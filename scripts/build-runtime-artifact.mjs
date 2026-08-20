@@ -326,7 +326,7 @@ export function buildRuntimeArtifact({
     // framework layout contains a small set of internal links; record those in
     // a signed map and remove them from the tar instead of dereferencing ~500MB
     // of duplicate framework bytes.
-    const runtimeLinks = captureInternalLinks(path.join(temporary, "node_modules"), { platform: process.platform });
+    const runtimeLinks = captureInternalLinks(temporary, { platform: process.platform });
     fs.writeFileSync(path.join(packageRoot, "runtime-links.json"), `${JSON.stringify({ schema: 1, links: runtimeLinks }, null, 2)}\n`);
     const filename = `relay-runtime-${packageJson.version}-${platformKey}.tar.gz`;
     const artifactPath = path.join(destination, filename);
