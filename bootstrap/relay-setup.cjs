@@ -281,7 +281,8 @@ function restoreRuntimeLinks(root) {
   for (const record of ordered) {
     const targetStat = fs.statSync(record.targetAbsolute, { throwIfNoEntry: false });
     if (!targetStat || (record.type === "directory" ? !targetStat.isDirectory() : !targetStat.isFile())) {
-      fail("Relay runtime internal-link target is absent or has the wrong type.");
+      const actualType = !targetStat ? "absent" : targetStat.isDirectory() ? "directory" : targetStat.isFile() ? "file" : "unsupported";
+      fail(`Relay runtime internal-link target is absent or has the wrong type (${path.relative(root, record.absolute)} -> ${record.target}; expected ${record.type}, found ${actualType}).`);
     }
     fs.symlinkSync(
       path.normalize(record.target),

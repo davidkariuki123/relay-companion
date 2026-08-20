@@ -410,6 +410,7 @@ test("artifact construction signs a compact internal-link map and refuses escapi
     fs.symlinkSync("real", path.join(packageRoot, "Current"), "dir");
     const links = captureInternalLinks(root, { platform: "darwin" });
     assert.equal(links.length, 1);
+    assert.equal(links[0].path, "node_modules/relay-companion/Current");
     assert.equal(fs.existsSync(path.join(packageRoot, "Current")), false);
     fs.writeFileSync(path.join(packageRoot, "runtime-links.json"), JSON.stringify({ schema: 1, links }));
     assert.equal(restoreRuntimeLinks(root), 1);
@@ -472,6 +473,7 @@ test("same runtime tree builds byte-identical archives and SBOM identities twice
     const identity = { version, platformKey: "darwin-arm64", sourceSha, dependencyLockSha512: "sha512-lock" };
     assert.equal(deterministicSbomSerial(identity), deterministicSbomSerial(identity));
     const builder = fs.readFileSync(new URL("../scripts/build-runtime-artifact.mjs", import.meta.url), "utf8");
+    assert.match(builder, /captureInternalLinks\(temporary,/);
     assert.match(builder, /300 \* 1024 \* 1024/);
     assert.doesNotMatch(builder, /randomUUID\(|new Date\(\)\.toISOString/);
   } finally {
