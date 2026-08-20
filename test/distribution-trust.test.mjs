@@ -248,6 +248,20 @@ test("native runtime dependency graph is exact, integrity-locked, and reproducib
   assert.doesNotMatch(builder, /--package-lock=false/);
 });
 
+test("release dependency locks retain identical bytes on every build platform", () => {
+  const attributes = fs.readFileSync(new URL("../.gitattributes", import.meta.url), "utf8");
+  for (const relative of [
+    "package.json",
+    "package-lock.json",
+    "npm-shrinkwrap.json",
+    "runtime-dependencies.json",
+    "runtime-lock/package.json",
+    "runtime-lock/package-lock.json",
+  ]) {
+    assert.match(attributes, new RegExp(`${relative.replaceAll("/", "\\/")} text eol=lf`));
+  }
+});
+
 test("the migration bridge publishes an exact npm shrinkwrap for its full graph", () => {
   const packageJson = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const dependencies = JSON.parse(fs.readFileSync(new URL("../runtime-dependencies.json", import.meta.url), "utf8"));
