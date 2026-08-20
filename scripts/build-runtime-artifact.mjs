@@ -9,6 +9,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 const companionRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const sourceBootstrap = createRequire(import.meta.url)(path.join(companionRoot, "bootstrap", "relay-setup.cjs"));
 const NORMALIZED_ARCHIVE_TIME = new Date("2000-01-01T00:00:00.000Z");
 
 function run(command, args, options = {}) {
@@ -336,16 +337,20 @@ export function buildRuntimeArtifact({
     }
     // Prove the exact archived bytes reconstruct their signed internal links,
     // import the updater, and launch the pinned Electron runtime.
-    const smokeRoot = path.join(temporary, "artifact-smoke");
-    fs.mkdirSync(smokeRoot);
-    run("tar", ["-xzf", artifactPath, "-C", smokeRoot]);
-    const smokePackageRoot = path.join(smokeRoot, "node_modules", "relay-companion");
-    const smokeBootstrap = createRequire(import.meta.url)(
-      path.join(smokePackageRoot, "bootstrap", "relay-setup.cjs"),
-    );
-    smokeBootstrap.restoreRuntimeLinks(smokeRoot);
-    run(process.execPath, [path.join(companionRoot, "scripts", "verify-installed-runtime.mjs"),
-      "--package-root", smokePackageRoot, "--version", packageJson.version]);
+    const smokeRoot = fs.mkdtempSync(path.join(destination, ".relay-artifact-smoke-"));
+    try {
+      const unpack = sourceBootstrap.tarInvocation({ archivePath: artifactPath, mode: "extract", destination: smokeRoot });
+      run(unpack.command, unpack.args, { cwd: unpack.cwd });
+      const smokePackageRoot = path.join(smokeRoot, "node_modules", "relay-companion");
+      const smokeBootstrap = createRequire(import.meta.url)(
+        path.join(smokePackageRoot, "bootstrap", "relay-setup.cjs"),
+      );
+      smokeBootstrap.restoreRuntimeLinks(smokeRoot);
+      run(process.execPath, [path.join(companionRoot, "scripts", "verify-installed-runtime.mjs"),
+        "--package-root", smokePackageRoot, "--version", packageJson.version]);
+    } finally {
+      fs.rmSync(smokeRoot, { recursive: true, force: true });
+    }
     const artifactBytes = fs.statSync(artifactPath).size;
     const artifactSha512 = sha512File(artifactPath);
     const installedLock = JSON.parse(fs.readFileSync(path.join(temporary, "node_modules", ".package-lock.json"), "utf8"));

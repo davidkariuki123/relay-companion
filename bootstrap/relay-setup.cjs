@@ -165,9 +165,29 @@ function parseSignedManifest(bytes, { version, platformKey, publicKeyPem, trustS
   return { payload, artifact };
 }
 
+function tarInvocation({ archivePath, mode, destination, pathImpl = path }) {
+  const cwd = pathImpl.dirname(archivePath);
+  const archiveName = pathImpl.basename(archivePath);
+  if (!archiveName || archiveName === "." || archiveName === pathImpl.sep) {
+    fail("Relay runtime archive path is invalid.");
+  }
+  if (mode === "list-names") return { command: "tar", args: ["-tzf", archiveName], cwd };
+  if (mode === "list-details") return { command: "tar", args: ["-tvzf", archiveName], cwd };
+  if (mode === "extract") {
+    const relativeDestination = pathImpl.relative(cwd, destination) || ".";
+    if (pathImpl.isAbsolute(relativeDestination) || /^[A-Za-z]:/.test(relativeDestination)) {
+      fail("Relay runtime archive and extraction directory must share a local volume.");
+    }
+    return { command: "tar", args: ["-xzf", archiveName, "-C", relativeDestination], cwd };
+  }
+  fail("Relay runtime archive operation is invalid.");
+}
+
 function validateArchiveListing(archivePath) {
-  const names = spawnSync("tar", ["-tzf", archivePath], { encoding: "utf8", windowsHide: true });
-  const details = spawnSync("tar", ["-tvzf", archivePath], { encoding: "utf8", windowsHide: true });
+  const nameInvocation = tarInvocation({ archivePath, mode: "list-names" });
+  const detailInvocation = tarInvocation({ archivePath, mode: "list-details" });
+  const names = spawnSync(nameInvocation.command, nameInvocation.args, { cwd: nameInvocation.cwd, encoding: "utf8", windowsHide: true });
+  const details = spawnSync(detailInvocation.command, detailInvocation.args, { cwd: detailInvocation.cwd, encoding: "utf8", windowsHide: true });
   if (names.error || names.status !== 0 || details.error || details.status !== 0) {
     fail(`Relay could not inspect its runtime archive: ${names.error?.message || details.error?.message || names.stderr || details.stderr}`);
   }
@@ -545,7 +565,12 @@ async function stageVerifiedRuntime({ version, platformKey = releasePlatform(), 
     fs.mkdirSync(extracted);
     await downloadVerifiedArtifact(artifact.url, archivePath, artifact);
     validateArchiveListing(archivePath);
-    const unpack = spawnSync("tar", ["-xzf", archivePath, "-C", extracted], { encoding: "utf8", windowsHide: true });
+    const unpackInvocation = tarInvocation({ archivePath, mode: "extract", destination: extracted });
+    const unpack = spawnSync(unpackInvocation.command, unpackInvocation.args, {
+      cwd: unpackInvocation.cwd,
+      encoding: "utf8",
+      windowsHide: true,
+    });
     if (unpack.error || unpack.status !== 0) fail(`Relay could not unpack its verified runtime: ${unpack.error?.message || unpack.stderr}`);
     rejectExtractedLinks(extracted);
     restoreRuntimeLinks(extracted);
@@ -580,6 +605,7 @@ module.exports = {
   parseSignedManifest,
   restoreRuntimeLinks,
   stageVerifiedRuntime,
+  tarInvocation,
   validateArchiveEntries,
   verifyExtractedRuntime,
   waitForRuntimeHealth,

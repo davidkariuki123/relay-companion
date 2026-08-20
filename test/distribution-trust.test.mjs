@@ -39,6 +39,7 @@ const {
   assertCompatibleNode,
   restoreRuntimeLinks,
   stageVerifiedRuntime,
+  tarInvocation,
   validateArchiveEntries,
 } = createRequire(import.meta.url)("../bootstrap/relay-setup.cjs");
 const credentialStore = createRequire(import.meta.url)("../src/credential-store.cjs");
@@ -399,6 +400,34 @@ test("archive validation rejects traversal, links, devices, and FIFOs", () => {
   assert.throws(() => validateArchiveEntries(["safe"], ["lrwxr-xr-x link -> outside"]), /regular files and directories only/);
   assert.throws(() => validateArchiveEntries(["safe"], ["prw------- fifo"]), /regular files and directories only/);
   assert.throws(() => validateArchiveEntries(["safe"], ["crw------- device"]), /regular files and directories only/);
+});
+
+test("Windows tar receives local relative paths instead of drive-letter remote names", () => {
+  assert.deepEqual(tarInvocation({
+    archivePath: "D:\\release\\runtime.tar.gz",
+    destination: "D:\\release\\smoke",
+    mode: "extract",
+    pathImpl: path.win32,
+  }), {
+    command: "tar",
+    args: ["-xzf", "runtime.tar.gz", "-C", "smoke"],
+    cwd: "D:\\release",
+  });
+  assert.deepEqual(tarInvocation({
+    archivePath: "C:\\relay\\runtime.tar.gz",
+    mode: "list-names",
+    pathImpl: path.win32,
+  }), {
+    command: "tar",
+    args: ["-tzf", "runtime.tar.gz"],
+    cwd: "C:\\relay",
+  });
+  assert.throws(() => tarInvocation({
+    archivePath: "C:\\relay\\runtime.tar.gz",
+    destination: "D:\\relay\\root",
+    mode: "extract",
+    pathImpl: path.win32,
+  }), /share a local volume/);
 });
 
 test("artifact construction signs a compact internal-link map and refuses escaping links", () => {
