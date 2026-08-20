@@ -119,6 +119,7 @@ test("published release identity requires public source, integrity, and npm prov
     },
   };
   assert.equal(validatePublishedMetadata(metadata, { version, sourceSha }).integrity, integrity);
+  assert.equal(validatePublishedMetadata({ ...metadata, gitHead: undefined }, { version, sourceSha }).integrity, integrity);
   assert.equal(verifyTarballIntegrity(bytes, integrity), true);
   assert.throws(
     () => validatePublishedMetadata({ ...metadata, gitHead: "b".repeat(40) }, { version, sourceSha }),

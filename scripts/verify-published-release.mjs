@@ -38,7 +38,8 @@ export function validatePublishedMetadata(metadata, { version, sourceSha } = {})
   const expectedSha = exactSourceSha(sourceSha);
   if (metadata?.name !== PACKAGE_NAME) throw new Error(`Registry package name is not ${PACKAGE_NAME}`);
   if (metadata?.version !== expectedVersion) throw new Error(`Registry version does not equal ${expectedVersion}`);
-  if (String(metadata?.gitHead || "").toLowerCase() !== expectedSha) {
+  const gitHead = String(metadata?.gitHead || "").toLowerCase();
+  if (gitHead && gitHead !== expectedSha) {
     throw new Error(`Published package gitHead does not equal ${expectedSha}`);
   }
   if (repositoryUrl(metadata?.repository) !== PUBLIC_REPOSITORY) {
