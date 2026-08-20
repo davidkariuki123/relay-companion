@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "categories": ["model", "adapter", "renderer", "scroll", "provider"],
+  "requirements": [
+    { "id": "P00", "category": "provider", "surfaces": ["evidence"], "tests": ["[P00]"] },
+    { "id": "P01", "category": "adapter", "surfaces": ["request-work", "ai-preview"], "tests": ["[P01]"] },
+    { "id": "P02", "category": "renderer", "surfaces": ["request-work"], "tests": ["[P02]", "electron:P02"] },
+    { "id": "P03", "category": "model", "surfaces": ["request-work"], "tests": ["[P03]", "electron:P03", "electron:P03b"] },
+    { "id": "P04", "category": "renderer", "surfaces": ["request-work"], "tests": ["[P04]", "electron:P04"] },
+    { "id": "P05", "category": "renderer", "surfaces": ["request-work"], "tests": ["[P05]", "electron:P05"] },
+    { "id": "P06", "category": "renderer", "surfaces": ["request-work"], "tests": ["[P06]", "electron:P06", "electron:P06b"] },
+    { "id": "P07", "category": "scroll", "surfaces": ["request-work"], "tests": ["[P07]", "electron:P07", "electron:P07b"] },
+    { "id": "P08", "category": "provider", "surfaces": ["request-work"], "tests": ["[P08]"] },
+    { "id": "P09", "category": "provider", "surfaces": ["request-work", "ai-preview"], "tests": ["[P09]"] },
+    { "id": "P10", "category": "renderer", "surfaces": ["request-work"], "tests": ["[P10]", "electron:P10"] },
+    { "id": "P11", "category": "renderer", "surfaces": ["request-work"], "tests": ["[P11]", "electron:P11"] },
+    { "id": "P12", "category": "renderer", "surfaces": ["request-work"], "tests": ["[P12]", "electron:P12"] },
+    { "id": "P13", "category": "renderer", "surfaces": ["request-work"], "tests": ["[P13]", "electron:P13"] },
+    { "id": "P14", "category": "renderer", "surfaces": ["request-work"], "tests": ["[P14]"] },
+    { "id": "P15", "category": "provider", "surfaces": ["request-work", "ai-preview"], "tests": ["[P15a]", "[P15b]", "[P15c]"] },
+    { "id": "P16", "category": "renderer", "surfaces": ["request-work"], "tests": ["[P16]"] },
+    { "id": "P17", "category": "adapter", "surfaces": ["request-work", "ai-preview"], "tests": ["[P17]"] },
+    { "id": "P18", "category": "renderer", "surfaces": ["ai-preview"], "tests": ["[P18]", "preview:P02", "preview:P10"] },
+    { "id": "P19", "category": "model", "surfaces": ["ai-preview"], "tests": ["[P19]", "preview:P03"] },
+    { "id": "P20", "category": "renderer", "surfaces": ["ai-preview"], "tests": ["[P20]", "preview:P04", "preview:P05"] },
+    { "id": "P21", "category": "renderer", "surfaces": ["ai-preview"], "tests": ["[P21]", "preview:P06", "preview:P06b"] },
+    { "id": "P22", "category": "scroll", "surfaces": ["ai-preview"], "tests": ["[P22]", "preview:P07", "preview:P07b"] },
+    { "id": "P23", "category": "renderer", "surfaces": ["ai-preview"], "tests": ["[P23]", "preview:P11", "preview:P12"] }
+  ]
+}

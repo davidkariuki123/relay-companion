@@ -1,0 +1,36 @@
+{
+  "name": "steered two-turn lifecycle with commentary and blocking state",
+  "wireOrder": "oldest-first",
+  "events": [
+    { "method": "turn/started", "turnId": "turn-1", "atMs": 1000 },
+    { "method": "item/started", "turnId": "turn-1", "atMs": 1100, "item": { "id": "reason-1", "type": "reasoning", "summary": ["Inspecting the runner lifecycle"], "status": "inProgress" } },
+    { "method": "item/completed", "turnId": "turn-1", "atMs": 1200, "item": { "id": "comment-1", "type": "agentMessage", "phase": "commentary", "text": "I found the chronology boundary and am checking the renderer.", "status": "completed" } },
+    { "method": "item/started", "turnId": "turn-1", "atMs": 1300, "item": { "id": "read-1", "type": "commandExecution", "command": "sed -n 1,80p inbox.html", "commandActions": [{ "type": "read", "path": "/workspace/inbox.html" }], "status": "inProgress" } },
+    { "method": "item/completed", "turnId": "turn-1", "atMs": 1400, "item": { "id": "read-1", "type": "commandExecution", "command": "sed -n 1,80p inbox.html", "commandActions": [{ "type": "read", "path": "/workspace/inbox.html" }], "status": "completed" } },
+    { "method": "item/completed", "turnId": "turn-1", "atMs": 1500, "item": { "id": "question-1", "type": "requestUserInput", "question": "Use the current branch or create a fresh worktree?", "status": "completed" } },
+    { "method": "item/completed", "turnId": "turn-1", "atMs": 1600, "item": { "id": "final-1", "type": "agentMessage", "phase": "final_answer", "text": "The first turn is complete.", "status": "completed" } },
+    { "method": "turn/completed", "turnId": "turn-1", "atMs": 1700, "status": "completed" },
+    { "method": "turn/started", "turnId": "turn-2", "atMs": 2000 },
+    { "method": "item/completed", "turnId": "turn-2", "atMs": 2100, "item": { "id": "user-2", "type": "userMessage", "text": "Also verify reduced motion.", "status": "completed" } },
+    { "method": "item/completed", "turnId": "turn-2", "atMs": 2200, "item": { "id": "comment-2", "type": "agentMessage", "phase": "commentary", "text": "Checking the reduced-motion path now.", "status": "completed" } },
+    { "method": "item/completed", "turnId": "turn-2", "atMs": 2300, "item": { "id": "final-2", "type": "agentMessage", "phase": "final_answer", "text": "Reduced motion is verified.", "status": "completed" } },
+    { "method": "turn/completed", "turnId": "turn-2", "atMs": 2400, "status": "completed" }
+  ],
+  "expectedProjection": [
+    { "turnId": "turn-1", "kind": "exploration", "summary": "Explored", "items": [{ "kind": "reasoning_summary", "text": "Inspecting the runner lifecycle" }] },
+    { "turnId": "turn-1", "kind": "commentary", "text": "I found the chronology boundary and am checking the renderer." },
+    { "turnId": "turn-1", "kind": "exploration", "summary": "Read files", "items": [{ "kind": "activity", "activityKind": "read", "semanticName": "Read inbox.html" }] },
+    { "turnId": "turn-1", "kind": "blocking_question", "placement": "blocking", "text": "Use the current branch or create a fresh worktree?" },
+    { "turnId": "turn-1", "kind": "final_answer", "text": "The first turn is complete." },
+    { "turnId": "turn-2", "kind": "user", "text": "Also verify reduced motion." },
+    { "turnId": "turn-2", "kind": "commentary", "text": "Checking the reduced-motion path now." },
+    { "turnId": "turn-2", "kind": "final_answer", "text": "Reduced motion is verified." }
+  ],
+  "laws": [
+    "Turn boundaries and event chronology are preserved.",
+    "Commentary is activity narration and never becomes the final answer.",
+    "A phase=final_answer item is the final answer even if later lifecycle records arrive.",
+    "Blocking questions remain persistent and interactive, never hidden in activity.",
+    "A second user turn remains between the two native turns and is not hoisted to the top."
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "sessionId": "claude-golden-native",
+  "rows": [
+    { "type": "system", "subtype": "init", "session_id": "claude-golden-native", "timestamp": "2026-08-15T10:00:00.000Z" },
+    { "type": "user", "uuid": "internal-seed", "origin": { "kind": "human" }, "timestamp": "2026-08-15T10:00:01.000Z", "message": { "role": "user", "content": "<relay-documents>private brief</relay-documents>\n<relay-runtime-contract>internal</relay-runtime-contract>" } },
+    { "type": "assistant", "uuid": "think", "parentUuid": "internal-seed", "requestId": "req-1", "message": { "id": "msg-1", "role": "assistant", "content": [{ "type": "thinking", "thinking": "private chain of thought", "signature": "private-signature" }] }, "timestamp": "2026-08-15T10:00:02.000Z" },
+    { "type": "assistant", "uuid": "comment", "parentUuid": "think", "requestId": "req-1", "message": { "id": "msg-1", "role": "assistant", "stop_reason": "tool_use", "content": [{ "type": "text", "text": "I’m checking it now." }] }, "timestamp": "2026-08-15T10:00:03.000Z" },
+    { "type": "assistant", "uuid": "tool", "parentUuid": "comment", "requestId": "req-1", "promptId": "prompt-1", "message": { "id": "msg-1", "role": "assistant", "stop_reason": "tool_use", "content": [{ "type": "tool_use", "id": "read-1", "name": "Read", "input": { "file_path": "/repo/README.md", "authorization": "Bearer private" } }] }, "timestamp": "2026-08-15T10:00:04.000Z" },
+    { "type": "user", "uuid": "tool-result", "parentUuid": "tool", "sourceToolAssistantUUID": "tool", "message": { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": "read-1", "content": "secret output", "is_error": false }] }, "timestamp": "2026-08-15T10:00:05.000Z" },
+    { "type": "system", "subtype": "api_error", "uuid": "retry", "retryAttempt": 1, "maxRetries": 3, "error": "temporary", "timestamp": "2026-08-15T10:00:06.000Z" },
+    { "type": "system", "subtype": "compact_boundary", "uuid": "compact", "timestamp": "2026-08-15T10:00:07.000Z" },
+    { "type": "user", "uuid": "compact-summary", "isCompactSummary": true, "isVisibleInTranscriptOnly": true, "message": { "role": "user", "content": "private compact summary" }, "timestamp": "2026-08-15T10:00:07.100Z" },
+    { "type": "queue-operation", "operation": "enqueue", "content": "Please verify it too.", "timestamp": "2026-08-15T10:00:08.000Z" },
+    { "type": "user", "uuid": "human-followup", "parentUuid": "compact-summary", "origin": { "kind": "human" }, "message": { "role": "user", "content": "Please verify it too." }, "timestamp": "2026-08-15T10:00:09.000Z" },
+    { "type": "stream_event", "event": { "type": "content_block_start", "content_block": { "type": "text", "text": "Ver" } }, "timestamp": "2026-08-15T10:00:10.000Z" },
+    { "type": "stream_event", "event": { "type": "content_block_delta", "delta": { "type": "text_delta", "text": "ified." } }, "timestamp": "2026-08-15T10:00:11.000Z" },
+    { "type": "assistant", "uuid": "final", "parentUuid": "human-followup", "requestId": "req-2", "message": { "id": "msg-2", "role": "assistant", "stop_reason": "end_turn", "content": [{ "type": "text", "text": "Verified." }] }, "timestamp": "2026-08-15T10:00:12.000Z" },
+    { "type": "result", "uuid": "success", "subtype": "success", "is_error": false, "stop_reason": "end_turn", "result": "Verified.", "timestamp": "2026-08-15T10:00:13.000Z" },
+    { "type": "assistant", "uuid": "sidechain", "isSidechain": true, "message": { "role": "assistant", "stop_reason": "end_turn", "content": [{ "type": "text", "text": "STALE SIDECHAIN" }] }, "timestamp": "2026-08-15T10:00:14.000Z" }
+  ]
+}

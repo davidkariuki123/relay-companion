@@ -1,0 +1,11 @@
+{
+  "schema": 2,
+  "activeKeyId": "relay-runtime-release-v2",
+  "keys": [
+    {
+      "keyId": "relay-runtime-release-v2",
+      "algorithm": "ED25519_SHA_512",
+      "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEADYd9YKq7/T5Y6VhO3uceCJakH10UxNyBnHyT2yM7d9g=\n-----END PUBLIC KEY-----"
+    }
+  ]
+}

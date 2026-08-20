@@ -1,0 +1,213 @@
+name: Release Relay Companion
+
+# This public repository is the only provenance publisher for relay-companion.
+# There is intentionally no push trigger: every candidate/release is explicit.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: relay-companion-release
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: 24.18.0
+
+jobs:
+  identity:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      phase: ${{ steps.release.outputs.phase }}
+      source-sha: ${{ steps.release.outputs.source-sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "davidkariuki123/relay-companion"
+          version="$(node -p 'require("./package.json").version')"
+          phase="$(node -p 'require("./package.json").relayDistribution')"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          case "$phase" in bridge-runtime|thin-installer) ;; *) exit 1;; esac
+          test "$(node -p 'const t=require("./bootstrap/trust.json"); t.schema===2 && t.keys.some(k=>k.keyId===t.activeKeyId&&k.algorithm==="ED25519_SHA_512"&&k.publicKeyPem.includes("BEGIN PUBLIC KEY"))')" = true
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "phase=$phase" >> "$GITHUB_OUTPUT"
+          echo "source-sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Run release, updater, credential, and authorization security tests
+        run: >-
+          node --test
+          test/distribution-trust.test.mjs
+          test/account.test.mjs
+          test/installation-authorization.test.mjs
+          test/install.test.mjs
+          test/cli-trampoline.test.mjs
+          test/canonical-runtime.test.mjs
+          test/canonical-updater.test.mjs
+          test/auto-update.test.mjs
+
+  runtime:
+    needs: identity
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: darwin-arm64
+          - os: macos-15-intel
+            platform: darwin-x64
+          - os: windows-latest
+            platform: win32-x64
+          - os: windows-11-arm
+            platform: win32-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Build, reconstruct, and launch the exact native runtime
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ needs.identity.outputs.source-sha }}
+        run: node scripts/build-runtime-artifact.mjs --platform '${{ matrix.platform }}' --output runtime-release
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: runtime-release/relay-runtime-*.tar.gz
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: relay-runtime-${{ matrix.platform }}
+          path: runtime-release/*
+          if-no-files-found: error
+
+  release:
+    needs: [identity, runtime]
+    runs-on: ubuntu-latest
+    environment: companion-candidate
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: https://registry.npmjs.org
+          cache: npm
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: relay-runtime-*
+          path: runtime-release
+          merge-multiple: true
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ vars.RELAY_COMPANION_CANDIDATE_ROLE_ARN }}
+          aws-region: us-east-1
+      - name: Sign the exact four-platform manifest inside AWS KMS
+        env:
+          KMS_KEY_ARN: ${{ vars.RELAY_COMPANION_SIGNING_KEY_ARN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$KMS_KEY_ARN"
+          key_id="$(node -p 'require("./bootstrap/trust.json").activeKeyId')"
+          node scripts/sign-runtime-manifest.mjs \
+            --fragments runtime-release \
+            --payload-output runtime-release/manifest.payload
+          aws kms get-public-key --key-id "$KMS_KEY_ARN" --query PublicKey --output text | base64 --decode > runtime-release/kms-public.der
+          openssl pkey -pubin -inform DER -in runtime-release/kms-public.der -out runtime-release/kms-public.pem
+          node -e 'const fs=require("fs"),c=require("crypto"),t=require("./bootstrap/trust.json"),k=t.keys.find(x=>x.keyId===t.activeKeyId);if(!k||!c.createPublicKey(k.publicKeyPem).export({type:"spki",format:"der"}).equals(c.createPublicKey(fs.readFileSync(process.argv[1])).export({type:"spki",format:"der"})))process.exit(1)' runtime-release/kms-public.pem
+          aws kms sign \
+            --key-id "$KMS_KEY_ARN" \
+            --message-type RAW \
+            --signing-algorithm ED25519_SHA_512 \
+            --message fileb://runtime-release/manifest.payload \
+            --query Signature \
+            --output text | base64 --decode > runtime-release/manifest.signature
+          node scripts/sign-runtime-manifest.mjs \
+            --payload runtime-release/manifest.payload \
+            --signature runtime-release/manifest.signature \
+            --key-id "$key_id" \
+            --output runtime-release/manifest.json
+          rm -f runtime-release/manifest.payload runtime-release/manifest.signature runtime-release/kms-public.der runtime-release/kms-public.pem
+      - name: Publish immutable branded artifacts
+        env:
+          RELEASE_BUCKET: ${{ vars.RELAY_RELEASE_BUCKET }}
+          VERSION: ${{ needs.identity.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$RELEASE_BUCKET"
+          upload_exact() {
+            file="$1"; key="companion-releases/v$VERSION/$(basename "$file")"
+            sha="$(openssl dgst -sha512 -r "$file" | cut -d' ' -f1)"
+            type=application/gzip; case "$file" in *.json) type=application/json;; esac
+            if remote="$(aws s3api head-object --bucket "$RELEASE_BUCKET" --key "$key" --query Metadata.sha512 --output text 2>/dev/null)"; then
+              test "$remote" = "$sha" || { echo "::error::$key already has different bytes"; exit 1; }
+            else
+              aws s3api put-object --bucket "$RELEASE_BUCKET" --key "$key" --body "$file" --if-none-match '*' \
+                --content-type "$type" --cache-control 'public,max-age=31536000,immutable' --metadata "sha512=$sha" >/dev/null
+            fi
+          }
+          for file in runtime-release/*.tar.gz runtime-release/*.sbom.cdx.json runtime-release/manifest.json; do upload_exact "$file"; done
+          curl --fail --silent --show-error "https://api.sendrelays.com/v1/companion-releases/v$VERSION/manifest.json" >/dev/null
+      - name: Verify immutable npm version and package shape
+        env:
+          VERSION: ${{ needs.identity.outputs.version }}
+          PHASE: ${{ needs.identity.outputs.phase }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$PHASE" = thin-installer ]; then
+            test "$(node -p 'Object.keys(require("./package.json").dependencies||{}).length')" = 0
+            test "$(node -p 'require("./package.json").bin.relay')" = bootstrap/relay-setup.cjs
+          else
+            test -f npm-shrinkwrap.json
+          fi
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Pack and verify exact public bytes
+        id: pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm pack --json > "$RUNNER_TEMP/pack.json"
+          tarball="$(node -p 'require(process.argv[1])[0].filename' "$RUNNER_TEMP/pack.json")"
+          test -f "$tarball"
+          if [ "${{ needs.identity.outputs.phase }}" = bridge-runtime ]; then
+            tar -tzf "$tarball" | grep -qx package/npm-shrinkwrap.json
+          fi
+          integrity="sha512-$(openssl dgst -sha512 -binary "$tarball" | openssl base64 -A)"
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+          echo "integrity=$integrity" >> "$GITHUB_OUTPUT"
+      - name: Publish from this public commit with npm provenance
+        env:
+          VERSION: ${{ needs.identity.outputs.version }}
+          SOURCE_SHA: ${{ needs.identity.outputs.source-sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install -g npm@11.19.0
+          existing="$(npm view "relay-companion@$VERSION" dist.integrity 2>/dev/null || true)"
+          if [ -z "$existing" ]; then
+            npm publish '${{ steps.pack.outputs.tarball }}' --tag build --access public --provenance
+          else
+            test "$existing" = '${{ steps.pack.outputs.integrity }}' || { echo "::error::existing npm version has different bytes"; exit 1; }
+            node scripts/verify-published-release.mjs --version "$VERSION" --source-sha "$SOURCE_SHA"
+          fi
+      - name: Verify public build candidate before private environment promotion
+        env:
+          VERSION: ${{ needs.identity.outputs.version }}
+          SOURCE_SHA: ${{ needs.identity.outputs.source-sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/verify-published-release.mjs --version "$VERSION" --source-sha "$SOURCE_SHA"

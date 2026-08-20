@@ -1,0 +1,61 @@
+{
+  "fixtureVersion": 1,
+  "capturedAt": "2026-08-14T16:18:00+02:00",
+  "relayBaseline": {
+    "branch": "origin/main",
+    "commit": "8cb7bd759da87f3ad1152888e5f374520639fa52",
+    "companionVersion": "0.1.196"
+  },
+  "application": {
+    "path": "/Applications/ChatGPT.app",
+    "bundleIdentifier": "com.openai.codex",
+    "shortVersion": "26.803.61601",
+    "bundleVersion": "6396",
+    "executableSha256": "998361d4d8e64be2474e8324529de780047b40873aadfe7d2f9271510144d630",
+    "asarSha256": "928129601e8b36eccba603114d6912352f2b13182f3a7d60b32166d0e81aafb5"
+  },
+  "sourceChunks": {
+    "local-conversation-turn-DQZrCwOw.js": "f495add2eeb1d0c781eb6d9529180e898e9229957365320b028acfc40f950e39",
+    "tool-activity-disclosure-DkkLM_qM.js": "caccc174f3f14a245f7e7ec060971ab1f350fa23b5435886d6df8230a1b5c7d6",
+    "thread-scroll-layout-BenRN5fA.js": "641c88c8102695b2b9db27c7ff28797ec8e65782ea7ab152bfdf05f92b188e2f",
+    "local-conversation-thread--qSgzOkZ.js": "77ad1d39d307dc51a6ce0e7241574d5d75bf7d12a514a5fe48e58fe1a482dcc3",
+    "thread-virtualizer-D5BSbZuA.js": "f51d72c42944f491a77a0d08d28c349af9a26262fb63fbd9a3057dbdddbc8376",
+    "app-initial-BYOVlUBL.js": "81278205ff341f551a8d1817380141d21b77c45a736dc6cab6a79460814c9885",
+    "app-initial-AYgnwUwc.css": "ecc5d7ffeeb3661f7466b0549da4d2fd80d1fcd641f5ee4dfe3cc729ff2f3e24",
+    "app-DuLjgNkx.css": "14175fed4620b0f4cf3aa357fe5d63a60c57cba74dba9ab93f97e4fc20fdf237"
+  },
+  "nativeContract": {
+    "threadContentMaxWidthPx": 768,
+    "panelGutterPx": 20,
+    "chatFontPx": 14,
+    "chatLineHeightPx": 21,
+    "chatLineHeightFormula": "--text-base (14px) multiplied by the shipped 1.5 leading",
+    "chatLineHeightEvidenceChunk": "app-DuLjgNkx.css",
+    "conversationItemGapPx": 16,
+    "groupedItemGapPx": 4,
+    "userBubbleMaxWidthPercent": 77,
+    "userBubblePaddingPx": [8, 12],
+    "bottomTolerancePx": 24,
+    "smoothScrollDurationMs": 260,
+    "historyLoadThresholdPx": 64,
+    "touchIntentThresholdPx": 8,
+    "intentExpiryMs": 1000,
+    "turnEstimatePx": 280,
+    "disclosureDurationMs": 300,
+    "disclosureEase": [0.19, 1, 0.22, 1],
+    "disclosureReducedMotion": "unchanged: the shipped tool disclosure uses Framer Motion's fixed 300ms height/opacity transition and has no reduced-motion branch",
+    "disclosureEvidence": {
+      "componentChunk": "tool-activity-disclosure-DkkLM_qM.js",
+      "componentExcerpt": "animate:{height:S?_:0,opacity:+!!S} ... transition:c",
+      "transitionChunk": "app-initial-BYOVlUBL.js",
+      "transitionExcerpt": "$j={duration:300/1e3,ease:[.19,1,.22,1]}; exported as U8"
+    },
+    "turnExpandDurationMs": 220,
+    "markdownFadeDurationMs": 150,
+    "messageHighlightDurationMs": 1400
+  },
+  "evidenceLimitations": [
+    "Computer Use refuses direct control of com.openai.codex, so interactive evidence was reconstructed from the exact signed bundle.",
+    "The fixture records authored behavioral contracts and hashes, not copied proprietary source."
+  ]
+}

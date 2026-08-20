@@ -1,0 +1,120 @@
+{
+  "sessionId": "claude-native-fixture",
+  "rows": [
+    { "type": "system", "subtype": "init", "session_id": "claude-native-fixture", "uuid": "sys-init", "timestamp": "2026-08-15T10:00:00.000Z" },
+    {
+      "type": "user",
+      "uuid": "user-seed",
+      "parentUuid": null,
+      "origin": { "kind": "human" },
+      "timestamp": "2026-08-15T10:00:01.000Z",
+      "message": {
+        "role": "user",
+        "content": "<relay-documents>\n<for-human>High-level note</for-human>\n<for-agent>Private execution detail</for-agent>\n</relay-documents>\n\n<relay-runtime-contract>Return the result through Relay.</relay-runtime-contract>\n\nBegin the task as briefed."
+      }
+    },
+    {
+      "type": "assistant",
+      "uuid": "assistant-thinking",
+      "parentUuid": "user-seed",
+      "timestamp": "2026-08-15T10:00:02.000Z",
+      "message": { "role": "assistant", "stop_reason": null, "content": [{ "type": "thinking", "thinking": "private chain of thought", "signature": "private-signature" }] }
+    },
+    {
+      "type": "assistant",
+      "uuid": "assistant-commentary",
+      "parentUuid": "assistant-thinking",
+      "timestamp": "2026-08-15T10:00:03.000Z",
+      "message": { "role": "assistant", "stop_reason": "tool_use", "content": [{ "type": "text", "text": "I’m checking the native result." }] }
+    },
+    {
+      "type": "assistant",
+      "uuid": "assistant-read",
+      "parentUuid": "assistant-commentary",
+      "timestamp": "2026-08-15T10:00:04.000Z",
+      "message": { "role": "assistant", "stop_reason": "tool_use", "content": [{ "type": "tool_use", "id": "tool-read", "name": "Read", "input": { "file_path": "/repo/README.md", "authorization": "Bearer must-not-cross" } }] }
+    },
+    {
+      "type": "user",
+      "uuid": "tool-read-result",
+      "parentUuid": "assistant-read",
+      "sourceToolAssistantUUID": "assistant-read",
+      "timestamp": "2026-08-15T10:00:05.000Z",
+      "message": { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": "tool-read", "content": "read complete", "is_error": false }] }
+    },
+    { "type": "system", "subtype": "api_error", "uuid": "retry-one", "parentUuid": "tool-read-result", "timestamp": "2026-08-15T10:00:06.000Z", "retryAttempt": 1, "retryInMs": 500, "maxRetries": 3, "error": "temporary provider failure" },
+    {
+      "type": "assistant",
+      "uuid": "assistant-agent",
+      "parentUuid": "retry-one",
+      "timestamp": "2026-08-15T10:00:07.000Z",
+      "message": { "role": "assistant", "stop_reason": "tool_use", "content": [{ "type": "tool_use", "id": "tool-agent", "name": "Agent", "input": { "description": "Verify independently", "subagent_type": "general-purpose" } }] }
+    },
+    {
+      "type": "user",
+      "uuid": "tool-agent-result",
+      "parentUuid": "assistant-agent",
+      "sourceToolAssistantUUID": "assistant-agent",
+      "timestamp": "2026-08-15T10:00:08.000Z",
+      "toolUseResult": { "backgroundTaskId": "agent-task-1" },
+      "message": { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": "tool-agent", "content": "Agent running in background with ID: agent-task-1", "is_error": false }] }
+    },
+    {
+      "type": "user",
+      "uuid": "task-notification",
+      "parentUuid": "tool-agent-result",
+      "origin": { "kind": "task-notification" },
+      "timestamp": "2026-08-15T10:00:09.000Z",
+      "message": { "role": "user", "content": "<task-notification><task-id>agent-task-1</task-id><status>completed</status><summary>Independent verification passed</summary></task-notification>" }
+    },
+    { "type": "system", "subtype": "compact_boundary", "uuid": "compact-boundary", "parentUuid": "task-notification", "timestamp": "2026-08-15T10:00:10.000Z", "compactMetadata": { "trigger": "auto", "preTokens": 200000 } },
+    {
+      "type": "user",
+      "uuid": "compact-summary",
+      "parentUuid": "compact-boundary",
+      "timestamp": "2026-08-15T10:00:10.100Z",
+      "isCompactSummary": true,
+      "isVisibleInTranscriptOnly": true,
+      "message": { "role": "user", "content": "Private compacted transcript summary that must not become a human bubble." }
+    },
+    { "type": "queue-operation", "operation": "enqueue", "timestamp": "2026-08-15T10:00:11.000Z", "content": "Please also verify the output." },
+    {
+      "type": "user",
+      "uuid": "user-steer",
+      "parentUuid": "compact-summary",
+      "origin": { "kind": "human" },
+      "timestamp": "2026-08-15T10:00:12.000Z",
+      "message": { "role": "user", "content": "Please also verify the output." }
+    },
+    { "type": "stream_event", "session_id": "claude-native-fixture", "event": { "type": "content_block_start", "content_block": { "type": "text", "text": "Ver" } } },
+    { "type": "stream_event", "session_id": "claude-native-fixture", "event": { "type": "content_block_delta", "delta": { "type": "text_delta", "text": "ified." } } },
+    {
+      "type": "assistant",
+      "uuid": "assistant-final",
+      "parentUuid": "user-steer",
+      "timestamp": "2026-08-15T10:00:14.000Z",
+      "message": { "role": "assistant", "stop_reason": "end_turn", "content": [{ "type": "text", "text": "Verified." }] }
+    },
+    { "type": "result", "uuid": "result-success", "timestamp": "2026-08-15T10:00:15.000Z", "subtype": "success", "is_error": false, "stop_reason": "end_turn", "terminal_reason": "completed" },
+    {
+      "type": "assistant",
+      "uuid": "stale-sidechain",
+      "parentUuid": "user-seed",
+      "timestamp": "2026-08-15T10:00:16.000Z",
+      "message": { "role": "assistant", "stop_reason": "end_turn", "content": [{ "type": "text", "text": "STALE SIDECHAIN MUST NOT RENDER" }] }
+    }
+  ],
+  "failedRows": [
+    { "type": "user", "uuid": "failed-user", "origin": { "kind": "human" }, "timestamp": "2026-08-15T11:00:00.000Z", "message": { "role": "user", "content": "Run the failing check." } },
+    { "type": "assistant", "uuid": "failed-commentary", "parentUuid": "failed-user", "timestamp": "2026-08-15T11:00:01.000Z", "message": { "role": "assistant", "stop_reason": "tool_use", "content": [{ "type": "text", "text": "I am checking." }] } },
+    { "type": "assistant", "uuid": "failed-tool", "parentUuid": "failed-commentary", "timestamp": "2026-08-15T11:00:02.000Z", "message": { "role": "assistant", "stop_reason": "tool_use", "content": [{ "type": "tool_use", "id": "tool-fail", "name": "Bash", "input": { "command": "false" } }] } },
+    { "type": "user", "uuid": "failed-result", "parentUuid": "failed-tool", "toolDenialKind": "user-rejected", "interruptedByShutdown": true, "timestamp": "2026-08-15T11:00:03.000Z", "message": { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": "tool-fail", "content": "Rejected", "is_error": true }] } },
+    { "type": "system", "subtype": "api_error", "uuid": "retry-exhausted", "parentUuid": "failed-result", "timestamp": "2026-08-15T11:00:04.000Z", "retryAttempt": 3, "retryInMs": 0, "maxRetries": 3, "error": "provider unavailable" },
+    { "type": "result", "uuid": "result-error", "timestamp": "2026-08-15T11:00:05.000Z", "subtype": "error", "is_error": true, "stop_reason": "tool_use", "terminal_reason": "provider_error" }
+  ],
+  "blockingRows": [
+    { "type": "user", "uuid": "ask-user", "origin": { "kind": "human" }, "timestamp": "2026-08-15T12:00:00.000Z", "message": { "role": "user", "content": "Choose a deployment target." } },
+    { "type": "assistant", "uuid": "ask-tool", "parentUuid": "ask-user", "timestamp": "2026-08-15T12:00:01.000Z", "message": { "role": "assistant", "stop_reason": "tool_use", "content": [{ "type": "tool_use", "id": "ask-1", "name": "AskUserQuestion", "input": { "questions": [{ "question": "Which target?", "header": "Target", "options": [{ "label": "Dev" }, { "label": "Prod" }] }] } }] } },
+    { "type": "system", "subtype": "stop_hook_summary", "uuid": "blocked-hook", "parentUuid": "ask-tool", "timestamp": "2026-08-15T12:00:02.000Z", "preventedContinuation": true, "stopReason": "awaiting user input", "hookErrors": [], "hookInfos": [] }
+  ]
+}

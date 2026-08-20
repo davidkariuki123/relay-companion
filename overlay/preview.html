@@ -1,0 +1,733 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'none'; base-uri 'none'; connect-src 'none'; font-src 'none'; form-action 'none'; frame-src 'none'; img-src data: blob:; media-src 'none'; object-src 'none'; script-src 'self'; style-src 'unsafe-inline'"
+  />
+  <title>Relay preview</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --paper:#FFFFFF;
+      --canvas:#F2F0EB;
+      --ink:#1F1A17;
+      --ink-soft:#2C2824;
+      --muted:#7C736B;
+      --muted-2:#9A928A;
+      --line:rgba(31,26,23,.09);
+      --line-strong:rgba(31,26,23,.15);
+      --accent:#305566;
+      --accent-soft:rgba(48,85,102,.09);
+      --danger:#B4332A;
+      --ok:#1A7F37;
+      --serif:Newsreader,Georgia,"Times New Roman",serif;
+      --sans:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      --mono:"IBM Plex Mono","SFMono-Regular",Consolas,monospace;
+      --shadow:0 22px 70px -30px rgba(31,26,23,.34);
+      --hover:rgba(31,26,23,.06);
+      --danger-wash:#fff0ee;
+    }
+    /* Night follows the pill's own stored choice — same key, same rule: the
+       moon button decides, never the OS. */
+    :root[data-theme="dark"] {
+      --paper:#221E1B;
+      --canvas:#1B1815;
+      --ink:#EDE7E1;
+      --ink-soft:#DDD6CE;
+      --muted:#A2988E;
+      --muted-2:#837A71;
+      --line:rgba(237,231,225,.09);
+      --line-strong:rgba(237,231,225,.16);
+      --accent:#8FB0C0;
+      --on-accent:#16232A;
+      --accent-soft:rgba(143,176,192,.12);
+      --danger:#E06258;
+      --ok:#58B575;
+      --shadow:0 22px 70px -30px rgba(0,0,0,.6);
+      --hover:rgba(237,231,225,.08);
+      --danger-wash:rgba(224,98,88,.12);
+    }
+
+    * { box-sizing:border-box; }
+    html, body { width:100%; height:100%; margin:0; overflow:hidden; }
+    body {
+      background:var(--canvas);
+      color:var(--ink);
+      font-family:var(--sans);
+      -webkit-font-smoothing:antialiased;
+      text-rendering:optimizeLegibility;
+    }
+    button, textarea { font:inherit; }
+
+    .preview-shell {
+      width:100%; height:100%; min-width:360px; min-height:360px;
+      display:flex; flex-direction:column; overflow:hidden;
+      background:var(--paper);
+      border:1px solid var(--line-strong);
+      box-shadow:0 22px 70px -30px rgba(31,26,23,.34);
+    }
+
+    /* The message's high-level title is the first content on the panel. It and
+       the subdued metadata stay fixed while only the detailed body scrolls. */
+    .message-head {
+      position:relative; flex:0 0 auto;
+      padding:30px 76px 20px 30px;
+      border-bottom:1px solid var(--line);
+      -webkit-app-region:drag;
+    }
+    .message-title {
+      margin:0;
+      font-family:var(--serif);
+      font-size:clamp(25px, 4.2vw, 34px);
+      font-weight:500;
+      line-height:1.12;
+      letter-spacing:-.022em;
+      overflow-wrap:anywhere;
+    }
+    .message-meta {
+      display:flex; align-items:center; flex-wrap:wrap; gap:7px;
+      min-height:18px; margin-top:11px;
+      color:var(--muted); font-size:12px; line-height:1.45;
+      -webkit-app-region:no-drag;
+    }
+    .message-meta .sender { color:var(--ink-soft); font-weight:550; }
+    .message-meta .dot { color:var(--muted-2); }
+    .message-meta time { font-variant-numeric:tabular-nums; }
+
+    .window-controls {
+      position:absolute; z-index:2; top:13px; right:13px;
+      display:flex; align-items:center; gap:4px;
+      -webkit-app-region:no-drag;
+    }
+    .window-control {
+      appearance:none; width:28px; height:28px; padding:0;
+      display:inline-flex; align-items:center; justify-content:center;
+      border:0; border-radius:8px; background:transparent;
+      color:var(--muted-2); cursor:pointer;
+      transition:background-color .13s ease, color .13s ease;
+    }
+    .window-control:hover { background:var(--hover); color:var(--ink); }
+    .window-control.close:hover { background:var(--danger-wash); color:var(--danger); }
+    .window-control:focus-visible { outline:2px solid rgba(48,85,102,.38); outline-offset:1px; }
+
+    .detail-scroll {
+      flex:1 1 auto; min-height:0; overflow:auto; overscroll-behavior:contain;
+      padding:24px 30px 38px;
+      scrollbar-gutter:stable;
+    }
+    .detail-scroll::-webkit-scrollbar { width:11px; height:11px; }
+    .detail-scroll::-webkit-scrollbar-thumb {
+      border:3px solid var(--paper); border-radius:999px;
+      background:rgba(31,26,23,.17); background-clip:padding-box;
+    }
+    .detail-scroll::-webkit-scrollbar-thumb:hover { background-color:rgba(31,26,23,.27); }
+    .detail-inner { width:min(100%, 720px); margin:0 auto; }
+
+    .markdown {
+      user-select:text; color:var(--ink-soft);
+      font-size:15.5px; line-height:1.68; overflow-wrap:anywhere;
+    }
+    .markdown > :first-child { margin-top:0; }
+    .markdown > :last-child { margin-bottom:0; }
+    .markdown p { margin:0 0 1em; }
+    .markdown h1, .markdown h2, .markdown h3,
+    .markdown h4, .markdown h5, .markdown h6 {
+      color:var(--ink); line-height:1.25; margin:1.6em 0 .55em;
+      scroll-margin-top:16px;
+    }
+    .markdown h1, .markdown h2 { font-family:var(--serif); font-weight:500; letter-spacing:-.012em; }
+    .markdown h1 { font-size:24px; }
+    .markdown h2 { font-size:21px; }
+    .markdown h3 { font-size:16px; font-weight:650; }
+    .markdown h4, .markdown h5, .markdown h6 { font-size:14px; font-weight:650; }
+    .markdown strong { color:var(--ink); font-weight:650; }
+    .markdown em { color:#514a44; }
+    .markdown ul, .markdown ol { margin:.8em 0 1.1em; padding-left:1.55em; }
+    .markdown li { margin:.25em 0; padding-left:.12em; }
+    .markdown li > p { margin:.25em 0; }
+    .markdown blockquote {
+      margin:1.25em 0; padding:.05em 0 .05em 16px;
+      border-left:3px solid rgba(48,85,102,.3); color:var(--muted);
+    }
+    .markdown hr { margin:1.8em 0; border:0; border-top:1px solid var(--line-strong); }
+    .markdown a { color:var(--accent); text-decoration:underline; text-underline-offset:3px; cursor:pointer; }
+    .markdown a:hover { text-decoration-thickness:2px; }
+    .markdown code {
+      padding:.14em .38em; border-radius:5px;
+      background:rgba(31,26,23,.055); color:var(--ink);
+      font-family:var(--mono); font-size:.88em;
+    }
+    .markdown pre {
+      max-width:100%; margin:1.2em 0; padding:15px 17px; overflow:auto;
+      border:1px solid var(--line); border-radius:10px;
+      background:#f8f7f4; color:var(--ink); line-height:1.55;
+    }
+    .markdown pre code { padding:0; background:transparent; font-size:12.5px; }
+    .markdown table {
+      width:100%; margin:1.25em 0; border-collapse:collapse;
+      font-size:13.5px; line-height:1.5;
+    }
+    .markdown th, .markdown td { padding:8px 10px; border:1px solid var(--line-strong); text-align:left; vertical-align:top; }
+    .markdown th { background:#f8f7f4; color:var(--ink); font-weight:650; }
+
+    .empty-detail, .render-error {
+      margin:0; padding:18px; border-radius:10px;
+      background:#f8f7f4; color:var(--muted);
+      font-size:13.5px; line-height:1.55;
+    }
+    .render-error { border:1px solid rgba(168,58,50,.16); background:#fff8f7; color:var(--danger); }
+    .gone { display:none !important; }
+
+    /* ---- The two faces -------------------------------------------------
+       One window, two ways to look at the same conversation: the MESSAGE
+       (Shane's reading surface, unchanged) and the CHAT it belongs to. They
+       ride a single track that slides sideways, so moving between them reads
+       as turning the same object around rather than opening a second window.
+       The composer below never moves — it is the hinge the two faces turn on. */
+    .faces {
+      position:relative; flex:1 1 auto; min-height:0; overflow:hidden;
+    }
+    .faces-track {
+      display:flex; width:200%; height:100%;
+      transform:translateX(0);
+      transition:transform .34s cubic-bezier(.32,.72,0,1);
+    }
+    .faces.at-chat .faces-track { transform:translateX(-50%); }
+    .face { width:50%; height:100%; min-height:0; display:flex; flex-direction:column; }
+    /* The face that is off-screen must not be reachable by Tab or read aloud. */
+    .face[aria-hidden="true"] { visibility:hidden; }
+
+    /* ---- The conversation affordance -----------------------------------
+       A quiet chip in the metadata line, in the reader's own voice: the room
+       this message is in, and how much is in it. It appears only once the
+       conversation is known, so the header never flickers a placeholder. */
+    .chat-chip {
+      appearance:none; display:inline-flex; align-items:center; gap:6px;
+      max-width:100%; min-width:0; padding:3px 9px 3px 7px;
+      border:0; border-radius:999px;
+      background:var(--accent-soft); color:var(--accent);
+      font-family:var(--sans); font-size:11.5px; font-weight:600; line-height:1.35;
+      cursor:pointer; -webkit-app-region:no-drag;
+      transition:background-color .14s ease, transform .14s ease;
+    }
+    .chat-chip:hover { background:rgba(48,85,102,.15); }
+    .chat-chip:active { transform:scale(.98); }
+    .chat-chip:focus-visible { outline:2px solid rgba(48,85,102,.45); outline-offset:2px; }
+    .chat-chip .chip-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+    .chat-chip .chip-count {
+      flex:0 0 auto; font-variant-numeric:tabular-nums; opacity:.72;
+    }
+    .chat-chip svg { flex:0 0 auto; opacity:.75; }
+
+    /* ---- The task face ---------------------------------------------------
+       Received, a task reads like any relay; the composer is the ignition.
+       The chip names what it is, the state word is the receipt, and the
+       runtime lives as words in the caption line — tap to change. */
+    .task-chip {
+      display:inline-flex; align-items:center; gap:6px; padding:3px 9px 3px 7px;
+      border-radius:999px; background:var(--accent-soft); color:var(--accent);
+      font-size:11.5px; font-weight:600; line-height:1.35;
+    }
+    .task-chip svg { flex:0 0 auto; opacity:.8; }
+    .task-state { font-size:11.5px; font-weight:600; color:var(--accent); font-variant-numeric:tabular-nums; }
+    .task-state.done { color:var(--ok); }
+    .runtime-note { display:flex; align-items:center; gap:4px; flex-wrap:wrap; }
+    .runtime-btn {
+      appearance:none; border:0; background:transparent; padding:0; cursor:pointer;
+      font-family:var(--sans); font-size:11px; font-weight:600; color:var(--accent);
+      display:inline-flex; align-items:center; gap:3px;
+    }
+    .runtime-btn:hover { text-decoration:underline; text-underline-offset:2px; }
+    .runtime-btn:focus-visible { outline:2px solid rgba(48,85,102,.38); outline-offset:1px; }
+    .rt-anchor { position:relative; display:inline-flex; }
+    .runtime-pop {
+      position:absolute; bottom:calc(100% + 8px); left:-8px; width:236px;
+      background:var(--paper); border:1px solid var(--line-strong); border-radius:9px;
+      box-shadow:var(--shadow); padding:3px; z-index:30; display:none; flex-direction:column;
+    }
+    .runtime-pop.open { display:flex; }
+    .rt-label { padding:9px 10px 3px; font-size:10px; font-weight:600; letter-spacing:.02em; color:var(--muted-2); }
+    .rt-item {
+      appearance:none; border:0; background:transparent; cursor:pointer; width:100%;
+      text-align:left; border-radius:6px; padding:8px 10px; font-family:var(--sans);
+      font-size:13px; color:var(--ink); line-height:1.2; display:flex; align-items:center; gap:8px;
+    }
+    .rt-item:hover:not(:disabled) { background:var(--hover); }
+    .rt-item .tick { margin-left:auto; color:var(--accent); visibility:hidden; }
+    .rt-item.on .tick { visibility:visible; }
+    .rt-item:disabled { color:var(--muted-2); cursor:default; }
+    .rt-item .rt-sub { margin-left:auto; color:var(--muted-2); font-size:11px; }
+    .rt-sep { height:1px; margin:2px 8px; background:var(--line); }
+
+    /* ---- The session face -------------------------------------------------
+       A started task's transcript is a CALM DOCUMENT: the human speaks in the
+       one bubble, the agent writes in flat prose, and everything the agent DID
+       collapses to a dimmed one-line sentence you can expand. Four text
+       strengths off one ink; no spinners — live state is a cadenced shimmer on
+       the words themselves. */
+    .session-scroll {
+      flex:1 1 auto; min-height:0; overflow:auto; overscroll-behavior:contain;
+      padding:20px 26px 26px; scrollbar-gutter:stable;
+      scroll-padding-bottom:calc(var(--work-footer-height, 0px) + 16px);
+    }
+    .session-scroll::-webkit-scrollbar { width:11px; height:11px; }
+    .session-scroll::-webkit-scrollbar-thumb {
+      border:3px solid var(--paper); border-radius:999px;
+      background:rgba(31,26,23,.17); background-clip:padding-box;
+    }
+    .session-inner { width:min(100%, 720px); margin:0 auto; display:flex; flex-direction:column; gap:12px; }
+    .session-inner .group-gap { display:flex; flex-direction:column; gap:5px; }
+    .session-fade { opacity:0; animation:sessionFade .18s cubic-bezier(.33,1,.68,1) forwards; }
+    @keyframes sessionFade { to { opacity:1; } }
+    .turn-marker { display:flex; align-items:center; gap:10px; color:var(--muted-2); font-size:11px; white-space:nowrap; }
+    .turn-marker::after { content:""; flex:1 1 auto; height:1px; background:var(--line); }
+    .user-msg {
+      align-self:flex-end; width:fit-content; max-width:100%;
+      background:var(--canvas); color:var(--ink-soft);
+      border-radius:16px; padding:8px 12px;
+      font-size:14px; line-height:21px; user-select:text; overflow-wrap:anywhere;
+    }
+    .session-turn { display:flex; flex-direction:column; gap:12px; content-visibility:auto; contain-intrinsic-size:auto 240px; }
+    .session-turn + .session-turn { margin-top:24px; }
+    .session-user-actions { display:flex; justify-content:flex-end; gap:8px; min-height:21px; opacity:0; transition:opacity .13s ease; }
+    .user-msg:hover + .session-user-actions, .user-msg:focus-visible + .session-user-actions, .session-user-actions:focus-within { opacity:1; }
+    .session-user-actions button { appearance:none; border:0; background:transparent; padding:3px 5px; color:var(--muted); font:500 11px/15px var(--sans); cursor:pointer; }
+    .session-user-actions button:hover { color:var(--ink); }
+    .session-user-wrap { align-self:flex-end; display:flex; flex-direction:column; align-items:flex-end; max-width:77%; gap:4px; }
+    .session-user-files { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:6px; margin-bottom:7px; }
+    .session-user-image { display:block; width:min(240px, 58vw); max-height:220px; object-fit:cover; border-radius:10px; }
+    .session-user-file { padding:4px 8px; border-radius:9px; background:var(--canvas); color:var(--muted); font-size:12px; }
+    .agent-prose { font-size:14px; line-height:21px; color:var(--ink-soft); user-select:text; max-width:62ch; overflow-wrap:anywhere; }
+    .agent-prose .markdown { font-size:14px; line-height:21px; }
+    .act { display:flex; flex-direction:column; align-items:flex-start; }
+    .act-head {
+      appearance:none; border:0; background:transparent; cursor:pointer; text-align:left;
+      display:inline-flex; align-items:center; gap:7px; max-width:100%;
+      padding:3px 6px; margin:-3px -6px; border-radius:6px; font:inherit;
+      transition:background-color .13s ease;
+    }
+    .act-head:hover { background:var(--hover); }
+    .session-unit-detail { margin:7px 0 3px 21px; padding:8px 11px; max-height:260px; overflow:auto; border:1px solid var(--line); border-radius:9px; background:var(--canvas); color:var(--muted); font:11px/1.6 var(--mono); white-space:pre-wrap; user-select:text; }
+    .act-ic { flex:0 0 auto; width:14px; height:14px; color:var(--muted-2); display:grid; place-items:center; }
+    .act-sum {
+      font-size:14px; line-height:21px; color:var(--muted); min-width:0;
+      overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+      transition:color .13s ease;
+    }
+    .act-sum .obj { font-family:var(--mono); font-size:11.5px; }
+    .act-head:hover .act-sum { color:var(--ink); }
+    .act-chev { flex:0 0 auto; width:10px; height:10px; color:var(--muted-2); opacity:0; transition:opacity .13s ease, transform .2s ease; }
+    /* Codex's active semantic label: a delayed, cadenced sweep over duplicated
+       text. It never breathes the activity rows or assistant prose. */
+    .native-cadenced-shimmer { position:relative; color:var(--muted); }
+    .native-cadenced-shimmer-sweep {
+      pointer-events:none; width:100%; position:absolute; inset:0 auto 0 0;
+      overflow:hidden; transform:translate(-50%);
+      -webkit-mask-image:linear-gradient(90deg,transparent 0%,#000 20% 30%,transparent 50% 100%);
+      mask-image:linear-gradient(90deg,transparent 0%,#000 20% 30%,transparent 50% 100%);
+    }
+    .native-cadenced-shimmer-highlight { color:#0009; width:100%; display:block; transform:translate(50%); }
+    .native-cadenced-shimmer.active .native-cadenced-shimmer-sweep,
+    .native-cadenced-shimmer.active .native-cadenced-shimmer-highlight {
+      animation-duration:1s; animation-timing-function:steps(48,end); animation-iteration-count:1;
+    }
+    .native-cadenced-shimmer.active .native-cadenced-shimmer-sweep { animation-name:nativeCadencedSweep; }
+    .native-cadenced-shimmer.active .native-cadenced-shimmer-highlight { animation-name:nativeCadencedHighlight; }
+    @keyframes nativeCadencedSweep { from { transform:translate(-50%); } to { transform:translate(125%); } }
+    @keyframes nativeCadencedHighlight { from { transform:translate(50%); } to { transform:translate(-125%); } }
+    @media (prefers-color-scheme:dark) { .native-cadenced-shimmer-highlight { color:#ffffffbf; } }
+    .session-semantic-group { color:var(--muted); }
+    .session-semantic-group .session-activity-toggle { align-self:flex-start; text-align:left; }
+    .session-semantic-group .session-activity-body > div { max-height:14rem; overflow-y:auto; overscroll-behavior:contain; }
+    .session-activity { display:flex; flex-direction:column; }
+    .session-activity-toggle { appearance:none; border:0; background:transparent; padding:0; margin:0;
+      display:inline-flex; align-items:center; align-self:center; gap:6px; cursor:pointer;
+      font-family:var(--sans); font-size:12px; line-height:18px; text-align:center; color:var(--muted); }
+    .session-activity-toggle:hover { color:var(--ink); }
+    .session-activity-toggle:focus-visible { color:var(--ink); outline:none; box-shadow:0 0 0 2px var(--accent-soft); }
+    .session-activity-toggle .act-chev { opacity:0; }
+    .session-activity-toggle:hover .act-chev, .session-activity-toggle:focus-visible .act-chev,
+    .session-activity-toggle[aria-expanded="true"] .act-chev { opacity:1; }
+    .session-activity-toggle[aria-expanded="true"] .act-chev { transform:rotate(90deg); }
+    .session-activity-body { display:block; height:0; overflow:hidden; opacity:0; padding:0 0 0 24px;
+      transition:height .3s cubic-bezier(.19,1,.22,1),opacity .3s cubic-bezier(.19,1,.22,1); }
+    .session-activity-body > div { display:flex; flex-direction:column; gap:4px; padding:8px 0 4px; }
+    .session-activity[data-disclosure-state="opening"] .session-activity-body,
+    .session-activity[data-disclosure-state="expanded"] .session-activity-body { opacity:1; overflow:visible; }
+    .session-empty { align-self:center; max-width:34em; font-family:var(--sans); font-size:12px; line-height:18px; text-align:center; color:var(--muted); }
+    .session-divider { height:1px; background:var(--line); }
+    .session-final { font-size:14px; line-height:21px; color:var(--ink-soft); user-select:text; max-width:62ch; overflow-wrap:anywhere; }
+    .session-final .markdown { font-size:14px; line-height:21px; }
+    .agent-prose .markdown p, .session-final .markdown p { margin:0 0 11px; }
+    .agent-prose .markdown p:last-child, .session-final .markdown p:last-child { margin-bottom:0; }
+    .agent-prose .markdown code, .session-final .markdown code { padding:1px 6px; border-radius:6px; }
+    @media (prefers-reduced-motion:reduce) {
+      .session-fade { animation:none; }
+      .native-cadenced-shimmer.active .native-cadenced-shimmer-sweep,
+      .native-cadenced-shimmer.active .native-cadenced-shimmer-highlight { animation:none; }
+    }
+
+    /* ---- Chat header ---------------------------------------------------- */
+    .chat-head { display:flex; align-items:center; gap:10px; min-width:0; }
+    .chat-back {
+      appearance:none; flex:0 0 auto; width:28px; height:28px; padding:0;
+      display:inline-flex; align-items:center; justify-content:center;
+      border:0; border-radius:8px; background:transparent; color:var(--muted);
+      cursor:pointer; -webkit-app-region:no-drag;
+      transition:background-color .13s ease, color .13s ease;
+    }
+    .chat-back:hover { background:rgba(31,26,23,.06); color:var(--ink); }
+    .chat-back:focus-visible { outline:2px solid rgba(48,85,102,.38); outline-offset:1px; }
+    .chat-identity { min-width:0; }
+    .chat-name {
+      margin:0; font-family:var(--serif); font-size:clamp(19px, 3vw, 23px);
+      font-weight:500; line-height:1.2; letter-spacing:-.016em;
+      overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    }
+    .chat-people {
+      margin-top:3px; color:var(--muted); font-size:11.5px; line-height:1.4;
+      overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    }
+
+    /* ---- Bubbles --------------------------------------------------------
+       Oldest at the top, newest at the bottom, yours on the right: the shape
+       every messaging app has taught people to read. Names appear only in a
+       room with more than two people — labelling every line in a one-to-one
+       is noise, and iMessage is right to leave it out. */
+    .chat-scroll {
+      flex:1 1 auto; min-height:0; overflow:auto; overscroll-behavior:contain;
+      padding:18px 22px 22px; scrollbar-gutter:stable;
+    }
+    .chat-scroll::-webkit-scrollbar { width:11px; height:11px; }
+    .chat-scroll::-webkit-scrollbar-thumb {
+      border:3px solid var(--paper); border-radius:999px;
+      background:rgba(31,26,23,.17); background-clip:padding-box;
+    }
+    .chat-scroll::-webkit-scrollbar-thumb:hover { background-color:rgba(31,26,23,.27); }
+    .chat-inner { width:min(100%, 720px); margin:0 auto; display:flex; flex-direction:column; }
+
+    .day-divider {
+      align-self:center; margin:16px 0 10px;
+      color:var(--muted-2); font-size:10.5px; font-weight:650;
+      letter-spacing:.06em; text-transform:uppercase;
+    }
+    .day-divider:first-child { margin-top:0; }
+
+    .bubble-row { display:flex; flex-direction:column; max-width:86%; margin-top:2px; }
+    .bubble-row.first-of-run { margin-top:11px; }
+    .bubble-row.mine { align-self:flex-end; align-items:flex-end; }
+    .bubble-row.theirs { align-self:flex-start; align-items:flex-start; }
+
+    .bubble-author {
+      margin:0 0 3px; padding:0 4px;
+      font-size:11px; font-weight:650; letter-spacing:.005em;
+    }
+    /* Stable per-person colour, hashed from their opaque party id, so the same
+       person is the same colour in every conversation and after every restart. */
+    .bubble-author.p0 { color:#4a6b5f; } .bubble-author.p1 { color:#7a5540; }
+    .bubble-author.p2 { color:#53607d; } .bubble-author.p3 { color:#75485f; }
+    .bubble-author.p4 { color:#456a76; } .bubble-author.p5 { color:#6b6142; }
+    .bubble-author.p6 { color:#7a4f4a; } .bubble-author.p7 { color:#4f6748; }
+
+    .bubble {
+      position:relative; appearance:none; width:100%; text-align:left;
+      padding:9px 14px 10px; border:0; border-radius:18px;
+      font:inherit; font-size:14px; line-height:1.5; cursor:pointer;
+      overflow-wrap:anywhere; transition:box-shadow .15s ease, opacity .2s ease;
+    }
+    .bubble-row.theirs .bubble {
+      background:var(--canvas); color:var(--ink-soft);
+      box-shadow:inset 0 0 0 1px rgba(31,26,23,.05);
+    }
+    .bubble-row.mine .bubble { background:var(--accent); color:#fff; }
+    /* Tighten the inner corner on the last bubble of a run — the quiet
+       stand-in for a tail, and the thing that makes a run read as one turn. */
+    .bubble-row.mine.last-of-run .bubble { border-bottom-right-radius:6px; }
+    .bubble-row.theirs.last-of-run .bubble { border-bottom-left-radius:6px; }
+    .bubble:focus-visible { outline:2px solid rgba(48,85,102,.5); outline-offset:2px; }
+    /* Something that arrived and has not been read yet is tinted, not outlined:
+       an outline on one bubble reads as "selected", which it is not. */
+    .bubble-row.unread .bubble {
+      background:color-mix(in srgb, var(--accent) 9%, var(--canvas));
+      box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent);
+    }
+
+    /* A long message is clamped to a readable height and opens in place. The
+       body is already here — expanding never costs a round trip. */
+    .bubble-body { max-height:none; }
+    .bubble.clamped .bubble-body {
+      max-height:190px; overflow:hidden;
+      -webkit-mask-image:linear-gradient(180deg, #000 132px, transparent 100%);
+      mask-image:linear-gradient(180deg, #000 132px, transparent 100%);
+    }
+    .bubble-more {
+      display:block; margin-top:7px;
+      font-size:11.5px; font-weight:650; letter-spacing:.01em;
+    }
+    .bubble-row.theirs .bubble-more { color:var(--accent); }
+    .bubble-row.mine .bubble-more { color:rgba(255,255,255,.82); }
+
+    /* Markdown inside a bubble: same rules as the reader, tuned down a size
+       and re-inked so it stays legible on the accent fill. */
+    .bubble .markdown { color:inherit; font-size:14px; line-height:1.5; }
+    .bubble .markdown p { margin:0 0 .6em; }
+    .bubble .markdown > :last-child { margin-bottom:0; }
+    .bubble .markdown h1, .bubble .markdown h2, .bubble .markdown h3,
+    .bubble .markdown h4, .bubble .markdown h5, .bubble .markdown h6 {
+      color:inherit; margin:.9em 0 .35em; font-size:1.02em; font-weight:650;
+      font-family:var(--sans); letter-spacing:0;
+    }
+    .bubble .markdown strong { color:inherit; }
+    .bubble .markdown em { color:inherit; opacity:.9; }
+    .bubble .markdown ul, .bubble .markdown ol { margin:.5em 0 .7em; padding-left:1.35em; }
+    .bubble .markdown pre { margin:.7em 0; padding:10px 12px; border-radius:9px; font-size:12px; }
+    .bubble-row.theirs .bubble .markdown pre { background:#fff; border-color:var(--line); }
+    .bubble-row.mine .bubble .markdown code { background:rgba(255,255,255,.17); color:#fff; }
+    .bubble-row.mine .bubble .markdown pre { background:rgba(0,0,0,.19); border-color:rgba(255,255,255,.12); color:#fff; }
+    .bubble-row.mine .bubble .markdown blockquote { border-left-color:rgba(255,255,255,.4); color:rgba(255,255,255,.85); }
+    .bubble-row.mine .bubble .markdown a { color:#fff; }
+    .bubble .markdown table { font-size:12.5px; }
+    .bubble-row.mine .bubble .markdown th { background:rgba(255,255,255,.12); color:#fff; }
+    .bubble-row.mine .bubble .markdown th,
+    .bubble-row.mine .bubble .markdown td { border-color:rgba(255,255,255,.22); }
+
+    .bubble-files {
+      display:flex; flex-wrap:wrap; gap:6px; margin-top:9px;
+    }
+    .bubble-file {
+      appearance:none; display:inline-flex; align-items:center; gap:5px;
+      padding:4px 9px; border:0; border-radius:8px;
+      font:inherit; font-size:11.5px; font-weight:600; cursor:pointer;
+      max-width:100%; min-width:0;
+    }
+    .bubble-file span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .bubble-row.theirs .bubble-file { background:rgba(31,26,23,.06); color:var(--ink-soft); }
+    .bubble-row.theirs .bubble-file:hover { background:rgba(31,26,23,.1); }
+    .bubble-row.mine .bubble-file { background:rgba(255,255,255,.16); color:#fff; }
+    .bubble-row.mine .bubble-file:hover { background:rgba(255,255,255,.26); }
+
+    .bubble-time {
+      margin:4px 4px 0; color:var(--muted-2);
+      font-size:10.5px; line-height:1.3; font-variant-numeric:tabular-nums;
+    }
+    /* Only the last message of a run is stamped — a time on every line is
+       clutter, and the run is what the eye actually groups. */
+    .bubble-row:not(.last-of-run):not(.pending):not(.failed) .bubble-time { display:none; }
+    .bubble-receipt { appearance:none; margin:3px 4px 0; padding:0; border:0; background:transparent;
+      color:var(--muted-2); font-size:10.5px; line-height:1.3; cursor:default; }
+    button.bubble-receipt { cursor:pointer; }
+    button.bubble-receipt:hover { color:var(--ink-soft); }
+    .receipt-panel { width:min(290px, 100%); margin-top:5px; padding:8px 10px; border:1px solid var(--line);
+      border-radius:10px; background:var(--canvas); }
+    .receipt-row { display:flex; justify-content:space-between; gap:18px; padding:3px 0; font-size:10.5px; color:var(--ink-soft); }
+    .receipt-row + .receipt-row { border-top:1px solid var(--line); }
+    .receipt-when { color:var(--muted-2); text-align:right; }
+
+    /* A reply appears the moment it is sent and settles when the server
+       confirms it, so the conversation never stalls on the network. */
+    .bubble-row.pending .bubble { opacity:.62; }
+    .bubble-row.failed .bubble { background:#a83a32; }
+    .bubble-row.failed .bubble-time { color:var(--danger); }
+
+    .chat-state {
+      margin:auto; padding:26px 18px; text-align:center;
+      color:var(--muted); font-size:13px; line-height:1.55;
+    }
+    .chat-state.error { color:var(--danger); }
+
+    .reply-composer {
+      flex:0 0 auto; padding:14px 16px;
+      background:var(--canvas); border-top:1px solid var(--line);
+    }
+    .reply-row {
+      width:min(100%, 744px); margin:0 auto;
+      display:flex; align-items:flex-end; gap:10px;
+    }
+    .reply-input {
+      flex:1 1 auto; min-width:0; height:42px; max-height:124px; resize:none;
+      padding:10px 13px; border:1px solid var(--line-strong); border-radius:10px;
+      outline:none; background:var(--paper); color:var(--ink); font-size:13.5px; line-height:1.45;
+      box-shadow:inset 0 1px 1px rgba(31,26,23,.025);
+      transition:border-color .14s ease, box-shadow .14s ease;
+    }
+    .reply-input::placeholder { color:var(--muted-2); }
+    .reply-input:focus { border-color:rgba(48,85,102,.42); box-shadow:0 0 0 3px var(--accent-soft); }
+    .reply-input:disabled { background:#f8f7f4; color:var(--muted); cursor:not-allowed; }
+    .reply-button {
+      flex:0 0 auto; height:42px; min-width:76px; padding:0 18px;
+      border:0; border-radius:10px; background:var(--accent); color:var(--on-accent, #fff);
+      font-size:13px; font-weight:650; cursor:pointer;
+      transition:opacity .14s ease, transform .14s ease;
+    }
+    .reply-button:hover:not(:disabled) { opacity:.92; }
+    .reply-button:active:not(:disabled) { transform:scale(.985); }
+    .reply-button:disabled {
+      background:color-mix(in srgb, var(--accent) 14%, transparent); color:color-mix(in srgb, var(--accent) 55%, transparent);
+      cursor:not-allowed; box-shadow:none;
+    }
+    .reply-note {
+      width:min(100%, 744px); margin:7px auto 0;
+      color:var(--muted-2); font-size:11px; line-height:1.35;
+    }
+    .reply-note.error { color:var(--danger); }
+
+    @media (max-width:520px) {
+      .message-head { padding:24px 64px 17px 20px; }
+      .detail-scroll { padding:20px 20px 30px; }
+      .chat-scroll { padding:14px 14px 18px; }
+      .bubble-row { max-width:92%; }
+      .reply-composer { padding:12px; }
+      .reply-button { min-width:66px; padding:0 13px; }
+    }
+    @media (prefers-reduced-motion:reduce) {
+      *, *::before, *::after { scroll-behavior:auto !important; transition:none !important; }
+      /* Codex leaves the measured activity disclosure on its audited 300 ms
+         height/opacity transition even when generic node motion is reduced. */
+      .session-activity-body {
+        transition:height .3s cubic-bezier(.19,1,.22,1),opacity .3s cubic-bezier(.19,1,.22,1) !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <section class="preview-shell" aria-label="Relay preview">
+    <header class="message-head">
+      <div class="window-controls" aria-label="Window controls">
+        <button class="window-control" id="minimizeButton" type="button" aria-label="Minimize preview" title="Minimize">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+            <path d="M2 7.5h8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+          </svg>
+        </button>
+        <button class="window-control close" id="closeButton" type="button" aria-label="Close preview" title="Close">
+          <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden="true">
+            <path d="M1.5 1.5l8 8m0-8l-8 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- The message's own heading, and the way into the conversation it
+           belongs to. The chip stays hidden until the chat is known. -->
+      <div id="headMessage">
+        <h1 class="message-title" id="messageTitle" aria-live="polite">Loading relay…</h1>
+        <div class="message-meta" id="messageMeta" aria-live="polite">
+          <span class="task-chip gone" id="taskChip">
+            <svg width="11" height="11" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <path d="M2.5 7.5 5.5 10.5 11.5 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            Task
+          </span>
+          <span class="sender" id="messageSender">Relay</span>
+          <span class="dot" id="messageMetaDot" aria-hidden="true">·</span>
+          <time id="messageTime">Loading…</time>
+          <span class="task-state gone" id="taskState"></span>
+          <button class="chat-chip gone" id="chatChip" type="button" aria-label="Open this conversation">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M2.6 6.2c0-1.5 1.2-2.7 2.7-2.7h5.4c1.5 0 2.7 1.2 2.7 2.7v2.6c0 1.5-1.2 2.7-2.7 2.7H7l-3 2.3v-2.4a2.7 2.7 0 0 1-1.4-2.4V6.2Z"
+                stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
+            </svg>
+            <span class="chip-name" id="chatChipName">Conversation</span>
+            <span class="chip-count" id="chatChipCount"></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- The conversation's heading: who the room is, and a way back. -->
+      <div class="chat-head gone" id="headChat">
+        <button class="chat-back" id="chatBack" type="button" aria-label="Back to this message" title="Back to the message">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M9.8 3.4 5.2 8l4.6 4.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+        <div class="chat-identity">
+          <h1 class="chat-name" id="chatName">Conversation</h1>
+          <div class="chat-people" id="chatPeople"></div>
+        </div>
+      </div>
+    </header>
+
+    <div class="faces" id="faces">
+      <div class="faces-track">
+        <section class="face" id="faceMessage" aria-label="Message">
+          <main class="detail-scroll" id="detailScroll" tabindex="0" aria-label="Relay details">
+            <div class="detail-inner">
+              <article class="markdown" id="messageBody"></article>
+              <p class="empty-detail" id="emptyDetail">Loading the detailed message…</p>
+              <p class="render-error gone" id="renderError" role="alert"></p>
+            </div>
+          </main>
+          <!-- A started task swaps the reading surface for its live session:
+               same face slot, so the chat face stays one slide away. -->
+          <main class="session-scroll gone" id="sessionScroll" tabindex="0" aria-label="Task session">
+            <div class="session-inner" id="sessionList"></div>
+            <p class="chat-state gone" id="sessionState"></p>
+          </main>
+        </section>
+
+        <section class="face" id="faceChat" aria-label="Conversation" aria-hidden="true">
+          <main class="chat-scroll" id="chatScroll" tabindex="0" aria-label="Conversation messages">
+            <div class="chat-inner" id="chatList"></div>
+            <p class="chat-state gone" id="chatState"></p>
+          </main>
+        </section>
+      </div>
+    </div>
+
+    <footer class="reply-composer" aria-label="Reply composer">
+      <div class="reply-row">
+        <textarea
+          class="reply-input"
+          id="replyInput"
+          rows="1"
+          aria-label="Reply"
+          aria-describedby="replyNote"
+          placeholder="Write a reply…"
+        ></textarea>
+        <button class="reply-button" id="replyButton" type="button" disabled aria-disabled="true" aria-describedby="replyNote">
+          Send
+        </button>
+      </div>
+      <p class="reply-note" id="replyNote">Press Enter to send, Shift + Enter for a new line.</p>
+      <!-- The task composer's caption: the runtime as words, tap to change.
+           Shown only on an unstarted task face; replyNote keeps carrying
+           errors and hints for every face.
+
+           A DIV, never a <p>: this caption contains the runtime popover, and
+           an HTML parser auto-closes a <p> at the first block child — which
+           ejected the popover and every node after it OUT of the element
+           carrying `gone`, so the trailing sentence rendered in every preview
+           and the popover lost its positioning anchor. -->
+      <div class="reply-note runtime-note gone" id="taskRuntimeNote">
+        <span>Runs on</span>
+        <span class="rt-anchor">
+          <button class="runtime-btn" id="runtimeBtn" type="button" aria-haspopup="menu" aria-expanded="false">
+            <span id="runtimeWords">Claude Code · Opus 5 · High thinking</span>
+            <svg width="9" height="9" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+              <path d="M2 3.8 5 6.8 8 3.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
+          <div class="runtime-pop" id="runtimePop" role="menu" aria-label="Task runtime">
+            <div class="rt-label">Runs on</div>
+            <button class="rt-item on" type="button" data-rt-host="claude">Claude Code<span class="tick">✓</span></button>
+            <button class="rt-item" type="button" data-rt-host="codex" id="rtCodexItem">Codex<span class="tick">✓</span></button>
+            <div class="rt-sep" data-rt-claude></div>
+            <div class="rt-label" data-rt-claude>Model</div>
+            <button class="rt-item on" type="button" data-rt-model="claude-opus-5" data-rt-claude>Opus 5<span class="tick">✓</span></button>
+            <button class="rt-item" type="button" data-rt-model="claude-sonnet-5" data-rt-claude>Sonnet 5<span class="tick">✓</span></button>
+            <div class="rt-sep" data-rt-claude></div>
+            <div class="rt-label" data-rt-claude>Thinking</div>
+            <button class="rt-item on" type="button" data-rt-effort="high" data-rt-claude>High<span class="tick">✓</span></button>
+            <button class="rt-item" type="button" data-rt-effort="medium" data-rt-claude>Standard<span class="tick">✓</span></button>
+          </div>
+        </span>
+        <span>— on your machine. The sender sees when it starts and what you send back.</span>
+      </div>
+    </footer>
+  </section>
+  <script src="./work-ui.js"></script>
+  <script src="./read-receipts.cjs"></script>
+  <script src="./preview-renderer.js"></script>
+</body>
+</html>

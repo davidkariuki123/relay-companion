@@ -1,0 +1,24 @@
+#!/usr/bin/expect -f
+
+# Run the provider-owned subscription login in a real PTY while keeping every
+# OAuth URL/code out of Relay's logs and state. The provider CLI remains the
+# sole owner of its callback server and credential persistence.
+log_user 0
+set timeout -1
+
+if {[llength $argv] < 1} {
+  exit 64
+}
+
+set executable [lindex $argv 0]
+set command_args [lrange $argv 1 end]
+spawn -noecho $executable {*}$command_args
+expect eof
+
+set result [wait]
+set os_error [lindex $result 2]
+set exit_status [lindex $result 3]
+if {$os_error != 0} {
+  exit 1
+}
+exit $exit_status

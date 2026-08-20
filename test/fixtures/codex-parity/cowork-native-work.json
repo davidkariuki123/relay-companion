@@ -1,0 +1,51 @@
+{
+  "sessionId": "cse_native_fixture",
+  "session": {
+    "status": "active",
+    "status_bucket": "blocked",
+    "connection_status": "disconnected",
+    "worker_status": "requires_action",
+    "requires_action_details_list": [{ "request_id": "permission-1", "type": "can_use_tool" }]
+  },
+  "events": [
+    { "sequence_num": "10", "event_id": "task-summary", "event_type": "system", "payload": { "type": "system", "subtype": "task_summary", "detail": "Checking the requested file", "uuid": "task-summary" } },
+    { "sequence_num": "2", "event_id": "protocol-control", "event_type": "control_request", "payload": { "type": "control_request", "request_id": "protocol-1", "request": { "subtype": "mcp_set_servers", "servers": [{ "url": "https://secret.invalid/mcp", "headers": { "X-Session-UUID": "must-not-cross" } }] }, "uuid": "protocol-control" } },
+    { "sequence_num": "1", "event_id": "startup", "event_type": "env_manager_log", "payload": { "type": "env_manager_log", "data": { "content": "Allocating sandbox" }, "uuid": "startup" } },
+    { "sequence_num": "3", "event_id": "protocol-response", "event_type": "control_response", "payload": { "type": "control_response", "response": { "request_id": "protocol-1", "subtype": "success" }, "uuid": "protocol-response" } },
+    {
+      "sequence_num": "4",
+      "event_id": "cowork-user-seed",
+      "event_type": "user",
+      "source": "client",
+      "payload": {
+        "type": "user",
+        "uuid": "cowork-user-seed",
+        "client_platform": "desktop_app",
+        "message": { "role": "user", "content": "<relay-documents><for-human>Human note</for-human><for-agent>Private execution detail</for-agent></relay-documents><relay-runtime-contract>Return through Relay.</relay-runtime-contract>Begin the task as briefed." }
+      }
+    },
+    { "sequence_num": "5", "event_id": "cowork-thinking", "event_type": "assistant", "payload": { "type": "assistant", "uuid": "cowork-thinking", "message": { "role": "assistant", "content": [{ "type": "thinking", "thinking": "private Cowork reasoning" }] } } },
+    { "sequence_num": "6", "event_id": "cowork-commentary", "event_type": "assistant", "payload": { "type": "assistant", "uuid": "cowork-commentary", "message": { "role": "assistant", "content": [{ "type": "text", "text": "I’m checking the Cowork environment." }] } } },
+    { "sequence_num": "7", "event_id": "cowork-tool", "event_type": "assistant", "payload": { "type": "assistant", "uuid": "cowork-tool", "message": { "role": "assistant", "content": [{ "type": "tool_use", "id": "cowork-tool-1", "name": "Bash", "input": { "command": "run-check", "authorization": "Bearer must-not-cross" } }] } } },
+    { "sequence_num": "8", "event_id": "cowork-progress", "event_type": "tool_progress", "payload": { "type": "tool_progress", "uuid": "cowork-progress", "tool_use_id": "cowork-tool-1", "task_id": "task-1", "tool_name": "Bash", "elapsed_time_seconds": 3 } },
+    { "sequence_num": "9", "event_id": "cowork-tool-result", "event_type": "user", "source": "worker", "payload": { "type": "user", "uuid": "cowork-tool-result", "message": { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": "cowork-tool-1", "content": "check passed", "is_error": false }] } } },
+    { "sequence_num": "10", "event_id": "worker-synthetic-user", "event_type": "user", "source": "worker", "payload": { "type": "user", "uuid": "worker-synthetic-user", "isSynthetic": true, "parent_tool_use_id": null, "message": { "role": "user", "content": [{ "type": "text", "text": "WORKER SYNTHETIC USER MUST NOT RENDER" }] } } },
+    { "sequence_num": "11", "event_id": "cowork-final", "event_type": "assistant", "payload": { "type": "assistant", "uuid": "cowork-final", "message": { "role": "assistant", "content": [{ "type": "text", "text": "Cowork verification passed." }] } } },
+    { "sequence_num": "12", "event_id": "cowork-post-summary", "event_type": "system", "payload": { "type": "system", "subtype": "post_turn_summary", "uuid": "cowork-post-summary", "summarizes_uuid": "cowork-final", "status_category": "review_ready", "status_detail": "verification passed", "needs_action": "" } },
+    { "sequence_num": "13", "event_id": "cowork-result", "event_type": "result", "payload": { "type": "result", "uuid": "cowork-result", "subtype": "success", "is_error": false, "user_message_uuid": "cowork-user-seed", "result": "Cowork verification passed.", "duration_ms": 9000, "stop_reason": "end_turn", "terminal_reason": "completed", "permission_denials": [] } },
+    { "sequence_num": "14", "event_id": "cowork-followup", "event_type": "user", "source": "client", "payload": { "type": "user", "uuid": "cowork-followup", "client_platform": "desktop_app", "message": { "role": "user", "content": "Please deploy it now." } } },
+    { "sequence_num": "15", "event_id": "cowork-ask", "event_type": "assistant", "payload": { "type": "assistant", "uuid": "cowork-ask", "message": { "role": "assistant", "content": [{ "type": "tool_use", "id": "cowork-ask-1", "name": "AskUserQuestion", "input": { "questions": [{ "question": "Deploy to production?", "header": "Deploy" }] } }] } } },
+    { "sequence_num": "16", "event_id": "cowork-permission", "event_type": "control_request", "payload": { "type": "control_request", "uuid": "cowork-permission", "request_id": "permission-1", "request": { "subtype": "can_use_tool", "tool_use_id": "cowork-ask-1", "questions": [{ "question": "Deploy to production?" }] } } },
+    { "sequence_num": "17", "event_id": "cowork-blocked-summary", "event_type": "system", "payload": { "type": "system", "subtype": "post_turn_summary", "uuid": "cowork-blocked-summary", "summarizes_uuid": "cowork-ask", "status_category": "blocked", "status_detail": "waiting for deployment approval", "needs_action": "Approve or decline production deployment" } },
+    { "sequence_num": "18", "event_id": "cowork-rate-limit", "event_type": "rate_limit_event", "payload": { "type": "rate_limit_event", "uuid": "cowork-rate-limit", "rate_limit_info": { "status": "rejected", "overageStatus": "allowed", "overageInUse": true, "rateLimitType": "seven_day" } } },
+    { "sequence_num": "19", "event_id": "cowork-auth", "event_type": "mcp_auth_required", "payload": { "type": "mcp_auth_required", "uuid": "cowork-auth", "server_name": "Calendar", "server_url": "https://secret.invalid/oauth" } },
+    { "sequence_num": "20", "event_id": "cowork-goal", "event_type": "active_goal", "payload": { "type": "active_goal", "uuid": "cowork-goal", "value": { "condition": "Deploy safely", "iterations": 0, "lastReason": null } } },
+    { "sequence_num": "9", "event_id": "cowork-tool-result", "event_type": "user", "source": "worker", "payload": { "type": "user", "uuid": "cowork-tool-result", "message": { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": "cowork-tool-1", "content": "check passed", "is_error": false }] } } }
+  ],
+  "resolvedEvents": [
+    { "sequence_num": "21", "event_id": "cowork-permission-response", "event_type": "control_response", "payload": { "type": "control_response", "uuid": "cowork-permission-response", "response": { "request_id": "permission-1", "subtype": "approved", "response": "approve" } } },
+    { "sequence_num": "22", "event_id": "cowork-second-final", "event_type": "assistant", "payload": { "type": "assistant", "uuid": "cowork-second-final", "message": { "role": "assistant", "content": [{ "type": "text", "text": "Deployment completed." }] } } },
+    { "sequence_num": "23", "event_id": "cowork-second-summary", "event_type": "system", "payload": { "type": "system", "subtype": "post_turn_summary", "uuid": "cowork-second-summary", "summarizes_uuid": "cowork-second-final", "status_category": "review_ready", "status_detail": "deployment completed", "needs_action": "" } },
+    { "sequence_num": "24", "event_id": "cowork-second-result", "event_type": "result", "payload": { "type": "result", "uuid": "cowork-second-result", "subtype": "success", "is_error": false, "user_message_uuid": "cowork-followup", "result": "Deployment completed.", "duration_ms": 5000, "stop_reason": "end_turn", "terminal_reason": "completed", "permission_denials": [] } }
+  ]
+}

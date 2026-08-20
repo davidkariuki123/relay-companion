@@ -1,0 +1,84 @@
+{
+  "provenance": {
+    "provider": "claude-code",
+    "source": "/Users/david/.claude/projects/-Users-david-src-relay/03287122-8c90-4d9c-a249-d5f82f9d103e.jsonl",
+    "sourceSha256": "2657b55699223688271882a5e927abad14d54f81148afa138431223aa52b0737",
+    "note": "Sanitized from real user rows. Keys and nesting are exact; base64 bytes are replaced with a harmless marker."
+  },
+  "sessionId": "claude-native-attachment-proof",
+  "rows": [
+    {
+      "parentUuid": null,
+      "isSidechain": false,
+      "promptId": "prompt-image-only",
+      "type": "user",
+      "message": {
+        "role": "user",
+        "content": [
+          {
+            "type": "image",
+            "source": {
+              "type": "base64",
+              "media_type": "image/webp",
+              "data": "c2FuaXRpemVkLXJlYWwtc2hhcGU="
+            }
+          }
+        ]
+      },
+      "uuid": "human-image-only",
+      "timestamp": "2026-08-15T14:00:00.000Z",
+      "origin": "interactive",
+      "promptSource": "user",
+      "userType": "external"
+    },
+    {
+      "parentUuid": "human-image-only",
+      "isSidechain": false,
+      "type": "assistant",
+      "message": {
+        "role": "assistant",
+        "stop_reason": "end_turn",
+        "content": [{ "type": "text", "text": "I can see it." }]
+      },
+      "uuid": "assistant-image-answer",
+      "timestamp": "2026-08-15T14:00:01.000Z"
+    },
+    {
+      "parentUuid": "assistant-image-answer",
+      "isSidechain": false,
+      "promptId": "prompt-text-image",
+      "type": "user",
+      "message": {
+        "role": "user",
+        "content": [
+          { "type": "text", "text": "Compare this one." },
+          {
+            "type": "image",
+            "source": {
+              "type": "base64",
+              "media_type": "image/png",
+              "data": "c2FuaXRpemVkLXJlYWwtc2hhcGU="
+            }
+          }
+        ]
+      },
+      "uuid": "human-text-image",
+      "timestamp": "2026-08-15T14:00:02.000Z",
+      "origin": "interactive",
+      "promptSource": "user",
+      "userType": "external"
+    },
+    {
+      "parentUuid": "human-text-image",
+      "isSidechain": false,
+      "type": "assistant",
+      "message": {
+        "role": "assistant",
+        "stop_reason": "end_turn",
+        "content": [{ "type": "text", "text": "Compared." }]
+      },
+      "uuid": "assistant-text-image-answer",
+      "timestamp": "2026-08-15T14:00:03.000Z"
+    }
+  ]
+}

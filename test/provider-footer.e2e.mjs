@@ -1,0 +1,489 @@
+// End-to-end geometry and interaction gate for Relay's chosen-provider footer.
+//
+// Boots the real Electron overlay in an isolated home, opens a real Chat room,
+// verifies the newest Relay owns the resident chosen-provider row, then
+// drives real Chromium pointer, scroll, focus, touch and media state through
+// the older-Relay hover-intent controller.
+// It is intentionally outside npm test because it requires a macOS GUI session.
+
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import WebSocket from "ws";
+
+const dirname = path.dirname(fileURLToPath(import.meta.url));
+const packageRoot = path.join(dirname, "..");
+const electron = process.env.RELAY_PROVIDER_FOOTER_ELECTRON || [
+  path.join(packageRoot, "node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"),
+  path.join(packageRoot, "../../node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"),
+].find(fs.existsSync);
+if (!electron) throw new Error("Electron is unavailable; install workspace dependencies first");
+
+const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "relay-provider-footer-"));
+const relayHome = path.join(sandbox, "home");
+const userData = path.join(sandbox, "userdata");
+fs.mkdirSync(relayHome, { recursive: true });
+fs.mkdirSync(userData, { recursive: true });
+fs.writeFileSync(path.join(sandbox, "config.json"), JSON.stringify({
+  deviceToken: "provider_footer_fixture",
+  deviceId: "provider_footer_fixture",
+  deviceName: "Provider footer fixture",
+  user: { id: "fixture", name: "David", email: "david@example.com" },
+}));
+
+function packet(title, body, at, options = {}) {
+  return {
+    direction: "inbound",
+    state: "read",
+    relayNotificationKind: "plain_relay",
+    senderName: "Sven Wellmann",
+    senderUserId: "sven-provider-footer",
+    senderEmail: "sven@example.com",
+    threadId: "provider-footer-thread",
+    title,
+    forHuman: body,
+    forAgent: options.forAgent === undefined ? "Agent briefing for this Relay." : options.forAgent,
+    codexThreadId: options.codexThreadId || null,
+    claudeNativeSession: options.claudeNativeSession || null,
+    materializedSurfaces: options.materializedSurfaces,
+    createdAt: at,
+    updatedAt: at,
+  };
+}
+
+fs.writeFileSync(path.join(relayHome, "state.json"), JSON.stringify({
+  version: 1,
+  account: {},
+  profile: { name: "David", email: "david@example.com", transport: { type: "relay_api" } },
+  contacts: [],
+  packets: {
+    provider_footer_oldest: packet(
+      "Auto-update leaves an orphan daemon",
+      "The old daemon kept polling after the package was replaced.",
+      "2026-08-17T09:40:00.000Z",
+    ),
+    provider_footer_older: packet(
+      "Read receipts: what should read mean?",
+      "Saw the read-parity fix land on my machine.",
+      "2026-08-17T10:00:00.000Z",
+    ),
+    provider_footer_latest: packet(
+      "Fetch-mark misses self-sends",
+      "Follow-up to this morning's read-receipts note.",
+      "2026-08-17T10:32:00.000Z",
+      {
+        codexThreadId: "01a-provider-footer-existing",
+        materializedSurfaces: { codex:true, claudeCode:false, claudeCowork:false },
+      },
+    ),
+    provider_footer_quick_text: packet(
+      "hey",
+      "hey",
+      "2026-08-17T10:40:00.000Z",
+      { forAgent:"" },
+    ),
+  },
+  meetingNotes: {}, setup: {}, emailThreads: {}, chats: {},
+}, null, 2));
+
+const mainPort = Number(process.env.RELAY_PROVIDER_FOOTER_MAIN_PORT || 9481);
+const rendererPort = Number(process.env.RELAY_PROVIDER_FOOTER_RENDERER_PORT || 9482);
+const child = spawn(electron, [
+  `--inspect=${mainPort}`,
+  `--remote-debugging-port=${rendererPort}`,
+  path.join(packageRoot, "overlay/main.cjs"),
+], {
+  env: {
+    ...process.env,
+    RELAY_HOME: relayHome,
+    RELAY_CONFIG: path.join(sandbox, "config.json"),
+    RELAY_OVERLAY_USER_DATA: userData,
+    RELAY_OVERLAY_TEST: "1",
+    RELAY_OVERLAY_TEST_FORCE_ACTIVE: "1",
+    RELAY_OVERLAY_TEST_IGNORE_POINTER: "1",
+    RELAY_OVERLAY_TEST_NO_HOST_OPEN: "1",
+    RELAY_AUTO_UPDATE: "0",
+    RELAY_WEB_URL: "http://127.0.0.1:9",
+    RELAY_API_URL: "http://127.0.0.1:9",
+  },
+  stdio: ["ignore", "pipe", "pipe"],
+});
+let log = "";
+child.stdout.on("data", (chunk) => { log += chunk; });
+child.stderr.on("data", (chunk) => { log += chunk; });
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function jsonEventually(url) {
+  let last;
+  for (let i = 0; i < 100; i += 1) {
+    try { return await (await fetch(url)).json(); } catch (error) { last = error; await sleep(100); }
+  }
+  throw last;
+}
+async function connect(url) {
+  const socket = new WebSocket(url, { perMessageDeflate: false });
+  await new Promise((resolve, reject) => { socket.once("open", resolve); socket.once("error", reject); });
+  let id = 0;
+  const waiting = new Map();
+  socket.on("message", (raw) => {
+    const message = JSON.parse(String(raw));
+    if (!message.id || !waiting.has(message.id)) return;
+    const pending = waiting.get(message.id);
+    waiting.delete(message.id);
+    if (message.error) pending.reject(new Error(message.error.message));
+    else pending.resolve(message.result);
+  });
+  return {
+    send(method, params = {}) {
+      const requestId = ++id;
+      return new Promise((resolve, reject) => {
+        waiting.set(requestId, { resolve, reject });
+        socket.send(JSON.stringify({ id: requestId, method, params }));
+      });
+    },
+    close() { socket.close(); },
+  };
+}
+async function evaluate(connection, expression) {
+  const result = await connection.send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
+  if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text);
+  return result.result?.value;
+}
+async function waitFor(page, expression) {
+  for (let i = 0; i < 80; i += 1) {
+    if (await evaluate(page, expression)) return;
+    await sleep(100);
+  }
+  throw new Error(`Timed out waiting for ${expression}`);
+}
+async function capture(page, name) {
+  const shot = await page.send("Page.captureScreenshot", { format: "png", fromSurface: true });
+  const file = path.join(sandbox, name);
+  fs.writeFileSync(file, Buffer.from(shot.data, "base64"));
+  return file;
+}
+
+let main;
+let page;
+try {
+  const mainTargets = await jsonEventually(`http://127.0.0.1:${mainPort}/json/list`);
+  main = await connect(mainTargets[0].webSocketDebuggerUrl);
+  let target = null;
+  for (let i = 0; i < 80 && !target; i += 1) {
+    const pages = await jsonEventually(`http://127.0.0.1:${rendererPort}/json/list`);
+    target = pages.find((entry) => entry.type === "page" && /inbox\.html/.test(entry.url));
+    if (!target) await sleep(100);
+  }
+  if (!target) throw new Error("Relay renderer target was not found");
+  page = await connect(target.webSocketDebuggerUrl);
+  await main.send("Runtime.enable");
+  await page.send("Runtime.enable");
+  await page.send("Page.enable");
+  await evaluate(main, "global.__relayTest.showFromTray(); true");
+  await waitFor(page, "Boolean(document.querySelector('#relaysList .relay-arrival'))");
+  await evaluate(page, `document.querySelector('[data-view="settings"]').click(); true`);
+  await waitFor(page, "Boolean(document.querySelector('#protoPrefs'))");
+  const settingsDefault = await evaluate(page, `(() => {
+    agentSurfaces = { _claudeDesktop:{ available:true }, _codexDesktop:{ available:true } };
+    localStorage.removeItem("proto.agentApps.v2");
+    localStorage.setItem("proto.agentApp", "Codex");
+    renderSettings();
+    return [...document.querySelectorAll('#protoPrefs .sv-open-row')].map((row) => ({
+      name:row.querySelector('.sv-open-name')?.textContent,
+      logo:row.querySelector('.sv-open-logo')?.getAttribute('src'),
+      checked:row.querySelector('[role="switch"]')?.getAttribute('aria-checked'),
+      disabled:row.querySelector('[role="switch"]')?.disabled,
+    }));
+  })()`);
+  assert.deepEqual(settingsDefault, [
+    { name:"Claude Code", logo:"claudeCodeMark.svg", checked:"true", disabled:false },
+    { name:"Codex", logo:"codexMark.svg", checked:"true", disabled:false },
+  ]);
+  await evaluate(page, `document.querySelector('#protoPrefs').scrollIntoView({ block:"center" }); true`);
+  const settingsShot = await capture(page, "open-relays-with-settings.png");
+  // The v2 rollout deliberately ignores the stale one-value preference. With
+  // both surfaces available, both switches start on; either can be turned off,
+  // but the final enabled app cannot be removed.
+  const appSwitchContract = await evaluate(page, `(() => {
+    agentSurfaces = null;
+    localStorage.removeItem("proto.agentApps.v2");
+    localStorage.setItem("proto.agentApp", "Codex");
+    const initial = agentAppSelection();
+    setAgentAppEnabled("Codex", false);
+    const claudeOnly = agentAppSelection();
+    setAgentAppEnabled("Claude Code", false);
+    const stillClaude = agentAppSelection();
+    setAgentAppEnabled("Codex", true);
+    const bothAgain = agentAppSelection();
+    return { initial, claudeOnly, stillClaude, bothAgain };
+  })()`);
+  assert.deepEqual(appSwitchContract, {
+    initial:["Claude Code", "Codex"],
+    claudeOnly:["Claude Code"],
+    stillClaude:["Claude Code"],
+    bothAgain:["Claude Code", "Codex"],
+  });
+  await evaluate(page, `document.querySelector('[data-view="relays"]').click(); true`);
+  await waitFor(page, "Boolean(document.querySelector('#relaysList .relay-arrival'))");
+  // ONE ROW, THE APP YOU CHOSE (Sven, 2026-08-17): the footer names the app
+  // Settings picked; detection defaults it to the app this Mac has. Pin the
+  // choice to Codex here so the materialized-task subline is exercised; on a
+  // Mac without Codex the picker falls back to Claude Code and the assertions
+  // below follow the host that actually rendered.
+  await evaluate(page, `
+    document.documentElement.dataset.theme = "dark";
+    localStorage.setItem("proto.agentApps.v2", "Codex");
+    document.querySelector('#relaysList .relay-arrival').click();
+    true`);
+  try {
+    await waitFor(page, "document.querySelectorAll('#thHistory .th-msg').length === 4");
+  } catch (error) {
+    const roomState = await evaluate(page, `(() => ({
+      detailId:globalThis.threadDetailId,
+      rowIds:[...document.querySelectorAll('#thHistory .th-msg')].map((row) => row.dataset.msg),
+      historyText:document.querySelector('#thHistory')?.textContent?.slice(0, 500) || "",
+    }))()`);
+    throw new Error(`${error.message}: ${JSON.stringify(roomState)}`);
+  }
+  await waitFor(page, "[...document.querySelectorAll('.th-host-logo')].every((img) => img.complete && img.naturalWidth > 0)");
+
+  // Regression: opening a room paints the inbound half first, then refreshSent
+  // can append a newer outbound message. The entry-follow latch must carry the
+  // viewport to that hydrated bottom instead of preserving the old bottom as a
+  // now-stale reading position (David's Sven-room screenshots, 2026-08-17).
+  const beforeHydration = await evaluate(page, `(() => {
+    const scroller = roomScrollElement();
+    globalThis.__roomEntryHydrationToken = beginThreadEntryFollow(threadDetailId);
+    return { top:scroller.scrollTop, height:scroller.scrollHeight, client:scroller.clientHeight };
+  })()`);
+  const delayedSentBody = Array.from({ length:18 }, (_, index) => `hydrated newest line ${index + 1}`).join(" — ");
+  await evaluate(main, `global.__relayTest.setSentCache(${JSON.stringify([{
+    relayId:"provider_footer_delayed_sent",
+    threadId:"provider-footer-thread",
+    kind:"message",
+    forHuman:delayedSentBody,
+    forAgent:"",
+    recipient:{ name:"Sven Wellmann", email:"sven@example.com" },
+    createdAt:"2026-08-17T10:50:00.000Z",
+  }])})`);
+  await waitFor(page, "document.querySelectorAll('#thHistory .th-msg').length === 5");
+  await sleep(120);
+  const afterHydration = await evaluate(page, `(() => {
+    const scroller = roomScrollElement();
+    return {
+      top:scroller.scrollTop,
+      height:scroller.scrollHeight,
+      client:scroller.clientHeight,
+      distance:scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop,
+      newest:document.querySelector('#thHistory [data-msg="provider_footer_delayed_sent"]')?.textContent || "",
+    };
+  })()`);
+  assert.ok(afterHydration.height > beforeHydration.height, "the delayed sent payload must extend the transcript");
+  assert.ok(afterHydration.distance <= 1,
+    `entry follow must land at the hydrated bottom: ${JSON.stringify({ beforeHydration, afterHydration })}`);
+  assert.match(afterHydration.newest, /hydrated newest line 18/);
+  await evaluate(page, "threadDetailEntryFollow = null; true");
+
+  const before = await evaluate(page, `(() => {
+    const rows = [...document.querySelectorAll('#thHistory .th-msg')].filter((row) => row.querySelector('.th-host-actions'));
+    return rows.map((row) => {
+      const actions = row.querySelector('.th-host-actions');
+      const style = getComputedStyle(actions);
+      const innerStyle = getComputedStyle(actions.querySelector('.th-host-actions-inner'));
+      return {
+        id: row.dataset.msg,
+        persistent: actions.classList.contains('persistent'),
+        buttonHosts: [...actions.querySelectorAll('[data-host-open]')].map((button) => button.dataset.host),
+        height: actions.getBoundingClientRect().height,
+        opacity: style.opacity,
+        innerBottomRadii: [innerStyle.borderBottomLeftRadius, innerStyle.borderBottomRightRadius],
+        logoSources: [...actions.querySelectorAll('.th-host-logo')].map((img) => img.getAttribute('src')),
+        labelColors: [...actions.querySelectorAll('.th-host-label')].map((label) => getComputedStyle(label).color),
+        contexts: [...actions.querySelectorAll('.th-host-context')].map((label) => label.textContent.trim()),
+      };
+    });
+  })()`);
+  assert.equal(before.length, 3);
+  const resident = before.find((row) => row.persistent);
+  const older = before.filter((row) => !row.persistent);
+  assert.ok(resident && older.length === 2, "exactly the newest Relay must be resident");
+  assert.equal(resident.buttonHosts.length, 1, "one row: the app you chose");
+  assert.ok(older.every((row) => JSON.stringify(row.buttonHosts) === JSON.stringify(resident.buttonHosts)),
+    "every Relay row names the same chosen app");
+  const host = resident.buttonHosts[0];
+  assert.ok(host === "codex" || host === "claude");
+  assert.ok(resident.height > 45 && resident.opacity === "1", "the newest provider row is permanently visible");
+  assert.ok(older.every((row) => row.height <= 1 && row.opacity === "0"), "older provider rows start collapsed");
+  assert.deepEqual(resident.logoSources, [host === "codex" ? "codexMark.svg" : "claudeCodeMark.svg"]);
+  // The subline is per relay, from real state: the resident fixture was
+  // materialized into a Codex task and never into a Claude session.
+  assert.deepEqual(resident.contexts, [host === "codex" ? "Continue in its existing task" : "Start a new session with this Relay"]);
+  assert.ok(older.every((row) => JSON.stringify(row.contexts) === JSON.stringify([
+    host === "codex" ? "Start a new task with this Relay" : "Start a new session with this Relay",
+  ])));
+  assert.deepEqual(resident.innerBottomRadii, ["14px", "14px"], "the permanent footer clips to the bubble's rounded bottom corners");
+  assert.ok(older.every((row) => JSON.stringify(row.innerBottomRadii) === JSON.stringify(["14px", "14px"])),
+    "intent-opened footers use the same rounded clipping boundary");
+  assert.equal(await evaluate(page, "document.getElementById('thQrOpen') === null"), true,
+    "human chat composer has no duplicate Open in agent action");
+  assert.equal(await evaluate(page, "document.querySelector('[data-msg=provider_footer_quick_text] .th-host-actions') === null"), true,
+    "normal text messages never render provider actions");
+  const residentShot = await capture(page, "provider-footer-resident.png");
+
+  const pointFor = async (id, zone = "body", dx = 0) => evaluate(page, `(() => {
+    const row = document.querySelector('[data-msg="${id}"]');
+    const rect = row.getBoundingClientRect();
+    return {
+      x:rect.left + rect.width / 2 + ${dx},
+      y:${JSON.stringify(zone)} === 'seam' ? rect.bottom - 12 : rect.top + Math.min(24, rect.height / 2),
+    };
+  })()`);
+  const actionState = async (id) => evaluate(page, `(() => {
+    const row = document.querySelector('[data-msg="${id}"]');
+    const actions = row.querySelector('.th-host-actions');
+    return {
+      className:row.className,
+      expanded:row.getAttribute('aria-expanded'),
+      hidden:actions.getAttribute('aria-hidden'),
+      inert:actions.inert,
+      height:actions.getBoundingClientRect().height,
+      opacity:getComputedStyle(actions).opacity,
+    };
+  })()`);
+
+  // A stationary cursor must not acquire intent merely because wheel scrolling
+  // carries another Relay beneath it.
+  await evaluate(page, `document.querySelector('[data-msg="provider_footer_oldest"]').scrollIntoView({ block:'center' }); true`);
+  await sleep(100);
+  const stationaryPoint = await pointFor("provider_footer_oldest", "body");
+  await page.send("Input.dispatchMouseEvent", { type:"mouseMoved", x:stationaryPoint.x, y:stationaryPoint.y });
+  await page.send("Input.dispatchMouseEvent", { type:"mouseWheel", x:stationaryPoint.x, y:stationaryPoint.y, deltaX:0, deltaY:110 });
+  await sleep(700);
+  assert.equal(await evaluate(page, "document.querySelectorAll('.th-msg.host-intent-open').length"), 0,
+    "wheel scrolling under a stationary cursor never opens an older footer");
+
+  // A fast pass through the seam exits before dwell and must stay inert.
+  const flyoverPoint = await pointFor("provider_footer_older", "seam");
+  await page.send("Input.dispatchMouseEvent", { type:"mouseMoved", x:flyoverPoint.x - 70, y:flyoverPoint.y });
+  await sleep(5);
+  await page.send("Input.dispatchMouseEvent", { type:"mouseMoved", x:flyoverPoint.x, y:flyoverPoint.y });
+  await sleep(35);
+  await page.send("Input.dispatchMouseEvent", { type:"mouseMoved", x:20, y:20 });
+  await sleep(330);
+  assert.equal((await actionState("provider_footer_older")).expanded, "false", "fast flyover is rejected");
+
+  // After scroll quiet, a real post-scroll move and stable seam dwell opens.
+  const seamPoint = await pointFor("provider_footer_oldest", "seam", -8);
+  await page.send("Input.dispatchMouseEvent", { type:"mouseMoved", x:seamPoint.x, y:seamPoint.y });
+  await sleep(300);
+  const intentOpen = await actionState("provider_footer_oldest");
+  assert.match(intentOpen.className, /host-intent-open/);
+  assert.equal(intentOpen.expanded, "true");
+  assert.equal(intentOpen.hidden, "false");
+  assert.equal(intentOpen.inert, false);
+  await sleep(280);
+  const intentSettled = await actionState("provider_footer_oldest");
+  assert.ok(intentSettled.height > 45 && intentSettled.opacity === "1", "deliberate seam dwell opens the complete provider footer");
+  const hoverShot = await capture(page, "provider-footer-intent-open.png");
+
+  // Crossing a small boundary does not snap shut; returning inside grace keeps
+  // the row open. A full exit closes after 240ms.
+  await page.send("Input.dispatchMouseEvent", { type:"mouseMoved", x:20, y:20 });
+  await sleep(120);
+  assert.equal((await actionState("provider_footer_oldest")).expanded, "true", "exit grace prevents flicker");
+  const returnPoint = await pointFor("provider_footer_oldest", "seam");
+  const beforeReturnDiagnostic = await evaluate(page, `(() => {
+    const row = document.querySelector('[data-msg="provider_footer_oldest"]');
+    return { rect:row.getBoundingClientRect().toJSON(), viewport:[innerWidth, innerHeight], point:${JSON.stringify(returnPoint)} };
+  })()`);
+  await page.send("Input.dispatchMouseEvent", { type:"mouseMoved", x:returnPoint.x, y:returnPoint.y });
+  await sleep(180);
+  const reentered = await actionState("provider_footer_oldest");
+  const reentryDiagnostic = await evaluate(page, `(() => ({
+    target:document.elementFromPoint(${returnPoint.x}, ${returnPoint.y})?.closest?.('[data-msg]')?.dataset?.msg || '',
+    machine:relayHostHoverIntent.machine.getState(),
+  }))()`);
+  assert.equal(reentered.expanded, "true", `re-entry cancels the pending collapse: ${JSON.stringify({ beforeReturnDiagnostic, reentryDiagnostic })}`);
+
+  // Deliberately dwelling on another older Relay atomically transfers the one
+  // pointer-open slot instead of leaving an accordion trail behind.
+  const secondSeam = await pointFor("provider_footer_older", "seam");
+  await page.send("Input.dispatchMouseEvent", { type:"mouseMoved", x:secondSeam.x, y:secondSeam.y });
+  await sleep(310);
+  assert.equal(await evaluate(page, "document.querySelectorAll('.th-msg.host-intent-open').length"), 1);
+  assert.equal((await actionState("provider_footer_oldest")).expanded, "false");
+  assert.equal((await actionState("provider_footer_older")).expanded, "true");
+  await page.send("Input.dispatchMouseEvent", { type:"mouseMoved", x:20, y:20 });
+  await sleep(260);
+  assert.equal((await actionState("provider_footer_older")).expanded, "false");
+  await sleep(200);
+  const collapsedAgain = await actionState("provider_footer_older");
+  assert.ok(collapsedAgain.height <= 1 && collapsedAgain.opacity === "0",
+    `older provider rows collapse cleanly after grace: ${JSON.stringify(collapsedAgain)}`);
+
+  // Keyboard focus pins immediately, exposes correct accessibility state, and
+  // Escape closes without sending the user into the message reader.
+  await evaluate(page, `document.querySelector('[data-msg="provider_footer_older"]').focus({ preventScroll:true }); true`);
+  await sleep(30);
+  const keyboardOpen = await actionState("provider_footer_older");
+  assert.match(keyboardOpen.className, /host-focus-open/);
+  assert.equal(keyboardOpen.expanded, "true");
+  await page.send("Input.dispatchKeyEvent", { type:"keyDown", key:"Escape", code:"Escape" });
+  await page.send("Input.dispatchKeyEvent", { type:"keyUp", key:"Escape", code:"Escape" });
+  await sleep(30);
+  assert.equal((await actionState("provider_footer_older")).expanded, "false");
+
+  // Reduced motion preserves the states while removing both geometry motion
+  // and the provider-logo breathing animation.
+  await page.send("Emulation.setEmulatedMedia", { media:"", features:[{ name:"prefers-reduced-motion", value:"reduce" }] });
+  await sleep(30);
+  const reduced = await evaluate(page, `(() => {
+    const row = document.querySelector('[data-msg="provider_footer_older"]');
+    row.classList.add('host-intent-open', 'opening');
+    const actions = getComputedStyle(row.querySelector('.th-host-actions'));
+    const logo = getComputedStyle(row.querySelector('.th-host-logo'));
+    const result = { transitionDuration:actions.transitionDuration, animationName:logo.animationName };
+    row.classList.remove('host-intent-open', 'opening');
+    return result;
+  })()`);
+  assert.match(reduced.transitionDuration, /(^|, )0s/);
+  assert.equal(reduced.animationName, "none");
+
+  // Coarse pointers get a compact, explicit disclosure instead of message-click
+  // hover magic. The resident latest footer remains resident and has no toggle.
+  await page.send("Emulation.setEmulatedMedia", { media:"", features:[
+    { name:"prefers-reduced-motion", value:"reduce" },
+    { name:"hover", value:"none" },
+    { name:"pointer", value:"coarse" },
+  ] });
+  await page.send("Emulation.setTouchEmulationEnabled", { enabled:true, maxTouchPoints:1 });
+  await sleep(80);
+  const coarse = await evaluate(page, `(() => {
+    const row = document.querySelector('[data-msg="provider_footer_older"]');
+    const button = row.querySelector('[data-host-disclosure]');
+    return {
+      media:matchMedia('(hover: none), (pointer: coarse)').matches,
+      display:getComputedStyle(button).display,
+      residentDisclosure:document.querySelector('[data-msg="provider_footer_latest"] [data-host-disclosure]') !== null,
+    };
+  })()`);
+  assert.equal(coarse.media, true);
+  assert.equal(coarse.display, "flex");
+  assert.equal(coarse.residentDisclosure, false);
+  await evaluate(page, `document.querySelector('[data-msg="provider_footer_older"] [data-host-disclosure]').click(); true`);
+  await sleep(20);
+  assert.equal((await actionState("provider_footer_older")).expanded, "true", "touch disclosure opens without hijacking the message");
+
+  console.log(JSON.stringify({ sandbox, before, intentOpen, intentSettled, collapsedAgain, keyboardOpen, reduced, coarse, captures:[settingsShot, residentShot, hoverShot] }, null, 2));
+} catch (error) {
+  console.error(error.stack || error);
+  console.error(log);
+  process.exitCode = 1;
+} finally {
+  page?.close();
+  main?.close();
+  child.kill("SIGTERM");
+}

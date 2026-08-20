@@ -1,0 +1,23 @@
+{
+  "sessionId": "cse_native_families",
+  "session": {
+    "status": "active",
+    "status_bucket": "working",
+    "worker_status": "running",
+    "connection_status": "connected",
+    "requires_action_details_list": []
+  },
+  "events": [
+    { "sequence_num": "1", "event_id": "seed", "event_type": "user", "source": "client", "payload": { "type": "user", "uuid": "seed", "client_platform": "desktop_app", "message": { "role": "user", "content": "<relay-runtime-contract>private</relay-runtime-contract>Begin the task as briefed." } } },
+    { "sequence_num": "2", "event_id": "goal", "event_type": "active_goal", "payload": { "type": "active_goal", "uuid": "goal", "value": { "condition": "Audit the release", "iterations": 2, "lastReason": "Gathering evidence" } } },
+    { "sequence_num": "3", "event_id": "read", "event_type": "assistant", "payload": { "type": "assistant", "uuid": "read", "message": { "role": "assistant", "content": [{ "type": "tool_use", "id": "read-1", "name": "Read", "input": { "file_path": "/repo/README.md" } }] } } },
+    { "sequence_num": "4", "event_id": "progress", "event_type": "tool_progress", "payload": { "type": "tool_progress", "uuid": "progress", "tool_use_id": "read-1", "tool_name": "Read", "elapsed_time_seconds": 2 } },
+    { "sequence_num": "5", "event_id": "result-read", "event_type": "user", "payload": { "type": "user", "uuid": "result-read", "message": { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": "read-1", "content": "ok", "is_error": false }] } } },
+    { "sequence_num": "6", "event_id": "compact", "event_type": "autocompact_state", "payload": { "type": "autocompact_state", "uuid": "compact", "state": "compacted" } },
+    { "sequence_num": "7", "event_id": "question", "event_type": "control_request", "payload": { "type": "control_request", "uuid": "question", "request_id": "question-1", "request": { "subtype": "can_use_tool", "tool_use_id": "ask-1", "questions": [{ "header": "Release", "question": "Ship the release?" }] } } },
+    { "sequence_num": "8", "event_id": "cancel", "event_type": "control_cancel", "payload": { "type": "control_cancel", "uuid": "cancel", "request_id": "question-1" } },
+    { "sequence_num": "9", "event_id": "auth", "event_type": "mcp_auth_required", "payload": { "type": "mcp_auth_required", "uuid": "auth", "server_name": "Gmail", "server_url": "https://private.invalid" } },
+    { "sequence_num": "10", "event_id": "rate", "event_type": "rate_limit_event", "payload": { "type": "rate_limit_event", "uuid": "rate", "rate_limit_info": { "status": "rejected", "overageStatus": "denied", "message": "Try again shortly", "retry_status": { "type": "retrying" } } } },
+    { "sequence_num": "11", "event_id": "commentary", "event_type": "assistant", "payload": { "type": "assistant", "uuid": "commentary", "message": { "role": "assistant", "content": [{ "type": "text", "text": "I’m verifying the release." }] } } }
+  ]
+}
