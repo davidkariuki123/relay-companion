@@ -28,6 +28,7 @@ import {
   captureInternalLinks,
   createDeterministicArchive,
   deterministicSbomSerial,
+  npmRuntimeInvocation,
 } from "../scripts/build-runtime-artifact.mjs";
 import { bridgeShrinkwrap, publishPackageJson } from "../scripts/prepare-publish-package.mjs";
 import { assertMonotonicVersion, compareExactVersions } from "../scripts/assert-monotonic-version.mjs";
@@ -61,6 +62,25 @@ test("npm provenance audit uses an executable command shape on Windows and Unix"
   assert.deepEqual(npmInvocation(["audit", "signatures"], { platform: "win32", comspec: "C:\\Windows\\System32\\cmd.exe" }), {
     command: "C:\\Windows\\System32\\cmd.exe",
     args: ["/d", "/s", "/c", "npm.cmd", "audit", "signatures"],
+  });
+});
+
+test("runtime builds invoke npm through an executable Node or shell entrypoint", () => {
+  assert.deepEqual(npmRuntimeInvocation(["ci"], {
+    npmExecPath: "/opt/node/lib/node_modules/npm/bin/npm-cli.js",
+    execPath: "/opt/node/bin/node",
+    existsSync: () => true,
+  }), {
+    command: "/opt/node/bin/node",
+    args: ["/opt/node/lib/node_modules/npm/bin/npm-cli.js", "ci"],
+  });
+  assert.deepEqual(npmRuntimeInvocation(["ci"], {
+    platform: "win32",
+    npmExecPath: "",
+    comspec: "C:\\Windows\\System32\\cmd.exe",
+  }), {
+    command: "C:\\Windows\\System32\\cmd.exe",
+    args: ["/d", "/s", "/c", "npm.cmd", "ci"],
   });
 });
 

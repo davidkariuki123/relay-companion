@@ -19,6 +19,22 @@ function run(command, args, options = {}) {
   return String(result.stdout || "").trim();
 }
 
+export function npmRuntimeInvocation(args, {
+  platform = process.platform,
+  npmExecPath = process.env.npm_execpath,
+  execPath = process.execPath,
+  comspec = process.env.ComSpec,
+  existsSync = fs.existsSync,
+} = {}) {
+  if (npmExecPath && existsSync(npmExecPath)) {
+    return { command: execPath, args: [npmExecPath, ...args] };
+  }
+  if (platform === "win32") {
+    return { command: comspec || "cmd.exe", args: ["/d", "/s", "/c", "npm.cmd", ...args] };
+  }
+  return { command: "npm", args };
+}
+
 function option(name, fallback = "") {
   const index = process.argv.indexOf(name);
   return index >= 0 ? process.argv[index + 1] : fallback;
@@ -290,12 +306,10 @@ export function buildRuntimeArtifact({
   try {
     fs.copyFileSync(path.join(runtimeLockRoot, "package.json"), path.join(temporary, "package.json"));
     fs.copyFileSync(path.join(runtimeLockRoot, "package-lock.json"), path.join(temporary, "package-lock.json"));
-    const npmExecPath = String(process.env.npm_execpath || "");
-    const npmCommand = npmExecPath && fs.existsSync(npmExecPath) ? process.execPath : (process.platform === "win32" ? "npm.cmd" : "npm");
-    const npmPrefix = npmCommand === process.execPath ? [npmExecPath] : [];
-    run(npmCommand, [...npmPrefix,
+    const npmInstall = npmRuntimeInvocation([
       "ci", "--ignore-scripts", "--no-audit", "--no-fund",
-    ], { timeout: 15 * 60_000, cwd: temporary });
+    ]);
+    run(npmInstall.command, npmInstall.args, { timeout: 15 * 60_000, cwd: temporary });
     fs.rmSync(path.join(temporary, "node_modules", ".bin"), { recursive: true, force: true });
     fs.mkdirSync(packageRoot, { recursive: true });
     for (const entry of ["bin", "bootstrap", "src", "overlay", "licenses"]) {
