@@ -269,6 +269,7 @@ test("the migration bridge publishes an exact npm shrinkwrap for its full graph"
   const bridgePackage = publishPackageJson(packageJson, { mode: "bridge", version, runtimeDependencies: dependencies });
   const shrinkwrap = bridgeShrinkwrap(runtimeLock, { version, runtimeDependencies: dependencies });
   assert.equal(bridgePackage.relayDistribution, "bridge-runtime");
+  assert.ok(bridgePackage.files.includes("npm-shrinkwrap.json"), "the packed bridge carries its transitive lock");
   assert.equal(shrinkwrap.name, bridgePackage.name);
   assert.equal(shrinkwrap.version, bridgePackage.version);
   assert.deepEqual(shrinkwrap.packages[""].dependencies, bridgePackage.dependencies);
@@ -728,6 +729,8 @@ test("public release owns immutable publication while private promotion owns fle
   assert.match(publish, /--if-none-match '\*'/);
   assert.match(publish, /npm publish .*--provenance/);
   assert.match(publish, /existing npm version has different bytes/);
+  assert.match(publish, /tar -tzf "\$tarball" > "\$RUNNER_TEMP\/pack-files\.txt"/);
+  assert.doesNotMatch(publish, /tar -tzf "\$tarball" \| grep/);
   assert.doesNotMatch(publish, /companion-releases\/stable\/manifest\.json/);
   const privatePromotion = new URL("../../../.github/workflows/promote-prod.yml", import.meta.url);
   if (fs.existsSync(privatePromotion)) {

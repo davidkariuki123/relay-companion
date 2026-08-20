@@ -183,7 +183,8 @@ jobs:
           tarball="$(node -p 'require(process.argv[1])[0].filename' "$RUNNER_TEMP/pack.json")"
           test -f "$tarball"
           if [ "${{ needs.identity.outputs.phase }}" = bridge-runtime ]; then
-            tar -tzf "$tarball" | grep -qx package/npm-shrinkwrap.json
+            tar -tzf "$tarball" > "$RUNNER_TEMP/pack-files.txt"
+            grep -qx package/npm-shrinkwrap.json "$RUNNER_TEMP/pack-files.txt"
           fi
           integrity="sha512-$(openssl dgst -sha512 -binary "$tarball" | openssl base64 -A)"
           echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
