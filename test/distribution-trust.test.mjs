@@ -587,14 +587,22 @@ test("macOS and Windows credential commands use the native OS vault", () => {
   const macCalls = [];
   const mac = credentialStore.writeDeviceToken("secret-mac", {
     platform: "darwin",
-    run: (command, args, options) => { macCalls.push({ command, args, options }); return { status: 0, stdout: "" }; },
+    run: (command, args, options) => {
+      macCalls.push({ command, args, options });
+      return command === "/usr/bin/security" && args.includes("find-generic-password")
+        ? { status: 0, stdout: "secret-mac\n" }
+        : { status: 0, stdout: "" };
+    },
   });
   assert.equal(mac.ok, true);
-  assert.equal(macCalls[0].command, "/usr/bin/security");
-  assert.ok(macCalls[0].args.includes("add-generic-password"));
+  assert.equal(macCalls[0].command, "/usr/bin/expect");
+  assert.ok(macCalls[0].args.includes("-c"));
+  assert.match(macCalls[0].args.join(" "), /security add-generic-password/);
   assert.equal(macCalls[0].args.includes("secret-mac"), false, "the token is not exposed in macOS argv");
   assert.equal(Object.values(macCalls[0].options.env).includes("secret-mac"), false, "the token is not exposed in macOS env");
   assert.equal(macCalls[0].options.input, "secret-mac", "the token is delivered over the child stdin pipe");
+  assert.equal(macCalls[1].command, "/usr/bin/security");
+  assert.ok(macCalls[1].args.includes("find-generic-password"), "a successful write is read back byte for byte");
   const macRead = credentialStore.readDeviceToken({
     platform: "darwin",
     run: () => ({ status: 0, stdout: "secret-mac\n" }),

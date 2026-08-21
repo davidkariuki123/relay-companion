@@ -4,6 +4,23 @@ const { spawnSync } = require("node:child_process");
 
 const SERVICE = "work.relay.companion";
 const ACCOUNT = "device-token";
+const MACOS_PROMPT_MAX_BYTES = 120;
+
+// `security add-generic-password ... -w` only reads from a terminal. Giving it
+// a normal stdin pipe exits successfully but stores an empty password. Expect
+// supplies the terminal while the credential itself still travels only over
+// stdin; it never appears in argv or the environment.
+const MACOS_WRITE_SCRIPT = String.raw`set timeout 20
+fconfigure stdin -translation binary -encoding binary
+set secret [read stdin]
+spawn -noecho /usr/bin/security add-generic-password -U -s $env(RELAY_CREDENTIAL_SERVICE) -a $env(RELAY_CREDENTIAL_ACCOUNT) -w
+expect {
+  -re {(?i)password.*:} { send -- "$secret\r"; exp_continue }
+  eof {}
+  timeout { exit 124 }
+}
+set outcome [wait]
+exit [lindex $outcome 3]`;
 
 function resultOf(command, args, { env = process.env, run = spawnSync, input, ...spawnOptions } = {}) {
   const result = run(command, args, {
@@ -61,14 +78,37 @@ function operation(
   const credentialAccount = String(account || "").trim();
   if (!credentialService || !credentialAccount) return { ok: false, value: "", detail: "invalid credential identity" };
   if (platform === "darwin") {
+    if (action === "write") {
+      if (Buffer.byteLength(secret, "utf8") > MACOS_PROMPT_MAX_BYTES) {
+        return { ok: false, value: "", detail: "credential exceeds the macOS secure prompt limit" };
+      }
+      const writeResult = resultOf("/usr/bin/expect", ["-c", MACOS_WRITE_SCRIPT], {
+        ...options,
+        env: {
+          ...(options.env || process.env),
+          RELAY_CREDENTIAL_SERVICE: credentialService,
+          RELAY_CREDENTIAL_ACCOUNT: credentialAccount,
+        },
+        input: secret,
+      });
+      if (!writeResult.ok) return writeResult;
+      const verifyResult = resultOf(
+        "/usr/bin/security",
+        ["find-generic-password", "-s", credentialService, "-a", credentialAccount, "-w"],
+        options,
+      );
+      if (verifyResult.ok && verifyResult.value === secret) return { ok: true, value: "", detail: "" };
+      resultOf(
+        "/usr/bin/security",
+        ["delete-generic-password", "-s", credentialService, "-a", credentialAccount],
+        options,
+      );
+      return { ok: false, value: "", detail: verifyResult.detail || "native credential verification failed" };
+    }
     let args;
-    // `security` explicitly documents `-w password` as insecure because the
-    // secret is exposed in the process list. With -w last it prompts on stdin,
-    // so neither argv nor the environment carries the credential.
-    if (action === "write") args = ["add-generic-password", "-U", "-s", credentialService, "-a", credentialAccount, "-w"];
-    else if (action === "read") args = ["find-generic-password", "-s", credentialService, "-a", credentialAccount, "-w"];
+    if (action === "read") args = ["find-generic-password", "-s", credentialService, "-a", credentialAccount, "-w"];
     else args = ["delete-generic-password", "-s", credentialService, "-a", credentialAccount];
-    const result = resultOf("/usr/bin/security", args, { ...options, ...(action === "write" ? { input: secret } : {}) });
+    const result = resultOf("/usr/bin/security", args, options);
     if (action === "delete" && !result.ok && /could not be found|-25300/i.test(result.detail)) return { ok: true, value: "" };
     return result;
   }
