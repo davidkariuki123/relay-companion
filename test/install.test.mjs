@@ -465,6 +465,7 @@ test("repairDesktopSurfaces --no-restart rewrites both LaunchAgents and Relay.ap
     platform: "darwin",
     homeDir: fixture.homeDir,
     reload: false,
+    snapshotTrayPosition: () => ({ ok: true, snapshotted: false, reason: "fixture" }),
     runCommand: fakeMacCommands(calls),
   });
 
@@ -557,6 +558,7 @@ test("desktop repair removes capability modes from daemon, pill, and Relay.app",
     platform: "darwin",
     homeDir: fixture.homeDir,
     reload: false,
+    snapshotTrayPosition: () => ({ ok: true, snapshotted: false, reason: "fixture" }),
     runCommand: fakeMacCommands(calls),
   });
 
