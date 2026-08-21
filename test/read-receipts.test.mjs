@@ -61,7 +61,7 @@ test("the ladder before anyone has read it: Sent, then Delivered", () => {
 });
 
 test("a message still on this device shows no receipt at all", () => {
-  // The queue's own words own that bubble ("Sending…", "Waiting for network").
+  // The queue's own words own that bubble ("Sending…", "Trying again…").
   // A receipt here would claim the server has something it does not.
   const queued = { direction:"out", at:at(0), pending:true, delivered:false, readReceipts:[] };
   assert.equal(receipts.forLatest(queued, [queued], format), null);

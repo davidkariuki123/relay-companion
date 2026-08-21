@@ -23,7 +23,7 @@ test("People rows use colored identity, editorial metadata, and recency without 
 });
 
 test("Group rows show roster avatar stacks, member summaries, and people counts", () => {
-  const render = html.slice(html.indexOf("function groupMemberSummary("), html.indexOf("function openGroupChat(groupId)"));
+  const render = html.slice(html.indexOf("function groupMemberSummary("), html.indexOf("function openGroupRoom(groupId)"));
   assert.match(render, /function groupAvatarStack\(group, roster\)/);
   assert.match(render, /class="cvg-stack"/);
   assert.match(render, /class="cvg-sub">\$\{esc\(groupMemberSummary\(roster\)\)\}/);

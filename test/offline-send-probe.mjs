@@ -291,6 +291,22 @@ try {
   sentProjection.items = [sentRow("read")];
   result.wordWhenRead = await waitForWord("Seen");
 
+  // ---- two ordinary texts are one visual run ----
+  await typeAndSend("rapid one");
+  await retry(async () => {
+    if (!(await ev('[...document.querySelectorAll(".th-msg")].some(n => (n.textContent||"").includes("rapid one"))'))) throw new Error("first rapid bubble missing");
+  }, { label:"the first rapid bubble" });
+  await typeAndSend("rapid two");
+  await retry(async () => {
+    if (!(await ev('[...document.querySelectorAll(".th-msg")].some(n => (n.textContent||"").includes("rapid two"))'))) throw new Error("second rapid bubble missing");
+  }, { label:"the second rapid bubble" });
+  result.rapidMessagesVisible = true;
+  result.rapidTextSeams = await ev('document.querySelectorAll(".th-run.th-seam").length');
+  result.rapidYouHeaders = await ev('[...document.querySelectorAll(".th-run.mine .th-party")].filter(n => (n.textContent||"").trim() === "You").length');
+  const rapidShot = await page.send("Page.captureScreenshot", { format:"png" });
+  result.rapidScreenshot = path.join(sandbox, "rapid-messages.png");
+  fs.writeFileSync(result.rapidScreenshot, Buffer.from(rapidShot.data, "base64"));
+
   // ---- the harder half: quit with a message still queued ----
   // "It sends when you are back online" has to survive closing the laptop, not
   // just losing the signal. Queue one with the network down, kill the app
@@ -341,7 +357,7 @@ try {
   const laws = result.error ? [] : [
     ["an offline send is NOT returned to the composer", result.composerAfterOfflineSend === ""],
     ["the message stays in the room while offline", result.bubbleVisibleOffline === true],
-    ["it says it is waiting, not that it sent", /Waiting for network/.test(result.stateWordOffline || "")],
+    ["it says it is retrying, not that it sent", /Trying again/.test(result.stateWordOffline || "")],
     ["the device holds the message on disk", result.outboxHoldsIt === true],
     ["it is queued, not failed", result.outboxStateOffline === "queued"],
     ["the network really was down for it", result.refusedAttempts >= 1],
@@ -352,6 +368,9 @@ try {
     ["the server having it reads Sent", /Sent/.test(result.wordWhenServerHasIt || "")],
     ["the recipient having it reads Delivered", /Delivered/.test(result.wordWhenRecipientHasIt || "")],
     ["their reading it still outranks both", /Seen/.test(result.wordWhenRead || "")],
+    ["two rapid texts both remain visible", result.rapidMessagesVisible === true],
+    ["nearby texts have no reply-chain divider", result.rapidTextSeams === 0],
+    ["nearby own texts share one new You header", result.rapidYouHeaders === 2],
     ["a queued message survives quitting the app", result.survivedTheQuit === true],
     ["it sends itself on the next launch, untouched", result.sentAfterRestart === true && result.restartSentText === "queued before quitting"],
     ["and it is still in the room after the restart", result.restartBubbleVisible === true],

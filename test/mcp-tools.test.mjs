@@ -47,8 +47,9 @@ test("an unrecognised or silent MCP client leaves provenance unstated", () => {
 test("startup teachings establish Relay as the default medium without losing the product contract", () => {
   for (const instructions of [RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS]) {
     assert.ok(Buffer.byteLength(instructions, "utf8") <= 2_048, "Claude receives the complete instruction block");
+    assert.match(instructions, /^Only send a Relay when the user asks you to send \(or relay\) something to someone\./);
     assert.match(instructions, /default general person-to-person and saved-group communication layer/i);
-    assert.match(instructions, /without specifying a medium, use Relay/i);
+    assert.match(instructions, /For that ask, use Relay unless another medium is named/i);
     assert.match(instructions, /explicitly requested other medium overrides/i);
     assert.match(instructions, /mint a link with relay_share_link/i);
     assert.match(instructions, /search relay_inbox_list/i);

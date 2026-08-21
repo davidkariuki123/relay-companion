@@ -6,6 +6,7 @@ import { RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS, TOOLS } from ".
 
 const byName = new Map(TOOLS.map((tool) => [tool.name, tool]));
 const source = await readFile(new URL("../src/mcp.js", import.meta.url), "utf8");
+const SEND_GATE = "Only send a Relay when the user asks you to send (or relay) something to someone.";
 
 const EXPECTED_TOOLS = [
   "relay_ai_sessions",
@@ -53,8 +54,14 @@ test("the complete MCP catalog has unique, internally valid model contracts", ()
 test("startup guidance and owner schemas preserve the complete product ontology", () => {
   const sendContract = JSON.stringify(byName.get("relay_send"));
   const inboxContract = JSON.stringify(byName.get("relay_inbox_list"));
+  for (const instructions of [RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS]) {
+    assert.ok(instructions.startsWith(SEND_GATE), "the human's ask is the first startup send rule");
+  }
+  for (const name of ["relay_send", "relay_chat_send"]) {
+    assert.ok(byName.get(name).description.startsWith(SEND_GATE), `${name} leads with the human-ask gate`);
+  }
   assert.match(RELAY_MCP_INSTRUCTIONS, /default general person-to-person and saved-group communication layer/i);
-  assert.match(RELAY_MCP_INSTRUCTIONS, /without specifying a medium, use Relay/i);
+  assert.match(RELAY_MCP_INSTRUCTIONS, /For that ask, use Relay unless another medium is named/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /explicitly requested other medium overrides/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /mint a link with relay_share_link/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /notification emails are not the authoritative contents/i);

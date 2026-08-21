@@ -43,6 +43,15 @@ test("the queue reaches the renderer, and its own progress moves the payload", (
   assert.match(main, /onChange: \(\) => pushInboxQuiet\(\)/);
 });
 
+test("an older Sent response cannot erase a message revealed by a newer one", () => {
+  assert.match(main, /let sentRefreshStarted = 0;/);
+  assert.match(main, /let sentRefreshCommitted = 0;/);
+  assert.match(main, /const refreshId = \+\+sentRefreshStarted;/);
+  assert.match(main, /refreshId < sentRefreshCommitted/);
+  assert.match(main, /sentRefreshCommitted = refreshId;/);
+  assert.match(main, /deviceToken\(\) !== credential/);
+});
+
 test("a queued message is retired by the server's own view, and resumes on any evidence of network", () => {
   assert.match(main, /outbox\.retireConfirmed\(\{/);
   assert.match(main, /relayIds: sentCache\.map\(/);

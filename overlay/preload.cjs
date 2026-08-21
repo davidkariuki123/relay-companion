@@ -111,10 +111,6 @@ contextBridge.exposeInMainWorld("relay", {
   // Opening a contact opens the conversation with them, in its own window.
   openChatWith: (email, name) =>
     ipcRenderer.invoke("relay:openChatWith", { email: String(email || ""), name: String(name || "") }),
-  // Opening a group opens the room its roster names — the same window, one
-  // conversation for everybody in it.
-  openGroupChat: (groupId, name) =>
-    ipcRenderer.invoke("relay:openChatWith", { groupId: String(groupId || ""), name: String(name || "") }),
   // contact groups (saved rosters; a group relays to every member as one thread)
   groups: () => ipcRenderer.invoke("relay:groups"),
   groupCreate: (name) => ipcRenderer.invoke("relay:groupCreate", name),

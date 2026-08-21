@@ -1538,6 +1538,12 @@
   .th-under { display:flex; align-items:center; gap:10px; margin:3px 16px 0; }
   .th-under.mine { justify-content:flex-end; }
   .th-under .th-seen { appearance:none; border:0; padding:0; background:transparent; font-family:var(--sans); font-size:10px; color:var(--muted-2); opacity:.75; }
+  /* A healthy send can cross several true states in a few hundred
+     milliseconds. Hold transient words for one quiet beat so the person sees
+     the first stable result, not transport chatter. Permanent failure is
+     deliberately not delayed. */
+  @keyframes th-status-settle { from { opacity:0; } to { opacity:.75; } }
+  .th-under .th-seen.th-settling { animation:th-status-settle 1ms 900ms both; }
   .th-under button.th-seen { cursor:pointer; }
   .th-under button.th-seen:hover { color:var(--ink); opacity:1; }
   /* A message the server refused stays a whisper — it is not an alarm — but it
@@ -3099,7 +3105,12 @@
       && !chunkDateLabel
       && previous.party === current.party
       && previous.direction === current.direction
-      && String(previous.threadId || "") === String(current.threadId || ""),
+      // A human chat is one visible room. Its ordinary texts may carry
+      // different internal reply-chain ids, but that metadata cannot split a
+      // run the person sent minutes apart. Structured Relays keep their real
+      // chain boundary; text keeps the conversational/time boundary.
+      && (Boolean(previous.textLike && current.textLike)
+        || String(previous.threadId || "") === String(current.threadId || "")),
     );
   }
 
@@ -7549,7 +7560,6 @@
   let groupsLoaded = false;
   let groupsLoading = null;
   let cvgExpandedId = null; // group whose full details screen is open
-  let cvgOpeningId = null;  // group whose room is being resolved right now
   let cvgRenamingId = null;
   let cvgDeleteArmedId = null;
   let groupLeaveArmedId = null;
@@ -7873,31 +7883,6 @@
     wireGroupRows();
   }
   /**
-   * The room a group names: its owner plus its roster, one conversation.
-   *
-   * A group somebody else owns has nothing to open until it holds messages —
-   * only its owner can start that conversation — so the answer there is a line
-   * on the group's own error slot, not a window with a composer that would be
-   * refused.
-   */
-  function openGroupChat(groupId) {
-    if (!groupId) return;
-    if (!window.relay.openGroupChat) { // older main process
-      cvgShowError("That conversation could not be opened.");
-      return;
-    }
-    const g = groupsList.find((x) => x.id === groupId) || null;
-    // A refusal belongs to the row that asked for it, not to whichever group is
-    // clicked next while a slow answer is still in the air.
-    cvgOpeningId = groupId;
-    const onThisRow = (message) => { if (cvgOpeningId === groupId) cvgShowError(message); };
-    Promise.resolve(window.relay.openGroupChat(groupId, (g && g.name) || ""))
-      .then((res) => {
-        if (res && res.ok === false) onThisRow(res.error || "That conversation could not be opened.");
-      })
-      .catch(() => onThisRow("That conversation could not be opened."));
-  }
-  /**
    * Open the conversation a group row names.
    *
    * Same law as a contact row: the room the pill already holds opens IN the
@@ -7921,7 +7906,7 @@
       if (morphFromList) startReaderMorph("threads");
       return;
     }
-    openGroupChat(groupId);
+    cvgShowError("That conversation could not be opened.");
   }
 
   function groupRoomPostingState(room) {
@@ -8401,10 +8386,8 @@
   // waiting. Said in the same whisper, because a message on its way is not an
   // event — only a message that will not go is.
   //
-  // "Waiting for network" is deliberately the second word rather than the
-  // first: one failed attempt is a hiccup, and a composer that announces the
-  // wifi every time someone presses Send is noise. It appears once the queue
-  // has actually had to wait for a connection.
+  // A retry is deliberately neutral: a timeout, throttled server, or dropped
+  // socket is not evidence that the person's Wi-Fi is disconnected.
   function outboxStatusBits(m) {
     const state = String(m.outboxState || "");
     if (state === "failed") {
@@ -8415,9 +8398,9 @@
       ];
     }
     if (state === "queued" && Number(m.outboxAttempts || 0) >= 1) {
-      return [`<span class="th-seen">Waiting for network</span>`];
+      return [`<span class="th-seen th-settling">Trying again…</span>`];
     }
-    return [`<span class="th-seen">Sending…</span>`];
+    return [`<span class="th-seen th-settling">Sending…</span>`];
   }
   function receiptTimestamp(value) {
     const date = new Date(value || "");
@@ -8609,11 +8592,9 @@
     threads.sort((a, b) => new Date(b.latest.at || 0) - new Date(a.latest.at || 0));
     return threads;
   }
-  // ---- the Chat tab: every conversation, sectioned Groups / People, with
-  // the "Your people" row (contacts management) at the list's end. A group
-  // here is a conversation with 2+ other parties; a person is a 1:1. Opening any
-  // conversation springs the pill into the expanded frame (David's law:
-  // the list is the glance surface, the room earns the frame).
+  // ---- the Chat tab: one activity-sorted rail of people and saved groups.
+  // Opening any conversation springs the pill into the expanded frame (the
+  // list is the glance surface; the room earns the frame).
   function chatConversations() {
     const threads = buildThreads();
     for (const t of threads) {
@@ -8656,9 +8637,16 @@
     return Boolean(roomName && normalizedPartyName(message && message.party) === roomName);
   }
   function sortConversationRooms(rooms) {
-    return [...rooms].sort((a, b) =>
-      new Date(b.latest.at || 0) - new Date(a.latest.at || 0),
-    );
+    return [...rooms].sort((a, b) => {
+      // Message activity owns the chronology. A saved room with no messages is
+      // still a room, but it follows active conversations; creation/update time
+      // orders only that quiet tail. Name is the final stable tie-breaker.
+      const aActive = a.hasActivity !== false;
+      const bActive = b.hasActivity !== false;
+      if (aActive !== bActive) return aActive ? -1 : 1;
+      const byTime = new Date((b.latest && b.latest.at) || 0) - new Date((a.latest && a.latest.at) || 0);
+      return byTime || String(a.name || "").localeCompare(String(b.name || ""));
+    });
   }
   function chatSections() {
     const convos = chatConversations();
@@ -8704,7 +8692,7 @@
       const key = t.groupId ? `group-id:${t.groupId}` : `group:${normalizedPartyName(t.groupName || t.name)}`;
       const prev = byGroup.get(key);
       if (!prev) {
-        byGroup.set(key, { ...t, threadIds: new Set([t.threadId]) });
+        byGroup.set(key, { ...t, hasActivity: true, threadIds: new Set([t.threadId]) });
         continue;
       }
       prev.threadIds.add(t.threadId);
@@ -8716,7 +8704,44 @@
       for (const person of t.people || []) if (!prev.people.includes(person)) prev.people.push(person);
       if (!prev.groupId && t.groupId) prev.groupId = t.groupId;
     }
-    const groups = [...byGroup.values()].sort((a, b) => new Date(b.latest.at || 0) - new Date(a.latest.at || 0));
+    // Message history is not the registry of rooms. Every saved group belongs
+    // in the conversation rail even before its first message; otherwise a new
+    // group opens in a detached legacy window and then vanishes from the rail.
+    for (const group of groupsList) {
+      if (!group || !group.id) continue;
+      const key = `group-id:${group.id}`;
+      const roster = groupInfoRoster(group);
+      const people = roster
+        .map((person) => String(person.name || person.email || "").trim())
+        .filter(Boolean);
+      const existing = byGroup.get(key) || [...byGroup.values()].find((room) =>
+        !room.groupId && normalizedPartyName(room.groupName || room.name) === normalizedPartyName(group.name));
+      if (existing) {
+        existing.groupId = String(group.id);
+        existing.groupName = group.name || existing.groupName;
+        existing.name = group.name || existing.name;
+        for (const person of people) if (!existing.people.includes(person)) existing.people.push(person);
+        continue;
+      }
+      const quietAt = group.updatedAt || group.createdAt || "1970-01-01T00:00:00.000Z";
+      byGroup.set(key, {
+        threadId: `group-room:${group.id}`,
+        threadIds: new Set(),
+        msgs: [],
+        latest: { at:quietAt, title:"No messages yet", direction:"", party:"" },
+        unreadCount: 0,
+        party: group.name || "Group",
+        partyKey: key,
+        isGroup: true,
+        groupId: String(group.id),
+        groupName: group.name || "Group",
+        name: group.name || "Group",
+        people,
+        setLabel: groupMemberSummary(roster),
+        hasActivity: false,
+      });
+    }
+    const groups = sortConversationRooms([...byGroup.values()]);
     // WhatsApp/iMessage law: group and direct conversations are peers. The
     // visible Chat list is one chronology, never two type-based shelves.
     const rooms = sortConversationRooms([...groups, ...people]);
@@ -8821,15 +8846,15 @@
     if (morphFromList) startReaderMorph("threads");
   }
   function renderChat() {
-    const { convos, rooms } = chatSections();
-    chatEmptyEl.classList.toggle("gone", convos.length > 0);
+    const { rooms } = chatSections();
+    chatEmptyEl.classList.toggle("gone", rooms.length > 0);
     const row = (t) => `
       <button class="th-item${t.unreadCount ? " unread" : ""}" type="button" data-chat-open="${esc(t.threadId)}" data-party="${esc(t.name)}">
         ${t.isGroup
           ? `<span class="av-stack">${t.people.slice(0, 2).map((pp, i) => `<span class="avatar sm${i === 0 ? " sq" : ""}" style="--av-h:${avatarHue(pp)}" aria-hidden="true">${esc(avatarInitials(pp))}</span>`).join("")}</span>`
           : `<span class="avatar" style="--av-h:${avatarHue(t.name)}" aria-hidden="true">${esc(avatarInitials(t.name))}</span>`}
         <span class="rk-body">
-          <span class="th-top"><span class="th-party">${esc(t.name)}</span><span class="th-time">${esc(timeAgo(t.latest.at))}</span></span>
+          <span class="th-top"><span class="th-party">${esc(t.name)}</span><span class="th-time">${t.hasActivity === false ? "" : esc(timeAgo(t.latest.at))}</span></span>
           <span class="rk-line">
             <span class="th-title">${t.latest.direction === "out" ? `<span class="gist-who">You:</span> ` : (t.isGroup ? `<span class="gist-who">${esc(String(t.latest.party || "").split(" ")[0])}:</span> ` : "")}${esc(t.latest.title)}</span>
             ${t.unreadCount ? `<span class="th-count">${t.unreadCount}</span>` : ""}
@@ -8847,6 +8872,12 @@
     if (!contactsList.length && !renderChat._loading) {
       renderChat._loading = true;
       loadContacts().then(() => { renderChat._loading = false; if (activeView === "chat") renderChat(); });
+    }
+    if (!groupsLoaded && !groupsLoading) {
+      groupsLoading = Promise.resolve(loadGroups()).finally(() => {
+        groupsLoading = null;
+        if (activeView === "chat") renderChat();
+      });
     }
     for (const el of chatListEl.querySelectorAll("[data-chat-open]")) {
       el.addEventListener("click", () => openRoom(el.getAttribute("data-chat-open"), el.getAttribute("data-party")));
@@ -8883,10 +8914,12 @@
   function positionChatRail(railEl, roomKey) {
     // A room that has never been visited always starts at the newest
     // conversation. Returning to a room restores only an explicit rail scroll.
+    const hasSavedPosition = chatRailScrollByRoom.has(roomKey);
     const target = setChatRailScrollTop(railEl, chatRailScrollByRoom.get(roomKey));
     requestAnimationFrame(() => {
       if (activeView !== "threads" || !chatExpanded || chatRailRoomKey() !== roomKey) return;
-      setChatRailScrollTop(railEl, target);
+      if (hasSavedPosition) setChatRailScrollTop(railEl, target);
+      else railEl.querySelector(".rl-row.on")?.scrollIntoView({ block:"nearest" });
     });
   }
   function renderChatRail() {
@@ -9222,7 +9255,11 @@
       // clusters and the sender run breaks so a new topic re-introduces its
       // speaker. A dated chunk is also a new run: otherwise its first visible
       // message inherits a sender header that may be days above the viewport.
-      const chainChanged = Boolean(prev && String(m.threadId || "") !== String(prev.threadId || ""));
+      const chainChanged = Boolean(
+        prev
+        && !(prev.textLike && m.textLike)
+        && String(m.threadId || "") !== String(prev.threadId || ""),
+      );
       const cont = continuesSenderRun(prev, m, chunkDateLabel);
       // TIME IS DISTANCE. Messages sent hours apart sat as tight as messages
       // sent seconds apart, so a day's conversation read as one squashed block
@@ -9278,11 +9315,12 @@
         // reply button sat on the words themselves (David). They live under it.
         const receipt = receiptFor(m, msgs);
         const bits = [];
+        const settleReceipt = receipt && (receipt.label === "Sent" || receipt.label === "Delivered") ? " th-settling" : "";
         if (!m.request && !groupPostingBlocked) bits.push(`<button type="button" class="th-reply-ghost" data-reply-to="${esc(m.id)}" data-stop="1">reply</button>`);
         if (mine && m.pending) bits.push(...outboxStatusBits(m));
         if (receipt) bits.push(receipt.expandable
           ? `<button type="button" class="th-seen" data-receipt-toggle="${esc(m.id)}" data-stop="1" aria-expanded="${expandedReceiptIds.has(m.id) ? "true" : "false"}">${esc(receipt.label)}</button>`
-          : `<span class="th-seen">${esc(receipt.label)}</span>`);
+          : `<span class="th-seen${settleReceipt}">${esc(receipt.label)}</span>`);
         const under = bits.length ? `<div class="th-under${mine ? " mine" : ""}">${bits.join("")}</div>` : "";
         const details = receipt && expandedReceiptIds.has(m.id) ? receiptDetailsHtml(receipt) : "";
         return under + details;
@@ -9339,6 +9377,17 @@
     }
     const composerSendEl = document.getElementById("thQrSend");
     if (composerSendEl) composerSendEl.disabled = chatReplySending.has(threadStateKey);
+    // The queue payload can paint the optimistic bubble before the IPC reply
+    // sets followOwnSend. The next render then has identical markup; returning
+    // early in that case left the new bubble below the viewport until another
+    // message happened to repaint the room. Following a send is a navigation
+    // obligation, not a side effect of a DOM write.
+    if (followOwnSend && !shellChanged && !rowsChanged) {
+      threadDetailFollowSendFor = null;
+      scrollRoomToNewest(chatShaped);
+      requestAnimationFrame(() => scrollRoomToNewest(chatShaped, { smooth:true }));
+      return;
+    }
     if (shellChanged || rowsChanged) {
       relayHostHoverIntent.refresh();
       // Entering a conversation always lands at the top (the newest message);
@@ -9425,9 +9474,23 @@
         const newest = (thread.msgs || [])[thread.msgs.length - 1];
         const selectedReplyTargetId = String(threadReplyTargets.get(threadStateKey) || "");
         const selectedReplyTarget = selectedReplyTargetId ? messageById.get(selectedReplyTargetId) : null;
-        const sendAnchor = selectedReplyTarget || addressAnchor || newest;
+        // An empty saved group is already an addressable room. It has no
+        // message from which to inherit an address, so the room itself is the
+        // anchor for its first send.
+        const emptyGroupAnchor = chatRoom && chatRoom.isGroup && chatRoom.groupId
+          ? {
+              threadId: chatRoom.threadId,
+              party: chatRoom.name,
+              partyKey: chatRoom.partyKey,
+              isGroup: true,
+              groupId: chatRoom.groupId,
+              groupName: chatRoom.groupName || chatRoom.name,
+            }
+          : null;
+        const sendAnchor = selectedReplyTarget || addressAnchor || newest || emptyGroupAnchor;
         const inReplyToRelayId = selectedReplyTargetId;
-        const recipient = addressAnchor && addressAnchor.addressRecipient;
+        const recipient = (addressAnchor && addressAnchor.addressRecipient)
+          || (emptyGroupAnchor ? { groupId:emptyGroupAnchor.groupId } : null);
         if (!sendAnchor || (!inReplyToRelayId && !recipient) || !window.relay.sendReply) {
           setRowNote(newest ? newest.id : thread.threadId, "This conversation cannot be replied to yet.", "err");
           return;
