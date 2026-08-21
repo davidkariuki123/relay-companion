@@ -52,19 +52,23 @@ test("a bare second instance cannot reopen the pill", () => {
 });
 
 test("the macOS menu-bar icon has a stable shipped identity", () => {
-  const guidMatch = main.match(/const RELAY_TRAY_GUID = "([^"]+)";/);
-  assert.ok(guidMatch, "missing persistent Relay tray identifier");
-  assert.match(
-    guidMatch[1],
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-    "tray identity must remain a valid UUID",
-  );
+  assert.match(main, /RELAY_TRAY_GUID,[\s\S]*?prepareMacTrayPosition,[\s\S]*?require\("\.\/tray-position\.cjs"\)/);
 
   const createTray = sliceFunction(main, "function createTray(");
+  const register = createTray.indexOf("prepareMacTrayPosition(");
+  const construct = createTray.indexOf("new Tray(icon, RELAY_TRAY_GUID)");
+  assert.ok(register >= 0, "missing first-run macOS tray position registration");
+  assert.ok(construct > register, "the position default must be registered before AppKit constructs the status item");
+  assert.match(createTray, /readMacDefaultsNumber\(domain, key, \{ execFileSync \}\)/, "migration uses the tri-state defaults adapter");
   assert.match(createTray, /process\.platform === "darwin"[\s\S]*?new Tray\(icon, RELAY_TRAY_GUID\)/);
   assert.match(createTray, /:\s*new Tray\(icon\)/, "other platforms retain their existing tray semantics");
   assert.match(createTray, /writePillStatus\(\)/, "tray creation must publish observable health state");
-  assert.match(main, /persistentId: process\.platform === "darwin" \? RELAY_TRAY_GUID : null/);
+  assert.match(main, /preferredPositionKey: process\.platform === "darwin" \? RELAY_TRAY_POSITION_KEY : null/);
+  assert.match(main, /preferredPositionDefault: process\.platform === "darwin" \? RELAY_TRAY_DEFAULT_POSITION : null/);
+  assert.match(main, /persistentId:[\s\S]*?tray\.getGUID\(\)/, "health reports the native Tray identity");
+  assert.match(main, /RELAY_BUNDLE_IDS = \[[\s\S]*?RELAY_MAC_BUNDLE_IDENTIFIER/, "the branded pill remains self-owned when its composer activates");
+  assert.match(main, /app\.on\("will-quit", preserveMacTrayPositionForExit\)/);
+  assert.match(main, /preserveMacTrayPositionForExit\(\);\s*app\.exit\(0\)/, "app.exit preserves position explicitly");
   assert.match(main, /tray: trayStatus\(\)/);
 });
 

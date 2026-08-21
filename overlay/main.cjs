@@ -102,6 +102,15 @@ const perf = require("./perf-counters.cjs");
 const { fittedOverlayBounds, shouldIgnoreOverlayMouse } = require("./window-fit.cjs");
 const { productFeatures } = require("../src/product-features.cjs");
 const { createOutbox } = require("../src/outbox.cjs");
+const {
+  RELAY_TRAY_DEFAULT_POSITION,
+  RELAY_TRAY_GUID,
+  RELAY_TRAY_POSITION_KEY,
+  destroyMacTrayPreservingPosition,
+  prepareMacTrayPosition,
+  readMacDefaultsNumber,
+} = require("./tray-position.cjs");
+const { RELAY_MAC_BUNDLE_IDENTIFIER } = require("../src/mac-app-identity.cjs");
 
 const RELAY_HOME = process.env.RELAY_HOME || process.env.RELAY_COMPANION_HOME || path.join(os.homedir(), ".relay-companion");
 const STATE_PATH = path.join(RELAY_HOME, "state.json");
@@ -111,12 +120,6 @@ const OUTBOX_PATH = path.join(RELAY_HOME, "outbox.json");
 // The companion CLI entrypoint (same path the overlay resolves its ESM modules
 // from). Spawned with ELECTRON_RUN_AS_NODE so Electron runs it as plain Node.
 const RELAY_CLI = path.resolve(__dirname, "..", "bin", "relay.js");
-// macOS keys status-item placement by this identifier. Without one, every
-// launchd restart creates an anonymous, brand-new menu-bar item and macOS is
-// free to place it elsewhere (including behind the notch on a crowded bar).
-// This value is a shipped identity: never rotate it between Relay versions.
-const RELAY_TRAY_GUID = "2aa0aef7-8c43-4644-b96d-2c5ba95a0232";
-
 // Fixed compositor canvas dimensions; the visible/hit-tested card morphs inside it.
 const WIN = { width: 760, height: 880 }; // holds the READER/split frame (720x760) the design expands into
 const PREVIEW_WIN = { width: 720, height: 760, minWidth: 480, minHeight: 480 };
@@ -170,6 +173,8 @@ function providerAuthStatuses() {
 const workFeedSubscriptions = new Map();
 const workCleanupBound = new WeakSet();
 let tray = null;
+let trayPositionPreparation = { prepared: false, reason: "not-created" };
+let trayPositionPreservedForExit = false;
 let trayAvailable = false;
 let hostRunning = false; // Claude or Codex desktop app is running (either)
 let claudeRunning = false; // Claude Desktop process is running (any macOS Space)
@@ -266,9 +271,15 @@ function trayStatus() {
   }
   return {
     available: Boolean(trayAvailable && tray && !tray.isDestroyed()),
-    // Electron does not expose a Tray GUID getter. Report the exact configured
-    // identity so install/restart diagnostics can still verify the contract.
-    persistentId: process.platform === "darwin" ? RELAY_TRAY_GUID : null,
+    // Report the configured identity even before native Tray inspection is
+    // available, so install/restart diagnostics can verify the contract.
+    persistentId: process.platform === "darwin" && tray && !tray.isDestroyed()
+      ? (() => { try { return tray.getGUID(); } catch { return null; } })()
+      : null,
+    preferredPositionKey: process.platform === "darwin" ? RELAY_TRAY_POSITION_KEY : null,
+    preferredPositionDefault: process.platform === "darwin" ? RELAY_TRAY_DEFAULT_POSITION : null,
+    positionPreparation: process.platform === "darwin" ? trayPositionPreparation : null,
+    bundleIdentifier: process.platform === "darwin" ? RELAY_MAC_BUNDLE_IDENTIFIER : null,
     bounds,
   };
 }
@@ -693,6 +704,7 @@ function relaunchPillSoon({ delayMs = 600 } = {}) {
       console.error("[overlay] relaunch failed:", error && error.message);
     }
     stopStateAckWorker();
+    preserveMacTrayPositionForExit();
     app.exit(0);
   }, delayMs);
 }
@@ -2527,6 +2539,7 @@ function rememberForegroundHost(host) {
 }
 
 const RELAY_BUNDLE_IDS = [
+  RELAY_MAC_BUNDLE_IDENTIFIER,
   "com.github.Electron",
   "com.granular.relay",
   "work.granular.relay",
@@ -6200,6 +6213,15 @@ function createTray() {
     console.error("[overlay] tray icon missing; status-area reopen unavailable");
     return;
   }
+  // AppKit fixes a status item's ordering during construction. Registering the
+  // GUID-specific fallback first puts a fresh Relay installation at the right
+  // edge of the third-party band; NSUserDefaults gives any persisted Cmd-drag
+  // position higher priority than this non-persistent registration value.
+  trayPositionPreparation = prepareMacTrayPosition({
+    platform: process.platform,
+    systemPreferences,
+    readDomainValue: (domain, key) => readMacDefaultsNumber(domain, key, { execFileSync }),
+  });
   // Supplying a stable GUID is the documented macOS mechanism for retaining a
   // status item's position between app launches. Keep other platforms on their
   // existing constructor path (Windows GUID semantics depend on code signing).
@@ -6269,6 +6291,21 @@ function createTray() {
     }
   });
 }
+
+function preserveMacTrayPositionForExit() {
+  if (trayPositionPreservedForExit) return;
+  const result = destroyMacTrayPreservingPosition({
+    platform: process.platform,
+    tray,
+    systemPreferences,
+  });
+  if (!result.preserved) return;
+  trayPositionPreservedForExit = true;
+  tray = null;
+  trayAvailable = false;
+}
+
+app.on("will-quit", preserveMacTrayPositionForExit);
 
 // ---- ipc -----------------------------------------------------------------
 

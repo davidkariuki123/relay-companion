@@ -10,6 +10,9 @@ import { fileURLToPath } from "node:url";
 
 const companionRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sourceBootstrap = createRequire(import.meta.url)(path.join(companionRoot, "bootstrap", "relay-setup.cjs"));
+const { RELAY_MAC_BUNDLE_IDENTIFIER } = createRequire(import.meta.url)(
+  path.join(companionRoot, "src", "mac-app-identity.cjs"),
+);
 const NORMALIZED_ARCHIVE_TIME = new Date("2000-01-01T00:00:00.000Z");
 
 function run(command, args, options = {}) {
@@ -65,6 +68,50 @@ export function runtimePackageJson(packageJson, dependencies) {
     main: "bin/relay.js",
     dependencies,
   };
+}
+
+export function brandMacElectronApp(electronApp, {
+  platform = process.platform,
+  runCommand = run,
+} = {}) {
+  if (platform !== "darwin") return { branded: false, reason: "not-darwin" };
+  const appPath = path.resolve(String(electronApp || ""));
+  const infoPath = path.join(appPath, "Contents", "Info.plist");
+  if (path.basename(appPath) !== "Electron.app" || !fs.existsSync(infoPath)) {
+    throw new Error(`Electron application bundle is missing: ${appPath}`);
+  }
+  for (const [key, value] of [
+    ["CFBundleIdentifier", RELAY_MAC_BUNDLE_IDENTIFIER],
+    ["CFBundleName", "Relay"],
+    ["CFBundleDisplayName", "Relay"],
+  ]) {
+    runCommand("/usr/bin/plutil", ["-replace", key, "-string", value, infoPath]);
+  }
+  // The final signed runtime archive owns these branded bytes. Re-sign the
+  // complete Electron bundle after the plist mutation and before link capture;
+  // the archive reconstructs the exact internal symlinks before verification.
+  runCommand("/usr/bin/codesign", ["--force", "--deep", "--sign", "-", appPath], { timeout: 5 * 60_000 });
+  runCommand("/usr/bin/codesign", ["--verify", "--deep", "--strict", appPath], { timeout: 5 * 60_000 });
+  const identifier = runCommand("/usr/bin/plutil", ["-extract", "CFBundleIdentifier", "raw", "-o", "-", infoPath]);
+  if (identifier !== RELAY_MAC_BUNDLE_IDENTIFIER) {
+    throw new Error(`Branded Electron bundle has unexpected identifier: ${identifier || "missing"}`);
+  }
+  return { branded: true, appPath, bundleIdentifier: identifier };
+}
+
+export function runMacTrayPositionProbe(electronPath, {
+  platform = process.platform,
+  runCommand = run,
+  env = process.env,
+} = {}) {
+  if (platform !== "darwin") return { probed: false, reason: "not-darwin" };
+  const probeEnv = { ...env };
+  delete probeEnv.ELECTRON_RUN_AS_NODE;
+  const probe = path.join(companionRoot, "test", "tray-position-native-probe.cjs");
+  for (const mode of ["first-run", "write-position", "read-position", "write-position-exit", "read-position", "destroy-preserve"]) {
+    runCommand(electronPath, [probe, mode], { cwd: companionRoot, env: probeEnv, timeout: 30_000 });
+  }
+  return { probed: true };
 }
 
 function insideRoot(root, candidate) {
@@ -323,6 +370,9 @@ export function buildRuntimeArtifact({
     );
     const electronInstall = path.join(temporary, "node_modules", "electron", "install.js");
     run(process.execPath, [electronInstall], { timeout: 15 * 60_000, env: { ...process.env } });
+    brandMacElectronApp(path.join(temporary, "node_modules", "electron", "dist", "Electron.app"), {
+      platform: process.platform,
+    });
     // Signed archives intentionally reject every link entry. Electron's macOS
     // framework layout contains a small set of internal links; record those in
     // a signed map and remove them from the tar instead of dereferencing ~500MB
@@ -346,6 +396,10 @@ export function buildRuntimeArtifact({
         path.join(smokePackageRoot, "bootstrap", "relay-setup.cjs"),
       );
       smokeBootstrap.restoreRuntimeLinks(smokeRoot);
+      runMacTrayPositionProbe(
+        path.join(smokeRoot, "node_modules", "electron", "dist", "Electron.app", "Contents", "MacOS", "Electron"),
+        { platform: process.platform },
+      );
       run(process.execPath, [path.join(companionRoot, "scripts", "verify-installed-runtime.mjs"),
         "--package-root", smokePackageRoot, "--version", packageJson.version]);
     } finally {
