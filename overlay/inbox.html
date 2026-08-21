@@ -688,7 +688,9 @@
   }
   .cv-body { display:flex; flex-direction:column; min-width:0; flex:1 1 auto; }
   .cv-name { font-size:13px; font-weight:600; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .cv-sub { font-family:var(--serif); font-size:14.5px; line-height:1.2; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; }
+  .cv-subrow { display:flex; align-items:baseline; gap:6px; min-width:0; margin-top:2px; }
+  .cv-sub { flex:0 1 auto; min-width:0; font-family:var(--serif); font-size:14.5px; line-height:1.2; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .cv-more, .cv-via { flex:0 0 auto; font-family:var(--serif); font-size:14.5px; line-height:1.2; color:var(--muted-2); white-space:nowrap; }
   .cv-meta { flex:0 0 auto; align-self:flex-start; padding-top:1px; font-size:11px; color:var(--muted-2); font-variant-numeric:tabular-nums; white-space:nowrap; }
   .cv-edit { flex:0 0 auto; color:var(--muted-2); font-size:11px; font-weight:600; opacity:0; transition:opacity var(--t-fast) var(--settle), color var(--t-fast) var(--settle); }
   .cv-item:hover .cv-edit, .cv-item:focus-visible .cv-edit { opacity:1; color:var(--ink-2); }
@@ -5144,6 +5146,33 @@
       effort: String(rt.effort || "high").toLowerCase(),
     };
   }
+  // Requests and ordinary Relay Work start on the same route-selecting
+  // composer. The document changes the verb (Start vs Send), never the
+  // available app, model, or thinking controls.
+  function idleRunDockHtml(r, { inline = false, draft = "", action = "request", label = "Start", actions = "" } = {}) {
+    const rt = routeFor(r.id);
+    const actionButton = action === "work"
+      ? `<button type="button" class="ta-approve" data-work-start="${esc(r.id)}">${esc(label)}</button>`
+      : `<button type="button" class="ta-approve" data-approve="${esc(r.id)}">${esc(label)}</button>`;
+    const railActions = actions || `<button class="ta-later" type="button" data-open-in="${esc(r.id)}">Open in ${esc(rt.app)}</button>${actionButton}`;
+    return `
+      <div class="ta-dock${inline ? " inline" : ""}" data-stop="1">
+        <div class="qr ta-qr col">
+          <textarea rows="1" class="ta-note" placeholder="Tell ${esc(rt.app)} anything…">${esc(draft)}</textarea>
+          <div class="ta-rail">
+            <div class="rt-chips">
+              <button type="button" class="rt-chip" data-route-menu="app" data-request="${esc(r.id)}"><span class="sq" style="background:${vendorSq(rt.app)}"></span>${esc(rt.app)}</button>
+              <span class="rt-dot">·</span>
+              <button type="button" class="rt-chip" data-route-menu="model" data-request="${esc(r.id)}">${esc(rt.model)}</button>
+              <span class="rt-dot">·</span>
+              <button type="button" class="rt-chip" data-route-menu="effort" data-request="${esc(r.id)}">${esc(rt.effort)}</button>
+            </div>
+            <span class="rt-spacer"></span>
+            <span class="ta-acts">${railActions}</span>
+          </div>
+        </div>
+      </div>`;
+  }
   function requestDockHtml(r, { inline = false } = {}) {
     const state = requestState(r.id);
     const draft = String(requestWorkDrafts.get(String(r.id)) || "");
@@ -5181,27 +5210,12 @@
     // destination read as a sentence (■ app · model · effort), each word a
     // chip. It replaces the old "runs in your … · change" transparency line:
     // the rail IS the transparency, and it is writable.
-    const rt = routeFor(r.id);
-    return `
-      <div class="ta-dock${inline ? " inline" : ""}" data-stop="1">
-        <div class="qr ta-qr col">
-          <textarea rows="1" class="ta-note" placeholder="Tell ${esc(rt.app)} anything…">${esc(draft)}</textarea>
-          <div class="ta-rail">
-            <div class="rt-chips">
-              <button type="button" class="rt-chip" data-route-menu="app" data-request="${esc(r.id)}"><span class="sq" style="background:${vendorSq(rt.app)}"></span>${esc(rt.app)}</button>
-              <span class="rt-dot">·</span>
-              <button type="button" class="rt-chip" data-route-menu="model" data-request="${esc(r.id)}">${esc(rt.model)}</button>
-              <span class="rt-dot">·</span>
-              <button type="button" class="rt-chip" data-route-menu="effort" data-request="${esc(r.id)}">${esc(rt.effort)}</button>
-            </div>
-            <span class="rt-spacer"></span>
-            <span class="ta-acts">
-              ${scheduleActionsHtml(r) || `<button class="ta-later" type="button" data-open-in="${esc(r.id)}">Open in ${esc(rt.app)}</button>
-              <button type="button" class="ta-approve" data-approve="${esc(r.id)}">${state === "stopped" ? "Start again" : "Start"}</button>`}
-            </span>
-          </div>
-        </div>
-      </div>`;
+    return idleRunDockHtml(r, {
+      inline,
+      draft,
+      label: state === "stopped" ? "Start again" : "Start",
+      actions: scheduleActionsHtml(r),
+    });
   }
   function relayWorkDockHtml(r, { inline = false } = {}) {
     const state = relayWorkState(r);
@@ -5231,20 +5245,7 @@
         </div>
       </div>`;
     }
-    const rt = routeFor(r.id);
-    return `
-      <div class="ta-dock${inline ? " inline" : ""}" data-stop="1">
-        <div class="qr ta-qr col">
-          <textarea rows="1" class="ta-note" placeholder="Tell ${esc(rt.app)} anything…">${esc(draft)}</textarea>
-          <div class="ta-rail">
-            <div class="rt-chips">
-              <span class="rt-chip static"><span class="sq" style="background:${vendorSq(rt.app)}"></span>${esc(rt.app)}</span>
-            </div>
-            <span class="rt-spacer"></span>
-            <button type="button" class="ta-approve" data-work-start="${esc(r.id)}">Send</button>
-          </div>
-        </div>
-      </div>`;
+    return idleRunDockHtml(r, { inline, draft, action: "work", label: "Send" });
   }
   function requestControlsHtml(r, opts) { return requestDockHtml(r, opts) || requestStatusLine(r, opts); }
   function wireRequestControls(scope, onDone) {
@@ -7410,16 +7411,19 @@
     cvListEl.innerHTML = contactsList.map((c) => {
       const emails = contactEmails(c);
       const primary = emails[0] || "";
-      // "name@x.com  +2 more · on Relay" — mirrors the website's row sub-line.
-      const more = emails.length > 1 ? ` +${emails.length - 1} more` : "";
-      const sub = (primary || "no email") + more + (c.onRelay ? " · on Relay" : "");
+      const more = emails.length > 1 ? `+${emails.length - 1} more` : "";
+      const via = primary && !c.onRelay ? "· by email" : "";
       const recent = c.updatedAt ? timeAgo(c.updatedAt) : "";
       return `
       <button class="cv-item" type="button" data-contact="${esc(contactKey(c))}">
         <span class="cv-avatar" style="--cv-h:${cvHue(c.name || primary)}">${esc(cvInitials(c.name, primary))}</span>
         <span class="cv-body">
           <span class="cv-name">${esc(c.name || primary)}</span>
-          <span class="cv-sub">${esc(sub)}</span>
+          <span class="cv-subrow">
+            <span class="cv-sub">${esc(primary || "no email")}</span>
+            ${more ? `<span class="cv-more">${esc(more)}</span>` : ""}
+            ${via ? `<span class="cv-via">${esc(via)}</span>` : ""}
+          </span>
         </span>
         <span class="cv-edit" role="button" tabindex="0" data-contact-edit="${esc(contactKey(c))}">Edit</span>
         ${recent ? `<span class="cv-meta">${esc(recent)}</span>` : ""}

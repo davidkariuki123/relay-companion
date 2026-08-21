@@ -16,7 +16,12 @@ test("People and Groups are distinct counted panes with one consistent add actio
 test("People rows use colored identity, editorial metadata, and recency without chevrons", () => {
   const render = html.slice(html.indexOf("function renderContacts()"), html.indexOf("function openContactRoom(key)"));
   assert.match(render, /style="--cv-h:\$\{cvHue\(c\.name \|\| primary\)\}"/);
+  assert.match(render, /class="cv-subrow"/);
   assert.match(render, /class="cv-sub"/);
+  assert.match(render, /class="cv-more"/);
+  assert.match(render, /class="cv-via"/);
+  assert.match(render, /!c\.onRelay \? "· by email"/);
+  assert.doesNotMatch(render, /· on Relay|On Relay/);
   assert.match(render, /const recent = c\.updatedAt \? timeAgo\(c\.updatedAt\) : ""/);
   assert.match(render, /class="cv-meta"/);
   assert.doesNotMatch(render, /cv-chev|CHEVRON_SVG/);
