@@ -64,7 +64,7 @@ public static class RelayCredential {
 Add-Type -TypeDefinition $type
 switch($env:RELAY_CREDENTIAL_ACTION) {
  'write' { $secret=[Console]::In.ReadToEnd(); [RelayCredential]::Write($env:RELAY_CREDENTIAL_TARGET,$env:RELAY_CREDENTIAL_ACCOUNT,$secret) }
- 'read' { $v=[RelayCredential]::Read($env:RELAY_CREDENTIAL_TARGET); if($null -ne $v){[Console]::Out.Write($v)} }
+ 'read' { $v=[RelayCredential]::Read($env:RELAY_CREDENTIAL_TARGET); if($null -eq $v){exit 3}; [Console]::Out.Write($v) }
  'delete' { [RelayCredential]::Delete($env:RELAY_CREDENTIAL_TARGET) }
  default { throw 'Unsupported credential action' }
 }`;

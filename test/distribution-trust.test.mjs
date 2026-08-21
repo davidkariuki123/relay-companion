@@ -625,6 +625,14 @@ test("macOS and Windows credential commands use the native OS vault", () => {
     run: () => ({ status: 0, stdout: "secret-windows" }),
   });
   assert.equal(windowsRead.value, "secret-windows");
+  const windowsMissing = credentialStore.readDeviceToken({
+    platform: "win32",
+    run: (_command, args) => {
+      assert.match(args.join(" "), /\$null -eq \$v\)\{exit 3\}/);
+      return { status: 3, stdout: "" };
+    },
+  });
+  assert.equal(windowsMissing.ok, false, "a missing Windows credential is not an empty successful secret");
   assert.equal(credentialStore.deleteDeviceToken({ platform: "win32", run: () => ({ status: 0 }) }).ok, true);
 });
 
