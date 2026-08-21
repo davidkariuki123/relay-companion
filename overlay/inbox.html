@@ -313,12 +313,54 @@
   .reader-morph-snapshot[data-reader-morph-id="threadsView"].chat-max .chat-rail { display:flex; flex-direction:column; width:182px; height:100%; min-height:0; flex:0 0 auto; border-right:1px solid var(--hair); overflow-y:auto; overflow-x:hidden; padding-top:4px; overflow-anchor:none; }
   .reader-morph-snapshot[data-reader-morph-id="threadsView"].chat-max [data-reader-morph-id="thDetail"] { flex:1 1 auto; min-width:0; height:100%; margin:0; max-width:none; overflow-y:auto; }
   .scroll.reader-morph:not(.reader-morph-go) .reader-morph-destination { opacity:0; }
-  .scroll.reader-morph.reader-morph-go .reader-morph-snapshot {
+  .scroll.reader-morph.reader-morph-go:not(.reader-morph-push) .reader-morph-snapshot {
     animation:readerSourceOut .18s var(--settle) both;
   }
-  .scroll.reader-morph.reader-morph-go .reader-morph-destination {
+  .scroll.reader-morph.reader-morph-go:not(.reader-morph-push) .reader-morph-destination {
     transform-origin:center top;
     animation:readerDestinationIn .28s var(--soft) .035s both;
+  }
+  /* A room is spatial navigation, not a dissolve. Keep the application chrome
+     still and move one opaque content face at a time, using the same direction
+     on entry and its exact inverse on Back. The trailing face travels farther;
+     the covered face only recedes a little, which gives the quiet depth cue of
+     Apple's navigation stacks without scaling text or showing two readable
+     conversations on top of each other. */
+  @keyframes roomForwardSourceOut {
+    from { transform:translate3d(0,0,0); }
+    to { transform:translate3d(-24%,0,0); }
+  }
+  @keyframes roomForwardDestinationIn {
+    from { transform:translate3d(100%,0,0); }
+    to { transform:translate3d(0,0,0); }
+  }
+  @keyframes roomBackSourceOut {
+    from { transform:translate3d(0,0,0); }
+    to { transform:translate3d(100%,0,0); }
+  }
+  @keyframes roomBackDestinationIn {
+    from { transform:translate3d(-24%,0,0); }
+    to { transform:translate3d(0,0,0); }
+  }
+  .scroll.reader-morph-push .reader-morph-snapshot,
+  .scroll.reader-morph-push .reader-morph-destination {
+    min-height:100%; background:var(--bg); will-change:transform;
+  }
+  .scroll.reader-morph-push:not(.reader-morph-back) .reader-morph-snapshot { z-index:4; }
+  .scroll.reader-morph-push:not(.reader-morph-back) .reader-morph-destination { position:relative; z-index:5; }
+  .scroll.reader-morph-push.reader-morph-back .reader-morph-snapshot { z-index:5; }
+  .scroll.reader-morph-push.reader-morph-back .reader-morph-destination { position:relative; z-index:4; }
+  .scroll.reader-morph-push.reader-morph-go:not(.reader-morph-back) .reader-morph-snapshot {
+    animation:roomForwardSourceOut .36s cubic-bezier(.32,.72,0,1) both;
+  }
+  .scroll.reader-morph-push.reader-morph-go:not(.reader-morph-back) .reader-morph-destination {
+    animation:roomForwardDestinationIn .36s cubic-bezier(.32,.72,0,1) both;
+  }
+  .scroll.reader-morph-push.reader-morph-go.reader-morph-back .reader-morph-snapshot {
+    animation:roomBackSourceOut .36s cubic-bezier(.32,.72,0,1) both;
+  }
+  .scroll.reader-morph-push.reader-morph-go.reader-morph-back .reader-morph-destination {
+    animation:roomBackDestinationIn .36s cubic-bezier(.32,.72,0,1) both;
   }
   @media (prefers-reduced-motion:reduce) {
     .reader-morph-snapshot { display:none; }
@@ -2580,6 +2622,7 @@
   let readerMorphInFlight = false;
   let readerMorphSnapshot = null;
   let readerMorphDestination = null;
+  let readerMorphMotion = "morph";
   let readerMorphRaf = null;
   let readerMorphTimer = null;
   let readerMorphDeferredPayload = null;
@@ -2597,7 +2640,8 @@
       readerMorphDestination.classList.remove("reader-morph-destination");
       readerMorphDestination = null;
     }
-    scrollEl.classList.remove("reader-morph", "reader-morph-go");
+    scrollEl.classList.remove("reader-morph", "reader-morph-go", "reader-morph-push", "reader-morph-back");
+    readerMorphMotion = "morph";
     readerMorphInFlight = false;
     // State can change while the two frozen faces are moving (most commonly
     // the first-open read receipt). Reconcile only the newest payload after the
@@ -2607,7 +2651,7 @@
     readerMorphDeferredPayload = null;
     if (deferredPayload) queueMicrotask(() => onPayload(deferredPayload));
   }
-  function prepareReaderMorph(sourceView) {
+  function prepareReaderMorph(sourceView, { motion = "morph" } = {}) {
     cleanReaderMorph();
     if (REDUCED || collapsed || peeking || ghost) return false;
     const source = {
@@ -2648,15 +2692,25 @@
       if (live.scrollTop) frozen.scrollTop = live.scrollTop;
       if (live.scrollLeft) frozen.scrollLeft = live.scrollLeft;
     }
+    readerMorphMotion = motion === "forward" || motion === "back" ? motion : "morph";
     scrollEl.classList.add("reader-morph");
+    scrollEl.classList.toggle("reader-morph-push", readerMorphMotion !== "morph");
+    scrollEl.classList.toggle("reader-morph-back", readerMorphMotion === "back");
     readerMorphSnapshot = snapshot;
     readerMorphInFlight = true;
     return true;
   }
   function startReaderMorph(destinationView = "reader") {
-    readerMorphDestination = destinationView === "reader" ? readerViewEl
-      : destinationView === "threads" ? threadsViewEl
-      : null;
+    readerMorphDestination = {
+      relays: relaysViewEl,
+      chat: chatViewEl,
+      threads: threadsViewEl,
+      sent: sentViewEl,
+      requests: requestsViewEl,
+      reader: readerViewEl,
+      contacts: contactsViewEl,
+      settings: settingsViewEl,
+    }[destinationView] || null;
     if (!readerMorphSnapshot || !readerMorphDestination || activeView !== destinationView) {
       cleanReaderMorph();
       return;
@@ -2672,13 +2726,15 @@
       // the source face was frozen. Current main keeps a fixed maximum canvas,
       // so the await resolves immediately and remains backward-compatible.
       if (window.relay.prepareCardSize) {
-        const destinationSize = destinationView === "threads" && !chatExpanded ? EXPANDED : READER;
+        const destinationSize = destinationView === "reader" || (destinationView === "threads" && chatExpanded)
+          ? READER
+          : EXPANDED;
         try { await window.relay.prepareCardSize(destinationSize.w, destinationSize.h); } catch {}
       }
       if (!readerMorphSnapshot || activeView !== destinationView) { cleanReaderMorph(); return; }
       scrollEl.classList.add("reader-morph-go");
       readerMorphInFlight = false;
-      syncCardSize(destinationView === "threads" ? chatExpanded : true);
+      syncCardSize(destinationView === "reader" || (destinationView === "threads" && chatExpanded));
       // Frozen/background frames do not reliably dispatch animationend. The
       // settled DOM is still deterministic when the app becomes active again.
       readerMorphTimer = setTimeout(cleanReaderMorph, 480);
@@ -3604,7 +3660,7 @@
       for (const el of relaysListEl.querySelectorAll(".relay-arrival")) {
         el.addEventListener("click", () => {
           openFull(); // a banner tap brings the real pill up first
-          const morphFromList = prepareReaderMorph(activeView);
+          const morphFromList = prepareReaderMorph(activeView, { motion:"forward" });
           openThreadDetail(el.getAttribute("data-thread"), el.getAttribute("data-party") || "", "relays");
           if (morphFromList) startReaderMorph("threads");
         });
@@ -3631,7 +3687,7 @@
     for (const el of relaysListEl.querySelectorAll(".relay-arrival")) {
       el.addEventListener("click", () => {
         // One tap, straight into the conversation (Sven's standing call).
-        const morphFromList = prepareReaderMorph(activeView);
+        const morphFromList = prepareReaderMorph(activeView, { motion:"forward" });
         openThreadDetail(el.getAttribute("data-thread"), el.getAttribute("data-party") || "");
         if (morphFromList) startReaderMorph("threads");
       });
@@ -9739,6 +9795,10 @@
   });
   thBackEl.addEventListener("click", () => {
     if (!groupInfoBackdropEl.classList.contains("hidden")) closeGroupInfo();
+    // Compact rooms are a same-frame navigation stack and reverse their push.
+    // Expanded rooms are also shrinking the card, so they keep the quieter
+    // resize morph instead of combining a full-width swipe with frame motion.
+    const morphBackToList = prepareReaderMorph("threads", { motion:chatExpanded ? "morph" : "back" });
     threadDetailId = null;
     threadDetailScrolledFor = null;
     chatExpanded = false;
@@ -9751,6 +9811,7 @@
       : activeView === "contacts" ? contactsListScrollTop
       : relaysListScrollTop;
     commitNavigation({ outerScrollTop: returnTop });
+    if (morphBackToList) startReaderMorph(activeView);
   });
   let threadsSource = "chat"; // which tab the open conversation belongs to (the reader's readerSource law)
   let threadsCameFrom = "relays"; // where it was born — that tab also re-homes instead of navigating

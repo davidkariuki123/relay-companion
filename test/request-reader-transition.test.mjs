@@ -48,7 +48,7 @@ test("the fixed native canvas barrier resolves before visible reader motion begi
   const start = between(html, "function startReaderMorph", "let peeking");
   const prepareAt = start.indexOf("await window.relay.prepareCardSize(destinationSize.w, destinationSize.h)");
   const revealAt = start.indexOf('classList.add("reader-morph-go")');
-  const springAt = start.indexOf('syncCardSize(destinationView === "threads" ? chatExpanded : true)');
+  const springAt = start.indexOf('syncCardSize(destinationView === "reader" || (destinationView === "threads" && chatExpanded))');
   assert.ok(prepareAt >= 0 && prepareAt < revealAt && revealAt < springAt);
   assert.match(preload, /prepareCardSize: \(w, h\) => ipcRenderer\.invoke\("relay:prepareCardSize", w, h\)/);
   assert.match(main, /ipcMain\.handle\("relay:prepareCardSize"/);
