@@ -94,7 +94,10 @@ test("the branded runtime probe covers first run, quit, app.exit, and relaunch",
     "read-position",
     "write-position-exit",
     "read-position",
+    "write-position-signal",
+    "read-position",
     "destroy-preserve",
+    "cleanup",
   ]);
   assert.ok(calls.every(({ command }) => command === "/runtime/Relay"));
   assert.ok(calls.every(({ options }) => options.env.ELECTRON_RUN_AS_NODE === undefined));
