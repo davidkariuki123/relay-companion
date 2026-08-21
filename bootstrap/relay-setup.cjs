@@ -16,6 +16,12 @@ const { exactRuntimeHealth } = require("./runtime-health.cjs");
 const RELEASE_ORIGIN = "https://api.sendrelays.com";
 const RELEASE_BASE_PATH = "/v1/companion-releases";
 const PACKAGE_NAME = "relay-companion";
+const WINDOWS_RELAY_TASKS = ["Relay Companion Pill", "Relay Companion Daemon"];
+const WINDOWS_STOP_RELAY_SERVICES_PS = [
+  "$p=Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {",
+  "  $_.CommandLine -and (($_.CommandLine -match '[\\\\/]relay\\.js.*\\bdaemon\\b') -or ($_.CommandLine -match '[\\\\/]overlay[\\\\/]main\\.cjs'))",
+  "}; foreach($x in $p){ try { Invoke-CimMethod -InputObject $x -MethodName Terminate -ErrorAction Stop | Out-Null } catch {} }",
+].join(" ");
 const packageJson = require("../package.json");
 const trust = require("./trust.json");
 const { RELEASE_ALGORITHM, verifyReleaseEnvelope } = require("./release-signature.cjs");
@@ -521,7 +527,28 @@ async function waitForRuntimeHealth(runtime, {
   return health || { ok: false, daemon: false, pill: false };
 }
 
+// Scheduled Tasks launch through wscript and return before their real children.
+// Ending the task can therefore leave the old daemon/pill alive, where they win
+// the singleton race and make exact-root health reject an otherwise valid runtime.
+function stopPreviousWindowsRuntime({ platform = process.platform, spawnImpl = spawnSync } = {}) {
+  if (platform !== "win32") return { ok: true, attempted: false, detail: "" };
+  for (const task of WINDOWS_RELAY_TASKS) {
+    spawnImpl("schtasks.exe", ["/End", "/TN", task], { stdio: "ignore", windowsHide: true });
+  }
+  const stopped = spawnImpl(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_STOP_RELAY_SERVICES_PS],
+    { encoding: "utf8", windowsHide: true },
+  );
+  return {
+    ok: Boolean(stopped && !stopped.error && stopped.status === 0),
+    attempted: true,
+    detail: stopped?.error?.message || String(stopped?.stderr || stopped?.stdout || "").trim(),
+  };
+}
+
 async function activateRuntime(layout, runtime, version, {
+  platform = process.platform,
   spawnImpl = spawnSync,
   existsSync = fs.existsSync,
   readFileSync = fs.readFileSync,
@@ -601,6 +628,13 @@ async function activateRuntime(layout, runtime, version, {
     }
     if (previous?.active === true) writePointer(layout.pointerPath, previous);
     else removePointer(layout.pointerPath);
+  }
+
+  const stopped = stopPreviousWindowsRuntime({ platform, spawnImpl });
+  if (!stopped.ok) {
+    const message = `Relay runtime activation could not stop the previous desktop services${stopped.detail ? ` (${stopped.detail})` : ""}.`;
+    rollback(message);
+    fail(message);
   }
 
   const result = spawnImpl(process.execPath, [runtime.bin, "setup", "--no-trampoline", "--claim"], {

@@ -764,7 +764,7 @@ test("bootstrap writes the active pointer only after setup and exact-root health
       { pointerPath, releaseId: "next", releaseRoot: path.dirname(path.dirname(nextBin)) },
       { bin: nextBin, packageRoot: path.dirname(path.dirname(nextBin)) },
       version,
-      { spawnImpl: (_command, args) => {
+      { platform: "darwin", spawnImpl: (_command, args) => {
         calls.push(args);
         if (calls.length === 1) {
           const journal = JSON.parse(fs.readFileSync(pointerPath, "utf8"));
@@ -782,7 +782,7 @@ test("bootstrap writes the active pointer only after setup and exact-root health
       { pointerPath, releaseId: "next", releaseRoot: path.dirname(path.dirname(nextBin)) },
       { bin: nextBin, packageRoot: path.dirname(path.dirname(nextBin)) },
       version,
-      { spawnImpl: () => ({ status: 0 }), healthCheck: () => ({ ok: true }) },
+      { platform: "darwin", spawnImpl: () => ({ status: 0 }), healthCheck: () => ({ ok: true }) },
     );
     assert.equal(JSON.parse(fs.readFileSync(pointerPath, "utf8")).version, version);
   } finally {
@@ -805,7 +805,7 @@ test("bootstrap leaves a recovery journal when both activation and prior-runtime
       { pointerPath, releaseId: "next", releaseRoot: path.dirname(path.dirname(nextBin)) },
       { bin: nextBin, packageRoot: path.dirname(path.dirname(nextBin)) },
       version,
-      { spawnImpl: () => ({ status: 1 }), healthCheck: () => ({ ok: true }) },
+      { platform: "darwin", spawnImpl: () => ({ status: 1 }), healthCheck: () => ({ ok: true }) },
     ), /Rollback failed/);
     const journal = JSON.parse(fs.readFileSync(pointerPath, "utf8"));
     assert.equal(journal.active, false);
@@ -834,6 +834,7 @@ test("bootstrap rolls back when registered services never become healthy", async
       { bin: nextBin, packageRoot: nextPackageRoot },
       version,
       {
+        platform: "darwin",
         spawnImpl: (_command, args) => { calls.push(args); return { status: 0 }; },
         healthCheck: () => ({ ok: false, daemon: true, pill: false }),
         healthAttempts: 2,
@@ -843,6 +844,77 @@ test("bootstrap rolls back when registered services never become healthy", async
     ), /pill did not start/);
     assert.equal(JSON.parse(fs.readFileSync(pointerPath, "utf8")).version, "1.2.2");
     assert.ok(calls.some((args) => args.includes("repair-runtime")), "failed health restores the prior runtime");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("bootstrap stops Windows Relay grandchildren before candidate setup", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-bootstrap-windows-handoff-"));
+  try {
+    const nextPackageRoot = path.join(root, "next", "node_modules", "relay-companion");
+    const nextBin = path.join(nextPackageRoot, "bin", "relay.js");
+    const pointerPath = path.join(root, "current.json");
+    fs.mkdirSync(path.dirname(nextBin), { recursive: true });
+    fs.writeFileSync(nextBin, "// next");
+    const calls = [];
+    await activateRuntime(
+      { pointerPath, releaseId: "next", releaseRoot: path.dirname(path.dirname(nextPackageRoot)) },
+      { bin: nextBin, packageRoot: nextPackageRoot },
+      version,
+      {
+        platform: "win32",
+        spawnImpl: (command, args) => {
+          calls.push({ command, args });
+          return { status: 0, stdout: "", stderr: "" };
+        },
+        healthCheck: () => ({ ok: true }),
+      },
+    );
+    assert.deepEqual(calls.slice(0, 2).map(({ command, args }) => [command, ...args]), [
+      ["schtasks.exe", "/End", "/TN", "Relay Companion Pill"],
+      ["schtasks.exe", "/End", "/TN", "Relay Companion Daemon"],
+    ]);
+    assert.equal(calls[2].command, "powershell.exe");
+    assert.match(calls[2].args.join(" "), /relay\\\.js.*daemon/);
+    assert.match(calls[2].args.join(" "), /overlay.*main\\\.cjs/);
+    assert.equal(calls[3].command, process.execPath, "candidate setup starts only after the old grandchildren are swept");
+    assert.equal(calls[3].args[0], nextBin);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("bootstrap restores the prior runtime when the Windows service sweep fails", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-bootstrap-windows-stop-failure-"));
+  try {
+    const oldBin = path.join(root, "old", "relay.js");
+    const nextPackageRoot = path.join(root, "next", "node_modules", "relay-companion");
+    const nextBin = path.join(nextPackageRoot, "bin", "relay.js");
+    const pointerPath = path.join(root, "current.json");
+    fs.mkdirSync(path.dirname(oldBin), { recursive: true });
+    fs.mkdirSync(path.dirname(nextBin), { recursive: true });
+    fs.writeFileSync(oldBin, "// old");
+    fs.writeFileSync(nextBin, "// next");
+    fs.writeFileSync(pointerPath, JSON.stringify({ schema: 1, active: true, state: "active", version: "1.2.2", bin: oldBin }));
+    const calls = [];
+    await assert.rejects(() => activateRuntime(
+      { pointerPath, releaseId: "next", releaseRoot: path.dirname(path.dirname(nextPackageRoot)) },
+      { bin: nextBin, packageRoot: nextPackageRoot },
+      version,
+      {
+        platform: "win32",
+        spawnImpl: (command, args) => {
+          calls.push({ command, args });
+          if (command === "powershell.exe") return { status: 1, stderr: "service sweep failed" };
+          return { status: 0, stdout: "", stderr: "" };
+        },
+        healthCheck: () => ({ ok: true }),
+      },
+    ), /could not stop the previous desktop services/);
+    assert.equal(JSON.parse(fs.readFileSync(pointerPath, "utf8")).version, "1.2.2");
+    assert.ok(calls.some(({ args }) => args.includes("repair-runtime")), "failed service cleanup restores the prior runtime");
+    assert.equal(calls.some(({ args }) => args.includes("setup")), false, "candidate setup never starts after an incomplete handoff");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
