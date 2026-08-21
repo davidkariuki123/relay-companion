@@ -151,9 +151,8 @@ test("the reply composer starts disabled and only arms once there is something t
   assert.match(replyButton, /\sdisabled(?:\s|>)/, "ships disabled, so a dead bridge cannot look live");
   assert.match(replyButton, /aria-disabled="true"/);
 
-  // Arming is conditional on BOTH a reply target and typed text — never on
-  // typing alone, which would offer to send a reply with nowhere to go.
-  assert.match(previewRenderer, /const ready = hasTarget && !sending && Boolean\(replyInputEl\.value\.trim\(\)\)/);
+  // Arming is conditional on a target and either words or staged files.
+  assert.match(previewRenderer, /const ready = hasTarget && !sending && Boolean\(replyInputEl\.value\.trim\(\) \|\| stagedReplyFiles\.length\)/);
   assert.match(previewRenderer, /replyButtonEl\.disabled = !ready/);
   // Enter sends, Shift+Enter keeps writing.
   assert.match(previewRenderer, /if \(event\.key !== "Enter" \|\| event\.shiftKey \|\| event\.isComposing\) return/);
@@ -164,7 +163,7 @@ test("a reply names no recipient: the server addresses it from the message it an
   // which message this is (for idempotency) — never WHO receives it.
   assert.match(
     previewPreloadSource,
-    /sendReply: \(inReplyToRelayId, body, idempotencyKey\) =>[\s\S]*?inReplyToRelayId: String\(inReplyToRelayId \|\| ""\),[\s\S]*?body: String\(body \|\| ""\),/,
+    /sendReply: \(inReplyToRelayId, body, idempotencyKey, files = \[\]\) =>[\s\S]*?inReplyToRelayId: String\(inReplyToRelayId \|\| ""\),[\s\S]*?body: String\(body \|\| ""\),/,
   );
   const send = between(main, "async function sendPreviewReply", "function installActiveSpaceWatcher");
   // A reply names nobody: the server addresses it from the message it answers,
@@ -181,9 +180,9 @@ test("a retried reply reuses its idempotency key, so a lost response cannot doub
   // The key identifies the MESSAGE, not the attempt: it is minted once when the
   // person hits send and threaded back through retry unchanged.
   assert.match(previewRenderer, /function newIdempotencyKey\(\)/);
-  assert.match(previewRenderer, /await deliver\(body, targetId, newIdempotencyKey\(\)\)/);
-  assert.match(previewRenderer, /deliver\(entry\.body, entry\.inReplyToRelayId, entry\.idempotencyKey\)/);
-  assert.match(previewRenderer, /bridge\.sendReply\(targetId, body, entry\.idempotencyKey\)/);
+  assert.match(previewRenderer, /await deliver\(body, targetId, newIdempotencyKey\(\), payload\.files, payload\.attachments\)/);
+  assert.match(previewRenderer, /deliver\(entry\.body, entry\.inReplyToRelayId, entry\.idempotencyKey, entry\.files, entry\.attachments\)/);
+  assert.match(previewRenderer, /bridge\.sendReply\(targetId, body, entry\.idempotencyKey, entry\.files\)/);
   // Main honours the renderer's key rather than minting a fresh one per attempt.
   const send = between(main, "async function sendPreviewReply", "function installActiveSpaceWatcher");
   assert.match(send, /const idempotencyKey = String\(\(input && input\.idempotencyKey\) \|\| ""\) \|\|/);

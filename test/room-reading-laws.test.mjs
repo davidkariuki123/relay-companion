@@ -182,15 +182,11 @@ test("the open rows are the apps you chose — one, or both — on the bubble an
   assert.match(reader, /<button type="button" id="qrSend">Send<\/button>/);
 });
 
-test("composer attachments are dark behind a reversible gate", () => {
-  // Sven, 2026-08-16: "i think we should disable the attachments button for
-  // now. i dont think it is necessary." Same shape as REACTIONS_ENABLED: the
-  // + button, picker and paste-to-stage never mount while the flag is false;
-  // the staging store, chips and send pipeline stay implemented so flipping
-  // one constant restores it all.
-  assert.match(html, /const COMPOSER_ATTACHMENTS_ENABLED = false;/);
+test("composer attachments are enabled across picker, paste, and drop", () => {
+  assert.match(html, /const COMPOSER_ATTACHMENTS_ENABLED = true;/);
   assert.match(html, /if \(COMPOSER_ATTACHMENTS_ENABLED && qr && !qr\.querySelector\("\.cmp-plus"\)\)/);
-  assert.match(html, /if \(COMPOSER_ATTACHMENTS_ENABLED\) field\.addEventListener\("paste"/);
+  assert.match(html, /field\.addEventListener\("paste"/);
+  assert.match(html, /field\.addEventListener\("drop"/);
 });
 
 test('every element that toggles "hidden" has CSS that actually hides it', () => {

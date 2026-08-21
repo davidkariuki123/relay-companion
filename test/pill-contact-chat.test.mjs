@@ -247,7 +247,7 @@ test("an empty room can be written to: the first message is what starts it", () 
   // With nothing to answer there is no reply target, and the composer would sit
   // disabled in a room whose whole point is to be written in.
   assert.match(previewRenderer, /const hasTarget = Boolean\(replyTargetId\(\)\) \|\| chatOnly;/);
-  assert.match(previewRenderer, /if \(!body \|\| \(!targetId && !chatOnly\)\) return;/);
+  assert.match(previewRenderer, /if \(\(!body && !stagedReplyFiles\.length\) \|\| \(!targetId && !chatOnly\)\) return;/);
   // And it says so, pointing at the composer rather than reporting emptiness.
   assert.match(previewRenderer, /chatOnly \? "No messages yet\. Write the first one below\." : "No messages in this conversation yet\."/);
   // The name on the composer is the one the reader knows this person by.

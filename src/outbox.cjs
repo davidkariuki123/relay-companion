@@ -200,26 +200,30 @@ function createOutbox({
   function spoolFiles(id, files) {
     const staged = [];
     const dir = entryDir(id);
-    files.forEach((f, index) => {
-      if (!f) return;
-      const name = safeName(f.name);
-      const target = path.join(dir, `${index}-${name}`);
-      try {
+    try {
+      files.forEach((f, index) => {
+        if (!f) throw new Error(`attachment ${index + 1} is missing`);
+        const name = safeName(f.name);
+        const target = path.join(dir, `${index}-${name}`);
         fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
         if (f.path) fs.copyFileSync(String(f.path), target);
         else if (f.contentBase64) fs.writeFileSync(target, Buffer.from(String(f.contentBase64), "base64"), { mode: 0o600 });
-        else return;
+        else throw new Error(`${name} has no readable bytes`);
         staged.push({
           name: f.name || name,
           size: Number(f.size || 0) || fs.statSync(target).size,
           ...(f.contentType ? { contentType: String(f.contentType) } : {}),
           spoolPath: target,
         });
-      } catch (error) {
-        log(`outbox could not spool ${name}`, error);
-      }
-    });
-    return staged;
+      });
+      return staged;
+    } catch (error) {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+      const failed = files[staged.length];
+      const name = safeName(failed && failed.name);
+      log(`outbox could not spool ${name}`, error);
+      throw new Error(`Could not attach ${name}: ${(error && error.message) || String(error)}`);
+    }
   }
 
   function releaseFiles(entry) {

@@ -27,7 +27,7 @@ import WebSocket from "ws";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkgRoot = process.env.RELAY_PKG_ROOT || path.join(__dirname, "..");
-const electronBin = [path.join(pkgRoot, "node_modules", "electron", "dist", "Electron.app", "Contents", "MacOS", "Electron"), path.join(pkgRoot, "..", "..", "node_modules", "electron", "dist", "Electron.app", "Contents", "MacOS", "Electron")].find((p) => fs.existsSync(p)) || "";
+const electronBin = [process.env.PROBE_ELECTRON_BIN, path.join(pkgRoot, "node_modules", "electron", "dist", "Electron.app", "Contents", "MacOS", "Electron"), path.join(pkgRoot, "..", "..", "node_modules", "electron", "dist", "Electron.app", "Contents", "MacOS", "Electron")].find((p) => p && fs.existsSync(p)) || "";
 if (!electronBin) { console.error("no electron at", electronBin); process.exit(1); }
 
 const CDP_PORT = Number(process.env.PROBE_CDP_PORT) || 9412;
@@ -36,6 +36,11 @@ const relayHome = path.join(sandbox, "home");
 const userData = path.join(sandbox, "userdata");
 fs.mkdirSync(relayHome, { recursive: true });
 fs.mkdirSync(userData, { recursive: true });
+const sampleDir = path.join(sandbox, "attachment-samples");
+fs.mkdirSync(sampleDir, { recursive: true });
+fs.writeFileSync(path.join(sampleDir, "probe-image.png"), Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"));
+fs.writeFileSync(path.join(sampleDir, "probe-video.mp4"), "Relay video attachment probe\n");
+fs.writeFileSync(path.join(sampleDir, "probe-notes.txt"), "Relay generic file attachment probe\n");
 
 // ---- stub API: accept the send, return a relay id ----
 const seen = [];
@@ -137,6 +142,7 @@ async function ev(expr, awaitPromise = false) {
 
 const result = { label: process.env.PROBE_LABEL || "run" };
 try {
+  probe: {
   const target = await retry(async () => {
     const list = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`)).json();
     const p = list.find((t) => t.type === "page" && String(t.url).includes("inbox.html"));
@@ -161,6 +167,33 @@ try {
     if (!ok) throw new Error("no conversation row yet");
   }, { label: "conversation row" });
   await retry(async () => { if (!(await ev('Boolean(document.getElementById("thQrInput"))'))) throw new Error("no composer"); }, { label: "composer" });
+
+  // Manual Computer Use mode leaves the real Electron room open so a person or
+  // desktop-driving test can copy files in Finder, paste them into the composer,
+  // inspect the chips, and press Send. The same stub API then proves that the
+  // visible interaction crossed every renderer/preload/main/transport boundary.
+  if (process.env.PROBE_MANUAL_ATTACHMENTS === "1") {
+    result.manualAttachments = true;
+    result.sampleDir = sampleDir;
+    console.log(JSON.stringify({ ready: true, sampleDir, electronApp: path.dirname(path.dirname(path.dirname(electronBin))) }));
+    await retry(async () => {
+      if (!seen.some((request) => request.method === "POST" && request.url === "/v1/relays")) throw new Error("no attachment send yet");
+      return true;
+    }, { tries: 1200, delayMs: 500, label: "Computer Use attachment send" });
+    const sends = seen.filter((request) => request.method === "POST" && request.url === "/v1/relays");
+    result.apiSends = sends.length;
+    result.sentBody = JSON.parse(sends.at(-1).body);
+    result.sentAttachments = (result.sentBody.attachments || []).map((file) => ({
+      name: file.name,
+      contentType: file.contentType,
+      bytes: file.bytes,
+      hasContent: typeof file.contentBase64 === "string" && file.contentBase64.length > 0,
+    }));
+    const shot = await page.send("Page.captureScreenshot", { format: "png" });
+    fs.writeFileSync(process.env.PROBE_SHOT || path.join(sandbox, "attachments-sent.png"), Buffer.from(shot.data, "base64"));
+    result.screenshot = process.env.PROBE_SHOT || path.join(sandbox, "attachments-sent.png");
+    break probe;
+  }
 
   // Type like a person: focus, set text, fire input.
   await ev(`(() => {
@@ -216,11 +249,19 @@ try {
     return true;
   })()`);
   result.secondMessageTypedWithoutClicking = await ev('(() => { const b=document.getElementById("thQrInput"); return b ? b.value : null; })()') === "second message";
+  }
 } catch (e) {
   result.error = e.message;
   result.log = log.slice(-2000);
 } finally {
-  const laws = result.error ? [] : [
+  const laws = result.error ? [] : result.manualAttachments ? [
+    ["one Computer Use send reaches the API", result.apiSends === 1],
+    ["image, video, and generic file all arrive", result.sentAttachments?.length === 3],
+    ["every attachment carries bytes", result.sentAttachments?.every((file) => file.hasContent)],
+    ["the image keeps image/png", result.sentAttachments?.some((file) => file.name === "probe-image.png" && file.contentType === "image/png")],
+    ["the video keeps video/mp4", result.sentAttachments?.some((file) => file.name === "probe-video.mp4" && file.contentType === "video/mp4")],
+    ["the generic file keeps text/plain", result.sentAttachments?.some((file) => file.name === "probe-notes.txt" && file.contentType === "text/plain")],
+  ] : [
     ["the caret stays in the composer after a send", result.focusedAfterSend === "thQrInput"],
     ["the composer node is never replaced", result.composerSurvived === true],
     ["the sent message empties the field", result.composerValueAfterSend === ""],

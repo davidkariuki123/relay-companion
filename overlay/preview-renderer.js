@@ -16,6 +16,9 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
   const detailScrollEl = document.getElementById("detailScroll");
   const replyInputEl = document.getElementById("replyInput");
   const replyButtonEl = document.getElementById("replyButton");
+  const replyAttachButtonEl = document.getElementById("replyAttachButton");
+  const replyFilePickerEl = document.getElementById("replyFilePicker");
+  const replyFilesEl = document.getElementById("replyFiles");
   const replyNoteEl = document.getElementById("replyNote");
   const minimizeButtonEl = document.getElementById("minimizeButton");
   const closeButtonEl = document.getElementById("closeButton");
@@ -50,6 +53,7 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
   const RUN_GAP_MS = 5 * 60 * 1000;
   const CLAMP_HEIGHT = 190;
   const DEFAULT_NOTE = "Press Enter to send, Shift + Enter for a new line.";
+  const MAX_REPLY_FILES = 20;
 
   let renderRevision = 0;
   let chatRevision = 0;
@@ -69,6 +73,7 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
   let sending = false;
   /** Replies shown before the server has confirmed them. */
   let outgoing = [];
+  let stagedReplyFiles = [];
   /** Relay ids whose bubble the reader has opened in place. */
   const expanded = new Set();
   /** Relay ids whose per-person group receipt roster is visible. */
@@ -189,6 +194,75 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
     )}px`;
   }
 
+  function clipboardFiles(event) {
+    const clipboard = event && event.clipboardData;
+    const files = [...(clipboard?.files || [])].filter(Boolean);
+    if (files.length) return files;
+    return [...(clipboard?.items || [])]
+      .filter((item) => item && item.kind === "file" && typeof item.getAsFile === "function")
+      .map((item) => item.getAsFile())
+      .filter(Boolean);
+  }
+
+  function paintReplyFiles() {
+    replyFilesEl.replaceChildren();
+    replyFilesEl.classList.toggle("gone", !stagedReplyFiles.length);
+    stagedReplyFiles.forEach((file, index) => {
+      const chip = document.createElement("span");
+      chip.className = "reply-file";
+      const name = document.createElement("span");
+      name.className = "reply-file-name";
+      name.textContent = file.name || `pasted-${index + 1}`;
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "reply-file-remove";
+      remove.setAttribute("aria-label", `Remove ${name.textContent}`);
+      remove.textContent = "×";
+      remove.addEventListener("click", () => {
+        stagedReplyFiles.splice(index, 1);
+        paintReplyFiles();
+        refreshComposer();
+      });
+      chip.append(name, remove);
+      replyFilesEl.appendChild(chip);
+    });
+  }
+
+  function stageReplyFiles(list) {
+    for (const file of [...(list || [])].filter(Boolean)) {
+      if (stagedReplyFiles.length >= MAX_REPLY_FILES) break;
+      stagedReplyFiles.push(file);
+    }
+    paintReplyFiles();
+    refreshComposer();
+  }
+
+  async function replyFilePayloads(staged) {
+    const files = [];
+    const attachments = [];
+    for (let index = 0; index < staged.length; index += 1) {
+      const file = staged[index];
+      const name = String(file?.name || `pasted-${index + 1}`);
+      const size = Number(file?.size || 0);
+      const contentType = String(file?.type || "application/octet-stream");
+      const osPath = bridge.pathForFile ? bridge.pathForFile(file) : "";
+      if (osPath) {
+        files.push({ name, size, contentType, path: osPath });
+      } else if (file?.arrayBuffer) {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        let binary = "";
+        for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+          binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+        }
+        files.push({ name, size, contentType, contentBase64: btoa(binary) });
+      } else {
+        throw new Error(`${name} could not be read`);
+      }
+      attachments.push({ name, contentType, bytes: size });
+    }
+    return { files, attachments };
+  }
+
   // --- The conversation affordance -------------------------------------------
 
   /**
@@ -225,6 +299,9 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
   }
 
   function refreshComposer() {
+    const humanComposer = !taskMode && !(sessionMode && face !== "chat");
+    replyAttachButtonEl.classList.toggle("gone", !humanComposer);
+    replyAttachButtonEl.disabled = sending || !humanComposer;
     if (taskMode) {
       // The ignition: the note is optional, so Start is ready whenever a start
       // is not already in flight.
@@ -257,7 +334,7 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
     const hasTarget = Boolean(replyTargetId()) || chatOnly;
     replyInputEl.placeholder = composerPlaceholder();
     replyInputEl.disabled = sending || !hasTarget;
-    const ready = hasTarget && !sending && Boolean(replyInputEl.value.trim());
+    const ready = hasTarget && !sending && Boolean(replyInputEl.value.trim() || stagedReplyFiles.length);
     replyButtonEl.disabled = !ready;
     replyButtonEl.setAttribute("aria-disabled", ready ? "false" : "true");
     replyButtonEl.textContent = sending ? "Sending…" : "Send";
@@ -582,6 +659,7 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
 
     const bodyWrap = document.createElement("div");
     bodyWrap.className = "bubble-body";
+    const files = entry.attachments || [];
     try {
       const html = body ? bridge.renderMarkdown(body) : "";
       if (html) {
@@ -592,14 +670,13 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
         article.innerHTML = html;
         bodyWrap.appendChild(article);
       } else {
-        bodyWrap.textContent = text(entry.preview) || "(no message body)";
+        bodyWrap.textContent = text(entry.preview) || (files.length ? "" : "(no message body)");
       }
     } catch {
       bodyWrap.textContent = text(entry.preview) || "(this message could not be rendered)";
     }
-    bubble.appendChild(bodyWrap);
+    if (body || bodyWrap.textContent || !files.length) bubble.appendChild(bodyWrap);
 
-    const files = entry.attachments || [];
     if (files.length) {
       const list = document.createElement("div");
       list.className = "bubble-files";
@@ -725,7 +802,7 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
         preview: out.body,
         at: out.at,
         unread: false,
-        attachments: [],
+        attachments: out.attachments || [],
         state: out.state,
         error: out.error,
         isGroup,
@@ -815,7 +892,7 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
     renderChat();
     // Same key as the first attempt: if that one actually landed, the server
     // returns the original relay instead of sending a second copy.
-    deliver(entry.body, entry.inReplyToRelayId, entry.idempotencyKey);
+    deliver(entry.body, entry.inReplyToRelayId, entry.idempotencyKey, entry.files, entry.attachments);
   }
 
   /** A key identifying this MESSAGE, stable across every attempt to send it. */
@@ -824,7 +901,7 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
     return `preview-reply-${random}`;
   }
 
-  async function deliver(body, targetId, idempotencyKey) {
+  async function deliver(body, targetId, idempotencyKey, files = [], attachments = []) {
     const localId = `local-${Date.now()}-${outgoing.length}`;
     const entry = {
       localId,
@@ -834,6 +911,8 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
       state: "pending",
       inReplyToRelayId: targetId,
       idempotencyKey: idempotencyKey || newIdempotencyKey(),
+      files,
+      attachments,
       error: "",
     };
     outgoing.push(entry);
@@ -847,7 +926,7 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
 
     let result;
     try {
-      result = await bridge.sendReply(targetId, body, entry.idempotencyKey);
+      result = await bridge.sendReply(targetId, body, entry.idempotencyKey, entry.files);
     } catch (error) {
       result = { ok: false, error: (error && error.message) || String(error) };
     }
@@ -899,15 +978,25 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
     const targetId = replyTargetId();
     // With no target and no contact's room, there is nothing this could be
     // addressed to; in a contact's room, main addresses it to that person.
-    if (!body || (!targetId && !chatOnly)) return;
+    if ((!body && !stagedReplyFiles.length) || (!targetId && !chatOnly)) return;
+
+    let payload;
+    try {
+      payload = await replyFilePayloads(stagedReplyFiles);
+    } catch (error) {
+      setNote(`Could not attach that file: ${(error && error.message) || String(error)}`, true);
+      return;
+    }
 
     replyInputEl.value = "";
+    stagedReplyFiles = [];
+    paintReplyFiles();
     autosizeComposer();
     // Sending from the message face slides you into the conversation, so the
     // reply lands somewhere you can see it — and the room it went to is now
     // the thing on screen.
     if (face !== "chat" && chat) showFace("chat");
-    await deliver(body, targetId, newIdempotencyKey());
+    await deliver(body, targetId, newIdempotencyKey(), payload.files, payload.attachments);
     // Sending should not cost the person their place in the composer.
     if (!replyInputEl.disabled) replyInputEl.focus();
   }
@@ -1336,6 +1425,8 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
     emptyEl.textContent = markdown ? "Rendering details…" : "No additional detail was included with this relay.";
     emptyEl.classList.remove("gone");
     replyInputEl.value = "";
+    stagedReplyFiles = [];
+    paintReplyFiles();
     autosizeComposer();
 
     // A different message means a different conversation until proven otherwise.
@@ -1482,9 +1573,33 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
     submitReply().catch(() => {});
   });
 
+  replyAttachButtonEl.addEventListener("click", () => replyFilePickerEl.click());
+  replyFilePickerEl.addEventListener("change", () => {
+    stageReplyFiles(replyFilePickerEl.files);
+    replyFilePickerEl.value = "";
+  });
+
   replyInputEl.addEventListener("input", () => {
     autosizeComposer();
     refreshComposer();
+  });
+
+  replyInputEl.addEventListener("paste", (event) => {
+    const files = clipboardFiles(event);
+    if (!files.length) return;
+    event.preventDefault();
+    stageReplyFiles(files);
+  });
+
+  replyInputEl.addEventListener("dragover", (event) => {
+    if (event.dataTransfer && [...(event.dataTransfer.types || [])].includes("Files")) event.preventDefault();
+  });
+
+  replyInputEl.addEventListener("drop", (event) => {
+    const files = [...(event.dataTransfer?.files || [])].filter(Boolean);
+    if (!files.length) return;
+    event.preventDefault();
+    stageReplyFiles(files);
   });
 
   replyInputEl.addEventListener("keydown", (event) => {

@@ -61,3 +61,38 @@ test("an oversize attachment is rejected by the cap", async () => {
     else process.env.RELAY_ATTACHMENT_MAX_BYTES = prev;
   }
 });
+
+test("common video formats keep playable MIME types", async () => {
+  for (const [name, contentType] of [
+    ["clip.mp4", "video/mp4"],
+    ["clip.mov", "video/quicktime"],
+    ["clip.webm", "video/webm"],
+  ]) {
+    await withTempFile(name, "video bytes", async (file) => {
+      const [attachment] = await prepareOrdinaryRelayAttachments({ files: [file], idempotencyKey: `video-${name}` });
+      assert.equal(attachment.contentType, contentType);
+    });
+  }
+});
+
+test("the app's trusted outbox spool can send while arbitrary .relay paths stay blocked", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-att-"));
+  const spool = path.join(dir, ".relay", "outbox-files");
+  const file = path.join(spool, "0-photo.png");
+  fs.mkdirSync(spool, { recursive: true });
+  fs.writeFileSync(file, "image bytes");
+  try {
+    const refused = await prepareOrdinaryRelayAttachments({ files: [file], idempotencyKey: "blocked" });
+    assert.equal(refused.length, 0);
+    const prepared = await prepareOrdinaryRelayAttachments({
+      files: [{ path: file, name: "photo.png" }],
+      idempotencyKey: "trusted",
+      trustedLocalRoot: spool,
+    });
+    assert.equal(prepared.length, 1);
+    assert.equal(prepared[0].name, "photo.png");
+    assert.equal(prepared[0].contentType, "image/png");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
