@@ -11,7 +11,10 @@ const dirname = path.dirname(fileURLToPath(import.meta.url));
 const redteamPackageRoot = path.join(dirname, "..");
 const redteamRepoRoot = path.join(redteamPackageRoot, "../..");
 const sourceRepoRoot = path.resolve(process.env.RELAY_PARITY_SOURCE_ROOT || redteamRepoRoot);
-const packageRoot = path.join(sourceRepoRoot, "packages/companion");
+// Run unchanged from either the monorepo or the standalone public checkout.
+const packageRoot = fs.existsSync(path.join(redteamPackageRoot, "src/work-conversation.js"))
+  ? redteamPackageRoot
+  : path.join(sourceRepoRoot, "packages/companion");
 const fixtureRoot = path.join(dirname, "fixtures/codex-parity");
 const claudeFixture = JSON.parse(fs.readFileSync(path.join(fixtureRoot, "claude-native-work.json"), "utf8"));
 const claudeAttachmentFixture = JSON.parse(fs.readFileSync(path.join(fixtureRoot, "claude-native-attachments.json"), "utf8"));

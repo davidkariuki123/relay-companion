@@ -9922,12 +9922,14 @@
       const authLoaded = item.authLoaded === true;
       const busy = providerAuthBusy === id || item.busy;
       const state = !item.enabled ? "disabled" : busy ? "busy" : item.connected ? "connected" : "";
+      const requirement = item.requirement || (id === "claude" ? "Claude subscription required" : "ChatGPT subscription required");
       const status = !item.enabled
-        ? `Disabled in Relay${item.connected ? ` · ${item.detail}` : ""}`
+        ? `${item.connected ? `${item.detail} · ` : ""}Disabled for Requests`
         : busy
           ? item.busyDetail || "Waiting for authorization…"
-          : item.detail || (item.connected ? "Subscription connected" : "Not connected");
-      const profile = item.profile || "This Mac's existing local profile";
+          : item.connected
+            ? `${item.detail || "Subscription connected"} · Ready for Requests`
+            : item.detail || "Not signed in";
       const integrations = item.integrations && typeof item.integrations === "object" ? item.integrations : {};
       const mcpServers = Array.isArray(integrations.mcpServers) ? integrations.mcpServers : [];
       const apps = Array.isArray(integrations.apps) ? integrations.apps : [];
@@ -9943,26 +9945,35 @@
         </div>`;
       };
       const enableLabel = item.enabled ? "Disable" : "Enable";
+      const signInLabel = item.signInAction || (id === "claude" ? "Sign in to Claude Code" : "Sign in to Codex");
+      const connectLabel = busy
+        ? "Signing in…"
+        : item.connected
+          ? "Connected"
+          : item.authState === "api_billing"
+            ? (id === "claude" ? "Use Claude subscription" : "Use ChatGPT subscription")
+            : signInLabel;
+      const connectDisabled = busy || !authLoaded || !item.installed || !item.enabled || item.connected;
       return `<div class="sv-provider" data-provider-row="${id}">
         <div class="sv-provider-top">
           <span class="sv-provider-dot ${state}" aria-hidden="true"></span>
           <span class="sv-provider-copy">
             <span class="sv-provider-name">${esc(item.label)}</span>
+            <span class="sv-provider-status">${esc(requirement)}</span>
             <span class="sv-provider-status">${esc(status)}</span>
-            <span class="sv-provider-status">${esc(profile)}</span>
             ${integrationList("mcpServers", id === "claude" ? "MCPs and account connectors" : "local MCPs", mcpServers)}
             ${integrationList("apps", "connected apps", apps)}
           </span>
         </div>
         <div class="sv-provider-actions" data-stop="1">
-          <button class="sv-provider-btn primary" type="button" data-provider-connect="${id}" ${busy || !authLoaded || !item.installed ? "disabled" : ""}>${busy ? "Connecting…" : item.connected ? "Reconnect" : "Connect local profile"}</button>
+          <button class="sv-provider-btn primary" type="button" data-provider-connect="${id}" ${connectDisabled ? "disabled" : ""}>${esc(connectLabel)}</button>
           <button class="sv-provider-btn" type="button" data-provider-enable="${id}" data-enabled="${item.enabled ? "1" : "0"}" ${busy || !authLoaded ? "disabled" : ""}>${enableLabel}</button>
         </div>
       </div>`;
     }).join("");
     return `<section class="sv-provider-section" data-stop="1">
       <div class="sv-open-title">Agent connections</div>
-      <div class="sv-open-intro">Relay uses each app's existing local profile on this Mac, including its sessions, settings, MCPs, and account connectors. Relay never receives or stores your password, OAuth code, or provider token.</div>
+      <div class="sv-open-intro">Requests run through the official CLIs on this Mac: Claude Code uses your Claude subscription; Codex uses your ChatGPT subscription. Relay checks whether each is ready but never sees or stores your sign-in credentials. Sessions, settings, MCPs, and connectors stay in their apps.</div>
       <div class="sv-provider-list">${rows}</div>
       <div class="sv-hint${providerInventoryRefreshing || providerInventoryStale || providerInventoryError ? "" : " hidden"}" id="svProviderInventoryState">${esc(providerInventoryStateText())}</div>
       ${providerAuthNote ? `<div class="sv-note">${esc(providerAuthNote)}</div>` : ""}
@@ -10386,7 +10397,7 @@
     }
     if (result.alreadyConnected) {
       providerAuthBusy = "";
-      providerAuthNote = `${provider === "claude" ? "Claude Code" : "Codex"} is already using this Mac's local subscription profile.`;
+      providerAuthNote = `${provider === "claude" ? "Claude Code" : "Codex"} is already signed in with the required subscription.`;
       await refreshProviderAuth();
       refreshProviderInventory({ force:true }).catch(() => {});
       return;

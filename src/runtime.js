@@ -8,7 +8,6 @@ import readline from "node:readline";
 import { randomUUID } from "node:crypto";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { ensureStableMcpLauncher } from "./mcp-launcher.js";
 import { configDir, taskLedgerPath } from "./config.js";
 
 const { atomicWriteJsonSync } = atomicJson;
@@ -124,22 +123,42 @@ function relayBinPath() {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../bin/relay.js");
 }
 
-function relayMcpBinPath() {
-  return ensureStableMcpLauncher({ targetBin: relayBinPath(), node: process.execPath });
+// Relay-owned provider sessions are launched from the Electron pill as well as
+// from plain Node. process.execPath is therefore the Electron executable in the
+// live app. Without ELECTRON_RUN_AS_NODE, handing that executable to Codex or
+// Claude as an MCP command opens another GUI process instead of starting the
+// stdio server; the provider then waits until its MCP startup timeout expires.
+//
+// These are per-session configs, so point them directly at this runtime's CLI.
+// The upgrade-surviving ~/.relay launcher belongs to persistent host
+// registration and must not be rewritten by a development pill or private run.
+export function relayMcpLaunchSpec({
+  execPath = process.execPath,
+  binPath = relayBinPath(),
+  electron = Boolean(process.versions?.electron),
+  env = process.env,
+} = {}) {
+  const childEnv = {};
+  if (electron) childEnv.ELECTRON_RUN_AS_NODE = "1";
+  for (const key of ["RELAY_API_URL", "RELAY_DEVICE_TOKEN", "RELAY_CONFIG_DIR"]) {
+    if (env[key]) childEnv[key] = env[key];
+  }
+  return {
+    command: execPath,
+    args: [binPath, "mcp"],
+    env: childEnv,
+  };
 }
 
 function mcpConfigPath(hostKind, relaySessionId) {
   const filePath = path.join(runtimeDir(), `${relaySessionId}-${hostKind}-mcp.json`);
+  const launch = relayMcpLaunchSpec();
   const config = {
     mcpServers: {
       relay: {
-        command: process.execPath,
-        args: [relayMcpBinPath(), "mcp"],
-        env: {
-          RELAY_API_URL: process.env.RELAY_API_URL || "",
-          RELAY_DEVICE_TOKEN: process.env.RELAY_DEVICE_TOKEN || "",
-          RELAY_CONFIG_DIR: process.env.RELAY_CONFIG_DIR || "",
-        },
+        command: launch.command,
+        args: launch.args,
+        env: launch.env,
       },
     },
   };
@@ -148,35 +167,31 @@ function mcpConfigPath(hostKind, relaySessionId) {
 }
 
 function relayCodexConfigArgs(relaySessionId) {
-  const bin = relayMcpBinPath();
+  const launch = relayMcpLaunchSpec();
   const args = [
     "-c",
-    `mcp_servers.relay.command=${JSON.stringify(process.execPath)}`,
+    `mcp_servers.relay.command=${JSON.stringify(launch.command)}`,
     "-c",
-    `mcp_servers.relay.args=${JSON.stringify([bin, "mcp"])}`,
+    `mcp_servers.relay.args=${JSON.stringify(launch.args)}`,
     "-c",
     `mcp_servers.relay.startup_timeout_sec=30`,
     "-c",
     `mcp_servers.relay.tool_timeout_sec=300`,
   ];
-  for (const key of ["RELAY_API_URL", "RELAY_DEVICE_TOKEN", "RELAY_CONFIG_DIR"]) {
-    const value = process.env[key];
-    if (value) args.push("-c", `mcp_servers.relay.env.${key}=${JSON.stringify(value)}`);
+  for (const [key, value] of Object.entries(launch.env)) {
+    args.push("-c", `mcp_servers.relay.env.${key}=${JSON.stringify(value)}`);
   }
   return args;
 }
 
 function relayCodexAppServerConfig() {
-  const env = {};
-  for (const key of ["RELAY_API_URL", "RELAY_DEVICE_TOKEN", "RELAY_CONFIG_DIR"]) {
-    if (process.env[key]) env[key] = process.env[key];
-  }
+  const launch = relayMcpLaunchSpec();
   return {
     mcp_servers: {
       relay: {
-        command: process.execPath,
-        args: [relayMcpBinPath(), "mcp"],
-        env,
+        command: launch.command,
+        args: launch.args,
+        env: launch.env,
         startup_timeout_sec: 30,
         tool_timeout_sec: 300,
       },
@@ -185,16 +200,13 @@ function relayCodexAppServerConfig() {
 }
 
 function relayClaudeMcpServers() {
-  const env = {};
-  for (const key of ["RELAY_API_URL", "RELAY_DEVICE_TOKEN", "RELAY_CONFIG_DIR"]) {
-    if (process.env[key]) env[key] = process.env[key];
-  }
+  const launch = relayMcpLaunchSpec();
   return {
     relay: {
       type: "stdio",
-      command: process.execPath,
-      args: [relayMcpBinPath(), "mcp"],
-      env,
+      command: launch.command,
+      args: launch.args,
+      env: launch.env,
       timeout: 300_000,
       alwaysLoad: true,
     },

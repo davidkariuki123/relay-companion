@@ -159,6 +159,25 @@ test("a Relay Request worker strips legacy capability flags without mutating use
   assert.equal(fs.readFileSync(file, "utf8"), original);
 });
 
+test("an Electron-owned Claude worker runs this Relay runtime as Node", () => {
+  const homedir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-code-electron-mcp-test-"));
+  const config = JSON.parse(relayTaskMcpConfig(homedir, {
+    execPath: "/Applications/Relay.app/Contents/MacOS/Relay",
+    electron: true,
+    binPath: "/Applications/Relay.app/Contents/Resources/app/bin/relay.js",
+    env: { RELAY_CONFIG_DIR: "/Users/test/.relay" },
+  }));
+  assert.deepEqual(config, { mcpServers: { relay: {
+    type: "stdio",
+    command: "/Applications/Relay.app/Contents/MacOS/Relay",
+    args: ["/Applications/Relay.app/Contents/Resources/app/bin/relay.js", "mcp"],
+    env: {
+      ELECTRON_RUN_AS_NODE: "1",
+      RELAY_CONFIG_DIR: "/Users/test/.relay",
+    },
+  } } });
+});
+
 test("Desktop Code receives the account-driven Relay MCP config", async () => {
   const homedir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-code-mcp-launch-"));
   fs.writeFileSync(path.join(homedir, ".claude.json"), JSON.stringify({ mcpServers: {

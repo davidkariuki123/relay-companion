@@ -333,9 +333,11 @@ function parseClaudeStatus(stdout) {
   const apiProvider = String(payload?.apiProvider || "");
   const authMethod = String(payload?.authMethod || "");
   const subscription = loggedIn && apiProvider === "firstParty" && authMethod !== "api_key";
+  const authState = subscription ? "subscription" : loggedIn ? "api_billing" : "signed_out";
   return {
     connected: subscription,
     subscription,
+    authState,
     method: subscription ? (authMethod || "claude.ai") : "",
     detail: subscription
       ? "Claude subscription"
@@ -352,6 +354,7 @@ function parseCodexStatus(stdout, stderr, exitCode = 0) {
   return {
     connected: chatgpt,
     subscription: chatgpt,
+    authState: chatgpt ? "subscription" : apiKey ? "api_billing" : "signed_out",
     method: chatgpt ? "chatgpt" : "",
     detail: chatgpt
       ? "ChatGPT subscription"
@@ -383,11 +386,13 @@ export async function providerAuthStatus(provider, {
     installed: Boolean(runtime),
     connected: false,
     subscription: false,
+    authState: "signed_out",
     method: "",
     detail: runtime ? "Checking connection…" : `${spec.label} is not installed.`,
     busy: activeLogins.has(id),
     busyDetail: activeLogins.get(id)?.busyDetail || "",
-    profile: "This Mac's existing local profile",
+    requirement: id === "claude" ? "Claude subscription required" : "ChatGPT subscription required",
+    signInAction: id === "claude" ? "Sign in to Claude Code" : "Sign in to Codex",
     integrations: { mcpServers: [], apps: [] },
   };
   if (!runtime) return base;
@@ -476,11 +481,8 @@ export async function connectProvider(provider, {
   if (activeLogins.has(id)) return { ok: true, provider: id, started: false, busy: true };
   lastAttempts.delete(id);
   let paths = null;
-  const opensProviderApp = id === "codex" && platform === "darwin" && commandExists(openCommand);
   let invocation = loginInvocation(runtime, spec.loginArgs, { platform, expectCommand, expectRunner });
-  if (opensProviderApp) {
-    invocation = { command: openCommand, args: ["-a", "ChatGPT"] };
-  } else if (platform === "darwin" && commandExists(openCommand)) {
+  if (platform === "darwin" && commandExists(openCommand)) {
     paths = writeTerminalLoginScript(id, runtime, spec.loginArgs, terminalAttemptPaths(id, prefsFile));
     invocation = { command: openCommand, args: ["-a", terminalApp, paths.scriptPath] };
   }
@@ -502,7 +504,6 @@ export async function connectProvider(provider, {
     scriptPath: paths?.scriptPath || "",
     markerPath: paths?.markerPath || "",
     busyDetail: paths ? `Finish ${spec.label} sign-in in Terminal.` : "Waiting for authorization…",
-    opensProviderApp,
   };
   activeLogins.set(id, state);
   // Never retain or return CLI output: it can contain short-lived OAuth URLs
@@ -517,7 +518,7 @@ export async function connectProvider(provider, {
   child.once?.("close", (code) => {
     // `open` exits after handing the user-owned flow to Terminal. The result
     // marker, not this launcher process, owns completion for that flow.
-    if ((paths || opensProviderApp) && code === 0) return;
+    if (paths && code === 0) return;
     finishAttempt(id, state, code === 0
       ? "Authorization finished, but the subscription connection was not saved. Try again."
       : "Authorization was cancelled or did not complete. Try again.");
@@ -527,7 +528,7 @@ export async function connectProvider(provider, {
     finishAttempt(id, state, "Authorization timed out. Check the Terminal window, then try again.");
   }, Math.max(1_000, Number(loginTimeoutMs) || LOGIN_TIMEOUT_MS));
   state.timer.unref?.();
-  return { ok: true, provider: id, started: true, busy: true, interaction: paths ? "terminal" : opensProviderApp ? "provider_app" : "inline" };
+  return { ok: true, provider: id, started: true, busy: true, interaction: paths ? "terminal" : "inline" };
 }
 
 export async function assertProviderReady(provider, options = {}) {
@@ -536,10 +537,15 @@ export async function assertProviderReady(provider, options = {}) {
     throw new Error(`${status.label} is disabled in Relay. Enable it in Settings before starting this request.`);
   }
   if (!status.installed) {
-    throw new Error(`${status.label} is not installed. Install it, then connect your subscription in Relay Settings.`);
+    throw new Error(`${status.label} is not installed. Install it, then open Relay Settings → Agent connections.`);
   }
   if (!status.connected) {
-    throw new Error(`${status.label} is not connected with a subscription. Connect it in Relay Settings before starting this request.`);
+    const subscription = status.id === "claude" ? "Claude subscription" : "ChatGPT subscription";
+    const action = status.id === "claude" ? "Sign in to Claude Code" : "Sign in to Codex";
+    if (status.authState === "api_billing") {
+      throw new Error(`${status.label} is signed in with API billing, but Requests use your ${subscription}. Open Relay Settings → Agent connections and choose “${action}”.`);
+    }
+    throw new Error(`${status.label} needs your ${subscription} before this Request can start. Open Relay Settings → Agent connections and choose “${action}”.`);
   }
   return status;
 }
