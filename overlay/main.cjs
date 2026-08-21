@@ -4542,6 +4542,7 @@ async function previewChat(entry, threadId) {
 async function sendPreviewReply(input, entry) {
   const body = String((input && input.body) || "").trim();
   const inReplyToRelayId = String((input && input.inReplyToRelayId) || "");
+  const files = Array.isArray(input && input.files) ? input.files.slice(0, 20) : [];
   // One person by address, or a whole roster by group — the two ways a room
   // can be addressed before anything has been said in it.
   const carried = (entry && entry.recipient) || null;
@@ -4550,7 +4551,7 @@ async function sendPreviewReply(input, entry) {
     : carried && carried.email
       ? { email: String(carried.email) }
       : null;
-  if (!body) return { ok: false, error: "Write something first." };
+  if (!body && !files.length) return { ok: false, error: "Write something or attach a file first." };
   if (!inReplyToRelayId && !to) return { ok: false, error: "There is nothing here to reply to." };
   if (body.length > 20000) return { ok: false, error: "That reply is too long to send." };
   // The key belongs to the MESSAGE, not the attempt. The renderer mints one when
@@ -4558,7 +4559,37 @@ async function sendPreviewReply(input, entry) {
   // was delivered but whose response was lost (a 15s timeout, an API rollout,
   // a sleeping laptop) converges instead of arriving twice.
   const idempotencyKey = String((input && input.idempotencyKey) || "") || `preview-reply-${randomUUID()}`;
+  let tempDir = "";
   try {
+    const localFiles = [];
+    for (const [index, file] of files.entries()) {
+      const name = String((file && file.name) || `attachment-${index + 1}`);
+      const contentType = String((file && file.contentType) || "application/octet-stream");
+      const sourcePath = String((file && file.path) || "");
+      if (sourcePath) {
+        localFiles.push({ path: sourcePath, name, contentType });
+        continue;
+      }
+      const encoded = String((file && file.contentBase64) || "");
+      const maxBytes = Number(process.env.RELAY_ATTACHMENT_MAX_BYTES) > 0
+        ? Number(process.env.RELAY_ATTACHMENT_MAX_BYTES)
+        : 100 * 1024 * 1024;
+      if (encoded.length > Math.ceil(maxBytes / 3) * 4 + 4) {
+        throw new Error(`${name} is over the attachment size limit.`);
+      }
+      if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) {
+        throw new Error(`${name} did not contain valid file data.`);
+      }
+      if (!tempDir) tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-preview-attachment-"));
+      const safe = name.replace(/[\\/:*?"<>|]/g, "_").slice(0, 120) || `attachment-${index + 1}`;
+      const target = path.join(tempDir, `${index}-${safe}`);
+      fs.writeFileSync(target, Buffer.from(encoded, "base64"), { mode: 0o600 });
+      localFiles.push({ path: target, name, contentType });
+    }
+    const attachmentsUrl = pathToFileURL(path.join(__dirname, "..", "src", "attachments.js")).href;
+    const { prepareOrdinaryRelayAttachments } = await import(attachmentsUrl);
+    const attachments = await prepareOrdinaryRelayAttachments({ files: localFiles, idempotencyKey });
+    if (attachments.length !== localFiles.length) throw new Error("One or more selected files cannot be attached safely.");
     const client = await relayClient();
     const sent = await client.sendRelay({
       // Addressed only when there is nothing to answer: a reply that names a
@@ -4567,7 +4598,9 @@ async function sendPreviewReply(input, entry) {
       // A chat message has a body, not a subject. No title at all: an untitled
       // relay IS a typed text, and titlelessness is what marks it, when it
       // comes back, as a line of a conversation rather than a relay to read.
-      forHuman: body,
+      ...(body ? {} : { title: files.length === 1 ? String(files[0].name || "1 file") : `${files.length} files` }),
+      forHuman: body || " ",
+      attachments,
       ...(inReplyToRelayId ? { inReplyToRelayId } : {}),
       idempotencyKey,
       source: { host: "relay-preview" },
@@ -4583,6 +4616,10 @@ async function sendPreviewReply(input, entry) {
     return { ok: true, relayId: sent && sent.relayId };
   } catch (error) {
     return { ok: false, error: (error && error.message) || String(error) };
+  } finally {
+    if (tempDir) {
+      try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch {}
+    }
   }
 }
 
@@ -6813,6 +6850,11 @@ async function postQueuedRelay(entry) {
   // long offline stretch. `name` rides along because the spool file is stored
   // under an index-prefixed name and the human's filename is what shows.
   const prepared = await prepareOrdinaryRelayAttachments({
+    idempotencyKey: entry.idempotencyKey,
+    // The queue already copied these exact paths into its private spool. That
+    // directory may itself live under ~/.relay, which the generic attachment
+    // guard correctly refuses for arbitrary caller-supplied paths.
+    trustedLocalRoot: path.join(path.dirname(OUTBOX_PATH), "outbox-files"),
     files: files
       .filter((f) => f && f.spoolPath)
       .map((f) => ({ path: f.spoolPath, name: f.name, ...(f.contentType ? { contentType: f.contentType } : {}) })),

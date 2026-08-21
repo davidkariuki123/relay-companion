@@ -3779,20 +3779,25 @@
     }
   }
   function stageFileList(field, list) {
-    const incoming = [...(list || [])].filter((f) => f && f.name);
+    const incoming = [...(list || [])].filter(Boolean);
     if (!incoming.length) return;
     const key = stageKeyFor(field);
     const files = stagedFiles.get(key) || [];
-    for (const f of incoming) files.push({ name: f.name, size: f.size || 0, file: f });
+    for (const f of incoming) files.push({ name: f.name || `pasted-${files.length + 1}`, size: f.size || 0, file: f });
     stagedFiles.set(key, files);
     const qr = field.closest(".qr");
     if (qr) paintStagedChips(qr, key);
   }
-  // Composer attachments are deliberately dark for now (Sven, 2026-08-16:
-  // "i dont think it is necessary"). Same shape as REACTIONS_ENABLED — a
-  // reversible product gate over the + button, the picker and paste-to-
-  // stage; the staging store, chips and send pipeline stay implemented.
-  const COMPOSER_ATTACHMENTS_ENABLED = false;
+  function clipboardFiles(event) {
+    const clipboard = event && event.clipboardData;
+    const files = [...(clipboard?.files || [])].filter(Boolean);
+    if (files.length) return files;
+    return [...(clipboard?.items || [])]
+      .filter((item) => item && item.kind === "file" && typeof item.getAsFile === "function")
+      .map((item) => item.getAsFile())
+      .filter(Boolean);
+  }
+  const COMPOSER_ATTACHMENTS_ENABLED = true;
   function dressComposer(field, onSend) {
     if (!field || field.dataset.dressed) return;
     field.dataset.dressed = "1";
@@ -3824,9 +3829,16 @@
       qr.appendChild(picker);
       paintStagedChips(qr, key); // chips survive re-renders via the store
     }
-    if (COMPOSER_ATTACHMENTS_ENABLED) field.addEventListener("paste", (e) => {
-      const files = e.clipboardData && e.clipboardData.files;
-      if (files && files.length) { e.preventDefault(); stageFileList(field, files); }
+    field.addEventListener("paste", (e) => {
+      const files = clipboardFiles(e);
+      if (files.length) { e.preventDefault(); stageFileList(field, files); }
+    });
+    field.addEventListener("dragover", (e) => {
+      if (e.dataTransfer && [...(e.dataTransfer.types || [])].includes("Files")) e.preventDefault();
+    });
+    field.addEventListener("drop", (e) => {
+      const files = [...(e.dataTransfer?.files || [])].filter(Boolean);
+      if (files.length) { e.preventDefault(); stageFileList(field, files); }
     });
     if (qr && !qr.dataset.focusWired) {
       qr.dataset.focusWired = "1";
@@ -9454,10 +9466,9 @@
       });
       const doThReply = async () => {
         if (thReplySending || chatReplySending.has(threadStateKey)) return;
-        // Before anything is read out of the composer: takeStagedFiles DELETES
-        // the staged files and repaints the chips, so refusing below it destroys
-        // the attachments while keeping the words, and an empty-draft return
-        // above it would refuse in silence.
+        // Resolve the address before removing anything from the composer. A
+        // missing or unclaimed destination must leave both words and files in
+        // place; only a send the device can actually accept consumes them.
         const addressAnchor = [...(thread.msgs || [])].reverse().find((m) => m.addressRecipient);
         const pendingLink = addressAnchor && addressAnchor.shareLink && addressAnchor.shareLink.state !== "claimed"
           ? addressAnchor.shareLink
@@ -9469,7 +9480,7 @@
           return;
         }
         const text = (thQrInput.value || "").trim();
-        const staged = takeStagedFiles(thQrInput);
+        const staged = peekStagedFiles(thQrInput);
         if (!text && !staged.length) return;
         const newest = (thread.msgs || [])[thread.msgs.length - 1];
         const selectedReplyTargetId = String(threadReplyTargets.get(threadStateKey) || "");
@@ -9495,19 +9506,15 @@
           setRowNote(newest ? newest.id : thread.threadId, "This conversation cannot be replied to yet.", "err");
           return;
         }
-        // Picker/drag files carry a real OS path (preload webUtils); pasted
-        // bytes ride as base64 — main temp-files them so ONE pipeline prepares
-        // every attachment.
-        const files = [];
-        for (const f of staged) {
-          const file = f.file || f;
-          const p = window.relay.pathForFile ? window.relay.pathForFile(file) : "";
-          if (p) { files.push({ name: f.name, size: f.size || 0, path: p }); continue; }
-          if (file && file.arrayBuffer) {
-            const bytes = new Uint8Array(await file.arrayBuffer());
-            let bin = ""; for (let i = 0; i < bytes.length; i += 1) bin += String.fromCharCode(bytes[i]);
-            files.push({ name: f.name, size: f.size || 0, contentType: file.type || "application/octet-stream", contentBase64: btoa(bin) });
-          }
+        takeStagedFiles(thQrInput);
+        let files;
+        let attachments;
+        try {
+          ({ files, attachments } = await composerFilePayloads(staged));
+        } catch (error) {
+          stageFileList(thQrInput, staged.map((f) => f.file || f));
+          setRowNote(newest ? newest.id : thread.threadId, `Could not attach that file: ${(error && error.message) || String(error)}`, "err");
+          return;
         }
         thReplySending = true;
         thQrSend.disabled = true;
@@ -9541,6 +9548,7 @@
           request: false,
           pending: true,
           reactions: { aggregates: [], events: [] },
+          attachments,
           preview: "",
         });
         chatReplySending.add(threadStateKey);

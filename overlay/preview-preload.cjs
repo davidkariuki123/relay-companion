@@ -6375,13 +6375,28 @@ var require_purify_cjs = __commonJS({
 });
 
 // overlay/preview-preload-source.cjs
-var { contextBridge, ipcRenderer } = require("electron");
+var { contextBridge, ipcRenderer, webUtils } = require("electron");
 var MarkdownItModule = require_index_cjs4();
 var createDOMPurifyModule = require_purify_cjs();
 var MarkdownIt = MarkdownItModule.default || MarkdownItModule;
 var createDOMPurify = createDOMPurifyModule.default || createDOMPurifyModule;
 var DOMPurify = createDOMPurify.sanitize ? createDOMPurify : createDOMPurify(window);
 var MAX_PREVIEW_MARKDOWN_CHARS = 5e5;
+var MAX_REPLY_FILES = 20;
+function normalizedReplyFiles(files) {
+  return (Array.isArray(files) ? files : []).slice(0, MAX_REPLY_FILES).flatMap((file) => {
+    const localPath = String(file && file.path || "");
+    const inline = Boolean(file && Object.prototype.hasOwnProperty.call(file, "contentBase64"));
+    if (!localPath && !inline) return [];
+    return [{
+      name: String(file && file.name || "file"),
+      size: Math.max(0, Number(file && file.size || 0) || 0),
+      contentType: String(file && file.contentType || "application/octet-stream"),
+      path: localPath,
+      contentBase64: inline ? String(file.contentBase64 || "") : ""
+    }];
+  });
+}
 function safeExternalUrl(value) {
   const raw = String(value || "").trim();
   if (!raw || /[\u0000-\u001f\u007f]/.test(raw)) return null;
@@ -6502,12 +6517,20 @@ contextBridge.exposeInMainWorld("relayPreview", {
   // Every argument is coerced to a primitive here so the renderer can never
   // hand the main process a structure to walk.
   loadChat: (threadId) => ipcRenderer.invoke("relay:preview:chat", String(threadId || "")),
-  sendReply: (inReplyToRelayId, body, idempotencyKey) => ipcRenderer.invoke("relay:preview:reply", {
+  pathForFile: (file) => {
+    try {
+      return webUtils.getPathForFile(file) || "";
+    } catch {
+      return "";
+    }
+  },
+  sendReply: (inReplyToRelayId, body, idempotencyKey, files = []) => ipcRenderer.invoke("relay:preview:reply", {
     inReplyToRelayId: String(inReplyToRelayId || ""),
     body: String(body || ""),
     // Minted once per composed message so a retry converges on the same relay
     // rather than sending it twice.
-    idempotencyKey: String(idempotencyKey || "")
+    idempotencyKey: String(idempotencyKey || ""),
+    files: normalizedReplyFiles(files)
   }),
   // The task face's ignition. Same coercion discipline as sendReply.
   startTask: (relayId, note, host, model, effort) => ipcRenderer.invoke("relay:preview:startTask", {

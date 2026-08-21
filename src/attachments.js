@@ -27,8 +27,12 @@ const SECRET_BASENAME_RE = /(^\.env($|\.local|\.[a-z]+$)|^id_(rsa|dsa|ecdsa|ed25
 // Returns null if the path is a refused (secret) location; otherwise the resolved path.
 // Non-throwing so one bad path skips (with a logged warning) instead of failing the
 // whole batch.
-function safeAttachmentPathOrNull(filePath) {
+function safeAttachmentPathOrNull(filePath, trustedLocalRoot = "") {
   const resolved = path.resolve(filePath);
+  if (trustedLocalRoot) {
+    const root = path.resolve(trustedLocalRoot);
+    if (resolved === root || resolved.startsWith(root + path.sep)) return resolved;
+  }
   const home = os.homedir();
   const segments = resolved.split(path.sep).map((s) => s.toLowerCase());
   for (const seg of segments) {
@@ -55,6 +59,11 @@ const CONTENT_TYPES = new Map([
   [".jpg", "image/jpeg"],
   [".json", "application/json"],
   [".md", "text/markdown"],
+  [".m4v", "video/x-m4v"],
+  [".mov", "video/quicktime"],
+  [".mp4", "video/mp4"],
+  [".mpeg", "video/mpeg"],
+  [".mpg", "video/mpeg"],
   [".pdf", "application/pdf"],
   [".png", "image/png"],
   [".ppt", "application/vnd.ms-powerpoint"],
@@ -64,6 +73,7 @@ const CONTENT_TYPES = new Map([
   [".text", "text/plain"],
   [".txt", "text/plain"],
   [".webp", "image/webp"],
+  [".webm", "video/webm"],
   [".xls", "application/vnd.ms-excel"],
   [".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
   [".zip", "application/zip"],
@@ -71,7 +81,7 @@ const CONTENT_TYPES = new Map([
 
 export async function prepareOrdinaryRelayAttachments(args = {}) {
   const passthrough = passthroughAttachments(args);
-  const local = await readLocalAttachmentSpecs(localAttachmentSpecs(args));
+  const local = await readLocalAttachmentSpecs(localAttachmentSpecs(args), args.trustedLocalRoot);
   return [
     ...passthrough,
     ...local.map((file, index) => ({
@@ -121,11 +131,11 @@ function passthroughAttachments(args = {}) {
   return arrayOf(args.attachments).filter((item) => !(item && typeof item === "object" && (item.path || item.filePath)));
 }
 
-async function readLocalAttachmentSpecs(specs) {
+async function readLocalAttachmentSpecs(specs, trustedLocalRoot = "") {
   const out = [];
   const cap = maxAttachmentBytes();
   for (const [index, spec] of specs.entries()) {
-    const filePath = safeAttachmentPathOrNull(spec.path);
+    const filePath = safeAttachmentPathOrNull(spec.path, trustedLocalRoot);
     if (!filePath) {
       // Skip a clearly-secret file rather than fail the whole send; the agent can
       // re-send without it, and a prompt-injected exfiltration attempt is quietly denied.

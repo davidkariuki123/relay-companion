@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 const MarkdownItModule = require("markdown-it");
 const createDOMPurifyModule = require("dompurify");
 
@@ -6,6 +6,22 @@ const MarkdownIt = MarkdownItModule.default || MarkdownItModule;
 const createDOMPurify = createDOMPurifyModule.default || createDOMPurifyModule;
 const DOMPurify = createDOMPurify.sanitize ? createDOMPurify : createDOMPurify(window);
 const MAX_PREVIEW_MARKDOWN_CHARS = 500_000;
+const MAX_REPLY_FILES = 20;
+
+function normalizedReplyFiles(files) {
+  return (Array.isArray(files) ? files : []).slice(0, MAX_REPLY_FILES).flatMap((file) => {
+    const localPath = String((file && file.path) || "");
+    const inline = Boolean(file && Object.prototype.hasOwnProperty.call(file, "contentBase64"));
+    if (!localPath && !inline) return [];
+    return [{
+      name: String((file && file.name) || "file"),
+      size: Math.max(0, Number((file && file.size) || 0) || 0),
+      contentType: String((file && file.contentType) || "application/octet-stream"),
+      path: localPath,
+      contentBase64: inline ? String(file.contentBase64 || "") : "",
+    }];
+  });
+}
 
 // Relay bodies are authored outside this renderer. Treat every URL as untrusted,
 // even after Markdown parsing, and expose only schemes that Electron may safely
@@ -137,13 +153,17 @@ contextBridge.exposeInMainWorld("relayPreview", {
   // Every argument is coerced to a primitive here so the renderer can never
   // hand the main process a structure to walk.
   loadChat: (threadId) => ipcRenderer.invoke("relay:preview:chat", String(threadId || "")),
-  sendReply: (inReplyToRelayId, body, idempotencyKey) =>
+  pathForFile: (file) => {
+    try { return webUtils.getPathForFile(file) || ""; } catch { return ""; }
+  },
+  sendReply: (inReplyToRelayId, body, idempotencyKey, files = []) =>
     ipcRenderer.invoke("relay:preview:reply", {
       inReplyToRelayId: String(inReplyToRelayId || ""),
       body: String(body || ""),
       // Minted once per composed message so a retry converges on the same relay
       // rather than sending it twice.
       idempotencyKey: String(idempotencyKey || ""),
+      files: normalizedReplyFiles(files),
     }),
   // The task face's ignition. Same coercion discipline as sendReply.
   startTask: (relayId, note, host, model, effort) =>

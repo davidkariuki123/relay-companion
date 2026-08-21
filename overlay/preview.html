@@ -546,6 +546,24 @@
       width:min(100%, 744px); margin:0 auto;
       display:flex; align-items:flex-end; gap:10px;
     }
+    .reply-attach {
+      flex:0 0 auto; width:42px; height:42px; padding:0;
+      display:grid; place-items:center; border:1px solid var(--line-strong); border-radius:10px;
+      background:var(--paper); color:var(--muted); font-size:22px; font-weight:300;
+      cursor:pointer; transition:border-color .14s ease, color .14s ease, background .14s ease;
+    }
+    .reply-attach:hover:not(:disabled) { border-color:rgba(48,85,102,.42); color:var(--accent); background:var(--accent-soft); }
+    .reply-attach:disabled { opacity:.42; cursor:not-allowed; }
+    .reply-files {
+      width:min(100%, 744px); margin:0 auto 8px;
+      display:flex; flex-wrap:wrap; gap:6px;
+    }
+    .reply-file {
+      display:inline-flex; align-items:center; gap:7px; max-width:100%; padding:5px 7px 5px 9px;
+      border-radius:9px; background:var(--accent-soft); color:var(--ink-soft); font-size:11.5px;
+    }
+    .reply-file-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .reply-file-remove { appearance:none; border:0; background:transparent; color:var(--muted); padding:0 2px; font:16px/1 var(--sans); cursor:pointer; }
     .reply-input {
       flex:1 1 auto; min-width:0; height:42px; max-height:124px; resize:none;
       padding:10px 13px; border:1px solid var(--line-strong); border-radius:10px;
@@ -676,7 +694,10 @@
     </div>
 
     <footer class="reply-composer" aria-label="Reply composer">
+      <div class="reply-files gone" id="replyFiles" aria-label="Attached files"></div>
       <div class="reply-row">
+        <button class="reply-attach" id="replyAttachButton" type="button" aria-label="Attach files" title="Attach files">+</button>
+        <input class="gone" id="replyFilePicker" type="file" multiple tabindex="-1" aria-hidden="true">
         <textarea
           class="reply-input"
           id="replyInput"

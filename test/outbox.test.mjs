@@ -232,6 +232,25 @@ test("attachment bytes are copied into the queue and released when it retires", 
   assert.equal(fs.existsSync(entry.files[0].spoolPath), false, "retirement takes the spooled bytes with it");
 });
 
+test("attachment spooling is all-or-nothing: a missing file cannot become an empty send", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-outbox-src-"));
+  const valid = path.join(dir, "notes.txt");
+  fs.writeFileSync(valid, "keep me");
+  const { outbox } = harness();
+
+  assert.throws(
+    () => outbox.enqueue(message({
+      text: "",
+      files: [
+        { name: "notes.txt", path: valid },
+        { name: "missing.mov", path: path.join(dir, "missing.mov") },
+      ],
+    })),
+    /could not attach missing\.mov/i,
+  );
+  assert.equal(outbox.list().length, 0, "no partial or attachment-free message is committed");
+});
+
 test("Retry puts a failed message back in line", async () => {
   let reject = true;
   const { outbox } = harness({ send: () => { if (reject) throw REJECTED(400); return { relayId: "relay_A" }; } });
