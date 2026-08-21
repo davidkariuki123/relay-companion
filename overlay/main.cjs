@@ -4590,7 +4590,17 @@ async function startTaskFromPreview(input) {
   const id = String((input && input.relayId) || "").trim();
   const note = String((input && input.note) || "").trim();
   const selectedHost = String((input && input.host) || "claude").toLowerCase();
-  const model = String((input && input.model) || "").trim();
+  // A shared composer must never leak one provider's model into the other.
+  // The renderer normally sends a provider-specific model, but older callers
+  // and direct IPC clients can omit it. Historically the IPC boundary filled
+  // every omission with `claude-opus-5`, which made an otherwise authenticated
+  // Codex/ChatGPT-subscription run fail with an unsupported-model 400.
+  const requestedModel = String((input && input.model) || "").trim();
+  const model = selectedHost === "codex" && /^claude-/i.test(requestedModel)
+    ? ""
+    : selectedHost === "claude" && /^gpt-/i.test(requestedModel)
+      ? ""
+      : requestedModel;
   const effort = String((input && input.effort) || "").trim();
   const files = Array.isArray(input && input.files) ? input.files : [];
   const row = rowById(id);
@@ -4658,6 +4668,12 @@ async function startTaskFromPreview(input) {
   // exclusive owner is what makes Start, streaming and Steer one stable lane.
   let running = false;
   let runError = "";
+  // A new provider-owned run starts a new visible turn history. A prior Steer
+  // (including one sent to a different provider before an explicit route
+  // change) must not be re-inserted as this run's user message.
+  const freshRunFollowUpState = isRequest
+    ? { taskFollowUpText: "", taskFollowUpAt: null }
+    : { workFollowUpText: "", workFollowUpAt: null };
   // The reader's Settings choice, in each vendor's own terms. Claude takes a
   // permission-mode string; Codex takes an approval policy plus a sandbox.
   const permission = String((input && input.permission) || "").trim();
@@ -4700,6 +4716,7 @@ async function startTaskFromPreview(input) {
         cwd: String(row.openCwd || process.env.RELAY_OPEN_CWD || os.homedir()),
       });
       updateStagedPacket(id, {
+        ...freshRunFollowUpState,
         workProvider: "cowork",
         coworkSessionId: started.sessionId,
         coworkEnvironmentId: started.environmentId || "",
@@ -4735,6 +4752,7 @@ async function startTaskFromPreview(input) {
         ].join("\n\n"),
       });
       updateStagedPacket(id, {
+        ...freshRunFollowUpState,
         workProvider: "claude",
         claudeNativeSession: {
           sessionId: launched.sessionId,
@@ -4806,6 +4824,7 @@ async function startTaskFromPreview(input) {
           exclusiveNative: true,
         });
         updateStagedPacket(id, {
+          ...freshRunFollowUpState,
           workProvider: "codex",
           codexRuntimeSessionRef: sessionRef,
           codexThreadId: sessionRef.threadId || threadId,
@@ -5399,7 +5418,17 @@ async function previewTaskSession(relayId) {
   const claudePath = row.claudeNativeSession && row.claudeNativeSession.sessionPath;
   const codexPath = row.codexSessionPath || row.sessionPath;
   const coworkSessionId = row.coworkSessionId || "";
-  const provider = coworkSessionId ? "cowork" : claudePath ? "claude" : codexPath ? "codex" : "";
+  // A Relay can have historical sessions from more than one provider after a
+  // retry or an explicit route change. The currently persisted workProvider
+  // owns the run; path-existence order must not resurrect an older transcript.
+  const requestedProvider = String(row.workProvider || "").toLowerCase();
+  const provider = requestedProvider === "cowork" && coworkSessionId ? "cowork"
+    : requestedProvider === "claude" && claudePath ? "claude"
+      : requestedProvider === "codex" && codexPath ? "codex"
+        : coworkSessionId ? "cowork"
+          : claudePath ? "claude"
+            : codexPath ? "codex"
+              : "";
   if (!provider) return { ok: false, error: "The session has not started on this computer yet." };
   try {
     if (provider === "cowork") {
@@ -6457,7 +6486,9 @@ ipcMain.handle("relay:taskStart", (_e, id, route) =>
     relayId: id,
     note: (route && route.note) || "",
     host: (route && route.host) || "claude",
-    model: (route && route.model) || "claude-opus-5",
+    // Leave an omitted model empty. startTaskFromPreview/materializer then use
+    // the selected provider's own default instead of a Claude-only fallback.
+    model: (route && route.model) || "",
     effort: (route && route.effort) || "high",
     // The reader's Settings choice must survive the IPC boundary too, or the
     // picker is decoration (and referencing `route` inside the handler body
@@ -6473,7 +6504,7 @@ ipcMain.handle("relay:relayWorkStart", (_e, id, route) =>
     relayId: id,
     note: (route && route.note) || "",
     host: (route && route.host) || "claude",
-    model: (route && route.model) || "claude-opus-5",
+    model: (route && route.model) || "",
     effort: (route && route.effort) || "high",
     permission: (route && route.permission) || "",
     localWork: true,

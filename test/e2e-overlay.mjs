@@ -109,7 +109,13 @@ writeState(packets);
 
 // A paired sandbox account (RELAY_CONFIG points here) so the Settings tab has a
 // real card to show. The token only ever reaches the dead 127.0.0.1:9 API.
-const sandboxAccount = { id: "user_e2e", name: "E2E Harness", email: "e2e@example.com" };
+const sandboxAccount = {
+  id: "user_e2e",
+  name: "E2E Harness",
+  email: "e2e@example.com",
+  accountKind: "human",
+  isDeveloper: true,
+};
 fs.writeFileSync(
   path.join(sandbox, "config.json"),
   JSON.stringify(
@@ -1292,21 +1298,95 @@ try {
       settingsUi.pairRowHidden === true &&
       settingsUi.providers.length === 2 &&
       settingsUi.providers.every((provider) =>
-        provider.text.includes("This Mac's existing local profile") &&
-        provider.buttons.some((label) => label === "Reconnect" || label === "Connect local profile") &&
+        provider.text.includes("subscription required") &&
+        provider.buttons.some((label) => ["Connected", "Sign in to Claude Code", "Sign in to Codex", "Use Claude subscription", "Use ChatGPT subscription"].includes(label)) &&
         provider.buttons.includes("Disable") &&
+        !provider.buttons.includes("Connect local profile") &&
+        !provider.buttons.includes("Reconnect") &&
         !provider.buttons.includes("Refresh status")
-      ),
+      ) &&
       settingsAccountMs <= 1500,
-    `paint=${settingsAccountMs}ms name=${settingsUi.name} email=${settingsUi.email} device=${settingsUi.device} version=${settingsUi.version} switch=${settingsUi.switchLabel} signOut=${settingsUi.signOutLabel}`,
+    `paint=${settingsAccountMs}ms ${JSON.stringify(settingsUi)}`,
   );
 
-  const authState = await evalIn(pageConn, `window.relay.providerAuthStatus()`);
+  const authState = await evalIn(pageConn, `window.relay.providerAuthStatus()`, { awaitPromise:true });
   check(
     "settings: provider status is readable without mutating this Mac's local authorization",
     authState && typeof authState === "object" && settingsUi.providers.length === 2,
     JSON.stringify(authState),
   );
+
+  const providerUi = await retry(async () => {
+    const ui = await evalIn(pageConn, `(() => [...document.querySelectorAll('[data-provider-row]')].map((row) => ({
+      id: row.getAttribute('data-provider-row'),
+      text: row.textContent.replace(/\\s+/g, ' ').trim(),
+      primary: row.querySelector('[data-provider-connect]')?.textContent.trim() || '',
+      primaryDisabled: Boolean(row.querySelector('[data-provider-connect]')?.disabled),
+      toggle: row.querySelector('[data-provider-enable]')?.textContent.trim() || '',
+    })))()`);
+    if (ui.length !== 2 || ui.some((row) => row.text.includes("Checking connection"))) throw new Error(JSON.stringify(ui));
+    return ui;
+  }, { label: "provider subscription rows reconcile" });
+  const claudeUi = providerUi.find((row) => row.id === "claude");
+  const codexUi = providerUi.find((row) => row.id === "codex");
+  const expectedPrimary = (id, state) => state === "subscription"
+    ? "Connected"
+    : state === "api_billing"
+      ? (id === "claude" ? "Use Claude subscription" : "Use ChatGPT subscription")
+      : (id === "claude" ? "Sign in to Claude Code" : "Sign in to Codex");
+  check(
+    "settings: each provider shows its real subscription action and connected providers have no fake reconnect",
+    claudeUi.primary === expectedPrimary("claude", authState.providers.claude.authState) &&
+      claudeUi.primaryDisabled === (authState.providers.claude.authState === "subscription") &&
+      codexUi.primary === expectedPrimary("codex", authState.providers.codex.authState) &&
+      codexUi.primaryDisabled === (authState.providers.codex.authState === "subscription") &&
+      providerUi.every((row) => !/local profile|reconnect/i.test(`${row.text} ${row.primary}`)),
+    JSON.stringify(providerUi),
+  );
+
+  await evalIn(pageConn, `document.querySelector('[data-provider-enable="claude"]').click(); 'disable Claude'`);
+  const disabledClaude = await retry(async () => {
+    const row = await evalIn(pageConn, `(() => { const row = document.querySelector('[data-provider-row="claude"]'); return {
+      text: row.textContent.replace(/\\s+/g, ' ').trim(),
+      primaryDisabled: row.querySelector('[data-provider-connect]').disabled,
+      toggle: row.querySelector('[data-provider-enable]').textContent.trim(),
+    }; })()`);
+    if (row.toggle !== "Enable") throw new Error(JSON.stringify(row));
+    return row;
+  }, { label: "disable Claude for Requests" });
+  check(
+    "settings: Disable is Relay-only and makes the recovery path explicit",
+    disabledClaude.text.includes("Disabled for Requests") && disabledClaude.primaryDisabled,
+    JSON.stringify(disabledClaude),
+  );
+  await evalIn(pageConn, `document.querySelector('[data-provider-enable="claude"]').click(); 'enable Claude'`);
+  const enabledClaude = await retry(async () => {
+    const row = await evalIn(pageConn, `(() => { const row = document.querySelector('[data-provider-row="claude"]'); return {
+      primary: row.querySelector('[data-provider-connect]').textContent.trim(),
+      primaryDisabled: row.querySelector('[data-provider-connect]').disabled,
+      toggle: row.querySelector('[data-provider-enable]').textContent.trim(),
+    }; })()`);
+    if (row.toggle !== "Disable") throw new Error(JSON.stringify(row));
+    return row;
+  }, { label: "re-enable Claude for Requests" });
+  check(
+    "settings: Enable restores the subscription sign-in action",
+    enabledClaude.primary === expectedPrimary("claude", authState.providers.claude.authState) &&
+      enabledClaude.primaryDisabled === (authState.providers.claude.authState === "subscription"),
+    JSON.stringify(enabledClaude),
+  );
+
+  if (authState.providers.claude.authState !== "subscription") {
+    const requestGate = await evalIn(pageConn, `window.relay.relayWorkStart('pkt_boot_1', { host:'claude', note:'gate only' })`, { awaitPromise:true });
+    check(
+      "requests: an unusable provider fails before work starts and names the exact Settings action",
+      requestGate?.ok === false &&
+        /Claude subscription/.test(requestGate.error || "") &&
+        /Agent connections/.test(requestGate.error || "") &&
+        /Sign in to Claude Code/.test(requestGate.error || ""),
+      JSON.stringify(requestGate),
+    );
+  }
 
   const settingsOpenLogStart = childLog.length;
   await evalIn(pageConn, `document.getElementById('svAccount').click(); 'account settings'`);

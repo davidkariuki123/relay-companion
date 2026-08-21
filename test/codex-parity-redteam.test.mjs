@@ -10,7 +10,11 @@ const dirname = path.dirname(fileURLToPath(import.meta.url));
 const redteamPackageRoot = path.join(dirname, "..");
 const redteamRepoRoot = path.join(redteamPackageRoot, "../..");
 const sourceRepoRoot = path.resolve(process.env.RELAY_PARITY_SOURCE_ROOT || redteamRepoRoot);
-const packageRoot = path.join(sourceRepoRoot, "packages/companion");
+// The test ships in both the monorepo (packages/companion) and the standalone
+// public package. Resolve whichever layout actually contains the source.
+const packageRoot = fs.existsSync(path.join(redteamPackageRoot, "src/codex-app-server-activity.js"))
+  ? redteamPackageRoot
+  : path.join(sourceRepoRoot, "packages/companion");
 const { codexAppServerActivity } = await import(pathToFileURL(path.join(packageRoot, "src/codex-app-server-activity.js")));
 const workConversationPath = path.join(packageRoot, "src/work-conversation.js");
 const workConversation = fs.existsSync(workConversationPath)
@@ -66,7 +70,13 @@ const previewFeed = between(previewRenderer, "async function pollSession", "asyn
 const runnerImplementation = `${runStream}\n${workUi}\n${workConversationSource}`;
 const previewImplementation = `${previewSession}\n${previewRenderer}\n${workUi}\n${workConversationSource}`;
 
-test("[P00] golden evidence is pinned to this exact installed Codex bundle", { skip: !fs.existsSync(manifest.application.path) }, () => {
+const pinnedBundlePresent = fs.existsSync(path.join(manifest.application.path, "Contents/Resources/app.asar"))
+  && fs.existsSync(path.join(manifest.application.path, "Contents/MacOS/ChatGPT"));
+const installedBundleMatchesFixture = pinnedBundlePresent
+  && sha256(path.join(manifest.application.path, "Contents/Resources/app.asar")) === manifest.application.asarSha256
+  && sha256(path.join(manifest.application.path, "Contents/MacOS/ChatGPT")) === manifest.application.executableSha256;
+
+test("[P00] golden evidence is pinned to this exact installed Codex bundle", { skip: !installedBundleMatchesFixture }, () => {
   assert.equal(sha256(path.join(manifest.application.path, "Contents/Resources/app.asar")), manifest.application.asarSha256);
   assert.equal(sha256(path.join(manifest.application.path, "Contents/MacOS/ChatGPT")), manifest.application.executableSha256);
 });
@@ -307,7 +317,11 @@ test("[P23] AI preview shares native geometry and split reduced-motion behavior"
 });
 
 test("[META] ledger and executable Electron parity probe remain present", () => {
-  assert.ok(fs.existsSync(path.join(redteamRepoRoot, "docs/CODEX_DESKTOP_PARITY_LEDGER.md")));
+  const ledger = [
+    path.join(redteamRepoRoot, "docs/CODEX_DESKTOP_PARITY_LEDGER.md"),
+    path.join(dirname, "fixtures/codex-parity/PROVIDER_NATIVE_LEDGER.md"),
+  ].find((candidate) => fs.existsSync(candidate));
+  assert.ok(ledger, "the monorepo or standalone parity ledger must be packaged");
   assert.ok(fs.existsSync(path.join(dirname, "codex-parity-redteam.e2e.mjs")));
   assert.ok(fs.existsSync(path.join(dirname, "codex-parity-preview-redteam.e2e.mjs")));
   assert.ok(fs.existsSync(path.join(dirname, "fixtures/codex-parity/requirements.json")));

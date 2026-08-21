@@ -279,6 +279,32 @@ test("host adapters expose auth preflight, Relay MCP plans, UI open, and unsuppo
   assert.deepEqual(opened, ["/tmp/relay-prompt.md"]);
 });
 
+test("Electron provider sessions run Relay MCP as Node without rewriting the persistent launcher", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-runtime-test-"));
+  process.env.RELAY_CONFIG_DIR = dir;
+  const runtime = await import("../src/runtime.js");
+  const spec = runtime.relayMcpLaunchSpec({
+    execPath: "/Applications/Relay.app/Contents/MacOS/Relay",
+    binPath: "/Applications/Relay.app/Contents/Resources/app/bin/relay.js",
+    electron: true,
+    env: {
+      RELAY_API_URL: "https://api.example.test",
+      RELAY_DEVICE_TOKEN: "test-token",
+    },
+  });
+
+  assert.deepEqual(spec, {
+    command: "/Applications/Relay.app/Contents/MacOS/Relay",
+    args: ["/Applications/Relay.app/Contents/Resources/app/bin/relay.js", "mcp"],
+    env: {
+      ELECTRON_RUN_AS_NODE: "1",
+      RELAY_API_URL: "https://api.example.test",
+      RELAY_DEVICE_TOKEN: "test-token",
+    },
+  });
+  assert.doesNotMatch(spec.args[0], /mcp-launcher\.cjs$/);
+});
+
 test("ensureRuntimeSession launches a real host adapter turn for new sessions", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-runtime-test-"));
   process.env.RELAY_CONFIG_DIR = dir;

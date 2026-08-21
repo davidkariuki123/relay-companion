@@ -3,6 +3,7 @@ import fs from "node:fs";
 import test from "node:test";
 
 const html = fs.readFileSync(new URL("../overlay/inbox.html", import.meta.url), "utf8");
+const main = fs.readFileSync(new URL("../overlay/main.cjs", import.meta.url), "utf8");
 
 function between(source, startMarker, endMarker) {
   const start = source.indexOf(startMarker);
@@ -70,4 +71,30 @@ test("Agent connections wears the shared section species too, not the caption la
   // a td-label header among sv-open-title siblings (David, 2026-08-18).
   assert.match(html, /class="sv-provider-section" data-stop="1">\s*<div class="sv-open-title">Agent connections<\/div>\s*<div class="sv-open-intro">/);
   assert.doesNotMatch(html, /sv-provider-intro/);
+});
+
+test("Agent connections says subscription sign-in, never implementation jargon or fake reconnect", () => {
+  assert.match(html, /Claude Code uses your Claude subscription; Codex uses your ChatGPT subscription/);
+  assert.match(html, /never sees or stores your sign-in credentials/);
+  assert.match(html, /"Sign in to Claude Code" : "Sign in to Codex"/);
+  assert.match(html, /"Use Claude subscription" : "Use ChatGPT subscription"/);
+  assert.match(html, /item\.connected\s*\? "Connected"/);
+  assert.match(html, /item\.connected[\s\S]*connectDisabled/);
+  assert.doesNotMatch(html, /Connect local profile|This Mac's existing local profile/);
+  assert.doesNotMatch(html, /item\.connected \? "Reconnect"/);
+});
+
+test("provider routes never inherit another provider's model or historical transcript", () => {
+  const start = between(main, "async function startTaskFromPreview", "function forgeTaskSessionQuietly");
+  assert.match(start, /selectedHost === "codex" && \/\^claude-\/i\.test\(requestedModel\)/);
+  assert.match(start, /selectedHost === "claude" && \/\^gpt-\/i\.test\(requestedModel\)/);
+
+  const taskIpc = between(main, 'ipcMain.handle("relay:taskStart"', '// The agent document of an ordinary Relay');
+  const localIpc = between(main, 'ipcMain.handle("relay:relayWorkStart"', '// The session face\'s feed');
+  assert.match(taskIpc, /model: \(route && route\.model\) \|\| ""/);
+  assert.match(localIpc, /model: \(route && route\.model\) \|\| ""/);
+
+  const preview = between(main, "async function previewTaskSession", "const providerCompletionInflight");
+  assert.match(preview, /requestedProvider === "codex" && codexPath \? "codex"/);
+  assert.match(preview, /requestedProvider === "claude" && claudePath \? "claude"/);
 });

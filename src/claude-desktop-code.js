@@ -8,6 +8,7 @@ import { spawn as spawnChild } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { adoptClaudeSessionIntoDesktop } from "./claude-session-writer.js";
 
 const liveWorkers = new Map();
@@ -68,7 +69,31 @@ function permissionArgs(permissionMode) {
  * server resolves developer capability from the signed-in Relay account; this
  * copy also strips mode flags left behind by older registrations.
  */
-export function relayTaskMcpConfig(homedir = os.homedir()) {
+export function relayTaskMcpConfig(homedir = os.homedir(), {
+  execPath = process.execPath,
+  electron = Boolean(process.versions?.electron),
+  binPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../bin/relay.js"),
+  env = process.env,
+} = {}) {
+  // The live pill is an Electron process. Reusing its persistent host
+  // registration here can route a private Claude worker through an updater
+  // launcher that another runtime is concurrently refreshing. More
+  // importantly, process.execPath is Electron, not Node: it needs the official
+  // run-as-Node switch or Claude waits out its MCP deadline before dropping the
+  // Relay tools. A provider-owned worker should bind to the exact runtime that
+  // created it and must not rewrite the user's persistent registration.
+  if (electron) {
+    const childEnv = { ELECTRON_RUN_AS_NODE: "1" };
+    for (const key of ["RELAY_API_URL", "RELAY_DEVICE_TOKEN", "RELAY_CONFIG_DIR"]) {
+      if (env[key]) childEnv[key] = env[key];
+    }
+    return JSON.stringify({ mcpServers: { relay: {
+      type: "stdio",
+      command: execPath,
+      args: [binPath, "mcp"],
+      env: childEnv,
+    } } });
+  }
   let config;
   try {
     config = JSON.parse(fs.readFileSync(path.join(homedir, ".claude.json"), "utf8"));

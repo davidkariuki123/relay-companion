@@ -646,6 +646,14 @@ test("Claude partial output and the optimistic follow-up are merged into the liv
   assert.match(inbox, /runFeedPending\.has\(key\)/, "polling resumes only after the provider accepts the turn");
 });
 
+test("starting a fresh provider run clears stale follow-up presentation state", () => {
+  const start = between(main, "async function startTaskFromPreview", "function forgeTaskSessionQuietly");
+  assert.match(start, /const freshRunFollowUpState = isRequest/);
+  assert.match(start, /taskFollowUpText: "", taskFollowUpAt: null/);
+  assert.match(start, /workFollowUpText: "", workFollowUpAt: null/);
+  assert.equal((start.match(/\.\.\.freshRunFollowUpState/g) || []).length, 3, "Cowork, Claude, and Codex all reset an older provider turn");
+});
+
 test("a For-you Request reply is optimistic correspondence and remains in the person's conversation", () => {
   const reader = between(inbox, "if (!onAgent && !onWork)", "const oc = readerBodyEl.querySelector");
   assert.match(reader, /optimisticChatReplies\.set\(idempotencyKey/);
@@ -857,6 +865,11 @@ test("ordinary Relay folders address the human, the agent, and local Work separa
   assert.match(wiring, /readerTab = "work"/);
   assert.match(reader, /data-rtab="work"[^]*<span class="lab">Work<\/span>/);
   assert.match(startHandler, /localWork: true/);
+  assert.doesNotMatch(startHandler, /model:\s*\(route && route\.model\) \|\| "claude-opus-5"/,
+    "an omitted Codex model must use Codex's own default");
+  const starter = between(main, "async function startTaskFromPreview", "function forgeTaskSessionQuietly");
+  assert.match(starter, /selectedHost === "codex" && \/\^claude-\/i\.test\(requestedModel\)/,
+    "a stale Claude model can never cross into Codex");
   assert.match(main, /const isLocalWork = input\?\.localWork === true/);
   assert.match(main, /if \(isRequest\) \{[^]*client\.taskStarted\(id\)/,
     "ordinary local work must not stamp a Request receipt");
@@ -1013,11 +1026,15 @@ test("only native end-to-end providers can start a request", () => {
 
 test("Settings exposes complete subscription connection management for Claude Code and Codex", () => {
   assert.match(inbox, /Agent connections/);
-  assert.match(inbox, /Relay never receives or stores your password, OAuth code, or provider token/);
-  assert.match(inbox, /This Mac's existing local profile/);
-  assert.match(inbox, /sessions, settings, MCPs, and account connectors/);
+  assert.match(inbox, /Claude Code uses your Claude subscription; Codex uses your ChatGPT subscription/);
+  assert.match(inbox, /never sees or stores your sign-in credentials/);
+  assert.doesNotMatch(inbox, /This Mac's existing local profile/);
+  assert.match(inbox, /Sessions, settings, MCPs, and connectors/);
   assert.match(inbox, /data-provider-connect="\$\{id\}"/);
-  assert.match(inbox, /item\.connected \? "Reconnect" : "Connect local profile"/);
+  assert.match(inbox, /item\.connected\s*\? "Connected"/);
+  assert.match(inbox, /"Sign in to Claude Code" : "Sign in to Codex"/);
+  assert.match(inbox, /"Use Claude subscription" : "Use ChatGPT subscription"/);
+  assert.doesNotMatch(inbox, /Connect local profile/);
   assert.doesNotMatch(inbox, /data-provider-refresh|Refresh status/);
   assert.doesNotMatch(inbox, /data-provider-open|Open \$\{esc\(item\.label\)\}/);
   assert.match(inbox, /Local MCPs/);
@@ -1030,7 +1047,7 @@ test("Settings exposes complete subscription connection management for Claude Co
   assert.match(inbox, /role="dialog" aria-modal="true"/);
   assert.match(inbox, /placeholder="Search integrations"/);
   assert.match(inbox, /data-provider-enable="\$\{id\}"/);
-  assert.match(inbox, /Disabled in Relay/);
+  assert.match(inbox, /Disabled for Requests/);
   assert.match(inbox, /window\.addEventListener\("focus", \(\) => \{[\s\S]*activeView === "settings"[\s\S]*loadSettings\(\)/);
   assert.match(inbox, /document\.addEventListener\("visibilitychange"[\s\S]*document\.visibilityState === "visible"[\s\S]*loadSettings\(\)/);
   assert.match(pillPreload, /providerAuthStatus: \(\) => ipcRenderer\.invoke\("relay:providerAuthStatus"\)/);

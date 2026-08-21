@@ -34,6 +34,7 @@ test("Claude status accepts only the official first-party subscription login", a
   });
   assert.equal(connected.connected, true);
   assert.equal(connected.subscription, true);
+  assert.equal(connected.authState, "subscription");
   assert.equal(connected.detail, "Claude subscription");
 
   const apiBilled = await providerAuthStatus("claude", {
@@ -42,6 +43,7 @@ test("Claude status accepts only the official first-party subscription login", a
     execFile: async () => ({ stdout: JSON.stringify({ loggedIn: true, authMethod: "api_key", apiProvider: "firstParty" }) }),
   });
   assert.equal(apiBilled.connected, false);
+  assert.equal(apiBilled.authState, "api_billing");
   assert.match(apiBilled.detail, /API billing/);
 });
 
@@ -53,6 +55,7 @@ test("Codex status accepts ChatGPT subscription login and rejects API-key billin
     execFile: async () => ({ stdout: "Logged in using ChatGPT" }),
   });
   assert.equal(connected.connected, true);
+  assert.equal(connected.authState, "subscription");
   assert.equal(connected.detail, "ChatGPT subscription");
 
   const apiBilled = await providerAuthStatus("codex", {
@@ -61,6 +64,7 @@ test("Codex status accepts ChatGPT subscription login and rejects API-key billin
     execFile: async () => ({ stdout: "Logged in using an API key" }),
   });
   assert.equal(apiBilled.connected, false);
+  assert.equal(apiBilled.authState, "api_billing");
   assert.match(apiBilled.detail, /API billing/);
 });
 
@@ -117,7 +121,7 @@ test("non-desktop fallback launches each official subscription login inside a ma
   _test.lastAttempts.clear();
 });
 
-test("desktop Connect opens visible official subscription flows and monitors only a non-secret result marker", async () => {
+test("desktop sign-in opens each official CLI subscription flow and monitors only a non-secret result marker", async () => {
   const prefsFile = tempPrefs();
   const calls = [];
   function spawn(command, args, options) {
@@ -174,17 +178,28 @@ test("desktop Connect opens visible official subscription flows and monitors onl
     terminalApp: "Test Terminal",
     execFile: disconnectedExec,
   });
-  assert.equal(codexStart.interaction, "provider_app");
-  assert.deepEqual(calls[1].args, ["-a", "ChatGPT"]);
-  assert.equal(calls[1].args.some((arg) => /login/i.test(arg)), false, "Relay never rotates Codex credentials");
+  assert.equal(codexStart.interaction, "terminal");
+  assert.deepEqual(calls[1].args.slice(0, 2), ["-a", "Test Terminal"]);
+  const codexScript = calls[1].args[2];
+  assert.equal(fs.statSync(codexScript).mode & 0o777, 0o700);
+  const codexSource = fs.readFileSync(codexScript, "utf8");
+  assert.match(codexSource, /codex' 'login'/);
+  assert.doesNotMatch(codexSource, /with-api-key|access[_-]?token|oauth[_-]?code|client[_-]?secret/i);
+  calls[1].child.emit("close", 0);
   const codexAttempt = _test.activeLogins.get("codex");
-  clearTimeout(codexAttempt.timer);
-  calls[1].child.emit("error", new Error("test cleanup"));
+  fs.writeFileSync(codexAttempt.markerPath, "0\n", { mode: 0o600 });
+  const codexStatus = await providerAuthStatus("codex", {
+    command: "/opt/homebrew/bin/codex",
+    prefsFile,
+    execFile: async () => ({ stdout: "Logged in using ChatGPT" }),
+  });
+  assert.equal(codexStatus.connected, true);
+  assert.equal(fs.existsSync(codexScript), false, "temporary Codex command is removed after the marker is consumed");
   _test.activeLogins.clear();
   _test.lastAttempts.clear();
 });
 
-test("Connect is a no-op for an already connected local profile", async () => {
+test("Sign in is a no-op when the required subscription is already connected", async () => {
   const prefsFile = tempPrefs();
   let spawned = false;
   const result = await connectProvider("codex", {
@@ -228,7 +243,7 @@ test("the packaged macOS runner owns a real PTY even when its parent uses pipes"
   assert.equal(code, 0, "provider process keeps a real stdin/stdout/stderr TTY");
 });
 
-test("a browser success that does not persist provider auth surfaces an explicit failure", async () => {
+test("a provider sign-in that does not persist subscription auth surfaces an explicit failure", async () => {
   const prefsFile = tempPrefs();
   let child;
   function spawn() {
@@ -256,6 +271,21 @@ test("a browser success that does not persist provider auth surfaces an explicit
   assert.equal(status.connected, false);
   assert.match(status.detail, /was not saved/i);
   _test.lastAttempts.clear();
+});
+
+test("the Request gate names the exact subscription recovery for signed-out and API-billed providers", async () => {
+  const prefsFile = tempPrefs();
+  await assert.rejects(assertProviderReady("claude", {
+    command: "/opt/homebrew/bin/claude",
+    prefsFile,
+    execFile: disconnectedExec,
+  }), /needs your Claude subscription[\s\S]*Agent connections[\s\S]*Sign in to Claude Code/);
+
+  await assert.rejects(assertProviderReady("codex", {
+    command: "/opt/homebrew/bin/codex",
+    prefsFile,
+    execFile: async () => ({ stdout: "Logged in using an API key" }),
+  }), /API billing[\s\S]*ChatGPT subscription[\s\S]*Sign in to Codex/);
 });
 
 test("Settings auth status is cheap and does not inventory integrations", async () => {
