@@ -847,6 +847,8 @@ test("successful Request launch acknowledgement expires instead of surviving Don
 
 test("ordinary Relay folders address the human, the agent, and local Work separately", () => {
   const reader = between(inbox, "function renderReader()", "// ---------- the requests board");
+  const sharedIdleDock = between(inbox, "function idleRunDockHtml", "function requestDockHtml");
+  const requestDock = between(inbox, "function requestDockHtml", "function relayWorkDockHtml");
   const workDock = between(inbox, "function relayWorkDockHtml", "function requestControlsHtml");
   const wiring = between(inbox, "function wireRequestControls", "function requestsWaitingCount");
   const startHandler = between(main, 'ipcMain.handle("relay:relayWorkStart"', "// The session face's feed");
@@ -855,8 +857,16 @@ test("ordinary Relay folders address the human, the agent, and local Work separa
     "the agent document cannot retain the human reply composer");
   assert.match(reader, /if \(!onAgent && !onWork\)/,
     "the direct human reply path belongs only to For you");
-  assert.match(workDock, /placeholder="Tell \$\{esc\(rt\.app\)\} anything…"/);
-  assert.match(workDock, /data-work-start="\$\{esc\(r\.id\)\}">Send</);
+  assert.match(sharedIdleDock, /placeholder="Tell \$\{esc\(rt\.app\)\} anything…"/);
+  assert.match(sharedIdleDock, /data-route-menu="app"/);
+  assert.match(sharedIdleDock, /data-route-menu="model"/);
+  assert.match(sharedIdleDock, /data-route-menu="effort"/);
+  assert.match(sharedIdleDock, /data-open-in="\$\{esc\(r\.id\)\}"/);
+  assert.match(sharedIdleDock, /data-work-start="\$\{esc\(r\.id\)\}"/);
+  assert.match(requestDock, /return idleRunDockHtml\(r,/,
+    "Requests use the shared route-selecting composer");
+  assert.match(workDock, /return idleRunDockHtml\(r, \{ inline, draft, action: "work", label: "Send" \}\);/,
+    "ordinary Relay Work uses that same composer with Send as its verb");
   assert.match(workDock, /const starting = live && !hasSession/);
   assert.match(workDock, /starting \? "Starting" : live \? "Queue" : "Send"/,
     "the startup gap cannot expose a second send");
