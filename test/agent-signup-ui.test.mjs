@@ -26,6 +26,21 @@ test("unpaired first run is one in-pill account flow ending at the normal inbox"
   assert.doesNotMatch(overlay, /Welcome to Relay|welcome tutorial|first-launch tutorial/i);
 });
 
+test("signup errors are human recovery copy, never raw Electron IPC failures", () => {
+  assert.match(overlay, /invalid_email_code[\s\S]*That code isn’t right or has expired\. Try again\./);
+  assert.match(overlay, /network_unavailable[\s\S]*Relay couldn’t connect\. Check your internet and try again\./);
+  assert.match(overlay, /authorization is unavailable[\s\S]*Relay couldn’t secure setup on this computer\./);
+  assert.match(overlay, /signupError = signupFailureMessage\(reason, fallback\)/);
+  assert.doesNotMatch(overlay, /signupError = reason && reason\.message/);
+});
+
+test("email signup keeps a user recoverable when delivery is delayed or filtered", () => {
+  assert.match(overlay, /Check spam if you don’t see it\./);
+  assert.match(overlay, /Send another code/);
+  assert.match(overlay, /suCodeResend[\s\S]*installationAuthEmailStart\(signupEmail\)/);
+  assert.match(overlay, /email_code_cooldown[\s\S]*A code was just sent\. Check your inbox or wait a moment\./);
+});
+
 test("renderer installation IPC is capability-shaped and never exposes credentials", () => {
   for (const method of [
     "installationAuthState",

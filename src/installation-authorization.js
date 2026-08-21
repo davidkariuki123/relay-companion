@@ -13,6 +13,12 @@ const { writeCredential, readCredential, deleteCredential } = createRequire(impo
 export const INSTALLATION_AUTHORIZATION_FILE = "installation-authorization.json";
 export const INSTALLATION_CREDENTIAL_SERVICE = "work.relay.companion.installation";
 export const INSTALLATION_CREDENTIAL_ACCOUNT = "authorization";
+const INSTALLATION_CREDENTIAL_ACCOUNTS = Object.freeze({
+  authorizationId: "authorization-id",
+  clientSecret: "client-secret",
+  codeVerifier: "code-verifier",
+  activationToken: "activation-token",
+});
 const AUTHORIZATION_STATUSES = new Set([
   "pending_identity",
   "pending_approval",
@@ -48,20 +54,69 @@ function defaultStateStore(file = statePath()) {
   };
 }
 
-function defaultSecretStore() {
-  const options = {
-    service: INSTALLATION_CREDENTIAL_SERVICE,
-    account: INSTALLATION_CREDENTIAL_ACCOUNT,
+export function createNativeInstallationSecretStore({
+  webBase = DEFAULT_WEB_URL,
+  service = INSTALLATION_CREDENTIAL_SERVICE,
+} = {}) {
+  const options = (account) => ({ service, account });
+  const accounts = Object.values(INSTALLATION_CREDENTIAL_ACCOUNTS);
+  const removeAccounts = () => {
+    const results = [...accounts, INSTALLATION_CREDENTIAL_ACCOUNT]
+      .map((account) => deleteCredential(options(account)));
+    const failed = results.find((result) => !result?.ok);
+    return failed || { ok: true, value: "", detail: "" };
   };
   return {
-    write(value) { return writeCredential(JSON.stringify(value), options); },
+    write(value) {
+      let activationUrl;
+      try { activationUrl = new URL(String(value?.activationUrl || "")); }
+      catch { return { ok: false, detail: "invalid activation URL" }; }
+      const activationToken = new URLSearchParams(activationUrl.hash.slice(1)).get("activationToken") || "";
+      const fields = {
+        authorizationId: String(value?.authorizationId || ""),
+        clientSecret: String(value?.clientSecret || ""),
+        codeVerifier: String(value?.codeVerifier || ""),
+        activationToken,
+      };
+      if (Object.values(fields).some((field) => !field)) {
+        return { ok: false, detail: "installation authorization is incomplete" };
+      }
+      const written = [];
+      for (const [field, account] of Object.entries(INSTALLATION_CREDENTIAL_ACCOUNTS)) {
+        const result = writeCredential(fields[field], options(account));
+        if (!result?.ok) {
+          for (const prior of written) deleteCredential(options(prior));
+          return result;
+        }
+        written.push(account);
+      }
+      deleteCredential(options(INSTALLATION_CREDENTIAL_ACCOUNT));
+      return { ok: true, value: "", detail: "" };
+    },
     read() {
-      const result = readCredential(options);
-      if (!result.ok) return result;
-      try { return { ok: true, value: JSON.parse(result.value) }; }
+      const values = {};
+      let missing = null;
+      for (const [field, account] of Object.entries(INSTALLATION_CREDENTIAL_ACCOUNTS)) {
+        const result = readCredential(options(account));
+        if (!result?.ok) { missing = result; break; }
+        values[field] = result.value;
+      }
+      if (!missing) {
+        const target = new URL(`/activate/${encodeURIComponent(values.authorizationId)}`, normalizeWebOrigin(webBase));
+        target.hash = new URLSearchParams({ activationToken: values.activationToken }).toString();
+        return { ok: true, value: {
+          authorizationId: values.authorizationId,
+          clientSecret: values.clientSecret,
+          codeVerifier: values.codeVerifier,
+          activationUrl: target.toString(),
+        } };
+      }
+      const legacy = readCredential(options(INSTALLATION_CREDENTIAL_ACCOUNT));
+      if (!legacy.ok) return missing;
+      try { return { ok: true, value: JSON.parse(legacy.value) }; }
       catch { return { ok: false, detail: "stored authorization is invalid" }; }
     },
-    delete() { return deleteCredential(options); },
+    delete() { return removeAccounts(); },
   };
 }
 
@@ -204,7 +259,7 @@ export function createInstallationAuthorizationController({
   fetchImpl = globalThis.fetch,
   openExternal = async () => false,
   durableStore = defaultStateStore(),
-  secretStore = defaultSecretStore(),
+  secretStore = createNativeInstallationSecretStore({ webBase }),
   now = () => Date.now(),
   isPaired = () => Boolean(readConfig().deviceToken),
   persistAccount = (registration) => persistPairedAccount({
