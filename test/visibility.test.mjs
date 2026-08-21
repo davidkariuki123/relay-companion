@@ -262,3 +262,16 @@ test("quitRelayCommand stops the daemon BEFORE the pill's own service (macOS) an
   assert.match(winArgs[1], /Relay Companion Daemon/);
   assert.match(winArgs[1], /Relay Companion Pill/);
 });
+
+test("Quit Relay explains the consequence and the platform recovery path before unloading services", async () => {
+  const { quitRelayConfirmationOptions } = await import("../overlay/visibility.cjs");
+  const mac = quitRelayConfirmationOptions({ platform: "darwin" });
+  assert.deepEqual(mac.buttons, ["Cancel", "Quit Relay"]);
+  assert.equal(mac.defaultId, 0, "an accidental Return keeps Relay running");
+  assert.equal(mac.cancelId, 0);
+  assert.match(mac.detail, /stop receiving messages/);
+  assert.match(mac.detail, /Spotlight, Launchpad, or Applications/);
+
+  const windows = quitRelayConfirmationOptions({ platform: "win32" });
+  assert.match(windows.detail, /Start menu/);
+});

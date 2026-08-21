@@ -143,7 +143,9 @@ function sentRefreshDelayMs({ testMode = false, engaged = false, showActive = fa
 // services. Order matters — the daemon first, the pill's own service LAST,
 // because the second bootout kills the process that spawned the shell.
 // launchctl bootout (not kickstart/stop) is the verb that beats KeepAlive;
-// the jobs return at next login (RunAtLoad) or via `relay pill`.
+// the jobs return at next login (RunAtLoad) or when the person opens the
+// installed Relay app, whose launcher restores both services before showing the
+// pill. `relay pill` alone is intentionally only a UI command.
 function quitRelayCommand({ platform = process.platform, uid = 501 } = {}) {
   if (platform === "win32") {
     return [
@@ -161,8 +163,30 @@ function quitRelayCommand({ platform = process.platform, uid = 501 } = {}) {
   ];
 }
 
+// Quitting a dockless menu-bar app removes the only persistent affordance the
+// person can click. Confirm both the consequence and the ordinary recovery path
+// before doing that. The platform-specific wording names the launcher people can
+// actually find; it does not imply that hiding/closing the pill stops Relay.
+function quitRelayConfirmationOptions({ platform = process.platform } = {}) {
+  const reopen = platform === "darwin"
+    ? "Open Relay from Spotlight, Launchpad, or Applications to start it again."
+    : platform === "win32"
+      ? "Open Relay from the Start menu to start it again."
+      : "Open Relay again to start it again.";
+  return {
+    type: "warning",
+    buttons: ["Cancel", "Quit Relay"],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+    message: "Quit Relay?",
+    detail: `Relay will stop receiving messages on this computer. ${reopen}`,
+  };
+}
+
 module.exports = {
   quitRelayCommand,
+  quitRelayConfirmationOptions,
   hostPollDelayMs,
   sentRefreshDelayMs,
   overlayWanted,

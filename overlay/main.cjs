@@ -20,7 +20,7 @@
 //   - Mutations (accept/reject/approve/decline/answer) call RelayClient with device-token
 //     auth. ack/mark-read writes state.json directly (atomic temp+rename).
 
-const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, powerMonitor, powerSaveBlocker, shell, screen, systemPreferences } = require("electron");
+const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage, powerMonitor, powerSaveBlocker, shell, screen, systemPreferences } = require("electron");
 
 // The pill is an accessory window that spends most of its life idle behind other
 // apps. Both Chromium and macOS treat that as "safe to throttle", and the cost is
@@ -78,6 +78,7 @@ const {
   boundedPresentedRelayIds,
   recoverInterruptedAttentionPrefs,
   quitRelayCommand,
+  quitRelayConfirmationOptions,
   hostPollDelayMs,
   sentRefreshDelayMs,
 } = require("./visibility.cjs");
@@ -6027,7 +6028,16 @@ function syncTray() {
 // "Quit Relay" from the tray: stop the daemon and the pill's own service via a
 // DETACHED shell (the second bootout kills this process, so the shell must
 // outlive us), then quit the app immediately for instant visual feedback.
-function quitRelayCompletely() {
+async function quitRelayCompletely() {
+  try {
+    const confirmation = await dialog.showMessageBox(quitRelayConfirmationOptions({ platform: process.platform }));
+    if (confirmation.response !== 1) return;
+  } catch (error) {
+    // A broken confirmation surface must fail closed: losing Relay's only visible
+    // launcher is more harmful than leaving it running.
+    console.error(`[overlay] ${new Date().toISOString()} quit confirmation failed:`, error && error.message);
+    return;
+  }
   try {
     const uid = typeof process.getuid === "function" ? process.getuid() : 501;
     const [cmd, args] = quitRelayCommand({ platform: process.platform, uid });
@@ -6218,7 +6228,7 @@ function createTray() {
               ? [{ label: `Update ready (${availableUpdate}) — restart now?`, click: runUpdateNow }]
               : [{ label: `Relay ${pillVersion()}`, enabled: false }]),
           { type: "separator" },
-          { label: "Quit Relay", click: quitRelayCompletely },
+          { label: "Quit Relay…", click: quitRelayCompletely },
         ]),
       );
     } catch (error) {

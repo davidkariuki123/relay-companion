@@ -290,6 +290,7 @@ export function installRelayMacApp({
   const launcherPath = path.join(resourcesDir, "relay-launcher.sh");
   const logPath = path.join(homeDir, ".relay", "pill.log");
   const pillStatusPath = path.join(homeDir, ".relay-companion", "pill-status.json");
+  const daemonPlistPath = path.join(homeDir, "Library", "LaunchAgents", `${DAEMON_LAUNCH_LABEL}.plist`);
   const pillPlistPath = path.join(homeDir, "Library", "LaunchAgents", `${PILL_LAUNCH_LABEL}.plist`);
   const version = packageVersion(packageRoot);
 
@@ -320,16 +321,27 @@ export function installRelayMacApp({
       "#!/bin/sh",
       'nonce="app-$$-$(date +%s)"',
       'domain="gui/$(id -u)"',
-      `service="$domain/${PILL_LAUNCH_LABEL}"`,
-      `plist=${shellSingleQuote(pillPlistPath)}`,
+      `daemon_service="$domain/${DAEMON_LAUNCH_LABEL}"`,
+      `pill_service="$domain/${PILL_LAUNCH_LABEL}"`,
+      `daemon_plist=${shellSingleQuote(daemonPlistPath)}`,
+      `pill_plist=${shellSingleQuote(pillPlistPath)}`,
       `status=${shellSingleQuote(pillStatusPath)}`,
-      // If an agent unloaded Relay rather than merely killing it, restore the
-      // launchd-owned process first. Otherwise a standalone Electron process would
-      // work temporarily but later fight KeepAlive when repair/bootstrap runs.
-      'if ! /bin/launchctl print "$service" >/dev/null 2>&1 && [ -f "$plist" ]; then',
-      '  /bin/launchctl bootstrap "$domain" "$plist" >/dev/null 2>&1 || true',
+      // Relay.app is the recovery path after a deliberate Quit. Quit unloads both
+      // launch agents, so opening the product must restore the PRODUCT (receive
+      // daemon + status item/pill), not merely spawn a temporary pill window.
+      // Refuse a stale application bundle after uninstall instead of resurrecting
+      // an ownerless Electron process.
+      'if [ ! -f "$daemon_plist" ] || [ ! -f "$pill_plist" ]; then',
+      "  exit 1",
       "fi",
-      '/bin/launchctl kickstart "$service" >/dev/null 2>&1 || true',
+      'if ! /bin/launchctl print "$daemon_service" >/dev/null 2>&1; then',
+      '  /bin/launchctl bootstrap "$domain" "$daemon_plist" >/dev/null 2>&1 || true',
+      "fi",
+      '/bin/launchctl kickstart "$daemon_service" >/dev/null 2>&1 || true',
+      'if ! /bin/launchctl print "$pill_service" >/dev/null 2>&1; then',
+      '  /bin/launchctl bootstrap "$domain" "$pill_plist" >/dev/null 2>&1 || true',
+      "fi",
+      '/bin/launchctl kickstart "$pill_service" >/dev/null 2>&1 || true',
       // launchd's `state = running` only means exec started; it can be reported
       // before Electron acquires the single-instance lock. Wait for the owner's
       // atomic ready acknowledgement instead, and verify its pid is still alive.
