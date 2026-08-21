@@ -77,52 +77,150 @@ function fetchBuffer(url, redirects = 0, maxBytes = 2 * 1024 * 1024) {
   });
 }
 
-function downloadVerifiedArtifact(url, file, artifact) {
-  return new Promise((resolve, reject) => {
-    const parsed = new URL(url);
-    if (parsed.protocol !== "https:" || parsed.origin !== RELEASE_ORIGIN) {
-      return reject(new Error(`Relay refused an untrusted artifact origin: ${parsed.origin}`));
+const MAX_ARTIFACT_BYTES = 750 * 1024 * 1024;
+const ARTIFACT_DOWNLOAD_ATTEMPTS = 6;
+
+class PermanentArtifactDownloadError extends Error {}
+
+function artifactResponseShape(response, offset, totalBytes) {
+  const expectedBytes = totalBytes - offset;
+  const contentLength = Number(response.headers["content-length"]);
+  if (!Number.isSafeInteger(contentLength) || contentLength !== expectedBytes) {
+    throw new PermanentArtifactDownloadError("Release artifact Content-Length does not match its signed manifest");
+  }
+  if (offset === 0) {
+    if (response.statusCode !== 200) {
+      throw new PermanentArtifactDownloadError(`Release artifact returned HTTP ${response.statusCode}`);
     }
-    const request = https.get(parsed, { headers: { "user-agent": `${PACKAGE_NAME}/${packageJson.version}` } }, async (response) => {
-      if (response.statusCode !== 200) {
+    return expectedBytes;
+  }
+  if (response.statusCode !== 206) {
+    throw new PermanentArtifactDownloadError(`Release artifact resume returned HTTP ${response.statusCode}`);
+  }
+  const contentRange = String(response.headers["content-range"] || "");
+  const match = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(contentRange);
+  if (
+    !match ||
+    Number(match[1]) !== offset ||
+    Number(match[2]) !== totalBytes - 1 ||
+    Number(match[3]) !== totalBytes
+  ) {
+    throw new PermanentArtifactDownloadError("Release artifact resume returned an invalid Content-Range");
+  }
+  return expectedBytes;
+}
+
+function downloadArtifactAttempt({ parsed, file, artifact, offset, get }) {
+  return new Promise((resolve, reject) => {
+    let complete = false;
+    let responseStream = null;
+    let responseDeadline = null;
+    const finish = (error) => {
+      if (complete) return;
+      complete = true;
+      if (responseDeadline) clearTimeout(responseDeadline);
+      if (error) reject(error);
+      else resolve();
+    };
+    const headers = {
+      "user-agent": `${PACKAGE_NAME}/${packageJson.version}`,
+      "accept-encoding": "identity",
+      ...(offset > 0 ? { range: `bytes=${offset}-` } : {}),
+    };
+    const request = get(parsed, { headers }, async (response) => {
+      if (responseDeadline) clearTimeout(responseDeadline);
+      responseStream = response;
+      let expectedBytes;
+      try {
+        expectedBytes = artifactResponseShape(response, offset, artifact.bytes);
+      } catch (error) {
         response.resume();
-        return reject(new Error(`Release artifact returned HTTP ${response.statusCode}`));
+        return finish(error);
       }
-      const declaredLength = Number(response.headers["content-length"]);
-      if (!Number.isSafeInteger(declaredLength) || declaredLength !== artifact.bytes) {
-        response.resume();
-        return reject(new Error("Release artifact Content-Length does not match its signed manifest"));
-      }
-      let bytes = 0;
-      const hash = crypto.createHash("sha512");
-      const fd = fs.openSync(file, "wx", 0o600);
-      const output = fs.createWriteStream(file, { fd, autoClose: false });
+      let received = 0;
       response.on("data", (chunk) => {
-        bytes += chunk.length;
-        hash.update(chunk);
-        if (bytes > artifact.bytes || bytes > 750 * 1024 * 1024) {
-          request.destroy(new Error("Release artifact exceeded its signed size"));
+        received += chunk.length;
+        if (received > expectedBytes) {
+          request.destroy(new PermanentArtifactDownloadError("Release artifact exceeded its signed size"));
         }
       });
       try {
-        await pipeline(response, output);
-        if (bytes !== artifact.bytes) fail(`Relay artifact size mismatch (${bytes} != ${artifact.bytes}).`);
-        const actual = `sha512-${hash.digest("base64")}`;
-        if (actual.length !== artifact.sha512.length || !crypto.timingSafeEqual(Buffer.from(actual), Buffer.from(artifact.sha512))) {
-          fail("Relay artifact checksum is invalid.");
+        if (fs.statSync(file).size !== offset) {
+          throw new PermanentArtifactDownloadError("Relay artifact staging file changed during download");
         }
-        fs.fsyncSync(fd);
-        fs.closeSync(fd);
-        resolve();
+        const output = fs.createWriteStream(file, { flags: "r+", start: offset, mode: 0o600 });
+        await pipeline(response, output);
+        if (received !== expectedBytes) {
+          throw new Error(`Relay artifact download ended early (${received} != ${expectedBytes}).`);
+        }
+        const fd = fs.openSync(file, "r");
+        try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+        finish();
       } catch (error) {
-        try { fs.closeSync(fd); } catch {}
-        try { fs.rmSync(file, { force: true }); } catch {}
-        reject(error);
+        finish(error);
       }
     });
-    request.setTimeout(10 * 60_000, () => request.destroy(new Error("Release artifact download timed out")));
-    request.on("error", reject);
+    // ClientRequest's socket timeout starts only after a socket is assigned.
+    // Bound DNS, connection, TLS, and response-header setup separately so a
+    // broken network cannot wedge setup before resumable transfer begins.
+    responseDeadline = setTimeout(
+      () => request.destroy(new Error("Release artifact connection timed out")),
+      30_000,
+    );
+    request.setTimeout(60_000, () => request.destroy(new Error("Release artifact download stalled")));
+    request.on("error", (error) => {
+      if (responseStream) responseStream.destroy(error);
+      finish(error);
+    });
   });
+}
+
+function sha512File(file) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash("sha512");
+    const input = fs.createReadStream(file);
+    input.on("data", (chunk) => hash.update(chunk));
+    input.on("error", reject);
+    input.on("end", () => resolve(`sha512-${hash.digest("base64")}`));
+  });
+}
+
+async function downloadVerifiedArtifact(url, file, artifact, options = {}) {
+  const parsed = new URL(url);
+  if (parsed.protocol !== "https:" || parsed.origin !== RELEASE_ORIGIN) {
+    fail(`Relay refused an untrusted artifact origin: ${parsed.origin}`);
+  }
+  if (!Number.isSafeInteger(artifact.bytes) || artifact.bytes <= 0 || artifact.bytes > MAX_ARTIFACT_BYTES) {
+    fail("Release artifact has an unsafe signed size");
+  }
+  const get = options.get || https.get;
+  const sleep = options.sleep || ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
+  const attempts = options.attempts || ARTIFACT_DOWNLOAD_ATTEMPTS;
+  fs.closeSync(fs.openSync(file, "wx", 0o600));
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const offset = fs.statSync(file).size;
+    if (offset > artifact.bytes) fail("Release artifact exceeded its signed size");
+    if (offset === artifact.bytes) break;
+    try {
+      await downloadArtifactAttempt({ parsed, file, artifact, offset, get });
+    } catch (error) {
+      lastError = error;
+      if (error instanceof PermanentArtifactDownloadError) throw error;
+      if (attempt + 1 >= attempts) break;
+      const backoff = Math.min(4_000, 250 * (2 ** attempt));
+      await sleep(backoff + Math.floor(Math.random() * 250));
+    }
+  }
+  const downloadedBytes = fs.statSync(file).size;
+  if (downloadedBytes !== artifact.bytes) {
+    throw new Error(`Relay artifact download failed after ${attempts} attempts (${downloadedBytes}/${artifact.bytes} bytes): ${lastError?.message || lastError || "incomplete response"}`);
+  }
+  const actual = await sha512File(file);
+  if (actual.length !== artifact.sha512.length || !crypto.timingSafeEqual(Buffer.from(actual), Buffer.from(artifact.sha512))) {
+    fs.rmSync(file, { force: true });
+    fail("Relay artifact checksum is invalid.");
+  }
 }
 
 function parseSignedManifest(bytes, { version, platformKey, publicKeyPem, trustStore = trust }) {
@@ -601,6 +699,7 @@ module.exports = {
   activateRuntime,
   acquireCanonicalLock,
   assertCompatibleNode,
+  downloadVerifiedArtifact,
   releasePlatform,
   parseSignedManifest,
   restoreRuntimeLinks,

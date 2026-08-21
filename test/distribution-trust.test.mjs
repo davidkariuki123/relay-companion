@@ -5,7 +5,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { createRequire } from "node:module";
+import { PassThrough } from "node:stream";
 
 import { exactCompanionSpec, npmInstallArgs } from "../src/install.js";
 import {
@@ -38,6 +40,7 @@ const {
   activateRuntime,
   acquireCanonicalLock,
   assertCompatibleNode,
+  downloadVerifiedArtifact,
   restoreRuntimeLinks,
   stageVerifiedRuntime,
   tarInvocation,
@@ -105,6 +108,107 @@ test("bootstrap fails before download on incompatible Node instead of switching 
   assert.equal(assertCompatibleNode("23.0.0"), true);
   assert.throws(() => assertCompatibleNode("22.11.9"), /requires Node\.js 22\.12 or newer/);
   assert.throws(() => assertCompatibleNode("20.19.0"), /will not switch runtimes automatically/);
+});
+
+function fakeArtifactGet(responses, requests) {
+  return (_url, options, callback) => {
+    requests.push(options);
+    const request = new EventEmitter();
+    request.setTimeout = () => request;
+    request.destroy = (error) => queueMicrotask(() => request.emit("error", error));
+    const spec = responses.shift();
+    queueMicrotask(() => {
+      const response = new PassThrough();
+      response.statusCode = spec.statusCode;
+      response.headers = spec.headers;
+      callback(response);
+      response.end(spec.body);
+    });
+    return request;
+  };
+}
+
+test("artifact download resumes a short first response and verifies the complete SHA-512", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-resume-"));
+  const destination = path.join(root, "runtime.tar.gz");
+  const bytes = Buffer.from("a signed runtime that survives an interrupted first response");
+  const firstBytes = 17;
+  const requests = [];
+  const artifact = {
+    bytes: bytes.length,
+    sha512: `sha512-${crypto.createHash("sha512").update(bytes).digest("base64")}`,
+  };
+  const get = fakeArtifactGet([
+    {
+      statusCode: 200,
+      headers: { "content-length": String(bytes.length) },
+      body: bytes.subarray(0, firstBytes),
+    },
+    {
+      statusCode: 206,
+      headers: {
+        "content-length": String(bytes.length - firstBytes),
+        "content-range": `bytes ${firstBytes}-${bytes.length - 1}/${bytes.length}`,
+      },
+      body: bytes.subarray(firstBytes),
+    },
+  ], requests);
+  try {
+    await downloadVerifiedArtifact(
+      "https://api.sendrelays.com/v1/companion-releases/v1.2.3/runtime.tar.gz",
+      destination,
+      artifact,
+      { get, sleep: async () => {}, attempts: 3 },
+    );
+    assert.deepEqual(fs.readFileSync(destination), bytes);
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0].headers.range, undefined);
+    assert.equal(requests[1].headers.range, `bytes=${firstBytes}-`);
+    assert.equal(requests[1].headers["accept-encoding"], "identity");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("artifact resume rejects a mismatched Content-Range without retrying corrupt bytes", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-bad-range-"));
+  const destination = path.join(root, "runtime.tar.gz");
+  const bytes = Buffer.from("signed bytes for strict range validation");
+  const firstBytes = 8;
+  const requests = [];
+  const artifact = {
+    bytes: bytes.length,
+    sha512: `sha512-${crypto.createHash("sha512").update(bytes).digest("base64")}`,
+  };
+  const get = fakeArtifactGet([
+    {
+      statusCode: 200,
+      headers: { "content-length": String(bytes.length) },
+      body: bytes.subarray(0, firstBytes),
+    },
+    {
+      statusCode: 206,
+      headers: {
+        "content-length": String(bytes.length - firstBytes),
+        "content-range": `bytes 0-${bytes.length - 1}/${bytes.length}`,
+      },
+      body: bytes.subarray(firstBytes),
+    },
+  ], requests);
+  try {
+    await assert.rejects(
+      downloadVerifiedArtifact(
+        "https://api.sendrelays.com/v1/companion-releases/v1.2.3/runtime.tar.gz",
+        destination,
+        artifact,
+        { get, sleep: async () => {}, attempts: 3 },
+      ),
+      /invalid Content-Range/,
+    );
+    assert.equal(requests.length, 2);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("published release identity requires public source, integrity, and npm provenance", () => {
