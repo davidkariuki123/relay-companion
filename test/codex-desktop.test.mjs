@@ -12,6 +12,7 @@ import {
   classifyCodexDesktopWindowUrl,
   codexRolloutHasClientMessage,
   codexTurnStartMessage,
+  enqueueCodexProjectMutation,
   isCodexMainCommand,
   primarySubmitRendererResult,
   primaryWindowRan,
@@ -22,11 +23,46 @@ import {
 // renderer globals `window` and `location`. Install fakes on globalThis so bare
 // references resolve, capture what it posts, then restore. `href`/`search` decide
 // whether the code treats this as the hotkey window vs the main window.
-async function withRendererGlobals({ href = "app://-/index.html", search = "", origin = "app://-", activeThreadId = null }, fn) {
+async function withRendererGlobals(
+  {
+    href = "app://-/index.html",
+    search = "",
+    origin = "app://-",
+    activeThreadId = null,
+    localProjects = {},
+    threadProjectAssignments = {},
+    projectlessThreadIds = [],
+    failedHostRequests = [],
+    ignoredHostRequests = [],
+    concurrentAssignmentPatch = null,
+    projectLockAvailable = true,
+  },
+  fn,
+) {
   const sent = [];
   const posted = [];
+  const listeners = new Set();
+  const state = {
+    "local-projects": { ...localProjects },
+    "thread-project-assignments": { ...threadProjectAssignments },
+    "projectless-thread-ids": [...projectlessThreadIds],
+  };
+  let injectedConcurrentAssignment = false;
   const prevWindow = globalThis.window;
   const prevLocation = globalThis.location;
+  const prevNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: {
+      locks: {
+        request: async (name, options, callback) => {
+          assert.equal(name, "relay-codex-project-state");
+          assert.deepEqual(options, { ifAvailable: true });
+          return callback(projectLockAvailable ? { name } : null);
+        },
+      },
+    },
+  });
   globalThis.window = {
     document: {
       querySelectorAll: () => activeThreadId
@@ -36,7 +72,54 @@ async function withRendererGlobals({ href = "app://-/index.html", search = "", o
     electronBridge: {
       sendMessageFromView: async (message) => {
         sent.push(message);
+        if (message.type === "electron-update-workspace-root-options") {
+          state["local-projects"]["relay-project"] = {
+            id: "relay-project",
+            name: "Relay",
+            rootPaths: [...message.roots],
+          };
+        }
+        if (message.type === "fetch") {
+          const name = String(message.url || "").split("/").at(-1);
+          const params = JSON.parse(message.body || "{}");
+          if (ignoredHostRequests.includes(name)) return new Promise(() => {});
+          const failed = failedHostRequests.includes(name);
+          let body = null;
+          if (name === "get-global-state") body = { value: state[params.key] ?? null };
+          if (name === "set-global-state") {
+            if (!failed && params.key === "thread-project-assignments" && concurrentAssignmentPatch && !injectedConcurrentAssignment) {
+              injectedConcurrentAssignment = true;
+              Object.assign(state[params.key], concurrentAssignmentPatch);
+              for (const listener of listeners) {
+                listener({ data: { type: "thread-project-assignments-updated", assignments: concurrentAssignmentPatch } });
+              }
+            }
+            if (!failed) state[params.key] = params.value;
+            body = { success: true };
+          }
+          queueMicrotask(() => {
+            for (const listener of listeners) {
+              listener({
+                data: {
+                  type: "fetch-response",
+                  responseType: failed ? "error" : "success",
+                  requestId: message.requestId,
+                  status: failed ? 500 : 200,
+                  headers: { "content-type": "application/json" },
+                  error: failed ? `${name}-failed` : undefined,
+                  bodyJsonString: JSON.stringify(body),
+                },
+              });
+            }
+          });
+        }
       },
+    },
+    addEventListener: (type, listener) => {
+      if (type === "message") listeners.add(listener);
+    },
+    removeEventListener: (type, listener) => {
+      if (type === "message") listeners.delete(listener);
     },
     postMessage: (msg, targetOrigin) => {
       posted.push({ msg, targetOrigin });
@@ -44,14 +127,35 @@ async function withRendererGlobals({ href = "app://-/index.html", search = "", o
   };
   globalThis.location = { href, search, origin, pathname: "/index.html" };
   try {
-    return await fn({ sent, posted });
+    return await fn({ sent, posted, state });
   } finally {
     globalThis.window = prevWindow;
     globalThis.location = prevLocation;
+    if (prevNavigator) Object.defineProperty(globalThis, "navigator", prevNavigator);
+    else delete globalThis.navigator;
   }
 }
 
 const navPaths = (posted) => posted.filter((p) => p.msg.type === "navigate-to-route").map((p) => p.msg.path);
+
+test("Relay project mutations are serialized across concurrent opens", async () => {
+  const order = [];
+  let releaseFirst;
+  const first = enqueueCodexProjectMutation(async () => {
+    order.push("first-start");
+    await new Promise((resolve) => { releaseFirst = resolve; });
+    order.push("first-end");
+  });
+  const second = enqueueCodexProjectMutation(async () => {
+    order.push("second-start");
+    order.push("second-end");
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, ["first-start"]);
+  releaseFirst();
+  await Promise.all([first, second]);
+  assert.deepEqual(order, ["first-start", "first-end", "second-start", "second-end"]);
+});
 
 function fakeBrowserWindow({
   id,
@@ -173,6 +277,253 @@ test("does not navigate when no thread is being opened", async () => {
   });
 });
 
+test("a foreground Relay open uses Codex's non-navigating native project registration before resume", async () => {
+  await withRendererGlobals({ activeThreadId: "relay-thread" }, async ({ sent, state }) => {
+    const result = await relayRefreshCodexRenderer({
+      threadIds: ["relay-thread"],
+      openThreadId: "relay-thread",
+      ensureWorkspaceRoot: "/Users/tester/Relay",
+      workspaceRootsByThreadId: { "relay-thread": ["/Users/tester/Relay"] },
+      primeMs: 0,
+    });
+
+    const registerIndex = sent.findIndex((message) => message.type === "electron-update-workspace-root-options");
+    const resumeIndex = sent.findIndex((message) => message.type === "maybe-resume-conversation");
+    assert.ok(registerIndex >= 0, "the Relay root is registered through Codex's native project manager");
+    assert.deepEqual(sent[registerIndex].roots, ["/Users/tester/Relay"]);
+    assert.equal(
+      sent.some((message) => message.type === "electron-add-new-workspace-root-option"),
+      false,
+      "first open never invokes the native path that temporarily navigates Home",
+    );
+    assert.ok(resumeIndex > registerIndex, "the project exists before the task is resumed");
+    assert.equal(
+      sent.some((message) => {
+        if (message.type !== "fetch" || !String(message.url).endsWith("/set-global-state")) return false;
+        return JSON.parse(message.body).key === "local-projects";
+      }),
+      false,
+      "Relay never replaces Codex's whole project map",
+    );
+    assert.equal(Object.values(state["local-projects"])[0].name, "Relay");
+    assert.deepEqual(Object.values(state["local-projects"])[0].rootPaths, ["/Users/tester/Relay"]);
+    assert.deepEqual(sent[resumeIndex].workspaceRoots, ["/Users/tester/Relay"]);
+    const relayProject = Object.values(state["local-projects"])[0];
+    assert.deepEqual(state["thread-project-assignments"]["relay-thread"], {
+      projectKind: "local",
+      projectId: relayProject.id,
+    });
+    assert.ok(result.sent.some((item) => item.type === "relay-project-assignment" && item.ok));
+  });
+});
+
+test("background repair never creates or selects a missing Relay project", async () => {
+  await withRendererGlobals({}, async ({ sent }) => {
+    const result = await relayRefreshCodexRenderer({
+      threadIds: ["historical-relay"],
+      ensureWorkspaceRoot: "/Users/tester/Relay",
+      workspaceRootsByThreadId: { "historical-relay": ["/Users/tester/Relay"] },
+      assignmentOnly: true,
+    });
+    assert.equal(result.ok, false);
+    assert.equal(sent.some((message) => message.type === "electron-update-workspace-root-options"), false);
+  });
+});
+
+test("a contended renderer lock fails fast without a late project mutation", async () => {
+  await withRendererGlobals(
+    {
+      activeThreadId: "relay-thread",
+      projectLockAvailable: false,
+    },
+    async ({ sent, state }) => {
+      const started = Date.now();
+      const result = await relayRefreshCodexRenderer({
+        threadIds: ["relay-thread"],
+        openThreadId: "relay-thread",
+        ensureWorkspaceRoot: "/Users/tester/Relay",
+        workspaceRootsByThreadId: { "relay-thread": ["/Users/tester/Relay"] },
+        primeOpen: false,
+        confirmMs: 0,
+      });
+      assert.ok(Date.now() - started < 1000, "lock contention stays below the inspector timeout");
+      assert.equal(result.openConfirmed, true, "the already-visible task remains open");
+      assert.equal(result.projectAssignmentOk, false);
+      assert.deepEqual(state["local-projects"], {});
+      assert.equal(sent.some((message) => message.type === "electron-update-workspace-root-options"), false);
+      assert.ok(result.sent.some((item) => item.error === "project-state-lock-busy"));
+    },
+  );
+});
+
+test("an existing Relay project is reused without registering a duplicate", async () => {
+  await withRendererGlobals(
+    {
+      localProjects: {
+        existing: { id: "existing", name: "Relay", rootPaths: ["/Users/tester/Relay"] },
+      },
+    },
+    async ({ sent, state }) => {
+      await relayRefreshCodexRenderer({
+        threadIds: ["existing-relay-thread"],
+        ensureWorkspaceRoot: "/Users/tester/Relay/",
+        workspaceRootsByThreadId: { "existing-relay-thread": ["/Users/tester/Relay"] },
+        primeMs: 0,
+      });
+      assert.equal(
+        sent.some((message) => {
+          if (message.type !== "fetch" || !String(message.url).endsWith("/set-global-state")) return false;
+          return JSON.parse(message.body).key === "local-projects";
+        }),
+        false,
+      );
+      assert.equal(state["thread-project-assignments"]["existing-relay-thread"].projectId, "existing");
+    },
+  );
+});
+
+test("a failed Relay assignment fails the refresh so startup repair retries", async () => {
+  await withRendererGlobals(
+    {
+      localProjects: {
+        existing: { id: "existing", name: "Relay", rootPaths: ["/Users/tester/Relay"] },
+      },
+      failedHostRequests: ["set-global-state"],
+    },
+    async ({ sent }) => {
+      const result = await relayRefreshCodexRenderer({
+        threadIds: ["relay-thread"],
+        ensureWorkspaceRoot: "/Users/tester/Relay",
+        workspaceRootsByThreadId: { "relay-thread": ["/Users/tester/Relay"] },
+        assignmentOnly: true,
+        primeMs: 0,
+      });
+      assert.equal(result.ok, false);
+      assert.equal(result.projectAssignmentOk, false);
+      assert.ok(result.sent.some((item) => item.type === "relay-project-assignment" && !item.ok));
+      assert.equal(sent.some((message) => message.type === "maybe-resume-conversation"), false);
+    },
+  );
+});
+
+test("a visible open stays confirmed when only the Relay assignment needs retry", async () => {
+  await withRendererGlobals(
+    {
+      activeThreadId: "relay-thread",
+      localProjects: {
+        existing: { id: "existing", name: "Relay", rootPaths: ["/Users/tester/Relay"] },
+      },
+      failedHostRequests: ["set-global-state"],
+    },
+    async () => {
+      const result = await relayRefreshCodexRenderer({
+        threadIds: ["relay-thread"],
+        openThreadId: "relay-thread",
+        ensureWorkspaceRoot: "/Users/tester/Relay",
+        workspaceRootsByThreadId: { "relay-thread": ["/Users/tester/Relay"] },
+        primeOpen: false,
+        confirmMs: 0,
+      });
+      assert.equal(result.openConfirmed, true);
+      assert.equal(result.projectAssignmentOk, false);
+      assert.equal(result.ok, true, "a project retry must not manufacture a second visible open");
+    },
+  );
+});
+
+test("assignment-only repair removes Relay from Recents without rewriting Codex's projectless index", async () => {
+  await withRendererGlobals(
+    {
+      localProjects: {
+        existing: { id: "existing", name: "Relay", rootPaths: ["/Users/tester/Relay"] },
+      },
+      projectlessThreadIds: ["historical-relay", "unrelated-task"],
+    },
+    async ({ sent, state }) => {
+      const result = await relayRefreshCodexRenderer({
+        threadIds: ["historical-relay"],
+        ensureWorkspaceRoot: "/Users/tester/Relay",
+        workspaceRootsByThreadId: { "historical-relay": ["/Users/tester/Relay"] },
+        assignmentOnly: true,
+      });
+      assert.equal(result.ok, true);
+      assert.equal(state["thread-project-assignments"]["historical-relay"].projectId, "existing");
+      assert.deepEqual(
+        state["projectless-thread-ids"],
+        ["historical-relay", "unrelated-task"],
+        "Codex's native projectless bookkeeping is never replaced wholesale",
+      );
+      assert.equal(
+        sent.some((message) => {
+          if (message.type !== "fetch" || !String(message.url).endsWith("/set-global-state")) return false;
+          return JSON.parse(message.body).key === "projectless-thread-ids";
+        }),
+        false,
+      );
+      for (const forbidden of [
+        "hydrate-pinned-threads",
+        "refresh-recent-conversations-for-host",
+        "discard-conversation-from-cache",
+        "ensure-conversation-history-loaded",
+        "maybe-resume-conversation",
+        "broadcast-conversation-snapshot-for-host",
+      ]) {
+        assert.equal(sent.some((message) => message.type === forbidden), false, `${forbidden} must stay off the migration path`);
+      }
+    },
+  );
+});
+
+test("Relay assignment preserves a concurrent Codex project move", async () => {
+  const concurrent = { projectKind: "local", projectId: "other-project" };
+  await withRendererGlobals(
+    {
+      localProjects: {
+        existing: { id: "existing", name: "Relay", rootPaths: ["/Users/tester/Relay"] },
+      },
+      concurrentAssignmentPatch: { "other-thread": concurrent },
+    },
+    async ({ state }) => {
+      const result = await relayRefreshCodexRenderer({
+        threadIds: ["relay-thread"],
+        ensureWorkspaceRoot: "/Users/tester/Relay",
+        workspaceRootsByThreadId: { "relay-thread": ["/Users/tester/Relay"] },
+        assignmentOnly: true,
+      });
+      assert.equal(result.ok, true);
+      assert.deepEqual(state["thread-project-assignments"]["other-thread"], concurrent);
+      assert.equal(state["thread-project-assignments"]["relay-thread"].projectId, "existing");
+    },
+  );
+});
+
+test("an unresponsive Codex state bridge fails assignment within its visual budget", async () => {
+  await withRendererGlobals({ ignoredHostRequests: ["get-global-state"] }, async () => {
+    const started = Date.now();
+    const result = await relayRefreshCodexRenderer({
+      threadIds: ["relay-thread"],
+      ensureWorkspaceRoot: "/Users/tester/Relay",
+      workspaceRootsByThreadId: { "relay-thread": ["/Users/tester/Relay"] },
+      assignmentOnly: true,
+    });
+    assert.equal(result.ok, false);
+    assert.ok(Date.now() - started < 1500, "the assignment path must stay below the outer inspector deadline");
+  });
+});
+
+test("desktop refresh expression preserves per-thread workspace roots", () => {
+  const expression = buildCodexDesktopRefreshExpression({
+    threadIds: ["relay-thread"],
+    ensureWorkspaceRoot: "/Users/tester/Relay",
+    workspaceRootsByThreadId: { "relay-thread": ["/Users/tester/Relay"] },
+  });
+  assert.match(expression, /set-global-state/);
+  assert.match(expression, /electron-update-workspace-root-options/);
+  assert.match(expression, /navigator\?\.locks/);
+  assert.ok(expression.includes("/Users/tester/Relay"));
+  assert.match(expression, /workspaceRootsByThreadId/);
+});
+
 test("a hung bridge send does not block the navigation", async () => {
   const prevWindow = globalThis.window;
   const prevLocation = globalThis.location;
@@ -184,7 +535,7 @@ test("a hung bridge send does not block the navigation", async () => {
   globalThis.location = { href: "app://-/index.html", search: "", origin: "app://-", pathname: "/index.html" };
   try {
     // send timeout is 2000ms; give the test room. Navigation must still happen.
-    await relayRefreshCodexRenderer({ threadIds: ["t1"], openThreadId: "t1", primeMs: 0, confirmMs: 0 });
+    await relayRefreshCodexRenderer({ threadIds: [], openThreadId: "t1", primeMs: 0, confirmMs: 0 });
     const paths = posted.filter((m) => m.type === "navigate-to-route").map((m) => m.path);
     assert.deepEqual(paths, ["/hotkey-window/thread/t1", "/local/t1"]);
   } finally {

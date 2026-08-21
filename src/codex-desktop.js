@@ -39,6 +39,14 @@ const CODEX_DESKTOP_BUNDLE_IDS = ["com.openai.codex", "com.openai.chat"];
 const CODEX_ABSENT_MISS_THRESHOLD = 3;
 
 let wsFallbackPromise = null;
+let codexProjectMutationChain = Promise.resolve();
+
+export function enqueueCodexProjectMutation(run) {
+  const result = codexProjectMutationChain.then(run, run);
+  codexProjectMutationChain = result.catch(() => {});
+  return result;
+}
+
 async function resolveWebSocketImpl() {
   if (typeof WebSocket === "function") return WebSocket;
   if (!wsFallbackPromise) {
@@ -60,10 +68,20 @@ export async function notifyCodexDesktopThread({ threadId, pinnedThreadIds = nul
   });
 }
 
-export async function notifyCodexDesktopThreads({
+export async function notifyCodexDesktopThreads(options = {}) {
+  const mutatesProject = Boolean(String(options.ensureWorkspaceRoot || "").trim());
+  return mutatesProject
+    ? enqueueCodexProjectMutation(() => notifyCodexDesktopThreadsUnserialized(options))
+    : notifyCodexDesktopThreadsUnserialized(options);
+}
+
+async function notifyCodexDesktopThreadsUnserialized({
   threadIds = [],
   pinnedThreadIds = null,
   openThreadId = null,
+  workspaceRootsByThreadId = null,
+  ensureWorkspaceRoot = null,
+  assignmentOnly = false,
   primeOpen = true,
   // The open path navigates hotkey -> (prime wait) -> /local inside the renderer,
   // so the inspector eval must outlast RELAY_CODEX_OPEN_PRIME_MS; default higher.
@@ -96,7 +114,15 @@ export async function notifyCodexDesktopThreads({
     coldLaunched = true;
   }
 
-  const expression = buildCodexDesktopRefreshExpression({ threadIds: ids, pinnedThreadIds: pinnedIds, openThreadId: openId, primeOpen });
+  const expression = buildCodexDesktopRefreshExpression({
+    threadIds: ids,
+    pinnedThreadIds: pinnedIds,
+    openThreadId: openId,
+    workspaceRootsByThreadId,
+    ensureWorkspaceRoot,
+    assignmentOnly,
+    primeOpen,
+  });
   // READINESS, not liveness: a just-launched app answers the inspector (the main
   // process is up) long before it owns a BrowserWindow to drive, and an app the
   // user left running with every window CLOSED never owns one at all. Both cases
@@ -127,6 +153,7 @@ export async function notifyCodexDesktopThreads({
   }
 
   const reached = results.some(primaryWindowRan);
+  const rendererResult = primaryRefreshRendererResult(results);
   return {
     attempted: true,
     ok: reached,
@@ -134,6 +161,7 @@ export async function notifyCodexDesktopThreads({
     // caller may suppress the codex:// fallback only after the requested task
     // is active and the selected Codex window has actually taken focus.
     openConfirmed: Boolean(openId && reached),
+    projectAssignmentOk: ensureWorkspaceRoot ? rendererResult?.projectAssignmentOk === true : true,
     ...(reached ? {} : { reason: coldLaunched ? "codex-not-ready" : "codex-window-unavailable" }),
     results,
   };
@@ -171,6 +199,15 @@ export function primaryWindowRan(entry) {
       win.result?.ok === true &&
       (!win.focusRequested || win.focused === true),
   );
+}
+
+export function primaryRefreshRendererResult(results) {
+  for (const entry of Array.isArray(results) ? results : []) {
+    if (!entry?.ok || !Array.isArray(entry.value)) continue;
+    const selected = entry.value.find((win) => win?.kind === "primary" && !win.skipped && win.result && typeof win.result === "object");
+    if (selected) return selected.result;
+  }
+  return null;
 }
 
 // Bring up ChatGPT/Codex Desktop. Bundle ids in the same order the activation
@@ -405,14 +442,203 @@ export async function relayRefreshCodexRenderer(payload) {
     }
   }
 
+  // Use the same vscode://codex request bridge as Codex Desktop's own state
+  // store. `sendMessageFromView` is one-way, while the matching fetch response
+  // arrives as a window message, so correlate it explicitly by request id.
+  // This keeps project membership writes inside Codex's main process: no
+  // brittle direct edits of .codex-global-state.json and no lost broadcasts.
+  async function hostRequest(name, params, timeoutMs = 700) {
+    const requestId = globalThis.crypto?.randomUUID?.() || `relay-${Date.now()}-${Math.random()}`;
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        finish(() => reject(new Error(`${name}-timeout`)));
+      }, timeoutMs);
+      function finish(callback) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        window.removeEventListener?.("message", onMessage);
+        callback();
+      }
+      function onMessage(event) {
+        const message = event?.data;
+        if (message?.type !== "fetch-response" || message.requestId !== requestId) return;
+        if (message.responseType !== "success" || !(message.status >= 200 && message.status < 300)) {
+          finish(() => reject(new Error(String(message.error || message.bodyJsonString || `${name}-failed`))));
+          return;
+        }
+        finish(() => {
+          try {
+            resolve(JSON.parse(message.bodyJsonString || "null"));
+          } catch (error) {
+            reject(error);
+          }
+        });
+      }
+      window.addEventListener?.("message", onMessage);
+      try {
+        Promise.resolve(
+          bridge.sendMessageFromView({
+            type: "fetch",
+            requestId,
+            method: "POST",
+            url: `vscode://codex/${name}`,
+            body: JSON.stringify(params),
+          }),
+        ).catch((error) => finish(() => reject(error)));
+      } catch (error) {
+        finish(() => reject(error));
+      }
+    });
+  }
+
+  const canonicalRoot = (value) => String(value || "").trim().replace(/\\/g, "/").replace(/\/+$/, "");
+  const findProjectForRoot = (projects, root) => {
+    const wanted = canonicalRoot(root);
+    if (!wanted || !projects || typeof projects !== "object") return null;
+    return (
+      Object.values(projects).find((project) =>
+        Array.isArray(project?.rootPaths) && project.rootPaths.some((candidate) => canonicalRoot(candidate) === wanted),
+      ) || null
+    );
+  };
+
   if (Array.isArray(payload.pinnedThreadIds)) {
     await send({ type: "set-pinned-thread-ids-for-host", hostId, threadIds: payload.pinnedThreadIds });
+  }
+  const projectRoot = String(payload.ensureWorkspaceRoot || "").trim();
+  let projectAssignmentOk = !projectRoot;
+  let relayProject = null;
+  let projectLookupOk = false;
+  if (projectRoot) {
+    const mutateProjectState = async () => {
+    try {
+      relayProject = findProjectForRoot((await hostRequest("get-global-state", { key: "local-projects" }))?.value, projectRoot);
+      projectLookupOk = true;
+    } catch (error) {
+      sent.push({ type: "relay-project-lookup", ok: false, error: String(error?.message || error) });
+    }
+    // Create through Codex's native project manager on a foreground open. The
+    // update-roots command owns the project-map transaction and selects the
+    // resulting project, but (unlike add-new-workspace-root-option) does not
+    // navigate the renderer to Home. Background repair never creates/selects a
+    // project or disturbs the active window.
+    if (projectLookupOk && !relayProject) {
+      if (payload.openThreadId) {
+        try {
+          await send({ type: "electron-update-workspace-root-options", roots: [projectRoot] });
+          for (let attempt = 0; attempt < 5 && !relayProject; attempt += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 80));
+            const saved = (await hostRequest("get-global-state", { key: "local-projects" }))?.value;
+            relayProject = findProjectForRoot(saved, projectRoot);
+          }
+        } catch (error) {
+          sent.push({ type: "relay-project-registration", ok: false, error: String(error?.message || error) });
+        }
+      }
+    }
+
+    if (relayProject?.id) {
+      const concurrentAssignments = {};
+      const onAssignmentUpdate = (event) => {
+        const message = event?.data;
+        if (message?.type !== "thread-project-assignments-updated" || !message.assignments || typeof message.assignments !== "object") return;
+        Object.assign(concurrentAssignments, message.assignments);
+      };
+      window.addEventListener?.("message", onAssignmentUpdate);
+      try {
+        const assignment = { projectKind: "local", projectId: relayProject.id };
+        const relayThreadIds = payload.threadIds.filter((threadId) => {
+          const roots = Array.isArray(payload.workspaceRootsByThreadId?.[threadId])
+            ? payload.workspaceRootsByThreadId[threadId]
+            : [];
+          return roots.some((root) => canonicalRoot(root) === canonicalRoot(projectRoot));
+        });
+        let verified = false;
+        const applyConcurrent = (assignments) => {
+          for (const [threadId, concurrent] of Object.entries(concurrentAssignments)) {
+            if (concurrent == null) delete assignments[threadId];
+            else assignments[threadId] = concurrent;
+          }
+        };
+        const sameAssignment = (left, right) =>
+          left?.projectKind === right?.projectKind &&
+          left?.projectId === right?.projectId &&
+          (left?.hostId || null) === (right?.hostId || null);
+        for (let attempt = 0; attempt < 2 && !verified; attempt += 1) {
+          const current = (await hostRequest("get-global-state", { key: "thread-project-assignments" }))?.value;
+          const assignments = current && typeof current === "object" ? { ...current } : {};
+          applyConcurrent(assignments);
+          for (const threadId of relayThreadIds) assignments[threadId] = assignment;
+          await hostRequest("set-global-state", { key: "thread-project-assignments", value: assignments });
+          const saved = (await hostRequest("get-global-state", { key: "thread-project-assignments" }))?.value;
+          const required = { ...assignments };
+          applyConcurrent(required);
+          for (const threadId of relayThreadIds) required[threadId] = assignment;
+          verified = Object.entries(required).every(([threadId, expected]) =>
+            expected == null ? saved?.[threadId] == null : sameAssignment(saved?.[threadId], expected),
+          );
+        }
+        if (!verified) throw new Error("assignment-not-persisted");
+
+        // Do not rewrite Codex's projectless-thread-ids array. Codex derives
+        // Recents from the assignment map and excludes every assigned thread;
+        // its native projectless bookkeeping may change concurrently, and a
+        // generic whole-array write here could erase an unrelated new task.
+        projectAssignmentOk = true;
+        sent.push({ type: "relay-project-assignment", ok: true, projectId: relayProject.id });
+      } catch (error) {
+        sent.push({ type: "relay-project-assignment", ok: false, error: String(error?.message || error) });
+      } finally {
+        window.removeEventListener?.("message", onAssignmentUpdate);
+      }
+    } else {
+      sent.push({ type: "relay-project-assignment", ok: false, error: "project-not-found" });
+    }
+    };
+    const locks = globalThis.navigator?.locks;
+    if (locks?.request) {
+      let acquired = false;
+      // An inspector evaluation cannot cancel executeJavaScript after its
+      // websocket timeout. Never leave an expression queued on a browser lock:
+      // if another Relay mutation owns it, fail fast and let the bounded quiet
+      // assignment retry heal the task without a late surprise navigation.
+      for (let attempt = 0; attempt < 3 && !acquired; attempt += 1) {
+        acquired = await locks.request(
+          "relay-codex-project-state",
+          { ifAvailable: true },
+          async (lock) => {
+            if (!lock) return false;
+            await mutateProjectState();
+            return true;
+          },
+        );
+        if (!acquired && attempt < 2) await new Promise((resolve) => setTimeout(resolve, 40 * (attempt + 1)));
+      }
+      if (!acquired) sent.push({ type: "relay-project-assignment", ok: false, error: "project-state-lock-busy" });
+    } else {
+      await mutateProjectState();
+    }
+  }
+  if (payload.assignmentOnly) {
+    return {
+      ok: projectAssignmentOk,
+      projectAssignmentOk,
+      openConfirmed: false,
+      href: location.href,
+      openThreadId: null,
+      sent,
+    };
   }
   if (payload.threadIds.length) {
     await send({ type: "hydrate-pinned-threads", hostId, threadIds: payload.threadIds });
   }
   await send({ type: "refresh-recent-conversations-for-host", hostId });
   for (const threadId of payload.threadIds) {
+    const workspaceRoots = Array.isArray(payload.workspaceRootsByThreadId?.[threadId])
+      ? payload.workspaceRootsByThreadId[threadId].map((root) => String(root || "").trim()).filter(Boolean)
+      : [];
     // Codex Desktop (>=0.142) serves thread views from its in-memory core and
     // never cold-loads externally created threads — the view spins forever
     // until an app restart. Adopt the thread the way the app itself opens one:
@@ -429,7 +655,7 @@ export async function relayRefreshCodexRenderer(payload) {
       model: null,
       serviceTier: null,
       reasoningEffort: null,
-      workspaceRoots: [],
+      workspaceRoots,
       collaborationMode: null,
     });
     await send({ type: "broadcast-conversation-snapshot-for-host", hostId, conversationId: threadId });
@@ -505,7 +731,12 @@ export async function relayRefreshCodexRenderer(payload) {
   }
 
   return {
+    // Opening and assignment have separate recovery paths. If navigation
+    // succeeded, report that visual fact even when the project write needs a
+    // quiet retry; otherwise the caller fires a second codex:// open and the
+    // user sees a duplicate/flicker despite already being in the task.
     ok: payload.openThreadId ? openConfirmed : sent.some((item) => item.ok),
+    projectAssignmentOk,
     openConfirmed,
     href: location.href,
     openThreadId: payload.openThreadId || null,
@@ -763,11 +994,23 @@ export function classifyCodexDesktopWindowUrl(url) {
   return "primary";
 }
 
-export function buildCodexDesktopRefreshExpression({ threadIds = [], pinnedThreadIds = null, openThreadId = null, primeOpen = true } = {}) {
+export function buildCodexDesktopRefreshExpression({
+  threadIds = [],
+  pinnedThreadIds = null,
+  openThreadId = null,
+  workspaceRootsByThreadId = null,
+  ensureWorkspaceRoot = null,
+  assignmentOnly = false,
+  primeOpen = true,
+} = {}) {
   const rendererCode = `(${relayRefreshCodexRenderer.toString()})(${JSON.stringify({
     threadIds: uniqueStrings(threadIds),
     pinnedThreadIds,
     openThreadId: String(openThreadId || "").trim() || null,
+    workspaceRootsByThreadId:
+      workspaceRootsByThreadId && typeof workspaceRootsByThreadId === "object" ? workspaceRootsByThreadId : {},
+    ensureWorkspaceRoot: String(ensureWorkspaceRoot || "").trim() || null,
+    assignmentOnly: assignmentOnly === true,
     primeOpen: primeOpen !== false,
     primeMs: Number(process.env.RELAY_CODEX_OPEN_PRIME_MS) || 1200,
     confirmMs: Number(process.env.RELAY_CODEX_OPEN_CONFIRM_MS) || 2500,

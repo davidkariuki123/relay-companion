@@ -130,10 +130,7 @@ test("the pill asks for a contact's chat by address and name, coerced to primiti
     preload,
     /openChatWith: \(email, name\) =>\s*\n\s*ipcRenderer\.invoke\("relay:openChatWith", \{ email: String\(email \|\| ""\), name: String\(name \|\| ""\) \}\)/,
   );
-  assert.match(
-    preload,
-    /openGroupChat: \(groupId, name\) =>\s*\n\s*ipcRenderer\.invoke\("relay:openChatWith", \{ groupId: String\(groupId \|\| ""\), name: String\(name \|\| ""\) \}\)/,
-  );
+  assert.doesNotMatch(preload, /openGroupChat:/, "saved groups open in the pill; no detached group-window bridge remains");
 });
 
 // A group is not a container for messages: it is a NAME for one participant
@@ -158,15 +155,11 @@ test("opening a group in People opens its room; only Edit expands the roster", (
   // Matched by the two keys chatSections() merges group rooms by, id first.
   assert.match(room, /room\.groupId && String\(room\.groupId\) === wantedId/);
   assert.match(room, /!room\.groupId && normalizedPartyName\(room\.groupName \|\| room\.name\) === wantedName/);
-  assert.match(room, /openGroupChat\(groupId\);/);
-
-  const opener = between(html, "function openGroupChat(groupId)", "\n  /**");
-  assert.match(opener, /window\.relay\.openGroupChat\(groupId, \(g && g\.name\) \|\| ""\)/);
-  assert.match(opener, /if \(!window\.relay\.openGroupChat\) \{/);
-  // A failure lands on the pane it came from, and only while that row is the
-  // one still being opened — the roster is no longer expanded on this path.
-  assert.match(opener, /const onThisRow = \(message\) => \{ if \(cvgOpeningId === groupId\) cvgShowError\(message\); \}/);
-  assert.match(opener, /onThisRow\(res\.error \|\| "That conversation could not be opened\."\)/);
+  assert.doesNotMatch(room, /openGroupChat\(groupId\)/, "an empty group must not switch to a detached window");
+  // groupsList, not message history, creates the room for a zero-message group.
+  assert.match(html, /threadId: `group-room:\$\{group\.id\}`/);
+  assert.match(html, /hasActivity: false/);
+  assert.match(html, /const emptyGroupAnchor = chatRoom && chatRoom\.isGroup && chatRoom\.groupId/);
 });
 
 test("a group only its owner can address carries no recipient, and says why", () => {

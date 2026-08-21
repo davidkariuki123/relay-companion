@@ -50,7 +50,7 @@ test("a conversation is named only by its person or saved group", () => {
   assert.match(html, /setThreadHeader\(roomName \|\| voices, ""\)/);
   assert.doesNotMatch(html, /explicitTitle|allTopics|topicsPanelOpen|Search topics|>Topics</);
   const chat = html.slice(html.indexOf("function renderChat()"), html.indexOf("function renderChatRail()"));
-  assert.match(chat, /const \{ convos, rooms \} = chatSections\(\)/);
+  assert.match(chat, /const \{ rooms \} = chatSections\(\)/);
   assert.match(chat, /rooms\.map\(row\)\.join\(""\)/);
   assert.doesNotMatch(chat, />Groups<|>People<|section\("Groups"|section\("People"/);
   assert.doesNotMatch(chat, />See all</);
@@ -67,8 +67,14 @@ test("direct and group conversations share one newest-first chronology", () => {
     { name: "Older person", isGroup: false, latest: { at: "2026-08-14T08:00:00Z" } },
     { name: "Newest group", isGroup: true, latest: { at: "2026-08-14T10:00:00Z" } },
     { name: "Middle person", isGroup: false, latest: { at: "2026-08-14T09:00:00Z" } },
+    { name: "Quiet Z", isGroup: true, hasActivity:false, latest: { at: "2026-08-21T11:00:00Z" } },
+    { name: "Quiet A", isGroup: true, hasActivity:false, latest: { at: "2026-08-21T12:00:00Z" } },
   ]);
-  assert.deepEqual(sorted.map((room) => room.name), ["Newest group", "Middle person", "Older person"]);
+  assert.deepEqual(
+    sorted.map((room) => room.name),
+    ["Newest group", "Middle person", "Older person", "Quiet A", "Quiet Z"],
+    "activity is chronological; empty saved rooms follow it but remain listed",
+  );
 
   const chat = html.slice(html.indexOf("function renderChat()"), html.indexOf("function renderChatRail()"));
   assert.doesNotMatch(chat, /tb-group/);
@@ -150,7 +156,8 @@ test("merged people and group rooms retain every internal reply-chain id", () =>
   const sections = html.slice(html.indexOf("function chatSections()"), html.indexOf("function renderChatRail"));
   assert.match(sections, /byParty\.set\(key, \{ \.\.\.t, threadIds: new Set\(\[t\.threadId\]\) \}\)/);
   assert.match(sections, /prev\.threadIds\.add\(t\.threadId\)/);
-  assert.match(sections, /byGroup\.set\(key, \{ \.\.\.t, threadIds: new Set\(\[t\.threadId\]\) \}\)/);
+  assert.match(sections, /byGroup\.set\(key, \{ \.\.\.t, hasActivity: true, threadIds: new Set\(\[t\.threadId\]\) \}\)/);
+  assert.match(sections, /threadId: `group-room:\$\{group\.id\}`/);
   assert.match(sections, /room\.threadIds instanceof Set && room\.threadIds\.has\(threadId\)/);
 });
 
@@ -197,6 +204,7 @@ test("a newly opened room positions the newest conversations at the top of the r
   assert.match(render, /const nextHtml =/);
   assert.match(render, /if \(railEl\.innerHTML !== nextHtml\)/);
   assert.match(render, /positionChatRail\(railEl, roomKey\)/);
+  assert.match(html, /railEl\.querySelector\("\.rl-row\.on"\)\?\.scrollIntoView\(\{ block:"nearest" \}\)/);
   assert.match(html, /#threadsView\.chat-max \.chat-rail[\s\S]*?overflow-anchor:none/);
   // The real failure was subtler than a nonzero rail.scrollTop: the long room
   // enlarged #threadsView and the OUTER card scroller moved the entire rail
@@ -310,6 +318,8 @@ test("a successful chat send follows the new message; unrelated refreshes preser
   assert.match(html, /roomScrollEl\.scrollTo\(\{ top, behavior:"smooth" \}\)/);
   assert.match(html, /scrollRoomToNewest\(chatShaped, \{ smooth:followOwnSend \}\)/);
   assert.match(html, /if \(followOwnSend\) threadDetailFollowSendFor = null/);
+  assert.match(html, /if \(followOwnSend && !shellChanged && !rowsChanged\) \{/);
+  assert.match(html, /scrollRoomToNewest\(chatShaped\);[\s\S]*?scrollRoomToNewest\(chatShaped, \{ smooth:true \}\)/);
 });
 
 test("chat send is visible before the Sent projection catches up and reconciles exactly once", () => {
@@ -339,7 +349,9 @@ test("an unsent message is the device's business, not the composer's", () => {
   assert.match(html, /syncOutboxProjection\(\);/);
   assert.match(html, /outboxState: String\(entry\.state \|\| "queued"\)/);
   assert.match(html, /function outboxStatusBits\(m\)/);
-  assert.match(html, /Waiting for network/);
+  assert.match(html, /Trying again…/);
+  assert.match(html, /th-status-settle/);
+  assert.match(html, /receipt\.label === "Sent" \|\| receipt\.label === "Delivered"/);
   assert.match(html, /data-outbox-retry/);
   assert.match(html, /data-outbox-discard/);
   // A regained connection must flush the queue rather than wait out the
@@ -387,6 +399,7 @@ test("conversation chunks carry the selected Relay date divider", () => {
 
   assert.match(html, /class="th-chunk-date\$\{firstChunk \? " first" : ""\}" role="separator"/);
   assert.match(html, /return `\$\{chunkDivider\}\$\{runHeader\}/);
+  assert.match(html, /&& !\(prev\.textLike && m\.textLike\)/);
   assert.match(html, /const chainSeamClass = chainChanged && !chunkDateLabel \? " th-seam" : ""/);
   assert.match(html, /class="th-run\$\{headerGapClass\}\$\{chainSeamClass\}/);
   assert.doesNotMatch(html, /\$\{chainChanged \? " th-seam" : ""\}/);
@@ -402,6 +415,7 @@ test("a dated chunk reintroduces the sender even inside the same wire thread", (
     party: "Sven Wellmann",
     direction: "in",
     threadId: "relay_20260813153401840_2df18c122fec",
+    textLike: true,
   };
   const current = { ...previous };
 
@@ -416,13 +430,24 @@ test("a dated chunk reintroduces the sender even inside the same wire thread", (
     false,
     "a direction change still starts a new sender run",
   );
+  assert.equal(
+    continuesSenderRun(previous, { ...current, threadId: "another-chain" }, ""),
+    true,
+    "nearby ordinary texts stay in one visible sender run across wire chains",
+  );
+  assert.equal(
+    continuesSenderRun({ ...previous, textLike:false }, { ...current, textLike:false, threadId:"another-chain" }, ""),
+    false,
+    "structured Relays keep a real chain boundary",
+  );
   assert.match(html, /const cont = continuesSenderRun\(prev, m, chunkDateLabel\)/);
 });
 
 test("a room send addresses the room and quotes only a chosen Relay", () => {
   assert.match(html, /const selectedReplyTargetId = String\(threadReplyTargets\.get\(threadStateKey\) \|\| ""\)/);
   assert.match(html, /const inReplyToRelayId = selectedReplyTargetId;/);
-  assert.match(html, /const recipient = addressAnchor && addressAnchor\.addressRecipient/);
+  assert.match(html, /const recipient = \(addressAnchor && addressAnchor\.addressRecipient\)/);
+  assert.match(html, /emptyGroupAnchor \? \{ groupId:emptyGroupAnchor\.groupId \} : null/);
   assert.match(html, /sendReply\(\{\s*text, recipient, \.\.\.\(inReplyToRelayId \? \{ inReplyToRelayId \} : \{\}\), files, idempotencyKey,/);
   assert.doesNotMatch(html, /sendReply\(\{ text, inReplyToRelayId: newest\.id/);
 });

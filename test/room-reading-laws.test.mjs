@@ -97,14 +97,13 @@ test("a titled letter's tap is the reader in either frame; texts stay inert", ()
   assert.doesNotMatch(bind, /expandedMsgIds\.add/);
 });
 
-test("boundaries without names: a chain change is a seam and breaks the sender run", () => {
-  // Shane: "distinct threads appear stacked directly on top of one another."
-  // Sven's topics-in-chats design reborn as structure, not ontology — the
-  // cluster's heading is the root letter's own subject; #220's no-visible-
-  // naming contract holds.
-  assert.match(html, /const chainChanged = Boolean\(prev && String\(m\.threadId \|\| ""\) !== String\(prev\.threadId \|\| ""\)\)/);
+test("internal chains never divide consecutive ordinary texts", () => {
+  // A visible chat is one room. Wire reply-chain ids remain meaningful for
+  // structured Relays, but cannot put a hairline and a repeated sender label
+  // between two texts the same person sent minutes apart.
+  assert.match(html, /&& !\(prev\.textLike && m\.textLike\)/);
   assert.match(html, /const cont = continuesSenderRun\(prev, m, chunkDateLabel\)/);
-  assert.match(html, /String\(previous\.threadId \|\| ""\) === String\(current\.threadId \|\| ""\)/);
+  assert.match(html, /Boolean\(previous\.textLike && current\.textLike\)/);
   assert.match(html, /const chainSeamClass = chainChanged && !chunkDateLabel \? " th-seam" : ""/);
   assert.match(html, /\$\{chainSeamClass\}/);
   assert.match(html, /\.th-run\.th-seam \{ border-top:1px solid var\(--hair\)/);

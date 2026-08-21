@@ -581,8 +581,14 @@ async function materializeRowInHost({
     // waits, then switches to /local/<id> so the thread shows in the main window
     // with the sidebar. The /local route alone renders an empty "New chat" pane
     // for a fresh relay thread and never recovers.
+    const relayProjectOpen = !workspaceKey && path.resolve(cwd) === path.resolve(path.join(os.homedir(), "Relay"));
     const desktopOpenResult = activateDesktop
-      ? await refreshCodexDesktopForThreads([codexThreadId], { force: true, openThreadId: codexThreadId })
+      ? await refreshCodexDesktopForThreads([codexThreadId], {
+          force: true,
+          openThreadId: codexThreadId,
+          cwd,
+          ensureRelayProject: relayProjectOpen,
+        })
       : { ok: false, reason: "quiet-provider" };
     // COLD START: when the first pass never reached a window at all — the app
     // could not be launched, or it came up without one — a second pass 1.2s later
@@ -597,7 +603,25 @@ async function materializeRowInHost({
       // first pass, so a plain /local navigate re-asserts it deterministically
       // without a second hotkey->local visual transition.
       await sleep(Number(process.env.RELAY_CODEX_OPEN_SECOND_PASS_MS || 1200));
-      secondPassResult = await refreshCodexDesktopForThreads([codexThreadId], { force: true, openThreadId: codexThreadId, primeOpen: false });
+      secondPassResult = await refreshCodexDesktopForThreads([codexThreadId], {
+        force: true,
+        openThreadId: codexThreadId,
+        cwd,
+        ensureRelayProject: relayProjectOpen,
+        primeOpen: false,
+      });
+    }
+    const latestAssignmentResult = secondPassResult || desktopOpenResult;
+    if (activateDesktop && relayProjectOpen && latestAssignmentResult?.projectAssignmentOk !== true) {
+      // The CLI is a one-shot child, so an unref'ed retry timer dies as soon as
+      // Open returns. Complete one bounded assignment-only retry while this
+      // process is alive; daemon startup repair remains the durable fallback.
+      await refreshCodexDesktopForThreads([codexThreadId], {
+        force: true,
+        cwd,
+        ensureRelayProject: true,
+        assignmentOnly: true,
+      });
     }
     openedInHost = Boolean(desktopOpenResult?.openConfirmed || secondPassResult?.openConfirmed);
     skipExternalOpen = openedInHost;
@@ -957,14 +981,24 @@ function ensureRelayCodexIndexMarker({ threadId, sessionPath, packetId }) {
   }
 }
 
-async function refreshCodexDesktopForThreads(threadIds, { force = false, openThreadId = null, primeOpen = true } = {}) {
+async function refreshCodexDesktopForThreads(
+  threadIds,
+  { force = false, openThreadId = null, cwd = "", ensureRelayProject = false, assignmentOnly = false, primeOpen = true } = {},
+) {
   const uniqueThreadIds = Array.from(new Set(threadIds.filter(Boolean)));
   if (!uniqueThreadIds.length && !force) return null;
   try {
+    const cleanCwd = String(cwd || "").trim();
+    const workspaceRootsByThreadId = cleanCwd
+      ? Object.fromEntries(uniqueThreadIds.map((threadId) => [threadId, [cleanCwd]]))
+      : {};
     const result = await notifyCodexDesktopThreads({
       threadIds: uniqueThreadIds,
       pinnedThreadIds: readPinnedThreadIds(),
       openThreadId,
+      workspaceRootsByThreadId,
+      ensureWorkspaceRoot: ensureRelayProject ? cleanCwd : null,
+      assignmentOnly,
       primeOpen,
     });
     if (process.env.RELAY_DEBUG && result.attempted && !result.ok) {

@@ -1088,6 +1088,13 @@ async function markAllVisibleRelaysRead() {
 
 let sentCache = [];
 let sentLoadedOnce = null;
+// Multiple surfaces can request Sent at once (room hydration, post-send
+// refresh, the safety poll). A slower older response must never overwrite a
+// newer one: that exact race retired the optimistic bubble against the newer
+// result, then painted the older result without it until another send caused a
+// refresh. Sequence commits make the cache monotonic within one credential.
+let sentRefreshStarted = 0;
+let sentRefreshCommitted = 0;
 // Fingerprint over exactly the fields the inbox signature (and therefore the
 // renderer) can observe, so "did anything change?" costs a tiny stringify
 // instead of a full payload rebuild per refresh.
@@ -1141,10 +1148,17 @@ async function refreshSent() {
     sentFingerprint = sentFingerprintOf(sentCache);
     return sentCache;
   }
-  if (!deviceToken()) return sentCache; // signed out: nothing to fetch, no 401 log storm
+  const credential = deviceToken();
+  if (!credential) return sentCache; // signed out: nothing to fetch, no 401 log storm
+  const refreshId = ++sentRefreshStarted;
   try {
     const client = await relayClient();
     const res = await client.sent({ limit: SENT_FETCH_LIMIT });
+    // A request from the previous account, or one that lost a race to a newer
+    // completed request, has no authority to move this account's room back in
+    // time.
+    if (deviceToken() !== credential || refreshId < sentRefreshCommitted) return sentCache;
+    sentRefreshCommitted = refreshId;
     sentCache = Array.isArray(res && res.items) ? res.items : [];
     sentFingerprint = sentFingerprintOf(sentCache);
     // A queued message retires against the SERVER's own view, never against our

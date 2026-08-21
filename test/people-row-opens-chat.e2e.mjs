@@ -77,6 +77,9 @@ const server = http.createServer((request, response) => {
     const url = new URL(request.url || "/", "http://127.0.0.1");
     apiCalls.push({ method: request.method, pathname: url.pathname, body });
     if (url.pathname === "/v1/contact-groups") return json(response, 200, { groups });
+    if (url.pathname === "/v1/relays" && request.method === "POST") {
+      return json(response, 200, { relayId:"relay_quiet_first", groupSendId:"gsend_quiet", threadId:`group-room:${GROUP_WITHOUT_ROOM}` });
+    }
     if (url.pathname === "/v1/chats/resolve") return json(response, 200, { chatId: "chat_resolved", title: "Jordan Nel", items: [] });
     if (url.pathname.startsWith("/v1/chats/")) return json(response, 200, { chatId: "chat_resolved", title: "", items: [] });
     return json(response, 200, { contacts: [], relays: [], sent: [], items: [] });
@@ -402,13 +405,27 @@ try {
     assert.equal(backToGroups.view, "contacts");
     assert.equal(backToGroups.groupsPane, true);
   });
-  // ---- Groups: a group nothing has been said in resolves server-side too ----
+  // ---- Groups: a saved group is already an in-pill room before first send ----
   const groupResolvesBefore = apiCalls.filter((c) => c.pathname === "/v1/chats/resolve" && c.body.includes(GROUP_WITHOUT_ROOM)).length;
   await evaluate(page, `document.querySelector('.cvg-item[data-group="${GROUP_WITHOUT_ROOM}"]').click(); true`);
-  for (let i = 0; i < 60 && apiCalls.filter((c) => c.pathname === "/v1/chats/resolve" && c.body.includes(GROUP_WITHOUT_ROOM)).length === groupResolvesBefore; i += 1) await sleep(100);
-  const groupResolves = apiCalls.filter((c) => c.pathname === "/v1/chats/resolve" && c.body.includes(GROUP_WITHOUT_ROOM));
-  check("an empty group still opens: its room resolves server-side by id", () => {
-    assert.equal(groupResolves.length, groupResolvesBefore + 1, "the row must ask for the room");
+  await until(page, `activeView === "threads" && document.getElementById("thDetailName").textContent === "Quiet Room"`, "the empty group to open in the pill");
+  await sleep(450); // capture the settled expanded frame, not the list-to-room morph
+  await shoot(page, "7-empty-group-room");
+  const quietRoom = await evaluate(page, SNAPSHOT);
+  check("an empty group opens in the same expanded pill, never a detached window", () => {
+    assert.equal(quietRoom.view, "threads");
+    assert.equal(quietRoom.source, "contacts");
+    assert.equal(apiCalls.filter((c) => c.pathname === "/v1/chats/resolve" && c.body.includes(GROUP_WITHOUT_ROOM)).length, groupResolvesBefore);
+  });
+  await evaluate(page, `(() => { const input = document.getElementById("thQrInput"); input.value = "first quiet message"; input.dispatchEvent(new Event("input", { bubbles:true })); document.getElementById("thQrSend").click(); return true; })()`);
+  await until(page, `[...document.querySelectorAll(".th-msg-title")].some((node) => node.textContent.includes("first quiet message"))`, "the first group message to stay visible");
+  await sleep(450); // the optimistic bubble must remain after the follow-scroll settles
+  await shoot(page, "8-empty-group-first-send");
+  for (let i = 0; i < 60 && !apiCalls.some((c) => c.pathname === "/v1/relays" && c.method === "POST" && c.body.includes("first quiet message")); i += 1) await sleep(100);
+  const firstGroupSend = apiCalls.find((c) => c.pathname === "/v1/relays" && c.method === "POST" && c.body.includes("first quiet message"));
+  check("the empty room's first message addresses the saved group", () => {
+    assert.ok(firstGroupSend, "the first message must reach the send endpoint");
+    assert.equal(JSON.parse(firstGroupSend.body).recipient.groupId, GROUP_WITHOUT_ROOM);
   });
 } finally {
   try { page && page.close(); } catch {}

@@ -33,6 +33,7 @@ import agentRelayContext from "./agent-relay-context.cjs";
 import { storeDir } from "./host-paths.js";
 import { readCanonicalRuntime } from "./canonical-runtime.js";
 import { autostartWillReplace } from "./autostart-registration.js";
+import { startRelayCodexProjectRepairLoop } from "./codex-project-repair.js";
 
 const { recordAgentRelayIndex } = agentRelayContext;
 
@@ -862,6 +863,12 @@ export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
   // Keep the always-on logs bounded. The daemon is the single long-lived owner on
   // the machine, so it is the natural place to cap files that nothing else prunes.
   startLogRotation({ log });
+  // A previous Companion release gave unanchored Relay tasks the correct
+  // ~/Relay cwd but never registered/assigned the matching Codex sidebar
+  // project. Repair every remembered Codex task in the background, retrying
+  // until Codex has a window available. This never launches or focuses Codex;
+  // future opens also perform the assignment directly.
+  startRelayCodexProjectRepairLoop({ log });
   // Age out downloaded attachment copies; ingest prefetch would otherwise grow
   // ~/.relay-companion/attachments with the inbox forever.
   try {
