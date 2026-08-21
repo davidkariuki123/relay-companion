@@ -107,12 +107,17 @@ const {
   RELAY_TRAY_GUID,
   RELAY_TRAY_POSITION_KEY,
   destroyMacTrayPreservingPosition,
+  installMacTrayPositionSignalHandlers,
   prepareMacTrayPosition,
+  readMacTrayPositionCache,
   readMacDefaultsNumber,
+  resolveMacTrayPositionCachePath,
+  writeMacTrayPositionCache,
 } = require("./tray-position.cjs");
 const { RELAY_MAC_BUNDLE_IDENTIFIER } = require("../src/mac-app-identity.cjs");
 
 const RELAY_HOME = process.env.RELAY_HOME || process.env.RELAY_COMPANION_HOME || path.join(os.homedir(), ".relay-companion");
+const TRAY_POSITION_CACHE_PATH = resolveMacTrayPositionCachePath({ relayHome: RELAY_HOME });
 const STATE_PATH = path.join(RELAY_HOME, "state.json");
 const SCHEDULES_PATH = path.join(RELAY_HOME, "schedules.json");
 const PILL_STATUS_PATH = path.join(RELAY_HOME, "pill-status.json");
@@ -6258,6 +6263,7 @@ function createTray() {
     platform: process.platform,
     systemPreferences,
     readDomainValue: (domain, key) => readMacDefaultsNumber(domain, key, { execFileSync }),
+    readCachedValue: () => readMacTrayPositionCache(TRAY_POSITION_CACHE_PATH),
   });
   // Supplying a stable GUID is the documented macOS mechanism for retaining a
   // status item's position between app launches. Keep other platforms on their
@@ -6335,6 +6341,7 @@ function preserveMacTrayPositionForExit() {
     platform: process.platform,
     tray,
     systemPreferences,
+    writeCachedValue: (value) => writeMacTrayPositionCache(TRAY_POSITION_CACHE_PATH, value),
   });
   if (!result.preserved) return;
   trayPositionPreservedForExit = true;
@@ -6343,6 +6350,12 @@ function preserveMacTrayPositionForExit() {
 }
 
 app.on("will-quit", preserveMacTrayPositionForExit);
+installMacTrayPositionSignalHandlers({
+  platform: process.platform,
+  processLike: process,
+  app,
+  preserve: preserveMacTrayPositionForExit,
+});
 
 // ---- ipc -----------------------------------------------------------------
 

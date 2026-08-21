@@ -2,18 +2,26 @@
 //   electron test/tray-position-native-probe.cjs first-run
 //   electron test/tray-position-native-probe.cjs write-position
 //   electron test/tray-position-native-probe.cjs write-position-exit
+//   electron test/tray-position-native-probe.cjs write-position-signal
 //   electron test/tray-position-native-probe.cjs read-position
 //   electron test/tray-position-native-probe.cjs destroy-preserve
+//   electron test/tray-position-native-probe.cjs cleanup
 //
 // It deliberately uses test-only UUIDs. Never create, destroy, or clean a Tray
 // carrying Relay's shipped UUID from a test process.
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const { app, nativeImage, systemPreferences, Tray } = require("electron");
 const {
   RELAY_TRAY_DEFAULT_POSITION,
   destroyMacTrayPreservingPosition,
+  installMacTrayPositionSignalHandlers,
   prepareMacTrayPosition,
+  readMacTrayPositionCache,
+  writeMacTrayPositionCache,
 } = require("../overlay/tray-position.cjs");
 
 const SEEDED_GUID = "99e50a52-2c3d-40f2-80be-cc0c36ae0c35";
@@ -21,6 +29,7 @@ const CONTROL_GUID = "ee156dcf-9510-4c4b-9b32-2e781c86cd92";
 const SEEDED_KEY = `NSStatusItem Preferred Position ${SEEDED_GUID}`;
 const CONTROL_KEY = `NSStatusItem Preferred Position ${CONTROL_GUID}`;
 const SAVED_POSITION = 347;
+const PROBE_CACHE_PATH = path.join(os.tmpdir(), `relay-tray-position-probe-${SEEDED_GUID}.json`);
 const mode = process.argv[2] || "first-run";
 let seededTray;
 let controlTray;
@@ -37,6 +46,7 @@ function cleanProbePreferences() {
   for (const key of [SEEDED_KEY, CONTROL_KEY]) {
     try { systemPreferences.removeUserDefault(key); } catch {}
   }
+  try { fs.rmSync(PROBE_CACHE_PATH, { force: true }); } catch {}
 }
 
 function registerProbeDefault() {
@@ -45,11 +55,24 @@ function registerProbeDefault() {
     systemPreferences,
     positionKey: SEEDED_KEY,
     defaultPosition: RELAY_TRAY_DEFAULT_POSITION,
-    readDomainValue: () => ({ status: "error" }),
+    readDomainValue: () => ({ status: "missing" }),
+    readCachedValue: () => readMacTrayPositionCache(PROBE_CACHE_PATH),
   });
 }
 
 app.whenReady().then(() => {
+  if (mode === "cleanup") {
+    // A process that owned a Tray can make AppKit persist its autosave value
+    // during teardown, after in-process cleanup has already run. Finish with a
+    // separate no-Tray process so release probes leave no test UUID or cache.
+    cleanProbePreferences();
+    setTimeout(() => {
+      console.log(JSON.stringify({ mode, cleaned: true }));
+      app.exit(0);
+    }, 200);
+    return;
+  }
+
   if (mode === "destroy-preserve") {
     cleanProbePreferences();
     systemPreferences.setUserDefault(SEEDED_KEY, "double", SAVED_POSITION);
@@ -90,6 +113,30 @@ app.whenReady().then(() => {
       // Do not destroy the Tray or remove the preference in this phase.
       if (mode === "write-position-exit") app.exit(0);
       else app.quit();
+    }, 600);
+    return;
+  }
+
+  if (mode === "write-position-signal") {
+    cleanProbePreferences();
+    systemPreferences.setUserDefault(SEEDED_KEY, "double", SAVED_POSITION);
+    seededTray = new Tray(icon(), SEEDED_GUID);
+    installMacTrayPositionSignalHandlers({
+      platform: "darwin",
+      processLike: process,
+      app,
+      preserve: () => destroyMacTrayPreservingPosition({
+        platform: "darwin",
+        tray: seededTray,
+        systemPreferences,
+        positionKey: SEEDED_KEY,
+        writeCachedValue: (value) => writeMacTrayPositionCache(PROBE_CACHE_PATH, value),
+      }),
+    });
+    setTimeout(() => {
+      assert.equal(systemPreferences.getUserDefault(SEEDED_KEY, "double"), SAVED_POSITION);
+      console.log(JSON.stringify({ mode, savedPosition: SAVED_POSITION, signal: "SIGTERM" }));
+      process.kill(process.pid, "SIGTERM");
     }, 600);
     return;
   }

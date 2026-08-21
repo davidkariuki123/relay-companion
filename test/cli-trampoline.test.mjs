@@ -184,10 +184,10 @@ test("end to end: a managed shim hands `--version` to a fake canonical release a
   // genuine startup path rather than through the pure resolver alone.
   const home = tmpDir("e2e");
   const managedRoot = path.join(home, "prefix", "node_modules", "relay-companion");
-  // Copy this checkout's bin + bootstrap + src under a node_modules path so the running
+  // Copy this checkout's CLI import graph under a node_modules path so the running
   // root reads as an npm-managed install, and point its node_modules at the
   // repo's hoisted deps so the real import graph resolves.
-  for (const dir of ["bin", "bootstrap", "src"]) fs.cpSync(path.join(packageRoot, dir), path.join(managedRoot, dir), { recursive: true });
+  for (const dir of ["bin", "bootstrap", "overlay", "src"]) fs.cpSync(path.join(packageRoot, dir), path.join(managedRoot, dir), { recursive: true });
   fs.writeFileSync(path.join(managedRoot, "package.json"), JSON.stringify({ name: "relay-companion", version: "0.1.1", type: "module" }));
   const repoNodeModules = findRepoNodeModules(packageRoot);
   fs.symlinkSync(repoNodeModules, path.join(managedRoot, "node_modules"), process.platform === "win32" ? "junction" : "dir");

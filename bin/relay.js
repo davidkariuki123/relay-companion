@@ -36,6 +36,7 @@ import {
   purgeLocalState,
   windowsAutostartTaskStatus,
   repairDesktopSurfaces,
+  snapshotDesktopTrayPosition,
   repairExistingAgentHooks,
   repairExistingAgentRegistrations,
   accountRestartLines,
@@ -385,6 +386,15 @@ function cmdRepairDesktop(flags = {}) {
 function cmdRepairRuntime(flags = {}) {
   writeConfig({});
   const reload = !flags["no-restart"];
+  // This candidate command is deliberately invoked by the already-installed
+  // updater before it bootouts the old pill. Capture the live preference first:
+  // it is the cross-version handoff that protects the ingress transition.
+  const positionSnapshot = snapshotDesktopTrayPosition();
+  if (!positionSnapshot.ok) {
+    throw new Error(
+      `Could not preserve Relay's menu-bar position (${positionSnapshot.detail || positionSnapshot.reason || "snapshot failed"}).`,
+    );
+  }
   // Internal target overrides let a verified immutable candidate restore an
   // older legacy runtime whose own CLI predates `repair-runtime`.
   const targetBin = flags["target-bin"] ? path.resolve(String(flags["target-bin"])) : undefined;
@@ -397,7 +407,12 @@ function cmdRepairRuntime(flags = {}) {
   if (!registrations.ok) {
     throw new Error(`Could not repair Relay agent registrations (${registrations.reason || "migration failed"}).`);
   }
-  const repaired = repairDesktopSurfaces({ reload, ...target, claim: Boolean(flags.claim) || Boolean(targetBin) });
+  const repaired = repairDesktopSurfaces({
+    reload,
+    ...target,
+    claim: Boolean(flags.claim) || Boolean(targetBin),
+    positionSnapshot,
+  });
   if (!repaired.ok) {
     throw new Error("Could not repair Relay runtime services.");
   }
