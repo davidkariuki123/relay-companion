@@ -90,8 +90,33 @@ test("all compact-to-reader transitions can hold a frozen source face", () => {
   const start = between(html, "function startReaderMorph", "let peeking");
   assert.ok(start.indexOf('classList.add("reader-morph-destination")') < start.indexOf("requestAnimationFrame(async"),
     "the destination is hidden before the first paint opportunity");
-  assert.match(start, /destinationView === "threads" && !chatExpanded \? EXPANDED : READER/);
-  assert.match(start, /syncCardSize\(destinationView === "threads" \? chatExpanded : true\)/);
+  assert.match(start, /destinationView === "reader" \|\| \(destinationView === "threads" && chatExpanded\)/);
+  assert.match(start, /syncCardSize\(destinationView === "reader" \|\| \(destinationView === "threads" && chatExpanded\)\)/);
+});
+
+test("room navigation is one directional stack with a matching Back transition", () => {
+  const styles = between(html, "@keyframes roomForwardSourceOut", "@media (prefers-reduced-motion:reduce)");
+  assert.match(styles, /roomForwardSourceOut[\s\S]*translate3d\(-24%,0,0\)/,
+    "the covered list recedes toward the leading edge");
+  assert.match(styles, /roomForwardDestinationIn[\s\S]*translate3d\(100%,0,0\)/,
+    "the room enters from the trailing edge");
+  assert.match(styles, /roomBackSourceOut[\s\S]*translate3d\(100%,0,0\)/,
+    "Back returns the room toward the edge it entered from");
+  assert.match(styles, /roomBackDestinationIn[\s\S]*translate3d\(-24%,0,0\)/,
+    "Back restores the list from the same parallax depth");
+  assert.doesNotMatch(styles, /scale\(/, "room text never scales during navigation");
+  assert.equal((styles.match(/\.36s cubic-bezier\(\.32,\.72,0,1\)/g) || []).length, 4,
+    "both faces and both directions share one timing curve");
+
+  const relays = between(html, "function renderRelays()", "function relayIdentityRowHtml");
+  assert.equal((relays.match(/prepareReaderMorph\(activeView, \{ motion:"forward" \}\)/g) || []).length, 2,
+    "a room uses the same forward push from the list and notification faces");
+
+  const back = between(html, 'thBackEl.addEventListener("click", () => {', "let threadsSource");
+  assert.match(back, /prepareReaderMorph\("threads", \{ motion:chatExpanded \? "morph" : "back" \}\)/);
+  assert.ok(back.indexOf('prepareReaderMorph("threads"') < back.indexOf("threadDetailId = null"),
+    "Back freezes the visible room before navigation clears it");
+  assert.match(back, /commitNavigation\(\{ outerScrollTop: returnTop \}\);[\s\S]*startReaderMorph\(activeView\)/);
 });
 
 test("payload reconciliation cannot rebuild the destination during its crossfade", () => {
