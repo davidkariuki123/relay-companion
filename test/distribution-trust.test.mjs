@@ -32,6 +32,7 @@ import {
 } from "../scripts/build-runtime-artifact.mjs";
 import { bridgeShrinkwrap, publishPackageJson } from "../scripts/prepare-publish-package.mjs";
 import { assertMonotonicVersion, compareExactVersions } from "../scripts/assert-monotonic-version.mjs";
+import { electronVersionArgs } from "../scripts/verify-installed-runtime.mjs";
 
 const {
   activateRuntime,
@@ -83,6 +84,12 @@ test("runtime builds invoke npm through an executable Node or shell entrypoint",
     command: "C:\\Windows\\System32\\cmd.exe",
     args: ["/d", "/s", "/c", "npm.cmd", "ci"],
   });
+});
+
+test("Linux release smoke reads Electron version without requiring a setuid sandbox helper", () => {
+  assert.deepEqual(electronVersionArgs("linux"), ["--no-sandbox", "--version"]);
+  assert.deepEqual(electronVersionArgs("darwin"), ["--version"]);
+  assert.deepEqual(electronVersionArgs("win32"), ["--version"]);
 });
 
 test("first contact persists the exact reviewed version without lifecycle scripts", () => {
@@ -250,17 +257,25 @@ test("native runtime dependency graph is exact, integrity-locked, and reproducib
 });
 
 test("release dependency locks retain identical bytes on every build platform", () => {
-  const attributes = fs.readFileSync(new URL("../.gitattributes", import.meta.url), "utf8");
+  const exportedTemplate = new URL("../public-release/.gitattributes", import.meta.url);
+  const inMonorepo = fs.existsSync(exportedTemplate);
+  const localAttributes = fs.readFileSync(
+    inMonorepo ? new URL("../../../.gitattributes", import.meta.url) : new URL("../.gitattributes", import.meta.url),
+    "utf8",
+  );
+  const publicAttributes = fs.readFileSync(inMonorepo ? exportedTemplate : new URL("../.gitattributes", import.meta.url), "utf8");
   for (const relative of [
     "package.json",
     "package-lock.json",
-    "npm-shrinkwrap.json",
     "runtime-dependencies.json",
     "runtime-lock/package.json",
     "runtime-lock/package-lock.json",
   ]) {
-    assert.match(attributes, new RegExp(`${relative.replaceAll("/", "\\/")} text eol=lf`));
+    const localPath = inMonorepo ? `packages/companion/${relative}` : relative;
+    assert.match(localAttributes, new RegExp(`${localPath.replaceAll("/", "\\/")} text eol=lf`));
+    assert.match(publicAttributes, new RegExp(`${relative.replaceAll("/", "\\/")} text eol=lf`));
   }
+  assert.match(publicAttributes, /npm-shrinkwrap\.json text eol=lf/);
 });
 
 test("the migration bridge publishes an exact npm shrinkwrap for its full graph", () => {
@@ -736,6 +751,8 @@ test("public release owns immutable publication while private promotion owns fle
   const privatePromotion = new URL("../../../.github/workflows/promote-prod.yml", import.meta.url);
   if (fs.existsSync(privatePromotion)) {
     const promote = fs.readFileSync(privatePromotion, "utf8");
+    assert.match(promote, /\(cd "\$runtime_prefix" && tar -xzf runtime\.tar\.gz\)/);
+    assert.doesNotMatch(promote, /tar -xzf "\$runtime_prefix\/runtime\.tar\.gz"/);
     assert.match(promote, /thin-installer\) TAG=installer/);
     assert.match(promote, /thin installer must never replace bridge latest/);
     assert.match(promote, /companion-releases\/stable\/manifest\.json/);
@@ -744,6 +761,12 @@ test("public release owns immutable publication while private promotion owns fle
     assert.match(promote, /s3api get-object[\s\S]{0,1600}elif grep -q 'NoSuchKey'/);
     assert.match(promote, /could not read the authoritative stable runtime pointer/);
     assert.doesNotMatch(promote, /if \[ "\$TAG" = "latest" \][\s\S]{0,300}stable\/manifest/);
+  }
+  const privateImport = new URL("../../../.github/workflows/publish-companion.yml", import.meta.url);
+  if (fs.existsSync(privateImport)) {
+    const importWorkflow = fs.readFileSync(privateImport, "utf8");
+    assert.match(importWorkflow, /\(cd "\$root" && tar -xzf runtime\.tar\.gz\)/);
+    assert.doesNotMatch(importWorkflow, /tar -xzf "\$archive"/);
   }
 });
 

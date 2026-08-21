@@ -21,6 +21,7 @@ test("unpaired first run is one in-pill account flow ending at the normal inbox"
   ]) assert.match(overlay, new RegExp(copy.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 
   assert.match(overlay, /cardEl\.classList\.toggle\("signup", needsSignup\)/);
+  assert.match(overlay, /\.card\.collapsed \.signup-view \{ display:none; \}/);
   assert.match(overlay, /const needsSignup = payload\.account\?\.paired === false/);
   assert.doesNotMatch(overlay, /Welcome to Relay|welcome tutorial|first-launch tutorial/i);
 });

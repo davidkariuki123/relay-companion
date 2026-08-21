@@ -2045,6 +2045,11 @@
      Once core writes the device credential this whole view disappears and the
      ordinary inbox paints Shane's real Welcome relay. */
   .card.signup .tabs, .card.signup .scroll, .card.signup .minimize-btn, .card.signup .count { display:none; }
+  /* First-run content is taller than the folded pill. If it remains in layout,
+     the centered body overflows upward across the lockup and can intercept the
+     very click that should reopen Relay. The compact face owns the whole 44px
+     hit area; reveal signup again as the card expands. */
+  .card.collapsed .signup-view { display:none; }
   .signup-view { flex:1 1 auto; min-height:0; padding:14px 22px 24px; display:flex; flex-direction:column; }
   .su-body { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; justify-content:center; }
   .su-step { color:var(--muted); font-size:10px; font-weight:600; letter-spacing:.14em; text-transform:uppercase; }

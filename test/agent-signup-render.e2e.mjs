@@ -32,7 +32,7 @@ const welcomePacket = {
   senderEmail:"hello@sendrelays.com",
   threadId:"welcome_fixture",
   title:"Welcome to Relay",
-  forHuman:'Relay is connected. Messages sent to you appear here, and your AI can read and reply.\n\n**Try it:** ask your AI, *"send a relay to someone I work with saying hi."*',
+  forHuman:'Relay is connected. Messages sent to you appear here, and your AI can read and reply.\n\nTry it: ask your AI, "send a relay to someone I work with saying hi."',
   forAgent:"",
   createdAt:"2026-08-20T18:00:00.000Z",
   updatedAt:"2026-08-20T18:00:00.000Z",
@@ -128,6 +128,11 @@ async function capture(page, name) {
   return file;
 }
 
+async function clickAt(page, x, y) {
+  await page.send("Input.dispatchMouseEvent", { type:"mousePressed", x, y, button:"left", clickCount:1 });
+  await page.send("Input.dispatchMouseEvent", { type:"mouseReleased", x, y, button:"left", clickCount:1 });
+}
+
 let main;
 let page;
 try {
@@ -161,6 +166,36 @@ try {
     await evaluate(page, `window.__relaySignupPreview(${JSON.stringify(stage)}, { email:"alex@example.com", account:{ displayName:"Alex Rivera", email:"alex@example.com" } }); true`);
     await waitFor(page, `document.getElementById("signupBody").innerText.includes(${JSON.stringify(expected)})`);
     rendered.push(await capture(page, `pill-${stage}`));
+    if (stage === "installed") {
+      const expandedLockup = await evaluate(page, `(() => {
+        const rect = document.getElementById("lockup").getBoundingClientRect();
+        return { x:rect.left + 32, y:rect.top + (rect.height / 2) };
+      })()`);
+      await clickAt(page, expandedLockup.x, expandedLockup.y);
+      await waitFor(page, `document.getElementById("card").classList.contains("collapsed") && document.getElementById("card").getBoundingClientRect().height < 46`);
+      const compact = await evaluate(page, `(() => {
+        const cardRect = document.getElementById("card").getBoundingClientRect();
+        const lockupRect = document.getElementById("lockup").getBoundingClientRect();
+        const x = lockupRect.left + 32;
+        const y = lockupRect.top + (lockupRect.height / 2);
+        const hit = document.elementFromPoint(x, y);
+        return {
+          x,
+          y,
+          width:cardRect.width,
+          height:cardRect.height,
+          signupDisplay:getComputedStyle(document.getElementById("signupView")).display,
+          hitInsideLockup:Boolean(hit && hit.closest && hit.closest("#lockup")),
+        };
+      })()`);
+      assert.equal(compact.signupDisplay, "none", `collapsed signup content must be absent: ${JSON.stringify(compact)}`);
+      assert.equal(compact.hitInsideLockup, true, `collapsed pill header must own its hit area: ${JSON.stringify(compact)}`);
+      rendered.push(await capture(page, "pill-installed-collapsed"));
+      await clickAt(page, compact.x, compact.y);
+      await waitFor(page, `!document.getElementById("card").classList.contains("collapsed") && document.getElementById("card").getBoundingClientRect().height > 520`);
+      assert.match(await evaluate(page, `document.getElementById("signupBody").innerText`), /Relay is ready for you\./);
+      rendered.push(await capture(page, "pill-installed-reexpanded"));
+    }
   }
 
   const welcomeText = await evaluate(page, `(async () => { onPayload(await window.relay.refresh()); return document.getElementById("relaysList").innerText; })()`);
@@ -171,7 +206,7 @@ try {
   assert.match(openedWelcome.text, /Relay is connected/);
   rendered.push(await capture(page, "pill-inbox-welcome"));
 
-  assert.equal(rendered.length, 8);
+  assert.equal(rendered.length, 10);
   console.log(JSON.stringify({ ok:true, screenshots:rendered }, null, 2));
 } catch (error) {
   throw new Error(`${error.message}\n${log.slice(-4000)}`);

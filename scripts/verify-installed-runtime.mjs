@@ -9,6 +9,14 @@ import { fileURLToPath } from "node:url";
 import { pathToFileURL } from "node:url";
 import { ensureCandidateElectronRuntime, verifyCanonicalCandidate } from "../src/canonical-runtime.js";
 
+export function electronVersionArgs(platform = process.platform) {
+  // This process only prints Electron's embedded version and exits. Runtime
+  // archives deliberately preserve ordinary file ownership, so the temporary
+  // Linux smoke tree cannot satisfy Chromium's root-owned setuid helper check.
+  // Relay's real desktop launch does not use this flag.
+  return platform === "linux" ? ["--no-sandbox", "--version"] : ["--version"];
+}
+
 export async function verifyInstalledRuntime({ packageRoot, version, platform = process.platform } = {}) {
   const root = path.resolve(String(packageRoot || ""));
   const expectedVersion = String(version || "").trim();
@@ -24,7 +32,7 @@ export async function verifyInstalledRuntime({ packageRoot, version, platform = 
   if (!verified.ok) throw new Error(`Runtime verification failed: ${verified.reason}${verified.detail ? ` (${verified.detail})` : ""}`);
   const expectedElectron = String(manifest.dependencies?.electron || "");
   if (!/^\d+\.\d+\.\d+$/.test(expectedElectron)) throw new Error("Runtime does not pin one exact Electron version");
-  const launched = spawnSync(verified.electronPath, ["--version"], {
+  const launched = spawnSync(verified.electronPath, electronVersionArgs(platform), {
     encoding: "utf8",
     windowsHide: true,
     timeout: 30_000,
