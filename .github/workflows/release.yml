@@ -56,6 +56,9 @@ jobs:
           test/canonical-runtime.test.mjs
           test/canonical-updater.test.mjs
           test/auto-update.test.mjs
+          test/tray-position.test.mjs
+          test/mac-app-identity.test.mjs
+          test/pill-open-flow.test.mjs
 
   runtime:
     needs: identity
@@ -81,6 +84,16 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Prove the native credential store round trip
         run: node --test test/credential-store-darwin.integration.test.mjs
+      - name: Prove AppKit honors Relay's first-run tray ordering
+        if: startsWith(matrix.platform, 'darwin-')
+        shell: bash
+        run: |
+          env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron test/tray-position-native-probe.cjs first-run
+          env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron test/tray-position-native-probe.cjs write-position
+          env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron test/tray-position-native-probe.cjs read-position
+          env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron test/tray-position-native-probe.cjs write-position-exit
+          env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron test/tray-position-native-probe.cjs read-position
+          env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron test/tray-position-native-probe.cjs destroy-preserve
       - name: Build, reconstruct, and launch the exact native runtime
         shell: bash
         env:

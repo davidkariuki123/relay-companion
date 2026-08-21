@@ -8,6 +8,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { pathToFileURL } from "node:url";
 import { ensureCandidateElectronRuntime, verifyCanonicalCandidate } from "../src/canonical-runtime.js";
+const { RELAY_MAC_BUNDLE_IDENTIFIER } = createRequire(import.meta.url)("../src/mac-app-identity.cjs");
 
 export function electronVersionArgs(platform = process.platform) {
   // This process only prints Electron's embedded version and exits. Runtime
@@ -15,6 +16,33 @@ export function electronVersionArgs(platform = process.platform) {
   // Linux smoke tree cannot satisfy Chromium's root-owned setuid helper check.
   // Relay's real desktop launch does not use this flag.
   return platform === "linux" ? ["--no-sandbox", "--version"] : ["--version"];
+}
+
+export function verifyMacElectronIdentity(electronPath, {
+  platform = process.platform,
+  spawn = spawnSync,
+} = {}) {
+  if (platform !== "darwin") return { verified: false, reason: "not-darwin" };
+  const appPath = path.resolve(path.dirname(electronPath), "../..");
+  const infoPath = path.join(appPath, "Contents", "Info.plist");
+  const plist = spawn("/usr/bin/plutil", ["-extract", "CFBundleIdentifier", "raw", "-o", "-", infoPath], {
+    encoding: "utf8",
+    windowsHide: true,
+    timeout: 30_000,
+  });
+  const identifier = String(plist.stdout || "").trim();
+  if (plist.error || plist.status !== 0 || identifier !== RELAY_MAC_BUNDLE_IDENTIFIER) {
+    throw new Error(`Electron bundle identity is not Relay-owned (${plist.error?.message || identifier || plist.stderr || plist.status}).`);
+  }
+  const signature = spawn("/usr/bin/codesign", ["--verify", "--deep", "--strict", appPath], {
+    encoding: "utf8",
+    windowsHide: true,
+    timeout: 5 * 60_000,
+  });
+  if (signature.error || signature.status !== 0) {
+    throw new Error(`Relay Electron bundle signature is invalid (${signature.error?.message || signature.stderr || signature.status}).`);
+  }
+  return { verified: true, appPath, bundleIdentifier: identifier };
 }
 
 export async function verifyInstalledRuntime({ packageRoot, version, platform = process.platform } = {}) {
@@ -30,6 +58,7 @@ export async function verifyInstalledRuntime({ packageRoot, version, platform = 
   if (!prepared.ok) throw new Error(`Electron runtime preparation failed: ${prepared.reason}`);
   const verified = verifyCanonicalCandidate(root, expectedVersion, { platform });
   if (!verified.ok) throw new Error(`Runtime verification failed: ${verified.reason}${verified.detail ? ` (${verified.detail})` : ""}`);
+  verifyMacElectronIdentity(verified.electronPath, { platform });
   const expectedElectron = String(manifest.dependencies?.electron || "");
   if (!/^\d+\.\d+\.\d+$/.test(expectedElectron)) throw new Error("Runtime does not pin one exact Electron version");
   const launched = spawnSync(verified.electronPath, electronVersionArgs(platform), {
