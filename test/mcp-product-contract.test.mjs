@@ -147,6 +147,7 @@ test("conditional schemas are used only where they do not erase critical writing
       if: { properties: { action: { enum: ["get", "read", "search", "agents"] } } },
       then: { required: ["aiSessionId"] },
     },
+    { if: { properties: { action: { const: "operation" } } }, then: { required: ["operationId"] } },
     { if: { properties: { action: { const: "search" } } }, then: { required: ["query"] } },
   ]);
   const session = byName.get("relay_ai_session").inputSchema;

@@ -81,6 +81,36 @@ test("relay_ai_sessions routes transcript search to the computer holding the AI 
   assert.deepEqual(payload(result).records, [{ type: "message", text: "found" }]);
 });
 
+test("relay_ai_sessions exposes durable operation state without transcript polling", async () => {
+  let received;
+  const client = {
+    async getSessionOperation(operationId) {
+      received = operationId;
+      return {
+        operation: {
+          id: operationId,
+          state: "handed_off",
+          sourceSessionId: "rsess_source",
+          targetSessionId: "rsess_target",
+          result: { sessionId: "rsess_target" },
+        },
+      };
+    },
+  };
+  const result = await handleCall(client, "relay_ai_sessions", {
+    action: "operation",
+    operationId: "rsop_visible",
+  }, { features: DEVELOPER_FEATURES });
+  assert.equal(received, "rsop_visible");
+  assert.deepEqual(payload(result).operation, {
+    id: "rsop_visible",
+    state: "handed_off",
+    sourceAiSessionId: "rsess_source",
+    targetAiSessionId: "rsess_target",
+    result: { aiSessionId: "rsess_target" },
+  });
+});
+
 test("previous MCP names remain callable for clients that cached them", async () => {
   const client = { async listSessions() { return { sessions: [] }; } };
   const result = await handleCall(client, "relay_sessions", { action: "list" }, { features: DEVELOPER_FEATURES });

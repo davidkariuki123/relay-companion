@@ -207,6 +207,8 @@ test("ordinary Relay MCP directs Claude and Codex to the membership-scoped Granu
   assert.doesNotMatch(send.description, /coordination-workflow|relay_task_create/i);
   assert.match(search.description, /workspace name/);
   assert.match(search.description, /several workspaces/);
+  assert.match(send.description, /recipient\.self=true/);
+  assert.equal(send.inputSchema.properties.recipient.properties.self.type, "boolean");
 
   const titleDescription = send.inputSchema.properties.title.description;
   const humanDescription = send.inputSchema.properties.forHuman.description;
@@ -338,6 +340,36 @@ test("relay_send turns local files into inline ordinary relay attachments", asyn
   assert.equal(payload.attachments[0].bytes, body.length);
   assert.equal(payload.attachments[0].sha256, sha256);
   assert.equal(Buffer.from(payload.attachments[0].contentBase64, "base64").toString(), body.toString());
+});
+
+test("relay_send delivers a zero-byte local attachment directly to self", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "relay-mcp-self-"));
+  const filePath = path.join(dir, "TestDoc.txt");
+  await fs.writeFile(filePath, Buffer.alloc(0));
+  let payload;
+  const fakeClient = {
+    async sendRelay(input) {
+      payload = input;
+      return { relayId: "relay_self_1", deliveredVia: "device" };
+    },
+  };
+
+  await handleCall(fakeClient, "relay_send", {
+    recipient: { self: true },
+    kind: "message",
+    title: "Test document for myself",
+    forHuman: "Saving this here.",
+    files: [filePath],
+    idempotencyKey: "idem_relay_self_file_1",
+  });
+
+  assert.deepEqual(payload.recipient, { self: true });
+  assert.equal(payload.attachments.length, 1);
+  assert.equal(payload.attachments[0].name, "TestDoc.txt");
+  assert.equal(payload.attachments[0].contentType, "text/plain");
+  assert.equal(payload.attachments[0].bytes, 0);
+  assert.equal(payload.attachments[0].sha256, createHash("sha256").update(Buffer.alloc(0)).digest("hex"));
+  assert.equal(payload.attachments[0].contentBase64, "");
 });
 
 test("relay_send scopes generated ordinary attachment ids to the send idempotency key", async () => {
@@ -1122,7 +1154,7 @@ test("relay_send refuses to guess the recipient experience", async () => {
   await assert.rejects(() => handleCall(client, "relay_send", base), /kind is required/i);
   await assert.rejects(
     () => handleCall(client, "relay_send", { ...base, recipient: {}, kind: "message" }),
-    /recipient must include contactId, relayUserId, email, groupId, or chatId/i,
+    /recipient must set self=true or include contactId, relayUserId, email, groupId, or chatId/i,
   );
   await assert.rejects(
     () => handleCall(client, "relay_send", { ...base, kind: "task", recipient: { groupId: "grp_founders" } }),
