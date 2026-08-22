@@ -232,7 +232,9 @@ test("ordinary Relay MCP directs Claude and Codex to the membership-scoped Granu
   assert.match(humanDescription, /60 words triggers mandatory review; it is NOT A TARGET OR BUDGET/);
   assert.match(humanDescription, /Never pad toward it or hide detail in long compound sentences/i);
   assert.match(humanDescription, /teaches voice and relationship register, not target length/i);
-  assert.match(humanDescription, /Lots of detail never justifies a longer human message/i);
+  assert.match(humanDescription, /plain narrative in ordinary human language/i);
+  assert.match(humanDescription, /what happened, why it matters, and what comes next/i);
+  assert.match(humanDescription, /Never use technical detail to help the person understand/i);
   assert.match(humanDescription, /mechanisms, evidence, code, paths, logs, reproduction steps/i);
   assert.match(humanDescription, /No headings, lists, tables, code blocks, title repetition/i);
   const longConfirmation = send.inputSchema.properties.longForHumanConfirmed;
