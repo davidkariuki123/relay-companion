@@ -54,7 +54,7 @@ test("resetWindowZoom pins the renderer at 100 percent", () => {
 test("reinforceSpacePresence applies all-Spaces and floating window flags", () => {
   const win = fakeWindow({ visible: true });
 
-  assert.equal(reinforceSpacePresence(win, { moveTop: true }), true);
+  assert.equal(reinforceSpacePresence(win, { moveTop: true, platform: "darwin" }), true);
 
   assert.deepEqual(win.calls, [
     ["setZoomFactor", 1],
@@ -71,7 +71,7 @@ test("reinforceSpacePresence NEVER moveTops a hidden window (macOS would show it
   // implicitly show anything.
   const win = fakeWindow({ visible: false });
 
-  assert.equal(reinforceSpacePresence(win, { moveTop: true }), true);
+  assert.equal(reinforceSpacePresence(win, { moveTop: true, platform: "darwin" }), true);
 
   assert.ok(!win.calls.some(([name]) => name === "moveTop"), "hidden window must not be raised/shown");
 });
@@ -79,7 +79,7 @@ test("reinforceSpacePresence NEVER moveTops a hidden window (macOS would show it
 test("showInactiveOnAllSpaces reasserts all-Spaces for already-visible windows", () => {
   const win = fakeWindow({ visible: true });
 
-  assert.equal(showInactiveOnAllSpaces(win), false);
+  assert.equal(showInactiveOnAllSpaces(win, { platform: "darwin" }), false);
 
   assert.deepEqual(win.calls, [
     ["setZoomFactor", 1],
@@ -96,7 +96,7 @@ test("showInactiveOnAllSpaces force NEVER hides a visible window (no blink)", ()
 
   // Returns false because the window was already visible (no hidden->shown
   // transition, so main must not reset the renderer's interactivity handshake).
-  assert.equal(showInactiveOnAllSpaces(win, { force: true }), false);
+  assert.equal(showInactiveOnAllSpaces(win, { force: true, platform: "darwin" }), false);
 
   assert.ok(!win.calls.some(([name]) => name === "hide"), "force path must not hide()");
   assert.ok(win.calls.some(([name]) => name === "showInactive"), "still re-attaches via showInactive()");
@@ -111,7 +111,7 @@ test("showInactiveOnAllSpaces force is a no-op when nothing drifted (no reorder,
   win.isVisibleOnAllWorkspaces = () => true;
   win.isAlwaysOnTop = () => true;
 
-  assert.equal(showInactiveOnAllSpaces(win, { force: true }), false);
+  assert.equal(showInactiveOnAllSpaces(win, { force: true, platform: "darwin" }), false);
 
   assert.ok(!win.calls.some(([name]) => name === "showInactive"), "no re-attach needed");
   assert.ok(!win.calls.some(([name]) => name === "moveTop"), "no reorder");
@@ -127,7 +127,7 @@ test("showInactiveOnAllSpaces force re-attaches a visible window whose all-Space
     voaw = true;
   };
 
-  assert.equal(showInactiveOnAllSpaces(win, { force: true }), false);
+  assert.equal(showInactiveOnAllSpaces(win, { force: true, platform: "darwin" }), false);
 
   assert.ok(win.calls.some(([name]) => name === "setVisibleOnAllWorkspaces"), "repairs the drifted bit");
   assert.ok(win.calls.some(([name]) => name === "showInactive"), "re-attaches to the active Space");
@@ -137,7 +137,7 @@ test("showInactiveOnAllSpaces force re-attaches a visible window whose all-Space
 test("showInactiveOnAllSpaces force shows a hidden window and reports the transition", () => {
   const win = fakeWindow({ visible: false });
 
-  assert.equal(showInactiveOnAllSpaces(win, { force: true }), true);
+  assert.equal(showInactiveOnAllSpaces(win, { force: true, platform: "darwin" }), true);
 
   assert.ok(win.calls.some(([name]) => name === "showInactive"));
   const shownAt = win.calls.findIndex(([name]) => name === "showInactive");
@@ -151,7 +151,7 @@ test("reinforceSpacePresence skips window-server calls that would be no-ops", ()
   win.isVisibleOnAllWorkspaces = () => true;
   win.isAlwaysOnTop = () => true;
 
-  assert.equal(reinforceSpacePresence(win), true);
+  assert.equal(reinforceSpacePresence(win, { platform: "darwin" }), true);
 
   assert.ok(
     !win.calls.some(([name]) => name === "setVisibleOnAllWorkspaces" || name === "setAlwaysOnTop"),
@@ -164,7 +164,7 @@ test("reinforceSpacePresence re-asserts state that actually drifted", () => {
   win.isVisibleOnAllWorkspaces = () => false;
   win.isAlwaysOnTop = () => false;
 
-  assert.equal(reinforceSpacePresence(win), true);
+  assert.equal(reinforceSpacePresence(win, { platform: "darwin" }), true);
 
   assert.ok(win.calls.some(([name]) => name === "setVisibleOnAllWorkspaces"));
   assert.ok(win.calls.some(([name]) => name === "setAlwaysOnTop"));
@@ -175,7 +175,7 @@ test("a yielded macOS pill stays open but drops its topmost level", () => {
   win.isVisibleOnAllWorkspaces = () => true;
   win.isAlwaysOnTop = () => true;
 
-  assert.equal(showInactiveOnAllSpaces(win, { force: true, alwaysOnTop: false }), false);
+  assert.equal(showInactiveOnAllSpaces(win, { force: true, alwaysOnTop: false, platform: "darwin" }), false);
 
   assert.ok(!win.calls.some(([name]) => name === "hide"), "yielding never closes the reader");
   assert.ok(!win.calls.some(([name]) => name === "moveTop"), "yielding never raises over the newly active app");

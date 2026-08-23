@@ -284,7 +284,9 @@ test("ensureElectronRuntime repairs Electron when npm hoists it beside Relay", (
   assert.deepEqual(calls[0].args, [fs.realpathSync(installScript)]);
 });
 
-test("installRelayMacApp creates a valid Spotlight-searchable Relay.app with a real icon and reopen launcher", () => {
+test("installRelayMacApp creates a valid Spotlight-searchable Relay.app with a real icon and reopen launcher", {
+  skip: process.platform !== "darwin" ? "macOS bundle mode contract" : false,
+}, () => {
   const fixture = relayDesktopFixture();
   const calls = [];
   const result = installRelayMacApp({
@@ -746,6 +748,7 @@ test("installDaemonAutostart creates and starts a Windows logon Scheduled Task",
   const calls = [];
   const res = installDaemonAutostart("C:\\Relay\\relay.js", "C:\\Node\\node.exe", {
     platform: "win32",
+    claim: true,
     ensureLauncher: () => null,
     runCommand(command, args) {
       calls.push({ command, args });
@@ -768,6 +771,7 @@ test("installDaemonAutostart --no-restart updates a Windows task without ending 
   const calls = [];
   const res = installDaemonAutostart("C:\\Relay\\relay.js", "C:\\Node\\node.exe", {
     platform: "win32",
+    claim: true,
     reload: false,
     ensureLauncher: () => null,
     runCommand(command, args) {

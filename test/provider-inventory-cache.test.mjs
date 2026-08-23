@@ -56,7 +56,7 @@ test("provider inventory refreshes once, persists privately, and observes its TT
 
   const persisted = fs.readFileSync(cacheFile, "utf8");
   assert.equal(persisted.includes("accessToken"), false);
-  assert.equal(fs.statSync(cacheFile).mode & 0o777, 0o600);
+  if (process.platform !== "win32") assert.equal(fs.statSync(cacheFile).mode & 0o777, 0o600);
   assert.equal((await inventory.refresh()).stale, false);
   assert.equal(calls, 1);
 

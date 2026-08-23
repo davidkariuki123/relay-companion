@@ -42,8 +42,9 @@ export function relayBinPath() {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../bin/relay.js");
 }
 
-function packageRootForBin(bin = relayBinPath()) {
-  return path.resolve(path.dirname(bin), "..");
+function packageRootForBin(bin = relayBinPath(), platform = process.platform) {
+  const api = platform === "win32" ? path.win32 : path.posix;
+  return api.resolve(api.dirname(bin), "..");
 }
 
 // A STABLE node path to bake into launchd plists and MCP registrations. process.execPath
@@ -1423,12 +1424,12 @@ function autostartClaimRefusal(bin, { claim, homeDir, platform, ownershipGuard }
   if (claim) return null;
   let guard = null;
   try {
-    guard = ownershipGuard(packageRootForBin(bin), { homeDir, platform });
+    guard = ownershipGuard(packageRootForBin(bin, platform), { homeDir, platform });
   } catch {
     return null;
   }
   if (!guard || guard.mayClaim) return null;
-  const wouldRegister = packageRootForBin(bin);
+  const wouldRegister = packageRootForBin(bin, platform);
   const current = guard.current?.packageRoot ?? null;
   return {
     ok: false,
@@ -1530,7 +1531,7 @@ export function installPillAutostart(
   if (platform !== "darwin" && platform !== "win32") return { ok: false, reason: "autostart_unsupported_platform" };
   const refusal = autostartClaimRefusal(bin, { claim, homeDir, platform, ownershipGuard });
   if (refusal) return refusal;
-  const packageRoot = packageRootForBin(bin);
+  const packageRoot = packageRootForBin(bin, platform);
   const electron = ensureElectronRuntime(packageRoot, { runCommand });
   const electronPath = electron.electronPath;
   const overlayMain = path.join(packageRoot, "overlay", "main.cjs");

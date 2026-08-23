@@ -4,6 +4,7 @@ import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { CodexAppServerClient, defaultCodexCommand } from "./codex-app-server.js";
+import { codexRelayCompletion, runCodexOneShot } from "./codex-one-shot.js";
 import { cliBinaryPath, installedCliVersions } from "./desktop-wake.js";
 import { inspectAiSession } from "./ai-session-transcript.js";
 import { waitForCodexIdle, waitForRolloutGrowth, rolloutSize } from "./codex-inject.js";
@@ -615,6 +616,51 @@ async function executeCodex({ client, claim, target, operation, input, prompt })
     } finally {
       await appServer.stop();
     }
+  }
+
+  if (input.oneShot) {
+    const runRelayId = String(input.agentRunRelayId || "");
+    let applied = false;
+    let lastProgress = "";
+    let nativeThreadId = "";
+    let writes = Promise.resolve();
+    const queueProgress = (summary) => {
+      if (!runRelayId || !summary || summary === lastProgress) return;
+      lastProgress = summary;
+      writes = writes.then(() => client.agentRunProgress(runRelayId, summary)).catch(() => {});
+    };
+    queueProgress("Codex is starting on your laptop.");
+    await evidence(client, operation.id, claim.claimToken, "handed_off", {
+      adapter: "codex_exec",
+    });
+    const result = await runCodexOneShot({
+      command: defaultCodexCommand(),
+      cwd: input.cwd || process.cwd(),
+      prompt,
+      model: input.model || "",
+      effort: input.effort || "",
+      fullAccess: currentPlacement() === "cloud" || process.env.RELAY_SESSION_FULL_ACCESS === "1",
+      onEvent: (event, status) => {
+        if (event?.type === "thread.started") nativeThreadId = String(event.thread_id || event.threadId || "");
+        if (!applied && ["thread.started", "turn.started"].includes(event?.type)) {
+          applied = true;
+          writes = writes.then(() => evidence(client, operation.id, claim.claimToken, "applied", {
+            adapter: "codex_exec",
+            ...(nativeThreadId ? { nativeThreadId } : {}),
+          })).catch(() => {});
+        }
+        queueProgress(status);
+      },
+    });
+    await writes;
+    const completion = codexRelayCompletion(result.finalMessage);
+    if (!completion) throw new Error("Codex finished without returning a Relay answer");
+    if (runRelayId) await client.agentRunComplete(runRelayId, completion.forHuman, completion.forAgent);
+    await evidence(client, operation.id, claim.claimToken, "completed", {
+      adapter: "codex_exec",
+      ...(result.threadId ? { nativeThreadId: result.threadId } : {}),
+    });
+    return;
   }
 
   const appServer = new CodexAppServerClient({ command: defaultCodexCommand(), cwd: input.cwd || process.cwd() });

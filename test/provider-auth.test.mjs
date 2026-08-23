@@ -78,7 +78,7 @@ test("Relay enablement is local, durable, and does not log the provider out", as
   });
   assert.equal(status.connected, true, "provider authentication remains intact");
   assert.equal(status.enabled, false, "only Relay use is disabled");
-  assert.equal(fs.statSync(prefsFile).mode & 0o777, 0o600);
+  if (process.platform !== "win32") assert.equal(fs.statSync(prefsFile).mode & 0o777, 0o600);
   await assert.rejects(assertProviderReady("claude", {
     command: "/opt/homebrew/bin/claude",
     prefsFile,
@@ -152,7 +152,7 @@ test("desktop sign-in opens each official CLI subscription flow and monitors onl
   assert.equal(busyStatus.busyDetail, "Finish Claude Code sign-in in Terminal.");
   assert.deepEqual(calls[0].args.slice(0, 2), ["-a", "Test Terminal"]);
   const claudeScript = calls[0].args[2];
-  assert.equal(fs.statSync(claudeScript).mode & 0o777, 0o700);
+  if (process.platform !== "win32") assert.equal(fs.statSync(claudeScript).mode & 0o777, 0o700);
   const claudeSource = fs.readFileSync(claudeScript, "utf8");
   assert.match(claudeSource, /claude' 'auth' 'login' '--claudeai'/);
   assert.match(claudeSource, /security unlock-keychain/);
@@ -181,7 +181,7 @@ test("desktop sign-in opens each official CLI subscription flow and monitors onl
   assert.equal(codexStart.interaction, "terminal");
   assert.deepEqual(calls[1].args.slice(0, 2), ["-a", "Test Terminal"]);
   const codexScript = calls[1].args[2];
-  assert.equal(fs.statSync(codexScript).mode & 0o777, 0o700);
+  if (process.platform !== "win32") assert.equal(fs.statSync(codexScript).mode & 0o777, 0o700);
   const codexSource = fs.readFileSync(codexScript, "utf8");
   assert.match(codexSource, /codex' 'login'/);
   assert.doesNotMatch(codexSource, /with-api-key|access[_-]?token|oauth[_-]?code|client[_-]?secret/i);

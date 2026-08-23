@@ -49,10 +49,10 @@ test("the registration resolves to the package root, skipping node and its flags
   const registration = readAutostartDaemonRoot({
     homeDir: "/Users/test",
     platform: "darwin",
-    readFileImpl: readerFor(plistFor(path.join(STALE, "bin", "relay.js"))),
+    readFileImpl: readerFor(plistFor(path.posix.join(STALE, "bin", "relay.js"))),
   });
   assert.equal(registration.root, STALE);
-  assert.equal(registration.bin, path.join(STALE, "bin", "relay.js"));
+  assert.equal(registration.bin, path.posix.join(STALE, "bin", "relay.js"));
 });
 
 test("an unreadable or Relay-less registration is UNKNOWN, never an answer", () => {
@@ -80,7 +80,7 @@ test("a registration that still names THIS tree never reports a replacement", ()
   const verdict = autostartWillReplace(STALE, {
     homeDir: "/Users/test",
     platform: "darwin",
-    readImpl: () => ({ root: STALE, bin: path.join(STALE, "bin", "relay.js"), source: "plist" }),
+    readImpl: () => ({ root: STALE, bin: path.posix.join(STALE, "bin", "relay.js"), source: "plist" }),
   });
   assert.equal(verdict.willReplace, false);
   assert.equal(verdict.reason, "registration-still-names-this-tree");
@@ -90,7 +90,7 @@ test("a registration naming another tree is the only thing that authorises the e
   const verdict = autostartWillReplace(STALE, {
     homeDir: "/Users/test",
     platform: "darwin",
-    readImpl: () => ({ root: CANONICAL, bin: path.join(CANONICAL, "bin", "relay.js"), source: "plist" }),
+    readImpl: () => ({ root: CANONICAL, bin: path.posix.join(CANONICAL, "bin", "relay.js"), source: "plist" }),
   });
   assert.equal(verdict.willReplace, true);
   assert.equal(verdict.reason, "registration-names-another-tree");

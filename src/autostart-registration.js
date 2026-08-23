@@ -24,8 +24,13 @@ export const DAEMON_LAUNCH_LABEL = "work.relay.companion";
 export const WINDOWS_DAEMON_TASK_NAME = "Relay Companion Daemon";
 
 /** `<packageRoot>/bin/relay.js` -> `<packageRoot>`. */
-function packageRootForBin(bin) {
-  return path.dirname(path.dirname(path.resolve(String(bin))));
+function pathApi(platform) {
+  return platform === "win32" ? path.win32 : path.posix;
+}
+
+function packageRootForBin(bin, platform = process.platform) {
+  const api = pathApi(platform);
+  return api.dirname(api.dirname(api.resolve(String(bin))));
 }
 
 /** Pull the `<string>` entries out of the ProgramArguments array of a launchd plist. */
@@ -58,7 +63,7 @@ function relayBinFromArguments(args) {
 }
 
 function readDarwinRegistration({ homeDir, readFileImpl }) {
-  const plistPath = path.join(homeDir, "Library", "LaunchAgents", `${DAEMON_LAUNCH_LABEL}.plist`);
+  const plistPath = path.posix.join(homeDir, "Library", "LaunchAgents", `${DAEMON_LAUNCH_LABEL}.plist`);
   let xml = null;
   try {
     xml = readFileImpl(plistPath, "utf8");
@@ -67,7 +72,7 @@ function readDarwinRegistration({ homeDir, readFileImpl }) {
   }
   const bin = relayBinFromArguments(parseLaunchAgentProgramArguments(xml));
   if (!bin) return null;
-  return { root: packageRootForBin(bin), bin: path.resolve(bin), source: plistPath };
+  return { root: packageRootForBin(bin, "darwin"), bin: path.posix.resolve(bin), source: plistPath };
 }
 
 function readWin32Registration({ runCommandImpl }) {
@@ -89,7 +94,7 @@ function readWin32Registration({ runCommandImpl }) {
   const bin = match[1]
     .replaceAll("&quot;", '"')
     .replaceAll("&amp;", "&");
-  return { root: packageRootForBin(bin), bin: path.resolve(bin), source: WINDOWS_DAEMON_TASK_NAME };
+  return { root: packageRootForBin(bin, "win32"), bin: path.win32.resolve(bin), source: WINDOWS_DAEMON_TASK_NAME };
 }
 
 /**
@@ -130,7 +135,7 @@ export function autostartWillReplace(bootPackageRoot, {
   // that is really the same tree can compare unequal, and an unequal compare here
   // is precisely the "a replacement is coming" answer that must never be wrong.
   const normalise = (value) => {
-    const resolved = path.resolve(String(value ?? ""));
+    const resolved = pathApi(platform).resolve(String(value ?? ""));
     return platform === "win32" ? resolved.toLowerCase() : resolved;
   };
   if (normalise(registration.root) === normalise(bootPackageRoot)) {

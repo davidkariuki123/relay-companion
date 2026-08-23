@@ -624,6 +624,33 @@ test("folding publishes the pill hit region before an animation frame can stall"
   );
 });
 
+test("a hidden-to-shown pill cannot leave native click-through state out of step", () => {
+  // Reproduction: hide and re-show while the pointer remains over the card.
+  // If show writes setIgnoreMouseEvents(true) directly while hitIgnoring is
+  // still false, the next applyIgnore(false) is suppressed and every click
+  // keeps falling through until the pointer leaves and re-enters.
+  const show = sliceFunction(main, "function showOverlayWindow(");
+  assert.match(show, /applyIgnore\(true, \{ force: true \}\)/);
+  assert.doesNotMatch(show, /win\.setIgnoreMouseEvents/);
+
+  const apply = sliceFunction(main, "function applyIgnore(");
+  assert.match(apply, /\{ force = false \} = \{\}/);
+  assert.match(apply, /if \(!force && next === hitIgnoring\) return;/);
+  assert.ok(
+    apply.indexOf("hitIgnoring = next;") < apply.indexOf("win.setIgnoreMouseEvents(next"),
+    "the mirror must update before the native click-through write",
+  );
+  assert.equal(
+    [...main.matchAll(/\.setIgnoreMouseEvents\(/g)].length,
+    1,
+    "applyIgnore must remain the only writer of Electron's native click-through flag",
+  );
+
+  const create = sliceFunction(main, "function createWindow(");
+  assert.match(create, /applyIgnore\(true, \{ force: true \}\);\s*startHitTest\(\);/);
+  assert.doesNotMatch(create, /win\.setIgnoreMouseEvents/);
+});
+
 test("reader refreshes cannot steal focus from or block the app underneath", () => {
   const renderReader = html.slice(html.indexOf("function renderReader("), html.indexOf("// ---------- the requests board"));
   assert.doesNotMatch(renderReader, /setFocusable\(true\)/);

@@ -8,7 +8,7 @@ test("pill status paths follow the same RELAY_HOME precedence as the overlay", (
   assert.equal(relayCompanionHome({ RELAY_HOME: "/tmp/primary", RELAY_COMPANION_HOME: "/tmp/legacy" }, "/Users/x"), "/tmp/primary");
   assert.equal(relayCompanionHome({ RELAY_COMPANION_HOME: "/tmp/legacy" }, "/Users/x"), "/tmp/legacy");
   assert.equal(relayCompanionHome({}, "/Users/x"), path.join("/Users/x", ".relay-companion"));
-  assert.equal(pillStatusPath({ RELAY_HOME: "/tmp/relay" }, os.homedir()), "/tmp/relay/pill-status.json");
+  assert.equal(pillStatusPath({ RELAY_HOME: "/tmp/relay" }, os.homedir()), path.join("/tmp/relay", "pill-status.json"));
 });
 
 test("waitForPillReady requires the caller nonce and an actually visible, undismissed window", async () => {

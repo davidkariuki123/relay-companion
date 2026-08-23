@@ -571,6 +571,9 @@ test("developer chat composers rank owned laptop agents ahead of participant men
   assert.match(html, /groupInfoRoster\(group\)[\s\S]*!member\.currentUser/, "saved-group rosters contribute participants who have not spoken yet");
   assert.match(html, /payload\.features\?\.requests === true \? \[/, "owned agents are suggested only where the feature is enabled");
   assert.match(html, /if \(event\.key === "Enter" \|\| event\.key === "Tab"\)/, "keyboard selection works without leaving the composer");
+  assert.match(html, /button\.addEventListener\("click"[\s\S]*chooseMention/, "touch and click selection dismisses the menu too");
+  assert.match(html, /\["ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"\][\s\S]*renderMentions/, "moving the caret re-evaluates the active mention");
+  assert.match(html, /thQrInput\.addEventListener\("blur"[\s\S]*closeMentions/, "leaving the composer dismisses the menu");
   assert.match(html, /title:"I'm on it"[\s\S]*agentInvocation:true/, "sending paints the immediate owned-agent response");
 });
 

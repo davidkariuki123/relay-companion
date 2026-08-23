@@ -9716,6 +9716,7 @@
         mentionMenu.classList.remove("hidden");
         for (const button of mentionMenu.querySelectorAll("[data-mention-index]")) {
           button.addEventListener("mousedown", (event) => { event.preventDefault(); event.stopPropagation(); chooseMention(Number(button.getAttribute("data-mention-index"))); });
+          button.addEventListener("click", (event) => { event.preventDefault(); event.stopPropagation(); chooseMention(Number(button.getAttribute("data-mention-index"))); });
         }
       };
       thQrInput.addEventListener("input", () => {
@@ -9724,6 +9725,12 @@
         renderMentions();
       });
       thQrInput.addEventListener("click", renderMentions);
+      thQrInput.addEventListener("keyup", (event) => {
+        if (["ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"].includes(event.key)) renderMentions();
+      });
+      thQrInput.addEventListener("blur", (event) => {
+        if (!mentionMenu?.contains(event.relatedTarget)) closeMentions();
+      });
       thQrInput.addEventListener("keydown", (event) => {
         if (!mentionMatches.length || mentionMenu?.classList.contains("hidden")) return;
         if (event.key === "ArrowDown" || event.key === "ArrowUp") {

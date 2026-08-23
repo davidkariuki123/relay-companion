@@ -66,7 +66,7 @@ function reinforceSpacePresence(win, { moveTop = false, alwaysOnTop = true, plat
   return true;
 }
 
-function showInactiveOnAllSpaces(win, { force = false, alwaysOnTop = true } = {}) {
+function showInactiveOnAllSpaces(win, { force = false, alwaysOnTop = true, platform = process.platform } = {}) {
   if (!isUsableWindow(win)) return false;
   const visible = typeof win.isVisible === "function" ? win.isVisible() : false;
   // Capture drift BEFORE reinforceSpacePresence repairs it: once the collection
@@ -75,7 +75,7 @@ function showInactiveOnAllSpaces(win, { force = false, alwaysOnTop = true } = {}
   const canJoinAllSpacesIntact =
     typeof win.isVisibleOnAllWorkspaces === "function" && win.isVisibleOnAllWorkspaces();
   if (visible && !force) {
-    reinforceSpacePresence(win, { alwaysOnTop });
+    reinforceSpacePresence(win, { alwaysOnTop, platform });
     return false;
   }
   if (visible && canJoinAllSpacesIntact) {
@@ -83,7 +83,7 @@ function showInactiveOnAllSpaces(win, { force = false, alwaysOnTop = true } = {}
     // the active Space, so there is nothing to re-attach. showInactive()/moveTop()
     // here re-order the window mid Space-transition animation — the residual
     // "pill blinks on every swipe" after the hide()/show() cycle was removed.
-    reinforceSpacePresence(win, { alwaysOnTop });
+    reinforceSpacePresence(win, { alwaysOnTop, platform });
     return false;
   }
 
@@ -91,9 +91,9 @@ function showInactiveOnAllSpaces(win, { force = false, alwaysOnTop = true } = {}
   // blink on every forced re-show (twice per Space change). showInactive() on a
   // visible window is enough to re-attach it to the active Space once the
   // all-workspaces collection behavior has been re-asserted above.
-  reinforceSpacePresence(win, { alwaysOnTop });
+  reinforceSpacePresence(win, { alwaysOnTop, platform });
   if (typeof win.showInactive === "function") win.showInactive();
-  reinforceSpacePresence(win, { moveTop: alwaysOnTop, alwaysOnTop });
+  reinforceSpacePresence(win, { moveTop: alwaysOnTop, alwaysOnTop, platform });
   return !visible;
 }
 

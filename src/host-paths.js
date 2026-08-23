@@ -19,17 +19,17 @@ function defaultWindowsAppData({ env = process.env, homedir = os.homedir() } = {
 
 export function defaultClaudeDesktopBaseDir({ platform = process.platform, env = process.env, homedir = os.homedir() } = {}) {
   if (platform === "win32") return path.win32.join(defaultWindowsAppData({ env, homedir }), "Claude");
-  if (platform === "darwin") return path.join(homedir, "Library", "Application Support", "Claude");
+  if (platform === "darwin") return path.posix.join(homedir, "Library", "Application Support", "Claude");
   return path.join(env.XDG_CONFIG_HOME || path.join(homedir, ".config"), "Claude");
 }
 
 export function defaultClaudeDesktopConfigPath(options = {}) {
-  const pathLib = options.platform === "win32" ? path.win32 : path;
+  const pathLib = options.platform === "win32" ? path.win32 : options.platform === "darwin" ? path.posix : path;
   return pathLib.join(defaultClaudeDesktopBaseDir(options), "claude_desktop_config.json");
 }
 
 export function defaultClaudeDesktopSessionsDir(options = {}) {
-  const pathLib = options.platform === "win32" ? path.win32 : path;
+  const pathLib = options.platform === "win32" ? path.win32 : options.platform === "darwin" ? path.posix : path;
   return pathLib.join(defaultClaudeDesktopBaseDir(options), "claude-code-sessions");
 }
 

@@ -98,7 +98,15 @@ test("openRelay downloads ordinary attachments and seeds Claude with clickable a
     const transcript = fs.readFileSync(row.claudeNativeSession.sessionPath, "utf8");
     assert.match(transcript, /## Attachments/);
     assert.match(transcript, /brain-quality-plan\.md/);
-    assert.match(transcript, new RegExp(`\\[brain-quality-plan\\.md\\]\\(${localPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)`));
+    const visibleText = transcript
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .flatMap((entry) => entry?.message?.content || [])
+      .filter((part) => part?.type === "text")
+      .map((part) => part.text)
+      .join("\n");
+    assert.match(visibleText, new RegExp(`\\[brain-quality-plan\\.md\\]\\(${localPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)`));
     assert.doesNotMatch(transcript, /Local copy:/);
   } finally {
     await new Promise((resolve) => server.close(resolve));

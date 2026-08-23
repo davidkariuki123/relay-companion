@@ -565,7 +565,9 @@ test("Windows tar receives local relative paths instead of drive-letter remote n
   }), /share a local volume/);
 });
 
-test("artifact construction signs a compact internal-link map and refuses escaping links", () => {
+test("artifact construction signs a compact internal-link map and refuses escaping links", {
+  skip: process.platform === "win32" ? "requires POSIX symlink semantics" : false,
+}, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-runtime-links-"));
   try {
     const packageRoot = path.join(root, "node_modules", "relay-companion");

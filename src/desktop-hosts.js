@@ -31,31 +31,31 @@ export function claudeDesktopConfigDirs({ env = process.env, platform = process.
 
   const home = env.HOME || os.homedir();
   if (platform === "darwin") {
-    const base = path.join(home, "Library", "Application Support");
+    const base = path.posix.join(home, "Library", "Application Support");
     // Claude-3p is the enterprise/partner build; it has its own userData dir.
-    return [path.join(base, "Claude"), path.join(base, "Claude-3p")].filter((dir) => exists(dir));
+    return [path.posix.join(base, "Claude"), path.posix.join(base, "Claude-3p")].filter((dir) => exists(dir));
   }
 
   if (platform === "win32") {
     const dirs = [];
     const localAppData = env.LOCALAPPDATA;
     if (localAppData) {
-      const packages = path.join(localAppData, "Packages");
+      const packages = path.win32.join(localAppData, "Packages");
       // The MSIX package family name carries a hash, so glob rather than pin it.
       try {
         for (const entry of fs.readdirSync(packages)) {
           if (!/^Claude_/.test(entry)) continue;
-          const dir = path.join(packages, entry, "LocalCache", "Roaming", "Claude");
+          const dir = path.win32.join(packages, entry, "LocalCache", "Roaming", "Claude");
           if (exists(dir)) dirs.push(dir);
         }
       } catch {
         // No Packages dir: not an MSIX install.
       }
-      const thirdParty = path.join(localAppData, "Claude-3p");
+      const thirdParty = path.win32.join(localAppData, "Claude-3p");
       if (exists(thirdParty)) dirs.push(thirdParty);
     }
     if (env.APPDATA) {
-      const roaming = path.join(env.APPDATA, "Claude");
+      const roaming = path.win32.join(env.APPDATA, "Claude");
       if (exists(roaming)) dirs.push(roaming);
     }
     return dirs;

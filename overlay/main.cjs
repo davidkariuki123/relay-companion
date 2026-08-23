@@ -3807,11 +3807,11 @@ function anchorTopRight() {
   return anchor;
 }
 
-// Show the overlay window. Electron's forwarded-mousemove stream (the thing that
-// lets the renderer detect hover on a click-through window) can stall across a
-// hide()/show() cycle, leaving the window permanently click-through. Re-assert
-// setIgnoreMouseEvents on every hidden->shown transition and tell the renderer to
-// reset its interactivity handshake.
+// Show the overlay window. A hide()/show() cycle can leave Electron's native
+// click-through flag out of step with the main-process hit-test mirror. Re-assert
+// the native state on every hidden->shown transition through applyIgnore(), so
+// the next cursor sample can always reverse it even when the pointer never left
+// the visible card.
 function showOverlayWindow({ force = false, reposition = true } = {}) {
   if (!win || win.isDestroyed()) return;
   const visible = win.isVisible();
@@ -3837,11 +3837,11 @@ function showOverlayWindow({ force = false, reposition = true } = {}) {
   perf.inc("spaceAsserts");
   const shown = showInactiveOnAllSpaces(win, { force, alwaysOnTop: overlayElevated });
   if (shown) {
-    // hidden -> shown only: re-assert click-through and reset the renderer's
-    // interactivity handshake. Touching setIgnoreMouseEvents on an already-visible
-    // window would silently flip it click-through while the renderer still thinks
-    // the pointer handshake is live — a dead card until the pointer re-enters.
-    win.setIgnoreMouseEvents(true, { forward: true });
+    // hidden -> shown only: force both the native flag and our mirror back to
+    // click-through. A direct native write here used to leave hitIgnoring=false;
+    // when the cursor remained over the card, applyIgnore(false) then no-op'd and
+    // the visible pill stayed untouchable until the cursor left and re-entered.
+    applyIgnore(true, { force: true });
     // Visible again: unthrottle immediately, so the FIRST click after this is as
     // fast as the tenth (the "slow, then fast, then slow again" report).
     applyThrottlingPolicy();
@@ -4011,8 +4011,9 @@ let lastHostProbeAt = 0;
 // test ignores the physical cursor entirely. Never set outside the harness.
 const HIT_TEST_POINTER_BLIND = process.env.RELAY_OVERLAY_TEST_IGNORE_POINTER === "1";
 
-function applyIgnore(next) {
-  if (next === hitIgnoring) return;
+function applyIgnore(next, { force = false } = {}) {
+  next = Boolean(next);
+  if (!force && next === hitIgnoring) return;
   hitIgnoring = next;
   if (win && !win.isDestroyed()) win.setIgnoreMouseEvents(next, { forward: true });
 }
@@ -4154,7 +4155,8 @@ function createWindow() {
   if (!isHarness || harnessTopmost) win.setAlwaysOnTop(true, process.platform === "win32" ? "screen-saver" : "floating");
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   // Empty canvas is click-through; startHitTest() below owns this from here on.
-  win.setIgnoreMouseEvents(true, { forward: true });
+  // Force the initial native write while keeping the mirror authoritative.
+  applyIgnore(true, { force: true });
   startHitTest();
   const inboxPath = path.join(__dirname, "inbox.html");
   const inboxUrl = pathToFileURL(inboxPath).href;

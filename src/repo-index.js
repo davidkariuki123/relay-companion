@@ -113,31 +113,49 @@ function fromClaudeRegistry() {
   }
 }
 
-// Extra roots for people who keep repos somewhere unconventional. Colon- or
-// comma-separated, e.g. RELAY_REPO_ROOTS=/Volumes/work:/opt/checkouts
+// Extra roots for people who keep repos somewhere unconventional. Use the host
+// path delimiter (":" on POSIX, ";" on Windows) or commas; splitting Windows
+// roots on every colon turns C:\\work into two invalid paths.
 function configuredRoots() {
+  const separator = path.delimiter === ";" ? /[;,]/ : /[:,]/;
   return String(process.env.RELAY_REPO_ROOTS || "")
-    .split(/[:,]/)
+    .split(separator)
     .map((entry) => entry.trim())
     .filter(Boolean);
 }
 
-// Bounded breadth scan of conventional source roots. `find -maxdepth` keeps this
-// off the multi-minute path an unbounded $HOME walk would take.
+function scanRoot(root) {
+  const repos = [];
+  const queue = [{ dir: root, depth: 0 }];
+  while (queue.length) {
+    const current = queue.shift();
+    let entries;
+    try {
+      entries = fs.readdirSync(current.dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    if (entries.some((entry) => entry.name === ".git")) {
+      repos.push(current.dir);
+      continue;
+    }
+    if (current.depth + 1 >= SCAN_MAX_DEPTH) continue;
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name === ".git") continue;
+      queue.push({ dir: path.join(current.dir, entry.name), depth: current.depth + 1 });
+    }
+  }
+  return repos;
+}
+
+// Bounded breadth scan of conventional source roots. Keeping traversal in Node
+// gives Windows the same discovery contract without depending on Unix `find`.
 function fromDiskScan() {
   const home = os.homedir();
   const roots = [...configuredRoots(), ...SCAN_ROOT_NAMES.map((name) => path.join(home, name))].filter(isDir);
   if (!roots.length) return [];
-  const result = spawnSync("find", [...roots, "-maxdepth", String(SCAN_MAX_DEPTH), "-name", ".git"], {
-    encoding: "utf8",
-    timeout: 15000,
-  });
-  if (!result.stdout) return [];
-  return result.stdout
-    .split("\n")
-    .filter(Boolean)
-    .map((gitPath) => ({
-      dir: path.dirname(gitPath),
+  return roots.flatMap(scanRoot).map((dir) => ({
+      dir,
       originKey: "",
       uses: 0,
       lastUsedAt: 0,

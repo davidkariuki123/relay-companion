@@ -8,7 +8,7 @@ import { installDaemonAutostart, installPillAutostart } from "../src/install.js"
 
 const STALE = "/Users/test/.relay/runtime/releases/0.1.318-a/node_modules/relay-companion";
 const CANONICAL = "/Users/test/.relay/runtime/releases/0.1.320-b/node_modules/relay-companion";
-const STALE_BIN = path.join(STALE, "bin", "relay.js");
+const STALE_BIN = path.posix.join(STALE, "bin", "relay.js");
 
 const tempHome = () => fs.mkdtempSync(path.join(os.tmpdir(), "relay-claim-"));
 
