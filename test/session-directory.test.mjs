@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { discoverClaudeSessions, discoverCodexSessions } from "../src/session-directory.js";
+import { discoverClaudeSessions, discoverCodexSessions, recordAnonymousSession } from "../src/session-directory.js";
 
 function fixture() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "relay-session-directory-"));
@@ -45,6 +45,30 @@ test("directory reports native Codex parent tasks as active/idle and excludes su
   assert.equal(sessions.find((row) => row.nativeId === idleId).state, "idle");
   assert.ok(!sessions.some((row) => row.nativeId === childId));
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("anonymous chat agent runs stay out of the visible Codex directory", () => {
+  const root = fixture();
+  const previousRelayHome = process.env.RELAY_HOME;
+  process.env.RELAY_HOME = path.join(root, "relay-store");
+  try {
+    const home = path.join(root, "codex");
+    const day = path.join(home, "sessions", "2026", "08", "23");
+    fs.mkdirSync(day, { recursive:true });
+    const visibleId = "019fa000-0000-7000-8000-000000000031";
+    const anonymousId = "019fa000-0000-7000-8000-000000000032";
+    for (const id of [visibleId, anonymousId]) {
+      fs.writeFileSync(path.join(day, `rollout-2026-08-23T10-00-00-${id}.jsonl`), `${codexLine("session_meta", { id, session_id:id, cwd:"/work/relay" })}\n`);
+    }
+    recordAnonymousSession("codex", anonymousId);
+    const sessions = discoverCodexSessions({ homeDir:home, nowMs:Date.parse("2026-08-23T10:01:00Z") });
+    assert.ok(sessions.some((row) => row.nativeId === visibleId));
+    assert.ok(!sessions.some((row) => row.nativeId === anonymousId));
+  } finally {
+    if (previousRelayHome === undefined) delete process.env.RELAY_HOME;
+    else process.env.RELAY_HOME = previousRelayHome;
+    fs.rmSync(root, { recursive:true, force:true });
+  }
 });
 
 test("directory keeps a huge currently-growing Codex turn active after its start marker leaves the tail", () => {

@@ -17,6 +17,7 @@ import { setClaudeDesktopSessionPermissionMode } from "./claude-session-writer.j
 import {
   cachePublishedSessions,
   discoverSessions,
+  recordAnonymousSession,
   recordControlledSession,
   sessionPlacement,
   sessionPlacementId,
@@ -159,13 +160,14 @@ export function resolveClaudeBackgroundAgent(
 // Exported for the task start flow: a forged, never-run session only becomes a
 // RUN when something launches the turn — resume via the background runner is
 // the proven way (a claude://resume deep link opens a chat that sits idle).
-export function spawnBackgroundClaude({ sessionId, title, cwd, prompt, resume = false, model = "", permissionMode = "" }) {
+export function spawnBackgroundClaude({ sessionId, title, cwd, prompt, resume = false, model = "", effort = "", permissionMode = "" }) {
   const args = ["--bg"];
   if (resume) args.push("--resume", sessionId);
   if (title) args.push("--name", title);
   // The forged transcript's seed rows carry a placeholder model the CLI cannot
   // restore; an explicit --model is what makes the runtime picker's choice real.
   if (model) args.push("--model", model);
+  if (effort && effort !== "auto") args.push("--effort", effort);
   // The reader's Settings choice wins over the default for THIS run.
   args.push("--permission-mode", permissionMode || relayClaudePermissionMode());
   args.push(prompt);
@@ -497,7 +499,15 @@ async function executeClaude({ client, claim, target, operation, input, prompt }
       nativeSessionId: sessionId,
     });
   } else {
-    const launched = spawnBackgroundClaude({ sessionId, title, cwd, prompt, resume: Boolean(target) });
+    const launched = spawnBackgroundClaude({
+      sessionId,
+      title,
+      cwd,
+      prompt,
+      resume: Boolean(target),
+      model: input.model || "",
+      effort: input.effort || "",
+    });
     sessionId = launched.sessionId;
     resolvedTranscriptPath = path.join(
       claudeHome(),
@@ -505,21 +515,24 @@ async function executeClaude({ client, claim, target, operation, input, prompt }
       String(cwd).replace(/[^a-zA-Z0-9]/g, "-"),
       `${sessionId}.jsonl`,
     );
-    recordControlledSession({
-      provider: "claude",
-      nativeId: sessionId,
-      title,
-      cwd,
-      transcriptPath: resolvedTranscriptPath,
-      permissionMode: relayClaudePermissionMode(),
-      relayMcpCatalogVersion: RELAY_AI_SESSION_MCP_CATALOG_VERSION,
-    });
+    if (input.oneShot) recordAnonymousSession("claude", sessionId);
+    else {
+      recordControlledSession({
+        provider: "claude",
+        nativeId: sessionId,
+        title,
+        cwd,
+        transcriptPath: resolvedTranscriptPath,
+        permissionMode: relayClaudePermissionMode(),
+        relayMcpCatalogVersion: RELAY_AI_SESSION_MCP_CATALOG_VERSION,
+      });
+    }
     await evidence(client, operation.id, claim.claimToken, "handed_off", {
       adapter: "claude_background",
       nativeSessionId: sessionId,
     });
   }
-  const stable = target || (await publishAndFind(client, sessionId));
+  const stable = target || (input.oneShot ? null : await publishAndFind(client, sessionId));
   await evidence(client, operation.id, claim.claimToken, "applied", {
     adapter: registration ? "claude_inbox_socket" : "claude_background",
     ...(stable?.id ? { sessionId: stable.id } : {}),
@@ -534,6 +547,7 @@ async function executeClaude({ client, claim, target, operation, input, prompt }
     ...(stable?.id ? { sessionId: stable.id } : {}),
     nativeSessionId: sessionId,
   });
+  if (input.agentRunRelayId) await client.agentRunFinish(input.agentRunRelayId);
 }
 
 async function executeCodex({ client, claim, target, operation, input, prompt }) {
@@ -612,12 +626,15 @@ async function executeCodex({ client, claim, target, operation, input, prompt })
       approvalPolicy: full ? "never" : "on-request",
       sandbox: full ? "danger-full-access" : "workspace-write",
       threadSource: "user",
+      ...(input.model ? { model: input.model } : {}),
+      ...(input.effort && input.effort !== "auto" ? { reasoningEffort: input.effort } : {}),
     });
     const threadId = started.thread?.id;
     if (!threadId) throw new Error("Codex did not return a thread id");
     if (input.title) await appServer.request("thread/name/set", { threadId, name: input.title });
-    recordControlledSession({ provider: "codex", nativeId: threadId, title: input.title, cwd: input.cwd || process.cwd() });
-    const stable = await publishAndFind(client, threadId);
+    if (input.oneShot) recordAnonymousSession("codex", threadId);
+    else recordControlledSession({ provider: "codex", nativeId: threadId, title: input.title, cwd: input.cwd || process.cwd() });
+    const stable = input.oneShot ? null : await publishAndFind(client, threadId);
     const turn = await appServer.request("turn/start", {
       threadId,
       input: [{ type: "text", text: prompt, text_elements: [] }],
@@ -652,6 +669,7 @@ async function executeCodex({ client, claim, target, operation, input, prompt })
       nativeThreadId: threadId,
       ...(stable?.id ? { sessionId: stable.id } : {}),
     });
+    if (input.agentRunRelayId) await client.agentRunFinish(input.agentRunRelayId);
   } finally {
     await appServer.stop();
   }
@@ -757,6 +775,8 @@ async function processClaim(client, claim, log) {
     else throw new Error(`Unsupported provider: ${provider}`);
   } catch (error) {
     log(`session operation ${operation.id} failed: ${error?.message || error}`);
+    const runRelayId = String(operation.input?.agentRunRelayId || "");
+    if (runRelayId) await client.agentRunFinish(runRelayId, error?.message || String(error)).catch(() => {});
     await evidence(client, operation.id, claim.claimToken, "failed", {}, error?.message || String(error)).catch(() => {});
   } finally {
     clearInterval(renewTimer);

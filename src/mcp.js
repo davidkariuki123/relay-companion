@@ -159,6 +159,33 @@ export const TOOLS = [
     },
   },
   {
+    name: "relay_agent_progress",
+    description:
+      "Update the single in-chat response for an owned @my_claude or @my_codex run. Call only when the invocation prompt supplied the exact runRelayId. Write one short, plain-language status grounded in work actually completed; never expose private reasoning or invent progress.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        runRelayId: { type: "string", description: "Exact response Relay id supplied by the invocation prompt." },
+        summary: { type: "string", description: "A grounded present-tense progress summary, at most 280 characters." },
+      },
+      required: ["runRelayId", "summary"],
+    },
+  },
+  {
+    name: "relay_agent_complete",
+    description:
+      "Finish an owned @my_claude or @my_codex run by replacing its existing progress response. Call exactly once at the end. forHuman is the concise chat answer; forAgent is the complete useful evidence and handoff document. Do not send a second Relay.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        runRelayId: { type: "string", description: "Exact response Relay id supplied by the invocation prompt." },
+        forHuman: { type: "string", description: "The concise answer people in the chat should read." },
+        forAgent: { type: "string", description: "Complete useful details, evidence, paths, links, constraints, and handoff context without duplicating forHuman." },
+      },
+      required: ["runRelayId", "forHuman", "forAgent"],
+    },
+  },
+  {
     name: "relay_send",
     _meta: ALWAYS_LOAD_META,
     description:
@@ -1449,6 +1476,19 @@ export async function handleCall(client, name, args, {
           ...sessionSourceBinding(),
         })),
       );
+    }
+    case "relay_agent_progress": {
+      const runRelayId = String(args.runRelayId || "").trim();
+      const summary = String(args.summary || "").trim();
+      if (!runRelayId || !summary) throw new Error("runRelayId and summary are required");
+      return text(await client.agentRunProgress(runRelayId, summary));
+    }
+    case "relay_agent_complete": {
+      const runRelayId = String(args.runRelayId || "").trim();
+      const forHuman = String(args.forHuman || "").trim();
+      const forAgent = String(args.forAgent || "").trim();
+      if (!runRelayId || !forHuman || !forAgent) throw new Error("runRelayId, forHuman, and forAgent are required");
+      return text(await client.agentRunComplete(runRelayId, forHuman, forAgent));
     }
     case "relay_send": {
       requireRelaySendRecipient(args.recipient);

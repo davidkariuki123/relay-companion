@@ -1884,6 +1884,19 @@
   .th-composer-dock.chat-shaped { position:sticky; bottom:0; z-index:2; padding-bottom:16px;
     box-shadow:0 -12px 16px -10px var(--bg), 0 2px 0 0 var(--bg); }
   .th-composer-dock .qr.th-qr { position:static; margin:0; padding-bottom:6px; background:var(--bg); box-shadow:none; z-index:auto; }
+  .th-composer-dock .qr.th-qr { position:relative; }
+  .th-mention-menu { position:absolute; left:10px; right:10px; bottom:100%; margin-bottom:7px; z-index:8; overflow:hidden;
+    border:1px solid var(--edge); border-radius:12px; background:var(--bg); box-shadow:0 12px 30px color-mix(in srgb, #000 18%, transparent); }
+  .th-mention-item { width:100%; display:flex; align-items:center; gap:9px; padding:9px 11px !important; border-radius:0 !important;
+    background:transparent !important; color:var(--ink) !important; text-align:left; font-size:12px !important; }
+  .th-mention-item.on { background:var(--wash) !important; }
+  .th-mention-dot { width:7px; height:7px; flex:none; border-radius:2px; background:var(--muted-3); }
+  .th-mention-item.agent .th-mention-dot { background:var(--agent-sq); }
+  .th-mention-copy { display:flex; flex-direction:column; min-width:0; }
+  .th-mention-name { font-weight:650; }
+  .th-mention-note { color:var(--muted); font-size:10.5px; }
+  .sv-agent-defaults select { min-width:122px; max-width:44%; padding:6px 8px; border:1px solid var(--edge); border-radius:8px;
+    background:var(--bg); color:var(--ink); font:11.5px var(--sans); }
   /* The chosen Relay is attached to the existing composer as its top face.
      This is one composer with context, not a Slack-style child conversation. */
   .qr.th-qr.replying { gap:0; }
@@ -8614,7 +8627,8 @@
       const request = isRequestRow(r);
       if (!request && !isRelayListKind(r)) continue;
       const subj = relaySubject(r);
-      const textLike = request ? false : relayTextLike(r.forHuman, subj, r.forAgent);
+      const ownedAgent = r.source?.host === "relay-agent-run";
+      const textLike = request ? false : ownedAgent || relayTextLike(r.forHuman, subj, r.forAgent);
       // Two-document execution output stays on the Request reading surface.
       // A human-only completion is a text message despite its control-plane
       // marker, and belongs in the room like the server chat projection shows.
@@ -8635,6 +8649,7 @@
         groupName: r.recipientGroupName || "",
         unread: Boolean(r.unread),
         source: r.source || null,
+        ownedAgent,
         editedAt: r.editedAt || null,
         deletedAt: r.deletedAt || null,
         textLike, request,
@@ -8673,7 +8688,8 @@
       const request = String(s.kind || "") === "task" || String(s.kind || "") === "task_request";
       // A two-document provider completion stays on the Request. A human-only
       // completion is ordinary correspondence and stays in the conversation.
-      const sentTextLike = request ? false : relayTextLike(s.forHuman, sentSubject(s), s.forAgent);
+      const ownedAgent = s.source?.host === "relay-agent-run";
+      const sentTextLike = request ? false : ownedAgent || relayTextLike(s.forHuman, sentSubject(s), s.forAgent);
       if (isCompletionRelay(s) && !sentTextLike) continue;
 
       if (s.groupSendId) {
@@ -8704,6 +8720,7 @@
         groupName: s.recipientGroupName || "",
         unread: false,
         source: s.source || null,
+        ownedAgent,
         editedAt: s.editedAt || null,
         deletedAt: s.deletedAt || null,
         // YOUR OWN RELAYS ARE READABLE TOO. This hardcoded `textLike: true`
@@ -8731,6 +8748,12 @@
     }
     const canonicalIds = new Set(msgs.map((message) => String(message.id || "")));
     for (const [key, optimistic] of optimisticChatReplies) {
+      if (optimistic.agentInvocation) {
+        const matched = msgs.some((message) => message.ownedAgent
+          && message.source?.surface === optimistic.source?.surface
+          && new Date(message.at || 0).getTime() >= new Date(optimistic.at || 0).getTime() - 60_000);
+        if (matched) { optimisticChatReplies.delete(key); continue; }
+      }
       if (optimistic.relayId && canonicalIds.has(String(optimistic.relayId))) {
         optimisticChatReplies.delete(key);
         continue;
@@ -9398,6 +9421,7 @@
     // exact Relay rows above, where Codex and Claude Code are both explicit.
     const threadComposer = `<div class="th-composer-dock${chatShaped ? " chat-shaped" : ""}"><div class="qr th-qr col${replyTargetId ? " replying" : ""}">
           ${composerReplyTargetHtml}
+          <div class="th-mention-menu hidden" id="thMentionMenu" role="listbox"></div>
           <textarea id="thQrInput" rows="1" placeholder="Reply…">${esc(threadDraft)}</textarea>
           <div class="ta-rail">
             <span class="rt-spacer"></span>
@@ -9427,8 +9451,11 @@
       // recipient's), sitting left in the flow like every other row.
       // Labelling it with the recipient read as "Shane sent this" on a message
       // David sent, contradicting the transcript's own "You" (field report).
-      const mine = m.direction === "out";
-      const who = mine ? me : m.party;
+      const mine = m.direction === "out" && !m.ownedAgent;
+      const ownedAgentName = m.direction === "out"
+        ? (m.source?.surface === "codex" ? "My Codex" : "My Claude")
+        : m.party;
+      const who = m.ownedAgent ? ownedAgentName : mine ? me : m.party;
       // Consecutive messages from one sender group into a run (the Slack
       // shape): the row above (newest of the run) carries the header, the
       // continuation renders title-only underneath.
@@ -9636,9 +9663,79 @@
     const thQrInput = document.getElementById("thQrInput");
     if (thQrSend && thQrInput) {
       let thReplySending = false;
+      const mentionMenu = document.getElementById("thMentionMenu");
+      let mentionMatches = [];
+      let mentionIndex = 0;
+      let mentionStart = -1;
+      const participantNames = new Set(
+        (thread.msgs || [])
+          .filter((message) => message.direction === "in" && !message.ownedAgent)
+          .map((message) => String(message.party || "").trim())
+          .filter(Boolean),
+      );
+      if (thread.isGroup) {
+        const group = groupsList.find((candidate) => String(candidate.id || "") === String(thread.groupId || ""))
+          || groupsList.find((candidate) => normalizedPartyName(candidate.name) === normalizedPartyName(thread.groupName));
+        for (const member of group ? groupInfoRoster(group) : []) {
+          if (!member.currentUser && member.name) participantNames.add(String(member.name).trim());
+        }
+      } else if (thread.party) participantNames.add(String(thread.party).trim());
+      const mentionOptions = [
+        ...(payload.features?.requests === true ? [
+          { token:"my_claude", name:"@my_claude", note:"Run Claude on my laptop", agent:true },
+          { token:"my_codex", name:"@my_codex", note:"Run Codex on my laptop", agent:true },
+        ] : []),
+        ...[...participantNames]
+          .map((name) => ({ token:name.replace(/\s+/g, "_"), name:`@${name}`, note:"Participant", agent:false })),
+      ];
+      const closeMentions = () => { mentionMatches = []; mentionStart = -1; mentionMenu?.classList.add("hidden"); };
+      const chooseMention = (index) => {
+        const option = mentionMatches[index];
+        if (!option || mentionStart < 0) return;
+        const caret = thQrInput.selectionStart ?? thQrInput.value.length;
+        thQrInput.value = `${thQrInput.value.slice(0, mentionStart)}@${option.token} ${thQrInput.value.slice(caret)}`;
+        const nextCaret = mentionStart + option.token.length + 2;
+        thQrInput.setSelectionRange(nextCaret, nextCaret);
+        threadComposerDrafts.set(threadStateKey, thQrInput.value);
+        thQrInput.relayResize?.();
+        closeMentions();
+        thQrInput.focus();
+      };
+      const renderMentions = () => {
+        if (!mentionMenu) return;
+        const caret = thQrInput.selectionStart ?? thQrInput.value.length;
+        const before = thQrInput.value.slice(0, caret);
+        const match = before.match(/(^|\s)@([^\s@]*)$/);
+        if (!match) { closeMentions(); return; }
+        const query = String(match[2] || "").toLowerCase();
+        mentionStart = caret - query.length - 1;
+        mentionMatches = mentionOptions.filter((option) => option.token.toLowerCase().includes(query)).slice(0, 8);
+        if (!mentionMatches.length) { closeMentions(); return; }
+        mentionIndex = Math.min(mentionIndex, mentionMatches.length - 1);
+        mentionMenu.innerHTML = mentionMatches.map((option, index) => `<button type="button" class="th-mention-item${option.agent ? " agent" : ""}${index === mentionIndex ? " on" : ""}" data-mention-index="${index}" role="option" aria-selected="${index === mentionIndex ? "true" : "false"}"><span class="th-mention-dot"></span><span class="th-mention-copy"><span class="th-mention-name">${esc(option.name)}</span><span class="th-mention-note">${esc(option.note)}</span></span></button>`).join("");
+        mentionMenu.classList.remove("hidden");
+        for (const button of mentionMenu.querySelectorAll("[data-mention-index]")) {
+          button.addEventListener("mousedown", (event) => { event.preventDefault(); event.stopPropagation(); chooseMention(Number(button.getAttribute("data-mention-index"))); });
+        }
+      };
       thQrInput.addEventListener("input", () => {
         threadComposerDrafts.set(threadStateKey, thQrInput.value || "");
+        mentionIndex = 0;
+        renderMentions();
       });
+      thQrInput.addEventListener("click", renderMentions);
+      thQrInput.addEventListener("keydown", (event) => {
+        if (!mentionMatches.length || mentionMenu?.classList.contains("hidden")) return;
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault(); event.stopImmediatePropagation();
+          mentionIndex = (mentionIndex + (event.key === "ArrowDown" ? 1 : -1) + mentionMatches.length) % mentionMatches.length;
+          renderMentions();
+        } else if (event.key === "Enter" || event.key === "Tab") {
+          event.preventDefault(); event.stopImmediatePropagation(); chooseMention(mentionIndex);
+        } else if (event.key === "Escape") {
+          event.preventDefault(); event.stopImmediatePropagation(); closeMentions();
+        }
+      }, true);
       const doThReply = async () => {
         if (thReplySending || chatReplySending.has(threadStateKey)) return;
         // Resolve the address before removing anything from the composer. A
@@ -9726,6 +9823,20 @@
           attachments,
           preview: "",
         });
+        const invokedProviders = payload.features?.requests === true
+          ? ["claude", "codex"].filter((provider) => new RegExp(`(^|\\s)@my_${provider}\\b`, "i").test(text))
+          : [];
+        for (const [index, provider] of invokedProviders.entries()) {
+          optimisticChatReplies.set(`${idempotencyKey}:agent:${provider}`, {
+            id:`optimistic-agent:${idempotencyKey}:${provider}`, relayId:"", threadId:sendAnchor.threadId || thread.threadId,
+            inReplyToRelayId:optimisticId, direction:"out", seen:false, seenAt:null, readReceipts:[],
+            title:"I'm on it", body:"I'm on it", party:provider === "claude" ? "My Claude" : "My Codex",
+            partyKey:`owned-agent:${provider}`, at:new Date(Date.now() + index + 1).toISOString(), isGroup:Boolean(sendAnchor.isGroup || thread.isGroup),
+            groupName:sendAnchor.groupName || thread.groupName || "", unread:false, textLike:true, request:false, pending:true,
+            source:{ host:"relay-agent-run", surface:provider === "claude" ? "claude_code" : "codex" }, ownedAgent:true, agentInvocation:true,
+            reactions:{ aggregates:[], events:[] }, attachments:[], preview:"",
+          });
+        }
         chatReplySending.add(threadStateKey);
         // Paint before awaiting IPC. The words now live in the optimistic row,
         // so the field empties — but it is the SAME field afterwards, still
@@ -9764,6 +9875,8 @@
           // failure, which the queue absorbs, but something it cannot store at
           // all. Only then do the words belong back in the composer.
           optimisticChatReplies.delete(idempotencyKey);
+          optimisticChatReplies.delete(`${idempotencyKey}:agent:claude`);
+          optimisticChatReplies.delete(`${idempotencyKey}:agent:codex`);
           chatReplySending.delete(threadStateKey);
           threadComposerDrafts.set(threadStateKey, text);
           setRowNote(newest.id, (res && res.error) || "Send failed — try again.", "err");
@@ -10001,6 +10114,8 @@
   // pairing code is never rebuilt away mid-entry. Switch/sign-out succeed by
   // RESTARTING the pill into the new account, so the success note is brief.
   let settingsInfo = null;      // last relay:accountInfo payload (null while loading)
+  let chatAgentPreferences = null;
+  let chatAgentPreferencesError = "";
   let providerAuthInfo = null;  // safe status only; credentials stay in provider CLIs
   let providerAuthBusy = "";
   let providerAuthNote = "";
@@ -10308,6 +10423,26 @@
         </div>
       </div>`;
   }
+  function chatAgentDefaultsHtml() {
+    if (payload.features?.requests !== true || !window.relay.chatAgentPreferences) return "";
+    if (!chatAgentPreferences) return `<div class="sv-open-section" data-stop="1"><div class="sv-open-title">Chat agents</div><div class="sv-open-intro">${esc(chatAgentPreferencesError || "Loading model defaults…")}</div></div>`;
+    const rows = [
+      { key:"claude", label:"@my_claude", logo:"claudeCodeMark.svg", models:[["opus","Opus 5"],["fable","Fable 5"],["sonnet","Sonnet 5"],["haiku","Haiku 4.5"]], efforts:["low","medium","high","xhigh","max"] },
+      { key:"codex", label:"@my_codex", logo:"codexMark.svg", models:[["gpt-5.6-sol","5.6 Sol"],["gpt-5.6-terra","5.6 Terra"],["gpt-5.6-luna","5.6 Luna"],["gpt-5.5","5.5"],["gpt-5.4","5.4"]], efforts:["auto","low","medium","high","xhigh"] },
+    ];
+    return `<div class="sv-open-section sv-agent-defaults" data-stop="1">
+      <div class="sv-open-title">Chat agents</div>
+      <div class="sv-open-intro">Defaults for anonymous one-shot runs started by a mention.</div>
+      <div class="sv-open-list">${rows.map((row) => {
+        const current = chatAgentPreferences[row.key] || {};
+        return `<div class="sv-open-row"><img class="sv-open-logo" src="${row.logo}" alt="" /><span class="sv-open-copy"><span class="sv-open-name">${row.label}</span></span>
+          <select data-chat-agent-model="${row.key}" aria-label="${row.label} model">${row.models.map(([value,label]) => `<option value="${value}"${current.model === value ? " selected" : ""}>${label}</option>`).join("")}</select>
+          <select data-chat-agent-effort="${row.key}" aria-label="${row.label} thinking">${row.efforts.map((value) => `<option value="${value}"${current.effort === value ? " selected" : ""}>${value}</option>`).join("")}</select>
+        </div>`;
+      }).join("")}</div>
+      ${chatAgentPreferencesError ? `<div class="row-err sv-err">${esc(chatAgentPreferencesError)}</div>` : ""}
+    </div>`;
+  }
   function deviceApprovalsHtml(info) {
     if (!info?.paired || !window.relay.e2eeDeviceApprovals) return "";
     const pending = Array.isArray(deviceApprovalInfo?.pendingDevices) ? deviceApprovalInfo.pendingDevices : [];
@@ -10426,6 +10561,7 @@
           }).join("")}
         </div>
       </div>`;
+    html += chatAgentDefaultsHtml();
     // WHAT REQUESTS MAY DO. One value row per app — the same species as the
     // "Open Relays with" rows above (logo, name, current state), under the
     // shared section title style. Tapping a row unfolds the standard
@@ -10486,6 +10622,22 @@
       sw.addEventListener("click", (e) => {
         e.stopPropagation();
         setAgentAppEnabled(sw.getAttribute("data-agent-app"), sw.getAttribute("aria-checked") !== "true");
+        renderSettings();
+      });
+    }
+
+    for (const select of settingsViewEl.querySelectorAll("[data-chat-agent-model],[data-chat-agent-effort]")) {
+      select.addEventListener("change", async (event) => {
+        event.stopPropagation();
+        const provider = select.getAttribute("data-chat-agent-model") || select.getAttribute("data-chat-agent-effort");
+        if (!provider || !chatAgentPreferences || !window.relay.saveChatAgentPreferences) return;
+        const route = { ...(chatAgentPreferences[provider] || {}) };
+        if (select.hasAttribute("data-chat-agent-model")) route.model = select.value;
+        else route.effort = select.value;
+        chatAgentPreferences = { ...chatAgentPreferences, [provider]:route };
+        chatAgentPreferencesError = "";
+        try { chatAgentPreferences = await window.relay.saveChatAgentPreferences({ [provider]:route }); }
+        catch (error) { chatAgentPreferencesError = error?.message || "Could not save that agent default."; }
         renderSettings();
       });
     }
@@ -10904,7 +11056,20 @@
       // events converge on one scan.
       refreshProviderInventory({ seq }).catch(() => {});
     })();
-    await Promise.allSettled([accountTask, deviceApprovalTask, authTask, inventoryTask]);
+    const chatAgentTask = (async () => {
+      if (payload.features?.requests !== true || !window.relay.chatAgentPreferences) return;
+      try {
+        const result = await window.relay.chatAgentPreferences();
+        if (seq !== settingsLoadSeq) return;
+        chatAgentPreferences = result;
+        chatAgentPreferencesError = "";
+      } catch (error) {
+        if (seq !== settingsLoadSeq) return;
+        chatAgentPreferencesError = error?.message || "Could not load chat agent defaults.";
+      }
+      renderSettings();
+    })();
+    await Promise.allSettled([accountTask, deviceApprovalTask, authTask, inventoryTask, chatAgentTask]);
   }
   // Provider state is live product state, not something the user should have
   // to refresh manually. Re-read it whenever Settings becomes visible again

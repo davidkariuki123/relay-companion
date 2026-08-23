@@ -97,11 +97,17 @@ test("a fast background Claude turn completes from direct transcript growth plus
   const sessionId = "b457c91e-ff65-4333-892e-4908c09b07dd";
   fs.mkdirSync(registryDir, { recursive: true });
   fs.writeFileSync(transcriptPath, `${JSON.stringify({ type: "assistant", sessionId })}\n`);
-  const server = net.createServer(() => {});
-  await new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(socketPath, resolve);
-  });
+  const server = process.platform === "win32" ? null : net.createServer(() => {});
+  if (server) {
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(socketPath, resolve);
+    });
+  } else {
+    // Windows cannot bind a Unix-domain socket at a filesystem path. This test
+    // only needs the registry's socket-exists signal; no client connects.
+    fs.writeFileSync(socketPath, "");
+  }
   fs.writeFileSync(path.join(registryDir, "claude.json"), JSON.stringify({
     sessionId,
     pid: process.pid,
@@ -121,7 +127,7 @@ test("a fast background Claude turn completes from direct transcript growth plus
   } finally {
     if (previous === undefined) delete process.env.RELAY_CLAUDE_SESSION_REGISTRY_DIR;
     else process.env.RELAY_CLAUDE_SESSION_REGISTRY_DIR = previous;
-    await new Promise((resolve) => server.close(resolve));
+    if (server) await new Promise((resolve) => server.close(resolve));
     fs.rmSync(root, { recursive: true, force: true });
   }
   assert.ok(true);

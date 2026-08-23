@@ -51,6 +51,27 @@ test("Claude Code and Codex expose only encrypted Relay operations on an enrolle
   }
 });
 
+test("owned chat agent tools are developer-only and update the existing response", async () => {
+  const fullNames = new Set(toolsForAccount({ requests:true, aiSessions:true, connectors:true }).map((tool) => tool.name));
+  assert.equal(fullNames.has("relay_agent_progress"), true);
+  assert.equal(fullNames.has("relay_agent_complete"), true);
+  const ordinaryNames = new Set(toolsForAccount({ requests:false, aiSessions:false, connectors:false }).map((tool) => tool.name));
+  assert.equal(ordinaryNames.has("relay_agent_progress"), false);
+  assert.equal(ordinaryNames.has("relay_agent_complete"), false);
+
+  const calls = [];
+  const client = {
+    async agentRunProgress(relayId, summary) { calls.push(["progress", relayId, summary]); return { ok:true }; },
+    async agentRunComplete(relayId, forHuman, forAgent) { calls.push(["complete", relayId, forHuman, forAgent]); return { ok:true }; },
+  };
+  await handleCall(client, "relay_agent_progress", { runRelayId:"relay_run", summary:"Checked the build." });
+  await handleCall(client, "relay_agent_complete", { runRelayId:"relay_run", forHuman:"It works.", forAgent:"Tests passed." });
+  assert.deepEqual(calls, [
+    ["progress", "relay_run", "Checked the build."],
+    ["complete", "relay_run", "It works.", "Tests passed."],
+  ]);
+});
+
 test("the local E2EE catalog follows rollout mode and fails closed in required mode", async () => {
   const client = {};
   assert.deepEqual(await localMcpEncryptionState(client, {
@@ -1328,7 +1349,7 @@ test("obsolete coordination protocol is absent and rejected before any API call"
   // state an agent sets on its own, so a human-initiated pull clears unread
   // and sends the read receipt — without it the sender sees "delivered"
   // forever). relay_acknowledge stays retired.
-  assert.equal(TOOLS.length, 26, "the full model catalog contains only current product tools");
+  assert.equal(TOOLS.length, 28, "the full model catalog contains only current product tools");
 
   const client = new Proxy({}, {
     get() { throw new Error("removed tool must not touch the API client"); },

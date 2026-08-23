@@ -13,6 +13,25 @@ import {
 const MAX_SESSIONS_PER_PROVIDER = 250;
 const CLAUDE_DESKTOP_LOOKBACK_MS = 90 * 24 * 60 * 60 * 1000;
 
+function anonymousSessionKeys() {
+  const rows = readJson(path.join(storeDir(), "anonymous-sessions.json"));
+  return new Set((Array.isArray(rows?.sessions) ? rows.sessions : []).map((row) => `${row.provider}:${row.nativeId}`));
+}
+
+/** Keep one-shot chat invocations out of the user-visible AI-session directory. */
+export function recordAnonymousSession(provider, nativeId) {
+  if (!provider || !nativeId) return;
+  const filePath = path.join(storeDir(), "anonymous-sessions.json");
+  const current = readJson(filePath);
+  const rows = (Array.isArray(current?.sessions) ? current.sessions : [])
+    .filter((row) => `${row.provider}:${row.nativeId}` !== `${provider}:${nativeId}`);
+  rows.push({ provider, nativeId, recordedAt: Date.now() });
+  fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  const tmp = `${filePath}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, `${JSON.stringify({ sessions: rows.slice(-1000) }, null, 2)}\n`, { mode: 0o600 });
+  fs.renameSync(tmp, filePath);
+}
+
 function readJson(filePath) {
   try {
     return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -88,10 +107,12 @@ function indexRows(homeDir) {
 }
 
 export function discoverCodexSessions({ homeDir = codexHome(), nowMs = Date.now() } = {}) {
+  const anonymous = anonymousSessionKeys();
   const index = indexRows(homeDir);
   const rollouts = listRecentRollouts(path.join(homeDir, "sessions"), { nowMs, dayLookback: 90 });
   const rows = [];
   for (const rollout of rollouts.values()) {
+    if (anonymous.has(`codex:${rollout.threadId}`)) continue;
     const meta = readRolloutMeta(rollout.sessionPath);
     if (!meta || meta.subagent) continue;
     const activity = readRolloutActivity(rollout.sessionPath);
@@ -161,13 +182,14 @@ export function discoverClaudeSessions({
   desktopDir = claudeDesktopSessionsDir(),
   nowMs = Date.now(),
 } = {}) {
+  const anonymous = anonymousSessionKeys();
   const live = liveClaudeRegistrations(configDir);
   const byId = new Map();
   const metadataFiles = collectFiles(desktopDir, (name) => /^local_.*\.json$/.test(name));
   for (const filePath of metadataFiles) {
     const row = readJson(filePath);
     const nativeId = String(row?.cliSessionId || "").trim();
-    if (!nativeId || row.isArchived || row.transcriptUnavailable) continue;
+    if (!nativeId || anonymous.has(`claude:${nativeId}`) || row.isArchived || row.transcriptUnavailable) continue;
     const lastActiveAt = Number(row.lastActivityAt || row.lastFocusedAt || row.createdAt || 0);
     if (!lastActiveAt || nowMs - lastActiveAt > CLAUDE_DESKTOP_LOOKBACK_MS) continue;
     const registration = live.get(nativeId);
@@ -197,7 +219,7 @@ export function discoverClaudeSessions({
   // CLI/background sessions may have no Desktop metadata. The official live
   // registry is authoritative for their address and state.
   for (const [nativeId, registration] of live) {
-    if (byId.has(nativeId)) continue;
+    if (anonymous.has(`claude:${nativeId}`) || byId.has(nativeId)) continue;
     const cwd = String(registration.cwd || "");
     const transcriptPath = claudeTranscriptPath(configDir, cwd, nativeId);
     byId.set(nativeId, {
@@ -220,7 +242,7 @@ export function discoverClaudeSessions({
   }
   const controlled = readJson(path.join(storeDir(), "controlled-sessions.json"));
   for (const saved of Array.isArray(controlled?.sessions) ? controlled.sessions : []) {
-    if (saved?.provider !== "claude" || !saved.nativeId || byId.has(saved.nativeId)) continue;
+    if (saved?.provider !== "claude" || !saved.nativeId || anonymous.has(`claude:${saved.nativeId}`) || byId.has(saved.nativeId)) continue;
     const registration = live.get(saved.nativeId);
     const transcriptPath = String(saved.transcriptPath || "");
     const recoverable = Boolean(transcriptPath && fs.existsSync(transcriptPath));

@@ -255,8 +255,8 @@ test("per-party colors are stable across conversations and restarts", () => {
 });
 
 test("the user's own messages are labelled 'You' and sit left like every row", () => {
-  assert.match(html, /const mine = m\.direction === "out";/);
-  assert.match(html, /const who = mine \? me : m\.party;/);
+  assert.match(html, /const mine = m\.direction === "out" && !m\.ownedAgent;/);
+  assert.match(html, /const who = m\.ownedAgent \? ownedAgentName : mine \? me : m\.party;/);
   // "You", not the account name: the pill is a personal surface, only ever
   // read by its owner (Slack shows your name because its rooms are shared).
   assert.match(html, /const me = "You";/);
@@ -564,6 +564,16 @@ test("the room composer prevents duplicate sends, and returns a draft only when 
   assert.match(html, /const restored = document\.getElementById\("thQrInput"\)/);
 });
 
+test("developer chat composers rank owned laptop agents ahead of participant mentions", () => {
+  const owned = html.indexOf('{ token:"my_claude", name:"@my_claude"');
+  const participant = html.indexOf('...[...participantNames]');
+  assert.ok(owned >= 0 && participant > owned, "owned agents precede participant suggestions");
+  assert.match(html, /groupInfoRoster\(group\)[\s\S]*!member\.currentUser/, "saved-group rosters contribute participants who have not spoken yet");
+  assert.match(html, /payload\.features\?\.requests === true \? \[/, "owned agents are suggested only where the feature is enabled");
+  assert.match(html, /if \(event\.key === "Enter" \|\| event\.key === "Tab"\)/, "keyboard selection works without leaving the composer");
+  assert.match(html, /title:"I'm on it"[\s\S]*agentInvocation:true/, "sending paints the immediate owned-agent response");
+});
+
 test("agents can quote explicitly but cannot name threads", () => {
   assert.match(mcp, /Addressing a person, group, or chat never implies a reply/);
   assert.match(mcp, /Set replyToRelayId only when/);
@@ -586,7 +596,7 @@ test("requests stay on the board for control and appear in chat as delivered cor
   // progress/completion and execution controls remain on the board/reader.
   assert.match(html, /const request = isRequestRow\(r\)/);
   assert.match(html, /if \(!request && !isRelayListKind\(r\)\) continue;/);
-  assert.match(html, /const textLike = request \? false : relayTextLike/);
+  assert.match(html, /const textLike = request \? false : ownedAgent \|\| relayTextLike/);
   assert.match(html, /m\.request \? '<span class="kchip">Request<\/span>'/);
   assert.match(html, /m\.request \? "requests" : "threads"/);
   // The dock's composer never clips: inputs must be allowed to shrink.
@@ -617,7 +627,7 @@ test("your own relays are readable too — the text/letter rule is the same on b
   // A quick text you typed stays a text; a titled relay with a body of its
   // own is a letter you can open. Hardcoding textLike:true meant a reader
   // could open everyone's relays but never their own (Sven, live).
-  assert.match(sentPush, /const sentTextLike = request \? false : relayTextLike\(s\.forHuman, sentSubject\(s\), s\.forAgent\)/);
+  assert.match(sentPush, /const sentTextLike = request \? false : ownedAgent \|\| relayTextLike\(s\.forHuman, sentSubject\(s\), s\.forAgent\)/);
   assert.match(sentPush, /textLike: sentTextLike/);
   assert.match(sentPush, /body: s\.forHuman \|\| "",/);
   assert.match(sentPush, /preview: \(\(\) => \{/);
@@ -633,8 +643,8 @@ test("the agent document, not title similarity, distinguishes text from a Relay"
   assert.doesNotMatch(classifier, /b === s|startsWith/);
   assert.match(listGate, /type\) \|\| ""\) === "completion"/);
   assert.match(listGate, /row\.forAgent/, "only two-document completions stay off the correspondence list");
-  assert.match(html, /const textLike = request \? false : relayTextLike\(r\.forHuman, subj, r\.forAgent\)/);
-  assert.match(html, /const sentTextLike = request \? false : relayTextLike\(s\.forHuman, sentSubject\(s\), s\.forAgent\)/);
+  assert.match(html, /const textLike = request \? false : ownedAgent \|\| relayTextLike\(r\.forHuman, subj, r\.forAgent\)/);
+  assert.match(html, /const sentTextLike = request \? false : ownedAgent \|\| relayTextLike\(s\.forHuman, sentSubject\(s\), s\.forAgent\)/);
 });
 
 test("opening a conversation reads ALL of it — never a per-message click", () => {

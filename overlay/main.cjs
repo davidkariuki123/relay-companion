@@ -7221,6 +7221,9 @@ ipcMain.handle("relay:contactsSearch", (_e, q) => groupCall((c) => c.searchConta
 
 // Settings tab: account card + the sign-out / switch-account lifecycle.
 ipcMain.handle("relay:accountInfo", () => accountInfo());
+ipcMain.handle("relay:chatAgentPreferences", async () => new RelayClient().chatAgentPreferences());
+ipcMain.handle("relay:chatAgentPreferencesSave", async (_event, input = {}) =>
+  new RelayClient().updateChatAgentPreferences(input));
 ipcMain.handle("relay:connectChatGPT", () => connectChatGPT());
 ipcMain.handle("relay:connectClaude", () => connectClaude());
 ipcMain.handle("relay:completeSetupTutorial", () => completeSetupTutorial());

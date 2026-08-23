@@ -119,7 +119,7 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
   assert.deepEqual(toolsForAccount(productionDeveloper).map((tool) => tool.name), ordinary);
   // The complete catalog requires the role and the dev channel together.
   const developer = productFeatures({ env: { RELAY_UPDATE_CHANNEL: "dev" }, user: DEVELOPER });
-  assert.equal(toolsForAccount(developer).length, 26);
+  assert.equal(toolsForAccount(developer).length, 28);
   // A call that arrives anyway (a stale client, a hand-written request) is refused before transport.
   const client = new Proxy({}, { get(_target, key) { throw new Error(`transport must not run (${String(key)})`); } });
   for (const [name, args] of [

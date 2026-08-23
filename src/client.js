@@ -209,6 +209,26 @@ export class RelayClient {
     return this.#req("POST", `/v1/session-operations/${encodeURIComponent(operationId)}/evidence`, payload);
   }
 
+  chatAgentPreferences() {
+    return this.#req("GET", "/v1/chat-agents/preferences");
+  }
+
+  updateChatAgentPreferences(payload) {
+    return this.#req("PATCH", "/v1/chat-agents/preferences", payload);
+  }
+
+  agentRunProgress(relayId, summary) {
+    return this.#req("POST", `/v1/chat-agents/${encodeURIComponent(relayId)}/progress`, { summary });
+  }
+
+  agentRunComplete(relayId, forHuman, forAgent) {
+    return this.#req("POST", `/v1/chat-agents/${encodeURIComponent(relayId)}/complete`, { forHuman, forAgent });
+  }
+
+  agentRunFinish(relayId, error = "") {
+    return this.#req("POST", `/v1/chat-agents/${encodeURIComponent(relayId)}/finish`, error ? { error } : {});
+  }
+
   registerDevice({ pairingCode, name, platform, e2eeIdentity }) {
     return this.#req(
       "POST",

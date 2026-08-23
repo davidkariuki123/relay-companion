@@ -11,6 +11,8 @@ const SEND_GATE = "Only send a Relay when the user asks you to send (or relay) s
 const EXPECTED_TOOLS = [
   "relay_ai_sessions",
   "relay_ai_session",
+  "relay_agent_progress",
+  "relay_agent_complete",
   "relay_send",
   "relay_share_link",
   "relay_contacts_search",
