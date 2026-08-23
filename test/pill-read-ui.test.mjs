@@ -76,17 +76,12 @@ test("relay rows project attachment metadata only — no localPath, no signed UR
 
 test("staged relays recover both complete documents from the durable packet", () => {
   const recovery = main.slice(
-    main.indexOf("function documentsForPacket(packet)"),
+    main.indexOf("const documentsForPacket = createPacketDocumentReader()"),
     main.indexOf("// The inbound Relay attention rows"),
   );
   const readRelays = main.slice(main.indexOf("function readRelays()"), main.indexOf("const RELAY_HIDDEN_KINDS"));
 
-  assert.match(recovery, /packet\.forHuman/);
-  assert.match(recovery, /packet\.forAgent/);
-  assert.match(recovery, /fs\.readFileSync\(contentPath, "utf8"\)/);
-  assert.match(recovery, /content\.forHuman/);
-  assert.match(recovery, /content\.forAgent/);
-  assert.match(recovery, /packetDocumentCache\.set\(contentPath, recovered\)/);
+  assert.match(recovery, /createPacketDocumentReader\(\)/);
   assert.match(readRelays, /forHuman: documents\.forHuman/);
   assert.match(readRelays, /forAgent: documents\.forAgent/);
 });

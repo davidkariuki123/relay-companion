@@ -110,6 +110,7 @@ const {
   prepareMacTrayPosition,
   readMacDefaultsNumber,
 } = require("./tray-position.cjs");
+const { createPacketDocumentReader } = require("./packet-documents.cjs");
 const { RELAY_MAC_BUNDLE_IDENTIFIER } = require("../src/mac-app-identity.cjs");
 
 const RELAY_HOME = process.env.RELAY_HOME || process.env.RELAY_COMPANION_HOME || path.join(os.homedir(), ".relay-companion");
@@ -1043,30 +1044,10 @@ function writeStateAtomic(store) {
 // forAgent from the staged pill row. Updating the companion did not
 // re-stage rows already recorded by the daemon, so the two-document reader
 // remained permanently absent for exactly the relays that demonstrated it.
-// Recover the immutable second document from that packet. Cache both hits and
-// misses: readRelays runs on every refresh and must not turn into a disk poll.
-const packetDocumentCache = new Map();
-function documentsForPacket(packet) {
-  const staged = {
-    forHuman: String((packet && packet.forHuman) || ""),
-    forAgent: String((packet && packet.forAgent) || ""),
-  };
-  const contentPath = String((packet && packet.contentPath) || "");
-  if (!contentPath) return staged;
-  if (packetDocumentCache.has(contentPath)) return packetDocumentCache.get(contentPath);
-  let recovered = staged;
-  try {
-    const content = JSON.parse(fs.readFileSync(contentPath, "utf8")) || {};
-    recovered = {
-      // The durable packet is the complete immutable document. The row may
-      // contain only the inbox preview after a mixed-version re-stage.
-      forHuman: String(content.forHuman || staged.forHuman),
-      forAgent: String(content.forAgent || staged.forAgent),
-    };
-  } catch {}
-  packetDocumentCache.set(contentPath, recovered);
-  return recovered;
-}
+// Recover the complete second document from that packet. Ordinary packet files
+// are immutable; owned-agent responses are the exception and replace the same
+// path as their Relay advances from acknowledgement to progress to completion.
+const documentsForPacket = createPacketDocumentReader();
 
 // The inbound Relay attention rows, newest + unread first.
 function readRelays() {
