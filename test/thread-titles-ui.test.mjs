@@ -574,6 +574,7 @@ test("developer chat composers rank owned laptop agents ahead of participant men
   assert.match(html, /button\.addEventListener\("click"[\s\S]*chooseMention/, "touch and click selection dismisses the menu too");
   assert.match(html, /\["ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"\][\s\S]*renderMentions/, "moving the caret re-evaluates the active mention");
   assert.match(html, /thQrInput\.addEventListener\("blur"[\s\S]*closeMentions/, "leaving the composer dismisses the menu");
+  assert.match(html, /\.th-mention-menu\.hidden\s*\{\s*display:none;\s*\}/, "the hidden state actually removes the mention menu");
   assert.match(html, /title:"I'm on it"[\s\S]*agentInvocation:true/, "sending paints the immediate owned-agent response");
 });
 

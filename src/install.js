@@ -43,7 +43,10 @@ export function relayBinPath() {
 }
 
 function packageRootForBin(bin = relayBinPath(), platform = process.platform) {
-  const api = platform === "win32" ? path.win32 : path.posix;
+  // Cross-platform tests may exercise the Darwin writer against a real Windows
+  // temp tree. Preserve that host path while still parsing injected /Users/...
+  // registrations with POSIX semantics.
+  const api = platform === "win32" || /^[A-Za-z]:[\\/]/.test(String(bin)) ? path.win32 : path.posix;
   return api.resolve(api.dirname(bin), "..");
 }
 

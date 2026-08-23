@@ -711,9 +711,26 @@ test("on Windows and macOS a press on a text field asks for the keyboard", () =>
   const focusHandler = main.slice(main.indexOf('ipcMain.on("relay:setFocusable"'), main.indexOf('ipcMain.on("relay:engage"'));
   assert.match(focusHandler, /process\.platform === "darwin" && !app\.isActive\(\)/);
   assert.match(focusHandler, /app\.focus\(\{ steal: true \}\)/, "macOS activates Relay under the user's text-field press");
+  assert.match(focusHandler, /process\.platform === "win32"\) win\.setSkipTaskbar\(true\)/,
+    "Windows focus transitions must not expose Electron in the taskbar");
   assert.ok(
     focusHandler.indexOf('app.focus({ steal: true })') < focusHandler.indexOf("win.focus()"),
     "the macOS app activates before its text field is focused",
+  );
+});
+
+test("selecting pill text grants the keyboard so Ctrl or Command+C copies it", () => {
+  const start = html.indexOf('if (window.relay.platform === "win32" || window.relay.platform === "darwin") {');
+  assert.notEqual(start, -1);
+  const block = html.slice(start, html.indexOf("// Text inputs temporarily make", start));
+  assert.match(block, /addEventListener\("mouseup"/);
+  assert.match(block, /window\.getSelection\?\.\(\)/);
+  assert.match(block, /!selection\.isCollapsed/);
+  assert.match(block, /String\(selection\)/);
+  assert.match(block, /window\.relay\.setFocusable\?\.\(true\)/);
+  assert.ok(
+    block.indexOf('addEventListener("mouseup"') < block.lastIndexOf("setFocusable?.(true)"),
+    "focus is granted after the selection gesture, not for an ordinary press",
   );
 });
 

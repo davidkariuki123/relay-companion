@@ -14,6 +14,11 @@ import {
   repairCanonicalRuntime,
 } from "../src/canonical-runtime.js";
 
+// These integration cases deliberately exercise POSIX permissions and atomic
+// rename behavior on the host filesystem. Keep them active on macOS/Linux and
+// use the injected Windows filesystem fixture below for the Windows contract.
+const posixFsTest = process.platform === "win32" ? test.skip : test;
+
 function fixture() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "relay-canonical-"));
 }
@@ -68,7 +73,7 @@ async function runPosix({ homeDir, version = "0.1.241", ...overrides } = {}) {
   });
 }
 
-test("POSIX success verifies staging, atomically commits an immutable release, then activates", async () => {
+posixFsTest("POSIX success verifies staging, atomically commits an immutable release, then activates", async () => {
   const homeDir = fixture();
   const legacy = path.join(homeDir, ".hermes", "node", "lib", "node_modules", "relay-companion");
   fs.mkdirSync(legacy, { recursive: true });
@@ -101,7 +106,7 @@ test("POSIX success verifies staging, atomically commits an immutable release, t
 });
 
 for (const fault of ["install", "verify", "pre-commit"]) {
-  test(`POSIX ${fault} failure never changes the callable current release`, async () => {
+  posixFsTest(`POSIX ${fault} failure never changes the callable current release`, async () => {
     const homeDir = fixture();
     const previous = existingPointer(homeDir);
     let activated = false;
@@ -119,7 +124,7 @@ for (const fault of ["install", "verify", "pre-commit"]) {
 }
 
 for (const activation of ["returned failure", "threw"]) {
-  test(`POSIX activation ${activation} restores pointer and runs rollback activation`, async () => {
+  posixFsTest(`POSIX activation ${activation} restores pointer and runs rollback activation`, async () => {
     const homeDir = fixture();
     const previous = existingPointer(homeDir);
     let rollback = null;
@@ -148,7 +153,7 @@ for (const activation of ["returned failure", "threw"]) {
   });
 }
 
-test("a failed activation prunes older stranded releases too", async () => {
+posixFsTest("a failed activation prunes older stranded releases too", async () => {
   const homeDir = fixture();
   const previous = existingPointer(homeDir);
   const layout = canonicalRuntimeLayout({ homeDir, platform: "linux" });
@@ -171,7 +176,7 @@ test("a failed activation prunes older stranded releases too", async () => {
   assert.equal(strandedLeft.length <= 1, true, `stranded releases pruned on failure, saw: ${left.join(", ")}`);
 });
 
-test("a rollback that fails keeps the candidate tree for recovery", async () => {
+posixFsTest("a rollback that fails keeps the candidate tree for recovery", async () => {
   const homeDir = fixture();
   existingPointer(homeDir);
   const result = await runPosix({
@@ -185,7 +190,7 @@ test("a rollback that fails keeps the candidate tree for recovery", async () => 
   assert.equal(fs.existsSync(result.candidate.packageRoot), true, "recovery-required keeps the candidate");
 });
 
-test("an existing verifying release of the target version is adopted instead of reinstalled", async () => {
+posixFsTest("an existing verifying release of the target version is adopted instead of reinstalled", async () => {
   const homeDir = fixture();
   existingPointer(homeDir);
   const layout = canonicalRuntimeLayout({ homeDir, platform: "linux" });
@@ -203,7 +208,7 @@ test("an existing verifying release of the target version is adopted instead of 
   assert.equal(readCanonicalRuntime({ homeDir, platform: "linux" }).releaseRoot, path.join(layout.releasesDir, strandedId));
 });
 
-test("adoption never claims the active release or a process-referenced one", async () => {
+posixFsTest("adoption never claims the active release or a process-referenced one", async () => {
   const homeDir = fixture();
   const layout = canonicalRuntimeLayout({ homeDir, platform: "linux" });
   // The CURRENT pointer is at the target version (a same-version repair): its own
@@ -237,7 +242,7 @@ test("adoption never claims the active release or a process-referenced one", asy
   assert.notEqual(result.candidate.releaseId, busyId);
 });
 
-test("live transaction lock rejects a concurrent repair without touching current", async () => {
+posixFsTest("live transaction lock rejects a concurrent repair without touching current", async () => {
   const homeDir = fixture();
   const previous = existingPointer(homeDir);
   const { lockPath } = canonicalRuntimeLayout({ homeDir, platform: "linux" });
@@ -250,7 +255,7 @@ test("live transaction lock rejects a concurrent repair without touching current
   assert.equal(readCanonicalRuntime({ homeDir, platform: "linux" }).packageRoot, previous.packageRoot);
 });
 
-test("transaction admission exposes the durable request and worker identity", async () => {
+posixFsTest("transaction admission exposes the durable request and worker identity", async () => {
   const homeDir = fixture();
   let owner = null;
   const result = await runPosix({
@@ -264,7 +269,7 @@ test("transaction admission exposes the durable request and worker identity", as
   assert.equal(owner.pid, process.pid);
 });
 
-test("ownership guard allows only the selected canonical release once current exists", () => {
+posixFsTest("ownership guard allows only the selected canonical release once current exists", () => {
   const homeDir = fixture();
   const current = existingPointer(homeDir);
   const external = path.join(homeDir, ".hermes", "node", "lib", "node_modules", "relay-companion");
@@ -275,7 +280,7 @@ test("ownership guard allows only the selected canonical release once current ex
   assert.equal(canonicalOwnershipGuard(external, { homeDir, platform: "linux" }).mayClaim, false);
 });
 
-test("first migration retains an explicit legacy rollback target", async () => {
+posixFsTest("first migration retains an explicit legacy rollback target", async () => {
   const homeDir = fixture();
   const legacy = {
     kind: "legacy",
@@ -296,7 +301,7 @@ test("first migration retains an explicit legacy rollback target", async () => {
   assert.equal(readCanonicalRuntime({ homeDir, platform: "linux" }), null);
 });
 
-test("rollback failure preserves a non-authoritative recovery journal", async () => {
+posixFsTest("rollback failure preserves a non-authoritative recovery journal", async () => {
   const homeDir = fixture();
   const previous = existingPointer(homeDir);
   const result = await runPosix({
@@ -315,7 +320,7 @@ test("rollback failure preserves a non-authoritative recovery journal", async ()
 });
 
 for (const crashPoint of ["after-journal", "after-repair-runtime", "after-service-restart"]) {
-  test(`startup recovery restores previous runtime after crash ${crashPoint}`, async () => {
+  posixFsTest(`startup recovery restores previous runtime after crash ${crashPoint}`, async () => {
     const homeDir = fixture();
     const previous = existingPointer(homeDir);
     const candidateLayout = canonicalRuntimeLayout({ homeDir, platform: "linux", releaseId: "candidate" });
@@ -450,7 +455,7 @@ test("repair requires an exact version", async () => {
   assert.equal((await repairCanonicalRuntime({ version: "^0.1.241" })).reason, "exact-version-required");
 });
 
-test("28 immutable updates retain only active, previous, process-referenced, and one forensic release", () => {
+posixFsTest("28 immutable updates retain only active, previous, process-referenced, and one forensic release", () => {
   const homeDir = fixture();
   const { releasesDir } = canonicalRuntimeLayout({ homeDir, platform: "linux" });
   fs.mkdirSync(releasesDir, { recursive: true });
@@ -480,7 +485,7 @@ test("28 immutable updates retain only active, previous, process-referenced, and
   assert.equal(fs.readFileSync(path.join(external, "sentinel"), "utf8"), "external");
 });
 
-test("lock filesystem failures return structured results from repair and recovery", async () => {
+posixFsTest("lock filesystem failures return structured results from repair and recovery", async () => {
   const homeDir = fixture();
   const throwingFs = Object.create(fs);
   throwingFs.mkdirSync = () => { throw Object.assign(new Error("disk is read-only"), { code: "EROFS" }); };
@@ -511,7 +516,7 @@ test("lock filesystem failures return structured results from repair and recover
 // renamed directory is garbage. The old code never deleted it, so every steal —
 // and a failing transaction steals on every retry — leaked one directory into the
 // runtime root: 11,015 of them on David's Mac in a single day.
-test("a stolen lock is deleted, and pre-existing stale locks are swept", async () => {
+posixFsTest("a stolen lock is deleted, and pre-existing stale locks are swept", async () => {
   const homeDir = fixture();
   const layout = canonicalRuntimeLayout({ homeDir, platform: "linux" });
   fs.mkdirSync(layout.root, { recursive: true });
@@ -528,7 +533,7 @@ test("a stolen lock is deleted, and pre-existing stale locks are swept", async (
   assert.deepEqual(leftover, [], `runtime root still holds ${leftover.length} stale lock directories`);
 });
 
-test("a live owner still holds the lock rather than having it stolen", async () => {
+posixFsTest("a live owner still holds the lock rather than having it stolen", async () => {
   const homeDir = fixture();
   const layout = canonicalRuntimeLayout({ homeDir, platform: "linux" });
   fs.mkdirSync(layout.lockPath, { recursive: true });
@@ -538,7 +543,7 @@ test("a live owner still holds the lock rather than having it stolen", async () 
   assert.equal(result.reason, "transaction-in-progress");
 });
 
-test("a live transaction is never stolen because an elapsed-time deadline passed", async () => {
+posixFsTest("a live transaction is never stolen because an elapsed-time deadline passed", async () => {
   const homeDir = fixture();
   const layout = canonicalRuntimeLayout({ homeDir, platform: "linux" });
   fs.mkdirSync(layout.lockPath, { recursive: true });

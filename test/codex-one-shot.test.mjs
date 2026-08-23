@@ -30,11 +30,18 @@ test("anonymous Codex runs use the real non-interactive CLI without discarding u
   assert.deepEqual(args.slice(0, 4), ["exec", "--json", "--ephemeral", "--skip-git-repo-check"]);
   assert.equal(args.includes("--ignore-user-config"), false);
   assert.equal(args.includes("--ignore-rules"), false);
-  assert.equal(args.includes("workspace-write"), true);
+  assert.equal(args.includes("--sandbox"), false, "approve-for-me owns the reviewed workspace-write policy");
+  assert.equal(args.includes("workspace-write"), false);
   assert.equal(args.includes("--approve-for-me"), true, "configured tools get automatic approval review instead of blocking headless work");
   assert.equal(args.includes("gpt-5.6-sol"), true);
   assert.equal(args.includes('model_reasoning_effort="high"'), true);
   assert.equal(args.at(-1), "-", "the large chat prompt is piped over stdin");
+});
+
+test("full-access Codex runs select the danger sandbox without the approval reviewer", () => {
+  const args = codexOneShotArgs({ fullAccess: true });
+  assert.deepEqual(args.slice(args.indexOf("--sandbox"), args.indexOf("--sandbox") + 2), ["--sandbox", "danger-full-access"]);
+  assert.equal(args.includes("--approve-for-me"), false);
 });
 
 test("Codex JSONL events become visible chat progress", () => {

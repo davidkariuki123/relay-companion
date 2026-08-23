@@ -1887,6 +1887,7 @@
   .th-composer-dock .qr.th-qr { position:relative; }
   .th-mention-menu { position:absolute; left:10px; right:10px; bottom:100%; margin-bottom:7px; z-index:8; overflow:hidden;
     border:1px solid var(--edge); border-radius:12px; background:var(--bg); box-shadow:0 12px 30px color-mix(in srgb, #000 18%, transparent); }
+  .th-mention-menu.hidden { display:none; }
   .th-mention-item { width:100%; display:flex; align-items:center; gap:9px; padding:9px 11px !important; border-radius:0 !important;
     background:transparent !important; color:var(--ink) !important; text-align:left; font-size:12px !important; }
   .th-mention-item.on { background:var(--wash) !important; }
@@ -2580,6 +2581,13 @@
     window.addEventListener("mousedown", (e) => {
       const el = e.target;
       if (el && el.matches && el.matches(OVERLAY_TEXT_FIELD)) window.relay.setFocusable?.(true);
+    }, { capture: true });
+    // The rest of the pill stays keyboard-neutral until the pointer gesture has
+    // actually produced a selection. At that point Ctrl/Cmd+C belongs to Relay,
+    // not to the application that was focused behind its accessory window.
+    window.addEventListener("mouseup", () => {
+      const selection = window.getSelection?.();
+      if (selection && !selection.isCollapsed && String(selection)) window.relay.setFocusable?.(true);
     }, { capture: true });
   }
   // Text inputs temporarily make the accessory window focusable. A removed or

@@ -28,7 +28,9 @@ function writeExecutable(filePath, source) {
   fs.writeFileSync(filePath, source, { mode: 0o700 });
 }
 
-test("POSIX bridge survives spaces and apostrophes, streams stdin, and prefers the dedicated entry", () => {
+const posixExecTest = process.platform === "win32" ? test.skip : test;
+
+posixExecTest("POSIX bridge survives spaces and apostrophes, streams stdin, and prefers the dedicated entry", () => {
   const root = fixture("quoted");
   const homeDir = path.join(root, "Relay user's home");
   const targetBin = path.join(root, "runtime user's tree", "bin", "relay.js");
@@ -59,7 +61,7 @@ process.stdout.write(process.argv[2] + ":" + body);
   assert.match(handler.command, /relay\.js'\s+claude-hook$/);
 });
 
-test("bridge fails silently and immediately when the target runtime is missing", () => {
+posixExecTest("bridge fails silently and immediately when the target runtime is missing", () => {
   const root = fixture("missing");
   const invocation = ensureStableHookLauncher({
     targetBin: path.join(root, "gone", "bin", "relay.js"),
@@ -79,7 +81,7 @@ test("bridge fails silently and immediately when the target runtime is missing",
   assert.ok(Date.now() - started < 1000, "missing runtime does not wait through the five-second host deadline");
 });
 
-test("POSIX host timeout terminates the dedicated hook process, not an orphaned child", async () => {
+posixExecTest("POSIX host timeout terminates the dedicated hook process, not an orphaned child", async () => {
   const root = fixture("timeout");
   const targetBin = path.join(root, "runtime", "bin", "relay.js");
   const pidFile = path.join(root, "hook.pid");
@@ -102,7 +104,7 @@ setInterval(() => {}, 1000);
   assert.throws(() => process.kill(child.pid, 0), { code: "ESRCH" });
 });
 
-test("legacy relay.js remains a silent fail-open downgrade fallback", () => {
+posixExecTest("legacy relay.js remains a silent fail-open downgrade fallback", () => {
   const root = fixture("legacy");
   const targetBin = path.join(root, "old runtime", "bin", "relay.js");
   writeExecutable(targetBin, "process.stdout.write('old'); process.stderr.write('hidden'); process.exit(7);\n");
@@ -243,7 +245,7 @@ test("candidate runtime repair refreshes only existing Relay MCP registrations",
     bin,
     node: process.execPath,
     homeDir,
-    platform: "linux",
+    platform: process.platform,
     claudeConfigFile,
     codexConfigFile,
     claudeSettingsFile: path.join(homeDir, ".claude", "settings.json"),
@@ -254,7 +256,7 @@ test("candidate runtime repair refreshes only existing Relay MCP registrations",
   assert.equal(JSON.parse(fs.readFileSync(claudeConfigFile, "utf8")).keep, true);
   assert.equal(JSON.parse(fs.readFileSync(claudeConfigFile, "utf8")).mcpServers.relay.args[1], result.mcpBin);
   assert.match(fs.readFileSync(codexConfigFile, "utf8"), /model = "keep"/);
-  assert.match(fs.readFileSync(result.mcpBin, "utf8"), /release[\\/]bin[\\/]relay\.js/);
+  assert.ok(fs.readFileSync(result.mcpBin, "utf8").includes(JSON.stringify(bin)));
 });
 
 test("candidate runtime repair does not add Relay MCP to unrelated host configs", () => {
@@ -270,6 +272,7 @@ test("candidate runtime repair does not add Relay MCP to unrelated host configs"
     bin: path.join(homeDir, "release", "bin", "relay.js"),
     node: process.execPath,
     homeDir,
+    platform: "linux",
     claudeConfigFile,
     codexConfigFile,
     claudeSettingsFile: path.join(homeDir, ".claude", "settings.json"),

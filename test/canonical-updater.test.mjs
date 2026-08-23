@@ -25,6 +25,11 @@ import {
   repairCanonicalRuntime,
 } from "../src/canonical-runtime.js";
 
+// These cases create a POSIX runtime tree on the real host filesystem. They
+// remain active on macOS/Linux; Windows behavior is covered by injected-path
+// and Windows-specific tests without asking NTFS to emulate POSIX paths.
+const posixFsTest = process.platform === "win32" ? test.skip : test;
+
 function seedLinuxRuntime(packageRoot, version) {
   for (const [relative, contents, mode] of [
     ["package.json", JSON.stringify({ version }), 0o600],
@@ -458,7 +463,7 @@ test("the update worker is never launched under Electron", () => {
 // labels resurrected the moment node became reachable, replaying two dead target
 // versions. Reconciliation removes every legacy label and the fixed label admits
 // only one current worker.
-test("legacy worker labels are all reconciled and the fixed label is the sole admission slot", () => {
+posixFsTest("legacy worker labels are all reconciled and the fixed label is the sole admission slot", () => {
   const nowMs = 1_700_000_000_000;
   const liveLabel = `${UPDATE_WORKER_LABEL_PREFIX}101.${nowMs - 60_000}`;
   const wedgedLabel = `${UPDATE_WORKER_LABEL_PREFIX}102.${nowMs - 2 * 60 * 60 * 1000}`;
@@ -495,7 +500,7 @@ test("legacy worker labels are all reconciled and the fixed label is the sole ad
   assert.equal(spawned.status, "busy");
 });
 
-test("an admission timeout never removes the fixed label and cannot kill a newer owner", () => {
+posixFsTest("an admission timeout never removes the fixed label and cannot kill a newer owner", () => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-worker-timeout-"));
   const calls = [];
   const run = (command, args) => {
@@ -617,7 +622,7 @@ test("the transaction refuses Electron as the service node", async () => {
   assert.equal(result.reason, "service-node-electron");
 });
 
-test("later failed activation rolls back through public Node after Hermes disappears", async () => {
+posixFsTest("later failed activation rolls back through public Node after Hermes disappears", async () => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-hermes-rollback-"));
   const rawNode = path.join(homeDir, ".hermes", "node", "bin", "node");
   const rawNpm = path.join(homeDir, ".hermes", "node", "bin", "npm");

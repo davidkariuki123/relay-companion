@@ -7366,6 +7366,10 @@ ipcMain.on("relay:setFocusable", (event, focusable) => {
   if (!win || win.isDestroyed()) return;
   if (event.sender !== win.webContents) return;
   win.setFocusable(Boolean(focusable));
+  // Windows mutates native window styles when focusability changes. Reassert
+  // the pill's tool-window contract after every transition so temporarily
+  // accepting keyboard input can never create an Electron taskbar button.
+  if (process.platform === "win32") win.setSkipTaskbar(true);
   if (focusable) {
     // BrowserWindow.focus() alone need not activate a macOS accessory app while
     // another application owns the keyboard. This IPC grant is sent only for a

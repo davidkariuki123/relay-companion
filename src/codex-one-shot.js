@@ -36,10 +36,12 @@ export function codexOneShotArgs({ model = "", effort = "", fullAccess = false, 
     "--skip-git-repo-check",
     "--color",
     "never",
-    "--sandbox",
-    fullAccess ? "danger-full-access" : "workspace-write",
   ];
-  if (!fullAccess) args.push("--approve-for-me");
+  // --approve-for-me already selects Codex's reviewed workspace-write mode.
+  // Passing an explicit --sandbox alongside it is rejected by the CLI before
+  // the run starts. Full-access runs opt into their sandbox directly instead.
+  if (fullAccess) args.push("--sandbox", "danger-full-access");
+  else args.push("--approve-for-me");
   if (model) args.push("--model", model);
   if (effort && effort !== "auto") args.push("--config", `model_reasoning_effort=${JSON.stringify(effort)}`);
   if (schemaPath) args.push("--output-schema", schemaPath);

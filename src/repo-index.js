@@ -155,12 +155,12 @@ function fromDiskScan() {
   const roots = [...configuredRoots(), ...SCAN_ROOT_NAMES.map((name) => path.join(home, name))].filter(isDir);
   if (!roots.length) return [];
   return roots.flatMap(scanRoot).map((dir) => ({
-      dir,
-      originKey: "",
-      uses: 0,
-      lastUsedAt: 0,
-      source: "disk",
-    }));
+    dir,
+    originKey: "",
+    uses: 0,
+    lastUsedAt: 0,
+    source: "disk",
+  }));
 }
 
 // Fill in origin/branch/common-dir for candidates that lack them, drop anything
