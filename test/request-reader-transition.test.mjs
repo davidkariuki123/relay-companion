@@ -44,7 +44,7 @@ test("Requests stages an inert source snapshot before exposing the prepared read
   assert.match(commit, /renderAll\(\)/, "the shared navigation commit builds the destination before the morph");
 });
 
-test("the fixed native canvas barrier resolves before visible reader motion begins", () => {
+test("the native window growth barrier resolves before visible reader motion begins", () => {
   const start = between(html, "function startReaderMorph", "let peeking");
   const prepareAt = start.indexOf("await window.relay.prepareCardSize(destinationSize.w, destinationSize.h)");
   const revealAt = start.indexOf('classList.add("reader-morph-go")');
@@ -85,10 +85,10 @@ test("the card spring approaches both reader and mini-list sizes monotonically",
   exercise(720, 344);
 });
 
-test("native size preparation updates only the hit rect", () => {
+test("native size preparation grows the ordinary window before the morph", () => {
   const prepare = between(main, 'ipcMain.handle("relay:prepareCardSize"', 'ipcMain.on("relay:setPos"');
   assert.match(prepare, /cardSize = \{ w, h \}/);
-  assert.doesNotMatch(prepare, /setBounds|fitOverlayWindowToCard/);
+  assert.match(prepare, /fitOverlayWindowToCard\(\)/);
 });
 
 test("chat, compact rooms, sent, and requests share the same source snapshot", () => {

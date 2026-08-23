@@ -62,7 +62,7 @@ test("choosing a mode persists it and folds the tray back to the value row", () 
   assert.match(wiring, /renderSettings\(\);/);
 });
 
-test("the section still mounts only with the requests feature and stops click-through", () => {
+test("the section still mounts only with the requests feature", () => {
   assert.match(html, /if \(payload\.features\?\.requests === true\) html \+= `\s*<div class="sv-open-section" id="permPrefs" data-stop="1">/);
 });
 

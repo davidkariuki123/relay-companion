@@ -576,6 +576,16 @@ test("developer chat composers rank owned laptop agents ahead of participant men
   assert.match(html, /thQrInput\.addEventListener\("blur"[\s\S]*closeMentions/, "leaving the composer dismisses the menu");
   assert.match(html, /\.th-mention-menu\.hidden\s*\{\s*display:none;\s*\}/, "the hidden state actually removes the mention menu");
   assert.match(html, /title:"I'm on it"[\s\S]*agentInvocation:true/, "sending paints the immediate owned-agent response");
+  assert.match(html, /const ownedAgentParticipantNames = new Set\([\s\S]*message\.ownedAgent/,
+    "owned-agent reply identities are tracked separately from people");
+  assert.match(html, /thread\.party && !ownedAgentParticipantNames\.has\(normalizedPartyName\(thread\.party\)\)/,
+    "an owned-agent reply cannot re-enter the selector through the direct-room fallback");
+});
+
+test("progress-only Relay edits repaint an already-open desktop chat", () => {
+  const relayFingerprint = main.slice(main.indexOf("const sig = JSON.stringify({"), main.indexOf("if (force || sig !== lastSig)"));
+  assert.match(relayFingerprint, /relays:[\s\S]*r\.updatedAt/,
+    "the pill's inbox signature includes the in-place generation changed by agent progress");
 });
 
 test("agents can quote explicitly but cannot name threads", () => {

@@ -35,22 +35,18 @@ function fittedOverlayBounds(workArea, size, {
   };
 }
 
-/**
- * A transparent accessory window may be larger than its visible card to leave
- * room for the shadow. Only the card itself is allowed to receive input. The
- * rest of the native window must stay click-through so controls in the app
- * underneath keep working.
- */
-function shouldIgnoreOverlayMouse(point, card, pad = 0) {
-  const p = point || {};
-  const r = card || {};
-  const x = finite(p.x, Number.NEGATIVE_INFINITY);
-  const y = finite(p.y, Number.NEGATIVE_INFINITY);
-  const inset = Math.max(0, finite(pad));
-  const onCard =
-    x >= finite(r.x) - inset && x < finite(r.x) + finite(r.w) + inset &&
-    y >= finite(r.y) - inset && y < finite(r.y) + finite(r.h) + inset;
-  return !onCard;
+/** Resize an already-positioned pill without snapping a user-dragged window home. */
+function resizedOverlayBounds(current, size, { maximum = size } = {}) {
+  const card = clampCardSize(size, maximum);
+  const width = Math.max(1, Math.ceil(card.w));
+  const height = Math.max(1, Math.ceil(card.h));
+  const bounds = current || { x: 0, y: 0, width, height };
+  return {
+    x: Math.round(finite(bounds.x) + finite(bounds.width, width) - width),
+    y: Math.round(finite(bounds.y)),
+    width,
+    height,
+  };
 }
 
-module.exports = { clampCardSize, fittedOverlayBounds, shouldIgnoreOverlayMouse };
+module.exports = { clampCardSize, fittedOverlayBounds, resizedOverlayBounds };

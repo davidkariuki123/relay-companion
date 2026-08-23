@@ -7,6 +7,7 @@ import { storeDir } from "./host-paths.js";
 
 const DEFAULT_STALL_TIMEOUT_MS = 5 * 60 * 1000;
 const DEFAULT_RUN_TIMEOUT_MS = 90 * 60 * 1000;
+const DEFAULT_MCP_TOOL_TIMEOUTS = Object.freeze({ agentos: 45 });
 
 const RELAY_OUTPUT_SCHEMA = {
   type: "object",
@@ -28,7 +29,13 @@ export function ensureCodexRelayOutputSchema(baseDir = storeDir()) {
   return schemaPath;
 }
 
-export function codexOneShotArgs({ model = "", effort = "", fullAccess = false, schemaPath }) {
+export function codexOneShotArgs({
+  model = "",
+  effort = "",
+  fullAccess = false,
+  schemaPath,
+  mcpToolTimeouts = DEFAULT_MCP_TOOL_TIMEOUTS,
+}) {
   const args = [
     "exec",
     "--json",
@@ -44,6 +51,13 @@ export function codexOneShotArgs({ model = "", effort = "", fullAccess = false, 
   else args.push("--approve-for-me");
   if (model) args.push("--model", model);
   if (effort && effort !== "auto") args.push("--config", `model_reasoning_effort=${JSON.stringify(effort)}`);
+  // Preserve the user's MCP setup, but do not let a provenance service hold an
+  // anonymous chat answer forever. Codex receives the timeout as a normal
+  // config layer; the server and all of its tools remain available to the run.
+  for (const [server, seconds] of Object.entries(mcpToolTimeouts || {})) {
+    if (!/^[A-Za-z0-9_-]+$/.test(server) || !Number.isFinite(seconds) || seconds <= 0) continue;
+    args.push("--config", `mcp_servers.${server}.tool_timeout_sec=${seconds}`);
+  }
   if (schemaPath) args.push("--output-schema", schemaPath);
   args.push("-");
   return args;
@@ -114,11 +128,12 @@ export function runCodexOneShot({
   stallTimeoutMs = Number(process.env.RELAY_CHAT_AGENT_STALL_TIMEOUT_MS || DEFAULT_STALL_TIMEOUT_MS),
   runTimeoutMs = Number(process.env.RELAY_CHAT_AGENT_TIMEOUT_MS || DEFAULT_RUN_TIMEOUT_MS),
   heartbeatIntervalMs = 30_000,
+  mcpToolTimeouts = DEFAULT_MCP_TOOL_TIMEOUTS,
   onEvent = () => {},
   spawnProcess = spawn,
 } = {}) {
   return new Promise((resolve, reject) => {
-    const args = codexOneShotArgs({ model, effort, fullAccess, schemaPath });
+    const args = codexOneShotArgs({ model, effort, fullAccess, schemaPath, mcpToolTimeouts });
     const child = spawnProcess(command, args, {
       cwd: cwd && fs.existsSync(cwd) ? cwd : process.cwd(),
       env: { ...process.env },

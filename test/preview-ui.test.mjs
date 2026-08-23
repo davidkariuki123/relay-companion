@@ -1109,12 +1109,11 @@ test("a completed runner repaints its visible follow-up composer", () => {
   assert.match(mirror, /feed\.completedAt[\s\S]*requestLocal\.set\(key, "done"\); renderAll\(\)/);
 });
 
-test("reader refreshes never steal focus and run retries invalidate stale polls", () => {
+test("ordinary window focus survives reader refreshes and run retries invalidate stale polls", () => {
   const dress = between(inbox, "function dressComposer", "let readerSource");
   const reader = between(inbox, "function renderReader", "// ---------- the requests board");
-  assert.match(dress, /addEventListener\("focus"[^]*setFocusable\?\.\(true\)/);
-  assert.match(dress, /addEventListener\("blur"[^]*setFocusable\?\.\(false\)/);
-  assert.doesNotMatch(reader, /setFocusable\([^)]*true/);
+  assert.doesNotMatch(dress, /setFocusable/);
+  assert.doesNotMatch(reader, /setFocusable/);
   assert.match(inbox, /const runFeedEpoch = new Map/);
   assert.match(inbox, /function resetRunFeedForNewRun/);
   assert.match(inbox, /runFeedEpoch\.get\(key\)[^]*!== epoch/);

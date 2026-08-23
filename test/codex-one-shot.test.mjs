@@ -35,7 +35,17 @@ test("anonymous Codex runs use the real non-interactive CLI without discarding u
   assert.equal(args.includes("--approve-for-me"), true, "configured tools get automatic approval review instead of blocking headless work");
   assert.equal(args.includes("gpt-5.6-sol"), true);
   assert.equal(args.includes('model_reasoning_effort="high"'), true);
+  assert.equal(args.includes("mcp_servers.agentos.tool_timeout_sec=45"), true,
+    "AgentOS stays enabled but a dead provenance call cannot own the whole run");
   assert.equal(args.at(-1), "-", "the large chat prompt is piped over stdin");
+});
+
+test("one-shot MCP timeouts are bounded config layers, not server exclusions", () => {
+  const args = codexOneShotArgs({ mcpToolTimeouts: { agentos: 30, "bad.name": 10, relay: 0 } });
+  assert.equal(args.includes("mcp_servers.agentos.tool_timeout_sec=30"), true);
+  assert.equal(args.some((arg) => String(arg).includes("bad.name")), false);
+  assert.equal(args.some((arg) => String(arg).includes("mcp_servers.relay")), false);
+  assert.equal(args.includes("--ignore-user-config"), false);
 });
 
 test("full-access Codex runs select the danger sandbox without the approval reviewer", () => {

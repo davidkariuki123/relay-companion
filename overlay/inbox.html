@@ -82,7 +82,7 @@
   body {
     font-family:var(--sans); color:var(--ink);
     -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
-    user-select:none; cursor:default;
+    cursor:default;
   }
 
   /* One sheet of warm-white paper. Width/height are written by a JS spring each frame;
@@ -90,7 +90,7 @@
      Elevation is three tokens: the card's own drop shadow (this one), the
      folded pill's lighter cousin, and one popover shadow — nothing else casts. */
   .card {
-    position:absolute; top:24px; right:36px;
+    position:absolute; inset:0;
     width:344px; height:524px;
     background:var(--bg);
     border-radius:var(--r-card);
@@ -2569,40 +2569,13 @@
   window.addEventListener("mousedown", () => {
     window.relay.engage?.();
   }, { capture: true });
-  // A field inside the normally non-activatable (focusable:false) window is not
-  // guaranteed to receive a DOM `focus`: the press reaches the field, but the
-  // page can remain inactive and keystrokes keep going to the app behind Relay.
-  // This was first verified on Windows and later reproduced on macOS. Ask for
-  // the keyboard on the deliberate text-field press itself; main activates the
-  // accessory app where macOS requires it, then every existing blur revoke stays
-  // in charge of handing the keyboard back.
-  const OVERLAY_TEXT_FIELD = "textarea, input, [contenteditable='true']";
-  if (window.relay.platform === "win32" || window.relay.platform === "darwin") {
-    window.addEventListener("mousedown", (e) => {
-      const el = e.target;
-      if (el && el.matches && el.matches(OVERLAY_TEXT_FIELD)) window.relay.setFocusable?.(true);
-    }, { capture: true });
-    // The rest of the pill stays keyboard-neutral until the pointer gesture has
-    // actually produced a selection. At that point Ctrl/Cmd+C belongs to Relay,
-    // not to the application that was focused behind its accessory window.
-    window.addEventListener("mouseup", () => {
-      const selection = window.getSelection?.();
-      if (selection && !selection.isCollapsed && String(selection)) window.relay.setFocusable?.(true);
-    }, { capture: true });
-  }
-  // Text inputs temporarily make the accessory window focusable. A removed or
-  // re-rendered composer may never emit blur, so revoke that privilege whenever
-  // another app takes focus. Relay stays visible without reclaiming the keyboard.
-  window.addEventListener("blur", () => window.relay.setFocusable?.(false));
-
   // ---------- the spring (stiffness 170, damping 22, mass 1) ----------
   const K = 170, C = 22, M = 1;
   const W = { v: EXPANDED.w, vel: 0, t: EXPANDED.w };
   const H = { v: EXPANDED.h, vel: 0, t: EXPANDED.h };
   let raf = null, lastT = 0;
-  // Main derives the clickable card rect from this size (the card's origin is pinned by
-  // the top-right CSS anchor, so only w/h can change). Declared beside the spring so it
-  // exists before any size is written. Deduped: one IPC per distinct integer size.
+  // Main sizes the native window to this card. Deduped: one IPC per distinct
+  // integer size.
   let interactive = false;
   let lastSentCardSize = "";
   function publishCardSize(w, h) {
@@ -2635,9 +2608,8 @@
     for (let i = 0; i < n; i++) { const a = step(W, h), b = step(H, h); moving = moving || a || b; }
     cardEl.style.width = W.v.toFixed(2) + "px";
     cardEl.style.height = H.v.toFixed(2) + "px";
-    // The hit rect only needs to be roughly right DURING the animation (main
-    // re-reads it at the end); sending it every frame was 60 cross-process
-    // messages a second competing with the very frames it describes.
+    // Native resize only needs to track the animation coarsely; sending it every
+    // frame would compete with the renderer's own motion.
     publishCardSizeThrottled(W.v, H.v);
     if (moving) raf = requestAnimationFrame(frame);
     else { raf = null; cardEl.style.willChange = ""; publishCardSize(W.t, H.t); }
@@ -2651,12 +2623,8 @@
   }
   function springTo(w, h) {
     W.t = w; H.t = h;
-    // The native hit region is safety-critical: it decides which portion of
-    // the otherwise transparent 760x880 window consumes mouse events. Publish
-    // the destination synchronously instead of waiting for requestAnimationFrame.
-    // A throttled or busy renderer can delay that frame indefinitely; after a
-    // reader folded to the pill, main would then retain a stale 720x760 region
-    // and block clicks in the app visibly underneath the tiny capsule.
+    // Publish the destination synchronously so growth is available before paint
+    // and a delayed animation frame cannot leave a stale native window size.
     publishCardSize(w, h);
     // The scroller's width is FIXED (containment: the height spring must not
     // reflow the rows every frame) — so it must be re-fixed to each new
@@ -2777,9 +2745,9 @@
     readerMorphRaf = requestAnimationFrame(async () => {
       readerMorphRaf = null;
       if (!readerMorphSnapshot || activeView !== destinationView) { cleanReaderMorph(); return; }
-      // Older main processes used this barrier to grow the native canvas while
-      // the source face was frozen. Current main keeps a fixed maximum canvas,
-      // so the await resolves immediately and remains backward-compatible.
+      // Grow the native window while the source face is frozen so the destination
+      // can animate without being clipped. Older main processes resolve this
+      // barrier immediately, so the call remains backward-compatible.
       if (window.relay.prepareCardSize) {
         const destinationSize = destinationView === "reader" || (destinationView === "threads" && chatExpanded)
           ? READER
@@ -2888,8 +2856,7 @@
     springTo(PILL.w, PILL.h);
     renderAll();
   }
-  // Any real input on the card is interaction evidence. The window is
-  // click-through outside the card, so these only fire on the card itself.
+  // Any real input on the card is interaction evidence.
   for (const evt of ["pointerdown", "pointermove", "wheel", "keydown"]) {
     document.addEventListener(evt, () => {
       if (!activeNotificationIds.length) return;
@@ -3157,17 +3124,10 @@
     requestToggle();
   });
 
-  // ---------- click-through ----------
-  // Main owns this now. It polls the real cursor against the card rect, so clickability
-  // no longer depends on this renderer being responsive — the whole reason taps used to
-  // fall through to the app underneath while a big re-render blocked the event loop.
-  // Here we only publish the card's size (its origin is fixed by the top-right anchor)
-  // and mirror main's hover edge for the dwell/interaction bookkeeping below.
-  // `interactive` is now only a MIRROR of main's hover edge, used by the dwell/fold
-  // bookkeeping below ("don't fold this notification while the user is on the card").
-  // It no longer gates clickability, so it can never make the card unclickable.
+  // ---------- ordinary window hover ----------
   function setInteractive(v) { interactive = Boolean(v); }
-  if (window.relay.onHover) window.relay.onHover((v) => { interactive = v; });
+  cardEl.addEventListener("mouseenter", () => setInteractive(true));
+  cardEl.addEventListener("mouseleave", () => setInteractive(false));
 
   // ---------- shared helpers ----------
   function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c])); }
@@ -3916,12 +3876,6 @@
   function dressComposer(field, onSend) {
     if (!field || field.dataset.dressed) return;
     field.dataset.dressed = "1";
-    // The overlay may accept keyboard focus only while the user is actually
-    // typing in one of its composers. Making the whole reader focusable from
-    // renderReader() caused every background refresh to pull focus back from
-    // whatever app the user had switched to.
-    field.addEventListener("focus", () => window.relay.setFocusable?.(true));
-    field.addEventListener("blur", () => window.relay.setFocusable?.(false));
     // ---- attachments: the + button, paste, and the staged chips ----
     const qr = field.closest(".qr");
     if (COMPOSER_ATTACHMENTS_ENABLED && qr && !qr.querySelector(".cmp-plus")) {
@@ -6852,11 +6806,7 @@
     }
     wireAttachmentChips(relaysListEl);
     for (const ta of relaysListEl.querySelectorAll(".qr-input")) {
-      // Keep the window focusable the whole time the reply field is focused so no keystroke is
-      // ever dropped; only release focusability on blur.
-      ta.addEventListener("focus", () => window.relay.setFocusable(true));
       ta.addEventListener("blur", () => {
-        if (activeView !== "contacts") window.relay.setFocusable(false);
         // The blur may have cleared the only active quick reply — apply any inbox refresh that
         // was deferred while the user was typing. Defer one tick so a focus moving to the Send
         // button (which we never want to interrupt) settles first.
@@ -7818,7 +7768,6 @@
     groupInfoGroup = null;
     groupLeaveArmedId = null;
     groupInfoDetailEl.innerHTML = "";
-    if (window.relay.setFocusable) window.relay.setFocusable(false);
   }
   function groupInfoRoster(g, account = (payload && payload.account) || {}) {
     // The API deliberately keeps the creator separate from the owner's contact
@@ -7980,7 +7929,6 @@
     const addInput = container.querySelector("[data-gd-add]");
     const suggestions = container.querySelector("[data-gd-suggestions]");
     if (addInput && suggestions) {
-      addInput.addEventListener("focus", () => { if (window.relay.setFocusable) window.relay.setFocusable(true); });
       addInput.addEventListener("input", () => {
         clearTimeout(cvgSearchTimer);
         const q = addInput.value.trim();
@@ -8198,8 +8146,6 @@
     for (const input of cvgListEl.querySelectorAll("[data-addmember]")) {
       const gid = input.getAttribute("data-addmember");
       const suggEl = cvgListEl.querySelector(`[data-sugg="${CSS.escape(gid)}"]`);
-      input.addEventListener("focus", () => { if (window.relay.setFocusable) window.relay.setFocusable(true); });
-      input.addEventListener("blur", () => { if (activeView !== "contacts" && window.relay.setFocusable) window.relay.setFocusable(false); });
       input.addEventListener("input", () => {
         clearTimeout(cvgSearchTimer);
         const q = input.value.trim();
@@ -8226,7 +8172,6 @@
   cvgNewEl.addEventListener("click", () => {
     cvgNewFormEl.classList.toggle("hidden");
     if (!cvgNewFormEl.classList.contains("hidden")) {
-      if (window.relay.setFocusable) window.relay.setFocusable(true);
       cvgNewNameEl.focus();
     }
   });
@@ -8333,7 +8278,7 @@
   cvEmailsEl.addEventListener("mousedown", (e) => {
     if (e.target === cvEmailsEl) { e.preventDefault(); cvEmailEl.focus(); }
   });
-  cvEmailEl.addEventListener("focus", () => { cvEmailsEl.classList.add("focus"); if (window.relay.setFocusable) window.relay.setFocusable(true); });
+  cvEmailEl.addEventListener("focus", () => { cvEmailsEl.classList.add("focus"); });
   cvEmailEl.addEventListener("blur", () => {
     cvEmailsEl.classList.remove("focus");
     if (cvEmailEl.value.trim()) addEmail(cvEmailEl.value);
@@ -8369,7 +8314,6 @@
     renderEmailChips();
     syncDeleteButton();
     cvFormEl.classList.remove("hidden");
-    if (window.relay.setFocusable) window.relay.setFocusable(true);
     setInteractive(true);
     setTimeout(() => cvFirstEl.focus(), 30);
   }
@@ -8383,7 +8327,6 @@
     cvSuggestEl.classList.add("hidden"); cvSuggestEl.innerHTML = "";
     cvDeleteEl.classList.add("gone");
     resetDeleteButton();
-    if (window.relay.setFocusable) window.relay.setFocusable(false);
   }
   // Normalizes a contact write into { ok, error, contacts }. The main process now
   // answers with that envelope; the catch is a backstop for a genuinely broken IPC,
@@ -9675,6 +9618,12 @@
       let mentionMatches = [];
       let mentionIndex = 0;
       let mentionStart = -1;
+      const ownedAgentParticipantNames = new Set(
+        (thread.msgs || [])
+          .filter((message) => message.ownedAgent)
+          .map((message) => normalizedPartyName(message.party))
+          .filter(Boolean),
+      );
       const participantNames = new Set(
         (thread.msgs || [])
           .filter((message) => message.direction === "in" && !message.ownedAgent)
@@ -9687,7 +9636,12 @@
         for (const member of group ? groupInfoRoster(group) : []) {
           if (!member.currentUser && member.name) participantNames.add(String(member.name).trim());
         }
-      } else if (thread.party) participantNames.add(String(thread.party).trim());
+      } else if (thread.party && !ownedAgentParticipantNames.has(normalizedPartyName(thread.party))) {
+        // buildThreads names a wire thread after its newest inbound sender.
+        // An owned-agent response is inbound too, but it is an execution face,
+        // not a second participant beside @my_codex / @my_claude.
+        participantNames.add(String(thread.party).trim());
+      }
       const mentionOptions = [
         ...(payload.features?.requests === true ? [
           { token:"my_claude", name:"@my_claude", note:"Run Claude on my laptop", agent:true },
@@ -10755,14 +10709,6 @@
       };
       for (const codeCell of codeCells) {
         const index = Number(codeCell.getAttribute("data-sv-code-index"));
-        // Same focusability contract as the contact form / quick reply: the window
-        // may take keyboard focus only while a text field needs it.
-        codeCell.addEventListener("focus", () => { if (window.relay.setFocusable) window.relay.setFocusable(true); });
-        codeCell.addEventListener("blur", () => setTimeout(() => {
-          if (activeView !== "contacts" && !document.activeElement?.matches?.("[data-sv-code-index]") && window.relay.setFocusable) {
-            window.relay.setFocusable(false);
-          }
-        }, 0));
         codeCell.addEventListener("mousedown", () => setInteractive(true));
         codeCell.addEventListener("paste", (event) => {
           event.preventDefault();
@@ -10789,7 +10735,6 @@
       }
       if (svFocusCodeOnce) {
         svFocusCodeOnce = false;
-        if (window.relay.setFocusable) window.relay.setFocusable(true);
         const firstEmpty = codeCells.find((cell) => !cell.value) || codeCells[codeCells.length - 1];
         setTimeout(() => firstEmpty.focus(), 30);
       }
@@ -11375,15 +11320,6 @@
       tab.classList.toggle("active", view === tabView);
     }
   }
-  // True while the user has the keyboard in one of the pill's own text fields.
-  // Windows-only by design: on macOS revoking focusability never takes the
-  // keyboard away, so the existing every-pass revoke stays byte-for-byte there.
-  function typingInOverlayField() {
-    if (window.relay.platform !== "win32") return false;
-    if (!document.hasFocus()) return false; // another app already owns the keyboard
-    const el = document.activeElement;
-    return Boolean(el && el.matches && el.matches(OVERLAY_TEXT_FIELD));
-  }
   function applyView() {
     // Visibility is committed only after renderAll has built the destination.
     // Toggle layout first; retarget the native/card frame last so its first
@@ -11428,13 +11364,6 @@
       loadGroups(); // counts on the segment must be right before it is tapped
     } else if (activeView !== "contacts") {
       cvFormEl.classList.add("hidden");
-      // This branch re-runs on every render pass, i.e. every payload push. On
-      // Windows setFocusable(false) deactivates the window (macOS leaves an
-      // already-focused one alone), so a background refresh here handed the
-      // keyboard back to the app under the pill mid-sentence. Keep the grant
-      // while one of our own fields is being typed in; its blur handler still
-      // revokes it the moment the user leaves the field or the window.
-      if (window.relay.setFocusable && !typingInOverlayField()) window.relay.setFocusable(false);
     }
     if (activeView === "sent" && viewChanged && window.relay.refreshSent) {
       window.relay.refreshSent().catch(() => {});
@@ -11627,8 +11556,8 @@
     else notifyArrival(row, opts);
   });
   if (window.relay.onOpenFull) window.relay.onOpenFull(() => trayOpen());
-  // The OS window was just re-shown and main re-asserted click-through; reset the
-  // local flag so the next mousemove re-runs the interactivity handshake cleanly.
+  // The OS window was just re-shown; reset notification dwell state until the
+  // pointer enters the card again.
   if (window.relay.onShown) window.relay.onShown(() => { interactive = false; });
   if (window.relay.onOpenDone) window.relay.onOpenDone((id) => { stopOpening(id); retireOpeningNote(id); });
   // Visible confirmation for "Open in current chat". Two honest states:

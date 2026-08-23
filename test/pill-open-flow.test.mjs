@@ -588,13 +588,7 @@ test("dark mode uses its subtle edge token instead of a hard-coded white cap", (
   assert.doesNotMatch(html, /inset 0 1px 0 rgba\(255,255,255,\.9\)/);
 });
 
-// The pill is a click-through window with one interactive rectangle carved out
-// of it, clamped to CARD_MAX and anchored from the RIGHT. Under-sizing it does
-// not clip anything visually — it silently kills input over the uncovered
-// strip. Widening the notification to 400 without moving CARD_MAX left the
-// leftmost 56px of the card dead, which is exactly where the Relays tab sits,
-// so clicking Relays did nothing while Contacts (further right) still worked.
-test("the hit region covers the widest card state, not just the expanded one", () => {
+test("the native size clamp covers every card state", () => {
   const sizeOf = (name) => {
     const m = html.match(new RegExp(`const ${name} = \\{ w: (\\d+), h: (\\d+) \\}`));
     assert.ok(m, `${name} is declared in inbox.html`);
@@ -615,53 +609,29 @@ test("the hit region covers the widest card state, not just the expanded one", (
   );
 });
 
-test("folding publishes the pill hit region before an animation frame can stall", () => {
+test("folding publishes the native window destination before an animation frame can stall", () => {
   const spring = html.slice(html.indexOf("function springTo("), html.indexOf("// ---------- collapse / expand / peek"));
   assert.match(spring, /W\.t = w; H\.t = h;\s*[\s\S]*?publishCardSize\(w, h\);/);
   assert.ok(
     spring.indexOf("publishCardSize(w, h);") < spring.indexOf("requestAnimationFrame(frame)"),
-    "the safe destination hit region is sent before the animated frame is scheduled",
+    "the native destination is sent before the animated frame is scheduled",
   );
 });
 
-test("a hidden-to-shown pill cannot leave native click-through state out of step", () => {
-  // Reproduction: hide and re-show while the pointer remains over the card.
-  // If show writes setIgnoreMouseEvents(true) directly while hitIgnoring is
-  // still false, the next applyIgnore(false) is suppressed and every click
-  // keeps falling through until the pointer leaves and re-enters.
-  const show = sliceFunction(main, "function showOverlayWindow(");
-  assert.match(show, /applyIgnore\(true, \{ force: true \}\)/);
-  assert.doesNotMatch(show, /win\.setIgnoreMouseEvents/);
-
-  const apply = sliceFunction(main, "function applyIgnore(");
-  assert.match(apply, /\{ force = false \} = \{\}/);
-  assert.match(apply, /if \(!force && next === hitIgnoring\) return;/);
-  assert.ok(
-    apply.indexOf("hitIgnoring = next;") < apply.indexOf("win.setIgnoreMouseEvents(next"),
-    "the mirror must update before the native click-through write",
-  );
-  assert.equal(
-    [...main.matchAll(/\.setIgnoreMouseEvents\(/g)].length,
-    1,
-    "applyIgnore must remain the only writer of Electron's native click-through flag",
-  );
-
+test("the pill uses ordinary native input routing", () => {
   const create = sliceFunction(main, "function createWindow(");
-  assert.match(create, /applyIgnore\(true, \{ force: true \}\);\s*startHitTest\(\);/);
-  assert.doesNotMatch(create, /win\.setIgnoreMouseEvents/);
+  assert.match(create, /focusable: true/);
+  assert.match(create, /skipTaskbar: true/);
+  assert.match(create, /hasShadow: true/);
+  assert.doesNotMatch(main, /setIgnoreMouseEvents|applyIgnore|hitTick|startHitTest/);
+  assert.doesNotMatch(main + preload + html, /relay:setFocusable|setFocusable/);
+  assert.match(html, /\.card \{\s*position:absolute; inset:0;/);
+  assert.doesNotMatch(html, /body \{[^}]*user-select:none/);
 });
 
-test("reader refreshes cannot steal focus from or block the app underneath", () => {
-  const renderReader = html.slice(html.indexOf("function renderReader("), html.indexOf("// ---------- the requests board"));
-  assert.doesNotMatch(renderReader, /setFocusable\(true\)/);
-  const dressComposer = html.slice(html.indexOf("function dressComposer("), html.indexOf("function requestState("));
-  assert.match(dressComposer, /addEventListener\("focus", \(\) => window\.relay\.setFocusable\?\.\(true\)\)/);
-  assert.match(dressComposer, /addEventListener\("blur", \(\) => window\.relay\.setFocusable\?\.\(false\)\)/);
-  assert.match(html, /window\.addEventListener\("blur", \(\) => window\.relay\.setFocusable\?\.\(false\)\)/);
-  const focusHandler = main.slice(main.indexOf('ipcMain.on("relay:setFocusable"'), main.indexOf("// The renderer no longer drives interactivity"));
-  assert.match(focusHandler, /event\.sender !== win\.webContents/);
-  assert.match(main, /fittedOverlayBounds\(wa, CARD_MAX,/, "the native canvas is allocated once at its maximum size");
-  assert.doesNotMatch(main, /function fitOverlayWindowToCard/, "card morphs never resize the native window");
+test("reader refreshes cannot change native focusability", () => {
+  assert.doesNotMatch(html + preload + main, /setFocusable|relay:setFocusable/);
+  assert.match(main, /function fitOverlayWindowToCard/);
   assert.match(main, /subscribeActiveApplicationChanges/);
   assert.match(main, /observeFrontmostBundle/);
   assert.match(main, /setAlwaysOnTop\(elevated, "floating"\)/);
@@ -672,66 +642,9 @@ test("reader refreshes cannot steal focus from or block the app underneath", () 
   assert.match(html, /window\.relay\.engage\?\.\(\)/, "a deliberate click raises Relay again after it yielded");
 });
 
-test("a background render pass cannot take the keyboard from a composer on Windows", () => {
-  // applyView re-runs on every payload push. Its non-contacts branch revokes
-  // window focusability; on Windows that deactivates the window, so a 2.5s
-  // state poll used to hand the keyboard back to the app under the pill while
-  // the user was typing a reply. macOS ignores the revoke, so it stays as-is.
+test("background render passes leave the keyboard with the normally focused window", () => {
   const applyView = sliceFunction(html, "function applyView(");
-  assert.match(
-    applyView,
-    /else if \(activeView !== "contacts"\) \{[\s\S]*?if \(window\.relay\.setFocusable && !typingInOverlayField\(\)\) window\.relay\.setFocusable\(false\);/,
-    "the per-pass revoke must skip a field that is being typed in",
-  );
-  const guard = sliceFunction(html, "function typingInOverlayField(");
-  assert.match(guard, /window\.relay\.platform !== "win32"\) return false/, "the guard is Windows-only");
-  assert.match(guard, /document\.hasFocus\(\)/, "once another app has the keyboard the revoke goes through");
-  assert.match(guard, /OVERLAY_TEXT_FIELD/);
-  assert.match(html, /const OVERLAY_TEXT_FIELD = "textarea, input, \[contenteditable='true'\]";/);
-  assert.match(preload, /platform: process\.platform,/, "the renderer learns the platform from preload");
-  // The render pass itself never grants: it only defers a revoke.
-  assert.doesNotMatch(applyView, /setFocusable\((true|\!)/);
-});
-
-test("on Windows and macOS a press on a text field asks for the keyboard", () => {
-  // A focusable:false accessory window can receive the press without making
-  // the field first responder. Requesting the keyboard on the press avoids a
-  // circular dependency on the DOM `focus` event that activation would create.
-  const start = html.indexOf('if (window.relay.platform === "win32" || window.relay.platform === "darwin") {');
-  assert.notEqual(start, -1, "the press-to-focus grant covers both desktop platforms");
-  const block = html.slice(start, html.indexOf("}, { capture: true });", start));
-  assert.match(block, /addEventListener\("mousedown"/);
-  assert.match(block, /el\.matches\(OVERLAY_TEXT_FIELD\)\) window\.relay\.setFocusable\?\.\(true\)/);
-  // A press anywhere else on the card must NOT grant: buttons, rows and tabs
-  // stay keyboard-neutral so the pill never steals focus from a mere click.
-  assert.doesNotMatch(block, /engage|initAudio/);
-  // The revokes that hand the keyboard back are untouched.
-  assert.match(html, /window\.addEventListener\("blur", \(\) => window\.relay\.setFocusable\?\.\(false\)\)/);
-
-  const focusHandler = main.slice(main.indexOf('ipcMain.on("relay:setFocusable"'), main.indexOf('ipcMain.on("relay:engage"'));
-  assert.match(focusHandler, /process\.platform === "darwin" && !app\.isActive\(\)/);
-  assert.match(focusHandler, /app\.focus\(\{ steal: true \}\)/, "macOS activates Relay under the user's text-field press");
-  assert.match(focusHandler, /process\.platform === "win32"\) win\.setSkipTaskbar\(true\)/,
-    "Windows focus transitions must not expose Electron in the taskbar");
-  assert.ok(
-    focusHandler.indexOf('app.focus({ steal: true })') < focusHandler.indexOf("win.focus()"),
-    "the macOS app activates before its text field is focused",
-  );
-});
-
-test("selecting pill text grants the keyboard so Ctrl or Command+C copies it", () => {
-  const start = html.indexOf('if (window.relay.platform === "win32" || window.relay.platform === "darwin") {');
-  assert.notEqual(start, -1);
-  const block = html.slice(start, html.indexOf("// Text inputs temporarily make", start));
-  assert.match(block, /addEventListener\("mouseup"/);
-  assert.match(block, /window\.getSelection\?\.\(\)/);
-  assert.match(block, /!selection\.isCollapsed/);
-  assert.match(block, /String\(selection\)/);
-  assert.match(block, /window\.relay\.setFocusable\?\.\(true\)/);
-  assert.ok(
-    block.indexOf('addEventListener("mouseup"') < block.lastIndexOf("setFocusable?.(true)"),
-    "focus is granted after the selection gesture, not for an ordinary press",
-  );
+  assert.doesNotMatch(applyView, /setFocusable|typingInOverlayField/);
 });
 
 // The card is the app; only the notification needed the extra width. Widening
@@ -743,26 +656,33 @@ test("the expanded card stays at its designed width; only the banner is wider", 
   assert.match(html, /width:344px; height:524px;/);
 });
 
-test("the native hit region starts at the visible expanded size and synchronizes before readiness", () => {
+test("the native window starts at the visible expanded size and synchronizes before readiness", () => {
   const expanded = html.match(/const EXPANDED = \{ w: (\d+), h: (\d+) \};/);
   const initial = main.match(/const CARD_INITIAL = \{ w: (\d+), h: (\d+) \}/);
   assert.ok(expanded, "the renderer declares its expanded dimensions");
   assert.ok(initial, "main declares the initial visible card dimensions");
-  assert.deepEqual(initial.slice(1), expanded.slice(1), "main cannot boot with a larger invisible hit rect");
+  assert.deepEqual(initial.slice(1), expanded.slice(1), "main cannot boot with a larger invisible window");
   assert.match(main, /let cardSize = \{ w: CARD_INITIAL\.w, h: CARD_INITIAL\.h \}/);
 
   const publish = html.lastIndexOf("publishCardSize(W.t, H.t);");
   const ready = html.lastIndexOf("if (window.relay.rendererReady) window.relay.rendererReady();");
   assert.notEqual(publish, -1, "the renderer publishes its initial live size");
-  assert.ok(publish < ready, "the initial native hit rect is synchronized before main releases queued work");
+  assert.ok(publish < ready, "the initial native size is synchronized before main releases queued work");
 });
 
-test("card-size IPC updates hit testing without resizing the native compositor surface", () => {
+test("card-size IPC keeps the ordinary native window fitted to the card", () => {
   const sizeHandler = main.slice(main.indexOf('ipcMain.on("relay:cardSize"'), main.indexOf('ipcMain.on("relay:setPos"'));
   assert.match(sizeHandler, /cardSize = \{ w, h \}/);
-  assert.doesNotMatch(sizeHandler, /setBounds|fitOverlayWindowToCard/);
+  assert.match(sizeHandler, /fitOverlayWindowToCard\(\)/);
   const anchor = main.slice(main.indexOf("function anchorTopRight"), main.indexOf("function showOverlayWindow"));
-  assert.match(anchor, /fittedOverlayBounds\(wa, CARD_MAX,/);
+  assert.match(anchor, /function anchorTopRight\(size = cardSize\)/);
+  assert.match(anchor, /fittedOverlayBounds\(wa, size,/);
+  const fit = sliceFunction(main, "function fitOverlayWindowToCard(");
+  assert.match(fit, /resizedOverlayBounds\(current, cardSize,/,
+    "resizing keeps a dragged pill at its current top-right position");
+  assert.match(fit, /win\.setBounds\(target, false\)/);
+  assert.match(fit, /setTimeout\(\(\) => \{[\s\S]*fitOverlayWindowToCard\(\{ settle: true \}\)/,
+    "shrink waits for the card animation to finish");
   const show = main.slice(main.indexOf("function showOverlayWindow"), main.indexOf("function maybeShow"));
   assert.match(show, /target\.x !== current\.x \|\| target\.y !== current\.y/,
     "forced shows skip an identical AppKit bounds transaction");

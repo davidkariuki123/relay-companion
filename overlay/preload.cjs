@@ -21,7 +21,7 @@ contextBridge.exposeInMainWorld("relay", {
   // say why inline instead of letting the spinner just stop.
   onOpenError: (cb) => ipcRenderer.on("openError", (_e, id, message) => cb(id, message || "")),
   onOpenFull: (cb) => ipcRenderer.on("openFull", () => cb()), // status-area icon clicked
-  onShown: (cb) => ipcRenderer.on("shown", () => cb()), // window re-shown; reset hover handshake
+  onShown: (cb) => ipcRenderer.on("shown", () => cb()),
 
   // pull the full payload on demand
   refresh: () => ipcRenderer.invoke("relay:get"),
@@ -168,19 +168,11 @@ contextBridge.exposeInMainWorld("relay", {
 
 
   // window plumbing
-  // setFocusable(false) is a no-op against an already-focused window on macOS but
-  // deactivates it on Windows, so the renderer needs to know which one it is on.
-  platform: process.platform,
-  setFocusable: (v) => ipcRenderer.send("relay:setFocusable", v),
   engage: () => ipcRenderer.send("relay:engage"),
-  // Main owns click-through now (it polls the real cursor). The renderer only reports
-  // the card's size so main can derive the hit rect, and listens for the hover edge.
+  // The native window tracks the visible card's dimensions.
   cardSize: (w, h) => ipcRenderer.send("relay:cardSize", w, h),
-  // Grow the transparent native canvas before a reader's visible morph begins.
-  // Awaiting this keeps macOS's synchronous window resize out of the content
-  // animation while the exact source snapshot is still on screen.
+  // Grow before revealing a larger reader so content is never clipped.
   prepareCardSize: (w, h) => ipcRenderer.invoke("relay:prepareCardSize", w, h),
-  onHover: (cb) => ipcRenderer.on("hover", (_e, v) => cb(Boolean(v))),
   setTheme: (t) => ipcRenderer.send("relay:theme", t), // preview window wears the same sheet
   setPos: (x, y) => ipcRenderer.send("relay:setPos", x, y),
   soundBytes: (name) => ipcRenderer.invoke("relay:soundBytes", name),

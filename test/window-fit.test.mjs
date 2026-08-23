@@ -2,47 +2,47 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import windowFit from "../overlay/window-fit.cjs";
 
-const { fittedOverlayBounds, shouldIgnoreOverlayMouse } = windowFit;
+const { fittedOverlayBounds, resizedOverlayBounds } = windowFit;
 const workArea = { x: 100, y: 40, width: 1400, height: 900 };
 const options = {
   margin: 8,
-  anchor: { top: 24, right: 36 },
-  frame: { left: 4, bottom: 56 },
   maximum: { w: 720, h: 800 },
 };
 
 test("the native pill window fits the visible collapsed card", () => {
   assert.deepEqual(fittedOverlayBounds(workArea, { w: 244, h: 44 }, options), {
-    x: 1208,
+    x: 1248,
     y: 48,
-    width: 284,
-    height: 124,
+    width: 244,
+    height: 44,
   });
 });
 
 test("every card size keeps the visible card on the same top-right anchor", () => {
   const collapsed = fittedOverlayBounds(workArea, { w: 244, h: 44 }, options);
   const reader = fittedOverlayBounds(workArea, { w: 720, h: 760 }, options);
-  const cardRight = (bounds) => bounds.x + bounds.width - options.anchor.right;
-  const cardTop = (bounds) => bounds.y + options.anchor.top;
+  const cardRight = (bounds) => bounds.x + bounds.width;
+  const cardTop = (bounds) => bounds.y;
   assert.equal(cardRight(collapsed), cardRight(reader));
   assert.equal(cardTop(collapsed), cardTop(reader));
-  assert.deepEqual(reader, { x: 732, y: 48, width: 760, height: 840 });
+  assert.deepEqual(reader, { x: 772, y: 48, width: 720, height: 760 });
 });
 
 test("malformed renderer sizes cannot claim an oversized invisible window", () => {
   assert.deepEqual(fittedOverlayBounds(workArea, { w: 99999, h: 99999 }, options), {
-    x: 732,
+    x: 772,
     y: 48,
-    width: 760,
-    height: 880,
+    width: 720,
+    height: 800,
   });
 });
 
-test("only the visible card receives mouse input", () => {
-  const card = { x: 100, y: 80, w: 720, h: 760 };
-  assert.equal(shouldIgnoreOverlayMouse({ x: 500, y: 500 }, card), false);
-  assert.equal(shouldIgnoreOverlayMouse({ x: 500, y: 850 }, card), true, "the transparent strip below the card is click-through");
-  assert.equal(shouldIgnoreOverlayMouse({ x: 90, y: 500 }, card), true);
-  assert.equal(shouldIgnoreOverlayMouse({ x: 95, y: 500 }, card, 6), false, "the spring overshoot tolerance remains interactive");
+test("resizing preserves a user-positioned window's top-right corner", () => {
+  const current = { x: 500, y: 120, width: 344, height: 524 };
+  assert.deepEqual(resizedOverlayBounds(current, { w: 720, h: 760 }, options), {
+    x: 124,
+    y: 120,
+    width: 720,
+    height: 760,
+  });
 });

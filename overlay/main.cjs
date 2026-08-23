@@ -1,10 +1,9 @@
 // Relay companion pill — a small floating, always-on-top Relay window that lists
 // incoming Relay attention items + sent relays, and lazy-opens them in Claude Code / Codex.
 //
-// Motion principle: the native transparent window keeps one maximum compositor surface
-// for its lifetime while the visible card animates inside it. Main-process cursor hit
-// testing makes the unused pixels click-through. A compact -> reader transition therefore
-// never asks AppKit to resize/raster a new transparent surface on the interaction edge.
+// Motion principle: the native transparent window follows the visible card, using the
+// renderer's pre-morph size barrier to grow before a transition and a short settle to
+// shrink afterwards. The whole native window is an ordinary focusable input surface.
 //
 // Visibility: the card carries a ✕ that hides the overlay entirely (persisted). The Relay
 // mark in the OS status area (macOS menu bar, Windows system tray) brings it back fully
@@ -100,7 +99,7 @@ const {
 const { elevationForFrontmost } = require("./elevation-policy.cjs");
 const { openingFaceFor } = require("./message-face.cjs");
 const perf = require("./perf-counters.cjs");
-const { fittedOverlayBounds, shouldIgnoreOverlayMouse } = require("./window-fit.cjs");
+const { fittedOverlayBounds, resizedOverlayBounds } = require("./window-fit.cjs");
 const { productFeatures } = require("../src/product-features.cjs");
 const { createOutbox } = require("../src/outbox.cjs");
 const {
@@ -1951,6 +1950,11 @@ async function pushInboxNow(force) {
       r.title,
       r.senderName,
       r.urgency,
+      // Owned-agent progress edits the existing Relay in place. Its id, title,
+      // read state and sender do not move, so updatedAt is the only cheap
+      // generation marker that lets "I'm on it" become live progress (and,
+      // eventually, the answer) in an already-open pill.
+      r.updatedAt,
       // Thread identity: a re-parented or newly threaded relay must repaint so
       // per-thread grouping and unread counts stay correct.
       r.threadId,
@@ -3775,19 +3779,14 @@ async function openRelayAttachment(relayId, attachmentId) {
 
 // ---- window placement / visibility ---------------------------------------
 
-function anchorTopRight() {
+function anchorTopRight(size = cardSize) {
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()) || screen.getPrimaryDisplay();
   const wa = display.workArea;
-  // Keep one compositor surface for the lifetime of the visible pill. Resizing
-  // a transparent BrowserWindow is synchronous on macOS and stalls Chromium's
-  // compositor for hundreds of milliseconds on the first compact -> reader
-  // transition. The card still morphs inside this fixed canvas and cardSize
-  // continues to define the exact main-process hit rect.
-  const anchor = fittedOverlayBounds(wa, CARD_MAX, { margin: MARGIN, anchor: CARD_ANCHOR, frame: CARD_FRAME, maximum: CARD_MAX });
+  const anchor = fittedOverlayBounds(wa, size, { margin: MARGIN, maximum: CARD_MAX });
   if (process.env.RELAY_OVERLAY_TEST === "1" || process.env.RELAY_OVERLAY_PERF === "1") {
     // A harness run must not take over the developer's screen. Park sandbox
     // windows just off the bottom-right of the work area: still a REAL composited
-    // window on the same display — so paint timing, dwell timers and hit tests
+    // window on the same display — so paint timing and dwell timers
     // measure exactly what production does — but out of sight while the suite
     // runs, and never under the user's parked cursor (a pointer resting on the
     // card holds notifications open BY DESIGN, which wedged dwell scenarios).
@@ -3807,11 +3806,8 @@ function anchorTopRight() {
   return anchor;
 }
 
-// Show the overlay window. A hide()/show() cycle can leave Electron's native
-// click-through flag out of step with the main-process hit-test mirror. Re-assert
-// the native state on every hidden->shown transition through applyIgnore(), so
-// the next cursor sample can always reverse it even when the pointer never left
-// the visible card.
+// Show the overlay window. It is an ordinary focusable window: Electron owns
+// input routing and the renderer owns only its contents.
 function showOverlayWindow({ force = false, reposition = true } = {}) {
   if (!win || win.isDestroyed()) return;
   const visible = win.isVisible();
@@ -3837,11 +3833,6 @@ function showOverlayWindow({ force = false, reposition = true } = {}) {
   perf.inc("spaceAsserts");
   const shown = showInactiveOnAllSpaces(win, { force, alwaysOnTop: overlayElevated });
   if (shown) {
-    // hidden -> shown only: force both the native flag and our mirror back to
-    // click-through. A direct native write here used to leave hitIgnoring=false;
-    // when the cursor remained over the card, applyIgnore(false) then no-op'd and
-    // the visible pill stayed untouchable until the cursor left and re-entered.
-    applyIgnore(true, { force: true });
     // Visible again: unthrottle immediately, so the FIRST click after this is as
     // fast as the tenth (the "slow, then fast, then slow again" report).
     applyThrottlingPolicy();
@@ -3962,142 +3953,42 @@ function pollHosts({ probeFrontmost = true } = {}) {
   }
 }
 
-// ---- pointer hit test (main-process authority) -----------------------------
-// Clickability used to be gated on renderer mousemove -> IPC -> main. AppKit picks
-// the receiving window at the instant the button goes down, from ignoresMouseEvents
-// AS IT STANDS THEN, so a flag computed in REACTION to a mouse event is always one
-// round trip too late: a mousedown landing in that gap is routed to the app BELOW
-// and lost outright — not queued, not replayed. When the renderer was busy (large
-// inbox re-render) that gap grew to seconds, which is the "clicking Minimize does
-// nothing" report. Main now decides from the real cursor and never from renderer
-// state, so no click ever waits on a state transition.
-//
-// The default is INTERACTIVE, not click-through. ignoresMouseEvents only affects
-// events inside THIS window's own frame, so while the cursor is outside the window
-// the flag is unobservable and holding it interactive blocks nothing anywhere. We
-// flip to click-through only once we have positively SEEN the cursor inside the
-// window and off the card. A pointer that arrives on the card with no intervening
-// motion (synthetic click, tablet, cursor warp, Space switch under a parked cursor)
-// therefore finds a window that is already clickable.
-const CARD_ANCHOR = { top: 24, right: 36 }; // .card top/right in inbox.html
-// Preserve shadow room around the fixed maximum compositor canvas:
-// 760 - 720 - 36 = 4px left, 880 - 800 - 24 = 56px below. Main-process
-// hit-testing keeps every non-card pixel click-through in smaller states.
-const CARD_FRAME = { left: 4, bottom: 56 };
-// The widest and tallest the card can ever be, in ANY state. This clamps the
-// interactive region carved out of a click-through window, so it must cover the
-// LARGEST state, not the expanded one: the notification banner is wider than the
-// card. Under-sizing it does not clip the visuals, it silently kills input over
-// the uncovered strip — the region is anchored from the right, so a value 56px
-// short made the leftmost 56px of the card dead, which is exactly where the
-// Relays tab sits. Keep in step with EXPANDED and PEEK in inbox.html.
+// ---- native window size ---------------------------------------------------
+// The BrowserWindow follows the visible card, like a normal small desktop
+// window. There is no larger transparent input surface and no click-through
+// state to synchronize.
 const CARD_INITIAL = { w: 344, h: 524 };    // EXPANDED in inbox.html; renderer publishes its live size before announcing readiness
 const CARD_MAX = { w: 720, h: 800 };        // READER in inbox.html (the pill expanded into the page; PEEK is 400px wide)
-const HIT_IN = 6;    // become interactive within 6px of the card (covers spring overshoot)
-const HIT_OUT = 12;  // release only beyond 12px — Schmitt trigger stops edge flapping
-const POLL_NEAR_MS = 24;
-const POLL_FAR_MS = 64;
-const POLL_HIDDEN_MS = 250;
-const NEAR_PAD = 96;
 let cardSize = { w: CARD_INITIAL.w, h: CARD_INITIAL.h };
-let hitTimer = null;
-let hitIgnoring = true; // mirrors the last setIgnoreMouseEvents call
-let hitHover = false;
-let lastHostProbeAt = 0;
-// Harness seam: a sandboxed e2e run shares the screen with the user's REAL
-// mouse, and a pointer that happens to rest on the card rect legitimately
-// holds notifications open (the macOS-banner rule) — wedging every dwell-based
-// scenario. The harness drives only synthetic input, so in this mode the hit
-// test ignores the physical cursor entirely. Never set outside the harness.
-const HIT_TEST_POINTER_BLIND = process.env.RELAY_OVERLAY_TEST_IGNORE_POINTER === "1";
+let overlayFitTimer = null;
 
-function applyIgnore(next, { force = false } = {}) {
-  next = Boolean(next);
-  if (!force && next === hitIgnoring) return;
-  hitIgnoring = next;
-  if (win && !win.isDestroyed()) win.setIgnoreMouseEvents(next, { forward: true });
-}
-
-function applyHover(next) {
-  if (next === hitHover) return;
-  hitHover = next;
-  if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("hover", next);
-  if (!next) return;
-  lastEngagedAt = Date.now(); // preserved from the old relay:interactive edge
-  // Capture the foreground host on APPROACH, before a click can momentarily activate
-  // this accessory window. (Previously a side effect of the relay:interactive edge.)
-  // Throttled: the frontmost probe spawns processes.
-  const now = Date.now();
-  if (now - lastHostProbeAt < 750) return;
-  lastHostProbeAt = now;
-  frontmostBundleId((bundle) => rememberForegroundHost(hostFromBundle(bundle)));
-}
-
-// The card never MOVES inside the window — only width/height animate — so its origin
-// follows from the top-right anchor and only a size has to cross the IPC. Clamped so a
-// malformed size can never claim a region larger than the expanded card.
-function cardScreenRect(bounds) {
-  const w = Math.min(Math.max(cardSize.w, 0), CARD_MAX.w);
-  const h = Math.min(Math.max(cardSize.h, 0), CARD_MAX.h);
-  return { x: bounds.x + bounds.width - CARD_ANCHOR.right - w, y: bounds.y + CARD_ANCHOR.top, w, h };
-}
-
-function scheduleHit(ms) {
-  if (hitTimer) clearTimeout(hitTimer);
-  hitTimer = setTimeout(hitTick, ms);
-  if (typeof hitTimer.unref === "function") hitTimer.unref();
-}
-
-function hitTick() {
-  hitTimer = null;
+function fitOverlayWindowToCard({ settle = false } = {}) {
   if (!win || win.isDestroyed()) return;
-  if (HIT_TEST_POINTER_BLIND) {
-    // Interactive everywhere, hover never asserted: synthetic-input runs must
-    // not have their dwell/fold behavior steered by the user's parked mouse.
-    applyIgnore(false);
-    applyHover(false);
-    scheduleHit(POLL_HIDDEN_MS);
+  let current;
+  try { current = win.getBounds(); } catch { return; }
+  // Preserve the window's current top-right corner. That keeps ordinary card
+  // morphs in place and, importantly, never snaps a user-dragged pill home.
+  const target = resizedOverlayBounds(current, cardSize, { maximum: CARD_MAX });
+  if (target.x === current.x && target.y === current.y && target.width === current.width && target.height === current.height) {
+    if (overlayFitTimer) clearTimeout(overlayFitTimer);
+    overlayFitTimer = null;
     return;
   }
-  if (!win.isVisible()) {
-    // A hidden window must never hold clicks, and must not cost a cursor read.
-    applyIgnore(true);
-    applyHover(false);
-    scheduleHit(POLL_HIDDEN_MS);
+  const growing = target.width > current.width || target.height > current.height;
+  if (growing || settle) {
+    if (overlayFitTimer) clearTimeout(overlayFitTimer);
+    overlayFitTimer = null;
+    try { win.setBounds(target, false); } catch {}
     return;
   }
-  let bounds;
-  let point;
-  try {
-    perf.inc("cursorReads");
-    bounds = win.getContentBounds(); // frameless: content == frame; follows setPos for free
-    point = screen.getCursorScreenPoint();
-  } catch {
-    scheduleHit(POLL_FAR_MS);
-    return;
-  }
-  const near =
-    point.x >= bounds.x - NEAR_PAD && point.x < bounds.x + bounds.width + NEAR_PAD &&
-    point.y >= bounds.y - NEAR_PAD && point.y < bounds.y + bounds.height + NEAR_PAD;
-  const card = cardScreenRect(bounds);
-  // Hysteresis: entering uses the generous inset, leaving the strict one, so a cursor
-  // parked exactly on the card edge cannot oscillate the flag at poll rate.
-  const pad = hitIgnoring ? HIT_IN : HIT_OUT;
-  const ignoreMouse = shouldIgnoreOverlayMouse(point, card, pad);
-  const onCard = !ignoreMouse;
-  // The native transparent frame is deliberately larger than the visible card
-  // so its shadow is not clipped. Every non-card pixel stays click-through,
-  // including the 56px strip below an expanded reader where another app's Send
-  // button commonly sits. Keeping the frame interactive outside the card made
-  // the first click disappear into an invisible Relay surface.
-  applyIgnore(ignoreMouse);
-  applyHover(onCard);
-  scheduleHit(near ? POLL_NEAR_MS : POLL_FAR_MS);
-}
-
-function startHitTest() {
-  if (hitTimer) return;
-  scheduleHit(POLL_NEAR_MS);
+  // Let the card's closing animation finish before shrinking the native window;
+  // growing happens first so content is never clipped.
+  if (overlayFitTimer) clearTimeout(overlayFitTimer);
+  overlayFitTimer = setTimeout(() => {
+    overlayFitTimer = null;
+    fitOverlayWindowToCard({ settle: true });
+  }, 420);
+  overlayFitTimer.unref?.();
 }
 
 function createWindow() {
@@ -4119,18 +4010,14 @@ function createWindow() {
     resizable: false,
     movable: false,
     show: false,
-    hasShadow: false,
+    hasShadow: true,
     skipTaskbar: true,
     fullscreenable: false,
     maximizable: false,
     minimizable: false,
-    focusable: false, // never steal keyboard focus from Claude/Codex
-    // The overlay is never the active application (focusable:false + hidden dock), and
-    // AppKit discards the mouse-down that would merely activate an inactive window. That
-    // ate the FIRST click on the card every time the user's focus was in Claude/Codex —
-    // "I clicked Minimize and nothing happened" — and made injected clicks never register
-    // at all. Verified on-device: with the main-process hit test correct and this still
-    // false, the card stayed dead; setting it true made Minimize respond on the first click.
+    focusable: true,
+    // The pill follows ordinary window activation. acceptFirstMouse keeps the
+    // initial macOS click actionable while the OS activates Relay.
     acceptFirstMouse: true,
     title: "Relay",
     webPreferences: {
@@ -4154,10 +4041,6 @@ function createWindow() {
   );
   if (!isHarness || harnessTopmost) win.setAlwaysOnTop(true, process.platform === "win32" ? "screen-saver" : "floating");
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  // Empty canvas is click-through; startHitTest() below owns this from here on.
-  // Force the initial native write while keeping the mirror authoritative.
-  applyIgnore(true, { force: true });
-  startHitTest();
   const inboxPath = path.join(__dirname, "inbox.html");
   const inboxUrl = pathToFileURL(inboxPath).href;
   // Relay bodies are untrusted correspondence. Their links may leave through
@@ -7359,35 +7242,12 @@ ipcMain.handle("relay:setSoundsMuted", (_event, value) => {
   }
 });
 
-// The overlay is normally focusable:false so it never steals keyboard focus from
-// Claude/Codex. Text fields (the contact form, quick reply) need focus, so the renderer
-// asks us to grant it while a field is open and revoke it the moment the form closes.
-ipcMain.on("relay:setFocusable", (event, focusable) => {
-  if (!win || win.isDestroyed()) return;
-  if (event.sender !== win.webContents) return;
-  win.setFocusable(Boolean(focusable));
-  // Windows mutates native window styles when focusability changes. Reassert
-  // the pill's tool-window contract after every transition so temporarily
-  // accepting keyboard input can never create an Electron taskbar button.
-  if (process.platform === "win32") win.setSkipTaskbar(true);
-  if (focusable) {
-    // BrowserWindow.focus() alone need not activate a macOS accessory app while
-    // another application owns the keyboard. This IPC grant is sent only for a
-    // deliberate press on one of Relay's text fields (or that field's own focus),
-    // so taking activation here follows the user's gesture rather than stealing it.
-    if (process.platform === "darwin" && !app.isActive()) app.focus({ steal: true });
-    win.focus();
-  }
-});
 ipcMain.on("relay:engage", (event) => {
   if (!win || win.isDestroyed() || event.sender !== win.webContents) return;
   lastEngagedAt = Date.now();
   setOverlayElevated(true);
 });
-// The renderer no longer drives interactivity — hitTick() does, from the real cursor.
-// It only publishes the card's current SIZE (origin is fixed by the top-right anchor)
-// so main can derive the clickable rect. Stale sizes are safe: the rect is clamped to
-// the expanded card, and a size arriving late only shifts the hit edge by a few px.
+// The renderer publishes the visible card size; the native window follows it.
 // Self-diagnosing stalls. Sandbox benchmarks kept showing a healthy pill while
 // the real one felt frozen for seconds, so the product records its own hitches:
 // the renderer reports any frame gap or click-to-response delay over the
@@ -7435,14 +7295,13 @@ ipcMain.on("relay:stall", (_e, info) => {
 ipcMain.on("relay:cardSize", (_e, w, h) => {
   if (!Number.isFinite(w) || !Number.isFinite(h)) return;
   cardSize = { w, h };
+  fitOverlayWindowToCard();
 });
 ipcMain.handle("relay:prepareCardSize", (event, w, h) => {
   if (!win || win.isDestroyed() || event.sender !== win.webContents) return { ok:false };
   if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return { ok:false };
   cardSize = { w, h };
-  // Compatibility barrier for renderer versions that prepare a morph before
-  // revealing it. The native canvas is already at CARD_MAX, so this updates
-  // only the hit rect and resolves without a synchronous AppKit resize.
+  fitOverlayWindowToCard();
   return { ok:true };
 });
 ipcMain.on("relay:setPos", (_e, x, y) => {
