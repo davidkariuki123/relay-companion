@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   canonicalProviderCompletionCandidate,
+  parseProviderCompletionDocument,
   providerCompletionCandidate,
   providerCompletionIdempotencyKey,
 } from "../src/provider-completion.js";
@@ -26,12 +27,33 @@ test("canonical completion returns provider-neutral terminal truth", () => {
     presentation: { turns: [{
       key: "native-turn", nativeStarted: true, settled: true, status: "completed",
       startedAtMs: 2_001, completedAtMs: 3_000,
-      finalEligible: true, final: { text: "Done natively." },
+      finalEligible: true, final: { text: 'Done natively.\n<!-- relay-output-risk {"level":"none","summary":"Only a short completion note will be sent.","effects":[]} -->' },
     }] },
   });
   assert.deepEqual(candidate, {
-    body: "Done natively.", outcome: "completed", completedAt: new Date(3_000).toISOString(), turnId: "native-turn",
+    body: "Done natively.",
+    assessment: { level: "none", summary: "Only a short completion note will be sent.", effects: [] },
+    outcome: "completed", completedAt: new Date(3_000).toISOString(), turnId: "native-turn",
   });
+});
+
+test("completion release assessment is removed from the recipient's result", () => {
+  assert.deepEqual(parseProviderCompletionDocument([
+    "I prepared the private launch document.",
+    '<!-- relay-output-risk {"level":"review","summary":"The document contains private launch details.","effects":["The recipient will receive those details."]} -->',
+  ].join("\n")), {
+    body: "I prepared the private launch document.",
+    assessment: {
+      level: "review",
+      summary: "The document contains private launch details.",
+      effects: ["The recipient will receive those details."],
+    },
+  });
+});
+
+test("a missing or malformed release assessment requires human review", () => {
+  assert.equal(parseProviderCompletionDocument("It is done.").assessment.level, "review");
+  assert.equal(parseProviderCompletionDocument("Done. <!-- relay-output-risk nope -->").assessment.level, "review");
 });
 
 test("a canonical failed terminal stays Didn't finish instead of forging Done", () => {
@@ -51,7 +73,7 @@ test("a settled provider turn returns its newest current-turn final answer", () 
     provider: "codex",
     liveState: "idle",
     records: [
-      { type: "message", role: "assistant", text: "RUN_MODE_PROOF_OK", at: "2026-08-13T14:00:03Z" },
+      { type: "message", role: "assistant", text: 'RUN_MODE_PROOF_OK\n<!-- relay-output-risk {"level":"none","summary":"This is only a harmless proof marker.","effects":[]} -->', at: "2026-08-13T14:00:03Z" },
       { type: "message", role: "user", text: "run proof", at: "2026-08-13T14:00:00Z" },
       { type: "message", role: "assistant", text: "an older answer", at: "2026-08-13T13:00:03Z" },
     ],

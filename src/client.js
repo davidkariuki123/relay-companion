@@ -1,6 +1,38 @@
 import { accountIdentity, apiUrl, deviceToken } from "./config.js";
 import { compareAccountIdentity } from "./account.js";
 import { createRequire } from "node:module";
+import {
+  e2eeInboxItem,
+  e2eePacket,
+  e2eeSentItem,
+  encryptE2eeMessage,
+  ensureE2eeKeyPackages,
+  identityOrThrow,
+  localE2eeIdentityAvailable,
+  verifiedE2eeStatus,
+} from "./e2ee-mls.js";
+import { e2eeChat, e2eeChatForThread, e2eeChatList, e2eeOpenedRecords } from "./e2ee-sync.js";
+import {
+  E2EE_GROUP_PRODUCT_EVENTS,
+  e2eeGroupChat,
+  e2eeGroupChatForThread,
+  e2eeGroupChats,
+  e2eeGroupOpenedRecords,
+  e2eeGroupPacket,
+  ensureE2eeGroupProductReady,
+  sendE2eeGroupChange,
+  sendE2eeGroupRelay,
+} from "./e2ee-group-product.js";
+import { offerE2eeDeviceHistory, syncE2eeDeviceHistory } from "./e2ee-device-history.js";
+import {
+  readImportedE2eeHistoryRecord,
+  readProcessedGroupEvents,
+  removeCachedPlaintext,
+  removeImportedE2eeHistoryRecord,
+  removeLocalE2eeAttachmentDirectory,
+  removePendingE2eeOutbox,
+  removeProcessedGroupEvent,
+} from "./e2ee-state.js";
 
 // Reported on every device-authenticated call so the server always knows which
 // companion version each device runs — support and rollout questions get
@@ -131,6 +163,11 @@ export class RelayClient {
     return this.#req("GET", "/v1/me");
   }
 
+  /** A short-lived, single-use browser path for installing Relay in a chat app. */
+  createMcpBrowserHandoff(provider = "chatgpt") {
+    return this.#req("POST", "/v1/mcp/browser-handoff", { provider });
+  }
+
   listSessions(filters = {}) {
     const query = new URLSearchParams();
     for (const key of ["provider", "placement", "state", "limit"]) {
@@ -172,8 +209,169 @@ export class RelayClient {
     return this.#req("POST", `/v1/session-operations/${encodeURIComponent(operationId)}/evidence`, payload);
   }
 
-  registerDevice({ pairingCode, name, platform }) {
-    return this.#req("POST", "/v1/devices/register", { pairingCode, name, platform }, { auth: false });
+  registerDevice({ pairingCode, name, platform, e2eeIdentity }) {
+    return this.#req(
+      "POST",
+      "/v1/devices/register",
+      { pairingCode, name, platform, ...(e2eeIdentity ? { e2eeIdentity } : {}) },
+      { auth: false },
+    );
+  }
+
+  e2eeDirectory(relayUserId) {
+    return this.#req("POST", "/v1/e2ee/directory", { relayUserId });
+  }
+
+  e2eeStatus() {
+    return this.#req("GET", "/v1/e2ee/status");
+  }
+
+  e2eeRemoteEndpoint() {
+    return this.#req("GET", "/v1/e2ee/remote-endpoint");
+  }
+
+  provisionE2eeRemoteEndpoint() {
+    return this.#req("POST", "/v1/e2ee/remote-endpoint", {});
+  }
+
+  e2eeRemoteTunnelLease() {
+    return this.#req("POST", "/v1/e2ee/remote-endpoint/lease", {});
+  }
+
+  publishE2eeRemoteDnsChallenge(value) {
+    return this.#req("PUT", "/v1/e2ee/remote-endpoint/dns-challenge", { value });
+  }
+
+  removeE2eeRemoteDnsChallenge(value) {
+    return this.#req("DELETE", "/v1/e2ee/remote-endpoint/dns-challenge", { value });
+  }
+
+  e2eeExportLegacyHistory(payload) {
+    return this.#req("POST", "/v1/e2ee/history-import/export", payload);
+  }
+
+  e2eeTransparencySync(payload) {
+    return this.#req("POST", "/v1/e2ee/transparency/sync", payload);
+  }
+
+  e2eeKeyPackageStatus() {
+    return this.#req("GET", "/v1/e2ee/key-packages/status");
+  }
+
+  e2eeUploadKeyPackages(packages) {
+    return this.#req("POST", "/v1/e2ee/key-packages", { packages });
+  }
+
+  e2eeCrossSignDevice(payload) {
+    return this.#req("POST", "/v1/e2ee/device-cross-signatures", payload);
+  }
+
+  e2eePrepareSend(payload) {
+    return this.#req("POST", "/v1/e2ee/messages/prepare", payload);
+  }
+
+  e2eeSendMessage(payload) {
+    return this.#req("POST", "/v1/e2ee/messages", payload);
+  }
+
+  e2eeInbox() {
+    return this.#req("GET", "/v1/e2ee/messages");
+  }
+
+  e2eeSent() {
+    return this.#req("GET", "/v1/e2ee/messages/sent");
+  }
+
+  e2eeSync() {
+    return this.#req("GET", "/v1/e2ee/messages/sync");
+  }
+
+  e2eeFetchMessages(ids) {
+    return this.#req("POST", "/v1/e2ee/messages/batch", { ids });
+  }
+
+  e2eePrepareDeviceHistory(payload) {
+    return this.#req("POST", "/v1/e2ee/device-history/prepare", payload);
+  }
+
+  e2eeUploadDeviceHistory(payload) {
+    return this.#req("POST", "/v1/e2ee/device-history", payload);
+  }
+
+  e2eeDeviceHistory() {
+    return this.#req("GET", "/v1/e2ee/device-history");
+  }
+
+  e2eeAcknowledgeDeviceHistory(transferId) {
+    return this.#req("POST", `/v1/e2ee/device-history/${encodeURIComponent(transferId)}/ack`, {});
+  }
+
+  offerDeviceHistory(targetDeviceId, options) {
+    return offerE2eeDeviceHistory(this, targetDeviceId, options);
+  }
+
+  syncDeviceHistory() {
+    return syncE2eeDeviceHistory(this);
+  }
+
+  e2eePrepareGroup(payload) {
+    return this.#req("POST", "/v1/e2ee/groups/prepare", payload);
+  }
+
+  e2eeBootstrapGroup(payload) {
+    return this.#req("POST", "/v1/e2ee/groups", payload);
+  }
+
+  e2eePrepareGroupRekey(payload) {
+    return this.#req("POST", "/v1/e2ee/groups/rekey/prepare", payload);
+  }
+
+  e2eeCommitGroupRekey(payload) {
+    return this.#req("POST", "/v1/e2ee/groups/rekey", payload);
+  }
+
+  e2eeGroupWelcomes() {
+    return this.#req("GET", "/v1/e2ee/groups/welcomes");
+  }
+
+  e2eeGroupEpochUpdates() {
+    return this.#req("GET", "/v1/e2ee/groups/epochs");
+  }
+
+  e2eeAcknowledgeGroupWelcome(groupId, epoch) {
+    return this.#req(
+      "POST",
+      `/v1/e2ee/groups/${encodeURIComponent(groupId)}/epochs/${encodeURIComponent(epoch)}/ack`,
+      {},
+    );
+  }
+
+  e2eeSendGroupMessage(payload) {
+    return this.#req("POST", "/v1/e2ee/groups/messages", payload);
+  }
+
+  e2eeGroupMessages() {
+    return this.#req("GET", "/v1/e2ee/groups/messages");
+  }
+
+  e2eeAcknowledgeGroupMessage(eventId) {
+    return this.#req("POST", `/v1/e2ee/groups/messages/${encodeURIComponent(eventId)}/ack`, {});
+  }
+
+  e2eeUploadHistoryArchive(payload) {
+    return this.#req("POST", "/v1/e2ee/groups/history", payload);
+  }
+
+  e2eeHistoryArchives() {
+    return this.#req("GET", "/v1/e2ee/groups/history");
+  }
+
+  e2eeAcknowledgeHistoryArchive(archiveId) {
+    return this.#req("POST", `/v1/e2ee/groups/history/${encodeURIComponent(archiveId)}/ack`, {});
+  }
+
+  ensureE2eeReady() {
+    return ensureE2eeKeyPackages(this);
   }
 
   /** Revoke THIS device's own token (`relay uninstall --purge`). */
@@ -193,7 +391,19 @@ export class RelayClient {
     return this.#req("GET", "/v1/task-relays");
   }
 
-  sendRelay(payload) {
+  async sendRelay(payload) {
+    if (!localE2eeIdentityAvailable()) return this.#req("POST", "/v1/relays", payload).catch((error) => {
+      const reviewToken = error?.body?.error === "human_message_review_required" ? error.body.reviewToken : null;
+      if (!reviewToken || payload?.longForHumanConfirmed !== true) throw error;
+      return this.#req("POST", "/v1/relays", { ...payload, longForHumanReviewToken: reviewToken });
+    });
+    const status = await verifiedE2eeStatus(this);
+    if (status.mode !== "off") {
+      if (payload.recipient?.groupId || String(payload.recipient?.chatId || "").startsWith("grp_")) {
+        return sendE2eeGroupRelay(this, payload);
+      }
+      return encryptE2eeMessage(this, payload, status);
+    }
     return this.#req("POST", "/v1/relays", payload).catch((error) => {
       const reviewToken = error?.body?.error === "human_message_review_required" ? error.body.reviewToken : null;
       if (!reviewToken || payload?.longForHumanConfirmed !== true) throw error;
@@ -216,11 +426,72 @@ export class RelayClient {
     return this.#req("DELETE", `/v1/share-links/${encodeURIComponent(relayId)}`);
   }
 
-  editMessage(relayId, payload) {
+  async editMessage(relayId, payload) {
+    if (String(relayId).startsWith("egmsg_")) {
+      const sent = await sendE2eeGroupChange(
+        this,
+        relayId,
+        E2EE_GROUP_PRODUCT_EVENTS.edit,
+        { forHuman: payload.forHuman },
+        payload.idempotencyKey,
+      );
+      const now = new Date().toISOString();
+      return { ok: true, relayId, affectedRelayIds: [relayId], updatedAt: now, editedAt: now, e2eeEventId: sent.eventId };
+    }
+    if (String(relayId).startsWith("erelay_")) {
+      const status = await verifiedE2eeStatus(this);
+      const sent = await encryptE2eeMessage(this, {
+        kind: "message",
+        recipient: {},
+        forHuman: payload.forHuman,
+        idempotencyKey: payload.idempotencyKey,
+        e2eeEvent: { type: "message.edited", targetRelayId: relayId },
+      }, status);
+      const now = new Date().toISOString();
+      return { ok: true, relayId, affectedRelayIds: [relayId], updatedAt: now, editedAt: now, e2eeEventId: sent.relayId };
+    }
     return this.#req("PATCH", `/v1/messages/${encodeURIComponent(relayId)}`, payload);
   }
 
-  deleteMessage(relayId, payload) {
+  async deleteMessage(relayId, payload) {
+    if (String(relayId).startsWith("egmsg_")) {
+      const sent = await sendE2eeGroupChange(
+        this,
+        relayId,
+        E2EE_GROUP_PRODUCT_EVENTS.delete,
+        { deleted: true },
+        payload.idempotencyKey,
+      );
+      const identity = identityOrThrow();
+      const target = readProcessedGroupEvents(identity).find((record) => record.eventId === relayId);
+      await this.#req("POST", `/v1/e2ee/groups/messages/${encodeURIComponent(relayId)}/purge`, {
+        tombstoneEventId: sent.eventId,
+      });
+      if (target) removeProcessedGroupEvent(identity, target.groupId, relayId);
+      removeLocalE2eeAttachmentDirectory(relayId);
+      const now = new Date().toISOString();
+      return { ok: true, relayId, affectedRelayIds: [relayId], updatedAt: now, deletedAt: now, e2eeEventId: sent.eventId };
+    }
+    if (String(relayId).startsWith("erelay_")) {
+      const status = await verifiedE2eeStatus(this);
+      const sent = await encryptE2eeMessage(this, {
+        kind: "message",
+        recipient: {},
+        forHuman: "",
+        idempotencyKey: payload.idempotencyKey,
+        e2eeEvent: { type: "message.deleted", targetRelayId: relayId },
+      }, status);
+      await this.#req("POST", `/v1/e2ee/messages/${encodeURIComponent(relayId)}/purge`, {
+        tombstoneEventId: sent.relayId,
+      });
+      const identity = identityOrThrow();
+      removeCachedPlaintext(identity, relayId);
+      removeImportedE2eeHistoryRecord(identity, relayId);
+      removePendingE2eeOutbox(identity, `direct:${relayId}`);
+      removeLocalE2eeAttachmentDirectory(relayId);
+      const now = new Date().toISOString();
+      return { ok: true, relayId, affectedRelayIds: [relayId], updatedAt: now, deletedAt: now, e2eeEventId: sent.relayId };
+    }
     return this.#req("DELETE", `/v1/messages/${encodeURIComponent(relayId)}`, payload);
   }
 
@@ -229,11 +500,76 @@ export class RelayClient {
    * signed attachment URLs. A poller running every few seconds wants this; it
    * re-fetches real packets (via fetchRelayPackets) only for what changed.
    */
-  inbox({ summary = false } = {}) {
-    return this.#req("GET", summary ? "/v1/inbox?view=summary" : "/v1/inbox");
+  async inbox({ summary = false } = {}) {
+    if (!localE2eeIdentityAvailable()) {
+      return this.#req("GET", summary ? "/v1/inbox?view=summary" : "/v1/inbox");
+    }
+    const status = await verifiedE2eeStatus(this);
+    if (status.mode === "off") return this.#req("GET", summary ? "/v1/inbox?view=summary" : "/v1/inbox");
+    await ensureE2eeKeyPackages(this, status);
+    const encrypted = await this.e2eeSync();
+    const e2eeItems = [];
+    const synchronized = await e2eeOpenedRecords(this, encrypted.items || []);
+    for (const record of synchronized.opened.filter((entry) => entry.item.direction === "inbound")) {
+      const item = e2eeInboxItem(record.wire, record.plaintext);
+      e2eeItems.push(summary ? {
+        relayId: item.relayId,
+        state: item.state,
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt,
+        kind: item.kind,
+        ...(item.title ? { title: item.title } : {}),
+        sender: item.sender,
+        preview: item.preview,
+        inReplyToRelayId: item.inReplyToRelayId,
+        threadId: item.threadId,
+        hasAttachments: false,
+        e2ee: item.e2ee,
+        ...(item.historyImported ? { historyImported: true } : {}),
+      } : item);
+    }
+    const groupRecords = await e2eeGroupOpenedRecords(this);
+    for (const record of groupRecords.filter((entry) => entry.item.direction === "inbound")) {
+      const item = record.item;
+      e2eeItems.push(summary ? {
+        relayId: item.relayId,
+        state: item.state,
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt,
+        kind: item.kind,
+        ...(item.title ? { title: item.title } : {}),
+        sender: item.sender,
+        preview: item.preview,
+        inReplyToRelayId: item.inReplyToRelayId,
+        threadId: item.threadId,
+        hasAttachments: item.hasAttachments,
+        e2ee: item.e2ee,
+        ...(item.historyImported ? { historyImported: true } : {}),
+      } : item);
+    }
+    const legacy = status.mode === "optional"
+      ? await this.#req("GET", summary ? "/v1/inbox?view=summary" : "/v1/inbox")
+      : { items: [] };
+    return {
+      items: [...(legacy.items || []), ...e2eeItems]
+        .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))),
+      ...(legacy.cursor ? { cursor: legacy.cursor } : {}),
+    };
   }
 
-  markAllRead(payload = {}) {
+  async markAllRead(payload = {}) {
+    if (localE2eeIdentityAvailable()) {
+      const status = await verifiedE2eeStatus(this);
+      if (status.mode !== "off") {
+        const encrypted = await this.e2eeSync();
+        const synchronized = await e2eeOpenedRecords(this, encrypted.items || []);
+        const ids = synchronized.opened
+          .filter((entry) => entry.item.direction === "inbound" && entry.item.state === "delivered")
+          .map((entry) => entry.wire.relayId);
+        const result = await this.markManyRead(ids, payload);
+        if (status.mode === "required") return result;
+      }
+    }
     return this.#req("POST", "/v1/inbox/read-all", payload);
   }
 
@@ -252,20 +588,67 @@ export class RelayClient {
     const ids = Array.from(new Set((relayIds || []).filter(Boolean)));
     if (!ids.length) return { ok: true, ordinaryRelaysUpdated: 0, relayIds: [] };
     const { idempotencyKey = "mark-many-read", ...rest } = payload;
-    await Promise.all(ids.map((id) => this.markRead(id, {
-      ...rest,
-      idempotencyKey: `${idempotencyKey}:${id}`,
-    })));
+    // E2EE receipts reserve one-time packages and update encrypted local state;
+    // serialize the fan-out so concurrent file replacements cannot lose one.
+    for (const id of ids) {
+      await this.markRead(id, {
+        ...rest,
+        idempotencyKey: `${idempotencyKey}:${id}`,
+      });
+    }
     return { ok: true, ordinaryRelaysUpdated: ids.length, relayIds: ids };
   }
 
-  sent({ limit } = {}) {
+  async sent({ limit } = {}) {
     const query = Number.isFinite(limit) ? `?limit=${encodeURIComponent(limit)}` : "";
-    return this.#req("GET", `/v1/sent${query}`);
+    if (!localE2eeIdentityAvailable()) return this.#req("GET", `/v1/sent${query}`);
+    const status = await verifiedE2eeStatus(this);
+    if (status.mode === "off") return this.#req("GET", `/v1/sent${query}`);
+    await ensureE2eeKeyPackages(this, status);
+    const encrypted = await this.e2eeSync();
+    const synchronized = await e2eeOpenedRecords(this, encrypted.items || []);
+    const groupRecords = await e2eeGroupOpenedRecords(this);
+    const groupViews = (await this.groups()).groups || [];
+    const groupNames = new Map(groupViews.map((group) => [group.id, group.name]));
+    const items = synchronized.opened
+      .filter((entry) => entry.item.direction === "outbound")
+      .map((entry) => e2eeSentItem(entry.wire, entry.plaintext));
+    for (const record of groupRecords.filter((entry) => entry.item.direction === "outbound")) {
+      const item = record.item;
+      items.push({
+        ...item,
+        recipient: { name: groupNames.get(record.groupId) || "Relay group", onRelay: true },
+        recipientGroupId: record.groupId,
+        recipientGroupName: groupNames.get(record.groupId) || "Relay group",
+        delivery: { channel: "device", state: item.state, sentAt: item.createdAt },
+      });
+    }
+    const selected = items
+      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+      .slice(0, Number.isFinite(limit) ? Math.max(1, Math.trunc(limit)) : 200);
+    if (status.mode === "required") return { items: selected };
+    const legacy = await this.#req("GET", `/v1/sent${query}`);
+    return {
+      items: [...(legacy.items || []), ...selected]
+        .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+        .slice(0, Number.isFinite(limit) ? Math.max(1, Math.trunc(limit)) : 200),
+    };
   }
 
-  fetchRelay(id) {
-    return this.#req("GET", `/v1/relays/${encodeURIComponent(id)}`);
+  async fetchRelay(id) {
+    if (String(id).startsWith("egmsg_")) {
+      const records = await e2eeGroupOpenedRecords(this);
+      const projected = records.find((entry) => entry.eventId === id);
+      if (!projected) throw new Error("Encrypted group Relay not found.");
+      const group = (await this.groups()).groups?.find((item) => item.id === projected.groupId);
+      return e2eeGroupPacket(projected, group?.name);
+    }
+    if (!String(id).startsWith("erelay_")) return this.#req("GET", `/v1/relays/${encodeURIComponent(id)}`);
+    const encrypted = await this.e2eeSync();
+    const synchronized = await e2eeOpenedRecords(this, encrypted.items || []);
+    const projected = synchronized.opened.find((entry) => entry.wire.relayId === id);
+    if (!projected) throw new Error("Encrypted Relay not found.");
+    return await e2eePacket(projected.wire, projected.plaintext);
   }
 
   /**
@@ -274,15 +657,89 @@ export class RelayClient {
    * catching up on a backlog take minutes. Ids the caller may not read are
    * absent from `packets` — same meaning as a 404 from the single-relay route.
    */
-  fetchRelayPackets(ids) {
-    return this.#req("POST", "/v1/relays/packets", { ids });
+  async fetchRelayPackets(ids) {
+    const identity = localE2eeIdentityAvailable() ? identityOrThrow() : null;
+    const imported = new Map();
+    if (identity) {
+      for (const id of ids || []) {
+        if (!String(id).startsWith("erelay_")) continue;
+        const record = readImportedE2eeHistoryRecord(identity, id);
+        if (record) imported.set(id, record);
+      }
+    }
+    const encryptedIds = (ids || []).filter((id) => String(id).startsWith("erelay_") && !imported.has(id));
+    const groupIds = (ids || []).filter((id) => String(id).startsWith("egmsg_"));
+    const legacyIds = (ids || []).filter((id) => !String(id).startsWith("erelay_") && !String(id).startsWith("egmsg_"));
+    const result = legacyIds.length
+      ? await this.#req("POST", "/v1/relays/packets", { ids: legacyIds })
+      : { packets: {} };
+    if (encryptedIds.length || imported.size) {
+      const encrypted = await this.e2eeSync();
+      const synchronized = await e2eeOpenedRecords(this, encrypted.items || []);
+      const wanted = new Set((ids || []).map(String));
+      for (const record of synchronized.opened) {
+        if (!wanted.has(record.wire.relayId)) continue;
+        result.packets[record.wire.relayId] = await e2eePacket(record.wire, record.plaintext);
+      }
+    }
+    if (groupIds.length) {
+      const [records, groups] = await Promise.all([e2eeGroupOpenedRecords(this), this.groups()]);
+      const names = new Map((groups.groups || []).map((group) => [group.id, group.name]));
+      const wanted = new Set(groupIds.map(String));
+      for (const record of records) {
+        if (wanted.has(record.eventId)) result.packets[record.eventId] = await e2eeGroupPacket(record, names.get(record.groupId));
+      }
+    }
+    return result;
   }
 
-  reactions(ids) {
-    return this.#req("POST", "/v1/relays/reactions", { ids });
+  async reactions(ids) {
+    const encryptedIds = (ids || []).filter((id) => String(id).startsWith("erelay_"));
+    const groupIds = (ids || []).filter((id) => String(id).startsWith("egmsg_"));
+    const legacyIds = (ids || []).filter((id) => !String(id).startsWith("erelay_") && !String(id).startsWith("egmsg_"));
+    const result = legacyIds.length
+      ? await this.#req("POST", "/v1/relays/reactions", { ids: legacyIds })
+      : { reactions: {} };
+    if (encryptedIds.length) {
+      const encrypted = await this.e2eeSync();
+      const synchronized = await e2eeOpenedRecords(this, encrypted.items || []);
+      const wanted = new Set(encryptedIds.map(String));
+      for (const record of synchronized.opened) {
+        if (wanted.has(record.wire.relayId)) result.reactions[record.wire.relayId] = record.item.reactions;
+      }
+    }
+    if (groupIds.length) {
+      const records = await e2eeGroupOpenedRecords(this);
+      const wanted = new Set(groupIds.map(String));
+      for (const record of records) {
+        if (wanted.has(record.eventId)) result.reactions[record.eventId] = record.item.reactions;
+      }
+    }
+    return result;
   }
 
-  react(id, { emoji, action, idempotencyKey }) {
+  async react(id, { emoji, action, idempotencyKey }) {
+    if (String(id).startsWith("egmsg_")) {
+      const sent = await sendE2eeGroupChange(
+        this,
+        id,
+        E2EE_GROUP_PRODUCT_EVENTS.reaction,
+        { emoji, action },
+        idempotencyKey,
+      );
+      return { ok: true, relayId: id, changed: true, reactions: { aggregates: [], events: [] }, fanoutRelayIds: [sent.eventId] };
+    }
+    if (String(id).startsWith("erelay_")) {
+      const status = await verifiedE2eeStatus(this);
+      const sent = await encryptE2eeMessage(this, {
+        kind: "message",
+        recipient: {},
+        forHuman: "",
+        idempotencyKey,
+        e2eeEvent: { type: "reaction.changed", targetRelayId: id, emoji, action },
+      }, status);
+      return { ok: true, relayId: id, changed: true, reactions: { aggregates: [], events: [] }, fanoutRelayIds: [sent.relayId] };
+    }
     return this.#req("POST", `/v1/relays/${encodeURIComponent(id)}/reactions`, {
       emoji,
       action,
@@ -290,17 +747,86 @@ export class RelayClient {
     });
   }
 
-  acknowledge(id, payload = {}) {
+  async acknowledge(id, payload = {}) {
+    if (String(id).startsWith("egmsg_")) {
+      const sent = await sendE2eeGroupChange(
+        this,
+        id,
+        E2EE_GROUP_PRODUCT_EVENTS.receipt,
+        { state: "acknowledged" },
+        payload.idempotencyKey || `acknowledge:${id}`,
+      );
+      return { ok: true, relayId: id, e2eeEventId: sent.eventId };
+    }
+    if (String(id).startsWith("erelay_")) {
+      const status = await verifiedE2eeStatus(this);
+      const idempotencyKey = payload.idempotencyKey || `acknowledge:${id}`;
+      await encryptE2eeMessage(this, {
+        kind: "message",
+        recipient: {},
+        forHuman: "",
+        idempotencyKey,
+        e2eeEvent: { type: "receipt.changed", targetRelayId: id, state: "acknowledged" },
+      }, status);
+      // Acknowledgement also authorizes erasing this device's one-time Welcome.
+      return this.#req("POST", `/v1/e2ee/messages/${encodeURIComponent(id)}/ack`, payload);
+    }
     return this.#req("POST", `/v1/relays/${encodeURIComponent(id)}/ack`, payload);
   }
 
-  markRead(id, payload = {}) {
+  async markRead(id, payload = {}) {
+    if (String(id).startsWith("egmsg_")) {
+      const sent = await sendE2eeGroupChange(
+        this,
+        id,
+        E2EE_GROUP_PRODUCT_EVENTS.receipt,
+        { state: "read" },
+        payload.idempotencyKey || `mark-read:${id}`,
+      );
+      return { ok: true, relayId: id, e2eeEventId: sent.eventId };
+    }
+    if (String(id).startsWith("erelay_")) {
+      const status = await verifiedE2eeStatus(this);
+      const idempotencyKey = payload.idempotencyKey || `mark-read:${id}`;
+      const sent = await encryptE2eeMessage(this, {
+        kind: "message",
+        recipient: {},
+        forHuman: "",
+        idempotencyKey,
+        e2eeEvent: { type: "receipt.changed", targetRelayId: id, state: "read" },
+      }, status);
+      return { ok: true, relayId: id, e2eeEventId: sent.relayId };
+    }
     return this.#req("POST", `/v1/relays/${encodeURIComponent(id)}/read`, payload);
   }
 
   /** The recipient pressed Start on a task relay. Idempotent server-side. */
-  taskStarted(id) {
+  async taskStarted(id) {
+    if (String(id).startsWith("erelay_")) {
+      return this.e2eeTaskChanged(id, "started", {
+        idempotencyKey: `task-started:${id}`,
+      });
+    }
     return this.#req("POST", `/v1/relays/${encodeURIComponent(id)}/task/started`, {});
+  }
+
+  /** Append an opaque encrypted task receipt; the API cannot read its state. */
+  async e2eeTaskChanged(id, state, { resultMessageId, idempotencyKey } = {}) {
+    if (!String(id).startsWith("erelay_")) throw new Error("Encrypted task receipts require an E2EE Request id.");
+    const status = await verifiedE2eeStatus(this);
+    return encryptE2eeMessage(this, {
+      kind: "message",
+      recipient: {},
+      forHuman: "",
+      idempotencyKey: idempotencyKey || `task-${state}:${id}`,
+      e2eeEvent: {
+        type: "task.changed",
+        targetRelayId: id,
+        taskId: id,
+        state,
+        ...(resultMessageId ? { resultMessageId } : {}),
+      },
+    }, status);
   }
 
   deleteInboxItem(itemId, payload = {}) {
@@ -426,16 +952,58 @@ export class RelayClient {
 
   // Chats: every thread between the same set of people, merged into one
   // conversation. See apps/api/src/services/chat-identity.ts for the ontology.
-  chats() {
-    return this.#req("GET", "/v1/chats");
+  async chats() {
+    if (!localE2eeIdentityAvailable()) return this.#req("GET", "/v1/chats");
+    const status = await verifiedE2eeStatus(this);
+    if (status.mode === "off") return this.#req("GET", "/v1/chats");
+    await ensureE2eeKeyPackages(this, status);
+    const encrypted = await this.e2eeSync();
+    const e2ee = await e2eeChatList(this, encrypted.items || []);
+    const groupChats = await e2eeGroupChats(this);
+    for (const chat of groupChats) {
+      const { items: _items, hasMoreMessages: _more, ...summary } = chat;
+      e2ee.chats.push(summary);
+    }
+    e2ee.chats.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+    if (status.mode === "required") return e2ee;
+    const legacy = await this.#req("GET", "/v1/chats");
+    const merged = new Map((legacy.chats || []).map((chat) => [chat.chatId, chat]));
+    for (const chat of e2ee.chats) merged.set(chat.chatId, chat);
+    return { chats: [...merged.values()].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))) };
   }
 
-  chat(chatId) {
+  async chat(chatId) {
+    if (!localE2eeIdentityAvailable()) return this.#req("GET", `/v1/chats/${encodeURIComponent(chatId)}`);
+    const status = await verifiedE2eeStatus(this);
+    if (status.mode === "off") return this.#req("GET", `/v1/chats/${encodeURIComponent(chatId)}`);
+    await ensureE2eeKeyPackages(this, status);
+    if (String(chatId).startsWith("grp_")) {
+      const group = await e2eeGroupChat(this, chatId);
+      if (!group) throw new Error("Encrypted group chat not found.");
+      return group;
+    }
+    const encrypted = await this.e2eeSync();
+    const e2ee = await e2eeChat(this, encrypted.items || [], chatId);
+    if (e2ee || status.mode === "required") {
+      if (!e2ee) throw new Error("Encrypted chat not found.");
+      return e2ee;
+    }
     return this.#req("GET", `/v1/chats/${encodeURIComponent(chatId)}`);
   }
 
   /** The chat around an open message, in one round trip. */
-  chatForThread(threadId) {
+  async chatForThread(threadId) {
+    if (!localE2eeIdentityAvailable()) return this.#req("GET", `/v1/chats/by-thread/${encodeURIComponent(threadId)}`);
+    const status = await verifiedE2eeStatus(this);
+    if (status.mode === "off") return this.#req("GET", `/v1/chats/by-thread/${encodeURIComponent(threadId)}`);
+    await ensureE2eeKeyPackages(this, status);
+    const encrypted = await this.e2eeSync();
+    const e2ee = await e2eeChatForThread(this, encrypted.items || [], threadId);
+    const group = e2ee || await e2eeGroupChatForThread(this, threadId);
+    if (group || status.mode === "required") {
+      if (!group) throw new Error("Encrypted chat not found.");
+      return group;
+    }
     return this.#req("GET", `/v1/chats/by-thread/${encodeURIComponent(threadId)}`);
   }
 
@@ -455,6 +1023,14 @@ export class RelayClient {
    * those people share, empty or not.
    */
   chatForGroup(groupId) {
+    if (localE2eeIdentityAvailable()) {
+      return verifiedE2eeStatus(this).then((status) => status.mode === "off"
+        ? this.#req("POST", "/v1/chats/resolve", { groupId: String(groupId || "") })
+        : e2eeGroupChat(this, String(groupId || "")).then((chat) => {
+            if (!chat) throw new Error("Encrypted group chat not found.");
+            return chat;
+          }));
+    }
     return this.#req("POST", "/v1/chats/resolve", { groupId: String(groupId || "") });
   }
 
@@ -478,19 +1054,27 @@ export class RelayClient {
     return this.#req("DELETE", `/v1/contact-groups/${encodeURIComponent(groupId)}`);
   }
 
-  addGroupMember(groupId, contactId) {
-    return this.#req(
+  async addGroupMember(groupId, contactId) {
+    const result = await this.#req(
       "POST",
       `/v1/contact-groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(contactId)}`,
       {},
     );
+    if (localE2eeIdentityAvailable() && (await verifiedE2eeStatus(this)).mode !== "off") {
+      await ensureE2eeGroupProductReady(this, groupId, `group-add:${groupId}:${contactId}`);
+    }
+    return result;
   }
 
-  removeGroupMember(groupId, contactId) {
-    return this.#req(
+  async removeGroupMember(groupId, contactId) {
+    const result = await this.#req(
       "DELETE",
       `/v1/contact-groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(contactId)}`,
     );
+    if (localE2eeIdentityAvailable() && (await verifiedE2eeStatus(this)).mode !== "off") {
+      await ensureE2eeGroupProductReady(this, groupId, `group-remove:${groupId}:${contactId}`);
+    }
+    return result;
   }
 
   leaveGroup(groupId) {

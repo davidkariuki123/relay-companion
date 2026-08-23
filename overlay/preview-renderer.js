@@ -16,6 +16,8 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
   const detailScrollEl = document.getElementById("detailScroll");
   const replyInputEl = document.getElementById("replyInput");
   const replyButtonEl = document.getElementById("replyButton");
+  const safetyButtonEl = document.getElementById("safetyButton");
+  const safetyPanelEl = document.getElementById("safetyPanel");
   const replyAttachButtonEl = document.getElementById("replyAttachButton");
   const replyFilePickerEl = document.getElementById("replyFilePicker");
   const replyFilesEl = document.getElementById("replyFiles");
@@ -81,6 +83,7 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
   /** The task face's ignition state: composer starts the task, not a reply. */
   let taskMode = false;
   let starting = false;
+  let reviewingSafety = false;
   /** A started task shows its live session in the message-face slot. */
   let sessionMode = false;
   let sessionWatching = false;
@@ -126,7 +129,7 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
 
   function senderFor(row) {
     const sender = text(row.senderName);
-    if (sender) return `From ${sender}`;
+    if (sender) return `From ${sender}${row.e2ee ? " · End-to-end encrypted" : ""}`;
     return "Relay";
   }
 
@@ -309,11 +312,16 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
       replyInputEl.disabled = starting;
       replyButtonEl.disabled = starting;
       replyButtonEl.setAttribute("aria-disabled", starting ? "true" : "false");
-      replyButtonEl.textContent = starting ? "Starting…" : "Start task";
+      replyButtonEl.textContent = starting ? "Accepting…" : "Accept";
+      safetyButtonEl.classList.remove("gone");
+      safetyButtonEl.disabled = starting || reviewingSafety;
+      safetyButtonEl.textContent = reviewingSafety ? "Reviewing…" : "Review Safety";
       taskRuntimeNoteEl.classList.remove("gone");
       replyNoteEl.classList.add("gone");
       return;
     }
+    safetyButtonEl.classList.add("gone");
+    safetyPanelEl.classList.add("gone");
     taskRuntimeNoteEl.classList.add("gone");
     replyNoteEl.classList.remove("gone");
     if (sessionMode && face !== "chat") {
@@ -372,6 +380,67 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
     } else {
       taskStateEl.classList.add("gone");
     }
+  }
+
+  function renderSafetyReview(review) {
+    safetyPanelEl.replaceChildren();
+    const heading = document.createElement("strong");
+    heading.textContent = review.concern === "high" ? "Look closely before accepting" : "Safety review";
+    const summary = document.createElement("div");
+    summary.textContent = text(review.summary);
+    safetyPanelEl.append(heading, summary);
+    const permissions = Array.isArray(review.permissions) ? review.permissions : [];
+    if (permissions.length) {
+      const chips = document.createElement("div");
+      chips.className = "safety-permissions";
+      for (const permission of permissions) {
+        const chip = document.createElement("span");
+        chip.className = "safety-permission";
+        chip.textContent = text(permission.label);
+        chip.title = text(permission.effect);
+        chips.appendChild(chip);
+      }
+      safetyPanelEl.appendChild(chips);
+      const effects = document.createElement("div");
+      for (const permission of permissions) {
+        const effect = document.createElement("div");
+        effect.textContent = `${text(permission.label)}: ${text(permission.effect)}`;
+        effects.appendChild(effect);
+      }
+      safetyPanelEl.appendChild(effects);
+    }
+    const plain = document.createElement("div");
+    plain.textContent = text(review.plainLanguage);
+    safetyPanelEl.appendChild(plain);
+    if (text(review.trustContext)) {
+      const trust = document.createElement("div");
+      trust.textContent = text(review.trustContext);
+      safetyPanelEl.appendChild(trust);
+    }
+    safetyPanelEl.classList.remove("gone");
+  }
+
+  async function reviewSafety() {
+    if (!taskMode || reviewingSafety) return;
+    const id = text(content.relayId);
+    if (!id) return;
+    reviewingSafety = true;
+    refreshComposer();
+    let result;
+    try {
+      result = await bridge.reviewSafety(id);
+    } catch (error) {
+      result = { ok: false, error: (error && error.message) || String(error) };
+    }
+    reviewingSafety = false;
+    if (result?.ok && result.review) renderSafetyReview(result.review);
+    else renderSafetyReview({
+      concern: "review",
+      summary: text(result?.error) || "The safety review could not be prepared.",
+      permissions: [],
+      plainLanguage: "Nothing was accepted or started. You can try the review again.",
+    });
+    refreshComposer();
   }
 
   async function submitStart() {
@@ -1571,6 +1640,9 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
   }
   replyButtonEl.addEventListener("click", () => {
     submitReply().catch(() => {});
+  });
+  safetyButtonEl.addEventListener("click", () => {
+    reviewSafety().catch(() => {});
   });
 
   replyAttachButtonEl.addEventListener("click", () => replyFilePickerEl.click());

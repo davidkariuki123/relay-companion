@@ -9,16 +9,80 @@ import {
   FOR_HUMAN_EXCEPTIONAL_SENTENCE_LIMIT,
   FOR_HUMAN_SOFT_WORD_LIMIT,
   FOR_HUMAN_TYPICAL_WORD_LIMIT,
+  E2EE_LOCAL_MCP_INSTRUCTIONS,
+  E2EE_LOCAL_TOOL_NAMES,
   ORDINARY_RELAY_TOOL_NAMES,
   RELAY_MCP_INSTRUCTIONS,
   REQUESTS_DISABLED_INSTRUCTIONS,
   TOOLS,
+  assertE2eeLocalToolCall,
   handleCall,
+  localMcpEncryptionState,
   relayCallErrorResult,
   relayCallingSurface,
   rememberCallingClient,
   toolsForAccount,
+  toolsForE2eeLocalAccount,
 } from "../src/mcp.js";
+
+test("Claude Code and Codex expose only encrypted Relay operations on an enrolled E2EE device", () => {
+  const tools = toolsForE2eeLocalAccount({ requests: true, aiSessions: true, connectors: true });
+  const names = new Set(tools.map((tool) => tool.name));
+  assert.deepEqual(names, E2EE_LOCAL_TOOL_NAMES);
+  for (const forbidden of [
+    "relay_share_link",
+    "relay_ai_sessions",
+    "relay_ai_session",
+    "relay_connector_list_tools",
+    "relay_connector_call_tool",
+    "relay_file_download",
+    "relay_recently_deleted_list",
+    "relay_attachment_read",
+  ]) {
+    assert.equal(names.has(forbidden), false, `${forbidden} stays outside local E2EE messaging`);
+  }
+  assert.doesNotMatch(E2EE_LOCAL_MCP_INSTRUCTIONS, /mint a link/i);
+  assert.match(E2EE_LOCAL_MCP_INSTRUCTIONS, /never supply a plaintext fallback/i);
+
+  for (const name of ["relay_send", "relay_chat_send"]) {
+    const tool = tools.find((candidate) => candidate.name === name);
+    assert.ok(Object.hasOwn(tool.inputSchema.properties, "files"), "local agents retain file-path attachments");
+    assert.match(tool.description, /encrypted by Companion before upload/i);
+  }
+});
+
+test("the local E2EE catalog follows rollout mode and fails closed in required mode", async () => {
+  const client = {};
+  assert.deepEqual(await localMcpEncryptionState(client, {
+    identityAvailable: () => true,
+    statusReader: async () => ({ mode: "off" }),
+  }), { mode: "off", enabled: false });
+  assert.deepEqual(await localMcpEncryptionState(client, {
+    identityAvailable: () => false,
+    statusReader: async () => ({ mode: "optional" }),
+  }), { mode: "optional", enabled: false });
+  assert.deepEqual(await localMcpEncryptionState(client, {
+    identityAvailable: () => true,
+    statusReader: async () => ({ mode: "optional" }),
+  }), { mode: "optional", enabled: true });
+  assert.deepEqual(await localMcpEncryptionState(client, {
+    identityAvailable: () => false,
+    statusReader: async () => { throw Object.assign(new Error("route not found"), { status: 404 }); },
+  }), { mode: "off", enabled: false });
+  await assert.rejects(localMcpEncryptionState(client, {
+    identityAvailable: () => true,
+    statusReader: async () => { throw Object.assign(new Error("route not found"), { status: 404 }); },
+  }), /route not found/i);
+  await assert.rejects(localMcpEncryptionState(client, {
+    identityAvailable: () => false,
+    statusReader: async () => ({ mode: "required" }),
+  }), /requires E2EE.*not an enrolled device/i);
+
+  assert.doesNotThrow(() => assertE2eeLocalToolCall("relay_send"));
+  assert.doesNotThrow(() => assertE2eeLocalToolCall("relay_chat_reply"));
+  assert.throws(() => assertE2eeLocalToolCall("relay_share_link"), /unavailable.*E2EE/i);
+  assert.throws(() => assertE2eeLocalToolCall("relay_ai_session"), /unavailable.*E2EE/i);
+});
 
 test("MCP provenance distinguishes Codex and Claude Code by the name each states at initialize", () => {
   // These two strings are MEASURED off real `initialize` frames (2026-08-19),
@@ -234,9 +298,7 @@ test("ordinary Relay MCP directs Claude and Codex to the membership-scoped Granu
   assert.match(humanDescription, /60 words triggers mandatory review; it is NOT A TARGET OR BUDGET/);
   assert.match(humanDescription, /Never pad toward it or hide detail in long compound sentences/i);
   assert.match(humanDescription, /teaches voice and relationship register, not target length/i);
-  assert.match(humanDescription, /plain narrative in ordinary human language/i);
-  assert.match(humanDescription, /what happened, why it matters, and what comes next/i);
-  assert.match(humanDescription, /Never use technical detail to help the person understand/i);
+  assert.match(humanDescription, /Lots of detail never justifies a longer human message/i);
   assert.match(humanDescription, /mechanisms, evidence, code, paths, logs, reproduction steps/i);
   assert.match(humanDescription, /No headings, lists, tables, code blocks, title repetition/i);
   const longConfirmation = send.inputSchema.properties.longForHumanConfirmed;

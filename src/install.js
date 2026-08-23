@@ -33,12 +33,7 @@ const DEFAULT_NPM_INSTALL_TIMEOUT_MS = 10 * 60 * 1000;
 const RELAY_MAC_APP_NAME = "Relay.app";
 const RELAY_MAC_APP_FALLBACK_NAME = "Relay Companion.app";
 const RELAY_MAC_BUNDLE_IDENTIFIER = "work.relay.companion.launcher";
-const cjsRequire = createRequire(import.meta.url);
-const { deleteDeviceToken } = cjsRequire("./credential-store.cjs");
-const {
-  resolveMacTrayPositionCachePath,
-  snapshotMacTrayPosition,
-} = cjsRequire("../overlay/tray-position.cjs");
+const { deleteDeviceToken } = createRequire(import.meta.url)("./credential-store.cjs");
 
 export const PACKAGE_NAME = "relay-companion";
 
@@ -2325,46 +2320,14 @@ export function repairDesktopSurfaces({
   runCommand = run,
   reload = true,
   homeDir = os.homedir(),
-  env = process.env,
   claim = false,
-  snapshotTrayPosition = snapshotMacTrayPosition,
-  positionSnapshot: suppliedPositionSnapshot,
 } = {}) {
-  // The currently installed updater executes this verified candidate repair
-  // before it bootouts the old pill. Snapshot the exact branded value here so
-  // even an older updater (or an unavoidable SIGKILL) cannot erase a user's
-  // Cmd-dragged position during the first transition into this fix.
-  const positionSnapshot = suppliedPositionSnapshot || snapshotDesktopTrayPosition({
-    platform,
-    env,
-    homeDir,
-    snapshotTrayPosition,
-  });
-  if (!positionSnapshot.ok) {
-    return {
-      ok: false,
-      reason: "tray-position-snapshot-failed",
-      positionSnapshot,
-    };
-  }
   const pill = installPillAutostart(bin, { platform, runCommand, reload, homeDir, claim });
   // Reload the daemon last. A repair may be invoked by the updater's detached child;
   // replacing the pill first avoids killing the update-owning daemon before all other
   // desktop surfaces are ready.
   const daemon = installDaemonAutostart(bin, node, { platform, runCommand, reload, homeDir, claim });
-  return { ok: Boolean(daemon.ok && pill.ok), daemon, pill, positionSnapshot };
-}
-
-export function snapshotDesktopTrayPosition({
-  platform = process.platform,
-  env = process.env,
-  homeDir = os.homedir(),
-  snapshotTrayPosition = snapshotMacTrayPosition,
-} = {}) {
-  return snapshotTrayPosition({
-    platform,
-    cachePath: resolveMacTrayPositionCachePath({ env, homeDir }),
-  });
+  return { ok: Boolean(daemon.ok && pill.ok), daemon, pill };
 }
 
 /** Remove the Relay MCP from both agents and stop/clear the background daemon. */

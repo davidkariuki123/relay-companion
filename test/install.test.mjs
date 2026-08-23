@@ -465,7 +465,6 @@ test("repairDesktopSurfaces --no-restart rewrites both LaunchAgents and Relay.ap
     platform: "darwin",
     homeDir: fixture.homeDir,
     reload: false,
-    snapshotTrayPosition: () => ({ ok: true, snapshotted: false, reason: "fixture" }),
     runCommand: fakeMacCommands(calls),
   });
 
@@ -485,70 +484,6 @@ test("repairDesktopSurfaces --no-restart rewrites both LaunchAgents and Relay.ap
   assert.doesNotMatch(pillPlist, /--full|--messages-only/);
 });
 
-test("candidate repair snapshots tray position before touching registrations", () => {
-  const fixture = relayDesktopFixture();
-  const events = [];
-  const result = repairDesktopSurfaces({
-    bin: fixture.bin,
-    node: "/opt/homebrew/bin/node",
-    platform: "darwin",
-    homeDir: fixture.homeDir,
-    reload: false,
-    snapshotTrayPosition() {
-      events.push("snapshot");
-      return { ok: true, snapshotted: true, value: 347 };
-    },
-    runCommand(command, args, options) {
-      events.push(`command:${command}`);
-      return fakeMacCommands([])(command, args, options);
-    },
-  });
-  assert.equal(result.ok, true);
-  assert.equal(events[0], "snapshot");
-  assert.equal(result.positionSnapshot.value, 347);
-});
-
-test("repair-runtime snapshots before agent registrations so an old updater gets the ingress handoff", () => {
-  const cli = fs.readFileSync(new URL("../bin/relay.js", import.meta.url), "utf8");
-  const commandStart = cli.indexOf("function cmdRepairRuntime");
-  const snapshot = cli.indexOf("snapshotDesktopTrayPosition()", commandStart);
-  const registrations = cli.indexOf("repairExistingAgentRegistrations(target)", commandStart);
-  const desktop = cli.indexOf("repairDesktopSurfaces({", commandStart);
-  assert.ok(commandStart >= 0 && snapshot > commandStart);
-  assert.ok(snapshot < registrations, "durable snapshot precedes any candidate registration mutation");
-  assert.ok(registrations < desktop);
-});
-
-test("candidate repair fails before registration when a live position cannot be cached", () => {
-  const fixture = relayDesktopFixture();
-  const calls = [];
-  const result = repairDesktopSurfaces({
-    bin: fixture.bin,
-    node: "/opt/homebrew/bin/node",
-    platform: "darwin",
-    homeDir: fixture.homeDir,
-    reload: false,
-    snapshotTrayPosition: () => ({
-      ok: false,
-      snapshotted: false,
-      reason: "cache-write-failed",
-      detail: "disk full",
-    }),
-    runCommand(command, args) { calls.push([command, ...args]); return { ok: true, out: "" }; },
-  });
-  assert.deepEqual(result, {
-    ok: false,
-    reason: "tray-position-snapshot-failed",
-    positionSnapshot: {
-      ok: false,
-      snapshotted: false,
-      reason: "cache-write-failed",
-      detail: "disk full",
-    },
-  });
-  assert.deepEqual(calls, []);
-});
-
 test("desktop repair removes capability modes from daemon, pill, and Relay.app", () => {
   const fixture = relayDesktopFixture();
   const calls = [];
@@ -558,7 +493,6 @@ test("desktop repair removes capability modes from daemon, pill, and Relay.app",
     platform: "darwin",
     homeDir: fixture.homeDir,
     reload: false,
-    snapshotTrayPosition: () => ({ ok: true, snapshotted: false, reason: "fixture" }),
     runCommand: fakeMacCommands(calls),
   });
 

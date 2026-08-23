@@ -160,12 +160,26 @@ try {
     ["google", "Finish with Google."],
     ["approval", "Connect this computer?"],
     ["finishing", "Finishing setup…"],
+    ["chat-setup", "Use Relay in your chats."],
   ];
   const rendered = [];
   for (const [stage, expected] of states) {
     await evaluate(page, `window.__relaySignupPreview(${JSON.stringify(stage)}, { email:"alex@example.com", account:{ displayName:"Alex Rivera", email:"alex@example.com" } }); true`);
     await waitFor(page, `document.getElementById("signupBody").innerText.includes(${JSON.stringify(expected)})`);
     rendered.push(await capture(page, `pill-${stage}`));
+    if (stage === "chat-setup") {
+      const layout = await evaluate(page, `(() => {
+        const cardRect = document.getElementById("card").getBoundingClientRect();
+        const bodyRect = document.getElementById("signupBody").getBoundingClientRect();
+        const skipRect = document.getElementById("suChatSkip").getBoundingClientRect();
+        return {
+          bodyInside:bodyRect.top >= cardRect.top && bodyRect.bottom <= cardRect.bottom,
+          skipInside:skipRect.top >= cardRect.top && skipRect.bottom <= cardRect.bottom,
+          skipVisible:getComputedStyle(document.getElementById("suChatSkip")).display !== "none",
+        };
+      })()`);
+      assert.deepEqual(layout, { bodyInside:true, skipInside:true, skipVisible:true });
+    }
     if (stage === "installed") {
       const expandedLockup = await evaluate(page, `(() => {
         const rect = document.getElementById("lockup").getBoundingClientRect();
@@ -206,7 +220,7 @@ try {
   assert.match(openedWelcome.text, /Relay is connected/);
   rendered.push(await capture(page, "pill-inbox-welcome"));
 
-  assert.equal(rendered.length, 10);
+  assert.equal(rendered.length, 11);
   console.log(JSON.stringify({ ok:true, screenshots:rendered }, null, 2));
 } catch (error) {
   throw new Error(`${error.message}\n${log.slice(-4000)}`);

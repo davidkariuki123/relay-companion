@@ -1,7 +1,12 @@
 {
   "@anthropic-ai/claude-agent-sdk": "0.3.195",
   "@modelcontextprotocol/sdk": "1.30.0",
+  "@noble/ciphers": "2.1.1",
+  "@noble/curves": "2.0.1",
+  "@noble/hashes": "2.0.1",
+  "acme-client": "5.4.0",
   "electron": "43.4.1",
+  "ts-mls": "1.6.2",
   "undici": "7.29.0",
   "ws": "8.21.0"
 }

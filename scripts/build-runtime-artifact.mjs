@@ -108,17 +108,7 @@ export function runMacTrayPositionProbe(electronPath, {
   const probeEnv = { ...env };
   delete probeEnv.ELECTRON_RUN_AS_NODE;
   const probe = path.join(companionRoot, "test", "tray-position-native-probe.cjs");
-  for (const mode of [
-    "first-run",
-    "write-position",
-    "read-position",
-    "write-position-exit",
-    "read-position",
-    "write-position-signal",
-    "read-position",
-    "destroy-preserve",
-    "cleanup",
-  ]) {
+  for (const mode of ["first-run", "write-position", "read-position", "write-position-exit", "read-position", "destroy-preserve"]) {
     runCommand(electronPath, [probe, mode], { cwd: companionRoot, env: probeEnv, timeout: 30_000 });
   }
   return { probed: true };

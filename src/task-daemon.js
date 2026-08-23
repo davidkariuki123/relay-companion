@@ -27,6 +27,7 @@ import { startDesktopStartupMigration } from "./desktop-migration.js";
 import { ensureWindowsAutostartTasks, repairAgentMcpRegistrations } from "./install.js";
 import { apiUrl, readConfig } from "./config.js";
 import { activeSessionOperationCount, runSessionDirectoryOnce } from "./session-controller.js";
+import { createE2eeClaudeRuntimeController } from "./e2ee-claude-runtime.js";
 import { productFeatures } from "./product-features.js";
 import { migratePersistedContentFields } from "./content-field-migration.js";
 import agentRelayContext from "./agent-relay-context.cjs";
@@ -890,17 +891,22 @@ export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
   // eslint-disable-next-line no-console
   console.log(`[relay] receiver for ${me.user.email}; polling every ${intervalMs}ms`);
   let features = daemonProductFeatures(log, me.user);
+  let claudeRuntime = createE2eeClaudeRuntimeController({ client, logger: log });
+  void claudeRuntime.tick();
   let featureRefreshAt = Date.now() + ACCOUNT_FEATURE_REFRESH_MS;
   let consecutiveFailures = 0;
   for (;;) {
     const rebound = await followAccountDrift({ client, log, role: "receiver" });
     if (rebound) {
+      await claudeRuntime.stop();
+      claudeRuntime = createE2eeClaudeRuntimeController({ client, logger: log });
       features = daemonProductFeatures(log, rebound.user);
       featureRefreshAt = Date.now() + ACCOUNT_FEATURE_REFRESH_MS;
     } else if (Date.now() >= featureRefreshAt) {
       features = await refreshDaemonProductFeatures(client, features, log);
       featureRefreshAt = Date.now() + ACCOUNT_FEATURE_REFRESH_MS;
     }
+    void claudeRuntime.tick();
     await sessionControllerTick({ client, log, features });
     try {
       const result = await daemonDeliveryTick({ client, log, features });
@@ -939,6 +945,9 @@ export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
         log(`inbox polling has failed ${consecutiveFailures} times; rebuilding the Windows receiver client`);
         client = new RelayClient();
         const recovered = await resolveMe(client);
+        await claudeRuntime.stop();
+        claudeRuntime = createE2eeClaudeRuntimeController({ client, logger: log });
+        void claudeRuntime.tick();
         features = daemonProductFeatures(log, recovered.user);
         featureRefreshAt = Date.now() + ACCOUNT_FEATURE_REFRESH_MS;
         consecutiveFailures = 0;

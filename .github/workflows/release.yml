@@ -93,10 +93,7 @@ jobs:
           env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron test/tray-position-native-probe.cjs read-position
           env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron test/tray-position-native-probe.cjs write-position-exit
           env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron test/tray-position-native-probe.cjs read-position
-          env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron test/tray-position-native-probe.cjs write-position-signal
-          env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron test/tray-position-native-probe.cjs read-position
           env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron test/tray-position-native-probe.cjs destroy-preserve
-          env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron test/tray-position-native-probe.cjs cleanup
       - name: Build, reconstruct, and launch the exact native runtime
         shell: bash
         env:

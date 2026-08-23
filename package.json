@@ -1,6 +1,6 @@
 {
   "name": "relay-companion",
-  "version": "0.1.347",
+  "version": "0.1.348",
   "description": "Install Relay for Claude Code, Cowork, and Codex, then sign in from the Relay pill.",
   "homepage": "https://sendrelays.com/get-started",
   "repository": {
@@ -36,10 +36,15 @@
   "devDependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.195",
     "@modelcontextprotocol/sdk": "1.30.0",
+    "@noble/ciphers": "2.1.1",
+    "@noble/curves": "2.0.1",
+    "@noble/hashes": "2.0.1",
+    "acme-client": "5.4.0",
     "dompurify": "3.4.13",
     "electron": "43.4.1",
     "esbuild": "0.28.1",
     "markdown-it": "14.3.0",
+    "ts-mls": "1.6.2",
     "undici": "7.29.0",
     "ws": "8.21.0"
   },

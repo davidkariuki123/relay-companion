@@ -88,8 +88,11 @@ test("startup guidance and owner schemas preserve the complete product ontology"
   assert.match(inboxContract, /cold-start recent backlog.*do not enumerate irrelevant ones/i);
   assert.ok(Buffer.byteLength(RELAY_MCP_INSTRUCTIONS, "utf8") <= 2_048,
     "Claude receives the complete startup ontology instead of a truncated prefix");
-  assert.match(source, /instructions: features\.requests \? RELAY_MCP_INSTRUCTIONS : REQUESTS_DISABLED_INSTRUCTIONS/,
-    "the MCP initialize response carries guidance for the active product surface");
+  assert.match(
+    source,
+    /instructions:\s*startupEncryption\.enabled\s*\?\s*E2EE_LOCAL_MCP_INSTRUCTIONS\s*:\s*\(features\.requests\s*\?\s*RELAY_MCP_INSTRUCTIONS\s*:\s*REQUESTS_DISABLED_INSTRUCTIONS\)/,
+    "the MCP initialize response carries guidance for the active encryption and product surface",
+  );
 });
 
 test("no model-facing tool resurrects removed content fields or visible topic names", () => {

@@ -11,6 +11,53 @@ function providerLabel(provider) {
   return "The provider";
 }
 
+const RISK_MARKER = /<!--\s*relay-output-risk\s+([\s\S]*?)\s*-->/i;
+
+function compact(value, maximum) {
+  return clean(value).replace(/\s+/g, " ").slice(0, maximum);
+}
+
+/**
+ * Split the provider's human result from its private release assessment. The
+ * assessment is authored by the same local agent that did the work; Relay's
+ * service never sees either document until this device chooses to send the
+ * result. Missing or malformed assessments fail closed into human review.
+ */
+export function parseProviderCompletionDocument(value) {
+  const source = clean(value);
+  const match = source.match(RISK_MARKER);
+  const body = clean(source.replace(RISK_MARKER, ""));
+  if (!match) {
+    return {
+      body,
+      assessment: {
+        level: "review",
+        summary: "The agent did not include a release assessment, so Relay is asking you to check the result before it leaves this device.",
+        effects: [],
+      },
+    };
+  }
+  try {
+    const parsed = JSON.parse(match[1]);
+    const level = parsed?.level === "none" ? "none" : "review";
+    const summary = compact(parsed?.summary, 500);
+    const effects = Array.isArray(parsed?.effects)
+      ? parsed.effects.map((item) => compact(item, 240)).filter(Boolean).slice(0, 6)
+      : [];
+    if (!summary) throw new Error("missing summary");
+    return { body, assessment: { level, summary, effects } };
+  } catch {
+    return {
+      body,
+      assessment: {
+        level: "review",
+        summary: "The agent's release assessment could not be read, so Relay is asking you to check the result before it leaves this device.",
+        effects: [],
+      },
+    };
+  }
+}
+
 /**
  * Convert a provider-owned terminal turn into the one completion document
  * Relay attaches to the Request. Records are newest-first.
@@ -37,8 +84,10 @@ export function providerCompletionCandidate({
     (row) => row?.type === "message" && row?.role === "assistant" && clean(row.text),
   );
   if (assistant) {
+    const document = parseProviderCompletionDocument(assistant.text);
     return {
-      body: clean(assistant.text),
+      body: document.body,
+      assessment: document.assessment,
       outcome: "completed",
       completedAt: endedAt || assistant.at || turn.completedAt || new Date().toISOString(),
     };
@@ -92,7 +141,15 @@ export function canonicalProviderCompletionCandidate({
     : new Date().toISOString();
   const body = clean(turn.final?.text);
   if (clean(turn.status).toLowerCase() !== "completed" || !turn.finalEligible || !body) return null;
-  return { body, outcome: "completed", completedAt, turnId: clean(turn.key) };
+  const document = parseProviderCompletionDocument(body);
+  if (!document.body) return null;
+  return {
+    body: document.body,
+    assessment: document.assessment,
+    outcome: "completed",
+    completedAt,
+    turnId: clean(turn.key),
+  };
 }
 
 export function providerCompletionIdempotencyKey({ relayId, provider, sessionId } = {}) {

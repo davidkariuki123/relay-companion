@@ -39,6 +39,8 @@ contextBridge.exposeInMainWorld("relay", {
   openRunSession: (id) => ipcRenderer.invoke("relay:openRunSession", String(id || "")),
   // The pill tray's Start task: the full start flow with the default runtime.
   taskStart: (id, route) => ipcRenderer.invoke("relay:taskStart", String(id || ""), route || null),
+  requestReviewSafety: (id) => ipcRenderer.invoke("relay:requestReviewSafety", String(id || "")),
+  requestCompletionSend: (id) => ipcRenderer.invoke("relay:requestCompletionSend", String(id || "")),
   relayWorkStart: (id, route) => ipcRenderer.invoke("relay:relayWorkStart", String(id || ""), route || null),
   runFeed: (id) => ipcRenderer.invoke("relay:runFeed", String(id || "")),
   watchRunFeed: (id) => ipcRenderer.invoke("relay:runFeed:watch", String(id || "")),
@@ -124,6 +126,11 @@ contextBridge.exposeInMainWorld("relay", {
 
   // settings / account (switch + sign-out relaunch the pill on success)
   accountInfo: () => ipcRenderer.invoke("relay:accountInfo"),
+  connectChatGPT: () => ipcRenderer.invoke("relay:connectChatGPT"),
+  connectClaude: () => ipcRenderer.invoke("relay:connectClaude"),
+  completeSetupTutorial: () => ipcRenderer.invoke("relay:completeSetupTutorial"),
+  e2eeDeviceApprovals: () => ipcRenderer.invoke("relay:e2eeDeviceApprovals"),
+  approveE2eeDevice: (deviceId) => ipcRenderer.invoke("relay:approveE2eeDevice", String(deviceId || "")),
   // Agent-installed first run. Main/core owns the installation authorization,
   // its client secret, activation token and PKCE verifier. The renderer sees
   // only status + verified account summary and can request the next human act.

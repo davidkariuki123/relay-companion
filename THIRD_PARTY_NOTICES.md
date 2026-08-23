@@ -32,3 +32,18 @@ Copyright (c) Cure53 and other contributors.
 DOMPurify is distributed under the Apache License 2.0 or the Mozilla Public
 License 2.0. Relay distributes its embedded copy under the Apache License 2.0.
 The complete terms are included in [`licenses/Apache-2.0.txt`](licenses/Apache-2.0.txt).
+
+## E2EE runtime libraries (MIT)
+
+The Companion uses the following packages for its RFC 9420 one-to-one text
+implementation. Each npm package includes its own complete MIT license text.
+
+- `ts-mls` 1.6.2 — Copyright Luka Jacobowitz and contributors.
+- `@hpke/core` 1.8.0 — Copyright hpke-js contributors.
+- `@noble/hashes` 2.0.1 — Copyright Paul Miller and contributors.
+- `@noble/ciphers` 2.1.1 — Copyright Paul Miller and contributors.
+- `@noble/curves` 2.0.1 — Copyright Paul Miller and contributors.
+
+`ts-mls` states that it has not undergone a formal security audit. Relay's own
+architecture documentation treats independent cryptographic and application
+review as a prerequisite for a public production E2EE claim.

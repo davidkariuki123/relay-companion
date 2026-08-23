@@ -230,6 +230,7 @@ test("preview payload is an explicit allowlist and never exposes briefingMarkdow
     "title",
     "forHuman",
     "senderName",
+    "e2ee",
     "createdAt",
     "unread",
     "threadId",
@@ -475,7 +476,7 @@ test("the task face's ignition is wired end to end: preload, IPC guard, renderer
   assert.match(handler, /isPreviewEvent\(event\)/);
   assert.match(main, /async function startTaskFromPreview\(input\)/);
   // The order: supported subscription auth preflight first, note second,
-  // receipt third, then a provider-owned session. Codex
+  // then a provider-owned session, and only then the Started receipt. Codex
   // launches through Relay's exclusive app-server owner and never opens the
   // Desktop app as a side effect of Start.
   const start = between(main, "async function startTaskFromPreview", "function safeNoteStem");
@@ -484,13 +485,40 @@ test("the task face's ignition is wired end to end: preload, IPC guard, renderer
   const stampAt = start.indexOf("taskStarted(");
   const nativeAt = start.indexOf("adapters.launchTurn(");
   const receiptAt = start.indexOf("receipt-not-correspondence");
-  assert.ok(authAt > -1 && noteAt > authAt && stampAt > noteAt && nativeAt > stampAt && receiptAt > nativeAt, "auth and start steps stay ordered");
+  assert.ok(authAt > -1 && noteAt > authAt && nativeAt > noteAt && stampAt > nativeAt && receiptAt > nativeAt, "auth and start steps stay ordered");
   assert.doesNotMatch(start, /if \(host === "codex"\) openPacket/);
   // The renderer routes Enter through the ignition while in task mode.
   assert.match(previewRenderer, /if \(taskMode\) \{\s*await submitStart\(\);/);
-  assert.match(previewRenderer, /Start task/);
+  assert.match(previewRenderer, /"Accept"/);
   // The bundle actually carries the new bridge (a stale build would ship without it).
   assert.match(previewPreloadBundle, /relay:preview:startTask/);
+});
+
+test("the Request face offers a local Review Safety before one-click Accept", () => {
+  assert.match(previewHtml, /id="safetyButton"[^>]*>Review Safety<\/button>/);
+  assert.match(previewHtml, /id="safetyPanel"/);
+  assert.match(previewPreloadSource, /reviewSafety:[\s\S]*relay:preview:reviewSafety/);
+  assert.match(previewPreloadBundle, /relay:preview:reviewSafety/);
+  const reviewHandler = between(main, 'ipcMain.handle("relay:preview:reviewSafety"', "});");
+  assert.match(reviewHandler, /id !== String\(entry\.relayId/);
+  assert.match(reviewHandler, /reviewRequestSafetyById/);
+  assert.match(previewRenderer, /async function reviewSafety\(\)/);
+  assert.match(previewRenderer, /plainLanguage/);
+  // The current pill reader, not only the retired standalone preview, carries
+  // the two-button consent surface.
+  assert.match(inbox, /data-request-safety/);
+  assert.match(inbox, />Review Safety<\/button>/);
+  assert.match(inbox, /label: "Accept"/);
+  assert.match(pillPreload, /relay:requestReviewSafety/);
+});
+
+test("a consequential Request result waits on the recipient device before encrypted release", () => {
+  assert.match(main, /candidate\.assessment\?\.level !== "none"/);
+  assert.match(main, /completionReview/);
+  assert.match(main, /releaseProviderCompletion/);
+  assert.match(inbox, /Ready for your review/);
+  assert.match(inbox, /data-result-send/);
+  assert.match(pillPreload, /relay:requestCompletionSend/);
 });
 
 test("the task face declares itself and its runtime in the document", () => {
@@ -882,7 +910,7 @@ test("ordinary Relay folders address the human, the agent, and local Work separa
   assert.match(main, /const isLocalWork = input\?\.localWork === true/);
   assert.match(main, /if \(isRequest\) \{[^]*client\.taskStarted\(id\)/,
     "ordinary local work must not stamp a Request receipt");
-  assert.match(main, /isRequest \? \{ taskStartedAt: stamped \} : \{ workStartedAt: stamped, workCompletedAt: null \}/);
+  assert.match(main, /isRequest \? \{ taskState: "started", taskStartedAt: stamped \} : \{ workStartedAt: stamped, workCompletedAt: null \}/);
   assert.match(pillPreload, /relayWorkStart: \(id, route\) => ipcRenderer\.invoke\("relay:relayWorkStart"/);
 });
 
@@ -992,7 +1020,7 @@ test("Cowork Start owns a remote session, feed, Steer, and honest terminal state
   assert.match(main, /providerCompletionIdempotencyKey/);
   const monitor = between(main, "async function settleCanonicalWorkEnvelope", "function workEventAuthorized");
   assert.match(monitor, /canonicalProviderCompletionCandidate/);
-  assert.match(monitor, /updateStagedPacket\(id, \{ \[completedField\]: candidate\.completedAt \}\)/);
+  assert.match(monitor, /updateStagedPacket\(id, \{ \[completedField\]: candidate\.completedAt, \.\.\.\(isRequest \? \{ taskState: "completed" \} : \{\}\) \}\)/);
   assert.ok(monitor.indexOf("updateStagedPacket") < monitor.indexOf("queueProviderCompletionBridge"), "local Done persists before the fallible wire receipt");
   assert.match(monitor, /ensureCanonicalCompletionMonitor/);
   assert.match(monitor, /startedAt/);

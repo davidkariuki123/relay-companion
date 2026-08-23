@@ -20,7 +20,7 @@
 //   - Mutations (accept/reject/approve/decline/answer) call RelayClient with device-token
 //     auth. ack/mark-read writes state.json directly (atomic temp+rename).
 
-const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, powerMonitor, powerSaveBlocker, shell, screen, systemPreferences } = require("electron");
+const { app, BrowserWindow, Menu, Tray, clipboard, ipcMain, nativeImage, powerMonitor, powerSaveBlocker, shell, screen, systemPreferences } = require("electron");
 
 // The pill is an accessory window that spends most of its life idle behind other
 // apps. Both Chromium and macOS treat that as "safe to throttle", and the cost is
@@ -86,6 +86,7 @@ const { withJsonLock } = require("../src/state-lock.cjs");
 const { atomicWriteJsonSync } = require("../src/atomic-json.cjs");
 const { readDeviceToken } = require("../src/credential-store.cjs");
 const { appendLocalTrace, appendLocalTraces } = require("../src/local-trace.cjs");
+const { createPairingIdentity, persistPairedIdentity, readPairedIdentity } = require("../src/e2ee-identity.cjs");
 const { canonicalInboxItemId, packetIdsForCanonicalItem } = require("../src/inbox-item-id.cjs");
 const claudeInject = require("../src/claude-inject.cjs");
 const codexOpenCurrent = require("./codex-open-current.cjs");
@@ -107,17 +108,12 @@ const {
   RELAY_TRAY_GUID,
   RELAY_TRAY_POSITION_KEY,
   destroyMacTrayPreservingPosition,
-  installMacTrayPositionSignalHandlers,
   prepareMacTrayPosition,
-  readMacTrayPositionCache,
   readMacDefaultsNumber,
-  resolveMacTrayPositionCachePath,
-  writeMacTrayPositionCache,
 } = require("./tray-position.cjs");
 const { RELAY_MAC_BUNDLE_IDENTIFIER } = require("../src/mac-app-identity.cjs");
 
 const RELAY_HOME = process.env.RELAY_HOME || process.env.RELAY_COMPANION_HOME || path.join(os.homedir(), ".relay-companion");
-const TRAY_POSITION_CACHE_PATH = resolveMacTrayPositionCachePath({ relayHome: RELAY_HOME });
 const STATE_PATH = path.join(RELAY_HOME, "state.json");
 const SCHEDULES_PATH = path.join(RELAY_HOME, "schedules.json");
 const PILL_STATUS_PATH = path.join(RELAY_HOME, "pill-status.json");
@@ -208,6 +204,9 @@ let attentionLatched = overlayPrefs.attentionLatched === true;
 // Both default false, so every install that predates them is untouched.
 let pillHidden = overlayPrefs.pillHidden === true;
 let soundsMuted = overlayPrefs.soundsMuted === true;
+// Only a freshly completed agent-installed signup turns this on. Missing means
+// false, so an update never drops an existing signed-in user into onboarding.
+let setupTutorialPending = overlayPrefs.setupTutorialPending === true;
 const presentedRelayIds = new Set(
   Array.isArray(overlayPrefs.presentedRelayIds) ? overlayPrefs.presentedRelayIds.filter(Boolean).map(String) : [],
 );
@@ -299,6 +298,7 @@ function writeOverlayPrefs() {
       attentionLatched,
       pillHidden,
       soundsMuted,
+      setupTutorialPending,
       presentedRelayIds: [...presentedRelayIds],
       activeAttentionIds: [...activeAttentionIds],
     });
@@ -397,6 +397,39 @@ function loadRelayModules() {
   return relayModulesPromise;
 }
 
+let e2eeDeviceTrustModulePromise = null;
+function loadE2eeDeviceTrustModule() {
+  if (!e2eeDeviceTrustModulePromise) {
+    const trustUrl = pathToFileURL(path.join(__dirname, "..", "src", "e2ee-device-trust.js")).href;
+    e2eeDeviceTrustModulePromise = import(trustUrl).catch((error) => {
+      e2eeDeviceTrustModulePromise = null;
+      throw error;
+    });
+  }
+  return e2eeDeviceTrustModulePromise;
+}
+
+async function e2eeDeviceApprovalStatus() {
+  if (!deviceToken()) return { ok: true, available: false, devices: [], pendingDevices: [] };
+  try {
+    const [{ RelayClient }, trust] = await Promise.all([loadRelayModules(), loadE2eeDeviceTrustModule()]);
+    return { ok: true, ...(await trust.listOwnE2eeDeviceApprovals(new RelayClient())) };
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error), available: false, devices: [], pendingDevices: [] };
+  }
+}
+
+async function approveE2eeDevice(deviceId) {
+  const target = String(deviceId || "").trim();
+  if (!target) return { ok: false, error: "Choose a device to approve." };
+  try {
+    const [{ RelayClient }, trust] = await Promise.all([loadRelayModules(), loadE2eeDeviceTrustModule()]);
+    return { ok: true, ...(await trust.approveOwnE2eeDevice(new RelayClient(), target)) };
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) };
+  }
+}
+
 // Account lifecycle deps (ESM, lazy like the modules above): src/account.js is
 // the shared pair/sign-out config persistence, src/notifications.js owns the
 // packet-store reset that re-stages the new account's inbox cleanly.
@@ -429,6 +462,8 @@ function installationAuthorizationController() {
         deviceName: String(readConfigFile().deviceName || "").trim() || os.hostname(),
         openExternal: (url) => shell.openExternal(url),
         onConnected: async (registration) => {
+          setupTutorialPending = true;
+          writeOverlayPrefs();
           const { notifications } = await loadAccountModules();
           nativeCredentialCache = { version: null, token: "" };
           notifications.resetCompanionStateForAccount(
@@ -668,6 +703,96 @@ function accountInfo() {
   };
 }
 
+const CHAT_APP_HANDOFF_PATHS = {
+  chatgpt: "/connect/chatgpt",
+  claude: "/connect/claude",
+};
+
+function relayMcpUrl() {
+  const configured = process.env.RELAY_API_URL || readConfigFile().apiUrl || "https://api.sendrelays.com";
+  const base = new URL(`${String(configured).replace(/\/+$/, "")}/`);
+  const loopback = base.hostname === "localhost" || base.hostname === "127.0.0.1" || base.hostname === "::1";
+  if ((base.protocol !== "https:" && !(base.protocol === "http:" && loopback)) || base.username || base.password) {
+    throw new Error("Relay's MCP address is not safe to copy.");
+  }
+  return new URL("/mcp", base).toString();
+}
+
+async function connectChatApp(provider) {
+  const label = provider === "claude" ? "Claude" : "ChatGPT";
+  const expectedPath = CHAT_APP_HANDOFF_PATHS[provider];
+  if (!expectedPath) return { ok: false, error: "This chat app is not supported." };
+  if (!deviceToken()) return { ok: false, error: `Sign in to Relay before connecting ${label}.` };
+  try {
+    const client = await relayClient();
+    const e2ee = await client.e2eeStatus();
+    if (e2ee?.mode === "required") {
+      if (provider !== "claude") {
+        return { ok: false, error: "ChatGPT connections are not available with Relay E2EE yet." };
+      }
+      const availability = await client.e2eeRemoteEndpoint();
+      if (availability?.enabled !== true) {
+        return { ok: false, error: "Encrypted Claude access is not enabled in this Relay environment yet." };
+      }
+      const identity = readPairedIdentity();
+      if (!identity) throw new Error("Re-pair this device before connecting encrypted Claude access.");
+      const provisioned = await client.provisionE2eeRemoteEndpoint();
+      const endpointUrl = String(provisioned?.endpoint?.url || "");
+      const endpoint = new URL(endpointUrl);
+      if (endpoint.protocol !== "https:" || endpoint.pathname !== "/mcp" || endpoint.search || endpoint.hash) {
+        throw new Error("Relay returned an invalid encrypted Claude endpoint.");
+      }
+      const controlUrl = pathToFileURL(path.join(__dirname, "..", "src", "e2ee-claude-control.js")).href;
+      const { requestE2eeClaudeConnection, waitForE2eeClaudeConnection } = await import(controlUrl);
+      const request = requestE2eeClaudeConnection(identity);
+      const ready = await waitForE2eeClaudeConnection(identity, request.requestId);
+      if (ready.endpointUrl !== endpointUrl) throw new Error("The Relay daemon prepared a different Claude endpoint.");
+      clipboard.writeText(endpointUrl);
+      await shell.openExternal("https://claude.ai/customize/connectors");
+      return { ok: true, expiresAt: ready.enrollmentExpiresAt || "", copiedMcpUrl: endpointUrl, e2ee: true };
+    }
+    const handoff = await client.createMcpBrowserHandoff(provider);
+    const relayWeb = new URL(`${webBase()}/`);
+    const target = new URL(String(handoff?.url || ""));
+    const fragment = new URLSearchParams(target.hash.slice(1));
+    const token = fragment.get("handoff") || "";
+    const fragmentKeys = [...fragment.keys()];
+    if (
+      target.origin !== relayWeb.origin ||
+      target.pathname !== expectedPath ||
+      target.search ||
+      fragmentKeys.length !== 1 ||
+      fragmentKeys[0] !== "handoff" ||
+      !/^mcp_handoff\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token)
+    ) {
+      throw new Error(`Relay returned an invalid ${label} connection link.`);
+    }
+    const copiedMcpUrl = provider === "claude" ? relayMcpUrl() : "";
+    if (copiedMcpUrl) clipboard.writeText(copiedMcpUrl);
+    await shell.openExternal(target.toString());
+    return { ok: true, expiresAt: handoff.expiresAt || "", copiedMcpUrl };
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error);
+    console.error(`[overlay] ${label} connection failed:`, message);
+    return { ok: false, error: message };
+  }
+}
+
+function connectChatGPT() {
+  return connectChatApp("chatgpt");
+}
+
+function connectClaude() {
+  return connectChatApp("claude");
+}
+
+async function completeSetupTutorial() {
+  setupTutorialPending = false;
+  writeOverlayPrefs();
+  await pushInbox(true);
+  return { ok: true };
+}
+
 // After an account change the daemon must restart into the new credentials, or
 // it keeps polling (and staging) as the OLD account until its next launch.
 // This is the shared, VERIFIED restart (src/install.js restartRelayServices):
@@ -732,8 +857,16 @@ async function pairWithCode(input) {
     if (!code) return { ok: false, error: "Enter the pairing code from your browser." };
     const deviceName = accountMod.deviceNameForPairing(readConfigFile());
     const client = new RelayClient();
-    const res = await client.registerDevice({ pairingCode: code, name: deviceName, platform: process.platform });
+    const encryptionIdentity = createPairingIdentity({ pairingCode: code, name: deviceName, platform: process.platform });
+    const res = await client.registerDevice({
+      pairingCode: code,
+      name: deviceName,
+      platform: process.platform,
+      e2eeIdentity: encryptionIdentity.request,
+    });
+    persistPairedIdentity(encryptionIdentity.state, res);
     accountMod.persistPairedAccount({ deviceName, registration: res });
+    await new RelayClient().ensureE2eeReady();
     notifications.resetCompanionStateForAccount(
       { user: res.user, deviceId: res.deviceId, force: true },
       { statePath: STATE_PATH },
@@ -958,8 +1091,12 @@ function readRelays() {
       unread: p.state !== "read",
       relayNotificationKind: p.relayNotificationKind || "task_completed",
       kind: p.kind || "message",
+      taskState: p.taskState || null,
+      historyImported: p.historyImported === true,
+      taskAcceptedAt: p.taskAcceptedAt || null,
       taskStartedAt: p.taskStartedAt || null,
       taskCompletedAt: p.taskCompletedAt || null,
+      completionReview: p.completionReview || null,
       // Ordinary Relays may be worked on locally without becoming Requests.
       // These stamps belong only to the recipient's private Work folder: they
       // never create Started/Done receipts for the sender.
@@ -1463,6 +1600,7 @@ function buildPayload() {
       canDismiss: trayAvailable,
       reopenSurface: reopenSurfaceName(),
       notificationDurationMs: Number(process.env.RELAY_OVERLAY_NOTIFICATION_MS) || 7000,
+      setupTutorialPending,
       // The renderer's playTink gate. `ui` is not part of the push signature, so
       // relay:setSoundsMuted forces a push rather than waiting for inbox data to move.
       soundsMuted,
@@ -2379,6 +2517,7 @@ function previewPayloadForPacket(packetId) {
     title: String(row.title || row.displayTitle || ""),
     forHuman: String(row.forHuman || ""),
     senderName: String(row.senderName || "Relay"),
+    e2ee: Boolean(row.e2ee),
     createdAt: String(row.createdAt || ""),
     unread: row.state !== "read",
     // The thread this message belongs to, so the preview can ask for the
@@ -4688,6 +4827,18 @@ async function startTaskFromPreview(input) {
       return { ok: false, running: false, error: (error && error.message) || String(error) };
     }
   }
+  // Accept is the human's one consent gate. Tell the sender through the same
+  // encrypted event stream before attempting the local provider launch; a
+  // transient receipt failure never blocks work or falls back to plaintext.
+  if (isRequest && String(id).startsWith("erelay_")) {
+    try {
+      const client = await relayClient();
+      await client.e2eeTaskChanged(id, "accepted", { idempotencyKey: `task-accepted:${id}` });
+      updateStagedPacket(id, { taskState: "accepted", taskAcceptedAt: new Date().toISOString() });
+    } catch (error) {
+      console.error("[overlay] encrypted task accepted stamp failed:", id, error && error.message);
+    }
+  }
   // A Request is one Request, not a Relay conversation replay. Run here gives
   // the provider exactly its two canonical documents. Never feed
   // briefingMarkdown here: it is a UI projection and may contain request
@@ -4705,18 +4856,7 @@ async function startTaskFromPreview(input) {
   } catch (error) {
     console.error("[overlay] task note write failed:", error && error.message);
   }
-  // 2. Requests stamp a Started receipt. Ordinary Relay work is private to the
-  // recipient and must never masquerade as a Request or notify the sender.
-  // that fails to stamp must not stop the actual work from starting.
-  if (isRequest) {
-    try {
-      const client = await relayClient();
-      await client.taskStarted(id);
-    } catch (error) {
-      console.error("[overlay] task started stamp failed:", id, error && error.message);
-    }
-  }
-  // 3. Start the run in the selected provider-native surface. Claude Code uses
+  // 2. Start the run in the selected provider-native surface. Claude Code uses
   // its official CLI subscription session; Cowork uses Claude Desktop's own
   // session. Codex uses its official CLI ChatGPT subscription session and a
   // Relay-owned app-server turn and never injects into Codex Desktop. That
@@ -4903,8 +5043,8 @@ async function startTaskFromPreview(input) {
     // Never open a provider app as a fallback. Run here either owns a real
     // native turn or stays waiting with the error visible.
   }
-  // 4. The sender already knows: /task/started stamped the receipt in step 2,
-  // and their ladder reads it (Started → Done). Relay used to ALSO send them a
+  // 3. The sender learns through an encrypted Started receipt after a real run
+  // exists. Relay used to ALSO send them a
   // "Started the task." message, which put a receipt in the room with a person,
   // dragged the request's thread into the Relays list, and made tapping it open
   // a chat instead of the run (David, live). A receipt climbs the ladder; it is
@@ -4917,15 +5057,35 @@ async function startTaskFromPreview(input) {
   // nothing behind it — the stall. A failed start now stays WAITING, says why,
   // and Start can simply be pressed again.
   if (!running) {
+    if (isRequest && String(id).startsWith("erelay_")) {
+      try {
+        const client = await relayClient();
+        await client.e2eeTaskChanged(id, "failed", { idempotencyKey: `task-failed:${id}:${selectedHost}` });
+      } catch (error) {
+        console.error("[overlay] encrypted task failed stamp failed:", id, error && error.message);
+      }
+    }
     try {
-      updateStagedPacket(id, isRequest ? { taskStartedAt: null } : { workStartedAt: null });
+      updateStagedPacket(id, isRequest ? { taskState: "failed", taskStartedAt: null } : { workStartedAt: null });
       pushInbox(true);
     } catch {}
     return { ok: false, error: runError || "The run did not start.", running: false, runError };
   }
+  // Accept is the single consent gate. Stamp Started only after the selected
+  // provider returned a real live run; a launch failure must never tell the
+  // sender that work began. Receipt failure is retriable and does not destroy
+  // the already-running local session.
+  if (isRequest) {
+    try {
+      const client = await relayClient();
+      await client.taskStarted(id);
+    } catch (error) {
+      console.error("[overlay] encrypted task started stamp failed:", id, error && error.message);
+    }
+  }
   try {
     const stamped = new Date().toISOString();
-    updateStagedPacket(id, isRequest ? { taskStartedAt: stamped } : { workStartedAt: stamped, workCompletedAt: null });
+    updateStagedPacket(id, isRequest ? { taskState: "started", taskStartedAt: stamped } : { workStartedAt: stamped, workCompletedAt: null });
     pushInbox(true);
     void ensureCanonicalCompletionMonitor(id);
     return { ok: true, taskStartedAt: stamped, replied: reply.ok, running, runError };
@@ -5279,12 +5439,38 @@ async function settleCanonicalWorkEnvelope(relayId, identity, envelope) {
   });
   if (!candidate) return false;
 
+  // The same local agent that did the work supplies a compact release
+  // assessment in its terminal answer. Harmless answers (including a plain
+  // "done") keep the automatic Request flow. Anything with a meaningful
+  // downside pauses here, with plaintext held only on this device, until the
+  // recipient approves sending it.
+  if (isRequest && candidate.assessment?.level !== "none") {
+    updateStagedPacket(id, {
+      taskState: "review",
+      completionReview: {
+        body: candidate.body,
+        assessment: candidate.assessment || {
+          level: "review",
+          summary: "Check this result before it is sent.",
+          effects: [],
+        },
+        completedAt: candidate.completedAt,
+        provider: identity.provider,
+        sessionId: identity.sessionId,
+        turnId: candidate.turnId || "",
+      },
+    });
+    pushInbox(true).catch(() => {});
+    await stopCanonicalCompletionMonitor(id);
+    return true;
+  }
+
   // Native terminal truth is local truth. Persist Done before attempting the
   // separate wire receipt: an offline API (or a local-only fixture id) cannot
   // turn a completed provider run back into "Didn't finish".
   const latest = rowById(id) || row;
   if (!completionAfter(latest[completedField], startedAt)) {
-    updateStagedPacket(id, { [completedField]: candidate.completedAt });
+    updateStagedPacket(id, { [completedField]: candidate.completedAt, ...(isRequest ? { taskState: "completed" } : {}) });
     pushInbox(true).catch(() => {});
   }
   if (isRequest && hasWireCompletionTarget(id) && !latest.providerCompletionRelayId && !latest.coworkCompletionRelayId) {
@@ -5299,7 +5485,7 @@ async function ensureCanonicalCompletionMonitor(relayId) {
   const row = rowById(id);
   const isRequest = row?.relayNotificationKind === "task";
   const startedAt = isRequest ? row?.taskStartedAt : row?.workStartedAt;
-  if (!row || !startedAt || (isRequest && row.providerCompletionRelayId)) return false;
+  if (!row || !startedAt || (isRequest && (row.providerCompletionRelayId || row.completionReview))) return false;
   const identity = providerWorkIdentity(id);
   if (!identity) return false;
   const previous = canonicalCompletionMonitors.get(id);
@@ -5334,7 +5520,7 @@ function reconcileCanonicalCompletionMonitors() {
     const isRequest = row.relayNotificationKind === "task";
     const startedAt = isRequest ? row.taskStartedAt : row.workStartedAt;
     const completedAt = isRequest ? row.taskCompletedAt : row.workCompletedAt;
-    const wirePending = isRequest && hasWireCompletionTarget(id) && !row.providerCompletionRelayId && !row.coworkCompletionRelayId;
+    const wirePending = isRequest && !row.completionReview && hasWireCompletionTarget(id) && !row.providerCompletionRelayId && !row.coworkCompletionRelayId;
     if (!startedAt || (!wirePending && completionAfter(completedAt, startedAt))) continue;
     if (providerWorkIdentity(id)) void ensureCanonicalCompletionMonitor(id);
   }
@@ -5604,11 +5790,10 @@ async function bridgeProviderCompletion(relayId, provider, sessionId, candidate)
   const operation = (async () => {
     const latest = rowById(key);
     const existing = latest?.providerCompletionRelayId || latest?.coworkCompletionRelayId;
-    if (existing) return { ok: true, relayId: existing };
     const { providerCompletionIdempotencyKey } = await import("../src/provider-completion.js");
     const body = String(candidate?.body || "").trim();
     const client = await relayClient();
-    const sent = await client.sendRelay({
+    const sent = existing ? { relayId: existing } : await client.sendRelay({
       recipient: {},
       kind: "message",
       type: "completion",
@@ -5623,6 +5808,9 @@ async function bridgeProviderCompletion(relayId, provider, sessionId, candidate)
     });
     updateStagedPacket(key, {
       providerCompletionRelayId: String(sent?.relayId || "sent"),
+      taskState: "completed",
+      taskCompletedAt: candidate.completedAt || new Date().toISOString(),
+      completionReview: null,
       ...(provider === "cowork" ? { coworkCompletionRelayId: String(sent?.relayId || "sent") } : {}),
     });
     refreshSent().then(() => pushInbox(true)).catch(() => {});
@@ -5631,6 +5819,30 @@ async function bridgeProviderCompletion(relayId, provider, sessionId, candidate)
   providerCompletionInflight.set(key, operation);
   try { return await operation; }
   finally { if (providerCompletionInflight.get(key) === operation) providerCompletionInflight.delete(key); }
+}
+
+async function releaseProviderCompletion(relayId) {
+  const id = String(relayId || "");
+  const row = rowById(id);
+  const pending = row?.completionReview;
+  if (!row || row.relayNotificationKind !== "task" || !pending?.body) {
+    return { ok: false, error: "This Request has no result waiting for review." };
+  }
+  try {
+    return await bridgeProviderCompletion(
+      id,
+      String(pending.provider || row.workProvider || "unknown"),
+      String(pending.sessionId || providerWorkIdentity(id)?.sessionId || "session"),
+      {
+        body: String(pending.body),
+        assessment: pending.assessment || { level: "review", summary: "Reviewed on this device.", effects: [] },
+        completedAt: pending.completedAt || new Date().toISOString(),
+        turnId: pending.turnId || "",
+      },
+    );
+  } catch (error) {
+    return { ok: false, error: (error && error.message) || String(error) };
+  }
 }
 
 // "Is the agent working right now?" A process and its inbox socket can survive
@@ -6263,7 +6475,6 @@ function createTray() {
     platform: process.platform,
     systemPreferences,
     readDomainValue: (domain, key) => readMacDefaultsNumber(domain, key, { execFileSync }),
-    readCachedValue: () => readMacTrayPositionCache(TRAY_POSITION_CACHE_PATH),
   });
   // Supplying a stable GUID is the documented macOS mechanism for retaining a
   // status item's position between app launches. Keep other platforms on their
@@ -6341,7 +6552,6 @@ function preserveMacTrayPositionForExit() {
     platform: process.platform,
     tray,
     systemPreferences,
-    writeCachedValue: (value) => writeMacTrayPositionCache(TRAY_POSITION_CACHE_PATH, value),
   });
   if (!result.preserved) return;
   trayPositionPreservedForExit = true;
@@ -6350,12 +6560,6 @@ function preserveMacTrayPositionForExit() {
 }
 
 app.on("will-quit", preserveMacTrayPositionForExit);
-installMacTrayPositionSignalHandlers({
-  platform: process.platform,
-  processLike: process,
-  app,
-  preserve: preserveMacTrayPositionForExit,
-});
 
 // ---- ipc -----------------------------------------------------------------
 
@@ -6557,10 +6761,28 @@ ipcMain.handle("relay:preview:reply", (event, input) => {
   if (!entry) return { ok: false, error: "Not the preview window." };
   return sendPreviewReply(input, entry);
 });
+async function reviewRequestSafetyById(relayId) {
+  const id = String(relayId || "");
+  const row = rowById(id);
+  if (!row || row.relayNotificationKind !== "task") return { ok: false, error: "This is not a Request." };
+  try {
+    const { reviewRequestSafety } = await import("../src/request-safety.js");
+    return { ok: true, review: reviewRequestSafety({ ...row, kind: "task" }) };
+  } catch (error) {
+    return { ok: false, error: (error && error.message) || String(error) };
+  }
+}
+ipcMain.handle("relay:preview:reviewSafety", async (event, relayId) => {
+  const entry = previewEntryForEvent(event);
+  const id = String(relayId || "");
+  if (!entry || id !== String(entry.relayId || "")) return { ok: false, error: "Not the matching preview window." };
+  return reviewRequestSafetyById(id);
+});
+ipcMain.handle("relay:requestReviewSafety", (_event, relayId) => reviewRequestSafetyById(relayId));
+ipcMain.handle("relay:requestCompletionSend", (_event, relayId) => releaseProviderCompletion(relayId));
 // The task preview's ignition. One press does four things, in an order chosen
-// so a partial failure degrades honestly: persist the note (so any re-forge
-// keeps it), stamp the Started receipt, launch the session on the chosen
-// runtime, and tell the sender in the conversation.
+// so a partial failure degrades honestly: persist the note, launch the session
+// on the chosen runtime, then stamp the encrypted Started receipt.
 ipcMain.handle("relay:preview:startTask", async (event, input) => {
   if (!isPreviewEvent(event)) return { ok: false, error: "Not the preview window." };
   return startTaskFromPreview(input);
@@ -6999,6 +7221,11 @@ ipcMain.handle("relay:contactsSearch", (_e, q) => groupCall((c) => c.searchConta
 
 // Settings tab: account card + the sign-out / switch-account lifecycle.
 ipcMain.handle("relay:accountInfo", () => accountInfo());
+ipcMain.handle("relay:connectChatGPT", () => connectChatGPT());
+ipcMain.handle("relay:connectClaude", () => connectClaude());
+ipcMain.handle("relay:completeSetupTutorial", () => completeSetupTutorial());
+ipcMain.handle("relay:e2eeDeviceApprovals", () => e2eeDeviceApprovalStatus());
+ipcMain.handle("relay:approveE2eeDevice", (_event, deviceId) => approveE2eeDevice(deviceId));
 ipcMain.handle("relay:installationAuthState", async () =>
   (await installationAuthorizationController()).state());
 ipcMain.handle("relay:installationAuthBegin", async () =>

@@ -1,6 +1,10 @@
 import os from "node:os";
 import { createRequire } from "node:module";
 import { readConfig, withoutDeprecatedCapabilityConfig, writeConfigObject } from "./config.js";
+import e2eeIdentity from "./e2ee-identity.cjs";
+import { removeE2eeRuntimeState } from "./e2ee-state.js";
+
+const { removePairedIdentity } = e2eeIdentity;
 
 const { deleteDeviceToken } = createRequire(import.meta.url)("./credential-store.cjs");
 
@@ -70,8 +74,10 @@ export function persistPairedAccount({
   requireNativeCredential = false,
   credentialBackend,
 } = {}) {
+  const existing = readConfig();
+  if (existing.deviceId && existing.deviceId !== registration?.deviceId) removeE2eeRuntimeState();
   return writeConfigObject(
-    pairedAccountConfig(readConfig(), { apiUrl, webUrl, deviceName, registration }),
+    pairedAccountConfig(existing, { apiUrl, webUrl, deviceName, registration }),
     { requireNativeCredential, ...(credentialBackend ? { credentialBackend } : {}) },
   );
 }
@@ -82,7 +88,10 @@ export function persistSignedOutAccount({ credentialBackend = { deleteDeviceToke
     const removed = credentialBackend.deleteDeviceToken({ account: config.credentialAccount || "device-token" });
     if (!removed.ok) throw new Error(`Could not remove Relay credential from the native credential store (${removed.detail || "unknown error"}).`);
   }
-  return writeConfigObject(signedOutAccountConfig(config));
+  const next = writeConfigObject(signedOutAccountConfig(config));
+  removeE2eeRuntimeState();
+  removePairedIdentity();
+  return next;
 }
 
 /**

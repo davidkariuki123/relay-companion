@@ -566,7 +566,11 @@ export function stagePlainRelayItem(
   };
   const contentPath = writeNotificationPacketContent({ id: item.relayId }, content, statePath);
   const preserveSetupUnread = existing.setupImportedUnread === true && existing.state === "unread";
-  const readState = forceUnread || preserveSetupUnread ? "unread" : existing.state === "read" || item.state === "read" ? "read" : "unread";
+  const readState = forceUnread || preserveSetupUnread
+    ? "unread"
+    : existing.state === "read" || item.state === "read" || item.state === "acknowledged"
+      ? "read"
+      : "unread";
   const row = {
     ...existing,
     id: item.relayId,
@@ -581,6 +585,8 @@ export function stagePlainRelayItem(
     // Task receipt timestamps, present only on kind "task" items. The server
     // is authoritative once it has them; until then keep a locally stamped
     // value (the preview writes one at Start) instead of reverting to null.
+    taskState: item.taskState || existing.taskState || ((item.kind || packet?.kind) === "task" ? "requested" : null),
+    taskAcceptedAt: item.taskAcceptedAt || existing.taskAcceptedAt || null,
     taskStartedAt: item.taskStartedAt || existing.taskStartedAt || null,
     taskCompletedAt: item.taskCompletedAt || existing.taskCompletedAt || null,
     // The completion species has to survive staging or the pill cannot tell an
@@ -622,6 +628,11 @@ export function stagePlainRelayItem(
     groupSendId: item.groupSendId || packet?.groupSendId || null,
     recipientGroupId: item.recipientGroupId || packet?.recipientGroupId || null,
     recipientGroupName: item.recipientGroupName || packet?.recipientGroupName || null,
+    // This marker is created only after authenticated local MLS decryption. It
+    // drives a visible trust label; the server cannot manufacture it in a
+    // plaintext inbox response.
+    e2ee: packet?.e2ee || item.e2ee || null,
+    historyImported: packet?.historyImported === true || item.historyImported === true,
     // A restoration is a fresh inbox delivery even when the underlying relay was
     // read before deletion. Use that timestamp so an older account read-all
     // cutoff cannot immediately collapse the restored row back to read.

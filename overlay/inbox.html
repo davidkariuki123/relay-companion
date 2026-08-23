@@ -453,6 +453,12 @@
     background:var(--accent-soft); border-radius:var(--r-pill); padding:3px 7px;
     transform:translateY(-1px);
   }
+  .echip {
+    flex:0 0 auto; font-family:var(--sans); font-size:10px; font-weight:600;
+    letter-spacing:.01em; line-height:1; color:var(--ok);
+    border:1px solid color-mix(in srgb, var(--ok) 38%, transparent);
+    border-radius:var(--r-pill); padding:3px 7px; transform:translateY(-1px);
+  }
   .row.settled .rk-subject { color:var(--muted-2); }
 
   /* subject: single-line serif, right-edge fade mask */
@@ -1831,6 +1837,10 @@
   .qr .ta-rail .ta-later { background:transparent; border:1px solid var(--edge); color:var(--muted); font-size:11px; padding:5px 13px; }
   .qr .ta-rail .ta-later:hover { color:var(--ink); border-color:var(--muted-3); }
   .qr .ta-rail .ta-approve { background:var(--accent); color:var(--on-accent,#fff); }
+  .request-safety, .result-review { margin:0 0 4px; padding:9px 10px; border:1px solid var(--hair); border-radius:11px; background:var(--wash); font-family:var(--sans); color:var(--muted); font-size:11px; line-height:1.45; }
+  .request-safety strong, .result-review strong { display:block; margin-bottom:3px; color:var(--ink); font-size:11.5px; }
+  .request-safety ul, .result-review ul { margin:5px 0 0; padding-left:17px; }
+  .request-safety .permission-line { margin-top:5px; color:var(--ink-soft); }
   /* the route menu — the island's night material */
   .rt-menu { position:fixed; z-index:99; min-width:150px; padding:5px; border-radius:12px;
     background:linear-gradient(180deg,#2B2622,#1E1A16);
@@ -2006,6 +2016,16 @@
   .sv-update { display:flex; flex-direction:column; gap:8px; align-items:flex-start; }
   .sv-setup-link { appearance:none; border:0; padding:0; background:transparent; color:var(--ink); font:inherit; cursor:pointer; text-decoration:underline; text-decoration-color:color-mix(in srgb, var(--ink) 38%, transparent); text-underline-offset:2px; }
   .sv-update-btn { width:auto; padding:7px 12px; border-radius:var(--r-2); font-family:var(--sans); font-size:12px; }
+  .sv-device-section { margin:24px 12px 0; }
+  .sv-device-list { overflow:hidden; border-radius:var(--r-3); background:var(--raised); box-shadow:inset 0 0 0 1px var(--edge); }
+  .sv-device-row { display:flex; align-items:center; gap:10px; min-height:58px; padding:11px 12px; }
+  .sv-device-row + .sv-device-row { border-top:1px solid var(--edge); }
+  .sv-device-shield { flex:0 0 auto; width:28px; height:28px; border-radius:50%; display:grid; place-items:center; background:var(--accent-soft); color:var(--accent); font-size:14px; }
+  .sv-device-copy { min-width:0; flex:1 1 auto; display:flex; flex-direction:column; }
+  .sv-device-name { font-size:13px; font-weight:600; color:var(--ink); }
+  .sv-device-note { margin-top:3px; font-size:11px; line-height:1.35; color:var(--muted-2); }
+  .sv-device-approve { appearance:none; border:1px solid color-mix(in srgb, var(--accent) 32%, var(--edge)); border-radius:999px; padding:6px 10px; background:var(--accent-soft); color:var(--accent); font:600 11px/1 var(--sans); cursor:pointer; }
+  .sv-device-approve:disabled { opacity:.45; cursor:default; }
   .sv-provider-section { margin:24px 12px 0; }
   .sv-provider-list { overflow:hidden; border-radius:var(--r-3); background:var(--raised); box-shadow:inset 0 0 0 1px var(--edge); }
   .sv-provider { padding:12px; }
@@ -2091,8 +2111,8 @@
 
   /* ---- first run -------------------------------------------------------
      The agent has already installed the app. Account setup stays inside this
-     card; only Google's provider-owned OAuth page may leave for the browser.
-     Once core writes the device credential this whole view disappears and the
+     card; provider-owned sign-in and connector pages may leave for the browser.
+     A final skippable chat setup page follows account connection, then the
      ordinary inbox paints Shane's real Welcome relay. */
   .card.signup .tabs, .card.signup .scroll, .card.signup .minimize-btn, .card.signup .count { display:none; }
   /* First-run content is taller than the folded pill. If it remains in layout,
@@ -2132,6 +2152,20 @@
   .su-account-name { display:block; font-size:13px; font-weight:600; color:var(--ink); }
   .su-account-email, .su-device { display:block; margin-top:3px; font-size:11px; line-height:1.4; color:var(--muted); overflow-wrap:anywhere; }
   .su-device { margin-top:10px; padding-top:10px; border-top:1px solid var(--hair); }
+  .su-chat-list { margin-top:17px; display:grid; gap:8px; }
+  .su-chat-option {
+    appearance:none; width:100%; min-height:56px; padding:10px 12px; border:1px solid var(--edge); border-radius:var(--r-3);
+    display:flex; align-items:center; gap:10px; color:var(--ink); background:var(--bg); text-align:left; cursor:pointer;
+  }
+  .su-chat-option:hover { background:var(--wash); }
+  .su-chat-option:disabled { cursor:default; opacity:.5; }
+  .su-chat-copy { flex:1 1 auto; min-width:0; display:grid; gap:3px; }
+  .su-chat-name { font-size:13px; font-weight:600; }
+  .su-chat-detail { color:var(--muted); font-size:11px; line-height:1.35; }
+  .su-chat-action { flex:none; color:var(--accent); font-size:11px; font-weight:600; }
+  .su-agent-note { margin-top:11px; padding:10px 12px; border-radius:var(--r-2); color:var(--muted); background:var(--wash); font-size:11px; line-height:1.42; }
+  .su-agent-note strong { display:block; margin-bottom:2px; color:var(--ink); font-weight:600; }
+  .su-chat-footer { margin-top:13px; }
   .su-checks { margin:20px 0 0; display:grid; gap:9px; color:var(--muted); font-size:12px; }
   .su-check { display:flex; align-items:center; gap:8px; }
   .su-check-mark { color:var(--accent); font-weight:700; }
@@ -3459,12 +3493,13 @@
 
   // ---------- state ----------
   let activeView = "relays";
-  let payload = { account: { paired: false }, ui: { canDismiss: true, reopenSurface: "the Relay icon" }, features: { requests:false, cowork:false, environment:"production" }, relays: [], sent: [], requests: [], contacts: [] };
+  let payload = { account: { paired: false }, ui: { canDismiss: true, reopenSurface: "the Relay icon", setupTutorialPending:false }, features: { requests:false, cowork:false, environment:"production" }, relays: [], sent: [], requests: [], contacts: [] };
   let signupStage = "installed";
   let signupBusy = false;
   let signupEmail = "";
   let signupAccount = null;
   let signupError = "";
+  let signupNote = "";
   let signupPollTimer = null;
   let signupStateLoaded = false;
   let signupForceGoogleSelection = false;
@@ -3714,6 +3749,7 @@
         <span class="rk-body">
           <span class="th-top">
             <span class="th-party">${esc(name)}</span>
+            ${row.e2ee ? `<span class="echip" title="Only the sender's and recipient's devices can read this message">Encrypted</span>` : ""}
             <span class="th-time">${esc(timeAgo(identity.latestAt))}</span>
           </span>
           <span class="rk-line"><span class="th-title">${senderPrefix}${esc(gist)}</span>${identity.unreadCount ? `<span class="th-count">${identity.unreadCount}</span>` : ""}</span>
@@ -4013,6 +4049,7 @@
   }
   function chatOrder() { return protoPref("proto.convOrder", "chat"); } // "chat" | "inbox"
   const requestLocal = new Map(); // packetId -> "running" | "parked" (prototype-local approval state)
+  const requestSafetyReviews = new Map(); // decrypted, local-only advisory review
   // A REQUEST arrives on the wire as kind "task" and stages as relayNotificationKind
   // "task"; the legacy task-pipeline rows say "task_request". Both are Requests —
   // matching only one is why the Requests tab read "No requests yet" while three
@@ -4068,6 +4105,7 @@
     if (local === "running") return "running";
     if (local === "done") return "done";
     if (local === "stopped") return "stopped";
+    if (row.completionReview) return "review";
     // The completion receipt may arrive in Claude's final tool turn a few
     // milliseconds before Relay's worker has flushed and released the native
     // transcript. Ownership wins over the receipt for that interval: Open must
@@ -5210,10 +5248,25 @@
     const actionButton = action === "work"
       ? `<button type="button" class="ta-approve" data-work-start="${esc(r.id)}">${esc(label)}</button>`
       : `<button type="button" class="ta-approve" data-approve="${esc(r.id)}">${esc(label)}</button>`;
-    const railActions = actions || `<button class="ta-later" type="button" data-open-in="${esc(r.id)}">Open in ${esc(rt.app)}</button>${actionButton}`;
+    const review = requestSafetyReviews.get(String(r.id));
+    const reviewHtml = action === "request" && review ? `
+      <div class="request-safety" role="status">
+        <strong>${review.concern === "high" ? "Look closely before accepting" : "Safety review"}</strong>
+        <div>${esc(review.summary || "")}</div>
+        ${Array.isArray(review.permissions) && review.permissions.length
+          ? `<div class="permission-line">May need: ${review.permissions.map((item) => esc(item.label || "")).filter(Boolean).join(" · ")}</div>
+             <ul>${review.permissions.map((item) => `<li>${esc(item.effect || "")}</li>`).join("")}</ul>`
+          : `<div class="permission-line">${esc(review.plainLanguage || "No powerful access is obvious from the request.")}</div>`}
+        ${review.trustContext ? `<div class="permission-line">${esc(review.trustContext)}</div>` : ""}
+      </div>` : "";
+    const defaultActions = action === "request"
+      ? `<button class="ta-later" type="button" data-request-safety="${esc(r.id)}">Review Safety</button>${actionButton}`
+      : `<button class="ta-later" type="button" data-open-in="${esc(r.id)}">Open in ${esc(rt.app)}</button>${actionButton}`;
+    const railActions = actions || defaultActions;
     return `
       <div class="ta-dock${inline ? " inline" : ""}" data-stop="1">
         <div class="qr ta-qr col">
+          ${reviewHtml}
           <textarea rows="1" class="ta-note" placeholder="Tell ${esc(rt.app)} anything…">${esc(draft)}</textarea>
           <div class="ta-rail">
             <div class="rt-chips">
@@ -5230,8 +5283,39 @@
       </div>`;
   }
   function requestDockHtml(r, { inline = false } = {}) {
+    if (r.historyImported) {
+      return `<div class="ta-dock${inline ? " inline" : ""}" data-stop="1">
+        <div class="qr ta-qr col"><div class="request-safety" role="status">
+          <strong>Imported Request history</strong>
+          <div>This is a private copy of an earlier Request. It cannot be accepted or run again.</div>
+        </div></div>
+      </div>`;
+    }
     const state = requestState(r.id);
     const draft = String(requestWorkDrafts.get(String(r.id)) || "");
+    if (state === "review") {
+      const pending = r.completionReview || {};
+      const assessment = pending.assessment || {};
+      const effects = Array.isArray(assessment.effects) ? assessment.effects : [];
+      return `
+      <div class="ta-dock${inline ? " inline" : ""}" data-stop="1">
+        <div class="qr ta-qr col">
+          <div class="result-review" role="status">
+            <strong>Result ready — check its release risk</strong>
+            <div>${esc(assessment.summary || "Check this result before it leaves your device.")}</div>
+            ${effects.length ? `<ul>${effects.map((effect) => `<li>${esc(effect)}</li>`).join("")}</ul>` : ""}
+          </div>
+          <div class="ta-rail">
+            ${continuedRouteChipsHtml(r)}
+            <span class="rt-spacer"></span>
+            <span class="ta-acts">
+              <button class="ta-later" type="button" data-open-run="${esc(r.id)}">Open result</button>
+              <button type="button" class="ta-approve" data-result-send="${esc(r.id)}">Send result</button>
+            </span>
+          </div>
+        </div>
+      </div>`;
+    }
     const canContinueSession = state === "stopped" && requestHasNativeSession(r);
     if (state === "running" || state === "done" || canContinueSession) {
       const live = state === "running";
@@ -5269,7 +5353,7 @@
     return idleRunDockHtml(r, {
       inline,
       draft,
-      label: state === "stopped" ? "Start again" : "Start",
+      label: "Accept",
       actions: scheduleActionsHtml(r),
     });
   }
@@ -5305,6 +5389,34 @@
   }
   function requestControlsHtml(r, opts) { return requestDockHtml(r, opts) || requestStatusLine(r, opts); }
   function wireRequestControls(scope, onDone) {
+    for (const button of scope.querySelectorAll("[data-request-safety]")) button.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const id = button.getAttribute("data-request-safety");
+      if (!id || button.disabled) return;
+      button.disabled = true;
+      button.textContent = "Reviewing…";
+      const result = await window.relay.requestReviewSafety(id).catch((error) => ({ ok:false, error:String(error?.message || error) }));
+      if (result?.ok && result.review) requestSafetyReviews.set(String(id), result.review);
+      else setRowNote(id, result?.error || "The safety review could not be prepared.", "err");
+      renderAll();
+    });
+    for (const button of scope.querySelectorAll("[data-result-send]")) button.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const id = button.getAttribute("data-result-send");
+      if (!id || button.disabled) return;
+      button.disabled = true;
+      button.textContent = "Sending…";
+      const result = await window.relay.requestCompletionSend(id).catch((error) => ({ ok:false, error:String(error?.message || error) }));
+      if (!result?.ok) {
+        button.disabled = false;
+        button.textContent = "Send result";
+        setRowNote(id, result?.error || "The result could not be sent.", "err");
+      } else {
+        setRowNote(id, "Encrypted result sent.", "ok");
+        fadeRowNoteLater(id, 3000);
+      }
+      renderAll();
+    });
     for (const button of scope.querySelectorAll("[data-run-queued-now]")) button.addEventListener("click", async (event) => {
       event.stopPropagation();
       const dock = button.closest(".ta-dock");
@@ -6104,7 +6216,7 @@
         <div class="rd-rule"></div>
         <div class="rd-agentcopy">${readerParagraphs(agentText)}</div>`;
     const humanDoc = `
-        <div class="rd-kicker">${request ? "request · " : ""}${esc(sender)} · ${esc(timeAgo(r.createdAt))}${r.unread ? "" : " · read"}</div>
+        <div class="rd-kicker">${request ? "request · " : ""}${esc(sender)}${r.e2ee ? " · end-to-end encrypted" : ""} · ${esc(timeAgo(r.createdAt))}${r.unread ? "" : " · read"}</div>
         <div class="rd-headline${headlineClass}">${esc(subject)}</div>
         <div class="rd-rule"></div>
         <div class="rd-body">${readerParagraphs(r.forHuman)}</div>
@@ -6366,7 +6478,7 @@
   function renderRequestsBoard() {
     const rows = requestRows();
     requestsEmptyEl.classList.toggle("gone", rows.length > 0);
-    const groups = { waiting: [], running: [], stopped: [], done: [], parked: [], scheduled: [] };
+    const groups = { waiting: [], running: [], review: [], stopped: [], done: [], parked: [], scheduled: [] };
     for (const r of rows) {
       const sc = scheduleFor(r.id);
       // An accepted or paused cadence OWNS the row between runs.
@@ -6410,6 +6522,7 @@
           return `<span class="tb-when">${phrase}</span>`;
         })
       + section("Working", groups.running, () => "")
+      + section("Ready for your review", groups.review, () => "")
       // The state's name is the fact: it began, the agent is gone, and nothing
       // came back. "Stopped" named nothing and told the reader nothing to do
       // (David). This one says what happened and implies the next move — the
@@ -6578,6 +6691,7 @@
         <div class="rk-top">
           <span class="rk-sender">${esc(sender)}</span>
           ${isTask ? `<span class="kchip">Request</span>` : ""}
+          ${r.e2ee ? `<span class="echip" title="Only the sender's and recipient's devices can read this message">Encrypted</span>` : ""}
           <span class="rk-time">${timeAgo(r.createdAt)}</span>
         </div>
         <div class="rk-subject">${esc(subject)}</div>
@@ -8526,6 +8640,7 @@
         textLike, request,
         materializedCodex: Boolean(r.materializedCodex),
         materializedClaude: Boolean(r.materializedClaude),
+        e2ee: Boolean(r.e2ee),
         body: r.forHuman || "",
         agent: String(r.forAgent || ""),
         reactions: r.reactions || { aggregates: [], events: [] },
@@ -9356,7 +9471,7 @@
       // reply-chain seam underneath it when both the time gap and thread change.
       const chainSeamClass = chainChanged && !chunkDateLabel ? " th-seam" : "";
       const runHeader = cont ? "" : `
-      <div class="th-run${headerGapClass}${chainSeamClass}${mine ? " mine" : ""}"><span class="th-party ${partyColorClass(who, mine)}">${esc(who)}</span></div>`;
+      <div class="th-run${headerGapClass}${chainSeamClass}${mine ? " mine" : ""}"><span class="th-party ${partyColorClass(who, mine)}">${esc(who)}</span>${m.e2ee ? `<span class="echip" title="Only the sender's and recipient's devices can read this message">Encrypted</span>` : ""}</div>`;
       const open = expandedMsgIds.has(m.id);
       const inlineBody = !textLike && !m.request && !open
         && !!m.body && String(m.body).length <= INLINE_BODY_MAX;
@@ -9906,6 +10021,13 @@
   let svSignOutArmed = false;
   let svSignOutTimer = null;
   let svFocusCodeOnce = false;
+  let deviceApprovalInfo = null;
+  let deviceApprovalBusy = "";
+  let deviceApprovalError = "";
+  let deviceApprovalNote = "";
+  let chatConnectionBusy = false;
+  let chatConnectionError = "";
+  let chatConnectionNote = "";
 
   function resetSignOutArm() {
     svSignOutArmed = false;
@@ -10053,6 +10175,76 @@
       ${providerAuthError ? `<div class="row-err sv-err">${esc(providerAuthError)}</div>` : ""}
     </section>`;
   }
+  function chatConnectionsHtml(info) {
+    if (!info?.paired || (!window.relay.connectChatGPT && !window.relay.connectClaude)) return "";
+    return `<section class="sv-provider-section" data-stop="1">
+      <div class="sv-open-title">Chat connections</div>
+      <div class="sv-open-intro">Use Relay directly in the chats you already have. Your Companion account is carried into the connection, so Relay does not ask you to sign in again.</div>
+      <div class="sv-provider-list">
+        <div class="sv-provider">
+          <div class="sv-provider-top">
+            <span class="sv-provider-dot" aria-hidden="true"></span>
+            <span class="sv-provider-copy">
+              <span class="sv-provider-name">ChatGPT</span>
+              <span class="sv-provider-status">ChatGPT will show the Relay access it is requesting before you approve.</span>
+            </span>
+          </div>
+          <div class="sv-provider-actions" data-stop="1">
+            <button class="sv-provider-btn primary" type="button" id="svConnectChatGPT" ${chatConnectionBusy ? "disabled" : ""}>${chatConnectionBusy ? "Opening…" : "Connect ChatGPT"}</button>
+          </div>
+        </div>
+        <div class="sv-provider">
+          <div class="sv-provider-top">
+            <span class="sv-provider-dot" aria-hidden="true"></span>
+            <span class="sv-provider-copy">
+              <span class="sv-provider-name">Claude</span>
+              <span class="sv-provider-status">Relay copies its connector address and opens Claude at the right setup page.</span>
+            </span>
+          </div>
+          <div class="sv-provider-actions" data-stop="1">
+            <button class="sv-provider-btn primary" type="button" id="svConnectClaude" ${chatConnectionBusy ? "disabled" : ""}>${chatConnectionBusy ? "Opening…" : "Connect Claude"}</button>
+          </div>
+        </div>
+      </div>
+      ${chatConnectionNote ? `<div class="sv-note">${esc(chatConnectionNote)}</div>` : ""}
+      ${chatConnectionError ? `<div class="row-err sv-err">${esc(chatConnectionError)}</div>` : ""}
+    </section>`;
+  }
+
+  async function connectChatGptFromSettings() {
+    if (chatConnectionBusy || !window.relay.connectChatGPT) return;
+    chatConnectionBusy = true;
+    chatConnectionError = "";
+    chatConnectionNote = "";
+    renderSettings();
+    try {
+      const result = await window.relay.connectChatGPT();
+      if (!result?.ok) throw new Error(result?.error || "ChatGPT setup could not be opened.");
+      chatConnectionNote = "Continue in your browser to install Relay in ChatGPT.";
+    } catch (error) {
+      chatConnectionError = error?.message || "ChatGPT setup could not be opened.";
+    } finally {
+      chatConnectionBusy = false;
+      renderSettings();
+    }
+  }
+  async function connectClaudeFromSettings() {
+    if (chatConnectionBusy || !window.relay.connectClaude) return;
+    chatConnectionBusy = true;
+    chatConnectionError = "";
+    chatConnectionNote = "";
+    renderSettings();
+    try {
+      const result = await window.relay.connectClaude();
+      if (!result?.ok) throw new Error(result?.error || "Claude setup could not be opened.");
+      chatConnectionNote = "Relay’s address is copied. In Claude, choose +, Add custom connector, then paste it.";
+    } catch (error) {
+      chatConnectionError = error?.message || "Claude setup could not be opened.";
+    } finally {
+      chatConnectionBusy = false;
+      renderSettings();
+    }
+  }
   function providerIntegrationsDialogHtml() {
     const dialog = providerIntegrationsDialog;
     if (!dialog) return "";
@@ -10116,6 +10308,33 @@
         </div>
       </div>`;
   }
+  function deviceApprovalsHtml(info) {
+    if (!info?.paired || !window.relay.e2eeDeviceApprovals) return "";
+    const pending = Array.isArray(deviceApprovalInfo?.pendingDevices) ? deviceApprovalInfo.pendingDevices : [];
+    const body = !deviceApprovalInfo
+      ? '<div class="sv-device-row"><span class="sv-device-copy"><span class="sv-device-note">Checking trusted devices…</span></span></div>'
+      : pending.length
+        ? pending.map((device) => {
+            const enrolled = device.enrolledAt ? new Date(device.enrolledAt).toLocaleDateString() : "recently";
+            const shortId = String(device.deviceId || "").slice(-6);
+            const busy = deviceApprovalBusy === device.deviceId;
+            return `<div class="sv-device-row">
+              <span class="sv-device-shield" aria-hidden="true">◇</span>
+              <span class="sv-device-copy">
+                <span class="sv-device-name">New Relay device</span>
+                <span class="sv-device-note">Paired ${esc(enrolled)}${shortId ? ` · ${esc(shortId)}` : ""}. Approving lets encrypted messages and history include it.</span>
+              </span>
+              <button class="sv-device-approve" type="button" data-device-approve="${esc(device.deviceId)}" ${deviceApprovalBusy ? "disabled" : ""}>${busy ? "Approving…" : "Approve"}</button>
+            </div>`;
+          }).join("")
+        : '<div class="sv-device-row"><span class="sv-device-shield" aria-hidden="true">✓</span><span class="sv-device-copy"><span class="sv-device-name">No devices awaiting approval</span><span class="sv-device-note">New devices cannot join encrypted delivery until a trusted device vouches for them.</span></span></div>';
+    return `<section class="sv-device-section" data-stop="1">
+      <div class="sv-open-title">Device approvals</div>
+      <div class="sv-device-list">${body}</div>
+      ${deviceApprovalNote ? `<div class="sv-note">${esc(deviceApprovalNote)}</div>` : ""}
+      ${deviceApprovalError ? `<div class="row-err sv-err">${esc(deviceApprovalError)}</div>` : ""}
+    </section>`;
+  }
   function renderSettings() {
     if (activeView !== "settings") return;
     const info = settingsInfo;
@@ -10152,6 +10371,8 @@
     if (svPairOpen) html += svPairRowHtml();
     if (svNote) html += `<div class="sv-note">${esc(svNote)}</div>`;
     html += `<div class="row-err sv-err" id="svErr">${esc(svError)}</div>`;
+    html += deviceApprovalsHtml(info);
+    html += chatConnectionsHtml(info);
     // AGENT CONNECTIONS ARE REQUESTS SUBSTRATE (Sven, 2026-08-17): provider
     // subscription profiles and the MCP / connected-apps inventory exist so a
     // request can RUN here. Prod v1 only opens relays; the section rides the
@@ -10286,6 +10507,10 @@
     for (const sw of settingsViewEl.querySelectorAll("[data-quiet]")) {
       sw.addEventListener("click", () => toggleQuietPref(sw.getAttribute("data-quiet"), sw));
     }
+    const connectChatGpt = document.getElementById("svConnectChatGPT");
+    if (connectChatGpt) connectChatGpt.addEventListener("click", connectChatGptFromSettings);
+    const connectClaude = document.getElementById("svConnectClaude");
+    if (connectClaude) connectClaude.addEventListener("click", connectClaudeFromSettings);
     for (const button of settingsViewEl.querySelectorAll("[data-provider-connect]")) {
       button.addEventListener("click", () => connectProviderFromSettings(button.getAttribute("data-provider-connect")));
     }
@@ -10300,6 +10525,9 @@
         providerIntegrationsDialog = { provider:button.getAttribute("data-provider-integrations"), kind:button.getAttribute("data-integration-kind") };
         renderSettings();
       });
+    }
+    for (const button of settingsViewEl.querySelectorAll("[data-device-approve]")) {
+      button.addEventListener("click", () => approveDeviceFromSettings(button.getAttribute("data-device-approve")));
     }
     const integrationsBackdrop = document.getElementById("providerIntegrationsBackdrop");
     const closeIntegrations = () => { providerIntegrationsDialog = null; renderSettings(); };
@@ -10489,6 +10717,28 @@
     await refreshProviderAuth();
     if (result?.ok) refreshProviderInventory({ force:true }).catch(() => {});
   }
+  async function approveDeviceFromSettings(deviceId) {
+    if (!deviceId || deviceApprovalBusy || !window.relay.approveE2eeDevice) return;
+    deviceApprovalBusy = deviceId;
+    deviceApprovalError = "";
+    deviceApprovalNote = "";
+    renderSettings();
+    let result = null;
+    try { result = await window.relay.approveE2eeDevice(deviceId); } catch (error) {
+      result = { ok:false, error:error?.message || "Could not approve this device." };
+    }
+    deviceApprovalBusy = "";
+    if (!result?.ok) {
+      deviceApprovalError = result?.error || "Could not approve this device.";
+      renderSettings();
+      return;
+    }
+    deviceApprovalNote = result.historyError
+      ? `Device approved for new encrypted messages. Prior history is still waiting: ${result.historyError}`
+      : "Device approved. Its encrypted history transfer has been offered.";
+    try { deviceApprovalInfo = await window.relay.e2eeDeviceApprovals(); } catch {}
+    renderSettings();
+  }
   // Notification switches are phrased positively while storage remains the
   // original hidden/muted booleans. Optimistic: flip the visible state and the
   // local sound gate first, then reconcile from main's authoritative answer.
@@ -10609,6 +10859,17 @@
       // its local read finishes; provider health must never hold this card up.
       if (JSON.stringify(settingsInfo) !== before) renderSettings();
     })();
+    const deviceApprovalTask = (async () => {
+      if (!window.relay.e2eeDeviceApprovals) return;
+      let result = null;
+      try { result = await window.relay.e2eeDeviceApprovals(); } catch (error) {
+        result = { ok:false, error:error?.message || "Could not check device approvals." };
+      }
+      if (seq !== settingsLoadSeq) return;
+      deviceApprovalInfo = result?.ok === false ? { available:false, pendingDevices:[] } : result;
+      deviceApprovalError = result?.ok === false ? result.error || "Could not check device approvals." : "";
+      renderSettings();
+    })();
     // Provider profiles and integration health are only read when Agent
     // connections can render; outside local builds the pill never inspects
     // the CLIs' local state (the section is requests substrate — Sven,
@@ -10643,7 +10904,7 @@
       // events converge on one scan.
       refreshProviderInventory({ seq }).catch(() => {});
     })();
-    await Promise.allSettled([accountTask, authTask, inventoryTask]);
+    await Promise.allSettled([accountTask, deviceApprovalTask, authTask, inventoryTask]);
   }
   // Provider state is live product state, not something the user should have
   // to refresh manually. Re-read it whenever Settings becomes visible again
@@ -10736,10 +10997,51 @@
     }, 1400);
   }
 
+  async function connectChatFromSignup(provider) {
+    if (signupBusy) return;
+    const connect = provider === "claude" ? window.relay.connectClaude : window.relay.connectChatGPT;
+    const label = provider === "claude" ? "Claude" : "ChatGPT";
+    if (!connect) return;
+    signupBusy = true; signupError = ""; signupNote = ""; renderSignup();
+    try {
+      const result = await connect();
+      if (!result?.ok) throw new Error(result?.error || `${label} setup could not be opened.`);
+      signupBusy = false;
+      signupNote = provider === "claude"
+        ? "Relay’s address is copied. In Claude, choose +, Add custom connector, then paste it."
+        : "Continue in your browser to install Relay in ChatGPT.";
+      renderSignup();
+    } catch (reason) {
+      signupFailure(reason, `${label} setup could not be opened.`);
+    }
+  }
+
+  async function completeSignupTutorial() {
+    if (signupBusy || !window.relay.completeSetupTutorial) return;
+    signupBusy = true; signupError = ""; renderSignup();
+    try {
+      const result = await window.relay.completeSetupTutorial();
+      if (!result?.ok) throw new Error(result?.error || "Relay could not finish setup.");
+      signupBusy = false; signupNote = ""; signupStage = "installed";
+      payload.ui = { ...payload.ui, setupTutorialPending:false };
+      renderAll();
+    } catch (reason) {
+      signupFailure(reason, "Relay could not finish setup. Try again.");
+    }
+  }
+
   function renderSignup() {
     if (!signupBodyEl) return;
     const busy = signupBusy ? " disabled" : "";
     const error = signupError ? `<p class="su-note su-error" role="alert">${esc(signupError)}</p>` : "";
+    const note = signupNote ? `<p class="su-note" role="status">${esc(signupNote)}</p>` : "";
+    if (signupStage === "chat-setup") {
+      signupBodyEl.innerHTML = `<p class="su-step">One last thing</p><h1 class="su-title">Use Relay in your chats.</h1><p class="su-copy">Connect Claude now. You can also do this later from Settings.</p><div class="su-chat-list"><button class="su-chat-option" id="suConnectClaude" type="button"${signupBusy || !window.relay.connectClaude ? " disabled" : ""}><span class="su-chat-copy"><span class="su-chat-name">Sign in with Claude</span><span class="su-chat-detail">Copy Relay’s address and open Claude Connectors.</span></span><span class="su-chat-action">Set up</span></button></div><div class="su-agent-note"><strong>Claude Code and Codex do not need this.</strong> They are already connected through the Companion.</div>${note}${error}<div class="su-form su-chat-footer"><button class="su-primary" id="suChatDone" type="button"${busy}>Done</button><button class="su-link" id="suChatSkip" type="button"${busy}>Skip for now</button></div>`;
+      document.getElementById("suConnectClaude")?.addEventListener("click", () => connectChatFromSignup("claude"));
+      document.getElementById("suChatDone")?.addEventListener("click", completeSignupTutorial);
+      document.getElementById("suChatSkip")?.addEventListener("click", completeSignupTutorial);
+      return;
+    }
     if (signupStage === "installed") {
       signupBodyEl.innerHTML = `<p class="su-step">Agent installed</p><h1 class="su-title">Relay is ready for you.</h1><p class="su-copy">Your agent finished the install. Connect your account to this computer.</p><div class="su-form"><button class="su-primary" id="suContinue" type="button"${busy}>Continue</button>${cancelSetupButton()}</div>${error}`;
       document.getElementById("suContinue")?.addEventListener("click", async () => {
@@ -10851,7 +11153,10 @@
       signupAccount = data.account || { displayName:"Alex Rivera", email:"alex@example.com" };
       signupBusy = false;
       signupError = String(data.error || "");
-      payload.account = { paired:false };
+      signupNote = String(data.note || "");
+      const tutorial = signupStage === "chat-setup";
+      payload.account = { paired:tutorial };
+      payload.ui = { ...payload.ui, setupTutorialPending:tutorial };
       renderAll();
     };
   }
@@ -10988,13 +11293,18 @@
     // frame target. It removes the blank-frame and double-rebuild paths while
     // preserving applyView as the sole visibility writer.
     const enteringView = applyView._last !== activeView;
-    const needsSignup = payload.account?.paired === false;
+    const tutorialPending = payload.account?.paired !== false && payload.ui?.setupTutorialPending === true;
+    if (tutorialPending) {
+      stopSignupPolling();
+      signupStage = "chat-setup";
+    }
+    const needsSignup = payload.account?.paired === false || tutorialPending;
     cardEl.classList.toggle("signup", needsSignup);
     signupViewEl?.classList.toggle("gone", !needsSignup);
     if (needsSignup) {
       renderSignup();
       syncCardSize(false);
-      if (!signupStateLoaded && window.relay.installationAuthState) {
+      if (payload.account?.paired === false && !signupStateLoaded && window.relay.installationAuthState) {
         signupStateLoaded = true;
         window.relay.installationAuthState().then((state) => {
           applyInstallationState(state);

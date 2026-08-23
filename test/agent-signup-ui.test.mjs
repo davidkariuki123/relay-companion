@@ -9,7 +9,7 @@ const overlay = readFileSync(path.join(ROOT, "overlay/inbox.html"), "utf8");
 const preload = readFileSync(path.join(ROOT, "overlay/preload.cjs"), "utf8");
 const main = readFileSync(path.join(ROOT, "overlay/main.cjs"), "utf8");
 
-test("unpaired first run is one in-pill account flow ending at the normal inbox", () => {
+test("first run is one in-pill flow with a skippable chat setup page", () => {
   for (const copy of [
     "Relay is ready for you.",
     "How would you like to continue?",
@@ -18,12 +18,14 @@ test("unpaired first run is one in-pill account flow ending at the normal inbox"
     "Finish with Google.",
     "Connect this computer?",
     "Finishing setup…",
+    "Use Relay in your chats.",
   ]) assert.match(overlay, new RegExp(copy.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 
   assert.match(overlay, /cardEl\.classList\.toggle\("signup", needsSignup\)/);
   assert.match(overlay, /\.card\.collapsed \.signup-view \{ display:none; \}/);
-  assert.match(overlay, /const needsSignup = payload\.account\?\.paired === false/);
-  assert.doesNotMatch(overlay, /Welcome to Relay|welcome tutorial|first-launch tutorial/i);
+  assert.match(overlay, /const needsSignup = payload\.account\?\.paired === false \|\| tutorialPending/);
+  assert.match(overlay, /Claude Code and Codex do not need this\./);
+  assert.match(overlay, /id="suChatSkip"[\s\S]*Skip for now/);
 });
 
 test("signup errors are human recovery copy, never raw Electron IPC failures", () => {
@@ -50,6 +52,7 @@ test("renderer installation IPC is capability-shaped and never exposes credentia
     "installationAuthEmailVerify",
     "installationAuthApprove",
     "installationAuthCancel",
+    "completeSetupTutorial",
   ]) assert.match(preload, new RegExp(`${method}:`));
 
   const seam = preload.slice(preload.indexOf("installationAuthState:"), preload.indexOf("pairWithCode:"));

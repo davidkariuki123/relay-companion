@@ -174,6 +174,7 @@ contextBridge.exposeInMainWorld("relayPreview", {
       model: String(model || ""),
       effort: String(effort || ""),
     }),
+  reviewSafety: (relayId) => ipcRenderer.invoke("relay:preview:reviewSafety", String(relayId || "")),
   // The session face: the live transcript feed and the Steer verb.
   loadSession: (relayId) => ipcRenderer.invoke("relay:preview:session", String(relayId || "")),
   watchRunFeed: (relayId) => ipcRenderer.invoke("relay:runFeed:watch", String(relayId || "")),

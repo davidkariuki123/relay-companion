@@ -143,6 +143,11 @@ test("stagePlainRelayItem writes an ordinary relay row for the existing pill UI"
         source: { host: "relay-mcp" },
         targetSurfaces: ["codex"],
         attachments: [],
+        e2ee: {
+          protocol: "mls10",
+          cipherSuite: "MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519",
+          senderDeviceId: "dev_sven",
+        },
       },
     },
     { statePath },
@@ -157,9 +162,43 @@ test("stagePlainRelayItem writes an ordinary relay row for the existing pill UI"
   assert.equal(row.senderName, "Sven");
   assert.equal(row.title, "Checking in");
   assert.equal(row.forHuman, "How are you doing?");
+  assert.equal(row.e2ee.senderDeviceId, "dev_sven");
   const packet = JSON.parse(fs.readFileSync(result.contentPath, "utf8"));
   assert.equal(packet.schemaVersion, 2);
   assert.equal(packet.delivery.transport, "relay_api");
+});
+
+test("an acknowledged history import is staged as read and remains visibly non-runnable", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-history-row-test-"));
+  const statePath = companionStatePath(dir);
+  stagePlainRelayItem({
+    item: {
+      relayId: "erelay_imported_1",
+      state: "acknowledged",
+      kind: "task",
+      taskState: "completed",
+      historyImported: true,
+      preview: "An earlier Request.",
+      sender: { name: "David" },
+    },
+    packet: {
+      schemaVersion: 3,
+      id: "erelay_imported_1",
+      kind: "task",
+      taskState: "completed",
+      historyImported: true,
+      forHuman: "An earlier Request.",
+      forAgent: "Historical agent payload.",
+      sender: { name: "David" },
+      recipient: { name: "Shane" },
+      targetSurfaces: [],
+      attachments: [],
+    },
+  }, { statePath });
+  const row = JSON.parse(fs.readFileSync(statePath, "utf8")).packets.erelay_imported_1;
+  assert.equal(row.state, "read");
+  assert.equal(row.historyImported, true);
+  assert.equal(row.taskState, "completed");
 });
 
 test("stagePlainRelayItem canonicalizes a mixed-version packet on every ingest", () => {
@@ -872,6 +911,8 @@ test("stagePlainRelayItem mints the task notification kind for kind:'task' items
         preview: "Brief…",
         sender: { name: "Shane", email: "shane@example.com" },
         createdAt: "2026-08-12T10:00:00.000Z",
+        taskState: "started",
+        taskAcceptedAt: "2026-08-12T10:04:00.000Z",
         taskStartedAt: "2026-08-12T10:05:00.000Z",
       },
       packet: {
@@ -891,6 +932,8 @@ test("stagePlainRelayItem mints the task notification kind for kind:'task' items
   const row = JSON.parse(fs.readFileSync(statePath, "utf8")).packets.relay_task_1;
   assert.equal(row.relayNotificationKind, "task");
   assert.equal(row.kind, "task");
+  assert.equal(row.taskState, "started");
+  assert.equal(row.taskAcceptedAt, "2026-08-12T10:04:00.000Z");
   assert.equal(row.taskStartedAt, "2026-08-12T10:05:00.000Z");
   assert.equal(row.taskCompletedAt, null);
 });
