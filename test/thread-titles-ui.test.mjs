@@ -588,6 +588,15 @@ test("progress-only Relay edits repaint an already-open desktop chat", () => {
     "the pill's inbox signature includes the in-place generation changed by agent progress");
 });
 
+test("unfinished owned-agent replies visibly pulse until their final agent payload arrives", () => {
+  assert.match(html, /const agentWorking = m\.ownedAgent && !String\(m\.agent \|\| ""\)\.trim\(\) && !m\.deletedAt/);
+  assert.match(html, /agentWorking \? " agent-working"/);
+  assert.match(html, /agent-working-indicator[\s\S]*agent-working-dot[\s\S]*agent-working-dot[\s\S]*agent-working-dot/);
+  assert.match(html, /@keyframes agentWorkingPulse/);
+  assert.match(html, /prefers-reduced-motion: reduce/);
+  assert.match(html, /agentWorking \? ' aria-busy="true"'/);
+});
+
 test("agents can quote explicitly but cannot name threads", () => {
   assert.match(mcp, /Addressing a person, group, or chat never implies a reply/);
   assert.match(mcp, /Set replyToRelayId only when/);

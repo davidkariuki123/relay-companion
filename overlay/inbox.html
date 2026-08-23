@@ -1120,6 +1120,18 @@
   #thRows.inbox-order .th-msg:last-of-type { margin-bottom:10px; }
   .th-msg.text { cursor:default; user-select:text; }
   .th-msg.text .th-msg-title a { color:var(--accent); text-decoration:none; border-bottom:1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+  .agent-working-indicator { display:inline-flex; align-items:center; gap:3px; margin-left:7px; vertical-align:2px; }
+  .agent-working-dot { width:5px; height:5px; border-radius:50%; background:currentColor; opacity:.35;
+    animation:agentWorkingPulse 1.2s var(--settle) infinite; }
+  .agent-working-dot:nth-child(2) { animation-delay:.16s; }
+  .agent-working-dot:nth-child(3) { animation-delay:.32s; }
+  @keyframes agentWorkingPulse {
+    0%, 60%, 100% { opacity:.35; transform:translateY(0); }
+    30% { opacity:1; transform:translateY(-2px); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .agent-working-dot { animation:none; opacity:.55; }
+  }
   .th-reply-ghost { position:absolute; right:11px; bottom:5px; appearance:none; border:0; background:transparent; padding:2px 4px;
     font-family:var(--mono); font-size:9.5px; letter-spacing:.04em; color:var(--muted-3); cursor:pointer; opacity:0;
     transition:opacity var(--t-fast) var(--settle), color var(--t-fast) var(--settle); }
@@ -9435,6 +9447,7 @@
       // A quick TEXT (title derived from its own body) speaks in the body
       // voice — sans, message-toned; a titled relay keeps the serif subject.
       const textLike = m.textLike;
+      const agentWorking = m.ownedAgent && !String(m.agent || "").trim() && !m.deletedAt;
       const hasHostActions = !textLike && !m.request;
       // A time boundary owns ONE piece of vertical distance. A new speaker/run
       // has a header, so the header carries it; a continuation has no header,
@@ -9459,10 +9472,10 @@
       ).join("")}</div>` : "";
       const hostActionsPersistent = hasHostActions && String(m.id) === latestHostActionRelayId;
       return `${chunkDivider}${runHeader}
-      <div class="th-msg${hasHostActions ? " has-host-actions" : ""}${bubbleGapClass}${m.unread ? " unread" : ""}${mine ? " mine" : ""}${cont ? " cont" : ""}${textLike ? " text" : ""}${open ? " open" : ""}${m.deletedAt ? " deleted" : ""}${aggregates.length ? " has-rx" : ""}"${textLike ? "" : ' role="button" tabindex="0"'}${hasHostActions ? ` aria-expanded="${hostActionsPersistent ? "true" : "false"}"` : ""} data-msg="${esc(m.id)}" data-dir="${m.direction}" data-opening-id="${esc(m.id)}">
+      <div class="th-msg${hasHostActions ? " has-host-actions" : ""}${bubbleGapClass}${m.unread ? " unread" : ""}${mine ? " mine" : ""}${cont ? " cont" : ""}${textLike ? " text" : ""}${agentWorking ? " agent-working" : ""}${open ? " open" : ""}${m.deletedAt ? " deleted" : ""}${aggregates.length ? " has-rx" : ""}"${textLike ? "" : ' role="button" tabindex="0"'}${agentWorking ? ' aria-busy="true"' : ""}${hasHostActions ? ` aria-expanded="${hostActionsPersistent ? "true" : "false"}"` : ""} data-msg="${esc(m.id)}" data-dir="${m.direction}" data-opening-id="${esc(m.id)}">
         ${!REACTIONS_ENABLED || m.request ? "" : messageReactionPickerHtml(m.id)}
         ${messageReplyReferenceHtml(m)}
-        <span class="th-msg-title">${m.request ? '<span class="kchip">Request</span>' : ""}${textLike ? linkify(m.title) : esc(m.title)}${textLike ? "" : `<span class="th-more">${open ? "‹" : "›"}</span>`}${m.editedAt && !m.deletedAt ? '<span class="th-edited">edited</span>' : ""}</span><span class="th-blk-time">${esc(timeAgo(m.at))}</span>
+        <span class="th-msg-title">${m.request ? '<span class="kchip">Request</span>' : ""}${textLike ? linkify(m.title) : esc(m.title)}${agentWorking ? '<span class="agent-working-indicator" aria-hidden="true"><span class="agent-working-dot"></span><span class="agent-working-dot"></span><span class="agent-working-dot"></span></span>' : ""}${textLike ? "" : `<span class="th-more">${open ? "‹" : "›"}</span>`}${m.editedAt && !m.deletedAt ? '<span class="th-edited">edited</span>' : ""}</span><span class="th-blk-time">${esc(timeAgo(m.at))}</span>
 
         ${!textLike && !open && !inlineBody && m.preview ? `<span class="th-preview">${esc(m.preview)}</span>` : ""}
         ${!textLike && !open && inlineBody ? `<div class="th-body" data-stop="0">${readerParagraphs(m.body)}</div>` : ""}
