@@ -310,8 +310,17 @@ test("installRelayMacApp creates a valid Spotlight-searchable Relay.app with a r
   assert.equal(fs.existsSync(path.join(result.appPath, "Contents", "Resources", "RelayIcon.icns")), true);
   assert.equal(fs.statSync(appletPath).mode & 0o111, 0o111);
   assert.equal(fs.statSync(launcherPath).mode & 0o111, 0o111);
-  assert.match(launcher, /launchctl bootstrap "\$domain" "\$plist"/);
-  assert.match(launcher, /launchctl kickstart "\$service"/);
+  assert.match(launcher, /daemon_service="\$domain\/work\.relay\.companion"/);
+  assert.match(launcher, /pill_service="\$domain\/work\.relay\.companion\.pill"/);
+  assert.match(launcher, /launchctl bootstrap "\$domain" "\$daemon_plist"/);
+  assert.match(launcher, /launchctl bootstrap "\$domain" "\$pill_plist"/);
+  assert.match(launcher, /launchctl kickstart "\$daemon_service"/);
+  assert.match(launcher, /launchctl kickstart "\$pill_service"/);
+  assert.ok(
+    launcher.indexOf('kickstart "$daemon_service"') < launcher.indexOf('kickstart "$pill_service"'),
+    "opening Relay restores its receive daemon before its visible pill",
+  );
+  assert.match(launcher, /\[ ! -f "\$daemon_plist" \] \|\| \[ ! -f "\$pill_plist" \]/);
   assert.match(launcher, /plutil -extract pid raw/);
   assert.match(launcher, /plutil -extract ready raw/);
   assert.match(launcher, /kill -0 "\$owner_pid"/);
