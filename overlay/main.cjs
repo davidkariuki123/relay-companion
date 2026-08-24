@@ -602,7 +602,10 @@ function readConfigFile() {
         config.deviceToken = nativeCredentialCache.token;
         return withCredentialState(config, "available");
       } else {
-        const stored = readDeviceToken({ account: config.credentialAccount || "device-token" });
+        const stored = readDeviceToken({
+          account: config.credentialAccount || "device-token",
+          allowLegacyMigration: config.credentialStore === "native-v1",
+        });
         if (stored.ok && stored.value) {
           if (process.platform === "darwin" && config.credentialStore === "native-v1") {
             config.credentialStore = "local-v2";

@@ -182,7 +182,9 @@ function credentialOptions(options = {}) {
 function writeDeviceToken(token, options) {
   return writeCredential(token, options);
 }
-function readDeviceToken(options = {}) { return readCredential({ ...options, allowLegacyMigration: true }); }
+function readDeviceToken(options = {}) {
+  return readCredential({ ...options, allowLegacyMigration: options.allowLegacyMigration === true });
+}
 function deleteDeviceToken(options) { return deleteCredential(options); }
 
 function writeCredential(secret, options) {
