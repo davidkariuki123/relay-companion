@@ -1107,9 +1107,6 @@
   .contacts-group-detail #cvgError, .contacts-group-detail #cvgList,
   .contacts-group-detail #cvgEmpty { display:none !important; }
   .th-room-status { margin:10px 16px 12px; padding:10px 12px; border-top:1px solid var(--hair); color:var(--muted); font-family:var(--serif); font-size:12.5px; line-height:1.4; text-align:center; }
-  .th-room-status.awaiting-link { display:flex; align-items:center; justify-content:space-between; gap:12px; text-align:left; font-family:var(--sans); }
-  .th-room-status.awaiting-link button { appearance:none; flex:none; border:1px solid var(--edge); border-radius:999px; padding:6px 11px; background:var(--bg); color:var(--ink); font:600 11.5px/1 var(--sans); cursor:pointer; }
-  .th-room-status.awaiting-link button:hover { border-color:var(--muted-3); background:var(--wash); }
   /* Conversation messages read like a group chat: every message is named on
      its own line, and every party's name keeps a stable color so a busy
      thread is scannable by who-said-what (the Slack convention). */
@@ -2024,7 +2021,7 @@
   .rl-row .nm { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
   .rl-row .ct { margin-left:auto; flex:0 0 auto; font-size:10px; font-weight:600; background:var(--accent); color:var(--on-accent); border-radius:999px; padding:2px 6px; }
   .chat-rail .people-row { margin-top:auto; padding:11px 14px; }
-  .th-msg.text .th-msg-title { font-family:var(--sans); font-size:13px; line-height:1.5; color:var(--ink-2, var(--ink)); }
+  .th-msg.text .th-msg-title { font-family:var(--sans); font-size:13px; line-height:1.5; color:var(--ink-2, var(--ink)); white-space:pre-wrap; }
   .th-msg.text.unread .th-msg-title { color:var(--ink); font-weight:600; }
   .runs-in { margin:8px 16px 0; font-family:var(--sans); font-size:10.5px; color:var(--muted-2); }
   .runs-in button { appearance:none; -webkit-appearance:none; border:0; background:transparent; padding:0; margin:0; cursor:pointer; font-family:var(--sans); font-size:10.5px; font-weight:600; color:var(--accent); }
@@ -8773,7 +8770,16 @@
         id, threadId: s.threadId || id, direction: "out", seen: sentIsRead(s), seenAt: s.readAt || null,
         delivered: s.groupSendId ? groupDelivered.get(s.groupSendId) === true : sentIsDelivered(s),
         inReplyToRelayId: s.inReplyToRelayId || "",
-        addressRecipient: s.recipientGroupId ? { groupId:s.recipientGroupId } : (s.recipient || null),
+        // A share-link id is a room address, not a posting gate. The server
+        // recognises its synthetic mailbox only for owned-agent invocations and
+        // never attempts to deliver email to it. Keeping that address here lets
+        // @my_codex / @my_claude use the room without making the earlier link's
+        // Opened state relevant to the new message.
+        addressRecipient: s.recipientGroupId
+          ? { groupId:s.recipientGroupId }
+          : (s.shareLink && s.shareLink.state !== "claimed")
+            ? { email:`${String(s.shareLink.id)}@guests.sendrelays.com` }
+            : (s.recipient || null),
         shareLink: s.shareLink || null,
         readReceipts: s.groupSendId
           ? (groupReceiptMembers.get(s.groupSendId) || [])
@@ -9444,9 +9450,10 @@
     }
     const threadDraft = threadComposerDrafts.get(threadStateKey) || "";
     const messageById = new Map(thread.msgs.map((message) => [String(message.id || ""), message]));
-    const addressAnchor = [...(thread.msgs || [])].reverse().find((message) => message.addressRecipient);
-    const pendingShareAnchor = addressAnchor?.shareLink && addressAnchor.shareLink.state !== "claimed" ? addressAnchor : null;
-    const pendingShareLink = pendingShareAnchor?.shareLink || null;
+    const addressAnchor = [...(thread.msgs || [])].reverse().find((message) => {
+      const recipient = message.addressRecipient;
+      return recipient && (recipient.email || recipient.contactId || recipient.relayUserId || recipient.groupId || recipient.chatId);
+    });
     const replyTargetId = String(threadReplyTargets.get(threadStateKey) || "");
     const replyTarget = replyTargetId ? messageById.get(replyTargetId) : null;
     const replyPreviewAuthor = (message) => message && message.direction === "out" ? "You" : String((message && message.party) || "Someone");
@@ -9504,12 +9511,9 @@
             <button type="button" id="thQrSend"${chatReplySending.has(threadStateKey) ? " disabled" : ""}>Send</button>
           </div>
         </div></div>`;
-    const pendingLinkStatus = pendingShareLink
-      ? `<div class="th-room-status awaiting-link"><span>${esc(roomName || "They")} hasn’t opened this Relay yet. Send them the link to start chatting.</span><button type="button" id="thPendingShareCopy" data-share-url="${esc(pendingShareLink.url || "")}">Copy link</button></div>`
-      : "";
     const visibleThreadComposer = groupPostingBlocked
       ? `<div class="th-room-status">${esc(groupPostingState.reason)}</div>`
-      : pendingLinkStatus || threadComposer;
+      : threadComposer;
     // Own messages are labelled "You" — the pill is a personal surface, only
     // ever read by its owner, so the account name carries no information here
     // (Slack shows your name because its rooms are shared; this one is not).
@@ -9641,10 +9645,7 @@
     // bubble through — which is exactly where the caret went. Rows and dock
     // are now siblings: #thRows is rewritten, the composer is left alone, and
     // focus survives a send the way it does in every other messaging app.
-    const composerMode = groupPostingBlocked
-      ? "blocked"
-      : pendingShareLink ? `pending-link:${String(pendingShareLink.id || pendingShareAnchor?.id || "")}` : "open";
-    const shellKey = `${chatShaped ? "chat" : "inbox"}|${composerMode}|${threadStateKey}`;
+    const shellKey = `${chatShaped ? "chat" : "inbox"}|${groupPostingBlocked ? "blocked" : "open"}|${threadStateKey}`;
     // Repaint guard. This view is rebuilt on EVERY payload push (and entering it
     // triggers a sent refresh), which tore down and recreated the open-actions
     // card ~a second after opening — the flash David reported on "Read the
@@ -9674,20 +9675,6 @@
     }
     const composerSendEl = document.getElementById("thQrSend");
     if (composerSendEl) composerSendEl.disabled = chatReplySending.has(threadStateKey);
-    const pendingShareCopyEl = document.getElementById("thPendingShareCopy");
-    if (pendingShareCopyEl && !pendingShareCopyEl.dataset.wired) {
-      pendingShareCopyEl.dataset.wired = "1";
-      pendingShareCopyEl.addEventListener("click", async (event) => {
-        event.stopPropagation();
-        const url = pendingShareCopyEl.getAttribute("data-share-url") || "";
-        try {
-          await navigator.clipboard.writeText(url);
-          pendingShareCopyEl.textContent = "Copied";
-        } catch {
-          if (pendingShareAnchor) setRowNote(pendingShareAnchor.id, "Could not copy the link.", "err");
-        }
-      });
-    }
     // The queue payload can paint the optimistic bubble before the IPC reply
     // sets followOwnSend. The next render then has identical markup; returning
     // early in that case left the new bubble below the viewport until another
@@ -9853,15 +9840,6 @@
       }, true);
       const doThReply = async () => {
         if (thReplySending || chatReplySending.has(threadStateKey)) return;
-        // Resolve the address before removing anything from the composer. A
-        // missing or unclaimed destination must leave both words and files in
-        // place; only a send the device can actually accept consumes them.
-        if (pendingShareLink) {
-          // Nothing was sent and nothing is queued: the composer is offering an
-          // address that does not exist yet. Keep the words in the field.
-          setRowNote(addressAnchor.id, `Nobody has opened this link yet. Send it again: ${pendingShareLink.url}`, "err");
-          return;
-        }
         const text = (thQrInput.value || "").trim();
         const staged = peekStagedFiles(thQrInput);
         if (!text && !staged.length) return;

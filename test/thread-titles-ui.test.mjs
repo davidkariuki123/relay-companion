@@ -9,6 +9,13 @@ const main = fs.readFileSync(new URL("../overlay/main.cjs", import.meta.url), "u
 const notifications = fs.readFileSync(new URL("../src/notifications.js", import.meta.url), "utf8");
 const mcp = fs.readFileSync(new URL("../src/mcp.js", import.meta.url), "utf8");
 
+test("chat text bubbles preserve authored line breaks", () => {
+  const rule = html.match(/\.th-msg\.text \.th-msg-title \{([^}]+)\}/)?.[1] || "";
+  assert.match(rule, /white-space:pre-wrap/);
+
+  assert.match(html, /<span class="th-msg-title">[^\n]*textLike \? linkify\(m\.title\)/);
+});
+
 test("legacy threadTitle stays readable in storage but never reaches the visible pill", () => {
   // Old packets remain readable during rolling upgrades.
   assert.match(notifications, /threadTitle: item\.threadTitle \|\| packet\?\.threadTitle \|\| null/);
@@ -289,10 +296,8 @@ test("a live refresh repaints the history around the composer, never through it"
   assert.doesNotMatch(html, /thQrInput\.blur\(\)/, "sending must not give up the keyboard");
   assert.doesNotMatch(html, /threadDetailRenderPending/, "no repaint waits on a blur any more");
   // The shell is rebuilt only when the room, its order or its posting state
-  // changes — never for new messages. An unclaimed link is a posting state too:
-  // it replaces the false live composer and yields back to it once claimed.
-  assert.match(html, /const composerMode = groupPostingBlocked[\s\S]*pendingShareLink \? `pending-link:/);
-  assert.match(html, /const shellKey = `\$\{chatShaped \? "chat" : "inbox"\}\|\$\{composerMode\}\|\$\{threadStateKey\}`/);
+  // changes — never for new messages.
+  assert.match(html, /const shellKey = `\$\{chatShaped \? "chat" : "inbox"\}\|\$\{groupPostingBlocked \? "blocked" : "open"\}\|\$\{threadStateKey\}`/);
   assert.match(html, /const shellChanged = thHistoryEl\.dataset\.shellKey !== shellKey \|\| !document\.getElementById\("thRows"\);/);
   // Faces that change while the composer stays put are set in place.
   assert.match(html, /composerQr\.classList\.toggle\("replying", Boolean\(replyTargetId\)\)/);

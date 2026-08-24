@@ -45,25 +45,15 @@ test("an unnamed share recipient gets the unknown-person glyph, not initials", (
   assert.match(html, /if \(String\(name \|\| ""\) === "Someone with the link"\) return "\?"/);
 });
 
-test("an unclaimed share-link room shows its real next action instead of a live composer", () => {
-  assert.match(html, /const pendingShareAnchor = addressAnchor\?\.shareLink && addressAnchor\.shareLink\.state !== "claimed" \? addressAnchor : null/);
-  assert.match(html, /hasn’t opened this Relay yet\. Send them the link to start chatting\./);
-  assert.match(html, /id="thPendingShareCopy"/);
-  assert.match(html, /pendingLinkStatus \|\| threadComposer/);
-  assert.match(html, /pending-link:\$\{String\(pendingShareLink\.id/,
-    "a claim-state change rebuilds the dock into an ordinary composer");
-  assert.match(html, /navigator\.clipboard\.writeText\(url\)/);
-  assert.match(html, /Nobody has opened this link yet\. Send it again/);
-  // Source ORDER, which no behavioural test in this suite can see:
-  // takeStagedFiles deletes the staged files and repaints the chips, so a
-  // refusal below it destroys the attachments and keeps only the words, and the
-  // empty-composer early return below it refuses in silence.
-  const guard = html.indexOf("Nobody has opened this link yet");
+test("a previous share link never becomes a posting rule for the room", () => {
+  assert.match(html, /\? \{ email:`\$\{String\(s\.shareLink\.id\)\}@guests\.sendrelays\.com` \}/,
+    "the link identifies the room without exposing its synthetic address in UI copy");
+  assert.match(html, /const visibleThreadComposer = groupPostingBlocked[\s\S]*: threadComposer/);
+  assert.doesNotMatch(html, /pendingShareLink|pendingLinkStatus|thPendingShareCopy/);
+  assert.doesNotMatch(html, /Nobody has opened this link yet/);
+  const readDraft = html.indexOf('const text = (thQrInput.value || "").trim();');
   const take = html.indexOf("takeStagedFiles(thQrInput)");
-  const empty = html.indexOf("if (!text && !staged.length) return;");
-  assert.ok(guard > 0 && take > 0 && empty > 0);
-  assert.ok(guard < take, "the refusal runs before the composer is emptied");
-  assert.ok(guard < empty, "the refusal runs before the empty-draft return");
+  assert.ok(readDraft > 0 && take > readDraft, "the ordinary send path owns every later message");
 });
 
 test("a chat that moved when its link was claimed is followed, never shown as an error", () => {
