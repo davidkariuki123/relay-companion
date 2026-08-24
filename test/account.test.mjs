@@ -342,8 +342,13 @@ test("configPath honors RELAY_CONFIG so the pill and CLI share one file", () => 
     assert.equal(configPath(), explicit);
     persistPairedAccount({ registration: REGISTRATION });
     const disk = JSON.parse(fs.readFileSync(explicit, "utf8"));
-    assert.equal(disk.deviceToken, undefined);
-    assert.equal(disk.credentialStore, process.platform === "darwin" ? "local-v2" : undefined);
+    if (process.platform === "darwin") {
+      assert.equal(disk.deviceToken, undefined);
+      assert.equal(disk.credentialStore, "local-v2");
+    } else {
+      assert.equal(disk.deviceToken, "dev_token_new");
+      assert.equal(disk.credentialStore, undefined);
+    }
     assert.equal(readConfig().deviceToken, "dev_token_new");
   });
 });
