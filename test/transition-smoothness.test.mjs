@@ -72,16 +72,15 @@ test("the first pointer event never cold-starts Web Audio", () => {
   assert.doesNotMatch(pointer, /initAudio|\.resume\(/);
   const prime = between(html, "function primeAudio", 'window.addEventListener("mousedown"');
   assert.match(prime, /requestIdleCallback/);
-  assert.match(prime, /readerMorphSnapshot \|\| readerMorphInFlight \|\| raf/);
+  assert.match(prime, /readerMorphSnapshot \|\| readerMorphInFlight \|\| roomViewTransition \|\| raf/);
 });
 
-test("all compact-to-reader transitions can hold a frozen source face", () => {
+test("all compact-to-reader resize transitions can hold a frozen source face", () => {
   const prepare = between(html, "function prepareReaderMorph", "function startReaderMorph");
   assert.doesNotMatch(prepare, /sourceView !== "requests"/);
   for (const view of ["relays", "chat", "threads", "sent", "requests", "contacts"]) {
     assert.match(prepare, new RegExp(`${view}:`));
   }
-  assert.match(html, /const morphFromList = prepareReaderMorph\(activeView\);[\s\S]*?startReaderMorph\("threads"\)/);
   assert.match(html, /const morphFromCompact = !chatExpanded && prepareReaderMorph\(activeView\)/);
   assert.match(prepare, /snapshot\.style\.width = `\$\{Math\.round\(cardEl\.getBoundingClientRect\(\)\.width\)\}px`/);
   assert.match(prepare, /node\.dataset\.readerMorphId = node\.id/);
@@ -94,29 +93,51 @@ test("all compact-to-reader transitions can hold a frozen source face", () => {
   assert.match(start, /syncCardSize\(destinationView === "reader" \|\| \(destinationView === "threads" && chatExpanded\)\)/);
 });
 
-test("room navigation is one directional stack with a matching Back transition", () => {
-  const styles = between(html, "@keyframes roomForwardSourceOut", "@media (prefers-reduced-motion:reduce)");
-  assert.match(styles, /roomForwardSourceOut[\s\S]*translate3d\(-24%,0,0\)/,
-    "the covered list recedes toward the leading edge");
-  assert.match(styles, /roomForwardDestinationIn[\s\S]*translate3d\(100%,0,0\)/,
-    "the room enters from the trailing edge");
-  assert.match(styles, /roomBackSourceOut[\s\S]*translate3d\(100%,0,0\)/,
-    "Back returns the room toward the edge it entered from");
-  assert.match(styles, /roomBackDestinationIn[\s\S]*translate3d\(-24%,0,0\)/,
-    "Back restores the list from the same parallax depth");
+test("compact room navigation animates exact viewport pixels with a matching Back transition", () => {
+  const styles = between(html, "@keyframes roomPixelsForwardOld", "@keyframes roomForwardSourceOut");
+  assert.match(styles, /roomPixelsForwardOld[\s\S]*translate3d\(-24%,0,0\)/,
+    "the captured list recedes toward the leading edge");
+  assert.match(styles, /roomPixelsForwardNew[\s\S]*translate3d\(100%,0,0\)/,
+    "the captured room enters from the trailing edge");
+  assert.match(styles, /roomPixelsBackOld[\s\S]*translate3d\(100%,0,0\)/,
+    "Back returns the captured room toward the edge it entered from");
+  assert.match(styles, /roomPixelsBackNew[\s\S]*translate3d\(-24%,0,0\)/,
+    "Back restores the captured list from the same parallax depth");
   assert.doesNotMatch(styles, /scale\(/, "room text never scales during navigation");
   assert.equal((styles.match(/\.36s cubic-bezier\(\.32,\.72,0,1\)/g) || []).length, 4,
     "both faces and both directions share one timing curve");
+  assert.match(styles, /::view-transition-group\(relay-room\)/);
+  assert.match(styles, /::view-transition-image-pair\(relay-room\)/);
+  assert.match(styles, /::view-transition-old\(relay-room\),[\s\S]*::view-transition-new\(relay-room\) \{[\s\S]*background:var\(--bg\)/,
+    "both moving pixel faces are opaque");
 
   const relays = between(html, "function renderRelays()", "function relayIdentityRowHtml");
-  assert.equal((relays.match(/prepareReaderMorph\(activeView, \{ motion:"forward" \}\)/g) || []).length, 2,
-    "a room uses the same forward push from the list and notification faces");
+  assert.equal((relays.match(/prepareReaderMorph\(activeView, \{ motion:"forward" \}\)/g) || []).length, 1,
+    "the resizing notification face retains the shared reader morph");
+  assert.match(relays, /startRoomViewTransition\(\(\) => \{[\s\S]*?openThreadDetail\([\s\S]*?\}, \{ motion:"forward" \}\)/,
+    "the stable Relays list uses browser-captured pixels for room entry");
 
   const back = between(html, 'thBackEl.addEventListener("click", () => {', "let threadsSource");
-  assert.match(back, /prepareReaderMorph\("threads", \{ motion:chatExpanded \? "morph" : "back" \}\)/);
-  assert.ok(back.indexOf('prepareReaderMorph("threads"') < back.indexOf("threadDetailId = null"),
-    "Back freezes the visible room before navigation clears it");
-  assert.match(back, /commitNavigation\(\{ outerScrollTop: returnTop \}\);[\s\S]*startReaderMorph\(activeView\)/);
+  assert.match(back, /startRoomViewTransition\(navigateBack, \{ motion:"back" \}\)/,
+    "compact Back reverses the exact-pixel transition");
+  assert.match(back, /prepareReaderMorph\("threads", \{ motion:"morph" \}\)/,
+    "expanded Back still coordinates its real native resize");
+  assert.match(back, /navigateBack\(\);[\s\S]*startReaderMorph\(activeView\)/);
+});
+
+test("the room transition names one stable viewport and cleans up on actual completion", () => {
+  const room = between(html, "let roomViewTransition = null", "let peeking");
+  assert.match(room, /typeof document\.startViewTransition !== "function"/);
+  assert.match(room, /scrollEl\.style\.viewTransitionName = "relay-room"/,
+    "the scroller viewport is the sole pixel snapshot");
+  assert.match(room, /document\.startViewTransition\(\(\) => \{/);
+  assert.match(room, /transition\.finished\.then\(/,
+    "cleanup follows compositor completion instead of a guessed timeout");
+  assert.doesNotMatch(room, /cloneNode|setTimeout|prepareCardSize/,
+    "same-size room navigation has no DOM clone, timer, or native-size IPC barrier");
+  assert.match(room, /const deferredPayload = roomViewTransitionDeferredPayload/);
+  assert.match(room, /if \(deferredPayload\) queueMicrotask\(\(\) => onPayload\(deferredPayload\)\)/,
+    "the newest payload reconciles after the compositor transaction");
 });
 
 test("payload reconciliation cannot rebuild the destination during its crossfade", () => {
@@ -125,6 +146,11 @@ test("payload reconciliation cannot rebuild the destination during its crossfade
   assert.match(clean, /queueMicrotask\(\(\) => onPayload\(deferredPayload\)\)/);
   const payload = between(html, "function onPayload", "window.relay.onInbox");
   assert.match(payload, /if \(readerMorphSnapshot\) \{[\s\S]*?readerMorphDeferredPayload = next;[\s\S]*?return;/);
+});
+
+test("payload reconciliation cannot replace a room while its snapshots are moving", () => {
+  const payloadHandler = between(html, "function onPayload(next)", "window.relay.onInbox(onPayload)");
+  assert.match(payloadHandler, /if \(roomViewTransition\) \{[\s\S]*roomViewTransitionDeferredPayload = next;[\s\S]*return;/);
 });
 
 test("an unrelated polling payload cannot resurrect an optimistic read", () => {
