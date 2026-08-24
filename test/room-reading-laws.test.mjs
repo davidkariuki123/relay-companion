@@ -97,16 +97,14 @@ test("a titled letter's tap is the reader in either frame; texts stay inert", ()
   assert.doesNotMatch(bind, /expandedMsgIds\.add/);
 });
 
-test("internal chains never divide consecutive ordinary texts", () => {
-  // A visible chat is one room. Wire reply-chain ids remain meaningful for
-  // structured Relays, but cannot put a hairline and a repeated sender label
-  // between two texts the same person sent minutes apart.
-  assert.match(html, /&& !\(prev\.textLike && m\.textLike\)/);
+test("internal chains and message species never divide a same-sender chat run", () => {
+  // A visible chat is one room. Wire reply-chain ids and Task/Relay/text
+  // presentation stay internal; only a six-hour dated chunk divides the room.
   assert.match(html, /const cont = continuesSenderRun\(prev, m, chunkDateLabel\)/);
-  assert.match(html, /Boolean\(previous\.textLike && current\.textLike\)/);
-  assert.match(html, /const chainSeamClass = chainChanged && !chunkDateLabel \? " th-seam" : ""/);
-  assert.match(html, /\$\{chainSeamClass\}/);
-  assert.match(html, /\.th-run\.th-seam \{ border-top:1px solid var\(--hair\)/);
+  assert.doesNotMatch(html, /chainChanged|chainSeamClass|th-seam/);
+  assert.doesNotMatch(html, /gap-mid|45 \* 60e3/);
+  const source = html.match(/(function continuesSenderRun\(previous, current, chunkDateLabel\) \{[\s\S]*?\n  \})\n/)[1];
+  assert.doesNotMatch(source, /threadId|textLike|request/);
 });
 
 test("a group's face stays stacked even when only one member has spoken", () => {

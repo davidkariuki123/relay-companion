@@ -301,7 +301,7 @@ try {
     if (!(await ev('[...document.querySelectorAll(".th-msg")].some(n => (n.textContent||"").includes("rapid two"))'))) throw new Error("second rapid bubble missing");
   }, { label:"the second rapid bubble" });
   result.rapidMessagesVisible = true;
-  result.rapidTextSeams = await ev('document.querySelectorAll(".th-run.th-seam").length');
+  result.rapidTextDividers = await ev('document.querySelectorAll(".th-chunk-date:not(.first)").length');
   result.rapidYouHeaders = await ev('[...document.querySelectorAll(".th-run.mine .th-party")].filter(n => (n.textContent||"").trim() === "You").length');
   const rapidShot = await page.send("Page.captureScreenshot", { format:"png" });
   result.rapidScreenshot = path.join(sandbox, "rapid-messages.png");
@@ -369,7 +369,7 @@ try {
     ["the recipient having it reads Delivered", /Delivered/.test(result.wordWhenRecipientHasIt || "")],
     ["their reading it still outranks both", /Seen/.test(result.wordWhenRead || "")],
     ["two rapid texts both remain visible", result.rapidMessagesVisible === true],
-    ["nearby texts have no reply-chain divider", result.rapidTextSeams === 0],
+    ["nearby texts have no time divider", result.rapidTextDividers === 0],
     ["nearby own texts share one new You header", result.rapidYouHeaders === 2],
     ["a queued message survives quitting the app", result.survivedTheQuit === true],
     ["it sends itself on the next launch, untouched", result.sentAfterRestart === true && result.restartSentText === "queued before quitting"],
