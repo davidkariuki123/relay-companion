@@ -348,29 +348,27 @@ test("ordinary Relay MCP directs Claude and Codex to the membership-scoped Granu
   assert.doesNotMatch(titleDescription, /ONLY thing shown on the recipient's card/i);
   assert.doesNotMatch(titleDescription, /characters|8-20 words|4-12 words/i);
   assert.equal(send.inputSchema.properties.threadTitle, undefined);
-  // The body is GHOSTWRITTEN in the sender's inferred voice (the voice
-  // contract, David 2026-08-12): substance fidelity + inferred voice +
-  // their relationship register, with real sent messages as the gold standard.
-  assert.match(humanDescription, /ghostwritten in the sender's voice/i);
+  // The body is ghostwritten from the sender's shorthand into the message
+  // they would naturally say in this relationship, without adding meaning.
+  assert.match(humanDescription, /what the sender would naturally say to this person, not the shorthand/i);
+  assert.match(humanDescription, /Supply the words, never additional meaning/i);
   assert.match(humanDescription, /recipient-specific vocabulary, rhythm, directness, formality, warmth, emphasis, and sign-off/i);
   assert.match(humanDescription, /relay_sent_list/);
   assert.match(humanDescription, /relay_chat_fetch/);
-  assert.match(humanDescription, /know, answer, feel, discuss, or decide/i);
+  assert.match(humanDescription, /never revive superseded intent/i);
   assert.match(humanDescription, /USE THE FEWEST WORDS THAT FAITHFULLY PRESERVE IT/);
   assert.match(humanDescription, /1-3 normally sized sentences/i);
   assert.match(humanDescription, /45 words or fewer/i);
-  assert.match(humanDescription, /60 words triggers mandatory review; it is NOT A TARGET OR BUDGET/);
-  assert.match(humanDescription, /Never pad toward it or hide detail in long compound sentences/i);
-  assert.match(humanDescription, /teaches voice and relationship register, not target length/i);
-  assert.match(humanDescription, /Lots of detail never justifies a longer human message/i);
-  assert.match(humanDescription, /mechanisms, evidence, code, paths, logs, reproduction steps/i);
+  assert.match(humanDescription, /60 words triggers mandatory review and is NOT A TARGET OR BUDGET/);
+  assert.match(humanDescription, /Sending or attaching information does not imply.*requesting a response/i);
+  assert.match(humanDescription, /mechanisms, evidence, paths, logs, constraints, chronology/i);
   assert.match(humanDescription, /No headings, lists, tables, code blocks, title repetition/i);
   const longConfirmation = send.inputSchema.properties.longForHumanConfirmed;
   assert.equal(longConfirmation.type, "boolean");
   assert.match(longConfirmation.description, /already rejected this exact over-60-word draft/i);
   assert.match(longConfirmation.description, /Never set it preemptively/i);
   const agentDescription = send.inputSchema.properties.forAgent.description;
-  assert.match(agentDescription, /complete document/i);
+  assert.match(agentDescription, /complete supporting document/i);
   assert.match(agentDescription, /under-sending here is worse than over-sending/i);
   assert.match(agentDescription, /do not repeat forHuman/i);
   assert.equal(send.inputSchema.required.includes("forAgent"), false);
@@ -1255,14 +1253,15 @@ test("relay_send teaches the relay-vs-REQUEST decision — David's discernment l
   assert.match(kind.description, /old 'handoff' kind no longer exists/i);
   assert.match(kind.description, /including a forAgent document never turns a message into one|forAgent can contain dense implementation context without making it a Task/i);
   assert.match(kind.description, /Start control/i);
-  assert.match(kind.description, /requested outcome/i);
+  assert.match(kind.description, /intended outcome/i);
   assert.match(kind.description, /Imperative wording addressed as 'you' is still a Task/i);
   assert.match(kind.description, /Switch your Relay install to dev and confirm the version\/channel/i);
   assert.match(kind.description, /MUST be kind='task', not kind='message'/i);
   assert.match(kind.description, /small or quick operation is still a Task/i);
   assert.match(kind.description, /Do you think we should switch to dev\?' is kind='message'/i);
   assert.match(kind.description, /exactly one recipient and no group/i);
-  assert.match(kind.description, /PERSON'S opinion, memory, judgment.*decision/i);
+  assert.match(kind.description, /may simply inform them without seeking a response/i);
+  assert.match(kind.description, /human opinion, memory, judgment, decision/i);
   assert.doesNotMatch(kind.description, /relay_task_create/i);
   // And it is available in the default messages-only profile: a task is an
   // ordinary relay, sent by the same tool as every message.
