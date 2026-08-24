@@ -685,8 +685,9 @@ try {
 
   // ---- dragged anchor: fold and reopen around the user's chosen position ----
   // Drive the lockup's real pointer path (not win.setPosition directly), then
-  // require both native sizes to preserve the dragged card's screen-space
-  // top-right corner. This is the regression for the two-step collapse jump.
+  // require the fixed native compositor surface to remain byte-for-byte stable
+  // while the one DOM card changes size. This is the regression for the
+  // one-frame duplicate created by AppKit origin+size settlement.
   const dragStart = await evalIn(mainConn, "global.__relayTest.getWin().getBounds()");
   const dragDx = dragStart.x > 200 ? -80 : 80;
   const dragDy = dragStart.y > 200 ? -60 : 60;
@@ -741,39 +742,84 @@ try {
     };
   })()`);
   check(
-    "dragged-anchor: the compact face is continuous while native bounds settle",
+    "dragged-anchor: the compact face changes synchronously on the fixed surface",
     collapseHandoff.collapsing === false && collapseHandoff.collapsed === true && collapseHandoff.countDisplay !== "none",
     JSON.stringify(collapseHandoff),
   );
   const draggedCollapsed = await retry(async () => {
     const phase = await evalIn(pageConn, `(() => {
       const card = document.getElementById('card');
-      return { collapsed:card.classList.contains('collapsed'), collapsing:card.classList.contains('collapsing') };
+      const r = card.getBoundingClientRect();
+      return { collapsed:card.classList.contains('collapsed'), collapsing:card.classList.contains('collapsing'), width:Math.round(r.width), height:Math.round(r.height) };
     })()`);
     const bounds = await evalIn(mainConn, "global.__relayTest.getWin().getBounds()");
-    if (!phase.collapsed || phase.collapsing || bounds.width !== 244 || bounds.height !== 44) {
+    if (!phase.collapsed || phase.collapsing || phase.width !== 244 || phase.height !== 44 ||
+        JSON.stringify(bounds) !== JSON.stringify(draggedExpanded)) {
       throw new Error(`phase=${JSON.stringify(phase)} bounds=${JSON.stringify(bounds)}`);
     }
     return bounds;
   }, { label: "dragged pill collapse settlement" });
   await evalIn(pageConn, tapLockup);
   const draggedReopened = await retry(async () => {
-    const collapsed = await evalIn(pageConn, "document.getElementById('card').classList.contains('collapsed')");
+    const phase = await evalIn(pageConn, `(() => {
+      const card = document.getElementById('card');
+      const r = card.getBoundingClientRect();
+      return { collapsed:card.classList.contains('collapsed'), width:Math.round(r.width), height:Math.round(r.height) };
+    })()`);
     const bounds = await evalIn(mainConn, "global.__relayTest.getWin().getBounds()");
-    if (collapsed || bounds.width !== 344 || bounds.height !== 524) {
-      throw new Error(`collapsed=${collapsed} bounds=${JSON.stringify(bounds)}`);
+    if (phase.collapsed || phase.width !== 344 || phase.height !== 524 ||
+        JSON.stringify(bounds) !== JSON.stringify(draggedExpanded)) {
+      throw new Error(`phase=${JSON.stringify(phase)} bounds=${JSON.stringify(bounds)}`);
     }
     return bounds;
   }, { label: "dragged pill reopen settlement" });
-  const expandedRight = draggedExpanded.x + draggedExpanded.width;
-  const collapsedRight = draggedCollapsed.x + draggedCollapsed.width;
-  const reopenedRight = draggedReopened.x + draggedReopened.width;
   check(
-    "dragged-anchor: collapse and reopen stay on the user's chosen screen position",
-    draggedCollapsed.y === draggedExpanded.y && draggedReopened.y === draggedExpanded.y &&
-      collapsedRight === expandedRight && reopenedRight === expandedRight &&
-      draggedReopened.x === draggedExpanded.x,
+    "dragged-anchor: collapse and reopen never mutate the user's chosen native position",
+    JSON.stringify(draggedCollapsed) === JSON.stringify(draggedExpanded) &&
+      JSON.stringify(draggedReopened) === JSON.stringify(draggedExpanded),
     `expanded=${JSON.stringify(draggedExpanded)} collapsed=${JSON.stringify(draggedCollapsed)} reopened=${JSON.stringify(draggedReopened)}`,
+  );
+
+  // Hammer the exact header path. Every cycle must keep one DOM face and the
+  // exact same native surface; any return to dynamic native sizing fails on the
+  // first iteration rather than relying on a human catching a one-frame flash.
+  let repeatedMorphsOk = true;
+  let repeatedMorphDetail = "";
+  for (let i = 0; i < 20; i += 1) {
+    await evalIn(pageConn, tapLockup);
+    const shouldBeCollapsed = i % 2 === 0;
+    const immediateBounds = await evalIn(mainConn, "global.__relayTest.getWin().getBounds()");
+    let sample;
+    try {
+      sample = await retry(async () => {
+        const value = await evalIn(pageConn, `(() => {
+          const cards = [...document.querySelectorAll('#card')];
+          const r = cards[0].getBoundingClientRect();
+          return { count:cards.length, collapsed:cards[0].classList.contains('collapsed'), width:Math.round(r.width), height:Math.round(r.height) };
+        })()`);
+        const correctCard = shouldBeCollapsed
+          ? value.collapsed && value.width === 244 && value.height === 44
+          : !value.collapsed && value.width === 344 && value.height === 524;
+        if (value.count !== 1 || !correctCard) throw new Error(JSON.stringify(value));
+        return value;
+      }, { tries: 25, delayMs: 40, label: `collapse hammer ${i}` });
+    } catch (error) {
+      repeatedMorphsOk = false;
+      repeatedMorphDetail = `i=${i} ${error.message}`;
+      break;
+    }
+    const settledBounds = await evalIn(mainConn, "global.__relayTest.getWin().getBounds()");
+    if (JSON.stringify(immediateBounds) !== JSON.stringify(draggedExpanded) ||
+        JSON.stringify(settledBounds) !== JSON.stringify(draggedExpanded)) {
+      repeatedMorphsOk = false;
+      repeatedMorphDetail = `i=${i} sample=${JSON.stringify(sample)} immediate=${JSON.stringify(immediateBounds)} settled=${JSON.stringify(settledBounds)}`;
+      break;
+    }
+  }
+  check(
+    "collapse-hammer: twenty header toggles keep one card on one immutable native surface",
+    repeatedMorphsOk,
+    repeatedMorphDetail,
   );
 
   // ---- 8. the race: dismiss then reopen inside the exit animation ----

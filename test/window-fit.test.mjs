@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import windowFit from "../overlay/window-fit.cjs";
 
-const { fittedOverlayBounds, resizedOverlayBounds } = windowFit;
+const { fittedOverlayBounds, shouldIgnoreOverlayMouse } = windowFit;
 const workArea = { x: 100, y: 40, width: 1400, height: 900 };
 const options = {
   margin: 8,
@@ -37,22 +37,15 @@ test("malformed renderer sizes cannot claim an oversized invisible window", () =
   });
 });
 
-test("resizing preserves a user-positioned window's top-right corner", () => {
-  const current = { x: 500, y: 120, width: 344, height: 524 };
-  assert.deepEqual(resizedOverlayBounds(current, { w: 720, h: 760 }, options), {
-    x: 124,
-    y: 120,
-    width: 720,
-    height: 760,
-  });
+test("only the visible card inside a fixed compositor surface receives input", () => {
+  const card = { x: 1074, y: 8, w: 244, h: 44 };
+  assert.equal(shouldIgnoreOverlayMouse({ x: 1100, y: 30 }, card), false);
+  assert.equal(shouldIgnoreOverlayMouse({ x: 1000, y: 30 }, card), true);
+  assert.equal(shouldIgnoreOverlayMouse({ x: 1100, y: 100 }, card), true);
 });
 
-test("a dragged pill collapses and expands around the same screen-space anchor", () => {
-  const dragged = { x: 500, y: 320, width: 344, height: 524 };
-  const collapsed = resizedOverlayBounds(dragged, { w: 244, h: 44 }, options);
-  const expanded = resizedOverlayBounds(collapsed, { w: 344, h: 524 }, options);
-  assert.deepEqual(collapsed, { x: 600, y: 320, width: 244, height: 44 });
-  assert.deepEqual(expanded, dragged);
-  assert.equal(collapsed.x + collapsed.width, dragged.x + dragged.width);
-  assert.equal(expanded.x + expanded.width, dragged.x + dragged.width);
+test("hit-test padding is hysteresis around the visible card, not a second surface", () => {
+  const card = { x: 1074, y: 8, w: 244, h: 44 };
+  assert.equal(shouldIgnoreOverlayMouse({ x: 1070, y: 30 }, card, 6), false);
+  assert.equal(shouldIgnoreOverlayMouse({ x: 1060, y: 30 }, card, 6), true);
 });
