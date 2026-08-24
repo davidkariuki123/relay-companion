@@ -5,12 +5,37 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import {
+  commandAvailable,
   claudeSessionNeedsCatalogRestart,
   publishAndFind,
   resolveClaudeBackgroundAgent,
   runSessionDirectoryOnce,
   waitForClaudeCompletion,
 } from "../src/session-controller.js";
+
+test("Windows controllers discover Codex and Claude through where.exe", () => {
+  const calls = [];
+  const available = commandAvailable("codex", {
+    platform: "win32",
+    spawn(command, args, options) {
+      calls.push({ command, args, options });
+      return { status: 0, error: undefined };
+    },
+  });
+  assert.equal(available, true);
+  assert.deepEqual(calls, [{
+    command: "where.exe",
+    args: ["codex"],
+    options: { stdio: "ignore", windowsHide: true },
+  }]);
+});
+
+test("missing controller commands are reported as unavailable", () => {
+  assert.equal(commandAvailable("codex", {
+    platform: "win32",
+    spawn: () => ({ status: null, error: new Error("not found") }),
+  }), false);
+});
 
 test("owned-agent controller inbox is checked before the native session inventory", async () => {
   const calls = [];

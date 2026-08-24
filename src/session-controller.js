@@ -401,9 +401,15 @@ export async function publishAndFind(
 }
 
 let cachedControllerCapabilities;
-function commandAvailable(command) {
-  if (path.isAbsolute(command)) return fs.existsSync(command);
-  return spawnSync("/usr/bin/which", [command], { stdio: "ignore" }).status === 0;
+export function commandAvailable(command, {
+  platform = process.platform,
+  existsSync = fs.existsSync,
+  spawn = spawnSync,
+} = {}) {
+  if (path.isAbsolute(command)) return existsSync(command);
+  const locator = platform === "win32" ? "where.exe" : "/usr/bin/which";
+  const result = spawn(locator, [command], { stdio: "ignore", windowsHide: true });
+  return !result.error && result.status === 0;
 }
 
 function controllerObservation() {
