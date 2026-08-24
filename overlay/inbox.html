@@ -109,7 +109,7 @@
     transition:box-shadow var(--t-slow) var(--soft), border-radius var(--t-slow) var(--settle);
     animation:appIn var(--t-slow) var(--soft) both;
   }
-  .card:is(.collapsed, .collapsing) {
+  .card.collapsed {
     border-radius:var(--r-fold);
     box-shadow:var(--shadow-pill);
   }
@@ -212,7 +212,7 @@
     opacity:1;
     transition:opacity var(--t-base) var(--settle);
   }
-  .card:is(.collapsed, .collapsing) .tabs { opacity:0; pointer-events:none; }
+  .card.collapsed .tabs { opacity:0; pointer-events:none; }
   /* a notification (peek) collapses the tab rail to nothing, so the peek shows just
      the brand lockup and the new relay. */
   .card.peek .tabs {
@@ -261,7 +261,7 @@
     padding:0 0 8px;
     transition:opacity var(--t-base) var(--settle) .06s;
   }
-  .card:is(.collapsed, .collapsing) .scroll { opacity:0; pointer-events:none; transition:opacity var(--t-fast) var(--settle); }
+  .card.collapsed .scroll { opacity:0; pointer-events:none; transition:opacity var(--t-fast) var(--settle); }
   .card.peek .scroll {
     opacity:1; pointer-events:auto;
     /* The banner is measured to its whole row. Give the final line a real
@@ -2702,17 +2702,12 @@
   // A renderer reload starts a fresh ordering domain. Without this session id,
   // main could mistake the new renderer's low motion ids for stale messages.
   const cardMotionSessionId = crypto.randomUUID();
-  // `collapsing` is deliberately distinct from `collapsed`. During a fold the
-  // native BrowserWindow is still expanded so the renderer can animate without
-  // AppKit resizing every frame. Painting the final pill face in that old wide
-  // surface leaves one composited frame at its previous left edge — perceived as
-  // a duplicate pill. Commit the final face only in the same task that sends the
-  // settled native shrink. Expansion remains immediate because main reserves the
-  // larger native surface during the prepare phase before the next paint.
-  function settleCardVisualState() {
-    cardEl.classList.remove("collapsing");
-    cardEl.classList.toggle("collapsed", collapsed);
-  }
+  // The renderer owns one visual state for the whole morph. In particular, the
+  // card becomes the compact face as soon as collapse starts; waiting for the
+  // native shrink acknowledgement left a pill-sized frame carrying the expanded
+  // theme/minimize controls, followed by a second paint containing the unread
+  // count. Main independently preserves the native top-right anchor at settled
+  // size, so no renderer face swap belongs at that boundary.
   function publishCardSize(w, h, { phase = "prepare", motionId = cardMotionId } = {}) {
     const key = motionId + ":" + phase + ":" + Math.round(w) + "x" + Math.round(h);
     if (key === lastSentCardSize) return;
@@ -2725,21 +2720,10 @@
   }
   function commitSettledCardSize(w, h, motionId) {
     const receipt = publishCardSize(w, h, { phase:"settled", motionId });
-    const commitVisual = () => {
-      // A rapid retarget supersedes this settlement. Never let its late native
-      // acknowledgement put the obsolete face back on screen.
-      if (motionId !== cardMotionId) return;
-      settleCardVisualState();
-    };
-    if (receipt && typeof receipt.then === "function") {
-      receipt.then((result) => {
-        if (!result || result.ok !== false) commitVisual();
-      }, commitVisual);
-    } else {
-      // Compatibility fallback for an older preload during a live renderer
-      // reload. New releases always use the acknowledged path below.
-      commitVisual();
-    }
+    // Settlement is geometry-only now. Consume a teardown rejection without
+    // allowing the acknowledgement to schedule a second visual-state paint.
+    if (receipt && typeof receipt.catch === "function") receipt.catch(() => {});
+    return receipt;
   }
   function step(s, dt) {
     const before = s.v - s.t;
@@ -3004,15 +2988,9 @@
     collapsed = v;
     if (!collapsed) presented = true; // expanded on purpose: the reader is looking at it
     refreshCountLabel();
-    if (collapsed) {
-      // Keep the final folded face out of the old expanded native surface. The
-      // spring still morphs the one sheet through its folded radius and shadow;
-      // `settleCardVisualState` swaps in the pill face at native settlement.
-      cardEl.classList.remove("collapsed");
-      cardEl.classList.add("collapsing");
-    } else {
-      cardEl.classList.remove("collapsed", "collapsing");
-    }
+    // One face, one transition: the count and compact controls track the same
+    // state from the first shrinking frame through native-window settlement.
+    cardEl.classList.toggle("collapsed", collapsed);
     const openSize = readerOpenNow ? READER : EXPANDED;
     springTo(collapsed ? PILL.w : openSize.w, collapsed ? PILL.h : openSize.h);
     playTink();
@@ -3036,7 +3014,7 @@
     presented = false; // parked: the next arrival banners again rather than landing silently
     refreshCountLabel();
     cardEl.classList.add("offstage");
-    cardEl.classList.remove("collapsed", "collapsing", "ghost", "bye");
+    cardEl.classList.remove("collapsed", "ghost", "bye");
     snapSize(EXPANDED.w, EXPANDED.h);
   }
   // ✕ — the card leaves gracefully, then the main process hides the window and keeps
@@ -3075,8 +3053,7 @@
     peeking = false;
     cardEl.classList.remove("peek", "notifying");
     collapsed = true;
-    cardEl.classList.remove("collapsed");
-    cardEl.classList.add("collapsing");
+    cardEl.classList.add("collapsed");
     refreshCountLabel();
     springTo(PILL.w, PILL.h);
     renderAll();
@@ -3122,7 +3099,7 @@
     clearPeek();
     collapsed = false;
     refreshCountLabel();
-    cardEl.classList.remove("collapsed", "collapsing", "offstage", "bye");
+    cardEl.classList.remove("collapsed", "offstage", "bye");
     ghost = true; peeking = true;
     cardEl.classList.add("peek", "ghost");
     activeView = "relays";
@@ -3150,7 +3127,7 @@
     clearPeek();
     collapsed = false;
     presented = true; // the tray mark opens the card FULLY: that is a presentation
-    cardEl.classList.remove("collapsed", "collapsing");
+    cardEl.classList.remove("collapsed");
     if (wasOffstage) {
       // fresh entrance: snap to expanded and replay the appear animation
       cardEl.classList.remove("ghost", "bye", "offstage");
@@ -3235,7 +3212,7 @@
     peeking = true;
     collapsed = false;
     notifInteracted = false;
-    cardEl.classList.remove("collapsed", "collapsing", "offstage", "ghost", "bye");
+    cardEl.classList.remove("collapsed", "offstage", "ghost", "bye");
     // A notification is a BANNER, not the app. `peek` collapses the tab rail and the
     // card is sized to the rows it actually shows — the notification list is unread-only
     // (see renderRelays), so at full expanded height a single new relay sat above ~380px
@@ -3275,7 +3252,7 @@
     collapsed = false;
     presented = true;
     refreshCountLabel();
-    cardEl.classList.remove("collapsed", "collapsing");
+    cardEl.classList.remove("collapsed");
     // `peeking` is already false, so this paints the full destination list
     // before applyView retargets the frame. No banner-to-list swap mid-spring.
     renderAll();

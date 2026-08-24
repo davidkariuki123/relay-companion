@@ -75,31 +75,27 @@ test("the first pointer event never cold-starts Web Audio", () => {
   assert.match(prime, /readerMorphSnapshot \|\| readerMorphInFlight \|\| roomViewTransition \|\| raf/);
 });
 
-test("the folded pill face is committed only with native-window settlement", () => {
+test("the folded pill uses one visual face through native-window settlement", () => {
   const collapse = between(html, "function setCollapsed", "// Park the card invisibly");
-  assert.match(collapse, /cardEl\.classList\.remove\("collapsed"\);[\s\S]*cardEl\.classList\.add\("collapsing"\)/,
-    "collapse starts with a transitional sheet, not a second final pill face");
-  assert.doesNotMatch(collapse, /classList\.toggle\("collapsed", collapsed\)/,
-    "the final pill face is not painted synchronously in the old expanded window");
-
-  const settle = between(html, "function settleCardVisualState", "function publishCardSize");
-  assert.match(settle, /classList\.remove\("collapsing"\)/);
-  assert.match(settle, /classList\.toggle\("collapsed", collapsed\)/);
+  assert.match(collapse, /classList\.toggle\("collapsed", collapsed\)/,
+    "the compact count and controls change with the collapse state, not after native settlement");
+  assert.doesNotMatch(html, /collapsing|settleCardVisualState/,
+    "there is no late second face to flash after the card has reached pill dimensions");
   const frame = between(html, "function frame", "function springTo");
   assert.match(frame, /commitSettledCardSize\(W\.t, H\.t, cardMotionId\)/);
   const commit = between(html, "function commitSettledCardSize", "function step");
   assert.match(commit, /publishCardSize\(w, h, \{ phase:"settled", motionId \}\)/);
-  assert.match(commit, /receipt\.then\(\(result\) => \{[\s\S]*commitVisual\(\)/,
-    "the final face waits for main to acknowledge the native bounds transaction");
+  assert.doesNotMatch(commit, /classList|then\(/,
+    "the native receipt cannot trigger another renderer paint");
 
-  assert.match(html, /\.card:is\(\.collapsed, \.collapsing\) \{/,
+  assert.match(html, /\.card\.collapsed \{/,
     "the one sheet keeps its folded radius and shadow throughout the morph");
-  assert.match(html, /\.card:is\(\.collapsed, \.collapsing\) \.scroll/,
+  assert.match(html, /\.card\.collapsed \.scroll/,
     "the old expanded content cannot remain visible behind the folding sheet");
   assert.match(html, /\.card:not\(\.collapsed\):not\(\.peek\) \.count \{ display:none; \}/,
-    "the final unread pill face remains absent until settlement");
+    "the unread count is present throughout a collapsed-state fold");
   assert.match(preload, /ipcRenderer\.invoke\("relay:cardSizeSettled"/,
-    "the isolated renderer receives an explicit native-settlement acknowledgement");
+    "the isolated renderer still receives explicit native-settlement acknowledgement");
   assert.match(main, /ipcMain\.handle\("relay:cardSizeSettled"/);
 });
 

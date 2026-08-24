@@ -583,7 +583,7 @@ test("theme has two layers — system default, explicit button choice sticks", (
 
 test("the fitted card keeps elevation inside its bounds", () => {
   assert.match(html, /\.card \{[\s\S]*?box-shadow:var\(--shadow-card\)/);
-  assert.match(html, /\.card:is\(\.collapsed, \.collapsing\) \{[\s\S]*?box-shadow:var\(--shadow-pill\)/);
+  assert.match(html, /\.card\.collapsed \{[\s\S]*?box-shadow:var\(--shadow-pill\)/);
   assert.match(html, /:root\[data-theme="dark"\][\s\S]*?--paper-edge:rgba\(255,255,255,\.06\)/);
   assert.match(html, /--shadow-card:inset 0 1px 0 var\(--paper-edge\)/);
   assert.match(html, /--shadow-pill:inset 0 1px 0 var\(--paper-edge\)/);
