@@ -196,6 +196,28 @@ test("a native credential pointer keeps paired recovery states distinct from fir
   });
 });
 
+test("only an explicit native-v1 pointer authorizes the one-time macOS legacy read", () => {
+  withConfigEnv(() => {
+    const seen = [];
+    const credentialBackend = {
+      readDeviceToken: (options) => {
+        seen.push(options);
+        return { ok: false, value: "", code: "credential_not_found" };
+      },
+    };
+    for (const credentialStore of ["native-v1", "local-v2"]) {
+      fs.writeFileSync(configPath(), JSON.stringify({
+        credentialStore,
+        credentialVersion: credentialStore,
+        credentialAccount: `device-token-${credentialStore}`,
+      }));
+      readConfigState({ credentialBackend });
+    }
+    assert.equal(seen[0].allowLegacyMigration, true);
+    assert.equal(seen[1].allowLegacyMigration, false);
+  });
+});
+
 test("a migrated macOS credential atomically advances its config pointer to local-v2", { skip: process.platform !== "darwin" }, () => {
   withConfigEnv((dir) => {
     const account = "device-token-legacy-marker-test";
@@ -342,8 +364,13 @@ test("configPath honors RELAY_CONFIG so the pill and CLI share one file", () => 
     assert.equal(configPath(), explicit);
     persistPairedAccount({ registration: REGISTRATION });
     const disk = JSON.parse(fs.readFileSync(explicit, "utf8"));
-    assert.equal(disk.deviceToken, undefined);
-    assert.equal(disk.credentialStore, process.platform === "darwin" ? "local-v2" : undefined);
+    if (process.platform === "darwin") {
+      assert.equal(disk.deviceToken, undefined);
+      assert.equal(disk.credentialStore, "local-v2");
+    } else {
+      assert.equal(disk.deviceToken, "dev_token_new");
+      assert.equal(disk.credentialStore, undefined);
+    }
     assert.equal(readConfig().deviceToken, "dev_token_new");
   });
 });
