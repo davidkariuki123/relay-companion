@@ -1153,6 +1153,15 @@ export async function localMcpEncryptionState(client, {
   return { mode, enabled: true };
 }
 
+async function activeMcpEncryptionState(client) {
+  // Managed Relay does not need the optional E2EE service. Avoid making MCP
+  // startup and ordinary tools depend on that authenticated route unless this
+  // computer actually has an enrolled E2EE identity.
+  return localE2eeIdentityAvailable()
+    ? localMcpEncryptionState(client)
+    : { mode: "off", enabled: false };
+}
+
 export function assertE2eeLocalToolCall(name) {
   // Keep the removed byte-identical chat alias working for an already-open
   // agent session, but never advertise it to a new one.
@@ -1929,11 +1938,10 @@ export async function runMcpServer() {
     apiUrl: apiUrl(),
   });
   // An unpaired MCP process must still start so the pill can pair it. Only ask
-  // for the signed mode at startup when an enrolled identity proves there is
-  // also a device credential; list/call handlers re-check after pairing.
-  const startupEncryption = localE2eeIdentityAvailable()
-    ? await localMcpEncryptionState(client)
-    : { mode: "off", enabled: false };
+  // for the signed mode when an enrolled identity proves there is also a
+  // device credential. Every handler re-checks, so pairing during a live
+  // session still takes effect.
+  const startupEncryption = await activeMcpEncryptionState(client);
   const server = new Server(
     { name: "relay-companion", version: "0.2.0-agent-protocol" },
     // claude/channel alongside tools: this ONE server both answers tool calls
@@ -1952,7 +1960,7 @@ export async function runMcpServer() {
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const refusal = accountDriftRefusal(client);
     if (refusal) throw new Error(refusal.content[0].text);
-    const encryption = await localMcpEncryptionState(client);
+    const encryption = await activeMcpEncryptionState(client);
     return { tools: encryption.enabled ? toolsForE2eeLocalAccount(features) : toolsForAccount(features) };
   });
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
@@ -1965,7 +1973,7 @@ export async function runMcpServer() {
     const refusal = accountDriftRefusal(client);
     if (refusal) return refusal;
     try {
-      const encryption = await localMcpEncryptionState(client);
+      const encryption = await activeMcpEncryptionState(client);
       if (encryption.enabled) assertE2eeLocalToolCall(req.params.name);
       return await handleCall(client, req.params.name, req.params.arguments || {}, {
         features,

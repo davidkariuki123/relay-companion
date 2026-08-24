@@ -99,7 +99,7 @@ const {
 const { elevationForFrontmost } = require("./elevation-policy.cjs");
 const { openingFaceFor } = require("./message-face.cjs");
 const perf = require("./perf-counters.cjs");
-const { fittedOverlayBounds, resizedOverlayBounds } = require("./window-fit.cjs");
+const { fittedOverlayBounds, shouldIgnoreOverlayMouse } = require("./window-fit.cjs");
 const { productFeatures } = require("../src/product-features.cjs");
 const { createOutbox } = require("../src/outbox.cjs");
 const {
@@ -3852,10 +3852,14 @@ async function previewRelayAttachment(relayId, attachmentId) {
 
 // ---- window placement / visibility ---------------------------------------
 
-function anchorTopRight(size = cardSize) {
+function anchorTopRight() {
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()) || screen.getPrimaryDisplay();
   const wa = display.workArea;
-  const anchor = fittedOverlayBounds(wa, size, { margin: MARGIN, maximum: CARD_MAX });
+  // Allocate one transparent compositor surface and keep it unchanged for the
+  // window's lifetime. On macOS an origin change and a size change are not
+  // presented atomically; resizing this surface after the CSS fold produced a
+  // retained old pill beside the new pill for one frame.
+  const anchor = fittedOverlayBounds(wa, CARD_MAX, { margin: MARGIN, maximum: CARD_MAX });
   if (process.env.RELAY_OVERLAY_TEST === "1" || process.env.RELAY_OVERLAY_PERF === "1") {
     // A harness run must not take over the developer's screen. Park sandbox
     // windows just off the bottom-right of the work area: still a REAL composited
@@ -3879,8 +3883,8 @@ function anchorTopRight(size = cardSize) {
   return anchor;
 }
 
-// Show the overlay window. It is an ordinary focusable window: Electron owns
-// input routing and the renderer owns only its contents.
+// Show the overlay window. It remains an ordinary focusable window over the
+// visible card; the transparent remainder is made click-through below.
 function showOverlayWindow({ force = false, reposition = true } = {}) {
   if (!win || win.isDestroyed()) return;
   const visible = win.isVisible();
@@ -3906,6 +3910,11 @@ function showOverlayWindow({ force = false, reposition = true } = {}) {
   perf.inc("spaceAsserts");
   const shown = showInactiveOnAllSpaces(win, { force, alwaysOnTop: overlayElevated });
   if (shown) {
+    // A hide/show cycle can leave Electron's native ignore flag out of step
+    // with our mirror. Reassert it, then let the next cursor sample carve out
+    // the visible card precisely.
+    applyIgnore(true, { force: true });
+    scheduleHit(0);
     // Visible again: unthrottle immediately, so the FIRST click after this is as
     // fast as the tenth (the "slow, then fast, then slow again" report).
     applyThrottlingPolicy();
@@ -4026,45 +4035,77 @@ function pollHosts({ probeFrontmost = true } = {}) {
   }
 }
 
-// ---- native window size ---------------------------------------------------
-// The BrowserWindow follows the visible card, like a normal small desktop
-// window. There is no larger transparent input surface and no click-through
-// state to synchronize.
+// ---- stable compositor surface + main-process hit testing -----------------
+// The renderer morphs one DOM card inside a fixed transparent BrowserWindow.
+// Never resize or reposition this native surface as part of a card transition:
+// AppKit can expose those two geometry changes on different frames, retaining
+// the old surface long enough to look exactly like a duplicate pill.
 const CARD_INITIAL = { w: 344, h: 524 };    // EXPANDED in inbox.html; renderer publishes its live size before announcing readiness
 const CARD_MAX = { w: 720, h: 800 };        // READER in inbox.html (the pill expanded into the page; PEEK is 400px wide)
+const HIT_IN = 6;
+const HIT_OUT = 12;
+const POLL_NEAR_MS = 24;
+const POLL_FAR_MS = 64;
+const POLL_HIDDEN_MS = 250;
+const NEAR_PAD = 96;
 let cardSize = { w: CARD_INITIAL.w, h: CARD_INITIAL.h };
+let hitTimer = null;
+let hitIgnoring = false;
+const HIT_TEST_POINTER_BLIND = process.env.RELAY_OVERLAY_TEST_IGNORE_POINTER === "1";
 
-function fitOverlayWindowToCard({ settle = false } = {}) {
+function applyIgnore(next, { force = false } = {}) {
+  next = Boolean(next);
+  if (!force && next === hitIgnoring) return;
+  hitIgnoring = next;
+  if (win && !win.isDestroyed()) win.setIgnoreMouseEvents(next, { forward: true });
+}
+
+function cardScreenRect(bounds) {
+  const w = Math.min(Math.max(cardSize.w, 0), CARD_MAX.w);
+  const h = Math.min(Math.max(cardSize.h, 0), CARD_MAX.h);
+  return { x: bounds.x + bounds.width - w, y: bounds.y, w, h };
+}
+
+function scheduleHit(ms) {
+  if (hitTimer) clearTimeout(hitTimer);
+  hitTimer = setTimeout(hitTick, ms);
+  if (typeof hitTimer.unref === "function") hitTimer.unref();
+}
+
+function hitTick() {
+  hitTimer = null;
   if (!win || win.isDestroyed()) return;
-  let current;
-  try { current = win.getBounds(); } catch { return; }
-  // Preserve the window's current top-right corner. That keeps ordinary card
-  // morphs in place and, importantly, never snaps a user-dragged pill home.
-  const target = resizedOverlayBounds(current, cardSize, { maximum: CARD_MAX });
-  if (target.x === current.x && target.y === current.y && target.width === current.width && target.height === current.height) {
+  if (HIT_TEST_POINTER_BLIND) {
+    applyIgnore(false);
+    scheduleHit(POLL_HIDDEN_MS);
     return;
   }
-  const growing = target.width > current.width || target.height > current.height;
-  // Growth happens before the renderer paints its larger destination. Shrink
-  // waits for an explicit renderer-settled receipt: no guessed timeout, no
-  // competing AppKit resize during the spring, and no stale collapse after a
-  // rapid retarget.
-  if (!growing && !settle) return;
-  if (process.platform === "darwin" && !growing) {
-    try {
-      // AppKit/Chromium can expose the size half of one setBounds call a frame
-      // before its origin half. Queue origin first in the same run-loop turn;
-      // the following size change then reuses the already-correct anchor.
-      win.setPosition(target.x, target.y, false);
-      win.setSize(target.width, target.height, false);
-    } catch {
-      // Keep the ordinary cross-platform transaction as a defensive fallback
-      // if either split BrowserWindow operation is unavailable.
-      try { win.setBounds(target, false); } catch {}
-    }
+  if (!win.isVisible()) {
+    applyIgnore(true);
+    scheduleHit(POLL_HIDDEN_MS);
     return;
   }
-  try { win.setBounds(target, false); } catch {}
+  let bounds;
+  let point;
+  try {
+    perf.inc("cursorReads");
+    bounds = win.getContentBounds();
+    point = screen.getCursorScreenPoint();
+  } catch {
+    scheduleHit(POLL_FAR_MS);
+    return;
+  }
+  const near =
+    point.x >= bounds.x - NEAR_PAD && point.x < bounds.x + bounds.width + NEAR_PAD &&
+    point.y >= bounds.y - NEAR_PAD && point.y < bounds.y + bounds.height + NEAR_PAD;
+  const pad = hitIgnoring ? HIT_IN : HIT_OUT;
+  applyIgnore(shouldIgnoreOverlayMouse(point, cardScreenRect(bounds), pad));
+  scheduleHit(near ? POLL_NEAR_MS : POLL_FAR_MS);
+}
+
+function startHitTest() {
+  if (hitTimer) return;
+  scheduleHit(POLL_NEAR_MS);
 }
 
 function createWindow() {
@@ -4119,6 +4160,8 @@ function createWindow() {
   );
   if (!isHarness || harnessTopmost) win.setAlwaysOnTop(true, process.platform === "win32" ? "screen-saver" : "floating");
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  applyIgnore(true, { force: true });
+  startHitTest();
   const inboxPath = path.join(__dirname, "inbox.html");
   const inboxUrl = pathToFileURL(inboxPath).href;
   // Relay bodies are untrusted correspondence. Their links may leave through
@@ -7332,7 +7375,8 @@ ipcMain.on("relay:engage", (event) => {
   lastEngagedAt = Date.now();
   setOverlayElevated(true);
 });
-// The renderer publishes the visible card size; the native window follows it.
+// The renderer publishes the visible card size for the fixed surface's exact
+// main-process hit region. It never changes native geometry.
 // Self-diagnosing stalls. Sandbox benchmarks kept showing a healthy pill while
 // the real one felt frozen for seconds, so the product records its own hitches:
 // the renderer reports any frame gap or click-to-response delay over the
@@ -7393,7 +7437,7 @@ function acceptRendererCardSize(event, w, h, motion = {}) {
   if (motionId < latestCardMotionId) return { ok:false, stale:true };
   latestCardMotionId = motionId;
   cardSize = { w, h };
-  fitOverlayWindowToCard({ settle: motion.phase === "settled" });
+  scheduleHit(0);
   return { ok:true };
 }
 ipcMain.on("relay:cardSize", (event, w, h, motion = {}) => {
@@ -7406,7 +7450,7 @@ ipcMain.handle("relay:prepareCardSize", (event, w, h) => {
   if (!win || win.isDestroyed() || event.sender !== win.webContents) return { ok:false };
   if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return { ok:false };
   cardSize = { w, h };
-  fitOverlayWindowToCard();
+  scheduleHit(0);
   return { ok:true };
 });
 ipcMain.on("relay:setPos", (_e, x, y) => {

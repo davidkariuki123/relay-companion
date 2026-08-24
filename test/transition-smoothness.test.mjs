@@ -75,7 +75,7 @@ test("the first pointer event never cold-starts Web Audio", () => {
   assert.match(prime, /readerMorphSnapshot \|\| readerMorphInFlight \|\| roomViewTransition \|\| raf/);
 });
 
-test("the folded pill uses one visual face through native-window settlement", () => {
+test("the folded pill uses one visual face on a stable compositor surface", () => {
   const collapse = between(html, "function setCollapsed", "// Park the card invisibly");
   assert.match(collapse, /classList\.toggle\("collapsed", collapsed\)/,
     "the compact count and controls change with the collapse state, not after native settlement");
@@ -95,19 +95,22 @@ test("the folded pill uses one visual face through native-window settlement", ()
   assert.match(html, /\.card:not\(\.collapsed\):not\(\.peek\) \.count \{ display:none; \}/,
     "the unread count is present throughout a collapsed-state fold");
   assert.match(preload, /ipcRenderer\.invoke\("relay:cardSizeSettled"/,
-    "the isolated renderer still receives explicit native-settlement acknowledgement");
+    "the isolated renderer still receives explicit hit-region acknowledgement");
   assert.match(main, /ipcMain\.handle\("relay:cardSizeSettled"/);
 });
 
-test("macOS collapse hands the compositor the anchored origin before the pill size", () => {
-  const fit = between(main, "function fitOverlayWindowToCard", "function createWindow");
-  const macShrink = between(fit, 'if (process.platform === "darwin" && !growing)', "return;");
-  const position = macShrink.indexOf("win.setPosition(target.x, target.y, false)");
-  const size = macShrink.indexOf("win.setSize(target.width, target.height, false)");
-  assert.ok(position >= 0 && size > position,
-    "the smaller pill cannot be composited for one frame at the expanded window's old left edge");
-  assert.doesNotMatch(macShrink, /true\)/,
-    "native AppKit animation would fight the renderer spring and visibly vibrate");
+test("collapse never changes native geometry after the renderer has folded", () => {
+  assert.doesNotMatch(main, /function fitOverlayWindowToCard/,
+    "the card transition must not have a native resize phase");
+  const sizeHandlers = between(main, "function acceptRendererCardSize", 'ipcMain.on("relay:setPos"');
+  assert.match(sizeHandlers, /cardSize = \{ w, h \}/);
+  assert.doesNotMatch(sizeHandlers, /setBounds|setPosition|setSize/,
+    "a settled collapse only updates hit testing, never the AppKit surface");
+  const anchor = between(main, "function anchorTopRight", "function showOverlayWindow");
+  assert.match(anchor, /fittedOverlayBounds\(wa, CARD_MAX,/,
+    "the compositor surface is allocated at one stable maximum size");
+  assert.match(main, /setIgnoreMouseEvents\(next, \{ forward: true \}\)/,
+    "transparent pixels remain click-through despite the stable surface");
 });
 
 test("all compact-to-reader resize transitions can hold a frozen source face", () => {
