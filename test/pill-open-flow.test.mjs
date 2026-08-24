@@ -583,7 +583,7 @@ test("theme has two layers — system default, explicit button choice sticks", (
 
 test("the fitted card keeps elevation inside its bounds", () => {
   assert.match(html, /\.card \{[\s\S]*?box-shadow:var\(--shadow-card\)/);
-  assert.match(html, /\.card\.collapsed \{[\s\S]*?box-shadow:var\(--shadow-pill\)/);
+  assert.match(html, /\.card:is\(\.collapsed, \.collapsing\) \{[\s\S]*?box-shadow:var\(--shadow-pill\)/);
   assert.match(html, /:root\[data-theme="dark"\][\s\S]*?--paper-edge:rgba\(255,255,255,\.06\)/);
   assert.match(html, /--shadow-card:inset 0 1px 0 var\(--paper-edge\)/);
   assert.match(html, /--shadow-pill:inset 0 1px 0 var\(--paper-edge\)/);
@@ -620,7 +620,7 @@ test("folding publishes the native window destination before an animation frame 
     "the native destination is sent before the animated frame is scheduled",
   );
   const frame = sliceFunction(html, "function frame(");
-  assert.match(frame, /publishCardSize\(W\.t, H\.t, \{ phase:"settled", motionId:cardMotionId \}\)/,
+  assert.match(frame, /commitSettledCardSize\(W\.t, H\.t, cardMotionId\)/,
     "native shrink commits from actual spring settlement, not a guessed timeout");
   assert.doesNotMatch(frame, /publishCardSizeThrottled/,
     "the native window never competes with the renderer's per-frame spring");
@@ -628,6 +628,9 @@ test("folding publishes the native window destination before an animation frame 
     "each renderer lifetime has its own motion-ordering domain");
   assert.match(preload, /motionSessionId: typeof motion\.motionSessionId === "string"/,
     "the renderer session id crosses the isolated preload boundary");
+  assert.match(preload, /ipcRenderer\.invoke\("relay:cardSizeSettled"/,
+    "final renderer state waits for main's native-bounds acknowledgement");
+  assert.match(main, /ipcMain\.handle\("relay:cardSizeSettled"/);
 });
 
 test("the pill uses ordinary native input routing", () => {
@@ -684,7 +687,7 @@ test("the native window starts at the visible expanded size and synchronizes bef
 });
 
 test("card-size IPC keeps the ordinary native window fitted to the card", () => {
-  const sizeHandler = main.slice(main.indexOf('ipcMain.on("relay:cardSize"'), main.indexOf('ipcMain.on("relay:setPos"'));
+  const sizeHandler = main.slice(main.indexOf("function acceptRendererCardSize"), main.indexOf('ipcMain.on("relay:setPos"'));
   assert.match(sizeHandler, /cardSize = \{ w, h \}/);
   assert.match(sizeHandler, /fitOverlayWindowToCard\(\{ settle: motion\.phase === "settled" \}\)/);
   const anchor = main.slice(main.indexOf("function anchorTopRight"), main.indexOf("function showOverlayWindow"));

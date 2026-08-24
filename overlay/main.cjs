@@ -7365,9 +7365,9 @@ ipcMain.on("relay:stall", (_e, info) => {
 
 let latestCardMotionId = 0;
 let latestCardMotionSessionId = "";
-ipcMain.on("relay:cardSize", (event, w, h, motion = {}) => {
-  if (!win || win.isDestroyed() || event.sender !== win.webContents) return;
-  if (!Number.isFinite(w) || !Number.isFinite(h)) return;
+function acceptRendererCardSize(event, w, h, motion = {}) {
+  if (!win || win.isDestroyed() || event.sender !== win.webContents) return { ok:false };
+  if (!Number.isFinite(w) || !Number.isFinite(h)) return { ok:false };
   const motionSessionId = typeof motion.motionSessionId === "string"
     ? motion.motionSessionId.slice(0, 64)
     : "";
@@ -7376,10 +7376,17 @@ ipcMain.on("relay:cardSize", (event, w, h, motion = {}) => {
     latestCardMotionSessionId = motionSessionId;
     latestCardMotionId = 0;
   }
-  if (motionId < latestCardMotionId) return;
+  if (motionId < latestCardMotionId) return { ok:false, stale:true };
   latestCardMotionId = motionId;
   cardSize = { w, h };
   fitOverlayWindowToCard({ settle: motion.phase === "settled" });
+  return { ok:true };
+}
+ipcMain.on("relay:cardSize", (event, w, h, motion = {}) => {
+  acceptRendererCardSize(event, w, h, motion);
+});
+ipcMain.handle("relay:cardSizeSettled", (event, w, h, motion = {}) => {
+  return acceptRendererCardSize(event, w, h, { ...motion, phase:"settled" });
 });
 ipcMain.handle("relay:prepareCardSize", (event, w, h) => {
   if (!win || win.isDestroyed() || event.sender !== win.webContents) return { ok:false };

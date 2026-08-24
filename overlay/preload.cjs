@@ -179,13 +179,23 @@ contextBridge.exposeInMainWorld("relay", {
   engage: () => ipcRenderer.send("relay:engage"),
   // The native window tracks the visible card's dimensions. `prepare` reserves
   // growth before paint; `settled` commits shrink after the spring completes.
-  cardSize: (w, h, motion = {}) => ipcRenderer.send("relay:cardSize", w, h, {
-    phase: motion.phase === "settled" ? "settled" : "prepare",
-    motionId: Number.isSafeInteger(motion.motionId) ? motion.motionId : 0,
-    motionSessionId: typeof motion.motionSessionId === "string"
-      ? motion.motionSessionId.slice(0, 64)
-      : "",
-  }),
+  cardSize: (w, h, motion = {}) => {
+    const safeMotion = {
+      phase: motion.phase === "settled" ? "settled" : "prepare",
+      motionId: Number.isSafeInteger(motion.motionId) ? motion.motionId : 0,
+      motionSessionId: typeof motion.motionSessionId === "string"
+        ? motion.motionSessionId.slice(0, 64)
+        : "",
+    };
+    // Final visual state waits for this acknowledgement. It resolves only
+    // after main has synchronously committed the new AppKit bounds, preventing
+    // a folded face from painting once in the previous expanded surface.
+    if (safeMotion.phase === "settled") {
+      return ipcRenderer.invoke("relay:cardSizeSettled", w, h, safeMotion);
+    }
+    ipcRenderer.send("relay:cardSize", w, h, safeMotion);
+    return undefined;
+  },
   // Grow before revealing a larger reader so content is never clipped.
   prepareCardSize: (w, h) => ipcRenderer.invoke("relay:prepareCardSize", w, h),
   setTheme: (t) => ipcRenderer.send("relay:theme", t), // preview window wears the same sheet

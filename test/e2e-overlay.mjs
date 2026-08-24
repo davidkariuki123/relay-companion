@@ -726,12 +726,33 @@ try {
     window.dispatchEvent(new MouseEvent('mouseup', { bubbles:true, button:0, clientX, clientY }));
     return true;
   })()`;
-  await evalIn(pageConn, tapLockup);
+  const collapseHandoff = await evalIn(pageConn, `(() => {
+    const lockup = document.getElementById('lockup');
+    const r = lockup.getBoundingClientRect();
+    const clientX = Math.round(r.left + Math.min(40, r.width / 2));
+    const clientY = Math.round(r.top + Math.min(20, r.height / 2));
+    lockup.dispatchEvent(new MouseEvent('mousedown', { bubbles:true, button:0, clientX, clientY }));
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles:true, button:0, clientX, clientY }));
+    const card = document.getElementById('card');
+    return {
+      collapsing: card.classList.contains('collapsing'),
+      collapsed: card.classList.contains('collapsed'),
+      countDisplay: getComputedStyle(document.getElementById('count')).display,
+    };
+  })()`);
+  check(
+    "dragged-anchor: the final pill face never paints in the old expanded native surface",
+    collapseHandoff.collapsing === true && collapseHandoff.collapsed === false && collapseHandoff.countDisplay === "none",
+    JSON.stringify(collapseHandoff),
+  );
   const draggedCollapsed = await retry(async () => {
-    const collapsed = await evalIn(pageConn, "document.getElementById('card').classList.contains('collapsed')");
+    const phase = await evalIn(pageConn, `(() => {
+      const card = document.getElementById('card');
+      return { collapsed:card.classList.contains('collapsed'), collapsing:card.classList.contains('collapsing') };
+    })()`);
     const bounds = await evalIn(mainConn, "global.__relayTest.getWin().getBounds()");
-    if (!collapsed || bounds.width !== 244 || bounds.height !== 44) {
-      throw new Error(`collapsed=${collapsed} bounds=${JSON.stringify(bounds)}`);
+    if (!phase.collapsed || phase.collapsing || bounds.width !== 244 || bounds.height !== 44) {
+      throw new Error(`phase=${JSON.stringify(phase)} bounds=${JSON.stringify(bounds)}`);
     }
     return bounds;
   }, { label: "dragged pill collapse settlement" });
