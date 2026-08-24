@@ -241,6 +241,7 @@
   .scroll {
     flex:1 1 auto; min-height:0; width:344px;
     overflow-y:auto; overscroll-behavior:contain;
+    background:var(--bg);
     /* The card's open/close animation changes its HEIGHT every frame. Without
        containment each of those frames re-lays-out every row in this scroller
        (150+ on a real inbox) — ~60 full reflows a second, which is what made
@@ -320,6 +321,55 @@
     transform-origin:center top;
     animation:readerDestinationIn .28s var(--soft) .035s both;
   }
+  /* Compact list <-> room navigation uses Chromium's View Transition snapshots.
+     These are the exact pixels from the two rendered states, so the sticky room
+     header/composer and the scrolled list cannot become independent moving
+     layers or be re-laid-out as a clone halfway through the push. The tab rail
+     is outside the named .scroll snapshot and therefore stays perfectly still. */
+  @keyframes roomPixelsForwardOld {
+    from { transform:translate3d(0,0,0); }
+    to { transform:translate3d(-24%,0,0); }
+  }
+  @keyframes roomPixelsForwardNew {
+    from { transform:translate3d(100%,0,0); }
+    to { transform:translate3d(0,0,0); }
+  }
+  @keyframes roomPixelsBackOld {
+    from { transform:translate3d(0,0,0); }
+    to { transform:translate3d(100%,0,0); }
+  }
+  @keyframes roomPixelsBackNew {
+    from { transform:translate3d(-24%,0,0); }
+    to { transform:translate3d(0,0,0); }
+  }
+  html.room-view-transition::view-transition-old(root),
+  html.room-view-transition::view-transition-new(root) {
+    animation:none; mix-blend-mode:normal;
+  }
+  html.room-view-transition::view-transition-group(relay-room) {
+    animation-duration:.36s;
+    animation-timing-function:cubic-bezier(.32,.72,0,1);
+    overflow:hidden;
+  }
+  html.room-view-transition::view-transition-image-pair(relay-room) {
+    isolation:isolate;
+  }
+  html.room-view-transition::view-transition-old(relay-room),
+  html.room-view-transition::view-transition-new(relay-room) {
+    background:var(--bg);
+  }
+  html.room-view-transition[data-room-motion="forward"]::view-transition-old(relay-room) {
+    animation:roomPixelsForwardOld .36s cubic-bezier(.32,.72,0,1) both;
+  }
+  html.room-view-transition[data-room-motion="forward"]::view-transition-new(relay-room) {
+    animation:roomPixelsForwardNew .36s cubic-bezier(.32,.72,0,1) both;
+  }
+  html.room-view-transition[data-room-motion="back"]::view-transition-old(relay-room) {
+    animation:roomPixelsBackOld .36s cubic-bezier(.32,.72,0,1) both;
+  }
+  html.room-view-transition[data-room-motion="back"]::view-transition-new(relay-room) {
+    animation:roomPixelsBackNew .36s cubic-bezier(.32,.72,0,1) both;
+  }
   /* A room is spatial navigation, not a dissolve. Keep the application chrome
      still and move one opaque content face at a time, using the same direction
      on entry and its exact inverse on Back. The trailing face travels farther;
@@ -365,6 +415,8 @@
   @media (prefers-reduced-motion:reduce) {
     .reader-morph-snapshot { display:none; }
     .scroll.reader-morph .reader-morph-destination { opacity:1; animation:none; transform:none; }
+    html.room-view-transition::view-transition-old(relay-room),
+    html.room-view-transition::view-transition-new(relay-room) { animation-duration:.001s; }
   }
 
   /* ---- group headers (Requests) ---- */
@@ -2569,7 +2621,7 @@
     audioPrimeQueued = true;
     const prime = () => {
       audioPrimeQueued = false;
-      if (readerMorphSnapshot || readerMorphInFlight || raf) {
+      if (readerMorphSnapshot || readerMorphInFlight || roomViewTransition || raf) {
         setTimeout(primeAudio, 600);
         return;
       }
@@ -2774,6 +2826,61 @@
       // settled DOM is still deterministic when the app becomes active again.
       readerMorphTimer = setTimeout(cleanReaderMorph, 480);
     });
+  }
+  let roomViewTransition = null;
+  let roomViewTransitionToken = 0;
+  let roomViewTransitionDeferredPayload = null;
+  function cleanRoomViewTransition(token = roomViewTransitionToken) {
+    if (token !== roomViewTransitionToken) return;
+    roomViewTransition = null;
+    document.documentElement.classList.remove("room-view-transition");
+    delete document.documentElement.dataset.roomMotion;
+    scrollEl.style.viewTransitionName = "";
+    // Keep the captured destination immutable until Chromium retires both
+    // pseudo-elements. Polling/read-receipt updates collapse to the newest
+    // payload and reconcile immediately after the visual transaction.
+    const deferredPayload = roomViewTransitionDeferredPayload;
+    roomViewTransitionDeferredPayload = null;
+    if (deferredPayload) queueMicrotask(() => onPayload(deferredPayload));
+  }
+  function startRoomViewTransition(update, { motion = "forward" } = {}) {
+    if (typeof update !== "function") return false;
+    // View Transitions give compact room navigation real pixel snapshots. If
+    // the API is unavailable, instant navigation is preferable to reviving the
+    // DOM-clone push whose scroll/sticky layers can tear independently.
+    if (REDUCED || collapsed || peeking || ghost || typeof document.startViewTransition !== "function") {
+      update();
+      return false;
+    }
+    if (roomViewTransition) {
+      try { roomViewTransition.skipTransition(); } catch {}
+      cleanRoomViewTransition();
+    }
+    const token = ++roomViewTransitionToken;
+    const root = document.documentElement;
+    root.classList.add("room-view-transition");
+    root.dataset.roomMotion = motion === "back" ? "back" : "forward";
+    // Name the stable viewport, not either live child view. Chromium captures
+    // the exact old and new pixels of this box, including its current scroll
+    // position, then animates the two flat images as one plane apiece.
+    scrollEl.style.viewTransitionName = "relay-room";
+    let updated = false;
+    try {
+      const transition = document.startViewTransition(() => {
+        updated = true;
+        update();
+      });
+      roomViewTransition = transition;
+      transition.finished.then(
+        () => cleanRoomViewTransition(token),
+        () => cleanRoomViewTransition(token),
+      );
+      return true;
+    } catch {
+      cleanRoomViewTransition(token);
+      if (!updated) update();
+      return false;
+    }
   }
   let peeking = false, peekTimer = null;
   let notificationDurationMs = 7000;
@@ -3715,9 +3822,9 @@
     for (const el of relaysListEl.querySelectorAll(".relay-arrival")) {
       el.addEventListener("click", () => {
         // One tap, straight into the conversation (Sven's standing call).
-        const morphFromList = prepareReaderMorph(activeView, { motion:"forward" });
-        openThreadDetail(el.getAttribute("data-thread"), el.getAttribute("data-party") || "");
-        if (morphFromList) startReaderMorph("threads");
+        startRoomViewTransition(() => {
+          openThreadDetail(el.getAttribute("data-thread"), el.getAttribute("data-party") || "");
+        }, { motion:"forward" });
       });
     }
   }
@@ -10008,19 +10115,28 @@
     // Compact rooms are a same-frame navigation stack and reverse their push.
     // Expanded rooms are also shrinking the card, so they keep the quieter
     // resize morph instead of combining a full-width swipe with frame motion.
-    const morphBackToList = prepareReaderMorph("threads", { motion:chatExpanded ? "morph" : "back" });
-    threadDetailId = null;
-    threadDetailScrolledFor = null;
-    chatExpanded = false;
-    // Back goes back to the LIST that was clicked. A room entered from People
-    // returns to People, on the row it left, not to Relays.
-    activeView = threadsSource === "chat" ? "chat"
+    const wasExpanded = chatExpanded;
+    const destinationView = threadsSource === "chat" ? "chat"
       : threadsSource === "contacts" ? "contacts"
       : "relays";
-    const returnTop = activeView === "chat" ? chatListScrollTop
-      : activeView === "contacts" ? contactsListScrollTop
+    const returnTop = destinationView === "chat" ? chatListScrollTop
+      : destinationView === "contacts" ? contactsListScrollTop
       : relaysListScrollTop;
-    commitNavigation({ outerScrollTop: returnTop });
+    const navigateBack = () => {
+      threadDetailId = null;
+      threadDetailScrolledFor = null;
+      chatExpanded = false;
+      // Back goes back to the LIST that was clicked. A room entered from People
+      // returns to People, on the row it left, not to Relays.
+      activeView = destinationView;
+      commitNavigation({ outerScrollTop: returnTop });
+    };
+    if (!wasExpanded) {
+      startRoomViewTransition(navigateBack, { motion:"back" });
+      return;
+    }
+    const morphBackToList = prepareReaderMorph("threads", { motion:"morph" });
+    navigateBack();
     if (morphBackToList) startReaderMorph(activeView);
   });
   let threadsSource = "chat"; // which tab the open conversation belongs to (the reader's readerSource law)
@@ -11573,6 +11689,10 @@
     if (!next || typeof next !== "object") return;
     if (readerMorphSnapshot) {
       readerMorphDeferredPayload = next;
+      return;
+    }
+    if (roomViewTransition) {
+      roomViewTransitionDeferredPayload = next;
       return;
     }
     const incomingRelays = Array.isArray(next.relays) ? next.relays : [];

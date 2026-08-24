@@ -121,7 +121,8 @@ test("a room entered from People keeps People lit, and Back returns there", () =
   // Back goes back to the list that was clicked, on the row it left.
   const back = between(html, "thBackEl.addEventListener", "let threadsSource =");
   assert.match(back, /threadsSource === "contacts" \? "contacts"/);
-  assert.match(back, /activeView === "contacts" \? contactsListScrollTop/);
+  assert.match(back, /destinationView === "contacts" \? contactsListScrollTop/);
+  assert.match(back, /activeView = destinationView;/);
   assert.match(html, /if \(activeView === "contacts" && source === "contacts" && scrollEl\) contactsListScrollTop = scrollEl\.scrollTop;/);
 });
 

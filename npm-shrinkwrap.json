@@ -1,12 +1,12 @@
 {
   "name": "relay-companion",
-  "version": "0.1.357",
+  "version": "0.1.358",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "relay-companion",
-      "version": "0.1.357",
+      "version": "0.1.358",
       "license": "MIT",
       "dependencies": {
         "@anthropic-ai/claude-agent-sdk": "0.3.195",
