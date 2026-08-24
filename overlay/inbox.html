@@ -94,7 +94,12 @@
      Elevation is three tokens: the card's own drop shadow (this one), the
      folded pill's lighter cousin, and one popover shadow — nothing else casts. */
   .card {
-    position:absolute; inset:0;
+    /* The native window preserves its current screen-space top-right point while
+       it changes size. Anchor the visible sheet to that same point so a folded
+       pill never lands at the old left edge and then jumps home when AppKit
+       trims the transparent remainder. This remains local to the current native
+       window, so a user-dragged pill morphs exactly where it was placed. */
+    position:absolute; top:0; right:0;
     width:344px; height:524px;
     background:var(--bg);
     border-radius:var(--r-card);
@@ -2685,15 +2690,25 @@
   const W = { v: EXPANDED.w, vel: 0, t: EXPANDED.w };
   const H = { v: EXPANDED.h, vel: 0, t: EXPANDED.h };
   let raf = null, lastT = 0;
-  // Main sizes the native window to this card. Deduped: one IPC per distinct
-  // integer size.
+  // Main sizes the native window to this card. A morph has two explicit phases:
+  // prepare grows the native surface before the first destination paint; settled
+  // trims it only after the renderer's spring actually finishes. A monotonic id
+  // makes rapid collapse/expand retargeting reject stale completions.
   let interactive = false;
   let lastSentCardSize = "";
-  function publishCardSize(w, h) {
-    const key = Math.round(w) + "x" + Math.round(h);
+  let cardMotionId = 0;
+  // A renderer reload starts a fresh ordering domain. Without this session id,
+  // main could mistake the new renderer's low motion ids for stale messages.
+  const cardMotionSessionId = crypto.randomUUID();
+  function publishCardSize(w, h, { phase = "prepare", motionId = cardMotionId } = {}) {
+    const key = motionId + ":" + phase + ":" + Math.round(w) + "x" + Math.round(h);
     if (key === lastSentCardSize) return;
     lastSentCardSize = key;
-    if (window.relay.cardSize) window.relay.cardSize(Math.round(w), Math.round(h));
+    if (window.relay.cardSize) window.relay.cardSize(Math.round(w), Math.round(h), {
+      phase,
+      motionId,
+      motionSessionId: cardMotionSessionId,
+    });
   }
   function step(s, dt) {
     const before = s.v - s.t;
@@ -2719,24 +2734,20 @@
     for (let i = 0; i < n; i++) { const a = step(W, h), b = step(H, h); moving = moving || a || b; }
     cardEl.style.width = W.v.toFixed(2) + "px";
     cardEl.style.height = H.v.toFixed(2) + "px";
-    // Native resize only needs to track the animation coarsely; sending it every
-    // frame would compete with the renderer's own motion.
-    publishCardSizeThrottled(W.v, H.v);
     if (moving) raf = requestAnimationFrame(frame);
-    else { raf = null; cardEl.style.willChange = ""; publishCardSize(W.t, H.t); }
-  }
-  let lastPublishAt = 0;
-  function publishCardSizeThrottled(w, h) {
-    const now = performance.now();
-    if (now - lastPublishAt < 80) return;
-    lastPublishAt = now;
-    publishCardSize(w, h);
+    else {
+      raf = null;
+      cardEl.style.willChange = "";
+      publishCardSize(W.t, H.t, { phase:"settled", motionId:cardMotionId });
+    }
   }
   function springTo(w, h) {
     W.t = w; H.t = h;
+    const motionId = ++cardMotionId;
     // Publish the destination synchronously so growth is available before paint
     // and a delayed animation frame cannot leave a stale native window size.
-    publishCardSize(w, h);
+    // Shrink is only committed by the settled message below.
+    publishCardSize(w, h, { phase:"prepare", motionId });
     // The scroller's width is FIXED (containment: the height spring must not
     // reflow the rows every frame) — so it must be re-fixed to each new
     // TARGET, once per morph. Content lays out at the destination size
@@ -2744,7 +2755,13 @@
     // its content in a 344px column and the new width is dead space. The
     // folded pill hides .scroll entirely, so never shrink it below EXPANDED.
     scrollEl.style.width = Math.max(w, EXPANDED.w) + "px";
-    if (REDUCED) { W.v = w; H.v = h; cardEl.style.width = w + "px"; cardEl.style.height = h + "px"; publishCardSize(w, h); return; }
+    if (REDUCED) {
+      W.v = w; H.v = h;
+      cardEl.style.width = w + "px";
+      cardEl.style.height = h + "px";
+      publishCardSize(w, h, { phase:"settled", motionId });
+      return;
+    }
     // will-change on width/height buys nothing (they are layout, not composited)
     // and costs a layer promotion; containment on .scroll is what makes this cheap.
     if (!raf) { lastT = performance.now(); raf = requestAnimationFrame(frame); }
@@ -2970,7 +2987,7 @@
     if (raf) { cancelAnimationFrame(raf); raf = null; cardEl.style.willChange = ""; }
     cardEl.style.width = w + "px";
     cardEl.style.height = h + "px";
-    publishCardSize(w, h);
+    publishCardSize(w, h, { phase:"settled", motionId:++cardMotionId });
   }
   function resetOffstage() {
     ghost = false;
@@ -12021,7 +12038,7 @@
   // authoritative across reloads and future layout changes. Publish the actual
   // initial target before readiness so the native hit rect can never retain a
   // larger stale/default size until the first fold-expand transition.
-  publishCardSize(W.t, H.t);
+  publishCardSize(W.t, H.t, { phase:"settled", motionId:cardMotionId });
   // LAST signal on purpose: every listener above is registered and the native
   // hit rect is synchronized, so main may now deliver queued arrivals without
   // a single one being dropped (FM-1).
