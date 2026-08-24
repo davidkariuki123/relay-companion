@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createRequire } from "node:module";
 import {
   deviceNameForPairing,
   normalizePairingCode,
@@ -12,6 +13,8 @@ import {
   signedOutAccountConfig,
 } from "../src/account.js";
 import { configPath, readConfig, readConfigState, writeConfigObject } from "../src/config.js";
+
+const localCredentialStore = createRequire(import.meta.url)("../src/local-credential-store.cjs");
 
 const REGISTRATION = {
   deviceToken: "dev_token_new",
@@ -121,7 +124,7 @@ test("persistPairedAccount then persistSignedOutAccount round-trips config.json"
   });
 });
 
-test("new credentials and legacy plaintext migrate to native storage without leaving secrets in config.json", () => {
+test("new credentials and legacy plaintext migrate to protected storage without leaving secrets in config.json", () => {
   withConfigEnv(() => {
     let nativeToken = "";
     const credentialBackend = {
@@ -131,7 +134,7 @@ test("new credentials and legacy plaintext migrate to native storage without lea
     writeConfigObject({ deviceToken: "dev_secure", deviceId: "dev_1", user: { id: "usr_1" } }, { credentialBackend });
     const disk = JSON.parse(fs.readFileSync(configPath(), "utf8"));
     assert.equal(disk.deviceToken, undefined);
-    assert.equal(disk.credentialStore, "native-v1");
+    assert.equal(disk.credentialStore, process.platform === "darwin" ? "local-v2" : "native-v1");
     assert.equal(nativeToken, "dev_secure");
     assert.equal(readConfig({ credentialBackend }).deviceToken, "dev_secure");
 
@@ -193,6 +196,30 @@ test("a native credential pointer keeps paired recovery states distinct from fir
   });
 });
 
+test("a migrated macOS credential atomically advances its config pointer to local-v2", { skip: process.platform !== "darwin" }, () => {
+  withConfigEnv((dir) => {
+    const account = "device-token-legacy-marker-test";
+    fs.writeFileSync(configPath(), JSON.stringify({
+      credentialStore: "native-v1",
+      credentialVersion: "legacy-marker-test",
+      credentialAccount: account,
+      deviceId: "dev_existing",
+      user: { id: "usr_existing" },
+    }));
+    assert.equal(localCredentialStore.writeCredential("existing-secret", {
+      file: path.join(dir, "credentials.v2.json"),
+      service: "work.relay.companion",
+      account,
+    }).ok, true);
+
+    const state = readConfigState();
+    assert.equal(state.credential.status, "available");
+    assert.equal(state.config.deviceToken, "existing-secret");
+    assert.equal(state.config.credentialStore, "local-v2");
+    assert.equal(JSON.parse(fs.readFileSync(configPath(), "utf8")).credentialStore, "local-v2");
+  });
+});
+
 test("a corrupt account config is a recovery state, not a fresh unpaired machine", () => {
   withConfigEnv((dir) => {
     fs.writeFileSync(configPath(), "{broken account config");
@@ -208,7 +235,7 @@ test("a corrupt account config is a recovery state, not a fresh unpaired machine
   });
 });
 
-test("installation authorization requires native storage and never falls back to plaintext", () => {
+test("installation authorization requires protected storage and never falls back to config plaintext", () => {
   withConfigEnv(() => {
     const unavailable = {
       writeDeviceToken: () => ({ ok: false, detail: "vault locked" }),
@@ -239,7 +266,7 @@ test("installation authorization requires native storage and never falls back to
     const disk = JSON.parse(fs.readFileSync(configPath(), "utf8"));
     assert.equal(nativeToken, REGISTRATION.deviceToken);
     assert.equal(disk.deviceToken, undefined);
-    assert.equal(disk.credentialStore, "native-v1");
+    assert.equal(disk.credentialStore, process.platform === "darwin" ? "local-v2" : "native-v1");
   });
 });
 
@@ -314,7 +341,10 @@ test("configPath honors RELAY_CONFIG so the pill and CLI share one file", () => 
     process.env.RELAY_CONFIG = explicit;
     assert.equal(configPath(), explicit);
     persistPairedAccount({ registration: REGISTRATION });
-    assert.equal(JSON.parse(fs.readFileSync(explicit, "utf8")).deviceToken, "dev_token_new");
+    const disk = JSON.parse(fs.readFileSync(explicit, "utf8"));
+    assert.equal(disk.deviceToken, undefined);
+    assert.equal(disk.credentialStore, process.platform === "darwin" ? "local-v2" : undefined);
+    assert.equal(readConfig().deviceToken, "dev_token_new");
   });
 });
 

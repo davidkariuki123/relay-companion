@@ -105,7 +105,7 @@ test("begin preflights native storage before creating a server authorization", a
   const { controller, calls } = harness({ stores });
   await assert.rejects(controller.begin(), (error) => {
     assert.equal(error.code, "credential_unavailable");
-    assert.match(error.message, /Unlock it/);
+    assert.match(error.message, /Check its permissions/);
     return true;
   });
   assert.equal(calls.length, 0, "no server capability is created while the local vault is unavailable");
@@ -404,7 +404,7 @@ test("polling survives restart, expiry purges the capability, and cancel fails c
   });
   failingStores.secretStore.delete = () => ({ ok: false, detail: "vault locked" });
   const failing = harness({ stores: failingStores }).controller;
-  await assert.rejects(failing.cancel(), /native credential store/);
+  await assert.rejects(failing.cancel(), /protected storage/);
   assert.ok(failingStores.peekDurable(), "durable record stays so deletion can be retried");
   assert.ok(failingStores.peekSecret(), "capability is not silently orphaned");
 });

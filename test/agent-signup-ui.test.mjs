@@ -39,7 +39,8 @@ test("signup errors are human recovery copy, never raw Electron IPC failures", (
 test("a paired credential problem opens recovery and never falls through to first-run authorization", () => {
   assert.match(overlay, /\["unavailable", "missing", "corrupt"\]\.includes\(payload\.account\?\.credentialStatus\)/);
   assert.match(overlay, /signupStage = "credential-recovery"/);
-  assert.match(overlay, /Unlock Relay’s account\./);
+  assert.match(overlay, /Recover Relay’s account\./);
+  assert.match(overlay, /Repair Relay’s storage\./);
   assert.match(overlay, /Reconnect this computer\./);
   assert.match(overlay, /Relay preserved the corrupt file for inspection/);
   assert.match(overlay, /Check the file permissions, then try again\./);

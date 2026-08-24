@@ -596,7 +596,7 @@ function readConfigFile() {
     if (process.env.RELAY_DEVICE_TOKEN || config.deviceToken) {
       return withCredentialState(config, "available");
     }
-    if (!config.deviceToken && config.credentialStore === "native-v1") {
+    if (!config.deviceToken && ["native-v1", "local-v2"].includes(config.credentialStore)) {
       const credentialVersion = config.credentialVersion || "native";
       if (nativeCredentialCache.version === credentialVersion && nativeCredentialCache.token) {
         config.deviceToken = nativeCredentialCache.token;
@@ -604,6 +604,10 @@ function readConfigFile() {
       } else {
         const stored = readDeviceToken({ account: config.credentialAccount || "device-token" });
         if (stored.ok && stored.value) {
+          if (process.platform === "darwin" && config.credentialStore === "native-v1") {
+            config.credentialStore = "local-v2";
+            try { atomicWriteJsonSync(configPath, config, { mode: 0o600 }); } catch {}
+          }
           nativeCredentialCache = { version: credentialVersion, token: stored.value };
           config.deviceToken = stored.value;
           return withCredentialState(config, "available");
@@ -675,6 +679,7 @@ function account() {
     paired: Boolean(process.env.RELAY_DEVICE_TOKEN || cfg.deviceToken),
     credentialStatus: credential.status,
     credentialError: credential.code || "",
+    credentialStore: cfg.credentialStore || "",
     email: user.email || "",
     name: user.name || "",
   };
@@ -699,6 +704,7 @@ function accountInfo() {
     paired: Boolean(process.env.RELAY_DEVICE_TOKEN || cfg.deviceToken),
     credentialStatus: credential.status,
     credentialError: credential.code || "",
+    credentialStore: cfg.credentialStore || "",
     name: user.name || "",
     email: user.email || "",
     deviceName: String(cfg.deviceName || "").trim() || os.hostname(),

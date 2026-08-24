@@ -23,9 +23,10 @@ function aad(identity) {
 function masterKey(identity, {
   credentialService = E2EE_MCP_CERTIFICATE_CREDENTIAL_SERVICE,
   credentials = { writeCredential, readCredential, deleteCredential },
+  allowLegacyMigration = false,
 } = {}) {
   const options = { service: credentialService, account: account(identity) };
-  const existing = credentials.readCredential(options);
+  const existing = credentials.readCredential({ ...options, allowLegacyMigration });
   if (existing?.ok) {
     const key = Buffer.from(String(existing.value || ""), "base64url");
     if (key.length !== 32) throw new Error("The native E2EE certificate key is invalid");
@@ -35,7 +36,7 @@ function masterKey(identity, {
   const encoded = key.toString("base64url");
   const written = credentials.writeCredential(encoded, options);
   if (!written?.ok) {
-    throw new Error(`Relay cannot protect its Claude certificate in this device's native credential store (${written?.detail || "unavailable"}).`);
+    throw new Error(`Relay cannot protect its Claude certificate in this device's credential store (${written?.detail || "unavailable"}).`);
   }
   const verified = credentials.readCredential(options);
   if (!verified?.ok || verified.value !== encoded) {
@@ -66,7 +67,7 @@ export function createE2eeMcpCertificateStore(identity, options = {}) {
     path.dirname(identityPath(options)),
     `e2ee-mcp-certificate-${account(identity)}.json`,
   );
-  const key = masterKey(identity, options);
+  const key = masterKey(identity, { ...options, allowLegacyMigration: fs.existsSync(file) });
   return {
     file,
     read() {

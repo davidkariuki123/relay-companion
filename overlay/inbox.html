@@ -11070,8 +11070,13 @@
 
   function signupFailureMessage(reason, fallback) {
     const detail = String(reason?.code || reason?.message || reason || "").toLowerCase();
-    if (detail.includes("credential_unavailable") || detail.includes("native credential store") || detail.includes("saved account credential")) {
-      return "Relay still cannot access macOS Keychain. Unlock your Mac login keychain, then try again.";
+    if (detail.includes("credential_unavailable")) {
+      return payload.account?.credentialStore === "native-v1"
+        ? "macOS Keychain is unavailable. Restart your Mac, sign in normally, then open Relay to migrate this credential once."
+        : "Relay cannot read its protected credential file. Check ~/.relay ownership and permissions, then try again.";
+    }
+    if (detail.includes("credential_store_permissions") || detail.includes("credential_store_error") || detail.includes("saved account credential")) {
+      return "Relay cannot read its protected credential file. Check ~/.relay ownership and permissions, then try again.";
     }
     if (detail.includes("credential_not_found") || detail.includes("credential_missing")) {
       return "Relay’s saved account credential is missing. Reconnect this computer.";
@@ -11185,19 +11190,22 @@
     if (signupStage === "credential-recovery") {
       const status = payload.account?.credentialStatus || "unavailable";
       const reason = payload.account?.credentialError || "";
+      const legacyKeychain = payload.account?.credentialStore === "native-v1";
       const canReconnect = status === "missing" || status === "corrupt";
-      const title = canReconnect ? "Reconnect this computer." : "Unlock Relay’s account.";
+      const title = canReconnect ? "Reconnect this computer." : legacyKeychain ? "Recover Relay’s account." : "Repair Relay’s storage.";
       const copy = reason === "config_corrupt"
         ? "This computer’s Relay account configuration is damaged. Relay preserved the corrupt file for inspection and did not start a new signup automatically."
         : reason === "config_unavailable"
           ? "Relay cannot read this computer’s account configuration. Check the file permissions, then try again."
           : canReconnect
-        ? `This computer still has Relay account metadata, but its saved macOS Keychain credential is ${status === "missing" ? "missing" : "damaged"}. Relay did not sign you out or start a new signup automatically.`
-        : "This computer is still connected, but macOS Keychain did not release its saved Relay credential. Unlock your login keychain, then try again.";
+        ? `This computer still has Relay account metadata, but its saved credential is ${status === "missing" ? "missing" : "damaged"}. Relay did not sign you out or start a new signup automatically.`
+        : legacyKeychain
+          ? "This Mac still has Relay’s older Keychain credential, but macOS did not release it. Restart the Mac, sign in normally, and Relay will migrate it once without asking for your password."
+          : "Relay cannot read its owner-only credential file. Check the ownership and permissions of ~/.relay, then try again.";
       const primary = canReconnect
         ? `<button class="su-primary" id="suCredentialReconnect" type="button"${busy}>Reconnect account</button>`
         : `<button class="su-primary" id="suCredentialRetry" type="button"${busy}>Try again</button>`;
-      const retry = canReconnect ? `<button class="su-link" id="suCredentialRetry" type="button"${busy}>Check Keychain again</button>` : "";
+      const retry = canReconnect ? `<button class="su-link" id="suCredentialRetry" type="button"${busy}>Check saved credential again</button>` : "";
       signupBodyEl.innerHTML = `<p class="su-step">Account recovery</p><h1 class="su-title">${title}</h1><p class="su-copy">${copy}</p><div class="su-form">${primary}${retry}</div>${error}`;
       document.getElementById("suCredentialRetry")?.addEventListener("click", async () => {
         signupBusy = true; signupError = ""; renderSignup();
@@ -11212,7 +11220,7 @@
           }
           signupError = signupFailureMessage(result?.account?.credentialError, "Relay still cannot access the saved credential.");
           renderAll();
-        } catch (reason) { signupFailure(reason, "Relay could not check Keychain again."); }
+        } catch (reason) { signupFailure(reason, "Relay could not check the saved credential again."); }
       });
       document.getElementById("suCredentialReconnect")?.addEventListener("click", async () => {
         signupBusy = true; signupError = ""; renderSignup();

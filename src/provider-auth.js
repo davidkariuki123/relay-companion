@@ -262,24 +262,10 @@ function terminalAttemptPaths(id, prefsFile) {
 
 function writeTerminalLoginScript(id, runtime, loginArgs, paths) {
   const label = PROVIDERS[id].label;
-  const keychainPrelude = id === "claude" ? `
-login_keychain="$HOME/Library/Keychains/login.keychain-db"
-if [[ -f "$login_keychain" ]] && ! /usr/bin/security show-keychain-info "$login_keychain" >/dev/null 2>&1; then
-  echo "Claude Code needs your macOS login Keychain before it can save the subscription connection."
-  echo "Enter your Mac login password at the Keychain prompt below. Relay cannot see it."
-  if ! /usr/bin/security unlock-keychain "$login_keychain"; then
-    echo ""
-    echo "The login Keychain could not be unlocked. Fix it in Keychain Access, then reconnect from Relay."
-    print -r -- "1" > ${shellQuote(paths.markerPath)}
-    exit 1
-  fi
-fi
-` : "";
   const script = `#!/bin/zsh
 set -u
 echo "Relay opened ${label}'s official subscription sign-in."
 echo "Complete the provider and browser prompts in this window."
-${keychainPrelude}
 ${[runtime, ...loginArgs].map(shellQuote).join(" ")}
 result=$?
 print -r -- "$result" > ${shellQuote(paths.markerPath)}

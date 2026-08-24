@@ -63,9 +63,10 @@ function validateState(value, identity) {
 function nativeMasterKey(identity, {
   credentialService = E2EE_MCP_OAUTH_CREDENTIAL_SERVICE,
   credentials = { writeCredential, readCredential, deleteCredential },
+  allowLegacyMigration = false,
 } = {}) {
   const options = { service: credentialService, account: account(identity) };
-  const existing = credentials.readCredential(options);
+  const existing = credentials.readCredential({ ...options, allowLegacyMigration });
   if (existing?.ok) {
     const key = Buffer.from(String(existing.value || ""), "base64url");
     if (key.length !== 32) throw new Error("The native E2EE MCP authorization key is invalid");
@@ -74,7 +75,7 @@ function nativeMasterKey(identity, {
   const key = randomBytes(32);
   const written = credentials.writeCredential(key.toString("base64url"), options);
   if (!written?.ok) {
-    throw new Error(`Relay cannot protect Claude authorization state in this device's native credential store (${written?.detail || "unavailable"}).`);
+    throw new Error(`Relay cannot protect Claude authorization state in this device's credential store (${written?.detail || "unavailable"}).`);
   }
   const verified = credentials.readCredential(options);
   if (!verified?.ok || verified.value !== key.toString("base64url")) {
@@ -86,7 +87,7 @@ function nativeMasterKey(identity, {
 
 export function createNativeE2eeMcpOAuthStateStore(identity, options = {}) {
   const file = options.file || statePath(identity, options);
-  const key = nativeMasterKey(identity, options);
+  const key = nativeMasterKey(identity, { ...options, allowLegacyMigration: fs.existsSync(file) });
 
   const read = () => {
     let envelope;

@@ -9,7 +9,7 @@ const { writeCredential, readCredential, deleteCredential } = createRequire(impo
 );
 
 const nativeStoreName = process.platform === "darwin"
-  ? "macOS Keychain"
+  ? "Relay's private macOS credential file"
   : process.platform === "win32"
     ? "Windows Credential Manager"
     : "native credential store";
@@ -42,12 +42,9 @@ test(`${nativeStoreName} preserves Relay credentials byte for byte`, {
   assert.deepEqual(readCredential(options), { ok: true, value: second, detail: "" });
 
   if (process.platform === "darwin") {
-    assert.match(
-      writeCredential("x".repeat(121), options).detail,
-      /secure prompt limit/,
-      "oversized values fail before macOS can silently truncate them",
-    );
-    assert.deepEqual(readCredential(options), { ok: true, value: second, detail: "" });
+    const longSecret = "x".repeat(512);
+    assert.equal(writeCredential(longSecret, options).ok, true);
+    assert.deepEqual(readCredential(options), { ok: true, value: longSecret, detail: "" });
   }
 
   assert.equal(deleteCredential(options).ok, true);

@@ -7,7 +7,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { RelayClient } from "../src/client.js";
-import { writeConfig } from "../src/config.js";
+import { readConfig, writeConfig } from "../src/config.js";
 import {
   installDaemonAutostart,
   writeClaudeCodeMcpConfig,
@@ -36,10 +36,17 @@ test("config and registrations remove deprecated local capability switches", () 
       companionMode: "full",
       features: { requests: true, retainedSetting: true },
     });
-    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(process.env.RELAY_CONFIG_DIR, "config.json"), "utf8")), {
-      deviceToken: "dev_test",
-      features: { retainedSetting: true },
-    });
+    const storedConfig = JSON.parse(fs.readFileSync(path.join(process.env.RELAY_CONFIG_DIR, "config.json"), "utf8"));
+    assert.deepEqual(storedConfig.features, { retainedSetting: true });
+    assert.equal(storedConfig.companionMode, undefined);
+    assert.equal(storedConfig.features.requests, undefined);
+    if (process.platform === "darwin") {
+      assert.equal(storedConfig.deviceToken, undefined);
+      assert.equal(storedConfig.credentialStore, "local-v2");
+      assert.equal(readConfig().deviceToken, "dev_test");
+    } else {
+      assert.equal(storedConfig.deviceToken, "dev_test");
+    }
 
     const claudeConfig = path.join(root, "claude.json");
     fs.writeFileSync(claudeConfig, "{}\n");
