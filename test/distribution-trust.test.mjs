@@ -740,6 +740,14 @@ test("macOS uses an owner-only local store while Windows uses Credential Manager
   assert.equal(credentialStore.deleteDeviceToken({ platform: "win32", run: () => ({ status: 0 }) }).ok, true);
 });
 
+test("fresh installation authorization fields cannot fall through to the macOS Keychain", () => {
+  const source = fs.readFileSync(new URL("../src/installation-authorization.js", import.meta.url), "utf8");
+  const splitRead = source.match(/for \(const \[field, account\][\s\S]*?values\[field\] = result\.value;/)?.[0] || "";
+  assert.match(splitRead, /readCredential\(options\(account\)\)/);
+  assert.doesNotMatch(splitRead, /allowLegacyMigration/);
+  assert.match(source, /readCredential\(\{ \.\.\.options\(INSTALLATION_CREDENTIAL_ACCOUNT\), allowLegacyMigration: true \}\)/);
+});
+
 test("native credential failures distinguish a missing secret from an unavailable vault", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-legacy-keychain-test-"));
   const file = path.join(root, "credentials.json");
@@ -747,6 +755,7 @@ test("native credential failures distinguish a missing secret from an unavailabl
   const lockedRead = credentialStore.readDeviceToken({
     platform: "darwin",
     file,
+    allowLegacyMigration: true,
     run: (command, args) => {
       calls.push({ command, args });
       return { status: 51, stdout: "", stderr: "The user name or passphrase you entered is not correct." };
@@ -765,6 +774,7 @@ test("native credential failures distinguish a missing secret from an unavailabl
   const missingRead = credentialStore.readDeviceToken({
     platform: "darwin",
     file: path.join(missingRoot, "credentials.json"),
+    allowLegacyMigration: true,
     run: (_command, args) => args.includes("show-keychain-info")
       ? { status: 0, stdout: "" }
       : { status: 44, stdout: "", stderr: "The specified item could not be found in the keychain. (-25300)" },

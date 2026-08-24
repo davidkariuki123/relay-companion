@@ -119,7 +119,10 @@ export function createNativeInstallationSecretStore({
       const values = {};
       let missing = null;
       for (const [field, account] of Object.entries(INSTALLATION_CREDENTIAL_ACCOUNTS)) {
-        const result = readCredential({ ...options(account), allowLegacyMigration: true });
+        // These split fields have only ever existed in the local-v2 store. Do
+        // not probe the legacy login Keychain for accounts no released build
+        // ever wrote there. The one old envelope is handled once below.
+        const result = readCredential(options(account));
         if (!result?.ok) { missing = result; break; }
         values[field] = result.value;
       }

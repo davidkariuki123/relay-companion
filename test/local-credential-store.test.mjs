@@ -68,7 +68,7 @@ test("macOS legacy migration probes without reading a poisoned Keychain", (t) =>
       throw new Error("a poisoned Keychain must never reach a password operation");
     },
   };
-  assert.equal(credentialStore.readDeviceToken(options).code, "credential_unavailable");
+  assert.equal(credentialStore.readDeviceToken({ ...options, allowLegacyMigration: true }).code, "credential_unavailable");
   assert.equal(calls.length, 1);
 });
 
@@ -91,11 +91,23 @@ test("a healthy legacy macOS credential migrates once and future reads never tou
     },
   };
 
-  assert.deepEqual(credentialStore.readDeviceToken(options), { ok: true, value: "legacy-secret", detail: "" });
+  assert.deepEqual(credentialStore.readDeviceToken({ ...options, allowLegacyMigration: true }), { ok: true, value: "legacy-secret", detail: "" });
   assert.ok(calls.some((args) => args.includes("find-generic-password")));
   const migratedCallCount = calls.length;
   assert.deepEqual(credentialStore.readDeviceToken(options), { ok: true, value: "legacy-secret", detail: "" });
   assert.equal(calls.length, migratedCallCount, "the migrated local read never consults Keychain again");
+});
+
+test("a local-v2 device-token miss never falls back to the login Keychain", (t) => {
+  const { root, file } = sandbox();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const result = credentialStore.readDeviceToken({
+    platform: "darwin",
+    file,
+    account: "device-token-migrated",
+    run: () => { throw new Error("local-v2 must never invoke Keychain"); },
+  });
+  assert.equal(result.code, "credential_not_found");
 });
 
 test("a fresh generic macOS credential never probes Keychain", (t) => {

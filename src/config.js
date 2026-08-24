@@ -227,7 +227,10 @@ export function readConfigState({ credentialBackend = nativeCredentialBackend } 
         credential: { status: CREDENTIAL_STATUS_AVAILABLE },
       };
     }
-    const stored = credentialBackend.readDeviceToken({ account: credentialAccountFor(raw) });
+    const stored = credentialBackend.readDeviceToken({
+      account: credentialAccountFor(raw),
+      allowLegacyMigration: raw.credentialStore === NATIVE_CREDENTIAL_STORE,
+    });
     if (stored.ok && stored.value) {
       const migratedPointer = process.platform === "darwin" && raw.credentialStore === NATIVE_CREDENTIAL_STORE
         ? { ...raw, credentialStore: LOCAL_CREDENTIAL_STORE }
