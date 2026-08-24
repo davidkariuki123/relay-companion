@@ -700,7 +700,6 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
     if (entry.unread) row.classList.add("unread");
     if (entry.state === "pending") row.classList.add("pending");
     if (entry.state === "failed") row.classList.add("failed");
-    if (entry.inReplyToRelayId) row.classList.add("thread-reply");
 
     if (showAuthor) {
       const author = document.createElement("p");
@@ -767,18 +766,6 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
     }
 
     row.appendChild(bubble);
-
-    if (entry.origin === "slack" || entry.provider?.name === "slack") {
-      const provider = document.createElement("div");
-      provider.className = "bubble-provider";
-      const mark = document.createElement("img");
-      mark.src = "slackMark.png";
-      mark.alt = "";
-      const label = document.createElement("span");
-      label.textContent = "From Slack";
-      provider.append(mark, label);
-      row.appendChild(provider);
-    }
 
     const stamp = document.createElement("div");
     stamp.className = "bubble-time";
@@ -872,12 +859,6 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
       state: "sent",
       isGroup,
       readReceipts: Array.isArray(item.readReceipts) ? item.readReceipts : [],
-      origin: text(item.origin),
-      provider: item.provider || null,
-      inReplyToRelayId: text(item.inReplyToRelayId),
-      threadId: text(item.threadId),
-      editedAt: text(item.editedAt),
-      deletedAt: text(item.deletedAt),
     }));
     for (const out of outgoing) {
       entries.push({
@@ -927,8 +908,6 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
     chatStateEl.classList.add("gone");
 
     const fragment = document.createDocumentFragment();
-    const visibleIds = new Set(entries.map((entry) => entry.relayId).filter(Boolean));
-    const shownMissingRoots = new Set();
     let previousDay = "";
     for (let i = 0; i < entries.length; i += 1) {
       const entry = entries[i];
@@ -942,24 +921,6 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
         divider.textContent = dayLabel(entry.at);
         fragment.appendChild(divider);
         previousDay = day;
-      }
-
-      if (
-        entry.provider?.name === "slack"
-        && entry.inReplyToRelayId
-        && !visibleIds.has(entry.inReplyToRelayId)
-        && !shownMissingRoots.has(entry.threadId || entry.inReplyToRelayId)
-      ) {
-        shownMissingRoots.add(entry.threadId || entry.inReplyToRelayId);
-        const stub = document.createElement("div");
-        stub.className = "thread-stub";
-        const mark = document.createElement("img");
-        mark.src = "slackMark.png";
-        mark.alt = "";
-        const label = document.createElement("span");
-        label.textContent = "Earlier Slack thread";
-        stub.append(mark, label);
-        fragment.appendChild(stub);
       }
 
       // A run is the same person speaking without a long pause: it gets one

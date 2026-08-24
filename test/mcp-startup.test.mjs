@@ -28,8 +28,6 @@ async function inspectMcp({ developer = false, updateChannel = "stable" }) {
     env: {
       ...process.env,
       RELAY_CONFIG_DIR: configDir,
-      RELAY_HOME: configDir,
-      RELAY_COMPANION_HOME: configDir,
       RELAY_UPDATE_CHANNEL: updateChannel,
     },
     stderr: "pipe",

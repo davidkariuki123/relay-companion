@@ -60,7 +60,7 @@ test("a plain text message sends a declared empty forAgent", async () => {
   assert.equal("inReplyToRelayId" in payload, false);
 });
 
-test("the complete agent document supports the sender's intended human meaning", () => {
+test("the concise human document is derived from a complete unlimited agent document", () => {
   // Sven, on catching reasons that lived only in the letter: "agent should
   // be getting everything to replicate the work, continue from a handoff or
   // fix a bug... more is better for the agent, simple is better for the
@@ -70,17 +70,19 @@ test("the complete agent document supports the sender's intended human meaning",
   // the detail crossed, in the lane the human reads. These pins keep the
   // rule taught on all three surfaces of relay_send.
   const tool = TOOLS.find((t) => t.name === "relay_send");
-  assert.match(tool.description, /Determine what the sender means to communicate before drafting either field/i);
-  assert.match(tool.description, /write forAgent to support that meaning, then ghostwrite forHuman without adding an ask, response request, or commitment/i);
-  assert.match(tool.description, /field schemas contain the complete composition rules/i);
+  assert.match(tool.description, /compose the complete forAgent document first/i);
+  assert.match(tool.description, /derive forHuman as the concise message/i);
+  assert.match(tool.description, /fewest words that faithfully preserve the message, not the most allowed/i);
+  assert.match(tool.description, /1-3 normally sized sentences/i);
+  assert.match(tool.description, /45 words or fewer/i);
+  assert.match(tool.description, /60 words is only Relay's mandatory-review threshold, never a target, budget/i);
+  assert.match(tool.description, /stops an over-threshold first attempt for review/i);
+  assert.match(tool.description, /message history teaches voice and relationship register, not a default word count/i);
+  assert.match(tool.description, /under-sending to the recipient's agent is worse than over-sending/i);
   assert.match(tool.inputSchema.properties.forHuman.description, /USE THE FEWEST WORDS THAT FAITHFULLY PRESERVE IT/);
-  assert.match(tool.inputSchema.properties.forHuman.description, /1-3 normally sized sentences/i);
-  assert.match(tool.inputSchema.properties.forHuman.description, /45 words or fewer/i);
   assert.match(tool.inputSchema.properties.forHuman.description, /NOT A TARGET OR BUDGET/);
   assert.match(tool.inputSchema.properties.longForHumanConfirmed.description, /already rejected this exact over-60-word draft/i);
   assert.match(tool.inputSchema.properties.forAgent.description, /complete .*document/i);
-  assert.match(tool.inputSchema.properties.forAgent.description, /supports what the sender means to communicate now/i);
-  assert.match(tool.inputSchema.properties.forAgent.description, /never a superseded ask or next step/i);
   assert.match(tool.inputSchema.properties.forAgent.description, /may be as long and detailed as necessary/i);
 });
 

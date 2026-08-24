@@ -345,7 +345,7 @@ test("preview Markdown security controls survive into the bundled preload", () =
     assert.match(forbiddenTags, /["']img["']/i, `${label} explicitly forbids img`);
   }
 
-  assert.match(previewHtml, /img-src 'self' data: blob:/);
+  assert.match(previewHtml, /img-src data: blob:/);
   assert.doesNotMatch(previewHtml, /img-src[^;]*(?:https:|file:)/);
   const externalOpen = between(main, "function openPreviewExternal", "function isPreviewEvent");
   assert.match(externalOpen, /new Set\(\["http:",\s*"https:",\s*"mailto:"\]\)/);
@@ -854,7 +854,7 @@ test("Task documents remain beside a persistent Work tab throughout a run", () =
   assert.match(reader, /class="work-footer"[^]*\$\{status\}\$\{composer\}/, "Work keeps its provider composer after Start");
   assert.match(reader, /if \(request && \(onAgent \|\| onWork\)\) return requestDockHtml/,
     "For Agent and Work keep the provider composer");
-  assert.match(reader, /<div class="rd-foot"><div class="rd-col">\$\{sharedShelf\}\$\{status\}\$\{bothNote\}\$\{composer\}/,
+  assert.match(reader, /<div class="rd-foot"><div class="rd-col">\$\{status\}\$\{bothNote\}\$\{composer\}/,
     "both immutable source documents retain a composer after Work exists");
   assert.doesNotMatch(reader, /requestDisclosure|data-brief=/, "Work never nests another copy of the document tabs or documents");
 

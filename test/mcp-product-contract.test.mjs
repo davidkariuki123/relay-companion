@@ -68,22 +68,24 @@ test("startup guidance and owner schemas preserve the complete product ontology"
       `${name} leads with the human-ask gate and calibrated clarification rule`,
     );
   }
-  assert.match(RELAY_MCP_INSTRUCTIONS, /default general direct-message and saved-channel communication layer/i);
+  assert.match(RELAY_MCP_INSTRUCTIONS, /default general person-to-person and saved-group communication layer/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /For that ask, use Relay unless another medium is named/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /explicitly requested other medium overrides/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /mint a link with relay_share_link/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /notification emails are not the authoritative contents/i);
-  assert.match(RELAY_MCP_INSTRUCTIONS, /one chronological conversation for one person or saved channel/i);
+  assert.match(RELAY_MCP_INSTRUCTIONS, /one chronological room for one person or saved group/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /threadId is opaque AI retrieval metadata/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /3-6 word title/i);
   assert.match(sendContract, /fewest words that faithfully preserve/i);
   assert.match(sendContract, /1-3 normally sized sentences/i);
   assert.match(sendContract, /45 words or fewer/i);
   assert.match(sendContract, /60 words triggers mandatory review/i);
+  assert.match(sendContract, /Never pad toward it or hide detail in long compound sentences/i);
   assert.match(sendContract, /not the shorthand used to instruct you/i);
   assert.match(sendContract, /Sending or attaching information does not imply.*please review.*thoughts\?.*let me know.*requesting a response/i);
   assert.match(sendContract, /never revive superseded intent/i);
   assert.match(sendContract, /already rejected this exact over-60-word draft/i);
+  assert.match(sendContract, /teaches voice and relationship register, not target length/i);
   assert.match(sendContract, /teach voice and relationship register; never revive superseded intent/i);
   assert.match(sendContract, /It may be as long and detailed as necessary/i);
   assert.match(sendContract, /mechanisms, evidence, code, paths, logs, reproduction steps/i);
@@ -119,7 +121,7 @@ test("no model-facing tool resurrects removed content fields or visible topic na
     }
   }
   assert.match(byName.get("relay_thread_fetch").description, /not (?:a product object, )?visible thread\/topic, title, chat, or UI destination/i);
-  assert.match(byName.get("relay_chats_list").description, /CHANNEL is identified by its existing grp_\.\.\. id for compatibility/i);
+  assert.match(byName.get("relay_chats_list").description, /identified by the group's own id/i);
   assert.match(byName.get("relay_chat_fetch").description, /no user-visible threads or topics/i);
 });
 
@@ -136,7 +138,7 @@ test("relay_send requires one recipient, an explicit kind, and the two-document 
   assert.match(send.inputSchema.properties.kind.description, /Do you think we should switch to dev\?' is kind='message'/);
   assert.match(send.inputSchema.properties.title.description, /3-6 word gist/i);
   assert.match(send.inputSchema.properties.forHuman.description, /recipient-specific vocabulary.*rhythm.*directness.*formality.*warmth.*sign-off/i);
-  assert.match(send.inputSchema.properties.forHuman.description, /relay_sent_list.*relay_chat_fetch/i);
+  assert.match(send.inputSchema.properties.forHuman.description, /relay_sent_list and relay_chat_fetch/i);
   assert.match(send.inputSchema.properties.forHuman.description, /not the shorthand used to instruct you/i);
   assert.match(send.inputSchema.properties.forHuman.description, /Interpret that shorthand and ghostwrite it/i);
   assert.match(send.inputSchema.properties.forHuman.description, /Supply the words, never additional meaning/i);
@@ -146,12 +148,13 @@ test("relay_send requires one recipient, an explicit kind, and the two-document 
   assert.match(send.inputSchema.properties.forHuman.description, /USE THE FEWEST WORDS THAT FAITHFULLY PRESERVE IT/);
   assert.match(send.inputSchema.properties.forHuman.description, /1-3 normally sized sentences/i);
   assert.match(send.inputSchema.properties.forHuman.description, /45 words or fewer/i);
-  assert.match(send.inputSchema.properties.forHuman.description, /60 words triggers mandatory review and is NOT A TARGET OR BUDGET/);
+  assert.match(send.inputSchema.properties.forHuman.description, /60 words triggers mandatory review; it is NOT A TARGET OR BUDGET/);
+  assert.match(send.inputSchema.properties.forHuman.description, /not target length/i);
   assert.match(send.inputSchema.properties.longForHumanConfirmed.description, /already rejected this exact over-60-word draft/i);
   assert.ok(send.description.trim().split(/\s+/u).length <= 320,
     "relay_send guidance stays focused enough for the human-length rule to remain salient");
-  assert.ok(send.inputSchema.properties.forHuman.description.trim().split(/\s+/u).length <= 150,
-    "forHuman guidance does not bury its default length contract");
+  assert.ok(send.inputSchema.properties.forHuman.description.trim().split(/\s+/u).length <= 250,
+    "the additive intent contract does not bury the existing default length contract");
   assert.match(send.inputSchema.properties.forAgent.description, /everything useful that the person need not read/i);
   assert.equal(send.inputSchema.required.includes("forAgent"), false);
   assert.equal(send.inputSchema.properties.type, undefined, "legacy control types are not model-facing");
@@ -173,12 +176,8 @@ test("every human-message writing surface preserves the sender's intended speech
     assert.match(guidance, /Sending or attaching information does not imply.*requesting a response/i);
     assert.match(guidance, /never revive superseded intent/i);
   }
-  assert.match(RELAY_MCP_INSTRUCTIONS, /adds no meaning to the sender's shorthand/i);
-  assert.match(REQUESTS_DISABLED_INSTRUCTIONS, /adds no meaning to the sender's shorthand/i);
-  assert.match(byName.get("relay_send").description, /may be information-only/i);
-  assert.match(byName.get("relay_send").description, /only when that is what the sender means to communicate/i);
-  assert.match(byName.get("relay_send").inputSchema.properties.kind.description, /may simply inform them without seeking a response/i);
-  assert.match(byName.get("relay_send").inputSchema.properties.forAgent.description, /never a superseded ask or next step/i);
+  assert.match(RELAY_MCP_INSTRUCTIONS, /forHuman preserves intent; invent nothing/i);
+  assert.match(REQUESTS_DISABLED_INSTRUCTIONS, /forHuman preserves intent; invent nothing/i);
 });
 
 test("conditional schemas are used only where they do not erase critical writing fields", () => {

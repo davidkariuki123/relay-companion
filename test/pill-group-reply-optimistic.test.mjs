@@ -38,13 +38,13 @@ function runThreadMessages(payload, optimisticChatReplies, { realDelivery = fals
     ? `${pillFunction("sentIsRead")}\n${pillFunction("sentIsDelivered")}\n${pillFunction("threadMessages")}\nreturn threadMessages();`
     : `${pillFunction("threadMessages")}\nreturn threadMessages();`;
   return new Function(
-    "payload", "optimisticChatReplies", "canonicalChatDetails",
+    "payload", "optimisticChatReplies",
     "requestThreadIds", "isTaskRow", "isRelayListKind", "onRequestThread",
     "relaySubject", "relayTextLike", "isCompletionRelay", "relaySender",
     "bodyPreview", "sentRecipient", "sentIsRead", "sentIsDelivered", "sentSubject",
     `"use strict"; ${source}`,
   )(
-    payload, optimisticChatReplies, new Map(),
+    payload, optimisticChatReplies,
     () => new Set(), () => false, () => true, () => false,
     (r) => String(r.title || ""), () => true, () => false,
     (r) => String(r.senderName || "Sender"),
