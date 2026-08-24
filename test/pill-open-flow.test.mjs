@@ -697,6 +697,13 @@ test("card-size IPC keeps the ordinary native window fitted to the card", () => 
   assert.match(fit, /resizedOverlayBounds\(current, cardSize,/,
     "resizing keeps a dragged pill at its current top-right position");
   assert.match(fit, /win\.setBounds\(target, false\)/);
+  assert.match(fit, /process\.platform === "darwin" && !growing/);
+  const macShrink = fit.slice(fit.indexOf('process.platform === "darwin" && !growing'));
+  assert.ok(macShrink.indexOf("win.setPosition(target.x, target.y, false)")
+    < macShrink.indexOf("win.setSize(target.width, target.height, false)"),
+  "a macOS shrink moves the native origin before exposing the smaller surface");
+  assert.doesNotMatch(macShrink, /setBounds\(target, true\)|setSize\([^\n]*true\)/,
+    "AppKit must not animate underneath the renderer spring");
   assert.match(fit, /if \(!growing && !settle\) return;/,
     "prepare can grow immediately but cannot shrink before renderer settlement");
   assert.doesNotMatch(fit, /setTimeout|overlayFitTimer/,

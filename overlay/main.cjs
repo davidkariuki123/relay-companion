@@ -4050,6 +4050,20 @@ function fitOverlayWindowToCard({ settle = false } = {}) {
   // competing AppKit resize during the spring, and no stale collapse after a
   // rapid retarget.
   if (!growing && !settle) return;
+  if (process.platform === "darwin" && !growing) {
+    try {
+      // AppKit/Chromium can expose the size half of one setBounds call a frame
+      // before its origin half. Queue origin first in the same run-loop turn;
+      // the following size change then reuses the already-correct anchor.
+      win.setPosition(target.x, target.y, false);
+      win.setSize(target.width, target.height, false);
+    } catch {
+      // Keep the ordinary cross-platform transaction as a defensive fallback
+      // if either split BrowserWindow operation is unavailable.
+      try { win.setBounds(target, false); } catch {}
+    }
+    return;
+  }
   try { win.setBounds(target, false); } catch {}
 }
 
