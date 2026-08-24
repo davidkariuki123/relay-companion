@@ -614,11 +614,20 @@ test("the native size clamp covers every card state", () => {
 
 test("folding publishes the native window destination before an animation frame can stall", () => {
   const spring = html.slice(html.indexOf("function springTo("), html.indexOf("// ---------- collapse / expand / peek"));
-  assert.match(spring, /W\.t = w; H\.t = h;\s*[\s\S]*?publishCardSize\(w, h\);/);
+  assert.match(spring, /W\.t = w; H\.t = h;\s*[\s\S]*?publishCardSize\(w, h, \{ phase:"prepare", motionId \}\);/);
   assert.ok(
-    spring.indexOf("publishCardSize(w, h);") < spring.indexOf("requestAnimationFrame(frame)"),
+    spring.indexOf('publishCardSize(w, h, { phase:"prepare", motionId });') < spring.indexOf("requestAnimationFrame(frame)"),
     "the native destination is sent before the animated frame is scheduled",
   );
+  const frame = sliceFunction(html, "function frame(");
+  assert.match(frame, /publishCardSize\(W\.t, H\.t, \{ phase:"settled", motionId:cardMotionId \}\)/,
+    "native shrink commits from actual spring settlement, not a guessed timeout");
+  assert.doesNotMatch(frame, /publishCardSizeThrottled/,
+    "the native window never competes with the renderer's per-frame spring");
+  assert.match(html, /const cardMotionSessionId = crypto\.randomUUID\(\)/,
+    "each renderer lifetime has its own motion-ordering domain");
+  assert.match(preload, /motionSessionId: typeof motion\.motionSessionId === "string"/,
+    "the renderer session id crosses the isolated preload boundary");
 });
 
 test("the pill uses ordinary native input routing", () => {
@@ -628,7 +637,8 @@ test("the pill uses ordinary native input routing", () => {
   assert.match(create, /hasShadow: false/);
   assert.doesNotMatch(main, /setIgnoreMouseEvents|applyIgnore|hitTick|startHitTest/);
   assert.doesNotMatch(main + preload + html, /relay:setFocusable|setFocusable/);
-  assert.match(html, /\.card \{\s*position:absolute; inset:0;/);
+  assert.match(html, /\.card \{[\s\S]*?position:absolute; top:0; right:0;/,
+    "the visible card shares the native window's top-right anchor throughout a morph");
   assert.doesNotMatch(html, /body \{[^}]*user-select:none/);
 });
 
@@ -667,7 +677,7 @@ test("the native window starts at the visible expanded size and synchronizes bef
   assert.deepEqual(initial.slice(1), expanded.slice(1), "main cannot boot with a larger invisible window");
   assert.match(main, /let cardSize = \{ w: CARD_INITIAL\.w, h: CARD_INITIAL\.h \}/);
 
-  const publish = html.lastIndexOf("publishCardSize(W.t, H.t);");
+  const publish = html.lastIndexOf('publishCardSize(W.t, H.t, { phase:"settled", motionId:cardMotionId });');
   const ready = html.lastIndexOf("if (window.relay.rendererReady) window.relay.rendererReady();");
   assert.notEqual(publish, -1, "the renderer publishes its initial live size");
   assert.ok(publish < ready, "the initial native size is synchronized before main releases queued work");
@@ -676,7 +686,7 @@ test("the native window starts at the visible expanded size and synchronizes bef
 test("card-size IPC keeps the ordinary native window fitted to the card", () => {
   const sizeHandler = main.slice(main.indexOf('ipcMain.on("relay:cardSize"'), main.indexOf('ipcMain.on("relay:setPos"'));
   assert.match(sizeHandler, /cardSize = \{ w, h \}/);
-  assert.match(sizeHandler, /fitOverlayWindowToCard\(\)/);
+  assert.match(sizeHandler, /fitOverlayWindowToCard\(\{ settle: motion\.phase === "settled" \}\)/);
   const anchor = main.slice(main.indexOf("function anchorTopRight"), main.indexOf("function showOverlayWindow"));
   assert.match(anchor, /function anchorTopRight\(size = cardSize\)/);
   assert.match(anchor, /fittedOverlayBounds\(wa, size,/);
@@ -684,8 +694,14 @@ test("card-size IPC keeps the ordinary native window fitted to the card", () => 
   assert.match(fit, /resizedOverlayBounds\(current, cardSize,/,
     "resizing keeps a dragged pill at its current top-right position");
   assert.match(fit, /win\.setBounds\(target, false\)/);
-  assert.match(fit, /setTimeout\(\(\) => \{[\s\S]*fitOverlayWindowToCard\(\{ settle: true \}\)/,
-    "shrink waits for the card animation to finish");
+  assert.match(fit, /if \(!growing && !settle\) return;/,
+    "prepare can grow immediately but cannot shrink before renderer settlement");
+  assert.doesNotMatch(fit, /setTimeout|overlayFitTimer/,
+    "native settlement follows the renderer receipt rather than a guessed duration");
+  assert.match(sizeHandler, /motionId < latestCardMotionId/,
+    "a stale collapse completion cannot override a newer expansion");
+  assert.match(sizeHandler, /motionSessionId !== latestCardMotionSessionId[\s\S]*?latestCardMotionId = 0/,
+    "a renderer reload resets motion ordering before its new ids are compared");
   const show = main.slice(main.indexOf("function showOverlayWindow"), main.indexOf("function maybeShow"));
   assert.match(show, /target\.x !== current\.x \|\| target\.y !== current\.y/,
     "forced shows skip an identical AppKit bounds transaction");
