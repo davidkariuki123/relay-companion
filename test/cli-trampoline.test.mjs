@@ -83,8 +83,20 @@ test("the services and updater-internal commands never hop, whatever the pointer
   // deliberate act; this pins the current membership so a drift is visible.
   assert.deepEqual(
     Array.from(TRAMPOLINE_EXEMPT_COMMANDS).sort(),
-    ["claude-hook", "codex-hook", "daemon", "mcp", "pill", "repair-desktop", "repair-runtime", "self-update"],
+    ["claude-hook", "codex-hook", "daemon", "mcp", "repair-desktop", "repair-runtime", "self-update"],
   );
+});
+
+test("a stale global `relay pill` opens the active canonical pill", () => {
+  const current = pointerFor("/home/u/.relay/runtime/releases/0.1.376-x/node_modules/relay-companion", "0.1.376");
+  const hop = resolveCliTrampoline({ ...base, command: "pill", readCurrent: () => current });
+  assert.deepEqual(hop, {
+    node: current.node,
+    bin: current.bin,
+    from: "0.1.265",
+    to: "0.1.376",
+    shimRoot: path.resolve(base.runningRoot),
+  });
 });
 
 test("retired commands typed from muscle memory still hop and get the current usage text", () => {
