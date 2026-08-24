@@ -59,7 +59,7 @@ test("Relay identity rows show the room and latest gist without shortening the r
 
   // Both inbound and sent readers still resolve the complete semantic title;
   // relayListGist is deliberately confined to the identity list.
-  const reader = between(inbox, "function renderReader()", "// ---------- the requests board:");
+  const reader = between(inbox, "function renderReader()", "// ---------- the Tasks board:");
   const sentReaderProjection = between(inbox, "function readerRow(id)", "const RX_PRIMARY");
   assert.match(reader, /const subject = request \? [\s\S]*?relaySubject\(r\)/);
   assert.match(sentReaderProjection, /title: sentSubject\(sent\)/);
@@ -69,7 +69,7 @@ test("Relay identity rows show the room and latest gist without shortening the r
 
 test("both Relay documents render the complete document system", () => {
   const markdown = between(inbox, "function mdToHtml", "function readerParagraphs");
-  const reader = between(inbox, "function renderReader()", "// ---------- the requests board:");
+  const reader = between(inbox, "function renderReader()", "// ---------- the Tasks board:");
 
   assert.match(inbox, /:is\(\.rd-body,\.rd-agentcopy\) \.md-h/);
   assert.match(inbox, /:is\(\.rd-body,\.rd-agentcopy\) \.md-codeblock/);
@@ -494,7 +494,7 @@ test("the task face's ignition is wired end to end: preload, IPC guard, renderer
   assert.match(previewPreloadBundle, /relay:preview:startTask/);
 });
 
-test("the Request face offers a local Review Safety before one-click Accept", () => {
+test("the Task face offers a local Review Safety before one-click Accept", () => {
   assert.match(previewHtml, /id="safetyButton"[^>]*>Review Safety<\/button>/);
   assert.match(previewHtml, /id="safetyPanel"/);
   assert.match(previewPreloadSource, /reviewSafety:[\s\S]*relay:preview:reviewSafety/);
@@ -512,7 +512,7 @@ test("the Request face offers a local Review Safety before one-click Accept", ()
   assert.match(pillPreload, /relay:requestReviewSafety/);
 });
 
-test("a consequential Request result waits on the recipient device before encrypted release", () => {
+test("a consequential Task result waits on the recipient device before encrypted release", () => {
   assert.match(main, /candidate\.assessment\?\.level !== "none"/);
   assert.match(main, /completionReview/);
   assert.match(main, /releaseProviderCompletion/);
@@ -571,7 +571,7 @@ test("a restarted runner derives its composer provider from the persisted native
   assert.match(appName, /row\?\.codexThreadId/);
 });
 
-test("continued Request and Work composers keep model and thinking pickers wired to follow-ups", () => {
+test("continued Task and Work composers keep model and thinking pickers wired to follow-ups", () => {
   const continuation = between(inbox, "function continuedRouteFor", "function requestDockHtml");
   const controls = between(inbox, "function wireRequestControls", "function requestsWaitingCount");
   const steer = between(main, "async function previewTaskSteer", "function installActiveSpaceWatcher");
@@ -681,7 +681,7 @@ test("starting a fresh provider run clears stale follow-up presentation state", 
   assert.equal((start.match(/\.\.\.freshRunFollowUpState/g) || []).length, 3, "Cowork, Claude, and Codex all reset an older provider turn");
 });
 
-test("a For-you Request reply is optimistic correspondence and remains in the person's conversation", () => {
+test("a For-you Task reply is optimistic correspondence and remains in the person's conversation", () => {
   const reader = between(inbox, "if (!onAgent && !onWork)", "const oc = readerBodyEl.querySelector");
   assert.match(reader, /optimisticChatReplies\.set\(idempotencyKey/);
   assert.match(reader, /request:false/);
@@ -692,7 +692,7 @@ test("a For-you Request reply is optimistic correspondence and remains in the pe
   assert.match(reader, /optimistic\.outboxId = String\(res\.entry\.id \|\| idempotencyKey\)/);
   assert.match(reader, /optimisticChatReplies\.delete\(idempotencyKey\)/, "only a device that cannot hold the message removes the row");
   const sentProjection = between(inbox, "for (const s of payload.sent", "const canonicalIds");
-  assert.doesNotMatch(sentProjection, /!request && onRequestThread/, "ordinary human replies are not hidden merely because they answer a Request");
+  assert.doesNotMatch(sentProjection, /!request && onRequestThread/, "ordinary human replies are not hidden merely because they answer a Task");
   assert.match(sentProjection, /isCompletionRelay\(s\) && !sentTextLike/, "only two-document completion traffic remains outside the conversation");
 });
 
@@ -813,8 +813,8 @@ test("Work activity uses the installed Codex row grammar without raw argument du
   assert.match(inbox, /\.rd-activity \+ \.worked-for-divider \{ margin-top:-12px; \}/);
 });
 
-test("Request documents remain beside a persistent Work tab throughout a run", () => {
-  const reader = between(inbox, "function renderReader()", "// ---------- the requests board");
+test("Task documents remain beside a persistent Work tab throughout a run", () => {
+  const reader = between(inbox, "function renderReader()", "// ---------- the Tasks board");
   const controls = between(inbox, "function wireRequestControls", "function requestsWaitingCount");
   const open = between(inbox, "function openReader", "function closeReader");
 
@@ -867,14 +867,14 @@ test("Request documents remain beside a persistent Work tab throughout a run", (
   assert.match(open, /readerTab = readerWorkVisible \? "work" : "you"/);
 });
 
-test("successful Request launch acknowledgement expires instead of surviving Done", () => {
+test("successful Task launch acknowledgement expires instead of surviving Done", () => {
   const controls = between(inbox, "function wireRequestControls", "function requestsWaitingCount");
   assert.match(controls, /setRowNote\(id, note \|\| payloads\.files\.length \? `Started on \$\{rt\.app\} — your message went with it\.` : `Started on \$\{rt\.app\}\.`, "ok"\);/);
   assert.match(controls, /Work header owns running\/stopped\/done truth;[^]*fadeRowNoteLater\(id, 3000\);/);
 });
 
 test("ordinary Relay folders address the human, the agent, and local Work separately", () => {
-  const reader = between(inbox, "function renderReader()", "// ---------- the requests board");
+  const reader = between(inbox, "function renderReader()", "// ---------- the Tasks board");
   const sharedIdleDock = between(inbox, "function idleRunDockHtml", "function requestDockHtml");
   const requestDock = between(inbox, "function requestDockHtml", "function relayWorkDockHtml");
   const workDock = between(inbox, "function relayWorkDockHtml", "function requestControlsHtml");
@@ -892,7 +892,7 @@ test("ordinary Relay folders address the human, the agent, and local Work separa
   assert.match(sharedIdleDock, /data-open-in="\$\{esc\(r\.id\)\}"/);
   assert.match(sharedIdleDock, /data-work-start="\$\{esc\(r\.id\)\}"/);
   assert.match(requestDock, /return idleRunDockHtml\(r,/,
-    "Requests use the shared route-selecting composer");
+    "Tasks use the shared route-selecting composer");
   assert.match(workDock, /return idleRunDockHtml\(r, \{ inline, draft, action: "work", label: "Send" \}\);/,
     "ordinary Relay Work uses that same composer with Send as its verb");
   assert.match(workDock, /const starting = live && !hasSession/);
@@ -909,7 +909,7 @@ test("ordinary Relay folders address the human, the agent, and local Work separa
     "a stale Claude model can never cross into Codex");
   assert.match(main, /const isLocalWork = input\?\.localWork === true/);
   assert.match(main, /if \(isRequest\) \{[^]*client\.taskStarted\(id\)/,
-    "ordinary local work must not stamp a Request receipt");
+    "ordinary local work must not stamp a Task receipt");
   assert.match(main, /isRequest \? \{ taskState: "started", taskStartedAt: stamped \} : \{ workStartedAt: stamped, workCompletedAt: null \}/);
   assert.match(pillPreload, /relayWorkStart: \(id, route\) => ipcRenderer\.invoke\("relay:relayWorkStart"/);
 });
@@ -1016,7 +1016,7 @@ test("Cowork Start owns a remote session, feed, Steer, and honest terminal state
   assert.match(feed, /coworkSessionLifecycle/);
   const coworkRefresh = between(feed, "updateStagedPacket(id, {", "});");
   assert.doesNotMatch(coworkRefresh, /taskCompletedAt|workCompletedAt/, "legacy Cowork polling never persists settlement");
-  assert.doesNotMatch(feed, /providerCompletionCandidate\(/, "legacy transcript reads never derive Request settlement");
+  assert.doesNotMatch(feed, /providerCompletionCandidate\(/, "legacy transcript reads never derive Task settlement");
   assert.match(main, /providerCompletionIdempotencyKey/);
   const monitor = between(main, "async function settleCanonicalWorkEnvelope", "function workEventAuthorized");
   assert.match(monitor, /canonicalProviderCompletionCandidate/);
@@ -1037,7 +1037,7 @@ test("Cowork Start owns a remote session, feed, Steer, and honest terminal state
 
   const mirror = between(inbox, "function startRunFeed", "function syncRunMirrors");
   assert.match(mirror, /runFeedIsTerminal\(feed\)/);
-  assert.match(mirror, /requestLocal\.set\(key, "stopped"\)/);
+  assert.match(mirror, /taskLocal\.set\(key, "stopped"\)/);
   const controls = between(inbox, "function wireRequestControls", "function requestsWaitingCount");
   assert.match(controls, /appendOptimisticUserTurn\(id, note[^]*preserveHistory: false/);
 });
@@ -1084,7 +1084,7 @@ test("Settings exposes complete subscription connection management for Claude Co
   assert.match(inbox, /role="dialog" aria-modal="true"/);
   assert.match(inbox, /placeholder="Search integrations"/);
   assert.match(inbox, /data-provider-enable="\$\{id\}"/);
-  assert.match(inbox, /Disabled for Requests/);
+  assert.match(inbox, /Disabled for Tasks/);
   assert.match(inbox, /window\.addEventListener\("focus", \(\) => \{[\s\S]*activeView === "settings"[\s\S]*loadSettings\(\)/);
   assert.match(inbox, /document\.addEventListener\("visibilitychange"[\s\S]*document\.visibilityState === "visible"[\s\S]*loadSettings\(\)/);
   assert.match(pillPreload, /providerAuthStatus: \(\) => ipcRenderer\.invoke\("relay:providerAuthStatus"\)/);
@@ -1106,12 +1106,12 @@ test("Settings exposes complete subscription connection management for Claude Co
 
 test("a completed runner repaints its visible follow-up composer", () => {
   const mirror = between(inbox, "function startRunFeed", "function syncRunMirrors");
-  assert.match(mirror, /feed\.completedAt[\s\S]*requestLocal\.set\(key, "done"\); renderAll\(\)/);
+  assert.match(mirror, /feed\.completedAt[\s\S]*taskLocal\.set\(key, "done"\); renderAll\(\)/);
 });
 
 test("ordinary window focus survives reader refreshes and run retries invalidate stale polls", () => {
   const dress = between(inbox, "function dressComposer", "let readerSource");
-  const reader = between(inbox, "function renderReader", "// ---------- the requests board");
+  const reader = between(inbox, "function renderReader", "// ---------- the Tasks board");
   assert.doesNotMatch(dress, /setFocusable/);
   assert.doesNotMatch(reader, /setFocusable/);
   assert.match(inbox, /const runFeedEpoch = new Map/);
@@ -1142,7 +1142,7 @@ test("the session face's state words never claim more than the machine knows", (
 });
 
 test("the agent folder has no human reply button and never crashes control wiring", () => {
-  const reader = between(inbox, "function renderReader()", "function renderRequestsBoard()");
+  const reader = between(inbox, "function renderReader()", "function renderTasksBoard()");
   assert.match(reader, /const send = document\.getElementById\("qrSend"\)/);
   assert.match(reader, /const input = document\.getElementById\("qrInput"\)/);
   assert.match(reader, /if \(send && input\) \{[\s\S]*?send\.addEventListener\("click", doSend\);[\s\S]*?dressComposer\(input, doSend\);[\s\S]*?\}/);

@@ -118,7 +118,7 @@ test("[N02] Claude retry exhaustion/tool failure beats prior prose and never fab
   assert.deepEqual(finals(view), [], "stop_reason=tool_use commentary is not a final answer");
   assert.ok(units.some((unit) => unit.type === "error"), "exhausted retry/tool rejection must stay persistent");
   assert.notEqual(view.turns.at(-1)?.status, "completed");
-  assert.equal(visibleUsers(view).includes("[Request interrupted by user for tool use]"), false);
+  assert.equal(visibleUsers(view).includes("[Task interrupted by user for tool use]"), false);
 });
 
 test("[N03] Claude AskUserQuestion and prevented stop hook are one pending blocker, not generic activity", () => {

@@ -820,19 +820,50 @@ export class RelayClient {
     return this.#req("POST", `/v1/relays/${encodeURIComponent(id)}/read`, payload);
   }
 
-  /** The recipient pressed Start on a task relay. Idempotent server-side. */
-  async taskStarted(id) {
+  /** The recipient started a Task, either in Relay Work or an external MCP session. */
+  async taskStarted(id, payload = {}) {
     if (String(id).startsWith("erelay_")) {
       return this.e2eeTaskChanged(id, "started", {
-        idempotencyKey: `task-started:${id}`,
+        ...payload,
+        taskRunOwner: payload.taskRunOwner || { kind: "relay_work" },
+        idempotencyKey: payload.idempotencyKey || `task-started:${id}`,
       });
     }
-    return this.#req("POST", `/v1/relays/${encodeURIComponent(id)}/task/started`, {});
+    return this.#req("POST", `/v1/relays/${encodeURIComponent(id)}/task/started`, payload);
+  }
+
+  /** Complete one exact inbound Task and return its canonical result Relay. */
+  async taskCompleted(id, payload) {
+    if (String(id).startsWith("erelay_")) {
+      const sent = await this.sendRelay({
+        recipient: {},
+        kind: "message",
+        type: "completion",
+        forHuman: payload.forHuman,
+        forAgent: payload.forAgent || "",
+        attachments: payload.attachments || [],
+        inReplyToRelayId: id,
+        idempotencyKey: `task-complete:${id}`,
+        source: {
+          host: "relay-mcp",
+          ...(payload.sourceProvider === "codex" ? { surface: "codex" } : {}),
+          ...(payload.sourceProvider === "claude" ? { surface: "claude_code" } : {}),
+          ...(payload.sourceNativeId ? { threadId: payload.sourceNativeId } : {}),
+        },
+      });
+      return {
+        taskRelayId: id,
+        state: "done",
+        completedAt: new Date().toISOString(),
+        resultRelayId: sent.relayId,
+      };
+    }
+    return this.#req("POST", `/v1/relays/${encodeURIComponent(id)}/task/completed`, payload);
   }
 
   /** Append an opaque encrypted task receipt; the API cannot read its state. */
-  async e2eeTaskChanged(id, state, { resultMessageId, idempotencyKey } = {}) {
-    if (!String(id).startsWith("erelay_")) throw new Error("Encrypted task receipts require an E2EE Request id.");
+  async e2eeTaskChanged(id, state, { resultMessageId, taskRunOwner, idempotencyKey } = {}) {
+    if (!String(id).startsWith("erelay_")) throw new Error("Encrypted Task receipts require an E2EE Task id.");
     const status = await verifiedE2eeStatus(this);
     return encryptE2eeMessage(this, {
       kind: "message",
@@ -845,6 +876,7 @@ export class RelayClient {
         taskId: id,
         state,
         ...(resultMessageId ? { resultMessageId } : {}),
+        ...(taskRunOwner ? { taskRunOwner } : {}),
       },
     }, status);
   }

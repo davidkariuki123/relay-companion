@@ -142,7 +142,7 @@ test("Desktop Code stays alive across an interim result and closes after the bac
   assert.equal(adopted.importIntoDesktop, false);
 });
 
-test("a Relay Request worker strips legacy capability flags without mutating user settings", () => {
+test("a Relay Task worker strips legacy capability flags without mutating user settings", () => {
   const homedir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-code-mcp-test-"));
   const file = path.join(homedir, ".claude.json");
   const original = JSON.stringify({

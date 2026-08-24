@@ -531,7 +531,7 @@ export async function pollTaskRuntimeOnce({
 }
 
 // Run updater maintenance independently from API authentication and task polling.
-// This matters at login/offline recovery: client.me() or a task request can be slow or
+// This matters at login/offline recovery: client.me() or a Task fetch can be slow or
 // repeatedly fail, but a newly published companion may contain the very fix needed to
 // recover. createAutoUpdater handles the real one-minute registry rate limit; this
 // lightweight loop only lets pending/busy/retry state react within a few seconds.
@@ -692,11 +692,11 @@ export const SELF_HEAL_FAILURE_STREAK = 60;
 // The session controller — publish this machine's session directory, then
 // claim and execute remote session operations — is the substrate under
 // relay_ai_sessions / relay_ai_session. On the product row it shares with
-// Requests (prod v1: send · receive · open — Sven, 2026-08-17) it is off
+// Tasks (prod v1: send · receive · open — Sven, 2026-08-17) it is off
 // for ordinary accounts: nothing is uploaded, nothing is listened for, the
 // receiver loop is all that runs. A tick never throws either way: session
 // directory failure must never stop ordinary Relay delivery or a developer's
-// Request runtime while a new API release rolls through.
+// Task runtime while a new API release rolls through.
 export async function sessionControllerTick({ client, log, features, run = runSessionDirectoryOnce } = {}) {
   if (features && features.aiSessions === false) return { ran: false };
   try {
@@ -708,7 +708,7 @@ export async function sessionControllerTick({ client, log, features, run = runSe
   }
 }
 
-// The server-issued account role controls whether this loop asks for Request
+// The server-issued account role controls whether this loop asks for Task
 // work. Ordinary delivery remains active for every account.
 export async function daemonDeliveryTick({
   client,
@@ -734,7 +734,7 @@ export async function daemonDeliveryTick({
 function daemonProductFeatures(log, user) {
   const features = productFeatures({ env: process.env, config: readConfig(), apiUrl: apiUrl(), user });
   if (!features.aiSessions) log("developer session features off for this account: no session directory upload, no remote session operations");
-  if (!features.requests) log("Request runtime off for this account: ordinary Relay delivery only");
+  if (!features.requests) log("Task runtime off for this account: ordinary Relay delivery only");
   return features;
 }
 

@@ -86,7 +86,7 @@ test("the concise human document is derived from a complete unlimited agent docu
   assert.match(tool.inputSchema.properties.forAgent.description, /may be as long and detailed as necessary/i);
 });
 
-test("relay_send requires the model to classify message versus Request", async () => {
+test("relay_send requires the model to classify message versus Task", async () => {
   await assert.rejects(
     send({
       recipient: { email: "shane@example.com" },

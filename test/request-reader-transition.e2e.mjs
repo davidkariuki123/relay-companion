@@ -1,4 +1,4 @@
-// Visual/geometry gate for the Requests mini-list -> full reader morph.
+// Visual/geometry gate for the Tasks mini-list -> full reader morph.
 //
 // This boots the real Electron overlay in an isolated home, records every
 // rendered animation frame plus every native BrowserWindow bounds write, and
@@ -30,7 +30,7 @@ fs.mkdirSync(userData, { recursive: true });
 fs.writeFileSync(path.join(sandbox, "config.json"), JSON.stringify({
   deviceToken: "request_transition_fixture",
   deviceId: "request_transition_fixture",
-  deviceName: "Request transition fixture",
+  deviceName: "Task transition fixture",
   user: {
     id: "fixture",
     name: "Fixture",
@@ -54,7 +54,7 @@ const fixturePackets = {
 };
 // Match a long-lived production store, where first-open read persistence used
 // to parse and rewrite roughly two megabytes on the main thread. These rows are
-// already read and invisible on the Requests board; the padding stands in for
+// already read and invisible on the Tasks board; the padding stands in for
 // bounded provider/session metadata that the renderer never projects.
 for (let index = 0; index < 292; index += 1) {
   const id = `history_${String(index).padStart(3, "0")}`;
@@ -182,7 +182,7 @@ try {
   // Probe the row transition itself, not the app's unrelated entrance fade.
   await sleep(600);
   // The unread fixture deliberately raises a banner during boot. Re-enter the
-  // Requests board after that arrival so the gate exercises the real failure:
+  // Tasks board after that arrival so the gate exercises the real failure:
   // a visible row opened while the card still carries its transient `peeking`
   // state. The reader must retire that state and grow to its full geometry.
   await evaluate(page, `document.querySelector('[data-view="requests"]').click(); true`);
@@ -255,7 +255,7 @@ try {
   // without assuming a particular display refresh rate.
   assert.ok(frames.length >= 10, `expected a real frame sequence, got ${frames.length}`);
   assert.ok(frames.every((frame) => frame.activeView === "reader" && frame.readerReady && frame.readerVisible && !frame.requestVisible),
-    "no frame may expose an empty reader or the live Requests view after the click");
+    "no frame may expose an empty reader or the live Tasks view after the click");
   assert.equal(longTasks.length, 0, "the renderer performed a long task during the transition");
   assert.ok(fs.statSync(path.join(relayHome, "state.json")).size > 1_000_000, "fixture exercises a production-sized store");
   assert.equal(persisted.packets.request_transition.state, "read", "off-main acknowledgement became durable");

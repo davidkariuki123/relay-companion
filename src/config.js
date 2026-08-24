@@ -333,7 +333,7 @@ export function writeConfigObject(
 }
 
 export function withoutDeprecatedCapabilityConfig(next) {
-  // Request capability is server-owned. Remove the local switches older
+  // Task capability is server-owned. Remove the local switches older
   // companions persisted whenever we next touch the config so stale settings
   // cannot look authoritative to operators or future code.
   const cleaned = { ...next };

@@ -539,7 +539,7 @@ export function canonicalAttachmentReference(state, requestedItemId, {
   return null;
 }
 
-/** Canonical provider-native Work composition used by Request Work and AI Preview. */
+/** Canonical provider-native Work composition used by Task Work and AI Preview. */
 export function createCanonicalWorkPushBridge({ hydrate, subscribeNative, authorizeDetail, ...limits } = {}) {
   return createWorkPushBridge({
     ...limits,

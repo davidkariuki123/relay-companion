@@ -128,6 +128,9 @@ export async function e2eeOpenedRecords(client, wires) {
         if (["started", "completed"].includes(value.task.state) && !projection.taskStartedAt) {
           projection.taskStartedAt = value.task.occurredAt;
         }
+        if (value.task.taskRunOwner && !projection.taskRunOwner) {
+          projection.taskRunOwner = value.task.taskRunOwner;
+        }
         if (value.task.state === "completed") projection.taskCompletedAt = value.task.occurredAt;
         projection.updatedAt = value.task.occurredAt;
       }
@@ -157,7 +160,7 @@ export async function e2eeOpenedRecords(client, wires) {
     removePendingE2eeOutbox(identity, `direct:${messageId}`);
     removeLocalE2eeAttachmentDirectory(messageId);
   }
-  // A provider's encrypted completion reply is also the Request's Done
+  // A provider's encrypted completion reply is also the Task's Done
   // receipt. Derive that relationship locally from authenticated participants
   // and reply metadata instead of sending a second server-readable task call.
   const projectedByMessageId = new Map(opened.map((entry) => [entry.plaintext.messageId, entry]));

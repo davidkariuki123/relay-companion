@@ -273,7 +273,7 @@ test("a provider sign-in that does not persist subscription auth surfaces an exp
   _test.lastAttempts.clear();
 });
 
-test("the Request gate names the exact subscription recovery for signed-out and API-billed providers", async () => {
+test("the Task gate names the exact subscription recovery for signed-out and API-billed providers", async () => {
   const prefsFile = tempPrefs();
   await assert.rejects(assertProviderReady("claude", {
     command: "/opt/homebrew/bin/claude",

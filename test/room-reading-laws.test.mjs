@@ -93,7 +93,7 @@ test("a titled letter's tap is the reader in either frame; texts stay inert", ()
     html.indexOf("function syncExpandButton"),
   );
   assert.match(bind, /if \(m && m\.textLike\) return;/);
-  assert.match(bind, /openReader\(id, m\.direction === "out" \? "sent" : \(m\.request \? "requests" : "threads"\)\)/);
+  assert.match(bind, /openReader\(id, m\.direction === "out" \? "sent" : \(m\.request \? "tasks" : "threads"\)\)/);
   assert.doesNotMatch(bind, /expandedMsgIds\.add/);
 });
 

@@ -76,7 +76,7 @@ const store = {
   profile: { name: "David", handle: "david", email: "david@example.com", inboxDir: "", contactCardRoots: [], transport: { type: "relay_api" } },
   contacts: [],
   packets: {
-    pkt_note_1: packet("Safer Requests model", "2026-08-19T09:00:00.000Z"),
+    pkt_note_1: packet("Safer Tasks model", "2026-08-19T09:00:00.000Z"),
     pkt_note_2: packet("Where Relay can go", "2026-08-19T09:01:00.000Z"),
   },
   meetingNotes: {}, setup: {}, emailThreads: {}, chats: {},

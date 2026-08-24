@@ -65,7 +65,7 @@ test("canonical hydration retains the provider selected by the native adapter", 
   bridge.close();
 });
 
-test("one feed fans the same monotonic snapshot out to Request Work and AI Preview", async () => {
+test("one feed fans the same monotonic snapshot out to Task Work and AI Preview", async () => {
   const h = harness();
   const request = [];
   const preview = [];

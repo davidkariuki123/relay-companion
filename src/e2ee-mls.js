@@ -662,7 +662,7 @@ export function importE2eeAttachmentPlaintexts(messageId, metadata, contents) {
 export async function encryptE2eeMessage(client, payload, knownStatus) {
   const eventInput = payload.e2eeEvent || null;
   const kind = eventInput ? "message" : (payload.kind || "message");
-  if (!["message", "task"].includes(kind)) throw new Error("Encrypted Relay supports messages and direct Requests only.");
+  if (!["message", "task"].includes(kind)) throw new Error("Encrypted Relay supports messages and direct Tasks only.");
   if ((payload.files || []).length) throw new Error("Encrypted file paths must be prepared locally before sending.");
   if (payload.recipient?.groupId) throw new Error("Encrypted group messages are not available yet; nothing was sent.");
   const identity = identityOrThrow();
@@ -844,6 +844,7 @@ export async function encryptE2eeMessage(client, payload, knownStatus) {
           state: eventInput.state,
           occurredAt: authoredAt,
           ...(eventInput.resultMessageId ? { resultMessageId: String(eventInput.resultMessageId) } : {}),
+          ...(eventInput.taskRunOwner ? { taskRunOwner: eventInput.taskRunOwner } : {}),
         },
       };
       break;
@@ -993,7 +994,12 @@ function validateDecryptedPlaintext(plaintext, wire, identity, transparency) {
     (plaintext.eventType === "task.changed" && (
       typeof plaintext.task?.taskId !== "string" ||
       !["requested", "accepted", "started", "completed", "failed", "declined", "cancelled"].includes(plaintext.task?.state) ||
-      plaintext.task?.occurredAt !== plaintext.authoredAt
+      plaintext.task?.occurredAt !== plaintext.authoredAt ||
+      (plaintext.task?.taskRunOwner !== undefined && (
+        !["relay_work", "external_mcp"].includes(plaintext.task.taskRunOwner?.kind) ||
+        (plaintext.task.taskRunOwner.provider !== undefined && !["codex", "claude"].includes(plaintext.task.taskRunOwner.provider)) ||
+        (plaintext.task.taskRunOwner.nativeSessionId !== undefined && typeof plaintext.task.taskRunOwner.nativeSessionId !== "string")
+      ))
     ))
   ) throw new Error("Encrypted Relay metadata did not authenticate against its MLS plaintext.");
   assertKnownCheckpoint(transparency, plaintext.transparencyCheckpoint);
@@ -1069,6 +1075,9 @@ function taskReceiptFields(plaintext) {
       : {}),
     ...(plaintext.taskStartedAt || ["started", "completed"].includes(state)
       ? { taskStartedAt: plaintext.taskStartedAt || plaintext.task.occurredAt }
+      : {}),
+    ...(plaintext.taskRunOwner || plaintext.task.taskRunOwner
+      ? { taskRunOwner: plaintext.taskRunOwner || plaintext.task.taskRunOwner }
       : {}),
     ...(plaintext.taskCompletedAt || state === "completed"
       ? { taskCompletedAt: plaintext.taskCompletedAt || plaintext.task.occurredAt }

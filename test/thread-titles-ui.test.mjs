@@ -119,7 +119,7 @@ test("the Relays tab is one latest-message row per exact identity", () => {
   assert.doesNotMatch(render, /\(payload\.relays \|\| \[\]\)/);
 });
 
-test("a newer Request becomes the person's latest Relays preview", () => {
+test("a newer Task becomes the person's latest Relays preview", () => {
   const identitySource = html.slice(html.indexOf("function relayIdentityKey("), html.indexOf("function renderRelays()"));
   const { relayIdentityRows } = Function(`"use strict"; ${identitySource}; return { relayIdentityRows };`)();
   const [shane] = relayIdentityRows([
@@ -622,13 +622,13 @@ test("requests stay on the board for control and appear in chat as delivered cor
   assert.doesNotMatch(html, /tb-title/);
   assert.match(html, /\.tb-row\.unread \.th-title \{ color:var\(--ink\); font-weight:500; \}/);
   assert.match(html, /const expandedRequestIds = new Set\(\)/);
-  // The request ROOT is visible in the person's chat, labelled as a Request;
+  // The request ROOT is visible in the person's chat, labelled as a Task;
   // progress/completion and execution controls remain on the board/reader.
-  assert.match(html, /const request = isRequestRow\(r\)/);
+  assert.match(html, /const request = isTaskRow\(r\)/);
   assert.match(html, /if \(!request && !isRelayListKind\(r\)\) continue;/);
   assert.match(html, /const textLike = request \? false : ownedAgent \|\| relayTextLike/);
-  assert.match(html, /m\.request \? '<span class="kchip">Request<\/span>'/);
-  assert.match(html, /m\.request \? "requests" : "threads"/);
+  assert.match(html, /m\.request \? '<span class="kchip">Task<\/span>'/);
+  assert.match(html, /m\.request \? "tasks" : "threads"/);
   // The dock's composer never clips: inputs must be allowed to shrink.
   assert.match(html, /\.qr textarea \{ flex:1 1 auto; min-width:0;/); // the capsule IS the field (autosizing textarea)
   // Group membership IS the status — no per-row chips repeating the header,
@@ -643,7 +643,7 @@ test("requests stay on the board for control and appear in chat as delivered cor
   // one quiet control. Topic and brief appear only on unfold; no preview line
   // ("disk, davids name, the thread name, the task summary and the task in
   // full detail" — Sven counting the noise).
-  assert.match(html, /function requestRowHtml|renderRequestsBoard/); // the board renders rows; topic chip retired
+  assert.match(html, /function requestRowHtml|renderTasksBoard/); // the board renders rows; topic chip retired
   assert.doesNotMatch(html, /bodyPreview\(r\.forHuman \|\| "", title, 72\)/);
   // Title-less 1:1 conversations are named the person, plain — no suffix.
   assert.doesNotMatch(html, /\$\{t\.party\} · direct/);
@@ -662,7 +662,7 @@ test("your own relays are readable too — the text/letter rule is the same on b
   assert.match(sentPush, /body: s\.forHuman \|\| "",/);
   assert.match(sentPush, /preview: \(\(\) => \{/);
   assert.match(html, /function readerRow\(id\)/);
-  assert.match(html, /openReader\(id, m\.direction === "out" \? "sent" : \(m\.request \? "requests" : "threads"\)\)/);
+  assert.match(html, /openReader\(id, m\.direction === "out" \? "sent" : \(m\.request \? "tasks" : "threads"\)\)/);
   assert.doesNotMatch(html, /if \(el\.getAttribute\("data-dir"\) === "out"\) return;/);
 });
 
@@ -751,7 +751,7 @@ test("hand-offs speak in conversation terms: starts vs continues, said BEFORE th
   assert.doesNotMatch(html, /convSheet/);
   // The redundant Talk/Reply mode button is gone. The visible document owns
   // the composer: For you replies to the person, while For Agent starts Work.
-  // Requests use the document-owned destination too: For you replies to the
+  // Tasks use the document-owned destination too: For you replies to the
   // person, while For Agent starts or continues Work.
   assert.doesNotMatch(html, /data-reply-mode|__relayToggleReplyMode|replyTarget\(/);
   assert.doesNotMatch(html, /Talk to \$\{esc\(app\)\}|Reply to \$\{esc/);
@@ -760,7 +760,7 @@ test("hand-offs speak in conversation terms: starts vs continues, said BEFORE th
   assert.match(html, /data-work-start="\$\{esc\(r\.id\)\}"/);
   assert.match(html, /<button type="button" id="qrSend">Send<\/button>/);
   assert.match(html, /if \(!onAgent && !onWork\)/,
-    "For you wires the human reply composer for ordinary Relays and Requests");
+    "For you wires the human reply composer for ordinary Relays and Tasks");
   // And the destination line lives where hand-offs actually happen — inside
   // the unfolded bubble, not only on the off-path reader page (Sven:
   // "havent implemented anything for that which i can see").
@@ -771,7 +771,7 @@ test("every titled bubble opens the reader; quick texts stay inert", () => {
   // One document rule in both directions. A quick text has no hidden page;
   // every titled relay does, including the user's own sent relay.
   assert.match(html, /if \(m && m\.textLike\) return;/);
-  assert.match(html, /openReader\(id, m\.direction === "out" \? "sent" : \(m\.request \? "requests" : "threads"\)\)/);
+  assert.match(html, /openReader\(id, m\.direction === "out" \? "sent" : \(m\.request \? "tasks" : "threads"\)\)/);
   assert.match(html, /const r = readerRow\(readerId\)/);
   assert.doesNotMatch(html, /data-strip-reply/);
   // The task reader keeps the intention verbs + transparency line.
@@ -822,8 +822,8 @@ test("out-of-order arrivals are anchored by time, not by list position", () => {
   assert.ok(!anchors.get("third").has("first"));
 });
 
-test("a Request in between does not turn the composer's own anchor into a quote", () => {
-  // The composer skips Requests when it picks an anchor, so both the line
+test("a Task in between does not turn the composer's own anchor into a quote", () => {
+  // The composer skips Tasks when it picks an anchor, so both the line
   // directly above and the newest ordinary message above are defaults.
   const anchors = defaultReplyAnchorMap([
     { id: "chat", at: "2026-08-18T07:00:00.000Z" },

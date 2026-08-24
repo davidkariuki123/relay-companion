@@ -125,13 +125,13 @@ test("the pill has no local capability-mode policy", () => {
   assert.match(source, /user: me\?\.user/);
 });
 
-test("the pill gates every live Request entry point by the account capability", () => {
+test("the pill gates every live Task entry point by the account capability", () => {
   const source = fs.readFileSync(new URL("../overlay/main.cjs", import.meta.url), "utf8");
   assert.match(source, /async function refreshTasks\(\) \{\s+if \(!TASK_FEATURES_ALLOWED\)/);
   assert.match(source, /async function runMutation\(label, fn\) \{\s+if \(!TASK_FEATURES_ALLOWED\)/);
   assert.match(source, /function openTaskDetail\(taskId\) \{\s+if \(!TASK_FEATURES_ALLOWED\) return;/);
   assert.match(source, /ipcMain\.handle\("relay:taskStatus"[\s\S]*?if \(!TASK_FEATURES_ALLOWED\)/);
-  // Ordinary accounts hide every Request row while retaining it durably in the
+  // Ordinary accounts hide every Task row while retaining it durably in the
   // staged store. Developer accounts can render and open them.
   assert.match(
     source,
@@ -152,7 +152,7 @@ test("human-facing CLI commands reject removed capability flags", () => {
   assert.match(result.stderr, /--full and --messages-only were removed/);
 });
 
-test("a stored deprecated full mode cannot grant Request access to a non-developer", () => {
+test("a stored deprecated full mode cannot grant Task access to a non-developer", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-default-cli-profile-"));
   fs.writeFileSync(
     path.join(root, "config.json"),
@@ -174,7 +174,7 @@ test("a stored deprecated full mode cannot grant Request access to a non-develop
   }
 });
 
-test("a non-developer open rejects a stale Request row before it can call a task endpoint", () => {
+test("a non-developer open rejects a stale Task row before it can call a task endpoint", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-default-open-profile-"));
   fs.writeFileSync(
     path.join(root, "config.json"),

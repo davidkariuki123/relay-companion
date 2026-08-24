@@ -35,7 +35,7 @@ function stablePresentation(value) {
 }
 
 for (const provider of ["codex", "claude", "cowork"]) {
-  test(`${provider} fans one provider-native monotonic feed to Request and Preview`, async () => {
+  test(`${provider} fans one provider-native monotonic feed to Task and Preview`, async () => {
     const listeners = new Set();
     const bridge = createCanonicalWorkPushBridge({
       hydrate: async () => ({ provider, events: fixtures(provider) }),

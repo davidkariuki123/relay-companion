@@ -65,7 +65,7 @@ function permissionArgs(permissionMode) {
 }
 
 /**
- * Reuse the trusted local Relay server registration for a Request worker. The
+ * Reuse the trusted local Relay server registration for a Task worker. The
  * server resolves developer capability from the signed-in Relay account; this
  * copy also strips mode flags left behind by older registrations.
  */
@@ -415,7 +415,7 @@ export async function createClaudeDesktopCodeSession({
   initTimeoutMs,
 } = {}) {
   const resolvedCwd = path.resolve(String(cwd || homedir));
-  const resolvedTitle = String(title || "Relay request");
+  const resolvedTitle = String(title || "Relay Task");
   const prompt = [resolvedTitle, String(content || "")].filter(Boolean).join("\n\n");
   const worker = await launchWorker({
     sessionId,
@@ -483,7 +483,7 @@ async function waitForWorkerMaterialization(worker, timeoutMs = 30_000) {
 async function continueClaudeDesktopCodeSessionOnce({
   sessionId,
   cwd,
-  title = "Relay request",
+  title = "Relay Task",
   content,
   model = "claude-opus-5",
   effort = "high",
@@ -510,7 +510,7 @@ async function continueClaudeDesktopCodeSessionOnce({
   const worker = await launchWorker({
     sessionId: String(sessionId),
     cwd: resolvedCwd,
-    title: String(title || "Relay request"),
+    title: String(title || "Relay Task"),
     prompt: String(content || ""),
     model,
     effort,

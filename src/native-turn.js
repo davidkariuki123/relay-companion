@@ -5,7 +5,7 @@ function timestampMs(value) {
 
 /**
  * Return only the provider's current turn from a newest-first transcript.
- * Request receipts can be hours older than a retried/follow-up native turn,
+ * Task receipts can be hours older than a retried/follow-up native turn,
  * so they are deliberately not accepted as timing inputs here.
  */
 export function nativeTurn(records, { terminalAt = null } = {}) {

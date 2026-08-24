@@ -76,7 +76,7 @@ const store = {
   contacts: [],
   packets: {
     pkt_codex_titled: packet({
-      title: "Safer Requests model",
+      title: "Safer Tasks model",
       forHuman: "Three separate signals, and read means the human triggered access.",
       forAgent: "Full reasoning for the recipient's agent lives here.",
       surface: "codex",

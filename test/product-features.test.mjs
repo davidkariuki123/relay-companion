@@ -58,7 +58,7 @@ test("live server role outranks the cached pairing profile", async () => {
   assert.equal(production.requests, false);
 });
 
-test("developer status brings the complete Request substrate on dev but never Cowork", () => {
+test("developer status brings the complete Task substrate on dev but never Cowork", () => {
   const features = productFeatures({ env: { RELAY_UPDATE_CHANNEL: "dev" }, user: DEVELOPER });
   assert.equal(features.requests, true);
   assert.deepEqual(
@@ -83,7 +83,7 @@ test("localhost is local even without NODE_ENV", () => {
   assert.equal(runtimeEnvironment({ env: {}, apiUrl: "http://127.0.0.1:4000" }), "local");
 });
 
-test("disabled Requests disappear from the model schema and are rejected before transport", async () => {
+test("disabled Tasks disappear from the model schema and are rejected before transport", async () => {
   const ordinary = { requests: false, aiSessions: false, connectors: false };
   const send = toolsForAccount(ordinary).find((tool) => tool.name === "relay_send");
   assert.deepEqual(send.inputSchema.properties.kind.enum, ["message"]);
@@ -119,7 +119,7 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
   assert.deepEqual(toolsForAccount(productionDeveloper).map((tool) => tool.name), ordinary);
   // The complete catalog requires the role and the dev channel together.
   const developer = productFeatures({ env: { RELAY_UPDATE_CHANNEL: "dev" }, user: DEVELOPER });
-  assert.equal(toolsForAccount(developer).length, 28);
+  assert.equal(toolsForAccount(developer).length, 30);
   // A call that arrives anyway (a stale client, a hand-written request) is refused before transport.
   const client = new Proxy({}, { get(_target, key) { throw new Error(`transport must not run (${String(key)})`); } });
   for (const [name, args] of [
@@ -135,10 +135,10 @@ test("the first payload render reconciles feature-gated navigation", () => {
   const source = fs.readFileSync(path.join(here, "../overlay/inbox.html"), "utf8");
   const body = source.slice(source.indexOf("function renderAll()"), source.indexOf("markAllReadEl.addEventListener", source.indexOf("function renderAll()")));
   assert.match(body, /syncTabs\(\);/);
-  assert.match(source, /view === "requests" && payload\.features\?\.requests !== true/);
+  assert.match(source, /view === "tasks" && payload\.features\?\.requests !== true/);
 });
 
-test("disabled Requests and Cowork do not remain in Settings", () => {
+test("disabled Tasks and Cowork do not remain in Settings", () => {
   const source = fs.readFileSync(path.join(here, "../overlay/inbox.html"), "utf8");
   assert.match(source, /if \(payload\.features\?\.requests === true\) html \+= `\s*<div class="sv-open-section" id="permPrefs"/);
   const settings = source.slice(source.indexOf("function renderSettings()"), source.indexOf("function wireSettings()"));
@@ -149,7 +149,7 @@ test("disabled Requests and Cowork do not remain in Settings", () => {
 test("Settings always offers where relays open, and the fresh open goes there", () => {
   // Sven, 2026-08-17: "settings ... just needs to have which client you use
   // (codex and claude) ... and users can change it." The setting used to render
-  // only with Requests, so every prod user was pinned to Claude Code; and a
+  // only with Tasks, so every prod user was pinned to Claude Code; and a
   // fresh open passed no host, so the frontmost-window heuristic — not the
   // person's choice — decided where the relay landed. The enabled apps are a
   // promise: the switches are unconditional and every fresh open honours them.
@@ -157,7 +157,7 @@ test("Settings always offers where relays open, and the fresh open goes there", 
   const settings = source.slice(source.indexOf("function renderSettings()"), source.indexOf("function wireSettings()"));
   assert.match(settings, /<div class="sv-open-section" id="protoPrefs" data-stop="1">\s*<div class="sv-open-title">Open Relays with<\/div>/);
   assert.match(settings, /Choose which app buttons appear on each Relay\./);
-  assert.doesNotMatch(settings, /features\?\.requests === true\) html \+= `\s*<div id="protoPrefs"/, "the picker no longer hides with Requests");
+  assert.doesNotMatch(settings, /features\?\.requests === true\) html \+= `\s*<div id="protoPrefs"/, "the picker no longer hides with Tasks");
   const open = source.slice(source.indexOf("function openRelayFromUI("), source.indexOf("let unreadCount = 0;"));
   assert.match(open, /mode === "fresh" && window\.relay\.openFresh\) window\.relay\.openFresh\(id, host \|\| hostKeyFor\(agentAppName\(\)\), note\)/);
   // The same default on every un-hosted open: plain, current, and the sent copy.

@@ -61,13 +61,13 @@ function requestText(request) {
 }
 
 /**
- * A local, advisory preflight over already-decrypted Request text. It never
+ * A local, advisory preflight over already-decrypted Task text. It never
  * calls Relay's API and never grants a permission; Accept remains one explicit
  * human consent for the selected provider's actual permission mode.
  */
 export function reviewRequestSafety(request) {
   if ((request?.kind || request?.relayNotificationKind) !== "task") {
-    throw new Error("Safety review is available only for Requests.");
+    throw new Error("Safety review is available only for Tasks.");
   }
   const text = requestText(request);
   const permissions = PERMISSIONS
@@ -76,11 +76,11 @@ export function reviewRequestSafety(request) {
   const warnings = WARNING_SIGNALS.filter((signal) => signal.pattern.test(text)).map((signal) => signal.id);
   const concern = warnings.length >= 2 ? "high" : warnings.length === 1 ? "review" : "normal";
   const summary = concern === "high"
-    ? "This request contains more than one risky instruction. Check that the exact ask is really what you expect before accepting."
+    ? "This Task contains more than one risky instruction. Check that the exact ask is really what you expect before accepting."
     : concern === "review"
       ? "One part deserves a closer look. It may be legitimate, but make sure it matches what you expect from the sender."
       : permissions.length
-        ? "Nothing clearly harmful stands out. The task may still use the access listed below, so accept only if the request makes sense to you."
+        ? "Nothing clearly harmful stands out. The Task may still use the access listed below, so accept only if the Task makes sense to you."
         : "Nothing clearly harmful or powerful stands out. It looks like the agent may only need to think and write an answer.";
   return {
     version: 1,
@@ -92,6 +92,6 @@ export function reviewRequestSafety(request) {
       ? "Think of Accept like lending the agent the tools below for this job. It should use only what the job needs."
       : "This looks like a thinking job. Accept still starts an agent, but the words do not suggest it needs powerful tools.",
     advisory: "This is a local preflight, not a guarantee. The selected agent's real permission mode remains the enforcement boundary.",
-    trustContext: "Accept means you trust this request from the person who sent it and the agent acting for them. It does not require you to trust Relay with the message, because Relay cannot read it.",
+    trustContext: "Accept means you trust this Task from the person who sent it and the agent acting for them. It does not require you to trust Relay with the message, because Relay cannot read it.",
   };
 }

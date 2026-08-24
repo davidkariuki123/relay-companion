@@ -114,7 +114,7 @@ async function resolveRow(id, { log = () => {}, allowTaskRows = false } = {}) {
   if (!rowState) {
     const resolved = await resolvePublicOpenToken(id, { log });
     if (!allowTaskRows && resolved?.row?.taskId) {
-      throw new Error("Requests are currently available only to Relay developer accounts on dev.");
+      throw new Error("Tasks are currently available only to Relay developer accounts on dev.");
     }
     return resolved;
   }
@@ -122,12 +122,12 @@ async function resolveRow(id, { log = () => {}, allowTaskRows = false } = {}) {
   // an ordinary-account open. Reject before reading content or calling
   // GET /v1/tasks/:id; explicit full callers opt in through allowTaskRows.
   if (!allowTaskRows && rowState.taskId) {
-    throw new Error("Requests are currently available only to Relay developer accounts on dev.");
+    throw new Error("Tasks are currently available only to Relay developer accounts on dev.");
   }
   const content = readRowContent(rowState);
   // The staged packet's canonical Relay documents are the only content Open may
   // hand to a provider. briefingMarkdown is a derived UI projection and can
-  // contain a rendered Request/thread/history; never promote it into For Human.
+  // contain a rendered Task/thread/history; never promote it into For Human.
   const row = {
     ...(content || {}),
     ...rowState,
@@ -169,7 +169,7 @@ async function resolveRow(id, { log = () => {}, allowTaskRows = false } = {}) {
     ),
   };
   if (!allowTaskRows && row.taskId) {
-    throw new Error("Requests are currently available only to Relay developer accounts on dev.");
+    throw new Error("Tasks are currently available only to Relay developer accounts on dev.");
   }
 
   // When the row points at a task, fetch the verified task object so the per-kind
@@ -882,7 +882,7 @@ function hasAttachments(row) {
   return Array.isArray(row?.attachments) && row.attachments.length > 0;
 }
 
-// Historical CLI entry point. A Relay Request is an immutable two-document
+// Historical CLI entry point. A Relay Task is an immutable two-document
 // handoff, not a synthetic status/thread view. Fetch the canonical staged row;
 // if it is absent, fail honestly instead of inventing a third ontology from the
 // task status endpoint.
@@ -891,7 +891,7 @@ export async function openTask({ taskId, host = "claude", log = () => {} } = {})
   const state = readState();
   const match = Object.values(state.packets || {}).find((row) => String(row?.taskId || row?.id || "") === String(taskId));
   if (!match?.id || (!String(match.forHuman || "").trim() && !String(match.forAgent || "").trim())) {
-    throw new Error("This Request has no staged For Human / For Agent documents. Open it from Relay.");
+    throw new Error("This Task has no staged For Human / For Agent documents. Open it from Relay.");
   }
   return openRelay({ id: match.id, host, log, allowTaskRows: true });
 }

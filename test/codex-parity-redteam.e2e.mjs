@@ -132,21 +132,21 @@ try {
     await sleep(100);
   }
   // The isolated native state migrator intentionally owns its schema. Use the
-  // test-only closure seam so this probe exercises the real Request reader
+  // test-only closure seam so this probe exercises the real Task reader
   // without coupling the parity gate to a particular persisted schema.
   for (let i = 0; i < 80; i += 1) {
-    if (await evaluate(page, `typeof window.__relayParityOpenRequest === "function"`)) break;
+    if (await evaluate(page, `typeof window.__relayParityOpenTask === "function"`)) break;
     await sleep(100);
   }
-  const requestOpened = await evaluate(page, `window.__relayParityOpenRequest?.({
+  const requestOpened = await evaluate(page, `window.__relayParityOpenTask?.({
       id:"parity_request", direction:"inbound", state:"read", relayNotificationKind:"task",
       senderName:"Sven Wellmann", title:"Verify native runner parity",
       forHuman:"Please verify the runner.", forAgent:"Exercise every native turn state.",
       createdAt:"2026-08-14T08:00:00.000Z", updatedAt:"2026-08-14T08:00:00.000Z"
     })`);
   if (!requestOpened) {
-    const fixtureDiagnostics = await evaluate(page, `({ testOverlay:window.relay?.isTestOverlay, hook:typeof window.__relayParityOpenRequest, href:location.href })`);
-    throw new Error(`The isolated Request fixture seam was unavailable: ${JSON.stringify(fixtureDiagnostics)}`);
+    const fixtureDiagnostics = await evaluate(page, `({ testOverlay:window.relay?.isTestOverlay, hook:typeof window.__relayParityOpenTask, href:location.href })`);
+    throw new Error(`The isolated Task fixture seam was unavailable: ${JSON.stringify(fixtureDiagnostics)}`);
   }
   await sleep(200);
 
@@ -268,7 +268,7 @@ try {
   check("J05", "stopped native Work explains failure and offers a visible follow-up",
     /Didn't finish/.test(stopped.withSession.statusText) && /Ask .*follow-up/.test(stopped.withSession.placeholder) && stopped.withSession.action === "Send",
     JSON.stringify(stopped));
-  check("J06", "stopped Request without a resumable session offers Start again",
+  check("J06", "stopped Task without a resumable session offers Start again",
     stopped.withoutSession.visible && stopped.withoutSession.action === "Start again", JSON.stringify(stopped));
 
   const live = await evaluate(page, `(() => {
@@ -486,7 +486,7 @@ try {
       relayId:"provider-completion",
       type:"completion",
       title:"machine completion",
-      forAgent:"Provider-owned completion detail stays on the Request.",
+      forAgent:"Provider-owned completion detail stays on the Task.",
     };
     payload.sent = [...(payload.sent || []), reply, completion];
     const rows = threadMessages();
@@ -499,10 +499,10 @@ try {
       joinsRoom:projected ? sameDirectParty(projected, "email:sven@example.com", "sven wellmann") : false,
     };
   })()`);
-  check("P16e", "a For-you reply on a Request thread appears in the person's conversation",
+  check("P16e", "a For-you reply on a Task thread appears in the person's conversation",
     requestReplyProjection.visible && requestReplyProjection.text === "Visible human reply" && requestReplyProjection.joinsRoom,
     JSON.stringify(requestReplyProjection));
-  check("P16f", "machine completion traffic remains on the Request",
+  check("P16f", "machine completion traffic remains on the Task",
     requestReplyProjection.completionHidden, JSON.stringify(requestReplyProjection));
 
   await evaluate(page, `paintRunStream("parity_request", ${JSON.stringify(doneFeed)}); true`);

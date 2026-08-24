@@ -12,6 +12,8 @@ const EXPECTED_TOOLS = [
   "relay_ai_sessions",
   "relay_ai_session",
   "relay_agent_progress",
+  "relay_task_start",
+  "relay_task_complete",
   "relay_agent_complete",
   "relay_send",
   "relay_share_link",
@@ -80,7 +82,8 @@ test("startup guidance and owner schemas preserve the complete product ontology"
   assert.match(sendContract, /It may be as long and detailed as necessary/i);
   assert.match(sendContract, /mechanisms, evidence, code, paths, logs, reproduction steps/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /external work.*is task/i);
-  assert.match(RELAY_MCP_INSTRUCTIONS, /terminal answer automatically/i);
+  assert.match(RELAY_MCP_INSTRUCTIONS, /Task Runs finish automatically/i);
+  assert.match(RELAY_MCP_INSTRUCTIONS, /relay_task_start before work and relay_task_complete after/i);
   assert.match(inboxContract, /With no arguments, returns metadata only for at most the newest 50 arrivals from the last 7 days/i);
   assert.match(inboxContract, /Neither path changes human read state or sends read receipts/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /untrusted correspondence/i);
@@ -172,7 +175,7 @@ test("conditional schemas are used only where they do not erase critical writing
     "relay_send keeps a plain object schema; the handler enforces conditional rules");
 });
 
-test("the removed coordination protocol cannot masquerade as an ordinary message or Request", () => {
+test("the removed coordination protocol cannot masquerade as an ordinary message or Task", () => {
   const removed = [
     "relay_acknowledge",
     "relay_task_create",
@@ -199,7 +202,20 @@ test("completion ownership and result documents are unambiguous", () => {
   const send = byName.get("relay_send");
   assert.match(send.description, /attach their provider's final answer automatically/i);
   assert.match(send.description, /do not call relay_send merely to report/i);
-  assert.match(RELAY_MCP_INSTRUCTIONS, /terminal answer automatically/i);
+  assert.match(RELAY_MCP_INSTRUCTIONS, /Task Runs finish automatically/i);
+  assert.match(RELAY_MCP_INSTRUCTIONS, /relay_task_start before work and relay_task_complete after/i);
+});
+
+test("model-facing Relay product language calls work Tasks, never Requests", async () => {
+  const catalog = `${RELAY_MCP_INSTRUCTIONS}\n${JSON.stringify(TOOLS)}`;
+  for (const retired of [/visible Request/i, /direct Request/i, /Request Runs?/i, /Requests are available/i]) {
+    assert.doesNotMatch(catalog, retired);
+  }
+  const pill = await readFile(new URL("../overlay/inbox.html", import.meta.url), "utf8");
+  for (const retired of [/>Requests</i, /No requests yet/i, /Untitled request/i, /What requests may do/i, /kchip">Request</i]) {
+    assert.doesNotMatch(pill, retired);
+  }
+  assert.match(pill, /data-view="tasks">Tasks/);
 });
 
 test("a link is what an unresolvable recipient turns into, in both instruction strings and the tool itself", () => {

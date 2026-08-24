@@ -29,10 +29,10 @@ test("tab badges count unread items in their own visible surface", () => {
   const renderAll = html.slice(html.indexOf("function renderAll()"), html.indexOf("function onPayload"));
   assert.match(renderAll, /r\.unread && isRelayListKind\(r\) && !onRequestThread\(r, reqThreads\)/,
     "request progress/completion rows hidden from Relays cannot inflate its badge");
-  assert.match(renderAll, /setBadge\(requestsBadgeEl, requestsUnreadCount\(\)\)/,
-    "a read but unstarted Request is not unopened");
-  assert.match(html, /function requestsUnreadCount\(\) \{ return requestRows\(\)\.filter\(\(r\) => r\.unread\)\.length; \}/);
-  assert.doesNotMatch(renderAll, /setBadge\(requestsBadgeEl, requestsWaitingCount\(\)\)/);
+  assert.match(renderAll, /setBadge\(tasksBadgeEl, requestsUnreadCount\(\)\)/,
+    "a read but unstarted Task is not unopened");
+  assert.match(html, /function requestsUnreadCount\(\) \{ return taskRows\(\)\.filter\(\(r\) => r\.unread\)\.length; \}/);
+  assert.doesNotMatch(renderAll, /setBadge\(tasksBadgeEl, requestsWaitingCount\(\)\)/);
 });
 
 test("reading a Relay never removes it from the Relays identity index", () => {

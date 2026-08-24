@@ -24,7 +24,7 @@ function between(source, start, end) {
   return source.slice(from, to);
 }
 
-test("Requests stages an inert source snapshot before exposing the prepared reader", () => {
+test("Tasks stages an inert source snapshot before exposing the prepared reader", () => {
   const prepare = between(html, "function prepareReaderMorph", "function startReaderMorph");
   const open = between(html, "function openReader", "function closeReader");
 
@@ -91,9 +91,9 @@ test("native size preparation grows the ordinary window before the morph", () =>
   assert.match(prepare, /fitOverlayWindowToCard\(\)/);
 });
 
-test("chat, compact rooms, sent, and requests share the same source snapshot", () => {
+test("chat, compact rooms, sent, and Tasks share the same source snapshot", () => {
   const prepare = between(html, "function prepareReaderMorph", "function startReaderMorph");
-  for (const view of ["chat", "threads", "sent", "requests"]) {
+  for (const view of ["chat", "threads", "sent", "tasks"]) {
     assert.match(prepare, new RegExp(`${view}:`), `${view} is a supported compact source`);
   }
   assert.match(html, /startReaderMorph\("threads"\)/, "chat expansion uses the shared coordinator");

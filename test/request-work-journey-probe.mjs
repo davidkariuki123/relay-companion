@@ -1,4 +1,4 @@
-// Manual Computer Use probe for the complete Request -> Work journey.
+// Manual Computer Use probe for the complete Task -> Work journey.
 // It runs the real overlay and provider runtime in an isolated Relay home.
 
 import { spawn } from "node:child_process";
@@ -44,7 +44,7 @@ fs.writeFileSync(path.join(relayHome, "state.json"), JSON.stringify({
       relayNotificationKind: "task",
       senderName: "Journey Fixture",
       senderUserId: "user_request_journey_fixture",
-      title: "Verify Request journey",
+      title: "Verify Task journey",
       forHuman: "This is an isolated UI proof. Human replies stay addressed to Journey Fixture.",
       forAgent: "Reply with exactly REQUEST_JOURNEY_OK. Do not use tools.",
       createdAt: now,
@@ -59,7 +59,7 @@ fs.writeFileSync(path.join(relayHome, "state.json"), JSON.stringify({
 fs.writeFileSync(path.join(root, "config.json"), JSON.stringify({
   deviceToken: "request-journey-probe-token",
   deviceId: "request-journey-probe-device",
-  deviceName: "Request Journey Probe",
+  deviceName: "Task Journey Probe",
   user: { id: "user_david_probe", name: "David", email: "david@example.com" },
 }, null, 2));
 

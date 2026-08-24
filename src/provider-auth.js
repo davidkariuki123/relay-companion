@@ -529,9 +529,9 @@ export async function assertProviderReady(provider, options = {}) {
     const subscription = status.id === "claude" ? "Claude subscription" : "ChatGPT subscription";
     const action = status.id === "claude" ? "Sign in to Claude Code" : "Sign in to Codex";
     if (status.authState === "api_billing") {
-      throw new Error(`${status.label} is signed in with API billing, but Requests use your ${subscription}. Open Relay Settings → Agent connections and choose “${action}”.`);
+      throw new Error(`${status.label} is signed in with API billing, but Tasks use your ${subscription}. Open Relay Settings → Agent connections and choose “${action}”.`);
     }
-    throw new Error(`${status.label} needs your ${subscription} before this Request can start. Open Relay Settings → Agent connections and choose “${action}”.`);
+    throw new Error(`${status.label} needs your ${subscription} before this Task can start. Open Relay Settings → Agent connections and choose “${action}”.`);
   }
   return status;
 }

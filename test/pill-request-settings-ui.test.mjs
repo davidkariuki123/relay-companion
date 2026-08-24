@@ -21,7 +21,7 @@ function between(source, startMarker, endMarker) {
 
 test("the section header and intro are the shared settings species, not the caption label", () => {
   const section = between(html, 'id="permPrefs"', "sv-colophon");
-  assert.match(section, /<div class="sv-open-title">What requests may do<\/div>/);
+  assert.match(section, /<div class="sv-open-title">What Tasks may do<\/div>/);
   assert.match(section, /<div class="sv-open-intro">[^<]*<\/div>/);
   // The intro is ONE line of the same style the sibling section uses — the
   // old sv-explain paragraph (and its style) must not come back.

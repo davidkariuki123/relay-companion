@@ -20,7 +20,7 @@ test("navigation paints the destination before revealing or resizing it", () => 
 
   const applyView = between("function applyView()", 'document.getElementById("chatExpandBtn")');
   assert.ok(applyView.indexOf('readerViewEl.classList.toggle("hidden"') < applyView.indexOf("syncCardSize("));
-  assert.doesNotMatch(applyView, /renderThreads\(\)|renderRequestsBoard\(\)|renderSettings\(\)/);
+  assert.doesNotMatch(applyView, /renderThreads\(\)|renderTasksBoard\(\)|renderSettings\(\)/);
 });
 
 test("a navigation commits once and restores scroll before the browser paints", () => {

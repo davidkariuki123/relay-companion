@@ -469,7 +469,7 @@ test("enrolled Companions exchange one-to-one text while the service stores ciph
   }
 });
 
-test("a history import authenticates its quiet marker and keeps an old Request inert", async () => {
+test("a history import authenticates its quiet marker and keeps an old Task inert", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-e2ee-history-marker-"));
   const aliceRoot = path.join(root, "alice");
   const bobRoot = path.join(root, "bob");
@@ -485,7 +485,7 @@ test("a history import authenticates its quiet marker and keeps an old Request i
     await encryptE2eeMessage(service.client(alice), {
       recipient: { relayUserId: bob.userId },
       kind: "task",
-      forHuman: "An earlier Request that must not run again.",
+      forHuman: "An earlier Task that must not run again.",
       forAgent: "Historical agent instructions.",
       idempotencyKey: "history-import-marker-1",
       historyImport: true,
@@ -749,7 +749,7 @@ test("a cross-signed new device imports prior messages and attachments without s
   }
 });
 
-test("Requests, start receipts, and completion results stay end-to-end encrypted", async () => {
+test("Tasks, start receipts, and completion results stay end-to-end encrypted", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-e2ee-request-"));
   const aliceRoot = path.join(root, "alice");
   const bobRoot = path.join(root, "bob");
@@ -816,7 +816,13 @@ test("Requests, start receipts, and completion results stay end-to-end encrypted
       recipient: {},
       forHuman: "",
       idempotencyKey: "e2ee-request-started-1",
-      e2eeEvent: { type: "task.changed", targetRelayId: request.relayId, taskId: request.relayId, state: "started" },
+      e2eeEvent: {
+        type: "task.changed",
+        targetRelayId: request.relayId,
+        taskId: request.relayId,
+        state: "started",
+        taskRunOwner: { kind: "external_mcp", provider: "codex", nativeSessionId: "codex-thread-1" },
+      },
     });
     const completion = await encryptE2eeMessage(bobClient, {
       kind: "message",
@@ -833,6 +839,11 @@ test("Requests, start receipts, and completion results stay end-to-end encrypted
     const sentRequest = aliceChat.items.find((item) => item.relayId === request.relayId);
     const result = aliceChat.items.find((item) => item.relayId === completion.relayId);
     assert.ok(sentRequest.taskStartedAt);
+    assert.deepEqual(sentRequest.taskRunOwner, {
+      kind: "external_mcp",
+      provider: "codex",
+      nativeSessionId: "codex-thread-1",
+    });
     assert.ok(sentRequest.taskCompletedAt);
     assert.equal(result.type, "completion");
     assert.equal(result.forHuman, "The checklist is complete; the missing rollback owner is now named.");

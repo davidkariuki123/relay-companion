@@ -143,19 +143,19 @@ test("room and view transitions explicitly retire an open picker", () => {
     "even a tab hop that keeps the room mounted dismisses the picker");
 });
 
-test("Request, reader and AI-runner surfaces never render a reaction trigger", () => {
+test("Task, reader and AI-runner surfaces never render a reaction trigger", () => {
   assert.match(html, /const REACTIONS_ENABLED = false;/, "reactions stay implemented but ship behind the reversible off switch");
-  const reader = between(html, "function renderReader()", "// ---------- the requests board:");
+  const reader = between(html, "function renderReader()", "// ---------- the Tasks board:");
   assert.doesNotMatch(reader, /messageReactionPickerHtml|data-rx-face|reactionConfirmationHtml|wireReactionControls/);
 
   const conversation = between(html, "const rowsHtml = timeline.map", "// Chat order: history above");
   assert.match(conversation, /\$\{!REACTIONS_ENABLED \|\| m\.request \? "" : messageReactionPickerHtml\(m\.id\)\}/);
   assert.match(conversation, /\$\{!REACTIONS_ENABLED \|\| m\.request \? "" : reactionConfirmationHtml\(m\.id\)\}/);
-  assert.match(html, /for \(const event of \(!REACTIONS_ENABLED \|\| message\.request\) \? \[\] :/, "disabled and Request reactions do not enter the timeline");
-  assert.match(conversation, /const aggregates = \(!REACTIONS_ENABLED \|\| m\.request\) \? \[\] :/, "disabled and Request bubbles do not show reaction badges");
-  assert.match(conversation, /<span class="kchip">Request<\/span>/, "Request roots can remain visible as bubbles");
+  assert.match(html, /for \(const event of \(!REACTIONS_ENABLED \|\| message\.request\) \? \[\] :/, "disabled and Task reactions do not enter the timeline");
+  assert.match(conversation, /const aggregates = \(!REACTIONS_ENABLED \|\| m\.request\) \? \[\] :/, "disabled and Task bubbles do not show reaction badges");
+  assert.match(conversation, /<span class="kchip">Task<\/span>/, "Task roots can remain visible as bubbles");
 
-  const requests = between(html, "function renderRequestsBoard()", "function wireRequestDetail()");
+  const requests = between(html, "function renderTasksBoard()", "function wireRequestDetail()");
   assert.doesNotMatch(requests, /messageReactionPickerHtml|data-rx-face|wireReactionControls/);
   assert.equal((html.match(/wireReactionControls\(thHistoryEl\)/g) || []).length, 1);
 });

@@ -113,7 +113,7 @@ export function buildHumanNotifications({ user, tasks = [], relays = [], connect
       notifications.push(taskNotification(
         task,
         "task_request",
-        "Relay task request",
+        "Relay Task",
         `${task.title}: ${task.objective}`,
         `/app/tasks/${task.id}`,
         { participantId: participant.id },
@@ -372,7 +372,7 @@ function packetMarkdownForNotification(notification) {
   if (notification.provider) lines.push(`Connector: \`${notification.provider}\``);
   if (notification.kind === "task_request") {
     lines.push("");
-    lines.push("This is a Relay task request. The human must accept or reject before their agent participates.");
+    lines.push("This is a Relay Task. The human must accept or reject before their agent participates.");
   } else if (notification.kind === "share_approval") {
     lines.push("");
     lines.push("This is a Relay share approval. No cross-person information has been sent yet.");
@@ -588,6 +588,7 @@ export function stagePlainRelayItem(
     taskState: item.taskState || existing.taskState || ((item.kind || packet?.kind) === "task" ? "requested" : null),
     taskAcceptedAt: item.taskAcceptedAt || existing.taskAcceptedAt || null,
     taskStartedAt: item.taskStartedAt || existing.taskStartedAt || null,
+    taskRunOwner: item.taskRunOwner || existing.taskRunOwner || null,
     taskCompletedAt: item.taskCompletedAt || existing.taskCompletedAt || null,
     // The completion species has to survive staging or the pill cannot tell an
     // agent's report from correspondence, and it lands in the chat with a

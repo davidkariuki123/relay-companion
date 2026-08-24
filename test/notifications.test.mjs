@@ -178,7 +178,7 @@ test("an acknowledged history import is staged as read and remains visibly non-r
       kind: "task",
       taskState: "completed",
       historyImported: true,
-      preview: "An earlier Request.",
+      preview: "An earlier Task.",
       sender: { name: "David" },
     },
     packet: {
@@ -187,7 +187,7 @@ test("an acknowledged history import is staged as read and remains visibly non-r
       kind: "task",
       taskState: "completed",
       historyImported: true,
-      forHuman: "An earlier Request.",
+      forHuman: "An earlier Task.",
       forAgent: "Historical agent payload.",
       sender: { name: "David" },
       recipient: { name: "Shane" },

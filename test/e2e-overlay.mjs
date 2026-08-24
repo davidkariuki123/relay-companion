@@ -1353,10 +1353,10 @@ try {
     }; })()`);
     if (row.toggle !== "Enable") throw new Error(JSON.stringify(row));
     return row;
-  }, { label: "disable Claude for Requests" });
+  }, { label: "disable Claude for Tasks" });
   check(
     "settings: Disable is Relay-only and makes the recovery path explicit",
-    disabledClaude.text.includes("Disabled for Requests") && disabledClaude.primaryDisabled,
+    disabledClaude.text.includes("Disabled for Tasks") && disabledClaude.primaryDisabled,
     JSON.stringify(disabledClaude),
   );
   await evalIn(pageConn, `document.querySelector('[data-provider-enable="claude"]').click(); 'enable Claude'`);
@@ -1368,7 +1368,7 @@ try {
     }; })()`);
     if (row.toggle !== "Disable") throw new Error(JSON.stringify(row));
     return row;
-  }, { label: "re-enable Claude for Requests" });
+  }, { label: "re-enable Claude for Tasks" });
   check(
     "settings: Enable restores the subscription sign-in action",
     enabledClaude.primary === expectedPrimary("claude", authState.providers.claude.authState) &&

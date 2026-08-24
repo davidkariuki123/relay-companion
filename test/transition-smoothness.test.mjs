@@ -77,8 +77,8 @@ test("the first pointer event never cold-starts Web Audio", () => {
 
 test("all compact-to-reader resize transitions can hold a frozen source face", () => {
   const prepare = between(html, "function prepareReaderMorph", "function startReaderMorph");
-  assert.doesNotMatch(prepare, /sourceView !== "requests"/);
-  for (const view of ["relays", "chat", "threads", "sent", "requests", "contacts"]) {
+  assert.doesNotMatch(prepare, /sourceView !== "tasks"/);
+  for (const view of ["relays", "chat", "threads", "sent", "tasks", "contacts"]) {
     assert.match(prepare, new RegExp(`${view}:`));
   }
   assert.match(html, /const morphFromCompact = !chatExpanded && prepareReaderMorph\(activeView\)/);

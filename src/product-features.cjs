@@ -42,7 +42,7 @@ function productFeatures(options = {}) {
     relayWork: developer,
     // Settings → Agent connections: provider subscription profiles and the
     // MCP / connected-apps inventory. Substrate for runs, not for reading —
-    // so it rides the Requests switch: the day Requests turns on in an
+    // so it rides the Tasks switch: the day Tasks turns on in an
     // environment, its Settings surfaces (permission modes + connections)
     // turn on with it (David, 2026-08-18).
     agentConnections: developer,

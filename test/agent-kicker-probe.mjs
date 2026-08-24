@@ -78,7 +78,7 @@ const store = {
   profile: { name: "David", handle: "david", email: "david@example.com", inboxDir: "", contactCardRoots: [], transport: { type: "relay_api" } },
   contacts: [],
   packets: {
-    pkt_kick_1: packet("Safer Requests model", "2026-08-20T09:00:00.000Z", AGENT_DOC),
+    pkt_kick_1: packet("Safer Tasks model", "2026-08-20T09:00:00.000Z", AGENT_DOC),
     // A relay whose agent document is a single word, to prove the singular.
     pkt_kick_2: packet("Channel pump never runs", "2026-08-20T09:01:00.000Z", "Ship"),
   },

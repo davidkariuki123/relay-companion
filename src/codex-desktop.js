@@ -913,7 +913,7 @@ export async function relaySubmitCodexRenderer(payload) {
   // start-turn-for-host is DEAD in this build (ChatGPT 151.0.7922.76 / codex
   // 0.145.0): it acks, and then nothing happens — no rollout growth, no DOM
   // change, not a line in the app's own logs, even with this window confirmed
-  // as stream owner. Requests "started" on Codex for weeks and never ran.
+  // as stream owner. Tasks "started" on Codex for weeks and never ran.
   //
   // What the app itself does when a human presses send is a generic RPC
   // envelope to its OWN embedded app-server (a stdio child with no socket, so

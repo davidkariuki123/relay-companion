@@ -60,7 +60,7 @@ export function parseProviderCompletionDocument(value) {
 
 /**
  * Convert a provider-owned terminal turn into the one completion document
- * Relay attaches to the Request. Records are newest-first.
+ * Relay attaches to the Task. Records are newest-first.
  *
  * This deliberately returns null while liveness is ambiguous: a truthful
  * failure is useful only after the native worker has actually settled.
@@ -111,7 +111,7 @@ export function providerCompletionCandidate({
  * Convert a canonical Work envelope into local terminal truth. Unlike the
  * legacy transcript reader, this requires the exact provider-authored native
  * start and can be scoped to the Relay-owned turn/cutoff. Materialized session
- * history therefore cannot finish (or even start) a Request.
+ * history therefore cannot finish (or even start) a Task.
  */
 export function canonicalProviderCompletionCandidate({
   provider,

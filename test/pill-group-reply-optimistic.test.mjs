@@ -39,7 +39,7 @@ function runThreadMessages(payload, optimisticChatReplies, { realDelivery = fals
     : `${pillFunction("threadMessages")}\nreturn threadMessages();`;
   return new Function(
     "payload", "optimisticChatReplies",
-    "requestThreadIds", "isRequestRow", "isRelayListKind", "onRequestThread",
+    "requestThreadIds", "isTaskRow", "isRelayListKind", "onRequestThread",
     "relaySubject", "relayTextLike", "isCompletionRelay", "relaySender",
     "bodyPreview", "sentRecipient", "sentIsRead", "sentIsDelivered", "sentSubject",
     `"use strict"; ${source}`,

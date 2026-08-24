@@ -44,7 +44,7 @@ function delta(method, turnId, itemId, value, at) {
 test("internal Relay transport text never becomes the human's visible message", () => {
   const historical = [
     "Begin now and return only the requested marker.",
-    "<relay-runtime-contract>Relay Request return contract with internal settlement machinery.</relay-runtime-contract>",
+    "<relay-runtime-contract>Relay Task return contract with internal settlement machinery.</relay-runtime-contract>",
   ].join("\n\n");
   assert.equal(visibleWorkUserText(historical), "Begin now and return only the requested marker.");
   assert.equal(visibleWorkUserText("Begin the task as briefed."), "");

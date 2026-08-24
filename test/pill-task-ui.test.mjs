@@ -9,9 +9,9 @@ const main = fs.readFileSync(new URL("../overlay/main.cjs", import.meta.url), "u
 // source-shape assertions in the style of pill-sent-delivery-ui.test.mjs — the
 // behavioral halves live in notifications.test.mjs / relay-briefing.test.mjs.
 
-test("a request row carries the Request chip and the chip recipe exists once", () => {
+test("a request row carries the Task chip and the chip recipe exists once", () => {
   assert.match(html, /const isTask = kind === "task"/);
-  assert.match(html, /\$\{isTask \? `<span class="kchip">Request<\/span>` : ""\}/);
+  assert.match(html, /\$\{isTask \? `<span class="kchip">Task<\/span>` : ""\}/);
   assert.match(html, /\.kchip \{/);
 });
 
@@ -43,5 +43,5 @@ test("messages-only mode lets task relays through and the projection carries rec
 });
 
 test("the sent fingerprint moves when a task receipt advances", () => {
-  assert.match(main, /r\.taskStartedAt,\s*\n\s*r\.taskCompletedAt,/);
+  assert.match(main, /r\.taskStartedAt,\s*\n\s*r\.taskRunOwner,\s*\n\s*r\.taskCompletedAt,/);
 });

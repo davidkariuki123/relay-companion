@@ -233,7 +233,7 @@
   }
   .tab:not(.active) .tab-badge { opacity:.45; }
   .tab-badge.gone { display:none; }
-  /* Requests debt is a different color from unread ink — amber, not accent. */
+  /* Tasks debt is a different color from unread ink — amber, not accent. */
   .tab-badge.amber { background:color-mix(in srgb, var(--warn, #8A5A32) 16%, transparent); color:var(--warn, #8A5A32); }
   .mark-all-read { display:none !important; } /* leaving the rail — tray menu owns bulk-clear next */
 
@@ -284,7 +284,7 @@
      followed by a resize. The source snapshot holds the exact pixels the click
      began on while the prepared reader/chat fades in underneath. This keeps a
      720px destination from appearing as a cropped debug view inside the still-
-     narrow card. Requests, Chat, a compact room and Sent share this contract. */
+     narrow card. Tasks, Chat, a compact room and Sent share this contract. */
   @keyframes readerSourceOut {
     from { opacity:1; transform:translateX(0) scale(1); }
     to { opacity:0; transform:translateX(8px) scale(.985); }
@@ -419,7 +419,7 @@
     html.room-view-transition::view-transition-new(relay-room) { animation-duration:.001s; }
   }
 
-  /* ---- group headers (Requests) ---- */
+  /* ---- group headers (Tasks) ---- */
   /* Calm, refined section labels: the serif for warmth, sentence case, gentle weight,
      no all-caps / wide tracking / mono. The whole list reads quiet rather than shouty. */
   .group-head {
@@ -1133,7 +1133,7 @@
   .rx-badge.mine { border-color:color-mix(in srgb,var(--brand-anthropic) 55%,var(--edge)); }
   .rx-badge .n { font-family:var(--mono); font-size:9px; color:var(--muted-2); }
   @keyframes rxBadgePop { from { transform:scale(.2); } 60% { transform:scale(1.18); } }
-  /* The picker belongs to ONE message, never to a reader, Request or run.
+  /* The picker belongs to ONE message, never to a reader, Task or run.
      It appears just outside the hovered bubble and unfurls back across that
      bubble, so its target remains visually unambiguous at every width. */
   .th-msg .rx-msg-picker { position:absolute; z-index:8; top:50%; right:-32px; width:28px; height:30px; margin:0; transform:translateY(-50%); }
@@ -1462,7 +1462,7 @@
   :root[data-theme="dark"] .th-party.p4 { color:#8cb8c6; } :root[data-theme="dark"] .th-party.p5 { color:#bcae7e; }
   :root[data-theme="dark"] .th-party.p6 { color:#c9968e; } :root[data-theme="dark"] .th-party.p7 { color:#9cb891; }
 
-  /* ---- chat-first prototype: Relay rows / reader / requests board ---- */
+  /* ---- chat-first prototype: Relay rows / reader / Tasks board ---- */
   .relay-row { display:flex; gap:11px; padding:13px 16px 0; cursor:pointer; }
   .relay-row .rk-body { flex:1 1 auto; min-width:0; border-bottom:1px solid var(--hair); padding-bottom:13px; }
   .relay-row:last-child .rk-body { border-bottom:0; }
@@ -1533,7 +1533,7 @@
   :is(.rd-body,.rd-agentcopy) .md-table th, :is(.rd-body,.rd-agentcopy) .md-table td { text-align:left; padding:7px 12px 7px 0; border-bottom:1px solid var(--edge); vertical-align:top; }
   :is(.rd-body,.rd-agentcopy) .md-table th { font-weight:650; color:var(--muted-2); font-size:10px; letter-spacing:.06em; text-transform:uppercase; }
   :is(.rd-body,.rd-agentcopy) .md-img { max-width:100%; border-radius:6px; margin:8px 0; }
-  /* Settings: what requests may do. One value row per app — the "Open Relays
+  /* Settings: what Tasks may do. One value row per app — the "Open Relays
      with" species (logo, name, current mode) — that unfolds the standard
      open-actions tray inline. The tray is the explanation surface: modes are
      each vendor's own names, read at the moment of choosing. */
@@ -1722,7 +1722,7 @@
   .rd-said { align-self:flex-start; width:100%; font-family:var(--sans); font-size:14px; line-height:21px; font-weight:445; color:var(--ink); overflow-wrap:anywhere; }
   /* Codex conversation geometry: the agent and its work own the left edge;
      every user turn is a compact bubble on the right. A follow-up is a real
-     message in the conversation, never replaced by “Reading the request.” */
+     message in the conversation, never replaced by “Reading the Task.” */
   .rd-user { align-self:flex-end; width:fit-content; max-width:77%; padding:8px 12px;
     border-radius:16px; background:var(--wash); font-family:var(--sans); font-size:14px; line-height:21px; font-weight:445;
     color:var(--ink); overflow-wrap:anywhere; }
@@ -2299,7 +2299,7 @@
       <button class="tab active" type="button" data-view="relays">
         Relays <span class="tab-badge gone" id="relaysBadge">0</span>
       </button>
-      <button class="tab" type="button" data-view="requests">Requests <span class="tab-badge amber gone" id="requestsBadge">0</span></button>
+      <button class="tab" type="button" data-view="tasks">Tasks <span class="tab-badge amber gone" id="tasksBadge">0</span></button>
       <button class="tab" type="button" data-view="contacts">People</button>
       <button class="tab" type="button" data-view="settings">Settings</button>
       <button class="mark-all-read gone" id="markAllRead" type="button">Mark all as read</button>
@@ -2379,17 +2379,17 @@
         </div>
       </section>
 
-      <!-- Request detail view (in-pill mirror of the web request page, live-polled) -->
+      <!-- Task detail view (in-pill mirror of the web request page, live-polled) -->
       <section class="view hidden" id="requestDetailView"></section>
 
-      <!-- Requests view: the board behind the request reader (waiting / running / parked) -->
-      <section class="view hidden" id="requestsView">
-        <div id="requestsList"></div>
-        <div class="empty gone" id="requestsEmpty">
+      <!-- Tasks view: the board behind the Task reader (waiting / running / parked) -->
+      <section class="view hidden" id="tasksView">
+        <div id="tasksList"></div>
+        <div class="empty gone" id="tasksEmpty">
           <svg class="mark" width="22" height="22" viewBox="0 0 16 16" aria-hidden="true">
             <rect x="0" y="6" width="4" height="4"/><rect x="6" y="6" width="4" height="4"/><rect x="12" y="6" width="4" height="4"/>
           </svg>
-          <div class="t1">No requests yet</div>
+          <div class="t1">No Tasks yet</div>
           <div class="t2">When someone's agent sets up work for yours, it lands here for your approval.</div>
         </div>
       </section>
@@ -2508,10 +2508,10 @@
   const chatEmptyEl = document.getElementById("chatEmpty");
   const markAllReadEl = document.getElementById("markAllRead");
   const sentViewEl = document.getElementById("sentView");
-  const requestsViewEl = document.getElementById("requestsView");
-  const requestsListEl = document.getElementById("requestsList");
-  const requestsEmptyEl = document.getElementById("requestsEmpty");
-  const requestsBadgeEl = document.getElementById("requestsBadge");
+  const tasksViewEl = document.getElementById("requestsView");
+  const tasksListEl = document.getElementById("requestsList");
+  const tasksEmptyEl = document.getElementById("requestsEmpty");
+  const tasksBadgeEl = document.getElementById("requestsBadge");
   const readerViewEl = document.getElementById("readerView");
   const readerBodyEl = document.getElementById("readerBody");
   const sentListEl = document.getElementById("sentList");
@@ -2746,7 +2746,8 @@
       chat: chatViewEl,
       threads: threadsViewEl,
       sent: sentViewEl,
-      requests: requestsViewEl,
+      tasks: tasksViewEl,
+      requests: tasksViewEl, // compatibility alias for pre-Task view state
       contacts: contactsViewEl,
     }[sourceView];
     if (!source || source.classList.contains("hidden")) return false;
@@ -2793,7 +2794,8 @@
       chat: chatViewEl,
       threads: threadsViewEl,
       sent: sentViewEl,
-      requests: requestsViewEl,
+      tasks: tasksViewEl,
+      requests: tasksViewEl, // compatibility alias for pre-Task view state
       reader: readerViewEl,
       contacts: contactsViewEl,
       settings: settingsViewEl,
@@ -3366,11 +3368,11 @@
 
   // map enums -> humane copy (never show a raw enum)
   const RELAY_KIND_LABEL = {
-    task_request: "Request",
+    task_request: "Task",
     share_approval: "Approval needed",
-    task_completed: "Request completed",
-    task_cancelled: "Request cancelled",
-    task_failed: "Request failed",
+    task_completed: "Task completed",
+    task_cancelled: "Task cancelled",
+    task_failed: "Task failed",
     connector_reauth: "Reconnect needed",
     plain_relay: "Relay",
   };
@@ -3464,8 +3466,8 @@
   // Tasks/share approvals are hidden from the pill until that product surface is ready.
   const RELAY_HIDDEN_KINDS = new Set(["task_request", "task", "share_approval"]); // requests live on their own board
   function isRelayListKind(row) {
-    // A two-document completion is an agent's report on a Request and stays on
-    // that Request's page. A human-only completion is ordinary correspondence:
+    // A two-document completion is an agent's report on a Task and stays on
+    // that Task's page. A human-only completion is ordinary correspondence:
     // the wire marker must not make a text disappear from its person's room.
     if (
       String((row && row.type) || "") === "completion" &&
@@ -3549,7 +3551,7 @@
     active: "Active", completing: "Wrapping up", completed: "Completed",
     cancelled: "Cancelled", failed: "Failed",
   };
-  function requestStateLabel(state) { return REQUEST_STATE_LABEL[state] || "Request"; }
+  function requestStateLabel(state) { return REQUEST_STATE_LABEL[state] || "Task"; }
   function requestStateClass(state) {
     // The reduced palette only distinguishes "live" (prussian) from everything else (gray).
     if (state === "active" || state === "completing") return "s-active";
@@ -3675,7 +3677,7 @@
     // THE NAMED APP IS A PROMISE: every button that opens says "Open in {app}",
     // so an open with no host named by its caller goes where Settings says,
     // not where the frontmost-window heuristic guesses. Callers that name a
-    // host themselves (David's per-relay rows, the request rail's route) win.
+    // host themselves (David's per-relay rows, the Task rail's route) win.
     else if (source === "sent" && window.relay.openSent) window.relay.openSent(id, host || hostKeyFor(agentAppName()));
     else if (mode === "current" && window.relay.openInCurrent) window.relay.openInCurrent(id, host || hostKeyFor(agentAppName()));
     else if (mode === "fresh" && window.relay.openFresh) window.relay.openFresh(id, host || hostKeyFor(agentAppName()), note);
@@ -3765,10 +3767,10 @@
     // WhatsApp chronology: a room's preview is the newest correspondence in
     // either direction. `threadMessages` already normalizes staged inbound and
     // live Sent rows, deduplicates group fan-out siblings, and keeps optimistic
-    // sends visible while the Sent projection catches up. A Request root is
+    // sends visible while the Sent projection catches up. A Task root is
     // correspondence too: it appears in the room, so it must also be allowed
     // to become that room's latest preview. Only its progress and completion
-    // stay exclusively on the Requests surface.
+    // stay exclusively on the Tasks surface.
     const allRows = threadMessages()
       .sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
     const identityRows = relayIdentityRows(allRows);
@@ -3859,7 +3861,7 @@
 
   // ---------- the reader: one relay as a full page (chat-first prototype) ----
   // A relay is a REQUEST (sender's agent set up work for your agent -> Approve /
-  // note / Not now) or a MESSAGE (-> Reply). Request-ness is DECLARED by the
+  // note / Not now) or a MESSAGE (-> Reply). Task-ness is DECLARED by the
   // sender: relayNotificationKind === "task_request".
   const expandedMsgIds = new Set(); // bubbles currently unfolded in a thread
   const expandedReceiptIds = new Set(); // group receipt rosters currently open
@@ -4142,17 +4144,17 @@
     return [hostKeyFor(choice) === "codex" ? "codex" : "claude"];
   }
   function chatOrder() { return protoPref("proto.convOrder", "chat"); } // "chat" | "inbox"
-  const requestLocal = new Map(); // packetId -> "running" | "parked" (prototype-local approval state)
+  const taskLocal = new Map(); // packetId -> "running" | "parked" (prototype-local approval state)
   const requestSafetyReviews = new Map(); // decrypted, local-only advisory review
   // A REQUEST arrives on the wire as kind "task" and stages as relayNotificationKind
-  // "task"; the legacy task-pipeline rows say "task_request". Both are Requests —
-  // matching only one is why the Requests tab read "No requests yet" while three
+  // "task"; the legacy task-pipeline rows say "task_request". Both are Tasks —
+  // matching only one is why the Tasks tab read "No Tasks yet" while three
   // staged requests sat in the pill (David, live).
-  function isRequestRow(r) {
+  function isTaskRow(r) {
     const k = r && r.relayNotificationKind;
     return k === "task_request" || k === "task";
   }
-  function requestRows() { return (payload.relays || []).filter(isRequestRow); }
+  function taskRows() { return (payload.relays || []).filter(isTaskRow); }
   // State is READ FROM THE RECORD, not remembered in the tab. It used to be a
   // local Map, so a restarted pill forgot every run in flight and a finished
   // run sat under "Running" forever. The row's own receipts answer it: a
@@ -4191,9 +4193,9 @@
   function permMode(vendor) {
     return protoPref(`proto.perm.${vendor}`, PERM_DEFAULTS[vendor] || "");
   }
-  function requestState(id) {
+  function taskBoardState(id) {
     const row = relayById(id) || {};
-    const local = requestLocal.get(id);
+    const local = taskLocal.get(id);
     // A follow-up reopens the same session even if the original request has a
     // completion receipt. The local transition wins until that turn settles.
     if (local === "running") return "running";
@@ -4208,13 +4210,18 @@
     if (row.taskCompletedAt) return "done";
     // RUNNING MEANS RUNNING. A started stamp with nothing alive behind it is a
     // run that stopped without finishing — it says so, and Start comes back.
-    if (row.taskStartedAt) return row.runLive || local === "running" ? "running" : "stopped";
+    if (row.taskStartedAt) {
+      // A Task started by the current MCP agent is genuinely Working even
+      // though the Relay pill does not own or monitor that provider process.
+      if (row.taskRunOwner && row.taskRunOwner.kind === "external_mcp") return "running";
+      return row.runLive || local === "running" ? "running" : "stopped";
+    }
     if (local === "parked") return "parked";
     return "waiting";
   }
   function relayWorkState(row) {
-    if (!row || isRequestRow(row)) return row ? requestState(row.id) : "idle";
-    const local = requestLocal.get(String(row.id));
+    if (!row || isTaskRow(row)) return row ? taskBoardState(row.id) : "idle";
+    const local = taskLocal.get(String(row.id));
     if (local === "running" || local === "done" || local === "stopped") return local;
     if (row.runLive) return "running";
     if (row.workCompletedAt) return "done";
@@ -4234,7 +4241,7 @@
   function vendorSq(app) {
     return /claude/i.test(String(app)) ? "var(--brand-anthropic)" : "var(--agent-sq)";
   }
-  // ---- the route: which agent app runs this request, on which model, at what
+  // ---- the route: which agent app runs this Task, on which model, at what
   // thinking level. Settings picks the DEFAULT; the composer's rail changes
   // it per request. Model lists read from the installed apps' own binaries
   // (Claude CLI 2.1.222; ChatGPT.app app.asar), 2026-08-12.
@@ -4245,15 +4252,15 @@
     // Labels are the app's, so the picker reads like the one the user knows.
     "Codex":         { models:["5.6 Sol","5.6 Terra","5.6 Luna","5.5","5.4","5.3 Codex","5.3 Codex Spark"], efforts:["auto","low","medium","high","xhigh"], model:"5.6 Sol", effort:"high" },
   };
-  const requestRoutes = new Map(); // packetId -> { app, model, effort } (ad-hoc overrides)
+  const taskRoutes = new Map(); // packetId -> { app, model, effort } (ad-hoc overrides)
   function routeFor(id) {
     const base = AGENT_ROUTES[agentAppName()] ? agentAppName() : "Claude Code";
-    const o = requestRoutes.get(id) || {};
+    const o = taskRoutes.get(id) || {};
     const app = AGENT_ROUTES[o.app] ? o.app : base;
     const spec = AGENT_ROUTES[app];
     return { app, model: o.model || spec.model, effort: o.effort || spec.effort };
   }
-  function setRoute(id, patch) { requestRoutes.set(id, { ...(requestRoutes.get(id) || {}), ...patch }); }
+  function setRoute(id, patch) { taskRoutes.set(id, { ...(taskRoutes.get(id) || {}), ...patch }); }
   // The route menu: the island's night material, one list, current choice
   // wears the blue square.
   let routeMenuEl = null;
@@ -4293,14 +4300,14 @@
   // bubbles, board rows) are the same markup; `inline` only drops the sticky
   // page-bottom chrome. Reply boxes talk to people, this box talks to your
   // agent, and Approve sits where Send sits.
-  function requestStatusLine(r, { inline = false } = {}) {
-    const state = requestState(r.id);
+  function taskStatusLine(r, { inline = false } = {}) {
+    const state = taskBoardState(r.id);
     if (state === "waiting" || state === "running" || state === "done") return "";
     if (state === "stopped") {
       const recovery = requestHasNativeSession(r) ? "Send a follow-up to resume it." : "Start it again.";
       return `<div class="request-terminal-status${inline ? " inline" : ""}"><b>Didn't finish — the agent stopped before it reported back. ${recovery}</b></div>`;
     }
-    return `<div class="request-terminal-status${inline ? " inline" : ""}"><b>Parked — waiting in Requests</b></div>`;
+    return `<div class="request-terminal-status${inline ? " inline" : ""}"><b>Parked — waiting in Tasks</b></div>`;
   }
   // --- The run stream ---------------------------------------------------------
   // The reader MORPHS IN PLACE when a request starts (§2.15 / §4b): the kicker
@@ -4309,7 +4316,7 @@
   // window shipped without any of this, so "Started" was the last thing the
   // reader ever saw while the agent worked in the dark.
   // --- Scheduled requests ---------------------------------------------------
-  // A SCHEDULE is a standing contract: this request, on this cadence, on this
+  // A SCHEDULE is a standing contract: this Task, on this cadence, on this
   // route, until this end. It keeps its own shelf on the board — "On a
   // schedule" — because a request between runs is not Running and not Waiting,
   // and squatting in either would be a lie about its state.
@@ -4324,7 +4331,7 @@
     schedulesLoadedAt = Date.now();
     window.relay.schedules().then((rows) => {
       schedules = Array.isArray(rows) ? rows : [];
-      if (activeView === "requests") renderRequestsBoard();
+      if (activeView === "tasks") renderTasksBoard();
       if (activeView === "reader") renderReader();
     }).catch(() => {});
   }
@@ -4852,7 +4859,7 @@
     if (!kicker || !feed) return;
     const rt = routeFor(id);
     const app = runApp(id, feed);
-    const runKind = isRequestRow(relayById(id)) ? "request" : "work";
+    const runKind = isTaskRow(relayById(id)) ? "Task" : "work";
     const sq = `<span class="ksq" style="background:${vendorSq(app)}"></span>`;
     if (runFeedCompleted(feed)) {
       kicker.innerHTML = `${sq}${runKind} · ${esc(app.toUpperCase())} · done`;
@@ -4916,7 +4923,7 @@
     const key = String(id || "");
     const at = new Date().toISOString();
     const previous = runFeedSeen.get(key) || null;
-    const previousState = requestLocal.has(key) ? requestLocal.get(key) : undefined;
+    const previousState = taskLocal.has(key) ? taskLocal.get(key) : undefined;
     if (newTurn) resetRunFeedForNewRun(key, { preserveHistory });
     else stopRunFeed(key);
     const base = newTurn && !preserveHistory ? null : previous;
@@ -4952,7 +4959,7 @@
       liveState: "active",
     });
     runFeedPending.add(key);
-    requestLocal.set(key, "running");
+    taskLocal.set(key, "running");
     renderAll();
     return { previous, previousState };
   }
@@ -5003,7 +5010,7 @@
     }
     stopRunFeed(key);
     if (optimistic.previous) runFeedSeen.set(key, optimistic.previous); else runFeedSeen.delete(key);
-    if (optimistic.previousState === undefined) requestLocal.delete(key); else requestLocal.set(key, optimistic.previousState);
+    if (optimistic.previousState === undefined) taskLocal.delete(key); else taskLocal.set(key, optimistic.previousState);
     setRowNote(key, result?.error || "Could not reach the session.", "err");
     renderAll();
   }
@@ -5089,7 +5096,7 @@
       stopRunFeed(key); sendQueuedRunMessage(key, queued[0].id); return;
     }
     if (runFeedIsTerminal(feed)) {
-      requestLocal.set(key, runFeedCompleted(feed) ? "done" : "stopped");
+      taskLocal.set(key, runFeedCompleted(feed) ? "done" : "stopped");
       stopRunFeed(key); renderAll(); return;
     }
   }
@@ -5124,7 +5131,7 @@
       if (!document.querySelector(`[data-run-stream="${CSS.escape(key)}"]`)) return stopRunFeed(key);
       let feed = null;
       try { feed = await window.relay.runFeed(key); } catch { return; }
-      // A retry/continuation may have started while this request was in
+      // A retry/continuation may have started while this Task was in
       // flight. Never let the old provider/session repaint the new run.
       if ((runFeedEpoch.get(key) || 0) !== epoch) return;
       if (!feed || !feed.ok) return;
@@ -5139,7 +5146,7 @@
         return;
       }
       if (runFeedIsTerminal(feed)) {
-        requestLocal.set(key, "stopped");
+        taskLocal.set(key, "stopped");
         stopRunFeed(key);
         renderAll();
         return;
@@ -5162,10 +5169,10 @@
       }
       if (feed.completedAt) {
         // The open reader owns the runner and its composer. Updating only the
-        // hidden Requests board left that visible composer saying Steer after
+        // hidden Tasks board left that visible composer saying Steer after
         // the turn had settled; repaint every current surface so it becomes
         // the same-session Send affordance immediately.
-        if (requestLocal.get(key) !== "done") { requestLocal.set(key, "done"); renderAll(); }
+        if (taskLocal.get(key) !== "done") { taskLocal.set(key, "done"); renderAll(); }
         const settled = (runFeedSettle.get(key) || 0) + 1;
         runFeedSettle.set(key, settled);
         if (settled > 12) stopRunFeed(key); // ~12s grace for the closing message
@@ -5274,11 +5281,11 @@
         </div>
         <div class="sch-note">${sc.autoSend
           ? `Each result goes straight to ${esc(sender)}. You will see it in Sent.`
-          : `Each result waits in your Requests as a draft, in your words, until you send it.`}</div>
+          : `Each result waits in your Tasks as a draft, in your words, until you send it.`}</div>
       </div>`;
   }
   // The cadence's verbs ride the DOCK's rail, where Start lives for a one-off —
-  // same box, same place, the word changed to what this request actually is.
+  // same box, same place, the word changed to what this Task actually is.
   function scheduleActionsHtml(r) {
     const sc = scheduleFor(r.id);
     if (!sc) return "";
@@ -5300,7 +5307,7 @@
     const app = runAppName(id);
     const spec = AGENT_ROUTES[app];
     if (!spec) return { app, model:"", effort:"", configurable:false };
-    const selected = requestRoutes.get(id);
+    const selected = taskRoutes.get(id);
     if (!selected || selected.app !== app) {
       const persistedModel = String(rtAppModel(r, app) || "");
       const model = spec.models.find((label) => modelIdFor(app, label) === persistedModel) || spec.model;
@@ -5334,7 +5341,7 @@
       effort: String(rt.effort || "high").toLowerCase(),
     };
   }
-  // Requests and ordinary Relay Work start on the same route-selecting
+  // Tasks and ordinary Relay Work start on the same route-selecting
   // composer. The document changes the verb (Start vs Send), never the
   // available app, model, or thinking controls.
   function idleRunDockHtml(r, { inline = false, draft = "", action = "request", label = "Start", actions = "" } = {}) {
@@ -5350,7 +5357,7 @@
         ${Array.isArray(review.permissions) && review.permissions.length
           ? `<div class="permission-line">May need: ${review.permissions.map((item) => esc(item.label || "")).filter(Boolean).join(" · ")}</div>
              <ul>${review.permissions.map((item) => `<li>${esc(item.effect || "")}</li>`).join("")}</ul>`
-          : `<div class="permission-line">${esc(review.plainLanguage || "No powerful access is obvious from the request.")}</div>`}
+          : `<div class="permission-line">${esc(review.plainLanguage || "No powerful access is obvious from the Task.")}</div>`}
         ${review.trustContext ? `<div class="permission-line">${esc(review.trustContext)}</div>` : ""}
       </div>` : "";
     const defaultActions = action === "request"
@@ -5380,12 +5387,12 @@
     if (r.historyImported) {
       return `<div class="ta-dock${inline ? " inline" : ""}" data-stop="1">
         <div class="qr ta-qr col"><div class="request-safety" role="status">
-          <strong>Imported Request history</strong>
-          <div>This is a private copy of an earlier Request. It cannot be accepted or run again.</div>
+          <strong>Imported Task history</strong>
+          <div>This is a private copy of an earlier Task. It cannot be accepted or run again.</div>
         </div></div>
       </div>`;
     }
-    const state = requestState(r.id);
+    const state = taskBoardState(r.id);
     const draft = String(requestWorkDrafts.get(String(r.id)) || "");
     if (state === "review") {
       const pending = r.completionReview || {};
@@ -5481,7 +5488,7 @@
     }
     return idleRunDockHtml(r, { inline, draft, action: "work", label: "Send" });
   }
-  function requestControlsHtml(r, opts) { return requestDockHtml(r, opts) || requestStatusLine(r, opts); }
+  function requestControlsHtml(r, opts) { return requestDockHtml(r, opts) || taskStatusLine(r, opts); }
   function wireRequestControls(scope, onDone) {
     for (const button of scope.querySelectorAll("[data-request-safety]")) button.addEventListener("click", async (event) => {
       event.stopPropagation();
@@ -5547,7 +5554,7 @@
     // Open in {app} is a real, separate ownership mode. Relay never asks the
     // native app and the headless runner to own one turn concurrently. While a
     // Relay-owned turn is active the button is visibly disabled. Before a run
-    // it stages both Request documents plus the unsent composer text in a new
+    // it stages both Task documents plus the unsent composer text in a new
     // native session; after a run it opens that exact settled native session.
     for (const b of scope.querySelectorAll("[data-open-in]")) {
       b.addEventListener("click", async (e) => {
@@ -5556,7 +5563,7 @@
         const id = b.getAttribute("data-open-in");
         const rt = routeFor(id);
         const note = String((b.closest(".ta-dock")?.querySelector(".ta-note") || {}).value || "").trim();
-        const ranAlready = requestHasNativeSession(requestRows().find((row) => row.id === id));
+        const ranAlready = requestHasNativeSession(taskRows().find((row) => row.id === id));
         if (ranAlready && window.relay.openInCurrent) window.relay.openInCurrent(id, hostKeyFor(rt.app));
         else openRelayFromUI(id, "relay", "fresh", hostKeyFor(rt.app), note);
         // AFTER the open, never before: openRelayFromUI clears the row's note
@@ -5590,7 +5597,7 @@
       });
     }
     // The status line ("Approved — your agent is on it" / "Parked — waiting
-    // in Requests") is the ONE statement of state. A note appears only to echo a
+    // in Tasks") is the ONE statement of state. A note appears only to echo a
     // steering note you typed — never to say "Approved" a second time (Sven's
     // double). Park says nothing extra anywhere.
     for (const ap of scope.querySelectorAll("[data-approve]")) ap.addEventListener("click", async (e) => {
@@ -5620,9 +5627,9 @@
         workTabAnimateUntil.set(String(id), Date.now() + 500);
       }
       window.relay.ack(id); // acting on a request reads it — never bold after
-      // START IS REAL: ignite the run on the route this request names (rail or
+      // START IS REAL: ignite the run on the route this Task names (rail or
       // Settings default), carrying the composer's steering note verbatim.
-      setRowNote(id, `Starting ${rt.app} on this request…`, "ok");
+      setRowNote(id, `Starting ${rt.app} on this Task…`, "ok");
       if (window.relay.taskStart) {
         window.relay.taskStart(id, {
           host: hostKeyFor(rt.app),
@@ -5638,17 +5645,17 @@
           if (res && res.ok) {
             if (noteBox) clearStagedFiles(noteBox);
             setRowNote(id, note || payloads.files.length ? `Started on ${rt.app} — your message went with it.` : `Started on ${rt.app}.`, "ok");
-            // This is launch acknowledgement, not durable Request state. The
+            // This is launch acknowledgement, not durable Task state. The
             // Work header owns running/stopped/done truth; leaving this green
             // note mounted after a fast completion creates a contradictory
             // "Done / Started" footer.
             fadeRowNoteLater(id, 3000);
           }
           else {
-            // Nothing is running, so the request goes back to WAITING and Start
+            // Nothing is running, so the Task goes back to WAITING and Start
             // returns. An optimistic "running" that outlives a failed launch is
             // exactly the phantom run we just stopped creating.
-            requestLocal.delete(id);
+            taskLocal.delete(id);
             if (optimistic.previous) runFeedSeen.set(String(id), optimistic.previous); else runFeedSeen.delete(String(id));
             if (note) requestWorkDrafts.set(String(id), note);
             setRowNote(id, (res && (res.error || res.runError)) || "Start failed — try again.", "err");
@@ -5656,7 +5663,7 @@
           renderAll();
         }).catch((e) => {
           runFeedPending.delete(String(id));
-          requestLocal.delete(id);
+          taskLocal.delete(id);
           if (optimistic.previous) runFeedSeen.set(String(id), optimistic.previous); else runFeedSeen.delete(String(id));
           if (note) requestWorkDrafts.set(String(id), note);
           setRowNote(id, String(e && e.message || e).slice(0, 120), "err");
@@ -5700,7 +5707,7 @@
       }).then((res) => {
         runFeedPending.delete(String(id));
         if (!res?.ok) {
-          requestLocal.delete(String(id));
+          taskLocal.delete(String(id));
           if (optimistic.previous) runFeedSeen.set(String(id), optimistic.previous); else runFeedSeen.delete(String(id));
           requestWorkDrafts.set(String(id), note);
           readerTab = "agent";
@@ -5712,7 +5719,7 @@
         renderAll();
       }).catch((error) => {
         runFeedPending.delete(String(id));
-        requestLocal.delete(String(id));
+        taskLocal.delete(String(id));
         if (optimistic.previous) runFeedSeen.set(String(id), optimistic.previous); else runFeedSeen.delete(String(id));
         requestWorkDrafts.set(String(id), note);
         readerTab = "agent";
@@ -5744,7 +5751,7 @@
       }
       const key = String(id);
       const continuation = continuedRouteOptions(id);
-      if (requestState(id) === "running") {
+      if (taskBoardState(id) === "running") {
         const rows = queuedRunMessages(key);
         rows.push({ id: crypto.randomUUID(), body, files: payloads.files, attachments: payloads.attachments, ...continuation });
         runQueuedMessages.set(key, rows);
@@ -5756,7 +5763,7 @@
         return;
       }
       const previousFeed = runFeedSeen.get(key) || null;
-      const previousState = requestLocal.has(key) ? requestLocal.get(key) : undefined;
+      const previousState = taskLocal.has(key) ? taskLocal.get(key) : undefined;
       appendOptimisticUserTurn(id, body, true, payloads.attachments);
       const res = await window.relay.runSteer(id, body, { newTurn: true, files: payloads.files, ...continuation }).catch((err) => ({ ok: false, error: String(err && err.message || err) }));
       st.disabled = false;
@@ -5771,7 +5778,7 @@
       else {
         stopRunFeed(key);
         if (previousFeed) runFeedSeen.set(key, previousFeed); else runFeedSeen.delete(key);
-        if (previousState === undefined) requestLocal.delete(key); else requestLocal.set(key, previousState);
+        if (previousState === undefined) taskLocal.delete(key); else taskLocal.set(key, previousState);
         setRowNote(id, (res && res.error) || "Could not reach the session.", "err");
         renderAll();
       }
@@ -5779,16 +5786,16 @@
     for (const lt of scope.querySelectorAll("[data-later]")) lt.addEventListener("click", (e) => {
       e.stopPropagation();
       const id = lt.getAttribute("data-later");
-      requestLocal.set(id, "parked");
+      taskLocal.set(id, "parked");
       window.relay.ack(id); // parked ≠ unread: you saw it and deferred it
       clearRowNote(id);
       onDone("later", id);
     });
   }
-  function requestsWaitingCount() { return requestRows().filter((r) => requestState(r.id) === "waiting").length; }
-  function requestsUnreadCount() { return requestRows().filter((r) => r.unread).length; }
+  function requestsWaitingCount() { return taskRows().filter((r) => taskBoardState(r.id) === "waiting").length; }
+  function requestsUnreadCount() { return taskRows().filter((r) => r.unread).length; }
   let chatExpanded = false; // the conversation borrowing the reader's frame (⤢)
-  let readerTab = "you"; // which face of the Request folder is open ("you" | "agent" | "work")
+  let readerTab = "you"; // which face of the Task folder is open ("you" | "agent" | "work")
   let readerTabSwap = false; // true only for the render caused by a tab switch (drives the pane animation)
   let readerWorkVisible = false; // detects the two-tabs -> three-tabs transition without confusing an existing run
   const workTabAnimateUntil = new Map(); // request id -> animation deadline across the immediate Start repaint
@@ -6028,7 +6035,7 @@
   }
   function openReader(id, source) {
     // A notification banner remains `peeking` even after the user moves into
-    // Requests. Both prepareReaderMorph() and syncCardSize() deliberately
+    // Tasks. Both prepareReaderMorph() and syncCardSize() deliberately
     // refuse to resize in that state, so opening a row could paint the full
     // reader into the 400x118 banner window. The click explicitly asks for the
     // full surface: retire the transient banner before taking the snapshot.
@@ -6063,7 +6070,7 @@
   }
   function closeReader() {
     cleanReaderMorph();
-    const back = readerReturn || { view: readerSource === "requests" ? "requests" : "relays", threadId: null };
+    const back = readerReturn || { view: readerSource === "tasks" ? "tasks" : "relays", threadId: null };
     if (readerId) destroyWorkScroller(readerId);
     scrollEl.classList.remove("work-scroll-active"); readerViewEl.classList.remove("work-view"); readerBodyEl.classList.remove("work-mode");
     readerId = null;
@@ -6265,24 +6272,24 @@
   function renderReader() {
     const r = readerRow(readerId);
     if (!r) { readerBodyEl.innerHTML = '<div class="cv-empty">This relay is gone.</div>'; return; }
-    const request = isRequestRow(r);
+    const request = isTaskRow(r);
     const sender = relaySender(r);
     const subject = request ? (String(r.title || "").trim() || relaySubject(r)) : relaySubject(r);
     const headlineClass = subject.length > 120 ? " long very-long" : subject.length > 70 ? " long" : "";
     const note = rowNotes.get(r.id);
     let app = request ? routeFor(r.id).app : agentAppName();
-    const status = request ? requestStatusLine(r, { inline: true }) : "";
+    const status = request ? taskStatusLine(r, { inline: true }) : "";
     // The FOLDER: tabs cut from the paper, one per document — only when the
     // relay actually carries two. Orange square = you, blue = your agent app.
     const agentText = String(r.forAgent || "").trim();
-    // A Request always keeps its two immutable source documents. Once any
+    // A Task always keeps its two immutable source documents. Once any
     // provider turn exists, Work joins them as a third face and owns the live
     // transcript and final answer. Each face still owns its composer: human
     // reply on For you, provider Start/follow-up on For <agent> and Work.
     const runState = relayWorkState(r);
     // RELAY WORK IS REQUESTS SUBSTRATE (Sven, 2026-08-17): a plain relay grows
     // a Work face only where the product row allows it (local builds). A
-    // Request keeps its own — that surface is gated by features.requests.
+    // Task keeps its own — that surface is gated by features.requests.
     const workOn = payload.features?.relayWork === true;
     const hasWork = (request || workOn) && !["idle", "waiting", "parked"].includes(runState);
     if (hasWork) app = runAppName(r.id); // the third face names the provider that actually owns this run
@@ -6310,15 +6317,15 @@
         <div class="rd-rule"></div>
         <div class="rd-agentcopy">${readerParagraphs(agentText)}</div>`;
     const humanDoc = `
-        <div class="rd-kicker">${request ? "request · " : ""}${esc(sender)}${r.e2ee ? " · end-to-end encrypted" : ""} · ${esc(timeAgo(r.createdAt))}${r.unread ? "" : " · read"}</div>
+        <div class="rd-kicker">${request ? "Task · " : ""}${esc(sender)}${r.e2ee ? " · end-to-end encrypted" : ""} · ${esc(timeAgo(r.createdAt))}${r.unread ? "" : " · read"}</div>
         <div class="rd-headline${headlineClass}">${esc(subject)}</div>
         <div class="rd-rule"></div>
         <div class="rd-body">${readerParagraphs(r.forHuman)}</div>
         ${scheduleContractHtml(r)}`;
     const workDoc = `<div class="work-context">
-        <div class="rd-kicker" data-run-kicker="${esc(r.id)}">${request ? "request" : "work"} · ${esc(sender)} · ${esc(timeAgo(r.createdAt))}</div>
+        <div class="rd-kicker" data-run-kicker="${esc(r.id)}">${request ? "Task" : "work"} · ${esc(sender)} · ${esc(timeAgo(r.createdAt))}</div>
         <div class="rd-headline${headlineClass}">${esc(subject)}</div></div>
-        <div class="work-conversation${runState === "running" ? " work-streaming" : ""}" data-run-stream="${esc(r.id)}" aria-live="polite" aria-relevant="additions text"><div class="work-starting" role="status"><span class="rd-live-tail-dot" aria-hidden="true"></span><span>Starting ${esc(app)} on this request…</span></div></div>`;
+        <div class="work-conversation${runState === "running" ? " work-streaming" : ""}" data-run-stream="${esc(r.id)}" aria-live="polite" aria-relevant="additions text"><div class="work-starting" role="status"><span class="rd-live-tail-dot" aria-hidden="true"></span><span>Starting ${esc(app)} on this Task…</span></div></div>`;
     const doc = onWork ? workDoc : onAgent ? agentDoc : humanDoc;
     // The whisper explains what the Relay Work dock will send; without that
     // dock the row names where it goes (H2), and nothing else needs saying.
@@ -6342,7 +6349,7 @@
       // the other face; here the one verb is the open — the same row the room
       // paints under the bubble, so the two surfaces cannot drift. The
       // composer that talks to your own agent ("Tell Claude Code anything…")
-      // is Relay Work — the requests layer wearing a composer — and mounts
+      // is Relay Work — the Tasks layer wearing a composer — and mounts
       // only where the product row allows it.
       if (onAgent && !workOn) return `<div class="rd-host-actions" data-stop="1">${relayHostActionsHtml({
         id: r.id,
@@ -6441,7 +6448,7 @@
     if (!onAgent && !onWork) {
       const send = document.getElementById("qrSend");
       const input = document.getElementById("qrInput");
-      // The agent addressee uses the request-style dock, so it deliberately has
+      // The agent addressee uses the Task-style dock, so it deliberately has
       // no human-reply #qrSend/#qrInput pair. Switching the folder to "For
       // Claude Code" used to throw here and strand every control wired below.
       if (send && input) {
@@ -6563,24 +6570,24 @@
 
   }
 
-  // ---------- the requests board: waiting / running / parked ----
+  // ---------- the Tasks board: waiting / running / parked ----
   // The board is the same pill filtered to obligations, so its rows use the
   // RELAY anatomy — .th-title with the read/unread system (never hardcoded
   // ink), preview when folded — and the same interaction as every bubble:
   // tap unfolds in place to the body + inline dock; nothing navigates.
   const expandedRequestIds = new Set(); // board rows currently unfolded
-  function renderRequestsBoard() {
-    const rows = requestRows();
-    requestsEmptyEl.classList.toggle("gone", rows.length > 0);
+  function renderTasksBoard() {
+    const rows = taskRows();
+    tasksEmptyEl.classList.toggle("gone", rows.length > 0);
     const groups = { waiting: [], running: [], review: [], stopped: [], done: [], parked: [], scheduled: [] };
     for (const r of rows) {
       const sc = scheduleFor(r.id);
       // An accepted or paused cadence OWNS the row between runs.
-      if (sc && (sc.state === "accepted" || sc.state === "paused") && requestState(r.id) !== "running") {
+      if (sc && (sc.state === "accepted" || sc.state === "paused") && taskBoardState(r.id) !== "running") {
         groups.scheduled.push(r);
         continue;
       }
-      groups[requestState(r.id)].push(r);
+      groups[taskBoardState(r.id)].push(r);
     }
     const section = (label, items, renderRight) => items.length ? `
       <div class="tb-group">${label}<span class="n">${items.length}</span></div>
@@ -6604,9 +6611,9 @@
     // times (Sven). Rows carry no status chips and no notes — moving between
     // groups is the feedback. Only Waiting rows carry a control.
     // The row's one control is NOT NOW — never Start: nobody should ignite a
-    // job off its title alone. Starting requires opening the request and seeing
+    // job off its title alone. Starting requires opening the Task and seeing
     // at least the For-you document (David's rule); parking shouldn't.
-    requestsListEl.innerHTML =
+    tasksListEl.innerHTML =
       section("Waiting on you", groups.waiting, (r) => `<button class="tb-go" type="button" data-request-later="${esc(r.id)}">not now</button>`)
       + section("On a schedule", groups.scheduled, (r) => {
           const sc = scheduleFor(r.id) || {};
@@ -6624,35 +6631,35 @@
       + section("Didn't finish", groups.stopped, (r) => `<button class="tb-go" type="button" data-request-again="${esc(r.id)}">start again</button>`)
       + section("Done", groups.done, () => "")
       + section("Parked", groups.parked, () => "");
-    for (const z of requestsListEl.querySelectorAll('[data-stop="1"]')) {
+    for (const z of tasksListEl.querySelectorAll('[data-stop="1"]')) {
       z.addEventListener("click", (e) => e.stopPropagation());
     }
-    for (const el of requestsListEl.querySelectorAll(".tb-row")) {
+    for (const el of tasksListEl.querySelectorAll(".tb-row")) {
       el.addEventListener("click", () => {
         const id = el.getAttribute("data-request");
         // A request follows the letter ontology (David's round): tap → the pill
         // expands into the reader, where the dock is the composer. Opening
         // reads it. The row's ghost Start stays for one-tap approval.
-        const r = requestRows().find((x) => x.id === id);
+        const r = taskRows().find((x) => x.id === id);
         const shouldAck = Boolean(r && r.unread);
         if (r && r.unread) {
           r.unread = false; // the badge follows the open immediately, not the next daemon poll
         }
-        openReader(id, "requests");
+        openReader(id, "tasks");
         if (shouldAck) persistReadIds([id], { afterPaint: true });
       });
     }
-    for (const again of requestsListEl.querySelectorAll("[data-request-again]")) {
+    for (const again of tasksListEl.querySelectorAll("[data-request-again]")) {
       again.addEventListener("click", (e) => {
         e.stopPropagation();
         // A state without a remedy is just bad news. The fix is one tap, from
-        // the board, on the route the request already names (David).
+        // the board, on the route the Task already names (David).
         const id = again.getAttribute("data-request-again");
         const rt = routeFor(id);
         again.disabled = true;
         again.textContent = "starting…";
         resetRunFeedForNewRun(id);
-        requestLocal.set(id, "running");
+        taskLocal.set(id, "running");
         window.relay.taskStart(id, {
           host: hostKeyFor(rt.app),
           model: modelIdFor(rt.app, rt.model),
@@ -6660,23 +6667,23 @@
           note: "",
           permission: permMode(/claude/i.test(String(rt.app)) ? "claude" : "codex"),
         }).then((res) => {
-          if (!res || !res.ok) { requestLocal.delete(id); setRowNote(id, (res && (res.error || res.runError)) || "It did not start.", "err"); }
+          if (!res || !res.ok) { taskLocal.delete(id); setRowNote(id, (res && (res.error || res.runError)) || "It did not start.", "err"); }
           renderAll();
-        }).catch((err) => { requestLocal.delete(id); setRowNote(id, String(err && err.message || err).slice(0, 120), "err"); renderAll(); });
+        }).catch((err) => { taskLocal.delete(id); setRowNote(id, String(err && err.message || err).slice(0, 120), "err"); renderAll(); });
       });
     }
-    for (const btn of requestsListEl.querySelectorAll("[data-request-later]")) {
+    for (const btn of tasksListEl.querySelectorAll("[data-request-later]")) {
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
         const id = btn.getAttribute("data-request-later");
-        requestLocal.set(id, "parked");
+        taskLocal.set(id, "parked");
         window.relay.ack(id);
         clearRowNote(id);
-        renderRequestsBoard();
+        renderTasksBoard();
         renderAll();
       });
     }
-    wireRequestControls(requestsListEl, () => { renderRequestsBoard(); renderAll(); });
+    wireRequestControls(tasksListEl, () => { renderTasksBoard(); renderAll(); });
   }
 
   // Grow the window as the user scrolls toward the end. Cheap: each extension
@@ -6784,7 +6791,7 @@
       <div class="rk-body">
         <div class="rk-top">
           <span class="rk-sender">${esc(sender)}</span>
-          ${isTask ? `<span class="kchip">Request</span>` : ""}
+          ${isTask ? `<span class="kchip">Task</span>` : ""}
           ${r.e2ee ? `<span class="echip" title="Only the sender's and recipient's devices can read this message">Encrypted</span>` : ""}
           <span class="rk-time">${timeAgo(r.createdAt)}</span>
         </div>
@@ -6802,7 +6809,7 @@
   const SEND_ARROW_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
 
   // The inline action affordances for each relay kind. task_request / share_approval
-  // never reach the Relays list while the Requests product surface is hidden.
+  // never reach the Relays list while the Tasks product surface is hidden.
   function relayActionsHtml(r) {
     const k = r.relayNotificationKind;
     if (k === "connector_reauth") {
@@ -6907,7 +6914,7 @@
     try {
       const res = await fn();
       if (res && res.ok === false) {
-        showRowError(id, res.conflict ? "This request already moved on. " + (res.error || "") : (res.error || "Could not complete that."));
+        showRowError(id, res.conflict ? "This Task already moved on. " + (res.error || "") : (res.error || "Could not complete that."));
       } else {
         window.relay.ack(id);
       }
@@ -6966,7 +6973,7 @@
         }
       });
     }
-    // accept/reject are hidden with the Requests surface. Only connector_reauth keeps a
+    // accept/reject are hidden with the Tasks surface. Only connector_reauth keeps a
     // [data-review] "Reconnect" affordance here.
     for (const btn of relaysListEl.querySelectorAll("[data-review]")) {
       const id = btn.getAttribute("data-review");
@@ -7010,7 +7017,7 @@
       btn.addEventListener("click", () => {
         expandedRelayId = null;
         // Start carries the ROUTE: the app/model/effort the rail (or Settings)
-        // named for this request — never a hardcoded runtime.
+        // named for this Task — never a hardcoded runtime.
         const rt = routeFor(id);
         runRowAction(id, btn, () => window.relay.taskStart(id, {
           host: hostKeyFor(rt.app), model: modelIdFor(rt.app, rt.model), effort: String(rt.effort || "high").toLowerCase(),
@@ -7216,7 +7223,7 @@
         <div class="rk-body">
           <div class="rk-top">
             <span class="rk-sender">${esc(rec)}</span>
-            ${receipt ? `<span class="kchip">Request</span>` : ""}
+            ${receipt ? `<span class="kchip">Task</span>` : ""}
             <span class="st${stCls}">${esc(stLabel)} ${timeAgo(stTime)}</span>
           </div>
           <div class="rk-subject">${esc(subject)}</div>
@@ -7279,7 +7286,7 @@
     }
   }
 
-  // ---------- Requests view ----------
+  // ---------- Tasks view ----------
   const REQUEST_GROUPS = [
     { key: "needs", label: "Needs you", match: (t) => t.requiresViewerAction },
     { key: "active", label: "Active", match: (t) => t.state === "active" || t.state === "completing" },
@@ -7289,8 +7296,8 @@
   ];
   function renderRequests() {
     const requests = payload.requests || [];
-    requestsEmptyEl.classList.toggle("gone", requests.length > 0);
-    if (!requests.length) { requestsListEl.innerHTML = ""; return; }
+    tasksEmptyEl.classList.toggle("gone", requests.length > 0);
+    if (!requests.length) { tasksListEl.innerHTML = ""; return; }
     const assigned = new Set();
     let html = "";
     for (const g of REQUEST_GROUPS) {
@@ -7301,7 +7308,7 @@
       html += `<div class="group-head">${esc(g.label)} <span class="ghc">${inGroup.length}</span></div>`;
       html += inGroup.map(requestRowHtml).join("");
     }
-    requestsListEl.innerHTML = html;
+    tasksListEl.innerHTML = html;
     wireRequestRows();
   }
 
@@ -7358,11 +7365,11 @@
         requestDetailData = res.request;
         requestDetailError = "";
       } else {
-        requestDetailError = (res && res.error) || "Could not load the request.";
+        requestDetailError = (res && res.error) || "Could not load the Task.";
       }
     } catch (err) {
       if (id !== requestDetailId) return;
-      requestDetailError = (err && err.message) || "Could not load the request.";
+      requestDetailError = (err && err.message) || "Could not load the Task.";
     }
     if (activeView === "requestDetail") renderRequestDetail();
   }
@@ -7466,14 +7473,14 @@
     if (!t) {
       requestDetailViewEl.innerHTML = `
         <div class="td-head"><button class="td-back" type="button" data-td-back="1">‹ Sent</button></div>
-        <div class="td-quiet">${requestDetailError ? esc(requestDetailError) : "Loading request…"}</div>`;
+        <div class="td-quiet">${requestDetailError ? esc(requestDetailError) : "Loading Task…"}</div>`;
       wireRequestDetail();
       return;
     }
     const allMessages = Array.isArray(t.recentMessages) ? t.recentMessages.filter(Boolean) : [];
     const done = t.state === "completed" || t.state === "cancelled" || t.state === "failed";
     // every unanswered blocking question, scanned across ALL fetched messages
-    // (not just the visible window); suppressed once the request is closed
+    // (not just the visible window); suppressed once the Task is closed
     const pendingQs = done ? [] : allMessages.filter((m) =>
       m.kind === "relay_to_human" && m.humanResponse && m.humanResponse.status === "pending");
     const messages = allMessages.filter((m) => pendingQs.indexOf(m) === -1).slice(-5);
@@ -7486,7 +7493,7 @@
         <button class="td-back" type="button" data-td-back="1">‹ Sent</button>
         <span class="td-when">${esc(timeAgo(t.updatedAt))}</span>
       </div>
-      <div class="td-title">${esc(t.title || "Untitled request")}</div>
+      <div class="td-title">${esc(t.title || "Untitled Task")}</div>
       <div class="td-meta">${tdChip(t.state)}<span class="sep">·</span><span>${esc(participantSummary(t))}</span></div>`;
     if (objective) html += `<div class="td-obj">${esc(firstLine(objective, 140))}</div>`;
     if (requestDetailError) html += `<div class="td-err">${esc(requestDetailError)}</div>`;
@@ -7557,11 +7564,11 @@
   }
 
   function wireRequestRows() {
-    // action zones inside a row must not also open the request web detail
-    for (const z of requestsListEl.querySelectorAll('[data-stop="1"]')) {
+    // action zones inside a row must not also open the Task web detail
+    for (const z of tasksListEl.querySelectorAll('[data-stop="1"]')) {
       z.addEventListener("click", (e) => e.stopPropagation());
     }
-    for (const btn of requestsListEl.querySelectorAll("[data-request-accept]")) {
+    for (const btn of tasksListEl.querySelectorAll("[data-request-accept]")) {
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
         const requestId = btn.getAttribute("data-request-accept");
@@ -7569,7 +7576,7 @@
         runRequestAction(btn, () => window.relay.accept(requestId, pid));
       });
     }
-    for (const btn of requestsListEl.querySelectorAll("[data-request-decline]")) {
+    for (const btn of tasksListEl.querySelectorAll("[data-request-decline]")) {
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
         const requestId = btn.getAttribute("data-request-decline");
@@ -7578,7 +7585,7 @@
       });
     }
     // "N waiting to approve" -> the in-pill detail, where the approval buttons live
-    for (const el of requestsListEl.querySelectorAll("[data-approve]")) {
+    for (const el of tasksListEl.querySelectorAll("[data-approve]")) {
       el.addEventListener("click", (e) => {
         e.stopPropagation();
         showRequestDetail(el.getAttribute("data-approve"));
@@ -7586,7 +7593,7 @@
     }
     // Row click opens the live in-pill detail; opening in Claude/Codex is an
     // explicit action inside it.
-    for (const el of requestsListEl.querySelectorAll(".request")) {
+    for (const el of tasksListEl.querySelectorAll(".request")) {
       el.addEventListener("click", () => showRequestDetail(el.getAttribute("data-request")));
     }
   }
@@ -7639,7 +7646,7 @@
           <span class="t-state ${stateCls}">${esc(stateLabel)}</span>
           <span class="request-time">${timeAgo(t.updatedAt)}</span>
         </div>
-        <div class="request-title">${esc(t.title || "Untitled request")}</div>
+        <div class="request-title">${esc(t.title || "Untitled Task")}</div>
         ${obj ? `<div class="request-obj">${esc(obj)}</div>` : ""}
         <div class="request-meta">${meta.join("")}</div>
         ${actions}
@@ -8612,7 +8619,7 @@
   // listeners dispatch through this ref instead of capturing one render's
   // closure. Re-binding per render would stack a stale sender per repaint.
   let threadComposerSend = null;
-  // The completion species: typed by the MCP contract, threaded onto the request.
+  // The completion species: typed by the MCP contract, threaded onto the Task.
   function isCompletionRelay(r) {
     return String((r && r.type) || "") === "completion";
   }
@@ -8625,7 +8632,7 @@
   function requestThreadIds() {
     const ids = new Set();
     for (const r of payload.relays || []) {
-      if (!isRequestRow(r)) continue;
+      if (!isTaskRow(r)) continue;
       ids.add(String(r.id));
       if (r.threadId) ids.add(String(r.threadId));
     }
@@ -8692,14 +8699,14 @@
     for (const r of payload.relays || []) {
       // The REQUEST ROOT is correspondence: the sender delivered a named job
       // to this person, so it must be visible in their room like any other
-      // relay. Two-document progress/completion stays on the Requests page;
+      // relay. Two-document progress/completion stays on the Tasks page;
       // human-only correspondence stays in the room.
-      const request = isRequestRow(r);
+      const request = isTaskRow(r);
       if (!request && !isRelayListKind(r)) continue;
       const subj = relaySubject(r);
       const ownedAgent = r.source?.host === "relay-agent-run";
       const textLike = request ? false : ownedAgent || relayTextLike(r.forHuman, subj, r.forAgent);
-      // Two-document execution output stays on the Request reading surface.
+      // Two-document execution output stays on the Task reading surface.
       // A human-only completion is a text message despite its control-plane
       // marker, and belongs in the room like the server chat projection shows.
       if ((isCompletionRelay(r) || (!request && onRequestThread(r, reqThreads))) && !textLike) continue;
@@ -8756,7 +8763,7 @@
       const id = s.relayId || s.id;
       if (!id || inboundIds.has(id)) continue;
       const request = String(s.kind || "") === "task" || String(s.kind || "") === "task_request";
-      // A two-document provider completion stays on the Request. A human-only
+      // A two-document provider completion stays on the Task. A human-only
       // completion is ordinary correspondence and stays in the conversation.
       const ownedAgent = s.source?.host === "relay-agent-run";
       const sentTextLike = request ? false : ownedAgent || relayTextLike(s.forHuman, sentSubject(s), s.forAgent);
@@ -9340,7 +9347,7 @@
   //
   // So: for each message, the parent ids that mean "default anchor" rather
   // than "I chose this one" — the message directly above, plus the newest
-  // ordinary message above when Requests sit in between (the composer's own
+  // ordinary message above when Tasks sit in between (the composer's own
   // rule). A reference is only information when it reaches PAST those.
   function defaultReplyAnchorMap(msgs) {
     const ordered = [...(msgs || [])].sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));
@@ -9595,7 +9602,7 @@
       <div class="th-msg${hasHostActions ? " has-host-actions" : ""}${bubbleGapClass}${m.unread ? " unread" : ""}${mine ? " mine" : ""}${cont ? " cont" : ""}${textLike ? " text" : ""}${agentWorking ? " agent-working" : ""}${open ? " open" : ""}${m.deletedAt ? " deleted" : ""}${aggregates.length ? " has-rx" : ""}"${textLike ? "" : ' role="button" tabindex="0"'}${agentWorking ? ' aria-busy="true"' : ""}${hasHostActions ? ` aria-expanded="${hostActionsPersistent ? "true" : "false"}"` : ""} data-msg="${esc(m.id)}" data-dir="${m.direction}" data-opening-id="${esc(m.id)}">
         ${!REACTIONS_ENABLED || m.request ? "" : messageReactionPickerHtml(m.id)}
         ${messageReplyReferenceHtml(m)}
-        <span class="th-msg-title">${m.request ? '<span class="kchip">Request</span>' : ""}${textLike ? linkify(m.title) : esc(m.title)}${agentWorking ? '<span class="agent-working-indicator" aria-hidden="true"><span class="agent-working-dot"></span><span class="agent-working-dot"></span><span class="agent-working-dot"></span></span>' : ""}${textLike ? "" : `<span class="th-more">${open ? "‹" : "›"}</span>`}${m.editedAt && !m.deletedAt ? '<span class="th-edited">edited</span>' : ""}</span><span class="th-blk-time">${esc(timeAgo(m.at))}</span>
+        <span class="th-msg-title">${m.request ? '<span class="kchip">Task</span>' : ""}${textLike ? linkify(m.title) : esc(m.title)}${agentWorking ? '<span class="agent-working-indicator" aria-hidden="true"><span class="agent-working-dot"></span><span class="agent-working-dot"></span><span class="agent-working-dot"></span></span>' : ""}${textLike ? "" : `<span class="th-more">${open ? "‹" : "›"}</span>`}${m.editedAt && !m.deletedAt ? '<span class="th-edited">edited</span>' : ""}</span><span class="th-blk-time">${esc(timeAgo(m.at))}</span>
 
         ${!textLike && !open && !inlineBody && m.preview ? `<span class="th-preview">${esc(m.preview)}</span>` : ""}
         ${!textLike && !open && inlineBody ? `<div class="th-body" data-stop="0">${readerParagraphs(m.body)}</div>` : ""}
@@ -10071,7 +10078,7 @@
             const raw = (payload.relays || []).find((row) => String(row.id) === String(id));
             if (raw) raw.unread = false;
           }
-          openReader(id, m.direction === "out" ? "sent" : (m.request ? "requests" : "threads"));
+          openReader(id, m.direction === "out" ? "sent" : (m.request ? "tasks" : "threads"));
           if (shouldAck) persistReadIds([id], { afterPaint: true });
           return;
         }
@@ -10332,11 +10339,11 @@
       const state = !item.enabled ? "disabled" : busy ? "busy" : item.connected ? "connected" : "";
       const requirement = item.requirement || (id === "claude" ? "Claude subscription required" : "ChatGPT subscription required");
       const status = !item.enabled
-        ? `${item.connected ? `${item.detail} · ` : ""}Disabled for Requests`
+        ? `${item.connected ? `${item.detail} · ` : ""}Disabled for Tasks`
         : busy
           ? item.busyDetail || "Waiting for authorization…"
           : item.connected
-            ? `${item.detail || "Subscription connected"} · Ready for Requests`
+            ? `${item.detail || "Subscription connected"} · Ready for Tasks`
             : item.detail || "Not signed in";
       const integrations = item.integrations && typeof item.integrations === "object" ? item.integrations : {};
       const mcpServers = Array.isArray(integrations.mcpServers) ? integrations.mcpServers : [];
@@ -10381,7 +10388,7 @@
     }).join("");
     return `<section class="sv-provider-section" data-stop="1">
       <div class="sv-open-title">Agent connections</div>
-      <div class="sv-open-intro">Requests run through the official CLIs on this Mac: Claude Code uses your Claude subscription; Codex uses your ChatGPT subscription. Relay checks whether each is ready but never sees or stores your sign-in credentials. Sessions, settings, MCPs, and connectors stay in their apps.</div>
+      <div class="sv-open-intro">Tasks run through the official CLIs on this Mac: Claude Code uses your Claude subscription; Codex uses your ChatGPT subscription. Relay checks whether each is ready but never sees or stores your sign-in credentials. Sessions, settings, MCPs, and connectors stay in their apps.</div>
       <div class="sv-provider-list">${rows}</div>
       <div class="sv-hint${providerInventoryRefreshing || providerInventoryStale || providerInventoryError ? "" : " hidden"}" id="svProviderInventoryState">${esc(providerInventoryStateText())}</div>
       ${providerAuthNote ? `<div class="sv-note">${esc(providerAuthNote)}</div>` : ""}
@@ -10660,7 +10667,7 @@
         </div>
       </div>`;
     html += chatAgentDefaultsHtml();
-    // WHAT REQUESTS MAY DO. One value row per app — the same species as the
+    // WHAT TASKS MAY DO. One value row per app — the same species as the
     // "Open Relays with" rows above (logo, name, current state), under the
     // shared section title style. Tapping a row unfolds the standard
     // open-actions tray inline with each vendor's real modes in their own
@@ -10670,8 +10677,8 @@
     // intro line still says what a request is.
     if (payload.features?.requests === true) html += `
       <div class="sv-open-section" id="permPrefs" data-stop="1">
-        <div class="sv-open-title">What requests may do</div>
-        <div class="sv-open-intro">Each app’s own permission mode, for requests you Start.</div>
+        <div class="sv-open-title">What Tasks may do</div>
+        <div class="sv-open-intro">Each app’s own permission mode, for Tasks you Start.</div>
         <div class="sv-open-list">
           ${PERM_VENDORS.map((v) => {
             const cur = v.modes.find((m) => m.id === permMode(v.key)) || v.modes[0];
@@ -11496,14 +11503,14 @@
     // requestDetail belongs to Sent; conversations belong to CHAT (the
     // Chat tab lists them; a thread detail is its drill-down), and contacts
     // is Chat's pushed pane — its tab is retired.
-    const tabView = activeView === "requestDetail" ? "requests"
+    const tabView = activeView === "requestDetail" ? "tasks"
       : activeView === "threads" ? threadsSource
       : activeView === "contacts" ? "contacts"
       : activeView === "reader" ? (readerSource || "relays")
       : activeView;
     for (const tab of tabEls) {
       const view = tab.getAttribute("data-view");
-      tab.classList.toggle("gone", view === "requests" && payload.features?.requests !== true);
+      tab.classList.toggle("gone", view === "tasks" && payload.features?.requests !== true);
       tab.classList.toggle("active", view === tabView);
     }
   }
@@ -11516,7 +11523,7 @@
     chatViewEl.classList.toggle("hidden", activeView !== "chat");
     threadsViewEl.classList.toggle("hidden", activeView !== "threads");
     sentViewEl.classList.toggle("hidden", activeView !== "sent");
-    requestsViewEl.classList.toggle("hidden", activeView !== "requests");
+    tasksViewEl.classList.toggle("hidden", activeView !== "tasks");
     readerViewEl.classList.toggle("hidden", activeView !== "reader");
     requestDetailViewEl.classList.toggle("hidden", activeView !== "requestDetail");
     contactsViewEl.classList.toggle("hidden", activeView !== "contacts");
@@ -11641,12 +11648,12 @@
     setBadge(relaysBadgeEl, unread);
     markAllReadEl.classList.toggle("gone", activeView !== "relays" || unread === 0);
     markAllReadEl.disabled = unread === 0;
-    setBadge(requestsBadgeEl, requestsUnreadCount());
+    setBadge(tasksBadgeEl, requestsUnreadCount());
     if (activeView === "chat") renderChat();
     if (activeView === "relays") renderRelays();
     else if (activeView === "threads") renderThreads();
     else if (activeView === "sent") renderSent();
-    else if (activeView === "requests") renderRequestsBoard();
+    else if (activeView === "tasks") renderTasksBoard();
     else if (activeView === "reader") renderReader();
     else if (activeView === "requestDetail") renderRequestDetail();
     else if (activeView === "settings" && enteringView) renderSettings();
@@ -11654,7 +11661,7 @@
     // Every render rebuilds the mirror's element, so re-attach the poll to
     // whatever is on screen now and drop the ones whose card just closed.
     syncRunMirrors();
-    if (activeView === "requests" || activeView === "reader") loadSchedules();
+    if (activeView === "tasks" || activeView === "reader") loadSchedules();
     // contacts renders from its own load path
   }
 
@@ -11719,7 +11726,7 @@
     // only mirrors it. Doing this on every payload is what lets a queued bubble
     // survive a repaint, a room switch and a restart of the pill itself.
     syncOutboxProjection();
-    if (payload.features?.requests !== true && ["requests", "requestDetail"].includes(activeView)) {
+    if (payload.features?.requests !== true && ["tasks", "requestDetail"].includes(activeView)) {
       activeView = "relays";
     }
     // Delivery can happen after navigation. If its room is the visible Chat
@@ -11876,11 +11883,11 @@
   // complete renderer has initialized, and never expose it in production.
   if (window.relay.isTestOverlay) {
     window.__relayParityOpenRequest = (fixture) => {
-      if (!fixture?.id) throw new Error("A request fixture id is required");
+      if (!fixture?.id) throw new Error("A Task fixture id is required");
       payload.relays = [...(payload.relays || []).filter((row) => row.id !== fixture.id), fixture];
-      activeView = "requests";
-      renderRequestsBoard();
-      openReader(String(fixture.id), "requests");
+      activeView = "tasks";
+      renderTasksBoard();
+      openReader(String(fixture.id), "tasks");
       return true;
     };
   }

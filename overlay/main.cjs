@@ -1103,7 +1103,7 @@ function readRelays() {
   return Object.entries(packets)
     .map(([id, p]) => ({ id, ...(p || {}) }))
     .filter((p) => p.direction === "inbound")
-    // Requests remain durably staged for ordinary accounts, but are not
+    // Tasks remain durably staged for ordinary accounts, but are not
     // exposed, notified, or runnable in dev/stable product surfaces.
     .filter((p) => PRODUCT_FEATURES.requests || p.relayNotificationKind !== "task")
     // "task" here is the NEW tasks-as-relays kind (an ordinary relay carrying a
@@ -1122,9 +1122,10 @@ function readRelays() {
       historyImported: p.historyImported === true,
       taskAcceptedAt: p.taskAcceptedAt || null,
       taskStartedAt: p.taskStartedAt || null,
+      taskRunOwner: p.taskRunOwner || null,
       taskCompletedAt: p.taskCompletedAt || null,
       completionReview: p.completionReview || null,
-      // Ordinary Relays may be worked on locally without becoming Requests.
+      // Ordinary Relays may be worked on locally without becoming Tasks.
       // These stamps belong only to the recipient's private Work folder: they
       // never create Started/Done receipts for the sender.
       workStartedAt: p.workStartedAt || null,
@@ -1294,6 +1295,7 @@ function sentFingerprintOf(items) {
       // Task receipts advance without any other field moving; without these the
       // Sent tab would sit on "Seen" forever after a Start or a completion.
       r.taskStartedAt,
+      r.taskRunOwner,
       r.taskCompletedAt,
     ]),
   );
@@ -1992,6 +1994,7 @@ async function pushInboxNow(force) {
       // daemon poll never reached the renderer and the card sat on "Running"
       // forever. The Sent side already fingerprints them (sentFingerprintOf).
       r.taskStartedAt,
+      r.taskRunOwner,
       r.taskCompletedAt,
       r.materializedCodex,
       r.materializedClaude,
@@ -2572,6 +2575,7 @@ function previewPayloadForPacket(packetId) {
     ...(isTask
       ? {
           taskStartedAt: row.taskStartedAt || null,
+          taskRunOwner: row.taskRunOwner || null,
           taskCompletedAt: row.taskCompletedAt || null,
           runtimes: {
             claude: true,
@@ -2628,7 +2632,7 @@ function approvalIdForRow(row) {
 
 async function runMutation(label, fn) {
   if (!TASK_FEATURES_ALLOWED) {
-    return { ok: false, error: "Requests are currently available only to Relay developer accounts on dev." };
+    return { ok: false, error: "Tasks are currently available only to Relay developer accounts on dev." };
   }
   try {
     await fn();
@@ -3157,7 +3161,7 @@ async function openPacket(packetId, { sent = false, fresh = false, host: hostOve
     finishFailed(message);
   };
   if (!TASK_FEATURES_ALLOWED && (row?.taskId || isRelayTaskWebTarget(row?.actionUrl))) {
-    console.error("[overlay] refusing to open a Request for a non-developer account:", packetId);
+    console.error("[overlay] refusing to open a Task for a non-developer account:", packetId);
     return finishFailed();
   }
   if (process.env.RELAY_OVERLAY_TEST_NO_HOST_OPEN === "1") return finishOpened();
@@ -3438,7 +3442,7 @@ async function openPacketInCurrent(packetId, { sent = false, host: hostOverride 
   };
   if (!row) return fallbackFresh(); // deleted from under the click: the open path handles it
   if (!TASK_FEATURES_ALLOWED && (row.taskId || isRelayTaskWebTarget(row.actionUrl))) {
-    console.error("[overlay] refusing to open a Request for a non-developer account:", packetId);
+    console.error("[overlay] refusing to open a Task for a non-developer account:", packetId);
     return finish();
   }
   if (process.env.RELAY_OVERLAY_TEST_NO_HOST_OPEN === "1") return finish();
@@ -3726,7 +3730,7 @@ function openTaskDetail(taskId) {
 
 function openUrlTarget(url) {
   if (!TASK_FEATURES_ALLOWED && isRelayTaskWebTarget(url)) {
-    console.error("[overlay] refusing to open a Request URL for a non-developer account");
+    console.error("[overlay] refusing to open a Task URL for a non-developer account");
     return;
   }
   const target = absoluteUrl(url);
@@ -4721,7 +4725,7 @@ async function startTaskFromPreview(input) {
     return { ok: false, running: false, error: "Claude Cowork is temporarily unavailable in Relay." };
   }
   if (!["claude", "cowork", "codex"].includes(selectedHost)) {
-    return { ok: false, running: false, error: "That provider cannot run this request." };
+    return { ok: false, running: false, error: "That provider cannot run this Task." };
   }
   if (files.length && selectedHost !== "codex") {
     return { ok: false, running: false, error: "Work-run attachments are currently supported for Codex sessions." };
@@ -4731,7 +4735,7 @@ async function startTaskFromPreview(input) {
   if (note.length > 20000) return { ok: false, error: "That note is too long." };
   // Claude Code and Codex run only through their own supported subscription
   // login. This gate happens before notes, Started receipts or Work UI state so
-  // an unavailable/disabled provider cannot make a Request appear to start.
+  // an unavailable/disabled provider cannot make a Task appear to start.
   if (!cowork) {
     try {
       const providerAuth = await providerAuthModule();
@@ -4752,7 +4756,7 @@ async function startTaskFromPreview(input) {
       console.error("[overlay] encrypted task accepted stamp failed:", id, error && error.message);
     }
   }
-  // A Request is one Request, not a Relay conversation replay. Run here gives
+  // A Task is one Task, not a Relay conversation replay. Run here gives
   // the provider exactly its two canonical documents. Never feed
   // briefingMarkdown here: it is a UI projection and may contain request
   // receipts or historical Relay messages rendered as a fake conversation.
@@ -4806,7 +4810,7 @@ async function startTaskFromPreview(input) {
       const { createAndSeedCoworkSession } = await import("../src/cowork-sessions.js");
       const kick = taskKickPrompt({ note });
       const started = await createAndSeedCoworkSession({
-        title: String(row.title || row.displayTitle || "Relay request"),
+        title: String(row.title || row.displayTitle || "Relay Task"),
         content: [
           {
             type: "text",
@@ -4848,7 +4852,7 @@ async function startTaskFromPreview(input) {
       const kick = taskKickPrompt({ note });
       const cwd = String(row.openCwd || process.env.RELAY_OPEN_CWD || os.homedir());
       const launched = await claudeCode.createClaudeDesktopCodeSession({
-        title: String(row.title || row.displayTitle || "Relay request"),
+        title: String(row.title || row.displayTitle || "Relay Task"),
         cwd,
         model: model || "claude-opus-5",
         effort: effort || "high",
@@ -5064,7 +5068,7 @@ function forgeTaskSessionQuietly(packetId, { host, model, effort, cowork = false
 
 // The kick prompt is the task's REAL first user message. It must contain only
 // words the human deliberately sent (or the short default Start instruction).
-// Relay owns Request settlement out of band after the native turn settles, so
+// Relay owns Task settlement out of band after the native turn settles, so
 // internal completion/ownership machinery never belongs in the user turn.
 function taskKickPrompt({ note }) {
   return String(note || "Begin the task as briefed.").trim();
@@ -5354,7 +5358,7 @@ async function settleCanonicalWorkEnvelope(relayId, identity, envelope) {
 
   // The same local agent that did the work supplies a compact release
   // assessment in its terminal answer. Harmless answers (including a plain
-  // "done") keep the automatic Request flow. Anything with a meaningful
+  // "done") keep the automatic Task flow. Anything with a meaningful
   // downside pauses here, with plaintext held only on this device, until the
   // recipient approves sending it.
   if (isRequest && candidate.assessment?.level !== "none") {
@@ -5535,7 +5539,7 @@ function completionAfter(value, after) {
 async function taskRunFeed(relayId) {
   const id = String(relayId || "");
   const row = rowById(id);
-  if (!row) return { ok: false, error: "Unknown request." };
+  if (!row) return { ok: false, error: "Unknown Task." };
   if (!agentWorkEnabledForRow(row)) return agentWorkUnavailable();
   const isRequest = row.relayNotificationKind === "task";
   const startedAt = (isRequest ? row.taskStartedAt : row.workStartedAt) || null;
@@ -5739,7 +5743,7 @@ async function releaseProviderCompletion(relayId) {
   const row = rowById(id);
   const pending = row?.completionReview;
   if (!row || row.relayNotificationKind !== "task" || !pending?.body) {
-    return { ok: false, error: "This Request has no result waiting for review." };
+    return { ok: false, error: "This Task has no result waiting for review." };
   }
   try {
     return await bridgeProviderCompletion(
@@ -5808,7 +5812,7 @@ function markTaskFollowUpStarted(id, newTurn, body = "") {
   };
   // A follow-up is a real user turn whether it resumes a settled session or
   // steers a live one. Persist it so the next native-feed poll cannot replace
-  // the right-side user bubble with the old "Reading the request" placeholder.
+  // the right-side user bubble with the old "Reading the Task" placeholder.
   if (newTurn) {
     patch[isRequest ? "taskStartedAt" : "workStartedAt"] = startedAt;
     patch[isRequest ? "taskCompletedAt" : "workCompletedAt"] = null;
@@ -6045,7 +6049,7 @@ async function previewTaskSteer(input) {
     await claudeCode.continueClaudeDesktopCodeSession({
       sessionId,
       cwd: row.claudeNativeSession.cwd || row.openCwd || os.homedir(),
-      title: row.claudeNativeSession.title || row.title || row.displayTitle || "Relay request",
+      title: row.claudeNativeSession.title || row.title || row.displayTitle || "Relay Task",
       content: providerBody,
       model: claudeModel,
       effort: claudeEffort,
@@ -6677,7 +6681,7 @@ ipcMain.handle("relay:preview:reply", (event, input) => {
 async function reviewRequestSafetyById(relayId) {
   const id = String(relayId || "");
   const row = rowById(id);
-  if (!row || row.relayNotificationKind !== "task") return { ok: false, error: "This is not a Request." };
+  if (!row || row.relayNotificationKind !== "task") return { ok: false, error: "This is not a Task." };
   try {
     const { reviewRequestSafety } = await import("../src/request-safety.js");
     return { ok: true, review: reviewRequestSafety({ ...row, kind: "task" }) };
@@ -6719,8 +6723,8 @@ ipcMain.handle("relay:taskStart", (_e, id, route) =>
   }),
 );
 // The agent document of an ordinary Relay starts private, recipient-owned
-// work. It shares the native runner but never turns the Relay into a Request
-// and never emits Request receipts to the sender.
+// work. It shares the native runner but never turns the Relay into a Task
+// and never emits Task receipts to the sender.
 ipcMain.handle("relay:relayWorkStart", (_e, id, route) =>
   startTaskFromPreview({
     relayId: id,
@@ -6827,7 +6831,7 @@ async function scheduleList() {
   });
 }
 async function scheduleSave(input) {
-  if (!PRODUCT_FEATURES.requests) return { ok: false, error: "Requests are currently available only to Relay developer accounts on dev." };
+  if (!PRODUCT_FEATURES.requests) return { ok: false, error: "Tasks are currently available only to Relay developer accounts on dev." };
   const all = readSchedules();
   const id = String((input && input.id) || "").trim() || `sch_${Date.now().toString(36)}`;
   const existing = all[id] || {};
@@ -6965,7 +6969,7 @@ ipcMain.handle("relay:refreshTasks", async () => {
 // web detail page renders from). The renderer polls this while the view is open.
 ipcMain.handle("relay:taskStatus", async (_e, taskId) => {
   if (!TASK_FEATURES_ALLOWED) {
-    return { ok: false, error: "Requests are currently available only to Relay developer accounts on dev." };
+    return { ok: false, error: "Tasks are currently available only to Relay developer accounts on dev." };
   }
   if (!taskId) return { ok: false, error: "Missing task id." };
   try {
