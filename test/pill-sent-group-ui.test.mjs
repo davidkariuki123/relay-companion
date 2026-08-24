@@ -63,10 +63,11 @@ function readerFor(payload, id) {
   return new Function(
     "payload",
     "id",
+    "canonicalChatDetails",
     "sentRecipient",
     "sentSubject",
     source,
-  )(payload, id, (r) => (r.recipient && r.recipient.name) || "Recipient", (r) => r.title || "Relay");
+  )(payload, id, new Map(), (r) => (r.recipient && r.recipient.name) || "Recipient", (r) => r.title || "Relay");
 }
 
 const GROUP_SEND = [

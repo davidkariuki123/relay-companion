@@ -68,12 +68,12 @@ test("startup guidance and owner schemas preserve the complete product ontology"
       `${name} leads with the human-ask gate and calibrated clarification rule`,
     );
   }
-  assert.match(RELAY_MCP_INSTRUCTIONS, /default general person-to-person and saved-group communication layer/i);
+  assert.match(RELAY_MCP_INSTRUCTIONS, /default general direct-message and saved-channel communication layer/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /For that ask, use Relay unless another medium is named/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /explicitly requested other medium overrides/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /mint a link with relay_share_link/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /notification emails are not the authoritative contents/i);
-  assert.match(RELAY_MCP_INSTRUCTIONS, /one chronological room for one person or saved group/i);
+  assert.match(RELAY_MCP_INSTRUCTIONS, /one chronological conversation for one person or saved channel/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /threadId is opaque AI retrieval metadata/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /3-6 word title/i);
   assert.match(sendContract, /fewest words that faithfully preserve/i);
@@ -119,7 +119,7 @@ test("no model-facing tool resurrects removed content fields or visible topic na
     }
   }
   assert.match(byName.get("relay_thread_fetch").description, /not (?:a product object, )?visible thread\/topic, title, chat, or UI destination/i);
-  assert.match(byName.get("relay_chats_list").description, /identified by the group's own id/i);
+  assert.match(byName.get("relay_chats_list").description, /CHANNEL is identified by its existing grp_\.\.\. id for compatibility/i);
   assert.match(byName.get("relay_chat_fetch").description, /no user-visible threads or topics/i);
 });
 

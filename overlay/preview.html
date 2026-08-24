@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta
     http-equiv="Content-Security-Policy"
-    content="default-src 'none'; base-uri 'none'; connect-src 'none'; font-src 'none'; form-action 'none'; frame-src 'none'; img-src data: blob:; media-src 'none'; object-src 'none'; script-src 'self'; style-src 'unsafe-inline'"
+    content="default-src 'none'; base-uri 'none'; connect-src 'none'; font-src 'none'; form-action 'none'; frame-src 'none'; img-src 'self' data: blob:; media-src 'none'; object-src 'none'; script-src 'self'; style-src 'unsafe-inline'"
   />
   <title>Relay preview</title>
   <style>
@@ -459,6 +459,23 @@
        stand-in for a tail, and the thing that makes a run read as one turn. */
     .bubble-row.mine.last-of-run .bubble { border-bottom-right-radius:6px; }
     .bubble-row.theirs.last-of-run .bubble { border-bottom-left-radius:6px; }
+    .bubble-provider {
+      display:inline-flex; align-items:center; gap:5px; margin:5px 5px 0;
+      color:var(--muted-2); font-size:10.5px; line-height:1.3;
+    }
+    .bubble-provider img { width:12px; height:12px; object-fit:contain; }
+    .bubble-row.thread-reply { position:relative; max-width:82%; margin-left:20px; }
+    .bubble-row.thread-reply::before {
+      content:""; position:absolute; left:-12px; top:-3px; bottom:-3px;
+      width:1px; background:var(--line-strong);
+    }
+    .thread-stub {
+      align-self:flex-start; display:flex; align-items:center; gap:7px;
+      margin:13px 0 5px 8px; padding:6px 9px; border:1px solid var(--line);
+      border-radius:9px; background:var(--paper); color:var(--muted);
+      font-size:10.5px; line-height:1.3;
+    }
+    .thread-stub img { width:13px; height:13px; object-fit:contain; }
     .bubble:focus-visible { outline:2px solid rgba(48,85,102,.5); outline-offset:2px; }
     /* Something that arrived and has not been read yet is tinted, not outlined:
        an outline on one bubble reads as "selected", which it is not. */

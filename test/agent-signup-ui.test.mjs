@@ -48,7 +48,9 @@ test("a paired credential problem opens recovery and never falls through to firs
   assert.match(overlay, /!credentialRecovery && payload\.account\?\.paired === false[\s\S]*installationAuthState/);
   assert.match(preload, /credentialRetry: \(\) => ipcRenderer\.invoke\("relay:credentialRetry"\)/);
   assert.match(main, /ipcMain\.handle\("relay:credentialRetry"/);
-  assert.match(main, /credentialStatus: credential\.status/);
+  assert.match(main, /isRemoteCredentialRejection/);
+  assert.match(main, /remoteCredentialRejected \? "missing" : credential\.status/);
+  assert.match(overlay, /Relay’s service no longer accepts this computer’s saved sign-in/);
 });
 
 test("email signup keeps a user recoverable when delivery is delayed or filtered", () => {
