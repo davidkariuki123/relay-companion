@@ -5,7 +5,15 @@ import { createHash, randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
 import atomicJson from "./atomic-json.cjs";
 import { persistPairedAccount } from "./account.js";
-import { apiUrl, configPath, DEFAULT_WEB_URL, readConfig } from "./config.js";
+import {
+  apiUrl,
+  configPath,
+  CREDENTIAL_STATUS_CORRUPT,
+  CREDENTIAL_STATUS_MISSING,
+  CREDENTIAL_STATUS_UNAVAILABLE,
+  DEFAULT_WEB_URL,
+  readConfigState,
+} from "./config.js";
 
 const { atomicWriteJsonSync } = atomicJson;
 const { writeCredential, readCredential, deleteCredential } = createRequire(import.meta.url)("./credential-store.cjs");
@@ -13,6 +21,7 @@ const { writeCredential, readCredential, deleteCredential } = createRequire(impo
 export const INSTALLATION_AUTHORIZATION_FILE = "installation-authorization.json";
 export const INSTALLATION_CREDENTIAL_SERVICE = "work.relay.companion.installation";
 export const INSTALLATION_CREDENTIAL_ACCOUNT = "authorization";
+export const INSTALLATION_CREDENTIAL_PROBE_ACCOUNT = "availability-probe";
 const INSTALLATION_CREDENTIAL_ACCOUNTS = Object.freeze({
   authorizationId: "authorization-id",
   clientSecret: "client-secret",
@@ -67,6 +76,19 @@ export function createNativeInstallationSecretStore({
     return failed || { ok: true, value: "", detail: "" };
   };
   return {
+    probe() {
+      const probe = randomBytes(24).toString("base64url");
+      const target = options(INSTALLATION_CREDENTIAL_PROBE_ACCOUNT);
+      const written = writeCredential(probe, target);
+      if (!written?.ok) return written;
+      const verified = readCredential(target);
+      const removed = deleteCredential(target);
+      if (!verified?.ok) return verified;
+      if (verified.value !== probe) {
+        return { ok: false, value: "", detail: "native credential verification failed", code: "credential_verification_failed" };
+      }
+      return removed?.ok ? { ok: true, value: "", detail: "" } : removed;
+    },
     write(value) {
       let activationUrl;
       try { activationUrl = new URL(String(value?.activationUrl || "")); }
@@ -204,6 +226,23 @@ class InstallationRequestError extends Error {
   }
 }
 
+function credentialError(message, code = "credential_store_error") {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function defaultIsPaired() {
+  const { config, credential } = readConfigState();
+  if ([CREDENTIAL_STATUS_UNAVAILABLE, CREDENTIAL_STATUS_MISSING, CREDENTIAL_STATUS_CORRUPT].includes(credential.status)) {
+    throw credentialError(
+      "Relay cannot access this computer's saved account credential. Recover the account credential before starting setup.",
+      credential.code || `credential_${credential.status}`,
+    );
+  }
+  return Boolean(process.env.RELAY_DEVICE_TOKEN || config.deviceToken);
+}
+
 async function postJson(fetchImpl, base, route, body, timeoutMs = REQUEST_TIMEOUT_MS) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -261,7 +300,7 @@ export function createInstallationAuthorizationController({
   durableStore = defaultStateStore(),
   secretStore = createNativeInstallationSecretStore({ webBase }),
   now = () => Date.now(),
-  isPaired = () => Boolean(readConfig().deviceToken),
+  isPaired = defaultIsPaired,
   persistAccount = (registration) => persistPairedAccount({
     apiUrl: normalizeApiBase(apiBase),
     webUrl: webBase,
@@ -327,6 +366,14 @@ export function createInstallationAuthorizationController({
     }
     if (existing) await removeAuthorization({ requireSecretRemoval: false });
 
+    const available = await secretStore.probe?.();
+    if (available && !available.ok) {
+      throw credentialError(
+        "Relay cannot access the native credential store. Unlock it, then try setup again.",
+        available.code || "credential_store_error",
+      );
+    }
+
     const { codeVerifier, codeChallenge } = pkcePair();
     const created = await postJson(fetchImpl, base, "/v1/installation-authorizations", {
       deviceName: String(deviceName || "").trim() || "This computer",
@@ -342,7 +389,12 @@ export function createInstallationAuthorizationController({
     validateSecret({ authorizationId, clientSecret, codeVerifier, activationUrl }, authorizationId, trustedWebOrigin);
 
     const stored = await secretStore.write({ authorizationId, clientSecret, codeVerifier, activationUrl });
-    if (!stored?.ok) throw new Error("Relay could not protect the one-time setup authorization in the native credential store.");
+    if (!stored?.ok) {
+      throw credentialError(
+        "Relay could not protect the one-time setup authorization in the native credential store.",
+        stored?.code || "credential_store_error",
+      );
+    }
     try {
       await durableStore.write(state);
     } catch (error) {

@@ -31,10 +31,35 @@ function resultOf(command, args, { env = process.env, run = spawnSync, input, ..
     ...(input === undefined ? {} : { input }),
     ...spawnOptions,
   });
-  return {
+  const outcome = {
     ok: !result?.error && result?.status === 0,
     value: String(result?.stdout || "").replace(/[\r\n]+$/, ""),
     detail: result?.error?.message || String(result?.stderr || "").trim(),
+  };
+  Object.defineProperty(outcome, "status", { value: result?.status, enumerable: false });
+  return outcome;
+}
+
+function classifiedFailure(result, { platform = process.platform } = {}) {
+  const evidence = `${result?.detail || ""}\n${result?.value || ""}`;
+  const missing = /could not be found|cannot find|-25300|element not found/i.test(evidence)
+    || (platform === "darwin" && result?.status === 44)
+    || (platform === "win32" && result?.status === 3);
+  if (missing) {
+    return { ok: false, value: "", detail: "native credential was not found", code: "credential_not_found" };
+  }
+  const unavailable = /user name or passphrase|authentication failed|authfailed|interaction.*not allowed|-25293|-25308|keychain.*locked/i.test(evidence);
+  if (unavailable || (platform === "darwin" && [36, 51].includes(result?.status))) {
+    return { ok: false, value: "", detail: "native credential store is locked or unavailable", code: "credential_unavailable" };
+  }
+  if (result?.status === 124 || /timed?\s*out/i.test(evidence)) {
+    return { ok: false, value: "", detail: "native credential store operation timed out", code: "credential_timeout" };
+  }
+  return {
+    ok: false,
+    value: "",
+    detail: result?.detail || "native credential store operation failed",
+    code: "credential_store_error",
   };
 }
 
@@ -80,7 +105,7 @@ function operation(
   if (platform === "darwin") {
     if (action === "write") {
       if (Buffer.byteLength(secret, "utf8") > MACOS_PROMPT_MAX_BYTES) {
-        return { ok: false, value: "", detail: "credential exceeds the macOS secure prompt limit" };
+        return { ok: false, value: "", detail: "credential exceeds the macOS secure prompt limit", code: "credential_too_large" };
       }
       const writeResult = resultOf("/usr/bin/expect", ["-c", MACOS_WRITE_SCRIPT], {
         ...options,
@@ -91,7 +116,7 @@ function operation(
         },
         input: secret,
       });
-      if (!writeResult.ok) return writeResult;
+      if (!writeResult.ok) return classifiedFailure(writeResult, { platform });
       const verifyResult = resultOf(
         "/usr/bin/security",
         ["find-generic-password", "-s", credentialService, "-a", credentialAccount, "-w"],
@@ -103,14 +128,16 @@ function operation(
         ["delete-generic-password", "-s", credentialService, "-a", credentialAccount],
         options,
       );
-      return { ok: false, value: "", detail: verifyResult.detail || "native credential verification failed" };
+      if (!verifyResult.ok) return classifiedFailure(verifyResult, { platform });
+      return { ok: false, value: "", detail: "native credential verification failed", code: "credential_verification_failed" };
     }
     let args;
     if (action === "read") args = ["find-generic-password", "-s", credentialService, "-a", credentialAccount, "-w"];
     else args = ["delete-generic-password", "-s", credentialService, "-a", credentialAccount];
     const result = resultOf("/usr/bin/security", args, options);
-    if (action === "delete" && !result.ok && /could not be found|-25300/i.test(result.detail)) return { ok: true, value: "" };
-    return result;
+    const classified = result.ok ? null : classifiedFailure(result, { platform });
+    if (action === "delete" && classified?.code === "credential_not_found") return { ok: true, value: "" };
+    return result.ok ? result : classified;
   }
   if (platform === "win32") {
     // TargetName, not UserName, is the Credential Manager uniqueness key. Keep
@@ -119,14 +146,17 @@ function operation(
     const target = credentialService === SERVICE && credentialAccount === ACCOUNT
       ? SERVICE
       : `${credentialService}/${credentialAccount}`;
-    return resultOf("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", WINDOWS_SCRIPT], {
+    const result = resultOf("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", WINDOWS_SCRIPT], {
       ...options,
       env: { ...(options.env || process.env), RELAY_CREDENTIAL_ACTION: action, RELAY_CREDENTIAL_TARGET: target,
         RELAY_CREDENTIAL_ACCOUNT: credentialAccount },
       ...(action === "write" ? { input: secret } : {}),
     });
+    const classified = result.ok ? null : classifiedFailure(result, { platform });
+    if (action === "delete" && classified?.code === "credential_not_found") return { ok: true, value: "" };
+    return result.ok ? result : classified;
   }
-  return { ok: false, value: "", detail: "native credential store unsupported" };
+  return { ok: false, value: "", detail: "native credential store unsupported", code: "credential_store_unsupported" };
 }
 
 function writeDeviceToken(token, options) {

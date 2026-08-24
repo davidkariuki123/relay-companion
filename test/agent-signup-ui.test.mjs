@@ -23,7 +23,7 @@ test("first run is one in-pill flow with a skippable chat setup page", () => {
 
   assert.match(overlay, /cardEl\.classList\.toggle\("signup", needsSignup\)/);
   assert.match(overlay, /\.card\.collapsed \.signup-view \{ display:none; \}/);
-  assert.match(overlay, /const needsSignup = payload\.account\?\.paired === false \|\| tutorialPending/);
+  assert.match(overlay, /const needsSignup = credentialRecovery \|\| payload\.account\?\.paired === false \|\| tutorialPending/);
   assert.match(overlay, /Claude Code and Codex do not need this\./);
   assert.match(overlay, /id="suChatSkip"[\s\S]*Skip for now/);
 });
@@ -34,6 +34,20 @@ test("signup errors are human recovery copy, never raw Electron IPC failures", (
   assert.match(overlay, /authorization is unavailable[\s\S]*Relay couldn’t secure setup on this computer\./);
   assert.match(overlay, /signupError = signupFailureMessage\(reason, fallback\)/);
   assert.doesNotMatch(overlay, /signupError = reason && reason\.message/);
+});
+
+test("a paired credential problem opens recovery and never falls through to first-run authorization", () => {
+  assert.match(overlay, /\["unavailable", "missing", "corrupt"\]\.includes\(payload\.account\?\.credentialStatus\)/);
+  assert.match(overlay, /signupStage = "credential-recovery"/);
+  assert.match(overlay, /Unlock Relay’s account\./);
+  assert.match(overlay, /Reconnect this computer\./);
+  assert.match(overlay, /Relay preserved the corrupt file for inspection/);
+  assert.match(overlay, /Check the file permissions, then try again\./);
+  assert.match(overlay, /window\.relay\.credentialRetry\(\)/);
+  assert.match(overlay, /!credentialRecovery && payload\.account\?\.paired === false[\s\S]*installationAuthState/);
+  assert.match(preload, /credentialRetry: \(\) => ipcRenderer\.invoke\("relay:credentialRetry"\)/);
+  assert.match(main, /ipcMain\.handle\("relay:credentialRetry"/);
+  assert.match(main, /credentialStatus: credential\.status/);
 });
 
 test("email signup keeps a user recoverable when delivery is delayed or filtered", () => {

@@ -94,6 +94,37 @@ test("begin creates S256 PKCE and keeps every capability out of durable and rend
   assert.ok(stores.events.indexOf("secret:write") < stores.events.indexOf("durable:write"));
 });
 
+test("begin preflights native storage before creating a server authorization", async () => {
+  const stores = memoryStores();
+  stores.secretStore.probe = () => ({
+    ok: false,
+    value: "",
+    detail: "native credential store is locked or unavailable",
+    code: "credential_unavailable",
+  });
+  const { controller, calls } = harness({ stores });
+  await assert.rejects(controller.begin(), (error) => {
+    assert.equal(error.code, "credential_unavailable");
+    assert.match(error.message, /Unlock it/);
+    return true;
+  });
+  assert.equal(calls.length, 0, "no server capability is created while the local vault is unavailable");
+  assert.equal(stores.peekDurable(), null);
+  assert.equal(stores.peekSecret(), null);
+});
+
+test("begin does not reinterpret an unreadable paired credential as a new account", async () => {
+  const { controller, calls } = harness({
+    isPaired: () => {
+      const error = new Error("saved account credential is unavailable");
+      error.code = "credential_unavailable";
+      throw error;
+    },
+  });
+  await assert.rejects(controller.begin(), /saved account credential is unavailable/);
+  assert.equal(calls.length, 0);
+});
+
 test("begin is serialized and resumes the same authorization after a restart", async () => {
   let creates = 0;
   const stores = memoryStores();

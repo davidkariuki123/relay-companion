@@ -8,6 +8,11 @@ const { atomicWriteJsonSync } = atomicJson;
 const { writeDeviceToken, readDeviceToken, deleteDeviceToken } = createRequire(import.meta.url)("./credential-store.cjs");
 export const NATIVE_CREDENTIAL_STORE = "native-v1";
 export const LEGACY_DEVICE_CREDENTIAL_ACCOUNT = "device-token";
+export const CREDENTIAL_STATUS_AVAILABLE = "available";
+export const CREDENTIAL_STATUS_UNPAIRED = "unpaired";
+export const CREDENTIAL_STATUS_UNAVAILABLE = "unavailable";
+export const CREDENTIAL_STATUS_MISSING = "missing";
+export const CREDENTIAL_STATUS_CORRUPT = "corrupt";
 function nativeCredentialAccessAllowed(env = process.env) {
   // Config-path overrides are development/test sandboxes. Do not let a fixture
   // overwrite the person's real Keychain/Credential Manager entry. A deliberate
@@ -107,16 +112,19 @@ export function configPath() {
   return process.env.RELAY_CONFIG || path.join(configDir(), "config.json");
 }
 
-function readConfigRaw() {
+function readConfigRawState() {
   const file = configPath();
   let raw;
   try {
     raw = fs.readFileSync(file, "utf8");
-  } catch {
-    return {}; // absent config is normal (unpaired machine)
+  } catch (error) {
+    if (error?.code === "ENOENT") return { config: {}, status: "absent" };
+    return { config: {}, status: "unavailable", code: "config_unavailable" };
   }
   try {
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("invalid config shape");
+    return { config: parsed, status: "ok" };
   } catch (error) {
     // The file exists but is corrupt (crash mid-write on the old non-atomic path).
     // Preserve it for inspection instead of silently treating the device as unpaired
@@ -133,8 +141,12 @@ function readConfigRaw() {
         console.error(`[relay] config.json is corrupt; backed up to ${backup}`);
       } catch {}
     }
-    return {};
+    return { config: {}, status: "corrupt", code: "config_corrupt" };
   }
+}
+
+function readConfigRaw() {
+  return readConfigRawState().config;
 }
 let backedUpCorruptConfig = false;
 
@@ -156,13 +168,30 @@ function credentialAccountFor(config) {
  * native store or the atomic config rewrite fails, the plaintext remains as a
  * rollback-safe fallback and the user is never forced to authenticate again.
  */
-export function readConfig({ credentialBackend = nativeCredentialBackend } = {}) {
-  const raw = readConfigRaw();
-  if (process.env.RELAY_DEVICE_TOKEN) return raw;
+export function readConfigState({ credentialBackend = nativeCredentialBackend } = {}) {
+  const rawState = readConfigRawState();
+  const raw = rawState.config;
+  if (process.env.RELAY_DEVICE_TOKEN) {
+    return { config: raw, credential: { status: CREDENTIAL_STATUS_AVAILABLE } };
+  }
+  if (rawState.status === "unavailable") {
+    return {
+      config: raw,
+      credential: { status: CREDENTIAL_STATUS_UNAVAILABLE, code: rawState.code },
+    };
+  }
+  if (rawState.status === "corrupt") {
+    return {
+      config: raw,
+      credential: { status: CREDENTIAL_STATUS_CORRUPT, code: rawState.code },
+    };
+  }
   if (raw.deviceToken) {
     const identity = newCredentialIdentity();
     const stored = credentialBackend.writeDeviceToken(raw.deviceToken, { account: identity.credentialAccount });
-    if (!stored.ok) return raw;
+    if (!stored.ok) {
+      return { config: raw, credential: { status: CREDENTIAL_STATUS_AVAILABLE } };
+    }
     const next = { ...raw, credentialStore: NATIVE_CREDENTIAL_STORE, ...identity };
     const token = next.deviceToken;
     delete next.deviceToken;
@@ -170,24 +199,52 @@ export function readConfig({ credentialBackend = nativeCredentialBackend } = {})
       atomicWriteJsonSync(configPath(), withoutDeprecatedCapabilityConfig(next), { mode: 0o600 });
       cachedCredentialVersion = next.credentialVersion;
       cachedDeviceToken = token;
-      return { ...next, deviceToken: token };
+      return {
+        config: { ...next, deviceToken: token },
+        credential: { status: CREDENTIAL_STATUS_AVAILABLE },
+      };
     } catch {
       try { credentialBackend.deleteDeviceToken?.({ account: identity.credentialAccount }); } catch {}
-      return raw;
+      return { config: raw, credential: { status: CREDENTIAL_STATUS_AVAILABLE } };
     }
   }
   if (raw.credentialStore === NATIVE_CREDENTIAL_STORE) {
-    if (raw.credentialVersion === cachedCredentialVersion && cachedDeviceToken) {
-      return { ...raw, deviceToken: cachedDeviceToken };
+    const credentialVersion = raw.credentialVersion || "native";
+    if (credentialVersion === cachedCredentialVersion && cachedDeviceToken) {
+      return {
+        config: { ...raw, deviceToken: cachedDeviceToken },
+        credential: { status: CREDENTIAL_STATUS_AVAILABLE },
+      };
     }
     const stored = credentialBackend.readDeviceToken({ account: credentialAccountFor(raw) });
     if (stored.ok && stored.value) {
-      cachedCredentialVersion = raw.credentialVersion || "native";
+      cachedCredentialVersion = credentialVersion;
       cachedDeviceToken = stored.value;
-      return { ...raw, deviceToken: stored.value };
+      return {
+        config: { ...raw, deviceToken: stored.value },
+        credential: { status: CREDENTIAL_STATUS_AVAILABLE },
+      };
     }
+    if (stored.ok) {
+      return {
+        config: raw,
+        credential: { status: CREDENTIAL_STATUS_CORRUPT, code: "credential_empty" },
+      };
+    }
+    const missing = stored.code === "credential_not_found";
+    return {
+      config: raw,
+      credential: {
+        status: missing ? CREDENTIAL_STATUS_MISSING : CREDENTIAL_STATUS_UNAVAILABLE,
+        code: stored.code || "credential_store_error",
+      },
+    };
   }
-  return raw;
+  return { config: raw, credential: { status: CREDENTIAL_STATUS_UNPAIRED } };
+}
+
+export function readConfig(options) {
+  return readConfigState(options).config;
 }
 
 /**

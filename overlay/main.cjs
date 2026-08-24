@@ -568,26 +568,58 @@ const gotSingleInstanceLock = app.requestSingleInstanceLock({ relayReopenNonce: 
 
 let nativeCredentialCache = { version: null, token: "" };
 
+function withCredentialState(config, status, code = "") {
+  Object.defineProperty(config, "_relayCredential", {
+    value: { status, ...(code ? { code } : {}) },
+    enumerable: false,
+  });
+  return config;
+}
+
 function readConfigFile() {
   const configPath =
     process.env.RELAY_CONFIG ||
     path.join(process.env.RELAY_CONFIG_DIR || path.join(os.homedir(), ".relay"), "config.json");
+  let raw;
   try {
-    const config = JSON.parse(fs.readFileSync(configPath, "utf8")) || {};
+    raw = fs.readFileSync(configPath, "utf8");
+  } catch (error) {
+    return withCredentialState(
+      {},
+      error?.code === "ENOENT" ? "unpaired" : "unavailable",
+      error?.code === "ENOENT" ? "" : "config_unavailable",
+    );
+  }
+  try {
+    const config = JSON.parse(raw);
+    if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error("invalid config shape");
+    if (process.env.RELAY_DEVICE_TOKEN || config.deviceToken) {
+      return withCredentialState(config, "available");
+    }
     if (!config.deviceToken && config.credentialStore === "native-v1") {
-      if (nativeCredentialCache.version === config.credentialVersion && nativeCredentialCache.token) {
+      const credentialVersion = config.credentialVersion || "native";
+      if (nativeCredentialCache.version === credentialVersion && nativeCredentialCache.token) {
         config.deviceToken = nativeCredentialCache.token;
+        return withCredentialState(config, "available");
       } else {
         const stored = readDeviceToken({ account: config.credentialAccount || "device-token" });
         if (stored.ok && stored.value) {
-          nativeCredentialCache = { version: config.credentialVersion, token: stored.value };
+          nativeCredentialCache = { version: credentialVersion, token: stored.value };
           config.deviceToken = stored.value;
+          return withCredentialState(config, "available");
         }
+        if (stored.ok) return withCredentialState(config, "corrupt", "credential_empty");
+        const missing = stored.code === "credential_not_found";
+        return withCredentialState(
+          config,
+          missing ? "missing" : "unavailable",
+          stored.code || "credential_store_error",
+        );
       }
     }
-    return config;
+    return withCredentialState(config, "unpaired");
   } catch {
-    return {};
+    return withCredentialState({}, "corrupt", "config_corrupt");
   }
 }
 
@@ -638,8 +670,11 @@ function webBase() {
 function account() {
   const cfg = readConfigFile();
   const user = cfg.user || {};
+  const credential = cfg._relayCredential || { status: "unpaired" };
   return {
-    paired: Boolean(deviceToken()),
+    paired: Boolean(process.env.RELAY_DEVICE_TOKEN || cfg.deviceToken),
+    credentialStatus: credential.status,
+    credentialError: credential.code || "",
     email: user.email || "",
     name: user.name || "",
   };
@@ -658,9 +693,12 @@ function pillVersion() {
 function accountInfo() {
   const cfg = readConfigFile();
   const user = cfg.user || {};
+  const credential = cfg._relayCredential || { status: "unpaired" };
   return {
     ok: true,
-    paired: Boolean(deviceToken()),
+    paired: Boolean(process.env.RELAY_DEVICE_TOKEN || cfg.deviceToken),
+    credentialStatus: credential.status,
+    credentialError: credential.code || "",
     name: user.name || "",
     email: user.email || "",
     deviceName: String(cfg.deviceName || "").trim() || os.hostname(),
@@ -7087,6 +7125,12 @@ ipcMain.handle("relay:contactsSearch", (_e, q) => groupCall((c) => c.searchConta
 
 // Settings tab: account card + the sign-out / switch-account lifecycle.
 ipcMain.handle("relay:accountInfo", () => accountInfo());
+ipcMain.handle("relay:credentialRetry", async () => {
+  nativeCredentialCache = { version: null, token: "" };
+  const next = account();
+  await pushInbox(true);
+  return { ok: next.credentialStatus === "available", account: next };
+});
 ipcMain.handle("relay:chatAgentPreferences", async () => new RelayClient().chatAgentPreferences());
 ipcMain.handle("relay:chatAgentPreferencesSave", async (_event, input = {}) =>
   new RelayClient().updateChatAgentPreferences(input));

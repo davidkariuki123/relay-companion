@@ -15,6 +15,12 @@ const nativeStoreName = process.platform === "darwin"
     : "native credential store";
 const nativeStoreUnavailable = !["darwin", "win32"].includes(process.platform);
 
+function skipLockedNativeStore(t, result) {
+  if (!["credential_unavailable", "credential_timeout"].includes(result?.code)) return false;
+  t.skip(`${nativeStoreName} is locked or unavailable in this session`);
+  return true;
+}
+
 test(`${nativeStoreName} preserves Relay credentials byte for byte`, {
   skip: nativeStoreUnavailable && "native credential store is unavailable",
 }, (t) => {
@@ -27,7 +33,9 @@ test(`${nativeStoreName} preserves Relay credentials byte for byte`, {
   const first = `relay_${randomBytes(48).toString("base64url")}`;
   const second = `relay_${randomBytes(48).toString("base64url")}`;
 
-  assert.equal(writeCredential(first, options).ok, true);
+  const firstWrite = writeCredential(first, options);
+  if (skipLockedNativeStore(t, firstWrite)) return;
+  assert.equal(firstWrite.ok, true);
   assert.deepEqual(readCredential(options), { ok: true, value: first, detail: "" });
 
   assert.equal(writeCredential(second, options).ok, true);
@@ -52,6 +60,10 @@ test(`${nativeStoreName} round-trips a complete split installation capability`, 
   const service = `work.relay.companion.installation.integration.${process.pid}.${Date.now()}`;
   const store = createNativeInstallationSecretStore({ webBase: "https://sendrelays.com", service });
   t.after(() => store.delete());
+
+  const availability = store.probe();
+  if (skipLockedNativeStore(t, availability)) return;
+  assert.equal(availability.ok, true, "the runtime preflight proves write/read/delete before server authorization");
 
   const authorizationId = `iauth_${randomBytes(24).toString("hex")}`;
   const value = {
