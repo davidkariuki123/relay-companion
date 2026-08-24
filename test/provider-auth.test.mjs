@@ -155,7 +155,7 @@ test("desktop sign-in opens each official CLI subscription flow and monitors onl
   if (process.platform !== "win32") assert.equal(fs.statSync(claudeScript).mode & 0o777, 0o700);
   const claudeSource = fs.readFileSync(claudeScript, "utf8");
   assert.match(claudeSource, /claude' 'auth' 'login' '--claudeai'/);
-  assert.match(claudeSource, /security unlock-keychain/);
+  assert.doesNotMatch(claudeSource, /security|keychain/i, "Relay never manipulates the shared login Keychain");
   assert.doesNotMatch(claudeSource, /access[_-]?token|oauth[_-]?code|client[_-]?secret/i);
   calls[0].child.emit("close", 0);
   assert.equal(_test.activeLogins.has("claude"), true, "launcher exit does not pretend the external login finished");

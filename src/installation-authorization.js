@@ -85,7 +85,7 @@ export function createNativeInstallationSecretStore({
       const removed = deleteCredential(target);
       if (!verified?.ok) return verified;
       if (verified.value !== probe) {
-        return { ok: false, value: "", detail: "native credential verification failed", code: "credential_verification_failed" };
+        return { ok: false, value: "", detail: "credential verification failed", code: "credential_verification_failed" };
       }
       return removed?.ok ? { ok: true, value: "", detail: "" } : removed;
     },
@@ -119,7 +119,7 @@ export function createNativeInstallationSecretStore({
       const values = {};
       let missing = null;
       for (const [field, account] of Object.entries(INSTALLATION_CREDENTIAL_ACCOUNTS)) {
-        const result = readCredential(options(account));
+        const result = readCredential({ ...options(account), allowLegacyMigration: true });
         if (!result?.ok) { missing = result; break; }
         values[field] = result.value;
       }
@@ -133,7 +133,7 @@ export function createNativeInstallationSecretStore({
           activationUrl: target.toString(),
         } };
       }
-      const legacy = readCredential(options(INSTALLATION_CREDENTIAL_ACCOUNT));
+      const legacy = readCredential({ ...options(INSTALLATION_CREDENTIAL_ACCOUNT), allowLegacyMigration: true });
       if (!legacy.ok) return missing;
       try { return { ok: true, value: JSON.parse(legacy.value) }; }
       catch { return { ok: false, detail: "stored authorization is invalid" }; }
@@ -330,7 +330,7 @@ export function createInstallationAuthorizationController({
   async function removeAuthorization({ requireSecretRemoval = true } = {}) {
     const removed = await secretStore.delete();
     if (!removed?.ok && requireSecretRemoval) {
-      throw new Error("Relay could not remove the one-time setup authorization from the native credential store.");
+      throw new Error("Relay could not remove the one-time setup authorization from protected storage.");
     }
     await durableStore.remove();
   }
@@ -369,7 +369,7 @@ export function createInstallationAuthorizationController({
     const available = await secretStore.probe?.();
     if (available && !available.ok) {
       throw credentialError(
-        "Relay cannot access the native credential store. Unlock it, then try setup again.",
+        "Relay cannot access protected credential storage. Check its permissions, then try setup again.",
         available.code || "credential_store_error",
       );
     }
@@ -391,7 +391,7 @@ export function createInstallationAuthorizationController({
     const stored = await secretStore.write({ authorizationId, clientSecret, codeVerifier, activationUrl });
     if (!stored?.ok) {
       throw credentialError(
-        "Relay could not protect the one-time setup authorization in the native credential store.",
+        "Relay could not protect the one-time setup authorization in protected storage.",
         stored?.code || "credential_store_error",
       );
     }

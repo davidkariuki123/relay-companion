@@ -689,32 +689,29 @@ test("canonical setup lock has no missing-owner race between contenders", () => 
   }
 });
 
-test("macOS and Windows credential commands use the native OS vault", () => {
+test("macOS uses an owner-only local store while Windows uses Credential Manager", () => {
+  const macRoot = fs.mkdtempSync(path.join(os.tmpdir(), "relay-mac-credential-test-"));
+  const macFile = path.join(macRoot, "credentials.json");
   const macCalls = [];
   const mac = credentialStore.writeDeviceToken("secret-mac", {
     platform: "darwin",
+    file: macFile,
     run: (command, args, options) => {
       macCalls.push({ command, args, options });
-      return command === "/usr/bin/security" && args.includes("find-generic-password")
-        ? { status: 0, stdout: "secret-mac\n" }
-        : { status: 0, stdout: "" };
+      return { status: 0, stdout: "" };
     },
   });
   assert.equal(mac.ok, true);
-  assert.equal(macCalls[0].command, "/usr/bin/expect");
-  assert.ok(macCalls[0].args.includes("-c"));
-  assert.match(macCalls[0].args.join(" "), /security add-generic-password/);
-  assert.equal(macCalls[0].args.includes("secret-mac"), false, "the token is not exposed in macOS argv");
-  assert.equal(Object.values(macCalls[0].options.env).includes("secret-mac"), false, "the token is not exposed in macOS env");
-  assert.equal(macCalls[0].options.input, "secret-mac", "the token is delivered over the child stdin pipe");
-  assert.equal(macCalls[1].command, "/usr/bin/security");
-  assert.ok(macCalls[1].args.includes("find-generic-password"), "a successful write is read back byte for byte");
+  assert.equal(macCalls.length, 0, "a new macOS credential never touches the shared login Keychain");
+  assert.equal(fs.statSync(macFile).mode & 0o777, 0o600);
   const macRead = credentialStore.readDeviceToken({
     platform: "darwin",
-    run: () => ({ status: 0, stdout: "secret-mac\n" }),
+    file: macFile,
+    run: () => { throw new Error("local reads must not invoke Keychain"); },
   });
   assert.deepEqual(macRead, { ok: true, value: "secret-mac", detail: "" });
-  assert.equal(credentialStore.deleteDeviceToken({ platform: "darwin", run: () => ({ status: 0 }) }).ok, true);
+  assert.equal(credentialStore.deleteDeviceToken({ platform: "darwin", file: macFile }).ok, true);
+  fs.rmSync(macRoot, { recursive: true, force: true });
 
   const windowsCalls = [];
   const windows = credentialStore.writeDeviceToken("secret-windows", {
@@ -744,13 +741,16 @@ test("macOS and Windows credential commands use the native OS vault", () => {
 });
 
 test("native credential failures distinguish a missing secret from an unavailable vault", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-legacy-keychain-test-"));
+  const file = path.join(root, "credentials.json");
+  const calls = [];
   const lockedRead = credentialStore.readDeviceToken({
     platform: "darwin",
-    run: () => ({
-      status: 51,
-      stdout: "",
-      stderr: "security: SecKeychainSearchCopyNext: The user name or passphrase you entered is not correct.",
-    }),
+    file,
+    run: (command, args) => {
+      calls.push({ command, args });
+      return { status: 51, stdout: "", stderr: "The user name or passphrase you entered is not correct." };
+    },
   });
   assert.deepEqual(lockedRead, {
     ok: false,
@@ -758,23 +758,30 @@ test("native credential failures distinguish a missing secret from an unavailabl
     detail: "native credential store is locked or unavailable",
     code: "credential_unavailable",
   });
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].args.includes("show-keychain-info"), "the non-secret preflight fails before a password read can prompt");
 
+  const missingRoot = fs.mkdtempSync(path.join(os.tmpdir(), "relay-legacy-missing-test-"));
   const missingRead = credentialStore.readDeviceToken({
     platform: "darwin",
-    run: () => ({ status: 44, stdout: "", stderr: "The specified item could not be found in the keychain. (-25300)" }),
+    file: path.join(missingRoot, "credentials.json"),
+    run: (_command, args) => args.includes("show-keychain-info")
+      ? { status: 0, stdout: "" }
+      : { status: 44, stdout: "", stderr: "The specified item could not be found in the keychain. (-25300)" },
   });
   assert.equal(missingRead.code, "credential_not_found");
 
-  const lockedWrite = credentialStore.writeDeviceToken("never-log-this-secret", {
+  const writeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "relay-local-write-test-"));
+  const localWrite = credentialStore.writeDeviceToken("never-log-this-secret", {
     platform: "darwin",
-    run: () => ({
-      status: 51,
-      stdout: "password data for new item: security: SecKeychainItemCreateFromContent: The user name or passphrase you entered is not correct.",
-      stderr: "",
-    }),
+    file: path.join(writeRoot, "credentials.json"),
+    run: () => { throw new Error("new macOS writes must not invoke Keychain"); },
   });
-  assert.equal(lockedWrite.code, "credential_unavailable");
-  assert.equal(JSON.stringify(lockedWrite).includes("never-log-this-secret"), false);
+  assert.equal(localWrite.ok, true);
+  assert.equal(JSON.stringify(localWrite).includes("never-log-this-secret"), false);
+  fs.rmSync(root, { recursive: true, force: true });
+  fs.rmSync(missingRoot, { recursive: true, force: true });
+  fs.rmSync(writeRoot, { recursive: true, force: true });
 });
 
 test("canonical updater installs the signed artifact and does not recursively npm-install Relay", () => {

@@ -86,7 +86,7 @@ export function persistSignedOutAccount({ credentialBackend = { deleteDeviceToke
   const config = readConfig();
   if (config.credentialStore) {
     const removed = credentialBackend.deleteDeviceToken({ account: config.credentialAccount || "device-token" });
-    if (!removed.ok) throw new Error(`Could not remove Relay credential from the native credential store (${removed.detail || "unknown error"}).`);
+    if (!removed.ok) throw new Error(`Could not remove Relay credential from protected storage (${removed.detail || "unknown error"}).`);
   }
   const next = writeConfigObject(signedOutAccountConfig(config));
   removeE2eeRuntimeState();

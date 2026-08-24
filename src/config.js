@@ -7,6 +7,7 @@ import atomicJson from "./atomic-json.cjs";
 const { atomicWriteJsonSync } = atomicJson;
 const { writeDeviceToken, readDeviceToken, deleteDeviceToken } = createRequire(import.meta.url)("./credential-store.cjs");
 export const NATIVE_CREDENTIAL_STORE = "native-v1";
+export const LOCAL_CREDENTIAL_STORE = "local-v2";
 export const LEGACY_DEVICE_CREDENTIAL_ACCOUNT = "device-token";
 export const CREDENTIAL_STATUS_AVAILABLE = "available";
 export const CREDENTIAL_STATUS_UNPAIRED = "unpaired";
@@ -14,9 +15,10 @@ export const CREDENTIAL_STATUS_UNAVAILABLE = "unavailable";
 export const CREDENTIAL_STATUS_MISSING = "missing";
 export const CREDENTIAL_STATUS_CORRUPT = "corrupt";
 function nativeCredentialAccessAllowed(env = process.env) {
-  // Config-path overrides are development/test sandboxes. Do not let a fixture
-  // overwrite the person's real Keychain/Credential Manager entry. A deliberate
-  // custom production deployment can opt back in explicitly.
+  // The macOS store follows the selected config directory, so a sandbox stays
+  // inside its sandbox. Windows Credential Manager is machine-global; keep its
+  // explicit opt-in for custom config paths so tests cannot touch real entries.
+  if (process.platform === "darwin") return true;
   return (!(env.RELAY_CONFIG || env.RELAY_CONFIG_DIR) || env.RELAY_NATIVE_CREDENTIALS_WITH_CUSTOM_CONFIG === "1");
 }
 const nativeCredentialBackend = {
@@ -30,6 +32,14 @@ const nativeCredentialBackend = {
     ? deleteDeviceToken(options)
     : { ok: false, value: "", detail: "native credentials disabled for custom config path" },
 };
+
+function credentialStoreKind() {
+  return process.platform === "darwin" ? LOCAL_CREDENTIAL_STORE : NATIVE_CREDENTIAL_STORE;
+}
+
+function usesCredentialStore(value) {
+  return value === NATIVE_CREDENTIAL_STORE || value === LOCAL_CREDENTIAL_STORE;
+}
 
 export const DEFAULT_API_URL = "https://api.sendrelays.com";
 export const DEFAULT_WEB_URL = "https://sendrelays.com";
@@ -99,7 +109,8 @@ export function updateChannel() {
 /**
  * Companion configuration lives in ~/.relay/config.json. New macOS/Windows
  * installs keep only non-secret account metadata here; the device token lives in
- * Keychain/Credential Manager. Legacy plaintext tokens migrate on first read.
+ * Relay's owner-only local store on macOS or Credential Manager on Windows.
+ * Legacy plaintext and macOS Keychain tokens migrate on first read.
  * Environment variables override the file for local/staging testing.
  */
 export function configDir() {
@@ -163,9 +174,9 @@ function credentialAccountFor(config) {
 }
 
 /**
- * Hydrate the device credential from Keychain/Credential Manager. A legacy
- * plaintext token migrates only after the native write succeeds; if either the
- * native store or the atomic config rewrite fails, the plaintext remains as a
+ * Hydrate the device credential from protected storage. A legacy plaintext
+ * token migrates only after the protected write succeeds; if either the
+ * credential store or the atomic config rewrite fails, the plaintext remains as a
  * rollback-safe fallback and the user is never forced to authenticate again.
  */
 export function readConfigState({ credentialBackend = nativeCredentialBackend } = {}) {
@@ -192,7 +203,7 @@ export function readConfigState({ credentialBackend = nativeCredentialBackend } 
     if (!stored.ok) {
       return { config: raw, credential: { status: CREDENTIAL_STATUS_AVAILABLE } };
     }
-    const next = { ...raw, credentialStore: NATIVE_CREDENTIAL_STORE, ...identity };
+    const next = { ...raw, credentialStore: credentialStoreKind(), ...identity };
     const token = next.deviceToken;
     delete next.deviceToken;
     try {
@@ -208,7 +219,7 @@ export function readConfigState({ credentialBackend = nativeCredentialBackend } 
       return { config: raw, credential: { status: CREDENTIAL_STATUS_AVAILABLE } };
     }
   }
-  if (raw.credentialStore === NATIVE_CREDENTIAL_STORE) {
+  if (usesCredentialStore(raw.credentialStore)) {
     const credentialVersion = raw.credentialVersion || "native";
     if (credentialVersion === cachedCredentialVersion && cachedDeviceToken) {
       return {
@@ -218,10 +229,17 @@ export function readConfigState({ credentialBackend = nativeCredentialBackend } 
     }
     const stored = credentialBackend.readDeviceToken({ account: credentialAccountFor(raw) });
     if (stored.ok && stored.value) {
+      const migratedPointer = process.platform === "darwin" && raw.credentialStore === NATIVE_CREDENTIAL_STORE
+        ? { ...raw, credentialStore: LOCAL_CREDENTIAL_STORE }
+        : raw;
+      if (migratedPointer !== raw) {
+        try { atomicWriteJsonSync(configPath(), withoutDeprecatedCapabilityConfig(migratedPointer), { mode: 0o600 }); }
+        catch {}
+      }
       cachedCredentialVersion = credentialVersion;
       cachedDeviceToken = stored.value;
       return {
-        config: { ...raw, deviceToken: stored.value },
+        config: { ...migratedPointer, deviceToken: stored.value },
         credential: { status: CREDENTIAL_STATUS_AVAILABLE },
       };
     }
@@ -258,7 +276,7 @@ export function writeConfigObject(
   const file = configPath();
   const cleaned = withoutDeprecatedCapabilityConfig(next);
   const previous = readConfigRaw();
-  const previousCredentialAccount = previous.credentialStore === NATIVE_CREDENTIAL_STORE
+  const previousCredentialAccount = usesCredentialStore(previous.credentialStore)
     ? credentialAccountFor(previous)
     : "";
   let storedNativeCredential = false;
@@ -273,12 +291,12 @@ export function writeConfigObject(
       nextCredentialAccount = identity.credentialAccount;
       tokenForCache = token;
       delete cleaned.deviceToken;
-      cleaned.credentialStore = NATIVE_CREDENTIAL_STORE;
+      cleaned.credentialStore = credentialStoreKind();
       cleaned.credentialVersion = identity.credentialVersion;
       cleaned.credentialAccount = identity.credentialAccount;
     } else {
       if (requireNativeCredential) {
-        throw new Error(`Could not store Relay's device credential securely (${stored.detail || "native credential store unavailable"}).`);
+        throw new Error(`Could not store Relay's device credential securely (${stored.detail || "credential store unavailable"}).`);
       }
       delete cleaned.credentialStore;
       delete cleaned.credentialVersion;

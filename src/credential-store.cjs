@@ -1,6 +1,9 @@
 "use strict";
 
 const { spawnSync } = require("node:child_process");
+const path = require("node:path");
+const os = require("node:os");
+const localStore = require("./local-credential-store.cjs");
 
 const SERVICE = "work.relay.companion";
 const ACCOUNT = "device-token";
@@ -159,17 +162,56 @@ function operation(
   return { ok: false, value: "", detail: "native credential store unsupported", code: "credential_store_unsupported" };
 }
 
-function writeDeviceToken(token, options) {
-  return String(token || "") ? operation("write", String(token), options) : { ok: false, detail: "empty credential" };
+function legacyMacAvailable({ run = spawnSync, env = process.env, homeDir = os.homedir(), ...options } = {}) {
+  const keychain = path.join(homeDir, "Library", "Keychains", "login.keychain-db");
+  const result = resultOf("/usr/bin/security", ["show-keychain-info", keychain], { run, env, ...options });
+  return result.ok ? { ok: true, value: "", detail: "" } : classifiedFailure(result, { platform: "darwin" });
 }
-function readDeviceToken(options) { return operation("read", "", options); }
-function deleteDeviceToken(options) { return operation("delete", "", options); }
+
+function readLegacyMacCredential(options = {}) {
+  const available = legacyMacAvailable(options);
+  if (!available.ok) return available;
+  return operation("read", "", { ...options, platform: "darwin" });
+}
+
+function platformOf(options) { return options?.platform || process.platform; }
+function credentialOptions(options = {}) {
+  return { ...options, service: options.service || SERVICE, account: options.account || ACCOUNT };
+}
+
+function writeDeviceToken(token, options) {
+  return writeCredential(token, options);
+}
+function readDeviceToken(options = {}) { return readCredential({ ...options, allowLegacyMigration: true }); }
+function deleteDeviceToken(options) { return deleteCredential(options); }
 
 function writeCredential(secret, options) {
-  return String(secret || "") ? operation("write", String(secret), options) : { ok: false, detail: "empty credential" };
+  if (!String(secret || "")) return { ok: false, value: "", detail: "empty credential", code: "credential_store_error" };
+  if (platformOf(options) === "darwin") return localStore.writeCredential(String(secret), credentialOptions(options));
+  return operation("write", String(secret), options);
 }
-function readCredential(options) { return operation("read", "", options); }
-function deleteCredential(options) { return operation("delete", "", options); }
+function readCredential(options = {}) {
+  if (platformOf(options) !== "darwin") return operation("read", "", options);
+  const target = credentialOptions(options);
+  const local = localStore.readCredential(target);
+  if (local.ok || local.code !== "credential_not_found") return local;
+  if (options.allowLegacyMigration !== true) return local;
+  // One silent compatibility read migrates pre-0.1.356 credentials. The
+  // show-keychain-info preflight returns before `find-generic-password` when
+  // a locked or poisoned login Keychain would otherwise present UI.
+  const legacy = readLegacyMacCredential(target);
+  if (!legacy.ok) return legacy.code === "credential_not_found" ? local : legacy;
+  const migrated = localStore.writeCredential(legacy.value, target);
+  if (!migrated.ok) return migrated;
+  // Do not delete the legacy item here. Even a cleanup operation can invoke
+  // SecurityAgent for an unusual ACL, and zero UI is more important than
+  // removing a harmless orphan. Relay never consults it again after migration.
+  return legacy;
+}
+function deleteCredential(options = {}) {
+  if (platformOf(options) !== "darwin") return operation("delete", "", options);
+  return localStore.deleteCredential(credentialOptions(options));
+}
 
 module.exports = {
   SERVICE,
@@ -180,4 +222,5 @@ module.exports = {
   writeDeviceToken,
   readDeviceToken,
   deleteDeviceToken,
+  readLegacyMacCredential,
 };

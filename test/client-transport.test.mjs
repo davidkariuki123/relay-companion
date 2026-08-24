@@ -16,7 +16,11 @@ test("every API call goes over a kept-alive connection, not a fresh handshake", 
   // largest source of the "chat is slow" report.
   assert.match(client, /keepAliveTimeout: 60_000/);
   assert.match(client, /keepAliveMaxTimeout: 300_000/);
-  assert.deepEqual(pkg.dependencies, {}, "the first-contact installer remains dependency-free");
+  if (pkg.relayDistribution === "bridge-runtime") {
+    assert.deepEqual(pkg.dependencies, runtimeDependencies, "the bridge carries exactly the signed runtime graph");
+  } else {
+    assert.deepEqual(pkg.dependencies, {}, "the first-contact installer remains dependency-free");
+  }
   assert.ok(runtimeDependencies.undici, "the signed native runtime carries the configurable dispatcher");
 
   // The request path must use the kept-alive wrapper, never bare fetch.
