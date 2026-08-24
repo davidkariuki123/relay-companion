@@ -741,8 +741,8 @@ try {
     };
   })()`);
   check(
-    "dragged-anchor: the final pill face never paints in the old expanded native surface",
-    collapseHandoff.collapsing === true && collapseHandoff.collapsed === false && collapseHandoff.countDisplay === "none",
+    "dragged-anchor: the compact face is continuous while native bounds settle",
+    collapseHandoff.collapsing === false && collapseHandoff.collapsed === true && collapseHandoff.countDisplay !== "none",
     JSON.stringify(collapseHandoff),
   );
   const draggedCollapsed = await retry(async () => {
