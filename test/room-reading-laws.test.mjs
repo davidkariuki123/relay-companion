@@ -116,11 +116,13 @@ test("message species never change the spacing inside a sender run", () => {
 
 test("a group's face stays stacked even when only one member has spoken", () => {
   // A group must remain visually distinct from a direct chat. Known inbound
-  // speakers lead the stack; the saved group identity supplies the fallback
-  // disc until another member has spoken.
+  // people come from the same canonical human roster as Chat; an agent byline
+  // cannot become a group member or change the room's face.
   const rows = html.slice(html.indexOf("function relayIdentityRows("), html.indexOf("function renderRelays()"));
-  assert.match(rows, /people: message\.isGroup && message\.direction === "in" && message\.party \? \[message\.party\] : \[\]/);
-  assert.match(rows, /!existing\.people\.includes\(message\.party\)/);
+  assert.match(rows, /const \{ rooms \} = chatSections\(\)/);
+  assert.doesNotMatch(rows, /message\.party|message\.partyKey/);
+  const chats = html.slice(html.indexOf("function chatConversations()"), html.indexOf("function normalizedPartyName("));
+  assert.match(chats, /m\.direction === "in" && !m\.ownedAgent && m\.party/);
   const rowHtml = html.slice(html.indexOf("function relayIdentityRowHtml("), html.indexOf("// ---------- the reader:"));
   assert.match(rowHtml, /while \(identity\.isGroup && groupPeople\.length < 2\)/);
   assert.match(rowHtml, /identity\.isGroup\s*\? `<span class="av-stack">/);

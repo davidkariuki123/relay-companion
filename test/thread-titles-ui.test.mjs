@@ -121,26 +121,39 @@ test("direct and group conversations share one newest-first chronology", () => {
 });
 
 test("the Relays tab is one latest-message row per exact identity", () => {
-  const identitySource = html.slice(html.indexOf("function relayIdentityKey("), html.indexOf("function renderRelays()"));
-  const { relayIdentityRows } = Function(`"use strict"; ${identitySource}; return { relayIdentityRows };`)();
-  const rows = relayIdentityRows([
-    { id: "s1", direction: "in", party: "Sven", partyKey: "email:sven@example.com", at: "2026-08-13T10:00:00Z", unread: true },
-    { id: "s2", direction: "out", party: "Sven", partyKey: "email:sven@example.com", at: "2026-08-13T11:00:00Z", unread: false },
-    // Real production shape: Sven wrote through the Granular group. It must
-    // join the outbound Granular message, never create a third Sven row.
-    { id: "g1", direction: "in", party: "Sven", partyKey: "group:granular", isGroup: true, groupId: "grp_1", groupName: "Granular", at: "2026-08-13T12:00:00Z", unread: true },
-    { id: "g2", direction: "out", party: "Granular", partyKey: "group:granular", isGroup: true, groupName: "Granular", at: "2026-08-13T13:00:00Z", unread: false },
-  ]);
-  assert.equal(rows.length, 2);
-  const sven = rows.find((row) => row.name === "Sven");
-  const granular = rows.find((row) => row.name === "Granular");
-  assert.deepEqual({ latest: sven.latest.id, unread: sven.unreadCount }, { latest: "s2", unread: 1 });
-  assert.deepEqual({ latest: granular.latest.id, unread: granular.unreadCount, group: granular.isGroup }, { latest: "g2", unread: 1, group: true });
-  assert.deepEqual(granular.people, ["Sven"]);
+  const identitySource = html.slice(html.indexOf("function relayIdentityRows("), html.indexOf("function renderRelays()"));
+  const shane = {
+    name: "Shane",
+    latest: { id: "agent", party: "Shane's Codex", ownedAgent: true, at: "2026-08-13T13:00:00Z" },
+    latestAt: "2026-08-13T13:00:00Z",
+    unreadCount: 1,
+    people: ["Shane"],
+  };
+  const granular = {
+    name: "Granular",
+    isGroup: true,
+    latest: { id: "group-agent", party: "Shane's Codex", ownedAgent: true, at: "2026-08-13T12:00:00Z" },
+    latestAt: "2026-08-13T12:00:00Z",
+    unreadCount: 0,
+    people: ["Shane", "Sven"],
+  };
+  const quiet = { name: "New group", hasActivity: false, latest: { at: "2026-08-13T14:00:00Z" } };
+  const relayIdentityRows = Function("chatSections", `"use strict"; ${identitySource}; return relayIdentityRows;`)(
+    () => ({ rooms: [shane, granular, quiet] }),
+  );
+  const rows = relayIdentityRows();
+  assert.deepEqual(rows, [shane, granular]);
+  assert.equal(rows[0].name, "Shane", "the agent byline does not create or rename its own room");
+  assert.deepEqual(rows[1].people, ["Shane", "Sven"], "the group keeps its human roster");
 
   const render = html.slice(html.indexOf("function renderRelays()"), html.indexOf("function relayIdentityRowHtml"));
   assert.match(render, /const allRows = threadMessages\(\)[\s\S]*?\.sort\(\(a, b\) => new Date\(b\.at/);
-  assert.match(render, /const identityRows = relayIdentityRows\(allRows\)/);
+  assert.match(identitySource, /const \{ rooms \} = chatSections\(\)/);
+  assert.match(identitySource, /filter\(\(room\) => room\.hasActivity !== false\)/);
+  assert.match(identitySource, /latestAt: room\.latestAt \|\| \(room\.latest && room\.latest\.at\)/);
+  assert.doesNotMatch(identitySource, /message\.party|message\.partyKey|new Map/,
+    "Relays must not rebuild room identity from agent-authored messages");
+  assert.match(render, /const identityRows = relayIdentityRows\(\)/);
   assert.match(render, /unread\.map\(\(row\) => relayIdentityRowHtml\(row\)\)/);
   assert.match(render, /visible\.map\(\(row\) => relayIdentityRowHtml\(row\)\)\.join\(""\)/);
   assert.doesNotMatch(render, /receiptRowHtml|data-receipt/);
@@ -149,28 +162,22 @@ test("the Relays tab is one latest-message row per exact identity", () => {
 });
 
 test("a newer Task becomes the person's latest Relays preview", () => {
-  const identitySource = html.slice(html.indexOf("function relayIdentityKey("), html.indexOf("function renderRelays()"));
-  const { relayIdentityRows } = Function(`"use strict"; ${identitySource}; return { relayIdentityRows };`)();
-  const [shane] = relayIdentityRows([
-    {
-      id: "message_older",
-      direction: "out",
-      party: "Shane Acton",
-      partyKey: "email:shane@example.com",
-      at: "2026-08-18T15:29:38Z",
-      title: "thx boss",
-      request: false,
-    },
-    {
+  const identitySource = html.slice(html.indexOf("function relayIdentityRows("), html.indexOf("function renderRelays()"));
+  const room = {
+    name: "Shane Acton",
+    latest: {
       id: "request_newer",
       direction: "out",
       party: "Shane Acton",
-      partyKey: "email:shane@example.com",
       at: "2026-08-18T17:16:01Z",
       title: "Explore Relay Security Trust",
       request: true,
     },
-  ]);
+  };
+  const relayIdentityRows = Function("chatSections", `"use strict"; ${identitySource}; return relayIdentityRows;`)(
+    () => ({ rooms: [room] }),
+  );
+  const [shane] = relayIdentityRows();
 
   assert.equal(shane.latest.id, "request_newer");
   assert.equal(shane.latest.title, "Explore Relay Security Trust");
@@ -648,6 +655,21 @@ test("owned-agent faces remain inside the human room", () => {
     "the immediate agent bubble inherits the existing room key");
   assert.doesNotMatch(html, /partyKey:`owned-agent:\$\{provider\}`/,
     "an optimistic agent response never creates an agent-addressed room");
+
+  const buildThreadsFn = Function("threadMessages", `"use strict"; ${buildThreads}; return buildThreads;`)(() => [
+    {
+      id: "trigger", threadId: "thread_self", direction: "out", party: "Shane",
+      partyKey: "email:shane@example.com", at: "2026-08-24T14:21:46.205Z",
+    },
+    {
+      id: "agent", threadId: "thread_self", direction: "in", party: "Shane's Codex",
+      partyKey: "email:", ownedAgent: true, at: "2026-08-24T14:21:46.284Z",
+    },
+  ]);
+  const [selfThread] = buildThreadsFn();
+  assert.equal(selfThread.party, "Shane");
+  assert.equal(selfThread.partyKey, "email:shane@example.com");
+  assert.equal(selfThread.latest.id, "agent", "the agent can own the latest message without owning the room");
 });
 
 test("progress-only Relay edits repaint an already-open desktop chat", () => {

@@ -21,7 +21,7 @@ test("expanded pill exposes a mark-all-read action through IPC", () => {
 
 test("Relays is a pure person/group index with no free-floating request receipts", () => {
   const relays = html.slice(html.indexOf("function renderRelays()"), html.indexOf("function relayIdentityRowHtml"));
-  assert.match(relays, /const identityRows = relayIdentityRows\(allRows\)/);
+  assert.match(relays, /const identityRows = relayIdentityRows\(\)/);
   assert.doesNotMatch(relays, /receiptRowHtml|data-receipt|rl-receipt/);
 });
 
@@ -48,7 +48,7 @@ test("reading a Relay never removes it from the Relays identity index", () => {
   assert.match(readRelays, /\.filter\(\(p\) => p\.direction === "inbound"\)/);
   assert.doesNotMatch(readRelays, /\.filter\(\(p\) => p\.state !== "read"\)/);
   assert.match(readRelays, /unread: p\.state !== "read"/);
-  assert.match(relays, /const identityRows = relayIdentityRows\(allRows\)/);
+  assert.match(relays, /const identityRows = relayIdentityRows\(\)/);
   const fullIndex = relays.slice(relays.indexOf("// Relays is the WhatsApp-shaped identity index"));
   assert.doesNotMatch(fullIndex, /filter\([^\n]*unread/);
 });

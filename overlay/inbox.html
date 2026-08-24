@@ -3887,43 +3887,17 @@
     pendingRelaysRender = false;
     if (activeView === "relays") renderRelays();
   }
-  function relayIdentityKey(message) {
-    if (message && message.isGroup) {
-      const groupName = String(message.groupName || "").trim().toLowerCase();
-      if (groupName) return `group:${groupName}`;
-      const groupId = String(message.groupId || "").trim();
-      if (groupId) return `group-id:${groupId}`;
-      return `group:${String(message.party || "").trim().toLowerCase()}`;
-    }
-    return String((message && message.partyKey) || `person-name:${String(message && message.party || "").trim().toLowerCase()}`);
-  }
-  function relayIdentityRows(messages) {
-    const byIdentity = new Map();
-    for (const message of messages || []) {
-      const key = relayIdentityKey(message);
-      const at = message.at || "";
-      const groupName = String(message.groupName || "").trim();
-      const name = groupName || message.party || "Conversation";
-      const existing = byIdentity.get(key);
-      if (!existing) {
-        byIdentity.set(key, {
-          key, name, isGroup: Boolean(message.isGroup), latest: message,
-          latestAt: at, unreadCount: message.unread ? 1 : 0,
-          // A group's face is its members, newest inbound speaker first.
-          people: message.isGroup && message.direction === "in" && message.party ? [message.party] : [],
-        });
-        continue;
-      }
-      if (message.unread) existing.unreadCount += 1;
-      if (message.isGroup && message.direction === "in" && message.party && !existing.people.includes(message.party)) {
-        existing.people.push(message.party);
-      }
-      if (new Date(at || 0) > new Date(existing.latestAt || 0)) {
-        existing.latest = message;
-        existing.latestAt = at;
-      }
-    }
-    return [...byIdentity.values()].sort((a, b) => new Date(b.latestAt || 0) - new Date(a.latestAt || 0));
+  function relayIdentityRows() {
+    // Relays and Chat are two views of the SAME rooms. The room projection
+    // already keeps an owned agent as a speaking face inside its human or
+    // group conversation; rebuilding identity from each message here used to
+    // promote "Shane's Codex" into a second person and could let agent bylines
+    // leak into a group's avatar roster. Quiet saved groups belong in Chat but
+    // not in the correspondence index, so Relays keeps only active rooms.
+    const { rooms } = chatSections();
+    return rooms
+      .filter((room) => room.hasActivity !== false)
+      .map((room) => ({ ...room, latestAt: room.latestAt || (room.latest && room.latest.at) || "" }));
   }
   function renderRelays() {
     // WhatsApp chronology: a room's preview is the newest correspondence in
@@ -3935,7 +3909,7 @@
     // stay exclusively on the Tasks surface.
     const allRows = threadMessages()
       .sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
-    const identityRows = relayIdentityRows(allRows);
+    const identityRows = relayIdentityRows();
     if (peeking) {
       // A notification wears the SAME species as the list (David: the banner was
       // still main's old row with a "Preview / Start task" menu — furniture the
