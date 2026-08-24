@@ -739,7 +739,42 @@ test("macOS and Windows credential commands use the native OS vault", () => {
     },
   });
   assert.equal(windowsMissing.ok, false, "a missing Windows credential is not an empty successful secret");
+  assert.equal(windowsMissing.code, "credential_not_found");
   assert.equal(credentialStore.deleteDeviceToken({ platform: "win32", run: () => ({ status: 0 }) }).ok, true);
+});
+
+test("native credential failures distinguish a missing secret from an unavailable vault", () => {
+  const lockedRead = credentialStore.readDeviceToken({
+    platform: "darwin",
+    run: () => ({
+      status: 51,
+      stdout: "",
+      stderr: "security: SecKeychainSearchCopyNext: The user name or passphrase you entered is not correct.",
+    }),
+  });
+  assert.deepEqual(lockedRead, {
+    ok: false,
+    value: "",
+    detail: "native credential store is locked or unavailable",
+    code: "credential_unavailable",
+  });
+
+  const missingRead = credentialStore.readDeviceToken({
+    platform: "darwin",
+    run: () => ({ status: 44, stdout: "", stderr: "The specified item could not be found in the keychain. (-25300)" }),
+  });
+  assert.equal(missingRead.code, "credential_not_found");
+
+  const lockedWrite = credentialStore.writeDeviceToken("never-log-this-secret", {
+    platform: "darwin",
+    run: () => ({
+      status: 51,
+      stdout: "password data for new item: security: SecKeychainItemCreateFromContent: The user name or passphrase you entered is not correct.",
+      stderr: "",
+    }),
+  });
+  assert.equal(lockedWrite.code, "credential_unavailable");
+  assert.equal(JSON.stringify(lockedWrite).includes("never-log-this-secret"), false);
 });
 
 test("canonical updater installs the signed artifact and does not recursively npm-install Relay", () => {

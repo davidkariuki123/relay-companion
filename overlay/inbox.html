@@ -11070,6 +11070,15 @@
 
   function signupFailureMessage(reason, fallback) {
     const detail = String(reason?.code || reason?.message || reason || "").toLowerCase();
+    if (detail.includes("credential_unavailable") || detail.includes("native credential store") || detail.includes("saved account credential")) {
+      return "Relay still cannot access macOS Keychain. Unlock your Mac login keychain, then try again.";
+    }
+    if (detail.includes("credential_not_found") || detail.includes("credential_missing")) {
+      return "Relay’s saved account credential is missing. Reconnect this computer.";
+    }
+    if (detail.includes("credential_empty") || detail.includes("credential_corrupt")) {
+      return "Relay’s saved account credential is damaged. Reconnect this computer.";
+    }
     if (detail.includes("invalid_email_code")) return "That code isn’t right or has expired. Try again.";
     if (detail.includes("email_code_cooldown")) return "A code was just sent. Check your inbox or wait a moment.";
     if (detail.includes("email_rate_limited")) return "Too many codes were requested. Try again later.";
@@ -11173,6 +11182,47 @@
     const busy = signupBusy ? " disabled" : "";
     const error = signupError ? `<p class="su-note su-error" role="alert">${esc(signupError)}</p>` : "";
     const note = signupNote ? `<p class="su-note" role="status">${esc(signupNote)}</p>` : "";
+    if (signupStage === "credential-recovery") {
+      const status = payload.account?.credentialStatus || "unavailable";
+      const reason = payload.account?.credentialError || "";
+      const canReconnect = status === "missing" || status === "corrupt";
+      const title = canReconnect ? "Reconnect this computer." : "Unlock Relay’s account.";
+      const copy = reason === "config_corrupt"
+        ? "This computer’s Relay account configuration is damaged. Relay preserved the corrupt file for inspection and did not start a new signup automatically."
+        : reason === "config_unavailable"
+          ? "Relay cannot read this computer’s account configuration. Check the file permissions, then try again."
+          : canReconnect
+        ? `This computer still has Relay account metadata, but its saved macOS Keychain credential is ${status === "missing" ? "missing" : "damaged"}. Relay did not sign you out or start a new signup automatically.`
+        : "This computer is still connected, but macOS Keychain did not release its saved Relay credential. Unlock your login keychain, then try again.";
+      const primary = canReconnect
+        ? `<button class="su-primary" id="suCredentialReconnect" type="button"${busy}>Reconnect account</button>`
+        : `<button class="su-primary" id="suCredentialRetry" type="button"${busy}>Try again</button>`;
+      const retry = canReconnect ? `<button class="su-link" id="suCredentialRetry" type="button"${busy}>Check Keychain again</button>` : "";
+      signupBodyEl.innerHTML = `<p class="su-step">Account recovery</p><h1 class="su-title">${title}</h1><p class="su-copy">${copy}</p><div class="su-form">${primary}${retry}</div>${error}`;
+      document.getElementById("suCredentialRetry")?.addEventListener("click", async () => {
+        signupBusy = true; signupError = ""; renderSignup();
+        try {
+          const result = await window.relay.credentialRetry();
+          if (result?.account) payload.account = result.account;
+          signupBusy = false;
+          if (result?.ok) {
+            signupStage = "installed";
+            try { onPayload(await window.relay.refresh()); } catch { renderAll(); }
+            return;
+          }
+          signupError = signupFailureMessage(result?.account?.credentialError, "Relay still cannot access the saved credential.");
+          renderAll();
+        } catch (reason) { signupFailure(reason, "Relay could not check Keychain again."); }
+      });
+      document.getElementById("suCredentialReconnect")?.addEventListener("click", async () => {
+        signupBusy = true; signupError = ""; renderSignup();
+        try {
+          const result = await window.relay.signOut();
+          if (!result?.ok) throw new Error(result?.error || "Relay could not prepare this computer to reconnect.");
+        } catch (reason) { signupFailure(reason, "Relay could not prepare this computer to reconnect."); }
+      });
+      return;
+    }
     if (signupStage === "chat-setup") {
       signupBodyEl.innerHTML = `<p class="su-step">One last thing</p><h1 class="su-title">Use Relay in your chats.</h1><p class="su-copy">Connect Claude now. You can also do this later from Settings.</p><div class="su-chat-list"><button class="su-chat-option" id="suConnectClaude" type="button"${signupBusy || !window.relay.connectClaude ? " disabled" : ""}><span class="su-chat-copy"><span class="su-chat-name">Sign in with Claude</span><span class="su-chat-detail">Copy Relay’s address and open Claude Connectors.</span></span><span class="su-chat-action">Set up</span></button></div><div class="su-agent-note"><strong>Claude Code and Codex do not need this.</strong> They are already connected through the Companion.</div>${note}${error}<div class="su-form su-chat-footer"><button class="su-primary" id="suChatDone" type="button"${busy}>Done</button><button class="su-link" id="suChatSkip" type="button"${busy}>Skip for now</button></div>`;
       document.getElementById("suConnectClaude")?.addEventListener("click", () => connectChatFromSignup("claude"));
@@ -11415,18 +11465,22 @@
     // frame target. It removes the blank-frame and double-rebuild paths while
     // preserving applyView as the sole visibility writer.
     const enteringView = applyView._last !== activeView;
-    const tutorialPending = payload.account?.paired !== false && payload.ui?.setupTutorialPending === true;
-    if (tutorialPending) {
+    const credentialRecovery = ["unavailable", "missing", "corrupt"].includes(payload.account?.credentialStatus);
+    const tutorialPending = !credentialRecovery && payload.account?.paired !== false && payload.ui?.setupTutorialPending === true;
+    if (credentialRecovery) {
+      stopSignupPolling();
+      signupStage = "credential-recovery";
+    } else if (tutorialPending) {
       stopSignupPolling();
       signupStage = "chat-setup";
     }
-    const needsSignup = payload.account?.paired === false || tutorialPending;
+    const needsSignup = credentialRecovery || payload.account?.paired === false || tutorialPending;
     cardEl.classList.toggle("signup", needsSignup);
     signupViewEl?.classList.toggle("gone", !needsSignup);
     if (needsSignup) {
       renderSignup();
       syncCardSize(false);
-      if (payload.account?.paired === false && !signupStateLoaded && window.relay.installationAuthState) {
+      if (!credentialRecovery && payload.account?.paired === false && !signupStateLoaded && window.relay.installationAuthState) {
         signupStateLoaded = true;
         window.relay.installationAuthState().then((state) => {
           applyInstallationState(state);

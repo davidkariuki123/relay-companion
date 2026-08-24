@@ -11,7 +11,7 @@ import {
   persistSignedOutAccount,
   signedOutAccountConfig,
 } from "../src/account.js";
-import { configPath, readConfig, writeConfigObject } from "../src/config.js";
+import { configPath, readConfig, readConfigState, writeConfigObject } from "../src/config.js";
 
 const REGISTRATION = {
   deviceToken: "dev_token_new",
@@ -152,6 +152,59 @@ test("credential migration is rollback-safe when the native vault is unavailable
     };
     assert.equal(readConfig({ credentialBackend }).deviceToken, "keep_plaintext");
     assert.equal(JSON.parse(fs.readFileSync(configPath(), "utf8")).deviceToken, "keep_plaintext");
+  });
+});
+
+test("a native credential pointer keeps paired recovery states distinct from first run", () => {
+  withConfigEnv(() => {
+    const writePointer = (version) => fs.writeFileSync(configPath(), JSON.stringify({
+      credentialStore: "native-v1",
+      credentialVersion: version,
+      credentialAccount: `device-token-${version}`,
+      deviceId: "dev_existing",
+      user: { id: "usr_existing", email: "existing@example.com" },
+    }));
+
+    writePointer("locked");
+    const locked = readConfigState({ credentialBackend: {
+      readDeviceToken: () => ({ ok: false, value: "", code: "credential_unavailable" }),
+    } });
+    assert.equal(locked.credential.status, "unavailable");
+    assert.equal(locked.config.user.email, "existing@example.com");
+
+    writePointer("missing");
+    const missing = readConfigState({ credentialBackend: {
+      readDeviceToken: () => ({ ok: false, value: "", code: "credential_not_found" }),
+    } });
+    assert.equal(missing.credential.status, "missing");
+
+    writePointer("empty");
+    const corrupt = readConfigState({ credentialBackend: {
+      readDeviceToken: () => ({ ok: true, value: "" }),
+    } });
+    assert.equal(corrupt.credential.status, "corrupt");
+
+    writePointer("available");
+    const available = readConfigState({ credentialBackend: {
+      readDeviceToken: () => ({ ok: true, value: "dev_existing_token" }),
+    } });
+    assert.equal(available.credential.status, "available");
+    assert.equal(available.config.deviceToken, "dev_existing_token");
+  });
+});
+
+test("a corrupt account config is a recovery state, not a fresh unpaired machine", () => {
+  withConfigEnv((dir) => {
+    fs.writeFileSync(configPath(), "{broken account config");
+    const state = readConfigState();
+    assert.equal(state.credential.status, "corrupt");
+    assert.equal(state.credential.code, "config_corrupt");
+    assert.equal(state.config.deviceToken, undefined);
+    assert.equal(
+      fs.readdirSync(dir).some((name) => name.startsWith("config.json.corrupt-")),
+      true,
+      "the damaged file is preserved before recovery is offered",
+    );
   });
 });
 

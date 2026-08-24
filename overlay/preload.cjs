@@ -126,6 +126,7 @@ contextBridge.exposeInMainWorld("relay", {
 
   // settings / account (switch + sign-out relaunch the pill on success)
   accountInfo: () => ipcRenderer.invoke("relay:accountInfo"),
+  credentialRetry: () => ipcRenderer.invoke("relay:credentialRetry"),
   chatAgentPreferences: () => ipcRenderer.invoke("relay:chatAgentPreferences"),
   saveChatAgentPreferences: (input) => ipcRenderer.invoke("relay:chatAgentPreferencesSave", input || {}),
   connectChatGPT: () => ipcRenderer.invoke("relay:connectChatGPT"),
