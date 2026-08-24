@@ -4,7 +4,7 @@ import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { CodexAppServerClient, defaultCodexCommand } from "./codex-app-server.js";
-import { codexRelayCompletion, runCodexOneShot } from "./codex-one-shot.js";
+import { codexRelayCompletion, runCodexAppServerOneShot, runCodexOneShot } from "./codex-one-shot.js";
 import { cliBinaryPath, installedCliVersions } from "./desktop-wake.js";
 import { inspectAiSession } from "./ai-session-transcript.js";
 import { waitForCodexIdle, waitForRolloutGrowth, rolloutSize } from "./codex-inject.js";
@@ -631,9 +631,9 @@ async function executeCodex({ client, claim, target, operation, input, prompt })
     };
     queueProgress("Codex is starting on your laptop.");
     await evidence(client, operation.id, claim.claimToken, "handed_off", {
-      adapter: "codex_exec",
+      adapter: "codex_cli_one_shot",
     });
-    const result = await runCodexOneShot({
+    const runnerOptions = {
       command: defaultCodexCommand(),
       cwd: input.cwd || process.cwd(),
       prompt,
@@ -645,19 +645,27 @@ async function executeCodex({ client, claim, target, operation, input, prompt })
         if (!applied && ["thread.started", "turn.started"].includes(event?.type)) {
           applied = true;
           writes = writes.then(() => evidence(client, operation.id, claim.claimToken, "applied", {
-            adapter: "codex_exec",
+            adapter: "codex_cli_one_shot",
             ...(nativeThreadId ? { nativeThreadId } : {}),
           })).catch(() => {});
         }
         queueProgress(status);
       },
-    });
+    };
+    let result;
+    try {
+      result = await runCodexAppServerOneShot(runnerOptions);
+    } catch (error) {
+      if (!error?.relayExecFallbackSafe) throw error;
+      queueProgress("Codex is starting with its compatible CLI runner.");
+      result = await runCodexOneShot(runnerOptions);
+    }
     await writes;
     const completion = codexRelayCompletion(result.finalMessage);
     if (!completion) throw new Error("Codex finished without returning a Relay answer");
     if (runRelayId) await client.agentRunComplete(runRelayId, completion.forHuman, completion.forAgent);
     await evidence(client, operation.id, claim.claimToken, "completed", {
-      adapter: "codex_exec",
+      adapter: "codex_cli_one_shot",
       ...(result.threadId ? { nativeThreadId: result.threadId } : {}),
     });
     return;
@@ -722,6 +730,11 @@ async function executeCodex({ client, claim, target, operation, input, prompt })
 }
 
 async function recoverClaim({ client, claim, target, operation }) {
+  // Anonymous chat runs deliberately have no persisted provider session to
+  // recover. If a daemon dies after handoff, rerun the idempotent one-shot and
+  // replace the same Relay response instead of looking for a rollout that can
+  // never exist.
+  if (operation.input?.oneShot) return false;
   const previousState = claim.recovery?.previousState;
   if (!["handed_off", "applied"].includes(previousState)) return false;
   const result = claim.recovery?.result || {};
@@ -830,21 +843,37 @@ async function processClaim(client, claim, log) {
   }
 }
 
-export async function runSessionDirectoryOnce({ client, log = () => {} } = {}) {
-  const observations = discoverSessions();
-  const published = await client.publishSessionObservations(observations, controllerObservation());
-  cachePublishedSessions(published);
+export async function runSessionDirectoryOnce({
+  client,
+  log = () => {},
+  discover = discoverSessions,
+  controller = controllerObservation,
+} = {}) {
+  // Owned chat agents are user-visible foreground work. Claim them before the
+  // comparatively expensive local session scan/upload so a large native
+  // session directory cannot add several seconds before the CLI even starts.
   const inbox = await client.sessionControllerInbox();
-  for (const operation of inbox.operations || []) {
-    if (activeOperations.has(operation.id)) continue;
+  const operations = inbox.operations || [];
+  const urgent = operations.filter((operation) => operation.input?.oneShot && operation.input?.agentRunRelayId);
+  const ordinary = operations.filter((operation) => !urgent.includes(operation));
+  const claim = async (operation) => {
+    if (activeOperations.has(operation.id)) return;
     try {
       const claim = await client.claimSessionOperation(operation.id);
-      if (claim.terminal) continue;
+      if (claim.terminal) return;
       activeOperations.add(operation.id);
       void processClaim(client, claim, log);
     } catch (error) {
       if (![409, 404].includes(error?.status)) log(`session operation claim failed for ${operation.id}: ${error?.message || error}`);
     }
+  };
+  for (const operation of urgent) await claim(operation);
+
+  const observations = discover();
+  const published = await client.publishSessionObservations(observations, controller());
+  cachePublishedSessions(published);
+  for (const operation of ordinary) {
+    await claim(operation);
   }
   return { sessions: published.sessions || [], queuedOperations: inbox.operations?.length || 0 };
 }

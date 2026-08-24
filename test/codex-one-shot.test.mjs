@@ -4,8 +4,11 @@ import { PassThrough } from "node:stream";
 import test from "node:test";
 import {
   codexExecEventStatus,
+  codexOneShotAppServerArgs,
   codexOneShotArgs,
   codexRelayCompletion,
+  partialCodexRelayHuman,
+  runCodexAppServerOneShot,
   runCodexOneShot,
 } from "../src/codex-one-shot.js";
 
@@ -48,6 +51,13 @@ test("one-shot MCP timeouts are bounded config layers, not server exclusions", (
   assert.equal(args.includes("--ignore-user-config"), false);
 });
 
+test("ephemeral app-server runs keep user setup and bound only configured MCP timeouts", () => {
+  const args = codexOneShotAppServerArgs({ mcpToolTimeouts:{ agentos:30, "bad.name":10, relay:0 } });
+  assert.deepEqual(args, ["app-server", "--config", "mcp_servers.agentos.tool_timeout_sec=30"]);
+  assert.equal(args.includes("--ignore-user-config"), false);
+  assert.equal(args.includes("--ignore-rules"), false);
+});
+
 test("full-access Codex runs select the danger sandbox without the approval reviewer", () => {
   const args = codexOneShotArgs({ fullAccess: true });
   assert.deepEqual(args.slice(args.indexOf("--sandbox"), args.indexOf("--sandbox") + 2), ["--sandbox", "danger-full-access"]);
@@ -76,6 +86,100 @@ test("the final Codex answer populates both Relay payloads with a plain-text fal
     forAgent: "A normal final answer.",
   });
   assert.equal(codexRelayCompletion(""), null);
+});
+
+test("structured answer deltas expose only the already-authored human payload", () => {
+  assert.equal(partialCodexRelayHuman('{"forHuman":"Hello\\nShane\\u0021'), "Hello\nShane!");
+  assert.equal(partialCodexRelayHuman('{"forAgent":"private"'), "");
+});
+
+test("app-server one-shots are ephemeral, auto-reviewed, structured, and stream human text", async () => {
+  const requests = [];
+  const statuses = [];
+  let clientOptions;
+  const result = await runCodexAppServerOneShot({
+    prompt:"Say hello",
+    model:"gpt-5.6-sol",
+    effort:"high",
+    stallTimeoutMs:1_000,
+    runTimeoutMs:2_000,
+    heartbeatIntervalMs:1_000,
+    onEvent:(_event, status) => { if (status) statuses.push(status); },
+    appServerFactory:(options) => {
+      clientOptions = options;
+      return {
+        async start() {},
+        async stop() {},
+        async request(method, params) {
+          requests.push({ method, params });
+          if (method === "thread/start") return { thread:{ id:"thread_ephemeral" } };
+          if (method === "turn/start") {
+            queueMicrotask(() => {
+              options.onNotification({
+                method:"item/agentMessage/delta",
+                params:{ threadId:"thread_ephemeral", turnId:"turn_1", delta:'{"forHuman":"Hello from Codex' },
+              });
+              options.onNotification({
+                method:"item/agentMessage/delta",
+                params:{ threadId:"thread_ephemeral", turnId:"turn_1", delta:'!","forAgent":"Useful evidence."}' },
+              });
+              options.onNotification({
+                method:"item/completed",
+                params:{
+                  threadId:"thread_ephemeral",
+                  turnId:"turn_1",
+                  item:{ type:"agentMessage", text:'{"forHuman":"Hello from Codex!","forAgent":"Useful evidence."}' },
+                },
+              });
+              options.onNotification({
+                method:"turn/completed",
+                params:{ threadId:"thread_ephemeral", turn:{ id:"turn_1", status:"completed" } },
+              });
+            });
+            return { turn:{ id:"turn_1" } };
+          }
+          throw new Error(`Unexpected request: ${method}`);
+        },
+      };
+    },
+  });
+  const threadStart = requests.find((entry) => entry.method === "thread/start")?.params;
+  const turnStart = requests.find((entry) => entry.method === "turn/start")?.params;
+  assert.equal(threadStart.ephemeral, true);
+  assert.equal(threadStart.approvalsReviewer, "auto_review");
+  assert.equal(threadStart.sandbox, "workspace-write");
+  assert.equal(threadStart.model, "gpt-5.6-sol");
+  assert.equal(turnStart.effort, "high");
+  assert.deepEqual(turnStart.outputSchema.required, ["forHuman", "forAgent"]);
+  assert.equal(clientOptions.notificationOptOutMethods.includes("item/agentMessage/delta"), false);
+  assert.equal(statuses.some((status) => status.startsWith("Codex is answering: Hello from Codex")), true);
+  assert.equal(result.threadId, "thread_ephemeral");
+  assert.equal(result.finalMessage, '{"forHuman":"Hello from Codex!","forAgent":"Useful evidence."}');
+});
+
+test("an unsupported app-server can fall back before a turn, but an ambiguous turn timeout cannot", async () => {
+  await assert.rejects(runCodexAppServerOneShot({
+    prompt:"work",
+    appServerFactory:() => ({
+      async start() {},
+      async stop() {},
+      async request(method) {
+        if (method === "thread/start") throw new Error("unknown field ephemeral");
+      },
+    }),
+  }), (error) => error.relayExecFallbackSafe === true);
+
+  await assert.rejects(runCodexAppServerOneShot({
+    prompt:"work",
+    appServerFactory:() => ({
+      async start() {},
+      async stop() {},
+      async request(method) {
+        if (method === "thread/start") return { thread:{ id:"thread_1" } };
+        throw new Error("Timed out waiting for turn/start");
+      },
+    }),
+  }), (error) => error.relayExecFallbackSafe !== true);
 });
 
 test("a silent configured tool cannot leave the Relay response stuck forever", async () => {

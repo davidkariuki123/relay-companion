@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
-import { defaultCodexCommand } from "./codex-app-server.js";
+import { CodexAppServerClient, defaultCodexCommand } from "./codex-app-server.js";
 import { storeDir } from "./host-paths.js";
 
 const DEFAULT_STALL_TIMEOUT_MS = 5 * 60 * 1000;
@@ -18,6 +18,15 @@ const RELAY_OUTPUT_SCHEMA = {
   required: ["forHuman", "forAgent"],
   additionalProperties: false,
 };
+
+export function codexOneShotAppServerArgs({ mcpToolTimeouts = DEFAULT_MCP_TOOL_TIMEOUTS } = {}) {
+  const args = ["app-server"];
+  for (const [server, seconds] of Object.entries(mcpToolTimeouts || {})) {
+    if (!/^[A-Za-z0-9_-]+$/.test(server) || !Number.isFinite(seconds) || seconds <= 0) continue;
+    args.push("--config", `mcp_servers.${server}.tool_timeout_sec=${seconds}`);
+  }
+  return args;
+}
 
 export function ensureCodexRelayOutputSchema(baseDir = storeDir()) {
   const schemaPath = path.join(baseDir, "codex-chat-agent-output.schema.json");
@@ -83,11 +92,227 @@ export function codexExecEventStatus(event) {
     return cleanStatus(`Codex is using ${tool}.`);
   }
   if (["custom_tool_call", "tool_call", "function_call"].includes(item.type)) return "Codex is working through its agent tools.";
-  if (item.type === "command_execution") return "Codex is running a command.";
-  if (item.type === "file_change") return "Codex is updating files.";
-  if (item.type === "web_search") return "Codex is checking the web.";
+  if (["command_execution", "commandExecution"].includes(item.type)) return "Codex is running a command.";
+  if (["file_change", "fileChange"].includes(item.type)) return "Codex is updating files.";
+  if (["web_search", "webSearch"].includes(item.type)) return "Codex is checking the web.";
   if (item.type === "plan") return cleanStatus(item.text || "Codex is planning the work.");
   return "";
+}
+
+function decodePartialJsonString(source, start) {
+  let value = "";
+  for (let index = start; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === '"') return { value, complete: true };
+    if (char !== "\\") {
+      value += char;
+      continue;
+    }
+    if (index + 1 >= source.length) return { value, complete: false };
+    const escaped = source[index + 1];
+    index += 1;
+    if (escaped === "u") {
+      const hex = source.slice(index + 1, index + 5);
+      if (!/^[0-9a-fA-F]{4}$/.test(hex)) return { value, complete: false };
+      value += String.fromCharCode(Number.parseInt(hex, 16));
+      index += 4;
+      continue;
+    }
+    const escapes = { '"':'"', "\\":"\\", "/":"/", b:"\b", f:"\f", n:"\n", r:"\r", t:"\t" };
+    if (Object.hasOwn(escapes, escaped)) value += escapes[escaped];
+  }
+  return { value, complete: false };
+}
+
+/** Extract the already-authored human answer from an in-flight structured JSON response. */
+export function partialCodexRelayHuman(source) {
+  const text = String(source || "");
+  const match = /"forHuman"\s*:\s*"/.exec(text);
+  if (!match) return "";
+  return decodePartialJsonString(text, match.index + match[0].length).value;
+}
+
+function partialAnswerStatus(text) {
+  const clean = String(text || "").replace(/\s+/g, " ").trim();
+  if (clean.length < 8) return "";
+  const visible = clean.length <= 245 ? clean : `…${clean.slice(-244)}`;
+  return cleanStatus(`Codex is answering: ${visible}`);
+}
+
+function appServerItemStatus(item) {
+  if (!item || typeof item !== "object") return "";
+  if (item.type === "mcpToolCall") {
+    const server = String(item.server || "mcp").replace(/^mcp__/, "");
+    const tool = String(item.tool || "tool").replace(/^mcp__/, "").replace(/__/g, " · ");
+    return cleanStatus(`Codex is using ${server} · ${tool}.`);
+  }
+  return codexExecEventStatus({ type:"item.started", item });
+}
+
+/**
+ * A fresh, in-memory Codex thread over the CLI app-server protocol.
+ *
+ * Unlike `codex exec`, app-server exposes token deltas and does not pay the
+ * non-interactive runner's cold setup cost before every answer. `ephemeral`
+ * keeps the invocation out of both Codex history and Relay's session list.
+ */
+export async function runCodexAppServerOneShot({
+  command = defaultCodexCommand(),
+  cwd = process.cwd(),
+  prompt,
+  model = "",
+  effort = "",
+  fullAccess = false,
+  stallTimeoutMs = Number(process.env.RELAY_CHAT_AGENT_STALL_TIMEOUT_MS || DEFAULT_STALL_TIMEOUT_MS),
+  runTimeoutMs = Number(process.env.RELAY_CHAT_AGENT_TIMEOUT_MS || DEFAULT_RUN_TIMEOUT_MS),
+  heartbeatIntervalMs = 30_000,
+  mcpToolTimeouts = DEFAULT_MCP_TOOL_TIMEOUTS,
+  onEvent = () => {},
+  appServerFactory = (options) => new CodexAppServerClient(options),
+} = {}) {
+  const actualCwd = cwd && fs.existsSync(cwd) ? cwd : process.cwd();
+  let appServer;
+  let threadId = "";
+  let turnId = "";
+  let finalMessage = "";
+  let streamedMessage = "";
+  let lastPartialStatusAt = 0;
+  let lastPartialLength = 0;
+  let lastActivityAt = Date.now();
+  let lastPhase = "starting Codex";
+  let terminalResolve;
+  let terminalReject;
+  const terminal = new Promise((resolve, reject) => {
+    terminalResolve = resolve;
+    terminalReject = reject;
+  });
+  let settled = false;
+  let stallTimer;
+  let runTimer;
+  let heartbeatTimer;
+  const emit = (event, status = "") => {
+    lastActivityAt = Date.now();
+    if (status) lastPhase = status;
+    try { void onEvent(event, status); } catch {}
+  };
+  const fail = (error) => {
+    if (settled) return;
+    settled = true;
+    terminalReject(error instanceof Error ? error : new Error(String(error)));
+  };
+  const complete = () => {
+    if (settled) return;
+    settled = true;
+    terminalResolve();
+  };
+  const onNotification = (message) => {
+    const params = message?.params || {};
+    if (threadId && params.threadId && params.threadId !== threadId) return;
+    if (turnId && params.turnId && params.turnId !== turnId) return;
+    lastActivityAt = Date.now();
+    if (message?.method === "thread/started") {
+      emit({ type:"thread.started", thread_id:params.thread?.id || threadId }, "Codex has started working on your laptop.");
+      return;
+    }
+    if (message?.method === "turn/started") {
+      emit({ type:"turn.started" }, "Codex has started working on your laptop.");
+      return;
+    }
+    if (message?.method === "item/started") {
+      const status = appServerItemStatus(params.item);
+      emit({ type:"item.started", item:params.item }, status);
+      return;
+    }
+    if (message?.method === "item/agentMessage/delta") {
+      streamedMessage += String(params.delta || "");
+      const partial = partialCodexRelayHuman(streamedMessage);
+      const now = Date.now();
+      const enoughNewText = partial.length >= lastPartialLength + 12;
+      const paragraphFinished = /\n\n$/.test(partial);
+      if (partial && enoughNewText && (paragraphFinished || now - lastPartialStatusAt >= 700)) {
+        const status = partialAnswerStatus(partial);
+        if (status) {
+          lastPartialLength = partial.length;
+          lastPartialStatusAt = now;
+          emit({ type:"item.agent_message.delta", item:{ type:"agent_message", text:partial } }, status);
+        }
+      }
+      return;
+    }
+    if (message?.method === "item/completed" && params.item?.type === "agentMessage") {
+      finalMessage = String(params.item.text || "").trim() || finalMessage;
+      const parsed = parseStructuredOutput(finalMessage);
+      emit({ type:"item.completed", item:{ type:"agent_message", text:finalMessage } }, parsed ? "" : cleanStatus(finalMessage));
+      return;
+    }
+    if (message?.method === "turn/completed") {
+      const status = String(params.turn?.status || "completed").toLowerCase();
+      if (["failed", "error"].includes(status)) fail(new Error(params.turn?.error?.message || "Codex reported a failed run."));
+      else complete();
+      return;
+    }
+    if (message?.method === "error") fail(new Error(params.error?.message || params.message || "Codex reported a failed run."));
+  };
+
+  try {
+    appServer = appServerFactory({
+      command,
+      args: codexOneShotAppServerArgs({ mcpToolTimeouts }),
+      cwd: actualCwd,
+      notificationOptOutMethods: ["command/exec/outputDelta", "process/outputDelta"],
+      onNotification,
+    });
+    await appServer.start();
+    const thread = await appServer.request("thread/start", {
+      cwd: actualCwd,
+      approvalPolicy: fullAccess ? "never" : "on-request",
+      ...(fullAccess ? {} : { approvalsReviewer:"auto_review" }),
+      sandbox: fullAccess ? "danger-full-access" : "workspace-write",
+      ephemeral: true,
+      threadSource: "appServer",
+      serviceName: "relay_owned_agent",
+      ...(model ? { model } : {}),
+    });
+    threadId = String(thread?.thread?.id || "");
+    if (!threadId) throw new Error("Codex did not return an ephemeral thread id");
+    emit({ type:"thread.started", thread_id:threadId }, "Codex has started working on your laptop.");
+    const turn = await appServer.request("turn/start", {
+      threadId,
+      input: [{ type:"text", text:String(prompt || ""), text_elements:[] }],
+      outputSchema: RELAY_OUTPUT_SCHEMA,
+      ...(effort && effort !== "auto" ? { effort } : {}),
+    });
+    turnId = String(turn?.turn?.id || "");
+    if (!turnId) throw new Error("Codex did not return a turn id");
+    emit({ type:"turn.started" }, "Codex has started working on your laptop.");
+
+    stallTimer = setInterval(() => {
+      if (Date.now() - lastActivityAt <= stallTimeoutMs) return;
+      fail(new Error(`Codex stopped producing activity while ${lastPhase}.`));
+    }, Math.min(10_000, Math.max(10, Math.floor(stallTimeoutMs / 4))));
+    heartbeatTimer = setInterval(() => {
+      const idleSeconds = Math.max(1, Math.round((Date.now() - lastActivityAt) / 1000));
+      emit({ type:"relay.heartbeat" }, `Codex is still active on your laptop (${idleSeconds}s since its last event).`);
+    }, heartbeatIntervalMs);
+    heartbeatTimer.unref?.();
+    runTimer = setTimeout(() => fail(new Error("Codex reached Relay's one-shot run time limit.")), runTimeoutMs);
+    await terminal;
+    return { threadId, finalMessage: finalMessage || streamedMessage };
+  } catch (error) {
+    // Older Codex CLIs may have `exec` but not the ephemeral app-server fields.
+    // Falling back is safe only before a turn id proves model work was accepted;
+    // a timed-out turn/start response is ambiguous and must not duplicate work.
+    const failure = error instanceof Error ? error : new Error(String(error));
+    if (!turnId && !/Timed out waiting for turn\/start/i.test(failure.message)) {
+      failure.relayExecFallbackSafe = true;
+    }
+    throw failure;
+  } finally {
+    if (stallTimer) clearInterval(stallTimer);
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    if (runTimer) clearTimeout(runTimer);
+    await appServer?.stop().catch(() => {});
+  }
 }
 
 function parseStructuredOutput(text) {

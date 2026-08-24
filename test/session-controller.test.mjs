@@ -8,8 +8,34 @@ import {
   claudeSessionNeedsCatalogRestart,
   publishAndFind,
   resolveClaudeBackgroundAgent,
+  runSessionDirectoryOnce,
   waitForClaudeCompletion,
 } from "../src/session-controller.js";
+
+test("owned-agent controller inbox is checked before the native session inventory", async () => {
+  const calls = [];
+  const result = await runSessionDirectoryOnce({
+    client:{
+      async sessionControllerInbox() {
+        calls.push("inbox");
+        return { operations:[] };
+      },
+      async publishSessionObservations(observations, controller) {
+        calls.push(["publish", observations, controller]);
+        return { sessions:[] };
+      },
+    },
+    discover:() => {
+      calls.push("discover");
+      return [];
+    },
+    controller:() => ({ deviceId:"device_1" }),
+  });
+  assert.equal(calls[0], "inbox");
+  assert.equal(calls[1], "discover");
+  assert.deepEqual(calls[2], ["publish", [], { deviceId:"device_1" }]);
+  assert.deepEqual(result, { sessions:[], queuedOperations:0 });
+});
 
 test("Claude permission-mode metadata drift never restarts a catalog-current live task", () => {
   const liveRegistration = { pid: 50_097 };

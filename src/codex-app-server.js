@@ -8,10 +8,18 @@ import fs from "node:fs";
 import readline from "node:readline";
 
 export class CodexAppServerClient {
-  constructor({ command = defaultCodexCommand(), args = ["app-server"], cwd = process.cwd() } = {}) {
+  constructor({
+    command = defaultCodexCommand(),
+    args = ["app-server"],
+    cwd = process.cwd(),
+    notificationOptOutMethods = ["item/agentMessage/delta", "command/exec/outputDelta", "process/outputDelta"],
+    onNotification = () => {},
+  } = {}) {
     this.command = command;
     this.args = args;
     this.cwd = cwd;
+    this.notificationOptOutMethods = notificationOptOutMethods;
+    this.onNotification = onNotification;
     this.nextId = 1;
     this.pending = new Map();
     this.notifications = [];
@@ -52,6 +60,7 @@ export class CodexAppServerClient {
         else resolve(message.result);
       } else {
         this.notifications.push(message);
+        try { this.onNotification(message); } catch {}
       }
     });
     this.proc.on("exit", (code, signal) => {
@@ -69,7 +78,7 @@ export class CodexAppServerClient {
       },
       capabilities: {
         experimentalApi: true,
-        optOutNotificationMethods: ["item/agentMessage/delta", "command/exec/outputDelta", "process/outputDelta"],
+        optOutNotificationMethods: this.notificationOptOutMethods,
       },
     });
     this.notify("initialized", {});

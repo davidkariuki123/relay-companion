@@ -45,7 +45,14 @@ test("an unnamed share recipient gets the unknown-person glyph, not initials", (
   assert.match(html, /if \(String\(name \|\| ""\) === "Someone with the link"\) return "\?"/);
 });
 
-test("the room composer refuses an unclaimed share link before any request", () => {
+test("an unclaimed share-link room shows its real next action instead of a live composer", () => {
+  assert.match(html, /const pendingShareAnchor = addressAnchor\?\.shareLink && addressAnchor\.shareLink\.state !== "claimed" \? addressAnchor : null/);
+  assert.match(html, /hasn’t opened this Relay yet\. Send them the link to start chatting\./);
+  assert.match(html, /id="thPendingShareCopy"/);
+  assert.match(html, /pendingLinkStatus \|\| threadComposer/);
+  assert.match(html, /pending-link:\$\{String\(pendingShareLink\.id/,
+    "a claim-state change rebuilds the dock into an ordinary composer");
+  assert.match(html, /navigator\.clipboard\.writeText\(url\)/);
   assert.match(html, /Nobody has opened this link yet\. Send it again/);
   // Source ORDER, which no behavioural test in this suite can see:
   // takeStagedFiles deletes the staged files and repaints the chips, so a

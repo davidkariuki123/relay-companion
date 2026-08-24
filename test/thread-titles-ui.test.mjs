@@ -289,8 +289,10 @@ test("a live refresh repaints the history around the composer, never through it"
   assert.doesNotMatch(html, /thQrInput\.blur\(\)/, "sending must not give up the keyboard");
   assert.doesNotMatch(html, /threadDetailRenderPending/, "no repaint waits on a blur any more");
   // The shell is rebuilt only when the room, its order or its posting state
-  // changes — never for new messages.
-  assert.match(html, /const shellKey = `\$\{chatShaped \? "chat" : "inbox"\}\|\$\{groupPostingBlocked \? "blocked" : "open"\}\|\$\{threadStateKey\}`/);
+  // changes — never for new messages. An unclaimed link is a posting state too:
+  // it replaces the false live composer and yields back to it once claimed.
+  assert.match(html, /const composerMode = groupPostingBlocked[\s\S]*pendingShareLink \? `pending-link:/);
+  assert.match(html, /const shellKey = `\$\{chatShaped \? "chat" : "inbox"\}\|\$\{composerMode\}\|\$\{threadStateKey\}`/);
   assert.match(html, /const shellChanged = thHistoryEl\.dataset\.shellKey !== shellKey \|\| !document\.getElementById\("thRows"\);/);
   // Faces that change while the composer stays put are set in place.
   assert.match(html, /composerQr\.classList\.toggle\("replying", Boolean\(replyTargetId\)\)/);

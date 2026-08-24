@@ -147,7 +147,9 @@ test("leaving keeps history but disables every group reply affordance", () => {
   assert.match(html, /const visibleThreadComposer = groupPostingBlocked/);
   assert.match(html, /chatShaped \? rowsShell \+ visibleThreadComposer : visibleThreadComposer \+ rowsShell/);
   // The room shell is keyed by the posting state, so leaving or rejoining a
-  // group rebuilds it instead of leaving a live composer behind.
-  assert.match(html, /\$\{groupPostingBlocked \? "blocked" : "open"\}/);
+  // group rebuilds it instead of leaving a live composer behind. The same key
+  // also covers the unclaimed-link state used by direct share rooms.
+  assert.match(html, /const composerMode = groupPostingBlocked/);
+  assert.match(html, /const shellKey = `\$\{chatShaped \? "chat" : "inbox"\}\|\$\{composerMode\}/);
   assert.match(html, /!m\.request && !groupPostingBlocked/);
 });
