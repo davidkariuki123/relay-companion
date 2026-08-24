@@ -107,6 +107,13 @@ test("internal chains and message species never divide a same-sender chat run", 
   assert.doesNotMatch(source, /threadId|textLike|request/);
 });
 
+test("message species never change the spacing inside a sender run", () => {
+  assert.match(html, /\.th-msg\.cont \{ margin-top:20px; \}/);
+  assert.match(html, /\.th-under \{[^}]*height:15px;[^}]*margin:3px 16px 0;/);
+  assert.match(html, /\.th-under \+ \.th-msg\.cont \{ margin-top:2px; \}/);
+  assert.doesNotMatch(html, /\.th-msg:has\(\+ \.th-msg\.cont\) \{ border-bottom:0; \}/);
+});
+
 test("a group's face stays stacked even when only one member has spoken", () => {
   // A group must remain visually distinct from a direct chat. Known inbound
   // speakers lead the stack; the saved group identity supplies the fallback

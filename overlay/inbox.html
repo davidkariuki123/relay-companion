@@ -1475,12 +1475,14 @@
      identity comes from the muted name instead, via .th-party.me below. */
   /* A run of consecutive messages from one sender reads as one block: the
      newest row carries the name and clock, continuations sit under it with
-     no repeated header and no divider inside the run. */
-  /* Runs compress the GAP between bubbles, never the padding inside one —
-     a continuation with 2px top padding read as "bubble too small for the
-     text" (Sven). Same interior everywhere; only the seam tightens. */
-  .th-msg.cont { margin-top:2px; }
-  .th-msg:has(+ .th-msg.cont) { border-bottom:0; }
+     no repeated header and no divider inside the run.
+
+     Twenty pixels is the room's invariant bubble-to-bubble gap. Ordinary
+     messages put a reply/receipt accessory row between bubbles; Tasks do not.
+     Compensate for that row instead of letting message species or direction
+     change the rhythm. Every bubble keeps its complete rounded silhouette. */
+  .th-msg.cont { margin-top:20px; }
+  .th-under + .th-msg.cont { margin-top:2px; }
   /* Per-party name colors. Assigned by a stable hash of the party name, so a
      person keeps the same color across every conversation and every restart. */
   .th-party.p0 { color:#4a6b5f; } .th-party.p1 { color:#7a5540; } .th-party.p2 { color:#53607d; }
@@ -1684,7 +1686,7 @@
   .th-chunk-date::after { flex:1 1 auto; }
   .th-chunk-date span { flex:0 0 auto; white-space:nowrap; }
   /* Under the bubble: what is ABOUT a message, not part of it. */
-  .th-under { display:flex; align-items:center; gap:10px; margin:3px 16px 0; }
+  .th-under { display:flex; align-items:center; gap:10px; height:15px; margin:3px 16px 0; }
   .th-under.mine { justify-content:flex-end; }
   .th-under .th-seen { appearance:none; border:0; padding:0; background:transparent; font-family:var(--sans); font-size:10px; color:var(--muted-2); opacity:.75; }
   /* A healthy send can cross several true states in a few hundred

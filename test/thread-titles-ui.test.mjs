@@ -410,6 +410,17 @@ test("only a six-hour chunk boundary changes conversation geometry", () => {
   assert.match(html, /const chunkDivider = chunkDateLabel/);
 });
 
+test("same-sender bubbles keep one gap across Tasks, texts, and directions", () => {
+  // A replyable text has an interstitial .th-under row; a Task does not. The
+  // base continuation gap and the accessory-row compensation must describe
+  // the same visual distance, matching the established spacing between two
+  // outbound text messages.
+  assert.match(html, /\.th-msg\.cont \{ margin-top:20px; \}/);
+  assert.match(html, /\.th-under \{[^}]*height:15px;[^}]*margin:3px 16px 0;/);
+  assert.match(html, /\.th-under \+ \.th-msg\.cont \{ margin-top:2px; \}/);
+  assert.doesNotMatch(html, /\.th-msg:has\(\+ \.th-msg\.cont\) \{ border-bottom:0; \}/);
+});
+
 test("conversation chunks carry the selected Relay date divider", () => {
   const source = html.match(/(function formatChatDate\(iso, nowValue = Date\.now\(\)\) \{[\s\S]*?\n  \}\n\n  function chatChunkDateLabel\(iso, previousIso, nowValue = Date\.now\(\)\) \{[\s\S]*?\n  \})\n/)[1];
   const { formatChatDate, chatChunkDateLabel } = Function(

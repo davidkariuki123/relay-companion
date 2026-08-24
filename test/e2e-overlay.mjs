@@ -312,6 +312,30 @@ try {
     `id=${trayState.persistentId} bounds=${JSON.stringify(trayState.bounds)}`,
   );
 
+  // A Task omits the reply/receipt row that ordinary messages carry. Both DOM
+  // paths must nevertheless preserve the established outbound-message gap.
+  const messageSpacing = await evalIn(pageConn, `(() => {
+    const fixture = document.createElement('div');
+    fixture.style.cssText = 'position:fixed;left:-1000px;top:0;width:320px;visibility:hidden';
+    fixture.innerHTML = [
+      '<div data-flow="task"><div class="th-msg">Task</div><div class="th-msg cont">Text</div></div>',
+      '<div data-flow="text"><div class="th-msg">Text</div><div class="th-under"><button class="th-reply-ghost">reply</button></div><div class="th-msg cont">Relay</div></div>',
+    ].join('');
+    document.body.appendChild(fixture);
+    const gap = (name) => {
+      const rows = fixture.querySelectorAll('[data-flow="' + name + '"] .th-msg');
+      return rows[1].getBoundingClientRect().top - rows[0].getBoundingClientRect().bottom;
+    };
+    const result = { task:gap('task'), text:gap('text') };
+    fixture.remove();
+    return result;
+  })()`);
+  check(
+    "chat-spacing: Tasks and replyable messages keep the same twenty-pixel continuation gap",
+    messageSpacing.task === 20 && messageSpacing.text === 20,
+    `task=${messageSpacing.task}px text=${messageSpacing.text}px`,
+  );
+
   // ---- 2. boot with a daemon-first/offline backlog ----
   const bootUi = await retry(
     async () => {
