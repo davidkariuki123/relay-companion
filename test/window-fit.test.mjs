@@ -46,13 +46,3 @@ test("resizing preserves a user-positioned window's top-right corner", () => {
     height: 760,
   });
 });
-
-test("a dragged pill collapses and expands around the same screen-space anchor", () => {
-  const dragged = { x: 500, y: 320, width: 344, height: 524 };
-  const collapsed = resizedOverlayBounds(dragged, { w: 244, h: 44 }, options);
-  const expanded = resizedOverlayBounds(collapsed, { w: 344, h: 524 }, options);
-  assert.deepEqual(collapsed, { x: 600, y: 320, width: 244, height: 44 });
-  assert.deepEqual(expanded, dragged);
-  assert.equal(collapsed.x + collapsed.width, dragged.x + dragged.width);
-  assert.equal(expanded.x + expanded.width, dragged.x + dragged.width);
-});

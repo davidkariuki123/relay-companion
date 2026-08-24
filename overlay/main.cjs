@@ -4033,6 +4033,7 @@ function pollHosts({ probeFrontmost = true } = {}) {
 const CARD_INITIAL = { w: 344, h: 524 };    // EXPANDED in inbox.html; renderer publishes its live size before announcing readiness
 const CARD_MAX = { w: 720, h: 800 };        // READER in inbox.html (the pill expanded into the page; PEEK is 400px wide)
 let cardSize = { w: CARD_INITIAL.w, h: CARD_INITIAL.h };
+let overlayFitTimer = null;
 
 function fitOverlayWindowToCard({ settle = false } = {}) {
   if (!win || win.isDestroyed()) return;
@@ -4042,15 +4043,25 @@ function fitOverlayWindowToCard({ settle = false } = {}) {
   // morphs in place and, importantly, never snaps a user-dragged pill home.
   const target = resizedOverlayBounds(current, cardSize, { maximum: CARD_MAX });
   if (target.x === current.x && target.y === current.y && target.width === current.width && target.height === current.height) {
+    if (overlayFitTimer) clearTimeout(overlayFitTimer);
+    overlayFitTimer = null;
     return;
   }
   const growing = target.width > current.width || target.height > current.height;
-  // Growth happens before the renderer paints its larger destination. Shrink
-  // waits for an explicit renderer-settled receipt: no guessed timeout, no
-  // competing AppKit resize during the spring, and no stale collapse after a
-  // rapid retarget.
-  if (!growing && !settle) return;
-  try { win.setBounds(target, false); } catch {}
+  if (growing || settle) {
+    if (overlayFitTimer) clearTimeout(overlayFitTimer);
+    overlayFitTimer = null;
+    try { win.setBounds(target, false); } catch {}
+    return;
+  }
+  // Let the card's closing animation finish before shrinking the native window;
+  // growing happens first so content is never clipped.
+  if (overlayFitTimer) clearTimeout(overlayFitTimer);
+  overlayFitTimer = setTimeout(() => {
+    overlayFitTimer = null;
+    fitOverlayWindowToCard({ settle: true });
+  }, 420);
+  overlayFitTimer.unref?.();
 }
 
 function createWindow() {
@@ -7363,23 +7374,10 @@ ipcMain.on("relay:stall", (_e, info) => {
   }, 500).unref?.();
 }
 
-let latestCardMotionId = 0;
-let latestCardMotionSessionId = "";
-ipcMain.on("relay:cardSize", (event, w, h, motion = {}) => {
-  if (!win || win.isDestroyed() || event.sender !== win.webContents) return;
+ipcMain.on("relay:cardSize", (_e, w, h) => {
   if (!Number.isFinite(w) || !Number.isFinite(h)) return;
-  const motionSessionId = typeof motion.motionSessionId === "string"
-    ? motion.motionSessionId.slice(0, 64)
-    : "";
-  const motionId = Number.isSafeInteger(motion.motionId) ? motion.motionId : 0;
-  if (motionSessionId !== latestCardMotionSessionId) {
-    latestCardMotionSessionId = motionSessionId;
-    latestCardMotionId = 0;
-  }
-  if (motionId < latestCardMotionId) return;
-  latestCardMotionId = motionId;
   cardSize = { w, h };
-  fitOverlayWindowToCard({ settle: motion.phase === "settled" });
+  fitOverlayWindowToCard();
 });
 ipcMain.handle("relay:prepareCardSize", (event, w, h) => {
   if (!win || win.isDestroyed() || event.sender !== win.webContents) return { ok:false };

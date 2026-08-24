@@ -177,15 +177,8 @@ contextBridge.exposeInMainWorld("relay", {
 
   // window plumbing
   engage: () => ipcRenderer.send("relay:engage"),
-  // The native window tracks the visible card's dimensions. `prepare` reserves
-  // growth before paint; `settled` commits shrink after the spring completes.
-  cardSize: (w, h, motion = {}) => ipcRenderer.send("relay:cardSize", w, h, {
-    phase: motion.phase === "settled" ? "settled" : "prepare",
-    motionId: Number.isSafeInteger(motion.motionId) ? motion.motionId : 0,
-    motionSessionId: typeof motion.motionSessionId === "string"
-      ? motion.motionSessionId.slice(0, 64)
-      : "",
-  }),
+  // The native window tracks the visible card's dimensions.
+  cardSize: (w, h) => ipcRenderer.send("relay:cardSize", w, h),
   // Grow before revealing a larger reader so content is never clipped.
   prepareCardSize: (w, h) => ipcRenderer.invoke("relay:prepareCardSize", w, h),
   setTheme: (t) => ipcRenderer.send("relay:theme", t), // preview window wears the same sheet

@@ -103,8 +103,14 @@ test("group info joins creator, current user, and every member into one exact ro
   const source = html.slice(html.indexOf("function groupInfoRoster("), html.indexOf("function renderGroupInfo()"));
   const groupInfoRoster = Function(
     "normalizedPartyName",
+    "contactsList",
+    "contactEmails",
     `"use strict"; ${source}; return groupInfoRoster;`,
-  )((value) => String(value || "").trim().toLowerCase());
+  )(
+    (value) => String(value || "").trim().toLowerCase(),
+    [{ id:"con_sven_local", name:"Sven Ozwellmann", email:"sven@example.com" }],
+    (contact) => contact.emails || [contact.email].filter(Boolean),
+  );
 
   // Exact production failure: Bugs and Features is Shane-owned; the API
   // correctly returns David + Sven in `members` and Shane in `owner`.
@@ -120,7 +126,7 @@ test("group info joins creator, current user, and every member into one exact ro
     ],
   };
   const roster = groupInfoRoster(group, account);
-  assert.deepEqual(roster.map((person) => person.name), ["Shane Acton", "David Kariuki", "Sven Wellmann"]);
+  assert.deepEqual(roster.map((person) => person.name), ["Shane Acton", "David Kariuki", "Sven Ozwellmann"]);
   assert.equal(roster[0].role, "owner");
   assert.equal(roster[1].currentUser, true);
 
@@ -130,7 +136,7 @@ test("group info joins creator, current user, and every member into one exact ro
   const ownedRoster = groupInfoRoster({ name: "Mine", owned: true, members: group.members.slice(1) }, account);
   assert.deepEqual(ownedRoster.map((person) => [person.name, person.role]), [
     ["David Kariuki", "owner"],
-    ["Sven Wellmann", "member"],
+    ["Sven Ozwellmann", "member"],
   ]);
 
   const details = html.slice(html.indexOf("function groupDetailsMarkup("), html.indexOf("async function groupDetailCall("));

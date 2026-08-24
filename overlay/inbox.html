@@ -94,12 +94,7 @@
      Elevation is three tokens: the card's own drop shadow (this one), the
      folded pill's lighter cousin, and one popover shadow — nothing else casts. */
   .card {
-    /* The native window preserves its current screen-space top-right point while
-       it changes size. Anchor the visible sheet to that same point so a folded
-       pill never lands at the old left edge and then jumps home when AppKit
-       trims the transparent remainder. This remains local to the current native
-       window, so a user-dragged pill morphs exactly where it was placed. */
-    position:absolute; top:0; right:0;
+    position:absolute; inset:0;
     width:344px; height:524px;
     background:var(--bg);
     border-radius:var(--r-card);
@@ -2690,25 +2685,15 @@
   const W = { v: EXPANDED.w, vel: 0, t: EXPANDED.w };
   const H = { v: EXPANDED.h, vel: 0, t: EXPANDED.h };
   let raf = null, lastT = 0;
-  // Main sizes the native window to this card. A morph has two explicit phases:
-  // prepare grows the native surface before the first destination paint; settled
-  // trims it only after the renderer's spring actually finishes. A monotonic id
-  // makes rapid collapse/expand retargeting reject stale completions.
+  // Main sizes the native window to this card. Deduped: one IPC per distinct
+  // integer size.
   let interactive = false;
   let lastSentCardSize = "";
-  let cardMotionId = 0;
-  // A renderer reload starts a fresh ordering domain. Without this session id,
-  // main could mistake the new renderer's low motion ids for stale messages.
-  const cardMotionSessionId = crypto.randomUUID();
-  function publishCardSize(w, h, { phase = "prepare", motionId = cardMotionId } = {}) {
-    const key = motionId + ":" + phase + ":" + Math.round(w) + "x" + Math.round(h);
+  function publishCardSize(w, h) {
+    const key = Math.round(w) + "x" + Math.round(h);
     if (key === lastSentCardSize) return;
     lastSentCardSize = key;
-    if (window.relay.cardSize) window.relay.cardSize(Math.round(w), Math.round(h), {
-      phase,
-      motionId,
-      motionSessionId: cardMotionSessionId,
-    });
+    if (window.relay.cardSize) window.relay.cardSize(Math.round(w), Math.round(h));
   }
   function step(s, dt) {
     const before = s.v - s.t;
@@ -2734,20 +2719,24 @@
     for (let i = 0; i < n; i++) { const a = step(W, h), b = step(H, h); moving = moving || a || b; }
     cardEl.style.width = W.v.toFixed(2) + "px";
     cardEl.style.height = H.v.toFixed(2) + "px";
+    // Native resize only needs to track the animation coarsely; sending it every
+    // frame would compete with the renderer's own motion.
+    publishCardSizeThrottled(W.v, H.v);
     if (moving) raf = requestAnimationFrame(frame);
-    else {
-      raf = null;
-      cardEl.style.willChange = "";
-      publishCardSize(W.t, H.t, { phase:"settled", motionId:cardMotionId });
-    }
+    else { raf = null; cardEl.style.willChange = ""; publishCardSize(W.t, H.t); }
+  }
+  let lastPublishAt = 0;
+  function publishCardSizeThrottled(w, h) {
+    const now = performance.now();
+    if (now - lastPublishAt < 80) return;
+    lastPublishAt = now;
+    publishCardSize(w, h);
   }
   function springTo(w, h) {
     W.t = w; H.t = h;
-    const motionId = ++cardMotionId;
     // Publish the destination synchronously so growth is available before paint
     // and a delayed animation frame cannot leave a stale native window size.
-    // Shrink is only committed by the settled message below.
-    publishCardSize(w, h, { phase:"prepare", motionId });
+    publishCardSize(w, h);
     // The scroller's width is FIXED (containment: the height spring must not
     // reflow the rows every frame) — so it must be re-fixed to each new
     // TARGET, once per morph. Content lays out at the destination size
@@ -2755,13 +2744,7 @@
     // its content in a 344px column and the new width is dead space. The
     // folded pill hides .scroll entirely, so never shrink it below EXPANDED.
     scrollEl.style.width = Math.max(w, EXPANDED.w) + "px";
-    if (REDUCED) {
-      W.v = w; H.v = h;
-      cardEl.style.width = w + "px";
-      cardEl.style.height = h + "px";
-      publishCardSize(w, h, { phase:"settled", motionId });
-      return;
-    }
+    if (REDUCED) { W.v = w; H.v = h; cardEl.style.width = w + "px"; cardEl.style.height = h + "px"; publishCardSize(w, h); return; }
     // will-change on width/height buys nothing (they are layout, not composited)
     // and costs a layer promotion; containment on .scroll is what makes this cheap.
     if (!raf) { lastT = performance.now(); raf = requestAnimationFrame(frame); }
@@ -2987,7 +2970,7 @@
     if (raf) { cancelAnimationFrame(raf); raf = null; cardEl.style.willChange = ""; }
     cardEl.style.width = w + "px";
     cardEl.style.height = h + "px";
-    publishCardSize(w, h, { phase:"settled", motionId:++cardMotionId });
+    publishCardSize(w, h);
   }
   function resetOffstage() {
     ghost = false;
@@ -8068,7 +8051,17 @@
     const add = (person, role) => {
       if (!person) return;
       const email = String(person.email || "").trim().toLowerCase();
-      const name = String(person.name || "").trim();
+      const currentUser = Boolean(email && email === String(account.email || "").trim().toLowerCase());
+      // A group's stored roster belongs to its owner, so its labels can differ
+      // from how the viewer has saved the same person. Mentions and group info
+      // are viewer-facing: their own contact book is authoritative there.
+      const savedContact = !currentUser && email
+        ? contactsList.find((contact) => contactEmails(contact)
+          .some((address) => String(address || "").trim().toLowerCase() === email))
+        : null;
+      const savedName = String((savedContact && savedContact.name) || "").trim();
+      const shown = savedName ? { ...person, name:savedName } : person;
+      const name = String(shown.name || "").trim();
       if (!email && !name && !person.userId && !person.contactId && !person.id) return;
       const key = email
         ? `email:${email}`
@@ -8080,9 +8073,9 @@
       if (!key || seen.has(key)) return;
       seen.add(key);
       roster.push({
-        ...person,
+        ...shown,
         role,
-        currentUser: Boolean(email && email === String(account.email || "").trim().toLowerCase()),
+        currentUser,
       });
     };
     // Owner mutations historically returned the compact owned view without an
@@ -9037,9 +9030,12 @@
       t.unreadCount = t.msgs.filter((m) => m.unread).length;
       // The thread's display party is the other side: prefer the latest
       // inbound sender, else the latest outbound recipient.
-      const lastIn = [...t.msgs].reverse().find((m) => m.direction === "in");
-      t.party = (lastIn && lastIn.party) || latest.party || "Conversation";
-      t.partyKey = (lastIn && lastIn.partyKey) || latest.partyKey || `name:${String(t.party).trim().toLowerCase()}`;
+      const lastIn = [...t.msgs].reverse().find((m) => m.direction === "in" && !m.ownedAgent);
+      const counterpart = lastIn || [...t.msgs].reverse().find((m) => !m.ownedAgent) || latest;
+      // An owned agent is a speaking face inside the existing room, never a
+      // new participant. Name and key the room from its human counterpart.
+      t.party = counterpart.party || "Conversation";
+      t.partyKey = counterpart.partyKey || `name:${String(t.party).trim().toLowerCase()}`;
       t.isGroup = t.msgs.some((m) => m.isGroup);
       t.groupId = (t.msgs.find((m) => m.groupId) || {}).groupId || "";
       t.groupName = (t.msgs.find((m) => m.groupName) || {}).groupName || "";
@@ -9057,7 +9053,7 @@
     const threads = buildThreads();
     for (const t of threads) {
       const peopleByIdentity = new Map();
-      for (const m of t.msgs.filter((m) => m.direction === "in" && m.party)) {
+      for (const m of t.msgs.filter((m) => m.direction === "in" && !m.ownedAgent && m.party)) {
         peopleByIdentity.set(m.partyKey || `name:${String(m.party).trim().toLowerCase()}`, m.party);
       }
       const people = [...peopleByIdentity.values()];
@@ -9904,23 +9900,28 @@
           .map((message) => normalizedPartyName(message.party))
           .filter(Boolean),
       );
-      const participantNames = new Set(
-        (thread.msgs || [])
-          .filter((message) => message.direction === "in" && !message.ownedAgent)
-          .map((message) => String(message.party || "").trim())
-          .filter(Boolean),
-      );
+      const participantNames = new Set();
       if (thread.isGroup) {
         const group = groupsList.find((candidate) => String(candidate.id || "") === String(thread.groupId || ""))
           || groupsList.find((candidate) => normalizedPartyName(candidate.name) === normalizedPartyName(thread.groupName));
+        // The current roster decides who can be mentioned. Historical sender
+        // labels can be stale (or belong to somebody who has left), and must
+        // not sit beside the viewer's saved contact name as a second person.
         for (const member of group ? groupInfoRoster(group) : []) {
           if (!member.currentUser && member.name) participantNames.add(String(member.name).trim());
         }
-      } else if (thread.party && !ownedAgentParticipantNames.has(normalizedPartyName(thread.party))) {
+      } else {
+        for (const message of thread.msgs || []) {
+          if (message.direction === "in" && !message.ownedAgent && message.party) {
+            participantNames.add(String(message.party).trim());
+          }
+        }
+        if (thread.party && !ownedAgentParticipantNames.has(normalizedPartyName(thread.party))) {
         // buildThreads names a wire thread after its newest inbound sender.
         // An owned-agent response is inbound too, but it is an execution face,
         // not a second participant beside @my_codex / @my_claude.
-        participantNames.add(String(thread.party).trim());
+          participantNames.add(String(thread.party).trim());
+        }
       }
       const mentionOptions = [
         ...(payload.features?.requests === true ? [
@@ -10067,7 +10068,7 @@
             id:`optimistic-agent:${idempotencyKey}:${provider}`, relayId:"", threadId:sendAnchor.threadId || thread.threadId,
             inReplyToRelayId:optimisticId, direction:"out", seen:false, seenAt:null, readReceipts:[],
             title:"I'm on it", body:"I'm on it", party:provider === "claude" ? "My Claude" : "My Codex",
-            partyKey:`owned-agent:${provider}`, at:new Date(Date.now() + index + 1).toISOString(), isGroup:Boolean(sendAnchor.isGroup || thread.isGroup),
+            partyKey:sendAnchor.partyKey || thread.partyKey || "", at:new Date(Date.now() + index + 1).toISOString(), isGroup:Boolean(sendAnchor.isGroup || thread.isGroup),
             groupName:sendAnchor.groupName || thread.groupName || "", unread:false, textLike:true, request:false, pending:true,
             source:{ host:"relay-agent-run", surface:provider === "claude" ? "claude_code" : "codex" }, ownedAgent:true, agentInvocation:true,
             reactions:{ aggregates:[], events:[] }, attachments:[], preview:"",
@@ -12038,7 +12039,7 @@
   // authoritative across reloads and future layout changes. Publish the actual
   // initial target before readiness so the native hit rect can never retain a
   // larger stale/default size until the first fold-expand transition.
-  publishCardSize(W.t, H.t, { phase:"settled", motionId:cardMotionId });
+  publishCardSize(W.t, H.t);
   // LAST signal on purpose: every listener above is registered and the native
   // hit rect is synchronized, so main may now deliver queued arrivals without
   // a single one being dropped (FM-1).

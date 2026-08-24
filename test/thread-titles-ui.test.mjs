@@ -616,6 +616,27 @@ test("developer chat composers rank owned laptop agents ahead of participant men
     "owned-agent reply identities are tracked separately from people");
   assert.match(html, /thread\.party && !ownedAgentParticipantNames\.has\(normalizedPartyName\(thread\.party\)\)/,
     "an owned-agent reply cannot re-enter the selector through the direct-room fallback");
+  assert.match(html, /const savedContact = !currentUser && email[\s\S]*contactsList\.find[\s\S]*const shown = savedName/,
+    "the viewer's saved contact name wins over somebody else's group-roster label");
+  const groupMentions = html.slice(html.indexOf("const participantNames = new Set();"), html.indexOf("const mentionOptions = [", html.indexOf("const participantNames = new Set();")));
+  assert.match(groupMentions, /thread\.isGroup[\s\S]*groupInfoRoster\(group\)/,
+    "group mentions come from the current roster");
+  assert.doesNotMatch(groupMentions.split("} else {")[0], /message\.party/,
+    "historical group sender labels cannot create stale mention choices");
+});
+
+test("owned-agent faces remain inside the human room", () => {
+  const buildThreads = html.slice(html.indexOf("function buildThreads()"), html.indexOf("function normalizedPartyName("));
+  assert.match(buildThreads, /m\.direction === "in" && !m\.ownedAgent/,
+    "an agent response cannot name the room as an inbound participant");
+  assert.match(buildThreads, /find\(\(m\) => !m\.ownedAgent\) \|\| latest/,
+    "room identity prefers a human counterpart even without an inbound message");
+  assert.match(buildThreads, /m\.direction === "in" && !m\.ownedAgent && m\.party/,
+    "the room roster excludes owned-agent bylines");
+  assert.match(html, /partyKey:sendAnchor\.partyKey \|\| thread\.partyKey \|\| ""/,
+    "the immediate agent bubble inherits the existing room key");
+  assert.doesNotMatch(html, /partyKey:`owned-agent:\$\{provider\}`/,
+    "an optimistic agent response never creates an agent-addressed room");
 });
 
 test("progress-only Relay edits repaint an already-open desktop chat", () => {
