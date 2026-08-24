@@ -21,9 +21,12 @@ import { companionPackageRoot, currentCompanionVersion, isManagedInstall, isNewe
  *
  * Commands that must NOT hop, because they are launched by exact path on
  * purpose and their identity is the whole point:
- *   - daemon / pill: the services. Their launchers already name the exact
- *     release, and the daemon's own stale-process handoff depends on knowing
- *     which tree it booted from.
+ *   - daemon: the service launcher names the exact release, and the daemon's
+ *     own stale-process handoff depends on knowing which tree it booted from.
+ *     The pill is intentionally NOT exempt: launchd / Scheduled Tasks start
+ *     Electron directly, while a human typing `relay pill` may be entering
+ *     through a years-old global npm shim. That command must open the active
+ *     canonical pill, not resurrect the shim's bundled overlay.
  *   - mcp: launched by the stable MCP launcher, which activation already
  *     rewrites to the exact release bin.
  *   - repair-runtime / repair-desktop / self-update: invoked BY the updater
@@ -38,7 +41,6 @@ import { companionPackageRoot, currentCompanionVersion, isManagedInstall, isNewe
  */
 export const TRAMPOLINE_EXEMPT_COMMANDS = new Set([
   "daemon",
-  "pill",
   "mcp",
   "repair-runtime",
   "repair-desktop",
