@@ -4042,7 +4042,9 @@ function createWindow() {
     resizable: false,
     movable: false,
     show: false,
-    hasShadow: true,
+    // The card paints its edge inside these exact bounds. A native AppKit shadow
+    // adds a second dark outline and visibly changes shape when this window folds.
+    hasShadow: false,
     skipTaskbar: true,
     fullscreenable: false,
     maximizable: false,

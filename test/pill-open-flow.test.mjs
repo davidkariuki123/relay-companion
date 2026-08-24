@@ -581,10 +581,13 @@ test("theme has two layers — system default, explicit button choice sticks", (
   assert.match(html, /localStorage\.setItem\("relayTheme", toDark \? "dark" : "light"\)/);
 });
 
-test("dark mode uses its subtle edge token instead of a hard-coded white cap", () => {
+test("the fitted card keeps elevation inside its bounds", () => {
   assert.match(html, /\.card \{[\s\S]*?box-shadow:var\(--shadow-card\)/);
   assert.match(html, /\.card\.collapsed \{[\s\S]*?box-shadow:var\(--shadow-pill\)/);
   assert.match(html, /:root\[data-theme="dark"\][\s\S]*?--paper-edge:rgba\(255,255,255,\.06\)/);
+  assert.match(html, /--shadow-card:inset 0 1px 0 var\(--paper-edge\)/);
+  assert.match(html, /--shadow-pill:inset 0 1px 0 var\(--paper-edge\)/);
+  assert.doesNotMatch(html, /--shadow-(?:card|pill):[^;]*(?:rgba\(0,0,0|rgba\(31,26,23)/);
   assert.doesNotMatch(html, /inset 0 1px 0 rgba\(255,255,255,\.9\)/);
 });
 
@@ -622,7 +625,7 @@ test("the pill uses ordinary native input routing", () => {
   const create = sliceFunction(main, "function createWindow(");
   assert.match(create, /focusable: true/);
   assert.match(create, /skipTaskbar: true/);
-  assert.match(create, /hasShadow: true/);
+  assert.match(create, /hasShadow: false/);
   assert.doesNotMatch(main, /setIgnoreMouseEvents|applyIgnore|hitTick|startHitTest/);
   assert.doesNotMatch(main + preload + html, /relay:setFocusable|setFocusable/);
   assert.match(html, /\.card \{\s*position:absolute; inset:0;/);

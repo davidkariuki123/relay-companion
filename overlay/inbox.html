@@ -34,8 +34,12 @@
     --wash-3:rgba(31,26,23,.10);    /* pressed */
     --edge:rgba(31,26,23,.16);      /* input borders, scrollbar */
     --paper-edge:rgba(255,255,255,.9);
-    --shadow-card:0 1px 2px rgba(31,26,23,.05), 0 18px 50px -12px rgba(31,26,23,.16), inset 0 1px 0 var(--paper-edge);
-    --shadow-pill:0 1px 2px rgba(31,26,23,.05), 0 6px 18px -6px rgba(31,26,23,.14), inset 0 1px 0 var(--paper-edge);
+    /* The native window is fitted exactly to this surface. Exterior CSS shadows
+       are visible only while a shrink is pending, then get clipped at rest — a
+       dark halo that appears to collapse into an outline. Keep the surface edge
+       inside its bounds; popovers retain --shadow-pop below. */
+    --shadow-card:inset 0 1px 0 var(--paper-edge);
+    --shadow-pill:inset 0 1px 0 var(--paper-edge);
     --shadow-pop:0 12px 30px -18px rgba(31,26,23,.35);
     --accent-soft:color-mix(in srgb, var(--accent) 10%, transparent);
     --accent-press:color-mix(in srgb, var(--accent) 15%, transparent);
@@ -72,8 +76,8 @@
     --wash-3:rgba(237,231,225,.11);
     --edge:rgba(237,231,225,.18);
     --paper-edge:rgba(255,255,255,.06);
-    --shadow-card:0 1px 2px rgba(0,0,0,.3), 0 18px 50px -12px rgba(0,0,0,.55), inset 0 1px 0 var(--paper-edge);
-    --shadow-pill:0 1px 2px rgba(0,0,0,.3), 0 6px 18px -6px rgba(0,0,0,.5), inset 0 1px 0 var(--paper-edge);
+    --shadow-card:inset 0 1px 0 var(--paper-edge);
+    --shadow-pill:inset 0 1px 0 var(--paper-edge);
     --shadow-pop:0 12px 30px -18px rgba(0,0,0,.6);
     --av-bg-l:24%; --av-fg-l:76%;
   }
