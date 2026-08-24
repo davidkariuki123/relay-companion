@@ -50,6 +50,9 @@ jobs:
           test/distribution-trust.test.mjs
           test/credential-store-darwin.integration.test.mjs
           test/account.test.mjs
+          test/pill-read-ui.test.mjs
+          test/pill-task-ui.test.mjs
+          test/thread-titles-ui.test.mjs
           test/installation-authorization.test.mjs
           test/install.test.mjs
           test/cli-trampoline.test.mjs
