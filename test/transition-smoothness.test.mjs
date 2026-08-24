@@ -103,6 +103,17 @@ test("the folded pill face is committed only with native-window settlement", () 
   assert.match(main, /ipcMain\.handle\("relay:cardSizeSettled"/);
 });
 
+test("macOS collapse hands the compositor the anchored origin before the pill size", () => {
+  const fit = between(main, "function fitOverlayWindowToCard", "function createWindow");
+  const macShrink = between(fit, 'if (process.platform === "darwin" && !growing)', "return;");
+  const position = macShrink.indexOf("win.setPosition(target.x, target.y, false)");
+  const size = macShrink.indexOf("win.setSize(target.width, target.height, false)");
+  assert.ok(position >= 0 && size > position,
+    "the smaller pill cannot be composited for one frame at the expanded window's old left edge");
+  assert.doesNotMatch(macShrink, /true\)/,
+    "native AppKit animation would fight the renderer spring and visibly vibrate");
+});
+
 test("all compact-to-reader resize transitions can hold a frozen source face", () => {
   const prepare = between(html, "function prepareReaderMorph", "function startReaderMorph");
   assert.doesNotMatch(prepare, /sourceView !== "tasks"/);
