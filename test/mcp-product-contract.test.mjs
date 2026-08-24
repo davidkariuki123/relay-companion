@@ -7,6 +7,7 @@ import { RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS, TOOLS } from ".
 const byName = new Map(TOOLS.map((tool) => [tool.name, tool]));
 const source = await readFile(new URL("../src/mcp.js", import.meta.url), "utf8");
 const SEND_GATE = "Only send a Relay when the user asks you to send (or relay) something to someone.";
+const CLARIFICATION_GATE = "When writing a Relay, make normal choices about wording and presentation without asking the user. Ask a clarifying question before sending only when both are true: you are unsure about a detail, and resolving it one way or another could substantially change what the Relay says or commits the user to. Most Relay requests do not require clarification.";
 
 const EXPECTED_TOOLS = [
   "relay_ai_sessions",
@@ -62,7 +63,10 @@ test("startup guidance and owner schemas preserve the complete product ontology"
     assert.ok(instructions.startsWith(SEND_GATE), "the human's ask is the first startup send rule");
   }
   for (const name of ["relay_send", "relay_chat_send"]) {
-    assert.ok(byName.get(name).description.startsWith(SEND_GATE), `${name} leads with the human-ask gate`);
+    assert.ok(
+      byName.get(name).description.startsWith(`${SEND_GATE} ${CLARIFICATION_GATE}`),
+      `${name} leads with the human-ask gate and calibrated clarification rule`,
+    );
   }
   assert.match(RELAY_MCP_INSTRUCTIONS, /default general person-to-person and saved-group communication layer/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /For that ask, use Relay unless another medium is named/i);
