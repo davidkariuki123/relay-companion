@@ -1143,8 +1143,11 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
       const src = safeSessionImageUrl(result?.dataUrl || encoded);
       if (!result?.ok || !src) { file.dataset.loading = ""; return; }
       file.className = "session-user-image-wrap";
-      const img = document.createElement("img"); img.className = "session-user-image"; img.src = src; img.alt = attachment.name || "Image";
-      file.replaceChildren(img); file.dataset.src = src;
+      const frame = document.createElement("span"); frame.className = "session-user-image-frame";
+      const caption = document.createElement("span"); caption.className = "session-user-image-cap"; caption.textContent = attachment.name || "Image";
+      const img = document.createElement("img"); img.className = "session-user-image"; img.alt = attachment.name || "Image";
+      img.addEventListener("load", () => file.classList.add("ready"), { once:true });
+      img.src = src; frame.append(img); file.replaceChildren(frame, caption); file.dataset.src = src;
     }).catch(() => { if (file.isConnected) file.dataset.loading = ""; });
   }
 
@@ -1303,17 +1306,23 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
             const image = attachment.image || attachment.kind === "image" || /^image\//i.test(text(attachment.mimeType));
             const previewUrl = safeSessionImageUrl(attachment.previewUrl || attachment.url);
             if (image && previewUrl) {
-              file.className = "session-user-image-wrap";
+              file.className = "session-user-image-wrap ready";
               if (file.dataset.src !== previewUrl) {
-                file.innerHTML = `<img class="session-user-image" src="${escapeHtml(previewUrl)}" alt="${escapeHtml(attachment.name || "Image")}">`;
+                file.innerHTML = `<span class="session-user-image-frame"><img class="session-user-image" src="${escapeHtml(previewUrl)}" alt="${escapeHtml(attachment.name || "Image")}"></span><span class="session-user-image-cap">${escapeHtml(attachment.name || "Image")}</span>`;
                 file.dataset.src = previewUrl;
               }
+            } else if (image) {
+              file.className = "session-user-image-wrap";
+              if (!file.querySelector(".session-user-image-frame")) file.innerHTML = `<span class="session-user-image-frame"></span><span class="session-user-image-cap">${escapeHtml(attachment.name || "Image")}</span>`;
+              hydrateSessionAttachment(file, attachment, { relayId:text(content.relayId), sessionId:sessionCurrentSessionId, turnId:turn.turnId || turn.key, itemId:block.unit.id }, attachment.attachmentIndex);
             } else {
               file.className = "session-user-file"; file.textContent = attachment.name || "Attachment";
-              if (image) hydrateSessionAttachment(file, attachment, { relayId:text(content.relayId), sessionId:sessionCurrentSessionId, turnId:turn.turnId || turn.key, itemId:block.unit.id }, attachment.attachmentIndex);
             }
           });
-          updateSessionMarkdown(node._sessionUser, block.unit, "user-msg"); return;
+          node._sessionFiles.classList.toggle("one", (block.unit.attachments || []).filter((attachment) => attachment.image || attachment.kind === "image" || /^image\//i.test(text(attachment.mimeType))).length === 1);
+          updateSessionMarkdown(node._sessionUser, block.unit, "user-msg");
+          node._sessionUser.hidden = !text(block.unit.text).trim();
+          return;
         }
         if (block.type === "divider") { node.className = "session-divider"; node.replaceChildren(); return; }
         if (block.type === "final") { updateSessionMarkdown(node, block.unit, "session-final"); return; }

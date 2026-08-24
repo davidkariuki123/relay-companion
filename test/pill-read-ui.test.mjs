@@ -47,23 +47,31 @@ test("reading a Relay never removes it from the Relays identity index", () => {
   assert.doesNotMatch(fullIndex, /filter\([^\n]*unread/);
 });
 
-test("attachment chips are clickable buttons that open through main, never the renderer", () => {
-  // Renderer: relay rows and thread messages render chips as buttons carrying
-  // only ids; the click routes through the preload bridge.
+test("attachments use image plates and quiet file rows backed only by main-process bytes", () => {
+  // Renderer: image attachments unfold into design-system plates while files
+  // remain chips. Both carry only ids; open and preview route through preload.
   assert.match(html, /button class="td-att td-att-open"[^>]*data-att-relay=/);
-  assert.match(html, /attachmentChips\(r\.attachments, \{ relayId: r\.id \}\)/);
+  assert.match(html, /button class="att-fig td-att-open"[^>]*data-att-preview="1"/);
+  assert.match(html, /attachmentPlates\(r\.attachments, \{ relayId: r\.id \}\)/);
   // THE CARGO LAW: files stand free BENEATH the bubble, in their own zone —
   // never inside it, where the enclosure outweighed the relay itself.
-  assert.match(html, /<div class="th-cargo\$\{mine \? " mine" : ""\}">\$\{attachmentChips\(files, \{ relayId: m\.id \}\)\}<\/div>/);
+  assert.match(html, /<div class="th-cargo\$\{mine \? " mine" : ""\}">\$\{attachmentPlates\(files, \{ relayId: m\.id \}\)\}<\/div>/);
   assert.match(html, /window\.relay\.openAttachment\(relayId, chip\.getAttribute\("data-att-id"\)\)/);
+  assert.match(html, /window\.relay\.previewAttachment/);
+  assert.match(html, /class="att-plate"/);
+  assert.match(html, /class="att-cap"/);
   // Preload: invoke pair.
   assert.match(preload, /openAttachment: \(relayId, attachmentId\) => ipcRenderer\.invoke\("relay:openAttachment", relayId, attachmentId\)/);
+  assert.match(preload, /previewAttachment: \(relayId, attachmentId\) => ipcRenderer\.invoke/);
   // Main: handler exists, containment-checks the stored path against the
-  // attachments store before shell.openPath, and downloads on demand.
+  // attachments store before either shell.openPath or bounded preview, and
+  // downloads on demand.
   assert.match(main, /ipcMain\.handle\("relay:openAttachment"/);
+  assert.match(main, /ipcMain\.handle\("relay:previewAttachment"/);
   assert.match(main, /resolved\.startsWith\(attachmentsRoot \+ path\.sep\)/);
   assert.match(main, /shell\.openPath\(target\)/);
   assert.match(main, /materializeAttachmentFiles/);
+  assert.match(main, /resolveSafeAttachmentPreview/);
 });
 
 test("relay rows project attachment metadata only — no localPath, no signed URL", () => {

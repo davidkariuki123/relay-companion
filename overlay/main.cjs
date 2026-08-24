@@ -3752,12 +3752,26 @@ function openUrlTarget(url) {
  * same local open. `shell.openPath` is the file:// path: self-contained HTML
  * opens perfectly from disk, where the web origin can never render it.
  */
-async function openRelayAttachment(relayId, attachmentId) {
+async function resolveRelayAttachment(relayId, attachmentId) {
   const id = String(relayId || "").trim();
   const attId = String(attachmentId || "").trim();
   if (!id || !attId) return { ok: false, error: "missing id" };
-  const store = readStore();
-  const row = (store.packets || {})[id];
+  let store = readStore();
+  let stateId = (store.packets || {})[id] ? id : (store.packets || {})[`sent_${id}`] ? `sent_${id}` : "";
+  if (!stateId) {
+    const sentItem = (sentCache || []).find((item) => String(item?.relayId || item?.id || "") === id);
+    if (sentItem) {
+      try {
+        const stageSentRelayItem = await loadSentStager();
+        const staged = stageSentRelayItem({ item: sentItem, sender: account() }, { statePath: STATE_PATH });
+        stateId = String(staged?.itemId || "");
+        store = readStore();
+      } catch (error) {
+        console.error("[overlay] sent attachment staging failed:", error && error.message);
+      }
+    }
+  }
+  const row = stateId ? (store.packets || {})[stateId] : null;
   if (!row) return { ok: false, error: "relay not found" };
   const attachments = Array.isArray(row.attachments) ? row.attachments : [];
   const attachment = attachments.find((a) => a && a.id === attId);
@@ -3775,22 +3789,24 @@ async function openRelayAttachment(relayId, attachmentId) {
   };
 
   let target = containedLocalPath(attachment.localPath);
+  let canonical = attachment;
   if (!target) {
     try {
       const { materializeAttachmentFiles } = await import(
         pathToFileURL(path.join(__dirname, "..", "src", "materializer.js")).href
       );
       const materialized = await materializeAttachmentFiles(
-        { id, attachments, attachmentUrls: row.attachmentUrls || {} },
+        { id: row.sourceRelayId || id, attachments, attachmentUrls: row.attachmentUrls || {} },
         { log: (m) => console.error(`[overlay] ${m}`) },
       );
       const fresh = (materialized.attachments || []).find((a) => a && a.id === attId);
       target = containedLocalPath(fresh && fresh.localPath);
+      if (fresh) canonical = fresh;
       if (target) {
         withJsonLock(STATE_PATH, () => {
           const state = readStore();
-          if (state.packets && state.packets[id]) {
-            state.packets[id].attachments = materialized.attachments;
+          if (state.packets && state.packets[stateId]) {
+            state.packets[stateId].attachments = materialized.attachments;
             writeStateAtomic(state);
           }
         });
@@ -3800,6 +3816,13 @@ async function openRelayAttachment(relayId, attachmentId) {
     }
   }
   if (!target) return { ok: false, error: "attachment unavailable — download failed" };
+  return { ok: true, id, stateId, attachment: canonical, target, attachmentsRoot };
+}
+
+async function openRelayAttachment(relayId, attachmentId) {
+  const resolved = await resolveRelayAttachment(relayId, attachmentId);
+  if (!resolved.ok) return resolved;
+  const { target } = resolved;
   if (process.env.RELAY_OVERLAY_TEST_NO_HOST_OPEN === "1") {
     console.error("[overlay] test seam: suppressed attachment open:", target);
     return { ok: true, path: target, suppressed: true };
@@ -3807,6 +3830,24 @@ async function openRelayAttachment(relayId, attachmentId) {
   const openError = await shell.openPath(target);
   if (openError) return { ok: false, error: openError };
   return { ok: true, path: target };
+}
+
+async function previewRelayAttachment(relayId, attachmentId) {
+  const resolved = await resolveRelayAttachment(relayId, attachmentId);
+  if (!resolved.ok) return resolved;
+  try {
+    const { resolveSafeAttachmentPreview } = await import(
+      pathToFileURL(path.join(__dirname, "..", "src", "safe-attachment-preview.js")).href
+    );
+    const preview = await resolveSafeAttachmentPreview({
+      ...resolved.attachment,
+      path: resolved.target,
+      size: Number(resolved.attachment?.bytes ?? resolved.attachment?.size),
+    }, { allowedRoots: [resolved.attachmentsRoot] });
+    return { ok: true, ...preview };
+  } catch (error) {
+    return { ok: false, error: (error && error.message) || "Attachment preview failed safely." };
+  }
 }
 
 // ---- window placement / visibility ---------------------------------------
@@ -6950,6 +6991,7 @@ ipcMain.handle("relay:preview:steer", (event, input) => {
 ipcMain.on("relay:openTask", (_e, taskId) => openTaskDetail(taskId));
 ipcMain.on("relay:openUrl", (_e, url) => openUrlTarget(url));
 ipcMain.handle("relay:openAttachment", (_e, relayId, attachmentId) => openRelayAttachment(relayId, attachmentId));
+ipcMain.handle("relay:previewAttachment", (_e, relayId, attachmentId) => previewRelayAttachment(relayId, attachmentId));
 ipcMain.on("relay:ack", (_e, id) => ackPacket(id));
 ipcMain.handle("relay:ackMany", async (_e, ids) => {
   const ok = await ackPackets(Array.isArray(ids) ? ids : [], { optimistic: true });

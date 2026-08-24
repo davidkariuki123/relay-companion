@@ -227,3 +227,21 @@ test("historical images use only the authorized bounded attachment channel", () 
   assert.equal(inbox.includes("/^https:\\/\\//"), false);
   assert.equal(preview.includes("/^https:\\/\\//"), false);
 });
+
+test("Work images render as uncropped captioned plates outside the text bubble", () => {
+  const inbox = fs.readFileSync(new URL("../overlay/inbox.html", import.meta.url), "utf8");
+  const preview = fs.readFileSync(new URL("../overlay/preview.html", import.meta.url), "utf8");
+  const previewRenderer = fs.readFileSync(new URL("../overlay/preview-renderer.js", import.meta.url), "utf8");
+  assert.match(inbox, /class="rd-user-image-wrap/);
+  assert.match(inbox, /class="rd-user-image-frame"/);
+  assert.match(inbox, /class="rd-user-image-cap"/);
+  assert.match(inbox, /object-fit:contain/);
+  assert.doesNotMatch(inbox, /\.rd-user-image \{[^}]*object-fit:cover/);
+  assert.match(inbox, /`\$\{runUserAttachmentsHtml\(block\.unit\.attachments\)\}\$\{userCopy \? `<div class="rd-user/,
+    "the plate is a sibling before the optional text bubble");
+  assert.match(preview, /\.session-user-image-wrap\.ready/);
+  assert.match(preview, /\.session-user-image-cap/);
+  assert.match(preview, /object-fit:contain/);
+  assert.match(previewRenderer, /session-user-image-frame/);
+  assert.match(previewRenderer, /session-user-image-cap/);
+});

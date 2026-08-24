@@ -297,8 +297,20 @@
     .session-user-actions button { appearance:none; border:0; background:transparent; padding:3px 5px; color:var(--muted); font:500 11px/15px var(--sans); cursor:pointer; }
     .session-user-actions button:hover { color:var(--ink); }
     .session-user-wrap { align-self:flex-end; display:flex; flex-direction:column; align-items:flex-end; max-width:77%; gap:4px; }
-    .session-user-files { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:6px; margin-bottom:7px; }
-    .session-user-image { display:block; width:min(240px, 58vw); max-height:220px; object-fit:cover; border-radius:10px; }
+    .session-user-files { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); justify-content:flex-end;
+      width:min(560px, 70vw); gap:8px; margin-bottom:7px; }
+    .session-user-files.one { grid-template-columns:minmax(0, 1fr); }
+    .session-user-image-wrap { display:flex; flex-direction:column; min-width:0; margin:0; }
+    .session-user-image-frame { display:grid; place-items:center; width:100%; aspect-ratio:16 / 10; overflow:hidden;
+      border:1px solid var(--line); border-radius:12px; background:var(--canvas); }
+    .session-user-image-frame::before { content:""; width:5px; height:5px; background:var(--provider); opacity:.52; }
+    .session-user-image-wrap.ready .session-user-image-frame { aspect-ratio:auto; background:transparent; }
+    .session-user-image-wrap.ready .session-user-image-frame::before { display:none; }
+    .session-user-image { display:block; width:100%; height:auto; object-fit:contain; opacity:0;
+      transform:scale(.98); transition:opacity .42s cubic-bezier(.35,0,.12,1), transform .42s cubic-bezier(.32,1.24,.32,1); }
+    .session-user-image-wrap.ready .session-user-image { opacity:1; transform:none; }
+    .session-user-image-cap { padding:5px 2px 0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+      color:var(--muted-2); font:10.5px/15px var(--mono); }
     .session-user-file { padding:4px 8px; border-radius:9px; background:var(--canvas); color:var(--muted); font-size:12px; }
     .agent-prose { font-size:14px; line-height:21px; color:var(--ink-soft); user-select:text; max-width:62ch; overflow-wrap:anywhere; }
     .agent-prose .markdown { font-size:14px; line-height:21px; }

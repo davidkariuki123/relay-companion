@@ -93,6 +93,13 @@ contextBridge.exposeInMainWorld("relay", {
   // Attachment chip click: main resolves the local copy (or downloads it) and
   // opens it; the renderer never sees paths or URLs. Returns { ok, error? }.
   openAttachment: (relayId, attachmentId) => ipcRenderer.invoke("relay:openAttachment", relayId, attachmentId),
+  // Image plates use the same canonical attachment lookup, but receive only
+  // bounded, signature-checked image bytes. Paths and signed URLs stay in main.
+  previewAttachment: (relayId, attachmentId) => ipcRenderer.invoke(
+    "relay:previewAttachment",
+    String(relayId || ""),
+    String(attachmentId || ""),
+  ),
   refreshSent: () => ipcRenderer.invoke("relay:refreshSent"),
 
   // task mutations (return { ok, error?, conflict? })
