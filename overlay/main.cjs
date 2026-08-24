@@ -7188,9 +7188,9 @@ ipcMain.handle("relay:credentialRetry", async () => {
   await pushInbox(true);
   return { ok: next.credentialStatus === "available", account: next };
 });
-ipcMain.handle("relay:chatAgentPreferences", async () => new RelayClient().chatAgentPreferences());
+ipcMain.handle("relay:chatAgentPreferences", async () => (await relayClient()).chatAgentPreferences());
 ipcMain.handle("relay:chatAgentPreferencesSave", async (_event, input = {}) =>
-  new RelayClient().updateChatAgentPreferences(input));
+  (await relayClient()).updateChatAgentPreferences(input));
 ipcMain.handle("relay:connectChatGPT", () => connectChatGPT());
 ipcMain.handle("relay:connectClaude", () => connectClaude());
 ipcMain.handle("relay:completeSetupTutorial", () => completeSetupTutorial());

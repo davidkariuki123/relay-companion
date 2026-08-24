@@ -418,6 +418,13 @@ test("account settings opens the first-party identity gateway for the paired acc
   assert.doesNotMatch(renderer, /openUrl\("\/app\/settings"\)/);
 });
 
+test("chat agent preferences use the lazily loaded Relay client", () => {
+  const main = fs.readFileSync(new URL("../overlay/main.cjs", import.meta.url), "utf8");
+  assert.match(main, /relay:chatAgentPreferences", async \(\) => \(await relayClient\(\)\)\.chatAgentPreferences\(\)/);
+  assert.match(main, /\(await relayClient\(\)\)\.updateChatAgentPreferences\(input\)/);
+  assert.doesNotMatch(main, /relay:chatAgentPreferences[^\n]+new RelayClient/);
+});
+
 test("switch account uses eight code cells and a short clickable setup link", () => {
   const renderer = fs.readFileSync(new URL("../overlay/inbox.html", import.meta.url), "utf8");
 

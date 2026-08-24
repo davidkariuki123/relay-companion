@@ -63,6 +63,35 @@ test("a conversation is named only by its person or saved group", () => {
   assert.doesNotMatch(chat, />See all</);
 });
 
+test("known @handles render as highlighted contact names without changing unknown text", () => {
+  const start = html.indexOf("function mentionContact(");
+  const end = html.indexOf("\n  function relaySender(", start);
+  assert.notEqual(start, -1, "missing mention renderer");
+  assert.notEqual(end, -1, "missing mention renderer boundary");
+  const source = html.slice(start, end);
+  const escapeHtml = (value) => String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+  const linkify = Function(
+    "contactsList",
+    "esc",
+    `"use strict"; ${source}; return linkify;`,
+  )([{ handle:"shane_acton", name:"Shane Acton" }], escapeHtml);
+
+  assert.equal(
+    linkify("@Shane_Acton what's the word?"),
+    '<span class="th-mention" aria-label="Mentioned Shane Acton">@Shane Acton</span> what&#039;s the word?',
+  );
+  assert.equal(linkify("Ask @not_saved"), "Ask @not_saved", "unknown handles stay honest");
+  assert.equal(linkify("mail shane@shane_acton.dev"), "mail shane@shane_acton.dev", "email domains are not mentions");
+  assert.match(linkify("https://example.com/@shane_acton"), /^<a href=/, "a URL remains one link token");
+  assert.match(html, /\.th-msg\.text \.th-mention \{[\s\S]*?border:1px solid[\s\S]*?background:/);
+  assert.match(html, /else if \(activeView === "threads"\) renderThreads\(\)/, "an open room repaints after contact names load");
+});
+
 test("direct and group conversations share one newest-first chronology", () => {
   const source = html.slice(html.indexOf("function chatSections()"), html.indexOf("function chatRoomForThread("));
   assert.match(source, /const rooms = sortConversationRooms\(\[\.\.\.groups, \.\.\.people\]\)/);
@@ -375,13 +404,10 @@ test("a room has at most one Seen receipt and a pending send suppresses the old 
   assert.doesNotMatch(html, /if \(m\.textLike\) \{\s*const newest = msgs\.filter/);
 });
 
-test("a temporal conversation gap is applied once per boundary, never to both header and bubble", () => {
-  assert.match(html, /const headerGapClass = cont \? "" : gapClass/);
-  assert.match(html, /const bubbleGapClass = cont \? gapClass : ""/);
-  assert.match(html, /class="th-run\$\{headerGapClass\}/);
-  assert.match(html, /class="th-msg\$\{hasHostActions \? " has-host-actions" : ""\}\$\{bubbleGapClass\}/);
-  assert.doesNotMatch(html, /class="th-run\$\{gapClass\}/);
-  assert.doesNotMatch(html, /class="th-msg\$\{gapClass\}/);
+test("only a six-hour chunk boundary changes conversation geometry", () => {
+  assert.doesNotMatch(html, /gap-mid|gapClass|headerGapClass|bubbleGapClass/);
+  assert.doesNotMatch(html, /th-seam|chainChanged|chainSeamClass/);
+  assert.match(html, /const chunkDivider = chunkDateLabel/);
 });
 
 test("conversation chunks carry the selected Relay date divider", () => {
@@ -406,11 +432,7 @@ test("conversation chunks carry the selected Relay date divider", () => {
 
   assert.match(html, /class="th-chunk-date\$\{firstChunk \? " first" : ""\}" role="separator"/);
   assert.match(html, /return `\$\{chunkDivider\}\$\{runHeader\}/);
-  assert.match(html, /&& !\(prev\.textLike && m\.textLike\)/);
-  assert.match(html, /const chainSeamClass = chainChanged && !chunkDateLabel \? " th-seam" : ""/);
-  assert.match(html, /class="th-run\$\{headerGapClass\}\$\{chainSeamClass\}/);
-  assert.doesNotMatch(html, /\$\{chainChanged \? " th-seam" : ""\}/);
-  assert.doesNotMatch(html, /\.th-msg\.gap-far|\.th-run\.gap-far/);
+  assert.doesNotMatch(html, /\.th-run\.th-seam|\.th-msg\.gap-mid|\.th-run\.gap-mid/);
 });
 
 test("a dated chunk reintroduces the sender even inside the same wire thread", () => {
@@ -440,13 +462,20 @@ test("a dated chunk reintroduces the sender even inside the same wire thread", (
   assert.equal(
     continuesSenderRun(previous, { ...current, threadId: "another-chain" }, ""),
     true,
-    "nearby ordinary texts stay in one visible sender run across wire chains",
+    "opaque wire chains never split one speaker's visible run",
   );
   assert.equal(
     continuesSenderRun({ ...previous, textLike:false }, { ...current, textLike:false, threadId:"another-chain" }, ""),
-    false,
-    "structured Relays keep a real chain boundary",
+    true,
+    "structured Relays also stay in the same visible run",
   );
+  const request = { ...previous, textLike:false, request:true, threadId:"firebase" };
+  const correction = { ...request };
+  const text = { ...previous, textLike:true, request:false, threadId:"plain-text" };
+  const nextRequest = { ...request, threadId:"plugin" };
+  assert.equal(continuesSenderRun(request, correction, ""), true, "a Request correction stays grouped");
+  assert.equal(continuesSenderRun(correction, text, ""), true, "Request to text stays grouped");
+  assert.equal(continuesSenderRun(text, nextRequest, ""), true, "text to Request stays grouped");
   assert.match(html, /const cont = continuesSenderRun\(prev, m, chunkDateLabel\)/);
 });
 

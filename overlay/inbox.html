@@ -1197,6 +1197,16 @@
   #thRows.inbox-order .th-msg:last-of-type { margin-bottom:10px; }
   .th-msg.text { cursor:default; user-select:text; }
   .th-msg.text .th-msg-title a { color:var(--accent); text-decoration:none; border-bottom:1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+  /* Mentions keep their stable @handle in the message payload, but read as the
+     person's contact-book name. The outlined wash makes the reference an
+     unmistakable inline object without turning it into a button. */
+  .th-msg.text .th-mention {
+    display:inline-block; max-width:100%; margin:0 1px; padding:0 4px;
+    border:1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+    border-radius:4px; background:color-mix(in srgb, var(--accent) 14%, transparent);
+    color:var(--accent); font-weight:600; line-height:1.35; white-space:nowrap;
+    vertical-align:baseline;
+  }
   .agent-working-indicator { display:inline-flex; align-items:center; gap:3px; margin-left:7px; vertical-align:2px; }
   .agent-working-dot { width:5px; height:5px; border-radius:50%; background:currentColor; opacity:.35;
     animation:agentWorkingPulse 1.2s var(--settle) infinite; }
@@ -1266,9 +1276,6 @@
     .th-msg.opening .th-host-logo { animation:none; }
     .th-host-disclosure .chev { transition:none; }
   }
-  /* A chain boundary is a SEAM, not a name: hairline + air where the reply
-     chain changes. The cluster's heading is its root letter's own subject. */
-  .th-run.th-seam { border-top:1px solid var(--hair); padding-top:14px; margin-top:14px; }
   /* The B-rule, said where hand-offs actually happen (the reader is off the
      beaten path now — Sven: "havent implemented anything for that which i can
      see"): under the unfolded strip, one muted line resolves the destination
@@ -1666,9 +1673,9 @@
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .rl-receipt .rc-app { font-family:var(--sans); font-size:10.5px; color:var(--muted-2); }
   .rl-receipt .rc-when { flex:0 0 auto; font-family:var(--sans); font-size:10px; color:var(--muted-2); }
-  /* Time is distance: shorter pauses remain whitespace; a new conversation
+  /* Time alone creates conversation sections. Message species and internal
+     reply-chain ids never affect room geometry; after six quiet hours the new
      chunk gets one dated hairline that labels the messages immediately below. */
-  .th-msg.gap-mid, .th-run.gap-mid { margin-top:20px; }
   .th-chunk-date { display:flex; align-items:center; gap:9px; width:100%; margin:24px 0 0;
     color:var(--muted-2); font-family:var(--sans); font-size:10px; font-weight:600; line-height:1; }
   .th-chunk-date.first { margin-top:8px; }
@@ -3329,22 +3336,16 @@
     return formatChatDate(iso, nowValue);
   }
 
-  // A dated chunk is a new readable block even when its first message happens
-  // to share the sender, direction, and wire thread with the previous chunk.
-  // Without this boundary, the off-screen earlier message owns the only sender
-  // header and the first visible message below "Today" appears anonymous.
+  // One person or saved group is one chronological conversation. Sender and
+  // direction define a visual run; message species, provider, and opaque wire
+  // thread ids never split it. Only a dated chunk reintroduces the sender, so
+  // the first visible message below "Today" never appears anonymous.
   function continuesSenderRun(previous, current, chunkDateLabel) {
     return Boolean(
       previous
       && !chunkDateLabel
       && previous.party === current.party
-      && previous.direction === current.direction
-      // A human chat is one visible room. Its ordinary texts may carry
-      // different internal reply-chain ids, but that metadata cannot split a
-      // run the person sent minutes apart. Structured Relays keep their real
-      // chain boundary; text keeps the conversational/time boundary.
-      && (Boolean(previous.textLike && current.textLike)
-        || String(previous.threadId || "") === String(current.threadId || "")),
+      && previous.direction === current.direction,
     );
   }
 
@@ -3637,11 +3638,48 @@
     return prefix || "Someone";
   }
 
-  // Escape, then turn bare URLs into live anchors — a link in a text must
-  // open the LINK (David), never anything else.
+  function mentionContact(handle) {
+    const key = String(handle || "").replace(/^@/, "").trim().toLowerCase();
+    if (!key) return null;
+    return contactsList.find((contact) =>
+      String((contact && contact.handle) || "").replace(/^@/, "").trim().toLowerCase() === key,
+    ) || null;
+  }
+
+  function mentionDisplayName(handle) {
+    const contact = mentionContact(handle);
+    if (!contact) return "";
+    const name = String(contact.name || "").trim();
+    return name && name.indexOf("@") === -1 ? name : "";
+  }
+
+  // Escape once while turning bare URLs into live anchors and known @handles
+  // into named mention chips. Unknown handles remain literal text; the wire
+  // value is never rewritten, so routing stays stable when a contact is renamed.
   function linkify(text) {
-    return esc(String(text || "")).replace(/\bhttps?:\/\/[^\s<]+/g, (u) =>
-      `<a href="${u}" data-stop="1" target="_blank" rel="noreferrer noopener">${u}</a>`);
+    const source = String(text || "");
+    const token = /https?:\/\/[^\s<]+|@[A-Za-z0-9][A-Za-z0-9._-]*/g;
+    let html = "";
+    let cursor = 0;
+    let match;
+    while ((match = token.exec(source))) {
+      const value = match[0];
+      const index = match.index;
+      html += esc(source.slice(cursor, index));
+      if (value.startsWith("http")) {
+        const safe = esc(value);
+        html += `<a href="${safe}" data-stop="1" target="_blank" rel="noreferrer noopener">${safe}</a>`;
+      } else {
+        // Do not turn the domain half of an email address into a mention.
+        const previous = index > 0 ? source[index - 1] : "";
+        const displayName = /[A-Za-z0-9._%+-]/.test(previous) ? "" : mentionDisplayName(value);
+        html += displayName
+          ? `<span class="th-mention" aria-label="Mentioned ${esc(displayName)}">@${esc(displayName)}</span>`
+          : esc(value);
+      }
+      cursor = index + value.length;
+    }
+    return html + esc(source.slice(cursor));
   }
 
   function relaySender(row) {
@@ -9661,42 +9699,20 @@
       const chunkDateLabel = chatChunkDateLabel(m.at, previousChunkMessage && previousChunkMessage.at);
       const firstChunk = !previousChunkMessage;
       previousChunkMessage = m;
-      // BOUNDARIES WITHOUT NAMES (Sven / Shane's stacking report): where the
-      // reply chain changes between adjacent cards, a quiet seam separates the
-      // clusters and the sender run breaks so a new topic re-introduces its
-      // speaker. A dated chunk is also a new run: otherwise its first visible
-      // message inherits a sender header that may be days above the viewport.
-      const chainChanged = Boolean(
-        prev
-        && !(prev.textLike && m.textLike)
-        && String(m.threadId || "") !== String(prev.threadId || ""),
-      );
+      // Identity creates the room and time creates its sections. A dated chunk
+      // starts a new run; internal reply chains and Task/Relay/text presentation
+      // never add seams or repeat the same speaker inside that chunk.
       const cont = continuesSenderRun(prev, m, chunkDateLabel);
-      // TIME IS DISTANCE. Messages sent hours apart sat as tight as messages
-      // sent seconds apart, so a day's conversation read as one squashed block
-      // (David). Shorter pauses remain distance; far pauses become a dated
-      // separator, so one boundary still owns exactly one piece of space.
-      const apart = prev ? Math.abs(new Date(m.at || 0) - new Date(prev.at || 0)) : 0;
-      const gapClass = !prev || chunkDateLabel ? "" : apart > 45 * 60e3 ? " gap-mid" : "";
       // A quick TEXT (title derived from its own body) speaks in the body
       // voice — sans, message-toned; a titled relay keeps the serif subject.
       const textLike = m.textLike;
       const agentWorking = m.ownedAgent && !String(m.agent || "").trim() && !m.deletedAt;
       const hasHostActions = !textLike && !m.request;
-      // A time boundary owns ONE piece of vertical distance. A new speaker/run
-      // has a header, so the header carries it; a continuation has no header,
-      // so its bubble carries it. Applying the same 34px class to both doubled
-      // every far boundary into the enormous gaps seen in 0.1.185.
-      const headerGapClass = cont ? "" : gapClass;
-      const bubbleGapClass = cont ? gapClass : "";
       const chunkDivider = chunkDateLabel
         ? `<div class="th-chunk-date${firstChunk ? " first" : ""}" role="separator"><span>${esc(chunkDateLabel)}</span></div>`
         : "";
-      // A dated chunk divider already owns this boundary. Do not stack the
-      // reply-chain seam underneath it when both the time gap and thread change.
-      const chainSeamClass = chainChanged && !chunkDateLabel ? " th-seam" : "";
       const runHeader = cont ? "" : `
-      <div class="th-run${headerGapClass}${chainSeamClass}${mine ? " mine" : ""}"><span class="th-party ${partyColorClass(who, mine)}">${esc(who)}</span>${m.e2ee ? `<span class="echip" title="Only the sender's and recipient's devices can read this message">Encrypted</span>` : ""}</div>`;
+      <div class="th-run${mine ? " mine" : ""}"><span class="th-party ${partyColorClass(who, mine)}">${esc(who)}</span>${m.e2ee ? `<span class="echip" title="Only the sender's and recipient's devices can read this message">Encrypted</span>` : ""}</div>`;
       const open = expandedMsgIds.has(m.id);
       const inlineBody = !textLike && !m.request && !open
         && !!m.body && String(m.body).length <= INLINE_BODY_MAX;
@@ -9706,7 +9722,7 @@
       ).join("")}</div>` : "";
       const hostActionsPersistent = hasHostActions && String(m.id) === latestHostActionRelayId;
       return `${chunkDivider}${runHeader}
-      <div class="th-msg${hasHostActions ? " has-host-actions" : ""}${bubbleGapClass}${m.unread ? " unread" : ""}${mine ? " mine" : ""}${cont ? " cont" : ""}${textLike ? " text" : ""}${agentWorking ? " agent-working" : ""}${open ? " open" : ""}${m.deletedAt ? " deleted" : ""}${aggregates.length ? " has-rx" : ""}"${textLike ? "" : ' role="button" tabindex="0"'}${agentWorking ? ' aria-busy="true"' : ""}${hasHostActions ? ` aria-expanded="${hostActionsPersistent ? "true" : "false"}"` : ""} data-msg="${esc(m.id)}" data-dir="${m.direction}" data-opening-id="${esc(m.id)}">
+      <div class="th-msg${hasHostActions ? " has-host-actions" : ""}${m.unread ? " unread" : ""}${mine ? " mine" : ""}${cont ? " cont" : ""}${textLike ? " text" : ""}${agentWorking ? " agent-working" : ""}${open ? " open" : ""}${m.deletedAt ? " deleted" : ""}${aggregates.length ? " has-rx" : ""}"${textLike ? "" : ' role="button" tabindex="0"'}${agentWorking ? ' aria-busy="true"' : ""}${hasHostActions ? ` aria-expanded="${hostActionsPersistent ? "true" : "false"}"` : ""} data-msg="${esc(m.id)}" data-dir="${m.direction}" data-opening-id="${esc(m.id)}">
         ${!REACTIONS_ENABLED || m.request ? "" : messageReactionPickerHtml(m.id)}
         ${messageReplyReferenceHtml(m)}
         <span class="th-msg-title">${m.request ? '<span class="kchip">Task</span>' : ""}${textLike ? linkify(m.title) : esc(m.title)}${agentWorking ? '<span class="agent-working-indicator" aria-hidden="true"><span class="agent-working-dot"></span><span class="agent-working-dot"></span><span class="agent-working-dot"></span></span>' : ""}${textLike ? "" : `<span class="th-more">${open ? "‹" : "›"}</span>`}${m.editedAt && !m.deletedAt ? '<span class="th-edited">edited</span>' : ""}</span><span class="th-blk-time">${esc(timeAgo(m.at))}</span>
@@ -11936,6 +11952,8 @@
       contactsList = next;
       if (activeView === "relays") renderRelays();
       else if (activeView === "sent") renderSent();
+      else if (activeView === "chat") renderChat();
+      else if (activeView === "threads") renderThreads();
     } catch {}
   })();
 
