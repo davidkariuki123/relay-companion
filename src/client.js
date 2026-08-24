@@ -90,6 +90,18 @@ export async function closeRelayConnections() {
   await closing.close().catch(() => {});
 }
 
+const LOCAL_TRANSPORT_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+/** Production credentials and content may travel only over authenticated TLS. */
+export function secureRelayApiUrl(value) {
+  const parsed = new URL(String(value || ""));
+  if (parsed.protocol === "https:") return parsed.href.replace(/\/$/, "");
+  if (parsed.protocol === "http:" && LOCAL_TRANSPORT_HOSTS.has(parsed.hostname)) {
+    return parsed.href.replace(/\/$/, "");
+  }
+  throw new Error("Relay requires HTTPS except for a local development server.");
+}
+
 /** Thin authenticated client for relay-api, used by the CLI, MCP server, and daemon. */
 export class RelayClient {
   // Set when the caller supplied its own token: such a client is deliberately
@@ -98,7 +110,7 @@ export class RelayClient {
   #pinned = false;
 
   constructor({ url = apiUrl(), token } = {}) {
-    this.url = url.replace(/\/$/, "");
+    this.url = secureRelayApiUrl(url);
     this.#pinned = token !== undefined;
     // The account this client speaks for. Captured once, here, because the
     // token is captured once — a long-lived holder (daemon, MCP server) uses
@@ -567,13 +579,13 @@ export class RelayClient {
         ...(item.historyImported ? { historyImported: true } : {}),
       } : item);
     }
-    const legacy = status.mode === "optional"
+    const managed = status.mode === "optional"
       ? await this.#req("GET", summary ? "/v1/inbox?view=summary" : "/v1/inbox")
       : { items: [] };
     return {
-      items: [...(legacy.items || []), ...e2eeItems]
+      items: [...(managed.items || []), ...e2eeItems]
         .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))),
-      ...(legacy.cursor ? { cursor: legacy.cursor } : {}),
+      ...(managed.cursor ? { cursor: managed.cursor } : {}),
     };
   }
 
@@ -647,9 +659,9 @@ export class RelayClient {
       .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
       .slice(0, Number.isFinite(limit) ? Math.max(1, Math.trunc(limit)) : 200);
     if (status.mode === "required") return { items: selected };
-    const legacy = await this.#req("GET", `/v1/sent${query}`);
+    const managed = await this.#req("GET", `/v1/sent${query}`);
     return {
-      items: [...(legacy.items || []), ...selected]
+      items: [...(managed.items || []), ...selected]
         .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
         .slice(0, Number.isFinite(limit) ? Math.max(1, Math.trunc(limit)) : 200),
     };
@@ -1018,8 +1030,8 @@ export class RelayClient {
     }
     e2ee.chats.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
     if (status.mode === "required") return e2ee;
-    const legacy = await this.#req("GET", "/v1/chats");
-    const merged = new Map((legacy.chats || []).map((chat) => [chat.chatId, chat]));
+    const managed = await this.#req("GET", "/v1/chats");
+    const merged = new Map((managed.chats || []).map((chat) => [chat.chatId, chat]));
     for (const chat of e2ee.chats) merged.set(chat.chatId, chat);
     return { chats: [...merged.values()].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))) };
   }

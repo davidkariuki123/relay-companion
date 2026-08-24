@@ -35,6 +35,12 @@ test("tab badges count unread items in their own visible surface", () => {
   assert.doesNotMatch(renderAll, /setBadge\(tasksBadgeEl, requestsWaitingCount\(\)\)/);
 });
 
+test("every literal DOM lookup names an element that exists in the overlay", () => {
+  const ids = [...html.matchAll(/document\.getElementById\("([^"]+)"\)/g)].map((match) => match[1]);
+  const missing = [...new Set(ids)].filter((id) => !html.includes(`id="${id}"`));
+  assert.deepEqual(missing, [], `missing DOM elements: ${missing.join(", ")}`);
+});
+
 test("reading a Relay never removes it from the Relays identity index", () => {
   const readRelays = main.slice(main.indexOf("function readRelays()"), main.indexOf("const RELAY_HIDDEN_KINDS"));
   const relays = html.slice(html.indexOf("function renderRelays()"), html.indexOf("function relayIdentityRowHtml"));

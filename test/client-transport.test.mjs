@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import http from "node:http";
-import { RelayClient, closeRelayConnections } from "../src/client.js";
+import { RelayClient, closeRelayConnections, secureRelayApiUrl } from "../src/client.js";
 
 const client = fs.readFileSync(new URL("../src/client.js", import.meta.url), "utf8");
 const pkg = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
@@ -35,6 +35,15 @@ test("every API call goes over a kept-alive connection, not a fresh handshake", 
 test("the connection pool can be closed, so a short-lived CLI still exits", () => {
   assert.match(client, /export async function closeRelayConnections\(\)/);
   assert.match(client, /await closing\.close\(\)\.catch/);
+});
+
+test("remote Relay traffic requires HTTPS while localhost remains available", () => {
+  assert.equal(secureRelayApiUrl("https://api.sendrelays.com/"), "https://api.sendrelays.com");
+  assert.equal(secureRelayApiUrl("http://127.0.0.1:4000/"), "http://127.0.0.1:4000");
+  assert.throws(
+    () => new RelayClient({ url: "http://api.example.com", token: "secret" }),
+    /requires HTTPS/,
+  );
 });
 
 test("bodyless delete requests do not claim to contain JSON", async (t) => {
