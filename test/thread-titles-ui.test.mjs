@@ -313,7 +313,7 @@ test("the user's own messages are labelled 'You' and sit left like every row", (
 
 test("the thread view never repaints identical markup (the Read-the-Conversation flash)", () => {
   assert.match(html, /const rowsChanged = Boolean\(thRowsEl\) && thRowsEl\.innerHTML !== finalRowsHtml;/);
-  assert.match(html, /if \(rowsChanged\) thRowsEl\.innerHTML = finalRowsHtml;/);
+  assert.match(html, /if \(rowsChanged\) \{\s*thRowsEl\.innerHTML = finalRowsHtml;/);
   assert.match(html, /if \(shellChanged \|\| rowsChanged\) \{/);
   assert.match(html, /return; \/\/ markup unchanged: existing handlers are still bound/);
   assert.match(html, /return; \/\/ nothing changed at all/);
@@ -594,7 +594,7 @@ test("the provenance byline is not confined to rows without an agent document", 
   // the MOST agent-authored things in the room — so the footer was withheld
   // from precisely the relays that most needed it, and could only ever appear
   // on a plain one-document text. It is rendered for every row; surface decides.
-  assert.match(html, /\$\{providerBylineHtml\(m\)\}/);
+  assert.match(html, /\$\{showProviderByline \? providerBylineHtml\(m\) : ""\}/);
   assert.doesNotMatch(html, /\$\{textLike \? providerBylineHtml\(m\) : ""\}/);
 });
 

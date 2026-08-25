@@ -139,13 +139,15 @@ test("From Slack is message provenance, not a blanket channel label", () => {
   assert.match(html, /provider: item\.provider \|\| \(item\.origin === "slack" \? \{ name:"slack" \} : null\)/);
   assert.match(html, /message\?\.origin === "slack" \|\| message\?\.provider\?\.name === "slack"/);
   assert.match(html, /<img src="slackMark\.png" alt="" \/>From Slack/);
+  assert.match(html, /const showProviderByline = !continuesIntoNext \|\| providerKey\(nextMessage\) !== providerKey\(m\)/,
+    "a Slack provenance shelf closes a sender run instead of repeating inside every short bubble");
 });
 
 test("Slack-linked files and agent documents open the deployed Relay reader", () => {
   assert.match(html, /for \(const chat of canonicalChatDetails\.values\(\)\)/);
   assert.match(html, /const chat = result\?\.chat \|\| result/,
     "the renderer unwraps the main-process canonical chat response before opening the reader");
-  assert.match(html, /canonicalChatDetails\.set\(chat\.chatId, chat\);[\s\S]*openFull\(\);[\s\S]*openReader\(messageId, "threads"\)/,
+  assert.match(html, /storeCanonicalChatDetail\(chat\);[\s\S]*openFull\(\);[\s\S]*openReader\(messageId, "threads"\)/,
     "View Relay deliberately unfolds the native Pill before opening the requested reader");
   assert.match(html, /attachments: item\.attachments \|\| \[\]/);
   assert.match(html, /const textLike = !\(item\.attachments \|\| \[\]\)\.length && relayTextLike/);
@@ -161,6 +163,29 @@ test("Slack channel replies live in a real thread subview, including earlier-roo
   assert.match(html, /Still linking this reply to its Slack thread…/);
   assert.match(html, /selectedReplyTargetId \|\| String\(focusedSlackParent\?\.id \|\| ""\)/,
     "the focused composer posts back into the Slack thread instead of creating a channel root");
+  assert.match(html, /String\(row\.inReplyToRelayId \|\| ""\) === rootId/,
+    "only an explicit child counts as a Slack reply; a shared compatibility thread key cannot create a false 1 reply");
+  assert.doesNotMatch(html, /row\.inReplyToRelayId \|\| row\.id !== message\?\.id/,
+    "top-level siblings are never inferred to be replies");
+});
+
+test("an open Slack channel refreshes on a live-chat cadence without repainting unchanged generations", () => {
+  assert.match(html, /const ACTIVE_CANONICAL_CHAT_POLL_MS = 1000/);
+  assert.match(html, /if \(activeCanonicalChatRefresh \|\| document\.visibilityState !== "visible" \|\| collapsed\) return/);
+  assert.match(html, /canonicalChatFingerprints\.get\(id\) === nextFingerprint\) return false/);
+  assert.match(html, /setInterval\(\(\) => \{ refreshActiveCanonicalChat\(\); \}, ACTIVE_CANONICAL_CHAT_POLL_MS\)/);
+  assert.match(html, /liveCanonicalArrivalIds\.add\(messageId\)/);
+  assert.match(html, /th-msg\.live-arrival \{ animation:thMessageArrival/);
+});
+
+test("an open Slack channel persists one canonical read cursor instead of acking canonical ids as legacy rows", () => {
+  assert.match(html, /const canonicalReadGeneration = new Map\(\)/);
+  assert.match(html, /item\.direction === "inbound" && \(item\.state === "pending" \|\| item\.state === "delivered"\)/);
+  assert.match(html, /canonicalReadGeneration\.get\(chatId\) !== generation/);
+  assert.match(html, /canonicalChatDetails\.set\(chatId, opened\)/);
+  assert.match(html, /window\.relay\.canonicalChatRead\?\.\(chatId\)/);
+  assert.match(html, /if \(!id\.startsWith\("relay_"\)\) continue/);
+  assert.match(html, /renderThreadDetail\(\);\s*readVisibleChatRoom\(\);/);
 });
 
 test("relay rows project attachment metadata only — no localPath, no signed URL", () => {

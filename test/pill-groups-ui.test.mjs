@@ -68,7 +68,8 @@ test("foreign channels expose a self-only leave action without roster administra
   assert.match(html, /<span class="cvg-badge">Archived<\/span>/);
   assert.match(html, /<span class="cvg-badge">Added you<\/span>/);
   assert.match(html, /editable && member\.role !== "owner" && id/);
-  assert.match(html, /else if \(!mine\)/);
+  assert.match(html, /else if \(!mine && !slack\)/,
+    "only native Relay channels expose the legacy leave action");
   assert.match(html, /data-gd-leave/);
   assert.match(html, /<button class="gd-leave" type="button" data-gd-leave>Leave channel<\/button>/);
   assert.doesNotMatch(html, /gd-leave-copy/);
@@ -150,6 +151,10 @@ test("group info joins creator, current user, and every member into one exact ro
 test("leaving keeps history but disables every group reply affordance", () => {
   assert.match(html, /function groupRoomPostingState\(room\)/);
   assert.match(html, /You left this channel\. Existing messages remain readable\./);
+  assert.match(html, /if \(leftGroupIds\.has\(groupId\)\) return \{ blocked:true/,
+    "only an explicit local leave is allowed to claim that the person left");
+  assert.doesNotMatch(html, /if \(!group\) return \{ blocked:true, reason:"You left this channel/,
+    "a cache miss must never invent a departure");
   assert.match(html, /const visibleThreadComposer = groupPostingBlocked/);
   assert.match(html, /chatShaped \? rowsShell \+ visibleThreadComposer : visibleThreadComposer \+ rowsShell/);
   // The room shell is keyed by the posting state, so leaving or rejoining a
@@ -163,6 +168,15 @@ test("Slack-owned channels join the Channels pane without becoming editable Rela
   assert.match(html, /payload\.chats \|\| \[\]/);
   assert.match(html, /chat\.channel\?\.slack/);
   assert.match(html, /provider:"slack"/);
+  assert.match(html, /canPost:chat\.channel\.canPost !== false/);
+  assert.match(html, /archivedAt:chat\.channel\.archived \?/,
+    "read-only and archived are distinct Slack states");
+  assert.match(html, /if \(room\.provider === "slack" \|\| slackChat\)/);
+  assert.match(html, /slackChat\?\.channel\?\.canPost === false/);
+  assert.match(html, /Posting is unavailable for this Slack channel\./);
+  assert.match(html, /groupsList = result\.slice[\s\S]*syncSlackChannelRows\(\);[\s\S]*const wantedId/,
+    "refreshing native groups must restore the Slack channel projection before lookup");
+  assert.match(html, /Channel info is still syncing\./);
   assert.match(html, /src="slackMark\.png" alt="Slack"/);
   assert.match(html, /slack \? "" : `<span class="cvg-edit"/,
     "Slack controls its channel roster, so Relay must not expose the legacy editor");

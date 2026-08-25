@@ -1146,6 +1146,11 @@
     margin:7px 16px 0; padding:9px 13px 8px; border-radius:14px; font-family:var(--sans); }
   .th-msg:hover { background:var(--wash-2); }
   .th-msg.mine { background:color-mix(in srgb, var(--accent) 8%, transparent); }
+  .th-msg.live-arrival { animation:thMessageArrival .28s var(--soft) both; }
+  @keyframes thMessageArrival {
+    from { opacity:.25; transform:translateY(7px) scale(.985); }
+    to { opacity:1; transform:translateY(0) scale(1); }
+  }
   .th-msg .open-actions { margin-top:9px; text-align:left; }
   .th-run { display:flex; align-items:baseline; gap:7px; padding:14px 16px 3px; }
   /* WhatsApp sides (David's law — overturns C4): your messages approach from
@@ -3849,6 +3854,58 @@
   let activeView = "relays";
   let payload = { account: { paired: false }, ui: { canDismiss: true, reopenSurface: "the Relay icon", setupTutorialPending:false }, features: { requests:false, cowork:false, environment:"production" }, relays: [], sent: [], requests: [], contacts: [], chats: [] };
   const canonicalChatDetails = new Map();
+  const canonicalChatFingerprints = new Map();
+  const liveCanonicalArrivalIds = new Set();
+  const canonicalReadGeneration = new Map();
+  let activeCanonicalChatRefresh = null;
+  const ACTIVE_CANONICAL_CHAT_POLL_MS = 1000;
+
+  function canonicalChatFingerprint(chat) {
+    return JSON.stringify((chat?.items || []).map((item) => [
+      item.relayId, item.updatedAt, item.deletedAt, item.editedAt,
+      item.threadId, item.inReplyToRelayId, item.state,
+      (item.attachments || []).map((file) => [file.id, file.bytes]),
+    ]));
+  }
+
+  // Store one server generation. New ids are marked only after the first
+  // hydration, so entering an existing channel never animates its whole
+  // history; genuinely live arrivals use the same small settle as native
+  // Relay messages instead of making the transcript jump as one block.
+  function storeCanonicalChatDetail(chat, { markArrivals = false } = {}) {
+    if (!chat?.chatId) return false;
+    const id = String(chat.chatId);
+    const nextFingerprint = canonicalChatFingerprint(chat);
+    if (canonicalChatFingerprints.get(id) === nextFingerprint) return false;
+    const previous = canonicalChatDetails.get(id);
+    if (markArrivals && previous) {
+      const previousIds = new Set((previous.items || []).map((item) => String(item.relayId || "")));
+      for (const item of chat.items || []) {
+        const messageId = String(item.relayId || "");
+        if (messageId && !previousIds.has(messageId)) liveCanonicalArrivalIds.add(messageId);
+      }
+    }
+    canonicalChatDetails.set(id, chat);
+    canonicalChatFingerprints.set(id, nextFingerprint);
+    return true;
+  }
+
+  async function refreshActiveCanonicalChat() {
+    if (activeCanonicalChatRefresh || document.visibilityState !== "visible" || collapsed) return;
+    if (activeView !== "threads" || !threadDetailId) return;
+    const room = chatRoomForThread(threadDetailId);
+    if (room?.provider !== "slack" || !room.chatId || !window.relay.canonicalChat) return;
+    activeCanonicalChatRefresh = Promise.resolve(window.relay.canonicalChat(room.chatId));
+    try {
+      const result = await activeCanonicalChatRefresh;
+      if (!result?.ok || !result.chat) return;
+      if (storeCanonicalChatDetail(result.chat, { markArrivals:true }) && activeView === "threads") {
+        renderThreadDetail();
+        readVisibleChatRoom();
+      }
+    } catch {}
+    finally { activeCanonicalChatRefresh = null; }
+  }
   let signupStage = "installed";
   let signupBusy = false;
   let signupEmail = "";
@@ -8119,8 +8176,9 @@
         name:chat.channel.name || chat.title || "Channel",
         provider:"slack",
         slack:chat.channel.slack,
+        canPost:chat.channel.canPost !== false,
         owned:false,
-        archivedAt:chat.channel.canPost === false ? (chat.updatedAt || new Date().toISOString()) : null,
+        archivedAt:chat.channel.archived ? (chat.updatedAt || new Date().toISOString()) : null,
         members:(chat.participants || []).map((person) => ({
           id:person.id,
           userId:person.id,
@@ -8237,6 +8295,7 @@
   function groupDetailsMarkup(g, { sheet = false } = {}) {
     const roster = groupInfoRoster(g);
     const mine = g.owned !== false;
+    const slack = g.provider === "slack";
     const archived = Boolean(g.archivedAt);
     const editable = mine && !archived;
     const count = roster.length;
@@ -8262,7 +8321,7 @@
     let membershipAction = "";
     if (archived) {
       membershipAction = `<div class="gd-membership"><div class="gd-status">This channel is archived. Its messages stay readable, but nobody can post in it.</div></div>`;
-    } else if (!mine) {
+    } else if (!mine && !slack) {
       membershipAction = groupLeaveArmedId === g.id
         ? `<div class="gd-membership gd-membership-confirm"><div class="gd-confirm"><strong>Leave ${esc(g.name)}?</strong><p>You’ll stop receiving new messages. Your existing messages will remain in Relays.</p><div class="gd-confirm-actions"><button class="cancel" type="button" data-gd-leave-cancel>Cancel</button><button class="confirm" type="button" data-gd-leave-confirm>Leave channel</button></div></div></div>`
         : `<div class="gd-membership"><button class="gd-leave" type="button" data-gd-leave>Leave channel</button></div>`;
@@ -8404,13 +8463,19 @@
     }
     groupsLoaded = true;
     groupsList = result.slice().sort((a, b) => String(a.name).localeCompare(String(b.name)));
-    const wantedId = String(room.groupId || "");
+    // Native groups and Slack channels are two projections of the same
+    // Channels surface. Reloading the native roster must never discard the
+    // current Slack projection or turn a cache miss into a fake departure.
+    syncSlackChannelRows();
+    const wantedId = String(room.chatId || room.groupId || "");
     const wantedName = normalizedPartyName(room.groupName || room.name);
     groupInfoGroup = groupsList.find((group) => wantedId && String(group.id) === wantedId)
       || groupsList.find((group) => normalizedPartyName(group.name) === wantedName)
       || null;
     if (!groupInfoGroup) {
-      groupInfoDetailEl.innerHTML = `<div class="cv-empty">You left this channel. Existing messages remain readable.</div>`;
+      groupInfoDetailEl.innerHTML = leftGroupIds.has(String(room.groupId || room.chatId || ""))
+        ? `<div class="cv-empty">You left this channel. Existing messages remain readable.</div>`
+        : `<div class="cv-empty">Channel info is still syncing.</div>`;
       return;
     }
     renderGroupInfo();
@@ -8499,9 +8564,19 @@
     if (!room || !room.isGroup || !room.groupId) return { blocked:false, reason:"" };
     const groupId = String(room.groupId);
     if (leftGroupIds.has(groupId)) return { blocked:true, reason:"You left this channel. Existing messages remain readable." };
+    const slackChat = (payload.chats || []).find((chat) =>
+      chat?.channel?.slack && (String(chat.chatId) === String(room.chatId || groupId)),
+    );
+    if (room.provider === "slack" || slackChat) {
+      if (slackChat?.channel?.archived) return { blocked:true, reason:"This channel is archived. Existing messages remain readable." };
+      if (slackChat?.channel?.canPost === false) return { blocked:true, reason:"Posting is unavailable for this Slack channel." };
+      return { blocked:false, reason:"" };
+    }
     if (!groupsLoaded) return { blocked:false, reason:"" };
     const group = groupsList.find((candidate) => String(candidate.id) === groupId);
-    if (!group) return { blocked:true, reason:"You left this channel. Existing messages remain readable." };
+    // A local roster miss is not evidence of departure. The API remains the
+    // write authority and will reject a send if membership really changed.
+    if (!group) return { blocked:false, reason:"" };
     if (group.archivedAt) return { blocked:true, reason:"This channel is archived. Existing messages remain readable." };
     return { blocked:false, reason:"" };
   }
@@ -9513,6 +9588,41 @@
     else persist();
   }
   function readVisibleChatRoom() {
+    const visibleRoom = threadDetailId ? chatRoomForThread(threadDetailId) : null;
+    if (visibleRoom?.provider === "slack" && visibleRoom.chatId) {
+      const chatId = String(visibleRoom.chatId);
+      const chat = canonicalChatDetails.get(chatId);
+      const unreadCanonical = (chat?.items || []).filter((item) =>
+        item.direction === "inbound" && (item.state === "pending" || item.state === "delivered"));
+      if (unreadCanonical.length) {
+        const generation = String(unreadCanonical.at(-1)?.relayId || "");
+        if (generation && canonicalReadGeneration.get(chatId) !== generation) {
+          canonicalReadGeneration.set(chatId, generation);
+          const opened = {
+            ...chat,
+            unreadCount: 0,
+            items: (chat.items || []).map((item) => item.direction === "inbound"
+              && (item.state === "pending" || item.state === "delivered")
+              ? { ...item, state:"read" }
+              : item),
+          };
+          canonicalChatDetails.set(chatId, opened);
+          canonicalChatFingerprints.set(chatId, canonicalChatFingerprint(opened));
+          payload.chats = (payload.chats || []).map((summary) => String(summary.chatId) === chatId
+            ? { ...summary, unreadCount:0 }
+            : summary);
+          Promise.resolve(window.relay.canonicalChatRead?.(chatId))
+            .then((result) => {
+              if (!result || result.ok === false) throw new Error(result?.error || "read persistence failed");
+            })
+            .catch(() => {
+              if (canonicalReadGeneration.get(chatId) === generation) canonicalReadGeneration.delete(chatId);
+              canonicalChatFingerprints.delete(chatId);
+              refreshActiveCanonicalChat();
+            });
+        }
+      }
+    }
     const unreadRaw = new Map(
       (payload.relays || []).filter((r) => r.unread).map((r) => [String(r.id), r]),
     );
@@ -9523,6 +9633,7 @@
     for (const m of visibleChatRoomMessages()) {
       if (!m.unread) continue;
       const id = String(m.id);
+      if (!id.startsWith("relay_")) continue;
       // Paint the already-visible arrival as read immediately; the ack makes
       // that state durable. A stale polling payload is cleared the same way
       // until the daemon returns the acknowledged row.
@@ -9550,7 +9661,7 @@
         setRowNote(String(selected.latest?.id || threadId), result?.error || "Could not open this Slack channel.", "err");
         return;
       }
-      canonicalChatDetails.set(selected.chatId, result.chat);
+      storeCanonicalChatDetail(result.chat);
       const hydratedThreadId = (result.chat.threadIds || [])[0] || threadId;
       return openRoom(hydratedThreadId, partyHint);
     }
@@ -9561,7 +9672,7 @@
     openThreadDetail(threadId, partyHint || "", "chat", { expanded: true });
     if (morphFromList) startReaderMorph("threads");
     if (selected?.provider === "slack" && selected.chatId) {
-      window.relay.canonicalChatRead?.(selected.chatId).catch?.(() => {});
+      readVisibleChatRoom();
     }
   }
   function renderChat() {
@@ -9835,7 +9946,16 @@
     const slackChannelAllMessages = chatRoom?.provider === "slack" ? [...thread.msgs] : [];
     const slackThreadGroups = new Map();
     for (const message of slackChannelAllMessages) {
-      const key = String(message.threadId || message.id || "");
+      // A Slack thread is defined by an explicit parent. Relay's generic
+      // `threadId` also has compatibility meanings for ordinary message
+      // chains and optimistic rows, so using it alone made adjacent top-level
+      // channel messages masquerade as replies.
+      const key = String(
+        message.inReplyToRelayId
+        || (message.slackThreadContext ? message.threadId : "")
+        || message.id
+        || "",
+      );
       const group = slackThreadGroups.get(key) || [];
       group.push(message);
       slackThreadGroups.set(key, group);
@@ -9956,8 +10076,11 @@
     };
     const slackThreadReplyCount = (message) => {
       if (!slackChannelAllMessages.length) return 0;
-      const rows = slackThreadGroups.get(String(message?.threadId || message?.id || "")) || [];
-      return Math.max(0, rows.filter((row) => row.inReplyToRelayId || row.id !== message?.id).length);
+      const rootId = String(message?.id || "");
+      const rows = slackThreadGroups.get(rootId) || [];
+      // Count only rows that positively name this root. A sibling that happens
+      // to share an opaque Relay thread key is not a Slack reply.
+      return rows.filter((row) => String(row.inReplyToRelayId || "") === rootId).length;
     };
     const slackThreadLinkHtml = (message) => {
       if (slackFocusedThreadId) return "";
@@ -10059,8 +10182,19 @@
         `<button type="button" class="rx-badge${reaction.reactedByMe ? " mine" : ""}" data-rx-toggle="${esc(m.id)}" data-emoji="${esc(reaction.emoji)}" data-mine="${reaction.reactedByMe ? "1" : "0"}" title="${esc((reaction.actors || []).map((actor) => actor.self ? "You" : actor.name).join(", "))}">${esc(reaction.emoji)}${reaction.count > 1 ? `<span class="n">${reaction.count}</span>` : ""}</button>`
       ).join("")}</div>` : "";
       const hostActionsPersistent = hasHostActions && String(m.id) === latestHostActionRelayId;
+      const nextEntry = timeline[i + 1];
+      const nextMessage = nextEntry && nextEntry.kind === "message" ? nextEntry.message : null;
+      const nextChunkDateLabel = nextMessage ? chatChunkDateLabel(nextMessage.at, m.at) : "";
+      const continuesIntoNext = Boolean(nextMessage && continuesSenderRun(m, nextMessage, nextChunkDateLabel));
+      const providerKey = (message) => message?.origin === "slack" || message?.provider?.name === "slack"
+        ? "slack"
+        : String(message?.source?.surface || "");
+      // One provenance footer closes a consecutive sender run. Repeating the
+      // Slack shelf inside every two-word bubble made a live Slack burst look
+      // like unrelated cards rather than the normal Relay chat geometry.
+      const showProviderByline = !continuesIntoNext || providerKey(nextMessage) !== providerKey(m);
       return `${slackThreadContextHtml(m)}${chunkDivider}${runHeader}
-      <div class="th-msg${hasHostActions ? " has-host-actions" : ""}${m.unread ? " unread" : ""}${mine ? " mine" : ""}${cont ? " cont" : ""}${textLike ? " text" : ""}${agentWorking ? " agent-working" : ""}${open ? " open" : ""}${m.deletedAt ? " deleted" : ""}${aggregates.length ? " has-rx" : ""}"${textLike ? "" : ' role="button" tabindex="0"'}${agentWorking ? ' aria-busy="true"' : ""}${hasHostActions ? ` aria-expanded="${hostActionsPersistent ? "true" : "false"}"` : ""} data-msg="${esc(m.id)}" data-dir="${m.direction}" data-opening-id="${esc(m.id)}">
+      <div class="th-msg${hasHostActions ? " has-host-actions" : ""}${m.unread ? " unread" : ""}${mine ? " mine" : ""}${cont ? " cont" : ""}${textLike ? " text" : ""}${agentWorking ? " agent-working" : ""}${open ? " open" : ""}${m.deletedAt ? " deleted" : ""}${aggregates.length ? " has-rx" : ""}${liveCanonicalArrivalIds.has(String(m.id || "")) ? " live-arrival" : ""}"${textLike ? "" : ' role="button" tabindex="0"'}${agentWorking ? ' aria-busy="true"' : ""}${hasHostActions ? ` aria-expanded="${hostActionsPersistent ? "true" : "false"}"` : ""} data-msg="${esc(m.id)}" data-dir="${m.direction}" data-opening-id="${esc(m.id)}">
         ${!REACTIONS_ENABLED || m.request ? "" : messageReactionPickerHtml(m.id)}
         ${messageReplyReferenceHtml(m)}
         <span class="th-msg-title">${m.request ? '<span class="kchip">Task</span>' : ""}${textLike ? linkify(m.title) : esc(m.title)}${agentWorking ? '<span class="agent-working-indicator" aria-hidden="true"><span class="agent-working-dot"></span><span class="agent-working-dot"></span><span class="agent-working-dot"></span></span>' : ""}${textLike ? "" : `<span class="th-more">${open ? "‹" : "›"}</span>`}${m.editedAt && !m.deletedAt ? '<span class="th-edited">edited</span>' : ""}</span><span class="th-blk-time">${esc(timeAgo(m.at))}</span>
@@ -10072,7 +10206,7 @@
         <div class="row-err${rowNotes.get(m.id)?.cls === "ok" ? " ok" : ""}" data-err="${esc(m.id)}" data-stop="1">${esc(rowNotes.get(m.id)?.text || "")}</div>
         ${!REACTIONS_ENABLED || m.request ? "" : reactionConfirmationHtml(m.id)}
         ${badges}
-        ${providerBylineHtml(m)}
+        ${showProviderByline ? providerBylineHtml(m) : ""}
         ${hasHostActions ? relayHostActionsHtml(m, { persistent:hostActionsPersistent }) : ""}
       </div>
       ${slackThreadLinkHtml(m)}
@@ -10133,7 +10267,12 @@
     }
     const thRowsEl = document.getElementById("thRows");
     const rowsChanged = Boolean(thRowsEl) && thRowsEl.innerHTML !== finalRowsHtml;
-    if (rowsChanged) thRowsEl.innerHTML = finalRowsHtml;
+    if (rowsChanged) {
+      thRowsEl.innerHTML = finalRowsHtml;
+      for (const id of liveCanonicalArrivalIds) {
+        if (thRowsEl.querySelector(`[data-msg="${CSS.escape(id)}"]`)) liveCanonicalArrivalIds.delete(id);
+      }
+    }
     // The composer's own faces still move while it stays put: the Relay it is
     // attached to, and the in-flight Send. Both are set in place.
     const composerQr = thHistoryEl.querySelector(".qr.th-qr");
@@ -11831,6 +11970,11 @@
       refreshSlackConnection({ preserveWaiting:true });
     }
   }, SLACK_CONNECTION_POLL_MS);
+  setInterval(() => { refreshActiveCanonicalChat(); }, ACTIVE_CANONICAL_CHAT_POLL_MS);
+  window.addEventListener("focus", () => { refreshActiveCanonicalChat(); });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") refreshActiveCanonicalChat();
+  });
   if (signInBannerEl) signInBannerEl.addEventListener("click", (e) => {
     e.stopPropagation();
     activeView = "settings";
@@ -12385,8 +12529,10 @@
       if (room?.provider === "slack" && room.chatId) {
         window.relay.canonicalChat?.(room.chatId).then((result) => {
           if (!result?.ok || !result.chat) return;
-          canonicalChatDetails.set(room.chatId, result.chat);
-          if (activeView === "threads") renderThreadDetail();
+          if (storeCanonicalChatDetail(result.chat, { markArrivals:true }) && activeView === "threads") {
+            renderThreadDetail();
+            readVisibleChatRoom();
+          }
         }).catch(() => {});
       }
     }
@@ -12425,7 +12571,7 @@
       const result = await window.relay.canonicalChat(chatId);
       const chat = result?.chat || result;
       if (!chat?.chatId) return;
-      canonicalChatDetails.set(chat.chatId, chat);
+      storeCanonicalChatDetail(chat);
       // A Slack button is a deliberate open, just like clicking the menu-bar
       // mark. Never leave the requested reader clipped inside the 244×44 pill.
       openFull();
