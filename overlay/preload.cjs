@@ -42,6 +42,8 @@ contextBridge.exposeInMainWorld("relay", {
   requestReviewSafety: (id) => ipcRenderer.invoke("relay:requestReviewSafety", String(id || "")),
   requestCompletionSend: (id) => ipcRenderer.invoke("relay:requestCompletionSend", String(id || "")),
   relayWorkStart: (id, route) => ipcRenderer.invoke("relay:relayWorkStart", String(id || ""), route || null),
+  chatAgentWorkStop: (id) => ipcRenderer.invoke("relay:chatAgentWorkStop", String(id || "")),
+  chatAgentWorkRetry: (id) => ipcRenderer.invoke("relay:chatAgentWorkRetry", String(id || "")),
   runFeed: (id) => ipcRenderer.invoke("relay:runFeed", String(id || "")),
   watchRunFeed: (id) => ipcRenderer.invoke("relay:runFeed:watch", String(id || "")),
   unwatchRunFeed: (id) => ipcRenderer.send("relay:runFeed:unwatch", String(id || "")),

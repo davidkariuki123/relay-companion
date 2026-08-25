@@ -92,7 +92,8 @@ test("a titled letter's tap is the reader in either frame; texts stay inert", ()
     html.indexOf('for (const el of thHistoryEl.querySelectorAll(".th-msg"))'),
     html.indexOf("function syncExpandButton"),
   );
-  assert.match(bind, /if \(m && m\.textLike\) return;/);
+  assert.match(bind, /if \(m && m\.textLike && !\(m\.ownedAgent && m\.source\?\.agentSessionId\)\) return;/);
+  assert.match(bind, /m\.ownedAgent && m\.source\?\.agentSessionId[\s\S]*openReader/, "owned-agent text opens only its Work reader");
   assert.match(bind, /openReader\(id, m\.direction === "out" \? "sent" : \(m\.request \? "tasks" : "threads"\)\)/);
   assert.doesNotMatch(bind, /expandedMsgIds\.add/);
 });
@@ -178,7 +179,7 @@ test("the open rows are the apps you chose — one, or both — on the bubble an
   assert.match(html, /wireHostOpen\(thHistoryEl\);/, "the room binds through the shared binder");
   const reader = html.slice(html.indexOf("function renderReader()"), html.indexOf("wireHostOpen(readerBodyEl);") + 30);
   assert.match(reader, /const workOn = payload\.features\?\.relayWork === true;/);
-  assert.match(reader, /const hasWork = \(request \|\| workOn\) && !\["idle", "waiting", "parked"\]\.includes\(runState\);/);
+  assert.match(reader, /const hasWork = chatOwnedWork \|\| \(\(request \|\| workOn\) && !\["idle", "waiting", "parked"\]\.includes\(runState\)\);/);
   assert.match(reader, /const bothNote = onAgent && workOn \?/);
   assert.match(reader, /if \(onAgent && !workOn\) return `<div class="rd-host-actions" data-stop="1">\$\{relayHostActionsHtml\(\{/);
   assert.match(reader, /wireHostOpen\(readerBodyEl\);/, "the reader binds through the shared binder");

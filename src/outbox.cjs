@@ -251,6 +251,14 @@ function createOutbox({
       nextAttemptAt: at,
       lastError: "",
       text: String(input.text || ""),
+      agentMentions: Array.isArray(input.agentMentions)
+        ? input.agentMentions.slice(0, 4).map((mention) => ({
+            provider: mention && mention.provider === "claude" ? "claude" : "codex",
+            start: Number(mention && mention.start),
+            end: Number(mention && mention.end),
+            token: String((mention && mention.token) || ""),
+          }))
+        : undefined,
       recipient: input.recipient && typeof input.recipient === "object" ? input.recipient : {},
       inReplyToRelayId: String(input.inReplyToRelayId || ""),
       title: String(input.title || ""),

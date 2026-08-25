@@ -229,6 +229,40 @@ export class RelayClient {
     return this.#req("PATCH", "/v1/chat-agents/preferences", payload);
   }
 
+  chatAgentSessionByResponse(relayId) {
+    return this.#req("GET", `/v1/chat-agent-sessions/by-response/${encodeURIComponent(relayId)}`);
+  }
+
+  chatAgentSession(sessionId) {
+    return this.#req("GET", `/v1/chat-agent-sessions/${encodeURIComponent(sessionId)}`);
+  }
+
+  chatAgentSessionEvents(sessionId, after = 0) {
+    return this.#req("GET", `/v1/chat-agent-sessions/${encodeURIComponent(sessionId)}/events?after=${Number(after) || 0}`);
+  }
+
+  chatAgentSessionTurn(sessionId, message, idempotencyKey, expectedStateVersion) {
+    return this.#req("POST", `/v1/chat-agent-sessions/${encodeURIComponent(sessionId)}/turns`, {
+      message,
+      idempotencyKey,
+      ...(expectedStateVersion ? { expectedStateVersion } : {}),
+    });
+  }
+
+  stopChatAgentSession(sessionId, idempotencyKey, expectedStateVersion) {
+    return this.#req("POST", `/v1/chat-agent-sessions/${encodeURIComponent(sessionId)}/stop`, {
+      idempotencyKey,
+      ...(expectedStateVersion ? { expectedStateVersion } : {}),
+    });
+  }
+
+  retryChatAgentSession(sessionId, idempotencyKey, expectedStateVersion) {
+    return this.#req("POST", `/v1/chat-agent-sessions/${encodeURIComponent(sessionId)}/retry`, {
+      idempotencyKey,
+      ...(expectedStateVersion ? { expectedStateVersion } : {}),
+    });
+  }
+
   agentRunProgress(relayId, summary) {
     return this.#req("POST", `/v1/chat-agents/${encodeURIComponent(relayId)}/progress`, { summary });
   }

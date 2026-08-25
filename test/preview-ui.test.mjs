@@ -61,7 +61,7 @@ test("Relay identity rows show the room and latest gist without shortening the r
   // relayListGist is deliberately confined to the identity list.
   const reader = between(inbox, "function renderReader()", "// ---------- the Tasks board:");
   const sentReaderProjection = between(inbox, "function readerRow(id)", "const RX_PRIMARY");
-  assert.match(reader, /const subject = request \? [\s\S]*?relaySubject\(r\)/);
+  assert.match(reader, /const subject = chatOwnedWork && triggerRow[\s\S]*?: request \? [\s\S]*?relaySubject\(r\)/);
   assert.match(sentReaderProjection, /title: sentSubject\(sent\)/);
   assert.doesNotMatch(reader, /relayListGist/);
   assert.doesNotMatch(sentReaderProjection, /relayListGist/);

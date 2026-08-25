@@ -2531,7 +2531,25 @@ function idempotencyKey(prefix) {
 function rowById(packetId) {
   const store = readStore();
   const row = store.packets && store.packets[packetId];
-  return row ? { id: packetId, ...row } : null;
+  if (row) return { id: packetId, ...row };
+  // Chat-owned Work responses are authored by the viewer's agent and therefore
+  // live in Sent, not the inbound staged packet store. They still need the
+  // exact same Work authorization/projection path as an inbound Task.
+  const sent = (sentCache || []).find((item) => String(item.relayId || item.id || "") === String(packetId || ""));
+  if (!sent) return null;
+  return {
+    id: String(packetId),
+    relayNotificationKind: "plain_relay",
+    direction: "outbound",
+    forHuman: sent.forHuman || sent.preview || "",
+    forAgent: sent.forAgent || "",
+    title: sent.title || "",
+    createdAt: sent.createdAt || "",
+    updatedAt: sent.updatedAt || sent.createdAt || "",
+    source: sent.source || null,
+    threadId: sent.threadId || packetId,
+    workStartedAt: sent.source?.agentSessionId ? (sent.createdAt || new Date().toISOString()) : null,
+  };
 }
 
 // Preview is deliberately an allowlisted, human-facing projection of a staged
@@ -4810,6 +4828,7 @@ async function sendPreviewReply(input, entry) {
 }
 
 function agentWorkEnabledForRow(row) {
+  if (row?.source?.host === "relay-agent-run" && row?.source?.agentSessionId) return PRODUCT_FEATURES.requests === true;
   if (row?.relayNotificationKind === "task") return PRODUCT_FEATURES.requests === true;
   if (row?.relayNotificationKind === "plain_relay") return PRODUCT_FEATURES.relayWork === true;
   return false;
@@ -5586,6 +5605,10 @@ async function unwatchWorkFeedFor(event, relayId) {
   if (!current) return false;
   subscriptions.delete(String(relayId || ""));
   if (subscriptions.size === 0) workFeedSubscriptions.delete(event.sender.id);
+  if (current.detach) {
+    current.detach();
+    return true;
+  }
   const bridge = await canonicalWorkBridge();
   return bridge.unsubscribe({
     relayId: String(relayId || ""),
@@ -5611,6 +5634,7 @@ function bindWorkFeedWindowCleanup(sender) {
     if (!subscriptions) return;
     const bridge = await canonicalWorkBridge();
     for (const [relayId, current] of subscriptions) {
+      if (current.detach) { current.detach(); continue; }
       bridge.unsubscribe({ relayId, sessionId: current.sessionId, subscriberId: current.subscriberId });
     }
   });
@@ -5654,6 +5678,95 @@ function completionAfter(value, after) {
   return value;
 }
 
+const chatAgentWorkCache = new Map();
+async function chatAgentWorkSession(relayId, { fresh = false } = {}) {
+  const id = String(relayId || "");
+  const cached = chatAgentWorkCache.get(id);
+  if (!fresh && cached && Date.now() - cached.at < 1200) return cached.session;
+  const row = rowById(id);
+  if (row?.source?.host !== "relay-agent-run") return null;
+  try {
+    const client = await relayClient();
+    const session = row.source?.agentSessionId
+      ? await client.chatAgentSession(row.source.agentSessionId)
+      : await client.chatAgentSessionByResponse(id);
+    chatAgentWorkCache.set(id, { at: Date.now(), session });
+    return session;
+  } catch {
+    return cached?.session || null;
+  }
+}
+
+async function localChatAgentNative(session) {
+  if (!session?.relaySessionId) return null;
+  try {
+    const directory = await import("../src/session-directory.js");
+    const published = JSON.parse(fs.readFileSync(directory.sessionDirectoryStatePath(), "utf8"));
+    const binding = (published.sessions || []).find((item) => item.id === session.relaySessionId);
+    if (!binding?.nativeId) return null;
+    const native = directory.discoverSessions().find((item) =>
+      item.provider === session.provider && item.nativeId === binding.nativeId);
+    return native || null;
+  } catch {
+    return null;
+  }
+}
+
+function chatAgentEventRecords(session, events) {
+  const records = [{ type:"message", role:"user", text:String(session?.instruction || ""), at:session?.createdAt }];
+  for (const event of events || []) {
+    if (event.type === "agent.progress" && event.payload?.summary) {
+      records.push({ type:"progress", text:String(event.payload.summary), at:event.occurredAt });
+    } else if (event.type === "user.turn.accepted" && event.payload?.message) {
+      records.push({ type:"message", role:"user", text:String(event.payload.message), at:event.occurredAt });
+    } else if (event.type === "agent.completed" && event.payload?.forHuman) {
+      records.push({ type:"message", role:"assistant", text:String(event.payload.forHuman), at:event.occurredAt });
+    } else if (event.type === "agent.failed") {
+      records.push({ type:"error", text:String(event.payload?.error || "The Work session failed."), at:event.occurredAt });
+    }
+  }
+  return records.reverse();
+}
+
+async function chatAgentRunFeed(relayId) {
+  const session = await chatAgentWorkSession(relayId, { fresh: true });
+  if (!session) return null;
+  let events = [];
+  try { events = ((await (await relayClient()).chatAgentSessionEvents(session.id)).events || []); } catch {}
+  let records = chatAgentEventRecords(session, events);
+  const native = await localChatAgentNative(session);
+  if (native?.nativeRef) {
+    try {
+      const { inspectAiSession } = await import("../src/ai-session-transcript.js");
+      const page = await inspectAiSession({
+        id: session.relaySessionId,
+        provider: session.provider,
+        state: session.state,
+        nativeRef: native.nativeRef,
+      }, { limit: 200 });
+      if (Array.isArray(page.records) && page.records.length) records = page.records;
+    } catch {}
+  }
+  const terminal = ["completed", "failed", "stopped"].includes(String(session.state));
+  const { nativeTurn } = await import("../src/native-turn.js");
+  const turn = nativeTurn(records, { terminalAt: terminal ? session.completedAt : null });
+  return {
+    ok:true,
+    started:true,
+    startedAt:session.createdAt,
+    completedAt:session.state === "completed" ? session.completedAt : null,
+    endedAt:terminal ? session.completedAt : null,
+    provider:session.provider,
+    model:"",
+    liveState:session.state,
+    records:turn.records,
+    turnStartedAt:turn.startedAt,
+    turnCompletedAt:turn.completedAt,
+    turnDurationMs:turn.durationMs,
+    finalText:String((events.findLast?.((event) => event.type === "agent.completed")?.payload?.forHuman) || ""),
+  };
+}
+
 /**
  * The request card's mirror. Same transcript reader the old preview window
  * used — the card that replaced that window shipped without it, so a started
@@ -5666,6 +5779,9 @@ async function taskRunFeed(relayId) {
   const row = rowById(id);
   if (!row) return { ok: false, error: "Unknown Task." };
   if (!agentWorkEnabledForRow(row)) return agentWorkUnavailable();
+  if (row.source?.host === "relay-agent-run") {
+    return (await chatAgentRunFeed(id)) || { ok:false, error:"This Work session is not available yet." };
+  }
   const isRequest = row.relayNotificationKind === "task";
   const startedAt = (isRequest ? row.taskStartedAt : row.workStartedAt) || null;
   const completion = isRequest ? taskCompletionReceipt(id, { after: startedAt }) : null;
@@ -6046,6 +6162,23 @@ async function previewTaskSteer(input) {
   const isLocalWork = row?.relayNotificationKind === "plain_relay" && Boolean(row?.workStartedAt);
   if (!row || (!isRequest && !isLocalWork)) return { ok: false, error: "No local agent work exists for this Relay." };
   if (!agentWorkEnabledForRow(row)) return agentWorkUnavailable();
+  if (row.source?.host === "relay-agent-run") {
+    if (files.length) return { ok:false, error:"Work-session attachments are not available in this first release." };
+    const session = await chatAgentWorkSession(id, { fresh:true });
+    if (!session) return { ok:false, error:"This Work session is not available yet." };
+    try {
+      const result = await (await relayClient()).chatAgentSessionTurn(
+        session.id,
+        body,
+        `pill-work-turn-${session.id}-${randomUUID()}`,
+        session.stateVersion,
+      );
+      chatAgentWorkCache.set(id, { at:0, session:result.session || session });
+      return { ok:true, operation:result.operation };
+    } catch (error) {
+      return { ok:false, error:(error && error.message) || String(error) };
+    }
+  }
   const providerBody = newTurn ? taskKickPrompt({ note: body }) : body;
   if (row.coworkSessionId) {
     if (files.length) return { ok: false, error: "Work-run attachments are currently supported for Codex sessions." };
@@ -6850,6 +6983,25 @@ ipcMain.handle("relay:taskStart", (_e, id, route) =>
 // The agent document of an ordinary Relay starts private, recipient-owned
 // work. It shares the native runner but never turns the Relay into a Task
 // and never emits Task receipts to the sender.
+async function mutateChatAgentWork(relayId, action) {
+  const id = String(relayId || "");
+  const row = rowById(id);
+  if (row?.source?.host !== "relay-agent-run") return { ok:false, error:"This is not a tagged Work session." };
+  const session = await chatAgentWorkSession(id, { fresh:true });
+  if (!session) return { ok:false, error:"This Work session is not available yet." };
+  try {
+    const client = await relayClient();
+    const key = `pill-work-${action}-${session.id}-${randomUUID()}`;
+    const result = action === "stop"
+      ? await client.stopChatAgentSession(session.id, key, session.stateVersion)
+      : await client.retryChatAgentSession(session.id, key, session.stateVersion);
+    chatAgentWorkCache.set(id, { at:0, session:result.session || session });
+    return { ok:true, session:result.session || session };
+  } catch (error) {
+    return { ok:false, error:(error && error.message) || String(error) };
+  }
+}
+
 ipcMain.handle("relay:relayWorkStart", (_e, id, route) =>
   startTaskFromPreview({
     relayId: id,
@@ -6861,6 +7013,8 @@ ipcMain.handle("relay:relayWorkStart", (_e, id, route) =>
     localWork: true,
   }),
 );
+ipcMain.handle("relay:chatAgentWorkStop", (_e, id) => mutateChatAgentWork(id, "stop"));
+ipcMain.handle("relay:chatAgentWorkRetry", (_e, id) => mutateChatAgentWork(id, "retry"));
 // The session face's feed and its Steer verb. Preview-only, like everything
 // on this channel; the feed reads only this staged relay's own session.
 // --- Scheduled requests ------------------------------------------------------
@@ -6991,6 +7145,25 @@ ipcMain.handle("relay:runFeed", (_e, relayId) => taskRunFeed(relayId));
 ipcMain.handle("relay:runFeed:watch", async (event, input) => {
   const relayId = String(typeof input === "string" ? input : input?.relayId || "");
   if (!workEventAuthorized(event, relayId)) return { ok: false, error: "Not authorized for this Work feed." };
+  const row = rowById(relayId);
+  if (row?.source?.host === "relay-agent-run") {
+    await unwatchAllWorkFeedsFor(event);
+    const initial = await taskRunFeed(relayId);
+    if (!initial?.ok) return initial;
+    let active = true;
+    const timer = setInterval(async () => {
+      if (!active || event.sender.isDestroyed()) return;
+      const envelope = await taskRunFeed(relayId).catch((error) => ({ ok:false, error:String(error?.message || error) }));
+      if (!event.sender.isDestroyed()) event.sender.send("relay:runFeed:update", { relayId, ...envelope });
+      if (["completed", "failed", "stopped"].includes(String(envelope?.liveState))) clearInterval(timer);
+    }, 1000);
+    timer.unref?.();
+    const subscriptions = workFeedSubscriptions.get(event.sender.id) || new Map();
+    subscriptions.set(relayId, { sessionId:String(row.source.agentSessionId || relayId), subscriberId:`chat:${relayId}`, detach:() => { active = false; clearInterval(timer); } });
+    workFeedSubscriptions.set(event.sender.id, subscriptions);
+    bindWorkFeedWindowCleanup(event.sender);
+    return { relayId, ...initial };
+  }
   const identity = providerWorkIdentity(relayId);
   if (!identity) return { ok: false, error: "No provider-native Work session exists for this Relay." };
   // A renderer surface displays exactly one Work feed. Retire its prior feed
@@ -7149,6 +7322,7 @@ async function postQueuedRelay(entry) {
       ? {}
       : { title: files.length === 1 ? String(files[0].name || "1 file") : `${files.length} files` }),
     forHuman: text || " ",
+    ...(Array.isArray(entry.agentMentions) ? { agentMentions: entry.agentMentions } : {}),
     attachments: prepared,
     ...(entry.inReplyToRelayId ? { inReplyToRelayId: String(entry.inReplyToRelayId) } : {}),
     idempotencyKey: entry.idempotencyKey,
@@ -7173,6 +7347,7 @@ function enqueueReplyFromPill(input = {}) {
     const entry = outbox.enqueue({
       idempotencyKey: String(input.idempotencyKey || "").trim() || `pill-reply-${crypto.randomUUID()}`,
       text,
+      agentMentions: Array.isArray(input.agentMentions) ? input.agentMentions : undefined,
       recipient: input.recipient || {},
       inReplyToRelayId: input.inReplyToRelayId,
       files,
