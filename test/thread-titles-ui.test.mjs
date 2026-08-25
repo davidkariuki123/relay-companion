@@ -617,7 +617,7 @@ test("the room composer prevents duplicate sends, and returns a draft only when 
   assert.match(html, /thQrSend\.disabled = true;/);
   assert.match(html, /chatReplySending\.add\(threadStateKey\)/);
   assert.match(html, /const threadComposerDrafts = new Map\(\)/);
-  assert.match(html, /<textarea id="thQrInput"[^>]*>\$\{esc\(threadDraft\)\}<\/textarea>/);
+  assert.match(html, /<div id="thQrInput" class="th-rich-composer" contenteditable="true"/);
   assert.match(html, /const priorAttempt = threadReplyAttemptKeys\.get\(threadStateKey\)/);
   assert.match(html, /priorAttempt && priorAttempt\.fingerprint === fingerprint/);
   assert.match(html, /sendReply\(\{\s*text, recipient, \.\.\.\(inReplyToRelayId \? \{ inReplyToRelayId \} : \{\}\), files, idempotencyKey,/);
@@ -630,7 +630,7 @@ test("the room composer prevents duplicate sends, and returns a draft only when 
   assert.match(html, /const restored = document\.getElementById\("thQrInput"\)/);
 });
 
-test("developer chat composers rank owned laptop agents ahead of participant mentions", () => {
+test("chat composers offer owned laptop agents while human mentions stay group-only", () => {
   const owned = html.indexOf('{ token:"Claude", name:"@Claude"');
   const participant = html.indexOf('...[...participantNames]');
   assert.ok(owned >= 0 && participant > owned, "owned agents precede participant suggestions");
@@ -641,18 +641,42 @@ test("developer chat composers rank owned laptop agents ahead of participant men
   assert.match(html, /\["ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"\][\s\S]*renderMentions/, "moving the caret re-evaluates the active mention");
   assert.match(html, /thQrInput\.addEventListener\("blur"[\s\S]*closeMentions/, "leaving the composer dismisses the menu");
   assert.match(html, /\.th-mention-menu\.hidden\s*\{\s*display:none;\s*\}/, "the hidden state actually removes the mention menu");
+  assert.match(html, /prepareMentionComposer\(thQrInput, mentionOptions, threadDraft\)/,
+    "the room composer paints canonical mention tokens as rich chips");
+  assert.match(html, /data-mention-token/, "mention chips retain their canonical wire token");
+  assert.match(html, /setAttribute\("contenteditable", "false"\)/, "a selected mention behaves as one atomic inline object");
+  assert.match(html, /\.th-rich-composer \.th-composer-mention \{[\s\S]*border:1px solid[\s\S]*background:/,
+    "the selected full name is visibly enclosed in the composer");
   assert.match(html, /title:"I'm on it"[\s\S]*agentInvocation:true/, "sending paints the immediate owned-agent response");
-  assert.match(html, /const ownedAgentParticipantNames = new Set\([\s\S]*message\.ownedAgent/,
-    "owned-agent reply identities are tracked separately from people");
-  assert.match(html, /thread\.party && !ownedAgentParticipantNames\.has\(normalizedPartyName\(thread\.party\)\)/,
-    "an owned-agent reply cannot re-enter the selector through the direct-room fallback");
   assert.match(html, /const savedContact = !currentUser && email[\s\S]*contactsList\.find[\s\S]*const shown = savedName/,
     "the viewer's saved contact name wins over somebody else's group-roster label");
   const groupMentions = html.slice(html.indexOf("const participantNames = new Set();"), html.indexOf("const mentionOptions = [", html.indexOf("const participantNames = new Set();")));
   assert.match(groupMentions, /thread\.isGroup[\s\S]*groupInfoRoster\(group\)/,
     "group mentions come from the current roster");
-  assert.doesNotMatch(groupMentions.split("} else {")[0], /message\.party/,
-    "historical group sender labels cannot create stale mention choices");
+  assert.doesNotMatch(groupMentions, /message\.party|thread\.party/,
+    "a direct-message counterpart cannot appear as a redundant mention choice");
+});
+
+test("the rich composer displays names but serializes stable mention tokens", () => {
+  const start = html.indexOf("function mentionComposerParts(");
+  const end = html.indexOf("\n  function composerNodeValue(", start);
+  assert.ok(start >= 0 && end > start, "mention composer tokenizer is present");
+  const mentionComposerParts = Function(`"use strict"; ${html.slice(start, end)}; return mentionComposerParts;`)();
+  const options = [
+    { token:"Shane_Acton", name:"@Shane Acton", agent:false },
+    { token:"Codex", name:"@Codex", agent:true },
+  ];
+
+  assert.deepEqual(mentionComposerParts("Ask @Shane_Acton and @Codex", options), [
+    { text:"Ask " },
+    { token:"Shane_Acton", label:"@Shane Acton", agent:false },
+    { text:" and " },
+    { token:"Codex", label:"@Codex", agent:true },
+  ]);
+  assert.deepEqual(mentionComposerParts("Ask @not_saved", options), [{ text:"Ask @not_saved" }]);
+  assert.deepEqual(mentionComposerParts("mail shane@Shane_Acton.dev", options), [{ text:"mail shane@Shane_Acton.dev" }]);
+  assert.match(html, /hasAttribute\("data-mention-token"\)[\s\S]*getAttribute\("data-mention-token"\)/,
+    "chip serialization recovers the canonical @handle rather than its display label");
 });
 
 test("owned-agent faces remain inside the human room", () => {

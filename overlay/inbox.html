@@ -802,7 +802,7 @@
   .gone { display:none !important; }
 
   /* Keyboard focus is visible on every interactive element — one ring. */
-  button:focus-visible, [role="button"]:focus-visible, textarea:focus-visible, input:focus-visible {
+  button:focus-visible, [role="button"]:focus-visible, textarea:focus-visible, input:focus-visible, [contenteditable="true"]:focus-visible {
     outline:none; box-shadow:var(--focus-ring);
   }
   @media (prefers-reduced-motion: reduce) {
@@ -1963,8 +1963,19 @@
     box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent), 0 6px 18px -12px color-mix(in srgb, var(--accent) 40%, transparent); }
   .qr textarea { flex:1 1 auto; min-width:0; appearance:none; border:0; outline:none !important; box-shadow:none; background:transparent;
     font-family:var(--sans); font-size:13px; line-height:1.5; color:var(--ink); resize:none; padding:5px 0; height:30px; max-height:126px; overflow-y:auto; scrollbar-width:none; }
+  .qr .th-rich-composer { flex:1 1 auto; min-width:0; appearance:none; border:0; outline:none !important; box-shadow:none; background:transparent;
+    font-family:var(--sans); font-size:13px; line-height:1.5; color:var(--ink); resize:none; padding:5px 0; height:30px; max-height:126px; overflow-y:auto; scrollbar-width:none; }
   .qr textarea::-webkit-scrollbar { display:none; }
+  .qr .th-rich-composer::-webkit-scrollbar { display:none; }
   .qr textarea::placeholder { color:var(--muted-3); }
+  .th-rich-composer { white-space:pre-wrap; overflow-wrap:anywhere; cursor:text; }
+  .th-rich-composer:empty::before { content:attr(data-placeholder); color:var(--muted-3); pointer-events:none; }
+  .th-rich-composer .th-composer-mention { display:inline-block; max-width:100%; margin:0 1px; padding:0 4px;
+    border:1px solid color-mix(in srgb, var(--accent) 30%, transparent); border-radius:4px;
+    background:color-mix(in srgb, var(--accent) 14%, transparent); color:var(--accent); font-weight:600;
+    line-height:1.35; white-space:nowrap; vertical-align:baseline; user-select:all; }
+  .th-rich-composer .th-composer-mention.agent { color:var(--ink); border-color:color-mix(in srgb, var(--agent-sq) 45%, transparent);
+    background:color-mix(in srgb, var(--agent-sq) 14%, transparent); }
   /* the relays-list quick reply keeps its own bordered field — no capsule around it */
   .qr.qr-bare, .qr.qr-bare:focus-within { border:0; padding:0; box-shadow:none; background:transparent; }
   /* min-width:0 — an input's intrinsic size otherwise refuses to shrink and
@@ -3787,6 +3798,165 @@
     return name && name.indexOf("@") === -1 ? name : "";
   }
 
+  function mentionComposerParts(text, options) {
+    const source = String(text || "");
+    const byToken = new Map((options || []).map((option) => [String(option.token || "").toLowerCase(), option]));
+    const parts = [];
+    const token = /@[A-Za-z0-9][A-Za-z0-9._-]*/g;
+    let cursor = 0;
+    let match;
+    while ((match = token.exec(source))) {
+      const previous = match.index > 0 ? source[match.index - 1] : "";
+      const option = /[A-Za-z0-9._%+-]/.test(previous)
+        ? null
+        : byToken.get(match[0].slice(1).toLowerCase());
+      if (!option) continue;
+      if (match.index > cursor) parts.push({ text:source.slice(cursor, match.index) });
+      parts.push({ token:String(option.token), label:String(option.name || `@${option.token}`), agent:Boolean(option.agent) });
+      cursor = match.index + match[0].length;
+    }
+    if (cursor < source.length) parts.push({ text:source.slice(cursor) });
+    return parts.length ? parts : [{ text:source }];
+  }
+
+  function composerNodeValue(node) {
+    if (!node) return "";
+    if (node.nodeType === Node.TEXT_NODE) return node.data || "";
+    if (node.nodeType !== Node.ELEMENT_NODE) return "";
+    if (node.hasAttribute("data-mention-token")) return `@${node.getAttribute("data-mention-token") || ""}`;
+    if (node.tagName === "BR") return "\n";
+    let value = "";
+    for (const child of node.childNodes) value += composerNodeValue(child);
+    return value;
+  }
+
+  function composerValue(field) {
+    let value = "";
+    for (const child of field?.childNodes || []) value += composerNodeValue(child);
+    return value;
+  }
+
+  function composerNodeLength(node) { return composerNodeValue(node).length; }
+
+  function composerCaretOffset(field) {
+    const selection = window.getSelection?.();
+    if (!selection || !selection.rangeCount || !field.contains(selection.anchorNode)) return composerValue(field).length;
+    const target = selection.anchorNode;
+    const targetOffset = selection.anchorOffset;
+    let total = 0;
+    let found = false;
+    const visit = (node) => {
+      if (found) return;
+      if (node === target) {
+        if (node.nodeType === Node.TEXT_NODE) total += Math.min(targetOffset, (node.data || "").length);
+        else for (let index = 0; index < Math.min(targetOffset, node.childNodes.length); index += 1) total += composerNodeLength(node.childNodes[index]);
+        found = true;
+        return;
+      }
+      if (node.nodeType === Node.ELEMENT_NODE && node.hasAttribute("data-mention-token")) {
+        total += composerNodeLength(node);
+        return;
+      }
+      for (const child of node.childNodes || []) visit(child);
+    };
+    visit(field);
+    return found ? total : composerValue(field).length;
+  }
+
+  function composerSetCaretOffset(field, start, end = start) {
+    const range = document.createRange();
+    const locate = (wanted) => {
+      let remaining = Math.max(0, wanted);
+      let result = { node:field, offset:field.childNodes.length };
+      const visit = (node) => {
+        if (node.nodeType === Node.TEXT_NODE) {
+          const length = (node.data || "").length;
+          if (remaining <= length) { result = { node, offset:remaining }; return true; }
+          remaining -= length;
+          return false;
+        }
+        if (node.nodeType === Node.ELEMENT_NODE && node.hasAttribute("data-mention-token")) {
+          const length = composerNodeLength(node);
+          const parent = node.parentNode || field;
+          const index = [...parent.childNodes].indexOf(node);
+          if (remaining <= length) { result = { node:parent, offset:index + (remaining > length / 2 ? 1 : 0) }; return true; }
+          remaining -= length;
+          return false;
+        }
+        for (const child of node.childNodes || []) if (visit(child)) return true;
+        return false;
+      };
+      visit(field);
+      return result;
+    };
+    const from = locate(start);
+    const to = locate(end);
+    range.setStart(from.node, from.offset);
+    range.setEnd(to.node, to.offset);
+    const selection = window.getSelection?.();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }
+
+  function setComposerValue(field, value) {
+    const fragment = document.createDocumentFragment();
+    for (const part of mentionComposerParts(value, field.relayMentionOptions || [])) {
+      if (Object.prototype.hasOwnProperty.call(part, "text")) {
+        if (part.text) fragment.appendChild(document.createTextNode(part.text));
+      } else {
+        const mention = document.createElement("span");
+        mention.className = `th-composer-mention${part.agent ? " agent" : ""}`;
+        mention.setAttribute("data-mention-token", part.token);
+        mention.setAttribute("contenteditable", "false");
+        mention.setAttribute("aria-label", `Mentioned ${part.label.replace(/^@/, "")}`);
+        mention.textContent = part.label;
+        fragment.appendChild(mention);
+      }
+    }
+    field.replaceChildren(fragment);
+  }
+
+  function insertComposerText(field, text) {
+    const selection = window.getSelection?.();
+    if (!selection || !selection.rangeCount || !field.contains(selection.anchorNode)) return;
+    const range = selection.getRangeAt(0);
+    range.deleteContents();
+    const node = document.createTextNode(String(text || ""));
+    range.insertNode(node);
+    range.setStartAfter(node);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    field.dispatchEvent(new InputEvent("input", { bubbles:true, inputType:"insertText", data:String(text || "") }));
+  }
+
+  function prepareMentionComposer(field, options, initialValue) {
+    field.relayMentionOptions = options || [];
+    if (field.dataset.richMentionComposer) return;
+    field.dataset.richMentionComposer = "1";
+    Object.defineProperty(field, "value", {
+      configurable:true,
+      get:() => composerValue(field),
+      set:(value) => setComposerValue(field, value),
+    });
+    Object.defineProperty(field, "selectionStart", { configurable:true, get:() => composerCaretOffset(field) });
+    field.setSelectionRange = (start, end = start) => composerSetCaretOffset(field, start, end);
+    field.addEventListener("beforeinput", (event) => {
+      if (event.inputType !== "insertParagraph" && event.inputType !== "insertLineBreak") return;
+      event.preventDefault();
+      insertComposerText(field, "\n");
+    });
+    field.addEventListener("input", () => {
+      if (field.childNodes.length === 1 && field.firstChild?.nodeName === "BR") field.replaceChildren();
+    });
+    field.addEventListener("paste", (event) => {
+      if (clipboardFiles(event).length) return;
+      event.preventDefault();
+      insertComposerText(field, event.clipboardData?.getData("text/plain") || "");
+    });
+    field.value = initialValue || "";
+  }
+
   // Escape once while turning bare URLs into live anchors and known @handles
   // into named mention chips. Unknown handles remain literal text; the wire
   // value is never rewritten, so routing stays stable when a contact is renamed.
@@ -3879,6 +4049,9 @@
   const canonicalReadGeneration = new Map();
   let activeCanonicalChatRefresh = null;
   const ACTIVE_CANONICAL_CHAT_POLL_MS = 1000;
+  for (const eventName of ["pointerdown", "keydown", "wheel"]) {
+    window.addEventListener(eventName, () => window.relay.chatReadActivity?.(), { capture:true, passive:true });
+  }
 
   function canonicalChatFingerprint(chat) {
     return JSON.stringify((chat?.items || []).map((item) => [
@@ -4337,7 +4510,7 @@
     if (qr && !qr.dataset.focusWired) {
       qr.dataset.focusWired = "1";
       qr.addEventListener("click", (e) => {
-        if (e.target.closest("button, a, input, textarea, [data-route-menu], .cmp-chip")) return;
+        if (e.target.closest("button, a, input, textarea, [contenteditable], [data-route-menu], .cmp-chip")) return;
         field.focus();
       });
       qr.style.cursor = "text";
@@ -10240,7 +10413,7 @@
     const threadComposer = `<div class="th-composer-dock${chatShaped ? " chat-shaped" : ""}"><div class="qr th-qr col${replyTargetId ? " replying" : ""}">
           ${composerReplyTargetHtml}
           <div class="th-mention-menu hidden" id="thMentionMenu" role="listbox"></div>
-          <textarea id="thQrInput" rows="1" placeholder="Reply…">${esc(threadDraft)}</textarea>
+          <div id="thQrInput" class="th-rich-composer" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Reply" data-placeholder="Reply…"></div>
           <div class="ta-rail">
             <span class="rt-spacer"></span>
             <button type="button" id="thQrSend"${chatReplySending.has(threadStateKey) ? " disabled" : ""}>Send</button>
@@ -10503,12 +10676,10 @@
       let mentionMatches = [];
       let mentionIndex = 0;
       let mentionStart = -1;
-      const ownedAgentParticipantNames = new Set(
-        (thread.msgs || [])
-          .filter((message) => message.ownedAgent)
-          .map((message) => normalizedPartyName(message.party))
-          .filter(Boolean),
-      );
+      // A DM already has exactly one human recipient, so naming that person
+      // again cannot change the audience. Human @mentions disambiguate group
+      // recipients only; the owned Claude and Codex options remain available
+      // in every developer composer below.
       const participantNames = new Set();
       if (thread.isGroup) {
         const group = groupsList.find((candidate) => String(candidate.id || "") === String(thread.groupId || ""))
@@ -10519,18 +10690,6 @@
         for (const member of group ? groupInfoRoster(group) : []) {
           if (!member.currentUser && member.name) participantNames.add(String(member.name).trim());
         }
-      } else {
-        for (const message of thread.msgs || []) {
-          if (message.direction === "in" && !message.ownedAgent && message.party) {
-            participantNames.add(String(message.party).trim());
-          }
-        }
-        if (thread.party && !ownedAgentParticipantNames.has(normalizedPartyName(thread.party))) {
-        // buildThreads names a wire thread after its newest inbound sender.
-        // An owned-agent response is inbound too, but it is an execution face,
-        // not a second participant beside @my_codex / @my_claude.
-          participantNames.add(String(thread.party).trim());
-        }
       }
       const mentionOptions = [
         ...(payload.features?.requests === true ? [
@@ -10540,6 +10699,7 @@
         ...[...participantNames]
           .map((name) => ({ token:name.replace(/\s+/g, "_"), name:`@${name}`, note:"Participant", agent:false })),
       ];
+      prepareMentionComposer(thQrInput, mentionOptions, threadDraft);
       const closeMentions = () => { mentionMatches = []; mentionStart = -1; mentionMenu?.classList.add("hidden"); };
       const chooseMention = (index) => {
         const option = mentionMatches[index];
@@ -10694,6 +10854,7 @@
         // focused and ready for the next message. Only its height has to be
         // told, because grow() answers to typing and nothing was typed.
         thQrInput.value = "";
+        thQrInput.setSelectionRange(0, 0);
         thQrInput.relayResize?.();
         threadComposerDrafts.delete(threadStateKey);
         renderThreadDetail();
@@ -10743,6 +10904,7 @@
             restored.relayResize?.();
             if (staged.length) stageFileList(restored, staged.map((f) => f.file || f));
             restored.focus();
+            restored.setSelectionRange(text.length, text.length);
           }
           return;
         }

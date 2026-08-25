@@ -458,6 +458,8 @@ test("a rendered conversation marks every visible inbound message read", () => {
   assert.match(loader, /item\.direction === "inbound" && item\.state === "delivered"/);
   const handler = between(main, 'ipcMain.on("relay:preview:chat-rendered"', 'ipcMain.on("relay:preview:minimize"');
   assert.match(handler, /previewEntryForEvent\(event\)/);
+  assert.match(handler, /chatReadPresenceIsAvailable\(entry\.win\)/,
+    "a minimized, sleeping, locked, or long-idle preview cannot claim a read");
   assert.match(handler, /entry\.chatUnreadRelayIds\.has\(id\)/);
   assert.match(handler, /client\.markManyRead\(remoteOnly/);
   assert.match(handler, /source: "relay_pill_open"/);

@@ -141,6 +141,7 @@ contextBridge.exposeInMainWorld("relayPreview", {
     "relay:preview:chat-rendered",
     Array.from(new Set((Array.isArray(ids) ? ids : []).map((id) => String(id || "")).filter(Boolean))).slice(0, 500),
   ),
+  chatReadActivity: () => ipcRenderer.send("relay:chatReadActivity"),
   minimize: () => ipcRenderer.send("relay:preview:minimize"),
   close: () => ipcRenderer.send("relay:preview:close"),
   openExternal: (url) => {
