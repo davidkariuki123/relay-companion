@@ -116,6 +116,19 @@ test("Slack Settings is one truthful card with the official mark and no optimist
   assert.match(preload, /slackConnection: \(\) => ipcRenderer\.invoke\("relay:slackConnection"\)/);
 });
 
+test("Slack Settings follows browser-owned OAuth to its real server state", () => {
+  assert.match(html, /const SLACK_CONNECTION_POLL_MS = 2000/,
+    "an open Settings card polls the lightweight Slack status endpoint");
+  assert.match(html, /activeView === "settings" && document\.visibilityState === "visible"[\s\S]*refreshSlackConnection\(\{ preserveWaiting:true \}\)/,
+    "polling runs only while the user can see Settings");
+  assert.match(html, /slackConnectionReady\(result\.connection\)[\s\S]*slackConnectionWaiting = false/,
+    "the pending affordance clears only when the server reports the complete team and personal grant");
+  assert.match(html, /slackConnectionWaitingSince = result\?\.ok === true \? Date\.now\(\) : 0/,
+    "a launched browser flow has a bounded pending lifetime instead of becoming an immortal optimistic state");
+  assert.doesNotMatch(html, /slackConnectionWaiting = false;\s*if \(result\?\.ok && result\.connection\)/,
+    "an ordinary status read must not silently cancel a still-pending OAuth flow");
+});
+
 test("From Slack is message provenance, not a blanket channel label", () => {
   assert.match(html, /provider: item\.provider \|\| \(item\.origin === "slack" \? \{ name:"slack" \} : null\)/);
   assert.match(html, /message\?\.origin === "slack" \|\| message\?\.provider\?\.name === "slack"/);

@@ -10722,6 +10722,8 @@
   let slackConnectionInfo = null;
   let slackConnectionBusy = false;
   let slackConnectionWaiting = false;
+  let slackConnectionWaitingSince = 0;
+  let slackConnectionRefreshSeq = 0;
   let slackConnectionError = "";
   let slackDisconnectConfirm = false;
   let chatAgentPreferences = null;
@@ -10753,6 +10755,48 @@
   let chatConnectionBusy = false;
   let chatConnectionError = "";
   let chatConnectionNote = "";
+
+  const SLACK_CONNECTION_POLL_MS = 2000;
+  const SLACK_CONNECTION_WAIT_TIMEOUT_MS = 2 * 60 * 1000;
+
+  function slackConnectionReady(connection) {
+    return connection?.state === "connected"
+      && connection?.team?.connected === true
+      && connection?.personal?.state === "connected";
+  }
+
+  async function refreshSlackConnection({ preserveWaiting = true } = {}) {
+    if (!window.relay.slackConnection) return;
+    const seq = ++slackConnectionRefreshSeq;
+    let result = null;
+    try { result = await window.relay.slackConnection(); }
+    catch (error) { result = { ok:false, error:error?.message || "Could not check Slack." }; }
+    if (seq !== slackConnectionRefreshSeq) return;
+
+    const before = JSON.stringify({
+      connection:slackConnectionInfo,
+      waiting:slackConnectionWaiting,
+      error:slackConnectionError,
+    });
+    if (result?.ok && result.connection) {
+      slackConnectionInfo = result.connection;
+      slackConnectionError = "";
+      const waitExpired = slackConnectionWaitingSince > 0
+        && Date.now() - slackConnectionWaitingSince >= SLACK_CONNECTION_WAIT_TIMEOUT_MS;
+      if (slackConnectionReady(result.connection) || !preserveWaiting || waitExpired) {
+        slackConnectionWaiting = false;
+        slackConnectionWaitingSince = 0;
+      }
+    } else {
+      slackConnectionError = result?.error || "Could not check Slack.";
+    }
+    const after = JSON.stringify({
+      connection:slackConnectionInfo,
+      waiting:slackConnectionWaiting,
+      error:slackConnectionError,
+    });
+    if (after !== before) renderSettings();
+  }
 
   function resetSignOutArm() {
     svSignOutArmed = false;
@@ -11329,6 +11373,7 @@
       } catch (error) { result = { ok:false, error:error?.message || "Could not open Slack." }; }
       slackConnectionBusy = false;
       slackConnectionWaiting = result?.ok === true;
+      slackConnectionWaitingSince = result?.ok === true ? Date.now() : 0;
       slackConnectionError = result?.ok === false ? result.error || "Could not open Slack." : "";
       renderSettings();
     });
@@ -11705,19 +11750,8 @@
       renderSettings();
     })();
     const slackTask = (async () => {
-      if (!window.relay.slackConnection) return;
-      let result = null;
-      try { result = await window.relay.slackConnection(); }
-      catch (error) { result = { ok:false, error:error?.message || "Could not check Slack." }; }
       if (seq !== settingsLoadSeq) return;
-      slackConnectionWaiting = false;
-      if (result?.ok && result.connection) {
-        slackConnectionInfo = result.connection;
-        slackConnectionError = "";
-      } else {
-        slackConnectionError = result?.error || "Could not check Slack.";
-      }
-      renderSettings();
+      await refreshSlackConnection({ preserveWaiting:true });
     })();
     // Provider profiles and integration health are only read when Agent
     // connections can render; outside local builds the pill never inspects
@@ -11772,11 +11806,28 @@
   // to refresh manually. Re-read it whenever Settings becomes visible again
   // after an external provider-owned authorization window or app switch.
   window.addEventListener("focus", () => {
-    if (activeView === "settings") loadSettings();
+    if (activeView === "settings") {
+      loadSettings();
+      refreshSlackConnection({ preserveWaiting:true });
+    }
   });
   document.addEventListener("visibilitychange", () => {
-    if (activeView === "settings" && document.visibilityState === "visible") loadSettings();
+    if (activeView === "settings" && document.visibilityState === "visible") {
+      loadSettings();
+      refreshSlackConnection({ preserveWaiting:true });
+    }
   });
+  // Slack OAuth completes in the browser, not in this renderer. Focus and
+  // visibility events are not guaranteed while the Pill remains open behind
+  // that browser window, so keep its one integration card truthful without a
+  // manual refresh. This polls only while Settings is visible and calls the
+  // lightweight connection-status endpoint; all other Settings checks retain
+  // their existing focus/entry cadence.
+  setInterval(() => {
+    if (activeView === "settings" && document.visibilityState === "visible") {
+      refreshSlackConnection({ preserveWaiting:true });
+    }
+  }, SLACK_CONNECTION_POLL_MS);
   if (signInBannerEl) signInBannerEl.addEventListener("click", (e) => {
     e.stopPropagation();
     activeView = "settings";
