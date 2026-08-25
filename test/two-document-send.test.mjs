@@ -71,17 +71,15 @@ test("the concise human document is derived from a complete unlimited agent docu
   // rule taught on all three surfaces of relay_send.
   const tool = TOOLS.find((t) => t.name === "relay_send");
   assert.match(tool.description, /compose the complete forAgent document first/i);
-  assert.match(tool.description, /derive forHuman as the concise message/i);
-  assert.match(tool.description, /fewest words that faithfully preserve the message, not the most allowed/i);
-  assert.match(tool.description, /1-3 normally sized sentences/i);
-  assert.match(tool.description, /45 words or fewer/i);
-  assert.match(tool.description, /60 words is only Relay's mandatory-review threshold, never a target, budget/i);
-  assert.match(tool.description, /stops an over-threshold first attempt for review/i);
-  assert.match(tool.description, /message history teaches voice and relationship register, not a default word count/i);
+  assert.match(tool.description, /then write forHuman for the person/i);
+  assert.match(tool.description, /Keep forHuman under 95 words/i);
+  assert.match(tool.description, /a small update is a line or two/i);
+  assert.match(tool.description, /ceiling, not a target/i);
   assert.match(tool.description, /under-sending to the recipient's agent is worse than over-sending/i);
-  assert.match(tool.inputSchema.properties.forHuman.description, /USE THE FEWEST WORDS THAT FAITHFULLY PRESERVE IT/);
-  assert.match(tool.inputSchema.properties.forHuman.description, /NOT A TARGET OR BUDGET/);
-  assert.match(tool.inputSchema.properties.longForHumanConfirmed.description, /already rejected this exact over-60-word draft/i);
+  assert.match(tool.inputSchema.properties.forHuman.description, /OPEN FROM THE TOP/i);
+  assert.match(tool.inputSchema.properties.forHuman.description, /opening background survives every cut/i);
+  assert.match(tool.inputSchema.properties.forHuman.description, /Clarification before sending is uncommon/i);
+  assert.match(tool.inputSchema.properties.longForHumanConfirmed.description, /already rejected this exact draft/i);
   assert.match(tool.inputSchema.properties.forAgent.description, /complete .*document/i);
   assert.match(tool.inputSchema.properties.forAgent.description, /may be as long and detailed as necessary/i);
 });

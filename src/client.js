@@ -443,7 +443,7 @@ export class RelayClient {
     });
   }
 
-  // The mint route runs the same 60-word review gate as POST /v1/relays, and the
+  // The mint route runs the same 95-word review gate as POST /v1/relays, and the
   // confirmation the server accepts is an HMAC token it issued, not a boolean.
   // Without this retry a legitimate longForHumanConfirmed can never be honoured.
   mintShareLink(payload) {

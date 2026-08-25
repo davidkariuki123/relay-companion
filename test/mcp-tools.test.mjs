@@ -351,27 +351,31 @@ test("ordinary Relay MCP directs Claude and Codex to the membership-scoped Granu
   // The body is GHOSTWRITTEN in the sender's inferred voice (the voice
   // contract, David 2026-08-12): substance fidelity + inferred voice +
   // their relationship register, with real sent messages as the gold standard.
-  assert.match(humanDescription, /ghostwritten in the sender's voice/i);
-  assert.match(humanDescription, /what the sender would naturally say to this person, not the shorthand/i);
+  assert.match(humanDescription, /The person who reads your message is not you/i);
+  assert.match(humanDescription, /Write exactly what the sender would SAY aloud/i);
+  assert.match(humanDescription, /instructions to the ghostwriter, not a draft to lightly edit/i);
   assert.match(humanDescription, /Supply the words, never additional meaning/i);
   assert.match(humanDescription, /recipient-specific vocabulary, rhythm, directness, formality, warmth, emphasis, and sign-off/i);
   assert.match(humanDescription, /relay_sent_list/);
   assert.match(humanDescription, /relay_chat_fetch/);
-  assert.match(humanDescription, /know, answer, feel, discuss, or decide/i);
+  assert.match(humanDescription, /what happened and what it means for them/i);
   assert.match(humanDescription, /never revive superseded intent/i);
-  assert.match(humanDescription, /USE THE FEWEST WORDS THAT FAITHFULLY PRESERVE IT/);
-  assert.match(humanDescription, /1-3 normally sized sentences/i);
-  assert.match(humanDescription, /45 words or fewer/i);
-  assert.match(humanDescription, /60 words triggers mandatory review; it is NOT A TARGET OR BUDGET/);
-  assert.match(humanDescription, /Never pad toward it or hide detail in long compound sentences/i);
-  assert.match(humanDescription, /teaches voice and relationship register, not target length/i);
-  assert.match(humanDescription, /Lots of detail never justifies a longer human message/i);
-  assert.match(humanDescription, /Sending or attaching information does not imply.*requesting a response/i);
-  assert.match(humanDescription, /mechanisms, evidence, code, paths, logs, reproduction steps/i);
-  assert.match(humanDescription, /No headings, lists, tables, code blocks, title repetition/i);
+  assert.match(humanDescription, /OPEN FROM THE TOP/i);
+  assert.match(humanDescription, /first one to three sentences re-explain what has been going on/i);
+  assert.match(humanDescription, /Keep it under 95 words/i);
+  assert.match(humanDescription, /ceiling, not a target/i);
+  assert.match(humanDescription, /opening background survives every cut/i);
+  assert.match(humanDescription, /Never squeeze sentences into shorthand to save room/i);
+  assert.match(humanDescription, /Do not copy how short their own messages are/i);
+  assert.match(humanDescription, /No figures of speech/i);
+  assert.match(humanDescription, /Leave out any word they'd only know from doing this job/i);
+  assert.match(humanDescription, /Sending or attaching information does not imply.*request for a response/i);
+  assert.match(humanDescription, /Clarification before sending is uncommon/i);
+  assert.match(humanDescription, /critical detail is genuinely uncertain/i);
+  assert.match(humanDescription, /No headings, lists, tables, code blocks, or title repetition/i);
   const longConfirmation = send.inputSchema.properties.longForHumanConfirmed;
   assert.equal(longConfirmation.type, "boolean");
-  assert.match(longConfirmation.description, /already rejected this exact over-60-word draft/i);
+  assert.match(longConfirmation.description, /already rejected this exact draft/i);
   assert.match(longConfirmation.description, /Never set it preemptively/i);
   const agentDescription = send.inputSchema.properties.forAgent.description;
   assert.match(agentDescription, /complete document/i);
@@ -1209,10 +1213,10 @@ test("relay_message_edit keeps the MCP-only human-writing review", async () => {
   let edits = 0;
   const client = { async editMessage() { edits += 1; return { ok: true, relayId: "relay_1" }; } };
   const args = {
-    relayId: "relay_1", forHuman: Array.from({ length: 61 }, (_, i) => `word${i}`).join(" "),
+    relayId: "relay_1", forHuman: Array.from({ length: 96 }, (_, i) => `word${i}`).join(" "),
     idempotencyKey: "edit_review_1", longForHumanConfirmed: true,
   };
-  await assert.rejects(handleCall(client, "relay_message_edit", args, { mode: "messages-only" }), /mandatory-review threshold/);
+  await assert.rejects(handleCall(client, "relay_message_edit", args, { mode: "messages-only" }), /review threshold is 95 words/);
   assert.equal(edits, 0);
   await handleCall(client, "relay_message_edit", args, { mode: "messages-only" });
   assert.equal(edits, 1);
@@ -1232,14 +1236,14 @@ test("relay_chat_reply reviews an overlong human message before reading or sendi
   };
   const args = {
     chatId: "chat_a",
-    forHuman: Array.from({ length: 61 }, (_, index) => `reply${index + 1}`).join(" "),
+    forHuman: Array.from({ length: 96 }, (_, index) => `reply${index + 1}`).join(" "),
     longForHumanConfirmed: true,
     idempotencyKey: "long_chat_review_1",
   };
 
   await assert.rejects(
     handleCall(fakeClient, "relay_chat_reply", args, { mode: "messages-only" }),
-    /mandatory-review threshold is 60 words[\s\S]*not a target or budget[\s\S]*Nothing was sent/i,
+    /review threshold is 95 words[\s\S]*Nothing was sent/i,
   );
   assert.deepEqual(calls, [], "review happens before the content-bearing chat fetch or delivery");
 
@@ -1314,9 +1318,9 @@ test("relay_send rejects report headlines before delivery", async () => {
   assert.equal(calls, 0, "an invalid draft never reaches the API");
 });
 
-test("relay_send requires an exact second review for human messages over 60 words", async () => {
-  assert.equal(FOR_HUMAN_SOFT_WORD_LIMIT, 60);
-  assert.equal(FOR_HUMAN_TYPICAL_WORD_LIMIT, 45);
+test("relay_send requires an exact second review for human messages over 95 words", async () => {
+  assert.equal(FOR_HUMAN_SOFT_WORD_LIMIT, 95);
+  assert.equal(FOR_HUMAN_TYPICAL_WORD_LIMIT, 95);
   assert.equal(FOR_HUMAN_DEFAULT_SENTENCE_LIMIT, 3);
   assert.equal(FOR_HUMAN_EXCEPTIONAL_SENTENCE_LIMIT, 4);
   const calls = [];
@@ -1326,7 +1330,7 @@ test("relay_send requires an exact second review for human messages over 60 word
       return { relayId: "relay_long_reviewed", state: "delivered" };
     },
   };
-  const forHuman = Array.from({ length: 61 }, (_, index) => `word${index + 1}`).join(" ");
+  const forHuman = Array.from({ length: 96 }, (_, index) => `word${index + 1}`).join(" ");
   const args = {
     recipient: { relayUserId: "usr_sven" },
     kind: "message",
@@ -1341,14 +1345,14 @@ test("relay_send requires an exact second review for human messages over 60 word
 
   await assert.rejects(
     handleCall(client, "relay_send", args),
-    /forHuman is 61 words[\s\S]*not a target or budget[\s\S]*Nothing was sent[\s\S]*Review this exact draft again[\s\S]*longForHumanConfirmed: true/i,
+    /forHuman is 96 words[\s\S]*Nothing was sent[\s\S]*hearing about it for the first time[\s\S]*longForHumanConfirmed: true/i,
   );
   assert.equal(calls.length, 0, "the first over-limit attempt has no delivery side effects");
 
   const changedDraft = { ...args, forHuman: `${forHuman} changed` };
   await assert.rejects(
     handleCall(client, "relay_send", changedDraft),
-    /forHuman is 62 words[\s\S]*Review this exact draft again/i,
+    /forHuman is 97 words[\s\S]*Nothing was sent/i,
   );
   assert.equal(calls.length, 0, "editing the rejected draft requires a fresh review");
 
@@ -1358,7 +1362,7 @@ test("relay_send requires an exact second review for human messages over 60 word
   assert.equal(calls[0].longForHumanConfirmed, true, "the API can require its own exact-draft review token");
 });
 
-test("relay_send accepts the 60-word review boundary without making it a target", async () => {
+test("relay_send accepts the 95-word review boundary without making it a target", async () => {
   const calls = [];
   const client = {
     async sendRelay(payload) {
@@ -1366,7 +1370,7 @@ test("relay_send accepts the 60-word review boundary without making it a target"
       return { relayId: "relay_at_review_boundary", state: "delivered" };
     },
   };
-  const forHuman = Array.from({ length: 60 }, (_, index) => `word${index + 1}`).join(" ");
+  const forHuman = Array.from({ length: 95 }, (_, index) => `word${index + 1}`).join(" ");
   await handleCall(client, "relay_send", {
     recipient: { relayUserId: "usr_sven" },
     kind: "message",
@@ -1589,8 +1593,8 @@ test("a supplied share title obeys the 3-6 word gate and an omitted one does not
   assert.equal(Object.hasOwn(payload, "title"), false);
 });
 
-test("a mint runs the 60-word review before it reads a single file", async () => {
-  const draft = Array.from({ length: 70 }, (_, index) => `word${index}`).join(" ");
+test("a mint runs the 95-word review before it reads a single file", async () => {
+  const draft = Array.from({ length: 100 }, (_, index) => `word${index}`).join(" ");
   let minted = 0;
   const fakeClient = {
     async mintShareLink() {
@@ -1604,7 +1608,7 @@ test("a mint runs the 60-word review before it reads a single file", async () =>
       forHuman: draft,
       idempotencyKey: "idem_share_review_1",
     }),
-    /mandatory-review threshold/,
+    /review threshold is 95 words/,
     "the refusal arrives before prepareOrdinaryRelayAttachments touches the disk",
   );
   assert.equal(minted, 0);
@@ -1626,7 +1630,7 @@ test("a mint runs the 60-word review before it reads a single file", async () =>
       forHuman: draft,
       idempotencyKey: "idem_share_review_2",
     }),
-    /mandatory-review threshold/,
+    /review threshold is 95 words/,
   );
   await assert.rejects(
     handleCall(fakeClient, "relay_share_link", {
@@ -1634,7 +1638,7 @@ test("a mint runs the 60-word review before it reads a single file", async () =>
       longForHumanConfirmed: true,
       idempotencyKey: "idem_share_review_2",
     }),
-    /mandatory-review threshold/,
+    /review threshold is 95 words/,
   );
   assert.equal(minted, 1);
 });
