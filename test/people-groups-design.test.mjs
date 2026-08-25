@@ -5,12 +5,12 @@ import test from "node:test";
 const html = fs.readFileSync(new URL("../overlay/inbox.html", import.meta.url), "utf8");
 const main = fs.readFileSync(new URL("../overlay/main.cjs", import.meta.url), "utf8");
 
-test("People and Channels are distinct counted panes with one consistent add action", () => {
+test("People and Groups are distinct counted panes with one consistent add action", () => {
   assert.match(html, /data-view="contacts">People</);
   assert.match(html, /id="cvSegPeople"[^>]*>People <span class="cv-seg-n" id="cvSegPeopleN"/);
-  assert.match(html, /id="cvSegGroups"[^>]*>Channels <span class="cv-seg-n" id="cvSegGroupsN"/);
+  assert.match(html, /id="cvSegGroups"[^>]*>Groups <span class="cv-seg-n" id="cvSegGroupsN"/);
   assert.match(html, /id="cvAdd" aria-label="Add person">\+ Add</);
-  assert.match(html, /id="cvgNew" aria-label="Add channel">\+ Add</);
+  assert.match(html, /id="cvgNew" aria-label="Add group">\+ Add</);
 });
 
 test("People rows use colored identity, editorial metadata, and recency without chevrons", () => {
@@ -27,11 +27,11 @@ test("People rows use colored identity, editorial metadata, and recency without 
   assert.doesNotMatch(render, /cv-chev|CHEVRON_SVG/);
 });
 
-test("Channel rows show roster avatar stacks, member summaries, and people counts", () => {
+test("Group rows show roster avatar stacks, member summaries, and people counts", () => {
   const render = html.slice(html.indexOf("function groupMemberSummary("), html.indexOf("function openGroupRoom(groupId)"));
   assert.match(render, /function groupAvatarStack\(group, roster\)/);
   assert.match(render, /class="cvg-stack"/);
-  assert.match(render, /class="cvg-sub">\$\{esc\(slack \? \(g\.lastPreview \|\| "Slack channel"\) : groupMemberSummary\(roster\)\)\}/);
+  assert.match(render, /class="cvg-sub">\$\{esc\(groupMemberSummary\(roster\)\)\}/);
   assert.match(render, /count === 1 \? "person" : "people"/);
   assert.doesNotMatch(render, /cv-chev|CHEVRON_SVG/);
 });

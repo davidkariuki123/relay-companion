@@ -37,7 +37,7 @@ test("every room entry follows newest through sent-cache hydration regardless of
   const selectAt = open.indexOf("threadDetailId = threadId;");
   assert.ok(resetAt >= 0 && resetAt < selectAt, "entry rearms scrolling before selecting even the same room id");
   assert.match(open, /const entryFollowToken = beginThreadEntryFollow\(threadId\)/);
-  assert.match(open, /commitNavigation\(\{ outerScrollTop: 0 \}\);\s*hydrateThreadEntry\(entryFollowToken\)/,
+  assert.match(open, /commitNavigation\(\{ outerScrollTop: 0 \}\);[\s\S]*?hydrateThreadEntry\(entryFollowToken\)/,
     "the outbound refresh remains part of the same guarded room entry");
 
   const render = html.slice(html.indexOf("function renderThreadDetail()"), html.indexOf('document.getElementById("thExpand")'));

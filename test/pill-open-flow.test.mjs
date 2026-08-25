@@ -591,7 +591,7 @@ test("the fitted card keeps elevation inside its bounds", () => {
   assert.doesNotMatch(html, /inset 0 1px 0 rgba\(255,255,255,\.9\)/);
 });
 
-test("the stable compositor canvas covers every card state", () => {
+test("the macOS compositor canvas and ordinary native window clamp cover every card state", () => {
   const sizeOf = (name) => {
     const m = html.match(new RegExp(`const ${name} = \\{ w: (\\d+), h: (\\d+) \\}`));
     assert.ok(m, `${name} is declared in inbox.html`);
@@ -612,16 +612,16 @@ test("the stable compositor canvas covers every card state", () => {
   );
 });
 
-test("folding publishes the destination hit region before an animation frame can stall", () => {
+test("folding publishes destination native geometry before an animation frame can stall", () => {
   const spring = html.slice(html.indexOf("function springTo("), html.indexOf("// ---------- collapse / expand / peek"));
   assert.match(spring, /W\.t = w; H\.t = h;\s*[\s\S]*?publishCardSize\(w, h, \{ phase:"prepare", motionId \}\);/);
   assert.ok(
     spring.indexOf('publishCardSize(w, h, { phase:"prepare", motionId });') < spring.indexOf("requestAnimationFrame(frame)"),
-    "the destination hit region is sent before the animated frame is scheduled",
+    "the destination geometry is sent before the animated frame is scheduled",
   );
   const frame = sliceFunction(html, "function frame(");
   assert.match(frame, /commitSettledCardSize\(W\.t, H\.t, cardMotionId\)/,
-    "the final hit region commits from actual spring settlement, not a guessed timeout");
+    "the final geometry commits from actual spring settlement, not a guessed timeout");
   assert.doesNotMatch(frame, /publishCardSizeThrottled/,
     "main never receives per-frame geometry that could compete with the renderer spring");
   assert.match(html, /const cardMotionSessionId = crypto\.randomUUID\(\)/,
@@ -629,11 +629,11 @@ test("folding publishes the destination hit region before an animation frame can
   assert.match(preload, /motionSessionId: typeof motion\.motionSessionId === "string"/,
     "the renderer session id crosses the isolated preload boundary");
   assert.match(preload, /ipcRenderer\.invoke\("relay:cardSizeSettled"/,
-    "final renderer state waits for main's hit-region acknowledgement");
+    "final renderer state waits for main's geometry acknowledgement");
   assert.match(main, /ipcMain\.handle\("relay:cardSizeSettled"/);
 });
 
-test("the visible card is focusable while the fixed canvas stays click-through", () => {
+test("Windows uses an ordinary focusable window while only macOS hit-tests a fixed canvas", () => {
   const create = sliceFunction(main, "function createWindow(");
   assert.match(create, /focusable: true/);
   assert.match(create, /skipTaskbar: true/);
@@ -642,6 +642,12 @@ test("the visible card is focusable while the fixed canvas stays click-through",
   assert.match(main, /function applyIgnore/);
   assert.match(main, /function hitTick/);
   assert.match(main, /function startHitTest/);
+  assert.match(main, /const FIXED_OVERLAY_SURFACE = usesFixedOverlaySurface\(process\.platform\)/);
+  const ignore = sliceFunction(main, "function applyIgnore(");
+  assert.match(ignore, /if \(!FIXED_OVERLAY_SURFACE\) \{[\s\S]*?return;/,
+    "an ordinary Windows window can never enter Electron click-through mode");
+  assert.match(create, /if \(FIXED_OVERLAY_SURFACE\) \{[\s\S]*?applyIgnore\(true/,
+    "only the macOS fixed surface starts the click-through hit tester");
   assert.doesNotMatch(main + preload + html, /relay:setFocusable|setFocusable/);
   assert.match(html, /\.card \{[\s\S]*?position:absolute; top:0; right:0;/,
     "the visible card shares the native window's top-right anchor throughout a morph");
@@ -650,9 +656,11 @@ test("the visible card is focusable while the fixed canvas stays click-through",
 
 test("reader refreshes cannot change native focusability", () => {
   assert.doesNotMatch(html + preload + main, /setFocusable|relay:setFocusable/);
-  assert.doesNotMatch(main, /function fitOverlayWindowToCard/);
-  assert.match(main, /fittedOverlayBounds\(wa, CARD_MAX,/,
-    "card morphs share one stable native compositor surface");
+  assert.match(main, /function fitOverlayWindowToCard/);
+  assert.match(main, /if \(FIXED_OVERLAY_SURFACE \|\| !win/,
+    "macOS cannot accidentally re-enter native transition geometry");
+  assert.match(main, /const nativeSize = FIXED_OVERLAY_SURFACE \? CARD_MAX : cardSize/,
+    "Windows starts at the one visible card while macOS retains its compositor canvas");
   assert.match(main, /subscribeActiveApplicationChanges/);
   assert.match(main, /observeFrontmostBundle/);
   assert.match(main, /setAlwaysOnTop\(elevated, "floating"\)/);
@@ -677,34 +685,36 @@ test("the expanded card stays at its designed width; only the banner is wider", 
   assert.match(html, /width:344px; height:524px;/);
 });
 
-test("the native window starts at maximum size and synchronizes its hit region before readiness", () => {
+test("the native window starts in its platform geometry and synchronizes before readiness", () => {
   const initial = main.match(/const CARD_INITIAL = \{ w: (\d+), h: (\d+) \}/);
   assert.ok(initial, "main declares the initial visible card dimensions");
   assert.match(main, /let cardSize = \{ w: CARD_INITIAL\.w, h: CARD_INITIAL\.h \}/);
   const anchor = main.slice(main.indexOf("function anchorTopRight"), main.indexOf("function showOverlayWindow"));
-  assert.match(anchor, /fittedOverlayBounds\(wa, CARD_MAX,/,
-    "the native canvas is allocated once, independently of the visible card size");
+  assert.match(anchor, /const nativeSize = FIXED_OVERLAY_SURFACE \? CARD_MAX : cardSize/);
+  assert.match(anchor, /fittedOverlayBounds\(wa, nativeSize,/,
+    "Windows gets card bounds while macOS gets the maximum canvas");
 
   const publish = html.lastIndexOf('publishCardSize(W.t, H.t, { phase:"settled", motionId:cardMotionId });');
   const ready = html.lastIndexOf("if (window.relay.rendererReady) window.relay.rendererReady();");
-  assert.notEqual(publish, -1, "the renderer publishes its initial live hit region");
-  assert.ok(publish < ready, "the initial hit region is synchronized before main releases queued work");
+  assert.notEqual(publish, -1, "the renderer publishes its initial live geometry");
+  assert.ok(publish < ready, "the initial native state is synchronized before main releases queued work");
 });
 
-test("card-size IPC changes only hit testing, never native transition geometry", () => {
+test("card-size IPC resizes ordinary Windows windows and hit-tests only the macOS canvas", () => {
   const sizeHandler = main.slice(main.indexOf("function acceptRendererCardSize"), main.indexOf('ipcMain.on("relay:setPos"'));
   assert.match(sizeHandler, /cardSize = \{ w, h \}/);
-  assert.match(sizeHandler, /scheduleHit\(0\)/,
-    "a new visual target immediately refreshes the matching input region");
-  assert.doesNotMatch(sizeHandler, /setBounds|setPosition|setSize|fitOverlayWindowToCard/);
+  assert.match(sizeHandler, /if \(FIXED_OVERLAY_SURFACE\) scheduleHit\(0\);/,
+    "a macOS visual target immediately refreshes the matching input region");
+  assert.match(sizeHandler, /else fitOverlayWindowToCard\(\{ settle: motion\.phase === "settled" \}\)/,
+    "Windows follows the renderer with ordinary native bounds");
   const anchor = main.slice(main.indexOf("function anchorTopRight"), main.indexOf("function showOverlayWindow"));
   assert.match(anchor, /function anchorTopRight\(\)/);
-  assert.match(anchor, /fittedOverlayBounds\(wa, CARD_MAX,/);
+  assert.match(anchor, /fittedOverlayBounds\(wa, nativeSize,/);
   const hitRect = sliceFunction(main, "function cardScreenRect(");
   assert.match(hitRect, /bounds\.x \+ bounds\.width - w/,
     "the visible card stays on the dragged surface's current top-right anchor");
   assert.match(main, /shouldIgnoreOverlayMouse\(point, cardScreenRect\(bounds\), pad\)/,
-    "only transparent pixels outside the current card pass clicks through");
+    "only the macOS transparent canvas needs pixels outside the card to pass through");
   assert.match(sizeHandler, /motionId < latestCardMotionId/,
     "a stale collapse completion cannot override a newer expansion");
   assert.match(sizeHandler, /motionSessionId !== latestCardMotionSessionId[\s\S]*?latestCardMotionId = 0/,

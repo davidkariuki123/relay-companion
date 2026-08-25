@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import windowFit from "../overlay/window-fit.cjs";
 
-const { fittedOverlayBounds, shouldIgnoreOverlayMouse } = windowFit;
+const {
+  fittedOverlayBounds,
+  resizedOverlayBounds,
+  shouldIgnoreOverlayMouse,
+  usesFixedOverlaySurface,
+} = windowFit;
 const workArea = { x: 100, y: 40, width: 1400, height: 900 };
 const options = {
   margin: 8,
@@ -35,6 +40,23 @@ test("malformed renderer sizes cannot claim an oversized invisible window", () =
     width: 720,
     height: 800,
   });
+});
+
+test("ordinary native windows preserve the dragged card's top-right anchor", () => {
+  const current = { x: 500, y: 120, width: 344, height: 524 };
+  const reader = resizedOverlayBounds(current, { w: 720, h: 760 }, options);
+  const collapsed = resizedOverlayBounds(reader, { w: 244, h: 44 }, options);
+  assert.deepEqual(reader, { x: 124, y: 120, width: 720, height: 760 });
+  assert.deepEqual(collapsed, { x: 600, y: 120, width: 244, height: 44 });
+  assert.equal(current.x + current.width, reader.x + reader.width);
+  assert.equal(current.x + current.width, collapsed.x + collapsed.width);
+});
+
+test("only macOS requires a fixed transparent compositor surface", () => {
+  assert.equal(usesFixedOverlaySurface("darwin"), true);
+  assert.equal(usesFixedOverlaySurface("win32"), false);
+  assert.equal(usesFixedOverlaySurface("linux"), false);
+  assert.equal(usesFixedOverlaySurface(""), false);
 });
 
 test("only the visible card inside a fixed compositor surface receives input", () => {

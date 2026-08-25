@@ -312,8 +312,8 @@ test("the user's own messages are labelled 'You' and sit left like every row", (
 });
 
 test("the thread view never repaints identical markup (the Read-the-Conversation flash)", () => {
-  assert.match(html, /const rowsChanged = Boolean\(thRowsEl\) && thRowsEl\.innerHTML !== finalRowsHtml;/);
-  assert.match(html, /if \(rowsChanged\) \{\s*thRowsEl\.innerHTML = finalRowsHtml;/);
+  assert.match(html, /const rowsChanged = Boolean\(thRowsEl\) && thRowsEl\.innerHTML !== rowsHtml;/);
+  assert.match(html, /if \(rowsChanged\) thRowsEl\.innerHTML = rowsHtml;/);
   assert.match(html, /if \(shellChanged \|\| rowsChanged\) \{/);
   assert.match(html, /return; \/\/ markup unchanged: existing handlers are still bound/);
   assert.match(html, /return; \/\/ nothing changed at all/);
@@ -352,6 +352,18 @@ test("a live refresh repaints the history around the composer, never through it"
   // block flow would collapse the margins between bubbles.
   assert.match(html, /#thRows \{ display:flex; flex-direction:column; \}/);
   assert.match(html, /#thRows\.inbox-order \.th-msg:last-of-type \{ margin-bottom:10px; \}/);
+});
+
+test("entering a chat gives its composer the keyboard without a click", () => {
+  const open = html.slice(html.indexOf("function openThreadDetail("), html.indexOf("// ---------- Settings view"));
+  assert.match(open, /const composerFocusRequest = beginThreadComposerEntryFocus\(threadId\)/);
+  assert.match(open, /commitNavigation\(\{ outerScrollTop: 0 \}\);[\s\S]*focusThreadComposerOnEntry\(composerFocusRequest\);[\s\S]*settleThreadComposerEntryFocus\(composerFocusRequest\)/);
+  assert.match(html, /input\.focus\(\{ preventScroll:true \}\)/, "room entry focuses without moving the transcript");
+  assert.match(html, /input\.setSelectionRange\(end, end\)/, "an existing draft resumes at its end");
+  assert.match(html, /dressComposer\(thQrInput, \(\) => threadComposerSend\?\.\(\)\);[\s\S]*focusThreadComposerOnEntry\(threadComposerEntryFocus, \{ recover:true \}\)/,
+    "a room whose sent-side history loads asynchronously still receives focus");
+  assert.match(html, /if \(activeView !== "threads"\) threadComposerEntryFocus = null/,
+    "leaving the room cancels delayed focus instead of stealing it later");
 });
 
 test("a successful chat send follows the new message; unrelated refreshes preserve reading position", () => {
@@ -449,7 +461,7 @@ test("conversation chunks carry the selected Relay date divider", () => {
   assert.equal(chatChunkDateLabel(nextChunk, first, now), "Today", "a pause over six hours starts a labelled chunk");
 
   assert.match(html, /class="th-chunk-date\$\{firstChunk \? " first" : ""\}" role="separator"/);
-  assert.match(html, /return `\$\{slackThreadContextHtml\(m\)\}\$\{chunkDivider\}\$\{runHeader\}/);
+  assert.match(html, /return `\$\{chunkDivider\}\$\{runHeader\}/);
   assert.doesNotMatch(html, /\.th-run\.th-seam|\.th-msg\.gap-mid|\.th-run\.gap-mid/);
 });
 
@@ -499,9 +511,9 @@ test("a dated chunk reintroduces the sender even inside the same wire thread", (
 
 test("a room send addresses the room and quotes only a chosen Relay", () => {
   assert.match(html, /const selectedReplyTargetId = String\(threadReplyTargets\.get\(threadStateKey\) \|\| ""\)/);
-  assert.match(html, /const inReplyToRelayId = selectedReplyTargetId \|\| String\(focusedSlackParent\?\.id \|\| ""\)/);
+  assert.match(html, /const inReplyToRelayId = selectedReplyTargetId;/);
   assert.match(html, /const recipient = \(addressAnchor && addressAnchor\.addressRecipient\)/);
-  assert.match(html, /emptyGroupAnchor\.provider === "slack"[\s\S]*\? \{ chatId:emptyGroupAnchor\.chatId \}[\s\S]*: \{ groupId:emptyGroupAnchor\.groupId \}/);
+  assert.match(html, /emptyGroupAnchor \? \{ groupId:emptyGroupAnchor\.groupId \} : null/);
   assert.match(html, /sendReply\(\{\s*text, recipient, \.\.\.\(inReplyToRelayId \? \{ inReplyToRelayId \} : \{\}\), files, idempotencyKey,/);
   assert.doesNotMatch(html, /sendReply\(\{ text, inReplyToRelayId: newest\.id/);
 });
@@ -594,13 +606,13 @@ test("the provenance byline is not confined to rows without an agent document", 
   // the MOST agent-authored things in the room — so the footer was withheld
   // from precisely the relays that most needed it, and could only ever appear
   // on a plain one-document text. It is rendered for every row; surface decides.
-  assert.match(html, /\$\{showProviderByline \? providerBylineHtml\(m\) : ""\}/);
+  assert.match(html, /\$\{providerBylineHtml\(m\)\}/);
   assert.doesNotMatch(html, /\$\{textLike \? providerBylineHtml\(m\) : ""\}/);
 });
 
 test("the room composer prevents duplicate sends, and returns a draft only when the device itself refuses it", () => {
   assert.match(html, /let thReplySending = false;/);
-  assert.match(html, /const threadStateKey = `\$\{isConversationRoomSource\(\) \? String\(threadDetailId\) : String\(thread\.threadId\)\}\$\{slackFocusedThreadId \? `\|slack-thread:\$\{slackFocusedThreadId\}` : ""\}`/);
+  assert.match(html, /const threadStateKey = isConversationRoomSource\(\) \? String\(threadDetailId\) : String\(thread\.threadId\)/);
   assert.match(html, /if \(thReplySending \|\| chatReplySending\.has\(threadStateKey\)\) return;/);
   assert.match(html, /thQrSend\.disabled = true;/);
   assert.match(html, /chatReplySending\.add\(threadStateKey\)/);

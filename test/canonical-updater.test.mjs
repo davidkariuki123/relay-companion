@@ -14,55 +14,9 @@ import {
   resolveUpdateWorkerNode,
   reconcileUpdateWorkerJobs,
   runCanonicalUpdateTransaction,
-  repairLegacyGlobalCliShim,
   runtimeNpmCommand,
   spawnCanonicalUpdate,
 } from "../src/canonical-updater.js";
-
-test("canonical activation upgrades an older npm-global Relay shim without running lifecycle scripts", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-global-shim-"));
-  const packageRoot = path.join(root, "relay-companion");
-  const packageJson = path.join(packageRoot, "package.json");
-  fs.mkdirSync(packageRoot, { recursive: true });
-  fs.writeFileSync(packageJson, JSON.stringify({ version: "0.1.291" }));
-  const calls = [];
-  const result = repairLegacyGlobalCliShim({
-    version: "0.1.388",
-    npmCommand: "/runtime/bin/npm",
-    platform: "darwin",
-    run: (command, args, options) => {
-      calls.push({ command, args, options });
-      if (args[0] === "root") return { status: 0, stdout: `${root}\n`, stderr: "" };
-      fs.writeFileSync(packageJson, JSON.stringify({ version: "0.1.388" }));
-      return { status: 0, stdout: "", stderr: "" };
-    },
-  });
-  assert.deepEqual(result, { ok: true, repaired: true, from: "0.1.291", version: "0.1.388" });
-  assert.deepEqual(calls[1].args, [
-    "install", "--global", "--ignore-scripts", "--no-audit", "--no-fund", "relay-companion@0.1.388",
-  ]);
-  assert.equal(calls[1].options.timeout, 10 * 60_000);
-});
-
-test("global shim migration is a no-op for current/newer shims and honest when npm is unavailable", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-current-shim-"));
-  const packageRoot = path.join(root, "relay-companion");
-  fs.mkdirSync(packageRoot, { recursive: true });
-  fs.writeFileSync(path.join(packageRoot, "package.json"), JSON.stringify({ version: "0.1.400" }));
-  const current = repairLegacyGlobalCliShim({
-    version: "0.1.388",
-    npmCommand: "/runtime/bin/npm",
-    run: (_command, args) => {
-      assert.equal(args[0], "root");
-      return { status: 0, stdout: `${root}\n`, stderr: "" };
-    },
-  });
-  assert.deepEqual(current, { ok: true, repaired: false, version: "0.1.400" });
-  assert.deepEqual(repairLegacyGlobalCliShim({ version: "0.1.388", npmCommand: null }), {
-    ok: false,
-    reason: "npm-unavailable",
-  });
-});
 import {
   canonicalNpmInvocation,
   ensureCandidateElectronRuntime,

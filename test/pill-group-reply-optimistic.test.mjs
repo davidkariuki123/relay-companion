@@ -38,13 +38,13 @@ function runThreadMessages(payload, optimisticChatReplies, { realDelivery = fals
     ? `${pillFunction("sentIsRead")}\n${pillFunction("sentIsDelivered")}\n${pillFunction("threadMessages")}\nreturn threadMessages();`
     : `${pillFunction("threadMessages")}\nreturn threadMessages();`;
   return new Function(
-    "payload", "optimisticChatReplies", "canonicalChatDetails",
+    "payload", "optimisticChatReplies",
     "requestThreadIds", "isTaskRow", "isRelayListKind", "onRequestThread",
     "relaySubject", "relayTextLike", "isCompletionRelay", "relaySender",
     "bodyPreview", "sentRecipient", "sentIsRead", "sentIsDelivered", "sentSubject",
     `"use strict"; ${source}`,
   )(
-    payload, optimisticChatReplies, new Map(),
+    payload, optimisticChatReplies,
     () => new Set(), () => false, () => true, () => false,
     (r) => String(r.title || ""), () => true, () => false,
     (r) => String(r.senderName || "Sender"),
@@ -105,6 +105,45 @@ test("a direct reply still retires on its exact relay id", () => {
   }, optimistic);
   assert.equal(msgs.filter((m) => m.direction === "out").length, 1);
   assert.equal(optimistic.size, 0);
+});
+
+test("a self-send keeps the richer inbox copy but renders as my outbound message", () => {
+  const msgs = runThreadMessages({
+    account: { email: "shane@example.com" },
+    relays: [{
+      id: "relay_self", threadId: "thread_self", title: "hello", forHuman: "hello",
+      senderName: "Shane Acton", senderEmail: "shane@example.com", unread: true,
+      createdAt: "2026-08-25T10:00:00.000Z",
+    }],
+    sent: [{
+      relayId: "relay_self", threadId: "thread_self", title: "hello", forHuman: "hello",
+      state: "delivered", createdAt: "2026-08-25T10:00:00.000Z",
+      recipient: { name: "Shane Acton", email: "shane@example.com" },
+    }],
+  }, new Map());
+
+  assert.equal(msgs.length, 1, "the inbox and sent projections remain one bubble");
+  assert.equal(msgs[0].direction, "out", "the author sees their note-to-self as sent");
+  assert.equal(msgs[0].unread, false, "my own message cannot make my room unread");
+  assert.equal(msgs[0].body, "hello", "the richer inbox body is retained");
+  assert.equal(msgs[0].readReceipts[0].name, "Shane Acton");
+});
+
+test("a self-send is outbound on first paint before sent history hydrates", () => {
+  const msgs = runThreadMessages({
+    account: { email: "shane@example.com" },
+    relays: [{
+      id: "relay_self", threadId: "thread_self", title: "hello", forHuman: "hello",
+      senderName: "Shane Acton", senderEmail: "SHANE@example.com", unread: true,
+      createdAt: "2026-08-25T10:00:00.000Z",
+    }],
+    sent: [],
+  }, new Map());
+
+  assert.equal(msgs.length, 1);
+  assert.equal(msgs[0].direction, "out", "the signed-in sender address establishes authorship immediately");
+  assert.equal(msgs[0].unread, false);
+  assert.deepEqual(msgs[0].readReceipts, [], "receipts can hydrate later without changing ownership");
 });
 
 test("the groupSendId that retires a bubble is stamped by the device's queue, not by a send response", () => {

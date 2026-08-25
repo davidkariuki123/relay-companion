@@ -2,9 +2,9 @@
 //
 // This boots the real Electron overlay in an isolated home, records every
 // rendered animation frame plus every native BrowserWindow bounds write, and
-// captures a small screenshot sequence. The native compositor canvas must stay
-// fixed throughout the morph. It is intentionally outside npm test:
-// run it on macOS with a GUI session.
+// captures a small screenshot sequence. macOS must keep its compositor canvas
+// fixed throughout the morph; other platforms must use one ordinary native
+// growth transaction. It is intentionally outside npm test.
 
 import { spawn } from "node:child_process";
 import assert from "node:assert/strict";
@@ -269,7 +269,16 @@ try {
       `no-screenshot transition missed two presentation frames: ${Math.max(...frameGaps).toFixed(1)}ms`);
   }
   assert.deepEqual(frames.at(-1).card, { x:4, y:24, w:720, h:760 });
-  assert.equal(bounds.length, 0, `reader transition resized the fixed native canvas ${bounds.length} times`);
+  if (process.platform === "darwin") {
+    assert.equal(bounds.length, 0, `reader transition resized the macOS fixed native canvas ${bounds.length} times`);
+  } else {
+    assert.ok(bounds.length >= 1, "ordinary native window never grew with the reader");
+    assert.deepEqual(
+      { width: bounds.at(-1).bounds.width, height: bounds.at(-1).bounds.height, animate: bounds.at(-1).animate },
+      { width: 720, height: 760, animate: false },
+      "ordinary native window grows once to the reader without native animation",
+    );
+  }
   console.log(JSON.stringify({ sandbox, frameCount: frames.length, before, frames, longTasks, bounds, captures }, null, 2));
   const holdMs = Number(process.env.RELAY_TRANSITION_HOLD_MS || 0);
   if (holdMs > 0) await sleep(holdMs);

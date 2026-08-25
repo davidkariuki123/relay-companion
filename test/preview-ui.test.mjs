@@ -345,7 +345,7 @@ test("preview Markdown security controls survive into the bundled preload", () =
     assert.match(forbiddenTags, /["']img["']/i, `${label} explicitly forbids img`);
   }
 
-  assert.match(previewHtml, /img-src 'self' data: blob:/);
+  assert.match(previewHtml, /img-src data: blob:/);
   assert.doesNotMatch(previewHtml, /img-src[^;]*(?:https:|file:)/);
   const externalOpen = between(main, "function openPreviewExternal", "function isPreviewEvent");
   assert.match(externalOpen, /new Set\(\["http:",\s*"https:",\s*"mailto:"\]\)/);
@@ -854,7 +854,7 @@ test("Task documents remain beside a persistent Work tab throughout a run", () =
   assert.match(reader, /class="work-footer"[^]*\$\{status\}\$\{composer\}/, "Work keeps its provider composer after Start");
   assert.match(reader, /if \(request && \(onAgent \|\| onWork\)\) return requestDockHtml/,
     "For Agent and Work keep the provider composer");
-  assert.match(reader, /<div class="rd-foot"><div class="rd-col">\$\{sharedShelf\}\$\{status\}\$\{bothNote\}\$\{composer\}/,
+  assert.match(reader, /<div class="rd-foot"><div class="rd-col">\$\{status\}\$\{bothNote\}\$\{composer\}/,
     "both immutable source documents retain a composer after Work exists");
   assert.doesNotMatch(reader, /requestDisclosure|data-brief=/, "Work never nests another copy of the document tabs or documents");
 
@@ -1062,11 +1062,9 @@ test("only native end-to-end providers can start a request", () => {
 });
 
 test("Settings exposes complete subscription connection management for Claude Code and Codex", () => {
-  assert.match(inbox, /Agent connections/);
-  assert.match(inbox, /Claude Code uses your Claude subscription; Codex uses your ChatGPT subscription/);
-  assert.match(inbox, /never sees or stores your sign-in credentials/);
+  assert.match(inbox, />Connections</);
+  assert.match(inbox, /Relay uses each app's local profile\. Your credentials stay with the app\./);
   assert.doesNotMatch(inbox, /This Mac's existing local profile/);
-  assert.match(inbox, /Sessions, settings, MCPs, and connectors/);
   assert.match(inbox, /data-provider-connect="\$\{id\}"/);
   assert.match(inbox, /item\.connected\s*\? "Connected"/);
   assert.match(inbox, /"Sign in to Claude Code" : "Sign in to Codex"/);
@@ -1074,15 +1072,12 @@ test("Settings exposes complete subscription connection management for Claude Co
   assert.doesNotMatch(inbox, /Connect local profile/);
   assert.doesNotMatch(inbox, /data-provider-refresh|Refresh status/);
   assert.doesNotMatch(inbox, /data-provider-open|Open \$\{esc\(item\.label\)\}/);
-  assert.match(inbox, /Local MCPs/);
-  assert.match(inbox, /Connected apps/);
+  assert.match(inbox, /local MCPs/);
+  assert.match(inbox, /connected apps/);
   assert.match(inbox, /MCPs and account connectors/);
-  assert.match(inbox, /values\.slice\(0, 4\)/);
-  assert.match(inbox, /data-provider-integrations/);
-  assert.match(inbox, /providerIntegrationsDialogHtml/);
-  assert.match(inbox, /\.sv-integration-empty\.hidden\s*\{\s*display:none/);
-  assert.match(inbox, /role="dialog" aria-modal="true"/);
-  assert.match(inbox, /placeholder="Search integrations"/);
+  assert.match(inbox, /const preview = values\.map\(\(entry\) =>/);
+  assert.match(inbox, /sv-provider-list sv-agent-provider-list/);
+  assert.doesNotMatch(inbox, /data-provider-integrations|providerIntegrationsDialogHtml|sv-integration-more/);
   assert.match(inbox, /data-provider-enable="\$\{id\}"/);
   assert.match(inbox, /Disabled for Tasks/);
   assert.match(inbox, /window\.addEventListener\("focus", \(\) => \{[\s\S]*activeView === "settings"[\s\S]*loadSettings\(\)/);

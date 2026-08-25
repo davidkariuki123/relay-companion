@@ -169,7 +169,7 @@ test("Settings always offers where relays open, and the fresh open goes there", 
 test("Agent connections are requests substrate: never mounted, never probed, outside local builds", () => {
   const source = fs.readFileSync(path.join(here, "../overlay/inbox.html"), "utf8");
   const settings = source.slice(source.indexOf("function renderSettings()"), source.indexOf("function wireSettings()"));
-  assert.match(settings, /if \(payload\.features\?\.agentConnections === true\) \{\s*html \+= providerConnectionHtml\(\);\s*html \+= providerIntegrationsDialogHtml\(\);\s*\}/);
+  assert.match(settings, /if \(payload\.features\?\.agentConnections === true\) \{\s*html \+= providerConnectionHtml\(\);\s*\}/);
   const load = source.slice(source.indexOf("async function loadSettings()"), source.indexOf("// Provider state is live product state"));
   assert.match(load, /const connectionsOn = payload\.features\?\.agentConnections === true;/);
   assert.match(load, /const authTask = \(async \(\) => \{\s*if \(!connectionsOn\) return;/, "the subscription-profile probe never runs off the row");

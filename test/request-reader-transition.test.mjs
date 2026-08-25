@@ -85,10 +85,11 @@ test("the card spring approaches both reader and mini-list sizes monotonically",
   exercise(720, 344);
 });
 
-test("size preparation updates the fixed canvas hit region without native geometry", () => {
+test("size preparation chooses macOS hit testing or ordinary native geometry", () => {
   const prepare = between(main, 'ipcMain.handle("relay:prepareCardSize"', 'ipcMain.on("relay:setPos"');
   assert.match(prepare, /cardSize = \{ w, h \}/);
-  assert.doesNotMatch(prepare, /setBounds|setPosition|setSize|fitOverlayWindowToCard/);
+  assert.match(prepare, /if \(FIXED_OVERLAY_SURFACE\) scheduleHit\(0\)/);
+  assert.match(prepare, /else fitOverlayWindowToCard\(\)/);
 });
 
 test("chat, compact rooms, sent, and Tasks share the same source snapshot", () => {

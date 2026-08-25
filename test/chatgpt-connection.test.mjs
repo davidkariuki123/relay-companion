@@ -26,8 +26,9 @@ test("main validates the first-party handoff URL before opening it", () => {
   assert.match(body, /await shell\.openExternal\(target\.toString\(\)\)/);
 });
 
-test("Claude setup copies only Relay's configured public MCP URL", () => {
+test("Claude setup copies Relay's stable website MCP URL", () => {
   assert.match(main, /function relayMcpUrl\(\)/);
+  assert.match(main, /const base = new URL\(`\$\{webBase\(\)\}\/`\)/);
   assert.match(main, /return new URL\("\/mcp", base\)\.toString\(\)/);
   assert.match(main, /const loopback = base\.hostname === "localhost"/);
   assert.match(main, /if \(copiedMcpUrl\) clipboard\.writeText\(copiedMcpUrl\)/);
@@ -48,15 +49,17 @@ test("required E2EE routes Claude through the local runtime with no hosted fallb
   assert.match(body, /ChatGPT connections are not available with Relay E2EE yet/);
 });
 
-test("ordinary users always see ChatGPT and Claude under Chat connections", () => {
+test("ordinary users see ChatGPT as coming soon and Claude as connectable", () => {
   assert.match(html, /<div class="sv-open-title">Chat connections<\/div>/);
-  assert.match(html, /id="svConnectChatGPT"/);
+  assert.match(html, /<span class="sv-provider-name">ChatGPT<\/span>\s*<span class="sv-provider-status">Relay for regular ChatGPT is coming soon\.<\/span>/);
+  assert.match(html, /<button class="sv-provider-btn" type="button" disabled>Coming soon<\/button>/);
+  assert.doesNotMatch(html, /id="svConnectChatGPT"/);
+  assert.doesNotMatch(html, /connectChatGptFromSettings/);
   assert.match(html, /id="svConnectClaude"/);
   const render = html.slice(html.indexOf("function renderSettings()"), html.indexOf("function wireSettings()"));
   const chat = render.indexOf("html += chatConnectionsHtml(info)");
   const developerGate = render.indexOf("if (payload.features?.agentConnections === true)");
-  assert.ok(chat >= 0 && developerGate > chat, "ChatGPT setup is outside the developer-only agent section");
-  assert.match(html, /connectChatGpt\.addEventListener\("click", connectChatGptFromSettings\)/);
+  assert.ok(chat >= 0 && developerGate > chat, "chat setup is outside the developer-only agent section");
   assert.match(html, /connectClaude\.addEventListener\("click", connectClaudeFromSettings\)/);
 });
 

@@ -45,6 +45,11 @@ import WebSocket from "ws";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkgRoot = path.join(__dirname, "..");
+const fixedNativeSurface = process.platform === "darwin";
+const nativeBoundsMatch = (actual, expected, tolerance = 1) => (
+  actual && expected && ["x", "y", "width", "height"]
+    .every((key) => Math.abs(Number(actual[key]) - Number(expected[key])) <= tolerance)
+);
 // electron may be hoisted to the workspace root (dev) or vendored (npm install)
 const electronBin = [
   process.env.RELAY_PARITY_ELECTRON,
@@ -332,7 +337,7 @@ try {
   })()`);
   check(
     "chat-spacing: Tasks and replyable messages keep the same twenty-pixel continuation gap",
-    messageSpacing.task === 20 && messageSpacing.text === 20,
+    Math.abs(messageSpacing.task - 20) < 0.01 && Math.abs(messageSpacing.text - 20) < 0.01,
     `task=${messageSpacing.task}px text=${messageSpacing.text}px`,
   );
 
@@ -498,6 +503,59 @@ try {
     sentUi.preview === "You: Outbound fixture body" && openedSentRoom.history.includes("You") && openedSentRoom.history.includes("Outbound fixture body"),
     `preview=${sentUi.preview} room=${openedSentRoom.title}`,
   );
+
+  // Literal user path for the delayed Windows failure: open a conversation,
+  // press its Expand button, then wait beyond several intervals of the removed
+  // Windows click-through poll. The expanded card must still be the native
+  // input owner; collapsing it again must restore ordinary compact bounds.
+  await evalIn(pageConn, `openFull(); 'open full conversation card'`);
+  await retry(async () => {
+    const compact = await evalIn(pageConn, `(() => {
+      const r = document.getElementById('card').getBoundingClientRect();
+      return { collapsed:document.getElementById('card').classList.contains('collapsed'), width:Math.round(r.width), height:Math.round(r.height) };
+    })()`);
+    if (compact.collapsed || compact.width !== 344 || compact.height !== 524) throw new Error(JSON.stringify(compact));
+    return compact;
+  }, { label: "conversation card is open before Expand" });
+  await evalIn(pageConn, `document.getElementById('thExpand').click(); 'expand conversation'`);
+  const expandedConversation = await retry(async () => {
+    const ui = await evalIn(pageConn, `(() => {
+      const r = document.getElementById('card').getBoundingClientRect();
+      return { expanded:chatExpanded, width:Math.round(r.width), height:Math.round(r.height) };
+    })()`);
+    if (!ui.expanded || ui.width !== 720 || ui.height !== 760) throw new Error(JSON.stringify(ui));
+    return ui;
+  }, { label: "conversation Expand reaches reader geometry" });
+  await sleep(300);
+  const expandedInputState = await evalIn(mainConn, "global.__relayTest.state()");
+  const expectedExpandedNative = fixedNativeSurface
+    ? { width: 720, height: 800 }
+    : { width: 720, height: 760 };
+  check(
+    "conversation-expand: delayed Windows input remains owned by the expanded pill",
+    expandedConversation.expanded &&
+      (fixedNativeSurface || expandedInputState.hitIgnoring === false) &&
+      Math.abs(expandedInputState.nativeBounds.width - expectedExpandedNative.width) <= 1 &&
+      Math.abs(expandedInputState.nativeBounds.height - expectedExpandedNative.height) <= 1,
+    JSON.stringify(expandedInputState),
+  );
+  await evalIn(pageConn, `document.getElementById('thExpand').click(); 'collapse conversation'`);
+  await retry(async () => {
+    const ui = await evalIn(pageConn, `(() => {
+      const r = document.getElementById('card').getBoundingClientRect();
+      return { expanded:chatExpanded, width:Math.round(r.width), height:Math.round(r.height) };
+    })()`);
+    const state = await evalIn(mainConn, "global.__relayTest.state()");
+    const compactNative = fixedNativeSurface
+      ? { width: 720, height: 800 }
+      : { width: 344, height: 524 };
+    if (ui.expanded || ui.width !== 344 || ui.height !== 524 ||
+        Math.abs(state.nativeBounds.width - compactNative.width) > 1 ||
+        Math.abs(state.nativeBounds.height - compactNative.height) > 1) {
+      throw new Error(JSON.stringify({ ui, state }));
+    }
+    return true;
+  }, { label: "conversation Collapse restores compact native geometry" });
 
   // ---- 5. a new relay revives a dismissed pill and leaves it latched ----
   // Settle whatever is on stage FIRST, through the same seam the renderer uses
@@ -685,9 +743,9 @@ try {
 
   // ---- dragged anchor: fold and reopen around the user's chosen position ----
   // Drive the lockup's real pointer path (not win.setPosition directly), then
-  // require the fixed native compositor surface to remain byte-for-byte stable
-  // while the one DOM card changes size. This is the regression for the
-  // one-frame duplicate created by AppKit origin+size settlement.
+  // On macOS the fixed compositor surface must remain byte-for-byte stable.
+  // Elsewhere the ordinary native window must follow the card while preserving
+  // the same screen-space top-right anchor.
   const dragStart = await evalIn(mainConn, "global.__relayTest.getWin().getBounds()");
   const dragDx = dragStart.x > 200 ? -80 : 80;
   const dragDy = dragStart.y > 200 ? -60 : 60;
@@ -742,7 +800,7 @@ try {
     };
   })()`);
   check(
-    "dragged-anchor: the compact face changes synchronously on the fixed surface",
+    "dragged-anchor: the compact face changes synchronously",
     collapseHandoff.collapsing === false && collapseHandoff.collapsed === true && collapseHandoff.countDisplay !== "none",
     JSON.stringify(collapseHandoff),
   );
@@ -753,8 +811,16 @@ try {
       return { collapsed:card.classList.contains('collapsed'), collapsing:card.classList.contains('collapsing'), width:Math.round(r.width), height:Math.round(r.height) };
     })()`);
     const bounds = await evalIn(mainConn, "global.__relayTest.getWin().getBounds()");
+    const expected = fixedNativeSurface
+      ? draggedExpanded
+      : {
+          x: draggedExpanded.x + draggedExpanded.width - 244,
+          y: draggedExpanded.y,
+          width: 244,
+          height: 44,
+        };
     if (!phase.collapsed || phase.collapsing || phase.width !== 244 || phase.height !== 44 ||
-        JSON.stringify(bounds) !== JSON.stringify(draggedExpanded)) {
+        !nativeBoundsMatch(bounds, expected)) {
       throw new Error(`phase=${JSON.stringify(phase)} bounds=${JSON.stringify(bounds)}`);
     }
     return bounds;
@@ -768,21 +834,22 @@ try {
     })()`);
     const bounds = await evalIn(mainConn, "global.__relayTest.getWin().getBounds()");
     if (phase.collapsed || phase.width !== 344 || phase.height !== 524 ||
-        JSON.stringify(bounds) !== JSON.stringify(draggedExpanded)) {
+        !nativeBoundsMatch(bounds, draggedExpanded)) {
       throw new Error(`phase=${JSON.stringify(phase)} bounds=${JSON.stringify(bounds)}`);
     }
     return bounds;
   }, { label: "dragged pill reopen settlement" });
   check(
-    "dragged-anchor: collapse and reopen never mutate the user's chosen native position",
-    JSON.stringify(draggedCollapsed) === JSON.stringify(draggedExpanded) &&
-      JSON.stringify(draggedReopened) === JSON.stringify(draggedExpanded),
+    "dragged-anchor: collapse and reopen preserve the user's screen-space anchor",
+    Math.abs((draggedCollapsed.x + draggedCollapsed.width) - (draggedExpanded.x + draggedExpanded.width)) <= 1 &&
+      Math.abs(draggedCollapsed.y - draggedExpanded.y) <= 1 &&
+      nativeBoundsMatch(draggedReopened, draggedExpanded),
     `expanded=${JSON.stringify(draggedExpanded)} collapsed=${JSON.stringify(draggedCollapsed)} reopened=${JSON.stringify(draggedReopened)}`,
   );
 
-  // Hammer the exact header path. Every cycle must keep one DOM face and the
-  // exact same native surface; any return to dynamic native sizing fails on the
-  // first iteration rather than relying on a human catching a one-frame flash.
+  // Hammer the exact header path. Every cycle must keep one DOM face. macOS
+  // retains one native surface; ordinary Windows/Linux windows must settle to
+  // the visible card without ever losing the top-right anchor.
   let repeatedMorphsOk = true;
   let repeatedMorphDetail = "";
   for (let i = 0; i < 20; i += 1) {
@@ -809,17 +876,41 @@ try {
       break;
     }
     const settledBounds = await evalIn(mainConn, "global.__relayTest.getWin().getBounds()");
-    if (JSON.stringify(immediateBounds) !== JSON.stringify(draggedExpanded) ||
-        JSON.stringify(settledBounds) !== JSON.stringify(draggedExpanded)) {
+    const expectedSettled = fixedNativeSurface || !shouldBeCollapsed
+      ? draggedExpanded
+      : {
+          x: draggedExpanded.x + draggedExpanded.width - 244,
+          y: draggedExpanded.y,
+          width: 244,
+          height: 44,
+        };
+    if (!nativeBoundsMatch(immediateBounds, draggedExpanded) ||
+        !nativeBoundsMatch(settledBounds, expectedSettled)) {
       repeatedMorphsOk = false;
       repeatedMorphDetail = `i=${i} sample=${JSON.stringify(sample)} immediate=${JSON.stringify(immediateBounds)} settled=${JSON.stringify(settledBounds)}`;
       break;
     }
   }
   check(
-    "collapse-hammer: twenty header toggles keep one card on one immutable native surface",
+    "collapse-hammer: twenty header toggles keep one card on correct platform-native bounds",
     repeatedMorphsOk,
     repeatedMorphDetail,
+  );
+  // The regression appeared only after Expand had been open for a while: the
+  // old 24-64ms polling loop eventually marked the whole Windows BrowserWindow
+  // click-through. Wait beyond several old polling intervals and prove Windows
+  // still owns input with exact visible-card bounds.
+  await sleep(300);
+  const delayedInputState = await evalIn(mainConn, "global.__relayTest.state()");
+  check(
+    "windows-input: repeated expand/collapse never enters delayed click-through mode",
+    fixedNativeSurface || (
+      delayedInputState.fixedOverlaySurface === false &&
+      delayedInputState.hitIgnoring === false &&
+      Math.abs(delayedInputState.nativeBounds.width - 344) <= 1 &&
+      Math.abs(delayedInputState.nativeBounds.height - 524) <= 1
+    ),
+    JSON.stringify(delayedInputState),
   );
 
   // ---- 8. the race: dismiss then reopen inside the exit animation ----

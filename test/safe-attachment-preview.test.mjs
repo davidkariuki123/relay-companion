@@ -23,27 +23,6 @@ test("authorized canonical image is read through a bounded descriptor", async (t
   });
 });
 
-test("authorized canonical HTML is returned only after the same bounded digest verification", async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "relay-html-preview-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
-  const body = Buffer.from("<!doctype html><html><body><h1>Relay plan</h1></body></html>");
-  const file = path.join(root, "plan.html");
-  await fs.writeFile(file, body);
-  const result = await resolveSafeAttachmentPreview({
-    path: file,
-    name: "plan.html",
-    contentType: "text/html",
-    size: body.length,
-    sha256: createHash("sha256").update(body).digest("hex"),
-  }, { allowedRoots: [root] });
-  assert.deepEqual(result, {
-    name: "plan.html",
-    mimeType: "text/html",
-    size: body.length,
-    html: body.toString(),
-  });
-});
-
 test("preview fails closed for traversal, symlink escape, remote URLs, oversized files, and false extensions", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "relay-preview-root-"));
   const outside = await fs.mkdtemp(path.join(os.tmpdir(), "relay-preview-out-"));
@@ -77,7 +56,7 @@ test("preview fails closed for traversal, symlink escape, remote URLs, oversized
 
   const text = path.join(root, "fake.png");
   await fs.writeFile(text, "not an image");
-  await assert.rejects(() => resolveSafeAttachmentPreview({ path: text, sha256: createHash("sha256").update("not an image").digest("hex") }, { allowedRoots: [root] }), /recognized image or HTML/);
+  await assert.rejects(() => resolveSafeAttachmentPreview({ path: text, sha256: createHash("sha256").update("not an image").digest("hex") }, { allowedRoots: [root] }), /recognized image/);
 });
 
 test("preview rejects an inode swap before opening and never invokes an injected unbounded reader", async (t) => {

@@ -1,9 +1,9 @@
 // Relay companion pill — a small floating, always-on-top Relay window that lists
 // incoming Relay attention items + sent relays, and lazy-opens them in Claude Code / Codex.
 //
-// Motion principle: the native transparent window follows the visible card, using the
-// renderer's pre-morph size barrier to grow before a transition and a short settle to
-// shrink afterwards. The whole native window is an ordinary focusable input surface.
+// Motion principle: Windows/Linux use an ordinary native window that follows the
+// visible card. macOS keeps one stable compositor surface to avoid AppKit's split
+// origin/size presentation. In both cases the visible card remains focusable.
 //
 // Visibility: the card carries a ✕ that hides the overlay entirely (persisted). The Relay
 // mark in the OS status area (macOS menu bar, Windows system tray) brings it back fully
@@ -63,33 +63,6 @@ const { execFile, execFileSync, spawn, pathToFileURL } = (() => {
   const url = require("node:url");
   return { execFile: cp.execFile, execFileSync: cp.execFileSync, spawn: cp.spawn, pathToFileURL: url.pathToFileURL };
 })();
-
-// Slack buttons can only open HTTPS URLs. Relay's web bridge hands that click
-// to this narrow custom protocol, which carries an opaque message id and the
-// explicitly named host — never message content or credentials.
-const pendingRelayDeepLinks = [];
-let relayDeepLinksReady = false;
-function registerRelayProtocol() {
-  if (process.env.RELAY_OVERLAY_TEST === "1" || process.env.RELAY_OVERLAY_PERF === "1") return;
-  try {
-    if (process.defaultApp && process.argv[1]) {
-      app.setAsDefaultProtocolClient("relay", process.execPath, [path.resolve(process.argv[1])]);
-    } else {
-      app.setAsDefaultProtocolClient("relay");
-    }
-  } catch (error) {
-    console.error("[overlay] Relay protocol registration failed:", error && error.message);
-  }
-}
-registerRelayProtocol();
-
-app.on("open-url", (event, url) => {
-  event.preventDefault();
-  const parsed = parseRelayDeepLink(url);
-  if (!parsed) return;
-  pendingRelayDeepLinks.push(parsed);
-  if (relayDeepLinksReady) drainRelayDeepLinks();
-});
 const {
   hostFromBundle,
   activationBundleCandidates,
@@ -97,7 +70,6 @@ const {
   runningHostsFromProcessList,
   terminalClaudeCodeRunningFromProcessList,
 } = require("./host-select.cjs");
-const { parseRelayDeepLink, relayDeepLinkFromArgv } = require("./deep-link.cjs");
 const {
   overlayWanted,
   createHostRunningTracker,
@@ -127,7 +99,12 @@ const {
 const { elevationForFrontmost } = require("./elevation-policy.cjs");
 const { openingFaceFor } = require("./message-face.cjs");
 const perf = require("./perf-counters.cjs");
-const { fittedOverlayBounds, shouldIgnoreOverlayMouse } = require("./window-fit.cjs");
+const {
+  fittedOverlayBounds,
+  resizedOverlayBounds,
+  shouldIgnoreOverlayMouse,
+  usesFixedOverlaySurface,
+} = require("./window-fit.cjs");
 const { productFeatures } = require("../src/product-features.cjs");
 const { createOutbox } = require("../src/outbox.cjs");
 const {
@@ -149,7 +126,7 @@ const OUTBOX_PATH = path.join(RELAY_HOME, "outbox.json");
 // The companion CLI entrypoint (same path the overlay resolves its ESM modules
 // from). Spawned with ELECTRON_RUN_AS_NODE so Electron runs it as plain Node.
 const RELAY_CLI = path.resolve(__dirname, "..", "bin", "relay.js");
-// Fixed compositor canvas dimensions; the visible/hit-tested card morphs inside it.
+// Maximum harness parking footprint; it safely covers the largest reader frame.
 const WIN = { width: 760, height: 880 }; // holds the READER/split frame (720x760) the design expands into
 const PREVIEW_WIN = { width: 720, height: 760, minWidth: 480, minHeight: 480 };
 // A second preview steps down-right of the first so a stack stays individually
@@ -504,11 +481,8 @@ function installationAuthorizationController() {
           contactsCache = [];
           contactsFingerprint = "";
           contactsLoadedOnce = null;
-          canonicalChatsCache = [];
-          canonicalChatsFingerprint = "";
-          canonicalChatsLoadedOnce = null;
           await restartCompanionDaemon();
-          await Promise.allSettled([refreshSent(), refreshContacts(), refreshCanonicalChats()]);
+          await Promise.allSettled([refreshSent(), refreshContacts()]);
           await pushInbox(true);
         },
       }))
@@ -532,103 +506,6 @@ function loadSentStager() {
       });
   }
   return sentStagerPromise;
-}
-
-let plainStagerPromise = null;
-function loadPlainStager() {
-  if (!plainStagerPromise) {
-    const notificationsUrl = pathToFileURL(path.join(__dirname, "..", "src", "notifications.js")).href;
-    plainStagerPromise = import(notificationsUrl)
-      .then((notifications) => notifications.stagePlainRelayItem)
-      .catch((error) => {
-        plainStagerPromise = null;
-        throw error;
-      });
-  }
-  return plainStagerPromise;
-}
-
-let relayDeepLinkDrain = null;
-let pendingRelayReader = null;
-
-function deliverPendingRelayReader() {
-  if (!pendingRelayReader || !rendererListening || !win || win.isDestroyed() || win.webContents.isDestroyed()) {
-    return false;
-  }
-  win.webContents.send("relay:openReader", pendingRelayReader);
-  pendingRelayReader = null;
-  return true;
-}
-
-async function openRelayDeepLink(parsed) {
-  const [{ RelayClient }, stagePlainRelayItem] = await Promise.all([
-    import(pathToFileURL(path.join(__dirname, "..", "src", "client.js")).href),
-    loadPlainStager(),
-  ]);
-  if (parsed.host === "relay") {
-    const client = new RelayClient();
-    await refreshCanonicalChats();
-    const chatId = String(
-      parsed.chatId
-      || canonicalChatsCache.find((chat) => chat?.lastMessage?.relayId === parsed.messageId)?.chatId
-      || "",
-    );
-    if (!chatId) throw new Error("Relay channel context is unavailable to this account.");
-    const chat = await client.chat(chatId);
-    if (!Array.isArray(chat?.items) || !chat.items.some((item) => item?.relayId === parsed.messageId)) {
-      throw new Error("Relay message is unavailable to this account.");
-    }
-    await pushInbox(true);
-    pendingRelayReader = { messageId: parsed.messageId, chatId };
-    requestExternalReopen(randomUUID());
-    // Hot Pills receive this immediately. Cold Pills keep it until the renderer
-    // explicitly confirms that its openReader listener is installed.
-    deliverPendingRelayReader();
-    return;
-  }
-  const fetched = await new RelayClient().fetchRelay(parsed.messageId);
-  const packet = fetched && fetched.packet;
-  if (!packet || packet.id !== parsed.messageId) throw new Error("Relay message is unavailable to this account.");
-  stagePlainRelayItem({
-    item: {
-      relayId: packet.id,
-      state: "delivered",
-      createdAt: packet.createdAt,
-      updatedAt: packet.editedAt || packet.createdAt,
-      kind: packet.kind,
-      ...(packet.title ? { title: packet.title } : {}),
-      sender: packet.sender,
-      preview: packet.forHuman,
-      inReplyToRelayId: packet.inReplyToRelayId,
-      threadId: packet.threadId || packet.id,
-      recipientGroupId: packet.recipientGroupId,
-      recipientGroupName: packet.recipientGroupName,
-    },
-    packet,
-    attachmentUrls: fetched.attachmentUrls || {},
-  }, { statePath: STATE_PATH });
-  await pushInbox(true);
-  requestExternalReopen(randomUUID());
-  await openPacket(packet.id, { host: parsed.host, fresh: true });
-}
-
-function drainRelayDeepLinks() {
-  if (!relayDeepLinksReady || relayDeepLinkDrain || pendingRelayDeepLinks.length === 0) return relayDeepLinkDrain;
-  relayDeepLinkDrain = (async () => {
-    while (pendingRelayDeepLinks.length) {
-      const parsed = pendingRelayDeepLinks.shift();
-      try {
-        await openRelayDeepLink(parsed);
-      } catch (error) {
-        console.error("[overlay] Relay deep link failed:", error && error.message);
-        requestExternalReopen(randomUUID());
-      }
-    }
-  })().finally(() => {
-    relayDeepLinkDrain = null;
-    if (pendingRelayDeepLinks.length) drainRelayDeepLinks();
-  });
-  return relayDeepLinkDrain;
 }
 
 // Relay channel deps (ESM, lazy): the wake path for "Open in current chat".
@@ -764,13 +641,6 @@ let PRODUCT_FEATURES = productFeatures({
   apiUrl: process.env.RELAY_API_URL || readConfigFile().apiUrl || "",
 });
 let TASK_FEATURES_ALLOWED = PRODUCT_FEATURES.requests;
-let remoteCredentialRejected = false;
-
-function isRemoteCredentialRejection(error) {
-  if (![401, 403].includes(Number(error?.status))) return false;
-  const code = String(error?.body?.error || error?.body?.code || error?.message || "").toLowerCase();
-  return code.includes("missing_authorization") || code.includes("unauthorized") || code.includes("invalid_token");
-}
 
 async function refreshAccountProductFeatures() {
   if (!deviceToken()) return false;
@@ -784,7 +654,6 @@ async function refreshAccountProductFeatures() {
       user: me?.user,
     });
     const changed = JSON.stringify(next) !== JSON.stringify(PRODUCT_FEATURES);
-    remoteCredentialRejected = false;
     PRODUCT_FEATURES = next;
     TASK_FEATURES_ALLOWED = next.requests;
     if (changed) {
@@ -794,12 +663,6 @@ async function refreshAccountProductFeatures() {
     }
     return changed;
   } catch (error) {
-    if (isRemoteCredentialRejection(error)) {
-      const changed = !remoteCredentialRejected;
-      remoteCredentialRejected = true;
-      if (changed) await pushInbox(true);
-      return changed;
-    }
     console.error("[overlay] developer profile refresh failed:", error && error.message);
     return false;
   }
@@ -822,8 +685,8 @@ function account() {
   const credential = cfg._relayCredential || { status: "unpaired" };
   return {
     paired: Boolean(process.env.RELAY_DEVICE_TOKEN || cfg.deviceToken),
-    credentialStatus: remoteCredentialRejected ? "missing" : credential.status,
-    credentialError: remoteCredentialRejected ? "remote_authorization_rejected" : credential.code || "",
+    credentialStatus: credential.status,
+    credentialError: credential.code || "",
     credentialStore: cfg.credentialStore || "",
     email: user.email || "",
     name: user.name || "",
@@ -847,8 +710,8 @@ function accountInfo() {
   return {
     ok: true,
     paired: Boolean(process.env.RELAY_DEVICE_TOKEN || cfg.deviceToken),
-    credentialStatus: remoteCredentialRejected ? "missing" : credential.status,
-    credentialError: remoteCredentialRejected ? "remote_authorization_rejected" : credential.code || "",
+    credentialStatus: credential.status,
+    credentialError: credential.code || "",
     credentialStore: cfg.credentialStore || "",
     name: user.name || "",
     email: user.email || "",
@@ -898,8 +761,7 @@ const CHAT_APP_HANDOFF_PATHS = {
 };
 
 function relayMcpUrl() {
-  const configured = process.env.RELAY_API_URL || readConfigFile().apiUrl || "https://api.sendrelays.com";
-  const base = new URL(`${String(configured).replace(/\/+$/, "")}/`);
+  const base = new URL(`${webBase()}/`);
   const loopback = base.hostname === "localhost" || base.hostname === "127.0.0.1" || base.hostname === "::1";
   if ((base.protocol !== "https:" && !(base.protocol === "http:" && loopback)) || base.username || base.password) {
     throw new Error("Relay's MCP address is not safe to copy.");
@@ -1606,37 +1468,6 @@ function ensureTasksLoaded() {
   return tasksLoadedOnce;
 }
 
-// Slack-backed channels are canonical chats, not legacy inbox fan-out rows.
-// Keep their compact summaries beside the other network-backed caches so the
-// Pill still paints instantly offline and refreshes them without blocking its
-// local packet-store path.
-let canonicalChatsCache = [];
-let canonicalChatsLoadedOnce = null;
-let canonicalChatsFingerprint = "";
-function canonicalChatsFingerprintOf(list) {
-  return JSON.stringify((list || []).map((chat) => [
-    chat.chatId, chat.updatedAt, chat.messageCount, chat.unreadCount,
-    chat.lastMessage && chat.lastMessage.relayId,
-  ]));
-}
-async function refreshCanonicalChats() {
-  if (!deviceToken()) return canonicalChatsCache;
-  try {
-    const client = await relayClient();
-    const result = await client.chats();
-    canonicalChatsCache = (Array.isArray(result && result.chats) ? result.chats : [])
-      .filter((chat) => chat && chat.channel && chat.channel.slack);
-    canonicalChatsFingerprint = canonicalChatsFingerprintOf(canonicalChatsCache);
-  } catch (error) {
-    console.error("[overlay] canonical chats refresh failed:", error && error.message);
-  }
-  return canonicalChatsCache;
-}
-function ensureCanonicalChatsLoaded() {
-  if (!canonicalChatsLoadedOnce) canonicalChatsLoadedOnce = refreshCanonicalChats().catch(() => canonicalChatsCache);
-  return canonicalChatsLoadedOnce;
-}
-
 // ---- contacts (cached; refreshed on a slow interval + on demand) ----------
 // Contacts must NEVER be fetched per state push: a slow or failing network would
 // stall every inbox paint and blank the list (observed live: "listContacts failed:
@@ -1783,7 +1614,6 @@ function buildPayload() {
   // Kick the first loads without awaiting; each calls pushInbox(false) on completion.
   if (!sentLoadedOnce) ensureSentLoaded().then(() => pushInbox(false)).catch(() => {});
   if (!contactsLoadedOnce) ensureContactsLoaded().then(() => pushInbox(false)).catch(() => {});
-  if (!canonicalChatsLoadedOnce) ensureCanonicalChatsLoaded().then(() => pushInbox(false)).catch(() => {});
   const relaysNow = readRelays();
   const reactionIds = relaysNow.concat(sentCache).map((row) => row && (row.relayId || row.id)).filter(Boolean);
   const reactionSigNow = [...new Set(reactionIds.map(String).filter(Boolean))].slice(0, 200).sort().join("\n");
@@ -1818,7 +1648,6 @@ function buildPayload() {
     outbox: outbox.list(),
     tasks: [],
     contacts: contactsCache,
-    chats: canonicalChatsCache,
   };
 }
 
@@ -2191,10 +2020,6 @@ async function pushInboxNow(force) {
       reactionStateFingerprint(r.reactions),
     ]),
     contacts: payload.contacts.map((c) => [c.id, c.name, c.email]),
-    chats: (payload.chats || []).map((chat) => [
-      chat.chatId, chat.updatedAt, chat.messageCount, chat.unreadCount,
-      chat.lastMessage && chat.lastMessage.relayId,
-    ]),
     // Without these the queue's own progress — waiting, attempted again, sent,
     // refused — would never reach the renderer: nothing else in the payload
     // moves while a message sits offline.
@@ -3950,37 +3775,6 @@ async function resolveRelayAttachment(relayId, attachmentId) {
       }
     }
   }
-  // Canonical Slack-linked messages live in the normalized chat cache rather
-  // than the legacy Sent list. Fetch their packet lazily and stage an invisible
-  // outbound-shaped materialization row so attachment open/preview reuses the
-  // exact same contained local-file pipeline as every deployed Relay.
-  if (!stateId) {
-    try {
-      const [{ RelayClient }, stageSentRelayItem] = await Promise.all([
-        import(pathToFileURL(path.join(__dirname, "..", "src", "client.js")).href),
-        loadSentStager(),
-      ]);
-      const fetched = await new RelayClient().fetchRelay(id);
-      const packet = fetched?.packet;
-      if (packet?.id === id) {
-        const urls = fetched.attachmentUrls || {};
-        const item = {
-          ...packet,
-          relayId: packet.id,
-          recipient: { name: packet.recipientGroupName || "Channel" },
-          attachments: (packet.attachments || []).map((attachment) => ({
-            ...attachment,
-            ...(urls[attachment.id] ? { openUrl:urls[attachment.id] } : {}),
-          })),
-        };
-        const staged = stageSentRelayItem({ item, sender:account() }, { statePath:STATE_PATH });
-        stateId = String(staged?.itemId || "");
-        store = readStore();
-      }
-    } catch (error) {
-      console.error("[overlay] canonical attachment staging failed:", error && error.message);
-    }
-  }
   const row = stateId ? (store.packets || {})[stateId] : null;
   if (!row) return { ok: false, error: "relay not found" };
   const attachments = Array.isArray(row.attachments) ? row.attachments : [];
@@ -4042,53 +3836,6 @@ async function openRelayAttachment(relayId, attachmentId) {
   return { ok: true, path: target };
 }
 
-function lockedHtmlPreviewDocument(source) {
-  const policy = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; object-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src 'none'; connect-src 'none'";
-  const head = `<meta http-equiv="Content-Security-Policy" content="${policy}"><meta name="viewport" content="width=device-width,initial-scale=1">`;
-  const html = String(source || "");
-  if (/<head(?:\s[^>]*)?>/i.test(html)) return html.replace(/<head(?:\s[^>]*)?>/i, (match) => `${match}${head}`);
-  if (/<html(?:\s[^>]*)?>/i.test(html)) return html.replace(/<html(?:\s[^>]*)?>/i, (match) => `${match}<head>${head}</head>`);
-  return `<!doctype html><html><head>${head}</head><body>${html}</body></html>`;
-}
-
-async function renderSafeHtmlThumbnail(source) {
-  const partition = `relay-html-preview-${randomUUID()}`;
-  const preview = new BrowserWindow({
-    show: false,
-    width: 900,
-    height: 560,
-    backgroundColor: "#ffffff",
-    webPreferences: {
-      partition,
-      sandbox: true,
-      contextIsolation: true,
-      nodeIntegration: false,
-      javascript: false,
-      webSecurity: true,
-      allowRunningInsecureContent: false,
-      offscreen: true,
-    },
-  });
-  const contents = preview.webContents;
-  contents.setWindowOpenHandler(() => ({ action: "deny" }));
-  contents.on("will-navigate", (event) => event.preventDefault());
-  contents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
-  contents.session.webRequest.onBeforeRequest((details, callback) => {
-    callback({ cancel: !details.url.startsWith("data:text/html") && !details.url.startsWith("data:image/") && !details.url.startsWith("data:font/") });
-  });
-  try {
-    const document = lockedHtmlPreviewDocument(source);
-    await preview.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(document)}`);
-    await new Promise((resolve) => setTimeout(resolve, 80));
-    const image = await contents.capturePage({ x: 0, y: 0, width: 900, height: 560 });
-    const png = image.toPNG();
-    if (!png.length) throw new Error("HTML preview capture was empty.");
-    return { mimeType: "image/png", dataBase64: png.toString("base64") };
-  } finally {
-    if (!preview.isDestroyed()) preview.destroy();
-  }
-}
-
 async function previewRelayAttachment(relayId, attachmentId) {
   const resolved = await resolveRelayAttachment(relayId, attachmentId);
   if (!resolved.ok) return resolved;
@@ -4101,11 +3848,7 @@ async function previewRelayAttachment(relayId, attachmentId) {
       path: resolved.target,
       size: Number(resolved.attachment?.bytes ?? resolved.attachment?.size),
     }, { allowedRoots: [resolved.attachmentsRoot] });
-    if (preview.mimeType === "text/html" && preview.html) {
-      const rendered = await renderSafeHtmlThumbnail(preview.html);
-      return { ok: true, name: preview.name, size: preview.size, previewKind: "html", ...rendered };
-    }
-    return { ok: true, previewKind: "image", ...preview };
+    return { ok: true, ...preview };
   } catch (error) {
     return { ok: false, error: (error && error.message) || "Attachment preview failed safely." };
   }
@@ -4116,11 +3859,11 @@ async function previewRelayAttachment(relayId, attachmentId) {
 function anchorTopRight() {
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()) || screen.getPrimaryDisplay();
   const wa = display.workArea;
-  // Allocate one transparent compositor surface and keep it unchanged for the
-  // window's lifetime. On macOS an origin change and a size change are not
-  // presented atomically; resizing this surface after the CSS fold produced a
-  // retained old pill beside the new pill for one frame.
-  const anchor = fittedOverlayBounds(wa, CARD_MAX, { margin: MARGIN, maximum: CARD_MAX });
+  // AppKit needs one stable compositor surface because it does not present an
+  // origin and size change atomically. Windows and Linux instead get an
+  // ordinary native window whose bounds are exactly the visible card.
+  const nativeSize = FIXED_OVERLAY_SURFACE ? CARD_MAX : cardSize;
+  const anchor = fittedOverlayBounds(wa, nativeSize, { margin: MARGIN, maximum: CARD_MAX });
   if (process.env.RELAY_OVERLAY_TEST === "1" || process.env.RELAY_OVERLAY_PERF === "1") {
     // A harness run must not take over the developer's screen. Park sandbox
     // windows just off the bottom-right of the work area: still a REAL composited
@@ -4171,11 +3914,13 @@ function showOverlayWindow({ force = false, reposition = true } = {}) {
   perf.inc("spaceAsserts");
   const shown = showInactiveOnAllSpaces(win, { force, alwaysOnTop: overlayElevated });
   if (shown) {
-    // A hide/show cycle can leave Electron's native ignore flag out of step
-    // with our mirror. Reassert it, then let the next cursor sample carve out
-    // the visible card precisely.
-    applyIgnore(true, { force: true });
-    scheduleHit(0);
+    if (FIXED_OVERLAY_SURFACE) {
+      // A hide/show cycle can leave Electron's native ignore flag out of step
+      // with our mirror. Reassert it only on the macOS fixed canvas, then let
+      // the next cursor sample carve out the visible card precisely.
+      applyIgnore(true, { force: true });
+      scheduleHit(0);
+    }
     // Visible again: unthrottle immediately, so the FIRST click after this is as
     // fast as the tenth (the "slow, then fast, then slow again" report).
     applyThrottlingPolicy();
@@ -4296,13 +4041,14 @@ function pollHosts({ probeFrontmost = true } = {}) {
   }
 }
 
-// ---- stable compositor surface + main-process hit testing -----------------
-// The renderer morphs one DOM card inside a fixed transparent BrowserWindow.
-// Never resize or reposition this native surface as part of a card transition:
-// AppKit can expose those two geometry changes on different frames, retaining
-// the old surface long enough to look exactly like a duplicate pill.
+// ---- native window geometry + macOS compositor hit testing ----------------
+// Windows and Linux use a normal card-sized BrowserWindow. macOS alone keeps
+// one fixed transparent compositor surface because AppKit can expose origin
+// and size changes on different frames, retaining the old surface long enough
+// to look exactly like a duplicate pill.
 const CARD_INITIAL = { w: 344, h: 524 };    // EXPANDED in inbox.html; renderer publishes its live size before announcing readiness
 const CARD_MAX = { w: 720, h: 800 };        // READER in inbox.html (the pill expanded into the page; PEEK is 400px wide)
+const FIXED_OVERLAY_SURFACE = usesFixedOverlaySurface(process.platform);
 const HIT_IN = 6;
 const HIT_OUT = 12;
 const POLL_NEAR_MS = 24;
@@ -4315,6 +4061,13 @@ let hitIgnoring = false;
 const HIT_TEST_POINTER_BLIND = process.env.RELAY_OVERLAY_TEST_IGNORE_POINTER === "1";
 
 function applyIgnore(next, { force = false } = {}) {
+  // Never put an ordinary card-sized window into click-through mode. In
+  // particular, Windows must keep native input ownership across Expand and
+  // delayed renderer updates instead of relying on a polling repair.
+  if (!FIXED_OVERLAY_SURFACE) {
+    hitIgnoring = false;
+    return;
+  }
   next = Boolean(next);
   if (!force && next === hitIgnoring) return;
   hitIgnoring = next;
@@ -4336,6 +4089,7 @@ function scheduleHit(ms) {
 function hitTick() {
   hitTimer = null;
   if (!win || win.isDestroyed()) return;
+  if (!FIXED_OVERLAY_SURFACE) return;
   if (HIT_TEST_POINTER_BLIND) {
     applyIgnore(false);
     scheduleHit(POLL_HIDDEN_MS);
@@ -4365,8 +4119,27 @@ function hitTick() {
 }
 
 function startHitTest() {
+  if (!FIXED_OVERLAY_SURFACE) return;
   if (hitTimer) return;
   scheduleHit(POLL_NEAR_MS);
+}
+
+function fitOverlayWindowToCard({ settle = false } = {}) {
+  if (FIXED_OVERLAY_SURFACE || !win || win.isDestroyed()) return;
+  let current;
+  try { current = win.getBounds(); } catch { return; }
+  // Preserve the user's current top-right anchor while the ordinary Windows or
+  // Linux window grows and shrinks with the one visible card.
+  const target = resizedOverlayBounds(current, cardSize, { maximum: CARD_MAX });
+  if (target.x === current.x && target.y === current.y && target.width === current.width && target.height === current.height) {
+    return;
+  }
+  const growing = target.width > current.width || target.height > current.height;
+  // Grow before the renderer paints its destination. Shrink only after the
+  // renderer's explicit settlement receipt so transparent native space never
+  // remains after the visual card has folded.
+  if (!growing && !settle) return;
+  try { win.setBounds(target, false); } catch {}
 }
 
 function createWindow() {
@@ -4421,8 +4194,10 @@ function createWindow() {
   );
   if (!isHarness || harnessTopmost) win.setAlwaysOnTop(true, process.platform === "win32" ? "screen-saver" : "floating");
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  applyIgnore(true, { force: true });
-  startHitTest();
+  if (FIXED_OVERLAY_SURFACE) {
+    applyIgnore(true, { force: true });
+    startHitTest();
+  }
   const inboxPath = path.join(__dirname, "inbox.html");
   const inboxUrl = pathToFileURL(inboxPath).href;
   // Relay bodies are untrusted correspondence. Their links may leave through
@@ -4540,15 +4315,6 @@ function createWindow() {
       })
       .catch(() => {});
   }, 60000); // slow contact refresh; the contacts view also refreshes on open
-  setInterval(() => {
-    const fingerprintBefore = canonicalChatsFingerprint;
-    refreshCanonicalChats()
-      .then(() => {
-        if (canonicalChatsFingerprint !== fingerprintBefore) return pushInbox(false);
-        perf.inc("canonicalChatsPushSkips");
-      })
-      .catch(() => {});
-  }, 15000);
   const hostLoop = () => {
     // Engaged: fresh frontmost capture for imminent clicks. Otherwise the
     // process-list read alone keeps hostRunning/click-routing state warm.
@@ -4831,7 +4597,7 @@ async function openChatWithContact(input) {
       // A group somebody else owns, with nothing in it yet. The member cannot
       // start that conversation — only its owner can — so say that rather than
       // opening a window whose composer would be refused.
-      return { ok: false, error: "No conversation in this channel yet — only its owner can start one." };
+      return { ok: false, error: "No conversation in this group yet — only its owner can start one." };
     }
     return { ok: false, error: (error && error.message) || String(error) };
   }
@@ -6934,36 +6700,6 @@ ipcMain.on("relay:preview", (event, id) => {
   if (win && !win.isDestroyed() && event && event.sender !== win.webContents) return;
   if (!openPreview(id)) console.error("[preview] relay not found:", id);
 });
-ipcMain.handle("relay:canonicalChat", async (event, chatId) => {
-  if (win && !win.isDestroyed() && event && event.sender !== win.webContents) {
-    return { ok: false, error: "Not the pill." };
-  }
-  const id = String(chatId || "").trim();
-  if (!id) return { ok: false, error: "Missing channel id." };
-  try {
-    const client = await relayClient();
-    const chat = await client.chat(id);
-    return { ok: true, chat };
-  } catch (error) {
-    return { ok: false, error: (error && error.message) || String(error) };
-  }
-});
-ipcMain.handle("relay:canonicalChatRead", async (event, chatId) => {
-  if (win && !win.isDestroyed() && event && event.sender !== win.webContents) {
-    return { ok: false, error: "Not the pill." };
-  }
-  const id = String(chatId || "").trim();
-  if (!id) return { ok: false, error: "Missing channel id." };
-  try {
-    const client = await relayClient();
-    const result = await client.markChatRead(id, `pill-chat-read-${id}-${Date.now()}`);
-    await refreshCanonicalChats();
-    await pushInbox(true);
-    return result;
-  } catch (error) {
-    return { ok: false, error: (error && error.message) || String(error) };
-  }
-});
 // The Contacts tab's chat: only the pill may ask, and it asks by address —
 // the answer is a window on the room those two people share.
 ipcMain.handle("relay:openChatWith", (event, input) => {
@@ -7403,16 +7139,6 @@ async function postQueuedRelay(entry) {
   });
   const explicit = entry.recipient || {};
   const hasRecipient = explicit.email || explicit.contactId || explicit.relayUserId || explicit.groupId || explicit.chatId;
-  if (explicit.chatId && entry.chat && entry.chat.provider === "slack") {
-    const result = await client.sendChatMessage(String(explicit.chatId), {
-      forHuman: text || " ",
-      attachments: prepared,
-      ...(entry.inReplyToRelayId ? { inReplyToMessageId: String(entry.inReplyToRelayId) } : {}),
-      idempotencyKey: entry.idempotencyKey,
-    });
-    await refreshCanonicalChats();
-    return result;
-  }
   return client.sendRelay({
     recipient: hasRecipient ? explicit : {},
     kind: "message",
@@ -7538,31 +7264,6 @@ ipcMain.handle("relay:contactsSearch", (_e, q) => groupCall((c) => c.searchConta
 
 // Settings tab: account card + the sign-out / switch-account lifecycle.
 ipcMain.handle("relay:accountInfo", () => accountInfo());
-ipcMain.handle("relay:slackConnection", async () => {
-  try { return { ok: true, connection: await (await relayClient()).slackConnection() }; }
-  catch (error) { return { ok: false, error: (error && error.message) || String(error) }; }
-});
-ipcMain.handle("relay:slackConnect", async (_event, input = {}) => {
-  try {
-    const client = await relayClient();
-    const result = input?.reconnect
-      ? await client.reconnectSlack({ returnSurface: "settings" })
-      : await client.startSlackConnection({
-        mode: input?.mode === "user" ? "user" : "combined",
-        returnSurface: "settings",
-        ...(input?.expectedTeamId ? { expectedTeamId: String(input.expectedTeamId) } : {}),
-      });
-    if (!result?.authorizationUrl) throw new Error("Slack did not return an approval URL.");
-    await shell.openExternal(result.authorizationUrl);
-    return { ok: true, waiting: true };
-  } catch (error) {
-    return { ok: false, error: (error && error.message) || String(error) };
-  }
-});
-ipcMain.handle("relay:slackDisconnect", async () => {
-  try { return { ok: true, result: await (await relayClient()).disconnectSlack() }; }
-  catch (error) { return { ok: false, error: (error && error.message) || String(error) }; }
-});
 ipcMain.handle("relay:credentialRetry", async () => {
   nativeCredentialCache = { version: null, token: "" };
   const next = account();
@@ -7710,8 +7411,8 @@ ipcMain.on("relay:engage", (event) => {
   lastEngagedAt = Date.now();
   setOverlayElevated(true);
 });
-// The renderer publishes the visible card size for the fixed surface's exact
-// main-process hit region. It never changes native geometry.
+// The renderer publishes the visible card size. Ordinary Windows/Linux windows
+// follow it; macOS uses it only for the fixed surface's exact hit region.
 // Self-diagnosing stalls. Sandbox benchmarks kept showing a healthy pill while
 // the real one felt frozen for seconds, so the product records its own hitches:
 // the renderer reports any frame gap or click-to-response delay over the
@@ -7772,7 +7473,8 @@ function acceptRendererCardSize(event, w, h, motion = {}) {
   if (motionId < latestCardMotionId) return { ok:false, stale:true };
   latestCardMotionId = motionId;
   cardSize = { w, h };
-  scheduleHit(0);
+  if (FIXED_OVERLAY_SURFACE) scheduleHit(0);
+  else fitOverlayWindowToCard({ settle: motion.phase === "settled" });
   return { ok:true };
 }
 ipcMain.on("relay:cardSize", (event, w, h, motion = {}) => {
@@ -7785,7 +7487,8 @@ ipcMain.handle("relay:prepareCardSize", (event, w, h) => {
   if (!win || win.isDestroyed() || event.sender !== win.webContents) return { ok:false };
   if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return { ok:false };
   cardSize = { w, h };
-  scheduleHit(0);
+  if (FIXED_OVERLAY_SURFACE) scheduleHit(0);
+  else fitOverlayWindowToCard();
   return { ok:true };
 });
 ipcMain.on("relay:setPos", (_e, x, y) => {
@@ -7833,7 +7536,6 @@ ipcMain.on("relay:dismiss", () => {
 // script). Only now is it safe to deliver arrivals; the queue held them.
 ipcMain.on("relay:rendererReady", () => {
   rendererListening = true;
-  deliverPendingRelayReader();
   pumpAttention();
 });
 // The user engaged with a ghost notification (tapped the lockup to expand it):
@@ -7902,52 +7604,10 @@ ipcMain.handle("relay:soundBytes", (_e, name) => {
   return null; // gracefully null when no sound is available
 });
 
-async function repairLegacyGlobalShimBeforeFirstWindow() {
-  // A canonical update is executed by the OLD runtime's updater. The first
-  // release containing the global-shim migration therefore cannot rely on its
-  // updater to run the new migration code. Run the same idempotent repair from
-  // the newly activated pill before the first window is exposed so a direct
-  // upgrade from any historical build cannot leave `relay pill` or
-  // `relay repair-desktop` pointing back at stale global code.
-  if (process.env.RELAY_OVERLAY_TEST === "1" || process.env.RELAY_OVERLAY_PERF === "1") return;
-  try {
-    const [canonical, runtime] = await Promise.all([
-      import(pathToFileURL(path.resolve(__dirname, "../src/canonical-updater.js")).href),
-      import(pathToFileURL(path.resolve(__dirname, "../src/canonical-runtime.js")).href),
-    ]);
-    const current = runtime.readCanonicalRuntime({ homeDir: os.homedir(), platform: process.platform });
-    const npmCommand = canonical.runtimeNpmCommand(current && current.node, { platform: process.platform });
-    const result = canonical.repairLegacyGlobalCliShim({
-      version: pillVersion(),
-      npmCommand,
-      platform: process.platform,
-    });
-    if (result.repaired) {
-      console.error(`[overlay] updated legacy global CLI shim: ${result.from} -> ${result.version}`);
-    } else if (!result.ok) {
-      console.error(`[overlay] legacy global CLI shim unchanged: ${result.reason}`);
-    }
-  } catch (error) {
-    // The canonical app is already healthy. This bridge migration is
-    // best-effort and must never strand the pill if npm has been removed.
-    console.error("[overlay] legacy global CLI shim migration failed:", error && error.message);
-  }
-}
-
 if (!gotSingleInstanceLock) {
   app.quit();
 } else {
   app.on("second-instance", (_event, argv, _workingDirectory, additionalData = {}) => {
-    const deepLink = relayDeepLinkFromArgv(argv);
-    if (deepLink) {
-      pendingRelayDeepLinks.push({
-        messageId: deepLink.messageId,
-        host: deepLink.host,
-        ...(deepLink.chatId ? { chatId:deepLink.chatId } : {}),
-      });
-      drainRelayDeepLinks();
-      return;
-    }
     const nonce =
       (additionalData && typeof additionalData.relayReopenNonce === "string" && additionalData.relayReopenNonce) ||
       reopenNonceFromArgs(argv);
@@ -7965,7 +7625,6 @@ if (!gotSingleInstanceLock) {
   app.on("activate", () => requestExternalReopen());
 
   app.whenReady().then(async () => {
-    await repairLegacyGlobalShimBeforeFirstWindow();
     // The pill can be launched directly, without the always-on daemon or CLI
     // having run first. Upgrade durable Relay documents before the first
     // readRelays/buildPayload call so historical messages cannot paint blank.
@@ -7986,16 +7645,6 @@ if (!gotSingleInstanceLock) {
     }
     if (process.platform === "darwin" && app.dock) app.dock.hide(); // accessory: no dock icon, no NC banners
     createWindow();
-    const initialDeepLink = relayDeepLinkFromArgv(process.argv);
-    if (initialDeepLink) {
-      pendingRelayDeepLinks.push({
-        messageId: initialDeepLink.messageId,
-        host: initialDeepLink.host,
-        ...(initialDeepLink.chatId ? { chatId:initialDeepLink.chatId } : {}),
-      });
-    }
-    relayDeepLinksReady = true;
-    drainRelayDeepLinks();
     createTray();
     // First paint remains local and instant. Resolve the server-owned account
     // role immediately afterward, then keep it fresh so an operator can opt a
@@ -8102,6 +7751,9 @@ if (!gotSingleInstanceLock) {
           currentShow: currentShow ? { ids: [...currentShow.ids], digest: currentShow.digest, sticky: currentShow.sticky === true } : null,
           burstShown,
           rendererListening,
+          fixedOverlaySurface: FIXED_OVERLAY_SURFACE,
+          hitIgnoring,
+          nativeBounds: win && !win.isDestroyed() ? win.getBounds() : null,
           visible: win && !win.isDestroyed() ? win.isVisible() : null,
           tray: trayStatus(),
           previews: livePreviews().map((entry) => ({

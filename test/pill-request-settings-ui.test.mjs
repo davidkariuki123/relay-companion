@@ -66,16 +66,15 @@ test("the section still mounts only with the requests feature", () => {
   assert.match(html, /if \(payload\.features\?\.requests === true\) html \+= `\s*<div class="sv-open-section" id="permPrefs" data-stop="1">/);
 });
 
-test("Agent connections wears the shared section species too, not the caption label", () => {
+test("Connections uses the shared section species and concise privacy copy", () => {
   // The local-only section had the same defect this file exists to prevent:
   // a td-label header among sv-open-title siblings (David, 2026-08-18).
-  assert.match(html, /class="sv-provider-section" data-stop="1">\s*<div class="sv-open-title">Agent connections<\/div>\s*<div class="sv-open-intro">/);
+  assert.match(html, /class="sv-provider-section" data-stop="1">\s*<div class="sv-open-title">Connections<\/div>\s*<div class="sv-open-intro">Relay uses each app's local profile\. Your credentials stay with the app\.<\/div>/);
   assert.doesNotMatch(html, /sv-provider-intro/);
 });
 
 test("Agent connections says subscription sign-in, never implementation jargon or fake reconnect", () => {
-  assert.match(html, /Claude Code uses your Claude subscription; Codex uses your ChatGPT subscription/);
-  assert.match(html, /never sees or stores your sign-in credentials/);
+  assert.match(html, /Your credentials stay with the app/);
   assert.match(html, /"Sign in to Claude Code" : "Sign in to Codex"/);
   assert.match(html, /"Use Claude subscription" : "Use ChatGPT subscription"/);
   assert.match(html, /item\.connected\s*\? "Connected"/);

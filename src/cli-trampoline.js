@@ -29,10 +29,9 @@ import { companionPackageRoot, currentCompanionVersion, isManagedInstall, isNewe
  *     canonical pill, not resurrect the shim's bundled overlay.
  *   - mcp: launched by the stable MCP launcher, which activation already
  *     rewrites to the exact release bin.
- *   - repair-runtime / self-update: invoked BY the updater during activation
- *     and rollback, sometimes deliberately from a tree that is not current.
- *     Hopping would defeat rollback. `repair-desktop` is human-facing and must
- *     hop: otherwise a stale npm shim can rebuild Relay.app around stale code.
+ *   - repair-runtime / repair-desktop / self-update: invoked BY the updater
+ *     during activation and rollback, sometimes deliberately from a tree that
+ *     is not current. Hopping would defeat rollback.
  *   - claude-hook / codex-hook: launched by the stable hook launcher, same
  *     reasoning as mcp.
  *
@@ -44,6 +43,7 @@ export const TRAMPOLINE_EXEMPT_COMMANDS = new Set([
   "daemon",
   "mcp",
   "repair-runtime",
+  "repair-desktop",
   "self-update",
   "claude-hook",
   "codex-hook",

@@ -35,6 +35,29 @@ function fittedOverlayBounds(workArea, size, {
   };
 }
 
+/** Resize an already-positioned pill without snapping a user-dragged window home. */
+function resizedOverlayBounds(current, size, { maximum = size } = {}) {
+  const card = clampCardSize(size, maximum);
+  const width = Math.max(1, Math.ceil(card.w));
+  const height = Math.max(1, Math.ceil(card.h));
+  const bounds = current || { x: 0, y: 0, width, height };
+  return {
+    x: Math.round(finite(bounds.x) + finite(bounds.width, width) - width),
+    y: Math.round(finite(bounds.y)),
+    width,
+    height,
+  };
+}
+
+/**
+ * macOS keeps one compositor surface to avoid an AppKit origin/size split.
+ * Other platforms use an ordinary card-sized native window and need no
+ * click-through input state.
+ */
+function usesFixedOverlaySurface(platform) {
+  return String(platform || "").toLowerCase() === "darwin";
+}
+
 /**
  * A transparent compositor window can be larger than its visible card. Only
  * pixels occupied by the card may receive input; every other pixel must pass
@@ -52,4 +75,10 @@ function shouldIgnoreOverlayMouse(point, card, pad = 0) {
   return !onCard;
 }
 
-module.exports = { clampCardSize, fittedOverlayBounds, shouldIgnoreOverlayMouse };
+module.exports = {
+  clampCardSize,
+  fittedOverlayBounds,
+  resizedOverlayBounds,
+  shouldIgnoreOverlayMouse,
+  usesFixedOverlaySurface,
+};

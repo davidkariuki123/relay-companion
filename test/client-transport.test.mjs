@@ -1,22 +1,8 @@
-import test, { after } from "node:test";
+import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import http from "node:http";
-import os from "node:os";
-import path from "node:path";
 import { RelayClient, closeRelayConnections, secureRelayApiUrl } from "../src/client.js";
-
-// Transport tests exercise tiny fake HTTP servers. They must not discover the
-// developer's real enrolled device and add E2EE status traffic those servers do
-// not implement. A test run is hermetic regardless of who runs it.
-const previousRelayConfig = process.env.RELAY_CONFIG;
-const transportConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-client-transport-"));
-process.env.RELAY_CONFIG = path.join(transportConfigDir, "config.json");
-after(() => {
-  if (previousRelayConfig === undefined) delete process.env.RELAY_CONFIG;
-  else process.env.RELAY_CONFIG = previousRelayConfig;
-  fs.rmSync(transportConfigDir, { recursive: true, force: true });
-});
 
 const client = fs.readFileSync(new URL("../src/client.js", import.meta.url), "utf8");
 const pkg = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));

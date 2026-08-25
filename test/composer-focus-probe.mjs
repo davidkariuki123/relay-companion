@@ -27,7 +27,16 @@ import WebSocket from "ws";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkgRoot = process.env.RELAY_PKG_ROOT || path.join(__dirname, "..");
-const electronBin = [process.env.PROBE_ELECTRON_BIN, path.join(pkgRoot, "node_modules", "electron", "dist", "Electron.app", "Contents", "MacOS", "Electron"), path.join(pkgRoot, "..", "..", "node_modules", "electron", "dist", "Electron.app", "Contents", "MacOS", "Electron")].find((p) => p && fs.existsSync(p)) || "";
+const electronExecutable = process.platform === "win32"
+  ? "electron.exe"
+  : process.platform === "darwin"
+    ? path.join("Electron.app", "Contents", "MacOS", "Electron")
+    : "electron";
+const electronBin = [
+  process.env.PROBE_ELECTRON_BIN,
+  path.join(pkgRoot, "node_modules", "electron", "dist", electronExecutable),
+  path.join(pkgRoot, "..", "..", "node_modules", "electron", "dist", electronExecutable),
+].find((p) => p && fs.existsSync(p)) || "";
 if (!electronBin) { console.error("no electron at", electronBin); process.exit(1); }
 
 const CDP_PORT = Number(process.env.PROBE_CDP_PORT) || 9412;
@@ -167,6 +176,7 @@ try {
     if (!ok) throw new Error("no conversation row yet");
   }, { label: "conversation row" });
   await retry(async () => { if (!(await ev('Boolean(document.getElementById("thQrInput"))'))) throw new Error("no composer"); }, { label: "composer" });
+  result.focusedOnEntry = await ev('document.activeElement && document.activeElement.id');
 
   // Manual Computer Use mode leaves the real Electron room open so a person or
   // desktop-driving test can copy files in Finder, paste them into the composer,
@@ -195,14 +205,25 @@ try {
     break probe;
   }
 
-  // Type like a person: focus, set text, fire input.
-  await ev(`(() => {
-    const box = document.getElementById("thQrInput");
-    box.focus();
+  // Type like a person who has only opened the room: no composer click first.
+  result.firstMessageTypedWithoutClicking = await ev(`(() => {
+    const box = document.activeElement;
+    if (!box || box.id !== "thQrInput") return false;
     box.value = "first message";
     box.dispatchEvent(new Event("input", { bubbles: true }));
     return true;
   })()`);
+  // Keep the remainder of the probe diagnostic when the entry-focus law alone
+  // regresses; that law still fails below, while later send/refresh laws run.
+  if (!result.firstMessageTypedWithoutClicking) {
+    await ev(`(() => {
+      const box = document.getElementById("thQrInput");
+      box.focus();
+      box.value = "first message";
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    })()`);
+  }
   result.focusedBeforeSend = await ev('document.activeElement && document.activeElement.id');
   result.composerNodeIdBefore = await ev('(() => { const b=document.getElementById("thQrInput"); b.dataset.probeMark="1"; return b.dataset.probeMark; })()');
 
@@ -262,6 +283,8 @@ try {
     ["the video keeps video/mp4", result.sentAttachments?.some((file) => file.name === "probe-video.mp4" && file.contentType === "video/mp4")],
     ["the generic file keeps text/plain", result.sentAttachments?.some((file) => file.name === "probe-notes.txt" && file.contentType === "text/plain")],
   ] : [
+    ["entering a chat puts the caret in the composer", result.focusedOnEntry === "thQrInput"],
+    ["the first message can be typed without clicking", result.firstMessageTypedWithoutClicking === true],
     ["the caret stays in the composer after a send", result.focusedAfterSend === "thQrInput"],
     ["the composer node is never replaced", result.composerSurvived === true],
     ["the sent message empties the field", result.composerValueAfterSend === ""],
