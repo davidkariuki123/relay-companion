@@ -6083,7 +6083,9 @@ async function chatAgentRunFeed(relayId) {
   }
   const terminal = ["completed", "failed", "stopped"].includes(String(session.state));
   const { nativeTurn } = await import("../src/native-turn.js");
+  const { chatAgentWorkPresentation } = await import("../src/chat-agent-work-presentation.js");
   const turn = nativeTurn(records, { terminalAt: terminal ? session.completedAt : null });
+  const presentation = chatAgentWorkPresentation({ session, events, records });
   return {
     ok:true,
     started:true,
@@ -6093,6 +6095,8 @@ async function chatAgentRunFeed(relayId) {
     provider:session.provider,
     model:"",
     liveState:session.state,
+    sessionId:session.relaySessionId || session.id,
+    presentation,
     records:turn.records,
     turnStartedAt:turn.startedAt,
     turnCompletedAt:turn.completedAt,

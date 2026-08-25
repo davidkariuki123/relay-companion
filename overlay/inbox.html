@@ -5367,6 +5367,10 @@
     // feed poll. The persisted native session is the authority during a run;
     // falling back to Settings made a real Claude run say “Steer Codex.”
     const row = relayById(id);
+    if (row?.source?.host === "relay-agent-run") {
+      if (row.source.surface === "codex") return "Codex";
+      if (row.source.surface === "claude_code") return "Claude Code";
+    }
     if (row?.coworkSessionId || row?.ranOnCowork) return "Claude Cowork";
     if (row?.claudeNativeSession?.sessionId || row?.ranOnClaude) return "Claude Code";
     if (row?.codexThreadId || row?.codexSessionPath || row?.sessionPath || row?.ranOnCodex) return "Codex";
