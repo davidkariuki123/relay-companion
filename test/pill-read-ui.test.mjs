@@ -108,12 +108,18 @@ test("reader attachments share the deployed frosted footer above both document a
 
 test("Slack Settings is one truthful card with the official mark and no optimistic toggle", () => {
   assert.match(html, /src="slackMark\.png" alt="Slack"/);
-  assert.match(html, /Relay for \$\{esc\(teamName\)\}/);
-  assert.match(html, /Sync starts when you connect\. Relay does not import earlier Slack history\./);
+  assert.match(html, /New Slack messages sync with Relay, and Relays send from your Slack account\. Earlier Slack history is not imported\./);
+  assert.doesNotMatch(html, /Relay for \$\{esc\(teamName\)\}|<span class="sv-slack-name">Your Slack<\/span>/,
+    "workspace installation and personal authorization do not become competing product concepts");
   assert.match(html, /id="svSlackConnect"/);
   assert.match(html, /id="svSlackDisconnectConfirm"/);
   assert.doesNotMatch(html, /data-slack-toggle|Mirror my DMs/);
   assert.match(preload, /slackConnection: \(\) => ipcRenderer\.invoke\("relay:slackConnection"\)/);
+});
+
+test("Device approvals exists only when E2EE is actually available", () => {
+  assert.match(html, /deviceApprovalInfo\?\.available !== true\) return ""/,
+    "disabled encryption removes the whole section, including its loading and error states");
 });
 
 test("Slack Settings follows browser-owned OAuth to its real server state", () => {

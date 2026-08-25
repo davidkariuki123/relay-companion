@@ -11098,7 +11098,11 @@
     </div>`;
   }
   function deviceApprovalsHtml(info) {
-    if (!info?.paired || !window.relay.e2eeDeviceApprovals) return "";
+    // Device trust is an E2EE-only concept. Keep the entire section absent
+    // until the server explicitly says encrypted delivery is available; an
+    // `e2ee_disabled` response is product state, not an error the user needs
+    // to see in ordinary Settings.
+    if (!info?.paired || !window.relay.e2eeDeviceApprovals || deviceApprovalInfo?.available !== true) return "";
     const pending = Array.isArray(deviceApprovalInfo?.pendingDevices) ? deviceApprovalInfo.pendingDevices : [];
     const body = !deviceApprovalInfo
       ? '<div class="sv-device-row"><span class="sv-device-copy"><span class="sv-device-note">Checking trusted devices…</span></span></div>'
@@ -11133,25 +11137,24 @@
     const personalConnected = connection?.personal?.state === "connected" && state === "connected";
     const teamName = team?.name || "your team";
     const connectLabel = slackConnectionWaiting ? "Waiting for Slack…" : state === "paused" ? "Reconnect" : "Connect";
+    const connectionLabel = personalConnected
+      ? `${teamName} · Connected`
+      : teamConnected
+        ? `${teamName} · Finish connecting`
+        : state === "paused"
+          ? `${teamName} · Needs attention`
+          : "Not connected";
     return `<section class="sv-slack-section" data-stop="1">
       <div class="sv-open-title">Slack</div>
       <div class="sv-slack-card">
         <div class="sv-slack-row">
           <img class="sv-slack-logo" src="slackMark.png" alt="Slack" />
-          <span class="sv-slack-copy"><span class="sv-slack-name">Slack</span><span class="sv-slack-note">${esc(team ? `${teamName} · ${teamConnected ? "connected" : "needs attention"}` : "Not connected")}</span></span>
-          ${personalConnected ? '<span class="sv-slack-status">Connected</span>' : ""}
-        </div>
-        ${teamConnected ? `<div class="sv-slack-row">
-          <span class="sv-slack-copy"><span class="sv-slack-name">Relay for ${esc(teamName)}</span><span class="sv-slack-note">Available to teammates and channels</span></span>
-          <span class="sv-slack-status">Connected</span>
-        </div>` : ""}
-        <div class="sv-slack-row">
-          <span class="sv-slack-copy"><span class="sv-slack-name">Your Slack</span><span class="sv-slack-note">${personalConnected ? "Sync new messages and send Relays from your account" : "Sync new messages and send Relays from your account"}</span></span>
+          <span class="sv-slack-copy"><span class="sv-slack-name">Slack</span><span class="sv-slack-note">${esc(connectionLabel)}</span></span>
           ${personalConnected
             ? `<button class="sv-slack-action" type="button" id="svSlackDisconnect" ${slackConnectionBusy ? "disabled" : ""}>Disconnect</button>`
             : `<button class="sv-slack-action" type="button" id="svSlackConnect" ${slackConnectionBusy || slackConnectionWaiting ? "disabled" : ""}>${esc(connectLabel)}</button>`}
         </div>
-        <div class="sv-slack-foot">Sync starts when you connect. Relay does not import earlier Slack history.</div>
+        <div class="sv-slack-foot">New Slack messages sync with Relay, and Relays send from your Slack account. Earlier Slack history is not imported.</div>
       </div>
       ${slackConnectionError ? `<div class="row-err sv-err">${esc(slackConnectionError)}</div>` : ""}
       ${slackDisconnectConfirm ? `<div class="sv-integration-backdrop" id="slackDisconnectBackdrop" role="dialog" aria-modal="true" aria-labelledby="slackDisconnectTitle">
