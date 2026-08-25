@@ -101,9 +101,9 @@
        window, so a user-dragged pill morphs exactly where it was placed. */
     position:absolute; top:0; right:0;
     width:344px; height:524px;
-    background:var(--bg);
+    background:transparent;
     border-radius:var(--r-card);
-    overflow:hidden;
+    overflow:visible;
     display:flex; flex-direction:column;
     box-shadow:var(--shadow-card);
     transition:box-shadow var(--t-slow) var(--soft), border-radius var(--t-slow) var(--settle);
@@ -113,6 +113,21 @@
     border-radius:var(--r-fold);
     box-shadow:var(--shadow-pill);
   }
+  /* Keep the shadow on the outer shell and clip all promoted content layers on
+     a dedicated surface. During list -> chat transitions Chromium snapshots the
+     scroller into a compositor layer; relying on the shell's overflow clip can
+     expose that layer through square bottom corners for one frame. clip-path is
+     retained by the compositor for the whole resize without cutting the shadow. */
+  .card-surface {
+    width:100%; height:100%;
+    display:flex; flex-direction:column;
+    overflow:hidden;
+    border-radius:inherit;
+    background:var(--bg);
+    clip-path:inset(0 round 16px);
+    transition:clip-path .42s var(--settle);
+  }
+  .card.collapsed .card-surface { clip-path:inset(0 round 22px); }
   @keyframes appIn { from { opacity:0; transform:scale(.97); } to { opacity:1; transform:none; } }
 
   /* Dismissal states. `offstage` parks the card invisibly while the OS window is hidden.
@@ -2307,6 +2322,7 @@
     </defs>
   </svg>
   <div class="card" id="card">
+    <div class="card-surface">
     <div class="lockup" id="lockup">
       <svg class="mark" width="17" height="17" viewBox="0 0 16 16" aria-hidden="true">
         <rect x="0" y="6" width="4" height="4"/>
@@ -2498,6 +2514,7 @@
 
       <!-- Settings view (account card + sign-out / switch-account; rendered by JS) -->
       <section class="view hidden" id="settingsView"></section>
+    </div>
     </div>
   </div>
 
@@ -3316,6 +3333,26 @@
 
   // ---------- shared helpers ----------
   function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c])); }
+  function agentMentionSpans(value) {
+    const text = String(value || "");
+    const safe = text
+      .replace(/```[\s\S]*?```/g, (match) => " ".repeat(match.length))
+      .replace(/`[^`\n]*`/g, (match) => " ".repeat(match.length))
+      .replace(/https?:\/\/\S+/gi, (match) => " ".repeat(match.length))
+      .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, (match) => " ".repeat(match.length));
+    const spans = [];
+    const seen = new Set();
+    const matcher = /(^|[^A-Za-z0-9._%+-])@(Claude|Codex|my_claude|my_codex)\b/gi;
+    for (const match of safe.matchAll(matcher)) {
+      const provider = String(match[2]).toLowerCase().includes("claude") ? "claude" : "codex";
+      if (seen.has(provider)) continue;
+      const start = Number(match.index || 0) + String(match[1] || "").length;
+      const token = text.slice(start, start + String(match[2]).length + 1);
+      spans.push({ provider, start, end:start + token.length, token });
+      seen.add(provider);
+    }
+    return spans;
+  }
   function timeAgo(iso) {
     const t = Date.parse(iso); if (!t) return "";
     const s = Math.max(0, (Date.now() - t) / 1000);
@@ -4357,6 +4394,7 @@
     if (!row || isTaskRow(row)) return row ? taskBoardState(row.id) : "idle";
     const local = taskLocal.get(String(row.id));
     if (local === "running" || local === "done" || local === "stopped") return local;
+    if (row.source?.host === "relay-agent-run" && row.source?.agentSessionId) return "running";
     if (row.runLive) return "running";
     if (row.workCompletedAt) return "done";
     if (row.workStartedAt) return "stopped";
@@ -5597,7 +5635,8 @@
   function relayWorkDockHtml(r, { inline = false } = {}) {
     const state = relayWorkState(r);
     const draft = String(requestWorkDrafts.get(String(r.id)) || "");
-    const hasSession = requestHasNativeSession(r);
+    const taggedWork = r.source?.host === "relay-agent-run" && Boolean(r.source?.agentSessionId);
+    const hasSession = taggedWork || requestHasNativeSession(r);
     if (state !== "idle" && (hasSession || state === "running")) {
       const live = state === "running";
       const app = runAppName(r.id);
@@ -5611,6 +5650,8 @@
             ${continuedRouteChipsHtml(r)}
             <span class="rt-spacer"></span>
             <span class="ta-acts">
+              ${taggedWork && live ? `<button class="ta-later" type="button" data-chat-work-stop="${esc(r.id)}">Stop</button>` : ""}
+              ${taggedWork && !live ? `<button class="ta-later" type="button" data-chat-work-retry="${esc(r.id)}">Retry</button>` : ""}
               ${live
                 ? `<button class="ta-later" type="button" disabled aria-disabled="true">Open in ${esc(app)}</button>`
                 : r.ranOnClaude
@@ -5863,6 +5904,33 @@
         renderAll();
       });
       onDone("work-start", id);
+    });
+    for (const button of scope.querySelectorAll("[data-chat-work-stop]")) button.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const id = String(button.getAttribute("data-chat-work-stop") || "");
+      if (!id || button.disabled) return;
+      button.disabled = true;
+      const result = await window.relay.chatAgentWorkStop?.(id).catch((error) => ({ ok:false, error:String(error?.message || error) }));
+      if (result?.ok) {
+        taskLocal.set(id, "stopped");
+        stopRunFeed(id);
+        setRowNote(id, "Work stopped.", "ok");
+      } else setRowNote(id, result?.error || "Work could not be stopped.", "err");
+      renderAll();
+    });
+    for (const button of scope.querySelectorAll("[data-chat-work-retry]")) button.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const id = String(button.getAttribute("data-chat-work-retry") || "");
+      if (!id || button.disabled) return;
+      button.disabled = true;
+      const result = await window.relay.chatAgentWorkRetry?.(id).catch((error) => ({ ok:false, error:String(error?.message || error) }));
+      if (result?.ok) {
+        taskLocal.set(id, "running");
+        runFeedSeen.delete(id);
+        runFeedEpoch.set(id, (runFeedEpoch.get(id) || 0) + 1);
+        setRowNote(id, result.session?.state === "waiting_for_device" ? "Waiting for your computer." : "Retry started.", "ok");
+      } else setRowNote(id, result?.error || "Work could not be retried.", "err");
+      renderAll();
     });
     for (const st of scope.querySelectorAll("[data-steer]")) st.addEventListener("click", async (e) => {
       e.stopPropagation();
@@ -6410,7 +6478,11 @@
     if (!r) { readerBodyEl.innerHTML = '<div class="cv-empty">This relay is gone.</div>'; return; }
     const request = isTaskRow(r);
     const sender = relaySender(r);
-    const subject = request ? (String(r.title || "").trim() || relaySubject(r)) : relaySubject(r);
+    const chatOwnedWork = r.source?.host === "relay-agent-run" && Boolean(r.source?.agentSessionId);
+    const triggerRow = chatOwnedWork && r.inReplyToRelayId ? relayById(r.inReplyToRelayId) : null;
+    const subject = chatOwnedWork && triggerRow
+      ? (String(triggerRow.forHuman || "").trim() || relaySubject(triggerRow))
+      : request ? (String(r.title || "").trim() || relaySubject(r)) : relaySubject(r);
     const headlineClass = subject.length > 120 ? " long very-long" : subject.length > 70 ? " long" : "";
     const note = rowNotes.get(r.id);
     let app = request ? routeFor(r.id).app : agentAppName();
@@ -6427,7 +6499,7 @@
     // a Work face only where the product row allows it (local builds). A
     // Task keeps its own — that surface is gated by features.requests.
     const workOn = payload.features?.relayWork === true;
-    const hasWork = (request || workOn) && !["idle", "waiting", "parked"].includes(runState);
+    const hasWork = chatOwnedWork || ((request || workOn) && !["idle", "waiting", "parked"].includes(runState));
     if (hasWork) app = runAppName(r.id); // the third face names the provider that actually owns this run
     if (!hasWork && readerTab === "work") readerTab = "you";
     const workAppearing = hasWork && !readerWorkVisible;
@@ -6459,7 +6531,7 @@
         <div class="rd-body">${readerParagraphs(r.forHuman)}</div>
         ${scheduleContractHtml(r)}`;
     const workDoc = `<div class="work-context">
-        <div class="rd-kicker" data-run-kicker="${esc(r.id)}">${request ? "Task" : "work"} · ${esc(sender)} · ${esc(timeAgo(r.createdAt))}</div>
+        <div class="rd-kicker" data-run-kicker="${esc(r.id)}">${request || chatOwnedWork ? "Task" : "work"} · ${esc(sender)} · ${esc(timeAgo(r.createdAt))}</div>
         <div class="rd-headline${headlineClass}">${esc(subject)}</div></div>
         <div class="work-conversation${runState === "running" ? " work-streaming" : ""}" data-run-stream="${esc(r.id)}" aria-live="polite" aria-relevant="additions text"><div class="work-starting" role="status"><span class="rd-live-tail-dot" aria-hidden="true"></span><span>Starting ${esc(app)} on this Task…</span></div></div>`;
     const doc = onWork ? workDoc : onAgent ? agentDoc : humanDoc;
@@ -6613,6 +6685,7 @@
           // under the cursor and a red note.
           const res = await window.relay.sendReply({
             text,
+            agentMentions: agentMentionSpans(text),
             inReplyToRelayId: r.id,
             idempotencyKey,
             chat: {
@@ -9809,7 +9882,11 @@
         const receipt = receiptFor(m, msgs);
         const bits = [];
         const settleReceipt = receipt && (receipt.label === "Sent" || receipt.label === "Delivered") ? " th-settling" : "";
-        if (!m.request && !groupPostingBlocked) bits.push(`<button type="button" class="th-reply-ghost" data-reply-to="${esc(m.id)}" data-stop="1">reply</button>`);
+        if (m.ownedAgent && m.source?.agentSessionId) {
+          bits.push(`<button type="button" class="th-reply-ghost" data-open-agent-work="${esc(m.id)}" data-stop="1">Open Work</button>`);
+        } else if (!m.request && !groupPostingBlocked) {
+          bits.push(`<button type="button" class="th-reply-ghost" data-reply-to="${esc(m.id)}" data-stop="1">reply</button>`);
+        }
         if (mine && m.pending) bits.push(...outboxStatusBits(m));
         if (receipt) bits.push(receipt.expandable
           ? `<button type="button" class="th-seen" data-receipt-toggle="${esc(m.id)}" data-stop="1" aria-expanded="${expandedReceiptIds.has(m.id) ? "true" : "false"}">${esc(receipt.label)}</button>`
@@ -9977,8 +10054,8 @@
       }
       const mentionOptions = [
         ...(payload.features?.requests === true ? [
-          { token:"my_claude", name:"@my_claude", note:"Run Claude on my laptop", agent:true },
-          { token:"my_codex", name:"@my_codex", note:"Run Codex on my laptop", agent:true },
+          { token:"Claude", name:"@Claude", note:"Run Claude on my computer", agent:true },
+          { token:"Codex", name:"@Codex", note:"Run Codex on my computer", agent:true },
         ] : []),
         ...[...participantNames]
           .map((name) => ({ token:name.replace(/\s+/g, "_"), name:`@${name}`, note:"Participant", agent:false })),
@@ -10112,14 +10189,13 @@
           attachments,
           preview: "",
         });
-        const invokedProviders = payload.features?.requests === true
-          ? ["claude", "codex"].filter((provider) => new RegExp(`(^|\\s)@my_${provider}\\b`, "i").test(text))
-          : [];
+        const agentMentions = payload.features?.requests === true ? agentMentionSpans(text) : [];
+        const invokedProviders = agentMentions.map((mention) => mention.provider);
         for (const [index, provider] of invokedProviders.entries()) {
           optimisticChatReplies.set(`${idempotencyKey}:agent:${provider}`, {
             id:`optimistic-agent:${idempotencyKey}:${provider}`, relayId:"", threadId:sendAnchor.threadId || thread.threadId,
             inReplyToRelayId:optimisticId, direction:"out", seen:false, seenAt:null, readReceipts:[],
-            title:"I'm on it", body:"I'm on it", party:provider === "claude" ? "My Claude" : "My Codex",
+            title:"I'm on it", body:"I'm on it", party:provider === "claude" ? "Claude" : "Codex",
             partyKey:sendAnchor.partyKey || thread.partyKey || "", at:new Date(Date.now() + index + 1).toISOString(), isGroup:Boolean(sendAnchor.isGroup || thread.isGroup),
             groupName:sendAnchor.groupName || thread.groupName || "", unread:false, textLike:true, request:false, pending:true,
             source:{ host:"relay-agent-run", surface:provider === "claude" ? "claude_code" : "codex" }, ownedAgent:true, agentInvocation:true,
@@ -10144,7 +10220,7 @@
         let res;
         try {
           res = await window.relay.sendReply({
-            text, recipient, ...(inReplyToRelayId ? { inReplyToRelayId } : {}), files, idempotencyKey,
+            text, recipient, ...(inReplyToRelayId ? { inReplyToRelayId } : {}), files, idempotencyKey, agentMentions,
             // The room the queue is speaking into, so a bubble rebuilt from the
             // queue after a restart knows which conversation it belongs to.
             chat: {
@@ -10247,6 +10323,12 @@
       });
     }
     wireReplyCancel(thHistoryEl, threadStateKey);
+    for (const button of thHistoryEl.querySelectorAll("[data-open-agent-work]")) {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        openReader(String(button.getAttribute("data-open-agent-work") || ""), "threads");
+      });
+    }
     for (const b of thHistoryEl.querySelectorAll("[data-reply-ref]")) {
       b.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -10267,7 +10349,11 @@
         const m = threadMessages().find((x) => x.id === id);
         // Plain text is INERT (David): selectable, its links clickable, no
         // navigation hiding under it — Reply is a deliberate hover affordance.
-        if (m && m.textLike) return;
+        if (m && m.textLike && !(m.ownedAgent && m.source?.agentSessionId)) return;
+        if (m && m.ownedAgent && m.source?.agentSessionId) {
+          openReader(id, m.direction === "out" ? "sent" : "threads");
+          return;
+        }
         // ONE ontology, BOTH DIRECTIONS: every titled relay opens the same
         // document reader. Outbound rows resolve through the sent cache;
         // returning early here was the entire "I can open theirs, never mine"
@@ -10693,12 +10779,12 @@
     if (payload.features?.requests !== true || !window.relay.chatAgentPreferences) return "";
     if (!chatAgentPreferences) return `<div class="sv-open-section" data-stop="1"><div class="sv-open-title">Chat agents</div><div class="sv-open-intro">${esc(chatAgentPreferencesError || "Loading model defaults…")}</div></div>`;
     const rows = [
-      { key:"claude", label:"@my_claude", logo:"claudeCodeMark.svg", models:[["opus","Opus 5"],["fable","Fable 5"],["sonnet","Sonnet 5"],["haiku","Haiku 4.5"]], efforts:["low","medium","high","xhigh","max"] },
-      { key:"codex", label:"@my_codex", logo:"codexMark.svg", models:[["gpt-5.6-sol","5.6 Sol"],["gpt-5.6-terra","5.6 Terra"],["gpt-5.6-luna","5.6 Luna"],["gpt-5.5","5.5"],["gpt-5.4","5.4"]], efforts:["auto","low","medium","high","xhigh"] },
+      { key:"claude", label:"@Claude", logo:"claudeCodeMark.svg", models:[["opus","Opus 5"],["fable","Fable 5"],["sonnet","Sonnet 5"],["haiku","Haiku 4.5"]], efforts:["low","medium","high","xhigh","max"] },
+      { key:"codex", label:"@Codex", logo:"codexMark.svg", models:[["gpt-5.6-sol","5.6 Sol"],["gpt-5.6-terra","5.6 Terra"],["gpt-5.6-luna","5.6 Luna"],["gpt-5.5","5.5"],["gpt-5.4","5.4"]], efforts:["auto","low","medium","high","xhigh"] },
     ];
     return `<div class="sv-open-section sv-agent-defaults" data-stop="1">
       <div class="sv-open-title">Chat agents</div>
-      <div class="sv-open-intro">Defaults for anonymous one-shot runs started by a mention.</div>
+      <div class="sv-open-intro">Defaults for Work sessions that run on this computer.</div>
       <div class="sv-open-list">${rows.map((row) => {
         const current = chatAgentPreferences[row.key] || {};
         return `<div class="sv-open-row"><img class="sv-open-logo" src="${row.logo}" alt="" /><span class="sv-open-copy"><span class="sv-open-name">${row.label}</span></span>

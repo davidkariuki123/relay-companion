@@ -631,7 +631,7 @@ test("the room composer prevents duplicate sends, and returns a draft only when 
 });
 
 test("developer chat composers rank owned laptop agents ahead of participant mentions", () => {
-  const owned = html.indexOf('{ token:"my_claude", name:"@my_claude"');
+  const owned = html.indexOf('{ token:"Claude", name:"@Claude"');
   const participant = html.indexOf('...[...participantNames]');
   assert.ok(owned >= 0 && participant > owned, "owned agents precede participant suggestions");
   assert.match(html, /groupInfoRoster\(group\)[\s\S]*!member\.currentUser/, "saved-group rosters contribute participants who have not spoken yet");
@@ -865,7 +865,8 @@ test("hand-offs speak in conversation terms: starts vs continues, said BEFORE th
 test("every titled bubble opens the reader; quick texts stay inert", () => {
   // One document rule in both directions. A quick text has no hidden page;
   // every titled relay does, including the user's own sent relay.
-  assert.match(html, /if \(m && m\.textLike\) return;/);
+  assert.match(html, /if \(m && m\.textLike && !\(m\.ownedAgent && m\.source\?\.agentSessionId\)\) return;/);
+  assert.match(html, /data-open-agent-work/, "a compact owned-agent response explicitly opens the canonical Work reader");
   assert.match(html, /openReader\(id, m\.direction === "out" \? "sent" : \(m\.request \? "tasks" : "threads"\)\)/);
   assert.match(html, /const r = readerRow\(readerId\)/);
   assert.doesNotMatch(html, /data-strip-reply/);

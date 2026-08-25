@@ -172,7 +172,7 @@ export const TOOLS = [
   {
     name: "relay_agent_progress",
     description:
-      "Update the single in-chat response for an owned @my_claude or @my_codex run. Call only when the invocation prompt supplied the exact runRelayId. Write one short, plain-language status grounded in work actually completed; never expose private reasoning or invent progress.",
+      "Update the single in-chat response for a legacy owned @Claude or @Codex run. Call only when the invocation prompt supplied the exact runRelayId. Write one short, plain-language status grounded in work actually completed; never expose private reasoning or invent progress.",
     inputSchema: {
       type: "object",
       properties: {
@@ -227,7 +227,7 @@ export const TOOLS = [
   {
     name: "relay_agent_complete",
     description:
-      "Finish an owned @my_claude or @my_codex run by replacing its existing progress response. Call exactly once at the end. forHuman is the concise chat answer; forAgent is the complete useful evidence and handoff document. Do not send a second Relay.",
+      "Finish a legacy owned @Claude or @Codex run by replacing its existing progress response. Call exactly once at the end. forHuman is the concise chat answer; forAgent is the complete useful evidence and handoff document. Do not send a second Relay.",
     inputSchema: {
       type: "object",
       properties: {

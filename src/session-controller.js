@@ -724,6 +724,19 @@ async function executeCodex({ client, claim, target, operation, input, prompt })
     } finally {
       clearInterval(renewTimer);
     }
+    if (input.agentRunRelayId) {
+      const discovered = discoverSessions().find((session) => session.provider === "codex" && session.nativeId === threadId);
+      if (discovered?.nativeRef) {
+        const page = await inspectAiSession({
+          id: stable?.id || threadId,
+          provider: "codex",
+          state: "idle",
+          nativeRef: discovered.nativeRef,
+        }, { limit: 200 });
+        const final = (page.records || []).find((record) => record?.type === "message" && record?.role === "assistant" && String(record.text || "").trim());
+        if (final?.text) await client.agentRunComplete(input.agentRunRelayId, String(final.text).trim(), String(final.text).trim());
+      }
+    }
     await evidence(client, operation.id, claim.claimToken, "completed", {
       nativeTurnId: turnId || null,
       nativeThreadId: threadId,
