@@ -862,6 +862,16 @@ test("every titled bubble opens the reader; quick texts stay inert", () => {
   assert.match(html, /class="rt-chip" data-route-menu="app"/); // the rail IS the transparency, and it is writable
 });
 
+test("every chat-message link uses the theme accent", () => {
+  assert.match(html, /\.th-msg :is\(\.th-msg-title, \.th-body\) a \{ color:var\(--accent\)/);
+  assert.doesNotMatch(html, /\.th-msg\.text \.th-msg-title a/,
+    "link color must not depend on the message subtype or fall back to browser blue");
+  assert.match(html, /inlineBody \? `<div class="th-body"[^`]+\$\{readerParagraphs\(m\.body\)\}/,
+    "titled Relay bodies must remain inside the themed message-link scope");
+  assert.match(html, /href="\$\{esc\(href\)\}" data-md-link="1"/,
+    "Markdown links must continue through the safe URL renderer");
+});
+
 // ---- a default reply anchor is not a quote ---------------------------------
 // inReplyToRelayId is Relay's reply-chain key and every sender sets it by
 // default: the room composer anchors to the newest ordinary message, and
