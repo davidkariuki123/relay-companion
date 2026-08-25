@@ -54,6 +54,10 @@ test("--version hops too, so the number a person sees is the code the machine ru
   assert.ok(resolveCliTrampoline({ ...base, command: "--version", readCurrent: () => current }));
   assert.ok(resolveCliTrampoline({ ...base, command: "update", readCurrent: () => current }), "update must hop or it can never repair itself");
   assert.ok(resolveCliTrampoline({ ...base, command: "uninstall", readCurrent: () => current }));
+  assert.ok(
+    resolveCliTrampoline({ ...base, command: "repair-desktop", readCurrent: () => current }),
+    "a stale shim must not rebuild Relay.app around its own stale Electron runtime",
+  );
 });
 
 test("no canonical pointer, or a pointer to ourselves, runs in-process", () => {
@@ -83,7 +87,7 @@ test("the services and updater-internal commands never hop, whatever the pointer
   // deliberate act; this pins the current membership so a drift is visible.
   assert.deepEqual(
     Array.from(TRAMPOLINE_EXEMPT_COMMANDS).sort(),
-    ["claude-hook", "codex-hook", "daemon", "mcp", "repair-desktop", "repair-runtime", "self-update"],
+    ["claude-hook", "codex-hook", "daemon", "mcp", "repair-runtime", "self-update"],
   );
 });
 
