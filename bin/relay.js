@@ -326,11 +326,23 @@ async function cmdSetup(flags) {
     console.log("Using Relay's legacy pairing-code migration path.");
     await cmdPair(flags, { promptForDefaults: Boolean(flags.interactive) });
     console.log("");
-  } else if (readConfig().deviceToken) {
-    console.log("Relay is already signed in on this machine. Keeping that account while installing the current app.");
-    console.log("");
   } else {
-    console.log("Installing Relay first. The Relay pill will open signed out so you can review it and sign in there.");
+    const hasSavedCredential = Boolean(readConfig().deviceToken);
+    let savedCredentialRejected = false;
+    if (hasSavedCredential) {
+      try {
+        await new RelayClient().me();
+      } catch (error) {
+        savedCredentialRejected = [401, 403].includes(Number(error?.status));
+      }
+    }
+    if (hasSavedCredential && !savedCredentialRejected) {
+      console.log("Relay has a saved sign-in on this machine. Keeping that account while installing the current app.");
+    } else if (savedCredentialRejected) {
+      console.log("Relay’s service no longer accepts this computer’s saved sign-in. Installing the app and opening account recovery.");
+    } else {
+      console.log("Installing Relay first. The Relay pill will open signed out so you can review it and sign in there.");
+    }
     console.log("");
   }
   const install = await applyInstall({

@@ -131,6 +131,14 @@ test("the local E2EE catalog follows rollout mode and fails closed in required m
     identityAvailable: () => false,
     statusReader: async () => { throw Object.assign(new Error("route not found"), { status: 404 }); },
   }), { mode: "off", enabled: false });
+  assert.deepEqual(await localMcpEncryptionState(client, {
+    identityAvailable: () => false,
+    statusReader: async () => { throw Object.assign(new Error("missing_authorization"), { status: 401 }); },
+  }), { mode: "off", enabled: false });
+  await assert.rejects(localMcpEncryptionState(client, {
+    identityAvailable: () => true,
+    statusReader: async () => { throw Object.assign(new Error("missing_authorization"), { status: 401 }); },
+  }), /missing_authorization/i);
   await assert.rejects(localMcpEncryptionState(client, {
     identityAvailable: () => true,
     statusReader: async () => { throw Object.assign(new Error("route not found"), { status: 404 }); },
@@ -174,7 +182,7 @@ test("startup teachings establish Relay as the default medium without losing the
   for (const instructions of [RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS]) {
     assert.ok(Buffer.byteLength(instructions, "utf8") <= 2_048, "Claude receives the complete instruction block");
     assert.match(instructions, /^Only send a Relay when the user asks you to send \(or relay\) something to someone\./);
-    assert.match(instructions, /default general person-to-person and saved-group communication layer/i);
+    assert.match(instructions, /default general direct-message and saved-channel communication layer/i);
     assert.match(instructions, /For that ask, use Relay unless another medium is named/i);
     assert.match(instructions, /explicitly requested other medium overrides/i);
     assert.match(instructions, /mint a link with relay_share_link/i);
@@ -668,10 +676,10 @@ test("relay_sent_list gives an agent ids without choosing a reply target", async
   assert.equal(empty.agentInstruction, undefined);
 });
 
-test("relay_send separates room addressing from an explicit quoted reply", async () => {
+test("relay_send separates conversation addressing from an explicit quoted reply", async () => {
   const byName = new Map(TOOLS.map((tool) => [tool.name, tool]));
   const send = byName.get("relay_send");
-  assert.match(send.description, /Addressing a person, group, or chat never implies a reply/i);
+  assert.match(send.description, /Addressing a person, channel, or chat never implies a reply/i);
   assert.match(send.description, /replyToRelayId only when/i);
   assert.match(send.inputSchema.properties.replyToRelayId.description, /exact Relay/i);
   assert.match(send.inputSchema.properties.replyToRelayId.description, /Omit for an ordinary message/i);
@@ -916,12 +924,12 @@ test("chat tools are registered for ordinary accounts and teach the ontology", (
   // A model that has only read these descriptions must come away knowing what a
   // chat IS, or it will keep treating threads as conversations.
   const list = byName.get("relay_chats_list").description;
-  // Two kinds of room: a group is a stable container identified by its own id;
+  // A channel is a stable shared conversation identified by its compatibility id;
   // a direct chat is the one conversation between a pair.
-  assert.match(list, /identified by the group's own id/i);
-  assert.match(list, /two groups with the same people are two different chats/i);
-  assert.match(list, /every Relay between the same pair appears in that one room/i);
-  assert.match(list, /never separate the chat into topics/i);
+  assert.match(list, /CHANNEL is identified by its existing grp_\.\.\. id for compatibility/i);
+  assert.match(list, /two channels with the same people remain distinct/i);
+  assert.match(list, /DIRECT conversation is the one chat between two people/i);
+  assert.match(list, /never separate the chat into visible topics/i);
 
   // Choosing between the two read tools has to be unambiguous.
   const fetch = byName.get("relay_chat_fetch").description;

@@ -163,7 +163,7 @@ test("opening a group in People opens its room; only Edit expands the roster", (
   assert.match(html, /const emptyGroupAnchor = chatRoom && chatRoom\.isGroup && chatRoom\.groupId/);
 });
 
-test("a group only its owner can address carries no recipient, and says why", () => {
+test("a Relay-owned channel only its owner can address carries no recipient, and says why", () => {
   const opener = between(main, "async function openChatWithContact", "function openPreviewExternal");
   assert.match(opener, /chat = groupId \? await client\.chatForGroup\(groupId\) : await client\.chatWith\(email\)/);
   // The send path takes groupId from the roster's OWNER and nobody else, so a
@@ -177,7 +177,7 @@ test("a group only its owner can address carries no recipient, and says why", ()
   // And an empty room in somebody else's group is a 404 by design: say what is
   // true rather than opening a window whose composer would be refused.
   assert.match(opener, /if \(groupId && error && error\.status === 404\)/);
-  assert.match(opener, /No conversation in this group yet — only its owner can start one\./);
+  assert.match(opener, /No conversation in this channel yet — only its owner can start one\./);
 
   // Both shapes reach the API as a recipient ref, never flattened to a string.
   const send = between(main, "async function sendPreviewReply", "function installActiveSpaceWatcher");
