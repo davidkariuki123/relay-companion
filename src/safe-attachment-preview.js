@@ -4,6 +4,7 @@ import path from "node:path";
 import { createHash, timingSafeEqual } from "node:crypto";
 
 const MAX_BYTES = 10 * 1024 * 1024;
+const MAX_HTML_BYTES = 2 * 1024 * 1024;
 
 function imageMime(bytes) {
   if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return "image/png";
@@ -11,6 +12,15 @@ function imageMime(bytes) {
   if (bytes.length >= 6 && ["GIF87a", "GIF89a"].includes(bytes.subarray(0, 6).toString("ascii"))) return "image/gif";
   if (bytes.length >= 12 && bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP") return "image/webp";
   return "";
+}
+
+function isHtmlAttachment(attachment, bytes) {
+  if (bytes.length > MAX_HTML_BYTES || bytes.includes(0)) return false;
+  const contentType = String(attachment?.contentType || "").toLowerCase().split(";", 1)[0].trim();
+  const name = String(attachment?.name || "").toLowerCase();
+  if (contentType !== "text/html" && !/\.html?$/.test(name)) return false;
+  const head = bytes.subarray(0, Math.min(bytes.length, 4096)).toString("utf8").trimStart().toLowerCase();
+  return head.startsWith("<!doctype html") || head.startsWith("<html") || /<(head|body|main|section|div)[\s>]/.test(head);
 }
 
 function isInsideRoot(candidate, root) {
@@ -149,7 +159,15 @@ export async function resolveSafeAttachmentPreview(attachment, {
     }
 
     const mimeType = imageMime(bytes);
-    if (!mimeType) throw new Error("Only recognized image attachments can be previewed.");
+    if (!mimeType && isHtmlAttachment(attachment, bytes)) {
+      return {
+        name: String(attachment.name || "HTML preview"),
+        mimeType: "text/html",
+        size: bytes.length,
+        html: bytes.toString("utf8"),
+      };
+    }
+    if (!mimeType) throw new Error("Only recognized image or HTML attachments can be previewed.");
     return {
       name: String(attachment.name || "Image"),
       mimeType,
@@ -162,3 +180,4 @@ export async function resolveSafeAttachmentPreview(attachment, {
 }
 
 export const SAFE_ATTACHMENT_MAX_BYTES = MAX_BYTES;
+export const SAFE_HTML_PREVIEW_MAX_BYTES = MAX_HTML_BYTES;

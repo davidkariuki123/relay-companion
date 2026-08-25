@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld("relay", {
   // say why inline instead of letting the spinner just stop.
   onOpenError: (cb) => ipcRenderer.on("openError", (_e, id, message) => cb(id, message || "")),
   onOpenFull: (cb) => ipcRenderer.on("openFull", () => cb()), // status-area icon clicked
+  onOpenRelay: (cb) => ipcRenderer.on("relay:openReader", (_e, input) => cb(input || {})),
   onShown: (cb) => ipcRenderer.on("shown", () => cb()),
 
   // pull the full payload on demand
@@ -122,6 +123,8 @@ contextBridge.exposeInMainWorld("relay", {
   // Opening a contact opens the conversation with them, in its own window.
   openChatWith: (email, name) =>
     ipcRenderer.invoke("relay:openChatWith", { email: String(email || ""), name: String(name || "") }),
+  canonicalChat: (chatId) => ipcRenderer.invoke("relay:canonicalChat", String(chatId || "")),
+  canonicalChatRead: (chatId) => ipcRenderer.invoke("relay:canonicalChatRead", String(chatId || "")),
   // contact groups (saved rosters; a group relays to every member as one thread)
   groups: () => ipcRenderer.invoke("relay:groups"),
   groupCreate: (name) => ipcRenderer.invoke("relay:groupCreate", name),
@@ -135,6 +138,9 @@ contextBridge.exposeInMainWorld("relay", {
 
   // settings / account (switch + sign-out relaunch the pill on success)
   accountInfo: () => ipcRenderer.invoke("relay:accountInfo"),
+  slackConnection: () => ipcRenderer.invoke("relay:slackConnection"),
+  slackConnect: (input = {}) => ipcRenderer.invoke("relay:slackConnect", input || {}),
+  slackDisconnect: () => ipcRenderer.invoke("relay:slackDisconnect"),
   credentialRetry: () => ipcRenderer.invoke("relay:credentialRetry"),
   chatAgentPreferences: () => ipcRenderer.invoke("relay:chatAgentPreferences"),
   saveChatAgentPreferences: (input) => ipcRenderer.invoke("relay:chatAgentPreferencesSave", input || {}),

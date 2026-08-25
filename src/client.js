@@ -1089,6 +1089,33 @@ export class RelayClient {
     return this.#req("GET", `/v1/chats/${encodeURIComponent(chatId)}`);
   }
 
+  sendChatMessage(chatId, input) {
+    return this.#req("POST", `/v1/chats/${encodeURIComponent(chatId)}/messages`, input || {});
+  }
+
+  slackConnection() {
+    return this.#req("GET", "/v1/integrations/slack");
+  }
+
+  startSlackConnection(input = {}) {
+    return this.#req("POST", "/v1/integrations/slack/oauth/start", input);
+  }
+
+  reconnectSlack(input = {}) {
+    return this.#req("POST", "/v1/integrations/slack/reconnect", input);
+  }
+
+  disconnectSlack() {
+    return this.#req("POST", "/v1/integrations/slack/disconnect-user", {});
+  }
+
+  markChatRead(chatId, idempotencyKey) {
+    return this.#req("POST", `/v1/chats/${encodeURIComponent(chatId)}/read`, {
+      source: "companion",
+      idempotencyKey: String(idempotencyKey || `chat-read-${chatId}`),
+    });
+  }
+
   /** The chat around an open message, in one round trip. */
   async chatForThread(threadId) {
     if (!localE2eeIdentityAvailable()) return this.#req("GET", `/v1/chats/by-thread/${encodeURIComponent(threadId)}`);
