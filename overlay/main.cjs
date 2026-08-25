@@ -7902,6 +7902,38 @@ ipcMain.handle("relay:soundBytes", (_e, name) => {
   return null; // gracefully null when no sound is available
 });
 
+async function repairLegacyGlobalShimBeforeFirstWindow() {
+  // A canonical update is executed by the OLD runtime's updater. The first
+  // release containing the global-shim migration therefore cannot rely on its
+  // updater to run the new migration code. Run the same idempotent repair from
+  // the newly activated pill before the first window is exposed so a direct
+  // upgrade from any historical build cannot leave `relay pill` or
+  // `relay repair-desktop` pointing back at stale global code.
+  if (process.env.RELAY_OVERLAY_TEST === "1" || process.env.RELAY_OVERLAY_PERF === "1") return;
+  try {
+    const [canonical, runtime] = await Promise.all([
+      import(pathToFileURL(path.resolve(__dirname, "../src/canonical-updater.js")).href),
+      import(pathToFileURL(path.resolve(__dirname, "../src/canonical-runtime.js")).href),
+    ]);
+    const current = runtime.readCanonicalRuntime({ homeDir: os.homedir(), platform: process.platform });
+    const npmCommand = canonical.runtimeNpmCommand(current && current.node, { platform: process.platform });
+    const result = canonical.repairLegacyGlobalCliShim({
+      version: pillVersion(),
+      npmCommand,
+      platform: process.platform,
+    });
+    if (result.repaired) {
+      console.error(`[overlay] updated legacy global CLI shim: ${result.from} -> ${result.version}`);
+    } else if (!result.ok) {
+      console.error(`[overlay] legacy global CLI shim unchanged: ${result.reason}`);
+    }
+  } catch (error) {
+    // The canonical app is already healthy. This bridge migration is
+    // best-effort and must never strand the pill if npm has been removed.
+    console.error("[overlay] legacy global CLI shim migration failed:", error && error.message);
+  }
+}
+
 if (!gotSingleInstanceLock) {
   app.quit();
 } else {
@@ -7933,6 +7965,7 @@ if (!gotSingleInstanceLock) {
   app.on("activate", () => requestExternalReopen());
 
   app.whenReady().then(async () => {
+    await repairLegacyGlobalShimBeforeFirstWindow();
     // The pill can be launched directly, without the always-on daemon or CLI
     // having run first. Upgrade durable Relay documents before the first
     // readRelays/buildPayload call so historical messages cannot paint blank.
