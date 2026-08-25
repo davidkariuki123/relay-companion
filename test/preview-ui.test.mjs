@@ -81,6 +81,8 @@ test("both Relay documents render the complete document system", () => {
   assert.match(markdown, /data-code-copy/);
   assert.match(reader, /navigator\.clipboard\.writeText\(code\)/);
   assert.match(reader, /classList\.toggle\("wrap"\)/);
+  assert.match(reader, /your agent receives both the “for you” and “for your agent” parts/);
+  assert.doesNotMatch(reader, /this one verbatim/);
 
   // Long legacy headlines remain readable while new sends are corrected at
   // composition time; the complete stored title is not silently discarded.

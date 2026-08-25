@@ -6695,7 +6695,7 @@
     const doc = onWork ? workDoc : onAgent ? agentDoc : humanDoc;
     // The whisper explains what the Relay Work dock will send; without that
     // dock the row names where it goes (H2), and nothing else needs saying.
-    const bothNote = onAgent && workOn ? `<div class="rd-dest">${esc(app)} receives both documents — this one verbatim</div>` : "";
+    const bothNote = onAgent && workOn ? `<div class="rd-dest">your agent receives both the “for you” and “for your agent” parts</div>` : "";
     // The open folder owns the addressee. For you replies to the human sender;
     // For <agent> starts private local work; Work continues that same native
     // session. Switching documents must never silently keep Shane as the
