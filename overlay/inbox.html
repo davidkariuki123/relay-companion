@@ -11325,18 +11325,18 @@
             <span class="sv-device">This device · ${esc(info.deviceName || "")}</span>
           </span>
         </div>
-        <div class="open-actions sv-actions" data-stop="1" role="menu">
-          <button class="oa-item" type="button" role="menuitem" id="svAccount" ${svBusy ? "disabled" : ""}>Account Settings…</button>
-          <button class="oa-item oa-primary" type="button" role="menuitem" id="svSwitch" ${svBusy ? "disabled" : ""}>Switch Account…</button>
+        <div class="open-actions sv-actions" data-stop="1" aria-label="Account actions">
+          <button class="oa-item" type="button" id="svAccount" ${svBusy ? "disabled" : ""}>Account Settings…</button>
+          <button class="oa-item oa-primary" type="button" id="svSwitch" ${svBusy ? "disabled" : ""}>Switch Account…</button>
           <div class="oa-sep" role="separator"></div>
-          <button class="oa-item${svSignOutArmed ? " sv-signout-armed" : ""}" type="button" role="menuitem" id="svSignOut" ${svBusy ? "disabled" : ""}>${svSignOutArmed ? "Sign Out — click again to confirm" : "Sign Out"}</button>
+          <button class="oa-item${svSignOutArmed ? " sv-signout-armed" : ""}" type="button" id="svSignOut" ${svBusy ? "disabled" : ""}>${svSignOutArmed ? "Sign Out — click again to confirm" : "Sign Out"}</button>
         </div>`;
     } else {
       html += `
         <div class="sv-head"><span class="sv-title">Sign in to Relay.</span></div>
         <div class="sv-copy">This device isn’t connected to an account yet. Sign in from your browser, then enter the pairing code here.</div>
-        <div class="open-actions sv-actions" data-stop="1" role="menu">
-          <button class="oa-item oa-primary" type="button" role="menuitem" id="svSwitch" ${svBusy ? "disabled" : ""}>Sign In to Relay</button>
+        <div class="open-actions sv-actions" data-stop="1" aria-label="Account actions">
+          <button class="oa-item oa-primary" type="button" id="svSwitch" ${svBusy ? "disabled" : ""}>Sign In to Relay</button>
         </div>`;
     }
     if (svPairOpen) html += svPairRowHtml();

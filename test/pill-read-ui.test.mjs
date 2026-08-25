@@ -108,6 +108,9 @@ test("reader attachments share the deployed frosted footer above both document a
 
 test("Slack Settings is one truthful card with the official mark and no optimistic toggle", () => {
   assert.match(html, /src="slackMark\.png" alt="Slack"/);
+  assert.match(html, /class="open-actions sv-actions" data-stop="1" aria-label="Account actions"/,
+    "permanent account actions stay ordinary page controls instead of trapping Settings in a modal menu role");
+  assert.doesNotMatch(html, /class="open-actions sv-actions" data-stop="1" role="menu"/);
   assert.match(html, /New Slack messages sync with Relay, and Relays send from your Slack account\. Earlier Slack history is not imported\./);
   assert.doesNotMatch(html, /Relay for \$\{esc\(teamName\)\}|<span class="sv-slack-name">Your Slack<\/span>/,
     "workspace installation and personal authorization do not become competing product concepts");
