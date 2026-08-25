@@ -5,6 +5,9 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
   "use strict";
 
   const bridge = window.relayPreview;
+  for (const eventName of ["pointerdown", "keydown", "wheel"]) {
+    window.addEventListener(eventName, () => bridge.chatReadActivity?.(), { capture:true, passive:true });
+  }
   const titleEl = document.getElementById("messageTitle");
   const metaEl = document.getElementById("messageMeta");
   const senderEl = document.getElementById("messageSender");

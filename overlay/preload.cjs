@@ -75,6 +75,7 @@ contextBridge.exposeInMainWorld("relay", {
   scheduleSave: (input) => ipcRenderer.invoke("relay:scheduleSave", input || {}),
   ack: (id) => ipcRenderer.send("relay:ack", id),
   ackMany: (ids) => ipcRenderer.invoke("relay:ackMany", Array.isArray(ids) ? ids : []),
+  chatReadActivity: () => ipcRenderer.send("relay:chatReadActivity"),
   // A REAL send: {text, inReplyToRelayId?, recipient?, files:[{path}|{name,contentBase64,contentType}]}
   // Answers as soon as the message is committed to this device's outbox, not
   // when the server has it — the composer never waits on the network.

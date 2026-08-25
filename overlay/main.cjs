@@ -124,6 +124,11 @@ const {
   subscribeActiveApplicationChanges,
   subscribeActiveSpaceChanges,
 } = require("./space-presence.cjs");
+const {
+  DEFAULT_IDLE_THRESHOLD_SECONDS: CHAT_READ_IDLE_THRESHOLD_SECONDS,
+  chatReadPresenceAvailable,
+  observedFreshSystemInput,
+} = require("./chat-read-presence.cjs");
 const { elevationForFrontmost } = require("./elevation-policy.cjs");
 const { openingFaceFor } = require("./message-face.cjs");
 const perf = require("./perf-counters.cjs");
@@ -1854,6 +1859,64 @@ let screenLocked = false;
 let loginSessionActive = true;
 let deferredAttention = false;
 let testAwayOverride = null;
+let chatReadResumeNeedsActivity = false;
+let chatReadResumeIdleSample = null;
+let chatReadDeferred = false;
+let chatReadSystemWasEligible = true;
+
+function chatReadIdleSecondsSafe() {
+  if (process.env.RELAY_OVERLAY_TEST_FORCE_ACTIVE === "1") return 0;
+  try {
+    perf.inc("idleQueries");
+    return powerMonitor.getSystemIdleTime();
+  } catch {
+    // A receipt is a claim about a human. Unknown presence must fail closed.
+    return Infinity;
+  }
+}
+
+function chatReadSystemIsEligible(idleSeconds = chatReadIdleSecondsSafe()) {
+  return !systemSuspended && !screenLocked && loginSessionActive
+    && !chatReadResumeNeedsActivity
+    && idleSeconds < CHAT_READ_IDLE_THRESHOLD_SECONDS;
+}
+
+function chatReadPresenceIsAvailable(targetWindow) {
+  return chatReadPresenceAvailable({
+    window: targetWindow,
+    systemSuspended,
+    screenLocked,
+    loginSessionActive,
+    resumeNeedsActivity: chatReadResumeNeedsActivity,
+    idleSeconds: chatReadIdleSecondsSafe(),
+    idleThresholdSeconds: CHAT_READ_IDLE_THRESHOLD_SECONDS,
+  });
+}
+
+function deferChatRead() {
+  chatReadDeferred = true;
+  if (!chatReadSystemIsEligible()) chatReadSystemWasEligible = false;
+}
+
+function interruptChatReadPresence() {
+  chatReadResumeNeedsActivity = true;
+  chatReadResumeIdleSample = null;
+  chatReadSystemWasEligible = false;
+}
+
+function observeChatReadActivity() {
+  if (systemSuspended || screenLocked || !loginSessionActive) return;
+  const shouldRetry = chatReadResumeNeedsActivity || chatReadDeferred;
+  chatReadResumeNeedsActivity = false;
+  chatReadResumeIdleSample = null;
+  chatReadSystemWasEligible = true;
+  if (shouldRetry) {
+    chatReadDeferred = false;
+    // A forced generation lets every still-open chat retry the unread ids it
+    // deliberately left untouched while the laptop was away.
+    pushInbox(true).catch((error) => console.error("[overlay] chat read retry failed:", error && error.message));
+  }
+}
 
 function userIsAway() {
   if (testAwayOverride !== null) return testAwayOverride;
@@ -4667,6 +4730,7 @@ function showPreviewWindow(entry) {
     if (entry.win.isMinimized()) entry.win.restore();
     entry.win.show();
     entry.win.focus();
+    if (chatReadDeferred && entry.rendererReady) entry.win.webContents.send("relay:preview:mail");
   } catch (error) {
     console.error("[preview] show failed:", error && error.message);
   }
@@ -6621,6 +6685,7 @@ function installActiveApplicationWatcher() {
 function installPowerAttentionLifecycle() {
   powerMonitor.on("suspend", () => {
     systemSuspended = true;
+    interruptChatReadPresence();
     requeueActiveAttention();
   });
   powerMonitor.on("resume", () => {
@@ -6629,6 +6694,7 @@ function installPowerAttentionLifecycle() {
   });
   powerMonitor.on("lock-screen", () => {
     screenLocked = true;
+    interruptChatReadPresence();
     requeueActiveAttention();
   });
   powerMonitor.on("unlock-screen", () => {
@@ -6638,10 +6704,12 @@ function installPowerAttentionLifecycle() {
   if (process.platform === "darwin") {
     powerMonitor.on("user-did-resign-active", () => {
       loginSessionActive = false;
+      interruptChatReadPresence();
       requeueActiveAttention();
     });
     powerMonitor.on("user-did-become-active", () => {
       loginSessionActive = true;
+      observeChatReadActivity();
       scheduleReturnReconciliation();
     });
   }
@@ -6649,6 +6717,16 @@ function installPowerAttentionLifecycle() {
   // the first mouse/keyboard activity flushes the durable unpresented set.
   setInterval(() => {
     if (deferredAttention && !userIsAway()) reconcileAttentionAfterReturn();
+    const idleSeconds = chatReadIdleSecondsSafe();
+    if (chatReadResumeNeedsActivity && !systemSuspended && !screenLocked && loginSessionActive) {
+      if (observedFreshSystemInput(chatReadResumeIdleSample, idleSeconds)) observeChatReadActivity();
+      else chatReadResumeIdleSample = idleSeconds;
+    }
+    const systemEligible = chatReadSystemIsEligible(idleSeconds);
+    if (chatReadDeferred && systemEligible && !chatReadSystemWasEligible) {
+      observeChatReadActivity();
+    }
+    chatReadSystemWasEligible = systemEligible;
   }, 1000);
 }
 
@@ -7123,6 +7201,10 @@ ipcMain.handle("relay:canonicalChatRead", async (event, chatId) => {
   }
   const id = String(chatId || "").trim();
   if (!id) return { ok: false, error: "Missing channel id." };
+  if (!chatReadPresenceIsAvailable(win)) {
+    deferChatRead();
+    return { ok: false, deferred: true };
+  }
   try {
     const client = await relayClient();
     const result = await client.markChatRead(id, `pill-chat-read-${id}-${Date.now()}`);
@@ -7163,6 +7245,10 @@ ipcMain.on("relay:preview:rendered", (event, relayId) => {
 ipcMain.on("relay:preview:chat-rendered", (event, relayIds) => {
   const entry = previewEntryForEvent(event);
   if (!entry || !entry.chatUnreadRelayIds) return;
+  if (!chatReadPresenceIsAvailable(entry.win)) {
+    deferChatRead();
+    return;
+  }
   if (!(entry.renderedChatRelayIds instanceof Set)) entry.renderedChatRelayIds = new Set();
   if (!(entry.pendingChatReadRelayIds instanceof Set)) entry.pendingChatReadRelayIds = new Set();
   const allowed = Array.from(new Set(Array.isArray(relayIds) ? relayIds.map((id) => String(id || "")) : []))
@@ -7548,9 +7634,17 @@ ipcMain.on("relay:openUrl", (_e, url) => openUrlTarget(url));
 ipcMain.handle("relay:openAttachment", (_e, relayId, attachmentId) => openRelayAttachment(relayId, attachmentId));
 ipcMain.handle("relay:previewAttachment", (_e, relayId, attachmentId) => previewRelayAttachment(relayId, attachmentId));
 ipcMain.on("relay:ack", (_e, id) => ackPacket(id));
-ipcMain.handle("relay:ackMany", async (_e, ids) => {
+ipcMain.handle("relay:ackMany", async (event, ids) => {
+  if (!win || win.isDestroyed() || event.sender !== win.webContents || !chatReadPresenceIsAvailable(win)) {
+    deferChatRead();
+    return { ok: false, deferred: true };
+  }
   const ok = await ackPackets(Array.isArray(ids) ? ids : [], { optimistic: true });
   return { ok: ok === true };
+});
+ipcMain.on("relay:chatReadActivity", (event) => {
+  const fromPill = win && !win.isDestroyed() && event.sender === win.webContents;
+  if (fromPill || isPreviewEvent(event)) observeChatReadActivity();
 });
 ipcMain.handle("relay:delete", (_e, id) => deletePacket(id));
 ipcMain.handle("relay:markAllRead", () => markAllVisibleRelaysRead());

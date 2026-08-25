@@ -198,6 +198,18 @@ test("an open Slack channel persists one canonical read cursor instead of acking
     "a Slack arrival that paints into the open channel is immediately treated as read");
 });
 
+test("automatic chat reads require recent system-wide activity without requiring Relay focus", () => {
+  assert.match(preload, /chatReadActivity: \(\) => ipcRenderer\.send\("relay:chatReadActivity"\)/);
+  assert.match(html, /\["pointerdown", "keydown", "wheel"\][\s\S]*window\.relay\.chatReadActivity/);
+  assert.match(main, /CHAT_READ_IDLE_THRESHOLD_SECONDS/);
+  assert.match(main, /ipcMain\.handle\("relay:ackMany"[\s\S]*chatReadPresenceIsAvailable\(win\)/);
+  assert.match(main, /ipcMain\.handle\("relay:canonicalChatRead"[\s\S]*chatReadPresenceIsAvailable\(win\)/);
+  assert.match(main, /interruptChatReadPresence\(\);[\s\S]*requeueActiveAttention\(\)/,
+    "sleep and lock invalidate read presence alongside notification presence");
+  assert.doesNotMatch(main, /chatReadPresenceIsAvailable[\s\S]{0,500}isFocused/,
+    "using another app does not prevent an otherwise visible chat from recording reads");
+});
+
 test("relay rows project attachment metadata only — no localPath, no signed URL", () => {
   const readRelays = main.slice(main.indexOf("function readRelays()"), main.indexOf("const RELAY_HIDDEN_KINDS"));
   assert.match(readRelays, /hasLocalCopy: Boolean\(a\.localPath\)/);
