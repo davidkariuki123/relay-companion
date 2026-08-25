@@ -688,7 +688,7 @@ test("unfinished owned-agent replies visibly pulse until their final agent paylo
 });
 
 test("agents can quote explicitly but cannot name threads", () => {
-  assert.match(mcp, /Addressing a person, channel, or chat never implies a reply/);
+  assert.match(mcp, /Addressing a person, group, or chat never implies a reply/);
   assert.match(mcp, /Set replyToRelayId only when/);
   assert.match(mcp, /not a product object, visible thread\/topic, title, chat, or UI destination/);
   assert.doesNotMatch(mcp, /args\.threadTitle|properties\.threadTitle/);
