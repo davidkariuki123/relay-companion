@@ -1223,7 +1223,7 @@
      when the dock was the final sibling of the rows. */
   #thRows.inbox-order .th-msg:last-of-type { margin-bottom:10px; }
   .th-msg.text { cursor:default; user-select:text; }
-  .th-msg.text .th-msg-title a { color:var(--accent); text-decoration:none; border-bottom:1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+  .th-msg :is(.th-msg-title, .th-body) a { color:var(--accent); text-decoration:none; border-bottom:1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
   /* Mentions keep their stable @handle in the message payload, but read as the
      person's contact-book name. The outlined wash makes the reference an
      unmistakable inline object without turning it into a button. */
