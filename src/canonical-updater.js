@@ -82,6 +82,78 @@ export function runtimeNpmCommand(node = process.execPath, {
   return null;
 }
 
+function numericVersion(value) {
+  const match = String(value || "").match(/^(\d+)\.(\d+)\.(\d+)$/);
+  return match ? match.slice(1).map(Number) : null;
+}
+
+function versionIsOlder(left, right) {
+  const a = numericVersion(left);
+  const b = numericVersion(right);
+  if (!a || !b) return false;
+  for (let index = 0; index < 3; index += 1) {
+    if (a[index] !== b[index]) return a[index] < b[index];
+  }
+  return false;
+}
+
+/**
+ * One-time bridge migration for machines whose human-facing `relay` command is
+ * still an old npm-global shim. Most commands in those shims trampoline into the
+ * canonical runtime, but historical builds exempted `pill` and
+ * `repair-desktop`; invoking either could therefore repin the whole machine to
+ * stale code after a successful canonical update.
+ *
+ * Upgrade only an existing, older global Relay package and suppress lifecycle
+ * scripts: the signed canonical transaction already owns every registration and
+ * service. Failure is reported but never rolls back a healthy runtime.
+ */
+export function repairLegacyGlobalCliShim({
+  version,
+  npmCommand,
+  platform = process.platform,
+  run = defaultRun,
+  fsImpl = fs,
+} = {}) {
+  if (!npmCommand) return { ok: false, reason: "npm-unavailable" };
+  const rootResult = run(npmCommand, ["root", "--global"]);
+  if (!commandOk(rootResult)) {
+    return { ok: false, reason: "global-root-unavailable", detail: rootResult?.stderr || rootResult?.stdout || "" };
+  }
+  const api = platform === "win32" ? path.win32 : path.posix;
+  const globalRoot = String(rootResult.stdout || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).at(-1);
+  if (!globalRoot) return { ok: false, reason: "global-root-empty" };
+  const packageJson = api.join(globalRoot, "relay-companion", "package.json");
+  let installedVersion = null;
+  try {
+    installedVersion = JSON.parse(fsImpl.readFileSync(packageJson, "utf8"))?.version || null;
+  } catch {
+    return { ok: true, repaired: false, reason: "global-shim-not-installed" };
+  }
+  if (!versionIsOlder(installedVersion, version)) {
+    return { ok: true, repaired: false, version: installedVersion };
+  }
+  const installed = run(npmCommand, [
+    "install",
+    "--global",
+    "--ignore-scripts",
+    "--no-audit",
+    "--no-fund",
+    `relay-companion@${version}`,
+  ], { timeout: 10 * 60_000 });
+  if (!commandOk(installed)) {
+    return { ok: false, reason: "global-shim-upgrade-failed", detail: installed?.stderr || installed?.stdout || "" };
+  }
+  let verifiedVersion = null;
+  try {
+    verifiedVersion = JSON.parse(fsImpl.readFileSync(packageJson, "utf8"))?.version || null;
+  } catch {}
+  if (verifiedVersion !== version) {
+    return { ok: false, reason: "global-shim-version-mismatch", detail: String(verifiedVersion || "missing") };
+  }
+  return { ok: true, repaired: true, from: installedVersion, version: verifiedVersion };
+}
+
 export function smokeCanonicalCandidate(candidate, { run = defaultRun } = {}) {
   const result = run(candidate.node, [candidate.bin, "--help"], {
     env: { ...process.env, RELAY_SKIP_DESKTOP_POSTINSTALL: "1" },
@@ -324,7 +396,7 @@ export async function runCanonicalUpdateTransaction({
   const previous = readCanonicalRuntime({ homeDir, platform });
   const legacy = previous ? null : legacyRuntimeTarget(runningPackageRoot, runningVersion, { node: serviceNode, platform });
   if (!previous && !legacy) return { ok: false, phase: "input", reason: "legacy-runtime-invalid" };
-  return repair({
+  const result = await repair({
     version,
     homeDir,
     platform,
@@ -350,6 +422,18 @@ export async function runCanonicalUpdateTransaction({
       return activate(target, { homeDir, platform, repairExecutable: context?.failed });
     },
   });
+  if (!result?.ok) return result;
+  const legacyGlobalShim = repairLegacyGlobalCliShim({
+    version,
+    npmCommand: npmExecutable,
+    platform,
+  });
+  if (legacyGlobalShim.repaired) {
+    log(`updated legacy global CLI shim: ${legacyGlobalShim.from} -> ${legacyGlobalShim.version}`);
+  } else if (!legacyGlobalShim.ok) {
+    log(`legacy global CLI shim unchanged: ${legacyGlobalShim.reason}${legacyGlobalShim.detail ? ` (${String(legacyGlobalShim.detail).trim().replace(/\s+/g, " ").slice(0, 500)})` : ""}`);
+  }
+  return { ...result, legacyGlobalShim };
 }
 
 function workerPath() {
