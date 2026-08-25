@@ -37,10 +37,12 @@ import { assertMonotonicVersion, compareExactVersions } from "../scripts/assert-
 import { electronVersionArgs } from "../scripts/verify-installed-runtime.mjs";
 
 const {
+  activeCanonicalCli,
   activateRuntime,
   acquireCanonicalLock,
   assertCompatibleNode,
   downloadVerifiedArtifact,
+  forwardActiveCanonicalCli,
   restoreRuntimeLinks,
   stageVerifiedRuntime,
   tarInvocation,
@@ -800,6 +802,67 @@ test("canonical updater installs the signed artifact and does not recursively np
   assert.match(updater, /installSignedRuntimeCandidate/);
   assert.match(updater, /stageVerifiedRuntime/);
   assert.doesNotMatch(bootstrap, /npm\s+(?:install|i)\b/);
+});
+
+test("the thin installer forwards ordinary commands to the active signed runtime", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-thin-forward-"));
+  try {
+    const runtimeRoot = path.join(root, ".relay", "runtime");
+    const bin = path.join(runtimeRoot, "releases", "0.1.390-test", "node_modules", "relay-companion", "bin", "relay.js");
+    const node = path.join(root, "bin", "node");
+    fs.mkdirSync(path.dirname(bin), { recursive: true });
+    fs.mkdirSync(path.dirname(node), { recursive: true });
+    fs.writeFileSync(bin, "// canonical CLI\n");
+    fs.writeFileSync(node, "node\n");
+    fs.writeFileSync(path.join(runtimeRoot, "current.json"), JSON.stringify({
+      schema: 1,
+      active: true,
+      state: "active",
+      version: "0.1.390",
+      bin,
+      node,
+    }));
+
+    assert.deepEqual(activeCanonicalCli({ homeDir: root }), { bin, node, version: "0.1.390" });
+    const calls = [];
+    const result = forwardActiveCanonicalCli(["repair-desktop"], {
+      findTarget: () => activeCanonicalCli({ homeDir: root }),
+      spawnImpl: (command, args, options) => {
+        calls.push({ command, args, options });
+        return { status: 0 };
+      },
+    });
+    assert.equal(result.forwarded, true);
+    assert.equal(result.status, 0);
+    assert.equal(calls[0].command, node);
+    assert.deepEqual(calls[0].args, [bin, "repair-desktop"]);
+    assert.equal(calls[0].options.stdio, "inherit");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the thin installer refuses a forged canonical pointer outside Relay releases", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-thin-forged-"));
+  try {
+    const runtimeRoot = path.join(root, ".relay", "runtime");
+    const bin = path.join(root, "outside", "relay.js");
+    const node = path.join(root, "bin", "node");
+    fs.mkdirSync(runtimeRoot, { recursive: true });
+    fs.mkdirSync(path.dirname(bin), { recursive: true });
+    fs.mkdirSync(path.dirname(node), { recursive: true });
+    fs.writeFileSync(bin, "// forged\n");
+    fs.writeFileSync(node, "node\n");
+    fs.writeFileSync(path.join(runtimeRoot, "current.json"), JSON.stringify({
+      active: true,
+      state: "active",
+      bin,
+      node,
+    }));
+    assert.equal(activeCanonicalCli({ homeDir: root }), null);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("bootstrap writes the active pointer only after setup and exact-root health succeed", async () => {

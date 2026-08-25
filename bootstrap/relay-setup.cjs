@@ -447,6 +447,43 @@ function runtimeLayout(version, platformKey) {
   };
 }
 
+function activeCanonicalCli({
+  homeDir = os.homedir(),
+  platform = process.platform,
+  readFileSync = fs.readFileSync,
+  statSync = fs.statSync,
+} = {}) {
+  const api = platform === "win32" ? path.win32 : path.posix;
+  const runtimeRoot = api.join(homeDir, ".relay", "runtime");
+  let current;
+  try { current = JSON.parse(readFileSync(api.join(runtimeRoot, "current.json"), "utf8")); }
+  catch { return null; }
+  if (current?.active !== true || current?.state !== "active" || !current.bin || !current.node) return null;
+  const bin = api.resolve(String(current.bin));
+  const releasesRoot = api.resolve(api.join(runtimeRoot, "releases"));
+  const relative = api.relative(releasesRoot, bin);
+  if (!relative || relative.startsWith("..") || api.isAbsolute(relative)) return null;
+  try {
+    if (!statSync(bin).isFile() || !statSync(String(current.node)).isFile()) return null;
+  } catch { return null; }
+  return { bin, node: String(current.node), version: String(current.version || "") };
+}
+
+function forwardActiveCanonicalCli(args = process.argv.slice(2), {
+  findTarget = activeCanonicalCli,
+  spawnImpl = spawnSync,
+} = {}) {
+  const target = findTarget();
+  if (!target) return { forwarded: false };
+  const result = spawnImpl(target.node, [target.bin, ...args], {
+    stdio: "inherit",
+    windowsHide: true,
+    env: process.env,
+  });
+  if (result?.error) throw result.error;
+  return { forwarded: true, status: Number.isInteger(result?.status) ? result.status : 1, target };
+}
+
 function processAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try { process.kill(pid, 0); return true; }
@@ -717,6 +754,17 @@ async function stageVerifiedRuntime({ version, platformKey = releasePlatform(), 
 
 async function main() {
   const command = process.argv[2] || "help";
+  // Once the signed canonical runtime exists, the npm-global thin installer is
+  // only a human-facing command shim. Hand every ordinary command to the active
+  // runtime; keep `setup` local because an explicit exact-version npx install is
+  // allowed to replace or repair the canonical runtime.
+  if (command !== "setup") {
+    const forwarded = forwardActiveCanonicalCli();
+    if (forwarded.forwarded) {
+      process.exitCode = forwarded.status;
+      return;
+    }
+  }
   if (process.argv.includes("--code")) fail("New Relay setup never accepts a pairing code. Sign in from the Relay pill after installation.");
   if (command === "version" || process.argv.includes("--version")) return console.log(packageJson.version);
   if (command === "setup") return setup();
@@ -730,10 +778,12 @@ async function main() {
 }
 
 module.exports = {
+  activeCanonicalCli,
   activateRuntime,
   acquireCanonicalLock,
   assertCompatibleNode,
   downloadVerifiedArtifact,
+  forwardActiveCanonicalCli,
   releasePlatform,
   parseSignedManifest,
   restoreRuntimeLinks,
