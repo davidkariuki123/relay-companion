@@ -818,20 +818,22 @@ test("Work activity uses the installed Codex row grammar without raw argument du
   assert.match(inbox, /\.rd-activity \+ \.worked-for-divider \{ margin-top:-12px; \}/);
 });
 
-test("Task documents remain beside a persistent Work tab throughout a run", () => {
+test("Task documents remain in the contents list beside persistent Work throughout a run", () => {
   const reader = between(inbox, "function renderReader()", "// ---------- the Tasks board");
   const controls = between(inbox, "function wireRequestControls", "function requestsWaitingCount");
   const open = between(inbox, "function openReader", "function closeReader");
 
-  // Idle is exactly the two immutable source documents, with the provider
-  // label taken from the route rather than a hard-coded vendor.
-  assert.match(reader, /const tabs = \(request \|\| agentText\) \? `/);
-  assert.match(reader, /data-rtab="you"[^]*<span class="lab">For you<\/span>/);
-  assert.match(reader, /data-rtab="agent"[^]*<span class="lab">For \$\{esc\(app\)\}<\/span>/);
+  // Idle is exactly the two immutable source messages. Their labels describe
+  // the recipient, never whichever provider happens to be connected.
+  assert.match(reader, /const documentList = \(request \|\| agentText\) \? `/);
+  assert.match(reader, /<span class="relay-contents-label">This Relay contains<\/span>/);
+  assert.match(reader, /data-rtab="you"[^]*<span class="relay-contents-name">Message for you<\/span>/);
+  assert.match(reader, /data-rtab="agent"[^]*<span class="relay-contents-name">Message for your agent<\/span>/);
+  assert.doesNotMatch(reader, /data-rtab="agent"[^]*>For \$\{esc\(app\)\}</);
   assert.match(reader, /\$\{hasWork \? `<button[^`]*data-rtab="work"/);
-  assert.match(reader, /<span class="lab">Work<\/span>/);
+  assert.match(reader, /<span class="relay-contents-name">Work<\/span>/);
 
-  // A real start grows the folder to three tabs and selects Work. The work
+  // A real start grows the contents list to three rows and selects Work. The work
   // face owns the runner; source documents remain their original prose and
   // retain their addressee-specific composers.
   assert.match(reader, /const workAppearing = hasWork && !readerWorkVisible/);
@@ -843,11 +845,11 @@ test("Task documents remain beside a persistent Work tab throughout a run", () =
   assert.match(reader, /const agentDoc = `[^]*readerParagraphs\(agentText\)/);
   // THE AGENT KICKER IS METADATA, NOT A CLAIM (David, 2026-08-20, on "FOR YOUR
   // AGENT · RIDES WITH THIS RELAY": "i dont like that rides with this relay
-  // copy"). The tab directly above already names the addressee, so the only
+  // copy"). The contents row directly above already names the addressee, so the only
   // thing the line can add is how much document there is — the same grammar as
   // the human kicker's sender · time · read.
   assert.doesNotMatch(inbox, /RIDES WITH THIS RELAY/i, "the transport claim is retired");
-  assert.match(reader, /FOR \$\{esc\(app\.toUpperCase\(\)\)\}\$\{agentWeightLabel\(agentText\)\}/);
+  assert.match(reader, /MESSAGE FOR YOUR AGENT\$\{agentWeightLabel\(agentText\)\}/);
   assert.match(inbox, /function agentWeightLabel\(md\) \{[^]*n === 1 \? "WORD" : "WORDS"/,
     "one word never reads 1 WORDS");
   assert.match(inbox, /function agentWordCount\(md\)[^]*filter\(\(token\) => \/\[\\p\{L\}\\p\{N\}\]\/u\.test\(token\)\)/,
@@ -911,7 +913,7 @@ test("ordinary Relay folders address the human, the agent, and local Work separa
   assert.match(reader, /data-open-in-host="codex">Open in Codex[\s\S]*data-open-in-host="claude">Open in Claude Code[\s\S]*id="qrSend">Send/,
     "For you keeps both named Open actions directly beside Send in Codex-first order");
   assert.match(wiring, /readerTab = "work"/);
-  assert.match(reader, /data-rtab="work"[^]*<span class="lab">Work<\/span>/);
+  assert.match(reader, /data-rtab="work"[^]*<span class="relay-contents-name">Work<\/span>/);
   assert.match(startHandler, /localWork: true/);
   assert.doesNotMatch(startHandler, /model:\s*\(route && route\.model\) \|\| "claude-opus-5"/,
     "an omitted Codex model must use Codex's own default");

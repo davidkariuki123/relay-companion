@@ -1334,21 +1334,22 @@
      rule, the body set LEFT inside a centered measure (display centers;
      running text never does), the three relay squares as the colophon.
      Nothing ornamental — the rule and the colophon are the only jewelry. */
-  /* THE FOLDER (David's pick from the craft board): a relay with an agent
-     part is a JACKET holding two documents, and the tabs are cut from the
-     paper itself. The active tab is continuous with the page; the waiting
-     tab sits behind in darker stock, carrying its square and its weight.
-     The squares are the constitution: orange = you, blue = your agent,
-     ink = the relay. Tabs exist ONLY when the relay carries two documents. */
-  .fold-tabs { display:flex; gap:5px; max-width:560px; margin:12px auto 0; padding:0 44px; position:relative; z-index:2; }
-  .ftab { display:flex; align-items:center; gap:8px; padding:8px 15px 9px; cursor:pointer; position:relative; top:1px;
-    border:1px solid var(--hair); border-bottom:0; border-radius:11px 11px 0 0; background:var(--wash-2);
-    transition:transform var(--t-base) var(--settle), background var(--t-base) var(--settle); }
-  .ftab:hover { transform:translateY(-1px); }
-  .ftab.on { background:var(--bg); transform:none; cursor:default; }
-  .ftab.on::after { content:""; position:absolute; left:0; right:0; bottom:-2px; height:3px; background:var(--bg); }
+  /* A Relay names its two messages before either begins. This contents list
+     replaces the folder metaphor: the person can see at a glance that one
+     message is for them and the other is for whichever agent they use. */
+  .relay-contents { width:calc(100% - 88px); max-width:472px; margin:12px auto 0; position:relative; z-index:2; }
+  .relay-contents-label { display:block; margin:0 0 6px; font-family:var(--mono); font-size:9px; line-height:1.2;
+    letter-spacing:.12em; text-transform:uppercase; color:var(--muted-2); }
+  .relay-contents-list { display:block; overflow:hidden; border:1px solid var(--hair); border-radius:12px; background:var(--wash); }
+  .relay-contents-row { appearance:none; width:100%; min-height:34px; display:grid; grid-template-columns:4px minmax(0,1fr) auto;
+    align-items:center; gap:10px; padding:8px 12px; border:0; background:transparent; cursor:pointer; text-align:left;
+    transition:background var(--t-base) var(--settle); }
+  .relay-contents-row + .relay-contents-row { border-top:1px solid var(--hair); }
+  .relay-contents-row:hover { background:var(--wash-2); }
+  .relay-contents-row.on { background:var(--bg); cursor:default; }
+  .relay-contents-row.on:hover { background:var(--bg); }
   @keyframes workTabIn { from { opacity:0; transform:translateX(-8px) scale(.96); } to { opacity:1; transform:none; } }
-  .ftab.work-new { animation:workTabIn .32s var(--settle) both; }
+  .relay-contents-row.work-new { animation:workTabIn .32s var(--settle) both; }
   @keyframes workSourceOut { from { opacity:1; transform:translateY(0) scale(1); } to { opacity:0; transform:translateY(-7px) scale(.995); } }
   @keyframes workDestinationIn { 0%,12% { opacity:0; transform:translateY(10px) scale(.995); } 100% { opacity:1; transform:none; } }
   .work-surface.work-entering .work-transition-source { animation:workSourceOut .42s cubic-bezier(.22,1,.36,1) both; }
@@ -1356,13 +1357,13 @@
   .work-surface.work-entering .work-footer { animation:workDestinationIn .42s cubic-bezier(.22,1,.36,1) both; }
   .work-transition-source { position:absolute; inset:0 0 0; z-index:6; overflow:hidden; padding:14px 16px 120px; background:var(--bg); pointer-events:none; }
   .work-transition-source .rd-col { width:100%; height:100%; overflow:hidden; }
-  @media (prefers-reduced-motion:reduce) { .ftab.work-new { animation:none; } }
-  .ftab .sq { width:4px; height:4px; flex:none; }
-  .ftab .sq.you { background:var(--brand-anthropic); }
-  .ftab .sq.ag { background:var(--agent-sq); }
-  .ftab .lab { font-family:var(--mono); font-size:9.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--muted-2); }
-  .ftab.on .lab { color:var(--ink); }
-  .fold-rule { height:1px; background:var(--hair); max-width:560px; margin:0 auto; padding:0; }
+  @media (prefers-reduced-motion:reduce) { .relay-contents-row.work-new { animation:none; } }
+  .relay-contents-row .sq { width:4px; height:4px; flex:none; }
+  .relay-contents-row .sq.you { background:var(--brand-anthropic); }
+  .relay-contents-row .sq.ag { background:var(--agent-sq); }
+  .relay-contents-name { min-width:0; overflow:hidden; font-family:var(--sans); font-size:11.5px; line-height:1.25;
+    font-weight:600; color:var(--ink); text-overflow:ellipsis; white-space:nowrap; }
+  .relay-contents-state { font-family:var(--sans); font-size:10px; line-height:1.25; color:var(--muted-2); white-space:nowrap; }
   .rd-kicker .ksq { display:inline-block; width:4px; height:4px; background:var(--agent-sq); margin-right:8px; vertical-align:1px; }
   /* Which desktop apps each Relay offers. This is deliberately a pair of real
      switches: people move between Claude Code and Codex independently, so a
@@ -7378,15 +7379,23 @@
     const onAgent = Boolean(agentText || request) && readerTab === "agent";
     const requestActionable = request && ["waiting", "parked", "stopped"].includes(taskBoardState(r.id));
     const animateWork = hasWork && Date.now() < (workTabAnimateUntil.get(String(r.id)) || 0);
-    const tabs = (request || agentText) ? `
-      <div class="fold-tabs" data-stop="1">
-        <button type="button" class="ftab${!onAgent && !onWork ? " on" : ""}" data-rtab="you"><span class="sq you"></span><span class="lab">For you</span></button>
-        <button type="button" class="ftab${onAgent ? " on" : ""}" data-rtab="agent"><span class="sq ag" style="background:${vendorSq(app)}"></span><span class="lab">For ${esc(app)}</span></button>
-        ${hasWork ? `<button type="button" class="ftab work${onWork ? " on" : ""}${animateWork ? " work-new" : ""}" data-rtab="work"><span class="sq ag"${providerPrompt || legacyCompletedWithoutNative ? "" : ` style="background:${vendorSq(app)}"`}></span><span class="lab">Work</span></button>` : ""}
-      </div>
-      <div class="fold-rule"></div>` : "";
+    const agentWords = agentWordCount(agentText);
+    const onHuman = !onAgent && !onWork;
+    const documentList = (request || agentText) ? `
+      <nav class="relay-contents" data-stop="1" aria-label="Relay contents">
+        <span class="relay-contents-label">This Relay contains</span>
+        <span class="relay-contents-list">
+          <button type="button" class="relay-contents-row${onHuman ? " on" : ""}" data-rtab="you" aria-current="${onHuman ? "page" : "false"}">
+            <span class="sq you"></span><span class="relay-contents-name">Message for you</span><span class="relay-contents-state">${onHuman ? "reading now" : "view ›"}</span>
+          </button>
+          <button type="button" class="relay-contents-row${onAgent ? " on" : ""}" data-rtab="agent" aria-current="${onAgent ? "page" : "false"}">
+            <span class="sq ag"></span><span class="relay-contents-name">Message for your agent</span><span class="relay-contents-state">${onAgent ? "reading now" : agentWords ? `${agentWords} ${agentWords === 1 ? "word" : "words"} ›` : "view ›"}</span>
+          </button>
+          ${hasWork ? `<button type="button" class="relay-contents-row work${onWork ? " on" : ""}${animateWork ? " work-new" : ""}" data-rtab="work" aria-current="${onWork ? "page" : "false"}"><span class="sq ag"${providerPrompt || legacyCompletedWithoutNative ? "" : ` style="background:${vendorSq(app)}"`}></span><span class="relay-contents-name">Work</span><span class="relay-contents-state">${onWork ? "reading now" : "view ›"}</span></button>` : ""}
+        </span>
+      </nav>` : "";
     const agentDoc = `
-        <div class="rd-kicker"><span class="ksq" style="background:${vendorSq(app)}"></span>FOR ${esc(app.toUpperCase())}${agentWeightLabel(agentText)}</div>
+        <div class="rd-kicker"><span class="ksq"></span>MESSAGE FOR YOUR AGENT${agentWeightLabel(agentText)}</div>
         <div class="rd-rule"></div>
         <div class="rd-agentcopy">${readerParagraphs(agentText)}</div>`;
     const humanDoc = `
@@ -7466,7 +7475,7 @@
         <span class="reader-name">${esc(sender)}</span>
         ${request ? `<button class="reader-delete" type="button" data-reader-delete="${esc(r.id)}" aria-label="Move task to Recently Deleted" title="Move task to Recently Deleted"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button>` : ""}
       </div>
-      ${tabs}
+      ${documentList}
       ${onWork ? `<div class="work-surface${transitioningToWork ? " work-entering" : ""}" data-work-active="${runState === "running"}">
         ${transitioningToWork ? `<div class="work-transition-source" aria-hidden="true" inert><div class="rd-col">${transition.fromTab === "agent" ? agentDoc : humanDoc}</div></div>` : ""}
         <div class="work-scroll" data-work-scroll="${esc(r.id)}" tabindex="0" role="log" aria-label="Work conversation">
@@ -9922,6 +9931,16 @@
     const reply = String(r.inReplyToRelayId || "");
     return (thread && ids.has(thread)) || (reply && ids.has(reply));
   }
+  // A self-send is staged in the local inbox so the conversation can retain
+  // its complete message, but it is still an outbound message for this viewer.
+  // Every unread projection must share this rule: otherwise the raw staged
+  // packet inflates the tab badge while the conversation correctly shows no
+  // unread row.
+  function relayIsSelfAuthored(row, sentTwin = null, viewerEmail = "") {
+    const mine = String(viewerEmail || "").trim().toLowerCase();
+    const sender = String(row?.senderEmail || "").trim().toLowerCase();
+    return Boolean(sentTwin || (mine && sender === mine));
+  }
   // A read receipt describes the state of the CONVERSATION, not every message
   // that happened to be read. Exactly one row can own it: the newest outbound
   // item in the visible room, whether that item is a Relay or a quick text. A
@@ -9988,9 +10007,7 @@
       // Sent history hydrates asynchronously on launch. The signed-in address
       // makes the first paint correct too; the twin enriches it with receipts
       // once that cache arrives.
-      const selfAuthored = Boolean(sentTwin || (
-        viewerEmail && String(r.senderEmail || "").trim().toLowerCase() === viewerEmail
-      ));
+      const selfAuthored = relayIsSelfAuthored(r, sentTwin, viewerEmail);
       const subj = relaySubject(r);
       const ownedAgent = r.source?.host === "relay-agent-run";
       const completion = isCompletionRelay(r);
@@ -13702,9 +13719,16 @@
     // twice — the badges read 7 and 7 for seven relays (David). Relays owns the
     // count; Chat only claims what Relays does not already show.
     const reqThreads = requestThreadIds();
+    const sentByRelayId = new Map((payload.sent || [])
+      .map((item) => [String(item.relayId || item.id || ""), item])
+      .filter(([id]) => Boolean(id)));
+    const viewerEmail = String(payload.account?.email || "").trim().toLowerCase();
     const relayUnreadIds = new Set(
       (payload.relays || [])
-        .filter((r) => r.unread && isRelayListKind(r) && !onRequestThread(r, reqThreads))
+        .filter((r) => r.unread
+          && isRelayListKind(r)
+          && !onRequestThread(r, reqThreads)
+          && !relayIsSelfAuthored(r, sentByRelayId.get(String(r.id || r.relayId || "")), viewerEmail))
         .map((r) => r.id),
     );
     const unread = relayUnreadIds.size;

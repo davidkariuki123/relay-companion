@@ -172,8 +172,8 @@ try {
     })()`);
     if (!ok) throw new Error("openReader not reachable");
     const tabs = await ev('document.querySelectorAll("[data-rtab]").length');
-    if (!tabs) throw new Error("reader painted no fold tabs");
-  }, { label: "reader with fold tabs" });
+    if (!tabs) throw new Error("reader painted no message selector");
+  }, { label: "reader with message selector" });
 
   result.tabLabels = await ev('[...document.querySelectorAll("[data-rtab]")].map(b => b.textContent.trim())');
   result.humanKicker = await ev('(document.querySelector(".rd-kicker")||{}).textContent');
@@ -207,9 +207,9 @@ try {
 } finally {
   const laws = result.error ? [] : [
     ["the old transport claim is gone", !/RIDES WITH/i.test(result.agentKicker || "")],
-    ["the line names the document's addressee", /^FOR YOUR AGENT/.test(result.agentKicker || "")],
+    ["the line names the document's addressee", /^MESSAGE FOR YOUR AGENT/.test(result.agentKicker || "")],
     ["it carries the real word count", (result.agentKicker || "").includes(`· ${EXPECTED_WORDS} WORDS`)],
-    ["one word is not \"1 WORDS\"", result.singularKicker === "FOR YOUR AGENT · 1 WORD"],
+    ["one word is not \"1 WORDS\"", result.singularKicker === "MESSAGE FOR YOUR AGENT · 1 WORD"],
     ["it still obeys the kicker rule (mono, uppercase, centred)", Boolean(result.kickerStyle && /mono|SF Mono|Menlo|ui-monospace/i.test(result.kickerStyle.fontFamily) && result.kickerStyle.transform === "uppercase" && result.kickerStyle.align === "center")],
   ];
   result.broken = laws.filter(([, ok]) => !ok).map(([name]) => name);

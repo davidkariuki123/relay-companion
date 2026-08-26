@@ -34,9 +34,10 @@ function runThreadMessages(payload, optimisticChatReplies, { realDelivery = fals
   // The delivery fold is the code under test in its own case, so that case runs
   // the REAL sentIsRead/sentIsDelivered pair (the declarations shadow the
   // stub parameters of the same name) instead of a stub that would beg it.
+  const selfAuthored = pillFunction("relayIsSelfAuthored");
   const source = realDelivery
-    ? `${pillFunction("sentIsRead")}\n${pillFunction("sentIsDelivered")}\n${pillFunction("threadMessages")}\nreturn threadMessages();`
-    : `${pillFunction("threadMessages")}\nreturn threadMessages();`;
+    ? `${pillFunction("sentIsRead")}\n${pillFunction("sentIsDelivered")}\n${selfAuthored}\n${pillFunction("threadMessages")}\nreturn threadMessages();`
+    : `${selfAuthored}\n${pillFunction("threadMessages")}\nreturn threadMessages();`;
   return new Function(
     "payload", "optimisticChatReplies", "canonicalChatDetails",
     "requestThreadIds", "isTaskRow", "isRelayListKind", "onRequestThread",

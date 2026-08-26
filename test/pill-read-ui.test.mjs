@@ -27,12 +27,36 @@ test("Relays is a pure person/group index with no free-floating request receipts
 
 test("tab badges count unread items in their own visible surface", () => {
   const renderAll = html.slice(html.indexOf("function renderAll()"), html.indexOf("function onPayload"));
-  assert.match(renderAll, /r\.unread && isRelayListKind\(r\) && !onRequestThread\(r, reqThreads\)/,
+  assert.match(renderAll, /r\.unread[\s\S]*isRelayListKind\(r\)[\s\S]*!onRequestThread\(r, reqThreads\)/,
     "request progress/completion rows hidden from Relays cannot inflate its badge");
+  assert.match(renderAll, /!relayIsSelfAuthored\(r, sentByRelayId\.get\(String\(r\.id \|\| r\.relayId \|\| ""\)\), viewerEmail\)/,
+    "self-authored inbox twins cannot inflate a badge their conversation does not show");
   assert.match(renderAll, /setBadge\(tasksBadgeEl, requestsUnreadCount\(\)\)/,
     "a read but unstarted Task is not unopened");
   assert.match(html, /function requestsUnreadCount\(\) \{ return taskRows\(\)\.filter\(\(r\) => r\.unread\)\.length; \}/);
   assert.doesNotMatch(renderAll, /setBadge\(tasksBadgeEl, requestsWaitingCount\(\)\)/);
+});
+
+test("self-authored Relay detection is shared by conversations and the unread badge", () => {
+  const helperStart = html.indexOf("function relayIsSelfAuthored(");
+  const helperEnd = html.indexOf("\n  // A read receipt", helperStart);
+  assert.ok(helperStart >= 0 && helperEnd > helperStart, "self-authored helper exists");
+  const helperSource = html.slice(helperStart, helperEnd);
+  const relayIsSelfAuthored = Function(`${helperSource}; return relayIsSelfAuthored;`)();
+
+  assert.equal(relayIsSelfAuthored({ senderEmail: "david@example.com" }, null, "DAVID@example.com"), true,
+    "a staged note-to-self is outbound for its viewer");
+  assert.equal(relayIsSelfAuthored({ senderEmail: "" }, { relayId: "relay_self" }, "david@example.com"), true,
+    "a Sent twin identifies older self-authored rows without sender metadata");
+  assert.equal(relayIsSelfAuthored({ senderEmail: "sven@example.com" }, null, "david@example.com"), false,
+    "another person's Relay remains unread");
+
+  const threadMessages = html.slice(html.indexOf("function threadMessages()"), html.indexOf("function buildThreads()"));
+  const renderAll = html.slice(html.indexOf("function renderAll()"), html.indexOf("function onPayload"));
+  assert.match(threadMessages, /const selfAuthored = relayIsSelfAuthored\(r, sentTwin, viewerEmail\)/,
+    "conversation direction uses the shared viewer-aware rule");
+  assert.match(renderAll, /!relayIsSelfAuthored\(/,
+    "the unread badge uses the same viewer-aware rule");
 });
 
 test("every literal DOM lookup names an element that exists in the overlay", () => {
