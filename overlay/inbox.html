@@ -2294,7 +2294,8 @@
   .sv-note { padding:10px 16px 0; font-size:12px; color:var(--ok); line-height:1.4; }
   .sv-version { padding:20px 16px 12px; font-family:var(--mono); font-size:10px; color:var(--muted-3); }
   .sv-slack-section { margin:24px 12px 0; }
-  .sv-slack-card { overflow:hidden; border-radius:var(--r-3); background:var(--raised); box-shadow:inset 0 0 0 1px var(--edge); }
+  .sv-slack-card { overflow:hidden; border-radius:var(--r-3); background:var(--raised); box-shadow:inset 0 0 0 1px var(--edge); transition:box-shadow var(--t-base) var(--settle); }
+  .sv-slack-card.is-confirming { box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--edge) 78%,var(--muted-3)), 0 8px 22px color-mix(in srgb, var(--ink) 7%, transparent); }
   .sv-slack-row { display:flex; align-items:center; gap:11px; min-height:62px; padding:12px; }
   .sv-slack-row + .sv-slack-row { border-top:1px solid var(--edge); }
   .sv-slack-logo { flex:0 0 auto; width:34px; height:34px; object-fit:contain; }
@@ -2306,7 +2307,20 @@
   .sv-slack-action:hover { border-color:var(--muted-3); }
   .sv-slack-action:disabled { opacity:.45; cursor:default; }
   .sv-slack-foot { padding:10px 12px; border-top:1px solid var(--edge); background:color-mix(in srgb,var(--wash) 62%,transparent); font:10.5px/1.45 var(--sans); color:var(--muted-2); }
-  .sv-slack-dialog-copy { margin-top:9px; color:var(--muted); font:12px/1.5 var(--sans); }
+  .sv-slack-confirm { display:grid; grid-template-rows:0fr; border-top:1px solid transparent; background:color-mix(in srgb,var(--wash) 38%,var(--raised)); opacity:0; transition:grid-template-rows 280ms var(--settle), border-color var(--t-base) var(--settle), opacity var(--t-base) var(--settle); }
+  .sv-slack-card.is-confirming .sv-slack-confirm { grid-template-rows:1fr; border-top-color:var(--edge); opacity:1; }
+  .sv-slack-confirm-clip { min-height:0; overflow:hidden; visibility:hidden; transition:visibility 0s linear 280ms; }
+  .sv-slack-card.is-confirming .sv-slack-confirm-clip { visibility:visible; transition-delay:0s; }
+  .sv-slack-confirm-content { display:flex; flex-direction:column; gap:12px; padding:12px; transform:translateY(-6px); transition:transform 280ms var(--settle); }
+  .sv-slack-card.is-confirming .sv-slack-confirm-content { transform:translateY(0); }
+  .sv-slack-confirm-title { color:var(--ink); font:600 12.5px/1.3 var(--sans); }
+  .sv-slack-confirm-copy { max-width:310px; margin-top:4px; color:var(--muted-2); font:11px/1.45 var(--sans); }
+  .sv-slack-confirm-actions { display:flex; justify-content:flex-end; gap:7px; }
+  .sv-slack-confirm-danger { border-color:color-mix(in srgb,var(--danger) 82%,var(--edge)); background:var(--danger); color:white; }
+  .sv-slack-confirm-danger:hover { border-color:var(--danger); background:color-mix(in srgb,var(--danger) 90%,black); }
+  @media (prefers-reduced-motion:reduce) {
+    .sv-slack-card, .sv-slack-confirm, .sv-slack-confirm-clip, .sv-slack-confirm-content { transition-duration:0.01ms; }
+  }
   .sv-update { display:flex; flex-direction:column; gap:8px; align-items:flex-start; }
   .sv-setup-link { appearance:none; border:0; padding:0; background:transparent; color:var(--ink); font:inherit; cursor:pointer; text-decoration:underline; text-decoration-color:color-mix(in srgb, var(--ink) 38%, transparent); text-underline-offset:2px; }
   .sv-update-btn { width:auto; padding:7px 12px; border-radius:var(--r-2); font-family:var(--sans); font-size:12px; }
@@ -12042,25 +12056,31 @@
           : "Not connected";
     return `<section class="sv-slack-section" data-stop="1">
       <div class="sv-open-title">Slack</div>
-      <div class="sv-slack-card">
+      <div class="sv-slack-card${slackDisconnectConfirm ? " is-confirming" : ""}" id="svSlackCard">
         <div class="sv-slack-row">
           <img class="sv-slack-logo" src="slackMark.png" alt="Slack" />
           <span class="sv-slack-copy"><span class="sv-slack-name">Slack</span><span class="sv-slack-note">${esc(connectionLabel)}</span></span>
           ${personalConnected
-            ? `<button class="sv-slack-action" type="button" id="svSlackDisconnect" ${slackConnectionBusy ? "disabled" : ""}>Disconnect</button>`
+            ? `<button class="sv-slack-action" type="button" id="svSlackDisconnect" aria-controls="svSlackDisconnectConfirmPanel" aria-expanded="${slackDisconnectConfirm ? "true" : "false"}" ${slackConnectionBusy || slackDisconnectConfirm ? "disabled" : ""}>Disconnect</button>`
             : `<button class="sv-slack-action" type="button" id="svSlackConnect" ${slackConnectionBusy || slackConnectionWaiting ? "disabled" : ""}>${esc(connectLabel)}</button>`}
         </div>
         <div class="sv-slack-foot">New Slack messages sync with Relay, and Relays send from your Slack account. Earlier Slack history is not imported.</div>
+        ${personalConnected ? `<div class="sv-slack-confirm" id="svSlackDisconnectConfirmPanel" role="region" aria-labelledby="slackDisconnectTitle" aria-hidden="${slackDisconnectConfirm ? "false" : "true"}" ${slackDisconnectConfirm ? "" : "inert"}>
+          <div class="sv-slack-confirm-clip">
+            <div class="sv-slack-confirm-content">
+              <div>
+                <div class="sv-slack-confirm-title" id="slackDisconnectTitle">Disconnect Slack?</div>
+                <div class="sv-slack-confirm-copy">New messages and Relay deliveries will stop syncing. Messages already in Relay will stay.</div>
+              </div>
+              <div class="sv-slack-confirm-actions">
+                <button class="sv-slack-action" type="button" id="svSlackDisconnectCancel" ${slackConnectionBusy ? "disabled" : ""}>Keep connected</button>
+                <button class="sv-slack-action sv-slack-confirm-danger" type="button" id="svSlackDisconnectConfirm" ${slackConnectionBusy ? "disabled" : ""}>${slackConnectionBusy ? "Disconnecting…" : "Disconnect Slack"}</button>
+              </div>
+            </div>
+          </div>
+        </div>` : ""}
       </div>
       ${slackConnectionError ? `<div class="row-err sv-err">${esc(slackConnectionError)}</div>` : ""}
-      ${slackDisconnectConfirm ? `<div class="sv-integration-backdrop" id="slackDisconnectBackdrop" role="dialog" aria-modal="true" aria-labelledby="slackDisconnectTitle">
-        <div class="sv-integration-dialog" style="padding:16px">
-          <div class="sv-integration-dialog-title" id="slackDisconnectTitle">Disconnect your Slack?</div>
-          <div class="sv-slack-dialog-copy">New Slack messages and Relay deliveries will stop syncing. Messages already in Relay stay where they are.</div>
-          <button class="sv-connect" type="button" id="svSlackDisconnectConfirm" style="margin-top:14px;background:var(--danger)">Disconnect Slack</button>
-          <button class="sv-setup-link" type="button" id="svSlackDisconnectCancel" style="align-self:center;margin-top:12px">Keep connected</button>
-        </div>
-      </div>` : ""}
     </section>`;
   }
   function renderSettings() {
@@ -12273,12 +12293,31 @@
       renderSettings();
     });
     const slackDisconnect = document.getElementById("svSlackDisconnect");
-    if (slackDisconnect) slackDisconnect.addEventListener("click", () => { slackDisconnectConfirm = true; renderSettings(); });
+    const slackCard = document.getElementById("svSlackCard");
+    const slackDisconnectPanel = document.getElementById("svSlackDisconnectConfirmPanel");
     const slackDisconnectCancel = document.getElementById("svSlackDisconnectCancel");
-    const slackBackdrop = document.getElementById("slackDisconnectBackdrop");
-    const cancelSlackDisconnect = () => { slackDisconnectConfirm = false; renderSettings(); };
+    const setSlackDisconnectExpanded = (expanded, { returnFocus = false } = {}) => {
+      slackDisconnectConfirm = expanded;
+      slackCard?.classList.toggle("is-confirming", expanded);
+      slackDisconnect?.setAttribute("aria-expanded", expanded ? "true" : "false");
+      if (slackDisconnect) slackDisconnect.disabled = expanded || slackConnectionBusy;
+      if (slackDisconnectPanel) {
+        slackDisconnectPanel.setAttribute("aria-hidden", expanded ? "false" : "true");
+        if (expanded) slackDisconnectPanel.removeAttribute("inert");
+        else slackDisconnectPanel.setAttribute("inert", "");
+      }
+      if (expanded) requestAnimationFrame(() => slackDisconnectCancel?.focus({ preventScroll:true }));
+      else if (returnFocus) slackDisconnect?.focus({ preventScroll:true });
+    };
+    if (slackDisconnect) slackDisconnect.addEventListener("click", () => setSlackDisconnectExpanded(true));
+    const cancelSlackDisconnect = () => setSlackDisconnectExpanded(false, { returnFocus:true });
     if (slackDisconnectCancel) slackDisconnectCancel.addEventListener("click", cancelSlackDisconnect);
-    if (slackBackdrop) slackBackdrop.addEventListener("click", (event) => { if (event.target === slackBackdrop) cancelSlackDisconnect(); });
+    if (slackCard) slackCard.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && slackDisconnectConfirm && !slackConnectionBusy) {
+        event.preventDefault();
+        cancelSlackDisconnect();
+      }
+    });
     const slackDisconnectConfirmButton = document.getElementById("svSlackDisconnectConfirm");
     if (slackDisconnectConfirmButton) slackDisconnectConfirmButton.addEventListener("click", async () => {
       if (slackConnectionBusy || !window.relay.slackDisconnect) return;
