@@ -1,6 +1,6 @@
 {
   "name": "relay-companion",
-  "version": "0.1.412",
+  "version": "0.1.413",
   "description": "Install Relay for Claude Code, Cowork, and Codex, then sign in from the Relay pill.",
   "homepage": "https://sendrelays.com/get-started",
   "repository": {
@@ -28,25 +28,11 @@
   ],
   "type": "module",
   "bin": {
-    "relay": "bin/relay.js"
+    "relay": "bootstrap/relay-setup.cjs"
   },
-  "main": "bin/relay.js",
-  "scripts": {
-    "mcp": "node src/mcp.js",
-    "daemon": "node src/task-daemon.js"
-  },
-  "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.3.195",
-    "@modelcontextprotocol/sdk": "1.30.0",
-    "@noble/ciphers": "2.1.1",
-    "@noble/curves": "2.0.1",
-    "@noble/hashes": "2.0.1",
-    "acme-client": "5.4.0",
-    "electron": "43.4.1",
-    "ts-mls": "1.6.2",
-    "undici": "7.29.0",
-    "ws": "8.21.0"
-  },
+  "main": "bootstrap/relay-setup.cjs",
+  "scripts": {},
+  "dependencies": {},
   "devDependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.195",
     "@modelcontextprotocol/sdk": "1.30.0",
@@ -63,13 +49,7 @@
     "ws": "8.21.0"
   },
   "files": [
-    "bin",
-    "bootstrap",
-    "src",
-    "overlay",
-    "THIRD_PARTY_NOTICES.md",
-    "licenses",
-    "npm-shrinkwrap.json"
+    "bootstrap"
   ],
-  "relayDistribution": "bridge-runtime"
+  "relayDistribution": "thin-installer"
 }
