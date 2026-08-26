@@ -187,6 +187,7 @@ test("the open rows are the apps you chose — one, or both — on the bubble an
   assert.doesNotMatch(agentFooter, /<textarea/, "no composer to your own agent on the shipped agent document");
   // The letter keeps its reply — the loudest control on a person's letter.
   assert.match(reader, /<textarea id="qrInput" rows="1" placeholder="Reply…">/);
+  assert.match(reader, /data-open-in-host="codex">Open in Codex[\s\S]*data-open-in-host="claude">Open in Claude Code[\s\S]*id="qrSend">Send/);
   assert.match(reader, /<button type="button" id="qrSend">Send<\/button>/);
 });
 

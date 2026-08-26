@@ -894,7 +894,8 @@ test("ordinary Relay folders address the human, the agent, and local Work separa
   assert.match(sharedIdleDock, /data-route-menu="app"/);
   assert.match(sharedIdleDock, /data-route-menu="model"/);
   assert.match(sharedIdleDock, /data-route-menu="effort"/);
-  assert.match(sharedIdleDock, /data-open-in="\$\{esc\(r\.id\)\}"/);
+  assert.match(sharedIdleDock, /data-open-in="\$\{esc\(r\.id\)\}" data-open-in-host="codex">Open in Codex/);
+  assert.match(sharedIdleDock, /data-open-in="\$\{esc\(r\.id\)\}" data-open-in-host="claude">Open in Claude Code/);
   assert.match(sharedIdleDock, /data-work-start="\$\{esc\(r\.id\)\}"/);
   assert.match(requestDock, /return idleRunDockHtml\(r,/,
     "Tasks use the shared route-selecting composer");
@@ -904,6 +905,11 @@ test("ordinary Relay folders address the human, the agent, and local Work separa
   assert.match(workDock, /starting \? "Starting" : live \? "Queue" : "Send"/,
     "the startup gap cannot expose a second send");
   assert.match(wiring, /window\.relay\.relayWorkStart\(id,/);
+  assert.match(wiring, /const requestedHost = b\.getAttribute\("data-open-in-host"\)/);
+  assert.match(wiring, /openRelayFromUI\(id, "relay", "fresh", host, note\)/,
+    "each persistent Open button targets the app named on that button");
+  assert.match(reader, /data-open-in-host="codex">Open in Codex[\s\S]*data-open-in-host="claude">Open in Claude Code[\s\S]*id="qrSend">Send/,
+    "For you keeps both named Open actions directly beside Send in Codex-first order");
   assert.match(wiring, /readerTab = "work"/);
   assert.match(reader, /data-rtab="work"[^]*<span class="lab">Work<\/span>/);
   assert.match(startHandler, /localWork: true/);
@@ -995,7 +1001,7 @@ test("Claude ownership transfers only after settlement and an explicit Open", ()
   assert.match(dock, /state === "running"[\s\S]*disabled aria-disabled="true"[\s\S]*Available when this run finishes/);
   assert.match(dock, /r\.ranOnClaude[\s\S]*data-open-run/);
   assert.match(controls, /window\.relay\.openRunSession\(id\)/);
-  assert.match(controls, /openRelayFromUI\(id, "relay", "fresh", hostKeyFor\(rt\.app\), note\)/);
+  assert.match(controls, /openRelayFromUI\(id, "relay", "fresh", host, note\)/);
   assert.match(main, /ipcMain\.handle\("relay:openRunSession"/);
   assert.match(main, /waitForClaudeDesktopCodeMaterialization/);
   assert.match(main, /worker && !worker\.closed/);

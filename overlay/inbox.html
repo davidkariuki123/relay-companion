@@ -5867,7 +5867,8 @@
       </div>` : "";
     const defaultActions = action === "request"
       ? `<button class="ta-later" type="button" data-request-safety="${esc(r.id)}">Review Safety</button>${actionButton}`
-      : `<button class="ta-later" type="button" data-open-in="${esc(r.id)}">Open in ${esc(rt.app)}</button>${actionButton}`;
+      : `<button class="ta-later" type="button" data-open-in="${esc(r.id)}" data-open-in-host="codex">Open in Codex</button>
+         <button class="ta-later" type="button" data-open-in="${esc(r.id)}" data-open-in-host="claude">Open in Claude Code</button>${actionButton}`;
     const railActions = actions || defaultActions;
     return `
       <div class="ta-dock${inline ? " inline" : ""}" data-stop="1">
@@ -6070,15 +6071,20 @@
         if (b.disabled) return;
         const id = b.getAttribute("data-open-in");
         const rt = routeFor(id);
+        const requestedHost = b.getAttribute("data-open-in-host");
+        const host = requestedHost === "codex" || requestedHost === "claude"
+          ? requestedHost
+          : hostKeyFor(rt.app);
+        const app = host === "codex" ? "Codex" : host === "claude" ? "Claude Code" : rt.app;
         const note = String((b.closest(".ta-dock")?.querySelector(".ta-note") || {}).value || "").trim();
         const ranAlready = requestHasNativeSession(taskRows().find((row) => row.id === id));
-        if (ranAlready && window.relay.openInCurrent) window.relay.openInCurrent(id, hostKeyFor(rt.app));
-        else openRelayFromUI(id, "relay", "fresh", hostKeyFor(rt.app), note);
+        if (ranAlready && window.relay.openInCurrent) window.relay.openInCurrent(id, host);
+        else openRelayFromUI(id, "relay", "fresh", host, note);
         // AFTER the open, never before: openRelayFromUI clears the row's note
         // first (a stale failure must not outlive the retry), so a note written
         // above this line vanished the same instant — the trap already found on
         // the per-relay rows.
-        setOpeningNote(id, `Opening in ${rt.app}…`);
+        setOpeningNote(id, `Opening in ${app}…`);
         if (onDone) onDone("open-in");
       });
     }
@@ -6935,7 +6941,11 @@
             return ps.length ? ps : [sender];
           })(), null)}
           <span class="rt-spacer"></span>
-          <button type="button" id="qrSend">Send</button>
+          <span class="ta-acts">
+            <button class="ta-later" type="button" data-open-in="${esc(r.id)}" data-open-in-host="codex">Open in Codex</button>
+            <button class="ta-later" type="button" data-open-in="${esc(r.id)}" data-open-in-host="claude">Open in Claude Code</button>
+            <button type="button" id="qrSend">Send</button>
+          </span>
         </div>
       </div></div>`;
     }
@@ -7024,7 +7034,7 @@
       });
     }
     assessReaderFit();
-    if (request || onAgent || onWork) {
+    if (request || onAgent || onWork || readerBodyEl.querySelector("[data-open-in]")) {
       wireRequestControls(readerBodyEl, (action) => {
         if (action === "later") closeReader();
         else {

@@ -898,7 +898,8 @@ test("every titled bubble opens the reader; quick texts stay inert", () => {
   assert.match(html, /const r = readerRow\(readerId\)/);
   assert.doesNotMatch(html, /data-strip-reply/);
   // The task reader keeps the intention verbs + transparency line.
-  assert.match(html, /data-open-in="\$\{esc\(r\.id\)\}">Open in \$\{esc\(rt\.app\)\}/); // the Hand verb is retired
+  assert.match(html, /data-open-in="\$\{esc\(r\.id\)\}" data-open-in-host="codex">Open in Codex/);
+  assert.match(html, /data-open-in="\$\{esc\(r\.id\)\}" data-open-in-host="claude">Open in Claude Code/);
   assert.match(html, /class="rt-chip" data-route-menu="app"/); // the rail IS the transparency, and it is writable
 });
 
