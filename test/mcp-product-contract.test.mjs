@@ -61,6 +61,7 @@ test("startup guidance and owner schemas preserve the complete product ontology"
   const inboxContract = JSON.stringify(byName.get("relay_inbox_list"));
   for (const instructions of [RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS]) {
     assert.ok(instructions.startsWith(SEND_GATE), "the human's ask is the first startup send rule");
+    assert.match(instructions, /relay_chat_send only for explicitly requested plain text.*otherwise use relay_send.*inside an existing chat/i);
   }
   for (const name of ["relay_send", "relay_chat_send"]) {
     assert.ok(
@@ -69,7 +70,6 @@ test("startup guidance and owner schemas preserve the complete product ontology"
     );
   }
   assert.match(RELAY_MCP_INSTRUCTIONS, /default general direct-message and saved-channel communication layer/i);
-  assert.match(RELAY_MCP_INSTRUCTIONS, /For that ask, use Relay unless another medium is named/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /explicitly requested other medium overrides/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /mint a link with relay_share_link/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /notification emails are not the authoritative contents/i);
@@ -77,7 +77,7 @@ test("startup guidance and owner schemas preserve the complete product ontology"
   assert.match(RELAY_MCP_INSTRUCTIONS, /threadId is opaque AI retrieval metadata/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /3-6 word title/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /relay_send requires non-empty forAgent/i);
-  assert.match(RELAY_MCP_INSTRUCTIONS, /Plain text uses relay_chat_send/i);
+  assert.doesNotMatch(RELAY_MCP_INSTRUCTIONS, /Plain text uses relay_chat_send/i);
   assert.doesNotMatch(RELAY_MCP_INSTRUCTIONS, /optional (?:detailed forAgent|agent context)/i);
   assert.match(sendContract, /The person who reads your message is not you/i);
   assert.match(sendContract, /OPEN FROM THE TOP/i);

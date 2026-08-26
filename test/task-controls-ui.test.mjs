@@ -46,7 +46,7 @@ test("Tasks can move to Recently Deleted from the board and reader", () => {
 
 test("both source faces expose Start task while a Task is actionable", () => {
   const reader = between(inbox, "function renderReader()", "// ---------- the Tasks board");
-  assert.match(inbox, /label: "Start task"/);
+  assert.match(inbox, /label: state === "stopped" \? "Start again" : "Start task"/);
   assert.match(reader, /const requestActionable = request/);
   assert.match(reader, /onAgent \|\| onWork \|\| requestActionable/);
 });

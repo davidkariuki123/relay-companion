@@ -11,16 +11,34 @@ const preload = source("../overlay/preload.cjs");
 const main = source("../overlay/main.cjs");
 const client = source("../src/client.js");
 
-test("Slack is a first-class tab beside Relays with its own list and unread badge", () => {
+test("Slack is a first-class tab after Tasks with its own list and unread badge", () => {
   const nav = html.slice(html.indexOf('<nav class="tabs"'), html.indexOf("</nav>", html.indexOf('<nav class="tabs"')));
   const relayAt = nav.indexOf('data-view="relays"');
   const slackAt = nav.indexOf('data-view="slack"');
   const tasksAt = nav.indexOf('data-view="tasks"');
   assert.ok(relayAt >= 0, "Relays tab is present");
-  assert.ok(slackAt > relayAt, "Slack follows Relays in the existing tab rail");
-  assert.ok(tasksAt < 0 || slackAt < tasksAt, "Slack precedes the optional Tasks tab");
+  assert.ok(tasksAt > relayAt, "Tasks follows Relays in the existing tab rail");
+  assert.ok(slackAt > tasksAt, "Slack follows Tasks");
   assert.match(nav, /data-view="slack"[^>]*>[\s\S]*?Slack[\s\S]*?id="slackBadge"/);
   assert.match(html, /<section class="view hidden" id="slackView">[\s\S]*?id="slackList"[\s\S]*?<\/section>/);
+});
+
+test("an unconnected Slack tab becomes the onboarding-inspired connection page without signup escape copy", () => {
+  const render = html.slice(html.indexOf("function renderSlack()"), html.indexOf("// ---- the split's rail", html.indexOf("function renderSlack()")));
+  assert.match(render, /!slackConnectionReady\(slackConnectionInfo\)/);
+  assert.match(render, /Slack integration/);
+  assert.match(render, /Connect your Slack to Relay\./);
+  assert.match(render, /Relay for \$\{esc\(teamName\)\}/);
+  assert.match(render, /Your Slack/);
+  assert.match(render, /id="slackTabConnect"/);
+  assert.match(render, /Sync starts when you connect\. Relay does not import earlier Slack history\./);
+  assert.doesNotMatch(render, /Not now|Skip for now|Continue without Slack|Last step|Finish setup/);
+
+  const applyView = html.slice(html.indexOf("function applyView()"), html.indexOf('document.getElementById("chatExpandBtn")'));
+  assert.match(applyView, /activeView === "slack" && viewChanged[\s\S]*refreshSlackConnection/,
+    "opening Slack refreshes the authoritative connection state");
+  assert.match(html, /\(activeView === "settings" \|\| activeView === "slack"\)[\s\S]*refreshSlackConnection/,
+    "the Slack page stays live while browser OAuth completes");
 });
 
 test("Slack surfaces use exact integration metadata so DMs are not lost or name-matched", () => {
@@ -108,14 +126,133 @@ test("an exact-linked Relay room hydrates and polls its canonical Relay body whi
     html.indexOf("let signupStage", html.indexOf("async function refreshActiveCanonicalChat()")),
   );
   assert.match(poll, /const includeSlack = slackMessagesVisible\(room\)/);
-  assert.match(poll, /window\.relay\.canonicalChat\(room\.chatId, \{[\s\S]*?surface: conversationSurface\(\),[\s\S]*?includeSlack/);
+  assert.match(poll, /requestCanonicalChatDetail\(room, surface, \{ includeSlack \}\)/);
   assert.doesNotMatch(poll, /!includeSlack/,
     "Relay summaries have no bodies; hidden Slack must not prevent the Relay-origin detail poll");
 
   const open = html.slice(html.indexOf("async function openRoom("), html.indexOf("function renderSlack("));
-  assert.match(open, /if \(isSlackIntegratedRoom\(selected\) && selected\.chatId && !options\.hydrated\)/,
+  assert.match(open, /if \(isSlackIntegratedRoom\(selected\) && selected\.chatId && !options\.hydrated[\s\S]*!canonicalChatDetailIsCurrent\(selected, roomSource, \{ includeSlack \}\)\)/,
     "opening a linked Relay room hydrates detail even when its includeSlack flag is false");
-  assert.match(open, /canonicalChat\?\.\(selected\.chatId, \{ surface, includeSlack \}\)/);
+  assert.match(open, /requestCanonicalChatDetail\(selected, roomSource, \{ includeSlack \}\)/);
+});
+
+test("Slack detail hydration is versioned, shared, and skipped for a current cache", () => {
+  const cache = html.slice(
+    html.indexOf("function canonicalChatHydrationKey("),
+    html.indexOf("function syncSlackVisibilityButton(", html.indexOf("function canonicalChatHydrationKey(")),
+  );
+  assert.match(html, /const canonicalChatHydrations = new Map\(\)/);
+  assert.match(html, /const canonicalChatDetailProjectionKeys = new Map\(\)/);
+  assert.match(html, /const canonicalChatLatestStartedGeneration = new Map\(\)/);
+  assert.match(html, /const canonicalChatLatestAppliedGeneration = new Map\(\)/);
+  assert.match(cache, /canonicalChatHydrations\.get\(key\)/);
+  assert.match(cache, /canonicalChatHydrations\.set\(key, request\)/);
+  assert.match(cache, /canonicalChatLatestStartedGeneration\.set\(chatId, generation\)/);
+  assert.match(cache, /generation < Number\(canonicalChatLatestStartedGeneration\.get\(id\) \|\| 0\)/);
+  assert.match(cache, /canonicalChatLatestAppliedGeneration\.set\(id, generation\)/);
+  assert.match(cache, /\.finally\(\(\) => canonicalChatHydrations\.delete\(key\)\)/);
+  assert.match(cache, /detail\.updatedAt[\s\S]*room\.summaryUpdatedAt/);
+  assert.match(cache, /detail\.messageCount[\s\S]*room\.messageCount/);
+  assert.match(cache, /detail\.lastMessage\?\.relayId[\s\S]*room\.summaryLastMessageId/);
+  assert.match(cache, /`\$\{conversationSurface\(source\)\}:\$\{String\(room\.chatId\)\}:\$\{includeSlack \? "with-slack" : "relay-only"\}`/,
+    "Relay-hidden and Slack-visible transcripts do not share an invalid cache key");
+
+  const openThread = html.slice(html.indexOf("function openThreadDetail("), html.indexOf("// ---------- Settings view"));
+  assert.match(openThread, /!options\.hydrated[\s\S]*!canonicalChatDetailIsCurrent\(room, source, \{ includeSlack \}\)/,
+    "a current selected-room transcript opens without another lazy hydration");
+});
+
+test("a newer Slack-visible transcript cannot be overwritten by an older Relay-only response", async () => {
+  const requestSource = html.slice(
+    html.indexOf("function requestCanonicalChatDetail("),
+    html.indexOf("function reconcileCanonicalChatResult(", html.indexOf("function requestCanonicalChatDetail(")),
+  );
+  const pending = [];
+  const runtime = new Function("window", `
+    const canonicalChatHydrations = new Map();
+    const canonicalChatLatestStartedGeneration = new Map();
+    const canonicalChatLatestAppliedGeneration = new Map();
+    let canonicalChatRequestGeneration = 0;
+    let threadsSource = "relay";
+    function conversationSurface(source = threadsSource) { return source === "slack" ? "slack" : "relay"; }
+    function slackMessagesVisible() { return false; }
+    function canonicalChatHydrationKey(room, source = threadsSource, includeSlack = false) {
+      return \`${"${conversationSurface(source)}:${String(room.chatId)}:${includeSlack ? \"with-slack\" : \"relay-only\"}"}\`;
+    }
+    ${requestSource}
+    return { requestCanonicalChatDetail, canonicalChatResultIsCurrent };
+  `)({ relay:{ canonicalChat:(chatId, options) => new Promise((resolve) => pending.push({ chatId, options, resolve })) } });
+
+  const room = { chatId:"chat_race" };
+  const relayOnly = runtime.requestCanonicalChatDetail(room, "relay", { includeSlack:false });
+  const sharedRelayOnly = runtime.requestCanonicalChatDetail(room, "relay", { includeSlack:false });
+  assert.equal(sharedRelayOnly, relayOnly, "identical projections share one in-flight request and generation");
+  const withSlack = runtime.requestCanonicalChatDetail(room, "relay", { includeSlack:true });
+  assert.equal(pending.length, 2, "different projections may run concurrently");
+
+  pending[1].resolve({ ok:true, chat:{ chatId:room.chatId, items:[{ relayId:"new-with-slack" }] } });
+  const newest = await withSlack;
+  let stored = null;
+  if (runtime.canonicalChatResultIsCurrent(newest, room.chatId)) stored = newest.chat;
+
+  pending[0].resolve({ ok:true, chat:{ chatId:room.chatId, items:[{ relayId:"old-relay-only" }] } });
+  const older = await relayOnly;
+  if (runtime.canonicalChatResultIsCurrent(older, room.chatId)) stored = older.chat;
+
+  assert.equal(stored?.items?.[0]?.relayId, "new-with-slack");
+  assert.equal(runtime.canonicalChatResultIsCurrent(older, room.chatId), false,
+    "the late older projection remains stale for every consumer of its shared promise");
+
+  const reverseRoom = { chatId:"chat_reverse" };
+  const reverseRelayOnly = runtime.requestCanonicalChatDetail(reverseRoom, "relay", { includeSlack:false });
+  const reverseWithSlack = runtime.requestCanonicalChatDetail(reverseRoom, "relay", { includeSlack:true });
+  pending[2].resolve({ ok:true, chat:{ chatId:reverseRoom.chatId, items:[{ relayId:"early-relay-only" }] } });
+  const earlyOlder = await reverseRelayOnly;
+  assert.equal(runtime.canonicalChatResultIsCurrent(earlyOlder, reverseRoom.chatId), false,
+    "an older projection is stale even when it completes before the newer request");
+  pending[3].resolve({ ok:true, chat:{ chatId:reverseRoom.chatId, items:[{ relayId:"later-with-slack" }] } });
+  const laterNewest = await reverseWithSlack;
+  assert.equal(runtime.canonicalChatResultIsCurrent(laterNewest, reverseRoom.chatId), true);
+});
+
+test("canonical responses match the still-visible room, surface, and Slack projection before side effects", () => {
+  const source = html.slice(
+    html.indexOf("function canonicalChatResultMatchesVisibleProjection("),
+    html.indexOf("function reconcileCanonicalChatResult(", html.indexOf("function canonicalChatResultMatchesVisibleProjection(")),
+  );
+  const state = {
+    activeView:"threads",
+    surface:"relay",
+    threadDetailId:"thread-a",
+    includeSlack:true,
+    room:{ chatId:"chat-a" },
+  };
+  const matches = new Function("state", `
+    let activeView = state.activeView;
+    let threadDetailId = state.threadDetailId;
+    function conversationSurface() { return state.surface; }
+    function chatRoomForThread(threadId) { return threadId === state.threadDetailId ? state.room : null; }
+    function slackMessagesVisible() { return state.includeSlack; }
+    ${source}
+    return canonicalChatResultMatchesVisibleProjection;
+  `)(state);
+  const result = {
+    ok:true,
+    chat:{ chatId:"chat-a" },
+    canonicalRequest:{ chatId:"chat-a", surface:"relay", includeSlack:true },
+  };
+  assert.equal(matches(result, { chatId:"chat-a", surface:"relay" }), true);
+  state.includeSlack = false;
+  assert.equal(matches(result, { chatId:"chat-a", surface:"relay" }), false,
+    "hiding Slack invalidates an in-flight with-Slack response");
+  state.includeSlack = true;
+  state.room = { chatId:"chat-b" };
+  assert.equal(matches(result, { chatId:"chat-a", surface:"relay" }), false,
+    "switching rooms invalidates the old room response");
+  state.room = { chatId:"chat-a" };
+  state.surface = "slack";
+  assert.equal(matches(result, { chatId:"chat-a", surface:"relay" }), false,
+    "switching surfaces invalidates the old surface response");
 });
 
 test("canonical optimistic reads are surface-keyed and update only that surface's summary", () => {

@@ -32,6 +32,39 @@ test("collapsed and hidden surfaces stop frame watching, run polling, and view r
   assert.match(html, /function flushDeferredSurfaceRender\(\)/);
 });
 
+test("hidden surfaces defer canonical hydration, reads, and Slack connection paints", () => {
+  const reconcile = html.slice(
+    html.indexOf("function reconcileCanonicalChatResult("),
+    html.indexOf("function syncSlackVisibilityButton(", html.indexOf("function reconcileCanonicalChatResult(")),
+  );
+  const poll = html.slice(html.indexOf("async function refreshActiveCanonicalChat("), html.indexOf("let signupStage"));
+  const slack = html.slice(html.indexOf("function paintSlackConnectionSurface("), html.indexOf("function resetSignOutArm("));
+  const payload = html.slice(html.indexOf("function onPayload("), html.indexOf("window.relay.onInbox"));
+
+  assert.match(reconcile, /if \(!rendererSurfaceActive\(\)\) \{\s*surfaceRenderDeferred = true;\s*return;/);
+  assert.match(poll, /activeCanonicalChatRefresh \|\| !rendererSurfaceActive\(\)/);
+  assert.match(slack, /function paintSlackConnectionSurface\(\)[\s\S]*!rendererSurfaceActive\(\)[\s\S]*surfaceRenderDeferred = true/);
+  assert.match(slack, /async function refreshSlackConnection[\s\S]*!rendererSurfaceActive\(\)[\s\S]*slackConnectionRefreshDeferred = true/);
+  assert.match(payload, /const paintSurface = rendererSurfaceActive\(\)/);
+  assert.match(payload, /if \(paintSurface && activeView === "threads" && threadDetailId\)/);
+  assert.match(payload, /if \(paintSurface\) readVisibleChatRoom\(\);\s*else surfaceRenderDeferred = true;/);
+});
+
+test("a tab hop invalidates a retiring room transition before its update can navigate", () => {
+  const motion = html.slice(
+    html.indexOf("function cleanRoomViewTransition("),
+    html.indexOf("let peeking = false"),
+  );
+  const tabs = html.slice(
+    html.indexOf("for (const tab of tabEls)"),
+    html.indexOf("function renderAll()"),
+  );
+
+  assert.match(motion, /function supersedeRoomViewTransition\(\)[\s\S]*\+\+roomViewTransitionToken[\s\S]*skipTransition\(\)[\s\S]*cleanRoomViewTransition\(token\)/);
+  assert.match(motion, /document\.startViewTransition\(\(\) => \{\s*if \(token !== roomViewTransitionToken\) return;/);
+  assert.match(tabs, /if \(roomViewTransition\) \{\s*supersedeRoomViewTransition\(\);\s*\}/);
+});
+
 test("the real Electron harness exercises a running Task while collapsed", () => {
   const harness = fs.readFileSync(path.join(here, "perf-overlay.mjs"), "utf8");
   assert.match(harness, /D-running-task-collapsed/);

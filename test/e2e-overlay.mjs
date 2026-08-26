@@ -601,12 +601,23 @@ try {
   );
   await evalIn(pageConn, "window.dispatchEvent(new MouseEvent('mousemove', { clientX: 0, clientY: 800 })); 'pointer-away'");
   // The revived card may be sticky by now (its earlier dwells were never
-  // confirmed), and sticky cards deliberately never auto-collapse. Touch it
-  // like a user: a pointerdown on the card confirms it and folds it.
+  // confirmed), and sticky cards deliberately never auto-collapse. A sticky
+  // banner folds on the first touch; an ordinary banner opens on the first
+  // lockup tap and folds on the second. Exercise that real interaction instead
+  // of assuming the main process always classifies this revival as sticky.
   const revivedFolded = await retry(async () => {
     await evalIn(
       pageConn,
-      "document.getElementById('card').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); 'touched'",
+      `(() => {
+        const card = document.getElementById('card');
+        card.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+        if (!card.classList.contains('collapsed')) {
+          const lockup = document.getElementById('lockup');
+          lockup.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+          window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
+        }
+        return 'touched';
+      })()`,
     );
     const collapsed = await evalIn(pageConn, "document.getElementById('card').classList.contains('collapsed')");
     const state = await evalIn(mainConn, "global.__relayTest.state()");
@@ -1525,6 +1536,11 @@ try {
         const view = document.getElementById('settingsView');
         const text = (sel) => { const el = view.querySelector(sel); return el ? el.textContent.trim() : null; };
         return {
+          activeView,
+          cardClass: document.getElementById('card').className,
+          activeTab: document.querySelector('.tab.active')?.getAttribute('data-view') || null,
+          visibleViews: [...document.querySelectorAll('.view:not(.hidden)')].map((item) => item.id),
+          roomTransition: document.documentElement.classList.contains('room-view-transition'),
           visible: !view.classList.contains('hidden'),
           tabActive: document.querySelector('.tab[data-view="settings"]').classList.contains('active'),
           name: text('.sv-name'),
@@ -1542,10 +1558,12 @@ try {
         };
       })()`,
     );
-    if (!ui.visible || ui.email !== "e2e@example.com") throw new Error(`visible=${ui.visible} email=${ui.email}`);
+    if (!ui.visible || ui.email !== "e2e@example.com") throw new Error(JSON.stringify(ui));
     return ui;
   }, { label: "settings account card" });
   const settingsAccountMs = Date.now() - settingsOpenedAt;
+  const settingsNativeProviders = settingsUi.providers.filter((provider) => ["claude", "codex"].includes(provider.id));
+  const settingsChatProviders = settingsUi.providers.filter((provider) => ["chatgpt-chat", "claude-chat"].includes(provider.id));
   check(
     "settings: the account paints promptly without waiting for provider inventory",
     settingsUi.tabActive &&
@@ -1556,8 +1574,8 @@ try {
       settingsUi.switchLabel === "Switch Account…" &&
       settingsUi.signOutLabel === "Sign Out" &&
       settingsUi.pairRowHidden === true &&
-      settingsUi.providers.length === 2 &&
-      settingsUi.providers.every((provider) =>
+      settingsNativeProviders.length === 2 &&
+      settingsNativeProviders.every((provider) =>
         provider.text.includes("subscription required") &&
         provider.buttons.some((label) => ["Connected", "Sign in to Claude Code", "Sign in to Codex", "Use Claude subscription", "Use ChatGPT subscription"].includes(label)) &&
         provider.buttons.includes("Disable") &&
@@ -1565,6 +1583,9 @@ try {
         !provider.buttons.includes("Reconnect") &&
         !provider.buttons.includes("Refresh status")
       ) &&
+      settingsChatProviders.length === 2 &&
+      settingsChatProviders.some((provider) => provider.id === "chatgpt-chat" && provider.buttons.includes("Coming soon")) &&
+      settingsChatProviders.some((provider) => provider.id === "claude-chat" && provider.buttons.includes("Connect Claude")) &&
       settingsAccountMs <= 1500,
     `paint=${settingsAccountMs}ms ${JSON.stringify(settingsUi)}`,
   );
@@ -1572,12 +1593,12 @@ try {
   const authState = await evalIn(pageConn, `window.relay.providerAuthStatus()`, { awaitPromise:true });
   check(
     "settings: provider status is readable without mutating this Mac's local authorization",
-    authState && typeof authState === "object" && settingsUi.providers.length === 2,
+    authState && typeof authState === "object" && settingsNativeProviders.length === 2,
     JSON.stringify(authState),
   );
 
   const providerUi = await retry(async () => {
-    const ui = await evalIn(pageConn, `(() => [...document.querySelectorAll('[data-provider-row]')].map((row) => ({
+    const ui = await evalIn(pageConn, `(() => [...document.querySelectorAll('[data-provider-row="claude"], [data-provider-row="codex"]')].map((row) => ({
       id: row.getAttribute('data-provider-row'),
       text: row.textContent.replace(/\\s+/g, ' ').trim(),
       primary: row.querySelector('[data-provider-connect]')?.textContent.trim() || '',
@@ -1590,16 +1611,16 @@ try {
   const claudeUi = providerUi.find((row) => row.id === "claude");
   const codexUi = providerUi.find((row) => row.id === "codex");
   const expectedPrimary = (id, state) => state === "subscription"
-    ? "Connected"
+    ? ""
     : state === "api_billing"
       ? (id === "claude" ? "Use Claude subscription" : "Use ChatGPT subscription")
       : (id === "claude" ? "Sign in to Claude Code" : "Sign in to Codex");
   check(
     "settings: each provider shows its real subscription action and connected providers have no fake reconnect",
     claudeUi.primary === expectedPrimary("claude", authState.providers.claude.authState) &&
-      claudeUi.primaryDisabled === (authState.providers.claude.authState === "subscription") &&
+      (authState.providers.claude.authState === "subscription" || !claudeUi.primaryDisabled) &&
       codexUi.primary === expectedPrimary("codex", authState.providers.codex.authState) &&
-      codexUi.primaryDisabled === (authState.providers.codex.authState === "subscription") &&
+      (authState.providers.codex.authState === "subscription" || !codexUi.primaryDisabled) &&
       providerUi.every((row) => !/local profile|reconnect/i.test(`${row.text} ${row.primary}`)),
     JSON.stringify(providerUi),
   );

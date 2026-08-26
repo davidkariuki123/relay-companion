@@ -512,7 +512,7 @@ test("the Task face offers a local Review Safety before one-click Start task", (
   // the two-button consent surface.
   assert.match(inbox, /data-request-safety/);
   assert.match(inbox, />Review Safety<\/button>/);
-  assert.match(inbox, /label: "Start task"/);
+  assert.match(inbox, /label: state === "stopped" \? "Start again" : "Start task"/);
   assert.match(pillPreload, /relay:requestReviewSafety/);
 });
 
@@ -836,7 +836,7 @@ test("Task documents remain beside a persistent Work tab throughout a run", () =
   // retain their addressee-specific composers.
   assert.match(reader, /const workAppearing = hasWork && !readerWorkVisible/);
   assert.match(reader, /if \(workAppearing\) \{[^]*readerTab = "work"/);
-  assert.match(reader, /if \(hasWork\) app = runAppName\(r\.id\)/, "the provider tab follows the native run owner");
+  assert.match(reader, /if \(hasWork && !providerPrompt && !legacyCompletedWithoutNative\) app = runAppName\(r\.id\)/, "the provider tab follows the native run owner");
   assert.match(controls, /readerTab = "work"/);
   assert.match(controls, /workTabAnimateUntil\.set/);
   assert.match(reader, /const humanDoc = `[^]*readerParagraphs\(r\.forHuman\)/);
@@ -1070,6 +1070,44 @@ test("only native end-to-end providers can start a request", () => {
   assert.doesNotMatch(start, /chatgpt_work|ChatGPT Work/);
   assert.ok(start.indexOf('!["claude", "cowork", "codex"].includes(selectedHost)') < start.indexOf("taskStarted(id)"));
   assert.ok(start.indexOf("assertProviderReady(host)") < start.indexOf("taskStarted(id)"));
+});
+
+test("an unconnected Task stays truthful and offers the two native providers inline", () => {
+  const start = between(main, "async function startTaskFromPreview", "function safeNoteStem");
+  assert.match(start, /code: "provider_not_ready"/);
+  assert.match(start, /provider: host/);
+
+  assert.match(inbox, /const workProviderPrompts = new Map/);
+  assert.match(inbox, /providerReadyBeforeStart\(id, rt\.app\)/);
+  assert.match(inbox, /Connect an agent to start this Task/);
+  assert.match(inbox, /Work runs in Codex or Claude Code using your existing subscription/);
+  assert.match(inbox, /data-work-provider="\$\{provider\}"/);
+  assert.match(inbox, /codexMark\.svg/);
+  assert.match(inbox, /claudeCodeMark\.svg/);
+  assert.match(inbox, /\.work-connect-actions \{ display:grid; grid-template-columns:repeat\(2,minmax\(0,245px\)\)/);
+  assert.match(inbox, /window\.relay\.providerAuthConnect\(provider\)/);
+  assert.match(inbox, /chooseConnectedWorkProvider\(id, provider\)/);
+
+  const controls = between(inbox, "function wireRequestControls", "function requestsWaitingCount");
+  const readinessAt = controls.indexOf("providerReadyBeforeStart(id, rt.app)");
+  const optimisticAt = controls.indexOf("appendOptimisticUserTurn(id, note.trim()");
+  assert.ok(readinessAt > -1 && optimisticAt > readinessAt, "auth choice precedes any optimistic running state");
+});
+
+test("a completed legacy Task without a native pointer never pretends an agent is working", () => {
+  const watchError = between(inbox, "function presentRunFeedWatchError", "const disposeRunFeedUpdates");
+  assert.match(watchError, /No provider-native Work session exists/);
+  assert.match(watchError, /legacyMissingSession:true/);
+  assert.match(watchError, /This Task is complete\. Live Work history is unavailable for this older run\./);
+  const kicker = between(inbox, "function paintRunKicker", "function runAppName");
+  assert.match(kicker, /const providerKnown = !feed\?\.legacyMissingSession/);
+  assert.match(kicker, /const owner = providerKnown/);
+  const dock = between(inbox, "function requestDockHtml", "function relayWorkDockHtml");
+  assert.match(dock, /state === "done" && !requestHasNativeSession\(r\)/);
+  assert.match(dock, /Native session unavailable/);
+  const reader = between(inbox, "function renderReader", "// ---------- the Tasks board");
+  assert.match(reader, /const legacyCompletedWithoutNative = request && runState === "done" && !requestHasNativeSession\(r\)/);
+  assert.match(reader, /legacyCompletedWithoutNative[^]*Live Work history is unavailable for this older run/);
 });
 
 test("Settings exposes complete subscription connection management for Claude Code and Codex", () => {

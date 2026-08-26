@@ -179,7 +179,7 @@ test("the open rows are the apps you chose — one, or both — on the bubble an
   assert.match(html, /wireHostOpen\(thHistoryEl\);/, "the room binds through the shared binder");
   const reader = html.slice(html.indexOf("function renderReader()"), html.indexOf("wireHostOpen(readerBodyEl);") + 30);
   assert.match(reader, /const workOn = payload\.features\?\.relayWork === true;/);
-  assert.match(reader, /const hasWork = chatOwnedWork \|\| \(\(request \|\| workOn\) && !\["idle", "waiting", "parked"\]\.includes\(runState\)\);/);
+  assert.match(reader, /const hasWork = chatOwnedWork \|\| \(\(request \|\| workOn\) && \(Boolean\(providerPrompt\) \|\| !\["idle", "waiting", "parked"\]\.includes\(runState\)\)\);/);
   assert.match(reader, /const bothNote = onAgent && workOn \?/);
   assert.match(reader, /if \(onAgent && !workOn\) return `<div class="rd-host-actions" data-stop="1">\$\{relayHostActionsHtml\(\{/);
   assert.match(reader, /wireHostOpen\(readerBodyEl\);/, "the reader binds through the shared binder");

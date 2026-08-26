@@ -5252,7 +5252,13 @@ async function startTaskFromPreview(input) {
       const providerAuth = await providerAuthModule();
       await providerAuth.assertProviderReady(host);
     } catch (error) {
-      return { ok: false, running: false, error: (error && error.message) || String(error) };
+      return {
+        ok: false,
+        running: false,
+        code: "provider_not_ready",
+        provider: host,
+        error: (error && error.message) || String(error),
+      };
     }
   }
   // Accept is the human's one consent gate. Tell the sender through the same

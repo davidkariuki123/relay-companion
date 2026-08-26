@@ -1,4 +1,4 @@
-// Visual/compositor gate for compact Relays list <-> conversation navigation.
+// Visual/compositor gate for compact Relays/Slack list <-> conversation navigation.
 //
 // Boots the real Electron overlay in an isolated home, opens rooms from varied
 // list scroll positions ten times, and samples every animation frame in both
@@ -241,6 +241,168 @@ try {
       `back cycle ${cycle + 1} did not clean up`);
     allCycles.push({ cycle:cycle + 1, forwardFrames, backFrames });
   }
+
+  // An explicit human reply that arrives while the renderer is folded must
+  // update state without repainting the hidden transcript. Unfolding flushes
+  // exactly that queued generation and preserves its adjacent reply reference.
+  const hiddenReplyLifecycle = await evaluate(page, `(async () => {
+    document.querySelector('#relaysList .relay-arrival')?.click();
+    await new Promise((resolve) => setTimeout(resolve, 560));
+    const parent = threadMessages().find((message) => message.direction === 'in');
+    if (!parent) throw new Error('explicit-reply parent was not found');
+    const replyId = 'hidden-explicit-reply';
+    const reply = {
+      relayId:replyId,
+      threadId:parent.threadId,
+      inReplyToRelayId:parent.id,
+      forHuman:'Queued explicit reply while folded',
+      forAgent:'Reply presentation lifecycle fixture',
+      title:'Queued explicit reply while folded',
+      recipient:{ email:parent.addressRecipient?.email || 'transition-1@example.com' },
+      source:{ host:'relay-preview', clientVersion:'0.1.403' },
+      createdAt:'2026-08-26T12:30:00.000Z',
+      updatedAt:'2026-08-26T12:30:00.000Z',
+      state:'sent',
+      delivery:{ state:'delivered' },
+    };
+    window.__relayMotionTest.setCollapsed(true);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    const before = window.__relayMotionTest.state();
+    onPayload({ ...payload, sent:[...(payload.sent || []), reply] });
+    const queued = window.__relayMotionTest.state();
+    const paintedWhileHidden = Boolean(document.querySelector('[data-reply-ref="' + parent.id + '"]'));
+    window.__relayMotionTest.setCollapsed(false);
+    let paintedAfterShow = false;
+    for (let attempt = 0; attempt < 40 && !paintedAfterShow; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      paintedAfterShow = Boolean(document.querySelector('[data-reply-ref="' + parent.id + '"]'));
+    }
+    return {
+      parentId:parent.id,
+      before,
+      queued,
+      after:window.__relayMotionTest.state(),
+      paintedWhileHidden,
+      paintedAfterShow,
+    };
+  })()`);
+  assert.equal(hiddenReplyLifecycle.queued.deferred, true,
+    "a folded explicit reply did not mark its surface generation deferred");
+  assert.equal(hiddenReplyLifecycle.queued.surfacePaintCount, hiddenReplyLifecycle.before.surfacePaintCount,
+    "a folded explicit reply repainted the hidden transcript");
+  assert.equal(hiddenReplyLifecycle.paintedWhileHidden, false,
+    "the explicit reply reference appeared before the hidden generation flushed");
+  assert.equal(hiddenReplyLifecycle.paintedAfterShow, true,
+    "the explicit adjacent reply reference was lost when the hidden generation flushed");
+  assert.ok(hiddenReplyLifecycle.after.surfacePaintCount > hiddenReplyLifecycle.queued.surfacePaintCount,
+    "unfolding did not flush the queued reply generation");
+  await evaluate(page, `(async () => {
+    thBackEl.click();
+    await new Promise((resolve) => setTimeout(resolve, 560));
+  })()`);
+  assert.equal(await evaluate(page, `activeView`), "relays", "explicit-reply lifecycle did not return to Relays");
+
+  // Slack summaries are deliberately injected without a reachable API. A cold
+  // Slack room must begin the exact-pixel transition immediately from its local
+  // list truth; canonical hydration is allowed to fail later without changing
+  // the captured motion or exposing an empty first destination.
+  await evaluate(page, `(() => {
+    const at = "2026-08-26T12:00:00.000Z";
+    slackConnectionInfo = {
+      state:"connected",
+      team:{ id:"T_TRANSITION", name:"Granular", connected:true },
+      personal:{ state:"connected" },
+    };
+    slackConnectionLoaded = true;
+    onPayload({
+      ...payload,
+      slackChats:[{
+        chatId:"slack-transition-room",
+        title:"Slack Transition Person",
+        kind:"direct",
+        participants:[
+          { relayUserId:"fixture", name:"Fixture", self:true },
+          { relayUserId:"slack-person", name:"Slack Transition Person", self:false },
+        ],
+        integration:{
+          provider:"slack",
+          teamId:"T_TRANSITION",
+          conversationId:"D_TRANSITION",
+          type:"im",
+          state:"active",
+        },
+        threadIds:["slack-transition-message"],
+        messageCount:1,
+        unreadCount:1,
+        lastMessage:{
+          relayId:"slack-transition-message",
+          preview:"Slack cold-cache transition seed",
+          senderName:"Slack Transition Person",
+          createdAt:at,
+          direction:"inbound",
+        },
+        updatedAt:at,
+      }],
+    });
+    activeView = "slack";
+    commitNavigation({ outerScrollTop:0 });
+  })()`);
+  await waitFor(page, `document.querySelectorAll('#slackList .relay-arrival').length === 1`, "Slack row");
+  const slackForwardFrames = await evaluate(page, `(async () => {
+    const row = document.querySelector('#slackList .relay-arrival');
+    const frames = [];
+    const started = performance.now();
+    const sample = (now) => {
+      const animations = document.getAnimations({ subtree:true });
+      frames.push({
+        at:+(now - started).toFixed(2),
+        transitioning:document.documentElement.classList.contains('room-view-transition'),
+        snapshotName:scrollEl.style.viewTransitionName,
+        cloneCount:document.querySelectorAll('.reader-morph-snapshot').length,
+        legacyMorph:scrollEl.classList.contains('reader-morph'),
+        visibleViews:[...document.querySelectorAll('.view:not(.hidden)')].map((node) => node.id),
+        oldAnimation:animations.some((animation) => animation.effect?.pseudoElement === '::view-transition-old(relay-room)'),
+        newAnimation:animations.some((animation) => animation.effect?.pseudoElement === '::view-transition-new(relay-room)'),
+        newBackground:getComputedStyle(document.documentElement, '::view-transition-new(relay-room)').backgroundColor,
+        seedText:document.querySelector('#thHistory .th-msg-title')?.textContent?.trim() || '',
+      });
+      if (now - started < 520) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+    row.click();
+    await new Promise((resolve) => setTimeout(resolve, 560));
+    return frames;
+  })()`);
+  assertFrameSequence(slackForwardFrames, "Slack forward", 1);
+  assert.equal(await evaluate(page, `activeView`), "threads", "Slack row did not enter a room");
+  assert.ok(slackForwardFrames.some((frame) => frame.seedText === "Slack cold-cache transition seed"),
+    "the cold Slack destination did not paint its local latest-message seed");
+  const slackBackFrames = await evaluate(page, `(async () => {
+    const frames = [];
+    const started = performance.now();
+    const sample = (now) => {
+      const animations = document.getAnimations({ subtree:true });
+      frames.push({
+        at:+(now - started).toFixed(2),
+        transitioning:document.documentElement.classList.contains('room-view-transition'),
+        snapshotName:scrollEl.style.viewTransitionName,
+        cloneCount:document.querySelectorAll('.reader-morph-snapshot').length,
+        legacyMorph:scrollEl.classList.contains('reader-morph'),
+        visibleViews:[...document.querySelectorAll('.view:not(.hidden)')].map((node) => node.id),
+        oldAnimation:animations.some((animation) => animation.effect?.pseudoElement === '::view-transition-old(relay-room)'),
+        newAnimation:animations.some((animation) => animation.effect?.pseudoElement === '::view-transition-new(relay-room)'),
+        newBackground:getComputedStyle(document.documentElement, '::view-transition-new(relay-room)').backgroundColor,
+      });
+      if (now - started < 520) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+    thBackEl.click();
+    await new Promise((resolve) => setTimeout(resolve, 560));
+    return frames;
+  })()`);
+  assertFrameSequence(slackBackFrames, "Slack back", 1);
+  assert.equal(await evaluate(page, `activeView`), "slack", "Slack Back did not restore the Slack list");
+  allCycles.push({ cycle:"slack", forwardFrames:slackForwardFrames, backFrames:slackBackFrames });
 
   fs.writeFileSync(path.join(sandbox, "trace.json"), JSON.stringify({ sandbox, cycles:allCycles }, null, 2));
   const minFrames = Math.min(...allCycles.flatMap((cycle) => [cycle.forwardFrames.length, cycle.backFrames.length]));

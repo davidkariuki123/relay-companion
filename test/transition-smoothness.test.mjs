@@ -161,6 +161,12 @@ test("compact room navigation animates exact viewport pixels with a matching Bac
   assert.match(relays, /startRoomViewTransition\(\(\) => \{[\s\S]*?openThreadDetail\([\s\S]*?\}, \{ motion:"forward" \}\)/,
     "the stable Relays list uses browser-captured pixels for room entry");
 
+  const slack = between(html, "function renderSlack()", "// ---- the split's rail");
+  assert.match(slack, /startRoomViewTransition\(\(\) => \{[\s\S]*?openThreadDetail\([\s\S]*?"slack"[\s\S]*?expanded:false[\s\S]*?\}, \{ motion:"forward" \}\)/,
+    "the stable Slack list uses the identical browser-captured room entry");
+  assert.doesNotMatch(slack, /openRoom\(/,
+    "Slack navigation never waits on canonical hydration before motion starts");
+
   const back = between(html, 'thBackEl.addEventListener("click", () => {', "let threadsSource");
   assert.match(back, /startRoomViewTransition\(navigateBack, \{ motion:"back" \}\)/,
     "compact Back reverses the exact-pixel transition");
@@ -182,6 +188,9 @@ test("the room transition names one stable viewport and cleans up on actual comp
   assert.match(room, /const deferredPayload = roomViewTransitionDeferredPayload/);
   assert.match(room, /if \(deferredPayload\) queueMicrotask\(\(\) => onPayload\(deferredPayload\)\)/,
     "the newest payload reconciles after the compositor transaction");
+  assert.match(room, /const deferredWork = \[\.\.\.roomViewTransitionDeferredWork\]/);
+  assert.match(room, /for \(const update of deferredWork\) queueMicrotask\(update\)/,
+    "selected-room hydration cannot repaint the captured destination mid-transition");
 });
 
 test("payload reconciliation cannot rebuild the destination during its crossfade", () => {

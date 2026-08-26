@@ -43,12 +43,12 @@ test("every API call goes over a kept-alive connection, not a fresh handshake", 
   assert.doesNotMatch(requestBody, /await fetch\(/, "no bare fetch on the request path");
 
   // A missing undici must degrade to working-but-slower, never to a crash.
-  assert.match(client, /undiciFetch = \(u, i\) => fetch\(u, i\)/);
+  assert.match(client, /fetch: \(u, i\) => fetch\(u, i\)/);
 });
 
 test("the connection pool can be closed, so a short-lived CLI still exits", () => {
   assert.match(client, /export async function closeRelayConnections\(\)/);
-  assert.match(client, /await closing\.close\(\)\.catch/);
+  assert.match(client, /pool\.close\(\)\.catch/);
 });
 
 test("remote Relay traffic requires HTTPS while localhost remains available", () => {
@@ -58,6 +58,91 @@ test("remote Relay traffic requires HTTPS while localhost remains available", ()
     () => new RelayClient({ url: "http://api.example.com", token: "secret" }),
     /requires HTTPS/,
   );
+});
+
+async function flakyTransportServer(t, responseBody = { ok: true }) {
+  const requests = [];
+  const server = http.createServer((req, res) => {
+    let body = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => {
+      requests.push({ method: req.method, url: req.url, body });
+      if (requests.length === 1) {
+        // Model the App Runner cutover exactly: the old revision accepts a
+        // kept-alive request, then its socket vanishes before the response.
+        req.socket.destroy();
+        return;
+      }
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify(responseBody));
+    });
+  });
+  const address = await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve(server.address()));
+  });
+  t.after(async () => {
+    await closeRelayConnections();
+    await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  });
+  return {
+    requests,
+    url: `http://127.0.0.1:${address.port}`,
+  };
+}
+
+function captureTransportWarnings(t) {
+  const warnings = [];
+  const original = console.warn;
+  console.warn = (...args) => warnings.push(args.join(" "));
+  t.after(() => { console.warn = original; });
+  return warnings;
+}
+
+test("a read survives one App Runner socket cutover on a fresh pool", async (t) => {
+  const { requests, url } = await flakyTransportServer(t, { user: { id: "user_after_cutover" } });
+  const warnings = captureTransportWarnings(t);
+  const relay = new RelayClient({ url, token: "dev_test" });
+
+  assert.deepEqual(await relay.me(), { user: { id: "user_after_cutover" } });
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests.map((request) => request.method), ["GET", "GET"]);
+  assert.match(warnings.join("\n"), /UND_ERR_SOCKET.*retrying GET once with a fresh connection/);
+});
+
+test("an idempotency-protected write retries with the exact same body", async (t) => {
+  const { requests, url } = await flakyTransportServer(t, { relayId: "relay_after_cutover" });
+  const warnings = captureTransportWarnings(t);
+  const relay = new RelayClient({ url, token: "dev_test" });
+  const payload = {
+    kind: "message",
+    recipient: { self: true },
+    forHuman: "still once",
+    idempotencyKey: "cutover-send-once",
+  };
+
+  assert.deepEqual(await relay.sendRelay(payload), { relayId: "relay_after_cutover" });
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests.map((request) => JSON.parse(request.body)), [payload, payload]);
+  assert.match(warnings.join("\n"), /UND_ERR_SOCKET.*retrying POST once with a fresh connection/);
+});
+
+test("a write without an idempotency key is never replayed after a lost response", async (t) => {
+  const { requests, url } = await flakyTransportServer(t, { ok: true });
+  const warnings = captureTransportWarnings(t);
+  const relay = new RelayClient({ url, token: "dev_test" });
+
+  const error = await relay.createMcpBrowserHandoff().then(
+    () => null,
+    (caught) => caught,
+  );
+  assert.ok(error);
+  assert.equal(requests.length, 1);
+  assert.equal(error.relayTransportCode, "UND_ERR_SOCKET");
+  assert.equal(error.relayTransportCauseName, "SocketError");
+  assert.equal(error.relayTransportAttempts, 1);
+  assert.match(warnings.join("\n"), /UND_ERR_SOCKET.*POST was not retried/);
 });
 
 test("bodyless delete requests do not claim to contain JSON", async (t) => {

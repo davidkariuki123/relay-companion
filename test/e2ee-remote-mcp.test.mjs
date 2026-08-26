@@ -46,6 +46,7 @@ test("remote Claude exposes only the E2EE messaging surface", () => {
   }
   assert.doesNotMatch(E2EE_REMOTE_MCP_INSTRUCTIONS, /mint a link/i);
   assert.match(E2EE_REMOTE_MCP_INSTRUCTIONS, /never supply a plaintext fallback/i);
+  assert.match(E2EE_REMOTE_MCP_INSTRUCTIONS, /relay_chat_send only for explicitly requested plain text.*otherwise use relay_send/i);
 
   for (const name of ["relay_send", "relay_chat_send"]) {
     const tool = tools.find((candidate) => candidate.name === name);
@@ -55,6 +56,10 @@ test("remote Claude exposes only the E2EE messaging surface", () => {
     assert.equal(Object.hasOwn(properties, "filePath"), false);
     assert.ok(Object.hasOwn(properties, "contentBase64"));
   }
+  assert.match(
+    tools.find((candidate) => candidate.name === "relay_chat_send").description,
+    /relay_chat_send only for explicitly requested plain text.*otherwise use relay_send/i,
+  );
 });
 
 test("remote Claude fails closed unless the local device is enrolled and E2EE is enabled", async () => {

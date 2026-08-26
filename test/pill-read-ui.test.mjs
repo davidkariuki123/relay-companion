@@ -107,16 +107,17 @@ test("reader attachments share the deployed frosted footer above both document a
 });
 
 test("Slack Settings is one truthful card with the official mark and no optimistic toggle", () => {
+  const slackSettings = html.slice(html.indexOf("function slackSettingsHtml(info)"), html.indexOf("function renderSettings()"));
   assert.match(html, /src="slackMark\.png" alt="Slack"/);
   assert.match(html, /class="open-actions sv-actions" data-stop="1" aria-label="Account actions"/,
     "permanent account actions stay ordinary page controls instead of trapping Settings in a modal menu role");
   assert.doesNotMatch(html, /class="open-actions sv-actions" data-stop="1" role="menu"/);
-  assert.match(html, /New Slack messages sync with Relay, and Relays send from your Slack account\. Earlier Slack history is not imported\./);
-  assert.doesNotMatch(html, /Relay for \$\{esc\(teamName\)\}|<span class="sv-slack-name">Your Slack<\/span>/,
-    "workspace installation and personal authorization do not become competing product concepts");
-  assert.match(html, /id="svSlackConnect"/);
-  assert.match(html, /id="svSlackDisconnectConfirm"/);
-  assert.doesNotMatch(html, /data-slack-toggle|Mirror my DMs/);
+  assert.match(slackSettings, /New Slack messages sync with Relay, and Relays send from your Slack account\. Earlier Slack history is not imported\./);
+  assert.doesNotMatch(slackSettings, /Relay for \$\{esc\(teamName\)\}|<span class="sv-slack-name">Your Slack<\/span>/,
+    "Settings keeps its compact one-card ontology even though the Slack tab teaches both grants");
+  assert.match(slackSettings, /id="svSlackConnect"/);
+  assert.match(slackSettings, /id="svSlackDisconnectConfirm"/);
+  assert.doesNotMatch(slackSettings, /data-slack-toggle|Mirror my DMs/);
   assert.match(preload, /slackConnection: \(\) => ipcRenderer\.invoke\("relay:slackConnection"\)/);
 });
 
@@ -127,9 +128,9 @@ test("Device approvals exists only when E2EE is actually available", () => {
 
 test("Slack Settings follows browser-owned OAuth to its real server state", () => {
   assert.match(html, /const SLACK_CONNECTION_POLL_MS = 2000/,
-    "an open Settings card polls the lightweight Slack status endpoint");
-  assert.match(html, /activeView === "settings" && document\.visibilityState === "visible"[\s\S]*refreshSlackConnection\(\{ preserveWaiting:true \}\)/,
-    "polling runs only while the user can see Settings");
+    "a visible Slack connection surface polls the lightweight status endpoint");
+  assert.match(html, /\(activeView === "settings" \|\| activeView === "slack"\) && rendererSurfaceActive\(\)[\s\S]*refreshSlackConnection\(\{ preserveWaiting:true \}\)/,
+    "polling runs only while Settings or Slack is on an active renderer surface");
   assert.match(html, /slackConnectionReady\(result\.connection\)[\s\S]*slackConnectionWaiting = false/,
     "the pending affordance clears only when the server reports the complete team and personal grant");
   assert.match(html, /slackConnectionWaitingSince = result\?\.ok === true \? Date\.now\(\) : 0/,
@@ -174,10 +175,10 @@ test("Slack channel replies live in a real thread subview, including earlier-roo
 
 test("an open Slack channel refreshes on a live-chat cadence without repainting unchanged generations", () => {
   assert.match(html, /const ACTIVE_CANONICAL_CHAT_POLL_MS = 1000/);
-  assert.match(html, /if \(activeCanonicalChatRefresh \|\| document\.visibilityState !== "visible" \|\| collapsed\) return/,
-    "hidden and overlapping channel requests do not form a background poll storm");
-  assert.match(html, /canonicalChatFingerprints\.get\(id\) === nextFingerprint\) return false/,
-    "an unchanged transcript does not rebuild the open chat");
+  assert.match(html, /if \(activeCanonicalChatRefresh \|\| !rendererSurfaceActive\(\)\) return/,
+    "collapsed, offstage, hidden, and overlapping channel requests do not form a background poll storm");
+  assert.match(html, /canonicalChatDetailProjectionKeys\.get\(id\) === projectionKey[\s\S]*canonicalChatFingerprints\.get\(projectionKey\) === nextFingerprint\) return false/,
+    "an unchanged transcript in the same projection does not rebuild the open chat");
   assert.match(html, /setInterval\(\(\) => \{ refreshActiveCanonicalChat\(\); \}, ACTIVE_CANONICAL_CHAT_POLL_MS\)/);
   assert.match(html, /liveCanonicalArrivalIds\.add\(messageId\)/);
   assert.match(html, /th-msg\.live-arrival \{ animation:thMessageArrival/,
@@ -200,7 +201,11 @@ test("an open Slack channel persists one canonical read cursor instead of acking
     "the visible surface and reveal state qualify the canonical cursor advance");
   assert.match(html, /if \(!id\.startsWith\("relay_"\)\) continue/,
     "canonical message ids never enter the legacy per-delivery acknowledgment path");
-  assert.match(html, /renderThreadDetail\(\);\s*readVisibleChatRoom\(\);/,
+  const reconcile = html.slice(
+    html.indexOf("function reconcileCanonicalChatResult("),
+    html.indexOf("function syncSlackVisibilityButton(", html.indexOf("function reconcileCanonicalChatResult(")),
+  );
+  assert.match(reconcile, /if \(changed\) renderThreadDetail\(\);\s*if \(readVisible\) readVisibleChatRoom\(\);/,
     "a Slack arrival that paints into the open channel is immediately treated as read");
 });
 

@@ -1537,9 +1537,9 @@
   .th-msg-title .kchip { display:inline-block; margin-right:8px; vertical-align:2px; }
   .th-msg.unread .th-msg-title { color:var(--ink); font-weight:500; }
   .th-msg.mine .th-msg-title { color:var(--ink-2, var(--ink)); }
-  /* Your own messages sit LEFT like everyone else's — Slack's convention.
-     Right-hanging bare text without bubbles read as broken (Sven, round 5);
-     identity comes from the muted name instead, via .th-party.me below. */
+  /* The bubble moves as one rectangle; its contents do not mirror. Outbound
+     text keeps the same left-to-right layout and measure as inbound text while
+     the existing .mine geometry anchors the rectangle to the right. */
   /* A run of consecutive messages from one sender reads as one block: the
      newest row carries the name and clock, continuations sit under it with
      no repeated header and no divider inside the run.
@@ -1885,6 +1885,16 @@
   .work-conversation { display:flex; flex-direction:column; gap:24px; font-size:14px; line-height:21px; }
   .work-starting { display:flex; align-items:center; gap:8px; min-height:21px; color:color-mix(in oklab,var(--ink) 64%,transparent); font:445 14px/21px var(--sans); }
   .work-starting .rd-live-tail-dot { display:block; }
+  .work-connect { width:100%; max-width:48rem; margin:30px auto 0; }
+  .work-connect-title { color:var(--ink); font:650 18px/1.3 var(--sans); letter-spacing:-.01em; }
+  .work-connect-copy { max-width:36rem; margin-top:7px; color:var(--muted); font:400 13px/1.5 var(--sans); }
+  .work-connect-actions { display:grid; grid-template-columns:repeat(2,minmax(0,245px)); gap:10px; width:min(500px,100%); margin-top:20px; }
+  .work-connect-actions .th-host-action { min-width:0; border:1px solid var(--hair); border-radius:12px; }
+  .work-connect-actions .th-host-action + .th-host-action { border-top:1px solid var(--hair); }
+  .work-connect-actions .th-host-action:disabled { cursor:default; opacity:.55; }
+  .work-connect-error { min-height:18px; margin-top:10px; color:var(--danger); font:500 11px/1.45 var(--sans); }
+  .work-connect-dock .ta-note:disabled { color:var(--muted-3); opacity:1; }
+  @media (max-width:620px) { .work-connect-actions { grid-template-columns:1fr; width:min(280px,100%); } }
   .work-turn { display:flex; flex-direction:column; gap:16px; min-width:0;
     content-visibility:auto; contain-intrinsic-size:auto 240px; }
   .work-agent, .work-live-units { display:flex; flex-direction:column; min-width:0; }
@@ -2307,6 +2317,26 @@
   .sv-slack-action:hover { border-color:var(--muted-3); }
   .sv-slack-action:disabled { opacity:.45; cursor:default; }
   .sv-slack-foot { padding:10px 12px; border-top:1px solid var(--edge); background:color-mix(in srgb,var(--wash) 62%,transparent); font:10.5px/1.45 var(--sans); color:var(--muted-2); }
+  .sv-slack-dialog-copy { margin-top:9px; color:var(--muted); font:12px/1.5 var(--sans); }
+  /* The Slack tab's disconnected face borrows the onboarding chapter's
+     hierarchy, but it is ordinary product chrome now: no step count, finish
+     action or "Not now" escape. The only action is to connect Slack. */
+  .slack-connect { padding:28px 16px 24px; }
+  .slack-connect-kicker { margin:0; color:var(--muted); font:600 10px/1.2 var(--mono); letter-spacing:.14em; text-transform:uppercase; }
+  .slack-connect-title { margin:9px 0 0; max-width:290px; color:var(--ink); font:400 28px/1.08 var(--serif); letter-spacing:-.018em; }
+  .slack-connect-copy { margin:12px 0 0; max-width:300px; color:var(--muted); font:400 13px/1.52 var(--sans); }
+  .slack-connect-card { margin-top:21px; overflow:hidden; border-radius:var(--r-3); background:var(--raised); box-shadow:inset 0 0 0 1px var(--edge); }
+  .slack-connect-row { min-height:66px; padding:12px; display:flex; align-items:center; gap:11px; }
+  .slack-connect-row + .slack-connect-row { border-top:1px solid var(--edge); }
+  .slack-connect-icon { width:38px; height:38px; flex:0 0 auto; display:grid; place-items:center; border-radius:11px; background:var(--wash); }
+  .slack-connect-icon img { width:28px; height:28px; object-fit:contain; }
+  .slack-connect-avatar { width:38px; height:38px; flex:0 0 auto; display:grid; place-items:center; border-radius:50%; background:var(--wash-2); color:var(--ink-soft); font:650 12px/1 var(--sans); }
+  .slack-connect-row-copy { min-width:0; flex:1 1 auto; display:flex; flex-direction:column; }
+  .slack-connect-row-name { color:var(--ink); font:600 13px/1.25 var(--sans); }
+  .slack-connect-row-note { margin-top:3px; color:var(--muted-2); font:400 10.5px/1.38 var(--sans); }
+  .slack-connect-action { margin-top:18px; }
+  .slack-connect-foot { margin:14px 10px 0; color:var(--muted-3); font:400 10.5px/1.45 var(--sans); text-align:center; }
+  .slack-connect .row-err { margin-top:11px; padding:0; }
   .sv-slack-confirm { display:grid; grid-template-rows:0fr; border-top:1px solid transparent; background:color-mix(in srgb,var(--wash) 38%,var(--raised)); opacity:0; transition:grid-template-rows 280ms var(--settle), border-color var(--t-base) var(--settle), opacity var(--t-base) var(--settle); }
   .sv-slack-card.is-confirming .sv-slack-confirm { grid-template-rows:1fr; border-top-color:var(--edge); opacity:1; }
   .sv-slack-confirm-clip { min-height:0; overflow:hidden; visibility:hidden; transition:visibility 0s linear 280ms; }
@@ -2529,10 +2559,10 @@
       <button class="tab active" type="button" data-view="relays">
         Relays <span class="tab-badge gone" id="relaysBadge">0</span>
       </button>
+      <button class="tab" type="button" data-view="tasks">Tasks <span class="tab-badge amber gone" id="tasksBadge">0</span></button>
       <button class="tab" type="button" data-view="slack">
         Slack <span class="tab-badge gone" id="slackBadge">0</span>
       </button>
-      <button class="tab" type="button" data-view="tasks">Tasks <span class="tab-badge amber gone" id="tasksBadge">0</span></button>
       <button class="tab" type="button" data-view="contacts">People</button>
       <button class="tab" type="button" data-view="settings">Settings</button>
       <button class="mark-all-read gone" id="markAllRead" type="button">Mark all as read</button>
@@ -3006,8 +3036,10 @@
   }
   function reconcileSurfaceActivity() {
     const active = syncContinuousMotion();
-    if (active) flushDeferredSurfaceRender();
-    else syncRunMirrors();
+    if (active) {
+      flushDeferredSurfaceRender();
+      if (slackConnectionRefreshDeferred) refreshSlackConnection({ preserveWaiting:true });
+    } else syncRunMirrors();
   }
   new MutationObserver(reconcileSurfaceActivity).observe(cardEl, { attributes:true, attributeFilter:["class"] });
   document.addEventListener("visibilitychange", reconcileSurfaceActivity);
@@ -3138,6 +3170,15 @@
   let roomViewTransition = null;
   let roomViewTransitionToken = 0;
   let roomViewTransitionDeferredPayload = null;
+  const roomViewTransitionDeferredWork = new Set();
+  function afterRoomViewTransition(update) {
+    if (typeof update !== "function") return;
+    if (roomViewTransition) {
+      roomViewTransitionDeferredWork.add(update);
+      return;
+    }
+    queueMicrotask(update);
+  }
   function cleanRoomViewTransition(token = roomViewTransitionToken) {
     if (token !== roomViewTransitionToken) return;
     roomViewTransition = null;
@@ -3150,6 +3191,20 @@
     const deferredPayload = roomViewTransitionDeferredPayload;
     roomViewTransitionDeferredPayload = null;
     if (deferredPayload) queueMicrotask(() => onPayload(deferredPayload));
+    const deferredWork = [...roomViewTransitionDeferredWork];
+    roomViewTransitionDeferredWork.clear();
+    for (const update of deferredWork) queueMicrotask(update);
+  }
+  function supersedeRoomViewTransition() {
+    if (!roomViewTransition) return;
+    const transition = roomViewTransition;
+    // Invalidate the old update callback before asking Chromium to skip. The
+    // platform still runs an update callback for a skipped transition; without
+    // this token advance it can write the old room destination after a newer
+    // tab navigation has already committed.
+    const token = ++roomViewTransitionToken;
+    try { transition.skipTransition(); } catch {}
+    cleanRoomViewTransition(token);
   }
   function startRoomViewTransition(update, { motion = "forward" } = {}) {
     if (typeof update !== "function") return false;
@@ -3161,8 +3216,7 @@
       return false;
     }
     if (roomViewTransition) {
-      try { roomViewTransition.skipTransition(); } catch {}
-      cleanRoomViewTransition();
+      supersedeRoomViewTransition();
     }
     const token = ++roomViewTransitionToken;
     const root = document.documentElement;
@@ -3175,10 +3229,17 @@
     let updated = false;
     try {
       const transition = document.startViewTransition(() => {
+        if (token !== roomViewTransitionToken) return;
         updated = true;
         update();
       });
       roomViewTransition = transition;
+      // skipTransition() is a normal supersession path when the human picks a
+      // tab before this room motion settles. Chromium rejects these auxiliary
+      // promises on a skipped transition; consume that expected cancellation
+      // so it never becomes an unhandled renderer error.
+      transition.ready?.catch(() => {});
+      transition.updateCallbackDone?.catch(() => {});
       transition.finished.then(
         () => cleanRoomViewTransition(token),
         () => cleanRoomViewTransition(token),
@@ -4209,6 +4270,11 @@
   let payload = { account: { paired: false }, ui: { canDismiss: true, reopenSurface: "the Relay icon", setupTutorialPending:false }, features: { requests:false, cowork:false, environment:"production" }, relays: [], sent: [], requests: [], contacts: [], chats: [], slackChats: [] };
   const canonicalChatDetails = new Map();
   const canonicalChatFingerprints = new Map();
+  const canonicalChatDetailProjectionKeys = new Map();
+  const canonicalChatHydrations = new Map();
+  const canonicalChatLatestStartedGeneration = new Map();
+  const canonicalChatLatestAppliedGeneration = new Map();
+  let canonicalChatRequestGeneration = 0;
   const liveCanonicalArrivalIds = new Set();
   const canonicalReadGeneration = new Map();
   // Visibility is deliberately session-only and scoped to both chat and
@@ -4250,6 +4316,93 @@
       ? slackVisibilityOverrides.get(key) === true
       : conversationSurface(source) === "slack";
   }
+  function canonicalChatHydrationKey(room, source = threadsSource, includeSlack = slackMessagesVisible(room, source)) {
+    if (!room?.chatId) return "";
+    return `${conversationSurface(source)}:${String(room.chatId)}:${includeSlack ? "with-slack" : "relay-only"}`;
+  }
+  function canonicalChatDetailIsCurrent(room, source = threadsSource, { includeSlack = slackMessagesVisible(room, source) } = {}) {
+    if (!room?.chatId) return false;
+    const id = String(room.chatId);
+    const detail = canonicalChatDetails.get(id);
+    if (!detail) return false;
+    if (canonicalChatDetailProjectionKeys.get(id) !== canonicalChatHydrationKey(room, source, includeSlack)) return false;
+    return String(detail.updatedAt || "") === String(room.summaryUpdatedAt || "")
+      && Number(detail.messageCount || 0) === Number(room.messageCount || 0)
+      && String(detail.lastMessage?.relayId || "") === String(room.summaryLastMessageId || "");
+  }
+  function requestCanonicalChatDetail(room, source = threadsSource, { includeSlack = slackMessagesVisible(room, source) } = {}) {
+    if (!room?.chatId || !window.relay.canonicalChat) return Promise.resolve(null);
+    const key = canonicalChatHydrationKey(room, source, includeSlack);
+    const existing = canonicalChatHydrations.get(key);
+    if (existing) return existing;
+    const chatId = String(room.chatId);
+    const surface = conversationSurface(source);
+    const generation = ++canonicalChatRequestGeneration;
+    canonicalChatLatestStartedGeneration.set(chatId, generation);
+    const request = Promise.resolve(window.relay.canonicalChat(room.chatId, {
+      surface,
+      includeSlack,
+    })).then((result) => result && typeof result === "object"
+      ? { ...result, canonicalRequest:{ chatId, generation, surface, includeSlack } }
+      : result)
+      .catch((error) => ({ ok:false, error:error?.message || String(error), canonicalRequest:{ chatId, generation, surface, includeSlack } }))
+      .finally(() => canonicalChatHydrations.delete(key));
+    canonicalChatHydrations.set(key, request);
+    return request;
+  }
+  function canonicalChatResultIsCurrent(result, chatId) {
+    const request = result?.canonicalRequest;
+    if (!request) return true;
+    const id = String(chatId || result?.chat?.chatId || "");
+    const generation = Number(request.generation || 0);
+    if (!id || String(request.chatId || "") !== id || generation <= 0) return false;
+    if (generation < Number(canonicalChatLatestStartedGeneration.get(id) || 0)) return false;
+    if (generation < Number(canonicalChatLatestAppliedGeneration.get(id) || 0)) return false;
+    canonicalChatLatestAppliedGeneration.set(id, generation);
+    return true;
+  }
+  function canonicalChatResultMatchesVisibleProjection(result, { chatId, surface = conversationSurface() } = {}) {
+    const id = String(chatId || result?.chat?.chatId || "");
+    if (activeView !== "threads" || conversationSurface() !== surface) return false;
+    const visibleRoom = chatRoomForThread(threadDetailId, surface);
+    if (!visibleRoom || String(visibleRoom.chatId || "") !== id) return false;
+    const request = result?.canonicalRequest;
+    return !request || (
+      String(request.surface || "") === surface
+      && Boolean(request.includeSlack) === slackMessagesVisible(visibleRoom, surface)
+    );
+  }
+  function reconcileCanonicalChatResult(result, {
+    chatId,
+    surface = conversationSurface(),
+    markArrivals = false,
+    readVisible = false,
+  } = {}) {
+    if (!result?.ok || !result.chat) return false;
+    const id = String(chatId || result.chat.chatId || "");
+    if (!canonicalChatResultMatchesVisibleProjection(result, { chatId:id, surface })) return false;
+    const request = result.canonicalRequest;
+    if (!canonicalChatResultIsCurrent(result, id)) return false;
+    const changed = storeCanonicalChatDetail(result.chat, {
+      markArrivals,
+      surface:request?.surface || surface,
+      includeSlack:Boolean(request?.includeSlack),
+    });
+    const reconcile = () => {
+      if (activeView !== "threads" || conversationSurface() !== surface) return;
+      const currentRoom = chatRoomForThread(threadDetailId, surface);
+      if (!currentRoom || String(currentRoom.chatId || "") !== id) return;
+      if (request && Boolean(request.includeSlack) !== slackMessagesVisible(currentRoom, surface)) return;
+      if (!rendererSurfaceActive()) {
+        surfaceRenderDeferred = true;
+        return;
+      }
+      if (changed) renderThreadDetail();
+      if (readVisible) readVisibleChatRoom();
+    };
+    afterRoomViewTransition(reconcile);
+    return changed;
+  }
   function syncSlackVisibilityButton(room = threadDetailId ? chatRoomForThread(threadDetailId) : null) {
     const linked = isSlackIntegratedRoom(room);
     thSlackVisibilityEl.classList.toggle("hidden", !linked);
@@ -4265,11 +4418,17 @@
   // hydration, so entering an existing channel never animates its whole
   // history; genuinely live arrivals use the same small settle as native
   // Relay messages instead of making the transcript jump as one block.
-  function storeCanonicalChatDetail(chat, { markArrivals = false } = {}) {
+  function storeCanonicalChatDetail(chat, {
+    markArrivals = false,
+    surface = conversationSurface(),
+    includeSlack = false,
+  } = {}) {
     if (!chat?.chatId) return false;
     const id = String(chat.chatId);
+    const projectionKey = `${surface}:${id}:${includeSlack ? "with-slack" : "relay-only"}`;
     const nextFingerprint = canonicalChatFingerprint(chat);
-    if (canonicalChatFingerprints.get(id) === nextFingerprint) return false;
+    if (canonicalChatDetailProjectionKeys.get(id) === projectionKey
+      && canonicalChatFingerprints.get(projectionKey) === nextFingerprint) return false;
     const previous = canonicalChatDetails.get(id);
     if (markArrivals && previous) {
       const previousIds = new Set((previous.items || []).map((item) => String(item.relayId || "")));
@@ -4279,7 +4438,8 @@
       }
     }
     canonicalChatDetails.set(id, chat);
-    canonicalChatFingerprints.set(id, nextFingerprint);
+    canonicalChatDetailProjectionKeys.set(id, projectionKey);
+    canonicalChatFingerprints.set(projectionKey, nextFingerprint);
     // A summary may have been painted before this detail introduced its first
     // synchronized root. Keep exact ids current so the room remains addressable
     // when the detail swaps from its synthetic fallback to a real thread id.
@@ -4297,22 +4457,22 @@
   }
 
   async function refreshActiveCanonicalChat() {
-    if (activeCanonicalChatRefresh || document.visibilityState !== "visible" || collapsed) return;
+    if (activeCanonicalChatRefresh || !rendererSurfaceActive()) return;
     if (activeView !== "threads" || !threadDetailId) return;
     const room = chatRoomForThread(threadDetailId, conversationSurface());
     const includeSlack = slackMessagesVisible(room);
     if (!isSlackIntegratedRoom(room) || !room.chatId || !window.relay.canonicalChat) return;
-    activeCanonicalChatRefresh = Promise.resolve(window.relay.canonicalChat(room.chatId, {
-      surface: conversationSurface(),
-      includeSlack,
-    }));
+    const surface = conversationSurface();
+    activeCanonicalChatRefresh = requestCanonicalChatDetail(room, surface, { includeSlack });
     try {
       const result = await activeCanonicalChatRefresh;
       if (!result?.ok || !result.chat) return;
-      if (storeCanonicalChatDetail(result.chat, { markArrivals:true }) && activeView === "threads") {
-        renderThreadDetail();
-        readVisibleChatRoom();
-      }
+      reconcileCanonicalChatResult(result, {
+        chatId:room.chatId,
+        surface,
+        markArrivals:true,
+        readVisible:true,
+      });
     } catch {}
     finally { activeCanonicalChatRefresh = null; }
   }
@@ -4839,6 +4999,11 @@
   }
   function chatOrder() { return protoPref("proto.convOrder", "chat"); } // "chat" | "inbox"
   const taskLocal = new Map(); // packetId -> "running" | "parked" (prototype-local approval state)
+  // A Task whose chosen provider is not ready owns a real Work face, but no
+  // provider session yet. Keeping that state separate from taskLocal prevents
+  // the auth prompt from manufacturing a running Task or attaching a feed that
+  // cannot exist.
+  const workProviderPrompts = new Map(); // relayId -> { requested, busy, error }
   const requestSafetyReviews = new Map(); // decrypted, local-only advisory review
   // A REQUEST arrives on the wire as kind "task" and stages as relayNotificationKind
   // "task"; the legacy task-pipeline rows say "task_request". Both are Tasks —
@@ -4956,6 +5121,94 @@
     return { app, model: o.model || spec.model, effort: o.effort || spec.effort };
   }
   function setRoute(id, patch) { taskRoutes.set(id, { ...(taskRoutes.get(id) || {}), ...patch }); }
+  function providerIdForApp(app) { return /codex/i.test(String(app || "")) ? "codex" : "claude"; }
+  function providerAppName(provider) { return provider === "codex" ? "Codex" : "Claude Code"; }
+  function providerStatusForWork(provider) { return providerAuthInfo?.providers?.[provider] || null; }
+  function providerReadyForWork(provider) {
+    const item = providerStatusForWork(provider);
+    return Boolean(item?.authLoaded && item?.enabled && item?.connected);
+  }
+  function showWorkProviderPrompt(id, provider, error = "") {
+    const key = String(id || "");
+    if (!key) return;
+    workProviderPrompts.set(key, { requested:provider || providerIdForApp(routeFor(key).app), busy:"", error:String(error || "") });
+    if (activeView === "reader" && String(readerId) === key) {
+      readerTab = "work";
+      readerWorkVisible = true;
+      readerTabSwap = true;
+    }
+    renderAll();
+    readerTabSwap = false;
+  }
+  async function providerReadyBeforeStart(id, app) {
+    const provider = providerIdForApp(app);
+    let result = null;
+    try { result = window.relay.providerAuthStatus ? await window.relay.providerAuthStatus() : null; }
+    catch { result = null; }
+    if (result?.providers) applyProviderAuthResult(result);
+    // If the readiness probe itself is unavailable, main remains the
+    // authority and returns the structured provider_not_ready result below.
+    if (!result || result.ok === false || !result.providers) return true;
+    if (providerReadyForWork(provider)) return true;
+    showWorkProviderPrompt(id, provider);
+    return false;
+  }
+  function chooseConnectedWorkProvider(id, provider) {
+    const key = String(id || "");
+    const app = providerAppName(provider);
+    const spec = AGENT_ROUTES[app];
+    setRoute(key, { app, model:spec.model, effort:spec.effort });
+    workProviderPrompts.delete(key);
+    clearRowNote(key);
+    setRowNote(key, `${app} connected. This Task is ready to start.`, "ok");
+    fadeRowNoteLater(key, 3000);
+    if (activeView === "reader" && String(readerId) === key) {
+      readerTab = "agent";
+      readerWorkVisible = false;
+      renderReader();
+    } else renderAll();
+  }
+  function settleWorkProviderPrompts(provider, error = "") {
+    for (const [id, prompt] of workProviderPrompts) {
+      if (prompt.requested !== provider && prompt.busy !== provider) continue;
+      if (!error && providerReadyForWork(provider)) chooseConnectedWorkProvider(id, provider);
+      else if (error) {
+        workProviderPrompts.set(id, { ...prompt, busy:"", error:String(error) });
+        if (activeView === "reader" && String(readerId) === String(id)) renderReader();
+      }
+    }
+  }
+  function workProviderPromptHtml(r) {
+    const prompt = workProviderPrompts.get(String(r.id)) || {};
+    const busyProvider = prompt.busy || providerAuthBusy;
+    const row = (provider) => {
+      const app = providerAppName(provider);
+      const item = providerStatusForWork(provider);
+      const connected = providerReadyForWork(provider);
+      const busy = busyProvider === provider;
+      const disabled = Boolean(busyProvider && !busy) || Boolean(item?.authLoaded && (!item.installed || !item.enabled) && !connected);
+      const label = connected ? `Use ${app}` : busy ? `Connecting ${app}…` : `Connect ${app}`;
+      const context = connected ? "Ready for Tasks" : provider === "codex" ? "ChatGPT subscription" : "Claude subscription";
+      return `<button class="th-host-action" type="button" data-work-provider="${provider}" data-work-provider-relay="${esc(r.id)}" data-host="${provider}"${busy || disabled ? " disabled" : ""}>
+        <img class="th-host-logo" src="${provider === "codex" ? "codexMark.svg" : "claudeCodeMark.svg"}" alt="" />
+        <span class="th-host-copy"><span class="th-host-label">${esc(label)}</span><span class="th-host-context">${esc(context)}</span></span>
+        <span class="th-host-arrow" aria-hidden="true">→</span>
+      </button>`;
+    };
+    return `<div class="work-connect" role="region" aria-label="Agent connection required">
+      <div class="work-connect-title">Connect an agent to start this Task</div>
+      <div class="work-connect-copy">Work runs in Codex or Claude Code using your existing subscription. Choose one to connect and continue.</div>
+      <div class="work-connect-actions">${row("codex")}${row("claude")}</div>
+      <div class="work-connect-error" role="status" aria-live="polite">${esc(prompt.error || "")}</div>
+    </div>`;
+  }
+  function workProviderPromptDockHtml() {
+    return `<div class="ta-dock inline work-connect-dock" data-stop="1"><div class="qr ta-qr col">
+      <textarea rows="1" class="ta-note" placeholder="Connect an agent to send a follow-up…" disabled></textarea>
+      <div class="ta-rail"><div class="rt-chips"><span class="rt-chip static"><span class="sq"></span>No agent connected</span></div>
+        <span class="rt-spacer"></span><span class="ta-acts"><button class="ta-later" type="button" disabled>Open in agent</button><button class="ta-approve" type="button" disabled>Send</button></span>
+      </div></div></div>`;
+  }
   // The route menu: the island's night material, one list, current choice
   // wears the blue square.
   let routeMenuEl = null;
@@ -5557,15 +5810,17 @@
     const rt = routeFor(id);
     const app = runApp(id, feed);
     const runKind = isTaskRow(relayById(id)) ? "Task" : "work";
-    const sq = `<span class="ksq" style="background:${vendorSq(app)}"></span>`;
+    const providerKnown = !feed?.legacyMissingSession;
+    const sq = providerKnown ? `<span class="ksq" style="background:${vendorSq(app)}"></span>` : "";
+    const owner = providerKnown ? ` · ${esc(app.toUpperCase())}` : "";
     if (runFeedCompleted(feed)) {
-      kicker.innerHTML = `${sq}${runKind} · ${esc(app.toUpperCase())} · done`;
+      kicker.innerHTML = `${sq}${runKind}${owner} · done`;
       return;
     }
     if (runFeedIsTerminal(feed)) {
       const state = String(feed.liveState || "").toLowerCase();
       const label = state === "review_ready" ? "finished · awaiting Relay completion" : state === "blocked" ? "needs input" : "didn't finish";
-      kicker.innerHTML = `${sq}${runKind} · ${esc(app.toUpperCase())} · ${label}`;
+      kicker.innerHTML = `${sq}${runKind}${owner} · ${label}`;
       return;
     }
     // The model is the rail's only when the rail still names the app that ran;
@@ -5807,6 +6062,20 @@
     const current = cached.presentation || cached.workPresentation || { turns:[] };
     const turns = Array.isArray(current.turns) ? current.turns.map((turn) => ({ ...turn, units:Array.isArray(turn.units) ? turn.units.slice() : [] })) : [];
     const message = String(error?.message || error || "The live event stream is unavailable.").replace(/\s+/g, " ").trim().slice(0, 240);
+    const row = relayById(key) || {};
+    const completedAt = row.taskCompletedAt || row.workCompletedAt || "";
+    if (/No provider-native Work session exists/i.test(message) && completedAt) {
+      const unit = { id:"legacy-work-unavailable", type:"message", placement:"standalone", persistent:true,
+        text:"This Task is complete. Live Work history is unavailable for this older run." };
+      const settledTurn = { key:"legacy-work", turnId:"legacy-work", status:"completed", active:false, settled:true,
+        finalEligible:false, canCollapse:false, units:[unit] };
+      const next = { ...cached, ok:true, completedAt, liveState:"completed", legacyMissingSession:true,
+        presentation:{ ...current, provider:"", done:true, turns:[settledTurn] } };
+      taskLocal.set(key, "done");
+      runFeedSeen.set(key, next);
+      paintRunStream(key, next); paintRunKicker(key, next);
+      return;
+    }
     const unit = { id:"renderer-watch-error", type:"error", placement:"standalone", persistent:true, text:message || "The live event stream is unavailable." };
     if (!turns.length) turns.push({ key:"renderer-watch", turnId:"renderer-watch", status:"inProgress", active:true, settled:false, canCollapse:false, units:[unit] });
     else {
@@ -6101,6 +6370,16 @@
     }
     const state = taskBoardState(r.id);
     const draft = String(requestWorkDrafts.get(String(r.id)) || "");
+    if (state === "done" && !requestHasNativeSession(r)) {
+      return `<div class="ta-dock${inline ? " inline" : ""}" data-stop="1">
+        <div class="qr ta-qr col">
+          <textarea rows="1" class="ta-note" placeholder="This Task is complete" disabled></textarea>
+          <div class="ta-rail"><div class="rt-chips"><span class="rt-chip static"><span class="sq"></span>Older Task</span></div>
+            <span class="rt-spacer"></span><span class="ta-acts"><button class="ta-later" type="button" disabled>Native session unavailable</button><button class="ta-approve" type="button" disabled>Done</button></span>
+          </div>
+        </div>
+      </div>`;
+    }
     if (state === "review") {
       const pending = r.completionReview || {};
       const assessment = pending.assessment || {};
@@ -6161,7 +6440,7 @@
     return idleRunDockHtml(r, {
       inline,
       draft,
-      label: "Start task",
+      label: state === "stopped" ? "Start again" : "Start task",
       actions: scheduleActionsHtml(r),
     });
   }
@@ -6200,6 +6479,20 @@
   }
   function requestControlsHtml(r, opts) { return requestDockHtml(r, opts) || taskStatusLine(r, opts); }
   function wireRequestControls(scope, onDone) {
+    for (const button of scope.querySelectorAll("[data-work-provider]")) button.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const id = button.getAttribute("data-work-provider-relay") || "";
+      const provider = button.getAttribute("data-work-provider") || "";
+      if (!id || !["claude", "codex"].includes(provider) || button.disabled) return;
+      const prompt = workProviderPrompts.get(String(id)) || { requested:provider, busy:"", error:"" };
+      workProviderPrompts.set(String(id), { ...prompt, requested:provider, busy:provider, error:"" });
+      if (providerReadyForWork(provider)) {
+        chooseConnectedWorkProvider(id, provider);
+        return;
+      }
+      if (activeView === "reader" && String(readerId) === String(id)) renderReader();
+      await connectProviderFromSettings(provider, id);
+    });
     for (const button of scope.querySelectorAll("[data-request-safety]")) button.addEventListener("click", async (event) => {
       event.stopPropagation();
       const id = button.getAttribute("data-request-safety");
@@ -6329,6 +6622,7 @@
         setRowNote(id, "Work-run attachments are currently supported for Codex sessions.", "err");
         return;
       }
+      if (!await providerReadyBeforeStart(id, rt.app)) return;
       // A retry is a new run. Never let the previous provider's cached feed
       // repaint the new run's dock (Codex briefly replaced Cowork on screen).
       if (activeView === "reader" && String(readerId) === String(id) && readerTab !== "work") {
@@ -6373,7 +6667,8 @@
             taskLocal.delete(id);
             if (optimistic.previous) runFeedSeen.set(String(id), optimistic.previous); else runFeedSeen.delete(String(id));
             if (note) requestWorkDrafts.set(String(id), note);
-            setRowNote(id, (res && (res.error || res.runError)) || "Start failed — try again.", "err");
+            if (res?.code === "provider_not_ready") showWorkProviderPrompt(id, res.provider || providerIdForApp(rt.app));
+            else setRowNote(id, (res && (res.error || res.runError)) || "Start failed — try again.", "err");
           }
           renderAll();
         }).catch((e) => {
@@ -6402,6 +6697,7 @@
         setRowNote(id, "Work-run attachments are currently supported for Codex sessions.", "err");
         return;
       }
+      if (!await providerReadyBeforeStart(id, rt.app)) return;
       if (activeView === "reader" && String(readerId) === String(id) && readerTab !== "work") {
         workFaceTransitions.set(String(id), { fromTab:readerTab === "agent" ? "agent" : "you", until:Date.now() + 520 });
       }
@@ -6425,8 +6721,11 @@
           taskLocal.delete(String(id));
           if (optimistic.previous) runFeedSeen.set(String(id), optimistic.previous); else runFeedSeen.delete(String(id));
           requestWorkDrafts.set(String(id), note);
-          readerTab = "agent";
-          setRowNote(id, res?.error || res?.runError || "It did not start.", "err");
+          if (res?.code === "provider_not_ready") showWorkProviderPrompt(id, res.provider || providerIdForApp(rt.app));
+          else {
+            readerTab = "agent";
+            setRowNote(id, res?.error || res?.runError || "It did not start.", "err");
+          }
         } else {
           if (noteBox) clearStagedFiles(noteBox);
           clearRowNote(id);
@@ -6814,7 +7113,7 @@
     readerId = id;
     const opened = readerRow(id);
     const openedState = opened ? relayWorkState(opened) : "idle";
-    readerWorkVisible = Boolean(opened && !["idle", "waiting", "parked"].includes(openedState));
+    readerWorkVisible = Boolean(opened && (workProviderPrompts.has(String(id)) || !["idle", "waiting", "parked"].includes(openedState)));
     readerTab = readerWorkVisible ? "work" : "you";
     // Remember the WHOLE place, not just the view: a room is a person, so
     // coming back without the party hint (or without the split) left the rail
@@ -7049,7 +7348,8 @@
     const headlineClass = subject.length > 120 ? " long very-long" : subject.length > 70 ? " long" : "";
     const note = rowNotes.get(r.id);
     let app = request ? routeFor(r.id).app : agentAppName();
-    const status = request ? taskStatusLine(r, { inline: true }) : "";
+    const providerPrompt = request ? workProviderPrompts.get(String(r.id)) : null;
+    const status = request && !providerPrompt ? taskStatusLine(r, { inline: true }) : "";
     // The FOLDER: tabs cut from the paper, one per document — only when the
     // relay actually carries two. Orange square = you, blue = your agent app.
     const agentText = String(r.forAgent || "").trim();
@@ -7062,8 +7362,9 @@
     // a Work face only where the product row allows it (local builds). A
     // Task keeps its own — that surface is gated by features.requests.
     const workOn = payload.features?.relayWork === true;
-    const hasWork = chatOwnedWork || ((request || workOn) && !["idle", "waiting", "parked"].includes(runState));
-    if (hasWork) app = runAppName(r.id); // the third face names the provider that actually owns this run
+    const legacyCompletedWithoutNative = request && runState === "done" && !requestHasNativeSession(r);
+    const hasWork = chatOwnedWork || ((request || workOn) && (Boolean(providerPrompt) || !["idle", "waiting", "parked"].includes(runState)));
+    if (hasWork && !providerPrompt && !legacyCompletedWithoutNative) app = runAppName(r.id); // an existing run names the provider that actually owns it
     if (!hasWork && readerTab === "work") readerTab = "you";
     const workAppearing = hasWork && !readerWorkVisible;
     const transition = workFaceTransitions.get(String(r.id));
@@ -7081,7 +7382,7 @@
       <div class="fold-tabs" data-stop="1">
         <button type="button" class="ftab${!onAgent && !onWork ? " on" : ""}" data-rtab="you"><span class="sq you"></span><span class="lab">For you</span></button>
         <button type="button" class="ftab${onAgent ? " on" : ""}" data-rtab="agent"><span class="sq ag" style="background:${vendorSq(app)}"></span><span class="lab">For ${esc(app)}</span></button>
-        ${hasWork ? `<button type="button" class="ftab work${onWork ? " on" : ""}${animateWork ? " work-new" : ""}" data-rtab="work"><span class="sq ag" style="background:${vendorSq(app)}"></span><span class="lab">Work</span></button>` : ""}
+        ${hasWork ? `<button type="button" class="ftab work${onWork ? " on" : ""}${animateWork ? " work-new" : ""}" data-rtab="work"><span class="sq ag"${providerPrompt || legacyCompletedWithoutNative ? "" : ` style="background:${vendorSq(app)}"`}></span><span class="lab">Work</span></button>` : ""}
       </div>
       <div class="fold-rule"></div>` : "";
     const agentDoc = `
@@ -7095,9 +7396,13 @@
         <div class="rd-body">${readerParagraphs(r.forHuman)}</div>
         ${scheduleContractHtml(r)}`;
     const workDoc = `<div class="work-context">
-        <div class="rd-kicker" data-run-kicker="${esc(r.id)}">${request || chatOwnedWork ? "Task" : "work"} · ${esc(sender)} · ${esc(timeAgo(r.createdAt))}</div>
+        <div class="rd-kicker" data-run-kicker="${esc(r.id)}">${legacyCompletedWithoutNative ? "Task · done" : `${request || chatOwnedWork ? "Task" : "work"} · ${esc(sender)} · ${esc(timeAgo(r.createdAt))}`}</div>
         <div class="rd-headline${headlineClass}">${esc(subject)}</div></div>
-        <div class="work-conversation${runState === "running" ? " work-streaming" : ""}" data-run-stream="${esc(r.id)}" aria-live="polite" aria-relevant="additions text"><div class="work-starting" role="status"><span class="rd-live-tail-dot" aria-hidden="true"></span><span>Starting ${esc(app)} on this Task…</span></div></div>`;
+        ${providerPrompt
+          ? workProviderPromptHtml(r)
+          : legacyCompletedWithoutNative
+            ? `<div class="work-conversation" role="status"><div class="rd-final"><p>This Task is complete. Live Work history is unavailable for this older run.</p></div></div>`
+            : `<div class="work-conversation${runState === "running" ? " work-streaming" : ""}" data-run-stream="${esc(r.id)}" aria-live="polite" aria-relevant="additions text"><div class="work-starting" role="status"><span class="rd-live-tail-dot" aria-hidden="true"></span><span>Starting ${esc(app)} on this Task…</span></div></div>`}`;
     const doc = onWork ? workDoc : onAgent ? agentDoc : humanDoc;
     // The whisper explains what the Relay Work dock will send; without that
     // dock the row names where it goes (H2), and nothing else needs saying.
@@ -7117,6 +7422,7 @@
       // continues the provider turn. Previously any
       // existing Work hid the entire source-document footer, which left both
       // immutable documents looking like dead pages after a run completed.
+      if (request && onWork && providerPrompt) return workProviderPromptDockHtml();
       if (request && (onAgent || onWork || requestActionable)) return requestDockHtml(r, { inline: true });
       // TWO OUTCOMES, NO IN-BETWEEN (Sven): a message is either replied to
       // or opened in your agent. On the agent document the reply belongs to
@@ -7263,6 +7569,7 @@
           const idempotencyKey = `reader_${r.id}_${Date.now()}`;
           optimisticChatReplies.set(idempotencyKey, {
             id:`optimistic:${idempotencyKey}`, relayId:"", threadId:r.threadId || r.id,
+            inReplyToRelayId:r.id, explicitReply:true,
             direction:"out", seen:false, seenAt:null, title:text, body:text,
             party:sender, partyKey:(r.senderEmail || r.fromEmail)
               ? `email:${String(r.senderEmail || r.fromEmail).trim().toLowerCase()}`
@@ -9548,6 +9855,10 @@
         groupSendId: String(entry.groupSendId || ""),
         threadId: String(entry.threadId || chat.threadId || ""),
         inReplyToRelayId: String(entry.inReplyToRelayId || ""),
+        // Current pill senders set inReplyToRelayId only after an explicit
+        // reader/reply-button gesture. Keep that presentation while the
+        // durable outbox row stands in for the canonical Relay.
+        explicitReply: Boolean(entry.inReplyToRelayId),
         direction: "out",
         seen: false,
         seenAt: null,
@@ -10012,10 +10323,46 @@
     const name = String(chat.channel?.name || chat.title || people.join(", ") || (isGroup ? "Channel" : "Slack conversation"));
     const last = chat.lastMessage;
     const threadId = (chat.threadIds || [])[0] || `slack-chat:${chat.chatId}`;
+    const cached = canonicalChatDetails.get(String(chat.chatId));
+    // A list summary already carries the newest visible message. On a cold
+    // room, use that local truth for the compositor's destination snapshot
+    // instead of navigating into an empty transcript while the selected room
+    // hydrates. The canonical detail replaces this one preview after motion.
+    const openingMessages = !cached && last ? [{
+      id:last.relayId,
+      relayId:last.relayId,
+      chatId:chat.chatId,
+      threadId,
+      inReplyToRelayId:"",
+      direction:last.direction === "outbound" ? "out" : "in",
+      addressRecipient:{ chatId:chat.chatId },
+      title:last.title || last.preview || "Message",
+      party:last.direction === "outbound" ? "You" : (last.senderName || "Slack member"),
+      partyKey:`chat-id:${chat.chatId}`,
+      at:last.createdAt,
+      isGroup,
+      groupId:isGroup ? chat.chatId : "",
+      groupName:isGroup ? name : "",
+      unread:last.direction !== "outbound" && Number(chat.unreadCount || 0) > 0,
+      source:null,
+      integration,
+      provider:null,
+      origin:"",
+      editedAt:null,
+      deletedAt:null,
+      textLike:!last.title,
+      request:false,
+      body:last.preview || "",
+      agent:"",
+      reactions:{ aggregates:[], events:[] },
+      attachments:[],
+      preview:last.title ? (last.preview || "") : "",
+      openingSummary:true,
+    }] : [];
     return {
       threadId,
       threadIds: new Set(chat.threadIds || []),
-      msgs: [],
+      msgs: openingMessages,
       latest: last ? {
         id:last.relayId, at:last.createdAt, title:last.title || last.preview || "Message",
         direction:last.direction === "outbound" ? "out" : "in", party:last.senderName || "",
@@ -10031,6 +10378,9 @@
       setLabel:type === "im" ? "Slack message" : type === "mpim" ? "Slack group message" : "Slack channel",
       hasActivity:Boolean(last),
       chatId:chat.chatId,
+      messageCount:Number(chat.messageCount || 0),
+      summaryUpdatedAt:chat.updatedAt || "",
+      summaryLastMessageId:last?.relayId || "",
       provider:"slack",
       integration,
       channel:chat.channel || null,
@@ -10277,7 +10627,8 @@
               : item),
           };
           canonicalChatDetails.set(chatId, opened);
-          canonicalChatFingerprints.set(chatId, canonicalChatFingerprint(opened));
+          const projectionKey = canonicalChatDetailProjectionKeys.get(chatId);
+          if (projectionKey) canonicalChatFingerprints.set(projectionKey, canonicalChatFingerprint(opened));
           if (surface === "slack") {
             payload.slackChats = (payload.slackChats || []).map((summary) => String(summary.chatId) === chatId
               ? { ...summary, unreadCount:0 }
@@ -10295,7 +10646,8 @@
             })
             .catch(() => {
               if (canonicalReadGeneration.get(generationKey) === generation) canonicalReadGeneration.delete(generationKey);
-              canonicalChatFingerprints.delete(chatId);
+              const projectionKey = canonicalChatDetailProjectionKeys.get(chatId);
+              if (projectionKey) canonicalChatFingerprints.delete(projectionKey);
               refreshActiveCanonicalChat();
             });
         }
@@ -10345,13 +10697,18 @@
     }
     const selected = chatRoomForThread(threadId, surface);
     const includeSlack = slackMessagesVisible(selected, roomSource);
-    if (isSlackIntegratedRoom(selected) && selected.chatId && !options.hydrated) {
-      const result = await window.relay.canonicalChat?.(selected.chatId, { surface, includeSlack });
+    if (isSlackIntegratedRoom(selected) && selected.chatId && !options.hydrated
+      && !canonicalChatDetailIsCurrent(selected, roomSource, { includeSlack })) {
+      const result = await requestCanonicalChatDetail(selected, roomSource, { includeSlack });
       if (!result?.ok || !result.chat) {
         setRowNote(String(selected.latest?.id || threadId), result?.error || "Could not open this Slack conversation.", "err");
         return;
       }
-      storeCanonicalChatDetail(result.chat);
+      if (!canonicalChatResultIsCurrent(result, selected.chatId)) return;
+      storeCanonicalChatDetail(result.chat, {
+        surface:result.canonicalRequest?.surface || surface,
+        includeSlack:Boolean(result.canonicalRequest?.includeSlack),
+      });
       const hydratedThreadId = (result.chat.threadIds || [])[0] || threadId;
       return openRoom(hydratedThreadId, partyHint, roomSource, { ...options, hydrated:true });
     }
@@ -10415,6 +10772,44 @@
     if (pr) pr.addEventListener("click", () => { activeView = "contacts"; commitNavigation(); });
   }
   function renderSlack() {
+    if (!slackConnectionReady(slackConnectionInfo)) {
+      slackEmptyEl.classList.add("gone");
+      const connection = slackConnectionInfo;
+      const team = connection?.team;
+      const teamConnected = team?.connected === true;
+      const teamName = team?.name || "your team";
+      const checking = !slackConnectionLoaded;
+      const connectLabel = checking
+        ? "Checking Slack…"
+        : slackConnectionWaiting
+          ? "Waiting for Slack…"
+          : connection?.state === "paused"
+            ? "Reconnect Slack"
+            : "Connect Slack";
+      const account = payload.account || {};
+      slackListEl.innerHTML = `<div class="slack-connect" data-slack-connect-state="${checking ? "loading" : "disconnected"}">
+        <p class="slack-connect-kicker">Slack integration</p>
+        <h1 class="slack-connect-title">Connect your Slack to Relay.</h1>
+        <p class="slack-connect-copy">${teamConnected
+          ? "Your team already uses Relay in Slack. Connect the Slack conversations you can access."
+          : "Connect Relay to your team and sync the Slack conversations you can access in one approval."}</p>
+        <div class="slack-connect-card">
+          ${teamConnected ? "" : `<div class="slack-connect-row">
+            <span class="slack-connect-icon"><img src="slackMark.png" alt="" /></span>
+            <span class="slack-connect-row-copy"><span class="slack-connect-row-name">Relay for ${esc(teamName)}</span><span class="slack-connect-row-note">Deliver to teammates and channels</span></span>
+          </div>`}
+          <div class="slack-connect-row">
+            <span class="slack-connect-avatar" aria-hidden="true">${esc(cvInitials(account.name, account.email))}</span>
+            <span class="slack-connect-row-copy"><span class="slack-connect-row-name">Your Slack</span><span class="slack-connect-row-note">Sync conversations you can access and keep Relays in place</span></span>
+          </div>
+        </div>
+        <button class="sv-connect slack-connect-action" type="button" id="slackTabConnect" ${checking || slackConnectionBusy || slackConnectionWaiting ? "disabled" : ""}>${esc(connectLabel)}</button>
+        ${slackConnectionError ? `<div class="row-err" role="status">${esc(slackConnectionError)}</div>` : ""}
+        <p class="slack-connect-foot">Sync starts when you connect. Relay does not import earlier Slack history.</p>
+      </div>`;
+      document.getElementById("slackTabConnect")?.addEventListener("click", connectSlackFromSurface);
+      return;
+    }
     const { rooms } = chatSections("slack");
     slackEmptyEl.classList.toggle("gone", rooms.length > 0);
     const nextHtml = rooms.map((room) => relayIdentityRowHtml({
@@ -10425,12 +10820,17 @@
     slackListEl.innerHTML = nextHtml;
     for (const el of slackListEl.querySelectorAll(".relay-arrival")) {
       el.addEventListener("click", () => {
-        openRoom(
-          el.getAttribute("data-thread"),
-          el.getAttribute("data-party") || "",
-          "slack",
-          { expanded:false },
-        );
+        // Slack is a peer compact room index, so its first visual transaction
+        // is the exact same compositor-owned pixel transition as Relays. Room
+        // freshness is reconciled after the captured destination has settled.
+        startRoomViewTransition(() => {
+          openThreadDetail(
+            el.getAttribute("data-thread"),
+            el.getAttribute("data-party") || "",
+            "slack",
+            { expanded:false },
+          );
+        }, { motion:"forward" });
       });
     }
     requestAnimationFrame(() => {
@@ -10594,18 +10994,13 @@
       });
     }
   }
-  // inReplyToRelayId IS NOT A QUOTE GESTURE — it is Relay's reply-chain key,
-  // and everything sets it by default. This composer anchors to the newest
-  // ordinary message when nobody picked a target, and relay_send instructs
-  // every agent to pass "the newest related Relay". Rendering that key as a
-  // visible reference attached a quote of the line above to practically every
-  // message: David picked no reply target and his "sick" still quoted Sven,
-  // whose own message quoted the one above it (live, 0.1.265).
-  //
-  // So: for each message, the parent ids that mean "default anchor" rather
-  // than "I chose this one" — the message directly above, plus the newest
-  // ordinary message above when Tasks sit in between (the composer's own
-  // rule). A reference is only information when it reaches PAST those.
+  // Before 0.1.290, inReplyToRelayId doubled as a default reply-chain key: the
+  // room composer anchored every ordinary message to the newest one even when
+  // the human picked no target. Suppressing adjacent parents kept that legacy
+  // history from looking like a chain of selected quotes. Since 0.1.290,
+  // ordinary room sends are addressed to the room and only the reader or the
+  // explicit reply button sets inReplyToRelayId. Those gestures must keep their
+  // visible reference even when the selected Relay is immediately above.
   function defaultReplyAnchorMap(msgs) {
     const ordered = [...(msgs || [])].sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));
     const byId = new Map();
@@ -10619,6 +11014,22 @@
       byId.set(String(ordered[i].id || ""), anchors);
     }
     return byId;
+  }
+  function versionAtLeast(raw, minimum) {
+    const value = String(raw || "").match(/^(\d+)\.(\d+)\.(\d+)/);
+    if (!value) return false;
+    const actual = value.slice(1).map(Number);
+    const expected = String(minimum || "").split(".").slice(0, 3).map(Number);
+    while (expected.length < 3) expected.push(0);
+    for (let i = 0; i < 3; i += 1) {
+      if (actual[i] !== expected[i]) return actual[i] > expected[i];
+    }
+    return true;
+  }
+  function messageHasExplicitReplyGesture(message) {
+    if (message?.explicitReply === true) return true;
+    const source = message?.source;
+    return source?.host === "relay-preview" && versionAtLeast(source.clientVersion, "0.1.290");
   }
   // ---- the thread reply composer: a REAL send ----------------------------
   // Files stage as chips (picker or paste); Send creates a relay through the
@@ -10829,7 +11240,7 @@
       const parentId = String((message && message.inReplyToRelayId) || "");
       if (!parentId) return "";
       const defaults = defaultReplyAnchorIds.get(String((message && message.id) || ""));
-      if (defaults && defaults.has(parentId)) return "";
+      if (!messageHasExplicitReplyGesture(message) && defaults && defaults.has(parentId)) return "";
       const parent = messageById.get(parentId);
       // Outside the loaded room, we cannot tell a deliberate reply from the
       // default anchor, and the default is overwhelmingly the case — so a
@@ -10872,11 +11283,12 @@
         return `<div class="rx-line" data-rx-event="${esc(event.id)}"><span class="th-party ${partyColorClass(label, label === "You")}">${esc(label)}</span> reacted <span class="emoji">${esc(event.emoji)}</span></div>`;
       }
       const m = entry.message;
-      // Outbound = this user's own message: labelled with their name (not the
-      // recipient's), sitting left in the flow like every other row.
-      // Labelling it with the recipient read as "Shane sent this" on a message
-      // David sent, contradicting the transcript's own "You" (field report).
-      const mine = m.direction === "out" && !m.ownedAgent;
+      // Direction decides the side. Every outbound Relay approaches from the
+      // right, including work sent by this person's owned agent; every inbound
+      // Relay stays on the left. `ownedAgent` may change the truthful byline to
+      // "My Codex" / "My Claude", but it cannot make an outbound message look
+      // as though the other person sent it.
+      const mine = m.direction === "out";
       const ownedAgentName = m.direction === "out"
         ? (m.source?.surface === "codex" ? "My Codex" : "My Claude")
         : m.party;
@@ -11261,6 +11673,7 @@
           relayId: "",
           threadId: sendAnchor.threadId || thread.threadId,
           inReplyToRelayId: inReplyToRelayId || "",
+          explicitReply: Boolean(inReplyToRelayId),
           direction: "out",
           seen: false,
           seenAt: null,
@@ -11504,16 +11917,18 @@
     }
     thSlackVisibilityEl.disabled = true;
     thSlackVisibilityLabelEl.textContent = "Loading…";
-    const result = await window.relay.canonicalChat?.(room.chatId, { surface, includeSlack:true });
+    const result = await requestCanonicalChatDetail(room, surface, { includeSlack:true });
     if (!result?.ok || !result.chat) {
       slackVisibilityOverrides.set(key, wasVisible);
       syncSlackVisibilityButton(room);
       thSlackVisibilityEl.title = result?.error || "Could not load Slack messages.";
       return;
     }
-    storeCanonicalChatDetail(result.chat);
-    renderThreadDetail();
-    readVisibleChatRoom();
+    reconcileCanonicalChatResult(result, {
+      chatId:room.chatId,
+      surface,
+      readVisible:true,
+    });
   });
   document.getElementById("thExpand").addEventListener("click", (e) => {
     e.stopPropagation();
@@ -11633,13 +12048,15 @@
     // three times (including once on the next animation frame).
     commitNavigation({ outerScrollTop: 0 });
     readVisibleChatRoom();
-    if (isSlackIntegratedRoom(room) && room.chatId && !options.hydrated) {
-      const includeSlack = slackMessagesVisible(room, source);
-      window.relay.canonicalChat?.(room.chatId, { surface, includeSlack }).then((result) => {
-        if (!result?.ok || !result.chat || activeView !== "threads") return;
-        storeCanonicalChatDetail(result.chat);
-        renderThreadDetail();
-        readVisibleChatRoom();
+    const includeSlack = slackMessagesVisible(room, source);
+    if (isSlackIntegratedRoom(room) && room.chatId && !options.hydrated
+      && !canonicalChatDetailIsCurrent(room, source, { includeSlack })) {
+      requestCanonicalChatDetail(room, source, { includeSlack }).then((result) => {
+        reconcileCanonicalChatResult(result, {
+          chatId:room.chatId,
+          surface,
+          readVisible:true,
+        });
       }).catch(() => {});
     }
     // The row click has already put the native window in front. Put the caret
@@ -11661,10 +12078,12 @@
   // RESTARTING the pill into the new account, so the success note is brief.
   let settingsInfo = null;      // last relay:accountInfo payload (null while loading)
   let slackConnectionInfo = null;
+  let slackConnectionLoaded = false;
   let slackConnectionBusy = false;
   let slackConnectionWaiting = false;
   let slackConnectionWaitingSince = 0;
   let slackConnectionRefreshSeq = 0;
+  let slackConnectionRefreshDeferred = false;
   let slackConnectionError = "";
   let slackDisconnectConfirm = false;
   let chatAgentPreferences = null;
@@ -11706,8 +12125,25 @@
       && connection?.personal?.state === "connected";
   }
 
+  function paintSlackConnectionSurface() {
+    if (activeView !== "settings" && activeView !== "slack") return false;
+    if (!rendererSurfaceActive()) {
+      surfaceRenderDeferred = true;
+      return false;
+    }
+    if (activeView === "settings") renderSettings();
+    else renderSlack();
+    return true;
+  }
+
   async function refreshSlackConnection({ preserveWaiting = true } = {}) {
     if (!window.relay.slackConnection) return;
+    if (!rendererSurfaceActive()) {
+      slackConnectionRefreshDeferred = true;
+      surfaceRenderDeferred = true;
+      return;
+    }
+    slackConnectionRefreshDeferred = false;
     const seq = ++slackConnectionRefreshSeq;
     let result = null;
     try { result = await window.relay.slackConnection(); }
@@ -11716,11 +12152,13 @@
 
     const before = JSON.stringify({
       connection:slackConnectionInfo,
+      loaded:slackConnectionLoaded,
       waiting:slackConnectionWaiting,
       error:slackConnectionError,
     });
     if (result?.ok && result.connection) {
       slackConnectionInfo = result.connection;
+      slackConnectionLoaded = true;
       slackConnectionError = "";
       const waitExpired = slackConnectionWaitingSince > 0
         && Date.now() - slackConnectionWaitingSince >= SLACK_CONNECTION_WAIT_TIMEOUT_MS;
@@ -11729,14 +12167,37 @@
         slackConnectionWaitingSince = 0;
       }
     } else {
+      slackConnectionLoaded = true;
       slackConnectionError = result?.error || "Could not check Slack.";
     }
     const after = JSON.stringify({
       connection:slackConnectionInfo,
+      loaded:slackConnectionLoaded,
       waiting:slackConnectionWaiting,
       error:slackConnectionError,
     });
-    if (after !== before) renderSettings();
+    if (after !== before) {
+      paintSlackConnectionSurface();
+    }
+  }
+
+  async function connectSlackFromSurface() {
+    if (slackConnectionBusy || slackConnectionWaiting || !window.relay.slackConnect) return;
+    slackConnectionBusy = true;
+    slackConnectionError = "";
+    paintSlackConnectionSurface();
+    const team = slackConnectionInfo?.team;
+    let result = null;
+    try {
+      result = await window.relay.slackConnect(team?.connected
+        ? { mode:"user", expectedTeamId:team.id }
+        : { mode:"combined" });
+    } catch (error) { result = { ok:false, error:error?.message || "Could not open Slack." }; }
+    slackConnectionBusy = false;
+    slackConnectionWaiting = result?.ok === true;
+    slackConnectionWaitingSince = result?.ok === true ? Date.now() : 0;
+    slackConnectionError = result?.ok === false ? result.error || "Could not open Slack." : "";
+    paintSlackConnectionSurface();
   }
 
   function resetSignOutArm() {
@@ -12274,24 +12735,7 @@
     const connectClaude = document.getElementById("svConnectClaude");
     if (connectClaude) connectClaude.addEventListener("click", connectClaudeFromSettings);
     const slackConnect = document.getElementById("svSlackConnect");
-    if (slackConnect) slackConnect.addEventListener("click", async () => {
-      if (slackConnectionBusy || !window.relay.slackConnect) return;
-      slackConnectionBusy = true;
-      slackConnectionError = "";
-      renderSettings();
-      const team = slackConnectionInfo?.team;
-      let result = null;
-      try {
-        result = await window.relay.slackConnect(team?.connected
-          ? { mode:"user", expectedTeamId:team.id }
-          : { mode:"combined" });
-      } catch (error) { result = { ok:false, error:error?.message || "Could not open Slack." }; }
-      slackConnectionBusy = false;
-      slackConnectionWaiting = result?.ok === true;
-      slackConnectionWaitingSince = result?.ok === true ? Date.now() : 0;
-      slackConnectionError = result?.ok === false ? result.error || "Could not open Slack." : "";
-      renderSettings();
-    });
+    if (slackConnect) slackConnect.addEventListener("click", connectSlackFromSurface);
     const slackDisconnect = document.getElementById("svSlackDisconnect");
     const slackCard = document.getElementById("svSlackCard");
     const slackDisconnectPanel = document.getElementById("svSlackDisconnectConfirmPanel");
@@ -12467,44 +12911,54 @@
     if (providerAuthInfo?.providers && Object.values(providerAuthInfo.providers).every((item) => item?.connected || !item?.enabled)) {
       providerAuthError = "";
     }
+    for (const provider of ["claude", "codex"]) {
+      if (providerReadyForWork(provider)) settleWorkProviderPrompts(provider);
+    }
     if (activeView === "settings" && (changed || providerAuthError !== previousError)) renderSettings();
     if (poll && providerAuthBusy) {
-      const item = providerAuthInfo?.providers?.[providerAuthBusy];
+      const provider = providerAuthBusy;
+      const item = providerAuthInfo?.providers?.[provider];
       if (item?.connected && item?.enabled) {
         providerAuthNote = `${item.label} connected with ${item.detail}.`;
         providerAuthBusy = "";
         stopProviderAuthPolling();
-        renderSettings();
+        settleWorkProviderPrompts(provider);
+        if (activeView === "settings") renderSettings();
         refreshProviderInventory({ force:true }).catch(() => {});
       } else if (!item?.busy) {
         providerAuthError = item?.detail || "Authorization did not finish.";
         providerAuthBusy = "";
         stopProviderAuthPolling();
-        renderSettings();
+        settleWorkProviderPrompts(provider, providerAuthError);
+        if (activeView === "settings") renderSettings();
       } else {
         stopProviderAuthPolling();
         providerAuthPollTimer = setTimeout(() => refreshProviderAuth({ poll:true }), 900);
       }
     }
   }
-  async function connectProviderFromSettings(provider) {
+  async function connectProviderFromSettings(provider, workRelayId = "") {
     if (!provider || providerAuthBusy) return;
     providerAuthBusy = provider;
     providerAuthError = "";
     providerAuthNote = "";
-    renderSettings();
+    if (activeView === "settings") renderSettings();
+    else if (workRelayId && activeView === "reader" && String(readerId) === String(workRelayId)) renderReader();
     let result = null;
     try { result = await window.relay.providerAuthConnect(provider); } catch (error) { result = { ok:false, error:error?.message }; }
     if (!result?.ok) {
       providerAuthBusy = "";
       providerAuthError = result?.error || "Could not start authorization.";
-      renderSettings();
+      settleWorkProviderPrompts(provider, providerAuthError);
+      if (activeView === "settings") renderSettings();
+      else if (workRelayId && activeView === "reader" && String(readerId) === String(workRelayId)) renderReader();
       return;
     }
     if (result.alreadyConnected) {
       providerAuthBusy = "";
       providerAuthNote = `${provider === "claude" ? "Claude Code" : "Codex"} is already signed in with the required subscription.`;
       await refreshProviderAuth();
+      settleWorkProviderPrompts(provider);
       refreshProviderInventory({ force:true }).catch(() => {});
       return;
     }
@@ -12734,23 +13188,23 @@
   window.addEventListener("focus", () => {
     if (activeView === "settings") {
       loadSettings();
+    } else if (activeView === "slack") {
       refreshSlackConnection({ preserveWaiting:true });
     }
   });
   document.addEventListener("visibilitychange", () => {
-    if (activeView === "settings" && document.visibilityState === "visible") {
-      loadSettings();
-      refreshSlackConnection({ preserveWaiting:true });
+    if (document.visibilityState === "visible") {
+      if (activeView === "settings") loadSettings();
+      else if (activeView === "slack") refreshSlackConnection({ preserveWaiting:true });
     }
   });
   // Slack OAuth completes in the browser, not in this renderer. Focus and
   // visibility events are not guaranteed while the Pill remains open behind
-  // that browser window, so keep its one integration card truthful without a
-  // manual refresh. This polls only while Settings is visible and calls the
-  // lightweight connection-status endpoint; all other Settings checks retain
-  // their existing focus/entry cadence.
+  // that browser window, so keep both Slack connection faces truthful without
+  // a manual refresh. The tab and Settings card share the same lightweight
+  // status call; all other Settings checks retain their focus/entry cadence.
   setInterval(() => {
-    if (activeView === "settings" && document.visibilityState === "visible") {
+    if ((activeView === "settings" || activeView === "slack") && rendererSurfaceActive()) {
       refreshSlackConnection({ preserveWaiting:true });
     }
   }, SLACK_CONNECTION_POLL_MS);
@@ -13134,6 +13588,9 @@
     } else {
       resetSignOutArm(); // leaving the view disarms the confirm state
     }
+    if (activeView === "slack" && viewChanged) {
+      refreshSlackConnection({ preserveWaiting:true });
+    }
     // A room owns its sent-cache refresh in hydrateThreadEntry(), where the
     // matching entry-follow token keeps the newest message visible until the
     // asynchronous outbound half has actually rendered.
@@ -13167,6 +13624,13 @@
     tab.addEventListener("click", () => {
       dismissReactionPickers();
       const view = tab.getAttribute("data-view") || "relays";
+      // A tab hop supersedes any room-to-list View Transition still retiring.
+      // Leaving its captured transaction alive lets deferred payload work race
+      // the new destination and can leave the new tab active while its face is
+      // hidden. Retire the obsolete snapshots before committing navigation.
+      if (roomViewTransition) {
+        supersedeRoomViewTransition();
+      }
       // Tab hops over an open conversation move the HIGHLIGHT, never the
       // screen (David): Chat owns every conversation, and the tab it came
       // from keeps a claim too — hop freely between them, nothing re-renders.
@@ -13339,17 +13803,19 @@
       chats: Array.isArray(next.chats) ? next.chats : (payload.chats || []),
       slackChats: Array.isArray(next.slackChats) ? next.slackChats : (payload.slackChats || []),
     };
-    if (activeView === "threads" && threadDetailId) {
+    const paintSurface = rendererSurfaceActive();
+    if (paintSurface && activeView === "threads" && threadDetailId) {
       const surface = conversationSurface();
       const room = chatRoomForThread(threadDetailId, surface);
       const includeSlack = slackMessagesVisible(room);
       if (isSlackIntegratedRoom(room) && room.chatId) {
-        window.relay.canonicalChat?.(room.chatId, { surface, includeSlack }).then((result) => {
-          if (!result?.ok || !result.chat) return;
-          if (storeCanonicalChatDetail(result.chat, { markArrivals:true }) && activeView === "threads") {
-            renderThreadDetail();
-            readVisibleChatRoom();
-          }
+        requestCanonicalChatDetail(room, surface, { includeSlack }).then((result) => {
+          reconcileCanonicalChatResult(result, {
+            chatId:room.chatId,
+            surface,
+            markArrivals:true,
+            readVisible:true,
+          });
         }).catch(() => {});
       }
     }
@@ -13362,7 +13828,8 @@
     }
     // Delivery can happen after navigation. If its room is the visible Chat
     // transcript, receipt of the full payload is itself a read event.
-    readVisibleChatRoom();
+    if (paintSurface) readVisibleChatRoom();
+    else surfaceRenderDeferred = true;
     const configuredDuration = Number(next.ui && next.ui.notificationDurationMs);
     notificationDurationMs = Number.isFinite(configuredDuration) && configuredDuration >= 250
       ? configuredDuration

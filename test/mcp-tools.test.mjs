@@ -43,12 +43,17 @@ test("Claude Code and Codex expose only encrypted Relay operations on an enrolle
   }
   assert.doesNotMatch(E2EE_LOCAL_MCP_INSTRUCTIONS, /mint a link/i);
   assert.match(E2EE_LOCAL_MCP_INSTRUCTIONS, /never supply a plaintext fallback/i);
+  assert.match(E2EE_LOCAL_MCP_INSTRUCTIONS, /relay_chat_send only for explicitly requested plain text.*otherwise use relay_send/i);
 
   for (const name of ["relay_send", "relay_chat_send"]) {
     const tool = tools.find((candidate) => candidate.name === name);
     assert.ok(Object.hasOwn(tool.inputSchema.properties, "files"), "local agents retain file-path attachments");
     assert.match(tool.description, /encrypted by Companion before upload/i);
   }
+  assert.match(
+    tools.find((candidate) => candidate.name === "relay_chat_send").description,
+    /relay_chat_send only for explicitly requested plain text.*otherwise use relay_send/i,
+  );
 });
 
 test("owned chat agent tools are developer-only and update the existing response", async () => {
@@ -183,7 +188,6 @@ test("startup teachings establish Relay as the default medium without losing the
     assert.ok(Buffer.byteLength(instructions, "utf8") <= 2_048, "Claude receives the complete instruction block");
     assert.match(instructions, /^Only send a Relay when the user asks you to send \(or relay\) something to someone\./);
     assert.match(instructions, /default general direct-message and saved-channel communication layer/i);
-    assert.match(instructions, /For that ask, use Relay unless another medium is named/i);
     assert.match(instructions, /explicitly requested other medium overrides/i);
     assert.match(instructions, /mint a link with relay_share_link/i);
     assert.match(instructions, /search relay_inbox_list/i);
@@ -949,6 +953,8 @@ test("chat tools are registered for ordinary accounts and teach the ontology", (
   assert.match(byName.get("relay_inbox_list").description, /relay_chats_list and relay_chat_fetch/);
 
   const reply = byName.get("relay_chat_send").description;
+  assert.match(reply, /relay_chat_send only for explicitly requested plain text/i);
+  assert.match(reply, /otherwise use relay_send.*inside an existing chat/i);
   assert.match(reply, /chatId addresses the room/i);
   assert.match(reply, /does not imply a reply to the newest message/i);
   assert.match(reply, /replyToRelayId only when/i);

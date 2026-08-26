@@ -303,16 +303,24 @@ test("per-party colors are stable across conversations and restarts", () => {
   assert.match(html, /\.th-party\.me \{ color:var\(--muted\); \}/);
 });
 
-test("the user's own messages are labelled 'You' and sit left like every row", () => {
-  assert.match(html, /const mine = m\.direction === "out" && !m\.ownedAgent;/);
+test("every outbound Relay uses the incoming rectangle geometry on the right", () => {
+  assert.match(html, /const mine = m\.direction === "out";/);
+  assert.doesNotMatch(html, /const mine = m\.direction === "out" && !m\.ownedAgent;/,
+    "owned-agent authorship must not move an outbound Relay to the inbound side");
   assert.match(html, /const who = m\.ownedAgent \? ownedAgentName : mine \? me : m\.party;/);
   // "You", not the account name: the pill is a personal surface, only ever
   // read by its owner (Slack shows your name because its rooms are shared).
   assert.match(html, /const me = "You";/);
   assert.match(html, /\$\{mine \? " mine" : ""\}/);
-  // No side-hanging: bare right-hung text without bubbles read as broken
-  // (Sven, restyle round 5). Identity comes from the muted "You" instead
-  // (.th-party.me) — left-aligned like every other row.
+  assert.match(html, /\.th-run\.mine \{ justify-content:flex-end; \}/);
+  assert.match(html, /\.th-msg\.mine \{ margin-left:auto; \}/);
+  assert.match(html, /\.th-msg \{ width:fit-content; min-width:132px; \}/,
+    "incoming and outbound Relays share one width rule");
+  const mineRules = [...html.matchAll(/\.th-msg\.mine\s*\{([^}]*)\}/g)].map((match) => match[1]);
+  assert.equal(mineRules.some((rule) => /(?:^|;)\s*width\s*:/.test(rule)), false,
+    "outbound alignment must not invent a second rectangle width");
+  // Only the rectangle's horizontal edge changes. Its authored content keeps
+  // the exact same reading direction and internal layout as an inbound Relay.
   assert.doesNotMatch(html, /\.th-msg\.mine \{ text-align:right/);
   assert.doesNotMatch(html, /\.th-msg\.mine [^{]*\{ flex-direction:row-reverse/);
 });
@@ -920,11 +928,11 @@ test("every chat-message link uses the theme accent", () => {
     "Markdown links must continue through the safe URL renderer");
 });
 
-// ---- a default reply anchor is not a quote ---------------------------------
-// inReplyToRelayId is Relay's reply-chain key and every sender sets it by
-// default: the room composer anchors to the newest ordinary message, and
-// relay_send tells agents to pass "the newest related Relay". Rendered as a
-// visible reference, that key quoted the line above practically every message.
+// ---- legacy default anchors vs explicit replies ----------------------------
+// Companion <=0.1.289 used inReplyToRelayId as an automatic room-chain key.
+// Modern room sends are naked unless the human opens a Relay or selects Reply,
+// so those explicit gestures must keep their visible reference even when the
+// parent happens to be the immediately preceding message.
 function sliceFunction(src, header) {
   const start = src.indexOf(header);
   assert.notEqual(start, -1, `missing ${header}`);
@@ -940,6 +948,11 @@ function sliceFunction(src, header) {
 }
 const defaultReplyAnchorMap = new Function(
   `${sliceFunction(html, "function defaultReplyAnchorMap(")}; return defaultReplyAnchorMap;`,
+)();
+const messageHasExplicitReplyGesture = new Function(
+  `${sliceFunction(html, "function versionAtLeast(")};`
+    + `${sliceFunction(html, "function messageHasExplicitReplyGesture(")};`
+    + "return messageHasExplicitReplyGesture;",
 )();
 
 test("the message directly above is a default anchor, and reaching past it is not", () => {
@@ -975,10 +988,33 @@ test("a Task in between does not turn the composer's own anchor into a quote", (
   assert.ok(anchors.get("reply").has("request"), "and the message directly above");
 });
 
-test("the reply chip renders only for a deliberate reply still visible in the room", () => {
+test("modern pill reply gestures override the legacy adjacent-anchor suppression", () => {
+  assert.equal(messageHasExplicitReplyGesture({
+    source: { host: "relay-preview", clientVersion: "0.1.289" },
+  }), false, "legacy automatically anchored room messages stay quiet");
+  assert.equal(messageHasExplicitReplyGesture({
+    source: { host: "relay-preview", clientVersion: "0.1.290" },
+  }), true, "the first explicit-addressing Companion release shows the reply");
+  assert.equal(messageHasExplicitReplyGesture({
+    source: { host: "relay-preview", clientVersion: "0.1.402" },
+  }), true, "the reported reader reply is fixed retroactively from provenance");
+  assert.equal(messageHasExplicitReplyGesture({ explicitReply: true }), true,
+    "optimistic and outbox rows show the selected parent before canonical hydration");
+  assert.equal(messageHasExplicitReplyGesture({
+    source: { host: "relay-mcp", clientVersion: "0.1.402" },
+  }), false, "agent reply-chain metadata is not reclassified as a human quote gesture");
+});
+
+test("the reply chip preserves explicit adjacent replies and quiets only legacy defaults", () => {
   assert.match(html, /const defaultReplyAnchorIds = defaultReplyAnchorMap\(thread\.msgs\)/);
   assert.match(html, /const defaults = defaultReplyAnchorIds\.get\(String\(\(message && message\.id\) \|\| ""\)\)/);
-  assert.match(html, /if \(defaults && defaults\.has\(parentId\)\) return "";/);
+  assert.match(html, /if \(!messageHasExplicitReplyGesture\(message\) && defaults && defaults\.has\(parentId\)\) return "";/);
+  assert.match(html, /inReplyToRelayId:r\.id, explicitReply:true/,
+    "the reader reply is visibly anchored on its first optimistic frame");
+  assert.match(html, /explicitReply: Boolean\(entry\.inReplyToRelayId\)/,
+    "the durable outbox projection retains explicit presentation");
+  assert.match(html, /inReplyToRelayId: inReplyToRelayId \|\| "",\s+explicitReply: Boolean\(inReplyToRelayId\)/,
+    "a reply-button send is visibly anchored before canonical hydration");
   // A parent outside the loaded room is indistinguishable from a default
   // anchor, and the default is overwhelmingly the case: say nothing rather
   // than stamp a placeholder on old messages.

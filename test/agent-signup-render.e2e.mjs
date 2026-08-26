@@ -220,7 +220,45 @@ try {
   assert.match(openedWelcome.text, /Relay is connected/);
   rendered.push(await capture(page, "pill-inbox-welcome"));
 
-  assert.equal(rendered.length, 11);
+  await evaluate(page, `(() => {
+    slackConnectionInfo = { state:"disconnected", team:null, personal:null };
+    slackConnectionLoaded = true;
+    slackConnectionError = "";
+    slackConnectionWaiting = false;
+    payload.account = { paired:true, name:"Alex Rivera", email:"alex@example.com" };
+    payload.ui = { ...payload.ui, setupTutorialPending:false };
+    payload.features = { ...payload.features, requests:true };
+    activeView = "slack";
+    commitNavigation({ outerScrollTop:0 });
+    return true;
+  })()`);
+  await waitFor(page, `document.getElementById("slackList").innerText.includes("Connect your Slack to Relay.")`);
+  // This harness deliberately points API traffic at a closed local port. Keep
+  // that transport failure from obscuring the clean disconnected design state
+  // we are measuring; invalidating the in-flight sequence mirrors a newer
+  // successful status result winning the race.
+  await evaluate(page, `(() => { slackConnectionRefreshSeq += 1; slackConnectionError = ""; renderSlack(); return true; })()`);
+  const slackConnectLayout = await evaluate(page, `(() => {
+    const cardRect = document.getElementById("card").getBoundingClientRect();
+    const viewRect = document.querySelector(".slack-connect").getBoundingClientRect();
+    const actionRect = document.getElementById("slackTabConnect").getBoundingClientRect();
+    const footRect = document.querySelector(".slack-connect-foot").getBoundingClientRect();
+    return {
+      tabOrder:[...document.querySelectorAll(".tab:not(.gone)")].map((tab) => tab.getAttribute("data-view")),
+      viewInside:viewRect.left >= cardRect.left && viewRect.right <= cardRect.right && viewRect.top >= cardRect.top,
+      actionInside:actionRect.left >= cardRect.left && actionRect.right <= cardRect.right && actionRect.bottom <= cardRect.bottom,
+      footInside:footRect.left >= cardRect.left && footRect.right <= cardRect.right && footRect.bottom <= cardRect.bottom,
+      escapeCopy:/Not now|Skip for now|Continue without Slack|Finish setup/.test(document.getElementById("slackList").innerText),
+    };
+  })()`);
+  rendered.push(await capture(page, "pill-slack-disconnected"));
+  assert.deepEqual(slackConnectLayout.tabOrder, ["relays", "tasks", "slack", "contacts", "settings"]);
+  assert.equal(slackConnectLayout.viewInside, true, JSON.stringify(slackConnectLayout));
+  assert.equal(slackConnectLayout.actionInside, true, JSON.stringify(slackConnectLayout));
+  assert.equal(slackConnectLayout.footInside, true, JSON.stringify(slackConnectLayout));
+  assert.equal(slackConnectLayout.escapeCopy, false, JSON.stringify(slackConnectLayout));
+
+  assert.equal(rendered.length, 12);
   console.log(JSON.stringify({ ok:true, screenshots:rendered }, null, 2));
 } catch (error) {
   throw new Error(`${error.message}\n${log.slice(-4000)}`);

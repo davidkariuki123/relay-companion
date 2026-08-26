@@ -61,33 +61,139 @@ const COMPANION_VERSION = (() => {
  */
 let dispatcher = null;
 let undiciFetch = null;
-async function keepAliveFetch(url, init) {
-  if (!undiciFetch) {
-    try {
-      const undici = await import("undici");
-      dispatcher = new undici.Agent({
+let transportPromise = null;
+
+const RETRYABLE_TRANSPORT_CODES = new Set([
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "ENETDOWN",
+  "ENETRESET",
+  "EPIPE",
+  "ETIMEDOUT",
+  "EAGAIN",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_BODY_TIMEOUT",
+  "UND_ERR_SOCKET",
+]);
+const RETRYABLE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+async function createRelayTransport() {
+  try {
+    const undici = await import("undici");
+    return {
+      dispatcher: new undici.Agent({
         // Comfortably longer than any poll interval, so the connection is warm
         // when the next request arrives.
         keepAliveTimeout: 60_000,
         keepAliveMaxTimeout: 300_000,
         connections: 8,
-      });
-      undiciFetch = undici.fetch;
-    } catch {
-      // Without undici the client still works; it just pays the handshake again.
-      undiciFetch = (u, i) => fetch(u, i);
-    }
+      }),
+      fetch: undici.fetch,
+    };
+  } catch {
+    // Without undici the client still works; it just pays the handshake again.
+    return { dispatcher: null, fetch: (u, i) => fetch(u, i) };
   }
-  return undiciFetch(url, dispatcher ? { ...init, dispatcher } : init);
+}
+
+async function relayTransport() {
+  if (undiciFetch) return { dispatcher, fetch: undiciFetch };
+  if (!transportPromise) transportPromise = createRelayTransport();
+  const pending = transportPromise;
+  const created = await pending;
+  if (transportPromise !== pending) {
+    // closeRelayConnections() retired this pool while its import was pending.
+    if (created.dispatcher) await created.dispatcher.close().catch(() => {});
+    return relayTransport();
+  }
+  dispatcher = created.dispatcher;
+  undiciFetch = created.fetch;
+  transportPromise = null;
+  return created;
+}
+
+async function keepAliveFetch(url, init, transportRef) {
+  const transport = await relayTransport();
+  // The request body may fail after headers arrive. Retain the exact pool used
+  // by this attempt so a concurrent failure cannot retire a newer pool.
+  if (transportRef) transportRef.current = transport;
+  return transport.fetch(url, transport.dispatcher ? { ...init, dispatcher: transport.dispatcher } : init);
+}
+
+function retireRelayTransport(transport) {
+  if (!transport) return;
+  if (dispatcher === transport.dispatcher && undiciFetch === transport.fetch) {
+    dispatcher = null;
+    undiciFetch = null;
+  }
+  // Graceful close lets unrelated in-flight requests finish on the old pool;
+  // every new request uses the fresh pool immediately.
+  if (transport.dispatcher) void transport.dispatcher.close().catch(() => {});
+}
+
+function transportFailureDetails(error) {
+  let current = error;
+  let code = "";
+  let name = "";
+  for (let depth = 0; current && depth < 8; depth += 1) {
+    if (!code && typeof current.code === "string") code = current.code;
+    if (typeof current.name === "string" && current.name) name = current.name;
+    current = current.cause;
+  }
+  return { code, name: name || "Error" };
+}
+
+function isRetryableTransportFailure(error) {
+  if (!error || Number(error.status || error.statusCode || 0)) return false;
+  const { code } = transportFailureDetails(error);
+  if (RETRYABLE_TRANSPORT_CODES.has(code)) return true;
+  if (error.name === "TimeoutError") return true;
+  // Undici sometimes has no coded cause (notably for a refused local port),
+  // but preserves this stable outer error shape.
+  return error.name === "TypeError" && /fetch failed|network|socket/i.test(String(error.message || ""));
+}
+
+function requestCanRetry(method, body) {
+  if (RETRYABLE_METHODS.has(String(method).toUpperCase())) return true;
+  return Boolean(
+    body
+      && typeof body === "object"
+      && !Array.isArray(body)
+      && typeof body.idempotencyKey === "string"
+      && body.idempotencyKey.trim(),
+  );
+}
+
+function recordTransportFailure(error, attempts) {
+  const { code, name } = transportFailureDetails(error);
+  try {
+    Object.defineProperties(error, {
+      relayTransportCode: { configurable: true, value: code || null },
+      relayTransportCauseName: { configurable: true, value: name },
+      relayTransportAttempts: { configurable: true, value: attempts },
+    });
+  } catch {
+    // Some host errors may be non-extensible. The sanitized log still retains
+    // the useful cause without ever printing request URLs, tokens, or bodies.
+  }
+  return code ? `${code} (${name})` : name;
 }
 
 /** Close the shared connection pool. Tests and short-lived CLIs use this to exit. */
 export async function closeRelayConnections() {
-  if (!dispatcher) return;
   const closing = dispatcher;
+  const pending = transportPromise;
   dispatcher = null;
   undiciFetch = null;
-  await closing.close().catch(() => {});
+  transportPromise = null;
+  const pendingTransport = pending ? await pending.catch(() => null) : null;
+  const pools = new Set([closing, pendingTransport?.dispatcher].filter(Boolean));
+  await Promise.all([...pools].map((pool) => pool.close().catch(() => {})));
 }
 
 const LOCAL_TRANSPORT_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
@@ -148,27 +254,44 @@ export class RelayClient {
     headers["x-relay-client"] = "relay-companion";
     headers["x-relay-send-contract"] = "2";
     if (auth && this.token) headers.Authorization = `Bearer ${this.token}`;
-    const res = await keepAliveFetch(`${this.url}${path}`, {
-      method,
-      headers,
-      body: hasBody ? JSON.stringify(body) : undefined,
-      // A hung request must never stall a caller forever (the pill serializes its
-      // payload pushes behind these calls). 15s is generous for every route we have.
-      signal: AbortSignal.timeout(15000),
-    });
-    const text = await res.text();
-    const data = text ? JSON.parse(text) : {};
-    if (!res.ok) {
-      const err = new Error(data.message || data.error || `HTTP ${res.status}`);
-      err.status = res.status;
-      // The whole body, not a summary of it. A share chat re-keys the moment its
-      // link is claimed, so GET /v1/chats/:chatId answers 410 chat_moved with the
-      // id the room moved to; a caller that only sees the message has nothing to
-      // retry against and prints "conversation deleted" at a live conversation.
-      err.body = data;
-      throw err;
+    const retryable = requestCanRetry(method, body);
+    for (let attempts = 1; attempts <= 2; attempts += 1) {
+      const transportRef = { current: null };
+      try {
+        const res = await keepAliveFetch(`${this.url}${path}`, {
+          method,
+          headers,
+          body: hasBody ? JSON.stringify(body) : undefined,
+          // A hung request must never stall a caller forever (the pill serializes its
+          // payload pushes behind these calls). 15s is generous for every route we have.
+          signal: AbortSignal.timeout(15000),
+        }, transportRef);
+        const text = await res.text();
+        const data = text ? JSON.parse(text) : {};
+        if (!res.ok) {
+          const err = new Error(data.message || data.error || `HTTP ${res.status}`);
+          err.status = res.status;
+          // The whole body, not a summary of it. A share chat re-keys the moment its
+          // link is claimed, so GET /v1/chats/:chatId answers 410 chat_moved with the
+          // id the room moved to; a caller that only sees the message has nothing to
+          // retry against and prints "conversation deleted" at a live conversation.
+          err.body = data;
+          throw err;
+        }
+        return data;
+      } catch (error) {
+        if (!isRetryableTransportFailure(error)) throw error;
+        retireRelayTransport(transportRef.current);
+        const retrying = retryable && attempts === 1;
+        const cause = recordTransportFailure(error, attempts);
+        console.warn(
+          `[relay] API transport ${retrying ? "interrupted" : "failed"}: ${cause}; `
+          + (retrying ? `retrying ${method} once with a fresh connection` : `${method} was not retried`),
+        );
+        if (!retrying) throw error;
+      }
     }
-    return data;
+    throw new Error("Relay transport retry exhausted");
   }
 
   me() {

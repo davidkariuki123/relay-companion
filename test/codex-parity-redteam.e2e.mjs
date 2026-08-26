@@ -155,11 +155,12 @@ try {
       const rect = node?.getBoundingClientRect();
       return Boolean(rect && rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight);
     };
-    const human = document.querySelector('#qrInput');
+    const human = document.querySelector('.ta-note');
     const humanDock = human?.closest('.rd-foot');
     const humanVisible = visible(humanDock);
     const humanRecipient = humanDock?.textContent || "";
-    if (human) { human.value = "idle human draft"; human.dispatchEvent(new Event('input', { bubbles:true })); }
+    const humanStart = Boolean(humanDock?.querySelector('[data-approve="parity_request"]'));
+    if (human) { human.value = "idle start draft"; human.dispatchEvent(new Event('input', { bubbles:true })); }
     document.querySelector('[data-rtab="agent"]')?.click();
     const agent = document.querySelector('.ta-note');
     const agentDock = agent?.closest('.rd-foot');
@@ -167,23 +168,100 @@ try {
     const agentRecipient = agentDock?.textContent || "";
     if (agent) { agent.value = "idle provider draft"; agent.dispatchEvent(new Event('input', { bubbles:true })); }
     const result = {
-      human:Boolean(human), humanVisible, humanRecipient,
+      human:Boolean(human), humanVisible, humanRecipient, humanStart,
       agent:Boolean(agent), agentVisible, agentRecipient,
       start:Boolean(agentDock?.querySelector('[data-approve="parity_request"]')),
       noWork:!document.querySelector('[data-rtab="work"]'),
     };
     document.querySelector('[data-rtab="you"]')?.click();
-    result.humanRestored = document.querySelector('#qrInput')?.value || "";
+    result.humanRestored = document.querySelector('.ta-note')?.value || "";
     document.querySelector('[data-rtab="agent"]')?.click();
     result.agentRestored = document.querySelector('.ta-note')?.value || "";
     return result;
   })()`);
-  check("J01", "idle For-you has a visible human reply composer",
-    idle.human && idle.humanVisible && /Sven Wellmann/.test(idle.humanRecipient), JSON.stringify(idle));
+  check("J01", "idle For-you has the visible Task Start composer",
+    idle.human && idle.humanVisible && idle.humanStart && /Claude Code|Codex|Cowork/.test(idle.humanRecipient), JSON.stringify(idle));
   check("J02", "idle For-agent has a visible Start composer and no Work tab",
     idle.agent && idle.agentVisible && idle.start && idle.noWork && /Claude Code|Codex|Cowork/.test(idle.agentRecipient), JSON.stringify(idle));
-  check("J03", "idle source drafts survive round trips independently",
-    idle.humanRestored === "idle human draft" && idle.agentRestored === "idle provider draft", JSON.stringify(idle));
+  check("J03", "the unstarted Task draft survives across both source faces",
+    idle.humanRestored === "idle provider draft" && idle.agentRestored === "idle provider draft", JSON.stringify(idle));
+
+  await evaluate(page, `(() => {
+    providerAuthInfo = { ok:true, providers:{
+      claude:{ id:"claude", label:"Claude Code", authLoaded:true, installed:true, enabled:true, connected:false, busy:false },
+      codex:{ id:"codex", label:"Codex", authLoaded:true, installed:true, enabled:true, connected:false, busy:false },
+    } };
+    showWorkProviderPrompt("parity_request", "claude");
+    return true;
+  })()`);
+  await sleep(100);
+  const disconnected = await evaluate(page, `(() => {
+    const actions = document.querySelector('.work-connect-actions');
+    const buttons = [...document.querySelectorAll('[data-work-provider]')];
+    return {
+      workSelected:Boolean(document.querySelector('[data-rtab="work"].on')),
+      buttonLabels:buttons.map((button) => button.textContent.replace(/\\s+/g, " ").trim()),
+      logos:buttons.map((button) => button.querySelector('img')?.getAttribute('src') || ""),
+      columns:actions ? getComputedStyle(actions).gridTemplateColumns : "",
+      rawError:/No provider-native Work session/.test(document.querySelector('.work-surface')?.innerText || ""),
+      feedAttached:Boolean(document.querySelector('[data-run-stream="parity_request"]')),
+      composerDisabled:Boolean(document.querySelector('.work-connect-dock .ta-note[disabled]')),
+    };
+  })()`);
+  check("J03b", "unconnected Work shows both native provider choices without fabricating a run",
+    disconnected.workSelected
+      && disconnected.buttonLabels.some((label) => /Connect Codex/.test(label))
+      && disconnected.buttonLabels.some((label) => /Connect Claude Code/.test(label))
+      && disconnected.logos.some((src) => /codexMark\.svg$/.test(src))
+      && disconnected.logos.some((src) => /claudeCodeMark\.svg$/.test(src))
+      && disconnected.columns.split(" ").length === 2
+      && disconnected.composerDisabled
+      && !disconnected.rawError
+      && !disconnected.feedAttached,
+    JSON.stringify(disconnected));
+  const connectedChoice = await evaluate(page, `(async () => {
+    providerAuthInfo.providers.codex.connected = true;
+    renderReader();
+    document.querySelector('[data-work-provider="codex"]')?.click();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    return {
+      promptGone:!document.querySelector('.work-connect'),
+      agentSelected:Boolean(document.querySelector('[data-rtab="agent"].on')),
+      agentLabel:document.querySelector('[data-rtab="agent"]')?.textContent.trim() || "",
+      acceptVisible:Boolean(document.querySelector('[data-approve="parity_request"]')),
+    };
+  })()`);
+  check("J03c", "choosing a ready provider returns to the normal Task composer",
+    connectedChoice.promptGone && connectedChoice.agentSelected && /Codex/.test(connectedChoice.agentLabel) && connectedChoice.acceptVisible,
+    JSON.stringify(connectedChoice));
+  const legacyCompleted = await evaluate(page, `(() => {
+    const row = (payload.relays || []).find((item) => item.id === "parity_request");
+    workProviderPrompts.delete("parity_request");
+    providerAuthInfo = null;
+    clearRowNote("parity_request");
+    row.taskCompletedAt = "2026-08-14T08:05:00.000Z";
+    taskLocal.delete("parity_request");
+    readerWorkVisible = true;
+    readerTab = "work";
+    renderReader();
+    const result = {
+      text:document.querySelector('.work-surface')?.innerText || "",
+      feedAttached:Boolean(document.querySelector('[data-run-stream="parity_request"]')),
+      neutralDock:Boolean(document.querySelector('.work-footer button[disabled]')),
+    };
+    delete row.taskCompletedAt;
+    readerWorkVisible = false;
+    readerTab = "agent";
+    renderReader();
+    return result;
+  })()`);
+  check("J03d", "completed legacy Tasks show a neutral unavailable-history state",
+    /Task is complete/.test(legacyCompleted.text)
+      && /Live Work history is unavailable/.test(legacyCompleted.text)
+      && !/No provider-native Work session/.test(legacyCompleted.text)
+      && !legacyCompleted.feedAttached
+      && legacyCompleted.neutralDock,
+    JSON.stringify(legacyCompleted));
 
   const liveFeed = {
     ok:true, relayId:"parity_request", provider:"codex", liveState:"active", revision:1,
