@@ -315,7 +315,7 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
       replyInputEl.disabled = starting;
       replyButtonEl.disabled = starting;
       replyButtonEl.setAttribute("aria-disabled", starting ? "true" : "false");
-      replyButtonEl.textContent = starting ? "Accepting…" : "Accept";
+      replyButtonEl.textContent = starting ? "Starting…" : "Start task";
       safetyButtonEl.classList.remove("gone");
       safetyButtonEl.disabled = starting || reviewingSafety;
       safetyButtonEl.textContent = reviewingSafety ? "Reviewing…" : "Review Safety";

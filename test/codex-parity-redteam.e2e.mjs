@@ -135,17 +135,17 @@ try {
   // test-only closure seam so this probe exercises the real Task reader
   // without coupling the parity gate to a particular persisted schema.
   for (let i = 0; i < 80; i += 1) {
-    if (await evaluate(page, `typeof window.__relayParityOpenTask === "function"`)) break;
+    if (await evaluate(page, `typeof window.__relayParityOpenRequest === "function"`)) break;
     await sleep(100);
   }
-  const requestOpened = await evaluate(page, `window.__relayParityOpenTask?.({
+  const requestOpened = await evaluate(page, `window.__relayParityOpenRequest?.({
       id:"parity_request", direction:"inbound", state:"read", relayNotificationKind:"task",
       senderName:"Sven Wellmann", title:"Verify native runner parity",
       forHuman:"Please verify the runner.", forAgent:"Exercise every native turn state.",
       createdAt:"2026-08-14T08:00:00.000Z", updatedAt:"2026-08-14T08:00:00.000Z"
     })`);
   if (!requestOpened) {
-    const fixtureDiagnostics = await evaluate(page, `({ testOverlay:window.relay?.isTestOverlay, hook:typeof window.__relayParityOpenTask, href:location.href })`);
+    const fixtureDiagnostics = await evaluate(page, `({ testOverlay:window.relay?.isTestOverlay, hook:typeof window.__relayParityOpenRequest, href:location.href })`);
     throw new Error(`The isolated Task fixture seam was unavailable: ${JSON.stringify(fixtureDiagnostics)}`);
   }
   await sleep(200);
@@ -200,7 +200,7 @@ try {
   await evaluate(page, `(() => {
     const id = "parity_request";
     const feed = ${JSON.stringify(liveFeed)};
-    stopRunFeed(id); runFeedPending.add(id); runFeedSeen.set(id, feed); requestLocal.set(id, "running"); readerWorkVisible = true; readerTab = "work";
+    stopRunFeed(id); runFeedPending.add(id); runFeedSeen.set(id, feed); taskLocal.set(id, "running"); readerWorkVisible = true; readerTab = "work";
     renderReader(); paintRunStream(id, feed); return true;
   })()`);
   await sleep(100);
@@ -246,7 +246,7 @@ try {
   const stopped = await evaluate(page, `(() => {
     const row = (payload.relays || []).find((item) => item.id === "parity_request");
     row.codexThreadId = "fixture-thread"; row.ranOnCodex = true;
-    requestLocal.set("parity_request", "stopped"); readerTab = "work"; readerWorkVisible = true; renderReader();
+    taskLocal.set("parity_request", "stopped"); readerTab = "work"; readerWorkVisible = true; renderReader();
     const dock = document.querySelector('.work-footer .ta-dock');
     const statusText = document.querySelector('.work-footer')?.textContent || "";
     const withSession = {
@@ -262,7 +262,7 @@ try {
       visible:Boolean(retryDock?.getBoundingClientRect().height),
     };
     row.codexThreadId = "fixture-thread"; row.ranOnCodex = true;
-    requestLocal.set("parity_request", "running"); readerTab = "work"; renderReader(); paintRunStream("parity_request", ${JSON.stringify(liveFeed)});
+    taskLocal.set("parity_request", "running"); readerTab = "work"; renderReader(); paintRunStream("parity_request", ${JSON.stringify(liveFeed)});
     return { withSession, withoutSession };
   })()`);
   check("J05", "stopped native Work explains failure and offers a visible follow-up",
@@ -488,6 +488,14 @@ try {
       title:"machine completion",
       forAgent:"Provider-owned completion detail stays on the Task.",
     };
+    const inboundCompletion = {
+      id:"inbound-provider-completion", threadId:"parity_request", inReplyToRelayId:"parity_request",
+      relayNotificationKind:"plain_relay", type:"completion", title:"incoming completion",
+      forHuman:"Incoming human result", forAgent:"Incoming agent handoff",
+      senderName:"Sven Wellmann", senderEmail:"sven@example.com",
+      createdAt:"2026-08-14T08:06:00.000Z",
+    };
+    payload.relays = [...(payload.relays || []), inboundCompletion];
     payload.sent = [...(payload.sent || []), reply, completion];
     const rows = threadMessages();
     const projected = rows.find((row) => row.id === reply.relayId);
@@ -495,15 +503,22 @@ try {
       visible:Boolean(projected),
       text:projected?.body || "",
       party:projected?.party || "",
-      completionHidden:!rows.some((row) => row.id === completion.relayId),
+      completion:rows.find((row) => row.id === completion.relayId) || null,
+      inboundCompletion:rows.find((row) => row.id === inboundCompletion.id) || null,
       joinsRoom:projected ? sameDirectParty(projected, "email:sven@example.com", "sven wellmann") : false,
     };
   })()`);
   check("P16e", "a For-you reply on a Task thread appears in the person's conversation",
     requestReplyProjection.visible && requestReplyProjection.text === "Visible human reply" && requestReplyProjection.joinsRoom,
     JSON.stringify(requestReplyProjection));
-  check("P16f", "machine completion traffic remains on the Task",
-    requestReplyProjection.completionHidden, JSON.stringify(requestReplyProjection));
+  check("P16f", "completion closes the loop in chat as a two-document Relay",
+    requestReplyProjection.completion?.body === "Visible human reply" &&
+      requestReplyProjection.completion?.textLike === false &&
+      requestReplyProjection.completion?.agent === "Provider-owned completion detail stays on the Task." &&
+      requestReplyProjection.inboundCompletion?.body === "Incoming human result" &&
+      requestReplyProjection.inboundCompletion?.textLike === false &&
+      requestReplyProjection.inboundCompletion?.agent === "Incoming agent handoff",
+    JSON.stringify(requestReplyProjection));
 
   await evaluate(page, `paintRunStream("parity_request", ${JSON.stringify(doneFeed)}); true`);
   await page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });

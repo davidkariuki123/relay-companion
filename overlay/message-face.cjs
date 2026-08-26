@@ -45,8 +45,8 @@ function isChatMessage(row = {}) {
   // A task owns its own reading surface regardless of which document happens
   // to be populated.
   if (row && row.taskId) return false;
-  // This is the product discriminator. `type=completion` is transport/control
-  // metadata, not permission to render one human document twice as a Relay.
+  // This is the product discriminator. A typed Task completion with both
+  // documents is still a Relay when it returns to the person's conversation.
   if (row && (row.hasAgentDocument === true || String(row.forAgent || "").trim())) return false;
   return Boolean(String((row && row.forHuman) || "").trim());
 }

@@ -52,7 +52,7 @@ test("agent and system output keeps the reading face whatever its title says", (
   assert.equal(
     openingFaceFor(chatMessage({ type: "completion", forAgent: "Agent verification detail" })),
     "message",
-    "two-document completion is a Relay",
+    "a two-document completion is a Relay",
   );
   // A plain person-to-person relay is exactly what DOES open in the conversation.
   assert.equal(openingFaceFor(chatMessage({ relayNotificationKind: "plain_relay" })), "chat");

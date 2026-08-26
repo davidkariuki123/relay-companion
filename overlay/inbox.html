@@ -1583,6 +1583,9 @@
      two stacked hairlines read as competing chrome (David). */
   .reader-bar { display:flex; align-items:center; gap:9px; padding:12px 16px; }
   .reader-name { font-family:var(--sans); font-size:13px; font-weight:600; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .reader-delete { appearance:none; width:25px; height:25px; margin-left:auto; flex:0 0 25px; display:flex; align-items:center; justify-content:center; border:0; border-radius:var(--r-1); background:transparent; color:var(--muted-3); cursor:pointer; transition:color var(--t-fast) var(--settle), background var(--t-fast) var(--settle); }
+  .reader-delete:hover { color:var(--danger); background:var(--danger-soft); }
+  .reader-delete:disabled { opacity:.45; cursor:default; }
   .reader-meta { padding:14px 16px 0; }
   .reader-subject { font-family:var(--serif); font-size:17px; font-weight:500; line-height:1.3; letter-spacing:-.005em; color:var(--ink); }
   .reader-from { display:flex; gap:7px; align-items:baseline; margin-top:6px; font-family:var(--sans); font-size:11.5px; color:var(--muted-2); }
@@ -2056,13 +2059,20 @@
   .tb-row .th-title { margin-top:0; color:var(--muted); }
   .tb-row.unread .th-title { color:var(--ink); font-weight:500; }
   .tb-sub { font-family:var(--sans); font-size:10px; color:var(--muted-2); margin-top:3px; }
-  /* Quiet like everything else on a row — the filled accent chip per row was
-     the board's loudest voice. Ghost until hovered. */
-  /* The row's control speaks the list's whisper grammar — mono, unboxed,
-     sitting where the row's metadata lives; a ghost until hovered. A bordered
-     accent pill mid-row was furniture (David). */
-  .tb-go { flex:0 0 auto; appearance:none; cursor:pointer; background:none; border:0; font-family:var(--mono); font-size:10px; letter-spacing:.04em; color:var(--muted-3); padding:3px 5px; margin-top:2px; border-radius:6px; transition:color var(--t-fast) var(--settle), background var(--t-fast) var(--settle); }
+  .tb-actions { flex:0 0 auto; display:flex; align-items:center; gap:3px; margin-left:8px; }
+  /* Task verbs should feel human, not terminal-like: warm Inter, unboxed, and
+     visible enough to make a waiting Task immediately actionable. */
+  .tb-go { flex:0 0 auto; appearance:none; cursor:pointer; background:none; border:0; font-family:var(--sans); font-size:10.5px; font-weight:600; letter-spacing:0; color:var(--accent); padding:3px 5px; border-radius:6px; transition:color var(--t-fast) var(--settle), background var(--t-fast) var(--settle); }
   .tb-go:hover { color:var(--ink); background:var(--wash); }
+  .tb-delete { appearance:none; width:21px; height:21px; flex:0 0 21px; display:flex; align-items:center; justify-content:center; border:0; border-radius:6px; background:transparent; color:var(--muted-3); cursor:pointer; opacity:.7; transition:opacity var(--t-fast) var(--settle), color var(--t-fast) var(--settle), background var(--t-fast) var(--settle); }
+  .tb-row:hover .tb-delete, .tb-delete:focus-visible { opacity:1; }
+  .tb-delete:hover { color:var(--danger); background:var(--danger-soft); }
+  .tb-delete:disabled { opacity:.35; cursor:default; }
+  .tb-working { display:inline-flex; align-items:center; color:var(--accent); font-family:var(--sans); font-size:10.5px; font-weight:500; white-space:nowrap; }
+  .tb-working-orb { position:relative; width:6px; height:6px; flex:0 0 6px; margin-right:7px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 11%, transparent); animation:taskWorkingBreathe 1.8s cubic-bezier(.4,0,.2,1) infinite; }
+  .tb-working-orb::after { content:""; position:absolute; left:1px; top:1px; width:2px; height:2px; border-radius:50%; background:color-mix(in srgb, white 70%, var(--accent)); opacity:.7; }
+  @keyframes taskWorkingBreathe { 0%,100% { opacity:.62; transform:scale(.88); box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 8%, transparent); } 50% { opacity:1; transform:scale(1); box-shadow:0 0 0 4px color-mix(in srgb, var(--accent) 15%, transparent); } }
+  @media (prefers-reduced-motion:reduce) { .tb-working-orb { animation:none; opacity:1; } }
   /* The room composer owns an opaque dock, not just an opaque capsule. Chat
      history may scroll behind this layer, but it must never remain legible in
      the gutter or below the field (the same solid-foot contract as Codex and
@@ -3742,13 +3752,8 @@
   // Tasks/share approvals are hidden from the pill until that product surface is ready.
   const RELAY_HIDDEN_KINDS = new Set(["task_request", "task", "share_approval"]); // requests live on their own board
   function isRelayListKind(row) {
-    // A two-document completion is an agent's report on a Task and stays on
-    // that Task's page. A human-only completion is ordinary correspondence:
-    // the wire marker must not make a text disappear from its person's room.
-    if (
-      String((row && row.type) || "") === "completion" &&
-      String((row && row.forAgent) || "").trim()
-    ) return false;
+    // A typed completion remains a normal two-document Relay in correspondence
+    // even though the same envelope is also the Task's canonical result.
     return !RELAY_HIDDEN_KINDS.has(row && row.relayNotificationKind);
   }
 
@@ -4271,8 +4276,8 @@
     // live Sent rows, deduplicates group fan-out siblings, and keeps optimistic
     // sends visible while the Sent projection catches up. A Task root is
     // correspondence too: it appears in the room, so it must also be allowed
-    // to become that room's latest preview. Only its progress and completion
-    // stay exclusively on the Tasks surface.
+    // to become that room's latest preview. Progress stays exclusively on the
+    // Tasks surface; the terminal completion Relay also closes the loop here.
     const allRows = threadMessages()
       .sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
     const identityRows = relayIdentityRows();
@@ -5963,7 +5968,7 @@
     return idleRunDockHtml(r, {
       inline,
       draft,
-      label: "Accept",
+      label: "Start task",
       actions: scheduleActionsHtml(r),
     });
   }
@@ -6872,6 +6877,7 @@
     readerWorkVisible = Boolean(hasWork);
     const onWork = hasWork && readerTab === "work";
     const onAgent = Boolean(agentText || request) && readerTab === "agent";
+    const requestActionable = request && ["waiting", "parked", "stopped"].includes(taskBoardState(r.id));
     const animateWork = hasWork && Date.now() < (workTabAnimateUntil.get(String(r.id)) || 0);
     const tabs = (request || agentText) ? `
       <div class="fold-tabs" data-stop="1">
@@ -6907,12 +6913,13 @@
     const composer = (() => { try { return composerHtml(); } catch (error) { console.error("[reader] composer failed:", error); return ""; } })();
     const sharedShelf = relaySharedShelf(r);
     function composerHtml() {
-      // The visible source document owns the addressee even after Work exists.
-      // For you is always a human reply; For <agent> starts or continues the
-      // provider turn; Work continues that same provider turn. Previously any
+      // An unstarted Task is actionable from either immutable source document:
+      // both For you and For <agent> expose the same Start task dock. Once it
+      // starts, each visible source document owns its usual addressee and Work
+      // continues the provider turn. Previously any
       // existing Work hid the entire source-document footer, which left both
       // immutable documents looking like dead pages after a run completed.
-      if (request && (onAgent || onWork)) return requestDockHtml(r, { inline: true });
+      if (request && (onAgent || onWork || requestActionable)) return requestDockHtml(r, { inline: true });
       // TWO OUTCOMES, NO IN-BETWEEN (Sven): a message is either replied to
       // or opened in your agent. On the agent document the reply belongs to
       // the other face; here the one verb is the open — the same row the room
@@ -6949,6 +6956,7 @@
           <svg width="8" height="13" viewBox="0 0 8 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M7 1L1 7l6 6"/></svg>
         </button>
         <span class="reader-name">${esc(sender)}</span>
+        ${request ? `<button class="reader-delete" type="button" data-reader-delete="${esc(r.id)}" aria-label="Move task to Recently Deleted" title="Move task to Recently Deleted"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button>` : ""}
       </div>
       ${tabs}
       ${onWork ? `<div class="work-surface${transitioningToWork ? " work-entering" : ""}" data-work-active="${runState === "running"}">
@@ -6969,6 +6977,26 @@
       readerBodyEl.querySelector(".work-surface")?.classList.remove("work-entering");
     }, Math.max(0, transition.until - Date.now()) + 20);
     document.getElementById("readerBack").addEventListener("click", (e) => { e.stopPropagation(); closeReader(); });
+    const readerDelete = readerBodyEl.querySelector("[data-reader-delete]");
+    if (readerDelete) readerDelete.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      if (readerDelete.disabled) return;
+      readerDelete.disabled = true;
+      try {
+        const res = await window.relay.deleteRelay(r.id);
+        if (!res || res.ok === false) {
+          setRowNote(r.id, (res && res.error) || "Could not move this task to Recently Deleted.", "err");
+          readerDelete.disabled = false;
+          renderReader();
+          return;
+        }
+        closeReader();
+      } catch (error) {
+        setRowNote(r.id, (error && error.message) || "Could not move this task to Recently Deleted.", "err");
+        readerDelete.disabled = false;
+        renderReader();
+      }
+    });
     for (const b of readerBodyEl.querySelectorAll("[data-rtab]")) {
       b.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -7173,19 +7201,19 @@
           <span class="avatar sm" style="--av-h:${avatarHue(sender)}" aria-hidden="true">${esc(avatarInitials(sender))}</span>
           <div class="tb-main">
             <div class="th-top"><span class="th-party">${esc(sender)}</span><span class="th-time">${esc(timeAgo(r.createdAt))}</span></div>
-            <div class="rk-line"><span class="th-title">${esc(title)}</span>${renderRight(r)}</div>
+            <div class="rk-line"><span class="th-title">${esc(title)}</span><span class="tb-actions">${renderRight(r)}<button class="tb-delete" type="button" data-task-delete="${esc(r.id)}" data-stop="1" aria-label="Move task to Recently Deleted" title="Move task to Recently Deleted"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button></span></div>
+            <div class="row-err${rowNotes.get(r.id)?.cls === "ok" ? " ok" : ""}" data-err="${esc(r.id)}" data-stop="1">${esc(rowNotes.get(r.id)?.text || "")}</div>
           </div>
         </div>`;
       }).join("")}` : "";
     // Group membership IS the status: a "parked" chip on a row under a
     // "Parked" header, plus a note saying it again, said one thing three
     // times (Sven). Rows carry no status chips and no notes — moving between
-    // groups is the feedback. Only Waiting rows carry a control.
-    // The row's one control is NOT NOW — never Start: nobody should ignite a
-    // job off its title alone. Starting requires opening the Task and seeing
-    // at least the For-you document (David's rule); parking shouldn't.
+    // groups is the feedback. Waiting rows carry a direct Start task verb;
+    // every row carries the quiet, recoverable Recently Deleted affordance.
     tasksListEl.innerHTML =
-      section("Waiting on you", groups.waiting, (r) => `<button class="tb-go" type="button" data-request-later="${esc(r.id)}">not now</button>`)
+      section("Working", groups.running, () => `<span class="tb-working"><span class="tb-working-orb" aria-hidden="true"></span>Working</span>`)
+      + section("Waiting on you", groups.waiting, (r) => `<button class="tb-go" type="button" data-approve="${esc(r.id)}">Start task</button>`)
       + section("On a schedule", groups.scheduled, (r) => {
           const sc = scheduleFor(r.id) || {};
           const phrase = sc.state === "paused"
@@ -7193,7 +7221,6 @@
             : `${esc(sc.cadence || "")}${sc.countdown ? ` · ${esc(sc.countdown)}` : ""}`;
           return `<span class="tb-when">${phrase}</span>`;
         })
-      + section("Working", groups.running, () => "")
       + section("Ready for your review", groups.review, () => "")
       // The state's name is the fact: it began, the agent is gone, and nothing
       // came back. "Stopped" named nothing and told the reader nothing to do
@@ -7243,15 +7270,25 @@
         }).catch((err) => { taskLocal.delete(id); setRowNote(id, String(err && err.message || err).slice(0, 120), "err"); renderAll(); });
       });
     }
-    for (const btn of tasksListEl.querySelectorAll("[data-request-later]")) {
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const id = btn.getAttribute("data-request-later");
-        taskLocal.set(id, "parked");
-        window.relay.ack(id);
+    for (const btn of tasksListEl.querySelectorAll("[data-task-delete]")) {
+      btn.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        if (btn.disabled) return;
+        const id = btn.getAttribute("data-task-delete");
+        btn.disabled = true;
         clearRowNote(id);
-        renderTasksBoard();
-        renderAll();
+        try {
+          const res = await window.relay.deleteRelay(id);
+          if (!res || res.ok === false) {
+            setRowNote(id, (res && res.error) || "Could not move this task to Recently Deleted.", "err");
+            btn.disabled = false;
+            renderTasksBoard();
+          }
+        } catch (error) {
+          setRowNote(id, (error && error.message) || "Could not move this task to Recently Deleted.", "err");
+          btn.disabled = false;
+          renderTasksBoard();
+        }
       });
     }
     wireRequestControls(tasksListEl, () => { renderTasksBoard(); renderAll(); });
@@ -9306,12 +9343,9 @@
   function isCompletionRelay(r) {
     return String((r && r.type) || "") === "completion";
   }
-  // A REQUEST OWNS ITS THREAD. Everything hanging off a request — the start
-  // receipt, progress notes, the completion — belongs to that request's page,
-  // where the run view shows it. None of it is correspondence, so none of it
-  // appears in Relays or in Chat (David: "this started the task thing shouldn't
-  // fucking open up a chat. It should open up the task relay with the live
-  // runner in it").
+  // A REQUEST OWNS ITS EXECUTION THREAD. Start receipts and progress notes
+  // belong to the Task run view. The completion is the boundary: the same
+  // two-document Relay closes the loop in the person's room and the Task.
   function requestThreadIds() {
     const ids = new Set();
     for (const r of payload.relays || []) {
@@ -9390,8 +9424,8 @@
     for (const r of payload.relays || []) {
       // The REQUEST ROOT is correspondence: the sender delivered a named job
       // to this person, so it must be visible in their room like any other
-      // relay. Two-document progress/completion stays on the Tasks page;
-      // human-only correspondence stays in the room.
+      // relay. Progress stays on the Tasks page; the terminal completion Relay
+      // also returns to this room with both of its documents intact.
       const request = isTaskRow(r);
       if (!request && !isRelayListKind(r)) continue;
       const sentTwin = sentByRelayId.get(String(r.id || r.relayId || ""));
@@ -9403,11 +9437,10 @@
       ));
       const subj = relaySubject(r);
       const ownedAgent = r.source?.host === "relay-agent-run";
+      const completion = isCompletionRelay(r);
       const textLike = request ? false : ownedAgent || relayTextLike(r.forHuman, subj, r.forAgent);
-      // Two-document execution output stays on the Task reading surface.
-      // A human-only completion is a text message despite its control-plane
-      // marker, and belongs in the room like the server chat projection shows.
-      if ((isCompletionRelay(r) || (!request && onRequestThread(r, reqThreads))) && !textLike) continue;
+      // Non-completion execution output stays on the Task reading surface.
+      if (!completion && !request && onRequestThread(r, reqThreads) && !textLike) continue;
       msgs.push({
         id: r.id, threadId: r.threadId || r.id, direction: selfAuthored ? "out" : "in",
         seen: sentTwin ? sentIsRead(sentTwin) : false,
@@ -9468,11 +9501,8 @@
       const id = s.relayId || s.id;
       if (!id || inboundIds.has(id)) continue;
       const request = String(s.kind || "") === "task" || String(s.kind || "") === "task_request";
-      // A two-document provider completion stays on the Task. A human-only
-      // completion is ordinary correspondence and stays in the conversation.
       const ownedAgent = s.source?.host === "relay-agent-run";
       const sentTextLike = request ? false : ownedAgent || relayTextLike(s.forHuman, sentSubject(s), s.forAgent);
-      if (isCompletionRelay(s) && !sentTextLike) continue;
 
       if (s.groupSendId) {
         if (seenGroupSends.has(s.groupSendId)) continue;
@@ -9532,8 +9562,7 @@
           const body = String(s.forHuman || "");
           const subj = String(sentSubject(s) || "");
           if (!body || !subj) return "";
-          const textLike = relayTextLike(body, subj, s.forAgent);
-          return textLike ? "" : bodyPreview(body, subj, 72);
+          return sentTextLike ? "" : bodyPreview(body, subj, 72);
         })(),
       });
     }

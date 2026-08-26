@@ -742,10 +742,12 @@ test("requests stay on the board for control and appear in chat as delivered cor
   assert.match(html, /\.tb-row\.unread \.th-title \{ color:var\(--ink\); font-weight:500; \}/);
   assert.match(html, /const expandedRequestIds = new Set\(\)/);
   // The request ROOT is visible in the person's chat, labelled as a Task;
-  // progress/completion and execution controls remain on the board/reader.
+  // progress and execution controls remain on the board/reader. The terminal
+  // completion Relay also returns to chat with both documents intact.
   assert.match(html, /const request = isTaskRow\(r\)/);
   assert.match(html, /if \(!request && !isRelayListKind\(r\)\) continue;/);
   assert.match(html, /const textLike = request \? false : ownedAgent \|\| relayTextLike/);
+  assert.match(html, /if \(!completion && !request && onRequestThread/, "completion bypasses the execution-only filter");
   assert.match(html, /m\.request \? '<span class="kchip">Task<\/span>'/);
   assert.match(html, /m\.request \? "tasks" : "threads"/);
   // The dock's composer never clips: inputs must be allowed to shrink.
@@ -755,7 +757,7 @@ test("requests stay on the board for control and appear in chat as delivered cor
   // "it says parked in about 3 places").
   // TWO STATES, NOT THREE: a message sent into a finished run continues it
   // rather than starting it again, so the word is "Working" throughout.
-  assert.match(html, /\+ section\("Working", groups\.running, \(\) => ""\)/);
+  assert.match(html, /section\("Working", groups\.running, \(\) => `<span class="tb-working"><span class="tb-working-orb"/);
   assert.match(html, /\+ section\("Parked", groups\.parked, \(\) => ""\)/);
   assert.doesNotMatch(html, /tb-status/);
   // A folded task row is EXACTLY a list row: disc, name + time, serif title,
@@ -790,10 +792,11 @@ test("the agent document, not title similarity, distinguishes text from a Relay"
   const listGate = html.slice(html.indexOf("function isRelayListKind"), html.indexOf("function relaySubject"));
   assert.match(classifier, /!String\(forAgent \|\| ""\)\.trim\(\)/);
   assert.doesNotMatch(classifier, /b === s|startsWith/);
-  assert.match(listGate, /type\) \|\| ""\) === "completion"/);
-  assert.match(listGate, /row\.forAgent/, "only two-document completions stay off the correspondence list");
+  assert.doesNotMatch(listGate, /row\.forAgent|String\(\(row && row\.type/, "completion's human result remains correspondence");
   assert.match(html, /const textLike = request \? false : ownedAgent \|\| relayTextLike\(r\.forHuman, subj, r\.forAgent\)/);
   assert.match(html, /const sentTextLike = request \? false : ownedAgent \|\| relayTextLike\(s\.forHuman, sentSubject\(s\), s\.forAgent\)/);
+  assert.match(html, /agent: String\(r\.forAgent \|\| ""\)/, "inbound completion keeps its agent document");
+  assert.match(html, /agent: String\(s\.forAgent \|\| ""\)/, "outbound completion keeps its agent document");
 });
 
 test("opening a conversation reads ALL of it — never a per-message click", () => {
@@ -874,7 +877,7 @@ test("hand-offs speak in conversation terms: starts vs continues, said BEFORE th
   // person, while For Agent starts or continues Work.
   assert.doesNotMatch(html, /data-reply-mode|__relayToggleReplyMode|replyTarget\(/);
   assert.doesNotMatch(html, /Talk to \$\{esc\(app\)\}|Reply to \$\{esc/);
-  assert.match(html, /if \(request && \(onAgent \|\| onWork\)\) return requestDockHtml\(r, \{ inline: true \}\)/);
+  assert.match(html, /if \(request && \(onAgent \|\| onWork \|\| requestActionable\)\) return requestDockHtml\(r, \{ inline: true \}\)/);
   assert.match(html, /if \(onAgent \|\| onWork\) return relayWorkDockHtml\(r, \{ inline: true \}\)/);
   assert.match(html, /data-work-start="\$\{esc\(r\.id\)\}"/);
   assert.match(html, /<button type="button" id="qrSend">Send<\/button>/);

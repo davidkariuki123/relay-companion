@@ -310,6 +310,7 @@ test("relay_send forwards an ordinary relay payload to the API client", async ()
     kind: "message",
     title: "Checking in today",
     forHuman: "How are you doing?",
+    forAgent: "No additional action is needed; this is a personal check-in.",
     idempotencyKey: "idem_relay_send_1",
   });
 
@@ -389,7 +390,9 @@ test("ordinary Relay MCP directs Claude and Codex to the membership-scoped Granu
   assert.match(agentDescription, /complete document/i);
   assert.match(agentDescription, /under-sending here is worse than over-sending/i);
   assert.match(agentDescription, /do not repeat forHuman/i);
-  assert.equal(send.inputSchema.required.includes("forAgent"), false);
+  assert.match(agentDescription, /Draft it first for every Relay/i);
+  assert.match(agentDescription, /Never leave it empty/i);
+  assert.equal(send.inputSchema.required.includes("forAgent"), true);
   assert.doesNotMatch(send.description, /REQUEST RETURN CHANNEL/);
   assert.match(send.description, /attach their provider's final answer automatically/);
   assert.match(send.description, /do not call relay_send merely/i);
@@ -433,6 +436,7 @@ test("ordinary accounts list only messaging tools and reject developer operation
       kind: "message",
       title: "Owner message update",
       forHuman: "Please handle this.",
+      forAgent: "The recipient should handle the item described in the human message.",
       idempotencyKey: "messages_only_send_1",
     },
     { features: ordinaryFeatures },
@@ -472,6 +476,7 @@ test("relay_send turns local files into inline ordinary relay attachments", asyn
     kind: "message",
     title: "Local guide attached",
     forHuman: "Here you go",
+    forAgent: "The attached local guide is the complete document being shared.",
     files: [filePath],
     idempotencyKey: "idem_relay_file_1",
   });
@@ -501,6 +506,7 @@ test("relay_send delivers a zero-byte local attachment directly to self", async 
     kind: "message",
     title: "Test document for myself",
     forHuman: "Saving this here.",
+    forAgent: "The attached empty test document is intentionally zero bytes.",
     files: [filePath],
     idempotencyKey: "idem_relay_self_file_1",
   });
@@ -532,6 +538,7 @@ test("relay_send scopes generated ordinary attachment ids to the send idempotenc
       kind: "message",
       title: "Repeatable guide attached",
       forHuman: "Here you go",
+      forAgent: "The attached guide should keep a stable attachment id for an idempotent retry.",
       files: [filePath],
       idempotencyKey,
     });
@@ -566,6 +573,7 @@ test("relay_send tells the agent to clean up an auto-created contact", async () 
     kind: "message",
     title: "Checking in today",
     forHuman: "How are you doing?",
+    forAgent: "No additional action is needed; this is a personal check-in.",
     idempotencyKey: "idem_relay_send_2",
   });
 
@@ -710,6 +718,7 @@ test("relay_send separates conversation addressing from an explicit quoted reply
         kind: "message",
         title: "Pill restyle final for now",
         forHuman: "…",
+        forAgent: "This is the final update about the pill restyle work.",
         threadTitle: "Legacy caller value must be dropped",
         idempotencyKey: "idem_relay_send_hint",
       })
@@ -733,6 +742,7 @@ test("a send with no threading hint and a clean contact is passed through untouc
         kind: "message",
         title: "Checking in today",
         forHuman: "…",
+        forAgent: "No additional action is needed; this is a personal check-in.",
         idempotencyKey: "idem_relay_send_clean",
       })
     ).content[0].text,
@@ -1384,6 +1394,7 @@ test("relay_send accepts the 95-word review boundary without making it a target"
     kind: "message",
     title: "Review boundary proof",
     forHuman,
+    forAgent: "This payload proves that exactly 95 forHuman words remain within the boundary.",
     idempotencyKey: "human_review_boundary_1",
   });
   assert.equal(calls.length, 1);
@@ -1636,6 +1647,7 @@ test("a mint runs the 95-word review before it reads a single file", async () =>
       kind: "message",
       title: "Checking in today",
       forHuman: draft,
+      forAgent: "This call verifies that relay_send and relay_share_link keep independent review state.",
       idempotencyKey: "idem_share_review_2",
     }),
     /review threshold is 95 words/,

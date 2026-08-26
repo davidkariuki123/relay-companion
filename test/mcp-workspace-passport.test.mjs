@@ -36,6 +36,7 @@ async function sendWith(repo) {
     kind: "message",
     title: "Workspace passport proof",
     forHuman: "Please check this.",
+    forAgent: "This Relay verifies that only the explicitly declared repository subject becomes a workspace passport.",
     idempotencyKey: `idem_${Math.abs(Math.random() * 1e9) | 0}`,
     ...(repo === undefined ? {} : { repo }),
   });

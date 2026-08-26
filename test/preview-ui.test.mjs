@@ -493,12 +493,12 @@ test("the task face's ignition is wired end to end: preload, IPC guard, renderer
   assert.doesNotMatch(start, /if \(host === "codex"\) openPacket/);
   // The renderer routes Enter through the ignition while in task mode.
   assert.match(previewRenderer, /if \(taskMode\) \{\s*await submitStart\(\);/);
-  assert.match(previewRenderer, /"Accept"/);
+  assert.match(previewRenderer, /"Start task"/);
   // The bundle actually carries the new bridge (a stale build would ship without it).
   assert.match(previewPreloadBundle, /relay:preview:startTask/);
 });
 
-test("the Task face offers a local Review Safety before one-click Accept", () => {
+test("the Task face offers a local Review Safety before one-click Start task", () => {
   assert.match(previewHtml, /id="safetyButton"[^>]*>Review Safety<\/button>/);
   assert.match(previewHtml, /id="safetyPanel"/);
   assert.match(previewPreloadSource, /reviewSafety:[\s\S]*relay:preview:reviewSafety/);
@@ -512,7 +512,7 @@ test("the Task face offers a local Review Safety before one-click Accept", () =>
   // the two-button consent surface.
   assert.match(inbox, /data-request-safety/);
   assert.match(inbox, />Review Safety<\/button>/);
-  assert.match(inbox, /label: "Accept"/);
+  assert.match(inbox, /label: "Start task"/);
   assert.match(pillPreload, /relay:requestReviewSafety/);
 });
 
@@ -697,7 +697,8 @@ test("a For-you Task reply is optimistic correspondence and remains in the perso
   assert.match(reader, /optimisticChatReplies\.delete\(idempotencyKey\)/, "only a device that cannot hold the message removes the row");
   const sentProjection = between(inbox, "for (const s of payload.sent", "const canonicalIds");
   assert.doesNotMatch(sentProjection, /!request && onRequestThread/, "ordinary human replies are not hidden merely because they answer a Task");
-  assert.match(sentProjection, /isCompletionRelay\(s\) && !sentTextLike/, "only two-document completion traffic remains outside the conversation");
+  assert.doesNotMatch(sentProjection, /isCompletionRelay\(s\).*continue/, "completion Relays remain in the conversation");
+  assert.match(sentProjection, /const sentTextLike = request \? false : ownedAgent \|\| relayTextLike/, "completion keeps the ordinary Relay classifier");
 });
 
 test("Work images reach Codex as attachments and stay visible through reconciliation", () => {
@@ -856,8 +857,8 @@ test("Task documents remain beside a persistent Work tab throughout a run", () =
   assert.match(reader, /const workDoc = `[^]*data-run-stream=/);
   assert.match(reader, /const doc = onWork \? workDoc : onAgent \? agentDoc : humanDoc/);
   assert.match(reader, /class="work-footer"[^]*\$\{status\}\$\{composer\}/, "Work keeps its provider composer after Start");
-  assert.match(reader, /if \(request && \(onAgent \|\| onWork\)\) return requestDockHtml/,
-    "For Agent and Work keep the provider composer");
+  assert.match(reader, /if \(request && \(onAgent \|\| onWork \|\| requestActionable\)\) return requestDockHtml/,
+    "both source faces expose Start task while actionable, and Work keeps the provider composer");
   assert.match(reader, /<div class="rd-foot"><div class="rd-col">\$\{sharedShelf\}\$\{status\}\$\{bothNote\}\$\{composer\}/,
     "both immutable source documents retain a composer after Work exists");
   assert.doesNotMatch(reader, /requestDisclosure|data-brief=/, "Work never nests another copy of the document tabs or documents");

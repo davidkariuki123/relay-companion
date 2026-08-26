@@ -76,6 +76,9 @@ test("startup guidance and owner schemas preserve the complete product ontology"
   assert.match(RELAY_MCP_INSTRUCTIONS, /one chronological conversation for one person or saved channel/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /threadId is opaque AI retrieval metadata/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /3-6 word title/i);
+  assert.match(RELAY_MCP_INSTRUCTIONS, /relay_send requires non-empty forAgent/i);
+  assert.match(RELAY_MCP_INSTRUCTIONS, /Plain text uses relay_chat_send/i);
+  assert.doesNotMatch(RELAY_MCP_INSTRUCTIONS, /optional (?:detailed forAgent|agent context)/i);
   assert.match(sendContract, /The person who reads your message is not you/i);
   assert.match(sendContract, /OPEN FROM THE TOP/i);
   assert.match(sendContract, /opening background survives every cut/i);
@@ -127,7 +130,7 @@ test("no model-facing tool resurrects removed content fields or visible topic na
 
 test("relay_send requires one recipient, an explicit kind, and the two-document human contract", () => {
   const send = byName.get("relay_send");
-  assert.deepEqual(send.inputSchema.required, ["recipient", "kind", "title", "forHuman", "idempotencyKey"]);
+  assert.deepEqual(send.inputSchema.required, ["recipient", "kind", "title", "forHuman", "forAgent", "idempotencyKey"]);
   assert.equal(send.inputSchema.properties.recipient.anyOf, undefined,
     "recipient alternatives stay in runtime validation so Codex retains a typed argument object");
   assert.equal(send.inputSchema.allOf, undefined,
@@ -156,7 +159,10 @@ test("relay_send requires one recipient, an explicit kind, and the two-document 
   assert.ok(send.inputSchema.properties.forHuman.description.trim().split(/\s+/u).length <= 1400,
     "the complete reader teaching stays within its deliberate teaching budget");
   assert.match(send.inputSchema.properties.forAgent.description, /everything useful that the person need not read/i);
-  assert.equal(send.inputSchema.required.includes("forAgent"), false);
+  assert.match(send.inputSchema.properties.forAgent.description, /Draft it first for every Relay/i);
+  assert.match(send.inputSchema.properties.forAgent.description, /Never leave it empty/i);
+  assert.match(send.inputSchema.properties.forAgent.description, /explicitly requested plain text.*relay_chat_send/i);
+  assert.equal(send.inputSchema.required.includes("forAgent"), true);
   assert.equal(send.inputSchema.properties.type, undefined, "legacy control types are not model-facing");
   assert.match(send.inputSchema.properties.targetSurfaces.description, /kind='task'/);
   assert.match(send.inputSchema.properties.targetSurfaces.description, /recipient chooses/i);
