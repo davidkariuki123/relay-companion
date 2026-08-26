@@ -50,16 +50,21 @@ test("required E2EE routes Claude through the local runtime with no hosted fallb
 });
 
 test("ordinary users see ChatGPT as coming soon and Claude as connectable", () => {
-  assert.match(html, /<div class="sv-open-title">Chat connections<\/div>/);
-  assert.match(html, /<span class="sv-provider-name">ChatGPT<\/span>\s*<span class="sv-provider-status">Relay for regular ChatGPT is coming soon\.<\/span>/);
+  assert.doesNotMatch(html, /Chat connections/);
+  assert.equal((html.match(/<div class="sv-open-title">Connections<\/div>/g) || []).length, 1);
+  assert.match(html, /function connectionsHtml\(info, includeAgentProviders\)/);
+  assert.match(html, /includeAgentProviders \? providerConnectionRowsHtml\(\) : ""/);
+  assert.match(html, /chatConnectionRowsHtml\(info\)/);
+  assert.match(html, /id:"chatgpt-chat",\s*label:"ChatGPT",\s*logo:"codexMark\.svg"/);
+  assert.match(html, /meta:"Relay in ChatGPT is coming soon\."/);
   assert.match(html, /<button class="sv-provider-btn" type="button" disabled>Coming soon<\/button>/);
+  assert.match(html, /id:"claude-chat",\s*label:"Claude",\s*logo:"claudeCodeMark\.svg"/);
   assert.doesNotMatch(html, /id="svConnectChatGPT"/);
   assert.doesNotMatch(html, /connectChatGptFromSettings/);
   assert.match(html, /id="svConnectClaude"/);
   const render = html.slice(html.indexOf("function renderSettings()"), html.indexOf("function wireSettings()"));
-  const chat = render.indexOf("html += chatConnectionsHtml(info)");
-  const developerGate = render.indexOf("if (payload.features?.agentConnections === true)");
-  assert.ok(chat >= 0 && developerGate > chat, "chat setup is outside the developer-only agent section");
+  assert.match(render, /html \+= connectionsHtml\(info, payload\.features\?\.agentConnections === true\)/);
+  assert.doesNotMatch(render, /chatConnectionsHtml|providerConnectionHtml/);
   assert.match(html, /connectClaude\.addEventListener\("click", connectClaudeFromSettings\)/);
 });
 

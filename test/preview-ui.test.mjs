@@ -1082,8 +1082,8 @@ test("Settings exposes complete subscription connection management for Claude Co
   assert.match(inbox, /MCPs and account connectors/);
   assert.match(inbox, /const list = values\.map\(\(entry\) =>/);
   assert.match(inbox, /sv-provider-list sv-agent-provider-list/);
-  assert.match(inbox, /data-provider-details="\$\{id\}"/);
-  assert.match(inbox, /aria-controls="svProviderDetail-\$\{id\}"/);
+  assert.match(inbox, /data-provider-details="\$\{esc\(id\)\}"/);
+  assert.match(inbox, /aria-controls="svProviderDetail-\$\{esc\(id\)\}"/);
   assert.match(inbox, /claudeCodeMark\.svg/);
   assert.match(inbox, /codexMark\.svg/);
   assert.match(inbox, /healthy \? countLabel : status/);

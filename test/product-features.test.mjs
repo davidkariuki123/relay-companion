@@ -166,10 +166,12 @@ test("Settings always offers where relays open, and the fresh open goes there", 
   assert.match(open, /window\.relay\.openSent\(id, host \|\| hostKeyFor\(agentAppName\(\)\)\)/);
 });
 
-test("Agent connections are requests substrate: never mounted, never probed, outside local builds", () => {
+test("Agent connection rows stay gated while the unified chat rows remain available", () => {
   const source = fs.readFileSync(path.join(here, "../overlay/inbox.html"), "utf8");
   const settings = source.slice(source.indexOf("function renderSettings()"), source.indexOf("function wireSettings()"));
-  assert.match(settings, /if \(payload\.features\?\.agentConnections === true\) \{\s*html \+= providerConnectionHtml\(\);\s*\}/);
+  assert.match(settings, /html \+= connectionsHtml\(info, payload\.features\?\.agentConnections === true\)/);
+  assert.match(source, /const rows = `\$\{includeAgentProviders \? providerConnectionRowsHtml\(\) : ""\}\$\{chatConnectionRowsHtml\(info\)\}`/);
+  assert.doesNotMatch(settings, /providerConnectionHtml|chatConnectionsHtml/);
   const load = source.slice(source.indexOf("async function loadSettings()"), source.indexOf("// Provider state is live product state"));
   assert.match(load, /const connectionsOn = payload\.features\?\.agentConnections === true;/);
   assert.match(load, /const authTask = \(async \(\) => \{\s*if \(!connectionsOn\) return;/, "the subscription-profile probe never runs off the row");

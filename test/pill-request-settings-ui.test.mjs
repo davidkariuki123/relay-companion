@@ -68,6 +68,9 @@ test("the section still mounts only with the requests feature", () => {
 
 test("Connections uses the shared section species and concise privacy copy", () => {
   assert.match(html, /class="sv-provider-section" data-stop="1">\s*<div class="sv-open-title">Connections<\/div>\s*<div class="sv-provider-list sv-agent-provider-list">/);
+  assert.doesNotMatch(html, /Chat connections/);
+  assert.equal((html.match(/<div class="sv-open-title">Connections<\/div>/g) || []).length, 1);
+  assert.match(html, /const rows = `\$\{includeAgentProviders \? providerConnectionRowsHtml\(\) : ""\}\$\{chatConnectionRowsHtml\(info\)\}`/);
   assert.doesNotMatch(html, /sv-provider-intro/);
   assert.doesNotMatch(html, /Relay uses each app's local profile/);
 });
@@ -85,9 +88,12 @@ test("healthy providers collapse to the real app mark, connection count, and Rea
   assert.match(html, /const logo = id === "claude" \? "claudeCodeMark\.svg" : "codexMark\.svg"/);
   assert.match(html, /const headerMeta = healthy \? countLabel : status/);
   assert.match(html, /class="sv-agent-provider-ready">Ready<\/span>/);
-  assert.match(html, /data-provider-details="\$\{id\}"/);
+  assert.match(html, /data-provider-details="\$\{esc\(id\)\}"/);
   assert.match(html, /sv-agent-provider-detail\$\{open \? " open" : ""\}/);
+  assert.match(html, /aria-hidden="\$\{open \? "false" : "true"\}"\$\{open \? "" : " inert"\}/);
   assert.match(html, /providerDetailsOpen = willOpen \? provider : ""/);
+  assert.match(html, /detail\.setAttribute\("aria-hidden", open \? "false" : "true"\)/);
+  assert.match(html, /detail\.toggleAttribute\("inert", !open\)/);
   assert.doesNotMatch(html, /<span class="sv-provider-status">\$\{esc\(requirement\)\}<\/span>/);
 });
 

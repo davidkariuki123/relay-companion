@@ -2270,6 +2270,8 @@
   .sv-agent-provider-ready { display:inline-flex; align-items:center; gap:5px; color:var(--ok); font:600 10px/1 var(--sans); white-space:nowrap; }
   .sv-agent-provider-ready::before { content:""; width:5px; height:5px; border-radius:50%; background:currentColor; }
   .sv-agent-provider-state { color:var(--muted-2); font:600 10px/1 var(--sans); white-space:nowrap; }
+  .sv-agent-provider-state.available { color:var(--accent); }
+  .sv-agent-provider-state.busy { color:var(--accent); }
   .sv-agent-provider-chev { color:var(--muted-3); transition:transform var(--t-base) var(--settle); }
   .sv-agent-provider-toggle[aria-expanded="true"] .sv-agent-provider-chev { transform:rotate(180deg); }
   .sv-agent-provider-detail { display:grid; grid-template-rows:0fr; transition:grid-template-rows var(--t-base) var(--soft); }
@@ -2277,31 +2279,20 @@
   .sv-agent-provider-detail-inner { min-height:0; overflow:hidden; }
   .sv-agent-provider-detail-body { margin:0 12px 13px 50px; padding-top:11px; border-top:1px solid var(--hair); }
   .sv-agent-provider-note { margin-bottom:11px; color:var(--muted-2); font-size:10.5px; line-height:1.4; }
+  .sv-agent-provider-note.success { color:var(--ok); }
+  .sv-agent-provider-note.error { color:var(--danger); }
   .sv-agent-provider-group + .sv-agent-provider-group { margin-top:12px; }
   .sv-agent-provider-group-head { display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-bottom:7px; color:var(--muted-2); font:600 10px/1.25 var(--sans); }
   .sv-agent-provider-integrations { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px 12px; margin:0; padding:0; list-style:none; }
   .sv-agent-provider-integrations li { min-width:0; overflow:hidden; color:var(--muted); font:500 10px/1.25 var(--sans); text-overflow:ellipsis; white-space:nowrap; }
   .sv-agent-provider-integrations li::before { content:"·"; margin-right:5px; color:var(--muted-3); }
   .sv-agent-provider-actions { display:flex; gap:7px; justify-content:flex-end; margin-top:12px; }
-  .sv-provider-top { display:flex; align-items:center; gap:9px; }
-  .sv-provider-copy { min-width:0; flex:1 1 auto; display:flex; flex-direction:column; }
   .sv-provider-name { font-size:13px; font-weight:600; color:var(--ink); }
-  .sv-provider-status { margin-top:2px; font-size:11px; line-height:1.35; color:var(--muted-2); }
-  .sv-integration-summary { margin-top:7px; }
-  .sv-integration-heading { font:600 10px/1.25 var(--sans); color:var(--muted-2); }
-  .sv-integration-preview { display:flex; flex-wrap:wrap; gap:5px; margin-top:5px; }
-  .sv-integration-chip { min-width:0; max-width:100%; padding:4px 7px; border-radius:999px; background:color-mix(in srgb, var(--ink) 5%, transparent); font:500 10px/1.2 var(--sans); color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .sv-provider-dot { width:8px; height:8px; border-radius:50%; flex:0 0 auto; background:var(--muted-3); box-shadow:0 0 0 3px color-mix(in srgb, var(--muted-3) 11%, transparent); }
-  .sv-provider-dot.connected { background:var(--ok); box-shadow:0 0 0 3px color-mix(in srgb, var(--ok) 13%, transparent); }
-  .sv-provider-dot.busy { background:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 13%, transparent); animation:providerPulse 1.1s ease-in-out infinite; }
-  .sv-provider-dot.disabled { background:var(--muted-3); }
-  @keyframes providerPulse { 0%,100% { opacity:.45; } 50% { opacity:1; } }
-  .sv-provider-actions { display:flex; gap:7px; margin-top:10px; padding-left:17px; }
   .sv-provider-btn { appearance:none; border:1px solid var(--edge); background:transparent; color:var(--muted); border-radius:999px; padding:5px 10px; font:600 11px/1 var(--sans); cursor:pointer; }
   .sv-provider-btn.primary { border-color:color-mix(in srgb, var(--accent) 35%, var(--edge)); background:var(--accent-soft); color:var(--accent); }
   .sv-provider-btn:hover { color:var(--ink); border-color:var(--edge-strong); }
   .sv-provider-btn:disabled { opacity:.4; cursor:default; }
-  @media (prefers-reduced-motion:reduce) { .sv-provider-dot.busy { animation:none; } .sv-agent-provider-detail, .sv-agent-provider-chev { transition:none; } }
+  @media (prefers-reduced-motion:reduce) { .sv-agent-provider-detail, .sv-agent-provider-chev { transition:none; } }
 
   /* ---- Quiet mode: the two durable on/off preferences ----
      A real switch, not the Enable/Disable label-flip the provider rows use: these
@@ -11386,9 +11377,23 @@
     providerAuthInfo = { ok:true, providers };
     return providerRowsSignature() !== before;
   }
-  function providerConnectionHtml() {
+  function connectionDisclosureHtml({ id, label, logo, meta, stateHtml, detailHtml }) {
+    const open = providerDetailsOpen === id;
+    return `<div class="sv-provider" data-provider-row="${esc(id)}">
+      <button class="sv-agent-provider-toggle" type="button" data-provider-details="${esc(id)}" aria-expanded="${open ? "true" : "false"}" aria-controls="svProviderDetail-${esc(id)}">
+        <img class="sv-agent-provider-logo" src="${esc(logo)}" alt="" />
+        <span class="sv-agent-provider-summary"><span class="sv-provider-name">${esc(label)}</span><span class="sv-agent-provider-count">${esc(meta)}</span></span>
+        ${stateHtml}
+        <svg class="sv-agent-provider-chev" width="12" height="7" viewBox="0 0 12 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 1.5L6 5.5L10.5 1.5"/></svg>
+      </button>
+      <div class="sv-agent-provider-detail${open ? " open" : ""}" id="svProviderDetail-${esc(id)}" aria-hidden="${open ? "false" : "true"}"${open ? "" : " inert"}><div class="sv-agent-provider-detail-inner"><div class="sv-agent-provider-detail-body">
+        ${detailHtml}
+      </div></div></div>
+    </div>`;
+  }
+  function providerConnectionRowsHtml() {
     const providers = providerAuthInfo && providerAuthInfo.providers ? providerAuthInfo.providers : {};
-    const rows = ["claude", "codex"].map((id) => {
+    return ["claude", "codex"].map((id) => {
       const item = providers[id] || { id, label: id === "claude" ? "Claude Code" : "Codex", enabled:true, installed:false, connected:false, detail:"Checking connection…", busy:false, authLoaded:false };
       const authLoaded = item.authLoaded === true;
       const busy = providerAuthBusy === id || item.busy;
@@ -11425,7 +11430,6 @@
             ? (id === "claude" ? "Use Claude subscription" : "Use ChatGPT subscription")
             : signInLabel;
       const connectDisabled = busy || !authLoaded || !item.installed || !item.enabled || item.connected;
-      const open = providerDetailsOpen === id;
       const healthy = item.enabled && item.connected && !busy;
       const logo = id === "claude" ? "claudeCodeMark.svg" : "codexMark.svg";
       const countLabel = totalConnections === 1 ? "1 connection" : `${totalConnections} connections`;
@@ -11434,65 +11438,56 @@
         ? '<span class="sv-agent-provider-ready">Ready</span>'
         : `<span class="sv-agent-provider-state">${esc(busy ? "Connecting" : item.enabled ? "Needs attention" : "Disabled")}</span>`;
       const detailNote = healthy ? "" : `<div class="sv-agent-provider-note">${esc(requirement)}${status ? ` · ${esc(status)}` : ""}</div>`;
-      return `<div class="sv-provider" data-provider-row="${id}">
-        <button class="sv-agent-provider-toggle" type="button" data-provider-details="${id}" aria-expanded="${open ? "true" : "false"}" aria-controls="svProviderDetail-${id}">
-          <img class="sv-agent-provider-logo" src="${logo}" alt="" />
-          <span class="sv-agent-provider-summary"><span class="sv-provider-name">${esc(item.label)}</span><span class="sv-agent-provider-count">${esc(headerMeta)}</span></span>
-          ${headerState}
-          <svg class="sv-agent-provider-chev" width="12" height="7" viewBox="0 0 12 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 1.5L6 5.5L10.5 1.5"/></svg>
-        </button>
-        <div class="sv-agent-provider-detail${open ? " open" : ""}" id="svProviderDetail-${id}"><div class="sv-agent-provider-detail-inner"><div class="sv-agent-provider-detail-body">
-          ${detailNote}
+      return connectionDisclosureHtml({
+        id,
+        label:item.label,
+        logo,
+        meta:headerMeta,
+        stateHtml:headerState,
+        detailHtml:`${detailNote}
           ${integrationList(id === "claude" ? "MCPs and account connectors" : "Local MCPs", mcpServers)}
           ${integrationList("Connected apps", apps)}
           <div class="sv-agent-provider-actions">
             ${item.connected ? "" : `<button class="sv-provider-btn primary" type="button" data-provider-connect="${id}" ${connectDisabled ? "disabled" : ""}>${esc(connectLabel)}</button>`}
             <button class="sv-provider-btn" type="button" data-provider-enable="${id}" data-enabled="${item.enabled ? "1" : "0"}" ${busy || !authLoaded ? "disabled" : ""}>${enableLabel}</button>
-          </div>
-        </div></div></div>
-      </div>`;
+          </div>`,
+      });
     }).join("");
+  }
+  function chatConnectionRowsHtml(info) {
+    if (!info?.paired || (!window.relay.connectChatGPT && !window.relay.connectClaude)) return "";
+    const chatgpt = connectionDisclosureHtml({
+      id:"chatgpt-chat",
+      label:"ChatGPT",
+      logo:"codexMark.svg",
+      meta:"Relay in ChatGPT is coming soon.",
+      stateHtml:'<span class="sv-agent-provider-state">Coming soon</span>',
+      detailHtml:`<div class="sv-agent-provider-note">Relay connections for ChatGPT are not available yet.</div>
+        <div class="sv-agent-provider-actions"><button class="sv-provider-btn" type="button" disabled>Coming soon</button></div>`,
+    });
+    const claudeMeta = chatConnectionNote || chatConnectionError || "Use Relay in your Claude chats.";
+    const claude = connectionDisclosureHtml({
+      id:"claude-chat",
+      label:"Claude",
+      logo:"claudeCodeMark.svg",
+      meta:claudeMeta,
+      stateHtml:`<span class="sv-agent-provider-state ${chatConnectionBusy ? "busy" : "available"}">${chatConnectionBusy ? "Opening" : "Set up"}</span>`,
+      detailHtml:`<div class="sv-agent-provider-note">Relay copies its connector address and opens Claude at the right setup page.</div>
+        ${chatConnectionNote ? `<div class="sv-agent-provider-note success">${esc(chatConnectionNote)}</div>` : ""}
+        ${chatConnectionError ? `<div class="sv-agent-provider-note error">${esc(chatConnectionError)}</div>` : ""}
+        <div class="sv-agent-provider-actions"><button class="sv-provider-btn primary" type="button" id="svConnectClaude" ${chatConnectionBusy || !window.relay.connectClaude ? "disabled" : ""}>${chatConnectionBusy ? "Opening…" : "Connect Claude"}</button></div>`,
+    });
+    return `${chatgpt}${claude}`;
+  }
+  function connectionsHtml(info, includeAgentProviders) {
+    const rows = `${includeAgentProviders ? providerConnectionRowsHtml() : ""}${chatConnectionRowsHtml(info)}`;
+    if (!rows) return "";
     return `<section class="sv-provider-section" data-stop="1">
       <div class="sv-open-title">Connections</div>
       <div class="sv-provider-list sv-agent-provider-list">${rows}</div>
-      <div class="sv-hint${providerInventoryRefreshing || providerInventoryStale || providerInventoryError ? "" : " hidden"}" id="svProviderInventoryState">${esc(providerInventoryStateText())}</div>
-      ${providerAuthNote ? `<div class="sv-note">${esc(providerAuthNote)}</div>` : ""}
-      ${providerAuthError ? `<div class="row-err sv-err">${esc(providerAuthError)}</div>` : ""}
-    </section>`;
-  }
-  function chatConnectionsHtml(info) {
-    if (!info?.paired || (!window.relay.connectChatGPT && !window.relay.connectClaude)) return "";
-    return `<section class="sv-provider-section" data-stop="1">
-      <div class="sv-open-title">Chat connections</div>
-      <div class="sv-open-intro">Use Relay directly in the chats you already have. Your Companion account is carried into the connection, so Relay does not ask you to sign in again.</div>
-      <div class="sv-provider-list">
-        <div class="sv-provider">
-          <div class="sv-provider-top">
-            <span class="sv-provider-dot" aria-hidden="true"></span>
-            <span class="sv-provider-copy">
-              <span class="sv-provider-name">ChatGPT</span>
-              <span class="sv-provider-status">Relay for regular ChatGPT is coming soon.</span>
-            </span>
-          </div>
-          <div class="sv-provider-actions" data-stop="1">
-            <button class="sv-provider-btn" type="button" disabled>Coming soon</button>
-          </div>
-        </div>
-        <div class="sv-provider">
-          <div class="sv-provider-top">
-            <span class="sv-provider-dot" aria-hidden="true"></span>
-            <span class="sv-provider-copy">
-              <span class="sv-provider-name">Claude</span>
-              <span class="sv-provider-status">Relay copies its connector address and opens Claude at the right setup page.</span>
-            </span>
-          </div>
-          <div class="sv-provider-actions" data-stop="1">
-            <button class="sv-provider-btn primary" type="button" id="svConnectClaude" ${chatConnectionBusy ? "disabled" : ""}>${chatConnectionBusy ? "Opening…" : "Connect Claude"}</button>
-          </div>
-        </div>
-      </div>
-      ${chatConnectionNote ? `<div class="sv-note">${esc(chatConnectionNote)}</div>` : ""}
-      ${chatConnectionError ? `<div class="row-err sv-err">${esc(chatConnectionError)}</div>` : ""}
+      ${includeAgentProviders ? `<div class="sv-hint${providerInventoryRefreshing || providerInventoryStale || providerInventoryError ? "" : " hidden"}" id="svProviderInventoryState">${esc(providerInventoryStateText())}</div>` : ""}
+      ${includeAgentProviders && providerAuthNote ? `<div class="sv-note">${esc(providerAuthNote)}</div>` : ""}
+      ${includeAgentProviders && providerAuthError ? `<div class="row-err sv-err">${esc(providerAuthError)}</div>` : ""}
     </section>`;
   }
 
@@ -11677,14 +11672,13 @@
     html += `<div class="row-err sv-err" id="svErr">${esc(svError)}</div>`;
     html += slackSettingsHtml(info);
     html += deviceApprovalsHtml(info);
-    html += chatConnectionsHtml(info);
-    // AGENT CONNECTIONS ARE REQUESTS SUBSTRATE (Sven, 2026-08-17): provider
-    // subscription profiles and the MCP / connected-apps inventory exist so a
-    // request can RUN here. Prod v1 only opens relays; the section rides the
-    // product row and never mounts outside local builds.
-    if (payload.features?.agentConnections === true) {
-      html += providerConnectionHtml();
-    }
+    // ONE CONNECTIONS SURFACE. Claude Code and Codex are the subscription
+    // runtimes behind Tasks; ChatGPT and Claude are the chat surfaces. They
+    // share one contained disclosure list because they are all ways Relay
+    // connects to an agent, even though each provider keeps its own setup path.
+    // The native-runtime rows remain gated while their product feature is off;
+    // the chat rows stay available to every paired Companion account.
+    html += connectionsHtml(info, payload.features?.agentConnections === true);
     // Version line doubles as the manual update backstop: if the auto-updater
     // has not refreshed this machine, say so here and make it one click.
     // A machine whose updates keep FAILING outranks one that merely has an
@@ -11883,7 +11877,11 @@
           const open = willOpen && other === button;
           other.setAttribute("aria-expanded", open ? "true" : "false");
           const detail = document.getElementById(other.getAttribute("aria-controls"));
-          if (detail) detail.classList.toggle("open", open);
+          if (detail) {
+            detail.classList.toggle("open", open);
+            detail.setAttribute("aria-hidden", open ? "false" : "true");
+            detail.toggleAttribute("inert", !open);
+          }
         }
       });
     }
