@@ -2,9 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-import { RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS, TOOLS } from "../src/mcp.js";
+import { RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS, TOOLS, toolsForAccount } from "../src/mcp.js";
 
 const byName = new Map(TOOLS.map((tool) => [tool.name, tool]));
+const codexByName = new Map(toolsForAccount(
+  { requests: true, aiSessions: true, connectors: true },
+  "codex",
+).map((tool) => [tool.name, tool]));
 const source = await readFile(new URL("../src/mcp.js", import.meta.url), "utf8");
 const SEND_GATE = "Only send a Relay when the user asks you to send (or relay) something to someone.";
 const CLARIFICATION_GATE = "Clarification before sending is uncommon. Make normal wording and presentation choices yourself. Ask the human only when a critical detail is genuinely uncertain and choosing one way or another could materially change what the human communicates or commits them to. Never resolve that uncertainty by inventing content.";
@@ -129,7 +133,9 @@ test("no model-facing tool resurrects removed content fields or visible topic na
 });
 
 test("relay_send requires one recipient, an explicit kind, and the two-document human contract", () => {
-  const send = byName.get("relay_send");
+  const send = codexByName.get("relay_send");
+  const humanDescription = send.description;
+  const humanFieldDescription = send.inputSchema.properties.forHuman.description;
   assert.deepEqual(send.inputSchema.required, ["recipient", "kind", "title", "forHuman", "forAgent", "idempotencyKey"]);
   assert.equal(send.inputSchema.properties.recipient.anyOf, undefined,
     "recipient alternatives stay in runtime validation so Codex retains a typed argument object");
@@ -140,24 +146,27 @@ test("relay_send requires one recipient, an explicit kind, and the two-document 
   assert.match(send.inputSchema.properties.kind.description, /MUST be kind='task', not kind='message'/);
   assert.match(send.inputSchema.properties.kind.description, /Do you think we should switch to dev\?' is kind='message'/);
   assert.match(send.inputSchema.properties.title.description, /3-6 word gist/i);
-  assert.match(send.inputSchema.properties.forHuman.description, /The person who reads your message is not you/i);
-  assert.match(send.inputSchema.properties.forHuman.description, /recipient-specific vocabulary.*rhythm.*directness.*formality.*warmth.*sign-off/i);
-  assert.match(send.inputSchema.properties.forHuman.description, /relay_sent_list and relay_chat_fetch/i);
-  assert.match(send.inputSchema.properties.forHuman.description, /instructions to the ghostwriter, not a draft to lightly edit/i);
-  assert.match(send.inputSchema.properties.forHuman.description, /Supply the words, never additional meaning/i);
-  assert.match(send.inputSchema.properties.forHuman.description, /Never add, remove, strengthen, or soften an ask, question, commitment, permission, deadline, urgency, opinion, evaluation, or next step/i);
-  assert.match(send.inputSchema.properties.forHuman.description, /Sending or attaching information does not imply.*please review.*thoughts\?.*let me know.*request for a response/i);
-  assert.match(send.inputSchema.properties.forHuman.description, /never revive superseded intent/i);
-  assert.match(send.inputSchema.properties.forHuman.description, /OPEN FROM THE TOP/i);
-  assert.match(send.inputSchema.properties.forHuman.description, /first one to three sentences re-explain what has been going on/i);
-  assert.match(send.inputSchema.properties.forHuman.description, /opening background survives every cut/i);
-  assert.match(send.inputSchema.properties.forHuman.description, /Keep it under 95 words/i);
-  assert.match(send.inputSchema.properties.forHuman.description, /Clarification before sending is uncommon/i);
+  assert.match(humanDescription, /The person who reads your message is not you/i);
+  assert.match(humanDescription, /recipient-specific vocabulary.*rhythm.*directness.*formality.*warmth.*sign-off/i);
+  assert.match(humanDescription, /relay_sent_list and relay_chat_fetch/i);
+  assert.match(humanDescription, /instructions to the ghostwriter, not a draft to lightly edit/i);
+  assert.match(humanDescription, /Supply the words, never additional meaning/i);
+  assert.match(humanDescription, /Never add, remove, strengthen, or soften an ask, question, commitment, permission, deadline, urgency, opinion, evaluation, or next step/i);
+  assert.match(humanDescription, /Sending or attaching information does not imply.*please review.*thoughts\?.*let me know.*request for a response/i);
+  assert.match(humanDescription, /never revive superseded intent/i);
+  assert.match(humanDescription, /OPEN FROM THE TOP/i);
+  assert.match(humanDescription, /first one to three sentences re-explain what has been going on/i);
+  assert.match(humanDescription, /opening background survives every cut/i);
+  assert.match(humanDescription, /Keep it under 95 words/i);
+  assert.match(humanDescription, /Clarification before sending is uncommon/i);
+  assert.match(humanFieldDescription, /person who did not do the work/i);
+  assert.match(humanFieldDescription, /implementation detail/i);
+  assert.match(humanFieldDescription, /never invent or change an ask/i);
   assert.match(send.inputSchema.properties.longForHumanConfirmed.description, /already rejected this exact draft/i);
-  assert.ok(send.description.trim().split(/\s+/u).length <= 320,
-    "relay_send guidance stays focused enough for the human-length rule to remain salient");
-  assert.ok(send.inputSchema.properties.forHuman.description.trim().split(/\s+/u).length <= 1400,
-    "the complete reader teaching stays within its deliberate teaching budget");
+  assert.ok(send.description.trim().split(/\s+/u).length <= 1800,
+    "relay_send keeps the complete reader teaching within its deliberate top-level budget");
+  assert.ok(humanFieldDescription.trim().split(/\s+/u).length <= 120,
+    "the forHuman field keeps a compact standalone summary");
   assert.match(send.inputSchema.properties.forAgent.description, /everything useful that the person need not read/i);
   assert.match(send.inputSchema.properties.forAgent.description, /Draft it first for every Relay/i);
   assert.match(send.inputSchema.properties.forAgent.description, /Never leave it empty/i);
@@ -170,18 +179,19 @@ test("relay_send requires one recipient, an explicit kind, and the two-document 
 
 test("every human-message writing surface preserves the sender's intended speech acts", () => {
   const surfaces = [
-    byName.get("relay_send").inputSchema.properties.forHuman.description,
-    byName.get("relay_chat_send").inputSchema.properties.forHuman.description,
-    byName.get("relay_share_link").inputSchema.properties.forHuman.description,
-    byName.get("relay_message_edit").inputSchema.properties.forHuman.description,
+    codexByName.get("relay_send").description,
+    byName.get("relay_chat_send").description,
+    byName.get("relay_share_link").description,
+    byName.get("relay_message_edit").description,
+    byName.get("relay_task_complete").description,
+    byName.get("relay_agent_complete").description,
   ];
   for (const guidance of surfaces) {
-    assert.match(guidance, /instructions to the ghostwriter, not a draft to lightly edit/i);
-    assert.match(guidance, /Supply the words, never additional meaning/i);
-    assert.match(guidance, /Never add, remove, strengthen, or soften an ask, question, commitment, permission, deadline, urgency, opinion, evaluation, or next step/i);
-    assert.match(guidance, /Sending or attaching information does not imply.*request for a response/i);
-    assert.match(guidance, /never revive superseded intent/i);
-    assert.match(guidance, /Clarification before sending is uncommon/i);
+    assert.match(guidance, /person who did not do the work/i);
+    assert.match(guidance, /what happened, why it matters/i);
+    assert.match(guidance, /plain spoken sentences/i);
+    assert.match(guidance, /never invent or change an ask/i);
+    assert.match(guidance, /missing detail could materially change what the human communicates/i);
   }
   assert.match(RELAY_MCP_INSTRUCTIONS, /forHuman preserves intent; invent nothing/i);
   assert.match(REQUESTS_DISABLED_INSTRUCTIONS, /forHuman preserves intent; invent nothing/i);

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { TOOLS, handleCall } from "../src/mcp.js";
+import { TOOLS, handleCall, toolsForAccount } from "../src/mcp.js";
 
 // Product species: relay_send always creates a Relay with separately composed
 // forHuman and non-empty forAgent documents. Explicit plain text uses
@@ -68,16 +68,19 @@ test("the concise human document is derived from a complete unlimited agent docu
   // of headings, code and receipts in the LETTER and zero in the folder —
   // the detail crossed, in the lane the human reads. These pins keep the
   // rule taught on all three surfaces of relay_send.
-  const tool = TOOLS.find((t) => t.name === "relay_send");
+  const tool = toolsForAccount({ requests: true, aiSessions: true, connectors: true }, "codex")
+    .find((t) => t.name === "relay_send");
   assert.match(tool.description, /compose the complete forAgent document first/i);
   assert.match(tool.description, /then write forHuman for the person/i);
-  assert.match(tool.description, /Keep forHuman under 95 words/i);
+  assert.match(tool.description, /Keep (?:forHuman|it) under 95 words/i);
   assert.match(tool.description, /a small update is a line or two/i);
   assert.match(tool.description, /ceiling, not a target/i);
   assert.match(tool.description, /under-sending to the recipient's agent is worse than over-sending/i);
-  assert.match(tool.inputSchema.properties.forHuman.description, /OPEN FROM THE TOP/i);
-  assert.match(tool.inputSchema.properties.forHuman.description, /opening background survives every cut/i);
-  assert.match(tool.inputSchema.properties.forHuman.description, /Clarification before sending is uncommon/i);
+  assert.match(tool.description, /OPEN FROM THE TOP/i);
+  assert.match(tool.description, /opening background survives every cut/i);
+  assert.match(tool.description, /Clarification before sending is uncommon/i);
+  assert.match(tool.inputSchema.properties.forHuman.description, /person who did not do the work/i);
+  assert.match(tool.inputSchema.properties.forHuman.description, /implementation detail/i);
   assert.match(tool.inputSchema.properties.longForHumanConfirmed.description, /already rejected this exact draft/i);
   assert.match(tool.inputSchema.properties.forAgent.description, /complete .*document/i);
   assert.match(tool.inputSchema.properties.forAgent.description, /may be as long and detailed as necessary/i);

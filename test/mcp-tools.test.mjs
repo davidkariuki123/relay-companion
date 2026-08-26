@@ -208,7 +208,7 @@ test("startup teachings establish Relay as the default medium without losing the
 
 test("eager Claude descriptions keep routing guidance inside the per-description limit", () => {
   for (const developer of [false, true]) {
-    const tools = toolsForAccount({ requests: developer, aiSessions: developer, connectors: developer });
+    const tools = toolsForAccount({ requests: developer, aiSessions: developer, connectors: developer }, "claude_code");
     for (const name of ["relay_send", "relay_share_link", "relay_contacts_search", "relay_inbox_list"]) {
       const tool = tools.find((candidate) => candidate.name === name);
       assert.ok(tool, `${name} is available when developer=${developer}`);
@@ -340,7 +340,8 @@ test("relay_send forwards an ordinary relay payload to the API client", async ()
 });
 
 test("ordinary Relay MCP directs Claude and Codex to the membership-scoped Granular employee contact", () => {
-  const send = TOOLS.find((tool) => tool.name === "relay_send");
+  const send = toolsForAccount({ requests: true, aiSessions: true, connectors: true }, "codex")
+    .find((tool) => tool.name === "relay_send");
   const search = TOOLS.find((tool) => tool.name === "relay_contacts_search");
   assert.match(send.description, /workspace-labelled contactId/);
   assert.match(send.description, /exact matching workspace-labelled contactId/);
@@ -352,7 +353,8 @@ test("ordinary Relay MCP directs Claude and Codex to the membership-scoped Granu
   assert.equal(send.inputSchema.properties.recipient.properties.self.type, "boolean");
 
   const titleDescription = send.inputSchema.properties.title.description;
-  const humanDescription = send.inputSchema.properties.forHuman.description;
+  const humanDescription = send.description;
+  const humanFieldDescription = send.inputSchema.properties.forHuman.description;
   // A title is only the compact gist of this Relay. Agents must never invent a
   // second visible name for a thread/topic.
   assert.match(titleDescription, /3-6 word gist/i);
@@ -386,6 +388,8 @@ test("ordinary Relay MCP directs Claude and Codex to the membership-scoped Granu
   assert.match(humanDescription, /Clarification before sending is uncommon/i);
   assert.match(humanDescription, /critical detail is genuinely uncertain/i);
   assert.match(humanDescription, /No headings, lists, tables, code blocks, or title repetition/i);
+  assert.match(humanFieldDescription, /person who did not do the work/i);
+  assert.match(humanFieldDescription, /implementation detail/i);
   const longConfirmation = send.inputSchema.properties.longForHumanConfirmed;
   assert.equal(longConfirmation.type, "boolean");
   assert.match(longConfirmation.description, /already rejected this exact draft/i);
