@@ -2173,8 +2173,17 @@
   .th-mention-copy { display:flex; flex-direction:column; min-width:0; }
   .th-mention-name { font-weight:650; }
   .th-mention-note { color:var(--muted); font-size:10.5px; }
-  .sv-agent-defaults select { min-width:122px; max-width:44%; padding:6px 8px; border:1px solid var(--edge); border-radius:8px;
-    background:var(--bg); color:var(--ink); font:11.5px var(--sans); }
+  /* Chat-agent defaults stay compact without forcing four controls onto one
+     line. Identity owns the first line; model and thinking share a labelled,
+     responsive grid below it. */
+  .sv-agent-defaults .sv-open-row { display:block; min-height:0; padding:11px 12px 12px; }
+  .sv-agent-identity { display:flex; align-items:center; gap:11px; min-width:0; }
+  .sv-agent-fields { display:grid; grid-template-columns:minmax(0,1.35fr) minmax(0,1fr); gap:8px; margin:10px 0 0 39px; }
+  .sv-agent-field { display:block; min-width:0; }
+  .sv-agent-field-label { display:block; margin:0 0 4px 1px; color:var(--muted-2); font:10px/1.25 var(--sans); }
+  .sv-agent-select { width:100%; min-width:0; height:34px; padding:0 8px; border:1px solid var(--edge); border-radius:9px;
+    background:var(--bg); color:var(--ink); font:11.5px var(--sans); cursor:pointer; }
+  .sv-agent-select:focus-visible { outline:none; box-shadow:var(--focus-ring); }
   /* The chosen Relay is attached to the existing composer as its top face.
      This is one composer with context, not a Slack-style child conversation. */
   .qr.th-qr.replying { gap:0; }
@@ -12484,9 +12493,12 @@
       <div class="sv-open-intro">Defaults for Work sessions that run on this computer.</div>
       <div class="sv-open-list">${rows.map((row) => {
         const current = chatAgentPreferences[row.key] || {};
-        return `<div class="sv-open-row"><img class="sv-open-logo" src="${row.logo}" alt="" /><span class="sv-open-copy"><span class="sv-open-name">${row.label}</span></span>
-          <select data-chat-agent-model="${row.key}" aria-label="${row.label} model">${row.models.map(([value,label]) => `<option value="${value}"${current.model === value ? " selected" : ""}>${label}</option>`).join("")}</select>
-          <select data-chat-agent-effort="${row.key}" aria-label="${row.label} thinking">${row.efforts.map((value) => `<option value="${value}"${current.effort === value ? " selected" : ""}>${value}</option>`).join("")}</select>
+        return `<div class="sv-open-row">
+          <span class="sv-agent-identity"><img class="sv-open-logo" src="${row.logo}" alt="" /><span class="sv-open-copy"><span class="sv-open-name">${row.label}</span></span></span>
+          <span class="sv-agent-fields">
+            <label class="sv-agent-field"><span class="sv-agent-field-label">Model</span><select class="sv-agent-select" data-chat-agent-model="${row.key}" aria-label="${row.label} model">${row.models.map(([value,label]) => `<option value="${value}"${current.model === value ? " selected" : ""}>${label}</option>`).join("")}</select></label>
+            <label class="sv-agent-field"><span class="sv-agent-field-label">Thinking</span><select class="sv-agent-select" data-chat-agent-effort="${row.key}" aria-label="${row.label} thinking">${row.efforts.map((value) => `<option value="${value}"${current.effort === value ? " selected" : ""}>${value}</option>`).join("")}</select></label>
+          </span>
         </div>`;
       }).join("")}</div>
       ${chatAgentPreferencesError ? `<div class="row-err sv-err">${esc(chatAgentPreferencesError)}</div>` : ""}

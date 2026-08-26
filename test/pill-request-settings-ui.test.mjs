@@ -111,3 +111,15 @@ test("provider routes never inherit another provider's model or historical trans
   assert.match(preview, /requestedProvider === "codex" && codexPath \? "codex"/);
   assert.match(preview, /requestedProvider === "claude" && claudePath \? "claude"/);
 });
+
+test("Chat agents uses labelled compact controls below each agent identity", () => {
+  const section = between(html, 'function chatAgentDefaultsHtml()', "function deviceApprovalsHtml");
+  assert.match(section, /class="sv-agent-identity"/);
+  assert.match(section, /class="sv-agent-fields"/);
+  assert.match(section, /class="sv-agent-field-label">Model<\/span><select class="sv-agent-select" data-chat-agent-model=/);
+  assert.match(section, /class="sv-agent-field-label">Thinking<\/span><select class="sv-agent-select" data-chat-agent-effort=/);
+  assert.match(html, /\.sv-agent-defaults \.sv-open-row \{ display:block;/);
+  assert.match(html, /\.sv-agent-fields \{ display:grid; grid-template-columns:minmax\(0,1\.35fr\) minmax\(0,1fr\);/);
+  assert.match(html, /\.sv-agent-select \{ width:100%; min-width:0;/);
+  assert.doesNotMatch(html, /\.sv-agent-defaults select \{ min-width:122px; max-width:44%;/);
+});
