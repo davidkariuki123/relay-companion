@@ -92,6 +92,9 @@ function freshPlainRelays(ledger, items) {
       !seen ||
       seen.updatedAt !== item.updatedAt ||
       seen.state !== item.state ||
+      (seen.taskStartedAt || "") !== (item.taskStartedAt || "") ||
+      (seen.taskCompletedAt || "") !== (item.taskCompletedAt || "") ||
+      (seen.taskRunOwner || "null") !== JSON.stringify(item.taskRunOwner || null) ||
       (seen.restoredAt || "") !== (item.restoredAt || "")
     );
   });
@@ -104,6 +107,14 @@ function markPlainRelaysProcessed(ledger, items) {
     ledger.plainRelays[item.relayId] = {
       state: item.state,
       updatedAt: item.updatedAt || item.createdAt || "",
+      // Task lifecycle receipts are projected independently of the Relay row.
+      // Starting or completing a Task deliberately does not edit the original
+      // Relay's updatedAt, so these fields must participate in the daemon's
+      // generation key or the pill keeps rendering its initially staged
+      // "Waiting on you" copy forever.
+      taskStartedAt: item.taskStartedAt || "",
+      taskCompletedAt: item.taskCompletedAt || "",
+      taskRunOwner: JSON.stringify(item.taskRunOwner || null),
       restoredAt: item.restoredAt || "",
       processedAt,
     };

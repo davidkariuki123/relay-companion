@@ -86,6 +86,53 @@ test("idle polls stop rewriting an unchanged task ledger; a staging poll still w
   );
 });
 
+test("Task lifecycle-only projections re-stage an existing Relay exactly once", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-task-lifecycle-ledger-test-"));
+  process.env.RELAY_CONFIG_DIR = dir;
+  const daemon = await import("../src/task-daemon.js");
+  const item = {
+    relayId: "relay_task_lifecycle_test",
+    kind: "task",
+    state: "read",
+    createdAt: "2026-08-26T09:00:00.000Z",
+    updatedAt: "2026-08-26T09:00:00.000Z",
+    title: "Lifecycle-only Task",
+    sender: { name: "Shane" },
+  };
+  const client = {
+    token: "task-lifecycle-account",
+    inbox: async () => ({ items: [{ ...item }] }),
+    fetchRelay: async () => ({ packet: { relayId: item.relayId, kind: "task" }, attachmentUrls: {} }),
+  };
+  const staged = [];
+  const poll = () => daemon.pollOrdinaryRelayOnce({
+    client,
+    log: () => {},
+    stagePlainRelay: ({ item: stagedItem }) => staged.push(structuredClone(stagedItem)),
+    agentContextHome: dir,
+  });
+
+  await poll();
+  assert.equal(staged.length, 1, "the new Task is staged");
+  await poll();
+  assert.equal(staged.length, 1, "an unchanged Task is not re-staged");
+
+  item.taskStartedAt = "2026-08-26T09:01:00.000Z";
+  item.taskRunOwner = { kind: "external_mcp", provider: "codex" };
+  await poll();
+  assert.equal(staged.length, 2, "Start re-stages even though Relay updatedAt is unchanged");
+  assert.equal(staged.at(-1).taskRunOwner.kind, "external_mcp");
+  await poll();
+  assert.equal(staged.length, 2, "the same Start projection is deduplicated");
+
+  item.taskCompletedAt = "2026-08-26T09:02:00.000Z";
+  await poll();
+  assert.equal(staged.length, 3, "completion re-stages even though Relay updatedAt is unchanged");
+  assert.equal(staged.at(-1).taskCompletedAt, item.taskCompletedAt);
+  await poll();
+  assert.equal(staged.length, 3, "the same completion projection is deduplicated");
+});
+
 // ---- self-exit after a launched update: the replaced daemon must not outlive its replacement ----
 //
 // Field report (Shane, 2026-08-17): the old daemon kept running after "self-update

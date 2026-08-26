@@ -1067,7 +1067,7 @@ test("only native end-to-end providers can start a request", () => {
 
 test("Settings exposes complete subscription connection management for Claude Code and Codex", () => {
   assert.match(inbox, />Connections</);
-  assert.match(inbox, /Relay uses each app's local profile\. Your credentials stay with the app\./);
+  assert.doesNotMatch(inbox, /Relay uses each app's local profile\. Your credentials stay with the app\./);
   assert.doesNotMatch(inbox, /This Mac's existing local profile/);
   assert.match(inbox, /data-provider-connect="\$\{id\}"/);
   assert.match(inbox, /item\.connected\s*\? "Connected"/);
@@ -1076,11 +1076,17 @@ test("Settings exposes complete subscription connection management for Claude Co
   assert.doesNotMatch(inbox, /Connect local profile/);
   assert.doesNotMatch(inbox, /data-provider-refresh|Refresh status/);
   assert.doesNotMatch(inbox, /data-provider-open|Open \$\{esc\(item\.label\)\}/);
-  assert.match(inbox, /local MCPs/);
-  assert.match(inbox, /connected apps/);
+  assert.match(inbox, /Local MCPs/);
+  assert.match(inbox, /Connected apps/);
   assert.match(inbox, /MCPs and account connectors/);
-  assert.match(inbox, /const preview = values\.map\(\(entry\) =>/);
+  assert.match(inbox, /const list = values\.map\(\(entry\) =>/);
   assert.match(inbox, /sv-provider-list sv-agent-provider-list/);
+  assert.match(inbox, /data-provider-details="\$\{id\}"/);
+  assert.match(inbox, /aria-controls="svProviderDetail-\$\{id\}"/);
+  assert.match(inbox, /claudeCodeMark\.svg/);
+  assert.match(inbox, /codexMark\.svg/);
+  assert.match(inbox, /healthy \? countLabel : status/);
+  assert.doesNotMatch(inbox, /<span class="sv-provider-status">\$\{esc\(requirement\)\}<\/span>/);
   assert.doesNotMatch(inbox, /data-provider-integrations|providerIntegrationsDialogHtml|sv-integration-more/);
   assert.match(inbox, /data-provider-enable="\$\{id\}"/);
   assert.match(inbox, /Disabled for Tasks/);

@@ -67,20 +67,28 @@ test("the section still mounts only with the requests feature", () => {
 });
 
 test("Connections uses the shared section species and concise privacy copy", () => {
-  // The local-only section had the same defect this file exists to prevent:
-  // a td-label header among sv-open-title siblings (David, 2026-08-18).
-  assert.match(html, /class="sv-provider-section" data-stop="1">\s*<div class="sv-open-title">Connections<\/div>\s*<div class="sv-open-intro">Relay uses each app's local profile\. Your credentials stay with the app\.<\/div>/);
+  assert.match(html, /class="sv-provider-section" data-stop="1">\s*<div class="sv-open-title">Connections<\/div>\s*<div class="sv-provider-list sv-agent-provider-list">/);
   assert.doesNotMatch(html, /sv-provider-intro/);
+  assert.doesNotMatch(html, /Relay uses each app's local profile/);
 });
 
 test("Agent connections says subscription sign-in, never implementation jargon or fake reconnect", () => {
-  assert.match(html, /Your credentials stay with the app/);
   assert.match(html, /"Sign in to Claude Code" : "Sign in to Codex"/);
   assert.match(html, /"Use Claude subscription" : "Use ChatGPT subscription"/);
   assert.match(html, /item\.connected\s*\? "Connected"/);
   assert.match(html, /item\.connected[\s\S]*connectDisabled/);
   assert.doesNotMatch(html, /Connect local profile|This Mac's existing local profile/);
   assert.doesNotMatch(html, /item\.connected \? "Reconnect"/);
+});
+
+test("healthy providers collapse to the real app mark, connection count, and Ready", () => {
+  assert.match(html, /const logo = id === "claude" \? "claudeCodeMark\.svg" : "codexMark\.svg"/);
+  assert.match(html, /const headerMeta = healthy \? countLabel : status/);
+  assert.match(html, /class="sv-agent-provider-ready">Ready<\/span>/);
+  assert.match(html, /data-provider-details="\$\{id\}"/);
+  assert.match(html, /sv-agent-provider-detail\$\{open \? " open" : ""\}/);
+  assert.match(html, /providerDetailsOpen = willOpen \? provider : ""/);
+  assert.doesNotMatch(html, /<span class="sv-provider-status">\$\{esc\(requirement\)\}<\/span>/);
 });
 
 test("provider routes never inherit another provider's model or historical transcript", () => {
