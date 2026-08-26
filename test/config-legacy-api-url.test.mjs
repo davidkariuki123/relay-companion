@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   DEFAULT_API_URL,
+  DEFAULT_DEV_API_URL,
   LEGACY_API_URLS,
   apiUrl,
   canonicalizeApiUrl,
@@ -107,5 +108,32 @@ test("apiUrl respects an explicit env override without rewriting the file", () =
 test("apiUrl falls back to the canonical default when nothing is stored", () => {
   withConfigEnv(() => {
     assert.equal(apiUrl(), DEFAULT_API_URL);
+  });
+});
+
+test("apiUrl repairs a dev-channel install that still points at production", () => {
+  withConfigEnv(() => {
+    writeConfigObject({
+      apiUrl: DEFAULT_API_URL,
+      updateChannel: "dev",
+      deviceToken: "dev_keepme",
+      user: { id: "usr_dev", name: "Sven" },
+    });
+
+    assert.equal(apiUrl(), DEFAULT_DEV_API_URL);
+    const healed = readConfig();
+    assert.equal(healed.apiUrl, DEFAULT_DEV_API_URL);
+    assert.equal(healed.devApiUrl, DEFAULT_DEV_API_URL);
+    assert.equal(healed.updateChannel, "dev");
+    assert.equal(healed.deviceToken, "dev_keepme");
+    assert.deepEqual(healed.user, { id: "usr_dev", name: "Sven" });
+  });
+});
+
+test("apiUrl preserves an explicit custom origin on the dev channel", () => {
+  withConfigEnv(() => {
+    writeConfigObject({ apiUrl: "http://localhost:4000", updateChannel: "dev" });
+    assert.equal(apiUrl(), "http://localhost:4000");
+    assert.equal(readConfig().apiUrl, "http://localhost:4000");
   });
 });

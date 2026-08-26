@@ -55,7 +55,7 @@ test("relay env staging refuses to switch until an endpoint is explicitly known"
   assert.equal(fs.existsSync(path.join(dir, "config.json")), false);
 });
 
-test("environment switching does not override the existing standalone update-channel control", (t) => {
+test("the legacy update-channel command switches API and release code atomically", (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-channel-compat-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
@@ -65,5 +65,12 @@ test("environment switching does not override the existing standalone update-cha
 
   const stored = JSON.parse(fs.readFileSync(path.join(dir, "config.json"), "utf8"));
   assert.equal(stored.updateChannel, "dev");
-  assert.equal("environment" in stored, false, "a persisted environment would mask later channel changes");
+  assert.match(stored.apiUrl, /q9dpgb9fzb\.us-east-1\.awsapprunner\.com/);
+  assert.equal(stored.devApiUrl, stored.apiUrl);
+
+  const restored = runRelay(dir, "update-channel", "stable");
+  assert.equal(restored.status, 0, restored.stderr);
+  const production = JSON.parse(fs.readFileSync(path.join(dir, "config.json"), "utf8"));
+  assert.equal(production.updateChannel, "stable");
+  assert.equal(production.apiUrl, "https://api.sendrelays.com");
 });

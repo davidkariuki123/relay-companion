@@ -353,21 +353,33 @@ export function writeConfig(patch) {
 
 // One heal attempt per process: on a read-only or failing disk, retrying the
 // write on every apiUrl() call would add mkdir+rename to each daemon poll for
-// no benefit — the read-time mapping above already keeps the process correct.
-let attemptedLegacyApiUrlHeal = false;
+// no benefit — the read-time mapping below already keeps the process correct.
+const attemptedApiUrlHeals = new Set();
 
 export function apiUrl() {
   // An explicit env override is intentional (tests, staging, a local API) and
   // is never rewritten — even when it names the legacy host.
   if (process.env.RELAY_API_URL) return process.env.RELAY_API_URL;
-  const stored = readConfig().apiUrl;
-  const resolved = canonicalizeApiUrl(stored) || DEFAULT_API_URL;
-  if (stored && resolved !== stored && !attemptedLegacyApiUrlHeal) {
-    attemptedLegacyApiUrlHeal = true;
+  const config = readConfig();
+  const stored = config.apiUrl;
+  const canonical = canonicalizeApiUrl(stored) || DEFAULT_API_URL;
+  // A Companion on the dev release channel must talk to the dev API. Older
+  // setup instructions changed only the npm channel, leaving the persisted API
+  // at production. That produced a Dev Slack UI whose server returned a raw
+  // route_not_found. Repair only the known incoherent default/legacy pair;
+  // explicit local and staging origins remain valid developer choices.
+  const devChannel = normalizeUpdateChannel(process.env.RELAY_UPDATE_CHANNEL || config.updateChannel) === UPDATE_CHANNEL_DEV;
+  const resolved = devChannel && canonical === DEFAULT_API_URL ? DEFAULT_DEV_API_URL : canonical;
+  const healKey = `${configPath()}:${stored || "<default>"}->${resolved}`;
+  if (resolved !== (stored || DEFAULT_API_URL) && !attemptedApiUrlHeals.has(healKey)) {
+    attemptedApiUrlHeals.add(healKey);
     try {
-      writeConfig({ apiUrl: resolved });
+      writeConfig({
+        apiUrl: resolved,
+        ...(resolved === DEFAULT_DEV_API_URL ? { devApiUrl: resolved } : {}),
+      });
     } catch {
-      // The file keeps the legacy value; this process still uses the canonical
+      // The file keeps the incoherent value; this process still uses the canonical
       // URL, and the next process start retries the heal.
     }
   }

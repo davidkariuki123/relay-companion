@@ -881,9 +881,8 @@ function cmdEnv(positional = [], flags = {}) {
 
 function cmdUpdateChannel(positional = []) {
   const requested = String(positional[0] || "").trim().toLowerCase();
-  const overridden = Boolean(process.env.RELAY_UPDATE_CHANNEL);
   if (!requested) {
-    const source = overridden ? " (from RELAY_UPDATE_CHANNEL)" : "";
+    const source = process.env.RELAY_UPDATE_CHANNEL ? " (from RELAY_UPDATE_CHANNEL)" : "";
     console.log(`[relay] update channel: ${updateChannel()}${source}`);
     console.log(`[relay] switch with: relay update-channel ${UPDATE_CHANNEL_DEV} | relay update-channel ${UPDATE_CHANNEL_STAGING} | relay update-channel ${UPDATE_CHANNEL_STABLE}`);
     return;
@@ -893,18 +892,13 @@ function cmdUpdateChannel(positional = []) {
     process.exitCode = 1;
     return;
   }
-  writeConfig({ updateChannel: requested });
-  if (overridden) {
-    console.log(`[relay] saved channel ${requested}, but RELAY_UPDATE_CHANNEL=${process.env.RELAY_UPDATE_CHANNEL} overrides it in this environment`);
-    return;
-  }
-  if (requested === UPDATE_CHANNEL_DEV) {
-    console.log("[relay] update channel set to dev — this machine now installs builds deliberately promoted for dev testing (usually within a minute of the daemon's next check)");
-  } else if (requested === UPDATE_CHANNEL_STAGING) {
-    console.log("[relay] update channel set to staging — this machine now installs production-like release candidates deliberately promoted to staging");
-  } else {
-    console.log("[relay] update channel set to stable — this machine keeps its current build and follows production releases from here on");
-  }
+  // Release code and its server contract are one environment. Keeping these as
+  // independent switches allowed a dev Companion to keep calling production,
+  // where unreleased routes (notably Slack) correctly do not exist. Preserve
+  // the old command as an alias, but make the resulting state coherent.
+  if (requested === UPDATE_CHANNEL_DEV) return cmdEnv(["dev"]);
+  if (requested === UPDATE_CHANNEL_STAGING) return cmdEnv(["staging"]);
+  if (requested === UPDATE_CHANNEL_STABLE) return cmdEnv(["prod"]);
 }
 
 async function cmdE2eeHistoryImport(flags) {
