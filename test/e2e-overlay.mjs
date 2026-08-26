@@ -458,7 +458,7 @@ try {
   await evalIn(pageConn, "window.dispatchEvent(new MouseEvent('mousemove', { clientX: 0, clientY: 800 })); 'pointer-away'");
   await foldBanner("fresh stack");
 
-  // ---- 4. an outbound text updates the shared room and opens in one tap ----
+  // ---- 4. collapsed state stays cheap, then paints the newest shared room ----
   const sentFixture = {
     relayId: "relay_sent_e2e",
     state: "delivered",
@@ -479,6 +479,12 @@ try {
     `global.__relayTest.setSentCache(${JSON.stringify([sentFixture])})`,
     { awaitPromise: true },
   );
+  const foldedSentState = await retry(async () => {
+    const state = await evalIn(pageConn, "window.__relayMotionTest.state()");
+    if (!state.collapsed || !state.deferred) throw new Error(JSON.stringify(state));
+    return state;
+  }, { label:"collapsed outbound update defers its surface paint" });
+  await evalIn(pageConn, "window.__relayMotionTest.setCollapsed(false); 'expanded latest room state'");
   const sentUi = await retry(async () => {
     const ui = await evalIn(pageConn, `(() => {
       const row = [...document.querySelectorAll('#relaysList .relay-arrival')].find((node) => node.getAttribute('data-party') === 'Sven');
@@ -499,9 +505,9 @@ try {
     return ui;
   }, { label: "outbound room opens in one tap" });
   check(
-    "sent-open: outbound text is the latest room preview and opens in the shared conversation",
-    sentUi.preview === "You: Outbound fixture body" && openedSentRoom.history.includes("You") && openedSentRoom.history.includes("Outbound fixture body"),
-    `preview=${sentUi.preview} room=${openedSentRoom.title}`,
+    "sent-open: folded updates defer paint, then the latest room opens in one tap",
+    foldedSentState.deferred === true && sentUi.preview === "You: Outbound fixture body" && openedSentRoom.history.includes("You") && openedSentRoom.history.includes("Outbound fixture body"),
+    `deferred=${foldedSentState.deferred} preview=${sentUi.preview} room=${openedSentRoom.title}`,
   );
 
   // Literal user path for the delayed Windows failure: open a conversation,

@@ -22,9 +22,10 @@
 //
 // Run: node test/perf-overlay.mjs            (needs a GUI session)
 // Env: PERF_PHASE_A_MIN (default 5), PERF_PHASE_B_MIN (default 2),
-//      PERF_SKIP_C=1 to skip the latency runs.
+//      PERF_PHASE_D_MIN (default 1), PERF_SKIP_A/B/C=1 to skip phases,
+//      PERF_COLLAPSED_MAIN_CPU_MAX / PERF_COLLAPSED_RENDERER_CPU_MAX for gates.
 
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -33,9 +34,14 @@ import WebSocket from "ws";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkgRoot = path.join(__dirname, "..");
+const electronExecutable = process.platform === "win32"
+  ? "electron.exe"
+  : process.platform === "darwin"
+    ? path.join("Electron.app", "Contents", "MacOS", "Electron")
+    : "electron";
 const electronBin = [
-  path.join(pkgRoot, "node_modules", "electron", "dist", "Electron.app", "Contents", "MacOS", "Electron"),
-  path.join(pkgRoot, "..", "..", "node_modules", "electron", "dist", "Electron.app", "Contents", "MacOS", "Electron"),
+  path.join(pkgRoot, "node_modules", "electron", "dist", electronExecutable),
+  path.join(pkgRoot, "..", "..", "node_modules", "electron", "dist", electronExecutable),
 ].find((p) => fs.existsSync(p));
 if (!electronBin) {
   console.error("no Electron binary found; run npm install first");
@@ -47,6 +53,9 @@ const MAIN_INSPECT_PORT = Number(process.env.PERF_MAIN_PORT) || 9349;
 const RENDERER_CDP_PORT = Number(process.env.PERF_CDP_PORT) || 9350;
 const PHASE_A_MIN = Number(process.env.PERF_PHASE_A_MIN) || 5;
 const PHASE_B_MIN = Number(process.env.PERF_PHASE_B_MIN) || 2;
+const PHASE_D_MIN = Number(process.env.PERF_PHASE_D_MIN) || 1;
+const COLLAPSED_MAIN_CPU_MAX = Number(process.env.PERF_COLLAPSED_MAIN_CPU_MAX) || 10;
+const COLLAPSED_RENDERER_CPU_MAX = Number(process.env.PERF_COLLAPSED_RENDERER_CPU_MAX) || 5;
 
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "relay-overlay-perf-"));
 const relayHome = path.join(sandbox, "home");
@@ -76,6 +85,13 @@ for (let i = 0; i < 150; i += 1) {
   const at = new Date(Date.UTC(2026, 6, 1, 0, i)).toISOString();
   packets[id] = packet(id, `Seed relay #${i}`, at, "read");
 }
+packets.pkt_running_task = {
+  ...packet("pkt_running_task", "Long-running perf Task", "2026-07-01T04:00:00.000Z", "read"),
+  relayNotificationKind: "task",
+  forAgent: "Keep this Task running while the pill lifecycle is measured.",
+  taskStartedAt: "2026-07-01T04:00:05.000Z",
+  taskRunOwner: { kind: "external_mcp" },
+};
 
 function writeState() {
   const store = {
@@ -94,6 +110,13 @@ function writeState() {
   fs.renameSync(tmp, statePath);
 }
 writeState();
+const configPath = path.join(sandbox, "config.json");
+fs.writeFileSync(configPath, JSON.stringify({
+  deviceToken: "dev_overlay_perf",
+  deviceId: "dev_overlay_perf",
+  deviceName: "Overlay Perf Harness",
+  user: { id:"user_overlay_perf", name:"Overlay Perf Harness", email:"perf@example.com", accountKind:"human", isDeveloper:true },
+}, null, 2));
 
 async function fetchJson(url) {
   const res = await fetch(url);
@@ -163,25 +186,16 @@ async function retry(fn, { tries = 40, delayMs = 250, label = "condition" } = {}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function psSample(pid) {
-  return new Promise((resolve) => {
-    execFile("/bin/ps", ["-o", "%cpu=,rss=", "-p", String(pid)], (err, out) => {
-      if (err) return resolve(null);
-      const [cpu, rss] = String(out).trim().split(/\s+/).map(Number);
-      resolve(Number.isFinite(cpu) ? { cpu, rssKb: rss } : null);
-    });
-  });
-}
-
 const overlayEnv = {
   ...process.env,
   RELAY_HOME: relayHome,
   RELAY_OVERLAY_USER_DATA: userData,
   RELAY_OVERLAY_PERF: "1", // seam only; production cadences stay live
+  RELAY_ENV: "dev",
   RELAY_OVERLAY_TEST_NO_HOST_OPEN: "1",
   RELAY_OVERLAY_TEST_FORCE_ACTIVE: "1", // deterministic presence on a quiet machine
   RELAY_OVERLAY_NOTIFICATION_MS: "5000",
-  RELAY_CONFIG: path.join(sandbox, "config.json"),
+  RELAY_CONFIG: configPath,
   RELAY_WEB_URL: "http://127.0.0.1:9",
   RELAY_API_URL: "http://127.0.0.1:9",
 };
@@ -212,26 +226,29 @@ function perMinute(before, after, minutes) {
 
 async function measurePhase(name, minutes) {
   const before = await evalIn(mainConn, "global.__relayTest.perf()");
-  const cpuSamples = [];
-  const endAt = Date.now() + minutes * 60000;
-  while (Date.now() < endAt) {
-    const s = await psSample(child.pid);
-    if (s) cpuSamples.push(s);
-    await sleep(5000);
-  }
+  const mainBefore = await evalIn(mainConn, "({ cpu:process.cpuUsage(), rss:process.memoryUsage().rss })");
+  const rendererBefore = await pageConn.send("Performance.getMetrics");
+  const rendererTaskBefore = rendererBefore.metrics.find((metric) => metric.name === "TaskDuration")?.value || 0;
+  const startedAt = Date.now();
+  await sleep(minutes * 60000);
+  const elapsedMs = Math.max(1, Date.now() - startedAt);
   const after = await evalIn(mainConn, "global.__relayTest.perf()");
-  const rates = perMinute(before, after, minutes);
-  const cpuMean = cpuSamples.length
-    ? Number((cpuSamples.reduce((a, s) => a + s.cpu, 0) / cpuSamples.length).toFixed(2))
-    : null;
-  const cpuMax = cpuSamples.length ? Math.max(...cpuSamples.map((s) => s.cpu)) : null;
-  const rssMeanMb = cpuSamples.length
-    ? Number((cpuSamples.reduce((a, s) => a + s.rssKb, 0) / cpuSamples.length / 1024).toFixed(1))
-    : null;
-  summary.phases[name] = { minutes, ratesPerMinute: rates, cpuMeanPct: cpuMean, cpuMaxPct: cpuMax, rssMeanMb };
+  const mainAfter = await evalIn(mainConn, "({ cpu:process.cpuUsage(), rss:process.memoryUsage().rss })");
+  const rendererAfter = await pageConn.send("Performance.getMetrics");
+  const rendererTaskAfter = rendererAfter.metrics.find((metric) => metric.name === "TaskDuration")?.value || 0;
+  const elapsedUs = elapsedMs * 1000;
+  const mainCpuPct = Number((100 * (
+    (mainAfter.cpu.user - mainBefore.cpu.user) + (mainAfter.cpu.system - mainBefore.cpu.system)
+  ) / elapsedUs).toFixed(2));
+  const rendererCpuPct = Number((100 * (rendererTaskAfter - rendererTaskBefore) / (elapsedMs / 1000)).toFixed(2));
+  const rates = perMinute(before, after, elapsedMs / 60000);
+  const rssMb = Number((mainAfter.rss / 1024 / 1024).toFixed(1));
+  const result = { minutes:Number((elapsedMs / 60000).toFixed(3)), ratesPerMinute:rates, mainCpuPct, rendererCpuPct, rssMb };
+  summary.phases[name] = result;
   console.log(`\n== ${name} (${minutes} min) ==`);
   console.log(`   per-minute: ${JSON.stringify(rates)}`);
-  console.log(`   main-process CPU mean=${cpuMean}% max=${cpuMax}% rss=${rssMeanMb}MB over ${cpuSamples.length} samples`);
+  console.log(`   CPU: main=${mainCpuPct}% renderer-task=${rendererCpuPct}% rss=${rssMb}MB`);
+  return result;
 }
 
 try {
@@ -258,6 +275,7 @@ try {
   );
   pageConn = await connectWs(pages.webSocketDebuggerUrl);
   await pageConn.send("Runtime.enable");
+  await pageConn.send("Performance.enable");
 
   // Let boot churn settle (first sent/contacts loads, first paint) before measuring.
   await sleep(15000);
@@ -271,42 +289,83 @@ try {
     await measurePhase("A-idle-150-read-rows", PHASE_A_MIN);
   }
 
+  // ---- phase D: a live Task folded into the compact pill ----
+  // This is the 0.1.402 regression state: Tasks remains the selected DOM view,
+  // while the card is visually collapsed. No continuous animation, rAF watcher,
+  // run polling, or payload-driven surface rebuild may survive the fold.
+  await evalIn(pageConn, "window.__relayMotionTest.setView('tasks')");
+  await retry(async () => {
+    const present = await evalIn(pageConn, "Boolean(document.querySelector('.tb-working-orb'))");
+    if (!present) throw new Error("running Task indicator is absent");
+  }, { label:"running Task indicator" });
+  const expandedMotion = await evalIn(pageConn, "window.__relayMotionTest.state()");
+  if (!expandedMotion.active || expandedMotion.motion !== "running") throw new Error(`expanded motion is not running: ${JSON.stringify(expandedMotion)}`);
+  await evalIn(pageConn, "window.__relayMotionTest.setCollapsed(true)");
+  await sleep(1200); // card spring settles before the idle measurement
+  const foldedBefore = await evalIn(pageConn, "window.__relayMotionTest.state()");
+  await evalIn(pageConn, "window.__relayMotionTest.render(25)");
+  await sleep(500);
+  const foldedAfterRender = await evalIn(pageConn, "window.__relayMotionTest.state()");
+  if (foldedAfterRender.surfacePaintCount !== foldedBefore.surfacePaintCount) {
+    throw new Error(`collapsed payload renders repainted the surface: ${foldedBefore.surfacePaintCount} -> ${foldedAfterRender.surfacePaintCount}`);
+  }
+  if (foldedAfterRender.frameWatch.active || foldedAfterRender.frameWatch.ticks !== foldedBefore.frameWatch.ticks) {
+    throw new Error(`collapsed frame watcher remained live: ${JSON.stringify({ foldedBefore, foldedAfterRender })}`);
+  }
+  if (foldedAfterRender.loopAnimations.some((state) => state === "running")) {
+    throw new Error(`collapsed loop animation remained live: ${JSON.stringify(foldedAfterRender.loopAnimations)}`);
+  }
+  const foldedPerf = await measurePhase("D-running-task-collapsed", PHASE_D_MIN);
+  if (foldedPerf.mainCpuPct > COLLAPSED_MAIN_CPU_MAX) {
+    throw new Error(`collapsed main CPU ${foldedPerf.mainCpuPct}% exceeded ${COLLAPSED_MAIN_CPU_MAX}%`);
+  }
+  if (foldedPerf.rendererCpuPct > COLLAPSED_RENDERER_CPU_MAX) {
+    throw new Error(`collapsed renderer CPU ${foldedPerf.rendererCpuPct}% exceeded ${COLLAPSED_RENDERER_CPU_MAX}%`);
+  }
+  await evalIn(pageConn, "window.__relayMotionTest.setCollapsed(false)");
+  await retry(async () => {
+    const state = await evalIn(pageConn, "window.__relayMotionTest.state()");
+    if (!state.active || state.motion !== "running" || !state.frameWatch.active) throw new Error(JSON.stringify(state));
+  }, { label:"expanded motion resume" });
+
   // ---- phase B: pending-attention churn while the user is AWAY ----
   // Deterministic on a machine in active use: presenting cards would hand
   // confirmation to the REAL cursor (a stray hover counts as interaction and
   // drains the queue mid-measurement). Away defers presentation entirely while
   // the queue stays non-empty — the exact state whose disk churn was observed
   // live on the frozen Mac (overlay-prefs.json rewritten every safety tick).
-  await evalIn(mainConn, "global.__relayTest.setAway(true); 'away'");
-  for (let i = 0; i < 5; i += 1) {
-    const id = `pkt_hot_${i}`;
-    packets[id] = packet(id, `Hot unread relay #${i}`, new Date(Date.UTC(2026, 6, 2, 0, i)).toISOString());
+  if (process.env.PERF_SKIP_B !== "1") {
+    await evalIn(mainConn, "global.__relayTest.setAway(true); 'away'");
+    for (let i = 0; i < 5; i += 1) {
+      const id = `pkt_hot_${i}`;
+      packets[id] = packet(id, `Hot unread relay #${i}`, new Date(Date.UTC(2026, 6, 2, 0, i)).toISOString());
+    }
+    writeState();
+    await retry(
+      async () => {
+        const st = await evalIn(mainConn, "global.__relayTest.state()");
+        if (st.pendingAttention.length < 5) throw new Error(`pending=${st.pendingAttention.length}`);
+      },
+      { label: "attention queue primed" },
+    );
+    await sleep(10000); // let arrival churn settle before measuring the plateau
+    const bState = await evalIn(mainConn, "global.__relayTest.state()");
+    console.log(
+      `phase B steady state: pending=${bState.pendingAttention.length} away=true currentShow=${JSON.stringify(bState.currentShow)}`,
+    );
+    await measurePhase("B-pending-queue-away", PHASE_B_MIN);
+    // Return and drain the queue via confirmed dwells (same seam as the e2e), so
+    // phase C measures latency against a settled pill.
+    await evalIn(mainConn, "global.__relayTest.setAway(false); 'returned'");
+    await retry(
+      async () => {
+        const st = await evalIn(mainConn, "global.__relayTest.state()");
+        if (st.currentShow) await evalIn(mainConn, "global.__relayTest.confirmCurrentShow()");
+        if (st.pendingAttention.length > 0) throw new Error(`pending=${st.pendingAttention.length}`);
+      },
+      { tries: 60, delayMs: 400, label: "drain attention queue before phase C" },
+    );
   }
-  writeState();
-  await retry(
-    async () => {
-      const st = await evalIn(mainConn, "global.__relayTest.state()");
-      if (st.pendingAttention.length < 5) throw new Error(`pending=${st.pendingAttention.length}`);
-    },
-    { label: "attention queue primed" },
-  );
-  await sleep(10000); // let arrival churn settle before measuring the plateau
-  const bState = await evalIn(mainConn, "global.__relayTest.state()");
-  console.log(
-    `phase B steady state: pending=${bState.pendingAttention.length} away=true currentShow=${JSON.stringify(bState.currentShow)}`,
-  );
-  await measurePhase("B-pending-queue-away", PHASE_B_MIN);
-  // Return and drain the queue via confirmed dwells (same seam as the e2e), so
-  // phase C measures latency against a settled pill.
-  await evalIn(mainConn, "global.__relayTest.setAway(false); 'returned'");
-  await retry(
-    async () => {
-      const st = await evalIn(mainConn, "global.__relayTest.state()");
-      if (st.currentShow) await evalIn(mainConn, "global.__relayTest.confirmCurrentShow()");
-      if (st.pendingAttention.length > 0) throw new Error(`pending=${st.pendingAttention.length}`);
-    },
-    { tries: 60, delayMs: 400, label: "drain attention queue before phase C" },
-  );
 
   // ---- phase C: tray-open -> painted latency ----
   if (process.env.PERF_SKIP_C !== "1") {

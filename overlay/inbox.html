@@ -94,6 +94,7 @@
      Elevation is three tokens: the card's own drop shadow (this one), the
      folded pill's lighter cousin, and one popover shadow — nothing else casts. */
   .card {
+    --relay-loop-state:paused;
     /* The native window preserves its current screen-space top-right point while
        it changes size. Anchor the visible sheet to that same point so a folded
        pill never lands at the old left edge and then jumps home when AppKit
@@ -109,6 +110,7 @@
     transition:box-shadow var(--t-slow) var(--soft), border-radius var(--t-slow) var(--settle);
     animation:appIn var(--t-slow) var(--soft) both;
   }
+  .card[data-continuous-motion="running"] { --relay-loop-state:running; }
   .card.collapsed {
     border-radius:var(--r-fold);
     box-shadow:var(--shadow-pill);
@@ -499,7 +501,7 @@
             mask:radial-gradient(farthest-side, #0000 calc(100% - 1.6px), #000 0);
     opacity:0; transition:opacity var(--t-base) var(--settle); pointer-events:none;
   }
-  .row.opening .avatar::after, .th-item.opening .avatar::after { opacity:1; animation:dotSpin .7s linear infinite; }
+  .row.opening .avatar::after, .th-item.opening .avatar::after { opacity:1; animation:dotSpin .7s linear infinite; animation-play-state:var(--relay-loop-state); }
   @keyframes dotSpin { to { transform:rotate(1turn); } }
   .rk-top { display:flex; align-items:baseline; gap:7px; }
   .rk-sender { font-size:13px; font-weight:600; color:var(--ink); letter-spacing:.1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -1253,7 +1255,7 @@
   }
   .agent-working-indicator { display:inline-flex; align-items:center; gap:3px; margin-left:7px; vertical-align:2px; }
   .agent-working-dot { width:5px; height:5px; border-radius:50%; background:currentColor; opacity:.35;
-    animation:agentWorkingPulse 1.2s var(--settle) infinite; }
+    animation:agentWorkingPulse 1.2s var(--settle) infinite; animation-play-state:var(--relay-loop-state); }
   .agent-working-dot:nth-child(2) { animation-delay:.16s; }
   .agent-working-dot:nth-child(3) { animation-delay:.32s; }
   @keyframes agentWorkingPulse {
@@ -1308,7 +1310,7 @@
   .th-host-context { overflow:hidden; color:var(--muted-2); font-family:var(--sans); font-size:10px;
     text-overflow:ellipsis; white-space:nowrap; }
   .th-host-arrow { color:var(--host-color); font-family:var(--sans); font-size:17px; line-height:1; }
-  .th-msg.opening .th-host-logo { animation:hostOpenBreathe .8s ease-in-out infinite alternate; }
+  .th-msg.opening .th-host-logo { animation:hostOpenBreathe .8s ease-in-out infinite alternate; animation-play-state:var(--relay-loop-state); }
   @keyframes hostOpenBreathe { to { opacity:.42; transform:scale(.94); } }
   @media (hover:none), (pointer:coarse) {
     .th-host-disclosure { display:flex; }
@@ -1809,7 +1811,7 @@
   .rd-act { display:flex; gap:6px; align-items:center; min-width:0; font-family:var(--sans); font-size:14px; line-height:21px;
     font-weight:445; color:color-mix(in oklab, var(--ink) 60%, transparent); }
   .rd-act .act-icon { width:16px; height:16px; flex:0 0 16px; color:inherit; }
-  .rd-act.live .act-icon { animation:rdLivePulse 1.35s ease-in-out infinite; }
+  .rd-act.live .act-icon { animation:rdLivePulse 1.35s ease-in-out infinite; animation-play-state:var(--relay-loop-state); }
   .rd-act .act-stack { display:flex; flex-direction:column; min-width:0; max-width:100%; }
   .rd-act .act-copy { display:inline-flex; align-items:baseline; gap:4px; min-width:0; max-width:100%; }
   .rd-act .averb { flex:none; font-weight:400; white-space:nowrap; }
@@ -1822,7 +1824,7 @@
   .rd-live-tail { display:flex; align-items:center; gap:7px; min-height:21px; font-family:var(--sans); font-size:14px; line-height:21px;
     color:color-mix(in oklab, var(--ink) 64%, transparent); }
   .rd-live-tail-dot { width:6px; height:6px; flex:0 0 6px; border-radius:999px; background:var(--provider, var(--accent));
-    animation:rdLivePulse 1.35s ease-in-out infinite; }
+    animation:rdLivePulse 1.35s ease-in-out infinite; animation-play-state:var(--relay-loop-state); }
   @keyframes rdLivePulse { 0%,100% { opacity:.34; } 50% { opacity:1; } }
   .rd-said { align-self:flex-start; width:100%; font-family:var(--sans); font-size:14px; line-height:21px; font-weight:445; color:var(--ink); overflow-wrap:anywhere; }
   /* Codex conversation geometry: the agent and its work own the left edge;
@@ -2130,9 +2132,12 @@
   .tb-delete:hover { color:var(--danger); background:var(--danger-soft); }
   .tb-delete:disabled { opacity:.35; cursor:default; }
   .tb-working { display:inline-flex; align-items:center; color:var(--accent); font-family:var(--sans); font-size:10.5px; font-weight:500; white-space:nowrap; }
-  .tb-working-orb { position:relative; width:6px; height:6px; flex:0 0 6px; margin-right:7px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 11%, transparent); animation:taskWorkingBreathe 1.8s cubic-bezier(.4,0,.2,1) infinite; }
+  .tb-working-orb { position:relative; width:6px; height:6px; flex:0 0 6px; margin-right:7px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 11%, transparent); animation:taskWorkingBreathe 1.8s cubic-bezier(.4,0,.2,1) infinite; animation-play-state:var(--relay-loop-state); }
   .tb-working-orb::after { content:""; position:absolute; left:1px; top:1px; width:2px; height:2px; border-radius:50%; background:color-mix(in srgb, white 70%, var(--accent)); opacity:.7; }
-  @keyframes taskWorkingBreathe { 0%,100% { opacity:.62; transform:scale(.88); box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 8%, transparent); } 50% { opacity:1; transform:scale(1); box-shadow:0 0 0 4px color-mix(in srgb, var(--accent) 15%, transparent); } }
+  /* Keep the live cue on Chromium's compositor. Animating box-shadow repaints
+     the transparent always-on-top window and can monopolize Electron's main /
+     renderer IPC path even after the card folds. */
+  @keyframes taskWorkingBreathe { 0%,100% { opacity:.62; transform:scale(.88); } 50% { opacity:1; transform:scale(1); } }
   @media (prefers-reduced-motion:reduce) {
     .tb-working-orb, .task-zero.celebrate .tz-tile { animation:none; opacity:1; }
     .task-zero, .tz-glow, .tz-mark, .tz-tile, .tz-title, .tz-sub, .tb-completed-reveal, .tb-completed-toggle svg { transition-duration:.001s; }
@@ -2457,10 +2462,10 @@
   .su-checks { margin:20px 0 0; display:grid; gap:9px; color:var(--muted); font-size:12px; }
   .su-check { display:flex; align-items:center; gap:8px; }
   .su-check-mark { color:var(--accent); font-weight:700; }
-  .su-check-active .su-check-mark { width:13px; height:13px; border:1.5px solid var(--hair); border-top-color:var(--accent); border-radius:50%; animation:suSpin .8s linear infinite; }
+  .su-check-active .su-check-mark { width:13px; height:13px; border:1.5px solid var(--hair); border-top-color:var(--accent); border-radius:50%; animation:suSpin .8s linear infinite; animation-play-state:var(--relay-loop-state); }
   .su-note { margin-top:12px; min-height:17px; color:var(--muted); font-size:11px; line-height:1.45; }
   .su-error { color:var(--danger); }
-  .su-spinner { width:24px; height:24px; margin-bottom:14px; border:2px solid var(--hair); border-top-color:var(--accent); border-radius:50%; animation:suSpin .8s linear infinite; }
+  .su-spinner { width:24px; height:24px; margin-bottom:14px; border:2px solid var(--hair); border-top-color:var(--accent); border-radius:50%; animation:suSpin .8s linear infinite; animation-play-state:var(--relay-loop-state); }
   @keyframes suSpin { to { transform:rotate(360deg); } }
   @media (prefers-reduced-motion:reduce) { .su-spinner { animation:none; border-top-color:var(--hair); } }
   @media (prefers-reduced-motion:reduce) { .su-check-active .su-check-mark { animation:none; border-top-color:var(--hair); } }
@@ -2964,6 +2969,34 @@
 
   // ---------- collapse / expand / peek ----------
   let collapsed = false;
+  // Folding the transparent window hides its content visually, but opacity and
+  // pointer-events do not stop animations, frame callbacks, or run polling.
+  // This is the single lifecycle contract for all continuous renderer work;
+  // finite fold/open transitions deliberately remain independent.
+  const continuousMotionListeners = new Set();
+  let surfaceRenderDeferred = false;
+  let surfacePaintCount = 0;
+  function rendererSurfaceActive() {
+    return document.visibilityState === "visible"
+      && !collapsed
+      && !cardEl.classList.contains("offstage")
+      && !cardEl.classList.contains("bye");
+  }
+  function syncContinuousMotion() {
+    const active = rendererSurfaceActive();
+    const next = active ? "running" : "paused";
+    const changed = cardEl.dataset.continuousMotion !== next;
+    cardEl.dataset.continuousMotion = next;
+    if (changed) for (const listener of continuousMotionListeners) listener(active);
+    return active;
+  }
+  function reconcileSurfaceActivity() {
+    const active = syncContinuousMotion();
+    if (active) flushDeferredSurfaceRender();
+    else syncRunMirrors();
+  }
+  new MutationObserver(reconcileSurfaceActivity).observe(cardEl, { attributes:true, attributeFilter:["class"] });
+  document.addEventListener("visibilitychange", reconcileSurfaceActivity);
   let readerOpenNow = false; // the reader holds the card at READER size
   let readerMorphInFlight = false;
   let readerMorphSnapshot = null;
@@ -3171,11 +3204,17 @@
     // One face, one transition: the count and compact controls track the same
     // state from the first shrinking frame through native-window settlement.
     cardEl.classList.toggle("collapsed", collapsed);
+    syncContinuousMotion();
     const openSize = readerOpenNow ? READER : EXPANDED;
     springTo(collapsed ? PILL.w : openSize.w, collapsed ? PILL.h : openSize.h);
     playTink();
     // List rebuilds are deferred while folded; catch up now that the card is visible.
-    if (!collapsed) flushPendingRelaysRender();
+    if (!collapsed) {
+      flushPendingRelaysRender();
+      flushDeferredSurfaceRender();
+    } else {
+      syncRunMirrors();
+    }
   }
   // Park the card invisibly at expanded size while the OS window is hidden, so the
   // next appearance (tray reopen / ghost banner) starts from a clean slate.
@@ -3195,6 +3234,8 @@
     refreshCountLabel();
     cardEl.classList.add("offstage");
     cardEl.classList.remove("collapsed", "ghost", "bye");
+    syncContinuousMotion();
+    syncRunMirrors();
     snapSize(EXPANDED.w, EXPANDED.h);
   }
   // ✕ — the card leaves gracefully, then the main process hides the window and keeps
@@ -3234,6 +3275,8 @@
     cardEl.classList.remove("peek", "notifying");
     collapsed = true;
     cardEl.classList.add("collapsed");
+    syncContinuousMotion();
+    syncRunMirrors();
     refreshCountLabel();
     springTo(PILL.w, PILL.h);
     renderAll();
@@ -5879,6 +5922,11 @@
   // Every render rebuilds the stream element, so re-attach the poll to whatever
   // is on screen now and drop the ones whose card just closed.
   function syncRunMirrors() {
+    if (!rendererSurfaceActive()) {
+      for (const id of [...runFeedTimers.keys()]) stopRunFeed(id);
+      for (const id of [...runScrollControllers.keys()]) destroyWorkScroller(id);
+      return;
+    }
     const open = new Set();
     for (const el of document.querySelectorAll("[data-run-stream]")) {
       const id = el.getAttribute("data-run-stream");
@@ -13101,6 +13149,7 @@
     // frame target. It removes the blank-frame and double-rebuild paths while
     // preserving applyView as the sole visibility writer.
     const enteringView = applyView._last !== activeView;
+    const paintSurface = rendererSurfaceActive();
     const credentialRecovery = ["unavailable", "missing", "corrupt"].includes(payload.account?.credentialStatus);
     const tutorialPending = !credentialRecovery && payload.account?.paired !== false && payload.ui?.setupTutorialPending === true;
     if (credentialRecovery) {
@@ -13114,13 +13163,20 @@
     cardEl.classList.toggle("signup", needsSignup);
     signupViewEl?.classList.toggle("gone", !needsSignup);
     if (needsSignup) {
-      renderSignup();
+      if (paintSurface) {
+        renderSignup();
+        surfacePaintCount += 1;
+        surfaceRenderDeferred = false;
+      } else {
+        surfaceRenderDeferred = true;
+      }
       syncCardSize(false);
       if (!credentialRecovery && payload.account?.paired === false && !signupStateLoaded && window.relay.installationAuthState) {
         signupStateLoaded = true;
         window.relay.installationAuthState().then((state) => {
           applyInstallationState(state);
-          renderSignup();
+          if (rendererSurfaceActive()) renderSignup();
+          else surfaceRenderDeferred = true;
           if (["google", "approval", "finishing"].includes(signupStage)) pollInstallationState();
         }).catch(() => {});
       }
@@ -13156,21 +13212,33 @@
     markAllReadEl.classList.toggle("gone", activeView !== "relays" || unread === 0);
     markAllReadEl.disabled = unread === 0;
     setBadge(tasksBadgeEl, requestsUnreadCount());
-    if (activeView === "chat") renderChat();
-    if (activeView === "relays") renderRelays();
-    else if (activeView === "slack") renderSlack();
-    else if (activeView === "threads") renderThreads();
-    else if (activeView === "sent") renderSent();
-    else if (activeView === "tasks") renderTasksBoard();
-    else if (activeView === "reader") renderReader();
-    else if (activeView === "requestDetail") renderRequestDetail();
-    else if (activeView === "settings" && enteringView) renderSettings();
+    if (paintSurface) {
+      if (activeView === "chat") renderChat();
+      if (activeView === "relays") renderRelays();
+      else if (activeView === "slack") renderSlack();
+      else if (activeView === "threads") renderThreads();
+      else if (activeView === "sent") renderSent();
+      else if (activeView === "tasks") renderTasksBoard();
+      else if (activeView === "reader") renderReader();
+      else if (activeView === "requestDetail") renderRequestDetail();
+      else if (activeView === "settings" && enteringView) renderSettings();
+      surfacePaintCount += 1;
+      surfaceRenderDeferred = false;
+    } else {
+      surfaceRenderDeferred = true;
+    }
     applyView();
     // Every render rebuilds the mirror's element, so re-attach the poll to
     // whatever is on screen now and drop the ones whose card just closed.
     syncRunMirrors();
-    if (activeView === "tasks" || activeView === "reader") loadSchedules();
+    if (paintSurface && (activeView === "tasks" || activeView === "reader")) loadSchedules();
     // contacts renders from its own load path
+  }
+
+  function flushDeferredSurfaceRender() {
+    if (!surfaceRenderDeferred || !rendererSurfaceActive()) return;
+    surfaceRenderDeferred = false;
+    renderAll();
   }
 
   markAllReadEl.addEventListener("click", async () => {
@@ -13299,7 +13367,11 @@
   if (window.relay.onOpenFull) window.relay.onOpenFull(() => trayOpen());
   // The OS window was just re-shown; reset notification dwell state until the
   // pointer enters the card again.
-  if (window.relay.onShown) window.relay.onShown(() => { interactive = false; });
+  if (window.relay.onShown) window.relay.onShown(() => {
+    interactive = false;
+    syncContinuousMotion();
+    flushDeferredSurfaceRender();
+  });
   if (window.relay.onOpenDone) window.relay.onOpenDone((id) => { stopOpening(id); retireOpeningNote(id); });
   // Visible confirmation for "Open in current chat". Two honest states:
   //   waiting   — staged for an idle chat; ONLY that chat's next turn can ingest
@@ -13377,7 +13449,7 @@
   // re-pushed. Skip while the pointer is on the card (a rebuild under the pointer wipes
   // hover state) and while dragging; the next tick catches up.
   setInterval(() => {
-    if (dragging || interactive) return;
+    if (dragging || interactive || !rendererSurfaceActive()) return;
     if (activeView === "relays") renderRelays();
     else if (activeView === "sent") renderSent();
   }, 60000);
@@ -13386,13 +13458,20 @@
   // A frame gap this long is not "slow", it is a visible freeze: the card stops
   // moving and clicks appear dead. Record what the UI was doing so the next real
   // occurrence on a real machine identifies its own cause (~/.relay/perf.log).
+  // The watcher itself must obey the surface lifecycle: an always-running rAF
+  // keeps Chromium producing frames for a folded transparent window.
   const STALL_MS = 250;
   let lastRenderCostMs = 0;
-  (function watchFrames() {
-    let last = performance.now();
+  let frameWatchStats = () => ({ active:false, ticks:0 });
+  (function installFrameWatcher() {
+    let watchRaf = null;
+    let last = 0;
+    let ticks = 0;
     function tick(now) {
+      if (!rendererSurfaceActive()) { watchRaf = null; return; }
       const gap = now - last;
       last = now;
+      ticks += 1;
       if (gap > STALL_MS && window.relay.reportStall) {
         window.relay.reportStall({
           ms: gap,
@@ -13403,9 +13482,21 @@
           lastRenderMs: lastRenderCostMs,
         });
       }
-      requestAnimationFrame(tick);
+      watchRaf = requestAnimationFrame(tick);
     }
-    requestAnimationFrame(tick);
+    function setActive(active) {
+      if (!active) {
+        if (watchRaf !== null) cancelAnimationFrame(watchRaf);
+        watchRaf = null;
+        return;
+      }
+      if (watchRaf !== null) return;
+      last = performance.now();
+      watchRaf = requestAnimationFrame(tick);
+    }
+    continuousMotionListeners.add(setActive);
+    frameWatchStats = () => ({ active:watchRaf !== null, ticks });
+    setActive(syncContinuousMotion());
   })();
   // Time the list rebuild itself, so a stall report says whether rendering caused it.
   const __renderRelays = renderRelays;
@@ -13423,6 +13514,34 @@
   // schema is deliberately allowed to migrate. Install this only after the
   // complete renderer has initialized, and never expose it in production.
   if (window.relay.isTestOverlay) {
+    window.__relayMotionTest = {
+      state: () => {
+        const loopAnimations = document.getAnimations({ subtree:true }).filter((animation) => {
+          try { return animation.effect && animation.effect.getTiming().iterations === Infinity; }
+          catch { return false; }
+        });
+        return {
+          active:rendererSurfaceActive(),
+          motion:cardEl.dataset.continuousMotion,
+          collapsed,
+          activeView,
+          deferred:surfaceRenderDeferred,
+          surfacePaintCount,
+          frameWatch:frameWatchStats(),
+          loopAnimations:loopAnimations.map((animation) => animation.playState),
+        };
+      },
+      setCollapsed: (value) => { setCollapsed(Boolean(value)); return collapsed; },
+      setView: (view) => {
+        activeView = String(view || "relays");
+        commitNavigation();
+        return activeView;
+      },
+      render: (count = 1) => {
+        for (let i = 0; i < Math.max(1, Number(count) || 1); i += 1) renderAll();
+        return surfacePaintCount;
+      },
+    };
     window.__relayParityOpenRequest = (fixture) => {
       if (!fixture?.id) throw new Error("A Task fixture id is required");
       payload.relays = [...(payload.relays || []).filter((row) => row.id !== fixture.id), fixture];
