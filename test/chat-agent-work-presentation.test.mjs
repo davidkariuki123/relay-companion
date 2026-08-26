@@ -59,3 +59,22 @@ test("the pill labels tagged Work from its actual provider before feed hydration
   assert.match(appName, /row\.source\.surface === "codex"\) return "Codex"/);
   assert.match(appName, /row\.source\.surface === "claude_code"\) return "Claude Code"/);
 });
+
+test("tagged Work can send follow-ups through the existing Task runner", () => {
+  const main = fs.readFileSync(new URL("../overlay/main.cjs", import.meta.url), "utf8");
+  const helperStart = main.indexOf("function isTaggedAgentWorkRow(row)");
+  const helperEnd = main.indexOf("function agentWorkEnabledForRow", helperStart);
+  const helper = main.slice(helperStart, helperEnd);
+  assert.match(helper, /row\?\.source\?\.host === "relay-agent-run"/);
+  assert.match(helper, /row\?\.source\?\.agentSessionId/);
+
+  const steerStart = main.indexOf("async function previewTaskSteer(input)");
+  const steerEnd = main.indexOf("function installActiveSpaceWatcher", steerStart);
+  const steer = main.slice(steerStart, steerEnd);
+  assert.match(steer, /const isLocalWork =[^;]+\|\| isTaggedAgentWorkRow\(row\);/s);
+  assert.ok(
+    steer.indexOf("isTaggedAgentWorkRow(row)") < steer.indexOf('No local agent work exists for this Relay.'),
+    "tagged Work must pass eligibility before the follow-up rejection gate",
+  );
+  assert.match(steer, /chatAgentSessionTurn\(/);
+});

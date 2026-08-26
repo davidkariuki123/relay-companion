@@ -1899,6 +1899,7 @@ test("a claimed relay reaches the inbox as ordinary correspondence, with no trac
   // a claim the recipient has no account and no inbox, and after one the relay's
   // recipientUserId is the claimer, so it arrives through the existing path with
   // the sender's real name.
+  const now = Date.now();
   const claimed = shareParse(await handleCall({
     async inbox() {
       return {
@@ -1906,8 +1907,8 @@ test("a claimed relay reaches the inbox as ordinary correspondence, with no trac
           relayId: "relay_share_1",
           title: "Saturday session plan",
           sender: { name: "Priya Nair", email: "priya@example.com" },
-          createdAt: "2026-08-19T09:00:00.000Z",
-          arrivedAt: "2026-08-19T11:00:00.000Z",
+          createdAt: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+          arrivedAt: new Date(now - 60 * 60 * 1000).toISOString(),
           state: "delivered",
         }],
       };

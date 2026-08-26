@@ -5161,8 +5161,12 @@ async function sendPreviewReply(input, entry) {
   }
 }
 
+function isTaggedAgentWorkRow(row) {
+  return Boolean(row?.source?.host === "relay-agent-run" && row?.source?.agentSessionId);
+}
+
 function agentWorkEnabledForRow(row) {
-  if (row?.source?.host === "relay-agent-run" && row?.source?.agentSessionId) return PRODUCT_FEATURES.requests === true;
+  if (isTaggedAgentWorkRow(row)) return PRODUCT_FEATURES.requests === true;
   if (row?.relayNotificationKind === "task") return PRODUCT_FEATURES.requests === true;
   if (row?.relayNotificationKind === "plain_relay") return PRODUCT_FEATURES.relayWork === true;
   return false;
@@ -6149,7 +6153,8 @@ async function previewTaskSession(relayId) {
   const id = String(relayId || "");
   const row = rowById(id);
   const isRequest = row?.relayNotificationKind === "task";
-  const isLocalWork = row?.relayNotificationKind === "plain_relay" && Boolean(row?.workStartedAt);
+  const isLocalWork = (row?.relayNotificationKind === "plain_relay" && Boolean(row?.workStartedAt))
+    || isTaggedAgentWorkRow(row);
   if (!row || (!isRequest && !isLocalWork)) return { ok: false, error: "No local agent work exists for this Relay." };
   if (!agentWorkEnabledForRow(row)) return agentWorkUnavailable();
   const claudePath = row.claudeNativeSession && row.claudeNativeSession.sessionPath;
@@ -6497,7 +6502,13 @@ async function previewTaskSteer(input) {
   if (body.length > 20000) return { ok: false, error: "That is too long to send." };
   const row = rowById(id);
   const isRequest = row?.relayNotificationKind === "task";
-  const isLocalWork = row?.relayNotificationKind === "plain_relay" && Boolean(row?.workStartedAt);
+  // @Claude/@Codex Work rows are server-authored plain chat responses. Their
+  // durable session identity lives in source.agentSessionId, not in the
+  // legacy workStartedAt field used by recipient-started ordinary Relay Work.
+  // Treating only the legacy shape as Work lets the transcript render but
+  // rejects every same-session follow-up before it reaches the session API.
+  const isLocalWork = (row?.relayNotificationKind === "plain_relay" && Boolean(row?.workStartedAt))
+    || isTaggedAgentWorkRow(row);
   if (!row || (!isRequest && !isLocalWork)) return { ok: false, error: "No local agent work exists for this Relay." };
   if (!agentWorkEnabledForRow(row)) return agentWorkUnavailable();
   if (row.source?.host === "relay-agent-run") {
