@@ -10,8 +10,14 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 
 const DEVELOPER = { accountKind: "human", isDeveloper: true };
 const ORDINARY_USER = { accountKind: "human", isDeveloper: false };
-const DEVELOPER_SURFACES = { relayWork: true, agentConnections: true, aiSessions: true, connectors: true };
-const ORDINARY_SURFACES = { relayWork: false, agentConnections: false, aiSessions: false, connectors: false };
+const DEVELOPER_SURFACES = {
+  slack: true, peopleMentions: true, agentMentions: true,
+  relayWork: true, agentConnections: true, aiSessions: true, connectors: true,
+};
+const ORDINARY_SURFACES = {
+  slack: false, peopleMentions: true, agentMentions: false,
+  relayWork: false, agentConnections: false, aiSessions: false, connectors: false,
+};
 
 test("developer capabilities require both the server-owned role and a non-production environment", () => {
   assert.deepEqual(productFeatures({ env: { NODE_ENV: "development" }, user: ORDINARY_USER }), {
@@ -62,7 +68,11 @@ test("developer status brings the complete Task substrate on dev but never Cowor
   const features = productFeatures({ env: { RELAY_UPDATE_CHANNEL: "dev" }, user: DEVELOPER });
   assert.equal(features.requests, true);
   assert.deepEqual(
-    { relayWork: features.relayWork, agentConnections: features.agentConnections, aiSessions: features.aiSessions, connectors: features.connectors },
+    {
+      slack: features.slack, peopleMentions: features.peopleMentions, agentMentions: features.agentMentions,
+      relayWork: features.relayWork, agentConnections: features.agentConnections,
+      aiSessions: features.aiSessions, connectors: features.connectors,
+    },
     DEVELOPER_SURFACES,
   );
   assert.equal(features.cowork, false);
@@ -74,7 +84,11 @@ test("an explicit production environment wins over a local API URL, so the clone
   const clone = productFeatures({ env: { RELAY_ENV: "production" }, apiUrl: "http://127.0.0.1:9" });
   assert.equal(clone.environment, "production");
   assert.deepEqual(
-    { relayWork: clone.relayWork, agentConnections: clone.agentConnections, aiSessions: clone.aiSessions, connectors: clone.connectors },
+    {
+      slack: clone.slack, peopleMentions: clone.peopleMentions, agentMentions: clone.agentMentions,
+      relayWork: clone.relayWork, agentConnections: clone.agentConnections,
+      aiSessions: clone.aiSessions, connectors: clone.connectors,
+    },
     ORDINARY_SURFACES,
   );
 });
@@ -136,6 +150,19 @@ test("the first payload render reconciles feature-gated navigation", () => {
   const body = source.slice(source.indexOf("function renderAll()"), source.indexOf("markAllReadEl.addEventListener", source.indexOf("function renderAll()")));
   assert.match(body, /syncTabs\(\);/);
   assert.match(source, /view === "tasks" && payload\.features\?\.requests !== true/);
+  assert.match(source, /view === "slack" && payload\.features\?\.slack !== true/);
+});
+
+test("customer builds keep person mentions while hiding Slack and agent mentions", () => {
+  const staging = productFeatures({ env: { RELAY_UPDATE_CHANNEL: "staging" }, user: DEVELOPER });
+  assert.equal(staging.peopleMentions, true);
+  assert.equal(staging.agentMentions, false);
+  assert.equal(staging.slack, false);
+
+  const source = fs.readFileSync(path.join(here, "../overlay/inbox.html"), "utf8");
+  assert.match(source, /payload\.features\?\.peopleMentions === true && thread\.isGroup/);
+  assert.match(source, /payload\.features\?\.agentMentions === true \? agentMentionSpans\(text\) : \[\]/);
+  assert.doesNotMatch(source, /payload\.features\?\.requests === true \? agentMentionSpans/);
 });
 
 test("disabled Tasks and Cowork do not remain in Settings", () => {

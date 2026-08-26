@@ -33,6 +33,13 @@ function productFeatures(options = {}) {
     environment,
     developer,
     requests: developer,
+    // Slack is an internal proving surface alongside Tasks. Staging and
+    // production exercise the customer product, even for developer accounts.
+    slack: developer,
+    // Human mentions are ordinary conversation affordances. Agent mentions
+    // start local runs, so they retain the same boundary as Tasks.
+    peopleMentions: true,
+    agentMentions: developer,
     // Cowork is intentionally unavailable. Do not add an override here: its
     // former transport inspected Claude Desktop process/session credentials.
     cowork: false,

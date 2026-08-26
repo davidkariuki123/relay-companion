@@ -35,10 +35,27 @@ test("an unconnected Slack tab becomes the onboarding-inspired connection page w
   assert.doesNotMatch(render, /Not now|Skip for now|Continue without Slack|Last step|Finish setup/);
 
   const applyView = html.slice(html.indexOf("function applyView()"), html.indexOf('document.getElementById("chatExpandBtn")'));
-  assert.match(applyView, /activeView === "slack" && viewChanged[\s\S]*refreshSlackConnection/,
+  assert.match(applyView, /activeView === "slack" && payload\.features\?\.slack === true && viewChanged[\s\S]*refreshSlackConnection/,
     "opening Slack refreshes the authoritative connection state");
   assert.match(html, /\(activeView === "settings" \|\| activeView === "slack"\)[\s\S]*refreshSlackConnection/,
     "the Slack page stays live while browser OAuth completes");
+});
+
+test("Slack surfaces and transport are fail-closed outside the dev feature row", () => {
+  assert.match(html, /view === "slack" && payload\.features\?\.slack !== true/,
+    "the Slack tab is absent from customer builds");
+  assert.match(html, /function slackSettingsHtml\(info\) \{\s*if \(payload\.features\?\.slack !== true\) return "";/,
+    "Settings cannot paint a Slack card while the feature is off");
+  assert.match(html, /async function refreshSlackConnection[\s\S]{0,140}payload\.features\?\.slack !== true\) return;/,
+    "the hidden UI does not probe Slack status");
+  assert.match(main, /async function refreshCanonicalChats\(\) \{\s*if \(PRODUCT_FEATURES\.slack !== true\)[\s\S]*?slackChatsCache = \[\]/,
+    "the main process does not fetch Slack projections while disabled");
+  for (const channel of ["relay:slackConnection", "relay:slackConnect", "relay:slackDisconnect"]) {
+    const start = main.indexOf(`ipcMain.handle("${channel}"`);
+    assert.ok(start >= 0, `${channel} handler exists`);
+    assert.match(main.slice(start, start + 450), /PRODUCT_FEATURES\.slack !== true/,
+      `${channel} checks the product feature before transport`);
+  }
 });
 
 test("Slack surfaces use exact integration metadata so DMs are not lost or name-matched", () => {

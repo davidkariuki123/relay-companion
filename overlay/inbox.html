@@ -4277,7 +4277,7 @@
 
   // ---------- state ----------
   let activeView = "relays";
-  let payload = { account: { paired: false }, ui: { canDismiss: true, reopenSurface: "the Relay icon", setupTutorialPending:false }, features: { requests:false, cowork:false, environment:"production" }, relays: [], sent: [], requests: [], contacts: [], chats: [], slackChats: [] };
+  let payload = { account: { paired: false }, ui: { canDismiss: true, reopenSurface: "the Relay icon", setupTutorialPending:false }, features: { requests:false, slack:false, peopleMentions:true, agentMentions:false, cowork:false, environment:"production" }, relays: [], sent: [], requests: [], contacts: [], chats: [], slackChats: [] };
   const canonicalChatDetails = new Map();
   const canonicalChatFingerprints = new Map();
   const canonicalChatDetailProjectionKeys = new Map();
@@ -4320,6 +4320,7 @@
     return `${conversationSurface(source)}:${chatId}`;
   }
   function slackMessagesVisible(room, source = threadsSource) {
+    if (payload.features?.slack !== true) return false;
     if (!isSlackIntegratedRoom(room)) return false;
     const key = slackVisibilityKey(room, source);
     return slackVisibilityOverrides.has(key)
@@ -4414,7 +4415,7 @@
     return changed;
   }
   function syncSlackVisibilityButton(room = threadDetailId ? chatRoomForThread(threadDetailId) : null) {
-    const linked = isSlackIntegratedRoom(room);
+    const linked = payload.features?.slack === true && isSlackIntegratedRoom(room);
     thSlackVisibilityEl.classList.toggle("hidden", !linked);
     if (!linked) return;
     const visible = slackMessagesVisible(room);
@@ -11560,7 +11561,7 @@
       // recipients only; the owned Claude and Codex options remain available
       // in every developer composer below.
       const participantNames = new Set();
-      if (thread.isGroup) {
+      if (payload.features?.peopleMentions === true && thread.isGroup) {
         const group = groupsList.find((candidate) => String(candidate.id || "") === String(thread.groupId || ""))
           || groupsList.find((candidate) => normalizedPartyName(candidate.name) === normalizedPartyName(thread.groupName));
         // The current roster decides who can be mentioned. Historical sender
@@ -11571,7 +11572,7 @@
         }
       }
       const mentionOptions = [
-        ...(payload.features?.requests === true ? [
+        ...(payload.features?.agentMentions === true ? [
           { token:"Claude", name:"@Claude", note:"Run Claude on my computer", agent:true },
           { token:"Codex", name:"@Codex", note:"Run Codex on my computer", agent:true },
         ] : []),
@@ -11728,7 +11729,7 @@
           attachments,
           preview: "",
         });
-        const agentMentions = payload.features?.requests === true ? agentMentionSpans(text) : [];
+        const agentMentions = payload.features?.agentMentions === true ? agentMentionSpans(text) : [];
         const invokedProviders = agentMentions.map((mention) => mention.provider);
         for (const [index, provider] of invokedProviders.entries()) {
           optimisticChatReplies.set(`${idempotencyKey}:agent:${provider}`, {
@@ -12170,6 +12171,7 @@
   }
 
   async function refreshSlackConnection({ preserveWaiting = true } = {}) {
+    if (payload.features?.slack !== true) return;
     if (!window.relay.slackConnection) return;
     if (!rendererSurfaceActive()) {
       slackConnectionRefreshDeferred = true;
@@ -12536,6 +12538,7 @@
     </section>`;
   }
   function slackSettingsHtml(info) {
+    if (payload.features?.slack !== true) return "";
     if (!info?.paired || !window.relay.slackConnection) return "";
     const connection = slackConnectionInfo;
     const state = connection?.state || "disconnected";
@@ -13166,6 +13169,7 @@
       renderSettings();
     })();
     const slackTask = (async () => {
+      if (payload.features?.slack !== true) return;
       if (seq !== settingsLoadSeq) return;
       await refreshSlackConnection({ preserveWaiting:true });
     })();
@@ -13224,14 +13228,14 @@
   window.addEventListener("focus", () => {
     if (activeView === "settings") {
       loadSettings();
-    } else if (activeView === "slack") {
+    } else if (activeView === "slack" && payload.features?.slack === true) {
       refreshSlackConnection({ preserveWaiting:true });
     }
   });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
       if (activeView === "settings") loadSettings();
-      else if (activeView === "slack") refreshSlackConnection({ preserveWaiting:true });
+      else if (activeView === "slack" && payload.features?.slack === true) refreshSlackConnection({ preserveWaiting:true });
     }
   });
   // Slack OAuth completes in the browser, not in this renderer. Focus and
@@ -13240,7 +13244,7 @@
   // a manual refresh. The tab and Settings card share the same lightweight
   // status call; all other Settings checks retain their focus/entry cadence.
   setInterval(() => {
-    if ((activeView === "settings" || activeView === "slack") && rendererSurfaceActive()) {
+    if (payload.features?.slack === true && (activeView === "settings" || activeView === "slack") && rendererSurfaceActive()) {
       refreshSlackConnection({ preserveWaiting:true });
     }
   }, SLACK_CONNECTION_POLL_MS);
@@ -13711,7 +13715,9 @@
       : activeView;
     for (const tab of tabEls) {
       const view = tab.getAttribute("data-view");
-      tab.classList.toggle("gone", view === "tasks" && payload.features?.requests !== true);
+      tab.classList.toggle("gone",
+        (view === "tasks" && payload.features?.requests !== true)
+        || (view === "slack" && payload.features?.slack !== true));
       tab.classList.toggle("active", view === tabView);
     }
   }
@@ -13744,7 +13750,7 @@
     } else {
       resetSignOutArm(); // leaving the view disarms the confirm state
     }
-    if (activeView === "slack" && viewChanged) {
+    if (activeView === "slack" && payload.features?.slack === true && viewChanged) {
       refreshSlackConnection({ preserveWaiting:true });
     }
     // A room owns its sent-cache refresh in hydrateThreadEntry(), where the
@@ -13878,8 +13884,8 @@
     const unread = relayUnreadIds.size;
     setCount(unread);
     setBadge(relaysBadgeEl, unread);
-    setBadge(slackBadgeEl, (payload.slackChats || []).reduce(
-      (sum, chat) => sum + Math.max(0, Number(chat?.unreadCount || 0)), 0));
+    setBadge(slackBadgeEl, payload.features?.slack === true ? (payload.slackChats || []).reduce(
+      (sum, chat) => sum + Math.max(0, Number(chat?.unreadCount || 0)), 0) : 0);
     markAllReadEl.classList.toggle("gone", activeView !== "relays" || unread === 0);
     markAllReadEl.disabled = unread === 0;
     setBadge(tasksBadgeEl, requestsUnreadCount());
@@ -13993,6 +13999,10 @@
     syncOutboxProjection();
     if (payload.features?.requests !== true && ["tasks", "requestDetail"].includes(activeView)) {
       activeView = "relays";
+    }
+    if (payload.features?.slack !== true && (activeView === "slack" || threadsSource === "slack")) {
+      activeView = "relays";
+      threadsSource = "relay";
     }
     // Delivery can happen after navigation. If its room is the visible Chat
     // transcript, receipt of the full payload is itself a read event.

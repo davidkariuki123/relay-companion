@@ -874,7 +874,9 @@ async function refreshAccountProductFeatures() {
     TASK_FEATURES_ALLOWED = next.requests;
     if (changed) {
       tasksLoadedOnce = null;
+      canonicalChatsLoadedOnce = null;
       await refreshTasks();
+      await refreshCanonicalChats();
       await pushInbox(true);
     }
     return changed;
@@ -1714,6 +1716,12 @@ function isSlackLinkedChat(chat) {
   ));
 }
 async function refreshCanonicalChats() {
+  if (PRODUCT_FEATURES.slack !== true) {
+    canonicalChatsCache = [];
+    slackChatsCache = [];
+    canonicalChatsFingerprint = canonicalChatsFingerprintOf([], []);
+    return { relay: canonicalChatsCache, slack: slackChatsCache };
+  }
   if (!deviceToken()) return { relay: canonicalChatsCache, slack: slackChatsCache };
   try {
     const client = await relayClient();
@@ -7319,6 +7327,9 @@ ipcMain.handle("relay:canonicalChat", async (event, input) => {
   }
   const { chatId: id, surface, includeSlack } = canonicalChatIpcInput(input);
   if (!id) return { ok: false, error: "Missing channel id." };
+  if (PRODUCT_FEATURES.slack !== true && (surface === "slack" || includeSlack)) {
+    return { ok: false, error: "Slack is available only to Relay developer accounts on dev." };
+  }
   try {
     const client = await relayClient();
     const chat = await client.chat(id, { surface, includeSlack });
@@ -7333,6 +7344,9 @@ ipcMain.handle("relay:canonicalChatRead", async (event, input) => {
   }
   const { chatId: id, surface, includeSlack } = canonicalChatIpcInput(input);
   if (!id) return { ok: false, error: "Missing channel id." };
+  if (PRODUCT_FEATURES.slack !== true && (surface === "slack" || includeSlack)) {
+    return { ok: false, error: "Slack is available only to Relay developer accounts on dev." };
+  }
   if (!chatReadPresenceIsAvailable(win)) {
     deferChatRead();
     return { ok: false, deferred: true };
@@ -7976,10 +7990,16 @@ ipcMain.handle("relay:contactsSearch", (_e, q) => groupCall((c) => c.searchConta
 // Settings tab: account card + the sign-out / switch-account lifecycle.
 ipcMain.handle("relay:accountInfo", () => accountInfo());
 ipcMain.handle("relay:slackConnection", async () => {
+  if (PRODUCT_FEATURES.slack !== true) {
+    return { ok: false, error: "Slack is available only to Relay developer accounts on dev." };
+  }
   try { return { ok: true, connection: await (await relayClient()).slackConnection() }; }
   catch (error) { return { ok: false, error: (error && error.message) || String(error) }; }
 });
 ipcMain.handle("relay:slackConnect", async (_event, input = {}) => {
+  if (PRODUCT_FEATURES.slack !== true) {
+    return { ok: false, error: "Slack is available only to Relay developer accounts on dev." };
+  }
   try {
     const client = await relayClient();
     const result = input?.reconnect
@@ -7997,6 +8017,9 @@ ipcMain.handle("relay:slackConnect", async (_event, input = {}) => {
   }
 });
 ipcMain.handle("relay:slackDisconnect", async () => {
+  if (PRODUCT_FEATURES.slack !== true) {
+    return { ok: false, error: "Slack is available only to Relay developer accounts on dev." };
+  }
   try { return { ok: true, result: await (await relayClient()).disconnectSlack() }; }
   catch (error) { return { ok: false, error: (error && error.message) || String(error) }; }
 });

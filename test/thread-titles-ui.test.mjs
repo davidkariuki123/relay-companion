@@ -650,7 +650,7 @@ test("chat composers offer owned laptop agents while human mentions stay group-o
   const participant = html.indexOf('...[...participantNames]');
   assert.ok(owned >= 0 && participant > owned, "owned agents precede participant suggestions");
   assert.match(html, /groupInfoRoster\(group\)[\s\S]*!member\.currentUser/, "saved-group rosters contribute participants who have not spoken yet");
-  assert.match(html, /payload\.features\?\.requests === true \? \[/, "owned agents are suggested only where the feature is enabled");
+  assert.match(html, /payload\.features\?\.agentMentions === true \? \[/, "owned agents are suggested only where the feature is enabled");
   assert.match(html, /if \(event\.key === "Enter" \|\| event\.key === "Tab"\)/, "keyboard selection works without leaving the composer");
   assert.match(html, /button\.addEventListener\("click"[\s\S]*chooseMention/, "touch and click selection dismisses the menu too");
   assert.match(html, /\["ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"\][\s\S]*renderMentions/, "moving the caret re-evaluates the active mention");
@@ -666,7 +666,7 @@ test("chat composers offer owned laptop agents while human mentions stay group-o
   assert.match(html, /const savedContact = !currentUser && email[\s\S]*contactsList\.find[\s\S]*const shown = savedName/,
     "the viewer's saved contact name wins over somebody else's group-roster label");
   const groupMentions = html.slice(html.indexOf("const participantNames = new Set();"), html.indexOf("const mentionOptions = [", html.indexOf("const participantNames = new Set();")));
-  assert.match(groupMentions, /thread\.isGroup[\s\S]*groupInfoRoster\(group\)/,
+  assert.match(groupMentions, /payload\.features\?\.peopleMentions === true && thread\.isGroup[\s\S]*groupInfoRoster\(group\)/,
     "group mentions come from the current roster");
   assert.doesNotMatch(groupMentions, /message\.party|thread\.party/,
     "a direct-message counterpart cannot appear as a redundant mention choice");
