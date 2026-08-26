@@ -16,6 +16,7 @@ import { activateCodexMcp, verifyClaudeMcpRegistration } from "./setup-activatio
 import { ensureStableMcpLauncher } from "./mcp-launcher.js";
 import { canonicalOwnershipGuard, verifyCanonicalCandidate } from "./canonical-runtime.js";
 import { ensureStableHookLauncher, removeStableHookLauncher } from "./hook-launcher.js";
+import { writeConfig } from "./config.js";
 
 // Persistent install of the Relay companion into the user's local agents.
 //
@@ -1972,7 +1973,7 @@ function installWindowsLogonTask({
  * Detect Claude Code + Codex, register the Relay MCP into each present, and
  * start the receive daemon. Returns a summary for the CLI to print.
  */
-export async function runSetupInstall({ claim = false } = {}) {
+export async function runSetupInstall({ claim = false, reload = true } = {}) {
   const { bin, stable: binStable, version } = resolveStableBin();
   const packageRoot = packageRootForBin(bin);
   // First contact deliberately installs with --ignore-scripts. Prepare and verify
@@ -1986,6 +1987,11 @@ export async function runSetupInstall({ claim = false } = {}) {
   if (!verified.ok) {
     throw new Error(`Relay refused to activate an unverified runtime (${verified.reason}${verified.detail ? `: ${verified.detail}` : ""}).`);
   }
+  // Only after the complete target site is verified may setup touch host state.
+  // This migration preserves account values while removing retired capability
+  // switches; putting it here also keeps malformed native helpers from changing
+  // config, MCP registrations, launchers, or services before setup fails closed.
+  writeConfig({});
   // Bake the upgrade-surviving node path into the MCP registrations too, not just the
   // daemon plist — otherwise a `brew upgrade node` / `nvm uninstall` deletes the
   // version-managed node the Claude/Codex MCP `command` points at, and the agents can
@@ -2046,8 +2052,8 @@ export async function runSetupInstall({ claim = false } = {}) {
   } else {
     missing.push("Codex (registration failed)");
   }
-  const daemon = installDaemonAutostart(bin, node, { claim });
-  const pill = installPillAutostart(bin, { claim });
+  const daemon = installDaemonAutostart(bin, node, { claim, reload });
+  const pill = installPillAutostart(bin, { claim, reload });
   return {
     installed,
     missing,
@@ -2352,7 +2358,7 @@ export function repairDesktopSurfaces({
  */
 export const WINDOWS_STOP_RELAY_SERVICES_PS = [
   "$p=Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {",
-  "  $_.CommandLine -and (($_.CommandLine -match '[\\\\/]relay\\.js.*\\bdaemon\\b') -or ($_.CommandLine -match '[\\\\/]overlay[\\\\/]main\\.cjs'))",
+  "  $_.CommandLine -and ($_.CommandLine -match '[\\\\/]node_modules[\\\\/]relay-companion[\\\\/]') -and (($_.CommandLine -match '[\\\\/]relay\\.js.*\\bdaemon\\b') -or ($_.CommandLine -match '[\\\\/]overlay[\\\\/]main\\.cjs'))",
   "}; foreach($x in $p){ try { Invoke-CimMethod -InputObject $x -MethodName Terminate -ErrorAction Stop | Out-Null } catch {} }",
 ].join(" ");
 
@@ -2502,7 +2508,7 @@ export function accountRestartLines(result) {
     const detail = result.detail && (result.detail.daemon || result.detail.pill);
     lines.push(
       `The ${failed.map((s) => label[s]).join(" and ")} did not restart${detail ? ` (${detail})` : ""}; ` +
-        "run `relay repair-desktop` or restart this computer.",
+        "run `relay repair-installation` or restart this computer.",
     );
   }
   if (restarted.length || failed.length) {

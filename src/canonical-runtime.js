@@ -2,6 +2,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import runtimeExecutables from "../bootstrap/runtime-executables.cjs";
+
+const { verifyRuntimeExecutables } = runtimeExecutables;
 
 export const CANONICAL_RUNTIME_SCHEMA = 1;
 export const CANONICAL_PACKAGE_NAME = "relay-companion";
@@ -339,28 +342,31 @@ export function verifyCanonicalCandidate(packageRoot, expectedVersion, {
     return { ok: false, reason: "candidate-package-json-invalid" };
   }
   if (version !== expectedVersion) return { ok: false, reason: "candidate-version-mismatch", detail: `${version || "unknown"} != ${expectedVersion}` };
-  const electronRoots = [api.join(packageRoot, "node_modules", "electron"), api.join(api.dirname(packageRoot), "electron")];
-  const electronRelative = platform === "win32"
-    ? api.join("dist", "electron.exe")
-    : platform === "darwin"
-      ? api.join("dist", "Electron.app", "Contents", "MacOS", "Electron")
-      : api.join("dist", "electron");
-  const electronPath = electronRoots.map((root) => api.join(root, electronRelative)).find((candidate) => existsSync(candidate));
-  if (!electronPath) return { ok: false, reason: "candidate-electron-missing" };
   try {
-    if (!statSync(electronPath).isFile()) return { ok: false, reason: "candidate-electron-invalid" };
-    if (platform !== "win32") {
-      accessSync(api.join(packageRoot, "bin", "relay.js"), fs.constants.X_OK);
-      accessSync(electronPath, fs.constants.X_OK);
-    }
+    if (platform !== "win32") accessSync(api.join(packageRoot, "bin", "relay.js"), fs.constants.X_OK);
   } catch {
-    return { ok: false, reason: "candidate-not-executable" };
+    return { ok: false, reason: "candidate-not-executable", detail: "relay-cli" };
   }
+  const executables = verifyRuntimeExecutables(packageRoot, {
+    platform,
+    existsSync,
+    statSync,
+    accessSync,
+  });
+  if (!executables.ok) return executables;
+  const electronPath = executables.electronPath;
   if (platform === "darwin") {
     const frameworks = api.resolve(electronPath, "..", "..", "Frameworks", "Electron Framework.framework");
     if (!existsSync(frameworks)) return { ok: false, reason: "candidate-electron-incomplete" };
   }
-  return { ok: true, version, packageRoot, electronPath, bin: api.join(packageRoot, "bin", "relay.js") };
+  return {
+    ok: true,
+    version,
+    packageRoot,
+    electronPath,
+    executablePaths: executables.paths.map((entry) => entry.path),
+    bin: api.join(packageRoot, "bin", "relay.js"),
+  };
 }
 
 function atomicWritePointer(pointerPath, value, {

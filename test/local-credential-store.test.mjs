@@ -7,6 +7,7 @@ import test from "node:test";
 
 const localStore = createRequire(import.meta.url)("../src/local-credential-store.cjs");
 const credentialStore = createRequire(import.meta.url)("../src/credential-store.cjs");
+const posixPermissionTest = process.platform === "win32" ? test.skip : test;
 
 function sandbox() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-local-credentials-"));
@@ -23,15 +24,17 @@ test("owner-only local credentials round-trip independently by service and accou
   assert.equal(localStore.writeCredential("secret-two", second).ok, true);
   assert.deepEqual(localStore.readCredential(first), { ok: true, value: "secret-one", detail: "" });
   assert.deepEqual(localStore.readCredential(second), { ok: true, value: "secret-two", detail: "" });
-  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
-  assert.equal(fs.statSync(root).mode & 0o777, 0o700);
+  if (process.platform !== "win32") {
+    assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+    assert.equal(fs.statSync(root).mode & 0o777, 0o700);
+  }
 
   assert.equal(localStore.deleteCredential(first).ok, true);
   assert.equal(localStore.readCredential(first).code, "credential_not_found");
   assert.equal(localStore.readCredential(second).value, "secret-two");
 });
 
-test("local credentials fail closed on broad permissions, symlinks, and hard links", (t) => {
+posixPermissionTest("local credentials fail closed on broad permissions, symlinks, and hard links", (t) => {
   const { root, file } = sandbox();
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const target = { file, service: "work.relay", account: "device" };

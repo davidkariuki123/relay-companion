@@ -163,6 +163,10 @@ contextBridge.exposeInMainWorld("relay", {
   // only status + verified account summary and can request the next human act.
   installationAuthState: () => ipcRenderer.invoke("relay:installationAuthState"),
   installationAuthBegin: () => ipcRenderer.invoke("relay:installationAuthBegin"),
+  installationAuthResume: () => ipcRenderer.invoke("relay:installationAuthResume"),
+  // Restart is an explicit human act. Main deletes only the one-time
+  // installation-authorization namespace, and does so before minting again.
+  installationAuthRestart: () => ipcRenderer.invoke("relay:installationAuthRestart"),
   installationAuthGoogle: (options = {}) => ipcRenderer.invoke("relay:installationAuthGoogle", {
     forceAccountSelection: options?.forceAccountSelection === true,
   }),

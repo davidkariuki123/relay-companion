@@ -120,7 +120,10 @@ async function waitFor(page, expression) {
   throw new Error(`Timed out waiting for ${expression}`);
 }
 async function capture(page, name) {
-  await sleep(80);
+  // Signup stages can change the native card height. Capture only after the
+  // settle transition so a shorter recovery page is not clipped to the prior
+  // stage's moving bounds.
+  await sleep(360);
   const rect = await evaluate(page, `(() => { const r=card.getBoundingClientRect(); return {x:r.x,y:r.y,width:r.width,height:r.height}; })()`);
   const shot = await page.send("Page.captureScreenshot", { format:"png", fromSurface:true, clip:{ ...rect, scale:2 } });
   const file = path.join(shots, `${name}.png`);
@@ -154,17 +157,25 @@ try {
 
   const states = [
     ["installed", "Relay is ready for you."],
+    ["resume", "Continue your setup."],
+    ["restart-required", "Restart this setup."],
     ["method", "How would you like to continue?"],
     ["email", "What’s your email?"],
     ["code", "Enter your code."],
     ["google", "Finish with Google."],
     ["approval", "Connect this computer?"],
     ["finishing", "Finishing setup…"],
+    ["expired", "Start setup again."],
     ["chat-setup", "Use Relay in your chats."],
   ];
   const rendered = [];
   for (const [stage, expected] of states) {
-    await evaluate(page, `window.__relaySignupPreview(${JSON.stringify(stage)}, { email:"alex@example.com", account:{ displayName:"Alex Rivera", email:"alex@example.com" } }); true`);
+    const preview = {
+      email:"alex@example.com",
+      account:{ displayName:"Alex Rivera", email:"alex@example.com" },
+      ...(stage === "restart-required" ? { error:"Relay found an unfinished one-time approval. Restart setup to replace it safely." } : {}),
+    };
+    await evaluate(page, `window.__relaySignupPreview(${JSON.stringify(stage)}, ${JSON.stringify(preview)}); true`);
     await waitFor(page, `document.getElementById("signupBody").innerText.includes(${JSON.stringify(expected)})`);
     rendered.push(await capture(page, `pill-${stage}`));
     if (stage === "chat-setup") {
@@ -258,7 +269,7 @@ try {
   assert.equal(slackConnectLayout.footInside, true, JSON.stringify(slackConnectLayout));
   assert.equal(slackConnectLayout.escapeCopy, false, JSON.stringify(slackConnectLayout));
 
-  assert.equal(rendered.length, 12);
+  assert.equal(rendered.length, 15);
   console.log(JSON.stringify({ ok:true, screenshots:rendered }, null, 2));
 } catch (error) {
   throw new Error(`${error.message}\n${log.slice(-4000)}`);

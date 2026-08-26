@@ -18,6 +18,8 @@ test("first run is one in-pill flow with a skippable chat setup page", () => {
     "Finish with Google.",
     "Connect this computer?",
     "Finishing setup…",
+    "Continue your setup.",
+    "Restart this setup.",
     "Use Relay in your chats.",
   ]) assert.match(overlay, new RegExp(copy.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 
@@ -34,6 +36,35 @@ test("signup errors are human recovery copy, never raw Electron IPC failures", (
   assert.match(overlay, /authorization is unavailable[\s\S]*Relay couldn’t secure setup on this computer\./);
   assert.match(overlay, /signupError = signupFailureMessage\(reason, fallback\)/);
   assert.doesNotMatch(overlay, /signupError = reason && reason\.message/);
+  assert.match(main, /INSTALLATION_AUTH_IPC_ERROR_CODES/);
+  assert.match(main, /new Error\(`Relay setup failed \(\$\{code\}\)\.`\)/);
+  assert.doesNotMatch(
+    main.slice(main.indexOf("async function installationAuthorizationIpc"), main.indexOf("let sentStagerPromise")),
+    /error\?\.message|String\(error\)/,
+  );
+});
+
+test("authorization polling backs off, surfaces only recovery copy, and stops without resetting state", () => {
+  assert.match(overlay, /SIGNUP_POLL_BASE_MS \* \(2 \*\* Math\.min\(signupPollFailures, 3\)\)/);
+  assert.match(overlay, /SIGNUP_POLL_MAX_MS/);
+  assert.match(overlay, /signupPollFailures >= SIGNUP_POLL_SURFACE_FAILURE/);
+  assert.match(overlay, /signupPollFailures >= SIGNUP_POLL_STOP_FAILURE/);
+  assert.match(overlay, /Relay couldn’t check setup safely\. Resume setup to try again\./);
+  const poll = overlay.slice(overlay.indexOf("function pollInstallationState"), overlay.indexOf("async function resumeInstallationSetup"));
+  assert.doesNotMatch(poll, /installationAuthCancel|installationAuthRestart|signOut/);
+});
+
+test("interrupted local authorization residue can only take the explicit restart path", () => {
+  assert.match(overlay, /setup_restart_required[\s\S]*Restart setup to replace it safely/);
+  assert.match(overlay, /signupStage = "restart-required"/);
+  const restartRequired = overlay.slice(
+    overlay.indexOf('if (signupStage === "restart-required")'),
+    overlay.indexOf('if (signupStage === "resume")'),
+  );
+  assert.match(restartRequired, /restartInstallationSetup\(\)/);
+  assert.match(restartRequired, /cannot safely finish the current one-time approval/);
+  assert.doesNotMatch(restartRequired, /resumeInstallationSetup|signOut/);
+  assert.doesNotMatch(restartRequired, /\$\{error\}/, "terminal copy stays within the fixed-height pill");
 });
 
 test("a paired credential problem opens recovery and never falls through to first-run authorization", () => {
@@ -64,6 +95,8 @@ test("renderer installation IPC is capability-shaped and never exposes credentia
   for (const method of [
     "installationAuthState",
     "installationAuthBegin",
+    "installationAuthResume",
+    "installationAuthRestart",
     "installationAuthGoogle",
     "installationAuthEmailStart",
     "installationAuthEmailVerify",
@@ -91,7 +124,8 @@ test("the privileged pill renderer cannot navigate or create a web child", () =>
 test("a wrong identity stays human-confirmed and returns to the method chooser before approval", () => {
   assert.match(overlay, /Check the account and agent apps before you approve\./);
   assert.match(overlay, /Change account/);
-  assert.match(overlay, /await window\.relay\.installationAuthCancel\(\);\s+const state = await window\.relay\.installationAuthBegin\(\);/);
+  assert.match(overlay, /restartInstallationSetup\(\{ forceGoogleSelection:true \}\)/);
+  assert.match(overlay, /window\.relay\.installationAuthRestart\(\)/);
   assert.match(overlay, /installationAuthGoogle\(\{ forceAccountSelection:signupForceGoogleSelection \}\)/);
   assert.match(overlay, /installationAuthApprove\(\)/);
   assert.ok(overlay.indexOf("Change account") < overlay.indexOf("installationAuthApprove()"));

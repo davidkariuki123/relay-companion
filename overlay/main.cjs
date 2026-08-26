@@ -531,6 +531,79 @@ function installationAuthorizationController() {
   return installationAuthorizationControllerPromise;
 }
 
+// Electron serializes thrown IPC errors into renderer-visible strings. Keep
+// that boundary code-only: API bodies, filesystem details, credential-store
+// diagnostics, paths, and one-time authorization material never become UI
+// text even when an unexpected lower-level error occurs.
+const INSTALLATION_AUTH_IPC_ERROR_CODES = new Set([
+  "already_connected",
+  "authorization_changed",
+  "authorization_consumed",
+  "authorization_expired",
+  "authorization_recovery_failed",
+  "browser_open_failed",
+  "credential_corrupt",
+  "credential_empty",
+  "credential_missing",
+  "credential_not_found",
+  "credential_store_error",
+  "credential_store_permissions",
+  "credential_unavailable",
+  "email_code_cooldown",
+  "email_rate_limited",
+  "identity_already_bound",
+  "identity_binding_conflict",
+  "identity_conflict",
+  "identity_not_found",
+  "identity_required",
+  "invalid_activation",
+  "invalid_email",
+  "invalid_email_code",
+  "invalid_email_code_format",
+  "invalid_response",
+  "network_unavailable",
+  "not_found",
+  "pkce_verification_failed",
+  "request_failed",
+  "request_timeout",
+  "secret_removal_failed",
+  "setup_authorization_unavailable",
+  "setup_not_started",
+  "setup_restart_required",
+  "setup_state_unavailable",
+  "setup_unavailable",
+  "untrusted_destination",
+]);
+
+function installationAuthorizationIpcErrorCode(error) {
+  const code = String(error?.code || "").trim().toLowerCase();
+  if (INSTALLATION_AUTH_IPC_ERROR_CODES.has(code)) return code;
+  const detail = String(error?.message || "").toLowerCase();
+  if (detail.includes("already connected")) return "already_connected";
+  if (detail.includes("enter a valid email")) return "invalid_email";
+  if (detail.includes("enter the 6-digit code")) return "invalid_email_code_format";
+  if (detail.includes("start relay account setup first")) return "setup_not_started";
+  if (detail.includes("could not remove the one-time setup authorization")) return "secret_removal_failed";
+  if (detail.includes("authorization is unavailable") || detail.includes("stored authorization is invalid")) {
+    return "setup_authorization_unavailable";
+  }
+  if (detail.includes("untrusted setup destination")) return "untrusted_destination";
+  if (detail.includes("could not open the secure sign-in page")) return "browser_open_failed";
+  if (detail.includes("setup state") || detail.includes("state could not")) return "setup_state_unavailable";
+  return "setup_unavailable";
+}
+
+async function installationAuthorizationIpc(operation) {
+  try {
+    return await operation();
+  } catch (error) {
+    const code = installationAuthorizationIpcErrorCode(error);
+    const safe = new Error(`Relay setup failed (${code}).`);
+    safe.code = code;
+    throw safe;
+  }
+}
+
 let sentStagerPromise = null;
 function loadSentStager() {
   if (!sentStagerPromise) {
@@ -7941,22 +8014,26 @@ ipcMain.handle("relay:connectClaude", () => connectClaude());
 ipcMain.handle("relay:completeSetupTutorial", () => completeSetupTutorial());
 ipcMain.handle("relay:e2eeDeviceApprovals", () => e2eeDeviceApprovalStatus());
 ipcMain.handle("relay:approveE2eeDevice", (_event, deviceId) => approveE2eeDevice(deviceId));
-ipcMain.handle("relay:installationAuthState", async () =>
-  (await installationAuthorizationController()).state());
-ipcMain.handle("relay:installationAuthBegin", async () =>
-  (await installationAuthorizationController()).begin());
-ipcMain.handle("relay:installationAuthGoogle", async (_event, input = {}) =>
+ipcMain.handle("relay:installationAuthState", () => installationAuthorizationIpc(async () =>
+  (await installationAuthorizationController()).state()));
+ipcMain.handle("relay:installationAuthBegin", () => installationAuthorizationIpc(async () =>
+  (await installationAuthorizationController()).begin()));
+ipcMain.handle("relay:installationAuthResume", () => installationAuthorizationIpc(async () =>
+  (await installationAuthorizationController()).resume()));
+ipcMain.handle("relay:installationAuthRestart", () => installationAuthorizationIpc(async () =>
+  (await installationAuthorizationController()).restart()));
+ipcMain.handle("relay:installationAuthGoogle", (_event, input = {}) => installationAuthorizationIpc(async () =>
   (await installationAuthorizationController()).google({
     forceAccountSelection: input?.forceAccountSelection === true,
-  }));
-ipcMain.handle("relay:installationAuthEmailStart", async (_event, input = {}) =>
-  (await installationAuthorizationController()).emailStart(String(input?.email || "")));
-ipcMain.handle("relay:installationAuthEmailVerify", async (_event, input = {}) =>
-  (await installationAuthorizationController()).emailVerify(String(input?.code || "")));
-ipcMain.handle("relay:installationAuthApprove", async () =>
-  (await installationAuthorizationController()).approve());
-ipcMain.handle("relay:installationAuthCancel", async () =>
-  (await installationAuthorizationController()).cancel());
+  })));
+ipcMain.handle("relay:installationAuthEmailStart", (_event, input = {}) => installationAuthorizationIpc(async () =>
+  (await installationAuthorizationController()).emailStart(String(input?.email || ""))));
+ipcMain.handle("relay:installationAuthEmailVerify", (_event, input = {}) => installationAuthorizationIpc(async () =>
+  (await installationAuthorizationController()).emailVerify(String(input?.code || ""))));
+ipcMain.handle("relay:installationAuthApprove", () => installationAuthorizationIpc(async () =>
+  (await installationAuthorizationController()).approve()));
+ipcMain.handle("relay:installationAuthCancel", () => installationAuthorizationIpc(async () =>
+  (await installationAuthorizationController()).cancel()));
 ipcMain.handle("relay:pairWithCode", (_e, input) => pairWithCode(input));
 ipcMain.handle("relay:signOut", () => signOutAccount());
 ipcMain.handle("relay:providerAuthStatus", async () => {

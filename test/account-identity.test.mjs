@@ -209,6 +209,6 @@ test("accountRestartLines tells the truth and always names the sessions Relay ca
   assert.match(ok[0], /Restarted the background service and Relay app/);
   assert.match(ok[1], /Restart any open Claude Code or Codex sessions/);
   const bad = accountRestartLines({ daemon: "failed", pill: "skipped", detail: { daemon: "no output" } });
-  assert.match(bad[0], /background service did not restart \(no output\); run `relay repair-desktop`/);
+  assert.match(bad[0], /background service did not restart \(no output\); run `relay repair-installation`/);
   assert.match(bad[1], /still on the previous account/);
 });

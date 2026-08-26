@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import {
   UPDATE_WORKER_LABEL,
   UPDATE_WORKER_LABEL_PREFIX,
@@ -24,6 +25,8 @@ import {
   readCanonicalRuntime,
   repairCanonicalRuntime,
 } from "../src/canonical-runtime.js";
+
+const { installedServiceProcessRows } = createRequire(import.meta.url)("../bootstrap/runtime-health.cjs");
 
 // These cases create a POSIX runtime tree on the real host filesystem. They
 // remain active on macOS/Linux; Windows behavior is covered by injected-path
@@ -557,6 +560,50 @@ test("exact-root health ignores processes outside node_modules/relay-companion t
   });
   assert.equal(legacy.ok, false, "legacy global-tree services still count as old");
   assert.equal(legacy.oldPill, true);
+});
+
+test("service quiescence sees installed Relay processes but never a developer checkout", () => {
+  const target = {
+    packageRoot: "/u/.relay/runtime/releases/9/node_modules/relay-companion",
+  };
+  const result = installedServiceProcessRows(target, {
+    processId: 999,
+    includeTarget: true,
+    run: () => ({
+      status: 0,
+      stdout: [
+        "  101 node /Users/dev/src/relay/packages/companion/bin/relay.js daemon",
+        "  102 Electron /Users/dev/src/relay/packages/companion/overlay/main.cjs",
+        "  103 node /usr/local/lib/node_modules/relay-companion/bin/relay.js daemon",
+        `  104 Electron ${target.packageRoot}/overlay/main.cjs`,
+      ].join("\n"),
+    }),
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.rows.map((row) => row.pid), [103, 104]);
+});
+
+test("macOS activation fails closed when installed service processes cannot be enumerated", async () => {
+  const target = {
+    node: "/relay/node",
+    bin: "/relay/runtime/releases/242/node_modules/relay-companion/bin/relay.js",
+    packageRoot: "/relay/runtime/releases/242/node_modules/relay-companion",
+  };
+  const calls = [];
+  const result = await activateCanonicalRuntime(target, {
+    platform: "darwin",
+    homeDir: "/Users/test",
+    sleep: async () => {},
+    run: (command, args) => {
+      calls.push([command, ...args]);
+      if (command === "/bin/launchctl" && args[0] === "print") return { status: 113 };
+      if (command === "/bin/ps" && args[1] === "pid=,command=") return { status: 1, stderr: "ps denied" };
+      return { status: 0, stdout: "", stderr: "" };
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "service-process-query-failed");
+  assert.equal(calls.some((call) => call[1] === "bootstrap"), false);
 });
 
 // A pill that left the launchd domain without exiting (or predates the labels)

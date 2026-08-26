@@ -1,7 +1,11 @@
 "use strict";
 
 const path = require("node:path");
+const os = require("node:os");
 const { spawnSync } = require("node:child_process");
+
+const DAEMON_LABEL = "work.relay.companion";
+const PILL_LABEL = "work.relay.companion.pill";
 
 // A local checkout may run beside Relay without invalidating the installed
 // runtime. Only installed relay-companion trees count as production services.
@@ -44,4 +48,148 @@ function exactRuntimeHealth(target, {
   return { ok: daemon && pill && !oldDaemon && !oldPill, daemon, pill, oldDaemon, oldPill, packageRoot: target.packageRoot };
 }
 
-module.exports = { exactRuntimeHealth, runtimeProcessCommands };
+function installedServiceProcessRows(target, {
+  run = defaultRun,
+  includeTarget = false,
+  processId = process.pid,
+} = {}) {
+  const result = run("/bin/ps", ["-axo", "pid=,command="]);
+  if (!commandOk(result)) {
+    return {
+      ok: false,
+      rows: [],
+      reason: "service-process-query-failed",
+      detail: result?.error?.message || String(result?.stderr || result?.stdout || "").trim(),
+    };
+  }
+  const targetNeedle = String(target?.packageRoot || "").replaceAll("\\", "/");
+  const rows = [];
+  for (const line of String(result.stdout || "").split("\n")) {
+    const match = line.match(/^\s*(\d+)\s+(.*)$/);
+    if (!match) continue;
+    const pid = Number(match[1]);
+    const command = match[2];
+    // This is the safety boundary: only an immutable/global production install
+    // has node_modules/relay-companion in its command. A checkout's daemon or
+    // Electron pill is deliberately invisible and must never be terminated.
+    if (!SERVICE_TREE_RE.test(command)) continue;
+    const isDaemon = /(?:^|[\\/])relay\.js(?:"|'|\s).*\bdaemon\b/i.test(command);
+    const isPill = /(?:^|[\\/])overlay[\\/]main\.cjs(?:"|'|\s|$)/i.test(command);
+    if (!isDaemon && !isPill) continue;
+    if (!includeTarget && targetNeedle && command.replaceAll("\\", "/").includes(targetNeedle)) continue;
+    if (!Number.isInteger(pid) || pid <= 0 || pid === processId) continue;
+    rows.push({ pid, command });
+  }
+  return { ok: true, rows };
+}
+
+async function terminateInstalledServiceProcesses(target, {
+  run = defaultRun,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  graceMs = 2000,
+  includeTarget = false,
+  processId = process.pid,
+} = {}) {
+  const first = installedServiceProcessRows(target, { run, includeTarget, processId });
+  if (!first.ok) return first;
+  if (!first.rows.length) return { ok: true, terminated: [] };
+  for (const row of first.rows) run("/bin/kill", ["-TERM", String(row.pid)]);
+  await sleep(graceMs);
+  const afterTerm = installedServiceProcessRows(target, { run, includeTarget, processId });
+  if (!afterTerm.ok) return afterTerm;
+  const originalPids = new Set(first.rows.map((row) => row.pid));
+  const survivors = afterTerm.rows.filter((row) => originalPids.has(row.pid));
+  for (const row of survivors) run("/bin/kill", ["-KILL", String(row.pid)]);
+  if (survivors.length) await sleep(500);
+  const afterKill = installedServiceProcessRows(target, { run, includeTarget, processId });
+  if (!afterKill.ok) return afterKill;
+  const remaining = afterKill.rows.filter((row) => originalPids.has(row.pid));
+  if (remaining.length) {
+    return { ok: false, reason: "service-process-stop-failed", detail: remaining.map((row) => row.pid).join(",") };
+  }
+  return { ok: true, terminated: first.rows.map((row) => row.pid) };
+}
+
+/**
+ * Restart Relay's two macOS jobs from the registrations already written by the
+ * caller, then prove that both processes belong to the requested package root.
+ * Registration remains owned by setup/repair; this helper owns only the narrow
+ * launchd handoff and never edits a plist, account file, or installed binary.
+ */
+async function activateMacRuntimeServices(target, {
+  homeDir = os.homedir(),
+  platform = process.platform,
+  run = defaultRun,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  domainPollMs = 250,
+  bootstrapDelayMs = 500,
+  healthPollMs = 500,
+  activationDeadlineMs = 90_000,
+  now = Date.now,
+  processId = process.pid,
+  healthCheck = exactRuntimeHealth,
+} = {}) {
+  if (platform !== "darwin") return { ok: false, reason: "activation-platform-unsupported" };
+  if (!target?.packageRoot || !target?.bin) return { ok: false, reason: "activation-target-invalid" };
+  const domain = `gui/${typeof process.getuid === "function" ? process.getuid() : 0}`;
+  const agents = path.posix.join(String(homeDir || ""), "Library", "LaunchAgents");
+  const labels = [PILL_LABEL, DAEMON_LABEL];
+  const deadline = now() + Math.max(1, activationDeadlineMs);
+  for (const label of labels) run("/bin/launchctl", ["bootout", `${domain}/${label}`]);
+
+  // launchctl bootout is asynchronous. Keep quiescence, bootstrap, and liveness
+  // under one deadline so a racing EIO cannot create an unbounded retry loop.
+  while (now() <= deadline) {
+    const labelsPresent = labels.filter((label) => commandOk(run("/bin/launchctl", ["print", `${domain}/${label}`])));
+    if (labelsPresent.length) {
+      for (const label of labelsPresent) run("/bin/launchctl", ["bootout", `${domain}/${label}`]);
+      await sleep(domainPollMs);
+      continue;
+    }
+
+    const stopped = await terminateInstalledServiceProcesses(target, {
+      run,
+      sleep,
+      includeTarget: true,
+      processId,
+    });
+    if (!stopped.ok) return stopped;
+
+    let bootstrapFailure = null;
+    for (const label of labels) {
+      const started = run("/bin/launchctl", ["bootstrap", domain, path.posix.join(agents, `${label}.plist`)]);
+      if (!commandOk(started)) {
+        bootstrapFailure = { label, result: started };
+        break;
+      }
+    }
+    if (bootstrapFailure) {
+      for (const label of labels) run("/bin/launchctl", ["bootout", `${domain}/${label}`]);
+      const detail = String(bootstrapFailure.result?.stderr || bootstrapFailure.result?.stdout || "");
+      if (!/(?:Bootstrap failed:\s*5|Input\/output error|I\/O error)/i.test(detail)) {
+        return { ok: false, reason: "service-bootstrap-failed", detail: `${bootstrapFailure.label}: ${detail}` };
+      }
+      await sleep(bootstrapDelayMs);
+      continue;
+    }
+
+    while (now() <= deadline) {
+      const health = await healthCheck(target, { platform, run });
+      if (health?.ok) return { ok: true, health };
+      if (health?.oldDaemon || health?.oldPill) {
+        for (const label of labels) run("/bin/launchctl", ["bootout", `${domain}/${label}`]);
+        break;
+      }
+      await sleep(healthPollMs);
+    }
+  }
+  return { ok: false, reason: "activation-deadline-exceeded", detail: target.packageRoot };
+}
+
+module.exports = {
+  activateMacRuntimeServices,
+  exactRuntimeHealth,
+  installedServiceProcessRows,
+  runtimeProcessCommands,
+  terminateInstalledServiceProcesses,
+};

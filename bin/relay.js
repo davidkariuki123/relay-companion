@@ -217,10 +217,8 @@ async function applyInstall({
   requireLiveTools = false,
   requiredHosts = requiredLiveHosts(),
   claim = false,
+  reload = true,
 } = {}) {
-  // Installing or repairing is also the migration point for old local
-  // capability settings. writeConfig sanitizes them before touching disk.
-  writeConfig({});
   const {
     installed,
     missing,
@@ -232,7 +230,7 @@ async function applyInstall({
     codexHooks = null,
     desktopRestarts = [],
     sweptStaleEntries = [],
-  } = await runSetupInstall({ claim });
+  } = await runSetupInstall({ claim, reload });
   if (installed.length) console.log(`Added Relay to ${installed.join(" and ")} on this machine.`);
   if (!binStable) {
     console.log(
@@ -351,6 +349,10 @@ async function cmdSetup(flags) {
     // An explicit setup is the migration/ownership handoff. Runtime verification
     // in runSetupInstall completes before either platform's autostart is changed.
     claim: true,
+    // The signed thin bootstrap asks setup to write all registrations without
+    // starting them, then performs the same exact-root lifecycle as the updater.
+    // Ordinary setup keeps its historical install-and-start behaviour.
+    reload: !(flags["no-restart"] && process.env.RELAY_BOOTSTRAP_ACTIVATED === "1"),
   });
   const token = setupOpenRelayToken(flags);
   if (token && readConfig().deviceToken) {
@@ -389,8 +391,11 @@ async function cmdInstall(flags = {}) {
 }
 
 function cmdRepairDesktop(flags = {}) {
-  writeConfig({});
   const reload = !flags["no-restart"];
+  // Repair is deliberately local and non-destructive. It may rewrite Relay's
+  // launchers and Relay-owned hook registrations, but it never rewrites account
+  // config, deletes credentials/E2EE state, clears messages/outboxes/preferences,
+  // or calls a cloud revocation endpoint.
   // The updater invokes this command from the verified candidate tree before it
   // switches/restarts services. First atomically migrate any existing raw hook
   // registrations to Relay's stable bridge; if that fails, do not claim the
@@ -726,7 +731,7 @@ async function cmdDoctor(flags = {}) {
     const since = failure.firstAt ? new Date(Number(failure.firstAt)).toISOString() : "unknown";
     console.log(`  UPDATES ARE FAILING: ${failure.count} consecutive attempt(s) to install ${failure.target} since ${since}`);
     console.log(`    cause: see ${updateLogPath}`);
-    console.log("    if autostart is broken, run: relay repair-desktop");
+    console.log("    if autostart is broken, run: relay repair-installation");
   } else if (failureInFlight) {
     console.log(`  update attempt in flight: ${failure.target} (launched ${new Date(Number(failure.lastAt)).toISOString()})`);
   } else if (!canonicalFailures.length) {
@@ -786,7 +791,7 @@ async function cmdDoctor(flags = {}) {
     const missingTasks = taskStatus.missing;
     if (missingTasks.length) {
       console.log(`  MISSING Scheduled Task(s): ${missingTasks.join(", ")}`);
-      console.log("    fix with: relay repair-desktop");
+      console.log("    fix with: relay repair-installation");
     } else if (taskStatus.unavailable.length) {
       console.log("  Scheduled Tasks: unable to verify from this process");
       console.log("    run relay doctor in a normal terminal to check autostart");
@@ -795,7 +800,7 @@ async function cmdDoctor(flags = {}) {
     // Windows 11 overflow chevron) is the only way back to the pill.
     if (windowsStartMenuShortcutMissing()) {
       console.log(`  MISSING Start Menu shortcut: ${windowsStartMenuShortcutPath()}`);
-      console.log("    fix with: relay repair-desktop");
+      console.log("    fix with: relay repair-installation");
     } else {
       console.log("  Start Menu shortcut: ok (Start → \"relay\" opens the pill)");
     }
@@ -974,6 +979,7 @@ async function main() {
       return cmdPair(flags);
     case "install":
       return cmdInstall(flags);
+    case "repair-installation":
     case "repair-desktop":
       return cmdRepairDesktop(flags);
     case "repair-runtime":
@@ -1048,7 +1054,8 @@ async function main() {
           "  relay install                                        Add Relay to your agents",
           "  relay uninstall                                       Remove Relay from your agents and stop the daemon (keeps the pairing)",
           "  relay uninstall --purge                               Also revoke this device and delete all local Relay state, as if never installed",
-          "  relay repair-desktop [--no-restart]                  Repair Relay.app and background services without changing MCP/account state",
+          "  relay repair-installation [--no-restart]             Non-destructively repair Relay.app and services; preserves account, encryption, messages, outbox, and preferences",
+          "  relay repair-desktop [--no-restart]                  Compatibility alias for repair-installation",
           "  relay repair-runtime [--no-restart]                  Internal: refresh existing Relay registrations and runtime services",
           "  relay pair [--api URL] [--web URL] [--code CODE] [--no-restart] Pair this machine only (no agent install); restarts running Relay services onto the new account",
           "  relay tasks                                           Pull and process the developer Request runtime once",

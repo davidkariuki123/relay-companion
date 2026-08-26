@@ -35,6 +35,7 @@ import {
 import { bridgeShrinkwrap, publishPackageJson } from "../scripts/prepare-publish-package.mjs";
 import { assertMonotonicVersion, compareExactVersions } from "../scripts/assert-monotonic-version.mjs";
 import { electronVersionArgs } from "../scripts/verify-installed-runtime.mjs";
+import { verifyThinSetupUninstalled } from "../scripts/verify-thin-setup-canary.mjs";
 
 const {
   activeCanonicalCli,
@@ -49,6 +50,10 @@ const {
   validateArchiveEntries,
 } = createRequire(import.meta.url)("../bootstrap/relay-setup.cjs");
 const credentialStore = createRequire(import.meta.url)("../src/credential-store.cjs");
+const {
+  runtimeExecutableInventory,
+  verifyRuntimeExecutables,
+} = createRequire(import.meta.url)("../bootstrap/runtime-executables.cjs");
 
 const version = "1.2.3";
 const sourceSha = "a".repeat(40);
@@ -95,6 +100,39 @@ test("Linux release smoke reads Electron version without requiring a setuid sand
   assert.deepEqual(electronVersionArgs("linux"), ["--no-sandbox", "--version"]);
   assert.deepEqual(electronVersionArgs("darwin"), ["--version"]);
   assert.deepEqual(electronVersionArgs("win32"), ["--version"]);
+});
+
+test("macOS target-site verification covers every Electron process executable and fails closed on a bad helper", () => {
+  const inventory = runtimeExecutableInventory("/runtime/node_modules/relay-companion", {
+    platform: "darwin",
+    existsSync: () => true,
+  });
+  assert.equal(inventory.ok, true);
+  assert.deepEqual(inventory.paths.map((entry) => entry.role), [
+    "electron",
+    "helper:Electron Helper",
+    "helper:Electron Helper (GPU)",
+    "helper:Electron Helper (Plugin)",
+    "helper:Electron Helper (Renderer)",
+    "helper:chrome_crashpad_handler",
+  ]);
+  const rejected = verifyRuntimeExecutables("/runtime/node_modules/relay-companion", {
+    platform: "darwin",
+    existsSync: () => true,
+    statSync: () => ({ isFile: () => true }),
+    accessSync: (file) => {
+      if (file.includes("Electron Helper (GPU)")) {
+        const error = new Error("permission denied");
+        error.code = "EACCES";
+        throw error;
+      }
+    },
+  });
+  assert.deepEqual(rejected, {
+    ok: false,
+    reason: "candidate-not-executable",
+    detail: "helper:Electron Helper (GPU)",
+  });
 });
 
 test("first contact persists the exact reviewed version without lifecycle scripts", () => {
@@ -322,6 +360,7 @@ test("packed thin installer contains only the reviewed dependency-free bootstrap
     fs.mkdirSync(path.join(root, "bootstrap"), { recursive: true });
     fs.writeFileSync(path.join(root, "bootstrap", "relay-setup.cjs"), "module.exports = {}\n");
     fs.writeFileSync(path.join(root, "bootstrap", "release-signature.cjs"), "module.exports = {}\n");
+    fs.writeFileSync(path.join(root, "bootstrap", "runtime-executables.cjs"), "module.exports = {}\n");
     fs.writeFileSync(path.join(root, "bootstrap", "runtime-health.cjs"), "module.exports = {}\n");
     fs.writeFileSync(path.join(root, "bootstrap", "trust.json"), "{}\n");
     fs.writeFileSync(path.join(root, "README.md"), "Relay\n");
@@ -705,7 +744,9 @@ test("macOS uses an owner-only local store while Windows uses Credential Manager
   });
   assert.equal(mac.ok, true);
   assert.equal(macCalls.length, 0, "a new macOS credential never touches the shared login Keychain");
-  assert.equal(fs.statSync(macFile).mode & 0o777, 0o600);
+  // NTFS does not expose POSIX chmod semantics through Node. The same test runs
+  // on both release Mac runners, where the owner-only mode is enforceable.
+  if (process.platform !== "win32") assert.equal(fs.statSync(macFile).mode & 0o777, 0o600);
   const macRead = credentialStore.readDeviceToken({
     platform: "darwin",
     file: macFile,
@@ -745,9 +786,9 @@ test("macOS uses an owner-only local store while Windows uses Credential Manager
 test("fresh installation authorization fields cannot fall through to the macOS Keychain", () => {
   const source = fs.readFileSync(new URL("../src/installation-authorization.js", import.meta.url), "utf8");
   const splitRead = source.match(/for \(const \[field, account\][\s\S]*?values\[field\] = result\.value;/)?.[0] || "";
-  assert.match(splitRead, /readCredential\(options\(account\)\)/);
+  assert.match(splitRead, /readCredentialImpl\(options\(account\)\)/);
   assert.doesNotMatch(splitRead, /allowLegacyMigration/);
-  assert.match(source, /readCredential\(\{ \.\.\.options\(INSTALLATION_CREDENTIAL_ACCOUNT\), allowLegacyMigration: true \}\)/);
+  assert.match(source, /readCredentialImpl\(\{ \.\.\.options\(INSTALLATION_CREDENTIAL_ACCOUNT\), allowLegacyMigration: true \}\)/);
 });
 
 test("native credential failures distinguish a missing secret from an unavailable vault", () => {
@@ -865,7 +906,12 @@ test("the thin installer refuses a forged canonical pointer outside Relay releas
   }
 });
 
-test("bootstrap writes the active pointer only after setup and exact-root health succeed", async () => {
+const healthyMacActivation = async () => ({
+  ok: true,
+  health: { ok: true, daemon: true, pill: true, oldDaemon: false, oldPill: false },
+});
+
+test("bootstrap writes the active pointer only after setup and shared exact-root activation succeed", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-bootstrap-pointer-"));
   try {
     const oldBin = path.join(root, "old", "relay.js");
@@ -899,9 +945,19 @@ test("bootstrap writes the active pointer only after setup and exact-root health
       { pointerPath, releaseId: "next", releaseRoot: path.dirname(path.dirname(nextBin)) },
       { bin: nextBin, packageRoot: path.dirname(path.dirname(nextBin)) },
       version,
-      { platform: "darwin", spawnImpl: () => ({ status: 0 }), healthCheck: () => ({ ok: true }) },
+      {
+        platform: "darwin",
+        spawnImpl: (_command, args) => {
+          calls.push(args);
+          return { status: 0 };
+        },
+        healthCheck: () => ({ ok: true }),
+        activateMacServices: healthyMacActivation,
+      },
     );
     assert.equal(JSON.parse(fs.readFileSync(pointerPath, "utf8")).version, version);
+    const setup = calls.find((args) => args.includes("setup"));
+    assert.ok(setup.includes("--no-restart"), "setup writes registrations while shared activation owns launchd restart");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -933,7 +989,7 @@ test("bootstrap leaves a recovery journal when both activation and prior-runtime
   }
 });
 
-test("bootstrap rolls back when registered services never become healthy", async () => {
+test("bootstrap rolls back when shared macOS activation cannot prove exact-root health", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-bootstrap-health-"));
   try {
     const oldBin = path.join(root, "old", "relay.js");
@@ -953,12 +1009,9 @@ test("bootstrap rolls back when registered services never become healthy", async
       {
         platform: "darwin",
         spawnImpl: (_command, args) => { calls.push(args); return { status: 0 }; },
-        healthCheck: () => ({ ok: false, daemon: true, pill: false }),
-        healthAttempts: 2,
-        healthIntervalMs: 0,
-        sleep: async () => {},
+        activateMacServices: async () => ({ ok: false, reason: "exact-root-health-failed", detail: "pill did not start" }),
       },
-    ), /pill did not start/);
+    ), /could not start the exact registered macOS services/);
     assert.equal(JSON.parse(fs.readFileSync(pointerPath, "utf8")).version, "1.2.2");
     assert.ok(calls.some((args) => args.includes("repair-runtime")), "failed health restores the prior runtime");
   } finally {
@@ -1044,6 +1097,92 @@ test("new setup documentation has one exact-version command and no pairing code"
   assert.doesNotMatch(readme, /setup --code <PAIRING_CODE>/);
 });
 
+test("thin setup cleanup verifier proves launchd labels and installed service processes are stopped", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-thin-uninstall-canary-"));
+  const runtime = {
+    schema: 1,
+    active: true,
+    state: "active",
+    version,
+    packageRoot: path.join(root, ".relay", "runtime", "releases", version, "node_modules", "relay-companion"),
+    bin: path.join(root, ".relay", "runtime", "releases", version, "node_modules", "relay-companion", "bin", "relay.js"),
+  };
+  try {
+    const calls = [];
+    const processChecks = [];
+    const result = await verifyThinSetupUninstalled({
+      version,
+      homeDir: root,
+      platform: "darwin",
+      uid: 501,
+      readRuntime: () => runtime,
+      run: (command, args) => {
+        calls.push([command, ...args]);
+        return args[1] === "gui/501" ? { status: 0, stdout: "domain is queryable" } : { status: 113, stderr: "not found" };
+      },
+      processRows: (target, options) => {
+        processChecks.push({ target, options });
+        return { ok: true, rows: [] };
+      },
+    });
+    assert.deepEqual(result.stoppedLabels, ["work.relay.companion.pill", "work.relay.companion"]);
+    assert.deepEqual(calls, [
+      ["/bin/launchctl", "print", "gui/501"],
+      ["/bin/launchctl", "print", "gui/501/work.relay.companion.pill"],
+      ["/bin/launchctl", "print", "gui/501/work.relay.companion"],
+    ]);
+    assert.equal(processChecks[0].target, runtime);
+    assert.equal(processChecks[0].options.includeTarget, true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("thin setup cleanup verifier fails closed on loaded services or an unreadable process table", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-thin-uninstall-failure-"));
+  const runtime = { active: true, state: "active", version, packageRoot: "/tmp/runtime/node_modules/relay-companion" };
+  const absentLabelRun = (_command, args) => args[1] === "gui/501"
+    ? { status: 0, stdout: "domain is queryable" }
+    : { status: 113, stderr: "not found" };
+  try {
+    await assert.rejects(verifyThinSetupUninstalled({
+      version,
+      homeDir: root,
+      platform: "darwin",
+      uid: 501,
+      deadlineMs: 0,
+      readRuntime: () => runtime,
+      run: (_command, args) => args[1] === "gui/501" || args[1]?.endsWith("companion.pill")
+        ? { status: 0, stdout: "loaded" }
+        : { status: 113, stderr: "not found" },
+      processRows: () => ({ ok: true, rows: [] }),
+    }), /launchd labels still loaded: work\.relay\.companion\.pill/);
+
+    await assert.rejects(verifyThinSetupUninstalled({
+      version,
+      homeDir: root,
+      platform: "darwin",
+      uid: 501,
+      readRuntime: () => runtime,
+      run: absentLabelRun,
+      processRows: () => ({ ok: false, rows: [], reason: "service-process-query-failed" }),
+    }), /Could not inspect installed Relay processes.*service-process-query-failed/);
+
+    await assert.rejects(verifyThinSetupUninstalled({
+      version,
+      homeDir: root,
+      platform: "darwin",
+      uid: 501,
+      deadlineMs: 0,
+      readRuntime: () => runtime,
+      run: absentLabelRun,
+      processRows: () => ({ ok: true, rows: [{ pid: 4242, command: "installed Relay daemon" }] }),
+    }), /installed Relay service processes still running: 4242/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("public release owns immutable publication while private promotion owns fleet activation", () => {
   const localPublicWorkflow = new URL("../.github/workflows/release.yml", import.meta.url);
   const templatedPublicWorkflow = new URL("../public-release/.github/workflows/release.yml", import.meta.url);
@@ -1053,6 +1192,7 @@ test("public release owns immutable publication while private promotion owns fle
   assert.match(publish, /s3api put-object/);
   assert.match(publish, /--if-none-match '\*'/);
   assert.match(publish, /npm publish .*--provenance/);
+  assert.doesNotMatch(publish, /verify-thin-setup-canary/);
   assert.match(publish, /existing npm version has different bytes/);
   assert.match(publish, /tar -tzf "\$tarball" > "\$RUNNER_TEMP\/pack-files\.txt"/);
   assert.doesNotMatch(publish, /tar -tzf "\$tarball" \| grep/);
@@ -1076,9 +1216,18 @@ test("public release owns immutable publication while private promotion owns fle
     const importWorkflow = fs.readFileSync(privateImport, "utf8");
     assert.match(importWorkflow, /\(cd "\$root" && tar -xzf runtime\.tar\.gz\)/);
     assert.doesNotMatch(importWorkflow, /tar -xzf "\$archive"/);
+    assert.match(importWorkflow, /npx --yes "relay-companion@\$VERSION" setup/);
+    const canaryHostIndex = importWorkflow.indexOf('mkdir -p "$CODEX_HOME"');
+    const canarySetupIndex = importWorkflow.indexOf('npx --yes "relay-companion@$VERSION" setup');
+    assert.ok(canaryHostIndex >= 0 && canaryHostIndex < canarySetupIndex, "the isolated canary host exists before setup");
+    assert.match(importWorkflow, /verify-thin-setup-canary\.mjs/);
+    assert.match(importWorkflow, /--expect-uninstalled/);
+    assert.match(importWorkflow, /uninstall --no-trampoline/);
+    assert.doesNotMatch(importWorkflow, /relay-companion@latest|uninstall --purge/);
   }
 });
 
 test("public export includes every script its release security suite imports", () => {
   assert.equal(fs.existsSync(new URL("../scripts/assert-monotonic-version.mjs", import.meta.url)), true);
+  assert.equal(fs.existsSync(new URL("../scripts/verify-thin-setup-canary.mjs", import.meta.url)), true);
 });

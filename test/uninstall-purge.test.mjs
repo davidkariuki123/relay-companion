@@ -243,10 +243,11 @@ import { stopWindowsRelayServices, WINDOWS_STOP_RELAY_SERVICES_PS } from "../src
  */
 function psSweepMatches(commandLine) {
   const patterns = [...WINDOWS_STOP_RELAY_SERVICES_PS.matchAll(/-match '([^']+)'/g)].map((m) => m[1]);
-  assert.equal(patterns.length, 2, "two identity patterns in the sweep");
+  assert.equal(patterns.length, 3, "one installed-tree boundary and two service identities in the sweep");
   // PowerShell single-quoted regex → JS: unescape the doubled backslashes the
   // JS string literal carries for PowerShell's benefit.
-  return patterns.some((p) => new RegExp(p.replace(/\\/g, "\\")).test(commandLine));
+  const matches = patterns.map((p) => new RegExp(p.replace(/\\/g, "\\")).test(commandLine));
+  return matches[0] && matches.slice(1).some(Boolean);
 }
 
 test("the Windows service sweep matches the daemon and pill by identity, and nothing else", () => {
@@ -256,6 +257,7 @@ test("the Windows service sweep matches the daemon and pill by identity, and not
   const mcpServer = String.raw`C:\Users\shane\.granular-devtools\node-v22.13.0-win-x64\node.exe --max-old-space-size=96 C:\Users\shane\.relay\runtime\releases\0.1.269-x\node_modules\relay-companion\bin\relay.js mcp --messages-only`;
   const uninstallItself = String.raw`node.exe C:\Users\shane\.granular-devtools\node-v22.13.0-win-x64\node_modules\relay-companion\bin\relay.js uninstall --purge`;
   const daemonLog = String.raw`notepad.exe C:\Users\shane\.relay\daemon.log`;
+  const devCheckout = String.raw`node.exe C:\Users\shane\src\relay\packages\companion\bin\relay.js daemon`;
 
   assert.equal(psSweepMatches(daemon), true, "daemon matched");
   assert.equal(psSweepMatches(pill), true, "pill matched");
@@ -263,6 +265,7 @@ test("the Windows service sweep matches the daemon and pill by identity, and not
   assert.equal(psSweepMatches(mcpServer), false, "MCP servers belong to editor sessions; not the sweep's business");
   assert.equal(psSweepMatches(uninstallItself), false, "never terminates the uninstall that is running");
   assert.equal(psSweepMatches(daemonLog), false, "a file path is not a process identity");
+  assert.equal(psSweepMatches(devCheckout), false, "a developer checkout is outside the installed-tree boundary");
 });
 
 test("stopWindowsRelayServices ends both tasks, then sweeps survivors by identity", () => {

@@ -168,6 +168,7 @@ export function validateInstalledPackageShape(packageRoot, { version, distributi
     if (JSON.stringify(bootstrapFiles) !== JSON.stringify([
       "relay-setup.cjs",
       "release-signature.cjs",
+      "runtime-executables.cjs",
       "runtime-health.cjs",
       "trust.json",
     ])) {

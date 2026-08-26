@@ -14,23 +14,18 @@ import {
   verifyCanonicalCandidate,
 } from "./canonical-runtime.js";
 
-const DAEMON_LABEL = "work.relay.companion";
-const PILL_LABEL = "work.relay.companion.pill";
 const WINDOWS_DAEMON_TASK = "Relay Companion Daemon";
 const WINDOWS_PILL_TASK = "Relay Companion Pill";
 export const UPDATE_WORKER_LABEL_PREFIX = "work.relay.companion.update.";
 export const UPDATE_WORKER_LABEL = "work.relay.companion.update";
 export const UPDATE_REQUEST_SCHEMA = 1;
-// Only processes running out of a node_modules/relay-companion tree — a canonical
-// release or a legacy global install — are the runtime's own services. A developer's
-// checkout pill (…/packages/companion/overlay/main.cjs) must be invisible here: it
-// used to count as an "old pill", which failed exact-root health on EVERY canonical
-// activation while a dev pill ran, rolling back and stranding a ~650MB release per
-// attempt (David's Mac: 140 release dirs in one day).
-const SERVICE_TREE_RE = /node_modules[\\/]relay-companion[\\/]/i;
 const require = createRequire(import.meta.url);
 const { stageVerifiedRuntime, releasePlatform } = require("../bootstrap/relay-setup.cjs");
-const { exactRuntimeHealth, runtimeProcessCommands: processCommands } = require("../bootstrap/runtime-health.cjs");
+const {
+  activateMacRuntimeServices,
+  exactRuntimeHealth,
+  runtimeProcessCommands: processCommands,
+} = require("../bootstrap/runtime-health.cjs");
 
 export { exactRuntimeHealth };
 
@@ -114,45 +109,6 @@ export function processReferencedCanonicalRoots({
     .filter((packageRoot) => commands.some((command) => normalize(command).includes(normalize(packageRoot))));
 }
 
-// The runtime's own service processes that are NOT running from the target root and
-// are NOT tracked by the labels we just booted out: a pill that left the launchd
-// domain without exiting, or a legacy global-tree pill/daemon started outside launchd.
-// Left alone they hold the singleton lock, the freshly bootstrapped services lose it,
-// and exact-root health fails — rollback, new ~650MB candidate, repeat. Sven ended his
-// incident by killing exactly these by hand; do it here, scoped to relay-companion
-// trees only so a developer's checkout services are never touched.
-function staleServiceProcessRows(target, { run, includeTarget = false }) {
-  const result = run("/bin/ps", ["-axo", "pid=,command="]);
-  if (!commandOk(result)) return [];
-  const targetNeedle = String(target.packageRoot || "").replaceAll("\\", "/");
-  const rows = [];
-  for (const line of String(result.stdout || "").split("\n")) {
-    const match = line.match(/^\s*(\d+)\s+(.*)$/);
-    if (!match) continue;
-    const pid = Number(match[1]);
-    const command = match[2];
-    if (!SERVICE_TREE_RE.test(command)) continue;
-    const isDaemon = /(?:^|[\\/])relay\.js(?:"|'|\s).*\bdaemon\b/i.test(command);
-    const isPill = /(?:^|[\\/])overlay[\\/]main\.cjs(?:"|'|\s|$)/i.test(command);
-    if (!isDaemon && !isPill) continue;
-    if (!includeTarget && targetNeedle && command.replaceAll("\\", "/").includes(targetNeedle)) continue;
-    if (!Number.isInteger(pid) || pid === process.pid) continue;
-    rows.push({ pid, command });
-  }
-  return rows;
-}
-
-async function terminateStaleServiceProcesses(target, { run, sleep, graceMs = 2000, includeTarget = false }) {
-  const rows = staleServiceProcessRows(target, { run, includeTarget });
-  if (!rows.length) return { terminated: [] };
-  for (const row of rows) run("/bin/kill", ["-TERM", String(row.pid)]);
-  await sleep(graceMs);
-  const survivors = staleServiceProcessRows(target, { run, includeTarget }).filter((row) => rows.some((r) => r.pid === row.pid));
-  for (const row of survivors) run("/bin/kill", ["-KILL", String(row.pid)]);
-  if (survivors.length) await sleep(500);
-  return { terminated: rows.map((row) => row.pid) };
-}
-
 export async function activateCanonicalRuntime(target, {
   homeDir = os.homedir(),
   platform = process.platform,
@@ -185,59 +141,16 @@ export async function activateCanonicalRuntime(target, {
   }
 
   if (platform === "darwin") {
-    const domain = `gui/${typeof process.getuid === "function" ? process.getuid() : 0}`;
-    const agents = path.join(homeDir, "Library", "LaunchAgents");
-    const labels = [PILL_LABEL, DAEMON_LABEL];
-    const deadline = now() + Math.max(1, activationDeadlineMs);
-    for (const label of labels) run("/bin/launchctl", ["bootout", `${domain}/${label}`]);
-
-    // One state machine, one deadline: quiesce every production Relay service,
-    // start the two exact registrations, then prove exact-root health. EIO means
-    // launchd had not finished the prior bootout; it loops back through quiescence
-    // instead of stacking a second blind retry mechanism on top.
-    while (now() <= deadline) {
-      const labelsPresent = labels.filter((label) => commandOk(run("/bin/launchctl", ["print", `${domain}/${label}`])));
-      if (labelsPresent.length) {
-        for (const label of labelsPresent) run("/bin/launchctl", ["bootout", `${domain}/${label}`]);
-        await sleep(domainPollMs);
-        continue;
-      }
-
-      await terminateStaleServiceProcesses(target, { run, sleep, includeTarget: true });
-      if (staleServiceProcessRows(target, { run, includeTarget: true }).length) {
-        await sleep(domainPollMs);
-        continue;
-      }
-
-      let bootstrapFailure = null;
-      for (const label of labels) {
-        const started = run("/bin/launchctl", ["bootstrap", domain, path.join(agents, `${label}.plist`)]);
-        if (!commandOk(started)) {
-          bootstrapFailure = { label, result: started };
-          break;
-        }
-      }
-      if (bootstrapFailure) {
-        for (const label of labels) run("/bin/launchctl", ["bootout", `${domain}/${label}`]);
-        const detail = `${bootstrapFailure.result?.stderr || bootstrapFailure.result?.stdout || ""}`;
-        if (!/(?:Bootstrap failed:\s*5|Input\/output error|I\/O error)/i.test(detail)) {
-          return { ok: false, reason: "service-bootstrap-failed", detail: `${bootstrapFailure.label}: ${detail}` };
-        }
-        await sleep(bootstrapDelayMs);
-        continue;
-      }
-
-      while (now() <= deadline) {
-        const health = exactRuntimeHealth(target, { platform, run });
-        if (health.ok) return { ok: true, health };
-        if (health.oldDaemon || health.oldPill) {
-          for (const label of labels) run("/bin/launchctl", ["bootout", `${domain}/${label}`]);
-          break;
-        }
-        await sleep(500);
-      }
-    }
-    return { ok: false, reason: "activation-deadline-exceeded", detail: target.packageRoot };
+    return activateMacRuntimeServices(target, {
+      homeDir,
+      platform,
+      run,
+      sleep,
+      domainPollMs,
+      bootstrapDelayMs,
+      activationDeadlineMs,
+      now,
+    });
   } else if (platform === "win32") {
     for (const task of [WINDOWS_PILL_TASK, WINDOWS_DAEMON_TASK]) run("schtasks.exe", ["/End", "/TN", task]);
     // The tasks launch through a short-lived wscript/WshShell.Run wrapper. `/End`
@@ -246,7 +159,7 @@ export async function activateCanonicalRuntime(target, {
     // exact-root actions; the updater worker itself does not match either pattern.
     const stopRelayChildren = [
       "$p=Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {",
-      "  $_.CommandLine -and (($_.CommandLine -match '[\\\\/]relay\\.js.*\\bdaemon\\b') -or ($_.CommandLine -match '[\\\\/]overlay[\\\\/]main\\.cjs'))",
+      "  $_.CommandLine -and ($_.CommandLine -match '[\\\\/]node_modules[\\\\/]relay-companion[\\\\/]') -and (($_.CommandLine -match '[\\\\/]relay\\.js.*\\bdaemon\\b') -or ($_.CommandLine -match '[\\\\/]overlay[\\\\/]main\\.cjs'))",
       "}; foreach($x in $p){ try { Invoke-CimMethod -InputObject $x -MethodName Terminate -ErrorAction Stop | Out-Null } catch {} }",
     ].join(" ");
     const stopped = run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", stopRelayChildren]);

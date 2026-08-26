@@ -673,7 +673,7 @@ export function createAutoUpdater({
         `auto-update STUCK: ${state.updateFailures} consecutive failed attempts to install ${target} ` +
           `(still running ${runningVersion}). Updates are not reaching this machine. ` +
           `See ${path.join(os.homedir(), ".relay", "update.log")} for the cause, ` +
-          `and run \`relay doctor\` for a summary or \`relay repair-desktop\` if autostart is broken.`,
+          `and run \`relay doctor\` for a summary or \`relay repair-installation\` if autostart is broken.`,
       );
     } else {
       log(`auto-update: attempt ${state.updateFailures} to install ${target} did not land; retrying in ~${waitLabel}`);

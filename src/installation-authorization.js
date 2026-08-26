@@ -35,7 +35,7 @@ const AUTHORIZATION_STATUSES = new Set([
   "consumed",
   "expired",
 ]);
-const ACTIVE_STATUSES = new Set(["pending_identity", "pending_approval", "approved"]);
+const RESUMABLE_STATUSES = new Set(["pending_identity", "pending_approval", "approved", "consumed"]);
 const REQUEST_TIMEOUT_MS = 20_000;
 
 function statePath() {
@@ -66,23 +66,47 @@ function defaultStateStore(file = statePath()) {
 export function createNativeInstallationSecretStore({
   webBase = DEFAULT_WEB_URL,
   service = INSTALLATION_CREDENTIAL_SERVICE,
+  writeCredentialImpl = writeCredential,
+  readCredentialImpl = readCredential,
+  deleteCredentialImpl = deleteCredential,
 } = {}) {
   const options = (account) => ({ service, account });
   const accounts = Object.values(INSTALLATION_CREDENTIAL_ACCOUNTS);
-  const removeAccounts = () => {
-    const results = [...accounts, INSTALLATION_CREDENTIAL_ACCOUNT]
-      .map((account) => deleteCredential(options(account)));
-    const failed = results.find((result) => !result?.ok);
-    return failed || { ok: true, value: "", detail: "" };
+  const sentinelAccount = INSTALLATION_CREDENTIAL_ACCOUNTS.authorizationId;
+  const removeSentinelLast = (targetAccounts) => {
+    const ordered = [
+      ...targetAccounts.filter((account) => account !== sentinelAccount),
+      ...(targetAccounts.includes(sentinelAccount) ? [sentinelAccount] : []),
+    ];
+    for (const account of ordered) {
+      const result = deleteCredentialImpl(options(account));
+      // The sentinel must remain whenever an earlier field could not be
+      // removed, so a later Begin still detects the interrupted capability.
+      if (!result?.ok) return result;
+    }
+    return { ok: true, value: "", detail: "" };
   };
+  const removeAccounts = () => removeSentinelLast([...accounts, INSTALLATION_CREDENTIAL_ACCOUNT]);
   return {
+    inspect() {
+      // authorization-id is written first and rolled back last, so it is the
+      // bounded sentinel for a complete or interrupted split-field commit.
+      const current = readCredentialImpl(options(INSTALLATION_CREDENTIAL_ACCOUNTS.authorizationId));
+      if (current?.ok) return { ok: true, present: true, value: "", detail: "" };
+      if (current?.code !== "credential_not_found") return current;
+      // Do not inspect the legacy envelope here. Without matching durable
+      // state it is unusable and harmless, while touching it on a fresh start
+      // would add a second Windows vault read. Durable legacy setup uses
+      // read() below for its one migration.
+      return { ok: true, present: false, value: "", detail: "" };
+    },
     probe() {
       const probe = randomBytes(24).toString("base64url");
       const target = options(INSTALLATION_CREDENTIAL_PROBE_ACCOUNT);
-      const written = writeCredential(probe, target);
+      const written = writeCredentialImpl(probe, target);
       if (!written?.ok) return written;
-      const verified = readCredential(target);
-      const removed = deleteCredential(target);
+      const verified = readCredentialImpl(target);
+      const removed = deleteCredentialImpl(target);
       if (!verified?.ok) return verified;
       if (verified.value !== probe) {
         return { ok: false, value: "", detail: "credential verification failed", code: "credential_verification_failed" };
@@ -105,14 +129,14 @@ export function createNativeInstallationSecretStore({
       }
       const written = [];
       for (const [field, account] of Object.entries(INSTALLATION_CREDENTIAL_ACCOUNTS)) {
-        const result = writeCredential(fields[field], options(account));
+        const result = writeCredentialImpl(fields[field], options(account));
         if (!result?.ok) {
-          for (const prior of written) deleteCredential(options(prior));
+          removeSentinelLast(written);
           return result;
         }
         written.push(account);
       }
-      deleteCredential(options(INSTALLATION_CREDENTIAL_ACCOUNT));
+      deleteCredentialImpl(options(INSTALLATION_CREDENTIAL_ACCOUNT));
       return { ok: true, value: "", detail: "" };
     },
     read() {
@@ -122,7 +146,7 @@ export function createNativeInstallationSecretStore({
         // These split fields have only ever existed in the local-v2 store. Do
         // not probe the legacy login Keychain for accounts no released build
         // ever wrote there. The one old envelope is handled once below.
-        const result = readCredential(options(account));
+        const result = readCredentialImpl(options(account));
         if (!result?.ok) { missing = result; break; }
         values[field] = result.value;
       }
@@ -136,7 +160,7 @@ export function createNativeInstallationSecretStore({
           activationUrl: target.toString(),
         } };
       }
-      const legacy = readCredential({ ...options(INSTALLATION_CREDENTIAL_ACCOUNT), allowLegacyMigration: true });
+      const legacy = readCredentialImpl({ ...options(INSTALLATION_CREDENTIAL_ACCOUNT), allowLegacyMigration: true });
       if (!legacy.ok) return missing;
       try { return { ok: true, value: JSON.parse(legacy.value) }; }
       catch { return { ok: false, detail: "stored authorization is invalid" }; }
@@ -319,6 +343,19 @@ export function createInstallationAuthorizationController({
   if (platform !== "darwin" && platform !== "win32") throw new Error("Relay setup supports macOS and Windows.");
   let beginInFlight = null;
   let consumeInFlight = null;
+  let resumeInFlight = null;
+  let operationQueue = Promise.resolve();
+
+  // Authorization actions cross three commit boundaries (server capability,
+  // protected secret storage, and durable public state). Keep those actions in
+  // one local order so a poll cannot rewrite state after Cancel/Restart and a
+  // second click cannot delete the capability while consume is persisting the
+  // paired account.
+  function serialize(operation) {
+    const result = operationQueue.then(operation, operation);
+    operationQueue = result.catch(() => {});
+    return result;
+  }
 
   async function readDurable() {
     return validateDurableState(await durableStore.read());
@@ -330,9 +367,9 @@ export function createInstallationAuthorizationController({
     return validateSecret(result.value, state.authorizationId, trustedWebOrigin);
   }
 
-  async function removeAuthorization({ requireSecretRemoval = true } = {}) {
+  async function removeAuthorization() {
     const removed = await secretStore.delete();
-    if (!removed?.ok && requireSecretRemoval) {
+    if (!removed?.ok) {
       throw new Error("Relay could not remove the one-time setup authorization from protected storage.");
     }
     await durableStore.remove();
@@ -341,8 +378,10 @@ export function createInstallationAuthorizationController({
   async function expire(state) {
     const expired = { ...state, status: "expired" };
     await durableStore.write(expired);
-    const removed = await secretStore.delete();
-    if (removed?.ok) await durableStore.remove();
+    // Keep the public tombstone after deleting the one-time secret. It is what
+    // makes replacement an explicit Restart even across a renderer/process
+    // restart; it contains no capability material.
+    await secretStore.delete();
     return publicState(expired);
   }
 
@@ -350,24 +389,49 @@ export function createInstallationAuthorizationController({
     let state = await readDurable();
     if (state && Date.parse(state.expiresAt) <= now()) {
       await expire(state);
-      state = null;
+      throw new InstallationRequestError("authorization_expired", 410);
     }
     if (!state && create) {
-      await begin();
+      await beginInternal();
       state = await readDurable();
     }
     if (!state) throw new Error("Start Relay account setup first.");
+    if (state.status === "expired") throw new InstallationRequestError("authorization_expired", 410);
     return { state, secret: await readSecret(state) };
   }
 
   async function beginInternal() {
     if (await isPaired()) throw new Error("Relay is already connected on this computer.");
     const existing = await readDurable();
-    if (existing && Date.parse(existing.expiresAt) > now() && ACTIVE_STATUSES.has(existing.status)) {
+    if (existing && Date.parse(existing.expiresAt) > now() && RESUMABLE_STATUSES.has(existing.status)) {
       await readSecret(existing);
       return publicState(existing);
     }
-    if (existing) await removeAuthorization({ requireSecretRemoval: false });
+    // Beginning setup never destroys an old capability. An expired/inactive
+    // authorization is replaced only by the separate, explicit Restart act,
+    // whose secret deletion must succeed before a new server record is minted.
+    if (existing) {
+      if (existing.status !== "expired") return expire(existing);
+      return publicState(existing);
+    }
+
+    // A secret without its public state is an interrupted prior commit, not a
+    // fresh machine. Only explicit Restart may delete that authorization-only
+    // residue before a replacement is created.
+    const canInspectResidue = typeof secretStore.inspect === "function";
+    const residue = canInspectResidue ? await secretStore.inspect() : await secretStore.read();
+    if (residue?.ok && (canInspectResidue ? residue.present === true : true)) {
+      throw credentialError(
+        "Relay found an unfinished one-time setup authorization. Restart setup to replace it safely.",
+        "setup_restart_required",
+      );
+    }
+    if (residue && !residue.ok && residue.code && residue.code !== "credential_not_found") {
+      throw credentialError(
+        "Relay cannot inspect protected credential storage. Check its permissions, then try setup again.",
+        residue.code || "credential_store_error",
+      );
+    }
 
     const available = await secretStore.probe?.();
     if (available && !available.ok) {
@@ -401,7 +465,19 @@ export function createInstallationAuthorizationController({
     try {
       await durableStore.write(state);
     } catch (error) {
-      try { await secretStore.delete(); } catch {}
+      let removed;
+      try { removed = await secretStore.delete(); } catch (cleanupError) {
+        throw credentialError(
+          "Relay could not roll back the one-time setup authorization in protected storage.",
+          cleanupError?.code || "credential_store_error",
+        );
+      }
+      if (!removed?.ok) {
+        throw credentialError(
+          "Relay could not roll back the one-time setup authorization in protected storage.",
+          removed?.code || "credential_store_error",
+        );
+      }
       throw error;
     }
     return publicState(state);
@@ -409,16 +485,17 @@ export function createInstallationAuthorizationController({
 
   function begin() {
     if (!beginInFlight) {
-      beginInFlight = beginInternal().finally(() => { beginInFlight = null; });
+      beginInFlight = serialize(beginInternal).finally(() => { beginInFlight = null; });
     }
     return beginInFlight;
   }
 
-  async function state() {
+  async function stateInternal() {
     const durable = await readDurable();
     if (!durable) return { status: "idle" };
+    if (durable.status === "expired") return publicState(durable);
     if (Date.parse(durable.expiresAt) <= now()) return expire(durable);
-    if (durable.status === "consumed" || durable.status === "expired") return publicState(durable);
+    if (durable.status === "consumed") return publicState(durable);
     const secret = await readSecret(durable);
     let remote;
     try {
@@ -446,7 +523,11 @@ export function createInstallationAuthorizationController({
     return publicState(next);
   }
 
-  async function google({ forceAccountSelection = false } = {}) {
+  function state() {
+    return serialize(stateInternal);
+  }
+
+  async function googleInternal({ forceAccountSelection = false } = {}) {
     const { state: durable, secret } = await activeContext({ create: true });
     const target = new URL(secret.activationUrl);
     if (forceAccountSelection) {
@@ -459,7 +540,11 @@ export function createInstallationAuthorizationController({
     return publicState(durable);
   }
 
-  async function emailStart(email) {
+  function google(options) {
+    return serialize(() => googleInternal(options));
+  }
+
+  async function emailStartInternal(email) {
     const normalized = String(email || "").trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized) || normalized.length > 320) {
       throw new Error("Enter a valid email address.");
@@ -477,7 +562,11 @@ export function createInstallationAuthorizationController({
     return { status: "code_sent", codeExpiresAt: validDate(response.codeExpiresAt) };
   }
 
-  async function emailVerify(code) {
+  function emailStart(email) {
+    return serialize(() => emailStartInternal(email));
+  }
+
+  async function emailVerifyInternal(code) {
     const normalized = String(code || "").trim();
     if (!/^\d{6}$/.test(normalized)) throw new Error("Enter the 6-digit code.");
     const { state: durable, secret } = await activeContext();
@@ -492,6 +581,10 @@ export function createInstallationAuthorizationController({
     const next = { ...durable, status: "pending_approval", account };
     await durableStore.write(next);
     return publicState(next);
+  }
+
+  function emailVerify(code) {
+    return serialize(() => emailVerifyInternal(code));
   }
 
   async function approveAndConsume() {
@@ -556,17 +649,68 @@ export function createInstallationAuthorizationController({
 
   function approve() {
     if (!consumeInFlight) {
-      consumeInFlight = approveAndConsume().finally(() => { consumeInFlight = null; });
+      consumeInFlight = serialize(approveAndConsume).finally(() => { consumeInFlight = null; });
     }
     return consumeInFlight;
   }
 
-  async function cancel() {
-    const durable = await readDurable();
+  async function resumeInternal() {
+    if (await isPaired()) {
+      const pairedState = await readDurable();
+      if (pairedState?.status === "consumed") {
+        await removeAuthorization();
+        return publicState(pairedState);
+      }
+      throw new Error("Relay is already connected on this computer.");
+    }
+    let durable = await readDurable();
     if (!durable) return { status: "idle" };
+    if (Date.parse(durable.expiresAt) <= now()) return expire(durable);
+    if (durable.status === "approved" || durable.status === "consumed") {
+      return approveAndConsume();
+    }
+
+    // A local response may have been lost after the server committed approval.
+    // Refresh first, then use only the idempotent consume recovery path. A
+    // merely pending_approval authorization still requires the human button.
+    const refreshed = await stateInternal();
+    if (refreshed.status === "expired") return refreshed;
+    durable = await readDurable();
+    if (durable?.status === "approved" || durable?.status === "consumed") {
+      return approveAndConsume();
+    }
+    return publicState(durable);
+  }
+
+  function resume() {
+    if (!resumeInFlight) {
+      resumeInFlight = serialize(resumeInternal).finally(() => { resumeInFlight = null; });
+    }
+    return resumeInFlight;
+  }
+
+  async function cancelInternal() {
+    // Delete the authorization-only namespace even if its public state file is
+    // absent (for example, after a state commit failed following secret write).
     await removeAuthorization();
     return { status: "idle" };
   }
 
-  return { state, begin, google, emailStart, emailVerify, approve, cancel };
+  function cancel() {
+    return serialize(cancelInternal);
+  }
+
+  async function restartInternal() {
+    if (await isPaired()) throw new Error("Relay is already connected on this computer.");
+    // This touches only the one-time installation-authorization namespace. It
+    // never signs out, revokes a device, or removes account/E2EE/message state.
+    await removeAuthorization();
+    return beginInternal();
+  }
+
+  function restart() {
+    return serialize(restartInternal);
+  }
+
+  return { state, begin, resume, restart, google, emailStart, emailVerify, approve, cancel };
 }

@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import { createInstallationAuthorizationController } from "../src/installation-authorization.js";
+import {
+  createInstallationAuthorizationController,
+  createNativeInstallationSecretStore,
+} from "../src/installation-authorization.js";
 
 const NOW = Date.parse("2026-08-20T10:00:00.000Z");
 const EXPIRES = "2026-08-20T10:15:00.000Z";
@@ -113,6 +116,55 @@ test("begin preflights native storage before creating a server authorization", a
   assert.equal(stores.peekSecret(), null);
 });
 
+test("native authorization cleanup preserves its sentinel after a partial field deletion", () => {
+  const credentials = new Map([
+    ["authorization-id", AUTHORIZATION_ID],
+    ["client-secret", CLIENT_SECRET],
+    ["code-verifier", "v".repeat(43)],
+    ["activation-token", ACTIVATION_TOKEN],
+    ["authorization", "legacy"],
+  ]);
+  const deleted = [];
+  const store = createNativeInstallationSecretStore({
+    readCredentialImpl: ({ account }) => credentials.has(account)
+      ? { ok: true, value: credentials.get(account) }
+      : { ok: false, code: "credential_not_found", detail: "missing" },
+    deleteCredentialImpl: ({ account }) => {
+      deleted.push(account);
+      if (account === "code-verifier") {
+        return { ok: false, code: "credential_unavailable", detail: "vault locked" };
+      }
+      credentials.delete(account);
+      return { ok: true, value: "", detail: "" };
+    },
+  });
+
+  assert.equal(store.delete().ok, false);
+  assert.deepEqual(deleted, ["client-secret", "code-verifier"]);
+  assert.equal(credentials.has("authorization-id"), true, "the residue sentinel survives partial cleanup");
+  assert.deepEqual(store.inspect(), { ok: true, present: true, value: "", detail: "" });
+});
+
+test("a durable-state commit and cleanup failure leaves fail-closed authorization residue", async () => {
+  const stores = memoryStores();
+  stores.durableStore.write = () => { throw new Error("disk unavailable"); };
+  stores.secretStore.delete = () => ({
+    ok: false,
+    code: "credential_unavailable",
+    detail: "vault locked",
+  });
+  const { controller, calls } = harness({ stores });
+
+  await assert.rejects(controller.begin(), (error) => {
+    assert.equal(error.code, "credential_unavailable");
+    assert.match(error.message, /roll back/);
+    return true;
+  });
+  assert.equal(calls.length, 1);
+  assert.ok(stores.peekSecret(), "the residue remains detectable instead of being treated as fresh setup");
+  assert.equal(stores.peekDurable(), null);
+});
+
 test("begin does not reinterpret an unreadable paired credential as a new account", async () => {
   const { controller, calls } = harness({
     isPaired: () => {
@@ -138,6 +190,188 @@ test("begin is serialized and resumes the same authorization after a restart", a
   const restarted = harness({ stores, fetchImpl }).controller;
   await restarted.begin();
   assert.equal(creates, 1);
+});
+
+test("begin preserves an approved capability and resume finishes it without minting or re-approving", async () => {
+  const stores = memoryStores({
+    durable: {
+      schemaVersion: 1,
+      authorizationId: AUTHORIZATION_ID,
+      expiresAt: EXPIRES,
+      status: "approved",
+      account: { email: "alex@example.com", displayName: "Alex" },
+    },
+    secret: {
+      authorizationId: AUTHORIZATION_ID,
+      clientSecret: CLIENT_SECRET,
+      codeVerifier: "v".repeat(43),
+      activationUrl: ACTIVATION_URL,
+    },
+  });
+  let creates = 0;
+  let approvals = 0;
+  let consumes = 0;
+  let persisted = 0;
+  const fetchImpl = async (url) => {
+    const route = new URL(url).pathname;
+    if (route === "/v1/installation-authorizations") { creates += 1; return response(createReply()); }
+    if (route.endsWith("/approve")) { approvals += 1; return response({ status: "approved" }); }
+    if (route.endsWith("/consume")) {
+      consumes += 1;
+      return response({
+        deviceId: "dev_recovered",
+        deviceToken: "dev_recovered_secret",
+        user: { id: "usr_test", name: "Alex", email: "alex@example.com" },
+      });
+    }
+    throw new Error(`unexpected ${route}`);
+  };
+  const { controller } = harness({
+    stores,
+    fetchImpl,
+    persistAccount: async () => { persisted += 1; },
+  });
+
+  assert.equal((await controller.begin()).status, "approved");
+  assert.deepEqual({ creates, approvals, consumes, persisted }, { creates: 0, approvals: 0, consumes: 0, persisted: 0 });
+  assert.equal((await controller.resume()).status, "consumed");
+  assert.deepEqual({ creates, approvals, consumes, persisted }, { creates: 0, approvals: 0, consumes: 1, persisted: 1 });
+});
+
+test("resume preserves the explicit human approval boundary", async () => {
+  const stores = memoryStores({
+    durable: {
+      schemaVersion: 1,
+      authorizationId: AUTHORIZATION_ID,
+      expiresAt: EXPIRES,
+      status: "pending_approval",
+      account: { email: "alex@example.com", displayName: "Alex" },
+    },
+    secret: {
+      authorizationId: AUTHORIZATION_ID,
+      clientSecret: CLIENT_SECRET,
+      codeVerifier: "v".repeat(43),
+      activationUrl: ACTIVATION_URL,
+    },
+  });
+  let approvals = 0;
+  let consumes = 0;
+  const fetchImpl = async (url) => {
+    const route = new URL(url).pathname;
+    if (route.endsWith("/status")) return response({
+      status: "pending_approval",
+      expiresAt: EXPIRES,
+      account: { email: "alex@example.com", displayName: "Alex" },
+    });
+    if (route.endsWith("/approve")) approvals += 1;
+    if (route.endsWith("/consume")) consumes += 1;
+    return response({ status: "approved" });
+  };
+  const { controller } = harness({ stores, fetchImpl });
+  assert.equal((await controller.resume()).status, "pending_approval");
+  assert.deepEqual({ approvals, consumes }, { approvals: 0, consumes: 0 });
+  assert.equal(stores.peekDurable().status, "pending_approval");
+});
+
+test("resume recovers a lost explicit-approval response using status then idempotent consume", async () => {
+  const stores = memoryStores({
+    durable: {
+      schemaVersion: 1,
+      authorizationId: AUTHORIZATION_ID,
+      expiresAt: EXPIRES,
+      status: "pending_approval",
+      account: { email: "alex@example.com", displayName: "Alex" },
+    },
+    secret: {
+      authorizationId: AUTHORIZATION_ID,
+      clientSecret: CLIENT_SECRET,
+      codeVerifier: "v".repeat(43),
+      activationUrl: ACTIVATION_URL,
+    },
+  });
+  let approvals = 0;
+  let consumes = 0;
+  const fetchImpl = async (url) => {
+    const route = new URL(url).pathname;
+    if (route.endsWith("/status")) return response({
+      status: "approved",
+      expiresAt: EXPIRES,
+      account: { email: "alex@example.com", displayName: "Alex" },
+    });
+    if (route.endsWith("/approve")) { approvals += 1; return response({ status: "approved" }); }
+    if (route.endsWith("/consume")) {
+      consumes += 1;
+      return response({
+        deviceId: "dev_recovered",
+        deviceToken: "dev_recovered_secret",
+        user: { id: "usr_test", name: "Alex", email: "alex@example.com" },
+      });
+    }
+    throw new Error(`unexpected ${route}`);
+  };
+  const { controller } = harness({ stores, fetchImpl, persistAccount: async () => {} });
+  assert.equal((await controller.resume()).status, "consumed");
+  assert.deepEqual({ approvals, consumes }, { approvals: 0, consumes: 1 });
+});
+
+test("restart fails closed before minting when authorization-secret deletion fails", async () => {
+  const stores = memoryStores({
+    durable: { schemaVersion: 1, authorizationId: AUTHORIZATION_ID, expiresAt: EXPIRES, status: "expired" },
+    secret: { authorizationId: AUTHORIZATION_ID, clientSecret: CLIENT_SECRET, codeVerifier: "v".repeat(43), activationUrl: ACTIVATION_URL },
+  });
+  stores.secretStore.delete = () => ({ ok: false, detail: "vault locked" });
+  const { controller, calls } = harness({ stores });
+
+  await assert.rejects(controller.restart(), /protected storage/);
+  assert.equal(calls.length, 0, "replacement is not minted while the old secret remains");
+  assert.ok(stores.peekDurable());
+  assert.ok(stores.peekSecret());
+});
+
+test("an authorization secret without public state requires explicit restart before replacement", async () => {
+  const stores = memoryStores({
+    secret: { authorizationId: AUTHORIZATION_ID, clientSecret: CLIENT_SECRET, codeVerifier: "v".repeat(43), activationUrl: ACTIVATION_URL },
+  });
+  const { controller, calls } = harness({ stores });
+  await assert.rejects(controller.begin(), (error) => {
+    assert.equal(error.code, "setup_restart_required");
+    return true;
+  });
+  assert.equal(calls.length, 0);
+  assert.ok(stores.peekSecret());
+
+  assert.equal((await controller.restart()).status, "pending_identity");
+  assert.equal(calls.length, 1);
+  assert.equal(stores.peekDurable().status, "pending_identity");
+});
+
+test("restart touches only authorization state, deletes it before minting, and never runs for a paired account", async () => {
+  const stores = memoryStores({
+    durable: { schemaVersion: 1, authorizationId: AUTHORIZATION_ID, expiresAt: EXPIRES, status: "expired" },
+    secret: { authorizationId: AUTHORIZATION_ID, clientSecret: CLIENT_SECRET, codeVerifier: "v".repeat(43), activationUrl: ACTIVATION_URL },
+  });
+  let createEventIndex = -1;
+  const { controller } = harness({
+    stores,
+    fetchImpl: async () => {
+      createEventIndex = stores.events.length;
+      return response(createReply());
+    },
+  });
+  assert.equal((await controller.restart()).status, "pending_identity");
+  assert.ok(stores.events.indexOf("secret:delete") < createEventIndex);
+  assert.ok(stores.events.indexOf("durable:remove") < createEventIndex);
+
+  const pairedStores = memoryStores({
+    durable: { schemaVersion: 1, authorizationId: AUTHORIZATION_ID, expiresAt: EXPIRES, status: "expired" },
+    secret: { authorizationId: AUTHORIZATION_ID, clientSecret: CLIENT_SECRET, codeVerifier: "v".repeat(43), activationUrl: ACTIVATION_URL },
+  });
+  const paired = harness({ stores: pairedStores, isPaired: () => true });
+  await assert.rejects(paired.controller.restart(), /already connected/);
+  assert.equal(paired.calls.length, 0);
+  assert.ok(pairedStores.peekDurable());
+  assert.ok(pairedStores.peekSecret());
+  assert.deepEqual(pairedStores.events, []);
 });
 
 test("Google opens only the trusted browser URL and optional account chooser without exposing it", async () => {
@@ -321,7 +555,8 @@ test("lost consume response recovery skips re-approval when durable status is co
     fetchImpl,
     persistAccount: async () => { persisted += 1; },
   });
-  assert.equal((await controller.approve()).status, "consumed");
+  assert.equal((await controller.begin()).status, "consumed", "begin resumes the recovery receipt instead of replacing it");
+  assert.equal((await controller.resume()).status, "consumed");
   assert.equal(approvals, 0);
   assert.equal(consumes, 1);
   assert.equal(persisted, 1);
@@ -396,7 +631,8 @@ test("polling survives restart, expiry purges the capability, and cancel fails c
   const expired = harness({ stores, fetchImpl, now: () => Date.parse(EXPIRES) + 1 }).controller;
   assert.equal((await expired.state()).status, "expired");
   assert.equal(stores.peekSecret(), null);
-  assert.equal(stores.peekDurable(), null);
+  assert.equal(stores.peekDurable().status, "expired", "a secret-free tombstone requires an explicit Restart across relaunches");
+  assert.equal((await expired.begin()).status, "expired", "ordinary Begin cannot replace the tombstone");
 
   const failingStores = memoryStores({
     durable: { schemaVersion: 1, authorizationId: AUTHORIZATION_ID, expiresAt: EXPIRES, status: "pending_identity" },
@@ -407,4 +643,32 @@ test("polling survives restart, expiry purges the capability, and cancel fails c
   await assert.rejects(failing.cancel(), /protected storage/);
   assert.ok(failingStores.peekDurable(), "durable record stays so deletion can be retried");
   assert.ok(failingStores.peekSecret(), "capability is not silently orphaned");
+});
+
+test("cancel is serialized behind an in-flight poll and cannot be undone by its late response", async () => {
+  const stores = memoryStores({
+    durable: { schemaVersion: 1, authorizationId: AUTHORIZATION_ID, expiresAt: EXPIRES, status: "pending_identity" },
+    secret: { authorizationId: AUTHORIZATION_ID, clientSecret: CLIENT_SECRET, codeVerifier: "v".repeat(43), activationUrl: ACTIVATION_URL },
+  });
+  let releasePoll;
+  let pollStarted;
+  const started = new Promise((resolve) => { pollStarted = resolve; });
+  const fetchImpl = async () => {
+    pollStarted();
+    await new Promise((resolve) => { releasePoll = resolve; });
+    return response({
+      status: "pending_approval",
+      expiresAt: EXPIRES,
+      account: { email: "alex@example.com", displayName: "Alex" },
+    });
+  };
+  const { controller } = harness({ stores, fetchImpl });
+  const poll = controller.state();
+  await started;
+  const cancelled = controller.cancel();
+  releasePoll();
+  assert.equal((await poll).status, "pending_approval");
+  assert.deepEqual(await cancelled, { status: "idle" });
+  assert.equal(stores.peekDurable(), null);
+  assert.equal(stores.peekSecret(), null);
 });

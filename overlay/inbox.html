@@ -4484,8 +4484,15 @@
   let signupError = "";
   let signupNote = "";
   let signupPollTimer = null;
+  let signupPollFailures = 0;
+  let signupPollErrorVisible = false;
+  let signupConnectionCommitted = false;
   let signupStateLoaded = false;
   let signupForceGoogleSelection = false;
+  const SIGNUP_POLL_BASE_MS = 1400;
+  const SIGNUP_POLL_MAX_MS = 11200;
+  const SIGNUP_POLL_SURFACE_FAILURE = 3;
+  const SIGNUP_POLL_STOP_FAILURE = 6;
   let prevRelayIds = new Set();
   let contactsList = [];
   let cvEditing = null;
@@ -13266,12 +13273,22 @@
     if (detail.includes("credential_empty") || detail.includes("credential_corrupt")) {
       return "Relay’s saved account credential is damaged. Reconnect this computer.";
     }
+    if (detail.includes("invalid_email_code_format")) return "Enter the 6-digit code.";
     if (detail.includes("invalid_email_code")) return "That code isn’t right or has expired. Try again.";
     if (detail.includes("email_code_cooldown")) return "A code was just sent. Check your inbox or wait a moment.";
     if (detail.includes("email_rate_limited")) return "Too many codes were requested. Try again later.";
     if (detail.includes("authorization_expired")) return "Setup expired. Start again.";
+    if (detail.includes("authorization_changed")) return "Setup changed securely. Resume setup to continue.";
+    if (detail.includes("authorization_recovery_failed")) return "Relay could not recover the approved setup. Restart setup to create a new one-time approval.";
     if (detail.includes("request_timeout")) return "Relay took too long to respond. Try again.";
     if (detail.includes("network_unavailable")) return "Relay couldn’t connect. Check your internet and try again.";
+    if (detail.includes("invalid_email")) return "Enter a valid email address.";
+    if (detail.includes("browser_open_failed")) return "Relay couldn’t open your secure sign-in page. Try again.";
+    if (detail.includes("secret_removal_failed")) return "Relay could not safely remove the old one-time setup approval. No replacement was created.";
+    if (detail.includes("already_connected")) return "Relay is already connected on this computer.";
+    if (detail.includes("setup_restart_required")) return "Relay found an unfinished one-time approval. Restart setup to replace it safely.";
+    if (detail.includes("setup_state_unavailable")) return "Relay couldn’t read its setup state. Check the protected Relay folder, then try again.";
+    if (detail.includes("setup_unavailable")) return "Relay setup is temporarily unavailable. Try again.";
     if (detail.includes("authorization is unavailable") || detail.includes("stored authorization is invalid")) {
       return "Relay couldn’t secure setup on this computer. Cancel setup and start again.";
     }
@@ -13280,6 +13297,13 @@
 
   function signupFailure(reason, fallback) {
     signupBusy = false;
+    const detail = String(reason?.code || reason?.message || reason || "").toLowerCase();
+    if (
+      detail.includes("setup_restart_required") ||
+      detail.includes("authorization_recovery_failed") ||
+      detail.includes("pkce_verification_failed")
+    ) signupStage = "restart-required";
+    else if (detail.includes("authorization_expired")) signupStage = "expired";
     signupError = signupFailureMessage(reason, fallback);
     renderSignup();
   }
@@ -13290,10 +13314,11 @@
 
   function bindSignupCancel() {
     document.getElementById("suCancel")?.addEventListener("click", async () => {
+      stopSignupPolling();
       signupBusy = true; signupError = ""; renderSignup();
       try {
         await window.relay.installationAuthCancel();
-        stopSignupPolling();
+        signupPollFailures = 0; signupPollErrorVisible = false; signupConnectionCommitted = false;
         signupBusy = false; signupStage = "installed"; signupAccount = null; signupEmail = "";
         window.relay.dismiss?.();
       } catch (reason) { signupFailure(reason, "Relay could not cancel setup safely."); }
@@ -13313,22 +13338,107 @@
     signupPollTimer = null;
   }
 
-  function pollInstallationState() {
+  function retryInstallationPolling() {
+    signupPollFailures = 0;
+    signupPollErrorVisible = false;
+    signupError = "";
+    renderSignup();
+    pollInstallationState({ immediate:true });
+  }
+
+  function bindSignupResume() {
+    document.getElementById("suResume")?.addEventListener("click", retryInstallationPolling);
+  }
+
+  function pollInstallationState({ immediate = false } = {}) {
     stopSignupPolling();
     if (!window.relay.installationAuthState || payload.account?.paired !== false) return;
+    if (signupPollFailures >= SIGNUP_POLL_STOP_FAILURE) return;
+    const delay = immediate
+      ? 0
+      : Math.min(SIGNUP_POLL_BASE_MS * (2 ** Math.min(signupPollFailures, 3)), SIGNUP_POLL_MAX_MS);
     signupPollTimer = setTimeout(async () => {
       try {
-        const state = await window.relay.installationAuthState();
-        applyInstallationState(state);
-        renderSignup();
-        if (signupStage === "finishing") {
-          try { onPayload(await window.relay.refresh()); } catch {}
+        if (signupConnectionCommitted) {
+          onPayload(await window.relay.refresh());
+        } else {
+          let state = await window.relay.installationAuthState();
+          applyInstallationState(state);
+          if (signupStage === "finishing" && window.relay.installationAuthResume) {
+            state = await window.relay.installationAuthResume();
+            applyInstallationState(state);
+            if (state?.status === "consumed") {
+              signupConnectionCommitted = true;
+              onPayload(await window.relay.refresh());
+            }
+          }
         }
-      } catch {}
-      if (payload.account?.paired === false && ["google", "approval", "finishing"].includes(signupStage)) {
+        signupPollFailures = 0;
+        if (signupPollErrorVisible) signupError = "";
+        signupPollErrorVisible = false;
+        renderSignup();
+      } catch (reason) {
+        signupPollFailures += 1;
+        const detail = String(reason?.code || reason?.message || reason || "").toLowerCase();
+        let terminalRecovery = false;
+        if (
+          detail.includes("setup_restart_required") ||
+          detail.includes("authorization_recovery_failed") ||
+          detail.includes("pkce_verification_failed")
+        ) { signupStage = "restart-required"; terminalRecovery = true; }
+        else if (detail.includes("authorization_expired")) { signupStage = "expired"; terminalRecovery = true; }
+        if (terminalRecovery || signupPollFailures >= SIGNUP_POLL_SURFACE_FAILURE) {
+          signupPollErrorVisible = true;
+          signupError = signupFailureMessage(reason, "Relay couldn’t check setup safely. Resume setup to try again.");
+          renderSignup();
+        }
+      }
+      if (payload.account?.paired === false && ["google", "finishing"].includes(signupStage)) {
         pollInstallationState();
       }
-    }, 1400);
+    }, delay);
+  }
+
+  async function resumeInstallationSetup() {
+    if (signupBusy || !window.relay.installationAuthResume) return;
+    signupBusy = true; signupError = ""; renderSignup();
+    try {
+      const state = await window.relay.installationAuthResume();
+      signupBusy = false;
+      signupPollFailures = 0;
+      signupPollErrorVisible = false;
+      if (state?.status === "pending_identity" || state?.status === "idle") signupStage = "method";
+      applyInstallationState(state);
+      if (state?.status === "consumed") {
+        signupConnectionCommitted = true;
+        try { onPayload(await window.relay.refresh()); } catch {}
+      }
+      renderSignup();
+      if (["google", "finishing"].includes(signupStage)) pollInstallationState();
+    } catch (reason) {
+      signupFailure(reason, "Relay couldn’t resume setup safely.");
+    }
+  }
+
+  async function restartInstallationSetup({ forceGoogleSelection = false } = {}) {
+    if (signupBusy || !window.relay.installationAuthRestart) return;
+    stopSignupPolling();
+    signupBusy = true; signupError = ""; renderSignup();
+    try {
+      const state = await window.relay.installationAuthRestart();
+      signupBusy = false;
+      signupStage = "method";
+      signupAccount = null;
+      signupEmail = "";
+      signupPollFailures = 0;
+      signupPollErrorVisible = false;
+      signupConnectionCommitted = false;
+      signupForceGoogleSelection = forceGoogleSelection;
+      applyInstallationState(state);
+      renderSignup();
+    } catch (reason) {
+      signupFailure(reason, "Relay could not restart setup safely. No replacement was created.");
+    }
   }
 
   async function connectChatFromSignup(provider) {
@@ -13422,6 +13532,19 @@
       document.getElementById("suChatSkip")?.addEventListener("click", completeSignupTutorial);
       return;
     }
+    if (signupStage === "restart-required") {
+      signupBodyEl.innerHTML = `<p class="su-step">Setup interrupted</p><h1 class="su-title">Restart this setup.</h1><p class="su-copy">Relay cannot safely finish the current one-time approval. Restart deletes only that approval before creating a replacement.</p><div class="su-form"><button class="su-primary" id="suRestartSetup" type="button"${busy}>Restart setup</button>${cancelSetupButton()}</div>`;
+      document.getElementById("suRestartSetup")?.addEventListener("click", () => restartInstallationSetup());
+      bindSignupCancel();
+      return;
+    }
+    if (signupStage === "resume") {
+      signupBodyEl.innerHTML = `<p class="su-step">Setup in progress</p><h1 class="su-title">Continue your setup.</h1><p class="su-copy">Relay kept the unfinished one-time approval on this computer. Resume it, or explicitly restart just this setup approval.</p><div class="su-form"><button class="su-primary" id="suResumeSetup" type="button"${busy}>Resume setup</button><button class="su-link" id="suRestartSetup" type="button"${busy}>Restart setup</button>${cancelSetupButton()}</div>${error}`;
+      document.getElementById("suResumeSetup")?.addEventListener("click", resumeInstallationSetup);
+      document.getElementById("suRestartSetup")?.addEventListener("click", () => restartInstallationSetup());
+      bindSignupCancel();
+      return;
+    }
     if (signupStage === "installed") {
       signupBodyEl.innerHTML = `<p class="su-step">Agent installed</p><h1 class="su-title">Relay is ready for you.</h1><p class="su-copy">Your agent finished the install. Connect your account to this computer.</p><div class="su-form"><button class="su-primary" id="suContinue" type="button"${busy}>Continue</button>${cancelSetupButton()}</div>${error}`;
       document.getElementById("suContinue")?.addEventListener("click", async () => {
@@ -13429,6 +13552,7 @@
         try {
           const state = await window.relay.installationAuthBegin();
           signupBusy = false; signupStage = "method"; applyInstallationState(state); renderSignup();
+          if (signupStage === "finishing") pollInstallationState();
         } catch (reason) { signupFailure(reason, "Relay could not start account setup."); }
       });
       bindSignupCancel();
@@ -13490,7 +13614,9 @@
       return;
     }
     if (signupStage === "google") {
-      signupBodyEl.innerHTML = `<p class="su-step">Google sign-in</p><h1 class="su-title">Finish with Google.</h1><p class="su-copy">Complete Google sign-in in your default browser.</p><div class="su-account"><span class="su-account-name">Waiting for Google…</span><span class="su-account-email">Your agent cannot see this sign-in.</span></div><div class="su-form">${cancelSetupButton()}</div>${error}`;
+      const retry = signupError ? `<button class="su-primary" id="suResume" type="button"${busy}>Try again</button>` : "";
+      signupBodyEl.innerHTML = `<p class="su-step">Google sign-in</p><h1 class="su-title">Finish with Google.</h1><p class="su-copy">Complete Google sign-in in your default browser.</p><div class="su-account"><span class="su-account-name">Waiting for Google…</span><span class="su-account-email">Your agent cannot see this sign-in.</span></div><div class="su-form">${retry}${cancelSetupButton()}</div>${error}`;
+      bindSignupResume();
       bindSignupCancel();
       return;
     }
@@ -13501,27 +13627,28 @@
         signupBusy = true; signupError = ""; renderSignup();
         try {
           const state = await window.relay.installationAuthApprove();
-          signupBusy = false; signupStage = "finishing"; applyInstallationState(state); renderSignup(); pollInstallationState();
+          signupBusy = false; signupStage = "finishing"; applyInstallationState(state);
+          if (state?.status === "consumed") {
+            signupConnectionCommitted = true;
+            try { onPayload(await window.relay.refresh()); } catch {}
+          }
+          renderSignup(); pollInstallationState();
         } catch (reason) { signupFailure(reason, "Relay could not connect this account."); }
       });
       document.getElementById("suAnother")?.addEventListener("click", async () => {
-        signupBusy = true; signupError = ""; renderSignup();
-        try {
-          await window.relay.installationAuthCancel();
-          const state = await window.relay.installationAuthBegin();
-          signupForceGoogleSelection = true;
-          signupBusy = false; signupAccount = null; signupEmail = ""; signupStage = "method"; applyInstallationState(state); renderSignup();
-        } catch (reason) { signupFailure(reason, "Relay could not change accounts safely."); }
+        await restartInstallationSetup({ forceGoogleSelection:true });
       });
       bindSignupCancel();
       return;
     }
     if (signupStage === "expired") {
-      signupBodyEl.innerHTML = `<p class="su-step">Setup expired</p><h1 class="su-title">Start setup again.</h1><p class="su-copy">The one-time setup authorization expired without connecting this computer.</p><div class="su-form"><button class="su-primary" id="suRestart" type="button">Restart</button></div>${error}`;
-      document.getElementById("suRestart")?.addEventListener("click", () => { signupStage = "installed"; signupError = ""; renderSignup(); });
+      signupBodyEl.innerHTML = `<p class="su-step">Setup expired</p><h1 class="su-title">Start setup again.</h1><p class="su-copy">The one-time setup authorization expired without connecting this computer. Restart removes only that expired approval before creating a replacement.</p><div class="su-form"><button class="su-primary" id="suRestart" type="button"${busy}>Restart setup</button></div>${error}`;
+      document.getElementById("suRestart")?.addEventListener("click", () => restartInstallationSetup());
       return;
     }
-    signupBodyEl.innerHTML = `<p class="su-step">Almost done</p><h1 class="su-title">Finishing setup…</h1><p class="su-copy">Relay is getting this computer ready.</p><div class="su-checks"><div class="su-check"><span class="su-check-mark">✓</span>Account verified</div><div class="su-check"><span class="su-check-mark">✓</span>This computer approved</div><div class="su-check su-check-active"><span class="su-check-mark" aria-hidden="true"></span>Connecting Claude Code, Cowork, and Codex</div></div>${error}`;
+    const resume = signupError ? `<div class="su-form"><button class="su-primary" id="suResume" type="button"${busy}>Resume setup</button></div>` : "";
+    signupBodyEl.innerHTML = `<p class="su-step">Almost done</p><h1 class="su-title">Finishing setup…</h1><p class="su-copy">Relay is getting this computer ready.</p><div class="su-checks"><div class="su-check"><span class="su-check-mark">✓</span>Account verified</div><div class="su-check"><span class="su-check-mark">✓</span>This computer approved</div><div class="su-check su-check-active"><span class="su-check-mark" aria-hidden="true"></span>Connecting Claude Code, Cowork, and Codex</div></div>${resume}${error}`;
+    bindSignupResume();
   }
 
   // Deterministic visual states for the overlay's screenshot contract. It is
@@ -13694,11 +13821,16 @@
       if (!credentialRecovery && payload.account?.paired === false && !signupStateLoaded && window.relay.installationAuthState) {
         signupStateLoaded = true;
         window.relay.installationAuthState().then((state) => {
+          if (state?.status === "pending_identity") signupStage = "resume";
           applyInstallationState(state);
           if (rendererSurfaceActive()) renderSignup();
           else surfaceRenderDeferred = true;
-          if (["google", "approval", "finishing"].includes(signupStage)) pollInstallationState();
-        }).catch(() => {});
+          if (["google", "finishing"].includes(signupStage)) pollInstallationState();
+        }).catch((reason) => {
+          signupError = signupFailureMessage(reason, "Relay couldn’t check the saved setup. Try again.");
+          if (rendererSurfaceActive()) renderSignup();
+          else surfaceRenderDeferred = true;
+        });
       }
       return;
     }

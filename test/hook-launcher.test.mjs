@@ -221,7 +221,7 @@ test("repair does not create absent host configs and ignores unrelated malformed
   assert.equal(fs.existsSync(stableHookLauncherPath(homeDir)), false);
 });
 
-test("repair-desktop migrates hooks before refreshing restartable services", () => {
+test("repair-installation preserves state while migrating hooks before refreshing restartable services", () => {
   const cliPath = fileURLToPath(new URL("../bin/relay.js", import.meta.url));
   const cli = fs.readFileSync(cliPath, "utf8");
   const start = cli.indexOf("function cmdRepairDesktop(");
@@ -229,6 +229,9 @@ test("repair-desktop migrates hooks before refreshing restartable services", () 
   const command = cli.slice(start, end);
   assert.ok(command.indexOf("repairExistingAgentHooks()") >= 0);
   assert.ok(command.indexOf("repairDesktopSurfaces(") > command.indexOf("repairExistingAgentHooks()"));
+  assert.doesNotMatch(command, /writeConfig|purgeLocalState|revoke/i);
+  assert.match(cli, /case "repair-installation":\s*case "repair-desktop":\s*return cmdRepairDesktop/);
+  assert.match(cli, /preserves account, encryption, messages, outbox, and preferences/);
   assert.match(cli, /flags\["target-bin"\]/, "candidate repair can retarget a legacy runtime during rollback");
   assert.match(cli, /flags\["target-node"\]/);
 });

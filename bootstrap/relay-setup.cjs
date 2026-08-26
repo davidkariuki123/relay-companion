@@ -11,7 +11,8 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const { pipeline } = require("node:stream/promises");
-const { exactRuntimeHealth } = require("./runtime-health.cjs");
+const { activateMacRuntimeServices, exactRuntimeHealth } = require("./runtime-health.cjs");
+const { verifyRuntimeExecutables } = require("./runtime-executables.cjs");
 
 const RELEASE_ORIGIN = "https://api.sendrelays.com";
 const RELEASE_BASE_PATH = "/v1/companion-releases";
@@ -19,7 +20,7 @@ const PACKAGE_NAME = "relay-companion";
 const WINDOWS_RELAY_TASKS = ["Relay Companion Pill", "Relay Companion Daemon"];
 const WINDOWS_STOP_RELAY_SERVICES_PS = [
   "$p=Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {",
-  "  $_.CommandLine -and (($_.CommandLine -match '[\\\\/]relay\\.js.*\\bdaemon\\b') -or ($_.CommandLine -match '[\\\\/]overlay[\\\\/]main\\.cjs'))",
+  "  $_.CommandLine -and ($_.CommandLine -match '[\\\\/]node_modules[\\\\/]relay-companion[\\\\/]') -and (($_.CommandLine -match '[\\\\/]relay\\.js.*\\bdaemon\\b') -or ($_.CommandLine -match '[\\\\/]overlay[\\\\/]main\\.cjs'))",
   "}; foreach($x in $p){ try { Invoke-CimMethod -InputObject $x -MethodName Terminate -ErrorAction Stop | Out-Null } catch {} }",
 ].join(" ");
 const packageJson = require("../package.json");
@@ -426,11 +427,21 @@ function verifyExtractedRuntime(packageRoot, version, platformKey) {
   }
   const manifest = JSON.parse(fs.readFileSync(path.join(packageRoot, "package.json"), "utf8"));
   if (manifest.name !== PACKAGE_NAME || manifest.version !== version) fail("Relay runtime package identity is invalid.");
-  const electron = platformKey.startsWith("win32-")
-    ? path.join(path.dirname(packageRoot), "electron", "dist", "electron.exe")
-    : path.join(path.dirname(packageRoot), "electron", "dist", "Electron.app", "Contents", "MacOS", "Electron");
-  if (!fs.statSync(electron, { throwIfNoEntry: false })?.isFile()) fail("Relay runtime has no verified native Electron executable.");
-  return { packageRoot, bin: path.join(packageRoot, "bin", "relay.js"), electron };
+  const bin = path.join(packageRoot, "bin", "relay.js");
+  if (!platformKey.startsWith("win32-")) {
+    try { fs.accessSync(bin, fs.constants.X_OK); }
+    catch { fail("Relay runtime CLI is not executable."); }
+  }
+  const executables = verifyRuntimeExecutables(packageRoot, { platform: platformKey });
+  if (!executables.ok) {
+    fail(`Relay runtime executable verification failed (${executables.reason}${executables.detail ? `: ${executables.detail}` : ""}).`);
+  }
+  return {
+    packageRoot,
+    bin,
+    electron: executables.electronPath,
+    executablePaths: executables.paths.map((entry) => entry.path),
+  };
 }
 
 function runtimeLayout(version, platformKey) {
@@ -586,6 +597,7 @@ function stopPreviousWindowsRuntime({ platform = process.platform, spawnImpl = s
 
 async function activateRuntime(layout, runtime, version, {
   platform = process.platform,
+  homeDir = os.homedir(),
   spawnImpl = spawnSync,
   existsSync = fs.existsSync,
   readFileSync = fs.readFileSync,
@@ -595,6 +607,9 @@ async function activateRuntime(layout, runtime, version, {
   healthAttempts = 60,
   healthIntervalMs = 500,
   sleep,
+  activateMacServices = activateMacRuntimeServices,
+  activationDeadlineMs = 90_000,
+  now = Date.now,
 } = {}) {
   let previous = null;
   try { previous = JSON.parse(readFileSync(layout.pointerPath, "utf8")); } catch {}
@@ -674,7 +689,12 @@ async function activateRuntime(layout, runtime, version, {
     fail(message);
   }
 
-  const result = spawnImpl(process.execPath, [runtime.bin, "setup", "--no-trampoline", "--claim"], {
+  // On macOS setup owns registration, but the shared activation state machine
+  // owns service restart. This keeps first-install MCP/plist creation in the
+  // candidate while bootstrap and the updater use the same exact-root handoff.
+  const setupArgs = [runtime.bin, "setup", "--no-trampoline", "--claim"];
+  if (platform === "darwin") setupArgs.push("--no-restart");
+  const result = spawnImpl(process.execPath, setupArgs, {
     stdio: "inherit",
     windowsHide: true,
     env: { ...process.env, RELAY_BOOTSTRAP_ACTIVATED: "1" },
@@ -684,12 +704,32 @@ async function activateRuntime(layout, runtime, version, {
     rollback(message);
     fail(message);
   }
-  const health = await waitForRuntimeHealth(runtime, {
-    healthCheck,
-    attempts: healthAttempts,
-    intervalMs: healthIntervalMs,
-    ...(sleep ? { sleep } : {}),
-  });
+  let health = null;
+  if (platform === "darwin") {
+    const activated = await activateMacServices(runtime, {
+      homeDir,
+      platform,
+      run: spawnImpl,
+      healthCheck,
+      activationDeadlineMs,
+      now,
+      ...(sleep ? { sleep } : {}),
+    });
+    if (!activated?.ok) {
+      const detail = activated?.detail ? ` (${activated.detail})` : "";
+      const message = `Relay runtime activation could not start the exact registered macOS services${detail}.`;
+      rollback(message);
+      fail(message);
+    }
+    health = activated.health;
+  } else {
+    health = await waitForRuntimeHealth(runtime, {
+      healthCheck,
+      attempts: healthAttempts,
+      intervalMs: healthIntervalMs,
+      ...(sleep ? { sleep } : {}),
+    });
+  }
   if (!health?.ok) {
     const missing = [health?.daemon ? "" : "daemon", health?.pill ? "" : "pill"].filter(Boolean).join(" and ");
     const message = `Relay runtime activation failed exact-root health${missing ? ` (${missing} did not start)` : ""}.`;
