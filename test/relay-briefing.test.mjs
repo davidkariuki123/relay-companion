@@ -160,6 +160,7 @@ test("provider Open carries only the two Relay documents and an optional unsent 
   assert.match(seed.visible, /> Canonical human document only\./);
   assert.match(seed.visible, /## Draft \(not sent\)/);
   assert.match(seed.visible, /My local draft, not yet sent\./);
+  assert.match(seed.visible, /### What would you like to do\?$/);
   assert.match(seed.operatorNote, /<relay_for_agent>[\s\S]*Canonical agent document only\.[\s\S]*<\/relay_for_agent>/);
   for (const forbidden of ["Conversation thread", "Task from", "OLD REQUEST HISTORY", "OLD COMPLETION HISTORY", "LEAKED PROJECTION", "type \"completion\""]) {
     assert.doesNotMatch(`${seed.visible}\n${seed.operatorNote}`, new RegExp(forbidden));
@@ -169,6 +170,7 @@ test("provider Open carries only the two Relay documents and an optional unsent 
   assert.match(artifact, /## For Human[\s\S]*Canonical human document only\./);
   assert.match(artifact, /## For Agent[\s\S]*Canonical agent document only\./);
   assert.match(artifact, /## Draft \(not sent\)[\s\S]*My local draft, not yet sent\./);
+  assert.doesNotMatch(artifact, /What would you like to do\?/);
   assert.doesNotMatch(artifact, /Conversation thread|OLD REQUEST HISTORY|OLD COMPLETION HISTORY|LEAKED PROJECTION/);
 });
 
@@ -194,6 +196,8 @@ test("native provider Open reads like a letter and keeps only For Agent behind a
   assert.match(seed.visible, /- \[For Agent\]\(\/tmp\/relay\/For-Agent\.md\)/);
   assert.ok(seed.visible.indexOf("human-facing message") < seed.visible.indexOf("evidence.txt"));
   assert.ok(seed.visible.indexOf("evidence.txt") < seed.visible.indexOf("[For Agent]"));
+  assert.ok(seed.visible.indexOf("[For Agent]") < seed.visible.indexOf("### What would you like to do?"));
+  assert.match(seed.visible, /### What would you like to do\?$/);
   assert.match(seed.operatorNote, /<relay_for_human[\s\S]*The complete human-facing message is visible immediately\./);
   assert.match(seed.operatorNote, /<relay_for_agent[\s\S]*Private implementation context/);
 });
@@ -211,6 +215,7 @@ test("native provider Open omits the For Agent link when that document is empty"
 
   assert.match(seed.visible, /> Human message only\./);
   assert.doesNotMatch(seed.visible, /For Agent/);
+  assert.match(seed.visible, /### What would you like to do\?$/);
 });
 
 // Regression: Claude's file panel percent-decodes a link destination but does not

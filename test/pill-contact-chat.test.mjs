@@ -115,7 +115,8 @@ test("a room entered from People keeps People lit, and Back returns there", () =
   // The lit tab follows threadsSource, so "contacts" is what keeps the
   // highlight on People instead of throwing it to Relays (David).
   const source = between(html, "function isConversationRoomSource(source = threadsSource)", "\n  function openThreadDetail");
-  assert.match(source, /source === "chat" \|\| source === "relays" \|\| source === "contacts"/);
+  assert.match(source, /source === "chat" \|\| source === "relays" \|\| source === "slack" \|\| source === "contacts"/,
+    "Slack is another room index while the existing People source remains intact");
   assert.match(html, /: activeView === "threads" \? threadsSource/);
 
   // Back goes back to the list that was clicked, on the row it left.

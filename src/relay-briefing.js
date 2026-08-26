@@ -66,7 +66,7 @@ export function renderRelayRowBriefing(row) {
 // present, the local human's still-unsent draft. It must never receive
 // row.thread, task lifecycle messages, request/completion receipts, or a
 // synthetic "Task from …" conversation as provider chat history.
-export function renderRelayOpenSeed(row) {
+export function renderRelayOpenSeed(row, { includeActionPrompt = true } = {}) {
   // forHuman is the immutable canonical document. briefingMarkdown is a UI
   // projection that may already contain a rendered Relay thread/task wrapper;
   // falling back to it is precisely how request history became provider chat.
@@ -95,6 +95,12 @@ export function renderRelayOpenSeed(row) {
   if (documentPaths && forAgent) {
     visible = joinSections([visible, renderOpenDocumentLink("For Agent", documentPaths.forAgent)]);
   }
+  // End native Claude/Codex Opens with a quiet conversational handoff. A level-3
+  // heading keeps it visibly actionable while remaining subordinate to the
+  // level-2 Relay title above it.
+  if (includeActionPrompt) {
+    visible = joinSections([visible, "### What would you like to do?"]);
+  }
   return {
     visible,
     operatorNote: documentPaths
@@ -122,7 +128,9 @@ function renderRelayOpenContext({ forHuman, forAgent, documentPaths }) {
 // context channel, so the same two documents are written as explicit sections.
 // This remains a document artifact; thread/task history is intentionally absent.
 export function renderRelayOpenDocuments(row) {
-  const seed = renderRelayOpenSeed(row);
+  // Cowork receives a staged document rather than an interactive native
+  // session, so keep the conversational handoff on Claude Code/Codex only.
+  const seed = renderRelayOpenSeed(row, { includeActionPrompt: false });
   const forAgent = String(row?.forAgent || "").trim();
   return joinSections([
     `# ${relayRowTitle(row)}`,

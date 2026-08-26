@@ -152,6 +152,43 @@ test("a batch of human reads fans out to the recipient-scoped route, never the n
   );
 });
 
+test("opening a canonical chat uses the accepted pill source and qualifies the visible surface", async (t) => {
+  let request;
+  const server = http.createServer((req, res) => {
+    let body = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => {
+      request = { method: req.method, url: req.url, body: JSON.parse(body) };
+      res.statusCode = 200;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ ok: true }));
+    });
+  });
+  t.after(async () => {
+    await closeRelayConnections();
+    await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  });
+  const address = await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve(server.address()));
+  });
+  const relay = new RelayClient({ url: `http://127.0.0.1:${address.port}`, token: "dev_test" });
+
+  await relay.markChatRead("chat code", "pill-chat-read-code", "slack", { includeSlack: true });
+
+  assert.deepEqual(request, {
+    method: "POST",
+    url: "/v1/chats/chat%20code/read",
+    body: {
+      source: "relay_pill_open",
+      idempotencyKey: "pill-chat-read-code",
+      surface: "slack",
+      includeSlack: true,
+    },
+  });
+});
+
 test("a locally reviewed long relay completes the API's exact-draft soft review", async (t) => {
   const requests = [];
   const server = http.createServer((req, res) => {

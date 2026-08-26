@@ -241,8 +241,8 @@
   .tab {
     appearance:none; border:0; background:transparent; color:var(--muted-2);
     font-family:var(--sans); font-size:11px; font-weight:500;
-    height:24px; padding:0 8px; border-radius:var(--r-1); cursor:pointer;
-    display:inline-flex; align-items:center; gap:6px;
+    height:24px; padding:0 6px; border-radius:var(--r-1); cursor:pointer;
+    display:inline-flex; align-items:center; gap:3px;
     transition:background-color var(--t-fast) var(--settle), color var(--t-fast) var(--settle);
   }
   .tab:hover { background:var(--wash-2); color:var(--ink-2); }
@@ -251,8 +251,8 @@
     font-family:var(--sans); font-size:10px; font-weight:600;
     font-variant-numeric:tabular-nums; line-height:1;
     color:var(--on-accent); background:var(--accent);
-    border-radius:var(--r-pill); padding:3px 7px; min-width:17px; text-align:center;
-    display:inline-block; margin-left:3px; transform:translateY(-1px);
+    border-radius:var(--r-pill); padding:3px 5px; min-width:17px; text-align:center;
+    display:inline-block; transform:translateY(-1px);
     transition:opacity var(--t-fast) var(--settle);
   }
   .tab:not(.active) .tab-badge { opacity:.45; }
@@ -1074,6 +1074,8 @@
     transition:background-color var(--t-fast) var(--settle), color var(--t-fast) var(--settle);
   }
   .th-info:hover { background:var(--wash-2); color:var(--ink); }
+  .th-slack-toggle { display:inline-flex; align-items:center; gap:5px; white-space:nowrap; }
+  .th-slack-toggle img { width:12px; height:12px; object-fit:contain; }
   /* The only generic .hidden rule is scoped to .view — every other element
      toggling "hidden" needs its own display:none or the class is a silent
      no-op (See info rendered on every room, every frame, until this line). */
@@ -2049,6 +2051,65 @@
   .request-badge-inline { display:inline-block; font-family:var(--sans); font-size:10px; font-weight:700; letter-spacing:.04em; color:var(--warn); background:color-mix(in srgb, var(--warn) 10%, transparent); border-radius:5px; padding:2px 7px; vertical-align:2px; margin-right:7px; }
   .tb-group { display:flex; align-items:baseline; gap:7px; padding:16px 16px 4px; font-family:var(--sans); font-size:11px; font-weight:600; color:var(--muted); }
   .tb-group .n { margin-left:auto; font-family:var(--mono); font-size:10px; color:var(--muted-3); font-weight:400; }
+  /* Inbox zero is earned, not another empty list. The three glass tiles are the
+     Relay mark itself, lifted into a quiet one-shot celebration; completed work
+     stays behind the same calm disclosure whether or not live work remains. */
+  .task-zero {
+    position:relative; min-height:332px; padding:82px 20px 48px;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center; overflow:hidden;
+    transition:min-height .52s var(--soft), padding .52s var(--soft);
+  }
+  .task-zero.compact { min-height:164px; padding:28px 20px 22px; }
+  .tz-glow {
+    position:absolute; left:50%; top:44%; width:250px; height:165px;
+    transform:translate(-50%,-50%); border-radius:50%; pointer-events:none;
+    background:radial-gradient(ellipse, color-mix(in srgb, var(--brand-anthropic) 10%, transparent), color-mix(in srgb, var(--brand-codex) 4%, transparent) 48%, transparent 72%);
+    filter:blur(10px); opacity:.9;
+    transition:opacity .4s var(--settle), transform .52s var(--soft);
+  }
+  .task-zero.compact .tz-glow { opacity:.42; transform:translate(-50%,-50%) scale(.58); }
+  .tz-mark { position:relative; z-index:1; display:flex; align-items:center; gap:17px; height:52px; margin-bottom:20px; transition:gap .52s var(--soft), height .52s var(--soft), margin .52s var(--soft); }
+  .tz-tile {
+    display:block; width:36px; height:36px; border-radius:9px;
+    border:1px solid color-mix(in srgb, var(--paper-edge) 55%, transparent);
+    box-shadow:inset 0 1px 0 color-mix(in srgb, var(--paper-edge) 65%, transparent), 0 12px 24px -15px currentColor;
+    transition:width .52s var(--soft), height .52s var(--soft), border-radius .52s var(--soft), transform .52s var(--soft), box-shadow .4s var(--settle);
+  }
+  .tz-tile.peach { color:var(--brand-anthropic); background:linear-gradient(145deg, color-mix(in srgb, var(--brand-anthropic) 84%, white), color-mix(in srgb, var(--brand-anthropic) 82%, #5d2e22)); transform:translateY(5px) rotate(-12deg); }
+  .tz-tile.cream { color:var(--ink); background:linear-gradient(145deg, color-mix(in srgb, var(--ink) 86%, white), color-mix(in srgb, var(--ink) 72%, var(--bg))); transform:translateY(-1px); }
+  .tz-tile.violet { color:var(--brand-codex); background:linear-gradient(145deg, color-mix(in srgb, var(--brand-codex) 82%, white), color-mix(in srgb, var(--brand-codex) 84%, #282277)); transform:translateY(5px) rotate(12deg); }
+  .task-zero.celebrate .tz-tile { animation:taskZeroTileIn .58s var(--soft) both; }
+  .task-zero.celebrate .tz-tile.cream { animation-delay:.045s; }
+  .task-zero.celebrate .tz-tile.violet { animation-delay:.09s; }
+  @keyframes taskZeroTileIn { from { opacity:0; transform:translateY(15px) scale(.76) rotate(0); } }
+  .task-zero.compact .tz-mark { gap:8px; height:24px; margin-bottom:9px; }
+  .task-zero.compact .tz-tile { width:18px; height:18px; border-radius:5px; box-shadow:inset 0 1px 0 color-mix(in srgb, var(--paper-edge) 45%, transparent); }
+  .task-zero.compact .tz-tile.peach { transform:translateY(2px) rotate(-8deg); }
+  .task-zero.compact .tz-tile.cream { transform:none; }
+  .task-zero.compact .tz-tile.violet { transform:translateY(2px) rotate(8deg); }
+  .tz-title { position:relative; z-index:1; margin:0; font-family:var(--serif); font-size:29px; font-weight:500; line-height:1.06; letter-spacing:-.02em; color:var(--ink); transition:font-size .52s var(--soft); }
+  .tz-sub { position:relative; z-index:1; margin-top:11px; font-family:var(--sans); font-size:12.5px; color:var(--muted); transition:font-size .52s var(--soft), margin .52s var(--soft); }
+  .task-zero.compact .tz-title { font-size:21px; }
+  .task-zero.compact .tz-sub { margin-top:5px; font-size:11px; }
+  .tb-completed-toggle {
+    appearance:none; width:calc(100% - 32px); margin:0 16px; padding:14px 0;
+    border:0; border-top:1px solid var(--hair); border-bottom:1px solid var(--hair);
+    background:transparent; color:var(--muted); cursor:pointer;
+    display:flex; align-items:center; justify-content:space-between;
+    font-family:var(--sans); font-size:11.5px; font-weight:600;
+    transition:color var(--t-fast) var(--settle), background var(--t-fast) var(--settle);
+  }
+  .tb-completed-toggle:hover { color:var(--ink); background:var(--wash); }
+  .tb-completed-meta { display:flex; align-items:center; gap:10px; color:var(--muted-3); font-family:var(--mono); font-size:10px; font-weight:400; }
+  .tb-completed-toggle svg { transition:transform .42s var(--soft); }
+  .tb-completed-toggle[aria-expanded="true"] svg { transform:rotate(180deg); }
+  .tb-completed-reveal { display:grid; grid-template-rows:0fr; opacity:0; transform:translateY(-6px); transition:grid-template-rows .5s var(--soft), opacity .28s var(--settle), transform .5s var(--soft); }
+  .tb-completed-reveal.open { grid-template-rows:1fr; opacity:1; transform:none; }
+  /* Payload refreshes rebuild the Tasks board. An already-open disclosure must
+     land fully open instead of restarting its reveal transition on every poll. */
+  .tb-completed-reveal.preexpanded { transition:none; }
+  .tb-completed-clip { min-height:0; overflow:hidden; }
   .tb-row { display:flex; gap:11px; padding:13px 16px 0; cursor:pointer; }
   .tb-row .tb-main { flex:1 1 auto; min-width:0; border-bottom:1px solid var(--hair); padding-bottom:13px; }
   .tb-row:last-of-type .tb-main { border-bottom:0; }
@@ -2072,7 +2133,10 @@
   .tb-working-orb { position:relative; width:6px; height:6px; flex:0 0 6px; margin-right:7px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 11%, transparent); animation:taskWorkingBreathe 1.8s cubic-bezier(.4,0,.2,1) infinite; }
   .tb-working-orb::after { content:""; position:absolute; left:1px; top:1px; width:2px; height:2px; border-radius:50%; background:color-mix(in srgb, white 70%, var(--accent)); opacity:.7; }
   @keyframes taskWorkingBreathe { 0%,100% { opacity:.62; transform:scale(.88); box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 8%, transparent); } 50% { opacity:1; transform:scale(1); box-shadow:0 0 0 4px color-mix(in srgb, var(--accent) 15%, transparent); } }
-  @media (prefers-reduced-motion:reduce) { .tb-working-orb { animation:none; opacity:1; } }
+  @media (prefers-reduced-motion:reduce) {
+    .tb-working-orb, .task-zero.celebrate .tz-tile { animation:none; opacity:1; }
+    .task-zero, .tz-glow, .tz-mark, .tz-tile, .tz-title, .tz-sub, .tb-completed-reveal, .tb-completed-toggle svg { transition-duration:.001s; }
+  }
   /* The room composer owns an opaque dock, not just an opaque capsule. Chat
      history may scroll behind this layer, but it must never remain legible in
      the gutter or below the field (the same solid-foot contract as Codex and
@@ -2446,6 +2510,9 @@
       <button class="tab active" type="button" data-view="relays">
         Relays <span class="tab-badge gone" id="relaysBadge">0</span>
       </button>
+      <button class="tab" type="button" data-view="slack">
+        Slack <span class="tab-badge gone" id="slackBadge">0</span>
+      </button>
       <button class="tab" type="button" data-view="tasks">Tasks <span class="tab-badge amber gone" id="tasksBadge">0</span></button>
       <button class="tab" type="button" data-view="contacts">People</button>
       <button class="tab" type="button" data-view="settings">Settings</button>
@@ -2463,6 +2530,17 @@
           <div class="t1">No relays yet</div>
           <div class="t2">Questions, results, and notices will land here.</div>
           <button class="sv-signin-banner gone" id="signInBanner" type="button">Sign in to Relay</button>
+        </div>
+      </section>
+
+      <!-- Slack view: the same room index, projected only from exact active
+           Slack integration bindings. Relay-only contacts never enter it. -->
+      <section class="view hidden" id="slackView">
+        <div id="slackList"></div>
+        <div id="slackEmpty" class="empty gone">
+          <img src="slackMark.png" alt="" width="22" height="22" />
+          <div class="t1">No Slack conversations yet</div>
+          <div class="t2">Linked Slack channels and messages will appear here.</div>
         </div>
       </section>
 
@@ -2501,6 +2579,7 @@
             <span class="th-detail-name" id="thDetailName"></span>
             <span class="th-detail-meta" id="thDetailMeta"></span>
             <button class="th-info hidden" type="button" id="thGroupInfo">See info</button>
+            <button class="th-info th-slack-toggle hidden" type="button" id="thSlackVisibility" aria-pressed="false"><img src="slackMark.png" alt="" /><span id="thSlackVisibilityLabel">Show Slack</span></button>
             <button class="th-expand" type="button" id="thExpand" aria-label="Expand the conversation"><span class="xg">⤢</span><span class="xl">Expand</span></button>
           </div>
           <div id="thHistory"></div>
@@ -2651,6 +2730,10 @@
   const relaysListEl = document.getElementById("relaysList");
   const relaysEmptyEl = document.getElementById("relaysEmpty");
   const relaysBadgeEl = document.getElementById("relaysBadge");
+  const slackViewEl = document.getElementById("slackView");
+  const slackListEl = document.getElementById("slackList");
+  const slackEmptyEl = document.getElementById("slackEmpty");
+  const slackBadgeEl = document.getElementById("slackBadge");
   const chatViewEl = document.getElementById("chatView");
   const chatListEl = document.getElementById("chatList");
   const chatEmptyEl = document.getElementById("chatEmpty");
@@ -2692,6 +2775,8 @@
   const thDetailNameEl = document.getElementById("thDetailName");
   const thDetailMetaEl = document.getElementById("thDetailMeta");
   const thGroupInfoEl = document.getElementById("thGroupInfo");
+  const thSlackVisibilityEl = document.getElementById("thSlackVisibility");
+  const thSlackVisibilityLabelEl = document.getElementById("thSlackVisibilityLabel");
   function setThreadHeader(name, _count) {
     // The header's right side belongs to the EXPAND affordance, not a relay
     // count — nobody cares how many relays a chat holds (David). The second
@@ -2705,6 +2790,7 @@
     // 1:1 — where the roster sheet could only error. Named groups, split only.
     thGroupInfoEl.classList.toggle("hidden",
       !(chatExpanded && room && room.isGroup && (room.groupName || room.groupId)));
+    syncSlackVisibilityButton(room);
   }
   const thHistoryEl = document.getElementById("thHistory");
   const relayHostHoverIntent = window.RelayHoverIntent.installRelayHoverIntent({ document, window });
@@ -4063,11 +4149,15 @@
 
   // ---------- state ----------
   let activeView = "relays";
-  let payload = { account: { paired: false }, ui: { canDismiss: true, reopenSurface: "the Relay icon", setupTutorialPending:false }, features: { requests:false, cowork:false, environment:"production" }, relays: [], sent: [], requests: [], contacts: [], chats: [] };
+  let payload = { account: { paired: false }, ui: { canDismiss: true, reopenSurface: "the Relay icon", setupTutorialPending:false }, features: { requests:false, cowork:false, environment:"production" }, relays: [], sent: [], requests: [], contacts: [], chats: [], slackChats: [] };
   const canonicalChatDetails = new Map();
   const canonicalChatFingerprints = new Map();
   const liveCanonicalArrivalIds = new Set();
   const canonicalReadGeneration = new Map();
+  // Visibility is deliberately session-only and scoped to both chat and
+  // surface. Slack defaults open on its own tab and closed inside Relays;
+  // toggling one room never changes any other room or the other surface.
+  const slackVisibilityOverrides = new Map();
   let activeCanonicalChatRefresh = null;
   const ACTIVE_CANONICAL_CHAT_POLL_MS = 1000;
   for (const eventName of ["pointerdown", "keydown", "wheel"]) {
@@ -4080,6 +4170,38 @@
       item.threadId, item.inReplyToRelayId, item.state,
       (item.attachments || []).map((file) => [file.id, file.bytes]),
     ]));
+  }
+
+  function conversationSurface(source = threadsSource) {
+    return source === "slack" ? "slack" : "relay";
+  }
+  function isSlackIntegratedRoom(room) {
+    return Boolean(room && (
+      room.integration?.provider === "slack"
+      || room.channel?.slack
+      || room.provider === "slack"
+    ));
+  }
+  function slackVisibilityKey(room, source = threadsSource) {
+    const chatId = String((room && room.chatId) || threadDetailId || "");
+    return `${conversationSurface(source)}:${chatId}`;
+  }
+  function slackMessagesVisible(room, source = threadsSource) {
+    if (!isSlackIntegratedRoom(room)) return false;
+    const key = slackVisibilityKey(room, source);
+    return slackVisibilityOverrides.has(key)
+      ? slackVisibilityOverrides.get(key) === true
+      : conversationSurface(source) === "slack";
+  }
+  function syncSlackVisibilityButton(room = threadDetailId ? chatRoomForThread(threadDetailId) : null) {
+    const linked = isSlackIntegratedRoom(room);
+    thSlackVisibilityEl.classList.toggle("hidden", !linked);
+    if (!linked) return;
+    const visible = slackMessagesVisible(room);
+    thSlackVisibilityEl.disabled = false;
+    thSlackVisibilityEl.setAttribute("aria-pressed", visible ? "true" : "false");
+    thSlackVisibilityEl.title = visible ? "Hide messages from Slack" : "Show messages from Slack";
+    thSlackVisibilityLabelEl.textContent = visible ? "Hide Slack" : "Show Slack";
   }
 
   // Store one server generation. New ids are marked only after the first
@@ -4101,15 +4223,32 @@
     }
     canonicalChatDetails.set(id, chat);
     canonicalChatFingerprints.set(id, nextFingerprint);
+    // A summary may have been painted before this detail introduced its first
+    // synchronized root. Keep exact ids current so the room remains addressable
+    // when the detail swaps from its synthetic fallback to a real thread id.
+    for (const key of ["chats", "slackChats"]) {
+      payload[key] = (payload[key] || []).map((summary) => String(summary.chatId || "") === id
+        ? {
+            ...summary,
+            threadIds:[...new Set([...(summary.threadIds || []), ...(chat.threadIds || [])])],
+            ...(chat.integration ? { integration:chat.integration } : {}),
+            ...(chat.channel ? { channel:chat.channel } : {}),
+          }
+        : summary);
+    }
     return true;
   }
 
   async function refreshActiveCanonicalChat() {
     if (activeCanonicalChatRefresh || document.visibilityState !== "visible" || collapsed) return;
     if (activeView !== "threads" || !threadDetailId) return;
-    const room = chatRoomForThread(threadDetailId);
-    if (room?.provider !== "slack" || !room.chatId || !window.relay.canonicalChat) return;
-    activeCanonicalChatRefresh = Promise.resolve(window.relay.canonicalChat(room.chatId));
+    const room = chatRoomForThread(threadDetailId, conversationSurface());
+    const includeSlack = slackMessagesVisible(room);
+    if (!isSlackIntegratedRoom(room) || !room.chatId || !window.relay.canonicalChat) return;
+    activeCanonicalChatRefresh = Promise.resolve(window.relay.canonicalChat(room.chatId, {
+      surface: conversationSurface(),
+      includeSlack,
+    }));
     try {
       const result = await activeCanonicalChatRefresh;
       if (!result?.ok || !result.chat) return;
@@ -7176,6 +7315,8 @@
   // ink), preview when folded — and the same interaction as every bubble:
   // tap unfolds in place to the body + inline dock; nothing navigates.
   const expandedRequestIds = new Set(); // board rows currently unfolded
+  let completedTasksExpanded = false;
+  let taskInboxZero = false;
   function renderTasksBoard() {
     const rows = taskRows();
     tasksEmptyEl.classList.toggle("gone", rows.length > 0);
@@ -7189,9 +7330,7 @@
       }
       groups[taskBoardState(r.id)].push(r);
     }
-    const section = (label, items, renderRight) => items.length ? `
-      <div class="tb-group">${label}<span class="n">${items.length}</span></div>
-      ${items.map((r) => {
+    const rowsHtml = (items, renderRight) => items.map((r) => {
         const sender = relaySender(r);
         const title = String(r.title || "").trim() || relaySubject(r);
         // A request row is EXACTLY a list row: disc, name + time, serif line,
@@ -7206,13 +7345,16 @@
             <div class="row-err${rowNotes.get(r.id)?.cls === "ok" ? " ok" : ""}" data-err="${esc(r.id)}" data-stop="1">${esc(rowNotes.get(r.id)?.text || "")}</div>
           </div>
         </div>`;
-      }).join("")}` : "";
+      }).join("");
+    const section = (label, items, renderRight) => items.length ? `
+      <div class="tb-group">${label}<span class="n">${items.length}</span></div>
+      ${rowsHtml(items, renderRight)}` : "";
     // Group membership IS the status: a "parked" chip on a row under a
     // "Parked" header, plus a note saying it again, said one thing three
     // times (Sven). Rows carry no status chips and no notes — moving between
     // groups is the feedback. Waiting rows carry a direct Start task verb;
     // every row carries the quiet, recoverable Recently Deleted affordance.
-    tasksListEl.innerHTML =
+    const unfinishedHtml =
       section("Working", groups.running, () => `<span class="tb-working"><span class="tb-working-orb" aria-hidden="true"></span>Working</span>`)
       + section("Waiting on you", groups.waiting, (r) => `<button class="tb-go" type="button" data-approve="${esc(r.id)}">Start task</button>`)
       + section("On a schedule", groups.scheduled, (r) => {
@@ -7228,8 +7370,46 @@
       // (David). This one says what happened and implies the next move — the
       // dock is back, with Start on it.
       + section("Didn't finish", groups.stopped, (r) => `<button class="tb-go" type="button" data-request-again="${esc(r.id)}">start again</button>`)
-      + section("Done", groups.done, () => "")
       + section("Parked", groups.parked, () => "");
+    const unfinishedCount = groups.running.length + groups.waiting.length + groups.scheduled.length
+      + groups.review.length + groups.stopped.length + groups.parked.length;
+    const inboxZeroNow = groups.done.length > 0 && unfinishedCount === 0;
+    const celebrateNow = inboxZeroNow && !taskInboxZero;
+    taskInboxZero = inboxZeroNow;
+    const zeroHtml = inboxZeroNow ? `
+      <div class="task-zero${completedTasksExpanded ? " compact" : ""}${celebrateNow ? " celebrate" : ""}" data-task-zero>
+        <span class="tz-glow" aria-hidden="true"></span>
+        <span class="tz-mark" aria-hidden="true"><span class="tz-tile peach"></span><span class="tz-tile cream"></span><span class="tz-tile violet"></span></span>
+        <div class="tz-title">Nicely done.</div>
+        <div class="tz-sub">Your task list is clear.</div>
+      </div>` : "";
+    const completedHtml = groups.done.length ? `
+      <button class="tb-completed-toggle" type="button" data-completed-toggle aria-expanded="${completedTasksExpanded}" aria-controls="completedTasksList">
+        <span>Completed</span>
+        <span class="tb-completed-meta"><span>${groups.done.length}</span><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 4.5 3 3 3-3"/></svg></span>
+      </button>
+      <div class="tb-completed-reveal${completedTasksExpanded ? " open preexpanded" : ""}" id="completedTasksList" aria-hidden="${!completedTasksExpanded}"${completedTasksExpanded ? "" : " inert"}>
+        <div class="tb-completed-clip">${rowsHtml(groups.done, () => "")}</div>
+      </div>` : "";
+    tasksListEl.innerHTML = zeroHtml + unfinishedHtml + completedHtml;
+    const completedToggle = tasksListEl.querySelector("[data-completed-toggle]");
+    if (completedToggle) {
+      completedToggle.addEventListener("click", () => {
+        completedTasksExpanded = completedToggle.getAttribute("aria-expanded") !== "true";
+        completedToggle.setAttribute("aria-expanded", String(completedTasksExpanded));
+        tasksListEl.querySelector("[data-task-zero]")?.classList.toggle("compact", completedTasksExpanded);
+        const reveal = tasksListEl.querySelector("#completedTasksList");
+        if (!reveal) return;
+        if (reveal.classList.contains("preexpanded")) {
+          reveal.classList.remove("preexpanded");
+          void reveal.offsetHeight;
+        }
+        reveal.classList.toggle("open", completedTasksExpanded);
+        reveal.setAttribute("aria-hidden", String(!completedTasksExpanded));
+        if (completedTasksExpanded) reveal.removeAttribute("inert");
+        else reveal.setAttribute("inert", "");
+      });
+    }
     for (const z of tasksListEl.querySelectorAll('[data-stop="1"]')) {
       z.addEventListener("click", (e) => e.stopPropagation());
     }
@@ -8860,10 +9040,11 @@
     if (!room || !room.isGroup || !room.groupId) return { blocked:false, reason:"" };
     const groupId = String(room.groupId);
     if (leftGroupIds.has(groupId)) return { blocked:true, reason:"You left this channel. Existing messages remain readable." };
-    const slackChat = (payload.chats || []).find((chat) =>
-      chat?.channel?.slack && (String(chat.chatId) === String(room.chatId || groupId)),
+    const slackChat = [...(payload.chats || []), ...(payload.slackChats || [])].find((chat) =>
+      slackIntegrationForChat(chat) && (String(chat.chatId) === String(room.chatId || groupId)),
     );
-    if (room.provider === "slack" || slackChat) {
+    if (isSlackIntegratedRoom(room) || slackChat) {
+      if (room.integration?.state === "archived") return { blocked:true, reason:"This channel is archived. Existing messages remain readable." };
       if (slackChat?.channel?.archived) return { blocked:true, reason:"This channel is archived. Existing messages remain readable." };
       if (slackChat?.channel?.canPost === false) return { blocked:true, reason:"Posting is unavailable for this Slack channel." };
       return { blocked:false, reason:"" };
@@ -9412,6 +9593,7 @@
     return `<div class="th-receipt-panel">${seen}${unread}</div>`;
   }
   function threadMessages() {
+    const { includeSlack = false } = arguments[0] || {};
     const msgs = [];
     const reqThreads = requestThreadIds();
     // A note-to-self is projected on both inbox and sent surfaces. Keep the
@@ -9567,13 +9749,22 @@
         })(),
       });
     }
-    // Slack-backed channels use the normalized conversation/message model.
-    // Project the detail currently loaded for each channel into the Pill's
+    // Slack-backed rooms use the normalized conversation/message model.
+    // Project the detail currently loaded for each linked room into the Pill's
     // established message shape; this extends the deployed chat UI instead of
     // inventing a second Slack inbox.
     for (const chat of canonicalChatDetails.values()) {
-      if (!chat || !chat.channel || !chat.channel.slack) continue;
+      const integration = chat?.integration || (chat?.channel?.slack
+        ? { provider:"slack", ...chat.channel.slack }
+        : null);
+      if (!chat || integration?.provider !== "slack") continue;
+      const integrationType = String(integration.type || "");
+      const isGroup = chat.kind === "group" || integrationType === "mpim"
+        || integrationType === "public_channel" || integrationType === "private_channel";
+      const roomName = chat.channel?.name || chat.title || (isGroup ? "Channel" : "Slack conversation");
       for (const item of chat.items || []) {
+        const itemIsSlack = item.origin === "slack" || item.provider?.name === "slack";
+        if (!includeSlack && itemIsSlack) continue;
         const id = String(item.relayId || "");
         if (!id || msgs.some((message) => String(message.id || "") === id)) continue;
         const mine = item.direction === "outbound";
@@ -9594,13 +9785,14 @@
           addressRecipient: { chatId:chat.chatId },
           title: textLike ? (body || item.title || "Message") : String(item.title || "Relay"),
           party,
-          partyKey: `channel-id:${chat.chatId}`,
+          partyKey: `chat-id:${chat.chatId}`,
           at: item.createdAt || item.updatedAt,
-          isGroup: true,
-          groupId: chat.chatId,
-          groupName: chat.channel.name || chat.title || "Channel",
-          unread: !mine && item.state === "delivered",
+          isGroup,
+          groupId: isGroup ? chat.chatId : "",
+          groupName: isGroup ? roomName : "",
+          unread: !mine && (item.state === "pending" || item.state === "delivered"),
           source: null,
+          integration,
           // The conversation is Slack-backed, but the message may have been
           // authored in Relay and mirrored out. "From Slack" describes the
           // message's origin, never merely the room's transport.
@@ -9648,8 +9840,9 @@
     return msgs;
   }
   function buildThreads() {
+    const options = arguments[0] || {};
     const byThread = new Map();
-    for (const m of threadMessages()) {
+    for (const m of threadMessages(options)) {
       const t = byThread.get(m.threadId) || { threadId: m.threadId, msgs: [] };
       t.msgs.push(m);
       byThread.set(m.threadId, t);
@@ -9672,7 +9865,10 @@
       t.groupId = (t.msgs.find((m) => m.groupId) || {}).groupId || "";
       t.groupName = (t.msgs.find((m) => m.groupName) || {}).groupName || "";
       t.chatId = (t.msgs.find((m) => m.chatId) || {}).chatId || "";
-      t.provider = (t.msgs.find((m) => m.provider?.name === "slack") || {}).provider?.name || "";
+      t.integration = (t.msgs.find((m) => m.integration) || {}).integration || null;
+      t.provider = t.integration?.provider
+        || (t.msgs.find((m) => m.provider?.name === "slack") || {}).provider?.name
+        || "";
       // Message titles remain message gists. They never name the room; people
       // and saved groups are the only visible conversation identities.
       t.title = latest.title || "";
@@ -9683,8 +9879,8 @@
   // ---- the Chat tab: one activity-sorted rail of people and saved groups.
   // Opening any conversation springs the pill into the expanded frame (the
   // list is the glance surface; the room earns the frame).
-  function chatConversations() {
-    const threads = buildThreads();
+  function chatConversations(options = {}) {
+    const threads = buildThreads(options);
     for (const t of threads) {
       const peopleByIdentity = new Map();
       for (const m of t.msgs.filter((m) => m.direction === "in" && !m.ownedAgent && m.party)) {
@@ -9736,7 +9932,59 @@
       return byTime || String(a.name || "").localeCompare(String(b.name || ""));
     });
   }
+  function slackIntegrationForChat(chat) {
+    if (chat?.integration?.provider === "slack") return chat.integration;
+    return chat?.channel?.slack ? { provider:"slack", ...chat.channel.slack } : null;
+  }
+  function roomFromChatSummary(chat) {
+    const integration = slackIntegrationForChat(chat);
+    if (!chat?.chatId || !integration) return null;
+    const type = String(integration.type || "");
+    const isGroup = chat.kind === "group" || type === "mpim"
+      || type === "public_channel" || type === "private_channel";
+    const others = (chat.participants || [])
+      .filter((person) => !person.self)
+      .map((person) => String(person.name || "").trim())
+      .filter(Boolean);
+    const people = others.length ? others : (chat.participants || []).map((person) => person.name).filter(Boolean);
+    const name = String(chat.channel?.name || chat.title || people.join(", ") || (isGroup ? "Channel" : "Slack conversation"));
+    const last = chat.lastMessage;
+    const threadId = (chat.threadIds || [])[0] || `slack-chat:${chat.chatId}`;
+    return {
+      threadId,
+      threadIds: new Set(chat.threadIds || []),
+      msgs: [],
+      latest: last ? {
+        id:last.relayId, at:last.createdAt, title:last.title || last.preview || "Message",
+        direction:last.direction === "outbound" ? "out" : "in", party:last.senderName || "",
+      } : { id:threadId, at:chat.updatedAt, title:"No messages yet", direction:"", party:"" },
+      unreadCount: Number(chat.unreadCount || 0),
+      party:name,
+      partyKey:`chat-id:${chat.chatId}`,
+      isGroup,
+      groupId:isGroup ? chat.chatId : "",
+      groupName:isGroup ? name : "",
+      name,
+      people:people.length ? people : [name],
+      setLabel:type === "im" ? "Slack message" : type === "mpim" ? "Slack group message" : "Slack channel",
+      hasActivity:Boolean(last),
+      chatId:chat.chatId,
+      provider:"slack",
+      integration,
+      channel:chat.channel || null,
+    };
+  }
   function chatSections() {
+    const surface = arguments[0] || (activeView === "threads" ? conversationSurface() : "relay");
+    if (surface === "slack") {
+      const rooms = sortConversationRooms((payload.slackChats || []).map(roomFromChatSummary).filter(Boolean));
+      return {
+        convos:rooms,
+        groups:rooms.filter((room) => room.isGroup),
+        people:rooms.filter((room) => !room.isGroup),
+        rooms,
+      };
+    }
     const convos = chatConversations();
     const rawGroups = convos.filter((t) => t.isGroup);
     // The iMessage rule: a person is ONE conversation. Threads are the wire
@@ -9771,7 +10019,7 @@
       prev.unreadCount += t.unreadCount;
       if (new Date(t.latest.at || 0) > new Date(prev.latest.at || 0)) { prev.latest = t.latest; prev.threadId = t.threadId; }
     }
-    const people = [...byParty.values()].sort((a, b) => new Date(b.latest.at || 0) - new Date(a.latest.at || 0));
+    let people = [...byParty.values()].sort((a, b) => new Date(b.latest.at || 0) - new Date(a.latest.at || 0));
     // A saved group is one visible room even when its replies span several
     // internal reply-chain ids. Merge by the stable group name and retain the
     // member thread ids only as invisible lookup keys for the room transcript.
@@ -9794,45 +10042,35 @@
       if (!prev.chatId && t.chatId) prev.chatId = t.chatId;
       if (!prev.provider && t.provider) prev.provider = t.provider;
     }
-    // Slack channels are a registry, not a side effect of whichever histories
-    // happen to be loaded. Their list summaries keep every connected channel
-    // visible; opening one hydrates the canonical messages in place.
+    // Relay summaries carry exact Slack integration bindings without carrying
+    // Slack-only activity. Join by canonical chat/thread ids only—never by a
+    // person's name—so a Relay-only conversation cannot enter the Slack tab.
     for (const chat of payload.chats || []) {
-      if (!chat || !chat.chatId || !chat.channel?.slack) continue;
-      const key = `group-id:${chat.chatId}`;
-      const existing = byGroup.get(key);
+      const projected = roomFromChatSummary(chat);
+      if (!projected) continue;
+      const summaryThreadIds = projected.threadIds;
+      const existing = [...byGroup.values(), ...byParty.values()].find((room) =>
+        room.chatId === projected.chatId
+        || room.groupId === projected.chatId
+        || [...(room.threadIds || [])].some((id) => summaryThreadIds.has(id))
+        || summaryThreadIds.has(room.threadId));
       if (existing) {
-        existing.chatId = chat.chatId;
+        existing.chatId = projected.chatId;
+        existing.integration = projected.integration;
         existing.provider = "slack";
-        existing.groupId = chat.chatId;
-        existing.groupName = chat.channel.name || chat.title || existing.groupName;
-        existing.name = chat.channel.name || chat.title || existing.name;
+        existing.channel = projected.channel;
+        for (const id of summaryThreadIds) existing.threadIds.add(id);
+        if (new Date(projected.latest.at || 0) > new Date(existing.latest.at || 0)) {
+          existing.latest = projected.latest;
+          existing.threadId = projected.threadId;
+        }
+        existing.unreadCount = Math.max(existing.unreadCount, projected.unreadCount);
         continue;
       }
-      const last = chat.lastMessage;
-      const threadId = (chat.threadIds || [])[0] || `channel:${chat.chatId}`;
-      byGroup.set(key, {
-        threadId,
-        threadIds: new Set(chat.threadIds || []),
-        msgs: [],
-        latest: last ? {
-          id:last.relayId, at:last.createdAt, title:last.title || last.preview || "Message",
-          direction:last.direction === "outbound" ? "out" : "in", party:last.senderName || "",
-        } : { at:chat.updatedAt, title:"No messages yet", direction:"", party:"" },
-        unreadCount: Number(chat.unreadCount || 0),
-        party: chat.channel.name || chat.title || "Channel",
-        partyKey: `channel-id:${chat.chatId}`,
-        isGroup: true,
-        groupId: chat.chatId,
-        groupName: chat.channel.name || chat.title || "Channel",
-        name: chat.channel.name || chat.title || "Channel",
-        people: (chat.participants || []).map((person) => person.name).filter(Boolean),
-        setLabel: "Slack channel",
-        hasActivity: Boolean(last),
-        chatId: chat.chatId,
-        provider: "slack",
-      });
+      if (projected.isGroup) byGroup.set(`chat-id:${projected.chatId}`, projected);
+      else byParty.set(`chat-id:${projected.chatId}`, projected);
     }
+    people = sortConversationRooms([...byParty.values()]);
     // Message history is not the registry of rooms. Every saved group belongs
     // in the conversation rail even before its first message; otherwise a new
     // group opens in a detached legacy window and then vanishes from the rail.
@@ -9876,10 +10114,11 @@
     const rooms = sortConversationRooms([...groups, ...people]);
     return { convos, groups, people, rooms };
   }
-  function chatRoomForThread(threadId) {
-    const { rooms } = chatSections();
+  function chatRoomForThread(threadId, surface = conversationSurface()) {
+    const { rooms } = chatSections(surface);
     return rooms.find((room) =>
-      room.threadId === threadId || (room.threadIds instanceof Set && room.threadIds.has(threadId)),
+      room.threadId === threadId || room.chatId === threadId
+        || (room.threadIds instanceof Set && room.threadIds.has(threadId)),
     ) || null;
   }
   // Messages that arrive while their Chat room is already on screen have been
@@ -9889,10 +10128,11 @@
   function visibleChatRoomMessages() {
     if (!fullCardIsOnStage()) return [];
     if (activeView !== "threads" || !isConversationRoomSource() || !threadDetailId) return [];
-    const room = chatRoomForThread(threadDetailId);
+    const surface = conversationSurface();
+    const room = chatRoomForThread(threadDetailId, surface);
     const roomName = String(threadDetailPartyHint || (room && room.name) || "").trim().toLowerCase();
     const roomKey = room && room.partyKey;
-    return threadMessages().filter((m) => {
+    return threadMessages({ includeSlack:slackMessagesVisible(room) }).filter((m) => {
       if (m.direction !== "in") return false;
       if (room && room.isGroup) {
         const ids = room.threadIds instanceof Set ? room.threadIds : new Set([room.threadId]);
@@ -9936,45 +10176,72 @@
     if (afterPaint) requestAnimationFrame(() => requestAnimationFrame(persist));
     else persist();
   }
+  function persistCanonicalChatRead(chatId, options) {
+    // Keep the older preload shape usable during rolling desktop updates while
+    // current callers always qualify the surface.
+    if (!options) return window.relay.canonicalChatRead?.(chatId);
+    return window.relay.canonicalChatRead?.(chatId, options);
+  }
   function readVisibleChatRoom() {
-    const visibleRoom = threadDetailId ? chatRoomForThread(threadDetailId) : null;
-    if (visibleRoom?.provider === "slack" && visibleRoom.chatId) {
+    const surface = conversationSurface();
+    const visibleRoom = threadDetailId ? chatRoomForThread(threadDetailId, surface) : null;
+    // Hidden Slack is not visible and therefore is never read. Relay-origin
+    // canonical rows remain visible and use the Relay surface cursor; a reveal
+    // adds Slack rows to that read, while the Slack tab consumes its own cursor.
+    if (isSlackIntegratedRoom(visibleRoom) && visibleRoom.chatId) {
       const chatId = String(visibleRoom.chatId);
       const chat = canonicalChatDetails.get(chatId);
+      const includeSlack = slackMessagesVisible(visibleRoom);
+      const readOptions = { surface, includeSlack:slackMessagesVisible(visibleRoom) };
       const unreadCanonical = (chat?.items || []).filter((item) =>
-        item.direction === "inbound" && (item.state === "pending" || item.state === "delivered"));
+        (includeSlack || !(item.origin === "slack" || item.provider?.name === "slack"))
+        && item.direction === "inbound" && (item.state === "pending" || item.state === "delivered"));
       if (unreadCanonical.length) {
         const generation = String(unreadCanonical.at(-1)?.relayId || "");
-        if (generation && canonicalReadGeneration.get(chatId) !== generation) {
-          canonicalReadGeneration.set(chatId, generation);
+        const generationKey = `${surface}:${chatId}`;
+        const unseenGeneration = canonicalReadGeneration.get(generationKey) !== generation;
+        if (generation && unseenGeneration) {
+          canonicalReadGeneration.set(generationKey, generation);
           // The channel is visibly on screen, so its local projection becomes
-          // read before either network round trip. The canonical endpoint then
-          // persists this cursor in Relay and mirrors it to Slack.
+          // read before either network round trip. The canonical endpoint
+          // persists the cursor for this surface; only Slack mirrors to Slack.
           const opened = {
             ...chat,
             unreadCount: 0,
-            items: (chat.items || []).map((item) => item.direction === "inbound"
+            items: (chat.items || []).map((item) => (includeSlack || !(item.origin === "slack" || item.provider?.name === "slack"))
+              && item.direction === "inbound"
               && (item.state === "pending" || item.state === "delivered")
               ? { ...item, state:"read" }
               : item),
           };
           canonicalChatDetails.set(chatId, opened);
           canonicalChatFingerprints.set(chatId, canonicalChatFingerprint(opened));
-          payload.chats = (payload.chats || []).map((summary) => String(summary.chatId) === chatId
-            ? { ...summary, unreadCount:0 }
-            : summary);
-          Promise.resolve(window.relay.canonicalChatRead?.(chatId))
+          if (surface === "slack") {
+            payload.slackChats = (payload.slackChats || []).map((summary) => String(summary.chatId) === chatId
+              ? { ...summary, unreadCount:0 }
+              : summary);
+          } else {
+            payload.chats = (payload.chats || []).map((summary) => String(summary.chatId) === chatId
+              ? { ...summary, unreadCount:0 }
+              : summary);
+          }
+          Promise.resolve(includeSlack
+            ? persistCanonicalChatRead(chatId, { surface, includeSlack:true })
+            : persistCanonicalChatRead(chatId, readOptions))
             .then((result) => {
               if (!result || result.ok === false) throw new Error(result?.error || "read persistence failed");
             })
             .catch(() => {
-              if (canonicalReadGeneration.get(chatId) === generation) canonicalReadGeneration.delete(chatId);
+              if (canonicalReadGeneration.get(generationKey) === generation) canonicalReadGeneration.delete(generationKey);
               canonicalChatFingerprints.delete(chatId);
               refreshActiveCanonicalChat();
             });
         }
       }
     }
+    // Slack's read cursor is independent from the Relay inbox cursor. Reading
+    // a mirrored Relay inside Slack must not clear it from the Relays surface.
+    if (surface === "slack") return;
     const unreadRaw = new Map(
       (payload.relays || []).filter((r) => r.unread).map((r) => [String(r.id), r]),
     );
@@ -10003,29 +10270,39 @@
   // surface; the room earns the frame — David's law).
   let chatListScrollTop = 0; // where the reader was in the list before opening a room
   let relaysListScrollTop = 0; // same contract for the Relays identity index
+  let slackListScrollTop = 0; // Slack is a peer room index with its own return point
   let contactsListScrollTop = 0; // and for People, now that a row opens a room
-  async function openRoom(threadId, partyHint) {
+  async function openRoom(threadId, partyHint, source = null, options = {}) {
+    const roomSource = source || (activeView === "threads" ? threadsSource : activeView);
+    const surface = conversationSurface(roomSource);
     if (activeView === "chat") {
       try { chatListScrollTop = scrollEl ? scrollEl.scrollTop : 0; } catch { chatListScrollTop = 0; }
     }
-    const selected = chatRoomForThread(threadId);
-    if (selected?.provider === "slack" && selected.chatId && !canonicalChatDetails.has(selected.chatId)) {
-      const result = await window.relay.canonicalChat?.(selected.chatId);
+    if (activeView === "slack") {
+      try { slackListScrollTop = scrollEl ? scrollEl.scrollTop : 0; } catch { slackListScrollTop = 0; }
+    }
+    const selected = chatRoomForThread(threadId, surface);
+    const includeSlack = slackMessagesVisible(selected, roomSource);
+    if (isSlackIntegratedRoom(selected) && selected.chatId && !options.hydrated) {
+      const result = await window.relay.canonicalChat?.(selected.chatId, { surface, includeSlack });
       if (!result?.ok || !result.chat) {
-        setRowNote(String(selected.latest?.id || threadId), result?.error || "Could not open this Slack channel.", "err");
+        setRowNote(String(selected.latest?.id || threadId), result?.error || "Could not open this Slack conversation.", "err");
         return;
       }
       storeCanonicalChatDetail(result.chat);
       const hydratedThreadId = (result.chat.threadIds || [])[0] || threadId;
-      return openRoom(hydratedThreadId, partyHint);
+      return openRoom(hydratedThreadId, partyHint, roomSource, { ...options, hydrated:true });
     }
     // If this tap came from the split rail, retain that room's deliberate rail
     // position before threadDetailId changes to the destination room.
     rememberChatRailScroll();
     const morphFromList = prepareReaderMorph(activeView);
-    openThreadDetail(threadId, partyHint || "", "chat", { expanded: true });
+    openThreadDetail(threadId, partyHint || "", roomSource, {
+      expanded:options.expanded !== false,
+      hydrated:options.hydrated === true,
+    });
     if (morphFromList) startReaderMorph("threads");
-    if (selected?.provider === "slack" && selected.chatId) {
+    if (isSlackIntegratedRoom(selected) && selected.chatId) {
       readVisibleChatRoom();
     }
   }
@@ -10075,11 +10352,34 @@
     const pr = chatListEl.querySelector("#peopleRow");
     if (pr) pr.addEventListener("click", () => { activeView = "contacts"; commitNavigation(); });
   }
+  function renderSlack() {
+    const { rooms } = chatSections("slack");
+    slackEmptyEl.classList.toggle("gone", rooms.length > 0);
+    const nextHtml = rooms.map((room) => relayIdentityRowHtml({
+      ...room,
+      latestAt:room.latestAt || room.latest?.at || "",
+    })).join("");
+    if (slackListEl.innerHTML === nextHtml) return;
+    slackListEl.innerHTML = nextHtml;
+    for (const el of slackListEl.querySelectorAll(".relay-arrival")) {
+      el.addEventListener("click", () => {
+        openRoom(
+          el.getAttribute("data-thread"),
+          el.getAttribute("data-party") || "",
+          "slack",
+          { expanded:false },
+        );
+      });
+    }
+    requestAnimationFrame(() => {
+      if (activeView === "slack" && scrollEl) scrollEl.scrollTop = slackListScrollTop || 0;
+    });
+  }
   // ---- the split's rail: every conversation beside the open room ----
   const chatRailScrollByRoom = new Map();
   let chatRailRenderedRoomKey = "";
   function chatRailRoomKey(threadId = threadDetailId) {
-    const room = chatRoomForThread(threadId);
+    const room = chatRoomForThread(threadId, conversationSurface());
     if (!room) return String(threadId || "");
     if (room.isGroup) return `group:${normalizedPartyName(room.groupName || room.name)}`;
     return stablePartyKey(room.partyKey) || `person:${normalizedPartyName(room.name)}`;
@@ -10113,6 +10413,7 @@
       chatRailRenderedRoomKey = "";
       return;
     }
+    const surface = conversationSurface();
     const { rooms } = chatSections();
     const roomKey = chatRailRoomKey();
     const roomIsOpen = (t) => t.threadId === threadDetailId || (t.threadIds instanceof Set && t.threadIds.has(threadDetailId));
@@ -10122,20 +10423,23 @@
         <span class="nm">${esc(t.name)}</span>
         ${t.unreadCount && !roomIsOpen(t) ? `<span class="ct">${t.unreadCount}</span>` : ""}
       </button>`;
-    const nextHtml =
-      rooms.map(row).join("") +
-      `<button class="people-row" type="button" data-rail-people>
+    const peopleFooter = surface === "slack" ? "" : `<button class="people-row" type="button" data-rail-people>
          <span class="pd">${contactsList.slice(0, 2).map((c) => `<span class="avatar" style="--av-h:${avatarHue(c.name || c.email)}" aria-hidden="true">${esc(avatarInitials(c.name || c.email))}</span>`).join("")}</span>
          <span class="lab">Your people</span>
          <span class="n">${contactsList.length || ""}</span><span class="chev">&#8250;</span>
        </button>`;
+    const nextHtml = rooms.map(row).join("") + peopleFooter;
     // Keeping an unchanged rail intact avoids manufacturing a new browser
     // scroll anchor on every inbox poll. When content really changes, restore
     // the room's explicit rail position immediately after the replacement.
     if (railEl.innerHTML !== nextHtml) {
       railEl.innerHTML = nextHtml;
       for (const el of railEl.querySelectorAll("[data-rail-open]")) {
-        el.addEventListener("click", () => openRoom(el.getAttribute("data-rail-open"), el.getAttribute("data-party")));
+        el.addEventListener("click", () => openRoom(
+          el.getAttribute("data-rail-open"),
+          el.getAttribute("data-party"),
+          threadsSource,
+        ));
       }
       const pp = railEl.querySelector("[data-rail-people]");
       if (pp) pp.addEventListener("click", () => {
@@ -10158,11 +10462,14 @@
     renderChatRail();
     threadsListEl.classList.toggle("gone", showingDetail);
     if (showingDetail) return renderThreadDetail();
-    // A detail-less internal conversation route has no visible ontology of its
-    // own. Return to Chat, whose home is always people and saved groups.
-    activeView = "chat";
+    // A detail-less internal route returns to the index that opened it.
+    if (threadsSource === "slack") activeView = "slack";
+    else if (threadsSource === "relays") activeView = "relays";
+    else activeView = "chat";
     syncTabs();
-    renderChat();
+    if (activeView === "slack") renderSlack();
+    else if (activeView === "relays") renderRelays();
+    else renderChat();
   }
   // Stable per-party color: same person, same color, every conversation and
   // every restart (a hash, never an index into render order).
@@ -10259,9 +10566,11 @@
     // exchange with them, merged. The room was rendering ONE thread, so opening
     // Shane showed two messages instead of the history (David, live). Opened
     // from Relays, a single relay's thread is still the unit.
+    const surface = conversationSurface();
     const chatRoom = isConversationRoomSource()
       ? chatRoomForThread(threadDetailId)
       : null;
+    const threadMessageOptions = { includeSlack:slackMessagesVisible(chatRoom) };
     if (chatRoom && chatRoom.isGroup && !groupsLoaded && !groupsLoading) {
       groupsLoading = Promise.resolve(loadGroups()).finally(() => {
         groupsLoading = null;
@@ -10270,19 +10579,23 @@
     }
     const groupPostingState = groupRoomPostingState(chatRoom);
     const groupPostingBlocked = groupPostingState.blocked;
-    let thread = chatRoom || buildThreads().find((t) => t.threadId === threadDetailId);
+    let thread = chatRoom || buildThreads(threadMessageOptions).find((t) => t.threadId === threadDetailId);
     if (thread && isConversationRoomSource() && !(chatRoom && chatRoom.isGroup)) {
       const party = String(threadDetailPartyHint || thread.party || "").trim().toLowerCase();
       const partyKey = (chatRoom && chatRoom.partyKey) || thread.partyKey;
       if (partyKey || party) {
-        const msgs = threadMessages()
-          .filter((m) => sameDirectParty(m, partyKey, party))
+        const msgs = threadMessages(threadMessageOptions)
+          // Canonical Slack rows use their exact chat id as identity, while a
+          // locally staged Relay in the same linked room may still use the
+          // person's email. Either exact room coordinate belongs here.
+          .filter((m) => (chatRoom?.chatId && m.chatId === chatRoom.chatId)
+            || sameDirectParty(m, partyKey, party))
           .sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));
         if (msgs.length > thread.msgs.length) thread = { ...thread, msgs };
       }
     } else if (thread && isConversationRoomSource() && chatRoom && chatRoom.isGroup) {
       const ids = chatRoom.threadIds instanceof Set ? chatRoom.threadIds : new Set([chatRoom.threadId]);
-      const msgs = threadMessages()
+      const msgs = threadMessages(threadMessageOptions)
         .filter((m) => ids.has(m.threadId))
         .sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));
       if (msgs.length) thread = { ...thread, msgs };
@@ -10835,15 +11148,28 @@
               groupName: chatRoom.groupName || chatRoom.name,
               chatId: chatRoom.chatId || "",
               provider: chatRoom.provider || "",
+          }
+          : null;
+        const emptySlackDirectAnchor = chatRoom && !chatRoom.isGroup && isSlackIntegratedRoom(chatRoom) && chatRoom.chatId
+          ? {
+              threadId:chatRoom.threadId,
+              party:chatRoom.name,
+              partyKey:chatRoom.partyKey,
+              isGroup:false,
+              groupId:"",
+              groupName:"",
+              chatId:chatRoom.chatId,
+              provider:"slack",
             }
           : null;
-        const sendAnchor = selectedReplyTarget || addressAnchor || newest || emptyGroupAnchor;
+        const emptyRoomAnchor = emptyGroupAnchor || emptySlackDirectAnchor;
+        const sendAnchor = selectedReplyTarget || addressAnchor || newest || emptyRoomAnchor;
         const inReplyToRelayId = selectedReplyTargetId || String(focusedSlackParent?.id || "");
         const recipient = (addressAnchor && addressAnchor.addressRecipient)
-          || (emptyGroupAnchor
-            ? (emptyGroupAnchor.provider === "slack"
-              ? { chatId:emptyGroupAnchor.chatId }
-              : { groupId:emptyGroupAnchor.groupId })
+          || (emptyRoomAnchor
+            ? (emptyRoomAnchor.provider === "slack"
+              ? { chatId:emptyRoomAnchor.chatId }
+              : { groupId:emptyRoomAnchor.groupId })
             : null);
         if (!sendAnchor || (!inReplyToRelayId && !recipient) || !window.relay.sendReply) {
           setRowNote(newest ? newest.id : thread.threadId, "This conversation cannot be replied to yet.", "err");
@@ -11055,7 +11381,7 @@
       const id = el.getAttribute("data-msg");
       if (openingIds.has(id)) el.classList.add("opening");
       el.addEventListener("click", () => {
-        const m = threadMessages().find((x) => x.id === id);
+        const m = threadMessages(threadMessageOptions).find((x) => x.id === id);
         // Plain text is INERT (David): selectable, its links clickable, no
         // navigation hiding under it — Reply is a deliberate hover affordance.
         if (m && m.textLike && !(m.ownedAgent && m.source?.agentSessionId)) return;
@@ -11096,8 +11422,37 @@
       const room = threadDetailId ? chatRoomForThread(threadDetailId) : null;
       thGroupInfoEl.classList.toggle("hidden",
         !(chatExpanded && room && room.isGroup && (room.groupName || room.groupId)));
+      syncSlackVisibilityButton(room);
     }
   }
+  thSlackVisibilityEl.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    const surface = conversationSurface();
+    const room = threadDetailId ? chatRoomForThread(threadDetailId, surface) : null;
+    if (!isSlackIntegratedRoom(room) || !room.chatId) return;
+    const key = slackVisibilityKey(room);
+    const wasVisible = slackMessagesVisible(room);
+    const nextVisible = !wasVisible;
+    slackVisibilityOverrides.set(key, nextVisible);
+    syncSlackVisibilityButton(room);
+    if (!nextVisible) {
+      slackFocusedThreadId = "";
+      renderThreadDetail();
+      return;
+    }
+    thSlackVisibilityEl.disabled = true;
+    thSlackVisibilityLabelEl.textContent = "Loading…";
+    const result = await window.relay.canonicalChat?.(room.chatId, { surface, includeSlack:true });
+    if (!result?.ok || !result.chat) {
+      slackVisibilityOverrides.set(key, wasVisible);
+      syncSlackVisibilityButton(room);
+      thSlackVisibilityEl.title = result?.error || "Could not load Slack messages.";
+      return;
+    }
+    storeCanonicalChatDetail(result.chat);
+    renderThreadDetail();
+    readVisibleChatRoom();
+  });
   document.getElementById("thExpand").addEventListener("click", (e) => {
     e.stopPropagation();
     const roomScroll = captureRoomScroll();
@@ -11126,9 +11481,11 @@
     const wasExpanded = chatExpanded;
     const destinationView = threadsSource === "chat" ? "chat"
       : threadsSource === "contacts" ? "contacts"
+      : threadsSource === "slack" ? "slack"
       : "relays";
     const returnTop = destinationView === "chat" ? chatListScrollTop
       : destinationView === "contacts" ? contactsListScrollTop
+      : destinationView === "slack" ? slackListScrollTop
       : relaysListScrollTop;
     const navigateBack = () => {
       threadDetailId = null;
@@ -11154,10 +11511,11 @@
     // different readers. A topic row may select the starting message, but it
     // must not manufacture an isolated conversation that disappears from the
     // person's Chat room — and neither may a contact row.
-    return source === "chat" || source === "relays" || source === "contacts";
+    return source === "chat" || source === "relays" || source === "slack" || source === "contacts";
   }
   function openThreadDetail(threadId, partyHint = "", source = "relays", options = {}) {
     if (activeView === "relays" && source === "relays" && scrollEl) relaysListScrollTop = scrollEl.scrollTop;
+    if (activeView === "slack" && source === "slack" && scrollEl) slackListScrollTop = scrollEl.scrollTop;
     if (activeView === "contacts" && source === "contacts" && scrollEl) contactsListScrollTop = scrollEl.scrollTop;
     dismissReactionPickers();
     slackFocusedThreadId = "";
@@ -11184,13 +11542,16 @@
     // Letters used to be exempt, waiting for a per-message unfold, so a reader
     // could open a chat, read the thing, come back, and still find it bold with
     // a count on it (David, live). Opening is reading.
+    const surface = conversationSurface(source);
     const room = isConversationRoomSource(source)
-      ? chatRoomForThread(threadId)
+      ? chatRoomForThread(threadId, surface)
       : null;
     const partyKey = room && room.partyKey;
     const party = String(partyHint || (room && room.name) || "").trim().toLowerCase();
     const roomAckIds = [];
-    for (const m of threadMessages()) {
+    // Slack has its own read cursor. Relay opens acknowledge only Relay rows;
+    // Slack opens are handled after the canonical transcript is rendered.
+    for (const m of source === "slack" ? [] : threadMessages({ includeSlack:false })) {
       if (m.direction !== "in" || !m.unread) continue;
       const sameRoom = room && room.isGroup
         ? (room.threadIds instanceof Set ? room.threadIds.has(m.threadId) : m.threadId === threadId)
@@ -11209,6 +11570,16 @@
     // reveal it, and retarget the frame. The old openRoom path did those jobs
     // three times (including once on the next animation frame).
     commitNavigation({ outerScrollTop: 0 });
+    readVisibleChatRoom();
+    if (isSlackIntegratedRoom(room) && room.chatId && !options.hydrated) {
+      const includeSlack = slackMessagesVisible(room, source);
+      window.relay.canonicalChat?.(room.chatId, { surface, includeSlack }).then((result) => {
+        if (!result?.ok || !result.chat || activeView !== "threads") return;
+        storeCanonicalChatDetail(result.chat);
+        renderThreadDetail();
+        readVisibleChatRoom();
+      }).catch(() => {});
+    }
     // The row click has already put the native window in front. Put the caret
     // in its composer in the same task, then reassert it once after layout in
     // case the compact/expanded frame transition briefly disturbed focus.
@@ -12653,6 +13024,7 @@
     // animated frame already contains the final view rather than a blank pane.
     threadsViewEl.classList.toggle("chat-max", chatExpanded);
     relaysViewEl.classList.toggle("hidden", activeView !== "relays");
+    slackViewEl.classList.toggle("hidden", activeView !== "slack");
     chatViewEl.classList.toggle("hidden", activeView !== "chat");
     threadsViewEl.classList.toggle("hidden", activeView !== "threads");
     sentViewEl.classList.toggle("hidden", activeView !== "sent");
@@ -12779,11 +13151,14 @@
     const unread = relayUnreadIds.size;
     setCount(unread);
     setBadge(relaysBadgeEl, unread);
+    setBadge(slackBadgeEl, (payload.slackChats || []).reduce(
+      (sum, chat) => sum + Math.max(0, Number(chat?.unreadCount || 0)), 0));
     markAllReadEl.classList.toggle("gone", activeView !== "relays" || unread === 0);
     markAllReadEl.disabled = unread === 0;
     setBadge(tasksBadgeEl, requestsUnreadCount());
     if (activeView === "chat") renderChat();
     if (activeView === "relays") renderRelays();
+    else if (activeView === "slack") renderSlack();
     else if (activeView === "threads") renderThreads();
     else if (activeView === "sent") renderSent();
     else if (activeView === "tasks") renderTasksBoard();
@@ -12855,11 +13230,14 @@
       requests: Array.isArray(next.requests) ? next.requests : [],
       contacts: Array.isArray(next.contacts) ? next.contacts : (payload.contacts || []),
       chats: Array.isArray(next.chats) ? next.chats : (payload.chats || []),
+      slackChats: Array.isArray(next.slackChats) ? next.slackChats : (payload.slackChats || []),
     };
     if (activeView === "threads" && threadDetailId) {
-      const room = chatRoomForThread(threadDetailId);
-      if (room?.provider === "slack" && room.chatId) {
-        window.relay.canonicalChat?.(room.chatId).then((result) => {
+      const surface = conversationSurface();
+      const room = chatRoomForThread(threadDetailId, surface);
+      const includeSlack = slackMessagesVisible(room);
+      if (isSlackIntegratedRoom(room) && room.chatId) {
+        window.relay.canonicalChat?.(room.chatId, { surface, includeSlack }).then((result) => {
           if (!result?.ok || !result.chat) return;
           if (storeCanonicalChatDetail(result.chat, { markArrivals:true }) && activeView === "threads") {
             renderThreadDetail();

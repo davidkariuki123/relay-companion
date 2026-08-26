@@ -48,7 +48,7 @@ test("legacy name-only rows join one unambiguous stable person room", () => {
   assert.match(html, /function sameDirectParty\(message, roomKey, roomName\)/);
   assert.match(html, /if \(stablePartyKey\(messageKey\) && stablePartyKey\(roomKey\)\) return false/);
   assert.match(html, /!stablePartyKey\(t\.partyKey\) && candidates && candidates\.size === 1/);
-  assert.match(html, /filter\(\(m\) => sameDirectParty\(m, partyKey, party\)\)/);
+  assert.match(html, /filter\(\(m\) => \(chatRoom\?\.chatId && m\.chatId === chatRoom\.chatId\)\s*\|\| sameDirectParty\(m, partyKey, party\)\)/);
   assert.match(html, /sameDirectParty\(m, roomKey, roomName\)/);
 });
 
@@ -115,7 +115,13 @@ test("direct and group conversations share one newest-first chronology", () => {
   const chat = html.slice(html.indexOf("function renderChat()"), html.indexOf("function renderChatRail()"));
   assert.doesNotMatch(chat, /tb-group/);
   const rail = html.slice(html.indexOf("function renderChatRail()"), html.indexOf("function renderThreads()"));
+  assert.match(rail, /const surface = conversationSurface\(\)/);
   assert.match(rail, /const \{ rooms \} = chatSections\(\)/);
+  const sections = html.slice(html.indexOf("function chatSections()"), html.indexOf("function chatRoomForThread("));
+  assert.match(sections, /activeView === "threads" \? conversationSurface\(\) : "relay"/,
+    "the shared rail derives Relay versus Slack from its current conversation surface");
+  assert.match(rail, /const peopleFooter = surface === "slack" \? ""/,
+    "the Relay people affordance remains while the Slack rail stays link-only");
   assert.match(rail, /rooms\.map\(row\)\.join\(""\)/);
   assert.doesNotMatch(rail, /rl-h|>Groups<|>People</);
 });
@@ -513,7 +519,8 @@ test("a room send addresses the room and quotes only a chosen Relay", () => {
   assert.match(html, /const selectedReplyTargetId = String\(threadReplyTargets\.get\(threadStateKey\) \|\| ""\)/);
   assert.match(html, /const inReplyToRelayId = selectedReplyTargetId \|\| String\(focusedSlackParent\?\.id \|\| ""\)/);
   assert.match(html, /const recipient = \(addressAnchor && addressAnchor\.addressRecipient\)/);
-  assert.match(html, /emptyGroupAnchor\.provider === "slack"[\s\S]*\? \{ chatId:emptyGroupAnchor\.chatId \}[\s\S]*: \{ groupId:emptyGroupAnchor\.groupId \}/);
+  assert.match(html, /emptyRoomAnchor\.provider === "slack"[\s\S]*\? \{ chatId:emptyRoomAnchor\.chatId \}[\s\S]*: \{ groupId:emptyRoomAnchor\.groupId \}/,
+    "an exact Slack direct or channel addresses its chat while Relay groups retain their group recipient");
   assert.match(html, /sendReply\(\{\s*text, recipient, \.\.\.\(inReplyToRelayId \? \{ inReplyToRelayId \} : \{\}\), files, idempotencyKey,/);
   assert.doesNotMatch(html, /sendReply\(\{ text, inReplyToRelayId: newest\.id/);
 });

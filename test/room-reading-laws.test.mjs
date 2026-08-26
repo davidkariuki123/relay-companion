@@ -122,7 +122,7 @@ test("a group's face stays stacked even when only one member has spoken", () => 
   const rows = html.slice(html.indexOf("function relayIdentityRows("), html.indexOf("function renderRelays()"));
   assert.match(rows, /const \{ rooms \} = chatSections\(\)/);
   assert.doesNotMatch(rows, /message\.party|message\.partyKey/);
-  const chats = html.slice(html.indexOf("function chatConversations()"), html.indexOf("function normalizedPartyName("));
+  const chats = html.slice(html.indexOf("function chatConversations("), html.indexOf("function normalizedPartyName("));
   assert.match(chats, /m\.direction === "in" && !m\.ownedAgent && m\.party/);
   const rowHtml = html.slice(html.indexOf("function relayIdentityRowHtml("), html.indexOf("// ---------- the reader:"));
   assert.match(rowHtml, /while \(identity\.isGroup && groupPeople\.length < 2\)/);

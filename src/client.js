@@ -1050,10 +1050,18 @@ export class RelayClient {
 
   // Chats: every thread between the same set of people, merged into one
   // conversation. See apps/api/src/services/chat-identity.ts for the ontology.
-  async chats() {
-    if (!localE2eeIdentityAvailable()) return this.#req("GET", "/v1/chats");
+  async chats(options = {}) {
+    const explicitSurface = Boolean(options && Object.prototype.hasOwnProperty.call(options, "surface"));
+    const surface = options && options.surface === "slack" ? "slack" : "relay";
+    const relayListPath = "/v1/chats?surface=relay";
+    // Explicit surface requests are managed projections. They never
+    // participate in the local E2EE merge, whose identities and ciphertext
+    // belong to Relay. Omitting the option preserves the legacy merged client.
+    if (explicitSurface && surface === "slack") return this.#req("GET", "/v1/chats?surface=slack");
+    if (explicitSurface) return this.#req("GET", relayListPath);
+    if (!localE2eeIdentityAvailable()) return this.#req("GET", relayListPath);
     const status = await verifiedE2eeStatus(this);
-    if (status.mode === "off") return this.#req("GET", "/v1/chats");
+    if (status.mode === "off") return this.#req("GET", relayListPath);
     await ensureE2eeKeyPackages(this, status);
     const encrypted = await this.e2eeSync();
     const e2ee = await e2eeChatList(this, encrypted.items || []);
@@ -1064,16 +1072,26 @@ export class RelayClient {
     }
     e2ee.chats.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
     if (status.mode === "required") return e2ee;
-    const managed = await this.#req("GET", "/v1/chats");
+    const managed = await this.#req("GET", relayListPath);
     const merged = new Map((managed.chats || []).map((chat) => [chat.chatId, chat]));
     for (const chat of e2ee.chats) merged.set(chat.chatId, chat);
     return { chats: [...merged.values()].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))) };
   }
 
-  async chat(chatId) {
-    if (!localE2eeIdentityAvailable()) return this.#req("GET", `/v1/chats/${encodeURIComponent(chatId)}`);
+  async chat(chatId, options = {}) {
+    const explicitSurface = Boolean(options && Object.prototype.hasOwnProperty.call(options, "surface"));
+    const surface = options && options.surface === "slack" ? "slack" : "relay";
+    const includeSlack = options && options.includeSlack === true;
+    const managedBase = `/v1/chats/${encodeURIComponent(chatId)}`;
+    const relayPath = `${managedBase}?surface=relay`;
+    // Native surfaces address the managed canonical room directly, including
+    // under E2EE-required accounts. Unqualified calls retain their old merge.
+    if (surface === "slack") return this.#req("GET", `${managedBase}?surface=slack&includeSlack=true`);
+    if (includeSlack) return this.#req("GET", `${managedBase}?surface=relay&includeSlack=true`);
+    if (explicitSurface) return this.#req("GET", relayPath);
+    if (!localE2eeIdentityAvailable()) return this.#req("GET", relayPath);
     const status = await verifiedE2eeStatus(this);
-    if (status.mode === "off") return this.#req("GET", `/v1/chats/${encodeURIComponent(chatId)}`);
+    if (status.mode === "off") return this.#req("GET", relayPath);
     await ensureE2eeKeyPackages(this, status);
     if (String(chatId).startsWith("grp_")) {
       const group = await e2eeGroupChat(this, chatId);
@@ -1086,7 +1104,7 @@ export class RelayClient {
       if (!e2ee) throw new Error("Encrypted chat not found.");
       return e2ee;
     }
-    return this.#req("GET", `/v1/chats/${encodeURIComponent(chatId)}`);
+    return this.#req("GET", relayPath);
   }
 
   sendChatMessage(chatId, input) {
@@ -1109,10 +1127,12 @@ export class RelayClient {
     return this.#req("POST", "/v1/integrations/slack/disconnect-user", {});
   }
 
-  markChatRead(chatId, idempotencyKey) {
+  markChatRead(chatId, idempotencyKey, surface = "relay", options = {}) {
     return this.#req("POST", `/v1/chats/${encodeURIComponent(chatId)}/read`, {
-      source: "companion",
+      source: "relay_pill_open",
       idempotencyKey: String(idempotencyKey || `chat-read-${chatId}`),
+      surface: surface === "slack" ? "slack" : "relay",
+      includeSlack: Boolean(options && options.includeSlack),
     });
   }
 

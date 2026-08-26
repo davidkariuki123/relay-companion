@@ -515,6 +515,7 @@ function installationAuthorizationController() {
           contactsFingerprint = "";
           contactsLoadedOnce = null;
           canonicalChatsCache = [];
+          slackChatsCache = [];
           canonicalChatsFingerprint = "";
           canonicalChatsLoadedOnce = null;
           await restartCompanionDaemon();
@@ -580,11 +581,12 @@ async function openRelayDeepLink(parsed) {
     await refreshCanonicalChats();
     const chatId = String(
       parsed.chatId
-      || canonicalChatsCache.find((chat) => chat?.lastMessage?.relayId === parsed.messageId)?.chatId
+      || [...canonicalChatsCache, ...slackChatsCache]
+        .find((chat) => chat?.lastMessage?.relayId === parsed.messageId)?.chatId
       || "",
     );
     if (!chatId) throw new Error("Relay channel context is unavailable to this account.");
-    const chat = await client.chat(chatId);
+    const chat = await client.chat(chatId, { surface: "slack", includeSlack: true });
     if (!Array.isArray(chat?.items) || !chat.items.some((item) => item?.relayId === parsed.messageId)) {
       throw new Error("Relay message is unavailable to this account.");
     }
@@ -1620,26 +1622,48 @@ function ensureTasksLoaded() {
 // Pill still paints instantly offline and refreshes them without blocking its
 // local packet-store path.
 let canonicalChatsCache = [];
+let slackChatsCache = [];
 let canonicalChatsLoadedOnce = null;
 let canonicalChatsFingerprint = "";
-function canonicalChatsFingerprintOf(list) {
-  return JSON.stringify((list || []).map((chat) => [
+function canonicalChatsFingerprintOf(relayList, slackList) {
+  const rows = (list) => (list || []).map((chat) => [
     chat.chatId, chat.updatedAt, chat.messageCount, chat.unreadCount,
     chat.lastMessage && chat.lastMessage.relayId,
-  ]));
+  ]);
+  return JSON.stringify({ relay: rows(relayList), slack: rows(slackList) });
+}
+function isSlackLinkedChat(chat) {
+  return Boolean(chat && (
+    chat.integration?.provider === "slack"
+    // Compatibility with servers released before direct Slack bindings moved
+    // to `integration`; this branch covers their channel-only summaries.
+    || chat.channel?.slack
+  ));
 }
 async function refreshCanonicalChats() {
-  if (!deviceToken()) return canonicalChatsCache;
+  if (!deviceToken()) return { relay: canonicalChatsCache, slack: slackChatsCache };
   try {
     const client = await relayClient();
-    const result = await client.chats();
-    canonicalChatsCache = (Array.isArray(result && result.chats) ? result.chats : [])
-      .filter((chat) => chat && chat.channel && chat.channel.slack);
-    canonicalChatsFingerprint = canonicalChatsFingerprintOf(canonicalChatsCache);
+    const [relayResult, slackResult] = await Promise.allSettled([
+      client.chats({ surface: "relay" }),
+      client.chats({ surface: "slack" }),
+    ]);
+    if (relayResult.status === "fulfilled") {
+      canonicalChatsCache = (Array.isArray(relayResult.value?.chats) ? relayResult.value.chats : [])
+        .filter(isSlackLinkedChat);
+    }
+    if (slackResult.status === "fulfilled") {
+      slackChatsCache = (Array.isArray(slackResult.value?.chats) ? slackResult.value.chats : [])
+        .filter(isSlackLinkedChat);
+    }
+    if (relayResult.status === "rejected" && slackResult.status === "rejected") {
+      throw relayResult.reason;
+    }
+    canonicalChatsFingerprint = canonicalChatsFingerprintOf(canonicalChatsCache, slackChatsCache);
   } catch (error) {
     console.error("[overlay] canonical chats refresh failed:", error && error.message);
   }
-  return canonicalChatsCache;
+  return { relay: canonicalChatsCache, slack: slackChatsCache };
 }
 function ensureCanonicalChatsLoaded() {
   if (!canonicalChatsLoadedOnce) canonicalChatsLoadedOnce = refreshCanonicalChats().catch(() => canonicalChatsCache);
@@ -1828,6 +1852,7 @@ function buildPayload() {
     tasks: [],
     contacts: contactsCache,
     chats: canonicalChatsCache,
+    slackChats: slackChatsCache,
   };
 }
 
@@ -2259,6 +2284,10 @@ async function pushInboxNow(force) {
     ]),
     contacts: payload.contacts.map((c) => [c.id, c.name, c.email]),
     chats: (payload.chats || []).map((chat) => [
+      chat.chatId, chat.updatedAt, chat.messageCount, chat.unreadCount,
+      chat.lastMessage && chat.lastMessage.relayId,
+    ]),
+    slackChats: (payload.slackChats || []).map((chat) => [
       chat.chatId, chat.updatedAt, chat.messageCount, chat.unreadCount,
       chat.lastMessage && chat.lastMessage.relayId,
     ]),
@@ -7196,25 +7225,34 @@ ipcMain.on("relay:preview", (event, id) => {
   if (win && !win.isDestroyed() && event && event.sender !== win.webContents) return;
   if (!openPreview(id)) console.error("[preview] relay not found:", id);
 });
-ipcMain.handle("relay:canonicalChat", async (event, chatId) => {
+function canonicalChatIpcInput(input) {
+  const value = input && typeof input === "object" ? input : { chatId: input };
+  const surface = value.surface === "slack" ? "slack" : "relay";
+  return {
+    chatId: String(value.chatId || "").trim(),
+    surface,
+    includeSlack: surface === "slack" || value.includeSlack === true,
+  };
+}
+ipcMain.handle("relay:canonicalChat", async (event, input) => {
   if (win && !win.isDestroyed() && event && event.sender !== win.webContents) {
     return { ok: false, error: "Not the pill." };
   }
-  const id = String(chatId || "").trim();
+  const { chatId: id, surface, includeSlack } = canonicalChatIpcInput(input);
   if (!id) return { ok: false, error: "Missing channel id." };
   try {
     const client = await relayClient();
-    const chat = await client.chat(id);
+    const chat = await client.chat(id, { surface, includeSlack });
     return { ok: true, chat };
   } catch (error) {
     return { ok: false, error: (error && error.message) || String(error) };
   }
 });
-ipcMain.handle("relay:canonicalChatRead", async (event, chatId) => {
+ipcMain.handle("relay:canonicalChatRead", async (event, input) => {
   if (win && !win.isDestroyed() && event && event.sender !== win.webContents) {
     return { ok: false, error: "Not the pill." };
   }
-  const id = String(chatId || "").trim();
+  const { chatId: id, surface, includeSlack } = canonicalChatIpcInput(input);
   if (!id) return { ok: false, error: "Missing channel id." };
   if (!chatReadPresenceIsAvailable(win)) {
     deferChatRead();
@@ -7222,7 +7260,7 @@ ipcMain.handle("relay:canonicalChatRead", async (event, chatId) => {
   }
   try {
     const client = await relayClient();
-    const result = await client.markChatRead(id, `pill-chat-read-${id}-${Date.now()}`);
+    const result = await client.markChatRead(id, `pill-chat-read-${surface}-${id}-${Date.now()}`, surface, { includeSlack });
     await refreshCanonicalChats();
     await pushInbox(true);
     return result;

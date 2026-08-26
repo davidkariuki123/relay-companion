@@ -124,8 +124,16 @@ contextBridge.exposeInMainWorld("relay", {
   // Opening a contact opens the conversation with them, in its own window.
   openChatWith: (email, name) =>
     ipcRenderer.invoke("relay:openChatWith", { email: String(email || ""), name: String(name || "") }),
-  canonicalChat: (chatId) => ipcRenderer.invoke("relay:canonicalChat", String(chatId || "")),
-  canonicalChatRead: (chatId) => ipcRenderer.invoke("relay:canonicalChatRead", String(chatId || "")),
+  canonicalChat: (chatId, options = {}) => ipcRenderer.invoke("relay:canonicalChat", {
+    chatId: String(chatId || ""),
+    surface: options && options.surface === "slack" ? "slack" : "relay",
+    includeSlack: Boolean(options && options.includeSlack),
+  }),
+  canonicalChatRead: (chatId, options = {}) => ipcRenderer.invoke("relay:canonicalChatRead", {
+    chatId: String(chatId || ""),
+    surface: options && options.surface === "slack" ? "slack" : "relay",
+    includeSlack: Boolean(options && options.includeSlack),
+  }),
   // contact groups (saved rosters; a group relays to every member as one thread)
   groups: () => ipcRenderer.invoke("relay:groups"),
   groupCreate: (name) => ipcRenderer.invoke("relay:groupCreate", name),

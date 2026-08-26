@@ -187,11 +187,17 @@ test("an open Slack channel refreshes on a live-chat cadence without repainting 
 test("an open Slack channel persists one canonical read cursor instead of acking canonical ids as legacy rows", () => {
   assert.match(html, /const canonicalReadGeneration = new Map\(\)/);
   assert.match(html, /item\.direction === "inbound" && \(item\.state === "pending" \|\| item\.state === "delivered"\)/);
-  assert.match(html, /canonicalReadGeneration\.get\(chatId\) !== generation/,
-    "the live poll cannot submit the same read generation every second");
+  assert.match(html, /const generationKey = `\$\{surface\}:\$\{chatId\}`/);
+  assert.match(html, /canonicalReadGeneration\.get\(generationKey\) !== generation/,
+    "the live poll cannot submit the same surface-qualified read generation every second");
+  assert.doesNotMatch(html, /canonicalReadGeneration\.(?:get|set|delete)\(chatId\)/,
+    "one surface's generation cannot suppress another surface's read persistence");
   assert.match(html, /canonicalChatDetails\.set\(chatId, opened\)/,
     "the visible transcript becomes read optimistically instead of flickering until Slack returns");
-  assert.match(html, /window\.relay\.canonicalChatRead\?\.\(chatId\)/);
+  assert.match(html, /return window\.relay\.canonicalChatRead\?\.\(chatId, options\)/,
+    "the preload call carries the surface-qualified read options");
+  assert.match(html, /persistCanonicalChatRead\(chatId, \{ surface, includeSlack:true \}\)/,
+    "the visible surface and reveal state qualify the canonical cursor advance");
   assert.match(html, /if \(!id\.startsWith\("relay_"\)\) continue/,
     "canonical message ids never enter the legacy per-delivery acknowledgment path");
   assert.match(html, /renderThreadDetail\(\);\s*readVisibleChatRoom\(\);/,

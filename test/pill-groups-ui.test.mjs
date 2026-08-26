@@ -171,7 +171,8 @@ test("Slack-owned channels join the Channels pane without becoming editable Rela
   assert.match(html, /canPost:chat\.channel\.canPost !== false/);
   assert.match(html, /archivedAt:chat\.channel\.archived \?/,
     "read-only and archived are distinct Slack states");
-  assert.match(html, /if \(room\.provider === "slack" \|\| slackChat\)/);
+  assert.match(html, /if \(isSlackIntegratedRoom\(room\) \|\| slackChat\)/,
+    "posting state follows the exact integration binding, including Slack DMs and compatibility summaries");
   assert.match(html, /slackChat\?\.channel\?\.canPost === false/);
   assert.match(html, /Posting is unavailable for this Slack channel\./);
   assert.match(html, /groupsList = result\.slice[\s\S]*syncSlackChannelRows\(\);[\s\S]*const wantedId/,
