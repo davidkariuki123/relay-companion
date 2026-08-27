@@ -167,6 +167,7 @@ export function validateInstalledPackageShape(packageRoot, { version, distributi
     const bootstrapFiles = fs.readdirSync(path.join(packageRoot, "bootstrap")).sort();
     if (JSON.stringify(bootstrapFiles) !== JSON.stringify([
       "linux-systemd.cjs",
+      "owned-node-runtime.cjs",
       "relay-setup.cjs",
       "release-signature.cjs",
       "runtime-executables.cjs",

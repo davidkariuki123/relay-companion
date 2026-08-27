@@ -495,6 +495,7 @@ test("packed thin installer contains only the reviewed dependency-free bootstrap
   try {
     fs.mkdirSync(path.join(root, "bootstrap"), { recursive: true });
     fs.writeFileSync(path.join(root, "bootstrap", "linux-systemd.cjs"), "module.exports = {}\n");
+    fs.writeFileSync(path.join(root, "bootstrap", "owned-node-runtime.cjs"), "module.exports = {}\n");
     fs.writeFileSync(path.join(root, "bootstrap", "relay-setup.cjs"), "module.exports = {}\n");
     fs.writeFileSync(path.join(root, "bootstrap", "release-signature.cjs"), "module.exports = {}\n");
     fs.writeFileSync(path.join(root, "bootstrap", "runtime-executables.cjs"), "module.exports = {}\n");
