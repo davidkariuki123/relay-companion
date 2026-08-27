@@ -345,6 +345,40 @@ test("an authorization secret without public state requires explicit restart bef
   assert.equal(stores.peekDurable().status, "pending_identity");
 });
 
+test("begin replaces an expired authorization that never reached an identity", async () => {
+  const stores = memoryStores({
+    durable: { schemaVersion: 1, authorizationId: AUTHORIZATION_ID, expiresAt: EXPIRES, status: "expired" },
+  });
+  const replacementExpires = "2026-08-20T10:30:00.000Z";
+  const { controller, calls } = harness({
+    stores,
+    fetchImpl: async (url, init) => {
+      calls.push({ url: String(url), body: JSON.parse(init.body) });
+      return response({ ...createReply(), expiresAt: replacementExpires });
+    },
+  });
+  assert.equal((await controller.begin()).status, "pending_identity");
+  assert.equal(calls.length, 1);
+  assert.equal(stores.peekDurable().expiresAt, replacementExpires);
+  assert.ok(stores.events.indexOf("durable:remove") < stores.events.lastIndexOf("durable:write"));
+});
+
+test("begin preserves an expired identified authorization for explicit restart", async () => {
+  const stores = memoryStores({
+    durable: {
+      schemaVersion: 1,
+      authorizationId: AUTHORIZATION_ID,
+      expiresAt: EXPIRES,
+      status: "expired",
+      account: { email: "alex@example.com", displayName: "Alex" },
+    },
+  });
+  const { controller, calls } = harness({ stores });
+  assert.equal((await controller.begin()).status, "expired");
+  assert.equal(calls.length, 0);
+  assert.equal(stores.peekDurable().account.email, "alex@example.com");
+});
+
 test("restart touches only authorization state, deletes it before minting, and never runs for a paired account", async () => {
   const stores = memoryStores({
     durable: { schemaVersion: 1, authorizationId: AUTHORIZATION_ID, expiresAt: EXPIRES, status: "expired" },
@@ -605,7 +639,7 @@ test("a consumed-state commit failure leaves account persistence untouched and r
   assert.deepEqual({ approvals, consumes, persisted }, { approvals: 1, consumes: 2, persisted: 1 });
 });
 
-test("polling survives restart, expiry purges the capability, and cancel fails closed", async () => {
+test("polling survives restart, expiry purges the capability, and identified expiry waits for restart", async () => {
   const stores = memoryStores({
     durable: {
       schemaVersion: 1,
@@ -620,19 +654,22 @@ test("polling survives restart, expiry purges the capability, and cancel fails c
       activationUrl: ACTIVATION_URL,
     },
   });
-  const fetchImpl = async () => response({
-    status: "pending_approval",
-    expiresAt: EXPIRES,
-    account: { email: "alex@example.com", displayName: "Alex" },
-  });
+  const replacementExpires = "2026-08-20T10:30:00.000Z";
+  const fetchImpl = async (url) => new URL(url).pathname === "/v1/installation-authorizations"
+    ? response({ ...createReply(), expiresAt: replacementExpires })
+    : response({
+        status: "pending_approval",
+        expiresAt: EXPIRES,
+        account: { email: "alex@example.com", displayName: "Alex" },
+      });
   const restarted = harness({ stores, fetchImpl }).controller;
   assert.equal((await restarted.state()).status, "pending_approval");
 
   const expired = harness({ stores, fetchImpl, now: () => Date.parse(EXPIRES) + 1 }).controller;
   assert.equal((await expired.state()).status, "expired");
   assert.equal(stores.peekSecret(), null);
-  assert.equal(stores.peekDurable().status, "expired", "a secret-free tombstone requires an explicit Restart across relaunches");
-  assert.equal((await expired.begin()).status, "expired", "ordinary Begin cannot replace the tombstone");
+  assert.equal(stores.peekDurable().status, "expired");
+  assert.equal((await expired.begin()).status, "expired", "an identified tombstone preserves the account choice for explicit restart");
 
   const failingStores = memoryStores({
     durable: { schemaVersion: 1, authorizationId: AUTHORIZATION_ID, expiresAt: EXPIRES, status: "pending_identity" },

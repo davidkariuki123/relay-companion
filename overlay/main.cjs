@@ -829,6 +829,14 @@ function readConfigFile() {
           return withCredentialState(config, "available");
         }
         if (stored.ok) return withCredentialState(config, "corrupt", "credential_empty");
+        if (process.platform === "darwin" && config.credentialStore === "native-v1") {
+          // Current macOS builds persist locally. The old bridge release can
+          // still leave a Keychain pointer behind, but a failed legacy read is
+          // not useful account state and must not strand recovery on Try again.
+          config.credentialStore = "local-v2";
+          try { atomicWriteJsonSync(configPath, config, { mode: 0o600 }); } catch {}
+          return withCredentialState(config, "missing", stored.code || "legacy_credential_unavailable");
+        }
         const missing = stored.code === "credential_not_found";
         return withCredentialState(
           config,

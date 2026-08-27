@@ -407,12 +407,14 @@ export function createInstallationAuthorizationController({
       await readSecret(existing);
       return publicState(existing);
     }
-    // Beginning setup never destroys an old capability. An expired/inactive
-    // authorization is replaced only by the separate, explicit Restart act,
-    // whose secret deletion must succeed before a new server record is minted.
+    // An expired authorization that never reached an identity contains no
+    // account choice or approval worth preserving. Replace that dead first-run
+    // record automatically so an ordinary sign-in click cannot loop forever.
+    // Once an identity exists, replacement remains the explicit Restart act.
     if (existing) {
-      if (existing.status !== "expired") return expire(existing);
-      return publicState(existing);
+      const expired = existing.status === "expired" ? existing : await expire(existing);
+      if (accountSummary(expired.account)) return publicState(expired);
+      await removeAuthorization();
     }
 
     // A secret without its public state is an interrupted prior commit, not a

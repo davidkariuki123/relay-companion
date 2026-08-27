@@ -320,6 +320,13 @@ async function applyInstall({
  * migration window; it is never required or prompted for by the new flow.
  */
 async function cmdSetup(flags) {
+  if (flags.restart) {
+    if (flags.code) throw new Error("Relay setup --restart cannot be combined with the legacy --code path.");
+    const { createInstallationAuthorizationController } = await import("../src/installation-authorization.js");
+    await createInstallationAuthorizationController().restart();
+    console.log("Restarted Relay's one-time account setup. The app will open with a fresh approval.");
+    console.log("");
+  }
   if (flags.code) {
     console.log("Using Relay's legacy pairing-code migration path.");
     await cmdPair(flags, { promptForDefaults: Boolean(flags.interactive) });
@@ -1042,6 +1049,7 @@ async function main() {
           "",
           "Usage:",
           "  relay setup                                           Install and open Relay; sign in from the Relay pill",
+          "  relay setup --restart                                 Replace a stuck or expired one-time setup approval",
           "  relay version                                         Print the installed Relay companion version",
           "  relay setup --code CODE --open-relay TOKEN --host codex|claude",
           "  relay setup --code CODE                               Legacy migration only: pair by code, then install",

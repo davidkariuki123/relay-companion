@@ -252,6 +252,22 @@ export function readConfigState({ credentialBackend = nativeCredentialBackend } 
         credential: { status: CREDENTIAL_STATUS_CORRUPT, code: "credential_empty" },
       };
     }
+    if (process.platform === "darwin" && raw.credentialStore === NATIVE_CREDENTIAL_STORE) {
+      // The bridge installer deliberately remains npm's `latest` catch-up rail.
+      // Older bridge builds wrote a Keychain pointer that current macOS builds
+      // no longer use. A failed one-time legacy read must therefore lead to a
+      // clean reconnect, not an unrecoverable retry loop.
+      const healed = { ...raw, credentialStore: LOCAL_CREDENTIAL_STORE };
+      try { atomicWriteJsonSync(configPath(), withoutDeprecatedCapabilityConfig(healed), { mode: 0o600 }); }
+      catch {}
+      return {
+        config: healed,
+        credential: {
+          status: CREDENTIAL_STATUS_MISSING,
+          code: stored.code || "legacy_credential_unavailable",
+        },
+      };
+    }
     const missing = stored.code === "credential_not_found";
     return {
       config: raw,

@@ -8,6 +8,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const overlay = readFileSync(path.join(ROOT, "overlay/inbox.html"), "utf8");
 const preload = readFileSync(path.join(ROOT, "overlay/preload.cjs"), "utf8");
 const main = readFileSync(path.join(ROOT, "overlay/main.cjs"), "utf8");
+const config = readFileSync(path.join(ROOT, "src/config.js"), "utf8");
+const cli = readFileSync(path.join(ROOT, "bin/relay.js"), "utf8");
 
 test("first run is one in-pill flow with a skippable chat setup page", () => {
   for (const copy of [
@@ -82,6 +84,9 @@ test("a paired credential problem opens recovery and never falls through to firs
   assert.match(main, /isRemoteCredentialRejection/);
   assert.match(main, /remoteCredentialRejected \? "missing" : credential\.status/);
   assert.match(overlay, /Relay’s service no longer accepts this computer’s saved sign-in/);
+  assert.match(main, /process\.platform === "darwin" && config\.credentialStore === "native-v1"[\s\S]*config\.credentialStore = "local-v2"[\s\S]*withCredentialState\(config, "missing"/);
+  assert.match(config, /process\.platform === "darwin" && raw\.credentialStore === NATIVE_CREDENTIAL_STORE[\s\S]*credentialStore: LOCAL_CREDENTIAL_STORE[\s\S]*status: CREDENTIAL_STATUS_MISSING/);
+  assert.match(cli, /relay setup --restart[\s\S]*Replace a stuck or expired one-time setup approval/);
 });
 
 test("email signup keeps a user recoverable when delivery is delayed or filtered", () => {
