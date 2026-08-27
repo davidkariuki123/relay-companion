@@ -11,6 +11,13 @@ export function setupOpenRelayToken(flags = {}) {
   return String(flags["open-relay"] || flags.openRelay || flags.relay || "").trim() || null;
 }
 
+/** Bootstrap owns the exact-runtime service handoff. Pairing may update account
+ * state inside that handoff, but must not wake the previous runtime before the
+ * candidate has installed its registrations and is ready to take ownership. */
+export function setupPairFlags(flags = {}, bootstrapActivated = process.env.RELAY_BOOTSTRAP_ACTIVATED === "1") {
+  return bootstrapActivated ? { ...flags, "no-restart": true } : flags;
+}
+
 export function setupOpenStatus(opened, openUrlFn = () => false) {
   if (!opened) return { opened: false, fallbackAttempted: false, url: null };
   if (opened.openedInHost || opened.skipExternalOpen) {

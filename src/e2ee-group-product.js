@@ -323,7 +323,29 @@ function project(records, identity) {
 
 export async function e2eeGroupOpenedRecords(client) {
   const identity = identityOrThrow();
-  return project(await syncE2eeGroupProduct(client), identity);
+  const records = project(await syncE2eeGroupProduct(client), identity);
+  const taskIds = records.filter((record) => record.item.kind === "task").map((record) => record.eventId);
+  if (!taskIds.length) return records;
+  const claims = (await client.e2eeGroupTaskClaims(taskIds)).claims || {};
+  return records.map((record) => {
+    const taskClaim = claims[record.eventId];
+    if (!taskClaim || record.item.kind !== "task") return record;
+    const taskState = taskClaim.workState === "completed"
+      ? "completed"
+      : taskClaim.workState === "working" ? "started" : "requested";
+    return {
+      ...record,
+      item: {
+        ...record.item,
+        taskClaim,
+        taskState,
+        ...(taskClaim.workStartedAt ? { taskStartedAt: taskClaim.workStartedAt } : {}),
+        ...(taskClaim.workCompletedAt ? { taskCompletedAt: taskClaim.workCompletedAt } : {}),
+        recipientGroupId: taskClaim.channel?.id || record.groupId,
+        recipientGroupName: taskClaim.channel?.name || "Channel",
+      },
+    };
+  });
 }
 
 function participantId(value) {
@@ -407,6 +429,12 @@ export async function e2eeGroupPacket(record, groupName = "Relay group") {
       ...(record.item.inReplyToRelayId ? { inReplyToRelayId: record.item.inReplyToRelayId } : {}),
       threadId: record.item.threadId,
       groupSendId: record.eventId,
+      ...(record.item.recipientGroupId ? { recipientGroupId: record.item.recipientGroupId } : {}),
+      ...(record.item.recipientGroupName ? { recipientGroupName: record.item.recipientGroupName } : {}),
+      ...(record.item.taskState ? { taskState: record.item.taskState } : {}),
+      ...(record.item.taskStartedAt ? { taskStartedAt: record.item.taskStartedAt } : {}),
+      ...(record.item.taskCompletedAt ? { taskCompletedAt: record.item.taskCompletedAt } : {}),
+      ...(record.item.taskClaim ? { taskClaim: record.item.taskClaim } : {}),
       reactions: record.item.reactions,
       attachments: materialized,
       e2ee: record.item.e2ee,

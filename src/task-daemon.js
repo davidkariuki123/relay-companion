@@ -95,6 +95,7 @@ function freshPlainRelays(ledger, items) {
       (seen.taskStartedAt || "") !== (item.taskStartedAt || "") ||
       (seen.taskCompletedAt || "") !== (item.taskCompletedAt || "") ||
       (seen.taskRunOwner || "null") !== JSON.stringify(item.taskRunOwner || null) ||
+      (seen.taskClaim || "null") !== JSON.stringify(item.taskClaim || null) ||
       (seen.restoredAt || "") !== (item.restoredAt || "")
     );
   });
@@ -115,6 +116,7 @@ function markPlainRelaysProcessed(ledger, items) {
       taskStartedAt: item.taskStartedAt || "",
       taskCompletedAt: item.taskCompletedAt || "",
       taskRunOwner: JSON.stringify(item.taskRunOwner || null),
+      taskClaim: JSON.stringify(item.taskClaim || null),
       restoredAt: item.restoredAt || "",
       processedAt,
     };

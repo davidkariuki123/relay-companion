@@ -19,6 +19,7 @@ const EXPECTED_TOOLS = [
   "relay_agent_progress",
   "relay_task_start",
   "relay_task_complete",
+  "relay_task_unclaim",
   "relay_agent_complete",
   "relay_send",
   "relay_share_link",

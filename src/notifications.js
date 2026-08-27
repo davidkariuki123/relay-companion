@@ -590,6 +590,8 @@ export function stagePlainRelayItem(
     taskStartedAt: item.taskStartedAt || existing.taskStartedAt || null,
     taskRunOwner: item.taskRunOwner || existing.taskRunOwner || null,
     taskCompletedAt: item.taskCompletedAt || existing.taskCompletedAt || null,
+    // Channel Task ownership is live projection state, not packet content.
+    taskClaim: item.taskClaim || existing.taskClaim || null,
     // The completion species has to survive staging or the pill cannot tell an
     // agent's report from correspondence, and it lands in the chat with a
     // person (David, twice). packet.type is the sender's declared type.

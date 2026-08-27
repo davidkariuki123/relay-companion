@@ -82,14 +82,17 @@ test("Task lifecycle tools are developer-only and bind work to the calling agent
   const ordinaryNames = new Set(toolsForAccount({ requests:false, aiSessions:false, connectors:false }).map((tool) => tool.name));
   assert.equal(developerNames.has("relay_task_start"), true);
   assert.equal(developerNames.has("relay_task_complete"), true);
+  assert.equal(developerNames.has("relay_task_unclaim"), true);
   assert.equal(ordinaryNames.has("relay_task_start"), false);
   assert.equal(ordinaryNames.has("relay_task_complete"), false);
+  assert.equal(ordinaryNames.has("relay_task_unclaim"), false);
 
   rememberCallingClient({ name: "codex-mcp-client" });
   const calls = [];
   const client = {
     async taskStarted(relayId, payload) { calls.push(["start", relayId, payload]); return { taskRelayId: relayId, state: "working" }; },
     async taskCompleted(relayId, payload) { calls.push(["complete", relayId, payload]); return { taskRelayId: relayId, state: "done", resultRelayId: "relay_result" }; },
+    async taskUnclaimed(relayId, payload) { calls.push(["unclaim", relayId, payload]); return { taskRelayId: relayId, state: "unclaimed" }; },
   };
   await handleCall(client, "relay_task_start", { taskRelayId: "relay_task_1", idempotencyKey: "start_task_1" });
   await handleCall(client, "relay_task_complete", {
@@ -97,6 +100,11 @@ test("Task lifecycle tools are developer-only and bind work to the calling agent
     forHuman: "Done and verified.",
     forAgent: "The focused test suite passed.",
     idempotencyKey: "finish_task_1",
+  });
+  await handleCall(client, "relay_task_unclaim", {
+    taskRelayId: "relay_task_2",
+    expectedVersion: 3,
+    idempotencyKey: "release_task_2",
   });
   const native = String(process.env.CODEX_THREAD_ID || "").trim();
   assert.deepEqual(calls, [
@@ -115,6 +123,7 @@ test("Task lifecycle tools are developer-only and bind work to the calling agent
       sourceProvider: "codex",
       ...(native ? { sourceNativeId: native } : {}),
     }],
+    ["unclaim", "relay_task_2", { expectedVersion: 3, idempotencyKey: "release_task_2" }],
   ]);
 });
 
@@ -233,6 +242,7 @@ test("state-changing MCP tools require idempotency keys", () => {
     "relay_send",
     "relay_task_start",
     "relay_task_complete",
+    "relay_task_unclaim",
     "relay_share_link",
     "relay_mark_read",
     "relay_inbox_delete",
@@ -1313,7 +1323,8 @@ test("relay_send teaches the relay-vs-REQUEST decision — David's discernment l
   assert.match(kind.description, /MUST be kind='task', not kind='message'/i);
   assert.match(kind.description, /small or quick operation is still a Task/i);
   assert.match(kind.description, /Do you think we should switch to dev\?' is kind='message'/i);
-  assert.match(kind.description, /exactly one recipient and no group/i);
+  assert.match(kind.description, /saved channel[^]*shows Claim/i);
+  assert.match(kind.description, /only that claimant gets Start[^]*Unclaim while its work is idle/i);
   assert.match(kind.description, /PERSON'S opinion, memory, judgment.*decision/i);
   assert.doesNotMatch(kind.description, /relay_task_create/i);
   // And it is available in the default messages-only profile: a task is an
@@ -1322,11 +1333,13 @@ test("relay_send teaches the relay-vs-REQUEST decision — David's discernment l
 });
 
 test("relay_send refuses to guess the recipient experience", async () => {
-  const client = { async sendRelay() { throw new Error("must not send"); } };
+  const calls = [];
+  const client = { async sendRelay(payload) { calls.push(payload); return { relayId: "relay_channel_task", state: "delivered" }; } };
   const base = {
     recipient: { relayUserId: "usr_sven" },
     title: "Review the launch",
     forHuman: "Can you take a look?",
+    forAgent: "Review the launch and report what you find.",
     idempotencyKey: "explicit-kind-1",
   };
   await assert.rejects(() => handleCall(client, "relay_send", base), /kind is required/i);
@@ -1334,10 +1347,13 @@ test("relay_send refuses to guess the recipient experience", async () => {
     () => handleCall(client, "relay_send", { ...base, recipient: {}, kind: "message" }),
     /recipient must set self=true or include contactId, relayUserId, email, groupId, or chatId/i,
   );
-  await assert.rejects(
-    () => handleCall(client, "relay_send", { ...base, kind: "task", recipient: { groupId: "grp_founders" } }),
-    /exactly one recipient/i,
-  );
+  await handleCall(client, "relay_send", {
+    ...base,
+    kind: "task",
+    recipient: { groupId: "grp_founders" },
+  });
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].recipient, { groupId: "grp_founders" });
 });
 
 test("relay_send rejects report headlines before delivery", async () => {
@@ -1445,7 +1461,7 @@ test("obsolete coordination protocol is absent and rejected before any API call"
   // state an agent sets on its own, so a human-initiated pull clears unread
   // and sends the read receipt — without it the sender sees "delivered"
   // forever). relay_acknowledge stays retired.
-  assert.equal(TOOLS.length, 30, "the full model catalog contains only current product tools");
+  assert.equal(TOOLS.length, 31, "the full model catalog contains only current product tools");
 
   const client = new Proxy({}, {
     get() { throw new Error("removed tool must not touch the API client"); },
@@ -1481,7 +1497,7 @@ test("the send path is annotated anthropic/alwaysLoad so no serving mode defers 
   for (const developer of [true, false]) {
     const tools = toolsForAccount({ requests: developer, aiSessions: developer, connectors: developer });
     const byName = new Map(tools.map((tool) => [tool.name, tool]));
-    const expectedAlwaysOn = new Set([...alwaysOn, ...(developer ? ["relay_task_start", "relay_task_complete"] : [])]);
+    const expectedAlwaysOn = new Set([...alwaysOn, ...(developer ? ["relay_task_start", "relay_task_complete", "relay_task_unclaim"] : [])]);
     for (const name of expectedAlwaysOn) {
       assert.equal(
         byName.get(name)?._meta?.["anthropic/alwaysLoad"],

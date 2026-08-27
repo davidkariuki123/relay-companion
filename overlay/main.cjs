@@ -106,7 +106,7 @@ const {
   runningHostsFromProcessList,
   terminalClaudeCodeRunningFromProcessList,
 } = require("./host-select.cjs");
-const { parseRelayDeepLink, relayDeepLinkFromArgv } = require("./deep-link.cjs");
+const { parseRelayDeepLink, relayDeepLinkFromArgv, relayDeepLinkFailureStatus } = require("./deep-link.cjs");
 const {
   overlayWanted,
   createHostRunningTracker,
@@ -647,6 +647,16 @@ function loadPlainStager() {
 let relayDeepLinkDrain = null;
 let pendingRelayReader = null;
 
+function acknowledgeRelayDeepLink(parsed, status = "opened") {
+  if (!parsed?.handoffId) return;
+  const callback = new URL("/open/relay/ack", parsed.ackOrigin || webBase());
+  callback.searchParams.set("handoff", parsed.handoffId);
+  callback.searchParams.set("host", parsed.host);
+  callback.searchParams.set("status", status);
+  shell.openExternal(callback.toString()).catch((error) =>
+    console.error("[overlay] Relay handoff ACK failed:", error && error.message));
+}
+
 function deliverPendingRelayReader() {
   if (!pendingRelayReader || !rendererListening || !win || win.isDestroyed() || win.webContents.isDestroyed()) {
     return false;
@@ -675,17 +685,20 @@ async function openRelayDeepLink(parsed) {
     if (!Array.isArray(chat?.items) || !chat.items.some((item) => item?.relayId === parsed.messageId)) {
       throw new Error("Relay message is unavailable to this account.");
     }
+    acknowledgeRelayDeepLink(parsed, "accepted");
     await pushInbox(true);
     pendingRelayReader = { messageId: parsed.messageId, chatId };
     requestExternalReopen(randomUUID());
     // Hot Pills receive this immediately. Cold Pills keep it until the renderer
     // explicitly confirms that its openReader listener is installed.
     deliverPendingRelayReader();
+    acknowledgeRelayDeepLink(parsed);
     return;
   }
   const fetched = await new RelayClient().fetchRelay(parsed.messageId);
   const packet = fetched && fetched.packet;
   if (!packet || packet.id !== parsed.messageId) throw new Error("Relay message is unavailable to this account.");
+  acknowledgeRelayDeepLink(parsed, "accepted");
   stagePlainRelayItem({
     item: {
       relayId: packet.id,
@@ -707,6 +720,7 @@ async function openRelayDeepLink(parsed) {
   await pushInbox(true);
   requestExternalReopen(randomUUID());
   await openPacket(packet.id, { host: parsed.host, fresh: true });
+  acknowledgeRelayDeepLink(parsed);
 }
 
 function drainRelayDeepLinks() {
@@ -718,6 +732,7 @@ function drainRelayDeepLinks() {
         await openRelayDeepLink(parsed);
       } catch (error) {
         console.error("[overlay] Relay deep link failed:", error && error.message);
+        acknowledgeRelayDeepLink(parsed, relayDeepLinkFailureStatus(error));
         requestExternalReopen(randomUUID());
       }
     }
@@ -1372,6 +1387,7 @@ function readRelays() {
       taskStartedAt: p.taskStartedAt || null,
       taskRunOwner: p.taskRunOwner || null,
       taskCompletedAt: p.taskCompletedAt || null,
+      taskClaim: p.taskClaim || null,
       completionReview: p.completionReview || null,
       // Ordinary Relays may be worked on locally without becoming Tasks.
       // These stamps belong only to the recipient's private Work folder: they
@@ -1545,6 +1561,7 @@ function sentFingerprintOf(items) {
       r.taskStartedAt,
       r.taskRunOwner,
       r.taskCompletedAt,
+      r.taskClaim,
     ]),
   );
 }
@@ -2364,6 +2381,7 @@ async function pushInboxNow(force) {
       r.taskStartedAt,
       r.taskRunOwner,
       r.taskCompletedAt,
+      r.taskClaim,
       r.materializedCodex,
       r.materializedClaude,
       r.codexModel,
@@ -2379,6 +2397,10 @@ async function pushInboxNow(force) {
       r.delivery && r.delivery.state,
       r.delivery && r.delivery.channel,
       r.hasAttachments,
+      r.taskStartedAt,
+      r.taskRunOwner,
+      r.taskCompletedAt,
+      r.taskClaim,
       r.materializedCodex,
       r.materializedClaude,
       reactionStateFingerprint(r.reactions),
@@ -2962,7 +2984,7 @@ function rowById(packetId) {
   if (!sent) return null;
   return {
     id: String(packetId),
-    relayNotificationKind: "plain_relay",
+    relayNotificationKind: sent.kind === "task" ? "task" : "plain_relay",
     direction: "outbound",
     forHuman: sent.forHuman || sent.preview || "",
     forAgent: sent.forAgent || "",
@@ -2971,8 +2993,82 @@ function rowById(packetId) {
     updatedAt: sent.updatedAt || sent.createdAt || "",
     source: sent.source || null,
     threadId: sent.threadId || packetId,
+    groupSendId: sent.groupSendId || null,
+    recipientGroupId: sent.recipientGroupId || null,
+    recipientGroupName: sent.recipientGroupName || "",
+    taskStartedAt: sent.taskStartedAt || null,
+    taskRunOwner: sent.taskRunOwner || null,
+    taskCompletedAt: sent.taskCompletedAt || null,
+    taskClaim: sent.taskClaim || null,
     workStartedAt: sent.source?.agentSessionId ? (sent.createdAt || new Date().toISOString()) : null,
   };
+}
+
+async function mutateTaskClaim(relayId, action, expectedVersion) {
+  const id = String(relayId || "");
+  if (!id) return { ok: false, error: "Missing Task id." };
+  const current = rowById(id);
+  let client = null;
+  try {
+    client = await relayClient();
+    const payload = {
+      ...(Number.isInteger(expectedVersion) ? { expectedVersion } : {}),
+      idempotencyKey: `task-${action}:${id}:${Number.isInteger(expectedVersion) ? expectedVersion : "current"}`,
+    };
+    const response = action === "unclaim"
+      ? await client.taskUnclaimed(id, payload)
+      : await client.taskClaimed(id, payload);
+    const taskClaim = response && response.taskClaim;
+    if (taskClaim) {
+      updateStagedPacket(id, { taskClaim });
+      const groupSendId = current?.groupSendId || null;
+      sentCache = (sentCache || []).map((item) => {
+        const itemId = String(item?.relayId || item?.id || "");
+        const sameLogicalTask = itemId === id || (groupSendId && item?.groupSendId === groupSendId);
+        return sameLogicalTask ? { ...item, taskClaim } : item;
+      });
+      sentFingerprint = sentFingerprintOf(sentCache);
+    }
+    void refreshSent().then(() => pushInbox(true));
+    await pushInbox(true);
+    return { ok: true, taskRelayId: id, taskClaim };
+  } catch (error) {
+    let taskClaim = error?.body?.details?.taskClaim || null;
+    try {
+      const fetched = taskClaim ? null : (client ? await client.fetchRelay(id) : null);
+      taskClaim ||= fetched?.packet?.taskClaim || null;
+      if (taskClaim) updateStagedPacket(id, { taskClaim });
+    } catch {}
+    const raced = ["task_already_claimed", "task_claimed_by_other", "task_claim_version_conflict"]
+      .includes(String(error?.body?.error || ""));
+    await refreshSent().catch(() => sentCache);
+    await pushInbox(true);
+    return {
+      ok: false,
+      error: raced ? "Someone else claimed this just now." : ((error && error.message) || String(error)),
+      ...(taskClaim ? { taskClaim } : {}),
+    };
+  }
+}
+
+async function stopTaskWork(relayId) {
+  const id = String(relayId || "");
+  if (!id) return { ok: false, error: "Missing Task id." };
+  try {
+    const client = await relayClient();
+    const response = await client.taskStopped(id, { idempotencyKey: `task-stopped:${id}:${randomUUID()}` });
+    if (response?.taskClaim) {
+      updateStagedPacket(id, { taskClaim: response.taskClaim });
+      sentCache = (sentCache || []).map((item) => String(item?.relayId || item?.id || "") === id
+        ? { ...item, taskClaim: response.taskClaim }
+        : item);
+      sentFingerprint = sentFingerprintOf(sentCache);
+    }
+    await pushInbox(true);
+    return { ok: true, ...response };
+  } catch (error) {
+    return { ok: false, error: (error && error.message) || String(error) };
+  }
 }
 
 // Preview is deliberately an allowlisted, human-facing projection of a staged
@@ -3022,6 +3118,7 @@ function previewPayloadForPacket(packetId) {
           taskStartedAt: row.taskStartedAt || null,
           taskRunOwner: row.taskRunOwner || null,
           taskCompletedAt: row.taskCompletedAt || null,
+          taskClaim: row.taskClaim || null,
           runtimes: {
             claude: true,
             codex: Boolean(codexCliPath() || appInstalled("Codex") || appInstalled("ChatGPT")),
@@ -5686,17 +5783,25 @@ async function startTaskFromPreview(input) {
   // provider returned a real live run; a launch failure must never tell the
   // sender that work began. Receipt failure is retriable and does not destroy
   // the already-running local session.
+  let startedReceipt = null;
   if (isRequest) {
     try {
       const client = await relayClient();
-      await client.taskStarted(id);
+      startedReceipt = await client.taskStarted(id);
     } catch (error) {
       console.error("[overlay] encrypted task started stamp failed:", id, error && error.message);
     }
   }
   try {
     const stamped = new Date().toISOString();
-    updateStagedPacket(id, isRequest ? { taskState: "started", taskStartedAt: stamped } : { workStartedAt: stamped, workCompletedAt: null });
+    updateStagedPacket(id, isRequest
+      ? {
+          taskState: "started",
+          taskStartedAt: startedReceipt?.startedAt || stamped,
+          ...(startedReceipt?.taskRunOwner ? { taskRunOwner: startedReceipt.taskRunOwner } : {}),
+          ...(startedReceipt?.taskClaim ? { taskClaim: startedReceipt.taskClaim } : {}),
+        }
+      : { workStartedAt: stamped, workCompletedAt: null });
     pushInbox(true);
     void ensureCanonicalCompletionMonitor(id);
     return { ok: true, taskStartedAt: stamped, replied: reply.ok, running, runError };
@@ -6506,28 +6611,40 @@ async function bridgeProviderCompletion(relayId, provider, sessionId, candidate)
     const { providerCompletionIdempotencyKey } = await import("../src/provider-completion.js");
     const body = String(candidate?.body || "").trim();
     const client = await relayClient();
-    const sent = existing ? { relayId: existing } : await client.sendRelay({
-      recipient: {},
-      kind: "message",
-      type: "completion",
-      // A completion is the provider's answer landing in the chat — a text,
-      // not a titled document. Nobody authored a title; none is sent. The
-      // `type` field is what marks it as a completion, not a derived subject.
-      forHuman: body,
-      forAgent: "",
-      inReplyToRelayId: key,
-      idempotencyKey: providerCompletionIdempotencyKey({ relayId: key, provider, sessionId }),
-      source: { host: provider === "cowork" ? "claude-cowork" : provider, sessionId },
-    });
+    const sent = existing
+      ? { relayId: existing }
+      : key.startsWith("egmsg_")
+        ? await client.taskCompleted(key, {
+            forHuman: body,
+            forAgent: "",
+            attachments: [],
+            sourceProvider: provider === "cowork" ? "claude" : provider,
+            sourceNativeId: sessionId,
+          })
+        : await client.sendRelay({
+            recipient: {},
+            kind: "message",
+            type: "completion",
+            // A completion is the provider's answer landing in the chat — a text,
+            // not a titled document. Nobody authored a title; none is sent. The
+            // `type` field is what marks it as a completion, not a derived subject.
+            forHuman: body,
+            forAgent: "",
+            inReplyToRelayId: key,
+            idempotencyKey: providerCompletionIdempotencyKey({ relayId: key, provider, sessionId }),
+            source: { host: provider === "cowork" ? "claude-cowork" : provider, sessionId },
+          });
+    const completionRelayId = String(sent?.relayId || sent?.resultRelayId || "sent");
     updateStagedPacket(key, {
-      providerCompletionRelayId: String(sent?.relayId || "sent"),
+      providerCompletionRelayId: completionRelayId,
       taskState: "completed",
       taskCompletedAt: candidate.completedAt || new Date().toISOString(),
       completionReview: null,
-      ...(provider === "cowork" ? { coworkCompletionRelayId: String(sent?.relayId || "sent") } : {}),
+      ...(sent?.taskClaim ? { taskClaim: sent.taskClaim } : {}),
+      ...(provider === "cowork" ? { coworkCompletionRelayId: completionRelayId } : {}),
     });
     refreshSent().then(() => pushInbox(true)).catch(() => {});
-    return { ok: true, relayId: sent?.relayId || "" };
+    return { ok: true, relayId: completionRelayId };
   })();
   providerCompletionInflight.set(key, operation);
   try { return await operation; }
@@ -7622,6 +7739,13 @@ ipcMain.handle("relay:taskStart", (_e, id, route) =>
     permission: (route && route.permission) || "",
   }),
 );
+ipcMain.handle("relay:taskClaim", (_e, id, expectedVersion) =>
+  mutateTaskClaim(id, "claim", expectedVersion),
+);
+ipcMain.handle("relay:taskUnclaim", (_e, id, expectedVersion) =>
+  mutateTaskClaim(id, "unclaim", expectedVersion),
+);
+ipcMain.handle("relay:taskStop", (_e, id) => stopTaskWork(id));
 // The agent document of an ordinary Relay starts private, recipient-owned
 // work. It shares the native runner but never turns the Relay into a Task
 // and never emits Task receipts to the sender.

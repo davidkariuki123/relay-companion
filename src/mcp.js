@@ -190,7 +190,7 @@ export const TOOLS = [
     name: "relay_task_start",
     _meta: ALWAYS_LOAD_META,
     description:
-      "Mark one exact inbound Relay Task as Working when this human explicitly asks you to carry it out in the current agent session. Call before substantive work begins. Do not call merely because you read, summarize, discuss, or inspect a Task. Relay records this session as the Task owner; it does not open or foreground the Relay pill.",
+      "Mark one exact inbound Relay Task as Working when this human explicitly asks you to carry it out in the current agent session. Call before substantive work begins. For an unclaimed channel Task, Start atomically claims it for this human; it refuses a Task claimed by somebody else. Do not call merely because you read, summarize, discuss, or inspect a Task. Relay records this session as the Task owner; it does not open or foreground the Relay pill.",
     inputSchema: {
       type: "object",
       properties: {
@@ -226,6 +226,21 @@ export const TOOLS = [
         idempotencyKey: { type: "string", description: "A unique key of at least 8 characters for this completion operation." },
       },
       required: ["taskRelayId", "forHuman", "forAgent", "idempotencyKey"],
+    },
+  },
+  {
+    name: "relay_task_unclaim",
+    _meta: ALWAYS_LOAD_META,
+    description:
+      "Release this human's claim on one idle channel Task when they explicitly ask. Only the current claimant can release it. Active work must be stopped first; direct Tasks always belong to their recipient and cannot be unclaimed.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        taskRelayId: { type: "string", description: "The exact channel Task id to release." },
+        expectedVersion: { type: "integer", minimum: 0, description: "The ownership version shown on the Task, when known." },
+        idempotencyKey: { type: "string", description: "A unique key of at least 8 characters for this release operation." },
+      },
+      required: ["taskRelayId", "idempotencyKey"],
     },
   },
   {
@@ -275,7 +290,7 @@ export const TOOLS = [
           type: "string",
           enum: ["message", "task"],
           description:
-            "Required classification of the requested outcome, never of whether the wording addresses the person or explicitly names their agent. 'message' is correspondence whose response is the PERSON'S opinion, memory, judgment, decision, acknowledgement, or discussion. 'task' is a direct Task whenever the sender wants the RECIPIENT'S AGENT to perform external work: inspect, retrieve, analyze, create, change, configure, install, switch, coordinate, test, or verify something and report the result. Imperative wording addressed as 'you' is still a Task when it asks for that work. Exact example: 'Switch your Relay install to dev and confirm the version/channel' MUST be kind='task', not kind='message'. By contrast, 'Do you think we should switch to dev?' is kind='message'. A technical topic can still be a message; forAgent can contain dense implementation context without making it a Task. A Task gives the person a Start control, has exactly one recipient and no group, and a small or quick operation is still a Task. The old 'handoff' kind no longer exists for new sends; machine detail belongs in forAgent, not in a separate message ontology. A Task always needs a recipient who is already on Relay; it cannot be handed over as a share link.",
+            "Required classification of the requested outcome, never of whether the wording addresses the person or explicitly names their agent. 'message' is correspondence whose response is the PERSON'S opinion, memory, judgment, decision, acknowledgement, or discussion. 'task' asks for external work: inspect, retrieve, analyze, create, change, configure, install, switch, coordinate, test, or verify something and report the result. A direct Task gives its one recipient a Start control. A Task sent to a saved channel first shows Claim to eligible channel members; after one person claims it, only that claimant gets Start and may Unclaim while its work is idle. Imperative wording addressed as 'you' is still a Task when it asks for that work. Exact example: 'Switch your Relay install to dev and confirm the version/channel' MUST be kind='task', not kind='message'. By contrast, 'Do you think we should switch to dev?' is kind='message'. A technical topic can still be a message; forAgent can contain dense implementation context without making it a Task. A small or quick operation is still a Task. The old 'handoff' kind no longer exists for new sends; machine detail belongs in forAgent, not in a separate message ontology. Every direct recipient or channel member must already be on Relay; a Task cannot be handed over as a share link.",
         },
         title: {
           type: "string",
@@ -715,6 +730,7 @@ export const E2EE_REMOTE_TOOL_NAMES = new Set([
   "relay_send",
   "relay_task_start",
   "relay_task_complete",
+  "relay_task_unclaim",
   "relay_contacts_search",
   "relay_contact_update",
   "relay_groups_list",
@@ -1629,6 +1645,17 @@ export async function handleCall(client, name, args, {
         ...sessionSourceBinding(),
       }));
     }
+    case "relay_task_unclaim": {
+      const taskRelayId = String(args.taskRelayId || "").trim();
+      const idempotencyKey = String(args.idempotencyKey || "").trim();
+      if (!taskRelayId || idempotencyKey.length < 8) {
+        throw new Error("taskRelayId and an idempotencyKey of at least 8 characters are required");
+      }
+      return text(await client.taskUnclaimed(taskRelayId, {
+        ...(Number.isInteger(args.expectedVersion) ? { expectedVersion: args.expectedVersion } : {}),
+        idempotencyKey,
+      }));
+    }
     case "relay_agent_complete": {
       const runRelayId = String(args.runRelayId || "").trim();
       const forHuman = String(args.forHuman || "").trim();
@@ -1644,7 +1671,7 @@ export async function handleCall(client, name, args, {
       const explicitReplyToRelayId = args.replyToRelayId || args.inReplyToRelayId;
       if (!args.kind) {
         throw new Error(
-          "kind is required: choose 'message' for correspondence with the person or 'task' for a direct Task to their agent",
+          "kind is required: choose 'message' for correspondence or 'task' for work one person can claim and carry out",
         );
       }
       if (!["message", "task"].includes(args.kind)) {
@@ -1653,11 +1680,8 @@ export async function handleCall(client, name, args, {
       if (args.kind === "task" && !features.requests) {
         throw new Error("Tasks are available only to Relay developer accounts on dev; send ordinary correspondence with kind='message'");
       }
-      if (args.kind === "task" && args.recipient?.groupId) {
-        throw new Error("A direct Task has exactly one recipient and cannot be sent to a group");
-      }
       if (args.kind === "task" && args.recipient?.chatId) {
-        throw new Error("Address an agent Task to one contact, account, or email; chatId is for ordinary conversation messages");
+        throw new Error("Address a Task to one contact/account or a saved channel groupId; chatId is for ordinary conversation messages");
       }
       if (typeof args.forAgent !== "string" || !/\S/u.test(args.forAgent)) {
         throw new Error("forAgent is required and must be non-empty for every Relay; use relay_chat_send only when the human explicitly requested plain text");

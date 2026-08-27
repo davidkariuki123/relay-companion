@@ -543,6 +543,10 @@ export class RelayClient {
     return this.#req("GET", "/v1/e2ee/groups/messages");
   }
 
+  e2eeGroupTaskClaims(ids) {
+    return this.#req("POST", "/v1/e2ee/groups/messages/task/claims", { ids });
+  }
+
   e2eeAcknowledgeGroupMessage(eventId) {
     return this.#req("POST", `/v1/e2ee/groups/messages/${encodeURIComponent(eventId)}/ack`, {});
   }
@@ -735,6 +739,12 @@ export class RelayClient {
         preview: item.preview,
         inReplyToRelayId: item.inReplyToRelayId,
         threadId: item.threadId,
+        ...(item.taskState ? { taskState: item.taskState } : {}),
+        ...(item.taskStartedAt ? { taskStartedAt: item.taskStartedAt } : {}),
+        ...(item.taskCompletedAt ? { taskCompletedAt: item.taskCompletedAt } : {}),
+        ...(item.taskClaim ? { taskClaim: item.taskClaim } : {}),
+        ...(item.recipientGroupId ? { recipientGroupId: item.recipientGroupId } : {}),
+        ...(item.recipientGroupName ? { recipientGroupName: item.recipientGroupName } : {}),
         hasAttachments: item.hasAttachments,
         e2ee: item.e2ee,
         ...(item.historyImported ? { historyImported: true } : {}),
@@ -993,8 +1003,27 @@ export class RelayClient {
     return this.#req("POST", `/v1/relays/${encodeURIComponent(id)}/read`, payload);
   }
 
+  /** Claim one shared channel Task for this human. */
+  async taskClaimed(id, payload = {}) {
+    if (String(id).startsWith("egmsg_")) {
+      return this.#req("POST", `/v1/e2ee/groups/messages/${encodeURIComponent(id)}/task/claim`, payload);
+    }
+    return this.#req("POST", `/v1/relays/${encodeURIComponent(id)}/task/claim`, payload);
+  }
+
+  /** Release this human's claim on an idle shared channel Task. */
+  async taskUnclaimed(id, payload = {}) {
+    if (String(id).startsWith("egmsg_")) {
+      return this.#req("POST", `/v1/e2ee/groups/messages/${encodeURIComponent(id)}/task/unclaim`, payload);
+    }
+    return this.#req("POST", `/v1/relays/${encodeURIComponent(id)}/task/unclaim`, payload);
+  }
+
   /** The recipient started a Task, either in Relay Work or an external MCP session. */
   async taskStarted(id, payload = {}) {
+    if (String(id).startsWith("egmsg_")) {
+      return this.#req("POST", `/v1/e2ee/groups/messages/${encodeURIComponent(id)}/task/started`, payload);
+    }
     if (String(id).startsWith("erelay_")) {
       return this.e2eeTaskChanged(id, "started", {
         ...payload,
@@ -1005,8 +1034,55 @@ export class RelayClient {
     return this.#req("POST", `/v1/relays/${encodeURIComponent(id)}/task/started`, payload);
   }
 
+  /** The claimant's provider run is no longer live; ownership remains theirs. */
+  async taskStopped(id, payload = {}) {
+    if (String(id).startsWith("egmsg_")) {
+      return this.#req("POST", `/v1/e2ee/groups/messages/${encodeURIComponent(id)}/task/stopped`, payload);
+    }
+    return this.#req("POST", `/v1/relays/${encodeURIComponent(id)}/task/stopped`, payload);
+  }
+
   /** Complete one exact inbound Task and return its canonical result Relay. */
   async taskCompleted(id, payload) {
+    if (String(id).startsWith("egmsg_")) {
+      const records = await e2eeGroupOpenedRecords(this);
+      const target = records.find((record) => record.eventId === id && record.item.kind === "task");
+      if (!target) throw new Error("Encrypted group Task not found on this device.");
+      await this.taskStarted(id, {
+        idempotencyKey: `task-started:${id}`,
+        source: "relay_mcp_human_requested",
+        ...(payload.sourceProvider ? { sourceProvider: payload.sourceProvider } : {}),
+        ...(payload.sourceNativeId ? { sourceNativeId: payload.sourceNativeId } : {}),
+      });
+      const sent = await this.sendRelay({
+        recipient: { groupId: target.groupId },
+        kind: "message",
+        type: "completion",
+        forHuman: payload.forHuman,
+        forAgent: payload.forAgent || "",
+        attachments: payload.attachments || [],
+        inReplyToRelayId: id,
+        idempotencyKey: `task-complete:${id}`,
+        source: {
+          host: "relay-mcp",
+          ...(payload.sourceProvider === "codex" ? { surface: "codex" } : {}),
+          ...(payload.sourceProvider === "claude" ? { surface: "claude_code" } : {}),
+          ...(payload.sourceNativeId ? { threadId: payload.sourceNativeId } : {}),
+        },
+      });
+      const completed = await this.#req(
+        "POST",
+        `/v1/e2ee/groups/messages/${encodeURIComponent(id)}/task/completed`,
+        { idempotencyKey: `task-complete-state:${id}` },
+      );
+      return {
+        taskRelayId: id,
+        state: "done",
+        completedAt: completed.completedAt,
+        resultRelayId: sent.relayId,
+        taskClaim: completed.taskClaim,
+      };
+    }
     if (String(id).startsWith("erelay_")) {
       const sent = await this.sendRelay({
         recipient: {},

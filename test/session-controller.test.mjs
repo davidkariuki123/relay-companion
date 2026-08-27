@@ -8,11 +8,67 @@ import {
   commandAvailable,
   claudeSessionNeedsCatalogRestart,
   codexRecoveryWaitMs,
+  materializeRelayOperation,
   publishAndFind,
   resolveClaudeBackgroundAgent,
   runSessionDirectoryOnce,
   waitForClaudeCompletion,
 } from "../src/session-controller.js";
+
+test("a remote Slack action materializes the exact Relay instead of inventing a second prompt", async () => {
+  const staged = [];
+  const opened = [];
+  const receipts = [];
+  const operation = {
+    id: "rsop_mobile_handoff",
+    kind: "start",
+    input: { provider: "codex", relayMessageId: "msg_clicked" },
+  };
+  const handled = await materializeRelayOperation({
+    async fetchRelay(id) {
+      assert.equal(id, "msg_clicked");
+      return {
+        packet: {
+          id,
+          kind: "message",
+          title: "Exact handoff",
+          sender: { name: "Sven" },
+          forHuman: "For David",
+          forAgent: "Complete context",
+          createdAt: "2026-08-27T10:00:00.000Z",
+        },
+        attachmentUrls: { att_1: "https://files.test/att_1" },
+      };
+    },
+  }, operation, "claim_secret", {
+    load: async () => ({
+      stagePlainRelayItem(value) { staged.push(value); },
+      async openRelay(value) {
+        opened.push(value);
+        return { url: "codex://threads/thread_exact" };
+      },
+    }),
+    async recordEvidence(_client, operationId, claimToken, state, result) {
+      receipts.push({ operationId, claimToken, state, result });
+    },
+  });
+  assert.equal(handled, true);
+  assert.equal(staged[0].packet.id, "msg_clicked");
+  assert.equal(staged[0].packet.forAgent, "Complete context");
+  assert.deepEqual(opened, [{ id: "msg_clicked", host: "codex", forceFresh: true, log: opened[0].log }]);
+  assert.deepEqual(receipts.map((receipt) => receipt.state), ["handed_off", "applied", "completed"]);
+  assert.ok(receipts.every((receipt) => receipt.result.nativeSessionId === "thread_exact"));
+});
+
+test("ordinary session starts remain on the ordinary controller path", async () => {
+  assert.equal(await materializeRelayOperation({}, {
+    id: "rsop_ordinary",
+    kind: "start",
+    input: { provider: "codex", message: "Start new work" },
+  }, "claim_secret", {
+    load: async () => { throw new Error("must not load materializer"); },
+  }), false);
+});
 
 test("recovered Codex turns only wait through their remaining activity window", () => {
   const now = 10 * 60 * 1000;

@@ -54,6 +54,7 @@ const {
   restoreRuntimeLinks,
   stageVerifiedRuntime,
   tarInvocation,
+  validateSetupCompatibilityArgs,
   validateArchiveEntries,
 } = createRequire(import.meta.url)("../bootstrap/relay-setup.cjs");
 const credentialStore = createRequire(import.meta.url)("../src/credential-store.cjs");
@@ -65,6 +66,13 @@ const {
 
 const version = "1.2.3";
 const sourceSha = "a".repeat(40);
+const WEBSITE_SETUP_ARGS = [
+  "--code", "PAIR123",
+  "--api", "https://aia6vj5pgp.us-east-1.awsapprunner.com",
+  "--web", "https://sendrelays.com",
+  "--open-relay", "open_tok",
+  "--host", "codex",
+];
 
 test("release channels are monotonic and rollback is a higher roll-forward version", () => {
   assert.equal(compareExactVersions("1.2.4", "1.2.3"), 1);
@@ -1066,6 +1074,31 @@ test("canonical updater installs the signed artifact and does not recursively np
   assert.doesNotMatch(bootstrap, /npm\s+(?:install|i)\b/);
 });
 
+test("the thin installer accepts only the website's legacy setup contract", () => {
+  assert.deepEqual(validateSetupCompatibilityArgs([]), []);
+  assert.deepEqual(validateSetupCompatibilityArgs(WEBSITE_SETUP_ARGS), WEBSITE_SETUP_ARGS);
+  assert.deepEqual(
+    validateSetupCompatibilityArgs(["--code", "PAIR123", "--api", "http://localhost:4000"]),
+    ["--code", "PAIR123", "--api", "http://localhost:4000"],
+  );
+  assert.throws(
+    () => validateSetupCompatibilityArgs(["--api", "https://api.sendrelays.com"]),
+    /invalid pairing code/,
+  );
+  assert.throws(
+    () => validateSetupCompatibilityArgs(["--code", "PAIR123", "--api", "http://api.sendrelays.com"]),
+    /secure service origin/,
+  );
+  assert.throws(
+    () => validateSetupCompatibilityArgs(["--code", "PAIR123", "--host", "codex"]),
+    /host without a relay token/,
+  );
+  assert.throws(
+    () => validateSetupCompatibilityArgs(["--code", "PAIR123", "--name", "unreviewed"]),
+    /unsupported compatibility option/,
+  );
+});
+
 test("the thin installer forwards ordinary commands to the active signed runtime", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-thin-forward-"));
   try {
@@ -1202,6 +1235,7 @@ test("bootstrap Linux setup registers without restarting, then uses the exact-ro
         platform: "linux",
         homeDir: root,
         spawnImpl: (command, args) => { calls.push({ command, args }); return { status: 0, stdout: "", stderr: "" }; },
+        setupCompatibilityArgs: WEBSITE_SETUP_ARGS,
         activateLinuxServices: async (target) => {
           activated = true;
           assert.equal(target.packageRoot, packageRoot);
@@ -1211,6 +1245,11 @@ test("bootstrap Linux setup registers without restarting, then uses the exact-ro
     );
     const setup = calls.find(({ args }) => args.includes("setup"));
     assert.ok(setup.args.includes("--no-restart"));
+    assert.deepEqual(
+      setup.args,
+      [bin, "setup", "--no-trampoline", "--claim", ...WEBSITE_SETUP_ARGS, "--no-restart"],
+      "the verified runtime receives the website pairing and open-relay contract intact",
+    );
     assert.equal(activated, true);
     assert.equal(JSON.parse(fs.readFileSync(pointerPath, "utf8")).version, version);
   } finally {

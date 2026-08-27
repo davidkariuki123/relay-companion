@@ -80,6 +80,7 @@ class FakeGroupDirectory {
     this.log = transparencyLog(identities);
     this.packages = new Map();
     this.groupMessages = new Map();
+    this.taskClaims = new Map();
     this.groupSendAttempts = [];
     this.failAfterAcceptedGroupSends = 0;
     this.groupTransitions = new Map();
@@ -157,6 +158,13 @@ class FakeGroupDirectory {
         return { items: [...service.groupMessages.values()]
           .filter((item) => item.senderDeviceId !== identity.deviceId)
           .map((item) => ({ ...item, sender: item.sender || { relayUserId: "usr_alice", deviceId: "dev_alice", name: "Alice" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() })) };
+      },
+      async e2eeGroupTaskClaims(ids) {
+        return {
+          claims: Object.fromEntries(ids.flatMap((id) => service.taskClaims.has(id)
+            ? [[id, service.taskClaims.get(id)]]
+            : [])),
+        };
       },
       async e2eeAcknowledgeGroupMessage() { return { ok: true }; },
       async e2eeHistoryArchives() { return { items: [] }; },
@@ -422,6 +430,32 @@ test("persistent MLS group ciphertext survives restarts and opens for every enro
     assert.equal(productRecord?.item.forHuman, "This is a normal encrypted group chat message.");
     assert.equal(JSON.stringify(service.groupMessages.get(productSent.relayId)).includes("normal encrypted group"), false);
 
+    const encryptedTask = await sendE2eeGroupRelay(service.client(alice), {
+      recipient: { groupId: preparation.groupId },
+      kind: "task",
+      title: "Verify encrypted ownership",
+      forHuman: "Please verify the encrypted claim projection.",
+      forAgent: "Check ownership without exposing this instruction to the server.",
+      idempotencyKey: "group-product-task-1",
+    });
+    service.taskClaims.set(encryptedTask.relayId, {
+      scope: "channel",
+      state: "claimed",
+      workState: "idle",
+      version: 1,
+      claimant: { relayUserId: alice.userId, name: alice.name, self: true },
+      claimedAt: "2026-08-27T12:00:00.000Z",
+      createdBy: { relayUserId: alice.userId, name: alice.name, self: true },
+      channel: { id: preparation.groupId, name: "Friends" },
+      capabilities: { canClaim: false, canUnclaim: true, canStart: true },
+    });
+    const encryptedTaskRecord = (await e2eeGroupOpenedRecords(service.client(alice)))
+      .find((record) => record.eventId === encryptedTask.relayId);
+    assert.equal(encryptedTaskRecord?.item.taskClaim?.claimant?.name, "Alice");
+    assert.equal(encryptedTaskRecord?.item.recipientGroupName, "Friends");
+    assert.equal(JSON.stringify(service.groupMessages.get(encryptedTask.relayId)).includes("encrypted claim projection"), false);
+    assert.equal(JSON.stringify(service.taskClaims.get(encryptedTask.relayId)).includes("without exposing"), false);
+
     const importedGroup = await sendE2eeGroupRelay(service.client(alice), {
       recipient: { groupId: preparation.groupId },
       kind: "message",
@@ -497,7 +531,7 @@ test("persistent MLS group ciphertext survives restarts and opens for every enro
     const retried = await sendE2eeGroupEvent(service.client(alice), retryInput);
     assert.equal(retried.eventId, retryInput.eventId);
     assert.deepEqual(service.groupSendAttempts.at(-1), firstAttempt, "retry resends identical MLS bytes");
-    assert.equal(service.groupMessages.size, 4, "the service retains one row per logical group event");
+    assert.equal(service.groupMessages.size, 5, "the service retains one row per logical group event");
     const stateAfterSuccess = readEncryptedGroupState(alice, preparation.groupId);
     assert.equal(stateAfterSuccess.stateRevision, stateAfterFailure.stateRevision, "acknowledgement never advances MLS again");
     assert.equal(readPendingGroupOutbox(alice, preparation.groupId, retryInput.eventId).status, "completed");

@@ -1179,6 +1179,24 @@
   .th-run.mine { justify-content:flex-end; }
   .th-msg { width:fit-content; min-width:132px; } /* WhatsApp geometry: bubbles hug their words (min protects the clock anchor) */
   .th-msg.mine { margin-left:auto; }
+  /* A channel Task keeps the deployed message bubble unchanged. Ownership is
+     a separate full-width sibling beneath it, sharing only a sizing wrapper so
+     the button can never drift onto or inside the message frame. */
+  .th-task-stack { width:fit-content; min-width:132px; max-width:88%; margin:7px 16px 0; }
+  .th-task-stack.mine { margin-left:auto; }
+  .th-task-stack > .th-msg { width:100%; max-width:none; min-width:0; margin:0 !important; }
+  .task-claim-control { width:100%; margin-top:8px; font-family:var(--sans); }
+  .task-claim-button { appearance:none; width:100%; min-height:44px; padding:9px 14px; border-radius:10px;
+    font:650 12px/1.2 var(--sans); cursor:pointer; transition:background var(--t-fast) var(--settle), color var(--t-fast) var(--settle), border-color var(--t-fast) var(--settle), opacity var(--t-fast) var(--settle); }
+  .task-claim-button.claim { border:1px solid var(--accent); background:var(--accent); color:white; }
+  .task-claim-button.claim:hover { background:color-mix(in srgb,var(--accent) 88%,black); }
+  .task-claim-button.unclaim { border:1px solid color-mix(in srgb,var(--accent) 58%,var(--edge)); background:transparent; color:var(--accent); }
+  .task-claim-button.unclaim:hover { background:color-mix(in srgb,var(--accent) 8%,transparent); border-color:var(--accent); }
+  .task-claim-button:disabled { opacity:.55; cursor:default; }
+  .task-claim-status { width:100%; padding:7px 2px 2px; color:var(--muted); font:600 11px/1.35 var(--sans); }
+  .task-claim-status.mine { color:var(--accent); }
+  .task-claim-release { padding:0 2px 6px; color:var(--faint); font:500 10.5px/1.35 var(--sans); }
+  .task-claim-error { padding:6px 2px 0; color:var(--danger); font:500 10.5px/1.35 var(--sans); }
   /* Reactions B2 — live badges cling to the original bubble; the separately
      rendered serif whisper is the chronological conversation record. */
   .th-msg.has-rx { margin-bottom:12px; padding-bottom:19px; }
@@ -1479,6 +1497,7 @@
   .rd-col .reader-from { text-align:center; }
   .rd-col .ta-dock.inline .ta-meta { justify-content:center; gap:14px; }
   .rd-col .row-err { text-align:center; }
+  .rd-col > .task-claim-control { width:min(100%,560px); margin:12px auto 4px; }
   /* The agent document's footer is the same open row the room paints under a
      bubble — here it stands on its own, at the letter's measure. */
   .rd-host-actions { margin:18px auto 0; width:min(100%, 560px); }
@@ -2138,7 +2157,7 @@
      land fully open instead of restarting its reveal transition on every poll. */
   .tb-completed-reveal.preexpanded { transition:none; }
   .tb-completed-clip { min-height:0; overflow:hidden; }
-  .tb-row { display:flex; gap:11px; padding:13px 16px 0; cursor:pointer; }
+  .tb-row { display:grid; grid-template-columns:auto minmax(0,1fr); gap:0 11px; padding:13px 16px 0; cursor:pointer; }
   .tb-row .tb-main { flex:1 1 auto; min-width:0; border-bottom:1px solid var(--hair); padding-bottom:13px; }
   .tb-row:last-of-type .tb-main { border-bottom:0; }
   .tb-row:hover { background:var(--wash); }
@@ -2148,6 +2167,7 @@
   .tb-row .th-title { margin-top:0; color:var(--muted); }
   .tb-row.unread .th-title { color:var(--ink); font-weight:500; }
   .tb-sub { font-family:var(--sans); font-size:10px; color:var(--muted-2); margin-top:3px; }
+  .tb-row > .task-claim-control { grid-column:1 / -1; margin:0 0 13px; }
   .tb-actions { flex:0 0 auto; display:flex; align-items:center; gap:3px; margin-left:8px; }
   /* Task verbs should feel human, not terminal-like: warm Inter, unboxed, and
      visible enough to make a waiting Task immediately actionable. */
@@ -5057,6 +5077,8 @@
   }
   function chatOrder() { return protoPref("proto.convOrder", "chat"); } // "chat" | "inbox"
   const taskLocal = new Map(); // packetId -> "running" | "parked" (prototype-local approval state)
+  const taskClaimNotes = new Map(); // ownership errors stay with the separate claim control
+  const taskStopPending = new Set(); // one server-side idle transition per terminal Work feed
   // A Task whose chosen provider is not ready owns a real Work face, but no
   // provider session yet. Keeping that state separate from taskLocal prevents
   // the auth prompt from manufacturing a running Task or attaching a feed that
@@ -5072,6 +5094,79 @@
     return k === "task_request" || k === "task";
   }
   function taskRows() { return (payload.relays || []).filter(isTaskRow); }
+  function taskClaimFor(row) {
+    const claim = row && row.taskClaim;
+    return claim && claim.scope === "channel" ? claim : null;
+  }
+  function taskClaimAllowsStart(row) {
+    const claim = row && row.taskClaim;
+    return !claim || claim.scope === "direct" || claim.capabilities?.canStart === true;
+  }
+  function taskClaimControlHtml(row, { surface = "default" } = {}) {
+    const claim = taskClaimFor(row);
+    if (!claim) return "";
+    const id = String(row.id || row.relayId || "");
+    const working = claim.workState === "working"
+      || (!claim.workState && Boolean(row.taskStartedAt && !row.taskCompletedAt));
+    const claimant = claim.claimant;
+    const error = taskClaimNotes.get(id);
+    const errorHtml = error ? `<div class="task-claim-error" role="status">${esc(error)}</div>` : "";
+    if (claim.state === "unclaimed") {
+      const release = claim.releasedAt
+        ? `<div class="task-claim-release">${esc(`Unclaimed again${claim.releasedBy?.name ? ` · Released by ${claim.releasedBy.self ? "you" : claim.releasedBy.name}` : ""}`)}</div>`
+        : "";
+      if (claim.capabilities?.canClaim !== true) {
+        return `<div class="task-claim-control ${esc(surface)}" data-stop="1"><div class="task-claim-status">${claim.releasedAt ? "Unclaimed again" : "Unclaimed"}</div>${release}${errorHtml}</div>`;
+      }
+      return `<div class="task-claim-control ${esc(surface)}" data-stop="1">${release}<button class="task-claim-button claim" type="button" data-task-claim-action="claim" data-task-claim-id="${esc(id)}" data-task-claim-version="${Number(claim.version || 0)}">Claim task</button>${errorHtml}</div>`;
+    }
+    if (claimant?.self && claim.capabilities?.canUnclaim === true && !working) {
+      return `<div class="task-claim-control ${esc(surface)}" data-stop="1"><button class="task-claim-button unclaim" type="button" data-task-claim-action="unclaim" data-task-claim-id="${esc(id)}" data-task-claim-version="${Number(claim.version || 0)}">Unclaim task</button>${errorHtml}</div>`;
+    }
+    const label = claimant?.self
+      ? `Claimed by you${working ? " · Working" : ""}`
+      : `Claimed by ${String(claimant?.name || "someone else")}`;
+    return `<div class="task-claim-control ${esc(surface)}" data-stop="1"><div class="task-claim-status${claimant?.self ? " mine" : ""}">${esc(label)}</div>${errorHtml}</div>`;
+  }
+  function applyTaskClaimProjection(row, taskClaim) {
+    if (!row || !taskClaim) return;
+    const groupSendId = row.groupSendId || null;
+    for (const item of payload.relays || []) {
+      if (String(item.id || item.relayId || "") === String(row.id || row.relayId || "")
+        || (groupSendId && item.groupSendId === groupSendId)) item.taskClaim = taskClaim;
+    }
+    for (const item of payload.sent || []) {
+      if (String(item.id || item.relayId || "") === String(row.id || row.relayId || "")
+        || (groupSendId && item.groupSendId === groupSendId)) item.taskClaim = taskClaim;
+    }
+    row.taskClaim = taskClaim;
+  }
+  function wireTaskClaimControls(scope, rerender) {
+    for (const button of scope.querySelectorAll("[data-task-claim-action]")) {
+      button.addEventListener("click", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (button.disabled) return;
+        const id = String(button.getAttribute("data-task-claim-id") || "");
+        const version = Number(button.getAttribute("data-task-claim-version"));
+        const action = button.getAttribute("data-task-claim-action");
+        const row = relayById(id) || (payload.sent || []).find((item) => String(item.relayId || item.id || "") === id);
+        button.disabled = true;
+        button.textContent = action === "unclaim" ? "Unclaiming…" : "Claiming…";
+        taskClaimNotes.delete(id);
+        const result = action === "unclaim"
+          ? await window.relay.taskUnclaim(id, Number.isInteger(version) ? version : undefined)
+          : await window.relay.taskClaim(id, Number.isInteger(version) ? version : undefined);
+        if (result?.taskClaim) applyTaskClaimProjection(row, result.taskClaim);
+        if (!result?.ok) {
+          taskClaimNotes.set(id, result?.error || `Could not ${action} this Task.`);
+        } else {
+          taskClaimNotes.delete(id);
+        }
+        rerender();
+      });
+    }
+  }
   // State is READ FROM THE RECORD, not remembered in the tab. It used to be a
   // local Map, so a restarted pill forgot every run in flight and a finished
   // run sat under "Running" forever. The row's own receipts answer it: a
@@ -5125,12 +5220,15 @@
     // stay disabled until there is only one possible writer.
     if (row.runLive) return "running";
     if (row.taskCompletedAt) return "done";
+    const claim = taskClaimFor(row);
+    if (claim?.workState === "completed") return "done";
+    if (claim?.workState === "working") return "running";
     // RUNNING MEANS RUNNING. A started stamp with nothing alive behind it is a
     // run that stopped without finishing — it says so, and Start comes back.
     if (row.taskStartedAt) {
       // A Task started by the current MCP agent is genuinely Working even
       // though the Relay pill does not own or monitor that provider process.
-      if (row.taskRunOwner && row.taskRunOwner.kind === "external_mcp") return "running";
+      if (row.taskRunOwner && row.taskRunOwner.kind === "external_mcp" && claim?.workState !== "idle") return "running";
       return row.runLive || local === "running" ? "running" : "stopped";
     }
     if (local === "parked") return "parked";
@@ -6127,6 +6225,17 @@
     }
     if (runFeedIsTerminal(feed)) {
       taskLocal.set(key, runFeedCompleted(feed) ? "done" : "stopped");
+      const row = relayById(key);
+      const claim = taskClaimFor(row);
+      if (claim?.claimant?.self && claim.workState === "working" && !taskStopPending.has(key)) {
+        taskStopPending.add(key);
+        void window.relay.taskStop(key).then((result) => {
+          if (result?.ok && result.taskClaim) applyTaskClaimProjection(row, result.taskClaim);
+        }).finally(() => {
+          taskStopPending.delete(key);
+          renderAll();
+        });
+      }
       stopRunFeed(key); renderAll(); return;
     }
   }
@@ -7450,7 +7559,7 @@
     readerWorkVisible = Boolean(hasWork);
     const onWork = hasWork && readerTab === "work";
     const onAgent = Boolean(agentText || request) && readerTab === "agent";
-    const requestActionable = request && ["waiting", "parked", "stopped"].includes(taskBoardState(r.id));
+    const requestActionable = request && taskClaimAllowsStart(r) && ["waiting", "parked", "stopped"].includes(taskBoardState(r.id));
     const animateWork = hasWork && Date.now() < (workTabAnimateUntil.get(String(r.id)) || 0);
     const agentWords = agentWordCount(agentText);
     const onHuman = !onAgent && !onWork;
@@ -7472,13 +7581,13 @@
         <div class="rd-rule"></div>
         <div class="rd-agentcopy">${readerParagraphs(agentText)}</div>`;
     const humanDoc = `
-        <div class="rd-kicker">${request ? "Task · " : ""}${esc(sender)}${r.e2ee ? " · end-to-end encrypted" : ""} · ${esc(timeAgo(r.createdAt))}${r.unread ? "" : " · read"}</div>
+        <div class="rd-kicker">${request ? `Task · Created by ${esc(sender)}` : esc(sender)}${r.e2ee ? " · end-to-end encrypted" : ""} · ${esc(timeAgo(r.createdAt))}${r.unread ? "" : " · read"}</div>
         <div class="rd-headline${headlineClass}">${esc(subject)}</div>
         <div class="rd-rule"></div>
         <div class="rd-body">${readerParagraphs(r.forHuman)}</div>
         ${scheduleContractHtml(r)}`;
     const workDoc = `<div class="work-context">
-        <div class="rd-kicker" data-run-kicker="${esc(r.id)}">${legacyCompletedWithoutNative ? "Task · done" : `${request || chatOwnedWork ? "Task" : "work"} · ${esc(sender)} · ${esc(timeAgo(r.createdAt))}`}</div>
+        <div class="rd-kicker" data-run-kicker="${esc(r.id)}">${legacyCompletedWithoutNative ? "Task · done" : `${request || chatOwnedWork ? `Task · Created by ${esc(sender)}` : `work · ${esc(sender)}`} · ${esc(timeAgo(r.createdAt))}`}</div>
         <div class="rd-headline${headlineClass}">${esc(subject)}</div></div>
         ${providerPrompt
           ? workProviderPromptHtml(r)
@@ -7497,6 +7606,7 @@
     // is the surface, and it renders even if its dock cannot.
     const composer = (() => { try { return composerHtml(); } catch (error) { console.error("[reader] composer failed:", error); return ""; } })();
     const sharedShelf = relaySharedShelf(r);
+    const claimControl = request && !onWork ? taskClaimControlHtml(r, { surface: "reader" }) : "";
     function composerHtml() {
       // An unstarted Task is actionable from either immutable source document:
       // both For you and For <agent> expose the same Start task dock. Once it
@@ -7505,7 +7615,7 @@
       // existing Work hid the entire source-document footer, which left both
       // immutable documents looking like dead pages after a run completed.
       if (request && onWork && providerPrompt) return workProviderPromptDockHtml();
-      if (request && (onAgent || onWork || requestActionable)) return requestDockHtml(r, { inline: true });
+      if (request && taskClaimAllowsStart(r) && (onAgent || onWork || requestActionable)) return requestDockHtml(r, { inline: true });
       // TWO OUTCOMES, NO IN-BETWEEN (Sven): a message is either replied to
       // or opened in your agent. On the agent document the reply belongs to
       // the other face; here the one verb is the open — the same row the room
@@ -7556,7 +7666,7 @@
         <div class="work-footer" data-work-footer="${esc(r.id)}"><div class="work-footer-inner"><div class="rd-col run">
           ${status}${composer}<div class="row-err${note && note.cls === "ok" ? " ok" : ""}" data-err="${esc(r.id)}" data-stop="1">${esc((note && note.text) || "")}</div>
         </div></div></div></div>` : `<div class="rd-col${readerTabSwap ? " swap" : ""}">${doc}</div>
-        <div class="rd-foot"><div class="rd-col">${sharedShelf}${status}${bothNote}${composer}
+        <div class="rd-foot"><div class="rd-col">${sharedShelf}${status}${bothNote}${claimControl}${composer}
           <div class="row-err${note && note.cls === "ok" ? " ok" : ""}" data-err="${esc(r.id)}" data-stop="1">${esc((note && note.text) || "")}</div>
         </div></div>`}`;
     if (onWork) bindWorkScroller(r.id);
@@ -7604,6 +7714,7 @@
       });
     }
     wireHostOpen(readerBodyEl);
+    wireTaskClaimControls(readerBodyEl, () => { renderReader(); renderAll(); });
     wireAttachmentChips(readerBodyEl);
     for (const button of readerBodyEl.querySelectorAll("[data-code-wrap]")) {
       button.addEventListener("click", () => {
@@ -7771,19 +7882,26 @@
   function renderTasksBoard() {
     const rows = taskRows();
     tasksEmptyEl.classList.toggle("gone", rows.length > 0);
-    const groups = { waiting: [], running: [], review: [], stopped: [], done: [], parked: [], scheduled: [] };
+    const groups = { unclaimed: [], waiting: [], claimed: [], running: [], review: [], stopped: [], done: [], parked: [], scheduled: [] };
     for (const r of rows) {
       const sc = scheduleFor(r.id);
+      const state = taskBoardState(r.id);
       // An accepted or paused cadence OWNS the row between runs.
-      if (sc && (sc.state === "accepted" || sc.state === "paused") && taskBoardState(r.id) !== "running") {
+      if (sc && (sc.state === "accepted" || sc.state === "paused") && state !== "running") {
         groups.scheduled.push(r);
         continue;
       }
-      groups[taskBoardState(r.id)].push(r);
+      const claim = taskClaimFor(r);
+      if (claim?.state === "unclaimed" && claim.workState !== "completed") groups.unclaimed.push(r);
+      else if (state === "waiting" && claim?.claimant && !claim.claimant.self) groups.claimed.push(r);
+      else groups[state].push(r);
     }
     const rowsHtml = (items, renderRight) => items.map((r) => {
         const sender = relaySender(r);
         const title = String(r.title || "").trim() || relaySubject(r);
+        const claim = r.taskClaim;
+        const channel = claim?.channel?.name || r.recipientGroupName || "Direct";
+        const creator = claim?.createdBy?.name || sender;
         // A request row is EXACTLY a list row: disc, name + time, serif line,
         // one quiet control. No topic label, no preview, no unfold — tapping
         // opens the reader (the letter ontology), where reading happens.
@@ -7791,10 +7909,11 @@
         <div class="tb-row${r.unread ? " unread" : ""}" role="button" tabindex="0" data-request="${esc(r.id)}">
           <span class="avatar sm" style="--av-h:${avatarHue(sender)}" aria-hidden="true">${esc(avatarInitials(sender))}</span>
           <div class="tb-main">
-            <div class="th-top"><span class="th-party">${esc(sender)}</span><span class="th-time">${esc(timeAgo(r.createdAt))}</span></div>
+            <div class="tb-sub">${esc(channel)} · Created by ${esc(creator)} · ${esc(timeAgo(r.createdAt))}</div>
             <div class="rk-line"><span class="th-title">${esc(title)}</span><span class="tb-actions">${renderRight(r)}<button class="tb-delete" type="button" data-task-delete="${esc(r.id)}" data-stop="1" aria-label="Move task to Recently Deleted" title="Move task to Recently Deleted"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button></span></div>
             <div class="row-err${rowNotes.get(r.id)?.cls === "ok" ? " ok" : ""}" data-err="${esc(r.id)}" data-stop="1">${esc(rowNotes.get(r.id)?.text || "")}</div>
           </div>
+          ${taskClaimControlHtml(r, { surface: "tasks" })}
         </div>`;
       }).join("");
     const section = (label, items, renderRight) => items.length ? `
@@ -7807,7 +7926,9 @@
     // every row carries the quiet, recoverable Recently Deleted affordance.
     const unfinishedHtml =
       section("Working", groups.running, () => `<span class="tb-working"><span class="tb-working-orb" aria-hidden="true"></span>Working</span>`)
-      + section("Waiting on you", groups.waiting, (r) => `<button class="tb-go" type="button" data-approve="${esc(r.id)}">Start task</button>`)
+      + section("Unclaimed", groups.unclaimed, () => "")
+      + section("Waiting on you", groups.waiting, (r) => taskClaimAllowsStart(r) ? `<button class="tb-go" type="button" data-approve="${esc(r.id)}">Start task</button>` : "")
+      + section("Claimed", groups.claimed, () => "")
       + section("On a schedule", groups.scheduled, (r) => {
           const sc = scheduleFor(r.id) || {};
           const phrase = sc.state === "paused"
@@ -7822,7 +7943,7 @@
       // dock is back, with Start on it.
       + section("Didn't finish", groups.stopped, (r) => `<button class="tb-go" type="button" data-request-again="${esc(r.id)}">start again</button>`)
       + section("Parked", groups.parked, () => "");
-    const unfinishedCount = groups.running.length + groups.waiting.length + groups.scheduled.length
+    const unfinishedCount = groups.running.length + groups.unclaimed.length + groups.waiting.length + groups.claimed.length + groups.scheduled.length
       + groups.review.length + groups.stopped.length + groups.parked.length;
     const inboxZeroNow = groups.done.length > 0 && unfinishedCount === 0;
     const celebrateNow = inboxZeroNow && !taskInboxZero;
@@ -7924,6 +8045,7 @@
       });
     }
     wireRequestControls(tasksListEl, () => { renderTasksBoard(); renderAll(); });
+    wireTaskClaimControls(tasksListEl, () => { renderTasksBoard(); renderAll(); });
   }
 
   // Grow the window as the user scrolls toward the end. Cheap: each extension
@@ -10169,6 +10291,10 @@
         editedAt: r.editedAt || null,
         deletedAt: r.deletedAt || null,
         textLike, request,
+        groupSendId: r.groupSendId || "",
+        taskStartedAt: r.taskStartedAt || null,
+        taskCompletedAt: r.taskCompletedAt || null,
+        taskClaim: r.taskClaim || null,
         materializedCodex: Boolean(r.materializedCodex),
         materializedClaude: Boolean(r.materializedClaude),
         e2ee: Boolean(r.e2ee),
@@ -10256,6 +10382,10 @@
         // text; a human message plus an agent document is a Relay.
         textLike: sentTextLike,
         request,
+        groupSendId: s.groupSendId || "",
+        taskStartedAt: s.taskStartedAt || null,
+        taskCompletedAt: s.taskCompletedAt || null,
+        taskClaim: s.taskClaim || null,
         materializedCodex: Boolean(s.materializedCodex),
         materializedClaude: Boolean(s.materializedClaude),
         body: s.forHuman || "",
@@ -11529,8 +11659,10 @@
       // Slack shelf inside every two-word bubble made a live Slack burst look
       // like unrelated cards rather than the normal Relay chat geometry.
       const showProviderByline = !continuesIntoNext || providerKey(nextMessage) !== providerKey(m);
+      const channelTask = Boolean(m.request && m.taskClaim?.scope === "channel");
+      const claimControl = channelTask ? taskClaimControlHtml(m, { surface: "chat" }) : "";
       return `${slackThreadContextHtml(m)}${chunkDivider}${runHeader}
-      <div class="th-msg${hasHostActions ? " has-host-actions" : ""}${m.unread ? " unread" : ""}${mine ? " mine" : ""}${cont ? " cont" : ""}${textLike ? " text" : ""}${agentWorking ? " agent-working" : ""}${open ? " open" : ""}${m.deletedAt ? " deleted" : ""}${aggregates.length ? " has-rx" : ""}${liveCanonicalArrivalIds.has(String(m.id || "")) ? " live-arrival" : ""}"${textLike ? "" : ' role="button" tabindex="0"'}${agentWorking ? ' aria-busy="true"' : ""}${hasHostActions ? ` aria-expanded="${hostActionsPersistent ? "true" : "false"}"` : ""} data-msg="${esc(m.id)}" data-dir="${m.direction}" data-opening-id="${esc(m.id)}">
+      ${channelTask ? `<div class="th-task-stack${mine ? " mine" : ""}">` : ""}<div class="th-msg${hasHostActions ? " has-host-actions" : ""}${m.unread ? " unread" : ""}${mine ? " mine" : ""}${cont ? " cont" : ""}${textLike ? " text" : ""}${agentWorking ? " agent-working" : ""}${open ? " open" : ""}${m.deletedAt ? " deleted" : ""}${aggregates.length ? " has-rx" : ""}${liveCanonicalArrivalIds.has(String(m.id || "")) ? " live-arrival" : ""}"${textLike ? "" : ' role="button" tabindex="0"'}${agentWorking ? ' aria-busy="true"' : ""}${hasHostActions ? ` aria-expanded="${hostActionsPersistent ? "true" : "false"}"` : ""} data-msg="${esc(m.id)}" data-dir="${m.direction}" data-opening-id="${esc(m.id)}">
         ${!REACTIONS_ENABLED || m.request ? "" : messageReactionPickerHtml(m.id)}
         ${messageReplyReferenceHtml(m)}
         ${editingMessage ? `
@@ -11553,7 +11685,7 @@
         ${badges}
         ${showProviderByline ? providerBylineHtml(m) : ""}
         ${hasHostActions ? relayHostActionsHtml(m, { persistent:hostActionsPersistent }) : ""}
-      </div>
+      </div>${channelTask ? `${claimControl}</div>` : ""}
       ${slackThreadLinkHtml(m)}
       ${(() => {
         // A receipt and a reply control are ABOUT the message, not part of it.
@@ -11809,6 +11941,7 @@
       });
     }
     wireReactionControls(thHistoryEl);
+    wireTaskClaimControls(thHistoryEl, renderThreadDetail);
     wireAttachmentChips(thHistoryEl);
     wireHostOpen(thHistoryEl);
     for (const button of thHistoryEl.querySelectorAll("[data-slack-thread-open]")) {

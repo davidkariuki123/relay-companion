@@ -40,6 +40,9 @@ contextBridge.exposeInMainWorld("relay", {
   openRunSession: (id) => ipcRenderer.invoke("relay:openRunSession", String(id || "")),
   // The pill tray's Start task: the full start flow with the default runtime.
   taskStart: (id, route) => ipcRenderer.invoke("relay:taskStart", String(id || ""), route || null),
+  taskClaim: (id, expectedVersion) => ipcRenderer.invoke("relay:taskClaim", String(id || ""), expectedVersion),
+  taskUnclaim: (id, expectedVersion) => ipcRenderer.invoke("relay:taskUnclaim", String(id || ""), expectedVersion),
+  taskStop: (id) => ipcRenderer.invoke("relay:taskStop", String(id || "")),
   requestReviewSafety: (id) => ipcRenderer.invoke("relay:requestReviewSafety", String(id || "")),
   requestCompletionSend: (id) => ipcRenderer.invoke("relay:requestCompletionSend", String(id || "")),
   relayWorkStart: (id, route) => ipcRenderer.invoke("relay:relayWorkStart", String(id || ""), route || null),

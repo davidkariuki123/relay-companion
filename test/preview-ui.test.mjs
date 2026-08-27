@@ -859,9 +859,9 @@ test("Task documents remain in the contents list beside persistent Work througho
   assert.match(reader, /const workDoc = `[^]*data-run-stream=/);
   assert.match(reader, /const doc = onWork \? workDoc : onAgent \? agentDoc : humanDoc/);
   assert.match(reader, /class="work-footer"[^]*\$\{status\}\$\{composer\}/, "Work keeps its provider composer after Start");
-  assert.match(reader, /if \(request && \(onAgent \|\| onWork \|\| requestActionable\)\) return requestDockHtml/,
+  assert.match(reader, /if \(request && taskClaimAllowsStart\(r\) && \(onAgent \|\| onWork \|\| requestActionable\)\) return requestDockHtml/,
     "both source faces expose Start task while actionable, and Work keeps the provider composer");
-  assert.match(reader, /<div class="rd-foot"><div class="rd-col">\$\{sharedShelf\}\$\{status\}\$\{bothNote\}\$\{composer\}/,
+  assert.match(reader, /<div class="rd-foot"><div class="rd-col">\$\{sharedShelf\}\$\{status\}\$\{bothNote\}\$\{claimControl\}\$\{composer\}/,
     "both immutable source documents retain a composer after Work exists");
   assert.doesNotMatch(reader, /requestDisclosure|data-brief=/, "Work never nests another copy of the document tabs or documents");
 
@@ -923,7 +923,7 @@ test("ordinary Relay folders address the human, the agent, and local Work separa
   assert.match(main, /const isLocalWork = input\?\.localWork === true/);
   assert.match(main, /if \(isRequest\) \{[^]*client\.taskStarted\(id\)/,
     "ordinary local work must not stamp a Task receipt");
-  assert.match(main, /isRequest \? \{ taskState: "started", taskStartedAt: stamped \} : \{ workStartedAt: stamped, workCompletedAt: null \}/);
+  assert.match(main, /isRequest\s*\? \{[^]*taskState: "started",[^]*taskStartedAt: startedReceipt\?\.startedAt \|\| stamped,[^]*taskClaim: startedReceipt\.taskClaim[^]*:\s*\{ workStartedAt: stamped, workCompletedAt: null \}/);
   assert.match(pillPreload, /relayWorkStart: \(id, route\) => ipcRenderer\.invoke\("relay:relayWorkStart"/);
 });
 
@@ -1044,6 +1044,8 @@ test("Cowork Start owns a remote session, feed, Steer, and honest terminal state
   assert.match(bridge, /recipient: \{\}/);
   assert.match(bridge, /inReplyToRelayId: key/);
   assert.match(bridge, /type: "completion"/);
+  assert.match(bridge, /key\.startsWith\("egmsg_"\)[\s\S]*client\.taskCompleted\(key/);
+  assert.match(bridge, /sent\?\.taskClaim[\s\S]*taskClaim: sent\.taskClaim/);
   assert.match(bridge, /providerCompletionRelayId/);
   const steer = between(main, "async function previewTaskSteer", "function installActiveSpaceWatcher");
   assert.match(steer, /appendCoworkMessage/);

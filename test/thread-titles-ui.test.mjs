@@ -938,7 +938,7 @@ test("hand-offs speak in conversation terms: starts vs continues, said BEFORE th
   // person, while For Agent starts or continues Work.
   assert.doesNotMatch(html, /data-reply-mode|__relayToggleReplyMode|replyTarget\(/);
   assert.doesNotMatch(html, /Talk to \$\{esc\(app\)\}|Reply to \$\{esc/);
-  assert.match(html, /if \(request && \(onAgent \|\| onWork \|\| requestActionable\)\) return requestDockHtml\(r, \{ inline: true \}\)/);
+  assert.match(html, /if \(request && taskClaimAllowsStart\(r\) && \(onAgent \|\| onWork \|\| requestActionable\)\) return requestDockHtml\(r, \{ inline: true \}\)/);
   assert.match(html, /if \(onAgent \|\| onWork\) return relayWorkDockHtml\(r, \{ inline: true \}\)/);
   assert.match(html, /data-work-start="\$\{esc\(r\.id\)\}"/);
   assert.match(html, /<button type="button" id="qrSend">Send<\/button>/);

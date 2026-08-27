@@ -23,7 +23,7 @@ test("completed Tasks are collapsed behind one disclosure by default", () => {
 });
 
 test("inbox zero appears only after every unfinished Task category is clear", () => {
-  assert.match(board, /groups\.running\.length \+ groups\.waiting\.length \+ groups\.scheduled\.length/);
+  assert.match(board, /groups\.running\.length \+ groups\.unclaimed\.length \+ groups\.waiting\.length \+ groups\.claimed\.length \+ groups\.scheduled\.length/);
   assert.match(board, /groups\.review\.length \+ groups\.stopped\.length \+ groups\.parked\.length/);
   assert.match(board, /const inboxZeroNow = groups\.done\.length > 0 && unfinishedCount === 0;/);
   assert.match(board, /Nicely done\./);

@@ -8,6 +8,7 @@ import {
   normalizeSetupHost,
   setupOpenStatus,
   setupOpenRelayToken,
+  setupPairFlags,
   stageCurrentInbox,
 } from "../src/setup-open.js";
 import { stagePlainRelayItem } from "../src/notifications.js";
@@ -48,6 +49,13 @@ test("setup flag helpers normalize public relay open intent", () => {
   assert.equal(setupOpenRelayToken({}), null);
   assert.equal(normalizeSetupHost("codex"), "codex");
   assert.equal(normalizeSetupHost("claude_code"), "claude");
+});
+
+test("bootstrap pairing defers service restart to exact-runtime activation", () => {
+  const flags = { code: "PAIR123", api: "https://api.sendrelays.com" };
+  assert.equal(setupPairFlags(flags, false), flags);
+  assert.deepEqual(setupPairFlags(flags, true), { ...flags, "no-restart": true });
+  assert.equal(flags["no-restart"], undefined, "the caller's parsed flags remain unchanged");
 });
 
 test("stageCurrentInbox fetches and stages every authenticated inbox relay", async () => {

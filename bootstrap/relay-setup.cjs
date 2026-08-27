@@ -822,6 +822,70 @@ function stopPreviousWindowsRuntime({ platform = process.platform, spawnImpl = s
   };
 }
 
+const SETUP_COMPATIBILITY_VALUE_FLAGS = new Set([
+  "--code",
+  "--api",
+  "--web",
+  "--open-relay",
+  "--host",
+]);
+const SAFE_SETUP_TOKEN = /^[A-Za-z0-9_-]{4,256}$/;
+
+/**
+ * The signed-in website still emits the pre-pill setup contract while the
+ * installer migration is in flight. Keep that compatibility surface narrow:
+ * only the website's value-bearing arguments may cross the thin bootstrap into
+ * the already-verified runtime, and endpoint overrides must be secure origins.
+ */
+function validateSetupCompatibilityArgs(argv = []) {
+  if (!Array.isArray(argv) || argv.length === 0) return [];
+  const args = argv.map((value) => String(value));
+  const values = new Map();
+  for (let index = 0; index < args.length; index += 2) {
+    const flag = args[index];
+    const value = args[index + 1];
+    if (!SETUP_COMPATIBILITY_VALUE_FLAGS.has(flag)) {
+      fail("Relay setup received an unsupported compatibility option.");
+    }
+    if (!value || value.startsWith("--")) {
+      fail("Relay setup received an incomplete compatibility option.");
+    }
+    if (values.has(flag)) fail("Relay setup received a duplicate compatibility option.");
+    values.set(flag, value);
+  }
+
+  const code = values.get("--code");
+  if (!code || !SAFE_SETUP_TOKEN.test(code)) fail("Relay setup received an invalid pairing code.");
+  const openRelay = values.get("--open-relay");
+  if (openRelay && !SAFE_SETUP_TOKEN.test(openRelay)) fail("Relay setup received an invalid relay token.");
+  const host = values.get("--host");
+  if (host && !openRelay) fail("Relay setup received a host without a relay token.");
+  if (host && host !== "claude" && host !== "codex") fail("Relay setup received an invalid agent host.");
+
+  for (const flag of ["--api", "--web"]) {
+    const value = values.get(flag);
+    if (!value) continue;
+    let url;
+    try {
+      url = new URL(value);
+    } catch {
+      fail("Relay setup received an invalid service origin.");
+    }
+    const loopbackHttp = url.protocol === "http:" && ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
+    if (
+      (url.protocol !== "https:" && !loopbackHttp) ||
+      url.username ||
+      url.password ||
+      url.pathname !== "/" ||
+      url.search ||
+      url.hash
+    ) {
+      fail("Relay setup requires a secure service origin.");
+    }
+  }
+  return args;
+}
+
 async function activateRuntime(layout, runtime, version, {
   platform = process.platform,
   homeDir = os.homedir(),
@@ -838,6 +902,7 @@ async function activateRuntime(layout, runtime, version, {
   activateMacServices = activateMacRuntimeServices,
   activationDeadlineMs = 90_000,
   now = Date.now,
+  setupCompatibilityArgs = [],
 } = {}) {
   let previous = null;
   try { previous = JSON.parse(readFileSync(layout.pointerPath, "utf8")); } catch {}
@@ -944,7 +1009,7 @@ async function activateRuntime(layout, runtime, version, {
   // On macOS/Linux setup owns registration, but the shared activation state
   // machine owns service restart. This keeps first-install MCP/autostart creation
   // in the candidate while bootstrap and the updater use the same exact-root handoff.
-  const setupArgs = [runtime.bin, "setup", "--no-trampoline", "--claim"];
+  const setupArgs = [runtime.bin, "setup", "--no-trampoline", "--claim", ...setupCompatibilityArgs];
   if (platform === "darwin" || platform === "linux") setupArgs.push("--no-restart");
   const result = spawnImpl(candidate.node, setupArgs, {
     stdio: "inherit",
@@ -1013,16 +1078,21 @@ async function activateRuntime(layout, runtime, version, {
   return { candidate, cliLauncher };
 }
 
-async function setup() {
+async function setup(argv = []) {
   assertCompatibleNode();
+  const setupCompatibilityArgs = validateSetupCompatibilityArgs(argv);
   const version = exactVersion(packageJson.version);
   const platformKey = releasePlatform();
   const layout = runtimeLayout(version, platformKey);
   const lock = acquireCanonicalLock(layout.lockPath);
   try {
     const runtime = await stageVerifiedRuntime({ version, platformKey, destination: layout.releaseRoot });
-    const activated = await activateRuntime(layout, runtime, version);
-    console.log(`Relay ${version} is installed. The Relay pill is open; sign in there to finish.`);
+    const activated = await activateRuntime(layout, runtime, version, { setupCompatibilityArgs });
+    if (setupCompatibilityArgs.includes("--code")) {
+      console.log(`Relay ${version} is installed and paired. The Relay pill is open.`);
+    } else {
+      console.log(`Relay ${version} is installed. The Relay pill is open; sign in there to finish.`);
+    }
     if (activated?.cliLauncher && !activated.cliLauncher.pathAvailable) {
       console.log(`Relay's command is installed at ${activated.cliLauncher.shimPath}. Open a new login session to add ~/.local/bin to PATH.`);
     }
@@ -1077,9 +1147,8 @@ async function main() {
       return;
     }
   }
-  if (process.argv.includes("--code")) fail("New Relay setup never accepts a pairing code. Sign in from the Relay pill after installation.");
   if (command === "version" || process.argv.includes("--version")) return console.log(packageJson.version);
-  if (command === "setup") return setup();
+  if (command === "setup") return setup(process.argv.slice(3));
   console.log([
     "Relay secure setup",
     "",
@@ -1108,6 +1177,7 @@ module.exports = {
   stageVerifiedRuntime,
   stableNodePath,
   tarInvocation,
+  validateSetupCompatibilityArgs,
   validateArchiveEntries,
   verifyExtractedRuntime,
   waitForRuntimeHealth,

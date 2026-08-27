@@ -67,7 +67,13 @@ import { runClaudeHook } from "../src/claude-hook.js";
 import { runCodexHook } from "../src/codex-hook.js";
 import { normalizePairingCode, persistPairedAccount } from "../src/account.js";
 import { resetCompanionStateForAccount } from "../src/notifications.js";
-import { finishSetupOpenRelay, normalizeSetupHost, setupOpenRelayToken, setupOpenStatus } from "../src/setup-open.js";
+import {
+  finishSetupOpenRelay,
+  normalizeSetupHost,
+  setupOpenRelayToken,
+  setupOpenStatus,
+  setupPairFlags,
+} from "../src/setup-open.js";
 import { migratePersistedContentFields } from "../src/content-field-migration.js";
 import { accountProductFeatures } from "../src/product-features.js";
 import {
@@ -353,7 +359,7 @@ async function cmdSetup(flags) {
   }
   if (flags.code) {
     console.log("Using Relay's legacy pairing-code migration path.");
-    await cmdPair(flags, { promptForDefaults: Boolean(flags.interactive) });
+    await cmdPair(setupPairFlags(flags), { promptForDefaults: Boolean(flags.interactive) });
     console.log("");
   } else {
     const hasSavedCredential = Boolean(readConfig().deviceToken);
