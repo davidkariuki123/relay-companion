@@ -199,6 +199,38 @@ test("desktop sign-in opens each official CLI subscription flow and monitors onl
   _test.lastAttempts.clear();
 });
 
+test("Linux provider sign-in runs the official CLI in a graphical terminal", async () => {
+  const prefsFile = tempPrefs();
+  const calls = [];
+  function spawn(command, args, options) {
+    const child = new EventEmitter();
+    child.stdin = new EventEmitter();
+    child.stdout = Object.assign(new EventEmitter(), { resume() {} });
+    child.stderr = Object.assign(new EventEmitter(), { resume() {} });
+    calls.push({ command, args, options, child });
+    return child;
+  }
+  const result = await connectProvider("codex", {
+    command: "/home/alex/.local/bin/codex",
+    prefsFile,
+    spawn,
+    platform: "linux",
+    linuxTerminalInvocationImpl: (script, args) => ({ command: "kgx", args: ["--", script, ...args] }),
+    execFile: disconnectedExec,
+  });
+  assert.equal(result.interaction, "terminal");
+  assert.equal(calls[0].command, "kgx");
+  assert.equal(calls[0].args[0], "--");
+  const script = calls[0].args[1];
+  assert.match(fs.readFileSync(script, "utf8"), /^#!\/bin\/sh[\s\S]*\/codex' 'login'/);
+  const state = _test.activeLogins.get("codex");
+  clearTimeout(state.timer);
+  fs.writeFileSync(state.markerPath, "1\n", { mode: 0o600 });
+  await providerAuthStatus("codex", { command: "/home/alex/.local/bin/codex", prefsFile, execFile: disconnectedExec });
+  _test.activeLogins.clear();
+  _test.lastAttempts.clear();
+});
+
 test("Sign in is a no-op when the required subscription is already connected", async () => {
   const prefsFile = tempPrefs();
   let spawned = false;

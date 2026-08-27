@@ -22,6 +22,7 @@ import { spawnSync } from "node:child_process";
 
 export const DAEMON_LAUNCH_LABEL = "work.relay.companion";
 export const WINDOWS_DAEMON_TASK_NAME = "Relay Companion Daemon";
+export const LINUX_DAEMON_UNIT = `${DAEMON_LAUNCH_LABEL}.service`;
 
 /** `<packageRoot>/bin/relay.js` -> `<packageRoot>`. */
 function pathApi(platform) {
@@ -97,6 +98,27 @@ function readWin32Registration({ runCommandImpl }) {
   return { root: packageRootForBin(bin, "win32"), bin: path.win32.resolve(bin), source: WINDOWS_DAEMON_TASK_NAME };
 }
 
+function readLinuxRegistration({ homeDir, readFileImpl, env }) {
+  const configHome = env.XDG_CONFIG_HOME || path.posix.join(homeDir, ".config");
+  const unitPath = path.posix.join(configHome, "systemd", "user", LINUX_DAEMON_UNIT);
+  let unit = "";
+  try {
+    unit = readFileImpl(unitPath, "utf8");
+  } catch {
+    return null;
+  }
+  const encoded = String(unit).match(/^# RelayBinBase64=([A-Za-z0-9_-]+)$/m)?.[1];
+  if (!encoded) return null;
+  let bin = "";
+  try {
+    bin = Buffer.from(encoded, "base64url").toString("utf8");
+  } catch {
+    return null;
+  }
+  if (!/(?:^|[\/])relay\.js$/.test(bin)) return null;
+  return { root: packageRootForBin(bin, "linux"), bin: path.posix.resolve(bin), source: unitPath };
+}
+
 /**
  * Resolve the daemon's autostart registration to a package root.
  * @returns {{root: string, bin: string, source: string} | null} null when unknown.
@@ -106,10 +128,12 @@ export function readAutostartDaemonRoot({
   platform = process.platform,
   readFileImpl = fs.readFileSync,
   runCommandImpl = (file, args) => spawnSync(file, args, { encoding: "utf8" }),
+  env = process.env,
 } = {}) {
   try {
     if (platform === "darwin") return readDarwinRegistration({ homeDir, readFileImpl });
     if (platform === "win32") return readWin32Registration({ runCommandImpl });
+    if (platform === "linux") return readLinuxRegistration({ homeDir, readFileImpl, env });
   } catch {
     return null;
   }

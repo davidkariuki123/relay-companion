@@ -7,11 +7,75 @@ import path from "node:path";
 import {
   commandAvailable,
   claudeSessionNeedsCatalogRestart,
+  codexRecoveryWaitMs,
+  materializeRelayOperation,
   publishAndFind,
   resolveClaudeBackgroundAgent,
   runSessionDirectoryOnce,
   waitForClaudeCompletion,
 } from "../src/session-controller.js";
+
+test("a remote Slack action materializes the exact Relay instead of inventing a second prompt", async () => {
+  const staged = [];
+  const opened = [];
+  const receipts = [];
+  const operation = {
+    id: "rsop_mobile_handoff",
+    kind: "start",
+    input: { provider: "codex", relayMessageId: "msg_clicked" },
+  };
+  const handled = await materializeRelayOperation({
+    async fetchRelay(id) {
+      assert.equal(id, "msg_clicked");
+      return {
+        packet: {
+          id,
+          kind: "message",
+          title: "Exact handoff",
+          sender: { name: "Sven" },
+          forHuman: "For David",
+          forAgent: "Complete context",
+          createdAt: "2026-08-27T10:00:00.000Z",
+        },
+        attachmentUrls: { att_1: "https://files.test/att_1" },
+      };
+    },
+  }, operation, "claim_secret", {
+    load: async () => ({
+      stagePlainRelayItem(value) { staged.push(value); },
+      async openRelay(value) {
+        opened.push(value);
+        return { url: "codex://threads/thread_exact" };
+      },
+    }),
+    async recordEvidence(_client, operationId, claimToken, state, result) {
+      receipts.push({ operationId, claimToken, state, result });
+    },
+  });
+  assert.equal(handled, true);
+  assert.equal(staged[0].packet.id, "msg_clicked");
+  assert.equal(staged[0].packet.forAgent, "Complete context");
+  assert.deepEqual(opened, [{ id: "msg_clicked", host: "codex", forceFresh: true, log: opened[0].log }]);
+  assert.deepEqual(receipts.map((receipt) => receipt.state), ["handed_off", "applied", "completed"]);
+  assert.ok(receipts.every((receipt) => receipt.result.nativeSessionId === "thread_exact"));
+});
+
+test("ordinary session starts remain on the ordinary controller path", async () => {
+  assert.equal(await materializeRelayOperation({}, {
+    id: "rsop_ordinary",
+    kind: "start",
+    input: { provider: "codex", message: "Start new work" },
+  }, "claim_secret", {
+    load: async () => { throw new Error("must not load materializer"); },
+  }), false);
+});
+
+test("recovered Codex turns only wait through their remaining activity window", () => {
+  const now = 10 * 60 * 1000;
+  assert.equal(codexRecoveryWaitMs(now - 60_000, { now }), 4 * 60 * 1000);
+  assert.equal(codexRecoveryWaitMs(now - 6 * 60 * 1000, { now }), 0);
+  assert.equal(codexRecoveryWaitMs(0, { now }), 0);
+});
 
 test("Windows controllers discover Codex and Claude through where.exe", () => {
   const calls = [];
@@ -60,6 +124,40 @@ test("owned-agent controller inbox is checked before the native session inventor
   assert.equal(calls[1], "discover");
   assert.deepEqual(calls[2], ["publish", [], { deviceId:"device_1" }]);
   assert.deepEqual(result, { sessions:[], queuedOperations:0 });
+});
+
+test("visible owned-agent sessions are claimed before native session discovery", async () => {
+  const calls = [];
+  const operation = {
+    id:"operation_visible_agent",
+    input:{ oneShot:false, agentRunRelayId:"relay_agent_response" },
+  };
+  await runSessionDirectoryOnce({
+    client:{
+      async sessionControllerInbox() {
+        calls.push("inbox");
+        return { operations:[operation] };
+      },
+      async claimSessionOperation(id) {
+        calls.push(["claim", id]);
+        return { terminal:true };
+      },
+      async publishSessionObservations(observations) {
+        calls.push(["publish", observations]);
+        return { sessions:[] };
+      },
+    },
+    discover:() => {
+      calls.push("discover");
+      return [];
+    },
+    controller:() => ({ deviceId:"device_1" }),
+  });
+  assert.deepEqual(calls.slice(0, 3), [
+    "inbox",
+    ["claim", "operation_visible_agent"],
+    "discover",
+  ]);
 });
 
 test("Claude permission-mode metadata drift never restarts a catalog-current live task", () => {

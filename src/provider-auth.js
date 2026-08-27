@@ -2,6 +2,7 @@ import { execFile as execFileCallback, spawn as spawnChild } from "node:child_pr
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { withCodexAppServer } from "./codex-app-server.js";
@@ -42,6 +43,8 @@ const lastAttempts = new Map();
 const LOGIN_TIMEOUT_MS = 10 * 60 * 1_000;
 const CLAUDE_MCP_BATCH_SIZE = "8";
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
+const { linuxTerminalInvocation } = require("../overlay/linux-terminal.cjs");
 const EXPECT_RUNNER = path.join(MODULE_DIR, "provider-auth-runner.exp");
 const TERMINAL_APP = "Terminal";
 
@@ -260,17 +263,17 @@ function terminalAttemptPaths(id, prefsFile) {
   };
 }
 
-function writeTerminalLoginScript(id, runtime, loginArgs, paths) {
+function writeTerminalLoginScript(id, runtime, loginArgs, paths, { platform = process.platform } = {}) {
   const label = PROVIDERS[id].label;
-  const script = `#!/bin/zsh
+  const script = `#!${platform === "linux" ? "/bin/sh" : "/bin/zsh"}
 set -u
 echo "Relay opened ${label}'s official subscription sign-in."
 echo "Complete the provider and browser prompts in this window."
 ${[runtime, ...loginArgs].map(shellQuote).join(" ")}
 result=$?
-print -r -- "$result" > ${shellQuote(paths.markerPath)}
+printf '%s\\n' "$result" > ${shellQuote(paths.markerPath)}
 echo ""
-if [[ "$result" -eq 0 ]]; then
+if [ "$result" -eq 0 ]; then
   echo "${label} finished. Return to Relay Settings to confirm the connection."
 else
   echo "${label} did not finish signing in. Resolve the error above, then reconnect from Relay Settings."
@@ -452,6 +455,7 @@ export async function connectProvider(provider, {
   expectRunner = EXPECT_RUNNER,
   openCommand = "/usr/bin/open",
   terminalApp = TERMINAL_APP,
+  linuxTerminalInvocationImpl = linuxTerminalInvocation,
   loginTimeoutMs = LOGIN_TIMEOUT_MS,
 } = {}) {
   const id = String(provider || "");
@@ -469,8 +473,15 @@ export async function connectProvider(provider, {
   let paths = null;
   let invocation = loginInvocation(runtime, spec.loginArgs, { platform, expectCommand, expectRunner });
   if (platform === "darwin" && commandExists(openCommand)) {
-    paths = writeTerminalLoginScript(id, runtime, spec.loginArgs, terminalAttemptPaths(id, prefsFile));
+    paths = writeTerminalLoginScript(id, runtime, spec.loginArgs, terminalAttemptPaths(id, prefsFile), { platform });
     invocation = { command: openCommand, args: ["-a", terminalApp, paths.scriptPath] };
+  } else if (platform === "linux") {
+    paths = writeTerminalLoginScript(id, runtime, spec.loginArgs, terminalAttemptPaths(id, prefsFile), { platform });
+    invocation = linuxTerminalInvocationImpl(paths.scriptPath, []);
+    if (!invocation) {
+      removeAttemptFiles(paths);
+      throw new Error(`Could not start ${spec.label} authorization: no supported graphical terminal was found.`);
+    }
   }
   let child;
   try {

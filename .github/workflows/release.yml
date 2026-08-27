@@ -54,11 +54,13 @@ jobs:
           test/pill-task-ui.test.mjs
           test/thread-titles-ui.test.mjs
           test/installation-authorization.test.mjs
+          test/provider-auth.test.mjs
           test/install.test.mjs
           test/cli-trampoline.test.mjs
           test/canonical-runtime.test.mjs
           test/canonical-updater.test.mjs
           test/auto-update.test.mjs
+          test/linux-support.test.mjs
           test/tray-position.test.mjs
           test/mac-app-identity.test.mjs
           test/pill-open-flow.test.mjs
@@ -77,6 +79,10 @@ jobs:
             platform: win32-x64
           - os: windows-11-arm
             platform: win32-arm64
+          - os: ubuntu-24.04
+            platform: linux-x64
+          - os: ubuntu-24.04-arm
+            platform: linux-arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -131,7 +137,7 @@ jobs:
         with:
           role-to-assume: ${{ vars.RELAY_COMPANION_CANDIDATE_ROLE_ARN }}
           aws-region: us-east-1
-      - name: Sign the exact four-platform manifest inside AWS KMS
+      - name: Sign the exact six-platform manifest inside AWS KMS
         env:
           KMS_KEY_ARN: ${{ vars.RELAY_COMPANION_SIGNING_KEY_ARN }}
         shell: bash

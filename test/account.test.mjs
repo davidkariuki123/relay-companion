@@ -134,7 +134,7 @@ test("new credentials and legacy plaintext migrate to protected storage without 
     writeConfigObject({ deviceToken: "dev_secure", deviceId: "dev_1", user: { id: "usr_1" } }, { credentialBackend });
     const disk = JSON.parse(fs.readFileSync(configPath(), "utf8"));
     assert.equal(disk.deviceToken, undefined);
-    assert.equal(disk.credentialStore, process.platform === "darwin" ? "local-v2" : "native-v1");
+    assert.equal(disk.credentialStore, ["darwin", "linux"].includes(process.platform) ? "local-v2" : "native-v1");
     assert.equal(nativeToken, "dev_secure");
     assert.equal(readConfig({ credentialBackend }).deviceToken, "dev_secure");
 
@@ -172,8 +172,12 @@ test("a native credential pointer keeps paired recovery states distinct from fir
     const locked = readConfigState({ credentialBackend: {
       readDeviceToken: () => ({ ok: false, value: "", code: "credential_unavailable" }),
     } });
-    assert.equal(locked.credential.status, "unavailable");
+    const healsLegacyPointer = process.platform === "darwin" || process.platform === "linux";
+    assert.equal(locked.credential.status, healsLegacyPointer ? "missing" : "unavailable");
     assert.equal(locked.config.user.email, "existing@example.com");
+    if (healsLegacyPointer) {
+      assert.equal(JSON.parse(fs.readFileSync(configPath(), "utf8")).credentialStore, "local-v2");
+    }
 
     writePointer("missing");
     const missing = readConfigState({ credentialBackend: {
@@ -288,7 +292,7 @@ test("installation authorization requires protected storage and never falls back
     const disk = JSON.parse(fs.readFileSync(configPath(), "utf8"));
     assert.equal(nativeToken, REGISTRATION.deviceToken);
     assert.equal(disk.deviceToken, undefined);
-    assert.equal(disk.credentialStore, process.platform === "darwin" ? "local-v2" : "native-v1");
+    assert.equal(disk.credentialStore, ["darwin", "linux"].includes(process.platform) ? "local-v2" : "native-v1");
   });
 });
 
@@ -353,7 +357,10 @@ test("sign-out keeps its rollback marker when native credential deletion fails",
       () => persistSignedOutAccount({ credentialBackend: { deleteDeviceToken: () => ({ ok: false, detail: "vault locked" }) } }),
       /Could not remove Relay credential/,
     );
-    assert.deepEqual(JSON.parse(fs.readFileSync(configPath(), "utf8")), original);
+    assert.deepEqual(JSON.parse(fs.readFileSync(configPath(), "utf8")), {
+      ...original,
+      credentialStore: ["darwin", "linux"].includes(process.platform) ? "local-v2" : "native-v1",
+    });
   });
 });
 
@@ -364,7 +371,7 @@ test("configPath honors RELAY_CONFIG so the pill and CLI share one file", () => 
     assert.equal(configPath(), explicit);
     persistPairedAccount({ registration: REGISTRATION });
     const disk = JSON.parse(fs.readFileSync(explicit, "utf8"));
-    if (process.platform === "darwin") {
+    if (["darwin", "linux"].includes(process.platform)) {
       assert.equal(disk.deviceToken, undefined);
       assert.equal(disk.credentialStore, "local-v2");
     } else {

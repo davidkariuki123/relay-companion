@@ -97,6 +97,13 @@ test("begin creates S256 PKCE and keeps every capability out of durable and rend
   assert.ok(stores.events.indexOf("secret:write") < stores.events.indexOf("durable:write"));
 });
 
+test("Linux begins installation authorization with its real platform identity", async () => {
+  const { controller, calls } = harness({ platform: "linux", deviceName: "Alex's Linux desktop" });
+  await controller.begin();
+  assert.equal(calls[0].body.platform, "linux");
+  assert.equal(calls[0].body.deviceName, "Alex's Linux desktop");
+});
+
 test("begin preflights native storage before creating a server authorization", async () => {
   const stores = memoryStores();
   stores.secretStore.probe = () => ({

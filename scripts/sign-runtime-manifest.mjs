@@ -15,7 +15,7 @@ export const KMS_RAW_MESSAGE_MAX_BYTES = 4096;
 export function runtimeManifestPayload({ fragments } = {}) {
   if (!fragments?.length) throw new Error("At least one runtime artifact is required");
   const [{ version, sourceSha }] = fragments;
-  const required = ["darwin-arm64", "darwin-x64", "win32-arm64", "win32-x64"];
+  const required = ["darwin-arm64", "darwin-x64", "win32-arm64", "win32-x64", "linux-arm64", "linux-x64"];
   const present = new Set(fragments.map((fragment) => fragment.platform));
   const missing = required.filter((platform) => !present.has(platform));
   if (missing.length) throw new Error(`Runtime manifest is missing verified platform artifacts: ${missing.join(", ")}`);
@@ -71,7 +71,7 @@ export function readRuntimeFragments(fragmentsDir) {
     // Only the four fragment documents are inputs. SBOM filenames also contain
     // a platform and end in .json; accepting a broad glob made their completely
     // different shape look like a fifth runtime artifact.
-    .filter((name) => /^(?:darwin-arm64|darwin-x64|win32-arm64|win32-x64)\.json$/.test(name))
+    .filter((name) => /^(?:darwin-arm64|darwin-x64|win32-arm64|win32-x64|linux-arm64|linux-x64)\.json$/.test(name))
     .map((name) => JSON.parse(fs.readFileSync(path.join(fragmentsDir, name), "utf8")));
 }
 

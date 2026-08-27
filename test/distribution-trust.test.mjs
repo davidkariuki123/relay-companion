@@ -443,7 +443,7 @@ test("the migration bridge publishes an exact npm shrinkwrap for its full graph"
 
 test("runtime manifest signature binds all platform artifacts and SBOMs to one source", () => {
   const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
-  const platforms = ["darwin-arm64", "darwin-x64", "win32-arm64", "win32-x64"];
+  const platforms = ["darwin-arm64", "darwin-x64", "win32-arm64", "win32-x64", "linux-arm64", "linux-x64"];
   const fragments = platforms.map((platform) => ({
     platform,
     version,
@@ -475,7 +475,7 @@ test("runtime manifest signature binds all platform artifacts and SBOMs to one s
 
 test("runtime manifest payload fails closed above the KMS RAW signing limit", () => {
   const oversizedFilename = `relay-runtime-${"x".repeat(4096)}.tar.gz`;
-  const fragments = ["darwin-arm64", "darwin-x64", "win32-arm64", "win32-x64"].map((platform) => ({
+  const fragments = ["darwin-arm64", "darwin-x64", "win32-arm64", "win32-x64", "linux-arm64", "linux-x64"].map((platform) => ({
     platform,
     version,
     sourceSha,
@@ -495,7 +495,7 @@ test("runtime manifest payload fails closed above the KMS RAW signing limit", ()
 test("release keyring accepts current and overlap keys but rejects unknown ids and algorithms", () => {
   const current = crypto.generateKeyPairSync("ed25519");
   const previous = crypto.generateKeyPairSync("ed25519");
-  const fragments = ["darwin-arm64", "darwin-x64", "win32-arm64", "win32-x64"].map((platform) => ({
+  const fragments = ["darwin-arm64", "darwin-x64", "win32-arm64", "win32-x64", "linux-arm64", "linux-x64"].map((platform) => ({
     platform,
     version,
     sourceSha,
@@ -558,12 +558,12 @@ test("release keyring accepts current and overlap keys but rejects unknown ids a
 test("manifest assembly reads platform fragments but never ingests SBOM JSON as an artifact", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-manifest-fragments-"));
   try {
-    for (const platform of ["darwin-arm64", "darwin-x64", "win32-arm64", "win32-x64"]) {
+    for (const platform of ["darwin-arm64", "darwin-x64", "win32-arm64", "win32-x64", "linux-arm64", "linux-x64"]) {
       fs.writeFileSync(path.join(root, `${platform}.json`), JSON.stringify({ platform }));
       fs.writeFileSync(path.join(root, `relay-runtime-${version}-${platform}.sbom.cdx.json`), JSON.stringify({ bomFormat: "CycloneDX" }));
     }
     assert.deepEqual(readRuntimeFragments(root).map((fragment) => fragment.platform).sort(), [
-      "darwin-arm64", "darwin-x64", "win32-arm64", "win32-x64",
+      "darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-arm64", "win32-x64",
     ]);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -963,6 +963,39 @@ test("bootstrap writes the active pointer only after setup and shared exact-root
   }
 });
 
+test("bootstrap Linux setup registers without restarting, then uses the exact-root systemd activator", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-bootstrap-linux-handoff-"));
+  try {
+    const packageRoot = path.join(root, "next", "node_modules", "relay-companion");
+    const bin = path.join(packageRoot, "bin", "relay.js");
+    const pointerPath = path.join(root, "current.json");
+    fs.mkdirSync(path.dirname(bin), { recursive: true });
+    fs.writeFileSync(bin, "// next");
+    const calls = [];
+    let activated = false;
+    await activateRuntime(
+      { pointerPath, releaseId: "next", releaseRoot: path.dirname(path.dirname(packageRoot)) },
+      { bin, packageRoot },
+      version,
+      {
+        platform: "linux",
+        spawnImpl: (command, args) => { calls.push({ command, args }); return { status: 0, stdout: "", stderr: "" }; },
+        activateLinuxServices: async (target) => {
+          activated = true;
+          assert.equal(target.packageRoot, packageRoot);
+          return { ok: true, health: { ok: true, daemon: true, pill: true } };
+        },
+      },
+    );
+    const setup = calls.find(({ args }) => args.includes("setup"));
+    assert.ok(setup.args.includes("--no-restart"));
+    assert.equal(activated, true);
+    assert.equal(JSON.parse(fs.readFileSync(pointerPath, "utf8")).version, version);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("bootstrap leaves a recovery journal when both activation and prior-runtime repair fail", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-bootstrap-recovery-"));
   try {
@@ -1156,7 +1189,7 @@ test("thin setup cleanup verifier fails closed on loaded services or an unreadab
         ? { status: 0, stdout: "loaded" }
         : { status: 113, stderr: "not found" },
       processRows: () => ({ ok: true, rows: [] }),
-    }), /launchd labels still loaded: work\.relay\.companion\.pill/);
+    }), /service registrations still active: work\.relay\.companion\.pill/);
 
     await assert.rejects(verifyThinSetupUninstalled({
       version,

@@ -3,9 +3,10 @@
 // WHY IN-PLACE TRUNCATION, NOT RENAME:
 //
 //   Nothing in Relay owns the log file handles. `daemon.log` and `pill.log` are
-//   written by shell redirection configured OUTSIDE the process — launchd's
-//   StandardOutPath/StandardErrorPath on darwin, and the `>> "<log>" 2>&1` baked
-//   into each Scheduled Task action on win32 (see install.js).
+//   written by redirection configured OUTSIDE the process — launchd's
+//   StandardOutPath/StandardErrorPath on darwin, systemd append targets on
+//   Linux, and the `>> "<log>" 2>&1` baked into each Scheduled Task action on
+//   win32 (see install.js).
 //
 //   Both open the file in APPEND mode and hold the descriptor for the life of
 //   the service. Renaming the file (the classic logrotate move) therefore does

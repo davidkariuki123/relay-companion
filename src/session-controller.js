@@ -473,7 +473,49 @@ async function evidence(client, operationId, claimToken, state, result = {}, err
   throw lastError;
 }
 
+async function retryAgentWrite(write, { attempts = 8, wait = sleep } = {}) {
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await write();
+    } catch (error) {
+      if (error?.status && error.status < 500) throw error;
+      lastError = error;
+      if (attempt + 1 < attempts) await wait(Math.min(2_000, 250 * (attempt + 1)));
+    }
+  }
+  throw lastError;
+}
+
+function agentRunReporter(client, runRelayId) {
+  const relayId = String(runRelayId || "");
+  let lastProgress = "";
+  let writes = Promise.resolve();
+  const progress = (summary) => {
+    const clean = String(summary || "").trim();
+    if (!relayId || !clean || clean === lastProgress) return;
+    lastProgress = clean;
+    writes = writes
+      .then(() => retryAgentWrite(() => client.agentRunProgress(relayId, clean)))
+      .catch(() => {});
+  };
+  const flush = () => writes;
+  const complete = async (forHuman, forAgent) => {
+    await flush();
+    if (!relayId) return;
+    await retryAgentWrite(() => client.agentRunComplete(relayId, forHuman, forAgent));
+  };
+  const finish = async (error = "") => {
+    await flush();
+    if (!relayId) return;
+    await retryAgentWrite(() => client.agentRunFinish(relayId, error));
+  };
+  return { progress, flush, complete, finish };
+}
+
 async function executeClaude({ client, claim, target, operation, input, prompt }) {
+  const reporter = agentRunReporter(client, input.agentRunRelayId);
+  reporter.progress("Claude is starting on your laptop.");
   let sessionId = target?.nativeId || randomUUID();
   const cwd = target?.cwd || input.cwd || process.cwd();
   const title = target?.title || input.title || "Relay Claude session";
@@ -554,7 +596,7 @@ async function executeClaude({ client, claim, target, operation, input, prompt }
     ...(stable?.id ? { sessionId: stable.id } : {}),
     nativeSessionId: sessionId,
   });
-  if (input.agentRunRelayId) await client.agentRunFinish(input.agentRunRelayId);
+  if (input.agentRunRelayId) await reporter.finish();
 }
 
 async function executeCodex({ client, claim, target, operation, input, prompt }) {
@@ -627,14 +669,10 @@ async function executeCodex({ client, claim, target, operation, input, prompt })
   if (input.oneShot) {
     const runRelayId = String(input.agentRunRelayId || "");
     let applied = false;
-    let lastProgress = "";
     let nativeThreadId = "";
     let writes = Promise.resolve();
-    const queueProgress = (summary) => {
-      if (!runRelayId || !summary || summary === lastProgress) return;
-      lastProgress = summary;
-      writes = writes.then(() => client.agentRunProgress(runRelayId, summary)).catch(() => {});
-    };
+    const reporter = agentRunReporter(client, runRelayId);
+    const queueProgress = reporter.progress;
     queueProgress("Codex is starting on your laptop.");
     await evidence(client, operation.id, claim.claimToken, "handed_off", {
       adapter: "codex_cli_one_shot",
@@ -669,7 +707,7 @@ async function executeCodex({ client, claim, target, operation, input, prompt })
     await writes;
     const completion = codexRelayCompletion(result.finalMessage);
     if (!completion) throw new Error("Codex finished without returning a Relay answer");
-    if (runRelayId) await client.agentRunComplete(runRelayId, completion.forHuman, completion.forAgent);
+    if (runRelayId) await reporter.complete(completion.forHuman, completion.forAgent);
     await evidence(client, operation.id, claim.claimToken, "completed", {
       adapter: "codex_cli_one_shot",
       ...(result.threadId ? { nativeThreadId: result.threadId } : {}),
@@ -677,75 +715,59 @@ async function executeCodex({ client, claim, target, operation, input, prompt })
     return;
   }
 
-  const appServer = new CodexAppServerClient({ command: defaultCodexCommand(), cwd: input.cwd || process.cwd() });
-  await appServer.start();
-  try {
-    const full = currentPlacement() === "cloud" || process.env.RELAY_SESSION_FULL_ACCESS === "1";
-    const started = await appServer.request("thread/start", {
-      cwd: input.cwd || process.cwd(),
-      approvalPolicy: full ? "never" : "on-request",
-      sandbox: full ? "danger-full-access" : "workspace-write",
-      threadSource: "user",
-      ...(input.model ? { model: input.model } : {}),
-      ...(input.effort && input.effort !== "auto" ? { reasoningEffort: input.effort } : {}),
-    });
-    const threadId = started.thread?.id;
-    if (!threadId) throw new Error("Codex did not return a thread id");
-    if (input.title) await appServer.request("thread/name/set", { threadId, name: input.title });
-    if (input.oneShot) recordAnonymousSession("codex", threadId);
-    else recordControlledSession({ provider: "codex", nativeId: threadId, title: input.title, cwd: input.cwd || process.cwd() });
-    const stable = input.oneShot ? null : await publishAndFind(client, threadId);
-    const turn = await appServer.request("turn/start", {
-      threadId,
-      input: [{ type: "text", text: prompt, text_elements: [] }],
-    });
-    const turnId = turn.turn?.id;
-    await evidence(client, operation.id, claim.claimToken, "handed_off", {
-      adapter: "codex_app_server",
-      nativeThreadId: threadId,
-      nativeTurnId: turnId || null,
-      ...(stable?.id ? { sessionId: stable.id } : {}),
-    });
-    await evidence(client, operation.id, claim.claimToken, "applied", {
-      adapter: "codex_app_server",
-      nativeTurnId: turnId || null,
-      nativeThreadId: threadId,
-      ...(stable?.id ? { sessionId: stable.id } : {}),
-    });
-    const renewTimer = setInterval(() => {
-      void client.renewSessionOperationLease(operation.id, claim.claimToken).catch(() => {});
-    }, 10_000);
-    renewTimer.unref?.();
-    try {
-      await appServer.waitForNotification(
-        (message) => message.method === "turn/completed" && (!turnId || message.params?.turn?.id === turnId),
-        { timeoutMs: 12 * 60 * 60 * 1000 },
-      );
-    } finally {
-      clearInterval(renewTimer);
-    }
-    if (input.agentRunRelayId) {
-      const discovered = discoverSessions().find((session) => session.provider === "codex" && session.nativeId === threadId);
-      if (discovered?.nativeRef) {
-        const page = await inspectAiSession({
-          id: stable?.id || threadId,
-          provider: "codex",
-          state: "idle",
-          nativeRef: discovered.nativeRef,
-        }, { limit: 200 });
-        const final = (page.records || []).find((record) => record?.type === "message" && record?.role === "assistant" && String(record.text || "").trim());
-        if (final?.text) await client.agentRunComplete(input.agentRunRelayId, String(final.text).trim(), String(final.text).trim());
-      }
-    }
-    await evidence(client, operation.id, claim.claimToken, "completed", {
-      nativeTurnId: turnId || null,
-      nativeThreadId: threadId,
-      ...(stable?.id ? { sessionId: stable.id } : {}),
-    });
-    if (input.agentRunRelayId) await client.agentRunFinish(input.agentRunRelayId);
-  } finally {
-    await appServer.stop();
-  }
+  const runRelayId = String(input.agentRunRelayId || "");
+  const reporter = agentRunReporter(client, runRelayId);
+  let stable = null;
+  let nativeThreadId = "";
+  let nativeTurnId = "";
+  reporter.progress("Codex is starting on your laptop.");
+  const result = await runCodexAppServerOneShot({
+    command: defaultCodexCommand(),
+    cwd: input.cwd || process.cwd(),
+    prompt,
+    model: input.model || "",
+    effort: input.effort || "",
+    fullAccess: currentPlacement() === "cloud" || process.env.RELAY_SESSION_FULL_ACCESS === "1",
+    ephemeral: false,
+    title: input.title || "Relay @Codex",
+    onThreadStarted: async ({ threadId }) => {
+      nativeThreadId = threadId;
+      recordControlledSession({
+        provider: "codex",
+        nativeId: threadId,
+        title: input.title || "Relay @Codex",
+        cwd: input.cwd || process.cwd(),
+      });
+    },
+    onTurnStarted: async ({ threadId, turnId }) => {
+      nativeThreadId = threadId;
+      nativeTurnId = turnId;
+      const handoff = {
+        adapter: "codex_app_server_visible",
+        nativeThreadId: threadId,
+        nativeTurnId: turnId,
+      };
+      // The native turn is already running at this point. Publish its durable
+      // GUI identity afterwards so session-directory latency never delays the
+      // model's first token or the first visible progress event.
+      await evidence(client, operation.id, claim.claimToken, "handed_off", handoff);
+      stable = await publishAndFind(client, threadId);
+      await evidence(client, operation.id, claim.claimToken, "applied", {
+        ...handoff,
+        ...(stable?.id ? { sessionId: stable.id } : {}),
+      });
+    },
+    onEvent: (_event, status) => reporter.progress(status),
+  });
+  const completion = codexRelayCompletion(result.finalMessage);
+  if (!completion) throw new Error("Codex finished without returning a Relay answer");
+  if (runRelayId) await reporter.complete(completion.forHuman, completion.forAgent);
+  await evidence(client, operation.id, claim.claimToken, "completed", {
+    adapter: "codex_app_server_visible",
+    nativeTurnId: nativeTurnId || null,
+    nativeThreadId: nativeThreadId || result.threadId,
+    ...(stable?.id ? { sessionId: stable.id } : {}),
+  });
 }
 
 async function recoverClaim({ client, claim, target, operation }) {
@@ -801,6 +823,9 @@ async function recoverClaim({ client, claim, target, operation }) {
       }
     }
     await waitForClaudeCompletion(nativeId, { transcriptPath, renew });
+    if (operation.input?.agentRunRelayId) {
+      await agentRunReporter(client, operation.input.agentRunRelayId).finish();
+    }
     await evidence(client, operation.id, claim.claimToken, "completed", {
       ...result,
       nativeSessionId: nativeId,
@@ -810,8 +835,21 @@ async function recoverClaim({ client, claim, target, operation }) {
   } else if (provider === "codex") {
     const sessionPath = String(target?.nativeRef?.sessionPath || "");
     if (!sessionPath) throw new Error("Recovered Codex operation has no rollout path");
-    const idle = await waitForCodexIdle(sessionPath, { timeoutMs: 12 * 60 * 60 * 1000, pollMs: 1_000 });
-    if (!idle.idle) throw new Error("Recovered Codex turn did not become idle");
+    let lastActivityAt = 0;
+    try { lastActivityAt = fs.statSync(sessionPath).mtimeMs; } catch {}
+    const remainingMs = codexRecoveryWaitMs(lastActivityAt);
+    const idle = await waitForCodexIdle(sessionPath, { timeoutMs: remainingMs, pollMs: 1_000 });
+    if (!idle.idle) throw new Error("Recovered Codex turn stopped producing activity before it completed");
+    if (operation.input?.agentRunRelayId) {
+      const page = await inspectAiSession(target, { limit: 200 });
+      const final = (page.records || []).find(
+        (record) => record?.type === "message" && record?.role === "assistant" && String(record.text || "").trim(),
+      );
+      const completion = codexRelayCompletion(final?.text || "");
+      if (!completion) throw new Error("Recovered Codex run has no final answer");
+      await agentRunReporter(client, operation.input.agentRunRelayId)
+        .complete(completion.forHuman, completion.forAgent);
+    }
   } else {
     throw new Error(`Unsupported recovered provider: ${provider}`);
   }
@@ -819,6 +857,72 @@ async function recoverClaim({ client, claim, target, operation }) {
     ...result,
     ...(target?.id ? { sessionId: target.id } : {}),
   });
+  return true;
+}
+
+export function codexRecoveryWaitMs(
+  lastActivityAt,
+  { now = Date.now(), windowMs = 5 * 60 * 1000 } = {},
+) {
+  if (!Number.isFinite(lastActivityAt) || lastActivityAt <= 0) return 0;
+  return Math.max(0, windowMs - Math.max(0, now - lastActivityAt));
+}
+
+/**
+ * Materialize an existing Relay on a selected native host. This is deliberately
+ * separate from an ordinary session `start`: the clicked Relay remains the
+ * canonical handoff and is not flattened into a second invented prompt.
+ */
+export async function materializeRelayOperation(client, operation, claimToken, {
+  log = () => {},
+  load = async () => {
+    const [{ openRelay }, { stagePlainRelayItem }] = await Promise.all([
+      import("./materializer.js"),
+      import("./notifications.js"),
+    ]);
+    return { openRelay, stagePlainRelayItem };
+  },
+  recordEvidence = evidence,
+} = {}) {
+  const relayMessageId = String(operation.input?.relayMessageId || "");
+  if (operation.kind !== "start" || !relayMessageId) return false;
+  const { openRelay, stagePlainRelayItem } = await load();
+  const fetched = await client.fetchRelay(relayMessageId);
+  const packet = fetched?.packet;
+  if (!packet || packet.id !== relayMessageId) throw new Error("Relay message is unavailable to this computer.");
+  stagePlainRelayItem({
+    item: {
+      relayId: packet.id,
+      state: "delivered",
+      createdAt: packet.createdAt,
+      updatedAt: packet.editedAt || packet.createdAt,
+      kind: packet.kind,
+      ...(packet.title ? { title: packet.title } : {}),
+      sender: packet.sender,
+      preview: packet.forHuman,
+      inReplyToRelayId: packet.inReplyToRelayId,
+      threadId: packet.threadId || packet.id,
+      recipientGroupId: packet.recipientGroupId,
+      recipientGroupName: packet.recipientGroupName,
+    },
+    packet,
+    attachmentUrls: fetched.attachmentUrls || {},
+  });
+  const provider = operation.input?.provider === "claude" ? "claude" : "codex";
+  const opened = await openRelay({ id: relayMessageId, host: provider, forceFresh: true, log });
+  let nativeSessionId = "";
+  try {
+    const url = new URL(String(opened?.url || ""));
+    nativeSessionId = provider === "claude"
+      ? String(url.searchParams.get("session") || "")
+      : decodeURIComponent(url.pathname.split("/").filter(Boolean).pop() || "");
+  } catch {}
+  for (const state of ["handed_off", "applied", "completed"]) {
+    await recordEvidence(client, operation.id, claimToken, state, {
+      adapter: "relay_materializer",
+      ...(nativeSessionId ? { nativeSessionId } : {}),
+    });
+  }
   return true;
 }
 
@@ -842,6 +946,7 @@ async function processClaim(client, claim, log) {
       });
       return;
     }
+    if (await materializeRelayOperation(client, operation, claim.claimToken, { log })) return;
     if (await recoverClaim({ client, claim, target: claim.target, operation })) return;
     const input = operation.input || {};
     const source = await sourceSession(client, operation);
@@ -854,7 +959,9 @@ async function processClaim(client, claim, log) {
   } catch (error) {
     log(`session operation ${operation.id} failed: ${error?.message || error}`);
     const runRelayId = String(operation.input?.agentRunRelayId || "");
-    if (runRelayId) await client.agentRunFinish(runRelayId, error?.message || String(error)).catch(() => {});
+    if (runRelayId) {
+      await retryAgentWrite(() => client.agentRunFinish(runRelayId, error?.message || String(error))).catch(() => {});
+    }
     await evidence(client, operation.id, claim.claimToken, "failed", {}, error?.message || String(error)).catch(() => {});
   } finally {
     clearInterval(renewTimer);
@@ -873,7 +980,7 @@ export async function runSessionDirectoryOnce({
   // session directory cannot add several seconds before the CLI even starts.
   const inbox = await client.sessionControllerInbox();
   const operations = inbox.operations || [];
-  const urgent = operations.filter((operation) => operation.input?.oneShot && operation.input?.agentRunRelayId);
+  const urgent = operations.filter((operation) => operation.input?.agentRunRelayId);
   const ordinary = operations.filter((operation) => !urgent.includes(operation));
   const claim = async (operation) => {
     if (activeOperations.has(operation.id)) return;
