@@ -39,6 +39,19 @@ export function linuxElectronSandboxPlan(electronPath, {
     throw new Error(`Pinned Linux Electron executable is missing or unsafe: ${executable || "missing"}`);
   }
   const source = path.join(path.dirname(executable), "chrome-sandbox");
+  const root = path.resolve(destinationRoot);
+  let sourceStat;
+  try { sourceStat = lstatSync(source); } catch {}
+  if (sourceStat?.isSymbolicLink()) {
+    const destination = path.resolve(realpathSync(source));
+    const relative = path.relative(root, destination).replaceAll(path.sep, "/");
+    const match = /^([a-f0-9]{64})\/chrome-sandbox$/.exec(relative);
+    const sha256 = match?.[1] || "";
+    if (!sha256 || !trustedLinuxElectronSandbox(destination, sha256, { lstatSync, realpathSync, readFileSync })) {
+      throw new Error(`Pinned Electron sandbox helper link is unsafe: ${source}`);
+    }
+    return { ok: true, skipped: false, electronPath: executable, source, sha256, root, destination, linked: true };
+  }
   if (!regularFile(source, { lstatSync, realpathSync })) {
     throw new Error(`Pinned Electron sandbox helper is missing or unsafe: ${source}`);
   }
@@ -47,7 +60,6 @@ export function linuxElectronSandboxPlan(electronPath, {
     throw new Error(`Pinned Electron sandbox helper has an implausible size: ${size}`);
   }
   const sha256 = sha256File(source, { readFileSync });
-  const root = path.resolve(destinationRoot);
   const destination = path.join(root, sha256, "chrome-sandbox");
   return { ok: true, skipped: false, electronPath: executable, source, sha256, root, destination };
 }
@@ -135,6 +147,52 @@ export function installLinuxElectronSandboxAsRoot(plan, {
   return plan.destination;
 }
 
+export function linkLinuxElectronSandbox(plan, {
+  fsImpl = fs,
+  randomBytes = crypto.randomBytes,
+} = {}) {
+  if (!plan?.ok || plan.skipped || !/^[a-f0-9]{64}$/.test(String(plan.sha256 || ""))) {
+    throw new Error("Invalid Linux Electron sandbox activation plan");
+  }
+  const dependencies = {
+    lstatSync: fsImpl.lstatSync.bind(fsImpl),
+    realpathSync: fsImpl.realpathSync.bind(fsImpl),
+    readFileSync: fsImpl.readFileSync.bind(fsImpl),
+  };
+  if (!trustedLinuxElectronSandbox(plan.destination, plan.sha256, dependencies)) {
+    throw new Error("Cannot activate an untrusted Electron sandbox helper");
+  }
+  try {
+    const stat = fsImpl.lstatSync(plan.source);
+    if (stat.isSymbolicLink() && path.resolve(fsImpl.realpathSync(plan.source)) === path.resolve(plan.destination)) {
+      return { linked: true, source: plan.source, destination: plan.destination };
+    }
+    if (!stat.isFile() || stat.isSymbolicLink() || sha256File(plan.source, dependencies) !== plan.sha256) {
+      throw new Error(`Refusing to replace an unexpected Electron sandbox helper: ${plan.source}`);
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("Refusing")) throw error;
+    throw new Error(`Electron sandbox helper cannot be activated: ${plan.source}`);
+  }
+
+  const temporary = `${plan.source}.relay-link-${process.pid}-${randomBytes(8).toString("hex")}`;
+  try {
+    fsImpl.symlinkSync(plan.destination, temporary);
+    const temporaryStat = fsImpl.lstatSync(temporary);
+    if (!temporaryStat.isSymbolicLink() || path.resolve(fsImpl.realpathSync(temporary)) !== path.resolve(plan.destination)) {
+      throw new Error("Temporary Electron sandbox link failed validation");
+    }
+    fsImpl.renameSync(temporary, plan.source);
+  } finally {
+    try { fsImpl.rmSync(temporary, { force: true }); } catch {}
+  }
+  const sourceStat = fsImpl.lstatSync(plan.source);
+  if (!sourceStat.isSymbolicLink() || path.resolve(fsImpl.realpathSync(plan.source)) !== path.resolve(plan.destination)) {
+    throw new Error("Electron sandbox helper link failed activation");
+  }
+  return { linked: true, source: plan.source, destination: plan.destination };
+}
+
 export function prepareLinuxElectronSandbox({
   electronPath,
   platform = process.platform,
@@ -145,6 +203,7 @@ export function prepareLinuxElectronSandbox({
   spawn = spawnSync,
   execPath = process.execPath,
   scriptPath = fileURLToPath(import.meta.url),
+  linkSandbox = linkLinuxElectronSandbox,
 } = {}) {
   const dependencies = {
     lstatSync: fsImpl.lstatSync.bind(fsImpl),
@@ -174,6 +233,7 @@ export function prepareLinuxElectronSandbox({
   if (!trustedLinuxElectronSandbox(plan.destination, plan.sha256, dependencies)) {
     throw new Error("Electron sandbox helper is not the exact root-owned 4755 binary expected by this runtime");
   }
+  linkSandbox(plan, { fsImpl });
   env.CHROME_DEVEL_SANDBOX = plan.destination;
   return { ...plan, prepared: true };
 }

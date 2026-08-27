@@ -149,6 +149,7 @@ test("Linux release smoke provisions only the exact content-addressed Electron s
   );
 
   const calls = [];
+  const links = [];
   const env = {};
   const prepared = prepareLinuxElectronSandbox({
     electronPath,
@@ -159,6 +160,7 @@ test("Linux release smoke provisions only the exact content-addressed Electron s
     execPath: "/opt/node/bin/node",
     scriptPath: "/checkout/scripts/prepare-linux-electron-sandbox.mjs",
     env,
+    linkSandbox: (sandboxPlan) => links.push([sandboxPlan.source, sandboxPlan.destination]),
     spawn: (command, args, options) => {
       calls.push({ command, args, options });
       installed = true;
@@ -167,6 +169,7 @@ test("Linux release smoke provisions only the exact content-addressed Electron s
   });
   assert.equal(prepared.destination, destination);
   assert.equal(env.CHROME_DEVEL_SANDBOX, destination);
+  assert.deepEqual(links, [[source, destination]]);
   assert.deepEqual(calls[0].args, [
     "--", "/opt/node/bin/node", "/checkout/scripts/prepare-linux-electron-sandbox.mjs",
     "--install-root", "--electron-path", electronPath, "--expected-sha256", digest,

@@ -111,6 +111,7 @@ test("Linux runtime preflight names missing libraries and provisions the exact s
   let installed = false;
   const env = { DISPLAY: ":0", LANG: "en_US.UTF-8", RELAY_DEVICE_TOKEN: "must-not-elevate" };
   const calls = [];
+  const links = [];
   let authorizationOptions = null;
   const trustedSandboxStat = (file, { writableParent = false } = {}) => {
     if (file.endsWith("/chrome-sandbox")) {
@@ -139,6 +140,7 @@ test("Linux runtime preflight names missing libraries and provisions the exact s
     },
     lstatSync: trustedSandboxStat,
     realpathSync: (file) => file,
+    linkSandbox: ({ source, destination }) => links.push([source, destination]),
     runCommand(command, args, options) {
       calls.push([command, ...args]);
       authorizationOptions = options;
@@ -147,6 +149,7 @@ test("Linux runtime preflight names missing libraries and provisions the exact s
     },
   });
   assert.equal(sandbox.ok, true);
+  assert.deepEqual(links, [["/runtime/chrome-sandbox", sandbox.destination]]);
   assert.equal(calls[0][0], "pkexec");
   assert.match(calls[0].join(" "), /sha256sum/);
   assert.match(calls[0].join(" "), /readlink -f/);
@@ -169,9 +172,11 @@ test("Linux runtime preflight names missing libraries and provisions the exact s
     },
     lstatSync: trustedSandboxStat,
     realpathSync: (file) => file,
+    linkSandbox: ({ source, destination }) => links.push([source, destination]),
     runCommand: () => { throw new Error("a trusted helper must not prompt again"); },
   });
   assert.equal(discovered.discovered, true);
+  assert.equal(discovered.linked, true);
   assert.equal(discoveredEnv.CHROME_DEVEL_SANDBOX, discovered.destination);
 
   const untrustedParent = ensureLinuxElectronSandbox({
@@ -183,6 +188,7 @@ test("Linux runtime preflight names missing libraries and provisions the exact s
     },
     lstatSync: (file) => trustedSandboxStat(file, { writableParent: true }),
     realpathSync: (file) => file,
+    linkSandbox: () => { throw new Error("an untrusted helper must never be linked"); },
   });
   assert.equal(untrustedParent.reason, "linux_sandbox_update_authorization_required");
 
@@ -197,6 +203,7 @@ test("Linux runtime preflight names missing libraries and provisions the exact s
     },
     lstatSync: () => { throw Object.assign(new Error("missing"), { code: "ENOENT" }); },
     realpathSync: (file) => file,
+    linkSandbox: () => { throw new Error("a missing helper must never be linked"); },
     runCommand: () => { throw new Error("a background update must not ask for elevation"); },
   });
   assert.equal(blocked.reason, "linux_sandbox_update_authorization_required");

@@ -11,7 +11,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { activateCodexMcp, verifyClaudeMcpRegistration } from "./setup-activation.js";
 import { ensureStableMcpLauncher } from "./mcp-launcher.js";
@@ -586,6 +586,46 @@ function trustedLinuxSandbox(pathname, expectedSha256, {
   }
 }
 
+export function linkLinuxElectronSandbox({
+  source,
+  destination,
+  expectedSha256,
+  lstatSync = fs.lstatSync,
+  realpathSync = fs.realpathSync,
+  readFileSync = fs.readFileSync,
+  symlinkSync = fs.symlinkSync,
+  renameSync = fs.renameSync,
+  rmSync = fs.rmSync,
+  random = randomBytes,
+} = {}) {
+  if (!trustedLinuxSandbox(destination, expectedSha256, { lstatSync, realpathSync, readFileSync })) {
+    throw new Error("Cannot activate an untrusted Electron sandbox helper");
+  }
+  const sourceStat = lstatSync(source);
+  if (sourceStat.isSymbolicLink() && path.posix.resolve(realpathSync(source)) === path.posix.resolve(destination)) {
+    return { ok: true, linked: true, source, destination };
+  }
+  if (!sourceStat.isFile() || sourceStat.isSymbolicLink() || sha256File(source, { readFileSync }) !== expectedSha256) {
+    throw new Error(`Refusing to replace an unexpected Electron sandbox helper: ${source}`);
+  }
+  const temporary = `${source}.relay-link-${process.pid}-${random(8).toString("hex")}`;
+  try {
+    symlinkSync(destination, temporary);
+    const temporaryStat = lstatSync(temporary);
+    if (!temporaryStat.isSymbolicLink() || path.posix.resolve(realpathSync(temporary)) !== path.posix.resolve(destination)) {
+      throw new Error("Temporary Electron sandbox link failed validation");
+    }
+    renameSync(temporary, source);
+  } finally {
+    try { rmSync(temporary, { force: true }); } catch {}
+  }
+  const linkedStat = lstatSync(source);
+  if (!linkedStat.isSymbolicLink() || path.posix.resolve(realpathSync(source)) !== path.posix.resolve(destination)) {
+    throw new Error("Electron sandbox helper link failed activation");
+  }
+  return { ok: true, linked: true, source, destination };
+}
+
 function linuxAuthorizationEnvironment(env = process.env) {
   const allowed = [
     "HOME", "USER", "LOGNAME", "LANG", "LANGUAGE", "TERM",
@@ -616,6 +656,7 @@ export function ensureLinuxElectronSandbox({
   lstatSync = fs.lstatSync,
   realpathSync = fs.realpathSync,
   geteuid = () => (typeof process.geteuid === "function" ? process.geteuid() : -1),
+  linkSandbox = linkLinuxElectronSandbox,
 } = {}) {
   const source = path.posix.join(path.posix.dirname(String(electronPath || "")), "chrome-sandbox");
   let expectedSha256;
@@ -674,8 +715,19 @@ export function ensureLinuxElectronSandbox({
       };
     }
   }
+  try {
+    linkSandbox({ source, destination, expectedSha256, lstatSync, realpathSync, readFileSync });
+  } catch (error) {
+    return {
+      ok: false,
+      reason: "linux_sandbox_activation_failed",
+      detail: error instanceof Error ? error.message : "Relay could not activate Electron's trusted sandbox helper.",
+      source,
+      destination,
+    };
+  }
   env.CHROME_DEVEL_SANDBOX = destination;
-  return { ok: true, source, destination, sha256: expectedSha256 };
+  return { ok: true, source, destination, sha256: expectedSha256, linked: true };
 }
 
 /** Prepare direct Electron launches on hosts that cannot use user namespaces. */
@@ -694,8 +746,27 @@ export function prepareLinuxElectronSandbox({
     const expectedSha256 = sha256File(source, { readFileSync });
     const destination = `/usr/local/lib/relay/chromium-sandboxes/${expectedSha256}/chrome-sandbox`;
     if (trustedLinuxSandbox(destination, expectedSha256, { ...options, readFileSync })) {
+      const linkSandbox = options.linkSandbox || linkLinuxElectronSandbox;
+      try {
+        linkSandbox({
+          source,
+          destination,
+          expectedSha256,
+          readFileSync,
+          lstatSync: options.lstatSync,
+          realpathSync: options.realpathSync,
+        });
+      } catch (error) {
+        return {
+          ok: false,
+          reason: "linux_sandbox_activation_failed",
+          detail: error instanceof Error ? error.message : "Relay could not activate Electron's trusted sandbox helper.",
+          source,
+          destination,
+        };
+      }
       env.CHROME_DEVEL_SANDBOX = destination;
-      return { ok: true, source, destination, sha256: expectedSha256, discovered: true };
+      return { ok: true, source, destination, sha256: expectedSha256, discovered: true, linked: true };
     }
   } catch {}
   if (!linuxUserNamespacesRestricted({ readFileSync })) return { ok: true, skipped: true };
