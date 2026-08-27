@@ -12,11 +12,11 @@ const DEVELOPER = { accountKind: "human", isDeveloper: true };
 const ORDINARY_USER = { accountKind: "human", isDeveloper: false };
 const DEVELOPER_SURFACES = {
   slack: true, peopleMentions: true, agentMentions: true,
-  relayWork: true, agentConnections: true, aiSessions: true, connectors: true,
+  relayWork: true, agentConnections: true, aiSessions: true, connectors: true, messageMutations: true,
 };
 const ORDINARY_SURFACES = {
   slack: false, peopleMentions: true, agentMentions: false,
-  relayWork: false, agentConnections: false, aiSessions: false, connectors: false,
+  relayWork: false, agentConnections: false, aiSessions: false, connectors: false, messageMutations: false,
 };
 
 test("developer capabilities require both the server-owned role and a non-production environment", () => {
@@ -71,7 +71,7 @@ test("developer status brings the complete Task substrate on dev but never Cowor
     {
       slack: features.slack, peopleMentions: features.peopleMentions, agentMentions: features.agentMentions,
       relayWork: features.relayWork, agentConnections: features.agentConnections,
-      aiSessions: features.aiSessions, connectors: features.connectors,
+      aiSessions: features.aiSessions, connectors: features.connectors, messageMutations: features.messageMutations,
     },
     DEVELOPER_SURFACES,
   );
@@ -87,7 +87,7 @@ test("an explicit production environment wins over a local API URL, so the clone
     {
       slack: clone.slack, peopleMentions: clone.peopleMentions, agentMentions: clone.agentMentions,
       relayWork: clone.relayWork, agentConnections: clone.agentConnections,
-      aiSessions: clone.aiSessions, connectors: clone.connectors,
+      aiSessions: clone.aiSessions, connectors: clone.connectors, messageMutations: clone.messageMutations,
     },
     ORDINARY_SURFACES,
   );
@@ -125,8 +125,7 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
   assert.deepEqual(ordinary, [
     "relay_send", "relay_share_link", "relay_contacts_search", "relay_groups_list", "relay_group_create", "relay_group_update",
     "relay_group_delete", "relay_contact_update", "relay_inbox_list", "relay_sent_list", "relay_thread_fetch",
-    "relay_chats_list", "relay_chat_fetch", "relay_chat_send", "relay_message_edit",
-    "relay_message_delete", "relay_mark_read",
+    "relay_chats_list", "relay_chat_fetch", "relay_chat_send", "relay_mark_read",
   ]);
   // A developer on production gets the same catalog as every ordinary user.
   const productionDeveloper = productFeatures({ env: {}, user: DEVELOPER });
@@ -134,6 +133,8 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
   // The complete catalog requires the role and the dev channel together.
   const developer = productFeatures({ env: { RELAY_UPDATE_CHANNEL: "dev" }, user: DEVELOPER });
   assert.equal(toolsForAccount(developer).length, 30);
+  assert.ok(toolsForAccount(developer).some((tool) => tool.name === "relay_message_edit"));
+  assert.ok(toolsForAccount(developer).some((tool) => tool.name === "relay_message_delete"));
   // A call that arrives anyway (a stale client, a hand-written request) is refused before transport.
   const client = new Proxy({}, { get(_target, key) { throw new Error(`transport must not run (${String(key)})`); } });
   for (const [name, args] of [
@@ -142,6 +143,12 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
     ["relay_connector_call_tool", { provider: "gmail", toolName: "GMAIL_FETCH", idempotencyKey: "k2" }],
   ]) {
     await assert.rejects(handleCall(client, name, args, { features: shipped }), /available only to Relay developer accounts/);
+  }
+  for (const name of ["relay_message_edit", "relay_message_delete"]) {
+    await assert.rejects(
+      handleCall(client, name, { relayId: "relay_1", idempotencyKey: "stale_tool_call" }, { features: shipped }),
+      /available only to Relay developer accounts on dev/,
+    );
   }
 });
 

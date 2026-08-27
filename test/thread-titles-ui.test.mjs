@@ -8,6 +8,21 @@ const html = fs.readFileSync(new URL("../overlay/inbox.html", import.meta.url), 
 const main = fs.readFileSync(new URL("../overlay/main.cjs", import.meta.url), "utf8");
 const notifications = fs.readFileSync(new URL("../src/notifications.js", import.meta.url), "utf8");
 const mcp = fs.readFileSync(new URL("../src/mcp.js", import.meta.url), "utf8");
+const preload = fs.readFileSync(new URL("../overlay/preload.cjs", import.meta.url), "utf8");
+
+test("outbound message bubbles expose human-only edit and deliberate delete controls", () => {
+  assert.match(preload, /editMessage:[\s\S]*relay:messageEdit/);
+  assert.match(preload, /deleteMessage:[\s\S]*relay:messageDelete/);
+  assert.match(main, /client\.editMessage\(id,[\s\S]*forHuman/);
+  assert.match(main, /client\.deleteMessage\(id,/);
+  assert.match(main, /PRODUCT_FEATURES\.messageMutations !== true/);
+  assert.match(html, /payload\.features\?\.messageMutations === true && mine && !m\.pending && !m\.request && !m\.deletedAt/);
+  assert.match(html, /data-message-edit=/);
+  assert.match(html, /data-message-delete-confirm=/);
+  assert.match(html, /window\.relay\.editMessage\(id, forHuman, message\.updatedAt/);
+  assert.match(html, /window\.relay\.deleteMessage\(id, message\.updatedAt/);
+  assert.match(html, /m\.editedAt && !m\.deletedAt \? '<span class="th-edited">edited<\/span>'/);
+});
 
 test("chat text bubbles preserve authored line breaks", () => {
   const rule = html.match(/\.th-msg\.text \.th-msg-title \{([^}]+)\}/)?.[1] || "";

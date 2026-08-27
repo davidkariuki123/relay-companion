@@ -2882,6 +2882,57 @@ async function deletePacket(packetId) {
   }
 }
 
+async function editSentMessage(input = {}) {
+  if (PRODUCT_FEATURES.messageMutations !== true) {
+    return { ok: false, error: "Message editing is currently available only to Relay developer accounts on dev." };
+  }
+  const id = String(input.id || "").trim();
+  const forHuman = String(input.forHuman || "").trim();
+  if (!id) return { ok: false, error: "Missing message id." };
+  if (!forHuman) return { ok: false, error: "A message cannot be empty." };
+  try {
+    const client = await relayClient();
+    const result = await client.editMessage(id, {
+      forHuman,
+      ...(String(input.expectedUpdatedAt || "").trim()
+        ? { expectedUpdatedAt: String(input.expectedUpdatedAt).trim() }
+        : {}),
+      idempotencyKey: idempotencyKey("message_edit"),
+    });
+    await refreshSent();
+    await pushInbox(true);
+    return { ...result, ok: true, forHuman };
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error);
+    console.error("[overlay] sent message edit failed:", message);
+    return { ok: false, error: message };
+  }
+}
+
+async function deleteSentMessage(input = {}) {
+  if (PRODUCT_FEATURES.messageMutations !== true) {
+    return { ok: false, error: "Sent-message deletion is currently available only to Relay developer accounts on dev." };
+  }
+  const id = String(input.id || "").trim();
+  if (!id) return { ok: false, error: "Missing message id." };
+  try {
+    const client = await relayClient();
+    const result = await client.deleteMessage(id, {
+      ...(String(input.expectedUpdatedAt || "").trim()
+        ? { expectedUpdatedAt: String(input.expectedUpdatedAt).trim() }
+        : {}),
+      idempotencyKey: idempotencyKey("message_delete"),
+    });
+    await refreshSent();
+    await pushInbox(true);
+    return { ...result, ok: true };
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error);
+    console.error("[overlay] sent message delete failed:", message);
+    return { ok: false, error: message };
+  }
+}
+
 // ---- mutations -----------------------------------------------------------
 
 function idempotencyKey(prefix) {
@@ -7801,6 +7852,14 @@ ipcMain.on("relay:chatReadActivity", (event) => {
   if (fromPill || isPreviewEvent(event)) observeChatReadActivity();
 });
 ipcMain.handle("relay:delete", (_e, id) => deletePacket(id));
+ipcMain.handle("relay:messageEdit", (event, input) => {
+  if (!win || win.isDestroyed() || event.sender !== win.webContents) return { ok: false, error: "Not the pill." };
+  return editSentMessage(input);
+});
+ipcMain.handle("relay:messageDelete", (event, input) => {
+  if (!win || win.isDestroyed() || event.sender !== win.webContents) return { ok: false, error: "Not the pill." };
+  return deleteSentMessage(input);
+});
 ipcMain.handle("relay:markAllRead", () => markAllVisibleRelaysRead());
 ipcMain.handle("relay:refreshSent", async () => {
   await refreshSent();

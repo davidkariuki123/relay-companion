@@ -252,8 +252,9 @@ function project(records, identity) {
     const target = messages.get(plaintext?.messageId);
     if (!target) continue;
     if (plaintext.type === PRODUCT_EDIT && plaintext.senderUserId === target.plaintext.senderUserId) {
-      target.body.forHuman = String(plaintext.body?.forHuman || target.body.forHuman);
+      if (plaintext.body?.forHuman !== undefined) target.body.forHuman = String(plaintext.body.forHuman || "");
       if (plaintext.body?.forAgent !== undefined) target.body.forAgent = String(plaintext.body.forAgent || "");
+      target.editedAt = plaintext.authoredAt;
       target.updatedAt = plaintext.authoredAt;
     } else if (plaintext.type === PRODUCT_DELETE && plaintext.senderUserId === target.plaintext.senderUserId) {
       target.deletedAt = plaintext.authoredAt;

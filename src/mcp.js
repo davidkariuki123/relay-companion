@@ -531,22 +531,25 @@ export const TOOLS = [
   {
     name: "relay_message_edit",
     description:
-      `Edit an ordinary text message this human sent. Use an exact relayId from relay_sent_list or relay_chat_fetch. Sender-only; Tasks and messages carrying forAgent documents cannot be edited. For group messages Relay updates every fan-out copy atomically. ${FOR_HUMAN_COMPOSITION_SUMMARY}`,
+      `Edit the human-facing payload, agent-facing payload, or both on a message this human sent. Use an exact relayId from relay_sent_list or relay_chat_fetch. Sender-only; Tasks cannot be edited. Omit a payload to leave it unchanged; pass an empty forAgent to remove the agent document. For group messages Relay updates every fan-out copy atomically. ${FOR_HUMAN_COMPOSITION_SUMMARY}`,
     inputSchema: {
       type: "object",
       properties: {
-        relayId: { type: "string" }, forHuman: { type: "string", description: FOR_HUMAN_COMPOSITION_SUMMARY },
+        relayId: { type: "string" },
+        forHuman: { type: "string", description: `Optional replacement human-facing message. Omit to leave it unchanged. ${FOR_HUMAN_COMPOSITION_SUMMARY}` },
+        forAgent: { type: "string", description: "Optional complete replacement for the agent-facing document. Omit to leave it unchanged; pass an empty string to remove it." },
         longForHumanConfirmed: { type: "boolean", description: `Set true only after Relay rejected this exact over-${FOR_HUMAN_SOFT_WORD_LIMIT}-word MCP edit and a second review found the length necessary.` },
         expectedUpdatedAt: { type: "string", description: "Optional updatedAt from the last read; prevents overwriting a newer edit." },
         idempotencyKey: { type: "string" },
       },
-      required: ["relayId", "forHuman", "idempotencyKey"],
+      required: ["relayId", "idempotencyKey"],
+      anyOf: [{ required: ["forHuman"] }, { required: ["forAgent"] }],
     },
   },
   {
     name: "relay_message_delete",
     description:
-      "Delete for everyone an ordinary text message this human sent. This leaves a durable 'Message deleted' tombstone so chronology and replies remain coherent; Relay stops returning its attachments and rejects future API download requests. It is distinct from relay_inbox_delete, which only cleans up this human's received inbox. Use only when the human explicitly asks to delete the sent message.",
+      "Delete for everyone a message this human sent. Tasks cannot be deleted with this tool. This leaves a durable 'Message deleted' tombstone so chronology and replies remain coherent; Relay stops returning its attachments and rejects future API download requests. It is distinct from relay_inbox_delete, which only cleans up this human's received inbox. Use only when the human explicitly asks to delete the sent message.",
     inputSchema: {
       type: "object",
       properties: {
@@ -696,6 +699,11 @@ export const ORDINARY_RELAY_TOOL_NAMES = new Set([
   "relay_message_edit",
   "relay_message_delete",
   "relay_mark_read",
+]);
+
+const MESSAGE_MUTATION_TOOL_NAMES = new Set([
+  "relay_message_edit",
+  "relay_message_delete",
 ]);
 
 // The public Claude connector may reach only operations whose message content
@@ -1053,10 +1061,16 @@ function sentListLimit(value) {
   return Math.min(Math.floor(parsed), SENT_LIST_MAX_LIMIT);
 }
 
-function toolsForFeatures(tools, { requests = true, aiSessions = true, connectors = true } = {}) {
+function toolsForFeatures(tools, {
+  requests = true,
+  aiSessions = true,
+  connectors = true,
+  messageMutations = true,
+} = {}) {
   let listed = tools;
   if (!aiSessions) listed = listed.filter((tool) => !AI_SESSION_TOOL_NAMES.has(tool.name));
   if (!connectors) listed = listed.filter((tool) => !CONNECTOR_TOOL_NAMES.has(tool.name));
+  if (!messageMutations) listed = listed.filter((tool) => !MESSAGE_MUTATION_TOOL_NAMES.has(tool.name));
   if (requests) return listed;
   return listed.map((tool) => {
     if (tool.name !== "relay_send") return tool;
@@ -1504,6 +1518,9 @@ export async function handleCall(client, name, args, {
   if (features.connectors === false && CONNECTOR_TOOL_NAMES.has(name)) {
     throw new Error(`Tool ${name} is unavailable in this Relay release`);
   }
+  if (features.messageMutations === false && MESSAGE_MUTATION_TOOL_NAMES.has(name)) {
+    throw new Error(`Tool ${name} is available only to Relay developer accounts on dev`);
+  }
   if (shareLinks === false && name === "relay_share_link") {
     throw new Error("Public share links are unavailable in the E2EE connector");
   }
@@ -1886,9 +1903,10 @@ export async function handleCall(client, name, args, {
       );
     }
     case "relay_message_edit":
-      requireLongForHumanReview("relay_message_edit", args);
+      if (args.forHuman !== undefined) requireLongForHumanReview("relay_message_edit", args);
       return text(await client.editMessage(args.relayId, {
-        forHuman: args.forHuman,
+        ...(args.forHuman !== undefined ? { forHuman: args.forHuman } : {}),
+        ...(args.forAgent !== undefined ? { forAgent: args.forAgent } : {}),
         ...(args.expectedUpdatedAt ? { expectedUpdatedAt: args.expectedUpdatedAt } : {}),
         idempotencyKey: args.idempotencyKey,
       }));

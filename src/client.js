@@ -621,7 +621,10 @@ export class RelayClient {
         this,
         relayId,
         E2EE_GROUP_PRODUCT_EVENTS.edit,
-        { forHuman: payload.forHuman },
+        {
+          ...(payload.forHuman !== undefined ? { forHuman: payload.forHuman } : {}),
+          ...(payload.forAgent !== undefined ? { forAgent: payload.forAgent } : {}),
+        },
         payload.idempotencyKey,
       );
       const now = new Date().toISOString();
@@ -632,7 +635,8 @@ export class RelayClient {
       const sent = await encryptE2eeMessage(this, {
         kind: "message",
         recipient: {},
-        forHuman: payload.forHuman,
+        ...(payload.forHuman !== undefined ? { forHuman: payload.forHuman } : {}),
+        ...(payload.forAgent !== undefined ? { forAgent: payload.forAgent } : {}),
         idempotencyKey: payload.idempotencyKey,
         e2eeEvent: { type: "message.edited", targetRelayId: relayId },
       }, status);

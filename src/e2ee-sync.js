@@ -78,7 +78,7 @@ export async function e2eeOpenedRecords(client, wires) {
         value.senderUserId !== root.senderUserId && value.senderUserId !== root.recipientUserId
       ) continue;
       if (value.eventType === "message.edited" && value.senderUserId === root.senderUserId) {
-        projection.forHuman = value.forHuman;
+        if (value.forHuman !== undefined) projection.forHuman = value.forHuman;
         if (value.forAgent !== undefined) projection.forAgent = value.forAgent;
         if (value.title !== undefined) {
           if (value.title === null) delete projection.title;

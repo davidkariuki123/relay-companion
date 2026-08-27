@@ -58,6 +58,10 @@ function productFeatures(options = {}) {
     aiSessions: developer,
     // relay_connector_* — the server-side Composio gateway.
     connectors: developer,
+    // Editing or deleting already-delivered correspondence changes another
+    // person's view of history, so keep the whole mutation surface on the
+    // developer row until it has completed dev validation.
+    messageMutations: developer,
   });
 }
 

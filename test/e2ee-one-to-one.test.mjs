@@ -539,6 +539,12 @@ test("threading, edits, deletion, reactions, and read state stay inside encrypte
       idempotencyKey: "metadata-edit-1",
       e2eeEvent: { type: "message.edited", targetRelayId: created.relayId },
     });
+    await encryptE2eeMessage(aliceClient, {
+      recipient: {},
+      forAgent: "Replacement private agent document.",
+      idempotencyKey: "metadata-edit-agent-1",
+      e2eeEvent: { type: "message.edited", targetRelayId: created.relayId },
+    });
 
     process.env.RELAY_CONFIG_DIR = aliceRoot;
     await ensureE2eeKeyPackages(aliceClient);
@@ -587,6 +593,8 @@ test("threading, edits, deletion, reactions, and read state stay inside encrypte
     const chat = await e2eeChat(bobClient, (await bobClient.e2eeSync()).items, chats.chats[0].chatId);
     const original = chat.items.find((item) => item.relayId === created.relayId);
     assert.equal(original.forHuman, "Edited private message.");
+    assert.equal(original.forAgent, "Replacement private agent document.");
+    assert.ok(original.editedAt);
     assert.equal(original.reactions.aggregates[0].emoji, "👍");
     assert.equal(original.reactions.aggregates[0].count, 1);
     assert.equal(chat.items.find((item) => item.relayId === reply.relayId).inReplyToRelayId, created.relayId);

@@ -1228,13 +1228,26 @@ test("sent-message edit and delete forward exact ids and optimistic versions", a
   await handleCall(client, "relay_message_edit", {
     relayId: "relay_1", forHuman: "Corrected.", expectedUpdatedAt: "2026-08-18T10:00:00.000Z", idempotencyKey: "edit_0001",
   }, { mode: "messages-only" });
+  await handleCall(client, "relay_message_edit", {
+    relayId: "relay_1", forAgent: "Replacement agent document.", idempotencyKey: "edit_0002",
+  }, { mode: "messages-only" });
   await handleCall(client, "relay_message_delete", {
     relayId: "relay_1", expectedUpdatedAt: "2026-08-18T10:01:00.000Z", idempotencyKey: "delete_01",
   }, { mode: "messages-only" });
   assert.deepEqual(calls, [
     ["edit", "relay_1", { forHuman: "Corrected.", expectedUpdatedAt: "2026-08-18T10:00:00.000Z", idempotencyKey: "edit_0001" }],
+    ["edit", "relay_1", { forAgent: "Replacement agent document.", idempotencyKey: "edit_0002" }],
     ["delete", "relay_1", { expectedUpdatedAt: "2026-08-18T10:01:00.000Z", idempotencyKey: "delete_01" }],
   ]);
+});
+
+test("relay_message_edit exposes either payload independently", () => {
+  const edit = TOOLS.find((tool) => tool.name === "relay_message_edit");
+  assert.ok(edit);
+  assert.deepEqual(edit.inputSchema.required, ["relayId", "idempotencyKey"]);
+  assert.deepEqual(edit.inputSchema.anyOf, [{ required:["forHuman"] }, { required:["forAgent"] }]);
+  assert.ok(edit.inputSchema.properties.forHuman);
+  assert.ok(edit.inputSchema.properties.forAgent);
 });
 
 test("relay_message_edit keeps the MCP-only human-writing review", async () => {

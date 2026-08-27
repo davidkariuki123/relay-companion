@@ -797,7 +797,7 @@ export async function encryptE2eeMessage(client, payload, knownStatus) {
         ...eventBase,
         eventType: "message.edited",
         revision: Math.max(2, Number(eventInput.revision || 2)),
-        forHuman: String(payload.forHuman || ""),
+        ...(payload.forHuman !== undefined ? { forHuman: String(payload.forHuman || "") } : {}),
         ...(payload.forAgent !== undefined ? { forAgent: String(payload.forAgent || "") } : {}),
         ...(payload.title !== undefined ? { title: String(payload.title || "").trim() || null } : {}),
         editedAt: authoredAt,
@@ -974,7 +974,9 @@ function validateDecryptedPlaintext(plaintext, wire, identity, transparency) {
     )) ||
     (plaintext.eventType === "message.edited" && (
       !Number.isInteger(plaintext.revision) || plaintext.revision < 2 ||
-      typeof plaintext.forHuman !== "string" || !plaintext.forHuman ||
+      (plaintext.forHuman === undefined && plaintext.forAgent === undefined && plaintext.title === undefined) ||
+      (plaintext.forHuman !== undefined && (typeof plaintext.forHuman !== "string" || !plaintext.forHuman)) ||
+      (plaintext.forAgent !== undefined && typeof plaintext.forAgent !== "string") ||
       plaintext.editedAt !== plaintext.authoredAt
     )) ||
     (plaintext.eventType === "message.deleted" && (

@@ -88,6 +88,15 @@ contextBridge.exposeInMainWorld("relay", {
   // once instead of waiting out the last failure's backoff.
   networkOnline: () => ipcRenderer.invoke("relay:networkOnline"),
   react: (id, emoji, action) => ipcRenderer.invoke("relay:react", { id, emoji, action }),
+  editMessage: (id, forHuman, expectedUpdatedAt) => ipcRenderer.invoke("relay:messageEdit", {
+    id: String(id || ""),
+    forHuman: String(forHuman || ""),
+    expectedUpdatedAt: String(expectedUpdatedAt || ""),
+  }),
+  deleteMessage: (id, expectedUpdatedAt) => ipcRenderer.invoke("relay:messageDelete", {
+    id: String(id || ""),
+    expectedUpdatedAt: String(expectedUpdatedAt || ""),
+  }),
   // Electron>=32 removed File.path — the preload's webUtils is the only way
   // a renderer file picker/drop can yield a real path for the send pipeline.
   pathForFile: (file) => { try { return webUtils.getPathForFile(file) || ""; } catch { return ""; } },

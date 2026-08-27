@@ -1770,6 +1770,19 @@
   .th-under .th-seen.th-settling { animation:th-status-settle 1ms 900ms both; }
   .th-under button.th-seen { cursor:pointer; }
   .th-under button.th-seen:hover { color:var(--ink); opacity:1; }
+  .th-message-action { appearance:none; border:0; padding:0; background:transparent; font-family:var(--sans); font-size:10px;
+    color:var(--muted-2); opacity:0; cursor:pointer; transition:opacity .15s ease,color .15s ease; }
+  .th-msg:hover + .th-under .th-message-action, .th-under:hover .th-message-action,
+  .th-message-action:focus-visible { opacity:.78; }
+  .th-message-action:hover { color:var(--ink); opacity:1; }
+  .th-message-action.danger, .th-message-action.confirm { color:var(--danger); }
+  .th-message-edit { display:grid; gap:8px; min-width:min(310px, 72vw); padding-top:2px; }
+  .th-message-edit textarea { width:100%; min-height:72px; max-height:220px; resize:vertical; border:1px solid var(--edge); border-radius:9px;
+    background:var(--bg); color:var(--ink); padding:9px 10px; font:14px/1.45 var(--sans); outline:none; }
+  .th-message-edit textarea:focus { border-color:var(--muted-2); box-shadow:0 0 0 2px color-mix(in srgb,var(--ink) 8%,transparent); }
+  .th-message-edit-actions { display:flex; justify-content:flex-end; gap:10px; }
+  .th-message-edit-actions button { appearance:none; border:0; background:transparent; padding:2px 0; color:var(--muted-2); font:10.5px var(--sans); cursor:pointer; }
+  .th-message-edit-actions button[data-message-edit-save] { color:var(--ink); font-weight:600; }
   /* A message the server refused stays a whisper — it is not an alarm — but it
      has to read as a problem, and it carries the only two acts left on it. */
   .th-under .th-seen.warn { color:var(--danger); opacity:.95; }
@@ -4294,7 +4307,7 @@
 
   // ---------- state ----------
   let activeView = "relays";
-  let payload = { account: { paired: false }, ui: { canDismiss: true, reopenSurface: "the Relay icon", setupTutorialPending:false }, features: { requests:false, slack:false, peopleMentions:true, agentMentions:false, cowork:false, environment:"production" }, relays: [], sent: [], requests: [], contacts: [], chats: [], slackChats: [] };
+  let payload = { account: { paired: false }, ui: { canDismiss: true, reopenSurface: "the Relay icon", setupTutorialPending:false }, features: { requests:false, slack:false, peopleMentions:true, agentMentions:false, cowork:false, messageMutations:false, environment:"production" }, relays: [], sent: [], requests: [], contacts: [], chats: [], slackChats: [] };
   const canonicalChatDetails = new Map();
   const canonicalChatFingerprints = new Map();
   const canonicalChatDetailProjectionKeys = new Map();
@@ -9838,6 +9851,9 @@
   const optimisticReadIds = new Set(); // a polling payload cannot resurrect a read while persistence waits
   const threadComposerDrafts = new Map(); // threadId -> text; survives live DOM replacement
   const threadReplyTargets = new Map(); // visible room/thread id -> exact Relay id being answered
+  const messageEditDrafts = new Map(); // relayId -> replacement forHuman while its inline editor is open
+  const messageDeleteConfirmIds = new Set(); // relayIds awaiting the deliberate second Delete click
+  const messageMutationIds = new Set(); // relayIds with an edit/delete request in flight
   const threadReplyAttemptKeys = new Map(); // threadId -> { fingerprint, key }; retries converge
   // The API acknowledgement and the Sent projection are two different network
   // events. Keep the user's message in the room between them; otherwise a
@@ -10133,6 +10149,7 @@
         unread: selfAuthored ? false : Boolean(r.unread),
         source: r.source || null,
         ownedAgent,
+        updatedAt: r.updatedAt || r.createdAt,
         editedAt: r.editedAt || null,
         deletedAt: r.deletedAt || null,
         textLike, request,
@@ -10211,6 +10228,7 @@
         unread: false,
         source: s.source || null,
         ownedAgent,
+        updatedAt: s.updatedAt || s.createdAt,
         editedAt: s.editedAt || null,
         deletedAt: s.deletedAt || null,
         // YOUR OWN RELAYS ARE READABLE TOO. This hardcoded `textLike: true`
@@ -10284,6 +10302,7 @@
           // message's origin, never merely the room's transport.
           provider: item.provider || (item.origin === "slack" ? { name:"slack" } : null),
           origin: item.origin || "slack",
+          updatedAt: item.updatedAt || item.createdAt,
           slackThreadContext: item.slackThreadContext || null,
           editedAt: item.editedAt || null,
           deletedAt: item.deletedAt || null,
@@ -11146,6 +11165,37 @@
   // ---- the thread reply composer: a REAL send ----------------------------
   // Files stage as chips (picker or paste); Send creates a relay through the
   // device-token path (empty recipient + inReplyToRelayId = the reply rule);
+  function applySentMessageMutation(result, patch = {}) {
+    const ids = new Set((result?.affectedRelayIds?.length ? result.affectedRelayIds : [result?.relayId])
+      .map((id) => String(id || ""))
+      .filter(Boolean));
+    if (!ids.size) return;
+    const update = (item) => {
+      const id = String(item?.relayId || item?.id || "");
+      if (!ids.has(id)) return;
+      if (patch.deleted) {
+        item.deletedAt = result.deletedAt || result.updatedAt || new Date().toISOString();
+        item.title = "Message deleted";
+        item.displayTitle = "Message deleted";
+        item.forHuman = "This message was deleted.";
+        item.forAgent = "";
+        item.preview = "This message was deleted.";
+        item.attachments = [];
+        item.hasAttachments = false;
+      } else if (patch.forHuman !== undefined) {
+        item.forHuman = patch.forHuman;
+        item.preview = patch.forHuman;
+        item.editedAt = result.editedAt || result.updatedAt || new Date().toISOString();
+      }
+      item.updatedAt = result.updatedAt || item.updatedAt;
+    };
+    for (const item of payload.relays || []) update(item);
+    for (const item of payload.sent || []) update(item);
+    for (const chat of canonicalChatDetails.values()) {
+      for (const item of chat?.items || []) update(item);
+    }
+  }
+
   function renderThreadDetail() {
     // A ROOM IS A PERSON (the iMessage rule the Chat list already follows): every
     // exchange with them, merged. The room was rendering ONE thread, so opening
@@ -11436,6 +11486,8 @@
       // voice — sans, message-toned; a titled relay keeps the serif subject.
       const textLike = m.textLike;
       const agentWorking = m.ownedAgent && !String(m.agent || "").trim() && !m.deletedAt;
+      const editingMessage = messageEditDrafts.has(m.id);
+      const editDraft = editingMessage ? messageEditDrafts.get(m.id) : "";
       const hasHostActions = !textLike && !m.request;
       const chunkDivider = chunkDateLabel
         ? `<div class="th-chunk-date${firstChunk ? " first" : ""}" role="separator"><span>${esc(chunkDateLabel)}</span></div>`
@@ -11465,11 +11517,20 @@
       <div class="th-msg${hasHostActions ? " has-host-actions" : ""}${m.unread ? " unread" : ""}${mine ? " mine" : ""}${cont ? " cont" : ""}${textLike ? " text" : ""}${agentWorking ? " agent-working" : ""}${open ? " open" : ""}${m.deletedAt ? " deleted" : ""}${aggregates.length ? " has-rx" : ""}${liveCanonicalArrivalIds.has(String(m.id || "")) ? " live-arrival" : ""}"${textLike ? "" : ' role="button" tabindex="0"'}${agentWorking ? ' aria-busy="true"' : ""}${hasHostActions ? ` aria-expanded="${hostActionsPersistent ? "true" : "false"}"` : ""} data-msg="${esc(m.id)}" data-dir="${m.direction}" data-opening-id="${esc(m.id)}">
         ${!REACTIONS_ENABLED || m.request ? "" : messageReactionPickerHtml(m.id)}
         ${messageReplyReferenceHtml(m)}
-        <span class="th-msg-title">${m.request ? '<span class="kchip">Task</span>' : ""}${textLike ? linkify(m.title) : esc(m.title)}${agentWorking ? '<span class="agent-working-indicator" aria-hidden="true"><span class="agent-working-dot"></span><span class="agent-working-dot"></span><span class="agent-working-dot"></span></span>' : ""}${textLike ? "" : `<span class="th-more">${open ? "‹" : "›"}</span>`}${m.editedAt && !m.deletedAt ? '<span class="th-edited">edited</span>' : ""}</span><span class="th-blk-time">${esc(timeAgo(m.at))}</span>
+        ${editingMessage ? `
+          <div class="th-message-edit" data-stop="1">
+            <textarea data-message-edit-input="${esc(m.id)}" aria-label="Edit message">${esc(editDraft)}</textarea>
+            <div class="th-message-edit-actions">
+              <button type="button" data-message-edit-cancel="${esc(m.id)}">Cancel</button>
+              <button type="button" data-message-edit-save="${esc(m.id)}"${messageMutationIds.has(m.id) ? " disabled" : ""}>Save</button>
+            </div>
+          </div>` : `
+          <span class="th-msg-title">${m.request ? '<span class="kchip">Task</span>' : ""}${textLike ? linkify(m.title) : esc(m.title)}${agentWorking ? '<span class="agent-working-indicator" aria-hidden="true"><span class="agent-working-dot"></span><span class="agent-working-dot"></span><span class="agent-working-dot"></span></span>' : ""}${textLike ? "" : `<span class="th-more">${open ? "‹" : "›"}</span>`}${m.editedAt && !m.deletedAt ? '<span class="th-edited">edited</span>' : ""}</span><span class="th-blk-time">${esc(timeAgo(m.at))}</span>
 
-        ${!textLike && !open && !inlineBody && m.preview ? `<span class="th-preview">${esc(m.preview)}</span>` : ""}
-        ${!textLike && !open && inlineBody ? `<div class="th-body" data-stop="0">${readerParagraphs(m.body)}</div>` : ""}
-        ${!textLike && open ? `<div class="th-body" data-stop="0">${readerParagraphs(m.body)}</div>` : ""}
+          ${!textLike && !open && !inlineBody && m.preview ? `<span class="th-preview">${esc(m.preview)}</span>` : ""}
+          ${!textLike && !open && inlineBody ? `<div class="th-body" data-stop="0">${readerParagraphs(m.body)}</div>` : ""}
+          ${!textLike && open ? `<div class="th-body" data-stop="0">${readerParagraphs(m.body)}</div>` : ""}
+        `}
 
         <div class="row-err${rowNotes.get(m.id)?.cls === "ok" ? " ok" : ""}" data-err="${esc(m.id)}" data-stop="1">${esc(rowNotes.get(m.id)?.text || "")}</div>
         ${!REACTIONS_ENABLED || m.request ? "" : reactionConfirmationHtml(m.id)}
@@ -11489,6 +11550,15 @@
           bits.push(`<button type="button" class="th-reply-ghost" data-open-agent-work="${esc(m.id)}" data-stop="1">Open Work</button>`);
         } else if (!m.request && !groupPostingBlocked) {
           bits.push(`<button type="button" class="th-reply-ghost" data-reply-to="${esc(m.id)}" data-stop="1">reply</button>`);
+        }
+        if (payload.features?.messageMutations === true && mine && !m.pending && !m.request && !m.deletedAt) {
+          bits.push(`<button type="button" class="th-message-action" data-message-edit="${esc(m.id)}" data-stop="1">edit</button>`);
+          if (messageDeleteConfirmIds.has(m.id)) {
+            bits.push(`<button type="button" class="th-message-action confirm" data-message-delete-confirm="${esc(m.id)}" data-stop="1">Delete for everyone</button>`);
+            bits.push(`<button type="button" class="th-message-action" data-message-delete-cancel="${esc(m.id)}" data-stop="1">keep</button>`);
+          } else {
+            bits.push(`<button type="button" class="th-message-action danger" data-message-delete="${esc(m.id)}" data-stop="1">delete</button>`);
+          }
         }
         if (mine && m.pending) bits.push(...outboxStatusBits(m));
         if (receipt) bits.push(receipt.expandable
@@ -11602,6 +11672,104 @@
     }
     for (const z of thHistoryEl.querySelectorAll('[data-stop="1"]')) {
       z.addEventListener("click", (e) => e.stopPropagation());
+    }
+    for (const input of thHistoryEl.querySelectorAll("[data-message-edit-input]")) {
+      const id = String(input.getAttribute("data-message-edit-input") || "");
+      input.addEventListener("input", () => messageEditDrafts.set(id, input.value));
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          messageEditDrafts.delete(id);
+          renderThreadDetail();
+        } else if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+          event.preventDefault();
+          thHistoryEl.querySelector(`[data-message-edit-save="${CSS.escape(id)}"]`)?.click();
+        }
+      });
+    }
+    for (const button of thHistoryEl.querySelectorAll("[data-message-edit]")) {
+      button.addEventListener("click", () => {
+        const id = String(button.getAttribute("data-message-edit") || "");
+        const message = threadMessages(threadMessageOptions).find((item) => String(item.id) === id);
+        if (!message) return;
+        messageDeleteConfirmIds.delete(id);
+        messageEditDrafts.set(id, String(message.body || message.title || ""));
+        renderThreadDetail();
+        const input = thHistoryEl.querySelector(`[data-message-edit-input="${CSS.escape(id)}"]`);
+        if (input) {
+          input.focus();
+          input.setSelectionRange(input.value.length, input.value.length);
+        }
+      });
+    }
+    for (const button of thHistoryEl.querySelectorAll("[data-message-edit-cancel]")) {
+      button.addEventListener("click", () => {
+        messageEditDrafts.delete(String(button.getAttribute("data-message-edit-cancel") || ""));
+        renderThreadDetail();
+      });
+    }
+    for (const button of thHistoryEl.querySelectorAll("[data-message-edit-save]")) {
+      button.addEventListener("click", async () => {
+        const id = String(button.getAttribute("data-message-edit-save") || "");
+        const message = threadMessages(threadMessageOptions).find((item) => String(item.id) === id);
+        const input = thHistoryEl.querySelector(`[data-message-edit-input="${CSS.escape(id)}"]`);
+        const forHuman = String(input?.value || "").trim();
+        if (!message || messageMutationIds.has(id)) return;
+        if (!forHuman) {
+          setRowNote(id, "A message cannot be empty.", "err");
+          return;
+        }
+        messageEditDrafts.set(id, forHuman);
+        messageMutationIds.add(id);
+        button.disabled = true;
+        clearRowNote(id);
+        const result = await window.relay.editMessage(id, forHuman, message.updatedAt || "");
+        messageMutationIds.delete(id);
+        if (!result?.ok) {
+          setRowNote(id, result?.error || "Could not edit this message.", "err");
+          renderThreadDetail();
+          return;
+        }
+        applySentMessageMutation(result, { forHuman });
+        messageEditDrafts.delete(id);
+        setRowNote(id, "Message edited.", "ok");
+        fadeRowNoteLater(id, 2500);
+        renderThreadDetail();
+      });
+    }
+    for (const button of thHistoryEl.querySelectorAll("[data-message-delete]")) {
+      button.addEventListener("click", () => {
+        const id = String(button.getAttribute("data-message-delete") || "");
+        messageEditDrafts.delete(id);
+        messageDeleteConfirmIds.add(id);
+        renderThreadDetail();
+      });
+    }
+    for (const button of thHistoryEl.querySelectorAll("[data-message-delete-cancel]")) {
+      button.addEventListener("click", () => {
+        messageDeleteConfirmIds.delete(String(button.getAttribute("data-message-delete-cancel") || ""));
+        renderThreadDetail();
+      });
+    }
+    for (const button of thHistoryEl.querySelectorAll("[data-message-delete-confirm]")) {
+      button.addEventListener("click", async () => {
+        const id = String(button.getAttribute("data-message-delete-confirm") || "");
+        const message = threadMessages(threadMessageOptions).find((item) => String(item.id) === id);
+        if (!message || messageMutationIds.has(id)) return;
+        messageMutationIds.add(id);
+        button.disabled = true;
+        clearRowNote(id);
+        const result = await window.relay.deleteMessage(id, message.updatedAt || "");
+        messageMutationIds.delete(id);
+        if (!result?.ok) {
+          setRowNote(id, result?.error || "Could not delete this message.", "err");
+          renderThreadDetail();
+          return;
+        }
+        applySentMessageMutation(result, { deleted:true });
+        messageDeleteConfirmIds.delete(id);
+        renderThreadDetail();
+      });
     }
     for (const receiptButton of thHistoryEl.querySelectorAll("[data-receipt-toggle]")) {
       receiptButton.addEventListener("click", (event) => {
