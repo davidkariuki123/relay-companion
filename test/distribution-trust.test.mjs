@@ -35,6 +35,11 @@ import {
 import { bridgeShrinkwrap, publishPackageJson } from "../scripts/prepare-publish-package.mjs";
 import { assertMonotonicVersion, compareExactVersions } from "../scripts/assert-monotonic-version.mjs";
 import { electronVersionArgs } from "../scripts/verify-installed-runtime.mjs";
+import {
+  installLinuxElectronSandboxAsRoot,
+  linuxElectronSandboxPlan,
+  prepareLinuxElectronSandbox,
+} from "../scripts/prepare-linux-electron-sandbox.mjs";
 import { verifyThinSetupUninstalled } from "../scripts/verify-thin-setup-canary.mjs";
 
 const {
@@ -43,7 +48,9 @@ const {
   acquireCanonicalLock,
   assertCompatibleNode,
   downloadVerifiedArtifact,
+  durableNodePath,
   forwardActiveCanonicalCli,
+  installCanonicalCliLauncher,
   restoreRuntimeLinks,
   stageVerifiedRuntime,
   tarInvocation,
@@ -51,6 +58,7 @@ const {
 } = createRequire(import.meta.url)("../bootstrap/relay-setup.cjs");
 const credentialStore = createRequire(import.meta.url)("../src/credential-store.cjs");
 const {
+  repairRuntimeExecutablePermissions,
   runtimeExecutableInventory,
   verifyRuntimeExecutables,
 } = createRequire(import.meta.url)("../bootstrap/runtime-executables.cjs");
@@ -96,10 +104,76 @@ test("runtime builds invoke npm through an executable Node or shell entrypoint",
   });
 });
 
-test("Linux release smoke reads Electron version without requiring a setuid sandbox helper", () => {
-  assert.deepEqual(electronVersionArgs("linux"), ["--no-sandbox", "--version"]);
+test("every release smoke keeps Electron's production sandbox enabled", () => {
+  assert.deepEqual(electronVersionArgs("linux"), ["--version"]);
   assert.deepEqual(electronVersionArgs("darwin"), ["--version"]);
   assert.deepEqual(electronVersionArgs("win32"), ["--version"]);
+});
+
+test("Linux release smoke provisions only the exact content-addressed Electron sandbox helper", () => {
+  const electronPath = path.resolve("/runtime/node_modules/electron/dist/electron");
+  const source = path.join(path.dirname(electronPath), "chrome-sandbox");
+  const helperBytes = Buffer.from("pinned-electron-sandbox-helper");
+  const digest = crypto.createHash("sha256").update(helperBytes).digest("hex");
+  const destinationRoot = path.resolve("/trusted/relay/chromium-sandboxes");
+  const destination = path.join(destinationRoot, digest, "chrome-sandbox");
+  let installed = false;
+  const stat = (file) => {
+    if (file === electronPath) return { isFile: () => true, isSymbolicLink: () => false, size: 100, uid: 1000, mode: 0o100755 };
+    if (file === source) return { isFile: () => true, isSymbolicLink: () => false, size: helperBytes.length, uid: 1000, mode: 0o100755 };
+    if (file === destination && installed) return { isFile: () => true, isSymbolicLink: () => false, size: helperBytes.length, uid: 0, mode: 0o104755 };
+    throw new Error("missing");
+  };
+  const fsImpl = {
+    lstatSync: stat,
+    realpathSync: (file) => file,
+    readFileSync: (file) => {
+      if (file === source || (file === destination && installed)) return helperBytes;
+      throw new Error("missing");
+    },
+  };
+  const plan = linuxElectronSandboxPlan(electronPath, {
+    platform: "linux",
+    destinationRoot,
+    ...fsImpl,
+  });
+  assert.equal(plan.destination, destination);
+  assert.throws(
+    () => installLinuxElectronSandboxAsRoot(plan, {
+      uid: 0,
+      fsImpl,
+      expectedSha256: "0".repeat(64),
+    }),
+    /changed before installation/,
+    "the privileged half refuses a source swapped after the unprivileged digest was chosen",
+  );
+
+  const calls = [];
+  const env = {};
+  const prepared = prepareLinuxElectronSandbox({
+    electronPath,
+    platform: "linux",
+    destinationRoot,
+    uid: 1000,
+    fsImpl,
+    execPath: "/opt/node/bin/node",
+    scriptPath: "/checkout/scripts/prepare-linux-electron-sandbox.mjs",
+    env,
+    spawn: (command, args, options) => {
+      calls.push({ command, args, options });
+      installed = true;
+      return { status: 0, stdout: "", stderr: "" };
+    },
+  });
+  assert.equal(prepared.destination, destination);
+  assert.equal(env.CHROME_DEVEL_SANDBOX, destination);
+  assert.deepEqual(calls[0].args, [
+    "--", "/opt/node/bin/node", "/checkout/scripts/prepare-linux-electron-sandbox.mjs",
+    "--install-root", "--electron-path", electronPath, "--expected-sha256", digest,
+  ]);
+  assert.equal(calls[0].command, "sudo");
+  assert.deepEqual(calls[0].options.stdio, ["ignore", "pipe", "pipe"]);
+  assert.ok(!calls[0].args.includes("sh") && !calls[0].args.includes("-c"), "elevation never executes a shell command");
 });
 
 test("macOS target-site verification covers every Electron process executable and fails closed on a bad helper", () => {
@@ -133,6 +207,57 @@ test("macOS target-site verification covers every Electron process executable an
     reason: "candidate-not-executable",
     detail: "helper:Electron Helper (GPU)",
   });
+});
+
+test("signed runtime preflight repairs only the known CLI and Electron executable inventory", () => {
+  const root = "/runtime/node_modules/relay-companion";
+  const executable = new Set();
+  const chmods = [];
+  const result = repairRuntimeExecutablePermissions(root, {
+    platform: "darwin-arm64",
+    existsSync: () => true,
+    statSync: () => ({ isFile: () => true }),
+    accessSync: (file) => {
+      if (!executable.has(file)) {
+        const error = new Error("permission denied");
+        error.code = "EACCES";
+        throw error;
+      }
+    },
+    chmodSync: (file, mode) => {
+      chmods.push({ file, mode });
+      executable.add(file);
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.repaired, [
+    "relay-cli",
+    "electron",
+    "helper:Electron Helper",
+    "helper:Electron Helper (GPU)",
+    "helper:Electron Helper (Plugin)",
+    "helper:Electron Helper (Renderer)",
+    "helper:chrome_crashpad_handler",
+  ]);
+  assert.equal(chmods.length, result.repaired.length);
+  assert.equal(chmods.every(({ file, mode }) => file.startsWith(root) && mode === 0o700), true);
+});
+
+test("runtime permission repair fails closed before chmod for an unexpected file type", () => {
+  let chmodded = false;
+  const result = repairRuntimeExecutablePermissions("/runtime/node_modules/relay-companion", {
+    platform: "darwin",
+    existsSync: () => true,
+    statSync: () => ({ isFile: () => false }),
+    accessSync: () => {},
+    chmodSync: () => { chmodded = true; },
+  });
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "candidate-executable-invalid",
+    detail: "relay-cli",
+  });
+  assert.equal(chmodded, false);
 });
 
 test("first contact persists the exact reviewed version without lifecycle scripts", () => {
@@ -358,6 +483,7 @@ test("packed thin installer contains only the reviewed dependency-free bootstrap
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-thin-shape-"));
   try {
     fs.mkdirSync(path.join(root, "bootstrap"), { recursive: true });
+    fs.writeFileSync(path.join(root, "bootstrap", "linux-systemd.cjs"), "module.exports = {}\n");
     fs.writeFileSync(path.join(root, "bootstrap", "relay-setup.cjs"), "module.exports = {}\n");
     fs.writeFileSync(path.join(root, "bootstrap", "release-signature.cjs"), "module.exports = {}\n");
     fs.writeFileSync(path.join(root, "bootstrap", "runtime-executables.cjs"), "module.exports = {}\n");
@@ -380,6 +506,98 @@ test("packed thin installer contains only the reviewed dependency-free bootstrap
     assert.throws(() => validateInstalledPackageShape(root, { version, distribution: "thin-installer" }), /outside the reviewed bootstrap/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("thin runtime health loads with bootstrap files alone", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-thin-bootstrap-"));
+  try {
+    const bootstrap = path.join(root, "bootstrap");
+    fs.mkdirSync(bootstrap, { recursive: true });
+    for (const name of ["linux-systemd.cjs", "runtime-health.cjs"]) {
+      fs.copyFileSync(new URL(`../bootstrap/${name}`, import.meta.url), path.join(bootstrap, name));
+    }
+    const isolatedRequire = createRequire(path.join(root, "smoke.cjs"));
+    assert.doesNotThrow(() => isolatedRequire(path.join(bootstrap, "runtime-health.cjs")));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Linux preserves version-managed Node and installs a durable canonical CLI", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-linux-cli-"));
+  try {
+    const volatileNode = path.join(root, ".nvm", "versions", "node", "v22.13.0", "bin", "node");
+    fs.mkdirSync(path.dirname(volatileNode), { recursive: true });
+    fs.writeFileSync(volatileNode, "relay-node-bytes", { mode: 0o700 });
+    const runtimeRoot = path.join(root, ".relay", "runtime");
+    const durable = durableNodePath(volatileNode, { platform: "linux", runtimeRoot });
+    assert.match(durable.replaceAll("\\", "/"), /\/\.relay\/runtime\/node\/[a-f0-9]{64}\/node$/);
+    assert.equal(fs.readFileSync(durable, "utf8"), "relay-node-bytes");
+    fs.rmSync(path.join(root, ".nvm"), { recursive: true, force: true });
+    assert.equal(fs.existsSync(durable), true);
+
+    const releaseRoot = path.join(runtimeRoot, "releases", "1-linux-x64-test");
+    const packageRoot = path.join(releaseRoot, "node_modules", "relay-companion");
+    const bin = path.join(packageRoot, "bin", "relay.cjs");
+    fs.mkdirSync(path.dirname(bin), { recursive: true });
+    fs.writeFileSync(bin, "console.log('canonical-cli:' + process.argv.slice(2).join(','));\n");
+    const pointerPath = path.join(runtimeRoot, "current.json");
+    const candidate = { active: true, state: "active", node: process.execPath, bin, packageRoot, releaseRoot };
+    const installed = installCanonicalCliLauncher(candidate, {
+      platform: "linux",
+      homeDir: root,
+      pointerPath,
+      env: { PATH: path.join(root, ".local", "bin") },
+    });
+    assert.equal(installed.ok, true);
+    assert.equal(installed.pathAvailable, true);
+    fs.writeFileSync(pointerPath, JSON.stringify(candidate));
+    const invoked = spawnSync(process.execPath, [installed.launcherPath, "doctor"], { encoding: "utf8" });
+    assert.equal(invoked.status, 0, invoked.stderr);
+    assert.equal(invoked.stdout.trim(), "canonical-cli:doctor");
+
+    const repeated = installCanonicalCliLauncher(candidate, {
+      platform: "linux",
+      homeDir: root,
+      pointerPath,
+      env: { PATH: path.join(root, ".local", "bin") },
+    });
+    assert.equal(repeated.ok, true, "an unchanged Relay-owned launcher is safe to reuse");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Linux canonical CLI setup refuses unrelated launcher and command files without changing either", () => {
+  for (const collision of ["launcher", "shim"]) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), `relay-linux-cli-${collision}-`));
+    try {
+      const pointerPath = path.join(root, ".relay", "runtime", "current.json");
+      const launcherPath = path.join(path.dirname(pointerPath), "relay-cli.cjs");
+      const shimPath = path.join(root, ".local", "bin", "relay");
+      const target = collision === "launcher" ? launcherPath : shimPath;
+      const original = collision === "launcher"
+        ? "#!/usr/bin/env node\nconsole.log('someone else');\n"
+        : "#!/bin/sh\necho someone-else\n";
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, original);
+
+      const installed = installCanonicalCliLauncher({ node: process.execPath }, {
+        platform: "linux",
+        homeDir: root,
+        pointerPath,
+        env: {},
+      });
+
+      assert.equal(installed.ok, false);
+      assert.equal(installed.reason, collision === "launcher" ? "cli_launcher_collision" : "cli_shim_collision");
+      assert.equal(fs.readFileSync(target, "utf8"), original, "the unrelated file stays byte-identical");
+      const other = collision === "launcher" ? shimPath : launcherPath;
+      assert.equal(fs.existsSync(other), false, "preflight fails before writing the other generated file");
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   }
 });
 
@@ -979,6 +1197,7 @@ test("bootstrap Linux setup registers without restarting, then uses the exact-ro
       version,
       {
         platform: "linux",
+        homeDir: root,
         spawnImpl: (command, args) => { calls.push({ command, args }); return { status: 0, stdout: "", stderr: "" }; },
         activateLinuxServices: async (target) => {
           activated = true;
@@ -1235,6 +1454,7 @@ test("public release owns immutable publication while private promotion owns fle
     const promote = fs.readFileSync(privatePromotion, "utf8");
     assert.match(promote, /\(cd "\$runtime_prefix" && tar -xzf runtime\.tar\.gz\)/);
     assert.doesNotMatch(promote, /tar -xzf "\$runtime_prefix\/runtime\.tar\.gz"/);
+    assert.match(promote, /verify-installed-runtime\.mjs/);
     assert.match(promote, /thin-installer\) TAG=installer/);
     assert.match(promote, /thin installer must never replace bridge latest/);
     assert.match(promote, /companion-releases\/stable\/manifest\.json/);
@@ -1257,10 +1477,19 @@ test("public release owns immutable publication while private promotion owns fle
     assert.match(importWorkflow, /--expect-uninstalled/);
     assert.match(importWorkflow, /uninstall --no-trampoline/);
     assert.doesNotMatch(importWorkflow, /relay-companion@latest|uninstall --purge/);
+    assert.doesNotMatch(importWorkflow, /sudo install[^\n]*chrome-sandbox|sha256sum[^\n]*chrome-sandbox/);
   }
 });
 
 test("public export includes every script its release security suite imports", () => {
   assert.equal(fs.existsSync(new URL("../scripts/assert-monotonic-version.mjs", import.meta.url)), true);
+  assert.equal(fs.existsSync(new URL("../scripts/prepare-linux-electron-sandbox.mjs", import.meta.url)), true);
   assert.equal(fs.existsSync(new URL("../scripts/verify-thin-setup-canary.mjs", import.meta.url)), true);
+  const exporter = new URL("../scripts/export-public-release.mjs", import.meta.url);
+  if (fs.existsSync(exporter)) {
+    assert.match(fs.readFileSync(exporter, "utf8"), /"prepare-linux-electron-sandbox\.mjs"/);
+  }
+  const verifier = fs.readFileSync(new URL("../scripts/verify-installed-runtime.mjs", import.meta.url), "utf8");
+  assert.match(verifier, /prepareLinuxElectronSandbox\(\{ electronPath: verified\.electronPath, platform \}\)/);
+  assert.doesNotMatch(verifier, /["']--no-sandbox["']/);
 });

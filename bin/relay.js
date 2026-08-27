@@ -33,22 +33,34 @@ import {
 } from "../src/cli-trampoline.js";
 import {
   hookInstallNotices,
+  linuxDesktopPaths,
+  prepareLinuxElectronSandbox,
+  persistentNodePath,
   purgeLocalState,
+  relayBinPath,
   windowsAutostartTaskStatus,
   repairDesktopSurfaces,
   repairExistingAgentHooks,
   repairExistingAgentRegistrations,
   accountRestartLines,
+  desktopExecQuote,
   restartRelayServices,
   runSetupInstall,
   runUninstall,
+  startLinuxDesktopServices,
+  systemdExecQuote,
   windowsStartMenuShortcutMissing,
   windowsStartMenuShortcutPath,
 } from "../src/install.js";
+import { readAutostartDaemonRoot } from "../src/autostart-registration.js";
 import { companionPackageRoot, readMigrationFailure, readRecoveryFailure, runUpdateOnce } from "../src/auto-update.js";
-import { canonicalRuntimeLayout, readCanonicalRuntimeState } from "../src/canonical-runtime.js";
+import {
+  canonicalRuntimeLayout,
+  readCanonicalRuntimeState,
+  reconcileCanonicalRuntimeNode,
+} from "../src/canonical-runtime.js";
 import { listUpdateWorkerJobs } from "../src/canonical-updater.js";
-import { pillStatusPath, waitForPillReady } from "../src/pill-control.js";
+import { pillStatusPath, readPillStatus, waitForPillReady } from "../src/pill-control.js";
 import { liveToolRequirement, requiredLiveHosts, shouldRequireLiveTools } from "../src/setup-activation.js";
 import { openRelay, openTask } from "../src/materializer.js";
 import { runClaudeHook } from "../src/claude-hook.js";
@@ -117,6 +129,14 @@ function companionVersion() {
     return typeof pkg.version === "string" ? pkg.version : "unknown";
   } catch {
     return "unknown";
+  }
+}
+
+function companionDistribution() {
+  try {
+    return String(createRequire(import.meta.url)("../package.json").relayDistribution || "");
+  } catch {
+    return "";
   }
 }
 
@@ -394,15 +414,25 @@ async function cmdSetup(flags) {
 
 /** Install the tools + daemon on a device that is already paired. */
 async function cmdInstall(flags = {}) {
-  await applyInstall({
+  const install = await applyInstall({
     requireLiveTools: shouldRequireLiveTools(),
     requiredHosts: requiredLiveHosts(),
     claim: Boolean(flags.claim),
   });
+  // `relay setup` already propagates a Linux systemd/pill failure. The shorter
+  // `relay install` path must keep the same contract: printing recovery advice
+  // and then exiting zero makes automation (and a person skimming the last line)
+  // believe a machine is ready when neither background process will survive the
+  // terminal. Preserve the detailed messages from applyInstall, but fail the
+  // command so the incomplete lifecycle cannot be mistaken for success.
+  if (install?.lifecycleFailed) process.exitCode = 1;
 }
 
 function cmdRepairDesktop(flags = {}) {
   const reload = !flags["no-restart"];
+  const env = process.platform === "linux"
+    ? { ...process.env, RELAY_ALLOW_SANDBOX_AUTHORIZATION: "1" }
+    : process.env;
   // Repair is deliberately local and non-destructive. It may rewrite Relay's
   // launchers and Relay-owned hook registrations, but it never rewrites account
   // config, deletes credentials/E2EE state, clears messages/outboxes/preferences,
@@ -415,7 +445,7 @@ function cmdRepairDesktop(flags = {}) {
   if (!hookRepair.ok) {
     throw new Error(`Could not repair Relay agent hooks (${hookRepair.reason || "migration failed"}).`);
   }
-  const repaired = repairDesktopSurfaces({ reload, claim: Boolean(flags.claim) });
+  const repaired = repairDesktopSurfaces({ reload, claim: Boolean(flags.claim), env });
   if (!repaired.ok) {
     const failures = [
       !repaired.daemon?.ok && `daemon: ${repaired.daemon?.message || repaired.daemon?.reason || "install failed"}`,
@@ -436,9 +466,11 @@ function cmdRepairRuntime(flags = {}) {
   // older legacy runtime whose own CLI predates `repair-runtime`.
   const targetBin = flags["target-bin"] ? path.resolve(String(flags["target-bin"])) : undefined;
   const targetNode = flags["target-node"] ? String(flags["target-node"]) : undefined;
+  const runtimeBin = targetBin || relayBinPath();
+  const runtimeNode = persistentNodePath(targetNode || process.execPath);
   const target = {
-    ...(targetBin ? { bin: targetBin } : {}),
-    ...(targetNode ? { node: targetNode } : {}),
+    bin: runtimeBin,
+    node: runtimeNode,
   };
   const registrations = repairExistingAgentRegistrations(target);
   if (!registrations.ok) {
@@ -448,7 +480,17 @@ function cmdRepairRuntime(flags = {}) {
   if (!repaired.ok) {
     throw new Error("Could not repair Relay runtime services.");
   }
-  return { ok: true, registrations, ...repaired };
+  const pointer = reconcileCanonicalRuntimeNode({ node: runtimeNode });
+  if (!pointer.ok) {
+    throw new Error(`Could not reconcile Relay's active runtime pointer (${pointer.reason || "verification failed"}).`);
+  }
+  const pointerText = pointer.changed
+    ? " The active runtime pointer was updated."
+    : pointer.reason === "already-current"
+      ? " The active runtime pointer was already current."
+      : "";
+  console.log(`Relay runtime repaired with its durable Node.${pointerText}`);
+  return { ok: true, registrations, pointer, ...repaired };
 }
 
 /**
@@ -512,6 +554,9 @@ async function cmdUninstall(flags = {}) {
   if (!purged.ok) {
     console.log("The pairing is gone, so this machine is forgotten, but some files above could not be deleted.");
     console.log("They are inert leftovers — remove them by hand when whatever holds them exits.");
+  }
+  if (process.platform === "linux") {
+    console.log("A root-owned Chromium sandbox helper may remain under /usr/local/lib/relay because it can be shared by other users on this Linux device.");
   }
   console.log("This machine has forgotten Relay. To remove the package itself, run:");
   console.log("  npm uninstall -g relay-companion");
@@ -626,6 +671,46 @@ async function cmdPill(flags = {}, positional = []) {
   if (typeof electronPath !== "string") {
     throw new Error("Could not resolve the Electron binary. Run `npm install` in packages/companion.");
   }
+  const pillEnv = { ...process.env };
+  if (process.platform === "linux") {
+    pillEnv.RELAY_ALLOW_SANDBOX_AUTHORIZATION = "1";
+    const repaired = repairDesktopSurfaces({ reload: false, env: pillEnv });
+    if (!repaired.ok) {
+      const failure = repaired.pill?.detail || repaired.pill?.reason || repaired.daemon?.detail || repaired.daemon?.reason;
+      throw new Error(failure || "Relay could not prepare its Linux desktop services.");
+    }
+    const expectedRoot = path.resolve(here, "..");
+    const beforePidResult = spawnSync("systemctl", ["--user", "show", "--property=MainPID", "--value", "work.relay.companion.pill.service"], {
+      encoding: "utf8",
+      timeout: 5_000,
+    });
+    const beforePid = Number(String(beforePidResult.stdout || "").trim());
+    const beforeStatus = readPillStatus();
+    const exactPillAlreadyOwned = !beforePidResult.error && beforePidResult.status === 0 && beforePid > 0 &&
+      beforeStatus?.pid === beforePid && path.resolve(String(beforeStatus.packageRoot || "")) === expectedRoot;
+    const started = startLinuxDesktopServices({ env: pillEnv, restartPill: beforePid > 0 && !exactPillAlreadyOwned });
+    if (!started.ok) throw new Error(started.detail || `Relay could not start ${started.unit || "its Linux services"}.`);
+
+    // The systemd unit must own the singleton before the short-lived second
+    // Electron instance delivers a reopen/deep-link signal. Otherwise a manual
+    // app launch can become an unsupervised pill and strand future restarts.
+    const deadline = Date.now() + 12_000;
+    let supervised = false;
+    while (Date.now() <= deadline) {
+      const mainPid = spawnSync("systemctl", ["--user", "show", "--property=MainPID", "--value", "work.relay.companion.pill.service"], {
+        encoding: "utf8",
+        timeout: 5_000,
+      });
+      const status = readPillStatus();
+      const pid = Number(String(mainPid.stdout || "").trim());
+      if (!mainPid.error && mainPid.status === 0 && pid > 0 && status?.ready === true && status.pid === pid && path.resolve(String(status.packageRoot || "")) === expectedRoot) {
+        supervised = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    if (!supervised) throw new Error("Relay's registered Linux pill service did not become ready. Run `relay doctor` for details.");
+  }
   const reopenNonce = `cli-${process.pid}-${randomUUID()}`;
   const deepLinks = positional
     .map((value) => String(value || ""))
@@ -637,7 +722,7 @@ async function cmdPill(flags = {}, positional = []) {
     {
       detached: true,
       stdio: "ignore",
-      env: { ...process.env },
+      env: pillEnv,
     },
   );
   child.on("error", (error) => {
@@ -819,6 +904,122 @@ async function cmdDoctor(flags = {}) {
       console.log("  Start Menu shortcut: ok (Start → \"relay\" opens the pill)");
     }
   }
+  if (process.platform === "linux") {
+    const desktopPaths = linuxDesktopPaths();
+    const activeRoot = path.resolve(companionPackageRoot());
+    const activeUnitRoot = systemdExecQuote(activeRoot).slice(1, -1);
+    const activeDesktopRoot = desktopExecQuote(activeRoot).slice(1, -1);
+    const units = [
+      { label: "background service", unit: "work.relay.companion.service", expectedPath: desktopPaths.daemonUnitPath },
+      { label: "Relay pill", unit: "work.relay.companion.pill.service", expectedPath: desktopPaths.pillUnitPath },
+    ];
+    console.log("  Linux services:");
+    for (const { label, unit, expectedPath } of units) {
+      const probe = spawnSync(
+        "systemctl",
+        ["--user", "show", unit, "--property=LoadState,UnitFileState,ActiveState,SubState,MainPID,FragmentPath", "--no-pager"],
+        { encoding: "utf8", timeout: 10_000 },
+      );
+      const fields = Object.fromEntries(
+        String(probe.stdout || "")
+          .split(/\r?\n/)
+          .map((line) => line.split("="))
+          .filter(([key, ...value]) => key && value.length)
+          .map(([key, ...value]) => [key, value.join("=")]),
+      );
+      if (probe.error || (!fields.LoadState && probe.status !== 0)) {
+        const detail = probe.error?.message || String(probe.stderr || "systemd user manager unavailable").trim();
+        console.log(`    ${label}: unable to inspect (${detail})`);
+        continue;
+      }
+      if (fields.LoadState !== "loaded") {
+        console.log(`    ${label}: NOT INSTALLED (${unit})`);
+        console.log("      fix with: relay repair-installation");
+        continue;
+      }
+      const runtime = [fields.ActiveState, fields.SubState].filter(Boolean).join("/") || "unknown";
+      const registration = fields.UnitFileState ? `, ${fields.UnitFileState}` : "";
+      const mainPid = Number.parseInt(String(fields.MainPID || "0"), 10);
+      console.log(`    ${label}: ${runtime}${registration}, pid ${mainPid || "none"} (${unit})`);
+      let fragmentMatches = false;
+      try { fragmentMatches = fsSync.realpathSync(fields.FragmentPath) === fsSync.realpathSync(expectedPath); }
+      catch { fragmentMatches = path.resolve(String(fields.FragmentPath || "")) === path.resolve(expectedPath); }
+      if (!fragmentMatches) {
+        console.log(`      WRONG UNIT FILE: systemd resolved ${fields.FragmentPath || "nothing"}`);
+        console.log(`      expected: ${expectedPath}`);
+        console.log("      fix with: relay repair-installation");
+      }
+      let unitNamesActiveRoot = false;
+      try { unitNamesActiveRoot = fsSync.readFileSync(expectedPath, "utf8").includes(activeUnitRoot); } catch {}
+      if (!unitNamesActiveRoot) {
+        console.log(`      STALE COMMAND: ${expectedPath} does not name the active Relay runtime`);
+        console.log("      fix with: relay repair-installation");
+      }
+      if (fields.ActiveState !== "active" || !Number.isInteger(mainPid) || mainPid <= 0) {
+        console.log(`      inspect with: systemctl --user status ${unit}`);
+        console.log("      fix with: relay repair-installation");
+      }
+    }
+    const registered = readAutostartDaemonRoot({ platform: "linux" });
+    let registrationMatches = false;
+    try { registrationMatches = fsSync.realpathSync(registered?.root) === fsSync.realpathSync(activeRoot); }
+    catch { registrationMatches = Boolean(registered?.root) && path.resolve(registered.root) === activeRoot; }
+    if (!registrationMatches) {
+      console.log(`  Linux runtime registration: WRONG (${registered?.root || "unreadable"}; active ${activeRoot})`);
+      console.log("    fix with: relay repair-installation");
+    } else {
+      console.log(`  Linux runtime registration: ok (${activeRoot})`);
+    }
+    console.log("  Linux desktop integration:");
+    for (const [label, file] of [
+      ["app launcher", desktopPaths.applicationPath],
+      ["login autostart", desktopPaths.autostartPath],
+    ]) {
+      const exists = fsSync.existsSync(file);
+      let stale = false;
+      if (exists && label === "app launcher") {
+        try { stale = !fsSync.readFileSync(file, "utf8").includes(activeDesktopRoot); }
+        catch { stale = true; }
+      }
+      console.log(`    ${label}: ${!exists ? `MISSING (${file})` : stale ? `STALE (${file})` : "ok"}`);
+      if (!exists || stale) console.log("      fix with: relay repair-installation");
+    }
+    const mime = spawnSync("xdg-mime", ["query", "default", "x-scheme-handler/relay"], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    const mimeHandler = String(mime.stdout || "").trim();
+    if (!mime.error && mime.status === 0 && mimeHandler === "work.relay.companion.desktop") {
+      console.log("    relay: links: ok");
+    } else {
+      console.log(`    relay: links: WRONG (${mimeHandler || mime.error?.message || "no handler"})`);
+      console.log("      fix with: relay repair-installation");
+    }
+    try {
+      const electronPath = createRequire(import.meta.url)("electron");
+      const sandboxEnv = {};
+      const sandbox = prepareLinuxElectronSandbox({
+        platform: "linux",
+        electronPath,
+        env: sandboxEnv,
+        allowAuthorization: false,
+      });
+      if (sandbox.ok) {
+        console.log(`    Electron sandbox: ${sandbox.discovered ? `verified (${sandbox.destination})` : "kernel user namespace available"}`);
+      } else {
+        console.log(`    Electron sandbox: NEEDS ATTENTION (${sandbox.detail || sandbox.reason})`);
+        console.log("      fix with: relay update");
+      }
+    } catch (error) {
+      console.log(`    Electron sandbox: unable to inspect (${error?.message || error})`);
+      console.log("      fix with: relay repair-installation");
+    }
+    const relayLogDir = path.join(os.homedir(), ".relay");
+    console.log("  Linux logs:");
+    console.log(`    background service: ${path.join(relayLogDir, "daemon.log")}`);
+    console.log(`    Relay pill: ${path.join(relayLogDir, "pill.log")}`);
+    console.log("    service history: journalctl --user -u work.relay.companion.service -u work.relay.companion.pill.service");
+  }
   if (flags["requeue-unseen"] && prefs.pillHidden === true) {
     console.log("Refusing --requeue-unseen while \"Show Relay automatically\" is off: nothing can present, so it would only grow the queue.");
     console.log("Turn that setting on in Relay's Settings tab first.");
@@ -830,6 +1031,18 @@ async function cmdDoctor(flags = {}) {
       const uid = typeof process.getuid === "function" ? process.getuid() : 501;
       spawnSync("launchctl", ["kickstart", "-k", `gui/${uid}/work.relay.companion.pill`], { stdio: "ignore" });
       console.log("Pill restarted; the queue will replay them sequentially when you are present.");
+    } else if (flags["restart-pill"] && process.platform === "linux") {
+      const restarted = await restartRelayServices({ services: ["pill"] });
+      if (restarted.pill === "restarted") {
+        console.log("Pill restarted; the queue will replay them sequentially when you are present.");
+      } else if (restarted.pill === "not_installed") {
+        console.log("The Relay pill service is not installed; run `relay repair-installation`.");
+      } else {
+        const detail = restarted.detail?.pill ? ` (${restarted.detail.pill})` : "";
+        console.log(`The Relay pill did not restart${detail}; run \`relay repair-installation\` or restart it with systemctl.`);
+      }
+    } else if (process.platform === "linux") {
+      console.log("Restart the pill to pick this up: systemctl --user restart work.relay.companion.pill.service");
     } else {
       console.log("Restart the pill to pick this up: launchctl kickstart -k gui/$UID/work.relay.companion.pill");
     }
@@ -952,6 +1165,25 @@ let trampolineArrival = null;
 
 async function main() {
   const [command, ...rest] = process.argv.slice(2);
+  // The one-time full migration bridge still publishes bin/relay.js so older
+  // fleets can reach it. A human's first `setup`, however, must exercise the
+  // same signed canonical bootstrap and release canary as the later thin
+  // installer. Candidate activation sets this marker before calling setup back.
+  if (
+    command === "setup" &&
+    companionDistribution() === "bridge-runtime" &&
+    process.env.RELAY_BOOTSTRAP_ACTIVATED !== "1"
+  ) {
+    const bootstrap = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../bootstrap/relay-setup.cjs");
+    const result = spawnSync(process.execPath, [bootstrap, "setup", ...rest], {
+      stdio: "inherit",
+      windowsHide: true,
+      env: process.env,
+    });
+    if (result.error) throw result.error;
+    process.exitCode = Number.isInteger(result.status) ? result.status : 1;
+    return;
+  }
   // The typed `relay` command is the npm global shim and would otherwise stay
   // at install-time version forever while the canonical runtime moves on
   // underneath it. Hand human-facing commands to the active release; the
@@ -1062,7 +1294,7 @@ async function main() {
           "  relay setup --code CODE                               Legacy migration only: pair by code, then install",
           "  relay install                                        Add Relay to your agents",
           "  relay uninstall                                       Remove Relay from your agents and stop the daemon (keeps the pairing)",
-          "  relay uninstall --purge                               Also revoke this device and delete all local Relay state, as if never installed",
+          "  relay uninstall --purge                               Also revoke this device and delete all owner-scoped Relay state",
           "  relay repair-installation [--no-restart]             Non-destructively repair Relay.app and services; preserves account, encryption, messages, outbox, and preferences",
           "  relay repair-desktop [--no-restart]                  Compatibility alias for repair-installation",
           "  relay repair-runtime [--no-restart]                  Internal: refresh existing Relay registrations and runtime services",

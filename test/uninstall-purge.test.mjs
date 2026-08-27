@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { createRequire } from "node:module";
 import {
   localStateDirs,
   pathContains,
@@ -10,6 +11,8 @@ import {
   removeClaudeDesktopMcpConfig,
   runningPackageRoot,
 } from "../src/install.js";
+
+const { installCanonicalCliLauncher } = createRequire(import.meta.url)("../bootstrap/relay-setup.cjs");
 
 function tmpDir(label) {
   return fs.mkdtempSync(path.join(os.tmpdir(), `relay-${label}-`));
@@ -114,6 +117,72 @@ test("purge deletes the pairing dir and the companion state dir, honouring the s
   assert.deepEqual(res2.removed.sort(), [path.resolve(altConfig), path.resolve(altState)].sort());
   assert.equal(fs.existsSync(altConfig), false);
   assert.equal(fs.existsSync(altState), false);
+});
+
+test("Linux purge removes Relay's generated command pair but preserves an unrelated relay command", () => {
+  const ownedHome = tmpDir("linux-cli-owned");
+  const pointerPath = path.join(ownedHome, ".relay", "runtime", "current.json");
+  const installed = installCanonicalCliLauncher({ node: process.execPath }, {
+    platform: "linux",
+    homeDir: ownedHome,
+    pointerPath,
+    env: {},
+  });
+  assert.equal(installed.ok, true);
+
+  const purged = purgeLocalState({
+    homeDir: ownedHome,
+    env: {},
+    platform: "linux",
+    deleteCredential: () => ({ ok: true }),
+  });
+  assert.equal(purged.ok, true);
+  assert.equal(fs.existsSync(installed.shimPath), false, "Relay's generated command is removed");
+  assert.equal(fs.existsSync(installed.launcherPath), false, "Relay's generated launcher is removed");
+  assert.ok(purged.removed.includes(installed.shimPath));
+  assert.ok(purged.removed.includes(installed.launcherPath));
+
+  const collisionHome = tmpDir("linux-cli-unrelated");
+  const collisionInstall = installCanonicalCliLauncher({ node: process.execPath }, {
+    platform: "linux",
+    homeDir: collisionHome,
+    env: {},
+  });
+  assert.equal(collisionInstall.ok, true);
+  const unrelatedShim = collisionInstall.shimPath;
+  const unrelatedSource = "#!/bin/sh\necho someone-else\n";
+  fs.writeFileSync(unrelatedShim, unrelatedSource);
+  fs.writeFileSync(path.join(collisionHome, ".relay", "config.json"), "{}\n");
+
+  const collisionPurge = purgeLocalState({
+    homeDir: collisionHome,
+    env: {},
+    platform: "linux",
+    deleteCredential: () => ({ ok: true }),
+  });
+  assert.equal(collisionPurge.ok, true);
+  assert.equal(fs.readFileSync(unrelatedShim, "utf8"), unrelatedSource, "an unrelated relay command is untouched");
+  assert.equal(collisionPurge.removed.includes(unrelatedShim), false);
+
+  const damagedHome = tmpDir("linux-cli-damaged");
+  const damagedInstall = installCanonicalCliLauncher({ node: process.execPath }, {
+    platform: "linux",
+    homeDir: damagedHome,
+    env: {},
+  });
+  assert.equal(damagedInstall.ok, true);
+  fs.rmSync(damagedInstall.launcherPath, { force: true });
+  purgeLocalState({
+    homeDir: damagedHome,
+    env: {},
+    platform: "linux",
+    deleteCredential: () => ({ ok: true }),
+  });
+  assert.equal(fs.existsSync(damagedInstall.shimPath), false, "an exact orphaned Relay shim is still removed");
+
+  fs.rmSync(ownedHome, { recursive: true, force: true });
+  fs.rmSync(collisionHome, { recursive: true, force: true });
+  fs.rmSync(damagedHome, { recursive: true, force: true });
 });
 
 test("purging from inside the canonical runtime kills the pairing first and the running release last", () => {

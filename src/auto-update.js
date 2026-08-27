@@ -34,6 +34,7 @@ const DEFAULT_REGISTRY = "https://registry.npmjs.org";
 const STABLE_RUNTIME_MANIFEST = "https://api.sendrelays.com/v1/companion-releases/stable/manifest.json";
 const releaseTrust = createRequire(import.meta.url)("./release-trust.json");
 const { RELEASE_ALGORITHM, verifyReleaseEnvelope } = createRequire(import.meta.url)("../bootstrap/release-signature.cjs");
+const { systemdRunEnvironmentArgs } = createRequire(import.meta.url)("../bootstrap/linux-systemd.cjs");
 // A production publish should reach an idle machine promptly. The registry request is
 // a tiny dist-tags document and the daemon is the only checker, so one minute gives us
 // fast fleet convergence without meaningful registry load.
@@ -469,6 +470,7 @@ export function updateRetryCooldownMs(failures, { baseMs = RETRY_COOLDOWN_MS, ma
 export function submitCanonicalRepoint({
   canonical,
   platform = process.platform,
+  env = process.env,
   log = () => {},
   spawnImpl = spawn,
   label = null,
@@ -490,7 +492,16 @@ export function submitCanonicalRepoint({
       const jobLabel = label || `work.relay.autostart.repoint.${process.pid}`;
       const child = spawnImpl(
         "systemd-run",
-        ["--user", "--quiet", "--collect", `--unit=${jobLabel}`, node, canonical.bin, "repair-runtime"],
+        [
+          "--user",
+          "--quiet",
+          "--collect",
+          `--unit=${jobLabel}`,
+          ...systemdRunEnvironmentArgs(env),
+          node,
+          canonical.bin,
+          "repair-runtime",
+        ],
         { detached: true, stdio: "ignore" },
       );
       child?.unref?.();
@@ -520,6 +531,7 @@ export function createAutoUpdater({
         node: process.execPath,
         homeDir: os.homedir(),
         platform: opts.platform,
+        env,
       }),
   getCanonicalRuntime = () => readCanonicalRuntime({ platform }),
   readAutostart = () => readAutostartDaemonRoot({ platform }),
@@ -1088,6 +1100,7 @@ export async function runUpdateOnce({
   // useFailureBackoff false: likewise never make them wait out a backoff they are
   // very likely retrying precisely because they just repaired the cause.
   const updater = createAutoUpdater({
+    env: { ...process.env, RELAY_ALLOW_SANDBOX_AUTHORIZATION: "1" },
     checkIntervalMs: 0,
     restartCooldownMs: 0,
     useFailureBackoff: false,

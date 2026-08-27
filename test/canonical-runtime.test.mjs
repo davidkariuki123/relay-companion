@@ -9,6 +9,7 @@ import {
   isCanonicalPackageRoot,
   readCanonicalRuntime,
   readCanonicalRuntimeState,
+  reconcileCanonicalRuntimeNode,
   recoverCanonicalRuntime,
   pruneCanonicalReleases,
   repairCanonicalRuntime,
@@ -57,6 +58,67 @@ function existingPointer(homeDir, version = "0.1.240", platform = "linux", fsImp
   fsImpl.writeFileSync(layout.pointerPath, `${JSON.stringify(pointer)}\n`);
   return pointer;
 }
+
+test("runtime repair atomically replaces a stale pointer Node without changing release identity", () => {
+  const homeDir = fixture();
+  const platform = process.platform;
+  const api = platform === "win32" ? path.win32 : path.posix;
+  const previous = existingPointer(homeDir, "0.1.240", platform);
+  const durableNode = api.join(homeDir, ".relay", "runtime", "node", platform === "win32" ? "node.exe" : "node");
+  const result = reconcileCanonicalRuntimeNode({
+    node: durableNode,
+    homeDir,
+    platform,
+    now: () => 42,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.changed, true);
+  const current = readCanonicalRuntime({ homeDir, platform });
+  assert.equal(current.node, durableNode);
+  assert.equal(current.packageRoot, previous.packageRoot);
+  assert.equal(current.releaseId, previous.releaseId);
+  assert.equal(current.repairedAt, 42);
+});
+
+test("runtime repair updates the active pointer even when invoked by another install tree", () => {
+  const homeDir = fixture();
+  const platform = process.platform;
+  const api = platform === "win32" ? path.win32 : path.posix;
+  const previous = existingPointer(homeDir, "0.1.240", platform);
+  const other = reconcileCanonicalRuntimeNode({
+    node: api.join(homeDir, "durable", platform === "win32" ? "node.exe" : "node"),
+    homeDir,
+    platform,
+  });
+  assert.equal(other.changed, true);
+  const current = readCanonicalRuntime({ homeDir, platform });
+  assert.equal(current.bin, previous.bin);
+  assert.equal(current.packageRoot, previous.packageRoot);
+  assert.equal(current.releaseId, previous.releaseId);
+});
+
+test("runtime repair never overwrites an activation journal", () => {
+  const homeDir = fixture();
+  const platform = process.platform;
+  const api = platform === "win32" ? path.win32 : path.posix;
+  const previous = existingPointer(homeDir, "0.1.240", platform);
+  const layout = canonicalRuntimeLayout({ homeDir, platform });
+  fs.writeFileSync(layout.pointerPath, `${JSON.stringify({
+    schema: 1,
+    active: false,
+    state: "activating",
+    candidate: previous,
+    previous,
+  })}\n`);
+  const journal = fs.readFileSync(layout.pointerPath, "utf8");
+  const active = reconcileCanonicalRuntimeNode({
+    node: api.join(homeDir, "durable", platform === "win32" ? "node.exe" : "node"),
+    homeDir,
+    platform,
+  });
+  assert.equal(active.reason, "canonical-transaction-active");
+  assert.equal(fs.readFileSync(layout.pointerPath, "utf8"), journal);
+});
 
 async function runPosix({ homeDir, version = "0.1.241", ...overrides } = {}) {
   return repairCanonicalRuntime({

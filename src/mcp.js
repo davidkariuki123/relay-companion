@@ -849,6 +849,9 @@ const SHARE_DISABLED_INSTRUCTION =
 // against an environment Codex does not produce.
 const SURFACE_BY_MCP_CLIENT = {
   "codex-mcp-client": "codex",
+  // Measured from Conductor's Codex-compatible initialize frame. The client
+  // name is its declared provenance, not an environment or process guess.
+  "codex-local": "codex",
   "claude-code": "claude_code",
 };
 

@@ -5,7 +5,8 @@ import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { compatibleNodeRuntime, stableNodePath } from "./install.js";
+import { compatibleNodeRuntime, persistentNodePath, stableNodePath } from "./install.js";
+import { ACTIVE_UPDATE_WORKER_ENV } from "./update-agent-cleanup.js";
 import {
   canonicalRuntimeLayout,
   readCanonicalRuntime,
@@ -21,6 +22,7 @@ export const UPDATE_WORKER_LABEL = "work.relay.companion.update";
 export const UPDATE_REQUEST_SCHEMA = 1;
 const require = createRequire(import.meta.url);
 const { stageVerifiedRuntime, releasePlatform } = require("../bootstrap/relay-setup.cjs");
+const { systemdRunEnvironmentArgs } = require("../bootstrap/linux-systemd.cjs");
 const {
   activateLinuxRuntimeServices,
   activateMacRuntimeServices,
@@ -135,7 +137,7 @@ export async function activateCanonicalRuntime(target, {
     "--no-restart",
     ...targetOverride,
   ], {
-    env: { ...process.env, RELAY_SKIP_DESKTOP_POSTINSTALL: "1" },
+    env: { ...process.env, RELAY_SKIP_DESKTOP_POSTINSTALL: "1", [ACTIVE_UPDATE_WORKER_ENV]: "1" },
   });
   if (!commandOk(repair)) {
     return { ok: false, reason: "runtime-registration-failed", detail: repair?.error?.message || repair?.stderr || repair?.stdout || "" };
@@ -154,6 +156,7 @@ export async function activateCanonicalRuntime(target, {
     });
   } else if (platform === "linux") {
     return activateLinuxRuntimeServices(target, {
+      homeDir,
       platform,
       run,
       sleep,
@@ -207,8 +210,28 @@ export async function runCanonicalUpdateTransaction({
   requestId = null,
   workerId = null,
 } = {}) {
-  const serviceNode = resolveServiceNode(node);
-  if (!serviceNode) return { ok: false, phase: "input", reason: "service-node-missing", detail: node };
+  const selectedServiceNode = resolveServiceNode(node);
+  if (!selectedServiceNode) return { ok: false, phase: "input", reason: "service-node-missing", detail: node };
+  let serviceNode;
+  try {
+    serviceNode = persistentNodePath(selectedServiceNode, { platform, homeDir });
+  } catch (error) {
+    return {
+      ok: false,
+      phase: "input",
+      reason: "service-node-preservation-failed",
+      detail: error?.message || String(error),
+    };
+  }
+  const persistentTargetNode = (candidate) => {
+    const selected = resolveServiceNode(candidate);
+    if (!selected) return serviceNode;
+    try {
+      return persistentNodePath(selected, { platform, homeDir });
+    } catch {
+      return serviceNode;
+    }
+  };
   // Electron must never be baked into plists/pointers as the runtime's node, and it
   // cannot resolve npm either. spawnCanonicalUpdate substitutes a real node before
   // the worker exists; this guard is the backstop for every other caller.
@@ -230,7 +253,7 @@ export async function runCanonicalUpdateTransaction({
     rollbackActivate: async (target, context) => target
       ? activate({
           ...target,
-          node: resolveServiceNode(target?.node || serviceNode) || serviceNode,
+          node: persistentTargetNode(target?.node || serviceNode),
         }, { homeDir, platform, repairExecutable: context?.recovery?.candidate })
       : { ok: true },
     onLockAcquired: admit,
@@ -255,7 +278,7 @@ export async function runCanonicalUpdateTransaction({
     protectedPackageRoots,
     normalizePreviousTarget: (target) => ({
       ...target,
-      node: resolveServiceNode(target?.node || serviceNode) || serviceNode,
+      node: persistentTargetNode(target?.node || serviceNode),
     }),
     onLockAcquired: admit,
     lockIdentity,
@@ -492,6 +515,7 @@ export function spawnCanonicalUpdate({
   node = process.execPath,
   homeDir = os.homedir(),
   platform = process.platform,
+  env = process.env,
   run = defaultRun,
   existsSync = fs.existsSync,
   fsImpl = fs,
@@ -564,6 +588,7 @@ export function spawnCanonicalUpdate({
       "--quiet",
       "--collect",
       `--unit=${linuxWorkerUnit}`,
+      ...systemdRunEnvironmentArgs(env),
       "--property=Type=exec",
       `--property=StandardOutput=append:${logPath}`,
       `--property=StandardError=append:${logPath}`,

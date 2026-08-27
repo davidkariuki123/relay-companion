@@ -559,6 +559,22 @@ test("writeClaudeCodeMcpConfig registers Relay directly in ~/.claude.json shape"
   });
 });
 
+test("agent config rewrites preserve secrets and remain owner-only", { skip: process.platform === "win32" }, (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-config-mode-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const claude = path.join(root, ".claude.json");
+  const codex = path.join(root, ".codex", "config.toml");
+  fs.writeFileSync(claude, JSON.stringify({ apiCredential: "keep-secret", mcpServers: {} }), { mode: 0o600 });
+  fs.chmodSync(claude, 0o600);
+  fs.mkdirSync(path.dirname(codex), { recursive: true });
+  assert.equal(writeClaudeCodeMcpConfig("/relay/bin/relay.js", "/usr/bin/node", claude).ok, true);
+  assert.equal(JSON.parse(fs.readFileSync(claude, "utf8")).apiCredential, "keep-secret");
+  assert.equal(fs.statSync(claude).mode & 0o777, 0o600);
+
+  assert.equal(writeCodexMcpConfig("/relay/bin/relay.js", "/usr/bin/node", codex).ok, true);
+  assert.equal(fs.statSync(codex).mode & 0o777, 0o600);
+});
+
 test("writeCodexMcpConfig replaces only the Relay MCP table", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-install-test-"));
   const configPath = path.join(dir, "config.toml");

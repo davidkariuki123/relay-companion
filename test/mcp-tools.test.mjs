@@ -167,6 +167,9 @@ test("MCP provenance distinguishes Codex and Claude Code by the name each states
   rememberCallingClient({ name: "codex-mcp-client", title: "Codex", version: "0.148.0-alpha.9" });
   assert.equal(relayCallingSurface(), "codex");
 
+  rememberCallingClient({ name: "codex-local", title: "Conductor", version: "1.0.0" });
+  assert.equal(relayCallingSurface(), "codex", "Conductor's measured Codex-compatible client id is labelled");
+
   rememberCallingClient({ name: "claude-code", title: "Claude Code", version: "2.1.228" });
   assert.equal(relayCallingSurface(), "claude_code");
 });

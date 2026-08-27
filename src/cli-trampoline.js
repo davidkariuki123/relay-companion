@@ -4,6 +4,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { readCanonicalRuntime } from "./canonical-runtime.js";
 import { companionPackageRoot, currentCompanionVersion, isManagedInstall, isNewerVersion } from "./auto-update.js";
+import { STABLE_MCP_LAUNCHER_ENV } from "./mcp-launcher.js";
 
 /**
  * The `relay` command a person types is the npm global shim, and it stays at
@@ -27,8 +28,10 @@ import { companionPackageRoot, currentCompanionVersion, isManagedInstall, isNewe
  *     Electron directly, while a human typing `relay pill` may be entering
  *     through a years-old global npm shim. That command must open the active
  *     canonical pill, not resurrect the shim's bundled overlay.
- *   - mcp: launched by the stable MCP launcher, which activation already
- *     rewrites to the exact release bin.
+ *   - mcp only when launched by Relay's stable MCP launcher, which activation
+ *     already rewrites to the exact release bin. A person or third-party host
+ *     invoking `npx relay-companion@latest mcp` has no such guarantee and must
+ *     hop away from the deliberately old migration bridge.
  *   - repair-runtime / repair-desktop / self-update: invoked BY the updater
  *     during activation and rollback, sometimes deliberately from a tree that
  *     is not current. Hopping would defeat rollback.
@@ -41,7 +44,6 @@ import { companionPackageRoot, currentCompanionVersion, isManagedInstall, isNewe
  */
 export const TRAMPOLINE_EXEMPT_COMMANDS = new Set([
   "daemon",
-  "mcp",
   "repair-runtime",
   "repair-desktop",
   "self-update",
@@ -85,6 +87,7 @@ export function resolveCliTrampoline({
   if (argv.includes("--no-trampoline")) return null;
   // A bare `relay` (usage text) and unknown commands hop too — the help a
   // person reads should describe the code the machine runs.
+  if (command === "mcp" && env[STABLE_MCP_LAUNCHER_ENV] === "1") return null;
   if (command && TRAMPOLINE_EXEMPT_COMMANDS.has(command)) return null;
   // Only an npm-managed tree is "just a way in". A dev checkout
   // (.../packages/companion, not under node_modules) is the developer's own

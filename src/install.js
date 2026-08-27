@@ -11,12 +11,18 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { activateCodexMcp, verifyClaudeMcpRegistration } from "./setup-activation.js";
 import { ensureStableMcpLauncher } from "./mcp-launcher.js";
 import { canonicalOwnershipGuard, verifyCanonicalCandidate } from "./canonical-runtime.js";
 import { ensureStableHookLauncher, removeStableHookLauncher } from "./hook-launcher.js";
 import { writeConfig } from "./config.js";
+import {
+  ACTIVE_UPDATE_WORKER_ENV,
+  cleanupMacUpdateAgents,
+  updateAgentCleanupDetail,
+} from "./update-agent-cleanup.js";
 
 // Persistent install of the Relay companion into the user's local agents.
 //
@@ -32,13 +38,21 @@ const WINDOWS_DAEMON_TASK_NAME = "Relay Companion Daemon";
 const WINDOWS_PILL_TASK_NAME = "Relay Companion Pill";
 const LINUX_DAEMON_UNIT = `${DAEMON_LAUNCH_LABEL}.service`;
 const LINUX_PILL_UNIT = `${PILL_LAUNCH_LABEL}.service`;
-const LINUX_DESKTOP_FILE = "relay.desktop";
+const LINUX_DESKTOP_FILE = "work.relay.companion.desktop";
+const LINUX_LEGACY_DESKTOP_FILE = "relay.desktop";
 const LINUX_AUTOSTART_FILE = "work.relay.companion.pill.desktop";
 const DEFAULT_NPM_INSTALL_TIMEOUT_MS = 10 * 60 * 1000;
 const RELAY_MAC_APP_NAME = "Relay.app";
 const RELAY_MAC_APP_FALLBACK_NAME = "Relay Companion.app";
 const RELAY_MAC_BUNDLE_IDENTIFIER = "work.relay.companion.launcher";
 const { deleteDeviceToken } = createRequire(import.meta.url)("./credential-store.cjs");
+const {
+  canonicalCliLauncherSource,
+  canonicalCliPaths,
+  durableNodePath,
+  isCanonicalCliShimSource,
+} = createRequire(import.meta.url)("../bootstrap/relay-setup.cjs");
+const { isTemporaryNodePath, relayOwnedNodePath } = createRequire(import.meta.url)("../bootstrap/owned-node-runtime.cjs");
 
 export const PACKAGE_NAME = "relay-companion";
 
@@ -84,9 +98,11 @@ export function compatibleNodeRuntime(executable, { runCommand = spawnSync } = {
 }
 
 export function stableNodePath(execPath = process.execPath, {
+  platform = process.platform,
   realpath = (p) => fs.realpathSync(p),
   existsSync = fs.existsSync,
   runCommand = spawnSync,
+  env = process.env,
 } = {}) {
   if (!execPath) return execPath;
   let realExec;
@@ -96,17 +112,24 @@ export function stableNodePath(execPath = process.execPath, {
     realExec = execPath;
   }
   // Already a stable, non-version-managed path — keep it.
-  if (!VERSION_MANAGED_NODE_RE.test(execPath) && !VERSION_MANAGED_NODE_RE.test(realExec)) return execPath;
+  const volatile = VERSION_MANAGED_NODE_RE.test(execPath)
+    || VERSION_MANAGED_NODE_RE.test(realExec)
+    || isTemporaryNodePath(execPath, { platform, realpathSync: realpath });
+  if (!volatile) return execPath;
   const candidates = ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"];
-  try {
-    const which = spawnSync("/usr/bin/which", ["node"], { encoding: "utf8", timeout: 5000 });
-    const first = String(which.stdout || "").split("\n")[0].trim();
-    if (first) candidates.push(first);
-  } catch {}
+  const delimiter = String(execPath).includes("/") ? ":" : path.delimiter;
+  const pathApi = String(execPath).includes("/") ? path.posix : path;
+  for (const directory of String(env?.PATH || "").split(delimiter).filter(Boolean)) {
+    candidates.push(pathApi.join(directory, String(execPath).includes("/") ? "node" : "node.exe"));
+  }
   // Prefer a public path whose realpath matches the running runtime exactly.
   for (const candidate of candidates) {
     try {
-      if (existsSync(candidate) && realpath(candidate) === realExec) return candidate;
+      if (
+        existsSync(candidate)
+        && !isTemporaryNodePath(candidate, { platform, realpathSync: realpath })
+        && realpath(candidate) === realExec
+      ) return candidate;
     } catch {}
   }
   // Otherwise prefer an existing public, non-version-managed Node only when it
@@ -117,11 +140,35 @@ export function stableNodePath(execPath = process.execPath, {
       if (
         existsSync(candidate) &&
         !VERSION_MANAGED_NODE_RE.test(candidate) &&
+        !isTemporaryNodePath(candidate, { platform, realpathSync: realpath }) &&
         compatibleNodeRuntime(candidate, { runCommand })
       ) return candidate;
     } catch {}
   }
   return execPath;
+}
+
+export function persistentNodePath(execPath = process.execPath, {
+  platform = process.platform,
+  homeDir = os.homedir(),
+  runtimeRoot = path.join(homeDir, ".relay", "runtime"),
+  realpath = (p) => fs.realpathSync(p),
+  existsSync = fs.existsSync,
+  runCommand = spawnSync,
+  env = process.env,
+  fsImpl = fs,
+} = {}) {
+  const stable = stableNodePath(execPath, { platform, realpath, existsSync, runCommand, env });
+  const durable = platform === "linux"
+    ? durableNodePath(stable, { platform, runtimeRoot, fsImpl })
+    : stable;
+  return relayOwnedNodePath(durable, {
+    platform,
+    runtimeRoot,
+    realpathSync: realpath,
+    runCommand,
+    fsImpl,
+  });
 }
 
 function plistEscape(value) {
@@ -145,14 +192,25 @@ export function systemdExecQuote(value) {
     .replaceAll("%", () => "%%")}"`;
 }
 
+export function systemdUnitQuote(value) {
+  const text = String(value ?? "");
+  if (/[\0\r\n]/.test(text)) throw new Error("systemd values cannot contain control characters");
+  return `"${text
+    .replaceAll("\\", "\\\\")
+    .replaceAll('"', '\\"')
+    .replaceAll("%", () => "%%")}"`;
+}
+
 export function desktopExecQuote(value) {
   const text = String(value ?? "");
   if (/[\0\r\n]/.test(text)) throw new Error("desktop entry arguments cannot contain control characters");
   return `"${text
-    .replaceAll("\\", "\\\\")
+    // Desktop Entry Exec parsing has two escaping layers. Four file-level
+    // backslashes represent one literal backslash; a literal dollar needs two.
+    .replaceAll("\\", "\\\\\\\\")
     .replaceAll('"', '\\"')
     .replaceAll("`", "\\`")
-    .replaceAll("$", "\\$")
+    .replaceAll("$", "\\\\$")
     .replaceAll("%", () => "%%")}"`;
 }
 
@@ -186,10 +244,23 @@ function linuxServiceEnvironment({ homeDir, env = process.env } = {}) {
     RELAY_COMPANION_HOME: env.RELAY_COMPANION_HOME,
     CLAUDE_HOME: env.CLAUDE_HOME,
     CODEX_HOME: env.CODEX_HOME,
+    CLAUDE_CLI_PATH: env.CLAUDE_CLI_PATH,
+    CODEX_CLI_PATH: env.CODEX_CLI_PATH,
+    RELAY_TERMINAL: env.RELAY_TERMINAL,
+    TERMINAL: env.TERMINAL,
+    CHROME_DEVEL_SANDBOX: env.CHROME_DEVEL_SANDBOX,
+    LANG: env.LANG,
+    LANGUAGE: env.LANGUAGE,
+    LC_ALL: env.LC_ALL,
+    LC_CTYPE: env.LC_CTYPE,
+    SSH_AUTH_SOCK: env.SSH_AUTH_SOCK,
+    SSL_CERT_FILE: env.SSL_CERT_FILE,
+    SSL_CERT_DIR: env.SSL_CERT_DIR,
+    NODE_EXTRA_CA_CERTS: env.NODE_EXTRA_CA_CERTS,
   };
   return Object.entries(values)
     .filter(([, value]) => value)
-    .map(([name, value]) => `Environment=${systemdExecQuote(`${name}=${value}`)}`)
+    .map(([name, value]) => `Environment=${systemdUnitQuote(`${name}=${value}`)}`)
     .join("\n");
 }
 
@@ -208,8 +279,8 @@ ExecStart=${[node, "--max-old-space-size=128", bin, "daemon"].map(systemdExecQuo
 Restart=always
 RestartSec=3
 ${linuxServiceEnvironment({ homeDir, env })}
-StandardOutput=${systemdExecQuote(`append:${paths.daemonLogPath}`)}
-StandardError=${systemdExecQuote(`append:${paths.daemonLogPath}`)}
+StandardOutput=${systemdUnitQuote(`append:${paths.daemonLogPath}`)}
+StandardError=${systemdUnitQuote(`append:${paths.daemonLogPath}`)}
 
 [Install]
 WantedBy=default.target
@@ -229,14 +300,15 @@ ExecStart=${[electronPath, overlayMain].map(systemdExecQuote).join(" ")}
 Restart=on-failure
 RestartSec=3
 ${linuxServiceEnvironment({ homeDir, env })}
-StandardOutput=${systemdExecQuote(`append:${paths.pillLogPath}`)}
-StandardError=${systemdExecQuote(`append:${paths.pillLogPath}`)}
+StandardOutput=${systemdUnitQuote(`append:${paths.pillLogPath}`)}
+StandardError=${systemdUnitQuote(`append:${paths.pillLogPath}`)}
 `;
 }
 
 export function linuxPillStarterText() {
   return `#!/bin/sh
-systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XAUTHORITY DBUS_SESSION_BUS_ADDRESS XDG_CURRENT_DESKTOP XDG_SESSION_TYPE >/dev/null 2>&1 || true
+systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XAUTHORITY DBUS_SESSION_BUS_ADDRESS XDG_CURRENT_DESKTOP XDG_SESSION_TYPE XDG_RUNTIME_DIR SSH_AUTH_SOCK SSL_CERT_FILE SSL_CERT_DIR NODE_EXTRA_CA_CERTS LANG LANGUAGE LC_ALL LC_CTYPE >/dev/null 2>&1 || true
+systemctl --user restart ${LINUX_DAEMON_UNIT} >/dev/null 2>&1 || true
 exec systemctl --user restart ${LINUX_PILL_UNIT}
 `;
 }
@@ -251,7 +323,7 @@ Exec=${desktopExecQuote(node)} ${desktopExecQuote(bin)} pill %u
 Icon=${iconPath}
 Terminal=false
 StartupNotify=true
-StartupWMClass=Relay
+StartupWMClass=work.relay.companion
 Categories=Utility;Network;
 MimeType=x-scheme-handler/relay;
 `;
@@ -283,9 +355,131 @@ function importLinuxGraphicalEnvironment(runCommand, env = process.env) {
     "DBUS_SESSION_BUS_ADDRESS",
     "XDG_CURRENT_DESKTOP",
     "XDG_SESSION_TYPE",
+    "XDG_RUNTIME_DIR",
+    "SSH_AUTH_SOCK",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "NODE_EXTRA_CA_CERTS",
+    "LANG",
+    "LANGUAGE",
+    "LC_ALL",
+    "LC_CTYPE",
   ].filter((name) => env[name]);
   if (!names.length) return { ok: true, skipped: true };
   return runCommand("systemctl", ["--user", "import-environment", ...names]);
+}
+
+/** Start the registered Linux services without creating an unsupervised pill. */
+export function startLinuxDesktopServices({ runCommand = run, env = process.env, restartPill = false } = {}) {
+  const imported = importLinuxGraphicalEnvironment(runCommand, env);
+  if (!imported.ok) {
+    return { ok: false, reason: "graphical_environment_import_failed", detail: imported.out };
+  }
+  for (const unit of [LINUX_DAEMON_UNIT, LINUX_PILL_UNIT]) {
+    const verb = unit === LINUX_PILL_UNIT && restartPill ? "restart" : "start";
+    const started = runCommand("systemctl", ["--user", verb, unit]);
+    if (!started.ok) return { ok: false, reason: "linux_service_start_failed", unit, detail: started.out };
+  }
+  return { ok: true };
+}
+
+/**
+ * Make a user unit resolvable even when Relay's XDG_CONFIG_HOME differs from
+ * the environment captured by the long-lived systemd user manager. `link`
+ * is idempotent in effect; an existing standard-path unit may make that call
+ * nonzero, so the authoritative check is FragmentPath after daemon-reload.
+ */
+export function linkLinuxUserUnit(unitPath, unit, { runCommand = run, realpathSync = fs.realpathSync } = {}) {
+  runCommand("systemctl", ["--user", "link", path.posix.resolve(unitPath)]);
+  const reloaded = runCommand("systemctl", ["--user", "daemon-reload"]);
+  if (!reloaded.ok) {
+    return { ok: false, reason: "systemd_user_unavailable", detail: reloaded.out, unitPath };
+  }
+  const shown = runCommand("systemctl", ["--user", "show", "--property=FragmentPath", "--value", unit]);
+  const fragmentPath = String(shown.out || "").trim();
+  let fragmentMatches = false;
+  if (shown.ok && fragmentPath) {
+    try { fragmentMatches = realpathSync(fragmentPath) === realpathSync(unitPath); }
+    catch { fragmentMatches = path.posix.resolve(fragmentPath) === path.posix.resolve(unitPath); }
+  }
+  if (!fragmentMatches) {
+    return {
+      ok: false,
+      reason: "systemd_unit_resolution_failed",
+      detail: shown.out || `systemd resolved ${unit} to ${fragmentPath || "nothing"}, expected ${unitPath}`,
+      unitPath,
+      fragmentPath,
+    };
+  }
+  const cat = runCommand("systemctl", ["--user", "cat", unit]);
+  if (!cat.ok) {
+    return { ok: false, reason: "systemd_unit_resolution_failed", detail: cat.out, unitPath, fragmentPath };
+  }
+  return { ok: true, unitPath, fragmentPath };
+}
+
+export function registerLinuxProtocolHandler(applicationPath, { runCommand = run } = {}) {
+  // Cache refresh is optional on minimal desktops; xdg-mime itself is the
+  // portable contract and must round-trip before setup says links can open.
+  runCommand("update-desktop-database", [path.dirname(applicationPath)]);
+  const registered = runCommand("xdg-mime", ["default", LINUX_DESKTOP_FILE, "x-scheme-handler/relay"]);
+  if (!registered.ok) {
+    return { ok: false, reason: "protocol_handler_registration_failed", detail: registered.out, applicationPath };
+  }
+  const queried = runCommand("xdg-mime", ["query", "default", "x-scheme-handler/relay"]);
+  const handler = String(queried.out || "").trim();
+  if (!queried.ok || handler !== LINUX_DESKTOP_FILE) {
+    return {
+      ok: false,
+      reason: "protocol_handler_verification_failed",
+      detail: queried.out || `Linux selected ${handler || "no application"} for relay: links.`,
+      applicationPath,
+      handler,
+    };
+  }
+  return { ok: true, applicationPath, handler };
+}
+
+export function removeLinuxRelayMimeDefaults({
+  homeDir = os.homedir(),
+  env = process.env,
+  readFileSync = fs.readFileSync,
+  existsSync = fs.existsSync,
+  writeFile = writeTextAtomic,
+} = {}) {
+  const paths = linuxDesktopPaths({ homeDir, env });
+  const candidates = [
+    path.posix.join(env.XDG_CONFIG_HOME || path.posix.join(homeDir, ".config"), "mimeapps.list"),
+    path.posix.join(path.dirname(paths.applicationPath), "mimeapps.list"),
+  ];
+  const changed = [];
+  for (const file of [...new Set(candidates)]) {
+    if (!existsSync(file)) continue;
+    let text;
+    try { text = String(readFileSync(file, "utf8")); } catch { continue; }
+    let section = "";
+    let touched = false;
+    const next = text.split(/(?<=\n)/).map((line) => {
+      const sectionMatch = line.match(/^\s*\[([^\]]+)\]\s*(?:\r?\n)?$/);
+      if (sectionMatch) {
+        section = sectionMatch[1];
+        return line;
+      }
+      if (!["Default Applications", "Added Associations"].includes(section)) return line;
+      const match = line.match(/^(\s*x-scheme-handler\/relay\s*=\s*)([^\r\n]*)(\r?\n)?$/);
+      if (!match) return line;
+      const values = match[2].split(";").map((value) => value.trim()).filter(Boolean);
+      const kept = values.filter((value) => ![LINUX_DESKTOP_FILE, LINUX_LEGACY_DESKTOP_FILE].includes(value));
+      if (kept.length === values.length) return line;
+      touched = true;
+      return kept.length ? `${match[1]}${kept.join(";")};${match[3] || ""}` : "";
+    }).join("");
+    if (touched) {
+      writeFile(file, next);
+      changed.push(file);
+    }
+  }
+  return { ok: true, changed };
 }
 
 /** Refuse Linux setup before host registrations when its lifecycle contract is unavailable. */
@@ -310,6 +504,13 @@ export function linuxDesktopPreflight({
       detail: "Relay setup must run inside a graphical X11 or Wayland login session.",
     };
   }
+  if (env.WAYLAND_DISPLAY && !env.DISPLAY) {
+    return {
+      ok: false,
+      reason: "linux_xwayland_unavailable",
+      detail: "Relay currently needs XWayland in a Wayland login because its desktop pill must move and resize. Install or enable XWayland, then run setup again.",
+    };
+  }
   const systemd = runCommand("systemctl", ["--user", "show-environment"]);
   if (!systemd.ok) {
     return {
@@ -318,17 +519,262 @@ export function linuxDesktopPreflight({
       detail: systemd.out || "Relay requires an available systemd user manager.",
     };
   }
-  return { ok: true, glibcVersion, session: env.WAYLAND_DISPLAY ? "wayland" : "x11" };
+  for (const dependency of [
+    { command: "systemd-run", args: ["--version"], packageName: "systemd", purpose: "safe background updates" },
+    { command: "xdg-mime", args: ["--version"], packageName: "xdg-utils", purpose: "Relay link registration" },
+  ]) {
+    const checked = runCommand(dependency.command, dependency.args);
+    if (!checked.ok) {
+      return {
+        ok: false,
+        reason: "linux_desktop_dependency_missing",
+        detail: `Relay needs ${dependency.command} for ${dependency.purpose}. Install your distribution's ${dependency.packageName} package, then run setup again.`,
+        command: dependency.command,
+        packageName: dependency.packageName,
+      };
+    }
+  }
+  return { ok: true, glibcVersion, session: env.WAYLAND_DISPLAY ? "wayland-xwayland" : "x11" };
+}
+
+function linuxUserNamespacesRestricted({ readFileSync = fs.readFileSync } = {}) {
+  const restrictedWhenOne = ["/proc/sys/kernel/apparmor_restrict_unprivileged_userns"];
+  const restrictedWhenZero = [
+    "/proc/sys/kernel/unprivileged_userns_clone",
+    "/proc/sys/user/max_user_namespaces",
+  ];
+  for (const pathname of restrictedWhenOne) {
+    try {
+      if (String(readFileSync(pathname, "utf8")).trim() === "1") return true;
+    } catch {}
+  }
+  for (const pathname of restrictedWhenZero) {
+    try {
+      if (String(readFileSync(pathname, "utf8")).trim() === "0") return true;
+    } catch {}
+  }
+  return false;
+}
+
+function sha256File(file, { readFileSync = fs.readFileSync } = {}) {
+  return createHash("sha256").update(readFileSync(file)).digest("hex");
+}
+
+function trustedLinuxSandbox(pathname, expectedSha256, {
+  lstatSync = fs.lstatSync,
+  realpathSync = fs.realpathSync,
+  readFileSync = fs.readFileSync,
+} = {}) {
+  try {
+    const root = "/usr/local/lib/relay/chromium-sandboxes";
+    const resolved = path.posix.resolve(pathname);
+    const relative = path.posix.relative(root, resolved);
+    if (!/^[a-f0-9]{64}\/chrome-sandbox$/.test(relative)) return false;
+    for (const directory of ["/usr/local", "/usr/local/lib", "/usr/local/lib/relay", root, path.posix.dirname(resolved)]) {
+      const directoryStat = lstatSync(directory);
+      if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink() || directoryStat.uid !== 0 || (directoryStat.mode & 0o022) !== 0) {
+        return false;
+      }
+      if (path.posix.resolve(realpathSync(directory)) !== directory) return false;
+    }
+    const stat = lstatSync(resolved);
+    return stat.isFile() && !stat.isSymbolicLink() && path.posix.resolve(realpathSync(resolved)) === resolved &&
+      stat.uid === 0 && (stat.mode & 0o4777) === 0o4755 &&
+      sha256File(pathname, { readFileSync }) === expectedSha256;
+  } catch {
+    return false;
+  }
+}
+
+function linuxAuthorizationEnvironment(env = process.env) {
+  const allowed = [
+    "HOME", "USER", "LOGNAME", "LANG", "LANGUAGE", "TERM",
+    "DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS",
+    "XDG_RUNTIME_DIR", "XDG_CURRENT_DESKTOP", "XDG_SESSION_TYPE",
+  ];
+  const next = { PATH: "/usr/sbin:/usr/bin:/sbin:/bin" };
+  for (const name of allowed) {
+    const value = env?.[name];
+    if (value != null && value !== "" && !/\0|\r|\n/.test(String(value))) next[name] = String(value);
+  }
+  for (const [name, value] of Object.entries(env || {})) {
+    if (/^LC_[A-Z0-9_]+$/i.test(name) && value != null && value !== "" && !/\0|\r|\n/.test(String(value))) {
+      next[name] = String(value);
+    }
+  }
+  return next;
+}
+
+/** Install Electron's exact helper into a root-owned, user-nonwritable location. */
+export function ensureLinuxElectronSandbox({
+  electronPath,
+  env = process.env,
+  allowAuthorization = true,
+  onAuthorization = () => {},
+  runCommand = run,
+  readFileSync = fs.readFileSync,
+  lstatSync = fs.lstatSync,
+  realpathSync = fs.realpathSync,
+  geteuid = () => (typeof process.geteuid === "function" ? process.geteuid() : -1),
+} = {}) {
+  const source = path.posix.join(path.posix.dirname(String(electronPath || "")), "chrome-sandbox");
+  let expectedSha256;
+  try { expectedSha256 = sha256File(source, { readFileSync }); }
+  catch {
+    return { ok: false, reason: "linux_sandbox_helper_missing", detail: "Relay's exact Chromium sandbox helper is missing." };
+  }
+  const destination = `/usr/local/lib/relay/chromium-sandboxes/${expectedSha256}/chrome-sandbox`;
+  if (!trustedLinuxSandbox(destination, expectedSha256, { lstatSync, realpathSync, readFileSync })) {
+    if (!allowAuthorization) {
+      return {
+        ok: false,
+        reason: "linux_sandbox_update_authorization_required",
+        detail: "This Electron update needs a refreshed Linux sandbox helper. Run `relay update` in a desktop terminal to approve it.",
+        source,
+        destination,
+      };
+    }
+    onAuthorization({ source, destination });
+    // Copy once into a root-only temporary file, hash that immutable copy, and
+    // only then grant setuid. The source lives in a user tree, so hashing before
+    // the privileged copy would leave a replacement race and a privilege bug.
+    const script = [
+      "set -eu",
+      "src=$1", "dst=$2", "expected=$3",
+      "parent=$(/usr/bin/dirname -- \"$dst\")",
+      "d=/usr/local; [ ! -L \"$d\" ]; [ \"$(/usr/bin/readlink -f -- \"$d\")\" = \"$d\" ]; [ \"$(/usr/bin/stat -c %u -- \"$d\")\" = 0 ]; [ -z \"$(/usr/bin/find \"$d\" -maxdepth 0 -perm /022 -print -quit)\" ]",
+      "d=/usr/local/lib; [ ! -L \"$d\" ]; /usr/bin/install -d -o root -g root -m 0755 -- \"$d\"; [ \"$(/usr/bin/readlink -f -- \"$d\")\" = \"$d\" ]; [ \"$(/usr/bin/stat -c %u -- \"$d\")\" = 0 ]; [ -z \"$(/usr/bin/find \"$d\" -maxdepth 0 -perm /022 -print -quit)\" ]",
+      "for d in /usr/local/lib/relay /usr/local/lib/relay/chromium-sandboxes \"$parent\"; do [ ! -L \"$d\" ]; /usr/bin/install -d -o root -g root -m 0755 -- \"$d\"; [ \"$(/usr/bin/readlink -f -- \"$d\")\" = \"$d\" ]; done",
+      "tmp=\"$parent/.chrome-sandbox.$$\"",
+      "trap '/usr/bin/rm -f -- \"$tmp\"' EXIT HUP INT TERM",
+      "/usr/bin/install -o root -g root -m 0755 -- \"$src\" \"$tmp\"",
+      "actual=$(/usr/bin/sha256sum \"$tmp\")", "actual=${actual%% *}",
+      "[ \"$actual\" = \"$expected\" ]",
+      "/usr/bin/chmod 4755 \"$tmp\"",
+      "/usr/bin/mv -fT -- \"$tmp\" \"$dst\"",
+      "trap - EXIT HUP INT TERM",
+    ].join("; ");
+    const command = geteuid() === 0 ? "/bin/sh" : "pkexec";
+    const args = geteuid() === 0
+      ? ["-c", script, "relay-sandbox-install", source, destination, expectedSha256]
+      : ["/bin/sh", "-c", script, "relay-sandbox-install", source, destination, expectedSha256];
+    const installed = runCommand(command, args, {
+      timeoutMs: 2 * 60_000,
+      env: linuxAuthorizationEnvironment(env),
+    });
+    if (!installed.ok || !trustedLinuxSandbox(destination, expectedSha256, { lstatSync, realpathSync, readFileSync })) {
+      return {
+        ok: false,
+        reason: "linux_sandbox_authorization_failed",
+        detail: installed.missing && command === "pkexec"
+          ? "Relay could not find pkexec. Install your distribution's polkit/pkexec package, then run `relay update` again."
+          : installed.out || "Relay needs one administrator approval to install its exact Chromium sandbox helper.",
+        source,
+        destination,
+      };
+    }
+  }
+  env.CHROME_DEVEL_SANDBOX = destination;
+  return { ok: true, source, destination, sha256: expectedSha256 };
+}
+
+/** Prepare direct Electron launches on hosts that cannot use user namespaces. */
+export function prepareLinuxElectronSandbox({
+  platform = process.platform,
+  electronPath,
+  env = process.env,
+  readFileSync = fs.readFileSync,
+  ...options
+} = {}) {
+  if (platform !== "linux") {
+    return { ok: true, skipped: true };
+  }
+  const source = path.posix.join(path.posix.dirname(String(electronPath || "")), "chrome-sandbox");
+  try {
+    const expectedSha256 = sha256File(source, { readFileSync });
+    const destination = `/usr/local/lib/relay/chromium-sandboxes/${expectedSha256}/chrome-sandbox`;
+    if (trustedLinuxSandbox(destination, expectedSha256, { ...options, readFileSync })) {
+      env.CHROME_DEVEL_SANDBOX = destination;
+      return { ok: true, source, destination, sha256: expectedSha256, discovered: true };
+    }
+  } catch {}
+  if (!linuxUserNamespacesRestricted({ readFileSync })) return { ok: true, skipped: true };
+  return ensureLinuxElectronSandbox({ electronPath, env, readFileSync, ...options });
+}
+
+/** Prove the exact Electron binary can render securely before setup mutates host state. */
+export function linuxElectronRuntimePreflight({
+  platform = process.platform,
+  electronPath,
+  probePath,
+  env = process.env,
+  runCommand = run,
+  readFileSync = fs.readFileSync,
+  onAuthorization = () => {},
+} = {}) {
+  if (platform !== "linux") return { ok: true, skipped: true };
+  if (!electronPath || !probePath) {
+    return { ok: false, reason: "linux_electron_runtime_missing", detail: "Relay's Linux desktop runtime is incomplete." };
+  }
+
+  const linked = runCommand("ldd", [electronPath], { timeoutMs: 20_000 });
+  const missing = String(linked.out || "")
+    .split(/\r?\n/)
+    .filter((line) => /=>\s*not found\s*$/i.test(line))
+    .map((line) => line.trim().split(/\s+/)[0])
+    .filter(Boolean);
+  if (missing.length) {
+    return {
+      ok: false,
+      reason: "linux_desktop_libraries_missing",
+      detail: `Relay needs Linux desktop libraries that are not installed: ${[...new Set(missing)].join(", ")}.`,
+      missing,
+    };
+  }
+  if (!linked.ok) {
+    return {
+      ok: false,
+      reason: "linux_desktop_library_check_failed",
+      detail: linked.out || "Relay could not inspect the Electron runtime's shared libraries.",
+    };
+  }
+
+  let launched = runCommand(electronPath, [probePath], { timeoutMs: 30_000, env });
+  const restricted = linuxUserNamespacesRestricted({ readFileSync });
+  const launchFailed = !launched.ok || !String(launched.out || "").includes("relay-electron-ready");
+  const sandboxFailure = restricted || /(?:sandbox|user namespace|move to new namespace)/i.test(String(launched.out || ""));
+  if (launchFailed && sandboxFailure) {
+    const sandbox = ensureLinuxElectronSandbox({ electronPath, env, runCommand, readFileSync, onAuthorization });
+    if (!sandbox.ok) return sandbox;
+    launched = runCommand(electronPath, [probePath], { timeoutMs: 30_000, env });
+  }
+  if (!launched.ok || !String(launched.out || "").includes("relay-electron-ready")) {
+    return {
+      ok: false,
+      reason: sandboxFailure ? "linux_electron_sandbox_launch_failed" : "linux_electron_launch_failed",
+      detail: launched.out || "Relay's desktop window could not start in this graphical session.",
+    };
+  }
+  return { ok: true };
 }
 
 function installLinuxDaemonAutostart({ bin, node, runCommand, reload, homeDir, env = process.env }) {
   const paths = linuxDesktopPaths({ homeDir, env });
   writeLinuxDesktopFile(paths.daemonUnitPath, linuxDaemonUnitText({ bin, node, homeDir, env }));
+  const linked = linkLinuxUserUnit(paths.daemonUnitPath, LINUX_DAEMON_UNIT, { runCommand });
+  if (!linked.ok) return { ...linked, logPath: paths.daemonLogPath, started: false };
+  const imported = importLinuxGraphicalEnvironment(runCommand, env);
+  if (!imported.ok) {
+    return {
+      ok: false,
+      reason: "linux_session_environment_import_failed",
+      detail: imported.out,
+      unitPath: paths.daemonUnitPath,
+      logPath: paths.daemonLogPath,
+      started: false,
+    };
+  }
   if (!reload) {
-    const reloaded = runCommand("systemctl", ["--user", "daemon-reload"]);
-    if (!reloaded.ok) {
-      return { ok: false, reason: "systemd_user_unavailable", detail: reloaded.out, unitPath: paths.daemonUnitPath };
-    }
     const enabled = runCommand("systemctl", ["--user", "enable", LINUX_DAEMON_UNIT]);
     return {
       ok: enabled.ok,
@@ -338,8 +784,6 @@ function installLinuxDaemonAutostart({ bin, node, runCommand, reload, homeDir, e
       started: false,
     };
   }
-  const reloaded = runCommand("systemctl", ["--user", "daemon-reload"]);
-  if (!reloaded.ok) return { ok: false, reason: "systemd_user_unavailable", detail: reloaded.out, unitPath: paths.daemonUnitPath };
   const enabled = runCommand("systemctl", ["--user", "enable", "--now", LINUX_DAEMON_UNIT]);
   return {
     ok: enabled.ok,
@@ -357,6 +801,10 @@ function installLinuxPillAutostart({ bin, node, electronPath, overlayMain, runCo
   writeLinuxDesktopFile(paths.pillStarterPath, linuxPillStarterText(), 0o700);
   writeLinuxDesktopFile(paths.applicationPath, linuxApplicationDesktopText({ node, bin, iconPath }));
   writeLinuxDesktopFile(paths.autostartPath, linuxAutostartDesktopText({ pillStarterPath: paths.pillStarterPath }));
+  const linked = linkLinuxUserUnit(paths.pillUnitPath, LINUX_PILL_UNIT, { runCommand });
+  if (!linked.ok) return { ...linked, ...paths, started: false };
+  const protocol = registerLinuxProtocolHandler(paths.applicationPath, { runCommand });
+  if (!protocol.ok) return { ...protocol, ...paths, started: false };
   if (!reload) {
     return {
       ok: true,
@@ -367,14 +815,8 @@ function installLinuxPillAutostart({ bin, node, electronPath, overlayMain, runCo
       started: false,
     };
   }
-  const reloaded = runCommand("systemctl", ["--user", "daemon-reload"]);
-  if (!reloaded.ok) return { ok: false, reason: "systemd_user_unavailable", detail: reloaded.out, ...paths };
   importLinuxGraphicalEnvironment(runCommand, env);
   const started = runCommand("systemctl", ["--user", "restart", LINUX_PILL_UNIT]);
-  // These are caches/associations, not the launch path itself. Some minimal
-  // desktops omit the helpers, so both remain intentionally best-effort.
-  runCommand("update-desktop-database", [path.dirname(paths.applicationPath)]);
-  runCommand("xdg-mime", ["default", LINUX_DESKTOP_FILE, "x-scheme-handler/relay"]);
   return {
     ok: started.ok,
     ...(started.ok ? {} : { reason: "pill_service_start_failed", detail: started.out }),
@@ -735,10 +1177,10 @@ function npmInstallTimeoutMs(env = process.env) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_NPM_INSTALL_TIMEOUT_MS;
 }
 
-function run(cmd, args, { timeoutMs = 20_000 } = {}) {
+function run(cmd, args, { timeoutMs = 20_000, env = process.env } = {}) {
   // windowsHide keeps `schtasks`/`npm` helper spawns from flashing a console window
   // when this runs from a windowless parent (the daemon's repair path).
-  const res = spawnSync(cmd, args, { encoding: "utf8", timeout: timeoutMs, windowsHide: true });
+  const res = spawnSync(cmd, args, { encoding: "utf8", timeout: timeoutMs, windowsHide: true, env });
   return {
     ok: !res.error && res.status === 0,
     status: res.status,
@@ -808,18 +1250,40 @@ function readJsonObject(file) {
   return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
 }
 
+function privateConfigMode(file) {
+  try {
+    // Preserve an owner read-only file, but never carry group/other access into
+    // the replacement. These host configs can contain unrelated MCP secrets.
+    return (fs.statSync(file).mode & 0o600) || 0o600;
+  } catch {
+    return 0o600;
+  }
+}
+
 function writeJsonAtomic(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`);
-  fs.renameSync(tmp, file);
+  try {
+    const mode = privateConfigMode(file);
+    fs.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, { mode });
+    try { fs.chmodSync(tmp, mode); } catch {}
+    fs.renameSync(tmp, file);
+  } finally {
+    try { fs.rmSync(tmp, { force: true }); } catch {}
+  }
 }
 
 function writeTextAtomic(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(tmp, value);
-  fs.renameSync(tmp, file);
+  try {
+    const mode = privateConfigMode(file);
+    fs.writeFileSync(tmp, value, { mode });
+    try { fs.chmodSync(tmp, mode); } catch {}
+    fs.renameSync(tmp, file);
+  } finally {
+    try { fs.rmSync(tmp, { force: true }); } catch {}
+  }
 }
 
 export function writeClaudeCodeMcpConfig(
@@ -1254,6 +1718,11 @@ export function repairExistingAgentHooks({
   codexHooksFile = process.env.CODEX_HOOKS
     || path.join(process.env.CODEX_HOME || path.join(homeDir, ".codex"), "hooks.json"),
 } = {}) {
+  try {
+    node = persistentNodePath(node, { platform, homeDir });
+  } catch (error) {
+    return { ok: false, reason: "node_runtime_preservation_failed", detail: error?.message || String(error) };
+  }
   let claudeInstalled = false;
   let codexInstalled = false;
   try {
@@ -1718,6 +2187,7 @@ export function installDaemonAutostart(
     ensureLauncher = ensureWindowsHiddenLauncher,
     claim = false,
     ownershipGuard = canonicalOwnershipGuard,
+    env = process.env,
   } = {},
 ) {
   const refusal = autostartClaimRefusal(bin, { claim, homeDir, platform, ownershipGuard });
@@ -1742,7 +2212,7 @@ export function installDaemonAutostart(
     return { ...res, logPath };
   }
   if (platform === "linux") {
-    return installLinuxDaemonAutostart({ bin, node, runCommand, reload, homeDir });
+    return installLinuxDaemonAutostart({ bin, node, runCommand, reload, homeDir, env });
   }
   if (platform !== "darwin") return { ok: false, reason: "autostart_unsupported_platform" };
   const home = homeDir;
@@ -1791,6 +2261,7 @@ export function installPillAutostart(
     ensureLauncher = ensureWindowsHiddenLauncher,
     claim = false,
     ownershipGuard = canonicalOwnershipGuard,
+    env = process.env,
   } = {},
 ) {
   if (!["darwin", "win32", "linux"].includes(platform)) return { ok: false, reason: "autostart_unsupported_platform" };
@@ -1805,6 +2276,14 @@ export function installPillAutostart(
     return { ok: false, reason: "pill_runtime_missing", electronPath, overlayMain, electron };
   }
   if (platform === "linux") {
+    const sandbox = prepareLinuxElectronSandbox({
+      platform,
+      electronPath,
+      env,
+      runCommand,
+      allowAuthorization: env.RELAY_ALLOW_SANDBOX_AUTHORIZATION === "1",
+    });
+    if (!sandbox.ok) return { ...sandbox, electronPath, overlayMain };
     return installLinuxPillAutostart({
       bin,
       node,
@@ -1813,6 +2292,7 @@ export function installPillAutostart(
       runCommand,
       reload,
       homeDir,
+      env,
     });
   }
   if (platform === "win32") {
@@ -2263,6 +2743,20 @@ export async function runSetupInstall({ claim = false, reload = true } = {}) {
   if (!platformPreflight.ok) {
     throw new Error(`Relay cannot install on this Linux session (${platformPreflight.reason}): ${platformPreflight.detail}`);
   }
+  const linuxRuntimePreflight = linuxElectronRuntimePreflight({
+    electronPath: electron.electronPath,
+    probePath: path.join(packageRoot, "overlay", "linux-runtime-probe.cjs"),
+    onAuthorization: () => {
+      console.log("Relay needs one administrator approval to install Electron's exact Linux sandbox helper. Relay will not disable the sandbox.");
+    },
+  });
+  if (!linuxRuntimePreflight.ok) {
+    throw new Error(`Relay cannot install its Linux desktop runtime (${linuxRuntimePreflight.reason}): ${linuxRuntimePreflight.detail}`);
+  }
+  const updateAgents = cleanupMacUpdateAgents();
+  if (!updateAgents.ok) {
+    throw new Error(`Relay could not remove an older update agent (${updateAgentCleanupDetail(updateAgents) || "launchd cleanup failed"}).`);
+  }
   // Only after the complete target site is verified may setup touch host state.
   // This migration preserves account values while removing retired capability
   // switches; putting it here also keeps malformed native helpers from changing
@@ -2272,7 +2766,7 @@ export async function runSetupInstall({ claim = false, reload = true } = {}) {
   // daemon plist — otherwise a `brew upgrade node` / `nvm uninstall` deletes the
   // version-managed node the Claude/Codex MCP `command` points at, and the agents can
   // no longer spawn the Relay MCP server.
-  const node = stableNodePath();
+  const node = persistentNodePath();
   const mcpBin = ensureStableMcpLauncher({ targetBin: bin, node });
   const installed = [];
   const missing = [];
@@ -2282,7 +2776,21 @@ export async function runSetupInstall({ claim = false, reload = true } = {}) {
   // can say which ones, by name, instead of implying setup failed.
   const desktopRestarts = [];
   const sweptStaleEntries = [];
-  const claude = installClaudeCode(mcpBin, node);
+  const configuredClaudeCommand = process.env.CLAUDE_CLI_PATH;
+  const configuredCodexCommand = process.env.CODEX_CLI_PATH;
+  const claudeCommand = configuredClaudeCommand && /[\\/]/.test(configuredClaudeCommand)
+    ? path.resolve(configuredClaudeCommand)
+    : configuredClaudeCommand || "claude";
+  const codexCommand = configuredCodexCommand && /[\\/]/.test(configuredCodexCommand)
+    ? path.resolve(configuredCodexCommand)
+    : configuredCodexCommand || "codex";
+  const serviceEnv = {
+    ...process.env,
+    ...(configuredClaudeCommand ? { CLAUDE_CLI_PATH: claudeCommand } : {}),
+    ...(configuredCodexCommand ? { CODEX_CLI_PATH: codexCommand } : {}),
+    ...(process.platform === "linux" ? { RELAY_ALLOW_SANDBOX_AUTHORIZATION: "1" } : {}),
+  };
+  const claude = installClaudeCode(mcpBin, node, { command: claudeCommand });
   let claudeHooks = null;
   if (claude.ok) {
     installed.push("Claude Code");
@@ -2321,19 +2829,19 @@ export async function runSetupInstall({ claim = false, reload = true } = {}) {
   if (claude.ok || claudeAppearsPresent()) {
     claudeHooks = installClaudeHooksWithStableLauncher(bin, node);
   }
-  const codex = installCodex(mcpBin, node);
+  const codex = installCodex(mcpBin, node, { command: codexCommand });
   let codexHooks = null;
   if (codex.ok) {
     installed.push("Codex");
-    activations.push(await activateCodexMcp());
+    activations.push(await activateCodexMcp({ command: codexCommand }));
     codexHooks = installCodexHooksWithStableLauncher(bin, node);
   } else if (codex.reason === "codex_not_found") {
     missing.push("Codex");
   } else {
     missing.push("Codex (registration failed)");
   }
-  const daemon = installDaemonAutostart(bin, node, { claim, reload });
-  const pill = installPillAutostart(bin, { claim, reload });
+  const daemon = installDaemonAutostart(bin, node, { claim, reload, env: serviceEnv });
+  const pill = installPillAutostart(bin, { claim, reload, env: serviceEnv });
   return {
     installed,
     missing,
@@ -2440,6 +2948,11 @@ export function repairExistingAgentRegistrations({
   codexHooksFile = process.env.CODEX_HOOKS
     || path.join(process.env.CODEX_HOME || path.join(homeDir, ".codex"), "hooks.json"),
 } = {}) {
+  try {
+    node = persistentNodePath(node, { platform, homeDir });
+  } catch (error) {
+    return { ok: false, reason: "node_runtime_preservation_failed", detail: error?.message || String(error) };
+  }
   let claudeInstalled = false;
   let codexInstalled = false;
   let claudeDesktopConfigs = [];
@@ -2611,12 +3124,37 @@ export function repairDesktopSurfaces({
   reload = true,
   homeDir = os.homedir(),
   claim = false,
+  env = process.env,
 } = {}) {
-  const pill = installPillAutostart(bin, { platform, runCommand, reload, homeDir, claim, node });
+  try {
+    node = persistentNodePath(node, { platform, homeDir });
+  } catch (error) {
+    const failure = {
+      ok: false,
+      reason: "node_runtime_preservation_failed",
+      detail: error?.message || String(error),
+    };
+    return { ok: false, daemon: failure, pill: failure };
+  }
+  const updateAgents = cleanupMacUpdateAgents({
+    platform,
+    runCommand,
+    homeDir,
+    preserveCurrentWorker: process.env[ACTIVE_UPDATE_WORKER_ENV] === "1",
+  });
+  if (!updateAgents.ok) {
+    const failure = {
+      ok: false,
+      reason: "update_agent_cleanup_failed",
+      detail: updateAgentCleanupDetail(updateAgents) || "launchd cleanup failed",
+    };
+    return { ok: false, daemon: failure, pill: failure, updateAgents };
+  }
+  const pill = installPillAutostart(bin, { platform, runCommand, reload, homeDir, claim, node, env });
   // Reload the daemon last. A repair may be invoked by the updater's detached child;
   // replacing the pill first avoids killing the update-owning daemon before all other
   // desktop surfaces are ready.
-  const daemon = installDaemonAutostart(bin, node, { platform, runCommand, reload, homeDir, claim });
+  const daemon = installDaemonAutostart(bin, node, { platform, runCommand, reload, homeDir, claim, env });
   return { ok: Boolean(daemon.ok && pill.ok), daemon, pill };
 }
 
@@ -2651,6 +3189,66 @@ export function stopWindowsRelayServices({ runCommand = run } = {}) {
   for (const task of [WINDOWS_DAEMON_TASK_NAME, WINDOWS_PILL_TASK_NAME]) runCommand("schtasks", ["/End", "/TN", task]);
   const swept = runCommand("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_STOP_RELAY_SERVICES_PS]);
   return { swept: Boolean(swept && swept.ok) };
+}
+
+function linuxInstalledServiceRows({
+  runCommand = run,
+  processId = process.pid,
+  userId = typeof process.getuid === "function" ? process.getuid() : 0,
+} = {}) {
+  const queried = runCommand("/bin/ps", ["-axo", "uid=,pid=,command="]);
+  if (!queried.ok) return { ok: false, rows: [], detail: queried.out || "Could not enumerate Linux processes." };
+  const rows = [];
+  for (const line of String(queried.out || "").split(/\r?\n/)) {
+    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(.*)$/);
+    if (!match) continue;
+    const uid = Number(match[1]);
+    const pid = Number(match[2]);
+    const command = match[3];
+    if (!Number.isInteger(uid) || uid !== userId) continue;
+    if (!Number.isInteger(pid) || pid <= 0 || pid === processId) continue;
+    const normalized = command.replaceAll("\\", "/");
+    if (!/node_modules\/relay-companion\//i.test(normalized)) continue;
+    const daemon = /\/relay\.js(?:["'\s]|$).*\bdaemon\b/i.test(normalized);
+    const pill = /\/overlay\/main\.cjs(?:["'\s]|$)/i.test(normalized);
+    if (!daemon && !pill) continue;
+    rows.push({ pid, command });
+  }
+  return { ok: true, rows };
+}
+
+function blockingPause(ms) {
+  const signal = new Int32Array(new SharedArrayBuffer(4));
+  Atomics.wait(signal, 0, 0, Math.max(1, ms));
+}
+
+/** Stop supervised and standalone Linux processes before removing registrations. */
+export function stopLinuxRelayServices({
+  runCommand = run,
+  sleep = blockingPause,
+  processId = process.pid,
+  userId = typeof process.getuid === "function" ? process.getuid() : 0,
+} = {}) {
+  for (const unit of [LINUX_PILL_UNIT, LINUX_DAEMON_UNIT]) {
+    runCommand("systemctl", ["--user", "disable", "--now", unit]);
+  }
+  const first = linuxInstalledServiceRows({ runCommand, processId, userId });
+  if (!first.ok) return first;
+  for (const row of first.rows) runCommand("/bin/kill", ["-TERM", String(row.pid)]);
+  let live = first;
+  for (let attempt = 0; attempt < 20 && live.rows.length; attempt += 1) {
+    sleep(100);
+    live = linuxInstalledServiceRows({ runCommand, processId, userId });
+    if (!live.ok) return live;
+  }
+  for (const row of live.rows) runCommand("/bin/kill", ["-KILL", String(row.pid)]);
+  if (live.rows.length) sleep(200);
+  const final = linuxInstalledServiceRows({ runCommand, processId, userId });
+  if (!final.ok) return final;
+  if (final.rows.length) {
+    return { ok: false, rows: final.rows, detail: `Relay processes did not stop: ${final.rows.map(({ pid }) => pid).join(", ")}` };
+  }
+  return { ok: true, stopped: first.rows.map(({ pid }) => pid) };
 }
 
 /**
@@ -2731,7 +3329,13 @@ export function windowsRestartServiceScript(service, { waitSeconds = 15 } = {}) 
  * several seconds while it waits for the new process) so the pill's main
  * process keeps painting; a sync runner may be injected for tests.
  */
-export async function restartRelayServices({ services = ["daemon"], runCommand = runAsync, waitSeconds = 15, platform = process.platform } = {}) {
+export async function restartRelayServices({
+  services = ["daemon"],
+  runCommand = runAsync,
+  waitSeconds = 15,
+  platform = process.platform,
+  pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+} = {}) {
   const result = { daemon: "skipped", pill: "skipped", detail: {} };
   for (const service of services) {
     const spec = RELAY_SERVICES[service];
@@ -2767,8 +3371,28 @@ export async function restartRelayServices({ services = ["daemon"], runCommand =
           continue;
         }
         const restarted = await runCommand("systemctl", ["--user", "restart", unit]);
-        result[service] = restarted.ok ? "restarted" : "failed";
-        if (!restarted.ok) result.detail[service] = restarted.out;
+        if (!restarted.ok) {
+          result[service] = "failed";
+          result.detail[service] = restarted.out;
+          continue;
+        }
+        const attempts = Math.max(1, Math.ceil(Number(waitSeconds || 0) * 4));
+        let lastDetail = "service did not become active with a live main process";
+        for (let attempt = 0; attempt < attempts; attempt += 1) {
+          const active = await runCommand("systemctl", ["--user", "show", "--property=ActiveState", "--value", unit]);
+          const mainPid = await runCommand("systemctl", ["--user", "show", "--property=MainPID", "--value", unit]);
+          const pid = Number.parseInt(String(mainPid.out || "").trim(), 10);
+          if (active.ok && String(active.out || "").trim() === "active" && mainPid.ok && Number.isInteger(pid) && pid > 0) {
+            result[service] = "restarted";
+            break;
+          }
+          lastDetail = [active.out, mainPid.out].map((value) => String(value || "").trim()).filter(Boolean).join("; ") || lastDetail;
+          if (attempt + 1 < attempts) await pause(250);
+        }
+        if (result[service] !== "restarted") {
+          result[service] = "failed";
+          result.detail[service] = lastDetail;
+        }
       } else {
         result[service] = "not_installed";
       }
@@ -2815,13 +3439,18 @@ export function accountRestartLines(result) {
 const WINDOWS_LEGACY_UPDATER_TASK_NAME = "Relay Companion Updater";
 
 export function runUninstall() {
+  const updateAgents = cleanupMacUpdateAgents();
+  if (!updateAgents.ok) {
+    throw new Error(`Relay could not remove its older update agents (${updateAgentCleanupDetail(updateAgents) || "launchd cleanup failed"}).`);
+  }
   // Services FIRST, on every platform. A daemon that outlives the steps below
   // re-registers them within one poll cycle (ensureWindowsAutostartTasks,
   // repair-runtime), silently undoing the uninstall.
   if (process.platform === "win32") stopWindowsRelayServices();
+  let linuxStop = null;
   if (process.platform === "linux") {
-    run("systemctl", ["--user", "disable", "--now", LINUX_DAEMON_UNIT]);
-    run("systemctl", ["--user", "stop", LINUX_PILL_UNIT]);
+    linuxStop = stopLinuxRelayServices();
+    if (!linuxStop.ok) throw new Error(`Relay could not safely stop its Linux desktop processes (${linuxStop.detail || "unknown failure"}).`);
   }
 
   run("claude", ["mcp", "remove", "-s", "user", "relay"]);
@@ -2884,18 +3513,21 @@ export function runUninstall() {
     }
   } else if (process.platform === "linux") {
     const paths = linuxDesktopPaths();
+    removeLinuxRelayMimeDefaults();
     for (const file of [
       paths.daemonUnitPath,
       paths.pillUnitPath,
       paths.applicationPath,
+      path.join(path.dirname(paths.applicationPath), LINUX_LEGACY_DESKTOP_FILE),
       paths.autostartPath,
       paths.pillStarterPath,
     ]) {
       try { fs.unlinkSync(file); } catch { /* already gone */ }
     }
     run("systemctl", ["--user", "daemon-reload"]);
+    run("update-desktop-database", [path.dirname(paths.applicationPath)]);
   }
-  return { claudeDesktop: claudeDesktopRemoval };
+  return { claudeDesktop: claudeDesktopRemoval, linuxStop };
 }
 
 /**
@@ -2991,6 +3623,22 @@ export function purgeLocalState({
     failed.push({ path: "native credential store", detail: credential.detail || "credential deletion failed" });
   }
   remove(pairingCredentialPath({ homeDir, env }));
+
+  // The canonical Linux command is the only purge target outside Relay's own
+  // state directories. Each file has a strict generated identity, so a partly
+  // damaged install can still remove the exact Relay-owned half without ever
+  // deleting an edited or unrelated command.
+  if (platform === "linux") {
+    const { pointerPath, launcherPath, shimPath } = canonicalCliPaths({ homeDir });
+    try {
+      const shimSource = fs.readFileSync(shimPath, "utf8");
+      if (isCanonicalCliShimSource(shimSource, launcherPath)) remove(shimPath);
+    } catch {}
+    try {
+      const launcherSource = fs.readFileSync(launcherPath, "utf8");
+      if (launcherSource === canonicalCliLauncherSource(pointerPath)) remove(launcherPath);
+    } catch {}
+  }
 
   for (const dir of localStateDirs({ homeDir, env })) {
     if (!fs.existsSync(dir)) continue;

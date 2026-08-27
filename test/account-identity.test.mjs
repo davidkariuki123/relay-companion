@@ -197,6 +197,41 @@ test("restartRelayServices reports what each platform actually did and never thr
   assert.equal(thrown.daemon, "failed");
   assert.equal(thrown.detail.daemon, "boom");
 
+  // Linux does not call a successful `systemctl restart` healthy until the
+  // replacement has both reached active state and acquired a real main PID.
+  const linuxCalls = [];
+  const linux = await restartRelayServices({
+    platform: "linux",
+    services: ["daemon"],
+    waitSeconds: 1,
+    pause: async () => {},
+    runCommand: (_cmd, args) => {
+      linuxCalls.push(args.join(" "));
+      if (args.some((arg) => arg.includes("LoadState"))) return { ok: true, out: "loaded\n" };
+      if (args[1] === "restart") return { ok: true, out: "" };
+      if (args.some((arg) => arg.includes("ActiveState"))) return { ok: true, out: "active\n" };
+      if (args.some((arg) => arg.includes("MainPID"))) return { ok: true, out: "4242\n" };
+      return { ok: false, out: "unexpected" };
+    },
+  });
+  assert.equal(linux.daemon, "restarted");
+  assert.ok(linuxCalls.some((call) => call.includes("--property=MainPID")));
+
+  const linuxExited = await restartRelayServices({
+    platform: "linux",
+    services: ["pill"],
+    waitSeconds: 0,
+    runCommand: (_cmd, args) => {
+      if (args.some((arg) => arg.includes("LoadState"))) return { ok: true, out: "loaded\n" };
+      if (args[1] === "restart") return { ok: true, out: "" };
+      if (args.some((arg) => arg.includes("ActiveState"))) return { ok: true, out: "inactive\n" };
+      if (args.some((arg) => arg.includes("MainPID"))) return { ok: true, out: "0\n" };
+      return { ok: false, out: "unexpected" };
+    },
+  });
+  assert.equal(linuxExited.pill, "failed");
+  assert.match(linuxExited.detail.pill, /inactive; 0/);
+
   // an unknown platform has no supervisor to ask
   const other = await restartRelayServices({ platform: "linux", services: ["daemon"] });
   assert.equal(other.daemon, "not_installed");

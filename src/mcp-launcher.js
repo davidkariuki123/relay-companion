@@ -2,6 +2,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+export const STABLE_MCP_LAUNCHER_ENV = "RELAY_STABLE_MCP_LAUNCHER";
+
 export function stableMcpLauncherPath(homeDir = os.homedir()) {
   return path.join(homeDir, ".relay", "bin", "mcp-launcher.cjs");
 }
@@ -19,7 +21,10 @@ function launch() {
     console.error("Relay is updating and its MCP entrypoint did not return within 60 seconds: " + target);
     process.exit(1);
   }
-  const child = spawn(node, ["--max-old-space-size=96", target, ...process.argv.slice(2)], { stdio: "inherit" });
+  const child = spawn(node, ["--max-old-space-size=96", target, ...process.argv.slice(2)], {
+    stdio: "inherit",
+    env: { ...process.env, ${STABLE_MCP_LAUNCHER_ENV}: "1" },
+  });
   for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => child.kill(signal));
   child.once("error", (error) => { console.error("Relay MCP launcher failed: " + error.message); process.exit(1); });
   child.once("exit", (code, signal) => { if (signal) process.kill(process.pid, signal); else process.exit(code == null ? 1 : code); });

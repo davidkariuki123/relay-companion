@@ -6,17 +6,19 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { withCodexAppServer } from "./codex-app-server.js";
+import { cliBinaryPath, installedCliVersions } from "./desktop-wake.js";
 
 const execFileDefault = promisify(execFileCallback);
 const PROVIDERS = Object.freeze({
   claude: {
     id: "claude",
     label: "Claude Code",
-    candidates: () => [
-      process.env.CLAUDE_CLI_PATH,
+    candidates: (env = process.env) => [
+      env.CLAUDE_CLI_PATH,
       "/opt/homebrew/bin/claude",
       "/usr/local/bin/claude",
       path.join(os.homedir(), ".local", "bin", "claude"),
+      ...installedCliVersions().reverse().map((version) => cliBinaryPath(version)),
       "claude",
     ],
     statusArgs: ["auth", "status", "--json"],
@@ -25,8 +27,8 @@ const PROVIDERS = Object.freeze({
   codex: {
     id: "codex",
     label: "Codex",
-    candidates: () => [
-      process.env.CODEX_CLI_PATH,
+    candidates: (env = process.env) => [
+      env.CODEX_CLI_PATH,
       "/Applications/ChatGPT.app/Contents/Resources/codex",
       "/opt/homebrew/bin/codex",
       "/usr/local/bin/codex",
@@ -44,7 +46,7 @@ const LOGIN_TIMEOUT_MS = 10 * 60 * 1_000;
 const CLAUDE_MCP_BATCH_SIZE = "8";
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
-const { linuxTerminalInvocation } = require("../overlay/linux-terminal.cjs");
+const { linuxTerminalEnvironment, linuxTerminalInvocation } = require("../overlay/linux-terminal.cjs");
 const EXPECT_RUNNER = path.join(MODULE_DIR, "provider-auth-runner.exp");
 const TERMINAL_APP = "Terminal";
 
@@ -86,17 +88,32 @@ function writePrefs(provider, enabled, file = configPath()) {
   return next;
 }
 
-function commandExists(candidate) {
-  if (!candidate) return false;
-  if (!candidate.includes(path.sep)) return true;
-  try { return fs.statSync(candidate).isFile(); } catch { return false; }
+function normalizedProviderCommand(candidate) {
+  const value = String(candidate || "").trim();
+  if (!value) return "";
+  if (!value.includes(path.sep) && !value.includes("/")) return value;
+  const absolute = path.resolve(value);
+  try {
+    fs.accessSync(absolute, fs.constants.X_OK);
+    return fs.statSync(absolute).isFile() ? absolute : "";
+  } catch {
+    return "";
+  }
 }
 
-export function resolveProviderCommand(provider, { command = "" } = {}) {
+function commandExists(candidate, { platform = process.platform } = {}) {
+  // Target-platform unit tests exercise macOS paths on other hosts. The actual
+  // target still verifies its files; a cross-platform probe can only preserve
+  // the injected command and let the spawn boundary report a real failure.
+  if (platform !== process.platform) return Boolean(String(candidate || "").trim());
+  return Boolean(normalizedProviderCommand(candidate));
+}
+
+export function resolveProviderCommand(provider, { command = "", env = process.env } = {}) {
   const spec = PROVIDERS[String(provider || "")];
   if (!spec) throw new Error("Unknown provider connection.");
-  if (command) return command;
-  return spec.candidates().filter(Boolean).find(commandExists) || "";
+  if (command) return String(command).trim();
+  return spec.candidates(env).map(normalizedProviderCommand).find(Boolean) || "";
 }
 
 function safeMessage(value, max = 500) {
@@ -296,7 +313,7 @@ function loginInvocation(runtime, loginArgs, {
   // provide that when Electron's stdio is a pipe/socket: it exits immediately
   // with tcgetattr/ioctl ENOTTY and takes the OAuth callback listener with it.
   // The system `expect` binary owns the PTY independently of Electron stdio.
-  if (platform === "darwin" && commandExists(expectCommand) && commandExists(expectRunner)) {
+  if (platform === "darwin" && commandExists(expectCommand, { platform }) && commandExists(expectRunner, { platform })) {
     return {
       command: expectCommand,
       args: ["-f", expectRunner, "--", runtime, ...loginArgs],
@@ -445,6 +462,14 @@ export async function setProviderEnabled(provider, enabled, { prefsFile = config
   return { ok: true, provider: id, enabled: Boolean(enabled) };
 }
 
+export function providerSpawnEnvironment(env = process.env) {
+  // A provider login needs the graphical/user session, not the pill's complete
+  // deployment environment. Keep the same explicit allowlist used for normal
+  // Linux terminal opens so unknown URLs, cloud credentials, cookies, and Relay
+  // authority never cross into an external CLI by accident.
+  return linuxTerminalEnvironment(env);
+}
+
 export async function connectProvider(provider, {
   command = "",
   execFile = execFileDefault,
@@ -457,11 +482,12 @@ export async function connectProvider(provider, {
   terminalApp = TERMINAL_APP,
   linuxTerminalInvocationImpl = linuxTerminalInvocation,
   loginTimeoutMs = LOGIN_TIMEOUT_MS,
+  env = process.env,
 } = {}) {
   const id = String(provider || "");
   const spec = PROVIDERS[id];
   if (!spec) throw new Error("Unknown provider connection.");
-  const runtime = resolveProviderCommand(id, { command });
+  const runtime = resolveProviderCommand(id, { command, env });
   if (!runtime) throw new Error(`${spec.label} is not installed.`);
   await setProviderEnabled(id, true, { prefsFile });
   const current = await providerAuthStatus(id, { command: runtime, prefsFile, execFile });
@@ -472,12 +498,12 @@ export async function connectProvider(provider, {
   lastAttempts.delete(id);
   let paths = null;
   let invocation = loginInvocation(runtime, spec.loginArgs, { platform, expectCommand, expectRunner });
-  if (platform === "darwin" && commandExists(openCommand)) {
+  if (platform === "darwin" && commandExists(openCommand, { platform })) {
     paths = writeTerminalLoginScript(id, runtime, spec.loginArgs, terminalAttemptPaths(id, prefsFile), { platform });
     invocation = { command: openCommand, args: ["-a", terminalApp, paths.scriptPath] };
   } else if (platform === "linux") {
     paths = writeTerminalLoginScript(id, runtime, spec.loginArgs, terminalAttemptPaths(id, prefsFile), { platform });
-    invocation = linuxTerminalInvocationImpl(paths.scriptPath, []);
+    invocation = linuxTerminalInvocationImpl(paths.scriptPath, [], { env });
     if (!invocation) {
       removeAttemptFiles(paths);
       throw new Error(`Could not start ${spec.label} authorization: no supported graphical terminal was found.`);
@@ -486,7 +512,7 @@ export async function connectProvider(provider, {
   let child;
   try {
     child = spawn(invocation.command, invocation.args, {
-      env: { ...process.env },
+      env: providerSpawnEnvironment(env),
       stdio: ["pipe", "pipe", "pipe"],
     });
   } catch (error) {

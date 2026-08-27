@@ -12,7 +12,11 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const { pipeline } = require("node:stream/promises");
 const { activateLinuxRuntimeServices, activateMacRuntimeServices, exactRuntimeHealth } = require("./runtime-health.cjs");
-const { verifyRuntimeExecutables } = require("./runtime-executables.cjs");
+const { isTemporaryNodePath, relayOwnedNodePath } = require("./owned-node-runtime.cjs");
+const {
+  repairRuntimeExecutablePermissions,
+  verifyRuntimeExecutables,
+} = require("./runtime-executables.cjs");
 
 const RELEASE_ORIGIN = "https://api.sendrelays.com";
 const RELEASE_BASE_PATH = "/v1/companion-releases";
@@ -58,6 +62,90 @@ function assertCompatibleNode(version = process.versions.node) {
     fail(`Relay setup requires Node.js 22.12 or newer and will not switch runtimes automatically (found ${version || "unknown"}).`);
   }
   return true;
+}
+
+const VERSION_MANAGED_NODE_RE = /[\\/](Cellar[\\/]node|\.nvm[\\/]versions|\.n[\\/]versions|\.fnm|fnm[\\/]|\.volta|\.hermes[\\/]node)[\\/]/i;
+
+function stableNodePath(execPath = process.execPath, {
+  platform = process.platform,
+  env = process.env,
+  existsSync = fs.existsSync,
+  realpathSync = fs.realpathSync,
+  spawnImpl = spawnSync,
+} = {}) {
+  if (!execPath) return execPath;
+  let realExec = execPath;
+  try { realExec = realpathSync(execPath); } catch {}
+  const volatile = VERSION_MANAGED_NODE_RE.test(execPath)
+    || VERSION_MANAGED_NODE_RE.test(realExec)
+    || isTemporaryNodePath(execPath, { platform, realpathSync });
+  if (!volatile) return execPath;
+
+  const api = platform === "win32" ? path.win32 : path.posix;
+  const candidates = platform === "win32"
+    ? [api.join(env.ProgramFiles || "C:\\Program Files", "nodejs", "node.exe")]
+    : ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"];
+  for (const directory of String(env.PATH || "").split(platform === "win32" ? ";" : ":").filter(Boolean)) {
+    candidates.push(api.join(directory, platform === "win32" ? "node.exe" : "node"));
+  }
+  for (const candidate of [...new Set(candidates)]) {
+    try {
+      if (
+        existsSync(candidate)
+        && !isTemporaryNodePath(candidate, { platform, realpathSync })
+        && realpathSync(candidate) === realExec
+      ) return candidate;
+    } catch {}
+  }
+  for (const candidate of [...new Set(candidates)]) {
+    try {
+      if (
+        !existsSync(candidate)
+        || VERSION_MANAGED_NODE_RE.test(candidate)
+        || isTemporaryNodePath(candidate, { platform, realpathSync })
+      ) continue;
+      const result = spawnImpl(candidate, ["-p", "process.versions.node"], { encoding: "utf8", timeout: 5000 });
+      if (!result?.error && result?.status === 0) {
+        assertCompatibleNode(String(result.stdout || "").trim());
+        return candidate;
+      }
+    } catch {}
+  }
+  return execPath;
+}
+
+function durableNodePath(execPath = stableNodePath(), {
+  platform = process.platform,
+  runtimeRoot = path.join(os.homedir(), ".relay", "runtime"),
+  fsImpl = fs,
+} = {}) {
+  if (platform !== "linux" || !execPath) return execPath;
+  let source = execPath;
+  try { source = fsImpl.realpathSync(execPath); } catch {}
+  if (!VERSION_MANAGED_NODE_RE.test(execPath) && !VERSION_MANAGED_NODE_RE.test(source)) return execPath;
+  let bytes;
+  try { bytes = fsImpl.readFileSync(source); }
+  catch (error) { fail(`Relay could not preserve its Node runtime (${error?.message || error}).`); }
+  const digest = crypto.createHash("sha256").update(bytes).digest("hex");
+  const directory = path.join(runtimeRoot, "node", digest);
+  const destination = path.join(directory, "node");
+  try {
+    const existing = fsImpl.readFileSync(destination);
+    if (crypto.createHash("sha256").update(existing).digest("hex") === digest) return destination;
+  } catch {}
+  fsImpl.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const temporary = path.join(directory, `.node-${process.pid}-${crypto.randomBytes(6).toString("hex")}`);
+  try {
+    fsImpl.writeFileSync(temporary, bytes, { mode: 0o700, flag: "wx" });
+    fsImpl.chmodSync(temporary, 0o700);
+    const copied = crypto.createHash("sha256").update(fsImpl.readFileSync(temporary)).digest("hex");
+    if (copied !== digest) fail("Relay's durable Node copy failed its integrity check.");
+    fsImpl.rmSync(destination, { force: true });
+    fsImpl.renameSync(temporary, destination);
+  } finally {
+    try { fsImpl.rmSync(temporary, { force: true }); } catch {}
+  }
+  return destination;
 }
 
 function fetchBuffer(url, redirects = 0, maxBytes = 2 * 1024 * 1024) {
@@ -434,6 +522,10 @@ function verifyExtractedRuntime(packageRoot, version, platformKey) {
   }
   const manifest = JSON.parse(fs.readFileSync(path.join(packageRoot, "package.json"), "utf8"));
   if (manifest.name !== PACKAGE_NAME || manifest.version !== version) fail("Relay runtime package identity is invalid.");
+  const permissions = repairRuntimeExecutablePermissions(packageRoot, { platform: platformKey });
+  if (!permissions.ok) {
+    fail(`Relay runtime executable permission repair failed (${permissions.reason}${permissions.detail ? `: ${permissions.detail}` : ""}).`);
+  }
   const bin = path.join(packageRoot, "bin", "relay.js");
   if (!platformKey.startsWith("win32-")) {
     try { fs.accessSync(bin, fs.constants.X_OK); }
@@ -448,15 +540,18 @@ function verifyExtractedRuntime(packageRoot, version, platformKey) {
     bin,
     electron: executables.electronPath,
     executablePaths: executables.paths.map((entry) => entry.path),
+    repairedExecutableRoles: permissions.repaired,
   };
 }
 
 function runtimeLayout(version, platformKey) {
   const root = path.join(os.homedir(), ".relay", "runtime");
+  const releasesDir = path.join(root, "releases");
   const releaseId = `${version}-${platformKey}-${crypto.randomBytes(8).toString("hex")}`;
-  const releaseRoot = path.join(root, "releases", releaseId);
+  const releaseRoot = path.join(releasesDir, releaseId);
   return {
     root,
+    releasesDir,
     releaseId,
     releaseRoot,
     packageRoot: path.join(releaseRoot, "node_modules", PACKAGE_NAME),
@@ -566,6 +661,131 @@ function atomicWriteJson(file, value) {
   fs.renameSync(temporary, file);
 }
 
+function atomicCreateText(file, value, mode = 0o600) {
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const temporary = `${file}.${process.pid}.${crypto.randomBytes(6).toString("hex")}.tmp`;
+  try {
+    fs.writeFileSync(temporary, value, { mode, flag: "wx" });
+    fs.chmodSync(temporary, mode);
+    // linkSync is the portable no-replace primitive Node exposes: unlike
+    // renameSync it fails with EEXIST if another command appears after our
+    // ownership preflight, so Relay can never win that race by overwriting it.
+    fs.linkSync(temporary, file);
+  } finally {
+    try { fs.rmSync(temporary, { force: true }); } catch {}
+  }
+}
+
+function shellSingleQuote(value) {
+  return `'${String(value).replaceAll("'", `'"'"'`)}'`;
+}
+
+const CANONICAL_CLI_LAUNCHER_MARKER = "// relay-companion canonical CLI launcher v1";
+const CANONICAL_CLI_SHIM_MARKER = "# relay-companion canonical CLI shim v1";
+
+function canonicalCliLauncherSource(pointerPath) {
+  return `#!/usr/bin/env node
+${CANONICAL_CLI_LAUNCHER_MARKER}
+"use strict";
+const fs = require("node:fs");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
+const pointerPath = ${JSON.stringify(pointerPath)};
+let current;
+try { current = JSON.parse(fs.readFileSync(pointerPath, "utf8")); }
+catch { console.error("[relay] Relay is not installed. Run the exact setup command again."); process.exit(1); }
+const releases = path.resolve(path.dirname(pointerPath), "releases");
+const bin = path.resolve(String(current?.bin || ""));
+const relative = path.relative(releases, bin);
+if (current?.active !== true || current?.state !== "active" || !relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+  console.error("[relay] Relay's active runtime pointer is invalid. Run the exact setup command again.");
+  process.exit(1);
+}
+try {
+  if (!fs.statSync(bin).isFile() || !fs.statSync(String(current.node || "")).isFile()) throw new Error("missing");
+} catch { console.error("[relay] Relay's active runtime is missing. Run the exact setup command again."); process.exit(1); }
+const result = spawnSync(String(current.node), [bin, ...process.argv.slice(2)], { stdio: "inherit", env: process.env, windowsHide: true });
+if (result.error) { console.error("[relay] " + (result.error.message || result.error)); process.exit(1); }
+process.exit(Number.isInteger(result.status) ? result.status : 1);
+`;
+}
+
+function canonicalCliShimSource(node, launcherPath) {
+  return `#!/bin/sh\n${CANONICAL_CLI_SHIM_MARKER}\nexec ${shellSingleQuote(node)} ${shellSingleQuote(launcherPath)} "$@"\n`;
+}
+
+function canonicalCliPaths({
+  homeDir = os.homedir(),
+  pointerPath = path.join(homeDir, ".relay", "runtime", "current.json"),
+} = {}) {
+  const runtimeRoot = path.dirname(pointerPath);
+  const binDir = path.join(homeDir, ".local", "bin");
+  return {
+    pointerPath,
+    runtimeRoot,
+    launcherPath: path.join(runtimeRoot, "relay-cli.cjs"),
+    binDir,
+    shimPath: path.join(binDir, "relay"),
+  };
+}
+
+function isCanonicalCliShimSource(source, launcherPath) {
+  const prefix = `#!/bin/sh\n${CANONICAL_CLI_SHIM_MARKER}\nexec `;
+  const suffix = ` ${shellSingleQuote(launcherPath)} "$@"\n`;
+  if (typeof source !== "string" || !source.startsWith(prefix) || !source.endsWith(suffix)) return false;
+  const encodedNode = source.slice(prefix.length, -suffix.length);
+  if (!encodedNode.startsWith("'") || !encodedNode.endsWith("'") || encodedNode.includes("\n") || encodedNode.includes("\r")) {
+    return false;
+  }
+  const decodedNode = encodedNode.slice(1, -1).replaceAll(`'"'"'`, "'");
+  return shellSingleQuote(decodedNode) === encodedNode;
+}
+
+function installCanonicalCliLauncher(candidate, {
+  platform = process.platform,
+  homeDir = os.homedir(),
+  env = process.env,
+  pointerPath = path.join(homeDir, ".relay", "runtime", "current.json"),
+} = {}) {
+  if (platform !== "linux") return { ok: true, skipped: true };
+  const { launcherPath, binDir, shimPath } = canonicalCliPaths({ homeDir, pointerPath });
+  const launcherSource = canonicalCliLauncherSource(pointerPath);
+  const shimSource = canonicalCliShimSource(candidate.node, launcherPath);
+  try {
+    const existingLauncher = fs.existsSync(launcherPath) ? fs.readFileSync(launcherPath, "utf8") : null;
+    const existingShim = fs.existsSync(shimPath) ? fs.readFileSync(shimPath, "utf8") : null;
+    if (existingLauncher !== null && existingLauncher !== launcherSource) {
+      return {
+        ok: false,
+        reason: "cli_launcher_collision",
+        detail: `${launcherPath} already exists and is not Relay's generated launcher`,
+        launcherPath,
+        shimPath,
+      };
+    }
+    if (existingShim !== null && !isCanonicalCliShimSource(existingShim, launcherPath)) {
+      return {
+        ok: false,
+        reason: "cli_shim_collision",
+        detail: `${shimPath} already exists and is not Relay's generated command`,
+        launcherPath,
+        shimPath,
+      };
+    }
+    // Existing generated files deliberately remain byte-identical. The shim's
+    // Node is itself a retained durable copy, while the launcher follows the
+    // current pointer, so neither needs to be rewritten during an update.
+    if (existingLauncher === null) atomicCreateText(launcherPath, launcherSource, 0o700);
+    if (existingShim === null) atomicCreateText(shimPath, shimSource, 0o755);
+    const pathAvailable = String(env.PATH || "").split(":").some((entry) => {
+      try { return path.resolve(entry) === path.resolve(binDir); } catch { return false; }
+    });
+    return { ok: true, launcherPath, shimPath, pathAvailable };
+  } catch (error) {
+    return { ok: false, reason: "cli_launcher_install_failed", detail: error?.message || String(error), launcherPath, shimPath };
+  }
+}
+
 async function waitForRuntimeHealth(runtime, {
   platform = process.platform,
   healthCheck = exactRuntimeHealth,
@@ -631,7 +851,10 @@ async function activateRuntime(layout, runtime, version, {
     releaseRoot: layout.releaseRoot,
     packageRoot: runtime.packageRoot,
     bin: runtime.bin,
-    node: process.execPath,
+    node: relayOwnedNodePath(
+      durableNodePath(stableNodePath(), { platform, runtimeRoot: layout.root }),
+      { platform, runtimeRoot: layout.root },
+    ),
     source: "signed-release-artifact",
     preparedAt,
     updatedAt: preparedAt,
@@ -659,7 +882,7 @@ async function activateRuntime(layout, runtime, version, {
     let result = null;
     if (previous?.bin && existsSync(previous.bin)) {
       target = "previous runtime";
-      result = spawnImpl(process.execPath, [previous.bin, "repair-runtime", "--no-trampoline", "--claim"], {
+      result = spawnImpl(candidate.node, [previous.bin, "repair-runtime", "--no-trampoline", "--claim"], {
         stdio: "ignore",
         windowsHide: true,
       });
@@ -667,7 +890,7 @@ async function activateRuntime(layout, runtime, version, {
       // A failed first install has no former canonical owner. The candidate's
       // uninstall removes the partial MCP/autostart writes setup may have made.
       target = "partial installation";
-      result = spawnImpl(process.execPath, [runtime.bin, "uninstall", "--no-trampoline"], {
+      result = spawnImpl(candidate.node, [runtime.bin, "uninstall", "--no-trampoline"], {
         stdio: "ignore",
         windowsHide: true,
       });
@@ -688,6 +911,27 @@ async function activateRuntime(layout, runtime, version, {
     }
     if (previous?.active === true) writePointer(layout.pointerPath, previous);
     else removePointer(layout.pointerPath);
+    // Real runtime layouts place each immutable candidate directly beneath
+    // releases/. Remove only that exact, now-unreferenced child after rollback;
+    // recovery-required deliberately retains it above.
+    if (layout.releasesDir) {
+      const releasesDir = path.resolve(layout.releasesDir);
+      const failedRoot = path.resolve(layout.releaseRoot);
+      if (path.dirname(failedRoot) === releasesDir && failedRoot !== releasesDir) {
+        try { fs.rmSync(failedRoot, { recursive: true, force: true }); } catch {}
+      }
+    }
+  }
+
+  const cliLauncher = installCanonicalCliLauncher(candidate, {
+    platform,
+    homeDir,
+    pointerPath: layout.pointerPath,
+  });
+  if (!cliLauncher.ok) {
+    const message = `Relay could not install its durable command launcher (${cliLauncher.detail || cliLauncher.reason}).`;
+    rollback(message);
+    fail(message);
   }
 
   const stopped = stopPreviousWindowsRuntime({ platform, spawnImpl });
@@ -702,7 +946,7 @@ async function activateRuntime(layout, runtime, version, {
   // in the candidate while bootstrap and the updater use the same exact-root handoff.
   const setupArgs = [runtime.bin, "setup", "--no-trampoline", "--claim"];
   if (platform === "darwin" || platform === "linux") setupArgs.push("--no-restart");
-  const result = spawnImpl(process.execPath, setupArgs, {
+  const result = spawnImpl(candidate.node, setupArgs, {
     stdio: "inherit",
     windowsHide: true,
     env: { ...process.env, RELAY_BOOTSTRAP_ACTIVATED: "1" },
@@ -766,6 +1010,7 @@ async function activateRuntime(layout, runtime, version, {
     rollback("Relay could not commit the verified runtime pointer.");
     throw error;
   }
+  return { candidate, cliLauncher };
 }
 
 async function setup() {
@@ -776,8 +1021,11 @@ async function setup() {
   const lock = acquireCanonicalLock(layout.lockPath);
   try {
     const runtime = await stageVerifiedRuntime({ version, platformKey, destination: layout.releaseRoot });
-    await activateRuntime(layout, runtime, version);
+    const activated = await activateRuntime(layout, runtime, version);
     console.log(`Relay ${version} is installed. The Relay pill is open; sign in there to finish.`);
+    if (activated?.cliLauncher && !activated.cliLauncher.pathAvailable) {
+      console.log(`Relay's command is installed at ${activated.cliLauncher.shimPath}. Open a new login session to add ~/.local/bin to PATH.`);
+    }
   } finally {
     lock.release();
   }
@@ -846,12 +1094,19 @@ module.exports = {
   activateRuntime,
   acquireCanonicalLock,
   assertCompatibleNode,
+  canonicalCliLauncherSource,
+  canonicalCliPaths,
+  canonicalCliShimSource,
+  durableNodePath,
   downloadVerifiedArtifact,
   forwardActiveCanonicalCli,
+  installCanonicalCliLauncher,
+  isCanonicalCliShimSource,
   releasePlatform,
   parseSignedManifest,
   restoreRuntimeLinks,
   stageVerifiedRuntime,
+  stableNodePath,
   tarInvocation,
   validateArchiveEntries,
   verifyExtractedRuntime,

@@ -234,6 +234,9 @@ test("repair-installation preserves state while migrating hooks before refreshin
   assert.match(cli, /preserves account, encryption, messages, outbox, and preferences/);
   assert.match(cli, /flags\["target-bin"\]/, "candidate repair can retarget a legacy runtime during rollback");
   assert.match(cli, /flags\["target-node"\]/);
+  assert.match(cli, /reconcileCanonicalRuntimeNode/, "runtime repair reconciles the durable Node into current.json");
+  assert.match(cli, /reconcileCanonicalRuntimeNode\(\{ node: runtimeNode \}\)/, "a claimed repair updates the active pointer regardless of its invoking install tree");
+  assert.match(cli, /Relay runtime repaired with its durable Node/, "runtime repair reports what it repaired");
 });
 
 test("candidate runtime repair refreshes only existing Relay MCP registrations", () => {

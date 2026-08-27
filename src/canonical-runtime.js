@@ -107,6 +107,50 @@ export function readCanonicalRuntime({
   }
 }
 
+/**
+ * Keep an already-active canonical pointer aligned with the durable Node used
+ * by repair-runtime. Activation journals are deliberately left alone: the
+ * updater owns those state transitions and commits its candidate only after
+ * exact-root health succeeds.
+ */
+export function reconcileCanonicalRuntimeNode({
+  node,
+  homeDir = os.homedir(),
+  platform = process.platform,
+  now = Date.now,
+  fsImpl = fs,
+} = {}) {
+  if (!node) return { ok: false, changed: false, reason: "runtime-node-missing" };
+  const state = readCanonicalRuntimeState({
+    homeDir,
+    platform,
+    readFileSync: fsImpl.readFileSync.bind(fsImpl),
+  });
+  if (!state) return { ok: true, changed: false, reason: "canonical-runtime-absent" };
+  if (state.active !== true) return { ok: true, changed: false, reason: "canonical-transaction-active" };
+  if (samePath(node, state.node, platform)) {
+    return { ok: true, changed: false, reason: "already-current", current: state };
+  }
+
+  const { pointerPath } = canonicalRuntimeLayout({ homeDir, platform });
+  const next = { ...state, node, repairedAt: now() };
+  atomicWritePointer(pointerPath, next, {
+    platform,
+    mkdirSync: fsImpl.mkdirSync.bind(fsImpl),
+    writeFileSync: fsImpl.writeFileSync.bind(fsImpl),
+    renameSync: fsImpl.renameSync.bind(fsImpl),
+  });
+  const current = readCanonicalRuntime({
+    homeDir,
+    platform,
+    readFileSync: fsImpl.readFileSync.bind(fsImpl),
+  });
+  if (!current || !samePath(current.node, node, platform)) {
+    return { ok: false, changed: false, reason: "canonical-pointer-verification-failed" };
+  }
+  return { ok: true, changed: true, previousNode: state.node || null, current };
+}
+
 export function canonicalOwnershipGuard(packageRoot, {
   homeDir = os.homedir(),
   platform = process.platform,

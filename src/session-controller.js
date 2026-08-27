@@ -401,6 +401,7 @@ export async function publishAndFind(
 }
 
 let cachedControllerCapabilities;
+let cachedControllerCapabilitiesAt = 0;
 export function commandAvailable(command, {
   platform = process.platform,
   existsSync = fs.existsSync,
@@ -413,12 +414,17 @@ export function commandAvailable(command, {
 }
 
 function controllerObservation() {
-  cachedControllerCapabilities ||= {
-    claude: commandAvailable(claudeCommand()),
-    codex: commandAvailable(defaultCodexCommand()),
-    start: true,
-    send: true,
-  };
+  // Provider installation can change while the daemon is running. Refresh the
+  // executable probe so a queued @mention resumes without a Relay restart.
+  if (!cachedControllerCapabilities || Date.now() - cachedControllerCapabilitiesAt > 10_000) {
+    cachedControllerCapabilities = {
+      claude: commandAvailable(claudeCommand()),
+      codex: commandAvailable(defaultCodexCommand()),
+      start: true,
+      send: true,
+    };
+    cachedControllerCapabilitiesAt = Date.now();
+  }
   return {
     placement: sessionPlacement(),
     placementId: sessionPlacementId(),
@@ -868,64 +874,6 @@ export function codexRecoveryWaitMs(
   return Math.max(0, windowMs - Math.max(0, now - lastActivityAt));
 }
 
-/**
- * Materialize an existing Relay on a selected native host. This is deliberately
- * separate from an ordinary session `start`: the clicked Relay remains the
- * canonical handoff and is not flattened into a second invented prompt.
- */
-export async function materializeRelayOperation(client, operation, claimToken, {
-  log = () => {},
-  load = async () => {
-    const [{ openRelay }, { stagePlainRelayItem }] = await Promise.all([
-      import("./materializer.js"),
-      import("./notifications.js"),
-    ]);
-    return { openRelay, stagePlainRelayItem };
-  },
-  recordEvidence = evidence,
-} = {}) {
-  const relayMessageId = String(operation.input?.relayMessageId || "");
-  if (operation.kind !== "start" || !relayMessageId) return false;
-  const { openRelay, stagePlainRelayItem } = await load();
-  const fetched = await client.fetchRelay(relayMessageId);
-  const packet = fetched?.packet;
-  if (!packet || packet.id !== relayMessageId) throw new Error("Relay message is unavailable to this computer.");
-  stagePlainRelayItem({
-    item: {
-      relayId: packet.id,
-      state: "delivered",
-      createdAt: packet.createdAt,
-      updatedAt: packet.editedAt || packet.createdAt,
-      kind: packet.kind,
-      ...(packet.title ? { title: packet.title } : {}),
-      sender: packet.sender,
-      preview: packet.forHuman,
-      inReplyToRelayId: packet.inReplyToRelayId,
-      threadId: packet.threadId || packet.id,
-      recipientGroupId: packet.recipientGroupId,
-      recipientGroupName: packet.recipientGroupName,
-    },
-    packet,
-    attachmentUrls: fetched.attachmentUrls || {},
-  });
-  const provider = operation.input?.provider === "claude" ? "claude" : "codex";
-  const opened = await openRelay({ id: relayMessageId, host: provider, forceFresh: true, log });
-  let nativeSessionId = "";
-  try {
-    const url = new URL(String(opened?.url || ""));
-    nativeSessionId = provider === "claude"
-      ? String(url.searchParams.get("session") || "")
-      : decodeURIComponent(url.pathname.split("/").filter(Boolean).pop() || "");
-  } catch {}
-  for (const state of ["handed_off", "applied", "completed"]) {
-    await recordEvidence(client, operation.id, claimToken, state, {
-      adapter: "relay_materializer",
-      ...(nativeSessionId ? { nativeSessionId } : {}),
-    });
-  }
-  return true;
-}
-
 async function processClaim(client, claim, log) {
   const operation = claim.operation;
   // Protect every controller phase, including provider launch, native-session
@@ -946,7 +894,6 @@ async function processClaim(client, claim, log) {
       });
       return;
     }
-    if (await materializeRelayOperation(client, operation, claim.claimToken, { log })) return;
     if (await recoverClaim({ client, claim, target: claim.target, operation })) return;
     const input = operation.input || {};
     const source = await sourceSession(client, operation);

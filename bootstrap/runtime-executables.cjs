@@ -81,8 +81,56 @@ function verifyRuntimeExecutables(packageRoot, {
   return { ...inventory, ok: true };
 }
 
+/**
+ * Restore execute metadata only for the CLI and the finite Electron process
+ * inventory whose bytes were already authenticated by Relay's signed runtime
+ * artifact. Archive extraction can lose mode bits without changing file bytes;
+ * no discovered or caller-supplied path is ever chmodded here.
+ */
+function repairRuntimeExecutablePermissions(packageRoot, {
+  platform = process.platform,
+  existsSync = fs.existsSync,
+  statSync = fs.statSync,
+  accessSync = fs.accessSync,
+  chmodSync = fs.chmodSync,
+} = {}) {
+  const name = platformName(platform);
+  const inventory = runtimeExecutableInventory(packageRoot, { platform: name, existsSync });
+  if (!inventory.ok) return inventory;
+  if (name === "win32") return { ...inventory, ok: true, repaired: [] };
+
+  const api = pathsFor(name);
+  const entries = [
+    { role: "relay-cli", path: api.join(packageRoot, "bin", "relay.js") },
+    ...inventory.paths,
+  ];
+  const repaired = [];
+  for (const entry of entries) {
+    try {
+      if (!existsSync(entry.path)) return { ok: false, reason: "candidate-executable-missing", detail: entry.role };
+      if (!statSync(entry.path).isFile()) return { ok: false, reason: "candidate-executable-invalid", detail: entry.role };
+      try {
+        accessSync(entry.path, fs.constants.X_OK);
+        continue;
+      } catch {}
+      chmodSync(entry.path, 0o700);
+      accessSync(entry.path, fs.constants.X_OK);
+      repaired.push(entry.role);
+    } catch (error) {
+      return {
+        ok: false,
+        reason: "candidate-executable-permission-repair-failed",
+        detail: entry.role,
+        error: error?.message || String(error),
+      };
+    }
+  }
+  return { ...inventory, ok: true, repaired };
+}
+
 module.exports = {
   MAC_HELPER_EXECUTABLES,
+  repairRuntimeExecutablePermissions,
   runtimeExecutableInventory,
   verifyRuntimeExecutables,
 };

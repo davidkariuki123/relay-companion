@@ -8,14 +8,15 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { pathToFileURL } from "node:url";
 import { ensureCandidateElectronRuntime, verifyCanonicalCandidate } from "../src/canonical-runtime.js";
+import { prepareLinuxElectronSandbox } from "./prepare-linux-electron-sandbox.mjs";
 const { RELAY_MAC_BUNDLE_IDENTIFIER } = createRequire(import.meta.url)("../src/mac-app-identity.cjs");
 
 export function electronVersionArgs(platform = process.platform) {
-  // This process only prints Electron's embedded version and exits. Runtime
-  // archives deliberately preserve ordinary file ownership, so the temporary
-  // Linux smoke tree cannot satisfy Chromium's root-owned setuid helper check.
-  // Relay's real desktop launch does not use this flag.
-  return platform === "linux" ? ["--no-sandbox", "--version"] : ["--version"];
+  // Never teach a release gate to bypass the sandbox used in production. The
+  // full graphical readiness probe runs during setup; this early identity
+  // smoke still uses Electron's ordinary secure launch path.
+  void platform;
+  return ["--version"];
 }
 
 export function verifyMacElectronIdentity(electronPath, {
@@ -59,6 +60,10 @@ export async function verifyInstalledRuntime({ packageRoot, version, platform = 
   const verified = verifyCanonicalCandidate(root, expectedVersion, { platform });
   if (!verified.ok) throw new Error(`Runtime verification failed: ${verified.reason}${verified.detail ? ` (${verified.detail})` : ""}`);
   verifyMacElectronIdentity(verified.electronPath, { platform });
+  // Linux release gates must exercise the same Chromium sandbox boundary as a
+  // real desktop session. Provision one content-addressed, root-owned helper;
+  // never weaken the smoke test with --no-sandbox.
+  prepareLinuxElectronSandbox({ electronPath: verified.electronPath, platform });
   const expectedElectron = String(manifest.dependencies?.electron || "");
   if (!/^\d+\.\d+\.\d+$/.test(expectedElectron)) throw new Error("Runtime does not pin one exact Electron version");
   const launched = spawnSync(verified.electronPath, electronVersionArgs(platform), {

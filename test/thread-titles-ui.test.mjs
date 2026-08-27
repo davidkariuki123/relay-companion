@@ -661,11 +661,13 @@ test("the room composer prevents duplicate sends, and returns a draft only when 
 });
 
 test("chat composers offer owned laptop agents while human mentions stay group-only", () => {
-  const owned = html.indexOf('{ token:"Claude", name:"@Claude"');
+  const owned = html.indexOf('ownedAgentMentionOption("claude")');
   const participant = html.indexOf('...participantMentions.values()');
   assert.ok(owned >= 0 && participant > owned, "owned agents precede participant suggestions");
   assert.match(html, /groupInfoRoster\(group\)[\s\S]*!member\.currentUser/, "saved-group rosters contribute participants who have not spoken yet");
   assert.match(html, /payload\.features\?\.agentMentions === true \? \[/, "owned agents are suggested only where the feature is enabled");
+  assert.match(html, /Needs \$\{app\} CLI installation/, "a live missing-CLI probe is visible in the selector");
+  assert.match(html, /window\.relay\.providerAuthStatus\(\)[\s\S]*renderMentions\(\)/, "typing an agent mention refreshes local provider status");
   assert.match(html, /if \(event\.key === "Enter" \|\| event\.key === "Tab"\)/, "keyboard selection works without leaving the composer");
   assert.match(html, /button\.addEventListener\("click"[\s\S]*chooseMention/, "touch and click selection dismisses the menu too");
   assert.match(html, /\["ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"\][\s\S]*renderMentions/, "moving the caret re-evaluates the active mention");
@@ -680,13 +682,20 @@ test("chat composers offer owned laptop agents while human mentions stay group-o
   assert.match(html, /title:"I'm on it"[\s\S]*agentInvocation:true/, "sending paints the immediate owned-agent response");
   assert.match(html, /const savedContact = !currentUser && email[\s\S]*contactsList\.find[\s\S]*const shown = savedContact/,
     "the viewer's saved contact name wins over somebody else's group-roster label");
-  const groupMentions = html.slice(html.indexOf("const participantMentions = new Map();"), html.indexOf("const mentionOptions = [", html.indexOf("const participantMentions = new Map();")));
+  const groupMentions = html.slice(html.indexOf("const participantMentions = new Map();"), html.indexOf("let mentionOptions = [", html.indexOf("const participantMentions = new Map();")));
   assert.match(groupMentions, /payload\.features\?\.peopleMentions === true && thread\.isGroup[\s\S]*groupInfoRoster\(group\)/,
     "group mentions come from the current roster");
   assert.match(groupMentions, /mentionTokenForContact\(member\)/,
     "participants without an explicit handle still receive a valid mention token");
   assert.doesNotMatch(groupMentions, /message\.party|thread\.party/,
     "a direct-message counterpart cannot appear as a redundant mention choice");
+});
+
+test("agent settings offer a credential-safe CLI setup prompt when installation is missing", () => {
+  assert.match(html, /function providerSetupPrompt\(provider\)/);
+  assert.match(html, /Do not paste credentials or access tokens into chat/);
+  assert.match(html, /data-provider-setup-prompt="\$\{id\}"/);
+  assert.match(html, /navigator\.clipboard\.writeText\(providerSetupPrompt\(provider\)\)/);
 });
 
 test("person mentions fall back to contact names when cloud contacts have no handle", () => {

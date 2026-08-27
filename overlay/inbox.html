@@ -5182,6 +5182,22 @@
   function providerIdForApp(app) { return /codex/i.test(String(app || "")) ? "codex" : "claude"; }
   function providerAppName(provider) { return provider === "codex" ? "Codex" : "Claude Code"; }
   function providerStatusForWork(provider) { return providerAuthInfo?.providers?.[provider] || null; }
+  function providerSetupPrompt(provider) {
+    const agent = provider === "codex" ? "Codex" : "Claude Code";
+    const command = provider === "codex" ? "codex" : "claude";
+    const subscription = provider === "codex" ? "ChatGPT" : "Claude";
+    return `Install the official ${agent} CLI on this computer and authenticate it with my ${subscription} subscription. Make sure the ${command} command is available to background processes, verify the CLI is signed in, then make sure Relay is running and wait for it to detect the installation. Do not paste credentials or access tokens into chat.`;
+  }
+  function ownedAgentMentionOption(provider) {
+    const item = providerStatusForWork(provider);
+    const app = providerAppName(provider);
+    const note = item?.authLoaded && !item.installed
+      ? `Needs ${app} CLI installation`
+      : item?.authLoaded && item.installed && !item.connected
+        ? `Needs ${app} sign-in`
+        : `Run ${provider === "codex" ? "Codex" : "Claude"} on my computer`;
+    return { token:provider === "codex" ? "Codex" : "Claude", name:`@${provider === "codex" ? "Codex" : "Claude"}`, note, agent:true };
+  }
   function providerReadyForWork(provider) {
     const item = providerStatusForWork(provider);
     return Boolean(item?.authLoaded && item?.enabled && item?.connected);
@@ -11838,13 +11854,23 @@
           }
         }
       }
-      const mentionOptions = [
+      let mentionOptions = [
         ...(payload.features?.agentMentions === true ? [
-          { token:"Claude", name:"@Claude", note:"Run Claude on my computer", agent:true },
-          { token:"Codex", name:"@Codex", note:"Run Codex on my computer", agent:true },
+          ownedAgentMentionOption("claude"),
+          ownedAgentMentionOption("codex"),
         ] : []),
         ...participantMentions.values(),
       ];
+      let mentionProviderStatusLoading = false;
+      const refreshMentionProviderStatus = () => {
+        if (mentionProviderStatusLoading || providerAuthInfo?.providers?.claude?.authLoaded || !window.relay.providerAuthStatus) return;
+        mentionProviderStatusLoading = true;
+        window.relay.providerAuthStatus().then((result) => {
+          applyProviderAuthResult(result);
+          mentionOptions = [ownedAgentMentionOption("claude"), ownedAgentMentionOption("codex"), ...participantMentions.values()];
+          if (thQrInput.isConnected) renderMentions();
+        }).catch(() => {}).finally(() => { mentionProviderStatusLoading = false; });
+      };
       prepareMentionComposer(thQrInput, mentionOptions, threadDraft);
       const closeMentions = () => { mentionMatches = []; mentionStart = -1; mentionMenu?.classList.add("hidden"); };
       const chooseMention = (index) => {
@@ -11865,6 +11891,7 @@
         const before = thQrInput.value.slice(0, caret);
         const match = before.match(/(^|\s)@([^\s@]*)$/);
         if (!match) { closeMentions(); return; }
+        if (payload.features?.agentMentions === true) refreshMentionProviderStatus();
         const query = String(match[2] || "").toLowerCase();
         mentionStart = caret - query.length - 1;
         mentionMatches = mentionOptions.filter((option) => option.token.toLowerCase().includes(query)).slice(0, 8);
@@ -12648,6 +12675,7 @@
             ? (id === "claude" ? "Use Claude subscription" : "Use ChatGPT subscription")
             : signInLabel;
       const connectDisabled = busy || !authLoaded || !item.installed || !item.enabled || item.connected;
+      const needsInstallation = authLoaded && !item.installed;
       const healthy = item.enabled && item.connected && !busy;
       const logo = id === "claude" ? "claudeCodeMark.svg" : "codexMark.svg";
       const countLabel = totalConnections === 1 ? "1 connection" : `${totalConnections} connections`;
@@ -12666,6 +12694,7 @@
           ${integrationList(id === "claude" ? "MCPs and account connectors" : "Local MCPs", mcpServers)}
           ${integrationList("Connected apps", apps)}
           <div class="sv-agent-provider-actions">
+            ${needsInstallation ? `<button class="sv-provider-btn primary" type="button" data-provider-setup-prompt="${id}">Copy setup prompt</button>` : ""}
             ${item.connected ? "" : `<button class="sv-provider-btn primary" type="button" data-provider-connect="${id}" ${connectDisabled ? "disabled" : ""}>${esc(connectLabel)}</button>`}
             <button class="sv-provider-btn" type="button" data-provider-enable="${id}" data-enabled="${item.enabled ? "1" : "0"}" ${busy || !authLoaded ? "disabled" : ""}>${enableLabel}</button>
           </div>`,
@@ -13097,6 +13126,19 @@
     });
     for (const button of settingsViewEl.querySelectorAll("[data-provider-connect]")) {
       button.addEventListener("click", () => connectProviderFromSettings(button.getAttribute("data-provider-connect")));
+    }
+    for (const button of settingsViewEl.querySelectorAll("[data-provider-setup-prompt]")) {
+      button.addEventListener("click", async () => {
+        const provider = button.getAttribute("data-provider-setup-prompt");
+        try {
+          await navigator.clipboard.writeText(providerSetupPrompt(provider));
+          providerAuthNote = `${providerAppName(provider)} setup prompt copied.`;
+          providerAuthError = "";
+        } catch {
+          providerAuthError = "Could not copy the setup prompt.";
+        }
+        renderSettings();
+      });
     }
     for (const button of settingsViewEl.querySelectorAll("[data-provider-details]")) {
       button.addEventListener("click", () => {
@@ -13577,6 +13619,7 @@
     if (detail.includes("authorization_recovery_failed")) return "Relay could not recover the approved setup. Restart setup to create a new one-time approval.";
     if (detail.includes("request_timeout")) return "Relay took too long to respond. Try again.";
     if (detail.includes("network_unavailable")) return "Relay couldn’t connect. Check your internet and try again.";
+    if (detail.includes("linux_desktop_disabled")) return "New Linux desktop connections are temporarily paused. Try again later.";
     if (detail.includes("invalid_email")) return "Enter a valid email address.";
     if (detail.includes("browser_open_failed")) return "Relay couldn’t open your secure sign-in page. Try again.";
     if (detail.includes("secret_removal_failed")) return "Relay could not safely remove the old one-time setup approval. No replacement was created.";

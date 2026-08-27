@@ -23,7 +23,11 @@ const { app, BrowserWindow, Menu, Tray, clipboard, ipcMain, nativeImage, powerMo
 
 if (process.platform === "linux") {
   app.setName("Relay");
-  try { app.setDesktopName("relay.desktop"); } catch {}
+  try { app.setDesktopName("work.relay.companion.desktop"); } catch {}
+  // Relay's pill must move and resize after creation. Electron documents those
+  // operations as unavailable on native Wayland and recommends XWayland for
+  // applications that require them.
+  app.commandLine.appendSwitch("ozone-platform", "x11");
 }
 
 // The pill is an accessory window that spends most of its life idle behind other
@@ -102,7 +106,7 @@ const {
   runningHostsFromProcessList,
   terminalClaudeCodeRunningFromProcessList,
 } = require("./host-select.cjs");
-const { parseRelayDeepLink, relayDeepLinkFromArgv, relayDeepLinkFailureStatus } = require("./deep-link.cjs");
+const { parseRelayDeepLink, relayDeepLinkFromArgv } = require("./deep-link.cjs");
 const {
   overlayWanted,
   createHostRunningTracker,
@@ -370,6 +374,7 @@ function writePillStatus(reopenNonce = "") {
   if (reopenNonce) lastReopenNonce = String(reopenNonce);
   const stableStatus = {
     pid: process.pid,
+    packageRoot: path.resolve(__dirname, ".."),
     ready: pillReady,
     visible: Boolean(win && !win.isDestroyed() && win.isVisible()),
     dismissed: Boolean(dismissed),
@@ -562,6 +567,7 @@ const INSTALLATION_AUTH_IPC_ERROR_CODES = new Set([
   "identity_conflict",
   "identity_not_found",
   "identity_required",
+  "linux_desktop_disabled",
   "invalid_activation",
   "invalid_email",
   "invalid_email_code",
@@ -641,16 +647,6 @@ function loadPlainStager() {
 let relayDeepLinkDrain = null;
 let pendingRelayReader = null;
 
-function acknowledgeRelayDeepLink(parsed, status = "opened") {
-  if (!parsed?.handoffId) return;
-  const callback = new URL("/open/relay/ack", webBase());
-  callback.searchParams.set("handoff", parsed.handoffId);
-  callback.searchParams.set("host", parsed.host);
-  callback.searchParams.set("status", status);
-  shell.openExternal(callback.toString()).catch((error) =>
-    console.error("[overlay] Relay handoff ACK failed:", error && error.message));
-}
-
 function deliverPendingRelayReader() {
   if (!pendingRelayReader || !rendererListening || !win || win.isDestroyed() || win.webContents.isDestroyed()) {
     return false;
@@ -679,20 +675,17 @@ async function openRelayDeepLink(parsed) {
     if (!Array.isArray(chat?.items) || !chat.items.some((item) => item?.relayId === parsed.messageId)) {
       throw new Error("Relay message is unavailable to this account.");
     }
-    acknowledgeRelayDeepLink(parsed, "accepted");
     await pushInbox(true);
     pendingRelayReader = { messageId: parsed.messageId, chatId };
     requestExternalReopen(randomUUID());
     // Hot Pills receive this immediately. Cold Pills keep it until the renderer
     // explicitly confirms that its openReader listener is installed.
     deliverPendingRelayReader();
-    acknowledgeRelayDeepLink(parsed);
     return;
   }
   const fetched = await new RelayClient().fetchRelay(parsed.messageId);
   const packet = fetched && fetched.packet;
   if (!packet || packet.id !== parsed.messageId) throw new Error("Relay message is unavailable to this account.");
-  acknowledgeRelayDeepLink(parsed, "accepted");
   stagePlainRelayItem({
     item: {
       relayId: packet.id,
@@ -714,7 +707,6 @@ async function openRelayDeepLink(parsed) {
   await pushInbox(true);
   requestExternalReopen(randomUUID());
   await openPacket(packet.id, { host: parsed.host, fresh: true });
-  acknowledgeRelayDeepLink(parsed);
 }
 
 function drainRelayDeepLinks() {
@@ -726,7 +718,6 @@ function drainRelayDeepLinks() {
         await openRelayDeepLink(parsed);
       } catch (error) {
         console.error("[overlay] Relay deep link failed:", error && error.message);
-        acknowledgeRelayDeepLink(parsed, relayDeepLinkFailureStatus(error));
         requestExternalReopen(randomUUID());
       }
     }
@@ -3353,6 +3344,9 @@ function claudeDesktopBaseDir() {
   if (process.platform === "win32") {
     return path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "Claude");
   }
+  if (process.platform === "linux") {
+    return path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "Claude");
+  }
   return path.join(os.homedir(), "Library", "Application Support", "Claude");
 }
 function claudeDesktopSessionsDir() {
@@ -3676,7 +3670,7 @@ async function openPacket(packetId, { sent = false, fresh = false, host: hostOve
     // "close", never "exit": on Windows "exit" routinely fires BEFORE the stdout pipe
     // drains, so `out` was empty, the parse failed, and a perfectly successful open was
     // routed to the web fallback — the user got a browser instead of Claude.
-    child.on("close", (code) => {
+    child.on("close", async (code) => {
       const { url, skipExternalOpen, freshlyForged, cwd, cwdReason } = parseOpenResult(out);
       if (url || skipExternalOpen) {
         // Raise the host so the relay is visible, whichever open path ran (Claude deep
@@ -3684,7 +3678,7 @@ async function openPacket(packetId, { sent = false, fresh = false, host: hostOve
         // host but didn't foreground it".
         activateHost(host, bundle);
         if (url && !skipExternalOpen && process.platform === "linux") {
-          const launched = launchLinuxAgentTerminal({ url, host, cwd });
+          const launched = await launchLinuxAgentTerminal({ url, host, cwd });
           if (!launched.ok) {
             console.error("[overlay] Linux agent terminal launch failed:", launched.reason, launched.detail || "");
             finishInPreview(`Couldn't open ${host === "codex" ? "Codex" : "Claude Code"} in a terminal.`);
@@ -4143,12 +4137,20 @@ function openTaskDetail(taskId) {
     child.stderr.on("data", (data) => (err += data));
     // "close", never "exit" — same Windows stdout-drain race as openPacket: an empty
     // parse used to send a successful task open to the browser.
-    child.on("close", (code) => {
-      const { url, skipExternalOpen, freshlyForged } = parseOpenResult(out);
+    child.on("close", async (code) => {
+      const { url, skipExternalOpen, freshlyForged, cwd } = parseOpenResult(out);
       if (url || skipExternalOpen) {
         activateHost(host, bundle); // raise the host so the opened task is visible
         if (url && !skipExternalOpen) {
-          if (claudeSessionIdFromUrl(url)) {
+          if (process.platform === "linux") {
+            const launched = await launchLinuxAgentTerminal({ url, host, cwd });
+            if (!launched.ok) {
+              console.error("[overlay] Linux task terminal launch failed:", launched.reason, launched.detail || "");
+              shell.openExternal(taskWebUrl(taskId)).catch((error) =>
+                console.error("[overlay] task web fallback failed:", error && error.message),
+              );
+            }
+          } else if (claudeSessionIdFromUrl(url)) {
             openClaudeDeepLinkVerified(
               url,
               () => shell.openExternal(taskWebUrl(taskId)).catch((e) =>
@@ -7375,11 +7377,25 @@ ipcMain.handle("relay:openRunSession", async (_e, id) => {
       return { ok: false, error: "Claude Code is still working. Open becomes available after this run settles." };
     }
     if (worker) await waitForClaudeDesktopCodeMaterialization(sessionId);
-    if (!claudeSessionMetaPath(sessionId)) {
+    // Claude Desktop owns this metadata on macOS and Windows. Linux resumes the
+    // provider's materialized CLI transcript directly and has no desktop index.
+    if (process.platform !== "linux" && !claudeSessionMetaPath(sessionId)) {
       return { ok: false, error: "The completed Claude session has not finished materializing yet." };
     }
     const deepLink = native.deepLink || `claude://resume?session=${encodeURIComponent(sessionId)}`;
-    openClaudeDeepLinkVerified(deepLink, () => {}, id);
+    if (process.platform === "linux") {
+      const launched = await launchLinuxAgentTerminal({
+        url: deepLink,
+        host: "claude",
+        cwd: native.cwd || row.openCwd || undefined,
+      });
+      if (!launched.ok) {
+        console.error("[overlay] Linux run terminal launch failed:", launched.reason, launched.detail || "");
+        return { ok: false, error: "Couldn't open Claude Code in a terminal." };
+      }
+    } else {
+      openClaudeDeepLinkVerified(deepLink, () => {}, id);
+    }
     return { ok: true, sessionId };
   } catch (error) {
     return { ok: false, error: error?.message || String(error) };

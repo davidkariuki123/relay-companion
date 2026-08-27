@@ -4,7 +4,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { ensureStableMcpLauncher, stableMcpLauncherPath } from "../src/mcp-launcher.js";
+import {
+  ensureStableMcpLauncher,
+  stableMcpLauncherPath,
+  STABLE_MCP_LAUNCHER_ENV,
+} from "../src/mcp-launcher.js";
 
 test("the MCP launcher lives outside the replaceable package tree and records the current target", () => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-mcp-launcher-"));
@@ -15,6 +19,7 @@ test("the MCP launcher lives outside the replaceable package tree and records th
   const source = fs.readFileSync(launcher, "utf8");
   assert.match(source, /Date\.now\(\) \+ 60000/);
   assert.match(source, /setTimeout\(launch, 250\)/);
+  assert.ok(source.includes(`${STABLE_MCP_LAUNCHER_ENV}: "1"`));
   // Compare against the path AS THE FILE STORES IT: launcherSource embeds it with
   // JSON.stringify, which escapes backslashes, so a raw Windows path turned into a
   // regex looks for `C:\Users\…` while the file legitimately holds `C:\\Users\\…`

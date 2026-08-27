@@ -11,9 +11,33 @@ import {
   providerAuthStatus,
   providerAuthStatuses,
   providerInventoryStatuses,
+  providerSpawnEnvironment,
   setProviderEnabled,
   _test,
 } from "../src/provider-auth.js";
+
+test("provider subprocesses receive only a credential-free user session", () => {
+  const env = providerSpawnEnvironment({
+    HOME: "/home/alice",
+    PATH: "/usr/bin",
+    DISPLAY: ":0",
+    CLAUDE_CLI_PATH: "/opt/claude",
+    SSH_AUTH_SOCK: "/run/user/1000/keyring/ssh",
+    DATABASE_URL: "postgres://alice:secret@db.example/relay",
+    RELAY_DEVICE_TOKEN: "relay-secret",
+    AWS_ACCESS_KEY_ID: "AKIAEXAMPLE",
+    HTTPS_PROXY: "https://proxy-user:proxy-pass@proxy.example:8443",
+    NO_PROXY: "localhost",
+  });
+  assert.deepEqual(env, {
+    HOME: "/home/alice",
+    PATH: "/usr/bin",
+    DISPLAY: ":0",
+    SSH_AUTH_SOCK: "/run/user/1000/keyring/ssh",
+    NO_PROXY: "localhost",
+    CLAUDE_CLI_PATH: "/opt/claude",
+  });
+});
 
 function tempPrefs() {
   return path.join(fs.mkdtempSync(path.join(os.tmpdir(), "relay-provider-auth-")), "provider-connections.json");
@@ -202,6 +226,17 @@ test("desktop sign-in opens each official CLI subscription flow and monitors onl
 test("Linux provider sign-in runs the official CLI in a graphical terminal", async () => {
   const prefsFile = tempPrefs();
   const calls = [];
+  const sourceEnv = {
+    HOME: "/home/alex",
+    PATH: "/usr/bin",
+    DISPLAY: ":0",
+    LC_ALL: "C.UTF-8",
+    CODEX_CLI_PATH: "/home/alex/.local/bin/codex",
+    NODE_EXTRA_CA_CERTS: "/etc/company-ca.pem",
+    HTTPS_PROXY: "https://user:secret@proxy.example",
+    DATABASE_URL: "postgres://secret",
+    RELAY_DEVICE_TOKEN: "secret",
+  };
   function spawn(command, args, options) {
     const child = new EventEmitter();
     child.stdin = new EventEmitter();
@@ -215,12 +250,24 @@ test("Linux provider sign-in runs the official CLI in a graphical terminal", asy
     prefsFile,
     spawn,
     platform: "linux",
-    linuxTerminalInvocationImpl: (script, args) => ({ command: "kgx", args: ["--", script, ...args] }),
+    env: sourceEnv,
+    linuxTerminalInvocationImpl: (script, args, options) => {
+      assert.equal(options.env, sourceEnv);
+      return { command: "kgx", args: ["-e", script, ...args] };
+    },
     execFile: disconnectedExec,
   });
   assert.equal(result.interaction, "terminal");
   assert.equal(calls[0].command, "kgx");
-  assert.equal(calls[0].args[0], "--");
+  assert.equal(calls[0].args[0], "-e");
+  assert.deepEqual(calls[0].options.env, {
+    HOME: "/home/alex",
+    PATH: "/usr/bin",
+    DISPLAY: ":0",
+    NODE_EXTRA_CA_CERTS: "/etc/company-ca.pem",
+    CODEX_CLI_PATH: "/home/alex/.local/bin/codex",
+    LC_ALL: "C.UTF-8",
+  });
   const script = calls[0].args[1];
   assert.match(fs.readFileSync(script, "utf8"), /^#!\/bin\/sh[\s\S]*\/codex' 'login'/);
   const state = _test.activeLogins.get("codex");

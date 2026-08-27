@@ -188,6 +188,7 @@ test("Windows canonical npm invocation is spawnable without a shell", { skip: pr
 
 test("macOS activation repairs all runtime registrations before restart and requires exact-root health", async () => {
   const calls = [];
+  const userId = typeof process.getuid === "function" ? process.getuid() : 0;
   const target = {
     node: "/relay/node",
     bin: "/relay/runtime/releases/241/node_modules/relay-companion/bin/relay.js",
@@ -197,7 +198,8 @@ test("macOS activation repairs all runtime registrations before restart and requ
     calls.push([command, ...args]);
     if (command === "/bin/launchctl" && args[0] === "print") return { status: 113, stdout: "", stderr: "" };
     if (command === "/bin/ps") {
-      return { status: 0, stdout: `${target.node} ${target.bin} daemon\nElectron ${target.packageRoot}/overlay/main.cjs\n` };
+      if (args[1] === "uid=,pid=,command=") return { status: 0, stdout: "" };
+      return { status: 0, stdout: `${userId} ${target.node} ${target.bin} daemon\n${userId} Electron ${target.packageRoot}/overlay/main.cjs\n` };
     }
     return { status: 0, stdout: "", stderr: "" };
   };
@@ -253,6 +255,7 @@ test("Windows activation restarts tasks pill-first and rejects processes from an
 });
 
 test("legacy rollback is repaired by the failed candidate CLI with explicit target overrides", async () => {
+  const userId = typeof process.getuid === "function" ? process.getuid() : 0;
   const legacy = {
     kind: "legacy",
     node: "/hermes/node/bin/node",
@@ -268,10 +271,13 @@ test("legacy rollback is repaired by the failed candidate CLI with explicit targ
   const run = (command, args) => {
     calls.push([command, ...args]);
     if (command === "/bin/launchctl" && args[0] === "print") return { status: 113, stdout: "", stderr: "" };
-    if (command === "/bin/ps") return {
-      status: 0,
-      stdout: `node ${legacy.bin} daemon\nElectron ${legacy.packageRoot}/overlay/main.cjs\n`,
-    };
+    if (command === "/bin/ps") {
+      if (args[1] === "uid=,pid=,command=") return { status: 0, stdout: "" };
+      return {
+        status: 0,
+        stdout: `${userId} node ${legacy.bin} daemon\n${userId} Electron ${legacy.packageRoot}/overlay/main.cjs\n`,
+      };
+    }
     return { status: 0, stdout: "", stderr: "" };
   };
   const result = await activateCanonicalRuntime(legacy, {
@@ -295,8 +301,9 @@ test("legacy rollback is repaired by the failed candidate CLI with explicit targ
   assert.notEqual(calls[0][0], legacy.node, "pre-feature legacy CLI is never asked to repair itself");
 });
 
-test("transaction supplies explicit legacy rollback and separates smoke from activation", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-updater-contract-"));
+test("transaction supplies explicit legacy rollback and separates smoke from activation", async (t) => {
+  const root = fs.mkdtempSync(path.join(process.cwd(), ".relay-updater-contract-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const packageRoot = path.join(root, "lib", "node_modules", "relay-companion");
   const rawHermesNode = path.join(root, ".hermes", "node", "bin", "node");
   const rawHermesNpm = path.join(root, ".hermes", "node", "bin", "npm");
@@ -568,14 +575,16 @@ test("service quiescence sees installed Relay processes but never a developer ch
   };
   const result = installedServiceProcessRows(target, {
     processId: 999,
+    userId: 1000,
     includeTarget: true,
     run: () => ({
       status: 0,
       stdout: [
-        "  101 node /Users/dev/src/relay/packages/companion/bin/relay.js daemon",
-        "  102 Electron /Users/dev/src/relay/packages/companion/overlay/main.cjs",
-        "  103 node /usr/local/lib/node_modules/relay-companion/bin/relay.js daemon",
-        `  104 Electron ${target.packageRoot}/overlay/main.cjs`,
+        " 1000 101 node /Users/dev/src/relay/packages/companion/bin/relay.js daemon",
+        " 1000 102 Electron /Users/dev/src/relay/packages/companion/overlay/main.cjs",
+        " 1000 103 node /usr/local/lib/node_modules/relay-companion/bin/relay.js daemon",
+        ` 1000 104 Electron ${target.packageRoot}/overlay/main.cjs`,
+        " 2000 105 node /usr/local/lib/node_modules/relay-companion/bin/relay.js daemon",
       ].join("\n"),
     }),
   });
@@ -597,7 +606,7 @@ test("macOS activation fails closed when installed service processes cannot be e
     run: (command, args) => {
       calls.push([command, ...args]);
       if (command === "/bin/launchctl" && args[0] === "print") return { status: 113 };
-      if (command === "/bin/ps" && args[1] === "pid=,command=") return { status: 1, stderr: "ps denied" };
+      if (command === "/bin/ps" && args[1] === "uid=,pid=,command=") return { status: 1, stderr: "ps denied" };
       return { status: 0, stdout: "", stderr: "" };
     },
   });
@@ -611,6 +620,7 @@ test("macOS activation fails closed when installed service processes cannot be e
 // Activation now terminates exactly these — relay-companion trees other than the
 // target's — before bootstrapping.
 test("activation terminates escaped old-root services before bootstrapping", async () => {
+  const userId = typeof process.getuid === "function" ? process.getuid() : 0;
   const target = {
     node: "/relay/node",
     bin: "/relay/runtime/releases/242/node_modules/relay-companion/bin/relay.js",
@@ -624,14 +634,14 @@ test("activation terminates escaped old-root services before bootstrapping", asy
   // no stale row, kills nothing, and fails on an empty list. CI runners hand
   // out low pids and a hardcoded 4242 does collide (dev-stage, 84bda8f).
   const orphanPid = String(process.pid + 1);
-  const orphanRow = `  ${orphanPid} Electron /usr/local/lib/node_modules/relay-companion/overlay/main.cjs`;
+  const orphanRow = `  ${userId} ${orphanPid} Electron /usr/local/lib/node_modules/relay-companion/overlay/main.cjs`;
   const run = (command, args) => {
     calls.push([command, ...args]);
-    if (command === "/bin/ps" && args[0] === "-axo" && args[1] === "pid=,command=") {
+    if (command === "/bin/ps" && args[0] === "-axo" && args[1] === "uid=,pid=,command=") {
       return { status: 0, stdout: orphanAlive ? `${orphanRow}\n` : "" };
     }
     if (command === "/bin/ps") {
-      return { status: 0, stdout: `node ${target.bin} daemon\nElectron ${target.packageRoot}/overlay/main.cjs\n` };
+      return { status: 0, stdout: `${userId} node ${target.bin} daemon\n${userId} Electron ${target.packageRoot}/overlay/main.cjs\n` };
     }
     if (command === "/bin/kill") {
       if (args[0] === "-TERM") orphanAlive = false;
@@ -669,8 +679,9 @@ test("the transaction refuses Electron as the service node", async () => {
   assert.equal(result.reason, "service-node-electron");
 });
 
-posixFsTest("later failed activation rolls back through public Node after Hermes disappears", async () => {
-  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-hermes-rollback-"));
+posixFsTest("later failed activation rolls back through public Node after Hermes disappears", async (t) => {
+  const homeDir = fs.mkdtempSync(path.join(process.cwd(), ".relay-hermes-rollback-"));
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
   const rawNode = path.join(homeDir, ".hermes", "node", "bin", "node");
   const rawNpm = path.join(homeDir, ".hermes", "node", "bin", "npm");
   const publicNode = path.join(homeDir, "public", "bin", "node");
@@ -733,6 +744,7 @@ posixFsTest("later failed activation rolls back through public Node after Hermes
 // started succeeding — the transaction rolled back cleanly every single time.
 test("macOS activation waits for the label to leave the domain and retries a racing bootstrap", async () => {
   const calls = [];
+  const userId = typeof process.getuid === "function" ? process.getuid() : 0;
   let printsLeft = 2;      // the label lingers for two polls after bootout
   let bootstrapsLeft = 1;  // and the first bootstrap still races
   const result = await activateCanonicalRuntime({
@@ -748,7 +760,8 @@ test("macOS activation waits for the label to leave the domain and retries a rac
     run: (command, args) => {
       calls.push([command, ...args].join(" "));
       if (command === "/bin/ps") {
-        return { status: 0, stdout: "/relay/node /relay/runtime/releases/241/node_modules/relay-companion/bin/relay.js daemon\nElectron /relay/runtime/releases/241/node_modules/relay-companion/overlay/main.cjs\n" };
+        if (args[1] === "uid=,pid=,command=") return { status: 0, stdout: "" };
+        return { status: 0, stdout: `${userId} /relay/node /relay/runtime/releases/241/node_modules/relay-companion/bin/relay.js daemon\n${userId} Electron /relay/runtime/releases/241/node_modules/relay-companion/overlay/main.cjs\n` };
       }
       if (args[0] === "print") {
         printsLeft -= 1;

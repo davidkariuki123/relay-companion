@@ -25,7 +25,7 @@ function linuxCanaryPaths(homeDir, env = process.env) {
   const dataHome = env.XDG_DATA_HOME || path.join(homeDir, ".local", "share");
   return {
     units: LINUX_SERVICE_UNITS.map((unit) => path.join(configHome, "systemd", "user", unit)),
-    application: path.join(dataHome, "applications", "relay.desktop"),
+    application: path.join(dataHome, "applications", "work.relay.companion.desktop"),
     autostart: path.join(configHome, "autostart", "work.relay.companion.pill.desktop"),
     starter: path.join(homeDir, ".relay", "bin", "relay-pill-start"),
   };
@@ -95,6 +95,12 @@ export function verifyThinSetupCanary({
     if (!commandOk(daemonEnabled)) throw new Error("Thin setup did not enable the Relay daemon for the next login");
     for (const surface of [linux.application, linux.autostart, linux.starter]) {
       if (!fs.existsSync(surface)) throw new Error(`Thin setup did not install ${surface}`);
+    }
+    const cli = path.join(homeDir, ".local", "bin", "relay");
+    if (!fs.existsSync(cli)) throw new Error("Thin setup did not install a durable relay command");
+    const cliVersion = run(cli, ["version"]);
+    if (!commandOk(cliVersion) || String(cliVersion.stdout || "").trim() !== expectedVersion) {
+      throw new Error(`Thin setup command is not usable from a fresh process (${cliVersion?.stderr || cliVersion?.stdout || "no output"})`);
     }
   }
   return { runtime, verified, health };

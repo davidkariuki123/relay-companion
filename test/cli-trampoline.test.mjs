@@ -11,6 +11,7 @@ import {
   TRAMPOLINE_ENV,
   TRAMPOLINE_EXEMPT_COMMANDS,
 } from "../src/cli-trampoline.js";
+import { STABLE_MCP_LAUNCHER_ENV } from "../src/mcp-launcher.js";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -83,8 +84,19 @@ test("the services and updater-internal commands never hop, whatever the pointer
   // deliberate act; this pins the current membership so a drift is visible.
   assert.deepEqual(
     Array.from(TRAMPOLINE_EXEMPT_COMMANDS).sort(),
-    ["claude-hook", "codex-hook", "daemon", "mcp", "repair-desktop", "repair-runtime", "self-update"],
+    ["claude-hook", "codex-hook", "daemon", "repair-desktop", "repair-runtime", "self-update"],
   );
+});
+
+test("generic npm or npx MCP invocations hop, while Relay's stable launcher stays exact", () => {
+  const current = pointerFor("/home/u/.relay/runtime/releases/0.1.413-x/node_modules/relay-companion", "0.1.413");
+  assert.ok(resolveCliTrampoline({ ...base, command: "mcp", readCurrent: () => current }));
+  assert.equal(resolveCliTrampoline({
+    ...base,
+    command: "mcp",
+    env: { [STABLE_MCP_LAUNCHER_ENV]: "1" },
+    readCurrent: () => current,
+  }), null);
 });
 
 test("a stale global `relay pill` opens the active canonical pill", () => {
