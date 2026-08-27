@@ -14,11 +14,15 @@ export const CREDENTIAL_STATUS_UNPAIRED = "unpaired";
 export const CREDENTIAL_STATUS_UNAVAILABLE = "unavailable";
 export const CREDENTIAL_STATUS_MISSING = "missing";
 export const CREDENTIAL_STATUS_CORRUPT = "corrupt";
+function localCredentialStorePlatform(platform = process.platform) {
+  return platform === "darwin" || platform === "linux";
+}
+
 function nativeCredentialAccessAllowed(env = process.env) {
   // The macOS store follows the selected config directory, so a sandbox stays
   // inside its sandbox. Windows Credential Manager is machine-global; keep its
   // explicit opt-in for custom config paths so tests cannot touch real entries.
-  if (process.platform === "darwin") return true;
+  if (localCredentialStorePlatform()) return true;
   return (!(env.RELAY_CONFIG || env.RELAY_CONFIG_DIR) || env.RELAY_NATIVE_CREDENTIALS_WITH_CUSTOM_CONFIG === "1");
 }
 const nativeCredentialBackend = {
@@ -34,7 +38,7 @@ const nativeCredentialBackend = {
 };
 
 function credentialStoreKind() {
-  return process.platform === "darwin" ? LOCAL_CREDENTIAL_STORE : NATIVE_CREDENTIAL_STORE;
+  return localCredentialStorePlatform() ? LOCAL_CREDENTIAL_STORE : NATIVE_CREDENTIAL_STORE;
 }
 
 function usesCredentialStore(value) {
@@ -107,9 +111,9 @@ export function updateChannel() {
 }
 
 /**
- * Companion configuration lives in ~/.relay/config.json. New macOS/Windows
+ * Companion configuration lives in ~/.relay/config.json. New macOS/Linux/Windows
  * installs keep only non-secret account metadata here; the device token lives in
- * Relay's owner-only local store on macOS or Credential Manager on Windows.
+ * Relay's owner-only local store on macOS/Linux or Credential Manager on Windows.
  * Legacy plaintext and macOS Keychain tokens migrate on first read.
  * Environment variables override the file for local/staging testing.
  */
@@ -232,7 +236,7 @@ export function readConfigState({ credentialBackend = nativeCredentialBackend } 
       allowLegacyMigration: raw.credentialStore === NATIVE_CREDENTIAL_STORE,
     });
     if (stored.ok && stored.value) {
-      const migratedPointer = process.platform === "darwin" && raw.credentialStore === NATIVE_CREDENTIAL_STORE
+      const migratedPointer = localCredentialStorePlatform() && raw.credentialStore === NATIVE_CREDENTIAL_STORE
         ? { ...raw, credentialStore: LOCAL_CREDENTIAL_STORE }
         : raw;
       if (migratedPointer !== raw) {
@@ -252,7 +256,7 @@ export function readConfigState({ credentialBackend = nativeCredentialBackend } 
         credential: { status: CREDENTIAL_STATUS_CORRUPT, code: "credential_empty" },
       };
     }
-    if (process.platform === "darwin" && raw.credentialStore === NATIVE_CREDENTIAL_STORE) {
+    if (localCredentialStorePlatform() && raw.credentialStore === NATIVE_CREDENTIAL_STORE) {
       // The bridge installer deliberately remains npm's `latest` catch-up rail.
       // Older bridge builds wrote a Keychain pointer that current macOS builds
       // no longer use. A failed one-time legacy read must therefore lead to a

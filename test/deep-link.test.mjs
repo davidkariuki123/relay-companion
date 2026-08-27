@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
-const { parseRelayDeepLink, relayDeepLinkFromArgv } = require("../overlay/deep-link.cjs");
+const { parseRelayDeepLink, relayDeepLinkFromArgv, relayDeepLinkFailureStatus } = require("../overlay/deep-link.cjs");
 
 test("Relay deep links name one message and one supported host", () => {
   assert.deepEqual(parseRelayDeepLink("relay://open?message=msg_123&host=codex"), {
@@ -23,6 +23,11 @@ test("Relay deep links name one message and one supported host", () => {
     host: "relay",
     chatId: "chat_abc123",
   });
+  assert.deepEqual(parseRelayDeepLink("relay://open?message=msg_456&host=codex&handoff=handoff_12345678"), {
+    messageId: "msg_456",
+    host: "codex",
+    handoffId: "handoff_12345678",
+  });
 });
 
 test("Relay deep links fail closed", () => {
@@ -32,6 +37,8 @@ test("Relay deep links fail closed", () => {
     "relay://open?message=../secret&host=codex",
     "relay://open?message=msg_1&host=cowork",
     "relay://open?message=msg_1&host=relay&chat=../../secret",
+    "relay://open?message=msg_1&host=relay&handoff=short",
+    "relay://open?message=msg_1&host=relay&handoff=../../secret",
     "relay://open?message=&host=codex",
   ]) assert.equal(parseRelayDeepLink(input), null, input);
 });
@@ -41,4 +48,11 @@ test("argv parser ignores unrelated process arguments", () => {
     relayDeepLinkFromArgv(["Relay", "--flag", "relay://open?message=msg_9&host=codex"]),
     { url: "relay://open?message=msg_9&host=codex", messageId: "msg_9", host: "codex" },
   );
+});
+
+test("desktop handoff failures distinguish account mismatch from a transient unavailable computer", () => {
+  assert.equal(relayDeepLinkFailureStatus({ status: 401 }), "account_required");
+  assert.equal(relayDeepLinkFailureStatus({ statusCode: 404 }), "account_required");
+  assert.equal(relayDeepLinkFailureStatus({ code: "credential_missing" }), "account_required");
+  assert.equal(relayDeepLinkFailureStatus(new Error("network reset")), "unavailable");
 });

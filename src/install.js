@@ -30,6 +30,10 @@ const DAEMON_LAUNCH_LABEL = "work.relay.companion";
 const PILL_LAUNCH_LABEL = "work.relay.companion.pill";
 const WINDOWS_DAEMON_TASK_NAME = "Relay Companion Daemon";
 const WINDOWS_PILL_TASK_NAME = "Relay Companion Pill";
+const LINUX_DAEMON_UNIT = `${DAEMON_LAUNCH_LABEL}.service`;
+const LINUX_PILL_UNIT = `${PILL_LAUNCH_LABEL}.service`;
+const LINUX_DESKTOP_FILE = "relay.desktop";
+const LINUX_AUTOSTART_FILE = "work.relay.companion.pill.desktop";
 const DEFAULT_NPM_INSTALL_TIMEOUT_MS = 10 * 60 * 1000;
 const RELAY_MAC_APP_NAME = "Relay.app";
 const RELAY_MAC_APP_FALLBACK_NAME = "Relay Companion.app";
@@ -129,6 +133,259 @@ function plistEscape(value) {
 
 function shellSingleQuote(value) {
   return `'${String(value).replaceAll("'", "'\\''")}'`;
+}
+
+export function systemdExecQuote(value) {
+  const text = String(value ?? "");
+  if (/[\0\r\n]/.test(text)) throw new Error("systemd arguments cannot contain control characters");
+  return `"${text
+    .replaceAll("\\", "\\\\")
+    .replaceAll('"', '\\"')
+    .replaceAll("$", () => "$$")
+    .replaceAll("%", () => "%%")}"`;
+}
+
+export function desktopExecQuote(value) {
+  const text = String(value ?? "");
+  if (/[\0\r\n]/.test(text)) throw new Error("desktop entry arguments cannot contain control characters");
+  return `"${text
+    .replaceAll("\\", "\\\\")
+    .replaceAll('"', '\\"')
+    .replaceAll("`", "\\`")
+    .replaceAll("$", "\\$")
+    .replaceAll("%", () => "%%")}"`;
+}
+
+export function linuxDesktopPaths({ homeDir = os.homedir(), env = process.env } = {}) {
+  const configHome = env.XDG_CONFIG_HOME || path.posix.join(homeDir, ".config");
+  const dataHome = env.XDG_DATA_HOME || path.posix.join(homeDir, ".local", "share");
+  return {
+    daemonUnitPath: path.posix.join(configHome, "systemd", "user", LINUX_DAEMON_UNIT),
+    pillUnitPath: path.posix.join(configHome, "systemd", "user", LINUX_PILL_UNIT),
+    applicationPath: path.posix.join(dataHome, "applications", LINUX_DESKTOP_FILE),
+    autostartPath: path.posix.join(configHome, "autostart", LINUX_AUTOSTART_FILE),
+    pillStarterPath: path.posix.join(homeDir, ".relay", "bin", "relay-pill-start"),
+    daemonLogPath: path.posix.join(homeDir, ".relay", "daemon.log"),
+    pillLogPath: path.posix.join(homeDir, ".relay", "pill.log"),
+  };
+}
+
+function linuxPathEnvironment(env = process.env) {
+  return env.PATH || "/usr/local/bin:/usr/bin:/bin";
+}
+
+function linuxServiceEnvironment({ homeDir, env = process.env } = {}) {
+  const values = {
+    HOME: homeDir,
+    PATH: linuxPathEnvironment(env),
+    XDG_CONFIG_HOME: env.XDG_CONFIG_HOME,
+    XDG_DATA_HOME: env.XDG_DATA_HOME,
+    RELAY_CONFIG: env.RELAY_CONFIG,
+    RELAY_CONFIG_DIR: env.RELAY_CONFIG_DIR,
+    RELAY_HOME: env.RELAY_HOME,
+    RELAY_COMPANION_HOME: env.RELAY_COMPANION_HOME,
+    CLAUDE_HOME: env.CLAUDE_HOME,
+    CODEX_HOME: env.CODEX_HOME,
+  };
+  return Object.entries(values)
+    .filter(([, value]) => value)
+    .map(([name, value]) => `Environment=${systemdExecQuote(`${name}=${value}`)}`)
+    .join("\n");
+}
+
+export function linuxDaemonUnitText({ bin, node, homeDir = os.homedir(), env = process.env } = {}) {
+  const paths = linuxDesktopPaths({ homeDir, env });
+  const relayBinIdentity = Buffer.from(String(bin), "utf8").toString("base64url");
+  return `[Unit]
+Description=Relay Companion background service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# RelayBinBase64=${relayBinIdentity}
+ExecStart=${[node, "--max-old-space-size=128", bin, "daemon"].map(systemdExecQuote).join(" ")}
+Restart=always
+RestartSec=3
+${linuxServiceEnvironment({ homeDir, env })}
+StandardOutput=${systemdExecQuote(`append:${paths.daemonLogPath}`)}
+StandardError=${systemdExecQuote(`append:${paths.daemonLogPath}`)}
+
+[Install]
+WantedBy=default.target
+`;
+}
+
+export function linuxPillUnitText({ electronPath, overlayMain, homeDir = os.homedir(), env = process.env } = {}) {
+  const paths = linuxDesktopPaths({ homeDir, env });
+  return `[Unit]
+Description=Relay desktop pill
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=${[electronPath, overlayMain].map(systemdExecQuote).join(" ")}
+Restart=on-failure
+RestartSec=3
+${linuxServiceEnvironment({ homeDir, env })}
+StandardOutput=${systemdExecQuote(`append:${paths.pillLogPath}`)}
+StandardError=${systemdExecQuote(`append:${paths.pillLogPath}`)}
+`;
+}
+
+export function linuxPillStarterText() {
+  return `#!/bin/sh
+systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XAUTHORITY DBUS_SESSION_BUS_ADDRESS XDG_CURRENT_DESKTOP XDG_SESSION_TYPE >/dev/null 2>&1 || true
+exec systemctl --user restart ${LINUX_PILL_UNIT}
+`;
+}
+
+export function linuxApplicationDesktopText({ node, bin, iconPath } = {}) {
+  return `[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Relay
+Comment=Open the Relay desktop companion
+Exec=${desktopExecQuote(node)} ${desktopExecQuote(bin)} pill %u
+Icon=${iconPath}
+Terminal=false
+StartupNotify=true
+StartupWMClass=Relay
+Categories=Utility;Network;
+MimeType=x-scheme-handler/relay;
+`;
+}
+
+export function linuxAutostartDesktopText({ pillStarterPath } = {}) {
+  return `[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Relay
+Comment=Start the Relay desktop companion
+Exec=${desktopExecQuote(pillStarterPath)}
+Terminal=false
+StartupNotify=false
+X-GNOME-Autostart-enabled=true
+`;
+}
+
+function writeLinuxDesktopFile(file, contents, mode = 0o600) {
+  writeTextAtomic(file, contents);
+  try { fs.chmodSync(file, mode); } catch {}
+}
+
+function importLinuxGraphicalEnvironment(runCommand, env = process.env) {
+  const names = [
+    "DISPLAY",
+    "WAYLAND_DISPLAY",
+    "XAUTHORITY",
+    "DBUS_SESSION_BUS_ADDRESS",
+    "XDG_CURRENT_DESKTOP",
+    "XDG_SESSION_TYPE",
+  ].filter((name) => env[name]);
+  if (!names.length) return { ok: true, skipped: true };
+  return runCommand("systemctl", ["--user", "import-environment", ...names]);
+}
+
+/** Refuse Linux setup before host registrations when its lifecycle contract is unavailable. */
+export function linuxDesktopPreflight({
+  platform = process.platform,
+  arch = process.arch,
+  env = process.env,
+  glibcVersion = process.report?.getReport?.()?.header?.glibcVersionRuntime || "",
+  runCommand = run,
+} = {}) {
+  if (platform !== "linux") return { ok: true, skipped: true };
+  if (!["x64", "arm64"].includes(arch)) {
+    return { ok: false, reason: "linux_arch_unsupported", detail: `Relay supports Linux x64 and arm64, not ${arch}.` };
+  }
+  if (!glibcVersion) {
+    return { ok: false, reason: "linux_libc_unsupported", detail: "Relay requires a glibc-based Linux distribution." };
+  }
+  if (!env.DISPLAY && !env.WAYLAND_DISPLAY) {
+    return {
+      ok: false,
+      reason: "linux_graphical_session_missing",
+      detail: "Relay setup must run inside a graphical X11 or Wayland login session.",
+    };
+  }
+  const systemd = runCommand("systemctl", ["--user", "show-environment"]);
+  if (!systemd.ok) {
+    return {
+      ok: false,
+      reason: "systemd_user_unavailable",
+      detail: systemd.out || "Relay requires an available systemd user manager.",
+    };
+  }
+  return { ok: true, glibcVersion, session: env.WAYLAND_DISPLAY ? "wayland" : "x11" };
+}
+
+function installLinuxDaemonAutostart({ bin, node, runCommand, reload, homeDir, env = process.env }) {
+  const paths = linuxDesktopPaths({ homeDir, env });
+  writeLinuxDesktopFile(paths.daemonUnitPath, linuxDaemonUnitText({ bin, node, homeDir, env }));
+  if (!reload) {
+    const reloaded = runCommand("systemctl", ["--user", "daemon-reload"]);
+    if (!reloaded.ok) {
+      return { ok: false, reason: "systemd_user_unavailable", detail: reloaded.out, unitPath: paths.daemonUnitPath };
+    }
+    const enabled = runCommand("systemctl", ["--user", "enable", LINUX_DAEMON_UNIT]);
+    return {
+      ok: enabled.ok,
+      ...(enabled.ok ? {} : { reason: "daemon_service_enable_failed", detail: enabled.out }),
+      unitPath: paths.daemonUnitPath,
+      logPath: paths.daemonLogPath,
+      started: false,
+    };
+  }
+  const reloaded = runCommand("systemctl", ["--user", "daemon-reload"]);
+  if (!reloaded.ok) return { ok: false, reason: "systemd_user_unavailable", detail: reloaded.out, unitPath: paths.daemonUnitPath };
+  const enabled = runCommand("systemctl", ["--user", "enable", "--now", LINUX_DAEMON_UNIT]);
+  return {
+    ok: enabled.ok,
+    ...(enabled.ok ? {} : { reason: "daemon_service_start_failed", detail: enabled.out }),
+    unitPath: paths.daemonUnitPath,
+    logPath: paths.daemonLogPath,
+    started: enabled.ok,
+  };
+}
+
+function installLinuxPillAutostart({ bin, node, electronPath, overlayMain, runCommand, reload, homeDir, env = process.env }) {
+  const paths = linuxDesktopPaths({ homeDir, env });
+  const iconPath = path.posix.join(packageRootForBin(bin, "linux"), "overlay", "relayAppIcon.svg");
+  writeLinuxDesktopFile(paths.pillUnitPath, linuxPillUnitText({ electronPath, overlayMain, homeDir, env }));
+  writeLinuxDesktopFile(paths.pillStarterPath, linuxPillStarterText(), 0o700);
+  writeLinuxDesktopFile(paths.applicationPath, linuxApplicationDesktopText({ node, bin, iconPath }));
+  writeLinuxDesktopFile(paths.autostartPath, linuxAutostartDesktopText({ pillStarterPath: paths.pillStarterPath }));
+  if (!reload) {
+    return {
+      ok: true,
+      unitPath: paths.pillUnitPath,
+      applicationPath: paths.applicationPath,
+      autostartPath: paths.autostartPath,
+      logPath: paths.pillLogPath,
+      started: false,
+    };
+  }
+  const reloaded = runCommand("systemctl", ["--user", "daemon-reload"]);
+  if (!reloaded.ok) return { ok: false, reason: "systemd_user_unavailable", detail: reloaded.out, ...paths };
+  importLinuxGraphicalEnvironment(runCommand, env);
+  const started = runCommand("systemctl", ["--user", "restart", LINUX_PILL_UNIT]);
+  // These are caches/associations, not the launch path itself. Some minimal
+  // desktops omit the helpers, so both remain intentionally best-effort.
+  runCommand("update-desktop-database", [path.dirname(paths.applicationPath)]);
+  runCommand("xdg-mime", ["default", LINUX_DESKTOP_FILE, "x-scheme-handler/relay"]);
+  return {
+    ok: started.ok,
+    ...(started.ok ? {} : { reason: "pill_service_start_failed", detail: started.out }),
+    unitPath: paths.pillUnitPath,
+    applicationPath: paths.applicationPath,
+    autostartPath: paths.autostartPath,
+    logPath: paths.pillLogPath,
+    electronPath,
+    overlayMain,
+    started: started.ok,
+  };
 }
 
 function packageVersion(packageRoot) {
@@ -1484,6 +1741,9 @@ export function installDaemonAutostart(
     });
     return { ...res, logPath };
   }
+  if (platform === "linux") {
+    return installLinuxDaemonAutostart({ bin, node, runCommand, reload, homeDir });
+  }
   if (platform !== "darwin") return { ok: false, reason: "autostart_unsupported_platform" };
   const home = homeDir;
   const plistPath = path.join(home, "Library", "LaunchAgents", `${DAEMON_LAUNCH_LABEL}.plist`);
@@ -1527,12 +1787,13 @@ export function installPillAutostart(
     runCommand = run,
     reload = true,
     homeDir = os.homedir(),
+    node = stableNodePath(),
     ensureLauncher = ensureWindowsHiddenLauncher,
     claim = false,
     ownershipGuard = canonicalOwnershipGuard,
   } = {},
 ) {
-  if (platform !== "darwin" && platform !== "win32") return { ok: false, reason: "autostart_unsupported_platform" };
+  if (!["darwin", "win32", "linux"].includes(platform)) return { ok: false, reason: "autostart_unsupported_platform" };
   const refusal = autostartClaimRefusal(bin, { claim, homeDir, platform, ownershipGuard });
   if (refusal) return refusal;
   const packageRoot = packageRootForBin(bin, platform);
@@ -1542,6 +1803,17 @@ export function installPillAutostart(
   const pillArgs = [overlayMain];
   if (!electron.ok || !electronPath || !fs.existsSync(overlayMain)) {
     return { ok: false, reason: "pill_runtime_missing", electronPath, overlayMain, electron };
+  }
+  if (platform === "linux") {
+    return installLinuxPillAutostart({
+      bin,
+      node,
+      electronPath,
+      overlayMain,
+      runCommand,
+      reload,
+      homeDir,
+    });
   }
   if (platform === "win32") {
     const logPath = path.join(homeDir, ".relay", "pill.log");
@@ -1987,6 +2259,10 @@ export async function runSetupInstall({ claim = false, reload = true } = {}) {
   if (!verified.ok) {
     throw new Error(`Relay refused to activate an unverified runtime (${verified.reason}${verified.detail ? `: ${verified.detail}` : ""}).`);
   }
+  const platformPreflight = linuxDesktopPreflight();
+  if (!platformPreflight.ok) {
+    throw new Error(`Relay cannot install on this Linux session (${platformPreflight.reason}): ${platformPreflight.detail}`);
+  }
   // Only after the complete target site is verified may setup touch host state.
   // This migration preserves account values while removing retired capability
   // switches; putting it here also keeps malformed native helpers from changing
@@ -2021,15 +2297,19 @@ export async function runSetupInstall({ claim = false, reload = true } = {}) {
   // most people who get sent a relay actually have. Registering it is independent
   // of the CLI: a desktop-only machine used to report "Claude Code was not found
   // here, so it was skipped" and register nothing anywhere.
-  const claudeDesktop = installClaudeDesktop(mcpBin, node);
-  if (claudeDesktop.ok) {
-    installed.push("Claude Desktop");
-    desktopRestarts.push("Claude Desktop");
-    if (claudeDesktop.swept?.length) sweptStaleEntries.push(...claudeDesktop.swept);
-  } else if (claudeDesktop.reason === "claude_desktop_not_found") {
-    missing.push("Claude Desktop");
-  } else {
-    missing.push("Claude Desktop (registration failed)");
+  const claudeDesktop = process.platform === "linux"
+    ? { ok: false, reason: "unsupported_platform" }
+    : installClaudeDesktop(mcpBin, node);
+  if (process.platform !== "linux") {
+    if (claudeDesktop.ok) {
+      installed.push("Claude Desktop");
+      desktopRestarts.push("Claude Desktop");
+      if (claudeDesktop.swept?.length) sweptStaleEntries.push(...claudeDesktop.swept);
+    } else if (claudeDesktop.reason === "claude_desktop_not_found") {
+      missing.push("Claude Desktop");
+    } else {
+      missing.push("Claude Desktop (registration failed)");
+    }
   }
   // The Open-in-current-chat hook runtime rides along with the MCP registration
   // (both are what "Relay is installed into Claude" means) — but it must NOT
@@ -2332,7 +2612,7 @@ export function repairDesktopSurfaces({
   homeDir = os.homedir(),
   claim = false,
 } = {}) {
-  const pill = installPillAutostart(bin, { platform, runCommand, reload, homeDir, claim });
+  const pill = installPillAutostart(bin, { platform, runCommand, reload, homeDir, claim, node });
   // Reload the daemon last. A repair may be invoked by the updater's detached child;
   // replacing the pill first avoids killing the update-owning daemon before all other
   // desktop surfaces are ready.
@@ -2479,6 +2759,16 @@ export async function restartRelayServices({ services = ["daemon"], runCommand =
         const word = tokens.find((t) => ["restarted", "not_installed", "failed"].includes(t)) || "failed";
         result[service] = word;
         if (result[service] === "failed") result.detail[service] = (res && res.out) || "no output";
+      } else if (platform === "linux") {
+        const unit = service === "daemon" ? LINUX_DAEMON_UNIT : LINUX_PILL_UNIT;
+        const loaded = await runCommand("systemctl", ["--user", "show", "--property=LoadState", "--value", unit]);
+        if (!loaded.ok || String(loaded.out || "").trim() !== "loaded") {
+          result[service] = "not_installed";
+          continue;
+        }
+        const restarted = await runCommand("systemctl", ["--user", "restart", unit]);
+        result[service] = restarted.ok ? "restarted" : "failed";
+        if (!restarted.ok) result.detail[service] = restarted.out;
       } else {
         result[service] = "not_installed";
       }
@@ -2529,6 +2819,10 @@ export function runUninstall() {
   // re-registers them within one poll cycle (ensureWindowsAutostartTasks,
   // repair-runtime), silently undoing the uninstall.
   if (process.platform === "win32") stopWindowsRelayServices();
+  if (process.platform === "linux") {
+    run("systemctl", ["--user", "disable", "--now", LINUX_DAEMON_UNIT]);
+    run("systemctl", ["--user", "stop", LINUX_PILL_UNIT]);
+  }
 
   run("claude", ["mcp", "remove", "-s", "user", "relay"]);
   run("codex", ["mcp", "remove", "relay"]);
@@ -2588,6 +2882,18 @@ export function runUninstall() {
     } catch {
       /* already gone */
     }
+  } else if (process.platform === "linux") {
+    const paths = linuxDesktopPaths();
+    for (const file of [
+      paths.daemonUnitPath,
+      paths.pillUnitPath,
+      paths.applicationPath,
+      paths.autostartPath,
+      paths.pillStarterPath,
+    ]) {
+      try { fs.unlinkSync(file); } catch { /* already gone */ }
+    }
+    run("systemctl", ["--user", "daemon-reload"]);
   }
   return { claudeDesktop: claudeDesktopRemoval };
 }
@@ -2681,7 +2987,7 @@ export function purgeLocalState({
   const credential = platform === process.platform && (!customConfig || env.RELAY_NATIVE_CREDENTIALS_WITH_CUSTOM_CONFIG === "1")
     ? deleteCredential({ platform, env, account: credentialAccount })
     : { ok: true };
-  if (!credential.ok && (platform === "darwin" || platform === "win32")) {
+  if (!credential.ok && (platform === "darwin" || platform === "win32" || platform === "linux")) {
     failed.push({ path: "native credential store", detail: credential.detail || "credential deletion failed" });
   }
   remove(pairingCredentialPath({ homeDir, env }));

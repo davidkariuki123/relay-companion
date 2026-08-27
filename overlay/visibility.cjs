@@ -151,6 +151,12 @@ function quitRelayCommand({ platform = process.platform, uid = 501 } = {}) {
       ["/c", 'schtasks /End /TN "Relay Companion Daemon" & schtasks /End /TN "Relay Companion Pill"'],
     ];
   }
+  if (platform === "linux") {
+    return [
+      "/bin/sh",
+      ["-c", "systemctl --user stop work.relay.companion.service work.relay.companion.pill.service"],
+    ];
+  }
   return [
     "/bin/sh",
     [

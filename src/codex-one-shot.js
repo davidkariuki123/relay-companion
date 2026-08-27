@@ -163,11 +163,15 @@ export async function runCodexAppServerOneShot({
   model = "",
   effort = "",
   fullAccess = false,
+  ephemeral = true,
+  title = "",
   stallTimeoutMs = Number(process.env.RELAY_CHAT_AGENT_STALL_TIMEOUT_MS || DEFAULT_STALL_TIMEOUT_MS),
   runTimeoutMs = Number(process.env.RELAY_CHAT_AGENT_TIMEOUT_MS || DEFAULT_RUN_TIMEOUT_MS),
   heartbeatIntervalMs = 30_000,
   mcpToolTimeouts = DEFAULT_MCP_TOOL_TIMEOUTS,
   onEvent = () => {},
+  onThreadStarted = async () => {},
+  onTurnStarted = async () => {},
   appServerFactory = (options) => new CodexAppServerClient(options),
 } = {}) {
   const actualCwd = cwd && fs.existsSync(cwd) ? cwd : process.cwd();
@@ -268,13 +272,15 @@ export async function runCodexAppServerOneShot({
       approvalPolicy: fullAccess ? "never" : "on-request",
       ...(fullAccess ? {} : { approvalsReviewer:"auto_review" }),
       sandbox: fullAccess ? "danger-full-access" : "workspace-write",
-      ephemeral: true,
-      threadSource: "appServer",
+      ...(ephemeral ? { ephemeral:true } : {}),
+      threadSource: ephemeral ? "appServer" : "user",
       serviceName: "relay_owned_agent",
       ...(model ? { model } : {}),
     });
     threadId = String(thread?.thread?.id || "");
-    if (!threadId) throw new Error("Codex did not return an ephemeral thread id");
+    if (!threadId) throw new Error("Codex did not return a thread id");
+    if (title) await appServer.request("thread/name/set", { threadId, name:title });
+    await onThreadStarted({ threadId, appServer });
     emit({ type:"thread.started", thread_id:threadId }, "Codex has started working on your laptop.");
     const turn = await appServer.request("turn/start", {
       threadId,
@@ -284,7 +290,8 @@ export async function runCodexAppServerOneShot({
     });
     turnId = String(turn?.turn?.id || "");
     if (!turnId) throw new Error("Codex did not return a turn id");
-    emit({ type:"turn.started" }, "Codex has started working on your laptop.");
+    await onTurnStarted({ threadId, turnId, appServer });
+    emit({ type:"turn.started", turn_id:turnId }, "Codex has started working on your laptop.");
 
     stallTimer = setInterval(() => {
       if (Date.now() - lastActivityAt <= stallTimeoutMs) return;
@@ -295,7 +302,7 @@ export async function runCodexAppServerOneShot({
       emit({ type:"relay.heartbeat" }, `Codex is still active on your laptop (${idleSeconds}s since its last event).`);
     }, heartbeatIntervalMs);
     heartbeatTimer.unref?.();
-    runTimer = setTimeout(() => fail(new Error("Codex reached Relay's one-shot run time limit.")), runTimeoutMs);
+    runTimer = setTimeout(() => fail(new Error("Codex reached Relay's run time limit.")), runTimeoutMs);
     await terminal;
     return { threadId, finalMessage: finalMessage || streamedMessage };
   } catch (error) {

@@ -22,6 +22,7 @@ export const UPDATE_REQUEST_SCHEMA = 1;
 const require = createRequire(import.meta.url);
 const { stageVerifiedRuntime, releasePlatform } = require("../bootstrap/relay-setup.cjs");
 const {
+  activateLinuxRuntimeServices,
   activateMacRuntimeServices,
   exactRuntimeHealth,
   runtimeProcessCommands: processCommands,
@@ -150,6 +151,13 @@ export async function activateCanonicalRuntime(target, {
       bootstrapDelayMs,
       activationDeadlineMs,
       now,
+    });
+  } else if (platform === "linux") {
+    return activateLinuxRuntimeServices(target, {
+      platform,
+      run,
+      sleep,
+      attempts,
     });
   } else if (platform === "win32") {
     for (const task of [WINDOWS_PILL_TASK, WINDOWS_DAEMON_TASK]) run("schtasks.exe", ["/End", "/TN", task]);
@@ -512,6 +520,7 @@ export function spawnCanonicalUpdate({
     requestId, workerId, requestPath,
   });
   let launchedPid = null;
+  let linuxWorkerUnit = null;
   if (platform === "darwin") {
     const reconciled = reconcileUpdateWorkerJobs({ run });
     if (reconciled.fixed?.pid) {
@@ -547,6 +556,26 @@ export function spawnCanonicalUpdate({
       return { status: "launch-failed", requestId, workerId, requestPath };
     }
     launchedPid = Number(String(submitted.stdout || "").trim()) || null;
+  } else if (platform === "linux") {
+    linuxWorkerUnit = `${UPDATE_WORKER_LABEL_PREFIX}${requestId}`;
+    const logPath = api.join(homeDir, ".relay", "update.log");
+    const submitted = run("systemd-run", [
+      "--user",
+      "--quiet",
+      "--collect",
+      `--unit=${linuxWorkerUnit}`,
+      "--property=Type=exec",
+      `--property=StandardOutput=append:${logPath}`,
+      `--property=StandardError=append:${logPath}`,
+      workerNode,
+      workerPath(),
+      "--worker",
+      payload,
+    ]);
+    if (!commandOk(submitted)) {
+      atomicWriteRequest(requestPath, { ...prepared, state: "rejected", reason: "launch-failed", detail: submitted?.stderr || submitted?.stdout || "", completedAt: Date.now() }, { fsImpl, platform });
+      return { status: "launch-failed", requestId, workerId, requestPath };
+    }
   } else {
     throw new Error(`canonical updater unsupported on ${platform}`);
   }
@@ -571,6 +600,9 @@ export function spawnCanonicalUpdate({
     if (decision.won) atomicWriteRequest(requestPath, rejected, { fsImpl, platform });
     if (platform === "win32" && launchedPid && decision.won) {
       run("taskkill.exe", ["/PID", String(launchedPid), "/T", "/F"]);
+    }
+    if (platform === "linux" && linuxWorkerUnit && decision.won) {
+      run("systemctl", ["--user", "stop", linuxWorkerUnit]);
     }
     // Never remove the fixed launchd label here. Another caller may have observed
     // its old inactive state, replaced it, and submitted a newer worker while this

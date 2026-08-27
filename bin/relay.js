@@ -209,7 +209,7 @@ function statusAreaReopenText() {
   // Name the Start Menu first on Windows: the tray icon is usually behind the
   // overflow chevron, so it is the harder of the two to find, not the easier.
   if (process.platform === "win32") return "Relay in the Start Menu or the Relay icon in the system tray (behind the ^ near the clock)";
-  return "the Relay icon in the system tray";
+  return "Relay in your app launcher or taskbar (and the system tray when your desktop provides one)";
 }
 
 /** Register the Relay tools into Claude Code + Codex and start the receive daemon. */
@@ -231,6 +231,7 @@ async function applyInstall({
     desktopRestarts = [],
     sweptStaleEntries = [],
   } = await runSetupInstall({ claim, reload });
+  const lifecycleFailed = process.platform === "linux" && (!daemon.ok || !pill?.ok);
   if (installed.length) console.log(`Added Relay to ${installed.join(" and ")} on this machine.`);
   if (!binStable) {
     console.log(
@@ -245,7 +246,7 @@ async function applyInstall({
   for (const notice of hookInstallNotices({ claudeHooks, codexHooks })) console.log(notice);
   if (daemon.ok) console.log("Relay is running in the background and will start automatically when you log in.");
   else if (daemon.reason === "autostart_unsupported_platform") {
-    console.log("Run `relay daemon` to receive relays (background autostart is macOS-only for now).");
+    console.log("Run `relay daemon` to receive relays because managed background startup is unavailable on this platform.");
   } else {
     const failure = [daemon.reason, daemon.detail].filter(Boolean).join(": ");
     const detail = failure ? ` (${failure})` : "";
@@ -275,15 +276,18 @@ async function applyInstall({
 
   if (!installed.length) {
     console.log("");
-    console.log("Relay could not finish: no Claude or Codex app was found on this machine.");
+    console.log(`Relay could not finish: no ${process.platform === "linux" ? "Claude Code or Codex CLI" : "Claude or Codex app"} was found on this machine.`);
     console.log("Relay delivers into an AI assistant, so it needs one of these first:");
-    console.log("  Claude        https://claude.com/download        (desktop app)");
-    console.log("  ChatGPT/Codex https://chatgpt.com/download       (desktop app)");
+    if (process.platform !== "linux") {
+      console.log("  Claude        https://claude.com/download        (desktop app)");
+      console.log("  ChatGPT/Codex https://chatgpt.com/download       (desktop app)");
+    }
     console.log("  Claude Code   https://claude.com/claude-code     (terminal)");
+    if (process.platform === "linux") console.log("  Codex CLI     Install the Codex command-line app         (terminal)");
     console.log("Install one, then run this command again.");
     console.log("");
     console.log(`In the meantime you can read and reply to your relays on the web: ${absoluteWebTarget("/app/relays")}`);
-    return { installed, missing, daemon, pill, activations, agentMissing: true };
+    return { installed, missing, daemon, pill, activations, agentMissing: true, lifecycleFailed };
   }
 
   if (desktopRestarts.length) {
@@ -310,7 +314,7 @@ async function applyInstall({
     console.log("");
     console.log(`Relay is installed. Restart ${hostLabel} (or open a new session) to use it.`);
   }
-  return { installed, missing, daemon, pill, activations };
+  return { installed, missing, daemon, pill, activations, lifecycleFailed };
 }
 
 /**
@@ -354,7 +358,7 @@ async function cmdSetup(flags) {
     requireLiveTools: Boolean(flags["require-live-tools"]) || shouldRequireLiveTools(),
     requiredHosts: requiredLiveHosts(),
     // An explicit setup is the migration/ownership handoff. Runtime verification
-    // in runSetupInstall completes before either platform's autostart is changed.
+    // in runSetupInstall completes before any platform's autostart is changed.
     claim: true,
     // The signed thin bootstrap asks setup to write all registrations without
     // starting them, then performs the same exact-root lifecycle as the updater.
@@ -385,7 +389,7 @@ async function cmdSetup(flags) {
   // The relay is opened/staged first -- the recipient should still get the thing
   // they came for -- but setup did not achieve what it claims, so it must not
   // report success. `exitCode` rather than `exit()` so nothing above is truncated.
-  if (install?.agentMissing) process.exitCode = 1;
+  if (install?.agentMissing || install?.lifecycleFailed) process.exitCode = 1;
 }
 
 /** Install the tools + daemon on a device that is already paired. */
@@ -603,7 +607,7 @@ async function cmdOpen(positional, flags) {
 }
 
 /** Launch (or signal) the desktop Relay companion pill and verify it is visible. */
-async function cmdPill(flags = {}) {
+async function cmdPill(flags = {}, positional = []) {
   migratePersistedContentFields({ log: (message) => console.log(`[relay] ${message}`) });
   const here = path.dirname(fileURLToPath(import.meta.url));
   const overlayMain = path.resolve(here, "../overlay/main.cjs");
@@ -623,10 +627,13 @@ async function cmdPill(flags = {}) {
     throw new Error("Could not resolve the Electron binary. Run `npm install` in packages/companion.");
   }
   const reopenNonce = `cli-${process.pid}-${randomUUID()}`;
+  const deepLinks = positional
+    .map((value) => String(value || ""))
+    .filter((value) => value.startsWith("relay://"));
   let spawnError = null;
   const child = spawn(
     electronPath,
-    [overlayMain, "--relay-reopen", reopenNonce],
+    [overlayMain, ...deepLinks, "--relay-reopen", reopenNonce],
     {
       detached: true,
       stdio: "ignore",
@@ -1005,7 +1012,7 @@ async function main() {
     case "daemon":
       return runTaskDaemon({ intervalMs: Number(flags.interval) || 4000 });
     case "pill":
-      return cmdPill(flags);
+      return cmdPill(flags, positional);
     case "mcp":
       return runMcpServer();
     case "wake-on":

@@ -11,7 +11,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const { pipeline } = require("node:stream/promises");
-const { activateMacRuntimeServices, exactRuntimeHealth } = require("./runtime-health.cjs");
+const { activateLinuxRuntimeServices, activateMacRuntimeServices, exactRuntimeHealth } = require("./runtime-health.cjs");
 const { verifyRuntimeExecutables } = require("./runtime-executables.cjs");
 
 const RELEASE_ORIGIN = "https://api.sendrelays.com";
@@ -33,8 +33,15 @@ function fail(message) {
 
 function releasePlatform(platform = process.platform, arch = process.arch) {
   const key = `${platform}-${arch}`;
-  if (["darwin-arm64", "darwin-x64", "win32-x64", "win32-arm64"].includes(key)) return key;
-  fail(`Relay currently supports macOS and Windows; this machine is ${key}.`);
+  if ([
+    "darwin-arm64",
+    "darwin-x64",
+    "win32-x64",
+    "win32-arm64",
+    "linux-arm64",
+    "linux-x64",
+  ].includes(key)) return key;
+  fail(`Relay supports 64-bit macOS, Windows, and Linux; this machine is ${key}.`);
 }
 
 function exactVersion(value) {
@@ -607,6 +614,7 @@ async function activateRuntime(layout, runtime, version, {
   healthAttempts = 60,
   healthIntervalMs = 500,
   sleep,
+  activateLinuxServices = activateLinuxRuntimeServices,
   activateMacServices = activateMacRuntimeServices,
   activationDeadlineMs = 90_000,
   now = Date.now,
@@ -689,11 +697,11 @@ async function activateRuntime(layout, runtime, version, {
     fail(message);
   }
 
-  // On macOS setup owns registration, but the shared activation state machine
-  // owns service restart. This keeps first-install MCP/plist creation in the
-  // candidate while bootstrap and the updater use the same exact-root handoff.
+  // On macOS/Linux setup owns registration, but the shared activation state
+  // machine owns service restart. This keeps first-install MCP/autostart creation
+  // in the candidate while bootstrap and the updater use the same exact-root handoff.
   const setupArgs = [runtime.bin, "setup", "--no-trampoline", "--claim"];
-  if (platform === "darwin") setupArgs.push("--no-restart");
+  if (platform === "darwin" || platform === "linux") setupArgs.push("--no-restart");
   const result = spawnImpl(process.execPath, setupArgs, {
     stdio: "inherit",
     windowsHide: true,
@@ -718,6 +726,22 @@ async function activateRuntime(layout, runtime, version, {
     if (!activated?.ok) {
       const detail = activated?.detail ? ` (${activated.detail})` : "";
       const message = `Relay runtime activation could not start the exact registered macOS services${detail}.`;
+      rollback(message);
+      fail(message);
+    }
+    health = activated.health;
+  } else if (platform === "linux") {
+    const activated = await activateLinuxServices(runtime, {
+      homeDir,
+      platform,
+      run: spawnImpl,
+      healthCheck,
+      attempts: healthAttempts,
+      ...(sleep ? { sleep } : {}),
+    });
+    if (!activated?.ok) {
+      const detail = activated?.detail ? ` (${activated.detail})` : "";
+      const message = `Relay runtime activation could not start the exact registered Linux services${detail}.`;
       rollback(message);
       fail(message);
     }

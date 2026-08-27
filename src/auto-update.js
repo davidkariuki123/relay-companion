@@ -486,6 +486,16 @@ export function submitCanonicalRepoint({
       child?.unref?.();
       return true;
     }
+    if (platform === "linux") {
+      const jobLabel = label || `work.relay.autostart.repoint.${process.pid}`;
+      const child = spawnImpl(
+        "systemd-run",
+        ["--user", "--quiet", "--collect", `--unit=${jobLabel}`, node, canonical.bin, "repair-runtime"],
+        { detached: true, stdio: "ignore" },
+      );
+      child?.unref?.();
+      return true;
+    }
     const child = spawnImpl(node, [canonical.bin, "repair-runtime"], { detached: true, stdio: "ignore" });
     child?.unref?.();
     return true;
@@ -761,12 +771,10 @@ export function createAutoUpdater({
 
   async function tick() {
     if (!autoUpdateEnabled(env)) return { status: "disabled" };
-    // Only platforms with a real restart path may update: darwin (launchd bootout +
-    // bootstrap, handed to an independent submitted job) and win32 (Scheduled Tasks
-    // via schtasks /End + /Run, pill first, daemon last). Elsewhere a detached
-    // script would falsely report "updating" and never restart — the daemon would
-    // run stale code forever while thinking it self-updates. Gate explicitly.
-    if (platform !== "darwin" && platform !== "win32") return { status: "unsupported-platform" };
+    // Every admitted platform has an independent supervisor-owned worker and a
+    // verified restart path: launchd, Scheduled Tasks, or a Linux systemd user
+    // unit. Anything else remains fail-closed.
+    if (!["darwin", "win32", "linux"].includes(platform)) return { status: "unsupported-platform" };
     const t = now();
     let canonical = null;
     let canonicalState = null;
@@ -1104,7 +1112,7 @@ export async function runUpdateOnce({
       log("could not reach the npm registry to check for updates.");
       break;
     case "unsupported-platform":
-      log("self-update is only supported on macOS and Windows right now — update with `npm i -g relay-companion@latest`.");
+      log("self-update is supported on 64-bit macOS, Windows, and Linux — update this unsupported platform with `npm i -g relay-companion@latest`.");
       break;
     case "deferred-busy":
       log(`an update to ${result.latest} is ready but deferred while an agent turn is active; it will install once idle.`);

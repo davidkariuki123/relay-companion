@@ -340,7 +340,9 @@ export function createInstallationAuthorizationController({
   const base = normalizeApiBase(apiBase);
   const trustedWebOrigin = normalizeWebOrigin(webBase);
   if (!fetchImpl) throw new Error("Relay setup requires HTTPS support.");
-  if (platform !== "darwin" && platform !== "win32") throw new Error("Relay setup supports macOS and Windows.");
+  if (!["darwin", "win32", "linux"].includes(platform)) {
+    throw new Error("Relay setup supports macOS, Windows, and Linux.");
+  }
   let beginInFlight = null;
   let consumeInFlight = null;
   let resumeInFlight = null;

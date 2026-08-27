@@ -157,6 +157,70 @@ test("app-server one-shots are ephemeral, auto-reviewed, structured, and stream 
   assert.equal(result.finalMessage, '{"forHuman":"Hello from Codex!","forAgent":"Useful evidence."}');
 });
 
+test("visible app-server runs keep the native thread and retain the live event lifecycle", async () => {
+  const requests = [];
+  const callbacks = [];
+  const statuses = [];
+  const result = await runCodexAppServerOneShot({
+    prompt:"Inspect the Relay chat",
+    model:"gpt-5.6-terra",
+    effort:"medium",
+    ephemeral:false,
+    title:"Relay @Codex",
+    stallTimeoutMs:1_000,
+    runTimeoutMs:2_000,
+    heartbeatIntervalMs:1_000,
+    onThreadStarted:async ({ threadId }) => { callbacks.push(["thread", threadId]); },
+    onTurnStarted:async ({ threadId, turnId }) => { callbacks.push(["turn", threadId, turnId]); },
+    onEvent:(_event, status) => { if (status) statuses.push(status); },
+    appServerFactory:(options) => ({
+      async start() {},
+      async stop() {},
+      async request(method, params) {
+        requests.push({ method, params });
+        if (method === "thread/start") return { thread:{ id:"thread_visible" } };
+        if (method === "thread/name/set") return {};
+        if (method === "turn/start") {
+          queueMicrotask(() => {
+            options.onNotification({
+              method:"item/started",
+              params:{ threadId:"thread_visible", turnId:"turn_visible", item:{ type:"commandExecution" } },
+            });
+            options.onNotification({
+              method:"item/completed",
+              params:{
+                threadId:"thread_visible",
+                turnId:"turn_visible",
+                item:{ type:"agentMessage", text:'{"forHuman":"It works.","forAgent":"Native session retained."}' },
+              },
+            });
+            options.onNotification({
+              method:"turn/completed",
+              params:{ threadId:"thread_visible", turn:{ id:"turn_visible", status:"completed" } },
+            });
+          });
+          return { turn:{ id:"turn_visible" } };
+        }
+        throw new Error(`Unexpected request: ${method}`);
+      },
+    }),
+  });
+  const threadStart = requests.find((entry) => entry.method === "thread/start")?.params;
+  assert.equal(Object.hasOwn(threadStart, "ephemeral"), false);
+  assert.equal(threadStart.threadSource, "user");
+  assert.deepEqual(requests.find((entry) => entry.method === "thread/name/set")?.params, {
+    threadId:"thread_visible",
+    name:"Relay @Codex",
+  });
+  assert.deepEqual(callbacks, [
+    ["thread", "thread_visible"],
+    ["turn", "thread_visible", "turn_visible"],
+  ]);
+  assert.equal(statuses.includes("Codex is running a command."), true);
+  assert.equal(result.threadId, "thread_visible");
+  assert.equal(result.finalMessage, '{"forHuman":"It works.","forAgent":"Native session retained."}');
+});
+
 test("an unsupported app-server can fall back before a turn, but an ambiguous turn timeout cannot", async () => {
   await assert.rejects(runCodexAppServerOneShot({
     prompt:"work",

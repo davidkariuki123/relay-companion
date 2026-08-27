@@ -16,6 +16,10 @@ import {
 
 const relayBin = fileURLToPath(new URL("../bin/relay.js", import.meta.url));
 
+const PRODUCTION_ORDINARY_RELAY_TOOL_NAMES = new Set(ORDINARY_RELAY_TOOL_NAMES);
+PRODUCTION_ORDINARY_RELAY_TOOL_NAMES.delete("relay_message_edit");
+PRODUCTION_ORDINARY_RELAY_TOOL_NAMES.delete("relay_message_delete");
+
 async function inspectMcp({ developer = false, updateChannel = "stable" }) {
   const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-mcp-startup-"));
   fs.writeFileSync(path.join(configDir, "config.json"), JSON.stringify({
@@ -58,14 +62,14 @@ test("MCP initialize returns complete startup teachings before tools are selecte
   assert.equal(messages.instructions, REQUESTS_DISABLED_INSTRUCTIONS);
   assert.deepEqual(
     new Set(messages.tools.map((tool) => tool.name)),
-    ORDINARY_RELAY_TOOL_NAMES,
+    PRODUCTION_ORDINARY_RELAY_TOOL_NAMES,
   );
 
   const productionDeveloper = await inspectMcp({ developer: true });
   assert.equal(productionDeveloper.instructions, REQUESTS_DISABLED_INSTRUCTIONS);
   assert.deepEqual(
     new Set(productionDeveloper.tools.map((tool) => tool.name)),
-    ORDINARY_RELAY_TOOL_NAMES,
+    PRODUCTION_ORDINARY_RELAY_TOOL_NAMES,
   );
 
   const full = await inspectMcp({ developer: true, updateChannel: "dev" });

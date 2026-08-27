@@ -175,6 +175,7 @@ function readLegacyMacCredential(options = {}) {
 }
 
 function platformOf(options) { return options?.platform || process.platform; }
+function usesLocalStore(platform) { return platform === "darwin" || platform === "linux"; }
 function credentialOptions(options = {}) {
   return { ...options, service: options.service || SERVICE, account: options.account || ACCOUNT };
 }
@@ -189,15 +190,16 @@ function deleteDeviceToken(options) { return deleteCredential(options); }
 
 function writeCredential(secret, options) {
   if (!String(secret || "")) return { ok: false, value: "", detail: "empty credential", code: "credential_store_error" };
-  if (platformOf(options) === "darwin") return localStore.writeCredential(String(secret), credentialOptions(options));
+  if (usesLocalStore(platformOf(options))) return localStore.writeCredential(String(secret), credentialOptions(options));
   return operation("write", String(secret), options);
 }
 function readCredential(options = {}) {
-  if (platformOf(options) !== "darwin") return operation("read", "", options);
+  const platform = platformOf(options);
+  if (!usesLocalStore(platform)) return operation("read", "", options);
   const target = credentialOptions(options);
   const local = localStore.readCredential(target);
   if (local.ok || local.code !== "credential_not_found") return local;
-  if (options.allowLegacyMigration !== true) return local;
+  if (platform !== "darwin" || options.allowLegacyMigration !== true) return local;
   // One silent compatibility read migrates pre-0.1.356 credentials. The
   // show-keychain-info preflight returns before `find-generic-password` when
   // a locked or poisoned login Keychain would otherwise present UI.
@@ -211,7 +213,7 @@ function readCredential(options = {}) {
   return legacy;
 }
 function deleteCredential(options = {}) {
-  if (platformOf(options) !== "darwin") return operation("delete", "", options);
+  if (!usesLocalStore(platformOf(options))) return operation("delete", "", options);
   return localStore.deleteCredential(credentialOptions(options));
 }
 
@@ -225,4 +227,5 @@ module.exports = {
   readDeviceToken,
   deleteDeviceToken,
   readLegacyMacCredential,
+  usesLocalStore,
 };

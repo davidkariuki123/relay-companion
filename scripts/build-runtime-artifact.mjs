@@ -46,7 +46,7 @@ function option(name, fallback = "") {
 
 export function runtimePlatform(platform = process.platform, arch = process.arch) {
   const value = `${platform}-${arch}`;
-  if (!["darwin-arm64", "darwin-x64", "win32-x64", "win32-arm64"].includes(value)) {
+  if (!["darwin-arm64", "darwin-x64", "win32-x64", "win32-arm64", "linux-arm64", "linux-x64"].includes(value)) {
     throw new Error(`Unsupported Relay runtime platform: ${value}`);
   }
   return value;

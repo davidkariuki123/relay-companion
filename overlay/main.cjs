@@ -21,6 +21,11 @@
 
 const { app, BrowserWindow, Menu, Tray, clipboard, ipcMain, nativeImage, powerMonitor, powerSaveBlocker, shell, screen, systemPreferences } = require("electron");
 
+if (process.platform === "linux") {
+  app.setName("Relay");
+  try { app.setDesktopName("relay.desktop"); } catch {}
+}
+
 // The pill is an accessory window that spends most of its life idle behind other
 // apps. Both Chromium and macOS treat that as "safe to throttle", and the cost is
 // paid by the user: the FIRST click after an idle spell waits for the renderer to
@@ -97,7 +102,7 @@ const {
   runningHostsFromProcessList,
   terminalClaudeCodeRunningFromProcessList,
 } = require("./host-select.cjs");
-const { parseRelayDeepLink, relayDeepLinkFromArgv } = require("./deep-link.cjs");
+const { parseRelayDeepLink, relayDeepLinkFromArgv, relayDeepLinkFailureStatus } = require("./deep-link.cjs");
 const {
   overlayWanted,
   createHostRunningTracker,
@@ -117,6 +122,7 @@ const { createPairingIdentity, persistPairedIdentity, readPairedIdentity } = req
 const { canonicalInboxItemId, packetIdsForCanonicalItem } = require("../src/inbox-item-id.cjs");
 const claudeInject = require("../src/claude-inject.cjs");
 const codexOpenCurrent = require("./codex-open-current.cjs");
+const { commandAvailable, launchLinuxAgentTerminal } = require("./linux-terminal.cjs");
 const {
   reinforceSpacePresence,
   resetWindowZoom,
@@ -410,7 +416,7 @@ function reopenSurfaceName() {
   // Start Menu first on Windows: the tray icon is normally behind the overflow
   // chevron, which makes it the harder of the two to find, not the easier.
   if (process.platform === "win32") return "Relay in the Start Menu, or the tray icon near the clock";
-  return "the Relay icon in the system tray";
+  return "Relay in your app launcher or taskbar, or the tray icon when your desktop provides one";
 }
 
 // The ESM companion modules (config/client) are loaded lazily via dynamic import,
@@ -635,6 +641,16 @@ function loadPlainStager() {
 let relayDeepLinkDrain = null;
 let pendingRelayReader = null;
 
+function acknowledgeRelayDeepLink(parsed, status = "opened") {
+  if (!parsed?.handoffId) return;
+  const callback = new URL("/open/relay/ack", webBase());
+  callback.searchParams.set("handoff", parsed.handoffId);
+  callback.searchParams.set("host", parsed.host);
+  callback.searchParams.set("status", status);
+  shell.openExternal(callback.toString()).catch((error) =>
+    console.error("[overlay] Relay handoff ACK failed:", error && error.message));
+}
+
 function deliverPendingRelayReader() {
   if (!pendingRelayReader || !rendererListening || !win || win.isDestroyed() || win.webContents.isDestroyed()) {
     return false;
@@ -663,17 +679,20 @@ async function openRelayDeepLink(parsed) {
     if (!Array.isArray(chat?.items) || !chat.items.some((item) => item?.relayId === parsed.messageId)) {
       throw new Error("Relay message is unavailable to this account.");
     }
+    acknowledgeRelayDeepLink(parsed, "accepted");
     await pushInbox(true);
     pendingRelayReader = { messageId: parsed.messageId, chatId };
     requestExternalReopen(randomUUID());
     // Hot Pills receive this immediately. Cold Pills keep it until the renderer
     // explicitly confirms that its openReader listener is installed.
     deliverPendingRelayReader();
+    acknowledgeRelayDeepLink(parsed);
     return;
   }
   const fetched = await new RelayClient().fetchRelay(parsed.messageId);
   const packet = fetched && fetched.packet;
   if (!packet || packet.id !== parsed.messageId) throw new Error("Relay message is unavailable to this account.");
+  acknowledgeRelayDeepLink(parsed, "accepted");
   stagePlainRelayItem({
     item: {
       relayId: packet.id,
@@ -695,6 +714,7 @@ async function openRelayDeepLink(parsed) {
   await pushInbox(true);
   requestExternalReopen(randomUUID());
   await openPacket(packet.id, { host: parsed.host, fresh: true });
+  acknowledgeRelayDeepLink(parsed);
 }
 
 function drainRelayDeepLinks() {
@@ -706,6 +726,7 @@ function drainRelayDeepLinks() {
         await openRelayDeepLink(parsed);
       } catch (error) {
         console.error("[overlay] Relay deep link failed:", error && error.message);
+        acknowledgeRelayDeepLink(parsed, relayDeepLinkFailureStatus(error));
         requestExternalReopen(randomUUID());
       }
     }
@@ -820,7 +841,7 @@ function readConfigFile() {
           allowLegacyMigration: config.credentialStore === "native-v1",
         });
         if (stored.ok && stored.value) {
-          if (process.platform === "darwin" && config.credentialStore === "native-v1") {
+          if (["darwin", "linux"].includes(process.platform) && config.credentialStore === "native-v1") {
             config.credentialStore = "local-v2";
             try { atomicWriteJsonSync(configPath, config, { mode: 0o600 }); } catch {}
           }
@@ -829,8 +850,8 @@ function readConfigFile() {
           return withCredentialState(config, "available");
         }
         if (stored.ok) return withCredentialState(config, "corrupt", "credential_empty");
-        if (process.platform === "darwin" && config.credentialStore === "native-v1") {
-          // Current macOS builds persist locally. The old bridge release can
+        if (["darwin", "linux"].includes(process.platform) && config.credentialStore === "native-v1") {
+          // Current macOS/Linux builds persist locally. The old bridge release can
           // still leave a Keychain pointer behind, but a failed legacy read is
           // not useful account state and must not strand recovery on Try again.
           config.credentialStore = "local-v2";
@@ -3229,6 +3250,9 @@ function appInstalled(appName) {
       process.env.PROGRAMFILES && path.join(process.env.PROGRAMFILES, name, exe),
       process.env["PROGRAMFILES(X86)"] && path.join(process.env["PROGRAMFILES(X86)"], name, exe),
     ].filter(Boolean);
+  } else if (process.platform === "linux") {
+    const executable = /^codex$/i.test(name) ? (process.env.CODEX_CLI_PATH || "codex") : (process.env.CLAUDE_CLI_PATH || "claude");
+    return commandAvailable(executable);
   }
   return candidates.some((candidate) => fs.existsSync(candidate));
 }
@@ -3653,13 +3677,20 @@ async function openPacket(packetId, { sent = false, fresh = false, host: hostOve
     // drains, so `out` was empty, the parse failed, and a perfectly successful open was
     // routed to the web fallback — the user got a browser instead of Claude.
     child.on("close", (code) => {
-      const { url, skipExternalOpen, freshlyForged, cwdReason } = parseOpenResult(out);
+      const { url, skipExternalOpen, freshlyForged, cwd, cwdReason } = parseOpenResult(out);
       if (url || skipExternalOpen) {
         // Raise the host so the relay is visible, whichever open path ran (Claude deep
         // link, Codex bridge, or a plain url). This is the fix for "opened in the right
         // host but didn't foreground it".
         activateHost(host, bundle);
-        if (url && !skipExternalOpen) {
+        if (url && !skipExternalOpen && process.platform === "linux") {
+          const launched = launchLinuxAgentTerminal({ url, host, cwd });
+          if (!launched.ok) {
+            console.error("[overlay] Linux agent terminal launch failed:", launched.reason, launched.detail || "");
+            finishInPreview(`Couldn't open ${host === "codex" ? "Codex" : "Claude Code"} in a terminal.`);
+            return;
+          }
+        } else if (url && !skipExternalOpen) {
           if (claudeSessionIdFromUrl(url)) {
             openClaudeDeepLinkVerified(
               url,
@@ -4675,7 +4706,11 @@ function createWindow() {
     // The card paints its edge inside these exact bounds. A native AppKit shadow
     // adds a second dark outline and visibly changes shape when this window folds.
     hasShadow: false,
-    skipTaskbar: true,
+    // Linux trays are optional desktop-environment extensions. Keep a normal
+    // taskbar/app-switcher route there so hiding Relay can never make it
+    // unreachable; macOS and Windows retain their dedicated status surfaces.
+    skipTaskbar: process.platform !== "linux",
+    ...(process.platform === "linux" ? { icon: path.join(__dirname, "relayAppIcon.svg") } : {}),
     fullscreenable: false,
     maximizable: false,
     minimizable: false,

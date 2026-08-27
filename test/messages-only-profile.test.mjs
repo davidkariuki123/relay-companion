@@ -40,7 +40,7 @@ test("config and registrations remove deprecated local capability switches", () 
     assert.deepEqual(storedConfig.features, { retainedSetting: true });
     assert.equal(storedConfig.companionMode, undefined);
     assert.equal(storedConfig.features.requests, undefined);
-    if (process.platform === "darwin") {
+    if (["darwin", "linux"].includes(process.platform)) {
       assert.equal(storedConfig.deviceToken, undefined);
       assert.equal(storedConfig.credentialStore, "local-v2");
       assert.equal(readConfig().deviceToken, "dev_test");

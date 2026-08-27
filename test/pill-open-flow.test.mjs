@@ -633,10 +633,11 @@ test("folding publishes destination native geometry before an animation frame ca
   assert.match(main, /ipcMain\.handle\("relay:cardSizeSettled"/);
 });
 
-test("Windows uses an ordinary focusable window while only macOS hit-tests a fixed canvas", () => {
+test("Windows/Linux use ordinary focusable windows, with a Linux taskbar fallback, while only macOS hit-tests a fixed canvas", () => {
   const create = sliceFunction(main, "function createWindow(");
   assert.match(create, /focusable: true/);
-  assert.match(create, /skipTaskbar: true/);
+  assert.match(create, /skipTaskbar: process\.platform !== "linux"/);
+  assert.match(create, /process\.platform === "linux" \? \{ icon:/);
   assert.match(create, /hasShadow: false/);
   assert.match(main, /setIgnoreMouseEvents\(next, \{ forward: true \}\)/);
   assert.match(main, /function applyIgnore/);

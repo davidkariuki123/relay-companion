@@ -186,7 +186,47 @@ async function activateMacRuntimeServices(target, {
   return { ok: false, reason: "activation-deadline-exceeded", detail: target.packageRoot };
 }
 
+/** Restart Linux user services from their already-repaired unit files. */
+async function activateLinuxRuntimeServices(target, {
+  platform = process.platform,
+  run = defaultRun,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  attempts = 60,
+  healthPollMs = 500,
+  processId = process.pid,
+  healthCheck = exactRuntimeHealth,
+} = {}) {
+  if (platform !== "linux") return { ok: false, reason: "activation-platform-unsupported" };
+  if (!target?.packageRoot || !target?.bin) return { ok: false, reason: "activation-target-invalid" };
+  const units = [`${PILL_LABEL}.service`, `${DAEMON_LABEL}.service`];
+  for (const unit of units) run("systemctl", ["--user", "stop", unit]);
+  const stopped = await terminateInstalledServiceProcesses(target, {
+    run,
+    sleep,
+    includeTarget: true,
+    processId,
+  });
+  if (!stopped.ok) return stopped;
+  const reloaded = run("systemctl", ["--user", "daemon-reload"]);
+  if (!commandOk(reloaded)) {
+    return { ok: false, reason: "systemd-user-unavailable", detail: reloaded?.stderr || reloaded?.stdout || "" };
+  }
+  for (const unit of units) {
+    const started = run("systemctl", ["--user", "start", unit]);
+    if (!commandOk(started)) {
+      return { ok: false, reason: "service-start-failed", detail: `${unit}: ${started?.stderr || started?.stdout || ""}` };
+    }
+  }
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const health = await healthCheck(target, { platform, run });
+    if (health?.ok) return { ok: true, health };
+    if (attempt + 1 < attempts) await sleep(healthPollMs);
+  }
+  return { ok: false, reason: "exact-root-health-failed", detail: target.packageRoot };
+}
+
 module.exports = {
+  activateLinuxRuntimeServices,
   activateMacRuntimeServices,
   exactRuntimeHealth,
   installedServiceProcessRows,
