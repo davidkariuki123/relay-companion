@@ -64,7 +64,7 @@ test("a conversation is named only by its person or saved group", () => {
 });
 
 test("known @handles render as highlighted contact names without changing unknown text", () => {
-  const start = html.indexOf("function mentionContact(");
+  const start = html.indexOf("function normalizedMentionToken(");
   const end = html.indexOf("\n  function relaySender(", start);
   assert.notEqual(start, -1, "missing mention renderer");
   assert.notEqual(end, -1, "missing mention renderer boundary");
@@ -370,7 +370,7 @@ test("a live refresh repaints the history around the composer, never through it"
 
 test("entering a chat gives its composer the keyboard without a click", () => {
   const open = html.slice(html.indexOf("function openThreadDetail("), html.indexOf("// ---------- Settings view"));
-  assert.match(open, /const composerFocusRequest = beginThreadComposerEntryFocus\(threadId\)/);
+  assert.match(open, /const composerFocusRequest = beginThreadComposerEntryFocus\(roomCoordinate\)/);
   assert.match(open, /commitNavigation\(\{ outerScrollTop: 0 \}\);[\s\S]*focusThreadComposerOnEntry\(composerFocusRequest\);[\s\S]*settleThreadComposerEntryFocus\(composerFocusRequest\)/);
   assert.match(html, /input\.focus\(\{ preventScroll:true \}\)/, "room entry focuses without moving the transcript");
   assert.match(html, /input\.setSelectionRange\(end, end\)/, "an existing draft resumes at its end");
@@ -647,7 +647,7 @@ test("the room composer prevents duplicate sends, and returns a draft only when 
 
 test("chat composers offer owned laptop agents while human mentions stay group-only", () => {
   const owned = html.indexOf('{ token:"Claude", name:"@Claude"');
-  const participant = html.indexOf('...[...participantNames]');
+  const participant = html.indexOf('...participantMentions.values()');
   assert.ok(owned >= 0 && participant > owned, "owned agents precede participant suggestions");
   assert.match(html, /groupInfoRoster\(group\)[\s\S]*!member\.currentUser/, "saved-group rosters contribute participants who have not spoken yet");
   assert.match(html, /payload\.features\?\.agentMentions === true \? \[/, "owned agents are suggested only where the feature is enabled");
@@ -663,13 +663,35 @@ test("chat composers offer owned laptop agents while human mentions stay group-o
   assert.match(html, /\.th-rich-composer \.th-composer-mention \{[\s\S]*border:1px solid[\s\S]*background:/,
     "the selected full name is visibly enclosed in the composer");
   assert.match(html, /title:"I'm on it"[\s\S]*agentInvocation:true/, "sending paints the immediate owned-agent response");
-  assert.match(html, /const savedContact = !currentUser && email[\s\S]*contactsList\.find[\s\S]*const shown = savedName/,
+  assert.match(html, /const savedContact = !currentUser && email[\s\S]*contactsList\.find[\s\S]*const shown = savedContact/,
     "the viewer's saved contact name wins over somebody else's group-roster label");
-  const groupMentions = html.slice(html.indexOf("const participantNames = new Set();"), html.indexOf("const mentionOptions = [", html.indexOf("const participantNames = new Set();")));
+  const groupMentions = html.slice(html.indexOf("const participantMentions = new Map();"), html.indexOf("const mentionOptions = [", html.indexOf("const participantMentions = new Map();")));
   assert.match(groupMentions, /payload\.features\?\.peopleMentions === true && thread\.isGroup[\s\S]*groupInfoRoster\(group\)/,
     "group mentions come from the current roster");
+  assert.match(groupMentions, /mentionTokenForContact\(member\)/,
+    "participants without an explicit handle still receive a valid mention token");
   assert.doesNotMatch(groupMentions, /message\.party|thread\.party/,
     "a direct-message counterpart cannot appear as a redundant mention choice");
+});
+
+test("person mentions fall back to contact names when cloud contacts have no handle", () => {
+  const start = html.indexOf("function normalizedMentionToken(");
+  const end = html.indexOf("\n  function mentionDisplayName(", start);
+  assert.ok(start >= 0 && end > start, "mention contact resolver is present");
+  const mentionContact = Function("contactsList", `"use strict"; ${html.slice(start, end)}; return mentionContact;`)([
+    { name:"David Kariuki", handle:null },
+    { name:"Sven Ozwellmann", handle:"sven" },
+  ]);
+
+  assert.equal(mentionContact("David_Kariuki")?.name, "David Kariuki");
+  assert.equal(mentionContact("@sven")?.name, "Sven Ozwellmann");
+  assert.equal(mentionContact("Sven_Ozwellmann"), null, "an explicit handle remains the stable wire token");
+});
+
+test("a group roster finishing after room navigation refreshes the active composer", () => {
+  const renderChat = html.slice(html.indexOf("function renderChat()"), html.indexOf("function openRoom(", html.indexOf("function renderChat()")));
+  assert.match(renderChat, /groupsLoading = Promise\.resolve\(loadGroups\(\)\)[\s\S]*activeView === "threads" && threadDetailId[\s\S]*renderThreadDetail\(\)/,
+    "the shared roster request refreshes a room opened while it was in flight");
 });
 
 test("the rich composer displays names but serializes stable mention tokens", () => {

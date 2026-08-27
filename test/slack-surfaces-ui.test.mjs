@@ -137,7 +137,7 @@ test("Relay and Slack badges and lists consume only their own surface projection
     "Slack unread never inflates the Relay tab badge");
 });
 
-test("an exact-linked Relay room hydrates and polls its canonical Relay body while Slack stays hidden", () => {
+test("an exact-linked Relay room paints first, then hydrates and polls its canonical body", () => {
   const poll = html.slice(
     html.indexOf("async function refreshActiveCanonicalChat()"),
     html.indexOf("let signupStage", html.indexOf("async function refreshActiveCanonicalChat()")),
@@ -147,10 +147,33 @@ test("an exact-linked Relay room hydrates and polls its canonical Relay body whi
   assert.doesNotMatch(poll, /!includeSlack/,
     "Relay summaries have no bodies; hidden Slack must not prevent the Relay-origin detail poll");
 
-  const open = html.slice(html.indexOf("async function openRoom("), html.indexOf("function renderSlack("));
-  assert.match(open, /if \(isSlackIntegratedRoom\(selected\) && selected\.chatId && !options\.hydrated[\s\S]*!canonicalChatDetailIsCurrent\(selected, roomSource, \{ includeSlack \}\)\)/,
-    "opening a linked Relay room hydrates detail even when its includeSlack flag is false");
-  assert.match(open, /requestCanonicalChatDetail\(selected, roomSource, \{ includeSlack \}\)/);
+  const open = html.slice(html.indexOf("function openRoom("), html.indexOf("function renderChat("));
+  assert.match(open, /const roomCoordinate = isSlackIntegratedRoom\(selected\) && selected\.chatId[\s\S]*String\(selected\.chatId\)/,
+    "a linked room enters by immutable chat id rather than a message or root id");
+  assert.doesNotMatch(open, /await requestCanonicalChatDetail|requestCanonicalChatDetail\(/,
+    "room entry is never network-gated before its destination snapshot");
+
+  const openThread = html.slice(html.indexOf("function openThreadDetail("), html.indexOf("// ---------- Settings view"));
+  assert.match(openThread, /commitNavigation\(\{ outerScrollTop: 0 \}\);[\s\S]*requestCanonicalChatDetail\(room, source, \{ includeSlack \}\)/,
+    "canonical hydration starts only after the local destination has painted");
+});
+
+test("Slack rows navigate by chat id and can recover without a list-summary lookup", () => {
+  const row = html.slice(html.indexOf("function relayIdentityRowHtml("), html.indexOf("// ---------- the reader"));
+  assert.match(row, /const roomCoordinate = identity\.chatId \|\| identity\.threadId \|\| row\.threadId \|\| row\.id/);
+  assert.match(row, /data-thread="\$\{esc\(roomCoordinate\)\}"/,
+    "the newest Slack reply id is presentation data, never the room address");
+
+  const lookup = html.slice(html.indexOf("function chatRoomForThread("), html.indexOf("// Messages that arrive"));
+  assert.match(lookup, /canonicalChatDetails\.get\(String\(threadId \|\| ""\)\)/);
+  assert.match(lookup, /roomFromChatSummary\(cached\)/,
+    "cached canonical detail keeps an active chat-id room addressable if its list summary is replaced");
+
+  assert.match(html, /let threadDetailChatId = ""/);
+  assert.match(html, /function recoverActiveSlackRoom\(/);
+  assert.match(html, /requestCanonicalChatDetail\(room, "slack", \{ includeSlack:true \}\)/);
+  assert.match(html, /id="thConversationRetry"/,
+    "a failed active-room recovery ends in an explicit retry instead of the Relay Sent loader");
 });
 
 test("Slack detail hydration is versioned, shared, and skipped for a current cache", () => {

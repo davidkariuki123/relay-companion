@@ -331,11 +331,14 @@ try {
           type:"im",
           state:"active",
         },
-        threadIds:["slack-transition-message"],
-        messageCount:1,
+        // The newest item is deliberately a reply, not a root. Production
+        // Slack summaries expose roots in threadIds and the newest message
+        // separately; using one id for both hid the room-addressing defect.
+        threadIds:["slack-transition-root"],
+        messageCount:2,
         unreadCount:1,
         lastMessage:{
-          relayId:"slack-transition-message",
+          relayId:"slack-transition-reply",
           preview:"Slack cold-cache transition seed",
           senderName:"Slack Transition Person",
           createdAt:at,
@@ -375,8 +378,88 @@ try {
   })()`);
   assertFrameSequence(slackForwardFrames, "Slack forward", 1);
   assert.equal(await evaluate(page, `activeView`), "threads", "Slack row did not enter a room");
+  assert.equal(await evaluate(page, `threadDetailId`), "slack-transition-room",
+    "Slack entered by the newest reply id instead of its stable chat id");
   assert.ok(slackForwardFrames.some((frame) => frame.seedText === "Slack cold-cache transition seed"),
     "the cold Slack destination did not paint its local latest-message seed");
+  assert.doesNotMatch(await evaluate(page, `thHistoryEl.textContent`), /Loading conversation/,
+    "a newest Slack reply opened the unaddressable legacy loading state");
+  const slackCachedRecovery = await evaluate(page, `(() => {
+    const at = "2026-08-26T12:00:00.000Z";
+    storeCanonicalChatDetail({
+      chatId:"slack-transition-room",
+      title:"Slack Transition Person",
+      kind:"direct",
+      participants:[
+        { relayUserId:"fixture", name:"Fixture", self:true },
+        { relayUserId:"slack-person", name:"Slack Transition Person", self:false },
+      ],
+      integration:{
+        provider:"slack",
+        teamId:"T_TRANSITION",
+        conversationId:"D_TRANSITION",
+        type:"im",
+        state:"active",
+      },
+      threadIds:["slack-transition-root"],
+      messageCount:2,
+      unreadCount:0,
+      lastMessage:{
+        relayId:"slack-transition-reply",
+        preview:"Recovered Slack reply",
+        senderName:"Slack Transition Person",
+        createdAt:at,
+        direction:"inbound",
+      },
+      updatedAt:at,
+      items:[
+        {
+          relayId:"slack-transition-root",
+          threadId:"slack-transition-root",
+          inReplyToRelayId:"",
+          direction:"inbound",
+          title:"",
+          forHuman:"Recovered Slack root",
+          forAgent:"",
+          sender:{ name:"Slack Transition Person" },
+          state:"read",
+          origin:"slack",
+          provider:{ name:"slack" },
+          createdAt:at,
+          updatedAt:at,
+          attachments:[],
+        },
+        {
+          relayId:"slack-transition-reply",
+          threadId:"slack-transition-root",
+          inReplyToRelayId:"slack-transition-root",
+          direction:"inbound",
+          title:"",
+          forHuman:"Recovered Slack reply",
+          forAgent:"",
+          sender:{ name:"Slack Transition Person" },
+          state:"read",
+          origin:"slack",
+          provider:{ name:"slack" },
+          createdAt:at,
+          updatedAt:at,
+          attachments:[],
+        },
+      ],
+      hasMoreMessages:false,
+    }, { surface:"slack", includeSlack:true });
+    onPayload({ ...payload, slackChats:[] });
+    return {
+      activeId:threadDetailId,
+      recoveredChatId:chatRoomForThread(threadDetailId, "slack")?.chatId || "",
+      history:thHistoryEl.textContent,
+    };
+  })()`);
+  assert.equal(slackCachedRecovery.activeId, "slack-transition-room");
+  assert.equal(slackCachedRecovery.recoveredChatId, "slack-transition-room",
+    "cached canonical detail could not recover an active room after its list summary was replaced");
+  assert.match(slackCachedRecovery.history, /Recovered Slack root/);
+  assert.doesNotMatch(slackCachedRecovery.history, /Loading conversation/);
   const slackBackFrames = await evaluate(page, `(async () => {
     const frames = [];
     const started = performance.now();

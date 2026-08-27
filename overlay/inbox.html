@@ -842,6 +842,8 @@
   .cv-edit { flex:0 0 auto; color:var(--muted-2); font-size:11px; font-weight:600; opacity:0; transition:opacity var(--t-fast) var(--settle), color var(--t-fast) var(--settle); }
   .cv-item:hover .cv-edit, .cv-item:focus-visible .cv-edit { opacity:1; color:var(--ink-2); }
   .cv-empty { padding:34px 16px; text-align:center; color:var(--muted-2); font-size:13px; line-height:1.5; }
+  .cv-empty-retry { display:block; margin:12px auto 0; border:1px solid var(--edge); border-radius:999px; padding:7px 13px; background:transparent; color:var(--ink); font:inherit; cursor:pointer; }
+  .cv-empty-retry:hover { border-color:var(--muted); }
   /* Composer attachments: staged chips above the field, a + ghost in the rail. */
   .cmp-files { display:flex; flex-wrap:wrap; gap:5px; padding:2px 2px 6px; }
   .cmp-chip { display:inline-flex; align-items:center; gap:6px; border:1px solid var(--edge); border-radius:9px; padding:3px 6px 3px 8px;
@@ -4018,11 +4020,26 @@
     return prefix || "Someone";
   }
 
+  function normalizedMentionToken(value) {
+    return String(value || "").replace(/^@/, "").trim().toLowerCase();
+  }
+
+  function mentionTokenForContact(contact) {
+    const explicit = String((contact && contact.handle) || "").replace(/^@/, "").trim();
+    if (explicit) return explicit;
+    const name = String((contact && contact.name) || "").trim();
+    if (!name || name.includes("@")) return "";
+    return name.normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s+/g, "_")
+      .replace(/[^A-Za-z0-9._-]+/g, "");
+  }
+
   function mentionContact(handle) {
-    const key = String(handle || "").replace(/^@/, "").trim().toLowerCase();
+    const key = normalizedMentionToken(handle);
     if (!key) return null;
     return contactsList.find((contact) =>
-      String((contact && contact.handle) || "").replace(/^@/, "").trim().toLowerCase() === key,
+      normalizedMentionToken(mentionTokenForContact(contact)) === key,
     ) || null;
   }
 
@@ -4471,6 +4488,10 @@
     if (activeCanonicalChatRefresh || !rendererSurfaceActive()) return;
     if (activeView !== "threads" || !threadDetailId) return;
     const room = chatRoomForThread(threadDetailId, conversationSurface());
+    if (!room && threadsSource === "slack" && threadDetailChatId) {
+      recoverActiveSlackRoom();
+      return;
+    }
     const includeSlack = slackMessagesVisible(room);
     if (!isSlackIntegratedRoom(room) || !room.chatId || !window.relay.canonicalChat) return;
     const surface = conversationSurface();
@@ -4705,6 +4726,12 @@
   function relayIdentityRowHtml(identity) {
     const row = identity.latest;
     const name = identity.name;
+    // A conversation row opens the conversation, not whichever message happens
+    // to be newest. Slack's newest item may be a thread reply whose id is not a
+    // root id, so it cannot address the room. Prefer the immutable canonical
+    // chat id, then the room's own thread coordinate; message ids are only a
+    // compatibility fallback for legacy Relay rows.
+    const roomCoordinate = identity.chatId || identity.threadId || row.threadId || row.id;
     const gist = relayListGist(row.title || row.body || "Message", 90);
     const unreadCls = identity.unreadCount ? " unread" : "";
     const groupPeople = identity.isGroup ? [...(identity.people || [])].slice(0, 2) : [];
@@ -4718,7 +4745,7 @@
         ? `<span class="gist-who">${esc(String(row.party || "Someone").split(" ")[0])}:</span> `
         : "";
     return `
-      <div class="relay-row relay-arrival${unreadCls}" data-thread="${esc(row.threadId || row.id)}" data-party="${esc(name)}" data-opening-id="${esc(row.id)}">
+      <div class="relay-row relay-arrival${unreadCls}" data-thread="${esc(roomCoordinate)}" data-party="${esc(name)}" data-opening-id="${esc(row.id)}">
         ${avatar}
         <span class="rk-body">
           <span class="th-top">
@@ -7063,8 +7090,8 @@
       threadDetailEntryFollow = null;
     }));
   }
-  function hydrateThreadEntry(token) {
-    const sentReady = window.relay.refreshSent
+  function hydrateThreadEntry(token, { includeSent = true } = {}) {
+    const sentReady = includeSent && window.relay.refreshSent
       ? window.relay.refreshSent().catch(() => null)
       : Promise.resolve(null);
     const fontsReady = document.fonts && document.fonts.ready
@@ -9134,7 +9161,9 @@
           .some((address) => String(address || "").trim().toLowerCase() === email))
         : null;
       const savedName = String((savedContact && savedContact.name) || "").trim();
-      const shown = savedName ? { ...person, name:savedName } : person;
+      const shown = savedContact
+        ? { ...person, ...(savedName ? { name:savedName } : {}), handle:savedContact.handle || null }
+        : person;
       const name = String(shown.name || "").trim();
       if (!email && !name && !person.userId && !person.contactId && !person.id) return;
       const key = email
@@ -9787,7 +9816,14 @@
   // Conversations grouped by threadId across BOTH directions: staged inbound
   // relays plus the live Sent list. Local data only — the pill shows the
   // user's own exchanges; the API's /v1/threads serves web and agents.
-  let threadDetailId = null; // threadId while a thread's history is open
+  let threadDetailId = null; // stable room coordinate while a conversation is open
+  // Canonical Slack rooms are addressed by chatId. Message/root ids may change
+  // as replies arrive or missing Slack roots reconcile, but this coordinate
+  // remains valid for the lifetime of the room and can recover it independently
+  // from the current list summary.
+  let threadDetailChatId = "";
+  let threadDetailLoadError = "";
+  let threadDetailRecovery = null;
   // Slack threads are a subview inside one Slack-backed Relay channel. Keep
   // this separate from threadDetailId, which identifies the room itself.
   let slackFocusedThreadId = "";
@@ -9810,6 +9846,49 @@
   // canonical relay id appears on either side of the local payload.
   const optimisticChatReplies = new Map(); // idempotencyKey -> thread-message row
   const chatReplySending = new Set(); // visible room/thread id
+
+  function activeSlackRoomRecoveryMatches(chatId) {
+    return activeView === "threads" && threadsSource === "slack"
+      && String(threadDetailChatId || "") === String(chatId || "");
+  }
+  function recoverActiveSlackRoom({ force = false } = {}) {
+    const chatId = String(threadDetailChatId || "");
+    if (!chatId || !activeSlackRoomRecoveryMatches(chatId)) return null;
+    if (threadDetailRecovery?.chatId === chatId) return threadDetailRecovery.promise;
+    if (threadDetailLoadError && !force) return null;
+    threadDetailLoadError = "";
+    const room = { chatId, provider:"slack", integration:{ provider:"slack" } };
+    let retryStale = false;
+    const promise = requestCanonicalChatDetail(room, "slack", { includeSlack:true }).then((result) => {
+      if (!activeSlackRoomRecoveryMatches(chatId)) return false;
+      if (!result?.ok || !result.chat) {
+        threadDetailLoadError = result?.error || "Could not load this Slack conversation.";
+        renderThreadDetail();
+        return false;
+      }
+      if (!canonicalChatResultIsCurrent(result, chatId)) {
+        retryStale = true;
+        return false;
+      }
+      storeCanonicalChatDetail(result.chat, { surface:"slack", includeSlack:true });
+      threadDetailLoadError = "";
+      renderThreadDetail();
+      readVisibleChatRoom();
+      return true;
+    }).catch((error) => {
+      if (!activeSlackRoomRecoveryMatches(chatId)) return false;
+      threadDetailLoadError = error?.message || "Could not load this Slack conversation.";
+      renderThreadDetail();
+      return false;
+    }).finally(() => {
+      if (threadDetailRecovery?.promise === promise) threadDetailRecovery = null;
+      if (retryStale && activeSlackRoomRecoveryMatches(chatId)) {
+        queueMicrotask(() => recoverActiveSlackRoom({ force:true }));
+      }
+    });
+    threadDetailRecovery = { chatId, promise };
+    return promise;
+  }
 
   function beginThreadComposerEntryFocus(threadId) {
     const request = {
@@ -10562,10 +10641,20 @@
   }
   function chatRoomForThread(threadId, surface = conversationSurface()) {
     const { rooms } = chatSections(surface);
-    return rooms.find((room) =>
+    const listed = rooms.find((room) =>
       room.threadId === threadId || room.chatId === threadId
         || (room.threadIds instanceof Set && room.threadIds.has(threadId)),
-    ) || null;
+    );
+    if (listed) return listed;
+    // A full-payload refresh can temporarily replace the list summary while an
+    // already-open canonical room still has valid detail. Since Slack rooms are
+    // now opened by chatId, the detail cache is sufficient to keep that room
+    // addressable and to repaint it without falling into the legacy Sent loader.
+    const cached = canonicalChatDetails.get(String(threadId || ""));
+    const projected = cached ? roomFromChatSummary(cached) : null;
+    if (!projected) return null;
+    if (surface === "slack" || isSlackIntegratedRoom(projected)) return projected;
+    return null;
   }
   // Messages that arrive while their Chat room is already on screen have been
   // read. A direct room spans every wire thread with that person; a group room
@@ -10720,7 +10809,7 @@
   let relaysListScrollTop = 0; // same contract for the Relays identity index
   let slackListScrollTop = 0; // Slack is a peer room index with its own return point
   let contactsListScrollTop = 0; // and for People, now that a row opens a room
-  async function openRoom(threadId, partyHint, source = null, options = {}) {
+  function openRoom(threadId, partyHint, source = null, options = {}) {
     const roomSource = source || (activeView === "threads" ? threadsSource : activeView);
     const surface = conversationSurface(roomSource);
     if (activeView === "chat") {
@@ -10730,27 +10819,14 @@
       try { slackListScrollTop = scrollEl ? scrollEl.scrollTop : 0; } catch { slackListScrollTop = 0; }
     }
     const selected = chatRoomForThread(threadId, surface);
-    const includeSlack = slackMessagesVisible(selected, roomSource);
-    if (isSlackIntegratedRoom(selected) && selected.chatId && !options.hydrated
-      && !canonicalChatDetailIsCurrent(selected, roomSource, { includeSlack })) {
-      const result = await requestCanonicalChatDetail(selected, roomSource, { includeSlack });
-      if (!result?.ok || !result.chat) {
-        setRowNote(String(selected.latest?.id || threadId), result?.error || "Could not open this Slack conversation.", "err");
-        return;
-      }
-      if (!canonicalChatResultIsCurrent(result, selected.chatId)) return;
-      storeCanonicalChatDetail(result.chat, {
-        surface:result.canonicalRequest?.surface || surface,
-        includeSlack:Boolean(result.canonicalRequest?.includeSlack),
-      });
-      const hydratedThreadId = (result.chat.threadIds || [])[0] || threadId;
-      return openRoom(hydratedThreadId, partyHint, roomSource, { ...options, hydrated:true });
-    }
+    const roomCoordinate = isSlackIntegratedRoom(selected) && selected.chatId
+      ? String(selected.chatId)
+      : threadId;
     // If this tap came from the split rail, retain that room's deliberate rail
     // position before threadDetailId changes to the destination room.
     rememberChatRailScroll();
     const morphFromList = prepareReaderMorph(activeView);
-    openThreadDetail(threadId, partyHint || "", roomSource, {
+    openThreadDetail(roomCoordinate, partyHint || "", roomSource, {
       expanded:options.expanded !== false,
       hydrated:options.hydrated === true,
     });
@@ -10791,6 +10867,7 @@
       groupsLoading = Promise.resolve(loadGroups()).finally(() => {
         groupsLoading = null;
         if (activeView === "chat") renderChat();
+        else if (activeView === "threads" && threadDetailId) renderThreadDetail();
       });
     }
     for (const el of chatListEl.querySelectorAll("[data-chat-open]")) {
@@ -10912,7 +10989,8 @@
     const surface = conversationSurface();
     const { rooms } = chatSections();
     const roomKey = chatRailRoomKey();
-    const roomIsOpen = (t) => t.threadId === threadDetailId || (t.threadIds instanceof Set && t.threadIds.has(threadDetailId));
+    const roomIsOpen = (t) => t.threadId === threadDetailId || t.chatId === threadDetailId
+      || (t.threadIds instanceof Set && t.threadIds.has(threadDetailId));
     const row = (t) => `
       <button class="rl-row${roomIsOpen(t) ? " on" : ""}" type="button" data-rail-open="${esc(t.threadId)}" data-party="${esc(t.name)}">
         <span class="avatar${t.isGroup ? " sq" : ""}" style="--av-h:${avatarHue(t.isGroup ? (t.title || t.name) : t.name)}" aria-hidden="true">${esc(avatarInitials(t.name))}</span>
@@ -11108,6 +11186,21 @@
       if (msgs.length) thread = { ...thread, msgs };
     }
     if (!thread) {
+      if (threadsSource === "slack" && threadDetailChatId) {
+        setThreadHeader(threadDetailPartyHint, "");
+        if (threadDetailLoadError) {
+          thHistoryEl.innerHTML = `<div class="cv-empty" role="status">${esc(threadDetailLoadError)}<button class="cv-empty-retry" id="thConversationRetry" type="button">Try again</button></div>`;
+          document.getElementById("thConversationRetry")?.addEventListener("click", () => {
+            threadDetailLoadError = "";
+            renderThreadDetail();
+            recoverActiveSlackRoom({ force:true });
+          });
+        } else {
+          thHistoryEl.innerHTML = '<div class="cv-empty" role="status">Loading conversation…</div>';
+          recoverActiveSlackRoom();
+        }
+        return;
+      }
       // A conversation whose messages live on the SENT side renders empty until
       // the sent cache loads — and since 0.1.73 that refresh is lazy (30s when
       // idle). Ask for it now and show a loading line rather than a blank pane;
@@ -11560,7 +11653,7 @@
       // again cannot change the audience. Human @mentions disambiguate group
       // recipients only; the owned Claude and Codex options remain available
       // in every developer composer below.
-      const participantNames = new Set();
+      const participantMentions = new Map();
       if (payload.features?.peopleMentions === true && thread.isGroup) {
         const group = groupsList.find((candidate) => String(candidate.id || "") === String(thread.groupId || ""))
           || groupsList.find((candidate) => normalizedPartyName(candidate.name) === normalizedPartyName(thread.groupName));
@@ -11568,7 +11661,13 @@
         // labels can be stale (or belong to somebody who has left), and must
         // not sit beside the viewer's saved contact name as a second person.
         for (const member of group ? groupInfoRoster(group) : []) {
-          if (!member.currentUser && member.name) participantNames.add(String(member.name).trim());
+          const name = String(member.name || "").trim();
+          const token = mentionTokenForContact(member);
+          if (!member.currentUser && name && token && !participantMentions.has(normalizedMentionToken(token))) {
+            participantMentions.set(normalizedMentionToken(token), {
+              token, name:`@${name}`, note:"Participant", agent:false,
+            });
+          }
         }
       }
       const mentionOptions = [
@@ -11576,8 +11675,7 @@
           { token:"Claude", name:"@Claude", note:"Run Claude on my computer", agent:true },
           { token:"Codex", name:"@Codex", note:"Run Codex on my computer", agent:true },
         ] : []),
-        ...[...participantNames]
-          .map((name) => ({ token:name.replace(/\s+/g, "_"), name:`@${name}`, note:"Participant", agent:false })),
+        ...participantMentions.values(),
       ];
       prepareMentionComposer(thQrInput, mentionOptions, threadDraft);
       const closeMentions = () => { mentionMatches = []; mentionStart = -1; mentionMenu?.classList.add("hidden"); };
@@ -12000,6 +12098,9 @@
       : relaysListScrollTop;
     const navigateBack = () => {
       threadDetailId = null;
+      threadDetailChatId = "";
+      threadDetailLoadError = "";
+      threadDetailRecovery = null;
       threadDetailScrolledFor = null;
       chatExpanded = false;
       // Back goes back to the LIST that was clicked. A room entered from People
@@ -12028,11 +12129,19 @@
     if (activeView === "relays" && source === "relays" && scrollEl) relaysListScrollTop = scrollEl.scrollTop;
     if (activeView === "slack" && source === "slack" && scrollEl) slackListScrollTop = scrollEl.scrollTop;
     if (activeView === "contacts" && source === "contacts" && scrollEl) contactsListScrollTop = scrollEl.scrollTop;
+    const surface = conversationSurface(source);
+    const requestedRoom = isConversationRoomSource(source)
+      ? chatRoomForThread(threadId, surface)
+      : null;
+    const canonicalChatId = isSlackIntegratedRoom(requestedRoom) && requestedRoom.chatId
+      ? String(requestedRoom.chatId)
+      : source === "slack" ? String(threadId || "") : "";
+    const roomCoordinate = canonicalChatId || threadId;
     dismissReactionPickers();
     slackFocusedThreadId = "";
     threadDetailScrolledFor = null;
-    const entryFollowToken = beginThreadEntryFollow(threadId);
-    const composerFocusRequest = beginThreadComposerEntryFocus(threadId);
+    const entryFollowToken = beginThreadEntryFollow(roomCoordinate);
+    const composerFocusRequest = beginThreadComposerEntryFocus(roomCoordinate);
     threadsSource = source;
     threadsCameFrom = source;
     expandedMsgIds.clear();
@@ -12046,17 +12155,19 @@
     // and callers may pass options.expanded explicitly).
     chatExpanded = options.expanded === undefined ? source === "chat" : Boolean(options.expanded);
     syncExpandButton();
-    threadDetailId = threadId;
+    threadDetailId = roomCoordinate;
+    threadDetailChatId = canonicalChatId;
+    threadDetailLoadError = "";
+    threadDetailRecovery = null;
     threadDetailPartyHint = partyHint;
     activeView = "threads";
     // Entering a conversation READS IT — all of it, like every messenger.
     // Letters used to be exempt, waiting for a per-message unfold, so a reader
     // could open a chat, read the thing, come back, and still find it bold with
     // a count on it (David, live). Opening is reading.
-    const surface = conversationSurface(source);
-    const room = isConversationRoomSource(source)
-      ? chatRoomForThread(threadId, surface)
-      : null;
+    const room = requestedRoom || (isConversationRoomSource(source)
+      ? chatRoomForThread(roomCoordinate, surface)
+      : null);
     const partyKey = room && room.partyKey;
     const party = String(partyHint || (room && room.name) || "").trim().toLowerCase();
     const roomAckIds = [];
@@ -12068,7 +12179,7 @@
         ? (room.threadIds instanceof Set ? room.threadIds.has(m.threadId) : m.threadId === threadId)
         : partyKey || party
           ? sameDirectParty(m, partyKey, party)
-          : m.threadId === threadId;
+          : m.threadId === roomCoordinate;
       if (sameRoom) {
         const messageId = String(m.id);
         if (m.provider?.name !== "slack") roomAckIds.push(messageId);
@@ -12098,7 +12209,7 @@
     // case the compact/expanded frame transition briefly disturbed focus.
     focusThreadComposerOnEntry(composerFocusRequest);
     settleThreadComposerEntryFocus(composerFocusRequest);
-    hydrateThreadEntry(entryFollowToken);
+    hydrateThreadEntry(entryFollowToken, { includeSent:source !== "slack" });
     // Let Chromium commit the destination before the main process takes the
     // one locked state.json write for the room. Per-message synchronous writes
     // here were the first-open-only stall: once read, later opens were smooth.

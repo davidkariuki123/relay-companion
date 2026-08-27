@@ -31,14 +31,14 @@ test("a relay tap lands in the glance frame; only Chat-sourced opens earn the sp
   assert.doesNotMatch(open, /chatExpanded = false;/);
 });
 
-test("every room entry follows newest through sent-cache hydration regardless of the previous exit", () => {
+test("every room entry follows newest through its own hydration regardless of the previous exit", () => {
   const open = html.slice(html.indexOf("function openThreadDetail("), html.indexOf("// ---------- Settings view"));
   const resetAt = open.indexOf("threadDetailScrolledFor = null;");
-  const selectAt = open.indexOf("threadDetailId = threadId;");
+  const selectAt = open.indexOf("threadDetailId = roomCoordinate;");
   assert.ok(resetAt >= 0 && resetAt < selectAt, "entry rearms scrolling before selecting even the same room id");
-  assert.match(open, /const entryFollowToken = beginThreadEntryFollow\(threadId\)/);
-  assert.match(open, /commitNavigation\(\{ outerScrollTop: 0 \}\);[\s\S]*?hydrateThreadEntry\(entryFollowToken\)/,
-    "the outbound refresh remains part of the same guarded room entry");
+  assert.match(open, /const entryFollowToken = beginThreadEntryFollow\(roomCoordinate\)/);
+  assert.match(open, /commitNavigation\(\{ outerScrollTop: 0 \}\);[\s\S]*?hydrateThreadEntry\(entryFollowToken, \{ includeSent:source !== "slack" \}\)/,
+    "each room keeps one guarded entry follow while Slack avoids the unrelated Sent refresh");
 
   const render = html.slice(html.indexOf("function renderThreadDetail()"), html.indexOf('document.getElementById("thExpand")'));
   assert.match(render, /const entryFollowToken = threadEntryFollowToken\(\)/);
