@@ -5,6 +5,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { PassThrough, Writable } from "node:stream";
+import { fileURLToPath } from "node:url";
+
+const COMPANION_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const MCP_BRIDGE_ENTRYPOINT = path.join(COMPANION_ROOT, "src", "mcp-bridge.js");
 
 test("task runtime ledger persists sessions and processed messages", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-runtime-test-"));
@@ -263,11 +267,11 @@ test("host adapters expose auth preflight, Relay MCP plans, UI open, and unsuppo
   assert.equal(adapters.preflightAuth(host).ok, true);
   assert.deepEqual(
     adapters.relayToolPlan("codex", "tsess_plan").appServerConfig.mcp_servers.relay.args.at(-1),
-    path.resolve("packages/companion/src/mcp-bridge.js"),
+    MCP_BRIDGE_ENTRYPOINT,
   );
   assert.deepEqual(
     adapters.relayToolPlan("claude_code", "tsess_plan").mcpServers.relay.args.at(-1),
-    path.resolve("packages/companion/src/mcp-bridge.js"),
+    MCP_BRIDGE_ENTRYPOINT,
   );
   assert.deepEqual(await adapters.interruptTurn({ session: session(), sessionRef: { mode: "unknown" } }), {
     ok: false,
@@ -578,7 +582,7 @@ test("Codex host adapter starts app-server threads with Relay MCP config", async
   assert.equal(out.sessionRef.mode, "codex_app_server");
   assert.equal(out.sessionRef.threadId, "thr_relay_1");
   assert.equal(out.sessionRef.turnId, "turn_1");
-  assert.equal(recorded.threadParams.config.mcp_servers.relay.args.at(-1), path.resolve("packages/companion/src/mcp-bridge.js"));
+  assert.equal(recorded.threadParams.config.mcp_servers.relay.args.at(-1), MCP_BRIDGE_ENTRYPOINT);
   assert.match(recorded.turnStarts[0].input[0].text, /Relay task task_app_server_1/);
 });
 
@@ -884,7 +888,7 @@ test("Claude host adapter starts Agent SDK sessions with Relay MCP config", asyn
   assert.equal(out.sessionRef.mode, "claude_agent_sdk");
   assert.equal(recorded.queries.length, 1);
   assert.equal(recorded.queries[0].options.mcpServers.relay.command, process.execPath);
-  assert.equal(recorded.queries[0].options.mcpServers.relay.args.at(-1), path.resolve("packages/companion/src/mcp-bridge.js"));
+  assert.equal(recorded.queries[0].options.mcpServers.relay.args.at(-1), MCP_BRIDGE_ENTRYPOINT);
   assert.equal(recorded.queries[0].options.permissionMode, "auto");
   assert.match(recorded.queries[0].prompt, /Relay task task_claude_sdk_1/);
 });
