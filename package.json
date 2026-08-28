@@ -1,6 +1,6 @@
 {
   "name": "relay-companion",
-  "version": "0.1.420",
+  "version": "0.1.421",
   "description": "Install Relay for Claude Code, Cowork, and Codex, then sign in from the Relay pill.",
   "homepage": "https://sendrelays.com/get-started",
   "repository": {

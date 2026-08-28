@@ -4696,9 +4696,17 @@ const POLL_NEAR_MS = 24;
 const POLL_FAR_MS = 64;
 const POLL_HIDDEN_MS = 250;
 const NEAR_PAD = 96;
+// The renderer normally closes every morph with an explicit settled receipt.
+// Keep a main-process deadline as a safety property: a suspended animation
+// frame or lost renderer IPC must never leave an invisible, larger Windows
+// input surface over the desktop indefinitely.
+const NATIVE_GEOMETRY_WATCHDOG_MS = 750;
+const NATIVE_GEOMETRY_VERIFY_MS = 80;
 let cardSize = { w: CARD_INITIAL.w, h: CARD_INITIAL.h };
 let hitTimer = null;
 let hitIgnoring = false;
+let nativeGeometryTimer = null;
+let nativeGeometryGeneration = 0;
 const HIT_TEST_POINTER_BLIND = process.env.RELAY_OVERLAY_TEST_IGNORE_POINTER === "1";
 
 function applyIgnore(next, { force = false } = {}) {
@@ -4781,6 +4789,22 @@ function fitOverlayWindowToCard({ settle = false } = {}) {
   // remains after the visual card has folded.
   if (!growing && !settle) return;
   try { win.setBounds(target, false); } catch {}
+}
+
+function scheduleNativeGeometryReconcile(delayMs) {
+  if (FIXED_OVERLAY_SURFACE) return;
+  nativeGeometryGeneration += 1;
+  const generation = nativeGeometryGeneration;
+  if (nativeGeometryTimer) clearTimeout(nativeGeometryTimer);
+  nativeGeometryTimer = setTimeout(() => {
+    nativeGeometryTimer = null;
+    if (generation !== nativeGeometryGeneration) return;
+    // `cardSize` is the newest accepted destination. Force a settled fit even
+    // when the renderer's final spring frame never ran, and repeat a completed
+    // transaction once if Windows did not retain its first bounds update.
+    fitOverlayWindowToCard({ settle: true });
+  }, delayMs);
+  if (typeof nativeGeometryTimer.unref === "function") nativeGeometryTimer.unref();
 }
 
 function createWindow() {
@@ -8479,7 +8503,11 @@ function acceptRendererCardSize(event, w, h, motion = {}) {
   latestCardMotionId = motionId;
   cardSize = { w, h };
   if (FIXED_OVERLAY_SURFACE) scheduleHit(0);
-  else fitOverlayWindowToCard({ settle: motion.phase === "settled" });
+  else {
+    const settled = motion.phase === "settled";
+    fitOverlayWindowToCard({ settle });
+    scheduleNativeGeometryReconcile(settled ? NATIVE_GEOMETRY_VERIFY_MS : NATIVE_GEOMETRY_WATCHDOG_MS);
+  }
   return { ok:true };
 }
 ipcMain.on("relay:cardSize", (event, w, h, motion = {}) => {
@@ -8493,7 +8521,10 @@ ipcMain.handle("relay:prepareCardSize", (event, w, h) => {
   if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return { ok:false };
   cardSize = { w, h };
   if (FIXED_OVERLAY_SURFACE) scheduleHit(0);
-  else fitOverlayWindowToCard();
+  else {
+    fitOverlayWindowToCard();
+    scheduleNativeGeometryReconcile(NATIVE_GEOMETRY_WATCHDOG_MS);
+  }
   return { ok:true };
 });
 ipcMain.on("relay:setPos", (_e, x, y) => {

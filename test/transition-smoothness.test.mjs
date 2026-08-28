@@ -99,7 +99,7 @@ test("the folded pill uses one visual face across both native window strategies"
   assert.match(main, /ipcMain\.handle\("relay:cardSizeSettled"/);
 });
 
-test("collapse keeps macOS geometry stable and settles ordinary Windows geometry once", () => {
+test("collapse keeps macOS geometry stable and bounds ordinary Windows stale geometry", () => {
   assert.match(main, /function fitOverlayWindowToCard/);
   const fit = between(main, "function fitOverlayWindowToCard", "function createWindow");
   assert.match(fit, /if \(FIXED_OVERLAY_SURFACE \|\| !win/,
@@ -108,6 +108,11 @@ test("collapse keeps macOS geometry stable and settles ordinary Windows geometry
     "Windows shrink waits for the renderer's settled state");
   assert.match(fit, /win\.setBounds\(target, false\)/,
     "Windows uses one ordinary non-animated bounds transaction");
+  assert.match(fit, /function scheduleNativeGeometryReconcile/);
+  assert.match(fit, /fitOverlayWindowToCard\(\{ settle: true \}\)/,
+    "the watchdog reconciles to the newest visible-card target");
+  assert.match(main, /const NATIVE_GEOMETRY_WATCHDOG_MS = 750/,
+    "a missed renderer settlement cannot preserve the expanded Windows hit box indefinitely");
   const sizeHandlers = between(main, "function acceptRendererCardSize", 'ipcMain.on("relay:setPos"');
   assert.match(sizeHandlers, /cardSize = \{ w, h \}/);
   assert.doesNotMatch(sizeHandlers, /setBounds|setPosition|setSize/,

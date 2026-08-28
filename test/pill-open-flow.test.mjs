@@ -621,7 +621,7 @@ test("folding publishes destination native geometry before an animation frame ca
   );
   const frame = sliceFunction(html, "function frame(");
   assert.match(frame, /commitSettledCardSize\(W\.t, H\.t, cardMotionId\)/,
-    "the final geometry commits from actual spring settlement, not a guessed timeout");
+    "the normal final geometry commits from actual spring settlement");
   assert.doesNotMatch(frame, /publishCardSizeThrottled/,
     "main never receives per-frame geometry that could compete with the renderer spring");
   assert.match(html, /const cardMotionSessionId = crypto\.randomUUID\(\)/,
@@ -631,6 +631,12 @@ test("folding publishes destination native geometry before an animation frame ca
   assert.match(preload, /ipcRenderer\.invoke\("relay:cardSizeSettled"/,
     "final renderer state waits for main's geometry acknowledgement");
   assert.match(main, /ipcMain\.handle\("relay:cardSizeSettled"/);
+  assert.match(main, /const NATIVE_GEOMETRY_WATCHDOG_MS = 750/);
+  const reconcile = sliceFunction(main, "function scheduleNativeGeometryReconcile(");
+  assert.match(reconcile, /fitOverlayWindowToCard\(\{ settle: true \}\)/,
+    "main eventually trims a stale Windows input surface even if renderer settlement is lost");
+  assert.match(reconcile, /generation !== nativeGeometryGeneration/,
+    "an older shrink deadline cannot override a newer card destination");
 });
 
 test("Windows/Linux use ordinary focusable windows, with a Linux taskbar fallback, while only macOS hit-tests a fixed canvas", () => {
@@ -706,8 +712,10 @@ test("card-size IPC resizes ordinary Windows windows and hit-tests only the macO
   assert.match(sizeHandler, /cardSize = \{ w, h \}/);
   assert.match(sizeHandler, /if \(FIXED_OVERLAY_SURFACE\) scheduleHit\(0\);/,
     "a macOS visual target immediately refreshes the matching input region");
-  assert.match(sizeHandler, /else fitOverlayWindowToCard\(\{ settle: motion\.phase === "settled" \}\)/,
+  assert.match(sizeHandler, /const settled = motion\.phase === "settled";[\s\S]*?fitOverlayWindowToCard\(\{ settle \}\)/,
     "Windows follows the renderer with ordinary native bounds");
+  assert.match(sizeHandler, /scheduleNativeGeometryReconcile\(settled \? NATIVE_GEOMETRY_VERIFY_MS : NATIVE_GEOMETRY_WATCHDOG_MS\)/,
+    "Windows verifies settled bounds and has a bounded fallback for a missing receipt");
   const anchor = main.slice(main.indexOf("function anchorTopRight"), main.indexOf("function showOverlayWindow"));
   assert.match(anchor, /function anchorTopRight\(\)/);
   assert.match(anchor, /fittedOverlayBounds\(wa, nativeSize,/);

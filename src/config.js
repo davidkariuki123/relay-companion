@@ -50,7 +50,7 @@ export const DEFAULT_WEB_URL = "https://sendrelays.com";
 // The dev API (DEPLOY.md "Dev backend"): same accounts, same inboxes, newer
 // server code — the RelayDevApi App Runner service, deployed 2026-08-14.
 // `relay env dev` flips a machine here with no flags.
-export const DEFAULT_DEV_API_URL = "https://q9dpgb9fzb.us-east-1.awsapprunner.com";
+export const DEFAULT_DEV_API_URL = "https://dev-api.sendrelays.com";
 // Staging is intentionally dormant until its App Runner service is provisioned.
 // `relay env staging --api https://...` can persist the assigned URL once it
 // exists; a later stock build may bake it here after the endpoint is stable.

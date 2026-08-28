@@ -65,7 +65,7 @@ test("the legacy update-channel command switches API and release code atomically
 
   const stored = JSON.parse(fs.readFileSync(path.join(dir, "config.json"), "utf8"));
   assert.equal(stored.updateChannel, "dev");
-  assert.match(stored.apiUrl, /q9dpgb9fzb\.us-east-1\.awsapprunner\.com/);
+  assert.equal(stored.apiUrl, "https://dev-api.sendrelays.com");
   assert.equal(stored.devApiUrl, stored.apiUrl);
 
   const restored = runRelay(dir, "update-channel", "stable");

@@ -20,14 +20,21 @@ function defaultRun(command, args) {
   return spawnSync(command, args, { encoding: "utf8", timeout: 10_000 });
 }
 
-export function updateAgentLabelsFromLaunchctl(output) {
-  const labels = new Set();
+export function updateAgentJobsFromLaunchctl(output) {
+  const jobs = new Map();
   for (const line of String(output || "").split(/\r?\n/)) {
     const parts = line.trim().split(/\s+/);
+    const pid = /^\d+$/.test(parts[0] || "") ? Number(parts[0]) : null;
     const label = parts.length >= 3 ? parts[2] : "";
-    if (label === MAC_UPDATE_AGENT_LABEL || label.startsWith(MAC_UPDATE_AGENT_LABEL_PREFIX)) labels.add(label);
+    if (label === MAC_UPDATE_AGENT_LABEL || label.startsWith(MAC_UPDATE_AGENT_LABEL_PREFIX)) {
+      jobs.set(label, { label, pid });
+    }
   }
-  return [...labels].sort();
+  return [...jobs.values()].sort((left, right) => left.label.localeCompare(right.label));
+}
+
+export function updateAgentLabelsFromLaunchctl(output) {
+  return updateAgentJobsFromLaunchctl(output).map((job) => job.label);
 }
 
 function relayUpdatePlists({ homeDir, fsImpl, preserveCurrentWorker }) {
@@ -64,6 +71,7 @@ export function cleanupMacUpdateAgents({
   runCommand = defaultRun,
   fsImpl = fs,
   preserveCurrentWorker = process.env[ACTIVE_UPDATE_WORKER_ENV] === "1",
+  parentPid = process.ppid,
 } = {}) {
   if (platform !== "darwin") return { ok: true, skipped: true, removedLabels: [], removedFiles: [], failures: [] };
 
@@ -74,7 +82,13 @@ export function cleanupMacUpdateAgents({
     failures.push({ kind: "enumerate", detail: commandOutput(listing) || "launchctl list failed" });
   }
 
-  const listedLabels = new Set(updateAgentLabelsFromLaunchctl(commandOutput(listing)));
+  const listedJobs = updateAgentJobsFromLaunchctl(commandOutput(listing));
+  const listedLabels = new Set(listedJobs.map((job) => job.label));
+  const fixedWorker = listedJobs.find((job) => job.label === MAC_UPDATE_AGENT_LABEL);
+  // Updaters released before the environment contract still launch candidate
+  // repair synchronously, so the live fixed worker is the repair process's parent.
+  preserveCurrentWorker = preserveCurrentWorker
+    || (Number.isInteger(parentPid) && parentPid > 0 && fixedWorker?.pid === parentPid);
   const labels = new Set(listedLabels);
   if (!preserveCurrentWorker) labels.add(MAC_UPDATE_AGENT_LABEL);
   else labels.delete(MAC_UPDATE_AGENT_LABEL);
