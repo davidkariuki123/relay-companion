@@ -1,7 +1,7 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { prepareOrdinaryRelayAttachments } from "./attachments.js";
+import { hasAttachmentPayload, prepareOrdinaryRelayAttachments } from "./attachments.js";
 import { workspacePassportFromDeclaration } from "./repo-identity.js";
 import { fragileLinkWarning } from "./links.js";
 import { localizeAtFields } from "./local-time.cjs";
@@ -871,8 +871,31 @@ const SURFACE_BY_MCP_CLIENT = {
   "claude-code": "claude_code",
 };
 
-let callingClientName = "";
-let unknownClientReported = "";
+let unknownClientReported = false;
+
+export function createMcpSessionContext({
+  env = process.env,
+  argv = process.argv,
+  cwd = process.cwd(),
+  bridgePid = process.pid,
+  channelEnabled,
+  channelSource = "none",
+  attachmentGate = null,
+} = {}) {
+  return {
+    env: { ...env },
+    argv: Array.isArray(argv) ? [...argv] : [],
+    cwd,
+    bridgePid,
+    channelEnabled: channelEnabled === undefined ? channelsEnabledForSession(argv, env) : Boolean(channelEnabled),
+    channelSource,
+    callingClientName: "",
+    pendingLongForHumanReviews: new Map(),
+    attachmentGate,
+  };
+}
+
+const DEFAULT_MCP_SESSION_CONTEXT = createMcpSessionContext();
 
 // Read per call, not once at startup: the handshake is NOT complete when
 // `server.connect()` resolves — connect only attaches the transport's
@@ -882,41 +905,42 @@ let unknownClientReported = "";
 // enforce it, so a non-conforming client can reach a tool with nothing stored.
 // Then this stays empty and the relay goes out unlabelled, which is the right
 // failure: the one thing worse than missing provenance is invented provenance.
-export function rememberCallingClient(clientInfo) {
+export function rememberCallingClient(clientInfo, sessionContext = DEFAULT_MCP_SESSION_CONTEXT) {
   const name = String(clientInfo?.name || "").trim();
   if (!name) return;
-  callingClientName = name;
-  if (!SURFACE_BY_MCP_CLIENT[name] && unknownClientReported !== name) {
-    unknownClientReported = name;
+  sessionContext.callingClientName = name;
+  if (!SURFACE_BY_MCP_CLIENT[name] && !unknownClientReported) {
+    unknownClientReported = true;
     // stderr only: stdout is the MCP wire. An unrecognised host stays
     // unlabelled — provenance is reported, never guessed.
     console.error(`relay: unrecognised MCP client ${JSON.stringify(name)}; relays from it will be unlabelled`);
   }
 }
 
-export function relayCallingSurface() {
-  return SURFACE_BY_MCP_CLIENT[callingClientName];
+export function relayCallingSurface(sessionContext = DEFAULT_MCP_SESSION_CONTEXT) {
+  return SURFACE_BY_MCP_CLIENT[sessionContext.callingClientName];
 }
 
-function relaySource(repoDeclaration) {
+function relaySource(repoDeclaration, sessionContext = DEFAULT_MCP_SESSION_CONTEXT) {
   let workspace = null;
   try {
     workspace = workspacePassportFromDeclaration(repoDeclaration);
   } catch {
     workspace = null;
   }
-  const surface = relayCallingSurface();
+  const surface = relayCallingSurface(sessionContext);
   return { host: "relay-mcp", ...(surface ? { surface } : {}), ...(workspace ? { workspace } : {}) };
 }
 
-function sessionSourceBinding(env = process.env) {
+function sessionSourceBinding(sessionContext = DEFAULT_MCP_SESSION_CONTEXT) {
+  const env = sessionContext.env || {};
   const codex = String(env.CODEX_THREAD_ID || "").trim();
   if (codex) return { sourceProvider: "codex", sourceNativeId: codex };
   const claude = String(
     env.CLAUDE_CODE_SESSION_ID || env.RELAY_CALLING_NATIVE_SESSION_ID || env.CLAUDE_SESSION_ID || "",
   ).trim();
   if (claude) return { sourceProvider: "claude", sourceNativeId: claude };
-  const surface = relayCallingSurface();
+  const surface = relayCallingSurface(sessionContext);
   if (surface === "codex") return { sourceProvider: "codex" };
   if (surface === "claude_code") return { sourceProvider: "claude" };
   return {};
@@ -1349,7 +1373,6 @@ function relayTitleWordCount(value) {
   return String(value || "").trim().split(/\s+/u).filter(Boolean).length;
 }
 
-const pendingLongForHumanReviews = new Map();
 const MAX_PENDING_LONG_FOR_HUMAN_REVIEWS = 256;
 
 function relayHumanWordCount(value) {
@@ -1370,7 +1393,8 @@ function longForHumanFingerprint(toolName, args) {
     .digest("hex");
 }
 
-function rememberLongForHumanReview(key, fingerprint) {
+function rememberLongForHumanReview(key, fingerprint, sessionContext = DEFAULT_MCP_SESSION_CONTEXT) {
+  const pendingLongForHumanReviews = sessionContext.pendingLongForHumanReviews;
   pendingLongForHumanReviews.delete(key);
   pendingLongForHumanReviews.set(key, fingerprint);
   while (pendingLongForHumanReviews.size > MAX_PENDING_LONG_FOR_HUMAN_REVIEWS) {
@@ -1385,7 +1409,8 @@ function rememberLongForHumanReview(key, fingerprint) {
  * accepted only for that exact draft after Relay has already returned the review
  * instruction in this MCP process; changing the draft starts a fresh review.
  */
-function requireLongForHumanReview(toolName, args) {
+function requireLongForHumanReview(toolName, args, sessionContext = DEFAULT_MCP_SESSION_CONTEXT) {
+  const pendingLongForHumanReviews = sessionContext.pendingLongForHumanReviews;
   const wordCount = relayHumanWordCount(args?.forHuman);
   const key = longForHumanReviewKey(toolName, args);
   if (wordCount <= FOR_HUMAN_SOFT_WORD_LIMIT) {
@@ -1400,7 +1425,7 @@ function requireLongForHumanReview(toolName, args) {
     return;
   }
 
-  rememberLongForHumanReview(key, fingerprint);
+  rememberLongForHumanReview(key, fingerprint, sessionContext);
   throw new Error(
     `forHuman is ${wordCount} words; Relay's review threshold is ${FOR_HUMAN_SOFT_WORD_LIMIT} words. `
     + "Nothing was sent. Read the draft back as the person who will get it: someone who did not do this work and is hearing about it for the first time. Cut the words they would only know from doing the job — the names of parts, the steps you took, how any of it works. Never cut something they would decide differently about if they knew it, and never squeeze sentences into shorthand to save room. "
@@ -1522,6 +1547,7 @@ export function relayCallErrorResult(err) {
 export async function handleCall(client, name, args, {
   features = { requests: true },
   shareLinks = true,
+  sessionContext = DEFAULT_MCP_SESSION_CONTEXT,
 } = {}) {
   if (
     features.requests === false
@@ -1571,7 +1597,7 @@ export async function handleCall(client, name, args, {
           limit: args.limit,
           maxCharsPerItem: args.maxCharsPerItem,
           idempotencyKey: `inspect:${randomUUID()}`,
-          ...sessionSourceBinding(),
+          ...sessionSourceBinding(sessionContext),
         });
         return text(await waitForAiSessionInspection(client, created.operation.id));
       }
@@ -1601,7 +1627,7 @@ export async function handleCall(client, name, args, {
           turnNumber: args.turnNumber,
           maxTurns: args.maxTurns,
           idempotencyKey: args.idempotencyKey,
-          ...sessionSourceBinding(),
+          ...sessionSourceBinding(sessionContext),
         })),
       );
     }
@@ -1620,11 +1646,11 @@ export async function handleCall(client, name, args, {
       return text(await client.taskStarted(taskRelayId, {
         idempotencyKey,
         source: "relay_mcp_human_requested",
-        ...sessionSourceBinding(),
+        ...sessionSourceBinding(sessionContext),
         taskRunOwner: {
           kind: "external_mcp",
-          ...(sessionSourceBinding().sourceProvider ? { provider: sessionSourceBinding().sourceProvider } : {}),
-          ...(sessionSourceBinding().sourceNativeId ? { nativeSessionId: sessionSourceBinding().sourceNativeId } : {}),
+          ...(sessionSourceBinding(sessionContext).sourceProvider ? { provider: sessionSourceBinding(sessionContext).sourceProvider } : {}),
+          ...(sessionSourceBinding(sessionContext).sourceNativeId ? { nativeSessionId: sessionSourceBinding(sessionContext).sourceNativeId } : {}),
         },
       }));
     }
@@ -1636,13 +1662,13 @@ export async function handleCall(client, name, args, {
       if (!taskRelayId || !forHuman || !forAgent || idempotencyKey.length < 8) {
         throw new Error("taskRelayId, forHuman, forAgent, and an idempotencyKey of at least 8 characters are required");
       }
-      requireLongForHumanReview("relay_task_complete", args);
+      requireLongForHumanReview("relay_task_complete", args, sessionContext);
       return text(await client.taskCompleted(taskRelayId, {
         forHuman,
         forAgent,
-        attachments: await prepareOrdinaryRelayAttachments(args),
+        attachments: await prepareOrdinaryRelayAttachments(args, { baseDir: sessionContext.cwd }),
         idempotencyKey,
-        ...sessionSourceBinding(),
+        ...sessionSourceBinding(sessionContext),
       }));
     }
     case "relay_task_unclaim": {
@@ -1693,7 +1719,7 @@ export async function handleCall(client, name, args, {
           + "Move implementation evidence, chronology, technical qualifications, and additional findings into forAgent. Keep forHuman to the consequence, ask, opinion, or decision the recipient needs, then retry with the same idempotencyKey.",
         );
       }
-      requireLongForHumanReview("relay_send", args);
+      requireLongForHumanReview("relay_send", args, sessionContext);
       return text(
         relaySendResultForAgent(await client.sendRelay({
           recipient: args.recipient,
@@ -1702,9 +1728,9 @@ export async function handleCall(client, name, args, {
           forHuman: args.forHuman,
           forAgent: args.forAgent,
           ...(args.longForHumanConfirmed === true ? { longForHumanConfirmed: true } : {}),
-          source: relaySource(args.repo),
+          source: relaySource(args.repo, sessionContext),
           targetSurfaces: args.targetSurfaces || [],
-          attachments: await prepareOrdinaryRelayAttachments(args),
+          attachments: await prepareOrdinaryRelayAttachments(args, { baseDir: sessionContext.cwd }),
           ...(explicitReplyToRelayId ? { inReplyToRelayId: explicitReplyToRelayId } : {}),
           // Rolling clients may still submit the old control-plane `type`.
           // Keep transport compatibility, but do not expose it in the model
@@ -1753,11 +1779,11 @@ export async function handleCall(client, name, args, {
       // gate 7 needs the byte counts and still precedes the call. Skipping the
       // review gate would make this the documented way to launder a 400-word
       // message in the human's voice onto a public url.
-      requireLongForHumanReview("relay_share_link", args);
+      requireLongForHumanReview("relay_share_link", args, sessionContext);
       const attachments = await prepareOrdinaryRelayAttachments({
         files: args.files,
         idempotencyKey: args.idempotencyKey,
-      });
+      }, { baseDir: sessionContext.cwd });
       assertShareAttachmentBudget(attachments);
       const recipientName = String(args.recipientName || "").trim();
       const minted = await shareLinkCall(() => client.mintShareLink({
@@ -1766,7 +1792,7 @@ export async function handleCall(client, name, args, {
         forHuman: args.forHuman,
         forAgent: args.forAgent || "",
         ...(args.longForHumanConfirmed === true ? { longForHumanConfirmed: true } : {}),
-        source: relaySource(args.repo),
+        source: relaySource(args.repo, sessionContext),
         attachments,
         idempotencyKey: args.idempotencyKey,
       }));
@@ -1904,7 +1930,7 @@ export async function handleCall(client, name, args, {
       }
     case "relay_chat_send":
     case "relay_chat_reply": {
-      requireLongForHumanReview(name, args);
+      requireLongForHumanReview(name, args, sessionContext);
       const chat = await fetchChatForAgent(client, args);
       const chatId = String(chat?.chatId || args.chatId || "").trim();
       if (!chatId) throw new Error("Relay could not resolve that chat");
@@ -1920,8 +1946,8 @@ export async function handleCall(client, name, args, {
             ...(String(args.title || "").trim() ? { title: String(args.title).trim() } : {}),
             forHuman,
             ...(args.longForHumanConfirmed === true ? { longForHumanConfirmed: true } : {}),
-            source: relaySource(args.repo),
-            attachments: await prepareOrdinaryRelayAttachments(args),
+            source: relaySource(args.repo, sessionContext),
+            attachments: await prepareOrdinaryRelayAttachments(args, { baseDir: sessionContext.cwd }),
             ...(args.replyToRelayId ? { inReplyToRelayId: String(args.replyToRelayId) } : {}),
             idempotencyKey: args.idempotencyKey,
           }),
@@ -1930,7 +1956,7 @@ export async function handleCall(client, name, args, {
       );
     }
     case "relay_message_edit":
-      if (args.forHuman !== undefined) requireLongForHumanReview("relay_message_edit", args);
+      if (args.forHuman !== undefined) requireLongForHumanReview("relay_message_edit", args, sessionContext);
       return text(await client.editMessage(args.relayId, {
         ...(args.forHuman !== undefined ? { forHuman: args.forHuman } : {}),
         ...(args.forAgent !== undefined ? { forAgent: args.forAgent } : {}),
@@ -2009,8 +2035,14 @@ export function accountDriftRefusal(client) {
   };
 }
 
-export async function runMcpServer() {
-  const client = new RelayClient();
+export async function createRelayMcpSession({
+  transport,
+  sessionContext = createMcpSessionContext(),
+  clientFactory = () => new RelayClient(),
+  onClose = null,
+} = {}) {
+  if (!transport) throw new Error("Relay MCP session requires a transport");
+  const client = clientFactory();
   const features = await accountProductFeatures({
     client,
     env: process.env,
@@ -2038,55 +2070,104 @@ export async function runMcpServer() {
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    rememberCallingClient(server.getClientVersion());
+    rememberCallingClient(server.getClientVersion(), sessionContext);
     const refusal = accountDriftRefusal(client);
     if (refusal) throw new Error(refusal.content[0].text);
     const encryption = await activeMcpEncryptionState(client);
-    return { tools: encryption.enabled ? toolsForE2eeLocalAccount(features) : toolsForAccount(features) };
+    const surface = relayCallingSurface(sessionContext);
+    return { tools: encryption.enabled ? toolsForE2eeLocalAccount(features, surface) : toolsForAccount(features, surface) };
   });
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     // Who is calling, straight from the handshake this client already sent.
-    rememberCallingClient(server.getClientVersion());
+    rememberCallingClient(server.getClientVersion(), sessionContext);
     // This process is a child of the agent host and outlives any pairing the
     // human performs while the session is open; Relay cannot restart it. So
     // before every call, check the account on disk against the one this server
     // was bound to, and refuse rather than answer for the wrong person.
     const refusal = accountDriftRefusal(client);
     if (refusal) return refusal;
+    let releaseAttachment = null;
     try {
+      if (sessionContext.attachmentGate && hasAttachmentPayload(req.params.arguments || {})) {
+        releaseAttachment = sessionContext.attachmentGate.tryAcquire();
+        if (!releaseAttachment) {
+          throw new Error("Relay is busy sending another attachment. Retry this exact call with the same idempotency key.");
+        }
+      }
       const encryption = await activeMcpEncryptionState(client);
       if (encryption.enabled) assertE2eeLocalToolCall(req.params.name);
       return await handleCall(client, req.params.name, req.params.arguments || {}, {
         features,
         shareLinks: !encryption.enabled,
+        sessionContext,
       });
     } catch (err) {
       return relayCallErrorResult(err);
+    } finally {
+      releaseAttachment?.();
+      if (typeof transport.releaseRequest === "function") {
+        setImmediate(() => transport.releaseRequest(req.id));
+      }
     }
   });
 
-  const transport = new StdioServerTransport();
+  let closed = false;
+  let channelPump = null;
+  server.onclose = () => {
+    if (closed) return;
+    closed = true;
+    channelPump?.stop?.();
+    onClose?.();
+  };
   await server.connect(transport);
   // Only pump when the session actually enabled us as a channel: with no
   // --channels flag the notifications are ignored, and starting the watcher
   // anyway would burn a timer in every MCP process for nothing.
-  startChannelPumpIfEnabled(server);
+  channelPump = startChannelPumpIfEnabled(server, {
+    argv: sessionContext.argv,
+    env: sessionContext.env,
+    channelEnabled: sessionContext.channelEnabled,
+    bridgePid: sessionContext.bridgePid,
+  });
+  return {
+    server,
+    transport,
+    client,
+    features,
+    sessionContext,
+    close: async () => {
+      channelPump?.stop?.();
+      await server.close();
+    },
+  };
+}
+
+export async function runMcpServer() {
+  const transport = new StdioServerTransport(process.stdin, process.stdout, { maxBufferSize: 160 * 1024 * 1024 });
+  return createRelayMcpSession({ transport, sessionContext: createMcpSessionContext() });
 }
 
 // Bridge the pill's channel queue into this session. A channel notification is
 // the ONLY supported way to make an idle Claude session take a turn — hook
 // injections wait for the session to move on its own, which is why a relay
 // clicked into an idle chat used to sit there invisibly.
-export function startChannelPumpIfEnabled(server, { argv = process.argv, env = process.env, intervalMs = 700 } = {}) {
-  if (!channelsEnabledForSession(argv, env)) return null;
+export function startChannelPumpIfEnabled(server, {
+  argv = process.argv,
+  env = process.env,
+  intervalMs = 700,
+  channelEnabled = channelsEnabledForSession(argv, env),
+  bridgePid = process.pid,
+} = {}) {
+  if (!channelEnabled) return null;
   let stopped = false;
   // Which chat this server belongs to. Resolved once: the pill addresses wakes
   // at this pid, so a relay opened into one chat can never surface in another.
   let ownCliPid = null;
   try {
     const { owningClaudeCliPid } = require("./claude-inject.cjs");
-    ownCliPid = owningClaudeCliPid();
+    ownCliPid = owningClaudeCliPid(bridgePid);
   } catch {}
+  if (!ownCliPid) return null;
   const pump = async () => {
     if (stopped) return;
     let events = [];

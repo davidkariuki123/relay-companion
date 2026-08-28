@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
+import MarkdownIt from "markdown-it";
 import { renderRelayOpenDocuments, renderRelayOpenSeed, renderRelayRowSeed } from "../src/relay-briefing.js";
 import { localIso } from "../src/local-time.cjs";
 
@@ -248,6 +250,32 @@ test("a legacy path containing spaces is percent-encoded rather than wrapped", (
   // Parens terminate a markdown destination just as spaces do.
   assert.match(seed.visible, /\(\/tmp\/relay\/quarterly%20report%20%28final%29\.txt\)/);
   assert.doesNotMatch(seed.visible, /\]\(</);
+});
+
+test("Windows local-file links survive CommonMark parsing without changing the path", () => {
+  const forAgent = String.raw`C:\Users\Shane\.relay-companion\codex-inbox\relay one\For-Agent.md`;
+  const attachment = String.raw`C:\Users\Shane\.relay-companion\attachments\relay one\evidence (final).txt`;
+  const seed = renderRelayOpenSeed({
+    senderName: "Sven Wellmann",
+    forHuman: "Body.",
+    forAgent: "Agent context.",
+    relayOpenDocumentPaths: {
+      forHuman: String.raw`C:\Users\Shane\.relay-companion\codex-inbox\relay one\For-Human.md`,
+      forAgent,
+    },
+    attachments: [{ name: "evidence.txt", bytes: 10, localPath: attachment }],
+  });
+
+  const hrefs = new MarkdownIt()
+    .parse(seed.visible, {})
+    .flatMap((token) => token.children || [])
+    .filter((token) => token.type === "link_open")
+    .map((token) => token.attrGet("href"));
+  for (const expected of [attachment, forAgent]) {
+    const href = hrefs.find((candidate) => path.win32.basename(decodeURIComponent(candidate || "")) === path.win32.basename(expected));
+    assert.ok(href, `missing parsed link for ${path.win32.basename(expected)}`);
+    assert.equal(path.win32.normalize(decodeURIComponent(href)), path.win32.normalize(expected));
+  }
 });
 
 test("an attachment openUrl keeps its own percent-escapes intact", () => {

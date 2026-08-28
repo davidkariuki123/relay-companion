@@ -78,11 +78,10 @@ export function claudeDesktopConfigPathIn(dir) {
  * can make the app rewrite the file and drop the whole mcpServers section,
  * taking other tools' servers with it.
  */
-export function claudeDesktopEntry({ node, script, relayHome, maxOldSpaceMb = 96 }) {
-  const entry = {
-    command: node,
-    args: [`--max-old-space-size=${maxOldSpaceMb}`, script, "mcp"],
-  };
+export function claudeDesktopEntry({ node, script, command, args, relayHome, maxOldSpaceMb = 32 }) {
+  const entry = command
+    ? { command, args: Array.isArray(args) ? args.map(String) : [] }
+    : { command: node, args: [`--max-old-space-size=${maxOldSpaceMb}`, script, "mcp"] };
   if (relayHome) entry.env = { RELAY_HOME: relayHome };
   return entry;
 }
@@ -100,9 +99,11 @@ export function isDeadRelayEntry(name, entry, exists = fs.existsSync) {
   if (!entry || typeof entry !== "object") return false;
   if (!/relay/i.test(String(name))) return false;
   const args = Array.isArray(entry.args) ? entry.args : [];
-  const script = args.find((a) => typeof a === "string" && /relay[^/\\]*[/\\]bin[/\\]relay\.js$/.test(a));
-  if (!script) return false;
-  return !exists(script);
+  const target = /[/\\]\.relay[/\\]bin[/\\]mcp-bridge(?:-[0-9a-f]{16})?(?:\.exe)?$/i.test(String(entry.command || ""))
+    ? String(entry.command)
+    : args.find((a) => typeof a === "string" && /relay[^/\\]*[/\\]bin[/\\]relay\.js$/.test(a));
+  if (!target) return false;
+  return !exists(target);
 }
 
 /**
@@ -116,7 +117,7 @@ export function isLegacyRelayCompanionEntry(name, entry) {
   if (name !== "relay_companion") return false;
   if (!entry || typeof entry !== "object") return false;
   const args = Array.isArray(entry.args) ? entry.args : [];
-  return args.some(
+  return /[/\\]\.relay[/\\]bin[/\\]mcp-bridge(?:-[0-9a-f]{16})?(?:\.exe)?$/i.test(String(entry.command || "")) || args.some(
     (a) => typeof a === "string" && /relay[^/\\]*[/\\]bin[/\\](relay\.js|mcp-launcher\.cjs)$/.test(a),
   );
 }

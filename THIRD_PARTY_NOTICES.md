@@ -47,3 +47,10 @@ implementation. Each npm package includes its own complete MIT license text.
 `ts-mls` states that it has not undergone a formal security audit. Relay's own
 architecture documentation treats independent cryptographic and application
 review as a prerequisite for a public production E2EE claim.
+
+## Go standard library and runtime
+
+The Relay MCP bridge is compiled with the Go toolchain and includes portions of
+the Go standard library and runtime. Copyright 2009 The Go Authors. Go is
+distributed under a three-clause BSD license; the complete terms are included
+in [`licenses/Go.txt`](licenses/Go.txt).

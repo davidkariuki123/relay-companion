@@ -55,7 +55,7 @@ test("config and registrations remove deprecated local capability switches", () 
       true,
     );
     assert.deepEqual(JSON.parse(fs.readFileSync(claudeConfig, "utf8")).mcpServers.relay.args, [
-      "--max-old-space-size=96",
+      "--max-old-space-size=32",
       "/relay/bin/relay.js",
       "mcp",
     ]);
@@ -68,7 +68,7 @@ test("config and registrations remove deprecated local capability switches", () 
     );
     assert.match(
       fs.readFileSync(codexConfig, "utf8"),
-      /args = \["--max-old-space-size=96", "\/relay\/bin\/relay\.js", "mcp"\]/,
+      /args = \["--max-old-space-size=32", "\/relay\/bin\/relay\.js", "mcp"\]/,
     );
 
     const homeDir = path.join(root, "home");
@@ -101,7 +101,7 @@ test("registration repair strips old capability flags", () => {
       true,
     );
     assert.deepEqual(JSON.parse(fs.readFileSync(claudeConfig, "utf8")).mcpServers.relay.args, [
-      "--max-old-space-size=96",
+      "--max-old-space-size=32",
       "/relay/bin/relay.js",
       "mcp",
     ]);
@@ -111,7 +111,7 @@ test("registration repair strips old capability flags", () => {
     fs.writeFileSync(codexConfig, '[mcp_servers.relay]\ncommand = "/old/node"\nargs = ["/old/relay.js", "mcp", "--messages-only"]\n');
     assert.equal(writeCodexMcpConfig("/relay/bin/relay.js", "/usr/bin/node", codexConfig).ok, true);
     const codex = fs.readFileSync(codexConfig, "utf8");
-    assert.match(codex, /args = \["--max-old-space-size=96", "\/relay\/bin\/relay\.js", "mcp"\]/);
+    assert.match(codex, /args = \["--max-old-space-size=32", "\/relay\/bin\/relay\.js", "mcp"\]/);
     assert.doesNotMatch(codex, /--full|--messages-only/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

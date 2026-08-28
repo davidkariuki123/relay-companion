@@ -363,6 +363,15 @@ export function buildRuntimeArtifact({
     for (const entry of ["bin", "bootstrap", "src", "overlay", "licenses"]) {
       fs.cpSync(path.join(companionRoot, entry), path.join(packageRoot, entry), { recursive: true });
     }
+    const nativeDir = path.join(packageRoot, "native");
+    fs.mkdirSync(nativeDir, { recursive: true });
+    const nativeBridge = path.join(nativeDir, process.platform === "win32" ? "mcp-bridge.exe" : "mcp-bridge");
+    run("go", ["build", "-trimpath", "-ldflags=-s -w", "-o", nativeBridge, "."], {
+      cwd: path.join(companionRoot, "native-bridge"),
+      env: { ...process.env, CGO_ENABLED: "0" },
+      timeout: 5 * 60_000,
+    });
+    if (process.platform !== "win32") fs.chmodSync(nativeBridge, 0o755);
     fs.copyFileSync(path.join(companionRoot, "THIRD_PARTY_NOTICES.md"), path.join(packageRoot, "THIRD_PARTY_NOTICES.md"));
     fs.writeFileSync(
       path.join(packageRoot, "package.json"),
@@ -400,6 +409,10 @@ export function buildRuntimeArtifact({
         path.join(smokeRoot, "node_modules", "electron", "dist", "Electron.app", "Contents", "MacOS", "Electron"),
         { platform: process.platform },
       );
+      const smokeBridge = path.join(smokePackageRoot, "native", process.platform === "win32" ? "mcp-bridge.exe" : "mcp-bridge");
+      if (run(smokeBridge, ["--version"]) !== "relay-mcp-bridge-v1") {
+        throw new Error("Native Relay MCP bridge failed its packaged identity check");
+      }
       run(process.execPath, [path.join(companionRoot, "scripts", "verify-installed-runtime.mjs"),
         "--package-root", smokePackageRoot, "--version", packageJson.version]);
     } finally {

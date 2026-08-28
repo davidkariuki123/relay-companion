@@ -302,7 +302,7 @@ test("a release that cannot be deleted still leaves the machine forgotten, and s
 
 // ---- Windows: uninstall must actually stop the services ---------------------
 
-import { stopWindowsRelayServices, WINDOWS_STOP_RELAY_SERVICES_PS } from "../src/install.js";
+import { stopPosixMcpBrokers, stopWindowsRelayServices, WINDOWS_STOP_RELAY_SERVICES_PS } from "../src/install.js";
 
 /**
  * The PowerShell sweep matches by command line. Reproduce its two -match
@@ -312,7 +312,7 @@ import { stopWindowsRelayServices, WINDOWS_STOP_RELAY_SERVICES_PS } from "../src
  */
 function psSweepMatches(commandLine) {
   const patterns = [...WINDOWS_STOP_RELAY_SERVICES_PS.matchAll(/-match '([^']+)'/g)].map((m) => m[1]);
-  assert.equal(patterns.length, 3, "one installed-tree boundary and two service identities in the sweep");
+  assert.equal(patterns.length, 4, "one installed-tree boundary and three service identities in the sweep");
   // PowerShell single-quoted regex → JS: unescape the doubled backslashes the
   // JS string literal carries for PowerShell's benefit.
   const matches = patterns.map((p) => new RegExp(p.replace(/\\/g, "\\")).test(commandLine));
@@ -331,7 +331,9 @@ test("the Windows service sweep matches the daemon and pill by identity, and not
   assert.equal(psSweepMatches(daemon), true, "daemon matched");
   assert.equal(psSweepMatches(pill), true, "pill matched");
   assert.equal(psSweepMatches(pillCmdWrapper), true, "pill's cmd wrapper matched (it names main.cjs)");
-  assert.equal(psSweepMatches(mcpServer), false, "MCP servers belong to editor sessions; not the sweep's business");
+  assert.equal(psSweepMatches(mcpServer), false, "legacy MCP servers belong to editor sessions; not the sweep's business");
+  const broker = String.raw`C:\Users\shane\.granular-devtools\node-v22.13.0-win-x64\node.exe --max-old-space-size=512 C:\Users\shane\.relay\runtime\releases\0.1.292-x\node_modules\relay-companion\src\mcp-broker-entry.js --domain=abc`;
+  assert.equal(psSweepMatches(broker), true, "the shared broker is swept during uninstall");
   assert.equal(psSweepMatches(uninstallItself), false, "never terminates the uninstall that is running");
   assert.equal(psSweepMatches(daemonLog), false, "a file path is not a process identity");
   assert.equal(psSweepMatches(devCheckout), false, "a developer checkout is outside the installed-tree boundary");
@@ -351,4 +353,27 @@ test("stopWindowsRelayServices ends both tasks, then sweeps survivors by identit
   assert.equal(calls[2][0], "powershell.exe");
   assert.ok(calls[2].includes(WINDOWS_STOP_RELAY_SERVICES_PS), "sweep runs after /End, because /End alone leaves grandchildren alive");
   assert.ok(calls[2].includes("-NonInteractive"));
+});
+
+test("POSIX uninstall stops only same-account installed and exact-runtime brokers", () => {
+  const killed = [];
+  const scope = "scope123";
+  const result = stopPosixMcpBrokers({
+    userId: 501,
+    processId: 999,
+    configScopeId: scope,
+    runCommand: () => ({
+      ok: true,
+      out: [
+        `501 101 /usr/bin/node /Users/ada/.relay/runtime/node_modules/relay-companion/src/mcp-broker-entry.js --config-scope=${scope}`,
+        `501 102 /usr/bin/node /Users/ada/src/relay/packages/companion/src/mcp-broker-entry.js --config-scope=${scope}`,
+        "501 103 /usr/bin/node /Users/ada/.relay/runtime/node_modules/relay-companion/src/mcp-broker-entry.js --config-scope=other",
+        `502 104 /usr/bin/node /Users/other/.relay/runtime/node_modules/relay-companion/src/mcp-broker-entry.js --config-scope=${scope}`,
+        `501 105 /usr/bin/node /tmp/mcp-broker-entry.js --config-scope=${scope}`,
+      ].join("\n"),
+    }),
+    kill: (pid, signal) => killed.push([pid, signal]),
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(killed, [[101, "SIGTERM"], [102, "SIGTERM"]]);
 });

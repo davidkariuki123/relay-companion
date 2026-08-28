@@ -17,6 +17,7 @@ export function appendVisibleAssistantTurn({
   sessionPath,
   text,
   cwd = process.cwd(),
+  workspaceRoots = [cwd],
   currentDate = isoDate(),
   timezone = localTimezone(),
   model = DEFAULT_CODEX_OPEN_MODEL,
@@ -33,13 +34,14 @@ export function appendVisibleAssistantTurn({
   const cleanText = String(text);
   const cleanModel = String(model || "").trim() || DEFAULT_CODEX_OPEN_MODEL;
   const cleanEffort = String(effort || "").trim() || DEFAULT_CODEX_OPEN_EFFORT;
+  const cleanWorkspaceRoots = uniqueWorkspaceRoots(workspaceRoots, cwd);
   const lineEnvelope = {
     timestamp,
     type: "turn_context",
     payload: {
       turn_id: turnId,
       cwd,
-      workspace_roots: [cwd],
+      workspace_roots: cleanWorkspaceRoots,
       current_date: currentDate,
       timezone,
       approval_policy: "never",
@@ -115,6 +117,20 @@ export function appendVisibleAssistantTurn({
 
   fs.appendFileSync(resolvedPath, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
   return { sessionPath: resolvedPath, turnId, messageId };
+}
+
+function uniqueWorkspaceRoots(workspaceRoots, cwd) {
+  const roots = Array.isArray(workspaceRoots) ? workspaceRoots : [];
+  const ordered = [cwd, ...roots]
+    .map((root) => String(root || "").trim())
+    .filter(Boolean);
+  const seen = new Set();
+  return ordered.filter((root) => {
+    const key = process.platform === "win32" ? root.toLowerCase() : root;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 export function ensureCodexThreadIndexMarker({ sessionPath, markerId = "" }) {

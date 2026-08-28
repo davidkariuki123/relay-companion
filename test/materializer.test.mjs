@@ -106,7 +106,8 @@ test("openRelay downloads ordinary attachments and seeds Claude with clickable a
       .filter((part) => part?.type === "text")
       .map((part) => part.text)
       .join("\n");
-    assert.match(visibleText, new RegExp(`\\[brain-quality-plan\\.md\\]\\(${localPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)`));
+    const renderedLocalPath = localPath.replace(/\\/g, "%5C");
+    assert.match(visibleText, new RegExp(`\\[brain-quality-plan\\.md\\]\\(${renderedLocalPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)`));
     assert.doesNotMatch(transcript, /Local copy:/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
@@ -245,10 +246,70 @@ test("Codex Open stages the visible letter and hidden agent document without a m
   const source = fs.readFileSync(new URL("../src/materializer.js", import.meta.url), "utf8");
   assert.match(source, /materializeRelayOpenDocumentFiles\(rowWithAttachments, \{ provider: "codex-inbox" \}\)/);
   assert.match(source, /model: codexModel,[\s\S]*effort: codexEffort/);
-  assert.match(source, /appendVisibleAssistantTurn\(\{ sessionPath, text: briefing, cwd, model, effort \}\)/);
+  assert.match(source, /appendVisibleAssistantTurn\(\{ sessionPath, text: briefing, cwd, workspaceRoots, model, effort \}\)/);
   const createThread = source.slice(source.indexOf("async function createCodexThread"));
-  assert.match(createThread, /thread\/start[\s\S]*model,[\s\S]*reasoningEffort: effort/);
+  assert.match(createThread, /thread\/start[\s\S]*runtimeWorkspaceRoots: workspaceRoots[\s\S]*model,[\s\S]*reasoningEffort: effort/);
   assert.doesNotMatch(createThread, /turn\/start|turn\/steer/, "Open stages context but never runs the model");
+  const { CODEX_OPEN_METADATA_VERSION } = await import(`../src/materializer.js?metadata-version-${Date.now()}`);
+  assert.equal(CODEX_OPEN_METADATA_VERSION, 3, "old Codex tasks must be re-forged with file workspace roots");
+});
+
+test("Codex Open authorizes only the project and per-Relay file directories", async () => {
+  const previousRelayHome = process.env.RELAY_HOME;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-codex-open-roots-"));
+  const cwd = path.join(dir, "workspace");
+  const relayHome = path.join(dir, "relay-home");
+  const attachmentRoot = path.join(relayHome, "attachments", "relay_1");
+  const unrelatedRoot = path.join(relayHome, "attachments", "relay_2");
+  const arbitraryRoot = path.join(dir, "arbitrary", "attachments", "relay_1");
+  try {
+    process.env.RELAY_HOME = relayHome;
+    fs.mkdirSync(cwd, { recursive: true });
+    fs.mkdirSync(attachmentRoot, { recursive: true });
+    fs.mkdirSync(unrelatedRoot, { recursive: true });
+    fs.mkdirSync(arbitraryRoot, { recursive: true });
+    const attachmentPath = path.join(attachmentRoot, "att_1-evidence.txt");
+    const unrelatedPath = path.join(unrelatedRoot, "other.txt");
+    const arbitraryPath = path.join(arbitraryRoot, "secret.txt");
+    fs.writeFileSync(attachmentPath, "evidence");
+    fs.writeFileSync(unrelatedPath, "unrelated");
+    fs.writeFileSync(arbitraryPath, "shaped like a Relay cache, but outside Relay-owned storage");
+
+    const { materializeRelayOpenDocumentFiles } = await import(`../src/claude-materializer.js?roots-docs-${Date.now()}`);
+    const { codexOpenWorkspaceRoots } = await import(`../src/materializer.js?roots-helper-${Date.now()}`);
+    const documents = materializeRelayOpenDocumentFiles(
+      { id: "relay_1", forHuman: "Human note", forAgent: "Agent note" },
+      { provider: "codex-inbox" },
+    );
+    const roots = codexOpenWorkspaceRoots({
+      cwd,
+      openRow: {
+        id: "relay_1",
+        relayOpenDocumentPaths: documents,
+        attachments: [
+          { localPath: attachmentPath },
+          { localPath: unrelatedPath },
+          { localPath: arbitraryPath },
+        ],
+      },
+    });
+
+    assert.deepEqual(roots, [path.resolve(cwd), path.dirname(documents.forAgent), attachmentRoot]);
+    assert.equal(roots.includes(relayHome), false, "the Relay store itself must remain private");
+    assert.equal(roots.includes(path.join(relayHome, "attachments")), false, "the shared attachment store must remain private");
+    assert.equal(roots.includes(unrelatedRoot), false, "another Relay's attachment directory must remain private");
+    assert.equal(roots.includes(arbitraryRoot), false, "arbitrary localPath parents must not become workspace roots");
+    for (const linkedFile of [documents.forAgent, attachmentPath]) {
+      assert.ok(roots.some((root) => {
+        const relative = path.relative(root, linkedFile);
+        return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+      }), `${linkedFile} must be inside an authorized workspace root`);
+    }
+  } finally {
+    if (previousRelayHome === undefined) delete process.env.RELAY_HOME;
+    else process.env.RELAY_HOME = previousRelayHome;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("canonical Relay documents invalidate zero-attachment Codex and Claude materializations", async () => {
@@ -266,6 +327,7 @@ test("canonical Relay documents invalidate zero-attachment Codex and Claude mate
     attachments: [],
   });
   assert.notEqual(repaired, broken);
+  assert.match(repaired, /"renderer":"relay-open-documents-v5"/, "existing provider tasks must be re-forged with safe Windows links");
 
   for (const signatureKey of [
     "codexAttachmentMaterializationSignature",

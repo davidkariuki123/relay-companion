@@ -263,11 +263,11 @@ test("host adapters expose auth preflight, Relay MCP plans, UI open, and unsuppo
   assert.equal(adapters.preflightAuth(host).ok, true);
   assert.deepEqual(
     adapters.relayToolPlan("codex", "tsess_plan").appServerConfig.mcp_servers.relay.args.at(-1),
-    "mcp",
+    path.resolve("packages/companion/src/mcp-bridge.js"),
   );
   assert.deepEqual(
     adapters.relayToolPlan("claude_code", "tsess_plan").mcpServers.relay.args.at(-1),
-    "mcp",
+    path.resolve("packages/companion/src/mcp-bridge.js"),
   );
   assert.deepEqual(await adapters.interruptTurn({ session: session(), sessionRef: { mode: "unknown" } }), {
     ok: false,
@@ -285,7 +285,7 @@ test("Electron provider sessions run Relay MCP as Node without rewriting the per
   const runtime = await import("../src/runtime.js");
   const spec = runtime.relayMcpLaunchSpec({
     execPath: "/Applications/Relay.app/Contents/MacOS/Relay",
-    binPath: "/Applications/Relay.app/Contents/Resources/app/bin/relay.js",
+    bridgePath: "/Applications/Relay.app/Contents/Resources/app/src/mcp-bridge.js",
     electron: true,
     env: {
       RELAY_API_URL: "https://api.example.test",
@@ -295,7 +295,7 @@ test("Electron provider sessions run Relay MCP as Node without rewriting the per
 
   assert.deepEqual(spec, {
     command: "/Applications/Relay.app/Contents/MacOS/Relay",
-    args: ["/Applications/Relay.app/Contents/Resources/app/bin/relay.js", "mcp"],
+    args: ["--max-old-space-size=32", "/Applications/Relay.app/Contents/Resources/app/src/mcp-bridge.js"],
     env: {
       ELECTRON_RUN_AS_NODE: "1",
       RELAY_API_URL: "https://api.example.test",
@@ -578,7 +578,7 @@ test("Codex host adapter starts app-server threads with Relay MCP config", async
   assert.equal(out.sessionRef.mode, "codex_app_server");
   assert.equal(out.sessionRef.threadId, "thr_relay_1");
   assert.equal(out.sessionRef.turnId, "turn_1");
-  assert.equal(recorded.threadParams.config.mcp_servers.relay.args.at(-1), "mcp");
+  assert.equal(recorded.threadParams.config.mcp_servers.relay.args.at(-1), path.resolve("packages/companion/src/mcp-bridge.js"));
   assert.match(recorded.turnStarts[0].input[0].text, /Relay task task_app_server_1/);
 });
 
@@ -884,7 +884,7 @@ test("Claude host adapter starts Agent SDK sessions with Relay MCP config", asyn
   assert.equal(out.sessionRef.mode, "claude_agent_sdk");
   assert.equal(recorded.queries.length, 1);
   assert.equal(recorded.queries[0].options.mcpServers.relay.command, process.execPath);
-  assert.equal(recorded.queries[0].options.mcpServers.relay.args.at(-1), "mcp");
+  assert.equal(recorded.queries[0].options.mcpServers.relay.args.at(-1), path.resolve("packages/companion/src/mcp-bridge.js"));
   assert.equal(recorded.queries[0].options.permissionMode, "auto");
   assert.match(recorded.queries[0].prompt, /Relay task task_claude_sdk_1/);
 });

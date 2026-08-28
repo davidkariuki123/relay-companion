@@ -279,11 +279,16 @@ test("does not navigate when no thread is being opened", async () => {
 
 test("a foreground Relay open uses Codex's non-navigating native project registration before resume", async () => {
   await withRendererGlobals({ activeThreadId: "relay-thread" }, async ({ sent, state }) => {
+    const workspaceRoots = [
+      "/Users/tester/Relay",
+      "/Users/tester/.relay-companion/codex-inbox/relay-thread",
+      "/Users/tester/.relay-companion/attachments/relay-thread",
+    ];
     const result = await relayRefreshCodexRenderer({
       threadIds: ["relay-thread"],
       openThreadId: "relay-thread",
       ensureWorkspaceRoot: "/Users/tester/Relay",
-      workspaceRootsByThreadId: { "relay-thread": ["/Users/tester/Relay"] },
+      workspaceRootsByThreadId: { "relay-thread": workspaceRoots },
       primeMs: 0,
     });
 
@@ -307,7 +312,7 @@ test("a foreground Relay open uses Codex's non-navigating native project registr
     );
     assert.equal(Object.values(state["local-projects"])[0].name, "Relay");
     assert.deepEqual(Object.values(state["local-projects"])[0].rootPaths, ["/Users/tester/Relay"]);
-    assert.deepEqual(sent[resumeIndex].workspaceRoots, ["/Users/tester/Relay"]);
+    assert.deepEqual(sent[resumeIndex].workspaceRoots, workspaceRoots);
     const relayProject = Object.values(state["local-projects"])[0];
     assert.deepEqual(state["thread-project-assignments"]["relay-thread"], {
       projectKind: "local",

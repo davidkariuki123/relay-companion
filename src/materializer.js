@@ -51,7 +51,7 @@ const CODEX_DESKTOP_UNREACHED = new Set([
   "codex-not-ready",
   "codex-window-unavailable",
 ]);
-const CODEX_OPEN_METADATA_VERSION = 2;
+export const CODEX_OPEN_METADATA_VERSION = 3;
 
 function companionStatePath() {
   return path.join(storeDir(), "state.json");
@@ -458,6 +458,9 @@ async function materializeRowInHost({
         relayOpenDocumentPaths: materializeRelayOpenDocumentFiles(rowWithAttachments, { provider: "codex-inbox" }),
       }
     : rowWithAttachments;
+  const codexWorkspaceRoots = cleanHost === "codex"
+    ? codexOpenWorkspaceRoots({ cwd, openRow })
+    : [cwd];
   const { visible: briefing, operatorNote } = renderRelayOpenSeed(openRow);
   let url = null;
   let openedInHost = false;
@@ -525,6 +528,7 @@ async function materializeRowInHost({
         briefing,
         operatorNote,
         cwd,
+        workspaceRoots: codexWorkspaceRoots,
         model: codexModel,
         effort: codexEffort,
       });
@@ -536,6 +540,7 @@ async function materializeRowInHost({
         codexThreadId,
         codexSessionPath,
         codexOpenDocumentPaths: openRow.relayOpenDocumentPaths,
+        codexOpenWorkspaceRoots: codexWorkspaceRoots,
         codexOpenMetadataVersion: CODEX_OPEN_METADATA_VERSION,
         openModel: codexModel,
         openEffort: codexEffort,
@@ -587,6 +592,7 @@ async function materializeRowInHost({
           force: true,
           openThreadId: codexThreadId,
           cwd,
+          workspaceRoots: codexWorkspaceRoots,
           ensureRelayProject: relayProjectOpen,
         })
       : { ok: false, reason: "quiet-provider" };
@@ -607,6 +613,7 @@ async function materializeRowInHost({
         force: true,
         openThreadId: codexThreadId,
         cwd,
+        workspaceRoots: codexWorkspaceRoots,
         ensureRelayProject: relayProjectOpen,
         primeOpen: false,
       });
@@ -619,6 +626,7 @@ async function materializeRowInHost({
       await refreshCodexDesktopForThreads([codexThreadId], {
         force: true,
         cwd,
+        workspaceRoots: codexWorkspaceRoots,
         ensureRelayProject: true,
         assignmentOnly: true,
       });
@@ -730,6 +738,109 @@ export async function materializeAttachmentFiles(row, { log = () => {}, refreshU
   return { ...row, attachments: materialized };
 }
 
+// Codex treats local file links as workspace-scoped resources. Keep the user's
+// selected project first, then authorize only the exact per-Relay directories
+// that contain the two hand-off documents and locally materialized attachments.
+// Never authorize the Relay store or its shared attachments directory wholesale.
+export function codexOpenWorkspaceRoots({ cwd = "", openRow = null } = {}) {
+  const projectRoot = absolutePath(cwd);
+  const roots = projectRoot ? [projectRoot] : [];
+  const documentPaths = openRow?.relayOpenDocumentPaths && typeof openRow.relayOpenDocumentPaths === "object"
+    ? Object.values(openRow.relayOpenDocumentPaths)
+    : [];
+  for (const filePath of documentPaths) {
+    const root = relayDocumentRoot(filePath, openRow);
+    if (root && !roots.some((existing) => pathContains(existing, root))) roots.push(root);
+  }
+  const attachments = Array.isArray(openRow?.attachments) ? openRow.attachments : [];
+  for (const attachment of attachments) {
+    const root = relayAttachmentRoot(attachment?.localPath, openRow);
+    if (root && !roots.some((existing) => pathContains(existing, root))) roots.push(root);
+  }
+  return uniquePaths(roots);
+}
+
+function relayDocumentRoot(filePath, row) {
+  const file = existingAbsoluteFile(filePath);
+  if (!file) return "";
+  const relayStore = absolutePath(storeDir());
+  if (!relayStore || !pathContains(relayStore, file)) return "";
+  const root = path.dirname(file);
+  const expectedLeaf = safeFileStem(row?.id || row?.createdAt);
+  const isCodexLeaf = path.basename(path.dirname(root)).toLowerCase() === "codex-inbox" && path.basename(root) === expectedLeaf;
+  const isCanonicalDocument = new Set(["For-Human.md", "For-Agent.md"]).has(path.basename(file));
+  return isCodexLeaf && isCanonicalDocument && !samePath(root, relayStore) ? root : "";
+}
+
+function relayAttachmentRoot(filePath, row) {
+  const file = existingAbsoluteFile(filePath);
+  if (!file) return "";
+  const root = path.dirname(file);
+  const ordinaryRoot = path.resolve(
+    storeDir(),
+    "attachments",
+    safeFileStem(row?.id || row?.relayId || "relay"),
+  );
+  const e2eeRoot = e2eeAttachmentCacheRoot();
+  const e2eeCandidates = [row?.messageId, row?.id]
+    .map(e2eeAttachmentDirStem)
+    .filter(Boolean)
+    .map((leaf) => path.resolve(e2eeRoot, leaf));
+  return [ordinaryRoot, ...e2eeCandidates].some((candidate) => samePath(root, candidate)) ? root : "";
+}
+
+function e2eeAttachmentDirStem(value) {
+  const clean = String(value || "").trim();
+  return clean ? clean.replace(/[^A-Za-z0-9_-]/g, "_") : "";
+}
+
+function e2eeAttachmentCacheRoot() {
+  const explicitConfig = String(process.env.RELAY_CONFIG || "").trim();
+  const configRoot = explicitConfig
+    ? path.dirname(path.resolve(explicitConfig))
+    : path.resolve(process.env.RELAY_CONFIG_DIR || path.join(os.homedir(), ".relay"));
+  return path.join(configRoot, "attachments");
+}
+
+function existingAbsoluteFile(value) {
+  const clean = String(value || "").trim();
+  if (!clean || !path.isAbsolute(clean)) return "";
+  const resolved = path.resolve(clean);
+  try {
+    return fs.statSync(resolved).isFile() ? resolved : "";
+  } catch {
+    return "";
+  }
+}
+
+function absolutePath(value) {
+  const clean = String(value || "").trim();
+  return clean ? path.resolve(clean) : "";
+}
+
+function pathContains(root, candidate) {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+function samePath(left, right) {
+  return path.relative(left, right) === "";
+}
+
+function uniquePaths(values) {
+  const seen = new Set();
+  const paths = [];
+  for (const value of values) {
+    const resolved = absolutePath(value);
+    if (!resolved) continue;
+    const key = process.platform === "win32" ? resolved.toLowerCase() : resolved;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    paths.push(resolved);
+  }
+  return paths;
+}
+
 /** Fresh signed attachment URLs for one staged row, via a single packet re-fetch. */
 async function defaultRefreshAttachmentUrls(row) {
   const id = String(row?.id || row?.relayId || "").trim();
@@ -833,7 +944,7 @@ function safeFilename(value) {
 export function relayMaterializationSignature(row) {
   const attachments = Array.isArray(row?.attachments) ? row.attachments : [];
   return JSON.stringify({
-    renderer: "relay-open-documents-v4",
+    renderer: "relay-open-documents-v5",
     documents: {
       // Match the document writers: surrounding whitespace is not part of the
       // materialized artifact and therefore must not force a new provider task.
@@ -920,6 +1031,7 @@ async function createCodexThread({
   briefing,
   operatorNote = "",
   cwd,
+  workspaceRoots = [cwd],
   model = DEFAULT_CODEX_OPEN_MODEL,
   effort = DEFAULT_CODEX_OPEN_EFFORT,
 }) {
@@ -945,6 +1057,7 @@ async function createCodexThread({
     const fullAccess = process.env.RELAY_CODEX_FULL_ACCESS === "1";
     const started = await client.request("thread/start", {
       cwd,
+      runtimeWorkspaceRoots: workspaceRoots,
       approvalPolicy: fullAccess ? "never" : "on-request",
       sandbox: fullAccess ? "danger-full-access" : "workspace-write",
       threadSource: "user",
@@ -955,7 +1068,7 @@ async function createCodexThread({
     const threadId = started.thread.id;
     const sessionPath = started.thread.path || findCodexSessionPath(threadId);
     await client.request("thread/name/set", { threadId, name: row.displayTitle || row.title || relayRowTitle(row) });
-    appendVisibleAssistantTurn({ sessionPath, text: briefing, cwd, model, effort });
+    appendVisibleAssistantTurn({ sessionPath, text: briefing, cwd, workspaceRoots, model, effort });
     const deadline = Date.now() + Number(process.env.RELAY_CODEX_ROW_TIMEOUT_MS || 6000);
     while (!codexThreadRowExists(threadId) && Date.now() < deadline) {
       await sleep(150);
@@ -983,14 +1096,24 @@ function ensureRelayCodexIndexMarker({ threadId, sessionPath, packetId }) {
 
 async function refreshCodexDesktopForThreads(
   threadIds,
-  { force = false, openThreadId = null, cwd = "", ensureRelayProject = false, assignmentOnly = false, primeOpen = true } = {},
+  {
+    force = false,
+    openThreadId = null,
+    cwd = "",
+    workspaceRoots = [],
+    ensureRelayProject = false,
+    assignmentOnly = false,
+    primeOpen = true,
+  } = {},
 ) {
   const uniqueThreadIds = Array.from(new Set(threadIds.filter(Boolean)));
   if (!uniqueThreadIds.length && !force) return null;
   try {
     const cleanCwd = String(cwd || "").trim();
-    const workspaceRootsByThreadId = cleanCwd
-      ? Object.fromEntries(uniqueThreadIds.map((threadId) => [threadId, [cleanCwd]]))
+    const requestedWorkspaceRoots = Array.isArray(workspaceRoots) ? workspaceRoots : [];
+    const cleanWorkspaceRoots = uniquePaths([cleanCwd, ...requestedWorkspaceRoots]);
+    const workspaceRootsByThreadId = cleanWorkspaceRoots.length
+      ? Object.fromEntries(uniqueThreadIds.map((threadId) => [threadId, cleanWorkspaceRoots]))
       : {};
     const result = await notifyCodexDesktopThreads({
       threadIds: uniqueThreadIds,

@@ -31,7 +31,31 @@ test("the synthetic visible turn preserves the selected Codex model and effort",
     assert.equal(context.payload.effort, "high");
     assert.equal(context.payload.collaboration_mode.settings.model, "gpt-5.6-sol");
     assert.equal(context.payload.collaboration_mode.settings.reasoning_effort, "high");
+    assert.deepEqual(context.payload.workspace_roots, [dir]);
     assert.doesNotMatch(fs.readFileSync(sessionPath, "utf8"), /gpt-5\.5/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the synthetic visible turn preserves additional Relay file workspace roots", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-codex-writer-roots-"));
+  const sessionPath = path.join(dir, "rollout.jsonl");
+  const projectRoot = String.raw`C:\Users\Shane\Documents\relay`;
+  const relayRoot = String.raw`C:\Users\Shane\.relay-companion\codex-inbox\relay_1`;
+  const attachmentRoot = String.raw`C:\Users\Shane\.relay-companion\attachments\relay_1`;
+  try {
+    fs.writeFileSync(sessionPath, `${JSON.stringify({ type: "session_meta", payload: { id: "thread_roots" } })}\n`);
+    appendVisibleAssistantTurn({
+      sessionPath,
+      text: "Relay from Sven",
+      cwd: projectRoot,
+      workspaceRoots: [projectRoot, relayRoot, attachmentRoot, relayRoot],
+    });
+
+    const context = appendedTurnContext(sessionPath);
+    assert.equal(context.payload.cwd, projectRoot);
+    assert.deepEqual(context.payload.workspace_roots, [projectRoot, relayRoot, attachmentRoot]);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

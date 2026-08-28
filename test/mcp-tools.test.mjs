@@ -16,6 +16,7 @@ import {
   REQUESTS_DISABLED_INSTRUCTIONS,
   TOOLS,
   assertE2eeLocalToolCall,
+  createMcpSessionContext,
   handleCall,
   localMcpEncryptionState,
   relayCallErrorResult,
@@ -1420,6 +1421,38 @@ test("relay_send requires an exact second review for human messages over 95 word
   assert.equal(calls.length, 1, "the exact reviewed draft can be deliberately confirmed");
   assert.equal(calls[0].forHuman, changedDraft.forHuman);
   assert.equal(calls[0].longForHumanConfirmed, true, "the API can require its own exact-draft review token");
+});
+
+test("long-message review state never crosses broker connections", async () => {
+  const calls = [];
+  const client = {
+    async sendRelay(payload) {
+      calls.push(payload);
+      return { relayId: "relay_isolated_review", state: "delivered" };
+    },
+  };
+  const args = {
+    recipient: { relayUserId: "usr_sven" },
+    kind: "message",
+    title: "Read receipt design",
+    forHuman: Array.from({ length: 96 }, (_, index) => `word${index + 1}`).join(" "),
+    forAgent: "The complete technical document.",
+    longForHumanConfirmed: true,
+    idempotencyKey: "isolated_review_1",
+  };
+  const firstConnection = createMcpSessionContext();
+  const secondConnection = createMcpSessionContext();
+  await assert.rejects(
+    handleCall(client, "relay_send", args, { sessionContext: firstConnection }),
+    /Nothing was sent/,
+  );
+  await assert.rejects(
+    handleCall(client, "relay_send", args, { sessionContext: secondConnection }),
+    /Nothing was sent/,
+  );
+  assert.equal(calls.length, 0);
+  await handleCall(client, "relay_send", args, { sessionContext: firstConnection });
+  assert.equal(calls.length, 1, "only the connection that saw the rejection may confirm it");
 });
 
 test("relay_send accepts the 95-word review boundary without making it a target", async () => {

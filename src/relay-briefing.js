@@ -496,8 +496,13 @@ function escapeMarkdownLinkText(value) {
 // otherwise terminate the destination rather than wrapping it. `%` is encoded
 // first so a literal "%20" in a sender's filename survives the round trip.
 function encodeLocalPathHref(value) {
+  // CommonMark consumes a Windows backslash before punctuation as an escape.
+  // A path through `.relay-companion` therefore becomes a different, missing
+  // path. Encode every literal backslash after `%` so it survives parsing and
+  // the provider's normal percent-decoding, including drive and UNC paths.
   return String(value)
     .replace(/%/g, "%25")
+    .replace(/\\/g, "%5C")
     .replace(/ /g, "%20")
     .replace(/\(/g, "%28")
     .replace(/\)/g, "%29")

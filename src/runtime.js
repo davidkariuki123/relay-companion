@@ -9,6 +9,12 @@ import { randomUUID } from "node:crypto";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { configDir, taskLedgerPath } from "./config.js";
+import {
+  ensureMcpBrokerProvisioned,
+  MCP_BRIDGE_MAX_OLD_SPACE_MB,
+  packageRootForModule,
+} from "./mcp-broker-state.js";
+import { packagedNativeMcpBridgePath } from "./mcp-launcher.js";
 
 const { atomicWriteJsonSync } = atomicJson;
 
@@ -119,8 +125,8 @@ export function orderTaskMessages(messages = []) {
   });
 }
 
-function relayBinPath() {
-  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../bin/relay.js");
+function relayMcpBridgePath() {
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "mcp-bridge.js");
 }
 
 // Relay-owned provider sessions are launched from the Electron pill as well as
@@ -129,12 +135,15 @@ function relayBinPath() {
 // Claude as an MCP command opens another GUI process instead of starting the
 // stdio server; the provider then waits until its MCP startup timeout expires.
 //
-// These are per-session configs, so point them directly at this runtime's CLI.
+// These are per-session configs, so point them directly at this runtime's
+// packaged native bridge. Source checkouts retain the small Node bridge as an
+// explicit development and rollback path.
 // The upgrade-surviving ~/.relay launcher belongs to persistent host
 // registration and must not be rewritten by a development pill or private run.
 export function relayMcpLaunchSpec({
   execPath = process.execPath,
-  binPath = relayBinPath(),
+  bridgePath = relayMcpBridgePath(),
+  nativeBridgePath = packagedNativeMcpBridgePath(packageRootForModule(import.meta.url)),
   electron = Boolean(process.versions?.electron),
   env = process.env,
 } = {}) {
@@ -143,9 +152,21 @@ export function relayMcpLaunchSpec({
   for (const key of ["RELAY_API_URL", "RELAY_DEVICE_TOKEN", "RELAY_CONFIG_DIR"]) {
     if (env[key]) childEnv[key] = env[key];
   }
+  const provisioning = ensureMcpBrokerProvisioned({
+    env,
+    packageRoot: packageRootForModule(import.meta.url),
+    brokerNode: execPath,
+  });
+  if (fs.existsSync(nativeBridgePath)) {
+    return {
+      command: nativeBridgePath,
+      args: ["--descriptor", provisioning.files.descriptor],
+      env: childEnv,
+    };
+  }
   return {
     command: execPath,
-    args: [binPath, "mcp"],
+    args: [`--max-old-space-size=${MCP_BRIDGE_MAX_OLD_SPACE_MB}`, bridgePath],
     env: childEnv,
   };
 }

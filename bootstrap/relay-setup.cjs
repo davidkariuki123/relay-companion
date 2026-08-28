@@ -24,7 +24,7 @@ const PACKAGE_NAME = "relay-companion";
 const WINDOWS_RELAY_TASKS = ["Relay Companion Pill", "Relay Companion Daemon"];
 const WINDOWS_STOP_RELAY_SERVICES_PS = [
   "$p=Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {",
-  "  $_.CommandLine -and ($_.CommandLine -match '[\\\\/]node_modules[\\\\/]relay-companion[\\\\/]') -and (($_.CommandLine -match '[\\\\/]relay\\.js.*\\bdaemon\\b') -or ($_.CommandLine -match '[\\\\/]overlay[\\\\/]main\\.cjs'))",
+  "  $_.CommandLine -and ($_.CommandLine -match '[\\\\/]relay-companion[\\\\/]') -and (($_.CommandLine -match '[\\\\/]relay\\.js.*\\bdaemon\\b') -or ($_.CommandLine -match '[\\\\/]overlay[\\\\/]main\\.cjs') -or ($_.CommandLine -match '[\\\\/]mcp-broker-entry\\.js'))",
   "}; foreach($x in $p){ try { Invoke-CimMethod -InputObject $x -MethodName Terminate -ErrorAction Stop | Out-Null } catch {} }",
 ].join(" ");
 const packageJson = require("../package.json");

@@ -14,7 +14,8 @@ import { createRequire } from "node:module";
 import { createHash, randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { activateCodexMcp, verifyClaudeMcpRegistration } from "./setup-activation.js";
-import { ensureStableMcpLauncher } from "./mcp-launcher.js";
+import { ensureStableMcpLauncher, mcpLaunchCommand, removeStableMcpLauncher } from "./mcp-launcher.js";
+import { brokerIdentity, removeMcpBrokerProvisioning } from "./mcp-broker-state.js";
 import { canonicalOwnershipGuard, verifyCanonicalCandidate } from "./canonical-runtime.js";
 import { ensureStableHookLauncher, removeStableHookLauncher } from "./hook-launcher.js";
 import { writeConfig } from "./config.js";
@@ -1369,14 +1370,14 @@ export function writeClaudeCodeMcpConfig(
       cfg.mcpServers && typeof cfg.mcpServers === "object" && !Array.isArray(cfg.mcpServers)
         ? cfg.mcpServers
         : {};
+    const launch = mcpLaunchCommand({ mcpBin: bin, node });
     cfg.mcpServers = {
       ...existingServers,
       relay: {
         type: "stdio",
-        command: node,
-        // Heap-capped: one of these spawns per agent session (see codexRelayMcpTomlSection).
-        args: ["--max-old-space-size=96", bin, "mcp"],
-        env: {},
+        command: launch.command,
+        args: launch.args,
+        env: launch.env,
         alwaysLoad: true,
       },
     };
@@ -1997,12 +1998,11 @@ export function codexRelayMcpTomlSection(
   bin = relayBinPath(),
   node = stableNodePath(),
 ) {
+  const launch = mcpLaunchCommand({ mcpBin: bin, node });
   return [
     "[mcp_servers.relay]",
-    `command = ${tomlQuote(node)}`,
-    // Heap cap: one stdio server spawns per agent session, so an uncapped V8
-    // heap multiplies across every open session on busy machines.
-    `args = [${["--max-old-space-size=96", bin, "mcp"].map(tomlQuote).join(", ")}]`,
+    `command = ${tomlQuote(launch.command)}`,
+    `args = [${launch.args.map(tomlQuote).join(", ")}]`,
     "startup_timeout_sec = 30",
     "tool_timeout_sec = 300",
     "",
@@ -2171,8 +2171,9 @@ export function installClaudeCode(
 ) {
   let cliResult = null;
   if (commandExists(command)) {
+    const launch = mcpLaunchCommand({ mcpBin: bin, node });
     run(command, ["mcp", "remove", "-s", "user", "relay"]); // ignore if absent
-    cliResult = run(command, ["mcp", "add", "-s", "user", "relay", "--", node, "--max-old-space-size=96", bin, "mcp"]);
+    cliResult = run(command, ["mcp", "add", "-s", "user", "relay", "--", launch.command, ...launch.args]);
     if (cliResult.ok || /already exists/i.test(cliResult.out)) {
       return { ok: true, method: "cli" };
     }
@@ -2192,8 +2193,9 @@ export function installCodex(
 ) {
   let cliResult = null;
   if (commandExists(command)) {
+    const launch = mcpLaunchCommand({ mcpBin: bin, node });
     run(command, ["mcp", "remove", "relay"]); // ignore if absent
-    cliResult = run(command, ["mcp", "add", "relay", "--", node, "--max-old-space-size=96", bin, "mcp"]);
+    cliResult = run(command, ["mcp", "add", "relay", "--", launch.command, ...launch.args]);
     if (cliResult.ok || /already exists/i.test(cliResult.out)) {
       return { ok: true, method: "cli" };
     }
@@ -3052,9 +3054,10 @@ export function repairExistingAgentRegistrations({
       codex = writeCodexMcpConfig(mcpBin, node, codexConfigFile);
     }
     if (claudeDesktopConfigs.length) {
+      const launch = mcpLaunchCommand({ mcpBin, node: resolveStableNode({ execPath: node }) });
       const entry = claudeDesktopEntry({
-        node: resolveStableNode({ execPath: node }),
-        script: mcpBin,
+        command: launch.command,
+        args: launch.args,
         relayHome: env.RELAY_HOME || undefined,
       });
       const written = [];
@@ -3247,7 +3250,7 @@ export function repairDesktopSurfaces({
  */
 export const WINDOWS_STOP_RELAY_SERVICES_PS = [
   "$p=Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {",
-  "  $_.CommandLine -and ($_.CommandLine -match '[\\\\/]node_modules[\\\\/]relay-companion[\\\\/]') -and (($_.CommandLine -match '[\\\\/]relay\\.js.*\\bdaemon\\b') -or ($_.CommandLine -match '[\\\\/]overlay[\\\\/]main\\.cjs'))",
+  "  $_.CommandLine -and ($_.CommandLine -match '[\\\\/]relay-companion[\\\\/]') -and (($_.CommandLine -match '[\\\\/]relay\\.js.*\\bdaemon\\b') -or ($_.CommandLine -match '[\\\\/]overlay[\\\\/]main\\.cjs') -or ($_.CommandLine -match '[\\\\/]mcp-broker-entry\\.js'))",
   "}; foreach($x in $p){ try { Invoke-CimMethod -InputObject $x -MethodName Terminate -ErrorAction Stop | Out-Null } catch {} }",
 ].join(" ");
 
@@ -3260,6 +3263,34 @@ export function stopWindowsRelayServices({ runCommand = run } = {}) {
   for (const task of [WINDOWS_DAEMON_TASK_NAME, WINDOWS_PILL_TASK_NAME]) runCommand("schtasks", ["/End", "/TN", task]);
   const swept = runCommand("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_STOP_RELAY_SERVICES_PS]);
   return { swept: Boolean(swept && swept.ok) };
+}
+
+export function stopPosixMcpBrokers({
+  runCommand = run,
+  kill = process.kill,
+  userId = typeof process.getuid === "function" ? process.getuid() : null,
+  processId = process.pid,
+  configScopeId = brokerIdentity({ packageRoot: runningPackageRoot() }).configScopeId,
+} = {}) {
+  const queried = runCommand("/bin/ps", ["-axo", "uid=,pid=,command="]);
+  if (!queried.ok) return { ok: false, stopped: [], detail: queried.out || "Could not enumerate Relay MCP brokers." };
+  const stopped = [];
+  for (const line of String(queried.out || "").split(/\r?\n/)) {
+    const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
+    if (!match) continue;
+    const uid = Number(match[1]);
+    const pid = Number(match[2]);
+    const command = match[3].replaceAll("\\", "/");
+    if (userId !== null && uid !== userId) continue;
+    if (!Number.isInteger(pid) || pid <= 1 || pid === processId) continue;
+    const relayBroker = /(?:node_modules\/relay-companion|packages\/companion)\/src\/mcp-broker-entry\.js(?:\s|$)/i.test(command);
+    if (!relayBroker || !command.includes(`--config-scope=${configScopeId}`)) continue;
+    try {
+      kill(pid, "SIGTERM");
+      stopped.push(pid);
+    } catch {}
+  }
+  return { ok: true, stopped };
 }
 
 function linuxInstalledServiceRows({
@@ -3518,6 +3549,7 @@ export function runUninstall() {
   // re-registers them within one poll cycle (ensureWindowsAutostartTasks,
   // repair-runtime), silently undoing the uninstall.
   if (process.platform === "win32") stopWindowsRelayServices();
+  else stopPosixMcpBrokers();
   let linuxStop = null;
   if (process.platform === "linux") {
     linuxStop = stopLinuxRelayServices();
@@ -3539,6 +3571,11 @@ export function runUninstall() {
     } catch {
       /* a partial uninstall is still better than touching an unrelated file */
     }
+  }
+  try {
+    removeStableMcpLauncher();
+  } catch {
+    /* host registrations are already removed; reportable state cleanup continues below */
   }
   if (process.platform === "darwin") {
     const plistPath = path.join(os.homedir(), "Library", "LaunchAgents", `${DAEMON_LAUNCH_LABEL}.plist`);
@@ -3597,6 +3634,12 @@ export function runUninstall() {
     }
     run("systemctl", ["--user", "daemon-reload"]);
     run("update-desktop-database", [path.dirname(paths.applicationPath)]);
+  }
+  try {
+    const removedBroker = removeMcpBrokerProvisioning({ packageRoot: runningPackageRoot() });
+    fs.rmSync(removedBroker.files.dir, { recursive: true, force: true });
+  } catch {
+    /* purge reports remaining state; ordinary uninstall remains best-effort */
   }
   return { claudeDesktop: claudeDesktopRemoval, linuxStop };
 }
@@ -3753,9 +3796,10 @@ export function installClaudeDesktop(bin = relayBinPath(), node = stableNodePath
   const dirs = claudeDesktopConfigDirs({ env });
   if (!dirs.length) return { ok: false, reason: "claude_desktop_not_found" };
 
+  const launch = mcpLaunchCommand({ mcpBin: bin, node: resolveStableNode({ execPath: node }) });
   const entry = claudeDesktopEntry({
-    node: resolveStableNode({ execPath: node }),
-    script: bin,
+    command: launch.command,
+    args: launch.args,
     relayHome: env.RELAY_HOME || undefined,
   });
 

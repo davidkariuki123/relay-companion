@@ -58,7 +58,7 @@ test("the entry carries only the four keys Claude Desktop accepts", () => {
     assert.ok(!(banned in entry), `${banned} must never be emitted`);
   }
   assert.equal(entry.command, "/opt/homebrew/bin/node");
-  assert.deepEqual(entry.args, ["--max-old-space-size=96", "/pkg/bin/relay.js", "mcp"]);
+  assert.deepEqual(entry.args, ["--max-old-space-size=32", "/pkg/bin/relay.js", "mcp"]);
 });
 
 test("merging preserves cowork settings and preferences, and only touches our key", () => {

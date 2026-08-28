@@ -48,6 +48,7 @@ export function defaultLogPaths(homeDir = os.homedir()) {
     path.join(dir, "update.log"),
     path.join(dir, "update.native.log"),
     path.join(dir, "perf.log"),
+    path.join(dir, "logs", "broker.log"),
   ];
 }
 

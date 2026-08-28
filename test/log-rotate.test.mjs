@@ -102,7 +102,7 @@ test("rotateLogs reports only what it actually rotated", () => {
 
 test("the default set covers every always-on log", () => {
   const files = defaultLogPaths("/home/ada").map((f) => path.basename(f));
-  assert.deepEqual(files, ["daemon.log", "pill.log", "update.log", "update.native.log", "perf.log"]);
+  assert.deepEqual(files, ["daemon.log", "pill.log", "update.log", "update.native.log", "perf.log", "broker.log"]);
   assert.ok(defaultLogPaths("/home/ada").every((f) => f.startsWith(path.join("/home/ada", ".relay"))));
   // Sanity: a cap large enough to be useful, small enough to matter. The field report
   // that motivated this had daemon.log at 40 MB.

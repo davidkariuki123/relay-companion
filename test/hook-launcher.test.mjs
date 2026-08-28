@@ -262,7 +262,8 @@ test("candidate runtime repair refreshes only existing Relay MCP registrations",
   assert.equal(JSON.parse(fs.readFileSync(claudeConfigFile, "utf8")).keep, true);
   assert.equal(JSON.parse(fs.readFileSync(claudeConfigFile, "utf8")).mcpServers.relay.args[1], result.mcpBin);
   assert.match(fs.readFileSync(codexConfigFile, "utf8"), /model = "keep"/);
-  assert.ok(fs.readFileSync(result.mcpBin, "utf8").includes(JSON.stringify(bin)));
+  const bridge = path.resolve(path.dirname(bin), "../src/mcp-bridge.js");
+  assert.ok(fs.readFileSync(result.mcpBin, "utf8").includes(JSON.stringify(bridge)));
 });
 
 test("candidate runtime repair does not add Relay MCP to unrelated host configs", () => {

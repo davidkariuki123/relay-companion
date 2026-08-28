@@ -23,7 +23,6 @@ import {
   updateChannel,
 } from "../src/config.js";
 import { runTaskDaemon, pollTaskRuntimeOnce } from "../src/task-daemon.js";
-import { runMcpServer } from "../src/mcp.js";
 import {
   resolveCliTrampoline,
   runCliTrampoline,
@@ -1252,7 +1251,13 @@ async function main() {
     case "pill":
       return cmdPill(flags, positional);
     case "mcp":
-      return runMcpServer();
+      return Promise.all([
+        import("../src/mcp-broker-state.js"),
+        import("../src/mcp-bridge.js"),
+      ]).then(([state, bridge]) => {
+        state.ensureMcpBrokerProvisioned();
+        return bridge.runMcpBridge();
+      });
     case "wake-on":
       // Let Claude Desktop sessions be woken by an incoming relay (see
       // src/desktop-wake.js). Verified before it is trusted; reversible.

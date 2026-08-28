@@ -27,8 +27,8 @@ const SECRET_BASENAME_RE = /(^\.env($|\.local|\.[a-z]+$)|^id_(rsa|dsa|ecdsa|ed25
 // Returns null if the path is a refused (secret) location; otherwise the resolved path.
 // Non-throwing so one bad path skips (with a logged warning) instead of failing the
 // whole batch.
-function safeAttachmentPathOrNull(filePath, trustedLocalRoot = "") {
-  const resolved = path.resolve(filePath);
+function safeAttachmentPathOrNull(filePath, trustedLocalRoot = "", baseDir = process.cwd()) {
+  const resolved = path.resolve(baseDir, filePath);
   if (trustedLocalRoot) {
     const root = path.resolve(trustedLocalRoot);
     if (resolved === root || resolved.startsWith(root + path.sep)) return resolved;
@@ -79,9 +79,17 @@ const CONTENT_TYPES = new Map([
   [".zip", "application/zip"],
 ]);
 
-export async function prepareOrdinaryRelayAttachments(args = {}) {
+export function hasAttachmentPayload(value, depth = 0) {
+  if (!value || depth > 6) return false;
+  if (Array.isArray(value)) return value.some((item) => hasAttachmentPayload(item, depth + 1));
+  if (typeof value !== "object") return false;
+  if ((Array.isArray(value.files) && value.files.length) || (Array.isArray(value.attachments) && value.attachments.length)) return true;
+  return Object.values(value).some((item) => item && typeof item === "object" && hasAttachmentPayload(item, depth + 1));
+}
+
+export async function prepareOrdinaryRelayAttachments(args = {}, { baseDir = process.cwd() } = {}) {
   const passthrough = passthroughAttachments(args);
-  const local = await readLocalAttachmentSpecs(localAttachmentSpecs(args), args.trustedLocalRoot);
+  const local = await readLocalAttachmentSpecs(localAttachmentSpecs(args), args.trustedLocalRoot, baseDir);
   return [
     ...passthrough,
     ...local.map((file, index) => ({
@@ -95,21 +103,21 @@ export async function prepareOrdinaryRelayAttachments(args = {}) {
   ];
 }
 
-export async function prepareTaskMessageAttachments(client, taskId, args = {}) {
+export async function prepareTaskMessageAttachments(client, taskId, args = {}, { baseDir = process.cwd() } = {}) {
   const passthrough = passthroughAttachments(args);
-  const local = await readLocalAttachmentSpecs(localAttachmentSpecs(args));
+  const local = await readLocalAttachmentSpecs(localAttachmentSpecs(args), "", baseDir);
   const uploaded = await uploadLocalTaskFiles(client, taskId, local, args.idempotencyKey || "relay_mcp_task_file");
   return [...passthrough, ...uploaded];
 }
 
-export async function prepareTaskResult(client, taskId, result = {}, baseIdempotencyKey = "relay_mcp_result_file") {
+export async function prepareTaskResult(client, taskId, result = {}, baseIdempotencyKey = "relay_mcp_result_file", options = {}) {
   return {
     ...result,
     attachments: await prepareTaskMessageAttachments(client, taskId, {
       attachments: result.attachments || [],
       files: result.files || [],
       idempotencyKey: baseIdempotencyKey,
-    }),
+    }, options),
   };
 }
 
@@ -131,15 +139,17 @@ function passthroughAttachments(args = {}) {
   return arrayOf(args.attachments).filter((item) => !(item && typeof item === "object" && (item.path || item.filePath)));
 }
 
-async function readLocalAttachmentSpecs(specs, trustedLocalRoot = "") {
+async function readLocalAttachmentSpecs(specs, trustedLocalRoot = "", baseDir = process.cwd()) {
   const out = [];
   const cap = maxAttachmentBytes();
+  const accepted = [];
+  let aggregateBytes = 0;
   for (const [index, spec] of specs.entries()) {
-    const filePath = safeAttachmentPathOrNull(spec.path, trustedLocalRoot);
+    const filePath = safeAttachmentPathOrNull(spec.path, trustedLocalRoot, baseDir);
     if (!filePath) {
       // Skip a clearly-secret file rather than fail the whole send; the agent can
       // re-send without it, and a prompt-injected exfiltration attempt is quietly denied.
-      console.error(`[relay] refusing to attach a secret-looking file: ${path.resolve(spec.path)}`);
+      console.error(`[relay] refusing to attach a secret-looking file: ${path.resolve(baseDir, spec.path)}`);
       continue;
     }
     const stat = await fs.stat(filePath);
@@ -149,6 +159,15 @@ async function readLocalAttachmentSpecs(specs, trustedLocalRoot = "") {
         `Attachment ${path.basename(filePath)} is ${(stat.size / 1024 / 1024).toFixed(1)} MB, over the ${(cap / 1024 / 1024).toFixed(0)} MB limit.`,
       );
     }
+    aggregateBytes += stat.size;
+    if (aggregateBytes > cap) {
+      throw new Error(
+        `Attachments total ${(aggregateBytes / 1024 / 1024).toFixed(1)} MB, over the ${(cap / 1024 / 1024).toFixed(0)} MB per-call limit.`,
+      );
+    }
+    accepted.push({ index, spec, filePath, stat });
+  }
+  for (const { index, spec, filePath } of accepted) {
     const body = await fs.readFile(filePath);
     const name = String(spec.name || spec.filename || path.basename(filePath)).trim() || `attachment-${index + 1}`;
     const sha256 = createHash("sha256").update(body).digest("hex");

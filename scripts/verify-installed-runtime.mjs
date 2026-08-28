@@ -55,6 +55,11 @@ export async function verifyInstalledRuntime({ packageRoot, version, platform = 
   if (manifest?.scripts?.install || manifest?.scripts?.postinstall) {
     throw new Error("Installed Relay package executes an npm install lifecycle");
   }
+  const nativeBridge = path.join(root, "native", platform === "win32" ? "mcp-bridge.exe" : "mcp-bridge");
+  const bridgeIdentity = spawnSync(nativeBridge, ["--version"], { encoding: "utf8", windowsHide: true, timeout: 30_000 });
+  if (bridgeIdentity.error || bridgeIdentity.status !== 0 || String(bridgeIdentity.stdout || "").trim() !== "relay-mcp-bridge-v1") {
+    throw new Error(`Native Relay MCP bridge is missing or invalid (${bridgeIdentity.error?.message || bridgeIdentity.stderr || bridgeIdentity.status}).`);
+  }
   const prepared = ensureCandidateElectronRuntime(root, { platform });
   if (!prepared.ok) throw new Error(`Electron runtime preparation failed: ${prepared.reason}`);
   const verified = verifyCanonicalCandidate(root, expectedVersion, { platform });

@@ -553,10 +553,35 @@ test("writeClaudeCodeMcpConfig registers Relay directly in ~/.claude.json shape"
   assert.deepEqual(cfg.mcpServers.relay, {
     type: "stdio",
     command: "C:\\Node\\node.exe",
-    args: ["--max-old-space-size=96", "C:\\Relay\\relay.js", "mcp"],
+    args: ["--max-old-space-size=32", "C:\\Relay\\relay.js", "mcp"],
     env: {},
     alwaysLoad: true,
   });
+});
+
+test("host configs execute the native bridge directly when a packaged bridge is active", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-native-host-config-"));
+  const bridge = path.join(root, ".relay", "bin", "mcp-bridge-0123456789abcdef");
+  const claude = path.join(root, ".claude.json");
+  const codex = path.join(root, ".codex", "config.toml");
+  fs.mkdirSync(path.dirname(bridge), { recursive: true });
+  fs.mkdirSync(path.dirname(codex), { recursive: true });
+  fs.writeFileSync(bridge, "fixture");
+  fs.writeFileSync(claude, JSON.stringify({ mcpServers: {} }));
+  fs.writeFileSync(codex, "model = \"test\"\n");
+  assert.equal(writeClaudeCodeMcpConfig(bridge, process.execPath, claude).ok, true);
+  assert.equal(writeCodexMcpConfig(bridge, process.execPath, codex).ok, true);
+  const expectedDescriptor = path.join(root, ".relay", "run", "mcp", "broker-v1.json");
+  assert.deepEqual(JSON.parse(fs.readFileSync(claude, "utf8")).mcpServers.relay, {
+    type: "stdio",
+    command: bridge,
+    args: ["--descriptor", expectedDescriptor],
+    env: {},
+    alwaysLoad: true,
+  });
+  const codexText = fs.readFileSync(codex, "utf8");
+  assert.ok(codexText.includes(`command = ${JSON.stringify(bridge)}`));
+  assert.ok(codexText.includes(`args = [${JSON.stringify("--descriptor")}, ${JSON.stringify(expectedDescriptor)}]`));
 });
 
 test("agent config rewrites preserve secrets and remain owner-only", { skip: process.platform === "win32" }, (t) => {
@@ -600,7 +625,7 @@ test("writeCodexMcpConfig replaces only the Relay MCP table", () => {
   assert.match(text, /model = "gpt-test"/);
   assert.match(text, /\[features\.code_mode\]\ndirect_only_tool_namespaces = \["mcp__relay"\]/);
   assert.match(text, /\[mcp_servers\.node_repl\]/);
-  assert.match(text, /\[mcp_servers\.relay\]\ncommand = "\/usr\/local\/bin\/node"\nargs = \["--max-old-space-size=96", "\/relay\/bin\/relay\.js", "mcp"\]/);
+  assert.match(text, /\[mcp_servers\.relay\]\ncommand = "\/usr\/local\/bin\/node"\nargs = \["--max-old-space-size=32", "\/relay\/bin\/relay\.js", "mcp"\]/);
   assert.doesNotMatch(text, /command = "old"/);
 });
 
