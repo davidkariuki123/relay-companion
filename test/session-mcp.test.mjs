@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { handleCall, toolsForAccount } from "../src/mcp.js";
+import { createMcpSessionContext, handleCall, toolsForAccount } from "../src/mcp.js";
 
 const DEVELOPER_FEATURES = { requests: true, aiSessions: true, connectors: true };
 
@@ -30,8 +30,6 @@ test("relay_ai_sessions lists local and cloud together and labels ids as AI sess
 });
 
 test("relay_ai_session binds the calling Codex task without exposing a native target id", async () => {
-  const previous = process.env.CODEX_THREAD_ID;
-  process.env.CODEX_THREAD_ID = "native-calling-thread";
   let request;
   const client = {
     async createSessionOperation(value) {
@@ -39,22 +37,18 @@ test("relay_ai_session binds the calling Codex task without exposing a native ta
       return { operation: { id: "rsop_1", state: "accepted" } };
     },
   };
-  try {
-    const result = await handleCall(client, "relay_ai_session", {
-      action: "send",
-      aiSessionId: "rsess_target",
-      message: "Please inspect the failure.",
-      idempotencyKey: "idem-1",
-    }, { features: DEVELOPER_FEATURES });
-    assert.equal(payload(result).operation.id, "rsop_1");
-    assert.equal(request.sourceProvider, "codex");
-    assert.equal(request.sourceNativeId, "native-calling-thread");
-    assert.equal(request.sessionId, "rsess_target");
-    assert.ok(!("nativeId" in request));
-  } finally {
-    if (previous === undefined) delete process.env.CODEX_THREAD_ID;
-    else process.env.CODEX_THREAD_ID = previous;
-  }
+  const sessionContext = createMcpSessionContext({ env: { CODEX_THREAD_ID: "native-calling-thread" } });
+  const result = await handleCall(client, "relay_ai_session", {
+    action: "send",
+    aiSessionId: "rsess_target",
+    message: "Please inspect the failure.",
+    idempotencyKey: "idem-1",
+  }, { features: DEVELOPER_FEATURES, sessionContext });
+  assert.equal(payload(result).operation.id, "rsop_1");
+  assert.equal(request.sourceProvider, "codex");
+  assert.equal(request.sourceNativeId, "native-calling-thread");
+  assert.equal(request.sessionId, "rsess_target");
+  assert.ok(!("nativeId" in request));
 });
 
 test("relay_ai_sessions routes transcript search to the computer holding the AI session", async () => {
