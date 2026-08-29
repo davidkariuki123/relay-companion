@@ -256,4 +256,16 @@ jobs:
             echo "::error::relay-companion@$VERSION did not propagate within 60 seconds"
             exit 1
           }
-          node scripts/verify-published-release.mjs --version "$VERSION" --source-sha "$SOURCE_SHA"
+          verified=0
+          for attempt in $(seq 1 12); do
+            if node scripts/verify-published-release.mjs --version "$VERSION" --source-sha "$SOURCE_SHA"; then
+              verified=1
+              break
+            fi
+            echo "waiting for npm provenance to propagate ($attempt/12)"
+            sleep 5
+          done
+          [ "$verified" = 1 ] || {
+            echo "::error::relay-companion@$VERSION provenance did not propagate within the verification window"
+            exit 1
+          }

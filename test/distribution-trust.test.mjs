@@ -1487,6 +1487,7 @@ test("public release owns immutable publication while private promotion owns fle
   assert.match(publish, /s3api put-object/);
   assert.match(publish, /--if-none-match '\*'/);
   assert.match(publish, /npm publish .*--provenance/);
+  assert.match(publish, /waiting for npm provenance to propagate/);
   assert.doesNotMatch(publish, /verify-thin-setup-canary/);
   assert.match(publish, /existing npm version has different bytes/);
   assert.match(publish, /tar -tzf "\$tarball" > "\$RUNNER_TEMP\/pack-files\.txt"/);
