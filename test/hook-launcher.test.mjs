@@ -153,7 +153,10 @@ test("Windows bridge uses a stable PowerShell script and legacy-compatible owner
   const claude = claudeHookHandler("ignored", "ignored", invocation);
   assert.equal(claude.args, undefined);
   assert.match(claude.command, /^'C:\\Windows\\System32\\WindowsPowerShell\\v1\.0\\powershell\.exe'/);
-  assert.match(claude.command, /'[^']+\\\.relay\\bin\\hook-launcher\.ps1'/);
+  assert.ok(
+    claude.command.includes(`'${invocation.scriptPath}'`),
+    "the platform-specific stable launcher path is shell-quoted",
+  );
   assert.match(claude.command, /relay\.js["']? claude-hook$/);
   assert.equal(isRelayClaudeHookCommand(claude), true, "older installers can recognize and replace the handler");
   assert.match(claude.command, /relay\.js["']?\s+claude-hook(?:\s|$)/, "0.1.57 shell-only detector recognizes it");

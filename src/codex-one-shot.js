@@ -7,7 +7,12 @@ import { storeDir } from "./host-paths.js";
 
 const DEFAULT_STALL_TIMEOUT_MS = 5 * 60 * 1000;
 const DEFAULT_RUN_TIMEOUT_MS = 90 * 60 * 1000;
-const DEFAULT_MCP_TOOL_TIMEOUTS = Object.freeze({ agentos: 45 });
+// A timeout override for a server that is not present in the user's Codex
+// config creates an incomplete mcp_servers table. Current Codex rejects that
+// table as an invalid transport before starting the run, so defaults must not
+// invent server names. Callers may still bound MCP servers they explicitly
+// know are configured.
+const DEFAULT_MCP_TOOL_TIMEOUTS = Object.freeze({});
 
 const RELAY_OUTPUT_SCHEMA = {
   type: "object",

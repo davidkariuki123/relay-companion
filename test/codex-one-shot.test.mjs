@@ -38,9 +38,13 @@ test("anonymous Codex runs use the real non-interactive CLI without discarding u
   assert.equal(args.includes("--approve-for-me"), true, "configured tools get automatic approval review instead of blocking headless work");
   assert.equal(args.includes("gpt-5.6-sol"), true);
   assert.equal(args.includes('model_reasoning_effort="high"'), true);
-  assert.equal(args.includes("mcp_servers.agentos.tool_timeout_sec=45"), true,
-    "AgentOS stays enabled but a dead provenance call cannot own the whole run");
+  assert.equal(args.some((arg) => String(arg).startsWith("mcp_servers.")), false,
+    "Relay does not invent an incomplete MCP server table when the user has not configured that server");
   assert.equal(args.at(-1), "-", "the large chat prompt is piped over stdin");
+});
+
+test("ephemeral app-server defaults never invent an MCP transport", () => {
+  assert.deepEqual(codexOneShotAppServerArgs(), ["app-server"]);
 });
 
 test("one-shot MCP timeouts are bounded config layers, not server exclusions", () => {
