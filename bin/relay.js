@@ -46,6 +46,7 @@ import {
   restartRelayServices,
   runSetupInstall,
   runUninstall,
+  uninstallResultLines,
   startLinuxDesktopServices,
   systemdExecQuote,
   windowsStartMenuShortcutMissing,
@@ -53,6 +54,7 @@ import {
 } from "../src/install.js";
 import { readAutostartDaemonRoot } from "../src/autostart-registration.js";
 import { companionPackageRoot, readMigrationFailure, readRecoveryFailure, runUpdateOnce } from "../src/auto-update.js";
+import { uninstallManagedCompanionPackage } from "../src/uninstall-package.js";
 import {
   canonicalRuntimeLayout,
   readCanonicalRuntimeState,
@@ -526,14 +528,8 @@ async function cmdUninstall(flags = {}) {
   }
 
   const uninstalled = runUninstall();
-  console.log("Removed Relay from Claude Code, Codex, and Claude Desktop, and stopped the background daemon.");
-  const desktop = uninstalled && uninstalled.claudeDesktop;
-  if (desktop && desktop.removedFrom && desktop.removedFrom.length) {
-    console.log("Restart Claude Desktop so it stops loading the removed Relay server.");
-  }
-  if (desktop && desktop.failures && desktop.failures.length) {
-    for (const f of desktop.failures) console.log(`Could not edit ${f.configPath} (${f.detail}); remove the "relay" entry by hand.`);
-  }
+  for (const line of uninstallResultLines(uninstalled)) console.log(line);
+  if (!uninstalled.ok) process.exitCode = 1;
 
   if (!purge) return;
 
@@ -557,14 +553,34 @@ async function cmdUninstall(flags = {}) {
     return;
   }
   if (!purged.ok) {
-    console.log("The pairing is gone, so this machine is forgotten, but some files above could not be deleted.");
-    console.log("They are inert leftovers — remove them by hand when whatever holds them exits.");
+    console.log("The pairing is gone, but Relay's local purge is incomplete.");
+    console.log("Relay kept the npm package so this command can be retried after the reported lock or permission problem is fixed.");
+    process.exitCode = 1;
+    return;
+  }
+  if (!uninstalled.ok) {
+    console.log("Relay's local state is gone, but the integration uninstall above is incomplete.");
+    console.log("Relay kept the npm package so `relay uninstall --purge` can be retried.");
+    return;
   }
   if (process.platform === "linux") {
     console.log("A root-owned Chromium sandbox helper may remain under /usr/local/lib/relay because it can be shared by other users on this Linux device.");
   }
-  console.log("This machine has forgotten Relay. To remove the package itself, run:");
-  console.log("  npm uninstall -g relay-companion");
+  const packageRemoval = uninstallManagedCompanionPackage({
+    runningRoot: companionPackageRoot(),
+    shimRoot: process.env[TRAMPOLINE_SHIM_ROOT_ENV] || "",
+  });
+  if (!packageRemoval.ok) {
+    console.log(
+      `Could not remove the npm package after ${packageRemoval.attempts || 1} ` +
+      `${packageRemoval.attempts === 1 ? "attempt" : "attempts"} (${packageRemoval.detail || "unknown failure"}).`,
+    );
+    console.log(`Relay's data and integrations are gone. Remove the remaining package with: npm uninstall -g relay-companion --prefix "${packageRemoval.prefix}"`);
+    process.exitCode = 1;
+    return;
+  }
+  if (packageRemoval.removed) console.log("Removed the npm-global Relay package.");
+  console.log("This machine has forgotten Relay and no installed Relay runtime remains.");
 }
 
 async function cmdWhoami() {
@@ -1305,7 +1321,7 @@ async function main() {
           "  relay setup --code CODE                               Legacy migration only: pair by code, then install",
           "  relay install                                        Add Relay to your agents",
           "  relay uninstall                                       Remove Relay from your agents and stop the daemon (keeps the pairing)",
-          "  relay uninstall --purge                               Also revoke this device and delete all owner-scoped Relay state",
+          "  relay uninstall --purge                               Revoke this device and completely remove Relay from this machine",
           "  relay repair-installation [--no-restart]             Non-destructively repair Relay.app and services; preserves account, encryption, messages, outbox, and preferences",
           "  relay repair-desktop [--no-restart]                  Compatibility alias for repair-installation",
           "  relay repair-runtime [--no-restart]                  Internal: refresh existing Relay registrations and runtime services",

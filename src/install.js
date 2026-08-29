@@ -19,6 +19,7 @@ import { brokerIdentity, removeMcpBrokerProvisioning } from "./mcp-broker-state.
 import { canonicalOwnershipGuard, verifyCanonicalCandidate } from "./canonical-runtime.js";
 import { ensureStableHookLauncher, removeStableHookLauncher } from "./hook-launcher.js";
 import { writeConfig } from "./config.js";
+import { deleteInstallationAuthorizationCredentials } from "./installation-authorization.js";
 import {
   ACTIVE_UPDATE_WORKER_ENV,
   cleanupMacUpdateAgents,
@@ -1465,9 +1466,10 @@ function shellArg(value) {
 
 function stableHookCommand(hookInvocation, hookName) {
   const parts = [hookInvocation.command, ...hookInvocation.argsPrefix];
-  const quoted = hookInvocation.platform === "win32"
-    ? parts.map(shellArg)
-    : parts.map(shellSingleQuote);
+  // Claude runs command hooks through a POSIX-compatible shell on Windows as
+  // well. Bare Windows paths lose their backslashes there (C:\\Windows becomes
+  // C:Windows), so quote every launcher argument on every platform.
+  const quoted = parts.map(shellSingleQuote);
   // Keep the final hook name unquoted for Relay 0.1.57's ownership regex.
   return [...quoted, hookName].join(" ");
 }
@@ -3249,9 +3251,9 @@ export function repairDesktopSurfaces({
  * uninstall remove. A live daemon actively reverses an uninstall.
  */
 export const WINDOWS_STOP_RELAY_SERVICES_PS = [
-  "$p=Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {",
-  "  $_.CommandLine -and ($_.CommandLine -match '[\\\\/]relay-companion[\\\\/]') -and (($_.CommandLine -match '[\\\\/]relay\\.js.*\\bdaemon\\b') -or ($_.CommandLine -match '[\\\\/]overlay[\\\\/]main\\.cjs') -or ($_.CommandLine -match '[\\\\/]mcp-broker-entry\\.js'))",
-  "}; foreach($x in $p){ try { Invoke-CimMethod -InputObject $x -MethodName Terminate -ErrorAction Stop | Out-Null } catch {} }",
+  "$find={ @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {",
+  "  $_.ProcessId -ne $PID -and $_.CommandLine -and ($_.CommandLine -match '[\\\\/]relay-companion[\\\\/]') -and (($_.CommandLine -match '[\\\\/]relay\\.js.*\\bdaemon\\b') -or ($_.CommandLine -match '[\\\\/]overlay[\\\\/]main\\.cjs') -or ($_.CommandLine -match '[\\\\/]mcp-broker-entry\\.js') -or ($_.CommandLine -match '[\\\\/]relay\\.js.*(?:\\s|\")mcp(?:\\s|\"|$)'))",
+  "}) }; $p=&$find; for($i=0;$i -lt 3 -and $p.Count;$i++){ foreach($x in $p){ try { Invoke-CimMethod -InputObject $x -MethodName Terminate -ErrorAction Stop | Out-Null } catch {} }; Start-Sleep -Milliseconds 150; $p=&$find }; if($p.Count){ Write-Error ('Relay processes did not stop: '+(($p | ForEach-Object ProcessId) -join ', ')); exit 1 }",
 ].join(" ");
 
 /**
@@ -3262,7 +3264,11 @@ export const WINDOWS_STOP_RELAY_SERVICES_PS = [
 export function stopWindowsRelayServices({ runCommand = run } = {}) {
   for (const task of [WINDOWS_DAEMON_TASK_NAME, WINDOWS_PILL_TASK_NAME]) runCommand("schtasks", ["/End", "/TN", task]);
   const swept = runCommand("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_STOP_RELAY_SERVICES_PS]);
-  return { swept: Boolean(swept && swept.ok) };
+  return {
+    ok: Boolean(swept && swept.ok),
+    swept: Boolean(swept && swept.ok),
+    detail: swept && swept.ok ? "" : (swept?.out || "Could not stop Relay processes."),
+  };
 }
 
 export function stopPosixMcpBrokers({
@@ -3293,13 +3299,13 @@ export function stopPosixMcpBrokers({
   return { ok: true, stopped };
 }
 
-function linuxInstalledServiceRows({
+function installedPosixRelayProcessRows({
   runCommand = run,
   processId = process.pid,
   userId = typeof process.getuid === "function" ? process.getuid() : 0,
 } = {}) {
   const queried = runCommand("/bin/ps", ["-axo", "uid=,pid=,command="]);
-  if (!queried.ok) return { ok: false, rows: [], detail: queried.out || "Could not enumerate Linux processes." };
+  if (!queried.ok) return { ok: false, rows: [], detail: queried.out || "Could not enumerate Relay processes." };
   const rows = [];
   for (const line of String(queried.out || "").split(/\r?\n/)) {
     const match = line.match(/^\s*(\d+)\s+(\d+)\s+(.*)$/);
@@ -3313,7 +3319,8 @@ function linuxInstalledServiceRows({
     if (!/node_modules\/relay-companion\//i.test(normalized)) continue;
     const daemon = /\/relay\.js(?:["'\s]|$).*\bdaemon\b/i.test(normalized);
     const pill = /\/overlay\/main\.cjs(?:["'\s]|$)/i.test(normalized);
-    if (!daemon && !pill) continue;
+    const mcp = /\/relay\.js["']?\s+mcp(?:\s|$)/i.test(normalized);
+    if (!daemon && !pill && !mcp) continue;
     rows.push({ pid, command });
   }
   return { ok: true, rows };
@@ -3322,6 +3329,37 @@ function linuxInstalledServiceRows({
 function blockingPause(ms) {
   const signal = new Int32Array(new SharedArrayBuffer(4));
   Atomics.wait(signal, 0, 0, Math.max(1, ms));
+}
+
+function stopPosixRelayProcesses({
+  runCommand = run,
+  sleep = blockingPause,
+  processId = process.pid,
+  userId = typeof process.getuid === "function" ? process.getuid() : 0,
+} = {}) {
+  const read = () => installedPosixRelayProcessRows({ runCommand, processId, userId });
+  const first = read();
+  if (!first.ok) return first;
+  for (const row of first.rows) runCommand("/bin/kill", ["-TERM", String(row.pid)]);
+  let live = first;
+  for (let attempt = 0; attempt < 20 && live.rows.length; attempt += 1) {
+    sleep(100);
+    live = read();
+    if (!live.ok) return live;
+  }
+  for (const row of live.rows) runCommand("/bin/kill", ["-KILL", String(row.pid)]);
+  if (live.rows.length) sleep(200);
+  const final = read();
+  if (!final.ok) return final;
+  if (final.rows.length) {
+    return { ok: false, rows: final.rows, detail: `Relay processes did not stop: ${final.rows.map(({ pid }) => pid).join(", ")}` };
+  }
+  return { ok: true, stopped: first.rows.map(({ pid }) => pid) };
+}
+
+/** Stop live Relay-owned processes on macOS, including MCP children of open agents. */
+export function stopMacRelayProcesses(options = {}) {
+  return stopPosixRelayProcesses(options);
 }
 
 /** Stop supervised and standalone Linux processes before removing registrations. */
@@ -3334,23 +3372,7 @@ export function stopLinuxRelayServices({
   for (const unit of [LINUX_PILL_UNIT, LINUX_DAEMON_UNIT]) {
     runCommand("systemctl", ["--user", "disable", "--now", unit]);
   }
-  const first = linuxInstalledServiceRows({ runCommand, processId, userId });
-  if (!first.ok) return first;
-  for (const row of first.rows) runCommand("/bin/kill", ["-TERM", String(row.pid)]);
-  let live = first;
-  for (let attempt = 0; attempt < 20 && live.rows.length; attempt += 1) {
-    sleep(100);
-    live = linuxInstalledServiceRows({ runCommand, processId, userId });
-    if (!live.ok) return live;
-  }
-  for (const row of live.rows) runCommand("/bin/kill", ["-KILL", String(row.pid)]);
-  if (live.rows.length) sleep(200);
-  const final = linuxInstalledServiceRows({ runCommand, processId, userId });
-  if (!final.ok) return final;
-  if (final.rows.length) {
-    return { ok: false, rows: final.rows, detail: `Relay processes did not stop: ${final.rows.map(({ pid }) => pid).join(", ")}` };
-  }
-  return { ok: true, stopped: first.rows.map(({ pid }) => pid) };
+  return stopPosixRelayProcesses({ runCommand, sleep, processId, userId });
 }
 
 /**
@@ -3540,88 +3562,190 @@ export function accountRestartLines(result) {
  */
 const WINDOWS_LEGACY_UPDATER_TASK_NAME = "Relay Companion Updater";
 
-export function runUninstall() {
-  const updateAgents = cleanupMacUpdateAgents();
-  if (!updateAgents.ok) {
-    throw new Error(`Relay could not remove its older update agents (${updateAgentCleanupDetail(updateAgents) || "launchd cleanup failed"}).`);
+export const UNINSTALL_RETRY_ATTEMPTS = 3;
+
+function uninstallFailureDetail(result) {
+  if (!result || typeof result !== "object") return "The removal step returned no result.";
+  if (result.detail) return String(result.detail);
+  if (Array.isArray(result.failures) && result.failures.length) {
+    return result.failures
+      .map((failure) => `${failure.configPath || failure.path || "unknown location"}: ${failure.detail || "could not remove"}`)
+      .join("; ");
   }
+  if (result.out) return String(result.out);
+  if (result.reason) return String(result.reason);
+  if (result.status != null) return `command exited ${result.status}`;
+  return "The removal step did not complete.";
+}
+
+/** Run one idempotent uninstall operation with bounded retries and retain exact evidence. */
+export function retryUninstallStep(id, label, operation, {
+  attempts = UNINSTALL_RETRY_ATTEMPTS,
+  sleep = blockingPause,
+  retryDelayMs = 150,
+} = {}) {
+  const limit = Math.max(1, Number(attempts) || 1);
+  const history = [];
+  for (let attempt = 1; attempt <= limit; attempt += 1) {
+    let result;
+    try {
+      result = operation();
+    } catch (error) {
+      result = { ok: false, detail: error?.message || String(error) };
+    }
+    if (!result || typeof result !== "object" || typeof result.ok !== "boolean") {
+      result = { ok: false, detail: "The removal step returned an invalid result." };
+    }
+    history.push(result);
+    if (result.ok) {
+      return { ...result, id, label, ok: true, attempts: attempt, history };
+    }
+    if (attempt < limit) sleep(retryDelayMs * attempt);
+  }
+  const last = history.at(-1);
+  return {
+    ...last,
+    id,
+    label,
+    ok: false,
+    attempts: history.length,
+    history,
+    detail: uninstallFailureDetail(last),
+  };
+}
+
+export function mcpCliRemovalResult(result) {
+  if (result?.ok) return result;
+  const out = String(result?.out || "");
+  if (result?.missing) return { ...result, ok: true, skipped: true, detail: "Host CLI is not installed." };
+  if (
+    /\bno\b.*\bmcp\b.*(?:\bfound\b.*\brelay\b|\brelay\b.*\bfound\b)|\brelay\b.*\b(?:does not exist|not found|isn't configured|is not configured)\b/i.test(out)
+  ) {
+    return { ...result, ok: true, alreadyAbsent: true };
+  }
+  return { ...result, ok: false, detail: out || "The host CLI could not remove Relay." };
+}
+
+function removeOwnedPath(target, { recursive = false } = {}) {
+  if (!fs.existsSync(target)) return { ok: true, path: target, alreadyAbsent: true };
+  try {
+    if (recursive) fs.rmSync(target, { recursive: true, force: true });
+    else fs.unlinkSync(target);
+  } catch (error) {
+    return { ok: false, path: target, detail: error?.message || String(error) };
+  }
+  return fs.existsSync(target)
+    ? { ok: false, path: target, detail: "The path still exists after removal." }
+    : { ok: true, path: target, removed: true };
+}
+
+export function runUninstall({
+  platform = process.platform,
+  homeDir = os.homedir(),
+  env = process.env,
+  runCommand = run,
+  attempts = UNINSTALL_RETRY_ATTEMPTS,
+  sleep = blockingPause,
+} = {}) {
+  const steps = [];
+  const record = (id, label, operation) => {
+    const step = retryUninstallStep(id, label, operation, { attempts, sleep });
+    steps.push(step);
+    return step;
+  };
+
+  const updateAgents = record("update_agents", "older Relay update agents", () => {
+    const result = cleanupMacUpdateAgents({ platform, runCommand, homeDir });
+    return result.ok ? result : { ...result, detail: updateAgentCleanupDetail(result) || "launchd cleanup failed" };
+  });
+
   // Services FIRST, on every platform. A daemon that outlives the steps below
   // re-registers them within one poll cycle (ensureWindowsAutostartTasks,
   // repair-runtime), silently undoing the uninstall.
-  if (process.platform === "win32") stopWindowsRelayServices();
-  else stopPosixMcpBrokers();
-  let linuxStop = null;
-  if (process.platform === "linux") {
-    linuxStop = stopLinuxRelayServices();
-    if (!linuxStop.ok) throw new Error(`Relay could not safely stop its Linux desktop processes (${linuxStop.detail || "unknown failure"}).`);
-  }
+  const services = record("live_processes", "live Relay services and MCP processes", () => {
+    if (platform === "win32") return stopWindowsRelayServices({ runCommand });
+    const brokerStop = stopPosixMcpBrokers({
+      runCommand,
+      configScopeId: brokerIdentity({ env, packageRoot: runningPackageRoot(), platform, homeDir }).configScopeId,
+    });
+    if (!brokerStop.ok) return brokerStop;
+    if (platform === "linux") {
+      const stopped = stopLinuxRelayServices({ runCommand, sleep });
+      return stopped.ok ? { ...stopped, brokerStopped: brokerStop.stopped } : stopped;
+    }
+    if (platform === "darwin") {
+      for (const label of [PILL_LAUNCH_LABEL, DAEMON_LAUNCH_LABEL]) {
+        runCommand("launchctl", ["unload", path.join(homeDir, "Library", "LaunchAgents", `${label}.plist`)]);
+      }
+      const stopped = stopMacRelayProcesses({ runCommand, sleep });
+      return stopped.ok ? { ...stopped, brokerStopped: brokerStop.stopped } : stopped;
+    }
+    return { ...brokerStop, skipped: true };
+  });
 
-  run("claude", ["mcp", "remove", "-s", "user", "relay"]);
-  run("codex", ["mcp", "remove", "relay"]);
-  removeClaudeCodeMcpConfig();
-  removeCodexMcpConfig();
-  const claudeDesktopRemoval = removeClaudeDesktopMcpConfig();
-  const claudeHookRemoval = uninstallClaudeHooks();
-  const codexHookRemoval = uninstallCodexHooks();
+  const claudeCliRemoval = record("claude_cli_mcp", "Claude Code's user MCP registration", () =>
+    mcpCliRemovalResult(runCommand("claude", ["mcp", "remove", "-s", "user", "relay"])),
+  );
+  const codexCliRemoval = record("codex_cli_mcp", "Codex's user MCP registration", () =>
+    mcpCliRemovalResult(runCommand("codex", ["mcp", "remove", "relay"])),
+  );
+  const claudeConfigRemoval = record("claude_config_mcp", "Claude Code's Relay MCP config", () => removeClaudeCodeMcpConfig());
+  const codexConfigRemoval = record("codex_config_mcp", "Codex's Relay MCP config", () => removeCodexMcpConfig());
+  const claudeDesktopRemoval = record("claude_desktop_mcp", "Claude Desktop's Relay MCP config", () =>
+    removeClaudeDesktopMcpConfig({ env }),
+  );
+  const claudeHookRemoval = record("claude_hooks", "Claude Code's Relay hooks", () => uninstallClaudeHooks());
+  const codexHookRemoval = record("codex_hooks", "Codex's Relay hooks", () => uninstallCodexHooks());
   // If a malformed host config prevented handler removal, leave the tiny bridge
   // in place. Deleting it would strand a visible MODULE_NOT_FOUND Stop hook.
   if (claudeHookRemoval.ok && codexHookRemoval.ok) {
-    try {
-      removeStableHookLauncher();
-    } catch {
-      /* a partial uninstall is still better than touching an unrelated file */
-    }
+    record("hook_launcher", "Relay's hook launcher", () => {
+      try {
+        removeStableHookLauncher({ homeDir });
+        return { ok: true };
+      } catch (error) {
+        return { ok: false, detail: error?.message || String(error) };
+      }
+    });
   }
-  try {
-    removeStableMcpLauncher();
-  } catch {
-    /* host registrations are already removed; reportable state cleanup continues below */
-  }
-  if (process.platform === "darwin") {
-    const plistPath = path.join(os.homedir(), "Library", "LaunchAgents", `${DAEMON_LAUNCH_LABEL}.plist`);
-    run("launchctl", ["unload", plistPath]);
+  record("mcp_launcher", "Relay's stable MCP launcher", () => {
     try {
-      fs.unlinkSync(plistPath);
-    } catch {
-      /* already gone */
+      const launcherPath = removeStableMcpLauncher(homeDir);
+      return removeOwnedPath(launcherPath);
+    } catch (error) {
+      return { ok: false, detail: error?.message || String(error) };
     }
-    const pillPlistPath = path.join(os.homedir(), "Library", "LaunchAgents", `${PILL_LAUNCH_LABEL}.plist`);
-    run("launchctl", ["unload", pillPlistPath]);
-    try {
-      fs.unlinkSync(pillPlistPath);
-    } catch {
-      /* already gone */
+  });
+
+  if (platform === "darwin") {
+    for (const label of [DAEMON_LAUNCH_LABEL, PILL_LAUNCH_LABEL]) {
+      const plistPath = path.join(homeDir, "Library", "LaunchAgents", `${label}.plist`);
+      record(`mac_plist_${label}`, `macOS launch agent ${label}`, () => removeOwnedPath(plistPath));
     }
     for (const name of [RELAY_MAC_APP_NAME, RELAY_MAC_APP_FALLBACK_NAME]) {
-      const appPath = path.join(os.homedir(), "Applications", name);
-      try {
-        if (isRelayOwnedMacApp(appPath)) fs.rmSync(appPath, { recursive: true, force: true });
-      } catch {
-        /* already gone */
-      }
+      const appPath = path.join(homeDir, "Applications", name);
+      if (isRelayOwnedMacApp(appPath)) record(`mac_app_${name}`, name, () => removeOwnedPath(appPath, { recursive: true }));
     }
-  } else if (process.platform === "win32") {
+  } else if (platform === "win32") {
     // Processes were stopped at the top; now the tasks that would relaunch
     // them at next logon.
     for (const task of [WINDOWS_DAEMON_TASK_NAME, WINDOWS_PILL_TASK_NAME, WINDOWS_LEGACY_UPDATER_TASK_NAME]) {
-      run("schtasks", ["/Delete", "/TN", task, "/F"]);
+      record(`windows_task_${task}`, `Windows task ${task}`, () => {
+        const deleted = runCommand("schtasks", ["/Delete", "/TN", task, "/F"]);
+        const query = runCommand("schtasks", ["/Query", "/TN", task]);
+        if (!query.ok) return { ok: true, removed: deleted.ok, alreadyAbsent: !deleted.ok };
+        return { ok: false, detail: deleted.out || `The scheduled task ${task} still exists.` };
+      });
     }
     for (const taskName of [WINDOWS_DAEMON_TASK_NAME, WINDOWS_PILL_TASK_NAME, RELAY_WINDOWS_LAUNCHER_TASK]) {
-      try {
-        fs.unlinkSync(windowsHiddenLauncherPath(os.homedir(), taskName));
-      } catch {
-        /* already gone */
-      }
+      const launcherPath = windowsHiddenLauncherPath(homeDir, taskName);
+      record(`windows_launcher_${taskName}`, `Windows launcher ${taskName}`, () => removeOwnedPath(launcherPath));
     }
     // The Start Menu entry is the Windows counterpart to Relay.app above.
-    try {
-      fs.unlinkSync(windowsStartMenuShortcutPath());
-    } catch {
-      /* already gone */
-    }
-  } else if (process.platform === "linux") {
-    const paths = linuxDesktopPaths();
-    removeLinuxRelayMimeDefaults();
+    record("windows_shortcut", "Relay's Start Menu shortcut", () => removeOwnedPath(windowsStartMenuShortcutPath(env, homeDir)));
+  } else if (platform === "linux") {
+    const paths = linuxDesktopPaths({ homeDir, env });
+    record("linux_mime", "Relay's Linux protocol registration", () => removeLinuxRelayMimeDefaults({ homeDir, env }));
     for (const file of [
       paths.daemonUnitPath,
       paths.pillUnitPath,
@@ -3630,18 +3754,66 @@ export function runUninstall() {
       paths.autostartPath,
       paths.pillStarterPath,
     ]) {
-      try { fs.unlinkSync(file); } catch { /* already gone */ }
+      record(`linux_file_${file}`, file, () => removeOwnedPath(file));
     }
-    run("systemctl", ["--user", "daemon-reload"]);
-    run("update-desktop-database", [path.dirname(paths.applicationPath)]);
+    record("linux_daemon_reload", "Linux service registry reload", () => runCommand("systemctl", ["--user", "daemon-reload"]));
+    record("linux_desktop_reload", "Linux desktop registry reload", () => {
+      const result = runCommand("update-desktop-database", [path.dirname(paths.applicationPath)]);
+      return result.missing ? { ...result, ok: true, skipped: true } : result;
+    });
   }
-  try {
-    const removedBroker = removeMcpBrokerProvisioning({ packageRoot: runningPackageRoot() });
-    fs.rmSync(removedBroker.files.dir, { recursive: true, force: true });
-  } catch {
-    /* purge reports remaining state; ordinary uninstall remains best-effort */
+  record("mcp_broker_provisioning", "Relay's shared MCP broker state", () => {
+    try {
+      const removedBroker = removeMcpBrokerProvisioning({
+        env,
+        packageRoot: runningPackageRoot(),
+        platform,
+      });
+      return removeOwnedPath(removedBroker.files.dir, { recursive: true });
+    } catch (error) {
+      return { ok: false, detail: error?.message || String(error) };
+    }
+  });
+
+  const failures = steps.filter((step) => !step.ok);
+  const removedDesktopPaths = Array.from(new Set(
+    claudeDesktopRemoval.history.flatMap((result) => result.removedFrom || []),
+  ));
+  return {
+    ok: failures.length === 0,
+    steps,
+    failures,
+    services,
+    updateAgents,
+    claudeCode: { ok: claudeCliRemoval.ok && claudeConfigRemoval.ok && claudeHookRemoval.ok },
+    codex: { ok: codexCliRemoval.ok && codexConfigRemoval.ok && codexHookRemoval.ok },
+    claudeDesktop: { ...claudeDesktopRemoval, removedFrom: removedDesktopPaths },
+    openSessionsNeedRestart: true,
+  };
+}
+
+/** Human- and agent-readable uninstall result. Never claim success over a failed step. */
+export function uninstallResultLines(result) {
+  const lines = [];
+  if (result?.ok) {
+    lines.push("Removed Relay's MCP registrations and hooks from Claude Code, Codex, and Claude Desktop.");
+    lines.push("Stopped Relay's background services and disconnected live Relay MCP processes.");
+  } else {
+    lines.push("Relay uninstall is incomplete.");
+    for (const failure of result?.failures || []) {
+      const attempts = Number(failure.attempts) || 1;
+      lines.push(
+        `Could not remove ${failure.label || failure.id || "a Relay component"} after ${attempts} ` +
+        `${attempts === 1 ? "attempt" : "attempts"} (${uninstallFailureDetail(failure)}).`,
+      );
+    }
+    lines.push("Relay has not reported a successful uninstall. Fix the items above, then run `relay uninstall` again.");
   }
-  return { claudeDesktop: claudeDesktopRemoval, linuxStop };
+  lines.push(
+    "Restart any Claude or Codex sessions that were open during uninstall. A host cannot retract Relay instructions " +
+    "already copied into a conversation's context; disconnecting the MCP process makes those instructions inert.",
+  );
+  return lines;
 }
 
 /**
@@ -3657,6 +3829,33 @@ export function localStateDirs({ homeDir = os.homedir(), env = process.env } = {
     env.RELAY_HOME || env.RELAY_COMPANION_HOME || path.join(homeDir, ".relay-companion"),
   ];
   return Array.from(new Set(dirs.map((dir) => path.resolve(dir))));
+}
+
+/** Electron's profile is outside Relay's ordinary state dirs on every desktop OS. */
+export function electronProfileDirs({
+  platform = process.platform,
+  homeDir = os.homedir(),
+  env = process.env,
+} = {}) {
+  if (platform === "win32") {
+    return [path.resolve(env.APPDATA || path.join(homeDir, "AppData", "Roaming"), "Relay")];
+  }
+  if (platform === "darwin") {
+    return [path.resolve(homeDir, "Library", "Application Support", "Relay")];
+  }
+  if (platform === "linux") {
+    return [path.resolve(env.XDG_CONFIG_HOME || path.join(homeDir, ".config"), "Relay")];
+  }
+  return [];
+}
+
+function isLegacyBootstrapCliShimSource(source, { tempDir = os.tmpdir() } = {}) {
+  if (typeof source !== "string" || !source.startsWith("#!/bin/sh\nexec ")) return false;
+  const match = source.match(/^#!\/bin\/sh\nexec\s+'[^'\r\n]+'\s+'([^'\r\n]+[\\/]relay-cli\.cjs)'\s+"\$@"\s*$/);
+  if (!match) return false;
+  const launcher = path.resolve(match[1]);
+  if (!pathContains(path.resolve(tempDir), launcher)) return false;
+  return path.basename(path.dirname(launcher)).startsWith("relay-bootstrap-");
 }
 
 /** The companion package this process is executing from. */
@@ -3711,6 +3910,7 @@ export function purgeLocalState({
   runningFrom = runningPackageRoot(),
   platform = process.platform,
   deleteCredential = deleteDeviceToken,
+  deleteInstallationCredentials = deleteInstallationAuthorizationCredentials,
 } = {}) {
   const removed = [];
   const failed = [];
@@ -3725,29 +3925,49 @@ export function purgeLocalState({
   };
 
   const customConfig = Boolean(env.RELAY_CONFIG || env.RELAY_CONFIG_DIR);
+  const sameNativeHome = (() => {
+    const current = path.resolve(os.homedir());
+    const requested = path.resolve(homeDir);
+    return platform === "win32" ? current.toLowerCase() === requested.toLowerCase() : current === requested;
+  })();
+  const explicitNativeCredentialScope = env.RELAY_NATIVE_CREDENTIALS_WITH_CUSTOM_CONFIG === "1";
+  const useNativeCredentials = platform === process.platform
+    && (sameNativeHome || explicitNativeCredentialScope)
+    && (!customConfig || explicitNativeCredentialScope);
   let credentialAccount = "device-token";
   try {
     const config = JSON.parse(fs.readFileSync(pairingCredentialPath({ homeDir, env }), "utf8"));
     credentialAccount = String(config.credentialAccount || credentialAccount);
   } catch {}
-  const credential = platform === process.platform && (!customConfig || env.RELAY_NATIVE_CREDENTIALS_WITH_CUSTOM_CONFIG === "1")
+  const credential = useNativeCredentials
     ? deleteCredential({ platform, env, account: credentialAccount })
     : { ok: true };
   if (!credential.ok && (platform === "darwin" || platform === "win32" || platform === "linux")) {
     failed.push({ path: "native credential store", detail: credential.detail || "credential deletion failed" });
   }
+  const installationCredentials = useNativeCredentials
+    ? deleteInstallationCredentials({ platform, env })
+    : { ok: true };
+  if (!installationCredentials.ok && (platform === "darwin" || platform === "win32" || platform === "linux")) {
+    failed.push({
+      path: "native installation credential store",
+      detail: installationCredentials.detail || "installation credential deletion failed",
+    });
+  }
   remove(pairingCredentialPath({ homeDir, env }));
 
-  // The canonical Linux command is the only purge target outside Relay's own
-  // state directories. Each file has a strict generated identity, so a partly
-  // damaged install can still remove the exact Relay-owned half without ever
-  // deleting an edited or unrelated command.
+  // The durable Linux command and one retired bootstrap handoff are the only
+  // purge targets outside Relay's own state directories. Both have strict
+  // generated identities, so an unrelated ~/.local/bin/relay is never touched.
+  const { pointerPath, launcherPath, shimPath } = canonicalCliPaths({ homeDir });
+  try {
+    const shimSource = fs.readFileSync(shimPath, "utf8");
+    if (
+      (platform === "linux" && isCanonicalCliShimSource(shimSource, launcherPath))
+      || isLegacyBootstrapCliShimSource(shimSource, { tempDir: env.TEMP || env.TMPDIR || os.tmpdir() })
+    ) remove(shimPath);
+  } catch {}
   if (platform === "linux") {
-    const { pointerPath, launcherPath, shimPath } = canonicalCliPaths({ homeDir });
-    try {
-      const shimSource = fs.readFileSync(shimPath, "utf8");
-      if (isCanonicalCliShimSource(shimSource, launcherPath)) remove(shimPath);
-    } catch {}
     try {
       const launcherSource = fs.readFileSync(launcherPath, "utf8");
       if (launcherSource === canonicalCliLauncherSource(pointerPath)) remove(launcherPath);
@@ -3775,6 +3995,8 @@ export function purgeLocalState({
     // which is exactly what should be reported rather than swallowed.
     remove(dir);
   }
+
+  for (const dir of electronProfileDirs({ platform, homeDir, env })) remove(dir);
 
   const pairingRemains = fs.existsSync(pairingCredentialPath({ homeDir, env }));
   return { ok: failed.length === 0, removed, failed, pairingRemains };

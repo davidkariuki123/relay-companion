@@ -17,7 +17,7 @@ test("a packaged native bridge replaces the per-session Node launcher", () => {
   const nativeBridge = path.join(homeDir, "candidate-mcp-bridge");
   fs.writeFileSync(nativeBridge, "native-bridge-fixture", { mode: 0o700 });
   const installed = ensureStableMcpLauncher({ targetBin, node: process.execPath, homeDir, nativeBridge });
-  assert.match(installed, /mcp-bridge-[0-9a-f]{16}$/);
+  assert.match(installed, /mcp-bridge-[0-9a-f]{16}(?:\.exe)?$/);
   assert.equal(fs.readFileSync(installed, "utf8"), "native-bridge-fixture");
   assert.deepEqual(mcpLaunchCommand({ mcpBin: installed, node: process.execPath }), {
     command: installed,

@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   commandAvailable,
+  claudeRelayCompletionFromTranscript,
   claudeSessionNeedsCatalogRestart,
   codexRecoveryWaitMs,
   materializeRelayOperation,
@@ -99,6 +100,31 @@ test("missing controller commands are reported as unavailable", () => {
     platform: "win32",
     spawn: () => ({ status: null, error: new Error("not found") }),
   }), false);
+});
+
+test("Claude transcript completion returns the native final answer", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-claude-completion-"));
+  const transcript = path.join(root, "complete.jsonl");
+  fs.writeFileSync(transcript, [
+    { type:"user", uuid:"prompt", origin:{ kind:"human" }, message:{ role:"user", content:"Say hello" }, timestamp:"2026-08-29T10:00:00.000Z" },
+    { type:"assistant", uuid:"answer", parentUuid:"prompt", message:{ role:"assistant", stop_reason:"end_turn", content:[{ type:"text", text:"Hello from Claude." }] }, timestamp:"2026-08-29T10:00:01.000Z" },
+    { type:"result", subtype:"success", result:"Hello from Claude.", stop_reason:"end_turn", timestamp:"2026-08-29T10:00:02.000Z" },
+  ].map((row) => JSON.stringify(row)).join("\n"));
+  const result = claudeRelayCompletionFromTranscript(transcript, "claude-complete");
+  assert.equal(result.completion?.body, "Hello from Claude.");
+  assert.equal(result.error, "");
+});
+
+test("Claude transcript completion preserves authentication failure truth", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-claude-auth-"));
+  const transcript = path.join(root, "failed.jsonl");
+  fs.writeFileSync(transcript, [
+    { type:"user", uuid:"prompt", origin:{ kind:"human" }, message:{ role:"user", content:"Say hello" }, timestamp:"2026-08-29T10:00:00.000Z" },
+    { type:"assistant", uuid:"failure", parentUuid:"prompt", error:"authentication_failed", message:{ role:"assistant", stop_reason:"stop_sequence", content:[{ type:"text", text:"Login expired · Please run /login" }] }, timestamp:"2026-08-29T10:00:01.000Z" },
+  ].map((row) => JSON.stringify(row)).join("\n"));
+  const result = claudeRelayCompletionFromTranscript(transcript, "claude-failed");
+  assert.equal(result.completion, null);
+  assert.match(result.error, /Login expired/);
 });
 
 test("owned-agent controller inbox is checked before the native session inventory", async () => {

@@ -5,12 +5,18 @@ import path from "node:path";
 import test from "node:test";
 import { createRequire } from "node:module";
 import {
+  electronProfileDirs,
   localStateDirs,
+  mcpCliRemovalResult,
   pathContains,
   purgeLocalState,
   removeClaudeDesktopMcpConfig,
+  retryUninstallStep,
   runningPackageRoot,
+  stopMacRelayProcesses,
+  uninstallResultLines,
 } from "../src/install.js";
+import { uninstallManagedCompanionPackage } from "../src/uninstall-package.js";
 
 const { installCanonicalCliLauncher } = createRequire(import.meta.url)("../bootstrap/relay-setup.cjs");
 
@@ -81,6 +87,9 @@ test("purge deletes the pairing dir and the companion state dir, honouring the s
   fs.writeFileSync(path.join(configDir, "daemon.log"), "log");
   fs.writeFileSync(path.join(stateDir, "ledger.json"), "{}");
   fs.writeFileSync(path.join(stateDir, "attachments", "a.txt"), "x");
+  const [electronProfile] = electronProfileDirs({ platform: process.platform, homeDir: home, env: {} });
+  fs.mkdirSync(path.join(electronProfile, "Cache"), { recursive: true });
+  fs.writeFileSync(path.join(electronProfile, "Preferences"), "{}");
   const unrelated = path.join(home, "keep.txt");
   fs.writeFileSync(unrelated, "keep");
 
@@ -95,6 +104,8 @@ test("purge deletes the pairing dir and the companion state dir, honouring the s
   }
   assert.equal(fs.existsSync(configDir), false, "pairing dir gone");
   assert.equal(fs.existsSync(stateDir), false, "state dir gone");
+  assert.equal(fs.existsSync(electronProfile), false, "Electron profile gone");
+  assert.ok(res.removed.includes(electronProfile));
   assert.equal(fs.readFileSync(unrelated, "utf8"), "keep", "nothing outside Relay's dirs touched");
 
   assert.equal(res.pairingRemains, false);
@@ -117,6 +128,147 @@ test("purge deletes the pairing dir and the companion state dir, honouring the s
   assert.deepEqual(res2.removed.sort(), [path.resolve(altConfig), path.resolve(altState)].sort());
   assert.equal(fs.existsSync(altConfig), false);
   assert.equal(fs.existsSync(altState), false);
+});
+
+test("purge removes both device and setup credentials in the real native-user scope", () => {
+  const home = tmpDir("credential-scope");
+  const env = {
+    RELAY_CONFIG_DIR: path.join(home, "config"),
+    RELAY_HOME: path.join(home, "state"),
+    RELAY_NATIVE_CREDENTIALS_WITH_CUSTOM_CONFIG: "1",
+    APPDATA: path.join(home, "appdata"),
+  };
+  const calls = [];
+  const result = purgeLocalState({
+    homeDir: home,
+    env,
+    platform: process.platform,
+    runningFrom: path.join(os.tmpdir(), "outside-relay"),
+    deleteCredential: ({ account }) => {
+      calls.push(["device", account]);
+      return { ok: true };
+    },
+    deleteInstallationCredentials: ({ platform }) => {
+      calls.push(["installation", platform]);
+      return { ok: true };
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, [["device", "device-token"], ["installation", process.platform]]);
+});
+
+test("purge never touches native credentials when a test or tool injects another home", () => {
+  const home = tmpDir("foreign-home");
+  let calls = 0;
+  const result = purgeLocalState({
+    homeDir: home,
+    env: {},
+    platform: process.platform,
+    deleteCredential: () => { calls += 1; return { ok: true }; },
+    deleteInstallationCredentials: () => { calls += 1; return { ok: true }; },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(calls, 0);
+});
+
+test("purge removes an exact legacy bootstrap relay shim on every platform", () => {
+  const home = tmpDir("legacy-shim-home");
+  const temp = tmpDir("legacy-shim-temp");
+  const launcherDir = path.join(temp, "relay-bootstrap-old-handoff");
+  const launcherPath = path.join(launcherDir, "relay-cli.cjs");
+  const shimPath = path.join(home, ".local", "bin", "relay");
+  fs.mkdirSync(path.dirname(shimPath), { recursive: true });
+  fs.mkdirSync(launcherDir, { recursive: true });
+  fs.writeFileSync(launcherPath, "// retired handoff");
+  fs.writeFileSync(shimPath, `#!/bin/sh\nexec '${process.execPath}' '${launcherPath}' "$@"\n`);
+
+  const result = purgeLocalState({
+    homeDir: home,
+    env: { TEMP: temp },
+    platform: "win32",
+    deleteCredential: () => ({ ok: true }),
+    deleteInstallationCredentials: () => ({ ok: true }),
+  });
+  assert.equal(result.ok, true);
+  assert.equal(fs.existsSync(shimPath), false);
+  assert.ok(result.removed.includes(shimPath));
+  assert.equal(fs.existsSync(launcherPath), true, "the temp owner cleans its own test/runtime directory");
+});
+
+test("complete purge removes the invoking npm-global package and retries transient failures", () => {
+  const prefix = String.raw`C:\Tools\node`;
+  const packageRoot = String.raw`C:\Tools\node\node_modules\relay-companion`;
+  let packagePresent = true;
+  let attempts = 0;
+  const sleeps = [];
+  const result = uninstallManagedCompanionPackage({
+    runningRoot: String.raw`C:\Users\x\.relay\runtime\releases\1\node_modules\relay-companion`,
+    shimRoot: packageRoot,
+    platform: "win32",
+    homeDir: String.raw`C:\Users\x`,
+    existsSync(candidate) {
+      const normalized = path.win32.resolve(candidate).toLowerCase();
+      if (normalized === path.win32.resolve(path.win32.join(prefix, "relay.cmd")).toLowerCase()) return true;
+      if (normalized === path.win32.resolve(packageRoot).toLowerCase()) return packagePresent;
+      return false;
+    },
+    runCommand(command, args) {
+      attempts += 1;
+      assert.equal(command, "npm");
+      assert.deepEqual(args, ["uninstall", "--global", "--prefix", prefix, "relay-companion"]);
+      if (attempts === 2) packagePresent = false;
+      return attempts === 1 ? { status: 1, stderr: "EBUSY" } : { status: 0, stdout: "removed" };
+    },
+    sleep: (ms) => sleeps.push(ms),
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.removed, true);
+  assert.equal(result.attempts, 2);
+  assert.deepEqual(sleeps, [200]);
+});
+
+test("complete purge never uninstalls a checkout or arbitrary project dependency", () => {
+  let calls = 0;
+  const result = uninstallManagedCompanionPackage({
+    runningRoot: "/workspace/relay/packages/companion",
+    platform: "linux",
+    runCommand: () => { calls += 1; return { status: 0 }; },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.skipped, true);
+  assert.equal(calls, 0);
+});
+
+test("a direct canonical CLI discovers and removes the npm-global entry package", () => {
+  const home = String.raw`C:\Users\x`;
+  const globalRoot = String.raw`C:\Node\node_modules`;
+  const globalPackage = path.win32.join(globalRoot, "relay-companion");
+  const canonical = String.raw`C:\Users\x\.relay\runtime\releases\1\node_modules\relay-companion`;
+  let packagePresent = true;
+  const calls = [];
+  const result = uninstallManagedCompanionPackage({
+    runningRoot: canonical,
+    platform: "win32",
+    homeDir: home,
+    existsSync(candidate) {
+      const normalized = path.win32.resolve(candidate).toLowerCase();
+      if (normalized === path.win32.resolve(globalPackage).toLowerCase()) return packagePresent;
+      if (normalized === path.win32.resolve(String.raw`C:\Node\relay.cmd`).toLowerCase()) return true;
+      return false;
+    },
+    runCommand(command, args) {
+      calls.push([command, ...args]);
+      if (args[0] === "root") return { status: 0, stdout: `${globalRoot}\n` };
+      packagePresent = false;
+      return { status: 0, stdout: "removed" };
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.removed, true);
+  assert.deepEqual(calls, [
+    ["npm.cmd", "root", "--global"],
+    ["npm", "uninstall", "--global", "--prefix", String.raw`C:\Node`, "relay-companion"],
+  ]);
 });
 
 test("Linux purge removes Relay's generated command pair but preserves an unrelated relay command", () => {
@@ -300,6 +452,59 @@ test("a release that cannot be deleted still leaves the machine forgotten, and s
   assert.equal(fs.existsSync(path.join(configDir, "config.json")), false);
 });
 
+test("uninstall retries transient failures and retains attempt evidence", () => {
+  let calls = 0;
+  const sleeps = [];
+  const result = retryUninstallStep("codex_config", "Codex config", () => {
+    calls += 1;
+    return calls < 3 ? { ok: false, detail: `locked ${calls}` } : { ok: true, removed: true };
+  }, {
+    attempts: 3,
+    sleep: (ms) => sleeps.push(ms),
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.attempts, 3);
+  assert.equal(result.history.length, 3);
+  assert.deepEqual(sleeps, [150, 300]);
+});
+
+test("an already-absent MCP registration is success, while a real CLI failure is not", () => {
+  assert.equal(mcpCliRemovalResult({ ok: false, out: "No MCP server found with name: relay" }).ok, true);
+  assert.equal(mcpCliRemovalResult({ ok: false, out: "No MCP server named 'relay' found." }).ok, true);
+  assert.equal(mcpCliRemovalResult({ ok: false, missing: true, out: "ENOENT" }).ok, true);
+  const denied = mcpCliRemovalResult({ ok: false, status: 1, out: "Access denied" });
+  assert.equal(denied.ok, false);
+  assert.match(denied.detail, /Access denied/);
+});
+
+test("uninstall output never claims success when retries are exhausted", () => {
+  const failure = retryUninstallStep("claude_hooks", "Claude Code's Relay hooks", () => ({
+    ok: false,
+    detail: "settings.json is locked",
+  }), { attempts: 3, sleep: () => {} });
+  const lines = uninstallResultLines({ ok: false, failures: [failure] });
+  assert.match(lines.join("\n"), /uninstall is incomplete/i);
+  assert.match(lines.join("\n"), /after 3 attempts/i);
+  assert.match(lines.join("\n"), /settings\.json is locked/i);
+  assert.doesNotMatch(lines.join("\n"), /^Removed Relay/m);
+});
+
+test("successful uninstall explains the open-session context boundary", () => {
+  const lines = uninstallResultLines({ ok: true, failures: [] });
+  assert.match(lines.join("\n"), /disconnected live Relay MCP processes/i);
+  assert.match(lines.join("\n"), /cannot retract Relay instructions/i);
+  assert.match(lines.join("\n"), /makes those instructions inert/i);
+});
+
+test("relay CLI emits structured uninstall results and fails its exit status when incomplete", () => {
+  const source = fs.readFileSync(new URL("../bin/relay.js", import.meta.url), "utf8");
+  assert.match(source, /uninstallResultLines\(uninstalled\)/);
+  assert.match(source, /if \(!uninstalled\.ok\) process\.exitCode = 1/);
+  assert.match(source, /uninstallManagedCompanionPackage/);
+  assert.match(source, /if \(!purged\.ok\)[\s\S]*process\.exitCode = 1/);
+  assert.doesNotMatch(source, /console\.log\("Removed Relay from Claude Code, Codex, and Claude Desktop/);
+});
+
 // ---- Windows: uninstall must actually stop the services ---------------------
 
 import { stopPosixMcpBrokers, stopWindowsRelayServices, WINDOWS_STOP_RELAY_SERVICES_PS } from "../src/install.js";
@@ -312,7 +517,7 @@ import { stopPosixMcpBrokers, stopWindowsRelayServices, WINDOWS_STOP_RELAY_SERVI
  */
 function psSweepMatches(commandLine) {
   const patterns = [...WINDOWS_STOP_RELAY_SERVICES_PS.matchAll(/-match '([^']+)'/g)].map((m) => m[1]);
-  assert.equal(patterns.length, 4, "one installed-tree boundary and three service identities in the sweep");
+  assert.equal(patterns.length, 5, "one installed-tree boundary and four Relay process identities in the sweep");
   // PowerShell single-quoted regex → JS: unescape the doubled backslashes the
   // JS string literal carries for PowerShell's benefit.
   const matches = patterns.map((p) => new RegExp(p.replace(/\\/g, "\\")).test(commandLine));
@@ -331,7 +536,7 @@ test("the Windows service sweep matches the daemon and pill by identity, and not
   assert.equal(psSweepMatches(daemon), true, "daemon matched");
   assert.equal(psSweepMatches(pill), true, "pill matched");
   assert.equal(psSweepMatches(pillCmdWrapper), true, "pill's cmd wrapper matched (it names main.cjs)");
-  assert.equal(psSweepMatches(mcpServer), false, "legacy MCP servers belong to editor sessions; not the sweep's business");
+  assert.equal(psSweepMatches(mcpServer), true, "open-session MCP servers are disconnected during uninstall");
   const broker = String.raw`C:\Users\shane\.granular-devtools\node-v22.13.0-win-x64\node.exe --max-old-space-size=512 C:\Users\shane\.relay\runtime\releases\0.1.292-x\node_modules\relay-companion\src\mcp-broker-entry.js --domain=abc`;
   assert.equal(psSweepMatches(broker), true, "the shared broker is swept during uninstall");
   assert.equal(psSweepMatches(uninstallItself), false, "never terminates the uninstall that is running");
@@ -347,6 +552,7 @@ test("stopWindowsRelayServices ends both tasks, then sweeps survivors by identit
       return { ok: true, status: 0, out: "" };
     },
   });
+  assert.equal(res.ok, true);
   assert.equal(res.swept, true);
   assert.deepEqual(calls[0], ["schtasks", "/End", "/TN", "Relay Companion Daemon"]);
   assert.deepEqual(calls[1], ["schtasks", "/End", "/TN", "Relay Companion Pill"]);
@@ -376,4 +582,31 @@ test("POSIX uninstall stops only same-account installed and exact-runtime broker
   });
   assert.equal(result.ok, true);
   assert.deepEqual(killed, [[101, "SIGTERM"], [102, "SIGTERM"]]);
+});
+
+test("macOS uninstall process sweep also terminates live MCP children", () => {
+  let alive = true;
+  const killed = [];
+  const result = stopMacRelayProcesses({
+    sleep: () => {},
+    processId: 999,
+    userId: 501,
+    runCommand(command, args) {
+      if (command === "/bin/ps") {
+        return {
+          ok: true,
+          out: alive
+            ? " 501 321 node /Users/x/.relay/runtime/releases/1/node_modules/relay-companion/bin/relay.js mcp\n"
+            : "",
+        };
+      }
+      if (command === "/bin/kill") {
+        killed.push(args);
+        alive = false;
+      }
+      return { ok: true, out: "" };
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(killed, [["-TERM", "321"]]);
 });

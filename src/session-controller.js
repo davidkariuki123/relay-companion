@@ -5,10 +5,12 @@ import net from "node:net";
 import path from "node:path";
 import { CodexAppServerClient, defaultCodexCommand } from "./codex-app-server.js";
 import { codexRelayCompletion, runCodexAppServerOneShot, runCodexOneShot } from "./codex-one-shot.js";
+import { claudeNativeEventsToWorkEvents, readClaudeNativeTranscriptRows } from "./claude-native-work-feed.js";
 import { cliBinaryPath, installedCliVersions } from "./desktop-wake.js";
 import { inspectAiSession } from "./ai-session-transcript.js";
 import { waitForCodexIdle, waitForRolloutGrowth, rolloutSize } from "./codex-inject.js";
 import { claudeHome, storeDir } from "./host-paths.js";
+import { canonicalProviderCompletionCandidate } from "./provider-completion.js";
 import {
   claudeCatalogIsCurrent,
   relayClaudePermissionMode,
@@ -23,6 +25,7 @@ import {
   sessionPlacement,
   sessionPlacementId,
 } from "./session-directory.js";
+import { createWorkConversation, replayWorkEvents, workPresentationSnapshot } from "./work-conversation.js";
 
 const activeOperations = new Set();
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -493,6 +496,26 @@ async function retryAgentWrite(write, { attempts = 8, wait = sleep } = {}) {
   throw lastError;
 }
 
+export function claudeRelayCompletionFromTranscript(transcriptPath, sessionId) {
+  const rows = readClaudeNativeTranscriptRows(transcriptPath);
+  if (!rows.length) return { completion: null, error: "" };
+  const events = claudeNativeEventsToWorkEvents(rows, {
+    sessionId,
+    ownerAlive: false,
+    expectedActive: false,
+  });
+  const state = replayWorkEvents(events, createWorkConversation({ provider: "claude", sessionId }));
+  const presentation = workPresentationSnapshot(state);
+  const completion = canonicalProviderCompletionCandidate({ provider: "claude", presentation });
+  const terminalTurn = [...(presentation.turns || [])].reverse().find(
+    (turn) => turn?.nativeStarted && (turn?.error?.message || turn?.finalEligible),
+  );
+  return {
+    completion,
+    error: completion ? "" : String(terminalTurn?.error?.message || "").trim(),
+  };
+}
+
 function agentRunReporter(client, runRelayId) {
   const relayId = String(runRelayId || "");
   let lastProgress = "";
@@ -509,12 +532,12 @@ function agentRunReporter(client, runRelayId) {
   const complete = async (forHuman, forAgent) => {
     await flush();
     if (!relayId) return;
-    await retryAgentWrite(() => client.agentRunComplete(relayId, forHuman, forAgent));
+    return retryAgentWrite(() => client.agentRunComplete(relayId, forHuman, forAgent));
   };
   const finish = async (error = "") => {
     await flush();
     if (!relayId) return;
-    await retryAgentWrite(() => client.agentRunFinish(relayId, error));
+    return retryAgentWrite(() => client.agentRunFinish(relayId, error));
   };
   return { progress, flush, complete, finish };
 }
@@ -598,11 +621,22 @@ async function executeClaude({ client, claim, target, operation, input, prompt }
     transcriptPath: resolvedTranscriptPath,
     renew: () => client.renewSessionOperationLease(operation.id, claim.claimToken),
   });
+  const terminal = claudeRelayCompletionFromTranscript(resolvedTranscriptPath, sessionId);
+  if (terminal.completion) {
+    await reporter.complete(terminal.completion.body, terminal.completion.body);
+  } else {
+    const reason = terminal.error || "Claude Code finished without returning a Relay answer";
+    // Claude normally completes the owned Relay through its MCP tool. If that
+    // happened, finish is an idempotent no-op and confirms the existing result.
+    // Otherwise it records the native failure before processClaim stores failed
+    // controller evidence below.
+    const settled = await reporter.finish(reason);
+    if (!settled?.completed) throw new Error(reason);
+  }
   await evidence(client, operation.id, claim.claimToken, "completed", {
     ...(stable?.id ? { sessionId: stable.id } : {}),
     nativeSessionId: sessionId,
   });
-  if (input.agentRunRelayId) await reporter.finish();
 }
 
 async function executeCodex({ client, claim, target, operation, input, prompt }) {

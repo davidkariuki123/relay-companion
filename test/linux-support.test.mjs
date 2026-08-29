@@ -339,7 +339,7 @@ test("Linux uninstall removes only Relay MIME mappings and quiesces standalone s
         return {
           ok: true,
           out: alive
-            ? " 1000 321 Electron /opt/node_modules/relay-companion/overlay/main.cjs\n 2000 654 Electron /opt/node_modules/relay-companion/overlay/main.cjs\n"
+            ? " 1000 321 Electron /opt/node_modules/relay-companion/overlay/main.cjs\n 1000 322 node /opt/node_modules/relay-companion/bin/relay.js mcp\n 2000 654 Electron /opt/node_modules/relay-companion/overlay/main.cjs\n"
             : " 2000 654 Electron /opt/node_modules/relay-companion/overlay/main.cjs\n",
         };
       }
@@ -351,7 +351,7 @@ test("Linux uninstall removes only Relay MIME mappings and quiesces standalone s
     },
   });
   assert.equal(stopped.ok, true);
-  assert.deepEqual(killed, [["-TERM", "321"]]);
+  assert.deepEqual(killed, [["-TERM", "321"], ["-TERM", "322"]]);
 });
 
 test("Linux canonical activation repairs, restarts pill then daemon, and proves exact-root health", async () => {

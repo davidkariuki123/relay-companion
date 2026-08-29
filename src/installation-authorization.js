@@ -66,11 +66,12 @@ function defaultStateStore(file = statePath()) {
 export function createNativeInstallationSecretStore({
   webBase = DEFAULT_WEB_URL,
   service = INSTALLATION_CREDENTIAL_SERVICE,
+  credentialOptions = {},
   writeCredentialImpl = writeCredential,
   readCredentialImpl = readCredential,
   deleteCredentialImpl = deleteCredential,
 } = {}) {
-  const options = (account) => ({ service, account });
+  const options = (account) => ({ ...credentialOptions, service, account });
   const accounts = Object.values(INSTALLATION_CREDENTIAL_ACCOUNTS);
   const sentinelAccount = INSTALLATION_CREDENTIAL_ACCOUNTS.authorizationId;
   const removeSentinelLast = (targetAccounts) => {
@@ -167,6 +168,16 @@ export function createNativeInstallationSecretStore({
     },
     delete() { return removeAccounts(); },
   };
+}
+
+/** Remove every protected secret belonging to an unfinished or completed setup. */
+export function deleteInstallationAuthorizationCredentials({
+  platform = process.platform,
+  env = process.env,
+} = {}) {
+  return createNativeInstallationSecretStore({
+    credentialOptions: { platform, env },
+  }).delete();
 }
 
 function validDate(value) {
