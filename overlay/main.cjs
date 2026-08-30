@@ -8480,7 +8480,7 @@ function acceptRendererCardSize(event, w, h, motion = {}) {
   if (FIXED_OVERLAY_SURFACE) scheduleHit(0);
   else {
     const settled = motion.phase === "settled";
-    fitOverlayWindowToCard({ settle });
+    fitOverlayWindowToCard({ settle: settled });
     scheduleNativeGeometryReconcile(settled ? NATIVE_GEOMETRY_VERIFY_MS : NATIVE_GEOMETRY_WATCHDOG_MS);
   }
   return { ok:true };

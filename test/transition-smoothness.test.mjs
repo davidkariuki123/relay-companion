@@ -115,6 +115,8 @@ test("collapse keeps macOS geometry stable and bounds ordinary Windows stale geo
     "a missed renderer settlement cannot preserve the expanded Windows hit box indefinitely");
   const sizeHandlers = between(main, "function acceptRendererCardSize", 'ipcMain.on("relay:setPos"');
   assert.match(sizeHandlers, /cardSize = \{ w, h \}/);
+  assert.match(sizeHandlers, /const settled = motion\.phase === "settled";[\s\S]*fitOverlayWindowToCard\(\{ settle: settled \}\)/,
+    "the renderer settlement flag reaches the native fit without referencing an undefined shorthand");
   assert.doesNotMatch(sizeHandlers, /setBounds|setPosition|setSize/,
     "IPC delegates platform geometry instead of mutating the window inline");
   const anchor = between(main, "function anchorTopRight", "function showOverlayWindow");

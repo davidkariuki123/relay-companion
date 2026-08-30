@@ -30,8 +30,9 @@ test("claim states use obvious full-width verbs and named ownership", () => {
   assert.match(html, /Released by/);
 });
 
-test("Tasks and reader say channel and Created by instead of a bare member name", () => {
-  assert.match(html, /\$\{esc\(channel\)} · Created by \$\{esc\(creator\)}/);
+test("Tasks name a channel when present and omit the direct-task placeholder", () => {
+  assert.match(html, /\$\{channel \? `\$\{esc\(channel\)} · ` : ""\}Created by \$\{esc\(creator\)}/);
+  assert.doesNotMatch(html, /recipientGroupName \|\| "Direct"/);
   assert.match(html, /Task · Created by \$\{esc\(sender\)}/);
   assert.match(html, /section\("Unclaimed", groups\.unclaimed/);
   assert.match(html, /section\("Claimed", groups\.claimed/);

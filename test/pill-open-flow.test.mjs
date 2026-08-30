@@ -712,7 +712,7 @@ test("card-size IPC resizes ordinary Windows windows and hit-tests only the macO
   assert.match(sizeHandler, /cardSize = \{ w, h \}/);
   assert.match(sizeHandler, /if \(FIXED_OVERLAY_SURFACE\) scheduleHit\(0\);/,
     "a macOS visual target immediately refreshes the matching input region");
-  assert.match(sizeHandler, /const settled = motion\.phase === "settled";[\s\S]*?fitOverlayWindowToCard\(\{ settle \}\)/,
+  assert.match(sizeHandler, /const settled = motion\.phase === "settled";[\s\S]*?fitOverlayWindowToCard\(\{ settle: settled \}\)/,
     "Windows follows the renderer with ordinary native bounds");
   assert.match(sizeHandler, /scheduleNativeGeometryReconcile\(settled \? NATIVE_GEOMETRY_VERIFY_MS : NATIVE_GEOMETRY_WATCHDOG_MS\)/,
     "Windows verifies settled bounds and has a bounded fallback for a missing receipt");

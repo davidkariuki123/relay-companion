@@ -7925,7 +7925,7 @@
         const sender = relaySender(r);
         const title = String(r.title || "").trim() || relaySubject(r);
         const claim = r.taskClaim;
-        const channel = claim?.channel?.name || r.recipientGroupName || "Direct";
+        const channel = claim?.channel?.name || r.recipientGroupName || "";
         const creator = claim?.createdBy?.name || sender;
         // A request row is EXACTLY a list row: disc, name + time, serif line,
         // one quiet control. No topic label, no preview, no unfold — tapping
@@ -7934,7 +7934,7 @@
         <div class="tb-row${r.unread ? " unread" : ""}" role="button" tabindex="0" data-request="${esc(r.id)}">
           <span class="avatar sm" style="--av-h:${avatarHue(sender)}" aria-hidden="true">${esc(avatarInitials(sender))}</span>
           <div class="tb-main">
-            <div class="tb-sub">${esc(channel)} · Created by ${esc(creator)} · ${esc(timeAgo(r.createdAt))}</div>
+            <div class="tb-sub">${channel ? `${esc(channel)} · ` : ""}Created by ${esc(creator)} · ${esc(timeAgo(r.createdAt))}</div>
             <div class="rk-line"><span class="th-title">${esc(title)}</span><span class="tb-actions">${renderRight(r)}<button class="tb-delete" type="button" data-task-delete="${esc(r.id)}" data-stop="1" aria-label="Move task to Recently Deleted" title="Move task to Recently Deleted"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button></span></div>
             <div class="row-err${rowNotes.get(r.id)?.cls === "ok" ? " ok" : ""}" data-err="${esc(r.id)}" data-stop="1">${esc(rowNotes.get(r.id)?.text || "")}</div>
           </div>
