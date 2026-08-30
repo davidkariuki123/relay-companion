@@ -1357,6 +1357,39 @@ test("relay_send refuses to guess the recipient experience", async () => {
   assert.deepEqual(calls[0].recipient, { groupId: "grp_founders" });
 });
 
+test("a successful outbound Task records the exact calling native session before returning", async () => {
+  const recorded = [];
+  const sessionContext = createMcpSessionContext({
+    env: { CLAUDE_CODE_SESSION_ID: "claude-native-origin" },
+    cwd: "/tmp/origin-project",
+    bridgePid: 4242,
+  });
+  rememberCallingClient({ name: "claude-code" }, sessionContext);
+  const result = await handleCall({
+    async sendRelay() {
+      return { relayId: "relay_outbound_task", state: "delivered" };
+    },
+  }, "relay_send", {
+    recipient: { self: true },
+    kind: "task",
+    title: "Verify exact wake",
+    forHuman: "Please verify it.",
+    forAgent: "Run the verification and return the exact evidence.",
+    idempotencyKey: "outbound-task-origin-1",
+  }, {
+    sessionContext,
+    recordTaskOrigin: async (row) => recorded.push(row),
+  });
+  assert.equal(JSON.parse(result.content[0].text).relayId, "relay_outbound_task");
+  assert.equal(recorded.length, 1);
+  assert.deepEqual(recorded[0].sourceBinding, {
+    sourceProvider: "claude",
+    sourceNativeId: "claude-native-origin",
+  });
+  assert.equal(recorded[0].surface, "claude_code");
+  assert.equal(recorded[0].sessionContext.bridgePid, 4242);
+});
+
 test("relay_send rejects report headlines before delivery", async () => {
   let calls = 0;
   const client = {

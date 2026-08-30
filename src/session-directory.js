@@ -56,7 +56,7 @@ function claudeProjectKey(cwd) {
   return String(cwd || "").replace(/[^a-zA-Z0-9]/g, "-");
 }
 
-function claudeTranscriptPath(configDir, cwd, sessionId) {
+export function claudeTranscriptPath(configDir, cwd, sessionId) {
   const direct = path.join(configDir, "projects", claudeProjectKey(cwd), `${sessionId}.jsonl`);
   if (cwd && fs.existsSync(direct)) return direct;
   // Desktop metadata occasionally outlives a project rename. Fall back to an
@@ -177,6 +177,61 @@ export function claudeState(registration) {
   return "idle";
 }
 
+// Claude Desktop 1.40609.0 keeps its live registry addressable but no longer
+// writes `status` or `updatedAt`. The transcript is the authoritative turn
+// lifecycle in that build: a user/tool-result or unfinished assistant row is
+// active; an assistant end_turn is idle. Ignore metadata rows after the turn.
+export function readClaudeTranscriptActivity(transcriptPath, { tailBytes = 1024 * 1024 } = {}) {
+  const filePath = String(transcriptPath || "").trim();
+  if (!filePath) return { state: "unknown", lastEventAt: null };
+  let handle = null;
+  try {
+    handle = fs.openSync(filePath, "r");
+    const size = fs.fstatSync(handle).size;
+    const length = Math.min(size, tailBytes);
+    if (!length) return { state: "unknown", lastEventAt: null };
+    const buffer = Buffer.alloc(length);
+    const position = size - length;
+    fs.readSync(handle, buffer, 0, length, position);
+    const lines = buffer.toString("utf8").split("\n");
+    if (position > 0) lines.shift();
+    let state = "unknown";
+    let lastEventAt = null;
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      let row;
+      try { row = JSON.parse(line); } catch { continue; }
+      const role = String(row?.message?.role || "");
+      if (row?.type === "user" || role === "user") {
+        state = "active";
+      } else if (row?.type === "assistant" || role === "assistant") {
+        const stopReason = String(row?.message?.stop_reason || "").toLowerCase();
+        state = stopReason && stopReason !== "tool_use" ? "idle" : "active";
+      } else {
+        continue;
+      }
+      const at = Date.parse(row.timestamp || row.createdAt || 0);
+      if (Number.isFinite(at)) lastEventAt = Math.max(lastEventAt || 0, at);
+    }
+    return { state, lastEventAt };
+  } catch {
+    return { state: "unknown", lastEventAt: null };
+  } finally {
+    if (handle !== null) {
+      try { fs.closeSync(handle); } catch {}
+    }
+  }
+}
+
+function liveClaudeState(registration, transcriptPath, recoverable) {
+  const registryState = registration ? claudeState(registration) : recoverable ? "idle" : "offline";
+  // A transcript can refine a LIVE registry's missing busy flag. It cannot
+  // make a dead process active: a crashed turn often ends on a user/tool row.
+  if (!registration?.socketLive || registryState !== "idle") return registryState;
+  const transcriptState = readClaudeTranscriptActivity(transcriptPath).state;
+  return transcriptState === "active" ? "active" : registryState;
+}
+
 export function discoverClaudeSessions({
   configDir = process.env.CLAUDE_CONFIG_DIR || claudeHome(),
   desktopDir = claudeDesktopSessionsDir(),
@@ -204,7 +259,7 @@ export function discoverClaudeSessions({
       title: String(row.title || `Claude ${nativeId.slice(0, 8)}`),
       projectName: basenameProject(cwd),
       cwd,
-      state: registration ? claudeState(registration) : recoverable ? "idle" : "offline",
+      state: liveClaudeState(registration, transcriptPath, recoverable),
       lastActiveAt: new Date(Math.max(lastActiveAt, registration?.updatedAt || 0)).toISOString(),
       nativeRef: {
         sessionId: nativeId,
@@ -230,7 +285,7 @@ export function discoverClaudeSessions({
       title: String(registration.name || registration.title || `Claude ${nativeId.slice(0, 8)}`),
       projectName: basenameProject(cwd),
       cwd,
-      state: claudeState(registration),
+      state: liveClaudeState(registration, transcriptPath, Boolean(transcriptPath)),
       lastActiveAt: new Date(registration.updatedAt || registration.startedAt || nowMs).toISOString(),
       nativeRef: {
         sessionId: nativeId,
@@ -254,7 +309,7 @@ export function discoverClaudeSessions({
       title: saved.title || `Claude ${String(saved.nativeId).slice(0, 8)}`,
       projectName: basenameProject(saved.cwd),
       cwd: saved.cwd || "",
-      state: registration ? claudeState(registration) : recoverable ? "idle" : "offline",
+      state: liveClaudeState(registration, transcriptPath, recoverable),
       lastActiveAt: new Date(Math.max(Number(saved.lastActiveAt || 0), registration?.updatedAt || 0)).toISOString(),
       nativeRef: {
         sessionId: saved.nativeId,
