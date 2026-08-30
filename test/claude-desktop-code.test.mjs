@@ -71,7 +71,7 @@ test("Claude Code launch uses the supported subscription-authenticated CLI witho
   const input = JSON.parse(inputText.trim());
   assert.equal(input.type, "user");
   assert.equal(input.session_id, sessionId);
-  assert.match(input.message.content, /^Relay Code proof\n\nDo the work$/);
+  assert.equal(input.message.content, "Do the work");
   assert.equal(result.sessionId, sessionId);
   assert.equal(result.desktopSessionId, `local_${sessionId}`);
   await new Promise((resolve) => setTimeout(resolve, 120));

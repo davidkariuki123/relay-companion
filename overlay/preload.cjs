@@ -72,6 +72,7 @@ contextBridge.exposeInMainWorld("relay", {
     newTurn: options && options.newTurn === true,
     model: String(options && options.model || ""),
     effort: String(options && options.effort || ""),
+    clientMessageId: String(options && options.clientMessageId || ""),
     files: Array.isArray(options && options.files) ? options.files : [],
   }),
   schedules: () => ipcRenderer.invoke("relay:schedules"),

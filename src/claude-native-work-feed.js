@@ -595,7 +595,11 @@ function parseClaudeRows(inputRows, options) {
 
   const latest = turns.at(-1);
   if (latest?.status === "inProgress" && !latest.pendingBackground.size && !latest.pendingRequests.size) {
-    if (!options.ownerAlive && !options.expectedActive && latest.sawEndTurn && !latest.error) {
+    // A provider-authored end_turn is terminal truth even when the Task itself
+    // remains open. Task lifecycle and native-turn lifecycle are independent;
+    // using an open Task as expectedActive previously converted a successful
+    // turn into CLAUDE_OWNER_DETACHED after the worker exited normally.
+    if (!options.ownerAlive && latest.sawEndTurn && !latest.error) {
       latest.status = "completed";
       latest.completedAtMs = lastAt;
     } else if (!options.ownerAlive && options.expectedActive) {

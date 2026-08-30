@@ -197,11 +197,12 @@ contextBridge.exposeInMainWorld("relayPreview", {
     attachmentId: String(input?.attachmentId || ""),
     attachmentIndex: Number.isInteger(input?.attachmentIndex) ? input.attachmentIndex : -1
   }),
-  steer: (relayId, body, newTurn = false) =>
+  steer: (relayId, body, newTurn = false, clientMessageId = "") =>
     ipcRenderer.invoke("relay:preview:steer", {
       relayId: String(relayId || ""),
       body: String(body || ""),
       newTurn: newTurn === true,
+      clientMessageId: String(clientMessageId || ""),
     }),
   renderMarkdown,
 });

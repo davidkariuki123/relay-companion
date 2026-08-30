@@ -675,6 +675,36 @@ test("Claude partial output and the optimistic follow-up are merged into the liv
   assert.match(optimistic, /runFeedPending\.add/, "native polling cannot replace the optimistic bubble with a placeholder");
   assert.ok(controls.indexOf("appendOptimisticUserTurn") < controls.indexOf("await window.relay.runSteer"));
   assert.match(inbox, /runFeedPending\.has\(key\)/, "polling resumes only after the provider accepts the turn");
+  assert.match(optimistic, /crypto\.randomUUID\(\)/, "every visible message gets a transport-stable identity");
+  assert.match(optimistic, /clientMessageId/, "the identity travels with the optimistic canonical unit");
+  assert.match(inbox, /old\.clientMessageId && unit\.clientMessageId/, "acceptance reconciles by identity before text");
+});
+
+test("runner state follows canonical provider truth instead of a stale Working flag", () => {
+  const state = between(inbox, "function taskBoardState", "function relayWorkState");
+  const relayState = between(inbox, "function relayWorkState", "function requestHasNativeSession");
+  const accept = between(inbox, "function acceptRunFeedUpdate", "function presentRunFeedWatchError");
+  const liveness = between(main, "function runIsLive", "function readSchedules");
+  assert.match(state, /reconnecting/);
+  assert.match(state, /needs_input/);
+  assert.match(state, /return "waiting"/);
+  assert.doesNotMatch(state, /if \(local === "running"\) return "running"/);
+  assert.match(state, /feedState !== "running" \|\| runFeedTimers\.has/);
+  assert.match(state, /local === "running" && !row\.taskStartedAt/);
+  assert.match(relayState, /local === "running" && !row\.workStartedAt/);
+  assert.doesNotMatch(relayState, /\["running", "stopped", "waiting"\]\.includes\(local\)/);
+  assert.match(accept, /const projectedState = runnerStateForFeed\(feed\)/);
+  assert.match(accept, /taskLocal\.set\(key, projectedState\)/);
+  assert.match(main, /const relayOwnedCodexRuns = new Set/);
+  assert.equal((main.match(/relayOwnedCodexRuns\.add/g) || []).length, 2, "initial and follow-up Codex turns both acquire ownership");
+  assert.doesNotMatch(liveness, /statSync|mtimeMs/, "a recently written transcript is not evidence of a live turn");
+});
+
+test("streaming prose is coalesced to one DOM mutation per animation frame", () => {
+  assert.match(inbox, /function updateStreamingMarkupNode/);
+  assert.match(inbox, /requestAnimationFrame\(\(\) =>/);
+  assert.match(previewRenderer, /_sessionPendingText/);
+  assert.match(previewRenderer, /_sessionMarkdownFrame = requestAnimationFrame/);
 });
 
 test("starting a fresh provider run clears stale follow-up presentation state", () => {
@@ -943,10 +973,10 @@ test("Enter queues follow-ups and the queued Steer action uses the active sessio
   assert.match(inbox, /sendQueuedRunMessage\(id, button\.getAttribute\("data-run-queued-now"\), \{ steerNow: true \}\)/);
   assert.match(inbox, /\(feed\.completedAt \|\| runFeedIsTerminal\(feed\)\) && queued\.length/);
   assert.match(steer, /taskKickPrompt\(\{ note: body/);
-  assert.match(steer, /markTaskFollowUpStarted\(id, newTurn, body\)/);
+  assert.match(steer, /markTaskFollowUpStarted\(id, newTurn, body, clientMessageId\)/);
   assert.match(previewRenderer, /session face always talks to the agent/);
   assert.match(previewRenderer, /const newTurn = sessionSettled\(\)/);
-  assert.match(previewRenderer, /bridge\.steer\(id, body, newTurn\)/);
+  assert.match(previewRenderer, /bridge\.steer\(id, body, newTurn, crypto\.randomUUID\(\)\)/);
 });
 
 test("no <p> in the preview contains a block child, so nothing escapes its own hide class", () => {

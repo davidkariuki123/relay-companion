@@ -1153,6 +1153,7 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
       cursor = node.nextElementSibling;
     }
     for (const node of existing.values()) {
+      if (node._sessionMarkdownFrame) cancelAnimationFrame(node._sessionMarkdownFrame);
       node._workDisclosure?.destroy?.();
       node._semanticDisclosure?.destroy?.();
       node._nativeShimmerCleanup?.();
@@ -1164,12 +1165,20 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
   function updateSessionMarkdown(node, unit, className) {
     node.className = className;
     const source = text(unit?.text);
-    if (node.dataset.sessionText === source) return;
-    let html = "";
-    try { html = bridge.renderMarkdown(source); } catch { html = ""; }
-    node.innerHTML = html ? `<div class="markdown" data-markdown-animated="true">${html}</div>` : "";
-    if (!html) node.textContent = source;
-    node.dataset.sessionText = source;
+    if (node.dataset.sessionText === source || node._sessionPendingText === source) return;
+    node._sessionPendingText = source;
+    if (node._sessionMarkdownFrame) return;
+    node._sessionMarkdownFrame = requestAnimationFrame(() => {
+      node._sessionMarkdownFrame = 0;
+      const pending = node._sessionPendingText;
+      node._sessionPendingText = null;
+      if (!node.isConnected || pending == null || node.dataset.sessionText === pending) return;
+      let html = "";
+      try { html = bridge.renderMarkdown(pending); } catch { html = ""; }
+      node.innerHTML = html ? `<div class="markdown" data-markdown-animated="true">${html}</div>` : "";
+      if (!html) node.textContent = pending;
+      node.dataset.sessionText = pending;
+    });
   }
   function safeSessionImageUrl(value) {
     const url = text(value);
@@ -1493,7 +1502,7 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
     refreshComposer();
     let result;
     try {
-      result = await bridge.steer(id, body, newTurn);
+      result = await bridge.steer(id, body, newTurn, crypto.randomUUID());
     } catch (error) {
       result = { ok: false, error: (error && error.message) || String(error) };
     }

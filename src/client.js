@@ -368,11 +368,12 @@ export class RelayClient {
     return this.#req("POST", `/v1/chat-agent-sessions/${encodeURIComponent(sessionId)}/events`, payload);
   }
 
-  chatAgentSessionTurn(sessionId, message, idempotencyKey, expectedStateVersion) {
+  chatAgentSessionTurn(sessionId, message, idempotencyKey, expectedStateVersion, clientMessageId = "") {
     return this.#req("POST", `/v1/chat-agent-sessions/${encodeURIComponent(sessionId)}/turns`, {
       message,
       idempotencyKey,
       ...(expectedStateVersion ? { expectedStateVersion } : {}),
+      ...(clientMessageId ? { clientMessageId } : {}),
     });
   }
 
