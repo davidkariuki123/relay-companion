@@ -159,9 +159,7 @@ try {
     ["installed", "Relay is ready for you."],
     ["resume", "Continue your setup."],
     ["restart-required", "Restart this setup."],
-    ["method", "How would you like to continue?"],
-    ["email", "What’s your email?"],
-    ["code", "Enter your code."],
+    ["method", "Continue with Google."],
     ["google", "Finish with Google."],
     ["approval", "Connect this computer?"],
     ["finishing", "Finishing setup…"],
@@ -231,6 +229,37 @@ try {
   assert.match(openedWelcome.text, /Relay is connected/);
   rendered.push(await capture(page, "pill-inbox-welcome"));
 
+  await evaluate(page, `(async () => {
+    payload.account = { paired:true, name:"Alex Rivera", email:"alex@example.com" };
+    contactsPane = "people";
+    activeView = "contacts";
+    commitNavigation({ outerScrollTop:0 });
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    contactsList = [{ id:"con_ada", name:"Ada Lovelace", email:"ada@example.com", emails:["ada@example.com"], source:"google" }];
+    googleContactsInfo = { state:"healthy", connected:true, contactCount:1, lastSyncedAt:new Date().toISOString(), nextSyncAt:new Date(Date.now() + 86400000).toISOString(), error:null };
+    googleContactsError = "";
+    renderContacts();
+    return true;
+  })()`);
+  await waitFor(page, `document.getElementById("cvGoogleSync").innerText.includes("1 synced")`);
+  assert.match(await evaluate(page, `document.getElementById("contactsView").innerText`), /Ada Lovelace/);
+  rendered.push(await capture(page, "pill-people-google-healthy"));
+
+  await evaluate(page, `(async () => {
+    payload.features = { ...payload.features, requests:false, slack:false, agentConnections:false };
+    activeView = "settings";
+    commitNavigation({ outerScrollTop:0 });
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    settingsInfo = { paired:true, name:"Alex Rivera", email:"alex@example.com", deviceName:"Alex’s computer", version:"0.1.291", setupPath:"/app/setup" };
+    googleContactsInfo = { state:"permission_required", connected:true, contactCount:1, lastSyncedAt:new Date().toISOString(), nextSyncAt:null, error:"google_contacts_permission_required" };
+    googleContactsError = "";
+    renderSettings();
+    return true;
+  })()`);
+  await waitFor(page, `document.getElementById("settingsView").innerText.includes("Google contact permission needs to be reconnected.")`);
+  assert.equal(await evaluate(page, `document.getElementById("svGoogleContactsAction").innerText`), "Reconnect");
+  rendered.push(await capture(page, "pill-settings-google-reconnect"));
+
   await evaluate(page, `(() => {
     slackConnectionInfo = { state:"disconnected", team:null, personal:null };
     slackConnectionLoaded = true;
@@ -238,7 +267,9 @@ try {
     slackConnectionWaiting = false;
     payload.account = { paired:true, name:"Alex Rivera", email:"alex@example.com" };
     payload.ui = { ...payload.ui, setupTutorialPending:false };
-    payload.features = { ...payload.features, requests:true };
+    // The harness points the API at a closed port, so explicitly seed the
+    // developer-only Slack capability this unrelated layout check exercises.
+    payload.features = { ...payload.features, requests:true, slack:true };
     activeView = "slack";
     commitNavigation({ outerScrollTop:0 });
     return true;

@@ -132,6 +132,8 @@ contextBridge.exposeInMainWorld("relay", {
   // contacts
   capabilities: () => ipcRenderer.invoke("relay:capabilities"),
   contacts: () => ipcRenderer.invoke("relay:contacts"),
+  googleContactsStatus: () => ipcRenderer.invoke("relay:googleContactsStatus"),
+  googleContactsSync: () => ipcRenderer.invoke("relay:googleContactsSync"),
   contactsSearch: (q) => ipcRenderer.invoke("relay:contactsSearch", q),
   // Resolve a contact's canonical conversation for the pill's chat surface.
   openChatWith: (email, name) =>
@@ -182,8 +184,6 @@ contextBridge.exposeInMainWorld("relay", {
   installationAuthGoogle: (options = {}) => ipcRenderer.invoke("relay:installationAuthGoogle", {
     forceAccountSelection: options?.forceAccountSelection === true,
   }),
-  installationAuthEmailStart: (email) => ipcRenderer.invoke("relay:installationAuthEmailStart", { email: String(email || "") }),
-  installationAuthEmailVerify: (code) => ipcRenderer.invoke("relay:installationAuthEmailVerify", { code: String(code || "") }),
   installationAuthApprove: () => ipcRenderer.invoke("relay:installationAuthApprove"),
   // Cancelling abandons the local capability immediately; the unapproved
   // server record carries no identity and expires on its own.

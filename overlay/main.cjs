@@ -567,6 +567,8 @@ const INSTALLATION_AUTH_IPC_ERROR_CODES = new Set([
   "identity_conflict",
   "identity_not_found",
   "identity_required",
+  "google_required",
+  "google_contacts_required",
   "linux_desktop_disabled",
   "invalid_activation",
   "invalid_email",
@@ -998,6 +1000,7 @@ function accountInfo() {
     // device credential is not a browser session, and the gateway also checks
     // that an existing browser session belongs to this same Relay account.
     settingsPath: accountSettingsPath(user),
+    contactsPath: `${accountSettingsPath(user)}${accountSettingsPath(user).includes("?") ? "&" : "?"}contacts=google`,
     // Route through the app's OWN sign-in, not Clerk's hosted accounts.<domain>
     // subdomain. Clerk runs here in proxy mode (/__clerk), and the accounts./clerk.
     // hosts present NO certificate — the handshake fails outright, so a signed-out
@@ -8204,6 +8207,19 @@ ipcMain.handle("relay:capabilities", async () => {
   return capabilitiesCache || {};
 });
 ipcMain.handle("relay:contacts", () => readContacts());
+ipcMain.handle("relay:googleContactsStatus", async () => {
+  try { return { ok: true, status: await (await relayClient()).googleContactsStatus() }; }
+  catch (error) { return { ok: false, error: contactErrorText(error, "Could not check Google contacts.") }; }
+});
+ipcMain.handle("relay:googleContactsSync", async () => {
+  try {
+    const status = await (await relayClient()).syncGoogleContacts();
+    await refreshContacts();
+    return { ok: true, status };
+  } catch (error) {
+    return { ok: false, error: contactErrorText(error, "Could not sync Google contacts.") };
+  }
+});
 ipcMain.handle("relay:contactSave", (_e, input) => saveContact(input));
 ipcMain.handle("relay:contactDelete", (_e, input) => deleteContactFromBook(input));
 
@@ -8290,10 +8306,6 @@ ipcMain.handle("relay:installationAuthGoogle", (_event, input = {}) => installat
   (await installationAuthorizationController()).google({
     forceAccountSelection: input?.forceAccountSelection === true,
   })));
-ipcMain.handle("relay:installationAuthEmailStart", (_event, input = {}) => installationAuthorizationIpc(async () =>
-  (await installationAuthorizationController()).emailStart(String(input?.email || ""))));
-ipcMain.handle("relay:installationAuthEmailVerify", (_event, input = {}) => installationAuthorizationIpc(async () =>
-  (await installationAuthorizationController()).emailVerify(String(input?.code || ""))));
 ipcMain.handle("relay:installationAuthApprove", () => installationAuthorizationIpc(async () =>
   (await installationAuthorizationController()).approve()));
 ipcMain.handle("relay:installationAuthCancel", () => installationAuthorizationIpc(async () =>

@@ -844,6 +844,13 @@
   .cv-empty { padding:34px 16px; text-align:center; color:var(--muted-2); font-size:13px; line-height:1.5; }
   .cv-empty-retry { display:block; margin:12px auto 0; border:1px solid var(--edge); border-radius:999px; padding:7px 13px; background:transparent; color:var(--ink); font:inherit; cursor:pointer; }
   .cv-empty-retry:hover { border-color:var(--muted); }
+  .cv-google-sync {
+    min-height:30px; padding:7px 16px; border-bottom:1px solid var(--hair);
+    display:flex; align-items:center; gap:8px; color:var(--muted-2); font-size:10.5px; line-height:1.35;
+  }
+  .cv-google-sync:empty { display:none; }
+  .cv-google-sync button { appearance:none; border:0; padding:0; background:transparent; color:var(--accent); font:600 10.5px/1.35 var(--sans); cursor:pointer; }
+  .cv-google-sync button:disabled { opacity:.5; cursor:default; }
   /* Composer attachments: staged chips above the field, a + ghost in the rail. */
   .cmp-files { display:flex; flex-wrap:wrap; gap:5px; padding:2px 2px 6px; }
   .cmp-chip { display:inline-flex; align-items:center; gap:6px; border:1px solid var(--edge); border-radius:9px; padding:3px 6px 3px 8px;
@@ -2733,6 +2740,7 @@
           <button class="cv-add" type="button" id="cvAdd" aria-label="Add person">+ Add</button>
           <button class="cv-add gone" type="button" id="cvgNew" aria-label="Add channel">+ Add</button>
         </div>
+        <div class="cv-google-sync" id="cvGoogleSync" role="status"></div>
         <form class="cv-form hidden" id="cvForm">
           <div class="cv-row2">
             <input class="cv-input" id="cvFirst" placeholder="First name" autocomplete="off" spellcheck="false" />
@@ -2846,6 +2854,7 @@
   const contactsViewEl = document.getElementById("contactsView");
   const cvAddEl = document.getElementById("cvAdd");
   const cvListEl = document.getElementById("cvList");
+  const cvGoogleSyncEl = document.getElementById("cvGoogleSync");
   const contactsEmptyEl = document.getElementById("contactsEmpty");
   const cvFormEl = document.getElementById("cvForm");
   const cvFirstEl = document.getElementById("cvFirst");
@@ -4563,7 +4572,6 @@
   }
   let signupStage = "installed";
   let signupBusy = false;
-  let signupEmail = "";
   let signupAccount = null;
   let signupError = "";
   let signupNote = "";
@@ -4579,6 +4587,9 @@
   const SIGNUP_POLL_STOP_FAILURE = 6;
   let prevRelayIds = new Set();
   let contactsList = [];
+  let googleContactsInfo = null;
+  let googleContactsBusy = false;
+  let googleContactsError = "";
   // Direct chats resolved from People before inbox/Sent hydration finishes.
   // These anchors keep the canonical conversation inside the pill without
   // manufacturing a second chat window. Once local message projections arrive
@@ -9069,7 +9080,63 @@
     return e ? [e] : [];
   }
   function contactKey(c) { return c.id || (contactEmails(c)[0] || "") || c.name; }
+  function googleContactsStatusCopy() {
+    if (googleContactsBusy || googleContactsInfo?.state === "syncing") return "Google contacts · Syncing…";
+    if (googleContactsInfo?.state === "healthy") {
+      const count = Number(googleContactsInfo.contactCount || 0);
+      const when = googleContactsInfo.lastSyncedAt ? timeAgo(googleContactsInfo.lastSyncedAt) : "just now";
+      return `Google contacts · ${count} synced · ${when}`;
+    }
+    if (googleContactsInfo?.state === "permission_required") return "Google contacts need permission";
+    if (googleContactsInfo?.state === "error" || googleContactsError) return "Google contacts couldn’t sync";
+    return "";
+  }
+  function renderGoogleContactsStatus() {
+    if (!cvGoogleSyncEl) return;
+    cvGoogleSyncEl.classList.toggle("gone", contactsPane !== "people");
+    const copy = googleContactsStatusCopy();
+    if (!copy) { cvGoogleSyncEl.innerHTML = ""; return; }
+    const action = googleContactsInfo?.state === "permission_required"
+      ? `<button type="button" id="cvGoogleContactsAction"${googleContactsBusy ? " disabled" : ""}>Reconnect</button>`
+      : googleContactsInfo?.state === "error" || googleContactsError
+        ? `<button type="button" id="cvGoogleContactsAction"${googleContactsBusy ? " disabled" : ""}>Try again</button>`
+        : "";
+    cvGoogleSyncEl.innerHTML = `<span>${esc(copy)}</span>${action}`;
+    document.getElementById("cvGoogleContactsAction")?.addEventListener("click", googleContactsAction);
+  }
+  async function openGoogleContactsSettings() {
+    try {
+      const info = settingsInfo || (window.relay.accountInfo ? await window.relay.accountInfo() : null);
+      if (window.relay.openUrl) await window.relay.openUrl(info?.contactsPath || "/account/settings?contacts=google");
+    } catch {
+      googleContactsError = "Could not open Google contact settings.";
+      renderGoogleContactsStatus();
+    }
+  }
+  async function syncGoogleContactsNow() {
+    if (googleContactsBusy || !window.relay.googleContactsSync) return;
+    googleContactsBusy = true; googleContactsError = ""; renderGoogleContactsStatus();
+    if (activeView === "settings") renderSettings();
+    let result = null;
+    try { result = await window.relay.googleContactsSync(); }
+    catch (error) { result = { ok:false, error:error?.message || "Could not sync Google contacts." }; }
+    googleContactsBusy = false;
+    if (result?.ok && result.status) {
+      googleContactsInfo = result.status;
+      googleContactsError = "";
+      try { contactsList = (await window.relay.contacts()) || contactsList; } catch {}
+    } else {
+      googleContactsError = result?.error || "Could not sync Google contacts.";
+    }
+    if (activeView === "contacts") renderContacts();
+    if (activeView === "settings") renderSettings();
+  }
+  function googleContactsAction() {
+    if (googleContactsInfo?.state === "permission_required") void openGoogleContactsSettings();
+    else void syncGoogleContactsNow();
+  }
   function renderContacts() {
+    renderGoogleContactsStatus();
     contactsEmptyEl.classList.toggle("gone", contactsPane !== "people" || contactsList.length > 0);
     refreshPaneCounts();
     cvListEl.innerHTML = contactsList.map((c) => {
@@ -9204,8 +9271,17 @@
       .catch(() => onThisRow("That conversation could not be opened."));
   }
   async function loadContacts() {
-    try { contactsList = (await window.relay.contacts()) || []; }
-    catch { contactsList = []; }
+    const [contactsResult, googleResult] = await Promise.allSettled([
+      window.relay.contacts(),
+      window.relay.googleContactsStatus ? window.relay.googleContactsStatus() : Promise.resolve(null),
+    ]);
+    contactsList = contactsResult.status === "fulfilled" ? (contactsResult.value || []) : [];
+    if (googleResult.status === "fulfilled" && googleResult.value?.ok && googleResult.value.status) {
+      googleContactsInfo = googleResult.value.status;
+      googleContactsError = "";
+    } else if (googleResult.status === "fulfilled" && googleResult.value?.ok === false) {
+      googleContactsError = googleResult.value.error || "Could not check Google contacts.";
+    }
     renderContacts();
     loadGroups();
   }
@@ -9231,6 +9307,7 @@
     cvSegPeopleEl.setAttribute("aria-selected", String(people));
     cvSegGroupsEl.setAttribute("aria-selected", String(!people));
     cvListEl.classList.toggle("gone", !people);
+    cvGoogleSyncEl?.classList.toggle("gone", !people);
     contactsEmptyEl.classList.toggle("gone", !people || contactsList.length > 0);
     cvGroupsEl.classList.toggle("gone", people);
     // The add button follows the pane it belongs to.
@@ -13260,6 +13337,31 @@
       ${slackConnectionError ? `<div class="row-err sv-err">${esc(slackConnectionError)}</div>` : ""}
     </section>`;
   }
+  function googleContactsSettingsHtml(info) {
+    if (!info?.paired) return "";
+    const state = googleContactsInfo?.state || "pending";
+    const count = Number(googleContactsInfo?.contactCount || 0);
+    const healthy = state === "healthy";
+    const permission = state === "permission_required";
+    const detail = googleContactsBusy || state === "syncing"
+      ? "Syncing your Google contacts…"
+      : healthy
+        ? `${count} ${count === 1 ? "contact" : "contacts"} synced${googleContactsInfo?.lastSyncedAt ? ` · ${timeAgo(googleContactsInfo.lastSyncedAt)}` : ""}`
+        : permission
+          ? "Google contact permission needs to be reconnected."
+          : googleContactsError || "Google contacts have not finished syncing.";
+    const action = permission ? "Reconnect" : healthy ? "Sync now" : "Try again";
+    return `<section class="sv-open-section" data-stop="1">
+      <div class="sv-open-title">Contacts</div>
+      <div class="sv-quiet-list">
+        <div class="sv-quiet-row">
+          <span class="sv-quiet-copy"><span class="sv-quiet-name">Google contacts</span><span class="sv-quiet-note">${esc(detail)}</span></span>
+          <button class="sv-provider-btn${permission || !healthy ? " primary" : ""}" type="button" id="svGoogleContactsAction" ${googleContactsBusy || state === "syncing" ? "disabled" : ""}>${esc(googleContactsBusy || state === "syncing" ? "Syncing…" : action)}</button>
+        </div>
+      </div>
+      <div class="sv-hint">Read-only. Relay syncs daily and removes Google-deleted contacts unless you edited them in Relay.</div>
+    </section>`;
+  }
   function renderSettings() {
     if (activeView !== "settings") return;
     const info = settingsInfo;
@@ -13296,6 +13398,7 @@
     if (svPairOpen) html += svPairRowHtml();
     if (svNote) html += `<div class="sv-note">${esc(svNote)}</div>`;
     html += `<div class="row-err sv-err" id="svErr">${esc(svError)}</div>`;
+    html += googleContactsSettingsHtml(info);
     html += slackSettingsHtml(info);
     html += deviceApprovalsHtml(info);
     // ONE CONNECTIONS SURFACE. Claude Code and Codex are the subscription
@@ -13450,6 +13553,8 @@
     }
     const connectClaude = document.getElementById("svConnectClaude");
     if (connectClaude) connectClaude.addEventListener("click", connectClaudeFromSettings);
+    const googleContactsActionEl = document.getElementById("svGoogleContactsAction");
+    if (googleContactsActionEl) googleContactsActionEl.addEventListener("click", googleContactsAction);
     const slackConnect = document.getElementById("svSlackConnect");
     if (slackConnect) slackConnect.addEventListener("click", connectSlackFromSurface);
     const slackDisconnect = document.getElementById("svSlackDisconnect");
@@ -13847,6 +13952,20 @@
       // its local read finishes; provider health must never hold this card up.
       if (JSON.stringify(settingsInfo) !== before) renderSettings();
     })();
+    const googleContactsTask = (async () => {
+      if (!window.relay.googleContactsStatus) return;
+      let result = null;
+      try { result = await window.relay.googleContactsStatus(); }
+      catch (error) { result = { ok:false, error:error?.message || "Could not check Google contacts." }; }
+      if (seq !== settingsLoadSeq) return;
+      if (result?.ok && result.status) {
+        googleContactsInfo = result.status;
+        googleContactsError = "";
+      } else {
+        googleContactsError = result?.error || "Could not check Google contacts.";
+      }
+      renderSettings();
+    })();
     const deviceApprovalTask = (async () => {
       if (!window.relay.e2eeDeviceApprovals) return;
       let result = null;
@@ -13910,7 +14029,7 @@
       }
       renderSettings();
     })();
-    await Promise.allSettled([accountTask, slackTask, deviceApprovalTask, authTask, inventoryTask, chatAgentTask]);
+    await Promise.allSettled([accountTask, googleContactsTask, slackTask, deviceApprovalTask, authTask, inventoryTask, chatAgentTask]);
   }
   // Provider state is live product state, not something the user should have
   // to refresh manually. Re-read it whenever Settings becomes visible again
@@ -13979,6 +14098,9 @@
     if (detail.includes("credential_empty") || detail.includes("credential_corrupt")) {
       return "Relay’s saved account credential is damaged. Reconnect this computer.";
     }
+    if (detail.includes("google_contacts_required") || detail.includes("google_required")) {
+      return "Finish Google sign-in and allow read-only contact access, then try again.";
+    }
     if (detail.includes("invalid_email_code_format")) return "Enter the 6-digit code.";
     if (detail.includes("invalid_email_code")) return "That code isn’t right or has expired. Try again.";
     if (detail.includes("email_code_cooldown")) return "A code was just sent. Check your inbox or wait a moment.";
@@ -14026,7 +14148,7 @@
       try {
         await window.relay.installationAuthCancel();
         signupPollFailures = 0; signupPollErrorVisible = false; signupConnectionCommitted = false;
-        signupBusy = false; signupStage = "installed"; signupAccount = null; signupEmail = "";
+        signupBusy = false; signupStage = "installed"; signupAccount = null;
         window.relay.dismiss?.();
       } catch (reason) { signupFailure(reason, "Relay could not cancel setup safely."); }
     });
@@ -14136,7 +14258,6 @@
       signupBusy = false;
       signupStage = "method";
       signupAccount = null;
-      signupEmail = "";
       signupPollFailures = 0;
       signupPollErrorVisible = false;
       signupConnectionCommitted = false;
@@ -14266,7 +14387,7 @@
       return;
     }
     if (signupStage === "method") {
-      signupBodyEl.innerHTML = `<p class="su-step">Your account</p><h1 class="su-title">How would you like to continue?</h1><p class="su-copy">Your agent can’t see your identity or sign-in details.</p><div class="su-form"><button class="su-secondary su-google" id="suGoogle" type="button"${busy}>${googleMark()} Continue with Google</button><div class="su-divider">or</div><button class="su-primary" id="suEmail" type="button"${busy}>Continue with email</button>${cancelSetupButton()}</div>${error}`;
+      signupBodyEl.innerHTML = `<p class="su-step">Your account</p><h1 class="su-title">Continue with Google.</h1><p class="su-copy">Relay syncs your Google contacts so your agents can talk to theirs.</p><div class="su-form"><button class="su-secondary su-google" id="suGoogle" type="button"${busy}>${googleMark()} Continue with Google</button>${cancelSetupButton()}</div>${error}`;
       document.getElementById("suGoogle")?.addEventListener("click", async () => {
         signupBusy = true; signupError = ""; renderSignup();
         try {
@@ -14275,54 +14396,12 @@
           signupBusy = false; signupStage = "google"; applyInstallationState(state); renderSignup(); pollInstallationState();
         } catch (reason) { signupFailure(reason, "Google sign-in did not open."); }
       });
-      document.getElementById("suEmail")?.addEventListener("click", () => { signupStage = "email"; signupError = ""; renderSignup(); });
-      bindSignupCancel();
-      return;
-    }
-    if (signupStage === "email") {
-      signupBodyEl.innerHTML = `<p class="su-step">Email</p><h1 class="su-title">What’s your email?</h1><p class="su-copy">Relay sends you a one-time code. Your agent never sees it.</p><form class="su-form" id="suEmailForm"><label class="su-label">Email<input class="su-input" id="suEmailInput" type="email" autocomplete="email" placeholder="you@example.com" value="${esc(signupEmail)}" required /></label><button class="su-primary" type="submit"${busy}>Send code</button><button class="su-link" id="suEmailBack" type="button">Back</button>${cancelSetupButton()}</form>${error}`;
-      const input = document.getElementById("suEmailInput");
-      document.getElementById("suEmailBack")?.addEventListener("click", () => { signupStage = "method"; signupError = ""; renderSignup(); });
-      document.getElementById("suEmailForm")?.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        signupEmail = String(input?.value || "").trim();
-        if (!signupEmail || !input?.checkValidity()) { input?.reportValidity(); return; }
-        signupBusy = true; signupError = ""; renderSignup();
-        try {
-          await window.relay.installationAuthEmailStart(signupEmail);
-          signupBusy = false; signupStage = "code"; renderSignup();
-        } catch (reason) { signupFailure(reason, "Relay could not send the code."); }
-      });
-      bindSignupCancel();
-      return;
-    }
-    if (signupStage === "code") {
-      signupBodyEl.innerHTML = `<p class="su-step">Check your email</p><h1 class="su-title">Enter your code.</h1><p class="su-copy">We sent a 6-digit code to ${esc(signupEmail)}. Check spam if you don’t see it.</p><form class="su-form" id="suCodeForm"><label class="su-label">One-time code<input class="su-input su-code" id="suCodeInput" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" required /></label><button class="su-primary" type="submit"${busy}>Verify</button><button class="su-link" id="suCodeResend" type="button"${busy}>Send another code</button><button class="su-link" id="suCodeBack" type="button"${busy}>Use another email</button>${cancelSetupButton()}</form>${error}`;
-      const input = document.getElementById("suCodeInput");
-      document.getElementById("suCodeBack")?.addEventListener("click", () => { signupStage = "email"; signupError = ""; renderSignup(); });
-      document.getElementById("suCodeResend")?.addEventListener("click", async () => {
-        signupBusy = true; signupError = ""; renderSignup();
-        try {
-          await window.relay.installationAuthEmailStart(signupEmail);
-          signupBusy = false; renderSignup();
-        } catch (reason) { signupFailure(reason, "Relay could not send another code."); }
-      });
-      document.getElementById("suCodeForm")?.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const code = String(input?.value || "").trim();
-        if (!/^[0-9]{6}$/.test(code)) { input?.reportValidity(); return; }
-        signupBusy = true; signupError = ""; renderSignup();
-        try {
-          const state = await window.relay.installationAuthEmailVerify(code);
-          signupBusy = false; applyInstallationState(state); renderSignup();
-        } catch (reason) { signupFailure(reason, "That code did not work."); }
-      });
       bindSignupCancel();
       return;
     }
     if (signupStage === "google") {
       const retry = signupError ? `<button class="su-primary" id="suResume" type="button"${busy}>Try again</button>` : "";
-      signupBodyEl.innerHTML = `<p class="su-step">Google sign-in</p><h1 class="su-title">Finish with Google.</h1><p class="su-copy">Complete Google sign-in in your default browser.</p><div class="su-account"><span class="su-account-name">Waiting for Google…</span><span class="su-account-email">Your agent cannot see this sign-in.</span></div><div class="su-form">${retry}${cancelSetupButton()}</div>${error}`;
+      signupBodyEl.innerHTML = `<p class="su-step">Google sign-in</p><h1 class="su-title">Finish with Google.</h1><p class="su-copy">Complete Google sign-in and allow read-only contact access in your default browser.</p><div class="su-account"><span class="su-account-name">Waiting for Google…</span><span class="su-account-email">Relay is importing your Google contacts. Your agent cannot see this sign-in.</span></div><div class="su-form">${retry}${cancelSetupButton()}</div>${error}`;
       bindSignupResume();
       bindSignupCancel();
       return;
@@ -14354,7 +14433,7 @@
       return;
     }
     const resume = signupError ? `<div class="su-form"><button class="su-primary" id="suResume" type="button"${busy}>Resume setup</button></div>` : "";
-    signupBodyEl.innerHTML = `<p class="su-step">Almost done</p><h1 class="su-title">Finishing setup…</h1><p class="su-copy">Relay is getting this computer ready.</p><div class="su-checks"><div class="su-check"><span class="su-check-mark">✓</span>Account verified</div><div class="su-check"><span class="su-check-mark">✓</span>This computer approved</div><div class="su-check su-check-active"><span class="su-check-mark" aria-hidden="true"></span>Connecting Claude Code, Cowork, and Codex</div></div>${resume}${error}`;
+    signupBodyEl.innerHTML = `<p class="su-step">Almost done</p><h1 class="su-title">Finishing setup…</h1><p class="su-copy">Relay is getting this computer ready.</p><div class="su-checks"><div class="su-check"><span class="su-check-mark">✓</span>Google account verified</div><div class="su-check"><span class="su-check-mark">✓</span>Google contacts synced</div><div class="su-check"><span class="su-check-mark">✓</span>This computer approved</div><div class="su-check su-check-active"><span class="su-check-mark" aria-hidden="true"></span>Connecting Claude Code, Cowork, and Codex</div></div>${resume}${error}`;
     bindSignupResume();
   }
 
@@ -14363,7 +14442,6 @@
   if (window.relay.isTestOverlay) {
     window.__relaySignupPreview = (stage, data = {}) => {
       signupStage = String(stage || "installed");
-      signupEmail = String(data.email || "alex@example.com");
       signupAccount = data.account || { displayName:"Alex Rivera", email:"alex@example.com" };
       signupBusy = false;
       signupError = String(data.error || "");
