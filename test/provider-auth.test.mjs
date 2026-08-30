@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { spawn as spawnActual } from "node:child_process";
+import { createCipheriv, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -7,6 +8,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   assertProviderReady,
+  beginRemoteProviderAuth,
   connectProvider,
   providerAuthStatus,
   providerAuthStatuses,
@@ -15,6 +17,85 @@ import {
   setProviderEnabled,
   _test,
 } from "../src/provider-auth.js";
+
+function remoteChild() {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.stdin = new EventEmitter();
+  child.kill = () => {};
+  return child;
+}
+
+function encryptClaudeCode(authId, replyPublicKey, code) {
+  const sender = generateKeyPairSync("x25519");
+  const recipient = createPublicKey({ key:{ kty:"OKP", crv:"X25519", x:replyPublicKey }, format:"jwk" });
+  const shared = diffieHellman({ privateKey:sender.privateKey, publicKey:recipient });
+  const key = Buffer.from(hkdfSync(
+    "sha256", shared, Buffer.from(authId), Buffer.from("relay-provider-auth-code-v1"), 32,
+  ));
+  const nonce = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, nonce);
+  cipher.setAAD(Buffer.from(authId));
+  const ciphertext = Buffer.concat([cipher.update(code, "utf8"), cipher.final(), cipher.getAuthTag()]);
+  return {
+    version:1,
+    ephemeralPublicKey:sender.publicKey.export({ format:"jwk" }).x,
+    nonce:nonce.toString("base64url"),
+    ciphertext:ciphertext.toString("base64url"),
+  };
+}
+
+test("remote Claude sign-in exposes only an allowlisted URL and decrypts the mobile code on the laptop", async () => {
+  const child = remoteChild();
+  let submitted = "";
+  child.stdin.end = (value) => { submitted = value; };
+  const attempt = beginRemoteProviderAuth("claude", {
+    command:"claude",
+    spawn:() => child,
+    execFile:async () => ({ stdout:JSON.stringify({ loggedIn:true, authMethod:"claude.ai", apiProvider:"firstParty" }) }),
+  });
+  child.stdout.emit("data", Buffer.from("Open https://claude.com/cai/oauth/authorize?code=true&state=opaque\n"));
+  const challenge = await attempt.challenge;
+  assert.equal(challenge.provider, "claude");
+  assert.match(challenge.replyPublicKey, /^[A-Za-z0-9_-]{43}$/);
+  assert.equal("output" in challenge, false);
+  attempt.submit(encryptClaudeCode(challenge.authId, challenge.replyPublicKey, "mobile-returned-code#state"));
+  assert.equal(submitted, "mobile-returned-code#state\n");
+  child.emit("close", 1);
+  await attempt.completion;
+});
+
+test("remote Codex sign-in uses the official device-auth URL and code", async () => {
+  const child = remoteChild();
+  let invocation;
+  const attempt = beginRemoteProviderAuth("codex", {
+    command:"codex",
+    spawn:(command, args, options) => { invocation = { command, args, options }; return child; },
+    execFile:async () => ({ stdout:"Logged in using ChatGPT" }),
+  });
+  child.stderr.emit("data", Buffer.from("Visit https://auth.openai.com/codex/device and enter ABCD-12345\n"));
+  const challenge = await attempt.challenge;
+  assert.deepEqual(invocation.args, ["login", "--device-auth"]);
+  assert.equal(challenge.authorizeUrl, "https://auth.openai.com/codex/device");
+  assert.equal(challenge.userCode, "ABCD-12345");
+  assert.equal(challenge.replyPublicKey, undefined);
+  child.emit("close", 0);
+  await attempt.completion;
+});
+
+test("a stale status probe does not manufacture a mobile prompt when the login command finds an active session", async () => {
+  const child = remoteChild();
+  const attempt = beginRemoteProviderAuth("claude", {
+    command:"/opt/homebrew/bin/claude",
+    spawn:() => child,
+    prefsFile:tempPrefs(),
+    execFile:async () => ({ stdout:JSON.stringify({ loggedIn:true, authMethod:"claude.ai", apiProvider:"firstParty" }) }),
+  });
+  child.emit("close", 0);
+  assert.equal(await attempt.challenge, null);
+  assert.equal((await attempt.completion).ok, true);
+});
 
 test("provider subprocesses receive only a credential-free user session", () => {
   const env = providerSpawnEnvironment({
@@ -69,6 +150,18 @@ test("Claude status accepts only the official first-party subscription login", a
   assert.equal(apiBilled.connected, false);
   assert.equal(apiBilled.authState, "api_billing");
   assert.match(apiBilled.detail, /API billing/);
+});
+
+test("Claude status does not mistake a noisy authenticated JSON response for sign-out", async () => {
+  const status = await providerAuthStatus("claude", {
+    command: "/opt/homebrew/bin/claude",
+    prefsFile: tempPrefs(),
+    execFile: async () => ({
+      stdout: `Update available\n${JSON.stringify({ loggedIn:true, authMethod:"claude.ai", apiProvider:"firstParty" })}\n`,
+    }),
+  });
+  assert.equal(status.connected, true);
+  assert.equal(status.authState, "subscription");
 });
 
 test("Codex status accepts ChatGPT subscription login and rejects API-key billing", async () => {

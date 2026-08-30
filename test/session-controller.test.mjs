@@ -9,12 +9,56 @@ import {
   claudeRelayCompletionFromTranscript,
   claudeSessionNeedsCatalogRestart,
   codexRecoveryWaitMs,
+  ensureAgentRunProviderAuthentication,
   materializeRelayOperation,
   publishAndFind,
   resolveClaudeBackgroundAgent,
   runSessionDirectoryOnce,
   waitForClaudeCompletion,
 } from "../src/session-controller.js";
+
+test("an owned Claude run pauses for the encrypted mobile sign-in response and then resumes", async () => {
+  const appended = [];
+  const envelope = { version:1, ephemeralPublicKey:"A".repeat(43), nonce:"B".repeat(16), ciphertext:"C".repeat(23) };
+  let submitted;
+  let complete;
+  const completion = new Promise((resolve) => { complete = resolve; });
+  const auth = {
+    id:"pa_0123456789012345678901",
+    challenge:Promise.resolve({
+      kind:"provider_auth", authId:"pa_0123456789012345678901", provider:"claude",
+      providerLabel:"Anthropic", status:"waiting_for_user",
+      authorizeUrl:"https://claude.com/cai/oauth/authorize?state=safe", replyPublicKey:"D".repeat(43),
+      expiresAt:"2099-08-30T12:00:00.000Z",
+    }),
+    completion,
+    submit(value) { submitted = value; complete({ ok:true }); },
+  };
+  let stateVersion = 0;
+  const client = {
+    async chatAgentSession() { return { attempt:1, stateVersion:++stateVersion }; },
+    async appendChatAgentSessionEvents(_sessionId, input) {
+      appended.push(input.events[0]);
+      return { session:{ lastEventSequence:appended.length } };
+    },
+    async chatAgentSessionEvents() {
+      return { events:[{
+        sequence:2, type:"session.provider_auth_submitted",
+        payload:{ kind:"provider_auth_submission", authId:auth.id, envelope },
+      }] };
+    },
+  };
+  assert.equal(await ensureAgentRunProviderAuthentication({
+    client,
+    provider:"claude",
+    input:{ agentSessionId:"ras_mobile" },
+    inspect:async () => ({ connected:false }),
+    begin:() => auth,
+  }), true);
+  assert.deepEqual(submitted, envelope);
+  assert.deepEqual(appended.map((event) => event.type), ["session.needs_input", "session.running"]);
+  assert.equal(appended[0].visibility, "owner");
+});
 
 test("a remote Slack action materializes the exact Relay instead of inventing a second prompt", async () => {
   const staged = [];

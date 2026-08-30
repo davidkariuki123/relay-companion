@@ -1,4 +1,12 @@
 import { execFile as execFileCallback, spawn as spawnChild } from "node:child_process";
+import {
+  createDecipheriv,
+  createPublicKey,
+  diffieHellman,
+  generateKeyPairSync,
+  hkdfSync,
+  randomBytes,
+} from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -42,7 +50,10 @@ const PROVIDERS = Object.freeze({
 
 const activeLogins = new Map();
 const lastAttempts = new Map();
+const activeRemoteLogins = new Map();
 const LOGIN_TIMEOUT_MS = 10 * 60 * 1_000;
+const REMOTE_AUTH_OUTPUT_MAX_BYTES = 128 * 1024;
+const REMOTE_AUTH_CONTEXT = "relay-provider-auth-code-v1";
 const CLAUDE_MCP_BATCH_SIZE = "8";
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -118,6 +129,82 @@ export function resolveProviderCommand(provider, { command = "", env = process.e
 
 function safeMessage(value, max = 500) {
   return String(value || "").replace(/[\r\n]+/g, " ").trim().slice(0, max);
+}
+
+function stripTerminalControl(value) {
+  return String(value || "")
+    .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g, "")
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "");
+}
+
+function remoteAuthorizeUrl(provider, output) {
+  const matches = stripTerminalControl(output).match(/https:\/\/[^\s<>"']+/g) || [];
+  for (const candidate of matches) {
+    let parsed;
+    try { parsed = new URL(candidate); } catch { continue; }
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password) continue;
+    if (provider === "claude" && parsed.hostname === "claude.com" && parsed.pathname === "/cai/oauth/authorize") {
+      return parsed.href;
+    }
+    if (provider === "codex" && parsed.hostname === "auth.openai.com" && parsed.pathname === "/codex/device"
+        && !parsed.search && !parsed.hash) return parsed.href;
+  }
+  return "";
+}
+
+function codexDeviceCode(output) {
+  return stripTerminalControl(output).match(/\b[A-Z0-9]{4}-[A-Z0-9]{5}\b/)?.[0] || "";
+}
+
+function canonicalBase64Url(value, bytes) {
+  const text = String(value || "");
+  if (!/^[A-Za-z0-9_-]+$/.test(text)) throw new Error("The encrypted authorization response is invalid.");
+  const decoded = Buffer.from(text, "base64url");
+  if ((bytes && decoded.length !== bytes) || decoded.toString("base64url") !== text) {
+    throw new Error("The encrypted authorization response is invalid.");
+  }
+  return decoded;
+}
+
+function validateClaudeAuthorizationCode(value) {
+  const code = String(value || "");
+  if (!code || code !== code.trim() || code.length > 4096 || /[\u0000-\u001f\u007f]/.test(code)) {
+    throw new Error("The Claude authorization code is invalid.");
+  }
+  return code;
+}
+
+function decryptClaudeAuthorizationCode(authId, privateKey, envelope) {
+  if (!envelope || envelope.version !== 1) throw new Error("The encrypted authorization response is invalid.");
+  const peer = createPublicKey({
+    key: { kty: "OKP", crv: "X25519", x: canonicalBase64Url(envelope.ephemeralPublicKey, 32).toString("base64url") },
+    format: "jwk",
+  });
+  const shared = diffieHellman({ privateKey, publicKey: peer });
+  const key = Buffer.from(hkdfSync(
+    "sha256",
+    shared,
+    Buffer.from(authId, "utf8"),
+    Buffer.from(REMOTE_AUTH_CONTEXT, "utf8"),
+    32,
+  ));
+  const nonce = canonicalBase64Url(envelope.nonce, 12);
+  const sealed = canonicalBase64Url(envelope.ciphertext);
+  if (sealed.length < 17 || sealed.length > 5_000) throw new Error("The encrypted authorization response is invalid.");
+  const ciphertext = sealed.subarray(0, -16);
+  const decipher = createDecipheriv("aes-256-gcm", key, nonce);
+  decipher.setAAD(Buffer.from(authId, "utf8"));
+  decipher.setAuthTag(sealed.subarray(-16));
+  let plaintext;
+  try { plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8"); }
+  catch { throw new Error("The encrypted authorization response could not be opened on this computer."); }
+  return validateClaudeAuthorizationCode(plaintext);
+}
+
+export function providerAuthenticationFailure(value) {
+  return /authentication_failed|login expired|failed to authenticate|oauth access token.*revoked|not logged in|please run \/login/i
+    .test(String(value?.message || value || ""));
 }
 
 function safeIntegrationName(value) {
@@ -334,7 +421,16 @@ function attemptDetail(id, parsed) {
 
 function parseClaudeStatus(stdout) {
   let payload = null;
-  try { payload = JSON.parse(String(stdout || "").trim()); } catch {}
+  const text = String(stdout || "").trim();
+  try { payload = JSON.parse(text); } catch {
+    // Some CLI builds print an update notice around --json output. Do not
+    // mislabel a valid first-party login as signed out because of that noise.
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      try { payload = JSON.parse(text.slice(start, end + 1)); } catch {}
+    }
+  }
   const loggedIn = payload?.loggedIn === true;
   const apiProvider = String(payload?.apiProvider || "");
   const authMethod = String(payload?.authMethod || "");
@@ -470,6 +566,168 @@ export function providerSpawnEnvironment(env = process.env) {
   return linuxTerminalEnvironment(env);
 }
 
+/**
+ * Start the provider's official mobile-safe login flow without moving a
+ * credential into Relay. The returned challenge contains only an allowlisted
+ * provider URL/code. Claude's reply is encrypted to this attempt's ephemeral
+ * X25519 key before it crosses Relay's API.
+ */
+export function beginRemoteProviderAuth(provider, {
+  command = "",
+  execFile = execFileDefault,
+  spawn = spawnChild,
+  prefsFile = configPath(),
+  env = process.env,
+  now = Date.now,
+} = {}) {
+  const id = String(provider || "");
+  const spec = PROVIDERS[id];
+  if (!spec) throw new Error("Unknown provider connection.");
+  const existing = activeRemoteLogins.get(id);
+  if (existing && !existing.terminal && existing.expiresAt > now()) return existing.publicAttempt;
+  const runtime = resolveProviderCommand(id, { command, env });
+  if (!runtime) throw new Error(`${spec.label} is not installed.`);
+
+  const authId = `pa_${randomBytes(16).toString("base64url")}`;
+  const ttlMs = id === "codex" ? 15 * 60 * 1_000 : 10 * 60 * 1_000;
+  const expiresAt = now() + ttlMs;
+  const replyKeys = id === "claude" ? generateKeyPairSync("x25519") : null;
+  let resolveChallenge;
+  let rejectChallenge;
+  let resolveCompletion;
+  let rejectCompletion;
+  const challenge = new Promise((resolve, reject) => { resolveChallenge = resolve; rejectChallenge = reject; });
+  const completion = new Promise((resolve, reject) => { resolveCompletion = resolve; rejectCompletion = reject; });
+  // Callers normally await both, but attach guards immediately so a spawn
+  // failure cannot become a process-level unhandled rejection.
+  challenge.catch(() => {});
+  completion.catch(() => {});
+
+  const args = id === "codex" ? ["login", "--device-auth"] : [...spec.loginArgs];
+  let child;
+  try {
+    child = spawn(runtime, args, {
+      windowsHide: true,
+      env: providerSpawnEnvironment(env),
+      stdio: [id === "claude" ? "pipe" : "ignore", "pipe", "pipe"],
+    });
+  } catch (error) {
+    throw new Error(`Could not start ${spec.label} authorization: ${safeMessage(error?.message || error)}`);
+  }
+  const state = {
+    id: authId,
+    provider: id,
+    child,
+    terminal: false,
+    challengeResolved: false,
+    submitted: false,
+    expiresAt,
+    output: "",
+    outputBytes: 0,
+    timer: null,
+    privateKey: replyKeys?.privateKey || null,
+    publicAttempt: null,
+  };
+  const finish = (error = null) => {
+    if (state.terminal) return;
+    state.terminal = true;
+    clearTimeout(state.timer);
+    if (activeRemoteLogins.get(id) === state) activeRemoteLogins.delete(id);
+    state.output = "";
+    if (error) {
+      const failure = error instanceof Error ? error : new Error(String(error));
+      if (!state.challengeResolved) rejectChallenge(failure);
+      rejectCompletion(failure);
+    } else {
+      if (!state.challengeResolved) {
+        state.challengeResolved = true;
+        resolveChallenge(null);
+      }
+      resolveCompletion({ ok: true, provider: id, authId });
+    }
+  };
+  const maybeResolveChallenge = () => {
+    if (state.challengeResolved) return;
+    const authorizeUrl = remoteAuthorizeUrl(id, state.output);
+    const userCode = id === "codex" ? codexDeviceCode(state.output) : "";
+    if (!authorizeUrl || (id === "codex" && !userCode)) return;
+    state.challengeResolved = true;
+    const view = {
+      kind: "provider_auth",
+      authId,
+      provider: id,
+      providerLabel: id === "claude" ? "Anthropic" : "OpenAI",
+      status: "waiting_for_user",
+      authorizeUrl,
+      ...(userCode ? { userCode } : {}),
+      ...(replyKeys ? { replyPublicKey: String(replyKeys.publicKey.export({ format: "jwk" }).x || "") } : {}),
+      expiresAt: new Date(expiresAt).toISOString(),
+    };
+    state.output = "";
+    resolveChallenge(view);
+  };
+  const collect = (chunk) => {
+    if (state.terminal || state.challengeResolved) return;
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    state.outputBytes += bytes.length;
+    if (state.outputBytes > REMOTE_AUTH_OUTPUT_MAX_BYTES) {
+      try { child.kill(); } catch {}
+      finish(new Error(`${spec.label} sign-in returned too much output.`));
+      return;
+    }
+    state.output += bytes.toString("utf8");
+    maybeResolveChallenge();
+  };
+  child.stdout?.on?.("data", collect);
+  child.stderr?.on?.("data", collect);
+  child.stdin?.on?.("error", () => {});
+  child.once?.("error", (error) => finish(new Error(`Could not start ${spec.label} authorization: ${safeMessage(error?.message || error)}`)));
+  child.once?.("close", async (code) => {
+    if (state.terminal) return;
+    try {
+      const status = await providerAuthStatus(id, { command: runtime, execFile, prefsFile });
+      if (status.connected) {
+        finish();
+        return;
+      }
+      finish(new Error(code === 0
+        ? `${spec.label} sign-in completed without the required subscription.`
+        : `${spec.label} sign-in was cancelled or did not complete.`));
+    } catch (error) {
+      finish(new Error(code === 0
+        ? `Could not verify ${spec.label} sign-in: ${safeMessage(error?.message || error)}`
+        : `${spec.label} sign-in was cancelled or did not complete.`));
+    }
+  });
+  state.timer = setTimeout(() => {
+    try { child.kill?.("SIGTERM"); } catch {}
+    finish(new Error(`${spec.label} sign-in expired before it completed.`));
+  }, ttlMs);
+  state.timer.unref?.();
+  const publicAttempt = {
+    id: authId,
+    provider: id,
+    challenge,
+    completion,
+    expiresAt,
+    submit(envelope) {
+      if (id !== "claude" || state.terminal || state.submitted || !state.challengeResolved || !state.privateKey) {
+        throw new Error("Claude sign-in is not waiting for an authorization code.");
+      }
+      const code = decryptClaudeAuthorizationCode(authId, state.privateKey, envelope);
+      state.submitted = true;
+      child.stdin.end(`${code}\n`, "utf8");
+    },
+    cancel() {
+      try { child.kill?.("SIGTERM"); } catch {}
+      finish(new Error(`${spec.label} sign-in was cancelled.`));
+    },
+  };
+  state.publicAttempt = publicAttempt;
+  activeRemoteLogins.set(id, state);
+  return publicAttempt;
+}
+
 export async function connectProvider(provider, {
   command = "",
   execFile = execFileDefault,
@@ -589,4 +847,9 @@ export const _test = {
   localIntegrationNames,
   parseClaudeMcpList,
   providerIntegrations,
+  stripTerminalControl,
+  remoteAuthorizeUrl,
+  codexDeviceCode,
+  decryptClaudeAuthorizationCode,
+  activeRemoteLogins,
 };

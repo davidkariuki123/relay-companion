@@ -463,16 +463,27 @@ function peerPrompt({ source, target, input }) {
   ].join("\n");
 }
 
+const operationEvidenceRanks = new Map();
+const OPERATION_EVIDENCE_RANK = Object.freeze({ handed_off:1, applied:2, completed:3, failed:3 });
+
 async function evidence(client, operationId, claimToken, state, result = {}, error = undefined) {
+  // A provider can discover expired authentication only after its native
+  // process starts. When the same claimed operation resumes after mobile
+  // sign-in, do not replay its earlier evidence states into the server's
+  // monotonic state machine.
+  const rank = OPERATION_EVIDENCE_RANK[state] || 0;
+  if (rank < (operationEvidenceRanks.get(operationId) || 0)) return null;
   let lastError;
   for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
-      return await client.recordSessionOperationEvidence(operationId, {
+      const recorded = await client.recordSessionOperationEvidence(operationId, {
         claimToken,
         state,
         result,
         ...(error ? { error } : {}),
       });
+      operationEvidenceRanks.set(operationId, Math.max(rank, operationEvidenceRanks.get(operationId) || 0));
+      return recorded;
     } catch (writeError) {
       if (writeError?.status && writeError.status < 500) throw writeError;
       lastError = writeError;
@@ -540,6 +551,109 @@ function agentRunReporter(client, runRelayId) {
     return retryAgentWrite(() => client.agentRunFinish(relayId, error));
   };
   return { progress, flush, complete, finish };
+}
+
+async function appendAgentSessionEvent(client, sessionId, event, idempotencyKey) {
+  let lastError;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      const session = await client.chatAgentSession(sessionId);
+      return await client.appendChatAgentSessionEvents(sessionId, {
+        attempt:session.attempt,
+        expectedStateVersion:session.stateVersion,
+        idempotencyKey,
+        events:[event],
+      });
+    } catch (error) {
+      lastError = error;
+      if (error?.status !== 409 || attempt === 3) throw error;
+    }
+  }
+  throw lastError;
+}
+
+async function waitForClaudeRemoteAuthSubmission(client, sessionId, attempt, afterSequence) {
+  let after = Number(afterSequence || 0);
+  while (true) {
+    const next = await Promise.race([
+      attempt.completion.then(() => ({ completed:true })),
+      (async () => {
+        try {
+          const page = await client.chatAgentSessionEvents(sessionId, after);
+          return { completed:false, events:Array.isArray(page?.events) ? page.events : [] };
+        } catch (error) {
+          if (error?.status && error.status < 500) throw error;
+          return { completed:false, events:[] };
+        }
+      })(),
+    ]);
+    if (next.completed) return;
+    for (const event of next.events) {
+      after = Math.max(after, Number(event?.sequence || 0));
+      if (event?.type !== "session.provider_auth_submitted"
+          || event?.payload?.kind !== "provider_auth_submission"
+          || event?.payload?.authId !== attempt.id) continue;
+      attempt.submit(event.payload.envelope);
+      await attempt.completion;
+      return;
+    }
+    await sleep(750);
+  }
+}
+
+function providerAuthenticationFailure(value) {
+  return /authentication_failed|login expired|failed to authenticate|oauth access token.*revoked|not logged in|please run \/login/i
+    .test(String(value?.message || value || ""));
+}
+
+export async function ensureAgentRunProviderAuthentication({
+  client,
+  provider,
+  input,
+  force = false,
+  inspect,
+  begin,
+} = {}) {
+  const sessionId = String(input?.agentSessionId || "");
+  if (!sessionId || !["claude", "codex"].includes(provider)) return false;
+  let providerAuth;
+  if (!begin || (!force && !inspect)) providerAuth = await import("./provider-auth.js");
+  const inspectAuth = inspect || providerAuth?.providerAuthStatus;
+  const beginAuth = begin || providerAuth?.beginRemoteProviderAuth;
+  if (!force) {
+    try {
+      if ((await inspectAuth(provider)).connected) return false;
+    } catch {
+      // A status probe can fail on a provider version skew. Let the real run
+      // establish whether authentication is actually required.
+      return false;
+    }
+  }
+  const auth = beginAuth(provider);
+  try {
+    const challenge = await auth.challenge;
+    if (!challenge) {
+      await auth.completion;
+      return false;
+    }
+    const published = await appendAgentSessionEvent(client, sessionId, {
+      type:"session.needs_input",
+      visibility:"owner",
+      payload:challenge,
+    }, `provider-auth-required:${challenge.authId}`);
+    const after = Number(published?.session?.lastEventSequence || 0);
+    if (provider === "claude") await waitForClaudeRemoteAuthSubmission(client, sessionId, auth, after);
+    else await auth.completion;
+    await appendAgentSessionEvent(client, sessionId, {
+      type:"session.running",
+      visibility:"owner",
+      payload:{ resumedAfter:"provider_auth", authId:challenge.authId },
+    }, `provider-auth-complete:${challenge.authId}`);
+    return true;
+  } catch (error) {
+    auth.cancel?.();
+    throw error;
+  }
 }
 
 async function executeClaude({ client, claim, target, operation, input, prompt }) {
@@ -626,6 +740,7 @@ async function executeClaude({ client, claim, target, operation, input, prompt }
     await reporter.complete(terminal.completion.body, terminal.completion.body);
   } else {
     const reason = terminal.error || "Claude Code finished without returning a Relay answer";
+    if (providerAuthenticationFailure(reason)) throw new Error(reason);
     // Claude normally completes the owned Relay through its MCP tool. If that
     // happened, finish is an idempotent no-op and confirms the existing result.
     // Otherwise it records the native failure before processClaim stores failed
@@ -993,9 +1108,23 @@ async function processClaim(client, claim, log) {
     const target = claim.target;
     const prompt = operation.kind === "send" ? peerPrompt({ source, target, input }) : String(input.message || "");
     const provider = target?.provider || input.provider;
-    if (provider === "claude") await executeClaude({ client, claim, target, operation, input, prompt });
-    else if (provider === "codex") await executeCodex({ client, claim, target, operation, input, prompt });
-    else throw new Error(`Unsupported provider: ${provider}`);
+    const execute = async () => {
+      if (provider === "claude") await executeClaude({ client, claim, target, operation, input, prompt });
+      else if (provider === "codex") await executeCodex({ client, claim, target, operation, input, prompt });
+      else throw new Error(`Unsupported provider: ${provider}`);
+    };
+    let signedInDuringOperation = false;
+    if (operation.kind === "start" && input.agentRunRelayId) {
+      signedInDuringOperation = await ensureAgentRunProviderAuthentication({ client, provider, input });
+    }
+    try {
+      await execute();
+    } catch (error) {
+      if (!input.agentRunRelayId || signedInDuringOperation || !providerAuthenticationFailure(error)) throw error;
+      await ensureAgentRunProviderAuthentication({ client, provider, input, force:true });
+      signedInDuringOperation = true;
+      await execute();
+    }
   } catch (error) {
     log(`session operation ${operation.id} failed: ${error?.message || error}`);
     const runRelayId = String(operation.input?.agentRunRelayId || "");
@@ -1006,6 +1135,7 @@ async function processClaim(client, claim, log) {
   } finally {
     clearInterval(renewTimer);
     activeOperations.delete(operation.id);
+    operationEvidenceRanks.delete(operation.id);
   }
 }
 
