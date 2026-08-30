@@ -96,8 +96,9 @@ test("a titled letter's tap is the reader in either frame; texts stay inert", ()
     "the click resolves the exact painted message, including a canonical direct row before Sent hydration");
   assert.doesNotMatch(bind, /threadMessages\([^)]*\)\.find/,
     "a click must not rebuild a smaller local-only projection than the one that painted the card");
-  assert.match(bind, /if \(m && m\.textLike && !\(m\.ownedAgent && m\.source\?\.agentSessionId\)\) return;/);
-  assert.match(bind, /m\.ownedAgent && m\.source\?\.agentSessionId[\s\S]*openReader/, "owned-agent text opens only its Work reader");
+  assert.match(bind, /if \(m && m\.textLike && !m\.ownedAgent\) return;/);
+  assert.match(bind, /if \(m && m\.ownedAgent\)[\s\S]*openReader/,
+    "every owned-agent response opens its Work reader even when a legacy projection omitted the session id");
   assert.match(bind, /openReader\(id, m\.direction === "out" \? "sent" : \(m\.request \? "tasks" : "threads"\)\)/);
   assert.doesNotMatch(bind, /expandedMsgIds\.add/);
 });

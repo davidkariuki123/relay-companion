@@ -466,6 +466,13 @@ function peerPrompt({ source, target, input }) {
 const operationEvidenceRanks = new Map();
 const OPERATION_EVIDENCE_RANK = Object.freeze({ handed_off:1, applied:2, completed:3, failed:3 });
 
+export function sessionOperationPrompt(operation, source, target) {
+  const input = operation?.input || {};
+  return operation?.kind === "send" && !input.agentSessionId
+    ? peerPrompt({ source, target, input })
+    : String(input.message || "");
+}
+
 async function evidence(client, operationId, claimToken, state, result = {}, error = undefined) {
   // A provider can discover expired authentication only after its native
   // process starts. When the same claimed operation resumes after mobile
@@ -658,7 +665,6 @@ export async function ensureAgentRunProviderAuthentication({
 
 async function executeClaude({ client, claim, target, operation, input, prompt }) {
   const reporter = agentRunReporter(client, input.agentRunRelayId);
-  reporter.progress("Claude is starting on your laptop.");
   let sessionId = target?.nativeId || randomUUID();
   const cwd = target?.cwd || input.cwd || process.cwd();
   const title = target?.title || input.title || "Relay Claude session";
@@ -756,6 +762,8 @@ async function executeClaude({ client, claim, target, operation, input, prompt }
 
 async function executeCodex({ client, claim, target, operation, input, prompt }) {
   if (target) {
+    const reporter = agentRunReporter(client, input.agentRunRelayId);
+    let finalMessage = "";
     const sessionPath = String(target.nativeRef?.sessionPath || "");
     if (sessionPath) {
       const idle = await waitForCodexIdle(sessionPath, { timeoutMs: 12 * 60 * 60 * 1000, pollMs: 1000 });
@@ -765,7 +773,15 @@ async function executeCodex({ client, claim, target, operation, input, prompt })
     // Resume the native thread through a short-lived background App Server.
     // This appends to the same rollout watched by Codex Desktop without
     // foregrounding Codex or changing the chat the user is looking at.
-    const appServer = new CodexAppServerClient({ command: defaultCodexCommand(), cwd: target.cwd || process.cwd() });
+    const appServer = new CodexAppServerClient({
+      command: defaultCodexCommand(),
+      cwd: target.cwd || process.cwd(),
+      onNotification: (message) => {
+        if (message?.method === "item/completed" && message.params?.item?.type === "agentMessage") {
+          finalMessage = String(message.params.item.text || "").trim() || finalMessage;
+        }
+      },
+    });
     await appServer.start();
     try {
       const full = currentPlacement() === "cloud" || process.env.RELAY_SESSION_FULL_ACCESS === "1";
@@ -809,6 +825,11 @@ async function executeCodex({ client, claim, target, operation, input, prompt })
         );
       } finally {
         clearInterval(renewTimer);
+      }
+      if (input.agentRunRelayId) {
+        const completion = codexRelayCompletion(finalMessage);
+        if (!completion) throw new Error("Codex finished without returning a Relay answer");
+        await reporter.complete(completion.forHuman, completion.forAgent);
       }
       await evidence(client, operation.id, claim.claimToken, "completed", {
         adapter: "codex_app_server_resume",
@@ -875,7 +896,6 @@ async function executeCodex({ client, claim, target, operation, input, prompt })
   let stable = null;
   let nativeThreadId = "";
   let nativeTurnId = "";
-  reporter.progress("Codex is starting on your laptop.");
   const result = await runCodexAppServerOneShot({
     command: defaultCodexCommand(),
     cwd: input.cwd || process.cwd(),
@@ -1106,7 +1126,7 @@ async function processClaim(client, claim, log) {
     const input = operation.input || {};
     const source = await sourceSession(client, operation);
     const target = claim.target;
-    const prompt = operation.kind === "send" ? peerPrompt({ source, target, input }) : String(input.message || "");
+    const prompt = sessionOperationPrompt(operation, source, target);
     const provider = target?.provider || input.provider;
     const execute = async () => {
       if (provider === "claude") await executeClaude({ client, claim, target, operation, input, prompt });

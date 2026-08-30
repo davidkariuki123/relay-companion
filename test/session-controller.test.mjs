@@ -14,6 +14,7 @@ import {
   publishAndFind,
   resolveClaudeBackgroundAgent,
   runSessionDirectoryOnce,
+  sessionOperationPrompt,
   waitForClaudeCompletion,
 } from "../src/session-controller.js";
 
@@ -58,6 +59,29 @@ test("an owned Claude run pauses for the encrypted mobile sign-in response and t
   assert.deepEqual(submitted, envelope);
   assert.deepEqual(appended.map((event) => event.type), ["session.needs_input", "session.running"]);
   assert.equal(appended[0].visibility, "owner");
+});
+
+test("chat-owned Work follow-ups resume with only the unseen human turn", () => {
+  const prompt = sessionOperationPrompt({
+    kind:"send",
+    input:{
+      message:"Only this new human message",
+      agentSessionId:"ras_work",
+      agentRunRelayId:"relay_response",
+      conversationId:"rconv_unused",
+    },
+  }, { id:"source_peer" }, { provider:"codex" });
+  assert.equal(prompt, "Only this new human message");
+  assert.doesNotMatch(prompt, /Relay conversation|another AI session|final turn/i);
+});
+
+test("ordinary AI-to-AI sends retain the peer envelope", () => {
+  const prompt = sessionOperationPrompt({
+    kind:"send",
+    input:{ message:"Peer message", conversationId:"rconv_peer", turnNumber:1, maxTurns:2 },
+  }, { id:"source_peer", title:"Source", provider:"claude" }, { provider:"codex" });
+  assert.match(prompt, /Relay conversation: rconv_peer/);
+  assert.match(prompt, /Peer message/);
 });
 
 test("a remote Slack action materializes the exact Relay instead of inventing a second prompt", async () => {

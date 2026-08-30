@@ -28,7 +28,7 @@ test("chat text bubbles preserve authored line breaks", () => {
   const rule = html.match(/\.th-msg\.text \.th-msg-title \{([^}]+)\}/)?.[1] || "";
   assert.match(rule, /white-space:pre-wrap/);
 
-  assert.match(html, /<span class="th-msg-title">[^\n]*textLike \? linkify\(m\.title\)/);
+  assert.match(html, /<span class="th-msg-title">\$\{agentWorking[\s\S]*?textLike \? linkify\(m\.title\)/);
 });
 
 test("legacy threadTitle stays readable in storage but never reaches the visible pill", () => {
@@ -679,7 +679,8 @@ test("chat composers offer owned laptop agents while human mentions stay group-o
   assert.match(html, /setAttribute\("contenteditable", "false"\)/, "a selected mention behaves as one atomic inline object");
   assert.match(html, /\.th-rich-composer \.th-composer-mention \{[\s\S]*border:1px solid[\s\S]*background:/,
     "the selected full name is visibly enclosed in the composer");
-  assert.match(html, /title:"I'm on it"[\s\S]*agentInvocation:true/, "sending paints the immediate owned-agent response");
+  assert.match(html, /title:"", body:""[\s\S]*agentInvocation:true/,
+    "sending paints the existing owned-agent bubble with no hard-coded status copy");
   assert.match(html, /const savedContact = !currentUser && email[\s\S]*contactsList\.find[\s\S]*const shown = savedContact/,
     "the viewer's saved contact name wins over somebody else's group-roster label");
   const groupMentions = html.slice(html.indexOf("const participantMentions = new Map();"), html.indexOf("let mentionOptions = [", html.indexOf("const participantMentions = new Map();")));
@@ -776,9 +777,11 @@ test("progress-only Relay edits repaint an already-open desktop chat", () => {
 });
 
 test("unfinished owned-agent replies visibly pulse until their final agent payload arrives", () => {
-  assert.match(html, /const agentWorking = m\.ownedAgent && !String\(m\.agent \|\| ""\)\.trim\(\) && !m\.deletedAt/);
+  assert.match(html, /const agentWorking = m\.ownedAgent[\s\S]*!String\(m\.body \|\| ""\)\.trim\(\)[\s\S]*!String\(m\.agent \|\| ""\)\.trim\(\)/);
   assert.match(html, /agentWorking \? " agent-working"/);
   assert.match(html, /agent-working-indicator[\s\S]*agent-working-dot[\s\S]*agent-working-dot[\s\S]*agent-working-dot/);
+  assert.match(html, /<span class="th-msg-title">\$\{agentWorking[\s\S]*agent-working-indicator/,
+    "the loading bubble contains the dots instead of invented prose");
   assert.match(html, /@keyframes agentWorkingPulse/);
   assert.match(html, /prefers-reduced-motion: reduce/);
   assert.match(html, /agentWorking \? ' aria-busy="true"'/);
@@ -950,11 +953,15 @@ test("hand-offs speak in conversation terms: starts vs continues, said BEFORE th
   // The destination whisper under the verb was CUT (David): the button says\n  // where it goes, and the row note says what happened after the tap.\n  assert.match(html, /Reopening the \$\{agentAppName\(\)\} chat that knows this conversation/);
 });
 
-test("every titled bubble opens the reader; quick texts stay inert", () => {
+test("ordinary titled bubbles open the reader while owned-agent bubbles open Work", () => {
   // One document rule in both directions. A quick text has no hidden page;
   // every titled relay does, including the user's own sent relay.
-  assert.match(html, /if \(m && m\.textLike && !\(m\.ownedAgent && m\.source\?\.agentSessionId\)\) return;/);
-  assert.match(html, /data-open-agent-work/, "a compact owned-agent response explicitly opens the canonical Work reader");
+  assert.match(html, /if \(m && m\.textLike && !m\.ownedAgent\) return;/);
+  assert.match(html, /if \(m && m\.ownedAgent\)[\s\S]*openReader\(id, m\.direction === "out" \? "sent" : "threads"\)/,
+    "clicking the owned-agent bubble takes the Work path");
+  assert.match(html, /opened\.source\?\.host === "relay-agent-run"[\s\S]*readerTab = readerWorkVisible \? "work" : "you"/,
+    "the owned-agent reader lands directly on the existing runner face");
+  assert.match(html, /data-open-agent-work/, "the explicit Open Work affordance uses the same path");
   assert.match(html, /openReader\(id, m\.direction === "out" \? "sent" : \(m\.request \? "tasks" : "threads"\)\)/);
   assert.match(html, /const r = readerRow\(readerId\)/);
   assert.doesNotMatch(html, /data-strip-reply/);

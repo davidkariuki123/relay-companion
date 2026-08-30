@@ -2783,6 +2783,7 @@
       <section class="view hidden" id="settingsView"></section>
     </div>
     </div>
+    </div>
   </div>
 
 <script src="./work-ui.js"></script>
@@ -5262,7 +5263,7 @@
     if (!row || isTaskRow(row)) return row ? taskBoardState(row.id) : "idle";
     const local = taskLocal.get(String(row.id));
     if (local === "running" || local === "done" || local === "stopped") return local;
-    if (row.source?.host === "relay-agent-run" && row.source?.agentSessionId) return "running";
+    if (row.source?.host === "relay-agent-run") return "running";
     if (row.runLive) return "running";
     if (row.workCompletedAt) return "done";
     if (row.workStartedAt) return "stopped";
@@ -6654,7 +6655,7 @@
   function relayWorkDockHtml(r, { inline = false } = {}) {
     const state = relayWorkState(r);
     const draft = String(requestWorkDrafts.get(String(r.id)) || "");
-    const taggedWork = r.source?.host === "relay-agent-run" && Boolean(r.source?.agentSessionId);
+    const taggedWork = r.source?.host === "relay-agent-run";
     const hasSession = taggedWork || requestHasNativeSession(r);
     if (state !== "idle" && (hasSession || state === "running")) {
       const live = state === "running";
@@ -7321,7 +7322,11 @@
     readerId = id;
     const opened = readerRow(id);
     const openedState = opened ? relayWorkState(opened) : "idle";
-    readerWorkVisible = Boolean(opened && (workProviderPrompts.has(String(id)) || !["idle", "waiting", "parked"].includes(openedState)));
+    readerWorkVisible = Boolean(opened && (
+      opened.source?.host === "relay-agent-run"
+      || workProviderPrompts.has(String(id))
+      || !["idle", "waiting", "parked"].includes(openedState)
+    ));
     readerTab = readerWorkVisible ? "work" : "you";
     // Remember the WHOLE place, not just the view: a room is a person, so
     // coming back without the party hint (or without the split) left the rail
@@ -7548,7 +7553,7 @@
     if (!r) { readerBodyEl.innerHTML = '<div class="cv-empty">This relay is gone.</div>'; return; }
     const request = isTaskRow(r);
     const sender = relaySender(r);
-    const chatOwnedWork = r.source?.host === "relay-agent-run" && Boolean(r.source?.agentSessionId);
+    const chatOwnedWork = r.source?.host === "relay-agent-run";
     const triggerRow = chatOwnedWork && r.inReplyToRelayId ? relayById(r.inReplyToRelayId) : null;
     const subject = chatOwnedWork && triggerRow
       ? (String(triggerRow.forHuman || "").trim() || relaySubject(triggerRow))
@@ -11833,7 +11838,10 @@
       // A quick TEXT (title derived from its own body) speaks in the body
       // voice — sans, message-toned; a titled relay keeps the serif subject.
       const textLike = m.textLike;
-      const agentWorking = m.ownedAgent && !String(m.agent || "").trim() && !m.deletedAt;
+      const agentWorking = m.ownedAgent
+        && !String(m.body || "").trim()
+        && !String(m.agent || "").trim()
+        && !m.deletedAt;
       const editingMessage = messageEditDrafts.has(m.id);
       const editDraft = editingMessage ? messageEditDrafts.get(m.id) : "";
       const hasHostActions = !textLike && !m.request;
@@ -11875,7 +11883,9 @@
               <button type="button" data-message-edit-save="${esc(m.id)}"${messageMutationIds.has(m.id) ? " disabled" : ""}>Save</button>
             </div>
           </div>` : `
-          <span class="th-msg-title">${m.request ? '<span class="kchip">Task</span>' : ""}${textLike ? linkify(m.title) : esc(m.title)}${agentWorking ? '<span class="agent-working-indicator" aria-hidden="true"><span class="agent-working-dot"></span><span class="agent-working-dot"></span><span class="agent-working-dot"></span></span>' : ""}${textLike ? "" : `<span class="th-more">${open ? "‹" : "›"}</span>`}${m.editedAt && !m.deletedAt ? '<span class="th-edited">edited</span>' : ""}</span><span class="th-blk-time">${esc(timeAgo(m.at))}</span>
+          <span class="th-msg-title">${agentWorking
+            ? '<span class="agent-working-indicator" aria-hidden="true"><span class="agent-working-dot"></span><span class="agent-working-dot"></span><span class="agent-working-dot"></span></span>'
+            : `${m.request ? '<span class="kchip">Task</span>' : ""}${textLike ? linkify(m.title) : esc(m.title)}${textLike ? "" : `<span class="th-more">${open ? "‹" : "›"}</span>`}${m.editedAt && !m.deletedAt ? '<span class="th-edited">edited</span>' : ""}`}</span><span class="th-blk-time">${esc(timeAgo(m.at))}</span>
 
           ${!textLike && !open && !inlineBody && m.preview ? `<span class="th-preview">${esc(m.preview)}</span>` : ""}
           ${!textLike && !open && inlineBody ? `<div class="th-body" data-stop="0">${readerParagraphs(m.body)}</div>` : ""}
@@ -11896,7 +11906,7 @@
         const receipt = receiptFor(m, msgs);
         const bits = [];
         const settleReceipt = receipt && (receipt.label === "Sent" || receipt.label === "Delivered") ? " th-settling" : "";
-        if (m.ownedAgent && m.source?.agentSessionId) {
+        if (m.ownedAgent) {
           bits.push(`<button type="button" class="th-reply-ghost" data-open-agent-work="${esc(m.id)}" data-stop="1">Open Work</button>`);
         } else if (!m.request && !groupPostingBlocked) {
           bits.push(`<button type="button" class="th-reply-ghost" data-reply-to="${esc(m.id)}" data-stop="1">reply</button>`);
@@ -12378,7 +12388,7 @@
           optimisticChatReplies.set(`${idempotencyKey}:agent:${provider}`, {
             id:`optimistic-agent:${idempotencyKey}:${provider}`, relayId:"", threadId:sendAnchor.threadId || thread.threadId,
             inReplyToRelayId:optimisticId, direction:"out", seen:false, seenAt:null, readReceipts:[],
-            title:"I'm on it", body:"I'm on it", party:provider === "claude" ? "Claude" : "Codex",
+            title:"", body:"", party:provider === "claude" ? "Claude" : "Codex",
             partyKey:sendAnchor.partyKey || thread.partyKey || "", at:new Date(Date.now() + index + 1).toISOString(), isGroup:Boolean(sendAnchor.isGroup || thread.isGroup),
             groupName:sendAnchor.groupName || thread.groupName || "", unread:false, textLike:true, request:false, pending:true,
             source:{ host:"relay-agent-run", surface:provider === "claude" ? "claude_code" : "codex" }, ownedAgent:true, agentInvocation:true,
@@ -12540,8 +12550,8 @@
         const m = messageById.get(String(id));
         // Plain text is INERT (David): selectable, its links clickable, no
         // navigation hiding under it — Reply is a deliberate hover affordance.
-        if (m && m.textLike && !(m.ownedAgent && m.source?.agentSessionId)) return;
-        if (m && m.ownedAgent && m.source?.agentSessionId) {
+        if (m && m.textLike && !m.ownedAgent) return;
+        if (m && m.ownedAgent) {
           openReader(id, m.direction === "out" ? "sent" : "threads");
           return;
         }
