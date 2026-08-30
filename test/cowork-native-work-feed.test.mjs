@@ -185,7 +185,7 @@ test("paged Cowork refresh is non-overlapping, bounded and never invents text de
   const stop = subscribeManagedProviderRefresh(async () => {
     calls += 1;
     await gate;
-    return { events: Array.from({ length: 20 }, (_, index) => ({ method: "provider/page", eventId: `page-${index}` })) };
+    return { events: Array.from({ length: calls > 1 ? 21 : 20 }, (_, index) => ({ method: "provider/page", eventId: `page-${index}` })) };
   }, (event) => seen.push(event), {
     maxEventsPerRefresh: 5,
     setTimer: (fn) => { callback = fn; return 4; },
@@ -197,6 +197,10 @@ test("paged Cowork refresh is non-overlapping, bounded and never invents text de
   release();
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(seen.map((event) => event.eventId), ["page-15", "page-16", "page-17", "page-18", "page-19"]);
+  void callback?.();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(seen.map((event) => event.eventId), ["page-15", "page-16", "page-17", "page-18", "page-19", "page-20"],
+    "overlapping refresh pages emit only genuinely new canonical events");
   assert.equal(seen.some((event) => /delta/i.test(event.method)), false);
   stop();
 });

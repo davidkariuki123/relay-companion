@@ -443,7 +443,13 @@ function normalizeItem(raw, lifecycle, timestamp, pending = {}) {
   };
   if (type === "userMessage" || type === "hookPrompt") {
     item.role = "user";
-    item.text = visibleWorkUserText(itemText(raw) || pending.text);
+    // The visible user message is a first-class transport field. Provider
+    // prompts may also contain titles, Relay documents and runtime contracts;
+    // those bytes are context for the model and are never a source of UI text.
+    item.text = Object.hasOwn(raw || {}, "displayText")
+      ? text(raw.displayText)
+      : visibleWorkUserText(itemText(raw) || pending.text);
+    item.clientMessageId = text(raw?.clientMessageId || raw?.clientId).trim() || null;
   } else if (type === "agentMessage") {
     item.role = "assistant";
     item.phase = raw.phase || null;
@@ -474,10 +480,12 @@ function normalizeItem(raw, lifecycle, timestamp, pending = {}) {
 
 function optimisticMatch(turn, raw) {
   if (raw?.type !== "userMessage") return null;
+  const clientMessageId = text(raw?.clientMessageId || raw?.clientId).trim();
   const body = visibleWorkUserText(itemText(raw));
   return turn.itemOrder
     .map((id) => turn.items[id])
-    .find((item) => item?.optimistic && ["pending", "accepted"].includes(item.status) && item.text.trim() === body) || null;
+    .find((item) => item?.optimistic && ["pending", "accepted"].includes(item.status)
+      && (clientMessageId ? item.clientId === clientMessageId : item.text.trim() === body)) || null;
 }
 
 function applyItem(turn, event, lifecycle) {
@@ -1077,6 +1085,7 @@ export function turnUnits(turn) {
       text: item.text,
       status: item.status,
       optimistic: Boolean(item.optimistic),
+      clientMessageId: item.clientMessageId || item.clientId || null,
       attachments: safeUserAttachments(item.raw),
     });
     else if (item.type === "agentMessage") push({ id, type: "message", side: "left", role: "assistant", phase: item.phase, text: item.text, status: item.status, final: item.phase === "final_answer" });
