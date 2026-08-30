@@ -133,3 +133,30 @@ test("canonical chat hydration preserves owned-agent Work identity in the reader
     "an aged-out Claude bubble must still select the Work face when tapped",
   );
 });
+
+test("an owned-agent Sent twin outranks a stale generic canonical source", () => {
+  const canonical = new Map([["chat_shane", {
+    chatId: "chat_shane",
+    title: "Shane Acton",
+    items: [{
+      relayId: "relay_claude_run",
+      direction: "outbound",
+      title: "Relay",
+      forHuman: "Finished on your laptop.",
+      forAgent: "",
+      createdAt: "2026-08-30T14:00:00.000Z",
+      source: { host: "relay-pill" },
+    }],
+  }]]);
+  const sent = [{
+    relayId: "relay_claude_run",
+    recipient: { name: "Shane Acton", email: "shane@example.com" },
+    source: { host: "relay-agent-run", surface: "claude_code" },
+  }];
+
+  assert.deepEqual(
+    readerFor({ relays: [], sent }, "relay_claude_run", canonical).source,
+    { host: "relay-agent-run", surface: "claude_code" },
+    "the real chat race must open Work even while canonical hydration is stale",
+  );
+});

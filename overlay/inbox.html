@@ -7073,6 +7073,15 @@
       if (!item) continue;
       const outbound = item.direction === "outbound";
       const directAnchor = directContactAnchorForChatId(chat.chatId);
+      const sentTwin = (payload.sent || []).find((row) => String(row.relayId || row.id || "") === String(id || ""));
+      const anchorTwin = (directAnchor?.msgs || []).find((row) => String(row.id || row.relayId || "") === String(id || ""));
+      // The chat endpoint and Sent hydrate independently. During that race the
+      // canonical item can still carry its original generic pill source while
+      // the Sent/room projection already knows this is an owned agent run.
+      // Work identity is stronger than a generic source, so preserve it from
+      // whichever copy has it instead of letting iteration order pick Relay.
+      const ownedAgentSource = [item.source, sentTwin?.source, anchorTwin?.source]
+        .find((source) => source?.host === "relay-agent-run");
       const channelName = directAnchor?.name || chat.channel?.name || chat.title || "Channel";
       return {
         id: item.relayId,
@@ -7092,7 +7101,8 @@
         // the server-owned source there: replacing an owned agent run with the
         // generic pill fallback makes its bubble look like Work in the chat,
         // then open the ordinary Relay reader when tapped.
-        source: item.source || (item.origin === "slack" ? { host:"slack" } : { host:"relay-pill" }),
+        source: ownedAgentSource || item.source || sentTwin?.source || anchorTwin?.source
+          || (item.origin === "slack" ? { host:"slack" } : { host:"relay-pill" }),
         provider: item.provider || (item.origin === "slack" ? { name:"slack" } : null),
         materializedCodex: Boolean(item.materializedCodex),
         materializedClaude: Boolean(item.materializedClaude),
@@ -7122,6 +7132,8 @@
       relayNotificationKind: "plain_relay",
       unread: false,
       outbound: true,
+      source: sent.source || { host:"relay-pill" },
+      provider: sent.provider || null,
       materializedCodex: Boolean(sent.materializedCodex),
       materializedClaude: Boolean(sent.materializedClaude),
       reactions: sent.reactions || { aggregates: [], events: [] },
