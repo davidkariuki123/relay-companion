@@ -16,6 +16,7 @@ import {
 } from "../src/config.js";
 
 const LEGACY_URL = LEGACY_API_URLS[0];
+const LEGACY_DEV_URL = LEGACY_API_URLS[1];
 
 test("release-channel normalization recognizes staging and fails unknown values closed to stable", () => {
   assert.equal(normalizeUpdateChannel("dev"), "dev");
@@ -127,6 +128,26 @@ test("apiUrl repairs a dev-channel install that still points at production", () 
     assert.equal(healed.updateChannel, "dev");
     assert.equal(healed.deviceToken, "dev_keepme");
     assert.deepEqual(healed.user, { id: "usr_dev", name: "Sven" });
+  });
+});
+
+test("apiUrl advances a paired dev install from the retired raw App Runner origin", () => {
+  withConfigEnv(() => {
+    writeConfigObject({
+      apiUrl: LEGACY_DEV_URL,
+      devApiUrl: LEGACY_DEV_URL,
+      updateChannel: "dev",
+      deviceToken: "dev_keepme",
+      user: { id: "usr_dev", name: "David" },
+    });
+
+    assert.equal(apiUrl(), DEFAULT_DEV_API_URL);
+    const healed = readConfig();
+    assert.equal(healed.apiUrl, DEFAULT_DEV_API_URL);
+    assert.equal(healed.devApiUrl, DEFAULT_DEV_API_URL);
+    assert.equal(healed.updateChannel, "dev");
+    assert.equal(healed.deviceToken, "dev_keepme");
+    assert.deepEqual(healed.user, { id: "usr_dev", name: "David" });
   });
 });
 
