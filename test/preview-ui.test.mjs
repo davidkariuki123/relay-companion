@@ -938,8 +938,8 @@ test("ordinary Relay folders address the human, the agent, and local Work separa
     "the startup gap cannot expose a second send");
   assert.match(wiring, /window\.relay\.relayWorkStart\(id,/);
   assert.match(wiring, /const requestedHost = b\.getAttribute\("data-open-in-host"\)/);
-  assert.match(wiring, /openRelayFromUI\(id, "relay", "fresh", host, note\)/,
-    "each persistent Open button targets the app named on that button");
+  assert.match(wiring, /loadSessionPicker\(id, host, relaySubject/,
+    "each persistent Open button opens the exact-session picker for the app named on that button");
   assert.match(reader, /data-open-in-host="codex">Open in Codex[\s\S]*data-open-in-host="claude">Open in Claude Code[\s\S]*id="qrSend">Send/,
     "For you keeps both named Open actions directly beside Send in Codex-first order");
   assert.match(wiring, /readerTab = "work"/);
@@ -1033,7 +1033,7 @@ test("Claude ownership transfers only after settlement and an explicit Open", ()
   assert.match(dock, /state === "running"[\s\S]*disabled aria-disabled="true"[\s\S]*Available when this run finishes/);
   assert.match(dock, /r\.ranOnClaude[\s\S]*data-open-run/);
   assert.match(controls, /window\.relay\.openRunSession\(id\)/);
-  assert.match(controls, /openRelayFromUI\(id, "relay", "fresh", host, note\)/);
+  assert.match(controls, /loadSessionPicker\(id, host, relaySubject/);
   assert.match(main, /ipcMain\.handle\("relay:openRunSession"/);
   assert.match(main, /waitForClaudeDesktopCodeMaterialization/);
   assert.match(main, /worker && !worker\.closed/);

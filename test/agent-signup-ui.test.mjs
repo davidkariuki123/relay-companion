@@ -11,11 +11,12 @@ const main = readFileSync(path.join(ROOT, "overlay/main.cjs"), "utf8");
 const config = readFileSync(path.join(ROOT, "src/config.js"), "utf8");
 const cli = readFileSync(path.join(ROOT, "bin/relay.js"), "utf8");
 
-test("first run is one Google-only in-pill flow with a skippable chat setup page", () => {
+test("first run is one in-pill flow with a skippable chat setup page", () => {
   for (const copy of [
     "Relay is ready for you.",
-    "Continue with Google.",
-    "Relay syncs your Google contacts so your agents can talk to theirs.",
+    "How would you like to continue?",
+    "What’s your email?",
+    "Enter your code.",
     "Finish with Google.",
     "Connect this computer?",
     "Finishing setup…",
@@ -29,9 +30,6 @@ test("first run is one Google-only in-pill flow with a skippable chat setup page
   assert.match(overlay, /const needsSignup = credentialRecovery \|\| payload\.account\?\.paired === false \|\| tutorialPending/);
   assert.match(overlay, /Claude Code and Codex do not need this\./);
   assert.match(overlay, /id="suChatSkip"[\s\S]*Skip for now/);
-  assert.doesNotMatch(overlay, /Continue with email|What’s your email\?|Enter your code\./);
-  assert.doesNotMatch(preload, /installationAuthEmailStart|installationAuthEmailVerify/);
-  assert.doesNotMatch(main, /relay:installationAuthEmailStart|relay:installationAuthEmailVerify/);
 });
 
 test("signup errors are human recovery copy, never raw Electron IPC failures", () => {
@@ -91,12 +89,11 @@ test("a paired credential problem opens recovery and never falls through to firs
   assert.match(cli, /relay setup --restart[\s\S]*Replace a stuck or expired one-time setup approval/);
 });
 
-test("Google signup explains and reports the required contact sync", () => {
-  assert.match(overlay, /allow read-only contact access/);
-  assert.match(overlay, /Google contacts synced/);
-  assert.match(overlay, /google_contacts_required[\s\S]*Finish Google sign-in and allow read-only contact access/);
-  assert.match(preload, /googleContactsStatus/);
-  assert.match(preload, /googleContactsSync/);
+test("email signup keeps a user recoverable when delivery is delayed or filtered", () => {
+  assert.match(overlay, /Check spam if you don’t see it\./);
+  assert.match(overlay, /Send another code/);
+  assert.match(overlay, /suCodeResend[\s\S]*installationAuthEmailStart\(signupEmail\)/);
+  assert.match(overlay, /email_code_cooldown[\s\S]*A code was just sent\. Check your inbox or wait a moment\./);
 });
 
 test("renderer installation IPC is capability-shaped and never exposes credentials", () => {
@@ -106,6 +103,8 @@ test("renderer installation IPC is capability-shaped and never exposes credentia
     "installationAuthResume",
     "installationAuthRestart",
     "installationAuthGoogle",
+    "installationAuthEmailStart",
+    "installationAuthEmailVerify",
     "installationAuthApprove",
     "installationAuthCancel",
     "completeSetupTutorial",
@@ -137,6 +136,6 @@ test("a wrong identity stays human-confirmed and returns to the method chooser b
   assert.ok(overlay.indexOf("Change account") < overlay.indexOf("installationAuthApprove()"));
   assert.match(overlay, /Connect Relay/);
   assert.match(overlay, /Claude Code · Cowork · Codex/);
-  assert.match(overlay, /Google account verified/);
+  assert.match(overlay, /Account verified/);
   assert.match(overlay, /Cancel setup/);
 });

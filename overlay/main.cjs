@@ -446,6 +446,33 @@ function loadRelayModules() {
   return relayModulesPromise;
 }
 
+let sessionRoutingPromise = null;
+function loadSessionRouting() {
+  if (!sessionRoutingPromise) {
+    const directoryUrl = pathToFileURL(path.join(__dirname, "..", "src", "session-directory.js")).href;
+    const deliveryUrl = pathToFileURL(path.join(__dirname, "..", "src", "session-delivery.js")).href;
+    const materializerUrl = pathToFileURL(path.join(__dirname, "..", "src", "materializer.js")).href;
+    const codexInjectUrl = pathToFileURL(path.join(__dirname, "..", "src", "codex-inject.js")).href;
+    sessionRoutingPromise = Promise.all([
+      import(directoryUrl),
+      import(deliveryUrl),
+      import(materializerUrl),
+      import(codexInjectUrl),
+    ])
+      .then(([directory, delivery, materializer, codexInject]) => ({
+        directory,
+        delivery,
+        materializer,
+        codexInject,
+      }))
+      .catch((error) => {
+        sessionRoutingPromise = null;
+        throw error;
+      });
+  }
+  return sessionRoutingPromise;
+}
+
 let e2eeDeviceTrustModulePromise = null;
 function loadE2eeDeviceTrustModule() {
   if (!e2eeDeviceTrustModulePromise) {
@@ -567,8 +594,6 @@ const INSTALLATION_AUTH_IPC_ERROR_CODES = new Set([
   "identity_conflict",
   "identity_not_found",
   "identity_required",
-  "google_required",
-  "google_contacts_required",
   "linux_desktop_disabled",
   "invalid_activation",
   "invalid_email",
@@ -1000,7 +1025,6 @@ function accountInfo() {
     // device credential is not a browser session, and the gateway also checks
     // that an existing browser session belongs to this same Relay account.
     settingsPath: accountSettingsPath(user),
-    contactsPath: `${accountSettingsPath(user)}${accountSettingsPath(user).includes("?") ? "&" : "?"}contacts=google`,
     // Route through the app's OWN sign-in, not Clerk's hosted accounts.<domain>
     // subdomain. Clerk runs here in proxy mode (/__clerk), and the accounts./clerk.
     // hosts present NO certificate — the handshake fails outright, so a signed-out
@@ -3656,6 +3680,118 @@ function repairClaudeHooks(install) {
       console.error("[overlay] claude-hook registration failed:", (result && result.reason) || "unknown");
     }
   });
+}
+
+function preferredSessionProvider() {
+  return new Promise((resolve) => frontmostBundleId((bundle) => {
+    const host = resolveClickHost(bundle);
+    resolve(host === "codex" ? "codex" : "claude");
+  }));
+}
+
+async function focusedNativeSession(provider, routing) {
+  try {
+    if (provider === "codex") {
+      const current = routing.codexInject.resolveCurrentCodexThread();
+      return current ? { nativeId: current.threadId } : null;
+    }
+    const current = claudeInject.findCurrentClaudeSession({
+      homeDir: RELAY_HOME,
+      desktopSessionsDir: claudeDesktopSessionsDir(),
+    });
+    return current ? { nativeId: current.sessionId } : null;
+  } catch {
+    return null;
+  }
+}
+
+async function sessionPicker(packetId, requestedProvider = "") {
+  if (!rowById(packetId)) throw new Error("That Relay is no longer available on this device");
+  const routing = await loadSessionRouting();
+  const provider = ["claude", "codex"].includes(requestedProvider)
+    ? requestedProvider
+    : await preferredSessionProvider();
+  const binding = routing.delivery.relaySessionBinding(packetId);
+  const current = await focusedNativeSession(provider, routing);
+  const destinations = routing.delivery.listRelayDestinations(provider, {
+    currentNativeId: current?.nativeId || "",
+  });
+  return { ok: true, provider, binding, ...destinations };
+}
+
+function nativeIdFromOpenResult(result) {
+  const url = String(result?.url || "");
+  const codex = /^codex:\/\/threads\/([^/?#]+)/.exec(url);
+  if (codex) return decodeURIComponent(codex[1]);
+  const claude = /^claude:\/\/resume\?session=([^&#]+)/.exec(url);
+  return claude ? decodeURIComponent(claude[1]) : "";
+}
+
+async function presentSessionOpen(result, provider, packetId, observedBundle = null) {
+  activateHost(provider, observedBundle);
+  if (!result?.url || result.skipExternalOpen) return;
+  if (claudeSessionIdFromUrl(result.url)) {
+    openClaudeDeepLinkVerified(
+      result.url,
+      () => openPreview(packetId),
+      packetId,
+      { freshlyForged: Boolean(result.claudeFreshlyForged) },
+    );
+    return;
+  }
+  await shell.openExternal(result.url);
+}
+
+async function deliverPacketToSession(packetId, selection = {}) {
+  const row = rowById(packetId);
+  if (!row) throw new Error("That Relay is no longer available on this device");
+  const routing = await loadSessionRouting();
+  const provider = selection.provider === "codex" ? "codex" : "claude";
+  const observedBundle = await new Promise((resolve) => frontmostBundleId(resolve));
+  if (selection.mode === "new") {
+    const previousImportSetting = process.env.RELAY_IMPORT_CLAUDE_DESKTOP;
+    if (provider === "claude") process.env.RELAY_IMPORT_CLAUDE_DESKTOP = "0";
+    let opened;
+    try {
+      opened = await routing.materializer.openRelay({
+        id: packetId,
+        host: provider,
+        forceFresh: true,
+        log: (message) => console.error(`[overlay] ${message}`),
+      });
+    } finally {
+      if (previousImportSetting === undefined) delete process.env.RELAY_IMPORT_CLAUDE_DESKTOP;
+      else process.env.RELAY_IMPORT_CLAUDE_DESKTOP = previousImportSetting;
+    }
+    const nativeId = nativeIdFromOpenResult(opened);
+    if (!nativeId) throw new Error("The new native session did not return an exact session id");
+    routing.delivery.bindRelaySession(packetId, {
+      provider,
+      nativeId,
+      title: row.displayTitle || row.title || "Relay",
+      cwd: opened.cwd || "",
+    }, { adapter: `${provider}_new_session_materialization` });
+    await presentSessionOpen(opened, provider, packetId, observedBundle);
+    ackPacket(packetId);
+    return { ok: true, delivered: true, binding: routing.delivery.relaySessionBinding(packetId), ...opened };
+  }
+  const result = await routing.delivery.deliverRelayToSession({
+    relayId: packetId,
+    target: { provider, nativeId: String(selection.nativeId || "") },
+  });
+  await presentSessionOpen(result, provider, packetId, observedBundle);
+  ackPacket(packetId);
+  return { ok: true, ...result };
+}
+
+async function continuePacketSession(packetId) {
+  const { delivery } = await loadSessionRouting();
+  const binding = delivery.relaySessionBinding(packetId);
+  if (!binding) throw new Error("This Relay is not bound to a native session");
+  const observedBundle = await new Promise((resolve) => frontmostBundleId(resolve));
+  const opened = await delivery.focusSession(binding);
+  await presentSessionOpen(opened, binding.provider, packetId, observedBundle);
+  return { ok: true, binding, ...opened };
 }
 
 // Click-to-open a Relay row. A relay materializes a REAL native agent session
@@ -7494,6 +7630,28 @@ app.on("will-quit", preserveMacTrayPositionForExit);
 // ---- ipc -----------------------------------------------------------------
 
 ipcMain.handle("relay:get", () => buildPayload());
+ipcMain.handle("relay:sessionPicker", async (_event, id, provider) => {
+  try {
+    return await sessionPicker(String(id || ""), String(provider || ""));
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) };
+  }
+});
+ipcMain.handle("relay:deliverToSession", async (_event, id, selection) => {
+  try {
+    return await deliverPacketToSession(String(id || ""), selection || {});
+  } catch (error) {
+    console.error("[overlay] native session delivery failed:", error?.message || error);
+    return { ok: false, error: error?.message || String(error) };
+  }
+});
+ipcMain.handle("relay:continueSession", async (_event, id) => {
+  try {
+    return await continuePacketSession(String(id || ""));
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) };
+  }
+});
 ipcMain.on("relay:open", (_e, id, host) => {
   openPacket(id, { host: String(host || "") }).catch((error) => console.error("[overlay] open failed:", error && error.message));
 });
@@ -8253,19 +8411,6 @@ ipcMain.handle("relay:capabilities", async () => {
   return capabilitiesCache || {};
 });
 ipcMain.handle("relay:contacts", () => readContacts());
-ipcMain.handle("relay:googleContactsStatus", async () => {
-  try { return { ok: true, status: await (await relayClient()).googleContactsStatus() }; }
-  catch (error) { return { ok: false, error: contactErrorText(error, "Could not check Google contacts.") }; }
-});
-ipcMain.handle("relay:googleContactsSync", async () => {
-  try {
-    const status = await (await relayClient()).syncGoogleContacts();
-    await refreshContacts();
-    return { ok: true, status };
-  } catch (error) {
-    return { ok: false, error: contactErrorText(error, "Could not sync Google contacts.") };
-  }
-});
 ipcMain.handle("relay:contactSave", (_e, input) => saveContact(input));
 ipcMain.handle("relay:contactDelete", (_e, input) => deleteContactFromBook(input));
 
@@ -8352,6 +8497,10 @@ ipcMain.handle("relay:installationAuthGoogle", (_event, input = {}) => installat
   (await installationAuthorizationController()).google({
     forceAccountSelection: input?.forceAccountSelection === true,
   })));
+ipcMain.handle("relay:installationAuthEmailStart", (_event, input = {}) => installationAuthorizationIpc(async () =>
+  (await installationAuthorizationController()).emailStart(String(input?.email || ""))));
+ipcMain.handle("relay:installationAuthEmailVerify", (_event, input = {}) => installationAuthorizationIpc(async () =>
+  (await installationAuthorizationController()).emailVerify(String(input?.code || ""))));
 ipcMain.handle("relay:installationAuthApprove", () => installationAuthorizationIpc(async () =>
   (await installationAuthorizationController()).approve()));
 ipcMain.handle("relay:installationAuthCancel", () => installationAuthorizationIpc(async () =>

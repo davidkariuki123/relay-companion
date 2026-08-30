@@ -30,6 +30,9 @@ contextBridge.exposeInMainWorld("relay", {
   // Relay rows
   open: (id, host) => ipcRenderer.send("relay:open", id, host),
   openSent: (id, host) => ipcRenderer.send("relay:openSent", id, host),
+  sessionPicker: (id, provider) => ipcRenderer.invoke("relay:sessionPicker", id, provider),
+  deliverToSession: (id, selection) => ipcRenderer.invoke("relay:deliverToSession", id, selection),
+  continueSession: (id) => ipcRenderer.invoke("relay:continueSession", id),
   // Sent rows get the same open-actions menu as received relays.
   openSentInCurrent: (id, host) => ipcRenderer.send("relay:openSentInCurrent", id, host),
   openSentFresh: (id, host) => ipcRenderer.send("relay:openSentFresh", id, host),
@@ -133,8 +136,6 @@ contextBridge.exposeInMainWorld("relay", {
   // contacts
   capabilities: () => ipcRenderer.invoke("relay:capabilities"),
   contacts: () => ipcRenderer.invoke("relay:contacts"),
-  googleContactsStatus: () => ipcRenderer.invoke("relay:googleContactsStatus"),
-  googleContactsSync: () => ipcRenderer.invoke("relay:googleContactsSync"),
   contactsSearch: (q) => ipcRenderer.invoke("relay:contactsSearch", q),
   // Resolve a contact's canonical conversation for the pill's chat surface.
   openChatWith: (email, name) =>
@@ -185,6 +186,8 @@ contextBridge.exposeInMainWorld("relay", {
   installationAuthGoogle: (options = {}) => ipcRenderer.invoke("relay:installationAuthGoogle", {
     forceAccountSelection: options?.forceAccountSelection === true,
   }),
+  installationAuthEmailStart: (email) => ipcRenderer.invoke("relay:installationAuthEmailStart", { email: String(email || "") }),
+  installationAuthEmailVerify: (code) => ipcRenderer.invoke("relay:installationAuthEmailVerify", { code: String(code || "") }),
   installationAuthApprove: () => ipcRenderer.invoke("relay:installationAuthApprove"),
   // Cancelling abandons the local capability immediately; the unapproved
   // server record carries no identity and expires on its own.

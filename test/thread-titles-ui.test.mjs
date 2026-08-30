@@ -553,6 +553,8 @@ test("specific replies use an attached composer preview and render a source refe
   assert.match(html, /class="th-composer-dock\$\{chatShaped \? " chat-shaped" : ""\}"/);
   assert.match(html, /\.th-composer-dock\.chat-shaped \{ position:sticky; bottom:0; z-index:2; padding-bottom:16px;/);
   assert.match(html, /\.th-composer-dock \{ flex:none; padding:14px 16px 0; background:var\(--bg\); \}/);
+  assert.match(html, /\.scroll\.room-scroll-active \{ padding-bottom:0; \}/);
+  assert.match(html, /scrollEl\.classList\.toggle\("room-scroll-active", activeView === "threads" && Boolean\(threadDetailId\)\)/);
   assert.match(html, /class="qr th-qr col\$\{replyTargetId \? " replying" : ""\}"/);
   assert.match(html, /class="th-reply-target"/);
   assert.match(html, /Replying to \$\{esc\(replyPreviewAuthor\(replyTarget\)\)\}/);

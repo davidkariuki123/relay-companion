@@ -1438,14 +1438,6 @@ export class RelayClient {
     return this.#req("GET", "/v1/contacts");
   }
 
-  googleContactsStatus() {
-    return this.#req("GET", "/v1/google-contacts/status");
-  }
-
-  syncGoogleContacts() {
-    return this.#req("POST", "/v1/google-contacts/sync", {});
-  }
-
   upsertContact({ name, firstName, surname, lastName, email, emails, notes, idempotencyKey }) {
     return this.#req("POST", "/v1/contacts", { name, firstName, surname, lastName, email, emails, notes, idempotencyKey });
   }
