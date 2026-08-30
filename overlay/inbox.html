@@ -7076,7 +7076,12 @@
         unread: !outbound && item.state === "delivered",
         outbound,
         attachments: item.attachments || [],
-        source: item.origin === "slack" ? { host:"slack" } : { host:"relay-pill" },
+        // Canonical chat hydration is the only remaining copy of an older
+        // message once the bounded Inbox/Sent caches roll past it. Preserve
+        // the server-owned source there: replacing an owned agent run with the
+        // generic pill fallback makes its bubble look like Work in the chat,
+        // then open the ordinary Relay reader when tapped.
+        source: item.source || (item.origin === "slack" ? { host:"slack" } : { host:"relay-pill" }),
         provider: item.provider || (item.origin === "slack" ? { name:"slack" } : null),
         materializedCodex: Boolean(item.materializedCodex),
         materializedClaude: Boolean(item.materializedClaude),

@@ -56,7 +56,7 @@ function pillFunction(name) {
   throw new Error(`unbalanced braces in ${name}`);
 }
 
-function readerFor(payload, id) {
+function readerFor(payload, id, canonicalChatDetails = new Map()) {
   const source = `${pillFunction("readerRow")}\n${pillFunction("sentGroupLabel")}\nreturn readerRow(id);`;
   // Only the naming path is under test; the row's other fields come straight
   // off the sent item, so the neighbours it calls are stubbed to their answer.
@@ -64,10 +64,18 @@ function readerFor(payload, id) {
     "payload",
     "id",
     "canonicalChatDetails",
+    "directContactAnchorForChatId",
     "sentRecipient",
     "sentSubject",
     source,
-  )(payload, id, new Map(), (r) => (r.recipient && r.recipient.name) || "Recipient", (r) => r.title || "Relay");
+  )(
+    payload,
+    id,
+    canonicalChatDetails,
+    () => null,
+    (r) => (r.recipient && r.recipient.name) || "Recipient",
+    (r) => r.title || "Relay",
+  );
 }
 
 const GROUP_SEND = [
@@ -102,4 +110,26 @@ test("a one-to-one send still names the person", () => {
     sent: [{ relayId: "r_solo", recipient: { name: "Shane Acton", email: "shane@example.com" }, title: "Ping" }],
   };
   assert.equal(readerFor(payload, "r_solo").senderName, "You → Shane Acton");
+});
+
+test("canonical chat hydration preserves owned-agent Work identity in the reader", () => {
+  const canonical = new Map([["chat_shane", {
+    chatId: "chat_shane",
+    title: "Shane Acton",
+    items: [{
+      relayId: "relay_claude_run",
+      direction: "outbound",
+      title: "Relay",
+      forHuman: "Finished on your laptop.",
+      forAgent: "",
+      createdAt: "2026-08-30T14:00:00.000Z",
+      source: { host: "relay-agent-run", surface: "claude_code" },
+    }],
+  }]]);
+
+  assert.deepEqual(
+    readerFor({ relays: [], sent: [] }, "relay_claude_run", canonical).source,
+    { host: "relay-agent-run", surface: "claude_code" },
+    "an aged-out Claude bubble must still select the Work face when tapped",
+  );
 });
