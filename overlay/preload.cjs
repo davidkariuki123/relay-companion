@@ -133,7 +133,7 @@ contextBridge.exposeInMainWorld("relay", {
   capabilities: () => ipcRenderer.invoke("relay:capabilities"),
   contacts: () => ipcRenderer.invoke("relay:contacts"),
   contactsSearch: (q) => ipcRenderer.invoke("relay:contactsSearch", q),
-  // Opening a contact opens the conversation with them, in its own window.
+  // Resolve a contact's canonical conversation for the pill's chat surface.
   openChatWith: (email, name) =>
     ipcRenderer.invoke("relay:openChatWith", { email: String(email || ""), name: String(name || "") }),
   canonicalChat: (chatId, options = {}) => ipcRenderer.invoke("relay:canonicalChat", {

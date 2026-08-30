@@ -2858,6 +2858,7 @@
   // shut on the path that opens a room, so a refusal there would be invisible.
   const cvPeopleErrorEl = document.getElementById("cvPeopleError");
   let cvOpeningKey = null;   // the contact whose room is being resolved right now
+  let cvOpenGeneration = 0;  // every later contact/navigation invalidates an older resolve
   const cvSaveEl = document.getElementById("cvSave");
   const cvCancelEl = document.getElementById("cvCancel");
   const cvDeleteEl = document.getElementById("cvDelete");
@@ -4337,6 +4338,7 @@
   let canonicalChatRequestGeneration = 0;
   const liveCanonicalArrivalIds = new Set();
   const canonicalReadGeneration = new Map();
+  const canonicalReadFailures = new Map();
   // Visibility is deliberately session-only and scoped to both chat and
   // surface. Slack defaults open on its own tab and closed inside Relays;
   // toggling one room never changes any other room or the other surface.
@@ -4444,11 +4446,27 @@
     if (!canonicalChatResultMatchesVisibleProjection(result, { chatId:id, surface })) return false;
     const request = result.canonicalRequest;
     if (!canonicalChatResultIsCurrent(result, id)) return false;
-    const changed = storeCanonicalChatDetail(result.chat, {
+    let changed = storeCanonicalChatDetail(result.chat, {
       markArrivals,
       surface:request?.surface || surface,
       includeSlack:Boolean(request?.includeSlack),
     });
+    const directAnchor = directContactAnchorForChatId(id);
+    if (directAnchor && changed) {
+      const refreshed = directContactRoomAnchor(
+        result.chat,
+        { name:directAnchor.name },
+        directAnchor.addressRecipient?.email || String(directAnchor.partyKey || "").replace(/^email:/, ""),
+        directAnchor.addressRecipient,
+      );
+      refreshed.threadIds = new Set([
+        refreshed.threadId,
+        ...(refreshed.threadIds || []),
+        directAnchor.threadId,
+        ...(directAnchor.threadIds || []),
+      ].filter(Boolean));
+      contactChatAnchors.set(id, refreshed);
+    }
     const reconcile = () => {
       if (activeView !== "threads" || conversationSurface() !== surface) return;
       const currentRoom = chatRoomForThread(threadDetailId, surface);
@@ -4517,7 +4535,7 @@
     return true;
   }
 
-  async function refreshActiveCanonicalChat() {
+  async function refreshActiveCanonicalChat({ readVisible = true } = {}) {
     if (activeCanonicalChatRefresh || !rendererSurfaceActive()) return;
     if (activeView !== "threads" || !threadDetailId) return;
     const room = chatRoomForThread(threadDetailId, conversationSurface());
@@ -4526,7 +4544,8 @@
       return;
     }
     const includeSlack = slackMessagesVisible(room);
-    if (!isSlackIntegratedRoom(room) || !room.chatId || !window.relay.canonicalChat) return;
+    const resolvedDirect = room?.chatId ? directContactAnchorForChatId(room.chatId) : null;
+    if ((!isSlackIntegratedRoom(room) && !resolvedDirect) || !room.chatId || !window.relay.canonicalChat) return;
     const surface = conversationSurface();
     activeCanonicalChatRefresh = requestCanonicalChatDetail(room, surface, { includeSlack });
     try {
@@ -4536,7 +4555,7 @@
         chatId:room.chatId,
         surface,
         markArrivals:true,
-        readVisible:true,
+        readVisible,
       });
     } catch {}
     finally { activeCanonicalChatRefresh = null; }
@@ -4559,6 +4578,11 @@
   const SIGNUP_POLL_STOP_FAILURE = 6;
   let prevRelayIds = new Set();
   let contactsList = [];
+  // Direct chats resolved from People before inbox/Sent hydration finishes.
+  // These anchors keep the canonical conversation inside the pill without
+  // manufacturing a second chat window. Once local message projections arrive
+  // they merge into the same email-keyed conversation below.
+  const contactChatAnchors = new Map();
   let cvEditing = null;
 
   // rows mid-open: id -> click time (or -1 once a stop is scheduled). Kept across re-renders.
@@ -7036,14 +7060,15 @@
       const item = (chat?.items || []).find((row) => String(row.relayId || "") === String(id || ""));
       if (!item) continue;
       const outbound = item.direction === "outbound";
-      const channelName = chat.channel?.name || chat.title || "Channel";
+      const directAnchor = directContactAnchorForChatId(chat.chatId);
+      const channelName = directAnchor?.name || chat.channel?.name || chat.title || "Channel";
       return {
         id: item.relayId,
         title: String(item.title || "Relay"),
         displayTitle: String(item.title || "Relay"),
         forHuman: String(item.forHuman || ""),
         forAgent: String(item.forAgent || ""),
-        senderName: outbound ? `You → ${channelName}` : String(item.sender?.name || "Slack member"),
+        senderName: outbound ? `You → ${channelName}` : String(item.sender?.name || directAnchor?.name || "Relay contact"),
         createdAt: item.createdAt || item.updatedAt,
         threadId: item.threadId || item.relayId,
         relayNotificationKind: "plain_relay",
@@ -9090,10 +9115,13 @@
    * lit tab throughout: the reader is the same room from a different index,
    * not a trip through Relays (David).
    *
-   * A person nobody has written to yet has no local room to open — that one
-   * resolves server-side, in its own window, with the composer ready.
+   * A person nobody has written to yet has no local transcript to open. Resolve
+   * the canonical chat, register it in the same in-pill conversation model,
+   * and open it here with the composer ready.
    */
   function openContactRoom(key) {
+    const openGeneration = ++cvOpenGeneration;
+    cvOpeningKey = null;
     const contact = key ? contactsList.find((item) => contactKey(item) === key) : null;
     if (!contact) return;
     cvPeopleErrorEl.textContent = "";
@@ -9115,18 +9143,17 @@
       if (morphFromList) startReaderMorph("threads");
       return;
     }
-    openContactChat(key);
+    openContactChat(key, openGeneration);
   }
   /**
-   * The conversation with a contact the pill has no transcript for, in its own
-   * window. The window resolves the room server-side and opens whether or not
-   * anything has been said in it, so a contact you have never written to lands
-   * in an empty room with the composer ready.
+   * Resolve a contact conversation that the local inbox/Sent projection has
+   * not produced yet. The existing bridge performs the server lookup; its
+   * result is registered as an in-pill anchor rather than opening Preview.
    *
    * A refusal is written on the LIST, because the list is what was clicked —
    * the card that used to carry it is not open on this path.
    */
-  function openContactChat(key) {
+  function openContactChat(key, openGeneration = ++cvOpenGeneration) {
     const c = key ? contactsList.find((x) => contactKey(x) === key) : null;
     if (!window.relay.openChatWith) { // older main process
       cvPeopleErrorEl.textContent = "That conversation could not be opened.";
@@ -9141,11 +9168,28 @@
     }
     // A failure belongs to the row it came from: by the time a slow one
     // answers, the person may have opened somebody else's.
-    const onThisRow = (message) => { if (cvOpeningKey === key) cvPeopleErrorEl.textContent = message; };
+    const stillCurrent = () => cvOpenGeneration === openGeneration && cvOpeningKey === key && activeView === "contacts";
+    const onThisRow = (message) => { if (stillCurrent()) cvPeopleErrorEl.textContent = message; };
     cvOpeningKey = key;
     Promise.resolve(window.relay.openChatWith(email, c.name || ""))
       .then((res) => {
-        if (res && res.ok === false) onThisRow(res.error || "That conversation could not be opened.");
+        if (!res || res.ok === false || !res.chat || !res.chat.chatId) {
+          onThisRow((res && res.error) || "That conversation could not be opened.");
+          return;
+        }
+        if (!stillCurrent()) return;
+        storeCanonicalChatDetail(res.chat, { surface:"relay" });
+        const anchor = directContactRoomAnchor(res.chat, c, email, res.recipient);
+        contactChatAnchors.set(anchor.chatId, anchor);
+        const resolved = chatSections().people.find((room) =>
+          room.partyKey === anchor.partyKey || room.chatId === anchor.chatId);
+        if (!resolved) {
+          onThisRow("That conversation could not be opened.");
+          return;
+        }
+        const morphFromList = prepareReaderMorph(activeView);
+        openThreadDetail(resolved.threadId, resolved.name || c.name, "contacts", { expanded:true, hydrated:true });
+        if (morphFromList) startReaderMorph("threads");
       })
       .catch(() => onThisRow("That conversation could not be opened."));
   }
@@ -10462,6 +10506,16 @@
         });
       }
     }
+    // A direct conversation resolved from People can precede both the inbox
+    // payload and the lazy Sent cache. Project that canonical snapshot into
+    // the same message list immediately; local rows above win by relay id once
+    // they arrive, so there is never a duplicate or a surface change.
+    for (const anchor of contactChatAnchors.values()) {
+      for (const message of anchor.msgs || []) {
+        if (msgs.some((row) => String(row.id || "") === String(message.id || ""))) continue;
+        msgs.push(message);
+      }
+    }
     const canonicalIds = new Set(msgs.map((message) => String(message.id || "")));
     for (const [key, optimistic] of optimisticChatReplies) {
       if (optimistic.agentInvocation) {
@@ -10582,6 +10636,121 @@
       const byTime = new Date((b.latest && b.latest.at) || 0) - new Date((a.latest && a.latest.at) || 0);
       return byTime || String(a.name || "").localeCompare(String(b.name || ""));
     });
+  }
+  function directContactRoomAnchor(chat, contact, email, resolvedRecipient) {
+    const address = String(email || "").trim().toLowerCase();
+    const name = String((contact && contact.name) || chat?.title || address || "Conversation");
+    const partyKey = `email:${address}`;
+    const recipient = resolvedRecipient && resolvedRecipient.email
+      ? { email:String(resolvedRecipient.email), name:String(resolvedRecipient.name || name) }
+      : { email:address, name };
+    const items = Array.isArray(chat?.items) ? chat.items : [];
+    const msgs = items.map((item) => {
+      const id = String(item?.relayId || "");
+      const mine = item?.direction === "outbound";
+      const body = String(item?.forHuman || "");
+      const agent = String(item?.forAgent || "");
+      const title = String(item?.title || "");
+      const attachments = Array.isArray(item?.attachments) ? item.attachments : [];
+      const textLike = !attachments.length && relayTextLike(body, title, agent);
+      return {
+        id,
+        relayId:id,
+        chatId:String(chat.chatId),
+        threadId:String(item?.threadId || id || `direct-chat:${chat.chatId}`),
+        inReplyToRelayId:String(item?.inReplyToRelayId || ""),
+        direction:mine ? "out" : "in",
+        seen:mine && (item?.readReceipts || []).some((receipt) => receipt && receipt.seen),
+        seenAt:mine ? ((item?.readReceipts || []).find((receipt) => receipt && receipt.readAt)?.readAt || null) : null,
+        delivered:mine && !new Set(["pending", "failed"]).has(String(item?.state || "")),
+        readReceipts:Array.isArray(item?.readReceipts) ? item.readReceipts : [],
+        addressRecipient:recipient,
+        title:textLike ? (body || title || "Message") : (title || "Relay"),
+        party:mine ? "You" : String(item?.sender?.name || name),
+        partyKey,
+        at:item?.createdAt || item?.updatedAt || chat.updatedAt,
+        isGroup:false,
+        groupId:"",
+        groupName:"",
+        unread:!mine && (item?.state === "pending" || item?.state === "delivered"),
+        source:item?.source || null,
+        provider:item?.provider || null,
+        origin:item?.origin || "",
+        updatedAt:item?.updatedAt || item?.createdAt,
+        editedAt:item?.editedAt || null,
+        deletedAt:item?.deletedAt || null,
+        textLike,
+        request:false,
+        body,
+        agent,
+        reactions:item?.reactions || { aggregates:[], events:[] },
+        attachments,
+        preview:textLike ? "" : bodyPreview(body, title, 72),
+        materializedCodex:Boolean(item?.materializedCodex),
+        materializedClaude:Boolean(item?.materializedClaude),
+      };
+    }).filter((message) => message.id)
+      .sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));
+    const threadIds = new Set([
+      ...(Array.isArray(chat?.threadIds) ? chat.threadIds : []),
+      ...msgs.map((message) => message.threadId),
+    ].filter(Boolean).map(String));
+    const latest = msgs[msgs.length - 1] || null;
+    const threadId = `direct-chat:${chat.chatId}`;
+    return {
+      threadId,
+      threadIds,
+      msgs,
+      latest:latest || { id:threadId, at:chat?.updatedAt || "1970-01-01T00:00:00.000Z", title:"No messages yet", direction:"", party:"" },
+      unreadCount:Number(chat?.unreadCount || msgs.filter((message) => message.unread).length),
+      party:name,
+      partyKey,
+      isGroup:false,
+      groupId:"",
+      groupName:"",
+      name,
+      people:[name],
+      setLabel:name,
+      hasActivity:Boolean(latest),
+      chatId:String(chat.chatId),
+      messageCount:Number(chat?.messageCount || msgs.length),
+      addressRecipient:recipient,
+    };
+  }
+  function mergeDirectContactAnchor(existing, anchor) {
+    if (!existing) return { ...anchor, threadIds:new Set(anchor.threadIds), msgs:[...anchor.msgs] };
+    const byId = new Map();
+    for (const message of anchor.msgs || []) byId.set(String(message.id), message);
+    // The local inbox/Sent projection carries the latest delivery/read state;
+    // let it enrich the canonical snapshot returned by the resolve call.
+    for (const message of existing.msgs || []) {
+      const id = String(message.id || "");
+      byId.set(id, byId.has(id) ? { ...byId.get(id), ...message } : message);
+    }
+    const msgs = [...byId.values()].sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));
+    const latest = msgs[msgs.length - 1] || existing.latest || anchor.latest;
+    return {
+      ...existing,
+      ...anchor,
+      // The chat coordinate stays stable while the first send moves from the
+      // local outbox into a server thread. Real thread ids are aliases; they
+      // must not strand the transcript that is already open.
+      threadId:anchor.threadId,
+      threadIds:new Set([
+        anchor.threadId,
+        ...(anchor.threadIds || []),
+        existing.threadId,
+        ...(existing.threadIds || []),
+      ].filter(Boolean)),
+      msgs,
+      latest,
+      unreadCount:Math.max(Number(anchor.unreadCount || 0), Number(existing.unreadCount || 0)),
+      hasActivity:Boolean(msgs.length || existing.hasActivity !== false),
+    };
+  }
+  function directContactAnchorForChatId(chatId) {
+    const id = String(chatId || "");
+    return contactChatAnchors.get(id) || null;
   }
   function slackIntegrationForChat(chat) {
     if (chat?.integration?.provider === "slack") return chat.integration;
@@ -10761,6 +10930,17 @@
       else byParty.set(`chat-id:${projected.chatId}`, projected);
     }
     people = sortConversationRooms([...byParty.values()]);
+    // A direct chat resolved from People is a real main-pill conversation even
+    // before Sent hydration or its first message. Merge it by stable address so
+    // later local rows replace the temporary anchor without changing surfaces.
+    for (const anchor of contactChatAnchors.values()) {
+      const key = stablePartyKey(anchor.partyKey) || anchor.partyKey;
+      const existing = byParty.get(key) || [...byParty.values()].find((room) =>
+        (anchor.chatId && room.chatId === anchor.chatId)
+        || room.partyKey === anchor.partyKey);
+      byParty.set(key, mergeDirectContactAnchor(existing, anchor));
+    }
+    people = sortConversationRooms([...byParty.values()]);
     // Message history is not the registry of rooms. Every saved group belongs
     // in the conversation rail even before its first message; otherwise a new
     // group opens in a detached legacy window and then vanishes from the rail.
@@ -10888,7 +11068,10 @@
     // Hidden Slack is not visible and therefore is never read. Relay-origin
     // canonical rows remain visible and use the Relay surface cursor; a reveal
     // adds Slack rows to that read, while the Slack tab consumes its own cursor.
-    if (isSlackIntegratedRoom(visibleRoom) && visibleRoom.chatId) {
+    const resolvedDirectAnchor = visibleRoom?.chatId
+      ? directContactAnchorForChatId(visibleRoom.chatId)
+      : null;
+    if ((isSlackIntegratedRoom(visibleRoom) || resolvedDirectAnchor) && visibleRoom.chatId) {
       const chatId = String(visibleRoom.chatId);
       const chat = canonicalChatDetails.get(chatId);
       const includeSlack = slackMessagesVisible(visibleRoom);
@@ -10899,7 +11082,10 @@
       if (unreadCanonical.length) {
         const generation = String(unreadCanonical.at(-1)?.relayId || "");
         const generationKey = `${surface}:${chatId}`;
-        const unseenGeneration = canonicalReadGeneration.get(generationKey) !== generation;
+        const failureKey = `${generationKey}:${generation}`;
+        const failure = canonicalReadFailures.get(failureKey);
+        const retryReady = !failure || Date.now() >= Number(failure.retryAfter || 0);
+        const unseenGeneration = canonicalReadGeneration.get(generationKey) !== generation && retryReady;
         if (generation && unseenGeneration) {
           canonicalReadGeneration.set(generationKey, generation);
           // The channel is visibly on screen, so its local projection becomes
@@ -10915,6 +11101,11 @@
               : item),
           };
           canonicalChatDetails.set(chatId, opened);
+          if (resolvedDirectAnchor) {
+            resolvedDirectAnchor.unreadCount = 0;
+            resolvedDirectAnchor.msgs = (resolvedDirectAnchor.msgs || []).map((message) =>
+              message.direction === "in" ? { ...message, unread:false } : message);
+          }
           const projectionKey = canonicalChatDetailProjectionKeys.get(chatId);
           if (projectionKey) canonicalChatFingerprints.set(projectionKey, canonicalChatFingerprint(opened));
           if (surface === "slack") {
@@ -10931,12 +11122,23 @@
             : persistCanonicalChatRead(chatId, readOptions))
             .then((result) => {
               if (!result || result.ok === false) throw new Error(result?.error || "read persistence failed");
+              canonicalReadFailures.delete(failureKey);
             })
             .catch(() => {
               if (canonicalReadGeneration.get(generationKey) === generation) canonicalReadGeneration.delete(generationKey);
               const projectionKey = canonicalChatDetailProjectionKeys.get(chatId);
               if (projectionKey) canonicalChatFingerprints.delete(projectionKey);
-              refreshActiveCanonicalChat();
+              const failures = Number(canonicalReadFailures.get(failureKey)?.attempts || 0) + 1;
+              const retryImmediately = failures === 1;
+              canonicalReadFailures.set(failureKey, {
+                attempts:failures,
+                retryAfter:retryImmediately ? 0 : Date.now() + 5000,
+              });
+              // One immediate retry heals a transient failure. A persistent
+              // outage then restores server truth without recursively posting
+              // forever; the normal poll or later activity retries after the
+              // short cooldown.
+              refreshActiveCanonicalChat({ readVisible:retryImmediately });
             });
         }
       }
@@ -12096,14 +12298,29 @@
               provider:"slack",
             }
           : null;
-        const emptyRoomAnchor = emptyGroupAnchor || emptySlackDirectAnchor;
+        const emptyRelayDirectAnchor = chatRoom && !chatRoom.isGroup
+          && chatRoom.addressRecipient && chatRoom.addressRecipient.email
+          ? {
+              threadId:chatRoom.threadId,
+              party:chatRoom.name,
+              partyKey:chatRoom.partyKey,
+              isGroup:false,
+              groupId:"",
+              groupName:"",
+              chatId:chatRoom.chatId || "",
+              provider:"relay",
+              addressRecipient:chatRoom.addressRecipient,
+            }
+          : null;
+        const emptyRoomAnchor = emptyGroupAnchor || emptySlackDirectAnchor || emptyRelayDirectAnchor;
         const sendAnchor = selectedReplyTarget || addressAnchor || newest || emptyRoomAnchor;
         const inReplyToRelayId = selectedReplyTargetId || String(focusedSlackParent?.id || "");
         const recipient = (addressAnchor && addressAnchor.addressRecipient)
           || (emptyRoomAnchor
-            ? (emptyRoomAnchor.provider === "slack"
+            ? (emptyRoomAnchor.addressRecipient
+              || (emptyRoomAnchor.provider === "slack"
               ? { chatId:emptyRoomAnchor.chatId }
-              : { groupId:emptyRoomAnchor.groupId })
+              : { groupId:emptyRoomAnchor.groupId }))
             : null);
         if (!sendAnchor || (!inReplyToRelayId && !recipient) || !window.relay.sendReply) {
           setRowNote(newest ? newest.id : thread.threadId, "This conversation cannot be replied to yet.", "err");
@@ -12213,7 +12430,7 @@
           optimisticChatReplies.delete(`${idempotencyKey}:agent:codex`);
           chatReplySending.delete(threadStateKey);
           threadComposerDrafts.set(threadStateKey, text);
-          setRowNote(newest.id, (res && res.error) || "Send failed — try again.", "err");
+          setRowNote(newest ? newest.id : (sendAnchor.threadId || thread.threadId), (res && res.error) || "Send failed — try again.", "err");
           thReplySending = false;
           renderThreadDetail();
           // The composer is no longer rebuilt from the draft store, so put
@@ -12316,7 +12533,11 @@
       const id = el.getAttribute("data-msg");
       if (openingIds.has(id)) el.classList.add("opening");
       el.addEventListener("click", () => {
-        const m = threadMessages(threadMessageOptions).find((x) => x.id === id);
+        // Resolve the exact card that was painted. A canonical direct chat can
+        // be visible before inbox/Sent hydration, so rebuilding only the local
+        // projection here made a real two-document Relay look clickable while
+        // its click silently found no message.
+        const m = messageById.get(String(id));
         // Plain text is INERT (David): selectable, its links clickable, no
         // navigation hiding under it — Reply is a deliberate hover affordance.
         if (m && m.textLike && !(m.ownedAgent && m.source?.agentSessionId)) return;
@@ -14147,6 +14368,10 @@
   // second applyView inside renderAll. Scroll is restored in the same task,
   // before Chromium can paint the destination at its default origin.
   function commitNavigation({ outerScrollTop = null } = {}) {
+    if (activeView !== "contacts") {
+      cvOpenGeneration += 1;
+      cvOpeningKey = null;
+    }
     const focused = document.activeElement;
     if (applyView._last && applyView._last !== activeView
       && focused && focused !== document.body && typeof focused.blur === "function") {
@@ -14400,6 +14625,28 @@
   }
 
   let lastPayloadSignature = "";
+  let canonicalAccountIdentity = "";
+  function accountCacheIdentity(account) {
+    if (!account || account.paired === false) return "";
+    const id = String(account.userId || account.id || "").trim().toLowerCase();
+    const email = String(account.email || "").trim().toLowerCase();
+    return id || email;
+  }
+  function clearCanonicalAccountCaches() {
+    cvOpenGeneration += 1;
+    cvOpeningKey = null;
+    contactChatAnchors.clear();
+    canonicalChatDetails.clear();
+    canonicalChatFingerprints.clear();
+    canonicalChatDetailProjectionKeys.clear();
+    canonicalChatHydrations.clear();
+    canonicalChatLatestStartedGeneration.clear();
+    canonicalChatLatestAppliedGeneration.clear();
+    canonicalReadGeneration.clear();
+    canonicalReadFailures.clear();
+    liveCanonicalArrivalIds.clear();
+    activeCanonicalChatRefresh = null;
+  }
   function onPayload(next) {
     if (!next || typeof next !== "object") return;
     if (readerMorphSnapshot) {
@@ -14410,6 +14657,13 @@
       roomViewTransitionDeferredPayload = next;
       return;
     }
+    const incomingAccount = next.account || payload.account;
+    const nextAccountIdentity = accountCacheIdentity(incomingAccount);
+    if ((canonicalAccountIdentity && nextAccountIdentity !== canonicalAccountIdentity)
+      || (!nextAccountIdentity && incomingAccount?.paired === false)) {
+      clearCanonicalAccountCaches();
+    }
+    canonicalAccountIdentity = nextAccountIdentity;
     const incomingRelays = Array.isArray(next.relays) ? next.relays : [];
     const projectedRelays = incomingRelays.map((row) => {
       const id = String((row && row.id) || "");
@@ -14421,7 +14675,7 @@
       return { ...row, unread: false, state: "read" };
     });
     payload = {
-      account: next.account || payload.account,
+      account: incomingAccount,
       ui: next.ui || payload.ui,
       features: next.features || payload.features,
       relays: projectedRelays,
@@ -14437,7 +14691,7 @@
       const surface = conversationSurface();
       const room = chatRoomForThread(threadDetailId, surface);
       const includeSlack = slackMessagesVisible(room);
-      if (isSlackIntegratedRoom(room) && room.chatId) {
+      if ((isSlackIntegratedRoom(room) || directContactAnchorForChatId(room?.chatId)) && room?.chatId) {
         requestCanonicalChatDetail(room, surface, { includeSlack }).then((result) => {
           reconcileCanonicalChatResult(result, {
             chatId:room.chatId,

@@ -92,10 +92,42 @@ test("a titled letter's tap is the reader in either frame; texts stay inert", ()
     html.indexOf('for (const el of thHistoryEl.querySelectorAll(".th-msg"))'),
     html.indexOf("function syncExpandButton"),
   );
+  assert.match(bind, /const m = messageById\.get\(String\(id\)\)/,
+    "the click resolves the exact painted message, including a canonical direct row before Sent hydration");
+  assert.doesNotMatch(bind, /threadMessages\([^)]*\)\.find/,
+    "a click must not rebuild a smaller local-only projection than the one that painted the card");
   assert.match(bind, /if \(m && m\.textLike && !\(m\.ownedAgent && m\.source\?\.agentSessionId\)\) return;/);
   assert.match(bind, /m\.ownedAgent && m\.source\?\.agentSessionId[\s\S]*openReader/, "owned-agent text opens only its Work reader");
   assert.match(bind, /openReader\(id, m\.direction === "out" \? "sent" : \(m\.request \? "tasks" : "threads"\)\)/);
   assert.doesNotMatch(bind, /expandedMsgIds\.add/);
+});
+
+test("the document reader can open a canonical direct Relay before Sent hydrates", () => {
+  const reader = html.slice(html.indexOf("function readerRow(id)"), html.indexOf("const RX_PRIMARY"));
+  const canonicalAt = reader.indexOf("for (const chat of canonicalChatDetails.values())");
+  const sentAt = reader.indexOf("const sent = (payload.sent || [])");
+  assert.ok(canonicalAt >= 0 && canonicalAt < sentAt, "canonical chat detail is consulted before the lazy Sent cache");
+  assert.match(reader, /title: String\(item\.title \|\| "Relay"\)/);
+  assert.match(reader, /forHuman: String\(item\.forHuman \|\| ""\)/);
+  assert.match(reader, /forAgent: String\(item\.forAgent \|\| ""\)/);
+  assert.match(reader, /outbound,/);
+});
+
+test("a failed canonical direct read refreshes the same main-pill chat", () => {
+  const refresh = html.slice(html.indexOf("async function refreshActiveCanonicalChat("), html.indexOf("let signupStage"));
+  assert.match(refresh, /directContactAnchorForChatId\(room\.chatId\)/);
+  assert.match(refresh, /!isSlackIntegratedRoom\(room\) && !resolvedDirect/,
+    "resolved Relay contacts use the canonical refresh path without becoming Slack rooms");
+  const reconcile = html.slice(html.indexOf("function reconcileCanonicalChatResult"), html.indexOf("function syncSlackVisibilityButton"));
+  assert.match(reconcile, /directContactAnchorForChatId\(id\)/);
+  assert.match(reconcile, /contactChatAnchors\.set\(id, refreshed\)/,
+    "fresh server truth rebuilds the direct anchor after an optimistic read rollback");
+  const read = html.slice(html.indexOf("function readVisibleChatRoom()"), html.indexOf('thBackEl.addEventListener("click"'));
+  assert.match(read, /canonicalReadGeneration\.delete\(generationKey\)/);
+  assert.match(read, /const retryImmediately = failures === 1/);
+  assert.match(read, /retryAfter:retryImmediately \? 0 : Date\.now\(\) \+ 5000/);
+  assert.match(read, /refreshActiveCanonicalChat\(\{ readVisible:retryImmediately \}\)/,
+    "one immediate retry is followed by a cooldown and a server-truth refresh without recursion");
 });
 
 test("internal chains and message species never divide a same-sender chat run", () => {

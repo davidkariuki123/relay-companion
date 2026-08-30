@@ -139,8 +139,8 @@ test("Relay and Slack badges and lists consume only their own surface projection
 
 test("an exact-linked Relay room paints first, then hydrates and polls its canonical body", () => {
   const poll = html.slice(
-    html.indexOf("async function refreshActiveCanonicalChat()"),
-    html.indexOf("let signupStage", html.indexOf("async function refreshActiveCanonicalChat()")),
+    html.indexOf("async function refreshActiveCanonicalChat("),
+    html.indexOf("let signupStage", html.indexOf("async function refreshActiveCanonicalChat(")),
   );
   assert.match(poll, /const includeSlack = slackMessagesVisible\(room\)/);
   assert.match(poll, /requestCanonicalChatDetail\(room, surface, \{ includeSlack \}\)/);
@@ -297,8 +297,8 @@ test("canonical responses match the still-visible room, surface, and Slack proje
 
 test("canonical optimistic reads are surface-keyed and update only that surface's summary", () => {
   const read = html.slice(html.indexOf("function readVisibleChatRoom()"), html.indexOf("// Open a conversation INTO"));
-  assert.match(read, /if \(isSlackIntegratedRoom\(visibleRoom\) && visibleRoom\.chatId\)/,
-    "visible canonical Relay rows are read even though Slack-origin rows remain hidden");
+  assert.match(read, /if \(\(isSlackIntegratedRoom\(visibleRoom\) \|\| resolvedDirectAnchor\) && visibleRoom\.chatId\)/,
+    "visible canonical Relay and resolved direct rows share the canonical read path");
   assert.doesNotMatch(read, /isSlackIntegratedRoom\(visibleRoom\) && slackMessagesVisible/,
     "Slack visibility cannot gate reading Relay-origin canonical rows");
   assert.match(read, /const generationKey = `\$\{surface\}:\$\{chatId\}`/);

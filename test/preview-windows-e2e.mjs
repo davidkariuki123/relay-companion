@@ -343,108 +343,48 @@ try {
   }, { label: "close all" });
   check("closing every preview leaves the pill visible", allClosed.visible === true, `pill=${allClosed.visible}`);
 
-  // ---- 10. a CONTACT opens the room, not a message --------------------------
-  // The Contacts tab knows a person and nothing else. Main resolves the room
-  // from their address and opens a window on the conversation itself.
+  // ---- 10. contact resolution never creates a Preview window ----------------
+  // The People renderer now owns ordinary chats. Main resolves the canonical
+  // chat and returns it over the existing bridge; only explicit message
+  // previews belong in this multi-window harness.
   const opened = await evalIn(
     mainConn,
     "global.__relayTest.openChatWith({ email: 'sven@example.com', name: 'Sven Wellmann' })",
     { awaitPromise: true },
   );
-  const roomOpen = await retry(async () => {
-    const s = await evalIn(mainConn, "global.__relayTest.state()");
-    if (s.previews.length !== 1) throw new Error(`previews=${s.previews.length}`);
-    if (!s.previews[0].visible) throw new Error("room not shown yet");
-    return s;
-  }, { label: "contact's room" });
-  check("a contact's address opens a window on their room",
-    opened && opened.ok === true && roomOpen.previews[0].chatId === "chat_room_e2e" && roomOpen.previews[0].relayId === "",
-    `opened=${JSON.stringify(opened)} previews=${JSON.stringify(roomOpen.previews)}`);
-  check("the window carries the person it writes to",
-    roomOpen.previews[0].recipient === "sven@example.com", `previews=${JSON.stringify(roomOpen.previews)}`);
+  const afterContactResolve = await evalIn(mainConn, "global.__relayTest.state()");
+  check("a contact resolution returns the canonical chat to the pill",
+    opened && opened.ok === true && opened.chat.chatId === ROOM.chatId
+      && opened.recipient.email === "sven@example.com",
+    `opened=${JSON.stringify(opened)}`);
+  check("a normal contact chat never creates a Preview window",
+    afterContactResolve.previews.length === 0,
+    `previews=${JSON.stringify(afterContactResolve.previews)}`);
   check("the address is asked for in a body, never in a URL",
     apiCalls.length === 1 && apiCalls[0].method === "POST" && apiCalls[0].url === "/v1/chats/resolve"
       && apiCalls[0].body === '{"email":"sven@example.com"}',
     JSON.stringify(apiCalls));
 
-  // The window that opened is the conversation, painted and named by the card.
-  const roomPages = await previewPages();
-  const roomConn = await connectWs(roomPages[0].webSocketDebuggerUrl);
-  const painted = await retry(async () => {
-    const view = await evalIn(roomConn, `(() => ({
-      atChat: document.getElementById("faces").classList.contains("at-chat"),
-      name: document.getElementById("chatName").textContent,
-      back: document.getElementById("chatBack").classList.contains("gone"),
-      state: document.getElementById("chatState").textContent,
-      composer: document.getElementById("replyInput").disabled,
-    }))()`);
-    if (!view.atChat) throw new Error("not on the conversation face yet");
-    return view;
-  }, { label: "room painted" });
-  roomConn.close();
-  check("it opens IN the conversation, named by the card, with no way back to a message",
-    painted.atChat === true && painted.name === "Sven Wellmann" && painted.back === true,
-    JSON.stringify(painted));
-  check("an empty room can still be written to",
-    painted.composer === false && painted.state === "No messages yet. Write the first one below.",
-    JSON.stringify(painted));
-  // The room was handed over with the window: opening it cost ONE API call, not
-  // one to find the room and a second for the window to read it.
-  check("opening a room reads it once", apiCalls.length === 1, JSON.stringify(apiCalls));
-
-  // Clicking the same contact again raises that window instead of stacking one.
-  await evalIn(mainConn, "global.__relayTest.openChatWith({ email: 'sven@example.com', name: 'Sven Wellmann' })", { awaitPromise: true });
-  await new Promise((r) => setTimeout(r, 700));
-  const afterSecond = await evalIn(mainConn, "global.__relayTest.state()");
-  const roomPagesAgain = await previewPages();
-  check("clicking the same contact twice raises one window, never two",
-    afterSecond.previews.length === 1 && roomPagesAgain.length === 1,
-    `previews=${afterSecond.previews.length} pages=${roomPagesAgain.length}`);
-
-  // ---- 11. a GROUP row opens the room its roster names ----------------------
-  // A group is a NAME for one participant set, so its row opens a room like any
-  // other — beside the person's, not instead of it.
+  // ---- 11. the legacy group-shaped resolver is also data-only ----------------
+  // Saved groups already open directly in the pill; keep this compatibility
+  // seam honest if an older renderer invokes it during an update.
   const groupOpened = await evalIn(
     mainConn,
     "global.__relayTest.openChatWith({ groupId: 'grp_e2e', name: 'Launch crew' })",
     { awaitPromise: true },
   );
-  const bothOpen = await retry(async () => {
-    const s = await evalIn(mainConn, "global.__relayTest.state()");
-    if (s.previews.length !== 2) throw new Error(`previews=${s.previews.length}`);
-    if (!s.previews.every((p) => p.visible)) throw new Error("not all shown yet");
-    return s;
-  }, { label: "the group's room" });
-  const groupRow = bothOpen.previews.find((p) => p.chatId === "chat_group_e2e");
-  check("a group opens its own room, beside the person's",
-    groupOpened && groupOpened.ok === true && Boolean(groupRow) && groupRow.relayId === "",
-    `opened=${JSON.stringify(groupOpened)} previews=${JSON.stringify(bothOpen.previews)}`);
-  // A roster is addressed as a roster: the window carries the group id, so the
-  // first message into an empty room fans out instead of going to one person.
-  check("the window addresses the roster, not a person",
-    groupRow && groupRow.recipient === "grp_e2e", `previews=${JSON.stringify(bothOpen.previews)}`);
+  const afterGroupResolve = await evalIn(mainConn, "global.__relayTest.state()");
+  check("a compatibility group resolution returns its canonical chat and address",
+    groupOpened && groupOpened.ok === true && groupOpened.chat.chatId === GROUP_ROOM.chatId
+      && groupOpened.recipient.groupId === "grp_e2e",
+    `opened=${JSON.stringify(groupOpened)}`);
+  check("group resolution creates no Preview window either",
+    afterGroupResolve.previews.length === 0,
+    `previews=${JSON.stringify(afterGroupResolve.previews)}`);
   const groupAsk = apiCalls[apiCalls.length - 1];
   check("the group is asked for by id, in the same one call",
     groupAsk.method === "POST" && groupAsk.url === "/v1/chats/resolve" && groupAsk.body === '{"groupId":"grp_e2e"}',
     JSON.stringify(groupAsk));
-
-  const groupPage = (await previewPages()).find((p) => p.url.includes("preview.html") && p.id !== roomPages[0].id);
-  const groupConn = await connectWs(groupPage.webSocketDebuggerUrl);
-  const groupPainted = await retry(async () => {
-    const view = await evalIn(groupConn, `(() => ({
-      name: document.getElementById("chatName").textContent,
-      people: document.getElementById("chatPeople").textContent,
-      atChat: document.getElementById("faces").classList.contains("at-chat"),
-    }))()`);
-    if (!view.atChat) throw new Error("not on the conversation face yet");
-    return view;
-  }, { label: "group room painted" });
-  groupConn.close();
-  // A room with more than two people in it says who is in it; a one-to-one does
-  // not, because its heading already names the only other person.
-  check("a group room names the room and who is in it",
-    groupPainted.name === "Launch crew" && groupPainted.people.startsWith("You, "),
-    JSON.stringify(groupPainted));
 
   const errors = childLog.split("\n").filter((l) => /preview-render-gone|preview-preload-error|preview-renderer/.test(l));
   check("no preview renderer crashed or errored", errors.length === 0, errors.slice(0, 3).join(" | "));

@@ -5247,17 +5247,15 @@ function openPreview(packetId) {
 }
 
 /**
- * Open the chat a contact card or a group row names.
+ * Resolve the chat a contact card names for the pill renderer.
  *
- * The Contacts tab knows WHO, never which conversation — so the room is
- * resolved server-side from the address (or from the roster a group names),
- * and it resolves whether or not anything has been said in it: a person you
- * have never written to still has somewhere to write.
- *
- * The window belongs to the ROOM, so every route into it from a card lands in
- * the same window however often it is clicked. Previewing a MESSAGE is still
- * its own window, keyed by that message — the action names a message, and
- * that is what it opens.
+ * A contact click used to create a Preview BrowserWindow whenever the local
+ * inbox/Sent projection had not produced that person's conversation yet.
+ * Preview predates the in-pill two-document reader, so the same real Relay
+ * opened correctly or merely expanded its text depending on this timing race.
+ * Resolve the canonical chat here and return it to the pill instead. The pill
+ * registers one temporary direct-chat anchor and uses its existing room and
+ * reader implementations for both empty and already-active conversations.
  */
 async function openChatWithContact(input) {
   const email = String((input && input.email) || "").trim().toLowerCase();
@@ -5271,7 +5269,7 @@ async function openChatWithContact(input) {
   } catch (error) {
     // The address stays out of the log: nothing else here writes one, and the
     // reason is what a log is for. The pill puts the failure on the card.
-    console.error("[preview] contact chat failed:", error && error.message);
+    console.error("[chat] contact resolution failed:", error && error.message);
     if (groupId && error && error.status === 404) {
       // A group somebody else owns, with nothing in it yet. The member cannot
       // start that conversation — only its owner can — so say that rather than
@@ -5280,39 +5278,16 @@ async function openChatWithContact(input) {
     }
     return { ok: false, error: (error && error.message) || String(error) };
   }
-  const chatId = String((chat && chat.chatId) || "");
-  if (!chatId) return { ok: false, error: "That conversation could not be opened." };
-  const payload = {
-    chatId,
-    // The card's own name wins over the room's: the pill holds what this person
-    // is called in THIS user's contact book (and what they named this group),
-    // while the server can only offer the account name, or the address when
-    // there is no account behind it. One of the two is the name they chose.
-    chatTitle: name || String((chat && chat.title) || "") || email,
-    // No relay was opened to get here, so there is no message face behind this
-    // window: it is the conversation and nothing else. See preview-renderer.js.
-    openFace: "chat",
-  };
-  // Who a first message goes to, when there is nothing in the room to answer.
-  // A group is addressable only by the account that owns the roster — the send
-  // path takes groupId from nobody else — so a member's window carries no
-  // recipient and answers by replying, which is all they can do anyway.
+  if (!String((chat && chat.chatId) || "")) {
+    return { ok: false, error: "That conversation could not be opened." };
+  }
+  // Who a first message goes to when the canonical conversation is empty.
+  // Keep this decision in main, beside the server resolution and the existing
+  // group ownership rule; the renderer receives only the address it may use.
   const recipient = groupId
     ? (chat && chat.group && chat.group.owned ? { groupId } : null)
     : { email, name };
-  const existing = previewEntryFor(chatId);
-  if (!existing) return { ok: Boolean(createPreviewWindow(payload, { recipient, chatSeed: chat })) };
-  // Already open: raise it, and hand it the room as it stands right now rather
-  // than leaving the reader looking at a transcript that stopped when they
-  // last closed the window.
-  existing.payload = payload;
-  existing.recipient = recipient;
-  existing.chatSeed = chat;
-  existing.renderedRelayId = null;
-  existing.payloadVersion += 1;
-  sendPreviewPayload(existing);
-  showPreviewWindow(existing);
-  return { ok: true };
+  return { ok: true, chat, recipient };
 }
 
 function openPreviewExternal(url) {
@@ -7612,8 +7587,8 @@ ipcMain.handle("relay:canonicalChatRead", async (event, input) => {
     return { ok: false, error: (error && error.message) || String(error) };
   }
 });
-// The Contacts tab's chat: only the pill may ask, and it asks by address —
-// the answer is a window on the room those two people share.
+// The People tab's chat: only the pill may ask, and it asks by address. Main
+// returns the canonical conversation to the pill; it never creates Preview.
 ipcMain.handle("relay:openChatWith", (event, input) => {
   if (win && !win.isDestroyed() && event && event.sender !== win.webContents) {
     return { ok: false, error: "Not the pill." };

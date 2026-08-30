@@ -51,6 +51,8 @@ jobs:
           test/credential-store-darwin.integration.test.mjs
           test/account.test.mjs
           test/pill-read-ui.test.mjs
+          test/pill-contact-chat.test.mjs
+          test/room-reading-laws.test.mjs
           test/pill-task-ui.test.mjs
           test/thread-titles-ui.test.mjs
           test/installation-authorization.test.mjs

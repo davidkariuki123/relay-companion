@@ -89,10 +89,12 @@ test("clicking a contact opens the conversation; only Edit opens the card", () =
   assert.match(room, /`email:\$\{String\(email\)\.trim\(\)\.toLowerCase\(\)\}`/);
   // Two known-but-different addresses never merge on a name collision.
   assert.match(room, /if \(stablePartyKey\(room\.partyKey\)\) return false;/);
-  // Nothing said yet: the resolved window is the fallback, not a dead click.
-  assert.match(room, /openContactChat\(key\);/);
+  // Nothing said yet: resolve the canonical chat and register it in the same
+  // main-pill conversation model rather than opening a second renderer.
+  assert.match(room, /const openGeneration = \+\+cvOpenGeneration/);
+  assert.match(room, /openContactChat\(key, openGeneration\);/);
 
-  const opener = between(html, "function openContactChat(key)", "\n  }\n");
+  const opener = between(html, "function openContactChat(key, openGeneration = ++cvOpenGeneration)", "\n  }\n");
   // The address comes from the contact's own book entry — the primary one, the
   // same address a relay to them would go to.
   assert.match(opener, /const email = c \? \(contactEmails\(c\)\[0\] \|\| ""\) : ""/);
@@ -105,8 +107,12 @@ test("clicking a contact opens the conversation; only Edit opens the card", () =
   assert.match(opener, /if \(!window\.relay\.openChatWith\) \{/);
   // A room that will not open says so on the LIST, which is what was clicked:
   // the card that used to carry this is shut on this path.
-  assert.match(opener, /const onThisRow = \(message\) => \{ if \(cvOpeningKey === key\) cvPeopleErrorEl\.textContent = message; \}/);
-  assert.match(opener, /onThisRow\(res\.error \|\| "That conversation could not be opened\."\)/);
+  assert.match(opener, /cvOpenGeneration === openGeneration && cvOpeningKey === key && activeView === "contacts"/);
+  assert.match(opener, /if \(!stillCurrent\(\)\) return;/, "a slow result cannot open the previously clicked person");
+  assert.match(opener, /storeCanonicalChatDetail\(res\.chat, \{ surface:"relay" \}\)/);
+  assert.match(opener, /directContactRoomAnchor\(res\.chat, c, email, res\.recipient\)/);
+  assert.match(opener, /contactChatAnchors\.set\(anchor\.chatId, anchor\)/);
+  assert.match(opener, /openThreadDetail\(resolved\.threadId, resolved\.name \|\| c\.name, "contacts", \{ expanded:true, hydrated:true \}\)/);
   // And the list has somewhere to put it: #cvError lives inside the card.
   assert.match(html, /<div class="cvg-error" id="cvPeopleError"><\/div>\s*\n\s*<div class="cv-list" id="cvList">/);
 });
@@ -186,29 +192,18 @@ test("a Relay-owned channel only its owner can address carries no recipient, and
   assert.match(send, /\? \{ email: String\(carried\.email\) \}/);
 });
 
-test("a contact's chat opens one window per room, seeded with the room main already read", () => {
+test("a contact's canonical chat is returned to the main pill and never creates Preview", () => {
   const opener = between(main, "async function openChatWithContact", "function openPreviewExternal");
   assert.match(opener, /chat = groupId \? await client\.chatForGroup\(groupId\) : await client\.chatWith\(email\)/);
-  // Keyed by the ROOM rather than by anything that was said in it, so the card
-  // always lands in the same window however often it is clicked.
-  assert.match(opener, /const existing = previewEntryFor\(chatId\)/);
-  assert.match(opener, /createPreviewWindow\(payload, \{ recipient, chatSeed: chat \}\)/);
-  // A second click raises what is already open, with the room as it stands now.
-  assert.match(opener, /existing\.chatSeed = chat;[\s\S]*?sendPreviewPayload\(existing\)[\s\S]*?showPreviewWindow\(existing\)/);
-  // No relay was opened to get here: the window is the conversation and nothing
-  // else, and it is named by the card that opened it.
-  assert.match(opener, /openFace: "chat"/);
-  assert.match(opener, /chatTitle: name \|\| String\(\(chat && chat\.title\) \|\| ""\) \|\| email/);
-
-  // The window carries the person; the renderer is never told how to reach them.
-  const createWindow = between(main, "function createPreviewWindow", "function openPreview(");
-  assert.match(createWindow, /recipient,/);
-  assert.match(createWindow, /chatSeed,/);
-  const payloadSend = between(main, "function sendPreviewPayload", "// The lowest cascade offset");
-  assert.doesNotMatch(payloadSend, /recipient|chatSeed/, "neither crosses to the renderer");
+  assert.match(opener, /return \{ ok: true, chat, recipient \};/);
+  assert.doesNotMatch(opener, /createPreviewWindow|previewEntryFor|showPreviewWindow|openFace/);
+  // The existing IPC/preload contract is reused. No new bridge or reader was
+  // introduced merely to move a canonical chat into the correct renderer.
+  assert.match(preload, /openChatWith: \(email, name\) =>/);
+  assert.doesNotMatch(preload, /openResolvedContact|openContactInPill/);
 });
 
-test("a contact's window reads its own room, decided by main and not by the renderer", () => {
+test("an explicit chat-only Preview reads the chat main assigned to that window", () => {
   const loader = between(main, "async function previewChat(entry, threadId)", "/**\n * Send a reply");
   // The seed is the room main already fetched to know which window to open:
   // spent once, so opening a chat does not pay a second round trip to see
@@ -220,15 +215,16 @@ test("a contact's window reads its own room, decided by main and not by the rend
   assert.match(loader, /chatId \? await client\.chat\(chatId\) : await client\.chatForThread\(id\)/);
 });
 
-test("a room opened from a contact card is the conversation and nothing else", () => {
+test("the retained explicit chat-only Preview cannot escape into another face", () => {
   const render = between(previewRenderer, "async function renderContent(next)", "if (!bridge) {");
   assert.match(
     render,
     /chatOnly = Boolean\(text\(row\.chatId\)\) && !text\(row\.relayId\)/,
     "a chat window is one with a room and no message behind it",
   );
-  // It opens IN the conversation, wears the name from the card that opened it,
-  // and offers no way back to a reading face that does not exist.
+  // This compatibility surface still opens IN its assigned conversation and
+  // offers no way back to a reading face that does not exist. People no longer
+  // routes ordinary direct chats here.
   const chatBranch = between(render, "if (chatOnly) {", "chatBackEl.classList.remove(\"gone\")");
   assert.match(chatBranch, /document\.title = `\$\{who\} — Relay`/);
   assert.match(chatBranch, /chatNameEl\.textContent = who/);
@@ -245,7 +241,19 @@ test("a room opened from a contact card is the conversation and nothing else", (
   assert.match(previewRenderer, /if \(face === "chat" && !chatOnly\) showFace\("message"\);\s*\n\s*else bridge\.close\(\);/);
 });
 
-test("an empty room can be written to: the first message is what starts it", () => {
+test("an empty direct chat can be written to from the main pill", () => {
+  const composer = between(html, "const emptyGroupAnchor =", "if (!sendAnchor ||");
+  assert.match(composer, /const emptyRelayDirectAnchor = chatRoom && !chatRoom\.isGroup/);
+  assert.match(composer, /chatRoom\.addressRecipient && chatRoom\.addressRecipient\.email/);
+  assert.match(composer, /emptyGroupAnchor \|\| emptySlackDirectAnchor \|\| emptyRelayDirectAnchor/);
+  assert.match(composer, /emptyRoomAnchor\.addressRecipient/);
+  // The direct address, never a guessed chat id, starts the first message.
+  const anchor = between(html, "function directContactRoomAnchor", "function mergeDirectContactAnchor");
+  assert.match(anchor, /addressRecipient:recipient/);
+  assert.match(anchor, /partyKey = `email:\$\{address\}`/);
+
+  // Explicit Preview windows can still compose in their own supported flows;
+  // ordinary People clicks no longer enter this renderer.
   // With nothing to answer there is no reply target, and the composer would sit
   // disabled in a room whose whole point is to be written in.
   assert.match(previewRenderer, /const hasTarget = Boolean\(replyTargetId\(\)\) \|\| chatOnly;/);
@@ -260,6 +268,37 @@ test("an empty room can be written to: the first message is what starts it", () 
   const send = between(main, "async function sendPreviewReply", "function installActiveSpaceWatcher");
   assert.match(send, /if \(!inReplyToRelayId && !to\) return \{ ok: false, error: "There is nothing here to reply to\." \}/);
   assert.match(send, /\.\.\.\(inReplyToRelayId \? \{ inReplyToRelayId \} : \{\}\)/);
+});
+
+test("a resolved direct chat keeps one identity through hydration and account changes", () => {
+  const merge = between(html, "function mergeDirectContactAnchor", "function directContactAnchorForChatId");
+  assert.match(merge, /return \{\s*\.\.\.existing,\s*\.\.\.anchor,/,
+    "the saved contact identity wins over an outbound-only room named You");
+  assert.match(merge, /threadId:anchor\.threadId/);
+  assert.match(merge, /anchor\.threadId,[\s\S]*?\.\.\.\(existing\.threadIds \|\| \[\]\)/,
+    "the synthetic open coordinate and every later real thread id remain aliases of one room");
+  const lookup = between(html, "function directContactAnchorForChatId", "function slackIntegrationForChat");
+  assert.match(lookup, /return contactChatAnchors\.get\(id\) \|\| null/,
+    "canonical chat id is the one registry key, even if a contact address changes");
+  const reader = between(html, "function readerRow(id)", "const RX_PRIMARY");
+  assert.match(reader, /const directAnchor = directContactAnchorForChatId\(chat\.chatId\)/);
+  assert.match(reader, /directAnchor\?\.name \|\| chat\.channel\?\.name/,
+    "the reader uses the saved contact name for canonical outbound messages");
+
+  const accountCaches = between(html, "function clearCanonicalAccountCaches", "function onPayload(next)");
+  assert.match(accountCaches, /cvOpenGeneration \+= 1/);
+  assert.match(accountCaches, /cvOpeningKey = null/);
+  assert.match(accountCaches, /contactChatAnchors\.clear\(\)/);
+  assert.match(accountCaches, /canonicalChatDetails\.clear\(\)/);
+  const payloadHandler = between(html, "function onPayload(next)", "window.relay.onInbox(onPayload)");
+  assert.match(payloadHandler, /nextAccountIdentity !== canonicalAccountIdentity/);
+  assert.match(payloadHandler, /clearCanonicalAccountCaches\(\)/);
+});
+
+test("an empty direct send failure restores the composer without dereferencing a missing message", () => {
+  const send = between(html, "const doThReply = async () =>", "threadComposerSend = doThReply");
+  assert.doesNotMatch(send, /setRowNote\(newest\.id/);
+  assert.match(send, /setRowNote\(newest \? newest\.id : \(sendAnchor\.threadId \|\| thread\.threadId\)/);
 });
 
 test("two unclaimed links with no address are two rooms, not one", () => {
