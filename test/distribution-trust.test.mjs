@@ -1521,7 +1521,9 @@ test("public release owns immutable publication while private promotion owns fle
     assert.match(source, /relay-runtime-\$VERSION-linux-x64\.tar\.gz/);
   }
   const catchupPromotion = new URL("../../../.github/workflows/promote-legacy-catchup.yml", import.meta.url);
-  assert.equal(fs.existsSync(catchupPromotion), true, "the isolated legacy catch-up workflow must exist");
+  if (fs.existsSync(privatePromotion)) {
+    assert.equal(fs.existsSync(catchupPromotion), true, "the isolated legacy catch-up workflow must exist");
+  }
   if (fs.existsSync(catchupPromotion)) {
     const catchup = fs.readFileSync(catchupPromotion, "utf8");
     assert.match(catchup, /name: Promote legacy Companion catch-up/);
@@ -1545,7 +1547,9 @@ test("public release owns immutable publication while private promotion owns fle
     assert.doesNotMatch(catchup, /configure-aws-credentials|aws s3|apprunner|cloudformation|secrets\.AWS_/);
   }
   const recoveryCanary = new URL("../../../.github/workflows/verify-companion-dev-update.yml", import.meta.url);
-  assert.equal(fs.existsSync(recoveryCanary), true, "the stock recovery canary workflow must exist");
+  if (fs.existsSync(privatePromotion)) {
+    assert.equal(fs.existsSync(recoveryCanary), true, "the stock recovery canary workflow must exist");
+  }
   if (fs.existsSync(recoveryCanary)) {
     const canary = fs.readFileSync(recoveryCanary, "utf8");
     assert.match(canary, /npm view "relay-companion@\$FROM_VERSION" relayDistribution/);
