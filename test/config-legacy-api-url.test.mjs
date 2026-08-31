@@ -6,12 +6,14 @@ import path from "node:path";
 import {
   DEFAULT_API_URL,
   DEFAULT_DEV_API_URL,
+  DEFAULT_DEV_WEB_URL,
   LEGACY_API_URLS,
   apiUrl,
   canonicalizeApiUrl,
   configPath,
   normalizeUpdateChannel,
   readConfig,
+  webUrl,
   writeConfigObject,
 } from "../src/config.js";
 
@@ -135,5 +137,22 @@ test("apiUrl preserves an explicit custom origin on the dev channel", () => {
     writeConfigObject({ apiUrl: "http://localhost:4000", updateChannel: "dev" });
     assert.equal(apiUrl(), "http://localhost:4000");
     assert.equal(readConfig().apiUrl, "http://localhost:4000");
+  });
+});
+
+test("webUrl heals a dev-channel install that still trusts the production website", () => {
+  withConfigEnv(() => {
+    writeConfigObject({
+      apiUrl: DEFAULT_DEV_API_URL,
+      webUrl: "https://sendrelays.com",
+      updateChannel: "dev",
+      deviceToken: "dev_keepme",
+    });
+
+    assert.equal(webUrl(), DEFAULT_DEV_WEB_URL);
+    const healed = readConfig();
+    assert.equal(healed.webUrl, DEFAULT_DEV_WEB_URL);
+    assert.equal(healed.devWebUrl, DEFAULT_DEV_WEB_URL);
+    assert.equal(healed.deviceToken, "dev_keepme");
   });
 });

@@ -51,10 +51,12 @@ export const DEFAULT_WEB_URL = "https://sendrelays.com";
 // server code — the RelayDevApi App Runner service, deployed 2026-08-14.
 // `relay env dev` flips a machine here with no flags.
 export const DEFAULT_DEV_API_URL = "https://dev-api.sendrelays.com";
-// Staging is intentionally dormant until its App Runner service is provisioned.
-// `relay env staging --api https://...` can persist the assigned URL once it
-// exists; a later stock build may bake it here after the endpoint is stable.
-export const DEFAULT_STAGING_API_URL = "";
+export const DEFAULT_DEV_WEB_URL = "https://ujvrds7yxv.us-east-1.awsapprunner.com";
+// Staging now has retained App Runner services. Keep both origins together: the
+// activation page is served by the matching web service and calls its matching
+// API, so mixing either one with sendrelays.com fails the setup trust boundary.
+export const DEFAULT_STAGING_API_URL = "https://cti37jd7vx.us-east-1.awsapprunner.com";
+export const DEFAULT_STAGING_WEB_URL = "https://8epdrqim29.us-east-1.awsapprunner.com";
 
 /**
  * Origins the fleet was pointed at before api.sendrelays.com existed. Every
@@ -406,12 +408,36 @@ export function apiUrl() {
   return resolved;
 }
 
+const attemptedWebUrlHeals = new Set();
+
 export function webUrl() {
-  return (
-    process.env.RELAY_WEB_URL ||
-    readConfig().webUrl ||
-    DEFAULT_WEB_URL
-  ).replace(/\/$/, "");
+  if (process.env.RELAY_WEB_URL) return process.env.RELAY_WEB_URL.replace(/\/+$/, "");
+  const config = readConfig();
+  const stored = String(config.webUrl || DEFAULT_WEB_URL).replace(/\/+$/, "");
+  const channel = normalizeUpdateChannel(process.env.RELAY_UPDATE_CHANNEL || config.updateChannel);
+  const selected = channel === UPDATE_CHANNEL_DEV
+    ? String(config.devWebUrl || DEFAULT_DEV_WEB_URL).replace(/\/+$/, "")
+    : channel === UPDATE_CHANNEL_STAGING
+      ? String(config.stagingWebUrl || DEFAULT_STAGING_WEB_URL).replace(/\/+$/, "")
+      : DEFAULT_WEB_URL;
+  // Heal only the known incoherent production/default value. An explicitly
+  // configured local or test web origin remains authoritative.
+  const resolved = stored === DEFAULT_WEB_URL ? selected : stored;
+  const healKey = `${configPath()}:${stored}->${resolved}`;
+  if (resolved !== stored && !attemptedWebUrlHeals.has(healKey)) {
+    attemptedWebUrlHeals.add(healKey);
+    try {
+      writeConfig({
+        webUrl: resolved,
+        ...(channel === UPDATE_CHANNEL_DEV ? { devWebUrl: resolved } : {}),
+        ...(channel === UPDATE_CHANNEL_STAGING ? { stagingWebUrl: resolved } : {}),
+      });
+    } catch {
+      // The current process still uses the coherent origin; a later process can
+      // retry the durable heal if this disk write was unavailable.
+    }
+  }
+  return resolved;
 }
 
 export function deviceToken() {

@@ -16,7 +16,9 @@ import {
   DEFAULT_API_URL,
   DEFAULT_WEB_URL,
   DEFAULT_DEV_API_URL,
+  DEFAULT_DEV_WEB_URL,
   DEFAULT_STAGING_API_URL,
+  DEFAULT_STAGING_WEB_URL,
   UPDATE_CHANNEL_STABLE,
   UPDATE_CHANNEL_DEV,
   UPDATE_CHANNEL_STAGING,
@@ -1097,8 +1099,8 @@ function cmdEnv(positional = [], flags = {}) {
     return;
   }
   if (target === "prod" || target === "stable") {
-    writeConfig({ apiUrl: DEFAULT_API_URL, updateChannel: UPDATE_CHANNEL_STABLE });
-    console.log(`[relay] env set to prod (api: ${DEFAULT_API_URL}, channel: stable)`);
+    writeConfig({ apiUrl: DEFAULT_API_URL, webUrl: DEFAULT_WEB_URL, updateChannel: UPDATE_CHANNEL_STABLE });
+    console.log(`[relay] env set to prod (api: ${DEFAULT_API_URL}, web: ${DEFAULT_WEB_URL}, channel: stable)`);
     console.log("[relay] note: this does not downgrade the installed build; run `npm i -g relay-companion@latest` to match users exactly");
     return;
   }
@@ -1116,15 +1118,26 @@ function cmdEnv(positional = [], flags = {}) {
     process.exitCode = 1;
     return;
   }
+  const savedWebUrl = isStaging ? cfg.stagingWebUrl : cfg.devWebUrl;
+  const defaultWebUrl = isStaging ? DEFAULT_STAGING_WEB_URL : DEFAULT_DEV_WEB_URL;
+  const selectedWebUrl = String(flags.web || savedWebUrl || defaultWebUrl || "").trim().replace(/\/+$/, "");
+  if (!selectedWebUrl) {
+    console.error(`[relay] the ${target} web URL is not known yet — pass it once: relay env ${target} --web https://<relay-web-${target}-url>`);
+    process.exitCode = 1;
+    return;
+  }
   const selectedChannel = isStaging ? UPDATE_CHANNEL_STAGING : UPDATE_CHANNEL_DEV;
   const savedApiKey = isStaging ? "stagingApiUrl" : "devApiUrl";
+  const savedWebKey = isStaging ? "stagingWebUrl" : "devWebUrl";
   writeConfig({
     apiUrl: selectedApiUrl,
     [savedApiKey]: selectedApiUrl,
+    webUrl: selectedWebUrl,
+    [savedWebKey]: selectedWebUrl,
     updateChannel: selectedChannel,
   });
   const featureNote = isStaging ? "production feature set" : "developer feature set";
-  console.log(`[relay] env set to ${target} (api: ${selectedApiUrl}, channel: ${selectedChannel}) — same account, ${featureNote}`);
+  console.log(`[relay] env set to ${target} (api: ${selectedApiUrl}, web: ${selectedWebUrl}, channel: ${selectedChannel}) — same account, ${featureNote}`);
 }
 
 function cmdUpdateChannel(positional = []) {
