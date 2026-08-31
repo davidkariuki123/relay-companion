@@ -280,7 +280,12 @@ export function resolveTaskOrigin({
     return publicOrigin(resolveClaude(sessionContext.bridgePid, { discover }));
   }
   if (provider === "codex") return publicOrigin(resolveCodex(idempotencyKey));
-  return null;
+  // Codex Desktop can invoke a short-lived Relay MCP server from an exec tool
+  // instead of exposing Relay as a first-class tool. That child process has no
+  // Codex surface metadata, but its unique relay_send idempotency key is already
+  // durably present in exactly one native rollout. Treat that exact match as
+  // provenance rather than dropping the completion wake.
+  return publicOrigin(resolveCodex(idempotencyKey));
 }
 
 export function recordOutboundTaskOrigin({

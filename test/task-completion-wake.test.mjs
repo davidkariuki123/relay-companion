@@ -11,6 +11,7 @@ import {
   readTaskCompletionWakeState,
   recordOutboundTaskOrigin,
   resolveCodexTaskOrigin,
+  resolveTaskOrigin,
   rolloutContainsRelaySend,
 } from "../src/task-completion-wake.js";
 import { readClaudeTranscriptActivity } from "../src/session-directory.js";
@@ -97,6 +98,31 @@ test("Codex origin resolution finds the one rollout carrying the relay_send idem
   assert.equal(origin.nativeId, threadId);
   assert.equal(origin.cwd, "/tmp/project");
   assert.equal(origin.nativeRef.sessionPath, rollout);
+});
+
+test("an unlabeled short-lived MCP process still resolves its exact Codex rollout", () => {
+  const expected = {
+    provider: "codex",
+    nativeId: "11111111-2222-4333-8444-555555555555",
+    cwd: "/tmp/project",
+    title: "",
+    nativeRef: { threadId: "11111111-2222-4333-8444-555555555555", sessionPath: "/tmp/rollout.jsonl" },
+  };
+  let resolvedKey = "";
+
+  const origin = resolveTaskOrigin({
+    idempotencyKey: "deployed-codex-shell-mcp-1",
+    sessionContext: { cwd: "/tmp/project" },
+    sourceBinding: {},
+    surface: "",
+    resolveCodex: (key) => {
+      resolvedKey = key;
+      return expected;
+    },
+  });
+
+  assert.equal(resolvedKey, "deployed-codex-shell-mcp-1");
+  assert.deepEqual(origin, expected);
 });
 
 test("an active Claude origin stays pending, then wakes exactly once after end_turn", async () => {
