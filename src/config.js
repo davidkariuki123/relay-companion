@@ -51,12 +51,14 @@ export const DEFAULT_WEB_URL = "https://sendrelays.com";
 // server code — the RelayDevApi App Runner service, deployed 2026-08-14.
 // `relay env dev` flips a machine here with no flags.
 export const DEFAULT_DEV_API_URL = "https://dev-api.sendrelays.com";
-export const DEFAULT_DEV_WEB_URL = "https://ujvrds7yxv.us-east-1.awsapprunner.com";
-// Staging now has retained App Runner services. Keep both origins together: the
-// activation page is served by the matching web service and calls its matching
-// API, so mixing either one with sendrelays.com fails the setup trust boundary.
+// Staging now has a retained App Runner API. Account activation still belongs
+// to sendrelays.com: the raw staging/dev web services cannot initialize the
+// production Clerk tenant.
 export const DEFAULT_STAGING_API_URL = "https://cti37jd7vx.us-east-1.awsapprunner.com";
-export const DEFAULT_STAGING_WEB_URL = "https://8epdrqim29.us-east-1.awsapprunner.com";
+export const AUTH_INCOMPATIBLE_WEB_URLS = [
+  "https://ujvrds7yxv.us-east-1.awsapprunner.com",
+  "https://8epdrqim29.us-east-1.awsapprunner.com",
+];
 
 /**
  * Origins the fleet was pointed at before api.sendrelays.com existed. Every
@@ -414,26 +416,19 @@ export function webUrl() {
   if (process.env.RELAY_WEB_URL) return process.env.RELAY_WEB_URL.replace(/\/+$/, "");
   const config = readConfig();
   const stored = String(config.webUrl || DEFAULT_WEB_URL).replace(/\/+$/, "");
-  const channel = normalizeUpdateChannel(process.env.RELAY_UPDATE_CHANNEL || config.updateChannel);
-  const selected = channel === UPDATE_CHANNEL_DEV
-    ? String(config.devWebUrl || DEFAULT_DEV_WEB_URL).replace(/\/+$/, "")
-    : channel === UPDATE_CHANNEL_STAGING
-      ? String(config.stagingWebUrl || DEFAULT_STAGING_WEB_URL).replace(/\/+$/, "")
-      : DEFAULT_WEB_URL;
-  // Heal only the known incoherent production/default value. An explicitly
-  // configured local or test web origin remains authoritative.
-  const resolved = stored === DEFAULT_WEB_URL ? selected : stored;
+  const incompatibleOrigins = new Set(AUTH_INCOMPATIBLE_WEB_URLS.map((url) => normalizeOrigin(url)));
+  // 0.1.439 persisted the raw dev/staging reader as the account origin. Those
+  // services can render pages but production Clerk rejects their hostnames, so
+  // setup can never leave its loading state. Heal only those known bad values;
+  // explicit localhost and custom test origins remain authoritative.
+  const resolved = incompatibleOrigins.has(normalizeOrigin(stored)) ? DEFAULT_WEB_URL : stored;
   const healKey = `${configPath()}:${stored}->${resolved}`;
   if (resolved !== stored && !attemptedWebUrlHeals.has(healKey)) {
     attemptedWebUrlHeals.add(healKey);
     try {
-      writeConfig({
-        webUrl: resolved,
-        ...(channel === UPDATE_CHANNEL_DEV ? { devWebUrl: resolved } : {}),
-        ...(channel === UPDATE_CHANNEL_STAGING ? { stagingWebUrl: resolved } : {}),
-      });
+      writeConfig({ webUrl: resolved });
     } catch {
-      // The current process still uses the coherent origin; a later process can
+      // The current process still uses the Clerk-capable origin; a later process can
       // retry the durable heal if this disk write was unavailable.
     }
   }

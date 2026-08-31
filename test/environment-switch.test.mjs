@@ -38,8 +38,7 @@ test("relay env staging atomically selects the staging API and release channel",
   const stored = JSON.parse(fs.readFileSync(path.join(dir, "config.json"), "utf8"));
   assert.equal(stored.apiUrl, "https://staging-api.example.com");
   assert.equal(stored.stagingApiUrl, "https://staging-api.example.com");
-  assert.equal(stored.webUrl, "https://8epdrqim29.us-east-1.awsapprunner.com");
-  assert.equal(stored.stagingWebUrl, stored.webUrl);
+  assert.equal(stored.webUrl, "https://sendrelays.com");
   assert.equal(stored.updateChannel, "staging");
 
   const shown = runRelay(dir, "env");
@@ -48,7 +47,7 @@ test("relay env staging atomically selects the staging API and release channel",
   assert.match(shown.stdout, /update channel: staging/);
 });
 
-test("relay env staging selects the retained staging API and web origins without flags", (t) => {
+test("relay env staging selects the retained staging API and Clerk-capable account origin", (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-staging-env-defaults-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
@@ -56,7 +55,7 @@ test("relay env staging selects the retained staging API and web origins without
   assert.equal(result.status, 0, result.stderr);
   const stored = JSON.parse(fs.readFileSync(path.join(dir, "config.json"), "utf8"));
   assert.equal(stored.apiUrl, "https://cti37jd7vx.us-east-1.awsapprunner.com");
-  assert.equal(stored.webUrl, "https://8epdrqim29.us-east-1.awsapprunner.com");
+  assert.equal(stored.webUrl, "https://sendrelays.com");
   assert.equal(stored.updateChannel, "staging");
 });
 
@@ -72,8 +71,7 @@ test("the legacy update-channel command switches API and release code atomically
   assert.equal(stored.updateChannel, "dev");
   assert.equal(stored.apiUrl, "https://dev-api.sendrelays.com");
   assert.equal(stored.devApiUrl, stored.apiUrl);
-  assert.equal(stored.webUrl, "https://ujvrds7yxv.us-east-1.awsapprunner.com");
-  assert.equal(stored.devWebUrl, stored.webUrl);
+  assert.equal(stored.webUrl, "https://sendrelays.com");
 
   const restored = runRelay(dir, "update-channel", "stable");
   assert.equal(restored.status, 0, restored.stderr);
@@ -99,5 +97,4 @@ test("relay env staging accepts and persists an explicit matching web origin", (
   assert.equal(switched.status, 0, switched.stderr);
   const stored = JSON.parse(fs.readFileSync(path.join(dir, "config.json"), "utf8"));
   assert.equal(stored.webUrl, "https://staging.example.com");
-  assert.equal(stored.stagingWebUrl, "https://staging.example.com");
 });

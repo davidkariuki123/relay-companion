@@ -6,7 +6,6 @@ import path from "node:path";
 import {
   DEFAULT_API_URL,
   DEFAULT_DEV_API_URL,
-  DEFAULT_DEV_WEB_URL,
   LEGACY_API_URLS,
   apiUrl,
   canonicalizeApiUrl,
@@ -140,19 +139,18 @@ test("apiUrl preserves an explicit custom origin on the dev channel", () => {
   });
 });
 
-test("webUrl heals a dev-channel install that still trusts the production website", () => {
+test("webUrl heals the raw dev reader that production Clerk cannot authenticate", () => {
   withConfigEnv(() => {
     writeConfigObject({
       apiUrl: DEFAULT_DEV_API_URL,
-      webUrl: "https://sendrelays.com",
+      webUrl: "https://ujvrds7yxv.us-east-1.awsapprunner.com",
       updateChannel: "dev",
       deviceToken: "dev_keepme",
     });
 
-    assert.equal(webUrl(), DEFAULT_DEV_WEB_URL);
+    assert.equal(webUrl(), "https://sendrelays.com");
     const healed = readConfig();
-    assert.equal(healed.webUrl, DEFAULT_DEV_WEB_URL);
-    assert.equal(healed.devWebUrl, DEFAULT_DEV_WEB_URL);
+    assert.equal(healed.webUrl, "https://sendrelays.com");
     assert.equal(healed.deviceToken, "dev_keepme");
   });
 });

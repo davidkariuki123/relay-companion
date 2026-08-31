@@ -16,9 +16,7 @@ import {
   DEFAULT_API_URL,
   DEFAULT_WEB_URL,
   DEFAULT_DEV_API_URL,
-  DEFAULT_DEV_WEB_URL,
   DEFAULT_STAGING_API_URL,
-  DEFAULT_STAGING_WEB_URL,
   UPDATE_CHANNEL_STABLE,
   UPDATE_CHANNEL_DEV,
   UPDATE_CHANNEL_STAGING,
@@ -1118,22 +1116,18 @@ function cmdEnv(positional = [], flags = {}) {
     process.exitCode = 1;
     return;
   }
-  const savedWebUrl = isStaging ? cfg.stagingWebUrl : cfg.devWebUrl;
-  const defaultWebUrl = isStaging ? DEFAULT_STAGING_WEB_URL : DEFAULT_DEV_WEB_URL;
-  const selectedWebUrl = String(flags.web || savedWebUrl || defaultWebUrl || "").trim().replace(/\/+$/, "");
+  const selectedWebUrl = String(flags.web || DEFAULT_WEB_URL).trim().replace(/\/+$/, "");
   if (!selectedWebUrl) {
-    console.error(`[relay] the ${target} web URL is not known yet — pass it once: relay env ${target} --web https://<relay-web-${target}-url>`);
+    console.error(`[relay] the account web URL is not known — pass it explicitly with --web`);
     process.exitCode = 1;
     return;
   }
   const selectedChannel = isStaging ? UPDATE_CHANNEL_STAGING : UPDATE_CHANNEL_DEV;
   const savedApiKey = isStaging ? "stagingApiUrl" : "devApiUrl";
-  const savedWebKey = isStaging ? "stagingWebUrl" : "devWebUrl";
   writeConfig({
     apiUrl: selectedApiUrl,
     [savedApiKey]: selectedApiUrl,
     webUrl: selectedWebUrl,
-    [savedWebKey]: selectedWebUrl,
     updateChannel: selectedChannel,
   });
   const featureNote = isStaging ? "production feature set" : "developer feature set";
