@@ -7279,8 +7279,12 @@
       onDone("later", id);
     });
   }
-  function requestsWaitingCount() { return taskRows().filter((r) => taskBoardState(r.id) === "waiting").length; }
-  function requestsUnreadCount() { return taskRows().filter((r) => r.unread).length; }
+  // The amber number is Task debt, not unread ink. Completed Tasks may still
+  // be unread inside the collapsed Completed disclosure, but they no longer
+  // make a clear task list claim that work remains.
+  function requestsOutstandingCount() {
+    return taskRows().filter((r) => taskBoardState(r.id) !== "done").length;
+  }
   let chatExpanded = false; // the conversation borrowing the reader's frame (⤢)
   let readerTab = "you"; // which face of the Task folder is open ("you" | "agent" | "work")
   let readerTabSwap = false; // true only for the render caused by a tab switch (drives the pane animation)
@@ -14842,7 +14846,7 @@
       (sum, chat) => sum + Math.max(0, Number(chat?.unreadCount || 0)), 0) : 0);
     markAllReadEl.classList.toggle("gone", activeView !== "relays" || unread === 0);
     markAllReadEl.disabled = unread === 0;
-    setBadge(tasksBadgeEl, requestsUnreadCount());
+    setBadge(tasksBadgeEl, requestsOutstandingCount());
     if (paintSurface) {
       if (activeView === "chat") renderChat();
       if (activeView === "relays") renderRelays();

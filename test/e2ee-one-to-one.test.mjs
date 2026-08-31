@@ -606,6 +606,28 @@ test("threading, edits, deletion, reactions, and read state stay inside encrypte
 
     await encryptE2eeMessage(aliceClient, {
       recipient: {},
+      forHuman: "Edited after Bob read it.",
+      idempotencyKey: "metadata-edit-after-read-1",
+      e2eeEvent: { type: "message.edited", targetRelayId: created.relayId },
+    });
+    process.env.RELAY_CONFIG_DIR = bobRoot;
+    const bobEditedChat = await e2eeChat(bobClient, (await bobClient.e2eeSync()).items, chats.chats[0].chatId);
+    const bobEdited = bobEditedChat.items.find((item) => item.relayId === created.relayId);
+    assert.equal(bobEdited.forHuman, "Edited after Bob read it.");
+    assert.equal(bobEdited.state, "delivered", "an edited revision becomes unread for its recipient");
+
+    await encryptE2eeMessage(bobClient, {
+      recipient: {},
+      forHuman: "",
+      idempotencyKey: "metadata-read-edited-revision-1",
+      e2eeEvent: { type: "receipt.changed", targetRelayId: created.relayId, state: "read" },
+    });
+    process.env.RELAY_CONFIG_DIR = aliceRoot;
+    const rereadAliceChat = await e2eeChat(aliceClient, (await aliceClient.e2eeSync()).items, chats.chats[0].chatId);
+    assert.match(rereadAliceChat.items.find((item) => item.relayId === created.relayId).readAt, /^\d{4}-/);
+
+    await encryptE2eeMessage(aliceClient, {
+      recipient: {},
       forHuman: "",
       idempotencyKey: "metadata-delete-1",
       e2eeEvent: { type: "message.deleted", targetRelayId: created.relayId },

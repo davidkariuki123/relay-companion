@@ -69,6 +69,9 @@ jobs:
           test/tray-position.test.mjs
           test/mac-app-identity.test.mjs
           test/pill-open-flow.test.mjs
+          test/session-routing.test.mjs
+          test/task-completion-wake.test.mjs
+          test/runtime-capabilities.test.mjs
 
   runtime:
     needs: identity

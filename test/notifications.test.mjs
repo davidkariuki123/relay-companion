@@ -168,6 +168,55 @@ test("stagePlainRelayItem writes an ordinary relay row for the existing pill UI"
   assert.equal(packet.delivery.transport, "relay_api");
 });
 
+test("a newly edited revision makes an already-read Relay unread again", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-edited-unread-test-"));
+  const statePath = companionStatePath(dir);
+  const packet = {
+    schemaVersion: 3,
+    id: "relay_edited_1",
+    createdAt: "2026-08-31T08:00:00.000Z",
+    kind: "message",
+    forHuman: "Before",
+    forAgent: "",
+    sender: { name: "Shane" },
+    recipient: { name: "David" },
+    targetSurfaces: [],
+    attachments: [],
+  };
+  stagePlainRelayItem({
+    item: {
+      relayId: packet.id,
+      state: "read",
+      kind: "message",
+      preview: packet.forHuman,
+      sender: packet.sender,
+      createdAt: packet.createdAt,
+      updatedAt: "2026-08-31T08:01:00.000Z",
+    },
+    packet,
+  }, { statePath });
+  assert.equal(JSON.parse(fs.readFileSync(statePath, "utf8")).packets[packet.id].state, "read");
+
+  const editedAt = "2026-08-31T09:00:00.000Z";
+  stagePlainRelayItem({
+    item: {
+      relayId: packet.id,
+      state: "delivered",
+      kind: "message",
+      preview: "After",
+      sender: packet.sender,
+      createdAt: packet.createdAt,
+      updatedAt: editedAt,
+      editedAt,
+    },
+    packet: { ...packet, forHuman: "After", editedAt },
+  }, { statePath });
+  const edited = JSON.parse(fs.readFileSync(statePath, "utf8")).packets[packet.id];
+  assert.equal(edited.state, "unread");
+  assert.equal(edited.forHuman, "After");
+  assert.equal(edited.editedAt, editedAt);
+});
+
 test("an acknowledged history import is staged as read and remains visibly non-runnable", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-history-row-test-"));
   const statePath = companionStatePath(dir);

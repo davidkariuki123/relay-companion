@@ -87,6 +87,11 @@ export async function e2eeOpenedRecords(client, wires) {
         projection.revision = Math.max(projection.revision, value.revision);
         projection.editedAt = value.editedAt;
         projection.updatedAt = value.editedAt;
+        // Receipts describe the revision that existed when they were emitted.
+        // A later authenticated edit is unread until a new receipt follows it.
+        projection.recipientReceiptState = "delivered";
+        delete projection.recipientReadAt;
+        if (root.recipientUserId === identity.userId) projection.localReceiptState = "delivered";
       } else if (value.eventType === "message.deleted" && value.senderUserId === root.senderUserId) {
         projection.revision = Math.max(projection.revision, value.revision);
         projection.deletedAt = value.deletedAt;

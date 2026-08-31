@@ -577,7 +577,7 @@ test("a restarted runner derives its composer provider from the persisted native
 
 test("continued Task and Work composers keep model and thinking pickers wired to follow-ups", () => {
   const continuation = between(inbox, "function continuedRouteFor", "function requestDockHtml");
-  const controls = between(inbox, "function wireRequestControls", "function requestsWaitingCount");
+  const controls = between(inbox, "function wireRequestControls", "function requestsOutstandingCount");
   const steer = between(main, "async function previewTaskSteer", "function installActiveSpaceWatcher");
   assert.match(continuation, /data-route-menu="model"/);
   assert.match(continuation, /data-route-menu="effort"/);
@@ -666,7 +666,7 @@ test("the in-pill runner mirrors Codex's completed-turn structure and stable mot
 test("Claude partial output and the optimistic follow-up are merged into the live feed", () => {
   const feed = between(main, "async function previewTaskSession", "const providerCompletionInflight");
   const optimistic = between(inbox, "function appendOptimisticUserTurn", "function runFeedIsTerminal");
-  const controls = between(inbox, "function wireRequestControls", "function requestsWaitingCount");
+  const controls = between(inbox, "function wireRequestControls", "function requestsOutstandingCount");
   assert.match(feed, /claudeDesktopCodeWorkerSnapshot/);
   assert.match(feed, /taskFollowUpText/);
   assert.match(feed, /snapshot\?\.assistantText/);
@@ -733,7 +733,7 @@ test("a For-you Task reply is optimistic correspondence and remains in the perso
 
 test("Work images reach Codex as attachments and stay visible through reconciliation", () => {
   const files = between(inbox, "async function composerFilePayloads", "function fmtBytes");
-  const controls = between(inbox, "function wireRequestControls", "function requestsWaitingCount");
+  const controls = between(inbox, "function wireRequestControls", "function requestsOutstandingCount");
   const steer = between(main, "async function previewTaskSteer", "function installActiveSpaceWatcher");
   assert.match(files, /window\.relay\.pathForFile/);
   assert.match(files, /contentBase64/);
@@ -750,7 +750,7 @@ test("Work images reach Codex as attachments and stay visible through reconcilia
 });
 
 test("Start is an optimistic transaction and cannot flash the seeded briefing", () => {
-  const controls = between(inbox, "function wireRequestControls", "function requestsWaitingCount");
+  const controls = between(inbox, "function wireRequestControls", "function requestsOutstandingCount");
   const startAt = controls.indexOf("appendOptimisticUserTurn(id, note.trim()");
   const transportAt = controls.indexOf("window.relay.taskStart(id");
   assert.ok(startAt >= 0 && startAt < transportAt);
@@ -850,7 +850,7 @@ test("Work activity uses the installed Codex row grammar without raw argument du
 
 test("Task documents remain in the contents list beside persistent Work throughout a run", () => {
   const reader = between(inbox, "function renderReader()", "// ---------- the Tasks board");
-  const controls = between(inbox, "function wireRequestControls", "function requestsWaitingCount");
+  const controls = between(inbox, "function wireRequestControls", "function requestsOutstandingCount");
   const open = between(inbox, "function openReader", "function closeReader");
 
   // Idle is exactly the two immutable source messages. Their labels describe
@@ -905,7 +905,7 @@ test("Task documents remain in the contents list beside persistent Work througho
 });
 
 test("successful Task launch acknowledgement expires instead of surviving Done", () => {
-  const controls = between(inbox, "function wireRequestControls", "function requestsWaitingCount");
+  const controls = between(inbox, "function wireRequestControls", "function requestsOutstandingCount");
   assert.match(controls, /setRowNote\(id, note \|\| payloads\.files\.length \? `Started on \$\{rt\.app\} — your message went with it\.` : `Started on \$\{rt\.app\}\.`, "ok"\);/);
   assert.match(controls, /Work header owns running\/stopped\/done truth;[^]*fadeRowNoteLater\(id, 3000\);/);
 });
@@ -915,7 +915,7 @@ test("ordinary Relay folders address the human, the agent, and local Work separa
   const sharedIdleDock = between(inbox, "function idleRunDockHtml", "function requestDockHtml");
   const requestDock = between(inbox, "function requestDockHtml", "function relayWorkDockHtml");
   const workDock = between(inbox, "function relayWorkDockHtml", "function requestControlsHtml");
-  const wiring = between(inbox, "function wireRequestControls", "function requestsWaitingCount");
+  const wiring = between(inbox, "function wireRequestControls", "function requestsOutstandingCount");
   const startHandler = between(main, 'ipcMain.handle("relay:relayWorkStart"', "// The session face's feed");
 
   assert.match(reader, /if \(onAgent \|\| onWork\) return relayWorkDockHtml/,
@@ -959,7 +959,7 @@ test("ordinary Relay folders address the human, the agent, and local Work separa
 
 test("Enter queues follow-ups and the queued Steer action uses the active session", () => {
   const dock = between(inbox, "function requestDockHtml", "function requestControlsHtml");
-  const controls = between(inbox, "function wireRequestControls", "function requestsWaitingCount");
+  const controls = between(inbox, "function wireRequestControls", "function requestsOutstandingCount");
   const steer = between(main, "async function previewTaskSteer", "function installActiveSpaceWatcher");
   const nativeSession = between(inbox, "function requestHasNativeSession", "function requestDockHtml");
   assert.match(dock, /canContinueSession/);
@@ -1029,7 +1029,7 @@ test("Start launches the official subscription-authenticated Claude Code CLI wit
 
 test("Claude ownership transfers only after settlement and an explicit Open", () => {
   const dock = between(inbox, "function requestDockHtml", "function requestControlsHtml");
-  const controls = between(inbox, "function wireRequestControls", "function requestsWaitingCount");
+  const controls = between(inbox, "function wireRequestControls", "function requestsOutstandingCount");
   assert.match(dock, /state === "running"[\s\S]*disabled aria-disabled="true"[\s\S]*Available when this run finishes/);
   assert.match(dock, /r\.ranOnClaude[\s\S]*data-open-run/);
   assert.match(controls, /window\.relay\.openRunSession\(id\)/);
@@ -1083,7 +1083,7 @@ test("Cowork Start owns a remote session, feed, Steer, and honest terminal state
   const mirror = between(inbox, "function startRunFeed", "function syncRunMirrors");
   assert.match(mirror, /runFeedIsTerminal\(feed\)/);
   assert.match(mirror, /taskLocal\.set\(key, "stopped"\)/);
-  const controls = between(inbox, "function wireRequestControls", "function requestsWaitingCount");
+  const controls = between(inbox, "function wireRequestControls", "function requestsOutstandingCount");
   assert.match(controls, /appendOptimisticUserTurn\(id, note[^]*preserveHistory: false/);
 });
 
@@ -1122,7 +1122,7 @@ test("an unconnected Task stays truthful and offers the two native providers inl
   assert.match(inbox, /window\.relay\.providerAuthConnect\(provider\)/);
   assert.match(inbox, /chooseConnectedWorkProvider\(id, provider\)/);
 
-  const controls = between(inbox, "function wireRequestControls", "function requestsWaitingCount");
+  const controls = between(inbox, "function wireRequestControls", "function requestsOutstandingCount");
   const readinessAt = controls.indexOf("providerReadyBeforeStart(id, rt.app)");
   const optimisticAt = controls.indexOf("appendOptimisticUserTurn(id, note.trim()");
   assert.ok(readinessAt > -1 && optimisticAt > readinessAt, "auth choice precedes any optimistic running state");

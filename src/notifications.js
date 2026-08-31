@@ -566,7 +566,8 @@ export function stagePlainRelayItem(
   };
   const contentPath = writeNotificationPacketContent({ id: item.relayId }, content, statePath);
   const preserveSetupUnread = existing.setupImportedUnread === true && existing.state === "unread";
-  const readState = forceUnread || preserveSetupUnread
+  const editedRevision = Boolean(existing.id && item.editedAt && item.editedAt !== existing.editedAt);
+  const readState = forceUnread || preserveSetupUnread || editedRevision
     ? "unread"
     : existing.state === "read" || item.state === "read" || item.state === "acknowledged"
       ? "read"

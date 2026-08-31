@@ -1487,6 +1487,9 @@ test("public release owns immutable publication while private promotion owns fle
   assert.match(publish, /s3api put-object/);
   assert.match(publish, /--if-none-match '\*'/);
   assert.match(publish, /npm publish .*--provenance/);
+  assert.match(publish, /test\/session-routing\.test\.mjs/);
+  assert.match(publish, /test\/task-completion-wake\.test\.mjs/);
+  assert.match(publish, /test\/runtime-capabilities\.test\.mjs/);
   assert.match(publish, /waiting for npm provenance to propagate/);
   assert.doesNotMatch(publish, /verify-thin-setup-canary/);
   assert.match(publish, /existing npm version has different bytes/);
@@ -1499,6 +1502,7 @@ test("public release owns immutable publication while private promotion owns fle
     assert.match(promote, /\(cd "\$runtime_prefix" && tar -xzf runtime\.tar\.gz\)/);
     assert.doesNotMatch(promote, /tar -xzf "\$runtime_prefix\/runtime\.tar\.gz"/);
     assert.match(promote, /verify-installed-runtime\.mjs/);
+    assert.match(promote, /assert-runtime-capabilities\.mjs/);
     assert.match(promote, /thin-installer\) TAG=installer/);
     assert.match(promote, /thin installer must never replace bridge latest/);
     assert.match(promote, /companion-releases\/stable\/manifest\.json/);
@@ -1507,6 +1511,47 @@ test("public release owns immutable publication while private promotion owns fle
     assert.match(promote, /s3api get-object[\s\S]{0,1600}elif grep -q 'NoSuchKey'/);
     assert.match(promote, /could not read the authoritative stable runtime pointer/);
     assert.doesNotMatch(promote, /if \[ "\$TAG" = "latest" \][\s\S]{0,300}stable\/manifest/);
+  }
+  for (const workflow of ["promote-dev-companion.yml", "promote-companion-dev.yml", "promote-staging.yml"]) {
+    const path = new URL(`../../../.github/workflows/${workflow}`, import.meta.url);
+    if (!fs.existsSync(path)) continue;
+    const source = fs.readFileSync(path, "utf8");
+    assert.match(source, /verify-runtime-manifest\.mjs/);
+    assert.match(source, /assert-runtime-capabilities\.mjs/);
+    assert.match(source, /relay-runtime-\$VERSION-linux-x64\.tar\.gz/);
+  }
+  const catchupPromotion = new URL("../../../.github/workflows/promote-legacy-catchup.yml", import.meta.url);
+  assert.equal(fs.existsSync(catchupPromotion), true, "the isolated legacy catch-up workflow must exist");
+  if (fs.existsSync(catchupPromotion)) {
+    const catchup = fs.readFileSync(catchupPromotion, "utf8");
+    assert.match(catchup, /name: Promote legacy Companion catch-up/);
+    assert.match(catchup, /group: relay-production-deploy/);
+    assert.match(catchup, /relayDistribution\)" = bridge-runtime/);
+    assert.match(catchup, /dist-tags\.dev/);
+    assert.match(catchup, /dist-tags\.staging/);
+    assert.match(catchup, /0\.1\.267/);
+    assert.match(catchup, /0\.1\.326/);
+    assert.match(catchup, /require_known_manual_intervention "\$RUN_267" 0\.1\.267/);
+    assert.match(catchup, /require_success_canary "\$RUN_326" 0\.1\.326/);
+    assert.match(catchup, /canonical update failed at install: candidate-install-failed \(env: node: No such file or directory\)/);
+    assert.deepEqual(
+      catchup.match(/npm dist-tag add[^\n]+/g),
+      ['npm dist-tag add "relay-companion@$VERSION" latest'],
+      "legacy catch-up may contain exactly one npm channel mutation, and it must move latest",
+    );
+    assert.match(catchup, /test "\$installer" = "\$EXPECTED_INSTALLER"/);
+    assert.match(catchup, /test "\$stable" = "\$EXPECTED_STABLE"/);
+    assert.doesNotMatch(catchup, /id-token:\s*write/);
+    assert.doesNotMatch(catchup, /configure-aws-credentials|aws s3|apprunner|cloudformation|secrets\.AWS_/);
+  }
+  const recoveryCanary = new URL("../../../.github/workflows/verify-companion-dev-update.yml", import.meta.url);
+  assert.equal(fs.existsSync(recoveryCanary), true, "the stock recovery canary workflow must exist");
+  if (fs.existsSync(recoveryCanary)) {
+    const canary = fs.readFileSync(recoveryCanary, "utf8");
+    assert.match(canary, /npm view "relay-companion@\$FROM_VERSION" relayDistribution/);
+    assert.match(canary, /if \[ "\$from_distribution" = thin-installer \]/);
+    assert.match(canary, /npm install --global --no-audit --no-fund "relay-companion@\$FROM_VERSION"/);
+    assert.match(canary, /npx --yes "relay-companion@\$FROM_VERSION" setup/);
   }
   const privateImport = new URL("../../../.github/workflows/publish-companion.yml", import.meta.url);
   if (fs.existsSync(privateImport)) {
@@ -1526,14 +1571,17 @@ test("public release owns immutable publication while private promotion owns fle
 });
 
 test("public export includes every script its release security suite imports", () => {
+  assert.equal(fs.existsSync(new URL("../scripts/assert-runtime-capabilities.mjs", import.meta.url)), true);
   assert.equal(fs.existsSync(new URL("../scripts/assert-monotonic-version.mjs", import.meta.url)), true);
   assert.equal(fs.existsSync(new URL("../scripts/prepare-linux-electron-sandbox.mjs", import.meta.url)), true);
   assert.equal(fs.existsSync(new URL("../scripts/verify-thin-setup-canary.mjs", import.meta.url)), true);
   const exporter = new URL("../scripts/export-public-release.mjs", import.meta.url);
   if (fs.existsSync(exporter)) {
+    assert.match(fs.readFileSync(exporter, "utf8"), /"assert-runtime-capabilities\.mjs"/);
     assert.match(fs.readFileSync(exporter, "utf8"), /"prepare-linux-electron-sandbox\.mjs"/);
   }
   const verifier = fs.readFileSync(new URL("../scripts/verify-installed-runtime.mjs", import.meta.url), "utf8");
+  assert.match(verifier, /assertRuntimeCapabilities\(root\)/);
   assert.match(verifier, /prepareLinuxElectronSandbox\(\{ electronPath: verified\.electronPath, platform \}\)/);
   assert.doesNotMatch(verifier, /["']--no-sandbox["']/);
 });

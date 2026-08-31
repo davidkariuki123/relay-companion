@@ -25,16 +25,39 @@ test("Relays is a pure person/group index with no free-floating request receipts
   assert.doesNotMatch(relays, /receiptRowHtml|data-receipt|rl-receipt/);
 });
 
-test("tab badges count unread items in their own visible surface", () => {
+test("tab badges report unread Relays and outstanding Task debt", () => {
   const renderAll = html.slice(html.indexOf("function renderAll()"), html.indexOf("function onPayload"));
   assert.match(renderAll, /r\.unread[\s\S]*isRelayListKind\(r\)[\s\S]*!onRequestThread\(r, reqThreads\)/,
     "request progress/completion rows hidden from Relays cannot inflate its badge");
   assert.match(renderAll, /!relayIsSelfAuthored\(r, sentByRelayId\.get\(String\(r\.id \|\| r\.relayId \|\| ""\)\), viewerEmail\)/,
     "self-authored inbox twins cannot inflate a badge their conversation does not show");
-  assert.match(renderAll, /setBadge\(tasksBadgeEl, requestsUnreadCount\(\)\)/,
-    "a read but unstarted Task is not unopened");
-  assert.match(html, /function requestsUnreadCount\(\) \{ return taskRows\(\)\.filter\(\(r\) => r\.unread\)\.length; \}/);
-  assert.doesNotMatch(renderAll, /setBadge\(tasksBadgeEl, requestsWaitingCount\(\)\)/);
+  assert.match(renderAll, /setBadge\(tasksBadgeEl, requestsOutstandingCount\(\)\)/,
+    "the amber Tasks badge reports unfinished work, not unread completed records");
+  assert.doesNotMatch(renderAll, /setBadge\(tasksBadgeEl, requestsUnreadCount\(\)\)/);
+  assert.doesNotMatch(html, /function requestsUnreadCount\(/);
+});
+
+test("completed unread Tasks do not inflate outstanding Task debt", () => {
+  const start = html.indexOf("function requestsOutstandingCount()");
+  const end = html.indexOf("\n  let chatExpanded", start);
+  assert.ok(start >= 0 && end > start, "outstanding Task counter exists");
+  const source = html.slice(start, end);
+  const rows = [
+    { id: "task_waiting", unread: false },
+    { id: "task_running", unread: false },
+    { id: "task_completed_unread", unread: true },
+  ];
+  const states = new Map([
+    ["task_waiting", "waiting"],
+    ["task_running", "running"],
+    ["task_completed_unread", "done"],
+  ]);
+  const count = Function(
+    "taskRows",
+    "taskBoardState",
+    `${source}; return requestsOutstandingCount;`,
+  )(() => rows, (id) => states.get(id));
+  assert.equal(count(), 2);
 });
 
 test("self-authored Relay detection is shared by conversations and the unread badge", () => {

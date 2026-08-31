@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { pathToFileURL } from "node:url";
 import { ensureCandidateElectronRuntime, verifyCanonicalCandidate } from "../src/canonical-runtime.js";
 import { prepareLinuxElectronSandbox } from "./prepare-linux-electron-sandbox.mjs";
+import { assertRuntimeCapabilities } from "./assert-runtime-capabilities.mjs";
 const { RELAY_MAC_BUNDLE_IDENTIFIER } = createRequire(import.meta.url)("../src/mac-app-identity.cjs");
 
 export function electronVersionArgs(platform = process.platform) {
@@ -55,6 +56,7 @@ export async function verifyInstalledRuntime({ packageRoot, version, platform = 
   if (manifest?.scripts?.install || manifest?.scripts?.postinstall) {
     throw new Error("Installed Relay package executes an npm install lifecycle");
   }
+  assertRuntimeCapabilities(root);
   const nativeBridge = path.join(root, "native", platform === "win32" ? "mcp-bridge.exe" : "mcp-bridge");
   const bridgeIdentity = spawnSync(nativeBridge, ["--version"], { encoding: "utf8", windowsHide: true, timeout: 30_000 });
   if (bridgeIdentity.error || bridgeIdentity.status !== 0 || String(bridgeIdentity.stdout || "").trim() !== "relay-mcp-bridge-v1") {

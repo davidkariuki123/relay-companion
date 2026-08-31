@@ -256,6 +256,9 @@ function project(records, identity) {
       if (plaintext.body?.forAgent !== undefined) target.body.forAgent = String(plaintext.body.forAgent || "");
       target.editedAt = plaintext.authoredAt;
       target.updatedAt = plaintext.authoredAt;
+      // Earlier group receipts belong to the superseded revision. Later
+      // receipt events in this ordered stream repopulate the current state.
+      receipts.delete(plaintext.messageId);
     } else if (plaintext.type === PRODUCT_DELETE && plaintext.senderUserId === target.plaintext.senderUserId) {
       target.deletedAt = plaintext.authoredAt;
       target.updatedAt = plaintext.authoredAt;
