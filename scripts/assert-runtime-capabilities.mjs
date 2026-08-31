@@ -23,7 +23,8 @@ export const REQUIRED_RUNTIME_CAPABILITIES = {
       'deliverToSession: (id, selection) => ipcRenderer.invoke("relay:deliverToSession"',
     ],
     "overlay/inbox.html": [
-      'id="sessionPickerView"',
+      "function sessionPickerInlineHtml(",
+      "Choose where this Relay lands",
       "window.relay.sessionPicker",
       "window.relay.deliverToSession",
     ],

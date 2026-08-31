@@ -477,7 +477,95 @@ try {
   await sleep(20);
   assert.equal((await actionState("provider_footer_older")).expanded, "true", "touch disclosure opens without hijacking the message");
 
-  console.log(JSON.stringify({ sandbox, before, intentOpen, intentSettled, collapsedAgain, keyboardOpen, reduced, coarse, captures:[settingsShot, residentShot, hoverShot] }, null, 2));
+  // The compact Relay chip keeps its existing provider rows. A bound row
+  // continues directly; an unbound row borrows the existing expanded room
+  // frame and unfolds Sven's destination rows directly beneath the pressed
+  // provider. There is no separate picker page or provider toggle.
+  await page.send("Emulation.setTouchEmulationEnabled", { enabled:false });
+  await page.send("Emulation.setEmulatedMedia", { media:"", features:[] });
+  const compactPickerStart = await evaluate(page, `(() => {
+    agentSurfaces = { _claudeDesktop:{ available:true }, _codexDesktop:{ available:true } };
+    localStorage.setItem("proto.agentApps.v2", "Claude Code|Codex");
+    sessionPickerState = null;
+    chatExpanded = false;
+    syncExpandButton();
+    renderChatRail();
+    applyView();
+    renderThreadDetail();
+    return {
+      cardWidth:Math.round(cardEl.getBoundingClientRect().width),
+      hosts:[...document.querySelectorAll('[data-msg="provider_footer_latest"] [data-host-open]')]
+        .map((button) => button.dataset.host),
+    };
+  })()`);
+  assert.ok(compactPickerStart.cardWidth >= 330 && compactPickerStart.cardWidth <= 344,
+    `the existing room remains on the compact product surface: ${compactPickerStart.cardWidth}px`);
+  assert.deepEqual(compactPickerStart.hosts, ["codex", "claude"], "the unchanged chip keeps both configured provider rows");
+
+  await evaluate(page, `document.querySelector('[data-msg="provider_footer_latest"] [data-host="codex"]').click(); true`);
+  await sleep(180);
+  const boundDirect = await evaluate(page, `({ expanded:chatExpanded, picker:sessionPickerState })`);
+  assert.equal(boundDirect.expanded, false, "a bound Relay does not open the destination picker");
+  assert.equal(boundDirect.picker, null, "a bound Relay continues directly in its existing task");
+
+  await evaluate(page, `document.querySelector('[data-msg="provider_footer_oldest"] [data-host="codex"]').click(); true`);
+  await waitFor(page, `chatExpanded && sessionPickerState?.id === "provider_footer_oldest" && !sessionPickerState.loading`);
+  await sleep(700);
+  const codexPicker = await evaluate(page, `(() => {
+    const row = document.querySelector('[data-msg="provider_footer_oldest"]');
+    const pressed = row.querySelector('[data-host="codex"]');
+    const list = pressed.nextElementSibling;
+    return {
+      cardWidth:Math.round(cardEl.getBoundingClientRect().width),
+      cardHeight:Math.round(cardEl.getBoundingClientRect().height),
+      activeView,
+      expanded:chatExpanded,
+      pressed:pressed.classList.contains('pressed'),
+      ariaExpanded:pressed.getAttribute('aria-expanded'),
+      context:pressed.querySelector('.th-host-context')?.textContent.trim(),
+      inline:list?.classList.contains('sp-list') || false,
+      firstDestination:list?.querySelector('.sp-name')?.textContent.trim(),
+      otherProviderVisible:Boolean(row.querySelector('[data-host="claude"]')),
+      standalonePicker:Boolean(document.getElementById('sessionPickerView')),
+      topProviderToggle:Boolean(document.querySelector('.sp-provider-toggle')),
+      duplicateComposerProviders:document.querySelectorAll('#thQr [data-host-open]').length,
+    };
+  })()`);
+  assert.equal(codexPicker.cardWidth, 720, "the provider click expands into the existing 720px room frame");
+  assert.equal(codexPicker.cardHeight, 760, "the provider click uses the existing expanded room height");
+  assert.equal(codexPicker.activeView, "threads");
+  assert.equal(codexPicker.expanded, true);
+  assert.equal(codexPicker.pressed, true);
+  assert.equal(codexPicker.ariaExpanded, "true");
+  assert.equal(codexPicker.context, "Choose where this Relay lands");
+  assert.equal(codexPicker.inline, true, "the destinations unfold directly beneath the pressed provider row");
+  assert.equal(codexPicker.firstDestination, "New Codex task");
+  assert.equal(codexPicker.otherProviderVisible, true, "the other configured provider remains available in place");
+  assert.equal(codexPicker.standalonePicker, false);
+  assert.equal(codexPicker.topProviderToggle, false);
+  assert.equal(codexPicker.duplicateComposerProviders, 0, "the human reply composer contains no duplicate provider actions");
+  const codexPickerShot = await capture(page, "provider-footer-codex-session-picker.png");
+
+  await evaluate(page, `document.querySelector('[data-msg="provider_footer_oldest"] [data-host="claude"]').click(); true`);
+  await waitFor(page, `sessionPickerState?.provider === "claude" && !sessionPickerState.loading`);
+  const claudePicker = await evaluate(page, `(() => {
+    const row = document.querySelector('[data-msg="provider_footer_oldest"]');
+    const codex = row.querySelector('[data-host="codex"]');
+    const claude = row.querySelector('[data-host="claude"]');
+    return {
+      selected:claude.classList.contains('pressed'),
+      codexSelected:codex.classList.contains('pressed'),
+      inlineAfterClaude:claude.nextElementSibling?.classList.contains('sp-list') || false,
+      firstDestination:claude.nextElementSibling?.querySelector('.sp-name')?.textContent.trim(),
+    };
+  })()`);
+  assert.equal(claudePicker.selected, true, "clicking the other provider moves the inline destination list there");
+  assert.equal(claudePicker.codexSelected, false);
+  assert.equal(claudePicker.inlineAfterClaude, true);
+  assert.equal(claudePicker.firstDestination, "New Claude Code session");
+  const claudePickerShot = await capture(page, "provider-footer-claude-session-picker.png");
+
+  console.log(JSON.stringify({ sandbox, before, intentOpen, intentSettled, collapsedAgain, keyboardOpen, reduced, coarse, compactPickerStart, boundDirect, codexPicker, claudePicker, captures:[settingsShot, residentShot, hoverShot, codexPickerShot, claudePickerShot] }, null, 2));
 } catch (error) {
   console.error(error.stack || error);
   console.error(log);
