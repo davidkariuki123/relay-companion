@@ -677,7 +677,6 @@ async function materializeRowInHost({
         title: relayRowTitle(rowWithAttachments),
         cwd,
         createdAt: rowWithAttachments.createdAt,
-        model,
       });
       rememberRow(id, {
         claudeNativeSession,

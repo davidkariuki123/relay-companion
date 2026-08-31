@@ -302,37 +302,9 @@
      already ellipsize/wrap internally; sideways overflow is always a bug, so
      clip it categorically and keep the corner transparent as belt-and-braces. */
   .scroll { overflow-x:hidden; }
-  /* The shared list scroller normally keeps an 8px breathing gutter. An open
-     room cannot inherit it: the sticky composer would stop above that gutter
-     and the last line of chat could remain visible beneath the opaque dock. */
-  .scroll.room-scroll-active { padding-bottom:0; }
   .scroll::-webkit-scrollbar:horizontal { height:0; }
   .scroll::-webkit-scrollbar-corner { background:transparent; }
   .view.hidden { display:none; }
-
-  /* ---- exact native-session destination picker ---- */
-  .sp { display:flex; flex-direction:column; min-height:330px; background:var(--bg); }
-  .sp-head { display:flex; align-items:center; gap:10px; padding:13px 16px 11px; border-bottom:1px solid var(--hair); }
-  .sp-back { appearance:none; border:0; background:transparent; color:var(--muted-2); cursor:pointer; padding:0; font-size:18px; line-height:1; }
-  .sp-title { min-width:0; flex:1; }
-  .sp-title strong { display:block; font-size:13px; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .sp-title span { display:block; margin-top:2px; font-family:var(--serif); font-size:13.5px; color:var(--muted); }
-  .sp-hosts { display:inline-flex; gap:2px; padding:2px; border-radius:8px; background:color-mix(in srgb, var(--ink) 6%, transparent); }
-  .sp-host { appearance:none; border:0; background:transparent; color:var(--muted-2); cursor:pointer; border-radius:6px; padding:4px 7px; font-size:10.5px; font-weight:600; }
-  .sp-host.active { background:var(--surface, var(--bg)); color:var(--ink); box-shadow:0 1px 2px rgba(0,0,0,.12); }
-  .sp-list { display:flex; flex-direction:column; }
-  .sp-row { appearance:none; border:0; border-bottom:1px solid var(--hair); background:transparent; width:100%; padding:12px 16px; cursor:pointer; text-align:left; display:flex; align-items:center; gap:10px; font-family:var(--sans); }
-  .sp-row:hover { background:color-mix(in srgb, var(--ink) 3%, transparent); }
-  .sp-row:disabled { cursor:default; opacity:.55; }
-  .sp-main { min-width:0; flex:1; }
-  .sp-name { display:block; color:var(--ink); font-size:12.75px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .sp-project { display:block; color:var(--muted-2); font-size:10.75px; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .sp-state { flex:0 0 auto; color:var(--muted-2); font-family:var(--mono); font-size:10.5px; white-space:nowrap; }
-  .sp-state.working { color:var(--accent); }
-  .sp-loading, .sp-error { padding:28px 16px; text-align:center; color:var(--muted-2); font-size:12px; line-height:1.5; }
-  .sp-error { color:var(--danger, #b4332a); }
-  .sp-continue { padding:16px; }
-  .sp-continue .sp-row { border:1px solid var(--hair); border-radius:10px; }
 
   /* Every compact surface -> reader frame is one morph, not a navigation
      followed by a resize. The source snapshot holds the exact pixels the click
@@ -2747,10 +2719,6 @@
         <div id="readerBody"></div>
       </section>
 
-      <section class="view hidden" id="sessionPickerView">
-        <div class="sp" id="sessionPicker"></div>
-      </section>
-
       <!-- Contacts view -->
       <section class="view hidden" id="contactsView">
         <div class="cv-head">
@@ -2872,8 +2840,6 @@
   const tasksBadgeEl = document.getElementById("tasksBadge");
   const readerViewEl = document.getElementById("readerView");
   const readerBodyEl = document.getElementById("readerBody");
-  const sessionPickerViewEl = document.getElementById("sessionPickerView");
-  const sessionPickerEl = document.getElementById("sessionPicker");
   const sentListEl = document.getElementById("sentList");
   const sentEmptyEl = document.getElementById("sentEmpty");
   const requestDetailViewEl = document.getElementById("requestDetailView");
@@ -4626,7 +4592,6 @@
   // survives the innerHTML rebuilds renderRelays performs on every push.
   let expandedRelayId = null;
   let expandedSentId = null;   // Sent row whose open-actions menu is expanded
-  let sessionPickerState = null;
   function openingTargets(id) {
     return [...document.querySelectorAll("[data-opening-id]")].filter((e) => e.getAttribute("data-opening-id") === id);
   }
@@ -4640,122 +4605,6 @@
       openingIds.delete(id);
       for (const el of openingTargets(id)) el.classList.remove("opening");
     }, wait);
-  }
-
-  function closeSessionPicker() {
-    const returnView = sessionPickerState?.returnView || "relays";
-    sessionPickerState = null;
-    activeView = returnView;
-    commitNavigation();
-  }
-
-  function sessionStateLabel(session, current) {
-    if (current) return session.state === "active" ? "working now" : "focused now";
-    if (session.state === "active") return "working now";
-    if (session.state === "needs_input") return "needs input";
-    return timeAgo(session.lastActiveAt);
-  }
-
-  function sessionRowHtml(session, { current = false } = {}) {
-    const label = sessionStateLabel(session, current);
-    return `<button class="sp-row" type="button" data-session-id="${esc(session.nativeId)}" data-session-state="${esc(session.state)}">
-      <span class="sp-main"><span class="sp-name">${esc(session.title || "Untitled session")}</span><span class="sp-project">${esc(session.projectName || session.cwd || "Native session")}</span></span>
-      <span class="sp-state${session.state === "active" ? " working" : ""}">${esc(label)}</span>
-    </button>`;
-  }
-
-  function renderSessionPicker() {
-    const state = sessionPickerState;
-    if (!state) return;
-    const data = state.data;
-    const provider = state.provider;
-    const hostLabel = provider === "codex" ? "Codex" : "Claude Code";
-    if (state.loading) {
-      sessionPickerEl.innerHTML = `<div class="sp-head"><button class="sp-back" type="button" data-sp-back>‹</button><div class="sp-title"><strong>${esc(state.title)}</strong><span>Choose where this Relay lands</span></div></div><div class="sp-loading">Loading recent ${hostLabel} sessions…</div>`;
-    } else if (state.error) {
-      sessionPickerEl.innerHTML = `<div class="sp-head"><button class="sp-back" type="button" data-sp-back>‹</button><div class="sp-title"><strong>${esc(state.title)}</strong><span>Choose where this Relay lands</span></div></div><div class="sp-error">${esc(state.error)}</div>`;
-    } else if (data?.binding) {
-      const boundHost = data.binding.provider === "codex" ? "Codex" : "Claude Code";
-      sessionPickerEl.innerHTML = `<div class="sp-head"><button class="sp-back" type="button" data-sp-back>‹</button><div class="sp-title"><strong>Continue in ${boundHost}</strong><span>This Relay already landed here</span></div></div><div class="sp-continue"><button class="sp-row" type="button" data-sp-continue><span class="sp-main"><span class="sp-name">${esc(data.binding.title || "Bound session")}</span><span class="sp-project">${esc(data.binding.cwd || "Exact native session")}</span></span><span class="sp-state">open →</span></button></div>`;
-    } else {
-      const current = data?.current ? sessionRowHtml(data.current, { current: true }) : "";
-      const recent = (data?.recent || []).map((session) => sessionRowHtml(session)).join("");
-      sessionPickerEl.innerHTML = `<div class="sp-head">
-        <button class="sp-back" type="button" data-sp-back>‹</button>
-        <div class="sp-title"><strong>Open in ${hostLabel}</strong><span>Choose where this Relay lands</span></div>
-        <div class="sp-hosts"><button class="sp-host${provider === "claude" ? " active" : ""}" type="button" data-sp-host="claude">Claude</button><button class="sp-host${provider === "codex" ? " active" : ""}" type="button" data-sp-host="codex">Codex</button></div>
-      </div><div class="sp-list"><button class="sp-row" type="button" data-sp-new><span class="sp-main"><span class="sp-name">New ${hostLabel} session</span><span class="sp-project">Starts with this Relay</span></span><span class="sp-state">new →</span></button>${current}${recent || '<div class="sp-loading">No recent sessions found.</div>'}</div>`;
-    }
-    sessionPickerEl.querySelector("[data-sp-back]")?.addEventListener("click", closeSessionPicker);
-    for (const host of sessionPickerEl.querySelectorAll("[data-sp-host]")) {
-      host.addEventListener("click", () => loadSessionPicker(
-        state.id,
-        host.getAttribute("data-sp-host"),
-        state.title,
-        state.returnView,
-      ));
-    }
-    const continueButton = sessionPickerEl.querySelector("[data-sp-continue]");
-    if (continueButton) continueButton.addEventListener("click", async () => {
-      if (continueButton.disabled) return;
-      continueButton.disabled = true;
-      continueButton.querySelector(".sp-state").textContent = "Opening…";
-      const result = await window.relay.continueSession(state.id);
-      if (result?.ok === false) {
-        continueButton.disabled = false;
-        sessionPickerState.error = result.error || "Could not open the bound session.";
-        renderSessionPicker();
-      } else closeSessionPicker();
-    });
-    const newButton = sessionPickerEl.querySelector("[data-sp-new]");
-    if (newButton) newButton.addEventListener("click", () => deliverSessionSelection(newButton, { provider, mode: "new" }));
-    for (const button of sessionPickerEl.querySelectorAll("[data-session-id]")) {
-      button.addEventListener("click", () => deliverSessionSelection(button, {
-        provider,
-        nativeId: button.getAttribute("data-session-id"),
-        state: button.getAttribute("data-session-state"),
-      }));
-    }
-  }
-
-  async function deliverSessionSelection(button, selection) {
-    if (!sessionPickerState || button.disabled) return;
-    button.disabled = true;
-    const stateEl = button.querySelector(".sp-state");
-    if (stateEl) stateEl.textContent = selection.state === "active" ? "Queued…" : "Opening…";
-    const result = await window.relay.deliverToSession(sessionPickerState.id, selection);
-    if (result?.ok === false) {
-      button.disabled = false;
-      sessionPickerState.error = result.error || "Could not deliver this Relay.";
-      renderSessionPicker();
-    } else closeSessionPicker();
-  }
-
-  async function loadSessionPicker(id, provider = "", title = "Relay", returnView = activeView) {
-    const rememberedReturn = returnView === "sessionPicker"
-      ? sessionPickerState?.returnView || "relays"
-      : returnView;
-    sessionPickerState = {
-      id,
-      provider: provider || "claude",
-      title,
-      returnView: rememberedReturn,
-      loading: true,
-      error: "",
-      data: null,
-    };
-    activeView = "sessionPicker";
-    commitNavigation();
-    renderSessionPicker();
-    const result = await window.relay.sessionPicker(id, provider);
-    if (!sessionPickerState || sessionPickerState.id !== id) return;
-    sessionPickerState.loading = false;
-    if (!result || result.ok === false) sessionPickerState.error = result?.error || "Could not load native sessions.";
-    else {
-      sessionPickerState.provider = result.provider;
-      sessionPickerState.data = result;
-    }
-    renderSessionPicker();
   }
   // The verb NAMES an app ("Open in Codex"), so the open must go THERE — the
   // running-process heuristic only decides when nothing was named (David's
@@ -5384,11 +5233,11 @@
   function taskBoardState(id) {
     const row = relayById(id) || {};
     const local = taskLocal.get(id);
-    // Optimistic transport and the canonical feed may lead the inbox packet,
-    // but an old renderer-local "running" flag is never liveness evidence.
-    if (runFeedPending.has(String(id))) return "running";
-    const feedState = runnerStateForFeed(runFeedFor(id));
-    if (feedState && (feedState !== "running" || runFeedTimers.has(String(id)))) return feedState;
+    // A follow-up reopens the same session even if the original request has a
+    // completion receipt. The local transition wins until that turn settles.
+    if (local === "running") return "running";
+    if (local === "done") return "done";
+    if (local === "stopped") return "stopped";
     if (row.completionReview) return "review";
     // The completion receipt may arrive in Claude's final tool turn a few
     // milliseconds before Relay's worker has flushed and released the native
@@ -5396,10 +5245,6 @@
     // stay disabled until there is only one possible writer.
     if (row.runLive) return "running";
     if (row.taskCompletedAt) return "done";
-    if (local === "done") return "done";
-    if (local === "stopped") return "stopped";
-    if (local === "waiting") return "waiting";
-    if (local === "running" && !row.taskStartedAt) return "running";
     const claim = taskClaimFor(row);
     if (claim?.workState === "completed") return "done";
     if (claim?.workState === "working") return "running";
@@ -5414,40 +5259,13 @@
     if (local === "parked") return "parked";
     return "waiting";
   }
-  function runnerStateForFeed(feed) {
-    const turn = feed?.presentation?.turns?.at(-1) || feed?.workPresentation?.turns?.at(-1) || null;
-    const providerState = String(turn?.providerState || feed?.liveState || "").toLowerCase();
-    if (["needs_input", "blocked", "reconnecting", "waiting_for_device", "queued", "starting"].includes(providerState)) return "waiting";
-    if (turn?.active || turn?.status === "inProgress") return "running";
-    if (turn?.settled || turn?.cancelled || ["completed", "failed", "cancelled", "interrupted"].includes(String(turn?.status))) {
-      if (turn?.finalEligible && !turn?.cancelled && !["failed", "cancelled", "interrupted"].includes(String(turn?.status))) return "done";
-      return String(turn?.status) === "completed" ? "waiting" : "stopped";
-    }
-    if (["completed", "archived"].includes(providerState)) return "done";
-    if (["failed", "stopped", "offline", "stalled"].includes(providerState)) return "stopped";
-    if (["running", "active"].includes(providerState)) return "running";
-    return "";
-  }
   function relayWorkState(row) {
     if (!row || isTaskRow(row)) return row ? taskBoardState(row.id) : "idle";
-    const key = String(row.id);
-    const local = taskLocal.get(key);
-    if (runFeedPending.has(key)) return "running";
-    const feedState = runnerStateForFeed(runFeedFor(row.id));
-    if (feedState && (feedState !== "running" || runFeedTimers.has(key))) return feedState;
-    if (row.source?.host === "relay-agent-run") {
-      if (String(row.forAgent || "").trim()) {
-        return /did not complete successfully/i.test(String(row.forAgent)) ? "stopped" : "done";
-      }
-      if (["stopped", "waiting"].includes(local)) return local;
-      return "waiting";
-    }
+    const local = taskLocal.get(String(row.id));
+    if (local === "running" || local === "done" || local === "stopped") return local;
+    if (row.source?.host === "relay-agent-run") return "running";
     if (row.runLive) return "running";
     if (row.workCompletedAt) return "done";
-    if (local === "done") return "done";
-    if (local === "stopped") return "stopped";
-    if (local === "waiting") return "waiting";
-    if (local === "running" && !row.workStartedAt) return "running";
     if (row.workStartedAt) return "stopped";
     return "idle";
   }
@@ -5994,7 +5812,6 @@
       cursor = node.nextElementSibling;
     }
     for (const node of existing.values()) {
-      if (node._workMarkupFrame) cancelAnimationFrame(node._workMarkupFrame);
       node._workDisclosure?.destroy?.();
       node._workSemanticDisclosure?.destroy?.();
       node._nativeShimmerDestroy?.();
@@ -6003,14 +5820,6 @@
     }
   }
   function updateMarkupNode(node, markup) {
-    if (node._workMarkupFrame) {
-      cancelAnimationFrame(node._workMarkupFrame);
-      node._workMarkupFrame = 0;
-      node._workPendingMarkup = null;
-    }
-    commitMarkupNode(node, markup);
-  }
-  function commitMarkupNode(node, markup) {
     if (node.dataset.workMarkup === markup) return;
     // Only the changed semantic unit is replaced; sibling turns, disclosure
     // state, selection, and the composer remain mounted.
@@ -6021,17 +5830,6 @@
     for (const link of node.querySelectorAll("a[href]")) {
       link.target = "_blank"; link.rel = "noreferrer noopener";
     }
-  }
-  function updateStreamingMarkupNode(node, markup) {
-    if (node.dataset.workMarkup === markup || node._workPendingMarkup === markup) return;
-    node._workPendingMarkup = markup;
-    if (node._workMarkupFrame) return;
-    node._workMarkupFrame = requestAnimationFrame(() => {
-      node._workMarkupFrame = 0;
-      const pending = node._workPendingMarkup;
-      node._workPendingMarkup = null;
-      if (node.isConnected && pending != null) commitMarkupNode(node, pending);
-    });
   }
   function bindSemanticDisclosure(node) {
     const root = node.matches?.("[data-semantic-disclosure]") ? node : node.querySelector?.("[data-semantic-disclosure]");
@@ -6136,8 +5934,7 @@
     runSummaryStabilizer.offer(openKey, item.label, (label) => { summaryNode.textContent = label; });
     keyedChildren(node._workInner, item.units, (unitNode, unit) => {
       unitNode.className = "work-unit";
-      if (["message", "plan", "compaction"].includes(unit.type)) updateStreamingMarkupNode(unitNode, runUnitMarkup(unit));
-      else updateMarkupNode(unitNode, runUnitMarkup(unit));
+      updateMarkupNode(unitNode, runUnitMarkup(unit));
       bindSemanticDisclosure(unitNode);
       bindRunUnitDetail(unitNode, unit, { relayId:relayKey, sessionId:item.sessionId || "", turnId:item.turnId });
     }, true);
@@ -6188,10 +5985,7 @@
           return;
         }
         blockNode.className = block.type === "divider" ? "worked-for-divider" : block.type === "final" ? "rd-final work-markdown" : "work-unit";
-        const markup = block.type === "divider" ? "" : block.type === "final" ? readerParagraphs(block.unit.text || "") : runUnitMarkup(block.unit);
-        if (block.type === "final" || (block.type === "unit" && ["message", "plan", "compaction"].includes(block.unit?.type))) {
-          updateStreamingMarkupNode(blockNode, markup);
-        } else updateMarkupNode(blockNode, markup);
+        updateMarkupNode(blockNode, block.type === "divider" ? "" : block.type === "final" ? readerParagraphs(block.unit.text || "") : runUnitMarkup(block.unit));
         if (block.type === "unit") bindSemanticDisclosure(blockNode);
         if (block.type === "final") blockNode.dataset.localConversationFinalAssistant = "true";
         if (block.type === "unit") bindRunUnitDetail(blockNode, block.unit, {
@@ -6224,16 +6018,6 @@
       const state = String(feed.liveState || "").toLowerCase();
       const label = state === "review_ready" ? "finished · awaiting Relay completion" : state === "blocked" ? "needs input" : "didn't finish";
       kicker.innerHTML = `${sq}${runKind}${owner} · ${label}`;
-      return;
-    }
-    const latestTurn = feed?.presentation?.turns?.at(-1) || null;
-    const providerState = String(latestTurn?.providerState || feed?.liveState || "").toLowerCase();
-    if (["reconnecting", "waiting_for_device", "queued", "starting"].includes(providerState)) {
-      kicker.innerHTML = `${sq}${runKind}${owner} · reconnecting`;
-      return;
-    }
-    if (latestTurn?.requiresAction || ["needs_input", "blocked"].includes(providerState)) {
-      kicker.innerHTML = `${sq}${runKind}${owner} · needs input`;
       return;
     }
     // The model is the rail's only when the rail still names the app that ran;
@@ -6298,12 +6082,10 @@
     const base = newTurn && !preserveHistory ? null : previous;
     const provider = String(base?.provider || (/cowork/i.test(runAppName(key)) ? "cowork" : /codex/i.test(runAppName(key)) ? "codex" : "claude"));
     const user = { type: "message", role: "user", text: String(body || ""), attachments, at };
-    const clientMessageId = crypto.randomUUID();
-    const optimisticId = `optimistic:${clientMessageId}`;
+    const optimisticId = `optimistic:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
     const previousTurns = Array.isArray(base?.presentation?.turns) ? base.presentation.turns : [];
     const userUnit = { id:`user:${optimisticId}`, type:"message", role:"user", side:"right", phase:null,
       text:String(body || ""), attachments, status:"pending", optimistic:true, placement:"user",
-      clientMessageId,
       optimisticMode:newTurn ? "newTurn" : "steer",
       persistent:true, blocking:false, standalone:false, collapsible:false };
     let optimisticTurns;
@@ -6332,7 +6114,7 @@
     runFeedPending.add(key);
     taskLocal.set(key, "running");
     renderAll();
-    return { previous, previousState, clientMessageId };
+    return { previous, previousState };
   }
   function queuedRunMessages(id) {
     return runQueuedMessages.get(String(id || "")) || [];
@@ -6367,7 +6149,6 @@
       newTurn: !steerNow,
       model: message.model,
       effort: message.effort,
-      clientMessageId: optimistic.clientMessageId,
       files: message.files,
     }).catch((error) => ({ ok: false, error: String(error?.message || error) }));
     runFeedPending.delete(key);
@@ -6408,21 +6189,10 @@
         ...turn,
         units:(turn.units || []).map((unit) => {
           if (unit?.placement !== "user") return unit;
-          const match = oldUsers.find((old) => old.clientMessageId && unit.clientMessageId
-            ? String(old.clientMessageId) === String(unit.clientMessageId)
-            : String(old.text || "") === String(unit.text || ""));
+          const match = oldUsers.find((old) => String(old.text || "") === String(unit.text || ""));
           if (!match) return unit;
           echoed.add(match.id);
-          return {
-            ...unit,
-            // Preserve the mounted bubble across transport acceptance. The
-            // canonical provider item can have a different native id without
-            // making the human's already-visible message jump in the DOM.
-            id:match.id,
-            optimistic:false,
-            clientMessageId:unit.clientMessageId || match.clientMessageId || null,
-            ...(match.attachments?.length && !unit.attachments?.length ? { attachments:match.attachments } : {}),
-          };
+          return match.attachments?.length && !unit.attachments?.length ? { ...unit, attachments:match.attachments } : unit;
         }),
       }));
       const pending = oldUsers.filter((unit) => !echoed.has(unit.id));
@@ -6473,19 +6243,16 @@
     if (revision) runFeedRevision.set(key, revision);
     const feed = preserveOptimisticUsers(incoming, runFeedSeen.get(key));
     runFeedSeen.set(key, feed);
-    const projectedState = runnerStateForFeed(feed);
-    if (projectedState) taskLocal.set(key, projectedState);
     paintRunStream(key, feed); paintRunKicker(key, feed);
     const queued = queuedRunMessages(key);
     if ((runFeedCompleted(feed) || runFeedIsTerminal(feed)) && queued.length) {
       stopRunFeed(key); sendQueuedRunMessage(key, queued[0].id); return;
     }
     if (runFeedIsTerminal(feed)) {
-      const settledState = projectedState || "stopped";
-      taskLocal.set(key, settledState);
+      taskLocal.set(key, runFeedCompleted(feed) ? "done" : "stopped");
       const row = relayById(key);
       const claim = taskClaimFor(row);
-      if (settledState === "stopped" && claim?.claimant?.self && claim.workState === "working" && !taskStopPending.has(key)) {
+      if (claim?.claimant?.self && claim.workState === "working" && !taskStopPending.has(key)) {
         taskStopPending.add(key);
         void window.relay.taskStop(key).then((result) => {
           if (result?.ok && result.taskClaim) applyTaskClaimProjection(row, result.taskClaim);
@@ -6844,7 +6611,7 @@
         </div>
       </div>`;
     }
-    const canContinueSession = ["stopped", "waiting"].includes(state) && requestHasNativeSession(r);
+    const canContinueSession = state === "stopped" && requestHasNativeSession(r);
     if (state === "running" || state === "done" || canContinueSession) {
       const live = state === "running";
       return `
@@ -6904,7 +6671,7 @@
             <span class="rt-spacer"></span>
             <span class="ta-acts">
               ${taggedWork && live ? `<button class="ta-later" type="button" data-chat-work-stop="${esc(r.id)}">Stop</button>` : ""}
-              ${taggedWork && state === "stopped" ? `<button class="ta-later" type="button" data-chat-work-retry="${esc(r.id)}">Retry</button>` : ""}
+              ${taggedWork && !live ? `<button class="ta-later" type="button" data-chat-work-retry="${esc(r.id)}">Retry</button>` : ""}
               ${live
                 ? `<button class="ta-later" type="button" disabled aria-disabled="true">Open in ${esc(app)}</button>`
                 : r.ranOnClaude
@@ -7011,13 +6778,10 @@
           ? requestedHost
           : hostKeyFor(rt.app);
         const app = host === "codex" ? "Codex" : host === "claude" ? "Claude Code" : rt.app;
+        const note = String((b.closest(".ta-dock")?.querySelector(".ta-note") || {}).value || "").trim();
         const ranAlready = requestHasNativeSession(taskRows().find((row) => row.id === id));
-        if (ranAlready && window.relay.openInCurrent) {
-          window.relay.openInCurrent(id, host);
-        } else {
-          loadSessionPicker(id, host, relaySubject(relayById(id) || { id }) || "Relay", activeView);
-          return;
-        }
+        if (ranAlready && window.relay.openInCurrent) window.relay.openInCurrent(id, host);
+        else openRelayFromUI(id, "relay", "fresh", host, note);
         // AFTER the open, never before: openRelayFromUI clears the row's note
         // first (a stale failure must not outlive the retry), so a note written
         // above this line vanished the same instant — the trap already found on
@@ -7092,7 +6856,6 @@
           // The Settings choice has to REACH the run, or the picker is a
           // decoration that lies about what the agent may do.
           permission: permMode(/claude/i.test(String(rt.app)) ? "claude" : "codex"),
-          clientMessageId: optimistic.clientMessageId,
           files: payloads.files,
         }).then((res) => {
           runFeedPending.delete(String(id));
@@ -7159,7 +6922,6 @@
         effort: String(rt.effort || "high").toLowerCase(),
         note,
         permission: permMode(/claude/i.test(String(rt.app)) ? "claude" : "codex"),
-        clientMessageId: optimistic.clientMessageId,
         files: payloads.files,
       }).then((res) => {
         runFeedPending.delete(String(id));
@@ -7251,8 +7013,8 @@
       }
       const previousFeed = runFeedSeen.get(key) || null;
       const previousState = taskLocal.has(key) ? taskLocal.get(key) : undefined;
-      const optimistic = appendOptimisticUserTurn(id, body, true, payloads.attachments);
-      const res = await window.relay.runSteer(id, body, { newTurn: true, clientMessageId:optimistic.clientMessageId, files: payloads.files, ...continuation }).catch((err) => ({ ok: false, error: String(err && err.message || err) }));
+      appendOptimisticUserTurn(id, body, true, payloads.attachments);
+      const res = await window.relay.runSteer(id, body, { newTurn: true, files: payloads.files, ...continuation }).catch((err) => ({ ok: false, error: String(err && err.message || err) }));
       st.disabled = false;
       runFeedPending.delete(key);
       if (res && res.ok) {
@@ -7300,15 +7062,6 @@
       if (!item) continue;
       const outbound = item.direction === "outbound";
       const directAnchor = directContactAnchorForChatId(chat.chatId);
-      const sentTwin = (payload.sent || []).find((row) => String(row.relayId || row.id || "") === String(id || ""));
-      const anchorTwin = (directAnchor?.msgs || []).find((row) => String(row.id || row.relayId || "") === String(id || ""));
-      // The chat endpoint and Sent hydrate independently. During that race the
-      // canonical item can still carry its original generic pill source while
-      // the Sent/room projection already knows this is an owned agent run.
-      // Work identity is stronger than a generic source, so preserve it from
-      // whichever copy has it instead of letting iteration order pick Relay.
-      const ownedAgentSource = [item.source, sentTwin?.source, anchorTwin?.source]
-        .find((source) => source?.host === "relay-agent-run");
       const channelName = directAnchor?.name || chat.channel?.name || chat.title || "Channel";
       return {
         id: item.relayId,
@@ -7323,13 +7076,7 @@
         unread: !outbound && item.state === "delivered",
         outbound,
         attachments: item.attachments || [],
-        // Canonical chat hydration is the only remaining copy of an older
-        // message once the bounded Inbox/Sent caches roll past it. Preserve
-        // the server-owned source there: replacing an owned agent run with the
-        // generic pill fallback makes its bubble look like Work in the chat,
-        // then open the ordinary Relay reader when tapped.
-        source: ownedAgentSource || item.source || sentTwin?.source || anchorTwin?.source
-          || (item.origin === "slack" ? { host:"slack" } : { host:"relay-pill" }),
+        source: item.origin === "slack" ? { host:"slack" } : { host:"relay-pill" },
         provider: item.provider || (item.origin === "slack" ? { name:"slack" } : null),
         materializedCodex: Boolean(item.materializedCodex),
         materializedClaude: Boolean(item.materializedClaude),
@@ -7359,8 +7106,6 @@
       relayNotificationKind: "plain_relay",
       unread: false,
       outbound: true,
-      source: sent.source || { host:"relay-pill" },
-      provider: sent.provider || null,
       materializedCodex: Boolean(sent.materializedCodex),
       materializedClaude: Boolean(sent.materializedClaude),
       reactions: sent.reactions || { aggregates: [], events: [] },
@@ -11725,11 +11470,6 @@
         const host = b.getAttribute("data-host") === "claude" ? "claude" : "codex";
         const source = b.getAttribute("data-source") === "sent" ? "sent" : "relay";
         const app = host === "codex" ? "Codex" : "Claude Code";
-        if (source === "relay") {
-          const message = relayById(id) || { id };
-          loadSessionPicker(id, host, relaySubject(message) || "Relay", activeView);
-          return;
-        }
         // The open clears any earlier note first (a stale failure must not
         // outlive the retry), so the answer to THIS click is written after it —
         // written before, it vanished the same instant (found on the clone).
@@ -14662,7 +14402,6 @@
       : activeView === "threads" ? threadsSource
       : activeView === "contacts" ? "contacts"
       : activeView === "reader" ? (readerSource || "relays")
-      : activeView === "sessionPicker" ? (sessionPickerState?.returnView === "reader" ? (readerSource || "relays") : sessionPickerState?.returnView || "relays")
       : activeView;
     for (const tab of tabEls) {
       const view = tab.getAttribute("data-view");
@@ -14677,7 +14416,6 @@
     // Toggle layout first; retarget the native/card frame last so its first
     // animated frame already contains the final view rather than a blank pane.
     threadsViewEl.classList.toggle("chat-max", chatExpanded);
-    scrollEl.classList.toggle("room-scroll-active", activeView === "threads" && Boolean(threadDetailId));
     relaysViewEl.classList.toggle("hidden", activeView !== "relays");
     slackViewEl.classList.toggle("hidden", activeView !== "slack");
     chatViewEl.classList.toggle("hidden", activeView !== "chat");
@@ -14685,7 +14423,6 @@
     sentViewEl.classList.toggle("hidden", activeView !== "sent");
     tasksViewEl.classList.toggle("hidden", activeView !== "tasks");
     readerViewEl.classList.toggle("hidden", activeView !== "reader");
-    sessionPickerViewEl.classList.toggle("hidden", activeView !== "sessionPicker");
     requestDetailViewEl.classList.toggle("hidden", activeView !== "requestDetail");
     contactsViewEl.classList.toggle("hidden", activeView !== "contacts");
     settingsViewEl.classList.toggle("hidden", activeView !== "settings");
@@ -14756,7 +14493,6 @@
         // second tap on the lit tab: fall through and navigate to its list
       }
       if (view === activeView) return;
-      if (activeView === "sessionPicker") sessionPickerState = null;
       activeView = view;
       commitNavigation();
     });

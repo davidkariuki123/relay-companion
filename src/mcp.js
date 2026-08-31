@@ -12,7 +12,6 @@ import { accountDriftMessage } from "./account.js";
 import { apiUrl, readConfig } from "./config.js";
 import { accountProductFeatures } from "./product-features.js";
 import { localE2eeIdentityAvailable, verifiedE2eeStatus } from "./e2ee-mls.js";
-import { recordOutboundTaskOrigin } from "./task-completion-wake.js";
 
 const require = createRequire(import.meta.url);
 
@@ -1549,7 +1548,6 @@ export async function handleCall(client, name, args, {
   features = { requests: true },
   shareLinks = true,
   sessionContext = DEFAULT_MCP_SESSION_CONTEXT,
-  recordTaskOrigin = recordOutboundTaskOrigin,
 } = {}) {
   if (
     features.requests === false
@@ -1722,42 +1720,26 @@ export async function handleCall(client, name, args, {
         );
       }
       requireLongForHumanReview("relay_send", args, sessionContext);
-      const sent = await client.sendRelay({
-        recipient: args.recipient,
-        kind: args.kind,
-        title: args.title,
-        forHuman: args.forHuman,
-        forAgent: args.forAgent,
-        ...(args.longForHumanConfirmed === true ? { longForHumanConfirmed: true } : {}),
-        source: relaySource(args.repo, sessionContext),
-        targetSurfaces: args.targetSurfaces || [],
-        attachments: await prepareOrdinaryRelayAttachments(args, { baseDir: sessionContext.cwd }),
-        ...(explicitReplyToRelayId ? { inReplyToRelayId: explicitReplyToRelayId } : {}),
-        // Rolling clients may still submit the old control-plane `type`.
-        // Keep transport compatibility, but do not expose it in the model
-        // schema: provider completion is automatic and a model choosing
-        // "completion" was both redundant and a frequent misclassification.
-        ...(args.type ? { type: args.type } : {}),
-        idempotencyKey: args.idempotencyKey,
-      });
-      if (args.kind === "task" && sent?.relayId) {
-        try {
-          await recordTaskOrigin({
-            taskRelayId: sent.relayId,
-            title: args.title,
-            idempotencyKey: args.idempotencyKey,
-            sessionContext,
-            sourceBinding: sessionSourceBinding(sessionContext),
-            surface: relayCallingSurface(sessionContext),
-          });
-        } catch (error) {
-          // The Task is already delivered. Never turn a successful remote send
-          // into an apparent failure that the host may retry; surface the local
-          // correlation failure on stderr and leave completion wake disabled.
-          console.error(`relay: could not record Task origin for ${sent.relayId}: ${error?.message || error}`);
-        }
-      }
-      return text(relaySendResultForAgent(sent, { linkWarning: fragileLinkWarning(args.forHuman) }));
+      return text(
+        relaySendResultForAgent(await client.sendRelay({
+          recipient: args.recipient,
+          kind: args.kind,
+          title: args.title,
+          forHuman: args.forHuman,
+          forAgent: args.forAgent,
+          ...(args.longForHumanConfirmed === true ? { longForHumanConfirmed: true } : {}),
+          source: relaySource(args.repo, sessionContext),
+          targetSurfaces: args.targetSurfaces || [],
+          attachments: await prepareOrdinaryRelayAttachments(args, { baseDir: sessionContext.cwd }),
+          ...(explicitReplyToRelayId ? { inReplyToRelayId: explicitReplyToRelayId } : {}),
+          // Rolling clients may still submit the old control-plane `type`.
+          // Keep transport compatibility, but do not expose it in the model
+          // schema: provider completion is automatic and a model choosing
+          // "completion" was both redundant and a frequent misclassification.
+          ...(args.type ? { type: args.type } : {}),
+          idempotencyKey: args.idempotencyKey,
+        }), { linkWarning: fragileLinkWarning(args.forHuman) }),
+      );
     }
     case "relay_share_link": {
       const action = String(args.action || "mint").trim().toLowerCase();

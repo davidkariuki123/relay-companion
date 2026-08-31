@@ -73,15 +73,7 @@ export const DEFAULT_STAGING_API_URL = "";
  * dialing it — retiring it earlier orphans every device this code has not
  * reached yet.
  */
-export const LEGACY_API_URLS = [
-  "https://aia6vj5pgp.us-east-1.awsapprunner.com",
-  // The first Dev API was exposed through its raw App Runner hostname. Dev
-  // installs persisted it before dev-api.sendrelays.com became canonical, so
-  // changing DEFAULT_DEV_API_URL alone left paired machines on the retired
-  // service forever. Stable installs heal this to production; the dev-channel
-  // resolution below then advances Dev installs to DEFAULT_DEV_API_URL.
-  "https://q9dpgb9fzb.us-east-1.awsapprunner.com",
-];
+export const LEGACY_API_URLS = ["https://aia6vj5pgp.us-east-1.awsapprunner.com"];
 
 const LEGACY_API_ORIGINS = new Set(LEGACY_API_URLS.map((url) => normalizeOrigin(url)));
 

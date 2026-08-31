@@ -663,19 +663,6 @@ export function subscribeManagedProviderRefresh(refresh, listener, {
   let timer = null;
   let delay = Math.max(250, Number(intervalMs) || 1_000);
   const ceiling = Math.max(delay, Number(maxIntervalMs) || 15_000);
-  const rememberedEventIds = new Set();
-  const maxRememberedEvents = Math.max(256, Math.max(1, maxEventsPerRefresh) * 2);
-  const emitNewEvent = (event) => {
-    const id = string(event?.eventId).trim();
-    if (id && rememberedEventIds.has(id)) return;
-    if (id) {
-      rememberedEventIds.add(id);
-      while (rememberedEventIds.size > maxRememberedEvents) {
-        rememberedEventIds.delete(rememberedEventIds.values().next().value);
-      }
-    }
-    listener(event);
-  };
   const schedule = () => {
     if (closed) return;
     timer = setTimer(run, delay);
@@ -688,11 +675,7 @@ export function subscribeManagedProviderRefresh(refresh, listener, {
       const result = await refresh();
       if (closed) return;
       const events = Array.isArray(result) ? result : result?.events;
-      // Managed providers return an overlapping authoritative page. Replaying
-      // every historical event made the shared bridge publish dozens of
-      // no-op revisions on every refresh, causing visible stream churn even
-      // though the reducer ultimately deduped the data.
-      for (const event of (Array.isArray(events) ? events : []).slice(-Math.max(1, maxEventsPerRefresh))) emitNewEvent(event);
+      for (const event of (Array.isArray(events) ? events : []).slice(-Math.max(1, maxEventsPerRefresh))) listener(event);
       delay = Math.max(250, Number(intervalMs) || 1_000);
       if (result?.terminal) closed = true;
     } catch (error) {

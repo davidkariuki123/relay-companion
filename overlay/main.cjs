@@ -446,33 +446,6 @@ function loadRelayModules() {
   return relayModulesPromise;
 }
 
-let sessionRoutingPromise = null;
-function loadSessionRouting() {
-  if (!sessionRoutingPromise) {
-    const directoryUrl = pathToFileURL(path.join(__dirname, "..", "src", "session-directory.js")).href;
-    const deliveryUrl = pathToFileURL(path.join(__dirname, "..", "src", "session-delivery.js")).href;
-    const materializerUrl = pathToFileURL(path.join(__dirname, "..", "src", "materializer.js")).href;
-    const codexInjectUrl = pathToFileURL(path.join(__dirname, "..", "src", "codex-inject.js")).href;
-    sessionRoutingPromise = Promise.all([
-      import(directoryUrl),
-      import(deliveryUrl),
-      import(materializerUrl),
-      import(codexInjectUrl),
-    ])
-      .then(([directory, delivery, materializer, codexInject]) => ({
-        directory,
-        delivery,
-        materializer,
-        codexInject,
-      }))
-      .catch((error) => {
-        sessionRoutingPromise = null;
-        throw error;
-      });
-  }
-  return sessionRoutingPromise;
-}
-
 let e2eeDeviceTrustModulePromise = null;
 function loadE2eeDeviceTrustModule() {
   if (!e2eeDeviceTrustModulePromise) {
@@ -3682,118 +3655,6 @@ function repairClaudeHooks(install) {
   });
 }
 
-function preferredSessionProvider() {
-  return new Promise((resolve) => frontmostBundleId((bundle) => {
-    const host = resolveClickHost(bundle);
-    resolve(host === "codex" ? "codex" : "claude");
-  }));
-}
-
-async function focusedNativeSession(provider, routing) {
-  try {
-    if (provider === "codex") {
-      const current = routing.codexInject.resolveCurrentCodexThread();
-      return current ? { nativeId: current.threadId } : null;
-    }
-    const current = claudeInject.findCurrentClaudeSession({
-      homeDir: RELAY_HOME,
-      desktopSessionsDir: claudeDesktopSessionsDir(),
-    });
-    return current ? { nativeId: current.sessionId } : null;
-  } catch {
-    return null;
-  }
-}
-
-async function sessionPicker(packetId, requestedProvider = "") {
-  if (!rowById(packetId)) throw new Error("That Relay is no longer available on this device");
-  const routing = await loadSessionRouting();
-  const provider = ["claude", "codex"].includes(requestedProvider)
-    ? requestedProvider
-    : await preferredSessionProvider();
-  const binding = routing.delivery.relaySessionBinding(packetId);
-  const current = await focusedNativeSession(provider, routing);
-  const destinations = routing.delivery.listRelayDestinations(provider, {
-    currentNativeId: current?.nativeId || "",
-  });
-  return { ok: true, provider, binding, ...destinations };
-}
-
-function nativeIdFromOpenResult(result) {
-  const url = String(result?.url || "");
-  const codex = /^codex:\/\/threads\/([^/?#]+)/.exec(url);
-  if (codex) return decodeURIComponent(codex[1]);
-  const claude = /^claude:\/\/resume\?session=([^&#]+)/.exec(url);
-  return claude ? decodeURIComponent(claude[1]) : "";
-}
-
-async function presentSessionOpen(result, provider, packetId, observedBundle = null) {
-  activateHost(provider, observedBundle);
-  if (!result?.url || result.skipExternalOpen) return;
-  if (claudeSessionIdFromUrl(result.url)) {
-    openClaudeDeepLinkVerified(
-      result.url,
-      () => openPreview(packetId),
-      packetId,
-      { freshlyForged: Boolean(result.claudeFreshlyForged) },
-    );
-    return;
-  }
-  await shell.openExternal(result.url);
-}
-
-async function deliverPacketToSession(packetId, selection = {}) {
-  const row = rowById(packetId);
-  if (!row) throw new Error("That Relay is no longer available on this device");
-  const routing = await loadSessionRouting();
-  const provider = selection.provider === "codex" ? "codex" : "claude";
-  const observedBundle = await new Promise((resolve) => frontmostBundleId(resolve));
-  if (selection.mode === "new") {
-    const previousImportSetting = process.env.RELAY_IMPORT_CLAUDE_DESKTOP;
-    if (provider === "claude") process.env.RELAY_IMPORT_CLAUDE_DESKTOP = "0";
-    let opened;
-    try {
-      opened = await routing.materializer.openRelay({
-        id: packetId,
-        host: provider,
-        forceFresh: true,
-        log: (message) => console.error(`[overlay] ${message}`),
-      });
-    } finally {
-      if (previousImportSetting === undefined) delete process.env.RELAY_IMPORT_CLAUDE_DESKTOP;
-      else process.env.RELAY_IMPORT_CLAUDE_DESKTOP = previousImportSetting;
-    }
-    const nativeId = nativeIdFromOpenResult(opened);
-    if (!nativeId) throw new Error("The new native session did not return an exact session id");
-    routing.delivery.bindRelaySession(packetId, {
-      provider,
-      nativeId,
-      title: row.displayTitle || row.title || "Relay",
-      cwd: opened.cwd || "",
-    }, { adapter: `${provider}_new_session_materialization` });
-    await presentSessionOpen(opened, provider, packetId, observedBundle);
-    ackPacket(packetId);
-    return { ok: true, delivered: true, binding: routing.delivery.relaySessionBinding(packetId), ...opened };
-  }
-  const result = await routing.delivery.deliverRelayToSession({
-    relayId: packetId,
-    target: { provider, nativeId: String(selection.nativeId || "") },
-  });
-  await presentSessionOpen(result, provider, packetId, observedBundle);
-  ackPacket(packetId);
-  return { ok: true, ...result };
-}
-
-async function continuePacketSession(packetId) {
-  const { delivery } = await loadSessionRouting();
-  const binding = delivery.relaySessionBinding(packetId);
-  if (!binding) throw new Error("This Relay is not bound to a native session");
-  const observedBundle = await new Promise((resolve) => frontmostBundleId(resolve));
-  const opened = await delivery.focusSession(binding);
-  await presentSessionOpen(opened, binding.provider, packetId, observedBundle);
-  return { ok: true, binding, ...opened };
-}
-
 // Click-to-open a Relay row. A relay materializes a REAL native agent session
 // inside the already-running foregrounded host (Claude Desktop or Codex) via the
 // companion CLI's `open` command, so it appears in that app's recents rail. The
@@ -5636,7 +5497,6 @@ async function startTaskFromPreview(input) {
       ? ""
       : requestedModel;
   const effort = String((input && input.effort) || "").trim();
-  const clientMessageId = String((input && input.clientMessageId) || "").trim().slice(0, 200);
   const files = Array.isArray(input && input.files) ? input.files : [];
   const row = rowById(id);
   const isRequest = row?.relayNotificationKind === "task";
@@ -5714,8 +5574,8 @@ async function startTaskFromPreview(input) {
   // (including one sent to a different provider before an explicit route
   // change) must not be re-inserted as this run's user message.
   const freshRunFollowUpState = isRequest
-    ? { taskFollowUpText: "", taskFollowUpAt: null, taskInitialUserText:note, taskInitialClientMessageId:clientMessageId || null }
-    : { workFollowUpText: "", workFollowUpAt: null, workInitialUserText:note, workInitialClientMessageId:clientMessageId || null };
+    ? { taskFollowUpText: "", taskFollowUpAt: null }
+    : { workFollowUpText: "", workFollowUpAt: null };
   // The reader's Settings choice, in each vendor's own terms. Claude takes a
   // permission-mode string; Codex takes an approval policy plus a sandbox.
   const permission = String((input && input.permission) || "").trim();
@@ -5865,7 +5725,6 @@ async function startTaskFromPreview(input) {
           },
           exclusiveNative: true,
         });
-        relayOwnedCodexRuns.add(String(sessionRef.relaySessionId || relaySession.id));
         updateStagedPacket(id, {
           ...freshRunFollowUpState,
           workProvider: "codex",
@@ -6028,16 +5887,6 @@ function providerWorkIdentity(relayId) {
   const id = String(relayId || "");
   const row = rowById(id);
   if (!agentWorkEnabledForRow(row)) return null;
-  if (isTaggedAgentWorkRow(row)) {
-    const surface = String(row?.source?.surface || "").toLowerCase();
-    return {
-      relayId:id,
-      kind:"chat-agent",
-      provider:surface === "claude_code" ? "claude" : "codex",
-      sessionId:String(row.source.agentSessionId),
-      agentSessionId:String(row.source.agentSessionId),
-    };
-  }
   const requestedProvider = String(row?.workProvider || "").toLowerCase();
   const coworkSessionId = String(row?.coworkSessionId || "").trim();
   if (row && coworkSessionId && (requestedProvider === "cowork" || !row?.codexRuntimeSessionRef)) {
@@ -6118,44 +5967,6 @@ function canonicalizeCodexWorkAttachments(relayId, events) {
   });
 }
 
-function canonicalizeWorkUserIdentity(relayId, events) {
-  const row = rowById(relayId) || {};
-  const isRequest = row.relayNotificationKind === "task";
-  const initialText = String((isRequest ? row.taskInitialUserText : row.workInitialUserText) || "");
-  const initialClientMessageId = String((isRequest ? row.taskInitialClientMessageId : row.workInitialClientMessageId) || "");
-  const followText = String((isRequest ? row.taskFollowUpText : row.workFollowUpText) || "");
-  const followClientMessageId = String((isRequest ? row.taskFollowUpClientMessageId : row.workFollowUpClientMessageId) || "");
-  const followAt = Date.parse(String((isRequest ? row.taskFollowUpAt : row.workFollowUpAt) || ""));
-  const source = Array.isArray(events) ? events : [];
-  const comparableText = (value) => String(value || "").replace(/\s+/g, " ").trim();
-  const identityMatches = (item, expected) => {
-    const actualText = comparableText(item?.displayText || item?.text);
-    const expectedText = comparableText(expected);
-    return Boolean(actualText && expectedText) && (actualText === expectedText || actualText.includes(expectedText));
-  };
-  return source.map((event) => {
-    const item = event?.params?.item;
-    if (!item || item.type !== "userMessage") return event;
-    const eventAt = Number(event.emittedAtMs ?? event.params?.completedAtMs ?? event.params?.startedAtMs);
-    const isFollowUp = Boolean(followText) && (identityMatches(item, followText) || (Number.isFinite(followAt) && Number.isFinite(eventAt) && eventAt >= followAt - 5_000));
-    const isInitial = !isFollowUp && Boolean(initialText) && identityMatches(item, initialText);
-    if (!isFollowUp && !isInitial) return event;
-    const displayText = isFollowUp ? followText : initialText;
-    const clientMessageId = isFollowUp ? followClientMessageId : initialClientMessageId;
-    return {
-      ...event,
-      params:{
-        ...event.params,
-        item:{
-          ...item,
-          displayText,
-          ...(clientMessageId ? { clientMessageId } : {}),
-        },
-      },
-    };
-  });
-}
-
 function canonicalWorkBridge() {
   if (canonicalWorkBridgePromise) return canonicalWorkBridgePromise;
   canonicalWorkBridgePromise = Promise.all([
@@ -6167,8 +5978,7 @@ function canonicalWorkBridge() {
     import("../src/provider-work-feed.js"),
     import("../src/cowork-sessions.js"),
     import("../src/safe-attachment-preview.js"),
-    import("../src/chat-agent-work-events.js"),
-  ]).then(([work, runtime, activity, claudeNative, claudeCode, providerFeed, coworkSessions, attachmentPreview, chatAgentWork]) => {
+  ]).then(([work, runtime, activity, claudeNative, claudeCode, providerFeed, coworkSessions, attachmentPreview]) => {
     const claudeReconcilers = new Map();
     const buildClaudeReconciler = (identity) => {
       const key = String(identity.sessionId || "");
@@ -6195,37 +6005,23 @@ function canonicalWorkBridge() {
     hydrate: async ({ relayId, sessionId }) => {
       const identity = providerWorkIdentity(relayId);
       if (!identity || identity.sessionId !== sessionId) return { events: [] };
-      if (identity.kind === "chat-agent") {
-        const data = await chatAgentWorkData(relayId, { fresh:true });
-        if (!data?.session) return { provider:identity.provider, events:[] };
-        return {
-          provider:data.session.provider || identity.provider,
-          events:chatAgentWork.chatAgentSessionToWorkEvents(data),
-        };
-      }
-      if (identity.provider === "claude") return { provider: "claude", events: canonicalizeWorkUserIdentity(relayId, buildClaudeReconciler(identity).adapter.snapshotEvents()) };
+      if (identity.provider === "claude") return { provider: "claude", events: buildClaudeReconciler(identity).adapter.snapshotEvents() };
       if (identity.provider === "cowork") {
         const remote = await coworkSessions.readCoworkSession(sessionId);
         return {
           provider: "cowork",
-          events: canonicalizeWorkUserIdentity(relayId, providerFeed.coworkNativeEventsToWorkEvents(remote.events, { sessionId, session: remote.session })),
+          events: providerFeed.coworkNativeEventsToWorkEvents(remote.events, { sessionId, session: remote.session }),
         };
       }
+      if (identity.provider === "claude") {
+        return { provider: "claude", events: buildClaudeReconciler(identity).adapter.snapshotEvents() };
+      }
       if (identity.provider !== "codex") return { provider: identity.provider, events: [] };
-      return { provider: "codex", events: canonicalizeWorkUserIdentity(relayId, canonicalizeCodexWorkAttachments(relayId, activity.readCodexAppServerEvents(identity.sessionRef.logPath))) };
+      return { provider: "codex", events: canonicalizeCodexWorkAttachments(relayId, activity.readCodexAppServerEvents(identity.sessionRef.logPath)) };
     },
     subscribeNative: ({ relayId, sessionId }, listener) => {
       const identity = providerWorkIdentity(relayId);
       if (!identity || identity.sessionId !== sessionId) return () => {};
-      if (identity.kind === "chat-agent") {
-        return providerFeed.subscribeManagedProviderRefresh(async () => {
-          const data = await chatAgentWorkData(relayId, { fresh:true, required:true });
-          return {
-            events:chatAgentWork.chatAgentSessionToWorkEvents(data),
-            terminal:["completed", "failed", "stopped"].includes(String(data.session?.state || "").toLowerCase()),
-          };
-        }, listener, { intervalMs:400, maxIntervalMs:5_000 });
-      }
       if (identity.provider === "claude") {
         const worker = claudeCode.claudeDesktopCodeNativeSnapshot(sessionId);
         if (!worker?.ownerAlive) {
@@ -6237,10 +6033,10 @@ function canonicalWorkBridge() {
         return claudeCode.subscribeClaudeDesktopCodeWorker(sessionId, (nativeRow) => {
           const currentIdentity = providerWorkIdentity(relayId) || identity;
           const currentWorker = claudeCode.claudeDesktopCodeNativeSnapshot(sessionId);
-          for (const event of canonicalizeWorkUserIdentity(relayId, reconciler.adapter.push(nativeRow, {
+          for (const event of reconciler.adapter.push(nativeRow, {
             ownerAlive: Boolean(currentWorker?.ownerAlive),
             expectedActive: currentIdentity.expectedActive && !currentWorker?.settled,
-          }))) listener(event);
+          })) listener(event);
         });
       }
       if (identity.provider === "cowork") {
@@ -6260,10 +6056,27 @@ function canonicalWorkBridge() {
           const remote = await coworkSessions.readCoworkSession(sessionId);
           const lifecycle = coworkSessions.coworkSessionLifecycle(remote.session, remote.events);
           return {
-            events: canonicalizeWorkUserIdentity(relayId, providerFeed.coworkNativeEventsToWorkEvents(remote.events, { sessionId, session: remote.session })),
+            events: providerFeed.coworkNativeEventsToWorkEvents(remote.events, { sessionId, session: remote.session }),
             terminal: Boolean(lifecycle.terminal),
           };
         }, listener);
+      }
+      if (identity.provider === "claude") {
+        const worker = claudeCode.claudeDesktopCodeNativeSnapshot(sessionId);
+        if (!worker?.ownerAlive) {
+          const detached = () => {};
+          detached.detached = identity.expectedActive;
+          return detached;
+        }
+        const reconciler = claudeReconciler(identity);
+        return claudeCode.subscribeClaudeDesktopCodeWorker(sessionId, (nativeRow) => {
+          const currentIdentity = providerWorkIdentity(relayId) || identity;
+          const currentWorker = claudeCode.claudeDesktopCodeNativeSnapshot(sessionId);
+          for (const nativeEvent of reconciler.adapter.push(nativeRow, {
+            ownerAlive: Boolean(currentWorker?.ownerAlive),
+            expectedActive: currentIdentity.expectedActive && !currentWorker?.settled,
+          })) listener(nativeEvent);
+        });
       }
       if (identity.provider !== "codex") {
         const detached = () => {};
@@ -6274,7 +6087,7 @@ function canonicalWorkBridge() {
       return adapters.subscribeEvents(
         { session: identity.relaySession, sessionRef: identity.sessionRef },
         (nativeEvent) => {
-          for (const event of canonicalizeWorkUserIdentity(relayId, canonicalizeCodexWorkAttachments(relayId, [nativeEvent]))) listener(event);
+          for (const event of canonicalizeCodexWorkAttachments(relayId, [nativeEvent])) listener(event);
         },
       );
     },
@@ -6332,14 +6145,6 @@ async function settleCanonicalWorkEnvelope(relayId, identity, envelope) {
   const completedField = isRequest ? "taskCompletedAt" : "workCompletedAt";
   const startedAt = String((isRequest ? row?.taskStartedAt : row?.workStartedAt) || "");
   if (!row || !startedAt) return false;
-  const latestTurn = envelope?.presentation?.turns?.at(-1);
-  const terminalTurn = latestTurn && (latestTurn.settled || latestTurn.cancelled
-    || ["completed", "failed", "cancelled", "interrupted"].includes(String(latestTurn.status)));
-  if (terminalTurn) {
-    if (identity.provider === "codex") relayOwnedCodexRuns.delete(String(identity.sessionId || ""));
-    if (identity.provider === "claude") relayOwnedClaudeRuns.delete(String(identity.sessionId || ""));
-    pushInbox(false).catch(() => {});
-  }
   const { canonicalProviderCompletionCandidate } = await import("../src/provider-completion.js");
   const candidate = canonicalProviderCompletionCandidate({
     provider: identity.provider,
@@ -6561,16 +6366,28 @@ async function localChatAgentNative(session) {
   }
 }
 
-async function chatAgentWorkData(relayId, { fresh = true, required = false } = {}) {
-  const session = await chatAgentWorkSession(relayId, { fresh });
-  if (!session) {
-    if (required) throw new Error("This Work session is not available yet.");
-    return null;
+function chatAgentEventRecords(session, events) {
+  const records = [{ type:"message", role:"user", text:String(session?.instruction || ""), at:session?.createdAt }];
+  for (const event of events || []) {
+    if (event.type === "agent.progress" && event.payload?.summary) {
+      records.push({ type:"progress", text:String(event.payload.summary), at:event.occurredAt });
+    } else if (event.type === "user.turn.accepted" && event.payload?.message) {
+      records.push({ type:"message", role:"user", text:String(event.payload.message), at:event.occurredAt });
+    } else if (event.type === "agent.completed" && event.payload?.forHuman) {
+      records.push({ type:"message", role:"assistant", text:String(event.payload.forHuman), at:event.occurredAt });
+    } else if (event.type === "agent.failed") {
+      records.push({ type:"error", text:String(event.payload?.error || "The Work session failed."), at:event.occurredAt });
+    }
   }
+  return records.reverse();
+}
+
+async function chatAgentRunFeed(relayId) {
+  const session = await chatAgentWorkSession(relayId, { fresh: true });
+  if (!session) return null;
   let events = [];
-  try { events = ((await (await relayClient()).chatAgentSessionEvents(session.id)).events || []); }
-  catch (error) { if (required) throw error; }
-  let records = [];
+  try { events = ((await (await relayClient()).chatAgentSessionEvents(session.id)).events || []); } catch {}
+  let records = chatAgentEventRecords(session, events);
   const native = await localChatAgentNative(session);
   if (native?.nativeRef) {
     try {
@@ -6584,24 +6401,11 @@ async function chatAgentWorkData(relayId, { fresh = true, required = false } = {
       if (Array.isArray(page.records) && page.records.length) records = page.records;
     } catch {}
   }
-  return { session, events, records };
-}
-
-async function chatAgentRunFeed(relayId) {
-  const data = await chatAgentWorkData(relayId, { fresh:true });
-  if (!data) return null;
-  const [{ chatAgentSessionToWorkEvents }, work] = await Promise.all([
-    import("../src/chat-agent-work-events.js"),
-    import("../src/work-conversation.js"),
-  ]);
-  const state = work.replayWorkEvents(
-    chatAgentSessionToWorkEvents(data),
-    work.createWorkConversation({ provider:data.session.provider, sessionId:data.session.id }),
-  );
-  const presentation = work.workPresentationSnapshot(state);
-  const session = data.session;
-  const terminal = ["completed", "failed", "stopped"].includes(String(session.state).toLowerCase());
-  const latest = presentation.turns.at(-1) || null;
+  const terminal = ["completed", "failed", "stopped"].includes(String(session.state));
+  const { nativeTurn } = await import("../src/native-turn.js");
+  const { chatAgentWorkPresentation } = await import("../src/chat-agent-work-presentation.js");
+  const turn = nativeTurn(records, { terminalAt: terminal ? session.completedAt : null });
+  const presentation = chatAgentWorkPresentation({ session, events, records });
   return {
     ok:true,
     started:true,
@@ -6611,13 +6415,13 @@ async function chatAgentRunFeed(relayId) {
     provider:session.provider,
     model:"",
     liveState:session.state,
-    sessionId:session.id,
+    sessionId:session.relaySessionId || session.id,
     presentation,
-    records:[],
-    turnStartedAt:latest?.startedAtMs ? new Date(latest.startedAtMs).toISOString() : null,
-    turnCompletedAt:latest?.completedAtMs ? new Date(latest.completedAtMs).toISOString() : null,
-    turnDurationMs:latest?.timing?.durationMs ?? null,
-    finalText:String(latest?.final?.text || ""),
+    records:turn.records,
+    turnStartedAt:turn.startedAt,
+    turnCompletedAt:turn.completedAt,
+    turnDurationMs:turn.durationMs,
+    finalText:String((events.findLast?.((event) => event.type === "agent.completed")?.payload?.forHuman) || ""),
   };
 }
 
@@ -6910,14 +6714,13 @@ async function previewTaskLiveState(row, provider, records = []) {
 // the sender — replies to the sender belong to the chat face. A live Claude
 // turn uses its inbox socket; a settled Claude turn resumes the same Desktop
 // transcript; Codex submits another turn through its existing Desktop bridge.
-function markTaskFollowUpStarted(id, newTurn, body = "", clientMessageId = "") {
+function markTaskFollowUpStarted(id, newTurn, body = "") {
   const startedAt = new Date().toISOString();
   const row = rowById(id);
   const isRequest = row?.relayNotificationKind === "task";
   const patch = {
     [isRequest ? "taskFollowUpText" : "workFollowUpText"]: String(body || ""),
     [isRequest ? "taskFollowUpAt" : "workFollowUpAt"]: startedAt,
-    [isRequest ? "taskFollowUpClientMessageId" : "workFollowUpClientMessageId"]: String(clientMessageId || "") || null,
   };
   // A follow-up is a real user turn whether it resumes a settled session or
   // steers a live one. Persist it so the next native-feed poll cannot replace
@@ -7022,7 +6825,6 @@ async function previewTaskSteer(input) {
   const newTurn = Boolean(input && input.newTurn);
   const requestedModel = String((input && input.model) || "").trim().slice(0, 128);
   const requestedEffort = String((input && input.effort) || "").trim().toLowerCase().slice(0, 32);
-  const clientMessageId = String((input && input.clientMessageId) || "").trim().slice(0, 200) || randomUUID();
   const files = Array.isArray(input && input.files) ? input.files : [];
   if (!body && !files.length) return { ok: false, error: "Write something or attach an image first." };
   if (body.length > 20000) return { ok: false, error: "That is too long to send." };
@@ -7045,9 +6847,8 @@ async function previewTaskSteer(input) {
       const result = await (await relayClient()).chatAgentSessionTurn(
         session.id,
         body,
-        `pill-work-turn-${session.id}-${clientMessageId}`,
+        `pill-work-turn-${session.id}-${randomUUID()}`,
         session.stateVersion,
-        clientMessageId,
       );
       chatAgentWorkCache.set(id, { at:0, session:result.session || session });
       return { ok:true, operation:result.operation };
@@ -7066,7 +6867,7 @@ async function previewTaskSteer(input) {
         coworkLiveState: "working",
         coworkLiveCheckedAt: new Date().toISOString(),
       });
-      markTaskFollowUpStarted(id, newTurn, body, clientMessageId);
+      markTaskFollowUpStarted(id, newTurn, body);
       return result;
     } catch (error) {
       return { ok: false, error: (error && error.message) || String(error) };
@@ -7130,7 +6931,6 @@ async function previewTaskSteer(input) {
       const sessionRef = !newTurn && stream.activeTurnId
         ? await adapters.steerTurn(input)
         : await adapters.launchTurn(input);
-      relayOwnedCodexRuns.add(String(sessionRef.relaySessionId || relaySession.id));
       updateStagedPacket(id, {
         codexRuntimeSessionRef: sessionRef,
         codexModel: requestedModel || row.codexModel || row.model || "",
@@ -7141,7 +6941,7 @@ async function previewTaskSteer(input) {
         ].slice(-100),
       });
       void reconnectCanonicalWorkFeed(id);
-      markTaskFollowUpStarted(id, newTurn, body, clientMessageId);
+      markTaskFollowUpStarted(id, newTurn, body);
       return { ok: true, activeTurnId: sessionRef.turnId || null };
     } catch (error) {
       return { ok: false, error: (error && error.message) || String(error) };
@@ -7175,7 +6975,7 @@ async function previewTaskSteer(input) {
       }
     } else if (match && match.socketLive && match.messagingSocketPath) {
       await sendClaudeSocket(match.messagingSocketPath, providerBody);
-      markTaskFollowUpStarted(id, newTurn, body, clientMessageId);
+      markTaskFollowUpStarted(id, newTurn, body);
       return { ok: true };
     }
     const claudeCode = await import("../src/claude-desktop-code.js");
@@ -7194,7 +6994,7 @@ async function previewTaskSteer(input) {
       claudeNativeSession: { ...row.claudeNativeSession, model: claudeModel, effort: claudeEffort },
     });
     trackClaudeRunOwnership(sessionId, claudeCode);
-    markTaskFollowUpStarted(id, newTurn, body, clientMessageId);
+    markTaskFollowUpStarted(id, newTurn, body);
     return { ok: true };
   } catch (error) {
     return { ok: false, error: (error && error.message) || String(error) };
@@ -7630,28 +7430,6 @@ app.on("will-quit", preserveMacTrayPositionForExit);
 // ---- ipc -----------------------------------------------------------------
 
 ipcMain.handle("relay:get", () => buildPayload());
-ipcMain.handle("relay:sessionPicker", async (_event, id, provider) => {
-  try {
-    return await sessionPicker(String(id || ""), String(provider || ""));
-  } catch (error) {
-    return { ok: false, error: error?.message || String(error) };
-  }
-});
-ipcMain.handle("relay:deliverToSession", async (_event, id, selection) => {
-  try {
-    return await deliverPacketToSession(String(id || ""), selection || {});
-  } catch (error) {
-    console.error("[overlay] native session delivery failed:", error?.message || error);
-    return { ok: false, error: error?.message || String(error) };
-  }
-});
-ipcMain.handle("relay:continueSession", async (_event, id) => {
-  try {
-    return await continuePacketSession(String(id || ""));
-  } catch (error) {
-    return { ok: false, error: error?.message || String(error) };
-  }
-});
 ipcMain.on("relay:open", (_e, id, host) => {
   openPacket(id, { host: String(host || "") }).catch((error) => console.error("[overlay] open failed:", error && error.message));
 });
@@ -7958,8 +7736,6 @@ ipcMain.handle("relay:taskStart", (_e, id, route) =>
     // picker is decoration (and referencing `route` inside the handler body
     // threw ReferenceError, killing Start outright — David, live).
     permission: (route && route.permission) || "",
-    clientMessageId: (route && route.clientMessageId) || "",
-    files: Array.isArray(route && route.files) ? route.files : [],
   }),
 );
 ipcMain.handle("relay:taskClaim", (_e, id, expectedVersion) =>
@@ -7999,8 +7775,6 @@ ipcMain.handle("relay:relayWorkStart", (_e, id, route) =>
     model: (route && route.model) || "",
     effort: (route && route.effort) || "high",
     permission: (route && route.permission) || "",
-    clientMessageId: (route && route.clientMessageId) || "",
-    files: Array.isArray(route && route.files) ? route.files : [],
     localWork: true,
   }),
 );
@@ -8013,8 +7787,10 @@ ipcMain.handle("relay:chatAgentWorkRetry", (_e, id) => mutateChatAgentWork(id, "
 // cadence maths and stays pure, so this is only storage plus the two verbs the
 // reader has: accept a cadence, and change its mind later.
 /**
- * A run is LIVE only while Relay still owns its provider process/connection.
- * Transcript modification is historical evidence, never liveness.
+ * A run is LIVE when the thing doing it still exists: a Claude session the CLI
+ * still registers, or a Codex rollout that grew within the last few minutes.
+ * Cheap by construction — only asked of requests that started and have not
+ * finished, which is a handful at most.
  */
 const RUN_LIVE_WINDOW_MS = 3 * 60 * 1000;
 let liveClaudeCache = { at: 0, ids: new Set() };
@@ -8022,7 +7798,6 @@ let liveClaudeCache = { at: 0, ids: new Set() };
 // can land during Claude's final tool turn, before the worker has flushed and
 // released the transcript; the UI must keep Open disabled through that gap.
 const relayOwnedClaudeRuns = new Set();
-const relayOwnedCodexRuns = new Set();
 function trackClaudeRunOwnership(sessionId, claudeCode) {
   const key = String(sessionId || "");
   const worker = claudeCode?.claudeDesktopCodeWorker?.(key);
@@ -8055,11 +7830,10 @@ function runIsLive(p) {
     } catch {}
   }
   if (p.taskCompletedAt || p.workCompletedAt) return false;
-  const codexOwner = String(p.codexRuntimeSessionRef?.relaySessionId || "");
-  if (codexOwner && relayOwnedCodexRuns.has(codexOwner)) return true;
-  // Transcript modification time is history, not liveness. A finished native
-  // turn can flush after its owner exits, so using a three-minute mtime window
-  // made the Tasks list claim Working long after the runner had stopped.
+  const rollout = p.codexSessionPath || p.sessionPath || (p.claudeNativeSession && p.claudeNativeSession.sessionPath);
+  try {
+    if (rollout && Date.now() - fs.statSync(rollout).mtimeMs < RUN_LIVE_WINDOW_MS) return true;
+  } catch {}
   return false;
 }
 
@@ -8136,6 +7910,25 @@ ipcMain.handle("relay:runFeed", (_e, relayId) => taskRunFeed(relayId));
 ipcMain.handle("relay:runFeed:watch", async (event, input) => {
   const relayId = String(typeof input === "string" ? input : input?.relayId || "");
   if (!workEventAuthorized(event, relayId)) return { ok: false, error: "Not authorized for this Work feed." };
+  const row = rowById(relayId);
+  if (row?.source?.host === "relay-agent-run") {
+    await unwatchAllWorkFeedsFor(event);
+    const initial = await taskRunFeed(relayId);
+    if (!initial?.ok) return initial;
+    let active = true;
+    const timer = setInterval(async () => {
+      if (!active || event.sender.isDestroyed()) return;
+      const envelope = await taskRunFeed(relayId).catch((error) => ({ ok:false, error:String(error?.message || error) }));
+      if (!event.sender.isDestroyed()) event.sender.send("relay:runFeed:update", { relayId, ...envelope });
+      if (["completed", "failed", "stopped"].includes(String(envelope?.liveState))) clearInterval(timer);
+    }, 1000);
+    timer.unref?.();
+    const subscriptions = workFeedSubscriptions.get(event.sender.id) || new Map();
+    subscriptions.set(relayId, { sessionId:String(row.source.agentSessionId || relayId), subscriberId:`chat:${relayId}`, detach:() => { active = false; clearInterval(timer); } });
+    workFeedSubscriptions.set(event.sender.id, subscriptions);
+    bindWorkFeedWindowCleanup(event.sender);
+    return { relayId, ...initial };
+  }
   const identity = providerWorkIdentity(relayId);
   if (!identity) return { ok: false, error: "No provider-native Work session exists for this Relay." };
   // A renderer surface displays exactly one Work feed. Retire its prior feed

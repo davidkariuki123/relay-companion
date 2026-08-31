@@ -35,10 +35,6 @@ import { storeDir } from "./host-paths.js";
 import { readCanonicalRuntime } from "./canonical-runtime.js";
 import { autostartWillReplace } from "./autostart-registration.js";
 import { startRelayCodexProjectRepairLoop } from "./codex-project-repair.js";
-import {
-  processTaskCompletionWakes as defaultProcessTaskCompletionWakes,
-  queueTaskCompletionWake as defaultQueueTaskCompletionWake,
-} from "./task-completion-wake.js";
 
 const { recordAgentRelayIndex } = agentRelayContext;
 
@@ -262,8 +258,6 @@ async function pollPlainInbox({
   persistLedger = () => {},
   agentContextHome = storeDir(),
   agentContextScope = client?.token || "",
-  queueCompletionWake = defaultQueueTaskCompletionWake,
-  processCompletionWakes = defaultProcessTaskCompletionWakes,
 }) {
   if (typeof client.inbox !== "function" || typeof client.fetchRelay !== "function") return [];
   try {
@@ -293,10 +287,6 @@ async function pollPlainInbox({
           { item, packet: relay.packet, attachmentUrls: relay.attachmentUrls || {} },
           { forceUnread: Boolean(item.restoredAt && seen?.restoredAt !== item.restoredAt) },
         );
-        // Correlate before committing the inbox ledger. If durable wake queueing
-        // fails, this Relay remains fresh and the next poll retries instead of
-        // permanently losing the only completion notification.
-        queueCompletionWake({ item, packet: relay.packet });
         staged.push(item);
         log(`staged ordinary Relay from ${item.sender?.name || "someone"}: ${item.title || item.relayId}`);
         // Commit progress as it happens. The ledger used to be written only
@@ -332,20 +322,10 @@ async function pollPlainInbox({
         log,
       });
     }
-    try {
-      await processCompletionWakes({ log });
-    } catch (err) {
-      log(`Task completion wake processing failed: ${err.message}`);
-    }
     staged.inboxOk = true;
     return staged;
   } catch (err) {
     log(`ordinary Relay inbox polling failed: ${err.message}`);
-    try {
-      await processCompletionWakes({ log });
-    } catch (wakeError) {
-      log(`Task completion wake processing failed: ${wakeError.message}`);
-    }
     const failed = [];
     // Carried on the array so both callers keep their existing shape. A wedged
     // client (see SELF_HEAL_FAILURE_STREAK) can only be recognised by whether
@@ -362,18 +342,8 @@ async function pollHumanNotifications({
   stagePlainRelay,
   log,
   persistLedger = () => {},
-  queueCompletionWake = defaultQueueTaskCompletionWake,
-  processCompletionWakes = defaultProcessTaskCompletionWakes,
 }) {
-  const ordinaryRelays = await pollPlainInbox({
-    client,
-    ledger,
-    stagePlainRelay,
-    log,
-    persistLedger,
-    queueCompletionWake,
-    processCompletionWakes,
-  });
+  const ordinaryRelays = await pollPlainInbox({ client, ledger, stagePlainRelay, log, persistLedger });
   try {
     const [me, tasks, relays, connectors] = await Promise.all([
       client.me(),
@@ -423,8 +393,6 @@ export async function pollOrdinaryRelayOnce({
   stagePlainRelay = defaultStagePlainRelayItem,
   agentContextHome = storeDir(),
   agentContextScope = client?.token || "",
-  queueCompletionWake = defaultQueueTaskCompletionWake,
-  processCompletionWakes = defaultProcessTaskCompletionWakes,
 } = {}) {
   const ledger = readTaskLedger();
   // Write-skip (2026-08-05 always-on-cost audit): an idle account rewrote an
@@ -445,8 +413,6 @@ export async function pollOrdinaryRelayOnce({
     persistLedger,
     agentContextHome,
     agentContextScope,
-    queueCompletionWake,
-    processCompletionWakes,
   });
   pruneLedger(ledger);
   if (ledgerContentSignature(ledger) !== ledgerBaseline) writeTaskLedger(ledger);
@@ -459,8 +425,6 @@ export async function pollTaskRuntimeOnce({
   stageCompanionItem = defaultStageRelayCompanionItem,
   stagePlainRelay = defaultStagePlainRelayItem,
   adapters,
-  queueCompletionWake = defaultQueueTaskCompletionWake,
-  processCompletionWakes = defaultProcessTaskCompletionWakes,
 } = {}) {
   const ledger = readTaskLedger();
   const ledgerBaseline = ledgerContentSignature(ledger); // see pollOrdinaryRelayOnce
@@ -566,8 +530,6 @@ export async function pollTaskRuntimeOnce({
       pruneLedger(ledger);
       writeTaskLedger(ledger);
     },
-    queueCompletionWake,
-    processCompletionWakes,
   });
   pruneLedger(ledger);
   if (ledgerContentSignature(ledger) !== ledgerBaseline) writeTaskLedger(ledger);

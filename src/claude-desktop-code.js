@@ -416,10 +416,7 @@ export async function createClaudeDesktopCodeSession({
 } = {}) {
   const resolvedCwd = path.resolve(String(cwd || homedir));
   const resolvedTitle = String(title || "Relay Task");
-  // `--name` already gives the native session its title. Repeating that title
-  // inside the provider prompt manufactures a user message the human never
-  // sent and makes prompt-sanitizing renderers leak it into the conversation.
-  const prompt = String(content || "");
+  const prompt = [resolvedTitle, String(content || "")].filter(Boolean).join("\n\n");
   const worker = await launchWorker({
     sessionId,
     cwd: resolvedCwd,

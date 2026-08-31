@@ -184,27 +184,6 @@ test("optimistic initial user and steer bubbles reconcile without duplicates", (
   assert.equal(state.turns.t1.items.u2.optimistic, false);
 });
 
-test("explicit display text and client identity beat provider prompt rewriting", () => {
-  let state = addOptimisticUser(createWorkConversation(), {
-    text:"what's this about?", clientId:"client-visible-1", atMs:900,
-  });
-  state = reduceWorkEvent(state, turn("turn/started", "t1", "inProgress", 1_000));
-  state = reduceWorkEvent(state, item("item/completed", "t1", {
-    id:"provider-user-1",
-    type:"userMessage",
-    text:"Harden Relay send guidance\n\n<relay-documents>private provider context</relay-documents>\n\nwhat's this about?",
-    displayText:"what's this about?",
-    clientMessageId:"client-visible-1",
-    status:"completed",
-  }, 1_050));
-  const messages = turnUnits(state.turns.t1).filter((unit) => unit.role === "user");
-  assert.equal(messages.length, 1);
-  assert.equal(messages[0].text, "what's this about?");
-  assert.equal(messages[0].clientMessageId, "client-visible-1");
-  assert.equal(state.turns.t1.itemOrder.includes("optimistic-user:client-visible-1"), false);
-  assert.doesNotMatch(JSON.stringify(workPresentationSnapshot(state)), /Harden Relay send guidance|relay-documents|private provider context/);
-});
-
 test("an unaccepted steer is restored after failure while an echoed steer is not", () => {
   let state = replayWorkEvents([turn("turn/started", "t1", "inProgress", 1_000)]);
   state = addOptimisticUser(state, { text: "Retry this note", clientId: "pending", turnId: "t1", mode: "steer", atMs: 1_100 });

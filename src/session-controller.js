@@ -250,57 +250,6 @@ async function waitForClaudeIdle(sessionId, timeoutMs = 12 * 60 * 60 * 1000) {
   throw new Error("Claude session did not become idle before its Relay MCP refresh deadline");
 }
 
-// A Claude Desktop inbox socket can outlive the renderer/stream that consumes
-// it: connect + close succeeds, but no user row is ever appended. Callers use
-// transcript observation before reaching this recovery path. Replace only the
-// exact unchanged idle worker they observed, then reopen the same saved native
-// session so a retry gets a fresh socket instead of disappearing again.
-export async function refreshClaudeDesktopSessionForDelivery(sessionId, {
-  expectedPid = 0,
-  expectedSocketPath = "",
-  timeoutMs = 30_000,
-} = {}) {
-  const current = liveClaudeRegistration(sessionId);
-  if (!current) throw new Error("Claude Desktop session is no longer live");
-  if (
-    (expectedPid && Number(current.pid || 0) !== Number(expectedPid))
-    || (expectedSocketPath && current.socketPath !== expectedSocketPath)
-  ) {
-    return {
-      pid: Number(current.pid || 0) || null,
-      messagingSocketPath: current.socketPath,
-      refreshed: false,
-    };
-  }
-  const previousPid = Number(current.pid || 0);
-  if (!previousPid) throw new Error("Claude Desktop session has no live process id");
-  try {
-    process.kill(previousPid, "SIGTERM");
-  } catch (error) {
-    if (error?.code !== "ESRCH") throw error;
-  }
-  const stoppedAt = Date.now();
-  while (Date.now() - stoppedAt < Math.min(timeoutMs, 10_000)) {
-    const registration = liveClaudeRegistration(sessionId);
-    if (!registration || registration.pid !== previousPid) break;
-    await sleep(100);
-  }
-  const stillOld = liveClaudeRegistration(sessionId);
-  if (stillOld?.pid === previousPid) {
-    throw new Error("Claude Desktop stale session did not stop before refresh");
-  }
-  openClaudeSessionInBackground(sessionId);
-  const refreshed = await waitForClaudeRegistration(sessionId, {
-    previousPid,
-    timeoutMs: Math.max(1_000, timeoutMs - (Date.now() - stoppedAt)),
-  });
-  return {
-    pid: Number(refreshed.pid || 0) || null,
-    messagingSocketPath: refreshed.socketPath,
-    refreshed: true,
-  };
-}
-
 export function claudeSessionNeedsCatalogRestart(saved, registration) {
   return Boolean(registration && !claudeCatalogIsCurrent(saved));
 }

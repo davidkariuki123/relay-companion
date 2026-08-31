@@ -111,18 +111,6 @@ test("detached active ownership is a terminal failure, not synthetic completion"
   assert.deepEqual(units(result.view).filter((unit) => unit.placement === "final"), []);
 });
 
-test("a successful provider end_turn stays complete when the Task remains open", () => {
-  const rows = [
-    { type:"user", uuid:"human", origin:{ kind:"human" }, message:{ role:"user", content:"Explain it." }, timestamp:"2026-08-15T10:00:00.000Z" },
-    { type:"assistant", uuid:"answer", parentUuid:"human", message:{ role:"assistant", stop_reason:"end_turn", content:[{ type:"text", text:"It is complete." }] }, timestamp:"2026-08-15T10:00:01.000Z" },
-    { type:"result", subtype:"success", is_error:false, result:"It is complete.", stop_reason:"end_turn", timestamp:"2026-08-15T10:00:02.000Z" },
-  ];
-  const result = view(rows, { sessionId:"task-still-open", ownerAlive:false, expectedActive:true });
-  assert.equal(result.view.turns.at(-1).status, "completed");
-  assert.equal(result.view.turns.at(-1).final.text, "It is complete.");
-  assert.equal(units(result.view).some((unit) => /no longer connected/i.test(unit.text || "")), false);
-});
-
 test("assistant-shaped provider failures render once as errors", () => {
   const result = view([{
     type: "assistant",
