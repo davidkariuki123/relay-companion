@@ -1118,7 +1118,7 @@ function cmdEnv(positional = [], flags = {}) {
   }
   const selectedWebUrl = String(flags.web || DEFAULT_WEB_URL).trim().replace(/\/+$/, "");
   if (!selectedWebUrl) {
-    console.error(`[relay] the account web URL is not known — pass it explicitly with --web`);
+    console.error("[relay] the account web URL is not known — pass it explicitly with --web");
     process.exitCode = 1;
     return;
   }

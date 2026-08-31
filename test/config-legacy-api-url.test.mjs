@@ -17,6 +17,7 @@ import {
 } from "../src/config.js";
 
 const LEGACY_URL = LEGACY_API_URLS[0];
+const LEGACY_DEV_URL = LEGACY_API_URLS[1];
 
 test("release-channel normalization recognizes staging and fails unknown values closed to stable", () => {
   assert.equal(normalizeUpdateChannel("dev"), "dev");
@@ -30,9 +31,11 @@ function withConfigEnv(fn) {
   const previousDir = process.env.RELAY_CONFIG_DIR;
   const previousFile = process.env.RELAY_CONFIG;
   const previousApi = process.env.RELAY_API_URL;
+  const previousWeb = process.env.RELAY_WEB_URL;
   process.env.RELAY_CONFIG_DIR = dir;
   delete process.env.RELAY_CONFIG;
   delete process.env.RELAY_API_URL;
+  delete process.env.RELAY_WEB_URL;
   try {
     return fn(dir);
   } finally {
@@ -42,6 +45,8 @@ function withConfigEnv(fn) {
     else process.env.RELAY_CONFIG = previousFile;
     if (previousApi === undefined) delete process.env.RELAY_API_URL;
     else process.env.RELAY_API_URL = previousApi;
+    if (previousWeb === undefined) delete process.env.RELAY_WEB_URL;
+    else process.env.RELAY_WEB_URL = previousWeb;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }
@@ -131,6 +136,26 @@ test("apiUrl repairs a dev-channel install that still points at production", () 
   });
 });
 
+test("apiUrl advances a paired dev install from the retired raw App Runner origin", () => {
+  withConfigEnv(() => {
+    writeConfigObject({
+      apiUrl: LEGACY_DEV_URL,
+      devApiUrl: LEGACY_DEV_URL,
+      updateChannel: "dev",
+      deviceToken: "dev_keepme",
+      user: { id: "usr_dev", name: "David" },
+    });
+
+    assert.equal(apiUrl(), DEFAULT_DEV_API_URL);
+    const healed = readConfig();
+    assert.equal(healed.apiUrl, DEFAULT_DEV_API_URL);
+    assert.equal(healed.devApiUrl, DEFAULT_DEV_API_URL);
+    assert.equal(healed.updateChannel, "dev");
+    assert.equal(healed.deviceToken, "dev_keepme");
+    assert.deepEqual(healed.user, { id: "usr_dev", name: "David" });
+  });
+});
+
 test("apiUrl preserves an explicit custom origin on the dev channel", () => {
   withConfigEnv(() => {
     writeConfigObject({ apiUrl: "http://localhost:4000", updateChannel: "dev" });
@@ -139,11 +164,11 @@ test("apiUrl preserves an explicit custom origin on the dev channel", () => {
   });
 });
 
-test("webUrl heals the raw dev reader that production Clerk cannot authenticate", () => {
+test("webUrl heals raw reader origins that production Clerk cannot authenticate", () => {
   withConfigEnv(() => {
     writeConfigObject({
       apiUrl: DEFAULT_DEV_API_URL,
-      webUrl: "https://ujvrds7yxv.us-east-1.awsapprunner.com",
+      webUrl: "https://ujvrds7yxv.us-east-1.awsapprunner.com/",
       updateChannel: "dev",
       deviceToken: "dev_keepme",
     });
@@ -152,5 +177,15 @@ test("webUrl heals the raw dev reader that production Clerk cannot authenticate"
     const healed = readConfig();
     assert.equal(healed.webUrl, "https://sendrelays.com");
     assert.equal(healed.deviceToken, "dev_keepme");
+  });
+});
+
+test("webUrl preserves explicit custom and environment origins", () => {
+  withConfigEnv(() => {
+    writeConfigObject({ webUrl: "http://localhost:3000/" });
+    assert.equal(webUrl(), "http://localhost:3000");
+    process.env.RELAY_WEB_URL = "http://localhost:3100/";
+    assert.equal(webUrl(), "http://localhost:3100");
+    assert.equal(readConfig().webUrl, "http://localhost:3000/");
   });
 });

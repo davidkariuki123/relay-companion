@@ -30,6 +30,9 @@ contextBridge.exposeInMainWorld("relay", {
   // Relay rows
   open: (id, host) => ipcRenderer.send("relay:open", id, host),
   openSent: (id, host) => ipcRenderer.send("relay:openSent", id, host),
+  sessionPicker: (id, provider) => ipcRenderer.invoke("relay:sessionPicker", id, provider),
+  deliverToSession: (id, selection) => ipcRenderer.invoke("relay:deliverToSession", id, selection),
+  continueSession: (id) => ipcRenderer.invoke("relay:continueSession", id),
   // Sent rows get the same open-actions menu as received relays.
   openSentInCurrent: (id, host) => ipcRenderer.send("relay:openSentInCurrent", id, host),
   openSentFresh: (id, host) => ipcRenderer.send("relay:openSentFresh", id, host),
@@ -72,6 +75,7 @@ contextBridge.exposeInMainWorld("relay", {
     newTurn: options && options.newTurn === true,
     model: String(options && options.model || ""),
     effort: String(options && options.effort || ""),
+    clientMessageId: String(options && options.clientMessageId || ""),
     files: Array.isArray(options && options.files) ? options.files : [],
   }),
   schedules: () => ipcRenderer.invoke("relay:schedules"),

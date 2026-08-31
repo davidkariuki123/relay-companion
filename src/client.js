@@ -1,6 +1,7 @@
 import { accountIdentity, apiUrl, deviceToken } from "./config.js";
 import { compareAccountIdentity } from "./account.js";
 import { createRequire } from "node:module";
+import { COMPANION_TELEMETRY_HEADER, companionFleetTelemetryHeader } from "./fleet-telemetry.js";
 import {
   e2eeInboxItem,
   e2eePacket,
@@ -254,6 +255,10 @@ export class RelayClient {
     headers["x-relay-client"] = "relay-companion";
     headers["x-relay-send-contract"] = "2";
     if (auth && this.token) headers.Authorization = `Bearer ${this.token}`;
+    if (auth && String(this.token || "").startsWith("dev_")) {
+      const telemetry = companionFleetTelemetryHeader();
+      if (telemetry) headers[COMPANION_TELEMETRY_HEADER] = telemetry;
+    }
     const retryable = requestCanRetry(method, body);
     for (let attempts = 1; attempts <= 2; attempts += 1) {
       const transportRef = { current: null };
@@ -368,11 +373,12 @@ export class RelayClient {
     return this.#req("POST", `/v1/chat-agent-sessions/${encodeURIComponent(sessionId)}/events`, payload);
   }
 
-  chatAgentSessionTurn(sessionId, message, idempotencyKey, expectedStateVersion) {
+  chatAgentSessionTurn(sessionId, message, idempotencyKey, expectedStateVersion, clientMessageId = "") {
     return this.#req("POST", `/v1/chat-agent-sessions/${encodeURIComponent(sessionId)}/turns`, {
       message,
       idempotencyKey,
       ...(expectedStateVersion ? { expectedStateVersion } : {}),
+      ...(clientMessageId ? { clientMessageId } : {}),
     });
   }
 

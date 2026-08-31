@@ -51,10 +51,14 @@ export const DEFAULT_WEB_URL = "https://sendrelays.com";
 // server code — the RelayDevApi App Runner service, deployed 2026-08-14.
 // `relay env dev` flips a machine here with no flags.
 export const DEFAULT_DEV_API_URL = "https://dev-api.sendrelays.com";
-// Staging now has a retained App Runner API. Account activation still belongs
-// to sendrelays.com: the raw staging/dev web services cannot initialize the
-// production Clerk tenant.
-export const DEFAULT_STAGING_API_URL = "https://cti37jd7vx.us-east-1.awsapprunner.com";
+// Staging is intentionally dormant until its App Runner service is provisioned.
+// `relay env staging --api https://...` can persist the assigned URL once it
+// exists; a later stock build may bake it here after the endpoint is stable.
+export const DEFAULT_STAGING_API_URL = "";
+// 0.1.439 briefly persisted these raw dev/staging reader origins as the
+// account web origin. Production Clerk cannot authenticate either hostname,
+// so later runtimes must keep repairing the bad durable value even after the
+// one-off recovery bridge is no longer the current release.
 export const AUTH_INCOMPATIBLE_WEB_URLS = [
   "https://ujvrds7yxv.us-east-1.awsapprunner.com",
   "https://8epdrqim29.us-east-1.awsapprunner.com",
@@ -77,7 +81,15 @@ export const AUTH_INCOMPATIBLE_WEB_URLS = [
  * dialing it — retiring it earlier orphans every device this code has not
  * reached yet.
  */
-export const LEGACY_API_URLS = ["https://aia6vj5pgp.us-east-1.awsapprunner.com"];
+export const LEGACY_API_URLS = [
+  "https://aia6vj5pgp.us-east-1.awsapprunner.com",
+  // The first Dev API was exposed through its raw App Runner hostname. Dev
+  // installs persisted it before dev-api.sendrelays.com became canonical, so
+  // changing DEFAULT_DEV_API_URL alone left paired machines on the retired
+  // service forever. Stable installs heal this to production; the dev-channel
+  // resolution below then advances Dev installs to DEFAULT_DEV_API_URL.
+  "https://q9dpgb9fzb.us-east-1.awsapprunner.com",
+];
 
 const LEGACY_API_ORIGINS = new Set(LEGACY_API_URLS.map((url) => normalizeOrigin(url)));
 
@@ -417,10 +429,6 @@ export function webUrl() {
   const config = readConfig();
   const stored = String(config.webUrl || DEFAULT_WEB_URL).replace(/\/+$/, "");
   const incompatibleOrigins = new Set(AUTH_INCOMPATIBLE_WEB_URLS.map((url) => normalizeOrigin(url)));
-  // 0.1.439 persisted the raw dev/staging reader as the account origin. Those
-  // services can render pages but production Clerk rejects their hostnames, so
-  // setup can never leave its loading state. Heal only those known bad values;
-  // explicit localhost and custom test origins remain authoritative.
   const resolved = incompatibleOrigins.has(normalizeOrigin(stored)) ? DEFAULT_WEB_URL : stored;
   const healKey = `${configPath()}:${stored}->${resolved}`;
   if (resolved !== stored && !attemptedWebUrlHeals.has(healKey)) {
@@ -428,7 +436,7 @@ export function webUrl() {
     try {
       writeConfig({ webUrl: resolved });
     } catch {
-      // The current process still uses the Clerk-capable origin; a later process can
+      // This process still uses the Clerk-capable origin; a later process can
       // retry the durable heal if this disk write was unavailable.
     }
   }

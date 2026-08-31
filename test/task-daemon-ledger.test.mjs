@@ -133,6 +133,45 @@ test("Task lifecycle-only projections re-stage an existing Relay exactly once", 
   assert.equal(staged.length, 3, "the same completion projection is deduplicated");
 });
 
+test("completion ingest durably queues the wake before committing and then runs the worker", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-completion-ingest-test-"));
+  process.env.RELAY_CONFIG_DIR = dir;
+  const daemon = await import("../src/task-daemon.js");
+  const sequence = [];
+  const item = {
+    relayId: "relay_completion_ingest",
+    state: "delivered",
+    type: "completion",
+    inReplyToRelayId: "relay_task_origin",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    sender: { name: "Sven" },
+  };
+  const packet = {
+    relayId: item.relayId,
+    type: "completion",
+    inReplyToRelayId: item.inReplyToRelayId,
+  };
+  await daemon.pollOrdinaryRelayOnce({
+    client: {
+      token: "completion-ingest",
+      async inbox() { return { items: [item] }; },
+      async fetchRelay() { return { packet, attachmentUrls: {} }; },
+    },
+    stagePlainRelay: () => sequence.push("stage"),
+    queueCompletionWake: (value) => {
+      sequence.push("queue");
+      assert.equal(value.item.relayId, item.relayId);
+      assert.equal(value.packet.inReplyToRelayId, item.inReplyToRelayId);
+    },
+    processCompletionWakes: async () => sequence.push("process"),
+    agentContextHome: dir,
+  });
+  assert.deepEqual(sequence, ["stage", "queue", "process"]);
+  const ledger = JSON.parse(fs.readFileSync(path.join(dir, "task-ledger.json"), "utf8"));
+  assert.ok(ledger.plainRelays[item.relayId], "completion is committed only after wake queueing succeeds");
+});
+
 // ---- self-exit after a launched update: the replaced daemon must not outlive its replacement ----
 //
 // Field report (Shane, 2026-08-17): the old daemon kept running after "self-update
