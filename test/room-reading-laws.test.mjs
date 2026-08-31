@@ -206,7 +206,8 @@ test("the open rows are the apps you chose — one, or both — on the bubble an
   // footer, so the two surfaces cannot drift, and one binder wires the click
   // wherever the rows are.
   const footer = html.slice(html.indexOf("function relayHostActionsHtml"), html.indexOf("// ---- the thread reply composer"));
-  assert.match(footer, /\$\{agentAppHosts\(\)\.map\(\(host\) => hostActionRowHtml\(host, message, source\)\)\.join\(""\)\}/, "the rows are the choice, nothing else");
+  assert.match(footer, /\$\{agentAppHosts\(\)\.map\(\(host\) => hostActionRowHtml\(host, message, source\) \+ sessionPickerInlineHtml\(id, host\)\)\.join\(""\)\}/,
+    "the configured provider rows remain the choice and own their inline picker state");
   assert.doesNotMatch(footer, /data-host="codex"[\s\S]*?data-host="claude"/, "no fixed pair of rows");
   assert.match(footer, /function wireHostOpen\(scope\)/);
   assert.match(html, /wireHostOpen\(thHistoryEl\);/, "the room binds through the shared binder");
@@ -220,8 +221,33 @@ test("the open rows are the apps you chose — one, or both — on the bubble an
   assert.doesNotMatch(agentFooter, /<textarea/, "no composer to your own agent on the shipped agent document");
   // The letter keeps its reply — the loudest control on a person's letter.
   assert.match(reader, /<textarea id="qrInput" rows="1" placeholder="Reply…">/);
-  assert.match(reader, /data-open-in-host="codex">Open in Codex[\s\S]*data-open-in-host="claude">Open in Claude Code[\s\S]*id="qrSend">Send/);
+  const humanComposerStart = reader.indexOf('<textarea id="qrInput"');
+  const humanComposer = reader.slice(humanComposerStart, reader.indexOf('id="qrSend"', humanComposerStart) + 80);
+  assert.doesNotMatch(humanComposer, /data-open-in-host=/,
+    "the human reply composer does not duplicate provider actions from the agent face");
   assert.match(reader, /<button type="button" id="qrSend">Send<\/button>/);
+});
+
+test("a compact provider-row click expands the existing conversation and unfolds destinations beneath that row", () => {
+  const picker = html.slice(html.indexOf("function renderSessionPickerSurface"), html.indexOf('// The verb NAMES an app'));
+  const footer = html.slice(html.indexOf("function relayHostActionsHtml"), html.indexOf("// Before 0.1.290"));
+  assert.doesNotMatch(html, /id="sessionPickerView"/, "there is no standalone picker page");
+  assert.doesNotMatch(picker, /data-sp-host|sp-hosts/, "there is no duplicate Claude/Codex toggle");
+  assert.match(footer, /class="th-host-action\$\{selected \? " pressed" : ""\}"/,
+    "the provider row itself owns the pressed state");
+  assert.match(footer, /selected[\s\S]*"Choose where this Relay lands"/);
+  assert.match(picker, /const expandConversation = activeView === "threads" && !chatExpanded/);
+  assert.match(picker, /const morphFromCompact = expandConversation && prepareReaderMorph\("threads"\)/);
+  assert.match(picker, /chatExpanded = true;[\s\S]*commitNavigation\(\);[\s\S]*startReaderMorph\("threads"\)/,
+    "the existing compact room becomes the existing expanded room before the picker is shown");
+  assert.match(picker, /New Codex task/);
+  assert.match(picker, /New Claude Code session/);
+  assert.match(picker, /your current \$\{noun\} ·/);
+  assert.match(picker, /recent · active/);
+  assert.match(footer, /if \(bound\) \{[\s\S]*openRelayFromUI\(id, source, "open", host\)/,
+    "a legacy materialized Relay continues directly without a picker");
+  assert.match(footer, /if \(picker\?\.binding\) \{[\s\S]*window\.relay\.continueSession\(id\)/,
+    "a remembered exact-session binding also continues directly without expanding");
 });
 
 test("composer attachments are enabled across picker, paste, and drop", () => {

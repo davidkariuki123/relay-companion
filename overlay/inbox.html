@@ -310,29 +310,22 @@
   .scroll::-webkit-scrollbar-corner { background:transparent; }
   .view.hidden { display:none; }
 
-  /* ---- exact native-session destination picker ---- */
-  .sp { display:flex; flex-direction:column; min-height:330px; background:var(--bg); }
-  .sp-head { display:flex; align-items:center; gap:10px; padding:13px 16px 11px; border-bottom:1px solid var(--hair); }
-  .sp-back { appearance:none; border:0; background:transparent; color:var(--muted-2); cursor:pointer; padding:0; font-size:18px; line-height:1; }
-  .sp-title { min-width:0; flex:1; }
-  .sp-title strong { display:block; font-size:13px; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .sp-title span { display:block; margin-top:2px; font-family:var(--serif); font-size:13.5px; color:var(--muted); }
-  .sp-hosts { display:inline-flex; gap:2px; padding:2px; border-radius:8px; background:color-mix(in srgb, var(--ink) 6%, transparent); }
-  .sp-host { appearance:none; border:0; background:transparent; color:var(--muted-2); cursor:pointer; border-radius:6px; padding:4px 7px; font-size:10.5px; font-weight:600; }
-  .sp-host.active { background:var(--surface, var(--bg)); color:var(--ink); box-shadow:0 1px 2px rgba(0,0,0,.12); }
-  .sp-list { display:flex; flex-direction:column; }
-  .sp-row { appearance:none; border:0; border-bottom:1px solid var(--hair); background:transparent; width:100%; padding:12px 16px; cursor:pointer; text-align:left; display:flex; align-items:center; gap:10px; font-family:var(--sans); }
+  /* The exact-session picker is the pressed state of the provider row. It is
+     never a separate page: a compact conversation grows into its normal
+     expanded frame, the chosen row remains the front door, and destinations
+     unfold immediately beneath that row (Sven's board, 2026-08-24). */
+  .th-host-action.pressed { background:linear-gradient(90deg, color-mix(in srgb, var(--host-color) 16%, transparent), transparent 72%); }
+  .th-host-action.pressed .th-host-arrow { transform:rotate(90deg); }
+  .sp-list { display:flex; flex-direction:column; border-top:1px solid var(--hair); border-bottom:1px solid var(--hair); background:color-mix(in srgb,var(--bg) 62%,var(--wash)); }
+  .sp-row { appearance:none; border:0; border-bottom:1px solid var(--hair); background:transparent; width:100%; padding:13px 18px 13px 52px; cursor:pointer; text-align:left; display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:16px; font-family:var(--sans); }
+  .sp-row:last-child { border-bottom:0; }
   .sp-row:hover { background:color-mix(in srgb, var(--ink) 3%, transparent); }
   .sp-row:disabled { cursor:default; opacity:.55; }
-  .sp-main { min-width:0; flex:1; }
-  .sp-name { display:block; color:var(--ink); font-size:12.75px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .sp-project { display:block; color:var(--muted-2); font-size:10.75px; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .sp-state { flex:0 0 auto; color:var(--muted-2); font-family:var(--mono); font-size:10.5px; white-space:nowrap; }
+  .sp-name { min-width:0; display:block; color:var(--ink); font-size:12.75px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .sp-state { color:var(--muted-2); font-family:var(--mono); font-size:10.5px; white-space:nowrap; text-align:right; }
   .sp-state.working { color:var(--accent); }
-  .sp-loading, .sp-error { padding:28px 16px; text-align:center; color:var(--muted-2); font-size:12px; line-height:1.5; }
+  .sp-loading, .sp-error { padding:18px; text-align:center; color:var(--muted-2); font-size:11px; line-height:1.5; }
   .sp-error { color:var(--danger, #b4332a); }
-  .sp-continue { padding:16px; }
-  .sp-continue .sp-row { border:1px solid var(--hair); border-radius:10px; }
 
   /* Every compact surface -> reader frame is one morph, not a navigation
      followed by a resize. The source snapshot holds the exact pixels the click
@@ -2747,10 +2740,6 @@
         <div id="readerBody"></div>
       </section>
 
-      <section class="view hidden" id="sessionPickerView">
-        <div class="sp" id="sessionPicker"></div>
-      </section>
-
       <!-- Contacts view -->
       <section class="view hidden" id="contactsView">
         <div class="cv-head">
@@ -2872,8 +2861,6 @@
   const tasksBadgeEl = document.getElementById("tasksBadge");
   const readerViewEl = document.getElementById("readerView");
   const readerBodyEl = document.getElementById("readerBody");
-  const sessionPickerViewEl = document.getElementById("sessionPickerView");
-  const sessionPickerEl = document.getElementById("sessionPicker");
   const sentListEl = document.getElementById("sentList");
   const sentEmptyEl = document.getElementById("sentEmpty");
   const requestDetailViewEl = document.getElementById("requestDetailView");
@@ -4642,120 +4629,120 @@
     }, wait);
   }
 
-  function closeSessionPicker() {
-    const returnView = sessionPickerState?.returnView || "relays";
+  function renderSessionPickerSurface(savedRoomScroll = null) {
+    if (activeView === "reader") renderReader();
+    else if (activeView === "threads") renderThreadDetail();
+    else renderAll();
+    if (savedRoomScroll) requestAnimationFrame(() => restoreRoomScroll(savedRoomScroll));
+  }
+
+  function closeSessionPicker({ render = true } = {}) {
+    if (!sessionPickerState) return;
     sessionPickerState = null;
-    activeView = returnView;
-    commitNavigation();
+    if (render) renderSessionPickerSurface();
   }
 
-  function sessionStateLabel(session, current) {
-    if (current) return session.state === "active" ? "working now" : "focused now";
-    if (session.state === "active") return "working now";
-    if (session.state === "needs_input") return "needs input";
-    return timeAgo(session.lastActiveAt);
+  function sessionStateLabel(session, { current = false, provider = "claude" } = {}) {
+    const noun = provider === "codex" ? "task" : "chat";
+    if (current) return `your current ${noun} · ${session.state === "active" ? "working now" : "focused now"}`;
+    if (session.state === "needs_input") return "recent · needs input";
+    const age = timeAgo(session.lastActiveAt);
+    return `recent · active ${age || "now"}`;
   }
 
-  function sessionRowHtml(session, { current = false } = {}) {
-    const label = sessionStateLabel(session, current);
+  function sessionRowHtml(session, { current = false, provider = "claude" } = {}) {
+    const label = sessionStateLabel(session, { current, provider });
     return `<button class="sp-row" type="button" data-session-id="${esc(session.nativeId)}" data-session-state="${esc(session.state)}">
-      <span class="sp-main"><span class="sp-name">${esc(session.title || "Untitled session")}</span><span class="sp-project">${esc(session.projectName || session.cwd || "Native session")}</span></span>
+      <span class="sp-name">“${esc(session.title || "Untitled session")}”</span>
       <span class="sp-state${session.state === "active" ? " working" : ""}">${esc(label)}</span>
     </button>`;
   }
 
-  function renderSessionPicker() {
+  function sessionPickerInlineHtml(id, provider) {
     const state = sessionPickerState;
-    if (!state) return;
-    const data = state.data;
-    const provider = state.provider;
+    if (!state || String(state.id) !== String(id) || state.provider !== provider) return "";
     const hostLabel = provider === "codex" ? "Codex" : "Claude Code";
-    if (state.loading) {
-      sessionPickerEl.innerHTML = `<div class="sp-head"><button class="sp-back" type="button" data-sp-back>‹</button><div class="sp-title"><strong>${esc(state.title)}</strong><span>Choose where this Relay lands</span></div></div><div class="sp-loading">Loading recent ${hostLabel} sessions…</div>`;
-    } else if (state.error) {
-      sessionPickerEl.innerHTML = `<div class="sp-head"><button class="sp-back" type="button" data-sp-back>‹</button><div class="sp-title"><strong>${esc(state.title)}</strong><span>Choose where this Relay lands</span></div></div><div class="sp-error">${esc(state.error)}</div>`;
-    } else if (data?.binding) {
-      const boundHost = data.binding.provider === "codex" ? "Codex" : "Claude Code";
-      sessionPickerEl.innerHTML = `<div class="sp-head"><button class="sp-back" type="button" data-sp-back>‹</button><div class="sp-title"><strong>Continue in ${boundHost}</strong><span>This Relay already landed here</span></div></div><div class="sp-continue"><button class="sp-row" type="button" data-sp-continue><span class="sp-main"><span class="sp-name">${esc(data.binding.title || "Bound session")}</span><span class="sp-project">${esc(data.binding.cwd || "Exact native session")}</span></span><span class="sp-state">open →</span></button></div>`;
-    } else {
-      const current = data?.current ? sessionRowHtml(data.current, { current: true }) : "";
-      const recent = (data?.recent || []).map((session) => sessionRowHtml(session)).join("");
-      sessionPickerEl.innerHTML = `<div class="sp-head">
-        <button class="sp-back" type="button" data-sp-back>‹</button>
-        <div class="sp-title"><strong>Open in ${hostLabel}</strong><span>Choose where this Relay lands</span></div>
-        <div class="sp-hosts"><button class="sp-host${provider === "claude" ? " active" : ""}" type="button" data-sp-host="claude">Claude</button><button class="sp-host${provider === "codex" ? " active" : ""}" type="button" data-sp-host="codex">Codex</button></div>
-      </div><div class="sp-list"><button class="sp-row" type="button" data-sp-new><span class="sp-main"><span class="sp-name">New ${hostLabel} session</span><span class="sp-project">Starts with this Relay</span></span><span class="sp-state">new →</span></button>${current}${recent || '<div class="sp-loading">No recent sessions found.</div>'}</div>`;
-    }
-    sessionPickerEl.querySelector("[data-sp-back]")?.addEventListener("click", closeSessionPicker);
-    for (const host of sessionPickerEl.querySelectorAll("[data-sp-host]")) {
-      host.addEventListener("click", () => loadSessionPicker(
-        state.id,
-        host.getAttribute("data-sp-host"),
-        state.title,
-        state.returnView,
-      ));
-    }
-    const continueButton = sessionPickerEl.querySelector("[data-sp-continue]");
-    if (continueButton) continueButton.addEventListener("click", async () => {
-      if (continueButton.disabled) return;
-      continueButton.disabled = true;
-      continueButton.querySelector(".sp-state").textContent = "Opening…";
-      const result = await window.relay.continueSession(state.id);
-      if (result?.ok === false) {
-        continueButton.disabled = false;
-        sessionPickerState.error = result.error || "Could not open the bound session.";
-        renderSessionPicker();
-      } else closeSessionPicker();
-    });
-    const newButton = sessionPickerEl.querySelector("[data-sp-new]");
-    if (newButton) newButton.addEventListener("click", () => deliverSessionSelection(newButton, { provider, mode: "new" }));
-    for (const button of sessionPickerEl.querySelectorAll("[data-session-id]")) {
-      button.addEventListener("click", () => deliverSessionSelection(button, {
-        provider,
-        nativeId: button.getAttribute("data-session-id"),
-        state: button.getAttribute("data-session-state"),
-      }));
-    }
+    if (state.loading) return `<div class="sp-list"><div class="sp-loading">Loading recent ${hostLabel} ${provider === "codex" ? "tasks" : "sessions"}…</div></div>`;
+    if (state.error) return `<div class="sp-list"><div class="sp-error">${esc(state.error)}</div></div>`;
+    const current = state.data?.current ? sessionRowHtml(state.data.current, { current:true, provider }) : "";
+    const recent = (state.data?.recent || []).map((session) => sessionRowHtml(session, { provider })).join("");
+    const newLabel = provider === "codex" ? "New Codex task" : "New Claude Code session";
+    return `<div class="sp-list">
+      <button class="sp-row" type="button" data-sp-new><span class="sp-name">${newLabel}</span><span class="sp-state">starts with this Relay</span></button>
+      ${current}${recent}
+    </div>`;
   }
 
   async function deliverSessionSelection(button, selection) {
-    if (!sessionPickerState || button.disabled) return;
+    const state = sessionPickerState;
+    if (!state || button.disabled) return;
     button.disabled = true;
     const stateEl = button.querySelector(".sp-state");
     if (stateEl) stateEl.textContent = selection.state === "active" ? "Queued…" : "Opening…";
-    const result = await window.relay.deliverToSession(sessionPickerState.id, selection);
+    const result = await window.relay.deliverToSession(state.id, selection);
+    if (!sessionPickerState || sessionPickerState !== state) return;
     if (result?.ok === false) {
-      button.disabled = false;
-      sessionPickerState.error = result.error || "Could not deliver this Relay.";
-      renderSessionPicker();
-    } else closeSessionPicker();
+      state.error = result.error || "Could not deliver this Relay.";
+      renderSessionPickerSurface();
+    } else {
+      sessionPickerState = null;
+      renderSessionPickerSurface();
+    }
   }
 
-  async function loadSessionPicker(id, provider = "", title = "Relay", returnView = activeView) {
-    const rememberedReturn = returnView === "sessionPicker"
-      ? sessionPickerState?.returnView || "relays"
-      : returnView;
+  async function loadSessionPicker(id, provider = "", title = "Relay", prefetchedResult = null) {
+    const selectedProvider = provider === "codex" ? "codex" : "claude";
+    if (sessionPickerState
+      && String(sessionPickerState.id) === String(id)
+      && sessionPickerState.provider === selectedProvider) {
+      closeSessionPicker();
+      return;
+    }
+    const savedRoomScroll = activeView === "threads" ? captureRoomScroll() : null;
+    const expandConversation = activeView === "threads" && !chatExpanded;
+    const morphFromCompact = expandConversation && prepareReaderMorph("threads");
     sessionPickerState = {
       id,
-      provider: provider || "claude",
+      provider:selectedProvider,
       title,
-      returnView: rememberedReturn,
-      loading: true,
-      error: "",
-      data: null,
+      loading:!prefetchedResult,
+      error:prefetchedResult?.ok === false ? prefetchedResult.error || "Could not load native sessions." : "",
+      data:prefetchedResult?.ok === false ? null : prefetchedResult,
     };
-    activeView = "sessionPicker";
-    commitNavigation();
-    renderSessionPicker();
-    const result = await window.relay.sessionPicker(id, provider);
-    if (!sessionPickerState || sessionPickerState.id !== id) return;
-    sessionPickerState.loading = false;
-    if (!result || result.ok === false) sessionPickerState.error = result?.error || "Could not load native sessions.";
-    else {
-      sessionPickerState.provider = result.provider;
-      sessionPickerState.data = result;
+    if (expandConversation) {
+      chatExpanded = true;
+      syncExpandButton();
+      renderChatRail();
     }
-    renderSessionPicker();
+    // Build the selected provider row and its loading dropdown before the
+    // compact-to-expanded morph begins. The original chat chip itself is not
+    // changed; only the destination frame gains this pressed state.
+    commitNavigation();
+    if (morphFromCompact) startReaderMorph("threads");
+    if (savedRoomScroll) requestAnimationFrame(() => restoreRoomScroll(savedRoomScroll));
+    const state = sessionPickerState;
+    if (prefetchedResult) return;
+    let result;
+    try { result = await window.relay.sessionPicker(id, selectedProvider); }
+    catch (error) { result = { ok:false, error:error?.message || "Could not load native sessions." }; }
+    if (!sessionPickerState || sessionPickerState !== state) return;
+    if (result?.binding) {
+      sessionPickerState = null;
+      renderSessionPickerSurface(savedRoomScroll);
+      const continued = await window.relay.continueSession(id);
+      if (continued?.ok === false) {
+        setRowNote(id, continued.error || "Could not open the bound session.", "err");
+        renderSessionPickerSurface(savedRoomScroll);
+      }
+      return;
+    }
+    state.loading = false;
+    if (!result || result.ok === false) state.error = result?.error || "Could not load native sessions.";
+    else {
+      state.provider = result.provider === "codex" ? "codex" : "claude";
+      state.data = result;
+    }
+    renderSessionPickerSurface(savedRoomScroll);
   }
   // The verb NAMES an app ("Open in Codex"), so the open must go THERE — the
   // running-process heuristic only decides when nothing was named (David's
@@ -7011,13 +6998,10 @@
           ? requestedHost
           : hostKeyFor(rt.app);
         const app = host === "codex" ? "Codex" : host === "claude" ? "Claude Code" : rt.app;
+        const note = String((b.closest(".ta-dock")?.querySelector(".ta-note") || {}).value || "").trim();
         const ranAlready = requestHasNativeSession(taskRows().find((row) => row.id === id));
-        if (ranAlready && window.relay.openInCurrent) {
-          window.relay.openInCurrent(id, host);
-        } else {
-          loadSessionPicker(id, host, relaySubject(relayById(id) || { id }) || "Relay", activeView);
-          return;
-        }
+        if (ranAlready && window.relay.openInCurrent) window.relay.openInCurrent(id, host);
+        else openRelayFromUI(id, "relay", "fresh", host, note);
         // AFTER the open, never before: openRelayFromUI clears the row's note
         // first (a stale failure must not outlive the retry), so a note written
         // above this line vanished the same instant — the trap already found on
@@ -7577,6 +7561,7 @@
       clearPeek();
       presented = true;
     }
+    sessionPickerState = null;
     const morphFromList = prepareReaderMorph(activeView);
     readerId = id;
     const opened = readerRow(id);
@@ -7608,6 +7593,7 @@
   }
   function closeReader() {
     cleanReaderMorph();
+    sessionPickerState = null;
     const back = readerReturn || { view: readerSource === "tasks" ? "tasks" : "relays", threadId: null };
     if (readerId) destroyWorkScroller(readerId);
     scrollEl.classList.remove("work-scroll-active"); readerViewEl.classList.remove("work-view"); readerBodyEl.classList.remove("work-mode");
@@ -7930,8 +7916,6 @@
           })(), null)}
           <span class="rt-spacer"></span>
           <span class="ta-acts">
-            <button class="ta-later" type="button" data-open-in="${esc(r.id)}" data-open-in-host="codex">Open in Codex</button>
-            <button class="ta-later" type="button" data-open-in="${esc(r.id)}" data-open-in-host="claude">Open in Claude Code</button>
             <button type="button" id="qrSend">Send</button>
           </span>
         </div>
@@ -11704,17 +11688,22 @@
     const source = message && message.direction === "out" ? "sent" : "relay";
     return `${persistent ? "" : `<button class="th-host-disclosure" type="button" data-host-disclosure="${esc(id)}" data-stop="1" aria-expanded="false" aria-controls="${esc(actionsId)}"><span>Open with an agent</span><span class="chev" aria-hidden="true">⌄</span></button>`}<div id="${esc(actionsId)}" class="th-host-actions${persistent ? " persistent" : ""}" data-host-actions="${esc(id)}" data-stop="1" aria-hidden="${persistent ? "false" : "true"}"${persistent ? "" : " inert"}>
       <div class="th-host-actions-inner">
-        ${agentAppHosts().map((host) => hostActionRowHtml(host, message, source)).join("")}
+        ${agentAppHosts().map((host) => hostActionRowHtml(host, message, source) + sessionPickerInlineHtml(id, host)).join("")}
       </div>
     </div>`;
   }
   function hostActionRowHtml(host, message, source) {
     const id = String(message && message.id || "");
     const codex = host === "codex";
-    const context = codex
-      ? (message?.materializedCodex ? "Continue in its existing task" : "Start a new task with this Relay")
-      : (message?.materializedClaude ? "Continue in its existing session" : "Start a new session with this Relay");
-    return `<button class="th-host-action" type="button" data-host-open="${esc(id)}" data-host="${codex ? "codex" : "claude"}" data-source="${source}">
+    const selected = sessionPickerState
+      && String(sessionPickerState.id) === id
+      && sessionPickerState.provider === host;
+    const context = selected
+      ? "Choose where this Relay lands"
+      : codex
+        ? (message?.materializedCodex ? "Continue in its existing task" : "Start a new task with this Relay")
+        : (message?.materializedClaude ? "Continue in its existing session" : "Start a new session with this Relay");
+    return `<button class="th-host-action${selected ? " pressed" : ""}" type="button" data-host-open="${esc(id)}" data-host="${codex ? "codex" : "claude"}" data-source="${source}" aria-expanded="${selected ? "true" : "false"}">
           <img class="th-host-logo" src="${codex ? "codexMark.svg" : "claudeCodeMark.svg"}" alt="" />
           <span class="th-host-copy"><span class="th-host-label">Open in ${codex ? "Codex" : "Claude Code"}</span><span class="th-host-context">${esc(context)}</span></span>
           <span class="th-host-arrow" aria-hidden="true">→</span>
@@ -11723,7 +11712,7 @@
   // The row's click, wherever the row is painted (a room bubble, the reader).
   function wireHostOpen(scope) {
     for (const b of scope.querySelectorAll("[data-host-open]")) {
-      b.addEventListener("click", (e) => {
+      b.addEventListener("click", async (e) => {
         e.stopPropagation();
         const id = b.getAttribute("data-host-open");
         const host = b.getAttribute("data-host") === "claude" ? "claude" : "codex";
@@ -11731,7 +11720,32 @@
         const app = host === "codex" ? "Codex" : "Claude Code";
         if (source === "relay") {
           const message = relayById(id) || { id };
-          loadSessionPicker(id, host, relaySubject(message) || "Relay", activeView);
+          const bound = host === "codex" ? message.materializedCodex : message.materializedClaude;
+          if (bound) {
+            openRelayFromUI(id, source, "open", host);
+            setOpeningNote(id, `Opening in ${app}…`);
+            return;
+          }
+          if (sessionPickerState
+            && String(sessionPickerState.id) === String(id)
+            && sessionPickerState.provider === host) {
+            closeSessionPicker();
+            return;
+          }
+          b.disabled = true;
+          let picker;
+          try { picker = await window.relay.sessionPicker(id, host); }
+          catch (error) { picker = { ok:false, error:error?.message || "Could not load native sessions." }; }
+          b.disabled = false;
+          if (picker?.binding) {
+            const result = await window.relay.continueSession(id);
+            if (result?.ok === false) {
+              setRowNote(id, result.error || `Could not open the existing ${host === "codex" ? "task" : "session"}.`, "err");
+              renderSessionPickerSurface();
+            }
+            return;
+          }
+          loadSessionPicker(id, host, relaySubject(message) || "Relay", picker);
           return;
         }
         // The open clears any earlier note first (a stale failure must not
@@ -11739,6 +11753,21 @@
         // written before, it vanished the same instant (found on the clone).
         openRelayFromUI(id, source, "open", host);
         setOpeningNote(id, `Opening in ${app}…`);
+      });
+    }
+    const newButton = scope.querySelector("[data-sp-new]");
+    if (newButton) newButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      deliverSessionSelection(newButton, { provider:sessionPickerState?.provider, mode:"new" });
+    });
+    for (const button of scope.querySelectorAll("[data-session-id]")) {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        deliverSessionSelection(button, {
+          provider:sessionPickerState?.provider,
+          nativeId:button.getAttribute("data-session-id"),
+          state:button.getAttribute("data-session-state"),
+        });
       });
     }
   }
@@ -12121,7 +12150,10 @@
       const badges = aggregates.length ? `<div class="rx-badges" data-stop="1">${aggregates.map((reaction) =>
         `<button type="button" class="rx-badge${reaction.reactedByMe ? " mine" : ""}" data-rx-toggle="${esc(m.id)}" data-emoji="${esc(reaction.emoji)}" data-mine="${reaction.reactedByMe ? "1" : "0"}" title="${esc((reaction.actors || []).map((actor) => actor.self ? "You" : actor.name).join(", "))}">${esc(reaction.emoji)}${reaction.count > 1 ? `<span class="n">${reaction.count}</span>` : ""}</button>`
       ).join("")}</div>` : "";
-      const hostActionsPersistent = hasHostActions && String(m.id) === latestHostActionRelayId;
+      const hostActionsPersistent = hasHostActions && (
+        String(m.id) === latestHostActionRelayId
+        || String(sessionPickerState?.id || "") === String(m.id)
+      );
       const nextEntry = timeline[i + 1];
       const nextMessage = nextEntry && nextEntry.kind === "message" ? nextEntry.message : null;
       const nextChunkDateLabel = nextMessage ? chatChunkDateLabel(nextMessage.at, m.at) : "";
@@ -12890,6 +12922,7 @@
     const roomScroll = captureRoomScroll();
     rememberChatRailScroll();
     const morphFromCompact = !chatExpanded && prepareReaderMorph(activeView);
+    if (chatExpanded) sessionPickerState = null;
     chatExpanded = !chatExpanded;
     syncExpandButton();
     // Populate/clear the rail before the frame begins moving. Building it
@@ -12900,6 +12933,7 @@
     requestAnimationFrame(() => restoreRoomScroll(roomScroll));
   });
   thBackEl.addEventListener("click", () => {
+    sessionPickerState = null;
     if (slackFocusedThreadId) {
       slackFocusedThreadId = "";
       threadDetailScrolledFor = null;
@@ -12949,6 +12983,7 @@
     return source === "chat" || source === "relays" || source === "slack" || source === "contacts";
   }
   function openThreadDetail(threadId, partyHint = "", source = "relays", options = {}) {
+    sessionPickerState = null;
     if (activeView === "relays" && source === "relays" && scrollEl) relaysListScrollTop = scrollEl.scrollTop;
     if (activeView === "slack" && source === "slack" && scrollEl) slackListScrollTop = scrollEl.scrollTop;
     if (activeView === "contacts" && source === "contacts" && scrollEl) contactsListScrollTop = scrollEl.scrollTop;
@@ -14666,7 +14701,6 @@
       : activeView === "threads" ? threadsSource
       : activeView === "contacts" ? "contacts"
       : activeView === "reader" ? (readerSource || "relays")
-      : activeView === "sessionPicker" ? (sessionPickerState?.returnView === "reader" ? (readerSource || "relays") : sessionPickerState?.returnView || "relays")
       : activeView;
     for (const tab of tabEls) {
       const view = tab.getAttribute("data-view");
@@ -14689,7 +14723,6 @@
     sentViewEl.classList.toggle("hidden", activeView !== "sent");
     tasksViewEl.classList.toggle("hidden", activeView !== "tasks");
     readerViewEl.classList.toggle("hidden", activeView !== "reader");
-    sessionPickerViewEl.classList.toggle("hidden", activeView !== "sessionPicker");
     requestDetailViewEl.classList.toggle("hidden", activeView !== "requestDetail");
     contactsViewEl.classList.toggle("hidden", activeView !== "contacts");
     settingsViewEl.classList.toggle("hidden", activeView !== "settings");
@@ -14760,7 +14793,7 @@
         // second tap on the lit tab: fall through and navigate to its list
       }
       if (view === activeView) return;
-      if (activeView === "sessionPicker") sessionPickerState = null;
+      if (sessionPickerState) sessionPickerState = null;
       activeView = view;
       commitNavigation();
     });
