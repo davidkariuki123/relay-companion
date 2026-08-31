@@ -22,6 +22,7 @@ import { claudeDesktopSessionsDir, claudeProjectsDir } from "./host-paths.js";
 import { relayClaudePermissionMode } from "./claude-session-runtime.js";
 
 const DEFAULT_CLAUDE_METADATA_MODEL = "claude-opus-5";
+const INVALID_RELAY_CLAUDE_MODEL = "relay-companion";
 const CLAUDE_DESKTOP_LIVE_TITLE_LIMITATION = {
   attempted: true,
   supported: "best-effort",
@@ -73,10 +74,10 @@ export function writeClaudeNativeSession({ row, cwd = process.cwd(), seed = rend
       parentUuid: operatorNote ? operatorUuid : null,
       isSidechain: false,
       message: {
-        // A real model id when the task runtime picker chose one — the CLI
-        // reads the session model off the last assistant row on resume, and a
-        // placeholder here made it warn and fall back to the default.
-        model: String(model || "").trim() || "relay-companion",
+        // Claude reads the session model off the last assistant row on resume.
+        // This must always be a real Claude model id: an internal Relay label
+        // makes current Claude builds reject the session instead of falling back.
+        model: resolveClaudeSessionModel(model),
         id: claudeMessageId(),
         type: "message",
         role: "assistant",
@@ -108,6 +109,12 @@ export function writeClaudeNativeSession({ row, cwd = process.cwd(), seed = rend
 
   fs.mkdirSync(sessionDir, { recursive: true });
   writeJsonlAtomic(sessionPath, rows);
+  const transcriptModelValidation = repairClaudeSessionModel({ sessionPath, model });
+  if (transcriptModelValidation.valid === false) {
+    throw new Error(
+      `Relay wrote a Claude session with an invalid model (${transcriptModelValidation.reason || "unknown"}).`,
+    );
+  }
   const desktopMetadataPath = writeClaudeDesktopSessionMetadata({ sessionId, title, cwd, createdAt, model, effort });
   if (process.env.RELAY_IMPORT_CLAUDE_DESKTOP !== "0") {
     sleepSync(Number(process.env.RELAY_CLAUDE_PREIMPORT_DELAY_MS || 750));
@@ -119,6 +126,7 @@ export function writeClaudeNativeSession({ row, cwd = process.cwd(), seed = rend
     title,
     cwd,
     createdAt,
+    model,
     metadataPath: desktopMetadataPath,
     retries: desktopImport.attempted ? 10 : 1,
   });
@@ -133,6 +141,7 @@ export function writeClaudeNativeSession({ row, cwd = process.cwd(), seed = rend
           title,
           cwd,
           createdAt,
+          model,
           metadataPath: desktopTitleBeforeRefocus.metadataPath || desktopMetadataPath,
           retries: 10,
         })
@@ -154,6 +163,7 @@ export function writeClaudeNativeSession({ row, cwd = process.cwd(), seed = rend
     desktopRefocus,
     desktopRepair,
     desktopPermissionMode,
+    transcriptModelRepair: transcriptModelValidation,
     desktopLiveTitle: CLAUDE_DESKTOP_LIVE_TITLE_LIMITATION,
   };
 }
@@ -182,7 +192,7 @@ export function writeClaudeDesktopSessionMetadata({
     lastActivityAt: nowMs,
     // Explicit choice (the task runtime picker) beats the env override beats
     // the default; effort mirrors model.
-    model: String(model || "").trim() || process.env.RELAY_CLAUDE_METADATA_MODEL || DEFAULT_CLAUDE_METADATA_MODEL,
+    model: resolveClaudeSessionModel(model),
     effort: String(effort || "").trim() || "high",
     isArchived: false,
     title,
@@ -224,6 +234,7 @@ export function restoreClaudeDesktopSessionTitle({
   title,
   cwd = process.cwd(),
   createdAt = new Date().toISOString(),
+  model = "",
   metadataPath = null,
   retries = 10,
   delayMs = 250,
@@ -256,7 +267,6 @@ export function restoreClaudeDesktopSessionTitle({
         lastFocusedAt: existing.lastFocusedAt || nowMs,
         createdAt: existing.createdAt || createdAtMs,
         lastActivityAt: existing.lastActivityAt || nowMs,
-        model: process.env.RELAY_CLAUDE_METADATA_MODEL || existing.model || DEFAULT_CLAUDE_METADATA_MODEL,
         effort: existing.effort || "high",
         isArchived: false,
         enabledMcpTools: existing.enabledMcpTools || {},
@@ -270,6 +280,10 @@ export function restoreClaudeDesktopSessionTitle({
         ...existing,
         title,
         titleSource: "user",
+        // Re-pin a valid model after the spread too. Desktop can rewrite the
+        // metadata during import, and older Relay builds wrote their own name
+        // here instead of a Claude model id.
+        model: resolveClaudeSessionModel(model, process.env.RELAY_CLAUDE_METADATA_MODEL, existing.model),
         // Re-pinned after the spread, exactly like the title, and for the same
         // reason: Claude Desktop's importCliSession builds the session with
         // permissionMode Default hardcoded and saves it over what we wrote before
@@ -464,6 +478,7 @@ export async function adoptClaudeSessionIntoDesktop({
         title,
         cwd: resolvedCwd,
         createdAt,
+        model,
         metadataPath,
         retries: 1,
       });
@@ -490,6 +505,7 @@ export async function adoptClaudeSessionIntoDesktop({
         title,
         cwd: resolvedCwd,
         createdAt,
+        model,
         metadataPath,
         retries: 1,
       });
@@ -522,8 +538,18 @@ export function isClaudeNativeSessionImported(nativeSession) {
   return desktopImport.reason === "disabled" || desktopImport.reason === "unsupported-platform";
 }
 
-export function ensureClaudeDesktopImported(nativeSession, { title, cwd, createdAt } = {}) {
+export function ensureClaudeDesktopImported(nativeSession, { title, cwd, createdAt, model = "" } = {}) {
   if (!nativeSession?.sessionId) return nativeSession;
+  const transcriptModelRepair = repairClaudeSessionModel({
+    sessionPath: nativeSession.sessionPath,
+    model,
+  });
+  if (transcriptModelRepair.valid === false) {
+    throw new Error(
+      `Relay could not safely repair the Claude session model (${transcriptModelRepair.reason || "unknown"}). Try opening the Relay again.`,
+    );
+  }
+  nativeSession = { ...nativeSession, transcriptModelRepair };
   const nextTitle = title || nativeSession.title;
   if (isClaudeNativeSessionImported(nativeSession)) return nativeSession;
   const desktopImport =
@@ -535,6 +561,7 @@ export function ensureClaudeDesktopImported(nativeSession, { title, cwd, created
     title: nextTitle,
     cwd: cwd || nativeSession.cwd || process.cwd(),
     createdAt: createdAt || nativeSession.createdAt || new Date().toISOString(),
+    model,
     metadataPath: nativeSession.desktopMetadataPath || nativeSession.desktopTitle?.metadataPath || null,
     retries: desktopImport.attempted ? 10 : 1,
   });
@@ -553,6 +580,7 @@ export function ensureClaudeDesktopImported(nativeSession, { title, cwd, created
           title: nextTitle,
           cwd: cwd || nativeSession.cwd || process.cwd(),
           createdAt: createdAt || nativeSession.createdAt || new Date().toISOString(),
+          model,
           metadataPath: desktopTitleBeforeRefocus.metadataPath || nativeSession.desktopMetadataPath || null,
           retries: 10,
         })
@@ -571,6 +599,133 @@ export function ensureClaudeDesktopImported(nativeSession, { title, cwd, created
     desktopRepair,
     desktopPermissionMode,
     desktopLiveTitle: CLAUDE_DESKTOP_LIVE_TITLE_LIMITATION,
+  };
+}
+
+/**
+ * Resolve one model id for both the forged transcript and Desktop metadata.
+ * Callers may provide candidates in priority order; the environment override
+ * and product default are the final fallbacks. The historical Relay sentinel
+ * is never a valid candidate, even if it leaks in through persisted state.
+ */
+export function resolveClaudeSessionModel(...values) {
+  const candidates = [...values, process.env.RELAY_CLAUDE_METADATA_MODEL, DEFAULT_CLAUDE_METADATA_MODEL];
+  for (const value of candidates) {
+    const candidate = String(value || "").trim();
+    if (candidate && candidate.toLowerCase() !== INVALID_RELAY_CLAUDE_MODEL) return candidate;
+  }
+  return DEFAULT_CLAUDE_METADATA_MODEL;
+}
+
+/**
+ * Heal transcripts forged by older Relay builds before Claude resumes them.
+ * Only the exact Relay-owned seed row is eligible. Untouched lines remain
+ * byte-for-byte identical, and a concurrent append or malformed tail aborts
+ * the atomic replacement rather than risking a user's Claude transcript.
+ */
+export function repairClaudeSessionModel({ sessionPath = "", model = "" } = {}) {
+  const resolvedModel = resolveClaudeSessionModel(model);
+  if (!sessionPath) return { attempted: false, repaired: false, valid: true, reason: "missing-session-path", model: resolvedModel };
+  if (!fs.existsSync(sessionPath)) {
+    return { attempted: false, repaired: false, valid: true, reason: "session-transcript-not-found", sessionPath, model: resolvedModel };
+  }
+
+  let before;
+  let raw;
+  try {
+    before = fs.statSync(sessionPath);
+    raw = fs.readFileSync(sessionPath, "utf8");
+  } catch (error) {
+    return {
+      attempted: true,
+      repaired: false,
+      valid: false,
+      reason: error instanceof Error ? error.message : String(error),
+      sessionPath,
+      model: resolvedModel,
+    };
+  }
+
+  const newline = raw.includes("\r\n") ? "\r\n" : "\n";
+  const lines = raw.split(/\r?\n/);
+  let invalidRows = 0;
+  const nextLines = [];
+  for (const line of lines) {
+    if (!line.trim()) {
+      nextLines.push(line);
+      continue;
+    }
+    let row;
+    try {
+      row = JSON.parse(line);
+    } catch {
+      return {
+        attempted: true,
+        repaired: false,
+        valid: false,
+        reason: "transcript-is-changing-or-malformed",
+        sessionPath,
+        model: resolvedModel,
+        invalidRows,
+      };
+    }
+    if (isRelayForgedAssistantRow(row)) {
+      const currentModel = String(row.message?.model || "").trim().toLowerCase();
+      if (!currentModel || currentModel === INVALID_RELAY_CLAUDE_MODEL) {
+        invalidRows += 1;
+        row = { ...row, message: { ...row.message, model: resolvedModel } };
+        nextLines.push(JSON.stringify(row));
+        continue;
+      }
+    }
+    nextLines.push(line);
+  }
+
+  if (!invalidRows) {
+    return { attempted: true, repaired: false, valid: true, reason: "already-valid", sessionPath, model: resolvedModel, invalidRows: 0 };
+  }
+
+  const nextRaw = nextLines.join(newline);
+  const temporaryPath = `${sessionPath}.${process.pid}.${Date.now()}.model-repair.tmp`;
+  try {
+    fs.writeFileSync(temporaryPath, nextRaw, { mode: before.mode & 0o777 });
+    const current = fs.statSync(sessionPath);
+    if (current.size !== before.size || current.mtimeMs !== before.mtimeMs) {
+      fs.rmSync(temporaryPath, { force: true });
+      return {
+        attempted: true,
+        repaired: false,
+        valid: false,
+        reason: "transcript-changed-during-repair",
+        sessionPath,
+        model: resolvedModel,
+        invalidRows,
+      };
+    }
+    fs.renameSync(temporaryPath, sessionPath);
+  } catch (error) {
+    try {
+      fs.rmSync(temporaryPath, { force: true });
+    } catch {}
+    return {
+      attempted: true,
+      repaired: false,
+      valid: false,
+      reason: error instanceof Error ? error.message : String(error),
+      sessionPath,
+      model: resolvedModel,
+      invalidRows,
+    };
+  }
+
+  return {
+    attempted: true,
+    repaired: true,
+    valid: true,
+    reason: "legacy-relay-model-repaired",
+    sessionPath,
+    model: resolvedModel,
+    invalidRows,
   };
 }
 
@@ -787,6 +942,16 @@ function findClaudeSessionPath({ sessionId, cwd = null }) {
 
 function isRelayTitle(value) {
   return /^🔁\s+((?:From|To)\s+.+:|Task:)/u.test(String(value || "").trim());
+}
+
+function isRelayForgedAssistantRow(row) {
+  return (
+    row?.type === "assistant" &&
+    row?.entrypoint === "relay-companion" &&
+    row?.version === "relay-companion" &&
+    row?.message?.role === "assistant" &&
+    /^msg_01relay[0-9a-f]+$/i.test(String(row?.message?.id || ""))
+  );
 }
 
 function childDirectories(dir) {
