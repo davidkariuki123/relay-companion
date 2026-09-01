@@ -7674,7 +7674,15 @@ ipcMain.handle("relay:deliverToSession", async (_event, id, selection) => {
     return await deliverPacketToSession(String(id || ""), selection || {});
   } catch (error) {
     console.error("[overlay] native session delivery failed:", error?.message || error);
-    return { ok: false, error: error?.message || String(error) };
+    try {
+      const { delivery } = await loadSessionRouting();
+      return {
+        ok: false,
+        error: delivery.publicSessionDeliveryError(error, selection?.provider),
+      };
+    } catch {
+      return { ok: false, error: "Relay could not deliver to that session. Please try again." };
+    }
   }
 });
 ipcMain.handle("relay:continueSession", async (_event, id, source) => {

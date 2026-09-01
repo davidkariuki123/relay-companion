@@ -155,6 +155,48 @@ test("queues the Relay behind an active native turn", async () => {
   }
 });
 
+test("an acknowledged but unverified Desktop delivery never starts a competing App Server", async () => {
+  const previousHome = process.env.RELAY_HOME;
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-session-owner-only-"));
+  const rollout = path.join(root, "rollout.jsonl");
+  fs.writeFileSync(rollout, "");
+  process.env.RELAY_HOME = root;
+  fs.writeFileSync(path.join(root, "state.json"), JSON.stringify({ packets: { relay_owner: { id: "relay_owner" } } }));
+  try {
+    const delivery = await import(`../src/session-delivery.js?owner-only=${Date.now()}`);
+    const target = targetFor(rollout);
+    let appServerCalls = 0;
+    await assert.rejects(
+      delivery.deliverRelayToSession({
+        relayId: "relay_owner",
+        target,
+        discover: () => [target],
+        submitCodex: async () => ({
+          attempted: true,
+          submitted: true,
+          ran: false,
+          clientUserMessageId: "message-owner",
+        }),
+        appServer: async () => {
+          appServerCalls += 1;
+          throw new Error("must not run");
+        },
+        pollMs: 1,
+      }),
+      (error) => error?.code === "CODEX_DELIVERY_UNCONFIRMED",
+    );
+    assert.equal(appServerCalls, 0);
+    assert.equal(delivery.relaySessionBinding("relay_owner"), null);
+    assert.doesNotMatch(
+      delivery.publicSessionDeliveryError(new Error("thread secret-id already has an active writer"), "codex"),
+      /secret-id|active writer/i,
+    );
+  } finally {
+    if (previousHome === undefined) delete process.env.RELAY_HOME;
+    else process.env.RELAY_HOME = previousHome;
+  }
+});
+
 test("a cold Claude session finishes its background owner before Relay opens it", async () => {
   const previousHome = process.env.RELAY_HOME;
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-session-claude-"));

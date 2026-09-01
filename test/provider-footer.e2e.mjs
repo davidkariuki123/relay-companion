@@ -710,12 +710,15 @@ try {
     }
     const list = document.querySelector(selector)?.nextElementSibling;
     const row = list?.previousElementSibling;
+    const composer = document.querySelector('#readerBody .rd-foot .ta-dock');
     const viewport = scrollEl.getBoundingClientRect();
     return {
       immediate,
       samples,
       scrollSamples,
-      finalFit:Boolean(list && row && row.getBoundingClientRect().top >= viewport.top - 1 && list.getBoundingClientRect().bottom <= viewport.bottom + 1),
+      finalFit:Boolean(list && row && composer && row.getBoundingClientRect().top >= viewport.top - 1 && composer.getBoundingClientRect().bottom <= viewport.bottom + 1),
+      composerBottom:composer?.getBoundingClientRect().bottom || 0,
+      viewportBottom:viewport.bottom,
     };
   })()`);
   await waitFor(page, `activeView === "reader" && sessionPickerState?.provider === "codex" && !sessionPickerState.loading`);
@@ -727,12 +730,12 @@ try {
   assert.ok(finalMotionHeight > 100, `the destination list reaches its full height: ${finalMotionHeight}`);
   assert.ok(motionHeights.some((height) => height > 1 && height < finalMotionHeight * .8),
     `the disclosure has real intermediate frames instead of a discrete jump: ${motionHeights.join(", ")}`);
-  assert.equal(readerMotion.finalFit, true, "the selected row and its completed destination list remain inside the reader viewport");
+  assert.equal(readerMotion.finalFit, true, `the selected row, completed destination list, and composer remain inside the reader viewport: ${JSON.stringify(readerMotion)}`);
   const viewportFollow = await evaluate(page, `(async () => {
     const prior = sessionPickerState;
     const harness = document.createElement('div');
     harness.style.cssText = 'position:fixed;left:-2000px;top:0;width:320px;height:190px;overflow:auto';
-    harness.innerHTML = '<div style="height:130px"></div><button style="display:block;width:100%;height:40px"></button><div class="sp-list open" data-sp-reveal="viewport_follow_fixture" data-sp-provider="codex" style="height:0"><div class="sp-list-inner" style="height:100px"></div></div>';
+    harness.innerHTML = '<div style="height:130px"></div><button style="display:block;width:100%;height:40px"></button><div class="sp-list open" data-sp-reveal="viewport_follow_fixture" data-sp-provider="codex" style="height:0"><div class="sp-list-inner" style="height:100px"></div></div><div class="ta-dock" style="position:static;height:48px;padding:0;margin:0"></div>';
     document.body.appendChild(harness);
     sessionPickerState = { id:'viewport_follow_fixture', provider:'codex', motion:'open' };
     const reveal = harness.querySelector('[data-sp-reveal]');
@@ -751,14 +754,15 @@ try {
     const viewport = harness.getBoundingClientRect();
     const row = reveal.previousElementSibling.getBoundingClientRect();
     const list = reveal.getBoundingClientRect();
-    const fit = row.top >= viewport.top - 1 && list.bottom <= viewport.bottom + 1;
+    const composer = harness.querySelector('.ta-dock').getBoundingClientRect();
+    const fit = row.top >= viewport.top - 1 && list.bottom <= composer.top + 1 && composer.bottom <= viewport.bottom + 1;
     const finalScrollTop = harness.scrollTop;
     cancelAnimationFrame(sessionPickerViewportRaf);
     sessionPickerViewportRaf = 0;
     sessionPickerState = prior;
     harness.remove();
     return { samples:[...new Set(samples)], heights:[...new Set(heights)], bottoms:[...new Set(bottoms)], fit, reduced:REDUCED,
-      final:{ rowTop:row.top, listBottom:list.bottom, viewportTop:viewport.top, viewportBottom:viewport.bottom, scrollTop:finalScrollTop } };
+      final:{ rowTop:row.top, listBottom:list.bottom, composerBottom:composer.bottom, viewportTop:viewport.top, viewportBottom:viewport.bottom, scrollTop:finalScrollTop } };
   })()`);
   assert.ok(viewportFollow.samples.length >= 5,
     `the viewport must follow a growing disclosure over multiple frames: ${JSON.stringify(viewportFollow)}`);

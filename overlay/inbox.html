@@ -342,7 +342,9 @@
   .sp-state { color:var(--muted-2); font-family:var(--mono); font-size:10.5px; white-space:nowrap; text-align:right; }
   .sp-state.working { color:var(--accent); }
   .sp-loading, .sp-error { padding:18px; text-align:center; color:var(--muted-2); font-size:11px; line-height:1.5; }
-  .sp-error { color:var(--danger, #b4332a); }
+  .sp-error { color:var(--danger, #b4332a); display:flex; align-items:center; justify-content:center; gap:12px; }
+  .sp-error button { appearance:none; border:1px solid var(--hair); border-radius:999px; padding:6px 10px; background:transparent; color:var(--ink); font:600 10px/1 var(--sans); cursor:pointer; }
+  .sp-error button:hover { background:color-mix(in srgb, var(--ink) 4%, transparent); }
   @media (prefers-reduced-motion:reduce) {
     .sp-list { transition:none; }
   }
@@ -4667,6 +4669,20 @@
     return activeView === "threads" && chatExpanded ? thDetailEl : scrollEl;
   }
 
+  function sessionPickerFitTail(reveal, scroller) {
+    if (!reveal || !scroller) return reveal;
+    // The picker lives immediately above the existing composer. As the menu
+    // unfolds it pushes that composer down; following only the list therefore
+    // lets the animation settle with the field clipped below the viewport.
+    // Keep the first visible following composer in the fit envelope so the
+    // whole footer moves as one continuous surface.
+    const following = Node.DOCUMENT_POSITION_FOLLOWING;
+    return [...scroller.querySelectorAll(".ta-dock, .th-composer-dock")].find((node) =>
+      Boolean(reveal.compareDocumentPosition(node) & following)
+      && node.getClientRects().length > 0
+    ) || reveal;
+  }
+
   function followSessionPickerIntoView(state = sessionPickerState, duration = 460) {
     if (!state || REDUCED) return;
     cancelAnimationFrame(sessionPickerViewportRaf);
@@ -4680,19 +4696,26 @@
       const viewport = scroller.getBoundingClientRect();
       const rowBox = row.getBoundingClientRect();
       const revealBox = reveal.getBoundingClientRect();
+      const tailBox = sessionPickerFitTail(reveal, scroller).getBoundingClientRect();
       const readerBar = readerBodyEl.querySelector(".reader-bar");
       const topInset = activeView === "reader" && readerBar && scroller.contains(readerBar)
         ? Math.max(14, readerBar.getBoundingClientRect().bottom - viewport.top + 12)
         : 14;
       const viewTop = viewport.top + topInset;
       const viewBottom = viewport.bottom - 16;
-      const targetHeight = revealBox.bottom - rowBox.top;
+      const targetBottom = Math.max(revealBox.bottom, tailBox.bottom);
+      const targetHeight = targetBottom - rowBox.top;
       const available = viewBottom - viewTop;
       let delta = 0;
       if (targetHeight <= available) {
-        if (revealBox.bottom > viewBottom) delta = revealBox.bottom - viewBottom;
+        if (targetBottom > viewBottom) delta = targetBottom - viewBottom;
         else if (rowBox.top < viewTop) delta = rowBox.top - viewTop;
-      } else if (rowBox.top < viewTop || rowBox.top > viewBottom - rowBox.height) {
+      } else if (targetBottom > viewBottom) {
+        // When the complete row + destinations + composer is taller than the
+        // viewport, the useful settled state is the footer: the destination
+        // list can scroll above, but the composer must never be truncated.
+        delta = targetBottom - viewBottom;
+      } else if (rowBox.top > viewBottom - rowBox.height) {
         delta = rowBox.top - viewTop;
       }
       // The disclosure gains only a few pixels per frame. Moving the scroller
@@ -4792,7 +4815,7 @@
     const provider = state.provider;
     const hostLabel = provider === "codex" ? "Codex" : "Claude Code";
     if (state.loading) return `<div class="sp-loading">Loading recent ${hostLabel} ${provider === "codex" ? "tasks" : "sessions"}…</div>`;
-    if (state.error) return `<div class="sp-error">${esc(state.error)}</div>`;
+    if (state.error) return `<div class="sp-error"><span>${esc(state.error)}</span><button type="button" data-sp-retry>Show sessions</button></div>`;
     const current = state.data?.current ? sessionRowHtml(state.data.current, { current:true, provider }) : "";
     const recent = (state.data?.recent || []).map((session) => sessionRowHtml(session, { provider })).join("");
     const newLabel = provider === "codex" ? "New Codex task" : "New Claude Code session";
@@ -4810,6 +4833,11 @@
   }
 
   function wireSessionPickerRows(scope) {
+    const retryButton = scope.querySelector("[data-sp-retry]");
+    if (retryButton) retryButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      retrySessionPicker(sessionPickerState);
+    });
     const newButton = scope.querySelector("[data-sp-new]");
     if (newButton) newButton.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -4826,6 +4854,24 @@
         });
       });
     }
+  }
+
+  async function retrySessionPicker(state) {
+    if (!state || sessionPickerState !== state) return;
+    state.loading = true;
+    state.error = "";
+    paintSessionPickerResult(state);
+    let result;
+    try { result = await window.relay.sessionPicker(state.id, state.provider, state.source); }
+    catch { result = { ok:false, error:"Could not load native sessions." }; }
+    if (!sessionPickerState || sessionPickerState !== state) return;
+    state.loading = false;
+    if (!result || result.ok === false) state.error = result?.error || "Could not load native sessions.";
+    else {
+      state.provider = result.provider === "codex" ? "codex" : "claude";
+      state.data = result;
+    }
+    paintSessionPickerResult(state);
   }
 
   function paintSessionPickerResult(state) {
