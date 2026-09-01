@@ -96,6 +96,25 @@ test("directory keeps a huge currently-growing Codex turn active after its start
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test("an abandoned unfinished Codex marker does not outrank live picker tasks", () => {
+  const root = fixture();
+  const home = path.join(root, "codex");
+  const day = path.join(home, "sessions", "2026", "08", "11");
+  fs.mkdirSync(day, { recursive: true });
+  const id = "019fa000-0000-7000-8000-000000000023";
+  const now = Date.parse("2026-08-11T10:00:00Z");
+  const filePath = path.join(day, `rollout-2026-08-11T01-00-00-${id}.jsonl`);
+  fs.writeFileSync(filePath, `${[
+    codexLine("session_meta", { id, session_id: id, cwd: "/work/relay" }, new Date(now - 9 * 60 * 60_000).toISOString()),
+    codexLine("event_msg", { type: "task_started", turn_id: "abandoned" }, new Date(now - 9 * 60 * 60_000).toISOString()),
+  ].join("\n")}\n`);
+  fs.utimesSync(filePath, (now - 9 * 60 * 60_000) / 1000, (now - 9 * 60 * 60_000) / 1000);
+
+  const session = discoverCodexSessions({ homeDir: home, nowMs: now }).find((row) => row.nativeId === id);
+  assert.equal(session.state, "idle");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test("directory distinguishes a live Claude chat from a cold but recoverable idle chat", () => {
   const root = fixture();
   const configDir = path.join(root, "claude");

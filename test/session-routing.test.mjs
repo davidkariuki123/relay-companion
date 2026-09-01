@@ -36,6 +36,25 @@ test("lists the current native task separately from five recents", async () => {
   assert.ok(result.recent.every((row) => row.nativeId !== rows[2].nativeId));
 });
 
+test("working tasks displace the oldest inactive picker rows", async () => {
+  const delivery = await import(`../src/session-delivery.js?working=${Date.now()}`);
+  const now = Date.now();
+  const rows = Array.from({ length: 7 }, (_, index) => ({
+    ...targetFor(`/tmp/rank-${index}.jsonl`),
+    nativeId: `11111111-1111-4111-8111-${String(index).padStart(12, "0")}`,
+    title: `Task ${index}`,
+    state: "idle",
+    lastActiveAt: new Date(now - index * 1_000).toISOString(),
+  }));
+  rows[6] = { ...rows[6], title: "Older but working", state: "active" };
+
+  const result = delivery.listRelayDestinations("codex", { discover: () => rows });
+  assert.equal(result.recent.length, 5);
+  assert.ok(result.recent.some((row) => row.title === "Older but working"));
+  assert.ok(!result.recent.some((row) => row.title === "Task 4"));
+  assert.equal(result.recent[0].title, "Older but working");
+});
+
 test("delivers once to an exact idle task, binds it, then only continues it", async () => {
   const previousHome = process.env.RELAY_HOME;
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-session-delivery-"));
@@ -66,6 +85,38 @@ test("delivers once to an exact idle task, binds it, then only continues it", as
     const second = await delivery.deliverRelayToSession(options);
     assert.equal(second.continued, true);
     assert.equal(sends.length, 1);
+  } finally {
+    if (previousHome === undefined) delete process.env.RELAY_HOME;
+    else process.env.RELAY_HOME = previousHome;
+  }
+});
+
+test("a sent Relay can supply its reference-only conversation lookup prompt", async () => {
+  const previousHome = process.env.RELAY_HOME;
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-sent-session-delivery-"));
+  const rollout = path.join(root, "rollout.jsonl");
+  fs.writeFileSync(rollout, "");
+  process.env.RELAY_HOME = root;
+  fs.writeFileSync(path.join(root, "state.json"), JSON.stringify({ packets: { sent_relay_4: { id:"sent_relay_4" } } }));
+  try {
+    const delivery = await import(`../src/session-delivery.js?sent=${Date.now()}`);
+    const target = targetFor(rollout);
+    let submitted = "";
+    const prompt = "A Relay you sent has been selected: relay_4. Use relay_sent_list, then relay_chat_fetch.";
+    await delivery.deliverRelayToSession({
+      relayId:"sent_relay_4",
+      target,
+      prompt,
+      discover:() => [target],
+      submitCodex:async ({ text }) => {
+        submitted = text;
+        return { submitted:true, ran:true, clientUserMessageId:"message-sent" };
+      },
+      notifyCodex:async () => ({ ok:true }),
+      pollMs:1,
+    });
+    assert.equal(submitted, prompt);
+    assert.doesNotMatch(submitted, /relay_inbox_list/);
   } finally {
     if (previousHome === undefined) delete process.env.RELAY_HOME;
     else process.env.RELAY_HOME = previousHome;

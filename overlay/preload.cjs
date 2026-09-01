@@ -30,9 +30,9 @@ contextBridge.exposeInMainWorld("relay", {
   // Relay rows
   open: (id, host) => ipcRenderer.send("relay:open", id, host),
   openSent: (id, host) => ipcRenderer.send("relay:openSent", id, host),
-  sessionPicker: (id, provider) => ipcRenderer.invoke("relay:sessionPicker", id, provider),
+  sessionPicker: (id, provider, source) => ipcRenderer.invoke("relay:sessionPicker", id, provider, source),
   deliverToSession: (id, selection) => ipcRenderer.invoke("relay:deliverToSession", id, selection),
-  continueSession: (id) => ipcRenderer.invoke("relay:continueSession", id),
+  continueSession: (id, source) => ipcRenderer.invoke("relay:continueSession", id, source),
   // Sent rows get the same open-actions menu as received relays.
   openSentInCurrent: (id, host) => ipcRenderer.send("relay:openSentInCurrent", id, host),
   openSentFresh: (id, host) => ipcRenderer.send("relay:openSentFresh", id, host),

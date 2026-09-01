@@ -246,8 +246,12 @@ test("a compact provider-row click expands the existing conversation and unfolds
   assert.match(picker, /recent · active/);
   assert.match(footer, /if \(bound\) \{[\s\S]*openRelayFromUI\(id, source, "open", host\)/,
     "a legacy materialized Relay continues directly without a picker");
-  assert.match(footer, /if \(picker\?\.binding\) \{[\s\S]*window\.relay\.continueSession\(id\)/,
+  assert.match(picker, /if \(result\?\.binding\) \{[\s\S]*window\.relay\.continueSession\(id, state\.source\)/,
     "a remembered exact-session binding also continues directly without expanding");
+  assert.match(footer, /loadSessionPicker\(id, host, relaySubject\(message\) \|\| "Relay", null, source\)/,
+    "received and sent rows enter the same immediate picker path");
+  assert.doesNotMatch(footer, /if \(source === "relay"\)/,
+    "sent Relays cannot bypass the picker and silently create a fresh session");
 });
 
 test("composer attachments are enabled across picker, paste, and drop", () => {

@@ -237,6 +237,25 @@ test("listRecentRollouts keeps the newest file per thread id", () => {
   assert.equal(byId.get(T3).sessionPath, fresh);
 });
 
+test("a continued Codex task keeps its root id and newest live rollout", () => {
+  const home = fixture();
+  const now = Date.now();
+  const original = writeRollout(home, T1, [sessionMetaLine(), taskStarted("old"), taskComplete("old")], {
+    mtimeMs: now - 2 * 60 * 60 * 1000,
+  });
+  const continuationId = "019fa000-0000-7000-8000-000000000099";
+  const continued = original.replace(`${T1}.jsonl`, `${T1}_${continuationId}.jsonl`);
+  fs.writeFileSync(continued, `${[sessionMetaLine(), taskStarted("live")].join("\n")}\n`);
+  fs.utimesSync(continued, new Date(now - 1_000), new Date(now - 1_000));
+
+  const byId = listRecentRollouts(path.join(home, "sessions"), { nowMs: now });
+  assert.equal(byId.size, 1);
+  assert.equal(byId.get(T1).threadId, T1);
+  assert.equal(byId.get(T1).sessionPath, continued);
+  assert.equal(resolveCurrentCodexThread({ homeDir: home, nowMs: now }).threadId, T1);
+  assert.equal(resolveCurrentCodexThread({ homeDir: home, nowMs: now }).busy, true);
+});
+
 // ---- idle waiting + growth verification ------------------------------------
 
 test("waitForCodexIdle returns once a close event lands, and times out while busy", async () => {

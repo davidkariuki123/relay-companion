@@ -88,7 +88,14 @@ export function listRelayDestinations(provider, {
     .filter((session) => session.provider === cleanProvider && session.capabilities?.send !== false)
     .sort((a, b) => Date.parse(b.lastActiveAt) - Date.parse(a.lastActiveAt));
   const current = rows.find((session) => session.nativeId === currentNativeId) || null;
-  const recent = rows.filter((session) => session.nativeId !== current?.nativeId).slice(0, limit);
+  const candidates = rows.filter((session) => session.nativeId !== current?.nativeId);
+  const working = candidates.filter((session) => ["active", "needs_input"].includes(session.state));
+  const inactive = candidates.filter((session) => !["active", "needs_input"].includes(session.state));
+  // A working task is a safer and more useful destination than an idle task
+  // whose only advantage is a newer timestamp. Reserve the fixed picker rows
+  // for live work first, then fill the remaining slots with the freshest idle
+  // tasks. Each group already retains native recency order from `rows`.
+  const recent = [...working, ...inactive].slice(0, limit);
   return {
     provider: cleanProvider,
     current: current ? publicSession(current) : null,
@@ -245,6 +252,7 @@ async function deliverClaude(target, prompt, options = {}) {
 export async function deliverRelayToSession({
   relayId,
   target,
+  prompt: suppliedPrompt = "",
   timeoutMs = DEFAULT_TIMEOUT_MS,
   ...options
 } = {}) {
@@ -258,7 +266,7 @@ export async function deliverRelayToSession({
     return { continued: true, binding: existing, ...(await focusSession(existing, options)) };
   }
   const exact = await waitForSessionIdle(target, { timeoutMs, ...options });
-  const prompt = relayReferencePrompt(relayId);
+  const prompt = String(suppliedPrompt || "").trim() || relayReferencePrompt(relayId);
   const delivery = exact.provider === "codex"
     ? await deliverCodex(exact, prompt, { timeoutMs, ...options })
     : await deliverClaude(exact, prompt, { timeoutMs, ...options });

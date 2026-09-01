@@ -593,14 +593,14 @@ test("continued Task and Work composers keep model and thinking pickers wired to
 });
 
 test("provider materialization state reaches both inbound and sent conversation rows", () => {
-  assert.match(main, /materializedCodex: Boolean\(p\.codexThreadId\)/);
-  assert.match(main, /materializedClaude: Boolean\(p\.claudeNativeSession\?\.sessionId\)/);
+  assert.match(main, /materializedCodex: Boolean\(p\.codexThreadId \|\| p\.sessionBinding\?\.provider === "codex"\)/);
+  assert.match(main, /materializedClaude: Boolean\(p\.claudeNativeSession\?\.sessionId \|\| p\.sessionBinding\?\.provider === "claude"\)/);
   assert.doesNotMatch(main, /materializedCodex: Boolean\(p\.materializedSurfaces/);
   assert.doesNotMatch(main, /materializedClaude: Boolean\(p\.materializedSurfaces/);
   assert.match(main, /function sentWithMaterializationState/);
   assert.match(main, /packets\[`sent_\$\{relayId\}`\]/);
-  assert.match(main, /materializedCodex: Boolean\(row\.codexThreadId\)/);
-  assert.match(main, /materializedClaude: Boolean\(row\.claudeNativeSession\?\.sessionId\)/);
+  assert.match(main, /materializedCodex: Boolean\(row\.codexThreadId \|\| row\.sessionBinding\?\.provider === "codex"\)/);
+  assert.match(main, /materializedClaude: Boolean\(row\.claudeNativeSession\?\.sessionId \|\| row\.sessionBinding\?\.provider === "claude"\)/);
   const inbound = between(inbox, "for (const r of payload.relays", "// A self-send exists");
   const sent = between(inbox, "for (const s of payload.sent", "const canonicalIds");
   assert.match(inbound, /materializedCodex: Boolean\(r\.materializedCodex\)/);

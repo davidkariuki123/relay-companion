@@ -4,6 +4,7 @@ import path from "node:path";
 import { codexHome, claudeDesktopSessionsDir, claudeHome, storeDir } from "./host-paths.js";
 import {
   RECENT_ROLLOUT_ACTIVITY_MS,
+  THREAD_MAX_AGE_MS,
   listRecentRollouts,
   parseSessionIndex,
   readRolloutActivity,
@@ -116,7 +117,8 @@ export function discoverCodexSessions({ homeDir = codexHome(), nowMs = Date.now(
     const meta = readRolloutMeta(rollout.sessionPath);
     if (!meta || meta.subagent) continue;
     const activity = readRolloutActivity(rollout.sessionPath);
-    const busy = activity.busy || (
+    const recentlyLive = nowMs - Math.max(rollout.mtimeMs, activity.lastEventAt || 0) <= THREAD_MAX_AGE_MS;
+    const busy = (activity.busy && recentlyLive) || (
       !activity.lifecycleObserved && nowMs - rollout.mtimeMs <= RECENT_ROLLOUT_ACTIVITY_MS
     );
     const indexed = index.get(rollout.threadId);

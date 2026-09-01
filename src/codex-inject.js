@@ -51,7 +51,16 @@ export const RECENT_ROLLOUT_ACTIVITY_MS = 90 * 1000;
 const ROLLOUT_TAIL_BYTES = 256 * 1024;
 const ROLLOUT_HEAD_BYTES = 96 * 1024;
 const INDEX_TAIL_BYTES = 256 * 1024;
-const ROLLOUT_FILE_RE = /^rollout-.*-([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl$/;
+const ROLLOUT_UUID_RE = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g;
+
+// Codex can continue one visible task in a new rollout file whose filename is
+// `<root-thread-id>_<continuation-id>.jsonl`. The provider-native address is
+// still the FIRST UUID. Treating only the final UUID as the task id hides the
+// live continuation and leaves an old, idle root row in the session picker.
+function rolloutThreadIdFromName(name) {
+  if (!/^rollout-.*\.jsonl$/.test(name)) return "";
+  return String(name).match(ROLLOUT_UUID_RE)?.[0] || "";
+}
 
 export { buildInjectionInstruction };
 
@@ -203,8 +212,8 @@ export function listRecentRollouts(sessionsRoot, { nowMs = Date.now(), dayLookba
       continue;
     }
     for (const name of names) {
-      const match = ROLLOUT_FILE_RE.exec(name);
-      if (!match) continue;
+      const threadId = rolloutThreadIdFromName(name);
+      if (!threadId) continue;
       const filePath = path.join(dir, name);
       let mtimeMs = 0;
       try {
@@ -212,7 +221,6 @@ export function listRecentRollouts(sessionsRoot, { nowMs = Date.now(), dayLookba
       } catch {
         continue;
       }
-      const threadId = match[1];
       const existing = byId.get(threadId);
       if (!existing || mtimeMs > existing.mtimeMs) byId.set(threadId, { threadId, sessionPath: filePath, mtimeMs });
     }

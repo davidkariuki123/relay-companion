@@ -591,32 +591,126 @@ try {
   assert.equal(readerActions.replyPlaceholder, "Reply…");
   const readerActionsShot = await capture(page, "reader-provider-actions.png");
 
+  // A live payload/chat refresh can rebuild the reader after the first reveal
+  // frame but before the second. The disclosure must arm the replacement node;
+  // retaining the original element leaves the actual UI at a two-pixel,
+  // opacity-zero seam even though accessibility can see every session row.
+  const rerenderedReveal = await evaluate(page, `(async () => {
+    sessionPickerState = {
+      id:"provider_footer_oldest",
+      provider:"codex",
+      title:"Relay",
+      loading:false,
+      error:"",
+      data:{ current:null, recent:[] },
+      motion:"opening",
+    };
+    renderReader();
+    armSessionPickerReveal();
+    await new Promise((resolve) => requestAnimationFrame(() => {
+      renderReader();
+      resolve();
+    }));
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const list = document.querySelector('#readerBody [data-sp-reveal="provider_footer_oldest"]');
+    const result = {
+      open:list?.classList.contains('open') || false,
+      height:list?.getBoundingClientRect().height || 0,
+      opacity:list ? getComputedStyle(list).opacity : "0",
+      motion:sessionPickerState?.motion || "",
+    };
+    sessionPickerState = null;
+    renderReader();
+    return result;
+  })()`);
+  assert.equal(rerenderedReveal.open, true, "a reader rebuild between reveal frames still opens the current disclosure");
+  assert.equal(rerenderedReveal.motion, "open");
+  assert.ok(rerenderedReveal.height > 1, `the replacement disclosure leaves zero height: ${JSON.stringify(rerenderedReveal)}`);
+
   const readerMotion = await evaluate(page, `(async () => {
     const selector = '#readerBody .rd-host-actions [data-host="codex"]';
     document.querySelector(selector).click();
+    const immediateList = document.querySelector(selector)?.nextElementSibling;
+    const immediate = {
+      pressed:document.querySelector(selector)?.classList.contains('pressed') || false,
+      loading:Boolean(sessionPickerState?.loading),
+      inline:immediateList?.classList.contains('sp-list') || false,
+    };
     const samples = [];
+    const scrollSamples = [];
     const arrivalDeadline = performance.now() + 5000;
     while (performance.now() < arrivalDeadline) {
       await new Promise((resolve) => requestAnimationFrame(resolve));
       const list = document.querySelector(selector)?.nextElementSibling;
       if (!list?.classList.contains('sp-list')) continue;
-      const motionDeadline = performance.now() + 700;
+      const motionDeadline = performance.now() + 1800;
+      let settledFrames = 0;
       do {
         samples.push(Math.round(list.getBoundingClientRect().height * 10) / 10);
-        if (list.classList.contains('open') && samples.length > 24) break;
+        scrollSamples.push(Math.round(scrollEl.scrollTop * 10) / 10);
+        if (!sessionPickerState?.loading && !sessionPickerState?.resizeAnimation && list.classList.contains('open')) settledFrames += 1;
+        else settledFrames = 0;
+        if (settledFrames >= 3) break;
         await new Promise((resolve) => requestAnimationFrame(resolve));
       } while (performance.now() < motionDeadline);
       break;
     }
-    return samples;
+    const list = document.querySelector(selector)?.nextElementSibling;
+    const row = list?.previousElementSibling;
+    const viewport = scrollEl.getBoundingClientRect();
+    return {
+      immediate,
+      samples,
+      scrollSamples,
+      finalFit:Boolean(list && row && row.getBoundingClientRect().top >= viewport.top - 1 && list.getBoundingClientRect().bottom <= viewport.bottom + 1),
+    };
   })()`);
   await waitFor(page, `activeView === "reader" && sessionPickerState?.provider === "codex" && !sessionPickerState.loading`);
-  const motionHeights = [...new Set(readerMotion)];
+  assert.deepEqual(readerMotion.immediate, { pressed:true, loading:true, inline:true },
+    "the click task itself paints the pressed row and loading disclosure");
+  const motionHeights = [...new Set(readerMotion.samples)];
   const finalMotionHeight = Math.max(...motionHeights);
   assert.ok(motionHeights.length >= 5, `the picker must paint multiple layout heights, saw ${motionHeights.join(", ")}`);
   assert.ok(finalMotionHeight > 100, `the destination list reaches its full height: ${finalMotionHeight}`);
   assert.ok(motionHeights.some((height) => height > 1 && height < finalMotionHeight * .8),
     `the disclosure has real intermediate frames instead of a discrete jump: ${motionHeights.join(", ")}`);
+  assert.equal(readerMotion.finalFit, true, "the selected row and its completed destination list remain inside the reader viewport");
+  const viewportFollow = await evaluate(page, `(async () => {
+    const prior = sessionPickerState;
+    const harness = document.createElement('div');
+    harness.style.cssText = 'position:fixed;left:-2000px;top:0;width:320px;height:190px;overflow:auto';
+    harness.innerHTML = '<div style="height:130px"></div><button style="display:block;width:100%;height:40px"></button><div class="sp-list open" data-sp-reveal="viewport_follow_fixture" data-sp-provider="codex" style="height:0"><div class="sp-list-inner" style="height:100px"></div></div>';
+    document.body.appendChild(harness);
+    sessionPickerState = { id:'viewport_follow_fixture', provider:'codex', motion:'open' };
+    const reveal = harness.querySelector('[data-sp-reveal]');
+    const animation = reveal.animate([{ height:'0px' }, { height:'100px' }], { duration:320, easing:'linear', fill:'forwards' });
+    followSessionPickerIntoView(sessionPickerState, 380);
+    const samples = [];
+    const heights = [];
+    const bottoms = [];
+    for (let index = 0; index < 26; index += 1) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      samples.push(Math.round(harness.scrollTop * 10) / 10);
+      heights.push(Math.round(reveal.getBoundingClientRect().height * 10) / 10);
+      bottoms.push(Math.round(reveal.getBoundingClientRect().bottom * 10) / 10);
+    }
+    await animation.finished;
+    const viewport = harness.getBoundingClientRect();
+    const row = reveal.previousElementSibling.getBoundingClientRect();
+    const list = reveal.getBoundingClientRect();
+    const fit = row.top >= viewport.top - 1 && list.bottom <= viewport.bottom + 1;
+    const finalScrollTop = harness.scrollTop;
+    cancelAnimationFrame(sessionPickerViewportRaf);
+    sessionPickerViewportRaf = 0;
+    sessionPickerState = prior;
+    harness.remove();
+    return { samples:[...new Set(samples)], heights:[...new Set(heights)], bottoms:[...new Set(bottoms)], fit, reduced:REDUCED,
+      final:{ rowTop:row.top, listBottom:list.bottom, viewportTop:viewport.top, viewportBottom:viewport.bottom, scrollTop:finalScrollTop } };
+  })()`);
+  assert.ok(viewportFollow.samples.length >= 5,
+    `the viewport must follow a growing disclosure over multiple frames: ${JSON.stringify(viewportFollow)}`);
+  assert.equal(viewportFollow.fit, true, `the synchronized follower lands with the complete menu inside its viewport: ${JSON.stringify(viewportFollow)}`);
   const readerPicker = await evaluate(page, `(() => {
     const actions = document.querySelector('#readerBody .rd-host-actions');
     const codex = actions.querySelector('[data-host="codex"]');
@@ -640,7 +734,38 @@ try {
   assert.equal(readerPicker.replyStillVisible, true);
   const readerPickerShot = await capture(page, "reader-provider-session-picker.png");
 
-  console.log(JSON.stringify({ sandbox, before, intentOpen, intentSettled, collapsedAgain, keyboardOpen, reduced, coarse, compactPickerStart, boundDirect, codexPicker, claudePicker, readerActions, readerMotion:motionHeights, readerPicker, captures:[settingsShot, residentShot, hoverShot, codexPickerShot, claudePickerShot, readerActionsShot, readerPickerShot] }, null, 2));
+  // Sent and received Relays share the exact picker. The legacy sent branch
+  // called openSent directly and silently forged a new session, which is why
+  // Sven saw the picker only on some Relays.
+  await evaluate(page, `(() => {
+    closeSessionPicker();
+    openReader("provider_footer_delayed_sent", "sent");
+    return true;
+  })()`);
+  await waitFor(page, `activeView === "reader" && Boolean(document.querySelector('#readerBody [data-host="codex"][data-source="sent"]'))`);
+  const sentImmediate = await evaluate(page, `(() => {
+    const button = document.querySelector('#readerBody [data-host="codex"][data-source="sent"]');
+    button.click();
+    return {
+      source:sessionPickerState?.source || "",
+      loading:Boolean(sessionPickerState?.loading),
+      pressed:document.querySelector('#readerBody [data-host="codex"]')?.classList.contains('pressed') || false,
+      inline:document.querySelector('#readerBody [data-sp-provider="codex"]')?.classList.contains('sp-list') || false,
+    };
+  })()`);
+  assert.deepEqual(sentImmediate, { source:"sent", loading:true, pressed:true, inline:true },
+    "a sent Relay paints the same picker immediately instead of creating a new session");
+  await waitFor(page, `sessionPickerState?.source === "sent" && !sessionPickerState.loading`);
+  await sleep(450);
+  const sentPicker = await evaluate(page, `(() => ({
+    source:sessionPickerState?.source || "",
+    firstDestination:document.querySelector('#readerBody [data-sp-provider="codex"] .sp-name')?.textContent.trim(),
+    open:document.querySelector('#readerBody [data-sp-provider="codex"]')?.classList.contains('open') || false,
+  }))()`);
+  assert.deepEqual(sentPicker, { source:"sent", firstDestination:"New Codex task", open:true });
+  const sentPickerShot = await capture(page, "sent-reader-provider-session-picker.png");
+
+  console.log(JSON.stringify({ sandbox, before, intentOpen, intentSettled, collapsedAgain, keyboardOpen, reduced, coarse, compactPickerStart, boundDirect, codexPicker, claudePicker, readerActions, rerenderedReveal, readerMotion:{ heights:motionHeights, scrolls:[...new Set(readerMotion.scrollSamples)], finalFit:readerMotion.finalFit }, viewportFollow, readerPicker, sentImmediate, sentPicker, captures:[settingsShot, residentShot, hoverShot, codexPickerShot, claudePickerShot, readerActionsShot, readerPickerShot, sentPickerShot] }, null, 2));
 } catch (error) {
   console.error(error.stack || error);
   console.error(log);

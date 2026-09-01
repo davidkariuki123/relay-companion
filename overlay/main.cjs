@@ -1439,8 +1439,8 @@ function readRelays() {
       // Footer copy is a promise about something the button can actually resume.
       // Historical surface bits can survive a failed/invalidated materialization;
       // only a persisted native identity earns “Continue”.
-      materializedCodex: Boolean(p.codexThreadId),
-      materializedClaude: Boolean(p.claudeNativeSession?.sessionId),
+      materializedCodex: Boolean(p.codexThreadId || p.sessionBinding?.provider === "codex"),
+      materializedClaude: Boolean(p.claudeNativeSession?.sessionId || p.sessionBinding?.provider === "claude"),
       codexModel: p.codexModel || p.openModel || "",
       codexEffort: p.codexEffort || p.openEffort || "",
       claudeModel: p.claudeNativeSession?.model || p.openModel || "",
@@ -1509,8 +1509,8 @@ function sentWithMaterializationState(items) {
     if (!row) return item;
     return {
       ...item,
-      materializedCodex: Boolean(row.codexThreadId),
-      materializedClaude: Boolean(row.claudeNativeSession?.sessionId),
+      materializedCodex: Boolean(row.codexThreadId || row.sessionBinding?.provider === "codex"),
+      materializedClaude: Boolean(row.claudeNativeSession?.sessionId || row.sessionBinding?.provider === "claude"),
     };
   });
 }
@@ -3705,13 +3705,36 @@ async function focusedNativeSession(provider, routing) {
   }
 }
 
-async function sessionPicker(packetId, requestedProvider = "") {
-  if (!rowById(packetId)) throw new Error("That Relay is no longer available on this device");
+async function sessionDeliveryRow(packetId, source = "relay") {
+  const id = String(packetId || "");
+  if (source !== "sent") {
+    const row = rowById(id);
+    if (!row) throw new Error("That Relay is no longer available on this device");
+    return { packetId:id, row, originalId:id, source:"relay" };
+  }
+  const sentItem = (sentCache || []).find((item) => String(item.relayId || item.id || "") === id);
+  if (!sentItem) throw new Error("That sent Relay is no longer available on this device");
+  const stageSentRelayItem = await loadSentStager();
+  const staged = stageSentRelayItem({ item:sentItem, sender:account() }, { statePath:STATE_PATH });
+  const row = rowById(staged.itemId);
+  if (!row) throw new Error("That sent Relay could not be prepared on this device");
+  return { packetId:staged.itemId, row, originalId:id, source:"sent", sentItem };
+}
+
+function sentRelayReferencePrompt(relayId) {
+  return [
+    `A Relay you sent has been selected: ${String(relayId || "").trim()}.`,
+    "Use relay_sent_list to locate that exact Relay, then relay_chat_fetch its conversation and handle it in this task.",
+  ].join(" ");
+}
+
+async function sessionPicker(packetId, requestedProvider = "", source = "relay") {
+  const deliveryRow = await sessionDeliveryRow(packetId, source);
   const routing = await loadSessionRouting();
   const provider = ["claude", "codex"].includes(requestedProvider)
     ? requestedProvider
     : await preferredSessionProvider();
-  const binding = routing.delivery.relaySessionBinding(packetId);
+  const binding = routing.delivery.relaySessionBinding(deliveryRow.packetId);
   const current = await focusedNativeSession(provider, routing);
   const destinations = routing.delivery.listRelayDestinations(provider, {
     currentNativeId: current?.nativeId || "",
@@ -3747,8 +3770,9 @@ async function presentSessionOpen(result, provider, packetId, observedBundle = n
 }
 
 async function deliverPacketToSession(packetId, selection = {}) {
-  const row = rowById(packetId);
-  if (!row) throw new Error("That Relay is no longer available on this device");
+  const deliveryRow = await sessionDeliveryRow(packetId, selection.source);
+  const routePacketId = deliveryRow.packetId;
+  const row = deliveryRow.row;
   const routing = await loadSessionRouting();
   const provider = selection.provider === "codex" ? "codex" : "claude";
   const observedBundle = await new Promise((resolve) => frontmostBundleId(resolve));
@@ -3758,7 +3782,7 @@ async function deliverPacketToSession(packetId, selection = {}) {
     let opened;
     try {
       opened = await routing.materializer.openRelay({
-        id: packetId,
+        id: routePacketId,
         host: provider,
         forceFresh: true,
         log: (message) => console.error(`[overlay] ${message}`),
@@ -3769,32 +3793,36 @@ async function deliverPacketToSession(packetId, selection = {}) {
     }
     const nativeId = nativeIdFromOpenResult(opened);
     if (!nativeId) throw new Error("The new native session did not return an exact session id");
-    routing.delivery.bindRelaySession(packetId, {
+    routing.delivery.bindRelaySession(routePacketId, {
       provider,
       nativeId,
       title: row.displayTitle || row.title || "Relay",
       cwd: opened.cwd || "",
     }, { adapter: `${provider}_new_session_materialization` });
-    await presentSessionOpen(opened, provider, packetId, observedBundle);
-    ackPacket(packetId);
-    return { ok: true, delivered: true, binding: routing.delivery.relaySessionBinding(packetId), ...opened };
+    await presentSessionOpen(opened, provider, routePacketId, observedBundle);
+    if (deliveryRow.source !== "sent") ackPacket(packetId);
+    await pushInbox(true);
+    return { ok: true, delivered: true, binding: routing.delivery.relaySessionBinding(routePacketId), ...opened };
   }
   const result = await routing.delivery.deliverRelayToSession({
-    relayId: packetId,
+    relayId: routePacketId,
     target: { provider, nativeId: String(selection.nativeId || "") },
+    prompt: deliveryRow.source === "sent" ? sentRelayReferencePrompt(deliveryRow.originalId) : undefined,
   });
-  await presentSessionOpen(result, provider, packetId, observedBundle);
-  ackPacket(packetId);
+  await presentSessionOpen(result, provider, routePacketId, observedBundle);
+  if (deliveryRow.source !== "sent") ackPacket(packetId);
+  await pushInbox(true);
   return { ok: true, ...result };
 }
 
-async function continuePacketSession(packetId) {
+async function continuePacketSession(packetId, source = "relay") {
+  const deliveryRow = await sessionDeliveryRow(packetId, source);
   const { delivery } = await loadSessionRouting();
-  const binding = delivery.relaySessionBinding(packetId);
+  const binding = delivery.relaySessionBinding(deliveryRow.packetId);
   if (!binding) throw new Error("This Relay is not bound to a native session");
   const observedBundle = await new Promise((resolve) => frontmostBundleId(resolve));
   const opened = await delivery.focusSession(binding);
-  await presentSessionOpen(opened, binding.provider, packetId, observedBundle);
+  await presentSessionOpen(opened, binding.provider, deliveryRow.packetId, observedBundle);
   return { ok: true, binding, ...opened };
 }
 
@@ -7634,9 +7662,9 @@ app.on("will-quit", preserveMacTrayPositionForExit);
 // ---- ipc -----------------------------------------------------------------
 
 ipcMain.handle("relay:get", () => buildPayload());
-ipcMain.handle("relay:sessionPicker", async (_event, id, provider) => {
+ipcMain.handle("relay:sessionPicker", async (_event, id, provider, source) => {
   try {
-    return await sessionPicker(String(id || ""), String(provider || ""));
+    return await sessionPicker(String(id || ""), String(provider || ""), String(source || ""));
   } catch (error) {
     return { ok: false, error: error?.message || String(error) };
   }
@@ -7649,9 +7677,9 @@ ipcMain.handle("relay:deliverToSession", async (_event, id, selection) => {
     return { ok: false, error: error?.message || String(error) };
   }
 });
-ipcMain.handle("relay:continueSession", async (_event, id) => {
+ipcMain.handle("relay:continueSession", async (_event, id, source) => {
   try {
-    return await continuePacketSession(String(id || ""));
+    return await continuePacketSession(String(id || ""), String(source || ""));
   } catch (error) {
     return { ok: false, error: error?.message || String(error) };
   }

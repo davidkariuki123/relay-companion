@@ -87,9 +87,15 @@ test("the exact-session picker expands and retires as one continuous disclosure"
     "the zero-height disclosure is committed before the open class is painted");
   assert.match(lifecycle, /reveal\.classList\.remove\("open"\)[\s\S]*transitionend/,
     "closing keeps the existing DOM alive until its grid track reaches zero");
+  assert.match(lifecycle, /function followSessionPickerIntoView[\s\S]*requestAnimationFrame\(follow\)/,
+    "the scrollport follows every disclosure frame instead of jumping after it opens");
 
   const picker = between(html, "function sessionPickerInlineHtml", "async function deliverSessionSelection");
   assert.match(picker, /class="sp-list\$\{revealClass\}"[\s\S]*class="sp-list-inner"/);
+  const resultSwap = between(html, "function paintSessionPickerResult", "async function deliverSessionSelection");
+  assert.match(resultSwap, /fromHeight[\s\S]*toHeight[\s\S]*reveal\.animate/,
+    "session discovery reflows from the loader's measured height to the measured rows");
+  assert.match(resultSwap, /followSessionPickerIntoView\(state, 500\)/);
 });
 
 test("the folded pill uses one visual face across both native window strategies", () => {
