@@ -591,6 +591,58 @@ try {
   assert.equal(readerActions.replyPlaceholder, "Reply…");
   const readerActionsShot = await capture(page, "reader-provider-actions.png");
 
+  // Message for your agent owns the same full action rail in the same document
+  // position. Its Relay Work composer remains useful, but contains route,
+  // note, and Send only — never a second compact copy of Open in Codex/Claude.
+  await evaluate(page, `(() => {
+    payload.features = { ...(payload.features || {}), relayWork:true };
+    renderReader();
+    document.querySelector('#readerBody [data-rtab="agent"]').click();
+    return true;
+  })()`);
+  await waitFor(page, `activeView === "reader" && readerTab === "agent"`);
+  await waitFor(page, `document.querySelectorAll('#readerBody .rd-host-actions [data-host-open]').length === 2`);
+  const agentReaderActions = await evaluate(page, `(() => {
+    const actions = document.querySelector('#readerBody .rd-host-actions');
+    const composer = document.querySelector('#readerBody .ta-dock');
+    return {
+      hosts:[...actions.querySelectorAll('[data-host-open]')].map((button) => button.dataset.host),
+      labels:[...actions.querySelectorAll('.th-host-label')].map((label) => label.textContent.trim()),
+      actionsBeforeComposer:Boolean(composer && (actions.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING)),
+      composerOpenButtons:composer ? [...composer.querySelectorAll('button')].map((button) => button.textContent.trim()).filter((label) => /^Open in /.test(label)) : [],
+      composerActions:composer ? [...composer.querySelectorAll('.ta-acts button')].map((button) => button.textContent.trim()).filter(Boolean) : [],
+      notePlaceholder:composer?.querySelector('.ta-note')?.getAttribute('placeholder') || '',
+    };
+  })()`);
+  assert.deepEqual(agentReaderActions.hosts, ["codex", "claude"]);
+  assert.deepEqual(agentReaderActions.labels, ["Open in Codex", "Open in Claude Code"]);
+  assert.equal(agentReaderActions.actionsBeforeComposer, true,
+    "the full provider rows sit under the agent document and above its composer");
+  assert.deepEqual(agentReaderActions.composerOpenButtons, [],
+    "the agent composer contains no compact Open in buttons");
+  assert.deepEqual(agentReaderActions.composerActions, ["Send"]);
+  assert.match(agentReaderActions.notePlaceholder, /^Tell /);
+  const agentImmediate = await evaluate(page, `(() => {
+    const button = document.querySelector('#readerBody .rd-host-actions [data-host="codex"]');
+    button.click();
+    return {
+      pressed:document.querySelector('#readerBody .rd-host-actions [data-host="codex"]')?.classList.contains('pressed') || false,
+      loading:Boolean(sessionPickerState?.loading),
+      inline:document.querySelector('#readerBody .rd-host-actions [data-sp-provider="codex"]')?.classList.contains('sp-list') || false,
+      tab:readerTab,
+    };
+  })()`);
+  assert.deepEqual(agentImmediate, { pressed:true, loading:true, inline:true, tab:"agent" },
+    "the agent document action opens its inline picker immediately without changing documents");
+  await waitFor(page, `readerTab === "agent" && sessionPickerState?.provider === "codex" && !sessionPickerState.loading`);
+  const agentReaderActionsShot = await capture(page, "reader-agent-provider-session-picker.png");
+  await evaluate(page, `(() => {
+    document.querySelector('#readerBody .rd-host-actions [data-host="codex"]').click();
+    document.querySelector('#readerBody [data-rtab="you"]').click();
+    return true;
+  })()`);
+  await waitFor(page, `activeView === "reader" && readerTab === "you" && !sessionPickerState`);
+
   // A live payload/chat refresh can rebuild the reader after the first reveal
   // frame but before the second. The disclosure must arm the replacement node;
   // retaining the original element leaves the actual UI at a two-pixel,
@@ -765,7 +817,7 @@ try {
   assert.deepEqual(sentPicker, { source:"sent", firstDestination:"New Codex task", open:true });
   const sentPickerShot = await capture(page, "sent-reader-provider-session-picker.png");
 
-  console.log(JSON.stringify({ sandbox, before, intentOpen, intentSettled, collapsedAgain, keyboardOpen, reduced, coarse, compactPickerStart, boundDirect, codexPicker, claudePicker, readerActions, rerenderedReveal, readerMotion:{ heights:motionHeights, scrolls:[...new Set(readerMotion.scrollSamples)], finalFit:readerMotion.finalFit }, viewportFollow, readerPicker, sentImmediate, sentPicker, captures:[settingsShot, residentShot, hoverShot, codexPickerShot, claudePickerShot, readerActionsShot, readerPickerShot, sentPickerShot] }, null, 2));
+  console.log(JSON.stringify({ sandbox, before, intentOpen, intentSettled, collapsedAgain, keyboardOpen, reduced, coarse, compactPickerStart, boundDirect, codexPicker, claudePicker, readerActions, agentReaderActions, agentImmediate, rerenderedReveal, readerMotion:{ heights:motionHeights, scrolls:[...new Set(readerMotion.scrollSamples)], finalFit:readerMotion.finalFit }, viewportFollow, readerPicker, sentImmediate, sentPicker, captures:[settingsShot, residentShot, hoverShot, codexPickerShot, claudePickerShot, readerActionsShot, agentReaderActionsShot, readerPickerShot, sentPickerShot] }, null, 2));
 } catch (error) {
   console.error(error.stack || error);
   console.error(log);

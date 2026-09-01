@@ -145,8 +145,8 @@ test("reader attachments share the deployed frosted footer above both document a
   assert.match(shelf, /data-att-preview="1"/,
     "previewable files reuse the existing bounded preview path");
   assert.match(reader, /const sharedShelf = relaySharedShelf\(r\)/);
-  assert.match(reader, /<div class="rd-foot"><div class="rd-col">\$\{sharedShelf\}\$\{status\}\$\{bothNote\}\$\{claimControl\}\$\{composer\}/,
-    "the shelf is inside the deployed footer and precedes existing actions");
+  assert.match(reader, /<div class="rd-foot"><div class="rd-col">\$\{sharedShelf\}\$\{status\}\$\{bothNote\}\$\{claimControl\}\$\{documentHostActions\}\$\{composer\}/,
+    "the shelf is inside the deployed footer and precedes document actions and the composer");
   assert.match(html, /\.rd-foot \{[^}]*backdrop-filter:blur\(14px\)/,
     "the shelf inherits the deployed 14px frost and long-document reveal");
   assert.match(reader, /wireAttachmentChips\(readerBodyEl\)/,

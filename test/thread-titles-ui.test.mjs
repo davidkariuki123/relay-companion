@@ -944,11 +944,11 @@ test("hand-offs speak in conversation terms: starts vs continues, said BEFORE th
   assert.doesNotMatch(html, /data-reply-mode|__relayToggleReplyMode|replyTarget\(/);
   assert.doesNotMatch(html, /Talk to \$\{esc\(app\)\}|Reply to \$\{esc/);
   assert.match(html, /if \(request && taskClaimAllowsStart\(r\) && \(onAgent \|\| onWork \|\| requestActionable\)\) return requestDockHtml\(r, \{ inline: true \}\)/);
-  assert.match(html, /if \(onAgent \|\| onWork\) return relayWorkDockHtml\(r, \{ inline: true \}\)/);
+  assert.match(html, /if \(onAgent \|\| onWork\) return relayWorkDockHtml\(r, \{ inline: true, showHostOpen: !onAgent \}\)/);
   assert.match(html, /data-work-start="\$\{esc\(r\.id\)\}"/);
   assert.match(html, /<button type="button" id="qrSend">Send<\/button>/);
-  assert.match(html, /if \(!onAgent && !onWork\)/,
-    "For you wires the human reply composer for ordinary Relays and Tasks");
+  assert.match(html, /if \(onAgent && !workOn\) return "";/,
+    "the agent document ends after its full provider actions when Relay Work is unavailable");
   // And the destination line lives where hand-offs actually happen — inside
   // the unfolded bubble, not only on the off-path reader page (Sven:
   // "havent implemented anything for that which i can see").

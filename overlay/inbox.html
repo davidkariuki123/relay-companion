@@ -6943,7 +6943,7 @@
   // Tasks and ordinary Relay Work start on the same route-selecting
   // composer. The document changes the verb (Start vs Send), never the
   // available app, model, or thinking controls.
-  function idleRunDockHtml(r, { inline = false, draft = "", action = "request", label = "Start", actions = "" } = {}) {
+  function idleRunDockHtml(r, { inline = false, draft = "", action = "request", label = "Start", actions = "", showHostOpen = true } = {}) {
     const rt = routeFor(r.id);
     const actionButton = action === "work"
       ? `<button type="button" class="ta-approve" data-work-start="${esc(r.id)}">${esc(label)}</button>`
@@ -6961,8 +6961,8 @@
       </div>` : "";
     const defaultActions = action === "request"
       ? `<button class="ta-later" type="button" data-request-safety="${esc(r.id)}">Review Safety</button>${actionButton}`
-      : `<button class="ta-later" type="button" data-open-in="${esc(r.id)}" data-open-in-host="codex">Open in Codex</button>
-         <button class="ta-later" type="button" data-open-in="${esc(r.id)}" data-open-in-host="claude">Open in Claude Code</button>${actionButton}`;
+      : `${showHostOpen ? `<button class="ta-later" type="button" data-open-in="${esc(r.id)}" data-open-in-host="codex">Open in Codex</button>
+         <button class="ta-later" type="button" data-open-in="${esc(r.id)}" data-open-in-host="claude">Open in Claude Code</button>` : ""}${actionButton}`;
     const railActions = actions || defaultActions;
     return `
       <div class="ta-dock${inline ? " inline" : ""}" data-stop="1">
@@ -7068,7 +7068,7 @@
       actions: scheduleActionsHtml(r),
     });
   }
-  function relayWorkDockHtml(r, { inline = false } = {}) {
+  function relayWorkDockHtml(r, { inline = false, showHostOpen = true } = {}) {
     const state = relayWorkState(r);
     const draft = String(requestWorkDrafts.get(String(r.id)) || "");
     const taggedWork = r.source?.host === "relay-agent-run";
@@ -7088,18 +7088,18 @@
             <span class="ta-acts">
               ${taggedWork && live ? `<button class="ta-later" type="button" data-chat-work-stop="${esc(r.id)}">Stop</button>` : ""}
               ${taggedWork && state === "stopped" ? `<button class="ta-later" type="button" data-chat-work-retry="${esc(r.id)}">Retry</button>` : ""}
-              ${live
+              ${showHostOpen ? (live
                 ? `<button class="ta-later" type="button" disabled aria-disabled="true">Open in ${esc(app)}</button>`
                 : r.ranOnClaude
                   ? `<button class="ta-later" type="button" data-open-run="${esc(r.id)}">Open in ${esc(app)}</button>`
-                  : `<button class="ta-later" type="button" data-open-in="${esc(r.id)}">Open in ${esc(app)}</button>`}
+                  : `<button class="ta-later" type="button" data-open-in="${esc(r.id)}">Open in ${esc(app)}</button>`) : ""}
               <button type="button" class="ta-approve" data-steer="${esc(r.id)}"${starting ? " disabled aria-disabled=\"true\"" : ""}>${starting ? "Starting" : live ? "Queue" : "Send"}</button>
             </span>
           </div>
         </div>
       </div>`;
     }
-    return idleRunDockHtml(r, { inline, draft, action: "work", label: "Send" });
+    return idleRunDockHtml(r, { inline, draft, action: "work", label: "Send", showHostOpen });
   }
   function requestControlsHtml(r, opts) { return requestDockHtml(r, opts) || taskStatusLine(r, opts); }
   function wireRequestControls(scope, onDone) {
@@ -8069,6 +8069,16 @@
     // The whisper explains what the Relay Work dock will send; without that
     // dock the row names where it goes (H2), and nothing else needs saying.
     const bothNote = onAgent && workOn ? `<div class="rd-dest">your agent receives both the “for you” and “for your agent” parts</div>` : "";
+    // Both immutable document faces own the same full provider action rows.
+    // They sit between the document and its composer, never inside either
+    // composer's rail. Work is the live provider transcript and keeps its own
+    // single-session controls instead.
+    const documentHostActions = !request && !onWork ? `<div class="rd-host-actions" data-stop="1">${relayHostActionsHtml({
+      id: r.id,
+      direction: r.outbound ? "out" : "in",
+      materializedCodex: Boolean(r.materializedCodex),
+      materializedClaude: Boolean(r.materializedClaude),
+    }, { persistent: true })}</div>` : "";
     // The open folder owns the addressee. For you replies to the human sender;
     // For <agent> starts private local work; Work continues that same native
     // session. Switching documents must never silently keep Shane as the
@@ -8087,28 +8097,13 @@
       // immutable documents looking like dead pages after a run completed.
       if (request && onWork && providerPrompt) return workProviderPromptDockHtml();
       if (request && taskClaimAllowsStart(r) && (onAgent || onWork || requestActionable)) return requestDockHtml(r, { inline: true });
-      // TWO OUTCOMES, NO IN-BETWEEN (Sven): a message is either replied to
-      // or opened in your agent. On the agent document the reply belongs to
-      // the other face; here the one verb is the open — the same row the room
-      // paints under the bubble, so the two surfaces cannot drift. The
-      // composer that talks to your own agent ("Tell Claude Code anything…")
-      // is Relay Work — the Tasks layer wearing a composer — and mounts
-      // only where the product row allows it.
-      if (onAgent && !workOn) return `<div class="rd-host-actions" data-stop="1">${relayHostActionsHtml({
-        id: r.id,
-        direction: r.outbound ? "out" : "in",
-        materializedCodex: Boolean(r.materializedCodex),
-        materializedClaude: Boolean(r.materializedClaude),
-      }, { persistent: true })}</div>`;
-      if (onAgent || onWork) return relayWorkDockHtml(r, { inline: true });
-      const hostActions = request ? "" : `<div class="rd-host-actions" data-stop="1">${relayHostActionsHtml({
-        id: r.id,
-        direction: r.outbound ? "out" : "in",
-        materializedCodex: Boolean(r.materializedCodex),
-        materializedClaude: Boolean(r.materializedClaude),
-      }, { persistent: true })}</div>`;
+      // The agent composer is Relay Work: route, note, and Send. Its provider
+      // launch affordances live in documentHostActions immediately above it,
+      // exactly as they do on Message for you. When Relay Work is disabled,
+      // the agent face ends after those document actions.
+      if (onAgent && !workOn) return "";
+      if (onAgent || onWork) return relayWorkDockHtml(r, { inline: true, showHostOpen: !onAgent });
       return `
-      ${hostActions}
       <div class="ta-dock inline" data-stop="1"><div class="qr col">
         <textarea id="qrInput" rows="1" placeholder="Reply…">${esc(readerHumanDrafts.get(String(r.id)) || "")}</textarea>
         <div class="ta-rail">
@@ -8142,7 +8137,7 @@
         <div class="work-footer" data-work-footer="${esc(r.id)}"><div class="work-footer-inner"><div class="rd-col run">
           ${status}${composer}<div class="row-err${note && note.cls === "ok" ? " ok" : ""}" data-err="${esc(r.id)}" data-stop="1">${esc((note && note.text) || "")}</div>
         </div></div></div></div>` : `<div class="rd-col${readerTabSwap ? " swap" : ""}">${doc}</div>
-        <div class="rd-foot"><div class="rd-col">${sharedShelf}${status}${bothNote}${claimControl}${composer}
+        <div class="rd-foot"><div class="rd-col">${sharedShelf}${status}${bothNote}${claimControl}${documentHostActions}${composer}
           <div class="row-err${note && note.cls === "ok" ? " ok" : ""}" data-err="${esc(r.id)}" data-stop="1">${esc((note && note.text) || "")}</div>
         </div></div>`}`;
     if (onWork) bindWorkScroller(r.id);

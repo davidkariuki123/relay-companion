@@ -891,8 +891,8 @@ test("Task documents remain in the contents list beside persistent Work througho
   assert.match(reader, /class="work-footer"[^]*\$\{status\}\$\{composer\}/, "Work keeps its provider composer after Start");
   assert.match(reader, /if \(request && taskClaimAllowsStart\(r\) && \(onAgent \|\| onWork \|\| requestActionable\)\) return requestDockHtml/,
     "both source faces expose Start task while actionable, and Work keeps the provider composer");
-  assert.match(reader, /<div class="rd-foot"><div class="rd-col">\$\{sharedShelf\}\$\{status\}\$\{bothNote\}\$\{claimControl\}\$\{composer\}/,
-    "both immutable source documents retain a composer after Work exists");
+  assert.match(reader, /<div class="rd-foot"><div class="rd-col">\$\{sharedShelf\}\$\{status\}\$\{bothNote\}\$\{claimControl\}\$\{documentHostActions\}\$\{composer\}/,
+    "both immutable source documents retain document actions before their composer after Work exists");
   assert.doesNotMatch(reader, /requestDisclosure|data-brief=/, "Work never nests another copy of the document tabs or documents");
 
   // Tab hops do not reset native activity, disclosure state, or an unsent
@@ -920,8 +920,10 @@ test("ordinary Relay folders address the human, the agent, and local Work separa
 
   assert.match(reader, /if \(onAgent \|\| onWork\) return relayWorkDockHtml/,
     "the agent document cannot retain the human reply composer");
-  assert.match(reader, /if \(!onAgent && !onWork\)/,
-    "the direct human reply path belongs only to For you");
+  assert.match(reader, /const documentHostActions = !request && !onWork \? `<div class="rd-host-actions"/,
+    "both immutable documents receive the same full provider action rail");
+  assert.match(reader, /showHostOpen: !onAgent/,
+    "the agent composer cannot duplicate the document-level provider actions");
   assert.match(sharedIdleDock, /placeholder="Tell \$\{esc\(rt\.app\)\} anything…"/);
   assert.match(sharedIdleDock, /data-route-menu="app"/);
   assert.match(sharedIdleDock, /data-route-menu="model"/);
@@ -931,7 +933,7 @@ test("ordinary Relay folders address the human, the agent, and local Work separa
   assert.match(sharedIdleDock, /data-work-start="\$\{esc\(r\.id\)\}"/);
   assert.match(requestDock, /return idleRunDockHtml\(r,/,
     "Tasks use the shared route-selecting composer");
-  assert.match(workDock, /return idleRunDockHtml\(r, \{ inline, draft, action: "work", label: "Send" \}\);/,
+  assert.match(workDock, /return idleRunDockHtml\(r, \{ inline, draft, action: "work", label: "Send", showHostOpen \}\);/,
     "ordinary Relay Work uses that same composer with Send as its verb");
   assert.match(workDock, /const starting = live && !hasSession/);
   assert.match(workDock, /starting \? "Starting" : live \? "Queue" : "Send"/,
@@ -940,10 +942,8 @@ test("ordinary Relay folders address the human, the agent, and local Work separa
   assert.match(wiring, /const requestedHost = b\.getAttribute\("data-open-in-host"\)/);
   assert.match(wiring, /openRelayFromUI\(id, "relay", "fresh", host, note\)/,
     "Task route controls keep their existing fresh-session behavior");
-  assert.match(reader, /const hostActions = request \? "" : `<div class="rd-host-actions"[^]*relayHostActionsHtml/,
-    "an ordinary Relay's letter face paints the same preference-backed provider rows as its agent face");
-  assert.match(reader, /\$\{hostActions\}[\s\S]*id="qrSend">Send/,
-    "Sven's provider rows sit above the human reply composer instead of inside its rail");
+  assert.match(reader, /\$\{documentHostActions\}\$\{composer\}/,
+    "Sven's provider rows sit above either document composer instead of inside its rail");
   assert.doesNotMatch(reader, /data-open-in-host="codex">Open in Codex[\s\S]*id="qrSend">Send/,
     "the human reply rail still contains only its reply action, never the old hardcoded provider buttons");
   assert.match(wiring, /readerTab = "work"/);

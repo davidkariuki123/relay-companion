@@ -202,9 +202,10 @@ test("the open rows are the apps you chose — one, or both — on the bubble an
   // option to always have both… I would always choose one (claude)." The
   // rows are the choice Settings holds (one app, or Both in David's order),
   // detection-backed; the other app is one tap away. David's per-relay
-  // subline stays. The reader's agent document paints the SAME rows as its
-  // footer, so the two surfaces cannot drift, and one binder wires the click
-  // wherever the rows are.
+  // subline stays. Both immutable reader documents paint the SAME rows as the
+  // footer, so the surfaces cannot drift, and one binder wires the click
+  // wherever the rows are. The agent composer below those rows is for its
+  // route, note, and Send — it must not duplicate provider launch controls.
   const footer = html.slice(html.indexOf("function relayHostActionsHtml"), html.indexOf("// ---- the thread reply composer"));
   assert.match(footer, /\$\{agentAppHosts\(\)\.map\(\(host\) => hostActionRowHtml\(host, message, source\) \+ sessionPickerInlineHtml\(id, host\)\)\.join\(""\)\}/,
     "the configured provider rows remain the choice and own their inline picker state");
@@ -215,10 +216,14 @@ test("the open rows are the apps you chose — one, or both — on the bubble an
   assert.match(reader, /const workOn = payload\.features\?\.relayWork === true;/);
   assert.match(reader, /const hasWork = chatOwnedWork \|\| \(\(request \|\| workOn\) && \(Boolean\(providerPrompt\) \|\| !\["idle", "waiting", "parked"\]\.includes\(runState\)\)\);/);
   assert.match(reader, /const bothNote = onAgent && workOn \?/);
-  assert.match(reader, /if \(onAgent && !workOn\) return `<div class="rd-host-actions" data-stop="1">\$\{relayHostActionsHtml\(\{/);
+  assert.match(reader, /const documentHostActions = !request && !onWork \? `<div class="rd-host-actions" data-stop="1">\$\{relayHostActionsHtml\(\{/,
+    "both source documents share the full provider rows outside their composers");
+  assert.match(reader, /if \(onAgent && !workOn\) return "";/);
+  assert.match(reader, /relayWorkDockHtml\(r, \{ inline: true, showHostOpen: !onAgent \}\)/,
+    "the agent composer explicitly suppresses provider launch buttons");
+  assert.match(reader, /\$\{documentHostActions\}\$\{composer\}/,
+    "provider rows precede the active document's composer");
   assert.match(reader, /wireHostOpen\(readerBodyEl\);/, "the reader binds through the shared binder");
-  const agentFooter = reader.slice(reader.indexOf('if (onAgent && !workOn) return `<div class="rd-host-actions"'), reader.indexOf("if (onAgent || onWork) return relayWorkDockHtml"));
-  assert.doesNotMatch(agentFooter, /<textarea/, "no composer to your own agent on the shipped agent document");
   // The letter keeps its reply — the loudest control on a person's letter.
   assert.match(reader, /<textarea id="qrInput" rows="1" placeholder="Reply…">/);
   const humanComposerStart = reader.indexOf('<textarea id="qrInput"');
