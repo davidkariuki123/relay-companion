@@ -565,7 +565,58 @@ try {
   assert.equal(claudePicker.firstDestination, "New Claude Code session");
   const claudePickerShot = await capture(page, "provider-footer-claude-session-picker.png");
 
-  console.log(JSON.stringify({ sandbox, before, intentOpen, intentSettled, collapsedAgain, keyboardOpen, reduced, coarse, compactPickerStart, boundDirect, codexPicker, claudePicker, captures:[settingsShot, residentShot, hoverShot, codexPickerShot, claudePickerShot] }, null, 2));
+  // Sven's full-document design: the human letter face owns the same complete
+  // preference-backed provider rows, immediately above the reply composer.
+  // The composer rail itself remains reply-only. Pressing a row unfolds that
+  // provider's destinations in place without leaving the reader.
+  await evaluate(page, `openReader("provider_footer_oldest", "threads"); true`);
+  await waitFor(page, `activeView === "reader" && readerTab === "you"`);
+  await waitFor(page, `document.querySelectorAll('#readerBody .rd-host-actions [data-host-open]').length === 2`);
+  await waitFor(page, `!readerMorphInFlight && !document.querySelector('.reader-morph-snapshot')`);
+  const readerActions = await evaluate(page, `(() => {
+    const actions = document.querySelector('#readerBody .rd-host-actions');
+    const replyRail = document.querySelector('#readerBody .ta-dock .ta-rail');
+    return {
+      hosts:[...actions.querySelectorAll('[data-host-open]')].map((button) => button.dataset.host),
+      labels:[...actions.querySelectorAll('.th-host-label')].map((label) => label.textContent.trim()),
+      actionsBeforeComposer:Boolean(actions.compareDocumentPosition(document.querySelector('#readerBody .ta-dock')) & Node.DOCUMENT_POSITION_FOLLOWING),
+      replyRailActions:[...replyRail.querySelectorAll('button')].map((button) => button.textContent.trim()).filter(Boolean),
+      replyPlaceholder:document.querySelector('#readerBody #qrInput')?.getAttribute('placeholder'),
+    };
+  })()`);
+  assert.deepEqual(readerActions.hosts, ["codex", "claude"]);
+  assert.deepEqual(readerActions.labels, ["Open in Codex", "Open in Claude Code"]);
+  assert.equal(readerActions.actionsBeforeComposer, true, "provider rows sit between the letter and reply composer");
+  assert.deepEqual(readerActions.replyRailActions, ["Send"], "the reply rail does not duplicate provider buttons");
+  assert.equal(readerActions.replyPlaceholder, "Reply…");
+  const readerActionsShot = await capture(page, "reader-provider-actions.png");
+
+  await evaluate(page, `document.querySelector('#readerBody .rd-host-actions [data-host="codex"]').click(); true`);
+  await waitFor(page, `activeView === "reader" && sessionPickerState?.provider === "codex" && !sessionPickerState.loading`);
+  const readerPicker = await evaluate(page, `(() => {
+    const actions = document.querySelector('#readerBody .rd-host-actions');
+    const codex = actions.querySelector('[data-host="codex"]');
+    const list = codex.nextElementSibling;
+    return {
+      activeView,
+      selected:codex.classList.contains('pressed'),
+      context:codex.querySelector('.th-host-context')?.textContent.trim(),
+      inline:list?.classList.contains('sp-list') || false,
+      firstDestination:list?.querySelector('.sp-name')?.textContent.trim(),
+      claudeStillVisible:Boolean(actions.querySelector('[data-host="claude"]')),
+      replyStillVisible:Boolean(document.querySelector('#readerBody #qrInput')),
+    };
+  })()`);
+  assert.equal(readerPicker.activeView, "reader", "the full document reader remains the active surface");
+  assert.equal(readerPicker.selected, true);
+  assert.equal(readerPicker.context, "Choose where this Relay lands");
+  assert.equal(readerPicker.inline, true);
+  assert.equal(readerPicker.firstDestination, "New Codex task");
+  assert.equal(readerPicker.claudeStillVisible, true);
+  assert.equal(readerPicker.replyStillVisible, true);
+  const readerPickerShot = await capture(page, "reader-provider-session-picker.png");
+
+  console.log(JSON.stringify({ sandbox, before, intentOpen, intentSettled, collapsedAgain, keyboardOpen, reduced, coarse, compactPickerStart, boundDirect, codexPicker, claudePicker, readerActions, readerPicker, captures:[settingsShot, residentShot, hoverShot, codexPickerShot, claudePickerShot, readerActionsShot, readerPickerShot] }, null, 2));
 } catch (error) {
   console.error(error.stack || error);
   console.error(log);

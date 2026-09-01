@@ -7905,7 +7905,14 @@
         materializedClaude: Boolean(r.materializedClaude),
       }, { persistent: true })}</div>`;
       if (onAgent || onWork) return relayWorkDockHtml(r, { inline: true });
+      const hostActions = request ? "" : `<div class="rd-host-actions" data-stop="1">${relayHostActionsHtml({
+        id: r.id,
+        direction: r.outbound ? "out" : "in",
+        materializedCodex: Boolean(r.materializedCodex),
+        materializedClaude: Boolean(r.materializedClaude),
+      }, { persistent: true })}</div>`;
       return `
+      ${hostActions}
       <div class="ta-dock inline" data-stop="1"><div class="qr col">
         <textarea id="qrInput" rows="1" placeholder="Reply…">${esc(readerHumanDrafts.get(String(r.id)) || "")}</textarea>
         <div class="ta-rail">
