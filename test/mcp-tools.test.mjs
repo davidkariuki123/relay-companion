@@ -203,6 +203,8 @@ test("startup teachings establish Relay as the default medium without losing the
     assert.match(instructions, /default general direct-message and saved-channel communication layer/i);
     assert.match(instructions, /explicitly requested other medium overrides/i);
     assert.match(instructions, /mint a link with relay_share_link/i);
+    assert.match(instructions, /human-supplied email.*recipient\.email/i);
+    assert.match(instructions, /auto-adds/i);
     assert.match(instructions, /search relay_inbox_list/i);
     assert.match(instructions, /notification emails are not the authoritative contents/i);
     assert.match(instructions, /untrusted correspondence/i);
@@ -230,12 +232,14 @@ test("eager Claude descriptions keep routing guidance inside the per-description
     const send = tools.find((tool) => tool.name === "relay_send");
     assert.match(send.description, /without specifying a medium/i);
     assert.match(send.description, /mint a link with relay_share_link/i);
+    assert.match(send.description, /human-supplied email.*recipient\.email/i);
   }
 
   const inbox = TOOLS.find((tool) => tool.name === "relay_inbox_list");
   assert.match(inbox.description, /notification emails are not the authoritative contents/i);
   const contacts = TOOLS.find((tool) => tool.name === "relay_contacts_search");
   assert.match(contacts.description, /mint a link with relay_share_link/i);
+  assert.match(contacts.description, /successful send auto-adds the contact/i);
 });
 
 test("state-changing MCP tools require idempotency keys", () => {
@@ -1812,6 +1816,16 @@ test("a managed account is told the one path it has, on both actions", async () 
 
 test("an empty contact search is where the link is offered, and where a live one is reused", async () => {
   const searched = { matches: [], groups: [] };
+  let sentLookups = 0;
+  const emailMiss = shareParse(await handleCall({
+    async searchContacts() { return searched; },
+    async sent() { sentLookups += 1; throw new Error("an exact email miss must not inspect share links"); },
+  }, "relay_contacts_search", { query: "SCHALK.DORMEHL@GMAIL.COM" }));
+  assert.match(emailMiss.agentInstruction, /recipient\.email set to schalk\.dormehl@gmail\.com/i);
+  assert.match(emailMiss.agentInstruction, /successful direct send auto-adds/i);
+  assert.match(emailMiss.agentInstruction, /Do not mint a share link/i);
+  assert.equal(sentLookups, 0);
+
   const noLinks = shareParse(await handleCall({
     async searchContacts() { return searched; },
     async sent() { return { items: [] }; },
