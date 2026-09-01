@@ -3728,8 +3728,12 @@ function nativeIdFromOpenResult(result) {
 }
 
 async function presentSessionOpen(result, provider, packetId, observedBundle = null) {
-  activateHost(provider, observedBundle);
+  // A confirmed Codex bridge open has already selected, shown and focused the
+  // one primary window. Calling `open -b` after that re-activates every visible
+  // ChatGPT surface, including its compact hotkey window. Activation belongs
+  // only to the deep-link fallback that the bridge did not confirm.
   if (!result?.url || result.skipExternalOpen) return;
+  activateHost(provider, observedBundle);
   if (claudeSessionIdFromUrl(result.url)) {
     openClaudeDeepLinkVerified(
       result.url,

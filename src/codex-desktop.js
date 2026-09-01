@@ -83,8 +83,6 @@ async function notifyCodexDesktopThreadsUnserialized({
   ensureWorkspaceRoot = null,
   assignmentOnly = false,
   primeOpen = true,
-  // The open path navigates hotkey -> (prime wait) -> /local inside the renderer,
-  // so the inspector eval must outlast RELAY_CODEX_OPEN_PRIME_MS; default higher.
   timeoutMs = Number(process.env.RELAY_CODEX_DESKTOP_TIMEOUT_MS || 8000),
 } = {}) {
   if (process.env.RELAY_CODEX_DESKTOP_REFRESH === "0") return { attempted: false, reason: "disabled" };
@@ -679,8 +677,9 @@ export async function relayRefreshCodexRenderer(payload) {
     const targetIsActive = () => {
       const nodes = window.document?.querySelectorAll?.("[data-app-action-sidebar-thread-id]") || [];
       for (const node of nodes) {
+        const activeId = node.getAttribute?.("data-app-action-sidebar-thread-id");
         if (
-          node.getAttribute?.("data-app-action-sidebar-thread-id") === targetThreadId &&
+          (activeId === targetThreadId || activeId === `${hostId}:${targetThreadId}`) &&
           node.getAttribute?.("data-app-action-sidebar-thread-active") === "true"
         ) {
           return true;
@@ -697,32 +696,17 @@ export async function relayRefreshCodexRenderer(payload) {
         await new Promise((resolve) => setTimeout(resolve, 50));
       } while (true);
     };
-    // Codex renders a thread through two router surfaces: the main window
-    // (sidebar + recents rail) at /local/<id>, and the borderless hotkey
-    // "quick chat" view at /hotkey-window/thread/<id>. Two facts drive the logic:
-    //   1. The app uses an in-memory router, so location.pathname is ALWAYS
-    //      /index.html — it never reveals the current route or window kind.
-    //   2. The /local/<id> route CANNOT cold-load an externally-created relay
-    //      thread: it renders the empty "New chat" state and never recovers.
-    //      Only /hotkey-window/thread/<id> loads such a thread from disk into the
-    //      renderer store. Once loaded, /local/<id> renders it fine.
-    // So to land the user in the main window WITH content, prime the load via the
-    // hotkey route, then switch to /local/<id> once it is warm. The hotkey view
-    // shows the thread during the prime, so the transition is content -> content,
-    // never a blank flash. The second materializer pass runs with primeOpen=false
-    // and just re-asserts /local (the thread is warm by then).
-    const inHotkeyWindow = /hotkey-window/.test(location.href) || /hotkey-window/.test(location.search || "");
-    const primeMs = Number.isFinite(payload.primeMs) ? payload.primeMs : 1200;
-    let finalNavigation;
-    if (inHotkeyWindow) {
-      finalNavigation = navTo(`/hotkey-window/thread/${encoded}`);
-    } else if (payload.primeOpen === false) {
-      finalNavigation = navTo(`/local/${encoded}`);
-    } else {
-      navTo(`/hotkey-window/thread/${encoded}`);
-      await new Promise((resolve) => setTimeout(resolve, primeMs));
-      finalNavigation = navTo(`/local/${encoded}`);
-    }
+    // Give Codex's acknowledged-but-asynchronous history/resume work time to
+    // hydrate the task, then route the selected primary renderer straight to
+    // the main task surface. Navigating through /hotkey-window used to provide
+    // this settling beat, but current Codex materializes that route as a second
+    // compact BrowserWindow. A delayed /local route produces the same cold-load
+    // result without creating another window.
+    const hydrateMs = Number.isFinite(payload.hydrateMs)
+      ? payload.hydrateMs
+      : Number.isFinite(payload.primeMs) ? payload.primeMs : 1200;
+    if (!targetIsActive() && hydrateMs > 0) await new Promise((resolve) => setTimeout(resolve, hydrateMs));
+    const finalNavigation = navTo(`/local/${encoded}`);
     openConfirmed = await confirmActiveThread();
     if (finalNavigation) {
       finalNavigation.confirmed = openConfirmed;
@@ -758,9 +742,9 @@ export async function relayRefreshCodexRenderer(payload) {
 //      bundle: this is the plain submit handler with NO thread-follower-owner
 //      assertion. thread-follower-submit-user-input is NOT a submit — it
 //      answers an item/tool/requestUserInput prompt.
-//   4. navigate to the thread so the injected turn is visible. No hotkey
-//      prime: the thread was just resumed in this window, and the current
-//      chat is often already on screen — a hotkey bounce would visibly yank it.
+//   4. navigate the main window directly to the thread. Never prime through
+//      `/hotkey-window`: current ChatGPT builds materialize that route as a
+//      second compact BrowserWindow, leaving both it and the main task open.
 // The turn/start envelope the app sends for its own composer. SECURITY: the
 // sandbox and approval policy MUST ride the turn params. A thread created with
 // sandbox "workspace-write" does not keep it across a resume — the app falls
@@ -888,25 +872,17 @@ export async function relaySubmitCodexRenderer(payload) {
   // Observed live: bridge sends ACK immediately (fire-and-forget) while the
   // resume completes asynchronously against the app's own app-server. An
   // immediate start-turn races that resume ("Conversation is not being
-  // streamed") and silently no-ops. Give the resume a beat, mirroring the
-  // refresh path's hotkey prime wait.
+  // streamed") and silently no-ops. Put the resumed task on the primary
+  // `/local` route, then give ownership the same bounded settling beat without
+  // ever creating ChatGPT's auxiliary hotkey window.
   const encodedEarly = encodeURIComponent(threadId);
-  const inHotkeyEarly = /hotkey-window/.test(location.href) || /hotkey-window/.test(location.search || "");
   try {
-    window.postMessage({ type: "navigate-to-route", path: `/hotkey-window/thread/${encodedEarly}` }, location.origin);
-    steps.push({ type: "navigate-to-route", ok: true, path: "hotkey-prime" });
+    window.postMessage({ type: "navigate-to-route", path: `/local/${encodedEarly}` }, location.origin);
+    steps.push({ type: "navigate-to-route", ok: true, path: `/local/${encodedEarly}` });
   } catch (error) {
     fail("navigate-to-route", error);
   }
   await new Promise((resolve) => setTimeout(resolve, 600));
-  if (!inHotkeyEarly) {
-    try {
-      window.postMessage({ type: "navigate-to-route", path: `/local/${encodedEarly}` }, location.origin);
-      steps.push({ type: "navigate-to-route", ok: true, path: `/local/${encodedEarly}` });
-    } catch (error) {
-      fail("navigate-to-route", error);
-    }
-  }
   const settleMs = Number.isFinite(payload.settleMs) ? payload.settleMs : 1200;
   if (settleMs > 0) await new Promise((resolve) => setTimeout(resolve, settleMs));
 
@@ -927,8 +903,7 @@ export async function relaySubmitCodexRenderer(payload) {
   }
 
   const encoded = encodeURIComponent(threadId);
-  const inHotkeyWindow = /hotkey-window/.test(location.href) || /hotkey-window/.test(location.search || "");
-  const navPath = inHotkeyWindow ? `/hotkey-window/thread/${encoded}` : `/local/${encoded}`;
+  const navPath = `/local/${encoded}`;
   try {
     // Already navigated before the turn; re-assert so the run is on screen.
     window.postMessage({ type: "navigate-to-route", path: navPath }, location.origin);

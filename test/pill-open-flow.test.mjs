@@ -477,6 +477,15 @@ test("Open in Codex imports the request's existing native thread instead of fork
   assert.doesNotMatch(handler, /selectedHost === "codex"[\s\S]*?fresh: true/);
 });
 
+test("a confirmed exact-session open does not reactivate every Codex window", () => {
+  const start = main.indexOf("async function presentSessionOpen");
+  const end = main.indexOf("async function deliverPacketToSession", start);
+  const present = main.slice(start, end);
+  assert.ok(start >= 0 && end > start, "presentSessionOpen is available");
+  assert.match(present, /if \(!result\?\.url \|\| result\.skipExternalOpen\) return;[\s\S]*activateHost\(provider, observedBundle\)/,
+    "a bridge-confirmed primary-window focus returns before LaunchServices can raise auxiliary windows");
+});
+
 // ---- a notification presents as a banner ----------------------------------
 
 test("a notification presents as a banner, sized to the rows it actually shows", () => {

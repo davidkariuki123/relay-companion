@@ -581,11 +581,10 @@ async function materializeRowInHost({
     // works. The refresh therefore discards the stale cache entry and navigates
     // through the bridge, which forces the view to reload the now-complete file.
     // The codex:// deep link is only the fallback when the bridge is unreachable.
-    // First pass PRIMES the open: it navigates to /hotkey-window/thread/<id>
-    // (the only route that cold-loads an externally-created thread from disk),
-    // waits, then switches to /local/<id> so the thread shows in the main window
-    // with the sidebar. The /local route alone renders an empty "New chat" pane
-    // for a fresh relay thread and never recovers.
+    // The desktop bridge hydrates the externally-created thread through Codex's
+    // cache/history/resume messages, then navigates the primary window directly
+    // to /local/<id>. It must never touch /hotkey-window: current Codex turns
+    // that route into a second compact BrowserWindow.
     const relayProjectOpen = !workspaceKey && path.resolve(cwd) === path.resolve(path.join(os.homedir(), "Relay"));
     const desktopOpenResult = activateDesktop
       ? await refreshCodexDesktopForThreads([codexThreadId], {
@@ -605,9 +604,7 @@ async function materializeRowInHost({
     if (activateDesktop && !CODEX_DESKTOP_UNREACHED.has(desktopOpenResult?.reason)) {
       // The desktop occasionally re-caches the conversation between our discard
       // and the view's load, so a single refresh still races on some first opens.
-      // The second pass runs with primeOpen=false — the thread is warm from the
-      // first pass, so a plain /local navigate re-asserts it deterministically
-      // without a second hotkey->local visual transition.
+      // Re-assert /local once the first hydration pass has settled.
       await sleep(Number(process.env.RELAY_CODEX_OPEN_SECOND_PASS_MS || 1200));
       secondPassResult = await refreshCodexDesktopForThreads([codexThreadId], {
         force: true,

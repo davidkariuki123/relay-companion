@@ -591,8 +591,32 @@ try {
   assert.equal(readerActions.replyPlaceholder, "Reply…");
   const readerActionsShot = await capture(page, "reader-provider-actions.png");
 
-  await evaluate(page, `document.querySelector('#readerBody .rd-host-actions [data-host="codex"]').click(); true`);
+  const readerMotion = await evaluate(page, `(async () => {
+    const selector = '#readerBody .rd-host-actions [data-host="codex"]';
+    document.querySelector(selector).click();
+    const samples = [];
+    const arrivalDeadline = performance.now() + 5000;
+    while (performance.now() < arrivalDeadline) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const list = document.querySelector(selector)?.nextElementSibling;
+      if (!list?.classList.contains('sp-list')) continue;
+      const motionDeadline = performance.now() + 700;
+      do {
+        samples.push(Math.round(list.getBoundingClientRect().height * 10) / 10);
+        if (list.classList.contains('open') && samples.length > 24) break;
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      } while (performance.now() < motionDeadline);
+      break;
+    }
+    return samples;
+  })()`);
   await waitFor(page, `activeView === "reader" && sessionPickerState?.provider === "codex" && !sessionPickerState.loading`);
+  const motionHeights = [...new Set(readerMotion)];
+  const finalMotionHeight = Math.max(...motionHeights);
+  assert.ok(motionHeights.length >= 5, `the picker must paint multiple layout heights, saw ${motionHeights.join(", ")}`);
+  assert.ok(finalMotionHeight > 100, `the destination list reaches its full height: ${finalMotionHeight}`);
+  assert.ok(motionHeights.some((height) => height > 1 && height < finalMotionHeight * .8),
+    `the disclosure has real intermediate frames instead of a discrete jump: ${motionHeights.join(", ")}`);
   const readerPicker = await evaluate(page, `(() => {
     const actions = document.querySelector('#readerBody .rd-host-actions');
     const codex = actions.querySelector('[data-host="codex"]');
@@ -616,7 +640,7 @@ try {
   assert.equal(readerPicker.replyStillVisible, true);
   const readerPickerShot = await capture(page, "reader-provider-session-picker.png");
 
-  console.log(JSON.stringify({ sandbox, before, intentOpen, intentSettled, collapsedAgain, keyboardOpen, reduced, coarse, compactPickerStart, boundDirect, codexPicker, claudePicker, readerActions, readerPicker, captures:[settingsShot, residentShot, hoverShot, codexPickerShot, claudePickerShot, readerActionsShot, readerPickerShot] }, null, 2));
+  console.log(JSON.stringify({ sandbox, before, intentOpen, intentSettled, collapsedAgain, keyboardOpen, reduced, coarse, compactPickerStart, boundDirect, codexPicker, claudePicker, readerActions, readerMotion:motionHeights, readerPicker, captures:[settingsShot, residentShot, hoverShot, codexPickerShot, claudePickerShot, readerActionsShot, readerPickerShot] }, null, 2));
 } catch (error) {
   console.error(error.stack || error);
   console.error(log);

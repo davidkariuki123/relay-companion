@@ -316,7 +316,19 @@
      unfold immediately beneath that row (Sven's board, 2026-08-24). */
   .th-host-action.pressed { background:linear-gradient(90deg, color-mix(in srgb, var(--host-color) 16%, transparent), transparent 72%); }
   .th-host-action.pressed .th-host-arrow { transform:rotate(90deg); }
-  .sp-list { display:flex; flex-direction:column; border-top:1px solid var(--hair); border-bottom:1px solid var(--hair); background:color-mix(in srgb,var(--bg) 62%,var(--wash)); }
+  /* The destinations are one continuous disclosure, not a replacement render.
+     The renderer first paints a real zero-height row, then arms `open` on the
+     next frame. Animating a grid track lets every destination participate in
+     layout while the reader and reply dock move continuously beneath it. */
+  .sp-list {
+    display:grid; grid-template-rows:0fr; opacity:0; transform:translateY(-6px);
+    overflow:hidden; pointer-events:none;
+    transition:grid-template-rows .32s var(--soft), opacity .20s var(--settle), transform .32s var(--soft);
+  }
+  .sp-list.open { grid-template-rows:1fr; opacity:1; transform:none; pointer-events:auto; }
+  .sp-list-inner { min-height:0; overflow:hidden; display:flex; flex-direction:column;
+    border-top:1px solid var(--hair); border-bottom:1px solid var(--hair);
+    background:color-mix(in srgb,var(--bg) 62%,var(--wash)); }
   .sp-row { appearance:none; border:0; border-bottom:1px solid var(--hair); background:transparent; width:100%; padding:13px 18px 13px 52px; cursor:pointer; text-align:left; display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:16px; font-family:var(--sans); }
   .sp-row:last-child { border-bottom:0; }
   .sp-row:hover { background:color-mix(in srgb, var(--ink) 3%, transparent); }
@@ -326,6 +338,9 @@
   .sp-state.working { color:var(--accent); }
   .sp-loading, .sp-error { padding:18px; text-align:center; color:var(--muted-2); font-size:11px; line-height:1.5; }
   .sp-error { color:var(--danger, #b4332a); }
+  @media (prefers-reduced-motion:reduce) {
+    .sp-list { transition:none; }
+  }
 
   /* Every compact surface -> reader frame is one morph, not a navigation
      followed by a resize. The source snapshot holds the exact pixels the click
@@ -1350,7 +1365,8 @@
     text-overflow:ellipsis; white-space:nowrap; }
   .th-host-context { overflow:hidden; color:var(--muted-2); font-family:var(--sans); font-size:10px;
     text-overflow:ellipsis; white-space:nowrap; }
-  .th-host-arrow { color:var(--host-color); font-family:var(--sans); font-size:17px; line-height:1; }
+  .th-host-arrow { color:var(--host-color); font-family:var(--sans); font-size:17px; line-height:1;
+    transition:transform .32s var(--soft); }
   .th-msg.opening .th-host-logo { animation:hostOpenBreathe .8s ease-in-out infinite alternate; animation-play-state:var(--relay-loop-state); }
   @keyframes hostOpenBreathe { to { opacity:.42; transform:scale(.94); } }
   @media (hover:none), (pointer:coarse) {
@@ -4634,12 +4650,65 @@
     else if (activeView === "threads") renderThreadDetail();
     else renderAll();
     if (savedRoomScroll) requestAnimationFrame(() => restoreRoomScroll(savedRoomScroll));
+    armSessionPickerReveal();
   }
 
   function closeSessionPicker({ render = true } = {}) {
     if (!sessionPickerState) return;
+    const closingState = sessionPickerState;
+    const reveal = sessionPickerReveal(closingState);
     sessionPickerState = null;
-    if (render) renderSessionPickerSurface();
+    if (!render) return;
+    if (!REDUCED && reveal?.classList.contains("open")) {
+      // Retire the pressed row and the disclosure in the same motion. Keep the
+      // current DOM alive until the grid track reaches zero; rebuilding first
+      // is the discrete close the user reported.
+      const row = reveal.previousElementSibling;
+      row?.classList.remove("pressed");
+      row?.setAttribute("aria-expanded", "false");
+      reveal.classList.remove("open");
+      let finished = false;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        reveal.removeEventListener("transitionend", onTransitionEnd);
+        if (!sessionPickerState) renderSessionPickerSurface();
+      };
+      const onTransitionEnd = (event) => {
+        if (event.propertyName === "grid-template-rows") finish();
+      };
+      reveal.addEventListener("transitionend", onTransitionEnd);
+      setTimeout(finish, 420);
+      return;
+    }
+    renderSessionPickerSurface();
+  }
+
+  function sessionPickerReveal(state = sessionPickerState) {
+    if (!state) return null;
+    return [...document.querySelectorAll("[data-sp-reveal]")].find((node) =>
+      node.getAttribute("data-sp-reveal") === String(state.id)
+      && node.getAttribute("data-sp-provider") === state.provider) || null;
+  }
+
+  function armSessionPickerReveal() {
+    const state = sessionPickerState;
+    if (!state) return;
+    const reveal = sessionPickerReveal(state);
+    if (!reveal) return;
+    if (state.motion === "open" || REDUCED) {
+      state.motion = "open";
+      reveal.classList.add("open");
+      return;
+    }
+    // Two animation frames guarantee Chromium has committed the zero-height
+    // grid track before it sees the open state. A timeout or a single-frame
+    // class toggle can be coalesced into one paint and jump to the final list.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (sessionPickerState !== state || !reveal.isConnected) return;
+      state.motion = "open";
+      reveal.classList.add("open");
+    }));
   }
 
   function sessionStateLabel(session, { current = false, provider = "claude" } = {}) {
@@ -4662,15 +4731,17 @@
     const state = sessionPickerState;
     if (!state || String(state.id) !== String(id) || state.provider !== provider) return "";
     const hostLabel = provider === "codex" ? "Codex" : "Claude Code";
-    if (state.loading) return `<div class="sp-list"><div class="sp-loading">Loading recent ${hostLabel} ${provider === "codex" ? "tasks" : "sessions"}…</div></div>`;
-    if (state.error) return `<div class="sp-list"><div class="sp-error">${esc(state.error)}</div></div>`;
+    const revealClass = state.motion === "open" || REDUCED ? " open" : "";
+    const wrap = (body) => `<div class="sp-list${revealClass}" data-sp-reveal="${esc(id)}" data-sp-provider="${provider}"><div class="sp-list-inner">${body}</div></div>`;
+    if (state.loading) return wrap(`<div class="sp-loading">Loading recent ${hostLabel} ${provider === "codex" ? "tasks" : "sessions"}…</div>`);
+    if (state.error) return wrap(`<div class="sp-error">${esc(state.error)}</div>`);
     const current = state.data?.current ? sessionRowHtml(state.data.current, { current:true, provider }) : "";
     const recent = (state.data?.recent || []).map((session) => sessionRowHtml(session, { provider })).join("");
     const newLabel = provider === "codex" ? "New Codex task" : "New Claude Code session";
-    return `<div class="sp-list">
+    return wrap(`
       <button class="sp-row" type="button" data-sp-new><span class="sp-name">${newLabel}</span><span class="sp-state">starts with this Relay</span></button>
       ${current}${recent}
-    </div>`;
+    `);
   }
 
   async function deliverSessionSelection(button, selection) {
@@ -4708,6 +4779,7 @@
       loading:!prefetchedResult,
       error:prefetchedResult?.ok === false ? prefetchedResult.error || "Could not load native sessions." : "",
       data:prefetchedResult?.ok === false ? null : prefetchedResult,
+      motion:"opening",
     };
     if (expandConversation) {
       chatExpanded = true;
@@ -4718,6 +4790,7 @@
     // compact-to-expanded morph begins. The original chat chip itself is not
     // changed; only the destination frame gains this pressed state.
     commitNavigation();
+    armSessionPickerReveal();
     if (morphFromCompact) startReaderMorph("threads");
     if (savedRoomScroll) requestAnimationFrame(() => restoreRoomScroll(savedRoomScroll));
     const state = sessionPickerState;

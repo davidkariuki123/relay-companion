@@ -219,15 +219,17 @@ function runRendererExpression(code, { posted, activeThreadId = null }) {
   return Function("window", "location", `return ${code}`)(rendererWindow, rendererLocation);
 }
 
-test("main-window open primes via the hotkey route, then switches to /local", async () => {
-  await withRendererGlobals({ activeThreadId: "thread_abc" }, async ({ posted }) => {
+test("main-window open navigates directly to the primary /local route", async () => {
+  // Current ChatGPT prefixes the DOM identity with the host (`local:`); the
+  // app-server and route APIs still take the bare conversation id.
+  await withRendererGlobals({ activeThreadId: "local:thread_abc" }, async ({ posted }) => {
     const result = await relayRefreshCodexRenderer({ threadIds: [], openThreadId: "thread_abc", primeMs: 0 });
-    assert.deepEqual(navPaths(posted), ["/hotkey-window/thread/thread_abc", "/local/thread_abc"]);
+    assert.deepEqual(navPaths(posted), ["/local/thread_abc"]);
     assert.ok(result.sent.some((s) => s.type === "navigate-to-route" && s.path === "/local/thread_abc" && s.ok));
   });
 });
 
-test("second pass (primeOpen=false) navigates straight to /local, no hotkey bounce", async () => {
+test("legacy primeOpen=false still navigates straight to /local", async () => {
   await withRendererGlobals({}, async ({ posted }) => {
     await relayRefreshCodexRenderer({ threadIds: [], openThreadId: "thread_abc", primeOpen: false, primeMs: 0, confirmMs: 0 });
     assert.deepEqual(navPaths(posted), ["/local/thread_abc"]);
@@ -256,17 +258,17 @@ test("an accepted navigation postMessage is not a confirmed route change", async
   });
 });
 
-test("inside the hotkey window, opens the hotkey thread route only", async () => {
+test("even a leaked hotkey renderer is directed to the primary /local route", async () => {
   await withRendererGlobals({ href: "app://-/index.html?initialRoute=%2Fhotkey-window", search: "?initialRoute=%2Fhotkey-window" }, async ({ posted }) => {
     await relayRefreshCodexRenderer({ threadIds: [], openThreadId: "thread_abc", primeMs: 0, confirmMs: 0 });
-    assert.deepEqual(navPaths(posted), ["/hotkey-window/thread/thread_abc"]);
+    assert.deepEqual(navPaths(posted), ["/local/thread_abc"]);
   });
 });
 
-test("thread ids with unsafe characters are encoded into both routes", async () => {
+test("thread ids with unsafe characters are encoded into the primary route", async () => {
   await withRendererGlobals({}, async ({ posted }) => {
     await relayRefreshCodexRenderer({ threadIds: [], openThreadId: "a/b c", primeMs: 0, confirmMs: 0 });
-    assert.deepEqual(navPaths(posted), ["/hotkey-window/thread/a%2Fb%20c", "/local/a%2Fb%20c"]);
+    assert.deepEqual(navPaths(posted), ["/local/a%2Fb%20c"]);
   });
 });
 
@@ -542,7 +544,7 @@ test("a hung bridge send does not block the navigation", async () => {
     // send timeout is 2000ms; give the test room. Navigation must still happen.
     await relayRefreshCodexRenderer({ threadIds: [], openThreadId: "t1", primeMs: 0, confirmMs: 0 });
     const paths = posted.filter((m) => m.type === "navigate-to-route").map((m) => m.path);
-    assert.deepEqual(paths, ["/hotkey-window/thread/t1", "/local/t1"]);
+    assert.deepEqual(paths, ["/local/t1"]);
   } finally {
     globalThis.window = prevWindow;
     globalThis.location = prevLocation;
@@ -581,7 +583,7 @@ test("desktop expression routes and focuses only the primary ChatGPT window", as
   assert.equal(avatar.calls.execute.length, 0);
   assert.equal(hotkey.calls.execute.length, 0);
   assert.equal(primary.calls.execute.length, 1);
-  assert.deepEqual(navPaths(posted), ["/hotkey-window/thread/thread_abc", "/local/thread_abc"]);
+  assert.deepEqual(navPaths(posted), ["/local/thread_abc"]);
   assert.deepEqual(
     { restore: primary.calls.restore, show: primary.calls.show, focus: primary.calls.focus },
     { restore: 1, show: 1, focus: 1 },
@@ -727,13 +729,13 @@ test("submit renderer resumes the thread, starts a turn with TurnStartParams inp
   // "missing field `type`", and because the bridge is fire-and-forget that
   // rejection is invisible — the turn never runs and the page hangs.
   assert.deepEqual(start.request.params.sandboxPolicy, { type: "dangerFullAccess" });
-      // The thread is primed into the hotkey route, dropped onto /local so the
-      // window is showing it BEFORE the turn fires, then re-asserted after.
+      // The existing task stays in the primary window for the whole submit.
+      // A hotkey prime creates ChatGPT's compact auxiliary window beside it.
       assert.deepEqual(navPaths(posted), [
-        "/hotkey-window/thread/thread_abc",
         "/local/thread_abc",
         "/local/thread_abc",
       ]);
+      assert.equal(navPaths(posted).some((route) => route.includes("hotkey-window")), false);
     },
   );
 });
@@ -768,7 +770,7 @@ test("submit renderer fails cleanly when the turn is rejected (the thread is on 
       // Navigation now precedes the turn (the window must be showing the thread
       // for the turn to land), so a rejected turn still leaves it on screen —
       // which is the honest place for the reader to see nothing happened.
-      assert.deepEqual(navPaths(posted), ["/hotkey-window/thread/t1", "/local/t1"]);
+      assert.deepEqual(navPaths(posted), ["/local/t1"]);
     },
   );
 });
@@ -796,7 +798,7 @@ test("a fire-and-forget bridge (undefined returns) still submits: busy detection
   });
 });
 
-test("submit renderer inside the hotkey window navigates the hotkey thread route", async () => {
+test("submit renderer never creates another hotkey window even if an auxiliary URL leaks through", async () => {
   await withSubmitGlobals(
     {
       respond: (m) => (m.type === "maybe-resume-conversation" ? { activeTurnId: null } : undefined),
@@ -806,9 +808,7 @@ test("submit renderer inside the hotkey window navigates the hotkey thread route
     async ({ posted }) => {
       const result = await relaySubmitCodexRenderer({ threadId: "t1", text: "hello", settleMs: 0 });
       assert.equal(result.ok, true);
-      // Already on the hotkey route: primed, never dropped to /local, then
-      // re-asserted after the turn.
-      assert.deepEqual(navPaths(posted), ["/hotkey-window/thread/t1", "/hotkey-window/thread/t1"]);
+      assert.deepEqual(navPaths(posted), ["/local/t1", "/local/t1"]);
     },
   );
 });
@@ -860,7 +860,7 @@ test("submit expression runs only in the selected primary window and focuses it"
   assert.equal(primary.calls.execute.length, 1);
   assert.equal(windows.find((w) => w.id === 41)?.focused, true, "submit always raises the primary window");
   assert.equal(windows.find((w) => w.id === 41)?.result?.ok, true);
-  assert.deepEqual(navPaths(posted), ["/hotkey-window/thread/thread_abc", "/local/thread_abc", "/local/thread_abc"]);
+  assert.deepEqual(navPaths(posted), ["/local/thread_abc", "/local/thread_abc"]);
 
   // The overlay digs the renderer verdict out of the per-pid envelope.
   const renderer = primarySubmitRendererResult([{ pid: 1, ok: true, value: windows }]);

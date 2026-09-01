@@ -75,6 +75,23 @@ test("the first pointer event never cold-starts Web Audio", () => {
   assert.match(prime, /readerMorphSnapshot \|\| readerMorphInFlight \|\| roomViewTransition \|\| raf/);
 });
 
+test("the exact-session picker expands and retires as one continuous disclosure", () => {
+  const styles = between(html, "/* The exact-session picker", "/* Every compact surface -> reader frame");
+  assert.match(styles, /\.sp-list \{[\s\S]*grid-template-rows:0fr[\s\S]*transition:grid-template-rows/);
+  assert.match(styles, /\.sp-list\.open \{ grid-template-rows:1fr/);
+  assert.match(styles, /\.sp-list-inner \{ min-height:0; overflow:hidden/);
+
+  const lifecycle = between(html, "function renderSessionPickerSurface", "function sessionStateLabel");
+  assert.match(lifecycle, /armSessionPickerReveal\(\)/);
+  assert.match(lifecycle, /requestAnimationFrame\(\(\) => requestAnimationFrame\(\(\) =>/,
+    "the zero-height disclosure is committed before the open class is painted");
+  assert.match(lifecycle, /reveal\.classList\.remove\("open"\)[\s\S]*transitionend/,
+    "closing keeps the existing DOM alive until its grid track reaches zero");
+
+  const picker = between(html, "function sessionPickerInlineHtml", "async function deliverSessionSelection");
+  assert.match(picker, /class="sp-list\$\{revealClass\}"[\s\S]*class="sp-list-inner"/);
+});
+
 test("the folded pill uses one visual face across both native window strategies", () => {
   const collapse = between(html, "function setCollapsed", "// Park the card invisibly");
   assert.match(collapse, /classList\.toggle\("collapsed", collapsed\)/,
