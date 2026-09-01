@@ -1519,6 +1519,10 @@ test("public release owns immutable publication while private promotion owns fle
     assert.match(source, /verify-runtime-manifest\.mjs/);
     assert.match(source, /assert-runtime-capabilities\.mjs/);
     assert.match(source, /relay-runtime-\$VERSION-linux-x64\.tar\.gz/);
+    if (workflow === "promote-dev-companion.yml") {
+      assert.match(source, /waiting for npm dev to converge to \$VERSION/);
+      assert.match(source, /npm view relay-companion dist-tags\.dev --prefer-online/);
+    }
   }
   const catchupPromotion = new URL("../../../.github/workflows/promote-legacy-catchup.yml", import.meta.url);
   if (fs.existsSync(privatePromotion)) {

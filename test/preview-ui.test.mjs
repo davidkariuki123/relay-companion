@@ -940,8 +940,12 @@ test("ordinary Relay folders address the human, the agent, and local Work separa
   assert.match(wiring, /const requestedHost = b\.getAttribute\("data-open-in-host"\)/);
   assert.match(wiring, /openRelayFromUI\(id, "relay", "fresh", host, note\)/,
     "Task route controls keep their existing fresh-session behavior");
+  assert.match(reader, /const hostActions = request \? "" : `<div class="rd-host-actions"[^]*relayHostActionsHtml/,
+    "an ordinary Relay's letter face paints the same preference-backed provider rows as its agent face");
+  assert.match(reader, /\$\{hostActions\}[\s\S]*id="qrSend">Send/,
+    "Sven's provider rows sit above the human reply composer instead of inside its rail");
   assert.doesNotMatch(reader, /data-open-in-host="codex">Open in Codex[\s\S]*id="qrSend">Send/,
-    "For you contains the human reply action, not duplicate provider actions");
+    "the human reply rail still contains only its reply action, never the old hardcoded provider buttons");
   assert.match(wiring, /readerTab = "work"/);
   assert.match(reader, /data-rtab="work"[^]*<span class="relay-contents-name">Work<\/span>/);
   assert.match(startHandler, /localWork: true/);
