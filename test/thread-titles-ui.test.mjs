@@ -844,7 +844,7 @@ test("your own relays are readable too — the text/letter rule is the same on b
   // A quick text you typed stays a text; a titled relay with a body of its
   // own is a letter you can open. Hardcoding textLike:true meant a reader
   // could open everyone's relays but never their own (Sven, live).
-  assert.match(sentPush, /const sentTextLike = request \? false : ownedAgent \|\| relayTextLike\(s\.forHuman, sentSubject\(s\), s\.forAgent\)/);
+  assert.match(sentPush, /const sentTextLike = request \? false : ownedAgent \|\| relayTextLike\(s\.forHuman, sentSubject\(s\), s\.forAgent, attachments\)/);
   assert.match(sentPush, /textLike: sentTextLike/);
   assert.match(sentPush, /body: s\.forHuman \|\| "",/);
   assert.match(sentPush, /preview: \(\(\) => \{/);
@@ -859,8 +859,10 @@ test("the agent document, not title similarity, distinguishes text from a Relay"
   assert.match(classifier, /!String\(forAgent \|\| ""\)\.trim\(\)/);
   assert.doesNotMatch(classifier, /b === s|startsWith/);
   assert.doesNotMatch(listGate, /row\.forAgent|String\(\(row && row\.type/, "completion's human result remains correspondence");
-  assert.match(html, /const textLike = request \? false : ownedAgent \|\| relayTextLike\(r\.forHuman, subj, r\.forAgent\)/);
-  assert.match(html, /const sentTextLike = request \? false : ownedAgent \|\| relayTextLike\(s\.forHuman, sentSubject\(s\), s\.forAgent\)/);
+  assert.match(html, /const textLike = request \? false : ownedAgent \|\| relayTextLike\(r\.forHuman, subj, r\.forAgent, attachments\)/);
+  assert.match(html, /const sentTextLike = request \? false : ownedAgent \|\| relayTextLike\(s\.forHuman, sentSubject\(s\), s\.forAgent, attachments\)/);
+  assert.match(classifier, /Array\.isArray\(attachments\) && attachments\.length > 0/,
+    "file-only human correspondence remains an ordinary message");
   assert.match(html, /agent: String\(r\.forAgent \|\| ""\)/, "inbound completion keeps its agent document");
   assert.match(html, /agent: String\(s\.forAgent \|\| ""\)/, "outbound completion keeps its agent document");
 });

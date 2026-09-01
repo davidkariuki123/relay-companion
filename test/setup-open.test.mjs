@@ -4,8 +4,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  clearPendingSetupOpen,
+  finishPendingSetupOpenRelay,
   finishSetupOpenRelay,
   normalizeSetupHost,
+  pendingSetupOpenPath,
+  pendingSetupOpenPreview,
+  persistPendingSetupOpen,
+  readPendingSetupOpen,
   setupOpenStatus,
   setupOpenRelayToken,
   setupPairFlags,
@@ -49,6 +55,38 @@ test("setup flag helpers normalize public relay open intent", () => {
   assert.equal(setupOpenRelayToken({}), null);
   assert.equal(normalizeSetupHost("codex"), "codex");
   assert.equal(normalizeSetupHost("claude_code"), "claude");
+});
+
+test("first-run open intent is owner-only, durable, and never needs renderer storage", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "relay-pending-open-test-"));
+  const saved = persistPendingSetupOpen({ token: "public_token", host: "codex", directory });
+  assert.equal(saved.token, "public_token");
+  assert.deepEqual(readPendingSetupOpen({ directory }), saved);
+  assert.equal(fs.statSync(pendingSetupOpenPath({ directory })).mode & 0o777, 0o600);
+  assert.equal(clearPendingSetupOpen({ directory }), true);
+  assert.equal(readPendingSetupOpen({ directory }), null);
+});
+
+test("signed-out pending preview exposes message value without binding the token", async () => {
+  const calls = [];
+  const preview = await pendingSetupOpenPreview({
+    pending: { token: "public_token", host: "codex" },
+    client: {
+      async openRelay(token) {
+        calls.push(["open", token]);
+        return { relay };
+      },
+      async openRelayPacket(token) {
+        calls.push(["packet", token]);
+        return { packet };
+      },
+    },
+  });
+  assert.deepEqual(calls, [["open", "public_token"], ["packet", "public_token"]]);
+  assert.equal(preview.forHuman, relay.forHuman);
+  assert.equal(preview.sender.name, "Sven");
+  assert.equal(preview.host, "codex");
+  assert.equal(Object.hasOwn(preview, "token"), false);
 });
 
 test("bootstrap pairing defers service restart to exact-runtime activation", () => {
@@ -277,6 +315,35 @@ test("finishSetupOpenRelay binds token, stages inbox, and opens the real relay i
   assert.deepEqual(opened, [{ id: "relay_123", host: "codex" }]);
   assert.equal(result.relayId, "relay_123");
   assert.equal(result.opened.url, "codex://threads/thread_1");
+});
+
+test("pending first-run intent is removed only after authenticated binding succeeds", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "relay-pending-finish-test-"));
+  const pending = persistPendingSetupOpen({ token: "public_token", host: "codex", directory });
+  const client = {
+    async bindOpenRelay() { return { relay }; },
+    async inbox() { return { items: [] }; },
+    async fetchRelay() { return { packet, attachmentUrls: {} }; },
+  };
+  await finishPendingSetupOpenRelay({
+    pending,
+    directory,
+    client,
+    stage: () => {},
+    openRelayFn: async () => ({ openedInHost: true }),
+  });
+  assert.equal(readPendingSetupOpen({ directory }), null);
+
+  persistPendingSetupOpen({ token: "public_token", host: "codex", directory });
+  await assert.rejects(
+    finishPendingSetupOpenRelay({
+      pending,
+      directory,
+      client: { async bindOpenRelay() { throw new Error("wrong account"); } },
+    }),
+    /wrong account/,
+  );
+  assert.equal(readPendingSetupOpen({ directory }).token, "public_token");
 });
 
 test("setup open status uses URL fallback when the host did not foreground directly", () => {

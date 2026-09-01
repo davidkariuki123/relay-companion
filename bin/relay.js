@@ -69,8 +69,9 @@ import { runCodexHook } from "../src/codex-hook.js";
 import { normalizePairingCode, persistPairedAccount } from "../src/account.js";
 import { resetCompanionStateForAccount } from "../src/notifications.js";
 import {
-  finishSetupOpenRelay,
+  finishPendingSetupOpenRelay,
   normalizeSetupHost,
+  persistPendingSetupOpen,
   setupOpenRelayToken,
   setupOpenStatus,
   setupPairFlags,
@@ -351,6 +352,10 @@ async function applyInstall({
  * migration window; it is never required or prompted for by the new flow.
  */
 async function cmdSetup(flags) {
+  const token = setupOpenRelayToken(flags);
+  if (token) {
+    persistPendingSetupOpen({ token, host: flags.host || flags.in });
+  }
   if (flags.restart) {
     if (flags.code) throw new Error("Relay setup --restart cannot be combined with the legacy --code path.");
     const { createInstallationAuthorizationController } = await import("../src/installation-authorization.js");
@@ -392,13 +397,10 @@ async function cmdSetup(flags) {
     // Ordinary setup keeps its historical install-and-start behaviour.
     reload: !(flags["no-restart"] && process.env.RELAY_BOOTSTRAP_ACTIVATED === "1"),
   });
-  const token = setupOpenRelayToken(flags);
   if (token && readConfig().deviceToken) {
     console.log("");
     const host = normalizeSetupHost(flags.host || flags.in);
-    const result = await finishSetupOpenRelay({
-      token,
-      host,
+    const result = await finishPendingSetupOpenRelay({
       log: (m) => process.stderr.write(`[relay] ${m}\n`),
     });
     const openStatus = setupOpenStatus(result.opened, openUrl);
@@ -411,7 +413,7 @@ async function cmdSetup(flags) {
     }
   } else if (token) {
     console.log("");
-    console.log("Sign in from the Relay pill first; the relay will be available in that account afterward.");
+    console.log("The Relay is waiting in the pill. Read it there, then connect the intended recipient account to reply or open it in your agent.");
   }
   // The relay is opened/staged first -- the recipient should still get the thing
   // they came for -- but setup did not achieve what it claims, so it must not

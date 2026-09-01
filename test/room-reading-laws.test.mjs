@@ -253,6 +253,10 @@ test("a compact provider-row click expands the existing conversation and unfolds
     "a legacy materialized Relay continues directly without a picker");
   assert.match(picker, /if \(result\?\.binding\) \{[\s\S]*window\.relay\.continueSession\(id, state\.source\)/,
     "a remembered exact-session binding also continues directly without expanding");
+  assert.match(picker, /if \(!state \|\| state\.delivering \|\| button\.disabled\) return;/,
+    "one picker selection blocks every competing row until delivery settles");
+  assert.match(picker, /querySelectorAll\("\.sp-row"\)[\s\S]*row\.disabled = true/,
+    "double-clicks and rapid destination changes cannot emit concurrent IPC deliveries");
   assert.match(footer, /loadSessionPicker\(id, host, relaySubject\(message\) \|\| "Relay", null, source\)/,
     "received and sent rows enter the same immediate picker path");
   assert.doesNotMatch(footer, /if \(source === "relay"\)/,

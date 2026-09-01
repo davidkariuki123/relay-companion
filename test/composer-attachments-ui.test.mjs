@@ -40,6 +40,8 @@ test("the pill stages picker and dropped files, and serializes them through one 
   assert.match(roomSend, /\(\{ files, attachments \} = await composerFilePayloads\(staged\)\)/);
   assert.doesNotMatch(roomSend, /for \(let i = 0; i < bytes\.length; i \+= 1\)/);
   assert.match(roomSend, /attachments,/);
+  assert.match(inbox, /attachments\.push\(\{ name, bytes:size, contentType, image, previewUrl \}\)/,
+    "optimistic cargo carries the same safe metadata as canonical attachments");
 });
 
 test("the pop-out person and group composer has attachment parity", () => {
@@ -62,6 +64,8 @@ test("the pop-out bridge carries only normalized file primitives and main prepar
   assert.match(send, /prepareOrdinaryRelayAttachments\(\{ files: localFiles, idempotencyKey \}\)/);
   assert.match(send, /attachments,/);
   assert.match(send, /forHuman: body \|\| " "/);
+  assert.match(send, /kind: "message"/,
+    "pop-out chat attachments use the same explicit ordinary-message species as the pill outbox");
 });
 
 test("attachment identity is scoped to the message idempotency key", () => {

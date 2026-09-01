@@ -30,14 +30,19 @@ function pillFunction(name) {
 // Run the real threadMessages against a minimal payload. Every collaborator it
 // reaches for is stubbed to its plain-correspondence behavior; the collapse
 // and reconciliation under test are the extracted code itself.
-function runThreadMessages(payload, optimisticChatReplies, { realDelivery = false } = {}) {
+function runThreadMessages(payload, optimisticChatReplies, { realDelivery = false, realClassifier = false } = {}) {
   // The delivery fold is the code under test in its own case, so that case runs
   // the REAL sentIsRead/sentIsDelivered pair (the declarations shadow the
   // stub parameters of the same name) instead of a stub that would beg it.
   const selfAuthored = pillFunction("relayIsSelfAuthored");
-  const source = realDelivery
-    ? `${pillFunction("sentIsRead")}\n${pillFunction("sentIsDelivered")}\n${selfAuthored}\n${pillFunction("threadMessages")}\nreturn threadMessages();`
-    : `${selfAuthored}\n${pillFunction("threadMessages")}\nreturn threadMessages();`;
+  const source = [
+    realDelivery ? pillFunction("sentIsRead") : "",
+    realDelivery ? pillFunction("sentIsDelivered") : "",
+    realClassifier ? pillFunction("relayTextLike") : "",
+    selfAuthored,
+    pillFunction("threadMessages"),
+    "return threadMessages();",
+  ].filter(Boolean).join("\n");
   return new Function(
     "payload", "optimisticChatReplies", "canonicalChatDetails", "contactChatAnchors",
     "requestThreadIds", "isTaskRow", "isRelayListKind", "onRequestThread",
@@ -106,6 +111,87 @@ test("a direct reply still retires on its exact relay id", () => {
   }, optimistic);
   assert.equal(msgs.filter((m) => m.direction === "out").length, 1);
   assert.equal(optimistic.size, 0);
+});
+
+test("an inbound file-only chat message stays an ordinary message and owns its attachment", () => {
+  const image = { id: "att_in", name: "photo.jpeg", bytes: 23165, contentType: "image/jpeg" };
+  const msgs = runThreadMessages({
+    relays: [{
+      id: "relay_in", threadId: "thread_in", title: "photo.jpeg", forHuman: " ", forAgent: "",
+      senderName: "Jordan", senderEmail: "jordan@example.com", createdAt: "2026-09-01T08:00:00.000Z",
+      attachments: [image],
+    }],
+    sent: [],
+  }, new Map(), { realClassifier: true });
+
+  assert.equal(msgs.length, 1);
+  assert.equal(msgs[0].textLike, true, "a file does not turn a chat message into a Relay");
+  assert.deepEqual(msgs[0].attachments, [image], "the renderer receives attachment data on the message itself");
+  assert.equal(msgs[0].body, " ", "the transport placeholder never becomes a fake filename body");
+});
+
+test("a sent text-and-image chat message stays ordinary after canonical reconciliation", () => {
+  const image = { id: "att_out", name: "diagram.png", bytes: 4096, contentType: "image/png" };
+  const msgs = runThreadMessages({
+    relays: [],
+    sent: [{
+      relayId: "relay_out", threadId: "thread_out", title: "caption", forHuman: "caption", forAgent: "",
+      createdAt: "2026-09-01T08:01:00.000Z", recipient: { name: "Jordan", email: "jordan@example.com" },
+      attachments: [image],
+    }],
+  }, new Map(), { realClassifier: true });
+
+  assert.equal(msgs.length, 1);
+  assert.equal(msgs[0].textLike, true);
+  assert.equal(msgs[0].body, "caption");
+  assert.deepEqual(msgs[0].attachments, [image]);
+});
+
+test("a file-only group fan-out collapses to one ordinary message with its image intact", () => {
+  const image = { id: "att_group", name: "group-photo.jpeg", bytes: 23165, contentType: "image/jpeg" };
+  const siblings = ["Shane", "Jordan"].map((name, index) => ({
+    relayId: `relay_group_${index}`, groupSendId: "gsend_image", threadId: "thread_group",
+    title: "group-photo.jpeg", forHuman: " ", forAgent: "", attachments: [image],
+    createdAt: `2026-09-01T08:01:0${index}.000Z`, recipientGroupName: "Granular",
+    recipient: { name, email:`${name.toLowerCase()}@example.com` },
+  }));
+  const msgs = runThreadMessages({ relays: [], sent: siblings }, new Map(), { realClassifier: true });
+
+  assert.equal(msgs.length, 1, "one group send remains one chat message");
+  assert.equal(msgs[0].textLike, true, "the group image does not grow Relay agent actions");
+  assert.deepEqual(msgs[0].attachments, [image]);
+});
+
+test("an attached agent document remains a Relay while retaining the same cargo", () => {
+  const file = { id: "att_doc", name: "evidence.pdf", bytes: 8192, contentType: "application/pdf" };
+  const msgs = runThreadMessages({
+    relays: [],
+    sent: [{
+      relayId: "relay_doc", threadId: "thread_doc", title: "Investigation", forHuman: "Here is the result.",
+      forAgent: "Full evidence for the recipient's agent.", createdAt: "2026-09-01T08:02:00.000Z",
+      recipient: { name: "Jordan", email: "jordan@example.com" }, attachments: [file],
+    }],
+  }, new Map(), { realClassifier: true });
+
+  assert.equal(msgs[0].textLike, false, "the agent document, not the file, defines the Relay species");
+  assert.deepEqual(msgs[0].attachments, [file]);
+});
+
+test("the durable outbox restores attachment cargo without exposing its spool path", () => {
+  const optimistic = new Map();
+  const source = `${pillFunction("syncOutboxProjection")}\nreturn syncOutboxProjection();`;
+  new Function("payload", "optimisticChatReplies", `"use strict"; ${source}`)({
+    outbox: [{
+      id: "queue_1", state: "queued", text: "", createdAt: "2026-09-01T08:03:00.000Z",
+      files: [{ name: "offline.jpg", size: 1234, contentType: "image/jpeg", spoolPath: "/private/outbox/secret" }],
+      recipient: { email: "jordan@example.com" }, chat: { party: "Jordan" },
+    }],
+  }, optimistic);
+
+  const row = optimistic.get("queue_1");
+  assert.deepEqual(row.attachments, [{ name: "offline.jpg", bytes: 1234, contentType: "image/jpeg" }]);
+  assert.equal(JSON.stringify(row).includes("spoolPath"), false, "renderer state carries metadata, never private file paths");
+  assert.equal(row.textLike, true);
 });
 
 test("a self-send keeps the richer inbox copy but renders as my outbound message", () => {

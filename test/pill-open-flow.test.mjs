@@ -486,6 +486,25 @@ test("a confirmed exact-session open does not reactivate every Codex window", ()
     "a bridge-confirmed primary-window focus returns before LaunchServices can raise auxiliary windows");
 });
 
+test("the New task/session picker row claims and recovers materialization before forceFresh", () => {
+  const start = main.indexOf("async function deliverPacketToSession");
+  const end = main.indexOf("async function continuePacketSession", start);
+  const delivery = main.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.match(delivery, /claimRelayNewSession\(routePacketId, provider\)/);
+  assert.match(delivery, /claim\.kind === "recovered"/);
+  assert.match(delivery, /markRelaySessionDispatching\(routePacketId, claim\.claim\.claimId\)/);
+  assert.match(delivery, /completeRelayNewSession\([\s\S]*claim\.claim\.claimId/);
+  assert.match(delivery, /noProviderSideEffect[\s\S]*releaseRelaySessionClaim\(routePacketId, claim\.claim\.claimId\)/,
+    "an unopenable workspace releases its pre-dispatch claim because no native session exists");
+  assert.match(delivery, /NEW_SESSION_ID_UNCONFIRMED/,
+    "an unexplained missing native id remains fail-closed rather than forcing another task");
+  assert.ok(
+    delivery.indexOf("markRelaySessionDispatching") < delivery.indexOf("forceFresh: true"),
+    "the durable dispatch boundary precedes materialization",
+  );
+});
+
 // ---- a notification presents as a banner ----------------------------------
 
 test("a notification presents as a banner, sized to the rows it actually shows", () => {

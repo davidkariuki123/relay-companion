@@ -812,8 +812,10 @@
   .att-zone { display:flex; flex-direction:column; gap:8px; width:100%; min-width:0; margin-top:8px; }
   .att-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px; width:100%; }
   .att-grid.one { grid-template-columns:minmax(0, 1fr); }
-  button.att-fig { appearance:none; display:flex; flex-direction:column; min-width:0; padding:0; border:0;
-    background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer; }
+  .att-fig { display:flex; flex-direction:column; min-width:0; padding:0; border:0;
+    background:transparent; color:inherit; font:inherit; text-align:left; }
+  button.att-fig { appearance:none; cursor:pointer; }
+  .att-fig.pending { cursor:default; }
   .att-plate { position:relative; display:grid; place-items:center; width:100%; aspect-ratio:16 / 10; overflow:hidden;
     border:1px solid var(--hair); border-radius:12px; background:var(--wash); }
   .att-plate::before { content:""; width:5px; height:5px; background:var(--accent); opacity:.52; }
@@ -822,7 +824,7 @@
   .att-fig.ready .att-plate { aspect-ratio:auto; background:transparent; }
   .att-fig.ready .att-plate::before { display:none; }
   .att-fig.ready .att-plate img { opacity:1; transform:none; }
-  .att-fig:hover .att-plate { border-color:var(--muted-2); }
+  button.att-fig:hover .att-plate { border-color:var(--muted-2); }
   .att-cap { display:flex; align-items:baseline; gap:6px; min-width:0; padding:5px 2px 0; }
   .att-cap .td-att-name { flex:1 1 auto; }
   .att-cap .td-att-meta { margin-left:0; }
@@ -1210,6 +1212,11 @@
     margin:7px 16px 0; padding:9px 13px 8px; border-radius:14px; font-family:var(--sans); }
   .th-msg:hover { background:var(--wash-2); }
   .th-msg.mine { background:color-mix(in srgb, var(--accent) 8%, transparent); }
+  /* File-only chat messages have no words, so they have no bubble. Keep the
+     message node in the DOM for receipts, reply anchoring and reconciliation,
+     but let its attachment cargo own the visible geometry. */
+  .th-msg.attachment-only { display:contents; }
+  .th-msg.attachment-only :is(.th-msg-title, .th-blk-time, .rx-msg-picker, .rx-confirm, .rx-badges) { display:none; }
   .th-msg.live-arrival { animation:thMessageArrival .28s var(--soft) both; }
   @keyframes thMessageArrival {
     from { opacity:.25; transform:translateY(7px) scale(.985); }
@@ -2547,7 +2554,7 @@
      hit area; reveal signup again as the card expands. */
   .card.collapsed .signup-view { display:none; }
   .signup-view { flex:1 1 auto; min-height:0; padding:14px 22px 24px; display:flex; flex-direction:column; }
-  .su-body { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; justify-content:center; }
+  .su-body { flex:1 1 auto; min-height:0; overflow:auto; display:flex; flex-direction:column; justify-content:center; }
   .su-step { color:var(--muted); font-size:10px; font-weight:600; letter-spacing:.14em; text-transform:uppercase; }
   .su-title { margin:7px 0 0; font-family:var(--serif); font-size:27px; font-weight:400; line-height:1.08; letter-spacing:-.015em; color:var(--ink); }
   .su-copy { margin:10px 0 0; max-width:285px; color:var(--muted); font-size:13px; line-height:1.52; }
@@ -2591,6 +2598,14 @@
   .su-chat-action { flex:none; color:var(--accent); font-size:11px; font-weight:600; }
   .su-agent-note { margin-top:11px; padding:10px 12px; border-radius:var(--r-2); color:var(--muted); background:var(--wash); font-size:11px; line-height:1.42; }
   .su-agent-note strong { display:block; margin-bottom:2px; color:var(--ink); font-weight:600; }
+  .su-relay { margin-top:17px; padding:14px; border:1px solid var(--edge); border-radius:var(--r-3); background:var(--raised); }
+  .su-relay-from { color:var(--muted); font-size:11px; font-weight:600; letter-spacing:.02em; }
+  .su-relay-title { margin-top:5px; color:var(--ink); font-family:var(--serif); font-size:18px; line-height:1.2; }
+  .su-relay-message { margin-top:10px; color:var(--ink); font-size:12px; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .su-relay-agent { margin-top:10px; color:var(--muted); font-size:11px; }
+  .su-relay-agent summary { cursor:pointer; font-weight:600; color:var(--muted); }
+  .su-relay-agent pre { margin:8px 0 0; white-space:pre-wrap; overflow-wrap:anywhere; font:400 10px/1.5 var(--mono); }
+  .su-relay-to { margin-top:9px; color:var(--muted-2); font-size:10px; }
   .su-chat-footer { margin-top:13px; }
   .su-checks { margin:20px 0 0; display:grid; gap:9px; color:var(--muted); font-size:12px; }
   .su-check { display:flex; align-items:center; gap:8px; }
@@ -3924,14 +3939,22 @@
     const images = list.filter((attachment) => {
       const type = String(attachment?.contentType || "").toLowerCase();
       const name = String(attachment?.filename || attachment?.name || "").toLowerCase();
-      return /^image\/(?:png|jpeg|gif|webp)$/.test(type) || /\.(?:png|jpe?g|gif|webp)$/.test(name);
+      return attachment?.image === true || /^image\/(?:png|jpeg|gif|webp)$/.test(type) || /\.(?:png|jpe?g|gif|webp)$/.test(name);
     });
     const files = list.filter((attachment) => !images.includes(attachment));
     if (!images.length) return attachmentChips(files, { relayId });
     const plates = images.map((attachment) => {
       const name = attachment?.filename || attachment?.name || "Image";
       const size = fmtBytes(attachment?.sizeBytes != null ? attachment.sizeBytes : attachment?.bytes);
-      if (!relayId || !attachment?.id) return attachmentChips([attachment]);
+      if (!relayId || !attachment?.id) {
+        const previewUrl = /^(?:blob:|data:image\/)/i.test(String(attachment?.previewUrl || ""))
+          ? String(attachment.previewUrl)
+          : "";
+        return `<div class="att-fig${previewUrl ? " ready" : " pending"}">
+          <span class="att-plate" aria-hidden="true">${previewUrl ? `<img src="${esc(previewUrl)}" alt="">` : ""}</span>
+          <span class="att-cap"><span class="td-att-name">${esc(name)}</span>${size ? `<span class="td-att-meta">${esc(size)}</span>` : ""}</span>
+        </div>`;
+      }
       return `<button class="att-fig td-att-open" type="button" data-att-relay="${esc(relayId)}" data-att-id="${esc(attachment.id)}" data-att-preview="1" data-stop="1" title="Open ${esc(name)}" aria-label="Open image ${esc(name)}">
         <span class="att-plate" aria-hidden="true"></span>
         <span class="att-cap"><span class="td-att-name">${esc(name)}</span>${size ? `<span class="td-att-meta">${esc(size)}</span>` : ""}</span>
@@ -4030,11 +4053,6 @@
     }
   }
 
-  // Attachments for one relay row, straight from the current payload.
-  function relayAttachmentsForId(id) {
-    const row = (payload.relays || []).find((r) => r.id === id);
-    return row && Array.isArray(row.attachments) ? row.attachments : [];
-  }
   // Tasks/share approvals are hidden from the pill until that product surface is ready.
   const RELAY_HIDDEN_KINDS = new Set(["task_request", "task", "share_approval"]); // requests live on their own board
   function isRelayListKind(row) {
@@ -4373,7 +4391,7 @@
 
   // ---------- state ----------
   let activeView = "relays";
-  let payload = { account: { paired: false }, ui: { canDismiss: true, reopenSurface: "the Relay icon", setupTutorialPending:false }, features: { requests:false, slack:false, peopleMentions:true, agentMentions:false, cowork:false, messageMutations:false, environment:"production" }, relays: [], sent: [], requests: [], contacts: [], chats: [], slackChats: [] };
+  let payload = { account: { paired: false }, ui: { canDismiss: true, reopenSurface: "the Relay icon", setupTutorialPending:false }, features: { requests:false, slack:false, peopleMentions:true, agentMentions:false, cowork:false, messageMutations:false, environment:"production" }, pendingOpen:null, relays: [], sent: [], requests: [], contacts: [], chats: [], slackChats: [] };
   const canonicalChatDetails = new Map();
   const canonicalChatFingerprints = new Map();
   const canonicalChatDetailProjectionKeys = new Map();
@@ -4914,13 +4932,17 @@
 
   async function deliverSessionSelection(button, selection) {
     const state = sessionPickerState;
-    if (!state || button.disabled) return;
-    button.disabled = true;
+    if (!state || state.delivering || button.disabled) return;
+    state.delivering = true;
+    for (const row of sessionPickerReveal(state)?.querySelectorAll(".sp-row") || []) row.disabled = true;
     const stateEl = button.querySelector(".sp-state");
     if (stateEl) stateEl.textContent = selection.state === "active" ? "Queued…" : "Opening…";
-    const result = await window.relay.deliverToSession(state.id, selection);
+    let result;
+    try { result = await window.relay.deliverToSession(state.id, selection); }
+    catch { result = { ok:false, error:"Could not deliver this Relay." }; }
     if (!sessionPickerState || sessionPickerState !== state) return;
     if (result?.ok === false) {
+      state.delivering = false;
       state.error = result.error || "Could not deliver this Relay.";
       renderSessionPickerSurface();
     } else {
@@ -5281,7 +5303,7 @@
         files.push({ name, size, contentType, contentBase64 });
         if (image && !previewUrl) previewUrl = `data:${contentType};base64,${contentBase64}`;
       }
-      attachments.push({ name, image, previewUrl });
+      attachments.push({ name, bytes:size, contentType, image, previewUrl });
     }
     return { files, attachments };
   }
@@ -8926,12 +8948,16 @@
     const title = String((r && (r.title || r.displayTitle)) || "").trim();
     return title || firstLine((r && r.forHuman) || "", 90) || "Relay";
   }
-  // Product species, never a title heuristic: a Relay has both a human and an
-  // agent document; human-only correspondence is a text message. The title is
-  // still present on the wire for notifications/email and may be shortened, so
-  // comparing it with the body made long texts render as duplicate Relay cards.
-  function relayTextLike(body, _subject, forAgent) {
-    return Boolean(String(body || "").trim()) && !String(forAgent || "").trim();
+  // Product species, never a title or attachment heuristic: a Relay has an
+  // agent document; human-only correspondence is an ordinary chat message.
+  // An ordinary message may contain words, attachments, or both. Requiring a
+  // non-empty body made file-only messages mutate into Relays after the
+  // optimistic row reconciled with Sent, which exposed agent actions and hid
+  // the chat attachment design system.
+  function relayTextLike(body, _subject, forAgent, attachments = []) {
+    const hasHumanContent = Boolean(String(body || "").trim())
+      || (Array.isArray(attachments) && attachments.length > 0);
+    return hasHumanContent && !String(forAgent || "").trim();
   }
   // The relay's own lifecycle state ("read"/"acknowledged" = the recipient read it in-app)
   // outranks the delivery channel state, which never advances past "sent"/"opened".
@@ -10636,6 +10662,16 @@
       const chat = entry.chat || {};
       const files = Array.isArray(entry.files) ? entry.files : [];
       const existing = optimisticChatReplies.get(key) || {};
+      // The durable queue is also the optimistic transcript after restart.
+      // Project only safe file metadata — never spoolPath — so queued messages
+      // keep their cargo while all file bytes remain in the main process.
+      const attachments = existing.attachments?.length
+        ? existing.attachments
+        : files.map((file) => ({
+            name:String(file?.name || "file"),
+            bytes:Number(file?.size || 0),
+            contentType:String(file?.contentType || "application/octet-stream"),
+          }));
       optimisticChatReplies.set(key, {
         ...existing,
         id: entry.relayId || `outbox:${key}`,
@@ -10675,6 +10711,7 @@
         request: false,
         pending: String(entry.state || "queued") !== "sent",
         reactions: { aggregates: [], events: [] },
+        attachments,
         preview: "",
       });
     }
@@ -10797,7 +10834,8 @@
       const subj = relaySubject(r);
       const ownedAgent = r.source?.host === "relay-agent-run";
       const completion = isCompletionRelay(r);
-      const textLike = request ? false : ownedAgent || relayTextLike(r.forHuman, subj, r.forAgent);
+      const attachments = Array.isArray(r.attachments) ? r.attachments : [];
+      const textLike = request ? false : ownedAgent || relayTextLike(r.forHuman, subj, r.forAgent, attachments);
       // Non-completion execution output stays on the Task reading surface.
       if (!completion && !request && onRequestThread(r, reqThreads) && !textLike) continue;
       msgs.push({
@@ -10837,6 +10875,7 @@
         body: r.forHuman || "",
         agent: String(r.forAgent || ""),
         reactions: r.reactions || { aggregates: [], events: [] },
+        attachments,
         preview: textLike ? "" : bodyPreview(r.forHuman || "", subj, 72),
       });
     }
@@ -10866,7 +10905,8 @@
       if (!id || inboundIds.has(id)) continue;
       const request = String(s.kind || "") === "task" || String(s.kind || "") === "task_request";
       const ownedAgent = s.source?.host === "relay-agent-run";
-      const sentTextLike = request ? false : ownedAgent || relayTextLike(s.forHuman, sentSubject(s), s.forAgent);
+      const attachments = Array.isArray(s.attachments) ? s.attachments : [];
+      const sentTextLike = request ? false : ownedAgent || relayTextLike(s.forHuman, sentSubject(s), s.forAgent, attachments);
 
       if (s.groupSendId) {
         if (seenGroupSends.has(s.groupSendId)) continue;
@@ -10927,6 +10967,7 @@
         body: s.forHuman || "",
         agent: String(s.forAgent || ""),
         reactions: s.reactions || { aggregates: [], events: [] },
+        attachments,
         preview: (() => {
           const body = String(s.forHuman || "");
           const subj = String(sentSubject(s) || "");
@@ -10957,10 +10998,10 @@
         const party = mine ? "You" : String(item.sender?.name || "Slack member");
         const body = String(item.forHuman || "");
         const agent = String(item.forAgent || "");
-        // A file or an agent document makes this a Relay, not a quick Slack
-        // text. It must open the deployed two-document reader, where the
-        // shared attachment shelf belongs to the whole handoff.
-        const textLike = !(item.attachments || []).length && relayTextLike(body, item.title || "", agent);
+        const attachments = Array.isArray(item.attachments) ? item.attachments : [];
+        // Attachments are cargo belonging to the chat message. Only an agent
+        // document changes the product species into a Relay.
+        const textLike = relayTextLike(body, item.title || "", agent, attachments);
         msgs.push({
           id,
           relayId: id,
@@ -10993,7 +11034,7 @@
           body,
           agent,
           reactions: item.reactions || { aggregates:[], events:[] },
-          attachments: item.attachments || [],
+          attachments,
           preview: textLike ? "" : bodyPreview(body, item.title || "", 72),
         });
       }
@@ -11144,7 +11185,7 @@
       const agent = String(item?.forAgent || "");
       const title = String(item?.title || "");
       const attachments = Array.isArray(item?.attachments) ? item.attachments : [];
-      const textLike = !attachments.length && relayTextLike(body, title, agent);
+      const textLike = relayTextLike(body, title, agent, attachments);
       return {
         id,
         relayId:id,
@@ -12344,12 +12385,15 @@
       // A quick TEXT (title derived from its own body) speaks in the body
       // voice — sans, message-toned; a titled relay keeps the serif subject.
       const textLike = m.textLike;
+      const attachments = Array.isArray(m.attachments) ? m.attachments : [];
       const agentWorking = m.ownedAgent
         && !String(m.body || "").trim()
         && !String(m.agent || "").trim()
         && !m.deletedAt;
       const editingMessage = messageEditDrafts.has(m.id);
       const editDraft = editingMessage ? messageEditDrafts.get(m.id) : "";
+      const attachmentOnly = textLike && attachments.length > 0
+        && !String(m.body || "").trim() && !editingMessage && !m.deletedAt;
       const hasHostActions = !textLike && !m.request;
       const chunkDivider = chunkDateLabel
         ? `<div class="th-chunk-date${firstChunk ? " first" : ""}" role="separator"><span>${esc(chunkDateLabel)}</span></div>`
@@ -12381,7 +12425,7 @@
       const channelTask = Boolean(m.request && m.taskClaim?.scope === "channel");
       const claimControl = channelTask ? taskClaimControlHtml(m, { surface: "chat" }) : "";
       return `${slackThreadContextHtml(m)}${chunkDivider}${runHeader}
-      ${channelTask ? `<div class="th-task-stack${mine ? " mine" : ""}">` : ""}<div class="th-msg${hasHostActions ? " has-host-actions" : ""}${m.unread ? " unread" : ""}${mine ? " mine" : ""}${cont ? " cont" : ""}${textLike ? " text" : ""}${agentWorking ? " agent-working" : ""}${open ? " open" : ""}${m.deletedAt ? " deleted" : ""}${aggregates.length ? " has-rx" : ""}${liveCanonicalArrivalIds.has(String(m.id || "")) ? " live-arrival" : ""}"${textLike ? "" : ' role="button" tabindex="0"'}${agentWorking ? ' aria-busy="true"' : ""}${hasHostActions ? ` aria-expanded="${hostActionsPersistent ? "true" : "false"}"` : ""} data-msg="${esc(m.id)}" data-dir="${m.direction}" data-opening-id="${esc(m.id)}">
+      ${channelTask ? `<div class="th-task-stack${mine ? " mine" : ""}">` : ""}<div class="th-msg${hasHostActions ? " has-host-actions" : ""}${m.unread ? " unread" : ""}${mine ? " mine" : ""}${cont ? " cont" : ""}${textLike ? " text" : ""}${attachmentOnly ? " attachment-only" : ""}${agentWorking ? " agent-working" : ""}${open ? " open" : ""}${m.deletedAt ? " deleted" : ""}${aggregates.length ? " has-rx" : ""}${liveCanonicalArrivalIds.has(String(m.id || "")) ? " live-arrival" : ""}"${textLike ? "" : ' role="button" tabindex="0"'}${agentWorking ? ' aria-busy="true"' : ""}${hasHostActions ? ` aria-expanded="${hostActionsPersistent ? "true" : "false"}"` : ""} data-msg="${esc(m.id)}" data-dir="${m.direction}" data-opening-id="${esc(m.id)}">
         ${!REACTIONS_ENABLED || m.request ? "" : messageReactionPickerHtml(m.id)}
         ${messageReplyReferenceHtml(m)}
         ${editingMessage ? `
@@ -12409,6 +12453,16 @@
       </div>${channelTask ? `${claimControl}</div>` : ""}
       ${slackThreadLinkHtml(m)}
       ${(() => {
+        // THE CARGO LAW: a bubble holds WORDS. Photos, video and files stand
+        // free BENEATH it — never inside, where the enclosure outweighed the
+        // message. Each render-model message owns its attachments; looking
+        // them up again in the inbound-only payload made every sent image
+        // disappear at the final presentation boundary.
+        if (!attachments.length) return "";
+        const relayId = String(m.relayId || m.id || "");
+        return `<div class="th-cargo${mine ? " mine" : ""}">${attachmentPlates(attachments, { relayId })}</div>`;
+      })()}
+      ${(() => {
         // A receipt and a reply control are ABOUT the message, not part of it.
         // Inside the bubble the receipt collided with the timestamp and the
         // reply button sat on the words themselves (David). They live under it.
@@ -12421,7 +12475,9 @@
           bits.push(`<button type="button" class="th-reply-ghost" data-reply-to="${esc(m.id)}" data-stop="1">reply</button>`);
         }
         if (payload.features?.messageMutations === true && mine && !m.pending && !m.request && !m.deletedAt) {
-          bits.push(`<button type="button" class="th-message-action" data-message-edit="${esc(m.id)}" data-stop="1">edit</button>`);
+          if (String(m.body || "").trim()) {
+            bits.push(`<button type="button" class="th-message-action" data-message-edit="${esc(m.id)}" data-stop="1">edit</button>`);
+          }
           if (messageDeleteConfirmIds.has(m.id)) {
             bits.push(`<button type="button" class="th-message-action confirm" data-message-delete-confirm="${esc(m.id)}" data-stop="1">Delete for everyone</button>`);
             bits.push(`<button type="button" class="th-message-action" data-message-delete-cancel="${esc(m.id)}" data-stop="1">keep</button>`);
@@ -12436,14 +12492,6 @@
         const under = bits.length ? `<div class="th-under${mine ? " mine" : ""}">${bits.join("")}</div>` : "";
         const details = receipt && expandedReceiptIds.has(m.id) ? receiptDetailsHtml(receipt) : "";
         return under + details;
-      })()}
-      ${(() => {
-        // THE CARGO LAW: a bubble holds WORDS. Photos, video and files stand
-        // free BENEATH it — never inside, where the enclosure outweighed the
-        // relay and the relay read as a file card (David, twice).
-        const files = relayAttachmentsForId(m.id) || [];
-        if (!files.length) return "";
-        return `<div class="th-cargo${mine ? " mine" : ""}">${attachmentPlates(files, { relayId: m.id })}</div>`;
       })()}`;
     }).join("");
     const focusedSlackThreadBanner = slackFocusedThreadId
@@ -14688,6 +14736,29 @@
     }
   }
 
+  function pendingOpenSignupCard() {
+    const pending = payload.pendingOpen;
+    if (!pending || (!pending.forHuman && !pending.title && !pending.error)) return "";
+    const sender = pending.sender?.name || "Someone";
+    const title = pending.title || "A Relay for you";
+    const message = pending.forHuman
+      ? `<div class="su-relay-message">${esc(pending.forHuman)}</div>`
+      : "";
+    const agent = pending.forAgent
+      ? `<details class="su-relay-agent"><summary>For your agent</summary><pre>${esc(pending.forAgent)}</pre></details>`
+      : "";
+    const attachments = pending.hasAttachments
+      ? `<p class="su-relay-to">Attachments become available after you connect the recipient account.</p>`
+      : "";
+    const recipient = pending.recipientEmail
+      ? `<p class="su-relay-to">Sent to ${esc(pending.recipientEmail)}</p>`
+      : "";
+    const pendingError = pending.error
+      ? `<p class="su-note su-error" role="alert">${esc(pending.error)}</p>`
+      : "";
+    return `<article class="su-relay"><p class="su-relay-from">From ${esc(sender)}</p><h2 class="su-relay-title">${esc(title)}</h2>${message}${agent}${attachments}${recipient}${pendingError}</article>`;
+  }
+
   function renderSignup() {
     if (!signupBodyEl) return;
     const busy = signupBusy ? " disabled" : "";
@@ -14760,7 +14831,10 @@
       return;
     }
     if (signupStage === "installed") {
-      signupBodyEl.innerHTML = `<p class="su-step">Agent installed</p><h1 class="su-title">Relay is ready for you.</h1><p class="su-copy">Your agent finished the install. Connect your account to this computer.</p><div class="su-form"><button class="su-primary" id="suContinue" type="button"${busy}>Continue</button>${cancelSetupButton()}</div>${error}`;
+      const pendingCard = pendingOpenSignupCard();
+      signupBodyEl.innerHTML = pendingCard
+        ? `<p class="su-step">Relay received</p><h1 class="su-title">Read it first.</h1>${pendingCard}<p class="su-copy">Connect the account this was sent to when you want to reply or open it in your agent.</p><div class="su-form"><button class="su-primary" id="suContinue" type="button"${busy}>Connect to reply</button>${cancelSetupButton()}</div>${error}`
+        : `<p class="su-step">Agent installed</p><h1 class="su-title">Relay is ready for you.</h1><p class="su-copy">Your agent finished the install. Connect your account to this computer.</p><div class="su-form"><button class="su-primary" id="suContinue" type="button"${busy}>Continue</button>${cancelSetupButton()}</div>${error}`;
       document.getElementById("suContinue")?.addEventListener("click", async () => {
         signupBusy = true; signupError = ""; renderSignup();
         try {

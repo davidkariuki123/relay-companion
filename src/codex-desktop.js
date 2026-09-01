@@ -168,16 +168,25 @@ async function notifyCodexDesktopThreadsUnserialized({
 async function evaluateAcrossCodexPids(pids, expression, { timeoutMs }) {
   const results = [];
   for (const pid of pids) {
+    let target;
     try {
-      const target = await findOrStartInspectorForPid(pid, { timeoutMs });
+      target = await findOrStartInspectorForPid(pid, { timeoutMs });
       if (!target) {
         results.push({ pid, ok: false, reason: "inspector-unavailable" });
         continue;
       }
+    } catch (error) {
+      results.push({ pid, ok: false, reason: "inspector-unavailable", error: errorMessage(error) });
+      continue;
+    }
+    try {
       const value = await evaluateInspectorExpression(target.webSocketDebuggerUrl, expression, { timeoutMs });
       results.push({ pid, ok: true, value });
     } catch (error) {
-      results.push({ pid, ok: false, error: errorMessage(error) });
+      // Once Runtime.evaluate has been dispatched, a timeout or socket loss is
+      // ambiguous: the renderer may still complete turn/start. Callers must
+      // poll the durable client identity and must never replay the expression.
+      results.push({ pid, ok: false, deliveryAmbiguous: true, error: errorMessage(error) });
     }
   }
   return results;
@@ -237,10 +246,10 @@ async function waitForCodexMainPids(timeoutMs) {
 // "Open in current chat" live tier: start a real turn in an existing thread in
 // the running ChatGPT desktop app via the inspector bridge. Returns
 //   { attempted, submitted, reason?, results }
-// submitted=true ONLY when the selected primary window's renderer reported
-// ok:true from relaySubmitCodexRenderer. Every other outcome (codex not
-// running, inspector unavailable, resume/start-turn failure, busy thread) is a
-// clean signal for the caller to fall back to the automation tier.
+// submitted=true only when the selected primary renderer acknowledged the
+// request or the exact durable client identity appeared in the rollout. An
+// inspector failure after dispatch is marked deliveryAmbiguous so callers fail
+// closed instead of falling back to a second writer.
 export async function submitTurnToCodexDesktopThread({
   threadId,
   text,
@@ -250,10 +259,12 @@ export async function submitTurnToCodexDesktopThread({
   approvalPolicy,
   approvalsReviewer,
   sandboxPolicy,
-  // Ownership of a just-resumed thread settles ~7s after the resume, and a
-  // turn/start fired before then no-ops with no error to read (the bridge is
-  // fire-and-forget). So the caller re-fires until the ROLLOUT GROWS — the
-  // only honest signal that the model actually took the turn.
+  clientUserMessageId: suppliedClientUserMessageId,
+  requestId: suppliedRequestId,
+  // Ownership of a just-resumed thread settles asynchronously. Retry transport
+  // failures, but once the renderer accepts the turn/start envelope only poll
+  // for its exact rollout identity. Re-firing an accepted envelope can append
+  // duplicate visible user turns even when the client identity is unchanged.
   rolloutPath = "",
   confirmAttempts = Number(process.env.RELAY_CODEX_TURN_ATTEMPTS || 4),
   confirmIntervalMs = Number(process.env.RELAY_CODEX_TURN_INTERVAL_MS || 5000),
@@ -281,13 +292,11 @@ export async function submitTurnToCodexDesktopThread({
   const pause = io.sleep || sleep;
   const launch = io.launchCodexDesktop || launchCodexDesktop;
   const waitPids = io.waitForCodexMainPids || waitForCodexMainPids;
-  // One logical press owns one identity for its entire lifetime. The old retry
-  // expression generated fresh UUIDs every time, so an inspector timeout after
-  // the app-server had accepted a turn could create the same user message two
-  // or three times. Codex deduplicates clientUserMessageId; preserve it across
-  // every renderer/PID retry, and preserve the JSON-RPC id as well.
-  const clientUserMessageId = randomUUID();
-  const requestId = randomUUID();
+  // One logical picker selection owns one durable identity for its entire
+  // lifetime. session-delivery persists these before submitting so a second
+  // process can reconcile the rollout without manufacturing a new turn.
+  const clientUserMessageId = String(suppliedClientUserMessageId || "").trim() || randomUUID();
+  const requestId = String(suppliedRequestId || "").trim() || randomUUID();
   const expression = buildCodexDesktopSubmitExpression({
     threadId: cleanThreadId,
     text: cleanText,
@@ -306,40 +315,50 @@ export async function submitTurnToCodexDesktopThread({
   const allResults = [];
   let renderer = null;
   let delivered = false;
+  let deliveryAmbiguous = false;
   let ran = rolloutPath ? codexRolloutHasClientMessage(rolloutPath, clientUserMessageId) : null;
   let attempts = 0;
   let coldLaunchTried = false;
 
-  for (let attempt = 1; attempt <= maxAttempts && ran !== true; attempt += 1) {
-    attempts = attempt;
-    // Resolve the process again on EVERY pass. A ChatGPT update/restart leaves
-    // the prior inspector WebSocket and PID stale while a new renderer is
-    // already alive; retrying the captured PID was the intermittent failure.
-    let pids = await findPids();
-    if (!pids.length && !coldLaunchTried) {
-      coldLaunchTried = true;
-      if (await launch()) pids = await waitPids(Number(process.env.RELAY_CODEX_LAUNCH_TIMEOUT_MS || 30000));
-    }
+  for (let confirmationRound = 1; confirmationRound <= maxAttempts && ran !== true; confirmationRound += 1) {
+    if (!delivered && !deliveryAmbiguous) {
+      attempts += 1;
+      // Resolve the process again before every transport retry. A ChatGPT
+      // update/restart can leave the prior inspector socket stale while a new
+      // primary renderer is already alive.
+      let pids = await findPids();
+      if (!pids.length && !coldLaunchTried) {
+        coldLaunchTried = true;
+        if (await launch()) pids = await waitPids(Number(process.env.RELAY_CODEX_LAUNCH_TIMEOUT_MS || 30000));
+      }
 
-    if (pids.length) {
-      const results = await evaluate(pids, expression, { timeoutMs });
-      allResults.push(...results.map((entry) => ({ ...entry, attempt })));
-      const current = primarySubmitRendererResult(results);
-      if (current) renderer = current;
-      if (current && current.ok === true) delivered = true;
-      // A retry can discover the active turn created by the previous attempt.
-      // Do not fire over it: the exact rollout identity below decides whether
-      // it is ours. If it is unrelated, report busy honestly.
-      if (current?.reason === "turn-in-progress" && !delivered) {
-        const deadline = Date.now() + Math.max(10, confirmIntervalMs);
-        while (rolloutPath && Date.now() < deadline) {
-          if (codexRolloutHasClientMessage(rolloutPath, clientUserMessageId)) {
-            ran = true;
-            break;
+      if (pids.length) {
+        // A destructive expression must never be broadcast across overlapping
+        // old/new app processes: each process can own a primary window and both
+        // would submit the same visible turn. The newest main PID is the only
+        // candidate for this logical picker selection.
+        const newestPid = Math.max(...pids.map(Number).filter(Number.isFinite));
+        const selectedPids = Number.isFinite(newestPid) ? [newestPid] : [];
+        const results = selectedPids.length
+          ? await evaluate(selectedPids, expression, { timeoutMs })
+          : [];
+        allResults.push(...results.map((entry) => ({ ...entry, attempt: attempts })));
+        if (results.some((entry) => entry?.deliveryAmbiguous === true)) deliveryAmbiguous = true;
+        const current = primarySubmitRendererResult(results);
+        if (current) renderer = current;
+        if (current?.deliveryAmbiguous === true) deliveryAmbiguous = true;
+        if (current && current.ok === true) delivered = true;
+        if (current?.reason === "turn-in-progress" && !delivered) {
+          const deadline = Date.now() + Math.max(10, confirmIntervalMs);
+          while (rolloutPath && Date.now() < deadline) {
+            if (codexRolloutHasClientMessage(rolloutPath, clientUserMessageId)) {
+              ran = true;
+              break;
+            }
+            await pause(pollMs);
           }
-          await pause(pollMs);
+          if (ran !== true) break;
         }
-        if (ran !== true) break;
       }
     }
 
@@ -364,7 +383,8 @@ export async function submitTurnToCodexDesktopThread({
   }
   return {
     attempted: true,
-    submitted: delivered,
+    submitted: delivered || ran === true,
+    deliveryAmbiguous,
     ran,
     turnAttempts: attempts,
     reason: renderer ? renderer.reason || null : "no-primary-window-result",
@@ -834,7 +854,11 @@ export async function relaySubmitCodexRenderer(payload) {
   async function send(message, timeoutMs = 4000) {
     const value = await Promise.race([
       bridge.sendMessageFromView(message),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("send-timeout")), timeoutMs)),
+      new Promise((_, reject) => setTimeout(() => {
+        const error = new Error("send-timeout");
+        error.code = "RELAY_BRIDGE_TIMEOUT";
+        reject(error);
+      }, timeoutMs)),
     ]);
     steps.push({ type: message.type, ok: true });
     return value;
@@ -908,10 +932,17 @@ export async function relaySubmitCodexRenderer(payload) {
   // this bridge is the only way in). turn/start is the real method, and it is
   // asynchronous: it returns inProgress and completes later.
   try {
-    await send(codexTurnStartMessage({ threadId, text, payload }), 8000);
+    const startTurnTimeoutMs = Number.isFinite(payload.startTurnTimeoutMs) ? payload.startTurnTimeoutMs : 8000;
+    await send(codexTurnStartMessage({ threadId, text, payload }), startTurnTimeoutMs);
   } catch (error) {
     fail("mcp-request:turn/start", error);
-    return { ok: false, reason: "start-turn-failed", steps };
+    const deliveryAmbiguous = error?.code === "RELAY_BRIDGE_TIMEOUT";
+    return {
+      ok: false,
+      reason: deliveryAmbiguous ? "start-turn-unconfirmed" : "start-turn-failed",
+      deliveryAmbiguous,
+      steps,
+    };
   }
 
   const encoded = encodeURIComponent(threadId);

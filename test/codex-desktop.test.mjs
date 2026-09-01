@@ -775,6 +775,30 @@ test("submit renderer fails cleanly when the turn is rejected (the thread is on 
   );
 });
 
+test("a timed-out turn/start is ambiguous because the uncancelled bridge request may still land", async () => {
+  await withSubmitGlobals(
+    {
+      respond: (message) => {
+        if (message.type === "maybe-resume-conversation") return { activeTurnId: null };
+        if (message.type === "mcp-request") return new Promise(() => {});
+        return undefined;
+      },
+    },
+    async ({ sent }) => {
+      const result = await relaySubmitCodexRenderer({
+        threadId: "t1",
+        text: "hello once",
+        settleMs: 0,
+        startTurnTimeoutMs: 5,
+      });
+      assert.equal(result.ok, false);
+      assert.equal(result.reason, "start-turn-unconfirmed");
+      assert.equal(result.deliveryAmbiguous, true);
+      assert.equal(sent.filter((message) => message.type === "mcp-request").length, 1);
+    },
+  );
+});
+
 test("submit renderer fails cleanly when the resume rejects", async () => {
   await withSubmitGlobals(
     {
@@ -963,7 +987,7 @@ test("submit recovers from a stale inspector on a replaced PID without duplicati
         const match = expression.match(/clientUserMessageId\\?":\\?"([0-9a-f-]{36})/);
         assert.ok(match, "stable client identity is embedded in the renderer payload");
         identities.push(match[1]);
-        if (pids[0] === 101) return [{ pid: 101, ok: false, error: "stale inspector socket" }];
+        if (pids[0] === 101) return [{ pid: 101, ok: false, reason: "inspector-unavailable" }];
         fs.appendFileSync(
           rollout,
           `${JSON.stringify({ type: "event_msg", payload: { type: "user_message", client_id: match[1], message: "restart-safe message" } })}\n`,
@@ -982,6 +1006,41 @@ test("submit recovers from a stale inspector on a replaced PID without duplicati
   assert.equal(result.submitted, true);
   assert.equal(result.ran, true);
   assert.equal(result.turnAttempts, 2);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("a destructive picker submit targets only the newest overlapping Codex main process", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-codex-overlap-"));
+  const rollout = path.join(dir, "rollout.jsonl");
+  fs.writeFileSync(rollout, "");
+  const evaluated = [];
+  const result = await submitTurnToCodexDesktopThread({
+    threadId: "thread_overlap",
+    text: "single-process turn",
+    rolloutPath: rollout,
+    confirmAttempts: 1,
+    confirmIntervalMs: 10,
+    timeoutMs: 20,
+    platform: "darwin",
+    runtime: {
+      findCodexMainPids: async () => [501, 503, 502],
+      evaluateAcrossCodexPids: async (pids, expression) => {
+        evaluated.push(pids);
+        const match = expression.match(/clientUserMessageId\\?":\\?"([0-9a-f-]{36})/);
+        fs.appendFileSync(
+          rollout,
+          `${JSON.stringify({ type: "event_msg", payload: { type: "user_message", client_id: match[1], message: "single-process turn" } })}\n`,
+        );
+        return [{ pid: pids[0], ok: true, value: [{ id: 1, kind: "primary", result: { ok: true } }] }];
+      },
+      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, Math.min(1, ms))),
+      launchCodexDesktop: async () => false,
+      waitForCodexMainPids: async () => [],
+    },
+  });
+  assert.deepEqual(evaluated, [[503]], "turn/start is never broadcast across old and new app processes");
+  assert.equal(result.submitted, true);
+  assert.equal(result.ran, true);
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -1013,9 +1072,130 @@ test("unrelated rollout activity never turns a failed Codex submission into succ
       waitForCodexMainPids: async () => [],
     },
   });
-  assert.equal(calls, 2);
+  assert.equal(calls, 1, "an accepted renderer envelope is never submitted a second time");
   assert.equal(result.submitted, true, "the bridge did acknowledge the envelope");
   assert.equal(result.ran, false, "no matching user_message means the turn did not start");
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("an inner turn/start timeout is polled but never re-evaluated", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-codex-inner-timeout-"));
+  const rollout = path.join(dir, "rollout.jsonl");
+  fs.writeFileSync(rollout, "");
+  let calls = 0;
+  const result = await submitTurnToCodexDesktopThread({
+    threadId: "thread_inner_timeout",
+    text: "one uncertain turn",
+    rolloutPath: rollout,
+    confirmAttempts: 2,
+    confirmIntervalMs: 10,
+    timeoutMs: 20,
+    platform: "darwin",
+    runtime: {
+      findCodexMainPids: async () => [406],
+      evaluateAcrossCodexPids: async () => {
+        calls += 1;
+        return [{
+          pid: 406,
+          ok: true,
+          value: [{ id: 1, kind: "primary", result: { ok: false, reason: "start-turn-unconfirmed", deliveryAmbiguous: true } }],
+        }];
+      },
+      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, Math.min(1, ms))),
+      launchCodexDesktop: async () => false,
+      waitForCodexMainPids: async () => [],
+    },
+  });
+  assert.equal(calls, 1);
+  assert.equal(result.submitted, false);
+  assert.equal(result.ran, false);
+  assert.equal(result.deliveryAmbiguous, true);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("an accepted picker turn is only polled while its rollout acknowledgement is delayed", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-codex-delayed-ack-"));
+  const rollout = path.join(dir, "rollout.jsonl");
+  fs.writeFileSync(rollout, "");
+  let calls = 0;
+  let identity = "";
+  let scheduled = false;
+  const result = await submitTurnToCodexDesktopThread({
+    threadId: "thread_delayed_ack",
+    text: "one visible picker turn",
+    rolloutPath: rollout,
+    clientUserMessageId: "client-picker-once",
+    requestId: "request-picker-once",
+    confirmAttempts: 3,
+    confirmIntervalMs: 20,
+    timeoutMs: 20,
+    platform: "darwin",
+    runtime: {
+      findCodexMainPids: async () => [404],
+      evaluateAcrossCodexPids: async (_pids, expression) => {
+        calls += 1;
+        assert.match(expression, /client-picker-once/);
+        assert.match(expression, /request-picker-once/);
+        identity = "client-picker-once";
+        if (!scheduled) {
+          scheduled = true;
+          setTimeout(() => {
+            fs.appendFileSync(
+              rollout,
+              `${JSON.stringify({ type: "event_msg", payload: { type: "user_message", client_id: identity, message: "one visible picker turn" } })}\n`,
+            );
+          }, 25);
+        }
+        return [{ pid: 404, ok: true, value: [{ id: 1, kind: "primary", result: { ok: true } }] }];
+      },
+      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      launchCodexDesktop: async () => false,
+      waitForCodexMainPids: async () => [],
+    },
+  });
+  assert.equal(calls, 1, "confirmation rounds poll the accepted identity without replaying turn/start");
+  assert.equal(result.clientUserMessageId, identity);
+  assert.equal(result.submitted, true);
+  assert.equal(result.ran, true);
+  assert.equal(result.turnAttempts, 1);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("an inspector timeout after dispatch is reconciled without replaying the picker turn", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-codex-ambiguous-dispatch-"));
+  const rollout = path.join(dir, "rollout.jsonl");
+  fs.writeFileSync(rollout, "");
+  let calls = 0;
+  const result = await submitTurnToCodexDesktopThread({
+    threadId: "thread_ambiguous_dispatch",
+    text: "timeout-safe picker turn",
+    rolloutPath: rollout,
+    clientUserMessageId: "client-ambiguous-once",
+    confirmAttempts: 3,
+    confirmIntervalMs: 20,
+    timeoutMs: 20,
+    platform: "darwin",
+    runtime: {
+      findCodexMainPids: async () => [405],
+      evaluateAcrossCodexPids: async () => {
+        calls += 1;
+        setTimeout(() => {
+          fs.appendFileSync(
+            rollout,
+            `${JSON.stringify({ type: "event_msg", payload: { type: "user_message", client_id: "client-ambiguous-once", message: "timeout-safe picker turn" } })}\n`,
+          );
+        }, 25);
+        return [{ pid: 405, ok: false, deliveryAmbiguous: true, error: "inspector response timed out" }];
+      },
+      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      launchCodexDesktop: async () => false,
+      waitForCodexMainPids: async () => [],
+    },
+  });
+  assert.equal(calls, 1, "an ambiguous dispatched expression is never evaluated again");
+  assert.equal(result.deliveryAmbiguous, true);
+  assert.equal(result.submitted, true, "the matching rollout identity resolves the ambiguous transport");
+  assert.equal(result.ran, true);
   fs.rmSync(dir, { recursive: true, force: true });
 });
 

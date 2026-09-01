@@ -433,9 +433,10 @@ function loadRelayModules() {
   if (relayModulesPromise) return relayModulesPromise;
   const clientUrl = pathToFileURL(path.join(__dirname, "..", "src", "client.js")).href;
   const configUrl = pathToFileURL(path.join(__dirname, "..", "src", "config.js")).href;
-  relayModulesPromise = Promise.all([import(clientUrl), import(configUrl)])
-    .then(([client, config]) => {
-      relayModules = { RelayClient: client.RelayClient, config };
+  const setupOpenUrl = pathToFileURL(path.join(__dirname, "..", "src", "setup-open.js")).href;
+  relayModulesPromise = Promise.all([import(clientUrl), import(configUrl), import(setupOpenUrl)])
+    .then(([client, config, setupOpen]) => {
+      relayModules = { RelayClient: client.RelayClient, config, setupOpen };
       return relayModules;
     })
     .catch((error) => {
@@ -912,6 +913,82 @@ let PRODUCT_FEATURES = productFeatures({
 });
 let TASK_FEATURES_ALLOWED = PRODUCT_FEATURES.requests;
 let remoteCredentialRejected = false;
+let pendingSetupOpenRecord = null;
+let pendingSetupOpenPreviewCache = null;
+let pendingSetupOpenLoaded = false;
+let pendingSetupOpenLoadPromise = null;
+let pendingSetupOpenFinishPromise = null;
+let pendingSetupOpenRetryAt = 0;
+
+function sanitizedPendingOpenError(error) {
+  const status = Number(error?.status || 0);
+  if (status === 403) return "Connect the account this Relay was sent to.";
+  if (status === 404 || status === 410) return "This Relay link is no longer available.";
+  return "Relay could not finish this handoff yet. It will try again.";
+}
+
+async function finishPendingSetupOpenInPill() {
+  if (pendingSetupOpenFinishPromise || !pendingSetupOpenRecord || !deviceToken()) return pendingSetupOpenFinishPromise;
+  pendingSetupOpenFinishPromise = (async () => {
+    try {
+      const { RelayClient, setupOpen } = await loadRelayModules();
+      const result = await setupOpen.finishPendingSetupOpenRelay({
+        pending: pendingSetupOpenRecord,
+        client: new RelayClient(),
+        log: (message) => console.error(`[overlay] pending Relay: ${message}`),
+      });
+      pendingSetupOpenRecord = null;
+      pendingSetupOpenPreviewCache = null;
+      pendingSetupOpenRetryAt = 0;
+      await pushInbox(true);
+      requestExternalReopen(randomUUID());
+      return result;
+    } catch (error) {
+      pendingSetupOpenRetryAt = Date.now() + 15_000;
+      pendingSetupOpenPreviewCache = {
+        ...(pendingSetupOpenPreviewCache || {}),
+        error: sanitizedPendingOpenError(error),
+      };
+      console.error("[overlay] pending Relay handoff failed:", error && error.message);
+      await pushInbox(true);
+      return null;
+    } finally {
+      pendingSetupOpenFinishPromise = null;
+    }
+  })();
+  return pendingSetupOpenFinishPromise;
+}
+
+function ensurePendingSetupOpen() {
+  if (!pendingSetupOpenLoaded && !pendingSetupOpenLoadPromise) {
+    pendingSetupOpenLoadPromise = (async () => {
+      try {
+        const { RelayClient, setupOpen } = await loadRelayModules();
+        pendingSetupOpenRecord = setupOpen.readPendingSetupOpen();
+        if (pendingSetupOpenRecord) {
+          pendingSetupOpenPreviewCache = await setupOpen.pendingSetupOpenPreview({
+            pending: pendingSetupOpenRecord,
+            client: new RelayClient(),
+          });
+        }
+      } catch (error) {
+        pendingSetupOpenPreviewCache = { error: sanitizedPendingOpenError(error) };
+        console.error("[overlay] pending Relay preview failed:", error && error.message);
+      } finally {
+        pendingSetupOpenLoaded = true;
+        pendingSetupOpenLoadPromise = null;
+        await pushInbox(true);
+        if (deviceToken() && pendingSetupOpenRecord) void finishPendingSetupOpenInPill();
+      }
+    })();
+  }
+  if (
+    pendingSetupOpenLoaded
+    && pendingSetupOpenRecord
+    && deviceToken()
+    && Date.now() >= pendingSetupOpenRetryAt
+  ) void finishPendingSetupOpenInPill();
+}
 
 function isRemoteCredentialRejection(error) {
   if (![401, 403].includes(Number(error?.status))) return false;
@@ -1958,6 +2035,7 @@ const outbox = createOutbox({
 // black-holed network (the client fetch timeout is 15s — far too long to block paint).
 function buildPayload() {
   perf.inc("payloadBuilds");
+  ensurePendingSetupOpen();
   // Kick the first loads without awaiting; each calls pushInbox(false) on completion.
   if (!sentLoadedOnce) ensureSentLoaded().then(() => pushInbox(false)).catch(() => {});
   if (!contactsLoadedOnce) ensureContactsLoaded().then(() => pushInbox(false)).catch(() => {});
@@ -1987,6 +2065,7 @@ function buildPayload() {
       soundsMuted,
     },
     features: PRODUCT_FEATURES,
+    pendingOpen: pendingSetupOpenPreviewCache,
     relays: hydrateReactions(relaysNow),
     sent: hydrateReactions(sentWithMaterializationState(sentCache)),
     // Messages this device has accepted but the server has not confirmed. They
@@ -2446,6 +2525,9 @@ async function pushInboxNow(force) {
     // moves while a message sits offline.
     outbox: (payload.outbox || []).map((e) => [e.id, e.state, e.attempts, e.nextAttemptAt, e.relayId, e.lastError]),
     account: [payload.account.paired, payload.account.email],
+    pendingOpen: payload.pendingOpen
+      ? [payload.pendingOpen.relayId, payload.pendingOpen.title, payload.pendingOpen.forHuman, payload.pendingOpen.error]
+      : null,
     features: payload.features,
   });
   // Unchanged data: skip the send entirely. Re-sending identical payloads made the
@@ -3777,36 +3859,86 @@ async function deliverPacketToSession(packetId, selection = {}) {
   const provider = selection.provider === "codex" ? "codex" : "claude";
   const observedBundle = await new Promise((resolve) => frontmostBundleId(resolve));
   if (selection.mode === "new") {
-    const previousImportSetting = process.env.RELAY_IMPORT_CLAUDE_DESKTOP;
-    if (provider === "claude") process.env.RELAY_IMPORT_CLAUDE_DESKTOP = "0";
+    const claim = routing.delivery.claimRelayNewSession(routePacketId, provider);
+    if (claim.kind === "bound") {
+      const focused = await routing.delivery.focusSession(claim.binding);
+      await presentSessionOpen(focused, provider, routePacketId, observedBundle);
+      return { ok: true, continued: true, binding: claim.binding, ...focused };
+    }
     let opened;
-    try {
-      opened = await routing.materializer.openRelay({
-        id: routePacketId,
-        host: provider,
-        forceFresh: true,
-        log: (message) => console.error(`[overlay] ${message}`),
-      });
-    } finally {
-      if (previousImportSetting === undefined) delete process.env.RELAY_IMPORT_CLAUDE_DESKTOP;
-      else process.env.RELAY_IMPORT_CLAUDE_DESKTOP = previousImportSetting;
+    if (claim.kind === "recovered") {
+      opened = claim.opened;
+    } else {
+      if (!routing.delivery.markRelaySessionDispatching(routePacketId, claim.claim.claimId)) {
+        throw new Error("The new-session delivery claim changed before materialization");
+      }
+      const previousImportSetting = process.env.RELAY_IMPORT_CLAUDE_DESKTOP;
+      if (provider === "claude") process.env.RELAY_IMPORT_CLAUDE_DESKTOP = "0";
+      try {
+        opened = await routing.materializer.openRelay({
+          id: routePacketId,
+          host: provider,
+          forceFresh: true,
+          log: (message) => console.error(`[overlay] ${message}`),
+        });
+      } catch (error) {
+        routing.delivery.markRelaySessionUncertain(
+          routePacketId,
+          claim.claim.claimId,
+          error?.code || "NEW_SESSION_MATERIALIZATION_FAILED",
+        );
+        throw error;
+      } finally {
+        if (previousImportSetting === undefined) delete process.env.RELAY_IMPORT_CLAUDE_DESKTOP;
+        else process.env.RELAY_IMPORT_CLAUDE_DESKTOP = previousImportSetting;
+      }
     }
     const nativeId = nativeIdFromOpenResult(opened);
-    if (!nativeId) throw new Error("The new native session did not return an exact session id");
-    routing.delivery.bindRelaySession(routePacketId, {
+    if (!nativeId) {
+      const noProviderSideEffect = Boolean(opened?.error && !opened?.url);
+      if (noProviderSideEffect) {
+        routing.delivery.releaseRelaySessionClaim(routePacketId, claim.claim.claimId);
+      } else {
+        routing.delivery.markRelaySessionUncertain(
+          routePacketId,
+          claim.claim.claimId,
+          "NEW_SESSION_ID_UNCONFIRMED",
+        );
+      }
+      const error = new Error(opened?.error || "The new native session did not return an exact session id");
+      if (!noProviderSideEffect) error.code = "SESSION_DELIVERY_UNCERTAIN";
+      throw error;
+    }
+    const nativeTarget = {
       provider,
       nativeId,
       title: row.displayTitle || row.title || "Relay",
       cwd: opened.cwd || "",
-    }, { adapter: `${provider}_new_session_materialization` });
+    };
+    let binding;
+    try {
+      binding = routing.delivery.completeRelayNewSession(
+        routePacketId,
+        nativeTarget,
+        claim.claim.claimId,
+      );
+    } catch (error) {
+      routing.delivery.markRelaySessionUncertain(
+        routePacketId,
+        claim.claim.claimId,
+        error?.code || "NEW_SESSION_BIND_FAILED",
+      );
+      throw error;
+    }
     await presentSessionOpen(opened, provider, routePacketId, observedBundle);
     if (deliveryRow.source !== "sent") ackPacket(packetId);
     await pushInbox(true);
-    return { ok: true, delivered: true, binding: routing.delivery.relaySessionBinding(routePacketId), ...opened };
+    return { ok: true, delivered: true, recovered: claim.kind === "recovered", binding, ...opened };
   }
   const result = await routing.delivery.deliverRelayToSession({
     relayId: routePacketId,
     target: { provider, nativeId: String(selection.nativeId || "") },
+    deliveryMode: routing.delivery.EXPLICIT_PICKER_DELIVERY,
     prompt: deliveryRow.source === "sent" ? sentRelayReferencePrompt(deliveryRow.originalId) : undefined,
   });
   await presentSessionOpen(result, provider, routePacketId, observedBundle);
@@ -5606,9 +5738,10 @@ async function sendPreviewReply(input, entry) {
       // Addressed only when there is nothing to answer: a reply that names a
       // recipient would narrow a group room to one person.
       recipient: inReplyToRelayId ? {} : to,
-      // A chat message has a body, not a subject. No title at all: an untitled
-      // relay IS a typed text, and titlelessness is what marks it, when it
-      // comes back, as a line of a conversation rather than a relay to read.
+      kind: "message",
+      // A worded chat message has a body, not a subject. File-only transport
+      // retains the filename as notification fallback, but kind + the absence
+      // of an agent document keep it ordinary chat correspondence.
       ...(body ? {} : { title: files.length === 1 ? String(files[0].name || "1 file") : `${files.length} files` }),
       forHuman: body || " ",
       attachments,

@@ -105,10 +105,18 @@ test("attachments use image plates and quiet file rows backed only by main-proce
   // remain chips. Both carry only ids; open and preview route through preload.
   assert.match(html, /button class="td-att td-att-open"[^>]*data-att-relay=/);
   assert.match(html, /button class="att-fig td-att-open"[^>]*data-att-preview="1"/);
+  assert.match(html, /<div class="att-fig\$\{previewUrl \? " ready" : " pending"\}">/,
+    "optimistic images use the same plate before a canonical attachment id exists");
   assert.match(html, /attachmentPlates\(r\.attachments, \{ relayId: r\.id \}\)/);
   // THE CARGO LAW: files stand free BENEATH the bubble, in their own zone —
   // never inside it, where the enclosure outweighed the relay itself.
-  assert.match(html, /<div class="th-cargo\$\{mine \? " mine" : ""\}">\$\{attachmentPlates\(files, \{ relayId: m\.id \}\)\}<\/div>/);
+  assert.match(html, /const attachments = Array\.isArray\(m\.attachments\) \? m\.attachments : \[\]/);
+  assert.match(html, /attachmentPlates\(attachments, \{ relayId \}\)/);
+  assert.doesNotMatch(html, /function relayAttachmentsForId\(/,
+    "the renderer cannot fall back to an inbound-only attachment lookup");
+  assert.match(html, /attachmentOnly = textLike && attachments\.length > 0/);
+  assert.match(html, /\.th-msg\.attachment-only \{ display:contents; \}/,
+    "file-only messages omit the fake filename bubble while retaining message semantics");
   assert.match(html, /window\.relay\.openAttachment\(relayId, chip\.getAttribute\("data-att-id"\)\)/);
   assert.match(html, /window\.relay\.previewAttachment/);
   assert.match(html, /class="att-plate"/);
@@ -131,6 +139,43 @@ test("attachments use image plates and quiet file rows backed only by main-proce
   assert.match(main, /if \(!pendingRelayReader \|\| !rendererListening/);
   assert.match(main, /ipcMain\.on\("relay:rendererReady", \(\) => \{[\s\S]*deliverPendingRelayReader\(\)/,
     "a cold View Relay launch waits for the renderer's explicit listener-ready handshake");
+});
+
+test("the shared image plate renders through optimistic, queued, and canonical attachment states", () => {
+  const start = html.indexOf("  function attachmentPlates(");
+  const end = html.indexOf("\n  function relaySharedShelf", start);
+  assert.ok(start >= 0 && end > start, "attachmentPlates has a complete source boundary");
+  const source = html.slice(start, end);
+  const attachmentPlates = new Function(
+    "attachmentChips", "fmtBytes", "esc",
+    `"use strict"; ${source}; return attachmentPlates;`,
+  )(
+    () => '<div class="td-att">fallback chip</div>',
+    (bytes) => bytes ? `${bytes} B` : "",
+    (value) => String(value).replace(/[&<>"']/g, ""),
+  );
+
+  const optimistic = attachmentPlates([
+    { name:"photo.jpeg", bytes:23, contentType:"image/jpeg", image:true, previewUrl:"blob:relay-preview" },
+  ]);
+  assert.match(optimistic, /class="att-fig ready"/);
+  assert.match(optimistic, /<img src="blob:relay-preview"/);
+  assert.doesNotMatch(optimistic, /fallback chip/);
+
+  const queuedAfterRestart = attachmentPlates([
+    { name:"photo.jpeg", bytes:23, contentType:"image/jpeg" },
+  ]);
+  assert.match(queuedAfterRestart, /class="att-fig pending"/);
+  assert.match(queuedAfterRestart, /class="att-plate"/);
+  assert.doesNotMatch(queuedAfterRestart, /fallback chip/);
+
+  const canonical = attachmentPlates([
+    { id:"att_1", name:"photo.jpeg", bytes:23, contentType:"image/jpeg" },
+  ], { relayId:"relay_1" });
+  assert.match(canonical, /class="att-fig td-att-open"/);
+  assert.match(canonical, /data-att-relay="relay_1"/);
+  assert.match(canonical, /data-att-id="att_1"/);
+  assert.match(canonical, /data-att-preview="1"/);
 });
 
 test("reader attachments share the deployed frosted footer above both document actions", () => {
@@ -194,14 +239,15 @@ test("From Slack is message provenance, not a blanket channel label", () => {
     "a Slack provenance shelf closes a sender run instead of repeating inside every short bubble");
 });
 
-test("Slack-linked files and agent documents open the deployed Relay reader", () => {
+test("Slack-linked files stay chat cargo while agent documents open the deployed Relay reader", () => {
   assert.match(html, /for \(const chat of canonicalChatDetails\.values\(\)\)/);
   assert.match(html, /const chat = result\?\.chat \|\| result/,
     "the renderer unwraps the main-process canonical chat response before opening the reader");
   assert.match(html, /storeCanonicalChatDetail\(chat\);[\s\S]*openFull\(\);[\s\S]*openReader\(messageId, "threads"\)/,
     "View Relay deliberately unfolds the native Pill before opening the requested reader");
-  assert.match(html, /attachments: item\.attachments \|\| \[\]/);
-  assert.match(html, /const textLike = !\(item\.attachments \|\| \[\]\)\.length && relayTextLike/);
+  assert.match(html, /const attachments = Array\.isArray\(item\.attachments\) \? item\.attachments : \[\]/);
+  assert.match(html, /const textLike = relayTextLike\(body, item\.title \|\| "", agent, attachments\)/,
+    "the agent document, not an ordinary file, decides whether chat opens the Relay reader");
   assert.match(html, /const sharedShelf = relaySharedShelf\(r\)/);
 });
 

@@ -138,6 +138,14 @@ test("Codex protects subagents, emits PostTool additionalContext, and Stop is on
   }, { homeDir, accountScope, readRolloutMetaImpl: rootMeta });
   assert.equal(post.hookSpecificOutput.hookEventName, "PostToolUse");
   assert.match(post.hookSpecificOutput.additionalContext, /relay_post/);
+  assert.deepEqual(Object.keys(post), ["hookSpecificOutput"], "automatic arrivals only use the hook response envelope");
+  assert.equal("input" in post, false);
+  assert.equal("role" in post, false);
+  assert.doesNotMatch(
+    post.hookSpecificOutput.additionalContext,
+    /A Relay was selected for this task/,
+    "automatic arrival context never impersonates an explicit picker selection",
+  );
 
   const stopItem = item("stop", new Date(now.getTime() + 2000).toISOString());
   recordAgentRelayIndex(homeDir, accountScope, { items: [stopItem, fresh, old] }, { nowMs: now.getTime() + 2000 });

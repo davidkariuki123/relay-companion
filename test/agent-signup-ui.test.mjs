@@ -32,6 +32,18 @@ test("first run is one in-pill flow with a skippable chat setup page", () => {
   assert.match(overlay, /id="suChatSkip"[\s\S]*Skip for now/);
 });
 
+test("a first-run Relay is readable before account approval and binds only afterward", () => {
+  const setup = readFileSync(path.join(ROOT, "src/setup-open.js"), "utf8");
+  assert.match(overlay, /pendingOpenSignupCard/);
+  assert.match(overlay, /Read it first\./);
+  assert.match(overlay, /Connect to reply/);
+  assert.match(overlay, /For your agent/);
+  assert.match(main, /pendingSetupOpenPreview/);
+  assert.match(main, /finishPendingSetupOpenRelay/);
+  assert.match(setup, /owner-only file is removed only after an authenticated bind succeeds/);
+  assert.match(setup, /atomicWriteJsonSync[\s\S]*mode: 0o600/);
+});
+
 test("signup errors are human recovery copy, never raw Electron IPC failures", () => {
   assert.match(overlay, /invalid_email_code[\s\S]*That code isn’t right or has expired\. Try again\./);
   assert.match(overlay, /network_unavailable[\s\S]*Relay couldn’t connect\. Check your internet and try again\./);
