@@ -799,14 +799,15 @@ test("agents can quote explicitly but cannot name threads", () => {
 });
 
 
-test("requests stay on the board for control and appear in chat as delivered correspondence", () => {
+test("Tasks stay in human conversation while Todo indexes every managed Relay and Task", () => {
   // The board uses the relay anatomy (Sven's audit: .tb-title hardcoded ink
   // and tap-navigates-to-reader made tasks feel like a different app): the
   // shared title component with the read/unread system, preview when folded,
   // and the same interaction as every bubble — tap unfolds in place.
   assert.doesNotMatch(html, /tb-title/);
   assert.match(html, /\.tb-row\.unread \.th-title \{ color:var\(--ink\); font-weight:500; \}/);
-  assert.match(html, /const expandedRequestIds = new Set\(\)/);
+  assert.match(html, /TODO_STATUS_ORDER = \["triage", "backlog", "todo", "in_progress", "done", "canceled", "duplicate"\]/);
+  assert.match(html, /item\.kind === "task" \? "Task" : "Relay"/);
   // The request ROOT is visible in the person's chat, labelled as a Task;
   // progress and execution controls remain on the board/reader. The terminal
   // completion Relay also returns to chat with both documents intact.
@@ -818,13 +819,10 @@ test("requests stay on the board for control and appear in chat as delivered cor
   assert.match(html, /m\.request \? "tasks" : "threads"/);
   // The dock's composer never clips: inputs must be allowed to shrink.
   assert.match(html, /\.qr textarea \{ flex:1 1 auto; min-width:0;/); // the capsule IS the field (autosizing textarea)
-  // Group membership IS the status — no per-row chips repeating the header,
-  // no notes on board rows; moving between groups is the feedback (Sven:
-  // "it says parked in about 3 places").
-  // TWO STATES, NOT THREE: a message sent into a finished run continues it
-  // rather than starting it again, so the word is "Working" throughout.
-  assert.match(html, /section\("Working", groups\.running, \(\) => `<span class="tb-working"><span class="tb-working-orb"/);
-  assert.match(html, /\+ section\("Parked", groups\.parked, \(\) => ""\)/);
+  // Group membership is the status: status names live in section heads and
+  // the filter rail, not repeated as chips on every row.
+  assert.match(html, /function todoGroupHtml\(group\)/);
+  assert.match(html, /data-todo-group="\$\{esc\(status\)\}"/);
   assert.doesNotMatch(html, /tb-status/);
   // A folded task row is EXACTLY a list row: disc, name + time, serif title,
   // one quiet control. Topic and brief appear only on unfold; no preview line
@@ -880,10 +878,9 @@ test("opening a conversation reads ALL of it — never a per-message click", () 
   assert.match(html, /if \(raw\) raw\.unread = false;/);
   // Tasks follow the letter rule too: unfolding reads, and ACTING certainly
   // does — a parked task must never stay bold (Sven).
-  assert.match(html, /if \(r && r\.unread\) \{/);
-  assert.match(html, /r\.unread = false; \/\/ the badge follows the open immediately/);
-  assert.match(html, /window\.relay\.ack\(id\); \/\/ acting on a request reads it/);
-  assert.match(html, /window\.relay\.ack\(id\); \/\/ parked ≠ unread/);
+  assert.match(html, /if \(projected\?\.unread\) \{/);
+  assert.match(html, /projected\.unread = false;/);
+  assert.match(html, /persistReadIds\(\[id\], \{ afterPaint:true \}\)/);
   // And the bubble clock anchors TOP-RIGHT regardless of how the title wraps —
   // absolutely positioned, out of the flex flow (in-flow it landed wherever
   // the wrapped title pushed it).

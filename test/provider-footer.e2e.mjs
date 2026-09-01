@@ -187,8 +187,14 @@ try {
   await evaluate(page, `document.querySelector('[data-view="settings"]').click(); true`);
   await waitFor(page, "Boolean(document.querySelector('#protoPrefs'))");
   const settingsDefault = await evaluate(page, `(() => {
-    agentSurfaces = { _claudeDesktop:{ available:true }, _codexDesktop:{ available:true } };
+    agentSurfaces = {
+      "Claude Code":{ available:true }, Codex:{ available:true },
+      _claudeDesktop:{ available:true }, _codexDesktop:{ available:true },
+      _claudeCli:{ available:true }, _codexCli:{ available:true },
+    };
     localStorage.removeItem("proto.agentApps.v2");
+    localStorage.removeItem("proto.agentSurface.claude.v1");
+    localStorage.removeItem("proto.agentSurface.codex.v1");
     localStorage.setItem("proto.agentApp", "Codex");
     renderSettings();
     return [...document.querySelectorAll('#protoPrefs .sv-open-row')].map((row) => ({
@@ -196,17 +202,43 @@ try {
       logo:row.querySelector('.sv-open-logo')?.getAttribute('src'),
       checked:row.querySelector('[role="switch"]')?.getAttribute('aria-checked'),
       disabled:row.querySelector('[role="switch"]')?.disabled,
+      surface:row.querySelector('[data-agent-surface]')?.value || "",
     }));
   })()`);
   assert.deepEqual(settingsDefault, [
-    { name:"Claude Code", logo:"claudeCodeMark.svg", checked:"true", disabled:false },
-    { name:"Codex", logo:"codexMark.svg", checked:"true", disabled:false },
+    { name:"Claude Code", logo:"claudeCodeMark.svg", checked:"true", disabled:false, surface:"desktop" },
+    { name:"Codex", logo:"codexMark.svg", checked:"true", disabled:false, surface:"desktop" },
   ]);
   await evaluate(page, `document.querySelector('#protoPrefs').scrollIntoView({ block:"center" }); true`);
   const settingsShot = await capture(page, "open-relays-with-settings.png");
+  const cliOnlyContract = await evaluate(page, `(() => {
+    agentSurfaces = {
+      "Claude Code":{ available:false, reason:"Claude Code isn’t installed on this Mac" },
+      Codex:{ available:true },
+      _claudeDesktop:{ available:false }, _codexDesktop:{ available:false },
+      _claudeCli:{ available:false }, _codexCli:{ available:true },
+    };
+    localStorage.removeItem("proto.agentApps.v2");
+    localStorage.setItem("proto.agentApp", "Claude Code");
+    renderSettings();
+    const rows = [...document.querySelectorAll('#protoPrefs .sv-open-row')];
+    const result = rows.map((row) => ({
+      name:row.querySelector('.sv-open-name')?.textContent,
+      checked:row.querySelector('[role="switch"]')?.getAttribute('aria-checked'),
+      disabled:row.querySelector('[role="switch"]')?.disabled,
+      why:row.querySelector('.sv-open-why')?.textContent || "",
+      surface:row.querySelector('[data-agent-surface]')?.value || "",
+    }));
+    agentSurfaces = null;
+    return result;
+  })()`);
+  assert.deepEqual(cliOnlyContract, [
+    { name:"Claude Code", checked:"false", disabled:true, why:"Claude Code isn’t installed on this Mac", surface:"" },
+    { name:"Codex", checked:"true", disabled:false, why:"Uses Terminal.", surface:"" },
+  ]);
   // The v2 rollout deliberately ignores the stale one-value preference. With
-  // both surfaces available, both switches start on; either can be turned off,
-  // but the final enabled app cannot be removed.
+  // both surfaces available, both switches start on; either (including the
+  // final provider) can be turned off, and re-enabling is explicit.
   const appSwitchContract = await evaluate(page, `(() => {
     agentSurfaces = null;
     localStorage.removeItem("proto.agentApps.v2");
@@ -223,8 +255,8 @@ try {
   assert.deepEqual(appSwitchContract, {
     initial:["Claude Code", "Codex"],
     claudeOnly:["Claude Code"],
-    stillClaude:["Claude Code"],
-    bothAgain:["Claude Code", "Codex"],
+    stillClaude:[],
+    bothAgain:["Codex"],
   });
   await evaluate(page, `document.querySelector('[data-view="relays"]').click(); true`);
   await waitFor(page, "Boolean(document.querySelector('#relaysList .relay-arrival'))");
@@ -477,10 +509,9 @@ try {
   await sleep(20);
   assert.equal((await actionState("provider_footer_older")).expanded, "true", "touch disclosure opens without hijacking the message");
 
-  // The compact Relay chip keeps its existing provider rows. A bound row
-  // continues directly; an unbound row borrows the existing expanded room
-  // frame and unfolds Sven's destination rows directly beneath the pressed
-  // provider. There is no separate picker page or provider toggle.
+  // The compact Relay chip keeps its existing provider rows. Bound and unbound
+  // rows both borrow the existing expanded room frame and unfold destinations
+  // beneath the pressed provider. There is no separate picker page or toggle.
   await page.send("Emulation.setTouchEmulationEnabled", { enabled:false });
   await page.send("Emulation.setEmulatedMedia", { media:"", features:[] });
   const compactPickerStart = await evaluate(page, `(() => {
@@ -503,10 +534,10 @@ try {
   assert.deepEqual(compactPickerStart.hosts, ["codex", "claude"], "the unchanged chip keeps both configured provider rows");
 
   await evaluate(page, `document.querySelector('[data-msg="provider_footer_latest"] [data-host="codex"]').click(); true`);
-  await sleep(180);
+  await waitFor(page, `chatExpanded && sessionPickerState?.id === "provider_footer_latest" && !sessionPickerState.loading`);
   const boundDirect = await evaluate(page, `({ expanded:chatExpanded, picker:sessionPickerState })`);
-  assert.equal(boundDirect.expanded, false, "a bound Relay does not open the destination picker");
-  assert.equal(boundDirect.picker, null, "a bound Relay continues directly in its existing task");
+  assert.equal(boundDirect.expanded, true, "a bound Relay opens the same destination picker");
+  assert.equal(boundDirect.picker?.id, "provider_footer_latest", "the existing binding is an annotated choice, not a bypass");
 
   await evaluate(page, `document.querySelector('[data-msg="provider_footer_oldest"] [data-host="codex"]').click(); true`);
   await waitFor(page, `chatExpanded && sessionPickerState?.id === "provider_footer_oldest" && !sessionPickerState.loading`);

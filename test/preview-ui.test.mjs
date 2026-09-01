@@ -111,7 +111,8 @@ test("thread preview and provider actions keep their source direction explicit",
   const footer = between(inbox, "function relayHostActionsHtml", "// ---- the thread reply composer");
   assert.match(footer, /message && message\.direction === "out" \? "sent" : "relay"/);
   assert.match(footer, /data-source="\$\{source\}"/);
-  assert.match(inbox, /openRelayFromUI\(id, source, "open", host\)/);
+  const wire = between(inbox, "function wireHostOpen", "// Before 0.1.290");
+  assert.match(wire, /loadSessionPicker\(id, host, relaySubject\(message\) \|\| "Relay", null, source\)/);
 });
 
 test("older Relay provider rows use explicit hover intent, keyboard and touch disclosure", () => {
@@ -520,7 +521,7 @@ test("a consequential Task result waits on the recipient device before encrypted
   assert.match(main, /candidate\.assessment\?\.level !== "none"/);
   assert.match(main, /completionReview/);
   assert.match(main, /releaseProviderCompletion/);
-  assert.match(inbox, /Ready for your review/);
+  assert.match(inbox, />Send result<\/button>/);
   assert.match(inbox, /data-result-send/);
   assert.match(pillPreload, /relay:requestCompletionSend/);
 });

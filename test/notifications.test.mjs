@@ -125,6 +125,8 @@ test("stagePlainRelayItem writes an ordinary relay row for the existing pill UI"
         kind: "message",
         title: "Checking in",
         preview: "How are you doing?",
+        todoStatus: "triage",
+        todoVersion: 4,
         sender: { name: "Sven", email: "sven@example.com" },
         createdAt: "2026-06-29T10:00:00.000Z",
         updatedAt: "2026-06-29T10:00:01.000Z",
@@ -162,6 +164,8 @@ test("stagePlainRelayItem writes an ordinary relay row for the existing pill UI"
   assert.equal(row.senderName, "Sven");
   assert.equal(row.title, "Checking in");
   assert.equal(row.forHuman, "How are you doing?");
+  assert.equal(row.todoStatus, "triage");
+  assert.equal(row.todoVersion, 4);
   assert.equal(row.e2ee.senderDeviceId, "dev_sven");
   const packet = JSON.parse(fs.readFileSync(result.contentPath, "utf8"));
   assert.equal(packet.schemaVersion, 2);

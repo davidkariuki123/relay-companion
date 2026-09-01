@@ -1492,6 +1492,9 @@ function readRelays() {
       taskRunOwner: p.taskRunOwner || null,
       taskCompletedAt: p.taskCompletedAt || null,
       taskClaim: p.taskClaim || null,
+      todoStatus: p.todoStatus || null,
+      todoVersion: Number.isInteger(p.todoVersion) ? p.todoVersion : null,
+      duplicateOfItemId: p.duplicateOfItemId || null,
       completionReview: p.completionReview || null,
       // Ordinary Relays may be worked on locally without becoming Tasks.
       // These stamps belong only to the recipient's private Work folder: they
@@ -1666,6 +1669,9 @@ function sentFingerprintOf(items) {
       r.taskRunOwner,
       r.taskCompletedAt,
       r.taskClaim,
+      r.todoStatus,
+      r.todoVersion,
+      r.duplicateOfItemId,
     ]),
   );
 }
@@ -2488,6 +2494,9 @@ async function pushInboxNow(force) {
       r.taskRunOwner,
       r.taskCompletedAt,
       r.taskClaim,
+      r.todoStatus,
+      r.todoVersion,
+      r.duplicateOfItemId,
       r.materializedCodex,
       r.materializedClaude,
       r.codexModel,
@@ -3180,6 +3189,112 @@ async function stopTaskWork(relayId) {
   }
 }
 
+async function listTodo(input = {}) {
+  try {
+    const client = await relayClient();
+    return await client.todo({
+      statuses: Array.isArray(input.statuses) ? input.statuses.map(String) : [],
+      ...(Number.isInteger(input.limit) ? { limit: input.limit } : {}),
+      ...(String(input.cursor || "").trim() ? { cursor: String(input.cursor).trim() } : {}),
+    });
+  } catch (error) {
+    return { ok: false, error: (error && error.message) || String(error), details: error?.body || null };
+  }
+}
+
+async function readTodoItem(relayId) {
+  const id = String(relayId || "").trim();
+  if (!id) return { ok: false, error: "Missing Todo item id." };
+  try {
+    const client = await relayClient();
+    const fetched = await client.fetchRelay(id);
+    const packet = fetched?.packet || {};
+    const local = rowById(id) || {};
+    return {
+      ok: true,
+      row: {
+        id,
+        direction: "inbound",
+        state: local.state || "read",
+        unread: local.unread === true,
+        relayNotificationKind: packet.kind === "task" ? "task" : "plain_relay",
+        kind: packet.kind || local.kind || "message",
+        title: packet.title || local.title || "",
+        displayTitle: packet.displayTitle || packet.title || local.displayTitle || "",
+        senderName: packet.sender?.name || local.senderName || "Someone",
+        senderEmail: packet.sender?.email || local.senderEmail || "",
+        forHuman: packet.forHuman || local.forHuman || "",
+        forAgent: packet.forAgent || local.forAgent || "",
+        createdAt: packet.createdAt || local.createdAt || new Date().toISOString(),
+        updatedAt: packet.updatedAt || local.updatedAt || packet.createdAt || new Date().toISOString(),
+        threadId: packet.threadId || local.threadId || id,
+        inReplyToRelayId: packet.inReplyToRelayId || local.inReplyToRelayId || null,
+        groupSendId: packet.groupSendId || local.groupSendId || null,
+        recipientGroupId: packet.recipientGroupId || local.recipientGroupId || null,
+        recipientGroupName: packet.recipientGroupName || local.recipientGroupName || "",
+        attachments: Array.isArray(packet.attachments) ? packet.attachments : [],
+        source: packet.source || local.source || null,
+        taskState: local.taskState || null,
+        taskStartedAt: local.taskStartedAt || null,
+        taskRunOwner: local.taskRunOwner || null,
+        taskCompletedAt: local.taskCompletedAt || null,
+        taskClaim: local.taskClaim || null,
+        todoStatus: local.todoStatus || null,
+        todoVersion: Number.isInteger(local.todoVersion) ? local.todoVersion : null,
+        duplicateOfItemId: local.duplicateOfItemId || null,
+      },
+    };
+  } catch (error) {
+    return { ok: false, error: (error && error.message) || String(error) };
+  }
+}
+
+async function updateTodoStatus(relayId, input = {}) {
+  const id = String(relayId || "").trim();
+  if (!id) return { ok: false, error: "Missing Todo item id." };
+  const current = rowById(id);
+  try {
+    const client = await relayClient();
+    const result = await client.updateTodoStatus(id, {
+      status: String(input.status || ""),
+      expectedVersion: Number(input.expectedVersion),
+      idempotencyKey: String(input.idempotencyKey || `todo-status:${id}:${randomUUID()}`),
+      ...(String(input.duplicateOfItemId || "").trim()
+        ? { duplicateOfItemId: String(input.duplicateOfItemId).trim() }
+        : {}),
+    });
+    const projection = {
+      todoStatus: result.status,
+      todoVersion: result.version,
+      duplicateOfItemId: result.duplicateOfItemId || null,
+    };
+    const groupSendId = current?.groupSendId || null;
+    withJsonLock(STATE_PATH, () => {
+      const store = readStore();
+      for (const [packetId, packet] of Object.entries(store.packets || {})) {
+        const sameLogicalItem = packetId === id || (groupSendId && packet?.groupSendId === groupSendId);
+        if (sameLogicalItem) Object.assign(packet, projection);
+      }
+      writeStateAtomic(store);
+    });
+    sentCache = (sentCache || []).map((item) => {
+      const itemId = String(item?.relayId || item?.id || "");
+      const sameLogicalItem = itemId === id || (groupSendId && item?.groupSendId === groupSendId);
+      return sameLogicalItem ? { ...item, ...projection } : item;
+    });
+    sentFingerprint = sentFingerprintOf(sentCache);
+    await pushInbox(true);
+    return result;
+  } catch (error) {
+    return {
+      ok: false,
+      error: (error && error.message) || String(error),
+      code: error?.body?.error || null,
+      details: error?.body?.details || null,
+    };
+  }
+}
+
 // Preview is deliberately an allowlisted, human-facing projection of a staged
 // relay. Never pass the recipient-session briefing, local content paths, signed
 // attachment URLs, or arbitrary packet fields into the renderer.
@@ -3787,6 +3902,29 @@ async function focusedNativeSession(provider, routing) {
   }
 }
 
+const SESSION_PICKER_DIRECTORY_TTL_MS = 5_000;
+const SESSION_PICKER_RAIL_TTL_MS = 3_000;
+const SESSION_PICKER_TERMINAL_FOCUS_GRACE_MS = 30_000;
+const sessionPickerDirectoryCache = new Map();
+const sessionPickerRailCache = new Map();
+const sessionPickerTerminalFocus = new Map();
+
+function cachedPickerDirectory(provider, routing) {
+  const cached = sessionPickerDirectoryCache.get(provider);
+  if (cached && Date.now() - cached.at < SESSION_PICKER_DIRECTORY_TTL_MS) return cached.sessions;
+  const sessions = routing.directory.discoverSessions({ provider, terminalBindings:new Map() });
+  sessionPickerDirectoryCache.set(provider, { at:Date.now(), sessions });
+  return sessions;
+}
+
+async function cachedPickerRail(provider, routing) {
+  const cached = sessionPickerRailCache.get(provider);
+  if (cached && Date.now() - cached.at < SESSION_PICKER_RAIL_TTL_MS) return cached.rows;
+  const rows = await routing.delivery.nativeProviderRail(provider);
+  sessionPickerRailCache.set(provider, { at:Date.now(), rows });
+  return rows;
+}
+
 async function sessionDeliveryRow(packetId, source = "relay") {
   const id = String(packetId || "");
   if (source !== "sent") {
@@ -3810,7 +3948,7 @@ function sentRelayReferencePrompt(relayId) {
   ].join(" ");
 }
 
-async function sessionPicker(packetId, requestedProvider = "", source = "relay") {
+async function sessionPicker(packetId, requestedProvider = "", source = "relay", requestedSurface = "") {
   const deliveryRow = await sessionDeliveryRow(packetId, source);
   const routing = await loadSessionRouting();
   const provider = ["claude", "codex"].includes(requestedProvider)
@@ -3818,10 +3956,35 @@ async function sessionPicker(packetId, requestedProvider = "", source = "relay")
     : await preferredSessionProvider();
   const binding = routing.delivery.relaySessionBinding(deliveryRow.packetId);
   const current = await focusedNativeSession(provider, routing);
+  const nativeRailPromise = cachedPickerRail(provider, routing);
+  const baseSessions = cachedPickerDirectory(provider, routing);
+  const terminalBindings = routing.directory.discoverTerminalSessionBindings();
+  const discoveredSessions = routing.directory.enrichTerminalSessions(baseSessions, terminalBindings);
+  const nativeRail = await nativeRailPromise;
+  const keyboardFocused = discoveredSessions.find((session) => session.terminalRef?.keyboardFocused);
+  if (keyboardFocused) {
+    sessionPickerTerminalFocus.set(provider, { nativeId:keyboardFocused.nativeId, at:Date.now() });
+  }
+  const rememberedTerminalFocus = sessionPickerTerminalFocus.get(provider);
+  const rememberedTerminalSession = rememberedTerminalFocus
+    && Date.now() - rememberedTerminalFocus.at < SESSION_PICKER_TERMINAL_FOCUS_GRACE_MS
+    ? discoveredSessions.find((session) => session.nativeId === rememberedTerminalFocus.nativeId && session.terminalRef)
+    : null;
+  const currentNativeId = keyboardFocused?.nativeId || rememberedTerminalSession?.nativeId || current?.nativeId || "";
   const destinations = routing.delivery.listRelayDestinations(provider, {
-    currentNativeId: current?.nativeId || "",
+    currentNativeId,
+    bindingNativeId: binding?.provider === provider ? binding.nativeId : "",
+    nativeRail,
+    defaultSurface: requestedSurface === "terminal" ? "terminal" : "desktop",
+    discover: () => discoveredSessions,
   });
-  return { ok: true, provider, binding, ...destinations };
+  return {
+    ok: true,
+    provider,
+    binding,
+    defaultSurface: requestedSurface === "terminal" ? "terminal" : "desktop",
+    ...destinations,
+  };
 }
 
 function nativeIdFromOpenResult(result) {
@@ -3857,6 +4020,7 @@ async function deliverPacketToSession(packetId, selection = {}) {
   const row = deliveryRow.row;
   const routing = await loadSessionRouting();
   const provider = selection.provider === "codex" ? "codex" : "claude";
+  const surface = selection.surface === "terminal" ? "terminal" : "desktop";
   const observedBundle = await new Promise((resolve) => frontmostBundleId(resolve));
   if (selection.mode === "new") {
     const claim = routing.delivery.claimRelayNewSession(routePacketId, provider);
@@ -3879,6 +4043,8 @@ async function deliverPacketToSession(packetId, selection = {}) {
           id: routePacketId,
           host: provider,
           forceFresh: true,
+          surface,
+          activateDesktop: surface !== "terminal",
           log: (message) => console.error(`[overlay] ${message}`),
         });
       } catch (error) {
@@ -3914,6 +4080,8 @@ async function deliverPacketToSession(packetId, selection = {}) {
       nativeId,
       title: row.displayTitle || row.title || "Relay",
       cwd: opened.cwd || "",
+      surface,
+      ...(opened.remoteEndpoint ? { remoteEndpoint: opened.remoteEndpoint } : {}),
     };
     let binding;
     try {
@@ -3930,6 +4098,13 @@ async function deliverPacketToSession(packetId, selection = {}) {
       );
       throw error;
     }
+    if (surface === "terminal") {
+      const terminalOpen = await routing.delivery.focusSession({
+        ...nativeTarget,
+        remoteEndpoint: opened.remoteEndpoint || "",
+      });
+      opened = { ...opened, ...terminalOpen, surface };
+    }
     await presentSessionOpen(opened, provider, routePacketId, observedBundle);
     if (deliveryRow.source !== "sent") ackPacket(packetId);
     await pushInbox(true);
@@ -3937,7 +4112,7 @@ async function deliverPacketToSession(packetId, selection = {}) {
   }
   const result = await routing.delivery.deliverRelayToSession({
     relayId: routePacketId,
-    target: { provider, nativeId: String(selection.nativeId || "") },
+    target: { provider, nativeId: String(selection.nativeId || ""), surface },
     deliveryMode: routing.delivery.EXPLICIT_PICKER_DELIVERY,
     prompt: deliveryRow.source === "sent" ? sentRelayReferencePrompt(deliveryRow.originalId) : undefined,
   });
@@ -7795,9 +7970,9 @@ app.on("will-quit", preserveMacTrayPositionForExit);
 // ---- ipc -----------------------------------------------------------------
 
 ipcMain.handle("relay:get", () => buildPayload());
-ipcMain.handle("relay:sessionPicker", async (_event, id, provider, source) => {
+ipcMain.handle("relay:sessionPicker", async (_event, id, provider, source, surface) => {
   try {
-    return await sessionPicker(String(id || ""), String(provider || ""), String(source || ""));
+    return await sessionPicker(String(id || ""), String(provider || ""), String(source || ""), String(surface || ""));
   } catch (error) {
     return { ok: false, error: error?.message || String(error) };
   }
@@ -8142,6 +8317,9 @@ ipcMain.handle("relay:taskUnclaim", (_e, id, expectedVersion) =>
   mutateTaskClaim(id, "unclaim", expectedVersion),
 );
 ipcMain.handle("relay:taskStop", (_e, id) => stopTaskWork(id));
+ipcMain.handle("relay:todoList", (_e, input) => listTodo(input));
+ipcMain.handle("relay:todoItem", (_e, id) => readTodoItem(id));
+ipcMain.handle("relay:todoStatusUpdate", (_e, id, input) => updateTodoStatus(id, input));
 // The agent document of an ordinary Relay starts private, recipient-owned
 // work. It shares the native runner but never turns the Relay into a Task
 // and never emits Task receipts to the sender.

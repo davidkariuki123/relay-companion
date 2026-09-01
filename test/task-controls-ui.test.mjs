@@ -12,33 +12,26 @@ function between(source, start, end) {
   return source.slice(from, to);
 }
 
-test("Tasks puts live work first and uses the breathing circular activity mark", () => {
+test("Todo puts the four attention states first and gives In Progress a live mark", () => {
   const board = between(inbox, "function renderTasksBoard()", "// Grow the window");
-  const workingAt = board.indexOf('section("Working"');
-  const waitingAt = board.indexOf('section("Waiting on you"');
-  assert.ok(workingAt > -1 && waitingAt > workingAt);
-  assert.match(board, /class="tb-working"/);
-  assert.match(board, /class="tb-working-orb"/);
-  assert.doesNotMatch(board, /class="ksq"/);
-  assert.match(inbox, /\.tb-working-orb \{[^}]*border-radius:50%/s);
-  assert.match(inbox, /@keyframes taskWorkingBreathe/);
-  assert.match(inbox, /prefers-reduced-motion:reduce[^}]*\.tb-working-orb/s);
+  assert.match(inbox, /TODO_ACTIVE_ORDER = \["triage", "in_progress", "todo", "backlog"\]/);
+  assert.match(board, /TODO_ACTIVE_ORDER\.map/);
+  assert.match(inbox, /\.todo-mark\.in_progress/);
 });
 
-test("waiting Tasks start directly from the board with warm action typography", () => {
+test("Todo filtering is a visible rail, never a dropdown", () => {
   const board = between(inbox, "function renderTasksBoard()", "// Grow the window");
-  assert.match(board, /data-approve=.*?>Start task<\/button>/);
-  assert.doesNotMatch(board, /data-request-later/);
-  assert.match(inbox, /\.tb-go \{[^}]*font-family:var\(--sans\)/s);
-  assert.match(inbox, /\.tb-go \{[^}]*font-weight:600/s);
-  assert.match(board, /wireRequestControls\(tasksListEl/);
+  assert.match(inbox, /id="todoFilterRail"/);
+  assert.match(inbox, /data-todo-filter/);
+  assert.match(board, /renderTodoRail\(\)/);
+  assert.doesNotMatch(board, /<select|dropdown/i);
 });
 
-test("Tasks can move to Recently Deleted from the board and reader", () => {
+test("Canceled is workflow state while Recently Deleted remains a separate reader action", () => {
   const board = between(inbox, "function renderTasksBoard()", "// Grow the window");
   const reader = between(inbox, "function renderReader()", "// ---------- the Tasks board");
-  assert.match(board, /data-task-delete/);
-  assert.match(board, /window\.relay\.deleteRelay\(id\)/);
+  assert.match(inbox, /canceled:"Canceled"/);
+  assert.doesNotMatch(board, /data-task-delete/);
   assert.match(reader, /data-reader-delete/);
   assert.match(reader, /window\.relay\.deleteRelay\(r\.id\)/);
   assert.match(reader, /Move task to Recently Deleted/);

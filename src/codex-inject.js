@@ -117,11 +117,17 @@ export function parseRolloutActivity(text, { truncatedHead = false } = {}) {
   const rows = parseJsonLines(text, { dropFirst: truncatedHead });
   let open = null;
   let lastEventAt = 0;
+  let lastMessageAt = 0;
   let lifecycleObserved = false;
   for (const row of rows) {
     if (!row || typeof row !== "object") continue;
     const at = Date.parse(row.timestamp);
     if (Number.isFinite(at)) lastEventAt = Math.max(lastEventAt, at);
+    const messageRole = String(row?.payload?.role || row?.payload?.message?.role || "");
+    if (row.type === "response_item" && row?.payload?.type === "message"
+      && ["user", "assistant"].includes(messageRole) && Number.isFinite(at)) {
+      lastMessageAt = Math.max(lastMessageAt, at);
+    }
     if (row.type !== "event_msg" || !row.payload || typeof row.payload !== "object") continue;
     const kind = row.payload.type;
     const turnId = typeof row.payload.turn_id === "string" ? row.payload.turn_id : null;
@@ -137,6 +143,7 @@ export function parseRolloutActivity(text, { truncatedHead = false } = {}) {
     busy: Boolean(open),
     openTurnId: open ? open.turnId : null,
     lastEventAt: lastEventAt || null,
+    lastMessageAt: lastMessageAt || null,
     lifecycleObserved,
   };
 }

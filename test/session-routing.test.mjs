@@ -19,7 +19,7 @@ function targetFor(sessionPath, state = "idle") {
   };
 }
 
-test("lists the current native task separately from five recents", async () => {
+test("keeps focus as an annotation inside the ranked destination list", async () => {
   const delivery = await import(`../src/session-delivery.js?list=${Date.now()}`);
   const rows = Array.from({ length: 8 }, (_, index) => ({
     ...targetFor(`/tmp/${index}.jsonl`),
@@ -31,9 +31,40 @@ test("lists the current native task separately from five recents", async () => {
     currentNativeId: rows[2].nativeId,
     discover: () => rows,
   });
-  assert.equal(result.current.nativeId, rows[2].nativeId);
+  assert.equal(result.current, null);
   assert.equal(result.recent.length, 5);
-  assert.ok(result.recent.every((row) => row.nativeId !== rows[2].nativeId));
+  assert.equal(result.recent.find((row) => row.nativeId === rows[2].nativeId).current, true);
+});
+
+test("a keyboard-focused terminal task overrides the desktop recency heuristic and every selected window stays visible", async () => {
+  const delivery = await import(`../src/session-delivery.js?terminal-focus=${Date.now()}`);
+  const now = Date.now();
+  const rows = Array.from({ length: 8 }, (_, index) => ({
+    ...targetFor(`/tmp/focus-${index}.jsonl`),
+    nativeId: `11111111-1111-4111-8111-${String(index).padStart(12, "0")}`,
+    title: `Task ${index}`,
+    lastActiveAt: new Date(now - index * 1_000).toISOString(),
+    lastMessageAt: new Date(now - index * 1_000).toISOString(),
+  }));
+  rows[6] = {
+    ...rows[6],
+    surface: "terminal",
+    terminalRef: { keyboardFocused: true, selectedInWindow: true },
+  };
+  rows[7] = {
+    ...rows[7],
+    surface: "terminal",
+    terminalRef: { keyboardFocused: false, selectedInWindow: true },
+  };
+  const result = delivery.listRelayDestinations("codex", {
+    currentNativeId: rows[0].nativeId,
+    discover: () => rows,
+    limit: 5,
+  });
+  assert.equal(result.recent.find((row) => row.nativeId === rows[0].nativeId).current, false);
+  assert.equal(result.recent.find((row) => row.nativeId === rows[6].nativeId).current, true);
+  assert.equal(result.recent.find((row) => row.nativeId === rows[7].nativeId).selectedInWindow, true);
+  assert.ok(result.recent.length > 5, "selected terminal windows are annotated without displacing recent rows");
 });
 
 test("working tasks displace the oldest inactive picker rows", async () => {
@@ -53,6 +84,38 @@ test("working tasks displace the oldest inactive picker rows", async () => {
   assert.ok(result.recent.some((row) => row.title === "Older but working"));
   assert.ok(!result.recent.some((row) => row.title === "Task 4"));
   assert.equal(result.recent[0].title, "Older but working");
+});
+
+test("all working tasks stay visible in native rail order, then idle tasks use last-message time", async () => {
+  const delivery = await import(`../src/session-delivery.js?rail-order=${Date.now()}`);
+  const now = Date.now();
+  const rows = Array.from({ length: 8 }, (_, index) => ({
+    ...targetFor(`/tmp/rail-${index}.jsonl`),
+    nativeId: `11111111-1111-4111-8111-${String(index).padStart(12, "0")}`,
+    title: `Task ${index}`,
+    state: index < 6 ? "active" : "idle",
+    lastActiveAt: new Date(now - index * 1_000).toISOString(),
+    lastMessageAt: new Date(now - (index === 7 ? 100 : 10_000)).toISOString(),
+  }));
+  const nativeRail = [rows[4], rows[1], rows[5], rows[0], rows[3], rows[2]];
+  const result = delivery.listRelayDestinations("codex", {
+    discover: () => rows,
+    nativeRail,
+    limit: 5,
+  });
+  assert.deepEqual(
+    result.recent.map((row) => row.nativeId),
+    nativeRail.map((row) => row.nativeId),
+    "running tasks are never truncated and keep native rail order",
+  );
+
+  const withIdleRoom = delivery.listRelayDestinations("codex", {
+    discover: () => rows.map((row, index) => ({ ...row, state: index < 2 ? "active" : "idle" })),
+    nativeRail: [rows[1], rows[0]],
+    limit: 5,
+  });
+  assert.deepEqual(withIdleRoom.recent.slice(0, 2).map((row) => row.nativeId), [rows[1].nativeId, rows[0].nativeId]);
+  assert.equal(withIdleRoom.recent[2].nativeId, rows[7].nativeId, "idle ranking uses the newest actual message");
 });
 
 test("visible user-turn delivery requires the explicit picker contract", async () => {
@@ -162,6 +225,62 @@ test("queues the Relay behind an active native turn", async () => {
     assert.equal(result.delivered, true);
     assert.equal(sends, 1);
     assert.ok(probes >= 3);
+  } finally {
+    if (previousHome === undefined) delete process.env.RELAY_HOME;
+    else process.env.RELAY_HOME = previousHome;
+  }
+});
+
+test("a managed Codex terminal task receives an active Relay through turn/steer", async () => {
+  const previousHome = process.env.RELAY_HOME;
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-session-codex-steer-"));
+  const rollout = path.join(root, "rollout.jsonl");
+  fs.writeFileSync(rollout, "");
+  process.env.RELAY_HOME = root;
+  fs.writeFileSync(path.join(root, "state.json"), JSON.stringify({ packets: { relay_steer: { id: "relay_steer" } } }));
+  try {
+    const delivery = await import(`../src/session-delivery.js?steer=${Date.now()}`);
+    const target = {
+      ...targetFor(rollout, "active"),
+      surface: "terminal",
+      nativeRef: {
+        sessionPath: rollout,
+        openTurnId: "turn-active",
+        terminalRef: {
+          tty: "ttys001",
+          managedRemote: true,
+          remoteEndpoint: "ws://127.0.0.1:45123",
+        },
+      },
+    };
+    const calls = [];
+    const result = await delivery.deliverRelayToSession({
+      relayId: "relay_steer",
+      target,
+      deliveryMode: delivery.EXPLICIT_PICKER_DELIVERY,
+      discover: () => [target],
+      remoteAppServer: async (run) => run({
+        request: async (method, params) => {
+          calls.push({ method, params });
+          if (method === "turn/steer") {
+            fs.appendFileSync(rollout, `${JSON.stringify({
+              timestamp: new Date().toISOString(),
+              type: "response_item",
+              payload: { type: "message", role: "user", content: params.input },
+            })}\n`);
+            return { turnId: params.expectedTurnId };
+          }
+          throw new Error(`unexpected ${method}`);
+        },
+      }, { endpoint: "ws://127.0.0.1:45123" }),
+      focusTerminal: () => ({ ok: true, app: "Terminal", tty: "ttys001" }),
+      pollMs: 1,
+    });
+    assert.equal(result.delivery.adapter, "codex_remote_steer");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].method, "turn/steer");
+    assert.equal(calls[0].params.expectedTurnId, "turn-active");
+    assert.equal(result.surface, "terminal");
   } finally {
     if (previousHome === undefined) delete process.env.RELAY_HOME;
     else process.env.RELAY_HOME = previousHome;
@@ -476,6 +595,96 @@ test("a cold Claude session finishes its background owner before Relay opens it"
     assert.deepEqual(events, ["spawn", "complete"]);
     assert.equal(result.delivery.adapter, "claude_background_resume");
     assert.equal(result.url, `claude://resume?session=${target.nativeId}`);
+  } finally {
+    if (previousHome === undefined) delete process.env.RELAY_HOME;
+    else process.env.RELAY_HOME = previousHome;
+  }
+});
+
+test("a live empty Claude CLI session accepts its first Relay through the inbox socket", async () => {
+  const previousHome = process.env.RELAY_HOME;
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-session-claude-empty-"));
+  const socketPath = path.join(root, "session.sock");
+  const transcript = path.join(root, "claude.jsonl");
+  fs.writeFileSync(socketPath, "socket-test-seam");
+  process.env.RELAY_HOME = root;
+  fs.writeFileSync(path.join(root, "state.json"), JSON.stringify({ packets: { relay_empty: { id: "relay_empty" } } }));
+  try {
+    const delivery = await import(`../src/session-delivery.js?claude-empty=${Date.now()}`);
+    const target = {
+      provider: "claude",
+      nativeId: "33333333-3333-4333-8333-333333333333",
+      title: "Empty live CLI",
+      cwd: root,
+      state: "active",
+      lastActiveAt: new Date().toISOString(),
+      capabilities: { send: true },
+      nativeRef: { messagingSocketPath: socketPath, pid: 1234 },
+    };
+    let sent = 0;
+    const discover = () => [{
+      ...target,
+      nativeRef: {
+        ...target.nativeRef,
+        ...(fs.existsSync(transcript) ? { transcriptPath: transcript } : {}),
+      },
+    }];
+    const result = await delivery.deliverRelayToSession({
+      relayId: "relay_empty",
+      target,
+      deliveryMode: delivery.EXPLICIT_PICKER_DELIVERY,
+      discover,
+      processState: () => ({ alive: true, suspended: false, zombie: false }),
+      sendClaude: async (_socket, prompt) => {
+        sent += 1;
+        fs.writeFileSync(transcript, `${JSON.stringify({
+          timestamp: new Date().toISOString(),
+          type: "user",
+          message: { role: "user", content: prompt },
+        })}\n`);
+      },
+      pollMs: 1,
+    });
+    assert.equal(sent, 1);
+    assert.equal(result.delivery.adapter, "claude_inbox_socket");
+    assert.equal(result.binding.nativeId, target.nativeId);
+  } finally {
+    if (previousHome === undefined) delete process.env.RELAY_HOME;
+    else process.env.RELAY_HOME = previousHome;
+  }
+});
+
+test("a suspended Claude CLI session is rejected before socket dispatch and remains retryable", async () => {
+  const previousHome = process.env.RELAY_HOME;
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-session-claude-suspended-"));
+  const socketPath = path.join(root, "session.sock");
+  fs.writeFileSync(socketPath, "socket-test-seam");
+  process.env.RELAY_HOME = root;
+  fs.writeFileSync(path.join(root, "state.json"), JSON.stringify({ packets: { relay_suspended: { id: "relay_suspended" } } }));
+  try {
+    const delivery = await import(`../src/session-delivery.js?claude-suspended=${Date.now()}`);
+    const target = {
+      provider: "claude",
+      nativeId: "44444444-4444-4444-8444-444444444444",
+      title: "Suspended CLI",
+      cwd: root,
+      state: "idle",
+      lastActiveAt: new Date().toISOString(),
+      capabilities: { send: true },
+      nativeRef: { messagingSocketPath: socketPath, pid: 1234 },
+    };
+    let sent = 0;
+    await assert.rejects(delivery.deliverRelayToSession({
+      relayId: "relay_suspended",
+      target,
+      deliveryMode: delivery.EXPLICIT_PICKER_DELIVERY,
+      discover: () => [target],
+      processState: () => ({ alive: true, suspended: true, zombie: false }),
+      sendClaude: async () => { sent += 1; },
+      pollMs: 1,
+    }), (error) => error?.code === "SESSION_TARGET_SUSPENDED");
+    assert.equal(sent, 0);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(root, "state.json"), "utf8")).packets.relay_suspended.sessionDelivery, undefined);
   } finally {
     if (previousHome === undefined) delete process.env.RELAY_HOME;
     else process.env.RELAY_HOME = previousHome;

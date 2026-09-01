@@ -242,14 +242,14 @@ test("Open never promotes a derived briefing projection into a missing For Human
   }
 });
 
-test("Codex Open stages the visible letter and hidden agent document without a model turn", async () => {
+test("Codex Open creates the rollout through the supported first turn instead of mutating a missing file", async () => {
   const source = fs.readFileSync(new URL("../src/materializer.js", import.meta.url), "utf8");
   assert.match(source, /materializeRelayOpenDocumentFiles\(rowWithAttachments, \{ provider: "codex-inbox" \}\)/);
   assert.match(source, /model: codexModel,[\s\S]*effort: codexEffort/);
-  assert.match(source, /appendVisibleAssistantTurn\(\{ sessionPath, text: briefing, cwd, workspaceRoots, model, effort \}\)/);
   const createThread = source.slice(source.indexOf("async function createCodexThread"));
   assert.match(createThread, /thread\/start[\s\S]*runtimeWorkspaceRoots: workspaceRoots[\s\S]*model,[\s\S]*reasoningEffort: effort/);
-  assert.doesNotMatch(createThread, /turn\/start|turn\/steer/, "Open stages context but never runs the model");
+  assert.match(createThread, /thread\/name\/set[\s\S]*turn\/start[\s\S]*text: briefing/);
+  assert.doesNotMatch(createThread, /appendVisibleAssistantTurn/, "Relay never writes Codex's rollout JSONL directly");
   const { CODEX_OPEN_METADATA_VERSION } = await import(`../src/materializer.js?metadata-version-${Date.now()}`);
   assert.equal(CODEX_OPEN_METADATA_VERSION, 3, "old Codex tasks must be re-forged with file workspace roots");
 });

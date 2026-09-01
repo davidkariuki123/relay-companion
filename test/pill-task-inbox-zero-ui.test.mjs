@@ -14,27 +14,22 @@ function between(source, start, end) {
 
 const board = between(inbox, "function renderTasksBoard()", "// Grow the window as the user scrolls");
 
-test("completed Tasks are collapsed behind one disclosure by default", () => {
-  assert.match(inbox, /let completedTasksExpanded = false;/);
-  assert.match(board, /data-completed-toggle aria-expanded="\$\{completedTasksExpanded\}"/);
-  assert.match(board, /id="completedTasksList" aria-hidden="\$\{!completedTasksExpanded\}"/);
-  assert.doesNotMatch(board, /section\("Done"/);
-  assert.match(board, /rowsHtml\(groups\.done, \(\) => ""\)/);
+test("All is an attention stack, not a completed accordion", () => {
+  assert.match(inbox, /const TODO_ACTIVE_ORDER = \["triage", "in_progress", "todo", "backlog"\]/);
+  assert.doesNotMatch(inbox, /completedTasksExpanded/);
+  assert.match(board, /TODO_ACTIVE_ORDER\.map/);
+  assert.match(board, /TODO_TERMINAL_ORDER\.filter/);
 });
 
-test("inbox zero appears only after every unfinished Task category is clear", () => {
-  assert.match(board, /groups\.running\.length \+ groups\.unclaimed\.length \+ groups\.waiting\.length \+ groups\.claimed\.length \+ groups\.scheduled\.length/);
-  assert.match(board, /groups\.review\.length \+ groups\.stopped\.length \+ groups\.parked\.length/);
-  assert.match(board, /const inboxZeroNow = groups\.done\.length > 0 && unfinishedCount === 0;/);
-  assert.match(board, /Nicely done\./);
-  assert.match(board, /Your task list is clear\./);
+test("empty copy follows the exact visible status selection", () => {
+  assert.match(board, /const visibleCount = selected\.length/);
+  assert.match(board, /`Nothing in \$\{selected\.map/);
+  assert.match(board, /Choose another status or All\./);
 });
 
-test("the Completed disclosure expands rows and condenses the celebration in place", () => {
-  assert.match(board, /completedTasksExpanded = completedToggle\.getAttribute\("aria-expanded"\) !== "true"/);
-  assert.match(board, /classList\.toggle\("compact", completedTasksExpanded\)/);
-  assert.match(board, /classList\.contains\("preexpanded"\)[\s\S]*?classList\.remove\("preexpanded"\)[\s\S]*?void reveal\.offsetHeight/);
-  assert.match(board, /reveal\.classList\.toggle\("open", completedTasksExpanded\)/);
-  assert.match(board, /reveal\.setAttribute\("aria-hidden", String\(!completedTasksExpanded\)\)/);
-  assert.match(board, /reveal\.removeAttribute\("inert"\)/);
+test("large single-status lists use cursor batches without page numbers", () => {
+  assert.match(board, /todoState\.nextCursor/);
+  assert.match(board, /Load next 25/);
+  assert.match(inbox, /loadTodo\(\{ append:true \}\)/);
+  assert.doesNotMatch(board, /pageNumber|totalPages/);
 });

@@ -1446,6 +1446,8 @@
   .sv-open-copy { min-width:0; flex:1 1 auto; display:flex; flex-direction:column; }
   .sv-open-name { font-family:var(--sans); font-size:14px; line-height:1.3; font-weight:600; color:var(--ink); }
   .sv-open-why { margin-top:2px; font-family:var(--sans); font-size:10.5px; line-height:1.4; color:var(--muted-3); }
+  .sv-surface-select { flex:0 0 auto; max-width:92px; border:1px solid var(--edge); border-radius:8px; background:var(--paper-2); color:var(--muted); padding:5px 7px; font:11px/1.2 var(--sans); }
+  .sv-surface-select:focus-visible { outline:none; box-shadow:var(--focus-ring); }
   .sv-open-row.off { opacity:.48; }
   .ap-list { margin-top:6px; }
   .ap-row { display:flex; align-items:center; gap:10px; padding:9px 11px; }
@@ -2244,6 +2246,64 @@
     .tb-working-orb, .task-zero.celebrate .tz-tile { animation:none; opacity:1; }
     .task-zero, .tz-glow, .tz-mark, .tz-tile, .tz-title, .tz-sub, .tb-completed-reveal, .tb-completed-toggle svg { transition-duration:.001s; }
   }
+  /* Todo keeps every category visible. The rail is a quiet, wrapping strip —
+     never a picker — so the current ontology and any combined filter remain
+     legible at the pill's native 344px width. */
+  .todo-filter-rail { position:sticky; top:0; z-index:3; display:flex; flex-wrap:wrap; gap:4px 5px;
+    padding:10px 12px 9px; border-bottom:1px solid var(--hair); background:color-mix(in srgb,var(--bg) 94%,transparent);
+    backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); }
+  .todo-filter { appearance:none; border:0; background:transparent; color:var(--muted-2); cursor:pointer;
+    display:inline-flex; align-items:center; gap:5px; min-height:25px; padding:4px 7px; border-radius:7px;
+    font:500 10.5px/1 var(--sans); white-space:nowrap; transition:color var(--t-fast) var(--settle),background var(--t-fast) var(--settle); }
+  .todo-filter:hover { color:var(--ink); background:var(--wash); }
+  .todo-filter.on { color:var(--ink); background:var(--wash-2); }
+  .todo-filter .n { color:var(--muted-3); font:9px/1 var(--mono); }
+  .todo-filter.on .n { color:var(--muted); }
+  .todo-mark { position:relative; width:8px; height:8px; flex:none; border:1px solid currentColor; border-radius:50%; box-sizing:border-box; opacity:.8; }
+  .todo-mark.triage { border-style:dashed; }
+  .todo-mark.backlog { opacity:.48; }
+  .todo-mark.in_progress { border:0; background:conic-gradient(currentColor 0 50%,transparent 50% 100%); box-shadow:inset 0 0 0 1px currentColor; }
+  .todo-mark.done { border:0; background:currentColor; }
+  .todo-mark.done::after { content:""; position:absolute; left:2px; top:1px; width:3px; height:4px; border:solid var(--bg); border-width:0 1px 1px 0; transform:rotate(45deg); }
+  .todo-mark.canceled::before,.todo-mark.canceled::after { content:""; position:absolute; left:3px; top:1px; width:1px; height:4px; background:currentColor; transform:rotate(45deg); }
+  .todo-mark.canceled::after { transform:rotate(-45deg); }
+  .todo-mark.duplicate { border-radius:2px; transform:rotate(45deg); }
+  .todo-loading,.todo-error { padding:28px 16px; text-align:center; font:11.5px/1.5 var(--sans); color:var(--muted-2); }
+  .todo-error { color:var(--danger); }
+  .todo-group-head { display:flex; align-items:center; gap:7px; padding:17px 16px 5px; color:var(--muted); font:600 11px/1.2 var(--sans); }
+  .todo-group-head .n { margin-left:auto; color:var(--muted-3); font:10px/1 var(--mono); }
+  .todo-row { display:grid; grid-template-columns:auto minmax(0,1fr); gap:0 11px; padding:12px 16px 0; cursor:pointer; }
+  .todo-row:hover { background:var(--wash); }
+  .todo-row-main { min-width:0; padding-bottom:12px; border-bottom:1px solid var(--hair); }
+  .todo-row:last-child .todo-row-main { border-bottom:0; }
+  .todo-row-meta { display:flex; align-items:baseline; gap:5px; min-width:0; margin-bottom:4px; color:var(--muted-2); font:10px/1.25 var(--sans); }
+  .todo-row-meta .kind { color:var(--muted); font-weight:600; }
+  .todo-row-title { overflow:hidden; color:var(--ink); font:500 15px/1.32 var(--serif); text-overflow:ellipsis; white-space:nowrap; }
+  .todo-row-preview { overflow:hidden; margin-top:3px; color:var(--muted-2); font:11px/1.35 var(--sans); text-overflow:ellipsis; white-space:nowrap; }
+  .todo-view-all,.todo-load-more { appearance:none; width:calc(100% - 32px); margin:2px 16px 4px; padding:8px 0; border:0; border-top:1px solid var(--hair); background:transparent; color:var(--muted-2); cursor:pointer; text-align:left; font:500 10.5px/1.2 var(--sans); }
+  .todo-view-all:hover,.todo-load-more:hover { color:var(--ink); }
+  .todo-terminal-stack { margin:14px 16px 8px; border-top:1px solid var(--hair); }
+  .todo-terminal { appearance:none; width:100%; display:flex; align-items:center; gap:7px; padding:10px 0; border:0; border-bottom:1px solid var(--hair); background:transparent; color:var(--muted-2); cursor:pointer; text-align:left; font:500 10.5px/1 var(--sans); }
+  .todo-terminal:hover { color:var(--ink); }
+  .todo-terminal .n { margin-left:auto; color:var(--muted-3); font:10px/1 var(--mono); }
+  .todo-load-more { text-align:center; margin-top:10px; border-bottom:1px solid var(--hair); }
+  .todo-load-more:disabled { cursor:default; opacity:.55; }
+  .todo-status-note { margin:8px 16px 0; color:var(--muted-3); font:10px/1.4 var(--sans); }
+  .todo-reader-status { position:relative; margin-left:auto; flex:none; }
+  .todo-reader-status + .reader-delete { margin-left:0; }
+  .todo-reader-current { appearance:none; display:inline-flex; align-items:center; gap:6px; min-height:25px; padding:4px 7px;
+    border:1px solid var(--hair); border-radius:7px; background:transparent; color:var(--muted); cursor:pointer; font:500 10.5px/1 var(--sans); }
+  .todo-reader-current:hover,.todo-reader-current[aria-expanded="true"] { color:var(--ink); background:var(--wash); }
+  .todo-reader-menu { position:absolute; z-index:12; top:30px; right:0; width:154px; padding:5px; border:1px solid var(--hair); border-radius:11px;
+    background:var(--bg); box-shadow:0 14px 34px -14px rgba(0,0,0,.42); }
+  .todo-reader-menu.hidden { display:none; }
+  .todo-reader-option { appearance:none; width:100%; display:flex; align-items:center; gap:8px; padding:7px 8px; border:0; border-radius:7px;
+    background:transparent; color:var(--muted); cursor:pointer; text-align:left; font:11px/1 var(--sans); }
+  .todo-reader-option:hover,.todo-reader-option.on { color:var(--ink); background:var(--wash); }
+  .todo-reader-option:disabled { opacity:.38; cursor:default; background:transparent; }
+  .todo-duplicate-banner { display:flex; align-items:center; gap:8px; margin:12px 16px 0; padding:9px 0 10px; border-bottom:1px solid var(--hair); color:var(--ink); font:11px/1.35 var(--sans); }
+  .todo-duplicate-banner span { flex:1; }
+  .todo-duplicate-banner button { appearance:none; border:0; background:transparent; color:var(--muted-2); cursor:pointer; font:10.5px/1 var(--sans); }
   /* The room composer owns an opaque dock, not just an opaque capsule. Chat
      history may scroll behind this layer, but it must never remain legible in
      the gutter or below the field (the same solid-foot contract as Codex and
@@ -2668,7 +2728,7 @@
       <button class="tab active" type="button" data-view="relays">
         Relays <span class="tab-badge gone" id="relaysBadge">0</span>
       </button>
-      <button class="tab" type="button" data-view="tasks">Tasks <span class="tab-badge amber gone" id="tasksBadge">0</span></button>
+      <button class="tab" type="button" data-view="tasks">Todo <span class="tab-badge amber gone" id="tasksBadge">0</span></button>
       <button class="tab" type="button" data-view="slack">
         Slack <span class="tab-badge gone" id="slackBadge">0</span>
       </button>
@@ -2766,15 +2826,16 @@
       <!-- Task detail view (in-pill mirror of the web request page, live-polled) -->
       <section class="view hidden" id="requestDetailView"></section>
 
-      <!-- Tasks view: the board behind the Task reader (waiting / running / parked) -->
+      <!-- Todo view: one workflow for every managed Relay and Task. -->
       <section class="view hidden" id="tasksView">
+        <nav class="todo-filter-rail" id="todoFilterRail" aria-label="Filter Todo by status"></nav>
         <div id="tasksList"></div>
         <div class="empty gone" id="tasksEmpty">
           <svg class="mark" width="22" height="22" viewBox="0 0 16 16" aria-hidden="true">
             <rect x="0" y="6" width="4" height="4"/><rect x="6" y="6" width="4" height="4"/><rect x="12" y="6" width="4" height="4"/>
           </svg>
-          <div class="t1">No Tasks yet</div>
-          <div class="t2">When someone's agent sets up work for yours, it lands here for your approval.</div>
+          <div class="t1">Nothing here</div>
+          <div class="t2">Relays and Tasks will appear here as they enter your workflow.</div>
         </div>
       </section>
 
@@ -2899,6 +2960,7 @@
   const markAllReadEl = document.getElementById("markAllRead");
   const sentViewEl = document.getElementById("sentView");
   const tasksViewEl = document.getElementById("tasksView");
+  const todoFilterRailEl = document.getElementById("todoFilterRail");
   const tasksListEl = document.getElementById("tasksList");
   const tasksEmptyEl = document.getElementById("tasksEmpty");
   const tasksBadgeEl = document.getElementById("tasksBadge");
@@ -4753,6 +4815,7 @@
   function closeSessionPicker({ render = true } = {}) {
     if (!sessionPickerState) return;
     const closingState = sessionPickerState;
+    clearInterval(closingState.refreshTimer);
     const reveal = sessionPickerReveal(closingState);
     sessionPickerState = null;
     cancelAnimationFrame(sessionPickerViewportRaf);
@@ -4819,15 +4882,24 @@
 
   function sessionStateLabel(session, { current = false, provider = "claude" } = {}) {
     const noun = provider === "codex" ? "task" : "chat";
-    if (current) return `your current ${noun} · ${session.state === "active" ? "working now" : "focused now"}`;
-    if (session.state === "needs_input") return "recent · needs input";
-    const age = timeAgo(session.lastActiveAt);
-    return `recent · active ${age || "now"}`;
+    const here = current || session.current
+      ? `current ${session.surface === "terminal" ? "terminal " : ""}${noun}`
+      : session.selectedInWindow
+        ? `selected in terminal window`
+        : session.bound
+          ? `this Relay’s ${noun}`
+          : "";
+    if (session.state === "active") return [here, "working now"].filter(Boolean).join(" · ");
+    if (session.state === "needs_input") return [here, "needs input"].filter(Boolean).join(" · ");
+    const age = timeAgo(session.lastMessageAt || session.lastActiveAt);
+    return [here, `active ${age || "now"}`].filter(Boolean).join(" · ");
   }
 
   function sessionRowHtml(session, { current = false, provider = "claude" } = {}) {
-    const label = sessionStateLabel(session, { current, provider });
-    return `<button class="sp-row" type="button" data-session-id="${esc(session.nativeId)}" data-session-state="${esc(session.state)}">
+    const label = session.canDeliver === false
+      ? session.unavailableReason || "Unavailable"
+      : sessionStateLabel(session, { current, provider });
+    return `<button class="sp-row" type="button" data-session-id="${esc(session.nativeId)}" data-session-state="${esc(session.state)}" data-session-surface="${session.surface === "terminal" ? "terminal" : "desktop"}"${session.canDeliver === false ? " disabled" : ""}>
       <span class="sp-name">“${esc(session.title || "Untitled session")}”</span>
       <span class="sp-state${session.state === "active" ? " working" : ""}">${esc(label)}</span>
     </button>`;
@@ -4838,12 +4910,12 @@
     const hostLabel = provider === "codex" ? "Codex" : "Claude Code";
     if (state.loading) return `<div class="sp-loading">Loading recent ${hostLabel} ${provider === "codex" ? "tasks" : "sessions"}…</div>`;
     if (state.error) return `<div class="sp-error"><span>${esc(state.error)}</span><button type="button" data-sp-retry>Show sessions</button></div>`;
-    const current = state.data?.current ? sessionRowHtml(state.data.current, { current:true, provider }) : "";
     const recent = (state.data?.recent || []).map((session) => sessionRowHtml(session, { provider })).join("");
     const newLabel = provider === "codex" ? "New Codex task" : "New Claude Code session";
+    const newSurface = state.surface === "terminal" ? "Terminal" : "Desktop";
     return `
-      <button class="sp-row" type="button" data-sp-new><span class="sp-name">${newLabel}</span><span class="sp-state">starts with this Relay</span></button>
-      ${current}${recent}
+      <button class="sp-row" type="button" data-sp-new><span class="sp-name">${newLabel}</span><span class="sp-state">starts with this Relay in ${newSurface}</span></button>
+      ${recent}
     `;
   }
 
@@ -4863,7 +4935,7 @@
     const newButton = scope.querySelector("[data-sp-new]");
     if (newButton) newButton.addEventListener("click", (event) => {
       event.stopPropagation();
-      deliverSessionSelection(newButton, { provider:sessionPickerState?.provider, mode:"new", source:sessionPickerState?.source });
+      deliverSessionSelection(newButton, { provider:sessionPickerState?.provider, mode:"new", source:sessionPickerState?.source, surface:sessionPickerState?.surface });
     });
     for (const button of scope.querySelectorAll("[data-session-id]")) {
       button.addEventListener("click", (event) => {
@@ -4872,6 +4944,7 @@
           provider:sessionPickerState?.provider,
           nativeId:button.getAttribute("data-session-id"),
           state:button.getAttribute("data-session-state"),
+          surface:button.getAttribute("data-session-surface") || sessionPickerState?.surface,
           source:sessionPickerState?.source,
         });
       });
@@ -4884,7 +4957,7 @@
     state.error = "";
     paintSessionPickerResult(state);
     let result;
-    try { result = await window.relay.sessionPicker(state.id, state.provider, state.source); }
+    try { result = await window.relay.sessionPicker(state.id, state.provider, state.source, state.surface); }
     catch { result = { ok:false, error:"Could not load native sessions." }; }
     if (!sessionPickerState || sessionPickerState !== state) return;
     state.loading = false;
@@ -4892,6 +4965,7 @@
     else {
       state.provider = result.provider === "codex" ? "codex" : "claude";
       state.data = result;
+      state.surface = result.defaultSurface === "terminal" ? "terminal" : state.surface;
     }
     paintSessionPickerResult(state);
   }
@@ -4950,6 +5024,7 @@
       state.error = result.error || "Could not deliver this Relay.";
       renderSessionPickerSurface();
     } else {
+      clearInterval(state.refreshTimer);
       sessionPickerState = null;
       renderSessionPickerSurface();
     }
@@ -4971,6 +5046,7 @@
       provider:selectedProvider,
       source:source === "sent" ? "sent" : "relay",
       title,
+      surface:agentSurfacePreference(selectedProvider === "codex" ? "Codex" : "Claude Code"),
       loading:!prefetchedResult,
       error:prefetchedResult?.ok === false ? prefetchedResult.error || "Could not load native sessions." : "",
       data:prefetchedResult?.ok === false ? null : prefetchedResult,
@@ -4991,26 +5067,31 @@
     const state = sessionPickerState;
     if (prefetchedResult) return;
     let result;
-    try { result = await window.relay.sessionPicker(id, selectedProvider, state.source); }
+    try { result = await window.relay.sessionPicker(id, selectedProvider, state.source, state.surface); }
     catch (error) { result = { ok:false, error:error?.message || "Could not load native sessions." }; }
     if (!sessionPickerState || sessionPickerState !== state) return;
-    if (result?.binding) {
-      sessionPickerState = null;
-      renderSessionPickerSurface(savedRoomScroll);
-      const continued = await window.relay.continueSession(id, state.source);
-      if (continued?.ok === false) {
-        setRowNote(id, continued.error || "Could not open the bound session.", "err");
-        renderSessionPickerSurface(savedRoomScroll);
-      }
-      return;
-    }
     state.loading = false;
     if (!result || result.ok === false) state.error = result?.error || "Could not load native sessions.";
     else {
       state.provider = result.provider === "codex" ? "codex" : "claude";
       state.data = result;
+      state.surface = result.defaultSurface === "terminal" ? "terminal" : state.surface;
     }
     paintSessionPickerResult(state);
+    state.refreshTimer = setInterval(() => refreshSessionPickerPresence(state), 2000);
+  }
+
+  async function refreshSessionPickerPresence(state) {
+    if (!state || sessionPickerState !== state || state.loading || state.delivering || state.refreshing) return;
+    state.refreshing = true;
+    let result;
+    try { result = await window.relay.sessionPicker(state.id, state.provider, state.source, state.surface); }
+    catch { return; }
+    finally { state.refreshing = false; }
+    if (!result?.ok || sessionPickerState !== state) return;
+    const before = JSON.stringify(state.data?.recent || []);
+    state.data = result;
+    if (JSON.stringify(result.recent || []) !== before) paintSessionPickerResult(state);
   }
   // The verb NAMES an app ("Open in Codex"), so the open must go THERE — the
   // running-process heuristic only decides when nothing was named (David's
@@ -5429,25 +5510,45 @@
   // readable in one glance. Longer letters keep title + preview and their tap
   // is the reader (no in-between). 4000 was tried and read as a wall.
   const INLINE_BODY_MAX = 550;
-  // WHICH AGENT APPS THIS MAC HAS. main's relay:capabilities (detectAgentSurfaces)
-  // — null until the first answer. THE APP, NOT THE CLI (Sven, 2026-08-17):
-  // "Open in {app}" opens the desktop app, so the desktop entries decide
-  // (_claudeDesktop for Claude Code, _codexDesktop for Codex); an app the
-  // probe does not name counts as present, so an old main or a failed probe
-  // never hides a real app.
+  // Provider availability and presentation surface are different facts. A
+  // CLI-only install is a usable provider and opens in Terminal; when both the
+  // CLI and desktop app exist, Desktop is the default unless the user changes it.
   let agentSurfaces = null;
   const AGENT_APP_OPTIONS = ["Claude Code", "Codex"];
   function desktopEntry(app) {
     const key = app === "Codex" ? "_codexDesktop" : app === "Claude Code" ? "_claudeDesktop" : "";
     return key && agentSurfaces ? agentSurfaces[key] : null;
   }
+  function cliEntry(app) {
+    const key = app === "Codex" ? "_codexCli" : app === "Claude Code" ? "_claudeCli" : "";
+    return key && agentSurfaces ? agentSurfaces[key] : null;
+  }
+  function providerEntry(app) {
+    return agentSurfaces ? agentSurfaces[app] : null;
+  }
   function appAvailable(app) {
-    const entry = desktopEntry(app);
+    const entry = providerEntry(app);
     return !entry || entry.available !== false;
   }
   function appUnavailableReason(app) {
-    const entry = desktopEntry(app);
-    return entry && entry.available === false ? String(entry.reason || `${app === "Codex" ? "Codex" : "Claude"} isn’t installed on this Mac`) : "";
+    const entry = providerEntry(app);
+    return entry && entry.available === false ? String(entry.reason || `${app} isn’t installed on this computer`) : "";
+  }
+  function agentSurfaceOptions(app) {
+    const options = [];
+    if (desktopEntry(app)?.available !== false) options.push("desktop");
+    if (cliEntry(app)?.available === true) options.push("terminal");
+    return options.length ? options : ["desktop"];
+  }
+  function agentSurfacePreference(app) {
+    const available = agentSurfaceOptions(app);
+    const saved = protoPref(`proto.agentSurface.${hostKeyFor(app)}.v1`, "");
+    if (available.includes(saved)) return saved;
+    return available.includes("desktop") ? "desktop" : "terminal";
+  }
+  function setAgentSurfacePreference(app, surface) {
+    if (!agentSurfaceOptions(app).includes(surface)) return;
+    setProtoPref(`proto.agentSurface.${hostKeyFor(app)}.v1`, surface);
   }
   async function loadAgentSurfaces() {
     if (!window.relay.capabilities) return;
@@ -5473,8 +5574,9 @@
     const saved = protoPref(AGENT_APPS_PREF, "");
     const present = AGENT_APP_OPTIONS.filter(appAvailable);
     const requested = saved.split("|").filter((app) => AGENT_APP_OPTIONS.includes(app) && appAvailable(app));
+    if (saved === "__none__") return [];
     if (saved && requested.length) return AGENT_APP_OPTIONS.filter((app) => requested.includes(app));
-    return present.length ? present : ["Claude Code"];
+    return present;
   }
   function agentAppChoice() {
     const selected = agentAppSelection();
@@ -5484,25 +5586,23 @@
     if (!AGENT_APP_OPTIONS.includes(app) || !appAvailable(app)) return;
     const selected = new Set(agentAppSelection());
     if (enabled) selected.add(app);
-    else {
-      if (selected.size <= 1) return;
-      selected.delete(app);
-    }
+    else selected.delete(app);
     const next = AGENT_APP_OPTIONS.filter((option) => selected.has(option));
-    setProtoPref(AGENT_APPS_PREF, next.join("|"));
+    setProtoPref(AGENT_APPS_PREF, next.length ? next.join("|") : "__none__");
     // Keep downgrade behavior coherent for a previous Relay build.
-    setProtoPref("proto.agentApp", next.length === 2 ? AGENT_APP_BOTH : next[0]);
+    setProtoPref("proto.agentApp", next.length === 2 ? AGENT_APP_BOTH : next[0] || "");
   }
   // The label: the app's name, or "your agent" when the choice is Both — the
   // reader's second document is then "For your agent", and an open with no
   // host named lets main pick the app you are working in.
   function agentAppName() {
     const choice = agentAppChoice();
-    return choice === AGENT_APP_BOTH ? "your agent" : choice;
+    return choice === AGENT_APP_BOTH || !choice ? "your agent" : choice;
   }
   // The rows: David's order when both, else the one you chose.
   function agentAppHosts() {
     const choice = agentAppChoice();
+    if (!choice) return [];
     if (choice === AGENT_APP_BOTH) return ["codex", "claude"];
     return [hostKeyFor(choice) === "codex" ? "codex" : "claude"];
   }
@@ -5525,6 +5625,117 @@
     return k === "task_request" || k === "task";
   }
   function taskRows() { return (payload.relays || []).filter(isTaskRow); }
+  const TODO_STATUS_ORDER = ["triage", "backlog", "todo", "in_progress", "done", "canceled", "duplicate"];
+  const TODO_ACTIVE_ORDER = ["triage", "in_progress", "todo", "backlog"];
+  const TODO_TERMINAL_ORDER = ["done", "canceled", "duplicate"];
+  const TODO_LABEL = {
+    triage:"Triage", backlog:"Backlog", todo:"Todo", in_progress:"In Progress",
+    done:"Done", canceled:"Canceled", duplicate:"Duplicate",
+  };
+  const EMPTY_TODO_COUNTS = Object.fromEntries(TODO_STATUS_ORDER.map((status) => [status, 0]));
+  const todoState = {
+    selected:new Set(), counts:{ ...EMPTY_TODO_COUNTS }, groups:[], items:[], nextCursor:null,
+    loading:false, loadingMore:false, loaded:false, error:"", generation:0,
+  };
+  let todoProjectionSignature = "";
+  let todoRefreshTimer = null;
+  let todoDuplicateSource = null;
+  const todoHydratedRows = new Map();
+  function todoSelectedStatuses() { return TODO_STATUS_ORDER.filter((status) => todoState.selected.has(status)); }
+  function todoItemById(id) {
+    for (const item of todoState.items || []) if (String(item.relayId) === String(id)) return item;
+    for (const group of todoState.groups || []) {
+      const item = (group.items || []).find((candidate) => String(candidate.relayId) === String(id));
+      if (item) return item;
+    }
+    return null;
+  }
+  function todoSummaryAsReaderRow(item) {
+    if (!item) return null;
+    return {
+      id:item.relayId, direction:"inbound", state:item.state || "read", unread:item.state === "delivered",
+      relayNotificationKind:item.kind === "task" ? "task" : "plain_relay", kind:item.kind || "message",
+      title:item.title || item.displayTitle || "", displayTitle:item.displayTitle || item.title || "",
+      senderName:item.sender?.name || "Someone", senderEmail:item.sender?.email || "",
+      forHuman:item.preview || "", forAgent:"", createdAt:item.createdAt, updatedAt:item.updatedAt,
+      threadId:item.threadId || item.relayId, groupSendId:item.groupSendId || null,
+      recipientGroupId:item.recipientGroupId || null, recipientGroupName:item.recipientGroupName || "",
+      todoStatus:item.todoStatus, todoVersion:item.todoVersion, duplicateOfItemId:item.duplicateOfItemId || null,
+      _todoSummary:true,
+    };
+  }
+  function mergeTodoProjection(item) {
+    if (!item) return;
+    for (const row of payload.relays || []) {
+      if (String(row.id) !== String(item.relayId)) continue;
+      row.todoStatus = item.todoStatus;
+      row.todoVersion = item.todoVersion;
+      row.duplicateOfItemId = item.duplicateOfItemId || null;
+    }
+    const hydrated = todoHydratedRows.get(String(item.relayId));
+    if (hydrated) Object.assign(hydrated, {
+      todoStatus:item.todoStatus, todoVersion:item.todoVersion,
+      duplicateOfItemId:item.duplicateOfItemId || null,
+    });
+  }
+  async function loadTodo({ append = false } = {}) {
+    if (!window.relay.todoList || todoState.loading || todoState.loadingMore) return;
+    const generation = append ? todoState.generation : ++todoState.generation;
+    if (append) todoState.loadingMore = true;
+    else {
+      todoState.loading = true;
+      todoState.error = "";
+      if (activeView === "tasks") renderTasksBoard();
+    }
+    const statuses = todoSelectedStatuses();
+    const response = await window.relay.todoList({
+      statuses,
+      ...(statuses.length === 1 ? { limit:25 } : {}),
+      ...(append && todoState.nextCursor ? { cursor:todoState.nextCursor } : {}),
+    }).catch((error) => ({ ok:false, error:String(error?.message || error) }));
+    if (generation !== todoState.generation) return;
+    todoState.loading = false;
+    todoState.loadingMore = false;
+    if (!response || response.ok === false) {
+      todoState.error = response?.error || "Todo could not be loaded.";
+      if (activeView === "tasks") renderTasksBoard();
+      return;
+    }
+    todoState.loaded = true;
+    todoState.error = "";
+    todoState.counts = { ...EMPTY_TODO_COUNTS, ...(response.counts || {}) };
+    if (response.mode === "continuous") {
+      const nextItems = Array.isArray(response.items) ? response.items : [];
+      todoState.items = append ? [...todoState.items, ...nextItems] : nextItems;
+      todoState.groups = [];
+      todoState.nextCursor = response.nextCursor || null;
+      for (const item of nextItems) mergeTodoProjection(item);
+    } else {
+      todoState.groups = Array.isArray(response.groups) ? response.groups : [];
+      todoState.items = [];
+      todoState.nextCursor = null;
+      for (const group of todoState.groups) for (const item of group.items || []) mergeTodoProjection(item);
+    }
+    if (activeView === "tasks") renderTasksBoard();
+    else renderAll();
+  }
+  async function openTodoItem(id) {
+    const known = readerRow(id);
+    if (!known || known._todoSummary) {
+      const result = await window.relay.todoItem?.(id).catch(() => null);
+      if (result?.ok && result.row) {
+        const summary = todoItemById(id);
+        todoHydratedRows.set(String(id), { ...result.row, ...(summary ? {
+          groupSendId:result.row.groupSendId || summary.groupSendId || null,
+          recipientGroupId:result.row.recipientGroupId || summary.recipientGroupId || null,
+          recipientGroupName:result.row.recipientGroupName || summary.recipientGroupName || "",
+          todoStatus:summary.todoStatus, todoVersion:summary.todoVersion,
+          duplicateOfItemId:summary.duplicateOfItemId || null,
+        } : {}) });
+      }
+    }
+    openReader(id, "tasks");
+  }
   function taskClaimFor(row) {
     const claim = row && row.taskClaim;
     return claim && claim.scope === "channel" ? claim : null;
@@ -7531,11 +7742,11 @@
       onDone("later", id);
     });
   }
-  // The amber number is Task debt, not unread ink. Completed Tasks may still
-  // be unread inside the collapsed Completed disclosure, but they no longer
-  // make a clear task list claim that work remains.
+  // Todo's amber number is narrowly Triage: items that have not yet been
+  // intentionally classified. Backlog and Todo are deliberate states, not
+  // notification debt, and never inflate this badge.
   function requestsOutstandingCount() {
-    return taskRows().filter((r) => taskBoardState(r.id) !== "done").length;
+    return Number(todoState.counts.triage || 0);
   }
   let chatExpanded = false; // the conversation borrowing the reader's frame (⤢)
   let readerTab = "you"; // which face of the Task folder is open ("you" | "agent" | "work")
@@ -7593,7 +7804,11 @@
       };
     }
     const sent = (payload.sent || []).find((row) => String(row.relayId || row.id || "") === String(id || ""));
-    if (!sent) return null;
+    if (!sent) {
+      const hydratedTodo = todoHydratedRows.get(String(id));
+      if (hydratedTodo) return hydratedTodo;
+      return todoSummaryAsReaderRow(todoItemById(id));
+    }
     // A group send fans out to one relay per member. The reader opened ONE of
     // those copies, but the message was addressed to the room — name the group
     // (or its members, if the roster is gone), never the sibling that was opened.
@@ -7755,24 +7970,30 @@
     else roomScrollEl.scrollTop = top;
   }
   function settleThreadEntryFollow(token) {
-    // refreshSent resolves after main has pushed the hydrated payload. Give the
-    // renderer and font/layout work two frames, perform one final bottom pin,
-    // then release the follow latch so ordinary polling preserves the reader's
-    // position. A stale room's promise can never move the room opened after it.
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      if (threadEntryFollowToken() !== token) return;
-      scrollRoomToNewest(chatOrder() === "chat");
-      threadDetailEntryFollow = null;
-    }));
+    // Hydration can resolve while Chromium is still holding the destination
+    // transcript immutable for a room View Transition. Release only after that
+    // deferred render has run, then give fonts/layout two frames before the
+    // final bottom pin. A stale room's promise can never move the room opened
+    // after it, and deliberate reader navigation cancels the token below.
+    afterRoomViewTransition(() => {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (threadEntryFollowToken() !== token) return;
+        scrollRoomToNewest(chatOrder() === "chat");
+        threadDetailEntryFollow = null;
+      }));
+    });
   }
-  function hydrateThreadEntry(token, { includeSent = true } = {}) {
+  function hydrateThreadEntry(token, { includeSent = true, detailReady = Promise.resolve(null) } = {}) {
     const sentReady = includeSent && window.relay.refreshSent
       ? window.relay.refreshSent().catch(() => null)
       : Promise.resolve(null);
     const fontsReady = document.fonts && document.fonts.ready
       ? document.fonts.ready.catch(() => null)
       : Promise.resolve(null);
-    Promise.allSettled([sentReady, fontsReady]).then(() => settleThreadEntryFollow(token));
+    // Slack opens have a third, network-owned phase: their summary paints
+    // immediately, then the canonical transcript arrives. Keep following the
+    // newest message until that exact request has reconciled as well.
+    Promise.allSettled([sentReady, fontsReady, detailReady]).then(() => settleThreadEntryFollow(token));
   }
   function interruptThreadEntryFollow(event) {
     if (!threadEntryFollowToken()) return;
@@ -8159,6 +8380,7 @@
     // is the surface, and it renders even if its dock cannot.
     const composer = (() => { try { return composerHtml(); } catch (error) { console.error("[reader] composer failed:", error); return ""; } })();
     const sharedShelf = relaySharedShelf(r);
+    const todoStatusControl = todoReaderStatusHtml(r);
     const claimControl = request && !onWork ? taskClaimControlHtml(r, { surface: "reader" }) : "";
     function composerHtml() {
       // An unstarted Task is actionable from either immutable source document:
@@ -8199,6 +8421,7 @@
           <svg width="8" height="13" viewBox="0 0 8 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M7 1L1 7l6 6"/></svg>
         </button>
         <span class="reader-name">${esc(sender)}</span>
+        ${todoStatusControl}
         ${request ? `<button class="reader-delete" type="button" data-reader-delete="${esc(r.id)}" aria-label="Move task to Recently Deleted" title="Move task to Recently Deleted"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button>` : ""}
       </div>
       ${documentList}
@@ -8220,6 +8443,7 @@
       readerBodyEl.querySelector(".work-surface")?.classList.remove("work-entering");
     }, Math.max(0, transition.until - Date.now()) + 20);
     document.getElementById("readerBack").addEventListener("click", (e) => { e.stopPropagation(); closeReader(); });
+    wireReaderTodoStatus(r);
     const readerDelete = readerBodyEl.querySelector("[data-reader-delete]");
     if (readerDelete) readerDelete.addEventListener("click", async (event) => {
       event.stopPropagation();
@@ -8414,181 +8638,248 @@
 
   }
 
-  // ---------- the Tasks board: waiting / running / parked ----
-  // The board is the same pill filtered to obligations, so its rows use the
-  // RELAY anatomy — .th-title with the read/unread system (never hardcoded
-  // ink), preview when folded — and the same interaction as every bubble:
-  // tap unfolds in place to the body + inline dock; nothing navigates.
-  const expandedRequestIds = new Set(); // board rows currently unfolded
-  let completedTasksExpanded = false;
-  let taskInboxZero = false;
-  function renderTasksBoard() {
-    const rows = taskRows();
-    tasksEmptyEl.classList.toggle("gone", rows.length > 0);
-    const groups = { unclaimed: [], waiting: [], claimed: [], running: [], review: [], stopped: [], done: [], parked: [], scheduled: [] };
-    for (const r of rows) {
-      const sc = scheduleFor(r.id);
-      const state = taskBoardState(r.id);
-      // An accepted or paused cadence OWNS the row between runs.
-      if (sc && (sc.state === "accepted" || sc.state === "paused") && state !== "running") {
-        groups.scheduled.push(r);
-        continue;
-      }
-      const claim = taskClaimFor(r);
-      if (claim?.state === "unclaimed" && claim.workState !== "completed") groups.unclaimed.push(r);
-      else if (state === "waiting" && claim?.claimant && !claim.claimant.self) groups.claimed.push(r);
-      else groups[state].push(r);
-    }
-    const rowsHtml = (items, renderRight) => items.map((r) => {
-        const sender = relaySender(r);
-        const title = String(r.title || "").trim() || relaySubject(r);
-        const claim = r.taskClaim;
-        const channel = claim?.channel?.name || r.recipientGroupName || "";
-        const creator = claim?.createdBy?.name || sender;
-        // A request row is EXACTLY a list row: disc, name + time, serif line,
-        // one quiet control. No topic label, no preview, no unfold — tapping
-        // opens the reader (the letter ontology), where reading happens.
-        return `
-        <div class="tb-row${r.unread ? " unread" : ""}" role="button" tabindex="0" data-request="${esc(r.id)}">
-          <span class="avatar sm" style="--av-h:${avatarHue(sender)}" aria-hidden="true">${esc(avatarInitials(sender))}</span>
-          <div class="tb-main">
-            <div class="tb-sub">${channel ? `${esc(channel)} · ` : ""}Created by ${esc(creator)} · ${esc(timeAgo(r.createdAt))}</div>
-            <div class="rk-line"><span class="th-title">${esc(title)}</span><span class="tb-actions">${renderRight(r)}<button class="tb-delete" type="button" data-task-delete="${esc(r.id)}" data-stop="1" aria-label="Move task to Recently Deleted" title="Move task to Recently Deleted"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button></span></div>
-            <div class="row-err${rowNotes.get(r.id)?.cls === "ok" ? " ok" : ""}" data-err="${esc(r.id)}" data-stop="1">${esc(rowNotes.get(r.id)?.text || "")}</div>
-          </div>
-          ${taskClaimControlHtml(r, { surface: "tasks" })}
-        </div>`;
-      }).join("");
-    const section = (label, items, renderRight) => items.length ? `
-      <div class="tb-group">${label}<span class="n">${items.length}</span></div>
-      ${rowsHtml(items, renderRight)}` : "";
-    // Group membership IS the status: a "parked" chip on a row under a
-    // "Parked" header, plus a note saying it again, said one thing three
-    // times (Sven). Rows carry no status chips and no notes — moving between
-    // groups is the feedback. Waiting rows carry a direct Start task verb;
-    // every row carries the quiet, recoverable Recently Deleted affordance.
-    const unfinishedHtml =
-      section("Working", groups.running, () => `<span class="tb-working"><span class="tb-working-orb" aria-hidden="true"></span>Working</span>`)
-      + section("Unclaimed", groups.unclaimed, () => "")
-      + section("Waiting on you", groups.waiting, (r) => taskClaimAllowsStart(r) ? `<button class="tb-go" type="button" data-approve="${esc(r.id)}">Start task</button>` : "")
-      + section("Claimed", groups.claimed, () => "")
-      + section("On a schedule", groups.scheduled, (r) => {
-          const sc = scheduleFor(r.id) || {};
-          const phrase = sc.state === "paused"
-            ? `paused · ${esc(sc.cadence || "")}`
-            : `${esc(sc.cadence || "")}${sc.countdown ? ` · ${esc(sc.countdown)}` : ""}`;
-          return `<span class="tb-when">${phrase}</span>`;
-        })
-      + section("Ready for your review", groups.review, () => "")
-      // The state's name is the fact: it began, the agent is gone, and nothing
-      // came back. "Stopped" named nothing and told the reader nothing to do
-      // (David). This one says what happened and implies the next move — the
-      // dock is back, with Start on it.
-      + section("Didn't finish", groups.stopped, (r) => `<button class="tb-go" type="button" data-request-again="${esc(r.id)}">start again</button>`)
-      + section("Parked", groups.parked, () => "");
-    const unfinishedCount = groups.running.length + groups.unclaimed.length + groups.waiting.length + groups.claimed.length + groups.scheduled.length
-      + groups.review.length + groups.stopped.length + groups.parked.length;
-    const inboxZeroNow = groups.done.length > 0 && unfinishedCount === 0;
-    const celebrateNow = inboxZeroNow && !taskInboxZero;
-    taskInboxZero = inboxZeroNow;
-    const zeroHtml = inboxZeroNow ? `
-      <div class="task-zero${completedTasksExpanded ? " compact" : ""}${celebrateNow ? " celebrate" : ""}" data-task-zero>
-        <span class="tz-glow" aria-hidden="true"></span>
-        <span class="tz-mark" aria-hidden="true"><span class="tz-tile peach"></span><span class="tz-tile cream"></span><span class="tz-tile violet"></span></span>
-        <div class="tz-title">Nicely done.</div>
-        <div class="tz-sub">Your task list is clear.</div>
-      </div>` : "";
-    const completedHtml = groups.done.length ? `
-      <button class="tb-completed-toggle" type="button" data-completed-toggle aria-expanded="${completedTasksExpanded}" aria-controls="completedTasksList">
-        <span>Completed</span>
-        <span class="tb-completed-meta"><span>${groups.done.length}</span><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 4.5 3 3 3-3"/></svg></span>
+  function todoReaderStatusHtml(row) {
+    const status = row?.todoStatus;
+    if (!TODO_STATUS_ORDER.includes(status) || !Number.isInteger(row?.todoVersion)) return "";
+    const task = isTaskRow(row);
+    return `<div class="todo-reader-status" data-stop="1">
+      <button class="todo-reader-current" type="button" data-todo-status-toggle aria-expanded="false">
+        ${todoMarkHtml(status)}<span>${esc(TODO_LABEL[status])}</span>
       </button>
-      <div class="tb-completed-reveal${completedTasksExpanded ? " open preexpanded" : ""}" id="completedTasksList" aria-hidden="${!completedTasksExpanded}"${completedTasksExpanded ? "" : " inert"}>
-        <div class="tb-completed-clip">${rowsHtml(groups.done, () => "")}</div>
-      </div>` : "";
-    tasksListEl.innerHTML = zeroHtml + unfinishedHtml + completedHtml;
-    const completedToggle = tasksListEl.querySelector("[data-completed-toggle]");
-    if (completedToggle) {
-      completedToggle.addEventListener("click", () => {
-        completedTasksExpanded = completedToggle.getAttribute("aria-expanded") !== "true";
-        completedToggle.setAttribute("aria-expanded", String(completedTasksExpanded));
-        tasksListEl.querySelector("[data-task-zero]")?.classList.toggle("compact", completedTasksExpanded);
-        const reveal = tasksListEl.querySelector("#completedTasksList");
-        if (!reveal) return;
-        if (reveal.classList.contains("preexpanded")) {
-          reveal.classList.remove("preexpanded");
-          void reveal.offsetHeight;
-        }
-        reveal.classList.toggle("open", completedTasksExpanded);
-        reveal.setAttribute("aria-hidden", String(!completedTasksExpanded));
-        if (completedTasksExpanded) reveal.removeAttribute("inert");
-        else reveal.setAttribute("inert", "");
-      });
+      <div class="todo-reader-menu hidden" data-todo-status-menu>
+        ${TODO_STATUS_ORDER.map((candidate) => {
+          const lifecycleOnly = task && ["in_progress", "done"].includes(candidate) && candidate !== status;
+          return `<button class="todo-reader-option${candidate === status ? " on" : ""}" type="button" data-reader-todo-status="${esc(candidate)}"${lifecycleOnly ? " disabled" : ""} title="${lifecycleOnly ? esc(candidate === "in_progress" ? "Start the Task to move it to In Progress" : "Complete the Task with its result to move it to Done") : ""}">
+            ${todoMarkHtml(candidate)}<span>${esc(TODO_LABEL[candidate])}${candidate === "duplicate" ? "…" : ""}</span>
+          </button>`;
+        }).join("")}
+      </div>
+    </div>`;
+  }
+  async function commitTodoStatus(itemId, status, expectedVersion, duplicateOfItemId = "") {
+    const result = await window.relay.todoStatusUpdate(itemId, {
+      status,
+      expectedVersion,
+      idempotencyKey:`todo-human:${itemId}:${crypto.randomUUID()}`,
+      ...(duplicateOfItemId ? { duplicateOfItemId } : {}),
+    }).catch((error) => ({ ok:false, error:String(error?.message || error) }));
+    if (!result?.ok) {
+      const detail = result?.details || {};
+      const row = readerRow(itemId);
+      if (row && Number.isInteger(detail.currentVersion)) {
+        row.todoVersion = detail.currentVersion;
+        row.todoStatus = detail.currentStatus || row.todoStatus;
+      }
+      setRowNote(itemId, result?.error || "That status could not be changed.", "err");
+      await loadTodo();
+      if (activeView === "reader" && readerId === itemId) renderReader();
+      return false;
     }
-    for (const z of tasksListEl.querySelectorAll('[data-stop="1"]')) {
-      z.addEventListener("click", (e) => e.stopPropagation());
-    }
-    for (const el of tasksListEl.querySelectorAll(".tb-row")) {
-      el.addEventListener("click", () => {
-        const id = el.getAttribute("data-request");
-        // A request follows the letter ontology (David's round): tap → the pill
-        // expands into the reader, where the dock is the composer. Opening
-        // reads it. The row's ghost Start stays for one-tap approval.
-        const r = taskRows().find((x) => x.id === id);
-        const shouldAck = Boolean(r && r.unread);
-        if (r && r.unread) {
-          r.unread = false; // the badge follows the open immediately, not the next daemon poll
-        }
-        openReader(id, "tasks");
-        if (shouldAck) persistReadIds([id], { afterPaint: true });
-      });
-    }
-    for (const again of tasksListEl.querySelectorAll("[data-request-again]")) {
-      again.addEventListener("click", (e) => {
-        e.stopPropagation();
-        // A state without a remedy is just bad news. The fix is one tap, from
-        // the board, on the route the Task already names (David).
-        const id = again.getAttribute("data-request-again");
-        const rt = routeFor(id);
-        again.disabled = true;
-        again.textContent = "starting…";
-        resetRunFeedForNewRun(id);
-        taskLocal.set(id, "running");
-        window.relay.taskStart(id, {
-          host: hostKeyFor(rt.app),
-          model: modelIdFor(rt.app, rt.model),
-          effort: String(rt.effort || "high").toLowerCase(),
-          note: "",
-          permission: permMode(/claude/i.test(String(rt.app)) ? "claude" : "codex"),
-        }).then((res) => {
-          if (!res || !res.ok) { taskLocal.delete(id); setRowNote(id, (res && (res.error || res.runError)) || "It did not start.", "err"); }
-          renderAll();
-        }).catch((err) => { taskLocal.delete(id); setRowNote(id, String(err && err.message || err).slice(0, 120), "err"); renderAll(); });
-      });
-    }
-    for (const btn of tasksListEl.querySelectorAll("[data-task-delete]")) {
-      btn.addEventListener("click", async (event) => {
+    const summary = todoItemById(itemId);
+    if (summary) Object.assign(summary, {
+      todoStatus:result.status, todoVersion:result.version,
+      duplicateOfItemId:result.duplicateOfItemId || null,
+    });
+    const row = readerRow(itemId);
+    if (row) Object.assign(row, {
+      todoStatus:result.status, todoVersion:result.version,
+      duplicateOfItemId:result.duplicateOfItemId || null,
+    });
+    clearRowNote(itemId);
+    await loadTodo();
+    if (activeView === "reader" && readerId === itemId) renderReader();
+    return true;
+  }
+  function wireReaderTodoStatus(row) {
+    const toggle = readerBodyEl.querySelector("[data-todo-status-toggle]");
+    const menu = readerBodyEl.querySelector("[data-todo-status-menu]");
+    if (!toggle || !menu) return;
+    toggle.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const open = menu.classList.toggle("hidden") === false;
+      toggle.setAttribute("aria-expanded", String(open));
+    });
+    for (const option of menu.querySelectorAll("[data-reader-todo-status]")) {
+      option.addEventListener("click", async (event) => {
         event.stopPropagation();
-        if (btn.disabled) return;
-        const id = btn.getAttribute("data-task-delete");
-        btn.disabled = true;
-        clearRowNote(id);
-        try {
-          const res = await window.relay.deleteRelay(id);
-          if (!res || res.ok === false) {
-            setRowNote(id, (res && res.error) || "Could not move this task to Recently Deleted.", "err");
-            btn.disabled = false;
-            renderTasksBoard();
-          }
-        } catch (error) {
-          setRowNote(id, (error && error.message) || "Could not move this task to Recently Deleted.", "err");
-          btn.disabled = false;
-          renderTasksBoard();
+        if (option.disabled) return;
+        const status = option.getAttribute("data-reader-todo-status");
+        if (status === row.todoStatus) {
+          menu.classList.add("hidden");
+          toggle.setAttribute("aria-expanded", "false");
+          return;
         }
+        if (status === "duplicate") {
+          todoDuplicateSource = { itemId:String(row.id), expectedVersion:Number(row.todoVersion) };
+          readerSource = "tasks";
+          closeReader();
+          return;
+        }
+        option.disabled = true;
+        await commitTodoStatus(String(row.id), status, Number(row.todoVersion));
       });
     }
-    wireRequestControls(tasksListEl, () => { renderTasksBoard(); renderAll(); });
-    wireTaskClaimControls(tasksListEl, () => { renderTasksBoard(); renderAll(); });
+  }
+
+  // ---------- the Tasks board: now the Todo attention stack ---------------
+  // Status names are the information architecture. They remain visible in the
+  // rail; All is a composed view, not another workflow state.
+  function todoMarkHtml(status) {
+    return status === "all" ? "" : `<span class="todo-mark ${esc(status)}" aria-hidden="true"></span>`;
+  }
+  function todoRowHtml(item, status) {
+    const sender = item.sender?.name || item.sender?.email || "Someone";
+    const rawTitle = String(item.title || item.displayTitle || "").trim();
+    const preview = String(item.preview || "").trim();
+    const title = rawTitle || preview || (item.kind === "task" ? "Untitled Task" : "Untitled Relay");
+    const showPreview = Boolean(rawTitle && preview && preview !== rawTitle);
+    const context = item.recipientGroupName ? `${item.recipientGroupName} · ` : "";
+    return `
+      <div class="todo-row" role="button" tabindex="0" data-todo-item="${esc(item.relayId)}" data-todo-status="${esc(status || item.todoStatus || "")}">
+        <span class="avatar sm" style="--av-h:${avatarHue(sender)}" aria-hidden="true">${esc(avatarInitials(sender))}</span>
+        <div class="todo-row-main">
+          <div class="todo-row-meta"><span class="kind">${item.kind === "task" ? "Task" : "Relay"}</span><span>·</span><span>${esc(context + sender)}</span><span>·</span><span>${esc(timeAgo(item.createdAt))}</span></div>
+          <div class="todo-row-title">${esc(title)}</div>
+          ${showPreview ? `<div class="todo-row-preview">${esc(preview)}</div>` : ""}
+        </div>
+      </div>`;
+  }
+  function renderTodoRail() {
+    const selected = todoSelectedStatuses();
+    const total = TODO_STATUS_ORDER.reduce((sum, status) => sum + Number(todoState.counts[status] || 0), 0);
+    const button = (status, label, count, on) => `
+      <button class="todo-filter${on ? " on" : ""}" type="button" data-todo-filter="${esc(status)}" aria-pressed="${on}">
+        ${todoMarkHtml(status)}<span>${esc(label)}</span><span class="n">${Number(count || 0)}</span>
+      </button>`;
+    todoFilterRailEl.innerHTML = button("all", "All", total, selected.length === 0)
+      + TODO_STATUS_ORDER.map((status) => button(
+          status, TODO_LABEL[status], todoState.counts[status], todoState.selected.has(status),
+        )).join("");
+    for (const control of todoFilterRailEl.querySelectorAll("[data-todo-filter]")) {
+      control.addEventListener("click", () => {
+        const status = control.getAttribute("data-todo-filter");
+        if (status === "all") todoState.selected.clear();
+        else if (todoState.selected.has(status)) todoState.selected.delete(status);
+        else todoState.selected.add(status);
+        todoState.items = [];
+        todoState.groups = [];
+        todoState.nextCursor = null;
+        loadTodo();
+      });
+    }
+  }
+  function todoGroupHtml(group) {
+    const status = group.status;
+    const items = Array.isArray(group.items) ? group.items : [];
+    return `
+      <section class="todo-group" data-todo-group="${esc(status)}">
+        <div class="todo-group-head">${todoMarkHtml(status)}<span>${esc(TODO_LABEL[status] || status)}</span><span class="n">${Number(group.count || 0)}</span></div>
+        ${items.map((item) => todoRowHtml(item, status)).join("")}
+        ${Number(group.count || 0) > items.length
+          ? `<button class="todo-view-all" type="button" data-todo-view-all="${esc(status)}">View all ${Number(group.count)} →</button>`
+          : ""}
+      </section>`;
+  }
+  function wireTodoBoard() {
+    for (const row of tasksListEl.querySelectorAll("[data-todo-item]")) {
+      const open = async () => {
+        const id = row.getAttribute("data-todo-item");
+        if (todoDuplicateSource) {
+          if (String(id) === String(todoDuplicateSource.itemId)) return;
+          const source = todoDuplicateSource;
+          const ok = await commitTodoStatus(source.itemId, "duplicate", source.expectedVersion, id);
+          if (ok) todoDuplicateSource = null;
+          else todoDuplicateSource = { ...source, error:"That item could not be marked Duplicate. Refresh and try again." };
+          if (activeView === "tasks") renderTasksBoard();
+          return;
+        }
+        const projected = (payload.relays || []).find((item) => String(item.id) === String(id));
+        if (projected?.unread) {
+          projected.unread = false;
+          persistReadIds([id], { afterPaint:true });
+        }
+        await openTodoItem(id);
+      };
+      row.addEventListener("click", open);
+      row.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        open();
+      });
+    }
+    for (const button of tasksListEl.querySelectorAll("[data-todo-view-all],[data-todo-terminal]")) {
+      button.addEventListener("click", () => {
+        const status = button.getAttribute("data-todo-view-all") || button.getAttribute("data-todo-terminal");
+        todoState.selected = new Set([status]);
+        todoState.items = [];
+        todoState.groups = [];
+        todoState.nextCursor = null;
+        scrollEl.scrollTop = 0;
+        loadTodo();
+      });
+    }
+    const more = tasksListEl.querySelector("[data-todo-more]");
+    if (more) more.addEventListener("click", () => loadTodo({ append:true }));
+    const cancelDuplicate = tasksListEl.querySelector("[data-todo-duplicate-cancel]");
+    if (cancelDuplicate) cancelDuplicate.addEventListener("click", () => {
+      todoDuplicateSource = null;
+      renderTasksBoard();
+    });
+  }
+  function renderTasksBoard() {
+    renderTodoRail();
+    if (todoState.loading && !todoState.loaded) {
+      tasksEmptyEl.classList.add("gone");
+      tasksListEl.innerHTML = '<div class="todo-loading">Loading Todo…</div>';
+      return;
+    }
+    if (todoState.error) {
+      tasksEmptyEl.classList.add("gone");
+      tasksListEl.innerHTML = `<div class="todo-error">${esc(todoState.error)}</div>`;
+      return;
+    }
+    const selected = todoSelectedStatuses();
+    const total = TODO_STATUS_ORDER.reduce((sum, status) => sum + Number(todoState.counts[status] || 0), 0);
+    const visibleCount = selected.length
+      ? selected.reduce((sum, status) => sum + Number(todoState.counts[status] || 0), 0)
+      : total;
+    tasksEmptyEl.classList.toggle("gone", visibleCount > 0 || todoState.loading);
+    if (!todoState.loaded || visibleCount === 0) {
+      tasksEmptyEl.querySelector(".t1").textContent = selected.length
+        ? `Nothing in ${selected.map((status) => TODO_LABEL[status]).join(" + ")}`
+        : "Nothing here";
+      tasksEmptyEl.querySelector(".t2").textContent = selected.length
+        ? "Choose another status or All."
+        : "Relays and Tasks will appear here as they enter your workflow.";
+      tasksListEl.innerHTML = todoState.loading ? '<div class="todo-loading">Refreshing…</div>' : "";
+      return;
+    }
+    if (selected.length === 1) {
+      const status = selected[0];
+      tasksListEl.innerHTML = `
+        <div class="todo-group-head">${todoMarkHtml(status)}<span>${esc(TODO_LABEL[status])}</span><span class="n">${Number(todoState.counts[status] || 0)}</span></div>
+        ${todoState.items.map((item) => todoRowHtml(item, status)).join("")}
+        ${todoState.nextCursor ? `<button class="todo-load-more" type="button" data-todo-more${todoState.loadingMore ? " disabled" : ""}>${todoState.loadingMore ? "Loading…" : "Load next 25"}</button>` : ""}
+        ${todoState.items.length ? `<div class="todo-status-note">Showing ${todoState.items.length} of ${Number(todoState.counts[status] || 0)}</div>` : ""}`;
+    } else {
+      const groups = selected.length
+        ? todoState.groups
+        : TODO_ACTIVE_ORDER.map((status) => todoState.groups.find((group) => group.status === status)).filter(Boolean);
+      const terminals = !selected.length ? `
+        <div class="todo-terminal-stack">
+          ${TODO_TERMINAL_ORDER.filter((status) => Number(todoState.counts[status] || 0) > 0).map((status) => `
+            <button class="todo-terminal" type="button" data-todo-terminal="${esc(status)}">
+              ${todoMarkHtml(status)}<span>${esc(TODO_LABEL[status])}</span><span class="n">${Number(todoState.counts[status])}</span>
+            </button>`).join("")}
+        </div>` : "";
+      tasksListEl.innerHTML = groups.map(todoGroupHtml).join("") + terminals;
+    }
+    if (todoDuplicateSource) tasksListEl.insertAdjacentHTML("afterbegin", `
+      <div class="todo-duplicate-banner" role="status">
+        <span>${esc(todoDuplicateSource.error || "Choose the original item. The current item will move to Duplicate.")}</span>
+        <button type="button" data-todo-duplicate-cancel>Cancel</button>
+      </div>`);
+    wireTodoBoard();
   }
 
   // Grow the window as the user scrolls toward the end. Cheap: each extension
@@ -8597,11 +8888,16 @@
   let renderedThreadCount = 0;
   let hasMoreThreads = false;
   scrollEl.addEventListener("scroll", () => {
-    if (!hasMoreThreads || activeView !== "relays") return;
     const nearEnd = scrollEl.scrollTop + scrollEl.clientHeight >= scrollEl.scrollHeight - 240;
     if (!nearEnd) return;
-    renderedThreadCount += RENDER_WINDOW;
-    renderRelays();
+    if (activeView === "tasks" && todoSelectedStatuses().length === 1 && todoState.nextCursor) {
+      loadTodo({ append:true });
+      return;
+    }
+    if (activeView === "relays" && hasMoreThreads) {
+      renderedThreadCount += RENDER_WINDOW;
+      renderRelays();
+    }
   }, { passive: true });
 
   // Preview plus the two host-open actions, as one small text-first menu.
@@ -11536,7 +11832,7 @@
     const projected = cached ? roomFromChatSummary(cached) : null;
     if (!projected) return null;
     if (surface === "slack" || isSlackIntegratedRoom(projected)) return projected;
-    return null;
+    return todoSummaryAsReaderRow(todoItemById(id));
   }
   // Messages that arrive while their Chat room is already on screen have been
   // read. A direct room spans every wire thread with that person; a group room
@@ -12006,14 +12302,7 @@
         const id = b.getAttribute("data-host-open");
         const host = b.getAttribute("data-host") === "claude" ? "claude" : "codex";
         const source = b.getAttribute("data-source") === "sent" ? "sent" : "relay";
-        const app = host === "codex" ? "Codex" : "Claude Code";
         const message = readerRow(id) || relayById(id) || { id };
-        const bound = host === "codex" ? message.materializedCodex : message.materializedClaude;
-        if (bound) {
-          openRelayFromUI(id, source, "open", host);
-          setOpeningNote(id, `Opening in ${app}…`);
-          return;
-        }
         if (sessionPickerState
           && String(sessionPickerState.id) === String(id)
           && sessionPickerState.provider === host) {
@@ -13318,9 +13607,10 @@
     commitNavigation({ outerScrollTop: 0 });
     readVisibleChatRoom();
     const includeSlack = slackMessagesVisible(room, source);
+    let canonicalDetailReady = Promise.resolve(null);
     if (isSlackIntegratedRoom(room) && room.chatId && !options.hydrated
       && !canonicalChatDetailIsCurrent(room, source, { includeSlack })) {
-      requestCanonicalChatDetail(room, source, { includeSlack }).then((result) => {
+      canonicalDetailReady = requestCanonicalChatDetail(room, source, { includeSlack }).then((result) => {
         reconcileCanonicalChatResult(result, {
           chatId:room.chatId,
           surface,
@@ -13333,7 +13623,10 @@
     // case the compact/expanded frame transition briefly disturbed focus.
     focusThreadComposerOnEntry(composerFocusRequest);
     settleThreadComposerEntryFocus(composerFocusRequest);
-    hydrateThreadEntry(entryFollowToken, { includeSent:source !== "slack" });
+    hydrateThreadEntry(entryFollowToken, {
+      includeSent:source !== "slack",
+      detailReady:canonicalDetailReady,
+    });
     // Let Chromium commit the destination before the main process takes the
     // one locked state.json write for the room. Per-message synchronous writes
     // here were the first-open-only stall: once read, later opens were smooth.
@@ -13887,9 +14180,9 @@
     // so nothing above it moves. Both say plainly what happens and — for hiding —
     // how to get the pill back, because Settings lives INSIDE the pill it hides.
     html += quietPrefsHtml(info);
-    // WHERE RELAYS OPEN. Each installed app is independent and both start on.
-    // That makes the visible controls match the actions beneath every Relay;
-    // at least one stays enabled so the Relay never loses its open action.
+    // WHERE RELAYS OPEN. Provider switches use runtime availability (CLI or
+    // desktop), while the optional surface selector decides where a new/idle
+    // session is presented when both surfaces exist.
     const selectedAgentApps = agentAppSelection();
     html += `
       <div class="sv-open-section" id="protoPrefs" data-stop="1">
@@ -13899,13 +14192,19 @@
           ${AGENT_APP_OPTIONS.map((app) => {
             const available = appAvailable(app);
             const on = selectedAgentApps.includes(app);
-            const last = on && selectedAgentApps.length === 1;
             const logo = app === "Codex" ? "codexMark.svg" : "claudeCodeMark.svg";
-            const why = !available ? appUnavailableReason(app) : last ? "At least one app must stay on." : "";
+            const surfaces = agentSurfaceOptions(app);
+            const surface = agentSurfacePreference(app);
+            const why = !available
+              ? appUnavailableReason(app)
+              : surfaces.length === 1
+                ? `Uses ${surface === "terminal" ? "Terminal" : "Desktop"}.`
+                : "";
             return `<div class="sv-open-row${available ? "" : " off"}">
               <img class="sv-open-logo" src="${logo}" alt="" />
               <span class="sv-open-copy"><span class="sv-open-name">${app}</span>${why ? `<span class="sv-open-why">${esc(why)}</span>` : ""}</span>
-              <button class="sv-switch" type="button" role="switch" data-agent-app="${app}" aria-checked="${on ? "true" : "false"}" aria-label="Open Relays with ${app}" ${!available || last ? "disabled" : ""}></button>
+              ${available && surfaces.length > 1 ? `<select class="sv-surface-select" data-agent-surface="${app}" aria-label="Open ${app} in"><option value="desktop"${surface === "desktop" ? " selected" : ""}>Desktop</option><option value="terminal"${surface === "terminal" ? " selected" : ""}>Terminal</option></select>` : ""}
+              <button class="sv-switch" type="button" role="switch" data-agent-app="${app}" aria-checked="${on ? "true" : "false"}" aria-label="Open Relays with ${app}" ${!available ? "disabled" : ""}></button>
             </div>`;
           }).join("")}
         </div>
@@ -13971,6 +14270,13 @@
       sw.addEventListener("click", (e) => {
         e.stopPropagation();
         setAgentAppEnabled(sw.getAttribute("data-agent-app"), sw.getAttribute("aria-checked") !== "true");
+        renderSettings();
+      });
+    }
+    for (const select of settingsViewEl.querySelectorAll("[data-agent-surface]")) {
+      select.addEventListener("change", (e) => {
+        e.stopPropagation();
+        setAgentSurfacePreference(select.getAttribute("data-agent-surface"), select.value);
         renderSettings();
       });
     }
@@ -14997,8 +15303,7 @@
     for (const tab of tabEls) {
       const view = tab.getAttribute("data-view");
       tab.classList.toggle("gone",
-        (view === "tasks" && payload.features?.requests !== true)
-        || (view === "slack" && payload.features?.slack !== true));
+        view === "slack" && payload.features?.slack !== true);
       tab.classList.toggle("active", view === tabView);
     }
   }
@@ -15055,6 +15360,7 @@
     if (activeView === "sent" && viewChanged && window.relay.refreshSent) {
       window.relay.refreshSent().catch(() => {});
     }
+    if (activeView === "tasks" && viewChanged) loadTodo();
     // The reader — or an expanded conversation — holds the card at READER size.
     syncCardSize(activeView === "reader" || (activeView === "threads" && chatExpanded));
   }
@@ -15191,7 +15497,7 @@
     // Every render rebuilds the mirror's element, so re-attach the poll to
     // whatever is on screen now and drop the ones whose card just closed.
     syncRunMirrors();
-    if (paintSurface && (activeView === "tasks" || activeView === "reader")) loadSchedules();
+    if (paintSurface && activeView === "reader") loadSchedules();
     // contacts renders from its own load path
   }
 
@@ -15289,6 +15595,19 @@
       chats: Array.isArray(next.chats) ? next.chats : (payload.chats || []),
       slackChats: Array.isArray(next.slackChats) ? next.slackChats : (payload.slackChats || []),
     };
+    const nextTodoProjectionSignature = JSON.stringify(projectedRelays.map((row) => [
+      row.id, row.todoStatus, row.todoVersion, row.duplicateOfItemId,
+      row.taskStartedAt, row.taskCompletedAt, row.taskClaim?.version,
+    ]));
+    const todoProjectionChanged = nextTodoProjectionSignature !== todoProjectionSignature;
+    todoProjectionSignature = nextTodoProjectionSignature;
+    if (incomingAccount?.paired !== false && (!todoState.loaded || todoProjectionChanged)) {
+      if (todoRefreshTimer) clearTimeout(todoRefreshTimer);
+      todoRefreshTimer = setTimeout(() => {
+        todoRefreshTimer = null;
+        loadTodo();
+      }, 40);
+    }
     const paintSurface = rendererSurfaceActive();
     if (paintSurface && activeView === "threads" && threadDetailId) {
       const surface = conversationSurface();
@@ -15309,7 +15628,7 @@
     // only mirrors it. Doing this on every payload is what lets a queued bubble
     // survive a repaint, a room switch and a restart of the pill itself.
     syncOutboxProjection();
-    if (payload.features?.requests !== true && ["tasks", "requestDetail"].includes(activeView)) {
+    if (payload.features?.requests !== true && activeView === "requestDetail") {
       activeView = "relays";
     }
     if (payload.features?.slack !== true && (activeView === "slack" || threadsSource === "slack")) {

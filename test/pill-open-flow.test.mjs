@@ -452,23 +452,12 @@ test("open-in-current on a sent relay forges the sent copy first and never acks"
   assert.match(main, /openPacket\(id, \{ sent: true, fresh: true, host: String\(host \|\| ""\) \}\)/);
 });
 
-test("the agent row opens the Relay's exact provider task or session", () => {
-  // Was "the two permanent agent rows…": since 2026-08-17 the footer is ONE
-  // row, the app Settings chose (room-reading-laws pins that). What this test
-  // guards is unchanged — the row's host reaches main untouched.
+test("the agent row always opens the exact provider's destination picker", () => {
   assert.match(preload, /open: \(id, host\) => ipcRenderer\.send\("relay:open", id, host\)/);
   assert.match(preload, /openSent: \(id, host\) => ipcRenderer\.send\("relay:openSent", id, host\)/);
-  // The row names its host and that host reaches main unchanged; an open that
-  // names NO host falls back to the Settings choice ("Open relays in"), never
-  // to the frontmost-window guess (Sven, 2026-08-17: the named app is a promise).
-  assert.match(html, /openSent\(id, host \|\| hostKeyFor\(agentAppName\(\)\)\)/);
-  assert.match(html, /window\.relay\.open\(id, host \|\| hostKeyFor\(agentAppName\(\)\)\)/);
-  assert.match(html, /openRelayFromUI\(id, source, "open", host\)/);
-
-  const sentHandler = main.slice(main.indexOf('ipcMain.on("relay:openSent"'), main.indexOf('// "Open in new chat"'));
-  assert.match(sentHandler, /openPacket\(id, \{ sent: true, host: String\(host \|\| ""\) \}\)/);
-  const receivedHandler = main.slice(main.indexOf('ipcMain.on("relay:open"'), main.indexOf('// Sent rows get'));
-  assert.match(receivedHandler, /openPacket\(id, \{ host: String\(host \|\| ""\) \}\)/);
+  const wire = html.slice(html.indexOf("function wireHostOpen"), html.indexOf("// Before 0.1.290"));
+  assert.match(wire, /loadSessionPicker\(id, host, relaySubject\(message\) \|\| "Relay", null, source\)/);
+  assert.doesNotMatch(wire, /materializedCodex|materializedClaude|openRelayFromUI/);
 });
 
 test("Open in Codex imports the request's existing native thread instead of forking it", () => {

@@ -20,6 +20,7 @@ const EXPECTED_TOOLS = [
   "relay_task_start",
   "relay_task_complete",
   "relay_task_unclaim",
+  "relay_todo_update",
   "relay_agent_complete",
   "relay_send",
   "relay_share_link",
@@ -265,7 +266,10 @@ test("model-facing Relay product language calls work Tasks, never Requests", asy
   for (const retired of [/>Requests</i, /No requests yet/i, /Untitled request/i, /What requests may do/i, /kchip">Request</i]) {
     assert.doesNotMatch(pill, retired);
   }
-  assert.match(pill, /data-view="tasks">Tasks/);
+  assert.match(pill, /data-view="tasks">Todo/);
+  for (const status of ["Triage", "Backlog", "Todo", "In Progress", "Done", "Canceled", "Duplicate"]) {
+    assert.match(pill, new RegExp(status));
+  }
 });
 
 test("a link is what an unresolvable recipient turns into, in both instruction strings and the tool itself", () => {

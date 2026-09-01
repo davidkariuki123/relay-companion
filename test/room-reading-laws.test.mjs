@@ -31,14 +31,17 @@ test("a relay tap lands in the glance frame; only Chat-sourced opens earn the sp
   assert.doesNotMatch(open, /chatExpanded = false;/);
 });
 
-test("every room entry follows newest through its own hydration regardless of the previous exit", () => {
+test("every room entry follows newest through every asynchronous hydration phase", () => {
   const open = html.slice(html.indexOf("function openThreadDetail("), html.indexOf("// ---------- Settings view"));
   const resetAt = open.indexOf("threadDetailScrolledFor = null;");
   const selectAt = open.indexOf("threadDetailId = roomCoordinate;");
   assert.ok(resetAt >= 0 && resetAt < selectAt, "entry rearms scrolling before selecting even the same room id");
   assert.match(open, /const entryFollowToken = beginThreadEntryFollow\(roomCoordinate\)/);
-  assert.match(open, /commitNavigation\(\{ outerScrollTop: 0 \}\);[\s\S]*?hydrateThreadEntry\(entryFollowToken, \{ includeSent:source !== "slack" \}\)/,
-    "each room keeps one guarded entry follow while Slack avoids the unrelated Sent refresh");
+  assert.match(open, /let canonicalDetailReady = Promise\.resolve\(null\)/);
+  assert.match(open, /canonicalDetailReady = requestCanonicalChatDetail\(room, source, \{ includeSlack \}\)/,
+    "a cold Slack transcript remains part of the guarded room entry");
+  assert.match(open, /hydrateThreadEntry\(entryFollowToken, \{[\s\S]*includeSent:source !== "slack",[\s\S]*detailReady:canonicalDetailReady/,
+    "both outbound and canonical hydration are handed to the entry-follow latch");
 
   const render = html.slice(html.indexOf("function renderThreadDetail()"), html.indexOf('document.getElementById("thExpand")'));
   assert.match(render, /const entryFollowToken = threadEntryFollowToken\(\)/);
@@ -50,7 +53,9 @@ test("every room entry follows newest through its own hydration regardless of th
     "a stale callback cannot pull a reader back down after deliberate scrolling");
 
   const entryFollow = html.slice(html.indexOf("function beginThreadEntryFollow("), html.indexOf("function captureRoomScroll("));
-  assert.match(entryFollow, /Promise\.allSettled\(\[sentReady, fontsReady\]\)\.then\(\(\) => settleThreadEntryFollow\(token\)\)/);
+  assert.match(entryFollow, /Promise\.allSettled\(\[sentReady, fontsReady, detailReady\]\)\.then\(\(\) => settleThreadEntryFollow\(token\)\)/);
+  assert.match(entryFollow, /afterRoomViewTransition\(\(\) => \{/,
+    "the final pin waits for any deferred transcript render behind the room transition");
   assert.match(entryFollow, /requestAnimationFrame\(\(\) => requestAnimationFrame/,
     "the final bottom pin waits for hydrated DOM and layout");
   assert.match(entryFollow, /threadDetailEntryFollow = null/,
@@ -69,6 +74,51 @@ test("every room entry follows newest through its own hydration regardless of th
     const banner = html.slice(html.indexOf(start), html.indexOf("commitNavigation({ outerScrollTop: 0 });", html.indexOf(start)) + 48);
     assert.match(banner, /activeView = "relays";[\s\S]*?commitNavigation\(\{ outerScrollTop: 0 \}\);/);
   }
+});
+
+test("delayed canonical detail cannot release entry-follow before its deferred render", async () => {
+  const helpers = html.slice(
+    html.indexOf("function beginThreadEntryFollow("),
+    html.indexOf("function interruptThreadEntryFollow("),
+  );
+  let resolveDetail;
+  const detailReady = new Promise((resolve) => { resolveDetail = resolve; });
+  const runtime = new Function("detailReady", `
+    let activeView = "threads";
+    let threadDetailId = "slack-room";
+    let threadDetailEntryFollow = null;
+    let threadDetailEntryFollowSeq = 0;
+    const scroller = { scrollHeight:1200, scrollTop:0 };
+    const deferredTransitionWork = [];
+    const window = { relay:{} };
+    const document = { fonts:{ ready:Promise.resolve() } };
+    function roomScrollElement() { return scroller; }
+    function chatOrder() { return "chat"; }
+    function afterRoomViewTransition(work) { deferredTransitionWork.push(work); }
+    function requestAnimationFrame(work) { queueMicrotask(work); }
+    ${helpers}
+    const token = beginThreadEntryFollow(threadDetailId);
+    hydrateThreadEntry(token, { includeSent:false, detailReady });
+    return {
+      scroller,
+      pending:() => threadEntryFollowToken(),
+      finishTransition:() => deferredTransitionWork.splice(0).forEach((work) => work()),
+    };
+  `)(detailReady);
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(runtime.scroller.scrollTop, 0, "the summary paint must not end entry-follow early");
+  assert.ok(runtime.pending(), "the room remains latched while canonical detail is in flight");
+
+  resolveDetail();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(runtime.scroller.scrollTop, 0, "a completed request still waits for the deferred room render");
+  assert.ok(runtime.pending(), "the transition owns the follow latch until its destination is mutable");
+
+  runtime.finishTransition();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(runtime.scroller.scrollTop, 1200, "the hydrated transcript lands on its newest message");
+  assert.equal(runtime.pending(), 0, "ordinary refreshes preserve reading position after entry settles");
 });
 
 test("a letter short enough to be self-contained renders whole in the bubble", () => {
@@ -247,12 +297,12 @@ test("a compact provider-row click expands the existing conversation and unfolds
     "the existing compact room becomes the existing expanded room before the picker is shown");
   assert.match(picker, /New Codex task/);
   assert.match(picker, /New Claude Code session/);
-  assert.match(picker, /your current \$\{noun\} ·/);
-  assert.match(picker, /recent · active/);
-  assert.match(footer, /if \(bound\) \{[\s\S]*openRelayFromUI\(id, source, "open", host\)/,
-    "a legacy materialized Relay continues directly without a picker");
-  assert.match(picker, /if \(result\?\.binding\) \{[\s\S]*window\.relay\.continueSession\(id, state\.source\)/,
-    "a remembered exact-session binding also continues directly without expanding");
+  assert.match(picker, /current \$\{session\.surface === "terminal" \? "terminal " : ""\}\$\{noun\}/);
+  assert.match(picker, /lastMessageAt \|\| session\.lastActiveAt/);
+  assert.doesNotMatch(footer, /if \(bound\) \{[\s\S]*openRelayFromUI\(id, source, "open", host\)/,
+    "legacy materialization cannot bypass destination choice");
+  assert.doesNotMatch(picker, /if \(result\?\.binding\) \{[\s\S]*window\.relay\.continueSession/,
+    "a remembered binding is labeled in the picker instead of short-circuiting it");
   assert.match(picker, /if \(!state \|\| state\.delivering \|\| button\.disabled\) return;/,
     "one picker selection blocks every competing row until delivery settles");
   assert.match(picker, /querySelectorAll\("\.sp-row"\)[\s\S]*row\.disabled = true/,

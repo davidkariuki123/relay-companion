@@ -123,7 +123,7 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
   const shipped = productFeatures({ env: {}, user: ORDINARY_USER });
   const ordinary = toolsForAccount(shipped).map((tool) => tool.name);
   assert.deepEqual(ordinary, [
-    "relay_send", "relay_share_link", "relay_contacts_search", "relay_groups_list", "relay_group_create", "relay_group_update",
+    "relay_todo_update", "relay_send", "relay_share_link", "relay_contacts_search", "relay_groups_list", "relay_group_create", "relay_group_update",
     "relay_group_delete", "relay_contact_update", "relay_inbox_list", "relay_sent_list", "relay_thread_fetch",
     "relay_chats_list", "relay_chat_fetch", "relay_chat_send", "relay_mark_read",
   ]);
@@ -132,7 +132,7 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
   assert.deepEqual(toolsForAccount(productionDeveloper).map((tool) => tool.name), ordinary);
   // The complete catalog requires the role and the dev channel together.
   const developer = productFeatures({ env: { RELAY_UPDATE_CHANNEL: "dev" }, user: DEVELOPER });
-  assert.equal(toolsForAccount(developer).length, 31);
+  assert.equal(toolsForAccount(developer).length, 32);
   assert.ok(toolsForAccount(developer).some((tool) => tool.name === "relay_task_unclaim"));
   assert.ok(toolsForAccount(developer).some((tool) => tool.name === "relay_message_edit"));
   assert.ok(toolsForAccount(developer).some((tool) => tool.name === "relay_message_delete"));
@@ -157,7 +157,9 @@ test("the first payload render reconciles feature-gated navigation", () => {
   const source = fs.readFileSync(path.join(here, "../overlay/inbox.html"), "utf8");
   const body = source.slice(source.indexOf("function renderAll()"), source.indexOf("markAllReadEl.addEventListener", source.indexOf("function renderAll()")));
   assert.match(body, /syncTabs\(\);/);
-  assert.match(source, /view === "tasks" && payload\.features\?\.requests !== true/);
+  assert.doesNotMatch(source, /view === "tasks" && payload\.features\?\.requests !== true/,
+    "Todo is available for ordinary managed Relays even when Task execution is gated");
+  assert.match(source, /data-view="tasks">Todo/);
   assert.match(source, /view === "slack" && payload\.features\?\.slack !== true/);
 });
 
@@ -293,34 +295,31 @@ test("production agent-work entry points enforce the feature row before native t
   assert.match(cli, /--full and --messages-only were removed/);
 });
 
-test("detection feeds independent app switches, defaulting to every installed app", () => {
-  // Sven, 2026-08-17: "detect which desktop apps you have then only suggest
-  // those, or even in settings you choose which one." The common state is both
-  // apps, so the setting is now one switch per app. main's existing
-  // relay:capabilities probe reaches the renderer; no v2 preference means every
-  // installed app starts enabled, and a touched preference restores exactly
-  // the available apps it names. At least one action always remains.
+test("detection feeds independent provider switches and desktop/terminal surface choices", () => {
   const source = fs.readFileSync(path.join(here, "../overlay/inbox.html"), "utf8");
   const pick = source.slice(source.indexOf("let agentSurfaces = null;"), source.indexOf("function chatOrder()"));
-  // THE APP, NOT THE CLI (Sven): the desktop entries decide what can be opened in.
   assert.match(pick, /const key = app === "Codex" \? "_codexDesktop" : app === "Claude Code" \? "_claudeDesktop" : "";/);
-  assert.match(pick, /function appAvailable\(app\) \{\s*const entry = desktopEntry\(app\);\s*return !entry \|\| entry\.available !== false;/,
-    "an app the probe does not name counts as present — an old main or a failed probe never hides a real app");
+  assert.match(pick, /const key = app === "Codex" \? "_codexCli" : app === "Claude Code" \? "_claudeCli" : "";/);
+  assert.match(pick, /function appAvailable\(app\) \{\s*const entry = providerEntry\(app\);\s*return !entry \|\| entry\.available !== false;/,
+    "CLI-only providers remain usable even without a desktop bundle");
+  assert.match(pick, /return available\.includes\("desktop"\) \? "desktop" : "terminal";/,
+    "desktop is the default when present and terminal is the CLI-only fallback");
   assert.match(pick, /const AGENT_APPS_PREF = "proto\.agentApps\.v2";/);
   assert.match(pick, /const requested = saved\.split\("\|"\)\.filter\(\(app\) => AGENT_APP_OPTIONS\.includes\(app\) && appAvailable\(app\)\);/);
-  assert.match(pick, /if \(saved && requested\.length\) return AGENT_APP_OPTIONS\.filter\(\(app\) => requested\.includes\(app\)\);/);
-  assert.match(pick, /return present\.length \? present : \["Claude Code"\];/, "missing v2 state defaults to all installed apps");
-  assert.match(pick, /if \(selected\.size <= 1\) return;/, "the final enabled app cannot be switched off");
-  assert.match(pick, /setProtoPref\(AGENT_APPS_PREF, next\.join\("\|"\)\);/);
+  assert.match(pick, /if \(saved === "__none__"\) return \[\];/);
+  assert.match(pick, /return present;/, "missing v2 state defaults to all installed providers without inventing Claude");
+  assert.doesNotMatch(pick, /if \(selected\.size <= 1\) return;/, "the final provider can be switched off");
+  assert.match(pick, /next\.length \? next\.join\("\|"\) : "__none__"/);
   // The label and the rows follow the selected set: "your agent" and both rows when both are on.
-  assert.match(pick, /return choice === AGENT_APP_BOTH \? "your agent" : choice;/);
+  assert.match(pick, /choice === AGENT_APP_BOTH \|\| !choice \? "your agent" : choice/);
   assert.match(pick, /if \(choice === AGENT_APP_BOTH\) return \["codex", "claude"\];/);
   assert.match(pick, /try \{ next = await window\.relay\.capabilities\(\); \}/, "the renderer asks main, never probes the disk itself");
   const settings = source.slice(source.indexOf("function renderSettings()"), source.indexOf("function wireSettings()"));
   assert.match(settings, /\$\{AGENT_APP_OPTIONS\.map\(\(app\) => \{/);
   assert.match(settings, /const logo = app === "Codex" \? "codexMark\.svg" : "claudeCodeMark\.svg";/, "the settings use Relay's shipped app marks");
   assert.match(settings, /role="switch" data-agent-app="\$\{app\}" aria-checked="\$\{on \? "true" : "false"\}"/);
-  assert.match(settings, /\$\{!available \|\| last \? "disabled" : ""\}/, "unavailable apps and the final enabled app cannot be toggled off");
+  assert.match(settings, /data-agent-surface="\$\{app\}"/, "machines with both surfaces can choose Desktop or Terminal");
+  assert.match(settings, /\$\{!available \? "disabled" : ""\}/, "only unavailable providers have disabled switches");
   assert.match(settings, /setAgentAppEnabled\(sw\.getAttribute\("data-agent-app"\), sw\.getAttribute\("aria-checked"\) !== "true"\);/);
   assert.match(source, /loadAgentSurfaces\(\)\.catch\(\(\) => \{\}\);/, "capabilities load at boot");
   assert.match(source, /const seq = \+\+settingsLoadSeq;\s*loadAgentSurfaces\(\)/, "and again whenever Settings loads");

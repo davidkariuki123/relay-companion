@@ -19,7 +19,7 @@ export const REQUIRED_RUNTIME_CAPABILITIES = {
       'ipcMain.handle("relay:deliverToSession"',
     ],
     "overlay/preload.cjs": [
-      'sessionPicker: (id, provider, source) => ipcRenderer.invoke("relay:sessionPicker"',
+      'sessionPicker: (id, provider, source, surface) => ipcRenderer.invoke("relay:sessionPicker"',
       'deliverToSession: (id, selection) => ipcRenderer.invoke("relay:deliverToSession"',
     ],
     "overlay/inbox.html": [

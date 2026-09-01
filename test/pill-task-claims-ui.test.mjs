@@ -30,20 +30,18 @@ test("claim states use obvious full-width verbs and named ownership", () => {
   assert.match(html, /Released by/);
 });
 
-test("Tasks name a channel when present and omit the direct-task placeholder", () => {
-  assert.match(html, /\$\{channel \? `\$\{esc\(channel\)} · ` : ""\}Created by \$\{esc\(creator\)}/);
+test("Todo rows name a channel when present and omit a direct-task placeholder", () => {
+  assert.match(html, /item\.recipientGroupName \? `\$\{item\.recipientGroupName\} · ` : ""/);
   assert.doesNotMatch(html, /recipientGroupName \|\| "Direct"/);
   assert.match(html, /Task · Created by \$\{esc\(sender\)}/);
-  assert.match(html, /section\("Unclaimed", groups\.unclaimed/);
-  assert.match(html, /section\("Claimed", groups\.claimed/);
+  assert.match(html, /triage:"Triage", backlog:"Backlog", todo:"Todo", in_progress:"In Progress"/);
 });
 
-test("reader and board share the same claim renderer and Start is owner-gated", () => {
+test("Task ownership stays in reader/chat while Todo status remains independent", () => {
   assert.match(html, /taskClaimControlHtml\(r, \{ surface: "reader" \}\)/);
-  assert.match(html, /taskClaimControlHtml\(r, \{ surface: "tasks" \}\)/);
   assert.match(html, /taskClaimAllowsStart\(r\) && \["waiting", "parked", "stopped"\]/);
   assert.match(html, /wireTaskClaimControls\(readerBodyEl/);
-  assert.match(html, /wireTaskClaimControls\(tasksListEl/);
   assert.match(html, /wireTaskClaimControls\(thHistoryEl/);
+  assert.match(html, /lifecycleOnly = task && \["in_progress", "done"\]\.includes\(candidate\)/);
   assert.match(html, /window\.relay\.taskStop\(key\)/, "a terminal Work feed durably enables later Unclaim");
 });

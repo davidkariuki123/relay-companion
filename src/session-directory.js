@@ -10,6 +10,7 @@ import {
   readRolloutActivity,
   readRolloutMeta,
 } from "./codex-inject.js";
+import { discoverTerminalSessionBindings } from "./terminal-sessions.js";
 
 const MAX_SESSIONS_PER_PROVIDER = 250;
 const CLAUDE_DESKTOP_LOOKBACK_MS = 90 * 24 * 60 * 60 * 1000;
@@ -133,6 +134,7 @@ export function discoverCodexSessions({ homeDir = codexHome(), nowMs = Date.now(
       cwd: meta.cwd,
       state: busy ? "active" : "idle",
       lastActiveAt: new Date(lastActiveAt || nowMs).toISOString(),
+      lastMessageAt: new Date(activity.lastMessageAt || lastActiveAt || nowMs).toISOString(),
       nativeRef: {
         threadId: rollout.threadId,
         sessionPath: rollout.sessionPath,
@@ -185,13 +187,13 @@ export function claudeState(registration) {
 // active; an assistant end_turn is idle. Ignore metadata rows after the turn.
 export function readClaudeTranscriptActivity(transcriptPath, { tailBytes = 1024 * 1024 } = {}) {
   const filePath = String(transcriptPath || "").trim();
-  if (!filePath) return { state: "unknown", lastEventAt: null };
+  if (!filePath) return { state: "unknown", lastEventAt: null, lastMessageAt: null };
   let handle = null;
   try {
     handle = fs.openSync(filePath, "r");
     const size = fs.fstatSync(handle).size;
     const length = Math.min(size, tailBytes);
-    if (!length) return { state: "unknown", lastEventAt: null };
+    if (!length) return { state: "unknown", lastEventAt: null, lastMessageAt: null };
     const buffer = Buffer.alloc(length);
     const position = size - length;
     fs.readSync(handle, buffer, 0, length, position);
@@ -215,9 +217,9 @@ export function readClaudeTranscriptActivity(transcriptPath, { tailBytes = 1024 
       const at = Date.parse(row.timestamp || row.createdAt || 0);
       if (Number.isFinite(at)) lastEventAt = Math.max(lastEventAt || 0, at);
     }
-    return { state, lastEventAt };
+    return { state, lastEventAt, lastMessageAt: lastEventAt };
   } catch {
-    return { state: "unknown", lastEventAt: null };
+    return { state: "unknown", lastEventAt: null, lastMessageAt: null };
   } finally {
     if (handle !== null) {
       try { fs.closeSync(handle); } catch {}
@@ -252,6 +254,7 @@ export function discoverClaudeSessions({
     const registration = live.get(nativeId);
     const cwd = String(row.cwd || "");
     const transcriptPath = claudeTranscriptPath(configDir, cwd, nativeId);
+    const transcriptActivity = readClaudeTranscriptActivity(transcriptPath);
     const recoverable = Boolean(transcriptPath);
     byId.set(nativeId, {
       provider: "claude",
@@ -263,12 +266,14 @@ export function discoverClaudeSessions({
       cwd,
       state: liveClaudeState(registration, transcriptPath, recoverable),
       lastActiveAt: new Date(Math.max(lastActiveAt, registration?.updatedAt || 0)).toISOString(),
+      lastMessageAt: new Date(transcriptActivity.lastMessageAt || lastActiveAt).toISOString(),
       nativeRef: {
         sessionId: nativeId,
         desktopSessionId: row.sessionId,
         metadataPath: filePath,
         ...(transcriptPath ? { transcriptPath } : {}),
         ...(registration?.messagingSocketPath ? { messagingSocketPath: registration.messagingSocketPath } : {}),
+        ...(registration?.pid || registration?.cliPid ? { pid: registration.pid || registration.cliPid } : {}),
       },
       capabilities: { send: recoverable || Boolean(registration?.socketLive), start: true, nativeUi: true },
     });
@@ -279,6 +284,7 @@ export function discoverClaudeSessions({
     if (anonymous.has(`claude:${nativeId}`) || byId.has(nativeId)) continue;
     const cwd = String(registration.cwd || "");
     const transcriptPath = claudeTranscriptPath(configDir, cwd, nativeId);
+    const transcriptActivity = readClaudeTranscriptActivity(transcriptPath);
     byId.set(nativeId, {
       provider: "claude",
       placement: sessionPlacement(),
@@ -289,10 +295,12 @@ export function discoverClaudeSessions({
       cwd,
       state: liveClaudeState(registration, transcriptPath, Boolean(transcriptPath)),
       lastActiveAt: new Date(registration.updatedAt || registration.startedAt || nowMs).toISOString(),
+      lastMessageAt: new Date(transcriptActivity.lastMessageAt || registration.updatedAt || registration.startedAt || nowMs).toISOString(),
       nativeRef: {
         sessionId: nativeId,
         ...(transcriptPath ? { transcriptPath } : {}),
         messagingSocketPath: registration.messagingSocketPath,
+        ...(registration.pid || registration.cliPid ? { pid: registration.pid || registration.cliPid } : {}),
       },
       capabilities: { send: Boolean(registration.socketLive), start: true, nativeUi: true },
     });
@@ -302,6 +310,7 @@ export function discoverClaudeSessions({
     if (saved?.provider !== "claude" || !saved.nativeId || anonymous.has(`claude:${saved.nativeId}`) || byId.has(saved.nativeId)) continue;
     const registration = live.get(saved.nativeId);
     const transcriptPath = String(saved.transcriptPath || "");
+    const transcriptActivity = readClaudeTranscriptActivity(transcriptPath);
     const recoverable = Boolean(transcriptPath && fs.existsSync(transcriptPath));
     byId.set(saved.nativeId, {
       provider: "claude",
@@ -313,10 +322,12 @@ export function discoverClaudeSessions({
       cwd: saved.cwd || "",
       state: liveClaudeState(registration, transcriptPath, recoverable),
       lastActiveAt: new Date(Math.max(Number(saved.lastActiveAt || 0), registration?.updatedAt || 0)).toISOString(),
+      lastMessageAt: new Date(transcriptActivity.lastMessageAt || Number(saved.lastActiveAt || 0) || registration?.updatedAt || nowMs).toISOString(),
       nativeRef: {
         sessionId: saved.nativeId,
         ...(transcriptPath ? { transcriptPath } : {}),
         ...(registration?.messagingSocketPath ? { messagingSocketPath: registration.messagingSocketPath } : {}),
+        ...(registration?.pid || registration?.cliPid ? { pid: registration.pid || registration.cliPid } : {}),
       },
       capabilities: { send: recoverable || Boolean(registration?.socketLive), start: true, nativeUi: true },
     });
@@ -346,9 +357,38 @@ export function recordControlledSession(session) {
   fs.renameSync(tmp, filePath);
 }
 
-export function discoverSessions(options = {}) {
-  return [...discoverCodexSessions(options.codex), ...discoverClaudeSessions(options.claude)];
+export function enrichTerminalSessions(sessions, terminalBindings = new Map()) {
+  return sessions.map((session) => {
+    const terminalRef = terminalBindings.get(`${session.provider}:${session.nativeId}`)
+      || terminalBindings.get(`pid:${session.nativeRef?.pid || ""}`);
+    if (!terminalRef) return session;
+    return {
+      ...session,
+      surface: "terminal",
+      terminalRef,
+      nativeRef: { ...session.nativeRef, terminalRef },
+      capabilities: session.provider === "codex" && !terminalRef.managedRemote
+        ? {
+            ...session.capabilities,
+            send: false,
+            unavailableReason: "Restart this Codex task through Relay once so Relay and Terminal can share its supported remote owner.",
+          }
+        : session.capabilities,
+    };
+  });
 }
+
+export function discoverSessions(options = {}) {
+  const terminalBindings = options.terminalBindings || discoverTerminalSessionBindings(options.terminal);
+  const sessions = options.provider === "codex"
+    ? discoverCodexSessions(options.codex)
+    : options.provider === "claude"
+      ? discoverClaudeSessions(options.claude)
+      : [...discoverCodexSessions(options.codex), ...discoverClaudeSessions(options.claude)];
+  return enrichTerminalSessions(sessions, terminalBindings);
+}
+
+export { discoverTerminalSessionBindings };
 
 export function sessionDirectoryStatePath() {
   return path.join(storeDir(), "session-directory.json");

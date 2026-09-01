@@ -248,11 +248,20 @@ export class RelayClient {
     return this.identity;
   }
 
-  async #req(method, path, body, { auth = true } = {}) {
+  async #req(method, path, body, {
+    auth = true,
+    clientName = "relay-companion",
+    sourceProvider = "",
+    nativeSessionId = "",
+  } = {}) {
     const hasBody = body !== undefined;
     const headers = hasBody ? { "Content-Type": "application/json" } : {};
     if (COMPANION_VERSION) headers["x-relay-version"] = COMPANION_VERSION;
-    headers["x-relay-client"] = "relay-companion";
+    headers["x-relay-client"] = String(clientName || "relay-companion").replace(/[^\x20-\x7e]/g, "_").trim().slice(0, 80);
+    const provider = String(sourceProvider || "").replace(/[^\x20-\x7e]/g, "_").trim().slice(0, 120);
+    const nativeSession = String(nativeSessionId || "").replace(/[^\x20-\x7e]/g, "_").trim().slice(0, 240);
+    if (provider) headers["x-relay-source-provider"] = provider;
+    if (nativeSession) headers["x-relay-native-session-id"] = nativeSession;
     headers["x-relay-send-contract"] = "2";
     if (auth && this.token) headers.Authorization = `Bearer ${this.token}`;
     if (auth && String(this.token || "").startsWith("dev_")) {
@@ -768,6 +777,25 @@ export class RelayClient {
         .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))),
       ...(managed.cursor ? { cursor: managed.cursor } : {}),
     };
+  }
+
+  /** Canonical managed Todo workflow projection. Dormant E2EE items are intentionally excluded. */
+  async todo({ statuses = [], limit, cursor } = {}) {
+    const query = new URLSearchParams();
+    if (Array.isArray(statuses) && statuses.length) query.set("statuses", statuses.join(","));
+    if (Number.isInteger(limit)) query.set("limit", String(limit));
+    if (cursor) query.set("cursor", String(cursor));
+    const suffix = query.toString();
+    return this.#req("GET", `/v1/todo${suffix ? `?${suffix}` : ""}`);
+  }
+
+  /** Change one exact Relay/Task workflow status with optimistic concurrency. */
+  async updateTodoStatus(itemId, payload, provenance = {}) {
+    return this.#req("PATCH", `/v1/todo/${encodeURIComponent(itemId)}/status`, payload, {
+      clientName: provenance.clientName || "relay-companion",
+      sourceProvider: provenance.sourceProvider,
+      nativeSessionId: provenance.nativeSessionId,
+    });
   }
 
   async markAllRead(payload = {}) {

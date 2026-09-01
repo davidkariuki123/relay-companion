@@ -248,6 +248,7 @@ test("state-changing MCP tools require idempotency keys", () => {
     "relay_task_start",
     "relay_task_complete",
     "relay_task_unclaim",
+    "relay_todo_update",
     "relay_share_link",
     "relay_mark_read",
     "relay_inbox_delete",
@@ -1093,6 +1094,47 @@ test("relay_inbox_list returns a bounded recent metadata index without changing 
   assert.match(tool.description, /cold-start recent backlog/i);
 });
 
+test("Todo reads are status-scoped and relay_todo_update forwards optimistic workflow changes", async () => {
+  const calls = [];
+  const sessionContext = createMcpSessionContext({ env:{}, argv:[], cwd:"/tmp/relay-todo-test" });
+  const fakeClient = {
+    async todo(input) {
+      calls.push(["list", input]);
+      return {
+        mode: "continuous",
+        counts: { triage: 2, backlog: 0, todo: 0, in_progress: 0, done: 0, canceled: 0, duplicate: 0 },
+        items: [{ relayId:"relay_triage", todoStatus:"triage", todoVersion:3 }],
+        nextCursor: "cursor_next",
+      };
+    },
+    async updateTodoStatus(itemId, input, provenance) {
+      calls.push(["update", itemId, input, provenance]);
+      return { ok:true, itemId, status:input.status, version:input.expectedVersion + 1 };
+    },
+  };
+  const listed = JSON.parse((await handleCall(fakeClient, "relay_inbox_list", {
+    todoStatuses:["triage"], limit:25,
+  }, { sessionContext })).content[0].text);
+  assert.equal(listed.mode, "continuous");
+  assert.equal(listed.items[0].todoVersion, 3);
+  const updated = JSON.parse((await handleCall(fakeClient, "relay_todo_update", {
+    itemId:"relay_triage", status:"backlog", expectedVersion:3, idempotencyKey:"todo-update-1",
+  }, { sessionContext })).content[0].text);
+  assert.equal(updated.status, "backlog");
+  assert.deepEqual(calls, [
+    ["list", { statuses:["triage"], limit:25 }],
+    ["update", "relay_triage", { status:"backlog", expectedVersion:3, idempotencyKey:"todo-update-1" }, {
+      clientName:"relay-local-mcp", sourceProvider:undefined, nativeSessionId:undefined,
+    }],
+  ]);
+  await assert.rejects(
+    handleCall(fakeClient, "relay_todo_update", {
+      itemId:"relay_triage", status:"duplicate", expectedVersion:3, idempotencyKey:"todo-update-2",
+    }, { sessionContext }),
+    /duplicateOfItemId/,
+  );
+});
+
 test("relay_inbox_list selectively opens exact ids read-free and preserves request order", async () => {
   const calls = [];
   const fakeClient = {
@@ -1531,7 +1573,7 @@ test("obsolete coordination protocol is absent and rejected before any API call"
   // state an agent sets on its own, so a human-initiated pull clears unread
   // and sends the read receipt — without it the sender sees "delivered"
   // forever). relay_acknowledge stays retired.
-  assert.equal(TOOLS.length, 31, "the full model catalog contains only current product tools");
+  assert.equal(TOOLS.length, 32, "the full model catalog contains only current product tools");
 
   const client = new Proxy({}, {
     get() { throw new Error("removed tool must not touch the API client"); },

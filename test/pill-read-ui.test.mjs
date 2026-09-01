@@ -25,38 +25,26 @@ test("Relays is a pure person/group index with no free-floating request receipts
   assert.doesNotMatch(relays, /receiptRowHtml|data-receipt|rl-receipt/);
 });
 
-test("tab badges report unread Relays and outstanding Task debt", () => {
+test("tab badges report unread Relays and only unclassified Todo debt", () => {
   const renderAll = html.slice(html.indexOf("function renderAll()"), html.indexOf("function onPayload"));
   assert.match(renderAll, /r\.unread[\s\S]*isRelayListKind\(r\)[\s\S]*!onRequestThread\(r, reqThreads\)/,
     "request progress/completion rows hidden from Relays cannot inflate its badge");
   assert.match(renderAll, /!relayIsSelfAuthored\(r, sentByRelayId\.get\(String\(r\.id \|\| r\.relayId \|\| ""\)\), viewerEmail\)/,
     "self-authored inbox twins cannot inflate a badge their conversation does not show");
   assert.match(renderAll, /setBadge\(tasksBadgeEl, requestsOutstandingCount\(\)\)/,
-    "the amber Tasks badge reports unfinished work, not unread completed records");
+    "the amber Todo badge reports Triage, not read state");
   assert.doesNotMatch(renderAll, /setBadge\(tasksBadgeEl, requestsUnreadCount\(\)\)/);
   assert.doesNotMatch(html, /function requestsUnreadCount\(/);
 });
 
-test("completed unread Tasks do not inflate outstanding Task debt", () => {
+test("only Triage inflates the Todo badge", () => {
   const start = html.indexOf("function requestsOutstandingCount()");
   const end = html.indexOf("\n  let chatExpanded", start);
   assert.ok(start >= 0 && end > start, "outstanding Task counter exists");
   const source = html.slice(start, end);
-  const rows = [
-    { id: "task_waiting", unread: false },
-    { id: "task_running", unread: false },
-    { id: "task_completed_unread", unread: true },
-  ];
-  const states = new Map([
-    ["task_waiting", "waiting"],
-    ["task_running", "running"],
-    ["task_completed_unread", "done"],
-  ]);
-  const count = Function(
-    "taskRows",
-    "taskBoardState",
-    `${source}; return requestsOutstandingCount;`,
-  )(() => rows, (id) => states.get(id));
+  const count = Function("todoState", `${source}; return requestsOutstandingCount;`)({
+    counts:{ triage:2, backlog:9, todo:4, in_progress:3, done:100, canceled:7, duplicate:5 },
+  });
   assert.equal(count(), 2);
 });
 

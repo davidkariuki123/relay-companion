@@ -1,16 +1,21 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { withCodexAppServer } from "./codex-app-server.js";
+import {
+  connectCodexRemoteAppServer,
+  withCodexAppServer,
+  withSharedCodexAppServer,
+} from "./codex-app-server.js";
 import {
   codexRolloutHasClientMessage,
   notifyCodexDesktopThreads,
   submitTurnToCodexDesktopThread,
 } from "./codex-desktop.js";
-import { waitForCodexIdle, waitForRolloutGrowth, rolloutSize } from "./codex-inject.js";
+import { waitForCodexIdle, rolloutSize } from "./codex-inject.js";
 import { storeDir } from "./host-paths.js";
 import { discoverSessions } from "./session-directory.js";
 import { sendClaudeSocket, spawnBackgroundClaude, waitForClaudeCompletion } from "./session-controller.js";
+import { focusTerminalSession, launchMacAgentTerminal, terminalProcessState } from "./terminal-sessions.js";
 import { withJsonLockStrict } from "./state-lock.cjs";
 
 const DEFAULT_TIMEOUT_MS = 12 * 60 * 60 * 1000;
@@ -44,6 +49,14 @@ function publicSession(session) {
     projectName: session.projectName,
     state: session.state,
     lastActiveAt: session.lastActiveAt,
+    lastMessageAt: session.lastMessageAt || session.lastActiveAt,
+    railIndex: Number.isFinite(session.railIndex) ? session.railIndex : null,
+    current: Boolean(session.current || session.terminalRef?.keyboardFocused),
+    selectedInWindow: Boolean(session.terminalRef?.selectedInWindow),
+    surface: session.surface || (session.terminalRef ? "terminal" : "desktop"),
+    bound: Boolean(session.bound),
+    canDeliver: session.capabilities?.send !== false,
+    unavailableReason: String(session.capabilities?.unavailableReason || ""),
   };
 }
 
@@ -78,6 +91,9 @@ export function bindRelaySession(relayId, target, delivery = {}, { claimId = "" 
       nativeId: target.nativeId,
       title: target.title || "",
       cwd: target.cwd || "",
+      surface: target.surface || (target.nativeRef?.terminalRef ? "terminal" : "desktop"),
+      ...(target.nativeRef?.terminalRef ? { terminalRef: target.nativeRef.terminalRef } : {}),
+      ...(delivery.remoteEndpoint || target.remoteEndpoint ? { remoteEndpoint: delivery.remoteEndpoint || target.remoteEndpoint } : {}),
       boundAt: new Date().toISOString(),
       delivery: {
         adapter: delivery.adapter || null,
@@ -260,26 +276,78 @@ export function completeRelayNewSession(relayId, opened, claimId) {
 export function listRelayDestinations(provider, {
   limit = 5,
   currentNativeId = "",
+  currentNativeIds = [],
+  bindingNativeId = "",
+  nativeRail = [],
+  defaultSurface = "desktop",
   discover = discoverSessions,
 } = {}) {
   const cleanProvider = provider === "codex" ? "codex" : "claude";
-  const rows = discover()
-    .filter((session) => session.provider === cleanProvider && session.capabilities?.send !== false)
-    .sort((a, b) => Date.parse(b.lastActiveAt) - Date.parse(a.lastActiveAt));
-  const current = rows.find((session) => session.nativeId === currentNativeId) || null;
-  const candidates = rows.filter((session) => session.nativeId !== current?.nativeId);
-  const working = candidates.filter((session) => ["active", "needs_input"].includes(session.state));
-  const inactive = candidates.filter((session) => !["active", "needs_input"].includes(session.state));
-  // A working task is a safer and more useful destination than an idle task
-  // whose only advantage is a newer timestamp. Reserve the fixed picker rows
-  // for live work first, then fill the remaining slots with the freshest idle
-  // tasks. Each group already retains native recency order from `rows`.
-  const recent = [...working, ...inactive].slice(0, limit);
+  const currentIds = new Set([currentNativeId, ...currentNativeIds].map(String).filter(Boolean));
+  const rail = new Map(nativeRail.map((row, index) => [String(row?.nativeId || row?.id || row), index]));
+  const discovered = discover().filter((session) => session.provider === cleanProvider);
+  const terminalHasKeyboardFocus = discovered.some((session) => session.terminalRef?.keyboardFocused);
+  const rows = discovered
+    .map((session, discoveryIndex) => ({
+      ...session,
+      discoveryIndex,
+      railIndex: rail.has(session.nativeId) ? rail.get(session.nativeId) : session.railIndex,
+      current: Boolean(session.terminalRef?.keyboardFocused)
+        || (!terminalHasKeyboardFocus && currentIds.has(String(session.nativeId))),
+      selectedInWindow: Boolean(session.terminalRef?.selectedInWindow),
+      bound: String(session.nativeId) === String(bindingNativeId || ""),
+      surface: session.surface || (session.terminalRef ? "terminal" : defaultSurface),
+    }));
+  const working = rows.filter((session) => ["active", "needs_input"].includes(session.state));
+  const inactive = rows.filter((session) => !["active", "needs_input"].includes(session.state));
+  working.sort((a, b) => {
+    const aRank = Number.isFinite(a.railIndex) ? a.railIndex : a.discoveryIndex;
+    const bRank = Number.isFinite(b.railIndex) ? b.railIndex : b.discoveryIndex;
+    return aRank - bRank;
+  });
+  inactive.sort((a, b) => {
+    const aAt = Date.parse(a.lastMessageAt || a.lastActiveAt || 0) || 0;
+    const bAt = Date.parse(b.lastMessageAt || b.lastActiveAt || 0) || 0;
+    return bAt - aAt || a.discoveryIndex - b.discoveryIndex;
+  });
+  // Every running task remains visible, in the provider rail's own order. Idle
+  // rows fill the remaining capacity by actual user/assistant message time.
+  // Focus is annotation, never a third ranking rule or a duplicate pinned row.
+  const idleCapacity = Math.max(0, limit - working.length);
+  const requiredIdle = inactive.filter((session) => session.current || session.selectedInWindow || session.bound);
+  const visibleIdleById = new Map(
+    [...inactive.slice(0, idleCapacity), ...requiredIdle].map((session) => [session.nativeId, session]),
+  );
+  const visibleIdle = [...visibleIdleById.values()].sort((a, b) => {
+    const aAt = Date.parse(a.lastMessageAt || a.lastActiveAt || 0) || 0;
+    const bAt = Date.parse(b.lastMessageAt || b.lastActiveAt || 0) || 0;
+    return bAt - aAt || a.discoveryIndex - b.discoveryIndex;
+  });
+  const recent = [...working, ...visibleIdle];
   return {
     provider: cleanProvider,
-    current: current ? publicSession(current) : null,
+    current: null,
     recent: recent.map(publicSession),
   };
+}
+
+export async function nativeProviderRail(provider, { appServer = withCodexAppServer } = {}) {
+  if (provider !== "codex") return [];
+  try {
+    return await appServer(async (client) => {
+      const result = await client.request("thread/list", {
+        limit: 250,
+        sortKey: "recency_at",
+        sortDirection: "desc",
+      });
+      return (result?.data || []).map((thread) => ({
+        nativeId: thread.id,
+        state: thread?.status?.type === "active" ? "active" : "idle",
+      }));
+    });
+  } catch {
+    return [];
+  }
 }
 
 function findExactSession(target, discover = discoverSessions) {
@@ -331,6 +399,23 @@ async function waitForPrompt(filePath, offset, prompt, { timeoutMs = 15_000, pol
   return appendedText(filePath, offset).includes(prompt);
 }
 
+async function waitForClaudeTranscript(target, {
+  timeoutMs = 15_000,
+  pollMs = 100,
+  discover = discoverSessions,
+} = {}) {
+  const existing = String(target.nativeRef?.transcriptPath || "");
+  if (existing && fs.existsSync(existing)) return existing;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const exact = findExactSession(target, discover);
+    const candidate = String(exact?.nativeRef?.transcriptPath || "");
+    if (candidate && fs.existsSync(candidate)) return candidate;
+    await sleep(pollMs);
+  }
+  return "";
+}
+
 async function deliverCodexWithAppServer(target, prompt, {
   appServer = withCodexAppServer,
   timeoutMs = DEFAULT_TIMEOUT_MS,
@@ -352,8 +437,7 @@ async function deliverCodexWithAppServer(target, prompt, {
       input: [{ type: "text", text: prompt, text_elements: [] }],
     });
     const turnId = started?.turn?.id || "";
-    const growth = await waitForRolloutGrowth(sessionPath, baseline, { timeoutMs: 15_000, pollMs: 250 });
-    if (!growth.grew || !appendedText(sessionPath, baseline).includes(prompt)) {
+    if (!(await waitForPrompt(sessionPath, baseline, prompt, { timeoutMs: 15_000, pollMs: 250 }))) {
       throw new Error("Codex accepted the request without appending the Relay turn to the selected task");
     }
     if (turnId) {
@@ -366,9 +450,63 @@ async function deliverCodexWithAppServer(target, prompt, {
   }, { cwd: target.cwd || process.cwd() });
 }
 
+async function deliverCodexWithRemoteOwner(target, prompt, options = {}) {
+  const sessionPath = String(target.nativeRef?.sessionPath || "");
+  if (!sessionPath) throw new Error("Codex rollout path is unavailable");
+  const baseline = rolloutSize(sessionPath);
+  const knownEndpoint = String(target.nativeRef?.terminalRef?.remoteEndpoint || target.remoteEndpoint || "");
+  let connection = null;
+  const run = async (client, server = null) => {
+    const endpoint = server?.endpoint || knownEndpoint;
+    if (!target.nativeRef?.terminalRef?.managedRemote || !knownEndpoint) {
+      const resumed = await client.request("thread/resume", {
+        threadId: target.nativeId,
+        cwd: target.cwd || process.cwd(),
+        excludeTurns: false,
+      });
+      if (resumed?.thread?.id && resumed.thread.id !== target.nativeId) {
+        throw new Error("Codex resumed a different native task");
+      }
+    }
+    const input = [{ type: "text", text: prompt, text_elements: [] }];
+    const openTurnId = String(target.nativeRef?.openTurnId || "");
+    const started = openTurnId
+      ? await client.request("turn/steer", { threadId: target.nativeId, expectedTurnId: openTurnId, input })
+      : await client.request("turn/start", { threadId: target.nativeId, input });
+    const turnId = started?.turn?.id || started?.turnId || openTurnId;
+    const verificationTimeoutMs = Math.min(Number(options.timeoutMs || DEFAULT_TIMEOUT_MS), 60_000);
+    if (!(await waitForPrompt(sessionPath, baseline, prompt, { timeoutMs: verificationTimeoutMs, pollMs: 100 }))) {
+      const error = new Error("Codex accepted the request without appending the Relay turn to the selected task");
+      error.code = "CODEX_DELIVERY_UNCONFIRMED";
+      throw error;
+    }
+    return {
+      provider: "codex",
+      nativeId: target.nativeId,
+      adapter: openTurnId ? "codex_remote_steer" : "codex_remote_turn",
+      turnId,
+      surface: "terminal",
+      remoteEndpoint: endpoint,
+    };
+  };
+  try {
+    if (options.remoteAppServer) return await options.remoteAppServer(run);
+    if (knownEndpoint) {
+      connection = await connectCodexRemoteAppServer(knownEndpoint);
+      return await run(connection.client, connection);
+    }
+    return await withSharedCodexAppServer(run, { cwd: target.cwd || process.cwd() });
+  } finally {
+    connection?.close?.();
+  }
+}
+
 async function deliverCodex(target, prompt, options = {}) {
   const sessionPath = String(target.nativeRef?.sessionPath || "");
   if (!sessionPath) throw new Error("Codex rollout path is unavailable");
+  if (target.surface === "terminal" || target.nativeRef?.terminalRef?.managedRemote) {
+    return deliverCodexWithRemoteOwner(target, prompt, options);
+  }
   const idle = await (options.waitForCodexIdle || waitForCodexIdle)(sessionPath, {
     timeoutMs: options.timeoutMs || DEFAULT_TIMEOUT_MS,
     pollMs: options.pollMs || 1_000,
@@ -442,16 +580,40 @@ export function publicSessionDeliveryError(error, provider = "") {
 }
 
 async function deliverClaude(target, prompt, options = {}) {
-  const transcriptPath = String(target.nativeRef?.transcriptPath || "");
-  if (!transcriptPath) throw new Error("Claude transcript path is unavailable");
+  let transcriptPath = String(target.nativeRef?.transcriptPath || "");
   let offset = 0;
-  try { offset = fs.statSync(transcriptPath).size; } catch {}
+  if (transcriptPath) {
+    try { offset = fs.statSync(transcriptPath).size; } catch {}
+  }
   const socketPath = String(target.nativeRef?.messagingSocketPath || "");
   let adapter;
   if (socketPath && fs.existsSync(socketPath)) {
-    await (options.sendClaude || sendClaudeSocket)(socketPath, prompt, Math.min(options.timeoutMs || DEFAULT_TIMEOUT_MS, 30_000));
+    const pid = target.nativeRef?.pid;
+    if (pid) {
+      const processState = (options.processState || terminalProcessState)(pid);
+      if (!processState.alive || processState.suspended || processState.zombie) {
+        const error = new Error(processState.suspended
+          ? "The selected Claude Code terminal session is suspended"
+          : "The selected Claude Code process is no longer available");
+        error.code = processState.suspended ? "SESSION_TARGET_SUSPENDED" : "SESSION_TARGET_UNAVAILABLE";
+        throw error;
+      }
+    }
+    try {
+      await (options.sendClaude || sendClaudeSocket)(socketPath, prompt, Math.min(options.timeoutMs || DEFAULT_TIMEOUT_MS, 30_000));
+    } catch (error) {
+      const uncertain = error instanceof Error ? error : new Error(String(error || "Claude socket delivery failed"));
+      uncertain.code = "CLAUDE_DELIVERY_UNCONFIRMED";
+      throw uncertain;
+    }
     adapter = "claude_inbox_socket";
+    transcriptPath = await waitForClaudeTranscript(target, options);
   } else {
+    if (!transcriptPath) {
+      const error = new Error("Claude session has neither a live inbox socket nor a transcript to resume");
+      error.code = "SESSION_TARGET_UNAVAILABLE";
+      throw error;
+    }
     let baselineMtime = 0;
     try { baselineMtime = fs.statSync(transcriptPath).mtimeMs; } catch {}
     const launched = (options.spawnClaude || spawnBackgroundClaude)({
@@ -470,8 +632,15 @@ async function deliverClaude(target, prompt, options = {}) {
       pollMs: options.pollMs || 1_000,
     });
   }
+  if (!transcriptPath) {
+    const error = new Error("Claude accepted the Relay but its transcript has not appeared yet");
+    error.code = "CLAUDE_DELIVERY_UNCONFIRMED";
+    throw error;
+  }
   if (!(await waitForPrompt(transcriptPath, offset, prompt, { timeoutMs: 15_000, pollMs: 250 }))) {
-    throw new Error("Claude accepted the request without appending the Relay turn to the selected session");
+    const error = new Error("Claude accepted the request without appending the Relay turn to the selected session");
+    error.code = "CLAUDE_DELIVERY_UNCONFIRMED";
+    throw error;
   }
   return { provider: "claude", nativeId: target.nativeId, adapter };
 }
@@ -530,7 +699,20 @@ export async function deliverRelayToSession({
   const claim = claimed.claim;
   let exact;
   try {
-    exact = await waitForSessionIdle(target, { timeoutMs, ...options });
+    const discovered = findExactSession(target, options.discover || discoverSessions);
+    const selected = discovered ? { ...discovered, surface: target.surface || discovered.surface } : null;
+    if (selected?.capabilities?.send === false) {
+      const error = new Error(selected.capabilities.unavailableReason || "The selected native session cannot receive this Relay safely");
+      error.code = "SESSION_TARGET_UNAVAILABLE";
+      throw error;
+    }
+    const canDeliverWhileActive = selected?.provider === "claude" && selected.nativeRef?.messagingSocketPath
+      || selected?.provider === "codex" && selected.surface === "terminal"
+        && selected.nativeRef?.terminalRef?.managedRemote && selected.nativeRef?.openTurnId;
+    exact = canDeliverWhileActive
+      ? selected
+      : await waitForSessionIdle(target, { timeoutMs, ...options });
+    if (exact && target.surface) exact = { ...exact, surface: target.surface };
   } catch (error) {
     updateRelaySessionDelivery(relayId, claim.claimId, null);
     throw error;
@@ -552,7 +734,7 @@ export async function deliverRelayToSession({
       })
       : await deliverClaude(exact, prompt, { timeoutMs, ...options });
   } catch (error) {
-    if (error?.code === "SESSION_TARGET_BUSY") {
+    if (["SESSION_TARGET_BUSY", "SESSION_TARGET_SUSPENDED", "SESSION_TARGET_UNAVAILABLE"].includes(error?.code)) {
       updateRelaySessionDelivery(relayId, claim.claimId, null);
     } else {
       updateRelaySessionDelivery(relayId, claim.claimId, {
@@ -571,8 +753,41 @@ export async function deliverRelayToSession({
   return { delivered: true, delivery, binding, ...(await focusSession(binding, options)) };
 }
 
-export async function focusSession(target, { notifyCodex = notifyCodexDesktopThreads } = {}) {
+export async function focusSession(target, {
+  notifyCodex = notifyCodexDesktopThreads,
+  focusTerminal = focusTerminalSession,
+  launchTerminal = launchMacAgentTerminal,
+} = {}) {
   if (!target?.provider || !target?.nativeId) throw new Error("An exact native destination is required");
+  if (target.surface === "terminal" || target.terminalRef) {
+    if (target.terminalRef?.tty) {
+      const focused = focusTerminal(target.terminalRef);
+      if (focused.ok) {
+        return {
+          openedInHost: true,
+          skipExternalOpen: true,
+          surface: "terminal",
+          terminal: focused,
+          url: null,
+        };
+      }
+    }
+    const launched = await launchTerminal({
+      provider: target.provider,
+      nativeId: target.nativeId,
+      cwd: target.cwd || process.cwd(),
+      remoteEndpoint: target.remoteEndpoint || target.terminalRef?.remoteEndpoint || "",
+    });
+    if (launched.ok) {
+      return {
+        openedInHost: true,
+        skipExternalOpen: true,
+        surface: "terminal",
+        terminal: launched,
+        url: null,
+      };
+    }
+  }
   if (target.provider === "codex") {
     const result = await notifyCodex({
       threadIds: [target.nativeId],

@@ -30,10 +30,7 @@ test("the product contains no ChatGPT Work provider route", () => {
   }
 });
 
-test("opening a relay is decided by the desktop app, not the CLI; off macOS an unknown app counts as present", () => {
-  // Sven, 2026-08-17: "shouldn't go for clis, must go for the app." "Open in
-  // Claude Code" opens the Claude desktop app and "Open in Codex" the
-  // ChatGPT/Codex app, so those are the entries the pill's picker reads.
+test("provider availability includes CLI-only installs while desktop and terminal remain separate surfaces", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-desktop-surfaces-"));
   try {
     // /Applications is the machine's own; only ~/Applications is sandboxed here,
@@ -57,9 +54,28 @@ test("opening a relay is decided by the desktop app, not the CLI; off macOS an u
       withApps._claudeDesktop.via.endsWith(path.join("Applications", "Claude.app")),
       `via should point at the sandboxed Claude.app, got ${withApps._claudeDesktop.via}`,
     );
+    const bin = path.join(root, "bin");
+    fs.mkdirSync(bin, { recursive: true });
+    for (const command of ["claude", "codex"]) {
+      const filePath = path.join(bin, command);
+      fs.writeFileSync(filePath, "#!/bin/sh\n", { mode: 0o755 });
+    }
+    const cliOnlyHome = path.join(root, "cli-only");
+    fs.mkdirSync(cliOnlyHome, { recursive: true });
+    const cliOnly = detectAgentSurfaces({
+      platform: "darwin",
+      homedir: cliOnlyHome,
+      env: { HOME: cliOnlyHome, PATH: bin },
+    });
+    assert.equal(cliOnly["Claude Code"].available, true);
+    assert.equal(cliOnly.Codex.available, true);
+    assert.equal(cliOnly._claudeCli.available, true);
+    assert.equal(cliOnly._codexCli.available, true);
+    assert.equal(cliOnly._claudeDesktop.available, systemHas(["Claude"]));
+    assert.equal(cliOnly._codexDesktop.available, systemHas(["ChatGPT", "Codex"]));
     const elsewhere = detectAgentSurfaces({ platform: "linux", homedir: root, env: { HOME: root, PATH: "" } });
-    assert.deepEqual(elsewhere._claudeDesktop, { available: true, reason: "", via: "" });
-    assert.deepEqual(elsewhere._codexDesktop, { available: true, reason: "", via: "" });
+    assert.equal(elsewhere._claudeDesktop.available, false);
+    assert.equal(elsewhere._codexDesktop.available, false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

@@ -7,7 +7,7 @@
 // Detection is by RUNTIME, not by branding — each surface is reachable through a
 // different thing, and the thing that runs the work is what must exist:
 //
-//   Claude Code   — Claude Desktop's Code surface and its existing login.
+//   Claude Code   — the Claude Code CLI or Claude Desktop's Code surface.
 //   Claude Cowork — Claude Desktop's Cowork surface and the same existing login.
 //   Codex         — the `codex` CLI (its app-server creates threads) or the
 //                   ChatGPT/Codex desktop app.
@@ -30,9 +30,9 @@ function firstExisting(paths) {
   return "";
 }
 
-function onPath(binary) {
+function onPath(binary, env = process.env) {
   try {
-    const out = execFileSync("/usr/bin/which", [binary], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    const out = execFileSync("/usr/bin/which", [binary], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], env });
     return String(out).trim();
   } catch {
     return "";
@@ -47,7 +47,7 @@ export function claudeCliPath({ env = process.env, homedir = os.homedir() } = {}
       "/opt/homebrew/bin/claude",
       "/usr/local/bin/claude",
     ]) ||
-    onPath("claude")
+    onPath("claude", env)
   );
 }
 
@@ -55,7 +55,7 @@ export function codexCliPath({ env = process.env } = {}) {
   return (
     String(env.CODEX_CLI_PATH || "").trim() ||
     firstExisting(["/opt/homebrew/bin/codex", "/usr/local/bin/codex"]) ||
-    onPath("codex")
+    onPath("codex", env)
   );
 }
 
@@ -81,8 +81,8 @@ export function detectAgentSurfaces(options = {}) {
   const claudeApp = appPath("Claude", options);
 
   return {
-    "Claude Code": claudeCli
-      ? { available: true, reason: "", via: claudeCli }
+    "Claude Code": claudeCli || claudeApp
+      ? { available: true, reason: "", via: claudeCli || claudeApp }
       : { available: false, reason: "Claude Code isn’t installed on this Mac", via: "" },
     "Claude Cowork": {
       available: false,
@@ -92,19 +92,25 @@ export function detectAgentSurfaces(options = {}) {
     Codex: codexCli || chatgptApp
       ? { available: true, reason: "", via: codexCli || chatgptApp }
       : { available: false, reason: "Codex isn’t installed on this Mac", via: "" },
-    // THE APP, NOT THE CLI (Sven, 2026-08-17): "Open in Claude Code" opens the
-    // Claude desktop app and "Open in Codex" the ChatGPT/Codex desktop app, so
-    // for OPENING a relay the desktop app is what must exist — the CLI-keyed
-    // entries above answer the other question, what can RUN a request. Off
-    // macOS there is no desktop probe here, and an unknown app counts as
-    // present: never hide a real app.
+    // Provider availability and presentation surface are deliberately separate.
+    // A CLI-only machine can still open a Relay in a real provider session; when
+    // both are installed the desktop app remains the default and Terminal is an
+    // explicit alternative. Settings must never infer either from branding.
+    _claudeCli: cliSurface("Claude Code", claudeCli),
+    _codexCli: cliSurface("Codex", codexCli),
     _claudeDesktop: desktopSurface("Claude", claudeApp, options),
     _codexDesktop: desktopSurface("Codex", chatgptApp, options),
   };
 }
 
+function cliSurface(label, hit) {
+  return hit
+    ? { available: true, reason: "", via: hit }
+    : { available: false, reason: `${label} CLI isn’t installed on this computer`, via: "" };
+}
+
 function desktopSurface(label, hit, { platform = process.platform } = {}) {
-  if (platform !== "darwin") return { available: true, reason: "", via: "" };
+  if (platform !== "darwin") return { available: false, reason: `${label} Desktop isn’t available on this computer`, via: "" };
   return hit
     ? { available: true, reason: "", via: hit }
     : { available: false, reason: `${label} isn’t installed on this Mac`, via: "" };

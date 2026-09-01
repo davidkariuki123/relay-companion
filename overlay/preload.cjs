@@ -30,7 +30,7 @@ contextBridge.exposeInMainWorld("relay", {
   // Relay rows
   open: (id, host) => ipcRenderer.send("relay:open", id, host),
   openSent: (id, host) => ipcRenderer.send("relay:openSent", id, host),
-  sessionPicker: (id, provider, source) => ipcRenderer.invoke("relay:sessionPicker", id, provider, source),
+  sessionPicker: (id, provider, source, surface) => ipcRenderer.invoke("relay:sessionPicker", id, provider, source, surface),
   deliverToSession: (id, selection) => ipcRenderer.invoke("relay:deliverToSession", id, selection),
   continueSession: (id, source) => ipcRenderer.invoke("relay:continueSession", id, source),
   // Sent rows get the same open-actions menu as received relays.
@@ -46,6 +46,13 @@ contextBridge.exposeInMainWorld("relay", {
   taskClaim: (id, expectedVersion) => ipcRenderer.invoke("relay:taskClaim", String(id || ""), expectedVersion),
   taskUnclaim: (id, expectedVersion) => ipcRenderer.invoke("relay:taskUnclaim", String(id || ""), expectedVersion),
   taskStop: (id) => ipcRenderer.invoke("relay:taskStop", String(id || "")),
+  todoList: (input = {}) => ipcRenderer.invoke("relay:todoList", input || {}),
+  todoStatusUpdate: (id, input = {}) => ipcRenderer.invoke(
+    "relay:todoStatusUpdate",
+    String(id || ""),
+    input || {},
+  ),
+  todoItem: (id) => ipcRenderer.invoke("relay:todoItem", String(id || "")),
   requestReviewSafety: (id) => ipcRenderer.invoke("relay:requestReviewSafety", String(id || "")),
   requestCompletionSend: (id) => ipcRenderer.invoke("relay:requestCompletionSend", String(id || "")),
   relayWorkStart: (id, route) => ipcRenderer.invoke("relay:relayWorkStart", String(id || ""), route || null),
