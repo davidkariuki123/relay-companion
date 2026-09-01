@@ -819,15 +819,12 @@
   .att-plate { position:relative; display:grid; place-items:center; width:100%; aspect-ratio:16 / 10; overflow:hidden;
     border:1px solid var(--hair); border-radius:12px; background:var(--wash); }
   .att-plate::before { content:""; width:5px; height:5px; background:var(--accent); opacity:.52; }
-  .att-plate img { display:block; width:100%; height:auto; object-fit:contain; opacity:0;
+  .att-plate img { display:block; width:100%; max-width:100%; height:auto; object-fit:contain; opacity:0;
     transform:scale(.98); transition:opacity var(--t-slow) var(--settle), transform var(--t-slow) var(--spring, var(--soft)); }
   .att-fig.ready .att-plate { aspect-ratio:auto; background:transparent; }
   .att-fig.ready .att-plate::before { display:none; }
   .att-fig.ready .att-plate img { opacity:1; transform:none; }
   button.att-fig:hover .att-plate { border-color:var(--muted-2); }
-  .att-cap { display:flex; align-items:baseline; gap:6px; min-width:0; padding:5px 2px 0; }
-  .att-cap .td-att-name { flex:1 1 auto; }
-  .att-cap .td-att-meta { margin-left:0; }
 
   /* footer — people, then the one navigation act */
   .td-people { padding:20px 16px 0; font-size:12px; color:var(--muted-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -1792,8 +1789,16 @@
   .th-cargo .td-att-meta { margin-left:0; font-family:var(--sans); font-size:10.5px; color:var(--muted-2); }
   .th-cargo .td-att-meta::before { content:"·"; margin-right:5px; opacity:.7; }
   .th-cargo .att-zone { margin:0; }
-  .th-cargo .att-grid { min-width:min(360px, 76vw); }
-  .th-cargo .att-cap .td-att-name { text-decoration:none; }
+  /* A revealed image must resolve against the room it is in. fit-content lets
+     the image's intrinsic width become the cargo width, which only happens to
+     fit in expanded mode and is clipped by the compact room. Image cargo gets
+     the same definite 88% measure as its message in every room. */
+  .th-cargo.image-cargo { width:88%; min-width:0; }
+  .th-cargo.image-cargo .att-zone,
+  .th-cargo.image-cargo .att-grid,
+  .th-cargo.image-cargo .att-fig,
+  .th-cargo.image-cargo .att-plate { min-width:0; max-width:100%; }
+  .th-cargo.image-cargo .att-grid { width:100%; }
   /* The stream's entrance, copied from the Codex app's own markdown renderer. */
   @keyframes rdFadeIn { to { opacity:1; } }
   @keyframes rdActivityIn { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
@@ -3934,30 +3939,29 @@
     }).join("");
   }
 
+  function attachmentIsImage(attachment) {
+    const type = String(attachment?.contentType || "").toLowerCase();
+    const name = String(attachment?.filename || attachment?.name || "").toLowerCase();
+    return attachment?.image === true || /^image\/(?:png|jpeg|gif|webp)$/.test(type) || /\.(?:png|jpe?g|gif|webp)$/.test(name);
+  }
+
   function attachmentPlates(attachments, { relayId = "" } = {}) {
     const list = Array.isArray(attachments) ? attachments : [];
-    const images = list.filter((attachment) => {
-      const type = String(attachment?.contentType || "").toLowerCase();
-      const name = String(attachment?.filename || attachment?.name || "").toLowerCase();
-      return attachment?.image === true || /^image\/(?:png|jpeg|gif|webp)$/.test(type) || /\.(?:png|jpe?g|gif|webp)$/.test(name);
-    });
+    const images = list.filter(attachmentIsImage);
     const files = list.filter((attachment) => !images.includes(attachment));
     if (!images.length) return attachmentChips(files, { relayId });
     const plates = images.map((attachment) => {
       const name = attachment?.filename || attachment?.name || "Image";
-      const size = fmtBytes(attachment?.sizeBytes != null ? attachment.sizeBytes : attachment?.bytes);
       if (!relayId || !attachment?.id) {
         const previewUrl = /^(?:blob:|data:image\/)/i.test(String(attachment?.previewUrl || ""))
           ? String(attachment.previewUrl)
           : "";
-        return `<div class="att-fig${previewUrl ? " ready" : " pending"}">
+        return `<div class="att-fig${previewUrl ? " ready" : " pending"}" role="img" aria-label="Attached image: ${esc(name)}">
           <span class="att-plate" aria-hidden="true">${previewUrl ? `<img src="${esc(previewUrl)}" alt="">` : ""}</span>
-          <span class="att-cap"><span class="td-att-name">${esc(name)}</span>${size ? `<span class="td-att-meta">${esc(size)}</span>` : ""}</span>
         </div>`;
       }
       return `<button class="att-fig td-att-open" type="button" data-att-relay="${esc(relayId)}" data-att-id="${esc(attachment.id)}" data-att-preview="1" data-stop="1" title="Open ${esc(name)}" aria-label="Open image ${esc(name)}">
         <span class="att-plate" aria-hidden="true"></span>
-        <span class="att-cap"><span class="td-att-name">${esc(name)}</span>${size ? `<span class="td-att-meta">${esc(size)}</span>` : ""}</span>
       </button>`;
     }).join("");
     return `<div class="att-zone"><div class="att-grid${images.length === 1 ? " one" : ""}">${plates}</div>${files.length ? `<div class="att-files">${attachmentChips(files, { relayId })}</div>` : ""}</div>`;
@@ -12386,6 +12390,7 @@
       // voice — sans, message-toned; a titled relay keeps the serif subject.
       const textLike = m.textLike;
       const attachments = Array.isArray(m.attachments) ? m.attachments : [];
+      const hasImageAttachments = attachments.some(attachmentIsImage);
       const agentWorking = m.ownedAgent
         && !String(m.body || "").trim()
         && !String(m.agent || "").trim()
@@ -12460,7 +12465,7 @@
         // disappear at the final presentation boundary.
         if (!attachments.length) return "";
         const relayId = String(m.relayId || m.id || "");
-        return `<div class="th-cargo${mine ? " mine" : ""}">${attachmentPlates(attachments, { relayId })}</div>`;
+        return `<div class="th-cargo${hasImageAttachments ? " image-cargo" : ""}${mine ? " mine" : ""}">${attachmentPlates(attachments, { relayId })}</div>`;
       })()}
       ${(() => {
         // A receipt and a reply control are ABOUT the message, not part of it.

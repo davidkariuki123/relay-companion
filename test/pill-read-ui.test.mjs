@@ -105,7 +105,7 @@ test("attachments use image plates and quiet file rows backed only by main-proce
   // remain chips. Both carry only ids; open and preview route through preload.
   assert.match(html, /button class="td-att td-att-open"[^>]*data-att-relay=/);
   assert.match(html, /button class="att-fig td-att-open"[^>]*data-att-preview="1"/);
-  assert.match(html, /<div class="att-fig\$\{previewUrl \? " ready" : " pending"\}">/,
+  assert.match(html, /<div class="att-fig\$\{previewUrl \? " ready" : " pending"\}" role="img"/,
     "optimistic images use the same plate before a canonical attachment id exists");
   assert.match(html, /attachmentPlates\(r\.attachments, \{ relayId: r\.id \}\)/);
   // THE CARGO LAW: files stand free BENEATH the bubble, in their own zone —
@@ -117,10 +117,18 @@ test("attachments use image plates and quiet file rows backed only by main-proce
   assert.match(html, /attachmentOnly = textLike && attachments\.length > 0/);
   assert.match(html, /\.th-msg\.attachment-only \{ display:contents; \}/,
     "file-only messages omit the fake filename bubble while retaining message semantics");
+  assert.match(html, /const hasImageAttachments = attachments\.some\(attachmentIsImage\)/);
+  assert.match(html, /th-cargo\$\{hasImageAttachments \? " image-cargo" : ""\}/,
+    "image messages opt into room-relative cargo geometry");
+  assert.match(html, /\.th-cargo\.image-cargo \{ width:88%; min-width:0; \}/,
+    "compact and expanded rooms give image cargo the same definite responsive measure");
+  assert.match(html, /\.th-cargo\.image-cargo \.att-grid \{ width:100%; \}/,
+    "the image grid resolves against its room instead of the image's intrinsic width");
   assert.match(html, /window\.relay\.openAttachment\(relayId, chip\.getAttribute\("data-att-id"\)\)/);
   assert.match(html, /window\.relay\.previewAttachment/);
   assert.match(html, /class="att-plate"/);
-  assert.match(html, /class="att-cap"/);
+  assert.doesNotMatch(html, /class="att-cap"/,
+    "image names stay in open/accessibility labels instead of appearing below previews");
   // Preload: invoke pair.
   assert.match(preload, /openAttachment: \(relayId, attachmentId\) => ipcRenderer\.invoke\("relay:openAttachment", relayId, attachmentId\)/);
   assert.match(preload, /previewAttachment: \(relayId, attachmentId\) => ipcRenderer\.invoke/);
@@ -142,9 +150,9 @@ test("attachments use image plates and quiet file rows backed only by main-proce
 });
 
 test("the shared image plate renders through optimistic, queued, and canonical attachment states", () => {
-  const start = html.indexOf("  function attachmentPlates(");
+  const start = html.indexOf("  function attachmentIsImage(");
   const end = html.indexOf("\n  function relaySharedShelf", start);
-  assert.ok(start >= 0 && end > start, "attachmentPlates has a complete source boundary");
+  assert.ok(start >= 0 && end > start, "image attachment helpers have a complete source boundary");
   const source = html.slice(start, end);
   const attachmentPlates = new Function(
     "attachmentChips", "fmtBytes", "esc",
@@ -160,6 +168,7 @@ test("the shared image plate renders through optimistic, queued, and canonical a
   ]);
   assert.match(optimistic, /class="att-fig ready"/);
   assert.match(optimistic, /<img src="blob:relay-preview"/);
+  assert.doesNotMatch(optimistic, /class="att-cap"/);
   assert.doesNotMatch(optimistic, /fallback chip/);
 
   const queuedAfterRestart = attachmentPlates([
@@ -167,6 +176,7 @@ test("the shared image plate renders through optimistic, queued, and canonical a
   ]);
   assert.match(queuedAfterRestart, /class="att-fig pending"/);
   assert.match(queuedAfterRestart, /class="att-plate"/);
+  assert.doesNotMatch(queuedAfterRestart, /class="att-cap"/);
   assert.doesNotMatch(queuedAfterRestart, /fallback chip/);
 
   const canonical = attachmentPlates([
@@ -176,6 +186,7 @@ test("the shared image plate renders through optimistic, queued, and canonical a
   assert.match(canonical, /data-att-relay="relay_1"/);
   assert.match(canonical, /data-att-id="att_1"/);
   assert.match(canonical, /data-att-preview="1"/);
+  assert.doesNotMatch(canonical, /class="att-cap"/);
 });
 
 test("reader attachments share the deployed frosted footer above both document actions", () => {
