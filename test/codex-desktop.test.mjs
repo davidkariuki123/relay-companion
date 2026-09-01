@@ -914,6 +914,28 @@ test("rollout confirmation requires the exact app-server client message, not unr
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test("rollout confirmation accepts the current completed UserMessage identity", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-codex-current-user-row-"));
+  const rollout = path.join(dir, "rollout.jsonl");
+  fs.writeFileSync(
+    rollout,
+    `${JSON.stringify({
+      type: "event_msg",
+      payload: {
+        type: "item_completed",
+        item: {
+          type: "UserMessage",
+          client_id: "client-current-456",
+          content: [{ type: "text", text: "A Relay has arrived" }],
+        },
+      },
+    })}\n`,
+  );
+  assert.equal(codexRolloutHasClientMessage(rollout, "client-current-456"), true);
+  assert.equal(codexRolloutHasClientMessage(rollout, "somebody-else"), false);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test("submit recovers from a stale inspector on a replaced PID without duplicating the logical turn", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-codex-restart-"));
   const rollout = path.join(dir, "rollout.jsonl");

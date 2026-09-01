@@ -393,7 +393,19 @@ export function codexRolloutHasClientMessage(rolloutPath, clientUserMessageId) {
     if (!line || !line.includes(wanted)) continue;
     try {
       const row = JSON.parse(line);
-      if (row?.type === "event_msg" && row?.payload?.type === "user_message" && row.payload.client_id === wanted) return true;
+      if (row?.type !== "event_msg") continue;
+      // Older app-server rollouts wrote the composer identity directly on a
+      // user_message event. Current Codex Desktop writes the same identity on
+      // the completed UserMessage item instead. Treat both as the one native
+      // acknowledgement. Missing the current shape made Relay retry a turn
+      // that had already landed, append the same Relay reference repeatedly,
+      // and finally start a competing App Server against Desktop's live owner.
+      if (row?.payload?.type === "user_message" && row.payload.client_id === wanted) return true;
+      if (
+        row?.payload?.type === "item_completed" &&
+        row.payload.item?.type === "UserMessage" &&
+        row.payload.item?.client_id === wanted
+      ) return true;
     } catch {
       // A writer may be halfway through the final line; the next poll retries.
     }

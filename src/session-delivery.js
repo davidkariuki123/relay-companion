@@ -210,8 +210,33 @@ async function deliverCodex(target, prompt, options = {}) {
       userMessageId: owner.clientUserMessageId || null,
     };
   }
+  // A bridge acknowledgement followed by an unconfirmed rollout is
+  // ambiguous: Desktop may already have accepted the turn. Starting a second
+  // App Server here is never a safe fallback because Desktop remains the
+  // thread's writer. Fail closed and let the user retry through the same owner;
+  // do not duplicate the Relay or trigger Codex's active-writer guard.
+  if (owner?.submitted) {
+    const error = new Error("Codex Desktop accepted the delivery request but the Relay turn was not verified");
+    error.code = "CODEX_DELIVERY_UNCONFIRMED";
+    throw error;
+  }
   if (owner?.reason === "turn-in-progress") throw new Error("Codex task is busy");
   return deliverCodexWithAppServer(target, prompt, options);
+}
+
+export function publicSessionDeliveryError(error, provider = "") {
+  const message = String(error?.message || error || "");
+  const cleanProvider = provider === "claude" ? "Claude Code" : "Codex";
+  if (error?.code === "CODEX_DELIVERY_UNCONFIRMED") {
+    return "Codex did not confirm the Relay in that task. Relay did not open another task; please try again.";
+  }
+  if (/already has an active writer/i.test(message)) {
+    return "Codex still owns that task. Relay did not open another task; please try again.";
+  }
+  if (/turn-in-progress|task is busy|did not become idle|timed out waiting/i.test(message)) {
+    return `${cleanProvider} is still working in that session. Try again when the current turn finishes.`;
+  }
+  return `Relay could not deliver to that ${cleanProvider} session. Please try again.`;
 }
 
 async function deliverClaude(target, prompt, options = {}) {
