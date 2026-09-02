@@ -33,6 +33,7 @@ test("the steward's reason replaces the preview on a row and reads in full in th
   assert.match(row, /const why = String\(item\.assessment \|\| ""\)\.trim\(\);/);
   assert.match(row, /why \? `<div class="todo-row-why" title="\$\{esc\(why\)\}">\$\{esc\(why\)\}<\/div>` : showPreview/);
   assert.match(inbox, /\.todo-row-why::before \{ content:""; display:inline-block; width:5px; height:5px/);
+  assert.match(inbox, /\.todo-row-why \{[^}]*-webkit-line-clamp:4;/, "the note finishes (up to four lines) instead of truncating at two");
   const why = between(inbox, "function todoWhyHtml(row)", "function todoReaderStatusHtml(row)");
   assert.match(why, /row\.assessedBy === "human" \? "You" : stewardAgentLabel\(row\.assessedBy\)/);
   assert.match(why, /Based on \$\{esc\(evidence\.join\(", "\)\)\}/);
