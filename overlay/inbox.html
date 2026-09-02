@@ -2289,6 +2289,14 @@
   .todo-load-more { text-align:center; margin-top:10px; border-bottom:1px solid var(--hair); }
   .todo-load-more:disabled { cursor:default; opacity:.55; }
   .todo-status-note { margin:8px 16px 0; color:var(--muted-3); font:10px/1.4 var(--sans); }
+  #tasksList { min-height:1px; transform-origin:top center; transition:opacity 150ms var(--settle),transform 180ms var(--settle); }
+  #tasksList.todo-switching { opacity:.52; transform:translateY(2px); pointer-events:none; }
+  #tasksList.todo-arriving { animation:todoContentArrive 210ms var(--settle) both; }
+  @keyframes todoContentArrive { from { opacity:.52; transform:translateY(2px); } to { opacity:1; transform:translateY(0); } }
+  @media (prefers-reduced-motion:reduce) {
+    #tasksList { transition-duration:.001s; }
+    #tasksList.todo-arriving { animation-duration:.001s; }
+  }
   .todo-reader-status { position:relative; margin-left:auto; flex:none; }
   .todo-reader-status + .reader-delete { margin-left:0; }
   .todo-reader-current { appearance:none; display:inline-flex; align-items:center; gap:6px; min-height:25px; padding:4px 7px;
@@ -5627,7 +5635,8 @@
   function taskRows() { return (payload.relays || []).filter(isTaskRow); }
   const TODO_STATUS_ORDER = ["triage", "backlog", "todo", "in_progress", "done", "canceled", "duplicate"];
   const TODO_ACTIVE_ORDER = ["triage", "in_progress", "todo", "backlog"];
-  const TODO_TERMINAL_ORDER = ["done", "canceled", "duplicate"];
+  const TODO_ALL_PREVIEW_ORDER = [...TODO_ACTIVE_ORDER, "done"];
+  const TODO_TERMINAL_ORDER = ["canceled", "duplicate"];
   const TODO_LABEL = {
     triage:"Triage", backlog:"Backlog", todo:"Todo", in_progress:"In Progress",
     done:"Done", canceled:"Canceled", duplicate:"Duplicate",
@@ -5639,6 +5648,7 @@
   };
   let todoProjectionSignature = "";
   let todoRefreshTimer = null;
+  let todoArrivalTimer = null;
   let todoDuplicateSource = null;
   const todoHydratedRows = new Map();
   function todoSelectedStatuses() { return TODO_STATUS_ORDER.filter((status) => todoState.selected.has(status)); }
@@ -5678,14 +5688,38 @@
       duplicateOfItemId:item.duplicateOfItemId || null,
     });
   }
+  function beginTodoTransition() {
+    if (!todoState.loaded || activeView !== "tasks") return;
+    clearTimeout(todoArrivalTimer);
+    tasksListEl.classList.remove("todo-arriving");
+    tasksListEl.classList.add("todo-switching");
+    tasksListEl.setAttribute("aria-busy", "true");
+  }
+  function finishTodoTransition({ animate = true } = {}) {
+    tasksListEl.classList.remove("todo-switching");
+    tasksListEl.removeAttribute("aria-busy");
+    clearTimeout(todoArrivalTimer);
+    tasksListEl.classList.remove("todo-arriving");
+    if (!animate) return;
+    // Replacing innerHTML and applying the arrival class in the same frame
+    // gives one continuous cross-fade: the old rows never disappear while
+    // the network request is pending, and the new rows settle into place.
+    void tasksListEl.offsetWidth;
+    tasksListEl.classList.add("todo-arriving");
+    todoArrivalTimer = setTimeout(() => tasksListEl.classList.remove("todo-arriving"), 240);
+  }
   async function loadTodo({ append = false } = {}) {
-    if (!window.relay.todoList || todoState.loading || todoState.loadingMore) return;
+    if (!window.relay.todoList || (append && (todoState.loading || todoState.loadingMore || !todoState.nextCursor))) return;
     const generation = append ? todoState.generation : ++todoState.generation;
     if (append) todoState.loadingMore = true;
     else {
       todoState.loading = true;
       todoState.error = "";
-      if (activeView === "tasks") renderTasksBoard();
+      if (activeView === "tasks") {
+        renderTodoRail();
+        if (todoState.loaded) beginTodoTransition();
+        else renderTasksBoard();
+      }
     }
     const statuses = todoSelectedStatuses();
     const response = await window.relay.todoList({
@@ -5698,7 +5732,10 @@
     todoState.loadingMore = false;
     if (!response || response.ok === false) {
       todoState.error = response?.error || "Todo could not be loaded.";
-      if (activeView === "tasks") renderTasksBoard();
+      if (activeView === "tasks") {
+        renderTasksBoard();
+        if (!append) finishTodoTransition();
+      }
       return;
     }
     todoState.loaded = true;
@@ -5716,7 +5753,10 @@
       todoState.nextCursor = null;
       for (const group of todoState.groups) for (const item of group.items || []) mergeTodoProjection(item);
     }
-    if (activeView === "tasks") renderTasksBoard();
+    if (activeView === "tasks") {
+      renderTasksBoard();
+      if (!append) finishTodoTransition();
+    }
     else renderAll();
   }
   async function openTodoItem(id) {
@@ -8761,9 +8801,6 @@
         if (status === "all") todoState.selected.clear();
         else if (todoState.selected.has(status)) todoState.selected.delete(status);
         else todoState.selected.add(status);
-        todoState.items = [];
-        todoState.groups = [];
-        todoState.nextCursor = null;
         loadTodo();
       });
     }
@@ -8811,9 +8848,6 @@
       button.addEventListener("click", () => {
         const status = button.getAttribute("data-todo-view-all") || button.getAttribute("data-todo-terminal");
         todoState.selected = new Set([status]);
-        todoState.items = [];
-        todoState.groups = [];
-        todoState.nextCursor = null;
         scrollEl.scrollTop = 0;
         loadTodo();
       });
@@ -8864,7 +8898,7 @@
     } else {
       const groups = selected.length
         ? todoState.groups
-        : TODO_ACTIVE_ORDER.map((status) => todoState.groups.find((group) => group.status === status)).filter(Boolean);
+        : TODO_ALL_PREVIEW_ORDER.map((status) => todoState.groups.find((group) => group.status === status)).filter(Boolean);
       const terminals = !selected.length ? `
         <div class="todo-terminal-stack">
           ${TODO_TERMINAL_ORDER.filter((status) => Number(todoState.counts[status] || 0) > 0).map((status) => `

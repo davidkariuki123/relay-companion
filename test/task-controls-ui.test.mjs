@@ -12,11 +12,24 @@ function between(source, start, end) {
   return source.slice(from, to);
 }
 
-test("Todo puts the four attention states first and gives In Progress a live mark", () => {
+test("Todo puts attention first, previews recent Done, and gives In Progress a live mark", () => {
   const board = between(inbox, "function renderTasksBoard()", "// Grow the window");
   assert.match(inbox, /TODO_ACTIVE_ORDER = \["triage", "in_progress", "todo", "backlog"\]/);
-  assert.match(board, /TODO_ACTIVE_ORDER\.map/);
+  assert.match(inbox, /TODO_ALL_PREVIEW_ORDER = \[\.\.\.TODO_ACTIVE_ORDER, "done"\]/);
+  assert.match(board, /TODO_ALL_PREVIEW_ORDER\.map/);
   assert.match(inbox, /\.todo-mark\.in_progress/);
+});
+
+test("Todo keeps existing rows during filter fetches and lets the newest choice win", () => {
+  const loader = between(inbox, "async function loadTodo", "async function openTodoItem");
+  const rail = between(inbox, "function renderTodoRail()", "function todoGroupHtml");
+  assert.match(inbox, /#tasksList\.todo-switching/);
+  assert.match(loader, /beginTodoTransition\(\)/);
+  assert.match(loader, /finishTodoTransition\(\)/);
+  assert.match(loader, /\+\+todoState\.generation/);
+  assert.match(loader, /append && \(todoState\.loading \|\| todoState\.loadingMore/);
+  assert.doesNotMatch(loader, /!window\.relay\.todoList \|\| todoState\.loading/);
+  assert.doesNotMatch(rail, /todoState\.(items|groups) = \[\]/);
 });
 
 test("Todo filtering is a visible rail, never a dropdown", () => {

@@ -14,10 +14,11 @@ function between(source, start, end) {
 
 const board = between(inbox, "function renderTasksBoard()", "// Grow the window as the user scrolls");
 
-test("All is an attention stack, not a completed accordion", () => {
+test("All is attention-first with a bounded recent Done preview", () => {
   assert.match(inbox, /const TODO_ACTIVE_ORDER = \["triage", "in_progress", "todo", "backlog"\]/);
+  assert.match(inbox, /const TODO_ALL_PREVIEW_ORDER = \[\.\.\.TODO_ACTIVE_ORDER, "done"\]/);
   assert.doesNotMatch(inbox, /completedTasksExpanded/);
-  assert.match(board, /TODO_ACTIVE_ORDER\.map/);
+  assert.match(board, /TODO_ALL_PREVIEW_ORDER\.map/);
   assert.match(board, /TODO_TERMINAL_ORDER\.filter/);
 });
 
