@@ -536,6 +536,30 @@ posixFsTest("an admission timeout never removes the fixed label and cannot kill 
   );
 });
 
+test("a worker that loses the canonical transaction lock is reported as busy", () => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-worker-busy-"));
+  const result = spawnCanonicalUpdate({
+    version: "0.1.463",
+    runningVersion: "0.1.461",
+    runningPackageRoot: path.join(homeDir, "old", "node_modules", "relay-companion"),
+    node: process.execPath,
+    homeDir,
+    platform: process.platform,
+    run: (command) => ({
+      status: 0,
+      stdout: process.platform === "win32" && /powershell\.exe$/i.test(command) ? "123\n" : "",
+      stderr: "",
+    }),
+    waitForAdmission: (requestPath, { fsImpl }) => ({
+      ...JSON.parse(fsImpl.readFileSync(requestPath, "utf8")),
+      state: "failed",
+      completedAt: Date.now(),
+      result: { ok: false, phase: "lock", reason: "transaction-in-progress", detail: "" },
+    }),
+  });
+  assert.equal(result.status, "busy");
+});
+
 // A developer's checkout services (…/packages/companion/…) are not the runtime's
 // own: counting them as "old" failed exact-root health on EVERY canonical
 // activation while a dev pill ran — rollback, stranded ~650MB release, repeat

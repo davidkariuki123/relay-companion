@@ -771,7 +771,8 @@ export function createAutoUpdater({
     if (!admittedLaunch(launch)) {
       state.updating = false;
       const status = rejectedLaunchStatus(launch);
-      log(`auto-update worker was not admitted (${status})`);
+      if (status === "worker-busy") log("auto-update is already running in another worker");
+      else log(`auto-update worker was not admitted (${status})`);
       return { status, current: runningVersion, latest, channel };
     }
     // Persist only after the worker has acquired the canonical transaction lock.

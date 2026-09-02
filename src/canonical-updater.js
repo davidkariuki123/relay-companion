@@ -609,13 +609,16 @@ export function spawnCanonicalUpdate({
     return { status: "failed", requestId, workerId, requestPath, admittedAt: admitted.admittedAt, terminal: admitted };
   }
   if (!admitted || !["admitted", "completed"].includes(admitted.state) || admitted.workerId !== workerId) {
+    const transactionAlreadyInProgress = admitted?.state === "failed" &&
+      admitted?.result?.phase === "lock" &&
+      admitted?.result?.reason === "transaction-in-progress";
     const rejected = {
       ...(admitted || prepared),
       schema: UPDATE_REQUEST_SCHEMA,
       requestId,
       workerId,
       state: "rejected",
-      reason: admitted?.reason || "admission-timeout",
+      reason: transactionAlreadyInProgress ? "worker-busy" : admitted?.reason || "admission-timeout",
       completedAt: Date.now(),
     };
     const decision = claimUpdateRequestDecision(requestPath, rejected, { fsImpl });
