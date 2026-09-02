@@ -372,6 +372,27 @@ test("a name the recipient does not have still fails closed", () => {
   assert.equal(openable, false);
 });
 
+test("a product open of an unmatched passport lands in the Relay folder, never home, never a guessed path", () => {
+  // Schalk's rerelay Relays (2026-09-02): David has no checkout, so the pill
+  // refused every open. The routing-only contract above still fails closed;
+  // an open that allows the unanchored fallback goes to the dedicated folder.
+  const homedir = "/Users/tester";
+  const created = [];
+  const { cwd, reason, openable, workspaceKey } = chooseOpenCwd({
+    ...base,
+    homedir,
+    row: { source: { cwd: "/Users/tester/.ssh", workspace: { kind: "git", key: "github.com/sjalq/rerelay", label: "rerelay" } } },
+    findCheckoutsFn: () => [],
+    isDirectory: (dir) => created.includes(dir),
+    ensureDirectory: (dir) => { created.push(dir); return true; },
+    allowUnanchoredFallback: true,
+  });
+  assert.equal(cwd, `${homedir}/Relay`);
+  assert.equal(reason, "workspace-unmapped-fallback");
+  assert.equal(openable, true);
+  assert.equal(workspaceKey, "git:github.com/sjalq/rerelay", "the unmatched passport stays on record");
+});
+
 test("Shane's actual case: a relay about relay, sent from elsewhere, opens in relay", () => {
   // Before this change the passport was captured from the sender's cwd, so a
   // message about relay written from another project either matched nothing

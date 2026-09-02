@@ -209,5 +209,17 @@ export function chooseOpenCwd({
     }
   }
 
+  // The passport names a repo this Mac does not have. Never guess a directory
+  // and never open home — but a product open (the pill, a picker choice) must
+  // still land somewhere the human can read and answer it: the dedicated Relay
+  // folder, exactly where an unanchored Relay goes. The reason records that the
+  // passport went unmatched so the choice stays diagnosable. Callers that do
+  // not allow the unanchored fallback keep failing closed.
+  if (allowUnanchoredFallback) {
+    const fallback = unanchoredFallback({ env, homedir, isDirectory, ensureDirectory });
+    if (fallback.cwd && fallback.reason !== "home") {
+      return { ...fallback, reason: "workspace-unmapped-fallback", repoName, workspaceKey: key, openable: true };
+    }
+  }
   return { cwd: "", reason: "workspace-unmapped", repoName, workspaceKey: key, openable: false };
 }

@@ -585,7 +585,7 @@ test("materialization heals legacy Codex threadId clobber back to the Relay thre
   }
 });
 
-test("an unopenable relay still downloads its attachments before the routing gate refuses", async () => {
+test("a relay whose passport repo is absent still downloads its attachments and opens in the Relay folder", async () => {
   const prevEnv = { RELAY_HOME: process.env.RELAY_HOME };
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-materializer-gate-"));
   const relayHome = path.join(dir, "relay-home");
@@ -611,9 +611,11 @@ test("an unopenable relay still downloads its attachments before the routing gat
           title: "Pill prototype board",
           forHuman: "Board attached.",
           createdAt: "2026-08-12T09:00:00.000Z",
-          // A passport naming a repo this machine does not have: the routing
-          // gate must refuse the open (fails closed), but delivery of the
-          // attachment must have happened anyway.
+          // A passport naming a repo this machine does not have: the open lands
+          // in the dedicated Relay folder (never home, never a guessed path) with
+          // the unmatched passport recorded, and delivery of the attachment must
+          // have happened regardless (2026-09-02: Schalk's rerelay Relays were
+          // unopenable on David's Mac).
           source: { workspace: { kind: "git", key: "github.com/nobody/does-not-exist" } },
           attachments: [{ id: "att_1", name: "proto-board.html", contentType: "text/html", bytes: body.length }],
           attachmentUrls: { att_1: url },
@@ -624,17 +626,16 @@ test("an unopenable relay still downloads its attachments before the routing gat
 
     const { openRelay } = await import(`../src/materializer.js?materializer-gate-test-${Date.now()}`);
     const opened = await openRelay({ id: "relay_gate", host: "claude" });
-    assert.equal(opened.openedInHost, false);
-    assert.match(String(opened.error || opened.cwdReason), /workspace-unmapped/);
+    assert.equal(opened.cwdReason, "workspace-unmapped-fallback");
+    assert.equal(path.basename(opened.cwd), "Relay", "an unmatched passport opens in the Relay folder");
 
     const state = JSON.parse(fs.readFileSync(path.join(relayHome, "state.json"), "utf8"));
     const row = state.packets.relay_gate;
     const localPath = row.attachments && row.attachments[0] && row.attachments[0].localPath;
-    assert.ok(localPath, "the failed open must still persist a downloaded local copy");
+    assert.ok(localPath, "the open must persist a downloaded local copy");
     assert.equal(fs.readFileSync(localPath, "utf8"), body.toString());
-    // Signatures are open-time state; a refused open must not write them.
-    assert.equal(row.attachmentMaterializationSignature, undefined);
-    assert.equal(row.claudeAttachmentMaterializationSignature, undefined);
+    assert.equal(row.openCwdReason, "workspace-unmapped-fallback");
+    assert.equal(row.openWorkspaceKey, "git:github.com/nobody/does-not-exist", "the unmatched passport stays on record");
   } finally {
     await new Promise((resolve) => server.close(resolve));
     for (const [key, value] of Object.entries(prevEnv)) {
