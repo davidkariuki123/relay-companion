@@ -4998,6 +4998,366 @@ async function previewRelayAttachment(relayId, attachmentId) {
   }
 }
 
+// ---- attachments: reveal, copy, download, viewer windows -------------------
+// Clicking an attachment used to hand the file to the OS. It now opens in a
+// Relay window, because the pill is where the file arrived and handing it
+// straight to Preview.app lost every bit of context it came with — who sent it,
+// when, and what else came with it. `openRelayAttachment` stays: it is the
+// "Open in default app" action INSIDE that window, a deliberate hand-off.
+
+const VIEWER_WIN = { width: 760, height: 560, minWidth: 480, minHeight: 360 };
+// The viewer is a night object even when the pill is on paper: it is a stage.
+// The renderer still wears the pill's theme; this is only the pre-paint fill.
+const VIEWER_BACKGROUND = "#221E1B";
+const attachmentViewers = new Map();
+
+function liveAttachmentViewers() {
+  for (const [key, entry] of [...attachmentViewers]) {
+    if (!entry.win || entry.win.isDestroyed()) attachmentViewers.delete(key);
+  }
+  return [...attachmentViewers.values()];
+}
+function viewerEntryForEvent(event) {
+  if (!event || !event.sender) return null;
+  return liveAttachmentViewers().find((entry) => entry.win.webContents === event.sender) || null;
+}
+
+// Ids come from a renderer and are used to look rows up in state, never as
+// paths. Bound them anyway: an id is a short opaque token, and anything longer
+// is not one.
+function safeAttachmentId(value) {
+  const clean = String(value == null ? "" : value).trim();
+  return clean && clean.length <= 200 ? clean : "";
+}
+function attachmentIsImageRow(attachment) {
+  const type = String(attachment?.contentType || "").toLowerCase();
+  const name = String(attachment?.filename || attachment?.name || "").toLowerCase();
+  return /^image\/(?:png|jpeg|gif|webp)$/.test(type) || /\.(?:png|jpe?g|gif|webp)$/.test(name);
+}
+
+/**
+ * The room manifest the renderer offers alongside a click, reduced to the only
+ * things main will act on: pairs of ids, plus display strings the viewer prints
+ * verbatim through textContent. No paths, no URLs — those are main's alone.
+ */
+function safeViewerContext(input) {
+  const rows = Array.isArray(input?.items) ? input.items.slice(0, 500) : [];
+  const items = [];
+  for (const row of rows) {
+    const relayId = safeAttachmentId(row?.relayId);
+    const attachmentId = safeAttachmentId(row?.attachmentId);
+    if (!relayId || !attachmentId) continue;
+    items.push({
+      relayId,
+      attachmentId,
+      name: String(row?.name || "file").slice(0, 200),
+      sender: String(row?.sender || "").slice(0, 120),
+      at: String(row?.at || "").slice(0, 40),
+      bytes: Number(row?.bytes) || 0,
+      contentType: String(row?.contentType || "").slice(0, 120),
+      image: row?.image === true || attachmentIsImageRow(row),
+    });
+  }
+  return {
+    chatKey: String(input?.chatKey || "").slice(0, 200),
+    chatTitle: String(input?.chatTitle || "").slice(0, 200),
+    items,
+  };
+}
+
+function attachmentViewerPosition(slot = 0) {
+  try {
+    let point = screen.getCursorScreenPoint();
+    if (win && !win.isDestroyed()) {
+      const bounds = win.getBounds();
+      point = { x: Math.round(bounds.x + bounds.width / 2), y: Math.round(bounds.y + bounds.height / 2) };
+    }
+    const workArea = screen.getDisplayNearestPoint(point).workArea;
+    const offset = slot * PREVIEW_CASCADE.step;
+    const x = workArea.x + Math.max(0, (workArea.width - VIEWER_WIN.width) / 2) + offset;
+    const y = workArea.y + Math.max(0, (workArea.height - VIEWER_WIN.height) / 2) + offset;
+    return {
+      x: Math.round(Math.min(x, workArea.x + Math.max(0, workArea.width - VIEWER_WIN.width))),
+      y: Math.round(Math.min(y, workArea.y + Math.max(0, workArea.height - VIEWER_WIN.height))),
+    };
+  } catch {
+    return {};
+  }
+}
+
+function createAttachmentViewerWindow(key) {
+  // Share the preview cascade so a viewer never lands exactly on top of a
+  // preview window that is already open.
+  const slot = nextCascadeSlot();
+  const viewerWin = new BrowserWindow({
+    width: VIEWER_WIN.width,
+    height: VIEWER_WIN.height,
+    minWidth: VIEWER_WIN.minWidth,
+    minHeight: VIEWER_WIN.minHeight,
+    ...attachmentViewerPosition(slot),
+    show: false,
+    frame: false,
+    transparent: false,
+    backgroundColor: VIEWER_BACKGROUND,
+    resizable: true,
+    movable: true,
+    minimizable: true,
+    maximizable: true,
+    fullscreenable: false,
+    hasShadow: true,
+    acceptFirstMouse: true,
+    autoHideMenuBar: true,
+    title: "Relay",
+    webPreferences: {
+      preload: path.join(__dirname, "viewer-preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      // Chromium's own PDF viewer, which is what renders a local .pdf inside
+      // the stage. It reads the file: URL main hands it and nothing else.
+      plugins: true,
+    },
+  });
+  const entry = { key, slot, win: viewerWin, ready: false, payload: null };
+  attachmentViewers.set(key, entry);
+
+  viewerWin.setMenuBarVisibility(false);
+  viewerWin.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  viewerWin.webContents.on("will-navigate", (event, url) => {
+    // The window is one document. Nothing navigates it — least of all anything
+    // that arrived with an attachment.
+    const viewerUrl = pathToFileURL(path.join(__dirname, "viewer.html")).href;
+    if (url !== viewerUrl && event && typeof event.preventDefault === "function") event.preventDefault();
+  });
+  viewerWin.webContents.on("console-message", (...args) => {
+    const message = args[1] && typeof args[1] === "object" ? args[1].message : args[2];
+    if (message) console.error("[viewer-renderer]", message);
+  });
+  viewerWin.webContents.on("preload-error", (_event, preloadPath, error) => {
+    console.error("[viewer-preload-error]", preloadPath, error && error.message);
+  });
+  viewerWin.webContents.on("did-finish-load", () => resetWindowZoom(viewerWin));
+  viewerWin.once("ready-to-show", () => sendAttachmentViewerPayload(entry));
+  viewerWin.on("closed", () => {
+    if (attachmentViewers.get(key) === entry) attachmentViewers.delete(key);
+  });
+  viewerWin.loadFile(path.join(__dirname, "viewer.html"));
+  return entry;
+}
+
+function sendAttachmentViewerPayload(entry) {
+  if (!entry || !entry.win || entry.win.isDestroyed() || !entry.payload) return false;
+  if (!entry.ready) return false;
+  entry.win.webContents.send("relay:viewer:content", { ...entry.payload, theme: uiTheme });
+  return true;
+}
+
+function showAttachmentViewer(entry) {
+  if (!entry || !entry.win || entry.win.isDestroyed()) return;
+  try {
+    if (entry.win.isMinimized()) entry.win.restore();
+    entry.win.show();
+    entry.win.focus();
+  } catch (error) {
+    console.error("[viewer] show failed:", error && error.message);
+  }
+}
+
+/**
+ * Open one attachment in its viewer. Images share ONE window per chat and
+ * re-target it — flicking through a conversation's photos should not litter the
+ * desktop with windows — while a file gets a window per file, the way a
+ * document does.
+ */
+async function openRelayAttachmentViewer(relayId, attachmentId, context) {
+  const id = safeAttachmentId(relayId);
+  const attId = safeAttachmentId(attachmentId);
+  if (!id || !attId) return { ok: false, error: "missing id" };
+  const resolved = await resolveRelayAttachment(id, attId);
+  if (!resolved.ok) return resolved;
+  const safe = safeViewerContext(context);
+  const image = attachmentIsImageRow(resolved.attachment);
+  const known = safe.items.find((item) => item.relayId === id && item.attachmentId === attId);
+  const self = known || {
+    relayId: id,
+    attachmentId: attId,
+    name: String(resolved.attachment?.filename || resolved.attachment?.name || "file"),
+    sender: "",
+    at: "",
+    bytes: Number(resolved.attachment?.bytes ?? resolved.attachment?.size) || 0,
+    contentType: String(resolved.attachment?.contentType || ""),
+    image,
+  };
+  // The filmstrip is every image in this chat, oldest first; files are not in
+  // it, because a file is not something you flick past.
+  const items = image
+    ? (() => {
+        const strip = safe.items.filter((item) => item.image);
+        return strip.some((item) => item.relayId === id && item.attachmentId === attId) ? strip : [self];
+      })()
+    : [self];
+  const index = Math.max(0, items.findIndex((item) => item.relayId === id && item.attachmentId === attId));
+  const key = image ? `image:${safe.chatKey || id}` : `file:${id}:${attId}`;
+  let entry = attachmentViewers.get(key);
+  if (entry && (!entry.win || entry.win.isDestroyed())) { attachmentViewers.delete(key); entry = null; }
+  if (!entry) entry = createAttachmentViewerWindow(key);
+  entry.payload = { kind: image ? "image" : "file", chatTitle: safe.chatTitle, items, index };
+  if (entry.ready) {
+    sendAttachmentViewerPayload(entry);
+    showAttachmentViewer(entry);
+  }
+  return { ok: true, kind: entry.payload.kind };
+}
+
+/** The bytes behind one item, as the viewer is allowed to see them. */
+async function attachmentViewerContent(relayId, attachmentId) {
+  const resolved = await resolveRelayAttachment(safeAttachmentId(relayId), safeAttachmentId(attachmentId));
+  if (!resolved.ok) return resolved;
+  const attachment = resolved.attachment || {};
+  const name = String(attachment.filename || attachment.name || "file");
+  const contentType = String(attachment.contentType || "");
+  const size = Number(attachment.bytes ?? attachment.size) || (() => {
+    try { return fs.statSync(resolved.target).size; } catch { return 0; }
+  })();
+  // A file: URL under the attachments store, or nothing. A remote URL never
+  // reaches this window, so the viewer cannot be made to fetch anything.
+  const fileUrl = pathToFileURL(resolved.target).href;
+  const base = { ok: true, name, contentType, size, fileUrl };
+  if (attachmentIsImageRow(attachment)) return { ...base, kind: "image" };
+  if (/^application\/pdf$/i.test(contentType) || /\.pdf$/i.test(name)) return { ...base, kind: "pdf" };
+  const { isTextPreviewable, textPreviewLines } = require("./attachment-text-preview.cjs");
+  if (isTextPreviewable({ name, contentType, size })) {
+    try {
+      const body = fs.readFileSync(resolved.target, "utf8");
+      const preview = textPreviewLines(body);
+      return { ...base, kind: "text", ...preview };
+    } catch (error) {
+      console.error("[viewer] text read failed:", error && error.message);
+    }
+  }
+  return { ...base, kind: "none" };
+}
+
+async function revealRelayAttachment(relayId, attachmentId) {
+  const resolved = await resolveRelayAttachment(safeAttachmentId(relayId), safeAttachmentId(attachmentId));
+  if (!resolved.ok) return resolved;
+  if (process.env.RELAY_OVERLAY_TEST_NO_HOST_OPEN === "1") {
+    console.error("[overlay] test seam: suppressed attachment reveal:", resolved.target);
+    return { ok: true, path: resolved.target, suppressed: true };
+  }
+  shell.showItemInFolder(resolved.target);
+  return { ok: true, path: resolved.target };
+}
+
+async function copyRelayAttachmentImage(relayId, attachmentId) {
+  const resolved = await resolveRelayAttachment(safeAttachmentId(relayId), safeAttachmentId(attachmentId));
+  if (!resolved.ok) return resolved;
+  if (!attachmentIsImageRow(resolved.attachment)) return { ok: false, error: "not an image" };
+  const image = nativeImage.createFromPath(resolved.target);
+  if (image.isEmpty()) return { ok: false, error: "could not read this image" };
+  clipboard.writeImage(image);
+  return { ok: true };
+}
+
+// ---- Download to ~/Downloads/Relay/<chat>/ ---------------------------------
+
+function relayDownloadsRoot() {
+  let downloads = "";
+  try { downloads = app.getPath("downloads"); } catch { downloads = ""; }
+  return path.join(downloads || path.join(os.homedir(), "Downloads"), "Relay");
+}
+
+function copyWithProgress(from, to, onProgress) {
+  return new Promise((resolve, reject) => {
+    let total = 0;
+    try { total = fs.statSync(from).size; } catch {}
+    let loaded = 0;
+    const read = fs.createReadStream(from);
+    const write = fs.createWriteStream(to);
+    const fail = (error) => { read.destroy(); write.destroy(); reject(error); };
+    read.on("error", fail);
+    write.on("error", fail);
+    // Progress is reported from the copy itself rather than guessed, so the
+    // bubble meta says a true "1.1 of 2.4 MB" instead of a spinner's promise.
+    // Reported every quarter-megabyte, not every 64KB chunk: the meta rounds to
+    // one decimal, so finer steps are invisible and only cost the pill IPC.
+    let reported = 0;
+    read.on("data", (chunk) => {
+      loaded += chunk.length;
+      if (loaded - reported < 256 * 1024 && loaded < total) return;
+      reported = loaded;
+      onProgress(loaded, total);
+    });
+    write.on("close", () => resolve({ loaded, total }));
+    read.pipe(write);
+  });
+}
+
+/**
+ * Save one or many attachments beside each other, keeping the sender's names.
+ * The folder is revealed exactly once, on the first file, when everything that
+ * could be saved has been.
+ */
+async function downloadRelayAttachments(input, options, report) {
+  const rows = Array.isArray(input) ? input.slice(0, 200) : [];
+  const items = rows
+    .map((row) => ({ relayId: safeAttachmentId(row?.relayId), attachmentId: safeAttachmentId(row?.attachmentId) }))
+    .filter((row) => row.relayId && row.attachmentId);
+  if (!items.length) return { ok: false, error: "nothing to download" };
+  const { sanitizeChatFolderName, uniqueDownloadName } = require("./attachment-downloads.cjs");
+  const folder = path.join(relayDownloadsRoot(), sanitizeChatFolderName(options?.chatTitle));
+  try {
+    fs.mkdirSync(folder, { recursive: true });
+  } catch (error) {
+    return { ok: false, error: (error && error.message) || "could not create the download folder" };
+  }
+  const claimed = new Set();
+  const taken = (candidate) => claimed.has(candidate) || fs.existsSync(path.join(folder, candidate));
+  const saved = [];
+  const failed = [];
+  for (const item of items) {
+    const tell = (state, extra = {}) => report?.({ ...item, state, ...extra });
+    try {
+      tell("downloading", { loaded: 0, total: 0 });
+      const resolved = await resolveRelayAttachment(item.relayId, item.attachmentId);
+      if (!resolved.ok) { failed.push({ ...item, error: resolved.error }); tell("error", { error: resolved.error }); continue; }
+      const name = uniqueDownloadName(
+        String(resolved.attachment?.filename || resolved.attachment?.name || path.basename(resolved.target)),
+        taken,
+      );
+      claimed.add(name);
+      const destination = path.join(folder, name);
+      await copyWithProgress(resolved.target, destination, (loaded, total) => tell("downloading", { loaded, total }));
+      saved.push(destination);
+      tell("done", { path: destination });
+    } catch (error) {
+      const message = (error && error.message) || "download failed";
+      failed.push({ ...item, error: message });
+      tell("error", { error: message });
+    }
+  }
+  if (saved.length) {
+    if (process.env.RELAY_OVERLAY_TEST_NO_HOST_OPEN === "1") {
+      console.error("[overlay] test seam: suppressed download reveal:", saved[0]);
+    } else {
+      // Once, on the first file. Revealing each one would open a Finder window
+      // per attachment, which is the opposite of saving them together.
+      shell.showItemInFolder(saved[0]);
+    }
+  }
+  return { ok: failed.length === 0, folder, saved, failed };
+}
+
+function reportAttachmentDownload(event) {
+  const payload = { ...event };
+  if (win && !win.isDestroyed()) {
+    try { win.webContents.send("relay:attachmentDownload", payload); } catch {}
+  }
+  for (const entry of liveAttachmentViewers()) {
+    try { entry.win.webContents.send("relay:viewer:download", payload); } catch {}
+  }
+}
+
 // ---- window placement / visibility ---------------------------------------
 
 function anchorTopRight() {
@@ -5729,6 +6089,10 @@ ipcMain.on("relay:theme", (_event, value) => {
   for (const entry of livePreviews()) {
     if (!entry.rendererReady) continue;
     try { entry.win.webContents.send("relay:preview:theme", uiTheme); } catch {}
+  }
+  for (const entry of liveAttachmentViewers()) {
+    if (!entry.ready) continue;
+    try { entry.win.webContents.send("relay:viewer:theme", uiTheme); } catch {}
   }
 });
 
@@ -8660,6 +9024,53 @@ ipcMain.on("relay:openTask", (_e, taskId) => openTaskDetail(taskId));
 ipcMain.on("relay:openUrl", (_e, url) => openUrlTarget(url));
 ipcMain.handle("relay:openAttachment", (_e, relayId, attachmentId) => openRelayAttachment(relayId, attachmentId));
 ipcMain.handle("relay:previewAttachment", (_e, relayId, attachmentId) => previewRelayAttachment(relayId, attachmentId));
+// Attachments open in a Relay viewer window, are saved as a set, are revealed,
+// and are copied as an image — each one an explicit act, each one validated
+// here. The renderer hands ids and display strings; it never hands a path.
+ipcMain.handle("relay:openAttachmentViewer", (event, relayId, attachmentId, context) => {
+  if (!win || win.isDestroyed() || event.sender !== win.webContents) return { ok: false, error: "Not the pill." };
+  return openRelayAttachmentViewer(relayId, attachmentId, context);
+});
+ipcMain.handle("relay:revealAttachment", (_e, relayId, attachmentId) => revealRelayAttachment(relayId, attachmentId));
+ipcMain.handle("relay:copyAttachmentImage", (_e, relayId, attachmentId) => copyRelayAttachmentImage(relayId, attachmentId));
+ipcMain.handle("relay:downloadAttachments", (_e, items, options) =>
+  downloadRelayAttachments(items, options, reportAttachmentDownload));
+
+// ---- the viewer window's own, narrow surface ------------------------------
+// Every one of these answers ONLY a live viewer window, so nothing else in the
+// app can use them to turn an id into a file.
+ipcMain.on("relay:viewer:ready", (event) => {
+  const entry = viewerEntryForEvent(event);
+  if (!entry) return;
+  entry.ready = true;
+  if (sendAttachmentViewerPayload(entry)) showAttachmentViewer(entry);
+});
+ipcMain.handle("relay:viewer:item", (event, relayId, attachmentId) => {
+  if (!viewerEntryForEvent(event)) return { ok: false, error: "Not a viewer window." };
+  return attachmentViewerContent(relayId, attachmentId);
+});
+ipcMain.handle("relay:viewer:download", (event, items, options) => {
+  if (!viewerEntryForEvent(event)) return { ok: false, error: "Not a viewer window." };
+  return downloadRelayAttachments(items, options, reportAttachmentDownload);
+});
+ipcMain.handle("relay:viewer:reveal", (event, relayId, attachmentId) => {
+  if (!viewerEntryForEvent(event)) return { ok: false, error: "Not a viewer window." };
+  return revealRelayAttachment(relayId, attachmentId);
+});
+ipcMain.handle("relay:viewer:openDefault", (event, relayId, attachmentId) => {
+  if (!viewerEntryForEvent(event)) return { ok: false, error: "Not a viewer window." };
+  return openRelayAttachment(relayId, attachmentId);
+});
+ipcMain.handle("relay:viewer:copyImage", (event, relayId, attachmentId) => {
+  if (!viewerEntryForEvent(event)) return { ok: false, error: "Not a viewer window." };
+  return copyRelayAttachmentImage(relayId, attachmentId);
+});
+ipcMain.on("relay:viewer:window", (event, action) => {
+  const entry = viewerEntryForEvent(event);
+  if (!entry || entry.win.isDestroyed()) return;
+  if (action === "minimize") entry.win.minimize();
+  else if (action === "close") entry.win.close();
+});
 ipcMain.on("relay:ack", (_e, id) => ackPacket(id));
 ipcMain.handle("relay:ackMany", async (event, ids) => {
   if (!win || win.isDestroyed() || event.sender !== win.webContents || !chatReadPresenceIsAvailable(win)) {

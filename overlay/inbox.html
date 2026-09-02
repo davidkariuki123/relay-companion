@@ -1769,38 +1769,145 @@
     line-height:1.35; color:var(--muted-2); white-space:normal; }
   /* THE CARGO ZONE (the cargo law, drawn properly).
      A file belongs to the message above it, and belonging is said with
-     geometry — not with a box:
-       · it shares the bubble's LEFT EDGE (16px) and its 88% measure, because a
-         child may never out-measure its parent (the enclosure was wider than
-         the relay it hung off, David);
-       · it sits 5px under its own bubble and 14px clear of the next, so
-         proximity alone says whose it is;
-       · no border and no fill — the bubble is the object, the file is its
-         label. Two stacked rounded rectangles of different widths were two
-         objects competing;
-       · the size is a whisper right after the name, never flung to a
-         right-hand column with a table's worth of air between them. */
-  .th-cargo { display:flex; flex-wrap:wrap; align-items:baseline; gap:2px 16px; margin:5px 16px 14px; max-width:88%; width:fit-content; }
-  .th-cargo.mine { margin-left:auto; justify-content:flex-end; }
-  .th-cargo .td-att { flex:0 0 auto; display:inline-flex; align-items:baseline; gap:6px; min-width:0; max-width:100%;
-    margin:0; padding:0; border:0; border-radius:0; background:none; }
-  .th-cargo .td-att svg { align-self:center; opacity:.55; }
-  .th-cargo .td-att-name { font-family:var(--sans); font-size:11.5px; font-weight:500; color:var(--muted-1, var(--ink));
-    text-decoration:underline; text-underline-offset:2px; text-decoration-color:transparent; transition:text-decoration-color .16s ease; }
-  .th-cargo .td-att:hover .td-att-name { text-decoration-color:var(--edge); }
-  .th-cargo .td-att-meta { margin-left:0; font-family:var(--sans); font-size:10.5px; color:var(--muted-2); }
-  .th-cargo .td-att-meta::before { content:"·"; margin-right:5px; opacity:.7; }
-  .th-cargo .att-zone { margin:0; }
-  /* A revealed image must resolve against the room it is in. fit-content lets
-     the image's intrinsic width become the cargo width, which only happens to
-     fit in expanded mode and is clipped by the compact room. Image cargo gets
-     the same definite 88% measure as its message in every room. */
-  .th-cargo.image-cargo { width:88%; min-width:0; }
-  .th-cargo.image-cargo .att-zone,
-  .th-cargo.image-cargo .att-grid,
-  .th-cargo.image-cargo .att-fig,
-  .th-cargo.image-cargo .att-plate { min-width:0; max-width:100%; }
-  .th-cargo.image-cargo .att-grid { width:100%; }
+     geometry — it shares the bubble's LEFT EDGE (16px), sits 5px under its own
+     bubble and 14px clear of the next, so proximity alone says whose it is.
+     What CHANGED (Option A): the cargo is no longer a footnote in the bubble's
+     margin. An underlined chip read as link text about the message; each file
+     is now a bubble of its own — the same object the words are — and photos
+     drop the plate entirely and hug the picture. */
+  .th-cargo { display:flex; flex-direction:column; align-items:flex-start; gap:5px; margin:5px 16px 14px; max-width:88%; width:fit-content; }
+  .th-cargo.mine { margin-left:auto; align-items:flex-end; }
+  .ca-row { display:flex; align-items:center; gap:0; max-width:100%; min-width:0; }
+  .th-cargo.mine .ca-row { justify-content:flex-end; }
+
+  /* The 20px check circle lives in the gutter and is INERT until selection mode
+     turns it on, so entering the mode is a class flip rather than a re-render.
+     Turning it on shifts the content right by exactly 30px (20 + 10). */
+  .ca-check { display:none; flex:none; width:20px; height:20px; margin-right:10px; padding:0;
+    appearance:none; cursor:pointer; border:1.5px solid var(--edge); border-radius:var(--r-pill);
+    background:transparent; color:var(--on-accent); place-items:center;
+    transition:background-color var(--t-fast) var(--settle), border-color var(--t-fast) var(--settle); }
+  .ca-check svg { opacity:0; }
+  .ca-check:hover { border-color:var(--muted); background:var(--wash-2); }
+  .ca-check[aria-pressed="true"] { background:var(--accent); border-color:var(--accent); }
+  .ca-check[aria-pressed="true"] svg { opacity:1; }
+  #thHistory.selecting .ca-check { display:grid; }
+
+  /* A FILE BUBBLE: 32px glyph tile, name, meta. Outbound wears the accent wash
+     the way .th-msg.mine does, so a sent file is recognisably yours. */
+  .ca-att { position:relative; appearance:none; font:inherit; color:inherit; text-align:left; border:0; padding:0;
+    background:transparent; max-width:100%; min-width:0; }
+  button.ca-att { cursor:pointer; }
+  .ca-file { display:flex; align-items:center; gap:10px; width:fit-content; max-width:100%;
+    padding:7px 14px 7px 7px; border-radius:14px; background:var(--wash);
+    transition:background-color var(--t-fast) var(--settle); }
+  .ca-file.mine { background:color-mix(in srgb, var(--accent) 8%, transparent); }
+  button.ca-file:hover { background:var(--wash-2); }
+  button.ca-file.mine:hover { background:color-mix(in srgb, var(--accent) 13%, transparent); }
+  .ca-file .ca-tile { flex:none; width:32px; height:32px; display:grid; place-items:center;
+    border-radius:var(--r-2); background:var(--wash-2); color:var(--muted); }
+  .ca-file.mine .ca-tile { background:color-mix(in srgb, var(--accent) 14%, transparent); color:var(--accent); }
+  .ca-file .ca-col { display:flex; flex-direction:column; gap:2px; min-width:0; }
+  .ca-file .ca-name { font-family:var(--sans); font-size:12.5px; font-weight:600; color:var(--ink);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ca-file .ca-meta { font-family:var(--mono); font-size:10px; color:var(--muted-2); white-space:nowrap; }
+  /* While the viewer window is being opened the bubble stands back a little,
+     so a slow first resolve is a state rather than a dead click. */
+  .ca-att.opening { opacity:.72; }
+  .ca-att.downloading .ca-meta { color:var(--accent); }
+  .ca-att.failed .ca-meta { color:var(--danger); }
+  /* Downloading spins in the tile itself: the file's own place, not a modal. */
+  .ca-att.downloading .ca-tile > svg { display:none; }
+  .ca-att.downloading .ca-tile::after { content:""; width:14px; height:14px; border-radius:var(--r-pill);
+    border:1.5px solid color-mix(in srgb, var(--accent) 30%, transparent); border-top-color:var(--accent);
+    animation:caSpin .8s linear infinite; animation-play-state:var(--relay-loop-state); }
+  @keyframes caSpin { to { transform:rotate(360deg); } }
+  @media (prefers-reduced-motion:reduce) { .ca-att.downloading .ca-tile::after { animation:none; } }
+
+  /* A PHOTO BUBBLE hugs its picture. The wash is painted at the FINAL size
+     while the bytes are still coming, so the thread never jumps; a portrait
+     photo keeps its own shape once it lands, capped at 300px tall. */
+  .ca-photo { display:block; width:236px; max-width:100%; border-radius:14px; overflow:hidden; background:var(--wash); }
+  .ca-photo .att-plate { display:grid; place-items:center; width:100%; aspect-ratio:4 / 3;
+    border:0; border-radius:0; background:var(--wash); overflow:hidden; }
+  .ca-photo.portrait .att-plate { aspect-ratio:var(--ca-ar, 4 / 3); max-height:300px; }
+  .ca-photo.portrait { width:auto; max-height:300px; }
+  /* The shared .att-plate rules belong to .att-fig: its loading dot and its
+     .98 entrance scale. A cargo photo paints its own wash at the final size
+     and fills it edge to edge, so it opts out of both — the scale was
+     leaving a hairline of background inside every collage gutter. */
+  .ca-att .att-plate::before { display:none; }
+  .ca-photo .att-plate img { display:block; width:100%; height:100%; object-fit:cover; opacity:0;
+    transform:none; transition:opacity var(--t-slow) var(--settle); }
+  .ca-photo.ready .att-plate img { opacity:1; }
+  .ca-photo.pending .att-plate::before { display:block; content:""; width:5px; height:5px; background:var(--accent); opacity:.52; }
+  button.ca-photo:hover .att-plate img { filter:brightness(.94); }
+
+  /* A COLLAGE is ONE object with 2px gutters — that is how many sends it was,
+     not how many rectangles it drew. */
+  .ca-collage { display:grid; gap:2px; width:268px; max-width:100%; border-radius:14px; overflow:hidden; }
+  .ca-collage.ca-two { grid-template-columns:1fr 1fr; aspect-ratio:3 / 2; }
+  .ca-collage.ca-three { grid-template-columns:2fr 1fr; grid-template-rows:1fr 1fr; aspect-ratio:3 / 2; }
+  .ca-collage.ca-three > .ca-tile:first-child { grid-row:1 / span 2; }
+  .ca-collage.ca-four { grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; aspect-ratio:1; }
+  .ca-collage .ca-tile { position:relative; display:block; width:100%; height:100%; min-width:0; overflow:hidden; background:var(--wash); }
+  .ca-collage .ca-tile .att-plate { display:grid; place-items:center; width:100%; height:100%; border:0; border-radius:0; background:var(--wash); }
+  .ca-collage .ca-tile .att-plate img { display:block; width:100%; height:100%; object-fit:cover; opacity:0;
+    transform:none; transition:opacity var(--t-slow) var(--settle); }
+  .ca-collage .ca-tile.ready .att-plate img { opacity:1; }
+  .ca-collage .ca-tile.pending .att-plate::before { display:block; content:""; width:5px; height:5px; background:var(--accent); opacity:.52; }
+  .ca-more { position:absolute; inset:0; display:grid; place-items:center; font-size:16px; font-weight:600;
+    color:var(--ink); background:color-mix(in srgb, var(--bg) 62%, transparent); }
+  /* Progress and failure speak on the photo itself; a picture has no meta row. */
+  .ca-note { position:absolute; left:8px; bottom:8px; padding:2px 7px; border-radius:var(--r-1);
+    font-family:var(--mono); font-size:10px; color:var(--accent);
+    background:color-mix(in srgb, var(--bg) 78%, transparent); }
+  .ca-att.failed .ca-note { color:var(--danger); }
+
+  /* SELECTED: a ring, plus a dimming on photos so the ring is never the only
+     cue (it would vanish against a light picture). */
+  .ca-att.selected, .ca-row.selected > .ca-collage { outline:2px solid var(--accent); outline-offset:2px; }
+  .ca-row.selected .ca-photo .att-plate img,
+  .ca-row.selected .ca-collage .att-plate img { filter:brightness(.82); }
+
+  /* The header takeover while selecting, and the in-page attachment menu. */
+  /* The mockup sheet is 376 wide; the pill's real inner measure is 334, and at
+     17px "12 selected" does not fit beside both acts. The count is still the
+     largest thing in the bar — it is just sized to the room it is actually in. */
+  .th-select-bar { display:flex; align-items:center; gap:8px; padding:16px 16px 12px 16px; border-bottom:1px solid var(--hair); }
+  /* `.hidden` is scoped per component in this sheet, never global. Both bars
+     are sticky at the same top, so without these the takeover would simply
+     sit on top of the room header instead of replacing it. */
+  .th-select-bar.hidden, .th-detail-head.hidden { display:none; }
+  /* The count owns whatever is left AFTER the acts, never the other way round:
+     "7 selected" clipping to "7 sele…" is the one word in this bar that has to
+     be readable. */
+  .th-select-bar .cnt { flex:1 1 auto; font-size:15px; font-weight:600; color:var(--ink); min-width:0;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .th-select-bar button { appearance:none; cursor:pointer; border:0; font:inherit; flex:none; }
+  .th-select-bar .sb-x { display:flex; padding:0; background:transparent; color:var(--muted); }
+  .th-select-bar .sb-act { display:inline-flex; align-items:center; gap:6px; height:32px; padding:0 9px;
+    border-radius:var(--r-2); background:transparent; color:var(--muted); font-size:13px; font-weight:500; }
+  .th-select-bar .sb-act:hover { background:var(--wash-2); color:var(--ink); }
+  .th-select-bar .sb-act.pri { background:var(--accent); color:var(--on-accent); font-weight:600; padding:0 11px; }
+  .th-select-bar .sb-act.pri:hover { background:var(--accent); filter:brightness(1.06); }
+  .th-select-bar .sb-act[disabled] { opacity:.45; cursor:default; }
+  /* The composer stands down while selecting: the header takeover is the
+     only thing that acts, and a reply box under a selection is a second
+     answer to the same question. */
+  #thHistory.selecting .th-composer-dock, #thHistory.selecting .th-room-status { display:none; }
+
+  .att-menu { position:fixed; z-index:60; width:196px; padding:6px; border-radius:var(--r-3);
+    background:var(--bg); border:1px solid var(--hair); box-shadow:var(--shadow-pop);
+    display:flex; flex-direction:column; gap:1px; }
+  .att-menu button { display:flex; align-items:center; gap:10px; width:100%; height:32px; padding:0 10px;
+    appearance:none; cursor:pointer; border:0; border-radius:var(--r-2); background:transparent;
+    font-family:var(--sans); font-size:13px; color:var(--ink); text-align:left; }
+  .att-menu button svg { flex:none; color:var(--muted); }
+  .att-menu button:hover, .att-menu button.on { background:var(--wash-2); }
+  .att-menu .k { margin-left:auto; font-family:var(--mono); font-size:9.5px; color:var(--muted-3); }
+  .att-menu .sep { height:1px; margin:4px 6px; background:var(--hair); }
+
   /* The stream's entrance, copied from the Codex app's own markdown renderer. */
   @keyframes rdFadeIn { to { opacity:1; } }
   @keyframes rdActivityIn { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
@@ -2835,6 +2942,14 @@
             <button class="th-info th-slack-toggle hidden" type="button" id="thSlackVisibility" aria-pressed="false"><img src="slackMark.png" alt="" /><span id="thSlackVisibilityLabel">Show Slack</span></button>
             <button class="th-expand" type="button" id="thExpand" aria-label="Expand the conversation"><span class="xg">⤢</span><span class="xl">Expand</span></button>
           </div>
+          <!-- Selection takes the header over rather than adding a second bar:
+               while you are picking files, the room name is not the question. -->
+          <div class="th-select-bar th-bar-sticky hidden" id="thSelectBar">
+            <button type="button" class="sb-x" id="thSelectExit" aria-label="Leave selection"><svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+            <span class="cnt" id="thSelectCount">0 selected</span>
+            <button type="button" class="sb-act" id="thSelectAll">Select all</button>
+            <button type="button" class="sb-act pri" id="thSelectDownload"><svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5v8M4.5 7L8 10.5 11.5 7M3 13h10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg> Download</button>
+          </div>
           <div id="thHistory"></div>
         </div>
       </section>
@@ -3052,6 +3167,11 @@
     syncSlackVisibilityButton(room);
   }
   const thHistoryEl = document.getElementById("thHistory");
+  const thSelectBarEl = document.getElementById("thSelectBar");
+  const thSelectCountEl = document.getElementById("thSelectCount");
+  const thSelectAllEl = document.getElementById("thSelectAll");
+  const thSelectDownloadEl = document.getElementById("thSelectDownload");
+  const thSelectExitEl = document.getElementById("thSelectExit");
   const relayHostHoverIntent = window.RelayHoverIntent.installRelayHoverIntent({ document, window });
   const settingsViewEl = document.getElementById("settingsView");
   const signInBannerEl = document.getElementById("signInBanner");
@@ -3991,7 +4111,7 @@
     if (t.includes("zip") || t.includes("tar") || t.includes("compressed") || /\.(zip|tar|gz|tgz|7z|rar|dmg)$/.test(n)) return "archive";
     if (t.startsWith("audio/") || /\.(mp3|wav|m4a|aac|flac|ogg)$/.test(n)) return "audio";
     if (t.startsWith("video/") || /\.(mp4|mov|mkv|webm|avi)$/.test(n)) return "video";
-    if (t.includes("json") || t.includes("xml") || t.includes("javascript") || /\.(json|jsonl|ya?ml|xml|html?|css|[jt]sx?|py|rb|go|rs|sh|sql)$/.test(n)) return "code";
+    if (t.includes("json") || t.includes("xml") || t.includes("javascript") || /\.(json|jsonl|ya?ml|xml|html?|css|[jt]sx?|py|rb|go|rs|sh|sql|log)$/.test(n)) return "code";
     if (t.includes("wordprocessing") || t.includes("msword") || t.startsWith("text/") || /\.(docx?|rtf|odt|pages|txt|md)$/.test(n)) return "doc";
     return "file";
   }
@@ -4125,7 +4245,18 @@
         if (!src) { figure.dataset.loading = ""; return; }
         const img = document.createElement("img");
         img.alt = figure.querySelector(".td-att-name")?.textContent || "Image";
-        img.addEventListener("load", () => figure.classList.add("ready"), { once:true });
+        img.addEventListener("load", () => {
+          figure.classList.remove("pending");
+          figure.classList.add("ready");
+          // A photo bubble was painted at 4:3 so the thread would not jump while
+          // the bytes came. Now that the picture is here, a PORTRAIT one is
+          // allowed its own shape (capped at 300px tall) — the default was a
+          // placeholder, not a crop the sender chose.
+          if (figure.classList.contains("ca-photo") && img.naturalHeight > img.naturalWidth) {
+            figure.style.setProperty("--ca-ar", `${img.naturalWidth} / ${img.naturalHeight}`);
+            figure.classList.add("portrait");
+          }
+        }, { once:true });
         img.src = src;
         figure.querySelector(".att-plate")?.append(img);
       }).catch(() => { if (figure.isConnected) figure.dataset.loading = ""; });
@@ -4137,7 +4268,9 @@
   // same .row-err slot every other row action uses.
   function wireAttachmentChips(root) {
     hydrateAttachmentPlates(root);
-    for (const chip of root.querySelectorAll("[data-att-relay]")) {
+    // Chat cargo bubbles have their own delegated handler (open in a Relay
+    // viewer, not the OS), so they are deliberately not claimed here.
+    for (const chip of root.querySelectorAll("[data-att-relay]:not(.ca-att)")) {
       chip.addEventListener("click", async (event) => {
         event.stopPropagation();
         if (chip.disabled) return;
@@ -4155,6 +4288,553 @@
       });
     }
   }
+
+  // ---- chat attachment cargo (Option A) ------------------------------------
+  // THE CARGO LAW said where a file stands. This says what it LOOKS like once
+  // it stands there. An underlined chip reads as link text ABOUT the message;
+  // a bubble of its own reads as a thing you were sent — same weight as the
+  // words above it, its own object. Photos go further and drop the chrome
+  // entirely: a picture needs no plate, so the bubble hugs the picture. Several
+  // photos in one send are ONE collage, because that is how many sends it was,
+  // not how many rectangles it drew.
+  //
+  // Everything here is markup only. It takes no globals it cannot be handed,
+  // so the collage arithmetic can be unit-tested without a DOM.
+  const CARGO_PHOTO_WIDTH = 236;   // one photo, 4:3
+  const CARGO_COLLAGE_WIDTH = 268; // two or more, as one rounded object
+  const CARGO_COLLAGE_TILES = 4;   // beyond this the rest fold into "+N"
+
+  // The word after the size in a file bubble's meta ("11 KB · Log"). The icon
+  // families are drawing instructions; this is the one the human reads.
+  const FILE_KIND_LABEL = {
+    image: "Image", pdf: "PDF", sheet: "Sheet", archive: "Archive",
+    audio: "Audio", video: "Video", code: "Code", doc: "Document", file: "File",
+  };
+  function fileKindLabel(name, contentType) {
+    const n = String(name || "").toLowerCase();
+    // A few extensions carry a better word than their drawing family does.
+    if (/\.log$/.test(n)) return "Log";
+    if (/\.(?:docx?|pages|odt|rtf)$/.test(n)) return "Word";
+    if (/\.(?:txt|md|markdown)$/.test(n)) return "Text";
+    if (/\.(?:csv|tsv)$/.test(n)) return "CSV";
+    if (/\.zip$/.test(n)) return "Zip";
+    return FILE_KIND_LABEL[fileFamilyOf(name, contentType)] || "File";
+  }
+  function attachmentMetaText(attachment) {
+    const name = attachment?.filename || attachment?.name || "file";
+    const size = fmtBytes(attachment?.sizeBytes != null ? attachment.sizeBytes : attachment?.bytes);
+    const kind = fileKindLabel(name, attachment?.contentType);
+    return size ? `${size} · ${kind}` : kind;
+  }
+  function attachmentKey(relayId, attachmentId) {
+    return `${String(relayId || "")}::${String(attachmentId || "")}`;
+  }
+
+  const CARGO_CHECK_SVG = '<svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5L6.5 11.5 12.5 4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+  // One selectable object per row: the 20px circle sits in the 16px gutter and
+  // is inert (display:none) until selection mode turns it on, so entering the
+  // mode costs a class flip rather than a re-render of the whole room.
+  // `keys` is every attachment the row stands for — one for a file or a lone
+  // photo, all of them for a collage, which is one object and therefore one
+  // check. Selecting a collage has to mean selecting the photos in it, or
+  // Download would save the first and quietly drop the rest.
+  function cargoRowHtml(inner, { mine = false, keys = [], label = "" } = {}) {
+    const members = keys.filter(Boolean);
+    if (!members.length) return `<div class="ca-row${mine ? " mine" : ""}">${inner}</div>`;
+    const list = members.join("|");
+    return `<div class="ca-row${mine ? " mine" : ""}" data-att-row="${esc(members[0])}" data-att-keys="${esc(list)}">`
+      + `<button type="button" class="ca-check" data-att-check="${esc(list)}" data-stop="1"`
+      + ` aria-pressed="false" aria-label="Select ${esc(label)}" tabindex="-1">${CARGO_CHECK_SVG}</button>`
+      + inner
+      + `</div>`;
+  }
+
+  // A photo bubble is tail-less and has no fill of its own beyond the wash it
+  // paints WHILE LOADING — at the final size, so the thread never jumps when
+  // the bytes land.
+  function cargoPhotoHtml(attachment, { relayId = "", mine = false, tile = false, more = 0 } = {}) {
+    const name = attachment?.filename || attachment?.name || "Image";
+    const key = attachmentKey(relayId, attachment?.id);
+    const cls = `ca-att ${tile ? "ca-tile" : "ca-photo"}${mine ? " mine" : ""}`;
+    const overlay = more > 0 ? `<span class="ca-more" aria-hidden="true">+${more}</span>` : "";
+    const note = `<span class="ca-note" data-att-note="1" hidden></span>`;
+    if (!relayId || !attachment?.id) {
+      // Optimistic (just picked, not yet canonical) or queued after a restart:
+      // the same plate, without an id to open.
+      const previewUrl = /^(?:blob:|data:image\/)/i.test(String(attachment?.previewUrl || ""))
+        ? String(attachment.previewUrl)
+        : "";
+      return `<div class="${cls}${previewUrl ? " ready" : " pending"}" role="img" aria-label="Attached image: ${esc(name)}">`
+        + `<span class="att-plate" aria-hidden="true">${previewUrl ? `<img src="${esc(previewUrl)}" alt="">` : ""}</span>${overlay}${note}</div>`;
+    }
+    return `<button type="button" class="${cls} pending" data-att-relay="${esc(relayId)}" data-att-id="${esc(attachment.id)}"`
+      + ` data-att-key="${esc(key)}" data-att-kind="image" data-att-preview="1" data-att-name="${esc(name)}" data-stop="1"`
+      + ` title="${esc(name)}" aria-label="Open image ${esc(name)}">`
+      + `<span class="att-plate" aria-hidden="true"></span>${overlay}${note}</button>`;
+  }
+
+  // 2 → side by side. 3 → one tall left, two stacked right. 4+ → a 2×2 whose
+  // last tile carries "+N" for everything that did not fit. Two-pixel gutters:
+  // close enough that the set reads as one object, wide enough to count.
+  function cargoCollageHtml(images, { relayId = "", mine = false } = {}) {
+    const shown = images.slice(0, CARGO_COLLAGE_TILES);
+    const hidden = images.length - shown.length;
+    const shape = images.length === 2 ? "two" : images.length === 3 ? "three" : "four";
+    const tiles = shown.map((attachment, i) => cargoPhotoHtml(attachment, {
+      relayId,
+      mine,
+      tile: true,
+      more: hidden > 0 && i === shown.length - 1 ? hidden : 0,
+    })).join("");
+    return `<div class="ca-collage ca-${shape}${mine ? " mine" : ""}">${tiles}</div>`;
+  }
+
+  function cargoFileHtml(attachment, { relayId = "", mine = false } = {}) {
+    const name = attachment?.filename || attachment?.name || "file";
+    const meta = attachmentMetaText(attachment);
+    const key = attachmentKey(relayId, attachment?.id);
+    const inner = `<span class="ca-tile" aria-hidden="true">${fileIconSvg(fileFamilyOf(name, attachment?.contentType))}</span>`
+      + `<span class="ca-col"><span class="ca-name">${esc(name)}</span>`
+      + `<span class="ca-meta" data-att-meta="1">${esc(meta)}</span></span>`;
+    if (!relayId || !attachment?.id) return `<div class="ca-att ca-file${mine ? " mine" : ""}">${inner}</div>`;
+    return `<button type="button" class="ca-att ca-file${mine ? " mine" : ""}" data-att-relay="${esc(relayId)}"`
+      + ` data-att-id="${esc(attachment.id)}" data-att-key="${esc(key)}" data-att-kind="file" data-att-name="${esc(name)}"`
+      + ` data-att-meta-base="${esc(meta)}" data-stop="1" title="${esc(name)}" aria-label="Open ${esc(name)}">${inner}</button>`;
+  }
+
+  /**
+   * Everything one message sent, as the objects beneath its bubble: the photos
+   * first as one picture or one collage, then a file bubble each. Returns the
+   * inside of `.th-cargo` — the cargo law still decides where that sits.
+   */
+  function chatAttachmentCargo(attachments, { relayId = "", mine = false } = {}) {
+    const list = Array.isArray(attachments) ? attachments : [];
+    const images = list.filter(attachmentIsImage);
+    const files = list.filter((attachment) => !images.includes(attachment));
+    const rows = [];
+    const keysFor = (group) => (relayId
+      ? group.filter((attachment) => attachment?.id).map((attachment) => attachmentKey(relayId, attachment.id))
+      : []);
+    if (images.length === 1) {
+      rows.push(cargoRowHtml(cargoPhotoHtml(images[0], { relayId, mine }), {
+        mine,
+        keys: keysFor(images),
+        label: images[0]?.filename || images[0]?.name || "image",
+      }));
+    } else if (images.length > 1) {
+      // A collage is ONE object, so it gets one check — which stands for every
+      // photo inside it, including the ones folded behind "+N".
+      rows.push(cargoRowHtml(cargoCollageHtml(images, { relayId, mine }), {
+        mine,
+        keys: keysFor(images),
+        label: `${images.length} photos`,
+      }));
+    }
+    for (const file of files) {
+      rows.push(cargoRowHtml(cargoFileHtml(file, { relayId, mine }), {
+        mine,
+        keys: keysFor([file]),
+        label: file?.filename || file?.name || "file",
+      }));
+    }
+    return rows.join("");
+  }
+  // ---- end chat attachment cargo -------------------------------------------
+
+  // ---- attachments: selection, menu, viewers -------------------------------
+  // The room's whole cargo manifest, rebuilt with every row render. The viewer's
+  // filmstrip, Select all and Shift-ranges all read from this one ordered list,
+  // so "every image in this chat" means the same thing everywhere.
+  const roomAttachmentIndex = [];
+  let roomAttachmentChat = { key:"", title:"" };
+  // { key, ids:Set<attachmentKey>, anchor } — null when not selecting.
+  let attachmentSelection = null;
+  let attachmentMenuEl = null;
+
+  function attachmentIndexEntry(key) {
+    return roomAttachmentIndex.find((item) => attachmentKey(item.relayId, item.attachmentId) === key) || null;
+  }
+  function attachmentSelectionActive() {
+    return Boolean(attachmentSelection && attachmentSelection.key === roomAttachmentChat.key);
+  }
+
+  /**
+   * The reducer behind selection mode. Pure: state in, state out, so the click
+   * rules (plain toggle, ⌘-toggle, Shift-range, select all, exit) are one thing
+   * that can be reasoned about — and tested — without a DOM.
+   *
+   * `order` is the room's attachment keys, oldest first.
+   */
+  function attachmentSelectionReducer(state, action, order = []) {
+    const keys = Array.isArray(order) ? order : [];
+    const current = state && state.ids instanceof Set ? state : null;
+    // One action shape covers a file, a photo and a whole collage: `id` is
+    // shorthand for a group of one.
+    const members = (a) => (Array.isArray(a?.ids) ? a.ids : a?.id ? [a.id] : []).filter(Boolean);
+    const next = (ids, anchor) => ({
+      key: (action && action.key) || (current && current.key) || "",
+      ids,
+      anchor: anchor || "",
+    });
+    switch (action && action.type) {
+      case "enter": {
+        const ids = new Set(current ? current.ids : []);
+        for (const id of members(action)) ids.add(id);
+        return next(ids, members(action)[0] || (current && current.anchor) || "");
+      }
+      case "toggle": {
+        if (!current) return current;
+        const ids = new Set(current.ids);
+        const group = members(action);
+        // A collage is one check standing for several photos: it goes all on or
+        // all off, never half-selected.
+        const on = group.length > 0 && group.every((id) => ids.has(id));
+        for (const id of group) { if (on) ids.delete(id); else ids.add(id); }
+        // Emptying the selection does NOT leave the mode: the × and Esc are the
+        // way out, so unchecking the last item never yanks the header away.
+        return next(ids, group[0] || current.anchor);
+      }
+      case "range": {
+        if (!current) return current;
+        const head = members(action)[0] || "";
+        const from = keys.indexOf(current.anchor || head);
+        const to = keys.indexOf(members(action)[members(action).length - 1] || head);
+        if (from < 0 || to < 0) return attachmentSelectionReducer(current, { ...action, type:"toggle" }, keys);
+        const ids = new Set(current.ids);
+        for (let i = Math.min(from, to); i <= Math.max(from, to); i += 1) ids.add(keys[i]);
+        return next(ids, current.anchor || head);
+      }
+      case "all":
+        return next(new Set(keys), (current && current.anchor) || "");
+      case "exit":
+        return null;
+      default:
+        return current;
+    }
+  }
+
+  // Every attachment a clicked thing stands for: one photo or file, or all of a
+  // collage's photos. Read off the row so the check and the object agree.
+  function attachmentGroupOf(node) {
+    const row = node?.closest?.("[data-att-keys]");
+    const listed = String(row?.getAttribute("data-att-keys") || "").split("|").filter(Boolean);
+    if (listed.length) return listed;
+    const own = node?.getAttribute?.("data-att-key") || "";
+    return own ? [own] : [];
+  }
+
+  function attachmentOrderKeys() {
+    return roomAttachmentIndex.map((item) => attachmentKey(item.relayId, item.attachmentId));
+  }
+
+  function applyAttachmentSelection() {
+    if (!thHistoryEl) return;
+    // A selection belongs to ONE room. Walking into another one ends it rather
+    // than leaving a live Download button pointed at files you cannot see.
+    if (attachmentSelection && attachmentSelection.key !== roomAttachmentChat.key) attachmentSelection = null;
+    const active = attachmentSelectionActive();
+    thHistoryEl.classList.toggle("selecting", active);
+    thSelectBarEl?.classList.toggle("hidden", !active);
+    document.querySelector("#thDetail > .th-detail-head")?.classList.toggle("hidden", active);
+    const ids = active ? attachmentSelection.ids : new Set();
+    for (const row of thHistoryEl.querySelectorAll("[data-att-row]")) {
+      const group = String(row.getAttribute("data-att-keys") || "").split("|").filter(Boolean);
+      const on = group.length > 0 && group.every((key) => ids.has(key));
+      row.classList.toggle("selected", on);
+      const check = row.querySelector("[data-att-check]");
+      if (check) {
+        check.setAttribute("aria-pressed", on ? "true" : "false");
+        check.tabIndex = active ? 0 : -1;
+      }
+      for (const att of row.querySelectorAll(".ca-att")) att.classList.toggle("selected", on && !att.classList.contains("ca-tile"));
+    }
+    if (active && thSelectCountEl) {
+      const n = ids.size;
+      thSelectCountEl.textContent = `${n} selected`;
+      if (thSelectDownloadEl) thSelectDownloadEl.disabled = n === 0;
+    }
+  }
+
+  function setAttachmentSelection(action) {
+    const order = attachmentOrderKeys();
+    const base = attachmentSelectionActive() ? attachmentSelection : null;
+    attachmentSelection = attachmentSelectionReducer(base, { ...action, key:roomAttachmentChat.key }, order);
+    applyAttachmentSelection();
+  }
+  function exitAttachmentSelection() { setAttachmentSelection({ type:"exit" }); }
+
+  // ---- the in-page context menu -------------------------------------------
+  const ATT_MENU_ICON = {
+    open: "M9 3h4v4M13 3L7.5 8.5M11 9v3.5H3.5V5H7",
+    download: "M8 2.5v8M4.5 7L8 10.5 11.5 7M3 13h10",
+    reveal: "M2.5 4.5h4l1.5 1.5h5.5v6.5h-11z",
+    select: "M3 8.5l3 3 7-7",
+    copy: "M6 6h7v7H6zM3 10V3h7",
+    reply: "M6.5 4L3 7.5 6.5 11M3 7.5h6a4 4 0 0 1 4 4V13",
+  };
+  function attMenuIcon(name) {
+    return `<svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path d="${ATT_MENU_ICON[name]}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  }
+
+  /**
+   * What the menu offers for one attachment. A photo can be copied as an image;
+   * only a room that actually has a reply-to-message action offers Reply — a
+   * menu item that cannot do anything is worse than a shorter menu.
+   */
+  function attachmentMenuItems({ image = false, canReply = false } = {}) {
+    const items = [
+      { id:"open", label:"Open", hint:"↩" },
+      { id:"download", label:"Download", hint:"⌘S" },
+      { id:"reveal", label:"Reveal in Finder", hint:"" },
+      { id:"sep" },
+      { id:"select", label:"Select…", hint:"" },
+    ];
+    if (image) items.push({ id:"copy", label:"Copy image", hint:"⌘C" });
+    if (canReply) items.push({ id:"sep" }, { id:"reply", label:"Reply", hint:"" });
+    return items;
+  }
+
+  let attachmentMenuOpenedAt = 0;
+  function closeAttachmentMenu() {
+    attachmentMenuEl?.remove();
+    attachmentMenuEl = null;
+  }
+
+  function openAttachmentMenu(target, point) {
+    closeAttachmentMenu();
+    const key = target.getAttribute("data-att-key") || "";
+    const image = target.getAttribute("data-att-kind") === "image";
+    const cargo = target.closest(".th-cargo");
+    const replyTo = cargo?.getAttribute("data-att-reply") || "";
+    const items = attachmentMenuItems({ image, canReply:Boolean(replyTo) });
+    attachmentMenuOpenedAt = Date.now();
+    const menu = document.createElement("div");
+    menu.className = "att-menu";
+    menu.setAttribute("role", "menu");
+    menu.dataset.stop = "1";
+    menu.innerHTML = items.map((item) => item.id === "sep"
+      ? '<span class="sep" aria-hidden="true"></span>'
+      : `<button type="button" role="menuitem" data-att-menu="${esc(item.id)}">${attMenuIcon(item.id)}${esc(item.label)}${item.hint ? `<span class="k">${esc(item.hint)}</span>` : ""}</button>`
+    ).join("");
+    document.body.append(menu);
+    attachmentMenuEl = menu;
+
+    // The pill IS the world here: a menu that escaped the card would be drawn
+    // outside the native window and simply not exist. Clamp to the card.
+    const bounds = (cardEl || document.body).getBoundingClientRect();
+    const size = menu.getBoundingClientRect();
+    const left = Math.max(bounds.left + 6, Math.min(point.x, bounds.right - size.width - 6));
+    const top = Math.max(bounds.top + 6, Math.min(point.y, bounds.bottom - size.height - 6));
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(top)}px`;
+
+    const buttons = [...menu.querySelectorAll("[data-att-menu]")];
+    let cursor = 0;
+    const highlight = () => buttons.forEach((b, i) => b.classList.toggle("on", i === cursor));
+    highlight();
+    buttons[0]?.focus({ preventScroll:true });
+    menu.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        cursor = (cursor + (event.key === "ArrowDown" ? 1 : buttons.length - 1)) % buttons.length;
+        highlight();
+        buttons[cursor]?.focus({ preventScroll:true });
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        closeAttachmentMenu();
+        target.focus?.({ preventScroll:true });
+      }
+    });
+    for (const button of buttons) {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const action = button.getAttribute("data-att-menu");
+        closeAttachmentMenu();
+        runAttachmentMenuAction(action, { target, key, replyTo });
+      });
+    }
+    return menu;
+  }
+
+  function runAttachmentMenuAction(action, { target, key, replyTo }) {
+    const relayId = target.getAttribute("data-att-relay") || "";
+    const attachmentId = target.getAttribute("data-att-id") || "";
+    if (!relayId || !attachmentId) return;
+    if (action === "open") { openAttachmentTarget(target); return; }
+    if (action === "download") { downloadAttachmentKeys([key]); return; }
+    if (action === "reveal") { window.relay.revealAttachment?.(relayId, attachmentId); return; }
+    if (action === "copy") { window.relay.copyAttachmentImage?.(relayId, attachmentId); return; }
+    if (action === "select") { setAttachmentSelection({ type:"enter", ids:attachmentGroupOf(target) }); return; }
+    if (action === "reply" && replyTo) {
+      threadReplyTargets.set(roomAttachmentChat.key, replyTo);
+      renderThreadDetail();
+    }
+  }
+
+  // ---- opening -------------------------------------------------------------
+  // Neither photos nor files hand off to the OS any more: both open in a Relay
+  // viewer window. "Open in default app" still exists — inside that window,
+  // where it is a deliberate act rather than the only thing a click could do.
+  function openAttachmentTarget(target) {
+    const relayId = target.getAttribute("data-att-relay") || "";
+    const attachmentId = target.getAttribute("data-att-id") || "";
+    if (!relayId || !attachmentId || !window.relay.openAttachmentViewer) return;
+    setAttachmentBusy(target, true);
+    Promise.resolve(window.relay.openAttachmentViewer(relayId, attachmentId, {
+      chatKey: roomAttachmentChat.key,
+      chatTitle: roomAttachmentChat.title,
+      items: roomAttachmentIndex,
+    })).then((result) => {
+      if (!result || result.ok === false) markAttachmentFailed(target, (result && result.error) || "");
+    }).catch(() => markAttachmentFailed(target, "")).finally(() => setAttachmentBusy(target, false));
+  }
+
+  function setAttachmentBusy(target, busy) {
+    target.classList.toggle("opening", Boolean(busy));
+  }
+  function markAttachmentFailed(target, message) {
+    target.classList.remove("downloading");
+    target.classList.add("failed");
+    const meta = target.querySelector("[data-att-meta]");
+    if (meta) meta.textContent = message || "Couldn't download · Retry";
+    const note = target.querySelector("[data-att-note]");
+    if (note) { note.hidden = false; note.textContent = message || "Couldn't download · Retry"; }
+  }
+
+  // ---- downloads -----------------------------------------------------------
+  function downloadAttachmentKeys(keys) {
+    const items = keys
+      .map((key) => attachmentIndexEntry(key))
+      .filter(Boolean)
+      .map((item) => ({ relayId:item.relayId, attachmentId:item.attachmentId }));
+    if (!items.length || !window.relay.downloadAttachments) return Promise.resolve(null);
+    for (const item of items) markAttachmentDownloading(item, 0, 0);
+    return Promise.resolve(window.relay.downloadAttachments(items, { chatTitle:roomAttachmentChat.title }))
+      .then((result) => {
+        // The set is saved and revealed; selection mode has done its one job.
+        if (result && result.ok !== false && attachmentSelectionActive()) exitAttachmentSelection();
+        return result;
+      })
+      .catch(() => null);
+  }
+
+  function attachmentNodesFor(relayId, attachmentId) {
+    if (!thHistoryEl) return [];
+    return [...thHistoryEl.querySelectorAll(
+      `[data-att-relay="${CSS.escape(relayId)}"][data-att-id="${CSS.escape(attachmentId)}"]`,
+    )];
+  }
+  function markAttachmentDownloading({ relayId, attachmentId }, loaded, total) {
+    for (const node of attachmentNodesFor(relayId, attachmentId)) {
+      node.classList.remove("failed");
+      node.classList.add("downloading");
+      const text = total > 0 ? `${fmtBytes(loaded)} of ${fmtBytes(total)}` : "Downloading…";
+      const meta = node.querySelector("[data-att-meta]");
+      if (meta) meta.textContent = text;
+      const note = node.querySelector("[data-att-note]");
+      if (note) { note.hidden = false; note.textContent = text; }
+    }
+  }
+  function clearAttachmentDownloading({ relayId, attachmentId }) {
+    for (const node of attachmentNodesFor(relayId, attachmentId)) {
+      node.classList.remove("downloading", "failed");
+      const meta = node.querySelector("[data-att-meta]");
+      const base = node.getAttribute("data-att-meta-base");
+      if (meta && base) meta.textContent = base;
+      const note = node.querySelector("[data-att-note]");
+      if (note) { note.hidden = true; note.textContent = ""; }
+    }
+  }
+
+  window.relay.onAttachmentDownloadProgress?.((event) => {
+    const info = event || {};
+    const coords = { relayId:String(info.relayId || ""), attachmentId:String(info.attachmentId || "") };
+    if (!coords.relayId || !coords.attachmentId) return;
+    if (info.state === "error") {
+      for (const node of attachmentNodesFor(coords.relayId, coords.attachmentId)) markAttachmentFailed(node, info.error || "");
+      return;
+    }
+    if (info.state === "done") { clearAttachmentDownloading(coords); return; }
+    markAttachmentDownloading(coords, Number(info.loaded) || 0, Number(info.total) || 0);
+  });
+
+  // ---- one delegated wiring pass for the whole room ------------------------
+  // Delegation, once, on the history container: rows are rewritten on every
+  // payload push, and per-node listeners would have to be rebound each time.
+  function wireRoomAttachments() {
+    if (!thHistoryEl || thHistoryEl.dataset.attWired === "1") return;
+    thHistoryEl.dataset.attWired = "1";
+
+    thHistoryEl.addEventListener("click", (event) => {
+      const check = event.target.closest?.("[data-att-check]");
+      if (check) {
+        event.preventDefault();
+        event.stopPropagation();
+        setAttachmentSelection({ type:event.shiftKey ? "range" : "toggle", ids:attachmentGroupOf(check) });
+        return;
+      }
+      const target = event.target.closest?.(".ca-att[data-att-key]");
+      if (!target) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const group = attachmentGroupOf(target);
+      // ⌘-click adds to a selection without ever opening the menu, and starts
+      // one if none is running — the Finder gesture, in the thread.
+      if (event.metaKey || event.ctrlKey) {
+        setAttachmentSelection(attachmentSelectionActive() ? { type:"toggle", ids:group } : { type:"enter", ids:group });
+        return;
+      }
+      if (attachmentSelectionActive()) {
+        setAttachmentSelection({ type:event.shiftKey ? "range" : "toggle", ids:group });
+        return;
+      }
+      openAttachmentTarget(target);
+    }, true);
+
+    thHistoryEl.addEventListener("contextmenu", (event) => {
+      const target = event.target.closest?.(".ca-att[data-att-key]");
+      if (!target) return;
+      event.preventDefault();
+      event.stopPropagation();
+      // macOS turns ⌃-click into a contextmenu. A held modifier means "add this
+      // to the selection", which is the same intent whichever event carries it,
+      // so it never opens a menu the user did not ask for.
+      if (event.metaKey || event.ctrlKey) {
+        const group = attachmentGroupOf(target);
+        setAttachmentSelection(attachmentSelectionActive() ? { type:"toggle", ids:group } : { type:"enter", ids:group });
+        return;
+      }
+      openAttachmentMenu(target, { x:event.clientX, y:event.clientY });
+    });
+  }
+
+  // Esc, an outside click and any scroll close the menu; Esc also leaves
+  // selection mode, in that order — one Esc, one thing undone.
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    if (attachmentMenuEl) { closeAttachmentMenu(); return; }
+    if (attachmentSelectionActive()) { event.preventDefault(); exitAttachmentSelection(); }
+  }, true);
+  document.addEventListener("pointerdown", (event) => {
+    if (attachmentMenuEl && !event.target.closest?.(".att-menu")) closeAttachmentMenu();
+  }, true);
+  // Opening the menu focuses its first item, and a focus can itself scroll the
+  // room a hair; that scroll must not close the menu before the click lands.
+  window.addEventListener("scroll", () => {
+    if (Date.now() - attachmentMenuOpenedAt < 300) return;
+    closeAttachmentMenu();
+  }, true);
+  // The header takeover's four acts.
+  thSelectExitEl?.addEventListener("click", () => exitAttachmentSelection());
+  thSelectAllEl?.addEventListener("click", () => setAttachmentSelection({ type:"all" }));
+  thSelectDownloadEl?.addEventListener("click", () => {
+    if (!attachmentSelectionActive() || !attachmentSelection.ids.size) return;
+    downloadAttachmentKeys([...attachmentSelection.ids]);
+    exitAttachmentSelection();
+  });
+  // ---- end attachments: selection, menu, viewers ---------------------------
 
   // Tasks/share approvals are hidden from the pill until that product surface is ready.
   const RELAY_HIDDEN_KINDS = new Set(["task_request", "task", "share_approval"]); // requests live on their own board
@@ -12380,6 +13060,10 @@
   }, { passive: true });
   function renderThreads() {
     const showingDetail = Boolean(threadDetailId);
+    // Walking out of a room ends its selection here rather than waiting for the
+    // room's next render, which may never come: an identical repaint returns
+    // early, and the header would stay taken over by a bar for a closed room.
+    if (!showingDetail && attachmentSelection) { attachmentSelection = null; applyAttachmentSelection(); }
     thDetailEl.classList.toggle("gone", !showingDetail);
     renderChatRail();
     threadsListEl.classList.toggle("gone", showingDetail);
@@ -12794,6 +13478,11 @@
       [...thread.msgs].reverse().find((message) => !message.textLike && !message.request) || {}
     ).id || "");
     let previousChunkMessage = null;
+    // Every attachment in this room, oldest first, collected as the rows are
+    // built. The viewer's filmstrip and Select all both need the whole room,
+    // and the row loop is the one place that already knows each sender/time.
+    roomAttachmentIndex.length = 0;
+    roomAttachmentChat = { key:threadStateKey, title:String(roomName || voices || "Relay") };
     const rowsHtml = timeline.map((entry, i) => {
       if (entry.kind === "reaction") {
         const event = entry.event;
@@ -12827,7 +13516,9 @@
       // voice — sans, message-toned; a titled relay keeps the serif subject.
       const textLike = m.textLike;
       const attachments = Array.isArray(m.attachments) ? m.attachments : [];
-      const hasImageAttachments = attachments.some(attachmentIsImage);
+      // The attachment menu offers Reply only where the room actually has a
+      // reply-to-message action — the same condition the reply ghost uses.
+      const canReplyHere = !m.ownedAgent && !m.request && !groupPostingBlocked;
       const agentWorking = m.ownedAgent
         && !String(m.body || "").trim()
         && !String(m.agent || "").trim()
@@ -12902,7 +13593,21 @@
         // disappear at the final presentation boundary.
         if (!attachments.length) return "";
         const relayId = String(m.relayId || m.id || "");
-        return `<div class="th-cargo${hasImageAttachments ? " image-cargo" : ""}${mine ? " mine" : ""}">${attachmentPlates(attachments, { relayId })}</div>`;
+        // Option A: each attachment is its own bubble beneath the words, so the
+        // cargo no longer needs the room-relative 88% measure the old inline
+        // plates did — a photo bubble hugs its picture at a definite width.
+        roomAttachmentIndex.push(...attachments.map((attachment) => ({
+          relayId,
+          attachmentId: String(attachment?.id || ""),
+          name: String(attachment?.filename || attachment?.name || "file"),
+          contentType: String(attachment?.contentType || ""),
+          bytes: Number(attachment?.sizeBytes != null ? attachment.sizeBytes : attachment?.bytes) || 0,
+          image: attachmentIsImage(attachment),
+          sender: who,
+          at: String(m.at || ""),
+          messageId: String(m.id || ""),
+        })).filter((item) => item.attachmentId));
+        return `<div class="th-cargo${mine ? " mine" : ""}" data-att-msg="${esc(m.id)}"${canReplyHere ? ` data-att-reply="${esc(m.id)}"` : ""}>${chatAttachmentCargo(attachments, { relayId, mine })}</div>`;
       })()}
       ${(() => {
         // A receipt and a reply control are ABOUT the message, not part of it.
@@ -13154,6 +13859,8 @@
     wireReactionControls(thHistoryEl);
     wireTaskClaimControls(thHistoryEl, renderThreadDetail);
     wireAttachmentChips(thHistoryEl);
+    wireRoomAttachments();
+    applyAttachmentSelection();
     wireHostOpen(thHistoryEl);
     for (const button of thHistoryEl.querySelectorAll("[data-slack-thread-open]")) {
       button.addEventListener("click", (event) => {

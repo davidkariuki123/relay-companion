@@ -691,6 +691,91 @@ test("materializeAttachmentFiles refreshes stale signed URLs once and retries th
   }
 });
 
+test("materializeAttachmentFiles mints a participant-scoped URL before touching the web route", async () => {
+  const prevEnv = { RELAY_HOME: process.env.RELAY_HOME };
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-materializer-mint-"));
+  const relayHome = path.join(dir, "relay-home");
+  fs.mkdirSync(relayHome, { recursive: true });
+  const body = Buffer.from("minted bytes");
+  const hits = [];
+  const server = http.createServer((req, res) => {
+    hits.push(req.url);
+    if (req.url.includes("web-route")) {
+      // The durable openUrl is the browser app's route: a device-token fetch
+      // of it never succeeds.
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "attachment_unavailable" }));
+      return;
+    }
+    res.writeHead(200, { "Content-Type": "application/octet-stream", "Content-Length": body.length });
+    res.end(body);
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    process.env.RELAY_HOME = relayHome;
+    const { materializeAttachmentFiles } = await import(`../src/materializer.js?materializer-mint-test-${Date.now()}`);
+    const mintCalls = [];
+    const refreshCalls = [];
+    const row = await materializeAttachmentFiles(
+      {
+        id: "relay_mint",
+        attachments: [{ id: "att_1", name: "deck.pdf", bytes: body.length, openUrl: `${base}/web-route` }],
+        attachmentUrls: {},
+      },
+      {
+        mintUrl: async (relayId, attachmentId) => {
+          mintCalls.push(`${relayId}/${attachmentId}`);
+          return `${base}/minted`;
+        },
+        refreshUrls: async (r) => { refreshCalls.push(r.id); return null; },
+      },
+    );
+    assert.deepEqual(mintCalls, ["relay_mint/att_1"]);
+    assert.deepEqual(hits, ["/minted"], "the web route must never be fetched when a mint succeeds");
+    assert.deepEqual(refreshCalls, [], "a landed file needs no packet refresh");
+    assert.ok(row.attachments[0].localPath);
+    assert.equal(fs.readFileSync(row.attachments[0].localPath, "utf8"), body.toString());
+    assert.equal(row.attachments[0].openUrl, `${base}/web-route`, "the durable link stays the browser route");
+
+    // A staged sent item lists the durable web route under attachmentUrls; it
+    // must be recognised and routed through the mint, never fetched as signed.
+    const staged = await materializeAttachmentFiles(
+      {
+        id: "relay_mint_staged",
+        attachments: [{ id: "att_3", name: "deck.pdf", bytes: body.length, openUrl: `${base}/api/relays/relay_mint_staged/attachments/att_3/download` }],
+        attachmentUrls: { att_3: `${base}/api/relays/relay_mint_staged/attachments/att_3/download` },
+      },
+      { mintUrl: async () => `${base}/minted-staged`, refreshUrls: async () => null },
+    );
+    assert.ok(staged.attachments[0].localPath, "a staged sent attachment lands through the mint");
+    assert.ok(!hits.some((u) => u.includes("/api/relays/")), "the web route is never fetched");
+
+    // A second materialization of the same row must be served from the cache
+    // without minting again.
+    mintCalls.length = 0;
+    const again = await materializeAttachmentFiles(
+      { id: "relay_mint", attachments: [{ id: "att_1", name: "deck.pdf", bytes: body.length, openUrl: `${base}/web-route` }], attachmentUrls: {} },
+      { mintUrl: async () => { mintCalls.push("again"); return `${base}/minted`; }, refreshUrls: async () => null },
+    );
+    assert.deepEqual(mintCalls, []);
+    assert.ok(again.attachments[0].localPath);
+
+    // When the mint fails the durable route is still tried, then the refresh.
+    const failing = await materializeAttachmentFiles(
+      { id: "relay_mint_2", attachments: [{ id: "att_2", name: "deck.pdf", bytes: body.length, openUrl: `${base}/web-route` }], attachmentUrls: {} },
+      { mintUrl: async () => { throw new Error("offline"); }, refreshUrls: async () => ({ att_2: `${base}/refreshed` }) },
+    );
+    assert.ok(failing.attachments[0].localPath, "the refresh still rescues a failed mint");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    for (const [key, value] of Object.entries(prevEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
 test("sweepStaleAttachmentFiles removes only dirs older than the retention window", async () => {
   const prevEnv = { RELAY_HOME: process.env.RELAY_HOME };
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-materializer-sweep-"));

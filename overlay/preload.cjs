@@ -131,6 +131,45 @@ contextBridge.exposeInMainWorld("relay", {
     String(relayId || ""),
     String(attachmentId || ""),
   ),
+  // A click no longer hands the file to the OS: it opens a Relay viewer window.
+  // The third argument is the room's own manifest (ids + display strings only)
+  // so the viewer's filmstrip can be "every image in this chat"; main validates
+  // every field and resolves the bytes itself.
+  openAttachmentViewer: (relayId, attachmentId, context = {}) => ipcRenderer.invoke(
+    "relay:openAttachmentViewer",
+    String(relayId || ""),
+    String(attachmentId || ""),
+    {
+      chatKey: String(context?.chatKey || ""),
+      chatTitle: String(context?.chatTitle || ""),
+      items: Array.isArray(context?.items) ? context.items : [],
+    },
+  ),
+  // Save one item or a whole selection into ~/Downloads/Relay/<chat>/.
+  downloadAttachments: (items, options = {}) => ipcRenderer.invoke(
+    "relay:downloadAttachments",
+    Array.isArray(items) ? items.map((item) => ({
+      relayId: String(item?.relayId || ""),
+      attachmentId: String(item?.attachmentId || ""),
+    })) : [],
+    { chatTitle: String(options?.chatTitle || "") },
+  ),
+  // Per-item progress for the bubble meta — never a modal.
+  onAttachmentDownloadProgress: (cb) => {
+    const listener = (_event, payload) => cb(payload || {});
+    ipcRenderer.on("relay:attachmentDownload", listener);
+    return () => ipcRenderer.removeListener("relay:attachmentDownload", listener);
+  },
+  revealAttachment: (relayId, attachmentId) => ipcRenderer.invoke(
+    "relay:revealAttachment",
+    String(relayId || ""),
+    String(attachmentId || ""),
+  ),
+  copyAttachmentImage: (relayId, attachmentId) => ipcRenderer.invoke(
+    "relay:copyAttachmentImage",
+    String(relayId || ""),
+    String(attachmentId || ""),
+  ),
   refreshSent: () => ipcRenderer.invoke("relay:refreshSent"),
 
   // task mutations (return { ok, error?, conflict? })

@@ -142,6 +142,44 @@ func readHello(connection io.ReadWriteCloser, deadline time.Time) (*bufio.Reader
 	}
 }
 
+type runtimePointer struct {
+	PackageRoot string `json:"packageRoot"`
+	Node        string `json:"node"`
+	Active      bool   `json:"active"`
+}
+
+// resolveBroker keeps a descriptor written by an earlier release usable.
+//
+// The descriptor names an exact release's mcp-broker-entry.js; once the updater
+// retires that release the path is gone, and spawning it fails with ENOENT for
+// every host that still holds the old registration. The canonical runtime
+// pointer always names the live release, so consult it before giving up.
+func resolveBroker(node, entry string) (string, string) {
+	if _, err := os.Stat(entry); err == nil {
+		return node, entry
+	}
+	configDir := os.Getenv("RELAY_CONFIG_DIR")
+	if configDir == "" {
+		return node, entry
+	}
+	body, err := os.ReadFile(filepath.Join(configDir, "runtime", "current.json"))
+	if err != nil {
+		return node, entry
+	}
+	var pointer runtimePointer
+	if err := json.Unmarshal(body, &pointer); err != nil || !pointer.Active || pointer.PackageRoot == "" {
+		return node, entry
+	}
+	candidate := filepath.Join(pointer.PackageRoot, "src", "mcp-broker-entry.js")
+	if _, err := os.Stat(candidate); err != nil {
+		return node, entry
+	}
+	if _, err := os.Stat(node); err != nil && pointer.Node != "" {
+		node = pointer.Node
+	}
+	return node, candidate
+}
+
 func connect(desc descriptor, request hello, deadline time.Time) (io.ReadWriteCloser, *bufio.Reader, error) {
 	delays := []time.Duration{25, 50, 100, 200, 400, 500}
 	started := false
@@ -154,9 +192,10 @@ func connect(desc descriptor, request hello, deadline time.Time) (io.ReadWriteCl
 		}
 		if err != nil && !started {
 			started = true
-			if err := startDetached(desc.BrokerNode, []string{
+			brokerNode, brokerEntry := resolveBroker(desc.BrokerNode, desc.BrokerEntry)
+			if err := startDetached(brokerNode, []string{
 				"--max-old-space-size=512",
-				desc.BrokerEntry,
+				brokerEntry,
 				"--config-scope=" + desc.ConfigScopeID,
 				"--domain=" + desc.DomainID,
 			}, brokerEnvironment()); err != nil {

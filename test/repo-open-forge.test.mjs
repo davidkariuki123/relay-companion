@@ -19,6 +19,7 @@ import { claudeProjectKey } from "../src/claude-session-writer.js";
 
 const ENV_KEYS = [
   "RELAY_HOME",
+  "RELAY_OPEN_CWD",
   "CLAUDE_HOME",
   "CLAUDE_DESKTOP_SESSIONS_DIR",
   "RELAY_IMPORT_CLAUDE_DESKTOP",
@@ -141,7 +142,7 @@ test("a relay carrying repo identity forges its session into that repo", async (
   assert.equal(row.openWorkspaceKey, "git:github.com/acme/widgets");
 });
 
-test("a relay for a workspace this machine does not have refuses to forge in home", async (t) => {
+test("a relay for a workspace this machine does not have opens in the Relay folder, never the sender's path", async (t) => {
   const prev = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-repo-forge-miss-"));
   t.after(() => {
@@ -152,6 +153,7 @@ test("a relay for a workspace this machine does not have refuses to forge in hom
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
+  delete process.env.RELAY_OPEN_CWD;
   const { opened, row } = await openIn(
     dir,
     baseRow({
@@ -167,12 +169,20 @@ test("a relay for a workspace this machine does not have refuses to forge in hom
     }),
   );
 
-  assert.equal(opened.url, null);
-  assert.equal(opened.openedInHost, false);
-  assert.equal(opened.cwd, "");
-  assert.equal(opened.cwdReason, "workspace-unmapped");
-  assert.equal(row.openCwd, "");
-  assert.equal(row.openCwdReason, "workspace-unmapped");
-  assert.equal(row.openWorkspaceKey, "git:github.com/attacker/definitely-not-here");
-  assert.equal(row.claudeNativeSession, undefined);
+  // 9b9c0d6d: a product open of an unmatched passport lands in the dedicated
+  // Relay folder (where an unanchored Relay goes) instead of failing closed.
+  // The hostile sender path and home itself must still never be chosen.
+  const relayFolder = path.resolve(os.homedir(), "Relay");
+  assert.match(String(opened.url), /^claude:\/\/resume\?session=/);
+  assert.equal(opened.cwd, relayFolder);
+  assert.equal(opened.cwdReason, "workspace-unmapped-fallback");
+  assert.notEqual(opened.cwd, os.homedir());
+  assert.notEqual(opened.cwd, path.join(os.homedir(), ".ssh"));
+  assert.equal(row.openCwd, relayFolder);
+  assert.equal(row.openCwdReason, "workspace-unmapped-fallback");
+  assert.equal(row.openWorkspaceKey, "git:github.com/attacker/definitely-not-here", "the unmatched passport stays on record");
+  // The open really happened, and its session lives under the Relay folder's
+  // project key, not under home's or the sender's path.
+  const sessionPath = row.claudeNativeSession.sessionPath;
+  assert.ok(sessionPath.includes(claudeProjectKey(relayFolder)), sessionPath);
 });

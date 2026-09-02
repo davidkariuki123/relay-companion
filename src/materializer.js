@@ -710,7 +710,7 @@ async function materializeRowInHost({
   return { id, host: cleanHost, url, openedInHost, skipExternalOpen, claudeFreshlyForged, cwd, cwdReason, workspaceKey };
 }
 
-export async function materializeAttachmentFiles(row, { log = () => {}, refreshUrls = defaultRefreshAttachmentUrls } = {}) {
+export async function materializeAttachmentFiles(row, { log = () => {}, refreshUrls = defaultRefreshAttachmentUrls, mintUrl = defaultMintAttachmentUrl } = {}) {
   const attachments = Array.isArray(row?.attachments) ? row.attachments : [];
   if (!attachments.length) return row;
   const attachmentUrls = row?.attachmentUrls && typeof row.attachmentUrls === "object" ? row.attachmentUrls : {};
@@ -720,14 +720,35 @@ export async function materializeAttachmentFiles(row, { log = () => {}, refreshU
   for (const [index, attachment] of attachments.entries()) {
     if (!attachment || typeof attachment !== "object") continue;
     const name = String(attachment.name || attachment.filename || `attachment-${index + 1}`).trim() || `attachment-${index + 1}`;
-    const url = String(attachmentUrls[attachment.id] || attachment.openUrl || "").trim();
+    // Staged sent items copy each attachment's openUrl into attachmentUrls, so
+    // a "signed" entry may really be the durable web route. Sort that out here,
+    // at the one place that fetches, rather than at every producer.
+    const listed = String(attachmentUrls[attachment.id] || "").trim();
+    const signed = isDurableAttachmentWebRoute(listed) ? "" : listed;
+    const durable = String(attachment.openUrl || (signed ? "" : listed) || "").trim();
+    // The durable openUrl is the WEB app's route: it authenticates a browser
+    // session, so a device-token fetch of it is a guaranteed 404. When no fresh
+    // signed URL came with the row, ask the API for one first — that route is
+    // participant-scoped, so it also serves the sender, which the packet refresh
+    // below never does. Resolved lazily so a cached copy costs no request.
+    const relayId = String(row?.id || row?.relayId || "").trim();
+    const url = signed || (async () => {
+      if (!attachment.id || !relayId || typeof mintUrl !== "function") return durable;
+      try {
+        const minted = String((await mintUrl(relayId, attachment.id)) || "").trim();
+        if (minted) return minted;
+      } catch (error) {
+        log(`relay attachment URL mint failed for ${name}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      return durable;
+    });
     const localPath = await ensureAttachmentLocalCopy({ attachment, url, dir, name, index, log });
     if (!localPath && attachment.id) misses += 1;
     materialized.push({
       ...attachment,
       name,
       filename: name,
-      openUrl: url || attachment.openUrl,
+      openUrl: signed || durable || attachment.openUrl,
       ...(localPath ? { localPath } : {}),
     });
   }
@@ -859,6 +880,30 @@ function uniquePaths(values) {
 }
 
 /** Fresh signed attachment URLs for one staged row, via a single packet re-fetch. */
+/**
+ * The web app's durable attachment link: it authenticates a browser session,
+ * so fetching it with a device token is a guaranteed 404 and it must never be
+ * mistaken for a signed storage URL.
+ */
+export function isDurableAttachmentWebRoute(url) {
+  try {
+    return /\/api\/relays\/[^/]+\/attachments\/[^/]+\/download\/?$/.test(new URL(String(url || "")).pathname);
+  } catch {
+    return false;
+  }
+}
+
+async function defaultMintAttachmentUrl(relayId, attachmentId) {
+  const id = String(relayId || "").trim();
+  const att = String(attachmentId || "").trim();
+  // Encrypted relays carry their own attachment transport; the API route only
+  // knows legacy relay ids.
+  if (!id || !att || id.startsWith("erelay_") || id.startsWith("egmsg_")) return "";
+  const { RelayClient } = await import("./client.js");
+  const response = await new RelayClient().attachmentDownloadUrl(id, att);
+  return String(response?.url || "").trim();
+}
+
 async function defaultRefreshAttachmentUrls(row) {
   const id = String(row?.id || row?.relayId || "").trim();
   if (!id) return null;
@@ -877,10 +922,15 @@ async function ensureAttachmentLocalCopy({ attachment, url, dir, name, index, lo
   const filePath = path.join(dir, attachmentFileName(attachment, name, index));
   if (fs.existsSync(filePath) && sizeMatches(filePath, attachment.bytes)) return filePath;
   try {
+    // `url` may be a thunk so that minting a signed URL happens only once the
+    // cache checks above have missed.
+    const href = typeof url === "function" ? String((await url()) || "").trim() : url;
+    if (!href) return existing || "";
+    url = href;
     // A hung download must never wedge the pill click forever, and a runaway
     // Content-Length must not OOM the overlay. Time-box the fetch and cap the size;
     // the caller degrades gracefully to the open-in-browser URL on failure.
-    const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
+    const res = await fetch(href, { signal: AbortSignal.timeout(30000) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const cap = Math.max(Number(attachment.bytes) || 0, 0) || ATTACHMENT_DOWNLOAD_CAP;
     const limit = Math.min(Math.max(cap * 2, 1024 * 1024), ATTACHMENT_DOWNLOAD_CAP);
@@ -895,7 +945,11 @@ async function ensureAttachmentLocalCopy({ attachment, url, dir, name, index, lo
     fs.renameSync(tmp, filePath);
     return filePath;
   } catch (error) {
-    log(`relay attachment download failed for ${name}: ${error instanceof Error ? error.message : String(error)}`);
+    // Name the route that failed (never its signature) so a 404 from the web
+    // app's browser-only route is distinguishable from a dead storage key.
+    let where = "";
+    try { const u = new URL(typeof url === "function" ? "" : url); where = ` (${u.host}${u.pathname.slice(0, 48)})`; } catch {}
+    log(`relay attachment download failed for ${name}: ${error instanceof Error ? error.message : String(error)}${where}`);
     return existing || "";
   }
 }

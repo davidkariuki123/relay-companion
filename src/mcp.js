@@ -695,7 +695,7 @@ export const TOOLS = [
   {
     name: "relay_file_download",
     description:
-      "Get an authorized short-lived download URL for a Relay file visible to this human or agent. Relay mints the URL only after checking file ownership and visibility. Treat the URL as temporary private transport: never paste it into a message or Relay. To send a file to another person, pass its local path through relay_send instead.",
+      "Get an authorized short-lived download URL for one Relay file or chat attachment. Pass the `fileId` (or `id`) of an attachment from relay_chat_fetch, relay_inbox_list, relay_thread_fetch or relay_sent_list, or a task file id. Relay mints the URL only after checking that this human or agent may read the file or the message carrying it. Treat the URL as temporary private transport: never paste the private URL into correspondence. To send a file to another person, pass its local path through relay_send instead.",
     inputSchema: {
       type: "object",
       properties: {

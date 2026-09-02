@@ -1213,6 +1213,18 @@ export class RelayClient {
     return this.#req("GET", `/v1/files/${encodeURIComponent(fileId)}/download`);
   }
 
+  // A fresh signed URL for one chat attachment, scoped to the relay's
+  // participants. This is the one download path that works for the SENDER too:
+  // the packet refresh only serves recipients, and an attachment's durable
+  // openUrl is the web app's route, which wants a browser session, not a
+  // device token.
+  attachmentDownloadUrl(relayId, attachmentId) {
+    return this.#req(
+      "GET",
+      `/v1/relays/${encodeURIComponent(relayId)}/attachments/${encodeURIComponent(attachmentId)}/download-url`,
+    );
+  }
+
   openTaskInvitation(token) {
     return this.#req("GET", `/v1/task-invitations/${encodeURIComponent(token)}`, undefined, { auth: false });
   }

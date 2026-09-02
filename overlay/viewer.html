@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- The stage loads NOTHING from the network. Pictures and PDFs come from
+       file: URLs under the attachments store that main resolved; there is no
+       connect-src, so this window cannot be made to fetch anything at all. -->
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'none'; base-uri 'none'; form-action 'none'; connect-src 'none'; media-src 'none'; object-src 'none'; img-src 'self' file: data:; frame-src 'self' file:; font-src 'self' file:; script-src 'self'; style-src 'unsafe-inline'"
+  />
+  <title>Relay</title>
+  <style>
+    @font-face { font-family:'Newsreader'; font-style:normal; font-weight:200 800; font-display:block; src:url("fonts/newsreader-var.woff2") format("woff2"); }
+    @font-face { font-family:'Inter'; font-style:normal; font-weight:100 900; font-display:block; src:url("fonts/inter-var.woff2") format("woff2"); }
+    @font-face { font-family:'IBM Plex Mono'; font-style:normal; font-weight:400; font-display:block; src:url("fonts/plexmono-400.woff2") format("woff2"); }
+    @font-face { font-family:'IBM Plex Mono'; font-style:normal; font-weight:500; font-display:block; src:url("fonts/plexmono-500.woff2") format("woff2"); }
+
+    /* The pill's own token sheet, so day and night are the same two rooms. */
+    :root {
+      --bg:#FFFFFF;
+      --ink:#1F1A17; --ink-2:#2C2824;
+      --muted:#7C736B; --muted-2:#9A928A; --muted-3:#B7B1A6;
+      --accent:#305566; --on-accent:#FFFFFF;
+      --brand-anthropic:#D9704E; --brand-codex:#5F74F6;
+      --danger:#B4332A;
+      --hair:rgba(31,26,23,.07);
+      --wash:rgba(31,26,23,.03);
+      --wash-2:rgba(31,26,23,.06);
+      --edge:rgba(31,26,23,.16);
+      --stage:#F2F0EB;
+      --r-1:6px; --r-2:9px; --r-3:12px; --r-card:16px; --r-pill:999px;
+      --t-fast:.13s; --t-base:.2s;
+      --serif:'Newsreader',Georgia,serif;
+      --sans:'Inter',ui-sans-serif,system-ui,-apple-system,sans-serif;
+      --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,monospace;
+      --settle:cubic-bezier(.4,0,.2,1);
+    }
+    :root[data-theme="dark"] {
+      --bg:#221E1B;
+      --ink:#EDE7E1; --ink-2:#DDD6CE;
+      --muted:#A2988E; --muted-2:#837A71; --muted-3:#615950;
+      --accent:#8FB0C0; --on-accent:#16232A;
+      --brand-anthropic:#E08862; --brand-codex:#8B9BF9;
+      --danger:#E06258;
+      --hair:rgba(237,231,225,.08);
+      --wash:rgba(237,231,225,.04);
+      --wash-2:rgba(237,231,225,.07);
+      --edge:rgba(237,231,225,.18);
+      --stage:#141110;
+    }
+
+    * { box-sizing:border-box; }
+    html, body { margin:0; height:100%; overflow:hidden; }
+    body { display:flex; flex-direction:column; background:var(--bg); color:var(--ink);
+      font-family:var(--sans); font-size:13px; -webkit-font-smoothing:antialiased; cursor:default; }
+    button { appearance:none; border:0; background:transparent; font:inherit; color:inherit; cursor:pointer; }
+    [hidden] { display:none !important; }
+
+    /* The one draggable strip: the window has no frame of its own. */
+    .bar { -webkit-app-region:drag; display:flex; align-items:center; gap:12px; height:46px;
+      padding:0 14px 0 16px; border-bottom:1px solid var(--hair); flex:none; }
+    .bar button, .bar .ttl { -webkit-app-region:no-drag; }
+    .ttl { display:flex; align-items:baseline; gap:8px; min-width:0; flex:1; }
+    .ttl .n { font-size:12.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .ttl .m { font-family:var(--mono); font-size:10px; color:var(--muted-2); white-space:nowrap; }
+    .acts { display:flex; align-items:center; gap:4px; }
+    .ab { display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 9px; border-radius:var(--r-2);
+      color:var(--muted); font-size:12px; font-weight:500; transition:background-color var(--t-fast) var(--settle); }
+    .ab:hover { background:var(--wash-2); color:var(--ink); }
+    .ab.pri { background:var(--accent); color:var(--on-accent); font-weight:600; padding:0 11px; }
+    .ab.ic { width:28px; padding:0; justify-content:center; }
+    .wc { display:flex; align-items:center; gap:2px; margin-left:6px; padding-left:10px;
+      border-left:1px solid var(--hair); color:var(--muted-2); }
+
+    /* The IMAGE stage. Arrows appear on hover and on keyboard focus. */
+    .stage { position:relative; flex:1 1 auto; display:flex; align-items:center; justify-content:center;
+      min-height:0; overflow:auto; padding:18px 56px; background:var(--bg); }
+    .stage img { display:block; max-width:100%; max-height:100%; height:auto; border-radius:var(--r-3); object-fit:contain; }
+    .stage.actual { align-items:flex-start; justify-content:flex-start; }
+    .stage.actual img { max-width:none; max-height:none; }
+    .arr { position:absolute; top:50%; transform:translateY(-50%); width:32px; height:32px; display:grid;
+      place-items:center; border-radius:var(--r-pill); background:var(--wash-2); color:var(--muted);
+      opacity:0; transition:opacity var(--t-base) var(--settle); }
+    .stage:hover .arr, .arr:focus-visible { opacity:1; }
+    .arr.l { left:14px; } .arr.r { right:14px; }
+    .arr[disabled] { display:none; }
+
+    .strip { display:flex; align-items:center; justify-content:center; gap:6px; height:64px; padding:0 16px;
+      border-top:1px solid var(--hair); flex:none; overflow-x:auto; }
+    .th { flex:none; width:44px; height:44px; border-radius:var(--r-2); overflow:hidden; opacity:.55; padding:0;
+      transition:opacity var(--t-fast) var(--settle); }
+    .th:hover { opacity:.85; }
+    .th.on { opacity:1; outline:2px solid var(--accent); outline-offset:2px; }
+    .th img { width:100%; height:100%; object-fit:cover; display:block; }
+
+    /* The FILE stages: a header card, then text, a PDF, or the no-preview card. */
+    .fh { display:flex; align-items:center; gap:12px; padding:14px 16px; border-bottom:1px solid var(--hair); flex:none; }
+    .tile { flex:none; width:40px; height:40px; border-radius:10px; display:grid; place-items:center;
+      background:var(--wash-2); color:var(--muted); font-family:var(--mono); font-size:9.5px; font-weight:500; letter-spacing:.04em; }
+    /* Prefixed, because ".code" and ".pdf" already name the two content panes
+       below and a tile wearing one of those inherited its layout. */
+    .tile.k-text { background:color-mix(in srgb, var(--brand-codex) 16%, transparent); color:var(--brand-codex); }
+    .tile.k-pdf { background:color-mix(in srgb, var(--brand-anthropic) 16%, transparent); color:var(--brand-anthropic); }
+    .fh .c { display:flex; flex-direction:column; gap:3px; flex:1; min-width:0; }
+    .fh .n { font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .fh .m { font-size:11.5px; color:var(--muted-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+    .code { flex:1 1 auto; overflow:auto; padding:14px 18px; margin:0; font-family:var(--mono); font-size:11px;
+      line-height:1.6; color:var(--muted); white-space:pre; }
+    .code .ln { display:block; }
+    .code .n { display:inline-block; min-width:34px; color:var(--muted-3); user-select:none; }
+    /* A log is read for the line that went wrong; only that line is tinted. */
+    .code .ln.bad { color:var(--danger); }
+    .code .more { display:block; margin-top:10px; color:var(--muted-3); }
+
+    .pdf { flex:1 1 auto; min-height:0; border:0; width:100%; background:var(--stage); }
+    .none { flex:1 1 auto; display:grid; place-items:center; padding:20px; }
+    .none .card { display:flex; flex-direction:column; align-items:center; gap:14px; padding:26px 32px;
+      border:1px solid var(--hair); border-radius:14px; text-align:center; }
+    .none .card .tile { width:56px; height:56px; border-radius:14px; }
+    .none .t { font-size:13px; color:var(--muted); line-height:1.5; }
+    .none .t b { display:block; color:var(--ink); font-weight:600; }
+    .none .ab.pri { height:34px; }
+
+    .msg { flex:1 1 auto; display:grid; place-items:center; padding:24px; color:var(--muted-2);
+      font-size:13px; text-align:center; line-height:1.5; }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <span class="ttl"><span class="n" id="vName">Relay</span><span class="m" id="vMeta"></span></span>
+    <span class="acts" id="vActs">
+      <button type="button" class="ab" id="vDownload"></button>
+      <button type="button" class="ab" id="vReveal"></button>
+      <button type="button" class="ab ic" id="vMore" aria-label="More actions" aria-haspopup="true"></button>
+    </span>
+    <span class="wc">
+      <button type="button" class="ab ic" id="vMin" aria-label="Minimise"></button>
+      <button type="button" class="ab ic" id="vClose" aria-label="Close"></button>
+    </span>
+  </div>
+
+  <div class="msg" id="vMessage">Opening…</div>
+
+  <!-- image -->
+  <div class="stage" id="vStage" hidden>
+    <button type="button" class="arr l" id="vPrev" aria-label="Previous image"></button>
+    <img id="vImage" alt="" />
+    <button type="button" class="arr r" id="vNext" aria-label="Next image"></button>
+  </div>
+  <div class="strip" id="vStrip" hidden></div>
+
+  <!-- file -->
+  <div class="fh" id="vFileHead" hidden>
+    <span class="tile" id="vFileTile"></span>
+    <span class="c"><span class="n" id="vFileName"></span><span class="m" id="vFileMeta"></span></span>
+  </div>
+  <pre class="code" id="vText" hidden></pre>
+  <iframe class="pdf" id="vPdf" hidden title="PDF"></iframe>
+  <div class="none" id="vNone" hidden>
+    <div class="card">
+      <span class="tile" id="vNoneTile"></span>
+      <span class="t"><b id="vNoneName"></b><span id="vNoneWhat"></span></span>
+      <button type="button" class="ab pri" id="vNoneDownload"></button>
+    </div>
+  </div>
+
+  <script src="./viewer-renderer.js"></script>
+</body>
+</html>

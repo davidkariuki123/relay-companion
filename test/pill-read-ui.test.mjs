@@ -99,19 +99,20 @@ test("attachments use image plates and quiet file rows backed only by main-proce
   // THE CARGO LAW: files stand free BENEATH the bubble, in their own zone —
   // never inside it, where the enclosure outweighed the relay itself.
   assert.match(html, /const attachments = Array\.isArray\(m\.attachments\) \? m\.attachments : \[\]/);
-  assert.match(html, /attachmentPlates\(attachments, \{ relayId \}\)/);
+  // The chat thread now builds Option A bubbles instead of the inline plates —
+  // the reader and the relay list still use attachmentPlates above.
+  assert.match(html, /chatAttachmentCargo\(attachments, \{ relayId, mine \}\)/);
   assert.doesNotMatch(html, /function relayAttachmentsForId\(/,
     "the renderer cannot fall back to an inbound-only attachment lookup");
   assert.match(html, /attachmentOnly = textLike && attachments\.length > 0/);
   assert.match(html, /\.th-msg\.attachment-only \{ display:contents; \}/,
     "file-only messages omit the fake filename bubble while retaining message semantics");
-  assert.match(html, /const hasImageAttachments = attachments\.some\(attachmentIsImage\)/);
-  assert.match(html, /th-cargo\$\{hasImageAttachments \? " image-cargo" : ""\}/,
-    "image messages opt into room-relative cargo geometry");
-  assert.match(html, /\.th-cargo\.image-cargo \{ width:88%; min-width:0; \}/,
-    "compact and expanded rooms give image cargo the same definite responsive measure");
-  assert.match(html, /\.th-cargo\.image-cargo \.att-grid \{ width:100%; \}/,
-    "the image grid resolves against its room instead of the image's intrinsic width");
+  // A photo bubble now hugs its picture at a definite width (236 / 268), so the
+  // old room-relative 88% image-cargo measure has no work left to do.
+  assert.doesNotMatch(html, /image-cargo/,
+    "photo bubbles carry their own measure instead of borrowing the room's");
+  assert.match(html, /\.ca-photo \{ display:block; width:236px;/);
+  assert.match(html, /\.ca-collage \{ display:grid; gap:2px; width:268px;/);
   assert.match(html, /window\.relay\.openAttachment\(relayId, chip\.getAttribute\("data-att-id"\)\)/);
   assert.match(html, /window\.relay\.previewAttachment/);
   assert.match(html, /class="att-plate"/);

@@ -136,6 +136,34 @@ test("a LIVE relay_companion entry is a duplicate of relay and is retired on ins
   assert.deepEqual(out.mcpServers.other, { command: "/keep" });
 });
 
+test("both bridge filenames are recognised, so an update never orphans a registration", () => {
+  // The installed bridge used to carry a hash in its name; entries written by
+  // those releases are still in people's configs alongside the stable name, and
+  // both have to be matched or a dead one is left crash-looping forever.
+  const stable = { command: "/Users/x/.relay/bin/mcp-bridge", args: ["--descriptor", "/Users/x/.relay/run/mcp/broker-v1.json"] };
+  const stableExe = { command: "C:\\Users\\x\\.relay\\bin\\mcp-bridge.exe", args: [] };
+  const fingerprinted = { command: "/Users/x/.relay/bin/mcp-bridge-0123456789abcdef", args: [] };
+
+  assert.equal(isDeadRelayEntry("relay", stable, () => false), true);
+  assert.equal(isDeadRelayEntry("relay", stable, () => true), false);
+  assert.equal(isDeadRelayEntry("relay", stableExe, () => false), true);
+  assert.equal(isDeadRelayEntry("relay", fingerprinted, () => false), true);
+  assert.equal(isLegacyRelayCompanionEntry("relay_companion", stable), true);
+  assert.equal(isLegacyRelayCompanionEntry("relay_companion", stableExe), true);
+
+  // A bridge-shaped path outside ~/.relay/bin is not ours to declare dead.
+  assert.equal(isDeadRelayEntry("relay", { command: "/opt/other/mcp-bridge", args: [] }, () => false), false);
+});
+
+test("the relay key is rewritten to the stable bridge even when it already holds a fingerprinted one", () => {
+  const existing = JSON.stringify({
+    mcpServers: { relay: { command: "/Users/x/.relay/bin/mcp-bridge-0123456789abcdef", args: ["--descriptor", "/d"] } },
+  });
+  const entry = { command: "/Users/x/.relay/bin/mcp-bridge", args: ["--descriptor", "/d"] };
+  const { text } = mergeClaudeDesktopConfig(existing, entry, { exists: () => true });
+  assert.deepEqual(JSON.parse(text).mcpServers.relay, entry);
+});
+
 test("node resolves to a stable symlink rather than a version-pinned Cellar path", () => {
   // Claude Desktop's curated PATH has no nvm/fnm shims, and /opt/homebrew/bin/node
   // survives a `brew upgrade node` where the Cellar path does not.
