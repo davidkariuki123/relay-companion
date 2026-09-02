@@ -33,6 +33,10 @@ function productFeatures(options = {}) {
     environment,
     developer,
     requests: developer,
+    // Todo is still in product development. Keep the complete surface on
+    // local/dev builds while staging and production exercise the currently
+    // shipped customer navigation.
+    todo: environment === "local" || environment === "dev",
     // Slack is an internal proving surface alongside Tasks. Staging and
     // production exercise the customer product, even for developer accounts.
     slack: developer,

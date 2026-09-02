@@ -21,22 +21,22 @@ const ORDINARY_SURFACES = {
 
 test("developer capabilities require both the server-owned role and a non-production environment", () => {
   assert.deepEqual(productFeatures({ env: { NODE_ENV: "development" }, user: ORDINARY_USER }), {
-    environment: "local", developer: false, requests: false, cowork: false, ...ORDINARY_SURFACES,
+    environment: "local", developer: false, requests: false, todo: true, cowork: false, ...ORDINARY_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { NODE_ENV: "development" }, user: DEVELOPER }), {
-    environment: "local", developer: true, requests: true, cowork: false, ...DEVELOPER_SURFACES,
+    environment: "local", developer: true, requests: true, todo: true, cowork: false, ...DEVELOPER_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { RELAY_UPDATE_CHANNEL: "dev" }, user: DEVELOPER }), {
-    environment: "dev", developer: true, requests: true, cowork: false, ...DEVELOPER_SURFACES,
+    environment: "dev", developer: true, requests: true, todo: true, cowork: false, ...DEVELOPER_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { RELAY_UPDATE_CHANNEL: "staging" }, user: DEVELOPER }), {
-    environment: "staging", developer: false, requests: false, cowork: false, ...ORDINARY_SURFACES,
+    environment: "staging", developer: false, requests: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { RELAY_ENV: "staging" }, user: DEVELOPER }), {
-    environment: "staging", developer: false, requests: false, cowork: false, ...ORDINARY_SURFACES,
+    environment: "staging", developer: false, requests: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: {}, user: DEVELOPER }), {
-    environment: "production", developer: false, requests: false, cowork: false, ...ORDINARY_SURFACES,
+    environment: "production", developer: false, requests: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
   });
 });
 
@@ -153,12 +153,14 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
   }
 });
 
-test("the first payload render reconciles feature-gated navigation", () => {
+test("the first payload render keeps Todo on dev and removes it from customer navigation", () => {
   const source = fs.readFileSync(path.join(here, "../overlay/inbox.html"), "utf8");
   const body = source.slice(source.indexOf("function renderAll()"), source.indexOf("markAllReadEl.addEventListener", source.indexOf("function renderAll()")));
   assert.match(body, /syncTabs\(\);/);
-  assert.doesNotMatch(source, /view === "tasks" && payload\.features\?\.requests !== true/,
-    "Todo is available for ordinary managed Relays even when Task execution is gated");
+  assert.match(source, /view === "tasks" && payload\.features\?\.todo !== true/);
+  assert.match(source, /payload\.features\?\.todo !== true && activeView === "tasks"/);
+  assert.match(source, /payload\.features\?\.todo === true && incomingAccount/,
+    "hidden environments must not fetch Todo data in the background");
   assert.match(source, /data-view="tasks">Todo/);
   assert.match(source, /view === "slack" && payload\.features\?\.slack !== true/);
 });

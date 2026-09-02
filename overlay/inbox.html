@@ -4465,7 +4465,7 @@
 
   // ---------- state ----------
   let activeView = "relays";
-  let payload = { account: { paired: false }, ui: { canDismiss: true, reopenSurface: "the Relay icon", setupTutorialPending:false }, features: { requests:false, slack:false, peopleMentions:true, agentMentions:false, cowork:false, messageMutations:false, environment:"production" }, pendingOpen:null, relays: [], sent: [], requests: [], contacts: [], chats: [], slackChats: [] };
+  let payload = { account: { paired: false }, ui: { canDismiss: true, reopenSurface: "the Relay icon", setupTutorialPending:false }, features: { requests:false, todo:false, slack:false, peopleMentions:true, agentMentions:false, cowork:false, messageMutations:false, environment:"production" }, pendingOpen:null, relays: [], sent: [], requests: [], contacts: [], chats: [], slackChats: [] };
   const canonicalChatDetails = new Map();
   const canonicalChatFingerprints = new Map();
   const canonicalChatDetailProjectionKeys = new Map();
@@ -15336,8 +15336,11 @@
       : activeView;
     for (const tab of tabEls) {
       const view = tab.getAttribute("data-view");
-      tab.classList.toggle("gone",
-        view === "slack" && payload.features?.slack !== true);
+      tab.classList.toggle("gone", (
+        view === "tasks" && payload.features?.todo !== true
+      ) || (
+        view === "slack" && payload.features?.slack !== true
+      ));
       tab.classList.toggle("active", view === tabView);
     }
   }
@@ -15394,7 +15397,7 @@
     if (activeView === "sent" && viewChanged && window.relay.refreshSent) {
       window.relay.refreshSent().catch(() => {});
     }
-    if (activeView === "tasks" && viewChanged) loadTodo();
+    if (activeView === "tasks" && payload.features?.todo === true && viewChanged) loadTodo();
     // The reader — or an expanded conversation — holds the card at READER size.
     syncCardSize(activeView === "reader" || (activeView === "threads" && chatExpanded));
   }
@@ -15635,7 +15638,7 @@
     ]));
     const todoProjectionChanged = nextTodoProjectionSignature !== todoProjectionSignature;
     todoProjectionSignature = nextTodoProjectionSignature;
-    if (incomingAccount?.paired !== false && (!todoState.loaded || todoProjectionChanged)) {
+    if (payload.features?.todo === true && incomingAccount?.paired !== false && (!todoState.loaded || todoProjectionChanged)) {
       if (todoRefreshTimer) clearTimeout(todoRefreshTimer);
       todoRefreshTimer = setTimeout(() => {
         todoRefreshTimer = null;
@@ -15663,6 +15666,9 @@
     // survive a repaint, a room switch and a restart of the pill itself.
     syncOutboxProjection();
     if (payload.features?.requests !== true && activeView === "requestDetail") {
+      activeView = "relays";
+    }
+    if (payload.features?.todo !== true && activeView === "tasks") {
       activeView = "relays";
     }
     if (payload.features?.slack !== true && (activeView === "slack" || threadsSource === "slack")) {
