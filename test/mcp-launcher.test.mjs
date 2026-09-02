@@ -135,9 +135,15 @@ test("a fingerprinted bridge a host config still names survives; an unreferenced
   const binDir = path.join(homeDir, ".relay", "bin");
   const referenced = path.join(binDir, "mcp-bridge-aaaaaaaaaaaaaaaa");
   const orphan = path.join(binDir, "mcp-bridge-bbbbbbbbbbbbbbbb");
+  const justReplaced = path.join(binDir, "mcp-bridge-cccccccccccccccc");
   fs.mkdirSync(binDir, { recursive: true });
   fs.writeFileSync(referenced, "old-release-still-registered");
   fs.writeFileSync(orphan, "old-release-nobody-runs");
+  // An app that was open when its registration moved to the stable name still
+  // holds this path; only age, not the config, says when it is safe to drop.
+  fs.writeFileSync(justReplaced, "release-before-the-stable-name");
+  const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  fs.utimesSync(orphan, monthAgo, monthAgo);
 
   fs.mkdirSync(env.CLAUDE_USER_DATA_DIR, { recursive: true });
   fs.writeFileSync(
@@ -151,7 +157,8 @@ test("a fingerprinted bridge a host config still names survives; an unreferenced
 
   assert.equal(installed, stableNativeMcpBridgePath(homeDir));
   assert.equal(fs.existsSync(referenced), true, "a bridge Claude Desktop still execs is never deleted");
-  assert.equal(fs.existsSync(orphan), false, "nothing points at this one, so it goes");
+  assert.equal(fs.existsSync(orphan), false, "nothing points at this one and it is old, so it goes");
+  assert.equal(fs.existsSync(justReplaced), true, "an unreferenced bridge younger than the retention window survives");
 });
 
 test("a config we cannot parse means keep everything, never delete everything", () => {

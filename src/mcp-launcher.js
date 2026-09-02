@@ -140,7 +140,14 @@ export function referencedMcpBridgePaths({
  * points at. The stable name is never a candidate — it is the path every fresh
  * registration carries.
  */
-function pruneUnreferencedMcpBridges({ binDir, registered, homeDir, env, platform }) {
+// How long a fingerprinted bridge outlives its last config reference. A host
+// app reads its config once at launch and keeps it: the day a registration
+// moves to the stable name, the app that is still open holds the old path, and
+// the daemon's next registration pass would otherwise sweep that file while the
+// app can still spawn it. Two weeks comfortably outlasts any app session.
+export const MCP_BRIDGE_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
+
+function pruneUnreferencedMcpBridges({ binDir, registered, homeDir, env, platform, retainRecentMs = MCP_BRIDGE_RETENTION_MS, now = Date.now() }) {
   let referenced;
   try {
     referenced = referencedMcpBridgePaths({ homeDir, env, platform });
@@ -156,6 +163,11 @@ function pruneUnreferencedMcpBridges({ binDir, registered, homeDir, env, platfor
     if (!FINGERPRINTED_MCP_BRIDGE_NAME.test(name)) continue;
     const file = path.join(binDir, name);
     if (keep.has(comparablePath(file, platform))) continue;
+    try {
+      if (now - fs.statSync(file).mtimeMs < retainRecentMs) continue;
+    } catch {
+      continue;
+    }
     try { fs.rmSync(file, { force: true }); } catch {}
   }
 }
@@ -197,6 +209,8 @@ export function ensureStableMcpLauncher({
   env = process.env,
   nativeBridge,
   platform = process.platform,
+  retainRecentMs = MCP_BRIDGE_RETENTION_MS,
+  now = Date.now(),
 } = {}) {
   const packageRoot = path.resolve(path.dirname(targetBin), "..");
   const brokerEnv = { ...env, ...(env.RELAY_CONFIG || env.RELAY_CONFIG_DIR ? {} : { RELAY_CONFIG_DIR: path.join(homeDir, ".relay") }) };
@@ -251,7 +265,7 @@ export function ensureStableMcpLauncher({
         }
       }
     }
-    pruneUnreferencedMcpBridges({ binDir, registered, homeDir, env, platform });
+    pruneUnreferencedMcpBridges({ binDir, registered, homeDir, env, platform, retainRecentMs, now });
     return registered;
   }
 

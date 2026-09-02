@@ -18,12 +18,19 @@ function localCredentialStorePlatform(platform = process.platform) {
   return platform === "darwin" || platform === "linux";
 }
 
-function nativeCredentialAccessAllowed(env = process.env) {
+export function nativeCredentialAccessAllowed(env = process.env, platform = process.platform, homeDir = os.homedir()) {
   // The macOS store follows the selected config directory, so a sandbox stays
   // inside its sandbox. Windows Credential Manager is machine-global; keep its
   // explicit opt-in for custom config paths so tests cannot touch real entries.
-  if (localCredentialStorePlatform()) return true;
-  return (!(env.RELAY_CONFIG || env.RELAY_CONFIG_DIR) || env.RELAY_NATIVE_CREDENTIALS_WITH_CUSTOM_CONFIG === "1");
+  if (localCredentialStorePlatform(platform)) return true;
+  if (env.RELAY_NATIVE_CREDENTIALS_WITH_CUSTOM_CONFIG === "1") return true;
+  if (env.RELAY_CONFIG) return false;
+  // The shared MCP broker is launched with RELAY_CONFIG_DIR pinned to the
+  // default directory so every host resolves the same state. That is not a
+  // custom path: refusing it left every Windows MCP tool call without a token
+  // (missing_authorization) while the daemon and pill authenticated fine.
+  if (!env.RELAY_CONFIG_DIR) return true;
+  return path.resolve(String(env.RELAY_CONFIG_DIR)) === path.resolve(path.join(homeDir, ".relay"));
 }
 const nativeCredentialBackend = {
   writeDeviceToken: (token, options) => nativeCredentialAccessAllowed()
