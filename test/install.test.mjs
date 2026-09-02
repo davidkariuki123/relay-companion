@@ -584,6 +584,58 @@ test("host configs execute the native bridge directly when a packaged bridge is 
   assert.ok(codexText.includes(`args = [${JSON.stringify("--descriptor")}, ${JSON.stringify(expectedDescriptor)}]`));
 });
 
+test("agent config repair preserves a compatible live native bridge without touching host files", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-native-host-stable-"));
+  const binDir = path.join(root, ".relay", "bin");
+  const currentBridge = path.join(binDir, "mcp-bridge-aaaaaaaaaaaaaaaa");
+  const nextBridge = path.join(binDir, "mcp-bridge-bbbbbbbbbbbbbbbb");
+  const claude = path.join(root, ".claude.json");
+  const codex = path.join(root, ".codex", "config.toml");
+  fs.mkdirSync(binDir, { recursive: true });
+  fs.mkdirSync(path.dirname(codex), { recursive: true });
+  fs.writeFileSync(currentBridge, "current");
+  fs.writeFileSync(nextBridge, "next");
+  fs.writeFileSync(claude, JSON.stringify({ mcpServers: {} }));
+  fs.writeFileSync(codex, "model = \"test\"\n");
+
+  assert.equal(writeClaudeCodeMcpConfig(currentBridge, process.execPath, claude).ok, true);
+  assert.equal(writeCodexMcpConfig(currentBridge, process.execPath, codex).ok, true);
+  const fixedTime = new Date("2020-01-01T00:00:00.000Z");
+  fs.utimesSync(claude, fixedTime, fixedTime);
+  fs.utimesSync(codex, fixedTime, fixedTime);
+
+  assert.equal(writeClaudeCodeMcpConfig(nextBridge, process.execPath, claude).ok, true);
+  assert.equal(writeCodexMcpConfig(nextBridge, process.execPath, codex).ok, true);
+  assert.equal(JSON.parse(fs.readFileSync(claude, "utf8")).mcpServers.relay.command, currentBridge);
+  assert.ok(fs.readFileSync(codex, "utf8").includes(`command = ${JSON.stringify(currentBridge)}`));
+  assert.equal(fs.statSync(claude).mtimeMs, fixedTime.getTime());
+  assert.equal(fs.statSync(codex).mtimeMs, fixedTime.getTime());
+});
+
+test("agent config repair replaces a native bridge that no longer exists", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-native-host-missing-"));
+  const binDir = path.join(root, ".relay", "bin");
+  const missingBridge = path.join(binDir, "mcp-bridge-aaaaaaaaaaaaaaaa");
+  const nextBridge = path.join(binDir, "mcp-bridge-bbbbbbbbbbbbbbbb");
+  const codex = path.join(root, ".codex", "config.toml");
+  fs.mkdirSync(binDir, { recursive: true });
+  fs.mkdirSync(path.dirname(codex), { recursive: true });
+  fs.writeFileSync(nextBridge, "next");
+  fs.writeFileSync(codex, [
+    "[mcp_servers.relay]",
+    `command = ${JSON.stringify(missingBridge)}`,
+    `args = [${JSON.stringify("--descriptor")}, ${JSON.stringify(path.join(root, ".relay", "run", "mcp", "broker-v1.json"))}]`,
+    "startup_timeout_sec = 30",
+    "tool_timeout_sec = 300",
+    "",
+  ].join("\n"));
+
+  assert.equal(writeCodexMcpConfig(nextBridge, process.execPath, codex).ok, true);
+  const text = fs.readFileSync(codex, "utf8");
+  assert.ok(text.includes(`command = ${JSON.stringify(nextBridge)}`));
+  assert.ok(!text.includes(`command = ${JSON.stringify(missingBridge)}`));
+});
+
 test("agent config rewrites preserve secrets and remain owner-only", { skip: process.platform === "win32" }, (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-config-mode-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

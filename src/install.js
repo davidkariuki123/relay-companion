@@ -1334,19 +1334,27 @@ function privateConfigMode(file) {
 }
 
 function writeJsonAtomic(file, value) {
+  const text = `${JSON.stringify(value, null, 2)}\n`;
+  try {
+    if (fs.readFileSync(file, "utf8") === text) return false;
+  } catch {}
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
   try {
     const mode = privateConfigMode(file);
-    fs.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, { mode });
+    fs.writeFileSync(tmp, text, { mode });
     try { fs.chmodSync(tmp, mode); } catch {}
     fs.renameSync(tmp, file);
   } finally {
     try { fs.rmSync(tmp, { force: true }); } catch {}
   }
+  return true;
 }
 
 function writeTextAtomic(file, value) {
+  try {
+    if (fs.readFileSync(file, "utf8") === value) return false;
+  } catch {}
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
   try {
@@ -1357,6 +1365,37 @@ function writeTextAtomic(file, value) {
   } finally {
     try { fs.rmSync(tmp, { force: true }); } catch {}
   }
+  return true;
+}
+
+const NATIVE_MCP_BRIDGE_NAME = /^mcp-bridge(?:-[0-9a-f]{16})?(?:\.exe)?$/i;
+
+function sameStringArray(left, right) {
+  return Array.isArray(left)
+    && Array.isArray(right)
+    && left.length === right.length
+    && left.every((value, index) => String(value) === String(right[index]));
+}
+
+/**
+ * Keep the native bridge a host already names when it still speaks to the same
+ * broker descriptor. Windows locks a running .exe, so an update may stage the
+ * new bridge under a fingerprinted filename. Repointing a live host at that
+ * filename makes Codex reload MCP and can strand every task using the old
+ * transport. The descriptor is the versioned bridge contract; a future
+ * incompatible bridge must use a new descriptor and will therefore migrate.
+ */
+function compatibleExistingNativeMcpCommand(existing, desired) {
+  const command = String(existing?.command || "").trim();
+  if (!command || !NATIVE_MCP_BRIDGE_NAME.test(path.basename(command))) return "";
+  if (!NATIVE_MCP_BRIDGE_NAME.test(path.basename(String(desired?.command || "")))) return "";
+  if (!sameStringArray(existing?.args, desired?.args)) return "";
+  if (!fs.existsSync(command)) return "";
+  const normalize = (value) => process.platform === "win32"
+    ? path.resolve(String(value)).toLowerCase()
+    : path.resolve(String(value));
+  if (normalize(path.dirname(command)) !== normalize(path.dirname(desired.command))) return "";
+  return command;
 }
 
 export function writeClaudeCodeMcpConfig(
@@ -1371,7 +1410,9 @@ export function writeClaudeCodeMcpConfig(
       cfg.mcpServers && typeof cfg.mcpServers === "object" && !Array.isArray(cfg.mcpServers)
         ? cfg.mcpServers
         : {};
-    const launch = mcpLaunchCommand({ mcpBin: bin, node });
+    let launch = mcpLaunchCommand({ mcpBin: bin, node });
+    const preservedCommand = compatibleExistingNativeMcpCommand(existingServers.relay, launch);
+    if (preservedCommand) launch = { ...launch, command: preservedCommand };
     cfg.mcpServers = {
       ...existingServers,
       relay: {
@@ -1897,6 +1938,13 @@ function tomlQuote(value) {
   return JSON.stringify(String(value));
 }
 
+function parseTomlStringAssignment(table, key) {
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`^\\s*${escapedKey}\\s*=\\s*("(?:[^"\\\\]|\\\\.)*"|'[^']*')`, "m").exec(table);
+  if (!match) return "";
+  try { return match[1][0] === '"' ? JSON.parse(match[1]) : match[1].slice(1, -1); } catch { return ""; }
+}
+
 export const RELAY_CODEX_DIRECT_NAMESPACE = "mcp__relay";
 
 function tomlTableBounds(text, tableName) {
@@ -1952,6 +2000,20 @@ function parseTomlStringArray(value) {
     index += 1;
   }
   throw new Error("unterminated TOML string array");
+}
+
+function existingCodexRelayLaunch(text) {
+  const bounds = tomlTableBounds(text, "mcp_servers.relay");
+  if (!bounds) return null;
+  const command = parseTomlStringAssignment(bounds.table, "command");
+  const argsMatch = /^\s*args\s*=/m.exec(bounds.table);
+  if (!command || !argsMatch) return null;
+  const valueStart = argsMatch.index + argsMatch[0].length;
+  try {
+    return { command, args: parseTomlStringArray(bounds.table.slice(valueStart)).values };
+  } catch {
+    return null;
+  }
 }
 
 function formatTomlStringArray(values) {
@@ -2066,6 +2128,12 @@ export function writeCodexMcpConfig(
   }
   try {
     const existing = fs.existsSync(configPath) ? fs.readFileSync(configPath, "utf8") : "";
+    const desiredLaunch = mcpLaunchCommand({ mcpBin: bin, node });
+    const preservedCommand = compatibleExistingNativeMcpCommand(
+      existingCodexRelayLaunch(existing),
+      desiredLaunch,
+    );
+    const registeredBin = preservedCommand || bin;
     const withDirectRelay = updateTomlStringArray(
       existing,
       "features.code_mode",
@@ -2074,7 +2142,7 @@ export function writeCodexMcpConfig(
     );
     writeTextAtomic(
       configPath,
-      replaceTomlTable(withDirectRelay, "mcp_servers.relay", codexRelayMcpTomlSection(bin, node)),
+      replaceTomlTable(withDirectRelay, "mcp_servers.relay", codexRelayMcpTomlSection(registeredBin, node)),
     );
     return { ok: true, method: "config", configPath };
   } catch (error) {
