@@ -322,7 +322,8 @@ test("every outbound Relay uses the incoming rectangle geometry on the right", (
   assert.match(html, /const mine = m\.direction === "out";/);
   assert.doesNotMatch(html, /const mine = m\.direction === "out" && !m\.ownedAgent;/,
     "owned-agent authorship must not move an outbound Relay to the inbound side");
-  assert.match(html, /const who = m\.ownedAgent \? ownedAgentName : mine \? me : m\.party;/);
+  assert.match(html, /const author = RelayChatPresentation\.chatMessageAuthorPresentation\(/);
+  assert.match(html, /const who = m\.ownedAgent \? author\.label : mine \? me : m\.party;/);
   // "You", not the account name: the pill is a personal surface, only ever
   // read by its owner (Slack shows your name because its rooms are shared).
   assert.match(html, /const me = "You";/);
@@ -395,15 +396,20 @@ test("entering a chat gives its composer the keyboard without a click", () => {
     "leaving the room cancels delayed focus instead of stealing it later");
 });
 
-test("a successful chat send follows the new message; unrelated refreshes preserve reading position", () => {
+test("a successful chat send follows the new message; agent updates keep following until the reader scrolls", () => {
   assert.match(html, /let threadDetailFollowSendFor = null/);
   assert.match(html, /threadDetailFollowSendFor = threadStateKey/);
   assert.match(html, /const followOwnSend = threadDetailFollowSendFor === threadStateKey/);
   assert.match(html, /roomScrollEl\.scrollTo\(\{ top, behavior:"smooth" \}\)/);
-  assert.match(html, /scrollRoomToNewest\(chatShaped, \{ smooth:followOwnSend \}\)/);
+  assert.match(html, /const followLiveAgent = RelayChatPresentation\.shouldPinChatLiveFollow\(threadDetailLiveFollow, threadStateKey\)/);
+  assert.match(html, /scrollRoomToNewest\(chatShaped, \{ smooth:followOwnSend && !followLiveAgent \}\)/);
   assert.match(html, /if \(followOwnSend\) threadDetailFollowSendFor = null/);
-  assert.match(html, /if \(followOwnSend && !shellChanged && !rowsChanged\) \{/);
-  assert.match(html, /scrollRoomToNewest\(chatShaped\);[\s\S]*?scrollRoomToNewest\(chatShaped, \{ smooth:true \}\)/);
+  assert.match(html, /if \(\(followOwnSend \|\| followLiveAgent\) && !shellChanged && !rowsChanged\) \{/);
+  assert.match(html, /type:"agent-sent",[\s\S]{0,100}roomKey:threadStateKey/);
+  assert.match(html, /threadDetailEntryFollow = null;[\s\S]*?type:"user-scrolled"/,
+    "wheel, touch, keyboard, or scrollbar navigation releases the live pin");
+  assert.match(html, /distanceFromBottom > 2\)[\s\S]{0,240}type:"user-scrolled"/,
+    "any other user-driven scroll away from the bottom also releases the live pin");
 });
 
 test("chat send is visible before the Sent projection catches up and reconciles exactly once", () => {
@@ -495,10 +501,17 @@ test("conversation chunks carry the selected Relay date divider", () => {
 });
 
 test("a dated chunk reintroduces the sender even inside the same wire thread", () => {
-  const source = html.match(/(function continuesSenderRun\(previous, current, chunkDateLabel\) \{[\s\S]*?\n  \})\n/)[1];
+  const source = html.slice(html.indexOf("function senderRunIdentity("), html.indexOf("// Derive a one-line summary"));
   const continuesSenderRun = Function(
+    "RelayChatPresentation",
     `"use strict"; ${source}; return continuesSenderRun;`,
-  )();
+  )({
+    chatMessageAuthorPresentation(message) {
+      const outbound = message.direction === "out" || message.direction === "outbound";
+      if (message.ownedAgent) return { key:`owned-agent:${message.source?.surface || "unknown"}` };
+      return { key:`${outbound ? "outbound" : "inbound"}:name:${String(message.sender?.name || "").toLowerCase()}` };
+    },
+  });
   const previous = {
     party: "Sven Wellmann",
     direction: "in",
@@ -535,6 +548,15 @@ test("a dated chunk reintroduces the sender even inside the same wire thread", (
   assert.equal(continuesSenderRun(request, correction, ""), true, "a Request correction stays grouped");
   assert.equal(continuesSenderRun(correction, text, ""), true, "Request to text stays grouped");
   assert.equal(continuesSenderRun(text, nextRequest, ""), true, "text to Request stays grouped");
+  const optimisticAgent = {
+    party:"Codex", direction:"out", ownedAgent:true,
+    source:{ host:"relay-agent-run", surface:"codex" },
+  };
+  const canonicalAgent = { ...optimisticAgent, party:"Sven Wellmann" };
+  assert.equal(continuesSenderRun(current, canonicalAgent, ""), false,
+    "the canonical agent response never collapses into the human's outbound run");
+  assert.equal(continuesSenderRun(optimisticAgent, canonicalAgent, ""), true,
+    "optimistic and canonical agent rows keep one visible author");
   assert.match(html, /const cont = continuesSenderRun\(prev, m, chunkDateLabel\)/);
 });
 
@@ -770,6 +792,41 @@ test("owned-agent faces remain inside the human room", () => {
   assert.equal(selfThread.party, "Shane");
   assert.equal(selfThread.partyKey, "email:shane@example.com");
   assert.equal(selfThread.latest.id, "agent", "the agent can own the latest message without owning the room");
+});
+
+test("canonical chat hydration preserves the immediate owned-agent card species", () => {
+  const source = html.slice(html.indexOf("function directContactRoomAnchor("), html.indexOf("function mergeDirectContactAnchor("));
+  const directContactRoomAnchor = Function(
+    "relayTextLike",
+    "bodyPreview",
+    `"use strict"; ${source}; return directContactRoomAnchor;`,
+  )(() => false, () => "");
+  const item = {
+    relayId:"agent-response",
+    direction:"outbound",
+    forHuman:" ",
+    forAgent:"",
+    source:{ host:"relay-agent-run", surface:"codex" },
+    sender:{ name:"Shane's Codex" },
+    state:"sent",
+    createdAt:"2026-09-02T10:00:00.000Z",
+    readReceipts:[],
+    attachments:[],
+  };
+  const anchor = directContactRoomAnchor(
+    { chatId:"chat-1", title:"Sven", items:[item], threadIds:["thread-1"] },
+    { name:"Sven" },
+    "sven@example.com",
+    { email:"sven@example.com", name:"Sven" },
+  );
+  const [message] = anchor.msgs;
+
+  assert.equal(message.direction, "out", "hydration keeps the optimistic bubble on the authored side");
+  assert.equal(message.ownedAgent, true, "hydration keeps the owned-agent author identity");
+  assert.equal(message.textLike, true, "an empty loading response keeps the compact agent bubble species");
+  assert.deepEqual(message.source, item.source, "the Codex byline and card colour keep their provider source");
+  assert.match(html, /const ownedAgent = item\.source\?\.host === "relay-agent-run";[\s\S]*?source: item\.source \|\| null,[\s\S]*?ownedAgent,/,
+    "canonical Slack projections preserve the same agent identity too");
 });
 
 test("progress-only Relay edits repaint an already-open desktop chat", () => {

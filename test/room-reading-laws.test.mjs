@@ -45,9 +45,10 @@ test("every room entry follows newest through every asynchronous hydration phase
 
   const render = html.slice(html.indexOf("function renderThreadDetail()"), html.indexOf('document.getElementById("thExpand")'));
   assert.match(render, /const entryFollowToken = threadEntryFollowToken\(\)/);
-  assert.match(render, /if \(threadDetailScrolledFor !== thread\.threadId \|\| followOwnSend \|\| entryFollowToken\)/);
+  assert.match(render, /if \(threadDetailScrolledFor !== thread\.threadId \|\| followOwnSend \|\| followLiveAgent \|\| entryFollowToken\)/);
   assert.match(render, /else if \(threadDetailScrolledFor !== thread\.threadId \|\| entryFollowToken\)/);
-  assert.ok((render.match(/if \(entryFollowToken\) scrollRoomToNewest\(chatShaped\);/g) || []).length >= 2,
+  assert.match(render, /if \(entryFollowToken \|\| followLiveAgent\) scrollRoomToNewest\(chatShaped\);/);
+  assert.match(render, /if \(entryFollowToken\) scrollRoomToNewest\(chatShaped\);/,
     "entry hydration pins synchronously before a backgrounded Electron window can defer paint");
   assert.match(render, /threadEntryFollowToken\(\) !== entryFollowToken/,
     "a stale callback cannot pull a reader back down after deliberate scrolling");
@@ -119,6 +120,51 @@ test("delayed canonical detail cannot release entry-follow before its deferred r
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(runtime.scroller.scrollTop, 1200, "the hydrated transcript lands on its newest message");
   assert.equal(runtime.pending(), 0, "ordinary refreshes preserve reading position after entry settles");
+});
+
+test("an invoked agent stays pinned above the composer across streaming layout changes", () => {
+  const observerSource = html.match(/(function observeRoomFollowLayout\(rowsEl, composerEl\) \{[\s\S]*?\n  \})\n/)[1];
+  let resize;
+  const scroller = { scrollHeight:720, scrollTop:0 };
+  const observed = [];
+  const rows = {
+    isConnected:true,
+    dataset:{ roomFollowKey:"room-1" },
+    classList:{ contains:(name) => name === "chat-order" },
+  };
+  const composer = {};
+  const runtime = Function("ResizeObserver", "rows", "composer", "scroller", `
+    let threadDetailFollowObservedRows = null;
+    let threadDetailFollowObserver = null;
+    let threadDetailFollowLayoutQueued = false;
+    let threadDetailLiveFollow = { roomKey:"room-1", following:true };
+    const RelayChatPresentation = {
+      shouldPinChatLiveFollow:(state, roomKey) => state.following && state.roomKey === roomKey,
+    };
+    function requestAnimationFrame(work) { work(); }
+    function roomScrollElement() { return scroller; }
+    function scrollRoomToNewest(chatShaped) {
+      scroller.scrollTop = chatShaped ? scroller.scrollHeight : 0;
+    }
+    ${observerSource}
+    observeRoomFollowLayout(rows, composer);
+    return {
+      release:() => { threadDetailLiveFollow = { roomKey:null, following:false }; },
+      observed:() => threadDetailFollowObserver.observed,
+    };
+  `)(class {
+    constructor(callback) { resize = callback; this.observed = observed; }
+    observe(target) { this.observed.push(target); }
+    disconnect() {}
+  }, rows, composer, scroller);
+
+  assert.deepEqual(runtime.observed(), [rows, composer], "both transcript and composer geometry are watched");
+  resize();
+  assert.equal(scroller.scrollTop, 720, "the growing agent row remains immediately above the composer");
+  runtime.release();
+  scroller.scrollHeight = 960;
+  resize();
+  assert.equal(scroller.scrollTop, 720, "a deliberate reader override releases the pin");
 });
 
 test("a letter short enough to be self-contained renders whole in the bubble", () => {

@@ -3058,6 +3058,7 @@
 <script src="./work-ui.js"></script>
 <script src="./hover-intent.js"></script>
 <script src="./read-receipts.cjs"></script>
+<script src="./chat-presentation.js"></script>
 <script>
   // Theme, two layers (Sven, round 5): the pill FOLLOWS the OS appearance by
   // default; the moon/sun button is the override — an explicit pick persists
@@ -4010,16 +4011,30 @@
     return formatChatDate(iso, nowValue);
   }
 
-  // One person or saved group is one chronological conversation. Sender and
-  // direction define a visual run; message species, provider, and opaque wire
-  // thread ids never split it. Only a dated chunk reintroduces the sender, so
-  // the first visible message below "Today" never appears anonymous.
+  function senderRunIdentity(message) {
+    // An owned agent authors through this account, so its canonical Sent row
+    // carries the human recipient in `party`. The immediate row knows the
+    // provider instead. Use the visible author for run grouping or the
+    // optimistic "My Codex" heading collapses into "You" as server truth
+    // replaces it. Inbound agents retain their owner's label so two people
+    // using the same provider never merge inside a group.
+    return RelayChatPresentation.chatMessageAuthorPresentation({
+      direction:message?.direction,
+      sender:{ name:message?.party },
+      source:message?.source,
+      ownedAgent:Boolean(message?.ownedAgent),
+    }).key;
+  }
+
+  // One person or saved group is one chronological conversation. Visible
+  // author and direction define a run; message species and opaque wire thread
+  // ids never split it. Only a dated chunk reintroduces the sender, so the
+  // first visible message below "Today" never appears anonymous.
   function continuesSenderRun(previous, current, chunkDateLabel) {
     return Boolean(
       previous
       && !chunkDateLabel
-      && previous.party === current.party
-      && previous.direction === current.direction,
+      && senderRunIdentity(previous) === senderRunIdentity(current),
     );
   }
 
@@ -8723,6 +8738,28 @@
     if (smooth && roomScrollEl.scrollTo) roomScrollEl.scrollTo({ top, behavior:"smooth" });
     else roomScrollEl.scrollTop = top;
   }
+  function observeRoomFollowLayout(rowsEl, composerEl) {
+    if (threadDetailFollowObservedRows === rowsEl) return;
+    threadDetailFollowObserver?.disconnect();
+    threadDetailFollowObserver = null;
+    threadDetailFollowObservedRows = rowsEl || null;
+    if (!rowsEl || typeof ResizeObserver !== "function") return;
+    threadDetailFollowObserver = new ResizeObserver(() => {
+      if (threadDetailFollowLayoutQueued) return;
+      threadDetailFollowLayoutQueued = true;
+      requestAnimationFrame(() => {
+        threadDetailFollowLayoutQueued = false;
+        if (!rowsEl.isConnected
+          || !RelayChatPresentation.shouldPinChatLiveFollow(
+            threadDetailLiveFollow,
+            String(rowsEl.dataset.roomFollowKey || ""),
+          )) return;
+        scrollRoomToNewest(rowsEl.classList.contains("chat-order"));
+      });
+    });
+    threadDetailFollowObserver.observe(rowsEl);
+    if (composerEl) threadDetailFollowObserver.observe(composerEl);
+  }
   function settleThreadEntryFollow(token) {
     // Hydration can resolve while Chromium is still holding the destination
     // transcript immutable for a room View Transition. Release only after that
@@ -8750,7 +8787,7 @@
     Promise.allSettled([sentReady, fontsReady, detailReady]).then(() => settleThreadEntryFollow(token));
   }
   function interruptThreadEntryFollow(event) {
-    if (!threadEntryFollowToken()) return;
+    if (!threadEntryFollowToken() && !threadDetailLiveFollow.following) return;
     if (event.type === "keydown") {
       const target = event.target;
       if (target && (target.matches?.("input, textarea, select") || target.isContentEditable)) return;
@@ -8760,12 +8797,28 @@
     // owning element. Bubble/button presses must not cancel hydration follow.
     if (event.type === "pointerdown" && event.target !== roomScrollElement()) return;
     threadDetailEntryFollow = null;
+    threadDetailLiveFollow = RelayChatPresentation.reduceChatLiveFollow(threadDetailLiveFollow, {
+      type:"user-scrolled",
+      roomKey:String(threadDetailLiveFollow.roomKey || ""),
+    });
+  }
+  function releaseRoomLiveFollowIfDetached(event) {
+    if (!threadDetailLiveFollow.following || event.target !== roomScrollElement()) return;
+    const roomScrollEl = roomScrollElement();
+    const distanceFromBottom = roomScrollEl.scrollHeight - roomScrollEl.clientHeight - roomScrollEl.scrollTop;
+    if (distanceFromBottom > 2) {
+      threadDetailLiveFollow = RelayChatPresentation.reduceChatLiveFollow(threadDetailLiveFollow, {
+        type:"user-scrolled",
+        roomKey:String(threadDetailLiveFollow.roomKey || ""),
+      });
+    }
   }
   for (const roomScroller of [scrollEl, thDetailEl]) {
     roomScroller.addEventListener("wheel", interruptThreadEntryFollow, { capture:true, passive:true });
     roomScroller.addEventListener("touchstart", interruptThreadEntryFollow, { capture:true, passive:true });
     roomScroller.addEventListener("pointerdown", interruptThreadEntryFollow, { capture:true, passive:true });
     roomScroller.addEventListener("keydown", interruptThreadEntryFollow, { capture:true });
+    roomScroller.addEventListener("scroll", releaseRoomLiveFollowIfDetached, { passive:true });
   }
   function captureRoomScroll() {
     const roomScrollEl = roomScrollElement();
@@ -11623,6 +11676,13 @@
   let threadComposerEntryFocus = null; // one-shot: entering a room gives its composer the keyboard
   let threadComposerEntryFocusSeq = 0;
   let threadDetailFollowSendFor = null; // one-shot: a successful send follows its new bubble smoothly
+  // An @agent response changes height in place as progress and final text
+  // replace one another. Keep its foot against the composer until the reader
+  // deliberately scrolls; a one-shot send scroll cannot preserve that anchor.
+  let threadDetailLiveFollow = RelayChatPresentation.idleChatLiveFollowState();
+  let threadDetailFollowObserver = null;
+  let threadDetailFollowObservedRows = null;
+  let threadDetailFollowLayoutQueued = false;
   let threadDetailPartyHint = ""; // who it's with, for the header while messages load
   const visibleRoomAckIds = new Set(); // suppress duplicate acks while the daemon catches up
   const optimisticReadIds = new Set(); // a polling payload cannot resurrect a read while persistence waits
@@ -12076,9 +12136,10 @@
         const body = String(item.forHuman || "");
         const agent = String(item.forAgent || "");
         const attachments = Array.isArray(item.attachments) ? item.attachments : [];
+        const ownedAgent = item.source?.host === "relay-agent-run";
         // Attachments are cargo belonging to the chat message. Only an agent
         // document changes the product species into a Relay.
-        const textLike = relayTextLike(body, item.title || "", agent, attachments);
+        const textLike = ownedAgent || relayTextLike(body, item.title || "", agent, attachments);
         msgs.push({
           id,
           relayId: id,
@@ -12095,7 +12156,8 @@
           groupId: isGroup ? chat.chatId : "",
           groupName: isGroup ? roomName : "",
           unread: !mine && (item.state === "pending" || item.state === "delivered"),
-          source: null,
+          source: item.source || null,
+          ownedAgent,
           integration,
           // The conversation is Slack-backed, but the message may have been
           // authored in Relay and mirrored out. "From Slack" describes the
@@ -12262,7 +12324,8 @@
       const agent = String(item?.forAgent || "");
       const title = String(item?.title || "");
       const attachments = Array.isArray(item?.attachments) ? item.attachments : [];
-      const textLike = relayTextLike(body, title, agent, attachments);
+      const ownedAgent = item?.source?.host === "relay-agent-run";
+      const textLike = ownedAgent || relayTextLike(body, title, agent, attachments);
       return {
         id,
         relayId:id,
@@ -12284,6 +12347,7 @@
         groupName:"",
         unread:!mine && (item?.state === "pending" || item?.state === "delivered"),
         source:item?.source || null,
+        ownedAgent,
         provider:item?.provider || null,
         origin:item?.origin || "",
         updatedAt:item?.updatedAt || item?.createdAt,
@@ -13445,10 +13509,13 @@
       // "My Codex" / "My Claude", but it cannot make an outbound message look
       // as though the other person sent it.
       const mine = m.direction === "out";
-      const ownedAgentName = m.direction === "out"
-        ? (m.source?.surface === "codex" ? "My Codex" : "My Claude")
-        : m.party;
-      const who = m.ownedAgent ? ownedAgentName : mine ? me : m.party;
+      const author = RelayChatPresentation.chatMessageAuthorPresentation({
+        direction:m.direction,
+        sender:{ name:m.party },
+        source:m.source,
+        ownedAgent:Boolean(m.ownedAgent),
+      });
+      const who = m.ownedAgent ? author.label : mine ? me : m.party;
       // Consecutive messages from one sender group into a run (the Slack
       // shape): the row above (newest of the run) carries the header, the
       // continuation renders title-only underneath.
@@ -13613,6 +13680,20 @@
     // card ~a second after opening — the flash David reported on "Read the
     // Conversation". Identical markup now means no DOM write and no rewiring.
     const followOwnSend = threadDetailFollowSendFor === threadStateKey;
+    const followLiveAgent = RelayChatPresentation.shouldPinChatLiveFollow(threadDetailLiveFollow, threadStateKey);
+    const liveAgentActive = thread.msgs.some((message) => RelayChatPresentation.isActiveOwnedAgentMessage({
+      source:message.source,
+      ownedAgent:Boolean(message.ownedAgent),
+      agent:message.agent,
+      deletedAt:message.deletedAt,
+    }));
+    const finishLiveFollowIfSettled = () => {
+      if (!followLiveAgent || liveAgentActive) return;
+      threadDetailLiveFollow = RelayChatPresentation.reduceChatLiveFollow(threadDetailLiveFollow, {
+        type:"agent-finished",
+        roomKey:threadStateKey,
+      });
+    };
     const entryFollowToken = threadEntryFollowToken();
     const shellChanged = thHistoryEl.dataset.shellKey !== shellKey || !document.getElementById("thRows");
     if (shellChanged) {
@@ -13621,6 +13702,8 @@
       thHistoryEl.innerHTML = chatShaped ? rowsShell + visibleThreadComposer : visibleThreadComposer + rowsShell;
     }
     const thRowsEl = document.getElementById("thRows");
+    if (thRowsEl) thRowsEl.dataset.roomFollowKey = threadStateKey;
+    observeRoomFollowLayout(thRowsEl, thHistoryEl.querySelector(".th-composer-dock"));
     const rowsChanged = Boolean(thRowsEl) && thRowsEl.innerHTML !== finalRowsHtml;
     if (rowsChanged) {
       thRowsEl.innerHTML = finalRowsHtml;
@@ -13647,10 +13730,13 @@
     // early in that case left the new bubble below the viewport until another
     // message happened to repaint the room. Following a send is a navigation
     // obligation, not a side effect of a DOM write.
-    if (followOwnSend && !shellChanged && !rowsChanged) {
-      threadDetailFollowSendFor = null;
+    if ((followOwnSend || followLiveAgent) && !shellChanged && !rowsChanged) {
+      if (followOwnSend) threadDetailFollowSendFor = null;
       scrollRoomToNewest(chatShaped);
-      requestAnimationFrame(() => scrollRoomToNewest(chatShaped, { smooth:true }));
+      requestAnimationFrame(() => {
+        scrollRoomToNewest(chatShaped, { smooth:followOwnSend && !followLiveAgent });
+        finishLiveFollowIfSettled();
+      });
       return;
     }
     if (shellChanged || rowsChanged) {
@@ -13659,17 +13745,20 @@
       // rebuilds of the same open thread keep the user's scroll position.
       // The one exception is the messaging-app contract: after YOU send,
       // follow the newly appended bubble so success is visible immediately.
-      if (threadDetailScrolledFor !== thread.threadId || followOwnSend || entryFollowToken) {
+      if (threadDetailScrolledFor !== thread.threadId || followOwnSend || followLiveAgent || entryFollowToken) {
         threadDetailScrolledFor = thread.threadId;
         if (followOwnSend) threadDetailFollowSendFor = null;
         // The entry latch is stronger than a paint callback: backgrounded or
         // inspector-driven Electron windows can defer rAF long enough for a
         // hydrated transcript to remain at its stale bottom. The DOM write has
         // already completed, so pin once now and once after layout settles.
-        if (entryFollowToken) scrollRoomToNewest(chatShaped);
+        if (entryFollowToken || followLiveAgent) scrollRoomToNewest(chatShaped);
         requestAnimationFrame(() => {
           if (entryFollowToken && threadEntryFollowToken() !== entryFollowToken) return;
-          scrollRoomToNewest(chatShaped, { smooth:followOwnSend });
+          if (followLiveAgent
+            && !RelayChatPresentation.shouldPinChatLiveFollow(threadDetailLiveFollow, threadStateKey)) return;
+          scrollRoomToNewest(chatShaped, { smooth:followOwnSend && !followLiveAgent });
+          finishLiveFollowIfSettled();
         });
       }
     } else if (threadDetailScrolledFor !== thread.threadId || entryFollowToken) {
@@ -14039,6 +14128,12 @@
         });
         const agentMentions = payload.features?.agentMentions === true ? agentMentionSpans(text) : [];
         const invokedProviders = agentMentions.map((mention) => mention.provider);
+        if (invokedProviders.length) {
+          threadDetailLiveFollow = RelayChatPresentation.reduceChatLiveFollow(threadDetailLiveFollow, {
+            type:"agent-sent",
+            roomKey:threadStateKey,
+          });
+        }
         for (const [index, provider] of invokedProviders.entries()) {
           optimisticChatReplies.set(`${idempotencyKey}:agent:${provider}`, {
             id:`optimistic-agent:${idempotencyKey}:${provider}`, relayId:"", threadId:sendAnchor.threadId || thread.threadId,
@@ -14093,6 +14188,13 @@
           optimisticChatReplies.delete(idempotencyKey);
           optimisticChatReplies.delete(`${idempotencyKey}:agent:claude`);
           optimisticChatReplies.delete(`${idempotencyKey}:agent:codex`);
+          if (invokedProviders.length
+            && RelayChatPresentation.shouldPinChatLiveFollow(threadDetailLiveFollow, threadStateKey)) {
+            threadDetailLiveFollow = RelayChatPresentation.reduceChatLiveFollow(threadDetailLiveFollow, {
+              type:"agent-finished",
+              roomKey:threadStateKey,
+            });
+          }
           chatReplySending.delete(threadStateKey);
           threadComposerDrafts.set(threadStateKey, text);
           setRowNote(newest ? newest.id : (sendAnchor.threadId || thread.threadId), (res && res.error) || "Send failed — try again.", "err");
@@ -14318,6 +14420,7 @@
       threadDetailLoadError = "";
       threadDetailRecovery = null;
       threadDetailScrolledFor = null;
+      threadDetailLiveFollow = RelayChatPresentation.reduceChatLiveFollow(threadDetailLiveFollow, { type:"reset" });
       chatExpanded = false;
       // Back goes back to the LIST that was clicked. A room entered from People
       // returns to People, on the row it left, not to Relays.
@@ -14357,6 +14460,7 @@
     dismissReactionPickers();
     slackFocusedThreadId = "";
     threadDetailScrolledFor = null;
+    threadDetailLiveFollow = RelayChatPresentation.reduceChatLiveFollow(threadDetailLiveFollow, { type:"reset" });
     const entryFollowToken = beginThreadEntryFollow(roomCoordinate);
     const composerFocusRequest = beginThreadComposerEntryFocus(roomCoordinate);
     threadsSource = source;

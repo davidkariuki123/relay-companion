@@ -246,8 +246,8 @@ test("Slack-linked files stay chat cargo while agent documents open the deployed
   assert.match(html, /storeCanonicalChatDetail\(chat\);[\s\S]*openFull\(\);[\s\S]*openReader\(messageId, "threads"\)/,
     "View Relay deliberately unfolds the native Pill before opening the requested reader");
   assert.match(html, /const attachments = Array\.isArray\(item\.attachments\) \? item\.attachments : \[\]/);
-  assert.match(html, /const textLike = relayTextLike\(body, item\.title \|\| "", agent, attachments\)/,
-    "the agent document, not an ordinary file, decides whether chat opens the Relay reader");
+  assert.match(html, /const textLike = ownedAgent \|\| relayTextLike\(body, item\.title \|\| "", agent, attachments\)/,
+    "owned Work and agent documents stay distinct from ordinary file cargo");
   assert.match(html, /const sharedShelf = relaySharedShelf\(r\)/);
 });
 
