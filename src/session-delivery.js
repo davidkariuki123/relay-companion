@@ -158,12 +158,19 @@ function materializedNativeSession(row, provider) {
   };
 }
 
-function claimRelaySessionDelivery(relayId, target, prompt) {
+function claimRelaySessionDelivery(relayId, target, prompt, { rebind = false } = {}) {
   const locked = withJsonLockStrict(statePath(), () => {
     const state = readState();
     state.packets ||= {};
     const row = state.packets[relayId] || { id: relayId };
-    if (row.sessionBinding?.nativeId) return { kind: "bound", binding: row.sessionBinding };
+    // A remembered binding is where this Relay already lives. Picking that same
+    // row again just focuses it. An explicit picker choice of a DIFFERENT task
+    // (or "New task") re-routes the Relay there and the binding follows: one
+    // Relay lives in one task at a time, but the human may move it. Refusing
+    // the move while still offering the rows (2026-09-02) was a dead end.
+    if (row.sessionBinding?.nativeId && (!rebind || sameDeliveryTarget(row.sessionBinding, target))) {
+      return { kind: "bound", binding: row.sessionBinding };
+    }
     if (row.sessionDelivery) {
       if (!sameDeliveryTarget(row.sessionDelivery, target)) {
         const error = new Error("This Relay already has a picker delivery in progress for another session");
@@ -237,13 +244,14 @@ function existingDeliveryError(delivery = {}) {
   return error;
 }
 
-export function claimRelayNewSession(relayId, provider) {
+export function claimRelayNewSession(relayId, provider, { rebind = false } = {}) {
   if (!relayId) throw new Error("Relay id is required");
   const cleanProvider = provider === "codex" ? "codex" : "claude";
   const claimed = claimRelaySessionDelivery(
     relayId,
     { provider: cleanProvider, nativeId: NEW_SESSION_TARGET },
     "",
+    { rebind },
   );
   if (claimed.kind !== "existing") return claimed;
   const row = readState()?.packets?.[relayId];
@@ -661,20 +669,15 @@ export async function deliverRelayToSession({
     throw error;
   }
   const existing = relaySessionBinding(relayId);
-  if (existing) {
-    if (existing.provider !== target.provider || existing.nativeId !== target.nativeId) {
-      throw new Error(`This Relay is already bound to ${existing.title || existing.nativeId}`);
-    }
+  if (existing && existing.provider === target.provider && existing.nativeId === target.nativeId) {
     return { continued: true, binding: existing, ...(await focusSession(existing, options)) };
   }
+  // A different explicit choice moves the Relay: the selected task receives the
+  // reference prompt and becomes the new binding (see claimRelaySessionDelivery).
   const prompt = String(suppliedPrompt || "").trim() || relayReferencePrompt(relayId);
-  const claimed = claimRelaySessionDelivery(relayId, target, prompt);
+  const claimed = claimRelaySessionDelivery(relayId, target, prompt, { rebind: true });
   if (claimed.kind === "bound") {
-    const binding = claimed.binding;
-    if (binding.provider !== target.provider || binding.nativeId !== target.nativeId) {
-      throw new Error(`This Relay is already bound to ${binding.title || binding.nativeId}`);
-    }
-    return { continued: true, binding, ...(await focusSession(binding, options)) };
+    return { continued: true, binding: claimed.binding, ...(await focusSession(claimed.binding, options)) };
   }
   if (claimed.kind === "existing") {
     const exact = findExactSession(target, options.discover || discoverSessions);

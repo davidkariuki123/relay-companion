@@ -242,14 +242,30 @@ test("Open never promotes a derived briefing projection into a missing For Human
   }
 });
 
-test("Codex Open creates the rollout through the supported first turn instead of mutating a missing file", async () => {
+test("Codex Open lets Codex persist the letter as the first user turn, interrupts, and releases the thread before Desktop", async () => {
+  // Codex 0.151+: thread/start no longer creates the rollout (turn/start does),
+  // every rollout record carries an ordinal (a hand-appended record makes
+  // Desktop refuse to resume), and a thread has one writer at a time. Relay's
+  // private app-server therefore never writes the file, never runs a model turn
+  // it will not outlive, and never holds the writer lock into the hand-off
+  // (2026-09-02: "This is open in another app", then an empty thread stuck on
+  // "working now", then "final paginated rollout record is missing an ordinal").
   const source = fs.readFileSync(new URL("../src/materializer.js", import.meta.url), "utf8");
   assert.match(source, /materializeRelayOpenDocumentFiles\(rowWithAttachments, \{ provider: "codex-inbox" \}\)/);
   assert.match(source, /model: codexModel,[\s\S]*effort: codexEffort/);
-  const createThread = source.slice(source.indexOf("async function createCodexThread"));
+  const createThread = source.slice(source.indexOf("async function createCodexThread"), source.indexOf("function codexRolloutHasUserLetter"));
   assert.match(createThread, /thread\/start[\s\S]*runtimeWorkspaceRoots: workspaceRoots[\s\S]*model,[\s\S]*reasoningEffort: effort/);
   assert.match(createThread, /thread\/name\/set[\s\S]*turn\/start[\s\S]*text: briefing/);
   assert.doesNotMatch(createThread, /appendVisibleAssistantTurn/, "Relay never writes Codex's rollout JSONL directly");
+  const letterAt = createThread.indexOf("codexRolloutHasUserLetter(sessionPath, briefing)");
+  const interruptAt = createThread.indexOf('client.request("turn/interrupt"');
+  const stopAt = createThread.indexOf("if (!shared) await client.stop();");
+  assert.ok(letterAt > 0 && interruptAt > letterAt, "the interrupt waits until Codex has persisted the letter as a user message");
+  assert.match(createThread, /while \(!finished\) \{[\s\S]*turn\/interrupt/, "the interrupt is retried while Codex still says there is no active turn");
+  assert.ok(stopAt > interruptAt, "the private app-server is stopped (writer lock released) before the thread is returned");
+  assert.doesNotMatch(createThread, /12 \* 60 \* 60 \* 1000/, "no app-server is kept alive for a model turn Relay does not own");
+  assert.match(createThread, /if \(!shared\) \{[\s\S]*turn\/interrupt/, "the shared terminal owner keeps its live turn; only the private desktop server interrupts");
+  assert.match(source, /if \(!codexUserTurnPersisted\) \{\s*ensureRelayCodexIndexMarker/, "the index marker rewrite is reserved for rollouts without a real user turn");
   const { CODEX_OPEN_METADATA_VERSION } = await import(`../src/materializer.js?metadata-version-${Date.now()}`);
   assert.equal(CODEX_OPEN_METADATA_VERSION, 3, "old Codex tasks must be re-forged with file workspace roots");
 });

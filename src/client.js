@@ -798,6 +798,19 @@ export class RelayClient {
     });
   }
 
+  /** Put the listed items first inside one Todo status; the rest follow in their current order. */
+  async reorderTodo(status, itemIds, provenance = {}) {
+    return this.#req("POST", "/v1/todo/reorder", {
+      status: String(status || ""),
+      itemIds: (Array.isArray(itemIds) ? itemIds : []).map((id) => String(id || "")).filter(Boolean),
+      ...(provenance.idempotencyKey ? { idempotencyKey: String(provenance.idempotencyKey) } : {}),
+    }, {
+      clientName: provenance.clientName || "relay-companion",
+      sourceProvider: provenance.sourceProvider,
+      nativeSessionId: provenance.nativeSessionId,
+    });
+  }
+
   async markAllRead(payload = {}) {
     if (localE2eeIdentityAvailable()) {
       const status = await verifiedE2eeStatus(this);

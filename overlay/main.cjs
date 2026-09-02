@@ -1495,6 +1495,11 @@ function readRelays() {
       todoStatus: p.todoStatus || null,
       todoVersion: Number.isInteger(p.todoVersion) ? p.todoVersion : null,
       duplicateOfItemId: p.duplicateOfItemId || null,
+      attentionRank: Number.isInteger(p.attentionRank) ? p.attentionRank : null,
+      assessment: p.assessment || null,
+      assessmentEvidence: Array.isArray(p.assessmentEvidence) ? p.assessmentEvidence : [],
+      assessedAt: p.assessedAt || null,
+      assessedBy: p.assessedBy || null,
       completionReview: p.completionReview || null,
       // Ordinary Relays may be worked on locally without becoming Tasks.
       // These stamps belong only to the recipient's private Work folder: they
@@ -1672,6 +1677,7 @@ function sentFingerprintOf(items) {
       r.todoStatus,
       r.todoVersion,
       r.duplicateOfItemId,
+      r.assessment,
     ]),
   );
 }
@@ -2071,6 +2077,7 @@ function buildPayload() {
       soundsMuted,
     },
     features: PRODUCT_FEATURES,
+    todoSteward: PRODUCT_FEATURES.todo === true ? readTodoStewardState() : null,
     pendingOpen: pendingSetupOpenPreviewCache,
     relays: hydrateReactions(relaysNow),
     sent: hydrateReactions(sentWithMaterializationState(sentCache)),
@@ -2497,6 +2504,8 @@ async function pushInboxNow(force) {
       r.todoStatus,
       r.todoVersion,
       r.duplicateOfItemId,
+      r.assessment,
+      r.attentionRank,
       r.materializedCodex,
       r.materializedClaude,
       r.codexModel,
@@ -2538,6 +2547,12 @@ async function pushInboxNow(force) {
       ? [payload.pendingOpen.relayId, payload.pendingOpen.title, payload.pendingOpen.forHuman, payload.pendingOpen.error]
       : null,
     features: payload.features,
+    // The steward's heartbeat and last verdict move nothing else in the payload.
+    todoSteward: payload.todoSteward ? [
+      payload.todoSteward.enabled, payload.todoSteward.provider, payload.todoSteward.requestedAt,
+      payload.todoSteward.run && [payload.todoSteward.run.startedAt, payload.todoSteward.run.heartbeatAt, payload.todoSteward.run.phase],
+      payload.todoSteward.lastRun && [payload.todoSteward.lastRun.finishedAt, payload.todoSteward.lastRun.ok, payload.todoSteward.lastRun.summary],
+    ] : null,
   });
   // Unchanged data: skip the send entirely. Re-sending identical payloads made the
   // renderer rebuild its DOM every few seconds (hover flicker, restarted transitions).
@@ -3242,6 +3257,11 @@ async function readTodoItem(relayId) {
         todoStatus: local.todoStatus || null,
         todoVersion: Number.isInteger(local.todoVersion) ? local.todoVersion : null,
         duplicateOfItemId: local.duplicateOfItemId || null,
+        attentionRank: Number.isInteger(local.attentionRank) ? local.attentionRank : null,
+        assessment: local.assessment || null,
+        assessmentEvidence: Array.isArray(local.assessmentEvidence) ? local.assessmentEvidence : [],
+        assessedAt: local.assessedAt || null,
+        assessedBy: local.assessedBy || null,
       },
     };
   } catch (error) {
@@ -3263,10 +3283,13 @@ async function updateTodoStatus(relayId, input = {}) {
         ? { duplicateOfItemId: String(input.duplicateOfItemId).trim() }
         : {}),
     });
+    const statusChanged = current?.todoStatus && current.todoStatus !== result.status;
     const projection = {
       todoStatus: result.status,
       todoVersion: result.version,
       duplicateOfItemId: result.duplicateOfItemId || null,
+      // A person moving an item retires the steward's reason for the old place.
+      ...(statusChanged ? { attentionRank: null, assessment: null, assessmentEvidence: [], assessedAt: null, assessedBy: null } : {}),
     };
     const groupSendId = current?.groupSendId || null;
     withJsonLock(STATE_PATH, () => {
@@ -4023,7 +4046,9 @@ async function deliverPacketToSession(packetId, selection = {}) {
   const surface = selection.surface === "terminal" ? "terminal" : "desktop";
   const observedBundle = await new Promise((resolve) => frontmostBundleId(resolve));
   if (selection.mode === "new") {
-    const claim = routing.delivery.claimRelayNewSession(routePacketId, provider);
+    // "New task" is an explicit choice even when this Relay already lives in a
+    // task: it gets a fresh one and the binding moves there.
+    const claim = routing.delivery.claimRelayNewSession(routePacketId, provider, { rebind: true });
     if (claim.kind === "bound") {
       const focused = await routing.delivery.focusSession(claim.binding);
       await presentSessionOpen(focused, provider, routePacketId, observedBundle);
@@ -5422,6 +5447,9 @@ function createWindow() {
       // atomicWriteJsonSync creates state.json.<pid>.<nonce>.tmp and a lock
       // directory beside it. Only the committed filename is a new generation.
       if (!file || String(file) === "state.json") pushInboxQuiet({ stateChange: true });
+      // The daemon's steward writes its heartbeat and verdict here; the Todo
+      // tab's "checked 4 min ago" line follows it without polling.
+      else if (String(file) === "todo-steward.json") pushInboxQuiet({ stateChange: false });
     });
   } catch {}
   // Safety net for state.json: ONE stat() per tick unless the file generation
@@ -8320,6 +8348,68 @@ ipcMain.handle("relay:taskStop", (_e, id) => stopTaskWork(id));
 ipcMain.handle("relay:todoList", (_e, input) => listTodo(input));
 ipcMain.handle("relay:todoItem", (_e, id) => readTodoItem(id));
 ipcMain.handle("relay:todoStatusUpdate", (_e, id, input) => updateTodoStatus(id, input));
+// The Todo steward lives in the daemon; the pill only asks and reads.
+async function todoStewardModule() {
+  return import("../src/todo-steward.js");
+}
+function readTodoStewardState() {
+  // No file yet means the steward has never run on this machine, not that
+  // the feature is absent: the Todo tab still offers Check now.
+  const statePath = path.join(RELAY_HOME, "todo-steward.json");
+  if (!fs.existsSync(statePath)) return { enabled: true, provider: "auto", requestedAt: 0, run: null, lastRun: null };
+  try {
+    const raw = JSON.parse(fs.readFileSync(statePath, "utf8"));
+    if (!raw || typeof raw !== "object") return null;
+    const prefs = raw.prefs && typeof raw.prefs === "object" ? raw.prefs : {};
+    return {
+      enabled: prefs.enabled !== false,
+      provider: ["auto", "codex", "claude"].includes(prefs.provider) ? prefs.provider : "auto",
+      requestedAt: Number(raw.requestedAt || 0) || 0,
+      run: raw.run && typeof raw.run === "object" ? {
+        startedAt: Number(raw.run.startedAt || 0) || 0,
+        heartbeatAt: Number(raw.run.heartbeatAt || 0) || 0,
+        provider: String(raw.run.provider || ""),
+        phase: String(raw.run.phase || ""),
+      } : null,
+      lastRun: raw.lastRun && typeof raw.lastRun === "object" ? {
+        startedAt: Number(raw.lastRun.startedAt || 0) || 0,
+        finishedAt: Number(raw.lastRun.finishedAt || 0) || 0,
+        ok: raw.lastRun.ok === true,
+        provider: String(raw.lastRun.provider || ""),
+        label: String(raw.lastRun.label || ""),
+        summary: String(raw.lastRun.summary || "").slice(0, 240),
+        checked: Number(raw.lastRun.checked || 0) || 0,
+        changed: Number(raw.lastRun.changed || 0) || 0,
+        error: String(raw.lastRun.error || "").slice(0, 240),
+      } : null,
+    };
+  } catch {
+    return null;
+  }
+}
+ipcMain.handle("relay:todoStewardRun", async () => {
+  try {
+    const steward = await todoStewardModule();
+    steward.requestStewardRun(RELAY_HOME);
+    pushInbox(true);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: (error && error.message) || String(error) };
+  }
+});
+ipcMain.handle("relay:todoStewardPrefs", async (_e, input) => {
+  try {
+    const steward = await todoStewardModule();
+    steward.saveStewardPreferences(RELAY_HOME, {
+      ...(typeof input?.enabled === "boolean" ? { enabled: input.enabled } : {}),
+      ...(typeof input?.provider === "string" ? { provider: input.provider } : {}),
+    });
+    pushInbox(true);
+    return { ok: true, steward: readTodoStewardState() };
+  } catch (error) {
+    return { ok: false, error: (error && error.message) || String(error) };
+  }
+});
 // The agent document of an ordinary Relay starts private, recipient-owned
 // work. It shares the native runner but never turns the Relay into a Task
 // and never emits Task receipts to the sender.

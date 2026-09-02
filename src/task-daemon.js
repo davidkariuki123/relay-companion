@@ -27,6 +27,7 @@ import { startDesktopStartupMigration } from "./desktop-migration.js";
 import { ensureWindowsAutostartTasks, repairAgentMcpRegistrations } from "./install.js";
 import { apiUrl, readConfig } from "./config.js";
 import { activeSessionOperationCount, runSessionDirectoryOnce } from "./session-controller.js";
+import { todoStewardTick } from "./todo-steward-runtime.js";
 import { createE2eeClaudeRuntimeController } from "./e2ee-claude-runtime.js";
 import { productFeatures } from "./product-features.js";
 import { migratePersistedContentFields } from "./content-field-migration.js";
@@ -790,8 +791,11 @@ export async function daemonDeliveryTick({
 
 function daemonProductFeatures(log, user) {
   const features = productFeatures({ env: process.env, config: readConfig(), apiUrl: apiUrl(), user });
-  if (!features.aiSessions) log("developer session features off for this account: no session directory upload, no remote session operations");
-  if (!features.requests) log("Task runtime off for this account: ordinary Relay delivery only");
+  // Both gates cover developer-only extras. Say what stays on: a reader who
+  // meets these lines while debugging an agent must not read them as "your
+  // Relay tools were removed" — ordinary MCP tools and delivery are untouched.
+  if (!features.aiSessions) log("remote session operations off (developer-only feature); ordinary Relay tools and delivery unaffected");
+  if (!features.requests) log("Tasks off (developer-only feature); ordinary Relay tools, sending, and delivery all stay on");
   return features;
 }
 
@@ -952,6 +956,7 @@ export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
   void claudeRuntime.tick();
   let featureRefreshAt = Date.now() + ACCOUNT_FEATURE_REFRESH_MS;
   let consecutiveFailures = 0;
+  let stewardInFlight = null;
   for (;;) {
     const rebound = await followAccountDrift({ client, log, role: "receiver" });
     if (rebound) {
@@ -965,6 +970,12 @@ export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
     }
     void claudeRuntime.tick();
     await sessionControllerTick({ client, log, features });
+    // The Todo steward decides for itself whether anything is due; a run is a
+    // background provider process and never blocks delivery below.
+    if (!stewardInFlight) {
+      stewardInFlight = todoStewardTick({ client, log, features, user: (rebound || me).user })
+        .finally(() => { stewardInFlight = null; });
+    }
     try {
       const result = await daemonDeliveryTick({ client, log, features });
       if (result.ordinaryOnly) {

@@ -2278,8 +2278,35 @@
   .todo-row:last-child .todo-row-main { border-bottom:0; }
   .todo-row-meta { display:flex; align-items:baseline; gap:5px; min-width:0; margin-bottom:4px; color:var(--muted-2); font:10px/1.25 var(--sans); }
   .todo-row-meta .kind { color:var(--muted); font-weight:600; }
-  .todo-row-title { overflow:hidden; color:var(--ink); font:500 15px/1.32 var(--serif); text-overflow:ellipsis; white-space:nowrap; }
+  /* Read and unread are the same words as the Relays list: ink and weight
+     mean "you have not seen this", never "this is a title". */
+  .todo-row-title { overflow:hidden; color:var(--muted); font:400 15px/1.32 var(--serif); text-overflow:ellipsis; white-space:nowrap; }
+  .todo-row.unread .todo-row-title { color:var(--ink); font-weight:500; }
   .todo-row-preview { overflow:hidden; margin-top:3px; color:var(--muted-2); font:11px/1.35 var(--sans); text-overflow:ellipsis; white-space:nowrap; }
+  /* The steward's one line: why this item sits where it does, in the
+     person's own second person. The accent dot is the only mark that says
+     "your agent wrote this"; the words do the rest. */
+  .todo-row-why { overflow:hidden; margin-top:3px; color:var(--muted); font:11px/1.4 var(--sans); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow-wrap:anywhere; }
+  .todo-row-why::before { content:""; display:inline-block; width:5px; height:5px; margin:0 6px 1px 0; border-radius:50%; background:var(--accent); opacity:.8; vertical-align:middle; }
+  .todo-steward { display:flex; align-items:flex-start; gap:6px; min-height:24px; padding:8px 16px 0; color:var(--muted-3); font:10.5px/1.35 var(--sans); }
+  .todo-steward .tb-working-orb { margin:4px 3px 0 0; }
+  .todo-steward > span { min-width:0; display:flex; flex-direction:column; gap:1px; }
+  .todo-steward .verdict { color:var(--muted); overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow-wrap:anywhere; }
+  .todo-steward .foot, .todo-steward .plain { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .todo-steward button { appearance:none; margin-left:auto; flex:none; padding:4px 0 4px 10px; border:0; background:transparent; color:var(--muted-2); cursor:pointer; font:500 10.5px/1 var(--sans); }
+  .todo-steward button:hover { color:var(--ink); }
+  .todo-steward button:disabled { cursor:default; opacity:.5; }
+  .todo-steward.err { color:var(--danger); }
+  .todo-clear { padding:20px 16px 2px; color:var(--ink); font:500 15px/1.3 var(--serif); }
+  .todo-clear + .todo-group .todo-group-head { padding-top:12px; }
+  .rd-why { display:flex; align-items:flex-start; gap:9px; margin:12px 0 0; padding:9px 12px 10px; border-radius:9px; background:var(--wash); color:var(--ink); font:12px/1.45 var(--sans); }
+  .rd-why::before { content:""; flex:none; width:5px; height:5px; margin-top:6px; border-radius:50%; background:var(--accent); }
+  .rd-why-who { color:var(--muted-2); }
+  .rd-why-evidence { margin-top:3px; color:var(--muted-2); font-size:11px; }
+  .sv-steward-options { display:inline-flex; gap:3px; margin-left:auto; flex:none; }
+  .sv-steward-row { display:block; min-height:0; padding:11px 12px 12px; }
+  .sv-steward-head { display:flex; align-items:center; gap:11px; margin-bottom:2px; }
+  .sv-steward-row .sv-open-why { display:block; }
   .todo-view-all,.todo-load-more { appearance:none; width:calc(100% - 32px); margin:2px 16px 4px; padding:8px 0; border:0; border-top:1px solid var(--hair); background:transparent; color:var(--muted-2); cursor:pointer; text-align:left; font:500 10.5px/1.2 var(--sans); }
   .todo-view-all:hover,.todo-load-more:hover { color:var(--ink); }
   .todo-terminal-stack { margin:14px 16px 8px; border-top:1px solid var(--hair); }
@@ -2837,6 +2864,7 @@
       <!-- Todo view: one workflow for every managed Relay and Task. -->
       <section class="view hidden" id="tasksView">
         <nav class="todo-filter-rail" id="todoFilterRail" aria-label="Filter Todo by status"></nav>
+        <div class="todo-steward gone" id="todoSteward" aria-live="polite"></div>
         <div id="tasksList"></div>
         <div class="empty gone" id="tasksEmpty">
           <svg class="mark" width="22" height="22" viewBox="0 0 16 16" aria-hidden="true">
@@ -2969,6 +2997,7 @@
   const sentViewEl = document.getElementById("sentView");
   const tasksViewEl = document.getElementById("tasksView");
   const todoFilterRailEl = document.getElementById("todoFilterRail");
+  const todoStewardEl = document.getElementById("todoSteward");
   const tasksListEl = document.getElementById("tasksList");
   const tasksEmptyEl = document.getElementById("tasksEmpty");
   const tasksBadgeEl = document.getElementById("tasksBadge");
@@ -5638,7 +5667,7 @@
   const TODO_ALL_PREVIEW_ORDER = [...TODO_ACTIVE_ORDER, "done"];
   const TODO_TERMINAL_ORDER = ["canceled", "duplicate"];
   const TODO_LABEL = {
-    triage:"Triage", backlog:"Backlog", todo:"Todo", in_progress:"In Progress",
+    triage:"Needs attention", backlog:"Backlog", todo:"Todo", in_progress:"In Progress",
     done:"Done", canceled:"Canceled", duplicate:"Duplicate",
   };
   const EMPTY_TODO_COUNTS = Object.fromEntries(TODO_STATUS_ORDER.map((status) => [status, 0]));
@@ -5671,21 +5700,31 @@
       threadId:item.threadId || item.relayId, groupSendId:item.groupSendId || null,
       recipientGroupId:item.recipientGroupId || null, recipientGroupName:item.recipientGroupName || "",
       todoStatus:item.todoStatus, todoVersion:item.todoVersion, duplicateOfItemId:item.duplicateOfItemId || null,
+      attentionRank:item.attentionRank || null, assessment:item.assessment || "",
+      assessmentEvidence:Array.isArray(item.assessmentEvidence) ? item.assessmentEvidence : [],
+      assessedAt:item.assessedAt || null, assessedBy:item.assessedBy || "",
       _todoSummary:true,
     };
   }
   function mergeTodoProjection(item) {
     if (!item) return;
+    const assessment = {
+      attentionRank:item.attentionRank || null, assessment:item.assessment || "",
+      assessmentEvidence:Array.isArray(item.assessmentEvidence) ? item.assessmentEvidence : [],
+      assessedAt:item.assessedAt || null, assessedBy:item.assessedBy || "",
+    };
     for (const row of payload.relays || []) {
       if (String(row.id) !== String(item.relayId)) continue;
       row.todoStatus = item.todoStatus;
       row.todoVersion = item.todoVersion;
       row.duplicateOfItemId = item.duplicateOfItemId || null;
+      Object.assign(row, assessment);
     }
     const hydrated = todoHydratedRows.get(String(item.relayId));
     if (hydrated) Object.assign(hydrated, {
       todoStatus:item.todoStatus, todoVersion:item.todoVersion,
       duplicateOfItemId:item.duplicateOfItemId || null,
+      ...assessment,
     });
   }
   function beginTodoTransition() {
@@ -5771,6 +5810,9 @@
           recipientGroupName:result.row.recipientGroupName || summary.recipientGroupName || "",
           todoStatus:summary.todoStatus, todoVersion:summary.todoVersion,
           duplicateOfItemId:summary.duplicateOfItemId || null,
+          attentionRank:summary.attentionRank || null, assessment:summary.assessment || "",
+          assessmentEvidence:Array.isArray(summary.assessmentEvidence) ? summary.assessmentEvidence : [],
+          assessedAt:summary.assessedAt || null, assessedBy:summary.assessedBy || "",
         } : {}) });
       }
     }
@@ -8389,6 +8431,7 @@
         <div class="rd-headline${headlineClass}">${esc(subject)}</div>
         <div class="rd-rule"></div>
         <div class="rd-body">${readerParagraphs(r.forHuman)}</div>
+        ${todoWhyHtml(r)}
         ${scheduleContractHtml(r)}`;
     const workDoc = `<div class="work-context">
         <div class="rd-kicker" data-run-kicker="${esc(r.id)}">${legacyCompletedWithoutNative ? "Task · done" : `${request || chatOwnedWork ? `Task · Created by ${esc(sender)}` : `work · ${esc(sender)}`} · ${esc(timeAgo(r.createdAt))}`}</div>
@@ -8678,6 +8721,18 @@
 
   }
 
+  // The steward's reason, in full, with what it was based on. Reads as a
+  // note from the person's own agent, not a system banner.
+  function todoWhyHtml(row) {
+    const note = String(row?.assessment || "").trim();
+    if (!note || payload.features?.todo !== true) return "";
+    const who = row.assessedBy === "human" ? "You" : stewardAgentLabel(row.assessedBy);
+    const when = row.assessedAt ? timeAgo(row.assessedAt) : "";
+    const evidence = (Array.isArray(row.assessmentEvidence) ? row.assessmentEvidence : [])
+      .map((item) => String(item?.label || "").trim()).filter(Boolean);
+    return `<div class="rd-why"><div><span class="rd-why-who">${esc(who)}${when ? ` · ${esc(when)}` : ""}</span> · ${esc(note)}${
+      evidence.length ? `<div class="rd-why-evidence">Based on ${esc(evidence.join(", "))}</div>` : ""}</div></div>`;
+  }
   function todoReaderStatusHtml(row) {
     const status = row?.todoStatus;
     if (!TODO_STATUS_ORDER.includes(status) || !Number.isInteger(row?.todoVersion)) return "";
@@ -8774,16 +8829,68 @@
     const title = rawTitle || preview || (item.kind === "task" ? "Untitled Task" : "Untitled Relay");
     const showPreview = Boolean(rawTitle && preview && preview !== rawTitle);
     const context = item.recipientGroupName ? `${item.recipientGroupName} · ` : "";
+    // Unread means the person has not opened it: same words as the Relays
+    // list. The steward's reason, when there is one, replaces the preview:
+    // "what you did and what is left" beats the first line of the message.
+    const unread = item.state === "delivered";
+    const why = String(item.assessment || "").trim();
     return `
-      <div class="todo-row" role="button" tabindex="0" data-todo-item="${esc(item.relayId)}" data-todo-status="${esc(status || item.todoStatus || "")}">
+      <div class="todo-row${unread ? " unread" : ""}" role="button" tabindex="0" data-todo-item="${esc(item.relayId)}" data-todo-status="${esc(status || item.todoStatus || "")}">
         <span class="avatar sm" style="--av-h:${avatarHue(sender)}" aria-hidden="true">${esc(avatarInitials(sender))}</span>
         <div class="todo-row-main">
           <div class="todo-row-meta"><span class="kind">${item.kind === "task" ? "Task" : "Relay"}</span><span>·</span><span>${esc(context + sender)}</span><span>·</span><span>${esc(timeAgo(item.createdAt))}</span></div>
           <div class="todo-row-title">${esc(title)}</div>
-          ${showPreview ? `<div class="todo-row-preview">${esc(preview)}</div>` : ""}
+          ${why ? `<div class="todo-row-why" title="${esc(why)}">${esc(why)}</div>` : showPreview ? `<div class="todo-row-preview">${esc(preview)}</div>` : ""}
         </div>
       </div>`;
   }
+  // ---------- the steward's line: who last checked the list, and when ----------
+  function stewardAgentLabel(provider) {
+    return provider === "claude" ? "Claude Code" : provider === "codex" ? "Codex" : "Your agent";
+  }
+  const STEWARD_RUN_STALE_MS = 25 * 60 * 1000;
+  function stewardIsRunning(s) {
+    return Boolean(s?.run && Date.now() - Number(s.run.heartbeatAt || s.run.startedAt || 0) < STEWARD_RUN_STALE_MS);
+  }
+  function stewardSentence(s) {
+    if (!s) return "";
+    if (!s.enabled) return "Not checking your list. Turn it on in Settings.";
+    if (stewardIsRunning(s)) return `${stewardAgentLabel(s.run.provider)} is checking your list…`;
+    if (s.requestedAt && s.requestedAt > Number(s.lastRun?.startedAt || 0)) return "Checking soon…";
+    if (s.lastRun?.ok) {
+      const when = timeAgo(new Date(s.lastRun.finishedAt).toISOString());
+      return `${stewardAgentLabel(s.lastRun.provider)} checked ${when === "now" ? "just now" : `${when} ago`}${s.lastRun.summary ? ` · ${s.lastRun.summary}` : ""}`;
+    }
+    if (s.lastRun) return `${stewardAgentLabel(s.lastRun.provider)} couldn’t check your list${s.lastRun.error ? ` · ${s.lastRun.error}` : ""}`;
+    return "Not checked yet.";
+  }
+  function renderTodoSteward() {
+    if (!todoStewardEl) return;
+    const s = payload.todoSteward;
+    if (!s || payload.features?.todo !== true) { todoStewardEl.classList.add("gone"); return; }
+    const running = stewardIsRunning(s);
+    const pending = !running && Boolean(s.requestedAt && s.requestedAt > Number(s.lastRun?.startedAt || 0));
+    const failed = Boolean(s.lastRun && !s.lastRun.ok && !running && !pending);
+    const sentence = stewardSentence(s);
+    todoStewardEl.className = `todo-steward${failed ? " err" : ""}`;
+    // The verdict is the news; who checked and when is the footnote.
+    const verdict = s.lastRun?.ok && !running && !pending ? String(s.lastRun.summary || "").trim() : "";
+    const body = verdict
+      ? `<span class="verdict">${esc(verdict)}</span><span class="foot">${esc(sentence.split(" · ")[0])}</span>`
+      : `<span class="plain">${esc(sentence)}</span>`;
+    todoStewardEl.innerHTML = `${running || pending ? '<span class="tb-working-orb" aria-hidden="true"></span>' : ""}<span title="${esc(sentence)}">${body}</span>${
+      s.enabled && !running && !pending ? `<button type="button" data-todo-steward-run>${failed ? "Try again" : "Check now"}</button>` : ""}`;
+    const run = todoStewardEl.querySelector("[data-todo-steward-run]");
+    if (run) run.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      run.disabled = true;
+      run.textContent = "Checking soon…";
+      await window.relay.todoStewardRun?.().catch(() => null);
+    });
+  }
+  // The "4 min ago" drifts; keep it honest while the tab is open.
+  setInterval(() => { if (activeView === "tasks") renderTodoSteward(); }, 30_000);
+  let todoStewardFinishedAt = 0;
   function renderTodoRail() {
     const selected = todoSelectedStatuses();
     const total = TODO_STATUS_ORDER.reduce((sum, status) => sum + Number(todoState.counts[status] || 0), 0);
@@ -8795,6 +8902,7 @@
       + TODO_STATUS_ORDER.map((status) => button(
           status, TODO_LABEL[status], todoState.counts[status], todoState.selected.has(status),
         )).join("");
+    renderTodoSteward();
     for (const control of todoFilterRailEl.querySelectorAll("[data-todo-filter]")) {
       control.addEventListener("click", () => {
         const status = control.getAttribute("data-todo-filter");
@@ -8899,6 +9007,12 @@
       const groups = selected.length
         ? todoState.groups
         : TODO_ALL_PREVIEW_ORDER.map((status) => todoState.groups.find((group) => group.status === status)).filter(Boolean);
+      // Nothing asks for the person: say so in one line and let the recent
+      // Done stay visible underneath — the settled list is the reward.
+      const attentionTotal = TODO_ACTIVE_ORDER.reduce((sum, status) => sum + Number(todoState.counts[status] || 0), 0);
+      const clear = !selected.length && attentionTotal === 0 && total > 0
+        ? `<div class="todo-clear">Nothing needs you right now.</div>`
+        : "";
       const terminals = !selected.length ? `
         <div class="todo-terminal-stack">
           ${TODO_TERMINAL_ORDER.filter((status) => Number(todoState.counts[status] || 0) > 0).map((status) => `
@@ -8906,7 +9020,7 @@
               ${todoMarkHtml(status)}<span>${esc(TODO_LABEL[status])}</span><span class="n">${Number(todoState.counts[status])}</span>
             </button>`).join("")}
         </div>` : "";
-      tasksListEl.innerHTML = groups.map(todoGroupHtml).join("") + terminals;
+      tasksListEl.innerHTML = clear + groups.map(todoGroupHtml).join("") + terminals;
     }
     if (todoDuplicateSource) tasksListEl.insertAdjacentHTML("afterbegin", `
       <div class="todo-duplicate-banner" role="status">
@@ -14013,6 +14127,30 @@
   }
   // Notification preferences. Unlike a ✕ (a snooze that the next relay revokes),
   // these are durable choices: nothing in the product undoes them but the user.
+  function todoStewardSettingsHtml() {
+    const s = payload.todoSteward || { enabled:true, provider:"auto" };
+    const option = (value, label) => `<button class="todo-filter${s.provider === value ? " on" : ""}" type="button" data-steward-provider="${value}" aria-pressed="${s.provider === value ? "true" : "false"}"${s.enabled ? "" : " disabled"}>${label}</button>`;
+    return `
+      <div class="sv-open-section" id="todoStewardPrefs" data-stop="1">
+        <div class="sv-open-title">Todo assistant</div>
+        <div class="sv-open-list">
+          <div class="sv-open-row${s.enabled ? "" : " off"}">
+            <span class="sv-open-copy"><span class="sv-open-name">Check my Todo in the background</span><span class="sv-open-why">Your own agent reads what you were sent and what you did about it, then keeps Needs attention honest. It never sends or replies.</span></span>
+            ${svSwitchHtml("todoSteward", s.enabled, { label:"Check my Todo in the background" })}
+          </div>
+          <div class="sv-open-row sv-steward-row${s.enabled ? "" : " off"}">
+            <div class="sv-steward-head"><span class="sv-open-name">Runs on</span><span class="sv-steward-options">${option("auto", "Automatic")}${option("codex", "Codex")}${option("claude", "Claude Code")}</span></div>
+            <span class="sv-open-why">Automatic uses Codex when both are installed, otherwise Claude Code.</span>
+          </div>
+        </div>
+      </div>`;
+  }
+  async function saveTodoStewardPrefs(input) {
+    const result = await window.relay.todoStewardPrefs?.(input).catch((error) => ({ ok:false, error:String(error?.message || error) }));
+    if (result?.ok && result.steward) payload.todoSteward = result.steward;
+    renderSettings();
+    if (activeView === "tasks") renderTodoSteward();
+  }
   function svSwitchHtml(key, checked, { disabled = false, label = "", inverted = false } = {}) {
     return `<button class="sv-switch" type="button" role="switch" data-quiet="${esc(key)}"${inverted ? ' data-quiet-inverted="1"' : ""}
       aria-checked="${checked ? "true" : "false"}" aria-label="${esc(label)}" ${disabled ? "disabled" : ""}></button>`;
@@ -14214,6 +14352,10 @@
     // so nothing above it moves. Both say plainly what happens and — for hiding —
     // how to get the pill back, because Settings lives INSIDE the pill it hides.
     html += quietPrefsHtml(info);
+    // THE TODO ASSISTANT. One switch and one choice, in the same value-row
+    // species as everything below it. The explanation sits under the switch
+    // it explains, never as a paragraph above the list.
+    if (payload.features?.todo === true) html += todoStewardSettingsHtml();
     // WHERE RELAYS OPEN. Provider switches use runtime availability (CLI or
     // desktop), while the optional surface selector decides where a new/idle
     // session is presented when both surfaces exist.
@@ -14347,6 +14489,13 @@
     }
     for (const sw of settingsViewEl.querySelectorAll("[data-quiet]")) {
       sw.addEventListener("click", () => toggleQuietPref(sw.getAttribute("data-quiet"), sw));
+    }
+    for (const option of settingsViewEl.querySelectorAll("[data-steward-provider]")) {
+      option.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (option.disabled) return;
+        saveTodoStewardPrefs({ provider:option.getAttribute("data-steward-provider") });
+      });
     }
     const connectClaude = document.getElementById("svConnectClaude");
     if (connectClaude) connectClaude.addEventListener("click", connectClaudeFromSettings);
@@ -14633,6 +14782,12 @@
   async function toggleQuietPref(key, el) {
     if (!el || el.disabled || !settingsInfo) return;
     const nextChecked = el.getAttribute("aria-checked") !== "true";
+    if (key === "todoSteward") {
+      el.setAttribute("aria-checked", nextChecked ? "true" : "false");
+      el.disabled = true;
+      await saveTodoStewardPrefs({ enabled:nextChecked });
+      return;
+    }
     const next = el.getAttribute("data-quiet-inverted") === "1" ? !nextChecked : nextChecked;
     el.setAttribute("aria-checked", nextChecked ? "true" : "false");
     el.disabled = true;
@@ -15631,12 +15786,19 @@
       contacts: Array.isArray(next.contacts) ? next.contacts : (payload.contacts || []),
       chats: Array.isArray(next.chats) ? next.chats : (payload.chats || []),
       slackChats: Array.isArray(next.slackChats) ? next.slackChats : (payload.slackChats || []),
+      todoSteward: next.todoSteward && typeof next.todoSteward === "object" ? next.todoSteward : null,
     };
+    // A finished steward run reordered or re-noted the list without moving
+    // any row's version; the board must reload on its own account.
+    const stewardFinishedAt = Number(payload.todoSteward?.lastRun?.finishedAt || 0);
+    const stewardFinished = stewardFinishedAt !== todoStewardFinishedAt;
+    todoStewardFinishedAt = stewardFinishedAt;
+    if (activeView === "tasks") renderTodoSteward();
     const nextTodoProjectionSignature = JSON.stringify(projectedRelays.map((row) => [
-      row.id, row.todoStatus, row.todoVersion, row.duplicateOfItemId,
+      row.id, row.todoStatus, row.todoVersion, row.duplicateOfItemId, row.assessment,
       row.taskStartedAt, row.taskCompletedAt, row.taskClaim?.version,
     ]));
-    const todoProjectionChanged = nextTodoProjectionSignature !== todoProjectionSignature;
+    const todoProjectionChanged = nextTodoProjectionSignature !== todoProjectionSignature || stewardFinished;
     todoProjectionSignature = nextTodoProjectionSignature;
     if (payload.features?.todo === true && incomingAccount?.paired !== false && (!todoState.loaded || todoProjectionChanged)) {
       if (todoRefreshTimer) clearTimeout(todoRefreshTimer);

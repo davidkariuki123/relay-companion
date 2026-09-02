@@ -11,7 +11,7 @@ import { RelayClient } from "./client.js";
 import { accountDriftMessage } from "./account.js";
 import { apiUrl, readConfig } from "./config.js";
 import { accountProductFeatures } from "./product-features.js";
-import { localE2eeIdentityAvailable, verifiedE2eeStatus } from "./e2ee-mls.js";
+import { highestPinnedE2eeMode, localE2eeIdentityAvailable, verifiedE2eeStatus } from "./e2ee-mls.js";
 import { recordOutboundTaskOrigin } from "./task-completion-wake.js";
 
 const require = createRequire(import.meta.url);
@@ -253,7 +253,7 @@ export const TOOLS = [
   {
     name: "relay_todo_update",
     description:
-      "Change the workflow status of one exact Relay or Task only when the human instructed it or a real workflow decision occurred. First read the item with relay_inbox_list and copy its exact relayId and todoVersion. Reading, summarizing, drafting, discussing, or inspecting an item never changes status. For Tasks, use relay_task_start for In Progress and relay_task_complete for Done. A stale version must be re-read and reconsidered, never overwritten blindly. Duplicate requires the exact original Relay id in the same personal Todo or Relay channel.",
+      "Change the workflow status of one exact Relay or Task only when the human instructed it or a real workflow decision occurred. First read the item with relay_inbox_list and copy its exact relayId and todoVersion. Reading, summarizing, drafting, discussing, or inspecting an item never changes status. For Tasks, use relay_task_start for In Progress and relay_task_complete for Done. A stale version must be re-read and reconsidered, never overwritten blindly. Duplicate requires the exact original Relay id in the same personal Todo or Relay channel. When you actually assessed the item (checked replies, sessions, commits), pass note: one plain second-person line the person sees under the item, saying what they did and what remains, plus evidence pointers. The same status with a new note is a valid update. A status change without a note clears the previous note.",
     inputSchema: {
       type: "object",
       properties: {
@@ -265,8 +265,40 @@ export const TOOLS = [
         duplicateOfItemId: { type: "string", description: "Required only for Duplicate: the exact accessible original relayId." },
         expectedVersion: { type: "integer", minimum: 1, description: "Exact todoVersion from the latest Relay read." },
         idempotencyKey: { type: "string", description: "A stable unique key of at least 8 characters for this status change." },
+        note: { type: "string", maxLength: 280, description: "One line, second person, plain words: what the person did and what is left. Shown under the item." },
+        evidence: {
+          type: "array",
+          maxItems: 8,
+          description: "Where the note came from, so the person can check it.",
+          items: {
+            type: "object",
+            properties: {
+              kind: { type: "string", enum: ["ai_session", "relay", "sent_relay", "chat", "git", "file", "url", "other"] },
+              ref: { type: "string", description: "Opaque id, path, or commit the kind refers to." },
+              label: { type: "string", description: "The human-facing words for this pointer." },
+            },
+            required: ["kind", "ref", "label"],
+          },
+        },
       },
       required: ["itemId", "status", "expectedVersion", "idempotencyKey"],
+    },
+  },
+  {
+    name: "relay_todo_reorder",
+    description:
+      "Order the items inside one exact Todo status, first to last, so the person sees the most important item first. Read the status with relay_inbox_list first; items come back in their current order with attentionRank. List the itemIds that should lead, in order; unlisted items in that status keep their relative order behind them. Never crosses statuses, never changes read state, and never changes any item version.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        status: {
+          type: "string",
+          enum: ["triage", "backlog", "todo", "in_progress", "done", "canceled", "duplicate"],
+        },
+        itemIds: { type: "array", minItems: 1, maxItems: 100, items: { type: "string" }, description: "Exact relayIds, first to last." },
+        idempotencyKey: { type: "string", description: "A stable unique key of at least 8 characters for this reorder." },
+      },
+      required: ["status", "itemIds", "idempotencyKey"],
     },
   },
   {
@@ -736,6 +768,7 @@ export const ORDINARY_RELAY_TOOL_NAMES = new Set([
   "relay_group_delete",
   "relay_inbox_list",
   "relay_todo_update",
+  "relay_todo_reorder",
   // The sender-side history an agent needs to thread a follow-up. Without it,
   // ordinary messaging can only ever start new conversations.
   "relay_sent_list",
@@ -1054,6 +1087,23 @@ function exactInboxRelayIds(value) {
   return relayIds;
 }
 
+/** The optional assessment half of a Todo update: a note the person sees, plus evidence pointers. */
+export function todoAssessmentInput(args = {}) {
+  const note = String(args?.note || "").trim().slice(0, 280);
+  if (!note) return {};
+  const allowedKinds = new Set(["ai_session", "relay", "sent_relay", "chat", "git", "file", "url", "other"]);
+  const evidence = (Array.isArray(args?.evidence) ? args.evidence : [])
+    .filter((row) => row && typeof row === "object" && allowedKinds.has(String(row.kind || "")))
+    .map((row) => ({
+      kind: String(row.kind),
+      ref: String(row.ref || "").slice(0, 400),
+      label: String(row.label || "").trim().slice(0, 160),
+    }))
+    .filter((row) => row.label)
+    .slice(0, 8);
+  return { note, ...(evidence.length ? { evidence } : {}) };
+}
+
 async function inboxForAgent(client, args = {}) {
   if (Object.hasOwn(args, "todoStatuses")) {
     if (Object.hasOwn(args, "relayIds")) throw new Error("Pass todoStatuses or relayIds, not both.");
@@ -1267,12 +1317,24 @@ export function toolsForE2eeLocalAccount(features = { requests: true }, surface 
 export async function localMcpEncryptionState(client, {
   identityAvailable = localE2eeIdentityAvailable,
   statusReader = verifiedE2eeStatus,
+  highestMode = highestPinnedE2eeMode,
 } = {}) {
   const identityPresent = identityAvailable();
   let status;
   try {
     status = await statusReader(client);
   } catch (error) {
+    // Pairing enrolls an E2EE identity on EVERY device, so this branch is the
+    // common case, not the encrypted edge: with an identity on disk, tools/list
+    // and session start both ran a live GET /v1/e2ee/status and threw on any
+    // failure (fetch failed, timeout, rollout 404, stale 401). Hosts list tools
+    // once per session, so one blip left a session "connected" with zero
+    // tools — Tommy, 0.1.429, 2026-09-01; our own broker.log shows the same
+    // "connection_rejected fetch failed". A device that has never verified a
+    // mode above "off" has nothing to downgrade: plaintext IS its product, so
+    // it keeps the ordinary catalog. A device that has operated encrypted
+    // still fails closed below.
+    if (identityPresent && highestMode() === "off") return { mode: "off", enabled: false };
     // An unpaired Companion has neither an API credential nor an E2EE
     // identity. It must still expose the ordinary pairing-capable catalog;
     // pairing can happen while this long-lived MCP process is running and the
@@ -1759,10 +1821,27 @@ export async function handleCall(client, name, args, {
         ...(duplicateOfItemId ? { duplicateOfItemId } : {}),
         expectedVersion: args.expectedVersion,
         idempotencyKey,
+        ...todoAssessmentInput(args),
       }, {
         clientName:"relay-local-mcp",
         sourceProvider:sourceBinding.sourceProvider,
         nativeSessionId:sourceBinding.sourceNativeId,
+      }));
+    }
+    case "relay_todo_reorder": {
+      const status = String(args.status || "").trim();
+      const itemIds = (Array.isArray(args.itemIds) ? args.itemIds : []).map((id) => String(id || "").trim()).filter(Boolean);
+      const allowed = new Set(["triage", "backlog", "todo", "in_progress", "done", "canceled", "duplicate"]);
+      const idempotencyKey = String(args.idempotencyKey || "").trim();
+      if (!allowed.has(status) || !itemIds.length || idempotencyKey.length < 8) {
+        throw new Error("an exact status, at least one itemId, and an idempotencyKey of at least 8 characters are required");
+      }
+      const sourceBinding = sessionSourceBinding(sessionContext);
+      return text(await client.reorderTodo(status, itemIds, {
+        clientName:"relay-local-mcp",
+        sourceProvider:sourceBinding.sourceProvider,
+        nativeSessionId:sourceBinding.sourceNativeId,
+        idempotencyKey,
       }));
     }
     case "relay_agent_complete": {
@@ -2179,8 +2258,14 @@ export async function createRelayMcpSession({
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     rememberCallingClient(server.getClientVersion(), sessionContext);
-    const refusal = accountDriftRefusal(client);
-    if (refusal) throw new Error(refusal.content[0].text);
+    // Account drift must never empty the catalog. Hosts list tools once per
+    // session, so a throw here leaves the whole session "connected" with zero
+    // tools while the hook context keeps telling the agent to call
+    // relay_inbox_list (the E2EE status read below had the same failure mode;
+    // see localMcpEncryptionState). Listing reveals nothing about either
+    // account; every call still re-checks and returns the named refusal, which
+    // the agent can read and relay to the human. A rotation rebinds in place.
+    accountDriftRefusal(client);
     const encryption = await activeMcpEncryptionState(client);
     const surface = relayCallingSurface(sessionContext);
     return { tools: encryption.enabled ? toolsForE2eeLocalAccount(features, surface) : toolsForAccount(features, surface) };

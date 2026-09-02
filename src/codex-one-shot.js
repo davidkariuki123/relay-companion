@@ -49,6 +49,7 @@ export function codexOneShotArgs({
   fullAccess = false,
   schemaPath,
   mcpToolTimeouts = DEFAULT_MCP_TOOL_TIMEOUTS,
+  configOverrides = {},
 }) {
   const args = [
     "exec",
@@ -71,6 +72,13 @@ export function codexOneShotArgs({
   for (const [server, seconds] of Object.entries(mcpToolTimeouts || {})) {
     if (!/^[A-Za-z0-9_-]+$/.test(server) || !Number.isFinite(seconds) || seconds <= 0) continue;
     args.push("--config", `mcp_servers.${server}.tool_timeout_sec=${seconds}`);
+  }
+  // Exact config layers the caller owns (for example the Relay MCP server a
+  // background run must have whatever the user's own config says). Values are
+  // TOML literals, so callers JSON-encode strings and arrays themselves.
+  for (const [key, value] of Object.entries(configOverrides || {})) {
+    if (!/^[A-Za-z0-9_.-]+$/.test(key) || value === undefined || value === null) continue;
+    args.push("--config", `${key}=${value}`);
   }
   if (schemaPath) args.push("--output-schema", schemaPath);
   args.push("-");
@@ -366,11 +374,12 @@ export function runCodexOneShot({
   runTimeoutMs = Number(process.env.RELAY_CHAT_AGENT_TIMEOUT_MS || DEFAULT_RUN_TIMEOUT_MS),
   heartbeatIntervalMs = 30_000,
   mcpToolTimeouts = DEFAULT_MCP_TOOL_TIMEOUTS,
+  configOverrides = {},
   onEvent = () => {},
   spawnProcess = spawn,
 } = {}) {
   return new Promise((resolve, reject) => {
-    const args = codexOneShotArgs({ model, effort, fullAccess, schemaPath, mcpToolTimeouts });
+    const args = codexOneShotArgs({ model, effort, fullAccess, schemaPath, mcpToolTimeouts, configOverrides });
     const child = spawnProcess(command, args, {
       cwd: cwd && fs.existsSync(cwd) ? cwd : process.cwd(),
       env: { ...process.env },

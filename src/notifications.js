@@ -599,6 +599,13 @@ export function stagePlainRelayItem(
     todoStatus: item.todoStatus || existing.todoStatus || null,
     todoVersion: Number.isInteger(item.todoVersion) ? item.todoVersion : (existing.todoVersion || null),
     duplicateOfItemId: item.duplicateOfItemId || existing.duplicateOfItemId || null,
+    // The steward's reason rides with the row so the reader can show why an
+    // item sits where it does without another request.
+    attentionRank: Number.isInteger(item.attentionRank) ? item.attentionRank : (existing.attentionRank || null),
+    assessment: item.assessment || (Number.isInteger(item.todoVersion) && item.todoVersion !== existing.todoVersion ? null : existing.assessment) || null,
+    assessmentEvidence: Array.isArray(item.assessmentEvidence) ? item.assessmentEvidence : (existing.assessmentEvidence || []),
+    assessedAt: item.assessedAt || existing.assessedAt || null,
+    assessedBy: item.assessedBy || existing.assessedBy || null,
     // The completion species has to survive staging or the pill cannot tell an
     // agent's report from correspondence, and it lands in the chat with a
     // person (David, twice). packet.type is the sender's declared type.

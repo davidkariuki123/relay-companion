@@ -34,7 +34,7 @@ test("Todo rows name a channel when present and omit a direct-task placeholder",
   assert.match(html, /item\.recipientGroupName \? `\$\{item\.recipientGroupName\} · ` : ""/);
   assert.doesNotMatch(html, /recipientGroupName \|\| "Direct"/);
   assert.match(html, /Task · Created by \$\{esc\(sender\)}/);
-  assert.match(html, /triage:"Triage", backlog:"Backlog", todo:"Todo", in_progress:"In Progress"/);
+  assert.match(html, /triage:"Needs attention", backlog:"Backlog", todo:"Todo", in_progress:"In Progress"/);
 });
 
 test("Task ownership stays in reader/chat while Todo status remains independent", () => {

@@ -21,6 +21,7 @@ const EXPECTED_TOOLS = [
   "relay_task_complete",
   "relay_task_unclaim",
   "relay_todo_update",
+  "relay_todo_reorder",
   "relay_agent_complete",
   "relay_send",
   "relay_share_link",
@@ -267,7 +268,7 @@ test("model-facing Relay product language calls work Tasks, never Requests", asy
     assert.doesNotMatch(pill, retired);
   }
   assert.match(pill, /data-view="tasks">Todo/);
-  for (const status of ["Triage", "Backlog", "Todo", "In Progress", "Done", "Canceled", "Duplicate"]) {
+  for (const status of ["Needs attention", "Backlog", "Todo", "In Progress", "Done", "Canceled", "Duplicate"]) {
     assert.match(pill, new RegExp(status));
   }
 });

@@ -150,14 +150,36 @@ test("the local E2EE catalog follows rollout mode and fails closed in required m
     identityAvailable: () => false,
     statusReader: async () => { throw Object.assign(new Error("missing_authorization"), { status: 401 }); },
   }), { mode: "off", enabled: false });
+  // A device that has operated encrypted keeps failing closed on any status failure.
   await assert.rejects(localMcpEncryptionState(client, {
     identityAvailable: () => true,
+    highestMode: () => "optional",
     statusReader: async () => { throw Object.assign(new Error("missing_authorization"), { status: 401 }); },
   }), /missing_authorization/i);
   await assert.rejects(localMcpEncryptionState(client, {
     identityAvailable: () => true,
+    highestMode: () => "required",
     statusReader: async () => { throw Object.assign(new Error("route not found"), { status: 404 }); },
   }), /route not found/i);
+  await assert.rejects(localMcpEncryptionState(client, {
+    identityAvailable: () => true,
+    highestMode: () => "optional",
+    statusReader: async () => { throw new TypeError("fetch failed"); },
+  }), /fetch failed/i);
+  // Every paired device carries an identity; one that never verified a mode
+  // above "off" keeps the plaintext catalog when the status read fails.
+  for (const failure of [
+    () => { throw new TypeError("fetch failed"); },
+    () => { throw Object.assign(new Error("missing_authorization"), { status: 401 }); },
+    () => { throw Object.assign(new Error("route not found"), { status: 404 }); },
+    () => { throw Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" }); },
+  ]) {
+    assert.deepEqual(await localMcpEncryptionState(client, {
+      identityAvailable: () => true,
+      highestMode: () => "off",
+      statusReader: async () => failure(),
+    }), { mode: "off", enabled: false });
+  }
   await assert.rejects(localMcpEncryptionState(client, {
     identityAvailable: () => false,
     statusReader: async () => ({ mode: "required" }),
@@ -249,6 +271,7 @@ test("state-changing MCP tools require idempotency keys", () => {
     "relay_task_complete",
     "relay_task_unclaim",
     "relay_todo_update",
+    "relay_todo_reorder",
     "relay_share_link",
     "relay_mark_read",
     "relay_inbox_delete",
@@ -1573,7 +1596,7 @@ test("obsolete coordination protocol is absent and rejected before any API call"
   // state an agent sets on its own, so a human-initiated pull clears unread
   // and sends the read receipt — without it the sender sees "delivered"
   // forever). relay_acknowledge stays retired.
-  assert.equal(TOOLS.length, 32, "the full model catalog contains only current product tools");
+  assert.equal(TOOLS.length, 33, "the full model catalog contains only current product tools");
 
   const client = new Proxy({}, {
     get() { throw new Error("removed tool must not touch the API client"); },

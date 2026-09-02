@@ -13,6 +13,7 @@ import {
 import { discoverTerminalSessionBindings } from "./terminal-sessions.js";
 
 const MAX_SESSIONS_PER_PROVIDER = 250;
+export const OPEN_TURN_STALE_MS = 30 * 60 * 1000;
 const CLAUDE_DESKTOP_LOOKBACK_MS = 90 * 24 * 60 * 60 * 1000;
 
 function anonymousSessionKeys() {
@@ -119,7 +120,11 @@ export function discoverCodexSessions({ homeDir = codexHome(), nowMs = Date.now(
     if (!meta || meta.subagent) continue;
     const activity = readRolloutActivity(rollout.sessionPath);
     const recentlyLive = nowMs - Math.max(rollout.mtimeMs, activity.lastEventAt || 0) <= THREAD_MAX_AGE_MS;
-    const busy = (activity.busy && recentlyLive) || (
+    // A live turn keeps writing (token counts, items). An open task_started whose
+    // rollout has been silent for longer than any real model turn is a turn that
+    // died with its owner (a killed app-server, a crash): idle, not "working now".
+    const openTurnFresh = nowMs - Math.max(rollout.mtimeMs, activity.lastEventAt || 0) <= OPEN_TURN_STALE_MS;
+    const busy = (activity.busy && recentlyLive && openTurnFresh) || (
       !activity.lifecycleObserved && nowMs - rollout.mtimeMs <= RECENT_ROLLOUT_ACTIVITY_MS
     );
     const indexed = index.get(rollout.threadId);

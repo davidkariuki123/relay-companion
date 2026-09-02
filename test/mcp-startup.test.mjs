@@ -93,3 +93,94 @@ test("a production session can see and be told about share links", async () => {
     assert.match(messages.instructions, /relay_share_link/);
   }
 });
+
+test("tools/list survives account drift; only calls refuse", async () => {
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-mcp-drift-"));
+  const configPath = path.join(configDir, "config.json");
+  const bound = {
+    user: { id: "usr_bound", email: "bound@example.com", accountKind: "human", isDeveloper: false },
+    deviceId: "dev_bound",
+    deviceToken: "dev_token_bound",
+    updateChannel: "stable",
+  };
+  fs.writeFileSync(configPath, JSON.stringify(bound));
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [relayBin, "mcp"],
+    env: {
+      ...process.env,
+      RELAY_CONFIG_DIR: configDir,
+      RELAY_HOME: configDir,
+      RELAY_COMPANION_HOME: configDir,
+      RELAY_UPDATE_CHANNEL: "stable",
+      // A dead endpoint: the profile lookup must fail fast, not reach a server.
+      RELAY_API_URL: "http://127.0.0.1:9",
+    },
+    stderr: "pipe",
+  });
+  const client = new Client({ name: "relay-drift-test", version: "1.0.0" }, { capabilities: {} });
+  try {
+    await client.connect(transport);
+    const before = (await client.listTools()).tools.map((tool) => tool.name);
+    assert.ok(before.includes("relay_inbox_list"));
+
+    // The pill signs out underneath the running session.
+    fs.writeFileSync(configPath, JSON.stringify({ updateChannel: "stable" }));
+    const after = (await client.listTools()).tools.map((tool) => tool.name);
+    assert.deepEqual(after, before, "the catalog must not empty when the credential is gone");
+
+    const call = await client.callTool({ name: "relay_inbox_list", arguments: {} });
+    assert.equal(call.isError, true);
+    assert.match(call.content[0].text, /signed out/i);
+    assert.match(call.content[0].text, /bound@example\.com/);
+  } finally {
+    await client.close();
+    fs.rmSync(configDir, { recursive: true, force: true });
+  }
+});
+
+test("tools/list survives an unreachable E2EE status route on a paired, never-encrypted device", async () => {
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-mcp-e2ee-status-"));
+  fs.writeFileSync(path.join(configDir, "config.json"), JSON.stringify({
+    user: { id: "usr_paired", email: "paired@example.com", accountKind: "human", isDeveloper: false },
+    deviceId: "dev_paired",
+    deviceToken: "dev_token_paired",
+    updateChannel: "stable",
+  }));
+  // What every pairing leaves behind: an enrolled identity, no verified mode yet.
+  fs.writeFileSync(path.join(configDir, "e2ee-device-identity.json"), JSON.stringify({
+    version: 1,
+    protocol: "mls10",
+    cipherSuite: "MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519",
+    signaturePublicKey: "A".repeat(43),
+    fingerprint: "B".repeat(43),
+    privateKeyJwk: { kty: "OKP", crv: "Ed25519", x: "A".repeat(43), d: "C".repeat(43) },
+    createdAt: new Date().toISOString(),
+    deviceId: "dev_paired",
+    userId: "usr_paired",
+  }), { mode: 0o600 });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [relayBin, "mcp"],
+    env: {
+      ...process.env,
+      RELAY_CONFIG_DIR: configDir,
+      RELAY_HOME: configDir,
+      RELAY_COMPANION_HOME: configDir,
+      RELAY_UPDATE_CHANNEL: "stable",
+      // The API is unreachable: GET /v1/e2ee/status fails with "fetch failed".
+      RELAY_API_URL: "http://127.0.0.1:9",
+    },
+    stderr: "pipe",
+  });
+  const client = new Client({ name: "relay-e2ee-status-test", version: "1.0.0" }, { capabilities: {} });
+  try {
+    await client.connect(transport);
+    const names = (await client.listTools()).tools.map((tool) => tool.name);
+    assert.ok(names.includes("relay_inbox_list"), `plaintext catalog expected, got ${names.length} tools`);
+    assert.ok(names.includes("relay_send"));
+  } finally {
+    await client.close();
+    fs.rmSync(configDir, { recursive: true, force: true });
+  }
+});

@@ -165,6 +165,56 @@ test("delivers once to an exact idle task, binds it, then only continues it", as
   }
 });
 
+test("an explicit pick of a different task moves the Relay there and the binding follows", async () => {
+  // The picker always shows every destination; refusing every row but the
+  // remembered one with "try again" (2026-09-02) was a dead end. Same row =
+  // focus; a different row = deliver there and rebind; "New task" = fresh + rebind.
+  const previousHome = process.env.RELAY_HOME;
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-session-rebind-"));
+  const rolloutA = path.join(root, "a.jsonl");
+  const rolloutB = path.join(root, "b.jsonl");
+  fs.writeFileSync(rolloutA, "");
+  fs.writeFileSync(rolloutB, "");
+  process.env.RELAY_HOME = root;
+  fs.writeFileSync(path.join(root, "state.json"), JSON.stringify({ packets: { relay_move: { id: "relay_move" } } }));
+  try {
+    const delivery = await import(`../src/session-delivery.js?rebind=${Date.now()}`);
+    const a = targetFor(rolloutA);
+    const b = { ...targetFor(rolloutB), nativeId: "22222222-2222-4222-8222-222222222222", title: "Other task" };
+    const sends = [];
+    const base = {
+      relayId: "relay_move",
+      deliveryMode: delivery.EXPLICIT_PICKER_DELIVERY,
+      discover: () => [a, b],
+      submitCodex: async (input) => {
+        sends.push(input);
+        return { submitted: true, ran: true, clientUserMessageId: `message-${sends.length}` };
+      },
+      notifyCodex: async () => ({ ok: true }),
+      pollMs: 1,
+    };
+    const first = await delivery.deliverRelayToSession({ ...base, target: a });
+    assert.equal(first.binding.nativeId, a.nativeId);
+    const again = await delivery.deliverRelayToSession({ ...base, target: a });
+    assert.equal(again.continued, true, "the bound row only focuses");
+    assert.equal(sends.length, 1);
+    const moved = await delivery.deliverRelayToSession({ ...base, target: b });
+    assert.equal(moved.delivered, true, "a different row receives the Relay");
+    assert.equal(moved.binding.nativeId, b.nativeId, "and becomes the binding");
+    assert.equal(sends.length, 2);
+    assert.match(sends[1].text, /relay_move/);
+    assert.equal(delivery.relaySessionBinding("relay_move").nativeId, b.nativeId);
+    assert.equal(delivery.claimRelayNewSession("relay_move", "codex").kind, "bound", "an implicit new-session claim still honours the binding");
+    const fresh = delivery.claimRelayNewSession("relay_move", "codex", { rebind: true });
+    assert.equal(fresh.kind, "claimed", "an explicit New task claim proceeds even while bound");
+    assert.equal(fresh.claim.mode, "new_session");
+    assert.equal(fresh.claim.previousNativeId, null, "the bound task is never mistaken for a recoverable half-made one");
+  } finally {
+    if (previousHome === undefined) delete process.env.RELAY_HOME;
+    else process.env.RELAY_HOME = previousHome;
+  }
+});
+
 test("a sent Relay can supply its reference-only conversation lookup prompt", async () => {
   const previousHome = process.env.RELAY_HOME;
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-sent-session-delivery-"));

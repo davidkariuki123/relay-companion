@@ -34,6 +34,7 @@ import {
   activeDeviceFromTransparency,
   assertAndPinE2eeMode,
   assertKnownCheckpoint,
+  readTransparencyState,
   cachePlaintext,
   canonicalKeyPackageProof,
   canonicalMlsCredential,
@@ -94,6 +95,18 @@ export function identityOrThrow() {
 
 export function localE2eeIdentityAvailable() {
   return Boolean(readPairedIdentity());
+}
+
+/**
+ * The highest E2EE mode this enrolled device has ever verified from the
+ * server: "off" until it has actually operated encrypted. Pairing enrolls an
+ * identity on every device, so identity presence alone says nothing about
+ * whether plaintext is a downgrade.
+ */
+export function highestPinnedE2eeMode() {
+  const identity = readPairedIdentity();
+  if (!identity) return "off";
+  return readTransparencyState(identity).highestE2eeMode;
 }
 
 function directConversationId(leftUserId, rightUserId) {

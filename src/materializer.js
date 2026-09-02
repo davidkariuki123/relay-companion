@@ -521,6 +521,7 @@ async function materializeRowInHost({
     let codexThreadId = rowState.codexThreadId || (rowState.threadId && codexRolloutExists(rowState.threadId) ? rowState.threadId : null);
     let codexSessionPath = rowState.codexSessionPath || rowState.sessionPath || null;
     let threadRemoteEndpoint = "";
+    let codexUserTurnPersisted = false;
     if (materializationStale) {
       codexThreadId = null;
       codexSessionPath = null;
@@ -539,6 +540,7 @@ async function materializeRowInHost({
       codexThreadId = thread.id;
       codexSessionPath = thread.path;
       threadRemoteEndpoint = thread.remoteEndpoint || "";
+      codexUserTurnPersisted = thread.userTurnPersisted === true;
       rememberRow(id, {
         relayThreadId: rowWithAttachments.threadId || row.threadId || id,
         threadId: rowWithAttachments.threadId || row.threadId || id,
@@ -567,7 +569,11 @@ async function materializeRowInHost({
         materializedAt: new Date().toISOString(),
       });
     }
-    ensureRelayCodexIndexMarker({ threadId: codexThreadId, sessionPath: codexSessionPath, packetId: id });
+    // A thread Codex wrote itself already carries a real user turn; rewriting
+    // its rollout (a record without an ordinal) would break Desktop's resume.
+    if (!codexUserTurnPersisted) {
+      ensureRelayCodexIndexMarker({ threadId: codexThreadId, sessionPath: codexSessionPath, packetId: id });
+    }
     finalizeCodexThreadState({
       threadId: codexThreadId,
       title: rowWithAttachments.displayTitle || rowWithAttachments.title || relayRowTitle(rowWithAttachments),
@@ -1105,6 +1111,44 @@ async function createCodexThread({
     if (!sessionPath || !fs.existsSync(sessionPath)) {
       throw new Error(`Codex did not materialize rollout ${threadId} after turn/start`);
     }
+    let userTurnPersisted = false;
+    if (!shared) {
+      // DESKTOP SURFACE: the private app-server exists only so Codex writes the
+      // thread itself; Codex Desktop is the thread's real owner. Codex 0.151+
+      // owns the rollout format (every record carries an ordinal, a hand-written
+      // final record makes Desktop refuse to resume) and holds a per-thread
+      // writer lock, so Relay never appends to the file and never keeps the
+      // server alive into the hand-off. It waits until Codex has persisted the
+      // letter as the first user message, interrupts the turn (no model reply,
+      // nothing Relay would have to outlive), and stops the server — releasing
+      // the lock — before Desktop is navigated onto the thread (2026-09-02:
+      // "This is open in another app", then an empty thread stuck "working").
+      const completed = client.waitForNotification(
+        (message) => message?.method === "turn/completed" && (!turnId || message?.params?.turn?.id === turnId),
+        { timeoutMs: Number(process.env.RELAY_CODEX_LETTER_TIMEOUT_MS || 45_000) },
+      ).then(() => true).catch(() => false);
+      let finished = false;
+      completed.then((value) => { finished = value; });
+      const letterDeadline = Date.now() + Number(process.env.RELAY_CODEX_LETTER_TIMEOUT_MS || 45_000);
+      while (!finished && Date.now() < letterDeadline) {
+        if (codexRolloutHasUserLetter(sessionPath, briefing)) {
+          userTurnPersisted = true;
+          break;
+        }
+        await sleep(50);
+      }
+      // The interrupt is refused ("no active turn") while the turn is still
+      // starting; keep asking until it lands or the turn ends by itself.
+      while (!finished) {
+        const interrupted = await client.request("turn/interrupt", { threadId, turnId })
+          .then(() => true)
+          .catch(() => false);
+        if (interrupted) break;
+        await sleep(100);
+      }
+      await completed;
+      userTurnPersisted = userTurnPersisted || codexRolloutHasUserLetter(sessionPath, briefing);
+    }
     const deadline = Date.now() + Number(process.env.RELAY_CODEX_ROW_TIMEOUT_MS || 6000);
     while (!codexThreadRowExists(threadId) && Date.now() < deadline) {
       await sleep(150);
@@ -1116,24 +1160,39 @@ async function createCodexThread({
       preview: relayThreadPreview(row),
     });
     await client.request("thread/name/set", { threadId, name: row.displayTitle || row.title || relayRowTitle(row) });
-    if (!shared) {
-      client.waitForNotification(
-        (message) => message?.method === "turn/completed" && (!turnId || message?.params?.turn?.id === turnId),
-        { timeoutMs: Number(process.env.RELAY_CODEX_OPEN_TURN_TIMEOUT_MS || 12 * 60 * 60 * 1000) },
-      ).catch(() => {}).finally(() => client.stop());
-    }
+    if (!shared) await client.stop();
     return {
       id: threadId,
       cwd,
       path: sessionPath,
       rowPersisted: codexThreadRowExists(threadId),
       turnId,
+      userTurnPersisted: shared ? true : userTurnPersisted,
       ...(shared?.endpoint ? { remoteEndpoint: shared.endpoint } : {}),
     };
   } catch (error) {
     if (!shared) await client.stop();
     throw error;
   }
+}
+
+// Codex persists the first user message a few seconds into the turn (after
+// hooks and MCP servers start). Match on the letter's opening line so a
+// developer-role echo of the same text cannot count.
+function codexRolloutHasUserLetter(sessionPath, briefing) {
+  try {
+    const head = String(briefing || "").split("\n").find((line) => line.trim()) || "";
+    if (!head) return false;
+    const needle = JSON.stringify(head).slice(1, -1);
+    for (const line of fs.readFileSync(sessionPath, "utf8").split("\n")) {
+      if (!line.includes('"role":"user"') || !line.includes(needle)) continue;
+      try {
+        const row = JSON.parse(line);
+        if (row?.type === "response_item" && row?.payload?.type === "message" && row?.payload?.role === "user") return true;
+      } catch {}
+    }
+  } catch {}
+  return false;
 }
 
 function ensureRelayCodexIndexMarker({ threadId, sessionPath, packetId }) {

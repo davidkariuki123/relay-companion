@@ -480,7 +480,7 @@ test("the New task/session picker row claims and recovers materialization before
   const end = main.indexOf("async function continuePacketSession", start);
   const delivery = main.slice(start, end);
   assert.ok(start >= 0 && end > start);
-  assert.match(delivery, /claimRelayNewSession\(routePacketId, provider\)/);
+  assert.match(delivery, /claimRelayNewSession\(routePacketId, provider, \{ rebind: true \}\)/);
   assert.match(delivery, /claim\.kind === "recovered"/);
   assert.match(delivery, /markRelaySessionDispatching\(routePacketId, claim\.claim\.claimId\)/);
   assert.match(delivery, /completeRelayNewSession\([\s\S]*claim\.claim\.claimId/);

@@ -115,6 +115,33 @@ test("an abandoned unfinished Codex marker does not outrank live picker tasks", 
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test("an open Codex turn whose rollout went silent is idle, a recently writing one is active", () => {
+  // A turn that died with its owner (a killed app-server) leaves task_started
+  // with no close. It must not read as "working now" for six hours.
+  const root = fixture();
+  const home = path.join(root, "codex");
+  const day = path.join(home, "sessions", "2026", "09", "02");
+  fs.mkdirSync(day, { recursive: true });
+  const now = Date.parse("2026-09-02T14:00:00Z");
+  const make = (id, ageMs) => {
+    const at = new Date(now - ageMs).toISOString();
+    const filePath = path.join(day, `rollout-2026-09-02T12-00-00-${id}.jsonl`);
+    fs.writeFileSync(filePath, `${[
+      codexLine("session_meta", { id, session_id: id, cwd: "/work/relay" }, at),
+      codexLine("event_msg", { type: "task_started", turn_id: `turn-${id.slice(-2)}` }, at),
+    ].join("\n")}\n`);
+    fs.utimesSync(filePath, (now - ageMs) / 1000, (now - ageMs) / 1000);
+  };
+  const dead = "019fa000-0000-7000-8000-000000000041";
+  const live = "019fa000-0000-7000-8000-000000000042";
+  make(dead, 45 * 60_000);
+  make(live, 5 * 60_000);
+  const rows = discoverCodexSessions({ homeDir: home, nowMs: now });
+  assert.equal(rows.find((row) => row.nativeId === dead).state, "idle");
+  assert.equal(rows.find((row) => row.nativeId === live).state, "active");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test("directory distinguishes a live Claude chat from a cold but recoverable idle chat", () => {
   const root = fixture();
   const configDir = path.join(root, "claude");
