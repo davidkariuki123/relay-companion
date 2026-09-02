@@ -53,9 +53,8 @@ contextBridge.exposeInMainWorld("relay", {
     input || {},
   ),
   todoItem: (id) => ipcRenderer.invoke("relay:todoItem", String(id || "")),
-  // The Todo steward runs in the daemon; these only ask it to look now and
-  // record the person's preference. Results arrive on the next inbox push.
-  todoStewardRun: () => ipcRenderer.invoke("relay:todoStewardRun"),
+  // The Todo steward runs in the daemon; the pill only records the person's
+  // preference. Its results arrive as ordinary Todo data on the next push.
   todoStewardPrefs: (input = {}) => ipcRenderer.invoke("relay:todoStewardPrefs", input || {}),
   requestReviewSafety: (id) => ipcRenderer.invoke("relay:requestReviewSafety", String(id || "")),
   requestCompletionSend: (id) => ipcRenderer.invoke("relay:requestCompletionSend", String(id || "")),

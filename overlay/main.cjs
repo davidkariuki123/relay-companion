@@ -2551,7 +2551,7 @@ async function pushInboxNow(force) {
     todoSteward: payload.todoSteward ? [
       payload.todoSteward.enabled, payload.todoSteward.provider, payload.todoSteward.requestedAt,
       payload.todoSteward.run && [payload.todoSteward.run.startedAt, payload.todoSteward.run.heartbeatAt, payload.todoSteward.run.phase],
-      payload.todoSteward.lastRun && [payload.todoSteward.lastRun.finishedAt, payload.todoSteward.lastRun.ok, payload.todoSteward.lastRun.summary],
+      payload.todoSteward.lastRun && [payload.todoSteward.lastRun.finishedAt, payload.todoSteward.lastRun.ok],
     ] : null,
   });
   // Unchanged data: skip the send entirely. Re-sending identical payloads made the
@@ -8741,7 +8741,6 @@ function readTodoStewardState() {
         ok: raw.lastRun.ok === true,
         provider: String(raw.lastRun.provider || ""),
         label: String(raw.lastRun.label || ""),
-        summary: String(raw.lastRun.summary || "").slice(0, 240),
         checked: Number(raw.lastRun.checked || 0) || 0,
         changed: Number(raw.lastRun.changed || 0) || 0,
         error: String(raw.lastRun.error || "").slice(0, 240),
@@ -8751,16 +8750,6 @@ function readTodoStewardState() {
     return null;
   }
 }
-ipcMain.handle("relay:todoStewardRun", async () => {
-  try {
-    const steward = await todoStewardModule();
-    steward.requestStewardRun(RELAY_HOME);
-    pushInbox(true);
-    return { ok: true };
-  } catch (error) {
-    return { ok: false, error: (error && error.message) || String(error) };
-  }
-});
 ipcMain.handle("relay:todoStewardPrefs", async (_e, input) => {
   try {
     const steward = await todoStewardModule();

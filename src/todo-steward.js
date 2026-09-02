@@ -55,11 +55,10 @@ export const STEWARD_ROUTES = Object.freeze({
 const STEWARD_OUTPUT_SCHEMA = {
   type: "object",
   properties: {
-    summary: { type: "string" },
     checked: { type: "integer" },
     changed: { type: "integer" },
   },
-  required: ["summary", "checked", "changed"],
+  required: ["checked", "changed"],
   additionalProperties: false,
 };
 
@@ -314,11 +313,11 @@ export function buildStewardPrompt({
     JSON.stringify(snapshot, null, 1),
     "",
     "WHEN YOU ARE DONE",
-    "Answer with JSON only: {\"summary\": one sentence to " + firstName + " about what needs them now, at most 160 characters — the state of the list, never a narration of what you or they 'cleared' or 'moved' (good: \"Jordan is still waiting on you; Tommy's fix is merged but not shipped.\"), \"checked\": number of items you assessed, \"changed\": number of status changes or reorders you made}.",
+    "Answer with JSON only: {\"checked\": number of items you assessed, \"changed\": number of status changes or reorders you made}. Write nothing else: the person reads your notes on the items, never a report.",
   ].join("\n");
 }
 
-/** Parse the steward's final answer; tolerate prose around the JSON. */
+/** Parse the steward's final answer (counts only); tolerate prose around the JSON. */
 export function stewardResultFromText(text) {
   const raw = String(text || "").trim();
   if (!raw) return null;
@@ -331,16 +330,15 @@ export function stewardResultFromText(text) {
   for (const candidate of candidates) {
     try {
       const parsed = JSON.parse(candidate);
-      if (parsed && typeof parsed === "object" && typeof parsed.summary === "string") {
+      if (parsed && typeof parsed === "object" && ("checked" in parsed || "changed" in parsed)) {
         return {
-          summary: parsed.summary.trim().slice(0, 240),
           checked: Number.isFinite(Number(parsed.checked)) ? Math.max(0, Math.trunc(Number(parsed.checked))) : 0,
           changed: Number.isFinite(Number(parsed.changed)) ? Math.max(0, Math.trunc(Number(parsed.changed))) : 0,
         };
       }
     } catch {}
   }
-  return { summary: raw.replace(/\s+/g, " ").slice(0, 240), checked: 0, changed: 0 };
+  return { checked: 0, changed: 0 };
 }
 
 export function ensureStewardOutputSchema(baseDir = storeDir()) {
@@ -540,14 +538,14 @@ export async function runTodoStewardOnce({
     });
     heartbeat(`${route.label} is checking your list`);
     const outcome = await runProvider({ route, prompt, heartbeat, baseDir });
-    const result = stewardResultFromText(outcome?.finalMessage) || { summary: "", checked: 0, changed: 0 };
+    const result = stewardResultFromText(outcome?.finalMessage) || { checked: 0, changed: 0 };
     const finishedAt = Date.now();
     updateStewardState(baseDir, {
       run: null,
       lastRun: {
         startedAt, finishedAt, ok: true, reason: decision.reason,
         provider: route.provider, model: route.model, label: route.label,
-        summary: result.summary, checked: result.checked, changed: result.changed,
+        checked: result.checked, changed: result.changed,
       },
     });
     log(`todo steward: ${route.label} checked ${result.checked}, changed ${result.changed} in ${Math.round((finishedAt - startedAt) / 1000)}s`);

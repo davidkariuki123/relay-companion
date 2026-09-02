@@ -110,15 +110,17 @@ test("the brief carries the person, the rules, the local transcript paths and th
   assert.match(prompt, /canceled: never on your own/);
   assert.match(prompt, /"What's your GitHub username\?"/);
   assert.match(prompt, /Answer with JSON only/);
+  assert.match(prompt, /Write nothing else: the person reads your notes on the items, never a report\./);
+  assert.doesNotMatch(prompt, /"summary"/);
   const withoutSessions = buildStewardPrompt({ snapshot, aiSessionTools: false, homeDir: "/Users/david" });
   assert.doesNotMatch(withoutSessions, /relay_ai_sessions/);
   assert.match(withoutSessions, /\.codex\/sessions/);
 });
 
 test("the final answer is read from JSON, fenced JSON, or falls back to the prose", () => {
-  assert.deepEqual(stewardResultFromText('{"summary":"You owe Schalk a reply.","checked":4,"changed":2}'), { summary: "You owe Schalk a reply.", checked: 4, changed: 2 });
-  assert.deepEqual(stewardResultFromText('Done.\n```json\n{"summary":"All clear.","checked":"3","changed":0}\n```'), { summary: "All clear.", checked: 3, changed: 0 });
-  assert.deepEqual(stewardResultFromText("I looked at everything and nothing changed."), { summary: "I looked at everything and nothing changed.", checked: 0, changed: 0 });
+  assert.deepEqual(stewardResultFromText('{"checked":4,"changed":2}'), { checked: 4, changed: 2 });
+  assert.deepEqual(stewardResultFromText('Done.\n```json\n{"checked":"3","changed":0}\n```'), { checked: 3, changed: 0 });
+  assert.deepEqual(stewardResultFromText("I looked at everything and nothing changed."), { checked: 0, changed: 0 }, "prose is never surfaced; only counts survive");
   assert.equal(stewardResultFromText(""), null);
 });
 
@@ -154,12 +156,12 @@ test("the Claude lane feeds the brief over stdin and reads the JSON result envel
   child.stdin.on("data", (chunk) => { stdin += chunk; });
   const pending = runClaudeSteward({ command: "claude", cwd: os.tmpdir(), prompt: "BRIEF", args: ["-p"], spawnProcess: () => child });
   await new Promise((resolve) => setTimeout(resolve, 10));
-  child.stdout.write(JSON.stringify({ type: "result", is_error: false, result: '{"summary":"Nothing owed.","checked":2,"changed":0}' }));
+  child.stdout.write(JSON.stringify({ type: "result", is_error: false, result: '{"checked":2,"changed":0}' }));
   child.exitCode = 0;
   child.emit("exit", 0);
   const result = await pending;
   assert.equal(stdin, "BRIEF");
-  assert.deepEqual(stewardResultFromText(result.finalMessage), { summary: "Nothing owed.", checked: 2, changed: 0 });
+  assert.deepEqual(stewardResultFromText(result.finalMessage), { checked: 2, changed: 0 });
 });
 
 test("one daemon tick fingerprints the board, runs when due, and records what happened", async () => {
@@ -179,7 +181,7 @@ test("one daemon tick fingerprints the board, runs when due, and records what ha
   const runProvider = async ({ route, prompt, heartbeat }) => {
     received = { route, prompt };
     heartbeat("Codex is checking");
-    return { finalMessage: '{"summary":"You owe Sven a reply.","checked":1,"changed":1}' };
+    return { finalMessage: '{"checked":1,"changed":1}' };
   };
   // Nothing installed: the tick reports it instead of crashing.
   requestStewardRun(baseDir, 5_000_000);
@@ -200,7 +202,7 @@ test("one daemon tick fingerprints the board, runs when due, and records what ha
   const state = readStewardState(baseDir);
   assert.equal(state.run, null);
   assert.equal(state.lastRun.ok, true);
-  assert.equal(state.lastRun.summary, "You owe Sven a reply.");
+  assert.equal(state.lastRun.summary, undefined, "no report is kept; the notes on the items are the output");
   assert.equal(state.lastRun.changed, 1);
   assert.equal(state.requestedAt, 0);
   // A second tick seconds later does nothing: fresh, and the signature check is rate limited.

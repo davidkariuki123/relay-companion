@@ -43,17 +43,12 @@ test("the steward's reason replaces the preview on a row and reads in full in th
   assert.match(summaryRow, /assessmentEvidence:Array\.isArray\(item\.assessmentEvidence\)/);
 });
 
-test("the Todo tab says who last checked the list, when, and offers Check now", () => {
-  assert.match(inbox, /<div class="todo-steward gone" id="todoSteward" aria-live="polite"><\/div>/);
-  const steward = between(inbox, "function stewardAgentLabel(provider)", "let todoStewardFinishedAt = 0;");
-  assert.match(steward, /provider === "claude" \? "Claude Code" : provider === "codex" \? "Codex" : "Your agent"/);
-  assert.match(steward, /is checking your list…/);
-  assert.match(steward, /checked \$\{when === "now" \? "just now" : `\$\{when\} ago`\}/);
-  assert.match(steward, /couldn’t check your list/);
-  assert.match(steward, /data-todo-steward-run>\$\{failed \? "Try again" : "Check now"\}/);
-  assert.match(steward, /window\.relay\.todoStewardRun\?\.\(\)/);
-  // The rail paints the line; a finished run reloads the board even though no row version moved.
-  assert.match(between(inbox, "function renderTodoRail()", "function todoGroupHtml(group)"), /renderTodoSteward\(\);/);
+test("the Todo tab carries no steward report: the agent's words live on the items, not above them", () => {
+  assert.doesNotMatch(inbox, /id="todoSteward"/);
+  assert.doesNotMatch(inbox, /is checking your list/);
+  assert.doesNotMatch(inbox, /Check now/);
+  assert.doesNotMatch(inbox, /todoStewardRun/);
+  // A finished run still reloads the board even though no row version moved.
   assert.match(inbox, /const todoProjectionChanged = nextTodoProjectionSignature !== todoProjectionSignature \|\| stewardFinished;/);
   assert.match(inbox, /todoSteward: next\.todoSteward && typeof next\.todoSteward === "object" \? next\.todoSteward : null,/);
 });
@@ -76,16 +71,14 @@ test("Settings carries the assistant as one switch and one choice in the value-r
   assert.match(inbox, /if \(key === "todoSteward"\) \{/);
 });
 
-test("main hands the renderer a bounded steward view and forwards Check now and preferences to the daemon's file", () => {
+test("main hands the renderer a bounded steward view and forwards preferences to the daemon's file", () => {
   assert.match(main, /todoSteward: PRODUCT_FEATURES\.todo === true \? readTodoStewardState\(\) : null,/);
-  assert.match(main, /ipcMain\.handle\("relay:todoStewardRun"/);
+  assert.doesNotMatch(main, /relay:todoStewardRun/);
   assert.match(main, /ipcMain\.handle\("relay:todoStewardPrefs"/);
-  assert.match(main, /steward\.requestStewardRun\(RELAY_HOME\)/);
   assert.match(main, /steward\.saveStewardPreferences\(RELAY_HOME/);
   assert.match(main, /else if \(String\(file\) === "todo-steward\.json"\) pushInboxQuiet\(\{ stateChange: false \}\);/);
   // The reader row and the push signature carry the note so a re-noted item repaints.
   assert.match(main, /assessment: p\.assessment \|\| null,/);
   assert.match(main, /r\.assessment,\n\s+r\.attentionRank,/);
-  assert.match(preload, /todoStewardRun: \(\) => ipcRenderer\.invoke\("relay:todoStewardRun"\)/);
   assert.match(preload, /todoStewardPrefs: \(input = \{\}\) => ipcRenderer\.invoke\("relay:todoStewardPrefs", input \|\| \{\}\)/);
 });
