@@ -659,7 +659,7 @@ test("folding publishes destination native geometry before an animation frame ca
 test("Windows/Linux use ordinary focusable windows, with a Linux taskbar fallback, while only macOS hit-tests a fixed canvas", () => {
   const create = sliceFunction(main, "function createWindow(");
   assert.match(create, /focusable: true/);
-  assert.match(create, /skipTaskbar: process\.platform !== "linux"/);
+  assert.match(create, /win = createCompanionWindow\(BrowserWindow, \{/);
   assert.match(create, /process\.platform === "linux" \? \{ icon:/);
   assert.match(create, /hasShadow: false/);
   assert.match(main, /setIgnoreMouseEvents\(next, \{ forward: true \}\)/);
@@ -676,6 +676,14 @@ test("Windows/Linux use ordinary focusable windows, with a Linux taskbar fallbac
   assert.match(html, /\.card \{[\s\S]*?position:absolute; top:0; right:0;/,
     "the visible card shares the native window's top-right anchor throughout a morph");
   assert.doesNotMatch(html, /body \{[^}]*user-select:none/);
+});
+
+test("every native window in the Companion follows the shared taskbar policy", () => {
+  assert.doesNotMatch(main, /new BrowserWindow\(/);
+  assert.ok(
+    (main.match(/createCompanionWindow\(BrowserWindow, \{/g) || []).length >= 4,
+    "the pill, previews, attachment viewers and hidden renderers all use the Companion window factory",
+  );
 });
 
 test("reader refreshes cannot change native focusability", () => {

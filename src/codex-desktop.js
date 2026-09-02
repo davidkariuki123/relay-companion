@@ -1,6 +1,6 @@
 // Codex Desktop foregrounding driver. Ported faithfully from
 // granular/tools/relay-companion/src/codex-desktop.js. Finds the running Codex
-// main process, opens (or SIGUSR1-starts) its Node inspector, and runs a
+// main process, opens its Node inspector, and runs a
 // Runtime.evaluate -> webContents.executeJavaScript -> electronBridge expression
 // in the selected primary BrowserWindow to refresh the recents rail and
 // navigate-to-route the freshly materialized Relay thread.
@@ -19,6 +19,7 @@ import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
+import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
 
@@ -84,16 +85,17 @@ async function notifyCodexDesktopThreadsUnserialized({
   assignmentOnly = false,
   primeOpen = true,
   timeoutMs = Number(process.env.RELAY_CODEX_DESKTOP_TIMEOUT_MS || 8000),
+  platform = process.platform,
 } = {}) {
   if (process.env.RELAY_CODEX_DESKTOP_REFRESH === "0") return { attempted: false, reason: "disabled" };
-  if (process.platform !== "darwin") return { attempted: false, reason: "not-darwin" };
+  if (!["darwin", "win32"].includes(platform)) return { attempted: false, reason: "unsupported-platform" };
 
   const openId = String(openThreadId || "").trim() || null;
   const ids = uniqueStrings(openId ? [...threadIds, openId] : threadIds);
   const pinnedIds = Array.isArray(pinnedThreadIds) ? uniqueStrings(pinnedThreadIds) : null;
   if (!ids.length && !pinnedIds && !openId) return { attempted: false, reason: "nothing-to-refresh" };
 
-  let pids = await findCodexMainPids();
+  let pids = await findCodexMainPids(platform);
   let coldLaunched = false;
   if (!pids.length) {
     // COLD START: an open must not assume the app is already running. Returning
@@ -106,8 +108,8 @@ async function notifyCodexDesktopThreadsUnserialized({
     // Only a real OPEN may launch: a background pin/recents refresh must never
     // make an app appear on someone's screen.
     if (!openId) return { attempted: true, ok: false, reason: "codex-not-running", results: [] };
-    const launched = await launchCodexDesktop();
-    pids = launched ? await waitForCodexMainPids(Number(process.env.RELAY_CODEX_LAUNCH_TIMEOUT_MS || 30000)) : [];
+    const launched = await launchCodexDesktop(platform);
+    pids = launched ? await waitForCodexMainPids(Number(process.env.RELAY_CODEX_LAUNCH_TIMEOUT_MS || 30000), platform) : [];
     if (!pids.length) return { attempted: true, ok: false, reason: "codex-launch-failed", results: [] };
     coldLaunched = true;
   }
@@ -132,11 +134,11 @@ async function notifyCodexDesktopThreadsUnserialized({
   let results = [];
   let misses = 0;
   for (;;) {
-    results = await evaluateAcrossCodexPids(pids, expression, { timeoutMs });
+    results = await evaluateAcrossCodexPids(pids, expression, { timeoutMs, platform });
     if (results.some(primaryWindowRan)) break;
     if (Date.now() >= readyDeadline) break;
     await sleep(500);
-    const next = await findCodexMainPids();
+    const next = await findCodexMainPids(platform);
     // A booting app's process list FLICKERS — an early build measured one empty
     // `ps` read seconds after a successful launch — so a single miss must not
     // abandon the wait, or the cold open gives up while the app is still coming
@@ -165,12 +167,12 @@ async function notifyCodexDesktopThreadsUnserialized({
   };
 }
 
-async function evaluateAcrossCodexPids(pids, expression, { timeoutMs }) {
+async function evaluateAcrossCodexPids(pids, expression, { timeoutMs, platform = process.platform }) {
   const results = [];
   for (const pid of pids) {
     let target;
     try {
-      target = await findOrStartInspectorForPid(pid, { timeoutMs });
+      target = await findOrStartInspectorForPid(pid, { timeoutMs, platform });
       if (!target) {
         results.push({ pid, ok: false, reason: "inspector-unavailable" });
         continue;
@@ -219,7 +221,18 @@ export function primaryRefreshRendererResult(results) {
 
 // Bring up ChatGPT/Codex Desktop. Bundle ids in the same order the activation
 // path uses, so a machine carrying only the legacy app still launches.
-async function launchCodexDesktop() {
+async function launchCodexDesktop(platform = process.platform) {
+  if (platform === "win32") {
+    try {
+      await execFileAsync(path.win32.join(process.env.SystemRoot || "C:\\Windows", "explorer.exe"), ["codex://"], {
+        timeout: 8000,
+        windowsHide: true,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
   for (const bundle of CODEX_DESKTOP_BUNDLE_IDS) {
     try {
       await execFileAsync("/usr/bin/open", ["-b", bundle], { timeout: 8000 });
@@ -233,10 +246,10 @@ async function launchCodexDesktop() {
 
 // Poll for the launched process instead of sleeping a guess: LaunchServices
 // returns as soon as it has handed the launch off, well before the app exists.
-async function waitForCodexMainPids(timeoutMs) {
+async function waitForCodexMainPids(timeoutMs, platform = process.platform) {
   const deadline = Date.now() + Math.max(1000, timeoutMs);
   for (;;) {
-    const pids = await findCodexMainPids();
+    const pids = await findCodexMainPids(platform);
     if (pids.length) return pids;
     if (Date.now() >= deadline) return [];
     await sleep(250);
@@ -281,17 +294,17 @@ export async function submitTurnToCodexDesktopThread({
   runtime = null,
 } = {}) {
   if (process.env.RELAY_CODEX_DESKTOP_REFRESH === "0") return { attempted: false, submitted: false, reason: "disabled" };
-  if (platform !== "darwin") return { attempted: false, submitted: false, reason: "not-darwin" };
+  if (!["darwin", "win32"].includes(platform)) return { attempted: false, submitted: false, reason: "unsupported-platform" };
   const cleanThreadId = String(threadId || "").trim();
   const cleanText = String(text || "").trim();
   if (!cleanThreadId || !cleanText) return { attempted: false, submitted: false, reason: "missing-thread-or-text" };
 
   const io = runtime || {};
-  const findPids = io.findCodexMainPids || findCodexMainPids;
+  const findPids = io.findCodexMainPids || (() => findCodexMainPids(platform));
   const evaluate = io.evaluateAcrossCodexPids || evaluateAcrossCodexPids;
   const pause = io.sleep || sleep;
-  const launch = io.launchCodexDesktop || launchCodexDesktop;
-  const waitPids = io.waitForCodexMainPids || waitForCodexMainPids;
+  const launch = io.launchCodexDesktop || (() => launchCodexDesktop(platform));
+  const waitPids = io.waitForCodexMainPids || ((timeout) => waitForCodexMainPids(timeout, platform));
   // One logical picker selection owns one durable identity for its entire
   // lifetime. session-delivery persists these before submitting so a second
   // process can reconcile the rollout without manufacturing a new turn.
@@ -340,7 +353,7 @@ export async function submitTurnToCodexDesktopThread({
         const newestPid = Math.max(...pids.map(Number).filter(Number.isFinite));
         const selectedPids = Number.isFinite(newestPid) ? [newestPid] : [];
         const results = selectedPids.length
-          ? await evaluate(selectedPids, expression, { timeoutMs })
+          ? await evaluate(selectedPids, expression, { timeoutMs, platform })
           : [];
         allResults.push(...results.map((entry) => ({ ...entry, attempt: attempts })));
         if (results.some((entry) => entry?.deliveryAmbiguous === true)) deliveryAmbiguous = true;
@@ -1140,8 +1153,15 @@ function buildPrimaryWindowExpression({ rendererCode, wantsFocus }) {
   })()`;
 }
 
-async function findCodexMainPids() {
+async function findCodexMainPids(platform = process.platform) {
   try {
+    if (platform === "win32") {
+      const powershell = path.win32.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+      const { stdout } = await execFileAsync(powershell, ["-NoProfile", "-NonInteractive", "-Command",
+        "Get-CimInstance Win32_Process -Filter \"Name='ChatGPT.exe' OR Name='Codex.exe'\" | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress",
+      ], { timeout: 4000, maxBuffer: 1024 * 1024, windowsHide: true });
+      return windowsCodexMainPids(stdout);
+    }
     const { stdout } = await execFileAsync("ps", ["-Ao", "pid=,command="], { timeout: 1500, maxBuffer: 1024 * 1024 });
     return stdout
       .split("\n")
@@ -1155,20 +1175,49 @@ async function findCodexMainPids() {
   }
 }
 
-export function isCodexMainCommand(command) {
-  const value = String(command || "");
-  return CODEX_MAIN_PATHS.some((mainPath) => value === mainPath || value.startsWith(`${mainPath} `));
+export function windowsCodexMainPids(source) {
+  let value;
+  try { value = JSON.parse(String(source || "")); } catch { return []; }
+  return (Array.isArray(value) ? value : [value])
+    .filter((entry) => entry && isCodexMainCommand(entry.CommandLine))
+    .map((entry) => Number(entry.ProcessId))
+    .filter((pid) => Number.isInteger(pid) && pid > 0);
 }
 
-async function findOrStartInspectorForPid(pid, { timeoutMs }) {
+export function isCodexMainCommand(command) {
+  const value = String(command || "");
+  if (CODEX_MAIN_PATHS.some((mainPath) => value === mainPath || value.startsWith(`${mainPath} `))) return true;
+  if (/(?:^|\s)--type(?:=|\s)/i.test(value)) return false;
+  // The Windows Store package has a versioned directory. Restrict the match to
+  // Codex's package so an unrelated ChatGPT install or a renderer is not driven.
+  return /^"?[A-Z]:\\[^"\r\n]*\\WindowsApps\\OpenAI\.Codex_[^\\"\r\n]+\\app\\(?:ChatGPT|Codex)\.exe"?(?:\s|$)/i.test(value);
+}
+
+export function startCodexInspector(pid, {
+  platform = process.platform,
+  debugProcess = process._debugProcess,
+  kill = process.kill,
+} = {}) {
+  try {
+    // SIGUSR1 is not available on Windows. Node's Windows debug trigger opens
+    // the same loopback inspector on the running Electron main process.
+    if (platform === "win32") {
+      if (typeof debugProcess !== "function") return false;
+      debugProcess(pid);
+    } else {
+      kill(pid, "SIGUSR1");
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function findOrStartInspectorForPid(pid, { timeoutMs, platform = process.platform }) {
   let target = await findInspectorTargetForPid(pid);
   if (target) return target;
 
-  try {
-    process.kill(pid, "SIGUSR1");
-  } catch {
-    return null;
-  }
+  if (!startCodexInspector(pid, { platform })) return null;
 
   const deadline = Date.now() + Math.max(500, timeoutMs);
   do {

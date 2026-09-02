@@ -132,7 +132,7 @@ export function startRelayCodexProjectRepairLoop({
     if (stopped) return;
     try {
       const result = await repair({ log });
-      if (result?.ok || result?.reason === "no-relay-threads" || result?.reason === "not-darwin") return;
+      if (result?.ok || ["no-relay-threads", "not-darwin", "unsupported-platform"].includes(result?.reason)) return;
     } catch (error) {
       log(`Codex Relay project repair failed: ${error?.message || error}`);
     }

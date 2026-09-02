@@ -16,7 +16,9 @@ import {
   isCodexMainCommand,
   primarySubmitRendererResult,
   primaryWindowRan,
+  startCodexInspector,
   submitTurnToCodexDesktopThread,
+  windowsCodexMainPids,
 } from "../src/codex-desktop.js";
 
 // relayRefreshCodexRenderer runs in the Codex page context and reaches for the
@@ -668,7 +670,53 @@ test("window URL classification decodes auxiliary initial routes without rejecti
 test("Codex process detection supports the current ChatGPT app and legacy Codex app", () => {
   assert.equal(isCodexMainCommand("/Applications/ChatGPT.app/Contents/MacOS/ChatGPT"), true);
   assert.equal(isCodexMainCommand("/Applications/Codex.app/Contents/MacOS/Codex"), true);
+  const windowsMain = String.raw`"C:\Program Files\WindowsApps\OpenAI.Codex_26.831.2377.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe"`;
+  assert.equal(isCodexMainCommand(windowsMain), true);
+  assert.equal(isCodexMainCommand(`${windowsMain} --type=renderer`), false);
+  assert.equal(isCodexMainCommand(String.raw`"C:\Program Files\WindowsApps\Other.ChatGPT_1\app\ChatGPT.exe"`), false);
   assert.equal(isCodexMainCommand("/Applications/Claude.app/Contents/MacOS/Claude"), false);
+});
+
+test("Windows process inventory keeps only Codex's main Electron process", () => {
+  const app = String.raw`"C:\Program Files\WindowsApps\OpenAI.Codex_26.831.2377.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe"`;
+  assert.deepEqual(windowsCodexMainPids(JSON.stringify([
+    { ProcessId: 101, CommandLine: app },
+    { ProcessId: 102, CommandLine: `${app} --type=gpu-process` },
+    { ProcessId: 103, CommandLine: String.raw`"C:\Program Files\WindowsApps\Other.ChatGPT_1\app\ChatGPT.exe"` },
+  ])), [101]);
+  assert.deepEqual(windowsCodexMainPids(JSON.stringify({ ProcessId: 104, CommandLine: app })), [104]);
+  assert.deepEqual(windowsCodexMainPids("not json"), []);
+});
+
+test("Windows opens Electron's inspector through Node's debug trigger", () => {
+  const calls = [];
+  assert.equal(startCodexInspector(301, {
+    platform: "win32",
+    debugProcess: (pid) => calls.push(["debug", pid]),
+    kill: () => calls.push(["kill"]),
+  }), true);
+  assert.deepEqual(calls, [["debug", 301]]);
+});
+
+test("Windows can submit through the same Desktop renderer bridge", async () => {
+  const result = await submitTurnToCodexDesktopThread({
+    threadId: "thread_windows",
+    text: "visible Windows turn",
+    platform: "win32",
+    confirmAttempts: 1,
+    runtime: {
+      findCodexMainPids: async () => [501],
+      evaluateAcrossCodexPids: async () => [{
+        pid: 501,
+        ok: true,
+        value: [{ id: 1, kind: "primary", result: { ok: true } }],
+      }],
+      launchCodexDesktop: async () => false,
+      waitForCodexMainPids: async () => [],
+    },
+  });
+  assert.equal(result.submitted, true);
+  assert.equal(result.reason, null);
 });
 
 // ---- Open-in-current-chat submit renderer -----------------------------------

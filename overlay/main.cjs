@@ -20,6 +20,7 @@
 //     auth. ack/mark-read writes state.json directly (atomic temp+rename).
 
 const { app, BrowserWindow, Menu, Tray, clipboard, ipcMain, nativeImage, powerMonitor, powerSaveBlocker, shell, screen, systemPreferences } = require("electron");
+const { createCompanionWindow } = require("./companion-window.cjs");
 
 if (process.platform === "linux") {
   app.setName("Relay");
@@ -4940,7 +4941,7 @@ function lockedHtmlPreviewDocument(source) {
 
 async function renderSafeHtmlThumbnail(source) {
   const partition = `relay-html-preview-${randomUUID()}`;
-  const preview = new BrowserWindow({
+  const preview = createCompanionWindow(BrowserWindow, {
     show: false,
     width: 900,
     height: 560,
@@ -5089,7 +5090,7 @@ function createAttachmentViewerWindow(key) {
   // Share the preview cascade so a viewer never lands exactly on top of a
   // preview window that is already open.
   const slot = nextCascadeSlot();
-  const viewerWin = new BrowserWindow({
+  const viewerWin = createCompanionWindow(BrowserWindow, {
     width: VIEWER_WIN.width,
     height: VIEWER_WIN.height,
     minWidth: VIEWER_WIN.minWidth,
@@ -5680,7 +5681,7 @@ function createWindow() {
   // Keep the ordinary harness translucent so parallel probes remain unmistakable,
   // but let an explicitly requested recording own the foreground for visual QA.
   const isRecordingHarness = isHarness && process.env.RELAY_OVERLAY_TEST_RECORDING === "1";
-  win = new BrowserWindow({
+  win = createCompanionWindow(BrowserWindow, {
     ...anchorTopRight(),
     ...(isHarness && !isRecordingHarness ? { opacity: 0.55 } : {}),
     frame: false,
@@ -5692,10 +5693,8 @@ function createWindow() {
     // The card paints its edge inside these exact bounds. A native AppKit shadow
     // adds a second dark outline and visibly changes shape when this window folds.
     hasShadow: false,
-    // Linux trays are optional desktop-environment extensions. Keep a normal
-    // taskbar/app-switcher route there so hiding Relay can never make it
-    // unreachable; macOS and Windows retain their dedicated status surfaces.
-    skipTaskbar: process.platform !== "linux",
+    // Linux trays are optional desktop-environment extensions. The Companion
+    // window factory preserves a taskbar/app-switcher route there.
     ...(process.platform === "linux" ? { icon: path.join(__dirname, "relayAppIcon.svg") } : {}),
     fullscreenable: false,
     maximizable: false,
@@ -5977,7 +5976,7 @@ function createPreviewWindow(payload, { recipient = null, chatSeed = null } = {}
   const key = previewKeyFor(payload);
   if (!key) return null;
   const slot = nextCascadeSlot();
-  const previewWin = new BrowserWindow({
+  const previewWin = createCompanionWindow(BrowserWindow, {
     width: PREVIEW_WIN.width,
     height: PREVIEW_WIN.height,
     minWidth: PREVIEW_WIN.minWidth,
@@ -5992,7 +5991,6 @@ function createPreviewWindow(payload, { recipient = null, chatSeed = null } = {}
     minimizable: true,
     maximizable: true,
     fullscreenable: false,
-    skipTaskbar: false,
     hasShadow: true,
     acceptFirstMouse: true,
     autoHideMenuBar: true,
