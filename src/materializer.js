@@ -23,6 +23,7 @@ import {
 import {
   DEFAULT_CODEX_OPEN_EFFORT,
   DEFAULT_CODEX_OPEN_MODEL,
+  appendVisibleAssistantTurn,
   ensureCodexThreadIndexMarker,
   findCodexSessionPath,
 } from "./codex-session-writer.js";
@@ -521,7 +522,6 @@ async function materializeRowInHost({
     let codexThreadId = rowState.codexThreadId || (rowState.threadId && codexRolloutExists(rowState.threadId) ? rowState.threadId : null);
     let codexSessionPath = rowState.codexSessionPath || rowState.sessionPath || null;
     let threadRemoteEndpoint = "";
-    let codexUserTurnPersisted = false;
     if (materializationStale) {
       codexThreadId = null;
       codexSessionPath = null;
@@ -540,7 +540,6 @@ async function materializeRowInHost({
       codexThreadId = thread.id;
       codexSessionPath = thread.path;
       threadRemoteEndpoint = thread.remoteEndpoint || "";
-      codexUserTurnPersisted = thread.userTurnPersisted === true;
       rememberRow(id, {
         relayThreadId: rowWithAttachments.threadId || row.threadId || id,
         threadId: rowWithAttachments.threadId || row.threadId || id,
@@ -569,11 +568,7 @@ async function materializeRowInHost({
         materializedAt: new Date().toISOString(),
       });
     }
-    // A thread Codex wrote itself already carries a real user turn; rewriting
-    // its rollout (a record without an ordinal) would break Desktop's resume.
-    if (!codexUserTurnPersisted) {
-      ensureRelayCodexIndexMarker({ threadId: codexThreadId, sessionPath: codexSessionPath, packetId: id });
-    }
+    ensureRelayCodexIndexMarker({ threadId: codexThreadId, sessionPath: codexSessionPath, packetId: id });
     finalizeCodexThreadState({
       threadId: codexThreadId,
       title: rowWithAttachments.displayTitle || rowWithAttachments.title || relayRowTitle(rowWithAttachments),
@@ -1096,10 +1091,11 @@ async function createCodexThread({
     });
     const threadId = started.thread.id;
     await client.request("thread/name/set", { threadId, name: row.displayTitle || row.title || relayRowTitle(row) });
-    const turn = await client.request("turn/start", {
-      threadId,
-      input: [{ type: "text", text: briefing, text_elements: [] }],
-    });
+    // Codex 0.151+ creates the rollout file at turn/start, not thread/start. The
+    // Relay is NOT the turn's input: the letter is Relay's own assistant turn,
+    // appended below exactly as before, and nothing user-authored ever enters
+    // the thread. The empty turn exists only to make Codex write the file.
+    const turn = await client.request("turn/start", { threadId, input: [] });
     turnId = turn?.turn?.id || "";
     const rolloutDeadline = Date.now() + Number(process.env.RELAY_CODEX_ROW_TIMEOUT_MS || 6000);
     let sessionPath = started.thread.path || "";
@@ -1111,35 +1107,25 @@ async function createCodexThread({
     if (!sessionPath || !fs.existsSync(sessionPath)) {
       throw new Error(`Codex did not materialize rollout ${threadId} after turn/start`);
     }
-    let userTurnPersisted = false;
     if (!shared) {
       // DESKTOP SURFACE: the private app-server exists only so Codex writes the
-      // thread itself; Codex Desktop is the thread's real owner. Codex 0.151+
-      // owns the rollout format (every record carries an ordinal, a hand-written
-      // final record makes Desktop refuse to resume) and holds a per-thread
-      // writer lock, so Relay never appends to the file and never keeps the
-      // server alive into the hand-off. It waits until Codex has persisted the
-      // letter as the first user message, interrupts the turn (no model reply,
-      // nothing Relay would have to outlive), and stops the server — releasing
-      // the lock — before Desktop is navigated onto the thread (2026-09-02:
-      // "This is open in another app", then an empty thread stuck "working").
+      // file; Codex Desktop is the thread's real owner. The empty turn is
+      // interrupted the moment the file exists (Codex refuses the interrupt
+      // with "no active turn" while the turn is still starting, so keep
+      // asking), and the server is stopped — releasing Codex's per-thread
+      // writer lock — before the letter is appended and before Desktop is
+      // navigated onto the thread. Holding the lock into the hand-off made
+      // Desktop fail with "already has an active writer" ("This is open in
+      // another app"), and a turn Relay did not outlive left the thread empty
+      // and "working now" (2026-09-02).
       const completed = client.waitForNotification(
         (message) => message?.method === "turn/completed" && (!turnId || message?.params?.turn?.id === turnId),
-        { timeoutMs: Number(process.env.RELAY_CODEX_LETTER_TIMEOUT_MS || 45_000) },
+        { timeoutMs: Number(process.env.RELAY_CODEX_INTERRUPT_TIMEOUT_MS || 20_000) },
       ).then(() => true).catch(() => false);
       let finished = false;
       completed.then((value) => { finished = value; });
-      const letterDeadline = Date.now() + Number(process.env.RELAY_CODEX_LETTER_TIMEOUT_MS || 45_000);
-      while (!finished && Date.now() < letterDeadline) {
-        if (codexRolloutHasUserLetter(sessionPath, briefing)) {
-          userTurnPersisted = true;
-          break;
-        }
-        await sleep(50);
-      }
-      // The interrupt is refused ("no active turn") while the turn is still
-      // starting; keep asking until it lands or the turn ends by itself.
-      while (!finished) {
+      const interruptDeadline = Date.now() + Number(process.env.RELAY_CODEX_INTERRUPT_TIMEOUT_MS || 20_000);
+      while (!finished && Date.now() < interruptDeadline) {
         const interrupted = await client.request("turn/interrupt", { threadId, turnId })
           .then(() => true)
           .catch(() => false);
@@ -1147,7 +1133,6 @@ async function createCodexThread({
         await sleep(100);
       }
       await completed;
-      userTurnPersisted = userTurnPersisted || codexRolloutHasUserLetter(sessionPath, briefing);
     }
     const deadline = Date.now() + Number(process.env.RELAY_CODEX_ROW_TIMEOUT_MS || 6000);
     while (!codexThreadRowExists(threadId) && Date.now() < deadline) {
@@ -1160,39 +1145,25 @@ async function createCodexThread({
       preview: relayThreadPreview(row),
     });
     await client.request("thread/name/set", { threadId, name: row.displayTitle || row.title || relayRowTitle(row) });
-    if (!shared) await client.stop();
+    if (!shared) {
+      await client.stop();
+      // The visible Relay letter: Relay's own assistant turn, as it has always
+      // been. Appended only now that no process holds the thread, with records
+      // that continue Codex's ordinal sequence (codex-session-writer.js).
+      appendVisibleAssistantTurn({ sessionPath, text: briefing, cwd, workspaceRoots, model, effort });
+    }
     return {
       id: threadId,
       cwd,
       path: sessionPath,
       rowPersisted: codexThreadRowExists(threadId),
       turnId,
-      userTurnPersisted: shared ? true : userTurnPersisted,
       ...(shared?.endpoint ? { remoteEndpoint: shared.endpoint } : {}),
     };
   } catch (error) {
     if (!shared) await client.stop();
     throw error;
   }
-}
-
-// Codex persists the first user message a few seconds into the turn (after
-// hooks and MCP servers start). Match on the letter's opening line so a
-// developer-role echo of the same text cannot count.
-function codexRolloutHasUserLetter(sessionPath, briefing) {
-  try {
-    const head = String(briefing || "").split("\n").find((line) => line.trim()) || "";
-    if (!head) return false;
-    const needle = JSON.stringify(head).slice(1, -1);
-    for (const line of fs.readFileSync(sessionPath, "utf8").split("\n")) {
-      if (!line.includes('"role":"user"') || !line.includes(needle)) continue;
-      try {
-        const row = JSON.parse(line);
-        if (row?.type === "response_item" && row?.payload?.type === "message" && row?.payload?.role === "user") return true;
-      } catch {}
-    }
-  } catch {}
-  return false;
 }
 
 function ensureRelayCodexIndexMarker({ threadId, sessionPath, packetId }) {

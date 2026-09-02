@@ -115,9 +115,72 @@ export function appendVisibleAssistantTurn({
     },
   ];
 
-  fs.appendFileSync(resolvedPath, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
+  let existing = "";
+  try { existing = fs.readFileSync(resolvedPath, "utf8"); } catch {}
+  const ordinals = rolloutOrdinalState(existing);
+  if (ordinals.numbered) {
+    // Codex 0.151+ renders a thread from its own projection (thread_items in
+    // thread_history), which it builds only from `item_completed` records of
+    // the native shape; the agent_message event above is what the TUI and
+    // older Desktops read. Emit both so the letter is visible everywhere.
+    const nowMs = Date.now();
+    lines.splice(lines.length - 1, 0, {
+      timestamp,
+      type: "event_msg",
+      payload: {
+        type: "item_completed",
+        thread_id: rolloutThreadId(existing),
+        turn_id: turnId,
+        item: {
+          type: "AgentMessage",
+          id: messageId,
+          content: [{ type: "Text", text: cleanText }],
+          phase: "final_answer",
+        },
+        started_at_ms: nowMs,
+        completed_at_ms: nowMs,
+      },
+    });
+  }
+  const numbered = ordinals.numbered
+    ? lines.map((line, index) => ({ timestamp: line.timestamp, ordinal: ordinals.next + index, ...line }))
+    : lines;
+  fs.appendFileSync(resolvedPath, `${numbered.map((line) => JSON.stringify(line)).join("\n")}\n`);
   return { sessionPath: resolvedPath, turnId, messageId };
 }
+
+function rolloutThreadId(text) {
+  for (const line of String(text || "").split("\n")) {
+    if (!line.includes('"session_meta"')) continue;
+    try {
+      const row = JSON.parse(line);
+      if (row?.type === "session_meta") return String(row.payload?.id || row.payload?.session_id || "");
+    } catch {}
+  }
+  return "";
+}
+
+// Codex 0.151+ numbers every rollout record (`ordinal`, from 0) and refuses to
+// resume a thread whose final record lacks one ("final paginated rollout record
+// … is missing an ordinal"). Records Relay appends continue that sequence; a
+// rollout written by an older Codex carries no ordinals and gets none.
+export function rolloutOrdinalState(text) {
+  let max = -1;
+  let numbered = false;
+  for (const line of String(text || "").split("\n")) {
+    const clean = line.trim();
+    if (!clean) continue;
+    try {
+      const ordinal = JSON.parse(clean)?.ordinal;
+      if (Number.isInteger(ordinal)) {
+        numbered = true;
+        if (ordinal > max) max = ordinal;
+      }
+    } catch {}
+  }
+  return { numbered, next: numbered ? max + 1 : null };
+}
+
 
 function uniqueWorkspaceRoots(workspaceRoots, cwd) {
   const roots = Array.isArray(workspaceRoots) ? workspaceRoots : [];
@@ -152,10 +215,12 @@ export function ensureCodexThreadIndexMarker({ sessionPath, markerId = "" }) {
       return false;
     }
   });
+  const ordinals = rolloutOrdinalState(text);
   // Codex Desktop's default local-thread route ignores assistant-only rollouts.
   // This zero-width user event makes the session indexable without making the Relay body user-authored.
   const marker = {
     timestamp: new Date().toISOString(),
+    ...(ordinals.numbered ? { ordinal: ordinals.next } : {}),
     type: "event_msg",
     payload: {
       type: "user_message",
@@ -168,7 +233,11 @@ export function ensureCodexThreadIndexMarker({ sessionPath, markerId = "" }) {
     },
   };
 
-  lines.splice(insertAt >= 0 ? insertAt + 1 : 0, 0, JSON.stringify(marker));
+  // A numbered rollout is an ordered sequence: the marker takes the next
+  // ordinal at the end. An older, unnumbered rollout keeps the marker right
+  // after session_meta as before.
+  if (ordinals.numbered) lines.push(JSON.stringify(marker));
+  else lines.splice(insertAt >= 0 ? insertAt + 1 : 0, 0, JSON.stringify(marker));
   // Atomic rewrite: a plain writeFileSync onto the live rollout can truncate it if
   // the process dies mid-write (or if Codex reads it concurrently), permanently
   // corrupting the thread. Write a sibling temp then rename onto the target.
