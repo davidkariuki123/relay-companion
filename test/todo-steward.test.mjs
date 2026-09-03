@@ -7,6 +7,8 @@ import { PassThrough } from "node:stream";
 import test from "node:test";
 import {
   DEFAULT_CADENCE_MS,
+  IDLE_CADENCE_MS,
+  LIVELY_WINDOW_MS,
   MIN_GAP_MS,
   SETTLE_MS,
   STEWARD_ROUTES,
@@ -62,6 +64,12 @@ test("when to run: manual beats everything, changes settle first, cadence fills 
   assert.deepEqual(stewardShouldRun({ state: { ...fresh, requestedAt: now }, nowMs: now, attention: 0 }), { run: true, reason: "manual" });
   assert.deepEqual(stewardShouldRun({ state: { lastRun: { startedAt: now - 5_000 }, requestedAt: now }, nowMs: now, attention: 1 }), { run: false, reason: "manual_too_soon" });
   assert.deepEqual(stewardShouldRun({ state: { lastRun: { startedAt: now - DEFAULT_CADENCE_MS } }, nowMs: now, attention: 1 }), { run: true, reason: "cadence" });
+  // A still board (no movement for hours) is read every two hours, not every thirty minutes.
+  const still = { lastRun: { startedAt: now - DEFAULT_CADENCE_MS - 1000 }, signatureChangedAt: now - LIVELY_WINDOW_MS - 1000 };
+  assert.deepEqual(stewardShouldRun({ state: still, nowMs: now, attention: 2 }), { run: false, reason: "fresh" });
+  assert.deepEqual(stewardShouldRun({ state: { ...still, lastRun: { startedAt: now - IDLE_CADENCE_MS } }, nowMs: now, attention: 2 }), { run: true, reason: "idle_cadence" });
+  // The moment it moves again the half-hour cadence is back (after settle + gap).
+  assert.deepEqual(stewardShouldRun({ state: { ...still, signatureChangedAt: now - SETTLE_MS - 1000 }, nowMs: now, attention: 2 }), { run: true, reason: "changed" });
 });
 
 test("the board signature reacts to arrivals, reads and status changes only", () => {
@@ -77,12 +85,18 @@ test("the board signature reacts to arrivals, reads and status changes only", ()
 test("the brief carries the person, the rules, the local transcript paths and the board in order", () => {
   const snapshot = stewardBoardSnapshot({
     triage: [
-      { relayId: "r1", todoStatus: "triage", todoVersion: 2, attentionRank: 1, kind: "message", title: "What's your GitHub username?", sender: { name: "Schalk Dormehl", email: "s@x.com" }, createdAt: "2026-09-02T11:30:00Z", state: "read", threadId: "r1", preview: "Hey David…" },
+      { relayId: "r1", todoStatus: "triage", todoVersion: 2, attentionRank: 1, kind: "message", title: "What's your GitHub username?", sender: { name: "Schalk Dormehl", email: "s@x.com" }, createdAt: "2026-09-02T11:30:00Z", state: "read", threadId: "r1", preview: "Hey David…",
+        sessions: [{ provider: "codex", nativeSessionId: "01a0-thread", touches: 2, lastSeenAt: "2026-09-02T12:00:00Z" }, { provider: "claude", nativeSessionId: "8d86682-claude", touches: 1, lastSeenAt: "2026-09-02T11:40:00Z", cwd: "/Users/david/src/relay" }] },
       { relayId: "r2", todoStatus: "triage", todoVersion: 1, kind: "task", title: "Ship it", sender: { name: "Sven" }, createdAt: "2026-09-01T11:30:00Z", state: "delivered", recipientGroupName: "Granular", assessment: "You started this", assessedAt: "2026-09-02T10:00:00Z" },
     ],
     done: [{ relayId: "d1", todoStatus: "done", todoVersion: 3, kind: "message", title: "Old", sender: { name: "X" }, createdAt: "2026-08-01T00:00:00Z", state: "read" }],
-  });
+  }, { resolveSession: (touch) => touch.provider === "codex" ? { title: "Design Todo ontology", cwd: "/Users/david/src/relay", transcriptPath: "/Users/david/.codex/sessions/rollout-01a0.jsonl", state: "idle" } : null });
   assert.equal(snapshot.triage[0].rank, 1);
+  assert.deepEqual(snapshot.triage[0].openedIn, [
+    { provider: "codex", id: "01a0-thread", title: "Design Todo ontology", cwd: "/Users/david/src/relay", transcriptPath: "/Users/david/.codex/sessions/rollout-01a0.jsonl", state: "idle", lastOpenedAt: "2026-09-02T12:00:00Z" },
+    { provider: "claude", id: "8d86682-claude", cwd: "/Users/david/src/relay", lastOpenedAt: "2026-09-02T11:40:00Z" },
+  ], "the sessions a Relay was opened in ride along with their transcripts resolved on this machine");
+  assert.equal(snapshot.triage[1].openedIn, undefined);
   assert.equal(snapshot.triage[0].read, true);
   assert.equal(snapshot.triage[1].channel, "Granular");
   assert.equal(snapshot.triage[1].previousNote, "You started this");
@@ -106,8 +120,12 @@ test("the brief carries the person, the rules, the local transcript paths and th
   assert.match(prompt, /\/Users\/david\/\.claude\/projects/);
   assert.match(prompt, /\/Users\/david\/\.codex\/sessions/);
   assert.match(prompt, /never call relay_mark_read, never send or reply/);
-  assert.match(prompt, /backlog: only when they, or the sender, said it can wait/);
-  assert.match(prompt, /canceled: never on your own/);
+  assert.match(prompt, /Only three statuses exist for you: triage \(Needs attention\), in_progress, done/);
+  assert.match(prompt, /Never use backlog, todo, canceled or duplicate/);
+  assert.match(prompt, /Start with openedIn: those are the exact Claude Code \/ Codex sessions this Relay was opened in/);
+  assert.match(prompt, /call it only when the current order \(the rank field\) is actually wrong/);
+  assert.match(prompt, /"transcriptPath": "\/Users\/david\/\.codex\/sessions\/rollout-01a0\.jsonl"/);
+  assert.doesNotMatch(prompt, /backlog: only when they/);
   assert.match(prompt, /"What's your GitHub username\?"/);
   assert.match(prompt, /Answer with JSON only/);
   assert.match(prompt, /Write nothing else: the person reads your notes on the items, never a report\./);

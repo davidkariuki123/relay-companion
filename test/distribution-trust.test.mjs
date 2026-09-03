@@ -1484,6 +1484,11 @@ test("public release owns immutable publication while private promotion owns fle
   const publish = fs.readFileSync(fs.existsSync(localPublicWorkflow) ? localPublicWorkflow : templatedPublicWorkflow, "utf8");
   assert.match(publish, /workflow_dispatch/);
   assert.doesNotMatch(publish, /\n\s*push:/);
+  assert.doesNotMatch(publish, /^concurrency:/m, "platform builds must not wait behind protected publication");
+  assert.match(
+    publish,
+    /release:\n\s+needs: \[identity, runtime\][\s\S]{0,300}concurrency:\n\s+group: relay-companion-publication\n\s+cancel-in-progress: false[\s\S]{0,160}environment: companion-candidate/,
+  );
   assert.match(publish, /s3api put-object/);
   assert.match(publish, /--if-none-match '\*'/);
   assert.match(publish, /npm publish .*--provenance/);
@@ -1493,6 +1498,17 @@ test("public release owns immutable publication while private promotion owns fle
   assert.match(publish, /waiting for npm provenance to propagate/);
   assert.doesNotMatch(publish, /verify-thin-setup-canary/);
   assert.match(publish, /existing npm version has different bytes/);
+  const monotonicPublicationChecks = [...publish.matchAll(/node scripts\/assert-monotonic-version\.mjs/g)]
+    .map((match) => match.index);
+  assert.equal(monotonicPublicationChecks.length, 2, "publication rechecks the live npm build channel twice");
+  const immutableUploadIndex = publish.indexOf("s3api put-object");
+  const npmPublishIndex = publish.indexOf("npm publish");
+  assert.ok(monotonicPublicationChecks[0] < immutableUploadIndex, "stale approval fails before immutable upload");
+  assert.ok(
+    monotonicPublicationChecks[1] > immutableUploadIndex && monotonicPublicationChecks[1] < npmPublishIndex,
+    "npm build is rechecked immediately before npm publication",
+  );
+  assert.match(publish, /npm view relay-companion dist-tags\.build --prefer-online/g);
   assert.match(publish, /tar -tzf "\$tarball" > "\$RUNNER_TEMP\/pack-files\.txt"/);
   assert.doesNotMatch(publish, /tar -tzf "\$tarball" \| grep/);
   assert.doesNotMatch(publish, /companion-releases\/stable\/manifest\.json/);

@@ -9,6 +9,7 @@ import { runCodexOneShot } from "./codex-one-shot.js";
 import { relayClaudePermissionMode } from "./claude-session-runtime.js";
 import { claudeCommand, commandAvailable } from "./session-controller.js";
 import { relayMcpLaunchSpec } from "./runtime.js";
+import { discoverSessions } from "./session-directory.js";
 import { storeDir } from "./host-paths.js";
 import {
   claudeStewardArgs,
@@ -88,6 +89,26 @@ export async function runStewardProvider({ route, prompt, heartbeat = () => {}, 
   });
 }
 
+/**
+ * Map a recorded (provider, native id) to what this machine knows about the
+ * session: its title, cwd, transcript path and live state. Built once per
+ * run so the brief can point the agent straight at the right transcripts.
+ */
+export function stewardSessionResolver(sessions = discoverSessions()) {
+  const byKey = new Map();
+  for (const session of sessions || []) {
+    const nativeId = String(session.nativeId || session.nativeRef?.threadId || session.nativeRef?.sessionId || "");
+    if (!nativeId) continue;
+    byKey.set(`${session.provider}:${nativeId}`, {
+      title: session.title || "",
+      cwd: session.cwd || "",
+      transcriptPath: session.nativeRef?.transcriptPath || session.nativeRef?.sessionPath || "",
+      state: session.state || "",
+    });
+  }
+  return (touch) => byKey.get(`${touch.provider}:${touch.nativeSessionId}`) || null;
+}
+
 /** The daemon's per-tick entry point. Never throws; the daemon loop must stay up. */
 export async function todoStewardTick({ client, features, user, log = () => {} } = {}) {
   try {
@@ -98,6 +119,9 @@ export async function todoStewardTick({ client, features, user, log = () => {} }
       log,
       providers: stewardProviders(),
       runProvider: runStewardProvider,
+      resolveSession: () => {
+        try { return stewardSessionResolver(); } catch { return () => null; }
+      },
     });
   } catch (error) {
     log(`todo steward tick failed: ${error?.message || error}`);

@@ -4019,7 +4019,25 @@ function nativeIdFromOpenResult(result) {
   return claude ? decodeURIComponent(claude[1]) : "";
 }
 
+// The open landed in a native session; tell the server which one so the
+// Todo steward reads that transcript first instead of searching for it.
+function recordRelaySessionTouch(packetId, provider, url) {
+  const id = String(packetId || "");
+  const claudeSession = claudeSessionIdFromUrl(url);
+  const codexThread = /^codex:\/\/threads\/([^/?#]+)/.exec(String(url || ""))?.[1];
+  const nativeSessionId = claudeSession || (codexThread ? decodeURIComponent(codexThread) : "");
+  if (!id || !nativeSessionId || id.startsWith("erelay_") || id.startsWith("egmsg_")) return;
+  const row = rowById(id);
+  relayClient()
+    .then((client) => client.recordRelaySessionTouch(id, {
+      provider: claudeSession ? "claude" : "codex",
+      nativeSessionId,
+      ...(row?.openCwd ? { cwd: row.openCwd } : {}),
+    }))
+    .catch(() => {});
+}
 async function presentSessionOpen(result, provider, packetId, observedBundle = null) {
+  if (result?.url) recordRelaySessionTouch(packetId, provider, result.url);
   // A confirmed Codex bridge open has already selected, shown and focused the
   // one primary window. Calling `open -b` after that re-activates every visible
   // ChatGPT surface, including its compact hotkey window. Activation belongs

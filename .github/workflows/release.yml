@@ -10,10 +10,6 @@ permissions:
   id-token: write
   attestations: write
 
-concurrency:
-  group: relay-companion-release
-  cancel-in-progress: false
-
 env:
   NODE_VERSION: 24.18.0
 
@@ -134,6 +130,11 @@ jobs:
   release:
     needs: [identity, runtime]
     runs-on: ubuntu-latest
+    # Builds are immutable and safe to run concurrently. Serialize only the
+    # protected publication so an older approval cannot race a newer release.
+    concurrency:
+      group: relay-companion-publication
+      cancel-in-progress: false
     environment: companion-candidate
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -151,6 +152,17 @@ jobs:
         with:
           role-to-assume: ${{ vars.RELAY_COMPANION_CANDIDATE_ROLE_ARN }}
           aws-region: us-east-1
+      - name: Refuse stale publication after protected approval
+        env:
+          VERSION: ${{ needs.identity.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          current="$(npm view relay-companion dist-tags.build --prefer-online 2>/dev/null || true)"
+          node scripts/assert-monotonic-version.mjs \
+            --candidate "$VERSION" \
+            --current "$current" \
+            --label "npm build"
       - name: Sign the exact six-platform manifest inside AWS KMS
         env:
           KMS_KEY_ARN: ${{ vars.RELAY_COMPANION_SIGNING_KEY_ARN }}
@@ -236,6 +248,11 @@ jobs:
         run: |
           set -euo pipefail
           npm install -g npm@11.19.0
+          current="$(npm view relay-companion dist-tags.build --prefer-online 2>/dev/null || true)"
+          node scripts/assert-monotonic-version.mjs \
+            --candidate "$VERSION" \
+            --current "$current" \
+            --label "npm build"
           existing="$(npm view "relay-companion@$VERSION" dist.integrity 2>/dev/null || true)"
           if [ -z "$existing" ]; then
             npm publish '${{ steps.pack.outputs.tarball }}' --tag build --access public --provenance

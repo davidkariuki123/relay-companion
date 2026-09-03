@@ -31,8 +31,11 @@ export const STEWARD_SCHEMA_FILE = "todo-steward-output.schema.json";
 /** Statuses the steward is responsible for. Done, Canceled and Duplicate are settled. */
 export const STEWARD_ATTENTION_STATUSES = Object.freeze(["triage", "in_progress", "todo", "backlog"]);
 
-/** How often the steward looks even when nothing visibly moved. */
+/** How often the steward looks while the board has moved recently. */
 export const DEFAULT_CADENCE_MS = 30 * 60 * 1000;
+/** Once the board has been still for this long, look only every IDLE_CADENCE_MS. */
+export const LIVELY_WINDOW_MS = 2 * 60 * 60 * 1000;
+export const IDLE_CADENCE_MS = 2 * 60 * 60 * 1000;
 /** After the list moves, let the burst settle before spending a run on it. */
 export const SETTLE_MS = 90 * 1000;
 /** Two runs never start closer than this unless a person asked. */
@@ -181,11 +184,29 @@ export function stewardShouldRun({
     if (nowMs - lastStartedAt < MIN_GAP_MS) return { run: false, reason: "too_soon" };
     return { run: true, reason: "changed" };
   }
-  if (nowMs - lastStartedAt >= cadenceMs) return { run: true, reason: "cadence" };
+  // A board nobody has touched for hours does not need a half-hourly read;
+  // the change trigger above still fires the moment anything moves.
+  const still = changedAt ? nowMs - changedAt >= LIVELY_WINDOW_MS : false;
+  const effectiveCadence = still ? Math.max(cadenceMs, IDLE_CADENCE_MS) : cadenceMs;
+  if (nowMs - lastStartedAt >= effectiveCadence) return { run: true, reason: still ? "idle_cadence" : "cadence" };
   return { run: false, reason: "fresh" };
 }
 
-function compactItem(item, status) {
+function compactSession(session, resolve) {
+  const local = typeof resolve === "function" ? resolve(session) || {} : {};
+  return {
+    provider: session.provider,
+    id: session.nativeSessionId,
+    ...(local.title || session.title ? { title: local.title || session.title } : {}),
+    ...(local.cwd || session.cwd ? { cwd: local.cwd || session.cwd } : {}),
+    ...(local.transcriptPath ? { transcriptPath: local.transcriptPath } : {}),
+    ...(local.state ? { state: local.state } : {}),
+    lastOpenedAt: session.lastSeenAt,
+  };
+}
+
+function compactItem(item, status, resolveSession) {
+  const sessions = (Array.isArray(item.sessions) ? item.sessions : []).map((session) => compactSession(session, resolveSession));
   return {
     relayId: item.relayId,
     status: item.todoStatus || status,
@@ -202,18 +223,19 @@ function compactItem(item, status) {
     ...(item.taskStartedAt ? { taskStartedAt: item.taskStartedAt } : {}),
     ...(item.taskCompletedAt ? { taskCompletedAt: item.taskCompletedAt } : {}),
     ...(item.assessment ? { previousNote: item.assessment, previousNoteAt: item.assessedAt || null } : {}),
+    ...(sessions.length ? { openedIn: sessions } : {}),
     preview: String(item.preview || "").slice(0, 240),
   };
 }
 
 /** The board as the prompt sees it: every attention item, in current order, plus a few recent Done. */
-export function stewardBoardSnapshot(byStatus = {}, { maxPerStatus = 60 } = {}) {
+export function stewardBoardSnapshot(byStatus = {}, { maxPerStatus = 60, resolveSession } = {}) {
   const snapshot = {};
   for (const status of STEWARD_ATTENTION_STATUSES) {
     const items = Array.isArray(byStatus[status]) ? byStatus[status] : [];
-    snapshot[status] = items.slice(0, maxPerStatus).map((item) => compactItem(item, status));
+    snapshot[status] = items.slice(0, maxPerStatus).map((item) => compactItem(item, status, resolveSession));
   }
-  snapshot.recentDone = (Array.isArray(byStatus.done) ? byStatus.done : []).slice(0, 5).map((item) => compactItem(item, "done"));
+  snapshot.recentDone = (Array.isArray(byStatus.done) ? byStatus.done : []).slice(0, 5).map((item) => compactItem(item, "done", resolveSession));
   return snapshot;
 }
 
@@ -278,11 +300,12 @@ export function buildStewardPrompt({
     "",
     "YOUR JOB",
     `For every item under "triage" (shown to ${firstName} as "Needs attention"), "in_progress", "todo" and "backlog", find out whether ${firstName} has actually taken it to its conclusion, then:`,
-    "1. Set the right status with relay_todo_update.",
+    "1. Set the right status with relay_todo_update. Only three statuses exist for you: triage (Needs attention), in_progress, done. Never use backlog, todo, canceled or duplicate; an item you find in todo or backlog belongs in triage.",
     "2. Leave a note on every item you assessed (same status is fine): one line, second person, plain words, at most 140 characters, saying what they did and what is still left. Example: \"You replied with your username 1h ago; nothing left to do.\" Example: \"You built this in Codex on Monday but it is not merged or deployed.\" Never hedge, never mention tools, never start with 'It seems'.",
-    "3. Order Needs attention (status triage) with relay_todo_reorder so the first row is what matters most right now.",
+    "3. Order Needs attention (status triage) with relay_todo_reorder so the first row is what matters most right now — but call it only when the current order (the rank field) is actually wrong. Re-issuing an order that already holds is a change nobody sees; do not count it.",
     "",
     "HOW TO INVESTIGATE (do this per item; skip items whose previousNote is still accurate and less than a day old)",
+    "- Start with openedIn: those are the exact Claude Code / Codex sessions this Relay was opened in, with transcriptPath when the transcript is on this machine. Read the tail of each (the newest turns) before anything else; only search more widely when they do not settle the question.",
     "- Read the correspondence: relay_thread_fetch with the item's threadId shows both directions; relay_chat_fetch / relay_chats_list show the whole conversation with that person or channel; relay_sent_list shows what they sent. A reply from them that fully answers the ask, with nothing pending, is a conclusion.",
     `- Look for work on this machine: ${aiSessionTools ? "relay_ai_sessions (action list, then search with the item's title, sender or key words, then read the newest turns) finds their Claude Code and Codex sessions. " : ""}Transcripts also live under ${claudeProjects} (Claude Code, *.jsonl) and ${codexSessions} (Codex, rollout-*.jsonl); grep them read-only for the title or distinctive words when you need more.`,
     "- A transcript only counts as work on an item when the person's own turns or the agent's actions are ABOUT it. Every Claude Code session carries Relay's context blocks (<untrusted_recent_relay_title_records>, RECENT/NEW Relay records, hook notes) that merely list titles; a title appearing there is not work and never makes a session 'active' on the item.",
@@ -293,9 +316,7 @@ export function buildStewardPrompt({
     "- done: fully concluded. They answered and nothing is pending, or the work is merged and shipped, or the sender said it is resolved.",
     `- triage (Needs attention): ${firstName} still owes something — a reply, a decision, or finishing work they started but did not ship. New items nobody has looked at stay here too.`,
     "- in_progress: only when there is live work today — a session in the last few hours whose own turns work on this item, or a running Task. A mention is not work. Stalled work goes back to triage with a note saying what is unfinished.",
-    "- todo: they explicitly committed to it (said they would do it, claimed a Task) but have not started.",
-    "- backlog: only when they, or the sender, said it can wait. Never defer on your own judgment.",
-    "- canceled: never on your own. duplicate: only when it is clearly the same ask from the same person as another visible item; point at the newer one.",
+    "- Something they committed to but have not started, or something that can wait, is still Needs attention; say so in the note rather than moving it anywhere else.",
     `- ${firstName}'s own test sends to themself (from is ${firstName}, titles like counts, markers, acceptance checks) with nothing to do are done: "Your own test send; nothing to do."`,
     "",
     "HOW TO ORDER Needs attention",
@@ -313,7 +334,7 @@ export function buildStewardPrompt({
     JSON.stringify(snapshot, null, 1),
     "",
     "WHEN YOU ARE DONE",
-    "Answer with JSON only: {\"checked\": number of items you assessed, \"changed\": number of status changes or reorders you made}. Write nothing else: the person reads your notes on the items, never a report.",
+    "Answer with JSON only: {\"checked\": number of items you assessed, \"changed\": number of real status changes, note changes or reorders you made (0 when nothing needed to change)}. Write nothing else: the person reads your notes on the items, never a report.",
   ].join("\n");
 }
 
@@ -475,6 +496,7 @@ export async function runTodoStewardOnce({
   providers = {},
   runProvider,
   fetchBoard = fetchStewardBoard,
+  resolveSession = null,
 } = {}) {
   const todoEnabled = features.todo === true;
   let state = readStewardState(baseDir);
@@ -527,7 +549,8 @@ export async function runTodoStewardOnce({
   }));
   try {
     const board = await fetchBoard(client);
-    const snapshot = stewardBoardSnapshot(board);
+    const resolver = typeof resolveSession === "function" ? resolveSession() : null;
+    const snapshot = stewardBoardSnapshot(board, { resolveSession: resolver });
     const prompt = buildStewardPrompt({
       user,
       snapshot,

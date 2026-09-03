@@ -798,6 +798,16 @@ export class RelayClient {
     });
   }
 
+  /** The Companion opened a Relay in a native session: remember which one so the steward reads it first. */
+  async recordRelaySessionTouch(relayId, { provider, nativeSessionId, cwd, title } = {}) {
+    return this.#req("POST", `/v1/relays/${encodeURIComponent(relayId)}/session-touch`, {
+      provider: String(provider || ""),
+      nativeSessionId: String(nativeSessionId || ""),
+      ...(cwd ? { cwd: String(cwd) } : {}),
+      ...(title ? { title: String(title) } : {}),
+    });
+  }
+
   /** Put the listed items first inside one Todo status; the rest follow in their current order. */
   async reorderTodo(status, itemIds, provenance = {}) {
     return this.#req("POST", "/v1/todo/reorder", {
@@ -889,7 +899,7 @@ export class RelayClient {
     };
   }
 
-  async fetchRelay(id) {
+  async fetchRelay(id, provenance = {}) {
     if (String(id).startsWith("egmsg_")) {
       const records = await e2eeGroupOpenedRecords(this);
       const projected = records.find((entry) => entry.eventId === id);
@@ -897,7 +907,13 @@ export class RelayClient {
       const group = (await this.groups()).groups?.find((item) => item.id === projected.groupId);
       return e2eeGroupPacket(projected, group?.name);
     }
-    if (!String(id).startsWith("erelay_")) return this.#req("GET", `/v1/relays/${encodeURIComponent(id)}`);
+    if (!String(id).startsWith("erelay_")) {
+      return this.#req("GET", `/v1/relays/${encodeURIComponent(id)}`, undefined, {
+        clientName: provenance.clientName || "relay-companion",
+        sourceProvider: provenance.sourceProvider,
+        nativeSessionId: provenance.nativeSessionId,
+      });
+    }
     const encrypted = await this.e2eeSync();
     const synchronized = await e2eeOpenedRecords(this, encrypted.items || []);
     const projected = synchronized.opened.find((entry) => entry.wire.relayId === id);
@@ -911,7 +927,7 @@ export class RelayClient {
    * catching up on a backlog take minutes. Ids the caller may not read are
    * absent from `packets` — same meaning as a 404 from the single-relay route.
    */
-  async fetchRelayPackets(ids) {
+  async fetchRelayPackets(ids, provenance = {}) {
     const identity = localE2eeIdentityAvailable() ? identityOrThrow() : null;
     const imported = new Map();
     if (identity) {
@@ -925,7 +941,11 @@ export class RelayClient {
     const groupIds = (ids || []).filter((id) => String(id).startsWith("egmsg_"));
     const legacyIds = (ids || []).filter((id) => !String(id).startsWith("erelay_") && !String(id).startsWith("egmsg_"));
     const result = legacyIds.length
-      ? await this.#req("POST", "/v1/relays/packets", { ids: legacyIds })
+      ? await this.#req("POST", "/v1/relays/packets", { ids: legacyIds }, {
+          clientName: provenance.clientName || "relay-companion",
+          sourceProvider: provenance.sourceProvider,
+          nativeSessionId: provenance.nativeSessionId,
+        })
       : { packets: {} };
     if (encryptedIds.length || imported.size) {
       const encrypted = await this.e2eeSync();

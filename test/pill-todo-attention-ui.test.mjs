@@ -20,6 +20,17 @@ test("Triage is shown to the person as Needs attention; the wire value never cha
   assert.doesNotMatch(inbox, /triage:"Triage"/);
 });
 
+test("the person sees three places only: Needs attention, In Progress, Done", () => {
+  assert.match(inbox, /const TODO_VISIBLE_ORDER = \["triage", "in_progress", "done"\]/);
+  const rail = between(inbox, "function renderTodoRail()", "function todoGroupHtml(group)");
+  assert.match(rail, /TODO_VISIBLE_ORDER\.map\(\(status\) => button\(/);
+  assert.doesNotMatch(rail, /TODO_STATUS_ORDER\.map/);
+  const menu = between(inbox, "function todoReaderStatusHtml(row)", "async function commitTodoStatus");
+  assert.match(menu, /\[\.\.\.TODO_VISIBLE_ORDER, \.\.\.\(TODO_VISIBLE_ORDER\.includes\(status\) \? \[\] : \[status\]\)\]\.map/);
+  // Legacy statuses still surface under All until they move, so nothing can hide.
+  assert.match(inbox, /const TODO_LEGACY_ORDER = \["todo", "backlog"\]/);
+});
+
 test("a read item is not bold: Todo rows wear the Relays list's unread words", () => {
   assert.match(inbox, /\.todo-row-title \{ overflow:hidden; color:var\(--muted\); font:400 15px/);
   assert.match(inbox, /\.todo-row\.unread \.todo-row-title \{ color:var\(--ink\); font-weight:500; \}/);

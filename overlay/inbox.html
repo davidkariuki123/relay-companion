@@ -6349,8 +6349,14 @@
     return k === "task_request" || k === "task";
   }
   function taskRows() { return (payload.relays || []).filter(isTaskRow); }
+  // The wire ontology keeps seven statuses; the person sees three. Needs
+  // attention, In Progress and Done are the only places an item can be
+  // (David, 2026-09-03: "the rest are redundant"). Anything still sitting in
+  // a legacy status is shown under All until it moves, never in the rail.
   const TODO_STATUS_ORDER = ["triage", "backlog", "todo", "in_progress", "done", "canceled", "duplicate"];
-  const TODO_ACTIVE_ORDER = ["triage", "in_progress", "todo", "backlog"];
+  const TODO_VISIBLE_ORDER = ["triage", "in_progress", "done"];
+  const TODO_LEGACY_ORDER = ["todo", "backlog"];
+  const TODO_ACTIVE_ORDER = ["triage", "in_progress", ...TODO_LEGACY_ORDER];
   const TODO_ALL_PREVIEW_ORDER = [...TODO_ACTIVE_ORDER, "done"];
   const TODO_TERMINAL_ORDER = ["canceled", "duplicate"];
   const TODO_LABEL = {
@@ -9467,7 +9473,7 @@
         ${todoMarkHtml(status)}<span>${esc(TODO_LABEL[status])}</span>
       </button>
       <div class="todo-reader-menu hidden" data-todo-status-menu>
-        ${TODO_STATUS_ORDER.map((candidate) => {
+        ${[...TODO_VISIBLE_ORDER, ...(TODO_VISIBLE_ORDER.includes(status) ? [] : [status])].map((candidate) => {
           const lifecycleOnly = task && ["in_progress", "done"].includes(candidate) && candidate !== status;
           return `<button class="todo-reader-option${candidate === status ? " on" : ""}" type="button" data-reader-todo-status="${esc(candidate)}"${lifecycleOnly ? " disabled" : ""} title="${lifecycleOnly ? esc(candidate === "in_progress" ? "Start the Task to move it to In Progress" : "Complete the Task with its result to move it to Done") : ""}">
             ${todoMarkHtml(candidate)}<span>${esc(TODO_LABEL[candidate])}${candidate === "duplicate" ? "…" : ""}</span>
@@ -9582,7 +9588,7 @@
         ${todoMarkHtml(status)}<span>${esc(label)}</span><span class="n">${Number(count || 0)}</span>
       </button>`;
     todoFilterRailEl.innerHTML = button("all", "All", total, selected.length === 0)
-      + TODO_STATUS_ORDER.map((status) => button(
+      + TODO_VISIBLE_ORDER.map((status) => button(
           status, TODO_LABEL[status], todoState.counts[status], todoState.selected.has(status),
         )).join("");
     for (const control of todoFilterRailEl.querySelectorAll("[data-todo-filter]")) {

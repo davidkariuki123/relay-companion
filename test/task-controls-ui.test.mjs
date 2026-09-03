@@ -14,7 +14,7 @@ function between(source, start, end) {
 
 test("Todo puts attention first, previews recent Done, and gives In Progress a live mark", () => {
   const board = between(inbox, "function renderTasksBoard()", "// Grow the window");
-  assert.match(inbox, /TODO_ACTIVE_ORDER = \["triage", "in_progress", "todo", "backlog"\]/);
+  assert.match(inbox, /TODO_ACTIVE_ORDER = \["triage", "in_progress", \.\.\.TODO_LEGACY_ORDER\]/);
   assert.match(inbox, /TODO_ALL_PREVIEW_ORDER = \[\.\.\.TODO_ACTIVE_ORDER, "done"\]/);
   assert.match(board, /TODO_ALL_PREVIEW_ORDER\.map/);
   assert.match(inbox, /\.todo-mark\.in_progress/);

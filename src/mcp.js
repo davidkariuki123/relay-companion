@@ -1104,7 +1104,7 @@ export function todoAssessmentInput(args = {}) {
   return { note, ...(evidence.length ? { evidence } : {}) };
 }
 
-async function inboxForAgent(client, args = {}) {
+async function inboxForAgent(client, args = {}, sessionContext = DEFAULT_MCP_SESSION_CONTEXT) {
   if (Object.hasOwn(args, "todoStatuses")) {
     if (Object.hasOwn(args, "relayIds")) throw new Error("Pass todoStatuses or relayIds, not both.");
     if (!Array.isArray(args.todoStatuses) || !args.todoStatuses.length) {
@@ -1129,7 +1129,13 @@ async function inboxForAgent(client, args = {}) {
   }
   if (Object.hasOwn(args, "relayIds")) {
     const relayIds = exactInboxRelayIds(args.relayIds);
-    const response = await client.fetchRelayPackets(relayIds);
+    // The session this open happens in is what the Todo steward reads later.
+    const binding = sessionSourceBinding(sessionContext);
+    const response = await client.fetchRelayPackets(relayIds, {
+      clientName: "relay-local-mcp",
+      sourceProvider: binding.sourceProvider,
+      nativeSessionId: binding.sourceNativeId,
+    });
     const packets = response?.packets && typeof response.packets === "object" ? response.packets : {};
     const items = [];
     const unavailableRelayIds = [];
@@ -2077,7 +2083,7 @@ export async function handleCall(client, name, args, {
         }),
       );
     case "relay_inbox_list":
-      return text(withoutThreadTitles(await inboxForAgent(client, args)));
+      return text(withoutThreadTitles(await inboxForAgent(client, args, sessionContext)));
     case "relay_sent_list": {
       const response = await client.sent();
       const all = Array.isArray(response?.items) ? response.items : [];
