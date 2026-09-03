@@ -310,13 +310,12 @@ test("the open rows are the apps you chose — one, or both — on the bubble an
   assert.match(html, /wireHostOpen\(thHistoryEl\);/, "the room binds through the shared binder");
   const reader = html.slice(html.indexOf("function renderReader()"), html.indexOf("wireHostOpen(readerBodyEl);") + 30);
   assert.match(reader, /const workOn = payload\.features\?\.relayWork === true;/);
-  assert.match(reader, /const hasWork = chatOwnedWork \|\| \(\(request \|\| workOn\) && \(Boolean\(providerPrompt\) \|\| !\["idle", "waiting", "parked"\]\.includes\(runState\)\)\);/);
-  assert.match(reader, /const bothNote = onAgent && workOn \?/);
-  assert.match(reader, /const documentHostActions = !request && !onWork \? `<div class="rd-host-actions" data-stop="1">\$\{relayHostActionsHtml\(\{/,
-    "both source documents share the full provider rows outside their composers");
+  assert.match(reader, /const bothNote = onAgent && workOn && !handoff \?/);
+  assert.match(reader, /const documentHostActions = !request && onHuman \? `<div class="rd-host-actions" data-stop="1">\$\{relayHostActionsHtml\(\{/,
+    "the provider rows live on the human document; the agent face's rail names the app and Send opens it");
   assert.match(reader, /if \(onAgent && !workOn\) return "";/);
-  assert.match(reader, /relayWorkDockHtml\(r, \{ inline: true, showHostOpen: !onAgent \}\)/,
-    "the agent composer explicitly suppresses provider launch buttons");
+  assert.match(reader, /if \(onAgent\) return relayWorkDockHtml\(r, \{ inline: true \}\)/,
+    "the agent composer is the hand-off and carries no provider launch buttons");
   assert.match(reader, /\$\{documentHostActions\}\$\{composer\}/,
     "provider rows precede the active document's composer");
   assert.match(reader, /wireHostOpen\(readerBodyEl\);/, "the reader binds through the shared binder");

@@ -40,7 +40,6 @@ contextBridge.exposeInMainWorld("relay", {
   preview: (id) => ipcRenderer.send("relay:preview", id),
   openInCurrent: (id, host) => ipcRenderer.send("relay:openInCurrent", id, host),
   openFresh: (id, host, note) => ipcRenderer.send("relay:openFresh", id, host, note),
-  openRunSession: (id) => ipcRenderer.invoke("relay:openRunSession", String(id || "")),
   // The pill tray's Start task: the full start flow with the default runtime.
   taskStart: (id, route) => ipcRenderer.invoke("relay:taskStart", String(id || ""), route || null),
   taskClaim: (id, expectedVersion) => ipcRenderer.invoke("relay:taskClaim", String(id || ""), expectedVersion),
@@ -58,36 +57,9 @@ contextBridge.exposeInMainWorld("relay", {
   todoStewardPrefs: (input = {}) => ipcRenderer.invoke("relay:todoStewardPrefs", input || {}),
   requestReviewSafety: (id) => ipcRenderer.invoke("relay:requestReviewSafety", String(id || "")),
   requestCompletionSend: (id) => ipcRenderer.invoke("relay:requestCompletionSend", String(id || "")),
-  relayWorkStart: (id, route) => ipcRenderer.invoke("relay:relayWorkStart", String(id || ""), route || null),
-  chatAgentWorkStop: (id) => ipcRenderer.invoke("relay:chatAgentWorkStop", String(id || "")),
-  chatAgentWorkRetry: (id) => ipcRenderer.invoke("relay:chatAgentWorkRetry", String(id || "")),
-  runFeed: (id) => ipcRenderer.invoke("relay:runFeed", String(id || "")),
-  watchRunFeed: (id) => ipcRenderer.invoke("relay:runFeed:watch", String(id || "")),
-  unwatchRunFeed: (id) => ipcRenderer.send("relay:runFeed:unwatch", String(id || "")),
-  onRunFeedUpdate: (cb) => {
-    const listener = (_event, envelope) => cb(envelope);
-    ipcRenderer.on("relay:runFeed:update", listener);
-    return () => ipcRenderer.removeListener("relay:runFeed:update", listener);
-  },
-  runFeedDetail: (input) => ipcRenderer.invoke("relay:runFeed:detail", {
-    relayId:String(input?.relayId || ""), sessionId:String(input?.sessionId || ""),
-    turnId:String(input?.turnId || ""), itemId:String(input?.itemId || ""), attachmentId:String(input?.attachmentId || ""),
-  }),
-  runFeedAttachment: (input) => ipcRenderer.invoke("relay:runFeed:attachment", {
-    relayId:String(input?.relayId || ""), sessionId:String(input?.sessionId || ""),
-    turnId:String(input?.turnId || ""), itemId:String(input?.itemId || ""),
-    attachmentId:String(input?.attachmentId || ""),
-    attachmentIndex:Number.isInteger(input?.attachmentIndex) ? input.attachmentIndex : -1,
-  }),
-  runSteer: (relayId, body, options = {}) => ipcRenderer.invoke("relay:runSteer", {
-    relayId: String(relayId || ""),
-    body: String(body || ""),
-    newTurn: options && options.newTurn === true,
-    model: String(options && options.model || ""),
-    effort: String(options && options.effort || ""),
-    clientMessageId: String(options && options.clientMessageId || ""),
-    files: Array.isArray(options && options.files) ? options.files : [],
-  }),
+  // The hand-off: Send/Start opens a real session in the desktop app and
+  // puts the words in as its first turn. The answer is a receipt, never a feed.
+  agentHandoff: (id, route) => ipcRenderer.invoke("relay:agentHandoff", String(id || ""), route || null),
   schedules: () => ipcRenderer.invoke("relay:schedules"),
   scheduleSave: (input) => ipcRenderer.invoke("relay:scheduleSave", input || {}),
   ack: (id) => ipcRenderer.send("relay:ack", id),

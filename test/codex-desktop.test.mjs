@@ -1168,6 +1168,7 @@ test("an accepted picker turn is only polled while its rollout acknowledgement i
   let calls = 0;
   let identity = "";
   let scheduled = false;
+  const lifecycle = [];
   const result = await submitTurnToCodexDesktopThread({
     threadId: "thread_delayed_ack",
     text: "one visible picker turn",
@@ -1178,6 +1179,7 @@ test("an accepted picker turn is only polled while its rollout acknowledgement i
     confirmIntervalMs: 20,
     timeoutMs: 20,
     platform: "darwin",
+    onSubmitted: () => { lifecycle.push("submitted"); },
     runtime: {
       findCodexMainPids: async () => [404],
       evaluateAcrossCodexPids: async (_pids, expression) => {
@@ -1188,6 +1190,7 @@ test("an accepted picker turn is only polled while its rollout acknowledgement i
         if (!scheduled) {
           scheduled = true;
           setTimeout(() => {
+            lifecycle.push("rollout");
             fs.appendFileSync(
               rollout,
               `${JSON.stringify({ type: "event_msg", payload: { type: "user_message", client_id: identity, message: "one visible picker turn" } })}\n`,
@@ -1206,6 +1209,7 @@ test("an accepted picker turn is only polled while its rollout acknowledgement i
   assert.equal(result.submitted, true);
   assert.equal(result.ran, true);
   assert.equal(result.turnAttempts, 1);
+  assert.deepEqual(lifecycle, ["submitted", "rollout"], "the UI receipt can advance before durable rollout polling finishes");
   fs.rmSync(dir, { recursive: true, force: true });
 });
 

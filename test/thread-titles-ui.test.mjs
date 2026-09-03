@@ -999,9 +999,9 @@ test("hand-offs speak in conversation terms: starts vs continues, said BEFORE th
   // person, while For Agent starts or continues Work.
   assert.doesNotMatch(html, /data-reply-mode|__relayToggleReplyMode|replyTarget\(/);
   assert.doesNotMatch(html, /Talk to \$\{esc\(app\)\}|Reply to \$\{esc/);
-  assert.match(html, /if \(request && taskClaimAllowsStart\(r\) && \(onAgent \|\| onWork \|\| requestActionable\)\) return requestDockHtml\(r, \{ inline: true \}\)/);
-  assert.match(html, /if \(onAgent \|\| onWork\) return relayWorkDockHtml\(r, \{ inline: true, showHostOpen: !onAgent \}\)/);
-  assert.match(html, /data-work-start="\$\{esc\(r\.id\)\}"/);
+  assert.match(html, /if \(request && taskClaimAllowsStart\(r\) && \(onAgent \|\| requestActionable\)\) return requestDockHtml\(r, \{ inline: true \}\)/);
+  assert.match(html, /if \(onAgent\) return relayWorkDockHtml\(r, \{ inline: true \}\)/);
+  assert.match(html, /data-handoff="\$\{esc\(r\.id\)\}"/);
   assert.match(html, /<button type="button" id="qrSend">Send<\/button>/);
   assert.match(html, /if \(onAgent && !workOn\) return "";/,
     "the agent document ends after its full provider actions when Relay Work is unavailable");
@@ -1017,15 +1017,15 @@ test("ordinary titled bubbles open the reader while owned-agent bubbles open Wor
   assert.match(html, /if \(m && m\.textLike && !m\.ownedAgent\) return;/);
   assert.match(html, /if \(m && m\.ownedAgent\)[\s\S]*openReader\(id, m\.direction === "out" \? "sent" : "threads"\)/,
     "clicking the owned-agent bubble takes the Work path");
-  assert.match(html, /opened\.source\?\.host === "relay-agent-run"[\s\S]*readerTab = readerWorkVisible \? "work" : "you"/,
-    "the owned-agent reader lands directly on the existing runner face");
+  assert.match(html, /const openedHandoff = handoffFor\(opened\);[\s\S]*readerTab = openedHandoff && \["starting", "running", "failed"\]\.includes\(openedHandoff\.state\) \? "agent" : "you"/,
+    "a Relay that went to an app opens on its receipt");
   assert.match(html, /data-open-agent-work/, "the explicit Open Work affordance uses the same path");
   assert.match(html, /openReader\(id, m\.direction === "out" \? "sent" : \(m\.request \? "tasks" : "threads"\)\)/);
   assert.match(html, /const r = readerRow\(readerId\)/);
   assert.doesNotMatch(html, /data-strip-reply/);
-  // The task reader keeps the intention verbs + transparency line.
-  assert.match(html, /data-open-in="\$\{esc\(r\.id\)\}" data-open-in-host="codex">Open in Codex/);
-  assert.match(html, /data-open-in="\$\{esc\(r\.id\)\}" data-open-in-host="claude">Open in Claude Code/);
+  // The task reader keeps the transparency line; the rail's app chip is the
+  // only place the agent face names an app (the hand-off, 2026-09-03).
+  assert.doesNotMatch(html, /data-open-in-host=/);
   assert.match(html, /class="rt-chip" data-route-menu="app"/); // the rail IS the transparency, and it is writable
 });
 

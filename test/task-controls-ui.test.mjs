@@ -52,7 +52,7 @@ test("Canceled is workflow state while Recently Deleted remains a separate reade
 
 test("both source faces expose Start task while a Task is actionable", () => {
   const reader = between(inbox, "function renderReader()", "// ---------- the Tasks board");
-  assert.match(inbox, /label: state === "stopped" \? "Start again" : "Start task"/);
+  assert.match(inbox, /label: failed \? "Retry" : state === "stopped" \? "Start again" : "Start task"/);
   assert.match(reader, /const requestActionable = request/);
-  assert.match(reader, /onAgent \|\| onWork \|\| requestActionable/);
+  assert.match(reader, /onAgent \|\| requestActionable/);
 });

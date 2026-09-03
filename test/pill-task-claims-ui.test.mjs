@@ -43,5 +43,4 @@ test("Task ownership stays in reader/chat while Todo status remains independent"
   assert.match(html, /wireTaskClaimControls\(readerBodyEl/);
   assert.match(html, /wireTaskClaimControls\(thHistoryEl/);
   assert.match(html, /lifecycleOnly = task && \["in_progress", "done"\]\.includes\(candidate\)/);
-  assert.match(html, /window\.relay\.taskStop\(key\)/, "a terminal Work feed durably enables later Unclaim");
 });
