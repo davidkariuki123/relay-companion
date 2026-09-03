@@ -79,6 +79,22 @@ const { execFile, execFileSync, spawn, pathToFileURL } = (() => {
 // explicitly named host — never message content or credentials.
 const pendingRelayDeepLinks = [];
 let relayDeepLinksReady = false;
+function queueRelayDeepLink(parsed) {
+  if (!parsed) return false;
+  // Windows and Linux deliver custom protocols through argv/second-instance,
+  // while macOS normally uses open-url. Keep the complete validated handoff on
+  // every route: dropping handoffId/ackOrigin makes the browser report failure
+  // after Claude has already opened, inviting another fresh-session retry.
+  pendingRelayDeepLinks.push({
+    messageId: parsed.messageId,
+    host: parsed.host,
+    ...(parsed.chatId ? { chatId: parsed.chatId } : {}),
+    ...(parsed.handoffId ? { handoffId: parsed.handoffId } : {}),
+    ...(parsed.ackOrigin ? { ackOrigin: parsed.ackOrigin } : {}),
+  });
+  if (relayDeepLinksReady) drainRelayDeepLinks();
+  return true;
+}
 function registerRelayProtocol() {
   if (process.env.RELAY_OVERLAY_TEST === "1" || process.env.RELAY_OVERLAY_PERF === "1") return;
   try {
@@ -95,10 +111,7 @@ registerRelayProtocol();
 
 app.on("open-url", (event, url) => {
   event.preventDefault();
-  const parsed = parseRelayDeepLink(url);
-  if (!parsed) return;
-  pendingRelayDeepLinks.push(parsed);
-  if (relayDeepLinksReady) drainRelayDeepLinks();
+  queueRelayDeepLink(parseRelayDeepLink(url));
 });
 const {
   hostFromBundle,
@@ -9686,12 +9699,7 @@ if (!gotSingleInstanceLock) {
   app.on("second-instance", (_event, argv, _workingDirectory, additionalData = {}) => {
     const deepLink = relayDeepLinkFromArgv(argv);
     if (deepLink) {
-      pendingRelayDeepLinks.push({
-        messageId: deepLink.messageId,
-        host: deepLink.host,
-        ...(deepLink.chatId ? { chatId:deepLink.chatId } : {}),
-      });
-      drainRelayDeepLinks();
+      queueRelayDeepLink(deepLink);
       return;
     }
     const nonce =
@@ -9732,13 +9740,7 @@ if (!gotSingleInstanceLock) {
     if (process.platform === "darwin" && app.dock) app.dock.hide(); // accessory: no dock icon, no NC banners
     createWindow();
     const initialDeepLink = relayDeepLinkFromArgv(process.argv);
-    if (initialDeepLink) {
-      pendingRelayDeepLinks.push({
-        messageId: initialDeepLink.messageId,
-        host: initialDeepLink.host,
-        ...(initialDeepLink.chatId ? { chatId:initialDeepLink.chatId } : {}),
-      });
-    }
+    queueRelayDeepLink(initialDeepLink);
     relayDeepLinksReady = true;
     drainRelayDeepLinks();
     createTray();

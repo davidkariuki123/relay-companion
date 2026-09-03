@@ -62,8 +62,29 @@ const NETWORK_ERROR_CODES = new Set([
 // HTTP answers that mean "not now" rather than "not ever".
 const TRANSIENT_STATUS = new Set([408, 425, 429, 500, 502, 503, 504, 507, 522, 524]);
 
+// How many times a "not now" from the SERVER is taken at its word before the
+// message is handed back as failed, with the server's reason. The ladder above
+// spans about six minutes; a server still saying no after that is not having a
+// moment, and the human is better served by "Not sent" and a Retry button than
+// by a bubble that says "Trying again…" for the rest of the day. A dead
+// connection has no such ceiling — see the ladder's own note.
+const SERVER_DEFERRAL_LIMIT = BACKOFF_MS.length + 1;
+
 /**
- * Is this failure worth waiting out?
+ * Is this failure worth waiting out, and on whose clock?
+ *
+ * Three verdicts:
+ *  - "transient": the connection is down. Nobody answered. Wait forever, and
+ *    try again the moment anything else proves the network is back.
+ *  - "deferred": the server answered and said "not now" (a 5xx, a 429). It is
+ *    the server's clock, not the network's: a poll that succeeds a second later
+ *    proves nothing about THIS payload, so the backoff stands, and after
+ *    SERVER_DEFERRAL_LIMIT attempts the message fails with the server's words.
+ *    The case that taught this: a channel send answered 502 because one
+ *    member's email fallback could not be sent, was resumed by every Sent poll,
+ *    and was retried 908 times in seven hours while the two messages typed
+ *    after it never left the device.
+ *  - "permanent": the server declined this exact payload. Fail at once.
  *
  * The default is PERMANENT, which looks backwards for a queue whose promise is
  * "keep trying" — but it is the honest default. A connection problem announces
@@ -76,7 +97,7 @@ const TRANSIENT_STATUS = new Set([408, 425, 429, 500, 502, 503, 504, 507, 522, 5
 function classifySendError(error) {
   if (!error) return "permanent";
   const status = Number(error.status || error.statusCode || 0);
-  if (status) return TRANSIENT_STATUS.has(status) ? "transient" : "permanent";
+  if (status) return TRANSIENT_STATUS.has(status) ? "deferred" : "permanent";
   const name = String(error.name || "");
   if (name === "TimeoutError" || name === "AbortError") return "transient";
   if (NETWORK_ERROR_CODES.has(String(error.code || ""))) return "transient";
@@ -332,6 +353,7 @@ function createOutbox({
     entry.attempts = 0;
     entry.nextAttemptAt = now();
     entry.lastError = "";
+    entry.waitingOn = "";
     changed();
     kick(0);
     return true;
@@ -354,15 +376,21 @@ function createOutbox({
     } catch (error) {
       const kind = classifySendError(error);
       const message = (error && error.message) || String(error);
-      if (kind === "permanent") {
-        update(entry.id, { state: "failed", lastError: message, failedAt: localIso(now()) });
+      const exhausted = kind === "deferred" && entry.attempts >= SERVER_DEFERRAL_LIMIT;
+      if (kind === "permanent" || exhausted) {
+        update(entry.id, { state: "failed", lastError: message, waitingOn: "", failedAt: localIso(now()) });
         changed();
-        log(`outbox send rejected (${message})`);
+        log(exhausted
+          ? `outbox send deferred ${entry.attempts} times, giving up (${message})`
+          : `outbox send rejected (${message})`);
         return "failed";
       }
       update(entry.id, {
         state: "queued",
         lastError: message,
+        // Whose clock the wait is on. resume() may cut a network wait short;
+        // a server deferral runs its full course.
+        waitingOn: kind === "deferred" ? "server" : "network",
         nextAttemptAt: now() + backoffMs(entry.attempts),
       });
       changed();
@@ -426,12 +454,18 @@ function createOutbox({
    * has just succeeded against the API, the guess is superseded: a message must
    * not sit for another five minutes because its last attempt happened to fail
    * during the outage.
+   *
+   * Only a NETWORK wait is a guess. A message the server itself deferred is
+   * waiting on the server's clock, and the Sent poll that calls this every few
+   * seconds is no evidence about that: waking it here is what turned one 502
+   * into an attempt every twenty seconds for seven hours.
    */
   function resume() {
     if (stopped) return 0;
     let woken = 0;
     for (const entry of store.entries) {
       if (entry.state !== "queued") continue;
+      if (entry.waitingOn === "server") continue;
       entry.nextAttemptAt = now();
       woken += 1;
     }
@@ -476,5 +510,6 @@ module.exports = {
   localIso,
   BACKOFF_MS,
   BACKOFF_CAP_MS,
+  SERVER_DEFERRAL_LIMIT,
   OUTBOX_VERSION,
 };

@@ -61,6 +61,26 @@ test("handoff acknowledgements return only to a trusted reader origin", () => {
   assert.match(overlay, /new URL\("\/open\/relay\/ack", parsed\.ackOrigin \|\| webBase\(\)\)/);
 });
 
+test("every desktop protocol route preserves the browser handoff acknowledgement", () => {
+  const queueStart = overlay.indexOf("function queueRelayDeepLink(");
+  const queueEnd = overlay.indexOf("function registerRelayProtocol(", queueStart);
+  assert.notEqual(queueStart, -1);
+  assert.notEqual(queueEnd, -1);
+  const queue = overlay.slice(queueStart, queueEnd);
+  assert.match(queue, /handoffId: parsed\.handoffId/);
+  assert.match(queue, /ackOrigin: parsed\.ackOrigin/);
+
+  const openUrlStart = overlay.indexOf('app.on("open-url"');
+  const openUrlEnd = overlay.indexOf("const {", openUrlStart);
+  const secondStart = overlay.indexOf('app.on("second-instance"');
+  const secondEnd = overlay.indexOf('app.on("activate"', secondStart);
+  const readyStart = overlay.indexOf("app.whenReady().then");
+  const readyEnd = overlay.indexOf("relayDeepLinksReady = true", readyStart);
+  assert.match(overlay.slice(openUrlStart, openUrlEnd), /queueRelayDeepLink\(parseRelayDeepLink\(url\)\)/);
+  assert.match(overlay.slice(secondStart, secondEnd), /queueRelayDeepLink\(deepLink\)/);
+  assert.match(overlay.slice(readyStart, readyEnd), /queueRelayDeepLink\(initialDeepLink\)/);
+});
+
 test("argv parser ignores unrelated process arguments", () => {
   assert.deepEqual(
     relayDeepLinkFromArgv(["Relay", "--flag", "relay://open?message=msg_9&host=codex"]),

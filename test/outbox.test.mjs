@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createOutbox, classifySendError, backoffMs } from "../src/outbox.cjs";
+import { createOutbox, classifySendError, backoffMs, SERVER_DEFERRAL_LIMIT } from "../src/outbox.cjs";
 
 function tempFile() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-outbox-test-"));
@@ -51,14 +51,15 @@ function message(over = {}) {
   };
 }
 
-test("every way a connection fails is transient; a rejected payload is not", () => {
+test("every way a connection fails is transient; a server's not-now is deferred; a rejected payload is neither", () => {
   // The three shapes undici actually produces, measured against no-DNS, a
   // black-holed route, and a refused port.
   assert.equal(classifySendError(OFFLINE()), "transient");
   assert.equal(classifySendError(TIMEOUT()), "transient");
   assert.equal(classifySendError(new TypeError("fetch failed")), "transient");
-  assert.equal(classifySendError(Object.assign(new Error("gateway"), { status: 502 })), "transient");
-  assert.equal(classifySendError(Object.assign(new Error("slow down"), { status: 429 })), "transient");
+  // The server ANSWERED. That is the server's clock, not the network's.
+  assert.equal(classifySendError(Object.assign(new Error("gateway"), { status: 502 })), "deferred");
+  assert.equal(classifySendError(Object.assign(new Error("slow down"), { status: 429 })), "deferred");
 
   assert.equal(classifySendError(REJECTED(400)), "permanent");
   assert.equal(classifySendError(REJECTED(401)), "permanent");
@@ -296,4 +297,76 @@ test("a message still waiting is never let go, however long the outage runs", as
   outbox.retireConfirmed({ relayIds: [] });
   assert.equal(outbox.list().length, 1, "three days offline is not a reason to drop someone's message");
   assert.equal(outbox.list()[0].state, "queued");
+});
+
+// The regression these two pin: a channel send was answered 502 because one
+// member's email fallback could not be sent. The pill treated the 502 as a
+// network outage, every Sent poll "resumed" it, and it was retried 908 times in
+// seven hours — while the two messages typed after it into the same room sat
+// at zero attempts behind it, saying "Sending…" (David, 2026-09-03).
+const DEFERRED = () => Object.assign(new Error("Relay could not email this recipient because the email provider rejected the message."), { status: 502 });
+
+test("a server's not-now runs on the server's clock: a poll proving the network is up does not wake it", async () => {
+  const { outbox, state } = harness({ send: () => { throw DEFERRED(); } });
+  outbox.enqueue(message());
+  await outbox.flush();
+  let [entry] = outbox.list();
+  assert.equal(entry.state, "queued");
+  assert.equal(entry.attempts, 1);
+  assert.equal(entry.waitingOn, "server");
+  const due = entry.nextAttemptAt;
+  assert.ok(due > state.now, "the deferral earned a backoff");
+
+  // The Sent poll succeeds a moment later and calls resume(), as it does every
+  // few seconds. That says nothing about THIS payload.
+  assert.equal(outbox.resume(), 0, "nothing on the server's clock is woken");
+  await outbox.flush();
+  assert.equal(outbox.list()[0].attempts, 1, "no extra attempt was spent");
+  assert.equal(outbox.list()[0].nextAttemptAt, due, "the backoff stands");
+
+  // A message waiting on the NETWORK is still woken by the same evidence.
+  const offline = harness({ send: () => { throw OFFLINE(); } });
+  offline.outbox.enqueue(message());
+  await offline.outbox.flush();
+  assert.equal(offline.outbox.list()[0].waitingOn, "network");
+  assert.equal(offline.outbox.resume(), 1);
+});
+
+test("a server that keeps saying not-now is believed for the ladder, then the message fails with its words", async () => {
+  const { outbox, state } = harness({ send: () => { throw DEFERRED(); } });
+  outbox.enqueue(message());
+  for (let i = 0; i < SERVER_DEFERRAL_LIMIT + 5; i += 1) {
+    await outbox.flush();
+    state.advance(backoffMs(i + 1) + 1);
+  }
+  const [entry] = outbox.list();
+  assert.equal(entry.state, "failed", "after the ladder the human is told instead of watching Trying again… all day");
+  assert.equal(entry.attempts, SERVER_DEFERRAL_LIMIT, "exactly the ladder, and not one attempt more");
+  assert.match(entry.lastError, /email provider rejected/, "the server's own reason is kept for the human");
+  assert.equal(entry.text, "hey room", "the words are held, so Retry has something to send");
+  assert.equal(entry.waitingOn, "");
+
+  // Retry puts it back in line and spends a fresh attempt at once.
+  const before = state.sends.length;
+  assert.equal(outbox.retry(entry.id), true);
+  await outbox.flush();
+  assert.equal(state.sends.length, before + 1, "Retry sends again with the same idempotency key");
+  assert.equal(state.sends[before].idempotencyKey, entry.idempotencyKey);
+  assert.equal(outbox.list()[0].state, "queued", "one more not-now is a deferral again, not an instant failure");
+});
+
+test("a message deferred by the server still holds its room in order, and a network wait behind it is not woken past it", async () => {
+  let calls = 0;
+  const { outbox, state } = harness({ send: () => { calls += 1; throw DEFERRED(); } });
+  outbox.enqueue(message({ idempotencyKey: "k1", text: "first" }));
+  outbox.enqueue(message({ idempotencyKey: "k2", text: "second" }));
+  await outbox.flush();
+  assert.equal(calls, 1, "the second waits behind the first in its room");
+  assert.equal(outbox.list()[1].attempts, 0);
+  outbox.resume();
+  await outbox.flush();
+  assert.equal(calls, 1, "resume() did not push the room past the deferred head");
+  state.advance(backoffMs(1) + 1);
+  await outbox.flush();
+  assert.equal(calls, 2, "the head is retried on its own clock");
 });
