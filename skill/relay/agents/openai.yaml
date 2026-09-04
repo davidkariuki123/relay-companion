@@ -1,0 +1,4 @@
+interface:
+  display_name: "Relay"
+  short_description: "Send and read Relay messages from your agent"
+  default_prompt: "Use $relay to check my Relay inbox and help me respond."

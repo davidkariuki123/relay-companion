@@ -2176,8 +2176,10 @@ test("public export includes every script its release security suite imports", (
   assert.equal(fs.existsSync(new URL("../scripts/verify-thin-setup-canary.mjs", import.meta.url)), true);
   const exporter = new URL("../scripts/export-public-release.mjs", import.meta.url);
   if (fs.existsSync(exporter)) {
-    assert.match(fs.readFileSync(exporter, "utf8"), /"assert-runtime-capabilities\.mjs"/);
-    assert.match(fs.readFileSync(exporter, "utf8"), /"prepare-linux-electron-sandbox\.mjs"/);
+    const exporterSource = fs.readFileSync(exporter, "utf8");
+    assert.match(exporterSource, /"assert-runtime-capabilities\.mjs"/);
+    assert.match(exporterSource, /"prepare-linux-electron-sandbox\.mjs"/);
+    assert.match(exporterSource, /COPY_DIRECTORIES = \[[^\]]*"skill"/);
   }
   const verifier = fs.readFileSync(new URL("../scripts/verify-installed-runtime.mjs", import.meta.url), "utf8");
   assert.match(verifier, /assertRuntimeCapabilities\(root\)/);
