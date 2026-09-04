@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import {
   ensureClaudeDesktopImported,
+  importClaudeDesktopSession,
   repairClaudeSessionModel,
   resolveClaudeSessionModel,
   writeClaudeNativeSession,
@@ -16,6 +17,19 @@ const ENV_KEYS = [
   "RELAY_CLAUDE_METADATA_MODEL",
   "RELAY_IMPORT_CLAUDE_DESKTOP",
 ];
+
+test("the Node test runner cannot invoke Claude Desktop's protocol handler", () => {
+  const previous = process.env.RELAY_IMPORT_CLAUDE_DESKTOP;
+  try {
+    delete process.env.RELAY_IMPORT_CLAUDE_DESKTOP;
+    assert.ok(process.env.NODE_TEST_CONTEXT, "this assertion must execute under node --test");
+    const result = importClaudeDesktopSession({ sessionId: "00000000-0000-4000-8000-000000000000" });
+    assert.equal(result.attempted, false);
+    assert.equal(result.reason, "node-test-runner");
+  } finally {
+    restoreEnv("RELAY_IMPORT_CLAUDE_DESKTOP", previous);
+  }
+});
 
 test("Claude session model resolution never emits Relay's internal sentinel", () => {
   const previous = process.env.RELAY_CLAUDE_METADATA_MODEL;

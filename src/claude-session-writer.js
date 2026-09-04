@@ -326,6 +326,12 @@ export function importClaudeDesktopSession({ sessionId, activate = process.env.R
   if (process.env.RELAY_IMPORT_CLAUDE_DESKTOP === "0") {
     return { attempted: false, reason: "disabled", deepLink };
   }
+  // `node --test` marks its worker processes with NODE_TEST_CONTEXT. Treat that
+  // boundary as absolute: a missed fixture override must never invoke the real
+  // OS protocol handler and focus the developer's installed Claude Desktop.
+  if (process.env.NODE_TEST_CONTEXT) {
+    return { attempted: false, reason: "node-test-runner", deepLink };
+  }
   if (process.platform !== "darwin" && process.platform !== "win32") {
     return { attempted: false, reason: "unsupported-platform", deepLink };
   }

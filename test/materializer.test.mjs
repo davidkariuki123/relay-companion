@@ -586,10 +586,18 @@ test("materialization heals legacy Codex threadId clobber back to the Relay thre
 });
 
 test("a relay whose passport repo is absent still downloads its attachments and opens in the Relay folder", async () => {
-  const prevEnv = { RELAY_HOME: process.env.RELAY_HOME };
+  const prevEnv = {
+    RELAY_HOME: process.env.RELAY_HOME,
+    CLAUDE_HOME: process.env.CLAUDE_HOME,
+    CLAUDE_DESKTOP_SESSIONS_DIR: process.env.CLAUDE_DESKTOP_SESSIONS_DIR,
+    RELAY_IMPORT_CLAUDE_DESKTOP: process.env.RELAY_IMPORT_CLAUDE_DESKTOP,
+  };
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-materializer-gate-"));
   const relayHome = path.join(dir, "relay-home");
+  const claudeHome = path.join(dir, "claude-home");
+  const desktopSessions = path.join(dir, "claude-desktop-sessions");
   fs.mkdirSync(relayHome, { recursive: true });
+  fs.mkdirSync(desktopSessions, { recursive: true });
   const body = Buffer.from("<!doctype html><title>proto board</title>");
   const server = http.createServer((_req, res) => {
     res.writeHead(200, { "Content-Type": "application/octet-stream", "Content-Length": body.length });
@@ -599,6 +607,9 @@ test("a relay whose passport repo is absent still downloads its attachments and 
   const url = `http://127.0.0.1:${server.address().port}/proto-board.html`;
   try {
     process.env.RELAY_HOME = relayHome;
+    process.env.CLAUDE_HOME = claudeHome;
+    process.env.CLAUDE_DESKTOP_SESSIONS_DIR = desktopSessions;
+    process.env.RELAY_IMPORT_CLAUDE_DESKTOP = "0";
     fs.writeFileSync(path.join(relayHome, "state.json"), JSON.stringify({
       packets: {
         relay_gate: {
@@ -636,12 +647,16 @@ test("a relay whose passport repo is absent still downloads its attachments and 
     assert.equal(fs.readFileSync(localPath, "utf8"), body.toString());
     assert.equal(row.openCwdReason, "workspace-unmapped-fallback");
     assert.equal(row.openWorkspaceKey, "git:github.com/nobody/does-not-exist", "the unmatched passport stays on record");
+    assert.equal(row.claudeNativeSession.desktopImport.attempted, false, "a test must never launch Claude Desktop");
+    assert.equal(row.claudeNativeSession.desktopImport.reason, "disabled");
+    assert.ok(row.claudeNativeSession.sessionPath.startsWith(claudeHome), "the test must not write into the user's Claude home");
   } finally {
     await new Promise((resolve) => server.close(resolve));
     for (const [key, value] of Object.entries(prevEnv)) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
