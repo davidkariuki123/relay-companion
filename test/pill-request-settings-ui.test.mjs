@@ -98,12 +98,12 @@ test("healthy providers collapse to the real app mark, connection count, and Rea
 });
 
 test("provider routes never inherit another provider's model or historical transcript", () => {
-  const start = between(main, "async function handOffToAgent", "// The kick prompt is the task's REAL first user message.");
-  assert.match(start, /host === "codex" && \/\^claude-\/i\.test\(requestedModel\)/);
-  assert.match(start, /host === "claude" && \/\^gpt-\/i\.test\(requestedModel\)/);
+  const start = between(main, "async function startTaskFromPreview", "function forgeTaskSessionQuietly");
+  assert.match(start, /selectedHost === "codex" && \/\^claude-\/i\.test\(requestedModel\)/);
+  assert.match(start, /selectedHost === "claude" && \/\^gpt-\/i\.test\(requestedModel\)/);
 
-  const taskIpc = between(main, 'ipcMain.handle("relay:taskStart"', 'ipcMain.handle("relay:taskClaim"');
-  const localIpc = between(main, 'ipcMain.handle("relay:agentHandoff"', 'ipcMain.handle("relay:chatAgentWorkStop"');
+  const taskIpc = between(main, 'ipcMain.handle("relay:taskStart"', '// The agent document of an ordinary Relay');
+  const localIpc = between(main, 'ipcMain.handle("relay:relayWorkStart"', '// The session face\'s feed');
   assert.match(taskIpc, /model: \(route && route\.model\) \|\| ""/);
   assert.match(localIpc, /model: \(route && route\.model\) \|\| ""/);
 

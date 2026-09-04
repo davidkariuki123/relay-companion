@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import runtimeExecutables from "../bootstrap/runtime-executables.cjs";
 
 const { verifyRuntimeExecutables } = runtimeExecutables;
@@ -296,9 +297,11 @@ export async function recoverCanonicalRuntime({
     rmSync: fsImpl.rmSync.bind(fsImpl),
     readdirSync: typeof fsImpl.readdirSync === "function" ? fsImpl.readdirSync.bind(fsImpl) : undefined,
     processAlive: typeof fsImpl.processAlive === "function" ? fsImpl.processAlive.bind(fsImpl) : undefined,
+    processIdentity: typeof fsImpl.processIdentity === "function" ? fsImpl.processIdentity.bind(fsImpl) : undefined,
   };
   const lockOptions = { ...io, platform, now, ownerIdentity: lockIdentity };
   if (!lockOptions.processAlive) delete lockOptions.processAlive;
+  if (!lockOptions.processIdentity) delete lockOptions.processIdentity;
   if (!lockOptions.readdirSync) delete lockOptions.readdirSync;
   let lock = null;
   try {
@@ -310,7 +313,7 @@ export async function recoverCanonicalRuntime({
   try {
     await onLockAcquired(lock.owner);
   } catch (error) {
-    try { io.rmSync(layout.lockPath, { recursive: true, force: true }); } catch {}
+    try { lock.release(); } catch {}
     return { ok: false, phase: "admission", reason: "worker-admission-failed", detail: error?.message || String(error) };
   }
   const target = state.previous || null;
@@ -357,7 +360,7 @@ export async function recoverCanonicalRuntime({
     }, { ...io, platform });
     return { ok: false, phase: "recovery", reason: "rollback-threw", detail: error?.message || String(error), state };
   } finally {
-    try { io.rmSync(layout.lockPath, { recursive: true, force: true }); } catch {}
+    try { lock.release(); } catch {}
   }
 }
 
@@ -592,59 +595,310 @@ function defaultInstallCandidate({ npmCommand, stagingRoot, version, env, node, 
     : { ok: false, status: result.status, detail: `${electron.reason}${electron.detail ? `: ${electron.detail}` : ""}` };
 }
 
+function linuxProcessDetails(pid, {
+  platform = process.platform,
+  readFileSync = fs.readFileSync,
+} = {}) {
+  if (platform !== "linux" || !Number.isInteger(pid) || pid <= 0) return null;
+  try {
+    const bootId = String(readFileSync("/proc/sys/kernel/random/boot_id", "utf8")).trim();
+    const stat = String(readFileSync(`/proc/${pid}/stat`, "utf8"));
+    const commandEnd = stat.lastIndexOf(")");
+    if (!bootId || commandEnd < 0) return null;
+    const fields = stat.slice(commandEnd + 1).trim().split(/\s+/);
+    const state = fields[0];
+    const startTicks = fields[19];
+    if (!/^[A-Za-z]$/.test(state || "") || !/^\d+$/.test(startTicks || "")) return null;
+    return { state, identity: `${bootId}:${startTicks}` };
+  } catch {
+    return null;
+  }
+}
+
+function linuxProcessIdentity(pid, options = {}) {
+  return linuxProcessDetails(pid, options)?.identity || "";
+}
+
+function processAlive(pid, {
+  platform = process.platform,
+  readFileSync = fs.readFileSync,
+} = {}) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    const details = linuxProcessDetails(pid, { platform, readFileSync });
+    return !details || !["Z", "X", "x"].includes(details.state);
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+function canonicalLockOwnerState(owner, { processAlive, processIdentity }) {
+  const pid = Number(owner?.pid);
+  if (!Number.isInteger(pid) || pid <= 0) return "unknown";
+  if (!processAlive(pid)) return "dead";
+  const expectedIdentity = typeof owner?.processIdentity === "string" ? owner.processIdentity : "";
+  if (expectedIdentity) {
+    const actualIdentity = processIdentity(pid);
+    if (actualIdentity && actualIdentity !== expectedIdentity) return "dead";
+  }
+  return "live";
+}
+
+function sameCanonicalLockGeneration(left, right, { requireBirth = false } = {}) {
+  if (!left || !right || left.dev === undefined || left.ino === undefined
+    || right.dev === undefined || right.ino === undefined) return false;
+  const leftBirth = left.birthtimeNs ?? (left.birthtimeMs !== undefined ? Math.trunc(Number(left.birthtimeMs) * 1e6) : null);
+  const rightBirth = right.birthtimeNs ?? (right.birthtimeMs !== undefined ? Math.trunc(Number(right.birthtimeMs) * 1e6) : null);
+  const sameObject = String(left.dev) === String(right.dev) && String(left.ino) === String(right.ino);
+  if (!sameObject) return false;
+  const hasBirth = leftBirth !== null && rightBirth !== null
+    && String(leftBirth) !== "0" && String(rightBirth) !== "0";
+  return hasBirth ? String(leftBirth) === String(rightBirth) : !requireBirth;
+}
+
+function canonicalLockGenerationNonce(owner) {
+  return typeof owner?.nonce === "string" && /^[0-9a-f]{32}$/.test(owner.nonce)
+    ? owner.nonce
+    : "";
+}
+
+function acquireCanonicalReclaimClaim(reclaimPath, {
+  nonce,
+  now,
+  staleAfterMs = 30_000,
+  readFileSync,
+  writeFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  existsSync,
+  processAlive,
+  processIdentity,
+}) {
+  const ownerProcessIdentity = processIdentity(process.pid);
+  const claim = {
+    pid: process.pid,
+    nonce,
+    createdAt: now(),
+    ...(ownerProcessIdentity ? { processIdentity: ownerProcessIdentity } : {}),
+  };
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      writeFileSync(reclaimPath, `${JSON.stringify(claim)}\n`, { mode: 0o600, flag: "wx" });
+      return true;
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      if (!existsSync(reclaimPath)) continue;
+      let priorBytes = null;
+      let prior = null;
+      try {
+        priorBytes = String(readFileSync(reclaimPath, "utf8"));
+      } catch (error) {
+        if (error?.code === "ENOENT") continue;
+        return false;
+      }
+      try { prior = JSON.parse(priorBytes); } catch {}
+      let priorAt = Number(prior?.createdAt || 0);
+      if (!priorAt) {
+        try { priorAt = Number(statSync(reclaimPath).mtimeMs || 0); } catch {}
+      }
+      const state = canonicalLockOwnerState(prior, { processAlive, processIdentity });
+      const stale = state === "dead" || (state === "unknown" && priorAt > 0 && now() - priorAt > staleAfterMs);
+      if (!stale || attempt > 0) return false;
+      const staleClaimPath = `${reclaimPath}.stale-${process.pid}-${nonce}`;
+      try {
+        renameSync(reclaimPath, staleClaimPath);
+        const movedBytes = String(readFileSync(staleClaimPath, "utf8"));
+        if (movedBytes !== priorBytes) {
+          try { if (!existsSync(reclaimPath)) renameSync(staleClaimPath, reclaimPath); } catch {}
+          return false;
+        }
+        rmSync(staleClaimPath, { force: true });
+      } catch (error) {
+        if (error?.code === "ENOENT") continue;
+        throw error;
+      }
+    }
+  }
+  return false;
+}
+
 function acquireLock(lockPath, {
   platform = process.platform,
+  // This directory is shared with shipped bootstraps whose owner publication
+  // was non-exclusive and had no reclaim handshake. Preserve their two-hour
+  // incomplete-record grace during rollout; complete dead owners are immediate.
+  staleAfterMs = 2 * 60 * 60_000,
   mkdirSync = fs.mkdirSync,
   readFileSync = fs.readFileSync,
   writeFileSync = fs.writeFileSync,
   renameSync = fs.renameSync,
   rmSync = fs.rmSync,
   readdirSync = fs.readdirSync,
-  processAlive = (pid) => {
-    try { process.kill(pid, 0); return true; } catch (error) { return error?.code === "EPERM"; }
-  },
+  statSync = fs.statSync,
+  existsSync = fs.existsSync,
+  processAlive: isProcessAlive = (pid) => processAlive(pid, { platform, readFileSync }),
+  processIdentity = (pid) => linuxProcessIdentity(pid, { platform, readFileSync }),
   now = Date.now,
   ownerIdentity = {},
 } = {}) {
   const api = pathsFor(platform);
   mkdirSync(api.dirname(lockPath), { recursive: true, mode: 0o700 });
-  try {
-    mkdirSync(lockPath);
-  } catch {
-    let owner = null;
-    try { owner = JSON.parse(readFileSync(api.join(lockPath, "owner.json"), "utf8")); } catch {}
-    // Never steal from a live PID on an elapsed-time guess. npm may legitimately
-    // take longer than a nominal deadline; a second writer would corrupt the one
-    // canonical transaction. Dead owners are recoverable below, while the fixed
-    // worker admission protocol prevents a fresh process from piling on.
-    if (Number.isInteger(owner?.pid) && processAlive(owner.pid)) {
-      return { ok: false, reason: "transaction-in-progress", owner };
-    }
-    // Rename-then-recreate is what makes the steal atomic: no window exists where the
-    // lock is absent. The RENAMED directory is then garbage and must be deleted — it
-    // was only ever kept alive by the rename. Left behind, each steal leaks a
-    // directory into the runtime root, and a failing transaction leaks one per retry:
-    // 11,015 of them accumulated on David's Mac in a day, which is also what made
-    // ~/.relay/runtime slow to read for everything else.
-    const stale = `${lockPath}.stale-${now()}-${process.pid}`;
-    try { renameSync(lockPath, stale); mkdirSync(lockPath); } catch { return { ok: false, reason: "transaction-lock-unavailable", owner }; }
-    try { rmSync(stale, { recursive: true, force: true }); } catch {}
-  }
-  // Machines that ran the leaking build already carry the debris, and nothing else
-  // ever looks at these names. Sweep them once per transaction so an upgrade heals
-  // the directory instead of inheriting it.
-  try {
-    const parent = api.dirname(lockPath);
-    const prefix = `${api.basename(lockPath)}.stale-`;
-    for (const entry of readdirSync(parent)) {
-      if (String(entry).startsWith(prefix)) {
-        try { rmSync(api.join(parent, entry), { recursive: true, force: true }); } catch {}
+  const nonce = randomBytes(16).toString("hex");
+  const ownerPath = api.join(lockPath, "owner.json");
+  const reclaimPath = api.join(lockPath, "reclaim.json");
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    let createdStat = null;
+    try {
+      mkdirSync(lockPath, { mode: 0o700 });
+      try { createdStat = statSync(lockPath, { bigint: true }); } catch {}
+    } catch {
+      if (!existsSync(lockPath)) {
+        if (attempt === 0) continue;
+        return { ok: false, reason: "transaction-lock-unavailable" };
       }
+      let ownerBytes = null;
+      let owner = null;
+      try {
+        ownerBytes = String(readFileSync(ownerPath, "utf8"));
+      } catch (readError) {
+        if (readError?.code !== "ENOENT") {
+          return { ok: false, reason: "transaction-lock-unavailable" };
+        }
+      }
+      if (ownerBytes !== null) try { owner = JSON.parse(ownerBytes); } catch {}
+      let observedStat = null;
+      try { observedStat = statSync(lockPath, { bigint: true }); } catch {}
+      const observedAt = Number(owner?.createdAt || observedStat?.mtimeMs || 0);
+      const ownerState = canonicalLockOwnerState(owner, { processAlive: isProcessAlive, processIdentity });
+      if (ownerState === "live") return { ok: false, reason: "transaction-in-progress", owner };
+      const stale = ownerState === "dead"
+        || (ownerState === "unknown" && observedAt > 0 && now() - observedAt > staleAfterMs);
+      if (!stale || attempt > 0) return { ok: false, reason: "transaction-lock-unavailable", owner };
+
+      let claimed = acquireCanonicalReclaimClaim(reclaimPath, {
+        nonce,
+        now,
+        readFileSync,
+        writeFileSync,
+        renameSync,
+        rmSync,
+        statSync,
+        existsSync,
+        processAlive: isProcessAlive,
+        processIdentity,
+      });
+      if (!claimed) return { ok: false, reason: "transaction-in-progress", owner };
+      try {
+        let confirmedOwnerBytes = null;
+        let confirmedOwner = null;
+        try {
+          confirmedOwnerBytes = String(readFileSync(ownerPath, "utf8"));
+        } catch (readError) {
+          if (readError?.code !== "ENOENT") {
+            return { ok: false, reason: "transaction-lock-unavailable" };
+          }
+        }
+        if (confirmedOwnerBytes !== null) try { confirmedOwner = JSON.parse(confirmedOwnerBytes); } catch {}
+        let confirmedStat = null;
+        try { confirmedStat = statSync(lockPath, { bigint: true }); } catch {}
+        // Only a fully parsed random nonce supplies generation identity. Missing
+        // or partial records can repeat across generations; without birth time,
+        // inode reuse makes those indistinguishable, so fail closed.
+        const ownerNonce = canonicalLockGenerationNonce(owner);
+        const confirmedNonce = canonicalLockGenerationNonce(confirmedOwner);
+        const requireBirth = !ownerNonce || ownerNonce !== confirmedNonce;
+        const sameGeneration = sameCanonicalLockGeneration(observedStat, confirmedStat, { requireBirth })
+          && ownerBytes === confirmedOwnerBytes;
+        if (!sameGeneration) return { ok: false, reason: "transaction-in-progress", owner: confirmedOwner };
+        const confirmedAt = Number(confirmedOwner?.createdAt || observedAt || 0);
+        const confirmedState = canonicalLockOwnerState(confirmedOwner, { processAlive: isProcessAlive, processIdentity });
+        const confirmedStale = confirmedState === "dead"
+          || (confirmedState === "unknown" && confirmedAt > 0 && now() - confirmedAt > staleAfterMs);
+        if (!confirmedStale) return { ok: false, reason: "transaction-in-progress", owner: confirmedOwner };
+        let confirmedClaim = null;
+        try { confirmedClaim = JSON.parse(readFileSync(reclaimPath, "utf8")); } catch {}
+        if (confirmedClaim?.nonce !== nonce) return { ok: false, reason: "transaction-in-progress", owner: confirmedOwner };
+        const stalePath = `${lockPath}.stale-${now()}-${process.pid}-${nonce}`;
+        renameSync(lockPath, stalePath);
+        claimed = false;
+        try { rmSync(stalePath, { recursive: true, force: true }); } catch {}
+      } catch {
+        return { ok: false, reason: "transaction-lock-unavailable", owner };
+      } finally {
+        if (claimed) {
+          let claim = null;
+          try { claim = JSON.parse(readFileSync(reclaimPath, "utf8")); } catch {}
+          if (claim?.nonce === nonce) {
+            try { rmSync(reclaimPath, { force: true }); } catch {}
+          }
+        }
+      }
+      continue;
     }
-  } catch {}
-  const owner = { pid: process.pid, createdAt: now(), ...ownerIdentity };
-  writeFileSync(api.join(lockPath, "owner.json"), `${JSON.stringify(owner)}\n`, { mode: 0o600 });
-  return { ok: true, owner };
+
+    const ownerProcessIdentity = processIdentity(process.pid);
+    const owner = {
+      ...ownerIdentity,
+      pid: process.pid,
+      nonce,
+      createdAt: now(),
+      ...(ownerProcessIdentity ? { processIdentity: ownerProcessIdentity } : {}),
+    };
+    const publishedOwnerBytes = `${JSON.stringify(owner)}\n`;
+    try {
+      writeFileSync(ownerPath, publishedOwnerBytes, { mode: 0o600, flag: "wx" });
+      // Publication and reclamation form a two-sided handshake. Check the
+      // claim first: if a reclaimer already won, abort; if it arrives after
+      // this check, its mandatory owner re-read will observe us as live.
+      try {
+        readFileSync(reclaimPath, "utf8");
+        throw new Error("Relay lost canonical runtime lock ownership to a recovery claimant.");
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+      }
+      let confirmedOwnerBytes = null;
+      let confirmedStat = null;
+      try { confirmedOwnerBytes = String(readFileSync(ownerPath, "utf8")); } catch {}
+      try { confirmedStat = statSync(lockPath, { bigint: true }); } catch {}
+      const comparableGeneration = createdStat?.dev !== undefined && createdStat?.ino !== undefined
+        && confirmedStat?.dev !== undefined && confirmedStat?.ino !== undefined;
+      if (confirmedOwnerBytes !== publishedOwnerBytes
+        || (comparableGeneration && !sameCanonicalLockGeneration(createdStat, confirmedStat))) {
+        throw new Error("Relay lost canonical runtime lock ownership while publishing its owner record.");
+      }
+    } catch (error) {
+      if (error?.code !== "EEXIST") {
+        let currentStat = null;
+        try { currentStat = statSync(lockPath, { bigint: true }); } catch {}
+        if (!existsSync(ownerPath)
+          && sameCanonicalLockGeneration(createdStat, currentStat, { requireBirth: true })) {
+          try { rmSync(lockPath, { recursive: true, force: true }); } catch {}
+        }
+      }
+      throw error;
+    }
+    const release = () => {
+      let currentOwner = null;
+      try { currentOwner = JSON.parse(readFileSync(ownerPath, "utf8")); } catch {}
+      if (currentOwner?.nonce === nonce) rmSync(lockPath, { recursive: true, force: true });
+    };
+    // Machines that ran the leaking build already carry the debris, and nothing else
+    // ever looks at these names. Sweep them once per transaction so an upgrade heals
+    // the directory instead of inheriting it.
+    try {
+      const parent = api.dirname(lockPath);
+      const prefix = `${api.basename(lockPath)}.stale-`;
+      for (const entry of readdirSync(parent)) {
+        if (String(entry).startsWith(prefix)) {
+          try { rmSync(api.join(parent, entry), { recursive: true, force: true }); } catch {}
+        }
+      }
+    } catch {}
+    return { ok: true, owner, release };
+  }
+  return { ok: false, reason: "transaction-lock-unavailable" };
 }
 
 /**
@@ -703,9 +957,11 @@ export async function repairCanonicalRuntime({
     accessSync: fsImpl.accessSync.bind(fsImpl),
     readdirSync: typeof fsImpl.readdirSync === "function" ? fsImpl.readdirSync.bind(fsImpl) : undefined,
     processAlive: typeof fsImpl.processAlive === "function" ? fsImpl.processAlive.bind(fsImpl) : undefined,
+    processIdentity: typeof fsImpl.processIdentity === "function" ? fsImpl.processIdentity.bind(fsImpl) : undefined,
   };
   const lockOptions = { ...io, platform, now, ownerIdentity: lockIdentity };
   if (!lockOptions.processAlive) delete lockOptions.processAlive;
+  if (!lockOptions.processIdentity) delete lockOptions.processIdentity;
   if (!lockOptions.readdirSync) delete lockOptions.readdirSync;
   let lock = null;
   try {
@@ -717,7 +973,7 @@ export async function repairCanonicalRuntime({
   try {
     await onLockAcquired(lock.owner);
   } catch (error) {
-    try { io.rmSync(layout.lockPath, { recursive: true, force: true }); } catch {}
+    try { lock.release(); } catch {}
     return { ok: false, phase: "admission", reason: "worker-admission-failed", detail: error?.message || String(error) };
   }
   const storedPrevious = readCanonicalRuntime({ homeDir, platform, readFileSync: io.readFileSync });
@@ -928,7 +1184,7 @@ export async function repairCanonicalRuntime({
       rolledBack: rollbackSucceeded,
     };
   } finally {
-    try { io.rmSync(layout.lockPath, { recursive: true, force: true }); } catch {}
+    try { lock.release(); } catch {}
     // Only Relay-owned, unpublished staging is disposable. Published releases and
     // every legacy/global tree remain untouched for rollback and forensics.
     try { if (io.existsSync(layout.stagingRoot)) io.rmSync(layout.stagingRoot, { recursive: true, force: true }); } catch {}

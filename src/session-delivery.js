@@ -13,7 +13,7 @@ import {
 } from "./codex-desktop.js";
 import { waitForCodexIdle, rolloutSize } from "./codex-inject.js";
 import { storeDir } from "./host-paths.js";
-import { discoverSessions, liveClaudeRegistrations } from "./session-directory.js";
+import { discoverSessions } from "./session-directory.js";
 import { sendClaudeSocket, spawnBackgroundClaude, waitForClaudeCompletion } from "./session-controller.js";
 import { focusTerminalSession, launchMacAgentTerminal, terminalProcessState } from "./terminal-sessions.js";
 import { withJsonLockStrict } from "./state-lock.cjs";
@@ -532,13 +532,6 @@ async function deliverCodex(target, prompt, options = {}) {
     rolloutPath: sessionPath,
     clientUserMessageId: options.clientUserMessageId,
     requestId: options.requestId,
-    // A hand-off names its route; a plain picker delivery leaves Desktop's own.
-    ...(options.model ? { model: options.model } : {}),
-    ...(options.effort ? { effort: options.effort } : {}),
-    ...(options.approvalPolicy ? { approvalPolicy: options.approvalPolicy } : {}),
-    ...(options.approvalsReviewer ? { approvalsReviewer: options.approvalsReviewer } : {}),
-    ...(options.sandboxPolicy ? { sandboxPolicy: options.sandboxPolicy } : {}),
-    ...(typeof options.onSubmitted === "function" ? { onSubmitted: options.onSubmitted } : {}),
   });
   if (owner?.ran === true || (owner?.submitted && owner?.ran !== false)) {
     return {
@@ -815,101 +808,4 @@ export async function focusSession(target, {
     skipExternalOpen: false,
     url: `claude://resume?session=${encodeURIComponent(target.nativeId)}`,
   };
-}
-
-// --- The hand-off's first turn ------------------------------------------------
-// Send on the agent document prepares a NEW native session and puts the
-// human's words in as its first user turn before the session is exposed. Codex
-// Desktop owns and submits that turn. Claude uses Relay's official-CLI worker;
-// the caller waits for the user row to be durable before importing the session
-// into Desktop, avoiding a stale pre-turn snapshot.
-export async function waitForClaudeSocket(nativeId, {
-  timeoutMs = 45_000,
-  pollMs = 500,
-  registrations = liveClaudeRegistrations,
-} = {}) {
-  const id = String(nativeId || "");
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const row = registrations().get(id);
-    if (row?.socketLive) return row;
-    if (Date.now() >= deadline) {
-      const error = new Error(`Claude Code did not register session ${id} within ${timeoutMs}ms`);
-      error.code = "SESSION_TARGET_UNAVAILABLE";
-      throw error;
-    }
-    await sleep(Math.min(pollMs, Math.max(1, deadline - Date.now())));
-  }
-}
-
-async function waitForExactSession(target, { timeoutMs = 20_000, pollMs = 500, discover = discoverSessions } = {}) {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const exact = findExactSession(target, discover);
-    if (exact) return exact;
-    if (Date.now() >= deadline) {
-      const error = new Error(`Native ${target.provider} session ${target.nativeId} has not appeared yet`);
-      error.code = "SESSION_TARGET_UNAVAILABLE";
-      throw error;
-    }
-    await sleep(Math.min(pollMs, Math.max(1, deadline - Date.now())));
-  }
-}
-
-export async function deliverTurnToSession(target, text, options = {}) {
-  const prompt = String(text || "").trim();
-  if (!prompt) throw new Error("A turn needs words");
-  const provider = String(target?.provider || "");
-  const nativeId = String(target?.nativeId || "");
-  if (!provider || !nativeId) throw new Error("An exact native destination is required");
-  const discover = options.discover || discoverSessions;
-  if (provider === "claude") {
-    // Run the turn through Relay's OWN official-CLI worker (the proven Start
-    // mechanism): it resumes the forged session (which already carries the
-    // Relay as its assistant letter), runs the human's words, and adopts the
-    // finished session into Claude Desktop. This never touches Desktop's warm-
-    // spawn governor, so it does not stall when Desktop is at its session cap —
-    // the cap that broke the inbox-socket path on a busy Mac (David, live).
-    const exact = findExactSession({ provider, nativeId }, discover);
-    const transcriptPath = String(exact?.nativeRef?.transcriptPath || target?.nativeRef?.transcriptPath || "");
-    const transcriptOffset = transcriptPath && fs.existsSync(transcriptPath) ? rolloutSize(transcriptPath) : 0;
-    const runTurn = options.continueClaude
-      || (await import("./claude-desktop-code.js")).continueClaudeDesktopCodeSession;
-    const result = await runTurn({
-      sessionId: nativeId,
-      cwd: exact?.cwd || target.cwd || "",
-      title: target.title || exact?.title || "Relay",
-      content: prompt,
-      model: options.model || "claude-opus-5",
-      effort: options.effort || "high",
-      permissionMode: options.permissionMode || "auto",
-    });
-    if (!result?.live && result?.live !== undefined) {
-      const error = new Error("Claude Code did not start the turn");
-      error.code = "CLAUDE_DELIVERY_UNCONFIRMED";
-      throw error;
-    }
-    const confirmedPath = String(result?.sessionPath || transcriptPath);
-    if (!confirmedPath || !(await waitForPrompt(confirmedPath, transcriptOffset, prompt, {
-      timeoutMs: options.deliveryTimeoutMs || 10_000,
-      pollMs: 50,
-    }))) {
-      const error = new Error("Claude Code started without appending the Relay turn to its native transcript");
-      error.code = "CLAUDE_DELIVERY_UNCONFIRMED";
-      throw error;
-    }
-    return { provider: "claude", nativeId, adapter: "claude_desktop_code_worker" };
-  }
-  if (provider === "codex") {
-    const suppliedSessionPath = String(options.sessionPath || target?.nativeRef?.sessionPath || "");
-    const exact = suppliedSessionPath
-      ? { ...target, provider, nativeId, nativeRef: { ...(target?.nativeRef || {}), sessionPath: suppliedSessionPath } }
-      : await waitForExactSession({ provider, nativeId }, { timeoutMs: options.discoverTimeoutMs || 20_000, discover });
-    return deliverCodex({ ...exact, surface: "desktop" }, prompt, {
-      ...options,
-      clientUserMessageId: options.clientUserMessageId || randomUUID(),
-      requestId: options.requestId || randomUUID(),
-    });
-  }
-  throw new Error(`Unsupported provider: ${provider}`);
 }

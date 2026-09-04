@@ -560,6 +560,24 @@ function runtimeLayout(version, platformKey) {
   };
 }
 
+function removeAbandonedRuntimeDownloads(releasesDir, {
+  readdirSync = fs.readdirSync,
+  rmSync = fs.rmSync,
+} = {}) {
+  let removed = 0;
+  let entries = [];
+  try { entries = readdirSync(releasesDir); } catch { return removed; }
+  for (const entry of entries) {
+    const name = String(entry);
+    if (!name.startsWith(".relay-download-")) continue;
+    try {
+      rmSync(path.join(releasesDir, name), { recursive: true, force: true });
+      removed += 1;
+    } catch {}
+  }
+  return removed;
+}
+
 function activeCanonicalCli({
   homeDir = os.homedir(),
   platform = process.platform,
@@ -597,39 +615,223 @@ function forwardActiveCanonicalCli(args = process.argv.slice(2), {
   return { forwarded: true, status: Number.isInteger(result?.status) ? result.status : 1, target };
 }
 
-function processAlive(pid) {
+function processAlive(pid, {
+  platform = process.platform,
+  readFileSync = fs.readFileSync,
+  kill = process.kill.bind(process),
+} = {}) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
-  try { process.kill(pid, 0); return true; }
+  try {
+    kill(pid, 0);
+    if (platform === "linux") {
+      const details = linuxProcessDetails(pid, { platform, readFileSync });
+      if (details && ["Z", "X", "x"].includes(details.state)) return false;
+    }
+    return true;
+  }
   catch (error) { return error?.code === "EPERM"; }
+}
+
+function linuxProcessDetails(pid, {
+  platform = process.platform,
+  readFileSync = fs.readFileSync,
+} = {}) {
+  if (platform !== "linux" || !Number.isInteger(pid) || pid <= 0) return null;
+  try {
+    const bootId = String(readFileSync("/proc/sys/kernel/random/boot_id", "utf8")).trim();
+    const stat = String(readFileSync(`/proc/${pid}/stat`, "utf8"));
+    const commandEnd = stat.lastIndexOf(")");
+    if (!bootId || commandEnd < 0) return null;
+    // Fields after the parenthesized command start at field 3 (state); process
+    // start time is field 22, so it is index 19 in this suffix.
+    const fields = stat.slice(commandEnd + 1).trim().split(/\s+/);
+    const state = fields[0];
+    const startTicks = fields[19];
+    if (!/^[A-Za-z]$/.test(state || "") || !/^\d+$/.test(startTicks || "")) return null;
+    return { state, identity: `${bootId}:${startTicks}` };
+  } catch {
+    return null;
+  }
+}
+
+function linuxProcessIdentity(pid, options = {}) {
+  return linuxProcessDetails(pid, options)?.identity || "";
+}
+
+function canonicalLockOwnerState(owner, { isProcessAlive, processIdentity }) {
+  const pid = Number(owner?.pid);
+  if (!Number.isInteger(pid) || pid <= 0) return "unknown";
+  if (!isProcessAlive(pid)) return "dead";
+  const expectedIdentity = typeof owner?.processIdentity === "string" ? owner.processIdentity : "";
+  if (expectedIdentity) {
+    const actualIdentity = processIdentity(pid);
+    if (actualIdentity && actualIdentity !== expectedIdentity) return "dead";
+  }
+  return "live";
+}
+
+function sameCanonicalLockGeneration(left, right, { requireBirth = false } = {}) {
+  if (!left || !right || left.dev === undefined || left.ino === undefined
+    || right.dev === undefined || right.ino === undefined) return false;
+  const leftBirth = left.birthtimeNs ?? (left.birthtimeMs !== undefined ? Math.trunc(Number(left.birthtimeMs) * 1e6) : null);
+  const rightBirth = right.birthtimeNs ?? (right.birthtimeMs !== undefined ? Math.trunc(Number(right.birthtimeMs) * 1e6) : null);
+  const sameObject = String(left.dev) === String(right.dev) && String(left.ino) === String(right.ino);
+  if (!sameObject) return false;
+  const hasBirth = leftBirth !== null && rightBirth !== null
+    && String(leftBirth) !== "0" && String(rightBirth) !== "0";
+  return hasBirth ? String(leftBirth) === String(rightBirth) : !requireBirth;
+}
+
+function canonicalLockGenerationNonce(owner) {
+  return typeof owner?.nonce === "string" && /^[0-9a-f]{32}$/.test(owner.nonce)
+    ? owner.nonce
+    : "";
+}
+
+function acquireCanonicalReclaimClaim(reclaimPath, {
+  nonce,
+  now,
+  staleAfterMs = 30_000,
+  readFileSync,
+  writeFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  existsSync,
+  isProcessAlive,
+  processIdentity,
+}) {
+  const ownerProcessIdentity = processIdentity(process.pid);
+  const claim = {
+    pid: process.pid,
+    nonce,
+    createdAt: now(),
+    ...(ownerProcessIdentity ? { processIdentity: ownerProcessIdentity } : {}),
+  };
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      writeFileSync(reclaimPath, `${JSON.stringify(claim)}\n`, { mode: 0o600, flag: "wx" });
+      return true;
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      if (!existsSync(reclaimPath)) continue;
+      let priorBytes = null;
+      let prior = null;
+      try {
+        priorBytes = String(readFileSync(reclaimPath, "utf8"));
+      } catch (error) {
+        if (error?.code === "ENOENT") continue;
+        return false;
+      }
+      try { prior = JSON.parse(priorBytes); } catch {}
+      let priorAt = Number(prior?.createdAt || 0);
+      if (!priorAt) {
+        try { priorAt = Number(statSync(reclaimPath).mtimeMs || 0); } catch {}
+      }
+      const state = canonicalLockOwnerState(prior, { isProcessAlive, processIdentity });
+      const stale = state === "dead" || (state === "unknown" && priorAt > 0 && now() - priorAt > staleAfterMs);
+      if (!stale || attempt > 0) return false;
+      const staleClaimPath = `${reclaimPath}.stale-${process.pid}-${nonce}`;
+      try {
+        renameSync(reclaimPath, staleClaimPath);
+        const movedBytes = String(readFileSync(staleClaimPath, "utf8"));
+        if (movedBytes !== priorBytes) {
+          try { if (!existsSync(reclaimPath)) renameSync(staleClaimPath, reclaimPath); } catch {}
+          return false;
+        }
+        rmSync(staleClaimPath, { force: true });
+      } catch (error) {
+        if (error?.code === "ENOENT") continue;
+        throw error;
+      }
+    }
+  }
+  return false;
 }
 
 function acquireCanonicalLock(lockPath, {
   now = Date.now,
+  // Preserve the shipped bootstrap's two-hour grace for incomplete records.
+  // Legacy writers did not use exclusive publication or the reclaim handshake,
+  // so a shorter default would let them resume into a successor lock. Complete
+  // dead owners are still recovered immediately regardless of this value.
   staleAfterMs = 2 * 60 * 60_000,
   mkdirSync = fs.mkdirSync,
   readFileSync = fs.readFileSync,
   writeFileSync = fs.writeFileSync,
+  renameSync = fs.renameSync,
   rmSync = fs.rmSync,
+  readdirSync = fs.readdirSync,
   statSync = fs.statSync,
   existsSync = fs.existsSync,
   isProcessAlive = processAlive,
+  processIdentity = (pid) => linuxProcessIdentity(pid, { readFileSync }),
 } = {}) {
   fs.mkdirSync(path.dirname(lockPath), { recursive: true, mode: 0o700 });
   const nonce = crypto.randomBytes(16).toString("hex");
   const ownerPath = path.join(lockPath, "owner.json");
+  const reclaimPath = path.join(lockPath, "reclaim.json");
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       mkdirSync(lockPath, { mode: 0o700 });
+      let createdStat = null;
+      try { createdStat = statSync(lockPath, { bigint: true }); } catch {}
       try {
+        const ownerProcessIdentity = processIdentity(process.pid);
+        const publishedOwnerBytes = `${JSON.stringify({
+          pid: process.pid,
+          nonce,
+          createdAt: now(),
+          operation: "bootstrap-setup",
+          ...(ownerProcessIdentity ? { processIdentity: ownerProcessIdentity } : {}),
+        })}\n`;
         writeFileSync(
           ownerPath,
-          `${JSON.stringify({ pid: process.pid, nonce, createdAt: now(), operation: "bootstrap-setup" })}\n`,
-          { mode: 0o600 },
+          publishedOwnerBytes,
+          { mode: 0o600, flag: "wx" },
         );
+        // Publication and reclamation form a two-sided handshake. Check the
+        // claim first: if a reclaimer already won, abort; if it arrives after
+        // this check, its mandatory owner re-read will observe us as live.
+        try {
+          readFileSync(reclaimPath, "utf8");
+          throw new Error("Relay lost canonical install lock ownership to a recovery claimant.");
+        } catch (error) {
+          if (error?.code !== "ENOENT") throw error;
+        }
+        let confirmedOwnerBytes = null;
+        let confirmedStat = null;
+        try { confirmedOwnerBytes = String(readFileSync(ownerPath, "utf8")); } catch {}
+        try { confirmedStat = statSync(lockPath, { bigint: true }); } catch {}
+        const comparableGeneration = createdStat?.dev !== undefined && createdStat?.ino !== undefined
+          && confirmedStat?.dev !== undefined && confirmedStat?.ino !== undefined;
+        if (confirmedOwnerBytes !== publishedOwnerBytes
+          || (comparableGeneration && !sameCanonicalLockGeneration(createdStat, confirmedStat))) {
+          throw new Error("Relay lost canonical install lock ownership while publishing its owner record.");
+        }
       } catch (error) {
-        try { rmSync(lockPath, { recursive: true, force: true }); } catch {}
+        // If a paused owner resumes after its ownerless directory was reclaimed,
+        // wx prevents it from overwriting the successor. Never delete that newer
+        // lock; clean up only our still-empty, provably identical generation.
+        if (error?.code !== "EEXIST") {
+          let currentStat = null;
+          try { currentStat = statSync(lockPath, { bigint: true }); } catch {}
+          if (!existsSync(ownerPath)
+            && sameCanonicalLockGeneration(createdStat, currentStat, { requireBirth: true })) {
+            try { rmSync(lockPath, { recursive: true, force: true }); } catch {}
+          }
+        }
         throw error;
       }
+      try {
+        const parent = path.dirname(lockPath);
+        const prefix = `${path.basename(lockPath)}.stale-`;
+        for (const entry of readdirSync(parent)) {
+          if (String(entry).startsWith(prefix)) {
+            try { rmSync(path.join(parent, entry), { recursive: true, force: true }); } catch {}
+          }
+        }
+      } catch {}
       return {
         release() {
           let owner = null;
@@ -638,17 +840,90 @@ function acquireCanonicalLock(lockPath, {
         },
       };
     } catch (error) {
-      if (!existsSync(lockPath) || !["EEXIST", "ENOTEMPTY", "EPERM", "EACCES"].includes(error?.code)) throw error;
+      if (!["EEXIST", "ENOTEMPTY", "EPERM", "EACCES"].includes(error?.code)) throw error;
+      if (!existsSync(lockPath)) {
+        if (attempt === 0) continue;
+        throw error;
+      }
+      let ownerBytes = null;
       let owner = null;
-      try { owner = JSON.parse(readFileSync(ownerPath, "utf8")); } catch {}
+      try {
+        ownerBytes = String(readFileSync(ownerPath, "utf8"));
+      } catch (readError) {
+        if (readError?.code !== "ENOENT") fail("Relay could not safely inspect the existing install lock.");
+      }
+      if (ownerBytes !== null) try { owner = JSON.parse(ownerBytes); } catch {}
+      let observedStat = null;
+      try { observedStat = statSync(lockPath, { bigint: true }); } catch {}
       let observedAt = Number(owner?.createdAt || 0);
       if (!observedAt) {
-        try { observedAt = Number(statSync(lockPath).mtimeMs || 0); } catch {}
+        observedAt = Number(observedStat?.mtimeMs || 0);
       }
-      const ownerDead = owner?.pid ? !isProcessAlive(Number(owner.pid)) : true;
-      const stale = ownerDead && observedAt > 0 && now() - observedAt > staleAfterMs;
+      const ownerState = canonicalLockOwnerState(owner, { isProcessAlive, processIdentity });
+      // A complete owner record whose exact process is gone can be recovered at
+      // once. Only incomplete records need the age grace: another contender may
+      // have observed the directory between mkdir and owner.json being written.
+      const stale = ownerState === "dead"
+        || (ownerState === "unknown" && observedAt > 0 && now() - observedAt > staleAfterMs);
       if (!stale || attempt > 0) fail("Another verified Relay install or update is already in progress.");
-      rmSync(lockPath, { recursive: true, force: true });
+
+      // Serialize reclaimers inside this exact lock generation, then re-read the
+      // owner after winning. This closes the race where one retry replaced the
+      // lock while another retry was still acting on the previous owner's PID.
+      let claimed = acquireCanonicalReclaimClaim(reclaimPath, {
+        nonce,
+        now,
+        readFileSync,
+        writeFileSync,
+        renameSync,
+        rmSync,
+        statSync,
+        existsSync,
+        isProcessAlive,
+        processIdentity,
+      });
+      if (!claimed) fail("Another verified Relay install or update is already in progress.");
+      try {
+        let confirmedOwnerBytes = null;
+        let confirmedOwner = null;
+        try {
+          confirmedOwnerBytes = String(readFileSync(ownerPath, "utf8"));
+        } catch (readError) {
+          if (readError?.code !== "ENOENT") fail("Relay could not safely recheck the existing install lock.");
+        }
+        if (confirmedOwnerBytes !== null) try { confirmedOwner = JSON.parse(confirmedOwnerBytes); } catch {}
+        let confirmedStat = null;
+        try { confirmedStat = statSync(lockPath, { bigint: true }); } catch {}
+        // Only a fully parsed random nonce supplies generation identity. Missing
+        // or partial records can repeat across generations; without birth time,
+        // inode reuse makes those indistinguishable, so fail closed.
+        const ownerNonce = canonicalLockGenerationNonce(owner);
+        const confirmedNonce = canonicalLockGenerationNonce(confirmedOwner);
+        const requireBirth = !ownerNonce || ownerNonce !== confirmedNonce;
+        const sameGeneration = sameCanonicalLockGeneration(observedStat, confirmedStat, { requireBirth })
+          && ownerBytes === confirmedOwnerBytes;
+        if (!sameGeneration) fail("Another verified Relay install or update is already in progress.");
+        const confirmedAt = Number(confirmedOwner?.createdAt || observedAt || 0);
+        const confirmedState = canonicalLockOwnerState(confirmedOwner, { isProcessAlive, processIdentity });
+        const confirmedStale = confirmedState === "dead"
+          || (confirmedState === "unknown" && confirmedAt > 0 && now() - confirmedAt > staleAfterMs);
+        if (!confirmedStale) fail("Another verified Relay install or update is already in progress.");
+        let confirmedClaim = null;
+        try { confirmedClaim = JSON.parse(readFileSync(reclaimPath, "utf8")); } catch {}
+        if (confirmedClaim?.nonce !== nonce) fail("Another verified Relay install or update is already in progress.");
+        const stalePath = `${lockPath}.stale-${now()}-${process.pid}-${nonce}`;
+        renameSync(lockPath, stalePath);
+        claimed = false;
+        try { rmSync(stalePath, { recursive: true, force: true }); } catch {}
+      } finally {
+        if (claimed) {
+          let claim = null;
+          try { claim = JSON.parse(readFileSync(reclaimPath, "utf8")); } catch {}
+          if (claim?.nonce === nonce) {
+            try { rmSync(reclaimPath, { force: true }); } catch {}
+          }
+        }
+      }
     }
   }
   fail("Relay could not acquire its canonical install lock.");
@@ -1084,8 +1359,13 @@ async function setup(argv = []) {
   const version = exactVersion(packageJson.version);
   const platformKey = releasePlatform();
   const layout = runtimeLayout(version, platformKey);
+  console.log(`Preparing Relay ${version} for this computer...`);
   const lock = acquireCanonicalLock(layout.lockPath);
   try {
+    // A killed download cannot run its finally block. Once this process owns the
+    // transaction, no staging tree is active, so retries also reclaim the partial
+    // archives instead of leaking hundreds of megabytes per interrupted attempt.
+    removeAbandonedRuntimeDownloads(layout.releasesDir);
     const runtime = await stageVerifiedRuntime({ version, platformKey, destination: layout.releaseRoot });
     const activated = await activateRuntime(layout, runtime, version, { setupCompatibilityArgs });
     if (setupCompatibilityArgs.includes("--code")) {
@@ -1093,8 +1373,10 @@ async function setup(argv = []) {
     } else {
       console.log(`Relay ${version} is installed. The Relay pill is open; sign in there to finish.`);
     }
-    if (activated?.cliLauncher && !activated.cliLauncher.pathAvailable) {
+    if (activated?.cliLauncher?.ok && activated.cliLauncher.shimPath && !activated.cliLauncher.pathAvailable) {
       console.log(`Relay's command is installed at ${activated.cliLauncher.shimPath}. Open a new login session to add ~/.local/bin to PATH.`);
+    } else if (activated?.cliLauncher && !activated.cliLauncher.ok) {
+      console.log("Relay is installed, but its command shortcut could not be created. Re-run setup after checking the permissions on ~/.local/bin.");
     }
   } finally {
     lock.release();
@@ -1107,6 +1389,7 @@ async function stageVerifiedRuntime({ version, platformKey = releasePlatform(), 
   if (fs.existsSync(destination)) {
     fail("Relay refused to reuse a pre-existing runtime destination.");
   }
+  console.log("Checking Relay's signed release...");
   const { artifact } = parseSignedManifest(await fetchBuffer(manifestUrl), { version, platformKey });
   fs.mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
   const staging = fs.mkdtempSync(path.join(path.dirname(destination), `.relay-download-${version}-`));
@@ -1114,7 +1397,9 @@ async function stageVerifiedRuntime({ version, platformKey = releasePlatform(), 
   const extracted = path.join(staging, "root");
   try {
     fs.mkdirSync(extracted);
+    console.log("Downloading Relay's signed runtime...");
     await downloadVerifiedArtifact(artifact.url, archivePath, artifact);
+    console.log("Verifying and installing Relay...");
     validateArchiveListing(archivePath);
     const unpackInvocation = tarInvocation({ archivePath, mode: "extract", destination: extracted });
     const unpack = spawnSync(unpackInvocation.command, unpackInvocation.args, {
@@ -1152,7 +1437,7 @@ async function main() {
   console.log([
     "Relay secure setup",
     "",
-    `  npx --yes ${PACKAGE_NAME}@${packageJson.version} setup`,
+    `  npx --yes --no-audit --no-fund ${PACKAGE_NAME}@${packageJson.version} setup`,
     "",
     "Downloads the exact signed Relay runtime, verifies it, installs Relay, and opens the signed-out pill.",
   ].join("\n"));
@@ -1173,6 +1458,8 @@ module.exports = {
   isCanonicalCliShimSource,
   releasePlatform,
   parseSignedManifest,
+  processAlive,
+  removeAbandonedRuntimeDownloads,
   restoreRuntimeLinks,
   stageVerifiedRuntime,
   stableNodePath,

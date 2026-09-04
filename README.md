@@ -11,7 +11,7 @@ Release commits are generated from the shipped Companion source, reviewed here, 
 Start at [sendrelays.com/get-started](https://sendrelays.com/get-started). Never install a version that Relay's Get Started page did not name exactly.
 
 ```sh
-npx --yes relay-companion@<EXACT_VERSION> setup
+npx --yes --no-audit --no-fund relay-companion@<EXACT_VERSION> setup
 ```
 
 Setup installs and opens the signed-out Relay pill, registers the local Relay MCP launcher for Claude Code and Codex, and registers the always-on task daemon with macOS launchd, Windows Task Scheduler, or owner-scoped Linux systemd services. New setup never asks the agent for a pairing code.

@@ -42,6 +42,8 @@ import {
 } from "../scripts/prepare-linux-electron-sandbox.mjs";
 import { verifyThinSetupUninstalled } from "../scripts/verify-thin-setup-canary.mjs";
 
+const posixFsTest = process.platform === "win32" ? test.skip : test;
+
 const {
   activeCanonicalCli,
   activateRuntime,
@@ -51,6 +53,8 @@ const {
   durableNodePath,
   forwardActiveCanonicalCli,
   installCanonicalCliLauncher,
+  processAlive,
+  removeAbandonedRuntimeDownloads,
   restoreRuntimeLinks,
   stageVerifiedRuntime,
   tarInvocation,
@@ -960,6 +964,563 @@ test("canonical setup lock has no missing-owner race between contenders", () => 
   }
 });
 
+test("canonical setup immediately recovers a fresh lock whose process died", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-bootstrap-dead-lock-"));
+  const lockPath = path.join(root, "transaction.lock");
+  const now = Date.now();
+  try {
+    fs.mkdirSync(lockPath);
+    fs.writeFileSync(path.join(lockPath, "owner.json"), JSON.stringify({
+      pid: 4074800,
+      nonce: "dead-download",
+      createdAt: now,
+      operation: "bootstrap-setup",
+    }));
+    const winner = acquireCanonicalLock(lockPath, {
+      now: () => now,
+      isProcessAlive: () => false,
+      processIdentity: () => "",
+    });
+    const owner = JSON.parse(fs.readFileSync(path.join(lockPath, "owner.json"), "utf8"));
+    assert.equal(owner.pid, process.pid);
+    assert.notEqual(owner.nonce, "dead-download");
+    winner.release();
+    assert.equal(fs.existsSync(lockPath), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("canonical setup recovers a valid dead owner when filesystem birth time is unavailable", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-bootstrap-zero-birth-"));
+  const lockPath = path.join(root, "transaction.lock");
+  const now = Date.now();
+  try {
+    fs.mkdirSync(lockPath);
+    fs.writeFileSync(path.join(lockPath, "owner.json"), JSON.stringify({
+      pid: 4074800,
+      nonce: "d".repeat(32),
+      createdAt: now,
+    }));
+    const winner = acquireCanonicalLock(lockPath, {
+      now: () => now,
+      isProcessAlive: () => false,
+      processIdentity: () => "",
+      statSync: (file, options) => {
+        const value = fs.statSync(file, options);
+        return { ...value, birthtimeNs: 0n, birthtimeMs: 0 };
+      },
+    });
+    winner.release();
+    assert.equal(fs.existsSync(lockPath), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("canonical setup never steals an old lock from the same live process", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-bootstrap-live-lock-"));
+  const lockPath = path.join(root, "transaction.lock");
+  const original = JSON.stringify({
+    pid: process.pid,
+    nonce: "live-download",
+    createdAt: 1,
+    operation: "bootstrap-setup",
+    processIdentity: "boot-a:100",
+  });
+  try {
+    fs.mkdirSync(lockPath);
+    fs.writeFileSync(path.join(lockPath, "owner.json"), original);
+    assert.throws(() => acquireCanonicalLock(lockPath, {
+      now: () => 10 * 60 * 60_000,
+      isProcessAlive: () => true,
+      processIdentity: () => "boot-a:100",
+    }), /already in progress/);
+    assert.equal(fs.readFileSync(path.join(lockPath, "owner.json"), "utf8"), original);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("canonical setup recognizes Linux PID reuse by process identity", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-bootstrap-reused-pid-"));
+  const lockPath = path.join(root, "transaction.lock");
+  const now = Date.now();
+  try {
+    fs.mkdirSync(lockPath);
+    fs.writeFileSync(path.join(lockPath, "owner.json"), JSON.stringify({
+      pid: process.pid,
+      nonce: "previous-process",
+      createdAt: now,
+      operation: "bootstrap-setup",
+      processIdentity: "boot-a:100",
+    }));
+    const winner = acquireCanonicalLock(lockPath, {
+      now: () => now,
+      isProcessAlive: () => true,
+      processIdentity: () => "boot-a:200",
+    });
+    const owner = JSON.parse(fs.readFileSync(path.join(lockPath, "owner.json"), "utf8"));
+    assert.notEqual(owner.nonce, "previous-process");
+    winner.release();
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("canonical setup gives incomplete owners a grace period, then recovers them", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-bootstrap-orphan-lock-"));
+  const lockPath = path.join(root, "transaction.lock");
+  const now = Date.now();
+  try {
+    fs.mkdirSync(lockPath);
+    fs.writeFileSync(path.join(lockPath, "owner.json"), "not-json");
+    fs.utimesSync(lockPath, new Date(now), new Date(now));
+    assert.throws(() => acquireCanonicalLock(lockPath, {
+      now: () => now,
+      processIdentity: () => "",
+    }), /already in progress/);
+
+    fs.utimesSync(lockPath, new Date(now - 31_000), new Date(now - 31_000));
+    assert.throws(() => acquireCanonicalLock(lockPath, {
+      now: () => now,
+      processIdentity: () => "",
+    }), /already in progress/);
+    const winner = acquireCanonicalLock(lockPath, {
+      now: () => now,
+      staleAfterMs: 30_000,
+      processIdentity: () => "",
+    });
+    winner.release();
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("canonical setup preserves the legacy publication grace during rollout", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-bootstrap-legacy-publisher-"));
+  const lockPath = path.join(root, "transaction.lock");
+  const ownerPath = path.join(lockPath, "owner.json");
+  const now = Date.now();
+  const legacyOwner = JSON.stringify({ pid: process.pid, createdAt: now - 31_000 });
+  try {
+    fs.mkdirSync(lockPath);
+    fs.utimesSync(lockPath, new Date(now - 31_000), new Date(now - 31_000));
+    assert.throws(() => acquireCanonicalLock(lockPath, {
+      now: () => now,
+      processIdentity: () => "",
+    }), /already in progress/);
+    // A shipped bootstrap paused before its non-exclusive owner write can still
+    // resume safely because the new contender did not reclaim its directory.
+    fs.writeFileSync(ownerPath, legacyOwner);
+    assert.equal(fs.readFileSync(ownerPath, "utf8"), legacyOwner);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+for (const readFailureAt of ["initial-owner", "confirmed-owner", "existing-claim"]) {
+test(`canonical setup fails closed on ${readFailureAt} filesystem read errors`, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-bootstrap-lock-read-error-"));
+  const lockPath = path.join(root, "transaction.lock");
+  const ownerPath = path.join(lockPath, "owner.json");
+  const reclaimPath = path.join(lockPath, "reclaim.json");
+  const ownerBytes = JSON.stringify({ pid: 4074800, nonce: "d".repeat(32), createdAt: 1 });
+  let ownerReads = 0;
+  try {
+    fs.mkdirSync(lockPath);
+    fs.writeFileSync(ownerPath, ownerBytes);
+    if (readFailureAt === "existing-claim") {
+      fs.writeFileSync(reclaimPath, JSON.stringify({ pid: process.pid, nonce: "a".repeat(32), createdAt: 1 }));
+    }
+    const readFileSync = (file, options) => {
+      const resolved = path.resolve(file);
+      if (resolved === path.resolve(ownerPath)) {
+        ownerReads += 1;
+        if (readFailureAt === "initial-owner" || (readFailureAt === "confirmed-owner" && ownerReads === 2)) {
+          const error = new Error("simulated owner read failure");
+          error.code = "EIO";
+          throw error;
+        }
+      }
+      if (readFailureAt === "existing-claim" && resolved === path.resolve(reclaimPath)) {
+        const error = new Error("simulated claim read failure");
+        error.code = "EACCES";
+        throw error;
+      }
+      return fs.readFileSync(file, options);
+    };
+    assert.throws(() => acquireCanonicalLock(lockPath, {
+      now: () => Date.now(),
+      readFileSync,
+      isProcessAlive: () => false,
+      processIdentity: () => "",
+    }));
+    assert.equal(fs.readFileSync(ownerPath, "utf8"), ownerBytes);
+    assert.equal(fs.existsSync(lockPath), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+}
+
+test("canonical setup preserves an old ownerless lock without filesystem birth time", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-bootstrap-ownerless-zero-birth-"));
+  const lockPath = path.join(root, "transaction.lock");
+  const now = Date.now();
+  try {
+    fs.mkdirSync(lockPath);
+    fs.utimesSync(lockPath, new Date(now - 31_000), new Date(now - 31_000));
+    assert.throws(() => acquireCanonicalLock(lockPath, {
+      now: () => now,
+      processIdentity: () => "",
+      statSync: (file, options) => {
+        const value = fs.statSync(file, options);
+        return { ...value, birthtimeNs: 0n, birthtimeMs: 0 };
+      },
+    }), /already in progress/);
+    assert.equal(fs.existsSync(lockPath), true);
+    assert.equal(fs.existsSync(path.join(lockPath, "reclaim.json")), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("canonical setup recovers an old ownerless lock with trustworthy birth time", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-bootstrap-ownerless-birth-"));
+  const lockPath = path.join(root, "transaction.lock");
+  const now = Date.now();
+  try {
+    fs.mkdirSync(lockPath);
+    fs.utimesSync(lockPath, new Date(now - 31_000), new Date(now - 31_000));
+    const winner = acquireCanonicalLock(lockPath, {
+      now: () => now,
+      staleAfterMs: 30_000,
+      processIdentity: () => "",
+    });
+    winner.release();
+    assert.equal(fs.existsSync(lockPath), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+for (const incompleteOwner of [null, '{"pid":']) {
+test(`canonical setup preserves an ambiguous replacement ${incompleteOwner === null ? "ownerless" : "partial-owner"} lock`, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-bootstrap-ownerless-reuse-"));
+  const lockPath = path.join(root, "transaction.lock");
+  const reclaimPath = path.join(lockPath, "reclaim.json");
+  const now = Date.now();
+  let replaced = false;
+  try {
+    fs.mkdirSync(lockPath);
+    if (incompleteOwner !== null) fs.writeFileSync(path.join(lockPath, "owner.json"), incompleteOwner);
+    fs.utimesSync(lockPath, new Date(now - 31_000), new Date(now - 31_000));
+    assert.throws(() => acquireCanonicalLock(lockPath, {
+      now: () => now,
+      staleAfterMs: 30_000,
+      processIdentity: () => "",
+      statSync: (file, options) => {
+        const value = fs.statSync(file, options);
+        return path.resolve(file) === path.resolve(lockPath)
+          ? { ...value, dev: 1n, ino: 2n, birthtimeNs: 0n, birthtimeMs: 0 }
+          : value;
+      },
+      writeFileSync: (file, bytes, options) => {
+        fs.writeFileSync(file, bytes, options);
+        if (!replaced && path.resolve(file) === path.resolve(reclaimPath)) {
+          replaced = true;
+          fs.rmSync(lockPath, { recursive: true, force: true });
+          fs.mkdirSync(lockPath);
+          if (incompleteOwner !== null) fs.writeFileSync(path.join(lockPath, "owner.json"), incompleteOwner);
+        }
+      },
+    }), /already in progress/);
+    assert.equal(replaced, true);
+    assert.equal(fs.existsSync(lockPath), true);
+    assert.equal(fs.existsSync(reclaimPath), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+}
+
+test("concurrent dead-lock recovery cannot displace the winning installer", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-bootstrap-lock-race-"));
+  const lockPath = path.join(root, "transaction.lock");
+  const now = Date.now();
+  let winner = null;
+  let triggered = false;
+  try {
+    fs.mkdirSync(lockPath);
+    fs.writeFileSync(path.join(lockPath, "owner.json"), JSON.stringify({
+      pid: 4074800,
+      nonce: "dead-download",
+      createdAt: now,
+      operation: "bootstrap-setup",
+    }));
+    assert.throws(() => acquireCanonicalLock(lockPath, {
+      now: () => now,
+      processIdentity: () => "",
+      isProcessAlive: (pid) => {
+        if (!triggered) {
+          triggered = true;
+          winner = acquireCanonicalLock(lockPath, {
+            now: () => now,
+            isProcessAlive: () => false,
+            processIdentity: () => "",
+          });
+        }
+        return pid === process.pid;
+      },
+    }), /already in progress/);
+    const ownerBeforeLosingRelease = fs.readFileSync(path.join(lockPath, "owner.json"), "utf8");
+    assert.equal(JSON.parse(ownerBeforeLosingRelease).pid, process.pid);
+    assert.ok(winner);
+    winner.release();
+    assert.equal(fs.existsSync(lockPath), false);
+  } finally {
+    try { winner?.release(); } catch {}
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("canonical setup detects a replacement even when the filesystem reuses its inode", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-bootstrap-inode-reuse-"));
+  const lockPath = path.join(root, "transaction.lock");
+  const now = Date.now();
+  let replaced = false;
+  try {
+    fs.mkdirSync(lockPath);
+    fs.writeFileSync(path.join(lockPath, "owner.json"), JSON.stringify({
+      pid: 4074800,
+      nonce: "dead-download",
+      createdAt: now,
+    }));
+    assert.throws(() => acquireCanonicalLock(lockPath, {
+      now: () => now,
+      processIdentity: () => "",
+      statSync: () => ({ dev: 1n, ino: 2n, birthtimeNs: 3n, mtimeMs: BigInt(now) }),
+      isProcessAlive: () => {
+        if (!replaced) {
+          replaced = true;
+          fs.rmSync(lockPath, { recursive: true, force: true });
+          fs.mkdirSync(lockPath);
+        }
+        return false;
+      },
+    }), /already in progress/);
+    assert.equal(replaced, true);
+    assert.equal(fs.existsSync(lockPath), true);
+    assert.equal(fs.existsSync(path.join(lockPath, "reclaim.json")), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a paused setup owner cannot overwrite the successor that reclaimed its empty lock", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-bootstrap-owner-publish-race-"));
+  const lockPath = path.join(root, "transaction.lock");
+  const startedAt = Date.now();
+  let intercepted = false;
+  let winner = null;
+  try {
+    assert.throws(() => acquireCanonicalLock(lockPath, {
+      now: () => startedAt,
+      processIdentity: () => "",
+      writeFileSync: (file, bytes, options) => {
+        if (!intercepted && file === path.join(lockPath, "owner.json")) {
+          intercepted = true;
+          winner = acquireCanonicalLock(lockPath, {
+            now: () => startedAt + 31_000,
+            staleAfterMs: 30_000,
+            processIdentity: () => "",
+          });
+        }
+        fs.writeFileSync(file, bytes, options);
+      },
+    }), /already in progress/);
+    assert.equal(intercepted, true);
+    const successor = JSON.parse(fs.readFileSync(path.join(lockPath, "owner.json"), "utf8"));
+    assert.equal(successor.pid, process.pid);
+    assert.ok(winner);
+    winner.release();
+  } finally {
+    try { winner?.release(); } catch {}
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("setup publication yields to a reclaimer that already passed its owner snapshot", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-bootstrap-publication-claim-"));
+  const lockPath = path.join(root, "transaction.lock");
+  const ownerPath = path.join(lockPath, "owner.json");
+  const reclaimPath = path.join(lockPath, "reclaim.json");
+  const claimBytes = JSON.stringify({ pid: process.pid, nonce: "a".repeat(32), createdAt: Date.now() });
+  try {
+    assert.throws(() => acquireCanonicalLock(lockPath, {
+      processIdentity: () => "",
+      writeFileSync: (file, bytes, options) => {
+        // The claimant has confirmed the old empty owner and is paused just
+        // before rename. Publishing now must not authorize this creator.
+        if (path.resolve(file) === path.resolve(ownerPath)) {
+          fs.writeFileSync(reclaimPath, claimBytes, { flag: "wx" });
+        }
+        fs.writeFileSync(file, bytes, options);
+      },
+    }), /lost canonical install lock ownership to a recovery claimant/);
+    assert.equal(fs.existsSync(ownerPath), true);
+    assert.equal(fs.readFileSync(reclaimPath, "utf8"), claimBytes);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+posixFsTest("a setup owner paused during publication cannot proceed after its lock is reclaimed", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-bootstrap-partial-owner-race-"));
+  const lockPath = path.join(root, "transaction.lock");
+  const ownerPath = path.join(lockPath, "owner.json");
+  const startedAt = Date.now();
+  let intercepted = false;
+  let winner = null;
+  let oldFd = null;
+  try {
+    assert.throws(() => acquireCanonicalLock(lockPath, {
+      now: () => startedAt,
+      processIdentity: () => "",
+      writeFileSync: (file, bytes, options) => {
+        if (!intercepted && path.resolve(file) === path.resolve(ownerPath)) {
+          intercepted = true;
+          oldFd = fs.openSync(file, options.flag, options.mode);
+          fs.writeSync(oldFd, bytes.slice(0, 7));
+          winner = acquireCanonicalLock(lockPath, {
+            now: () => startedAt + 31_000,
+            staleAfterMs: 30_000,
+            processIdentity: () => "",
+          });
+          fs.writeSync(oldFd, bytes.slice(7));
+          fs.closeSync(oldFd);
+          oldFd = null;
+          return;
+        }
+        fs.writeFileSync(file, bytes, options);
+      },
+    }), /lost canonical install lock ownership/);
+    assert.equal(intercepted, true);
+    const successor = JSON.parse(fs.readFileSync(ownerPath, "utf8"));
+    assert.equal(successor.pid, process.pid);
+    assert.ok(winner);
+    winner.release();
+    assert.equal(fs.existsSync(lockPath), false);
+  } finally {
+    if (oldFd !== null) try { fs.closeSync(oldFd); } catch {}
+    try { winner?.release(); } catch {}
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("canonical setup recovers when a previous lock reclaimer also died", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-bootstrap-dead-reclaimer-"));
+  const lockPath = path.join(root, "transaction.lock");
+  const now = Date.now();
+  try {
+    fs.mkdirSync(lockPath);
+    fs.writeFileSync(path.join(lockPath, "owner.json"), JSON.stringify({
+      pid: 4074800,
+      nonce: "dead-download",
+      createdAt: now,
+    }));
+    fs.writeFileSync(path.join(lockPath, "reclaim.json"), JSON.stringify({
+      pid: 4074801,
+      nonce: "dead-reclaimer",
+      createdAt: now,
+    }));
+    const winner = acquireCanonicalLock(lockPath, {
+      now: () => now,
+      isProcessAlive: () => false,
+      processIdentity: () => "",
+    });
+    const owner = JSON.parse(fs.readFileSync(path.join(lockPath, "owner.json"), "utf8"));
+    assert.notEqual(owner.nonce, "dead-download");
+    winner.release();
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("canonical setup leaves a dead owner alone while its live reclaimer is working", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-bootstrap-live-reclaimer-"));
+  const lockPath = path.join(root, "transaction.lock");
+  const now = Date.now();
+  const reclaim = {
+    pid: process.pid,
+    nonce: "live-reclaimer",
+    createdAt: now,
+  };
+  try {
+    fs.mkdirSync(lockPath);
+    fs.writeFileSync(path.join(lockPath, "owner.json"), JSON.stringify({
+      pid: 4074800,
+      nonce: "dead-download",
+      createdAt: now,
+    }));
+    fs.writeFileSync(path.join(lockPath, "reclaim.json"), JSON.stringify(reclaim));
+    assert.throws(() => acquireCanonicalLock(lockPath, {
+      now: () => now,
+      isProcessAlive: (pid) => pid === process.pid,
+      processIdentity: () => "",
+    }), /already in progress/);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(lockPath, "reclaim.json"), "utf8")), reclaim);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an old setup handle cannot release a successor's lock", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-bootstrap-release-owner-"));
+  const lockPath = path.join(root, "transaction.lock");
+  try {
+    const oldHandle = acquireCanonicalLock(lockPath, { processIdentity: () => "" });
+    const successor = JSON.stringify({ pid: process.pid, nonce: "successor", createdAt: Date.now() });
+    fs.writeFileSync(path.join(lockPath, "owner.json"), successor);
+    oldHandle.release();
+    assert.equal(fs.existsSync(lockPath), true);
+    assert.equal(fs.readFileSync(path.join(lockPath, "owner.json"), "utf8"), successor);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Linux zombie lock owners are treated as dead even with a matching PID", () => {
+  const fields = ["Z", ...Array(18).fill("0"), "123456", ...Array(3).fill("0")];
+  const alive = processAlive(42, {
+    platform: "linux",
+    kill: () => {},
+    readFileSync: (file) => String(file).includes("boot_id")
+      ? "test-boot-id\n"
+      : `42 (command with ) spaces) ${fields.join(" ")}\n`,
+  });
+  assert.equal(alive, false);
+});
+
+test("a recovered setup removes abandoned downloads without touching releases", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-bootstrap-download-cleanup-"));
+  try {
+    for (const name of [".relay-download-1.2.3-one", ".relay-download-1.2.3-two"]) {
+      fs.mkdirSync(path.join(root, name));
+      fs.writeFileSync(path.join(root, name, "runtime.tar.gz"), "partial");
+    }
+    const release = path.join(root, "1.2.3-linux-x64-release");
+    fs.mkdirSync(release);
+    fs.writeFileSync(path.join(release, "sentinel"), "keep");
+    assert.equal(removeAbandonedRuntimeDownloads(root), 2);
+    assert.deepEqual(fs.readdirSync(root), ["1.2.3-linux-x64-release"]);
+    assert.equal(fs.readFileSync(path.join(release, "sentinel"), "utf8"), "keep");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("macOS uses an owner-only local store while Windows uses Credential Manager", () => {
   const macRoot = fs.mkdtempSync(path.join(os.tmpdir(), "relay-mac-credential-test-"));
   const macFile = path.join(macRoot, "credentials.json");
@@ -1387,7 +1948,7 @@ test("bootstrap restores the prior runtime when the Windows service sweep fails"
 
 test("new setup documentation has one exact-version command and no pairing code", () => {
   const readme = fs.readFileSync(new URL("../README.md", import.meta.url), "utf8");
-  assert.match(readme, /npx --yes relay-companion@<EXACT_VERSION> setup/);
+  assert.match(readme, /npx --yes --no-audit --no-fund relay-companion@<EXACT_VERSION> setup/);
   assert.doesNotMatch(readme, /relay-companion@latest setup/);
   assert.doesNotMatch(readme, /setup --code <PAIRING_CODE>/);
 });
@@ -1575,16 +2136,22 @@ test("public release owns immutable publication while private promotion owns fle
     assert.match(canary, /npm view "relay-companion@\$FROM_VERSION" relayDistribution/);
     assert.match(canary, /if \[ "\$from_distribution" = thin-installer \]/);
     assert.match(canary, /npm install --global --no-audit --no-fund "relay-companion@\$FROM_VERSION"/);
-    assert.match(canary, /npx --yes "relay-companion@\$FROM_VERSION" setup/);
+    assert.match(canary, /npx --yes --no-audit --no-fund "relay-companion@\$FROM_VERSION" setup/);
   }
   const privateImport = new URL("../../../.github/workflows/publish-companion.yml", import.meta.url);
   if (fs.existsSync(privateImport)) {
     const importWorkflow = fs.readFileSync(privateImport, "utf8");
     assert.match(importWorkflow, /\(cd "\$root" && tar -xzf runtime\.tar\.gz\)/);
     assert.doesNotMatch(importWorkflow, /tar -xzf "\$archive"/);
-    assert.match(importWorkflow, /npx --yes "relay-companion@\$VERSION" setup/);
+    assert.match(importWorkflow, /npx --yes --no-audit --no-fund "relay-companion@\$VERSION" setup/);
+    const canaryStepIndex = importWorkflow.indexOf("Exercise the exact published setup");
+    const canaryStep = importWorkflow.slice(canaryStepIndex);
+    assert.ok(canaryStepIndex >= 0);
+    assert.match(canaryStep, /DISTRIBUTION: \$\{\{ inputs\.distribution \}\}/);
+    assert.match(canaryStep, /dead_setup_pid=2147483000/);
+    assert.match(canaryStep, /transaction\.lock\/owner\.json/);
     const canaryHostIndex = importWorkflow.indexOf('mkdir -p "$CODEX_HOME"');
-    const canarySetupIndex = importWorkflow.indexOf('npx --yes "relay-companion@$VERSION" setup');
+    const canarySetupIndex = importWorkflow.indexOf('npx --yes --no-audit --no-fund "relay-companion@$VERSION" setup');
     assert.ok(canaryHostIndex >= 0 && canaryHostIndex < canarySetupIndex, "the isolated canary host exists before setup");
     assert.match(importWorkflow, /verify-thin-setup-canary\.mjs/);
     assert.match(importWorkflow, /--expect-uninstalled/);

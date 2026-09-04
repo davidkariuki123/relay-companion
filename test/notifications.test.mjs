@@ -561,6 +561,31 @@ test("resetCompanionStateForAccount clears stale rows from a previous account", 
   assert.deepEqual(state.packets, {});
 });
 
+test("resetCompanionStateForAccount preserves read rows when the same account reconnects", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-account-reconnect-test-"));
+  const statePath = companionStatePath(dir);
+  fs.writeFileSync(
+    statePath,
+    JSON.stringify({
+      version: 1,
+      account: { userId: "usr_same", email: "same@example.com", deviceId: "dev_old" },
+      packets: {
+        old_task: { id: "old_task", direction: "inbound", state: "read", title: "Already read" },
+      },
+    }),
+  );
+
+  const result = resetCompanionStateForAccount(
+    { user: { id: "usr_same", email: "same@example.com" }, deviceId: "dev_new" },
+    { statePath },
+  );
+
+  assert.equal(result.reset, false);
+  const state = JSON.parse(fs.readFileSync(statePath, "utf8"));
+  assert.equal(state.packets.old_task.state, "read");
+  assert.equal(state.account.deviceId, "dev_new");
+});
+
 test("pollTaskRuntimeOnce stages Relay companion items without blocking agent polling", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-notify-test-"));
   process.env.RELAY_CONFIG_DIR = dir;

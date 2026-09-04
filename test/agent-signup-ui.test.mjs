@@ -11,10 +11,11 @@ const main = readFileSync(path.join(ROOT, "overlay/main.cjs"), "utf8");
 const config = readFileSync(path.join(ROOT, "src/config.js"), "utf8");
 const cli = readFileSync(path.join(ROOT, "bin/relay.js"), "utf8");
 
-test("first run is one in-pill flow with a skippable chat setup page", () => {
+test("first run opens account connection immediately and ends with skippable chat setup", () => {
   for (const copy of [
-    "Relay is ready for you.",
-    "How would you like to continue?",
+    "Agent installed",
+    "Connect Relay.",
+    "Sign in to connect this computer.",
     "What’s your email?",
     "Enter your code.",
     "Finish with Google.",
@@ -28,6 +29,9 @@ test("first run is one in-pill flow with a skippable chat setup page", () => {
   assert.match(overlay, /cardEl\.classList\.toggle\("signup", needsSignup\)/);
   assert.match(overlay, /\.card\.collapsed \.signup-view \{ display:none; \}/);
   assert.match(overlay, /const needsSignup = credentialRecovery \|\| payload\.account\?\.paired === false \|\| tutorialPending/);
+  assert.match(overlay, /initializeInstallationAuthorization\(\)/);
+  assert.match(overlay, /state\.status === "idle"[\s\S]*installationAuthBegin\(\)/);
+  assert.doesNotMatch(overlay, /Relay is ready for you\./);
   assert.match(overlay, /Claude Code and Codex do not need this\./);
   assert.match(overlay, /id="suChatSkip"[\s\S]*Skip for now/);
 });
@@ -49,6 +53,9 @@ test("signup errors are human recovery copy, never raw Electron IPC failures", (
   assert.match(overlay, /network_unavailable[\s\S]*Relay couldn’t connect\. Check your internet and try again\./);
   assert.match(overlay, /authorization is unavailable[\s\S]*Relay couldn’t secure setup on this computer\./);
   assert.match(overlay, /signupError = signupFailureMessage\(reason, fallback\)/);
+  assert.match(overlay, /Relay could not prepare account setup\. Try again\./);
+  assert.match(overlay, /signupInitializationFailed[\s\S]*id="suInitializeRetry"[\s\S]*Try again/);
+  assert.match(overlay, /suInitializeRetry[\s\S]*initializeInstallationAuthorization\(\{ force:true \}\)/);
   assert.doesNotMatch(overlay, /signupError = reason && reason\.message/);
   assert.match(main, /INSTALLATION_AUTH_IPC_ERROR_CODES/);
   assert.match(main, /new Error\(`Relay setup failed \(\$\{code\}\)\.`\)/);
@@ -90,7 +97,7 @@ test("a paired credential problem opens recovery and never falls through to firs
   assert.match(overlay, /Relay preserved the corrupt file for inspection/);
   assert.match(overlay, /Check the file permissions, then try again\./);
   assert.match(overlay, /window\.relay\.credentialRetry\(\)/);
-  assert.match(overlay, /!credentialRecovery && payload\.account\?\.paired === false[\s\S]*installationAuthState/);
+  assert.match(overlay, /!credentialRecovery && payload\.account\?\.paired === false\) void initializeInstallationAuthorization\(\)/);
   assert.match(preload, /credentialRetry: \(\) => ipcRenderer\.invoke\("relay:credentialRetry"\)/);
   assert.match(main, /ipcMain\.handle\("relay:credentialRetry"/);
   assert.match(main, /isRemoteCredentialRejection/);

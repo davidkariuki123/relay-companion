@@ -156,10 +156,9 @@ try {
   await waitFor(page, "typeof window.__relaySignupPreview === 'function'");
 
   const states = [
-    ["installed", "Relay is ready for you."],
     ["resume", "Continue your setup."],
     ["restart-required", "Restart this setup."],
-    ["method", "How would you like to continue?"],
+    ["method", "Connect Relay."],
     ["email", "What’s your email?"],
     ["code", "Enter your code."],
     ["google", "Finish with Google."],
@@ -191,7 +190,7 @@ try {
       })()`);
       assert.deepEqual(layout, { bodyInside:true, skipInside:true, skipVisible:true });
     }
-    if (stage === "installed") {
+    if (stage === "method") {
       const expandedLockup = await evaluate(page, `(() => {
         const rect = document.getElementById("lockup").getBoundingClientRect();
         return { x:rect.left + 32, y:rect.top + (rect.height / 2) };
@@ -215,13 +214,20 @@ try {
       })()`);
       assert.equal(compact.signupDisplay, "none", `collapsed signup content must be absent: ${JSON.stringify(compact)}`);
       assert.equal(compact.hitInsideLockup, true, `collapsed pill header must own its hit area: ${JSON.stringify(compact)}`);
-      rendered.push(await capture(page, "pill-installed-collapsed"));
+      rendered.push(await capture(page, "pill-method-collapsed"));
       await clickAt(page, compact.x, compact.y);
       await waitFor(page, `!document.getElementById("card").classList.contains("collapsed") && document.getElementById("card").getBoundingClientRect().height > 520`);
-      assert.match(await evaluate(page, `document.getElementById("signupBody").innerText`), /Relay is ready for you\./);
-      rendered.push(await capture(page, "pill-installed-reexpanded"));
+      assert.match(await evaluate(page, `document.getElementById("signupBody").innerText`), /Connect Relay\./);
+      rendered.push(await capture(page, "pill-method-reexpanded"));
     }
   }
+
+  await evaluate(page, `window.__relaySignupPreview("method", {
+    error:"Relay couldn’t connect. Check your internet and try again.",
+    initializationFailed:true
+  }); true`);
+  await waitFor(page, `document.getElementById("signupBody").innerText.includes("Try again")`);
+  rendered.push(await capture(page, "pill-method-retry"));
 
   const welcomeText = await evaluate(page, `(async () => { onPayload(await window.relay.refresh()); return document.getElementById("relaysList").innerText; })()`);
   assert.match(welcomeText, /Relay Agent/);

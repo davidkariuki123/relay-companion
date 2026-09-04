@@ -26,6 +26,7 @@ test("the Task working cue animates compositor properties without repainting its
 
 test("collapsed and hidden surfaces stop frame watching, run polling, and view rebuilds", () => {
   assert.match(html, /function rendererSurfaceActive\(\)[\s\S]*document\.visibilityState === "visible"[\s\S]*!collapsed[\s\S]*offstage[\s\S]*bye/);
+  assert.match(html, /function syncRunMirrors\(\) \{\s*if \(!rendererSurfaceActive\(\)\)/);
   assert.match(html, /const paintSurface = rendererSurfaceActive\(\)/);
   assert.match(html, /if \(!rendererSurfaceActive\(\)\) \{ watchRaf = null; return; \}/);
   assert.match(html, /function flushDeferredSurfaceRender\(\)/);

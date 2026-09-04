@@ -817,13 +817,26 @@ async function refreshDaemonProductFeatures(client, current, log) {
 // signed out underneath, must pick up the credential a later pairing writes
 // instead of 401-ing forever on the token it started with.
 async function resolveMe(client) {
+  let waitingForSignIn = false;
   for (let attempt = 1; ; attempt += 1) {
     try {
       return await client.me();
     } catch (err) {
       const wait = Math.min(60_000, 2_000 * attempt);
-      // eslint-disable-next-line no-console
-      console.error(`[relay] startup me() failed (${err && err.message}); retrying in ${Math.round(wait / 1000)}s`);
+      const detail = String(err?.code || err?.message || err || "").toLowerCase();
+      const missingAuthorization = detail.includes("missing_authorization")
+        || detail.includes("missing authorization")
+        || detail.includes("not paired");
+      if (missingAuthorization) {
+        if (!waitingForSignIn) {
+          waitingForSignIn = true;
+          // eslint-disable-next-line no-console
+          console.log("[relay] waiting for sign-in in the Relay app");
+        }
+      } else {
+        // eslint-disable-next-line no-console
+        console.error(`[relay] startup me() failed (${err && err.message}); retrying in ${Math.round(wait / 1000)}s`);
+      }
       await new Promise((resolve) => setTimeout(resolve, wait));
       if (client.accountDrift().status !== "same") client.rebindToCurrentAccount();
     }
@@ -925,12 +938,6 @@ export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
   // Keep the always-on logs bounded. The daemon is the single long-lived owner on
   // the machine, so it is the natural place to cap files that nothing else prunes.
   startLogRotation({ log });
-  // A previous Companion release gave unanchored Relay tasks the correct
-  // ~/Relay cwd but never registered/assigned the matching Codex sidebar
-  // project. Repair every remembered Codex task in the background, retrying
-  // until Codex has a window available. This never launches or focuses Codex;
-  // future opens also perform the assignment directly.
-  startRelayCodexProjectRepairLoop({ log });
   // Age out downloaded attachment copies; ingest prefetch would otherwise grow
   // ~/.relay-companion/attachments with the inbox forever.
   try {
@@ -949,6 +956,10 @@ export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
   }
   let client = new RelayClient();
   const me = await resolveMe(client);
+  // Codex project state belongs to the signed-in Relay account. Never inspect
+  // or rewrite historical Codex tasks while this installation is still signed
+  // out; doing so can resurrect tasks from a previous owner before consent.
+  startRelayCodexProjectRepairLoop({ log });
   // eslint-disable-next-line no-console
   console.log(`[relay] receiver for ${me.user.email}; polling every ${intervalMs}ms`);
   let features = daemonProductFeatures(log, me.user);

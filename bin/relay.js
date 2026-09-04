@@ -214,18 +214,16 @@ function printActivationStatus(activation) {
       return;
     }
     if (activation.serverCatalogHasTool) {
-      console.log(
-        "Relay was added to Codex and the MCP server advertises relay_send, but this open Codex session has not exposed relay_send to the agent yet.",
-      );
+      console.log("Relay was added to Codex.");
       return;
     }
     const detail = activation.reason ? ` (${activation.reason})` : "";
-    console.log(`Relay was added to Codex, but this open Codex session does not expose relay_send yet${detail}.`);
+    console.log(`Relay was added to Codex${detail}.`);
     return;
   }
   if (activation.host === "Claude Code") {
     if (activation.ok) {
-      console.log("Relay was added to Claude Code for new sessions. Existing Claude Code sessions may need their MCP tools reloaded from inside Claude.");
+      console.log("Relay was added to Claude Code.");
     } else {
       console.log("Relay could not verify the Claude Code MCP registration.");
     }
@@ -271,7 +269,8 @@ async function applyInstall({
     else console.log(`Could not register ${m}.`);
   }
   for (const activation of activations) printActivationStatus(activation);
-  for (const notice of hookInstallNotices({ claudeHooks, codexHooks })) console.log(notice);
+  const hookNotices = hookInstallNotices({ claudeHooks, codexHooks });
+  for (const notice of hookNotices.filter((line) => !line.startsWith("Codex requires one final step"))) console.log(notice);
   if (daemon.ok) console.log("Relay is running in the background and will start automatically when you log in.");
   else if (daemon.reason === "autostart_unsupported_platform") {
     console.log("Run `relay daemon` to receive relays because managed background startup is unavailable on this platform.");
@@ -318,17 +317,11 @@ async function applyInstall({
     return { installed, missing, daemon, pill, activations, agentMissing: true, lifecycleFailed };
   }
 
-  if (desktopRestarts.length) {
-    console.log("");
-    // These apps read their config only at process start, so the registration is
-    // inert until a FULL quit. Closing the window is not enough, and saying so
-    // vaguely is how people conclude it did not work.
-    for (const app of desktopRestarts) {
-      console.log(`Registered with ${app}. Fully quit it (Cmd-Q on macOS, Quit from the tray on Windows) and reopen to use Relay.`);
-    }
-  }
-
   const liveRequirement = liveToolRequirement({ activations, requiredHosts });
+  const nextSteps = [];
+  for (const notice of hookNotices.filter((line) => line.startsWith("Codex requires one final step"))) {
+    nextSteps.push(notice);
+  }
   if (requireLiveTools && !liveRequirement.ok) {
     // Registration only takes effect in a NEW agent session, so the session that
     // ran this command can never report itself ready -- verifyClaudeMcpRegistration
@@ -339,8 +332,18 @@ async function applyInstall({
     const hostLabel = liveRequirement.missingHosts.length
       ? liveRequirement.missingHosts.join(" and ")
       : "this agent session";
+    nextSteps.push(`Restart ${hostLabel} or open a new session to load Relay's tools.`);
+  }
+  // Desktop apps read their config only at process start. Put every manual
+  // action in one ordered block instead of scattering restart instructions
+  // through otherwise successful setup output.
+  for (const app of desktopRestarts) {
+    nextSteps.push(`Fully quit ${app} (Cmd-Q on macOS, Quit from the tray on Windows), then reopen it.`);
+  }
+  if (nextSteps.length) {
     console.log("");
-    console.log(`Relay is installed. Restart ${hostLabel} (or open a new session) to use it.`);
+    console.log("Next steps:");
+    nextSteps.forEach((step, index) => console.log(`  ${index + 1}. ${step}`));
   }
   return { installed, missing, daemon, pill, activations, lifecycleFailed };
 }

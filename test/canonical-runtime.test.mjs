@@ -623,3 +623,421 @@ posixFsTest("a live transaction is never stolen because an elapsed-time deadline
   assert.equal(result.ok, false);
   assert.equal(result.reason, "transaction-in-progress");
 });
+
+posixFsTest("an ownerless runtime lock without birth time fails closed after the legacy grace", async () => {
+  const homeDir = fixture();
+  const layout = canonicalRuntimeLayout({ homeDir, platform: "linux" });
+  const now = Date.now();
+  fs.mkdirSync(layout.lockPath, { recursive: true });
+  fs.utimesSync(layout.lockPath, new Date(now), new Date(now));
+  const ownerlessFs = Object.create(fs);
+  ownerlessFs.processIdentity = () => "";
+  ownerlessFs.statSync = (file, options) => {
+    const value = fs.statSync(file, options);
+    return path.resolve(file) === path.resolve(layout.lockPath)
+      ? { ...value, birthtimeNs: 0n, birthtimeMs: 0 }
+      : value;
+  };
+  const result = await runPosix({ homeDir, now: () => now, fsImpl: ownerlessFs });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "transaction-lock-unavailable");
+  assert.equal(fs.existsSync(layout.lockPath), true);
+
+  fs.utimesSync(layout.lockPath, new Date(now - (2 * 60 * 60_000 + 1)), new Date(now - (2 * 60 * 60_000 + 1)));
+  const stillProtected = await runPosix({ homeDir, now: () => now, fsImpl: ownerlessFs });
+  assert.equal(stillProtected.ok, false);
+  assert.equal(stillProtected.reason, "transaction-in-progress");
+  assert.equal(fs.existsSync(layout.lockPath), true);
+});
+
+posixFsTest("canonical runtime preserves a shared lock for a legacy bootstrap publisher", async () => {
+  const homeDir = fixture();
+  const layout = canonicalRuntimeLayout({ homeDir, platform: "linux" });
+  const ownerPath = path.posix.join(layout.lockPath, "owner.json");
+  const now = Date.now();
+  const legacyOwner = JSON.stringify({ pid: process.pid, createdAt: now - 31_000 });
+  fs.mkdirSync(layout.lockPath, { recursive: true });
+  fs.utimesSync(layout.lockPath, new Date(now - 31_000), new Date(now - 31_000));
+  const result = await runPosix({ homeDir, now: () => now });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "transaction-lock-unavailable");
+  // The shipped bootstrap can resume its old non-exclusive publication because
+  // canonical runtime retained the shared lock instead of replacing it.
+  fs.writeFileSync(ownerPath, legacyOwner);
+  assert.equal(fs.readFileSync(ownerPath, "utf8"), legacyOwner);
+});
+
+posixFsTest("an old ownerless runtime lock with trustworthy birth time is recovered", async () => {
+  const homeDir = fixture();
+  const layout = canonicalRuntimeLayout({ homeDir, platform: "linux" });
+  const now = Date.now();
+  fs.mkdirSync(layout.lockPath, { recursive: true });
+  fs.utimesSync(layout.lockPath, new Date(now - (2 * 60 * 60_000 + 1)), new Date(now - (2 * 60 * 60_000 + 1)));
+  const result = await runPosix({ homeDir, now: () => now });
+  assert.equal(result.ok, true, `${result.phase}: ${result.reason}`);
+  assert.equal(fs.existsSync(layout.lockPath), false);
+});
+
+for (const incompleteOwner of [null, '{"pid":']) {
+posixFsTest(`runtime recovery preserves an ambiguous replacement ${incompleteOwner === null ? "ownerless" : "partial-owner"} lock`, async () => {
+  const homeDir = fixture();
+  const layout = canonicalRuntimeLayout({ homeDir, platform: "linux" });
+  const reclaimPath = path.posix.join(layout.lockPath, "reclaim.json");
+  const now = Date.now();
+  fs.mkdirSync(layout.lockPath, { recursive: true });
+  if (incompleteOwner !== null) fs.writeFileSync(path.posix.join(layout.lockPath, "owner.json"), incompleteOwner);
+  fs.utimesSync(layout.lockPath, new Date(now - (2 * 60 * 60_000 + 1)), new Date(now - (2 * 60 * 60_000 + 1)));
+  const replacementFs = Object.create(fs);
+  let replaced = false;
+  replacementFs.processIdentity = () => "";
+  replacementFs.statSync = (file, options) => {
+    const value = fs.statSync(file, options);
+    return path.resolve(file) === path.resolve(layout.lockPath)
+      ? { ...value, dev: 1n, ino: 2n, birthtimeNs: 0n, birthtimeMs: 0 }
+      : value;
+  };
+  replacementFs.writeFileSync = (file, bytes, options) => {
+    fs.writeFileSync(file, bytes, options);
+    if (!replaced && path.resolve(file) === path.resolve(reclaimPath)) {
+      replaced = true;
+      fs.rmSync(layout.lockPath, { recursive: true, force: true });
+      fs.mkdirSync(layout.lockPath);
+      if (incompleteOwner !== null) fs.writeFileSync(path.posix.join(layout.lockPath, "owner.json"), incompleteOwner);
+    }
+  };
+  const result = await runPosix({ homeDir, now: () => now, fsImpl: replacementFs });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "transaction-in-progress");
+  assert.equal(replaced, true);
+  assert.equal(fs.existsSync(layout.lockPath), true);
+  assert.equal(fs.existsSync(reclaimPath), false);
+});
+}
+
+posixFsTest("runtime recovery recognizes a reused Linux PID by process identity", async () => {
+  const homeDir = fixture();
+  const layout = canonicalRuntimeLayout({ homeDir, platform: "linux" });
+  fs.mkdirSync(layout.lockPath, { recursive: true });
+  fs.writeFileSync(path.posix.join(layout.lockPath, "owner.json"), JSON.stringify({
+    pid: process.pid,
+    nonce: "previous-process",
+    createdAt: 100,
+    processIdentity: "boot-a:100",
+  }));
+  const identityFs = Object.create(fs);
+  identityFs.processAlive = () => true;
+  identityFs.processIdentity = () => "boot-a:200";
+  const result = await runPosix({ homeDir, fsImpl: identityFs });
+  assert.equal(result.ok, true, `${result.phase}: ${result.reason}`);
+  assert.equal(fs.existsSync(layout.lockPath), false);
+});
+
+posixFsTest("runtime recovery handles a valid dead owner without filesystem birth time", async () => {
+  const homeDir = fixture();
+  const layout = canonicalRuntimeLayout({ homeDir, platform: "linux" });
+  fs.mkdirSync(layout.lockPath, { recursive: true });
+  fs.writeFileSync(path.posix.join(layout.lockPath, "owner.json"), JSON.stringify({
+    pid: 2147483000,
+    nonce: "d".repeat(32),
+    createdAt: 100,
+  }));
+  const zeroBirthFs = Object.create(fs);
+  zeroBirthFs.processAlive = () => false;
+  zeroBirthFs.processIdentity = () => "";
+  zeroBirthFs.statSync = (file, options) => {
+    const value = fs.statSync(file, options);
+    return path.resolve(file) === path.resolve(layout.lockPath)
+      ? { ...value, birthtimeNs: 0n, birthtimeMs: 0 }
+      : value;
+  };
+  const result = await runPosix({ homeDir, fsImpl: zeroBirthFs });
+  assert.equal(result.ok, true, `${result.phase}: ${result.reason}`);
+});
+
+posixFsTest("concurrent runtime recovery cannot displace the winning transaction", async () => {
+  const homeDir = fixture();
+  const layout = canonicalRuntimeLayout({ homeDir, platform: "linux" });
+  fs.mkdirSync(layout.lockPath, { recursive: true });
+  fs.writeFileSync(path.posix.join(layout.lockPath, "owner.json"), JSON.stringify({
+    pid: 2147483000,
+    nonce: "dead-transaction",
+    createdAt: 100,
+  }));
+  const winnerFs = Object.create(fs);
+  winnerFs.processAlive = () => false;
+  winnerFs.processIdentity = () => "";
+  const loserFs = Object.create(fs);
+  let winnerPromise = null;
+  let triggered = false;
+  loserFs.processIdentity = () => "";
+  loserFs.processAlive = (pid) => {
+    if (!triggered) {
+      triggered = true;
+      winnerPromise = runPosix({ homeDir, fsImpl: winnerFs });
+    }
+    return pid === process.pid;
+  };
+  const loser = await runPosix({ homeDir, fsImpl: loserFs, version: "0.1.242" });
+  const winner = await winnerPromise;
+  assert.equal(winner.ok, true, `${winner.phase}: ${winner.reason}`);
+  assert.equal(loser.ok, false);
+  assert.equal(loser.reason, "transaction-in-progress");
+  assert.equal(fs.existsSync(layout.lockPath), false);
+});
+
+posixFsTest("runtime recovery detects a replacement even when its inode is immediately reused", async () => {
+  const homeDir = fixture();
+  const layout = canonicalRuntimeLayout({ homeDir, platform: "linux" });
+  fs.mkdirSync(layout.lockPath, { recursive: true });
+  fs.writeFileSync(path.posix.join(layout.lockPath, "owner.json"), JSON.stringify({
+    pid: 2147483000,
+    nonce: "dead-transaction",
+    createdAt: 100,
+  }));
+  const replacementFs = Object.create(fs);
+  let replaced = false;
+  replacementFs.processIdentity = () => "";
+  replacementFs.processAlive = () => {
+    if (!replaced) {
+      replaced = true;
+      fs.rmSync(layout.lockPath, { recursive: true, force: true });
+      fs.mkdirSync(layout.lockPath);
+    }
+    return false;
+  };
+  replacementFs.statSync = (file, options) => path.resolve(file) === path.resolve(layout.lockPath)
+    ? { dev: 1n, ino: 2n, birthtimeNs: 3n, mtimeMs: 100n }
+    : fs.statSync(file, options);
+  const result = await runPosix({ homeDir, fsImpl: replacementFs });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "transaction-in-progress");
+  assert.equal(replaced, true);
+  assert.equal(fs.existsSync(layout.lockPath), true);
+  assert.equal(fs.existsSync(path.posix.join(layout.lockPath, "reclaim.json")), false);
+});
+
+posixFsTest("a paused runtime owner cannot overwrite the successor of its empty lock", async () => {
+  const homeDir = fixture();
+  const layout = canonicalRuntimeLayout({ homeDir, platform: "linux" });
+  const startedAt = Date.now();
+  let unblockWinner;
+  const winnerGate = new Promise((resolve) => { unblockWinner = resolve; });
+  let winnerPromise = null;
+  let intercepted = false;
+  const winnerFs = Object.create(fs);
+  winnerFs.processIdentity = () => "";
+  const pausedFs = Object.create(fs);
+  pausedFs.processIdentity = () => "";
+  pausedFs.writeFileSync = (file, bytes, options) => {
+    if (!intercepted && path.resolve(file) === path.resolve(path.posix.join(layout.lockPath, "owner.json"))) {
+      intercepted = true;
+      winnerPromise = runPosix({
+        homeDir,
+        fsImpl: winnerFs,
+        now: () => startedAt + 2 * 60 * 60_000 + 1,
+        onLockAcquired: async () => winnerGate,
+      });
+    }
+    return fs.writeFileSync(file, bytes, options);
+  };
+  const paused = await runPosix({
+    homeDir,
+    fsImpl: pausedFs,
+    now: () => startedAt,
+    version: "0.1.242",
+  });
+  assert.equal(intercepted, true);
+  assert.equal(paused.ok, false);
+  assert.equal(paused.reason, "transaction-lock-unavailable");
+  const successor = JSON.parse(fs.readFileSync(path.posix.join(layout.lockPath, "owner.json"), "utf8"));
+  assert.equal(successor.pid, process.pid);
+  unblockWinner();
+  const winner = await winnerPromise;
+  assert.equal(winner.ok, true, `${winner.phase}: ${winner.reason}`);
+});
+
+posixFsTest("runtime publication yields to a reclaimer that already passed its owner snapshot", async () => {
+  const homeDir = fixture();
+  const layout = canonicalRuntimeLayout({ homeDir, platform: "linux" });
+  const ownerPath = path.posix.join(layout.lockPath, "owner.json");
+  const reclaimPath = path.posix.join(layout.lockPath, "reclaim.json");
+  const claimBytes = JSON.stringify({ pid: process.pid, nonce: "a".repeat(32), createdAt: Date.now() });
+  const claimedFs = Object.create(fs);
+  claimedFs.processIdentity = () => "";
+  claimedFs.writeFileSync = (file, bytes, options) => {
+    if (path.resolve(file) === path.resolve(ownerPath)) {
+      fs.writeFileSync(reclaimPath, claimBytes, { flag: "wx" });
+    }
+    fs.writeFileSync(file, bytes, options);
+  };
+  const result = await runPosix({ homeDir, fsImpl: claimedFs });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "transaction-lock-unavailable");
+  assert.equal(fs.existsSync(ownerPath), true);
+  assert.equal(fs.readFileSync(reclaimPath, "utf8"), claimBytes);
+});
+
+posixFsTest("a runtime owner paused during publication cannot proceed after reclamation", async () => {
+  const homeDir = fixture();
+  const layout = canonicalRuntimeLayout({ homeDir, platform: "linux" });
+  const ownerPath = path.posix.join(layout.lockPath, "owner.json");
+  const startedAt = Date.now();
+  let unblockWinner;
+  const winnerGate = new Promise((resolve) => { unblockWinner = resolve; });
+  let winnerPromise = null;
+  let intercepted = false;
+  let oldFd = null;
+  const winnerFs = Object.create(fs);
+  winnerFs.processIdentity = () => "";
+  const pausedFs = Object.create(fs);
+  pausedFs.processIdentity = () => "";
+  pausedFs.writeFileSync = (file, bytes, options) => {
+    if (!intercepted && path.resolve(file) === path.resolve(ownerPath)) {
+      intercepted = true;
+      oldFd = fs.openSync(file, options.flag, options.mode);
+      fs.writeSync(oldFd, bytes.slice(0, 7));
+      winnerPromise = runPosix({
+        homeDir,
+        fsImpl: winnerFs,
+        now: () => startedAt + 2 * 60 * 60_000 + 1,
+        onLockAcquired: async () => winnerGate,
+      });
+      fs.writeSync(oldFd, bytes.slice(7));
+      fs.closeSync(oldFd);
+      oldFd = null;
+      return;
+    }
+    fs.writeFileSync(file, bytes, options);
+  };
+  try {
+    const paused = await runPosix({
+      homeDir,
+      fsImpl: pausedFs,
+      now: () => startedAt,
+      version: "0.1.242",
+    });
+    assert.equal(intercepted, true);
+    assert.equal(paused.ok, false);
+    assert.equal(paused.reason, "transaction-lock-unavailable");
+    const successor = JSON.parse(fs.readFileSync(ownerPath, "utf8"));
+    assert.equal(successor.pid, process.pid);
+    unblockWinner();
+    const winner = await winnerPromise;
+    assert.equal(winner.ok, true, `${winner.phase}: ${winner.reason}`);
+  } finally {
+    if (oldFd !== null) try { fs.closeSync(oldFd); } catch {}
+    if (winnerPromise) {
+      unblockWinner();
+      try { await winnerPromise; } catch {}
+    }
+  }
+});
+
+posixFsTest("runtime recovery survives a dead reclaimer without stealing from a live one", async () => {
+  const deadHome = fixture();
+  const deadLayout = canonicalRuntimeLayout({ homeDir: deadHome, platform: "linux" });
+  fs.mkdirSync(deadLayout.lockPath, { recursive: true });
+  fs.writeFileSync(path.posix.join(deadLayout.lockPath, "owner.json"), JSON.stringify({
+    pid: 2147483000,
+    nonce: "dead-owner",
+    createdAt: 100,
+  }));
+  fs.writeFileSync(path.posix.join(deadLayout.lockPath, "reclaim.json"), JSON.stringify({
+    pid: 2147483001,
+    nonce: "dead-reclaimer",
+    createdAt: 100,
+  }));
+  const deadFs = Object.create(fs);
+  deadFs.processAlive = () => false;
+  deadFs.processIdentity = () => "";
+  const recovered = await runPosix({ homeDir: deadHome, fsImpl: deadFs });
+  assert.equal(recovered.ok, true, `${recovered.phase}: ${recovered.reason}`);
+
+  const liveHome = fixture();
+  const liveLayout = canonicalRuntimeLayout({ homeDir: liveHome, platform: "linux" });
+  fs.mkdirSync(liveLayout.lockPath, { recursive: true });
+  fs.writeFileSync(path.posix.join(liveLayout.lockPath, "owner.json"), JSON.stringify({
+    pid: 2147483000,
+    nonce: "dead-owner",
+    createdAt: 100,
+  }));
+  const liveClaim = { pid: process.pid, nonce: "live-reclaimer", createdAt: 100 };
+  fs.writeFileSync(path.posix.join(liveLayout.lockPath, "reclaim.json"), JSON.stringify(liveClaim));
+  const liveFs = Object.create(fs);
+  liveFs.processAlive = (pid) => pid === process.pid;
+  liveFs.processIdentity = () => "";
+  const blocked = await runPosix({ homeDir: liveHome, fsImpl: liveFs });
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.reason, "transaction-in-progress");
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.posix.join(liveLayout.lockPath, "reclaim.json"), "utf8")), liveClaim);
+});
+
+for (const readFailureAt of ["initial-owner", "confirmed-owner", "existing-claim"]) {
+posixFsTest(`runtime locking fails closed on ${readFailureAt} filesystem read errors`, async () => {
+  const homeDir = fixture();
+  const layout = canonicalRuntimeLayout({ homeDir, platform: "linux" });
+  const ownerPath = path.posix.join(layout.lockPath, "owner.json");
+  const reclaimPath = path.posix.join(layout.lockPath, "reclaim.json");
+  const ownerBytes = JSON.stringify({ pid: 2147483000, nonce: "d".repeat(32), createdAt: 1 });
+  fs.mkdirSync(layout.lockPath, { recursive: true });
+  fs.writeFileSync(ownerPath, ownerBytes);
+  if (readFailureAt === "existing-claim") {
+    fs.writeFileSync(reclaimPath, JSON.stringify({ pid: process.pid, nonce: "a".repeat(32), createdAt: 1 }));
+  }
+  const failureFs = Object.create(fs);
+  let ownerReads = 0;
+  failureFs.processAlive = () => false;
+  failureFs.processIdentity = () => "";
+  failureFs.readFileSync = (file, options) => {
+    const resolved = path.resolve(file);
+    if (resolved === path.resolve(ownerPath)) {
+      ownerReads += 1;
+      if (readFailureAt === "initial-owner" || (readFailureAt === "confirmed-owner" && ownerReads === 2)) {
+        const error = new Error("simulated owner read failure");
+        error.code = "EIO";
+        throw error;
+      }
+    }
+    if (readFailureAt === "existing-claim" && resolved === path.resolve(reclaimPath)) {
+      const error = new Error("simulated claim read failure");
+      error.code = "EACCES";
+      throw error;
+    }
+    return fs.readFileSync(file, options);
+  };
+  const result = await runPosix({ homeDir, fsImpl: failureFs });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, readFailureAt === "existing-claim"
+    ? "transaction-in-progress"
+    : "transaction-lock-unavailable");
+  assert.equal(fs.readFileSync(ownerPath, "utf8"), ownerBytes);
+  assert.equal(fs.existsSync(layout.lockPath), true);
+});
+}
+
+posixFsTest("a prior runtime transaction cannot release its successor's lock", async () => {
+  const homeDir = fixture();
+  const layout = canonicalRuntimeLayout({ homeDir, platform: "linux" });
+  const successor = { pid: process.pid, nonce: "successor", createdAt: 200 };
+  const result = await runPosix({
+    homeDir,
+    onLockAcquired: async () => {
+      fs.writeFileSync(path.posix.join(layout.lockPath, "owner.json"), JSON.stringify(successor));
+      throw new Error("simulated displaced owner");
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "worker-admission-failed");
+  assert.equal(fs.existsSync(layout.lockPath), true);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.posix.join(layout.lockPath, "owner.json"), "utf8")), successor);
+});
+
+test("Linux runtime owners include boot and process-start identity", {
+  skip: process.platform !== "linux" ? "requires Linux procfs" : false,
+}, async () => {
+  const homeDir = fixture();
+  let owner = null;
+  const result = await runPosix({ homeDir, onLockAcquired: async (value) => { owner = value; } });
+  assert.equal(result.ok, true, `${result.phase}: ${result.reason}`);
+  assert.match(owner?.processIdentity || "", /^[^:]+:\d+$/);
+});

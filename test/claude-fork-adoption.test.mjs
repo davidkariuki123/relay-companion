@@ -164,9 +164,8 @@ test("the forge stays quiet so one request is one row in the session list", () =
   // Importing there as well is what put the seeded stub in the reader's list
   // above the real run; adoption belongs to the fork, once.
   const main = fs.readFileSync(new URL("../overlay/main.cjs", import.meta.url), "utf8");
-  // The hand-off's fresh open (the picker's "New session" path) lets the
-  // overlay own the one Desktop import; the materializer never imports too.
-  const open = main.slice(main.indexOf("async function deliverPacketToSession"), main.indexOf("async function continuePacketSession"));
-  assert.match(open, /if \(provider === "claude"\) process\.env\.RELAY_IMPORT_CLAUDE_DESKTOP = "0";/);
-  assert.equal(main.includes("function forgeTaskSessionQuietly"), false, "the quiet forge died with the runner");
+  const forge = main.slice(main.indexOf("function forgeTaskSessionQuietly"));
+  const body = forge.slice(0, forge.indexOf("perf.inc(\"spawns\")"));
+  assert.match(body, /RELAY_IMPORT_CLAUDE_DESKTOP: "0"/);
+  assert.match(body, /RELAY_ACTIVATE_CLAUDE: "0"/);
 });

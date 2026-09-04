@@ -1416,6 +1416,16 @@
   .relay-contents-row:hover { background:var(--wash-2); }
   .relay-contents-row.on { background:var(--bg); cursor:default; }
   .relay-contents-row.on:hover { background:var(--bg); }
+  @keyframes workTabIn { from { opacity:0; transform:translateX(-8px) scale(.96); } to { opacity:1; transform:none; } }
+  .relay-contents-row.work-new { animation:workTabIn .32s var(--settle) both; }
+  @keyframes workSourceOut { from { opacity:1; transform:translateY(0) scale(1); } to { opacity:0; transform:translateY(-7px) scale(.995); } }
+  @keyframes workDestinationIn { 0%,12% { opacity:0; transform:translateY(10px) scale(.995); } 100% { opacity:1; transform:none; } }
+  .work-surface.work-entering .work-transition-source { animation:workSourceOut .42s cubic-bezier(.22,1,.36,1) both; }
+  .work-surface.work-entering .work-scroll,
+  .work-surface.work-entering .work-footer { animation:workDestinationIn .42s cubic-bezier(.22,1,.36,1) both; }
+  .work-transition-source { position:absolute; inset:0 0 0; z-index:6; overflow:hidden; padding:14px 16px 120px; background:var(--bg); pointer-events:none; }
+  .work-transition-source .rd-col { width:100%; height:100%; overflow:hidden; }
+  @media (prefers-reduced-motion:reduce) { .relay-contents-row.work-new { animation:none; } }
   .relay-contents-row .sq { width:4px; height:4px; flex:none; }
   .relay-contents-row .sq.you { background:var(--brand-anthropic); }
   .relay-contents-row .sq.ag { background:var(--agent-sq); }
@@ -1543,42 +1553,6 @@
   .rd-host-actions { margin:18px auto 0; width:min(100%, 560px); }
   .rd-host-actions .th-host-actions { flex:none; width:100%; margin:0; }
   .rd-host-actions .th-host-actions-inner { border:1px solid var(--hair); border-radius:14px; }
-  /* THE HAND-OFF RECEIPT. Send turns the composer capsule into this card in
-     place: the app's mark, one line of state, and the card itself is Open. It
-     wears the app's colour the way the host rows do, and nothing streams — the
-     app replies there, not here (David, 2026-09-03). */
-  .ho-dock { display:flex; flex-direction:column; gap:8px; }
-  .ho-bubble { align-self:flex-end; width:fit-content; max-width:77%; margin:0 0 2px auto; padding:8px 12px; border-radius:16px;
-    background:var(--wash-2); font-family:var(--sans); font-size:13px; line-height:1.5; color:var(--ink); overflow-wrap:anywhere; white-space:pre-wrap; }
-  .ho-card { --host-color:var(--brand-anthropic); appearance:none; width:100%; display:grid; grid-template-columns:30px minmax(0,1fr) auto; align-items:center; gap:12px;
-    padding:12px 14px; border:1px solid color-mix(in srgb, var(--host-color) 28%, transparent); border-radius:16px; text-align:left; cursor:default;
-    font-family:var(--sans); color:var(--ink);
-    background:linear-gradient(90deg, color-mix(in srgb, var(--host-color) 10%, transparent), transparent 62%); }
-  .ho-card.codex { --host-color:var(--brand-codex); }
-  .ho-card.failed { --host-color:var(--danger); }
-  .ho-card.done { --host-color:var(--ok); }
-  button.ho-card { cursor:pointer; transition:background-color var(--t-fast) var(--settle), filter var(--t-fast) var(--settle); }
-  button.ho-card:hover { background-color:var(--wash-2); filter:brightness(1.04); }
-  button.ho-card:focus-visible { outline:2px solid var(--host-color); outline-offset:-3px; }
-  button.ho-card:disabled { cursor:default; opacity:.7; }
-  .ho-logo { display:block; width:30px; height:30px; border-radius:8px; object-fit:cover; box-shadow:0 0 0 1px color-mix(in srgb, var(--ink) 7%, transparent); }
-  .ho-card.starting .ho-logo { animation:hostOpenBreathe .8s ease-in-out infinite alternate; animation-play-state:var(--relay-loop-state); }
-  .ho-copy { min-width:0; display:flex; flex-direction:column; gap:2px; }
-  .ho-label { color:var(--host-color); font-size:13px; font-weight:650; line-height:1.2; overflow-wrap:anywhere; }
-  .ho-sub { color:var(--muted); font-size:10.5px; line-height:1.4; }
-  .ho-arrow { color:var(--host-color); font-size:18px; line-height:1; }
-  .qr.col > .ho-card { margin:0 0 6px; }
-  /* A Task whose provider is not signed in asks for one, in the host-row voice. */
-  .work-connect { width:100%; margin:18px auto 0; }
-  .work-connect-title { color:var(--ink); font:650 15px/1.3 var(--sans); letter-spacing:-.01em; }
-  .work-connect-copy { margin-top:6px; color:var(--muted); font:400 12px/1.5 var(--sans); }
-  .work-connect-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; width:100%; margin-top:14px; }
-  .work-connect-actions .th-host-action { min-width:0; border:1px solid var(--hair); border-radius:12px; }
-  .work-connect-actions .th-host-action:disabled { cursor:default; opacity:.55; }
-  .work-connect-error { min-height:18px; margin-top:10px; color:var(--danger); font:500 11px/1.4 var(--sans); }
-  .work-connect-dock .ta-note:disabled { color:var(--muted-3); opacity:1; }
-  @media (max-width:620px) { .work-connect-actions { grid-template-columns:1fr; } }
-  @media (prefers-reduced-motion:reduce) { .ho-card.starting .ho-logo { animation:none; } }
   /* The action cluster — colophon, agent chip, Hand/dock, composer — PINS to
      the reader's bottom edge on a frosted pane (David's rule): a long letter
      must never push the actions below the fold. The pane backdrop-blurs the
@@ -2030,6 +2004,163 @@
   .rd-said strong { font-weight:640; }
   .rd-said .md-code { font-family:var(--mono); font-size:.86em; padding:1px 4px; border-radius:3px; background:var(--wash, rgba(127,127,127,.10)); }
   .rt-chip.static { cursor:default; opacity:.85; }
+  .rd-stream { margin-top:16px; margin-bottom:2px; display:flex; flex-direction:column; gap:16px; }
+  /* Consecutive native activity items are one group (4px); prose, user turns,
+     the completion seam and the final answer remain conversation items (16px). */
+  .rd-stream > .rd-act + .rd-act { margin-top:-12px; }
+  .rd-act { display:flex; gap:6px; align-items:center; min-width:0; font-family:var(--sans); font-size:14px; line-height:21px;
+    font-weight:445; color:color-mix(in oklab, var(--ink) 60%, transparent); }
+  .rd-act .act-icon { width:16px; height:16px; flex:0 0 16px; color:inherit; }
+  .rd-act.live .act-icon { animation:rdLivePulse 1.35s ease-in-out infinite; animation-play-state:var(--relay-loop-state); }
+  .rd-act .act-stack { display:flex; flex-direction:column; min-width:0; max-width:100%; }
+  .rd-act .act-copy { display:inline-flex; align-items:baseline; gap:4px; min-width:0; max-width:100%; }
+  .rd-act .averb { flex:none; font-weight:400; white-space:nowrap; }
+  .rd-act .aobj { min-width:0; font-weight:400; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .rd-act .aobj.file { color:inherit; text-decoration:underline; text-decoration-style:dotted; text-decoration-thickness:.5px; text-underline-offset:2px; }
+  .rd-act .aobj.command { color:color-mix(in oklab, var(--ink) 40%, transparent); }
+  .rd-act.live { color:var(--ink); }
+  .rd-act-progress { min-width:0; max-width:min(760px, 78vw); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    color:color-mix(in oklab, var(--ink) 52%, transparent); font-family:var(--mono); font-size:11px; line-height:17px; }
+  .rd-live-tail { display:flex; align-items:center; gap:7px; min-height:21px; font-family:var(--sans); font-size:14px; line-height:21px;
+    color:color-mix(in oklab, var(--ink) 64%, transparent); }
+  .rd-live-tail-dot { width:6px; height:6px; flex:0 0 6px; border-radius:999px; background:var(--provider, var(--accent));
+    animation:rdLivePulse 1.35s ease-in-out infinite; animation-play-state:var(--relay-loop-state); }
+  @keyframes rdLivePulse { 0%,100% { opacity:.34; } 50% { opacity:1; } }
+  .rd-said { align-self:flex-start; width:100%; font-family:var(--sans); font-size:14px; line-height:21px; font-weight:445; color:var(--ink); overflow-wrap:anywhere; }
+  /* Codex conversation geometry: the agent and its work own the left edge;
+     every user turn is a compact bubble on the right. A follow-up is a real
+     message in the conversation, never replaced by “Reading the Task.” */
+  .rd-user { align-self:flex-end; width:fit-content; max-width:77%; padding:8px 12px;
+    border-radius:16px; background:var(--wash); font-family:var(--sans); font-size:14px; line-height:21px; font-weight:445;
+    color:var(--ink); overflow-wrap:anywhere; }
+  .rd-user p { margin:0 0 8px; font:inherit; color:inherit; }
+  .rd-user p:last-child { margin-bottom:0; }
+  .rd-user-files { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); justify-content:flex-end; gap:8px;
+    width:min(560px, 70vw); margin-bottom:7px; }
+  .rd-user-files.one { grid-template-columns:minmax(0, 1fr); }
+  .rd-user-files:last-child { margin-bottom:0; }
+  .rd-user-image-wrap { display:flex; flex-direction:column; min-width:0; margin:0; }
+  .rd-user-image-frame { display:grid; place-items:center; width:100%; aspect-ratio:16 / 10; overflow:hidden;
+    border:1px solid var(--hair); border-radius:12px; background:var(--wash); }
+  .rd-user-image-frame::before { content:""; width:5px; height:5px; background:var(--provider, var(--accent)); opacity:.52; }
+  .rd-user-image-wrap.ready .rd-user-image-frame { aspect-ratio:auto; background:transparent; }
+  .rd-user-image-wrap.ready .rd-user-image-frame::before { display:none; }
+  .rd-user-image { display:block; width:100%; height:auto; object-fit:contain; opacity:0; transform:scale(.98);
+    transition:opacity var(--t-slow) var(--settle), transform var(--t-slow) var(--spring, var(--soft)); }
+  .rd-user-image-wrap.ready .rd-user-image { opacity:1; transform:none; }
+  .rd-user-image-cap { padding:5px 2px 0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    font-family:var(--mono); font-size:10.5px; line-height:15px; color:var(--muted-2); }
+  .rd-user-file { display:inline-flex; align-items:center; max-width:220px; padding:4px 8px; border-radius:9px; background:color-mix(in srgb, var(--ink) 7%, transparent); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .rd-prior-turn, .rd-current-turn { display:contents; }
+  .rd-activity { display:flex; flex-direction:column; gap:0; }
+  .rd-activity-toggle { position:relative; display:inline-flex; align-items:center; align-self:flex-start; gap:4px; min-width:0;
+    padding:0; border:1px solid transparent; border-radius:6px; background:transparent; color:color-mix(in srgb, var(--ink) 65%, transparent);
+    font-family:var(--sans); font-size:14px; line-height:21px; font-weight:445; cursor:pointer; text-align:left; }
+  .rd-activity-toggle:hover, .rd-activity-toggle:focus-visible { color:var(--ink); outline:none; }
+  .rd-activity-toggle .chev { width:12px; flex:none; color:color-mix(in oklab, var(--ink) 40%, transparent); opacity:0; transform:rotate(0deg); transition:transform .3s ease, opacity .15s ease; }
+  .rd-activity-toggle:hover .chev, .rd-activity-toggle:focus-visible .chev { opacity:1; }
+  .rd-activity-toggle[aria-expanded="true"] .chev { transform:rotate(90deg); opacity:1; }
+  .rd-activity-body { display:flex; flex-direction:column; gap:4px; padding:8px 0 4px 24px; }
+  .rd-activity-body.hidden { height:0; overflow:hidden; opacity:0; }
+  .rd-activity-body .rd-act { animation:rdActivityIn .22s cubic-bezier(.33,1,.68,1) both; }
+  .rd-empty { align-self:center; max-width:34em; font-family:var(--sans); font-size:12px; line-height:18px; text-align:center; color:var(--muted-2); }
+  .rd-activity + .worked-for-divider { margin-top:-12px; }
+  .worked-for-divider { height:1px; margin:0; padding:0; border-top:1px solid var(--hair); }
+  .rd-final { margin:0; font-family:var(--sans); font-size:14px; line-height:21px; font-weight:445; color:var(--ink); overflow-wrap:anywhere; }
+  .rd-final p { margin:0 0 11px; font-family:inherit; font-size:inherit; line-height:inherit; }
+  .rd-final p:last-child { margin-bottom:0; }
+  /* Installed Codex resolves text-size-chat to 14px × 1.5 = exactly 21px. */
+  .scroll.work-scroll-active { overflow-y:hidden; padding-bottom:0; }
+  #readerView.work-view, #readerBody.work-mode { height:100%; min-height:0; }
+  #readerBody.work-mode { overflow:hidden; }
+  .work-surface { position:relative; display:flex; flex:1 1 auto; min-height:0; width:100%; }
+  .work-scroll { --work-footer-height:0px; position:absolute; inset:0; overflow-x:hidden; overflow-y:auto;
+    overscroll-behavior:contain; overflow-anchor:none; scroll-padding-bottom:var(--work-footer-height);
+    padding:12px 20px calc(var(--work-footer-height) + 16px); scrollbar-gutter:stable both-edges; }
+  .work-scroll:focus { outline:none; }
+  .work-scroll-inner { width:100%; max-width:48rem; min-height:100%; margin:0 auto; display:flex; flex-direction:column; }
+  .work-context { display:flex; flex-direction:column; gap:2px; margin-bottom:18px; }
+  .work-context .rd-kicker { width:100%; margin:0; text-align:left; }
+  .work-context .rd-headline { width:100%; margin:8px 0 0; text-align:left; font-family:var(--sans); font-size:16px; line-height:24px; font-weight:600; letter-spacing:0; }
+  .work-conversation { display:flex; flex-direction:column; gap:24px; font-size:14px; line-height:21px; }
+  .work-starting { display:flex; align-items:center; gap:8px; min-height:21px; color:color-mix(in oklab,var(--ink) 64%,transparent); font:445 14px/21px var(--sans); }
+  .work-starting .rd-live-tail-dot { display:block; }
+  .work-connect { width:100%; max-width:48rem; margin:30px auto 0; }
+  .work-connect-title { color:var(--ink); font:650 18px/1.3 var(--sans); letter-spacing:-.01em; }
+  .work-connect-copy { max-width:36rem; margin-top:7px; color:var(--muted); font:400 13px/1.5 var(--sans); }
+  .work-connect-actions { display:grid; grid-template-columns:repeat(2,minmax(0,245px)); gap:10px; width:min(500px,100%); margin-top:20px; }
+  .work-connect-actions .th-host-action { min-width:0; border:1px solid var(--hair); border-radius:12px; }
+  .work-connect-actions .th-host-action + .th-host-action { border-top:1px solid var(--hair); }
+  .work-connect-actions .th-host-action:disabled { cursor:default; opacity:.55; }
+  .work-connect-error { min-height:18px; margin-top:10px; color:var(--danger); font:500 11px/1.45 var(--sans); }
+  .work-connect-dock .ta-note:disabled { color:var(--muted-3); opacity:1; }
+  @media (max-width:620px) { .work-connect-actions { grid-template-columns:1fr; width:min(280px,100%); } }
+  .work-turn { display:flex; flex-direction:column; gap:16px; min-width:0;
+    content-visibility:auto; contain-intrinsic-size:auto 240px; }
+  .work-agent, .work-live-units { display:flex; flex-direction:column; min-width:0; }
+  .work-agent { gap:16px; align-self:stretch; } .work-live-units { gap:4px; }
+  .work-turn .rd-user-wrap { align-self:flex-end; }
+  .work-turn .rd-final, .work-turn .rd-said { align-self:flex-start; width:100%; }
+  .work-response-spacer { flex:0 0 24px; min-height:24px; transition:min-height .22s cubic-bezier(.33,1,.68,1); }
+  .work-surface[data-work-active="true"] .work-response-spacer { min-height:clamp(72px,20vh,156px); }
+  .work-footer { position:absolute; left:0; right:0; bottom:0; z-index:4; padding:30px 20px 16px;
+    background:color-mix(in srgb,var(--bg) 62%,transparent); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); }
+  .work-footer-inner { width:100%; max-width:48rem; margin:0 auto; }
+  .work-footer .rd-col.run { padding:0; } .work-footer .rd-col.run .qr { width:100%; max-width:none; margin-top:0; }
+  .work-conversation .rd-act, .work-conversation .rd-said, .work-conversation .rd-final,
+  .work-conversation .rd-user, .work-conversation .rd-activity-toggle { font-size:14px; line-height:21px; }
+  .work-conversation .rd-activity { gap:0; }
+  .work-conversation .rd-activity-toggle { gap:4px; border:0; border-radius:6px; color:color-mix(in oklab,var(--ink) 60%,transparent); }
+  .work-conversation .rd-activity-toggle:focus-visible { box-shadow:0 0 0 2px var(--accent-soft); }
+  .work-conversation .rd-activity-toggle .chev { opacity:0; transition:transform .3s ease,opacity .15s ease; }
+  .work-conversation .rd-activity-toggle:hover .chev, .work-conversation .rd-activity-toggle:focus-visible .chev,
+  .rd-activity[data-disclosure-state="opening"] .chev, .rd-activity[data-disclosure-state="expanded"] .chev { opacity:1; }
+  .rd-activity[data-disclosure-state="opening"] .chev, .rd-activity[data-disclosure-state="expanded"] .chev { transform:rotate(90deg); }
+  .work-conversation .rd-activity-body { display:block; height:0; overflow:hidden; opacity:0; padding:0 0 0 24px;
+    transition:height .3s cubic-bezier(.19,1,.22,1),opacity .3s cubic-bezier(.19,1,.22,1); }
+  .work-conversation .rd-activity-body-inner { display:flex; flex-direction:column; gap:4px; padding:8px 0 4px; }
+  .rd-activity[data-disclosure-state="opening"] .rd-activity-body,
+  .rd-activity[data-disclosure-state="expanded"] .rd-activity-body { opacity:1; overflow:visible; }
+  .rd-activity[data-disclosure-state="closing"] .rd-activity-body { opacity:0; overflow:hidden; }
+  .native-cadenced-shimmer { position:relative; color:color-mix(in srgb,var(--ink) 45%,transparent); }
+  .native-cadenced-shimmer-sweep { pointer-events:none; width:100%; position:absolute; inset:0 auto 0 0; overflow:hidden; transform:translate(-50%); -webkit-mask-image:linear-gradient(90deg,transparent 0%,#000 20% 30%,transparent 50% 100%); mask-image:linear-gradient(90deg,transparent 0%,#000 20% 30%,transparent 50% 100%); }
+  .native-cadenced-shimmer-highlight { color:#0009; width:100%; display:block; transform:translate(50%); }
+  .native-cadenced-shimmer.active .native-cadenced-shimmer-sweep,
+  .native-cadenced-shimmer.active .native-cadenced-shimmer-highlight { animation-duration:1s; animation-timing-function:steps(48,end); animation-iteration-count:1; }
+  .native-cadenced-shimmer.active .native-cadenced-shimmer-sweep { animation-name:nativeCadencedSweep; }
+  .native-cadenced-shimmer.active .native-cadenced-shimmer-highlight { animation-name:nativeCadencedHighlight; }
+  @keyframes nativeCadencedSweep { from { transform:translate(-50%); } to { transform:translate(125%); } }
+  @keyframes nativeCadencedHighlight { from { transform:translate(50%); } to { transform:translate(-125%); } }
+  .work-markdown .md-h { font-family:var(--sans); font-weight:650; margin:18px 0 7px; color:var(--ink); }
+  .work-markdown .md-code { font-family:var(--mono); font-size:.86em; padding:1px 6px; border-radius:6px; background:var(--wash); }
+  .rd-said .md-code { padding:1px 6px; border-radius:6px; }
+  .rd-user-wrap { display:flex; flex-direction:column; align-items:flex-end; max-width:77%; gap:4px; }
+  .rd-user-wrap .rd-user { align-self:auto; max-width:100%; }
+  .rd-user-actions { display:flex; justify-content:flex-end; gap:8px; min-height:21px; opacity:0; transition:opacity .13s ease; }
+  .rd-user-wrap:hover .rd-user-actions, .rd-user:focus-visible + .rd-user-actions, .rd-user-actions:focus-within { opacity:1; }
+  .rd-user-actions button { appearance:none; border:0; background:transparent; padding:3px 5px; color:var(--muted-2); font:500 11px/15px var(--sans); cursor:pointer; }
+  .rd-user-actions button:hover { color:var(--ink); }
+  .rd-generated-heading { color:var(--muted); font-size:14px; line-height:21px; margin-bottom:4px; }
+  .rd-semantic-group { color:color-mix(in oklab,var(--ink) 64%,transparent); font:445 14px/21px var(--sans); }
+  .rd-semantic-group .rd-activity-toggle { width:max-content; max-width:100%; }
+  .rd-semantic-group .rd-activity-body-inner { max-height:14rem; overflow-y:auto; overscroll-behavior:contain; }
+  .rd-blocking, .rd-error, .rd-status { font-size:14px; line-height:21px; color:var(--ink); }
+  .rd-error { display:flex; gap:8px; align-items:flex-start; color:var(--danger); }
+  .rd-error button { appearance:none; border:0; background:transparent; color:inherit; font:600 12px/21px var(--sans); cursor:pointer; }
+  .work-unit[role="button"] { cursor:pointer; border-radius:6px; outline:none; }
+  .work-unit[role="button"]:focus-visible { box-shadow:0 0 0 2px var(--accent-soft); }
+  .work-unit-detail { margin:7px 0 3px 22px; padding:8px 11px; max-height:260px; overflow:auto; border:1px solid var(--hair); border-radius:9px; background:var(--wash); color:var(--muted); font:11px/1.6 var(--mono); white-space:pre-wrap; user-select:text; }
+  .work-markdown .md-list { margin:8px 0 8px 2px; padding-left:20px; } .work-markdown .md-list li { margin:5px 0; }
+  .work-markdown .md-quote { margin:12px 0; padding:5px 0 5px 14px; border-left:2px solid var(--edge); color:var(--muted-2); }
+  @media (prefers-reduced-motion:reduce) {
+    .work-surface.work-entering .work-transition-source { display:none; animation:none; }
+    .work-surface.work-entering .work-scroll, .work-surface.work-entering .work-footer { opacity:1; transform:none; animation:none; }
+    .rd-activity-body { transition-duration:.3s !important; transition-timing-function:cubic-bezier(.19,1,.22,1) !important; }
+    .rd-activity-body .rd-act { animation:none; transform:none; }
+    .native-cadenced-shimmer.active .native-cadenced-shimmer-sweep,
+    .native-cadenced-shimmer.active .native-cadenced-shimmer-highlight { animation:none; }
+    .work-response-spacer { transition:none; }
+  }
   .reader-actions { display:flex; gap:2px; margin:12px 16px 0; padding:2px; border-radius:var(--r-2); background:var(--wash); }
   .reader-actions button { flex:1 1 0; appearance:none; border:0; background:transparent; cursor:pointer; text-align:center; padding:7px 4px; font-family:var(--sans); font-size:11.5px; border-radius:var(--r-1); color:var(--ink); }
   .reader-actions button.pri { font-weight:600; color:var(--accent); }
@@ -2924,6 +3055,7 @@
     </div>
   </div>
 
+<script src="./work-ui.js"></script>
 <script src="./hover-intent.js"></script>
 <script src="./read-receipts.cjs"></script>
 <script src="./chat-presentation.js"></script>
@@ -3230,7 +3362,7 @@
     if (active) {
       flushDeferredSurfaceRender();
       if (slackConnectionRefreshDeferred) refreshSlackConnection({ preserveWaiting:true });
-    }
+    } else syncRunMirrors();
   }
   new MutationObserver(reconcileSurfaceActivity).observe(cardEl, { attributes:true, attributeFilter:["class"] });
   document.addEventListener("visibilitychange", reconcileSurfaceActivity);
@@ -3478,6 +3610,8 @@
     if (!collapsed) {
       flushPendingRelaysRender();
       flushDeferredSurfaceRender();
+    } else {
+      syncRunMirrors();
     }
   }
   // Park the card invisibly at expanded size while the OS window is hidden, so the
@@ -3499,6 +3633,7 @@
     cardEl.classList.add("offstage");
     cardEl.classList.remove("collapsed", "ghost", "bye");
     syncContinuousMotion();
+    syncRunMirrors();
     snapSize(EXPANDED.w, EXPANDED.h);
   }
   // ✕ — the card leaves gracefully, then the main process hides the window and keeps
@@ -3539,6 +3674,7 @@
     collapsed = true;
     cardEl.classList.add("collapsed");
     syncContinuousMotion();
+    syncRunMirrors();
     refreshCountLabel();
     springTo(PILL.w, PILL.h);
     renderAll();
@@ -5277,7 +5413,7 @@
     } catch {}
     finally { activeCanonicalChatRefresh = null; }
   }
-  let signupStage = "installed";
+  let signupStage = "method";
   let signupBusy = false;
   let signupEmail = "";
   let signupAccount = null;
@@ -5288,6 +5424,7 @@
   let signupPollErrorVisible = false;
   let signupConnectionCommitted = false;
   let signupStateLoaded = false;
+  let signupInitializationFailed = false;
   let signupForceGoogleSelection = false;
   const SIGNUP_POLL_BASE_MS = 1400;
   const SIGNUP_POLL_MAX_MS = 11200;
@@ -6486,55 +6623,60 @@
   function permMode(vendor) {
     return protoPref(`proto.perm.${vendor}`, PERM_DEFAULTS[vendor] || "");
   }
-  // THE RECEIPT is the state. main stamps agentHandoff on the row
-  // (starting → running | failed) and the pill keeps a short-lived local copy
-  // so the capsule becomes the card in the same click, before the push lands.
-  const handoffLocal = new Map(); // relayId -> { state, provider, note, at, ... }
-  function handoffFor(r) {
-    const key = String(r?.id || "");
-    const local = handoffLocal.get(key) || null;
-    const remote = r?.agentHandoff && typeof r.agentHandoff === "object" && r.agentHandoff.state ? r.agentHandoff : null;
-    if (local && remote) {
-      const remoteAt = Date.parse(String(remote.updatedAt || "")) || 0;
-      if (remoteAt >= local.at) { handoffLocal.delete(key); return remote; }
-      return local;
-    }
-    return local || remote;
-  }
-  function handoffAppName(h) { return h?.provider === "codex" ? "Codex" : "Claude Code"; }
   function taskBoardState(id) {
     const row = relayById(id) || {};
     const local = taskLocal.get(id);
-    const h = handoffFor(row);
-    if (h?.state === "starting") return "running";
+    // Optimistic transport and the canonical feed may lead the inbox packet,
+    // but an old renderer-local "running" flag is never liveness evidence.
+    if (runFeedPending.has(String(id))) return "running";
+    const feedState = runnerStateForFeed(runFeedFor(id));
+    if (feedState && (feedState !== "running" || runFeedTimers.has(String(id)))) return feedState;
     if (row.completionReview) return "review";
+    // The completion receipt may arrive in Claude's final tool turn a few
+    // milliseconds before Relay's worker has flushed and released the native
+    // transcript. Ownership wins over the receipt for that interval: Open must
+    // stay disabled until there is only one possible writer.
+    if (row.runLive) return "running";
     if (row.taskCompletedAt) return "done";
     if (local === "done") return "done";
     if (local === "stopped") return "stopped";
     if (local === "waiting") return "waiting";
+    if (local === "running" && !row.taskStartedAt) return "running";
     const claim = taskClaimFor(row);
     if (claim?.workState === "completed") return "done";
     if (claim?.workState === "working") return "running";
-    // RUNNING MEANS THE APP HAS IT. A Started stamp with a session bound in
-    // the desktop app is running there until Done arrives; a stamp with
-    // nothing behind it is a run that stopped, and Start comes back.
+    // RUNNING MEANS RUNNING. A started stamp with nothing alive behind it is a
+    // run that stopped without finishing — it says so, and Start comes back.
     if (row.taskStartedAt) {
-      if (h?.state === "failed") return "stopped";
-      if (h?.state === "running") return "running";
+      // A Task started by the current MCP agent is genuinely Working even
+      // though the Relay pill does not own or monitor that provider process.
       if (row.taskRunOwner && row.taskRunOwner.kind === "external_mcp" && claim?.workState !== "idle") return "running";
       return row.runLive || local === "running" ? "running" : "stopped";
     }
-    if (h?.state === "failed") return "waiting";
     if (local === "parked") return "parked";
     return "waiting";
+  }
+  function runnerStateForFeed(feed) {
+    const turn = feed?.presentation?.turns?.at(-1) || feed?.workPresentation?.turns?.at(-1) || null;
+    const providerState = String(turn?.providerState || feed?.liveState || "").toLowerCase();
+    if (["needs_input", "blocked", "reconnecting", "waiting_for_device", "queued", "starting"].includes(providerState)) return "waiting";
+    if (turn?.active || turn?.status === "inProgress") return "running";
+    if (turn?.settled || turn?.cancelled || ["completed", "failed", "cancelled", "interrupted"].includes(String(turn?.status))) {
+      if (turn?.finalEligible && !turn?.cancelled && !["failed", "cancelled", "interrupted"].includes(String(turn?.status))) return "done";
+      return String(turn?.status) === "completed" ? "waiting" : "stopped";
+    }
+    if (["completed", "archived"].includes(providerState)) return "done";
+    if (["failed", "stopped", "offline", "stalled"].includes(providerState)) return "stopped";
+    if (["running", "active"].includes(providerState)) return "running";
+    return "";
   }
   function relayWorkState(row) {
     if (!row || isTaskRow(row)) return row ? taskBoardState(row.id) : "idle";
     const key = String(row.id);
     const local = taskLocal.get(key);
-    const h = handoffFor(row);
-    if (h?.state === "starting") return "running";
-    if (h?.state === "failed") return "stopped";
+    if (runFeedPending.has(key)) return "running";
+    const feedState = runnerStateForFeed(runFeedFor(row.id));
+    if (feedState && (feedState !== "running" || runFeedTimers.has(key))) return feedState;
     if (row.source?.host === "relay-agent-run") {
       if (String(row.forAgent || "").trim()) {
         return /did not complete successfully/i.test(String(row.forAgent)) ? "stopped" : "done";
@@ -6542,11 +6684,13 @@
       if (["stopped", "waiting"].includes(local)) return local;
       return "waiting";
     }
+    if (row.runLive) return "running";
     if (row.workCompletedAt) return "done";
     if (local === "done") return "done";
     if (local === "stopped") return "stopped";
     if (local === "waiting") return "waiting";
-    if (row.workStartedAt) return h?.state === "running" ? "running" : "stopped";
+    if (local === "running" && !row.workStartedAt) return "running";
+    if (row.workStartedAt) return "stopped";
     return "idle";
   }
   // The B-rule (Sven, hand-off ambiguity round): the CONVERSATION owns the
@@ -6610,7 +6754,8 @@
     if (!key) return;
     workProviderPrompts.set(key, { requested:provider || providerIdForApp(routeFor(key).app), busy:"", error:String(error || "") });
     if (activeView === "reader" && String(readerId) === key) {
-      readerTab = "agent";
+      readerTab = "work";
+      readerWorkVisible = true;
       readerTabSwap = true;
     }
     renderAll();
@@ -6640,6 +6785,7 @@
     fadeRowNoteLater(key, 3000);
     if (activeView === "reader" && String(readerId) === key) {
       readerTab = "agent";
+      readerWorkVisible = false;
       renderReader();
     } else renderAll();
   }
@@ -6725,7 +6871,6 @@
   // agent, and Approve sits where Send sits.
   function taskStatusLine(r, { inline = false } = {}) {
     const state = taskBoardState(r.id);
-    if (handoffFor(r)?.state === "failed") return "";
     if (state === "waiting" || state === "running" || state === "done") return "";
     if (state === "stopped") {
       const recovery = requestHasNativeSession(r) ? "Send a follow-up to resume it." : "Start it again.";
@@ -6768,19 +6913,996 @@
     loadSchedules(true);
     return res;
   }
-  // Which app has this Relay's session. The receipt is the authority; before
-  // any hand-off the rail's choice names the app.
+  const runFeedTimers = new Map(); // relayId -> interval handle
+  const runFeedSeen = new Map(); // relayId -> last feed, so a re-render paints from memory
+  const runFeedSettle = new Map(); // relayId -> polls since completion (grace window)
+  const runPaintedSegments = new Map(); // relayId -> stable segment keys already animated
+  const runFeedEpoch = new Map(); // relayId -> generation; invalidates an awaited stale poll
+  const runActivityOpen = new Set(); // turn keys whose completed activity is expanded
+  const runDisclosureControllers = new Map();
+  const runScrollControllers = new Map();
+  const runScrollSnapshots = new Map();
+  const runTurnNodes = new Map(); // relayId -> keyed turn nodes, preserved across feed events
+  const runSummaryStabilizer = RelayWorkUI.createSummaryStabilizer({ delayMs: 1000 });
+  const runFeedPending = new Set(); // a user turn is visible while native transport starts
+  const runFeedRevision = new Map(); // relayId -> last monotonic main-owned snapshot revision
+  const MAX_NATIVE_PRESENTATION_TURNS = 20; // broker bounds snapshots before IPC
+  const runQueuedMessages = new Map(); // relayId -> follow-ups waiting for this turn to finish
+  const runQueueSending = new Set(); // relayId -> one queue transport at a time
+  const runPushFeeds = new Set(); // relay ids attached to main's native event bridge
+  function runFeedFor(id) { return runFeedSeen.get(String(id || "")) || null; }
+  function elapsedClock(fromISO, toISO) {
+    const from = fromISO ? new Date(fromISO).getTime() : 0;
+    if (!from) return "";
+    const to = toISO ? new Date(toISO).getTime() : Date.now();
+    const secs = Math.max(0, Math.round((to - from) / 1000));
+    return `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+  }
+  function humanRunDuration(durationMs) {
+    if (!Number.isFinite(durationMs) || durationMs < 0) return "";
+    const seconds = Math.max(1, Math.round(durationMs / 1000));
+    if (seconds < 60) return `${seconds} sec`;
+    const minutes = Math.floor(seconds / 60);
+    const remainder = seconds % 60;
+    if (minutes < 60) return remainder ? `${minutes} min ${remainder} sec` : `${minutes} min`;
+    const hours = Math.floor(minutes / 60);
+    const minuteRemainder = minutes % 60;
+    return minuteRemainder ? `${hours} h ${minuteRemainder} min` : `${hours} h`;
+  }
+  // An act reads as a SENTENCE: the verb belongs to the tool, the object is a
+  // noun phrase. Falling back to "Ran" + whatever argument came first produced
+  // "Ran David Kariuki" for a contact lookup (David, live) — a verb borrowed
+  // from the shell wrapped around a search query.
+  const ACTS = {
+    Bash: { active: "Running", done: "Ran", from: ["description", "command"], kind: "command" },
+    Read: { active: "Reading", done: "Read", from: ["file_path"], kind: "read", objectType: "file" },
+    Write: { active: "Writing", done: "Wrote", from: ["file_path"], kind: "edit", objectType: "file" },
+    Edit: { active: "Editing", done: "Edited", from: ["file_path"], kind: "edit", objectType: "file" },
+    Glob: { active: "Searching files for", done: "Searched files for", from: ["pattern"], kind: "search" },
+    ListFiles: { active: "Listing", done: "Listed", from: ["path"], kind: "list", objectType: "file" },
+    Grep: { active: "Searching for", done: "Searched for", from: ["pattern"], kind: "search" },
+    WebFetch: { active: "Reading", done: "Read", from: ["url"], kind: "web" },
+    WebSearch: { active: "Searching the web for", done: "Searched the web for", from: ["query"], kind: "web" },
+    Task: { active: "Delegating", done: "Delegated", from: ["description"], kind: "call" },
+    shell: { active: "Running", done: "Ran", from: ["command"], kind: "command" },
+    apply_patch: { active: "Editing", done: "Edited", from: ["path", "file_path"], kind: "edit", objectType: "file" },
+    relay_send: { active: "Sending", done: "Sent", from: [], object: "the completion back to the sender", kind: "call" },
+    relay_contacts_search: { active: "Searching for", done: "Searched for", from: ["query"], kind: "search" },
+    relay_thread_fetch: { active: "Reading", done: "Read", from: [], object: "the conversation", kind: "read" },
+    relay_chat_fetch: { active: "Reading", done: "Read", from: [], object: "the conversation", kind: "read" },
+    relay_inbox_list: { active: "Reading", done: "Read", from: [], object: "the inbox", kind: "read" },
+    relay_sent_list: { active: "Reading", done: "Read", from: [], object: "sent relays", kind: "read" },
+    relay_groups_list: { active: "Listing", done: "Listed", from: [], object: "channels", kind: "list" },
+    relay_chats_list: { active: "Listing", done: "Listed", from: [], object: "conversations", kind: "list" },
+  };
+  // "relay_contacts_search" -> "relay contacts search": a readable name is a
+  // better object than a raw argument when the tool is one we do not know.
+  function humanTool(tool) {
+    return String(tool || "")
+      .replace(/^mcp__.*?__/, "")
+      .replace(/[_-]+/g, " ")
+      .trim();
+  }
+  function parsedActInput(rec) {
+    if (rec?.input && typeof rec.input === "object") return rec.input;
+    try {
+      const value = JSON.parse(String(rec?.input || "{}"));
+      return value && typeof value === "object" ? value : {};
+    } catch { return {}; }
+  }
+  function activityPathLabel(value) {
+    const full = String(value == null ? "" : value).trim().replace(/[\\/]+$/, "");
+    if (!full) return { label: "", full: "" };
+    const label = full.split(/[\\/]/).filter(Boolean).at(-1) || full;
+    return { label, full };
+  }
+  function compactActivityText(value, max = 96) {
+    const oneLine = String(value == null ? "" : value).replace(/\s+/g, " ").trim();
+    if (oneLine.length <= max) return oneLine;
+    const head = oneLine.slice(0, Math.max(1, max - 1));
+    const word = head.replace(/\s+\S*$/, "").trim();
+    return `${word || head.trimEnd()}…`;
+  }
+  function activityIcon(kind) {
+    const paths = {
+      command: `<path d="M2.5 3.5h11v9h-11zM4.5 6l2 2-2 2M8 10h3"/>`,
+      read: `<path d="M4 2.5h5l3 3v8H4zM9 2.5v3h3M6 8h4M6 10.5h3"/>`,
+      edit: `<path d="m3 11.7.4-2.3 6.8-6.8 2.2 2.2-6.8 6.8zM8.9 3.9l2.2 2.2"/>`,
+      search: `<circle cx="7" cy="7" r="3.5"/><path d="m9.7 9.7 3 3"/>`,
+      list: `<path d="M5.5 4h7M5.5 8h7M5.5 12h7M3 4h.1M3 8h.1M3 12h.1"/>`,
+      web: `<circle cx="8" cy="8" r="5.5"/><path d="M2.7 8h10.6M8 2.5c1.6 1.5 2.4 3.4 2.4 5.5S9.6 12 8 13.5C6.4 12 5.6 10.1 5.6 8S6.4 4 8 2.5"/>`,
+      call: `<path d="M5 3.5h7.5V11H9l-2.5 2v-2H5zM3.5 5.5H3v7h1.5"/>`,
+    };
+    return `<svg class="act-icon" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round">${paths[kind] || paths.call}</svg>`;
+  }
+  function actHtml(act, active = false) {
+    const object = compactActivityText(act.object);
+    const objectClass = act.objectType === "file" ? " file" : act.kind === "command" ? " command" : "";
+    const title = act.objectType === "file" && act.fullObject && act.fullObject !== object ? ` title="${esc(act.fullObject)}"` : "";
+    const progress = active && act.outputPreview
+      ? `<span class="rd-act-progress" title="${esc(act.outputPreview)}">${esc(act.outputPreview)}</span>`
+      : "";
+    return `<div class="rd-act${active ? " live" : ""}" data-act="1" data-act-kind="${esc(act.kind || "call")}">${activityIcon(act.kind)}<span class="act-stack"><span class="act-copy"><span class="averb">${esc(act.verb)}</span>${object ? `<span class="aobj${objectClass}"${title}>${esc(object)}</span>` : ""}</span>${progress}</span></div>`;
+  }
+  function actOf(rec, active = false) {
+    if (!rec || rec.type !== "tool_call") return null;
+    const raw = String(rec.tool || "");
+    // Codex reports a bare name ("relay_contacts_search"); Claude reports the
+    // namespaced one ("mcp__relay__relay_contacts_search"). Same act.
+    const tool = raw.replace(/^mcp__.*?__/, "");
+    if (tool === "ToolSearch") return null; // the agent loading its own tools is plumbing
+    const input = parsedActInput(rec);
+    const spec = ACTS[tool];
+    const output = rec.outputPreview ? { outputPreview: String(rec.outputPreview) } : {};
+    if (spec) {
+      const verb = active ? spec.active : spec.done;
+      if (spec.object) return { verb, object: spec.object, kind: spec.kind, ...output };
+      for (const key of spec.from) {
+        const value = String(input[key] == null ? "" : input[key]).trim();
+        if (!value) continue;
+        if (spec.objectType === "file") {
+          const path = activityPathLabel(value);
+          return { verb, object: path.label, fullObject: path.full, objectType: "file", kind: spec.kind, ...output };
+        }
+        return { verb, object: compactActivityText(value), fullObject: value, kind: spec.kind, ...output };
+      }
+      return { verb, object: humanTool(tool), kind: spec.kind, ...output };
+    }
+    // Unknown tool: name the TOOL, never dress an argument in a borrowed verb.
+    return { verb: active ? "Calling" : "Called", object: humanTool(tool) || "a tool", kind: "call", ...output };
+  }
+  function activitySummary(acts) {
+    const counts = new Map();
+    for (const act of acts) {
+      const kind = ["read", "search", "list"].includes(act.kind) ? "exploration" : (act.kind || "call");
+      counts.set(kind, (counts.get(kind) || 0) + 1);
+    }
+    const noun = {
+      edit: (n) => `edited ${n === 1 ? "a file" : "files"}`,
+      exploration: () => "read files",
+      web: () => "searched the web",
+      command: (n) => `ran ${n === 1 ? "a command" : "commands"}`,
+      call: (n) => `called ${n === 1 ? "a tool" : "tools"}`,
+    };
+    const phrases = [...counts].map(([kind, count]) => (noun[kind] || noun.call)(count));
+    if (!phrases.length) return "Worked";
+    const joined = phrases.length === 1 ? phrases[0]
+      : phrases.length === 2 ? `${phrases[0]} and ${phrases[1]}`
+        : `${phrases.slice(0, -1).join(", ")}, and ${phrases.at(-1)}`;
+    return joined.charAt(0).toUpperCase() + joined.slice(1);
+  }
+  function toolCallHasResult(records, recordIndex) {
+    for (let i = recordIndex + 1; i < records.length; i += 1) {
+      const rec = records[i] || {};
+      if (rec.type === "tool_result") return true;
+      if (rec.type === "tool_call") return false;
+    }
+    return false;
+  }
+  function fadedRunSegment(part, delay) {
+    return part.html.replace(
+      /^<div class="/,
+      `<div data-run-segment="${esc(part.key)}" style="--fade-delay:${delay}ms" class="rd-fade `,
+    );
+  }
+  // Provider transports carry Relay's authorized result-return contract in the
+  // same native user event so the worker cannot miss it. It is runtime
+  // metadata, not text the human typed. Codex renders user-authored content as
+  // the right-side message and keeps developer/runtime instructions out of the
+  // conversation; apply the same partition here.
+  function visibleRunUserMessage(text) {
+    const raw = String(text || "");
+    // Claude's Monitor writes lifecycle notices into its JSONL as synthetic
+    // role:user messages. They are provider system events, not human turns.
+    if (/^\s*<task-notification\b/i.test(raw)) return "";
+    // A newly-created native provider turn carries the immutable Relay
+    // documents as context and the human's optional composer note in one
+    // transport event. The documents already live behind Show request; they
+    // are not a human chat message. Paint only what the human actually typed,
+    // exactly as Codex does with its user item.
+    const documents = raw.match(/<relay-documents>\s*([\s\S]*?)\s*<\/relay-documents>/i);
+    if (documents) {
+      return raw
+        .replace(/<relay-envelope>[\s\S]*?<\/relay-envelope>/gi, "")
+        .replace(/<relay-documents>[\s\S]*?<\/relay-documents>/gi, "")
+        .replace(/<relay-runtime-contract>[\s\S]*?<\/relay-runtime-contract>/gi, "")
+        .replace(/^\s*Begin the task as briefed\.\s*/i, "")
+        .trim();
+    }
+    // Historical in-flight runs may still carry the old single-body wrapper.
+    const body = raw.match(/<relay-body>\s*([\s\S]*?)\s*<\/relay-body>/i);
+    if (body) return String(body[1] || "").trim();
+    return raw
+      .replace(/<relay-envelope>[\s\S]*?<\/relay-envelope>/gi, "")
+      .replace(/<relay-documents>[\s\S]*?<\/relay-documents>/gi, "")
+      .replace(/<relay-runtime-contract>[\s\S]*?<\/relay-runtime-contract>/gi, "")
+      .replace(/^\s*Begin the task as briefed\.\s*/i, "")
+      .trim();
+  }
+  function safeWorkImageUrl(value) {
+    const url = String(value || "");
+    return /^(?:blob:|data:image\/(?:png|jpeg|gif|webp);base64,)/i.test(url) ? url : "";
+  }
+  function runUserAttachmentsHtml(attachments) {
+    const rows = Array.isArray(attachments) ? attachments : [];
+    if (!rows.length) return "";
+    const imageCount = rows.filter((attachment) => attachment?.image || attachment?.kind === "image" || /^image\//i.test(String(attachment?.mimeType || ""))).length;
+    return `<div class="rd-user-files${imageCount === 1 ? " one" : ""}">${rows.map((attachment, attachmentIndex) => {
+      const name = String(attachment?.name || "Image");
+      const image = attachment?.image || attachment?.kind === "image" || /^image\//i.test(String(attachment?.mimeType || ""));
+      const previewUrl = safeWorkImageUrl(attachment?.previewUrl || attachment?.url);
+      if (image) return `<figure class="rd-user-image-wrap${previewUrl ? " ready" : ""}" data-work-attachment="${attachmentIndex}"><span class="rd-user-image-frame">${previewUrl ? `<img class="rd-user-image" src="${esc(previewUrl)}" alt="${esc(name)}">` : ""}</span><figcaption class="rd-user-image-cap">${esc(name)}</figcaption></figure>`;
+      return `<span class="rd-user-file" data-work-attachment="${attachmentIndex}">${esc(name)}</span>`;
+    }).join("")}</div>`;
+  }
+  function hydrateRunAttachmentPreviews(node, attachments, context) {
+    if (!window.relay.runFeedAttachment) return;
+    (Array.isArray(attachments) ? attachments : []).forEach((attachment, attachmentIndex) => {
+      const image = attachment?.image || attachment?.kind === "image" || /^image\//i.test(String(attachment?.mimeType || ""));
+      const slot = node.querySelector(`[data-work-attachment="${attachmentIndex}"]`);
+      if (!image || !slot || slot.classList.contains("ready") || slot.dataset.loading === "1") return;
+      slot.dataset.loading = "1";
+      window.relay.runFeedAttachment({ ...context, itemId:String(context.itemId || ""), attachmentId:String(attachment?.id || ""), attachmentIndex }).then((result) => {
+        if (!slot.isConnected) return;
+        const mimeType = /^image\/(?:png|jpeg|gif|webp)$/i.test(String(result?.mimeType || "")) ? String(result.mimeType) : "";
+        const encoded = mimeType && /^[A-Za-z0-9+/=]+$/.test(String(result?.dataBase64 || "")) ? `data:${mimeType};base64,${result.dataBase64}` : "";
+        const src = safeWorkImageUrl(result?.dataUrl || encoded);
+        if (!result?.ok || !src) { slot.dataset.loading = ""; return; }
+        const img = document.createElement("img"); img.className = "rd-user-image"; img.alt = String(attachment?.name || "Image");
+        img.addEventListener("load", () => slot.classList.add("ready"), { once:true });
+        img.src = src;
+        slot.querySelector(".rd-user-image-frame")?.append(img);
+      }).catch(() => { if (slot.isConnected) slot.dataset.loading = ""; });
+    });
+  }
+  function runFeedPresentation(feed) {
+    // The main process owns native event reduction. Renderer input is the
+    // bounded, redacted, conversation-level presentation snapshot; it carries
+    // every turnId and explicit placement (user, collapsible, final, blocking,
+    // standalone, post). Never infer phase === "final_answer" from newest prose.
+    const snapshot = feed?.presentation || feed?.workPresentation || null;
+    return RelayWorkUI.normalizeConversationView(snapshot || { turns:[] });
+  }
+  function nativeShimmerMarkup(label, active) {
+    const value = esc(label || "Thinking");
+    if (!active) return `<span>${value}</span>`;
+    return `<span class="native-cadenced-shimmer" data-native-cadenced-shimmer>${value}<span aria-hidden="true" class="native-cadenced-shimmer-sweep"><span class="native-cadenced-shimmer-highlight">${value}</span></span></span>`;
+  }
+  function bindNativeCadencedShimmer(node) {
+    node._nativeShimmerDestroy?.();
+    const shimmer = node.querySelector?.("[data-native-cadenced-shimmer]");
+    if (!shimmer || matchMedia("(prefers-reduced-motion: reduce)").matches) { node._nativeShimmerDestroy = null; return; }
+    let removeTimer = 0;
+    const pulse = () => {
+      shimmer.classList.remove("active");
+      void shimmer.offsetWidth;
+      shimmer.classList.add("active");
+      clearTimeout(removeTimer);
+      removeTimer = setTimeout(() => shimmer.classList.remove("active"), 1000);
+    };
+    let cadenceTimer = 0;
+    const cadence = () => { pulse(); cadenceTimer = setTimeout(cadence, 4000); };
+    const initialTimer = setTimeout(cadence, 600);
+    node._nativeShimmerDestroy = () => {
+      clearTimeout(initialTimer); clearTimeout(removeTimer); clearTimeout(cadenceTimer);
+      shimmer.classList.remove("active");
+    };
+  }
+  function runUnitMarkup(unit) {
+    if (!unit) return "";
+    if (unit.type === "activity") {
+      const source = unit.activity || {};
+      const active = source.status === "inProgress";
+      return actHtml({ ...source, verb:active ? source.activeVerb : source.doneVerb, active }, active)
+        .replace(/^<div /, `<div data-work-detail-id="${esc(unit.id || "")}" `);
+    }
+    if (unit.type === "exploration" || unit.type === "activityGroup") {
+      const rows = (unit.items || []).map((item) => runUnitMarkup(item)).filter(Boolean).join("");
+      const active = unit.active === true || (unit.items || []).some((item) => item.activity?.status === "inProgress");
+      const label = active ? (unit.activeSummary || "Thinking") : (unit.summary || "Worked");
+      return rows ? `<div class="rd-semantic-group rd-exploration" data-semantic-disclosure data-disclosure-state="collapsed"><button type="button" class="rd-activity-toggle" data-work-disclosure-toggle aria-expanded="false"><span>${nativeShimmerMarkup(label, active)}</span><svg class="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="M4 2.5 7.5 6 4 9.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button><div class="rd-activity-body" data-work-disclosure-body aria-hidden="true" inert><div class="rd-activity-body-inner">${rows}</div></div></div>` : "";
+    }
+    if (unit.type === "message" || unit.type === "plan" || unit.type === "compaction") {
+      return unit.text ? `<div class="rd-said work-markdown" data-markdown-animated="true">${readerParagraphs(unit.text)}</div>` : "";
+    }
+    if (unit.type === "artifact") {
+      const label = String(unit.text || unit.label || "Created an artifact");
+      return actHtml({ verb:"Created", object:activityPathLabel(label).label, fullObject:label, objectType:"file", kind:"edit" });
+    }
+    if (unit.type === "request") {
+      const label = String(unit.text || "Input required");
+      return `<div class="rd-blocking" role="status" aria-live="polite"><span>${readerParagraphs(label)}</span></div>`;
+    }
+    if (unit.type === "error") {
+      return `<div class="rd-error" role="alert"><span aria-hidden="true">!</span><span>${esc(unit.text || unit.message || "The run hit an error")}</span></div>`;
+    }
+    if (unit.type === "retry") return `<div class="rd-status" role="status" aria-live="polite">${esc(unit.text || "Reconnecting")}</div>`;
+    return unit.text ? `<div class="rd-said work-markdown">${readerParagraphs(unit.text)}</div>` : "";
+  }
+  function keyedChildren(parent, items, update, animateFresh = false) {
+    const existing = new Map([...parent.children].map((node) => [node.dataset.workKey, node]));
+    let cursor = parent.firstElementChild;
+    for (const item of items) {
+      let node = existing.get(item.key);
+      const fresh = !node;
+      if (!node) {
+        node = document.createElement(item.tag || "div");
+        node.dataset.workKey = item.key;
+      } else existing.delete(item.key);
+      update(node, item);
+      if (fresh && animateFresh) node.dataset.workAnimate = "1";
+      if (node.dataset.workAnimate === "1") node.classList.add("rd-fade");
+      if (node !== cursor) parent.insertBefore(node, cursor);
+      cursor = node.nextElementSibling;
+    }
+    for (const node of existing.values()) {
+      if (node._workMarkupFrame) cancelAnimationFrame(node._workMarkupFrame);
+      node._workDisclosure?.destroy?.();
+      node._workSemanticDisclosure?.destroy?.();
+      node._nativeShimmerDestroy?.();
+      if (node._workSummaryKey) runSummaryStabilizer.clear(node._workSummaryKey);
+      node.remove();
+    }
+  }
+  function updateMarkupNode(node, markup) {
+    if (node._workMarkupFrame) {
+      cancelAnimationFrame(node._workMarkupFrame);
+      node._workMarkupFrame = 0;
+      node._workPendingMarkup = null;
+    }
+    commitMarkupNode(node, markup);
+  }
+  function commitMarkupNode(node, markup) {
+    if (node.dataset.workMarkup === markup) return;
+    // Only the changed semantic unit is replaced; sibling turns, disclosure
+    // state, selection, and the composer remain mounted.
+    node._workSemanticDisclosure?.destroy?.();
+    node._nativeShimmerDestroy?.();
+    node.innerHTML = markup;
+    node.dataset.workMarkup = markup;
+    for (const link of node.querySelectorAll("a[href]")) {
+      link.target = "_blank"; link.rel = "noreferrer noopener";
+    }
+  }
+  function updateStreamingMarkupNode(node, markup) {
+    if (node.dataset.workMarkup === markup || node._workPendingMarkup === markup) return;
+    node._workPendingMarkup = markup;
+    if (node._workMarkupFrame) return;
+    node._workMarkupFrame = requestAnimationFrame(() => {
+      node._workMarkupFrame = 0;
+      const pending = node._workPendingMarkup;
+      node._workPendingMarkup = null;
+      if (node.isConnected && pending != null) commitMarkupNode(node, pending);
+    });
+  }
+  function bindSemanticDisclosure(node) {
+    const root = node.matches?.("[data-semantic-disclosure]") ? node : node.querySelector?.("[data-semantic-disclosure]");
+    if (!root) return;
+    if (!root._workSemanticDisclosure) root._workSemanticDisclosure = RelayWorkUI.createDisclosureController(root, { initiallyExpanded:false });
+    node._workSemanticDisclosure = root._workSemanticDisclosure;
+    bindNativeCadencedShimmer(node);
+  }
+  function bindRunUnitDetail(node, unit, context) {
+    if (!window.relay.runFeedDetail) return;
+    const targets = [
+      ...(node.matches?.("[data-work-detail-id]") ? [node] : []),
+      ...node.querySelectorAll("[data-work-detail-id]"),
+    ];
+    for (const target of targets) {
+      target.tabIndex = 0; target.setAttribute("role", "button");
+      target.setAttribute("aria-expanded", String(Boolean(target._workDetailOpen)));
+      target._workDetailContext = { ...context, itemId:target.dataset.workDetailId };
+      if (target._workDetailBound) continue;
+      const toggle = async (event) => {
+        event?.stopPropagation?.();
+        if (target._workDetailOpen) {
+          target._workDetailOpen = false; target.setAttribute("aria-expanded", "false");
+          target.removeAttribute("aria-controls");
+          target._workDetailHost?.remove(); target._workDetailHost = null; return;
+        }
+        const generation = (target._workDetailGeneration || 0) + 1;
+        target._workDetailGeneration = generation;
+        let result = await window.relay.runFeedDetail(target._workDetailContext).catch((error) => ({
+          ok:false,
+          error:String(error?.message || error || "Detail could not be loaded."),
+        }));
+        // Provider adapters can recover an item whose persisted native turn id
+        // predates the current presentation key. Item ids are session-scoped;
+        // retrying without the optional turn hint is still constrained by the
+        // exact live Relay/session subscription in main.
+        if (!result?.ok && target._workDetailContext?.turnId) {
+          result = await window.relay.runFeedDetail({ ...target._workDetailContext, turnId:"" }).catch((error) => ({
+            ok:false,
+            error:String(error?.message || error || "Detail could not be loaded."),
+          }));
+        }
+        if (!target.isConnected || target._workDetailGeneration !== generation) return;
+        if (!result?.ok) {
+          const host = document.createElement("div");
+          host.className = "work-unit-detail error";
+          host.setAttribute("role", "status");
+          host.textContent = String(result?.error || "Detail is unavailable for this activity.");
+          host.id = `work-detail-${String(target.dataset.workDetailId || "item").replace(/[^A-Za-z0-9_-]/g, "-")}`;
+          target.after(host); target._workDetailHost = host; target._workDetailOpen = true;
+          target.setAttribute("aria-controls", host.id);
+          target.setAttribute("aria-expanded", "true");
+          return;
+        }
+        const detail = result.detail || {};
+        const execution = detail.execution || null;
+        const lines = execution
+          ? [execution.title, execution.command || execution.script, execution.transcript || execution.result]
+            .filter((value) => value != null && String(value).trim())
+            .map((value) => typeof value === "string" ? value : JSON.stringify(value, null, 2))
+          : [typeof detail === "string" ? detail : JSON.stringify(detail, null, 2)];
+        const host = document.createElement("pre"); host.className = "work-unit-detail";
+        host.textContent = lines.join("\n\n");
+        host.id = `work-detail-${String(target.dataset.workDetailId || "item").replace(/[^A-Za-z0-9_-]/g, "-")}`;
+        // The activity header is a horizontal flex row. Detail is its next
+        // block sibling, as in Codex; nesting the pre inside that flex row sent
+        // the content off the right edge and made a successful click look dead.
+        target.after(host); target._workDetailHost = host; target._workDetailOpen = true;
+        target.setAttribute("aria-controls", host.id);
+        target.setAttribute("aria-expanded", "true");
+      };
+      target.addEventListener("click", toggle);
+      target.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggle(event); } });
+      target._workDetailBound = true;
+    }
+  }
+  function updateActivityDisclosure(node, item, relayKey) {
+    node.className = "rd-activity";
+    const openKey = `${relayKey}:${item.turnId}:${item.segment}`;
+    node._workSummaryKey = openKey;
+    if (!node._workBuilt) {
+      const button = document.createElement("button");
+      button.type = "button"; button.className = "rd-activity-toggle";
+      button.setAttribute("data-work-disclosure-toggle", "");
+      button.innerHTML = `<span data-work-summary></span><svg class="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="M4 2.5 7.5 6 4 9.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+      const body = document.createElement("div");
+      body.className = "rd-activity-body"; body.setAttribute("data-work-disclosure-body", "");
+      const inner = document.createElement("div"); inner.className = "rd-activity-body-inner";
+      body.append(inner); node.append(button, body); node._workInner = inner; node._workBuilt = true;
+      node.dataset.workDisclosure = `${item.turnId}:${item.segment}`;
+      node._workDisclosure = RelayWorkUI.createDisclosureController(node, {
+        initiallyExpanded:runActivityOpen.has(openKey),
+        onStateChange:(state) => {
+          if (state === "opening" || state === "expanded") runActivityOpen.add(openKey);
+          else runActivityOpen.delete(openKey);
+        },
+      });
+    }
+    const button = node.querySelector("[data-work-disclosure-toggle]");
+    button.setAttribute("aria-label", `${item.label}. ${item.units.length} previous messages.`);
+    const summaryNode = button.querySelector("[data-work-summary]");
+    runSummaryStabilizer.offer(openKey, item.label, (label) => { summaryNode.textContent = label; });
+    keyedChildren(node._workInner, item.units, (unitNode, unit) => {
+      unitNode.className = "work-unit";
+      if (["message", "plan", "compaction"].includes(unit.type)) updateStreamingMarkupNode(unitNode, runUnitMarkup(unit));
+      else updateMarkupNode(unitNode, runUnitMarkup(unit));
+      bindSemanticDisclosure(unitNode);
+      bindRunUnitDetail(unitNode, unit, { relayId:relayKey, sessionId:item.sessionId || "", turnId:item.turnId });
+    }, true);
+  }
+  function paintRunStream(id, feed) {
+    const key = String(id);
+    const host = document.querySelector(`[data-run-stream="${CSS.escape(key)}"]`);
+    if (!host) return;
+    const presentation = runFeedPresentation(feed);
+    const turns = presentation.turns.map((turn, turnIndex) => {
+      const blocks = RelayWorkUI.partitionTurn({ ...turn, units:(turn.units || []).filter((unit) => runUnitMarkup(unit)) })
+        .map((block) => block.type === "activity" ? { ...block, sessionId:feed?.sessionId || feed?.presentation?.sessionId || "" } : block);
+      return { ...turn, key:String(turn.turnId || turn.key || `turn-${turnIndex}`), blocks };
+    });
+    const snapshot = runScrollControllers.get(key)?.controller.capture();
+    keyedChildren(host, turns, (turnNode, turn) => {
+      turnNode.className = `work-turn ${turn.settled ? "settled" : "active"}`;
+      turnNode.dataset.workTurn = turn.key; turnNode.dataset.workAnchor = turn.key;
+      let agent = turnNode.querySelector(":scope > .work-agent");
+      if (!agent) { agent = document.createElement("div"); agent.className = "work-agent"; turnNode.append(agent); }
+      keyedChildren(agent, turn.blocks, (blockNode, block) => {
+        if (block.type === "activity") return updateActivityDisclosure(blockNode, block, key);
+        if (block.type === "user") {
+          blockNode.className = "rd-user-wrap";
+          blockNode._workUserText = block.unit.text || "";
+          const userCopy = String(block.unit.text || "").trim();
+          updateMarkupNode(blockNode, `${runUserAttachmentsHtml(block.unit.attachments)}${userCopy ? `<div class="rd-user work-markdown" tabindex="0" role="group" aria-label="Your message"><div class="rd-user-copy">${readerParagraphs(userCopy)}</div></div>` : ""}<div class="rd-user-actions"><button type="button" aria-label="Copy message">Copy</button><button type="button" aria-label="Edit message">Edit</button></div>`);
+          hydrateRunAttachmentPreviews(blockNode, block.unit.attachments, { relayId:key, sessionId:feed?.sessionId || feed?.presentation?.sessionId || "", turnId:turn.turnId || turn.key, itemId:block.unit.id });
+          if (!blockNode._workUserBound) {
+            blockNode.addEventListener("click", (event) => {
+              const action = event.target.closest("button[aria-label]");
+              if (!action) return;
+              if (action.getAttribute("aria-label") === "Copy message") navigator.clipboard?.writeText(blockNode._workUserText || "");
+              if (action.getAttribute("aria-label") === "Edit message") {
+                const composer = document.querySelector(`[data-work-footer="${CSS.escape(key)}"] .ta-note`);
+                if (!composer) return;
+                composer.value = blockNode._workUserText || "";
+                requestWorkDrafts.set(key, composer.value);
+                composer.dispatchEvent(new Event("input", { bubbles:true }));
+                composer.focus();
+              }
+            });
+            blockNode.addEventListener("dblclick", (event) => {
+              if (event.target.closest(".rd-user")) blockNode.querySelector('[aria-label="Edit message"]')?.click();
+            });
+            blockNode._workUserBound = true;
+          }
+          return;
+        }
+        blockNode.className = block.type === "divider" ? "worked-for-divider" : block.type === "final" ? "rd-final work-markdown" : "work-unit";
+        const markup = block.type === "divider" ? "" : block.type === "final" ? readerParagraphs(block.unit.text || "") : runUnitMarkup(block.unit);
+        if (block.type === "final" || (block.type === "unit" && ["message", "plan", "compaction"].includes(block.unit?.type))) {
+          updateStreamingMarkupNode(blockNode, markup);
+        } else updateMarkupNode(blockNode, markup);
+        if (block.type === "unit") bindSemanticDisclosure(blockNode);
+        if (block.type === "final") blockNode.dataset.localConversationFinalAssistant = "true";
+        if (block.type === "unit") bindRunUnitDetail(blockNode, block.unit, {
+          relayId:key,
+          sessionId:feed?.sessionId || feed?.presentation?.sessionId || "",
+          turnId:turn.turnId || turn.key,
+        });
+      }, true);
+    });
+    if (presentation.done && !turns.length) {
+      keyedChildren(host, [{ key:"empty" }], (node) => { node.className = "rd-empty"; node.textContent = "No native run output was captured."; });
+    }
+    requestAnimationFrame(() => runScrollControllers.get(key)?.controller.contentChanged(snapshot));
+  }
+  // The kicker is the run's sky: who is working, on what, for how long.
+  function paintRunKicker(id, feed) {
+    const kicker = document.querySelector(`[data-run-kicker="${CSS.escape(String(id))}"]`);
+    if (!kicker || !feed) return;
+    const rt = routeFor(id);
+    const app = runApp(id, feed);
+    const runKind = isTaskRow(relayById(id)) ? "Task" : "work";
+    const providerKnown = !feed?.legacyMissingSession;
+    const sq = providerKnown ? `<span class="ksq" style="background:${vendorSq(app)}"></span>` : "";
+    const owner = providerKnown ? ` · ${esc(app.toUpperCase())}` : "";
+    if (runFeedCompleted(feed)) {
+      kicker.innerHTML = `${sq}${runKind}${owner} · done`;
+      return;
+    }
+    if (runFeedIsTerminal(feed)) {
+      const state = String(feed.liveState || "").toLowerCase();
+      const label = state === "review_ready" ? "finished · awaiting Relay completion" : state === "blocked" ? "needs input" : "didn't finish";
+      kicker.innerHTML = `${sq}${runKind}${owner} · ${label}`;
+      return;
+    }
+    const latestTurn = feed?.presentation?.turns?.at(-1) || null;
+    const providerState = String(latestTurn?.providerState || feed?.liveState || "").toLowerCase();
+    if (["reconnecting", "waiting_for_device", "queued", "starting"].includes(providerState)) {
+      kicker.innerHTML = `${sq}${runKind}${owner} · reconnecting`;
+      return;
+    }
+    if (latestTurn?.requiresAction || ["needs_input", "blocked"].includes(providerState)) {
+      kicker.innerHTML = `${sq}${runKind}${owner} · needs input`;
+      return;
+    }
+    // The model is the rail's only when the rail still names the app that ran;
+    // a run started on one app and re-routed later must not borrow the other's.
+    const rawModel = String(feed.model || (app === rt.app ? rt.model : ""));
+    const modelName = rawModel.replace(/^claude-/, "").replace(/-(\d+)-(\d+)$/, " $1.$2").replace(/(^|-)\w/g, (m) => m.replace("-", " ").toUpperCase());
+    const model = modelName ? ` · ${esc(modelName)}` : "";
+    kicker.innerHTML = feed.completedAt
+      ? `${sq}${runKind} · ${esc(app.toUpperCase())} · done`
+      : `${sq}${esc(app.toUpperCase())} IS WORKING${model}${feed.turnStartedAt ? ` · ${esc(elapsedClock(feed.turnStartedAt))}` : ""}`;
+  }
   function runAppName(id) {
-    const row = relayById(id) || readerRow(id);
-    const h = handoffFor(row);
-    if (h) return handoffAppName(h);
+    const feed = runFeedFor(id);
+    if (feed) return runApp(id, feed);
+    // A renderer restart clears the in-memory route picker before the first
+    // feed poll. The persisted native session is the authority during a run;
+    // falling back to Settings made a real Claude run say “Steer Codex.”
+    const row = relayById(id);
     if (row?.source?.host === "relay-agent-run") {
       if (row.source.surface === "codex") return "Codex";
       if (row.source.surface === "claude_code") return "Claude Code";
     }
+    if (row?.coworkSessionId || row?.ranOnCowork) return "Claude Cowork";
     if (row?.claudeNativeSession?.sessionId || row?.ranOnClaude) return "Claude Code";
-    if (row?.codexThreadId || row?.sessionPath || row?.ranOnCodex) return "Codex";
+    if (row?.codexThreadId || row?.codexSessionPath || row?.sessionPath || row?.ranOnCodex) return "Codex";
     return routeFor(id).app;
+  }
+  // Which app is actually doing the work: the provider of the transcript being
+  // tailed wins, because that is the session that exists.
+  function runApp(id, feed) {
+    const provider = String(feed?.provider || feed?.presentation?.provider || "");
+    if (provider === "codex") return "Codex";
+    if (provider === "cowork") return "Claude Cowork";
+    if (provider === "claude") {
+      const app = routeFor(id).app;
+      return /cowork/i.test(String(app)) ? app : "Claude Code";
+    }
+    return routeFor(id).app;
+  }
+  function stopRunFeed(id) {
+    const key = String(id);
+    const handle = runFeedTimers.get(key);
+    if (handle && handle !== "push") clearInterval(handle);
+    if (runPushFeeds.delete(key)) window.relay.unwatchRunFeed?.(key);
+    runFeedTimers.delete(key);
+  }
+  function resetRunFeedForNewRun(id, { preserveHistory = false } = {}) {
+    const key = String(id || "");
+    runFeedEpoch.set(key, (runFeedEpoch.get(key) || 0) + 1);
+    stopRunFeed(key);
+    runFeedSeen.delete(key);
+    runFeedSettle.delete(key);
+    runPaintedSegments.delete(key);
+  }
+  function appendOptimisticUserTurn(id, body, newTurn, attachments = [], { preserveHistory = true } = {}) {
+    const key = String(id || "");
+    const at = new Date().toISOString();
+    const previous = runFeedSeen.get(key) || null;
+    const previousState = taskLocal.has(key) ? taskLocal.get(key) : undefined;
+    if (newTurn) resetRunFeedForNewRun(key, { preserveHistory });
+    else stopRunFeed(key);
+    const base = newTurn && !preserveHistory ? null : previous;
+    const provider = String(base?.provider || (/cowork/i.test(runAppName(key)) ? "cowork" : /codex/i.test(runAppName(key)) ? "codex" : "claude"));
+    const user = { type: "message", role: "user", text: String(body || ""), attachments, at };
+    const clientMessageId = crypto.randomUUID();
+    const optimisticId = `optimistic:${clientMessageId}`;
+    const previousTurns = Array.isArray(base?.presentation?.turns) ? base.presentation.turns : [];
+    const userUnit = { id:`user:${optimisticId}`, type:"message", role:"user", side:"right", phase:null,
+      text:String(body || ""), attachments, status:"pending", optimistic:true, placement:"user",
+      clientMessageId,
+      optimisticMode:newTurn ? "newTurn" : "steer",
+      persistent:true, blocking:false, standalone:false, collapsible:false };
+    let optimisticTurns;
+    if (!newTurn && previousTurns.length) {
+      optimisticTurns = previousTurns.map((turn, index) => index === previousTurns.length - 1
+        ? { ...turn, active:true, settled:false, status:"inProgress", units:[...(turn.units || []), userUnit], users:[...(turn.users || []), userUnit] }
+        : turn);
+    } else {
+      optimisticTurns = [...previousTurns, { key:optimisticId, status:"inProgress", active:true, settled:false, cancelled:false,
+        users:[userUnit], user:userUnit, units:[userUnit], final:null, finalEligible:false, canCollapse:false,
+        timing:{ state:"active", durationMs:null, precise:false }, summary:"", empty:false, retryText:[], error:null }];
+    }
+    runFeedSeen.set(key, {
+      ...(base || {}),
+      ok: true,
+      started: true,
+      provider,
+      records: [user, ...(Array.isArray(base?.records) ? base.records : [])],
+      presentation:{ ...(base?.presentation || {}), provider, turns:optimisticTurns },
+      optimisticId,
+      turnStartedAt: at,
+      completedAt: null,
+      finalText: "",
+      liveState: "active",
+    });
+    runFeedPending.add(key);
+    taskLocal.set(key, "running");
+    renderAll();
+    return { previous, previousState, clientMessageId };
+  }
+  function queuedRunMessages(id) {
+    return runQueuedMessages.get(String(id || "")) || [];
+  }
+  function queuedRunMessagesHtml(id) {
+    const rows = queuedRunMessages(id);
+    if (!rows.length) return "";
+    return `<div class="run-queue" aria-label="Queued follow-ups">${rows.map((message) => {
+      const preview = message.attachments?.find((attachment) => attachment.image && attachment.previewUrl);
+      const text = String(message.body || "") || (message.attachments?.length === 1 ? "1 image" : `${message.attachments?.length || 0} images`);
+      return `<div class="run-queued" data-run-queued="${esc(message.id)}">
+        ${preview ? `<img class="run-queued-preview" src="${esc(preview.previewUrl)}" alt="">` : ""}
+        <span class="run-queued-text">${esc(text)}</span>
+        <button type="button" class="run-queued-now" data-run-queued-now="${esc(message.id)}" title="Submit without interrupting the model">↳ Steer</button>
+        <button type="button" class="run-queued-delete" data-run-queued-delete="${esc(message.id)}" aria-label="Delete queued message">×</button>
+      </div>`;
+    }).join("")}</div>`;
+  }
+  function removeQueuedRunMessage(id, messageId) {
+    const key = String(id || "");
+    const next = queuedRunMessages(key).filter((message) => message.id !== messageId);
+    if (next.length) runQueuedMessages.set(key, next); else runQueuedMessages.delete(key);
+  }
+  async function sendQueuedRunMessage(id, messageId, { steerNow = false } = {}) {
+    const key = String(id || "");
+    if (runQueueSending.has(key)) return;
+    const message = queuedRunMessages(key).find((row) => row.id === messageId);
+    if (!message) return;
+    runQueueSending.add(key);
+    const optimistic = appendOptimisticUserTurn(key, message.body, !steerNow, message.attachments);
+    const result = await window.relay.runSteer(key, message.body, {
+      newTurn: !steerNow,
+      model: message.model,
+      effort: message.effort,
+      clientMessageId: optimistic.clientMessageId,
+      files: message.files,
+    }).catch((error) => ({ ok: false, error: String(error?.message || error) }));
+    runFeedPending.delete(key);
+    runQueueSending.delete(key);
+    if (result?.ok) {
+      removeQueuedRunMessage(key, messageId);
+      requestWorkDrafts.delete(key);
+      setRowNote(key, steerNow ? "Steered into the current turn." : "Queued follow-up started.", "ok");
+      fadeRowNoteLater(key, 3000);
+      renderAll();
+      return;
+    }
+    stopRunFeed(key);
+    if (optimistic.previous) runFeedSeen.set(key, optimistic.previous); else runFeedSeen.delete(key);
+    if (optimistic.previousState === undefined) taskLocal.delete(key); else taskLocal.set(key, optimistic.previousState);
+    setRowNote(key, result?.error || "Could not reach the session.", "err");
+    renderAll();
+  }
+  function runFeedIsTerminal(feed) {
+    const turn = feed?.presentation?.turns?.at(-1);
+    if (turn && (turn.settled || turn.cancelled || ["completed", "failed", "cancelled", "interrupted"].includes(String(turn.status)))) return true;
+    const liveState = String((feed && feed.liveState) || "").toLowerCase();
+    return !feed?.completedAt && ["review_ready", "blocked", "completed", "failed", "idle", "archived", "stopped", "stalled", "offline"].includes(liveState);
+  }
+  function runFeedCompleted(feed) {
+    const turn = feed?.presentation?.turns?.at(-1);
+    return Boolean(feed?.completedAt || turn && turn.settled && turn.finalEligible && !turn.cancelled);
+  }
+  function preserveOptimisticUsers(feed, previous) {
+    if (!feed || !previous) return feed;
+    const optimistic = (previous.records || []).find((record) => record?.role === "user" && record.attachments?.some((attachment) => attachment.previewUrl));
+    const oldTurns = previous?.presentation?.turns || [];
+    const oldUsers = oldTurns.flatMap((turn) => turn.units || []).filter((unit) => unit?.placement === "user" && unit.optimistic);
+    let presentation = feed?.presentation;
+    if (presentation && oldUsers.length) {
+      const echoed = new Set();
+      let turns = (presentation.turns || []).map((turn) => ({
+        ...turn,
+        units:(turn.units || []).map((unit) => {
+          if (unit?.placement !== "user") return unit;
+          const match = oldUsers.find((old) => old.clientMessageId && unit.clientMessageId
+            ? String(old.clientMessageId) === String(unit.clientMessageId)
+            : String(old.text || "") === String(unit.text || ""));
+          if (!match) return unit;
+          echoed.add(match.id);
+          return {
+            ...unit,
+            // Preserve the mounted bubble across transport acceptance. The
+            // canonical provider item can have a different native id without
+            // making the human's already-visible message jump in the DOM.
+            id:match.id,
+            optimistic:false,
+            clientMessageId:unit.clientMessageId || match.clientMessageId || null,
+            ...(match.attachments?.length && !unit.attachments?.length ? { attachments:match.attachments } : {}),
+          };
+        }),
+      }));
+      const pending = oldUsers.filter((unit) => !echoed.has(unit.id));
+      if (pending.length) {
+        if (!turns.length) {
+          turns = [{ key:`optimistic:${Date.now()}`, status:"inProgress", active:true, settled:false, cancelled:false,
+            users:pending, user:pending[0], units:pending, final:null, finalEligible:false, canCollapse:false,
+            timing:{ state:"active", durationMs:null, precise:false }, summary:"", empty:false, retryText:[], error:null }];
+        } else {
+          const pendingTurns = oldTurns.filter((turn) => (turn.units || []).some((unit) => pending.some((row) => row.id === unit?.id)));
+          const pendingNewTurns = pendingTurns.filter((turn) => (turn.units || []).some((unit) => unit?.optimisticMode === "newTurn"));
+          for (const oldTurn of pendingNewTurns) {
+            if (turns.some((turn) => turn.key === oldTurn.key)) continue;
+            const users = (oldTurn.units || []).filter((unit) => pending.some((row) => row.id === unit?.id));
+            turns.push({ ...oldTurn, active:true, settled:false, status:"inProgress", users, user:users[0] || null, units:users });
+          }
+          const index = turns.length - 1;
+          const turn = turns[index];
+          const ids = new Set((turn.units || []).map((unit) => unit?.id));
+          const missing = pending.filter((unit) => unit.optimisticMode !== "newTurn" && !ids.has(unit.id));
+          turns[index] = missing.length ? {
+            ...turn,
+            active:true,
+            settled:false,
+            units:[...(turn.units || []), ...missing],
+            users:[...(turn.users || []), ...missing],
+          } : turn;
+        }
+      }
+      presentation = { ...presentation, turns };
+    }
+    if (!optimistic) return presentation === feed?.presentation ? feed : { ...feed, presentation };
+    const text = visibleRunUserMessage(optimistic.text);
+    const records = Array.isArray(feed.records) ? feed.records.map((record) => {
+      if (record?.role !== "user" || visibleRunUserMessage(record.text) !== text) return record;
+      return { ...record, attachments: optimistic.attachments };
+    }) : [];
+    return { ...feed, records, ...(presentation ? { presentation } : {}) };
+  }
+  function acceptRunFeedUpdate(key, incoming) {
+    if (!incoming || !document.querySelector(`[data-run-stream="${CSS.escape(key)}"]`)) return;
+    if (incoming.ok === false && !incoming.presentation) {
+      presentRunFeedWatchError(key, incoming.error);
+      return;
+    }
+    const revision = Number(incoming.revision) || 0;
+    if (revision && revision <= (runFeedRevision.get(key) || 0)) return;
+    if (revision) runFeedRevision.set(key, revision);
+    const feed = preserveOptimisticUsers(incoming, runFeedSeen.get(key));
+    runFeedSeen.set(key, feed);
+    const projectedState = runnerStateForFeed(feed);
+    if (projectedState) taskLocal.set(key, projectedState);
+    paintRunStream(key, feed); paintRunKicker(key, feed);
+    const queued = queuedRunMessages(key);
+    if ((runFeedCompleted(feed) || runFeedIsTerminal(feed)) && queued.length) {
+      stopRunFeed(key); sendQueuedRunMessage(key, queued[0].id); return;
+    }
+    if (runFeedIsTerminal(feed)) {
+      const settledState = projectedState || "stopped";
+      taskLocal.set(key, settledState);
+      const row = relayById(key);
+      const claim = taskClaimFor(row);
+      if (settledState === "stopped" && claim?.claimant?.self && claim.workState === "working" && !taskStopPending.has(key)) {
+        taskStopPending.add(key);
+        void window.relay.taskStop(key).then((result) => {
+          if (result?.ok && result.taskClaim) applyTaskClaimProjection(row, result.taskClaim);
+        }).finally(() => {
+          taskStopPending.delete(key);
+          renderAll();
+        });
+      }
+      stopRunFeed(key); renderAll(); return;
+    }
+  }
+  function presentRunFeedWatchError(id, error) {
+    const key = String(id || "");
+    const cached = runFeedSeen.get(key) || {};
+    const current = cached.presentation || cached.workPresentation || { turns:[] };
+    const turns = Array.isArray(current.turns) ? current.turns.map((turn) => ({ ...turn, units:Array.isArray(turn.units) ? turn.units.slice() : [] })) : [];
+    const message = String(error?.message || error || "The live event stream is unavailable.").replace(/\s+/g, " ").trim().slice(0, 240);
+    const row = relayById(key) || {};
+    const completedAt = row.taskCompletedAt || row.workCompletedAt || "";
+    if (/No provider-native Work session exists/i.test(message) && completedAt) {
+      const unit = { id:"legacy-work-unavailable", type:"message", placement:"standalone", persistent:true,
+        text:"This Task is complete. Live Work history is unavailable for this older run." };
+      const settledTurn = { key:"legacy-work", turnId:"legacy-work", status:"completed", active:false, settled:true,
+        finalEligible:false, canCollapse:false, units:[unit] };
+      const next = { ...cached, ok:true, completedAt, liveState:"completed", legacyMissingSession:true,
+        presentation:{ ...current, provider:"", done:true, turns:[settledTurn] } };
+      taskLocal.set(key, "done");
+      runFeedSeen.set(key, next);
+      paintRunStream(key, next); paintRunKicker(key, next);
+      return;
+    }
+    const unit = { id:"renderer-watch-error", type:"error", placement:"standalone", persistent:true, text:message || "The live event stream is unavailable." };
+    if (!turns.length) turns.push({ key:"renderer-watch", turnId:"renderer-watch", status:"inProgress", active:true, settled:false, canCollapse:false, units:[unit] });
+    else {
+      const latest = { ...turns.at(-1) };
+      latest.units = [...latest.units.filter((item) => item?.id !== unit.id), unit];
+      turns[turns.length - 1] = latest;
+    }
+    const next = { ...cached, ok:false, error:message, presentation:{ ...current, turns } };
+    runFeedSeen.set(key, next);
+    paintRunStream(key, next); paintRunKicker(key, next);
+  }
+  const disposeRunFeedUpdates = (window.relay.onRunFeedUpdate || window.relay.onRunFeed)?.((id, feed) => {
+    const envelope = feed || (id && typeof id === "object" ? id : null);
+    const relayId = String(envelope?.relayId || (typeof id === "string" ? id : ""));
+    acceptRunFeedUpdate(relayId, envelope);
+  });
+  window.addEventListener("beforeunload", () => { if (typeof disposeRunFeedUpdates === "function") disposeRunFeedUpdates(); }, { once:true });
+  function startRunFeed(id) {
+    const key = String(id || "");
+    if (!key || runFeedPending.has(key) || runFeedTimers.has(key) || (!window.relay.watchRunFeed && !window.relay.runFeed)) return;
+    const epoch = runFeedEpoch.get(key) || 0;
+    const tick = async () => {
+      if (!document.querySelector(`[data-run-stream="${CSS.escape(key)}"]`)) return stopRunFeed(key);
+      let feed = null;
+      try { feed = await window.relay.runFeed(key); } catch { return; }
+      // A retry/continuation may have started while this Task was in
+      // flight. Never let the old provider/session repaint the new run.
+      if ((runFeedEpoch.get(key) || 0) !== epoch) return;
+      if (!feed || !feed.ok) return;
+      feed = preserveOptimisticAttachments(feed, runFeedSeen.get(key));
+      runFeedSeen.set(key, feed);
+      paintRunStream(key, feed);
+      paintRunKicker(key, feed);
+      const queued = queuedRunMessages(key);
+      if ((feed.completedAt || runFeedIsTerminal(feed)) && queued.length) {
+        stopRunFeed(key);
+        sendQueuedRunMessage(key, queued[0].id);
+        return;
+      }
+      if (runFeedIsTerminal(feed)) {
+        taskLocal.set(key, "stopped");
+        stopRunFeed(key);
+        renderAll();
+        return;
+      }
+      // Done is a fact from the wire (the agent's completion relay), so the
+      // board must learn it too — a finished run cannot sit under "Running".
+      // A run that never produced a line is not working — it is stuck, and the
+      // page must say so rather than hold "working" indefinitely (David).
+      if (!feed.completedAt && feed.startedAt) {
+        const idleMs = Date.now() - new Date(feed.startedAt).getTime();
+        const silent = !(feed.records || []).length;
+        if (silent && idleMs > 90000) {
+          const kicker = document.querySelector(`[data-run-kicker="${CSS.escape(key)}"]`);
+          if (kicker) kicker.innerHTML = `<span class="ksq" style="background:var(--danger,#B3564D)"></span>${esc(runAppName(key).toUpperCase())} NEVER STARTED`;
+          const strm = document.querySelector(`[data-run-stream="${CSS.escape(key)}"]`);
+          if (strm) strm.innerHTML = `<div class="rd-act"><span class="asq" style="background:var(--danger,#B3564D)"></span><span><span class="averb">Nothing ran.</span> <span class="aobj">Open it in ${esc(runAppName(key))} and send it there, or press Start again.</span></span></div>`;
+          stopRunFeed(key);
+          return;
+        }
+      }
+      if (feed.completedAt) {
+        // The open reader owns the runner and its composer. Updating only the
+        // hidden Tasks board left that visible composer saying Steer after
+        // the turn had settled; repaint every current surface so it becomes
+        // the same-session Send affordance immediately.
+        if (taskLocal.get(key) !== "done") { taskLocal.set(key, "done"); renderAll(); }
+        const settled = (runFeedSettle.get(key) || 0) + 1;
+        runFeedSettle.set(key, settled);
+        if (settled > 12) stopRunFeed(key); // ~12s grace for the closing message
+      }
+    };
+    const cached = runFeedSeen.get(key);
+    if (cached) {
+      paintRunStream(key, cached);
+      paintRunKicker(key, cached);
+      if (runFeedIsTerminal(cached)) {
+        const queued = queuedRunMessages(key);
+        if (queued.length) sendQueuedRunMessage(key, queued[0].id);
+        return;
+      }
+    }
+    // Attach to the provider's native event stream first. The initial push is
+    // hydration; subsequent pushes are bounded semantic updates. Only older
+    // providers without a push source retain a compatibility pull fallback.
+    if (window.relay.watchRunFeed) {
+      runFeedTimers.set(key, "push");
+      window.relay.watchRunFeed(key).then((result) => {
+        if (runFeedTimers.get(key) !== "push") { window.relay.unwatchRunFeed?.(key); return; }
+        if (result?.ok === false || !result?.presentation) {
+          runFeedTimers.delete(key);
+          window.relay.unwatchRunFeed?.(key);
+          presentRunFeedWatchError(key, result?.error || "The live event stream is unavailable.");
+          return;
+        }
+        runPushFeeds.add(key);
+        acceptRunFeedUpdate(key, result);
+      }).catch((error) => {
+        if (runFeedTimers.get(key) !== "push") return;
+        runFeedTimers.delete(key);
+        presentRunFeedWatchError(key, error);
+      });
+      return;
+    }
+    tick();
+  }
+  function destroyWorkScroller(id) {
+    const key = String(id || "");
+    const entry = runScrollControllers.get(key);
+    if (!entry) return;
+    runScrollSnapshots.set(key, entry.controller.capture());
+    entry.controller.destroy(); runScrollControllers.delete(key);
+  }
+  function bindWorkScroller(id) {
+    const key = String(id || "");
+    destroyWorkScroller(key);
+    const scroller = document.querySelector(`[data-work-scroll="${CSS.escape(key)}"]`);
+    const footer = document.querySelector(`[data-work-footer="${CSS.escape(key)}"]`);
+    if (!scroller || !footer) return;
+    const controller = RelayWorkUI.createScrollController(scroller, footer, {
+      onFollowChange:(following) => scroller.toggleAttribute("data-work-detached", !following),
+    });
+    runScrollControllers.set(key, { controller, scroller });
+    const saved = runScrollSnapshots.get(key);
+    requestAnimationFrame(() => saved ? controller.restore(saved) : controller.scrollToBottom("instant"));
+  }
+  // Every render rebuilds the stream element, so re-attach the poll to whatever
+  // is on screen now and drop the ones whose card just closed.
+  function syncRunMirrors() {
+    if (!rendererSurfaceActive()) {
+      for (const id of [...runFeedTimers.keys()]) stopRunFeed(id);
+      for (const id of [...runScrollControllers.keys()]) destroyWorkScroller(id);
+      return;
+    }
+    const open = new Set();
+    for (const el of document.querySelectorAll("[data-run-stream]")) {
+      const id = el.getAttribute("data-run-stream");
+      open.add(id);
+      const cached = runFeedFor(id);
+      if (cached) { paintRunStream(id, cached); paintRunKicker(id, cached); }
+      startRunFeed(id);
+    }
+    for (const id of [...runFeedTimers.keys()]) if (!open.has(id)) stopRunFeed(id);
+    for (const id of [...runScrollControllers.keys()]) if (!open.has(id)) destroyWorkScroller(id);
   }
   // THE CONTRACT (B1, canon: proto/scheduled-requests-board.html). Accepting a
   // cadence is standing consent, so the whole promise sits on the page at
@@ -6877,62 +7999,16 @@
       effort: String(rt.effort || "high").toLowerCase(),
     };
   }
-  // --- THE HAND-OFF DOCK ------------------------------------------------------
-  // Send on the agent document (Start on a Task) opens a real session in the
-  // app named on the rail, with the Relay as the assistant's letter and the
-  // words as the first user turn. The composer capsule then BECOMES the
-  // receipt in place: one card, the app's mark, one line of state, and the
-  // card itself is Open. Relay never shows the transcript — the app replies
-  // there, not here (David, 2026-09-03: hand-off, not runner).
-  function hostMark(provider) { return provider === "codex" ? "codexMark.svg" : "claudeCodeMark.svg"; }
-  function handoffModelLabel(h) {
-    const rt = routeFor(h?.relayId || "");
-    const raw = String(h?.model || "");
-    if (!raw) return "";
-    const app = handoffAppName(h);
-    const spec = AGENT_ROUTES[app];
-    const named = spec?.models?.find((label) => modelIdFor(app, label) === raw);
-    return named || raw.replace(/^claude-/, "").replace(/-(\d+)-(\d+)$/, " $1.$2").replace(/(^|-)\w/g, (m) => m.replace("-", " ").toUpperCase());
-  }
-  function handoffBubbleHtml(h) {
-    const words = String(h?.note || "").trim();
-    return words ? `<div class="ho-bubble">${esc(words)}</div>` : "";
-  }
-  function handoffCardHtml(r, h, { inline = true } = {}) {
-    const app = handoffAppName(h);
-    const provider = h.provider === "codex" ? "codex" : "claude";
-    const request = isTaskRow(r);
-    const done = request ? Boolean(r.taskCompletedAt) : Boolean(r.workCompletedAt);
-    const wrap = (body) => `<div class="ta-dock${inline ? " inline" : ""}" data-stop="1"><div class="ho-dock">${body}</div></div>`;
-    if (h.state === "starting") {
-      return wrap(`${handoffBubbleHtml(h)}<div class="ho-card ${provider} starting" role="status" aria-live="polite">
-        <img class="ho-logo" src="${hostMark(provider)}" alt="" />
-        <span class="ho-copy"><span class="ho-label">Starting a session in ${esc(app)}…</span><span class="ho-sub">${request ? "The Task goes in first, then your words" : "The Relay goes in first, then your message"}</span></span>
-      </div>`);
-    }
-    const model = handoffModelLabel({ ...h, relayId: r.id });
-    const sub = [
-      done ? `Done ${esc(timeAgo(request ? r.taskCompletedAt : r.workCompletedAt))}` : `Started ${esc(timeAgo(h.startedAt || h.updatedAt))}`,
-      model ? esc(model) : "",
-      h.effort ? esc(String(h.effort).toLowerCase()) : "",
-    ].filter(Boolean).join(" · ");
-    return wrap(`${handoffBubbleHtml(h)}<button type="button" class="ho-card ${provider}${done ? " done" : ""}" data-handoff-open="${esc(r.id)}">
-        <img class="ho-logo" src="${hostMark(provider)}" alt="" />
-        <span class="ho-copy"><span class="ho-label">${done ? `Finished in ${esc(app)}` : `Running in ${esc(app)}`}</span><span class="ho-sub">${sub}</span></span>
-        <span class="ho-arrow" aria-hidden="true">→</span>
-      </button>
-      <div class="rd-dest">${esc(app)} replies there, not here</div>`);
-  }
-  // The composer: your words on top, the ROUTE RAIL beneath — destination as
-  // a writable sentence (■ app · model · effort) — and ONE verb at its end.
-  // A failed hand-off keeps the words here and turns the verb into Retry,
-  // with the other app one tap away.
-  function idleRunDockHtml(r, { inline = false, draft = "", label = "Send", actions = "", failed = null } = {}) {
+  // Tasks and ordinary Relay Work start on the same route-selecting
+  // composer. The document changes the verb (Start vs Send), never the
+  // available app, model, or thinking controls.
+  function idleRunDockHtml(r, { inline = false, draft = "", action = "request", label = "Start", actions = "", showHostOpen = true } = {}) {
     const rt = routeFor(r.id);
-    const request = isTaskRow(r);
-    const actionButton = `<button type="button" class="ta-approve" data-handoff="${esc(r.id)}">${esc(label)}</button>`;
+    const actionButton = action === "work"
+      ? `<button type="button" class="ta-approve" data-work-start="${esc(r.id)}">${esc(label)}</button>`
+      : `<button type="button" class="ta-approve" data-approve="${esc(r.id)}">${esc(label)}</button>`;
     const review = requestSafetyReviews.get(String(r.id));
-    const reviewHtml = request && review ? `
+    const reviewHtml = action === "request" && review ? `
       <div class="request-safety" role="status">
         <strong>${review.concern === "high" ? "Look closely before accepting" : "Safety review"}</strong>
         <div>${esc(review.summary || "")}</div>
@@ -6942,21 +8018,14 @@
           : `<div class="permission-line">${esc(review.plainLanguage || "No powerful access is obvious from the Task.")}</div>`}
         ${review.trustContext ? `<div class="permission-line">${esc(review.trustContext)}</div>` : ""}
       </div>` : "";
-    const failedHtml = failed ? `
-      <div class="ho-card ${failed.provider === "codex" ? "codex" : "claude"} failed" role="alert">
-        <img class="ho-logo" src="${hostMark(failed.provider)}" alt="" />
-        <span class="ho-copy"><span class="ho-label">${esc(failed.error || `${handoffAppName(failed)} didn't open`)}</span><span class="ho-sub">${failed.opened ? "The session is open, but your message did not go in" : request ? "Nothing started" : "Your message is still here"}</span></span>
-      </div>` : "";
-    const otherApp = hostKeyFor(rt.app) === "codex" ? "Claude Code" : "Codex";
-    const otherButton = failed ? `<button class="ta-later" type="button" data-handoff-other="${esc(r.id)}" data-handoff-other-app="${esc(otherApp)}">${esc(otherApp)} instead</button>` : "";
-    const defaultActions = request
-      ? `<button class="ta-later" type="button" data-request-safety="${esc(r.id)}">Review Safety</button>${otherButton}${actionButton}`
-      : `${otherButton}${actionButton}`;
+    const defaultActions = action === "request"
+      ? `<button class="ta-later" type="button" data-request-safety="${esc(r.id)}">Review Safety</button>${actionButton}`
+      : `${showHostOpen ? `<button class="ta-later" type="button" data-open-in="${esc(r.id)}" data-open-in-host="codex">Open in Codex</button>
+         <button class="ta-later" type="button" data-open-in="${esc(r.id)}" data-open-in-host="claude">Open in Claude Code</button>` : ""}${actionButton}`;
     const railActions = actions || defaultActions;
     return `
       <div class="ta-dock${inline ? " inline" : ""}" data-stop="1">
         <div class="qr ta-qr col">
-          ${failedHtml}
           ${reviewHtml}
           <textarea rows="1" class="ta-note" placeholder="Tell ${esc(rt.app)} anything…">${esc(draft)}</textarea>
           <div class="ta-rail">
@@ -6983,9 +8052,17 @@
       </div>`;
     }
     const state = taskBoardState(r.id);
-    const h = handoffFor(r);
-    const failed = h?.state === "failed" ? h : null;
-    const draft = String(requestWorkDrafts.get(String(r.id)) || (failed ? failed.note || "" : ""));
+    const draft = String(requestWorkDrafts.get(String(r.id)) || "");
+    if (state === "done" && !requestHasNativeSession(r)) {
+      return `<div class="ta-dock${inline ? " inline" : ""}" data-stop="1">
+        <div class="qr ta-qr col">
+          <textarea rows="1" class="ta-note" placeholder="This Task is complete" disabled></textarea>
+          <div class="ta-rail"><div class="rt-chips"><span class="rt-chip static"><span class="sq"></span>Older Task</span></div>
+            <span class="rt-spacer"></span><span class="ta-acts"><button class="ta-later" type="button" disabled>Native session unavailable</button><button class="ta-approve" type="button" disabled>Done</button></span>
+          </div>
+        </div>
+      </div>`;
+    }
     if (state === "review") {
       const pending = r.completionReview || {};
       const assessment = pending.assessment || {};
@@ -7002,23 +8079,36 @@
             ${continuedRouteChipsHtml(r)}
             <span class="rt-spacer"></span>
             <span class="ta-acts">
-              ${h ? `<button class="ta-later" type="button" data-handoff-open="${esc(r.id)}">Open result</button>` : ""}
+              <button class="ta-later" type="button" data-open-run="${esc(r.id)}">Open result</button>
               <button type="button" class="ta-approve" data-result-send="${esc(r.id)}">Send result</button>
             </span>
           </div>
         </div>
       </div>`;
     }
-    // A session in the desktop app is the receipt for running AND done: the
-    // card names the app and opens the exact session.
-    if (h && (h.state === "starting" || h.state === "running") && state !== "stopped") return handoffCardHtml(r, h, { inline });
-    if (state === "done") {
-      if (h) return handoffCardHtml(r, h, { inline });
-      return `<div class="ta-dock${inline ? " inline" : ""}" data-stop="1">
+    const canContinueSession = ["stopped", "waiting"].includes(state) && requestHasNativeSession(r);
+    if (state === "running" || state === "done" || canContinueSession) {
+      const live = state === "running";
+      return `
+      <div class="ta-dock${inline ? " inline" : ""}" data-stop="1">
         <div class="qr ta-qr col">
-          <textarea rows="1" class="ta-note" placeholder="This Task is complete" disabled></textarea>
-          <div class="ta-rail"><div class="rt-chips"><span class="rt-chip static"><span class="sq"></span>Older Task</span></div>
-            <span class="rt-spacer"></span><span class="ta-acts"><button class="ta-later" type="button" disabled>Native session unavailable</button><button class="ta-approve" type="button" disabled>Done</button></span>
+          ${queuedRunMessagesHtml(r.id)}
+          <textarea rows="1" class="ta-note" data-steer-note="${esc(r.id)}" placeholder="${live ? `Queue a follow-up for ${esc(runAppName(r.id))}…` : `Ask ${esc(runAppName(r.id))} for a follow-up…`}">${esc(draft)}</textarea>
+          <div class="ta-rail">
+            ${continuedRouteChipsHtml(r)}
+            <span class="rt-spacer"></span>
+            <span class="ta-acts">
+              ${(() => {
+                // Run here owns the provider turn exclusively. A second native
+                // owner is forbidden while active. When the turn settles,
+                // Claude opens via its guarded exact-transcript path and Codex
+                // navigates to the exact existing thread.
+                if (state === "running") return `<button class="ta-later" type="button" disabled aria-disabled="true" title="Available when this run finishes">Open in ${esc(runAppName(r.id))}</button>`;
+                if (r.ranOnClaude) return `<button class="ta-later" type="button" data-open-run="${esc(r.id)}">Open in ${esc(runAppName(r.id))}</button>`;
+                return `<button class="ta-later" type="button" data-open-in="${esc(r.id)}">Open in ${esc(runAppName(r.id))}</button>`;
+              })()}
+              <button type="button" class="ta-approve" data-steer="${esc(r.id)}">${live ? "Queue" : "Send"}</button>
+            </span>
           </div>
         </div>
       </div>`;
@@ -7026,21 +8116,49 @@
     // Parked is deferred, never dead: unfolding a parked request brings the dock
     // back so Start stays one tap away — only "Not now" leaves (it already
     // happened; the Parked group says so).
+    // The ROUTE RAIL is the dock's bottom line, inside the capsule — the
+    // destination read as a sentence (■ app · model · effort), each word a
+    // chip. It replaces the old "runs in your … · change" transparency line:
+    // the rail IS the transparency, and it is writable.
     return idleRunDockHtml(r, {
       inline,
       draft,
-      failed,
-      label: failed ? "Retry" : state === "stopped" ? "Start again" : "Start task",
-      actions: failed ? "" : scheduleActionsHtml(r),
+      label: state === "stopped" ? "Start again" : "Start task",
+      actions: scheduleActionsHtml(r),
     });
   }
-  function relayWorkDockHtml(r, { inline = false } = {}) {
-    const h = handoffFor(r);
-    const failed = h?.state === "failed" ? h : null;
-    const draft = String(requestWorkDrafts.get(String(r.id)) || (failed ? failed.note || "" : ""));
-    if (h && (h.state === "starting" || h.state === "running")) return handoffCardHtml(r, h, { inline });
-    if (h && r.workCompletedAt) return handoffCardHtml(r, h, { inline });
-    return idleRunDockHtml(r, { inline, draft, failed, label: failed ? "Retry" : "Send" });
+  function relayWorkDockHtml(r, { inline = false, showHostOpen = true } = {}) {
+    const state = relayWorkState(r);
+    const draft = String(requestWorkDrafts.get(String(r.id)) || "");
+    const taggedWork = r.source?.host === "relay-agent-run";
+    const hasSession = taggedWork || requestHasNativeSession(r);
+    if (state !== "idle" && (hasSession || state === "running")) {
+      const live = state === "running";
+      const app = runAppName(r.id);
+      const starting = live && !hasSession;
+      return `
+      <div class="ta-dock${inline ? " inline" : ""}" data-stop="1">
+        <div class="qr ta-qr col">
+          ${queuedRunMessagesHtml(r.id)}
+          <textarea rows="1" class="ta-note" data-steer-note="${esc(r.id)}" placeholder="${starting ? `Starting ${esc(app)}…` : live ? `Queue a follow-up for ${esc(app)}…` : `Ask ${esc(app)} for a follow-up…`}"${starting ? " disabled" : ""}>${esc(draft)}</textarea>
+          <div class="ta-rail">
+            ${continuedRouteChipsHtml(r)}
+            <span class="rt-spacer"></span>
+            <span class="ta-acts">
+              ${taggedWork && live ? `<button class="ta-later" type="button" data-chat-work-stop="${esc(r.id)}">Stop</button>` : ""}
+              ${taggedWork && state === "stopped" ? `<button class="ta-later" type="button" data-chat-work-retry="${esc(r.id)}">Retry</button>` : ""}
+              ${showHostOpen ? (live
+                ? `<button class="ta-later" type="button" disabled aria-disabled="true">Open in ${esc(app)}</button>`
+                : r.ranOnClaude
+                  ? `<button class="ta-later" type="button" data-open-run="${esc(r.id)}">Open in ${esc(app)}</button>`
+                  : `<button class="ta-later" type="button" data-open-in="${esc(r.id)}">Open in ${esc(app)}</button>`) : ""}
+              <button type="button" class="ta-approve" data-steer="${esc(r.id)}"${starting ? " disabled aria-disabled=\"true\"" : ""}>${starting ? "Starting" : live ? "Queue" : "Send"}</button>
+            </span>
+          </div>
+        </div>
+      </div>`;
+    }
+    return idleRunDockHtml(r, { inline, draft, action: "work", label: "Send", showHostOpen });
   }
   function requestControlsHtml(r, opts) { return requestDockHtml(r, opts) || taskStatusLine(r, opts); }
   function wireRequestControls(scope, onDone) {
@@ -7065,14 +8183,8 @@
       button.disabled = true;
       button.textContent = "Reviewing…";
       const result = await window.relay.requestReviewSafety(id).catch((error) => ({ ok:false, error:String(error?.message || error) }));
-      button.disabled = false;
-      button.textContent = "Review Safety";
-      if (result?.ok && result.review) {
-        requestSafetyReviews.set(String(id), result.review);
-        clearRowNote(id);
-      } else {
-        setRowNote(id, result?.error || "Safety review is unavailable right now.", "err");
-      }
+      if (result?.ok && result.review) requestSafetyReviews.set(String(id), result.review);
+      else setRowNote(id, result?.error || "The safety review could not be prepared.", "err");
       renderAll();
     });
     for (const button of scope.querySelectorAll("[data-result-send]")) button.addEventListener("click", async (event) => {
@@ -7092,90 +8204,82 @@
       }
       renderAll();
     });
+    for (const button of scope.querySelectorAll("[data-run-queued-now]")) button.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const dock = button.closest(".ta-dock");
+      const id = dock?.querySelector("[data-steer]")?.getAttribute("data-steer") || "";
+      if (!id) return;
+      button.disabled = true;
+      await sendQueuedRunMessage(id, button.getAttribute("data-run-queued-now"), { steerNow: true });
+    });
+    for (const button of scope.querySelectorAll("[data-run-queued-delete]")) button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const dock = button.closest(".ta-dock");
+      const id = dock?.querySelector("[data-steer]")?.getAttribute("data-steer") || "";
+      if (!id) return;
+      removeQueuedRunMessage(id, button.getAttribute("data-run-queued-delete"));
+      renderAll();
+    });
     for (const ch of scope.querySelectorAll("[data-change-app]")) ch.addEventListener("click", (e) => {
       e.stopPropagation(); activeView = "settings"; commitNavigation();
     });
-    // Enter sends, like Enter sends in every other composer; Shift+Enter breaks the line.
+    // Enter starts, like Enter sends in every other composer; Shift+Enter breaks the line.
     for (const inp of scope.querySelectorAll(".ta-note")) {
       const dock = inp.closest(".ta-dock");
-      const action = dock?.querySelector("[data-handoff]");
-      const id = action?.getAttribute("data-handoff") || "";
+      const action = dock?.querySelector("[data-steer]")
+        || dock?.querySelector("[data-approve]")
+        || dock?.querySelector("[data-work-start]");
+      const id = action?.getAttribute("data-steer")
+        || action?.getAttribute("data-approve")
+        || action?.getAttribute("data-work-start") || "";
       if (id) inp.addEventListener("input", () => requestWorkDrafts.set(String(id), inp.value || ""));
       // Capture the exact visible action. Enter and the button must never take
       // different paths merely because a re-render changed nearby controls.
       dressComposer(inp, () => action?.click());
     }
-    // THE HAND-OFF. One verb whatever the document calls it (Send, Start task,
-    // Start again, Retry): the words leave the composer, the capsule becomes
-    // the card, and main opens the app. Nothing here waits on a transcript.
-    for (const go of scope.querySelectorAll("[data-handoff]")) go.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      if (go.disabled) return;
-      const id = go.getAttribute("data-handoff");
-      const box = go.closest(".ta-dock")?.querySelector(".ta-note");
-      const note = String(box?.value || "").trim();
-      const row = readerRow(id) || relayById(id) || { id };
-      const request = isTaskRow(row);
-      const rt = routeFor(id);
-      if (box && peekStagedFiles(box).length) {
-        setRowNote(id, `Attach files in ${rt.app} itself — the hand-off carries your words.`, "err");
-        return;
-      }
-      if (!await providerReadyBeforeStart(id, rt.app)) return;
-      const host = hostKeyFor(rt.app) === "codex" ? "codex" : "claude";
-      if (request) window.relay.ack(id); // acting on a request reads it — never bold after
-      requestWorkDrafts.delete(String(id));
-      clearRowNote(id);
-      handoffLocal.set(String(id), { state:"starting", provider:host, note, startedAt:new Date().toISOString(), at:Date.now() });
-      renderAll();
-      const res = await window.relay.agentHandoff(id, {
-        host,
-        model: modelIdFor(rt.app, rt.model),
-        effort: String(rt.effort || "high").toLowerCase(),
-        note,
-        // Sent rows live under a distinct durable `sent_<relayId>` key. Main
-        // must stage and bind that row instead of manufacturing an incomplete
-        // inbound-shaped packet under the public Relay id.
-        source: row.outbound ? "sent" : "relay",
-        // The Settings choice has to REACH the session, or the picker is a
-        // decoration that lies about what the agent may do.
-        permission: permMode(host === "claude" ? "claude" : "codex"),
-      }).catch((error) => ({ ok:false, error:String(error?.message || error) }));
-      if (res?.ok) {
-        handoffLocal.set(String(id), { state:"running", provider:host, note, nativeId:res.nativeId || "", startedAt:new Date().toISOString(), at:Date.now() });
-      } else {
-        handoffLocal.set(String(id), { state:"failed", provider:host, note, opened:Boolean(res?.opened), error:res?.error || `${rt.app} didn't open.`, at:Date.now() });
-        if (res?.code === "provider_not_ready") showWorkProviderPrompt(id, res.provider || providerIdForApp(rt.app));
-        else if (note) requestWorkDrafts.set(String(id), note);
-      }
-      renderAll();
-      if (onDone) onDone("handoff", id);
-    });
-    // The other app, one tap away after a failure: the rail's app chip moves
-    // and the same Retry runs.
-    for (const other of scope.querySelectorAll("[data-handoff-other]")) other.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const id = other.getAttribute("data-handoff-other");
-      const app = other.getAttribute("data-handoff-other-app") || "";
-      const spec = AGENT_ROUTES[app];
-      if (!spec) return;
-      setRoute(id, { app, model:spec.model, effort:spec.effort });
-      other.closest(".ta-dock")?.querySelector("[data-handoff]")?.click();
-    });
-    // The card IS Open: the exact session this Relay lives in, in its app.
-    for (const open of scope.querySelectorAll("[data-handoff-open]")) open.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      const id = open.getAttribute("data-handoff-open");
-      const app = runAppName(id);
-      const row = readerRow(id) || relayById(id) || { id };
-      open.disabled = true;
-      setRowNote(id, `Opening in ${app}…`, "ok");
-      const res = await window.relay.continueSession(id, row.outbound ? "sent" : "relay").catch((error) => ({ ok:false, error:String(error?.message || error) }));
-      open.disabled = false;
-      if (res?.ok) { setRowNote(id, `Opened in ${app}.`, "ok"); fadeRowNoteLater(id, 3000); }
-      else setRowNote(id, res?.error || `That ${app} session could not be opened.`, "err");
-      if (onDone) onDone("open-in");
-    });
+    // Open in {app} is a real, separate ownership mode. Relay never asks the
+    // native app and the headless runner to own one turn concurrently. While a
+    // Relay-owned turn is active the button is visibly disabled. Before a run
+    // it stages both Task documents plus the unsent composer text in a new
+    // native session; after a run it opens that exact settled native session.
+    for (const b of scope.querySelectorAll("[data-open-in]")) {
+      b.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (b.disabled) return;
+        const id = b.getAttribute("data-open-in");
+        const rt = routeFor(id);
+        const requestedHost = b.getAttribute("data-open-in-host");
+        const host = requestedHost === "codex" || requestedHost === "claude"
+          ? requestedHost
+          : hostKeyFor(rt.app);
+        const app = host === "codex" ? "Codex" : host === "claude" ? "Claude Code" : rt.app;
+        const note = String((b.closest(".ta-dock")?.querySelector(".ta-note") || {}).value || "").trim();
+        const ranAlready = requestHasNativeSession(taskRows().find((row) => row.id === id));
+        if (ranAlready && window.relay.openInCurrent) window.relay.openInCurrent(id, host);
+        else openRelayFromUI(id, "relay", "fresh", host, note);
+        // AFTER the open, never before: openRelayFromUI clears the row's note
+        // first (a stale failure must not outlive the retry), so a note written
+        // above this line vanished the same instant — the trap already found on
+        // the per-relay rows.
+        setOpeningNote(id, `Opening in ${app}…`);
+        if (onDone) onDone("open-in");
+      });
+    }
+    // A finished Claude run already has an exact canonical transcript. Open
+    // that session; never forge a second row and never attach while Relay still
+    // owns its worker.
+    for (const b of scope.querySelectorAll("[data-open-run]")) {
+      b.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const id = b.getAttribute("data-open-run");
+        b.disabled = true;
+        const res = await window.relay.openRunSession(id).catch((error) => ({ ok: false, error: String(error?.message || error) }));
+        b.disabled = false;
+        if (!res?.ok) setRowNote(id, res?.error || "That Claude session is not ready to open yet.", "err");
+        else { setRowNote(id, "Opened in Claude Code.", "ok"); fadeRowNoteLater(id, 3000); }
+        if (res?.ok && onDone) onDone("open-in");
+      });
+    }
     // The route rail's chips: app / model / thinking, per request.
     for (const c of scope.querySelectorAll("[data-route-menu]")) {
       c.addEventListener("click", (e) => {
@@ -7183,6 +8287,228 @@
         openRouteMenu(c, c.getAttribute("data-route-menu"), c.getAttribute("data-request"), () => renderReader());
       });
     }
+    // The status line ("Approved — your agent is on it" / "Parked — waiting
+    // in Tasks") is the ONE statement of state. A note appears only to echo a
+    // steering note you typed — never to say "Approved" a second time (Sven's
+    // double). Park says nothing extra anywhere.
+    for (const ap of scope.querySelectorAll("[data-approve]")) ap.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const id = ap.getAttribute("data-approve");
+      const noteBox = ap.closest(".ta-dock")?.querySelector(".ta-note");
+      const note = (noteBox || {}).value || "";
+      const staged = noteBox ? peekStagedFiles(noteBox) : [];
+      let payloads;
+      try { payloads = await composerFilePayloads(staged); }
+      catch (error) { setRowNote(id, String(error?.message || error), "err"); return; }
+      const rt = routeFor(id);
+      if (payloads.files.length && !/codex/i.test(String(rt.app))) {
+        setRowNote(id, "Work-run attachments are currently supported for Codex sessions.", "err");
+        return;
+      }
+      if (!await providerReadyBeforeStart(id, rt.app)) return;
+      // A retry is a new run. Never let the previous provider's cached feed
+      // repaint the new run's dock (Codex briefly replaced Cowork on screen).
+      if (activeView === "reader" && String(readerId) === String(id) && readerTab !== "work") {
+        workFaceTransitions.set(String(id), { fromTab:readerTab === "agent" ? "agent" : "you", until:Date.now() + 520 });
+      }
+      const optimistic = appendOptimisticUserTurn(id, note.trim(), true, payloads.attachments, { preserveHistory: false });
+      requestWorkDrafts.delete(String(id));
+      if (activeView === "reader" && String(readerId) === String(id)) {
+        readerTab = "work";
+        readerTabSwap = true;
+        workTabAnimateUntil.set(String(id), Date.now() + 500);
+      }
+      window.relay.ack(id); // acting on a request reads it — never bold after
+      // START IS REAL: ignite the run on the route this Task names (rail or
+      // Settings default), carrying the composer's steering note verbatim.
+      setRowNote(id, `Starting ${rt.app} on this Task…`, "ok");
+      if (window.relay.taskStart) {
+        window.relay.taskStart(id, {
+          host: hostKeyFor(rt.app),
+          model: modelIdFor(rt.app, rt.model),
+          effort: String(rt.effort || "high").toLowerCase(),
+          note,
+          // The Settings choice has to REACH the run, or the picker is a
+          // decoration that lies about what the agent may do.
+          permission: permMode(/claude/i.test(String(rt.app)) ? "claude" : "codex"),
+          clientMessageId: optimistic.clientMessageId,
+          files: payloads.files,
+        }).then((res) => {
+          runFeedPending.delete(String(id));
+          if (res && res.ok) {
+            if (noteBox) clearStagedFiles(noteBox);
+            setRowNote(id, note || payloads.files.length ? `Started on ${rt.app} — your message went with it.` : `Started on ${rt.app}.`, "ok");
+            // This is launch acknowledgement, not durable Task state. The
+            // Work header owns running/stopped/done truth; leaving this green
+            // note mounted after a fast completion creates a contradictory
+            // "Done / Started" footer.
+            fadeRowNoteLater(id, 3000);
+          }
+          else {
+            // Nothing is running, so the Task goes back to WAITING and Start
+            // returns. An optimistic "running" that outlives a failed launch is
+            // exactly the phantom run we just stopped creating.
+            taskLocal.delete(id);
+            if (optimistic.previous) runFeedSeen.set(String(id), optimistic.previous); else runFeedSeen.delete(String(id));
+            if (note) requestWorkDrafts.set(String(id), note);
+            if (res?.code === "provider_not_ready") showWorkProviderPrompt(id, res.provider || providerIdForApp(rt.app));
+            else setRowNote(id, (res && (res.error || res.runError)) || "Start failed — try again.", "err");
+          }
+          renderAll();
+        }).catch((e) => {
+          runFeedPending.delete(String(id));
+          taskLocal.delete(id);
+          if (optimistic.previous) runFeedSeen.set(String(id), optimistic.previous); else runFeedSeen.delete(String(id));
+          if (note) requestWorkDrafts.set(String(id), note);
+          setRowNote(id, String(e && e.message || e).slice(0, 120), "err");
+          renderAll();
+        });
+      }
+      onDone("approve", id);
+    });
+    for (const start of scope.querySelectorAll("[data-work-start]")) start.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const id = start.getAttribute("data-work-start");
+      const noteBox = start.closest(".ta-dock")?.querySelector(".ta-note");
+      const note = String(noteBox?.value || "").trim();
+      const staged = noteBox ? peekStagedFiles(noteBox) : [];
+      if (!note && !staged.length) { noteBox?.focus(); return; }
+      let payloads;
+      try { payloads = await composerFilePayloads(staged); }
+      catch (error) { setRowNote(id, String(error?.message || error), "err"); return; }
+      const rt = routeFor(id);
+      if (payloads.files.length && !/codex/i.test(String(rt.app))) {
+        setRowNote(id, "Work-run attachments are currently supported for Codex sessions.", "err");
+        return;
+      }
+      if (!await providerReadyBeforeStart(id, rt.app)) return;
+      if (activeView === "reader" && String(readerId) === String(id) && readerTab !== "work") {
+        workFaceTransitions.set(String(id), { fromTab:readerTab === "agent" ? "agent" : "you", until:Date.now() + 520 });
+      }
+      const optimistic = appendOptimisticUserTurn(id, note, true, payloads.attachments, { preserveHistory: false });
+      requestWorkDrafts.delete(String(id));
+      readerTab = "work";
+      readerTabSwap = true;
+      workTabAnimateUntil.set(String(id), Date.now() + 500);
+      start.disabled = true;
+      setRowNote(id, `Starting ${rt.app} here…`, "ok");
+      window.relay.relayWorkStart(id, {
+        host: hostKeyFor(rt.app),
+        model: modelIdFor(rt.app, rt.model),
+        effort: String(rt.effort || "high").toLowerCase(),
+        note,
+        permission: permMode(/claude/i.test(String(rt.app)) ? "claude" : "codex"),
+        clientMessageId: optimistic.clientMessageId,
+        files: payloads.files,
+      }).then((res) => {
+        runFeedPending.delete(String(id));
+        if (!res?.ok) {
+          taskLocal.delete(String(id));
+          if (optimistic.previous) runFeedSeen.set(String(id), optimistic.previous); else runFeedSeen.delete(String(id));
+          requestWorkDrafts.set(String(id), note);
+          if (res?.code === "provider_not_ready") showWorkProviderPrompt(id, res.provider || providerIdForApp(rt.app));
+          else {
+            readerTab = "agent";
+            setRowNote(id, res?.error || res?.runError || "It did not start.", "err");
+          }
+        } else {
+          if (noteBox) clearStagedFiles(noteBox);
+          clearRowNote(id);
+        }
+        renderAll();
+      }).catch((error) => {
+        runFeedPending.delete(String(id));
+        taskLocal.delete(String(id));
+        if (optimistic.previous) runFeedSeen.set(String(id), optimistic.previous); else runFeedSeen.delete(String(id));
+        requestWorkDrafts.set(String(id), note);
+        readerTab = "agent";
+        setRowNote(id, String(error?.message || error).slice(0, 120), "err");
+        renderAll();
+      });
+      onDone("work-start", id);
+    });
+    for (const button of scope.querySelectorAll("[data-chat-work-stop]")) button.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const id = String(button.getAttribute("data-chat-work-stop") || "");
+      if (!id || button.disabled) return;
+      button.disabled = true;
+      const result = await window.relay.chatAgentWorkStop?.(id).catch((error) => ({ ok:false, error:String(error?.message || error) }));
+      if (result?.ok) {
+        taskLocal.set(id, "stopped");
+        stopRunFeed(id);
+        setRowNote(id, "Work stopped.", "ok");
+      } else setRowNote(id, result?.error || "Work could not be stopped.", "err");
+      renderAll();
+    });
+    for (const button of scope.querySelectorAll("[data-chat-work-retry]")) button.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const id = String(button.getAttribute("data-chat-work-retry") || "");
+      if (!id || button.disabled) return;
+      button.disabled = true;
+      const result = await window.relay.chatAgentWorkRetry?.(id).catch((error) => ({ ok:false, error:String(error?.message || error) }));
+      if (result?.ok) {
+        taskLocal.set(id, "running");
+        runFeedSeen.delete(id);
+        runFeedEpoch.set(id, (runFeedEpoch.get(id) || 0) + 1);
+        setRowNote(id, result.session?.state === "waiting_for_device" ? "Waiting for your computer." : "Retry started.", "ok");
+      } else setRowNote(id, result?.error || "Work could not be retried.", "err");
+      renderAll();
+    });
+    for (const st of scope.querySelectorAll("[data-steer]")) st.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const id = st.getAttribute("data-steer");
+      const box = scope.querySelector(`[data-steer-note="${CSS.escape(id)}"]`);
+      const body = String((box && box.value) || "").trim();
+      const staged = box ? peekStagedFiles(box) : [];
+      if (!body && !staged.length) { if (box) box.focus(); return; }
+      st.disabled = true;
+      let payloads;
+      try {
+        payloads = await composerFilePayloads(staged);
+      } catch (error) {
+        st.disabled = false;
+        setRowNote(id, String(error?.message || error), "err");
+        return;
+      }
+      if (payloads.files.length && !/codex/i.test(runAppName(id))) {
+        st.disabled = false;
+        setRowNote(id, "Work-run attachments are currently supported for Codex sessions.", "err");
+        return;
+      }
+      const key = String(id);
+      const continuation = continuedRouteOptions(id);
+      if (taskBoardState(id) === "running") {
+        const rows = queuedRunMessages(key);
+        rows.push({ id: crypto.randomUUID(), body, files: payloads.files, attachments: payloads.attachments, ...continuation });
+        runQueuedMessages.set(key, rows);
+        if (box) { box.value = ""; clearStagedFiles(box); }
+        requestWorkDrafts.delete(key);
+        setRowNote(id, "Queued for when the current turn finishes.", "ok");
+        fadeRowNoteLater(id, 5000);
+        renderAll();
+        return;
+      }
+      const previousFeed = runFeedSeen.get(key) || null;
+      const previousState = taskLocal.has(key) ? taskLocal.get(key) : undefined;
+      const optimistic = appendOptimisticUserTurn(id, body, true, payloads.attachments);
+      const res = await window.relay.runSteer(id, body, { newTurn: true, clientMessageId:optimistic.clientMessageId, files: payloads.files, ...continuation }).catch((err) => ({ ok: false, error: String(err && err.message || err) }));
+      st.disabled = false;
+      runFeedPending.delete(key);
+      if (res && res.ok) {
+        if (box) { box.value = ""; clearStagedFiles(box); }
+        requestWorkDrafts.delete(key);
+        setRowNote(id, "Follow-up sent into the session.", "ok");
+        fadeRowNoteLater(id, 3000);
+        renderAll();
+      }
+      else {
+        stopRunFeed(key);
+        if (previousFeed) runFeedSeen.set(key, previousFeed); else runFeedSeen.delete(key);
+        if (previousState === undefined) taskLocal.delete(key); else taskLocal.set(key, previousState);
+        setRowNote(id, (res && res.error) || "Could not reach the session.", "err");
+        renderAll();
+      }
+    });
     for (const lt of scope.querySelectorAll("[data-later]")) lt.addEventListener("click", (e) => {
       e.stopPropagation();
       const id = lt.getAttribute("data-later");
@@ -7199,8 +8525,11 @@
     return Number(todoState.counts.triage || 0);
   }
   let chatExpanded = false; // the conversation borrowing the reader's frame (⤢)
-  let readerTab = "you"; // which face of the Task folder is open ("you" | "agent")
+  let readerTab = "you"; // which face of the Task folder is open ("you" | "agent" | "work")
   let readerTabSwap = false; // true only for the render caused by a tab switch (drives the pane animation)
+  let readerWorkVisible = false; // detects the two-tabs -> three-tabs transition without confusing an existing run
+  const workTabAnimateUntil = new Map(); // request id -> animation deadline across the immediate Start repaint
+  const workFaceTransitions = new Map(); // request id -> source face retained while Work becomes ready
   const requestWorkDrafts = new Map(); // switching documents never eats an unsent Start/Steer note
   const readerHumanDrafts = new Map(); // For-you replies survive source/Work tab hops independently
   // Sent relays live in the API-backed sent cache rather than the inbound
@@ -7247,9 +8576,6 @@
         provider: item.provider || (item.origin === "slack" ? { name:"slack" } : null),
         materializedCodex: Boolean(item.materializedCodex),
         materializedClaude: Boolean(item.materializedClaude),
-        workStartedAt: sentTwin?.workStartedAt || null,
-        workCompletedAt: sentTwin?.workCompletedAt || null,
-        agentHandoff: sentTwin?.agentHandoff || null,
         reactions: item.reactions || { aggregates:[], events:[] },
       };
     }
@@ -7284,9 +8610,6 @@
       provider: sent.provider || null,
       materializedCodex: Boolean(sent.materializedCodex),
       materializedClaude: Boolean(sent.materializedClaude),
-      workStartedAt: sent.workStartedAt || null,
-      workCompletedAt: sent.workCompletedAt || null,
-      agentHandoff: sent.agentHandoff || null,
       reactions: sent.reactions || { aggregates: [], events: [] },
     };
   }
@@ -7545,9 +8868,13 @@
     const morphFromList = prepareReaderMorph(activeView);
     readerId = id;
     const opened = readerRow(id);
-    // A Relay that already went to an app opens on its receipt.
-    const openedHandoff = handoffFor(opened);
-    readerTab = openedHandoff && ["starting", "running", "failed"].includes(openedHandoff.state) ? "agent" : "you";
+    const openedState = opened ? relayWorkState(opened) : "idle";
+    readerWorkVisible = Boolean(opened && (
+      opened.source?.host === "relay-agent-run"
+      || workProviderPrompts.has(String(id))
+      || !["idle", "waiting", "parked"].includes(openedState)
+    ));
+    readerTab = readerWorkVisible ? "work" : "you";
     // Remember the WHOLE place, not just the view: a room is a person, so
     // coming back without the party hint (or without the split) left the rail
     // standing beside an empty pane (David, live).
@@ -7571,6 +8898,8 @@
     cleanReaderMorph();
     sessionPickerState = null;
     const back = readerReturn || { view: readerSource === "tasks" ? "tasks" : "relays", threadId: null };
+    if (readerId) destroyWorkScroller(readerId);
+    scrollEl.classList.remove("work-scroll-active"); readerViewEl.classList.remove("work-view"); readerBodyEl.classList.remove("work-mode");
     readerId = null;
     if (back.view === "threads" && back.threadId) {
       // Re-ENTER the room through the same door that opened it. Restoring the
@@ -7759,6 +9088,7 @@
   function assessReaderFit() {
     const tick = () => {
       if (activeView !== "reader") return;
+      if (readerBodyEl.classList.contains("work-mode")) { readerBodyEl.classList.remove("rd-fit"); return; }
       if (W.v !== W.t || H.v !== H.t) { requestAnimationFrame(tick); return; }
       readerBodyEl.classList.add("rd-fit");
       const fits = scrollEl.scrollHeight <= scrollEl.clientHeight + 1;
@@ -7778,33 +9108,39 @@
       : request ? (String(r.title || "").trim() || relaySubject(r)) : relaySubject(r);
     const headlineClass = subject.length > 120 ? " long very-long" : subject.length > 70 ? " long" : "";
     const note = rowNotes.get(r.id);
+    let app = request ? routeFor(r.id).app : agentAppName();
     const providerPrompt = request ? workProviderPrompts.get(String(r.id)) : null;
-    // A Task whose chosen provider is not signed in asks for one in the
-    // status slot, above the composer, on the agent face.
-    const status = request && providerPrompt
-      ? (readerTab === "agent" ? workProviderPromptHtml(r) : "")
-      : request ? taskStatusLine(r, { inline: true }) : "";
+    const status = request && !providerPrompt ? taskStatusLine(r, { inline: true }) : "";
     // The FOLDER: tabs cut from the paper, one per document — only when the
     // relay actually carries two. Orange square = you, blue = your agent app.
-    // TWO FACES, never three. The Work face — Relay's own transcript of a
-    // worker it ran — is gone: Send hands the Relay to the desktop app and the
-    // agent face keeps a receipt (David, 2026-09-03: hand-off, not runner).
     const agentText = String(r.forAgent || "").trim();
-    if (readerTab === "work") readerTab = "agent";
+    // A Task always keeps its two immutable source documents. Once any
+    // provider turn exists, Work joins them as a third face and owns the live
+    // transcript and final answer. Each face still owns its composer: human
+    // reply on For you, provider Start/follow-up on For <agent> and Work.
+    const runState = relayWorkState(r);
+    // RELAY WORK IS REQUESTS SUBSTRATE (Sven, 2026-08-17): a plain relay grows
+    // a Work face only where the product row allows it (local builds). A
+    // Task keeps its own — that surface is gated by features.requests.
+    const workOn = payload.features?.relayWork === true;
+    const legacyCompletedWithoutNative = request && runState === "done" && !requestHasNativeSession(r);
+    const hasWork = chatOwnedWork || ((request || workOn) && (Boolean(providerPrompt) || !["idle", "waiting", "parked"].includes(runState)));
+    if (hasWork && !providerPrompt && !legacyCompletedWithoutNative) app = runAppName(r.id); // an existing run names the provider that actually owns it
+    if (!hasWork && readerTab === "work") readerTab = "you";
+    const workAppearing = hasWork && !readerWorkVisible;
+    const transition = workFaceTransitions.get(String(r.id));
+    const transitioningToWork = Boolean(hasWork && transition && Date.now() < transition.until);
+    if (workAppearing) {
+      readerTab = "work";
+      workTabAnimateUntil.set(String(r.id), Date.now() + 500);
+    }
+    readerWorkVisible = Boolean(hasWork);
+    const onWork = hasWork && readerTab === "work";
     const onAgent = Boolean(agentText || request) && readerTab === "agent";
     const requestActionable = request && taskClaimAllowsStart(r) && ["waiting", "parked", "stopped"].includes(taskBoardState(r.id));
+    const animateWork = hasWork && Date.now() < (workTabAnimateUntil.get(String(r.id)) || 0);
     const agentWords = agentWordCount(agentText);
-    const onHuman = !onAgent;
-    const handoff = handoffFor(r);
-    // The agent row's state whispers where the Relay went, so the receipt is
-    // visible from the human face too.
-    const agentRowState = onAgent
-      ? "reading now"
-      : handoff?.state === "running"
-        ? `in ${handoffAppName(handoff)} ›`
-        : handoff?.state === "starting"
-          ? `opening ${handoffAppName(handoff)}…`
-          : agentWords ? `${agentWords} ${agentWords === 1 ? "word" : "words"} ›` : "view ›";
+    const onHuman = !onAgent && !onWork;
     const documentList = (request || agentText) ? `
       <nav class="relay-contents" data-stop="1" aria-label="Relay contents">
         <span class="relay-contents-label">This Relay contains</span>
@@ -7813,8 +9149,9 @@
             <span class="sq you"></span><span class="relay-contents-name">Message for you</span><span class="relay-contents-state">${onHuman ? "reading now" : "view ›"}</span>
           </button>
           <button type="button" class="relay-contents-row${onAgent ? " on" : ""}" data-rtab="agent" aria-current="${onAgent ? "page" : "false"}">
-            <span class="sq ag"></span><span class="relay-contents-name">Message for your agent</span><span class="relay-contents-state">${esc(agentRowState)}</span>
+            <span class="sq ag"></span><span class="relay-contents-name">Message for your agent</span><span class="relay-contents-state">${onAgent ? "reading now" : agentWords ? `${agentWords} ${agentWords === 1 ? "word" : "words"} ›` : "view ›"}</span>
           </button>
+          ${hasWork ? `<button type="button" class="relay-contents-row work${onWork ? " on" : ""}${animateWork ? " work-new" : ""}" data-rtab="work" aria-current="${onWork ? "page" : "false"}"><span class="sq ag"${providerPrompt || legacyCompletedWithoutNative ? "" : ` style="background:${vendorSq(app)}"`}></span><span class="relay-contents-name">Work</span><span class="relay-contents-state">${onWork ? "reading now" : "view ›"}</span></button>` : ""}
         </span>
       </nav>` : "";
     const agentDoc = `
@@ -7828,43 +9165,53 @@
         <div class="rd-body">${readerParagraphs(r.forHuman)}</div>
         ${todoWhyHtml(r)}
         ${scheduleContractHtml(r)}`;
-    const doc = onAgent ? agentDoc : humanDoc;
-    // RELAY WORK IS REQUESTS SUBSTRATE (Sven, 2026-08-17): a plain relay's
-    // agent composer exists only where the product row allows it (local
-    // builds). A Task keeps its own — that surface is gated by features.requests.
-    const workOn = payload.features?.relayWork === true;
-    // The whisper explains what Send will do; it leaves once a session exists.
-    const bothNote = onAgent && workOn && !handoff ? `<div class="rd-dest">your agent receives both the “for you” and “for your agent” parts</div>` : "";
-    // Host rows live on Message for you only. On the agent face the rail's
-    // chip names the app and Send opens it; a second "Open in…" beside that
-    // was two ways to say one thing (David, 2026-09-03).
-    const documentHostActions = !request && onHuman ? `<div class="rd-host-actions" data-stop="1">${relayHostActionsHtml({
+    const workDoc = `<div class="work-context">
+        <div class="rd-kicker" data-run-kicker="${esc(r.id)}">${legacyCompletedWithoutNative ? "Task · done" : `${request || chatOwnedWork ? `Task · Created by ${esc(sender)}` : `work · ${esc(sender)}`} · ${esc(timeAgo(r.createdAt))}`}</div>
+        <div class="rd-headline${headlineClass}">${esc(subject)}</div></div>
+        ${providerPrompt
+          ? workProviderPromptHtml(r)
+          : legacyCompletedWithoutNative
+            ? `<div class="work-conversation" role="status"><div class="rd-final"><p>This Task is complete. Live Work history is unavailable for this older run.</p></div></div>`
+            : `<div class="work-conversation${runState === "running" ? " work-streaming" : ""}" data-run-stream="${esc(r.id)}" aria-live="polite" aria-relevant="additions text"><div class="work-starting" role="status"><span class="rd-live-tail-dot" aria-hidden="true"></span><span>Starting ${esc(app)} on this Task…</span></div></div>`}`;
+    const doc = onWork ? workDoc : onAgent ? agentDoc : humanDoc;
+    // The whisper explains what the Relay Work dock will send; without that
+    // dock the row names where it goes (H2), and nothing else needs saying.
+    const bothNote = onAgent && workOn ? `<div class="rd-dest">your agent receives both the “for you” and “for your agent” parts</div>` : "";
+    // Both immutable document faces own the same full provider action rows.
+    // They sit between the document and its composer, never inside either
+    // composer's rail. Work is the live provider transcript and keeps its own
+    // single-session controls instead.
+    const documentHostActions = !request && !onWork ? `<div class="rd-host-actions" data-stop="1">${relayHostActionsHtml({
       id: r.id,
       direction: r.outbound ? "out" : "in",
       materializedCodex: Boolean(r.materializedCodex),
       materializedClaude: Boolean(r.materializedClaude),
     }, { persistent: true })}</div>` : "";
     // The open folder owns the addressee. For you replies to the human sender;
-    // For <agent> hands the Relay to your agent app. Switching documents must
-    // never silently keep Shane as the recipient of a message typed while
-    // looking at the Codex document.
+    // For <agent> starts private local work; Work continues that same native
+    // session. Switching documents must never silently keep Shane as the
+    // recipient of a message typed while looking at the Codex document.
     // A composer that throws must never take the page down with it: the reader
     // is the surface, and it renders even if its dock cannot.
     const composer = (() => { try { return composerHtml(); } catch (error) { console.error("[reader] composer failed:", error); return ""; } })();
     const sharedShelf = relaySharedShelf(r);
     const todoStatusControl = todoReaderStatusHtml(r);
-    const claimControl = request ? taskClaimControlHtml(r, { surface: "reader" }) : "";
+    const claimControl = request && !onWork ? taskClaimControlHtml(r, { surface: "reader" }) : "";
     function composerHtml() {
       // An unstarted Task is actionable from either immutable source document:
       // both For you and For <agent> expose the same Start task dock. Once it
-      // starts, each visible source document owns its usual addressee and the
-      // agent face carries the receipt.
-      if (request && providerPrompt && onAgent) return workProviderPromptDockHtml();
-      if (request && taskClaimAllowsStart(r) && (onAgent || requestActionable)) return requestDockHtml(r, { inline: true });
-      // The agent composer is the hand-off: route, words, and Send. When Relay
-      // Work is disabled, the agent face ends after its document.
+      // starts, each visible source document owns its usual addressee and Work
+      // continues the provider turn. Previously any
+      // existing Work hid the entire source-document footer, which left both
+      // immutable documents looking like dead pages after a run completed.
+      if (request && onWork && providerPrompt) return workProviderPromptDockHtml();
+      if (request && taskClaimAllowsStart(r) && (onAgent || onWork || requestActionable)) return requestDockHtml(r, { inline: true });
+      // The agent composer is Relay Work: route, note, and Send. Its provider
+      // launch affordances live in documentHostActions immediately above it,
+      // exactly as they do on Message for you. When Relay Work is disabled,
+      // the agent face ends after those document actions.
       if (onAgent && !workOn) return "";
-      if (onAgent) return relayWorkDockHtml(r, { inline: true });
+      if (onAgent || onWork) return relayWorkDockHtml(r, { inline: true, showHostOpen: !onAgent });
       return `
       <div class="ta-dock inline" data-stop="1"><div class="qr col">
         <textarea id="qrInput" rows="1" placeholder="Reply…">${esc(readerHumanDrafts.get(String(r.id)) || "")}</textarea>
@@ -7881,6 +9228,8 @@
         </div>
       </div></div>`;
     }
+    readerBodyEl.classList.toggle("work-mode", onWork); readerViewEl.classList.toggle("work-view", onWork);
+    scrollEl.classList.toggle("work-scroll-active", onWork); if (!onWork) destroyWorkScroller(r.id);
     readerBodyEl.innerHTML = `
       <div class="reader-bar">
         <button class="th-back" type="button" id="readerBack" aria-label="Back">
@@ -7891,10 +9240,23 @@
         ${request ? `<button class="reader-delete" type="button" data-reader-delete="${esc(r.id)}" aria-label="Move task to Recently Deleted" title="Move task to Recently Deleted"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button>` : ""}
       </div>
       ${documentList}
-      <div class="rd-col${readerTabSwap ? " swap" : ""}">${doc}</div>
-      <div class="rd-foot"><div class="rd-col">${sharedShelf}${status}${bothNote}${claimControl}${documentHostActions}${composer}
-        <div class="row-err${note && note.cls === "ok" ? " ok" : ""}" data-err="${esc(r.id)}" data-stop="1">${esc((note && note.text) || "")}</div>
-      </div></div>`;
+      ${onWork ? `<div class="work-surface${transitioningToWork ? " work-entering" : ""}" data-work-active="${runState === "running"}">
+        ${transitioningToWork ? `<div class="work-transition-source" aria-hidden="true" inert><div class="rd-col">${transition.fromTab === "agent" ? agentDoc : humanDoc}</div></div>` : ""}
+        <div class="work-scroll" data-work-scroll="${esc(r.id)}" tabindex="0" role="log" aria-label="Work conversation">
+          <div class="work-scroll-inner">${workDoc}<div class="work-response-spacer" aria-hidden="true"></div></div></div>
+        <div class="work-footer" data-work-footer="${esc(r.id)}"><div class="work-footer-inner"><div class="rd-col run">
+          ${status}${composer}<div class="row-err${note && note.cls === "ok" ? " ok" : ""}" data-err="${esc(r.id)}" data-stop="1">${esc((note && note.text) || "")}</div>
+        </div></div></div></div>` : `<div class="rd-col${readerTabSwap ? " swap" : ""}">${doc}</div>
+        <div class="rd-foot"><div class="rd-col">${sharedShelf}${status}${bothNote}${claimControl}${documentHostActions}${composer}
+          <div class="row-err${note && note.cls === "ok" ? " ok" : ""}" data-err="${esc(r.id)}" data-stop="1">${esc((note && note.text) || "")}</div>
+        </div></div>`}`;
+    if (onWork) bindWorkScroller(r.id);
+    if (transitioningToWork) setTimeout(() => {
+      const current = workFaceTransitions.get(String(r.id));
+      if (current === transition) workFaceTransitions.delete(String(r.id));
+      readerBodyEl.querySelector(".work-transition-source")?.remove();
+      readerBodyEl.querySelector(".work-surface")?.classList.remove("work-entering");
+    }, Math.max(0, transition.until - Date.now()) + 20);
     document.getElementById("readerBack").addEventListener("click", (e) => { e.stopPropagation(); closeReader(); });
     wireReaderTodoStatus(r);
     const readerDelete = readerBodyEl.querySelector("[data-reader-delete]");
@@ -7930,6 +9292,7 @@
         readerTabSwap = true;
         renderReader();
         readerTabSwap = false;
+        if (t === "work") syncRunMirrors();
       });
     }
     wireHostOpen(readerBodyEl);
@@ -7953,7 +9316,7 @@
       });
     }
     assessReaderFit();
-    if (request || onAgent) {
+    if (request || onAgent || onWork || readerBodyEl.querySelector("[data-open-in]")) {
       wireRequestControls(readerBodyEl, (action) => {
         if (action === "later") closeReader();
         else {
@@ -7963,7 +9326,7 @@
         }
       });
     }
-    if (!onAgent) {
+    if (!onAgent && !onWork) {
       const send = document.getElementById("qrSend");
       const input = document.getElementById("qrInput");
       // The agent addressee uses the Task-style dock, so it deliberately has
@@ -8086,6 +9449,7 @@
     renderReader();
     });
     }
+    if (onWork) syncRunMirrors();
 
   }
 
@@ -14483,7 +15847,8 @@
       try {
         await window.relay.installationAuthCancel();
         signupPollFailures = 0; signupPollErrorVisible = false; signupConnectionCommitted = false;
-        signupBusy = false; signupStage = "installed"; signupAccount = null; signupEmail = "";
+        signupBusy = false; signupStage = "method"; signupAccount = null; signupEmail = "";
+        signupStateLoaded = false; signupInitializationFailed = false;
         window.relay.dismiss?.();
       } catch (reason) { signupFailure(reason, "Relay could not cancel setup safely."); }
     });
@@ -14597,11 +15962,54 @@
       signupPollFailures = 0;
       signupPollErrorVisible = false;
       signupConnectionCommitted = false;
+      signupStateLoaded = true;
+      signupInitializationFailed = false;
       signupForceGoogleSelection = forceGoogleSelection;
       applyInstallationState(state);
       renderSignup();
     } catch (reason) {
       signupFailure(reason, "Relay could not restart setup safely. No replacement was created.");
+    }
+  }
+
+  async function initializeInstallationAuthorization({ force = false } = {}) {
+    if (!window.relay.installationAuthState || payload.account?.paired !== false) return;
+    if (signupStateLoaded && !force) return;
+    if (!force && pendingOpenSignupCard()) {
+      signupStage = "installed";
+      if (rendererSurfaceActive()) renderSignup();
+      else surfaceRenderDeferred = true;
+      return;
+    }
+    signupStateLoaded = true;
+    signupInitializationFailed = false;
+    signupBusy = true;
+    signupError = "";
+    signupStage = "method";
+    if (rendererSurfaceActive()) renderSignup();
+    else surfaceRenderDeferred = true;
+    try {
+      let state = await window.relay.installationAuthState();
+      const resumedExistingApproval = state?.status === "pending_identity";
+      if (!state || state.status === "idle") {
+        state = await window.relay.installationAuthBegin();
+      } else if (state.status === "expired") {
+        signupStage = "expired";
+      } else if (resumedExistingApproval) {
+        signupStage = "resume";
+      }
+      signupBusy = false;
+      applyInstallationState(state);
+      if (rendererSurfaceActive()) renderSignup();
+      else surfaceRenderDeferred = true;
+      if (["google", "finishing"].includes(signupStage)) pollInstallationState();
+    } catch (reason) {
+      signupBusy = false;
+      signupStage = "method";
+      signupInitializationFailed = true;
+      signupError = signupFailureMessage(reason, "Relay could not prepare account setup. Try again.");
+      if (rendererSurfaceActive()) renderSignup();
+      else surfaceRenderDeferred = true;
     }
   }
 
@@ -14734,22 +16142,23 @@
     }
     if (signupStage === "installed") {
       const pendingCard = pendingOpenSignupCard();
-      signupBodyEl.innerHTML = pendingCard
-        ? `<p class="su-step">Relay received</p><h1 class="su-title">Read it first.</h1>${pendingCard}<p class="su-copy">Connect the account this was sent to when you want to reply or open it in your agent.</p><div class="su-form"><button class="su-primary" id="suContinue" type="button"${busy}>Connect to reply</button>${cancelSetupButton()}</div>${error}`
-        : `<p class="su-step">Agent installed</p><h1 class="su-title">Relay is ready for you.</h1><p class="su-copy">Your agent finished the install. Connect your account to this computer.</p><div class="su-form"><button class="su-primary" id="suContinue" type="button"${busy}>Continue</button>${cancelSetupButton()}</div>${error}`;
-      document.getElementById("suContinue")?.addEventListener("click", async () => {
-        signupBusy = true; signupError = ""; renderSignup();
-        try {
-          const state = await window.relay.installationAuthBegin();
-          signupBusy = false; signupStage = "method"; applyInstallationState(state); renderSignup();
-          if (signupStage === "finishing") pollInstallationState();
-        } catch (reason) { signupFailure(reason, "Relay could not start account setup."); }
-      });
+      if (!pendingCard) {
+        signupStage = "method";
+        renderSignup();
+        return;
+      }
+      signupBodyEl.innerHTML = `<p class="su-step">Relay received</p><h1 class="su-title">Read it first.</h1>${pendingCard}<p class="su-copy">Connect the account this was sent to when you want to reply or open it in your agent.</p><div class="su-form"><button class="su-primary" id="suContinue" type="button"${busy}>Connect to reply</button>${cancelSetupButton()}</div>${error}`;
+      document.getElementById("suContinue")?.addEventListener("click", () => initializeInstallationAuthorization({ force:true }));
       bindSignupCancel();
       return;
     }
     if (signupStage === "method") {
-      signupBodyEl.innerHTML = `<p class="su-step">Your account</p><h1 class="su-title">How would you like to continue?</h1><p class="su-copy">Your agent can’t see your identity or sign-in details.</p><div class="su-form"><button class="su-secondary su-google" id="suGoogle" type="button"${busy}>${googleMark()} Continue with Google</button><div class="su-divider">or</div><button class="su-primary" id="suEmail" type="button"${busy}>Continue with email</button>${cancelSetupButton()}</div>${error}`;
+      const retry = signupInitializationFailed
+        ? `<button class="su-primary" id="suInitializeRetry" type="button"${busy}>Try again</button>`
+        : "";
+      const methodDisabled = signupInitializationFailed ? " disabled" : busy;
+      signupBodyEl.innerHTML = `<p class="su-step">Agent installed</p><h1 class="su-title">Connect Relay.</h1><p class="su-copy">Sign in to connect this computer. Your agent can’t see your identity or sign-in details.</p><div class="su-form">${retry}<button class="su-secondary su-google" id="suGoogle" type="button"${methodDisabled}>${googleMark()} Continue with Google</button><div class="su-divider">or</div><button class="su-primary" id="suEmail" type="button"${methodDisabled}>Continue with email</button>${cancelSetupButton()}</div>${error}`;
+      document.getElementById("suInitializeRetry")?.addEventListener("click", () => initializeInstallationAuthorization({ force:true }));
       document.getElementById("suGoogle")?.addEventListener("click", async () => {
         signupBusy = true; signupError = ""; renderSignup();
         try {
@@ -14845,12 +16254,13 @@
   // absent in production and cannot affect account or authorization state.
   if (window.relay.isTestOverlay) {
     window.__relaySignupPreview = (stage, data = {}) => {
-      signupStage = String(stage || "installed");
+      signupStage = String(stage || "method");
       signupEmail = String(data.email || "alex@example.com");
       signupAccount = data.account || { displayName:"Alex Rivera", email:"alex@example.com" };
       signupBusy = false;
       signupError = String(data.error || "");
       signupNote = String(data.note || "");
+      signupInitializationFailed = data.initializationFailed === true;
       const tutorial = signupStage === "chat-setup";
       payload.account = { paired:tutorial };
       payload.ui = { ...payload.ui, setupTutorialPending:tutorial };
@@ -15019,23 +16429,16 @@
         surfaceRenderDeferred = true;
       }
       syncCardSize(false);
-      if (!credentialRecovery && payload.account?.paired === false && !signupStateLoaded && window.relay.installationAuthState) {
-        signupStateLoaded = true;
-        window.relay.installationAuthState().then((state) => {
-          if (state?.status === "pending_identity") signupStage = "resume";
-          applyInstallationState(state);
-          if (rendererSurfaceActive()) renderSignup();
-          else surfaceRenderDeferred = true;
-          if (["google", "finishing"].includes(signupStage)) pollInstallationState();
-        }).catch((reason) => {
-          signupError = signupFailureMessage(reason, "Relay couldn’t check the saved setup. Try again.");
-          if (rendererSurfaceActive()) renderSignup();
-          else surfaceRenderDeferred = true;
-        });
-      }
+      if (!credentialRecovery && payload.account?.paired === false) void initializeInstallationAuthorization();
       return;
     }
     stopSignupPolling();
+    signupStage = "method";
+    signupBusy = false;
+    signupError = "";
+    signupNote = "";
+    signupStateLoaded = false;
+    signupInitializationFailed = false;
     // Feature policy arrives with the first main-process payload, after the
     // static HTML has already painted. Reconcile the tab strip on every
     // payload-driven render so a disabled surface never survives as stale
@@ -15088,6 +16491,9 @@
       surfaceRenderDeferred = true;
     }
     applyView();
+    // Every render rebuilds the mirror's element, so re-attach the poll to
+    // whatever is on screen now and drop the ones whose card just closed.
+    syncRunMirrors();
     if (paintSurface && activeView === "reader") loadSchedules();
     // contacts renders from its own load path
   }

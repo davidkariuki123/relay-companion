@@ -292,9 +292,6 @@ export async function submitTurnToCodexDesktopThread({
   // this; keeping the process/inspector clock injectable lets regression tests
   // prove a PID swap and a dead inspector without killing the user's app.
   runtime = null,
-  // Acknowledgement edge for UI receipts. Callers still await rollout
-  // verification before treating the turn as durably delivered.
-  onSubmitted = null,
 } = {}) {
   if (process.env.RELAY_CODEX_DESKTOP_REFRESH === "0") return { attempted: false, submitted: false, reason: "disabled" };
   if (!["darwin", "win32"].includes(platform)) return { attempted: false, submitted: false, reason: "unsupported-platform" };
@@ -335,7 +332,6 @@ export async function submitTurnToCodexDesktopThread({
   let ran = rolloutPath ? codexRolloutHasClientMessage(rolloutPath, clientUserMessageId) : null;
   let attempts = 0;
   let coldLaunchTried = false;
-  let submittedNotified = false;
 
   for (let confirmationRound = 1; confirmationRound <= maxAttempts && ran !== true; confirmationRound += 1) {
     if (!delivered && !deliveryAmbiguous) {
@@ -364,13 +360,7 @@ export async function submitTurnToCodexDesktopThread({
         const current = primarySubmitRendererResult(results);
         if (current) renderer = current;
         if (current?.deliveryAmbiguous === true) deliveryAmbiguous = true;
-        if (current && current.ok === true) {
-          delivered = true;
-          if (!submittedNotified) {
-            submittedNotified = true;
-            try { await onSubmitted?.({ threadId: cleanThreadId, clientUserMessageId, renderer: current }); } catch {}
-          }
-        }
+        if (current && current.ok === true) delivered = true;
         if (current?.reason === "turn-in-progress" && !delivered) {
           const deadline = Date.now() + Math.max(10, confirmIntervalMs);
           while (rolloutPath && Date.now() < deadline) {

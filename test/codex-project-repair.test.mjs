@@ -105,6 +105,15 @@ test("startup repair no-ops when no Companion state exists", async () => {
   assert.deepEqual(result, { attempted: false, reason: "state-unavailable", threadIds: [] });
 });
 
+test("the daemon waits for an authenticated owner before repairing Codex project state", () => {
+  const daemon = fs.readFileSync(new URL("../src/task-daemon.js", import.meta.url), "utf8");
+  const run = daemon.slice(daemon.indexOf("export async function runTaskDaemon"));
+  const signedIn = run.indexOf("const me = await resolveMe(client)");
+  const repair = run.indexOf("startRelayCodexProjectRepairLoop({ log })");
+  assert.ok(signedIn >= 0 && repair > signedIn, "account-owned Codex repair must start only after sign-in");
+  assert.match(daemon, /waiting for sign-in in the Relay app/);
+});
+
 test("startup repair waits for Codex and stops retrying after assignment succeeds", async () => {
   const results = [
     { attempted: true, ok: false, reason: "codex-not-running" },

@@ -30,6 +30,7 @@ const previewHtml = read("../overlay/preview.html");
 const previewRenderer = read("../overlay/preview-renderer.js");
 const previewPreloadSource = read("../overlay/preview-preload-source.cjs");
 const previewPreloadBundle = read("../overlay/preview-preload.cjs");
+const workUi = read("../overlay/work-ui.js");
 const hoverIntent = read("../overlay/hover-intent.js");
 
 function inlineFunction(source, name, nextMarker) {
@@ -469,6 +470,34 @@ test("a rendered conversation marks every visible inbound message read", () => {
   assert.match(handler, /if \(rowById\(id\)\) \{[\s\S]*?ackPacket\(id\)/);
 });
 
+test("the task face's ignition is wired end to end: preload, IPC guard, renderer", () => {
+  // Preload coerces every argument to a primitive, like sendReply.
+  const startBridge = between(previewPreloadSource, "startTask: (relayId", "renderMarkdown,");
+  assert.match(startBridge, /relay:preview:startTask/);
+  assert.match(startBridge, /String\(relayId \|\| ""\)/);
+  assert.match(startBridge, /String\(note \|\| ""\)/);
+  // Main answers only the preview window, and the handler exists.
+  const handler = between(main, 'ipcMain.handle("relay:preview:startTask"', "});");
+  assert.match(handler, /isPreviewEvent\(event\)/);
+  assert.match(main, /async function startTaskFromPreview\(input\)/);
+  // The order: supported subscription auth preflight first, note second,
+  // then a provider-owned session, and only then the Started receipt. Codex
+  // launches through Relay's exclusive app-server owner and never opens the
+  // Desktop app as a side effect of Start.
+  const start = between(main, "async function startTaskFromPreview", "function safeNoteStem");
+  const authAt = start.indexOf("assertProviderReady(host)");
+  const noteAt = start.indexOf("task-notes");
+  const stampAt = start.indexOf("taskStarted(");
+  const nativeAt = start.indexOf("adapters.launchTurn(");
+  const receiptAt = start.indexOf("receipt-not-correspondence");
+  assert.ok(authAt > -1 && noteAt > authAt && nativeAt > noteAt && stampAt > nativeAt && receiptAt > nativeAt, "auth and start steps stay ordered");
+  assert.doesNotMatch(start, /if \(host === "codex"\) openPacket/);
+  // The renderer routes Enter through the ignition while in task mode.
+  assert.match(previewRenderer, /if \(taskMode\) \{\s*await submitStart\(\);/);
+  assert.match(previewRenderer, /"Start task"/);
+  // The bundle actually carries the new bridge (a stale build would ship without it).
+  assert.match(previewPreloadBundle, /relay:preview:startTask/);
+});
 
 test("the Task face offers a local Review Safety before one-click Start task", () => {
   assert.match(previewHtml, /id="safetyButton"[^>]*>Review Safety<\/button>/);
@@ -484,7 +513,7 @@ test("the Task face offers a local Review Safety before one-click Start task", (
   // the two-button consent surface.
   assert.match(inbox, /data-request-safety/);
   assert.match(inbox, />Review Safety<\/button>/);
-  assert.match(inbox, /label: failed \? "Retry" : state === "stopped" \? "Start again" : "Start task"/);
+  assert.match(inbox, /label: state === "stopped" \? "Start again" : "Start task"/);
   assert.match(pillPreload, /relay:requestReviewSafety/);
 });
 
@@ -533,13 +562,36 @@ test("a live Claude socket needs recent native activity and stale sockets stop h
   const liveState = between(main, "async function previewTaskLiveState", "// Steer/follow-up");
   assert.match(liveState, /if \(!match \|\| !match\.socketLive\) return "offline"/);
   assert.match(liveState, /Date\.now\(\) - lastActivityAt <= 90_000 \? "active" : "stalled"/);
+  assert.match(inbox, /"stopped", "stalled", "offline"/);
   const steer = between(main, "async function previewTaskSteer", "function installActiveSpaceWatcher");
   assert.match(steer, /if \(newTurn && match && match\.socketLive\)/);
   assert.match(steer, /process\.kill\(pid, "SIGTERM"\)/);
   assert.match(steer, /continueClaudeDesktopCodeSession/);
 });
 
+test("a restarted runner derives its composer provider from the persisted native session", () => {
+  const appName = between(inbox, "function runAppName", "// Which app is actually doing the work");
+  assert.match(appName, /row\?\.coworkSessionId/);
+  assert.match(appName, /row\?\.claudeNativeSession\?\.sessionId/);
+  assert.match(appName, /row\?\.codexThreadId/);
+});
 
+test("continued Task and Work composers keep model and thinking pickers wired to follow-ups", () => {
+  const continuation = between(inbox, "function continuedRouteFor", "function requestDockHtml");
+  const controls = between(inbox, "function wireRequestControls", "function requestsOutstandingCount");
+  const steer = between(main, "async function previewTaskSteer", "function installActiveSpaceWatcher");
+  assert.match(continuation, /data-route-menu="model"/);
+  assert.match(continuation, /data-route-menu="effort"/);
+  assert.match(continuation, /function continuedRouteOptions/);
+  assert.match(controls, /const continuation = continuedRouteOptions\(id\)/);
+  assert.match(controls, /\.\.\.continuation/);
+  assert.match(pillPreload, /model: String\(options && options\.model \|\| ""\)/);
+  assert.match(pillPreload, /effort: String\(options && options\.effort \|\| ""\)/);
+  assert.match(steer, /requestedModel/);
+  assert.match(steer, /requestedEffort/);
+  assert.match(steer, /model: requestedModel \|\| row\.codexModel/);
+  assert.match(steer, /effort: requestedEffort \|\| row\.codexEffort/);
+});
 
 test("provider materialization state reaches both inbound and sent conversation rows", () => {
   assert.match(main, /materializedCodex: Boolean\(p\.codexThreadId \|\| p\.sessionBinding\?\.provider === "codex"\)/);
@@ -563,6 +615,7 @@ test("Codex runner uses native activity labels and native completion truth", () 
   assert.match(feed, /codexRuntimeSessionRef\.turnId/);
   assert.doesNotMatch(feed, /session\.nativeCompletedAt/, "legacy polling cannot bypass canonical terminal reconciliation");
   assert.match(main, /canonicalProviderCompletionCandidate/);
+  assert.match(inbox, /ListFiles: \{ active: "Listing", done: "Listed"/);
   assert.match(previewRenderer, /activity\.activeVerb/);
   assert.match(previewRenderer, /activity\.doneVerb/);
 });
@@ -589,17 +642,82 @@ test("the session document stays calm: evidence collapsed, no spinners, one bubb
   assert.match(previewRenderer, /done \? "Send" : "Steer"/);
 });
 
+test("the in-pill runner mirrors Codex's completed-turn structure and stable motion", () => {
+  const stream = between(inbox, "function paintRunStream", "function paintRunKicker");
+  assert.match(stream, /RelayWorkUI\.partitionTurn/);
+  assert.match(stream, /block\.type === "activity"/);
+  assert.match(stream, /block\.type === "divider"/);
+  assert.match(workUi, /unit\.placement === "final"/);
+  assert.match(workUi, /turn\?\.final\?\.text/, "a completion receipt supplies a strict final when the transcript lacks one");
+  assert.doesNotMatch(stream, /"a moment"/, "duration is never fabricated");
+  assert.doesNotMatch(stream, /rd-worked/, "duration never appears without expandable activity");
+  assert.match(workUi, /blocks\[finalAt - 1\]\.type === "activity"/, "the seam only joins an adjacent disclosure to a final");
+  assert.match(stream, /No native run output was captured/, "an entirely empty capture says so honestly");
+  assert.match(stream, /keyedChildren\(host, turns/);
+  assert.match(inbox, /\.rd-act \{ display:[^}]*font-size:14px;\s*line-height:21px/);
+  assert.match(cssRule(inbox, ".rd-final"), /font-size:14px;\s*line-height:21px/);
+  assert.match(inbox, /\.work-turn \.rd-user-wrap \{ align-self:flex-end;/, "user turns sit on the right like Codex");
+  assert.match(stream, /blockNode\.className = "rd-user-wrap"/, "every canonical user/Steer renders on the right");
+  assert.match(stream, /<div class="rd-user work-markdown"/, "message actions are siblings outside the bubble");
+  assert.match(workUi, /unit\.placement === "user"/, "user turns remain in exact canonical chronology");
+  assert.match(inbox, /\.rd-act\.live \.act-icon \{ animation:rdLivePulse/, "running native work has a cadenced activity affordance");
+  assert.doesNotMatch(stream, /feed\.records/, "runtime metadata never enters the canonical renderer");
+});
 
+test("Claude partial output and the optimistic follow-up are merged into the live feed", () => {
+  const feed = between(main, "async function previewTaskSession", "const providerCompletionInflight");
+  const optimistic = between(inbox, "function appendOptimisticUserTurn", "function runFeedIsTerminal");
+  const controls = between(inbox, "function wireRequestControls", "function requestsOutstandingCount");
+  assert.match(feed, /claudeDesktopCodeWorkerSnapshot/);
+  assert.match(feed, /taskFollowUpText/);
+  assert.match(feed, /snapshot\?\.assistantText/);
+  assert.match(feed, /role: "user", text: followUpText/);
+  assert.match(optimistic, /role: "user"/, "the user's words enter the visible timeline before transport resolves");
+  assert.match(optimistic, /runFeedPending\.add/, "native polling cannot replace the optimistic bubble with a placeholder");
+  assert.ok(controls.indexOf("appendOptimisticUserTurn") < controls.indexOf("await window.relay.runSteer"));
+  assert.match(inbox, /runFeedPending\.has\(key\)/, "polling resumes only after the provider accepts the turn");
+  assert.match(optimistic, /crypto\.randomUUID\(\)/, "every visible message gets a transport-stable identity");
+  assert.match(optimistic, /clientMessageId/, "the identity travels with the optimistic canonical unit");
+  assert.match(inbox, /old\.clientMessageId && unit\.clientMessageId/, "acceptance reconciles by identity before text");
+});
 
+test("runner state follows canonical provider truth instead of a stale Working flag", () => {
+  const state = between(inbox, "function taskBoardState", "function relayWorkState");
+  const relayState = between(inbox, "function relayWorkState", "function requestHasNativeSession");
+  const accept = between(inbox, "function acceptRunFeedUpdate", "function presentRunFeedWatchError");
+  const liveness = between(main, "function runIsLive", "function readSchedules");
+  assert.match(state, /reconnecting/);
+  assert.match(state, /needs_input/);
+  assert.match(state, /return "waiting"/);
+  assert.doesNotMatch(state, /if \(local === "running"\) return "running"/);
+  assert.match(state, /feedState !== "running" \|\| runFeedTimers\.has/);
+  assert.match(state, /local === "running" && !row\.taskStartedAt/);
+  assert.match(relayState, /local === "running" && !row\.workStartedAt/);
+  assert.doesNotMatch(relayState, /\["running", "stopped", "waiting"\]\.includes\(local\)/);
+  assert.match(accept, /const projectedState = runnerStateForFeed\(feed\)/);
+  assert.match(accept, /taskLocal\.set\(key, projectedState\)/);
+  assert.match(main, /const relayOwnedCodexRuns = new Set/);
+  assert.equal((main.match(/relayOwnedCodexRuns\.add/g) || []).length, 2, "initial and follow-up Codex turns both acquire ownership");
+  assert.doesNotMatch(liveness, /statSync|mtimeMs/, "a recently written transcript is not evidence of a live turn");
+});
 
 test("streaming prose is coalesced to one DOM mutation per animation frame", () => {
+  assert.match(inbox, /function updateStreamingMarkupNode/);
+  assert.match(inbox, /requestAnimationFrame\(\(\) =>/);
   assert.match(previewRenderer, /_sessionPendingText/);
   assert.match(previewRenderer, /_sessionMarkdownFrame = requestAnimationFrame/);
 });
 
+test("starting a fresh provider run clears stale follow-up presentation state", () => {
+  const start = between(main, "async function startTaskFromPreview", "function forgeTaskSessionQuietly");
+  assert.match(start, /const freshRunFollowUpState = isRequest/);
+  assert.match(start, /taskFollowUpText: "", taskFollowUpAt: null/);
+  assert.match(start, /workFollowUpText: "", workFollowUpAt: null/);
+  assert.equal((start.match(/\.\.\.freshRunFollowUpState/g) || []).length, 3, "Cowork, Claude, and Codex all reset an older provider turn");
+});
 
 test("a For-you Task reply is optimistic correspondence and remains in the person's conversation", () => {
-  const reader = between(inbox, "if (!onAgent) {", "const oc = readerBodyEl.querySelector");
+  const reader = between(inbox, "if (!onAgent && !onWork)", "const oc = readerBodyEl.querySelector");
   assert.match(reader, /optimisticChatReplies\.set\(idempotencyKey/);
   assert.match(reader, /request:false/);
   // The reply is handed to the device's send queue, which is what carries it
@@ -616,14 +734,31 @@ test("a For-you Task reply is optimistic correspondence and remains in the perso
 
 test("Work images reach Codex as attachments and stay visible through reconciliation", () => {
   const files = between(inbox, "async function composerFilePayloads", "function fmtBytes");
+  const controls = between(inbox, "function wireRequestControls", "function requestsOutstandingCount");
   const steer = between(main, "async function previewTaskSteer", "function installActiveSpaceWatcher");
   assert.match(files, /window\.relay\.pathForFile/);
   assert.match(files, /contentBase64/);
   assert.match(files, /URL\.createObjectURL/);
+  assert.match(pillPreload, /files: Array\.isArray\(options && options\.files\)/);
+  assert.match(controls, /files: payloads\.files/);
+  assert.match(controls, /clearStagedFiles\(box\)/, "accepted attachments leave the composer");
+  assert.match(controls, /if \(previousFeed\) runFeedSeen\.set/, "a failed send keeps the previous runner");
   assert.match(steer, /stageCodexLocalImages\(files\)/);
   assert.match(steer, /localImages,/);
+  assert.match(inbox, /function preserveOptimisticUsers/);
+  assert.match(inbox, /pending = oldUsers\.filter/, "an unmatched optimistic user survives snapshots until provider echo");
+  assert.match(inbox, /class="rd-user-image"/);
 });
 
+test("Start is an optimistic transaction and cannot flash the seeded briefing", () => {
+  const controls = between(inbox, "function wireRequestControls", "function requestsOutstandingCount");
+  const startAt = controls.indexOf("appendOptimisticUserTurn(id, note.trim()");
+  const transportAt = controls.indexOf("window.relay.taskStart(id");
+  assert.ok(startAt >= 0 && startAt < transportAt);
+  assert.match(controls, /preserveHistory: false/);
+  assert.match(controls, /runFeedPending\.delete\(String\(id\)\)/);
+  assert.match(inbox, /if \(!key \|\| runFeedPending\.has\(key\)/);
+});
 
 test("the Relay AI session surface uses the same Codex completed-turn contract", () => {
   const session = between(previewRenderer, "function renderSession", "async function pollSession");
@@ -642,11 +777,212 @@ test("the Relay AI session surface uses the same Codex completed-turn contract",
   assert.ok(session.indexOf("session-divider") < session.indexOf("session-final"), "divider precedes the separate final answer");
 });
 
+test("runner summaries use Codex's left-set conversation measure and are interactive only with real activity", () => {
+  assert.match(cssRule(inbox, ".rd-stream"), /max-width:48rem/);
+  assert.match(cssRule(inbox, ".rd-stream"), /width:calc\(100% - 40px\)/);
+  assert.match(cssRule(inbox, ".rd-col.run"), /max-width:none/);
+  assert.match(inbox, /\.rd-col\.run \.rd-headline,[\s\S]*text-align:left/);
+  assert.match(cssRule(inbox, ".rd-col.run .rd-headline"), /font-family:var\(--sans\)/);
+  assert.match(inbox, /const onWork = hasWork && readerTab === "work"/);
+  assert.match(inbox, /work-surface/);
+  assert.match(cssRule(inbox, ".rd-user"), /max-width:77%/);
+  assert.match(cssRule(inbox, ".rd-activity-toggle"), /align-self:flex-start/);
+  assert.match(cssRule(inbox, ".rd-activity-toggle"), /font-size:14px;\s*line-height:21px/);
+  assert.match(cssRule(inbox, ".rd-empty"), /text-align:center/);
+  assert.match(cssRule(previewHtml, ".session-activity-toggle"), /align-self:flex-start/);
+  assert.match(cssRule(previewHtml, ".session-empty"), /font-size:12px/);
+  assert.doesNotMatch(previewRenderer, /return "a moment"/);
+});
 
+test("Work activity uses the installed Codex row grammar without raw argument dumps", () => {
+  const start = inbox.indexOf("const ACTS = {");
+  const end = inbox.indexOf("function toolCallHasResult", start);
+  assert.ok(start >= 0 && end > start);
+  const source = inbox.slice(start, end);
+  const api = Function(`"use strict";
+    const esc = (value) => String(value).replace(/[&<>\"]/g, "");
+    ${source}
+    return { actOf, actHtml, activitySummary, compactActivityText };
+  `)();
 
+  const read = api.actOf({
+    type: "tool_call",
+    tool: "Read",
+    input: JSON.stringify({ file_path: "/Users/david/src/relay/packages/companion/overlay/inbox.html" }),
+  });
+  assert.deepEqual(read, {
+    verb: "Read",
+    object: "inbox.html",
+    fullObject: "/Users/david/src/relay/packages/companion/overlay/inbox.html",
+    objectType: "file",
+    kind: "read",
+  });
+  assert.match(api.actHtml(read), /class="act-icon"/);
+  assert.match(api.actHtml(read), /class="aobj file"/);
+  assert.doesNotMatch(api.actHtml(read), /file_path|\{&quot;/);
 
+  const command = api.actOf({
+    type: "tool_call",
+    tool: "shell",
+    input: JSON.stringify({ command: `node --test ${"very-long-suite ".repeat(12)}\nsecond line` }),
+  });
+  assert.equal(command.verb, "Ran");
+  assert.ok(command.object.length <= 96);
+  assert.equal(command.object.includes("\n"), false);
+  assert.match(api.actHtml(command), /class="aobj command"/);
 
+  const contact = api.actOf({
+    type: "tool_call",
+    tool: "mcp__example__lookup_person",
+    input: JSON.stringify({ query: "David Kariuki" }),
+  });
+  assert.equal(contact.object, "lookup person");
+  assert.equal(api.activitySummary([command, command]), "Ran commands");
+  assert.equal(api.activitySummary([read, command]), "Read files and ran a command");
 
+  assert.match(inbox, /\.rd-stream \{ margin-top:16px;[^}]*gap:16px/);
+  assert.match(inbox, /\.rd-stream > \.rd-act \+ \.rd-act \{ margin-top:-12px; \}/);
+  assert.match(cssRule(inbox, ".rd-activity-body"), /gap:4px;\s*padding:8px 0 4px 24px/);
+  assert.match(cssRule(inbox, ".rd-act .act-icon"), /width:16px;\s*height:16px/);
+  assert.match(cssRule(inbox, ".rd-activity-toggle"), /color:color-mix\(in srgb, var\(--ink\) 65%, transparent\)/);
+  assert.match(inbox, /<span data-work-summary><\/span><svg class="chev"/, "the native summary puts its trailing chevron after the label");
+  assert.match(inbox, /\.rd-activity \+ \.worked-for-divider \{ margin-top:-12px; \}/);
+});
+
+test("Task documents remain in the contents list beside persistent Work throughout a run", () => {
+  const reader = between(inbox, "function renderReader()", "// ---------- the Tasks board");
+  const controls = between(inbox, "function wireRequestControls", "function requestsOutstandingCount");
+  const open = between(inbox, "function openReader", "function closeReader");
+
+  // Idle is exactly the two immutable source messages. Their labels describe
+  // the recipient, never whichever provider happens to be connected.
+  assert.match(reader, /const documentList = \(request \|\| agentText\) \? `/);
+  assert.match(reader, /<span class="relay-contents-label">This Relay contains<\/span>/);
+  assert.match(reader, /data-rtab="you"[^]*<span class="relay-contents-name">Message for you<\/span>/);
+  assert.match(reader, /data-rtab="agent"[^]*<span class="relay-contents-name">Message for your agent<\/span>/);
+  assert.doesNotMatch(reader, /data-rtab="agent"[^]*>For \$\{esc\(app\)\}</);
+  assert.match(reader, /\$\{hasWork \? `<button[^`]*data-rtab="work"/);
+  assert.match(reader, /<span class="relay-contents-name">Work<\/span>/);
+
+  // A real start grows the contents list to three rows and selects Work. The work
+  // face owns the runner; source documents remain their original prose and
+  // retain their addressee-specific composers.
+  assert.match(reader, /const workAppearing = hasWork && !readerWorkVisible/);
+  assert.match(reader, /if \(workAppearing\) \{[^]*readerTab = "work"/);
+  assert.match(reader, /if \(hasWork && !providerPrompt && !legacyCompletedWithoutNative\) app = runAppName\(r\.id\)/, "the provider tab follows the native run owner");
+  assert.match(controls, /readerTab = "work"/);
+  assert.match(controls, /workTabAnimateUntil\.set/);
+  assert.match(reader, /const humanDoc = `[^]*readerParagraphs\(r\.forHuman\)/);
+  assert.match(reader, /const agentDoc = `[^]*readerParagraphs\(agentText\)/);
+  // THE AGENT KICKER IS METADATA, NOT A CLAIM (David, 2026-08-20, on "FOR YOUR
+  // AGENT · RIDES WITH THIS RELAY": "i dont like that rides with this relay
+  // copy"). The contents row directly above already names the addressee, so the only
+  // thing the line can add is how much document there is — the same grammar as
+  // the human kicker's sender · time · read.
+  assert.doesNotMatch(inbox, /RIDES WITH THIS RELAY/i, "the transport claim is retired");
+  assert.match(reader, /MESSAGE FOR YOUR AGENT\$\{agentWeightLabel\(agentText\)\}/);
+  assert.match(inbox, /function agentWeightLabel\(md\) \{[^]*n === 1 \? "WORD" : "WORDS"/,
+    "one word never reads 1 WORDS");
+  assert.match(inbox, /function agentWordCount\(md\)[^]*filter\(\(token\) => \/\[\\p\{L\}\\p\{N\}\]\/u\.test\(token\)\)/,
+    "pure markdown syntax does not inflate the count");
+  assert.match(inbox, /function agentWeightLabel\(md\) \{\n\s*const n = agentWordCount\(md\);\n\s*if \(!n\) return "";/,
+    "an empty agent document shows the addressee alone, never 0 WORDS");
+  assert.match(reader, /const workDoc = `[^]*data-run-stream=/);
+  assert.match(reader, /const doc = onWork \? workDoc : onAgent \? agentDoc : humanDoc/);
+  assert.match(reader, /class="work-footer"[^]*\$\{status\}\$\{composer\}/, "Work keeps its provider composer after Start");
+  assert.match(reader, /if \(request && taskClaimAllowsStart\(r\) && \(onAgent \|\| onWork \|\| requestActionable\)\) return requestDockHtml/,
+    "both source faces expose Start task while actionable, and Work keeps the provider composer");
+  assert.match(reader, /<div class="rd-foot"><div class="rd-col">\$\{sharedShelf\}\$\{status\}\$\{bothNote\}\$\{claimControl\}\$\{documentHostActions\}\$\{composer\}/,
+    "both immutable source documents retain document actions before their composer after Work exists");
+  assert.doesNotMatch(reader, /requestDisclosure|data-brief=/, "Work never nests another copy of the document tabs or documents");
+
+  // Tab hops do not reset native activity, disclosure state, or an unsent
+  // follow-up. Returning to Work repaints from the cached feed and resumes its poll.
+  assert.match(inbox, /const requestWorkDrafts = new Map/);
+  assert.match(reader, /requestWorkDrafts\.set\(String\(r\.id\), draftBox\.value/);
+  assert.match(reader, /if \(t === "work"\) syncRunMirrors\(\)/);
+  assert.match(reader, /if \(onWork\) syncRunMirrors\(\)/);
+  assert.match(open, /readerTab = readerWorkVisible \? "work" : "you"/);
+});
+
+test("successful Task launch acknowledgement expires instead of surviving Done", () => {
+  const controls = between(inbox, "function wireRequestControls", "function requestsOutstandingCount");
+  assert.match(controls, /setRowNote\(id, note \|\| payloads\.files\.length \? `Started on \$\{rt\.app\} — your message went with it\.` : `Started on \$\{rt\.app\}\.`, "ok"\);/);
+  assert.match(controls, /Work header owns running\/stopped\/done truth;[^]*fadeRowNoteLater\(id, 3000\);/);
+});
+
+test("ordinary Relay folders address the human, the agent, and local Work separately", () => {
+  const reader = between(inbox, "function renderReader()", "// ---------- the Tasks board");
+  const sharedIdleDock = between(inbox, "function idleRunDockHtml", "function requestDockHtml");
+  const requestDock = between(inbox, "function requestDockHtml", "function relayWorkDockHtml");
+  const workDock = between(inbox, "function relayWorkDockHtml", "function requestControlsHtml");
+  const wiring = between(inbox, "function wireRequestControls", "function requestsOutstandingCount");
+  const startHandler = between(main, 'ipcMain.handle("relay:relayWorkStart"', "// The session face's feed");
+
+  assert.match(reader, /if \(onAgent \|\| onWork\) return relayWorkDockHtml/,
+    "the agent document cannot retain the human reply composer");
+  assert.match(reader, /const documentHostActions = !request && !onWork \? `<div class="rd-host-actions"/,
+    "both immutable documents receive the same full provider action rail");
+  assert.match(reader, /showHostOpen: !onAgent/,
+    "the agent composer cannot duplicate the document-level provider actions");
+  assert.match(sharedIdleDock, /placeholder="Tell \$\{esc\(rt\.app\)\} anything…"/);
+  assert.match(sharedIdleDock, /data-route-menu="app"/);
+  assert.match(sharedIdleDock, /data-route-menu="model"/);
+  assert.match(sharedIdleDock, /data-route-menu="effort"/);
+  assert.match(sharedIdleDock, /data-open-in="\$\{esc\(r\.id\)\}" data-open-in-host="codex">Open in Codex/);
+  assert.match(sharedIdleDock, /data-open-in="\$\{esc\(r\.id\)\}" data-open-in-host="claude">Open in Claude Code/);
+  assert.match(sharedIdleDock, /data-work-start="\$\{esc\(r\.id\)\}"/);
+  assert.match(requestDock, /return idleRunDockHtml\(r,/,
+    "Tasks use the shared route-selecting composer");
+  assert.match(workDock, /return idleRunDockHtml\(r, \{ inline, draft, action: "work", label: "Send", showHostOpen \}\);/,
+    "ordinary Relay Work uses that same composer with Send as its verb");
+  assert.match(workDock, /const starting = live && !hasSession/);
+  assert.match(workDock, /starting \? "Starting" : live \? "Queue" : "Send"/,
+    "the startup gap cannot expose a second send");
+  assert.match(wiring, /window\.relay\.relayWorkStart\(id,/);
+  assert.match(wiring, /const requestedHost = b\.getAttribute\("data-open-in-host"\)/);
+  assert.match(wiring, /openRelayFromUI\(id, "relay", "fresh", host, note\)/,
+    "Task route controls keep their existing fresh-session behavior");
+  assert.match(reader, /\$\{documentHostActions\}\$\{composer\}/,
+    "Sven's provider rows sit above either document composer instead of inside its rail");
+  assert.doesNotMatch(reader, /data-open-in-host="codex">Open in Codex[\s\S]*id="qrSend">Send/,
+    "the human reply rail still contains only its reply action, never the old hardcoded provider buttons");
+  assert.match(wiring, /readerTab = "work"/);
+  assert.match(reader, /data-rtab="work"[^]*<span class="relay-contents-name">Work<\/span>/);
+  assert.match(startHandler, /localWork: true/);
+  assert.doesNotMatch(startHandler, /model:\s*\(route && route\.model\) \|\| "claude-opus-5"/,
+    "an omitted Codex model must use Codex's own default");
+  const starter = between(main, "async function startTaskFromPreview", "function forgeTaskSessionQuietly");
+  assert.match(starter, /selectedHost === "codex" && \/\^claude-\/i\.test\(requestedModel\)/,
+    "a stale Claude model can never cross into Codex");
+  assert.match(main, /const isLocalWork = input\?\.localWork === true/);
+  assert.match(main, /if \(isRequest\) \{[^]*client\.taskStarted\(id\)/,
+    "ordinary local work must not stamp a Task receipt");
+  assert.match(main, /isRequest\s*\? \{[^]*taskState: "started",[^]*taskStartedAt: startedReceipt\?\.startedAt \|\| stamped,[^]*taskClaim: startedReceipt\.taskClaim[^]*:\s*\{ workStartedAt: stamped, workCompletedAt: null \}/);
+  assert.match(pillPreload, /relayWorkStart: \(id, route\) => ipcRenderer\.invoke\("relay:relayWorkStart"/);
+});
+
+test("Enter queues follow-ups and the queued Steer action uses the active session", () => {
+  const dock = between(inbox, "function requestDockHtml", "function requestControlsHtml");
+  const controls = between(inbox, "function wireRequestControls", "function requestsOutstandingCount");
+  const steer = between(main, "async function previewTaskSteer", "function installActiveSpaceWatcher");
+  const nativeSession = between(inbox, "function requestHasNativeSession", "function requestDockHtml");
+  assert.match(dock, /canContinueSession/);
+  assert.match(nativeSession, /r\?\.codexThreadId/);
+  assert.match(nativeSession, /r\?\.claudeNativeSession\?\.sessionId/);
+  assert.match(nativeSession, /r\?\.ranOnClaude/);
+  assert.match(controls, /const action = dock\?\.querySelector\("\[data-steer\]"\)/);
+  assert.match(controls, /dressComposer\(inp, \(\) => action\?\.click\(\)\)/);
+  assert.match(controls, /runQueuedMessages\.set\(key, rows\)/);
+  assert.match(inbox, /data-run-queued-now/);
+  assert.match(inbox, /sendQueuedRunMessage\(id, button\.getAttribute\("data-run-queued-now"\), \{ steerNow: true \}\)/);
+  assert.match(inbox, /\(feed\.completedAt \|\| runFeedIsTerminal\(feed\)\) && queued\.length/);
+  assert.match(steer, /taskKickPrompt\(\{ note: body/);
+  assert.match(steer, /markTaskFollowUpStarted\(id, newTurn, body, clientMessageId\)/);
+  assert.match(previewRenderer, /session face always talks to the agent/);
+  assert.match(previewRenderer, /const newTurn = sessionSettled\(\)/);
+  assert.match(previewRenderer, /bridge\.steer\(id, body, newTurn, crypto\.randomUUID\(\)\)/);
+});
 
 test("no <p> in the preview contains a block child, so nothing escapes its own hide class", () => {
   // A parser auto-closes <p> at the first block-level child, ejecting that
@@ -669,9 +1005,58 @@ test("no <p> in the preview contains a block child, so nothing escapes its own h
   assert.match(caption, /on your machine/, "the trailing sentence stays inside the caption");
 });
 
+test("Start launches the official subscription-authenticated Claude Code CLI without opening Desktop", () => {
+  const start = between(main, "async function startTaskFromPreview", "function safeNoteStem");
+  assert.match(start, /createClaudeDesktopCodeSession/);
+  assert.match(start, /desktopNative: true/);
+  assert.match(start, /sessionId: launched\.sessionId/);
+  assert.match(start, /sessionPath: launched\.sessionPath/);
+  assert.doesNotMatch(start, /spawnBackgroundClaude|adoptClaudeSessionIntoDesktop/);
+  assert.match(start, /official CLI uses its own supported subscription login/);
+  assert.match(start, /trackClaudeRunOwnership\(launched\.sessionId, claudeCode\)/);
+  // The remaining forge belongs only to Codex. Claude never enters it.
+  const forge = between(main, "function forgeTaskSessionQuietly", "function taskKickPrompt");
+  assert.match(forge, /RELAY_IMPORT_CLAUDE_DESKTOP: "0"/);
+  assert.match(forge, /RELAY_ACTIVATE_CLAUDE: "0"/);
+  assert.match(forge, /"--quiet-provider"/, "Start materializes Codex without foregrounding Desktop");
+  assert.doesNotMatch(forge, /openExternal|activateHost|openClaudeDeepLinkVerified/);
+  // Relay, not the model, owns settlement after the native turn finishes.
+  const kick = between(main, "function taskKickPrompt", "// Matches src/materializer.js");
+  assert.doesNotMatch(kick, /type "completion"|inReplyToRelayId|DRAFT its completion result/);
+  assert.match(kick, /note \|\| "Begin the task as briefed\."/);
+  assert.doesNotMatch(kick, /relay-runtime-contract|relay_send|automatically attaches/,
+    "internal settlement machinery is never impersonated as a human user turn");
+  // The pill tray's Start task uses this flow, not a fresh-open.
+  assert.match(main, /ipcMain\.handle\("relay:taskStart"/);
+  assert.match(inbox, /data-task-start="\$\{esc\(id\)\}"/);
+  assert.doesNotMatch(between(inbox, "if (task) {", "return `"), /open-fresh/);
+});
 
+test("Claude ownership transfers only after settlement and an explicit Open", () => {
+  const dock = between(inbox, "function requestDockHtml", "function requestControlsHtml");
+  const controls = between(inbox, "function wireRequestControls", "function requestsOutstandingCount");
+  assert.match(dock, /state === "running"[\s\S]*disabled aria-disabled="true"[\s\S]*Available when this run finishes/);
+  assert.match(dock, /r\.ranOnClaude[\s\S]*data-open-run/);
+  assert.match(controls, /window\.relay\.openRunSession\(id\)/);
+  assert.match(controls, /openRelayFromUI\(id, "relay", "fresh", host, note\)/);
+  assert.match(main, /ipcMain\.handle\("relay:openRunSession"/);
+  assert.match(main, /waitForClaudeDesktopCodeMaterialization/);
+  assert.match(main, /worker && !worker\.closed/);
+  assert.match(main, /openClaudeDeepLinkVerified\(deepLink/);
+  assert.match(main, /const relayOwnedClaudeRuns = new Set/);
+  assert.match(inbox, /if \(row\.runLive\) return "running";[\s\S]*if \(row\.taskCompletedAt\) return "done"/);
+  const preload = fs.readFileSync(new URL("../overlay/preload.cjs", import.meta.url), "utf8");
+  assert.match(preload, /openRunSession: \(id\) => ipcRenderer\.invoke\("relay:openRunSession"/);
+  assert.match(preload, /openFresh: \(id, host, note\)/);
+});
 
 test("Cowork Start owns a remote session, feed, Steer, and honest terminal state", () => {
+  const start = between(main, "async function startTaskFromPreview", "function safeNoteStem");
+  assert.match(start, /createAndSeedCoworkSession/);
+  assert.match(start, /permissionMode: permission \|\| "auto"/);
+  assert.match(start, /coworkSessionId: started\.sessionId/);
+  assert.match(start, /coworkConnectorIds: started\.connectorIds/);
+  assert.match(start, /coworkRelayTransport: started\.relayTransport/);
 
   const feed = between(main, "async function previewTaskSession", "async function previewTaskSteer");
   assert.match(feed, /readCoworkSession/);
@@ -700,6 +1085,11 @@ test("Cowork Start owns a remote session, feed, Steer, and honest terminal state
   const steer = between(main, "async function previewTaskSteer", "function installActiveSpaceWatcher");
   assert.match(steer, /appendCoworkMessage/);
 
+  const mirror = between(inbox, "function startRunFeed", "function syncRunMirrors");
+  assert.match(mirror, /runFeedIsTerminal\(feed\)/);
+  assert.match(mirror, /taskLocal\.set\(key, "stopped"\)/);
+  const controls = between(inbox, "function wireRequestControls", "function requestsOutstandingCount");
+  assert.match(controls, /appendOptimisticUserTurn\(id, note[^]*preserveHistory: false/);
 });
 
 test("a completion send failure cannot withhold local native Done", () => {
@@ -713,8 +1103,51 @@ test("a completion send failure cannot withhold local native Done", () => {
   assert.match(retry, /providerCompletionRetryTimers\.set/);
 });
 
+test("only native end-to-end providers can start a request", () => {
+  const start = between(main, "async function startTaskFromPreview", "function safeNoteStem");
+  assert.match(start, /!\["claude", "cowork", "codex"\]\.includes\(selectedHost\)/);
+  assert.doesNotMatch(start, /chatgpt_work|ChatGPT Work/);
+  assert.ok(start.indexOf('!["claude", "cowork", "codex"].includes(selectedHost)') < start.indexOf("taskStarted(id)"));
+  assert.ok(start.indexOf("assertProviderReady(host)") < start.indexOf("taskStarted(id)"));
+});
 
+test("an unconnected Task stays truthful and offers the two native providers inline", () => {
+  const start = between(main, "async function startTaskFromPreview", "function safeNoteStem");
+  assert.match(start, /code: "provider_not_ready"/);
+  assert.match(start, /provider: host/);
 
+  assert.match(inbox, /const workProviderPrompts = new Map/);
+  assert.match(inbox, /providerReadyBeforeStart\(id, rt\.app\)/);
+  assert.match(inbox, /Connect an agent to start this Task/);
+  assert.match(inbox, /Work runs in Codex or Claude Code using your existing subscription/);
+  assert.match(inbox, /data-work-provider="\$\{provider\}"/);
+  assert.match(inbox, /codexMark\.svg/);
+  assert.match(inbox, /claudeCodeMark\.svg/);
+  assert.match(inbox, /\.work-connect-actions \{ display:grid; grid-template-columns:repeat\(2,minmax\(0,245px\)\)/);
+  assert.match(inbox, /window\.relay\.providerAuthConnect\(provider\)/);
+  assert.match(inbox, /chooseConnectedWorkProvider\(id, provider\)/);
+
+  const controls = between(inbox, "function wireRequestControls", "function requestsOutstandingCount");
+  const readinessAt = controls.indexOf("providerReadyBeforeStart(id, rt.app)");
+  const optimisticAt = controls.indexOf("appendOptimisticUserTurn(id, note.trim()");
+  assert.ok(readinessAt > -1 && optimisticAt > readinessAt, "auth choice precedes any optimistic running state");
+});
+
+test("a completed legacy Task without a native pointer never pretends an agent is working", () => {
+  const watchError = between(inbox, "function presentRunFeedWatchError", "const disposeRunFeedUpdates");
+  assert.match(watchError, /No provider-native Work session exists/);
+  assert.match(watchError, /legacyMissingSession:true/);
+  assert.match(watchError, /This Task is complete\. Live Work history is unavailable for this older run\./);
+  const kicker = between(inbox, "function paintRunKicker", "function runAppName");
+  assert.match(kicker, /const providerKnown = !feed\?\.legacyMissingSession/);
+  assert.match(kicker, /const owner = providerKnown/);
+  const dock = between(inbox, "function requestDockHtml", "function relayWorkDockHtml");
+  assert.match(dock, /state === "done" && !requestHasNativeSession\(r\)/);
+  assert.match(dock, /Native session unavailable/);
+  const reader = between(inbox, "function renderReader", "// ---------- the Tasks board");
+  assert.match(reader, /const legacyCompletedWithoutNative = request && runState === "done" && !requestHasNativeSession\(r\)/);
+  assert.match(reader, /legacyCompletedWithoutNative[^]*Live Work history is unavailable for this older run/);
+});
 
 test("Settings exposes complete subscription connection management for Claude Code and Codex", () => {
   assert.match(inbox, />Connections</);
@@ -760,14 +1193,27 @@ test("Settings exposes complete subscription connection management for Claude Co
   assert.doesNotMatch(settingsLoad, /Promise\.all\(\[\s*window\.relay\.accountInfo[\s\S]*providerAuthStatus/);
 });
 
+test("a completed runner repaints its visible follow-up composer", () => {
+  const mirror = between(inbox, "function startRunFeed", "function syncRunMirrors");
+  assert.match(mirror, /feed\.completedAt[\s\S]*taskLocal\.set\(key, "done"\); renderAll\(\)/);
+});
 
 test("ordinary window focus survives reader refreshes and run retries invalidate stale polls", () => {
   const dress = between(inbox, "function dressComposer", "let readerSource");
   const reader = between(inbox, "function renderReader", "// ---------- the Tasks board");
   assert.doesNotMatch(dress, /setFocusable/);
   assert.doesNotMatch(reader, /setFocusable/);
+  assert.match(inbox, /const runFeedEpoch = new Map/);
+  assert.match(inbox, /function resetRunFeedForNewRun/);
+  assert.match(inbox, /runFeedEpoch\.get\(key\)[^]*!== epoch/);
 });
 
+test("every settled native session keeps a follow-up composer", () => {
+  const dock = between(inbox, "function requestDockHtml", "function requestControlsHtml");
+  assert.match(dock, /canContinueSession/);
+  assert.match(dock, /Ask \$\{esc\(runAppName\(r\.id\)\)\} for a follow-up/);
+  assert.match(dock, /\$\{live \? "Queue" : "Send"\}/);
+});
 
 test("terminal request status shares the centered runner and composer measure", () => {
   assert.match(inbox, /\.request-terminal-status \{ width:100%; max-width:34em; margin:0 auto 4px;/);

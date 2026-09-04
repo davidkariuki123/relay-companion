@@ -281,8 +281,17 @@ export function resetCompanionStateForAccount(
   return withJsonLock(statePath, () => {
     const existing = readCompanionState(statePath);
     if (!force && stateBelongsToAccount(existing, marker)) {
-      if (!existing.account) {
-        existing.account = { ...marker, resetAt: null };
+      const account = existing.account || {};
+      if (
+        !existing.account ||
+        account.userId !== marker.userId ||
+        account.email !== marker.email ||
+        account.deviceId !== marker.deviceId
+      ) {
+        // Re-pairing the same account replaces its device id. Preserve the
+        // inbox (especially read rows), but bind future acknowledgements to
+        // the fresh device so the state worker does not reject them.
+        existing.account = { ...marker, resetAt: account.resetAt || null };
         writeCompanionState(statePath, existing);
       }
       return { reset: false, statePath };
