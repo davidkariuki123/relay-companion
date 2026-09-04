@@ -500,13 +500,16 @@ test("packed thin installer contains only the reviewed dependency-free bootstrap
     fs.mkdirSync(path.join(root, "bootstrap"), { recursive: true });
     fs.writeFileSync(path.join(root, "bootstrap", "linux-systemd.cjs"), "module.exports = {}\n");
     fs.writeFileSync(path.join(root, "bootstrap", "owned-node-runtime.cjs"), "module.exports = {}\n");
+    fs.writeFileSync(path.join(root, "bootstrap", "relay-background-install.cjs"), "module.exports = {}\n");
     fs.writeFileSync(path.join(root, "bootstrap", "relay-setup.cjs"), "module.exports = {}\n");
+    fs.writeFileSync(path.join(root, "bootstrap", "relay-skill.cjs"), "module.exports = {}\n");
     fs.writeFileSync(path.join(root, "bootstrap", "release-signature.cjs"), "module.exports = {}\n");
     fs.writeFileSync(path.join(root, "bootstrap", "runtime-executables.cjs"), "module.exports = {}\n");
     fs.writeFileSync(path.join(root, "bootstrap", "runtime-health.cjs"), "module.exports = {}\n");
     fs.writeFileSync(path.join(root, "bootstrap", "trust.json"), "{}\n");
     fs.writeFileSync(path.join(root, "README.md"), "Relay\n");
     fs.writeFileSync(path.join(root, "LICENSE"), "MIT\n");
+    fs.cpSync(new URL("../skill", import.meta.url), path.join(root, "skill"), { recursive: true });
     fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({
       name: "relay-companion",
       version,
@@ -1636,8 +1639,9 @@ test("canonical updater installs the signed artifact and does not recursively np
   assert.doesNotMatch(bootstrap, /npm\s+(?:install|i)\b/);
 });
 
-test("the thin installer accepts only the website's legacy setup contract", () => {
+test("the thin installer accepts only reviewed setup contracts", () => {
   assert.deepEqual(validateSetupCompatibilityArgs([]), []);
+  assert.deepEqual(validateSetupCompatibilityArgs(["--agent-protocol"]), ["--agent-protocol"]);
   assert.deepEqual(validateSetupCompatibilityArgs(WEBSITE_SETUP_ARGS), WEBSITE_SETUP_ARGS);
   assert.deepEqual(
     validateSetupCompatibilityArgs(["--code", "PAIR123", "--api", "http://localhost:4000"]),
@@ -1658,6 +1662,10 @@ test("the thin installer accepts only the website's legacy setup contract", () =
   assert.throws(
     () => validateSetupCompatibilityArgs(["--code", "PAIR123", "--name", "unreviewed"]),
     /unsupported compatibility option/,
+  );
+  assert.throws(
+    () => validateSetupCompatibilityArgs(["--agent-protocol", "--code", "PAIR123"]),
+    /cannot combine agent protocol setup/,
   );
 });
 

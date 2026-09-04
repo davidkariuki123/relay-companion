@@ -1104,6 +1104,7 @@ const SETUP_COMPATIBILITY_VALUE_FLAGS = new Set([
   "--open-relay",
   "--host",
 ]);
+const SETUP_COMPATIBILITY_BOOLEAN_FLAGS = new Set(["--agent-protocol"]);
 const SAFE_SETUP_TOKEN = /^[A-Za-z0-9_-]{4,256}$/;
 
 /**
@@ -1116,8 +1117,14 @@ function validateSetupCompatibilityArgs(argv = []) {
   if (!Array.isArray(argv) || argv.length === 0) return [];
   const args = argv.map((value) => String(value));
   const values = new Map();
-  for (let index = 0; index < args.length; index += 2) {
+  for (let index = 0; index < args.length;) {
     const flag = args[index];
+    if (SETUP_COMPATIBILITY_BOOLEAN_FLAGS.has(flag)) {
+      if (values.has(flag)) fail("Relay setup received a duplicate compatibility option.");
+      values.set(flag, true);
+      index += 1;
+      continue;
+    }
     const value = args[index + 1];
     if (!SETUP_COMPATIBILITY_VALUE_FLAGS.has(flag)) {
       fail("Relay setup received an unsupported compatibility option.");
@@ -1127,10 +1134,13 @@ function validateSetupCompatibilityArgs(argv = []) {
     }
     if (values.has(flag)) fail("Relay setup received a duplicate compatibility option.");
     values.set(flag, value);
+    index += 2;
   }
 
+  const agentProtocol = values.get("--agent-protocol") === true;
+  if (agentProtocol && values.size !== 1) fail("Relay setup cannot combine agent protocol setup with legacy pairing options.");
   const code = values.get("--code");
-  if (!code || !SAFE_SETUP_TOKEN.test(code)) fail("Relay setup received an invalid pairing code.");
+  if (!agentProtocol && (!code || !SAFE_SETUP_TOKEN.test(code))) fail("Relay setup received an invalid pairing code.");
   const openRelay = values.get("--open-relay");
   if (openRelay && !SAFE_SETUP_TOKEN.test(openRelay)) fail("Relay setup received an invalid relay token.");
   const host = values.get("--host");
@@ -1421,6 +1431,33 @@ async function stageVerifiedRuntime({ version, platformKey = releasePlatform(), 
 
 async function main() {
   const command = process.argv[2] || "help";
+  if (command === "protocol") {
+    const protocol = path.resolve(__dirname, "..", "skill", "relay", "scripts", "relay-protocol.mjs");
+    if (!fs.existsSync(protocol)) fail("Relay's bundled HTTPS protocol helper is missing.");
+    const result = spawnSync(process.execPath, [protocol, ...process.argv.slice(3)], {
+      stdio: "inherit",
+      windowsHide: true,
+      env: process.env,
+    });
+    if (result.error) fail(`Relay's HTTPS protocol helper could not start (${result.error.message}).`);
+    process.exitCode = Number.isInteger(result.status) ? result.status : 1;
+    return;
+  }
+  if (command === "skill") {
+    const result = await require("./relay-skill.cjs").runCli(process.argv.slice(3));
+    console.log(JSON.stringify(result, null, 2));
+    if (!result.ok) process.exitCode = 1;
+    return;
+  }
+  if (command === "background-install") {
+    const result = require("./relay-background-install.cjs").startBackgroundInstall();
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+  if (command === "background-status") {
+    console.log(JSON.stringify(require("./relay-background-install.cjs").installationStatus(), null, 2));
+    return;
+  }
   // Once the signed canonical runtime exists, the npm-global thin installer is
   // only a human-facing command shim. Hand every ordinary command to the active
   // runtime; keep `setup` local because an explicit exact-version npx install is
@@ -1438,8 +1475,12 @@ async function main() {
     "Relay secure setup",
     "",
     `  npx --yes --no-audit --no-fund ${PACKAGE_NAME}@${packageJson.version} setup`,
+    `  npx --yes --no-audit --no-fund ${PACKAGE_NAME}@${packageJson.version} protocol help`,
+    `  npx --yes --no-audit --no-fund ${PACKAGE_NAME}@${packageJson.version} skill install --consent`,
+    `  npx --yes --no-audit --no-fund ${PACKAGE_NAME}@${packageJson.version} background-install`,
     "",
     "Downloads the exact signed Relay runtime, verifies it, installs Relay, and opens the signed-out pill.",
+    "The skill command installs Relay's HTTPS agent skill; background-install starts the Companion without blocking the agent chat.",
   ].join("\n"));
 }
 

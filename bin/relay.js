@@ -244,6 +244,7 @@ async function applyInstall({
   requiredHosts = requiredLiveHosts(),
   claim = false,
   reload = true,
+  agentProtocol = false,
 } = {}) {
   const {
     installed,
@@ -256,9 +257,11 @@ async function applyInstall({
     codexHooks = null,
     desktopRestarts = [],
     sweptStaleEntries = [],
-  } = await runSetupInstall({ claim, reload });
+  } = await runSetupInstall({ claim, reload, agentProtocol });
   const lifecycleFailed = process.platform === "linux" && (!daemon.ok || !pill?.ok);
-  if (installed.length) console.log(`Added Relay to ${installed.join(" and ")} on this machine.`);
+  if (installed.length) console.log(agentProtocol
+    ? `Installed Relay's HTTPS skill for ${installed.join(" and ")} on this machine.`
+    : `Added Relay to ${installed.join(" and ")} on this machine.`);
   if (!binStable) {
     console.log(
       "Heads up: Relay is running from a temporary npx cache and couldn't global-install. It may stop working when that cache is cleaned — run `npm install -g relay-companion` to make it permanent.",
@@ -390,7 +393,7 @@ async function cmdSetup(flags) {
     console.log("");
   }
   const install = await applyInstall({
-    requireLiveTools: Boolean(flags["require-live-tools"]) || shouldRequireLiveTools(),
+    requireLiveTools: !flags["agent-protocol"] && (Boolean(flags["require-live-tools"]) || shouldRequireLiveTools()),
     requiredHosts: requiredLiveHosts(),
     // An explicit setup is the migration/ownership handoff. Runtime verification
     // in runSetupInstall completes before any platform's autostart is changed.
@@ -399,6 +402,7 @@ async function cmdSetup(flags) {
     // starting them, then performs the same exact-root lifecycle as the updater.
     // Ordinary setup keeps its historical install-and-start behaviour.
     reload: !(flags["no-restart"] && process.env.RELAY_BOOTSTRAP_ACTIVATED === "1"),
+    agentProtocol: Boolean(flags["agent-protocol"]),
   });
   if (token && readConfig().deviceToken) {
     console.log("");
@@ -1248,6 +1252,31 @@ async function main() {
       return;
     case "setup":
       return cmdSetup(flags);
+    case "protocol": {
+      const protocol = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "skill", "relay", "scripts", "relay-protocol.mjs");
+      if (!fsSync.existsSync(protocol)) throw new Error("Relay's bundled HTTPS protocol helper is missing.");
+      const result = spawnSync(process.execPath, [protocol, ...rest], { stdio: "inherit", windowsHide: true, env: process.env });
+      if (result.error) throw result.error;
+      process.exitCode = Number.isInteger(result.status) ? result.status : 1;
+      return;
+    }
+    case "skill": {
+      const relaySkill = createRequire(import.meta.url)("../bootstrap/relay-skill.cjs");
+      const result = await relaySkill.runCli(rest);
+      console.log(JSON.stringify(result, null, 2));
+      if (!result.ok) process.exitCode = 1;
+      return;
+    }
+    case "background-install": {
+      const background = createRequire(import.meta.url)("../bootstrap/relay-background-install.cjs");
+      console.log(JSON.stringify(background.startBackgroundInstall(), null, 2));
+      return;
+    }
+    case "background-status": {
+      const background = createRequire(import.meta.url)("../bootstrap/relay-background-install.cjs");
+      console.log(JSON.stringify(background.installationStatus(), null, 2));
+      return;
+    }
     case "pair":
       return cmdPair(flags);
     case "install":
@@ -1327,6 +1356,11 @@ async function main() {
           "",
           "Usage:",
           "  relay setup                                           Install and open Relay; sign in from the Relay pill",
+          "  relay protocol help                                   Use Relay's authenticated HTTPS protocol helper",
+          "  relay skill install --consent                         Install Relay's HTTPS skill for Claude Code and Codex",
+          "  relay skill update                                    Safely update Relay-owned skill files",
+          "  relay background-install                              Install the Companion without blocking this agent chat",
+          "  relay background-status                               Show the last background Companion install result",
           "  relay setup --restart                                 Replace a stuck or expired one-time setup approval",
           "  relay version                                         Print the installed Relay companion version",
           "  relay setup --code CODE --open-relay TOKEN --host codex|claude",

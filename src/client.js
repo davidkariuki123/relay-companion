@@ -312,6 +312,19 @@ export class RelayClient {
     return this.#req("GET", "/v1/me");
   }
 
+  /** Stable personal invite link for Companion onboarding. The established
+   * endpoint is primary; invites-v2 remains a tolerant compatibility fallback
+   * while older developer environments finish the migration. */
+  async inviteLink() {
+    try {
+      const result = await this.#req("POST", "/v1/invite-link", {});
+      if (result?.url) return result;
+    } catch (error) {
+      if (![404, 405].includes(Number(error?.status))) throw error;
+    }
+    return this.#req("POST", "/v1/invites-v2/link", {});
+  }
+
   /** A short-lived, single-use browser path for installing Relay in a chat app. */
   createMcpBrowserHandoff(provider = "chatgpt") {
     return this.#req("POST", "/v1/mcp/browser-handoff", { provider });

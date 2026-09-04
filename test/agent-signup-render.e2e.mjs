@@ -165,7 +165,7 @@ try {
     ["approval", "Connect this computer?"],
     ["finishing", "Finishing setup…"],
     ["expired", "Start setup again."],
-    ["chat-setup", "Use Relay in your chats."],
+    ["invite-onboarding", "Bring someone into Relay."],
   ];
   const rendered = [];
   for (const [stage, expected] of states) {
@@ -177,7 +177,7 @@ try {
     await evaluate(page, `window.__relaySignupPreview(${JSON.stringify(stage)}, ${JSON.stringify(preview)}); true`);
     await waitFor(page, `document.getElementById("signupBody").innerText.includes(${JSON.stringify(expected)})`);
     rendered.push(await capture(page, `pill-${stage}`));
-    if (stage === "chat-setup") {
+    if (stage === "invite-onboarding") {
       const layout = await evaluate(page, `(() => {
         const cardRect = document.getElementById("card").getBoundingClientRect();
         const bodyRect = document.getElementById("signupBody").getBoundingClientRect();
@@ -243,7 +243,7 @@ try {
     slackConnectionError = "";
     slackConnectionWaiting = false;
     payload.account = { paired:true, name:"Alex Rivera", email:"alex@example.com" };
-    payload.ui = { ...payload.ui, setupTutorialPending:false };
+    payload.ui = { ...payload.ui, onboardingRequired:false };
     payload.features = { ...payload.features, requests:true };
     activeView = "slack";
     commitNavigation({ outerScrollTop:0 });

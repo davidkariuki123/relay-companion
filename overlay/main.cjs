@@ -266,9 +266,13 @@ let attentionLatched = overlayPrefs.attentionLatched === true;
 // Both default false, so every install that predates them is untouched.
 let pillHidden = overlayPrefs.pillHidden === true;
 let soundsMuted = overlayPrefs.soundsMuted === true;
-// Only a freshly completed agent-installed signup turns this on. Missing means
-// false, so an update never drops an existing signed-in user into onboarding.
-let setupTutorialPending = overlayPrefs.setupTutorialPending === true;
+// Versioned per-account onboarding deliberately includes existing users. A
+// device can switch accounts, so one global boolean would let the second
+// account inherit the first account's completion.
+const COMPANION_ONBOARDING_VERSION = 1;
+let onboardingVersions = overlayPrefs.onboardingVersions && typeof overlayPrefs.onboardingVersions === "object"
+  ? { ...overlayPrefs.onboardingVersions }
+  : {};
 const presentedRelayIds = new Set(
   Array.isArray(overlayPrefs.presentedRelayIds) ? overlayPrefs.presentedRelayIds.filter(Boolean).map(String) : [],
 );
@@ -360,7 +364,7 @@ function writeOverlayPrefs() {
       attentionLatched,
       pillHidden,
       soundsMuted,
-      setupTutorialPending,
+      onboardingVersions,
       presentedRelayIds: [...presentedRelayIds],
       activeAttentionIds: [...activeAttentionIds],
     });
@@ -553,8 +557,6 @@ function installationAuthorizationController() {
         deviceName: String(readConfigFile().deviceName || "").trim() || os.hostname(),
         openExternal: (url) => shell.openExternal(url),
         onConnected: async (registration) => {
-          setupTutorialPending = true;
-          writeOverlayPrefs();
           const { notifications } = await loadAccountModules();
           nativeCredentialCache = { version: null, token: "" };
           notifications.resetCompanionStateForAccount(
@@ -1067,7 +1069,25 @@ function account() {
     credentialStore: cfg.credentialStore || "",
     email: user.email || "",
     name: user.name || "",
+    userId: user.id || user.userId || "",
   };
+}
+
+function onboardingAccountKey(accountValue = account()) {
+  const userId = String(accountValue?.userId || "").trim();
+  if (userId) return `user:${userId}`;
+  const email = String(accountValue?.email || "").trim().toLowerCase();
+  if (email) return `email:${email}`;
+  // Some long-lived installs predate the cached user profile. Keep Skip
+  // functional without persisting or exposing their bearer credential; a
+  // one-way fingerprint changes naturally if the device is paired elsewhere.
+  const token = String(deviceToken() || "");
+  return token ? `device:${createHash("sha256").update(token).digest("hex")}` : "";
+}
+
+function onboardingVersionFor(accountValue = account()) {
+  const key = onboardingAccountKey(accountValue);
+  return key ? Math.max(0, Number(onboardingVersions[key]) || 0) : 0;
 }
 
 function pillVersion() {
@@ -1215,10 +1235,12 @@ function connectClaude() {
 }
 
 async function completeSetupTutorial() {
-  setupTutorialPending = false;
+  const key = onboardingAccountKey();
+  if (!key) return { ok: false, error: "Relay could not identify the account completing onboarding." };
+  onboardingVersions[key] = COMPANION_ONBOARDING_VERSION;
   writeOverlayPrefs();
   await pushInbox(true);
-  return { ok: true };
+  return { ok: true, version: COMPANION_ONBOARDING_VERSION };
 }
 
 // After an account change the daemon must restart into the new credentials, or
@@ -2080,13 +2102,17 @@ function buildPayload() {
       if (refreshed) pushInbox(false);
     }).catch(() => {});
   }
+  const currentAccount = account();
+  const completedOnboardingVersion = onboardingVersionFor(currentAccount);
   return {
-    account: account(),
+    account: currentAccount,
     ui: {
       canDismiss: trayAvailable,
       reopenSurface: reopenSurfaceName(),
       notificationDurationMs: Number(process.env.RELAY_OVERLAY_NOTIFICATION_MS) || 7000,
-      setupTutorialPending,
+      onboardingVersion: COMPANION_ONBOARDING_VERSION,
+      completedOnboardingVersion,
+      onboardingRequired: currentAccount.paired && completedOnboardingVersion < COMPANION_ONBOARDING_VERSION,
       // The renderer's playTink gate. `ui` is not part of the push signature, so
       // relay:setSoundsMuted forces a push rather than waiting for inbox data to move.
       soundsMuted,
@@ -9354,6 +9380,29 @@ ipcMain.handle("relay:chatAgentPreferencesSave", async (_event, input = {}) =>
 ipcMain.handle("relay:connectChatGPT", () => connectChatGPT());
 ipcMain.handle("relay:connectClaude", () => connectClaude());
 ipcMain.handle("relay:completeSetupTutorial", () => completeSetupTutorial());
+ipcMain.handle("relay:onboardingInviteLink", async () => {
+  try {
+    const invite = await (await relayClient()).inviteLink();
+    const parsed = new URL(String(invite?.url || ""));
+    const loopback = ["localhost", "127.0.0.1", "::1"].includes(parsed.hostname);
+    if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && loopback)) throw new Error("Relay returned an unsafe invite link.");
+    return { ok: true, invite: { ...invite, url: parsed.toString() } };
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) };
+  }
+});
+ipcMain.handle("relay:copyOnboardingInviteLink", async () => {
+  try {
+    const invite = await (await relayClient()).inviteLink();
+    const parsed = new URL(String(invite?.url || ""));
+    const loopback = ["localhost", "127.0.0.1", "::1"].includes(parsed.hostname);
+    if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && loopback)) throw new Error("Relay returned an unsafe invite link.");
+    clipboard.writeText(parsed.toString());
+    return { ok: true, url: parsed.toString() };
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) };
+  }
+});
 ipcMain.handle("relay:e2eeDeviceApprovals", () => e2eeDeviceApprovalStatus());
 ipcMain.handle("relay:approveE2eeDevice", (_event, deviceId) => approveE2eeDevice(deviceId));
 ipcMain.handle("relay:installationAuthState", () => installationAuthorizationIpc(async () =>
@@ -9740,6 +9789,13 @@ if (!gotSingleInstanceLock) {
     }
     if (process.platform === "darwin" && app.dock) app.dock.hide(); // accessory: no dock icon, no NC banners
     createWindow();
+    // Keep Relay-owned skill wording current without delaying the first paint.
+    // The updater refuses unmanaged/edited files and any consent-version bump,
+    // so this background check can never silently replace a person's changes.
+    setTimeout(() => {
+      require("../bootstrap/relay-skill.cjs").updateFromRemote()
+        .catch((error) => console.error("[overlay] Relay skill update check failed:", error && error.message));
+    }, 5000).unref?.();
     const initialDeepLink = relayDeepLinkFromArgv(process.argv);
     queueRelayDeepLink(initialDeepLink);
     relayDeepLinksReady = true;

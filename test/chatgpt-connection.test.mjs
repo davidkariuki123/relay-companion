@@ -68,14 +68,14 @@ test("ordinary users see ChatGPT as coming soon and Claude as connectable", () =
   assert.match(html, /connectClaude\.addEventListener\("click", connectClaudeFromSettings\)/);
 });
 
-test("the final tutorial is durable for new signups but defaults off for existing users", () => {
-  assert.match(main, /let setupTutorialPending = overlayPrefs\.setupTutorialPending === true/);
-  assert.match(main, /onConnected: async \(registration\) => \{\s*setupTutorialPending = true;\s*writeOverlayPrefs\(\)/);
+test("versioned invite onboarding is durable and applies once to every account", () => {
+  assert.match(main, /const COMPANION_ONBOARDING_VERSION = 1/);
+  assert.match(main, /let onboardingVersions = overlayPrefs\.onboardingVersions/);
+  assert.match(main, /onboardingRequired: currentAccount\.paired && completedOnboardingVersion < COMPANION_ONBOARDING_VERSION/);
   assert.match(main, /ipcMain\.handle\("relay:completeSetupTutorial", \(\) => completeSetupTutorial\(\)\)/);
-  assert.match(html, /payload\.ui\?\.setupTutorialPending === true/);
-  assert.doesNotMatch(html, /id="suConnectChatGPT"/);
-  assert.match(html, /id="suConnectClaude"/);
-  assert.match(html, /<span class="su-chat-name">Sign in with Claude<\/span>/);
+  assert.match(html, /payload\.ui\?\.onboardingRequired === true/);
+  assert.match(html, /Bring someone into Relay\./);
+  assert.match(html, /id="suCopyInvite"/);
   assert.match(html, /id="suChatDone"/);
   assert.match(html, /id="suChatSkip"/);
 });

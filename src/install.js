@@ -2868,7 +2868,7 @@ function installWindowsLogonTask({
  * Detect Claude Code + Codex, register the Relay MCP into each present, and
  * start the receive daemon. Returns a summary for the CLI to print.
  */
-export async function runSetupInstall({ claim = false, reload = true } = {}) {
+export async function runSetupInstall({ claim = false, reload = true, agentProtocol = false } = {}) {
   const { bin, stable: binStable, version } = resolveStableBin();
   const packageRoot = packageRootForBin(bin);
   // First contact deliberately installs with --ignore-scripts. Prepare and verify
@@ -2910,7 +2910,6 @@ export async function runSetupInstall({ claim = false, reload = true } = {}) {
   // version-managed node the Claude/Codex MCP `command` points at, and the agents can
   // no longer spawn the Relay MCP server.
   const node = persistentNodePath();
-  const mcpBin = ensureStableMcpLauncher({ targetBin: bin, node });
   const installed = [];
   const missing = [];
   const activations = [];
@@ -2933,6 +2932,54 @@ export async function runSetupInstall({ claim = false, reload = true } = {}) {
     ...(configuredCodexCommand ? { CODEX_CLI_PATH: codexCommand } : {}),
     ...(process.platform === "linux" ? { RELAY_ALLOW_SANDBOX_AUTHORIZATION: "1" } : {}),
   };
+  if (agentProtocol) {
+    // The current product path installs one HTTPS skill and the visual
+    // Companion. MCP registrations and hook runtimes are legacy capability,
+    // not a second choice a new user has to understand. Remove only Relay's
+    // owned entries so an upgrade cannot leave both transports active.
+    const relaySkill = createRequire(import.meta.url)("../bootstrap/relay-skill.cjs");
+    const skillInstall = await relaySkill.installBundled({ consent: true });
+    let skillUpdate = null;
+    try {
+      skillUpdate = await relaySkill.updateFromRemote();
+    } catch (error) {
+      // A missing network must not turn the optional Companion install into a
+      // failure: the bundled, checksum-verified skill is already usable.
+      skillUpdate = { ok: false, offline: true, error: error?.message || String(error) };
+    }
+    for (const result of skillInstall.results || []) {
+      if (result.ok) installed.push(result.host === "codex" ? "Codex" : "Claude Code");
+      else missing.push(`${result.host === "codex" ? "Codex" : "Claude Code"} skill (${result.status || "install failed"})`);
+    }
+    const retiredAgentIntegrations = [
+      removeClaudeCodeMcpConfig(),
+      removeCodexMcpConfig(),
+      removeClaudeDesktopMcpConfig({ env: serviceEnv }),
+      uninstallClaudeHooks(),
+      uninstallCodexHooks(),
+    ];
+    try { removeMcpBrokerProvisioning(); } catch {}
+    try { removeStableMcpLauncher(); } catch {}
+    const daemon = installDaemonAutostart(bin, node, { claim, reload, env: serviceEnv });
+    const pill = installPillAutostart(bin, { claim, reload, env: serviceEnv });
+    return {
+      installed,
+      missing,
+      daemon,
+      pill,
+      activations,
+      binStable,
+      claudeHooks: null,
+      codexHooks: null,
+      desktopRestarts,
+      sweptStaleEntries,
+      skillInstall,
+      skillUpdate,
+      retiredAgentIntegrations,
+      agentProtocol: true,
+    };
+  }
+  const mcpBin = ensureStableMcpLauncher({ targetBin: bin, node });
   const claude = installClaudeCode(mcpBin, node, { command: claudeCommand });
   let claudeHooks = null;
   if (claude.ok) {

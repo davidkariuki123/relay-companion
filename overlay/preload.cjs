@@ -221,6 +221,8 @@ contextBridge.exposeInMainWorld("relay", {
   connectChatGPT: () => ipcRenderer.invoke("relay:connectChatGPT"),
   connectClaude: () => ipcRenderer.invoke("relay:connectClaude"),
   completeSetupTutorial: () => ipcRenderer.invoke("relay:completeSetupTutorial"),
+  onboardingInviteLink: () => ipcRenderer.invoke("relay:onboardingInviteLink"),
+  copyOnboardingInviteLink: () => ipcRenderer.invoke("relay:copyOnboardingInviteLink"),
   e2eeDeviceApprovals: () => ipcRenderer.invoke("relay:e2eeDeviceApprovals"),
   approveE2eeDevice: (deviceId) => ipcRenderer.invoke("relay:approveE2eeDevice", String(deviceId || "")),
   // Agent-installed first run. Main/core owns the installation authorization,

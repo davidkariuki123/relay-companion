@@ -161,20 +161,37 @@ export function validateInstalledPackageShape(packageRoot, { version, distributi
       throw new Error("Thin installer is not dependency-free first contact");
     }
     const topLevel = fs.readdirSync(packageRoot).filter((name) => !/^(?:readme|license)(?:\..*)?$/i.test(name)).sort();
-    if (JSON.stringify(topLevel) !== JSON.stringify(["bootstrap", "package.json"])) {
+    if (JSON.stringify(topLevel) !== JSON.stringify(["bootstrap", "package.json", "skill"])) {
       throw new Error("Thin installer contains files outside the reviewed bootstrap");
     }
     const bootstrapFiles = fs.readdirSync(path.join(packageRoot, "bootstrap")).sort();
     if (JSON.stringify(bootstrapFiles) !== JSON.stringify([
       "linux-systemd.cjs",
       "owned-node-runtime.cjs",
+      "relay-background-install.cjs",
       "relay-setup.cjs",
+      "relay-skill.cjs",
       "release-signature.cjs",
       "runtime-executables.cjs",
       "runtime-health.cjs",
       "trust.json",
     ])) {
       throw new Error("Thin installer bootstrap contents do not match the reviewed shape");
+    }
+    const manifest = JSON.parse(fs.readFileSync(path.join(packageRoot, "skill", "manifest.json"), "utf8"));
+    const expectedSkillFiles = ["SKILL.md", "agents/openai.yaml", "scripts/relay-protocol.mjs"];
+    if (manifest?.schemaVersion !== 1 || manifest?.name !== "relay" || !Array.isArray(manifest.files)) {
+      throw new Error("Thin installer skill manifest is invalid");
+    }
+    const listed = manifest.files.map((entry) => String(entry?.path || "")).sort();
+    if (JSON.stringify(listed) !== JSON.stringify(expectedSkillFiles)) {
+      throw new Error("Thin installer skill contents do not match the reviewed shape");
+    }
+    for (const entry of manifest.files) {
+      const bytes = fs.readFileSync(path.join(packageRoot, "skill", "relay", ...entry.path.split("/")));
+      if (crypto.createHash("sha256").update(bytes).digest("hex") !== entry.sha256) {
+        throw new Error("Thin installer skill checksum does not match its manifest");
+      }
     }
   } else {
     if (packageJson.bin?.relay !== "bin/relay.js" || !Object.keys(packageJson.dependencies || {}).length) {

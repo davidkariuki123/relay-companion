@@ -16,14 +16,14 @@ export function publishPackageJson(packageJson, { mode, version, runtimeDependen
     next.bin = { relay: "bin/relay.js" };
     next.main = "bin/relay.js";
     next.dependencies = runtimeDependencies;
-    next.files = ["bin", "bootstrap", "src", "overlay", "THIRD_PARTY_NOTICES.md", "licenses", "npm-shrinkwrap.json"];
+    next.files = ["bin", "bootstrap", "skill", "src", "overlay", "THIRD_PARTY_NOTICES.md", "licenses", "npm-shrinkwrap.json"];
     next.scripts = { mcp: "node src/mcp.js", daemon: "node src/task-daemon.js" };
   } else {
     next.relayDistribution = "thin-installer";
     next.bin = { relay: "bootstrap/relay-setup.cjs" };
     next.main = "bootstrap/relay-setup.cjs";
     next.dependencies = {};
-    next.files = ["bootstrap"];
+    next.files = ["bootstrap", "skill"];
     next.scripts = {};
   }
   return next;
