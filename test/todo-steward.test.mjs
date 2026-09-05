@@ -91,12 +91,16 @@ test("the brief carries the person, the rules, the local transcript paths and th
     ],
     done: [{ relayId: "d1", todoStatus: "done", todoVersion: 3, kind: "message", title: "Old", sender: { name: "X" }, createdAt: "2026-08-01T00:00:00Z", state: "read" }],
   }, { resolveSession: (touch) => touch.provider === "codex" ? { title: "Design Todo ontology", cwd: "/Users/david/src/relay", transcriptPath: "/Users/david/.codex/sessions/rollout-01a0.jsonl", state: "idle" } : null });
-  assert.equal(snapshot.triage[0].rank, 1);
+  assert.equal(snapshot.triage[0].rank, undefined, "the board is a plain newest-first list; there is no rank to reason about");
   assert.deepEqual(snapshot.triage[0].openedIn, [
     { provider: "codex", id: "01a0-thread", title: "Design Todo ontology", cwd: "/Users/david/src/relay", transcriptPath: "/Users/david/.codex/sessions/rollout-01a0.jsonl", state: "idle", lastOpenedAt: "2026-09-02T12:00:00Z" },
     { provider: "claude", id: "8d86682-claude", cwd: "/Users/david/src/relay", lastOpenedAt: "2026-09-02T11:40:00Z" },
   ], "the sessions a Relay was opened in ride along with their transcripts resolved on this machine");
   assert.equal(snapshot.triage[1].openedIn, undefined);
+  const textSnap = stewardBoardSnapshot({ triage: [{ relayId: "t1", todoStatus: "triage", todoVersion: 1, kind: "message", sender: { name: "Sven" }, createdAt: "2026-09-04T16:48:00Z", state: "read", preview: "On 3. is there a way to send a message that the link would open?" }] });
+  assert.equal(textSnap.triage[0].kind, "text");
+  assert.equal(textSnap.triage[0].title, undefined);
+  assert.match(textSnap.triage[0].preview, /is there a way/);
   assert.equal(snapshot.triage[0].read, true);
   assert.equal(snapshot.triage[1].channel, "Granular");
   assert.equal(snapshot.triage[1].previousNote, "You started this");
@@ -123,7 +127,16 @@ test("the brief carries the person, the rules, the local transcript paths and th
   assert.match(prompt, /Only three statuses exist for you: triage \(Needs attention\), in_progress, done/);
   assert.match(prompt, /Never use backlog, todo, canceled or duplicate/);
   assert.match(prompt, /Start with openedIn: those are the exact Claude Code \/ Codex sessions this Relay was opened in/);
-  assert.match(prompt, /call it only when the current order \(the rank field\) is actually wrong/);
+  assert.match(prompt, /Never reorder\. Needs attention is a plain list, newest arrival first/);
+  assert.match(prompt, /previousNote is a claim to re-test, never a fact to repeat/);
+  assert.match(prompt, /Tasks are yours to move too/);
+  assert.match(prompt, /A text that asks a question is exactly as owed as a titled Relay/);
+  assert.match(prompt, /Judge 'merged' against origin\/main, never against a local HEAD/);
+  assert.doesNotMatch(prompt, /HOW TO ORDER/);
+  assert.doesNotMatch(prompt, /SHIPPING FACTS \(measured/, "no facts block when none were measured");
+  const withFacts = buildStewardPrompt({ snapshot, homeDir: "/Users/david", facts: ["- Production (stable) Companion right now: 0.1.454."] });
+  assert.match(withFacts, /SHIPPING FACTS \(measured just now by Relay/);
+  assert.match(withFacts, /Production \(stable\) Companion right now: 0\.1\.454/);
   assert.match(prompt, /"transcriptPath": "\/Users\/david\/\.codex\/sessions\/rollout-01a0\.jsonl"/);
   assert.doesNotMatch(prompt, /backlog: only when they/);
   assert.match(prompt, /"What's your GitHub username\?"/);

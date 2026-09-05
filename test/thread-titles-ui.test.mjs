@@ -864,7 +864,7 @@ test("Tasks stay in human conversation while Todo indexes every managed Relay an
   assert.doesNotMatch(html, /tb-title/);
   assert.match(html, /\.tb-row\.unread \.th-title \{ color:var\(--ink\); font-weight:500; \}/);
   assert.match(html, /TODO_STATUS_ORDER = \["triage", "backlog", "todo", "in_progress", "done", "canceled", "duplicate"\]/);
-  assert.match(html, /item\.kind === "task" \? "Task" : "Relay"/);
+  assert.match(html, /item\.kind === "task" \? "Task" : rawTitle \? "Relay" : "Text"/, "typed texts sit on the board as texts");
   // The request ROOT is visible in the person's chat, labelled as a Task;
   // progress and execution controls remain on the board/reader. The terminal
   // completion Relay also returns to chat with both documents intact.

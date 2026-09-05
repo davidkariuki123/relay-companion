@@ -9561,7 +9561,8 @@
     const sender = item.sender?.name || item.sender?.email || "Someone";
     const rawTitle = String(item.title || item.displayTitle || "").trim();
     const preview = String(item.preview || "").trim();
-    const title = rawTitle || preview || (item.kind === "task" ? "Untitled Task" : "Untitled Relay");
+    // A typed text has no title: its words are the row, as in the Relays list.
+    const title = rawTitle || preview || (item.kind === "task" ? "Untitled Task" : "");
     const showPreview = Boolean(rawTitle && preview && preview !== rawTitle);
     const context = item.recipientGroupName ? `${item.recipientGroupName} · ` : "";
     // Unread means the person has not opened it: same words as the Relays
@@ -9573,7 +9574,7 @@
       <div class="todo-row${unread ? " unread" : ""}" role="button" tabindex="0" data-todo-item="${esc(item.relayId)}" data-todo-status="${esc(status || item.todoStatus || "")}">
         <span class="avatar sm" style="--av-h:${avatarHue(sender)}" aria-hidden="true">${esc(avatarInitials(sender))}</span>
         <div class="todo-row-main">
-          <div class="todo-row-meta"><span class="kind">${item.kind === "task" ? "Task" : "Relay"}</span><span>·</span><span>${esc(context + sender)}</span><span>·</span><span>${esc(timeAgo(item.createdAt))}</span></div>
+          <div class="todo-row-meta"><span class="kind">${item.kind === "task" ? "Task" : rawTitle ? "Relay" : "Text"}</span><span>·</span><span>${esc(context + sender)}</span><span>·</span><span>${esc(timeAgo(item.createdAt))}</span></div>
           <div class="todo-row-title">${esc(title)}</div>
           ${why ? `<div class="todo-row-why" title="${esc(why)}">${esc(why)}</div>` : showPreview ? `<div class="todo-row-preview">${esc(preview)}</div>` : ""}
         </div>

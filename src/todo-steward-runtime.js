@@ -10,6 +10,8 @@ import { relayClaudePermissionMode } from "./claude-session-runtime.js";
 import { claudeCommand, commandAvailable } from "./session-controller.js";
 import { relayMcpLaunchSpec } from "./runtime.js";
 import { discoverSessions } from "./session-directory.js";
+import { buildRepoIndex } from "./repo-index.js";
+import { execFile } from "node:child_process";
 import { storeDir } from "./host-paths.js";
 import {
   claudeStewardArgs,
@@ -68,8 +70,8 @@ export async function runStewardProvider({ route, prompt, heartbeat = () => {}, 
       effort: route.effort,
       schemaPath: ensureStewardOutputSchema(baseDir),
       configOverrides: codexStewardConfigOverrides(),
-      runTimeoutMs: 15 * 60 * 1000,
-      stallTimeoutMs: 4 * 60 * 1000,
+      runTimeoutMs: 18 * 60 * 1000,
+      stallTimeoutMs: 8 * 60 * 1000,
       // Structured-output drafts arrive as agent messages; a JSON blob is not a phase.
       onEvent: (_event, status) => { if (status && !/^\s*\{/.test(status)) heartbeat(status); },
     });
@@ -109,6 +111,60 @@ export function stewardSessionResolver(sessions = discoverSessions()) {
   return (touch) => byKey.get(`${touch.provider}:${touch.nativeSessionId}`) || null;
 }
 
+function gitLine(dir, args, timeoutMs = 8000) {
+  return new Promise((resolve) => {
+    execFile("git", ["-C", dir, ...args], { timeout: timeoutMs, encoding: "utf8" }, (error, stdout) => {
+      resolve(error ? "" : String(stdout || "").trim());
+    });
+  });
+}
+
+async function fetchJson(url, timeoutMs = 8000) {
+  const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs), headers: { accept: "application/json" } });
+  if (!response.ok) throw new Error(`${url} answered ${response.status}`);
+  return response.json();
+}
+
+/**
+ * What is actually deployed, measured by the daemon so the agent never has
+ * to guess (or read a stale checkout) to tell built from merged from
+ * shipped. Every line is best-effort: a fact that cannot be measured is
+ * simply absent from the brief.
+ */
+export async function stewardShippingFacts({
+  productionApiUrl = "https://api.sendrelays.com",
+  repoIndex = null,
+} = {}) {
+  const lines = [];
+  try {
+    const packument = await fetchJson("https://registry.npmjs.org/relay-companion");
+    const tags = packument?.["dist-tags"] || {};
+    lines.push(`- Relay Companion npm dist-tags: dev=${tags.dev || "?"}, staging=${tags.staging || "?"}, latest=${tags.latest || "?"}, build=${tags.build || "?"}. A person on the dev channel has dev; a stable/production person has what the stable manifest says, NOT latest.`);
+  } catch {}
+  try {
+    const manifest = await fetchJson(`${productionApiUrl}/v1/companion-releases/stable/manifest.json`);
+    const payload = manifest?.payload ? JSON.parse(Buffer.from(String(manifest.payload), "base64").toString("utf8")) : manifest;
+    if (payload?.version) lines.push(`- Production (stable) Companion right now: ${payload.version}${payload.sourceSha ? ` (public source ${String(payload.sourceSha).slice(0, 8)})` : ""}. Anything newer than this has NOT reached stable users.`);
+  } catch {}
+  const checkouts = Array.isArray(repoIndex) ? repoIndex : (() => { try { return buildRepoIndex(); } catch { return []; } })();
+  const byOrigin = new Map();
+  for (const checkout of checkouts) {
+    if (!checkout?.originKey || !checkout.dir) continue;
+    const current = byOrigin.get(checkout.originKey);
+    if (!current || (checkout.isPrimary && !current.isPrimary) || (!current.isPrimary && Number(checkout.uses || 0) > Number(current.uses || 0))) {
+      byOrigin.set(checkout.originKey, checkout);
+    }
+  }
+  for (const [originKey, checkout] of byOrigin) {
+    const head = await gitLine(checkout.dir, ["ls-remote", "origin", "refs/heads/main"]);
+    const remoteMain = head.split(/\s+/)[0] || "";
+    const localHead = await gitLine(checkout.dir, ["rev-parse", "HEAD"]);
+    const behind = remoteMain ? await gitLine(checkout.dir, ["rev-list", "--count", `HEAD..${remoteMain}`]) : "";
+    lines.push(`- Repo ${originKey}: checkout ${checkout.dir} (branch ${checkout.branch || "?"}${behind ? `, ${behind} commits behind origin/main` : ""}); origin/main is ${remoteMain ? remoteMain.slice(0, 12) : "unknown"} right now${localHead ? `, local HEAD ${localHead.slice(0, 12)}` : ""}. Judge merged against origin/main (git fetch first), never against this checkout's HEAD.`);
+  }
+  return lines;
+}
+
 /** The daemon's per-tick entry point. Never throws; the daemon loop must stay up. */
 export async function todoStewardTick({ client, features, user, log = () => {} } = {}) {
   try {
@@ -122,6 +178,7 @@ export async function todoStewardTick({ client, features, user, log = () => {} }
       resolveSession: () => {
         try { return stewardSessionResolver(); } catch { return () => null; }
       },
+      shippingFacts: () => stewardShippingFacts(),
     });
   } catch (error) {
     log(`todo steward tick failed: ${error?.message || error}`);
