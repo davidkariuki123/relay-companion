@@ -250,6 +250,46 @@ test("an unsupported app-server can fall back before a turn, but an ambiguous tu
   }), (error) => error.relayExecFallbackSafe !== true);
 });
 
+test("a completed answer survives Codex lingering after its final message", async () => {
+  // Seen on David's Mac 2026-09-05: the Todo steward printed {"checked":0,"changed":0},
+  // Codex never exited (MCP teardown), and the stall timer threw the answer away.
+  const child = fakeChild();
+  const run = runCodexOneShot({
+    prompt: "work",
+    schemaPath: "response.schema.json",
+    stallTimeoutMs: 40,
+    runTimeoutMs: 1_000,
+    exitGraceMs: 10_000,
+    heartbeatIntervalMs: 10,
+    spawnProcess: () => child,
+  });
+  child.stdout.write(JSON.stringify({ type: "thread.started", thread_id: "thread_9" }) + "\n");
+  child.stdout.write(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: '{"checked":0,"changed":0}' } }) + "\n");
+  child.stdout.write(JSON.stringify({ type: "turn.completed" }) + "\n");
+  const result = await run;
+  assert.deepEqual(result, { threadId: "thread_9", finalMessage: '{"checked":0,"changed":0}' });
+  assert.equal(child.killed, true, "the lingering process is stopped once the answer is taken");
+});
+
+test("a completed answer is taken after a short grace even before any timer fires", async () => {
+  const child = fakeChild();
+  const startedAt = Date.now();
+  const run = runCodexOneShot({
+    prompt: "work",
+    schemaPath: "response.schema.json",
+    stallTimeoutMs: 5_000,
+    runTimeoutMs: 10_000,
+    exitGraceMs: 30,
+    heartbeatIntervalMs: 10,
+    spawnProcess: () => child,
+  });
+  child.stdout.write(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "done" } }) + "\n");
+  child.stdout.write(JSON.stringify({ type: "turn.completed" }) + "\n");
+  const result = await run;
+  assert.equal(result.finalMessage, "done");
+  assert.ok(Date.now() - startedAt < 2_000, "the grace timer, not the stall timer, ended the wait");
+});
+
 test("a silent configured tool cannot leave the Relay response stuck forever", async () => {
   const child = fakeChild();
   await assert.rejects(runCodexOneShot({

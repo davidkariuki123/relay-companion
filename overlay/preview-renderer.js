@@ -210,7 +210,15 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
       .filter(Boolean);
   }
 
+  const replyPreviewUrls = new Map();
+  const failedReplyPreviews = new WeakSet();
   function paintReplyFiles() {
+    for (const [file, url] of replyPreviewUrls) {
+      if (!stagedReplyFiles.includes(file)) {
+        URL.revokeObjectURL(url);
+        replyPreviewUrls.delete(file);
+      }
+    }
     replyFilesEl.replaceChildren();
     replyFilesEl.classList.toggle("gone", !stagedReplyFiles.length);
     stagedReplyFiles.forEach((file, index) => {
@@ -219,6 +227,24 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
       const name = document.createElement("span");
       name.className = "reply-file-name";
       name.textContent = file.name || `pasted-${index + 1}`;
+      chip.title = name.textContent;
+      if (!failedReplyPreviews.has(file) && (String(file.type || "").startsWith("image/") || /\.(avif|bmp|gif|heic|heif|jpe?g|png|webp)$/i.test(file.name))) {
+        try {
+          if (!replyPreviewUrls.has(file)) replyPreviewUrls.set(file, URL.createObjectURL(file));
+          const img = document.createElement("img");
+          img.alt = name.textContent;
+          img.addEventListener("error", () => {
+            if (!img.isConnected || !stagedReplyFiles.includes(file)) return;
+            failedReplyPreviews.add(file);
+            URL.revokeObjectURL(replyPreviewUrls.get(file));
+            replyPreviewUrls.delete(file);
+            paintReplyFiles();
+          }, { once:true });
+          img.src = replyPreviewUrls.get(file);
+          chip.classList.add("image-chip");
+          chip.appendChild(img);
+        } catch { failedReplyPreviews.add(file); }
+      }
       const remove = document.createElement("button");
       remove.type = "button";
       remove.className = "reply-file-remove";

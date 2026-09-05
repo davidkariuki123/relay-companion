@@ -76,6 +76,6 @@ test("versioned invite onboarding is durable and applies once to every account",
   assert.match(html, /payload\.ui\?\.onboardingRequired === true/);
   assert.match(html, /Bring someone into Relay\./);
   assert.match(html, /id="suCopyInvite"/);
-  assert.match(html, /id="suChatDone"/);
+  assert.match(html, /id="suChatSkip"/);
   assert.match(html, /id="suChatSkip"/);
 });

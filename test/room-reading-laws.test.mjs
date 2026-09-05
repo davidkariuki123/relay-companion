@@ -71,8 +71,10 @@ test("every room entry follows newest through every asynchronous hydration phase
   assert.ok(close.indexOf("openThreadDetail(") < close.indexOf("requestAnimationFrame("));
   assert.match(close, /requestAnimationFrame\(\(\) => \{[\s\S]*?restoreRoomScroll\(back\.roomScroll\)/);
 
-  for (const start of ["function ghostArrival(row)", "// New relays always enter the notification stack"]) {
-    const banner = html.slice(html.indexOf(start), html.indexOf("commitNavigation({ outerScrollTop: 0 });", html.indexOf(start)) + 48);
+  for (const start of ["function ghostArrival(row)", "function notifyArrival(rows, meta)"]) {
+    const startAt = html.indexOf(start);
+    assert.ok(startAt >= 0, `notification entry exists: ${start}`);
+    const banner = html.slice(startAt, html.indexOf("commitNavigation({ outerScrollTop: 0 });", startAt) + 48);
     assert.match(banner, /activeView = "relays";[\s\S]*?commitNavigation\(\{ outerScrollTop: 0 \}\);/);
   }
 });

@@ -593,6 +593,10 @@
     }
     .reply-file-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .reply-file-remove { appearance:none; border:0; background:transparent; color:var(--muted); padding:0 2px; font:16px/1 var(--sans); cursor:pointer; }
+    .reply-file.image-chip { position:relative; width:64px; height:64px; flex:none; padding:0; overflow:hidden; }
+    .reply-file.image-chip img { width:100%; height:100%; object-fit:cover; }
+    .reply-file.image-chip .reply-file-name { display:none; }
+    .reply-file.image-chip .reply-file-remove { position:absolute; top:2px; right:2px; width:24px; height:24px; border-radius:6px; background:rgba(0,0,0,.65); color:#fff; font-size:18px; }
     .reply-input {
       flex:1 1 auto; min-width:0; height:42px; max-height:124px; resize:none;
       padding:10px 13px; border:1px solid var(--line-strong); border-radius:10px;

@@ -22,8 +22,10 @@ from the pasted `/i/:token/agent` Relay invite. Never ask the person to paste a
 password, Google credential, one-time code, or Relay access token into chat. Use
 the browser approval URL for identity and permission. Start with the pinned
 protocol helper in this conversation; no skill discovery or agent restart is
-needed. After connect-finish succeeds, install the skill for future sessions
-and start background-install on a supported desktop. It adopts this same
+needed. After connect-finish succeeds, follow the invitation's host activation
+procedure: install the skill, attempt supported discovery refresh in the running
+Claude Code or Codex host, and verify the scope of activation. Start
+background-install on a supported desktop. It adopts this same
 approved account without another login. Skip desktop installation on a
 hosted/headless machine. Keep the Companion
 installation non-blocking; continue as soon as the HTTPS protocol is ready and
@@ -50,6 +52,33 @@ installed skill if the network check fails. If Relay reports locally modified
 files, preserve them and tell the person; never overwrite them. If it reports a
 new consent version, explain the material change and ask before running
 `relay skill update --renew-consent`.
+
+## Verify skill activation after setup
+
+Own activation under the setup permission already given. Follow the activation
+procedure in the invitation's `/i/:token/agent` document, including checking the
+host environment and whether its personal skills directory existed before
+installation. Use the installer's absolute skill path. Check the existing
+connection with the helper's `status`; never expose credentials or reconnect a
+working account just to test discovery.
+
+Check the running host's skill catalogue or native skill invocation, not only
+connector/tool search. For Claude Code, use the exposed Skill tool for a
+read-only Relay status request if available; use a refresh capability only if
+the host exposes and supports it for standalone skills. Do not assume terminal
+slash commands work in the GUI or shell. For Codex, an already-connected,
+supported app-server can use `skills/list` with the actual workspace in `cwds`
+and `forceReload: true`; a newly launched process cannot refresh the existing
+GUI. Do not invent missing tools or silently change disabled-skill settings.
+
+Distinguish installed files, discovery in this session, and verified discovery
+in other existing sessions. Loading this file manually or successfully running
+the helper proves no other session has discovered it. Record the host, path,
+version, attempted mechanism and observed scope. If no supported refresh is
+available or it fails, continue through the helper and report that existing
+session activation remains unverified or failed. Do not claim app-wide setup
+complete, ask for restarts or compatibility messages, kill processes, alter host
+internals, add hooks/connectors/plugins, or inject prompts into other sessions.
 
 ## First-run tutorial
 

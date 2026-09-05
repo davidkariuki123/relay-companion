@@ -613,6 +613,9 @@
   .cmp-chip .sz { font-family:var(--mono); font-size:9.5px; font-weight:400; color:var(--muted-3); }
   .cmp-chip .x { appearance:none; border:0; background:transparent; color:var(--muted-3); font-size:12px; line-height:1; padding:0 2px; cursor:pointer; }
   .cmp-chip .x:hover { color:var(--ink); }
+  .cmp-chip.image-chip { position:relative; width:64px; height:64px; flex:none; padding:0; overflow:hidden; }
+  .cmp-chip.image-chip img { width:100%; height:100%; object-fit:cover; }
+  .cmp-chip.image-chip .x { position:absolute; top:2px; right:2px; width:24px; height:24px; border-radius:6px; background:rgba(0,0,0,.65); color:#fff; font-size:18px; }
   .th-reply .cmp-plus { appearance:none; flex:0 0 auto; align-self:center; width:20px; height:20px; min-width:20px; padding:0; margin:0;
     border-radius:6px; border:1px solid var(--hair); background:transparent; color:var(--muted-2); cursor:pointer;
     display:inline-flex; align-items:center; justify-content:center; }
@@ -3578,11 +3581,9 @@
   let notificationDurationMs = 7000;
   let activeNotificationIds = [];
   let ghost = false, ghostTimer = null; // notification-only mode while the pill is dismissed
-  // Has the FULL card been deliberately put in front of the reader — tray open, or
-  // expanding a pill or a banner? Boot leaves the card un-collapsed and unparked
-  // before anything has been shown, so `!collapsed` alone cannot answer this, and
-  // an arrival at launch would otherwise be treated as one landing over an inbox
-  // the reader already had open. Parking the card offstage takes it back.
+  // Read presence requires a deliberate open, beyond the current card size.
+  // Boot leaves the card un-collapsed before any user engagement; parking it
+  // offstage also revokes that engagement.
   let presented = false;
   function fullCardIsOnStage() {
     return presented && !collapsed && !peeking && !ghost
@@ -3796,23 +3797,19 @@
   if (document.fonts && document.fonts.ready) {
     document.fonts.ready.then(() => { if (peeking) springTo(PEEK.w, peekHeight()); });
   }
-  // New relays always enter the notification stack, including from a fully expanded
-  // card. The main process has already pushed the new payload, so render/sizing uses
-  // the latest unread rows rather than the previous inbox.
+  // Only the compact pill (or an existing banner/hidden surface) can show a
+  // transient banner. Medium and reader-size cards retain their current view,
+  // including the initial expanded card before any explicit open gesture.
   function notifyArrival(rows, meta) {
-    // An arrival while the card is already open in front of the reader must not
-    // pull it back down to banner height. The attention queue presents pending
-    // unread one batch at a time, and without this guard the second batch yanks
-    // a card the reader is part-way through; the relay lands in the list instead
-    // and attention settles where it is. (Sven's find on the restyle branch — the
-    // bug is real whichever presentation the arrival path uses.)
-    // `presented` is what separates a card the reader OPENED from a card that is
-    // merely un-collapsed because nothing has happened to it yet. The DOM boots
-    // expanded and unparked, so without it the very first arrival after launch
-    // looked exactly like an arrival over an open inbox: a backlog waiting at
-    // login never bannered, never folded back to the pill, and was marked
-    // confirmed-seen before the reader had looked at anything.
-    const onStageFull = fullCardIsOnStage();
+    const onStageFull = !collapsed && !peeking && !ghost
+      && !cardEl.classList.contains("offstage") && !cardEl.classList.contains("bye");
+    // Main defers setup notifications; also cover an arrival already in flight
+    // when the renderer enters onboarding or account recovery.
+    if (cardEl.classList.contains("signup")) {
+      activeNotificationIds = (Array.isArray(rows) ? rows : [rows]).filter(Boolean).map((row) => row.id).filter(Boolean);
+      sendAttentionDone(false);
+      return;
+    }
     if (peekTimer) clearTimeout(peekTimer);
     cancelBye();
     if (ghostTimer) { clearTimeout(ghostTimer); ghostTimer = null; }
@@ -6066,6 +6063,10 @@
   // Staged composer attachments — keyed by surface so chips survive the
   // constant re-renders (state on DOM nodes dies with them).
   const stagedFiles = new Map(); // stageKey -> [{name,size,file}]
+  function releaseStagedPreview(file) {
+    if (file.previewUrl) URL.revokeObjectURL(file.previewUrl);
+    file.previewUrl = "";
+  }
   function stageKeyFor(field) {
     const dock = field.closest("[data-request]") || field.closest(".ta-dock");
     if (dock) return "request:" + (dock.getAttribute("data-request") || (readerId || "dock"));
@@ -6076,6 +6077,7 @@
   function takeStagedFiles(field) {
     const key = stageKeyFor(field);
     const files = stagedFiles.get(key) || [];
+    files.forEach(releaseStagedPreview);
     stagedFiles.delete(key);
     const qr = field.closest(".qr");
     if (qr) paintStagedChips(qr, key);
@@ -6086,6 +6088,7 @@
   }
   function clearStagedFiles(field) {
     const key = stageKeyFor(field);
+    (stagedFiles.get(key) || []).forEach(releaseStagedPreview);
     stagedFiles.delete(key);
     const qr = field.closest(".qr");
     if (qr) paintStagedChips(qr, key);
@@ -6135,12 +6138,27 @@
       rowEl.className = "cmp-files";
       qr.insertBefore(rowEl, qr.firstChild);
     }
-    rowEl.innerHTML = files.map((f, i) => `
-      <span class="cmp-chip"><span class="fico-mini"></span>${esc(f.name)}${f.size ? `<span class="sz">${fmtBytes(f.size)}</span>` : ""}<button type="button" class="x" data-unstage="${i}" aria-label="Remove ${esc(f.name)}">×</button></span>`).join("");
+    rowEl.innerHTML = files.map((f, i) => {
+      if (!f.previewUrl && !f.previewFailed && (String(f.file?.type || "").startsWith("image/") || /\.(avif|bmp|gif|heic|heif|jpe?g|png|webp)$/i.test(f.name))) {
+        try { f.previewUrl = URL.createObjectURL(f.file); } catch { f.previewFailed = true; }
+      }
+      return `<span class="cmp-chip${f.previewUrl ? " image-chip" : ""}" title="${esc(f.name)}">${f.previewUrl
+        ? `<img src="${esc(f.previewUrl)}" alt="${esc(f.name)}" data-preview="${i}">`
+        : `<span class="fico-mini"></span>${esc(f.name)}${f.size ? `<span class="sz">${fmtBytes(f.size)}</span>` : ""}`}<button type="button" class="x" data-unstage="${i}" aria-label="Remove ${esc(f.name)}">×</button></span>`;
+    }).join("");
+    for (const img of rowEl.querySelectorAll("[data-preview]")) {
+      const file = files[Number(img.getAttribute("data-preview"))];
+      img.addEventListener("error", () => {
+        if (!img.isConnected || !files.includes(file)) return;
+        file.previewFailed = true;
+        releaseStagedPreview(file);
+        paintStagedChips(qr, key);
+      }, { once:true });
+    }
     for (const b of rowEl.querySelectorAll("[data-unstage]")) {
       b.addEventListener("click", (e) => {
         e.stopPropagation();
-        files.splice(Number(b.getAttribute("data-unstage")), 1);
+        files.splice(Number(b.getAttribute("data-unstage")), 1).forEach(releaseStagedPreview);
         stagedFiles.set(key, files);
         paintStagedChips(qr, key);
       });
@@ -16148,7 +16166,7 @@
       const inviteUrl = String(onboardingInvite?.url || "");
       const inviteValue = inviteUrl || (onboardingInviteLoading ? "Loading your invite link…" : "Invite link unavailable");
       const inviteError = onboardingInviteError ? `<p class="su-note su-error" role="alert">${esc(onboardingInviteError)}</p>` : "";
-      signupBodyEl.innerHTML = `<p class="su-step">Welcome to Relay</p><h1 class="su-title">Bring someone into Relay.</h1><p class="su-copy">Share this link. When they join, Relay connects you so they can send their first message back.</p><div class="su-form"><label class="su-label">Your invite link<input class="su-input" id="suInviteLink" readonly value="${esc(inviteValue)}" /></label><button class="su-primary" id="suCopyInvite" type="button"${busy || !inviteUrl ? " disabled" : ""}>Copy link</button>${inviteError}${note}${error}<button class="su-link" id="suChatDone" type="button"${busy}>Continue</button><button class="su-link" id="suChatSkip" type="button"${busy}>Skip for now</button></div>`;
+      signupBodyEl.innerHTML = `<p class="su-step">Welcome to Relay</p><h1 class="su-title">Bring someone into Relay.</h1><p class="su-copy">Share this link. When they join, Relay connects you so they can send their first message back.</p><div class="su-form"><label class="su-label">Your invite link<input class="su-input" id="suInviteLink" readonly value="${esc(inviteValue)}" /></label><button class="su-primary" id="suCopyInvite" type="button"${busy || !inviteUrl ? " disabled" : ""}>Copy link</button>${inviteError}${note}${error}<button class="su-link" id="suChatSkip" type="button"${busy}>Skip for now</button></div>`;
       if (!onboardingInvite && !onboardingInviteLoading && !onboardingInviteError) void loadOnboardingInvite();
       document.getElementById("suCopyInvite")?.addEventListener("click", async () => {
         if (signupBusy || !window.relay.copyOnboardingInviteLink) return;
@@ -16159,7 +16177,6 @@
           signupBusy = false; signupNote = "Invite link copied."; renderSignup();
         } catch (reason) { signupFailure(reason, "Relay could not copy your invite link."); }
       });
-      document.getElementById("suChatDone")?.addEventListener("click", completeSignupTutorial);
       document.getElementById("suChatSkip")?.addEventListener("click", completeSignupTutorial);
       return;
     }

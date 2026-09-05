@@ -896,9 +896,9 @@ posixFsTest("a runtime owner paused during publication cannot proceed after recl
       intercepted = true;
       oldFd = fs.openSync(file, options.flag, options.mode);
       fs.writeSync(oldFd, bytes.slice(0, 7));
-      // The partial owner is aged by its filesystem timestamp, so anchor it
+      // The partial owner is aged by the lock directory timestamp, so anchor it
       // to the same clock as the simulated reclaimer rather than wall time.
-      fs.futimesSync(oldFd, startedAt / 1000, startedAt / 1000);
+      fs.utimesSync(layout.lockPath, startedAt / 1000, startedAt / 1000);
       winnerPromise = runPosix({
         homeDir,
         fsImpl: winnerFs,

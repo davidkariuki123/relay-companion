@@ -2367,6 +2367,10 @@ function pumpAttention(prebuiltPayload = null) {
   }
 
   const payload = prebuiltPayload || buildPayload();
+  // Setup owns the card until it finishes. Keep arrivals pending without
+  // starting a presentation that would squeeze the invite page into a banner.
+  if (payload.account?.paired === false || payload.ui?.onboardingRequired === true
+      || ["unavailable", "missing", "corrupt"].includes(payload.account?.credentialStatus)) return false;
   const unreadRows = new Map(
     visibleRelayRows(payload.relays).filter((r) => r.unread).map((r) => [r.id, r]),
   );

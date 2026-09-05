@@ -373,6 +373,7 @@ export function runCodexOneShot({
   stallTimeoutMs = Number(process.env.RELAY_CHAT_AGENT_STALL_TIMEOUT_MS || DEFAULT_STALL_TIMEOUT_MS),
   runTimeoutMs = Number(process.env.RELAY_CHAT_AGENT_TIMEOUT_MS || DEFAULT_RUN_TIMEOUT_MS),
   heartbeatIntervalMs = 30_000,
+  exitGraceMs = 20_000,
   mcpToolTimeouts = DEFAULT_MCP_TOOL_TIMEOUTS,
   configOverrides = {},
   onEvent = () => {},
@@ -396,11 +397,13 @@ export function runCodexOneShot({
     let stallTimer;
     let runTimer;
     let heartbeatTimer;
+    let exitGraceTimer;
 
     const cleanup = () => {
       if (stallTimer) clearInterval(stallTimer);
       if (runTimer) clearTimeout(runTimer);
       if (heartbeatTimer) clearInterval(heartbeatTimer);
+      if (exitGraceTimer) clearTimeout(exitGraceTimer);
     };
     const fail = (error) => {
       if (settled) return;
@@ -413,8 +416,14 @@ export function runCodexOneShot({
       if (settled) return;
       settled = true;
       cleanup();
+      if (child.exitCode == null) child.kill("SIGTERM");
       resolve({ threadId, finalMessage: lastAgentMessage });
     };
+    // Once the turn has completed with an answer, the answer is the result.
+    // Codex sometimes lingers after that (an MCP server that will not shut
+    // down, a slow teardown); a timer that fires then must not throw the
+    // finished answer away as a stall.
+    const settle = (error) => (terminal && lastAgentMessage ? finish() : fail(error));
     const emit = (event) => {
       lastActivityAt = Date.now();
       if (event?.type === "thread.started") threadId = String(event.thread_id || event.threadId || "");
@@ -424,7 +433,13 @@ export function runCodexOneShot({
       const status = codexExecEventStatus(event);
       if (status) lastPhase = status;
       try { void onEvent(event, status); } catch {}
-      if (event?.type === "turn.completed") terminal = true;
+      if (event?.type === "turn.completed") {
+        terminal = true;
+        if (lastAgentMessage && !exitGraceTimer) {
+          exitGraceTimer = setTimeout(finish, Math.min(exitGraceMs, stallTimeoutMs));
+          exitGraceTimer.unref?.();
+        }
+      }
       if (event?.type === "turn.failed" || event?.type === "error") {
         const message = event?.error?.message || event?.message || "Codex reported a failed run.";
         fail(new Error(String(message)));
@@ -453,14 +468,14 @@ export function runCodexOneShot({
 
     stallTimer = setInterval(() => {
       if (Date.now() - lastActivityAt <= stallTimeoutMs) return;
-      fail(new Error(`Codex stopped producing activity while ${lastPhase}.`));
+      settle(new Error(`Codex stopped producing activity while ${lastPhase}.`));
     }, Math.min(10_000, Math.max(10, Math.floor(stallTimeoutMs / 4))));
     heartbeatTimer = setInterval(() => {
       const idleSeconds = Math.max(1, Math.round((Date.now() - lastActivityAt) / 1000));
       try { void onEvent({ type: "relay.heartbeat" }, `Codex is still active on your laptop (${idleSeconds}s since its last event).`); } catch {}
     }, heartbeatIntervalMs);
     heartbeatTimer.unref?.();
-    runTimer = setTimeout(() => fail(new Error("Codex reached Relay's one-shot run time limit.")), runTimeoutMs);
+    runTimer = setTimeout(() => settle(new Error("Codex reached Relay's one-shot run time limit.")), runTimeoutMs);
     child.stdin.end(String(prompt || ""));
   });
 }

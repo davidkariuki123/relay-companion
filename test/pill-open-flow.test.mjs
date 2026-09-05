@@ -9,6 +9,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import vm from "node:vm";
 
 const main = fs.readFileSync(new URL("../overlay/main.cjs", import.meta.url), "utf8");
 const preload = fs.readFileSync(new URL("../overlay/preload.cjs", import.meta.url), "utf8");
@@ -528,7 +529,7 @@ test("an arrival while the card is open lands in the list — it never re-banner
   // The attention queue presents pending unread one batch at a time; without
   // this guard each batch yanked a just-opened card back to banner height.
   const notifyFn = sliceFunction(html, "function notifyArrival(");
-  assert.match(notifyFn, /const onStageFull = fullCardIsOnStage\(\);/);
+  assert.match(notifyFn, /const onStageFull = !collapsed && !peeking && !ghost/);
   assert.match(notifyFn, /if \(onStageFull\) \{/);
   // The on-stage path keeps whatever chrome the card has and settles attention.
   assert.match(notifyFn, /cardEl\.classList\.add\("notifying"\); \/\/ state-only marker; the chrome stays put/);
@@ -556,11 +557,85 @@ test("only a deliberately presented full card counts as on stage", () => {
   assert.equal(isOnStage(true, false, false, false, card("bye")), false, "dismissal in progress");
 });
 
-// The guard above is only correct if "the card is open" means the reader was
-// actually shown it. The DOM boots un-collapsed and unparked, so `!collapsed`
-// alone made a launch-time backlog look like an arrival over an open inbox: it
-// never bannered, never folded back to the pill, and settled its own attention.
-test("a card nobody has opened yet is not 'on stage' — a backlog at launch still banners", () => {
+function arrivalHarness({ collapsed = false, peeking = false, reader = false, signup = false, presented = true } = {}) {
+  const classes = new Set([...(collapsed ? ["collapsed"] : []), ...(signup ? ["signup"] : [])]);
+  const calls = [];
+  const context = vm.createContext({
+    collapsed, peeking, presented, readerOpenNow: reader, ghost: false,
+    peekTimer: null, ghostTimer: null, activeNotificationIds: [],
+    notifSticky: false, notifInteracted: false, activeView: reader ? "threads" : "relays",
+    cardEl: { classList: {
+      contains: (name) => classes.has(name),
+      add: (...names) => names.forEach((name) => classes.add(name)),
+      remove: (...names) => names.forEach((name) => classes.delete(name)),
+    } },
+    window: { relay: { attentionDone: (receipt) => calls.push(["done", receipt.dwelled]) } },
+    cancelBye() {}, refreshCountLabel() {}, playTink() {},
+    renderAll: () => calls.push(["render"]),
+    commitNavigation: () => calls.push(["navigate"]),
+    sizePeek: () => calls.push(["resize"]),
+    setTimeout: () => { calls.push(["timer"]); return 1; }, clearTimeout() {},
+    notificationDurationMs: 7000,
+  });
+  vm.runInContext(`${sliceFunction(html, "function sendAttentionDone(")}\n${sliceFunction(html, "function notifyArrival(")}\nnotifyArrival([{ id: "arrival" }], {});`, context);
+  return { context, classes, calls };
+}
+
+test("arrivals preserve medium and large cards, including startup before an explicit open", () => {
+  for (const reader of [false, true]) {
+    for (const presented of [false, true]) {
+      const { context, classes, calls } = arrivalHarness({ reader, presented });
+      assert.equal(context.peeking, false);
+      assert.equal(context.collapsed, false);
+      assert.equal(context.activeView, reader ? "threads" : "relays");
+      assert.equal(classes.has("peek"), false);
+      assert.equal(classes.has("notifying"), false);
+      assert.deepEqual(calls, [["render"], ["done", true]]);
+    }
+  }
+});
+
+test("compact arrivals still banner and successive arrivals can update that banner", () => {
+  for (const state of [{ collapsed: true }, { peeking: true }]) {
+    const { context, classes, calls } = arrivalHarness(state);
+    assert.equal(context.peeking, true);
+    assert.equal(context.collapsed, false);
+    assert.equal(classes.has("peek"), true);
+    assert.deepEqual(calls, [["navigate"], ["resize"], ["timer"]]);
+  }
+});
+
+test("an in-flight arrival during onboarding never resizes or retires unseen mail", () => {
+  for (const collapsed of [false, true]) {
+    const { context, classes, calls } = arrivalHarness({ signup: true, collapsed, presented: false });
+    assert.equal(context.peeking, false);
+    assert.equal(context.collapsed, collapsed);
+    assert.equal(classes.has("peek"), false);
+    assert.deepEqual(calls, [["done", false]]);
+  }
+});
+
+test("the attention pump leaves setup arrivals pending before starting or showing a banner", () => {
+  for (const payload of [
+    { account: { paired: true }, ui: { onboardingRequired: true } },
+    { account: { paired: false } },
+    ...["unavailable", "missing", "corrupt"].map((credentialStatus) => ({ account: { paired: true, credentialStatus } })),
+  ]) {
+    const context = vm.createContext({
+      win: { isDestroyed: () => false }, pillReady: true, rendererListening: true,
+      currentShow: null, attention: { hasShowing: () => false, pendingCount: () => 1 },
+      attentionQueue: new Map([["arrival", { state: "pending" }]]),
+      pillHidden: false, userIsAway: () => false, dismissed: false, payload,
+    });
+    vm.runInContext(`${sliceFunction(main, "function pumpAttention(")}\nresult = pumpAttention(payload);`, context);
+    assert.equal(context.result, false);
+    assert.deepEqual([...context.attentionQueue], [["arrival", { state: "pending" }]]);
+  }
+});
+
+// Read presence still requires deliberate presentation, independently of the
+// size-based notification policy.
+test("read presence requires a deliberate open even when the card boots expanded", () => {
   assert.match(html, /^\s*let presented = false;$/m, "the renderer starts un-presented");
 
   // Only a deliberate presentation turns it on.
