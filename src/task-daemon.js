@@ -956,6 +956,19 @@ export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
   }
   let client = new RelayClient();
   const me = await resolveMe(client);
+  const { startAgentLocalServer } = await import("./agent-local-server.js");
+  const { listRelayDestinations, deliverRelayToSession } = await import("./session-delivery.js");
+  let localServer;
+  async function bindLocalAgentConnection(user) {
+    if (localServer) { await localServer.close(); localServer = null; }
+    try {
+      // Keep this client bound for the service's lifetime. The receiver may
+      // rebind its own client after an account switch; queued sends must not.
+      const agentClient = new RelayClient();
+      localServer = await startAgentLocalServer({ client: agentClient, accountId: user.id, apiUrl: agentClient.url, listDestinations: listRelayDestinations, deliver: deliverRelayToSession });
+    } catch (error) { log(`local agent connection unavailable: ${error.message}`); }
+  }
+  await bindLocalAgentConnection(me.user);
   // Codex project state belongs to the signed-in Relay account. Never inspect
   // or rewrite historical Codex tasks while this installation is still signed
   // out; doing so can resurrect tasks from a previous owner before consent.
@@ -969,8 +982,13 @@ export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
   let consecutiveFailures = 0;
   let stewardInFlight = null;
   for (;;) {
+    if (client.accountDrift().status !== "same" && localServer) {
+      await localServer.close();
+      localServer = null;
+    }
     const rebound = await followAccountDrift({ client, log, role: "receiver" });
     if (rebound) {
+      await bindLocalAgentConnection(rebound.user);
       await claudeRuntime.stop();
       claudeRuntime = createE2eeClaudeRuntimeController({ client, logger: log });
       features = daemonProductFeatures(log, rebound.user);
@@ -1024,6 +1042,7 @@ export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
         log(`inbox polling has failed ${consecutiveFailures} times; rebuilding the Windows receiver client`);
         client = new RelayClient();
         const recovered = await resolveMe(client);
+        await bindLocalAgentConnection(recovered.user);
         await claudeRuntime.stop();
         claudeRuntime = createE2eeClaudeRuntimeController({ client, logger: log });
         void claudeRuntime.tick();

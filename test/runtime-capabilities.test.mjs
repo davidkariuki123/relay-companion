@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
   assertRuntimeCapabilities,
@@ -9,9 +10,9 @@ import {
 } from "../scripts/assert-runtime-capabilities.mjs";
 
 test("the shipped runtime retains exact session routing and task completion wakes", () => {
-  const root = path.resolve(new URL("..", import.meta.url).pathname);
+  const root = fileURLToPath(new URL("..", import.meta.url));
   const result = assertRuntimeCapabilities(root);
-  assert.deepEqual(result.capabilities, ["exactSessionRouting", "taskCompletionWake"]);
+  assert.deepEqual(result.capabilities, ["agentProtocol", "exactSessionRouting", "taskCompletionWake"]);
 });
 
 test("the release gate rejects a runtime whose capability wiring disappeared", () => {

@@ -179,7 +179,7 @@ export function validateInstalledPackageShape(packageRoot, { version, distributi
       throw new Error("Thin installer bootstrap contents do not match the reviewed shape");
     }
     const manifest = JSON.parse(fs.readFileSync(path.join(packageRoot, "skill", "manifest.json"), "utf8"));
-    const expectedSkillFiles = ["SKILL.md", "agents/openai.yaml", "scripts/relay-protocol.mjs"];
+    const expectedSkillFiles = ["SKILL.md", "agents/openai.yaml", "scripts/relay-attachments.mjs", "scripts/relay-local.mjs", "scripts/relay-protocol.mjs"];
     if (manifest?.schemaVersion !== 1 || manifest?.name !== "relay" || !Array.isArray(manifest.files)) {
       throw new Error("Thin installer skill manifest is invalid");
     }

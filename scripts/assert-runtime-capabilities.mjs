@@ -5,6 +5,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const REQUIRED_RUNTIME_CAPABILITIES = {
+  agentProtocol: {
+    "skill/relay/scripts/relay-protocol.mjs": ["prepareOrdinaryRelayAttachments", "localRequest", 'command === "destinations"'],
+    "skill/relay/scripts/relay-attachments.mjs": ["export async function prepareOrdinaryRelayAttachments"],
+    "skill/relay/scripts/relay-local.mjs": ["export function localRequest"],
+    "src/agent-local-server.js": ["export async function startAgentLocalServer", "createOutbox"],
+    "src/agent-connection.js": ["export async function adoptAgentConnection"],
+  },
   exactSessionRouting: {
     "src/session-delivery.js": [
       "export function listRelayDestinations",

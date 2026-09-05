@@ -430,11 +430,11 @@ export class RelayClient {
     return this.#req("POST", `/v1/chat-agents/${encodeURIComponent(relayId)}/finish`, error ? { error } : {});
   }
 
-  registerDevice({ pairingCode, name, platform, e2eeIdentity }) {
+  registerDevice({ pairingCode, name, platform, e2eeIdentity, recoverySecret }) {
     return this.#req(
       "POST",
       "/v1/devices/register",
-      { pairingCode, name, platform, ...(e2eeIdentity ? { e2eeIdentity } : {}) },
+      { pairingCode, name, platform, ...(e2eeIdentity ? { e2eeIdentity } : {}), ...(recoverySecret ? { recoverySecret } : {}) },
       { auth: false },
     );
   }

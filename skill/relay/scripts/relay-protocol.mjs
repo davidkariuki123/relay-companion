@@ -4,6 +4,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
+import { prepareOrdinaryRelayAttachments } from "./relay-attachments.mjs";
+import { readLocalDescriptor, localRequest } from "./relay-local.mjs";
 import { spawnSync } from "node:child_process";
 
 const DEFAULT_CONFIG = path.join(os.homedir(), ".relay", "agent-protocol.json");
@@ -15,6 +18,10 @@ const TRUSTED_RELAY_HOSTS = new Map([
 const TUTORIAL_HUMAN = "Hi — I’ve just joined you on Relay.";
 const TUTORIAL_AGENT = "This is my first Relay after joining from your invite. Help the person reply if they want to welcome me.";
 const SAFE_GET = [
+  /^\/v1\/contact-groups$/,
+  /^\/v1\/chats(?:\?.*)?$/,
+  /^\/v1\/chats\/[A-Za-z0-9_-]+$/,
+  /^\/v1\/relays\/[A-Za-z0-9_-]+\/attachments\/[A-Za-z0-9_-]+\/download-url$/,
   /^\/v1\/me$/,
   /^\/v1\/inbox(?:\?.*)?$/,
   /^\/v1\/sent(?:\?.*)?$/,
@@ -73,8 +80,8 @@ function readConfig(file = configPath()) {
   }
   const apiUrl = relayApiOrigin(value?.apiUrl);
   const accessToken = String(value?.accessToken || "");
-  if (!accessToken.startsWith("web_") || accessToken.length < 20) throw new Error("Relay's agent credential is invalid. Connect Relay again.");
-  if (value.expiresAt && Date.parse(value.expiresAt) <= Date.now()) throw new Error("Relay's agent authorization expired. Connect Relay again.");
+  if (!value.local && (!accessToken.startsWith("web_") || accessToken.length < 20)) throw new Error("Relay's agent credential is invalid. Connect Relay again.");
+  if (!value.local && value.expiresAt && Date.parse(value.expiresAt) <= Date.now()) throw new Error("Relay's agent authorization expired. Connect Relay again.");
   return { ...value, apiUrl, accessToken };
 }
 
@@ -101,12 +108,12 @@ function atomicWrite(file, value) {
   const temporary = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.${randomUUID()}.tmp`);
   try {
     fs.writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600, flag: "wx" });
-    fs.renameSync(temporary, file);
-    try { protectOwnerOnly(file); }
+    try { protectOwnerOnly(temporary); }
     catch (error) {
-      try { fs.rmSync(file, { force: true }); } catch {}
+      try { fs.rmSync(temporary, { force: true }); } catch {}
       throw error;
     }
+    fs.renameSync(temporary, file);
   } finally {
     try { fs.rmSync(temporary, { force: true }); } catch {}
   }
@@ -143,6 +150,7 @@ async function authenticatedRequest(apiUrl, accessToken, method, requestPath, bo
     const error = new Error(payload.message || payload.error || `Relay request failed (${response.status}).`);
     error.status = response.status;
     error.code = payload.error || "";
+    error.body = payload;
     throw error;
   }
   return payload;
@@ -155,7 +163,21 @@ async function request(method, requestPath, body) {
     throw new Error(`Relay agent protocol does not allow ${verb} ${cleanPath || "<missing path>"}.`);
   }
   const config = readConfig();
-  return authenticatedRequest(config.apiUrl, config.accessToken, verb, cleanPath, body);
+  const local = readLocalDescriptor();
+  if (local && (config.consentVersion ?? 1) >= 2) {
+    if (local.accountId !== config.account?.relayUserId || local.apiUrl !== config.apiUrl) throw new Error("Companion is connected to a different Relay account or environment. Nothing was sent or read.");
+    const result = await localRequest(local, { method: verb, path: cleanPath, body, accountId: config.account.relayUserId });
+    // Only retire the standalone credential after the daemon has answered as
+    // the exact account. Future failures must not bypass local encryption.
+    if (!config.local) { config.local = true; delete config.accessToken; atomicWrite(configPath(), config); }
+    return result;
+  }
+  if (config.local) throw new Error("Reopen Relay Companion to use this connection. No agent restart is needed.");
+  try { return await authenticatedRequest(config.apiUrl, config.accessToken, verb, cleanPath, body); }
+  catch (error) {
+    if (verb !== "POST" || cleanPath !== "/v1/relays" || body?.longForHumanConfirmed !== true || error.code !== "human_message_review_required" || !error.body?.reviewToken) throw error;
+    return authenticatedRequest(config.apiUrl, config.accessToken, verb, cleanPath, { ...body, longForHumanReviewToken: error.body.reviewToken });
+  }
 }
 
 function parseJson(value, label = "JSON body") {
@@ -193,6 +215,7 @@ async function connectStart(apiUrl, inviteToken, surface) {
   const trustedApiUrl = relayApiOrigin(apiUrl);
   const response = await publicRequest(trustedApiUrl, "/v1/agent/authorizations", {
     inviteToken,
+    consentVersion: 2,
     clientName: cleanSurface === "codex" ? "Relay for Codex" : "Relay for Claude Code",
     surface: cleanSurface,
     codeChallenge,
@@ -283,6 +306,7 @@ async function configureFromResponse(input, { expectedApiUrl } = {}) {
     && existing?.inviter?.relayUserId === inviter.relayUserId;
   const record = {
     version: 1,
+    consentVersion: input.consentVersion ?? 1,
     apiUrl,
     accessToken,
     expiresAt: String(input.expiresAt || ""),
@@ -301,11 +325,18 @@ async function configureFromResponse(input, { expectedApiUrl } = {}) {
   return record;
 }
 
+async function prepareSendBody(body) {
+  if (!body || typeof body !== "object") throw new Error("Relay send requires a message body.");
+  const { files, trustedLocalRoot, ...rest } = body;
+  return { ...rest, attachments: await prepareOrdinaryRelayAttachments({ ...body, trustedLocalRoot: "" }) };
+}
+
 function sendBodyHash(body) {
   return createHash("sha256").update(JSON.stringify(body)).digest("hex");
 }
 
 async function sendPersisted(body) {
+  body = await prepareSendBody(body);
   const key = String(body?.idempotencyKey || "").trim();
   if (key.length < 8 || key.length > 200) throw new Error("Relay send requires a caller-supplied idempotencyKey of at least eight characters.");
   const config = readConfig();
@@ -403,6 +434,43 @@ async function main(argv = process.argv.slice(2)) {
     const config = readConfig();
     return { ok: true, connected: true, account: config.account || {}, inviter: config.inviter, invite: config.invite, tutorial: config.tutorial, lastSend: config.lastSend, expiresAt: config.expiresAt || "" };
   }
+  if (command === "groups") return request("GET", "/v1/contact-groups");
+  if (command === "chats") return request("GET", "/v1/chats");
+  if (command === "chat") return request("GET", `/v1/chats/${encodeURIComponent(rest[0] || "")}`);
+  if (command === "thread") return request("GET", `/v1/threads/${encodeURIComponent(rest[0] || "")}`);
+  if (command === "destinations" || command === "deliver" || command === "outbox") {
+    const config = readConfig();
+    const local = readLocalDescriptor();
+    if ((config.consentVersion ?? 1) < 2 || !local || local.accountId !== config.account?.relayUserId || local.apiUrl !== config.apiUrl) throw new Error("Local agent targeting requires Companion connected to this Relay account.");
+    const retry = command === "outbox" && rest[0] === "retry";
+    if (retry && !rest[1]) throw new Error("outbox retry requires the original idempotency key.");
+    const body = command === "deliver" ? parseJson(await readStdin()) : retry ? { idempotencyKey: rest[1] } : undefined;
+    return localRequest(local, { method: command === "deliver" || retry ? "POST" : "GET", path: command === "deliver" ? "/local/deliver" : retry ? "/local/outbox/retry" : command === "outbox" ? "/local/outbox" : `/local/destinations/${rest[0] || ""}`, body, accountId: config.account.relayUserId });
+  }
+  if (command === "wait-reply") {
+    if (!rest[0]) throw new Error("wait-reply requires the sent Relay id.");
+    const seconds = rest[1] === undefined ? 30 : Number(rest[1]);
+    if (!Number.isFinite(seconds) || seconds < 0 || seconds > 45) throw new Error("Choose a wait of 0 to 45 seconds.");
+    const sentList = await request("GET", "/v1/sent");
+    const sent = (sentList.items || []).find((item) => (item.id || item.relayId) === rest[0]);
+    if (!sent) throw new Error("That send is not in the recent sent list. Open its conversation to check for replies.");
+    const threadId = sent.threadId || rest[0];
+    const thread = await request("GET", `/v1/threads/${encodeURIComponent(threadId)}`);
+    const chatId = thread.chatId || thread.chat?.id;
+    const deadline = Date.now() + seconds * 1000;
+    do {
+      const result = chatId
+        ? await request("GET", `/v1/chats/${encodeURIComponent(chatId)}`)
+        : await request("GET", `/v1/threads/${encodeURIComponent(threadId)}`);
+      const replies = (result.items || result.relays || result.chat?.items || []).filter((item) =>
+        item.direction === "inbound" && Date.parse(item.createdAt) >= Date.parse(sent.createdAt));
+      if (replies.length) return { status: "reply_available", items: replies };
+      if (Date.now() >= deadline) break;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(3000, deadline - Date.now())));
+    } while (true);
+    return { status: "no_reply_yet", message: "No reply in this check. No ongoing monitoring was scheduled." };
+  }
+  if (command === "attachment") return request("GET", `/v1/relays/${encodeURIComponent(rest[0] || "")}/attachments/${encodeURIComponent(rest[1] || "")}/download-url`);
   if (command === "inbox") return request("GET", "/v1/inbox");
   if (command === "sent") return request("GET", "/v1/sent");
   if (command === "contacts") return request("GET", `/v1/contacts/search?q=${encodeURIComponent(rest.join(" "))}`);
@@ -438,7 +506,11 @@ async function main(argv = process.argv.slice(2)) {
       "relay-protocol connect-start <api-origin> <invite-token> claude_code|codex",
       "relay-protocol connect-finish   # run after approving the returned browser URL",
       "relay-protocol status",
-      "relay-protocol inbox | sent",
+      "relay-protocol inbox | sent | groups | chats | outbox",
+      "relay-protocol outbox retry <original-idempotency-key>",
+      "relay-protocol wait-reply <sent-relay-id> [seconds:0-45]",
+      "relay-protocol chat <id> | thread <id> | attachment <relay-id> <attachment-id>",
+      "relay-protocol destinations claude|codex | deliver # JSON exact relayId and target, approved:true",
       "relay-protocol contacts <name-or-email>",
       "relay-protocol read <relay-id>",
       "relay-protocol mark-read <relay-id> [idempotency-key]",
@@ -450,10 +522,15 @@ async function main(argv = process.argv.slice(2)) {
   };
 }
 
+export { allowed, authenticatedRequest, readConfig, configPath, atomicWrite, protectOwnerOnly };
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
 try {
   const result = await main();
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 } catch (error) {
   process.stderr.write(`${error?.message || String(error)}\n`);
   process.exitCode = 1;
+}
+
 }

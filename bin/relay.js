@@ -244,7 +244,7 @@ async function applyInstall({
   requiredHosts = requiredLiveHosts(),
   claim = false,
   reload = true,
-  agentProtocol = false,
+  agentProtocol = readConfig().agentProtocol === true,
 } = {}) {
   const {
     installed,
@@ -358,6 +358,11 @@ async function applyInstall({
  * migration window; it is never required or prompted for by the new flow.
  */
 async function cmdSetup(flags) {
+  const agentProtocol = Boolean(flags["agent-protocol"]) || readConfig().agentProtocol === true;
+  if (flags["agent-protocol"]) {
+    const { adoptAgentConnection } = await import("../src/agent-connection.js");
+    await adoptAgentConnection();
+  }
   const token = setupOpenRelayToken(flags);
   if (token) {
     persistPendingSetupOpen({ token, host: flags.host || flags.in });
@@ -393,7 +398,7 @@ async function cmdSetup(flags) {
     console.log("");
   }
   const install = await applyInstall({
-    requireLiveTools: !flags["agent-protocol"] && (Boolean(flags["require-live-tools"]) || shouldRequireLiveTools()),
+    requireLiveTools: !agentProtocol && (Boolean(flags["require-live-tools"]) || shouldRequireLiveTools()),
     requiredHosts: requiredLiveHosts(),
     // An explicit setup is the migration/ownership handoff. Runtime verification
     // in runSetupInstall completes before any platform's autostart is changed.
@@ -402,7 +407,7 @@ async function cmdSetup(flags) {
     // starting them, then performs the same exact-root lifecycle as the updater.
     // Ordinary setup keeps its historical install-and-start behaviour.
     reload: !(flags["no-restart"] && process.env.RELAY_BOOTSTRAP_ACTIVATED === "1"),
-    agentProtocol: Boolean(flags["agent-protocol"]),
+    agentProtocol,
   });
   if (token && readConfig().deviceToken) {
     console.log("");

@@ -18,7 +18,7 @@ import { ensureStableMcpLauncher, mcpLaunchCommand, removeStableMcpLauncher } fr
 import { brokerIdentity, removeMcpBrokerProvisioning } from "./mcp-broker-state.js";
 import { canonicalOwnershipGuard, verifyCanonicalCandidate } from "./canonical-runtime.js";
 import { ensureStableHookLauncher, removeStableHookLauncher } from "./hook-launcher.js";
-import { writeConfig } from "./config.js";
+import { readConfig, writeConfig } from "./config.js";
 import { deleteInstallationAuthorizationCredentials } from "./installation-authorization.js";
 import {
   ACTIVE_UPDATE_WORKER_ENV,
@@ -2868,7 +2868,7 @@ function installWindowsLogonTask({
  * Detect Claude Code + Codex, register the Relay MCP into each present, and
  * start the receive daemon. Returns a summary for the CLI to print.
  */
-export async function runSetupInstall({ claim = false, reload = true, agentProtocol = false } = {}) {
+export async function runSetupInstall({ claim = false, reload = true, agentProtocol = readConfig().agentProtocol === true } = {}) {
   const { bin, stable: binStable, version } = resolveStableBin();
   const packageRoot = packageRootForBin(bin);
   // First contact deliberately installs with --ignore-scripts. Prepare and verify
@@ -2933,6 +2933,7 @@ export async function runSetupInstall({ claim = false, reload = true, agentProto
     ...(process.platform === "linux" ? { RELAY_ALLOW_SANDBOX_AUTHORIZATION: "1" } : {}),
   };
   if (agentProtocol) {
+    writeConfig({ agentProtocol: true });
     // The current product path installs one HTTPS skill and the visual
     // Companion. MCP registrations and hook runtimes are legacy capability,
     // not a second choice a new user has to understand. Remove only Relay's
@@ -2954,12 +2955,12 @@ export async function runSetupInstall({ claim = false, reload = true, agentProto
     const retiredAgentIntegrations = [
       removeClaudeCodeMcpConfig(),
       removeCodexMcpConfig(),
-      removeClaudeDesktopMcpConfig({ env: serviceEnv }),
       uninstallClaudeHooks(),
       uninstallCodexHooks(),
     ];
-    try { removeMcpBrokerProvisioning(); } catch {}
-    try { removeStableMcpLauncher(); } catch {}
+    // Retained desktop integrations can still own the shared launcher/broker.
+    // This setup stops registering the local coding-agent bridge; it must not
+    // break an existing desktop connection as a side effect.
     const daemon = installDaemonAutostart(bin, node, { claim, reload, env: serviceEnv });
     const pill = installPillAutostart(bin, { claim, reload, env: serviceEnv });
     return {
@@ -3063,6 +3064,7 @@ export function repairAgentMcpRegistrations({
   codexHooksFile = process.env.CODEX_HOOKS
     || path.join(process.env.CODEX_HOME || path.join(homeDir, ".codex"), "hooks.json"),
 } = {}) {
+  if (readConfig().agentProtocol === true) return { ok: true, skipped: true, reason: "agent_protocol" };
   const mcpBin = ensureStableMcpLauncher({ targetBin: bin, node, homeDir });
   const claude = writeClaudeCodeMcpConfig(mcpBin, node, claudeConfigFile);
   const codex = writeCodexMcpConfig(mcpBin, node, codexConfigFile);
@@ -3138,6 +3140,7 @@ export function repairExistingAgentRegistrations({
   codexHooksFile = process.env.CODEX_HOOKS
     || path.join(process.env.CODEX_HOME || path.join(homeDir, ".codex"), "hooks.json"),
 } = {}) {
+  if (readConfig().agentProtocol === true) return { ok: true, skipped: true, reason: "agent_protocol" };
   try {
     node = persistentNodePath(node, { platform, homeDir });
   } catch (error) {

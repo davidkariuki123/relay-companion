@@ -360,7 +360,7 @@ export function buildRuntimeArtifact({
     run(npmInstall.command, npmInstall.args, { timeout: 15 * 60_000, cwd: temporary });
     fs.rmSync(path.join(temporary, "node_modules", ".bin"), { recursive: true, force: true });
     fs.mkdirSync(packageRoot, { recursive: true });
-    for (const entry of ["bin", "bootstrap", "src", "overlay", "licenses"]) {
+    for (const entry of ["bin", "bootstrap", "src", "skill", "overlay", "licenses"]) {
       fs.cpSync(path.join(companionRoot, entry), path.join(packageRoot, entry), { recursive: true });
     }
     const nativeDir = path.join(packageRoot, "native");

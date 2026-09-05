@@ -178,6 +178,7 @@ function createOutbox({
   now = () => Date.now(),
   spoolDir,
   onChange = () => {},
+  writeStore = atomicWriteJsonSync,
   log = () => {},
   scheduleTimer = setTimeout,
   cancelTimer = clearTimeout,
@@ -193,7 +194,7 @@ function createOutbox({
 
   function persist() {
     withJsonLock(file, () => {
-      atomicWriteJsonSync(file, { version: OUTBOX_VERSION, entries: store.entries });
+      writeStore(file, { version: OUTBOX_VERSION, entries: store.entries });
     });
   }
 
@@ -272,6 +273,7 @@ function createOutbox({
       nextAttemptAt: at,
       lastError: "",
       text: String(input.text || ""),
+      ...(input.protocolBody ? { protocolBody: input.protocolBody, protocolHash: input.protocolHash } : {}),
       agentMentions: Array.isArray(input.agentMentions)
         ? input.agentMentions.slice(0, 4).map((mention) => ({
             provider: mention && mention.provider === "claude" ? "claude" : "codex",

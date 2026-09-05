@@ -698,6 +698,18 @@ test("Windows opens Electron's inspector through Node's debug trigger", () => {
   assert.deepEqual(calls, [["debug", 301]]);
 });
 
+test("macOS and Linux desktop inspection never signal or debug an unproven process", () => {
+  for (const platform of ["darwin", "linux"]) {
+    const calls = [];
+    assert.equal(startCodexInspector(301, {
+      platform,
+      debugProcess: () => calls.push("debug"),
+      kill: () => calls.push("kill"),
+    }), false);
+    assert.deepEqual(calls, []);
+  }
+});
+
 test("Windows can submit through the same Desktop renderer bridge", async () => {
   const result = await submitTurnToCodexDesktopThread({
     threadId: "thread_windows",

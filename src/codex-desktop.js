@@ -1198,14 +1198,16 @@ export function startCodexInspector(pid, {
   debugProcess = process._debugProcess,
   kill = process.kill,
 } = {}) {
+  // macOS Electron builds can leave SIGUSR1 at its default disposition: kill
+  // the app. A matching executable name does not prove a debug signal handler.
+  // Existing inspectors are still discovered before this function is called.
+  if (platform !== "win32") return false;
   try {
     // SIGUSR1 is not available on Windows. Node's Windows debug trigger opens
     // the same loopback inspector on the running Electron main process.
     if (platform === "win32") {
       if (typeof debugProcess !== "function") return false;
       debugProcess(pid);
-    } else {
-      kill(pid, "SIGUSR1");
     }
     return true;
   } catch {
