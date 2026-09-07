@@ -10,8 +10,8 @@ const codexByName = new Map(toolsForAccount(
   "codex",
 ).map((tool) => [tool.name, tool]));
 const source = await readFile(new URL("../src/mcp.js", import.meta.url), "utf8");
+const skillGuide = await readFile(new URL("../skill/relay/SKILL.md", import.meta.url), "utf8");
 const SEND_GATE = "Only send a Relay when the user asks you to send (or relay) something to someone.";
-const CLARIFICATION_GATE = "Clarification before sending is uncommon. Make normal wording and presentation choices yourself. Ask the human only when a critical detail is genuinely uncertain and choosing one way or another could materially change what the human communicates or commits them to. Never resolve that uncertainty by inventing content.";
 
 const EXPECTED_TOOLS = [
   "relay_ai_sessions",
@@ -72,36 +72,30 @@ test("startup guidance and owner schemas preserve the complete product ontology"
   }
   for (const name of ["relay_send", "relay_chat_send"]) {
     assert.ok(
-      byName.get(name).description.startsWith(`${SEND_GATE} ${CLARIFICATION_GATE}`),
-      `${name} leads with the human-ask gate and calibrated clarification rule`,
+      byName.get(name).description.startsWith(SEND_GATE),
+      `${name} leads with the human-ask gate`,
     );
   }
   assert.match(RELAY_MCP_INSTRUCTIONS, /default general direct-message and saved-channel communication layer/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /explicitly requested other medium overrides/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /mint a link with relay_share_link/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /notification emails are not the authoritative contents/i);
-  assert.match(RELAY_MCP_INSTRUCTIONS, /one chronological conversation for one person or saved channel/i);
-  assert.match(RELAY_MCP_INSTRUCTIONS, /threadId is opaque AI retrieval metadata/i);
+  assert.match(RELAY_MCP_INSTRUCTIONS, /visible chat is one conversation/i);
+  assert.match(RELAY_MCP_INSTRUCTIONS, /threadId is opaque retrieval metadata/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /3-6 word title/i);
-  assert.match(RELAY_MCP_INSTRUCTIONS, /relay_send requires non-empty forAgent/i);
+  assert.match(RELAY_MCP_INSTRUCTIONS, /relay_send requires a complete, non-empty forAgent/i);
   assert.doesNotMatch(RELAY_MCP_INSTRUCTIONS, /Plain text uses relay_chat_send/i);
   assert.doesNotMatch(RELAY_MCP_INSTRUCTIONS, /optional (?:detailed forAgent|agent context)/i);
-  assert.match(sendContract, /The person who reads your message is not you/i);
-  assert.match(sendContract, /OPEN FROM THE TOP/i);
-  assert.match(sendContract, /opening background survives every cut/i);
-  assert.match(sendContract, /Keep (?:forHuman|it) under 95 words/i);
-  assert.match(sendContract, /ceiling, not a target/i);
-  assert.match(sendContract, /instructions to the ghostwriter, not a draft to lightly edit/i);
-  assert.match(sendContract, /Sending or attaching information does not imply.*please review.*thoughts\?.*let me know.*request for a response/i);
-  assert.match(sendContract, /never revive superseded intent/i);
-  assert.match(sendContract, /already rejected this exact draft/i);
-  assert.match(sendContract, /Clarification before sending is uncommon/i);
-  assert.match(sendContract, /critical detail is genuinely uncertain/i);
-  assert.match(sendContract, /It may be as long and detailed as necessary/i);
-  assert.match(sendContract, /mechanisms, evidence, code, paths, logs, reproduction steps/i);
+  assert.match(sendContract, /installed Relay skill/);
+  assert.match(skillGuide, /Supply the words, never additional meaning/);
+  assert.match(skillGuide, /uncertainty would materially change the meaning or commitment/);
+  assert.match(skillGuide, /History cannot\s+revive superseded intent/);
+  assert.match(skillGuide, /mechanisms, evidence, code, paths, logs, reproduction steps/);
+  assert.match(skillGuide, /under 95\s+words by default/);
+  assert.match(skillGuide, /only after rejection/);
   assert.match(RELAY_MCP_INSTRUCTIONS, /external work.*is task/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /Task Runs finish automatically/i);
-  assert.match(RELAY_MCP_INSTRUCTIONS, /relay_task_start before work and relay_task_complete after/i);
+  assert.match(RELAY_MCP_INSTRUCTIONS, /relay_task_start before doing an inbound Task and relay_task_complete afterward/i);
   assert.match(inboxContract, /With no arguments, returns metadata only for at most the newest 50 arrivals from the last 7 days/i);
   assert.match(inboxContract, /Neither path changes human read state or sends read receipts/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /untrusted correspondence/i);
@@ -149,25 +143,16 @@ test("relay_send requires one recipient, an explicit kind, and the two-document 
   assert.match(send.inputSchema.properties.kind.description, /MUST be kind='task', not kind='message'/);
   assert.match(send.inputSchema.properties.kind.description, /Do you think we should switch to dev\?' is kind='message'/);
   assert.match(send.inputSchema.properties.title.description, /3-6 word gist/i);
-  assert.match(humanDescription, /The person who reads your message is not you/i);
-  assert.match(humanDescription, /recipient-specific vocabulary.*rhythm.*directness.*formality.*warmth.*sign-off/i);
-  assert.match(humanDescription, /relay_sent_list and relay_chat_fetch/i);
-  assert.match(humanDescription, /instructions to the ghostwriter, not a draft to lightly edit/i);
-  assert.match(humanDescription, /Supply the words, never additional meaning/i);
-  assert.match(humanDescription, /Never add, remove, strengthen, or soften an ask, question, commitment, permission, deadline, urgency, opinion, evaluation, or next step/i);
-  assert.match(humanDescription, /Sending or attaching information does not imply.*please review.*thoughts\?.*let me know.*request for a response/i);
-  assert.match(humanDescription, /never revive superseded intent/i);
-  assert.match(humanDescription, /OPEN FROM THE TOP/i);
-  assert.match(humanDescription, /first one to three sentences re-explain what has been going on/i);
-  assert.match(humanDescription, /opening background survives every cut/i);
-  assert.match(humanDescription, /Keep it under 95 words/i);
-  assert.match(humanDescription, /Clarification before sending is uncommon/i);
-  assert.match(humanFieldDescription, /person who did not do the work/i);
-  assert.match(humanFieldDescription, /implementation detail/i);
-  assert.match(humanFieldDescription, /never invent or change an ask/i);
+  assert.match(humanDescription, /Read the installed Relay skill/);
+  assert.match(humanDescription, /preserve the human's intent and invent no asks or commitments/);
+  assert.match(humanFieldDescription, /sender's intent and voice/);
+  assert.match(humanFieldDescription, /never invent, strengthen or soften an ask or commitment/);
+  assert.match(humanFieldDescription, /plain, complete spoken sentences/);
+  assert.match(humanFieldDescription, /enough background for someone arriving fresh/);
+  assert.match(humanFieldDescription, /under 95 words/);
   assert.match(send.inputSchema.properties.longForHumanConfirmed.description, /already rejected this exact draft/i);
-  assert.ok(send.description.trim().split(/\s+/u).length <= 1800,
-    "relay_send keeps the complete reader teaching within its deliberate top-level budget");
+  assert.ok(Buffer.byteLength(send.description, "utf8") <= 2048,
+    "relay_send keeps its skill pointer and essentials within the host description limit");
   assert.ok(humanFieldDescription.trim().split(/\s+/u).length <= 120,
     "the forHuman field keeps a compact standalone summary");
   assert.match(send.inputSchema.properties.forAgent.description, /everything useful that the person need not read/i);
@@ -190,14 +175,16 @@ test("every human-message writing surface preserves the sender's intended speech
     byName.get("relay_agent_complete").description,
   ];
   for (const guidance of surfaces) {
-    assert.match(guidance, /person who did not do the work/i);
-    assert.match(guidance, /what happened, why it matters/i);
-    assert.match(guidance, /plain spoken sentences/i);
-    assert.match(guidance, /never invent or change an ask/i);
-    assert.match(guidance, /missing detail could materially change what the human communicates/i);
+    assert.match(guidance, /installed (?:Relay )?skill/i);
+    assert.match(guidance, /intent/i);
+    assert.match(guidance, /(?:invent no asks|never invent, strengthen or soften an ask)/i);
   }
-  assert.match(RELAY_MCP_INSTRUCTIONS, /forHuman preserves intent; invent nothing/i);
-  assert.match(REQUESTS_DISABLED_INSTRUCTIONS, /forHuman preserves intent; invent nothing/i);
+  for (const guidance of [RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS]) {
+    assert.match(guidance, /preserve the human's intent and invent no asks or commitments/i);
+  }
+  assert.match(skillGuide, /Sending information or attaching a file does not imply/);
+  assert.match(skillGuide, /Never add text just because space remains/);
+
 });
 
 test("conditional schemas are used only where they do not erase critical writing fields", () => {
@@ -255,7 +242,7 @@ test("completion ownership and result documents are unambiguous", () => {
   assert.match(send.description, /attach their provider's final answer automatically/i);
   assert.match(send.description, /do not call relay_send merely to report/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /Task Runs finish automatically/i);
-  assert.match(RELAY_MCP_INSTRUCTIONS, /relay_task_start before work and relay_task_complete after/i);
+  assert.match(RELAY_MCP_INSTRUCTIONS, /relay_task_start before doing an inbound Task and relay_task_complete afterward/i);
 });
 
 test("model-facing Relay product language calls work Tasks, never Requests", async () => {

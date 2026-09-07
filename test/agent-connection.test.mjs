@@ -14,6 +14,7 @@ test("Companion adopts one approved account and recovers a lost registration res
   let pairings = 0;
   const options = {
     journalFile: path.join(root, "pending.json"), readAgent: () => agent, readCompanion: () => ({}),
+    writeCompanion: (config) => { assert.deepEqual(config, { updateChannel: "dev" }); },
     request: async (_url, _token, _method, route, body) => {
       if (route === "/v1/me") return { user: { id: "usr_test" } };
       assert.equal(route, "/v1/agent/companion/pairing-code");
@@ -49,4 +50,18 @@ test("Companion adopts one approved account and recovers a lost registration res
     return registration;
   } }) }), { connected: true, reused: false });
   assert.equal(pairings - before, 2, "renew only a server-confirmed unused code, without another sign-in");
+});
+
+test("adopting an already-paired account selects its verified environment's update channel", async () => {
+  for (const [apiUrl, channel] of [["https://dev-api.sendrelays.com", "dev"], ["https://api.sendrelays.com", "stable"]]) {
+    const writes = [];
+    const result = await adoptAgentConnection({
+      readAgent: () => ({ consentVersion: 2, account: { relayUserId: "usr_test" }, apiUrl }),
+      readCompanion: () => ({ deviceToken: "fixture", user: { id: "usr_test" }, apiUrl }),
+      writeCompanion: (value) => writes.push(value),
+      makeClient: () => ({ me: async () => ({ user: { id: "usr_test" } }) }),
+    });
+    assert.equal(result.reused, true);
+    assert.deepEqual(writes, [{ updateChannel: channel }]);
+  }
 });

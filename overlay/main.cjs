@@ -21,6 +21,7 @@
 
 const { app, BrowserWindow, Menu, Tray, clipboard, ipcMain, nativeImage, powerMonitor, powerSaveBlocker, shell, screen, systemPreferences } = require("electron");
 const { createCompanionWindow } = require("./companion-window.cjs");
+const { createFirstRelayOnboarding } = require("./first-relay-onboarding.cjs");
 
 if (process.platform === "linux") {
   app.setName("Relay");
@@ -266,10 +267,11 @@ let attentionLatched = overlayPrefs.attentionLatched === true;
 // Both default false, so every install that predates them is untouched.
 let pillHidden = overlayPrefs.pillHidden === true;
 let soundsMuted = overlayPrefs.soundsMuted === true;
-// Versioned per-account onboarding deliberately includes existing users. A
-// device can switch accounts, so one global boolean would let the second
-// account inherit the first account's completion.
-const COMPANION_ONBOARDING_VERSION = 1;
+// First-send onboarding is separate from the old invite-sharing chapter.
+// Existing senders go straight to Relay; everyone else can continue with their
+// agent or skip. Completion belongs to the account, never the whole device.
+const COMPANION_ONBOARDING_VERSION = 2;
+const firstRelayOnboarding = createFirstRelayOnboarding();
 let onboardingVersions = overlayPrefs.onboardingVersions && typeof overlayPrefs.onboardingVersions === "object"
   ? { ...overlayPrefs.onboardingVersions }
   : {};
@@ -1531,6 +1533,8 @@ function readRelays() {
       taskClaim: p.taskClaim || null,
       todoStatus: p.todoStatus || null,
       todoVersion: Number.isInteger(p.todoVersion) ? p.todoVersion : null,
+      todoRemoved: p.todoRemoved === true,
+      todoVisibilityVersion: Number.isInteger(p.todoVisibilityVersion) ? p.todoVisibilityVersion : null,
       duplicateOfItemId: p.duplicateOfItemId || null,
       attentionRank: Number.isInteger(p.attentionRank) ? p.attentionRank : null,
       assessment: p.assessment || null,
@@ -1713,6 +1717,8 @@ function sentFingerprintOf(items) {
       r.taskClaim,
       r.todoStatus,
       r.todoVersion,
+      r.todoRemoved,
+      r.todoVisibilityVersion,
       r.duplicateOfItemId,
       r.assessment,
     ]),
@@ -1747,10 +1753,12 @@ async function refreshSent() {
   if (sentFixtures) {
     sentCache = sentFixtures;
     sentFingerprint = sentFingerprintOf(sentCache);
+    updateFirstRelayOnboarding(onboardingAccountKey(), { items: sentFixtures });
     return sentCache;
   }
   const credential = deviceToken();
   if (!credential) return sentCache; // signed out: nothing to fetch, no 401 log storm
+  const accountKey = onboardingAccountKey();
   const refreshId = ++sentRefreshStarted;
   try {
     const client = await relayClient();
@@ -1762,6 +1770,7 @@ async function refreshSent() {
     sentRefreshCommitted = refreshId;
     sentCache = Array.isArray(res && res.items) ? res.items : [];
     sentFingerprint = sentFingerprintOf(sentCache);
+    updateFirstRelayOnboarding(accountKey, res);
     // A queued message retires against the SERVER's own view, never against our
     // record of a response: the canonical row is the same evidence the renderer
     // uses to retire the bubble, so the two can never disagree on screen.
@@ -1773,9 +1782,22 @@ async function refreshSent() {
     // backoff earned during the outage is due now.
     if (outbox.pendingCount()) outbox.resume();
   } catch (error) {
+    if (deviceToken() === credential && refreshId >= sentRefreshCommitted) {
+      firstRelayOnboarding.failed(accountKey);
+    }
     console.error("[overlay] listSent failed:", error && error.message);
   }
   return sentCache;
+}
+function updateFirstRelayOnboarding(key, response) {
+  if (!key) return;
+  const status = firstRelayOnboarding.observe(key, response);
+  // A first send completed before this app opened: no remedial tutorial and
+  // no replayed celebration for an existing sender on a new computer.
+  if (status === "complete" && (Number(onboardingVersions[key]) || 0) < COMPANION_ONBOARDING_VERSION) {
+    onboardingVersions[key] = COMPANION_ONBOARDING_VERSION;
+    writeOverlayPrefs();
+  }
 }
 function ensureSentLoaded() {
   if (!sentLoadedOnce) sentLoadedOnce = refreshSent().catch(() => sentCache);
@@ -2113,8 +2135,9 @@ function buildPayload() {
       onboardingVersion: COMPANION_ONBOARDING_VERSION,
       completedOnboardingVersion,
       onboardingRequired: currentAccount.paired && completedOnboardingVersion < COMPANION_ONBOARDING_VERSION,
-      // The renderer's playTink gate. `ui` is not part of the push signature, so
-      // relay:setSoundsMuted forces a push rather than waiting for inbox data to move.
+      firstRelayStatus: firstRelayOnboarding.status(onboardingAccountKey(currentAccount)),
+      // The renderer's playTink gate. Sound preferences are not in the push
+      // signature, so relay:setSoundsMuted explicitly forces a push.
       soundsMuted,
     },
     features: PRODUCT_FEATURES,
@@ -2548,6 +2571,8 @@ async function pushInboxNow(force) {
       r.taskClaim,
       r.todoStatus,
       r.todoVersion,
+      r.todoRemoved,
+      r.todoVisibilityVersion,
       r.duplicateOfItemId,
       r.assessment,
       r.attentionRank,
@@ -2588,6 +2613,7 @@ async function pushInboxNow(force) {
     // moves while a message sits offline.
     outbox: (payload.outbox || []).map((e) => [e.id, e.state, e.attempts, e.nextAttemptAt, e.relayId, e.lastError]),
     account: [payload.account.paired, payload.account.email],
+    onboarding: [payload.ui.onboardingRequired, payload.ui.completedOnboardingVersion, payload.ui.firstRelayStatus],
     pendingOpen: payload.pendingOpen
       ? [payload.pendingOpen.relayId, payload.pendingOpen.title, payload.pendingOpen.forHuman, payload.pendingOpen.error]
       : null,
@@ -3301,6 +3327,8 @@ async function readTodoItem(relayId) {
         taskClaim: local.taskClaim || null,
         todoStatus: local.todoStatus || null,
         todoVersion: Number.isInteger(local.todoVersion) ? local.todoVersion : null,
+        todoRemoved: local.todoRemoved === true,
+        todoVisibilityVersion: Number.isInteger(local.todoVisibilityVersion) ? local.todoVisibilityVersion : null,
         duplicateOfItemId: local.duplicateOfItemId || null,
         attentionRank: Number.isInteger(local.attentionRank) ? local.attentionRank : null,
         assessment: local.assessment || null,
@@ -3360,6 +3388,35 @@ async function updateTodoStatus(relayId, input = {}) {
       code: error?.body?.error || null,
       details: error?.body?.details || null,
     };
+  }
+}
+
+async function updateTodoVisibility(relayId, input = {}) {
+  const id = String(relayId || "").trim();
+  if (!id) return { ok: false, error: "Missing Todo item id." };
+  try {
+    const client = await relayClient();
+    const result = await client.updateTodoVisibility(id, {
+      removed: input.removed,
+      expectedVersion: input.expectedVersion,
+      idempotencyKey: String(input.idempotencyKey || ""),
+    });
+    // The server already committed. A local refresh failure must not report the
+    // removal as failed and lose Undo; the daemon will reconcile the projection.
+    try {
+      withJsonLock(STATE_PATH, () => {
+        const store = readStore();
+        const packet = store.packets?.[id];
+        if (packet && Number(packet.todoVisibilityVersion || 0) <= result.version) {
+          Object.assign(packet, { todoRemoved: result.removed, todoVisibilityVersion: result.version });
+        }
+        writeStateAtomic(store);
+      });
+      await pushInbox(true);
+    } catch { /* Durable membership will arrive on the next account refresh. */ }
+    return result;
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error), code: error?.body?.error || null, details: error?.body?.details || null };
   }
 }
 
@@ -5889,16 +5946,20 @@ function createWindow() {
   const testMode = process.env.RELAY_OVERLAY_TEST === "1";
   const sentLoop = () => {
     const fingerprintBefore = sentFingerprint;
+    const onboardingBefore = firstRelayOnboarding.status(onboardingAccountKey());
     refreshSent()
       .then(() => {
         // Only rebuild + repush when the sig-relevant fields moved; an idle
         // machine's unchanged Sent list should cost the fetch and nothing more.
-        if (sentFingerprint !== fingerprintBefore) return pushInbox(false);
+        if (sentFingerprint !== fingerprintBefore
+          || firstRelayOnboarding.status(onboardingAccountKey()) !== onboardingBefore) return pushInbox(false);
         perf.inc("sentPushSkips");
       })
       .catch(() => {})
       .finally(() =>
-        setTimeout(sentLoop, sentRefreshDelayMs({ testMode, engaged: isEngaged(), showActive: Boolean(currentShow) })),
+        setTimeout(sentLoop, sentRefreshDelayMs({ testMode,
+          engaged: isEngaged() || (!dismissed && !pillHidden && account().paired && onboardingVersionFor() < COMPANION_ONBOARDING_VERSION),
+          showActive: Boolean(currentShow) })),
       );
   };
   setTimeout(sentLoop, 5000);
@@ -8772,6 +8833,11 @@ ipcMain.handle("relay:taskStop", (_e, id) => stopTaskWork(id));
 ipcMain.handle("relay:todoList", (_e, input) => listTodo(input));
 ipcMain.handle("relay:todoItem", (_e, id) => readTodoItem(id));
 ipcMain.handle("relay:todoStatusUpdate", (_e, id, input) => updateTodoStatus(id, input));
+ipcMain.handle("relay:todoVisibilityUpdate", (_e, id, input) => updateTodoVisibility(id, input));
+ipcMain.handle("relay:todoVisibilityRead", async (_e, id) => {
+  try { return await (await relayClient()).todoVisibility(String(id || "")); }
+  catch { return { ok:false }; }
+});
 // The Todo steward lives in the daemon; the pill only asks and reads.
 async function todoStewardModule() {
   return import("../src/todo-steward.js");

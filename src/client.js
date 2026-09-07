@@ -811,6 +811,15 @@ export class RelayClient {
     });
   }
 
+  /** Personal Todo membership only; the Relay remains available in the chat. */
+  async todoVisibility(itemId) {
+    return this.#req("GET", `/v1/todo/${encodeURIComponent(itemId)}/visibility`);
+  }
+
+  async updateTodoVisibility(itemId, payload) {
+    return this.#req("PATCH", `/v1/todo/${encodeURIComponent(itemId)}/visibility`, payload);
+  }
+
   /** The Companion opened a Relay in a native session: remember which one so the steward reads it first. */
   async recordRelaySessionTouch(relayId, { provider, nativeSessionId, cwd, title } = {}) {
     return this.#req("POST", `/v1/relays/${encodeURIComponent(relayId)}/session-touch`, {
@@ -906,6 +915,8 @@ export class RelayClient {
     if (status.mode === "required") return { items: selected };
     const managed = await this.#req("GET", `/v1/sent${query}`);
     return {
+      hasSentRelay: selected.some((item) => ["delivered", "read", "acknowledged"].includes(item.state))
+        ? true : managed.hasSentRelay,
       items: [...(managed.items || []), ...selected]
         .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
         .slice(0, Number.isFinite(limit) ? Math.max(1, Math.trunc(limit)) : 200),

@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import http from "node:http";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { startAgentLocalServer } from "../src/agent-local-server.js";
+import { localEndpoint } from "../skill/relay/scripts/relay-local.mjs";
 
 const skillText = fs.readFileSync(new URL("../skill/relay/SKILL.md", import.meta.url), "utf8");
 const protocol = fs.readFileSync(new URL("../skill/relay/scripts/relay-protocol.mjs", import.meta.url), "utf8");
@@ -36,6 +38,27 @@ function runNodeScript(script, args, { env, input = "" } = {}) {
 function runProtocol(args, options) {
   return runNodeScript(protocolPath, args, options);
 }
+
+test("an existing Companion account works without invite credentials and respects RELAY_CONFIG_DIR", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-existing-agent-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, "agent-local.json");
+  const client = { identity: { userId: "usr_existing" }, accountDrift: () => ({ status: "same" }),
+    me: async () => ({ user: { id: "usr_existing" } }), groups: async () => ({ groups: [{ id: "grp_existing" }] }) };
+  const server = await startAgentLocalServer({ client, accountId: "usr_existing", apiUrl: "https://dev-api.sendrelays.com", file });
+  const env = { RELAY_CONFIG_DIR: root, RELAY_AGENT_CONFIG: "", RELAY_AGENT_LOCAL: "" };
+  try {
+    const status = await runProtocol(["status"], { env });
+    assert.equal(status.code, 0, status.stderr);
+    assert.equal(JSON.parse(status.stdout).account.relayUserId, "usr_existing");
+    const groups = await runProtocol(["groups"], { env });
+    assert.equal(groups.code, 0, groups.stderr);
+    assert.equal(JSON.parse(groups.stdout).groups[0].id, "grp_existing");
+    assert.equal(fs.existsSync(path.join(root, "agent-protocol.json")), false, "read-only discovery does not invent a browser grant");
+    client.identity.userId = "usr_other";
+    assert.match((await runProtocol(["groups"], { env })).stderr, /account changed/);
+  } finally { await server.close(); }
+});
 
 test("Relay skill teaches one direct HTTPS product and an approved inviter hello", () => {
   assert.match(skillText, /authenticated HTTPS protocol/);
@@ -232,34 +255,49 @@ test("browser-approved PKCE connection keeps secrets out of output and powers di
   assert.match(untrustedApi.stderr, /production or development Relay API host/);
 });
 
-test("new Companion install mode retires local MCP and hooks while retaining hosted integrations", () => {
-  const start = installer.indexOf("if (agentProtocol)");
-  const end = installer.indexOf("const mcpBin = ensureStableMcpLauncher", start);
-  assert.ok(start >= 0 && end > start);
-  const directPath = installer.slice(start, end);
-  assert.match(directPath, /installBundled\(\{ consent: true \}\)/);
-  assert.match(directPath, /removeClaudeCodeMcpConfig/);
-  assert.match(directPath, /removeCodexMcpConfig/);
-  assert.doesNotMatch(directPath, /removeClaudeDesktopMcpConfig/);
-  assert.match(directPath, /uninstallClaudeHooks/);
-  assert.match(directPath, /uninstallCodexHooks/);
-  assert.doesNotMatch(directPath, /installClaudeCode\(|installCodex\(|installClaudeHooksWithStableLauncher|installCodexHooksWithStableLauncher/);
+test("setup converges on MCP and skill without retiring integrations or adding hooks", () => {
+  const start = installer.indexOf("export async function runSetupInstall");
+  const end = installer.indexOf("export async function installAgentSkills", start);
+  const setup = installer.slice(start, end);
+  assert.match(setup, /installAgentSkills\(\)/);
+  assert.match(setup, /installClaudeCode\(/);
+  assert.match(setup, /installCodex\(/);
+  assert.match(setup, /installClaudeDesktop\(/);
+  assert.match(setup, /repairExistingAgentHooks\(/);
+  assert.doesNotMatch(setup, /removeClaudeCodeMcpConfig|removeCodexMcpConfig|uninstallClaudeHooks|uninstallCodexHooks|installClaudeHooksWithStableLauncher|installCodexHooksWithStableLauncher/);
 });
 
-test("the command helper hands off to the matching daemon, forgets its token, and never falls back after takeover", async (t) => {
+test("the helper retains direct auth and falls back after Companion stops without bypassing account or encryption checks", async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-handoff-test-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const config = path.join(root, "config.json");
   const descriptor = path.join(root, "local.json");
-  fs.writeFileSync(config, JSON.stringify({ consentVersion: 2, apiUrl: "https://dev-api.sendrelays.com", accessToken: "web_test_only_01234567890123456789", account: { relayUserId: "usr_test" } }));
+  const requests = [];
+  let mode = "off";
+  let directUser = "usr_test";
+  let directStatus = 200;
+  const api = http.createServer((request, response) => {
+    requests.push(request.url);
+    response.setHeader("content-type", "application/json");
+    response.statusCode = directStatus;
+    if (directStatus !== 200) return response.end(JSON.stringify({ error: "invalid_token" }));
+    if (request.url === "/v1/me") return response.end(JSON.stringify({ user: { id: directUser } }));
+    if (request.url === "/v1/e2ee/status") return response.end(JSON.stringify({ mode }));
+    return response.end(JSON.stringify({ groups: [{ id: "grp_direct" }] }));
+  });
+  await new Promise((resolve) => api.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => api.close(resolve)));
+  const apiUrl = `http://127.0.0.1:${api.address().port}`;
+  fs.writeFileSync(config, JSON.stringify({ consentVersion: 2, apiUrl, accessToken: "web_test_only_01234567890123456789", account: { relayUserId: "usr_test" } }));
   const client = {
     identity: { userId: "usr_test" }, accountDrift: () => ({ status: "same" }),
     me: async () => ({ user: { id: "usr_test" } }),
     sendRelay: async () => ({ relayId: "rel_sent" }),
     groups: async () => ({ groups: [{ id: "grp_test", name: "Project" }] }),
   };
-  const env = { RELAY_AGENT_CONFIG: config, RELAY_AGENT_LOCAL: descriptor };
-  const server = await startAgentLocalServer({ client, accountId: "usr_test", apiUrl: "https://dev-api.sendrelays.com", file: descriptor });
+  const env = { RELAY_AGENT_CONFIG: config, RELAY_AGENT_LOCAL: descriptor, RELAY_AGENT_ALLOW_LOOPBACK: "1" };
+  const server = await startAgentLocalServer({ client, accountId: "usr_test", apiUrl, file: descriptor });
+  let staleDescriptor;
   try {
     const result = await runProtocol(["groups"], { env });
     assert.equal(result.code, 0, result.stderr);
@@ -267,17 +305,117 @@ test("the command helper hands off to the matching daemon, forgets its token, an
     assert.doesNotMatch(result.stdout, /web_test|capability|deviceToken/);
     const after = JSON.parse(fs.readFileSync(config, "utf8"));
     assert.equal(after.local, true);
-    assert.equal(after.accessToken, undefined);
+    assert.equal(after.accessToken, "web_test_only_01234567890123456789");
+    assert.equal(requests.length, 0, "healthy Companion remains preferred");
+    staleDescriptor = fs.readFileSync(descriptor, "utf8");
+    fs.writeFileSync(config, JSON.stringify({ ...after, expiresAt: "2000-01-01T00:00:00Z" }));
+    assert.equal((await runProtocol(["groups"], { env })).code, 0, "expired fallback does not break healthy Companion");
+    const legacy = { ...after };
+    delete legacy.accessToken;
+    fs.writeFileSync(config, JSON.stringify(legacy));
+    assert.equal((await runProtocol(["groups"], { env })).code, 0, "legacy tokenless connections keep using Companion");
     const wrongAccount = { ...after, account: { relayUserId: "usr_other" } };
     fs.writeFileSync(config, JSON.stringify(wrongAccount));
     const refused = await runProtocol(["groups"], { env });
     assert.equal(refused.code, 1);
     assert.match(refused.stderr, /different Relay account/);
+    fs.writeFileSync(config, JSON.stringify({ ...after, apiUrl: "https://api.sendrelays.com" }));
+    assert.match((await runProtocol(["groups"], { env })).stderr, /different Relay account or environment/);
     fs.writeFileSync(config, JSON.stringify(after));
+    client.groups = async () => { throw Object.assign(new Error("Permission refused"), { status: 403, code: "forbidden" }); };
+    assert.match((await runProtocol(["groups"], { env })).stderr, /Permission refused/);
+    client.groups = async () => { throw new Error("Relay's account changed"); };
+    assert.match((await runProtocol(["groups"], { env })).stderr, /account changed/);
+    assert.equal(requests.length, 0, "refusals never fall back");
+    client.groups = async () => { throw Object.assign(new Error("Device token expired"), { status: 401 }); };
+    const authFallback = await runProtocol(["groups"], { env });
+    assert.equal(authFallback.code, 0, authFallback.stderr);
+    assert.equal(JSON.parse(authFallback.stdout).groups[0].id, "grp_direct");
   } finally { await server.close(); }
   const stopped = await runProtocol(["groups"], { env });
-  assert.equal(stopped.code, 1);
-  assert.match(stopped.stderr, /Reopen Relay Companion/);
+  assert.equal(stopped.code, 0, stopped.stderr);
+  assert.equal(JSON.parse(stopped.stdout).groups[0].id, "grp_direct");
+  // An abrupt exit leaves a stale descriptor rather than deleting it.
+  fs.writeFileSync(descriptor, staleDescriptor, { mode: 0o600 });
+  const crashed = await runProtocol(["groups"], { env });
+  assert.equal(crashed.code, 0, crashed.stderr);
+  assert.equal(JSON.parse(crashed.stdout).groups[0].id, "grp_direct");
+  for (mode of ["optional", "required", "unknown"]) {
+    const before = requests.filter((url) => url === "/v1/contact-groups").length;
+    assert.match((await runProtocol(["groups"], { env })).stderr, /encryption/);
+    assert.equal(requests.filter((url) => url === "/v1/contact-groups").length, before);
+  }
+  mode = "off";
+  directUser = "usr_other";
+  assert.match((await runProtocol(["groups"], { env })).stderr, /different account/);
+  directUser = "usr_test";
+  directStatus = 401;
+  assert.match((await runProtocol(["groups"], { env })).stderr, /invalid_token/);
+  directStatus = 200;
+  const retained = JSON.parse(fs.readFileSync(config, "utf8"));
+  fs.writeFileSync(config, JSON.stringify({ ...retained, expiresAt: "2000-01-01T00:00:00Z" }));
+  assert.match((await runProtocol(["groups"], { env })).stderr, /direct authorization expired/);
+  delete retained.accessToken;
+  fs.writeFileSync(config, JSON.stringify(retained));
+  assert.match((await runProtocol(["groups"], { env })).stderr, /renew browser approval/);
+});
+
+test("a lost local send response uses the identical direct request and key, while unkeyed mutations never retry", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-fallback-send-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const descriptor = path.join(root, "local.json");
+  const config = path.join(root, "config.json");
+  const deliveries = new Map();
+  const sends = [];
+  const accept = (body) => {
+    const prior = deliveries.get(body.idempotencyKey);
+    if (prior) assert.deepEqual(body, prior.body);
+    else deliveries.set(body.idempotencyKey, { body, relayId: "rel_once" });
+    sends.push(body);
+    return { relayId: deliveries.get(body.idempotencyKey).relayId, state: "sent" };
+  };
+  const api = http.createServer(async (request, response) => {
+    let text = "";
+    for await (const chunk of request) text += chunk;
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/v1/me") return response.end(JSON.stringify({ user: { id: "usr_test" } }));
+    if (request.url === "/v1/e2ee/status") return response.end(JSON.stringify({ mode: "off" }));
+    assert.equal(request.url, "/v1/relays");
+    assert.equal(request.headers.authorization, "Bearer web_test_only_01234567890123456789");
+    response.end(JSON.stringify(accept(JSON.parse(text))));
+  });
+  await new Promise((resolve) => api.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => api.close(resolve)));
+  const apiUrl = `http://127.0.0.1:${api.address().port}`;
+  const endpoint = localEndpoint(descriptor);
+  fs.writeFileSync(descriptor, JSON.stringify({ version: 1, endpoint, capability: "a".repeat(64), accountId: "usr_test", apiUrl }), { mode: 0o600 });
+  fs.writeFileSync(config, JSON.stringify({ consentVersion: 2, apiUrl, accessToken: "web_test_only_01234567890123456789", account: { relayUserId: "usr_test" } }));
+  const local = net.createServer((socket) => {
+    let text = "";
+    socket.on("data", (chunk) => {
+      text += chunk;
+      if (!text.includes("\n")) return;
+      const request = JSON.parse(text.trim());
+      if (request.path === "/v1/relays") accept(request.body);
+      socket.end(); // Request accepted; response lost before the helper sees it.
+    });
+  });
+  await new Promise((resolve) => local.listen(endpoint, resolve));
+  t.after(() => new Promise((resolve) => local.close(resolve)));
+  const env = { RELAY_AGENT_CONFIG: config, RELAY_AGENT_LOCAL: descriptor, RELAY_AGENT_ALLOW_LOOPBACK: "1" };
+  const body = { recipient: { relayUserId: "usr_friend" }, kind: "message", forHuman: "Hello", forAgent: "Approved context", idempotencyKey: "lost-response-send-1" };
+  const sent = await runProtocol(["send"], { env, input: JSON.stringify(body) });
+  assert.equal(sent.code, 0, sent.stderr);
+  assert.equal(JSON.parse(sent.stdout).relayId, "rel_once");
+  assert.equal(sends.length, 2);
+  assert.equal(deliveries.size, 1);
+  assert.deepEqual(sends[0], sends[1]);
+  const repeated = await runProtocol(["send"], { env, input: JSON.stringify(body) });
+  assert.equal(JSON.parse(repeated.stdout).status, "already_accepted");
+  assert.equal(sends.length, 2);
+  const unkeyed = await runProtocol(["invite-link"], { env });
+  assert.equal(unkeyed.code, 1);
+  assert.match(unkeyed.stderr, /same idempotency key/);
 });
 
 test("bounded reply checks use the sent conversation and never mark a message read", async (t) => {

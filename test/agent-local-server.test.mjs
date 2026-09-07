@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -11,7 +12,7 @@ function fixture(t) {
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const calls = [];
   const client = { identity: { userId: "usr_test" }, accountDrift: () => ({ status: "same" }) };
-  for (const method of ["me", "inbox", "sent", "searchContacts", "groups", "chats", "chat", "thread", "chatForThread", "fetchRelay", "attachmentDownloadUrl", "markRead", "inviteLink"]) {
+  for (const method of ["me", "e2eeStatus", "inbox", "sent", "searchContacts", "groups", "chats", "chat", "thread", "chatForThread", "fetchRelay", "attachmentDownloadUrl", "markRead", "inviteLink"]) {
     client[method] = async (...args) => { calls.push([method, ...args]); return { method, args }; };
   }
   client.sendRelay = async (body) => { calls.push(["sendRelay", body]); return { relayId: "rel_sent", threadId: "thread_one" }; };
@@ -25,6 +26,7 @@ test("daemon dispatch restores groups, chats, attachment reads and exact local d
   t.after(() => dispatcher.stop());
   const get = (route) => dispatcher.dispatch({ method: "GET", path: route, accountId: "usr_test" });
   assert.equal((await get("/v1/contact-groups")).method, "groups");
+  assert.equal((await get("/v1/e2ee/status")).method, "e2eeStatus");
   assert.deepEqual((await get("/v1/chats/chat_one")).args, ["chat_one"]);
   assert.deepEqual((await get("/v1/relays/rel_one/attachments/att_one/download-url")).args, ["rel_one", "att_one"]);
   assert.equal((await get("/local/destinations/codex"))[0].nativeId, "session_one");
@@ -85,4 +87,23 @@ test("IPC requires its private capability and exact account; one daemon owns the
     await assert.rejects(startAgentLocalServer({ ...options, apiUrl: descriptor.apiUrl, file }), /Another Companion/);
   } finally { await server.close(); }
   assert.equal(fs.existsSync(file), false);
+});
+
+test("local transport distinguishes a refused connection from a timeout after dispatch", async (t) => {
+  const { root } = fixture(t);
+  const endpoint = process.platform === "win32" ? `\\\\.\\pipe\\relay-timeout-${process.pid}` : path.join(root, "timeout.sock");
+  const descriptor = { endpoint, capability: "a".repeat(64) };
+  await assert.rejects(localRequest(descriptor, { method: "GET", path: "/v1/me" }), (error) => {
+    assert.equal(error.localTransportFailure, true);
+    assert.equal(error.possiblySent, false);
+    return true;
+  });
+  const server = net.createServer((socket) => { socket.on("data", () => {}); });
+  await new Promise((resolve) => server.listen(endpoint, resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  await assert.rejects(localRequest(descriptor, { method: "POST", path: "/v1/relays" }, { timeoutMs: 100 }), (error) => {
+    assert.equal(error.localTransportFailure, true);
+    assert.equal(error.possiblySent, true);
+    return true;
+  });
 });

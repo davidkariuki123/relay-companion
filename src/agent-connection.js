@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { RelayClient } from "./client.js";
-import { readConfig as companionConfig } from "./config.js";
+import { readConfig as companionConfig, writeConfig } from "./config.js";
 import { persistPairedAccount } from "./account.js";
 import identity from "./e2ee-identity.cjs";
 import { readConfig, configPath, authenticatedRequest, atomicWrite } from "../skill/relay/scripts/relay-protocol.mjs";
@@ -13,6 +13,7 @@ import { readConfig, configPath, authenticatedRequest, atomicWrite } from "../sk
 export async function adoptAgentConnection({
   readAgent = readConfig,
   readCompanion = companionConfig,
+  writeCompanion = writeConfig,
   makeClient = (url, token = "") => new RelayClient({ url, token }),
   request = authenticatedRequest,
   persistAccount = persistPairedAccount,
@@ -23,12 +24,14 @@ export async function adoptAgentConnection({
   const agent = readAgent();
   const current = readCompanion();
   const expected = agent.account?.relayUserId;
+  const updateChannel = agent.apiUrl === "https://dev-api.sendrelays.com" ? "dev" : "stable";
   if (!expected || (agent.consentVersion ?? 1) < 2) throw new Error("Approve the updated Relay connection before installing Companion. The existing agent connection remains usable.");
   if (current.deviceToken) {
     if (current.user?.id !== expected || current.apiUrl !== agent.apiUrl) throw new Error("Companion is connected to another account or environment. Switch it explicitly before continuing.");
     try {
       const live = await makeClient(agent.apiUrl, current.deviceToken).me();
       if (live?.user?.id !== expected) throw new Error("Companion's live account does not match the approved connection.");
+      if (current.updateChannel !== updateChannel) writeCompanion({ updateChannel });
       return { connected: true, reused: true };
     } catch (error) {
       // An explicitly renewed browser grant can replace a revoked device
@@ -72,6 +75,7 @@ export async function adoptAgentConnection({
   if (journal.registration.user?.id !== expected) throw new Error("Companion pairing returned another account.");
   persistIdentity(journal.keys.state, journal.registration);
   persistAccount({ apiUrl: agent.apiUrl, webUrl: agent.apiUrl.replace("dev-api.", "dev.").replace("api.", ""), deviceName: journal.name, registration: journal.registration, requireNativeCredential: true });
+  writeCompanion({ updateChannel });
   fs.rmSync(journalFile, { force: true });
   return { connected: true, reused: false };
 }

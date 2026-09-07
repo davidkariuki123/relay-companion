@@ -41,6 +41,7 @@ import {
   repairDesktopSurfaces,
   repairExistingAgentHooks,
   repairExistingAgentRegistrations,
+  installAgentSkills,
   accountRestartLines,
   desktopExecQuote,
   restartRelayServices,
@@ -257,11 +258,11 @@ async function applyInstall({
     codexHooks = null,
     desktopRestarts = [],
     sweptStaleEntries = [],
+    skillInstall,
   } = await runSetupInstall({ claim, reload, agentProtocol });
   const lifecycleFailed = process.platform === "linux" && (!daemon.ok || !pill?.ok);
-  if (installed.length) console.log(agentProtocol
-    ? `Installed Relay's HTTPS skill for ${installed.join(" and ")} on this machine.`
-    : `Added Relay to ${installed.join(" and ")} on this machine.`);
+  if (installed.length) console.log(`Added Relay to ${installed.join(" and ")} on this machine.`);
+  printSkillInstallResult(skillInstall);
   if (!binStable) {
     console.log(
       "Heads up: Relay is running from a temporary npx cache and couldn't global-install. It may stop working when that cache is cleaned — run `npm install -g relay-companion` to make it permanent.",
@@ -480,7 +481,14 @@ function cmdRepairDesktop(flags = {}) {
   return repaired;
 }
 
-function cmdRepairRuntime(flags = {}) {
+function printSkillInstallResult(result) {
+  for (const item of result?.results || []) {
+    if (item.ok) continue;
+    console.log(`Relay's ${item.host} skill was not updated (${item.status}${item.error ? `: ${item.error}` : ""}). Existing files were preserved.`);
+  }
+}
+
+async function cmdRepairRuntime(flags = {}) {
   writeConfig({});
   const reload = !flags["no-restart"];
   // Internal target overrides let a verified immutable candidate restore an
@@ -497,6 +505,8 @@ function cmdRepairRuntime(flags = {}) {
   if (!registrations.ok) {
     throw new Error(`Could not repair Relay agent registrations (${registrations.reason || "migration failed"}).`);
   }
+  const skillInstall = await installAgentSkills();
+  printSkillInstallResult(skillInstall);
   const repaired = repairDesktopSurfaces({ reload, ...target, claim: Boolean(flags.claim) || Boolean(targetBin) });
   if (!repaired.ok) {
     throw new Error("Could not repair Relay runtime services.");
@@ -511,7 +521,7 @@ function cmdRepairRuntime(flags = {}) {
       ? " The active runtime pointer was already current."
       : "";
   console.log(`Relay runtime repaired with its durable Node.${pointerText}`);
-  return { ok: true, registrations, pointer, ...repaired };
+  return { ok: true, registrations, skillInstall, pointer, ...repaired };
 }
 
 /**

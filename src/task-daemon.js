@@ -103,6 +103,7 @@ function freshPlainRelays(ledger, items) {
       (seen.taskClaim || "null") !== JSON.stringify(item.taskClaim || null) ||
       (seen.todoStatus || "") !== (item.todoStatus || "") ||
       Number(seen.todoVersion || 0) !== Number(item.todoVersion || 0) ||
+      Number(seen.todoVisibilityVersion || 0) !== Number(item.todoVisibilityVersion || 0) ||
       (seen.duplicateOfItemId || "") !== (item.duplicateOfItemId || "") ||
       (seen.restoredAt || "") !== (item.restoredAt || "")
     );
@@ -127,6 +128,7 @@ function markPlainRelaysProcessed(ledger, items) {
       taskClaim: JSON.stringify(item.taskClaim || null),
       todoStatus: item.todoStatus || "",
       todoVersion: Number(item.todoVersion || 0),
+      todoVisibilityVersion: Number(item.todoVisibilityVersion || 0),
       duplicateOfItemId: item.duplicateOfItemId || "",
       restoredAt: item.restoredAt || "",
       processedAt,

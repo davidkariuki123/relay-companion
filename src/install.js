@@ -2934,52 +2934,10 @@ export async function runSetupInstall({ claim = false, reload = true, agentProto
   };
   if (agentProtocol) {
     writeConfig({ agentProtocol: true });
-    // The current product path installs one HTTPS skill and the visual
-    // Companion. MCP registrations and hook runtimes are legacy capability,
-    // not a second choice a new user has to understand. Remove only Relay's
-    // owned entries so an upgrade cannot leave both transports active.
-    const relaySkill = createRequire(import.meta.url)("../bootstrap/relay-skill.cjs");
-    const skillInstall = await relaySkill.installBundled({ consent: true });
-    let skillUpdate = null;
-    try {
-      skillUpdate = await relaySkill.updateFromRemote();
-    } catch (error) {
-      // A missing network must not turn the optional Companion install into a
-      // failure: the bundled, checksum-verified skill is already usable.
-      skillUpdate = { ok: false, offline: true, error: error?.message || String(error) };
-    }
-    for (const result of skillInstall.results || []) {
-      if (result.ok) installed.push(result.host === "codex" ? "Codex" : "Claude Code");
-      else missing.push(`${result.host === "codex" ? "Codex" : "Claude Code"} skill (${result.status || "install failed"})`);
-    }
-    const retiredAgentIntegrations = [
-      removeClaudeCodeMcpConfig(),
-      removeCodexMcpConfig(),
-      uninstallClaudeHooks(),
-      uninstallCodexHooks(),
-    ];
-    // Retained desktop integrations can still own the shared launcher/broker.
-    // This setup stops registering the local coding-agent bridge; it must not
-    // break an existing desktop connection as a side effect.
-    const daemon = installDaemonAutostart(bin, node, { claim, reload, env: serviceEnv });
-    const pill = installPillAutostart(bin, { claim, reload, env: serviceEnv });
-    return {
-      installed,
-      missing,
-      daemon,
-      pill,
-      activations,
-      binStable,
-      claudeHooks: null,
-      codexHooks: null,
-      desktopRestarts,
-      sweptStaleEntries,
-      skillInstall,
-      skillUpdate,
-      retiredAgentIntegrations,
-      agentProtocol: true,
-    };
   }
+  // Both setup paths converge on MCP plus the bundled skill. Distribution is
+  // additive: preserve existing integrations and user-modified skill folders.
+  const skillInstall = await installAgentSkills();
   const mcpBin = ensureStableMcpLauncher({ targetBin: bin, node });
   const claude = installClaudeCode(mcpBin, node, { command: claudeCommand });
   let claudeHooks = null;
@@ -3010,27 +2968,22 @@ export async function runSetupInstall({ claim = false, reload = true, agentProto
       missing.push("Claude Desktop (registration failed)");
     }
   }
-  // The Open-in-current-chat hook runtime rides along with the MCP registration
-  // (both are what "Relay is installed into Claude" means) — but it must NOT
-  // depend on the `claude` CLI being on PATH. On Windows installClaudeCode fails
-  // with claude_code_not_found whenever the CLI is absent even though Claude
-  // Code/Desktop is installed and the MCP was registered by hand; without this
-  // fallback the hook is never written and the pill's "Open in current chat" is a
-  // silent no-op on exactly those machines.
-  if (claude.ok || claudeAppearsPresent()) {
-    claudeHooks = installClaudeHooksWithStableLauncher(bin, node);
-  }
   const codex = installCodex(mcpBin, node, { command: codexCommand });
   let codexHooks = null;
   if (codex.ok) {
     installed.push("Codex");
-    activations.push(await activateCodexMcp({ command: codexCommand }));
-    codexHooks = installCodexHooksWithStableLauncher(bin, node);
+    activations.push(agentProtocol
+      ? { host: "Codex", ok: true, currentSessionReady: false, reason: "registered_for_next_session" }
+      : await activateCodexMcp({ command: codexCommand }));
   } else if (codex.reason === "codex_not_found") {
     missing.push("Codex");
   } else {
     missing.push("Codex (registration failed)");
   }
+  // Existing hooks survive and receive launcher repairs; new users get none.
+  const hookRepair = repairExistingAgentHooks({ bin, node });
+  claudeHooks = hookRepair.claudeHooks || null;
+  codexHooks = hookRepair.codexHooks || null;
   const daemon = installDaemonAutostart(bin, node, { claim, reload, env: serviceEnv });
   const pill = installPillAutostart(bin, { claim, reload, env: serviceEnv });
   return {
@@ -3044,7 +2997,15 @@ export async function runSetupInstall({ claim = false, reload = true, agentProto
     codexHooks,
     desktopRestarts,
     sweptStaleEntries,
+    skillInstall,
+    agentProtocol,
   };
+}
+
+/** Install/update the bundled instructions without changing host integrations. */
+export async function installAgentSkills(options = {}) {
+  const relaySkill = createRequire(import.meta.url)("../bootstrap/relay-skill.cjs");
+  return relaySkill.installBundled({ consent: true, ...options });
 }
 
 /**
@@ -3064,7 +3025,6 @@ export function repairAgentMcpRegistrations({
   codexHooksFile = process.env.CODEX_HOOKS
     || path.join(process.env.CODEX_HOME || path.join(homeDir, ".codex"), "hooks.json"),
 } = {}) {
-  if (readConfig().agentProtocol === true) return { ok: true, skipped: true, reason: "agent_protocol" };
   const mcpBin = ensureStableMcpLauncher({ targetBin: bin, node, homeDir });
   const claude = writeClaudeCodeMcpConfig(mcpBin, node, claudeConfigFile);
   const codex = writeCodexMcpConfig(mcpBin, node, codexConfigFile);
@@ -3140,7 +3100,6 @@ export function repairExistingAgentRegistrations({
   codexHooksFile = process.env.CODEX_HOOKS
     || path.join(process.env.CODEX_HOME || path.join(homeDir, ".codex"), "hooks.json"),
 } = {}) {
-  if (readConfig().agentProtocol === true) return { ok: true, skipped: true, reason: "agent_protocol" };
   try {
     node = persistentNodePath(node, { platform, homeDir });
   } catch (error) {

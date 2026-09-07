@@ -2384,6 +2384,21 @@
   .todo-group-head .n { margin-left:auto; color:var(--muted-3); font:10px/1 var(--mono); }
   .todo-row { display:grid; grid-template-columns:auto minmax(0,1fr); gap:0 11px; padding:12px 16px 0; cursor:pointer; }
   .todo-row:hover { background:var(--wash); }
+  .todo-row { position:relative; }
+  .todo-row-open { position:absolute; inset:0; width:100%; height:100%; z-index:1; appearance:none; border:0; background:transparent; cursor:pointer; border-radius:4px; }
+  .todo-row-meta { padding-right:20px; }
+  .todo-row-actions { position:absolute; right:10px; top:7px; z-index:2; appearance:none; display:flex; align-items:center; justify-content:center; width:24px; height:24px; padding:0; border:0; border-radius:6px; background:transparent; color:var(--muted-2); cursor:pointer; }
+  .todo-row-actions:hover,.todo-row-actions[aria-expanded="true"] { background:var(--wash-2); color:var(--ink); }
+  .todo-row-actions:disabled { opacity:.4; cursor:wait; }
+  .todo-row-menu { position:fixed; z-index:100; width:210px; padding:5px; border:1px solid var(--edge); border-radius:11px; background:var(--bg); box-shadow:var(--shadow-pop); }
+  .todo-row-menu button { appearance:none; display:flex; align-items:center; gap:8px; width:100%; padding:9px 8px; border:0; border-radius:6px; background:var(--wash); color:var(--ink); font:500 11px/1.2 var(--sans); cursor:pointer; text-align:left; }
+  .todo-row-menu .note { padding:5px 8px; color:var(--muted); font:10.5px/1.4 var(--sans); }
+  .todo-removal-notice { position:absolute; z-index:20; left:10px; right:10px; bottom:12px; display:flex; align-items:center; gap:10px; padding:11px 12px; border:1px solid var(--edge); border-radius:10px; background:var(--bg); box-shadow:var(--shadow-pop); color:var(--ink); font:11px/1.4 var(--sans); }
+  .todo-removal-notice .copy { flex:1; min-width:0; }
+  .todo-removal-notice small { display:block; margin-top:2px; color:var(--muted); font:10px/1.4 var(--sans); }
+  .todo-removal-notice button { appearance:none; border:0; border-radius:5px; background:transparent; color:var(--accent); padding:8px 4px; font:500 10.5px/1.2 var(--sans); cursor:pointer; }
+  .todo-removal-notice button:disabled { opacity:.4; cursor:wait; }
+  @media (pointer:coarse) { .todo-row-actions::before { content:""; position:absolute; inset:-10px; } }
   .todo-row-main { min-width:0; padding-bottom:12px; border-bottom:1px solid var(--hair); }
   .todo-row:last-child .todo-row-main { border-bottom:0; }
   .todo-row-meta { display:flex; align-items:baseline; gap:5px; min-width:0; margin-bottom:4px; color:var(--muted-2); font:10px/1.25 var(--sans); }
@@ -2749,8 +2764,8 @@
   /* ---- first run -------------------------------------------------------
      The agent has already installed the app. Account setup stays inside this
      card; provider-owned sign-in and connector pages may leave for the browser.
-     A final skippable chat setup page follows account connection, then the
-     ordinary inbox paints Shane's real Welcome relay. */
+     A first-send chapter follows account connection while the human continues
+     in their agent. The server’s account history decides when it is complete. */
   .card.signup .tabs, .card.signup .scroll, .card.signup .minimize-btn, .card.signup .count { display:none; }
   /* First-run content is taller than the folded pill. If it remains in layout,
      the centered body overflows upward across the lockup and can intercept the
@@ -2781,6 +2796,27 @@
   .su-secondary { border:1px solid var(--edge); color:var(--ink); background:transparent; }
   .su-secondary:hover { background:var(--wash); }
   .su-link { min-height:32px; padding:0; color:var(--muted); background:transparent; text-decoration:underline; text-decoration-color:var(--edge); text-underline-offset:3px; }
+  .su-first-relay { padding:4px 0; }
+  .su-relay-moment { display:flex; align-items:center; gap:6px; height:34px; margin-bottom:20px; }
+  .su-relay-moment i { display:block; width:19px; height:19px; border-radius:3px; background:#d67b5d; }
+  .su-relay-moment i:nth-child(2) { background:var(--ink); }
+  .su-relay-moment i:nth-child(3) { background:#7164ff; }
+  .su-relay-moment svg { width:23px; height:23px; margin-left:7px; fill:none; stroke:var(--accent); stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+  .su-first-relay .su-title { max-width:260px; font-size:30px; line-height:1.1; }
+  .su-first-relay .su-handoff-title { max-width:none; margin-top:13px; font-size:38px; line-height:1.04; letter-spacing:-.025em; }
+  .su-handoff-intro { display:block; max-width:245px; }
+  .su-handoff-or { display:block; }
+  .su-host-claude { color:var(--brand-anthropic); white-space:nowrap; }
+  .su-host-codex { color:var(--brand-codex); white-space:nowrap; }
+  .su-handoff-title + .su-copy { margin-top:18px; max-width:270px; }
+  .su-send-progress { display:flex; align-items:baseline; gap:7px; margin-top:24px; color:var(--muted); font-size:11px; line-height:1.5; }
+  .su-send-progress > span { flex:none; width:5px; height:5px; border-radius:50%; background:var(--muted-3); }
+  .su-first-relay .su-form { margin-top:18px; }
+  .su-first-relay-sent .su-relay-moment i { animation:su-first-send .65s var(--settle) both; }
+  .su-first-relay-sent .su-relay-moment i:nth-child(2) { animation-delay:.07s; }
+  .su-first-relay-sent .su-relay-moment i:nth-child(3) { animation-delay:.14s; }
+  @keyframes su-first-send { from { opacity:0; transform:translateY(9px) rotate(-8deg); } to { opacity:1; transform:none; } }
+  @media (prefers-reduced-motion:reduce) { .su-first-relay-sent .su-relay-moment i { animation:none; } }
   .su-divider { display:flex; align-items:center; gap:10px; color:var(--muted-3); font-size:10px; text-transform:uppercase; letter-spacing:.12em; }
   .su-divider::before, .su-divider::after { content:""; flex:1 1 auto; height:1px; background:var(--hair); }
   .su-google { display:flex; align-items:center; justify-content:center; gap:8px; }
@@ -5423,9 +5459,6 @@
   let signupStateLoaded = false;
   let signupInitializationFailed = false;
   let signupForceGoogleSelection = false;
-  let onboardingInvite = null;
-  let onboardingInviteLoading = false;
-  let onboardingInviteError = "";
   const SIGNUP_POLL_BASE_MS = 1400;
   const SIGNUP_POLL_MAX_MS = 11200;
   const SIGNUP_POLL_SURFACE_FAILURE = 3;
@@ -6394,6 +6427,12 @@
   let todoRefreshTimer = null;
   let todoArrivalTimer = null;
   let todoDuplicateSource = null;
+  let todoActionsMenu = null;
+  let todoActionsTrigger = null;
+  let todoRemovalNotice = null;
+  let todoRemovalUndo = null;
+  const todoVisibilityPending = new Set();
+  const todoReaderVisibility = new Map();
   const todoHydratedRows = new Map();
   function todoSelectedStatuses() { return TODO_STATUS_ORDER.filter((status) => todoState.selected.has(status)); }
   function todoItemById(id) {
@@ -6415,6 +6454,7 @@
       threadId:item.threadId || item.relayId, groupSendId:item.groupSendId || null,
       recipientGroupId:item.recipientGroupId || null, recipientGroupName:item.recipientGroupName || "",
       todoStatus:item.todoStatus, todoVersion:item.todoVersion, duplicateOfItemId:item.duplicateOfItemId || null,
+      todoRemoved:item.todoRemoved === true, todoVisibilityVersion:item.todoVisibilityVersion,
       attentionRank:item.attentionRank || null, assessment:item.assessment || "",
       assessmentEvidence:Array.isArray(item.assessmentEvidence) ? item.assessmentEvidence : [],
       assessedAt:item.assessedAt || null, assessedBy:item.assessedBy || "",
@@ -6432,12 +6472,15 @@
       if (String(row.id) !== String(item.relayId)) continue;
       row.todoStatus = item.todoStatus;
       row.todoVersion = item.todoVersion;
+      row.todoRemoved = item.todoRemoved === true;
+      row.todoVisibilityVersion = item.todoVisibilityVersion;
       row.duplicateOfItemId = item.duplicateOfItemId || null;
       Object.assign(row, assessment);
     }
     const hydrated = todoHydratedRows.get(String(item.relayId));
     if (hydrated) Object.assign(hydrated, {
       todoStatus:item.todoStatus, todoVersion:item.todoVersion,
+      todoRemoved:item.todoRemoved === true, todoVisibilityVersion:item.todoVisibilityVersion,
       duplicateOfItemId:item.duplicateOfItemId || null,
       ...assessment,
     });
@@ -6495,6 +6538,7 @@
     todoState.loaded = true;
     todoState.error = "";
     todoState.counts = { ...EMPTY_TODO_COUNTS, ...(response.counts || {}) };
+    setBadge(tasksBadgeEl, requestsOutstandingCount());
     if (response.mode === "continuous") {
       const nextItems = Array.isArray(response.items) ? response.items : [];
       todoState.items = append ? [...todoState.items, ...nextItems] : nextItems;
@@ -6524,6 +6568,7 @@
           recipientGroupId:result.row.recipientGroupId || summary.recipientGroupId || null,
           recipientGroupName:result.row.recipientGroupName || summary.recipientGroupName || "",
           todoStatus:summary.todoStatus, todoVersion:summary.todoVersion,
+          todoRemoved:summary.todoRemoved === true, todoVisibilityVersion:summary.todoVisibilityVersion,
           duplicateOfItemId:summary.duplicateOfItemId || null,
           attentionRank:summary.attentionRank || null, assessment:summary.assessment || "",
           assessmentEvidence:Array.isArray(summary.assessmentEvidence) ? summary.assessmentEvidence : [],
@@ -8581,6 +8626,12 @@
         forHuman: String(item.forHuman || ""),
         forAgent: String(item.forAgent || ""),
         senderName: outbound ? `You → ${channelName}` : String(item.sender?.name || directAnchor?.name || "Relay contact"),
+        senderEmail: item.sender?.email || "",
+        recipientName: channelName,
+        recipientEmail: sentTwin?.recipient?.email || (chat.participants || []).find((person) => !person.self)?.email || "",
+        recipientGroupId: chat.group?.groupId || (chat.kind === "group" ? chat.chatId : ""),
+        recipientGroupName: chat.kind === "group" ? (chat.group?.name || channelName) : "",
+        chatId: chat.chatId,
         createdAt: item.createdAt || item.updatedAt,
         threadId: item.threadId || item.relayId,
         relayNotificationKind: "plain_relay",
@@ -8622,6 +8673,11 @@
       forHuman: sent.forHuman || sent.preview || "",
       forAgent: sent.forAgent || "",
       senderName: `You → ${recipient}`,
+      recipientName: recipient,
+      recipientEmail: sent.recipient?.email || "",
+      recipientGroupId: sent.recipientGroupId || "",
+      recipientGroupName: sent.recipientGroupName || "",
+      groupSendId: sent.groupSendId || "",
       createdAt: sent.createdAt || sent.updatedAt,
       threadId: sent.threadId || sent.relayId || sent.id,
       relayNotificationKind: "plain_relay",
@@ -9117,11 +9173,36 @@
     };
     tick();
   }
+  // A reader reply stays in the selected Relay's conversation. Use one
+  // destination for its label, immediate bubble, and durable outbox copy.
+  function readerReplyChat(r) {
+    const groupId = r.recipientGroupId || "";
+    const group = groupId ? groupsList.find((candidate) => candidate.id === groupId) : null;
+    const chat = groupId ? (payload.chats || []).find((candidate) =>
+      candidate.group?.groupId === groupId || candidate.chatId === groupId) : null;
+    const groupName = group?.name || chat?.group?.name || chat?.channel?.name || chat?.title || r.recipientGroupName || "";
+    const isGroup = Boolean(groupId || groupName || r.groupSendId);
+    const party = isGroup ? (groupName || "Channel")
+      : r.outbound ? (r.recipientName || "Recipient") : relaySender(r);
+    const email = r.outbound ? r.recipientEmail : (r.senderEmail || r.fromEmail);
+    return {
+      threadId: r.threadId || r.id,
+      party,
+      partyKey: isGroup
+        ? (groupId ? `group-id:${groupId}` : `group:${String(groupName || r.threadId || r.id).trim().toLowerCase()}`)
+        : email ? `email:${String(email).trim().toLowerCase()}` : `name:${String(party).trim().toLowerCase()}`,
+      isGroup,
+      groupId,
+      groupName: isGroup ? (groupName || "Channel") : "",
+      chatId: r.chatId || chat?.chatId || "",
+    };
+  }
   function renderReader() {
     const r = readerRow(readerId);
     if (!r) { readerBodyEl.innerHTML = '<div class="cv-empty">This relay is gone.</div>'; return; }
     const request = isTaskRow(r);
     const sender = relaySender(r);
+    const replyChat = readerReplyChat(r);
     const chatOwnedWork = r.source?.host === "relay-agent-run";
     const triggerRow = chatOwnedWork && r.inReplyToRelayId ? relayById(r.inReplyToRelayId) : null;
     const subject = chatOwnedWork && triggerRow
@@ -9208,7 +9289,7 @@
       materializedCodex: Boolean(r.materializedCodex),
       materializedClaude: Boolean(r.materializedClaude),
     }, { persistent: true })}</div>` : "";
-    // The open folder owns the addressee. For you replies to the human sender;
+    // The open folder owns the addressee. For you replies to the conversation;
     // For <agent> starts private local work; Work continues that same native
     // session. Switching documents must never silently keep Shane as the
     // recipient of a message typed while looking at the Codex document.
@@ -9237,11 +9318,7 @@
       <div class="ta-dock inline" data-stop="1"><div class="qr col">
         <textarea id="qrInput" rows="1" placeholder="Reply…">${esc(readerHumanDrafts.get(String(r.id)) || "")}</textarea>
         <div class="ta-rail">
-          ${replyRail((() => {
-            const tid = r.threadId || r.id;
-            const ps = [...new Set(threadMessages().filter((m) => m.threadId === tid && m.direction !== "out").map((m) => m.party).filter(Boolean))];
-            return ps.length ? ps : [sender];
-          })(), null)}
+          ${replyRail([replyChat.party], replyChat.groupName)}
           <span class="rt-spacer"></span>
           <span class="ta-acts">
             <button type="button" id="qrSend">Send</button>
@@ -9364,13 +9441,11 @@
           send.disabled = true;
           const idempotencyKey = `reader_${r.id}_${Date.now()}`;
           optimisticChatReplies.set(idempotencyKey, {
-            id:`optimistic:${idempotencyKey}`, relayId:"", threadId:r.threadId || r.id,
+            ...replyChat,
+            id:`optimistic:${idempotencyKey}`, relayId:"",
             inReplyToRelayId:r.id, explicitReply:true,
             direction:"out", seen:false, seenAt:null, title:text, body:text,
-            party:sender, partyKey:(r.senderEmail || r.fromEmail)
-              ? `email:${String(r.senderEmail || r.fromEmail).trim().toLowerCase()}`
-              : `name:${String(sender).trim().toLowerCase()}`,
-            at:new Date().toISOString(), isGroup:false, groupName:"", unread:false,
+            at:new Date().toISOString(), unread:false,
             textLike:true, request:false, pending:true,
             reactions:{ aggregates:[], events:[] }, preview:"",
           });
@@ -9383,15 +9458,7 @@
             agentMentions: agentMentionSpans(text),
             inReplyToRelayId: r.id,
             idempotencyKey,
-            chat: {
-              threadId: r.threadId || r.id,
-              party: sender,
-              partyKey: (r.senderEmail || r.fromEmail)
-                ? `email:${String(r.senderEmail || r.fromEmail).trim().toLowerCase()}`
-                : `name:${String(sender).trim().toLowerCase()}`,
-              isGroup: false,
-              groupName: "",
-            },
+            chat: replyChat,
           }).catch((error) => ({ ok:false, error:String(error?.message || error) }));
           readerReplySending = false;
           send.disabled = false;
@@ -9414,7 +9481,7 @@
           // "Queued" would be a lie the instant the network is fine, and "Sent"
           // would be one while it is not. The message's own bubble carries the
           // state; this note only confirms the composer let go of it.
-          setRowNote(r.id, `Sent to ${sender}.`, "ok");
+          setRowNote(r.id, `Sent to ${replyChat.party}.`, "ok");
           fadeRowNoteLater(r.id, 3000);
           renderReader();
         };
@@ -9487,6 +9554,25 @@
       evidence.length ? `<div class="rd-why-evidence">Based on ${esc(evidence.join(", "))}</div>` : ""}</div></div>`;
   }
   function todoReaderStatusHtml(row) {
+    // Old chat messages can be outside the bounded inbox cache. Read just their
+    // personal membership so recovery is available there too, without read receipts.
+    if (row?.id && !row.outbound && row.direction !== "outbound" && payload.features?.todo === true && window.relay.todoVisibilityRead && !todoReaderVisibility.has(row.id)) {
+      const account = accountCacheIdentity(payload.account);
+      todoReaderVisibility.set(row.id, null);
+      window.relay.todoVisibilityRead(row.id).then((result) => {
+        if (account !== accountCacheIdentity(payload.account) || !result?.ok) return;
+        const previous = todoReaderVisibility.get(row.id);
+        if (!previous || result.version >= previous.todoVisibilityVersion) {
+          todoReaderVisibility.set(row.id, { todoRemoved:result.removed, todoVisibilityVersion:result.version });
+        }
+        if (activeView === "reader" && readerId === row.id) renderReader();
+      }).catch(() => {});
+    }
+    const cachedVisibility = todoReaderVisibility.get(row?.id);
+    const visibility = cachedVisibility && Number(cachedVisibility.todoVisibilityVersion) >= Number(row?.todoVisibilityVersion ?? -1) ? cachedVisibility : row;
+    if (visibility?.todoRemoved && Number.isInteger(visibility.todoVisibilityVersion) && window.relay.todoVisibilityUpdate) {
+      return `<div class="todo-reader-status" data-stop="1"><button class="todo-reader-current" type="button" data-todo-restore data-todo-restore-version="${Number(visibility.todoVisibilityVersion)}">Add to Todo</button></div>`;
+    }
     const status = row?.todoStatus;
     if (!TODO_STATUS_ORDER.includes(status) || !Number.isInteger(row?.todoVersion)) return "";
     const task = isTaskRow(row);
@@ -9539,6 +9625,12 @@
     return true;
   }
   function wireReaderTodoStatus(row) {
+    readerBodyEl.querySelector("[data-todo-restore]")?.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      event.currentTarget.disabled = true;
+      await commitTodoVisibility(String(row.id), false, Number(event.currentTarget.getAttribute("data-todo-restore-version")));
+      if (activeView === "reader" && readerId === row.id) renderReader();
+    });
     const toggle = readerBodyEl.querySelector("[data-todo-status-toggle]");
     const menu = readerBodyEl.querySelector("[data-todo-status-menu]");
     if (!toggle || !menu) return;
@@ -9575,6 +9667,109 @@
   function todoMarkHtml(status) {
     return status === "all" ? "" : `<span class="todo-mark ${esc(status)}" aria-hidden="true"></span>`;
   }
+  function closeTodoActions({ focus = false } = {}) {
+    todoActionsMenu?.remove();
+    todoActionsMenu = null;
+    todoActionsTrigger?.setAttribute("aria-expanded", "false");
+    if (focus) todoActionsTrigger?.focus({ preventScroll:true });
+    todoActionsTrigger = null;
+  }
+  function openTodoActions(trigger, item) {
+    if (todoActionsTrigger === trigger) { closeTodoActions({ focus:true }); return; }
+    closeTodoActions();
+    const menu = document.createElement("div");
+    menu.className = "todo-row-menu";
+    menu.setAttribute("role", "menu");
+    menu.setAttribute("aria-label", "Todo item actions");
+    menu.innerHTML = `<button type="button" role="menuitem"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M5 8h6"/></svg>Remove from Todo</button><div class="note">The Relay stays in your chat.</div>`;
+    document.body.append(menu);
+    todoActionsMenu = menu;
+    todoActionsTrigger = trigger;
+    trigger.setAttribute("aria-expanded", "true");
+    const bounds = cardEl.getBoundingClientRect();
+    const anchor = trigger.getBoundingClientRect();
+    const size = menu.getBoundingClientRect();
+    menu.style.left = `${Math.round(Math.max(bounds.left + 6, Math.min(anchor.right - size.width, bounds.right - size.width - 6)))}px`;
+    menu.style.top = `${Math.round(Math.max(bounds.top + 6, Math.min(anchor.bottom + 3, bounds.bottom - size.height - 6)))}px`;
+    const action = menu.querySelector("button");
+    action.focus({ preventScroll:true });
+    action.addEventListener("click", (event) => {
+      event.stopPropagation();
+      closeTodoActions();
+      commitTodoVisibility(String(item.relayId), true, item.todoVisibilityVersion);
+    });
+  }
+  function showTodoRemovalNotice(message, { error = false, detail = "" } = {}) {
+    todoRemovalNotice?.remove();
+    const notice = document.createElement("div");
+    notice.className = "todo-removal-notice";
+    notice.dataset.error = String(error);
+    notice.innerHTML = `<div class="copy" role="${error ? "alert" : "status"}">${esc(message)}${detail ? `<small>${esc(detail)}</small>` : ""}</div>${todoRemovalUndo ? '<button type="button" data-todo-undo>Undo</button>' : ''}<button type="button" data-todo-notice-close aria-label="Dismiss notification">×</button>`;
+    cardEl.append(notice);
+    todoRemovalNotice = notice;
+    notice.classList.toggle("hidden", activeView !== "tasks" && !error);
+    notice.querySelector("[data-todo-undo]")?.addEventListener("click", async (event) => {
+      const undo = todoRemovalUndo;
+      if (!undo) return;
+      event.currentTarget.disabled = true;
+      await commitTodoVisibility(undo.itemId, false, undo.version, undo.idempotencyKey);
+    });
+    notice.querySelector("[data-todo-notice-close]").addEventListener("click", () => {
+      notice.remove(); todoRemovalNotice = null; todoRemovalUndo = null;
+    });
+  }
+  async function commitTodoVisibility(itemId, removed, expectedVersion, idempotencyKey = `todo-visibility:${crypto.randomUUID()}`) {
+    if (todoVisibilityPending.has(itemId)) return false;
+    const account = accountCacheIdentity(payload.account);
+    todoVisibilityPending.add(itemId);
+    if (activeView === "tasks") renderTasksBoard();
+    const result = await window.relay.todoVisibilityUpdate(itemId, {
+      removed, expectedVersion, idempotencyKey,
+    }).catch((error) => ({ ok:false, error:String(error?.message || error) }));
+    todoVisibilityPending.delete(itemId);
+    if (account !== accountCacheIdentity(payload.account)) return false;
+    if (!result?.ok) {
+      if (result?.code === "todo_visibility_conflict") {
+        todoRemovalUndo = null;
+        if (Number.isInteger(result.details?.currentVersion)) todoReaderVisibility.set(itemId, {
+          todoRemoved:result.details.removed, todoVisibilityVersion:result.details.currentVersion,
+        });
+      }
+      showTodoRemovalNotice(result?.error || (removed ? "Could not remove from Todo." : "Could not restore to Todo."), { error:true });
+      await loadTodo();
+      return false;
+    }
+    const projection = { todoRemoved:result.removed, todoVisibilityVersion:result.version };
+    todoReaderVisibility.set(itemId, projection);
+    const row = readerRow(itemId);
+    if (row) Object.assign(row, projection);
+    const hydrated = todoHydratedRows.get(itemId);
+    if (hydrated) Object.assign(hydrated, projection);
+    if (removed) {
+      todoRemovalUndo = { itemId, version:result.version, idempotencyKey:`todo-undo:${crypto.randomUUID()}` };
+      showTodoRemovalNotice("Removed from Todo", { detail:"The Relay is still in your chat." });
+    } else if (!todoRemovalUndo || todoRemovalUndo.itemId === itemId) {
+      todoRemovalUndo = null;
+      todoRemovalNotice?.remove(); todoRemovalNotice = null;
+    }
+    await loadTodo();
+    if (activeView === "tasks") {
+      if (removed) todoRemovalNotice?.querySelector("[data-todo-undo]")?.focus({ preventScroll:true });
+      else tasksListEl.querySelector("[data-todo-open]")?.focus({ preventScroll:true });
+    }
+    return true;
+  }
+  document.addEventListener("pointerdown", (event) => {
+    if (!event.target.closest?.(".todo-row-menu,.todo-row-actions")) closeTodoActions();
+  }, true);
+  document.addEventListener("keydown", (event) => {
+    if (!todoActionsMenu) return;
+    if (event.key === "Escape") {
+      event.preventDefault(); event.stopImmediatePropagation(); closeTodoActions({ focus:true });
+    } else if (event.key === "Tab") closeTodoActions({ focus:true });
+  }, true);
+  scrollEl.addEventListener("scroll", () => closeTodoActions());
+
   function todoRowHtml(item, status) {
     const sender = item.sender?.name || item.sender?.email || "Someone";
     const rawTitle = String(item.title || item.displayTitle || "").trim();
@@ -9589,13 +9784,15 @@
     const unread = item.state === "delivered";
     const why = String(item.assessment || "").trim();
     return `
-      <div class="todo-row${unread ? " unread" : ""}" role="button" tabindex="0" data-todo-item="${esc(item.relayId)}" data-todo-status="${esc(status || item.todoStatus || "")}">
+      <div class="todo-row${unread ? " unread" : ""}" data-todo-item="${esc(item.relayId)}" data-todo-status="${esc(status || item.todoStatus || "")}">
+        <button class="todo-row-open" type="button" data-todo-open aria-label="${esc(`${item.kind === "task" ? "Task" : "Relay"} · ${context + sender} · ${title}`)}"></button>
         <span class="avatar sm" style="--av-h:${avatarHue(sender)}" aria-hidden="true">${esc(avatarInitials(sender))}</span>
         <div class="todo-row-main">
           <div class="todo-row-meta"><span class="kind">${item.kind === "task" ? "Task" : rawTitle ? "Relay" : "Text"}</span><span>·</span><span>${esc(context + sender)}</span><span>·</span><span>${esc(timeAgo(item.createdAt))}</span></div>
           <div class="todo-row-title">${esc(title)}</div>
           ${why ? `<div class="todo-row-why" title="${esc(why)}">${esc(why)}</div>` : showPreview ? `<div class="todo-row-preview">${esc(preview)}</div>` : ""}
         </div>
+        ${window.relay.todoVisibilityUpdate && Number.isInteger(item.todoVisibilityVersion) && !todoDuplicateSource ? `<button class="todo-row-actions" type="button" data-todo-actions aria-haspopup="menu" aria-expanded="false" aria-label="More options for ${esc(title)}"${todoVisibilityPending.has(String(item.relayId)) ? " disabled" : ""}><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3" cy="8" r="1"/><circle cx="8" cy="8" r="1"/><circle cx="13" cy="8" r="1"/></svg></button>` : ""}
       </div>`;
   }
   // ---------- the steward's line: who last checked the list, and when ----------
@@ -9656,11 +9853,11 @@
         }
         await openTodoItem(id);
       };
-      row.addEventListener("click", open);
-      row.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter" && event.key !== " ") return;
-        event.preventDefault();
-        open();
+      row.querySelector("[data-todo-open]")?.addEventListener("click", open);
+      row.querySelector("[data-todo-actions]")?.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const item = todoItemById(row.getAttribute("data-todo-item"));
+        if (item) openTodoActions(event.currentTarget, item);
       });
     }
     for (const button of tasksListEl.querySelectorAll("[data-todo-view-all],[data-todo-terminal]")) {
@@ -9680,6 +9877,7 @@
     });
   }
   function renderTasksBoard() {
+    closeTodoActions();
     renderTodoRail();
     if (todoState.loading && !todoState.loaded) {
       tasksEmptyEl.classList.add("gone");
@@ -16072,22 +16270,6 @@
     }
   }
 
-  async function loadOnboardingInvite() {
-    if (onboardingInviteLoading || onboardingInvite || !window.relay.onboardingInviteLink) return;
-    onboardingInviteLoading = true;
-    onboardingInviteError = "";
-    try {
-      const result = await window.relay.onboardingInviteLink();
-      if (!result?.ok || !result.invite?.url) throw new Error(result?.error || "Relay could not load your invite link.");
-      onboardingInvite = result.invite;
-    } catch (reason) {
-      onboardingInviteError = reason?.message || "Relay could not load your invite link.";
-    } finally {
-      onboardingInviteLoading = false;
-      if (signupStage === "invite-onboarding" && rendererSurfaceActive()) renderSignup();
-    }
-  }
-
   function pendingOpenSignupCard() {
     const pending = payload.pendingOpen;
     if (!pending || (!pending.forHuman && !pending.title && !pending.error)) return "";
@@ -16162,21 +16344,31 @@
       });
       return;
     }
-    if (signupStage === "invite-onboarding") {
-      const inviteUrl = String(onboardingInvite?.url || "");
-      const inviteValue = inviteUrl || (onboardingInviteLoading ? "Loading your invite link…" : "Invite link unavailable");
-      const inviteError = onboardingInviteError ? `<p class="su-note su-error" role="alert">${esc(onboardingInviteError)}</p>` : "";
-      signupBodyEl.innerHTML = `<p class="su-step">Welcome to Relay</p><h1 class="su-title">Bring someone into Relay.</h1><p class="su-copy">Share this link. When they join, Relay connects you so they can send their first message back.</p><div class="su-form"><label class="su-label">Your invite link<input class="su-input" id="suInviteLink" readonly value="${esc(inviteValue)}" /></label><button class="su-primary" id="suCopyInvite" type="button"${busy || !inviteUrl ? " disabled" : ""}>Copy link</button>${inviteError}${note}${error}<button class="su-link" id="suChatSkip" type="button"${busy}>Skip for now</button></div>`;
-      if (!onboardingInvite && !onboardingInviteLoading && !onboardingInviteError) void loadOnboardingInvite();
-      document.getElementById("suCopyInvite")?.addEventListener("click", async () => {
-        if (signupBusy || !window.relay.copyOnboardingInviteLink) return;
-        signupBusy = true; signupError = ""; signupNote = ""; renderSignup();
-        try {
-          const result = await window.relay.copyOnboardingInviteLink();
-          if (!result?.ok) throw new Error(result?.error || "Relay could not copy your invite link.");
-          signupBusy = false; signupNote = "Invite link copied."; renderSignup();
-        } catch (reason) { signupFailure(reason, "Relay could not copy your invite link."); }
-      });
+    if (signupStage === "first-relay") {
+      const status = payload.ui?.firstRelayStatus || "checking";
+      const signature = JSON.stringify([status, signupBusy, signupError]);
+      if (signupBodyEl.dataset.firstRelaySignature === signature && signupBodyEl.querySelector(".su-first-relay")) return;
+      signupBodyEl.dataset.firstRelaySignature = signature;
+      const sent = status === "sent";
+      const unavailable = status === "unavailable";
+      const checking = status === "checking";
+      const title = sent ? "Your first Relay is sent."
+        : '<span class="su-handoff-intro">Follow the instructions in</span><span class="su-host-claude">Claude Code</span><span class="su-handoff-or">or <span class="su-host-codex">Codex</span>.</span>';
+      const copy = sent
+        ? "Nicely done. You can keep the conversation going in Claude Code or Codex. Click below to open the Relay app."
+        : checking || unavailable
+        ? "Keep going in the conversation where you set up Relay."
+        : "Your agent will help you send your first Relay.";
+      const progress = unavailable ? "We couldn’t check your send yet. We’ll try again."
+        : checking ? "Checking whether you’ve already sent a Relay…"
+        : "This screen will update when your Relay is sent.";
+      signupBodyEl.innerHTML = `<div class="su-first-relay${sent ? " su-first-relay-sent" : ""}">
+        ${sent ? '<div class="su-relay-moment" aria-hidden="true"><i></i><i></i><i></i><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></svg></div>' : ""}
+        <p class="su-step">${sent ? "You’re on your way" : checking || unavailable ? "Connected to Relay" : "Your first Relay"}</p>
+        <h1 class="su-title${sent ? "" : " su-handoff-title"}">${title}</h1><p class="su-copy">${copy}</p>
+        ${sent ? "" : `<p class="su-send-progress" role="status"><span aria-hidden="true"></span>${progress}</p>`}
+        <div class="su-form">${error}<button class="${sent ? "su-primary" : "su-link"}" id="suChatSkip" type="button"${busy}>${sent ? "Open Relay" : "Skip for now"}</button></div>
+      </div>`;
       document.getElementById("suChatSkip")?.addEventListener("click", completeSignupTutorial);
       return;
     }
@@ -16314,9 +16506,9 @@
       signupError = String(data.error || "");
       signupNote = String(data.note || "");
       signupInitializationFailed = data.initializationFailed === true;
-      const tutorial = signupStage === "invite-onboarding";
+      const tutorial = signupStage === "first-relay";
       payload.account = { paired:tutorial, email:"preview@example.com" };
-      payload.ui = { ...payload.ui, onboardingRequired:tutorial };
+      payload.ui = { ...payload.ui, onboardingRequired:tutorial, firstRelayStatus:data.firstRelayStatus || "waiting" };
       renderAll();
     };
   }
@@ -16455,6 +16647,8 @@
   }
 
   function renderAll() {
+    if (activeView !== "tasks") closeTodoActions();
+    todoRemovalNotice?.classList.toggle("hidden", activeView !== "tasks" && todoRemovalNotice.dataset.error !== "true");
     // Build the destination BEFORE applyView reveals/resizes it. This ordering
     // is the transition contract: one DOM paint, one visibility commit, one
     // frame target. It removes the blank-frame and double-rebuild paths while
@@ -16468,7 +16662,7 @@
       signupStage = "credential-recovery";
     } else if (tutorialPending) {
       stopSignupPolling();
-      signupStage = "invite-onboarding";
+      signupStage = "first-relay";
     }
     const needsSignup = credentialRecovery || payload.account?.paired === false || tutorialPending;
     cardEl.classList.toggle("signup", needsSignup);
@@ -16592,6 +16786,10 @@
     return id || email;
   }
   function clearCanonicalAccountCaches() {
+    closeTodoActions();
+    todoRemovalNotice?.remove(); todoRemovalNotice = null; todoRemovalUndo = null;
+    todoVisibilityPending.clear();
+    todoReaderVisibility.clear();
     cvOpenGeneration += 1;
     cvOpeningKey = null;
     contactChatAnchors.clear();
@@ -16652,7 +16850,7 @@
     const stewardFinished = stewardFinishedAt !== todoStewardFinishedAt;
     todoStewardFinishedAt = stewardFinishedAt;
     const nextTodoProjectionSignature = JSON.stringify(projectedRelays.map((row) => [
-      row.id, row.todoStatus, row.todoVersion, row.duplicateOfItemId, row.assessment,
+      row.id, row.todoStatus, row.todoVersion, row.todoRemoved, row.todoVisibilityVersion, row.duplicateOfItemId, row.assessment,
       row.taskStartedAt, row.taskCompletedAt, row.taskClaim?.version,
     ]));
     const todoProjectionChanged = nextTodoProjectionSignature !== todoProjectionSignature || stewardFinished;

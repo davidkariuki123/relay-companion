@@ -12,6 +12,16 @@ const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const setupEntry = path.resolve(testDirectory, "../bootstrap/relay-setup.cjs");
 const backgroundEntry = path.resolve(testDirectory, "../bootstrap/relay-background-install.cjs");
 
+test("background installation status and log follow the selected Relay directory", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-background-config-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const options = { homeDir: root, env: { RELAY_CONFIG_DIR: path.join(root, "dev-relay") } };
+  background.startBackgroundInstall({ ...options, entry: setupEntry, spawnImpl: () => ({ pid: process.pid, unref() {} }) });
+  assert.equal(background.statusPath(options), path.join(root, "dev-relay", "companion-install.json"));
+  assert.equal(background.readStatus(options).logPath, path.join(root, "dev-relay", "companion-install.log"));
+  assert.equal(fs.existsSync(path.join(root, ".relay")), false);
+});
+
 test("background Companion install returns immediately and writes observable state", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-background-install-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -34,7 +44,7 @@ test("background Companion install returns immediately and writes observable sta
   assert.equal(state.logPath, path.join(root, ".relay", "companion-install.log"));
 });
 
-test("background worker command uses the no-MCP agent protocol install path", () => {
+test("background worker command uses the browser-approved agent setup path", () => {
   const source = fs.readFileSync(new URL("../bootstrap/relay-background-install.cjs", import.meta.url), "utf8");
   assert.match(source, /\[entry, "setup", "--agent-protocol"\]/);
   assert.match(source, /stdio: \["ignore", output, output\]/);

@@ -165,19 +165,23 @@ try {
     ["approval", "Connect this computer?"],
     ["finishing", "Finishing setup…"],
     ["expired", "Start setup again."],
-    ["invite-onboarding", "Bring someone into Relay."],
+    ["first-relay", "Follow the instructions in", "checking"],
+    ["first-relay", "Follow the instructions in", "waiting"],
+    ["first-relay", "Follow the instructions in", "unavailable"],
+    ["first-relay", "Your first Relay is sent.", "sent"],
   ];
   const rendered = [];
-  for (const [stage, expected] of states) {
+  for (const [stage, expected, firstRelayStatus] of states) {
     const preview = {
       email:"alex@example.com",
       account:{ displayName:"Alex Rivera", email:"alex@example.com" },
+      ...(firstRelayStatus ? { firstRelayStatus } : {}),
       ...(stage === "restart-required" ? { error:"Relay found an unfinished one-time approval. Restart setup to replace it safely." } : {}),
     };
     await evaluate(page, `window.__relaySignupPreview(${JSON.stringify(stage)}, ${JSON.stringify(preview)}); true`);
     await waitFor(page, `document.getElementById("signupBody").innerText.includes(${JSON.stringify(expected)})`);
-    rendered.push(await capture(page, `pill-${stage}`));
-    if (stage === "invite-onboarding") {
+    rendered.push(await capture(page, `pill-${stage}${firstRelayStatus ? `-${firstRelayStatus}` : ""}`));
+    if (stage === "first-relay") {
       const layout = await evaluate(page, `(() => {
         const cardRect = document.getElementById("card").getBoundingClientRect();
         const bodyRect = document.getElementById("signupBody").getBoundingClientRect();

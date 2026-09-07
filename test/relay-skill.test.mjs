@@ -9,6 +9,44 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const skill = require("../bootstrap/relay-skill.cjs");
 
+test("updates add the skill to both Codex directories and Claude without overwriting user files", async (t) => {
+  const { installAgentSkills } = await import("../src/install.js");
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-skill-update-"));
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  const options = { homeDir, env: {} };
+  const targets = skill.defaultTargets(options);
+  assert.deepEqual(targets.map((item) => path.relative(homeDir, item.directory).split(path.sep).join("/")), [".codex/skills/relay", ".agents/skills/relay", ".claude/skills/relay"]);
+  const custom = targets[0].directory;
+  fs.mkdirSync(custom, { recursive: true });
+  fs.writeFileSync(path.join(custom, "SKILL.md"), "My own Relay instructions");
+  const installed = await installAgentSkills(options);
+  assert.equal(installed.results[0].status, "unmanaged");
+  assert.ok(installed.results.slice(1).every((result) => result.ok));
+  assert.equal(fs.readFileSync(path.join(custom, "SKILL.md"), "utf8"), "My own Relay instructions");
+  const repeated = await installAgentSkills(options);
+  assert.ok(repeated.results.slice(1).every((result) => result.status === "current"));
+});
+
+test("skill updates follow the configured environment and reject cross-origin bundles", async (t) => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-skill-origin-"));
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  const configDir = path.join(homeDir, "custom-relay");
+  fs.mkdirSync(configDir);
+  const options = { homeDir, env: { RELAY_CONFIG_DIR: configDir } };
+  fs.writeFileSync(path.join(configDir, "agent-protocol.json"), JSON.stringify({ apiUrl: "https://dev-api.sendrelays.com" }));
+  assert.equal(skill.configuredManifestUrl(options), "https://dev.sendrelays.com/skills/relay/manifest.json");
+  fs.writeFileSync(path.join(configDir, "config.json"), JSON.stringify({ apiUrl: "https://custom.example" }));
+  assert.throws(() => skill.configuredManifestUrl(options), /configured web origin/);
+  fs.writeFileSync(path.join(configDir, "config.json"), JSON.stringify({ webUrl: "https://sendrelays.com" }));
+  assert.equal(skill.configuredManifestUrl(options), skill.MANIFEST_URL);
+  fs.writeFileSync(path.join(configDir, "config.json"), JSON.stringify({ webUrl: "https://dev.sendrelays.com" }));
+  const offered = fixture();
+  await assert.rejects(skill.updateFromRemote({ ...options, targets: [], fetchImpl: async (url) => {
+    assert.equal(url, "https://dev.sendrelays.com/skills/relay/manifest.json");
+    return new Response(JSON.stringify(offered.manifest));
+  } }), /configured web origin/);
+});
+
 function digest(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
 }

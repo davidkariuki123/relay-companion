@@ -79,12 +79,33 @@ function defaultTargets({ homeDir = os.homedir(), env = process.env, host = "all
   if (selected === "all" || selected === "codex") {
     const root = env.CODEX_HOME || path.join(homeDir, ".codex");
     targets.push({ host: "codex", directory: path.join(root, "skills", SKILL_NAME) });
+    targets.push({ host: "codex", directory: path.join(homeDir, ".agents", "skills", SKILL_NAME) });
   }
   if (selected === "all" || selected === "claude") {
     const root = env.CLAUDE_HOME || path.join(homeDir, ".claude");
     targets.push({ host: "claude", directory: path.join(root, "skills", SKILL_NAME) });
   }
-  return targets;
+  return targets.filter((target, index) => targets.findIndex((other) => path.resolve(other.directory) === path.resolve(target.directory)) === index);
+}
+
+function configuredManifestUrl({ homeDir = os.homedir(), env = process.env, webOrigin } = {}) {
+  const configRoot = env.RELAY_CONFIG_DIR || path.join(homeDir, ".relay");
+  function read(file) {
+    try { return JSON.parse(fs.readFileSync(file, "utf8")); }
+    catch (error) { if (error.code === "ENOENT") return {}; throw error; }
+  }
+  const config = read(env.RELAY_CONFIG || path.join(configRoot, "config.json"));
+  const agent = config.webUrl || config.apiUrl ? {} : read(env.RELAY_AGENT_CONFIG || path.join(configRoot, "agent-protocol.json"));
+  const api = config.apiUrl || agent.apiUrl;
+  const knownOrigin = !api || api === "https://api.sendrelays.com" ? "https://sendrelays.com"
+    : api === "https://dev-api.sendrelays.com" ? "https://dev.sendrelays.com" : null;
+  const origin = webOrigin || env.RELAY_WEB_URL || config.webUrl || knownOrigin;
+  if (!origin) throw new Error("Relay requires a configured web origin for this API environment's skill updates.");
+  const url = new URL(origin);
+  if (url.protocol !== "https:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
+    throw new Error("Relay requires a secure configured web origin for skill updates.");
+  }
+  return new URL("/skills/relay/manifest.json", url).href;
 }
 
 function pathInside(parent, child) {
@@ -223,12 +244,13 @@ async function installBundled(options = {}) {
 }
 
 async function updateFromRemote(options = {}) {
-  const manifestUrl = String(options.manifestUrl || MANIFEST_URL);
+  const manifestUrl = String(options.manifestUrl || configuredManifestUrl(options));
   const parsedUrl = new URL(manifestUrl);
   if (parsedUrl.protocol !== "https:" || parsedUrl.username || parsedUrl.password || parsedUrl.hash) {
     throw new Error("Relay requires a secure skill manifest URL.");
   }
   const manifest = parseManifest(await fetchBytes(parsedUrl.href, options), { requireRemote: true });
+  if (new URL(manifest.baseUrl).origin !== parsedUrl.origin) throw new Error("Relay's skill bundle must use the configured web origin.");
   return installManifest(manifest, (entry) => fetchBytes(`${manifest.baseUrl}/${entry.path.split("/").map(encodeURIComponent).join("/")}`, options), options);
 }
 
@@ -297,6 +319,7 @@ module.exports = {
   SKILL_NAME,
   STATE_FILE,
   compareVersions,
+  configuredManifestUrl,
   defaultTargets,
   installBundled,
   installManifest,

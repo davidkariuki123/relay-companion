@@ -405,33 +405,16 @@ test("ordinary Relay MCP directs Claude and Codex to the membership-scoped Granu
   assert.doesNotMatch(titleDescription, /ONLY thing shown on the recipient's card/i);
   assert.doesNotMatch(titleDescription, /characters|8-20 words|4-12 words/i);
   assert.equal(send.inputSchema.properties.threadTitle, undefined);
-  // The body is GHOSTWRITTEN in the sender's inferred voice (the voice
-  // contract, David 2026-08-12): substance fidelity + inferred voice +
-  // their relationship register, with real sent messages as the gold standard.
-  assert.match(humanDescription, /The person who reads your message is not you/i);
-  assert.match(humanDescription, /Write exactly what the sender would SAY aloud/i);
-  assert.match(humanDescription, /instructions to the ghostwriter, not a draft to lightly edit/i);
-  assert.match(humanDescription, /Supply the words, never additional meaning/i);
-  assert.match(humanDescription, /recipient-specific vocabulary, rhythm, directness, formality, warmth, emphasis, and sign-off/i);
-  assert.match(humanDescription, /relay_sent_list/);
-  assert.match(humanDescription, /relay_chat_fetch/);
-  assert.match(humanDescription, /what happened and what it means for them/i);
-  assert.match(humanDescription, /never revive superseded intent/i);
-  assert.match(humanDescription, /OPEN FROM THE TOP/i);
-  assert.match(humanDescription, /first one to three sentences re-explain what has been going on/i);
-  assert.match(humanDescription, /Keep it under 95 words/i);
-  assert.match(humanDescription, /ceiling, not a target/i);
-  assert.match(humanDescription, /opening background survives every cut/i);
-  assert.match(humanDescription, /Never squeeze sentences into shorthand to save room/i);
-  assert.match(humanDescription, /Do not copy how short their own messages are/i);
-  assert.match(humanDescription, /No figures of speech/i);
-  assert.match(humanDescription, /Leave out any word they'd only know from doing this job/i);
-  assert.match(humanDescription, /Sending or attaching information does not imply.*request for a response/i);
-  assert.match(humanDescription, /Clarification before sending is uncommon/i);
-  assert.match(humanDescription, /critical detail is genuinely uncertain/i);
-  assert.match(humanDescription, /No headings, lists, tables, code blocks, or title repetition/i);
-  assert.match(humanFieldDescription, /person who did not do the work/i);
-  assert.match(humanFieldDescription, /implementation detail/i);
+  // Full composition guidance is versioned in the managed skill; essential
+  // permissions, intent and retry rules must survive when it is not loaded.
+  assert.match(humanDescription, /installed Relay skill/);
+  assert.match(humanDescription, /complete, non-empty forAgent/);
+  assert.match(humanDescription, /preserve the human's intent and invent no asks or commitments/);
+  assert.match(humanDescription, /idempotencyKey.*change of transport/);
+  assert.match(humanFieldDescription, /Writing a Relay/);
+  assert.match(humanFieldDescription, /sender's intent and voice/);
+  assert.match(humanFieldDescription, /someone arriving fresh/);
+  assert.match(humanFieldDescription, /95 words/);
   const longConfirmation = send.inputSchema.properties.longForHumanConfirmed;
   assert.equal(longConfirmation.type, "boolean");
   assert.match(longConfirmation.description, /already rejected this exact draft/i);

@@ -7,16 +7,16 @@ const main = fs.readFileSync(new URL("../overlay/main.cjs", import.meta.url), "u
 const preload = fs.readFileSync(new URL("../overlay/preload.cjs", import.meta.url), "utf8");
 const html = fs.readFileSync(new URL("../overlay/inbox.html", import.meta.url), "utf8");
 
-test("all accounts cross a versioned, per-account, skippable invite-link onboarding", () => {
-  assert.match(main, /const COMPANION_ONBOARDING_VERSION = 1/);
+test("first-send onboarding is versioned, per-account and skippable", () => {
+  assert.match(main, /const COMPANION_ONBOARDING_VERSION = 2/);
   assert.match(main, /onboardingVersions\[key\] = COMPANION_ONBOARDING_VERSION/);
   assert.match(main, /user:\$\{userId\}/);
   assert.match(main, /email:\$\{email\}/);
   assert.match(main, /device:\$\{createHash\("sha256"\)\.update\(token\)\.digest\("hex"\)\}/);
   assert.match(main, /onboardingRequired: currentAccount\.paired && completedOnboardingVersion < COMPANION_ONBOARDING_VERSION/);
   assert.match(html, /payload\.ui\?\.onboardingRequired === true/);
-  assert.match(html, /Bring someone into Relay\./);
-  assert.match(html, /id="suCopyInvite"/);
+  assert.match(html, /Follow the instructions in/);
+  assert.match(html, /firstRelayStatus/);
   assert.match(html, /id="suChatSkip"[\s\S]*Skip for now/);
 });
 

@@ -47,6 +47,8 @@ contextBridge.exposeInMainWorld("relay", {
   taskUnclaim: (id, expectedVersion) => ipcRenderer.invoke("relay:taskUnclaim", String(id || ""), expectedVersion),
   taskStop: (id) => ipcRenderer.invoke("relay:taskStop", String(id || "")),
   todoList: (input = {}) => ipcRenderer.invoke("relay:todoList", input || {}),
+  todoVisibilityUpdate: (id, input = {}) => ipcRenderer.invoke("relay:todoVisibilityUpdate", String(id || ""), input || {}),
+  todoVisibilityRead: (id) => ipcRenderer.invoke("relay:todoVisibilityRead", String(id || "")),
   todoStatusUpdate: (id, input = {}) => ipcRenderer.invoke(
     "relay:todoStatusUpdate",
     String(id || ""),

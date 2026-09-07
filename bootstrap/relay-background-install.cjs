@@ -8,11 +8,11 @@ const { spawn } = require("node:child_process");
 const STATUS_VERSION = 1;
 
 function statusPath({ homeDir = os.homedir(), env = process.env } = {}) {
-  return env.RELAY_BACKGROUND_INSTALL_STATUS || path.join(homeDir, ".relay", "companion-install.json");
+  return env.RELAY_BACKGROUND_INSTALL_STATUS || path.join(env.RELAY_CONFIG_DIR || path.join(homeDir, ".relay"), "companion-install.json");
 }
 
 function logPath({ homeDir = os.homedir(), env = process.env } = {}) {
-  return env.RELAY_BACKGROUND_INSTALL_LOG || path.join(homeDir, ".relay", "companion-install.log");
+  return env.RELAY_BACKGROUND_INSTALL_LOG || path.join(env.RELAY_CONFIG_DIR || path.join(homeDir, ".relay"), "companion-install.log");
 }
 
 function atomicWriteJson(file, value) {

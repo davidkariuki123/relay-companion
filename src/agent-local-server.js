@@ -43,6 +43,7 @@ export function createAgentDispatcher({ client, outboxFile, listDestinations, de
     if (!allowed(method, route)) throw new Error("This operation is not part of the Relay agent protocol.");
     if (method === "GET") {
       if (url.pathname === "/v1/me") return client.me();
+      if (url.pathname === "/v1/e2ee/status") return client.e2eeStatus();
       if (url.pathname === "/v1/inbox") return client.inbox();
       if (url.pathname === "/v1/sent") return client.sent();
       if (url.pathname === "/v1/contacts/search") return client.searchContacts(url.searchParams.get("q") || "");

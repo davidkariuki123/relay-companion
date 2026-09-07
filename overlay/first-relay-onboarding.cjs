@@ -1,0 +1,41 @@
+// Account history, not installation or a locally queued send, drives this
+// chapter. Keep an unknown result distinct from a confirmed empty history.
+function hasSentRelay(response, limit = 200) {
+  if (response?.hasSentRelay === true) return true;
+  const items = response?.items;
+  if (!Array.isArray(items)) return null;
+  const sent = items.some((item) => item?.relayId
+    && ["delivered", "read", "acknowledged"].includes(item.state)
+    && (!item.shareLink || item.shareLink.claimedAt || item.shareLink.state === "claimed"));
+  if (sent) return true;
+  if (response?.hasSentRelay === false) return false;
+  // Older servers have no account-wide flag. A full page of unclaimed links
+  // cannot prove there was no real send further back in the account history.
+  return items.length < limit ? false : null;
+}
+
+function createFirstRelayOnboarding() {
+  const accounts = new Map();
+  function state(key) {
+    if (!accounts.has(key)) accounts.set(key, { status: "checking", sawEmpty: false });
+    return accounts.get(key);
+  }
+  return {
+    status(key) { return state(key).status; },
+    observe(key, response) {
+      const current = state(key);
+      if (["sent", "complete"].includes(current.status)) return current.status;
+      const sent = hasSentRelay(response);
+      if (sent === true) current.status = current.sawEmpty ? "sent" : "complete";
+      else if (sent === false) { current.status = "waiting"; current.sawEmpty = true; }
+      else current.status = "unavailable";
+      return current.status;
+    },
+    failed(key) {
+      const current = state(key);
+      if (!["sent", "complete"].includes(current.status)) current.status = "unavailable";
+    },
+  };
+}
+
+module.exports = { createFirstRelayOnboarding, hasSentRelay };

@@ -607,6 +607,9 @@ export function stagePlainRelayItem(
     // app without conflating workflow with read or Task-run state.
     todoStatus: item.todoStatus || existing.todoStatus || null,
     todoVersion: Number.isInteger(item.todoVersion) ? item.todoVersion : (existing.todoVersion || null),
+    // A poll already in flight must not overwrite a newer removal or Undo.
+    todoRemoved: Number(item.todoVisibilityVersion ?? -1) >= Number(existing.todoVisibilityVersion ?? -1) ? item.todoRemoved === true : existing.todoRemoved === true,
+    todoVisibilityVersion: Math.max(Number(item.todoVisibilityVersion || 0), Number(existing.todoVisibilityVersion || 0)),
     duplicateOfItemId: item.duplicateOfItemId || existing.duplicateOfItemId || null,
     // The steward's reason rides with the row so the reader can show why an
     // item sits where it does without another request.

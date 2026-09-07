@@ -23,6 +23,7 @@ const SAFE_GET = [
   /^\/v1\/chats\/[A-Za-z0-9_-]+$/,
   /^\/v1\/relays\/[A-Za-z0-9_-]+\/attachments\/[A-Za-z0-9_-]+\/download-url$/,
   /^\/v1\/me$/,
+  /^\/v1\/e2ee\/status$/,
   /^\/v1\/inbox(?:\?.*)?$/,
   /^\/v1\/sent(?:\?.*)?$/,
   /^\/v1\/contacts\/search\?q=.+$/,
@@ -37,11 +38,11 @@ const SAFE_POST = [
 ];
 
 function configPath(env = process.env) {
-  return env.RELAY_AGENT_CONFIG || DEFAULT_CONFIG;
+  return env.RELAY_AGENT_CONFIG || (env.RELAY_CONFIG_DIR ? path.join(env.RELAY_CONFIG_DIR, "agent-protocol.json") : DEFAULT_CONFIG);
 }
 
 function pendingPath(env = process.env) {
-  return env.RELAY_AGENT_AUTHORIZATION || DEFAULT_PENDING;
+  return env.RELAY_AGENT_AUTHORIZATION || (env.RELAY_CONFIG_DIR ? path.join(env.RELAY_CONFIG_DIR, "agent-authorization.json") : DEFAULT_PENDING);
 }
 
 function relayApiOrigin(value, env = process.env) {
@@ -75,8 +76,14 @@ function readConfig(file = configPath()) {
   let value;
   try { value = JSON.parse(fs.readFileSync(file, "utf8")); }
   catch (error) {
-    if (error?.code === "ENOENT") throw new Error("Relay is not connected in this agent yet. Complete the browser approval first.");
-    throw new Error("Relay's agent credential file could not be read.");
+    if (error?.code === "ENOENT") {
+      const local = readLocalDescriptor();
+      if (!local) throw new Error("Relay is not connected in this agent yet. Complete the browser approval first.");
+      if (!/^usr_[A-Za-z0-9_-]+$/.test(String(local.accountId || ""))) throw new Error("Relay's local account is invalid. Reopen Companion.");
+      value = { local: true, consentVersion: 2, apiUrl: local.apiUrl, account: { relayUserId: local.accountId } };
+    } else {
+      throw new Error("Relay's agent credential file could not be read.");
+    }
   }
   const apiUrl = relayApiOrigin(value?.apiUrl);
   const accessToken = String(value?.accessToken || "");
@@ -166,13 +173,31 @@ async function request(method, requestPath, body) {
   const local = readLocalDescriptor();
   if (local && (config.consentVersion ?? 1) >= 2) {
     if (local.accountId !== config.account?.relayUserId || local.apiUrl !== config.apiUrl) throw new Error("Companion is connected to a different Relay account or environment. Nothing was sent or read.");
-    const result = await localRequest(local, { method: verb, path: cleanPath, body, accountId: config.account.relayUserId });
-    // Only retire the standalone credential after the daemon has answered as
-    // the exact account. Future failures must not bypass local encryption.
-    if (!config.local) { config.local = true; delete config.accessToken; atomicWrite(configPath(), config); }
-    return result;
+    // Retain the browser-approved credential independently of Companion. Record
+    // the local attempt before dispatch so a lost response still requires the
+    // encryption/account checks on a later direct retry.
+    if (!config.local) { config.local = true; atomicWrite(configPath(), config); }
+    try {
+      return await localRequest(local, { method: verb, path: cleanPath, body, accountId: config.account.relayUserId });
+    } catch (error) {
+      const stableMutation = typeof body?.idempotencyKey === "string" && body.idempotencyKey.trim().length >= 8;
+      // Permission and application refusals are authoritative; an expired local
+      // authentication can use the separately approved direct credential.
+      // An uncertain mutation can only cross transports with the same body
+      // and stable deduplication key.
+      if ((!error.localTransportFailure && error.status !== 401) || (error.possiblySent && verb !== "GET" && !stableMutation)) throw error;
+    }
   }
-  if (config.local) throw new Error("Reopen Relay Companion to use this connection. No agent restart is needed.");
+  if (!config.accessToken.startsWith("web_") || config.accessToken.length < 20) {
+    throw new Error("This connection has no direct Relay credential. Reopen Relay Companion, or renew browser approval to enable direct fallback.");
+  }
+  if (config.expiresAt && Date.parse(config.expiresAt) <= Date.now()) throw new Error("Relay's direct authorization expired. Renew browser approval to use direct fallback.");
+  if (config.local) {
+    const me = await authenticatedRequest(config.apiUrl, config.accessToken, "GET", "/v1/me");
+    if (!config.account?.relayUserId || me.user?.id !== config.account.relayUserId) throw new Error("Direct Relay is connected to a different account. Nothing was sent or read.");
+    const encryption = await authenticatedRequest(config.apiUrl, config.accessToken, "GET", "/v1/e2ee/status");
+    if (encryption.mode !== "off") throw new Error("Reopen Relay Companion for this connection's encryption. Direct fallback is unavailable.");
+  }
   try { return await authenticatedRequest(config.apiUrl, config.accessToken, verb, cleanPath, body); }
   catch (error) {
     if (verb !== "POST" || cleanPath !== "/v1/relays" || body?.longForHumanConfirmed !== true || error.code !== "human_message_review_required" || !error.body?.reviewToken) throw error;

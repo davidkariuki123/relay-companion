@@ -11,7 +11,7 @@ const main = readFileSync(path.join(ROOT, "overlay/main.cjs"), "utf8");
 const config = readFileSync(path.join(ROOT, "src/config.js"), "utf8");
 const cli = readFileSync(path.join(ROOT, "bin/relay.js"), "utf8");
 
-test("first run opens account connection immediately and ends with skippable invite onboarding", () => {
+test("first run opens account connection immediately and ends with skippable first-send guidance", () => {
   for (const copy of [
     "Agent installed",
     "Connect Relay.",
@@ -23,7 +23,7 @@ test("first run opens account connection immediately and ends with skippable inv
     "Finishing setup…",
     "Continue your setup.",
     "Restart this setup.",
-    "Bring someone into Relay.",
+    "Follow the instructions in",
   ]) assert.match(overlay, new RegExp(copy.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 
   assert.match(overlay, /cardEl\.classList\.toggle\("signup", needsSignup\)/);
@@ -32,8 +32,8 @@ test("first run opens account connection immediately and ends with skippable inv
   assert.match(overlay, /initializeInstallationAuthorization\(\)/);
   assert.match(overlay, /state\.status === "idle"[\s\S]*installationAuthBegin\(\)/);
   assert.doesNotMatch(overlay, /Relay is ready for you\./);
-  assert.match(overlay, /Share this link\./);
-  assert.match(overlay, /id="suCopyInvite"/);
+  assert.match(overlay, /Your agent will help you send your first Relay\./);
+  assert.match(overlay, /firstRelayStatus/);
   assert.match(overlay, /id="suChatSkip"[\s\S]*Skip for now/);
 });
 

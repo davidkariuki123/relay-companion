@@ -29,6 +29,8 @@ export function readLocalDescriptor(file = localDescriptorPath()) {
 export function localRequest(descriptor, request, { timeoutMs = 30000 } = {}) {
   return new Promise((resolve, reject) => {
     const socket = net.createConnection(descriptor.endpoint);
+    let possiblySent = false;
+    const transportError = (message) => Object.assign(new Error(message), { localTransportFailure: true, possiblySent });
     let bytes = 0;
     const chunks = [];
     let finished = false;
@@ -39,8 +41,11 @@ export function localRequest(descriptor, request, { timeoutMs = 30000 } = {}) {
       socket.destroy();
       error ? reject(error) : resolve(value);
     };
-    const timer = setTimeout(() => finish(new Error("Companion did not confirm the request. Retry with the same idempotency key.")), timeoutMs);
-    socket.once("connect", () => socket.write(JSON.stringify({ ...request, capability: descriptor.capability }) + "\n"));
+    const timer = setTimeout(() => finish(transportError("Companion did not confirm the request. Retry with the same idempotency key.")), timeoutMs);
+    socket.once("connect", () => {
+      possiblySent = true;
+      socket.write(JSON.stringify({ ...request, capability: descriptor.capability }) + "\n");
+    });
     socket.on("data", (chunk) => {
       bytes += chunk.length;
       if (bytes > LOCAL_MAX_BYTES) return finish(new Error("Relay's local response is too large."));
@@ -53,7 +58,7 @@ export function localRequest(descriptor, request, { timeoutMs = 30000 } = {}) {
         } catch (error) { finish(error); }
       }
     });
-    socket.once("error", () => finish(new Error("Companion is unavailable. Reopen Relay and retry; your agent conversation can stay open.")));
-    socket.once("end", () => { if (!finished) finish(new Error("Companion closed before confirming the request. Retry with the same idempotency key.")); });
+    socket.once("error", () => finish(transportError("Companion is unavailable. Reopen Relay and retry; your agent conversation can stay open.")));
+    socket.once("end", () => { if (!finished) finish(transportError("Companion closed before confirming the request. Retry with the same idempotency key.")); });
   });
 }

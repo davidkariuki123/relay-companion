@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { TOOLS, handleCall, toolsForAccount } from "../src/mcp.js";
 
 // Product species: relay_send always creates a Relay with separately composed
@@ -70,17 +71,16 @@ test("the concise human document is derived from a complete unlimited agent docu
   // rule taught on all three surfaces of relay_send.
   const tool = toolsForAccount({ requests: true, aiSessions: true, connectors: true }, "codex")
     .find((t) => t.name === "relay_send");
-  assert.match(tool.description, /compose the complete forAgent document first/i);
-  assert.match(tool.description, /then write forHuman for the person/i);
-  assert.match(tool.description, /Keep (?:forHuman|it) under 95 words/i);
-  assert.match(tool.description, /a small update is a line or two/i);
-  assert.match(tool.description, /ceiling, not a target/i);
-  assert.match(tool.description, /under-sending to the recipient's agent is worse than over-sending/i);
-  assert.match(tool.description, /OPEN FROM THE TOP/i);
-  assert.match(tool.description, /opening background survives every cut/i);
-  assert.match(tool.description, /Clarification before sending is uncommon/i);
-  assert.match(tool.inputSchema.properties.forHuman.description, /person who did not do the work/i);
-  assert.match(tool.inputSchema.properties.forHuman.description, /implementation detail/i);
+  const skill = readFileSync(new URL("../skill/relay/SKILL.md", import.meta.url), "utf8");
+  assert.match(tool.description, /Read the installed Relay skill/);
+  assert.match(skill, /Compose the complete\s+`forAgent` first, then write `forHuman`/);
+  assert.match(skill, /Stay under 95\s+words by default/);
+  assert.match(skill, /a ceiling, never a target/);
+  assert.match(skill, /a small update is usually\s+a line or two/);
+  assert.match(skill, /Under-sending\s+here is worse than over-sending/);
+  assert.match(skill, /preserve that orientation when cutting/);
+  assert.match(tool.inputSchema.properties.forHuman.description, /enough background for someone arriving fresh/);
+  assert.match(tool.inputSchema.properties.forHuman.description, /put supporting detail in forAgent/);
   assert.match(tool.inputSchema.properties.longForHumanConfirmed.description, /already rejected this exact draft/i);
   assert.match(tool.inputSchema.properties.forAgent.description, /complete .*document/i);
   assert.match(tool.inputSchema.properties.forAgent.description, /may be as long and detailed as necessary/i);
