@@ -1454,6 +1454,10 @@ export class RelayClient {
     return this.#req("POST", "/v1/integrations/slack/disconnect-user", {});
   }
 
+  openMentionVisit(chatId, visitId) {
+    return this.#req("POST", `/v1/chats/${encodeURIComponent(chatId)}/mention-visit`, { visitId });
+  }
+
   markChatRead(chatId, idempotencyKey, surface = "relay", options = {}) {
     return this.#req("POST", `/v1/chats/${encodeURIComponent(chatId)}/read`, {
       source: "relay_pill_open",

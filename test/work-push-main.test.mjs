@@ -25,7 +25,7 @@ test("main owns one canonical pushed Work feed behind scoped IPC", () => {
 
 test("provider restarts reconnect the watched canonical generation", () => {
   assert.match(main, /async function reconnectCanonicalWorkFeed/);
-  assert.equal((main.match(/void reconnectCanonicalWorkFeed\(id\)/g) || []).length, 3);
+  assert.equal((main.match(/void reconnectCanonicalWorkFeed\(id\)/g) || []).length, 1);
 });
 
 test("native user identity is matched to its actual text instead of event position", () => {

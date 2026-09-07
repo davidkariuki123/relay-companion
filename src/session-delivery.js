@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { readConfig } from "./config.js";
@@ -15,7 +16,7 @@ import {
 } from "./codex-desktop.js";
 import { waitForCodexIdle, rolloutSize } from "./codex-inject.js";
 import { storeDir } from "./host-paths.js";
-import { discoverSessions } from "./session-directory.js";
+import { discoverSessions, liveClaudeRegistrations } from "./session-directory.js";
 import { sendClaudeSocket, spawnBackgroundClaude, waitForClaudeCompletion } from "./session-controller.js";
 import { focusTerminalSession, launchMacAgentTerminal, terminalProcessState } from "./terminal-sessions.js";
 import { withJsonLockStrict } from "./state-lock.cjs";
@@ -413,6 +414,56 @@ async function waitForPrompt(filePath, offset, prompt, { timeoutMs = 15_000, pol
   return appendedText(filePath, offset).includes(prompt);
 }
 
+function claudeTranscriptFor(cwd, sessionId) {
+  if (!cwd || !sessionId) return "";
+  return path.join(os.homedir(), ".claude", "projects", String(cwd).replace(/[^a-zA-Z0-9]/g, "-"), `${sessionId}.jsonl`);
+}
+
+// The engine resumes a session by ID and keeps appending to the transcript
+// the forge created, wherever that lives; a cwd the row remembers may not even
+// exist (live, 2026-09-04: the check waited on a file never written and called
+// a turn that was already answering "didn't go in"). Prefer any candidate that
+// exists, then search every project folder for the session id.
+export function locateClaudeTranscript(sessionId, candidates = []) {
+  const sid = String(sessionId || "");
+  for (const c of candidates) { if (c && fs.existsSync(c)) return c; }
+  if (!sid) return "";
+  const root = path.join(os.homedir(), ".claude", "projects");
+  let dirs = [];
+  try { dirs = fs.readdirSync(root); } catch { return ""; }
+  for (const d of dirs) {
+    const p = path.join(root, d, `${sid}.jsonl`);
+    if (fs.existsSync(p)) return p;
+  }
+  return "";
+}
+
+function transcriptHasUserRow(filePath, offset, prompt) {
+  const text = appendedText(filePath, offset);
+  if (!text) return false;
+  for (const line of text.split("\n")) {
+    if (!line.includes("\"type\":\"user\"")) continue;
+    let row = null;
+    try { row = JSON.parse(line); } catch { continue; }
+    if (row?.type !== "user" || row?.isMeta) continue;
+    const content = row?.message?.content;
+    const holds = (value) => { const t = String(value || ""); return t.trim() === prompt || t.includes(prompt); };
+    if (typeof content === "string" && holds(content)) return true;
+    if (Array.isArray(content) && content.some((part) => part?.type === "text" && holds(part.text))) return true;
+  }
+  return false;
+}
+
+export async function waitForClaudeUserRow(filePath, offset, prompt, { timeoutMs = 30_000, pollMs = 100 } = {}) {
+  const wanted = String(prompt || "").trim();
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (transcriptHasUserRow(filePath, offset, wanted)) return true;
+    await sleep(pollMs);
+  }
+  return transcriptHasUserRow(filePath, offset, wanted);
+}
+
 async function waitForClaudeTranscript(target, {
   timeoutMs = 15_000,
   pollMs = 100,
@@ -538,6 +589,13 @@ async function deliverCodex(target, prompt, options = {}) {
     rolloutPath: sessionPath,
     clientUserMessageId: options.clientUserMessageId,
     requestId: options.requestId,
+    // A hand-off names its route; a plain picker delivery leaves Desktop's own.
+    ...(options.model ? { model: options.model } : {}),
+    ...(options.effort ? { effort: options.effort } : {}),
+    ...(options.approvalPolicy ? { approvalPolicy: options.approvalPolicy } : {}),
+    ...(options.approvalsReviewer ? { approvalsReviewer: options.approvalsReviewer } : {}),
+    ...(options.sandboxPolicy ? { sandboxPolicy: options.sandboxPolicy } : {}),
+    ...(typeof options.onSubmitted === "function" ? { onSubmitted: options.onSubmitted } : {}),
   });
   if (owner?.ran === true || (owner?.submitted && owner?.ran !== false)) {
     return {
@@ -814,4 +872,99 @@ export async function focusSession(target, {
     skipExternalOpen: false,
     url: `claude://resume?session=${encodeURIComponent(target.nativeId)}`,
   };
+}
+
+// --- The hand-off's first turn ------------------------------------------------
+// Send on the agent document prepares a NEW native session and puts the
+// human's words in as its first user turn before the session is exposed. Codex
+// Desktop owns and submits that turn. Claude uses Relay's official-CLI worker;
+// the caller waits for the user row to be durable before importing the session
+// into Desktop, avoiding a stale pre-turn snapshot.
+export async function waitForClaudeSocket(nativeId, {
+  timeoutMs = 45_000,
+  pollMs = 500,
+  registrations = liveClaudeRegistrations,
+} = {}) {
+  const id = String(nativeId || "");
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const row = registrations().get(id);
+    if (row?.socketLive) return row;
+    if (Date.now() >= deadline) {
+      const error = new Error(`Claude Code did not register session ${id} within ${timeoutMs}ms`);
+      error.code = "SESSION_TARGET_UNAVAILABLE";
+      throw error;
+    }
+    await sleep(Math.min(pollMs, Math.max(1, deadline - Date.now())));
+  }
+}
+
+async function waitForExactSession(target, { timeoutMs = 20_000, pollMs = 500, discover = discoverSessions } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const exact = findExactSession(target, discover);
+    if (exact) return exact;
+    if (Date.now() >= deadline) {
+      const error = new Error(`Native ${target.provider} session ${target.nativeId} has not appeared yet`);
+      error.code = "SESSION_TARGET_UNAVAILABLE";
+      throw error;
+    }
+    await sleep(Math.min(pollMs, Math.max(1, deadline - Date.now())));
+  }
+}
+
+export async function deliverTurnToSession(target, text, options = {}) {
+  const prompt = String(text || "").trim();
+  if (!prompt) throw new Error("A turn needs words");
+  const provider = String(target?.provider || "");
+  const nativeId = String(target?.nativeId || "");
+  if (!provider || !nativeId) throw new Error("An exact native destination is required");
+  const discover = options.discover || discoverSessions;
+  if (provider === "claude") {
+    // A GOVERNOR-FREE LIVE SESSION (proven live 2026-09-04). Relay spawns the
+    // engine itself, so Desktop's warm-spawn cap never applies; that engine
+    // registers and binds its inbox socket, and one JSON line wakes the idle
+    // session into a real turn through Claude's own cross-session message
+    // system. Desktop displays the same session id. No headless worker, no
+    // cap fallback, no "shown only after it finishes".
+    const exact = findExactSession({ provider, nativeId }, discover);
+    const cwd = exact?.cwd || target.cwd || "";
+    const inbox = options.startInboxSession
+      || (await import("./claude-inbox-session.js")).startClaudeInboxSession;
+    const session = await inbox({
+      sessionId: nativeId,
+      cwd,
+      model: options.model || "claude-opus-5",
+      effort: options.effort || "high",
+      permissionMode: options.permissionMode || "auto",
+    });
+    const transcriptPath = locateClaudeTranscript(nativeId, [
+      exact?.nativeRef?.transcriptPath,
+      target?.nativeRef?.transcriptPath,
+      claudeTranscriptFor(cwd, nativeId),
+    ]);
+    const offset = transcriptPath ? rolloutSize(transcriptPath) : 0;
+    await (options.sendClaude || sendClaudeSocket)(session.socketPath, prompt, Math.min(options.timeoutMs || DEFAULT_TIMEOUT_MS, 30_000));
+    if (transcriptPath && !(await waitForClaudeUserRow(transcriptPath, offset, prompt, {
+      timeoutMs: options.deliveryTimeoutMs || 30_000,
+      pollMs: 100,
+    }))) {
+      const error = new Error("Claude accepted the message but did not start a turn");
+      error.code = "CLAUDE_DELIVERY_UNCONFIRMED";
+      throw error;
+    }
+    return { provider: "claude", nativeId, adapter: "claude_inbox_socket", live: true, socketPath: session.socketPath };
+  }
+  if (provider === "codex") {
+    const suppliedSessionPath = String(options.sessionPath || target?.nativeRef?.sessionPath || "");
+    const exact = suppliedSessionPath
+      ? { ...target, provider, nativeId, nativeRef: { ...(target?.nativeRef || {}), sessionPath: suppliedSessionPath } }
+      : await waitForExactSession({ provider, nativeId }, { timeoutMs: options.discoverTimeoutMs || 20_000, discover });
+    return deliverCodex({ ...exact, surface: "desktop" }, prompt, {
+      ...options,
+      clientUserMessageId: options.clientUserMessageId || randomUUID(),
+      requestId: options.requestId || randomUUID(),
+    });
+  }
+  throw new Error(`Unsupported provider: ${provider}`);
 }

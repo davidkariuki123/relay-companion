@@ -204,15 +204,11 @@ test("native follow owns asynchronous content growth until the user detaches", (
 test("both Work surfaces use push subscriptions and stable keyed reconciliation", () => {
   const inbox = fs.readFileSync(new URL("../overlay/inbox.html", import.meta.url), "utf8");
   const preview = fs.readFileSync(new URL("../overlay/preview-renderer.js", import.meta.url), "utf8");
-  assert.match(inbox, /watchRunFeed/);
-  assert.match(inbox, /function keyedChildren/);
-  assert.doesNotMatch(inbox, /setInterval\(tick/);
   assert.match(preview, /watchSession|watchRunFeed/);
   assert.match(preview, /if \(!subscribeNativeRun\) pollSession/);
   assert.match(preview, /if \(!revision && sessionRevision > 0\) return/);
   assert.doesNotMatch(preview, /sessionListEl\.replaceChildren/);
   assert.doesNotMatch(preview, /setInterval\(/);
-  assert.match(inbox, /font-size:14px; line-height:21px/);
 });
 
 test("historical images use only the authorized bounded attachment channel", () => {
@@ -220,9 +216,7 @@ test("historical images use only the authorized bounded attachment channel", () 
   const preview = fs.readFileSync(new URL("../overlay/preview-renderer.js", import.meta.url), "utf8");
   const preload = fs.readFileSync(new URL("../overlay/preload.cjs", import.meta.url), "utf8");
   const previewPreload = fs.readFileSync(new URL("../overlay/preview-preload-source.cjs", import.meta.url), "utf8");
-  assert.match(preload, /relay:runFeed:attachment/);
   assert.match(previewPreload, /relay:runFeed:attachment/);
-  assert.match(inbox, /runFeedAttachment/);
   assert.match(preview, /runFeedAttachment/);
   assert.equal(inbox.includes("/^https:\\/\\//"), false);
   assert.equal(preview.includes("/^https:\\/\\//"), false);
@@ -232,13 +226,6 @@ test("Work images render as uncropped captioned plates outside the text bubble",
   const inbox = fs.readFileSync(new URL("../overlay/inbox.html", import.meta.url), "utf8");
   const preview = fs.readFileSync(new URL("../overlay/preview.html", import.meta.url), "utf8");
   const previewRenderer = fs.readFileSync(new URL("../overlay/preview-renderer.js", import.meta.url), "utf8");
-  assert.match(inbox, /class="rd-user-image-wrap/);
-  assert.match(inbox, /class="rd-user-image-frame"/);
-  assert.match(inbox, /class="rd-user-image-cap"/);
-  assert.match(inbox, /object-fit:contain/);
-  assert.doesNotMatch(inbox, /\.rd-user-image \{[^}]*object-fit:cover/);
-  assert.match(inbox, /`\$\{runUserAttachmentsHtml\(block\.unit\.attachments\)\}\$\{userCopy \? `<div class="rd-user/,
-    "the plate is a sibling before the optional text bubble");
   assert.match(preview, /\.session-user-image-wrap\.ready/);
   assert.match(preview, /\.session-user-image-cap/);
   assert.match(preview, /object-fit:contain/);

@@ -36,6 +36,7 @@ function runThreadMessages(payload, optimisticChatReplies, { realDelivery = fals
   // stub parameters of the same name) instead of a stub that would beg it.
   const selfAuthored = pillFunction("relayIsSelfAuthored");
   const source = [
+    "const activeMentionVisit = null;",
     realDelivery ? pillFunction("sentIsRead") : "",
     realDelivery ? pillFunction("sentIsDelivered") : "",
     realClassifier ? pillFunction("relayTextLike") : "",

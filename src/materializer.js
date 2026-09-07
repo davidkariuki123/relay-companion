@@ -648,6 +648,7 @@ async function materializeRowInHost({
       cwdReason,
       workspaceKey,
       surface: surface === "terminal" ? "terminal" : "desktop",
+      sessionPath: codexSessionPath,
       ...(threadRemoteEndpoint ? { remoteEndpoint: threadRemoteEndpoint } : {}),
     };
   } else {

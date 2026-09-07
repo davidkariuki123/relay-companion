@@ -658,6 +658,7 @@ export function stagePlainRelayItem(
     groupSendId: item.groupSendId || packet?.groupSendId || null,
     recipientGroupId: item.recipientGroupId || packet?.recipientGroupId || null,
     recipientGroupName: item.recipientGroupName || packet?.recipientGroupName || null,
+    recipientMentioned: item.recipientMentioned ?? packet?.recipientMentioned ?? existing.recipientMentioned,
     // This marker is created only after authenticated local MLS decryption. It
     // drives a visible trust label; the server cannot manufacture it in a
     // plaintext inbox response.
@@ -785,6 +786,7 @@ export function stageSentRelayItem(
       groupSendId: item.groupSendId || existing.groupSendId || null,
       recipientGroupId: item.recipientGroupId || existing.recipientGroupId || null,
       recipientGroupName: item.recipientGroupName || existing.recipientGroupName || null,
+      recipientMentioned: item.recipientMentioned ?? existing.recipientMentioned,
       inReplyToRelayId: item.inReplyToRelayId || existing.inReplyToRelayId || null,
       // A sibling of recipient, not a property of it, so the field-by-field
       // allowlist above drops it unless it is named here. Without this line the
