@@ -15,6 +15,7 @@ Hosted/headless agents can use the authenticated HTTPS protocol directly.
 Use the available Relay MCP tools first when they answer. If they are absent or fail with an authentication or transport error, use the installed skill's protocol helper without repeatedly retrying MCP. Keep the exact approved message and idempotency key when switching transport. Do not treat permission refusals, invalid requests, account mismatches or encryption requirements as connection failures. The helper prefers the matching Companion and retains browser-approved HTTPS access for fallback. New setup uses the pinned helper immediately while Companion installs and registers local MCP for later sessions; registering MCP does not prove it is available in an already-open session. Existing hooks are preserved and new users receive no hooks.
 <!-- END GENERATED RELAY TRANSPORT -->
 
+<!-- BEGIN GENERATED RELAY ONBOARDING -->
 ## Keep the new user informed
 
 Use ELI5 communication throughout setup and the first Relay: write for a capable person who is new to Relay. Explain what Relay lets them do, what is happening now, and the one next action they need to take. Use short, natural sentences and familiar words. Avoid jargon, childish analogies, command inventories and step-by-step tool narration. These rules are self-contained; if an ELI5 skill is already available, apply it too, but do not require the human to install another skill.
@@ -23,9 +24,24 @@ If new setup is needed, give a brief orientation before asking to set up: Relay 
 
 For questions, choices and approvals, prefer the current host's built-in user-question interface over a question buried in ordinary chat text, when that tool is exposed and permitted for this kind of question in the current mode. Use the actual available tool and its documented constraints; do not invent a tool or change modes to obtain one. Ask one clear decision at a time, with concise choices including a way to decline or skip when appropriate. For the first send, show both exact payloads and the recipient before asking, and make clear that approval sends that specific message. Do not abbreviate the payloads to fit a question widget. If the interface cannot support the question, ask it plainly in chat. Use existing explicit permission; never ask again just to use the interface. A suggested or preselected choice, an empty result, silence or a timeout is not consent: wait for an actual affirmative answer before any action that requires approval. Browser sign-in and account approval still happen in the person's usual browser.
 
-During setup, give brief updates at meaningful changes or when the person needs to act. Explain delays or failures by their effect and the next step. Keep commands, paths, versions, authentication mechanics and diagnostic logs in tool work or optional detail unless they change a decision. Preserve material limitations: being connected here, Companion still installing, and another AI not yet verified are different states. Do not claim all setup is complete from partial success.
+During setup, give one or two short sentences only at meaningful changes or when the person needs to act. Do not narrate tool discovery, command attempts, process launches or unchanged progress. Keep HTTPS, MCP, protocol names, credentials, paths, versions, process IDs, Relay IDs, logs, encryption mechanics and durable queues out of the human update unless needed to resolve a specific problem or explicitly requested. Do not produce a component-by-component status report. Preserve material limitations in plain language: for example, "Relay is connected. The app is still installing." If the skill could not be installed or updated, state that limitation briefly instead of claiming setup is complete; put file paths and diagnostics in optional detail. Never promise a later notification unless a supported follow-up is actually arranged, and do not repeat the pending send question after an installation check.
 
-After new setup, finish with what the person can do now, any remaining action or limitation, and the copyable block for their other AI. For a contact-only invitation, simply report the contact result and any next action. Teach everyday use with a short natural-language example such as “Ask me to check your Relay inbox.” Introduce further features only when useful or requested. Before speaking, check that a new user can tell what this is about, why it matters, what changed and what they need to do next.
+After the first send, lead with one short, evidence-based result, such as "Delivered to Shane." Say "Sent to Shane" or "Queued for Shane" when that is all the result proves. Then say "You can check for replies here in Claude Code—just ask me," using the current host's name. Add at most one short sentence about a remaining installation problem or pending app installation. Do not append a feature list, another offer to check for replies, or routine assurances about actions the person never requested. Keep the exact two first-message payloads and their approval intact before the send; brevity never removes consent or hides a failure.
+
+After new setup, include the person's reusable invitation immediately below this short result, even if they skip the first-message tutorial. Retrieve their own verified invite.shareText and invite.url from the setup result, or use protocol invite-link if needed. Present the complete shareText beneath the bold title **Invite someone to Relay**, in one fenced plain-text code block so the entire message can be copied. Do not merely mention that an invite is available, ask whether to show it, or present a bare link. Use the human invitation URL at /i/{token}, never /agent or a one-time approval URL. Never substitute the original inviter's link, invent a URL, or send the invitation to anyone yourself. If shareText is unavailable but the person's own invitation URL is verified, use this message with the placeholder replaced; if neither is available, briefly say the invitation could not be retrieved and omit the block.
+
+**Invite someone to Relay**
+
+```text
+Join me on Relay so we can message each other from our AI conversations.
+
+<your own Relay invitation URL>
+
+Open the link, or paste this whole message into Claude Code or Codex and ask it to help you connect.
+```
+
+Put the separate optional block for using Relay in another AI after the invitation, under its own label; never mix that setup handoff into the message for a friend. For a contact-only invitation, simply report the contact result and any next action. Introduce further features only when useful or requested. Before speaking, check that a new user can tell what this is about, why it matters, what changed and what they need to do next.
+<!-- END GENERATED RELAY ONBOARDING -->
 
 ## Check for Relay before starting setup
 
@@ -157,13 +173,18 @@ After the send succeeds:
 
 1. Confirm only that Relay accepted or queued it. Do not claim the inviter
    received or read it unless Relay explicitly reports that later.
-2. Explain that replies are read here in Claude Code or Codex.
-3. Offer a bounded `wait-reply <sent-relay-id>` check here (up to 45 seconds).
-   It never marks read or schedules monitoring after the command finishes.
-4. Mention that Companion adds a visual view of conversations, contacts and
-   settings, and handles encryption and durable sends once connected.
-5. Offer their reusable `invite-link` for sharing. It connects new people and
-   contains no prewritten message. Do not send the link to anyone yourself.
+2. Say: "You can check for replies here in Claude Code—just ask me." Use Codex
+   instead when that is the current host. Do not imply replies automatically
+   appear in the agent conversation.
+3. Do not offer a timed wait or start polling. When the human asks to check,
+   fetch the inbox or conversation once and report what is available now.
+   Show a reply before marking that exact inbound Relay read.
+4. If the app is still installing or a setup issue remains, state that in one
+   short sentence. Do not repeat the installation details or feature list.
+5. Present their complete reusable invitation beneath **Invite someone to
+   Relay**, in one fenced plain-text block, as specified in the communication
+   guide above. Use their own verified human invitation URL. Do not merely
+   offer a link, use the inviter's invitation, or send it to anyone yourself.
 
 After the tutorial finishes or the person skips it, check the pinned Companion's
 `background-status` once if background installation was started. Report whether
