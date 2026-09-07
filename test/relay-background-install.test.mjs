@@ -49,3 +49,73 @@ test("background worker command uses the browser-approved agent setup path", () 
   assert.match(source, /\[entry, "setup", "--agent-protocol"\]/);
   assert.match(source, /stdio: \["ignore", output, output\]/);
 });
+
+function authorizationFixture(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-background-approval-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const env = {
+    RELAY_CONFIG_DIR: root,
+    RELAY_AGENT_CONFIG: path.join(root, "custom-credential.json"),
+    RELAY_AGENT_AUTHORIZATION: path.join(root, "custom-pending.json"),
+  };
+  background.atomicWriteJson(background.statusPath({ env }), {
+    version: 1, status: "installing", pid: process.pid,
+  });
+  return { env, credential: env.RELAY_AGENT_CONFIG, pending: env.RELAY_AGENT_AUTHORIZATION };
+}
+
+test("a prepared Companion waits through approval renewal and the complete credential handoff", async (t) => {
+  const { env, credential, pending } = authorizationFixture(t);
+  fs.writeFileSync(pending, "first approval");
+  let elapsed = 0;
+  let polls = 0;
+  await background.waitForAgentAuthorization({
+    env, now: () => elapsed, timeoutMs: 10_000,
+    sleep: async (ms) => {
+      elapsed += ms;
+      polls++;
+      assert.equal(background.installationStatus({ env }).status, "waiting_authorization");
+      const duplicate = background.startBackgroundInstall({ env, spawnImpl: () => assert.fail("must not start a second installer") });
+      assert.equal(duplicate.alreadyRunning, true);
+      if (polls === 1) fs.writeFileSync(pending, "renewed approval");
+      if (polls === 2) fs.writeFileSync(credential, "private credential contents are not read here");
+      if (polls === 3) fs.rmSync(pending);
+    },
+  });
+  assert.equal(polls, 3, "credential creation alone is not a completed handoff");
+  assert.equal(background.installationStatus({ env }).status, "installing");
+});
+
+test("approval completed during download needs no wait", async (t) => {
+  const { env, credential } = authorizationFixture(t);
+  fs.writeFileSync(credential, "adoption validates this later");
+  await background.waitForAgentAuthorization({ env, sleep: () => assert.fail("already approved") });
+  assert.equal(background.installationStatus({ env }).status, "installing");
+});
+
+test("a missing approval times out without creating credentials or starting account adoption", async (t) => {
+  const { env, credential } = authorizationFixture(t);
+  let elapsed = 0;
+  await assert.rejects(background.waitForAgentAuthorization({
+    env, now: () => elapsed, timeoutMs: 2500,
+    sleep: async (ms) => { elapsed += ms; },
+  }), /Finish the Relay connection, then retry background-install/);
+  assert.equal(elapsed, 2500);
+  assert.equal(fs.existsSync(credential), false);
+});
+
+test("a stopped installer awaiting authorization is reported as failed", (t) => {
+  const { env } = authorizationFixture(t);
+  background.atomicWriteJson(background.statusPath({ env }), { version: 1, status: "waiting_authorization", pid: 0 });
+  assert.equal(background.installationStatus({ env }).status, "failed");
+  assert.equal(background.installationStatus({ env }).reason, "installer_stopped");
+});
+
+test("background setup waits after verified staging and before runtime activation", () => {
+  const source = fs.readFileSync(setupEntry, "utf8");
+  const staging = source.indexOf("const runtime = await stageVerifiedRuntime");
+  const waiting = source.indexOf(".waitForAgentAuthorization()", staging);
+  const activation = source.indexOf("const activated = await activateRuntime", staging);
+  assert.ok(staging >= 0 && waiting > staging && activation > waiting);
+  assert.match(source.slice(staging, waiting), /setupCompatibilityArgs.includes\("--agent-protocol"\).*RELAY_BACKGROUND_INSTALL_WORKER === "1"/);
+});

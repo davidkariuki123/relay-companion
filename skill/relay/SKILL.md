@@ -50,14 +50,22 @@ from the pasted `/i/:token/agent` Relay invite. Never ask the person to paste a
 password, Google credential, one-time code, or Relay access token into chat. Use
 the browser approval URL for identity and permission. Start with the pinned
 protocol helper in this conversation; no skill discovery or agent restart is
-needed. After connect-finish succeeds, follow the invitation's host activation
-procedure: install the skill, attempt supported discovery refresh in the running
-Claude Code or Codex host, and verify the scope of activation. Start
-background-install on a supported desktop. It adopts this same
-approved account without another login. Skip desktop installation on a
-hosted/headless machine. Keep the Companion
-installation non-blocking; continue as soon as the HTTPS protocol is ready and
-report a later installation failure as a recoverable app-install issue.
+needed. Run connect-start and open its approval URL in the person's usual
+browser. With setup permission already given, start the same pinned package's
+background-install on a supported desktop before yielding to wait for browser
+approval. It downloads and verifies Companion while the person approves; do not
+postpone it until authorization finishes. The installer waits for the verified
+connection before adopting that account and activating Companion, without
+another login. Skip desktop installation on a hosted/headless machine.
+
+After browser approval, run connect-finish, then follow the invitation's host
+activation procedure: install the skill, attempt supported discovery refresh in
+the running Claude Code or Codex host, and verify the scope of activation. Keep
+Companion installation non-blocking; continue as soon as the HTTPS protocol is
+ready. If the approval link expires, renew browser approval without restarting
+a running installer. Check background-status; retry installation only if it
+failed or stopped, and report installation failures separately from the working
+connection.
 
 Create the authorization with `POST /v1/agent/authorizations` and consume it
 after browser approval with `POST /v1/agent/authorizations/:id/consume`. Treat

@@ -1377,6 +1377,9 @@ async function setup(argv = []) {
     // archives instead of leaking hundreds of megabytes per interrupted attempt.
     removeAbandonedRuntimeDownloads(layout.releasesDir);
     const runtime = await stageVerifiedRuntime({ version, platformKey, destination: layout.releaseRoot });
+    if (setupCompatibilityArgs.includes("--agent-protocol") && process.env.RELAY_BACKGROUND_INSTALL_WORKER === "1") {
+      await require("./relay-background-install.cjs").waitForAgentAuthorization();
+    }
     const activated = await activateRuntime(layout, runtime, version, { setupCompatibilityArgs });
     if (setupCompatibilityArgs.includes("--code")) {
       console.log(`Relay ${version} is installed and paired. The Relay pill is open.`);

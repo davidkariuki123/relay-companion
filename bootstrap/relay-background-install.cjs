@@ -6,6 +6,7 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 
 const STATUS_VERSION = 1;
+const RUNNING_STATUSES = ["starting", "installing", "waiting_authorization"];
 
 function statusPath({ homeDir = os.homedir(), env = process.env } = {}) {
   return env.RELAY_BACKGROUND_INSTALL_STATUS || path.join(env.RELAY_CONFIG_DIR || path.join(homeDir, ".relay"), "companion-install.json");
@@ -42,7 +43,7 @@ function processAlive(pid) {
 
 function installationStatus(options = {}) {
   const state = readStatus(options);
-  if (["starting", "installing"].includes(state.status) && !processAlive(state.pid)) {
+  if (RUNNING_STATUSES.includes(state.status) && !processAlive(state.pid)) {
     return { ...state, status: "failed", reason: "installer_stopped", finishedAt: new Date().toISOString() };
   }
   return state;
@@ -57,7 +58,7 @@ function startBackgroundInstall({
 } = {}) {
   const paths = { homeDir, env };
   const existing = installationStatus(paths);
-  if (["starting", "installing"].includes(existing.status)) {
+  if (RUNNING_STATUSES.includes(existing.status)) {
     return { ok: true, started: false, alreadyRunning: true, status: existing };
   }
   fs.mkdirSync(path.dirname(statusPath(paths)), { recursive: true, mode: 0o700 });
@@ -84,6 +85,37 @@ function startBackgroundInstall({
 function option(argv, name) {
   const index = argv.indexOf(name);
   return index >= 0 ? argv[index + 1] : "";
+}
+
+// Download and verify first, but never activate or enroll Companion until the
+// helper has verified the browser grant and finished its atomic handoff. Only
+// inspect file existence here; account/consent checks remain in adoption.
+async function waitForAgentAuthorization({
+  env = process.env,
+  homeDir = os.homedir(),
+  exists = fs.existsSync,
+  now = Date.now,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  timeoutMs = 30 * 60 * 1000,
+  intervalMs = 1000,
+} = {}) {
+  const root = env.RELAY_CONFIG_DIR || path.join(homeDir, ".relay");
+  const credential = env.RELAY_AGENT_CONFIG || path.join(root, "agent-protocol.json");
+  const pending = env.RELAY_AGENT_AUTHORIZATION || path.join(root, "agent-authorization.json");
+  const deadline = now() + timeoutMs;
+  const options = { env, homeDir };
+  let waiting = false;
+  while (exists(pending) || !exists(credential)) {
+    if (!waiting) {
+      atomicWriteJson(statusPath(options), { ...readStatus(options), status: "waiting_authorization" });
+      waiting = true;
+    }
+    if (now() >= deadline) {
+      throw new Error("Companion is downloaded but browser approval is not complete. Finish the Relay connection, then retry background-install.");
+    }
+    await sleep(Math.min(intervalMs, deadline - now()));
+  }
+  if (waiting) atomicWriteJson(statusPath(options), { ...readStatus(options), status: "installing" });
 }
 
 async function runWorker(argv = process.argv.slice(2), { spawnImpl = spawn, env = process.env } = {}) {
@@ -146,4 +178,5 @@ module.exports = {
   runWorker,
   startBackgroundInstall,
   statusPath,
+  waitForAgentAuthorization,
 };
