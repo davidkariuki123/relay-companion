@@ -67,6 +67,10 @@ jobs:
           test/pill-open-flow.test.mjs
           test/session-routing.test.mjs
           test/task-completion-wake.test.mjs
+          test/client-transport.test.mjs
+          test/inbox-receiver.test.mjs
+          test/inbox-ingest.test.mjs
+          test/inbox-worker.test.mjs
           test/runtime-capabilities.test.mjs
 
   runtime:

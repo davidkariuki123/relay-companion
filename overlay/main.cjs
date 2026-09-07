@@ -2438,6 +2438,7 @@ function pumpAttention(prebuiltPayload = null) {
   // Persist the in-flight marker BEFORE renderer delivery: death at any point
   // during the animation replays these ids from the queue at next launch.
   writeOverlayPrefs();
+  appendLocalTraces(ids.map((relayId) => ({ event: "relay_notification_dispatched", relayId, surface: "relay_pill" })));
   win.webContents.send("newRelay", rows, {
     ghost: false,
     stacked: digestMode,
@@ -2540,6 +2541,7 @@ async function pushInboxNow(force) {
   const added = attention.enqueueUnseen(attentionQueue, unreadIds, { presentedIds: presentedRelayIds });
   if (added.length || attention.pendingCount(attentionQueue)) writeOverlayPrefs();
   if (added.length) {
+    appendLocalTraces(added.map((relayId) => ({ event: "relay_notification_queued", relayId, surface: "relay_pill" })));
     console.error(`[overlay] ${new Date().toISOString()} attention queued:`, added.join(","));
     startReturnPump();
   }
@@ -9767,6 +9769,13 @@ ipcMain.on("relay:notifDone", () => {
 // click or an idle-counter change made an unread relay reappear 3–4 times for a
 // person who simply looked at the banner and kept working. Lock/sleep/hidden
 // interruptions still abort and replay because those are not visible dwells.
+ipcMain.on("relay:notificationPresented", (event, payload) => {
+  if (!win || win.isDestroyed() || event.sender !== win.webContents || !win.isVisible()) return;
+  const ids = Array.isArray(payload?.ids) ? payload.ids.slice(0, 200) : [];
+  appendLocalTraces(ids.filter((id) => typeof id === "string" && (activeAttentionIds.has(id) || presentedRelayIds.has(id)))
+    .map((relayId) => ({ event: "relay_notification_presented", relayId, surface: "relay_pill" })));
+});
+
 ipcMain.on("relay:attentionDone", (_event, payload) => {
   const legacy = Array.isArray(payload);
   const ids = new Set((legacy ? payload : (payload && payload.ids) || []).map(String));

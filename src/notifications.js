@@ -542,7 +542,7 @@ export function updateStagedRelayAttachments(relayId, attachments, { statePath =
 
 export function stagePlainRelayItem(
   { item, packet, attachmentUrls = {} },
-  { statePath = companionStatePath(), forceUnread = false } = {},
+  { statePath = companionStatePath(), forceUnread = false, isCurrent = () => true } = {},
 ) {
   if (!item?.relayId) throw new Error("stagePlainRelayItem requires an inbox item with relayId");
   // A rolling API deploy may briefly return a pre-v3 packet to a v3+ client.
@@ -555,6 +555,7 @@ export function stagePlainRelayItem(
   // relay — a permanently invisible message. Failing the poll and retrying in
   // 4s is strictly better. Throwing keeps the caller's no-ledger-on-error path.
   const strict = withJsonLockStrict(statePath, () => {
+  if (!isCurrent()) throw new Error("Inbox account changed before staging");
   const state = readCompanionState(statePath);
   state.packets ||= {};
   state.chats ||= {};

@@ -100,6 +100,47 @@ function captureTransportWarnings(t) {
   return warnings;
 }
 
+test("simultaneous inbox and live-feed startup share a healthy initial pool", async (t) => {
+  await closeRelayConnections();
+  const warnings = captureTransportWarnings(t);
+  const server = http.createServer((req, res) => {
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify(req.url.startsWith("/v1/account-events") ? { version: "1", changed: false } : { user: { id: "fixture" } }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { await closeRelayConnections(); await new Promise((resolve) => server.close(resolve)); });
+  const relay = new RelayClient({ url: `http://127.0.0.1:${server.address().port}`, token: "fixture" });
+  const [me, event] = await Promise.all([relay.me(), relay.waitForAccountChange()]);
+  assert.equal(me.user.id, "fixture"); assert.equal(event.version, "1");
+  assert.deepEqual(warnings, [], "a peer request retired the newly initialized shared pool");
+});
+
+test("a healthy live wait survives the ordinary 15-second deadline", { timeout: 20_000 }, async (t) => {
+  const server = http.createServer((_req, res) => {
+    setTimeout(() => { res.setHeader("content-type", "application/json"); res.end('{"version":"1","changed":false}'); }, 15_100);
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { await closeRelayConnections(); await new Promise((resolve) => server.close(resolve)); });
+  const relay = new RelayClient({ url: `http://127.0.0.1:${server.address().port}`, token: "fixture" });
+  assert.deepEqual(await relay.waitForAccountChange("1"), { version: "1", changed: false });
+});
+
+test("cancelling a live wait closes it without retrying or disrupting inbox requests", async (t) => {
+  let waits = 0; const connected = Promise.withResolvers();
+  const server = http.createServer((req, res) => {
+    if (req.url.startsWith("/v1/account-events")) { waits++; connected.resolve(); return; }
+    res.setHeader("content-type", "application/json"); res.end('{"user":{"id":"fixture"}}');
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { await closeRelayConnections(); await new Promise((resolve) => server.close(resolve)); });
+  const relay = new RelayClient({ url: `http://127.0.0.1:${server.address().port}`, token: "fixture" });
+  const controller = new AbortController();
+  const wait = relay.waitForAccountChange("1", controller.signal);
+  const rejected = assert.rejects(wait, { name: "AbortError" });
+  await connected.promise; controller.abort(); await rejected;
+  assert.equal(waits, 1); assert.equal((await relay.me()).user.id, "fixture");
+});
+
 test("a read survives one App Runner socket cutover on a fresh pool", async (t) => {
   const { requests, url } = await flakyTransportServer(t, { user: { id: "user_after_cutover" } });
   const warnings = captureTransportWarnings(t);

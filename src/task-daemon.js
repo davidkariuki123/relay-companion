@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { RelayClient } from "./client.js";
+import { RelayClient, secureRelayApiUrl } from "./client.js";
 import {
   ensureRuntimeSession,
   freshMessages,
@@ -36,6 +36,9 @@ import { storeDir } from "./host-paths.js";
 import { readCanonicalRuntime } from "./canonical-runtime.js";
 import { autostartWillReplace } from "./autostart-registration.js";
 import { startRelayCodexProjectRepairLoop } from "./codex-project-repair.js";
+import { startInboxWorker } from "./inbox-worker-controller.js";
+import { inboxAccountScope, processInboxAttachments } from "./inbox-work.js";
+import localTrace from "./local-trace.cjs";
 import {
   processTaskCompletionWakes as defaultProcessTaskCompletionWakes,
   queueTaskCompletionWake as defaultQueueTaskCompletionWake,
@@ -202,38 +205,41 @@ const PACKET_BATCH_SIZE = 100;
 
 /**
  * Fetch packets for `items` in as few round trips as the server allows, falling
- * back to the one-at-a-time route against a server too old to know the batch
+ * back to bounded individual requests against a server too old to know the batch
  * endpoint (a companion always outruns the API deploy on someone's machine).
  * Returns a Map of relayId -> {packet, attachmentUrls}; ids the server withheld
  * are simply absent, and the caller skips them.
  */
-async function fetchPacketsForItems({ client, items, log }) {
+async function fetchPacketsForItems({ client, items, log, onPacket = () => {}, isCurrent = () => true }) {
   const byId = new Map();
-  if (!items.length) return byId;
-  if (typeof client.fetchRelayPackets === "function") {
-    let batched = true;
-    for (let i = 0; i < items.length; i += PACKET_BATCH_SIZE) {
-      const slice = items.slice(i, i + PACKET_BATCH_SIZE);
+  const accept = (item, value) => {
+    if (!isCurrent() || !value?.packet) return;
+    byId.set(item.relayId, value);
+    onPacket(item, value);
+  };
+  let batchSupported = typeof client.fetchRelayPackets === "function";
+  for (let i = 0; i < items.length && isCurrent(); i += PACKET_BATCH_SIZE) {
+    const slice = items.slice(i, i + PACKET_BATCH_SIZE);
+    if (batchSupported) {
       try {
         const res = await client.fetchRelayPackets(slice.map((item) => item.relayId));
-        for (const [id, value] of Object.entries((res && res.packets) || {})) byId.set(id, value);
+        for (const item of slice) accept(item, res?.packets?.[item.relayId]);
+        continue;
       } catch (err) {
-        // 404 means this API predates the batch route; anything else is a real
-        // failure but the per-id path is still worth trying before giving up.
+        if ([404, 405].includes(err.status)) batchSupported = false;
         log(`batch packet fetch failed (${err.message}); falling back to per-relay fetch`);
-        batched = false;
-        break;
       }
     }
-    if (batched) return byId;
-    byId.clear();
-  }
-  for (const item of items) {
-    try {
-      byId.set(item.relayId, await client.fetchRelay(item.relayId));
-    } catch (err) {
-      log(`ordinary Relay fetch failed for ${item.relayId}: ${err.message}`);
-    }
+    // A single slow packet cannot hold every other ready item behind it.
+    // Successful earlier batches are already staged and are never re-fetched.
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(4, slice.length) }, async () => {
+      while (next < slice.length && isCurrent()) {
+        const item = slice[next++];
+        try { accept(item, await client.fetchRelay(item.relayId)); }
+        catch (err) { log(`ordinary Relay fetch failed for ${item.relayId}: ${err.message}`); }
+      }
+    }));
   }
   return byId;
 }
@@ -273,12 +279,15 @@ async function pollPlainInbox({
   agentContextScope = client?.token || "",
   queueCompletionWake = defaultQueueTaskCompletionWake,
   processCompletionWakes = defaultProcessTaskCompletionWakes,
+  queueAttachments,
+  isCurrent = () => true,
 }) {
   if (typeof client.inbox !== "function" || typeof client.fetchRelay !== "function") return [];
   try {
     // Summary projection: identity and change-detection fields only. The bodies
     // arrive with the packets below, for the few relays that are actually new.
     const inbox = await client.inbox({ summary: true });
+    if (!isCurrent()) throw new Error("Inbox account changed during refresh");
     // Reconcile cross-surface changes for ordinary accounts, which never call
     // the task-scoped endpoints that used to be the only inboxState source. A relay
     // deleted on the web (or read-all'd from another device) must leave this pill
@@ -290,22 +299,20 @@ async function pollPlainInbox({
       if (markedRead) log(`marked ${markedRead} Relay item(s) read from another surface`);
     }
     const fresh = freshPlainRelays(ledger, inbox.items || []);
-    const packets = await fetchPacketsForItems({ client, items: fresh, log });
+    localTrace.appendLocalTraces(fresh.map((item) => ({ event: "relay_discovered", relayId: item.relayId, surface: "receiver" })), { home: agentContextHome });
     const staged = [];
-    for (const item of fresh) {
-      const relay = packets.get(item.relayId);
-      // Withheld or failed: leave it out of the ledger so the next poll retries.
-      if (!relay || !relay.packet) continue;
+    const packets = await fetchPacketsForItems({ client, items: fresh, log, isCurrent, onPacket: (item, relay) => {
       try {
         const seen = ledger.plainRelays[item.relayId];
         stagePlainRelay(
           { item, packet: relay.packet, attachmentUrls: relay.attachmentUrls || {} },
-          { forceUnread: Boolean(item.restoredAt && seen?.restoredAt !== item.restoredAt) },
+          { forceUnread: Boolean(item.restoredAt && seen?.restoredAt !== item.restoredAt), isCurrent },
         );
         // Correlate before committing the inbox ledger. If durable wake queueing
         // fails, this Relay remains fresh and the next poll retries instead of
         // permanently losing the only completion notification.
         queueCompletionWake({ item, packet: relay.packet });
+        queueAttachments?.({ item, packet: relay.packet });
         staged.push(item);
         log(`staged ordinary Relay from ${item.sender?.name || "someone"}: ${item.title || item.relayId}`);
         // Commit progress as it happens. The ledger used to be written only
@@ -318,7 +325,8 @@ async function pollPlainInbox({
       } catch (err) {
         log(`ordinary Relay staging failed for ${item.relayId}: ${err.message}`);
       }
-    }
+    } });
+    if (!isCurrent()) throw new Error("Inbox account changed during refresh");
     // Reuse the summary response already fetched for human delivery. The hook
     // index contains metadata plus, for untitled typed texts, the text itself
     // (an untitled relay has no other content); it is account-scoped, and its
@@ -329,9 +337,9 @@ async function pollPlainInbox({
     } catch (err) {
       log(`recent Relay context persistence failed: ${err.message}`);
     }
-    // Prefetch attachments only after every stage + ledger commit has landed,
-    // so a slow download can never delay the relays queued behind it.
-    for (const item of staged) {
+    // One-shot callers retain eager downloads. The daemon's receiver instead
+    // queues durable work so downloads cannot delay a later inbox refresh.
+    for (const item of queueAttachments ? [] : staged) {
       const relay = packets.get(item.relayId);
       if (!relay || !relay.packet) continue;
       await prefetchStagedRelayAttachments({
@@ -373,8 +381,9 @@ async function pollHumanNotifications({
   persistLedger = () => {},
   queueCompletionWake = defaultQueueTaskCompletionWake,
   processCompletionWakes = defaultProcessTaskCompletionWakes,
+  includeOrdinary = true,
 }) {
-  const ordinaryRelays = await pollPlainInbox({
+  const ordinaryRelays = includeOrdinary ? await pollPlainInbox({
     client,
     ledger,
     stagePlainRelay,
@@ -382,7 +391,7 @@ async function pollHumanNotifications({
     persistLedger,
     queueCompletionWake,
     processCompletionWakes,
-  });
+  }) : [];
   try {
     const [me, tasks, relays, connectors] = await Promise.all([
       client.me(),
@@ -434,8 +443,11 @@ export async function pollOrdinaryRelayOnce({
   agentContextScope = client?.token || "",
   queueCompletionWake = defaultQueueTaskCompletionWake,
   processCompletionWakes = defaultProcessTaskCompletionWakes,
+  queueAttachments,
+  isCurrent = () => true,
+  ledger = readTaskLedger(),
+  saveLedger = writeTaskLedger,
 } = {}) {
-  const ledger = readTaskLedger();
   // Write-skip (2026-08-05 always-on-cost audit): an idle account rewrote an
   // identical ~150KB ledger every 4s poll, forever. Only touch the disk when a
   // poll actually changed the dedupe state.
@@ -444,7 +456,7 @@ export async function pollOrdinaryRelayOnce({
   // stages nothing and so still writes nothing.
   const persistLedger = () => {
     pruneLedger(ledger);
-    writeTaskLedger(ledger);
+    saveLedger(ledger);
   };
   const ordinaryRelays = await pollPlainInbox({
     client,
@@ -456,9 +468,11 @@ export async function pollOrdinaryRelayOnce({
     agentContextScope,
     queueCompletionWake,
     processCompletionWakes,
+    queueAttachments,
+    isCurrent,
   });
   pruneLedger(ledger);
-  if (ledgerContentSignature(ledger) !== ledgerBaseline) writeTaskLedger(ledger);
+  if (ledgerContentSignature(ledger) !== ledgerBaseline) saveLedger(ledger);
   return { ordinaryRelays, inboxOk: ordinaryRelays.inboxOk !== false };
 }
 
@@ -470,6 +484,7 @@ export async function pollTaskRuntimeOnce({
   adapters,
   queueCompletionWake = defaultQueueTaskCompletionWake,
   processCompletionWakes = defaultProcessTaskCompletionWakes,
+  includeOrdinary = true,
 } = {}) {
   const ledger = readTaskLedger();
   const ledgerBaseline = ledgerContentSignature(ledger); // see pollOrdinaryRelayOnce
@@ -577,6 +592,7 @@ export async function pollTaskRuntimeOnce({
     },
     queueCompletionWake,
     processCompletionWakes,
+    includeOrdinary,
   });
   pruneLedger(ledger);
   if (ledgerContentSignature(ledger) !== ledgerBaseline) writeTaskLedger(ledger);
@@ -776,9 +792,10 @@ export async function daemonDeliveryTick({
   features,
   taskPoll = pollTaskRuntimeOnce,
   ordinaryPoll = pollOrdinaryRelayOnce,
+  includeOrdinary = true,
 } = {}) {
   if (features && features.requests === false) {
-    const result = await ordinaryPoll({ client, log });
+    const result = includeOrdinary ? await ordinaryPoll({ client, log }) : { ordinaryRelays: [], inboxOk: true };
     return {
       ordinaryOnly: true,
       sessions: [],
@@ -788,7 +805,7 @@ export async function daemonDeliveryTick({
       ...result,
     };
   }
-  return { ordinaryOnly: false, ...(await taskPoll({ client, log })) };
+  return { ordinaryOnly: false, ...(await taskPoll({ client, log, includeOrdinary })) };
 }
 
 function daemonProductFeatures(log, user) {
@@ -888,6 +905,7 @@ export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
   // own registry retry/backoff and remains independent from the task-poll loop.
   const log = (m) => console.log(`[relay] ${new Date().toISOString()} ${m}`);
   migratePersistedContentFields({ log });
+  startInboxWorker({ intervalMs, log });
   // Repair Relay.app + launchd surfaces independently of npm postinstall. This is a
   // bounded, per-version migration; it reloads only the pill and never unloads this
   // currently running daemon.
@@ -983,6 +1001,7 @@ export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
   let featureRefreshAt = Date.now() + ACCOUNT_FEATURE_REFRESH_MS;
   let consecutiveFailures = 0;
   let stewardInFlight = null;
+  let inboxWorkInFlight = null;
   for (;;) {
     if (client.accountDrift().status !== "same" && localServer) {
       await localServer.close();
@@ -1000,6 +1019,16 @@ export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
       featureRefreshAt = Date.now() + ACCOUNT_FEATURE_REFRESH_MS;
     }
     void claudeRuntime.tick();
+    if (!inboxWorkInFlight) {
+      const backgroundClient = new RelayClient();
+      const isCurrent = () => backgroundClient.accountDrift().status === "same" && backgroundClient.url === secureRelayApiUrl(apiUrl());
+      inboxWorkInFlight = Promise.allSettled([
+        processInboxAttachments({ scope: inboxAccountScope(backgroundClient), isCurrent, log }),
+        defaultProcessTaskCompletionWakes({ log }),
+      ]).then((results) => {
+        for (const result of results) if (result.status === "rejected") log(`inbox background work failed: ${result.reason?.message || result.reason}`);
+      }).finally(() => { inboxWorkInFlight = null; });
+    }
     await sessionControllerTick({ client, log, features });
     // The Todo steward decides for itself whether anything is due; a run is a
     // background provider process and never blocks delivery below.
@@ -1008,7 +1037,7 @@ export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
         .finally(() => { stewardInFlight = null; });
     }
     try {
-      const result = await daemonDeliveryTick({ client, log, features });
+      const result = await daemonDeliveryTick({ client, log, features, includeOrdinary: false });
       if (result.ordinaryOnly) {
         if (result.ordinaryRelays.length) log(`processed ${result.ordinaryRelays.length} ordinary relay(s)`);
       } else if (

@@ -107,6 +107,9 @@ async function relayTransport() {
   if (!transportPromise) transportPromise = createRelayTransport();
   const pending = transportPromise;
   const created = await pending;
+  // Concurrent startup requests await the same import. The first adopts this
+  // pool and clears transportPromise; the others must reuse it, not close it.
+  if (dispatcher === created.dispatcher && undiciFetch === created.fetch) return created;
   if (transportPromise !== pending) {
     // closeRelayConnections() retired this pool while its import was pending.
     if (created.dispatcher) await created.dispatcher.close().catch(() => {});
@@ -253,6 +256,9 @@ export class RelayClient {
     clientName = "relay-companion",
     sourceProvider = "",
     nativeSessionId = "",
+    signal,
+    timeoutMs = 15000,
+    retry = true,
   } = {}) {
     const hasBody = body !== undefined;
     const headers = hasBody ? { "Content-Type": "application/json" } : {};
@@ -268,17 +274,18 @@ export class RelayClient {
       const telemetry = companionFleetTelemetryHeader();
       if (telemetry) headers[COMPANION_TELEMETRY_HEADER] = telemetry;
     }
-    const retryable = requestCanRetry(method, body);
+    const retryable = retry && requestCanRetry(method, body);
     for (let attempts = 1; attempts <= 2; attempts += 1) {
       const transportRef = { current: null };
       try {
+        signal?.throwIfAborted();
         const res = await keepAliveFetch(`${this.url}${path}`, {
           method,
           headers,
           body: hasBody ? JSON.stringify(body) : undefined,
           // A hung request must never stall a caller forever (the pill serializes its
-          // payload pushes behind these calls). 15s is generous for every route we have.
-          signal: AbortSignal.timeout(15000),
+          // payload pushes behind these calls). Live waits opt into a longer deadline.
+          signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
         }, transportRef);
         const text = await res.text();
         const data = text ? JSON.parse(text) : {};
@@ -294,6 +301,7 @@ export class RelayClient {
         }
         return data;
       } catch (error) {
+        if (signal?.aborted) throw error;
         if (!isRetryableTransportFailure(error)) throw error;
         retireRelayTransport(transportRef.current);
         const retrying = retryable && attempts === 1;
@@ -310,6 +318,15 @@ export class RelayClient {
 
   me() {
     return this.#req("GET", "/v1/me");
+  }
+
+  // The server holds healthy waits for 25 seconds. The ordinary request's
+  // 15-second deadline must not interrupt them; reconnect belongs to the receiver.
+  waitForAccountChange(since, signal) {
+    const query = since === undefined ? "" : `?since=${encodeURIComponent(since)}`;
+    return this.#req("GET", `/v1/account-events/wait${query}`, undefined, {
+      signal, timeoutMs: 35_000, retry: false,
+    });
   }
 
   /** Stable personal invite link for Companion onboarding. The established

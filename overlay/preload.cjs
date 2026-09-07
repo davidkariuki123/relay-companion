@@ -298,6 +298,7 @@ contextBridge.exposeInMainWorld("relay", {
   notifDone: () => ipcRenderer.send("relay:notifDone"),
   // Legacy array form = bare id list; object form carries dwell/interaction
   // evidence for the attention queue's confirmed-seen protocol.
+  notificationPresented: (ids) => ipcRenderer.send("relay:notificationPresented", { ids }),
   attentionDone: (payload) =>
     ipcRenderer.send(
       "relay:attentionDone",

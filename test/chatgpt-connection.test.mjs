@@ -68,14 +68,14 @@ test("ordinary users see ChatGPT as coming soon and Claude as connectable", () =
   assert.match(html, /connectClaude\.addEventListener\("click", connectClaudeFromSettings\)/);
 });
 
-test("versioned invite onboarding is durable and applies once to every account", () => {
-  assert.match(main, /const COMPANION_ONBOARDING_VERSION = 1/);
+test("versioned first-send onboarding keeps durable progress for each account", () => {
+  assert.match(main, /const COMPANION_ONBOARDING_VERSION = 2/);
   assert.match(main, /let onboardingVersions = overlayPrefs\.onboardingVersions/);
   assert.match(main, /onboardingRequired: currentAccount\.paired && completedOnboardingVersion < COMPANION_ONBOARDING_VERSION/);
   assert.match(main, /ipcMain\.handle\("relay:completeSetupTutorial", \(\) => completeSetupTutorial\(\)\)/);
   assert.match(html, /payload\.ui\?\.onboardingRequired === true/);
-  assert.match(html, /Bring someone into Relay\./);
-  assert.match(html, /id="suCopyInvite"/);
+  assert.match(html, /signupStage === "first-relay"/);
+  assert.match(html, /Your first Relay is sent\./);
   assert.match(html, /id="suChatSkip"/);
   assert.match(html, /id="suChatSkip"/);
 });

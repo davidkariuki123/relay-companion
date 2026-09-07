@@ -16935,6 +16935,11 @@
   if (window.relay.onNewRelay) window.relay.onNewRelay((row, opts) => {
     if (opts && opts.ghost) ghostArrival(row); // pill dismissed -> free-standing banner
     else notifyArrival(row, opts);
+    const ids = (Array.isArray(row) ? row : [row]).filter(Boolean).map((item) => item.id);
+    // Two frames acknowledge presentation eligibility without marking mail read.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      window.relay.notificationPresented?.(ids);
+    }));
   });
   if (window.relay.onOpenFull) window.relay.onOpenFull(() => trayOpen());
   // The OS window was just re-shown; reset notification dwell state until the
