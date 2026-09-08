@@ -1435,6 +1435,18 @@ export function writeClaudeCodeMcpConfig(
   }
 }
 
+export function claudeCodeMcpEntryAbsent(configPath = claudeCodeConfigPath()) {
+  if (!fs.existsSync(configPath)) return true;
+  try {
+    const cfg = readJsonObject(configPath);
+    if (!cfg.mcpServers || typeof cfg.mcpServers !== "object" || Array.isArray(cfg.mcpServers)) return true;
+    return !("relay" in cfg.mcpServers);
+  } catch {
+    // A config we cannot read cannot prove absence.
+    return false;
+  }
+}
+
 export function removeClaudeCodeMcpConfig(configPath = claudeCodeConfigPath()) {
   if (!fs.existsSync(configPath)) return { ok: true, configPath };
   try {
@@ -2152,6 +2164,17 @@ export function writeCodexMcpConfig(
       configPath,
       detail: error && error.message ? error.message : String(error),
     };
+  }
+}
+
+export function codexMcpEntryAbsent(configPath = codexConfigPath()) {
+  if (!fs.existsSync(configPath)) return true;
+  try {
+    const header = "[mcp_servers.relay]";
+    return !fs.readFileSync(configPath, "utf8").split(/\r?\n/).some((line) => line.trim() === header);
+  } catch {
+    // A config we cannot read cannot prove absence.
+    return false;
   }
 }
 
@@ -3008,6 +3031,12 @@ export async function installAgentSkills(options = {}) {
   return relaySkill.installBundled({ consent: true, ...options });
 }
 
+/** Remove only manifest-owned Relay skill trees, preserving human changes. */
+export function uninstallAgentSkills(options = {}) {
+  const relaySkill = createRequire(import.meta.url)("../bootstrap/relay-skill.cjs");
+  return relaySkill.uninstallManaged(options);
+}
+
 /**
  * Refresh agent MCP registrations and Relay-owned hooks after an auto-update.
  * The daemon calls this from the newly installed tree, so future host sessions
@@ -3691,7 +3720,7 @@ export function retryUninstallStep(id, label, operation, {
   };
 }
 
-export function mcpCliRemovalResult(result) {
+export function mcpCliRemovalResult(result, { verifyAbsent = null } = {}) {
   if (result?.ok) return result;
   const out = String(result?.out || "");
   if (result?.missing) return { ...result, ok: true, skipped: true, detail: "Host CLI is not installed." };
@@ -3700,6 +3729,11 @@ export function mcpCliRemovalResult(result) {
   ) {
     return { ...result, ok: true, alreadyAbsent: true };
   }
+  // Host wording drifts between releases, and an absent entry is the outcome
+  // this step wants. Since Relay moved MCP onto the Companion transport, most
+  // installs have no entry at all, so refusing on an unrecognised phrase failed
+  // every uninstall it could never fix. Ask the host's own config instead.
+  if (verifyAbsent?.()) return { ...result, ok: true, alreadyAbsent: true, verified: true };
   return { ...result, ok: false, detail: out || "The host CLI could not remove Relay." };
 }
 
@@ -3760,11 +3794,22 @@ export function runUninstall({
     return { ...brokerStop, skipped: true };
   });
 
+  // Skills are outside ~/.relay and ~/.relay-companion, so purgeLocalState
+  // cannot remove them. Stop the hosts first, then remove only trees whose
+  // ownership marker and file hashes prove they are still Relay-managed.
+  const managedSkills = record("managed_skills", "Relay's managed agent skills", () =>
+    uninstallAgentSkills({ homeDir, env }),
+  );
+
   const claudeCliRemoval = record("claude_cli_mcp", "Claude Code's user MCP registration", () =>
-    mcpCliRemovalResult(runCommand("claude", ["mcp", "remove", "-s", "user", "relay"])),
+    mcpCliRemovalResult(runCommand("claude", ["mcp", "remove", "-s", "user", "relay"]), {
+      verifyAbsent: () => claudeCodeMcpEntryAbsent(),
+    }),
   );
   const codexCliRemoval = record("codex_cli_mcp", "Codex's user MCP registration", () =>
-    mcpCliRemovalResult(runCommand("codex", ["mcp", "remove", "relay"])),
+    mcpCliRemovalResult(runCommand("codex", ["mcp", "remove", "relay"]), {
+      verifyAbsent: () => codexMcpEntryAbsent(),
+    }),
   );
   const claudeConfigRemoval = record("claude_config_mcp", "Claude Code's Relay MCP config", () => removeClaudeCodeMcpConfig());
   const codexConfigRemoval = record("codex_config_mcp", "Codex's Relay MCP config", () => removeCodexMcpConfig());
@@ -3862,6 +3907,7 @@ export function runUninstall({
     failures,
     services,
     updateAgents,
+    managedSkills,
     claudeCode: { ok: claudeCliRemoval.ok && claudeConfigRemoval.ok && claudeHookRemoval.ok },
     codex: { ok: codexCliRemoval.ok && codexConfigRemoval.ok && codexHookRemoval.ok },
     claudeDesktop: { ...claudeDesktopRemoval, removedFrom: removedDesktopPaths },
@@ -3873,7 +3919,7 @@ export function runUninstall({
 export function uninstallResultLines(result) {
   const lines = [];
   if (result?.ok) {
-    lines.push("Removed Relay's MCP registrations and hooks from Claude Code, Codex, and Claude Desktop.");
+    lines.push("Removed Relay's managed skills, MCP registrations, and hooks from Claude Code, Codex, and Claude Desktop.");
     lines.push("Stopped Relay's background services and disconnected live Relay MCP processes.");
   } else {
     lines.push("Relay uninstall is incomplete.");

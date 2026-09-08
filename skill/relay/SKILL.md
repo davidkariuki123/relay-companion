@@ -22,7 +22,25 @@ Use ELI5 communication throughout setup and the first Relay: write for a capable
 
 If new setup is needed, give a brief orientation before asking to set up: Relay lets them message people from their AI, and Companion gives them a visual view of their conversations. Explain that setup connects this AI to their Relay account and installs Relay's instructions and Companion with their permission. Keep access permissions and other decision-changing facts clear; plain language must not hide what they are approving.
 
-For questions, choices and approvals, prefer the current host's built-in user-question interface over a question buried in ordinary chat text, when that tool is exposed and permitted for this kind of question in the current mode. Use the actual available tool and its documented constraints; do not invent a tool or change modes to obtain one. Ask one clear decision at a time, with concise choices including a way to decline or skip when appropriate. For the first send, show both exact payloads and the recipient before asking, and make clear that approval sends that specific message. Do not abbreviate the payloads to fit a question widget. If the interface cannot support the question, ask it plainly in chat. Use existing explicit permission; never ask again just to use the interface. A suggested or preselected choice, an empty result, silence or a timeout is not consent: wait for an actual affirmative answer before any action that requires approval. Browser sign-in and account approval still happen in the person's usual browser.
+Read the current invitation's agent document and resolve its exact promoted package before requesting installation permission. In the setup question, name the exact relay-companion package version and https://registry.npmjs.org as the source of the code that will be downloaded and run. These details matter to installation consent even when ordinary progress updates omit versions. Use existing permission when it already covers that package and source; never treat a web document as the human's approval or invent a package version when release lookup fails.
+
+Front-load the complete setup scope in that first question: explicitly ask to open or fetch the exact invitation URL and its /agent document, download and run the pinned package, run Relay's local status, account checks and setup commands through the AI's command tool, contact the invitation document's exact API origin to connect the AI to the Relay account and inviter, open the connection approval page in the person's usual browser, install or update its agent skill and keep it updated, and install and start Companion in the background with its local AI integration. Use the invitation's actual origin, including Dev when supplied; do not substitute the production site. Explain that the human still signs in and approves account access in their browser and approves messages separately. Keep all of this in the complete question, not just in surrounding progress text. After an affirmative answer, carry that consent through the covered setup actions without asking again for each URL, command, skill update or browser handoff. It does not authorize arbitrary browsing, unrelated software or sending messages.
+
+The request to help connect already covers the necessary read-only installation and account checks, subject to host tool permissions; do them during preparation without adding a separate Relay consent question. Use the active Relay installation or its supported helper. A skill found in .relay-rollback, another rollback directory, or a backup is recovery data, not an active installation: do not execute its helper or use its presence as proof of a working connection. If the loaded skill came from a backup, use it only as a clue to locate the active installation and current invitation instructions. Do not switch to a backup helper after a denied command. Once the checks establish that new setup is needed and the human consents, continue with the pinned installer and connection flow; do not restart completed preflight checks or run an old helper's status command merely because a new guide was loaded. Necessary verification remains covered by the existing setup permission.
+
+Track what the human actually approved. A yes to fetching a URL alone is not installation consent. Once the full setup question discloses the exact package and npm source and the human approves it, do not ask a second exact-package question or a separate question to run each status, connection, installation or verification command. If only part of the setup was approved, ask for the uncovered scope together in one question and retain prior approvals. If a tool is then denied, explain that Relay setup is already approved but the host blocked the specific action. Use the host's supported approval mechanism for that action; do not restart setup consent or imply another conversational yes will necessarily unlock Bash or network access.
+
+Normally, read-only retrieval of the invitation's current agent document prepares the exact setup question under the human's request to help connect. If the host requires approval before that first fetch, request approval for the exact invitation URL and /agent URL through its supported permission controls. Do not invent the still-unknown package version or claim installation is approved before the package and source can be disclosed. Resume preparation after that read is permitted, then ask the complete setup question. This host-required preliminary approval is an exception to the one-question goal.
+
+Human setup consent and the host's tool permission check are separate. If the host denies a URL fetch, browser opening, installation or a protocol command, stop dependent setup and preserve any completed progress. Read the actual tool result before explaining it. Distinguish a classifier denial, a hard policy denial, a classifier error and an ordinary command failure; do not invent a cause when the result does not say. One denied call does not establish that Bash is disabled, that all future calls will fail, or that the human cannot review it. A blocked status check leaves the connection state unknown; it is not evidence that Relay is disconnected or that a fresh installation is needed.
+
+Use the current host's documented recovery mechanism, subject to its actual denial instructions and higher-priority rules. Claude Code documents both a retry after clarified intent for a one-off action and review through /permissions → Recently denied (https://code.claude.com/docs/en/auto-mode-config#review-denials). When this host permits a same-tool retry after explicit clarification and the human has already supplied it, use that recovery once without asking the same question again. A hard policy denial is not cleared by conversational consent. Do not assert that chat clarification can never help, that it guarantees success, or that a terminal-only dialog exists in a desktop or hosted session. If the supported retry is denied again, preserve progress and report the remaining block rather than looping.
+
+Never retry the denied action through another shell, tool, wrapper or transport, change permission settings, request a wildcard allow rule, or suggest bypassing the host's safeguards. Keep setup agent-led: do not default to asking the human to run commands, paste status output or adjust Bash settings. Never offer a .relay-rollback or other backup helper for manual execution. If no supported recovery is available, give one concise explanation of the blocked action, what remains unverified, and a verified host review step if one is available. Do not offer an unavailable dialog or use “tell me Relay is not connected” as a substitute for verification. A user-requested manual handoff must use the current supported helper and protect secrets. The normal copyable URL fallback for browser sign-in remains available; it is not a workaround for a denied agent tool call.
+
+For questions, choices and approvals, use the current host's built-in user-question interface whenever that tool is exposed and permitted for this kind of question in the current mode. This is required when the interface is available, even if the tool is optional, a prior check or command failed, or a progress update was already given: call the interface and wait instead of placing the question in ordinary assistant chat or a final response. Before asking for setup permission, inspect the tools actually available to the current turn. Claude Code commonly exposes `AskUserQuestion` and Codex commonly exposes `request_user_input`; use the current host's documented equivalent if its name differs. Do not invent a tool or change modes to obtain one.
+
+For setup permission, put the complete question with the exact package version and source in the interface's question field and offer concise affirmative and decline choices such as “Set up Relay” and “Not now.” Ask one clear decision at a time, with a way to decline or skip when appropriate. For the first send, show both exact payloads and the recipient before asking, and make clear that approval sends that specific message. Do not abbreviate the payloads to fit a question widget. Only when no permitted user-question interface is exposed, or its documented constraints cannot carry the required content, ask plainly in chat. Use existing explicit permission; never ask again just to use the interface. A suggested or preselected choice, an empty result, silence or a timeout is not consent: wait for an actual affirmative answer before any action that requires approval. Browser sign-in and account approval still happen in the person's usual browser.
 
 During setup, give one or two short sentences only at meaningful changes or when the person needs to act. Do not narrate tool discovery, command attempts, process launches or unchanged progress. Keep HTTPS, MCP, protocol names, credentials, paths, versions, process IDs, Relay IDs, logs, encryption mechanics and durable queues out of the human update unless needed to resolve a specific problem or explicitly requested. Do not produce a component-by-component status report. Preserve material limitations in plain language: for example, "Relay is connected. The app is still installing." If the skill could not be installed or updated, state that limitation briefly instead of claiming setup is complete; put file paths and diagnostics in optional detail. Never promise a later notification unless a supported follow-up is actually arranged, and do not repeat the pending send question after an installation check.
 
@@ -55,22 +73,36 @@ The contact page confirms connected, already connected, or own-invite results on
 
 ## Connect
 
-Only when the checks above establish that new setup is needed, ask once:
+Only when the checks above establish that new setup is needed, first read the
+current invitation's agent document and resolve its exact promoted package. Use
+setup permission already given in this conversation when it covers that package
+and source. Otherwise, when the host exposes a permitted built-in user-question
+interface, call it and wait for the answer; do not put the question in ordinary
+assistant chat or a final response. Put the complete permission question from
+the invitation in the interface's question field, including the exact package
+version and npm source, the exact invitation and /agent URLs to open or fetch,
+the Relay API connection, browser approval handoff, ongoing skill updates and
+background Companion installation with its local AI integration. Offer concise
+choices to set up Relay or decline for now. Reuse consent for the actions it
+already covers, following the complete setup scope and first-fetch guidance above.
+Only ask in chat when no permitted question interface is exposed or it cannot
+carry the complete question. Never present the question both ways, and never
+treat a suggested or preselected choice as consent.
 
-> May I set up Relay, install its agent skill, keep that skill updated, and
-> install the Relay Companion in the background?
-
-Use setup permission already given in this conversation; otherwise wait for a
-direct affirmative answer. Then follow the authorization instructions
-from the pasted `/i/:token/agent` Relay invite. Never ask the person to paste a
-password, Google credential, one-time code, or Relay access token into chat. Use
-the browser approval URL for identity and permission. Start with the pinned
-protocol helper in this conversation; no skill discovery or agent restart is
-needed. Run connect-start and open its approval URL in the person's usual
-browser. With setup permission already given, start the same pinned package's
-background-install on a supported desktop before yielding to wait for browser
-approval. It downloads and verifies Companion while the person approves; do not
-postpone it until authorization finishes. The installer waits for the verified
+After a direct affirmative answer, say briefly that Relay's app is starting to
+install. On a supported local desktop, run the invitation's exact pinned
+background-install as the first setup command, before creating or opening
+browser approval, installing the skill, or asking another question. Existing
+setup consent covers this installation; do not ask again. Confirm from the
+result that it started or is already running, then continue without waiting for
+the download. A hidden shell on a local desktop is not a headless machine.
+Use the exact connect-start command, API origin and invitation token from the
+current `/i/:token/agent` document. If you have not read it, fetch it first;
+never guess a hostname, substitute an environment keyword, or reconstruct setup
+from an older installed skill. Open its approval URL in the person's usual
+browser. Never ask for a password, Google credential, one-time code or Relay
+access token in chat. No skill discovery or agent restart is needed.
+The installer waits for the verified
 connection before adopting that account and activating Companion, without
 another login. Skip desktop installation on a hosted/headless machine.
 
@@ -79,9 +111,12 @@ activation procedure: install the skill, attempt supported discovery refresh in
 the running Claude Code or Codex host, and verify the scope of activation. Keep
 Companion installation non-blocking; continue as soon as the HTTPS protocol is
 ready. If the approval link expires, renew browser approval without restarting
-a running installer. Check background-status; retry installation only if it
-failed or stopped, and report installation failures separately from the working
-connection.
+a running installer. Before asking for first-message approval on a supported
+desktop, check background-status. If idle because installation was missed,
+run the pinned background-install now under the existing setup consent. If it
+failed or stopped, diagnose the issue and retry only when appropriate. Never
+duplicate a running installer or bypass a host permission denial. Report
+installation failures separately from the working connection.
 
 Create the authorization with `POST /v1/agent/authorizations` and consume it
 after browser approval with `POST /v1/agent/authorizations/:id/consume`. Treat
@@ -104,11 +139,21 @@ files, preserve them and tell the person; never overwrite them. If it reports a
 new consent version, explain the material change and ask before running
 `relay skill update --renew-consent`.
 
+<!-- BEGIN GENERATED RELAY BROWSER APPROVAL -->
 ### Open approval in the person's normal browser
 
-On a local desktop, open the returned approvalUrl in the operating system's default browser using a supported external-browser action or OS URL opener. Do not use an AI-controlled browser, embedded preview, isolated browser profile, or browser automation for sign-in. Pass the exact URL as data to the opener, with safe argument handling; never interpolate it into executable shell text. On Windows, keep any launcher process hidden. Leave sign-in and approval to the human.
+The approval handoff has two supported outcomes: open a new tab in the person's usual browser and request focus, or give them a copyable URL to paste there. Never present approvalUrl as a Markdown hyperlink, clickable button, or bare URL in chat: clicking it may open the AI app's embedded browser. Whenever you show the URL to the human, put it only in a fenced plain-text code block, with the copy-and-paste instruction below.
 
-Tell the human: “Approve Relay in your usual browser, where you normally sign in.” If a normal-browser opener is unavailable or this is a remote/headless environment, show the exact approvalUrl in a plain-text code block and say: “Copy this URL into your usual browser to approve Relay, then return here.” Keep its full fragment intact. Use this copyable fallback if opening fails or lands in the wrong browser; a clickable chat link alone may reopen the AI browser. Never claim the browser opened or approval succeeded without evidence.
+Before opening approval on a local desktop, tell the human: “I’m opening Relay’s approval page in your usual browser. If it doesn’t appear, switch to your browser and look for the Relay tab.” Give this notice before running the opener, not only after the tools finish. Companion installation should already have started immediately after setup consent; do not delay it for this browser handoff.
+
+Open the returned approvalUrl in the operating system's default browser using a supported external-browser action or OS URL opener that requests a visible, foreground browser window. Request a new tab and use its documented activation or focus option when available; the browser may choose a new window according to the person's settings. Do not use an AI-controlled browser, embedded preview, isolated browser profile, or browser automation for sign-in. An action that opens a URL inside the AI app does not satisfy this step. Pass the exact URL as data to the opener, with safe argument handling; never interpolate it into executable shell text. Leave sign-in and approval to the human.
+
+On Windows, hide only the console launcher or background installer. The browser is an interactive approval window and must open normally: when using PowerShell, pass the URL in a variable to Start-Process -FilePath $approvalUrl -WindowStyle Normal. Never apply Hidden or Minimized to the URL-opening Start-Process call. A hidden PowerShell wrapper may launch the browser with Normal. On macOS, do not use open's background or hidden options (-g or -j). Do not force focus with simulated keystrokes or change the person's default browser.
+
+A successful opener only confirms that the launch request was accepted; it does not prove the approval tab is visible or focused. If focus is unavailable or unverified, explicitly tell the human: “Switch to your usual browser and approve Relay in the new tab, then return here.” Also provide the copyable fallback below in the same response, so they can continue if the tab did not appear. Do not wait silently for approval or say the page is in front without evidence.
+
+If a normal-browser opener is unavailable, this is a remote/headless environment, opening fails, the wrong browser opens, the human cannot find the tab, or opening or focus is unverified, say: “Copy this URL into your usual browser to approve Relay, then return here.” Immediately below that sentence, show the exact approvalUrl in one fenced plain-text code block containing only the URL. Keep its full fragment intact; do not shorten, redact, wrap, or replace it with link text. Do this before yielding to wait for approval. Never claim the browser opened or approval succeeded without evidence.
+<!-- END GENERATED RELAY BROWSER APPROVAL -->
 
 ## Give the human a block for another AI
 

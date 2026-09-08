@@ -14,6 +14,7 @@ const DEFAULT_PENDING = path.join(os.homedir(), ".relay", "agent-authorization.j
 const TRUSTED_RELAY_HOSTS = new Map([
   ["https://api.sendrelays.com", "https://sendrelays.com"],
   ["https://dev-api.sendrelays.com", "https://dev.sendrelays.com"],
+  ["https://cti37jd7vx.us-east-1.awsapprunner.com", "https://8epdrqim29.us-east-1.awsapprunner.com"],
 ]);
 const TUTORIAL_HUMAN = "Hi — I’ve just joined you on Relay.";
 const TUTORIAL_AGENT = "This is my first Relay after joining from your invite. Help the person reply if they want to welcome me.";
@@ -45,6 +46,73 @@ function pendingPath(env = process.env) {
   return env.RELAY_AGENT_AUTHORIZATION || (env.RELAY_CONFIG_DIR ? path.join(env.RELAY_CONFIG_DIR, "agent-authorization.json") : DEFAULT_PENDING);
 }
 
+function currentSkillTarget(env = process.env) {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const candidates = [
+    { host: "codex", target: "primary", directory: path.join(env.CODEX_HOME || path.join(os.homedir(), ".codex"), "skills", "relay") },
+    { host: "codex", target: "compatibility", directory: path.join(os.homedir(), ".agents", "skills", "relay") },
+    { host: "claude", target: "primary", directory: path.join(env.CLAUDE_HOME || path.join(os.homedir(), ".claude"), "skills", "relay") },
+  ];
+  return candidates.find((candidate) => path.resolve(candidate.directory) === root) || null;
+}
+
+function skillFileNames(root, current = root, prefix = "", output = []) {
+  for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+    if (!prefix && entry.name === ".relay-managed.json") continue;
+    const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) skillFileNames(root, path.join(current, entry.name), relative, output);
+    else output.push(relative);
+  }
+  return output;
+}
+
+function managedSkillTelemetryHeader(env = process.env) {
+  try {
+    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+    let state = null;
+    try { state = JSON.parse(fs.readFileSync(path.join(root, ".relay-managed.json"), "utf8")); } catch {}
+    const recordedTarget = ["codex", "claude"].includes(state?.host) && ["primary", "compatibility"].includes(state?.target)
+      ? { host: state.host, target: state.target }
+      : null;
+    const target = recordedTarget || currentSkillTarget(env);
+    if (!target) return "";
+    const managed = state?.schemaVersion === 1 && state?.name === "relay" && Array.isArray(state.files);
+    let modified = false;
+    if (managed) {
+      const expected = new Set(state.files.map((entry) => String(entry?.path || "").replace(/\\/g, "/")));
+      const actual = new Set(skillFileNames(root));
+      if (expected.size !== actual.size || [...expected].some((relative) => !actual.has(relative))) modified = true;
+      for (const entry of state.files) {
+        const relative = String(entry?.path || "").replace(/\\/g, "/");
+        if (!relative || relative.startsWith("/") || relative.split("/").some((part) => !part || part === "." || part === "..")) {
+          modified = true;
+          break;
+        }
+        try {
+          const bytes = fs.readFileSync(path.join(root, ...relative.split("/")));
+          if (createHash("sha256").update(bytes).digest("hex") !== entry.sha256) modified = true;
+        } catch { modified = true; }
+      }
+    }
+    const installedAt = typeof state?.installedAt === "string" && Number.isFinite(Date.parse(state.installedAt))
+      ? new Date(state.installedAt).toISOString()
+      : null;
+    const payload = {
+      name: "relay",
+      host: target.host,
+      target: target.target,
+      ...(managed && /^ski_[A-Za-z0-9_-]{20,80}$/.test(String(state.installationId || "")) ? { installationId: state.installationId } : {}),
+      version: managed && /^\d+\.\d+\.\d+$/.test(String(state.version || "")) ? state.version : null,
+      consentVersion: managed && Number.isSafeInteger(state.consentVersion) && state.consentVersion > 0 ? state.consentVersion : null,
+      status: !managed ? "unmanaged" : modified ? "modified" : "managed",
+      installedAt,
+    };
+    return Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  } catch {
+    return "";
+  }
+}
+
 function relayApiOrigin(value, env = process.env) {
   const parsed = new URL(String(value || ""));
   const loopback = ["localhost", "127.0.0.1", "::1"].includes(parsed.hostname);
@@ -53,7 +121,7 @@ function relayApiOrigin(value, env = process.env) {
   }
   if (TRUSTED_RELAY_HOSTS.has(parsed.origin)) return parsed.origin;
   if (loopback && env.RELAY_AGENT_ALLOW_LOOPBACK === "1" && ["http:", "https:"].includes(parsed.protocol)) return parsed.origin;
-  throw new Error("Relay requires the production or development Relay API host.");
+  throw new Error("Relay requires the production or development Relay API host, or the approved staging API host.");
 }
 
 function trustedApprovalUrl(value, apiUrl, authorizationId, env = process.env) {
@@ -138,6 +206,7 @@ function allowed(method, requestPath) {
 }
 
 async function authenticatedRequest(apiUrl, accessToken, method, requestPath, body) {
+  const skillTelemetry = managedSkillTelemetryHeader();
   const response = await fetch(`${apiUrl}${requestPath}`, {
     method,
     headers: {
@@ -145,6 +214,7 @@ async function authenticatedRequest(apiUrl, accessToken, method, requestPath, bo
       "Content-Type": "application/json",
       "X-Relay-Client": "relay-agent-skill",
       "X-Relay-Send-Contract": "2",
+      ...(skillTelemetry ? { "X-Relay-Skill-Telemetry": skillTelemetry } : {}),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     signal: AbortSignal.timeout(15_000),

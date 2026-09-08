@@ -32,6 +32,17 @@ test("fleet telemetry reports an active canonical runtime without local paths", 
     committedAt: 1_788_800_000_000,
   }));
   fs.writeFileSync(updateStatePath, JSON.stringify({ version: "0.1.440" }));
+  const skillRoot = path.join(homeDir, ".codex", "skills", "relay");
+  fs.mkdirSync(skillRoot, { recursive: true });
+  fs.writeFileSync(path.join(skillRoot, ".relay-managed.json"), JSON.stringify({
+    schemaVersion: 1,
+    name: "relay",
+    version: "1.1.13",
+    consentVersion: 2,
+    installationId: "ski_0123456789abcdefghijklmn",
+    installedAt: "2026-09-08T08:00:00.000Z",
+    files: [],
+  }));
 
   const telemetry = collectCompanionFleetTelemetry({
     homeDir,
@@ -44,6 +55,17 @@ test("fleet telemetry reports an active canonical runtime without local paths", 
   assert.equal(telemetry.activeVersion, "0.1.440");
   assert.equal(telemetry.channel, "dev");
   assert.equal(telemetry.autoUpdate, true);
+  assert.deepEqual(telemetry.skills[0], {
+    name: "relay",
+    host: "codex",
+    target: "primary",
+    installationId: "ski_0123456789abcdefghijklmn",
+    version: "1.1.13",
+    consentVersion: 2,
+    status: "managed",
+    installedAt: "2026-09-08T08:00:00.000Z",
+  });
+  assert.equal(telemetry.skills.filter((skill) => skill.status === "absent").length, 2);
   assert.equal(JSON.stringify(telemetry).includes(homeDir), false);
 });
 

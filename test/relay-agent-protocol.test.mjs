@@ -5,6 +5,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { startAgentLocalServer } from "../src/agent-local-server.js";
@@ -38,6 +39,26 @@ function runNodeScript(script, args, { env, input = "" } = {}) {
 function runProtocol(args, options) {
   return runNodeScript(protocolPath, args, options);
 }
+
+test("paired staging accounts use the helper without accepting arbitrary API origins", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-staging-agent-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, "agent-local.json");
+  const client = { identity: { userId: "usr_staging" }, accountDrift: () => ({ status: "same" }),
+    groups: async () => ({ groups: [{ id: "grp_staging" }] }) };
+  const server = await startAgentLocalServer({ client, accountId: "usr_staging", apiUrl: "https://cti37jd7vx.us-east-1.awsapprunner.com", file });
+  t.after(() => server.close());
+  const env = { RELAY_CONFIG_DIR: root, RELAY_AGENT_CONFIG: path.join(root, "agent-protocol.json"), RELAY_AGENT_LOCAL: file };
+  const groups = await runProtocol(["groups"], { env });
+  assert.equal(groups.code, 0, groups.stderr);
+  assert.equal(JSON.parse(groups.stdout).groups[0].id, "grp_staging");
+  const descriptor = JSON.parse(fs.readFileSync(file, "utf8"));
+  descriptor.apiUrl = "https://untrusted.example";
+  fs.writeFileSync(file, JSON.stringify(descriptor));
+  const refused = await runProtocol(["groups"], { env });
+  assert.equal(refused.code, 1);
+  assert.match(refused.stderr, /approved staging API host/);
+});
 
 test("an existing Companion account works without invite credentials and respects RELAY_CONFIG_DIR", async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-existing-agent-"));
@@ -82,12 +103,71 @@ test("standalone protocol uses neutral authorization routes and a bounded reques
   assert.match(protocol, /SAFE_GET/);
   assert.match(protocol, /SAFE_POST/);
   assert.match(protocol, /X-Relay-Send-Contract/);
+  assert.match(protocol, /X-Relay-Skill-Telemetry/);
+  assert.match(protocol, /managedSkillTelemetryHeader/);
+  assert.doesNotMatch(protocol, /payload\s*=\s*\{[\s\S]{0,800}\bdirectory\b/);
   assert.match(protocol, /TRUSTED_RELAY_HOSTS/);
   assert.match(protocol, /authorization_pending/);
   assert.match(protocol, /authorization_approved/);
   assert.match(protocol, /protectOwnerOnly/);
   assert.doesNotMatch(protocol, /\/mcp|hook/i);
   assert.doesNotMatch(protocol, /command === "configure"/);
+});
+
+test("an installed direct helper reports bounded managed-skill identity and integrity", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-skill-telemetry-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const skillRoot = path.join(root, "custom", "relay");
+  fs.cpSync(fileURLToPath(new URL("../skill/relay", import.meta.url)), skillRoot, { recursive: true });
+  const ownedFiles = ["SKILL.md", "agents/openai.yaml", "scripts/relay-protocol.mjs", "scripts/relay-local.mjs", "scripts/relay-attachments.mjs"];
+  fs.writeFileSync(path.join(skillRoot, ".relay-managed.json"), JSON.stringify({
+    schemaVersion: 1,
+    name: "relay",
+    version: "1.1.15",
+    consentVersion: 2,
+    host: "claude",
+    target: "primary",
+    installationId: "ski_0123456789abcdefghijklmn",
+    installedAt: "2026-09-08T08:00:00.000Z",
+    files: ownedFiles.map((relative) => ({
+      path: relative,
+      sha256: createHash("sha256").update(fs.readFileSync(path.join(skillRoot, ...relative.split("/")))).digest("hex"),
+    })),
+  }));
+  const headers = [];
+  const server = http.createServer((request, response) => {
+    headers.push(request.headers);
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/v1/me") return response.end(JSON.stringify({ user: { id: "usr_test" } }));
+    if (request.url === "/v1/e2ee/status") return response.end(JSON.stringify({ mode: "off" }));
+    response.end(JSON.stringify({ groups: [] }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const config = path.join(root, "config.json");
+  fs.writeFileSync(config, JSON.stringify({
+    consentVersion: 2,
+    apiUrl: `http://127.0.0.1:${server.address().port}`,
+    accessToken: "web_test_only_01234567890123456789",
+    account: { relayUserId: "usr_test" },
+  }));
+  const result = await runNodeScript(path.join(skillRoot, "scripts", "relay-protocol.mjs"), ["groups"], {
+    env: { RELAY_AGENT_CONFIG: config, RELAY_AGENT_LOCAL: path.join(root, "missing-local.json"), RELAY_AGENT_ALLOW_LOOPBACK: "1" },
+  });
+  assert.equal(result.code, 0, result.stderr);
+  const encoded = headers.at(-1)["x-relay-skill-telemetry"];
+  const telemetry = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+  assert.deepEqual(telemetry, {
+    name: "relay",
+    host: "claude",
+    target: "primary",
+    installationId: "ski_0123456789abcdefghijklmn",
+    version: "1.1.15",
+    consentVersion: 2,
+    status: "managed",
+    installedAt: "2026-09-08T08:00:00.000Z",
+  });
+  assert.equal(JSON.stringify(telemetry).includes(root), false);
 });
 
 test("thin and full package CLIs expose the bundled protocol helper without handling credentials", async () => {

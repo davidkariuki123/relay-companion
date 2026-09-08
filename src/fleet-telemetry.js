@@ -1,9 +1,13 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { updateChannel } from "./config.js";
 import { storeDir } from "./host-paths.js";
 import { readCanonicalRuntimeState } from "./canonical-runtime.js";
+
+const require = createRequire(import.meta.url);
+const relaySkill = require("../bootstrap/relay-skill.cjs");
 
 export const COMPANION_TELEMETRY_SCHEMA = 1;
 export const COMPANION_TELEMETRY_HEADER = "x-relay-companion-telemetry";
@@ -57,6 +61,30 @@ function autoUpdateEnabled(env) {
   return !(raw === "0" || raw === "false" || raw === "off" || raw === "no");
 }
 
+function optionalIso(value) {
+  if (typeof value !== "string" || !value) return null;
+  return Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : null;
+}
+
+/** Inspect only Relay-owned metadata and hashes; never include local paths. */
+function managedSkillTelemetry({ homeDir, env }) {
+  return relaySkill.defaultTargets({ homeDir, env }).map((target) => {
+    const state = relaySkill.readState(target.directory);
+    const exists = fs.existsSync(target.directory);
+    const changed = exists ? relaySkill.localChanges(target.directory, state) : [];
+    return {
+      name: "relay",
+      host: target.host,
+      target: target.target || "primary",
+      ...(state && /^ski_[A-Za-z0-9_-]{20,80}$/.test(String(state.installationId || "")) ? { installationId: state.installationId } : {}),
+      version: state && /^\d+\.\d+\.\d+$/.test(String(state.version || "")) ? state.version : null,
+      consentVersion: Number.isSafeInteger(state?.consentVersion) && state.consentVersion > 0 ? state.consentVersion : null,
+      status: !exists ? "absent" : !state ? "unmanaged" : changed.length ? "modified" : "managed",
+      installedAt: optionalIso(state?.installedAt),
+    };
+  });
+}
+
 /** Collect only the state needed to identify and support a stranded updater. */
 export function collectCompanionFleetTelemetry({
   homeDir = os.homedir(),
@@ -85,6 +113,7 @@ export function collectCompanionFleetTelemetry({
     previousVersion: cleanVersion(canonical?.previous?.version),
     stateChangedAt: isoFromMillis(stateMillis),
     failures: failureTelemetry(updateState),
+    skills: managedSkillTelemetry({ homeDir, env }),
   };
 }
 

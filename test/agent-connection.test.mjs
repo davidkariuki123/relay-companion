@@ -53,7 +53,7 @@ test("Companion adopts one approved account and recovers a lost registration res
 });
 
 test("adopting an already-paired account selects its verified environment's update channel", async () => {
-  for (const [apiUrl, channel] of [["https://dev-api.sendrelays.com", "dev"], ["https://api.sendrelays.com", "stable"]]) {
+  for (const [apiUrl, channel] of [["https://dev-api.sendrelays.com", "dev"], ["https://api.sendrelays.com", "stable"], ["https://cti37jd7vx.us-east-1.awsapprunner.com", "staging"]]) {
     const writes = [];
     const result = await adoptAgentConnection({
       readAgent: () => ({ consentVersion: 2, account: { relayUserId: "usr_test" }, apiUrl }),

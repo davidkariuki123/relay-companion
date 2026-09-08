@@ -93,6 +93,29 @@ test("approval completed during download needs no wait", async (t) => {
   assert.equal(background.installationStatus({ env }).status, "installing");
 });
 
+test("installation can start before connect-start creates browser authorization", async (t) => {
+  const { env, credential, pending } = authorizationFixture(t);
+  let elapsed = 0;
+  let polls = 0;
+  await background.waitForAgentAuthorization({
+    env, now: () => elapsed, timeoutMs: 10_000,
+    sleep: async (ms) => {
+      elapsed += ms;
+      polls++;
+      assert.equal(background.installationStatus({ env }).status, "waiting_authorization");
+      if (polls === 1) {
+        assert.equal(fs.existsSync(pending), false);
+        assert.equal(fs.existsSync(credential), false);
+        fs.writeFileSync(pending, "browser authorization starts after installation");
+      }
+      if (polls === 2) fs.writeFileSync(credential, "verified connection");
+      if (polls === 3) fs.rmSync(pending);
+    },
+  });
+  assert.equal(polls, 3);
+  assert.equal(background.installationStatus({ env }).status, "installing");
+});
+
 test("a missing approval times out without creating credentials or starting account adoption", async (t) => {
   const { env, credential } = authorizationFixture(t);
   let elapsed = 0;

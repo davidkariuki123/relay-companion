@@ -78,12 +78,12 @@ function defaultTargets({ homeDir = os.homedir(), env = process.env, host = "all
   const targets = [];
   if (selected === "all" || selected === "codex") {
     const root = env.CODEX_HOME || path.join(homeDir, ".codex");
-    targets.push({ host: "codex", directory: path.join(root, "skills", SKILL_NAME) });
-    targets.push({ host: "codex", directory: path.join(homeDir, ".agents", "skills", SKILL_NAME) });
+    targets.push({ host: "codex", target: "primary", directory: path.join(root, "skills", SKILL_NAME) });
+    targets.push({ host: "codex", target: "compatibility", directory: path.join(homeDir, ".agents", "skills", SKILL_NAME) });
   }
   if (selected === "all" || selected === "claude") {
     const root = env.CLAUDE_HOME || path.join(homeDir, ".claude");
-    targets.push({ host: "claude", directory: path.join(root, "skills", SKILL_NAME) });
+    targets.push({ host: "claude", target: "primary", directory: path.join(root, "skills", SKILL_NAME) });
   }
   return targets.filter((target, index) => targets.findIndex((other) => path.resolve(other.directory) === path.resolve(target.directory)) === index);
 }
@@ -98,7 +98,8 @@ function configuredManifestUrl({ homeDir = os.homedir(), env = process.env, webO
   const agent = config.webUrl || config.apiUrl ? {} : read(env.RELAY_AGENT_CONFIG || path.join(configRoot, "agent-protocol.json"));
   const api = config.apiUrl || agent.apiUrl;
   const knownOrigin = !api || api === "https://api.sendrelays.com" ? "https://sendrelays.com"
-    : api === "https://dev-api.sendrelays.com" ? "https://dev.sendrelays.com" : null;
+    : api === "https://dev-api.sendrelays.com" ? "https://dev.sendrelays.com"
+    : api === "https://cti37jd7vx.us-east-1.awsapprunner.com" ? "https://8epdrqim29.us-east-1.awsapprunner.com" : null;
   const origin = webOrigin || env.RELAY_WEB_URL || config.webUrl || knownOrigin;
   if (!origin) throw new Error("Relay requires a configured web origin for this API environment's skill updates.");
   const url = new URL(origin);
@@ -160,12 +161,152 @@ function localChanges(directory, state = readState(directory)) {
   return changed;
 }
 
-function stateFor(manifest) {
+function installedStateEntries(state) {
+  if (!state || state.schemaVersion !== 1 || state.name !== SKILL_NAME || !Array.isArray(state.files)) return null;
+  try { exactVersion(state.version); } catch { return null; }
+  const entries = new Map();
+  for (const entry of state.files) {
+    let relative;
+    try { relative = safeRelativeFile(entry?.path); } catch { return null; }
+    const digest = String(entry?.sha256 || "").toLowerCase();
+    if (relative === STATE_FILE || !/^[a-f0-9]{64}$/.test(digest) || entries.has(relative)) return null;
+    entries.set(relative, digest);
+  }
+  return entries.has("SKILL.md") ? entries : null;
+}
+
+function treeLeaves(directory, current = directory, prefix = "") {
+  const leaves = [];
+  for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+    const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory() && !entry.isSymbolicLink()) {
+      leaves.push(...treeLeaves(directory, path.join(current, entry.name), relative));
+    } else {
+      leaves.push({ relative, file: path.join(directory, ...relative.split("/")), regular: entry.isFile() });
+    }
+  }
+  return leaves;
+}
+
+function removeSkillArtifact(directory) {
+  if (!fs.existsSync(directory)) return { ok: true, status: "already_absent", directory };
+  let root;
+  let leaves;
+  try {
+    root = fs.lstatSync(directory);
+    if (!root.isDirectory() || root.isSymbolicLink()) {
+      return { ok: false, status: "unmanaged", directory, changedFiles: ["<unmanaged skill>"] };
+    }
+    leaves = treeLeaves(directory);
+  } catch (error) {
+    return { ok: false, status: "failed", directory, error: error?.message || String(error) };
+  }
+
+  const state = readState(directory);
+  const managed = installedStateEntries(state);
+  if (!managed) {
+    // A killed or older uninstall can leave the known Relay directory shell
+    // behind after its files are gone. Empty directories contain no human data
+    // and are safe to finish removing without an ownership marker.
+    if (leaves.length !== 0) {
+      return { ok: false, status: "unmanaged", directory, changedFiles: ["<unmanaged skill>"] };
+    }
+  } else {
+    const changedFiles = [];
+    for (const leaf of leaves) {
+      if (leaf.relative === STATE_FILE) continue;
+      const expected = managed.get(leaf.relative);
+      if (!leaf.regular || !expected) {
+        changedFiles.push(leaf.relative);
+        continue;
+      }
+      try {
+        if (fileHash(leaf.file) !== expected) changedFiles.push(leaf.relative);
+      } catch {
+        changedFiles.push(leaf.relative);
+      }
+    }
+    // Missing manifest files are already removed and therefore harmless. Any
+    // surviving modified or additional file may belong to the human, so leave
+    // the entire artifact intact and make the top-level uninstall fail loudly.
+    if (changedFiles.length) {
+      return { ok: false, status: "modified", directory, changedFiles };
+    }
+  }
+
+  try {
+    fs.rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  } catch (error) {
+    return { ok: false, status: "failed", directory, error: error?.message || String(error) };
+  }
+  return fs.existsSync(directory)
+    ? { ok: false, status: "failed", directory, error: "The skill directory still exists after removal." }
+    : { ok: true, status: managed ? "removed" : "empty_debris_removed", directory };
+}
+
+function skillArtifacts(directory) {
+  const parent = path.dirname(directory);
+  const name = path.basename(directory);
+  const artifacts = [directory];
+  let entries = [];
+  try { entries = fs.readdirSync(parent, { withFileTypes: true }); }
+  catch (error) {
+    if (error.code === "ENOENT") return artifacts;
+    throw error;
+  }
+  const generated = [`.${name}-rollback`, `.${name}-staging-`, `.${name}-replaced-`];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+    if (entry.name === generated[0] || generated.slice(1).some((prefix) => entry.name.startsWith(prefix))) {
+      artifacts.push(path.join(parent, entry.name));
+    }
+  }
+  return artifacts;
+}
+
+function uninstallManaged(options = {}) {
+  const targets = options.targets || defaultTargets(options);
+  const results = [];
+  const seen = new Set();
+  for (const target of targets) {
+    let artifacts;
+    try { artifacts = skillArtifacts(target.directory); }
+    catch (error) {
+      results.push({ host: target.host, ok: false, status: "failed", directory: target.directory, error: error?.message || String(error) });
+      continue;
+    }
+    for (const directory of artifacts) {
+      const key = path.resolve(directory);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      results.push({ host: target.host, ...removeSkillArtifact(directory) });
+    }
+  }
+  const failures = results.filter((result) => !result.ok);
+  return {
+    ok: failures.length === 0,
+    results,
+    failures,
+    ...(failures.length ? {
+      detail: failures.map((failure) => {
+        const changed = failure.changedFiles?.length ? ` (${failure.changedFiles.join(", ")})` : "";
+        return `${failure.directory}: ${failure.error || failure.status}${changed}`;
+      }).join("; "),
+    } : {}),
+  };
+}
+
+function stateFor(manifest, target = {}, existing = null) {
   return {
     schemaVersion: 1,
     name: SKILL_NAME,
     version: manifest.version,
     consentVersion: manifest.consentVersion,
+    host: target.host || null,
+    target: target.target || "primary",
+    installationId: /^ski_[A-Za-z0-9_-]{20,80}$/.test(String(existing?.installationId || ""))
+      ? existing.installationId
+      : `ski_${crypto.randomBytes(18).toString("base64url")}`,
     installedAt: new Date().toISOString(),
     files: manifest.files.map((entry) => ({ path: entry.path, sha256: entry.sha256 })),
   };
@@ -175,7 +316,7 @@ function writeJson(file, value) {
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
 }
 
-async function materialize(manifest, staging, readFile) {
+async function materialize(manifest, staging, readFile, target, existing) {
   for (const entry of manifest.files) {
     const destination = path.join(staging, ...entry.path.split("/"));
     if (!pathInside(staging, destination)) throw new Error("Relay refused an unsafe skill destination.");
@@ -184,10 +325,11 @@ async function materialize(manifest, staging, readFile) {
     fs.mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
     fs.writeFileSync(destination, bytes, { mode: entry.path.startsWith("scripts/") ? 0o700 : 0o600 });
   }
-  writeJson(path.join(staging, STATE_FILE), stateFor(manifest));
+  writeJson(path.join(staging, STATE_FILE), stateFor(manifest, target, existing));
 }
 
-async function installOne(directory, manifest, readFile, { consent = false, renewConsent = false } = {}) {
+async function installOne(directory, manifest, readFile, options = {}) {
+  const { consent = false, renewConsent = false } = options;
   const parent = path.dirname(directory);
   const existing = readState(directory);
   const changes = localChanges(directory, existing);
@@ -206,7 +348,7 @@ async function installOne(directory, manifest, readFile, { consent = false, rene
   const rollback = path.join(parent, `.${SKILL_NAME}-rollback`);
   if (!pathInside(parent, staging) || !pathInside(parent, rollback)) throw new Error("Relay refused an unsafe skill update location.");
   try {
-    await materialize(manifest, staging, readFile);
+    await materialize(manifest, staging, readFile, options, existing);
     if (fs.existsSync(rollback)) fs.rmSync(rollback, { recursive: true, force: true });
     if (fs.existsSync(directory)) fs.renameSync(directory, rollback);
     try {
@@ -231,7 +373,7 @@ async function installManifest(manifest, readFile, options = {}) {
   const targets = options.targets || defaultTargets(options);
   const results = [];
   for (const target of targets) {
-    try { results.push({ host: target.host, ...(await installOne(target.directory, manifest, readFile, options)) }); }
+    try { results.push({ host: target.host, target: target.target, ...(await installOne(target.directory, manifest, readFile, { ...options, ...target })) }); }
     catch (error) { results.push({ host: target.host, ok: false, status: "failed", directory: target.directory, error: error?.message || String(error) }); }
   }
   return { ok: results.every((item) => item.ok), version: manifest.version, results };
@@ -330,6 +472,7 @@ module.exports = {
   rollbackOne,
   runCli,
   sha256,
+  uninstallManaged,
   updateFromRemote,
   validateManifest,
 };

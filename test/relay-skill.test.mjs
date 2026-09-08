@@ -35,6 +35,8 @@ test("skill updates follow the configured environment and reject cross-origin bu
   const options = { homeDir, env: { RELAY_CONFIG_DIR: configDir } };
   fs.writeFileSync(path.join(configDir, "agent-protocol.json"), JSON.stringify({ apiUrl: "https://dev-api.sendrelays.com" }));
   assert.equal(skill.configuredManifestUrl(options), "https://dev.sendrelays.com/skills/relay/manifest.json");
+  fs.writeFileSync(path.join(configDir, "agent-protocol.json"), JSON.stringify({ apiUrl: "https://cti37jd7vx.us-east-1.awsapprunner.com" }));
+  assert.equal(skill.configuredManifestUrl(options), "https://8epdrqim29.us-east-1.awsapprunner.com/skills/relay/manifest.json");
   fs.writeFileSync(path.join(configDir, "config.json"), JSON.stringify({ apiUrl: "https://custom.example" }));
   assert.throws(() => skill.configuredManifestUrl(options), /configured web origin/);
   fs.writeFileSync(path.join(configDir, "config.json"), JSON.stringify({ webUrl: "https://sendrelays.com" }));
@@ -84,7 +86,11 @@ test("managed Relay skill install is consented, verified, atomic, and rollback-c
   assert.equal(installed.ok, true);
   assert.equal(installed.results[0].status, "installed");
   assert.equal(fs.readFileSync(path.join(directory, "SKILL.md"), "utf8"), first.files.get("SKILL.md").toString());
-  assert.equal(skill.readState(directory).version, "1.0.0");
+  const firstState = skill.readState(directory);
+  assert.equal(firstState.version, "1.0.0");
+  assert.equal(firstState.host, "codex");
+  assert.equal(firstState.target, "primary");
+  assert.match(firstState.installationId, /^ski_[A-Za-z0-9_-]{20,80}$/);
 
   const second = fixture("1.1.0");
   second.files.set("SKILL.md", Buffer.from("---\nname: relay\ndescription: updated\n---\n"));
@@ -98,6 +104,7 @@ test("managed Relay skill install is consented, verified, atomic, and rollback-c
   assert.equal(updated.ok, true);
   assert.equal(updated.results[0].status, "updated");
   assert.equal(skill.readState(directory).version, "1.1.0");
+  assert.equal(skill.readState(directory).installationId, firstState.installationId);
 
   const refusedDowngrade = await skill.installManifest(first.manifest, (entry) => first.files.get(entry.path), { targets: target });
   assert.equal(refusedDowngrade.ok, true);
@@ -150,6 +157,65 @@ test("managed Relay skill refuses checksum failures, user edits, and new consent
   assert.equal(checksum.ok, false);
   assert.match(checksum.results[0].error, /modified skill file/);
   assert.equal(fs.existsSync(otherDirectory), false);
+});
+
+test("managed Relay skill uninstall removes owned trees, rollback copies, and empty debris", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-skill-uninstall-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const directory = path.join(root, "skills", "relay");
+  const targets = [{ host: "codex", directory }];
+  const first = fixture("1.0.0");
+  const second = fixture("1.1.0");
+  second.files.set("SKILL.md", Buffer.from("---\nname: relay\ndescription: updated\n---\n"));
+  second.manifest.files.find((entry) => entry.path === "SKILL.md").sha256 = digest(second.files.get("SKILL.md"));
+
+  await skill.installManifest(first.manifest, (entry) => first.files.get(entry.path), { targets, consent: true });
+  await skill.installManifest(second.manifest, (entry) => second.files.get(entry.path), { targets });
+  const rollback = path.join(path.dirname(directory), ".relay-rollback");
+  const emptyDebris = path.join(path.dirname(directory), ".relay-staging-interrupted");
+  const unrelated = path.join(path.dirname(directory), "keep");
+  fs.mkdirSync(path.join(emptyDebris, "nested"), { recursive: true });
+  fs.mkdirSync(unrelated);
+  fs.writeFileSync(path.join(unrelated, "notes.txt"), "keep\n");
+  fs.rmSync(path.join(directory, "scripts", "relay-protocol.mjs"));
+
+  const removed = skill.uninstallManaged({ targets });
+  assert.equal(removed.ok, true);
+  assert.equal(fs.existsSync(directory), false, "partially removed managed tree is finished");
+  assert.equal(fs.existsSync(rollback), false, "verified rollback copy is removed");
+  assert.equal(fs.existsSync(emptyDebris), false, "empty generated debris is removed");
+  assert.equal(fs.readFileSync(path.join(unrelated, "notes.txt"), "utf8"), "keep\n");
+
+  const repeated = skill.uninstallManaged({ targets });
+  assert.equal(repeated.ok, true, "uninstall is idempotent");
+  assert.ok(repeated.results.every((result) => result.status === "already_absent"));
+});
+
+test("managed Relay skill uninstall refuses modified and unmanaged skill data", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-skill-uninstall-guard-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const managedDirectory = path.join(root, "managed", "relay");
+  const unmanagedDirectory = path.join(root, "unmanaged", "relay");
+  const first = fixture();
+  await skill.installManifest(first.manifest, (entry) => first.files.get(entry.path), {
+    targets: [{ host: "codex", directory: managedDirectory }],
+    consent: true,
+  });
+  fs.appendFileSync(path.join(managedDirectory, "SKILL.md"), "human edit\n");
+  fs.mkdirSync(unmanagedDirectory, { recursive: true });
+  fs.writeFileSync(path.join(unmanagedDirectory, "SKILL.md"), "human-owned\n");
+
+  const result = skill.uninstallManaged({ targets: [
+    { host: "codex", directory: managedDirectory },
+    { host: "claude", directory: unmanagedDirectory },
+  ] });
+  assert.equal(result.ok, false);
+  assert.equal(result.failures.length, 2);
+  assert.equal(result.failures.find((item) => item.directory === managedDirectory).status, "modified");
+  assert.deepEqual(result.failures.find((item) => item.directory === managedDirectory).changedFiles, ["SKILL.md"]);
+  assert.equal(result.failures.find((item) => item.directory === unmanagedDirectory).status, "unmanaged");
+  assert.equal(fs.existsSync(path.join(managedDirectory, ".relay-managed.json")), true, "ownership state is preserved");
+  assert.equal(fs.readFileSync(path.join(unmanagedDirectory, "SKILL.md"), "utf8"), "human-owned\n");
 });
 
 test("bundled Relay skill manifest matches every shipped file", () => {

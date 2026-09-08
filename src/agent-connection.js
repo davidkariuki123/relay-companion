@@ -24,7 +24,9 @@ export async function adoptAgentConnection({
   const agent = readAgent();
   const current = readCompanion();
   const expected = agent.account?.relayUserId;
-  const updateChannel = agent.apiUrl === "https://dev-api.sendrelays.com" ? "dev" : "stable";
+  const staging = agent.apiUrl === "https://cti37jd7vx.us-east-1.awsapprunner.com";
+  const updateChannel = agent.apiUrl === "https://dev-api.sendrelays.com" ? "dev" : staging ? "staging" : "stable";
+  const webUrl = staging ? "https://8epdrqim29.us-east-1.awsapprunner.com" : agent.apiUrl.replace("dev-api.", "dev.").replace("api.", "");
   if (!expected || (agent.consentVersion ?? 1) < 2) throw new Error("Approve the updated Relay connection before installing Companion. The existing agent connection remains usable.");
   if (current.deviceToken) {
     if (current.user?.id !== expected || current.apiUrl !== agent.apiUrl) throw new Error("Companion is connected to another account or environment. Switch it explicitly before continuing.");
@@ -74,7 +76,7 @@ export async function adoptAgentConnection({
   }
   if (journal.registration.user?.id !== expected) throw new Error("Companion pairing returned another account.");
   persistIdentity(journal.keys.state, journal.registration);
-  persistAccount({ apiUrl: agent.apiUrl, webUrl: agent.apiUrl.replace("dev-api.", "dev.").replace("api.", ""), deviceName: journal.name, registration: journal.registration, requireNativeCredential: true });
+  persistAccount({ apiUrl: agent.apiUrl, webUrl, deviceName: journal.name, registration: journal.registration, requireNativeCredential: true });
   writeCompanion({ updateChannel });
   fs.rmSync(journalFile, { force: true });
   return { connected: true, reused: false };

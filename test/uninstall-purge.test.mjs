@@ -5,6 +5,8 @@ import path from "node:path";
 import test from "node:test";
 import { createRequire } from "node:module";
 import {
+  claudeCodeMcpEntryAbsent,
+  codexMcpEntryAbsent,
   electronProfileDirs,
   localStateDirs,
   mcpCliRemovalResult,
@@ -477,6 +479,41 @@ test("an already-absent MCP registration is success, while a real CLI failure is
   assert.match(denied.detail, /Access denied/);
 });
 
+test("an unrecognised refusal is success when the host config proves the entry is gone", () => {
+  // Claude Code's current wording matches none of the known phrases, and since
+  // MCP moved onto the Companion transport this is the default install shape.
+  const claude = { ok: false, status: 1, out: 'No MCP server named "relay" in user scope' };
+  assert.equal(mcpCliRemovalResult(claude, { verifyAbsent: () => true }).ok, true);
+  assert.equal(mcpCliRemovalResult(claude, { verifyAbsent: () => true }).verified, true);
+
+  const stillThere = mcpCliRemovalResult(claude, { verifyAbsent: () => false });
+  assert.equal(stillThere.ok, false);
+  assert.match(stillThere.detail, /No MCP server named/);
+  assert.equal(mcpCliRemovalResult(claude).ok, false);
+});
+
+test("MCP absence checks read each host's own config", () => {
+  const dir = tmpDir("mcp-absent");
+  const claudeConfig = path.join(dir, ".claude.json");
+  const codexConfig = path.join(dir, "config.toml");
+
+  assert.equal(claudeCodeMcpEntryAbsent(path.join(dir, "missing.json")), true);
+  assert.equal(codexMcpEntryAbsent(path.join(dir, "missing.toml")), true);
+
+  fs.writeFileSync(claudeConfig, JSON.stringify({ mcpServers: { other: {} } }));
+  assert.equal(claudeCodeMcpEntryAbsent(claudeConfig), true);
+  fs.writeFileSync(claudeConfig, JSON.stringify({ mcpServers: { relay: { command: "relay" } } }));
+  assert.equal(claudeCodeMcpEntryAbsent(claudeConfig), false);
+  // Unreadable config: absence is unproven, so the CLI failure must stand.
+  fs.writeFileSync(claudeConfig, "{ not json");
+  assert.equal(claudeCodeMcpEntryAbsent(claudeConfig), false);
+
+  fs.writeFileSync(codexConfig, '[mcp_servers.other]\ncommand = "x"\n');
+  assert.equal(codexMcpEntryAbsent(codexConfig), true);
+  fs.writeFileSync(codexConfig, '[mcp_servers.relay]\ncommand = "relay"\n');
+  assert.equal(codexMcpEntryAbsent(codexConfig), false);
+});
+
 test("uninstall output never claims success when retries are exhausted", () => {
   const failure = retryUninstallStep("claude_hooks", "Claude Code's Relay hooks", () => ({
     ok: false,
@@ -491,6 +528,7 @@ test("uninstall output never claims success when retries are exhausted", () => {
 
 test("successful uninstall explains the open-session context boundary", () => {
   const lines = uninstallResultLines({ ok: true, failures: [] });
+  assert.match(lines.join("\n"), /managed skills/i);
   assert.match(lines.join("\n"), /disconnected live Relay MCP processes/i);
   assert.match(lines.join("\n"), /cannot retract Relay instructions/i);
   assert.match(lines.join("\n"), /makes those instructions inert/i);
@@ -498,7 +536,9 @@ test("successful uninstall explains the open-session context boundary", () => {
 
 test("relay CLI emits structured uninstall results and fails its exit status when incomplete", () => {
   const source = fs.readFileSync(new URL("../bin/relay.js", import.meta.url), "utf8");
+  const installSource = fs.readFileSync(new URL("../src/install.js", import.meta.url), "utf8");
   assert.match(source, /uninstallResultLines\(uninstalled\)/);
+  assert.match(installSource, /uninstallAgentSkills\(\{ homeDir, env \}\)/);
   assert.match(source, /if \(!uninstalled\.ok\) process\.exitCode = 1/);
   assert.match(source, /uninstallManagedCompanionPackage/);
   assert.match(source, /if \(!purged\.ok\)[\s\S]*process\.exitCode = 1/);
