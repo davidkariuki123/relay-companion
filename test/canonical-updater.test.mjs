@@ -17,6 +17,10 @@ import {
   runCanonicalUpdateTransaction,
   runtimeNpmCommand,
   spawnCanonicalUpdate,
+  smokeCanonicalCandidate,
+  CANDIDATE_SMOKE_TIMEOUT_MS,
+  inspectUpdateRequest,
+  waitForUpdateRequestAdmission,
 } from "../src/canonical-updater.js";
 import {
   canonicalNpmInvocation,
@@ -32,6 +36,93 @@ const { installedServiceProcessRows } = createRequire(import.meta.url)("../boots
 // remain active on macOS/Linux; Windows behavior is covered by injected-path
 // and Windows-specific tests without asking NTFS to emulate POSIX paths.
 const posixFsTest = process.platform === "win32" ? test.skip : test;
+
+test("cold startup gets 120s and retries only a timeout against the same candidate", () => {
+  const candidate = { node: "node", bin: "/verified/candidate/bin/relay.js" };
+  const calls = [];
+  const logs = [];
+  const result = smokeCanonicalCandidate(candidate, {
+    run: (command, args, options) => {
+      calls.push({ command, args, options });
+      return calls.length === 1
+        ? { status: null, signal: "SIGTERM", error: Object.assign(new Error("slow scan"), { code: "ETIMEDOUT" }) }
+        : { status: 0 };
+    },
+    log: (message) => logs.push(message),
+  });
+  assert.equal(result.ok, true);
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[0], calls[1], "retry reuses the exact candidate and environment");
+  assert.equal(calls[0].options.timeout, 120_000);
+  assert.equal(calls[0].options.timeout, CANDIDATE_SMOKE_TIMEOUT_MS);
+  assert.match(logs[0], /timed out.*elapsed=.*exit=none.*signal=SIGTERM/);
+  assert.match(logs[1], /passed/);
+});
+
+test("startup timeout is bounded and a real CLI failure is never retried or accepted", () => {
+  for (const [failure, reason, expectedCalls] of [
+    [{ error: { code: "ETIMEDOUT", message: "too slow" }, status: null }, "candidate-cli-smoke-timeout", 2],
+    [{ status: 1, stderr: "bad module" }, "candidate-cli-smoke-failed", 1],
+    [{ error: { code: "ENOENT", message: "missing node" }, status: null }, "candidate-cli-smoke-failed", 1],
+  ]) {
+    let calls = 0;
+    const result = smokeCanonicalCandidate({ node: "node", bin: "candidate" }, { run: () => { calls++; return failure; } });
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, reason);
+    assert.equal(calls, expectedCalls);
+  }
+});
+
+test("request observation rejects stale identities and identifies a dead worker without an outcome", () => {
+  const launch = { requestPath: "request.json", requestId: "r1", workerId: "w1" };
+  const request = { ...launch, state: "admitted", workerPid: 123, stage: "download-and-extract" };
+  assert.equal(inspectUpdateRequest(launch, { read: () => ({ ...request, workerId: "other" }) }), null);
+  assert.equal(inspectUpdateRequest(launch, { read: () => ({ ...request, requestId: "other" }) }), null);
+  assert.equal(inspectUpdateRequest(launch, { read: () => request, alive: () => true }).state, "admitted");
+  const dead = inspectUpdateRequest(launch, { read: () => request, alive: () => false });
+  assert.equal(dead.state, "failed");
+  assert.equal(dead.result.reason, "worker-exited");
+  assert.equal(dead.result.phase, "download-and-extract");
+  assert.equal(inspectUpdateRequest(launch, { read: () => ({ ...request, state: "completed" }), alive: () => false }).state, "completed");
+});
+
+test("cold worker admission can exceed five seconds while terminal startup failures return promptly", () => {
+  let clock = 0;
+  const request = { schema: 1, requestId: "r1", workerId: "w1" };
+  const result = waitForUpdateRequestAdmission("request.json", {
+    now: () => clock, sleep: (ms) => { clock += ms; },
+    fsImpl: { readFileSync: () => JSON.stringify({ ...request, state: clock < 30_000 ? "prepared" : "admitted" }) },
+  });
+  assert.equal(result.state, "admitted");
+  assert.equal(clock, 30_000);
+  const failed = waitForUpdateRequestAdmission("request.json", {
+    now: () => clock, sleep: () => assert.fail("terminal failure must not wait"),
+    fsImpl: { readFileSync: () => JSON.stringify({ ...request, state: "failed" }) },
+  });
+  assert.equal(failed.state, "failed");
+});
+
+test("worker entry logs module-load failures before the updater can start", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-worker-entry-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const bootstrap = path.join(root, "bootstrap");
+  fs.mkdirSync(bootstrap);
+  const entry = path.join(bootstrap, "relay-update-worker.cjs");
+  fs.copyFileSync(new URL("../bootstrap/relay-update-worker.cjs", import.meta.url), entry);
+  const requestPath = path.join(root, ".relay", "runtime", "update-requests", "r1.json");
+  fs.mkdirSync(path.dirname(requestPath), { recursive: true });
+  fs.writeFileSync(requestPath, JSON.stringify({ schema: 1, requestId: "r1", workerId: "w1", state: "prepared" }));
+  const payload = Buffer.from(JSON.stringify({ homeDir: root, platform: process.platform, requestPath, requestId: "r1", workerId: "w1" })).toString("base64url");
+  const result = spawnSync(process.execPath, [entry, "--worker", payload], { encoding: "utf8", timeout: 10_000, windowsHide: true });
+  assert.equal(result.status, 0, result.stderr);
+  const request = JSON.parse(fs.readFileSync(requestPath, "utf8"));
+  assert.equal(request.state, "failed");
+  assert.equal(request.result.reason, "worker-startup-failed");
+  const log = fs.readFileSync(path.join(root, ".relay", "update.log"), "utf8");
+  assert.match(log, /worker starting; pid=/);
+  assert.match(log, /worker startup failed/);
+  assert.match(log, /worker exited; code=0; elapsed=/);
+});
 
 function seedLinuxRuntime(packageRoot, version) {
   for (const [relative, contents, mode] of [

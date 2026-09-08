@@ -32,6 +32,7 @@ const {
   DEFAULT_RESTART_COOLDOWN_MS,
   CANONICAL_TRANSACTION_IN_FLIGHT_MS,
   readUpdateFailure,
+  readUpdateAttempt,
   recordUpdateFailure,
   updateRetryCooldownMs,
 } = await import("../src/auto-update.js");
@@ -653,11 +654,12 @@ test("booting canonical clears the recovery record too", async () => {
 // and relaunched: Sven's Mac, 2026-08-18 13:42→13:47, a new ~650MB attempt every
 // ~15 seconds. The record is therefore written BEFORE the launch, honoured by the
 // rolled-back boot, and retired by the boot that proves the update landed.
-test("an update launch is recorded durably; the rolled-back boot defers, the landed boot clears", async () => {
+test("attempts survive restart and each terminal failure is counted once; a landed boot clears both", async () => {
   const statePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "relay-prerecord-")), "update-state.json");
   const packageRoot = path.join(os.homedir(), ".relay", "runtime", "releases", "r9", "node_modules", "relay-companion");
   const launched = [];
   let clock = 1_000_000;
+  let outcome = "admitted";
   const build = ({ runningVersion }) => createAutoUpdater({
     useCanonicalRuntime: true,
     platform: "darwin",
@@ -666,7 +668,11 @@ test("an update launch is recorded durably; the rolled-back boot defers, the lan
     getCanonicalRuntime: () => ({ packageRoot, version: runningVersion }),
     getCanonicalRuntimeState: () => null,
     getLatestVersion: async () => "0.1.241",
-    spawnUpdate: (options) => launched.push(options),
+    spawnUpdate: (options) => {
+      launched.push(options);
+      return { status: "admitted", requestId: `request-${launched.length}`, workerId: "worker", requestPath: "fake-request" };
+    },
+    inspectRequest: () => ({ state: outcome, result: { phase: "pre-commit", reason: "candidate-cli-smoke-timeout" } }),
     now: () => clock,
     checkIntervalMs: 0,
     retryCooldownMs: 1_000,
@@ -676,27 +682,85 @@ test("an update launch is recorded durably; the rolled-back boot defers, the lan
 
   assert.equal((await build({ runningVersion: "0.1.240" }).tick()).status, "updating");
   assert.equal(launched.length, 1);
-  const recorded = readUpdateFailure(statePath);
-  assert.equal(recorded.target, "0.1.241", "the target is on disk before any outcome is known");
-  assert.equal(recorded.count, 1);
+  assert.equal(readUpdateAttempt(statePath).target, "0.1.241");
+  assert.equal(readUpdateFailure(statePath), null, "launching is not failure");
 
   // Activation failed; rollback restarted the daemon on the OLD version. The new
   // process must inherit the attempt and back off instead of relaunching at once.
   clock += 500;
   const rolledBack = build({ runningVersion: "0.1.240" });
+  assert.equal((await rolledBack.tick()).status, "in-flight");
+  outcome = "failed";
   assert.equal((await rolledBack.tick()).status, "deferred-backoff");
+  assert.equal(readUpdateFailure(statePath).count, 1);
+  assert.equal(readUpdateAttempt(statePath), null);
+  await rolledBack.tick();
+  assert.equal(readUpdateFailure(statePath).count, 1, "re-observing cannot count the attempt twice");
   assert.equal(launched.length, 1, "no hot relaunch loop after an activation failure");
 
   // Past the backoff window the retry happens — and compounds the record.
   clock += 1_000;
   assert.equal((await rolledBack.tick()).status, "updating");
   assert.equal(launched.length, 2);
+  assert.equal(readUpdateFailure(statePath).count, 1, "the new launch is not another failure");
+  await rolledBack.tick();
   assert.equal(readUpdateFailure(statePath).count, 2);
 
   // The boot that runs the recorded target IS the success signal.
   clock += 10;
   build({ runningVersion: "0.1.241" });
   assert.equal(readUpdateFailure(statePath), null, "landing the target retires its record");
+  assert.equal(readUpdateAttempt(statePath), null);
+});
+
+test("a living worker is not failed by the grace deadline; three real timeouts get an accurate warning", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "relay-timeout-accounting-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const statePath = path.join(directory, "update-state.json");
+  const packageRoot = path.join(os.homedir(), ".relay", "runtime", "releases", "r9", "node_modules", "relay-companion");
+  let clock = 1_000_000;
+  let launches = 0;
+  let outcome = "admitted";
+  const logs = [];
+  const updater = createAutoUpdater({
+    env: {}, platform: "win32", packageRoot,
+    getCurrentVersion: () => "0.1.454", getCurrentChannel: () => "stable",
+    getCanonicalRuntime: () => ({ packageRoot, version: "0.1.454" }), getCanonicalRuntimeState: () => null,
+    getLatestVersion: async () => "0.1.481", now: () => clock,
+    spawnUpdate: () => ({ status: "admitted", requestId: `r${++launches}`, workerId: "w1", requestPath: "fake.json" }),
+    inspectRequest: () => ({ state: outcome, workerPid: 123, result: { phase: "pre-commit", reason: "candidate-cli-smoke-timeout" } }),
+    updateStatePath: statePath, retryCooldownMs: 1000, restartCooldownMs: 0,
+    log: (message) => logs.push(message),
+  });
+  assert.equal((await updater.tick()).status, "updating");
+  clock += 22 * 60_000;
+  assert.equal((await updater.tick()).status, "in-flight");
+  assert.equal(readUpdateFailure(statePath), null);
+  assert.equal(launches, 1);
+  outcome = "failed";
+  for (let count = 1; count <= 3; count++) {
+    const failed = await updater.tick();
+    assert.equal(failed.status, "deferred-backoff");
+    assert.equal(readUpdateFailure(statePath).count, count);
+    assert.equal(launches, count);
+    if (count < 3) {
+      clock = failed.retryAt;
+      assert.equal((await updater.tick()).status, "updating");
+    }
+  }
+  assert.ok(logs.some((line) => /needs attention: 3 failed attempts.*Update downloaded; startup verification timed out/.test(line)));
+  assert.ok(logs.every((line) => !/not reaching|STUCK/.test(line)));
+});
+
+test("a crash between recording failure and clearing admission cannot count that failure again", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "relay-failure-crash-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const file = path.join(directory, "update-state.json");
+  const options = { attemptId: "request-1", now: () => 1000, reason: "candidate-cli-smoke-timeout" };
+  assert.equal(recordUpdateFailure(file, "0.1.481", options).count, 1);
+  assert.equal(recordUpdateFailure(file, "0.1.481", { ...options, now: () => 2000 }).count, 1);
+  assert.equal(readUpdateFailure(file).lastAt, 1000, "re-observation does not extend the retry delay");
+  assert.equal(recordUpdateFailure(file, "0.1.481", { ...options, attemptId: "request-2" }).count, 2);
 });
 
 // The recovery in-flight guard was retryCooldownMs (2 minutes), which an npm

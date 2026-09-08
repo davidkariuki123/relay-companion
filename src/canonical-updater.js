@@ -80,13 +80,28 @@ export function runtimeNpmCommand(node = process.execPath, {
   return null;
 }
 
-export function smokeCanonicalCandidate(candidate, { run = defaultRun } = {}) {
-  const result = run(candidate.node, [candidate.bin, "--help"], {
-    env: { ...process.env, RELAY_SKIP_DESKTOP_POSTINSTALL: "1" },
-  });
-  return commandOk(result)
-    ? { ok: true }
-    : { ok: false, reason: "candidate-cli-smoke-failed", detail: result?.error?.message || result?.stderr || result?.stdout || "" };
+export const CANDIDATE_SMOKE_TIMEOUT_MS = 120_000;
+
+export function smokeCanonicalCandidate(candidate, { run = defaultRun, log = () => {}, now = Date.now } = {}) {
+  // First-touch scanning can make a freshly extracted Windows tree much slower
+  // than a warm CLI. Retry only a timeout, against this same verified tree.
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const startedAt = now();
+    const result = run(candidate.node, [candidate.bin, "--help"], {
+      timeout: CANDIDATE_SMOKE_TIMEOUT_MS,
+      env: { ...process.env, RELAY_SKIP_DESKTOP_POSTINSTALL: "1" },
+    });
+    const timedOut = result?.error?.code === "ETIMEDOUT";
+    const elapsedMs = Math.max(0, now() - startedAt);
+    log(`candidate startup check ${attempt}/2: ${commandOk(result) ? "passed" : timedOut ? "timed out" : "failed"}; elapsed=${elapsedMs}ms; exit=${result?.status ?? "none"}; signal=${result?.signal || "none"}`);
+    if (commandOk(result)) return { ok: true };
+    if (timedOut && attempt === 1) continue;
+    return {
+      ok: false,
+      reason: timedOut ? "candidate-cli-smoke-timeout" : "candidate-cli-smoke-failed",
+      detail: result?.error?.message || result?.stderr || result?.stdout || "",
+    };
+  }
 }
 
 export function processReferencedCanonicalRoots({
@@ -209,7 +224,22 @@ export async function runCanonicalUpdateTransaction({
   onLockAcquired = () => {},
   requestId = null,
   workerId = null,
+  onProgress = () => {},
+  now = Date.now,
 } = {}) {
+  const stage = async (name, operation) => {
+    const startedAt = now();
+    onProgress({ stage: name, stageStartedAt: startedAt });
+    log(`stage ${name} started`);
+    try {
+      const result = await operation();
+      log(`stage ${name} ${result?.ok === false ? "failed" : "finished"}; elapsed=${Math.max(0, now() - startedAt)}ms`);
+      return result;
+    } catch (error) {
+      log(`stage ${name} threw; elapsed=${Math.max(0, now() - startedAt)}ms; ${error?.message || error}`);
+      throw error;
+    }
+  };
   const selectedServiceNode = resolveServiceNode(node);
   if (!selectedServiceNode) return { ok: false, phase: "input", reason: "service-node-missing", detail: node };
   let serviceNode;
@@ -246,7 +276,7 @@ export async function runCanonicalUpdateTransaction({
     await onLockAcquired(owner);
     admitted = true;
   };
-  const recovered = await recoverCanonicalRuntime({
+  const recovered = await stage("recovery", () => recoverCanonicalRuntime({
     homeDir,
     platform,
     protectedPackageRoots,
@@ -258,7 +288,7 @@ export async function runCanonicalUpdateTransaction({
       : { ok: true },
     onLockAcquired: admit,
     lockIdentity,
-  });
+  }));
   if (!recovered.ok) return recovered;
   if (recovered.recovered) return recovered;
   // npm is resolved beside the worker's own runtime; when that yields nothing (the
@@ -274,7 +304,7 @@ export async function runCanonicalUpdateTransaction({
     platform,
     node: serviceNode,
     npmCommand: npmExecutable,
-    installCandidate,
+    installCandidate: (options) => stage("download-and-extract", () => installCandidate(options)),
     protectedPackageRoots,
     normalizePreviousTarget: (target) => ({
       ...target,
@@ -283,21 +313,21 @@ export async function runCanonicalUpdateTransaction({
     onLockAcquired: admit,
     lockIdentity,
     rollbackTarget: legacy,
-    preCommitVerify: async (candidate) => smoke(candidate),
+    preCommitVerify: (candidate) => stage("startup-verification", () => smoke(candidate, { log })),
     postCommitActivate: async (candidate) => {
       log(`activating ${candidate.version} from ${candidate.packageRoot}`);
-      return activate(candidate, { homeDir, platform });
+      return stage("activation", () => activate(candidate, { homeDir, platform }));
     },
     rollbackActivate: async (target, context) => {
       if (!target) return { ok: true };
       log(`restoring runtime targets to ${target.packageRoot}`);
-      return activate(target, { homeDir, platform, repairExecutable: context?.failed });
+      return stage("rollback", () => activate(target, { homeDir, platform, repairExecutable: context?.failed }));
     },
   });
 }
 
 function workerPath() {
-  return fileURLToPath(import.meta.url);
+  return fileURLToPath(new URL("../bootstrap/relay-update-worker.cjs", import.meta.url));
 }
 
 function encodePayload(value) {
@@ -471,6 +501,21 @@ export function readUpdateRequest(requestPath, { fsImpl = fs } = {}) {
   }
 }
 
+// Request identity prevents a stale observer from consuming another worker's
+// result. A PID probe can prove exit, but permission errors cannot prove death.
+export function inspectUpdateRequest(launch, { read = readUpdateRequest, alive = (pid) => {
+  try { process.kill(pid, 0); return true; } catch (error) { return error?.code !== "ESRCH"; }
+} } = {}) {
+  if (!launch?.requestPath) return null;
+  const request = read(launch.requestPath);
+  if (!request || request.requestId !== launch.requestId || request.workerId !== launch.workerId) return null;
+  if (["completed", "failed", "rejected"].includes(request.state)) return request;
+  if (Number.isSafeInteger(request.workerPid) && request.workerPid > 0 && !alive(request.workerPid)) {
+    return { ...request, state: "failed", result: { ok: false, phase: request.stage || "worker", reason: "worker-exited", detail: "Update worker exited without recording an outcome." } };
+  }
+  return request;
+}
+
 function blockingSleep(ms) {
   const signal = new Int32Array(new SharedArrayBuffer(4));
   Atomics.wait(signal, 0, 0, Math.max(1, ms));
@@ -480,7 +525,9 @@ export function waitForUpdateRequestAdmission(requestPath, {
   fsImpl = fs,
   now = Date.now,
   sleep = blockingSleep,
-  timeoutMs = 5_000,
+  // The worker loads the same cold module graph as the candidate CLI. The old
+  // five-second ceiling could kill it before it even entered the transaction.
+  timeoutMs = 120_000,
   pollMs = 50,
 } = {}) {
   const deadline = now() + timeoutMs;
@@ -640,7 +687,7 @@ export function spawnCanonicalUpdate({
   return { status: "admitted", requestId, workerId, requestPath, admittedAt: admitted.admittedAt };
 }
 
-async function workerMain(payload) {
+export async function workerMain(payload) {
   let options = null;
   try {
     options = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
@@ -684,6 +731,10 @@ async function workerMain(payload) {
     const result = await runCanonicalUpdateTransaction({
       ...options,
       log,
+      onProgress: (progress) => {
+        const current = readUpdateRequest(options.requestPath);
+        writeState(current?.state || "prepared", { ...progress, workerPid: process.pid });
+      },
       onLockAcquired: (owner) => {
         const admittedAt = Date.now();
         const admission = {
@@ -725,7 +776,7 @@ async function workerMain(payload) {
   return options;
 }
 
-if (process.argv[2] === "--worker" && process.argv[3]) {
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url) && process.argv[2] === "--worker" && process.argv[3]) {
   const options = await workerMain(process.argv[3]);
   // ALWAYS exit 0. launchd restarts a submitted job that exits non-zero — forever,
   // with its original payload — so a failing worker used to be resurrected every

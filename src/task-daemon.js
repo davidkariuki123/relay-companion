@@ -34,6 +34,7 @@ import { migratePersistedContentFields } from "./content-field-migration.js";
 import agentRelayContext from "./agent-relay-context.cjs";
 import { storeDir } from "./host-paths.js";
 import { readCanonicalRuntime } from "./canonical-runtime.js";
+import { inspectUpdateRequest } from "./canonical-updater.js";
 import { autostartWillReplace } from "./autostart-registration.js";
 import { startRelayCodexProjectRepairLoop } from "./codex-project-repair.js";
 import { startInboxWorker } from "./inbox-worker-controller.js";
@@ -645,6 +646,8 @@ export function scheduleSelfUpdateExit({
   now = () => Date.now(),
   replacementReady = null,
   onCeiling = null,
+  updateRequest = null,
+  inspectRequest = inspectUpdateRequest,
 } = {}) {
   const startedAt = now();
   let done = false;
@@ -668,6 +671,15 @@ export function scheduleSelfUpdateExit({
     }
   };
   const timer = setIntervalImpl(() => {
+    const request = inspectRequest(updateRequest);
+    if (request && ["failed", "rejected"].includes(request.state)) {
+      if (done) return;
+      done = true;
+      clearIntervalImpl(timer);
+      log(`self-update: worker stopped at ${request.result?.phase || request.stage || "unknown stage"}: ${request.result?.reason || request.reason || request.state}; keeping the current daemon alive and resuming checks`);
+      try { onCeiling?.(); } catch (error) { log(`self-update: could not resume checks: ${error?.message || error}`); }
+      return;
+    }
     if (typeof replacementReady === "function" && replacementReady()) {
       finish("canonical runtime pointer selected a replacement tree");
       return;
@@ -930,6 +942,7 @@ export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
         packageRoot: bootPackageRoot,
         log,
         ceilingMs: CANONICAL_UPDATE_EXIT_CEILING_MS,
+        updateRequest: _update.launch,
         replacementReady: () => {
           const current = readCanonicalRuntime();
           // "The pointer names a tree that is not mine" is the SAME fact that

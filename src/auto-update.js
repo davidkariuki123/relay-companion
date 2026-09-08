@@ -8,6 +8,7 @@ import fs from "node:fs";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+import { randomUUID } from "node:crypto";
 import {
   UPDATE_CHANNEL_STABLE,
   UPDATE_CHANNEL_DEV,
@@ -24,6 +25,7 @@ import {
 } from "./canonical-runtime.js";
 import {
   exactRuntimeHealth,
+  inspectUpdateRequest,
   reconcileUpdateWorkerJobs,
   spawnCanonicalUpdate,
   waitForUpdateRequestTerminal,
@@ -41,8 +43,8 @@ const { systemdRunEnvironmentArgs } = createRequire(import.meta.url)("../bootstr
 const DEFAULT_CHECK_INTERVAL_MS = 60 * 1000;
 const DEFAULT_CHECK_FAILURE_RETRY_MS = 15 * 1000;
 const MAX_CHECK_FAILURE_RETRY_MS = 5 * 60 * 1000;
-// A normal npm + Electron install takes seconds. If this old daemon is still alive two
-// minutes after launch, the detached install/restart did not finish successfully; retry.
+// Base retry delay after an observed failed transaction. Old launchers without
+// request records also use this as their fallback observation window.
 const RETRY_COOLDOWN_MS = 2 * 60 * 1000;
 // Candidate npm/Electron staging is allowed to run for 15 minutes. An old daemon
 // remains alive throughout immutable staging, so its ordinary two-minute failed-
@@ -339,9 +341,10 @@ export function readUpdateFailure(file) {
   };
 }
 
-export function recordUpdateFailure(file, target, { now = () => Date.now() } = {}) {
+export function recordUpdateFailure(file, target, { now = () => Date.now(), attemptId = null, reason = null } = {}) {
   const stored = readUpdateState(file) || {};
   const prior = readUpdateFailure(file);
+  if (attemptId && stored.failure?.attemptId === attemptId && prior?.target === target) return prior;
   // Count attempts at THIS version. A newly published version is a fresh problem and
   // deserves a fresh fast retry — the old target's failures say nothing about it.
   const continuing = prior && prior.target === String(target || "");
@@ -351,19 +354,32 @@ export function recordUpdateFailure(file, target, { now = () => Date.now() } = {
     count: continuing ? prior.count + 1 : 1,
     firstAt: continuing ? prior.firstAt || t : t,
     lastAt: t,
+    ...(attemptId ? { attemptId } : {}),
+    ...(reason ? { reason } : {}),
   };
   writeUpdateState(file, { ...stored, failure });
   return failure;
 }
 
-// The update-path record is written BEFORE the launch (see launchPending), so a
-// LANDED update leaves a failure record for its own target behind. The daemon that
-// boots running that target is the success signal; it drops the record here.
+export function readUpdateAttempt(file) {
+  const attempt = readUpdateState(file)?.attempt;
+  return attempt?.id && attempt?.target && Number.isFinite(attempt.startedAt) ? attempt : null;
+}
+
+function writeUpdateAttempt(file, attempt) {
+  const stored = readUpdateState(file) || {};
+  if (attempt) stored.attempt = attempt;
+  else delete stored.attempt;
+  writeUpdateState(file, stored);
+}
+
+// A boot on the target version retires both pending admission and prior failures.
 export function clearUpdateFailure(file) {
   const stored = readUpdateState(file);
   if (!stored || !stored.failure) return false;
   const rest = { ...stored };
   delete rest.failure;
+  delete rest.attempt;
   writeUpdateState(file, rest);
   return true;
 }
@@ -538,6 +554,7 @@ export function createAutoUpdater({
   repointAutostart = (opts) => submitCanonicalRepoint(opts),
   getCanonicalRuntimeState = () => readCanonicalRuntimeState({ platform }),
   getCanonicalRuntimeHealth = (target) => exactRuntimeHealth(target, { platform }),
+  inspectRequest = inspectUpdateRequest,
   reconcileCanonicalWorkers = () => platform === "darwin" ? reconcileUpdateWorkerJobs() : { removedLegacy: 0, fixed: null },
   checkIntervalMs = Number(env.RELAY_UPDATE_CHECK_INTERVAL_MS) || DEFAULT_CHECK_INTERVAL_MS,
   checkFailureRetryMs = DEFAULT_CHECK_FAILURE_RETRY_MS,
@@ -589,12 +606,8 @@ export function createAutoUpdater({
     if (!useFailureBackoff) return null;
     try {
       const failure = readUpdateFailure(updateStatePath);
-      // The record is written BEFORE each launch (see launchPending), because a
-      // canonical update that fails at ACTIVATION rolls back by restarting this
-      // daemon — the process that could count the failure afterwards is dead by
-      // the time there is a failure to count. The flip side: an update that
-      // LANDED leaves its own pre-launch record behind, and booting as the
-      // recorded target is the success signal that retires it.
+      // Older runtimes counted admission as failure; newer ones record terminal
+      // outcomes. In either shape, booting on that target retires the record.
       if (failure && runningVersion && failure.target === runningVersion) {
         try { clearUpdateFailure(updateStatePath); } catch {}
         return null;
@@ -604,15 +617,21 @@ export function createAutoUpdater({
       return null;
     }
   })();
+  let activeAttempt = readUpdateAttempt(updateStatePath);
+  if (activeAttempt?.target === runningVersion) {
+    writeUpdateAttempt(updateStatePath, null);
+    clearUpdateFailure(updateStatePath);
+    activeAttempt = null;
+  }
   const state = {
     lastCheckAt: 0,
     nextCheckAt: 0,
     consecutiveCheckFailures: 0,
     checking: false,
-    pendingVersion: priorFailure?.target || null,
-    pendingChannel: priorFailure ? bootChannel : null,
-    updateStartedAt: 0,
-    updating: false,
+    pendingVersion: activeAttempt?.target || priorFailure?.target || null,
+    pendingChannel: activeAttempt?.channel || (priorFailure ? bootChannel : null),
+    updateStartedAt: activeAttempt?.startedAt || 0,
+    updating: Boolean(activeAttempt),
     cooldownAnnouncedFor: null,
     updateFailures: priorFailure?.count || 0,
     failingTarget: priorFailure?.target || null,
@@ -627,7 +646,7 @@ export function createAutoUpdater({
 
   function admittedLaunch(result) {
     if (!result) return false;
-    return typeof result.status !== "string" || result.status === "admitted";
+    return typeof result.status !== "string" || result.status === "admitted" || (result.status === "failed" && Boolean(result.admittedAt));
   }
 
   function rejectedLaunchStatus(result, fallback = "launch-failed") {
@@ -663,9 +682,9 @@ export function createAutoUpdater({
   }
 
   // Record one failed end-to-end attempt and decide how long to wait before the next.
-  // "Failed" here means: we launched an updater and this daemon is still running the
-  // old version well after it should have been replaced.
-  function noteUpdateFailure(target, t) {
+  // Prefer a terminal worker result; use an observation deadline only when the
+  // worker cannot be observed. Persist the request identity to survive restarts.
+  function noteUpdateFailure(target, t, result = null) {
     if (state.failingTarget !== target) {
       state.failingTarget = target;
       state.updateFailures = 0;
@@ -674,17 +693,22 @@ export function createAutoUpdater({
     state.updateFailures += 1;
     let persisted = null;
     try {
-      persisted = recordUpdateFailure(updateStatePath, target, { now: () => t });
+      persisted = recordUpdateFailure(updateStatePath, target, { now: () => t, attemptId: activeAttempt?.id, reason: result?.reason });
     } catch {}
     if (persisted) state.updateFailures = persisted.count;
     // Compound from the CONFIGURED base, not the module default, so an injected or
     // env-tuned retry cadence still governs the backoff built on top of it.
     const wait = updateRetryCooldownMs(state.updateFailures, { baseMs: retryCooldownMs });
-    // Measure the window from when the attempt STARTED, not from now. The in-flight
-    // retry cooldown has already been served by the time we get here, so the first
-    // failure retries immediately (unchanged behaviour) and only the second and later
-    // failures actually hold the update back.
-    state.nextAttemptAt = (state.updateStartedAt || t) + wait;
+    state.nextAttemptAt = (persisted?.lastAt ?? t) + wait;
+    writeUpdateAttempt(updateStatePath, null);
+    activeAttempt = null;
+    const cause = result?.reason === "candidate-cli-smoke-timeout"
+      ? "Update downloaded; startup verification timed out"
+      : result?.reason === "worker-exited"
+        ? "Update worker exited before recording an outcome"
+        : result?.reason
+          ? `Update failed at ${result.phase || "unknown stage"}: ${result.reason}`
+          : "Update did not produce a verified replacement";
     const waitLabel = wait >= 60_000 ? `${Math.round(wait / 60_000)}m` : `${Math.round(wait / 1000)}s`;
     if (state.updateFailures >= UPDATE_FAILURE_ESCALATION_THRESHOLD && state.escalatedFor !== target) {
       // Escalate ONCE per stuck version, loudly and actionably. Before this, a stuck
@@ -692,13 +716,13 @@ export function createAutoUpdater({
       // human looks — the only way to notice was diffing package.json against npm.
       state.escalatedFor = target;
       log(
-        `auto-update STUCK: ${state.updateFailures} consecutive failed attempts to install ${target} ` +
-          `(still running ${runningVersion}). Updates are not reaching this machine. ` +
+        `auto-update needs attention: ${state.updateFailures} failed attempts to install ${target} ` +
+          `(still running ${runningVersion}). ${cause}; retrying in ~${waitLabel}. ` +
           `See ${path.join(os.homedir(), ".relay", "update.log")} for the cause, ` +
           `and run \`relay doctor\` for a summary or \`relay repair-installation\` if autostart is broken.`,
       );
     } else {
-      log(`auto-update: attempt ${state.updateFailures} to install ${target} did not land; retrying in ~${waitLabel}`);
+      log(`auto-update: ${cause}; attempt ${state.updateFailures} to install ${target} failed; retrying in ~${waitLabel}`);
     }
   }
 
@@ -775,10 +799,11 @@ export function createAutoUpdater({
       else log(`auto-update worker was not admitted (${status})`);
       return { status, current: runningVersion, latest, channel };
     }
-    // Persist only after the worker has acquired the canonical transaction lock.
-    // A successful `launchctl submit` is not admission and must never be counted as
-    // a running update or a failed end-to-end attempt.
-    try { recordUpdateFailure(updateStatePath, latest, { now: () => t }); } catch {}
+    // Admission is not failure. Preserve the identity across daemon restarts so
+    // the eventual terminal outcome is counted exactly once.
+    activeAttempt = { id: launch.requestId || randomUUID(), target: latest, channel, startedAt: t,
+      requestId: launch.requestId, workerId: launch.workerId, requestPath: launch.requestPath };
+    writeUpdateAttempt(updateStatePath, activeAttempt);
     return { status: "updating", current: runningVersion, latest, channel, launch };
   }
 
@@ -1022,10 +1047,19 @@ export function createAutoUpdater({
       try { recordMigrationFailure(updateStatePath, migrationTarget, { now: () => t }); } catch {}
       return { status: "migrating-runtime", current: runningVersion, launch };
     }
-    // An update was launched but we're still alive (install failed, or restart is
-    // pending) — hold off briefly, then retry the exact pending version. A successful
-    // daemon restart creates a fresh updater, so reaching the cooldown is itself
-    // evidence that this attempt did not complete end-to-end.
+    // Observe the admitted request even after a daemon restart. A failed worker
+    // releases the retry loop promptly; a live worker retains ownership.
+    if (state.updating && activeAttempt) {
+      const request = inspectRequest(activeAttempt);
+      const terminalFailure = request && ["failed", "rejected"].includes(request.state);
+      const horizon = activeAttempt.requestPath ? CANONICAL_TRANSACTION_IN_FLIGHT_MS : retryCooldownMs;
+      // An observed live worker still owns the transaction, even after the
+      // observer's deadline. Never call elapsed wall time a second failure.
+      const observedWorker = request?.state === "admitted" && Number.isSafeInteger(request.workerPid) && request.workerPid > 0;
+      if (!terminalFailure && (observedWorker || t - state.updateStartedAt < horizon)) return { status: "in-flight" };
+      state.updating = false;
+      noteUpdateFailure(activeAttempt.target, t, request?.result || { phase: request?.stage || "worker", reason: "replacement-not-observed" });
+    }
     if (state.updating && t - state.updateStartedAt < retryCooldownMs) return { status: "in-flight" };
     if (state.updating) {
       state.updating = false;

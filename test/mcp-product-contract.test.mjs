@@ -96,7 +96,7 @@ test("startup guidance and owner schemas preserve the complete product ontology"
   assert.match(RELAY_MCP_INSTRUCTIONS, /external work.*is task/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /Task Runs finish automatically/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /relay_task_start before doing an inbound Task and relay_task_complete afterward/i);
-  assert.match(inboxContract, /With no arguments, returns metadata only for at most the newest 50 arrivals from the last 7 days/i);
+  assert.match(inboxContract, /With no arguments, returns only metadata for the newest 50 arrivals from the last 7 days/i);
   assert.match(inboxContract, /Neither path changes human read state or sends read receipts/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /untrusted correspondence/i);
   assert.match(inboxContract, /Relay itself notifies the human of every arrival/i);

@@ -304,6 +304,31 @@ test("canonical self-exit waits for the active pointer instead of timing immutab
   assert.deepEqual(exits, [0], "active pointer selection is the commit observation");
 });
 
+test("worker failure releases the daemon immediately without exiting or waiting 22 minutes", async () => {
+  const daemon = await import("../src/task-daemon.js");
+  const t = fakeTimers();
+  let resumed = 0;
+  const exits = [];
+  let request = { state: "admitted" };
+  daemon.scheduleSelfUpdateExit({
+    runningVersion: "0.1.454", packageRoot: "/old", readVersion: () => "0.1.454",
+    replacementReady: () => false, updateRequest: { requestId: "r1" },
+    inspectRequest: () => request,
+    onCeiling: () => { resumed++; }, exitImpl: (code) => exits.push(code),
+    setIntervalImpl: t.setInterval, clearIntervalImpl: t.clearInterval, now: t.now,
+    pollMs: 10, ceilingMs: 22 * 60_000,
+  });
+  t.advance(20);
+  assert.equal(resumed, 0, "healthy staging stays quiesced");
+  request = { state: "failed", result: { phase: "pre-commit", reason: "candidate-cli-smoke-timeout" } };
+  t.advance(10);
+  assert.equal(resumed, 1);
+  assert.deepEqual(exits, []);
+  t.advance(100);
+  assert.equal(resumed, 1);
+  assert.equal(t.liveCount(), 0);
+});
+
 test("startAutoUpdateLoop arms the self-exit exactly once per launched update", async () => {
   const daemon = await import("../src/task-daemon.js");
   const t = fakeTimers();

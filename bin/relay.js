@@ -854,10 +854,14 @@ async function cmdDoctor(flags = {}) {
     console.log(`  running from: ${companionPackageRoot()}`);
   }
   console.log(`  update channel: ${updateChannel()}`);
-  // The update record is written BEFORE each launch (auto-update.js launchPending),
-  // so a single fresh record is an attempt in flight, not a diagnosis.
+  // New workers keep admission separate from failure. Retain the old single-
+  // record heuristic only for records written by an older runtime.
   const updateLogPath = path.join(os.homedir(), ".relay", "update.log");
-  const failureInFlight = failure && Number(failure.count) === 1 && Date.now() - Number(failure.lastAt || 0) < 30 * 60 * 1000;
+  const failureInFlight = failure && !failure.attemptId && Number(failure.count) === 1 && Date.now() - Number(failure.lastAt || 0) < 30 * 60 * 1000;
+  const pendingAttempt = updateState.attempt;
+  if (pendingAttempt?.target && Number.isFinite(pendingAttempt.startedAt)) {
+    console.log(`  update attempt in flight: ${pendingAttempt.target} (launched ${new Date(pendingAttempt.startedAt).toISOString()})`);
+  }
   // Canonical migration/recovery keep their own durable attempt records; doctor
   // used to read only `failure` and printed "update health: ok" for the entire day
   // Sven's machine burned 24GB in canonical install/activation loops.
@@ -874,11 +878,12 @@ async function cmdDoctor(flags = {}) {
   if (failure && Number(failure.count) > 0 && !failureInFlight) {
     const since = failure.firstAt ? new Date(Number(failure.firstAt)).toISOString() : "unknown";
     console.log(`  UPDATES ARE FAILING: ${failure.count} consecutive attempt(s) to install ${failure.target} since ${since}`);
+    if (failure.reason === "candidate-cli-smoke-timeout") console.log("    update downloaded; startup verification timed out; automatic retries remain enabled");
     console.log(`    cause: see ${updateLogPath}`);
     console.log("    if autostart is broken, run: relay repair-installation");
   } else if (failureInFlight) {
     console.log(`  update attempt in flight: ${failure.target} (launched ${new Date(Number(failure.lastAt)).toISOString()})`);
-  } else if (!canonicalFailures.length) {
+  } else if (!canonicalFailures.length && !pendingAttempt) {
     console.log("  update health: ok (no failed update attempts recorded)");
   }
   for (const record of canonicalFailures) {
