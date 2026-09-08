@@ -198,11 +198,19 @@ test("requests stay out of the Relays list and the unread count; People wears th
 
 test("a request supports Accept, reversible Ignore, and confirmed server blocking", () => {
   const pane = slice("function renderRequestsPane()", "function renderContacts()");
-  assert.match(pane, /Show ignored requests/);
+  // The way back from Ignore is a quiet line in the People pane's shape, not
+  // a bare button, and only while something is hidden (Sven, 2026-09-08).
+  assert.match(pane, /ignored\.size \? `<div class="cv-latent">Ignored requests are hidden\. <button type="button" class="cv-latent-link" id="cvShowIgnored">Show them<\/button>\.<\/div>`/);
+  assert.match(pane, /<div class="cv-latent">Showing ignored requests\. <button type="button" class="cv-latent-link" id="cvShowIgnored">Back to requests<\/button>\.<\/div>/);
+  assert.doesNotMatch(pane, /cv-add quiet" type="button" id="cvShowIgnored"/);
+  assert.match(pane, /"No requests\. Someone new writing to you shows up here first\."/);
+  assert.match(pane, /"No ignored requests\."/);
   assert.match(pane, /<span class="cv-request-why">Not in your People<\/span>/);
   assert.match(pane, /data-request-accept="\$\{esc\(address\)\}"[^>]*>Accept<\/button>/);
   assert.match(pane, /data-request-ignore="\$\{esc\(address\)\}">Ignore<\/button>/);
-  assert.match(pane, /Ignore hides a request on this computer/);
+  // Ignore and Block are plain words; the one hint sits under the rows.
+  assert.doesNotMatch(pane, /Ignore hides a request on this computer/);
+  assert.match(pane, /`<div class="cv-request-note">Open one to read it\. Replying accepts it too\.<\/div>`/);
   // Accepting is saving them: the same write the People form does.
   assert.match(pane, /window\.relay\.contactSave\(\{ contactId:"", name, emails:\[address\], email:address \}\)/);
   assert.match(pane, /openThreadDetail\(el\.getAttribute\("data-request-open"\), el\.getAttribute\("data-party"\) \|\| "", "contacts", \{ expanded:true \}\);/);

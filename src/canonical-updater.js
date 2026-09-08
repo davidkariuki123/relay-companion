@@ -327,7 +327,7 @@ export async function runCanonicalUpdateTransaction({
 }
 
 function workerPath() {
-  return fileURLToPath(new URL("../bootstrap/relay-update-worker.cjs", import.meta.url));
+  return fileURLToPath(new URL("./relay-update-worker.cjs", import.meta.url));
 }
 
 function encodePayload(value) {

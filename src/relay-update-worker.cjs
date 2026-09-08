@@ -26,7 +26,7 @@ async function main(payload) {
   process.on("exit", (code) => log(`worker exited; code=${code}; elapsed=${Date.now() - startedAt}ms`));
   try {
     write({ workerPid: process.pid, stage: "loading-worker", stageStartedAt: startedAt });
-    const { workerMain } = await import("../src/canonical-updater.js");
+    const { workerMain } = await import("./canonical-updater.js");
     await workerMain(payload);
   } catch (error) {
     log(`worker startup failed: ${error?.stack || error}`);

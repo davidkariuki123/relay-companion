@@ -331,7 +331,10 @@ test("detection feeds one chosen app, desktop when present and terminal as the f
   assert.match(agent, /<span class="sv-open-state">\$\{inApp \? "Opens relays" : "Chosen"\}<\/span>/);
   assert.match(agent, /<button class="sv-choose" type="button" data-agent-choose="\$\{app\}">Use this one<\/button>/);
   assert.doesNotMatch(agent, /role="switch"|data-agent-surface/, "no switches, no surface select");
-  assert.match(settings, /setAgentOpeningApp\(button\.getAttribute\("data-agent-choose"\)\);/);
+  // The third row (your own session) writes the same pref through its own
+  // setter; app rows still go through setAgentOpeningApp.
+  assert.match(settings, /if \(choice === "session"\) setAgentOwnSession\(\);\s*else setAgentOpeningApp\(choice\);/);
+  assert.doesNotMatch(settings, /svOpeningSurface/, "the surface select is gone");
   assert.match(source, /loadAgentSurfaces\(\)\.catch\(\(\) => \{\}\);/, "capabilities load at boot");
   assert.match(source, /const seq = \+\+settingsLoadSeq;\s*loadAgentSurfaces\(\)/, "and again whenever Settings loads");
 });

@@ -105,10 +105,10 @@ test("cold worker admission can exceed five seconds while terminal startup failu
 test("worker entry logs module-load failures before the updater can start", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-worker-entry-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const bootstrap = path.join(root, "bootstrap");
-  fs.mkdirSync(bootstrap);
-  const entry = path.join(bootstrap, "relay-update-worker.cjs");
-  fs.copyFileSync(new URL("../bootstrap/relay-update-worker.cjs", import.meta.url), entry);
+  const runtimeSource = path.join(root, "src");
+  fs.mkdirSync(runtimeSource);
+  const entry = path.join(runtimeSource, "relay-update-worker.cjs");
+  fs.copyFileSync(new URL("../src/relay-update-worker.cjs", import.meta.url), entry);
   const requestPath = path.join(root, ".relay", "runtime", "update-requests", "r1.json");
   fs.mkdirSync(path.dirname(requestPath), { recursive: true });
   fs.writeFileSync(requestPath, JSON.stringify({ schema: 1, requestId: "r1", workerId: "w1", state: "prepared" }));

@@ -38,11 +38,24 @@ test("the account is a row you tap; its actions unfold beneath it", () => {
 test("Your agent is one chosen app, in words: Opens relays, or Use this one", () => {
   const agent = slice("function yourAgentHtml()", "function yourLinkHtml()");
   assert.match(agent, /<div class="sv-open-title">Your agent<\/div>/);
-  assert.match(agent, /Opening an app does not confirm its Relay connection\./);
-  assert.match(agent, /Copy the sentence on a Relay into your current agent session\./);
-  assert.match(agent, /"Available · opens relays in a new chat"/);
-  assert.match(agent, /svOpeningSurface/);
+  // The intro states what is true: setup installs the skill and the MCP for
+  // everyone, so every app that is here is connected (Shane, 2026-09-07).
+  assert.match(agent, /"Relay is set up in Claude Code and Codex on this Mac\. One of them opens relays\."/);
+  assert.match(agent, /`Relay is set up in \$\{present\[0\]\} on this Mac\. It opens relays\.`/);
+  assert.match(agent, /"Relay is set up in your sessions on this Mac\. Install Claude Code or Codex and it opens relays there\."/);
+  assert.doesNotMatch(agent, /does not confirm|"Available/, "no disclaimer, and present means connected");
+  assert.match(agent, /"Connected · opens relays in a new chat"/);
+  assert.match(agent, /: "Connected";/);
+  assert.match(agent, /appUnavailableReason\(app\)/, "the availability check still names why an app is off");
   assert.match(agent, /data-agent-choose="\$\{app\}">Use this one<\/button>/);
+  // The terminal case is a third row in the same list, not a select
+  // (Sven, 2026-09-08): one control, the same data.
+  assert.doesNotMatch(agent, /svOpeningSurface|<select/);
+  assert.match(agent, /<span class="sv-open-name">My own session<\/span><span class="sv-open-why">Relay copies the sentence for you<\/span>/);
+  assert.match(agent, /data-agent-choose="session">Use this one<\/button>/);
+  const wiring = slice("function setAgentOwnSession()", "function setAgentOpeningApp(app)");
+  assert.match(wiring, /surface: "other"/);
+  assert.doesNotMatch(html, /svOpeningSurface/);
 });
 
 test("Your link is on the page with Copy, and says what joining through it does", () => {

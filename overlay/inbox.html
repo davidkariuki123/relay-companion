@@ -1473,6 +1473,7 @@
   .sv-open-row { display:flex; align-items:center; gap:11px; min-height:54px; padding:10px 12px; }
   .sv-open-row + .sv-open-row { border-top:1px solid var(--edge); }
   .sv-open-logo { width:28px; height:28px; flex:0 0 28px; border-radius:7px; object-fit:contain; }
+  .sv-open-logo-blank { display:block; }
   .sv-open-copy { min-width:0; flex:1 1 auto; display:flex; flex-direction:column; }
   .sv-open-name { font-family:var(--sans); font-size:14px; line-height:1.3; font-weight:600; color:var(--ink); }
   .sv-open-why { margin-top:2px; font-family:var(--sans); font-size:10.5px; line-height:1.4; color:var(--muted-3); }
@@ -6342,6 +6343,13 @@
     return chosen ? [chosen] : [];
   }
   function agentAppChoice() { return agentAppSelection()[0] || ""; }
+  // The third row on the You page: no app opens relays, the sentence is
+  // copied for whatever session you are in. Same pref the app rows write.
+  function setAgentOwnSession() {
+    setProtoPref(`proto.openingPreference.v1:${signupAccountKey()}`, JSON.stringify({
+      ...(openingPreference() || {}), surface: "other",
+    }));
+  }
   function setAgentOpeningApp(app) {
     if (!AGENT_APP_OPTIONS.includes(app) || !appAvailable(app)) return;
     setProtoPref(AGENT_APPS_PREF, app);
@@ -9870,8 +9878,13 @@
           ${inboundId ? `<button class="cv-add quiet" type="button" data-request-block="${esc(inboundId)}" data-address="${esc(address)}">Block</button>` : ""}
         </div>
       </div>`;
-    }).join("") + `${rooms.length ? "" : `<div class="cv-empty">No ${showIgnoredRequests ? "ignored requests" : "requests"}.</div>`}<div class="cv-request-note">Ignore hides a request on this computer. Block stops direct Relays in both directions; existing history stays.</div>
-      <button class="cv-add quiet" type="button" id="cvShowIgnored">${showIgnoredRequests ? "Back to requests" : "Show ignored requests"}</button>`;
+    }).join("") + `${rooms.length
+      ? (showIgnoredRequests ? "" : `<div class="cv-request-note">Open one to read it. Replying accepts it too.</div>`)
+      : `<div class="cv-empty">${showIgnoredRequests ? "No ignored requests." : "No requests. Someone new writing to you shows up here first."}</div>`}${
+      // The way back from Ignore, in the People pane's quiet-line shape; only
+      // when there is something hidden to show.
+      showIgnoredRequests ? `<div class="cv-latent">Showing ignored requests. <button type="button" class="cv-latent-link" id="cvShowIgnored">Back to requests</button>.</div>`
+      : ignored.size ? `<div class="cv-latent">Ignored requests are hidden. <button type="button" class="cv-latent-link" id="cvShowIgnored">Show them</button>.</div>` : ""}`;
     document.getElementById("cvShowIgnored")?.addEventListener("click", () => {
       showIgnoredRequests = !showIgnoredRequests; renderRequestsPane();
     });
@@ -14372,27 +14385,27 @@
   function yourAgentHtml() {
     const chosen = agentAppChoice();
     const inApp = agentOpensInApp();
-    const intro = inApp
-      ? "Choose where to open a Relay. Opening an app does not confirm its Relay connection."
-      : "Copy the sentence on a Relay into your current agent session. You can change this preference here.";
-    const surface = openingPreference()?.surface || (chosen ? agentSurfacePreference(chosen) : "other");
+    const present = AGENT_APP_OPTIONS.filter(appAvailable);
+    // No chosen app means the sentence goes to whatever session you are in:
+    // either you chose that, or this Mac has no app to choose.
+    const ownSession = !chosen;
+    const intro = present.length === 2
+      ? "Relay is set up in Claude Code and Codex on this Mac. One of them opens relays."
+      : present.length === 1
+        ? `Relay is set up in ${present[0]} on this Mac. It opens relays.`
+        : "Relay is set up in your sessions on this Mac. Install Claude Code or Codex and it opens relays there.";
     return `
       <div class="sv-open-section" id="yourAgent" data-stop="1">
         <div class="sv-open-title">Your agent</div>
         <div class="sv-open-intro">${esc(intro)}</div>
-        <label class="sv-open-row"><span class="sv-open-copy">I use my agent in</span>
-          <select id="svOpeningSurface" class="sv-agent-select" aria-label="Where I use my agent">
-            ${[["desktop", "A desktop app"], ["terminal", "The terminal"], ["other", "Another session"]].map(([value, label]) => `<option value="${value}"${surface === value ? " selected" : ""}>${label}</option>`).join("")}
-          </select>
-        </label>
         <div class="sv-open-list">
           ${AGENT_APP_OPTIONS.map((app) => {
             const available = appAvailable(app);
             const on = available && app === chosen;
             const logo = app === "Codex" ? "codexMark.svg" : "claudeCodeMark.svg";
             const why = !available ? appUnavailableReason(app)
-              : on ? (inApp ? "Available · opens relays in a new chat" : "Available · copy the sentence into your session")
-              : "Available on this computer";
+              : on ? (inApp ? "Connected · opens relays in a new chat" : "Connected · Relay copies the sentence for you")
+              : "Connected";
             return `<div class="sv-open-row${available ? "" : " off"}">
               <img class="sv-open-logo" src="${logo}" alt="" />
               <span class="sv-open-copy"><span class="sv-open-name">${app}</span><span class="sv-open-why">${esc(why)}</span></span>
@@ -14400,6 +14413,12 @@
                 : available ? `<button class="sv-choose" type="button" data-agent-choose="${app}">Use this one</button>` : ""}
             </div>`;
           }).join("")}
+          <div class="sv-open-row">
+            <span class="sv-open-logo sv-open-logo-blank" aria-hidden="true"></span>
+            <span class="sv-open-copy"><span class="sv-open-name">My own session</span><span class="sv-open-why">Relay copies the sentence for you</span></span>
+            ${ownSession ? `<span class="sv-open-state">Chosen</span>`
+              : `<button class="sv-choose" type="button" data-agent-choose="session">Use this one</button>`}
+          </div>
         </div>
       </div>`;
   }
@@ -14667,16 +14686,12 @@
     for (const button of settingsViewEl.querySelectorAll("[data-agent-choose]")) {
       button.addEventListener("click", (e) => {
         e.stopPropagation();
-        setAgentOpeningApp(button.getAttribute("data-agent-choose"));
+        const choice = button.getAttribute("data-agent-choose");
+        if (choice === "session") setAgentOwnSession();
+        else setAgentOpeningApp(choice);
         renderSettings();
       });
     }
-    document.getElementById("svOpeningSurface")?.addEventListener("change", (event) => {
-      setProtoPref(`proto.openingPreference.v1:${signupAccountKey()}`, JSON.stringify({
-        ...(openingPreference() || {}), surface: event.target.value,
-      }));
-      renderSettings();
-    });
     document.getElementById("svBlockedPeople")?.addEventListener("click", async () => {
       const list = document.getElementById("svBlockedList");
       const account = signupAccountKey();

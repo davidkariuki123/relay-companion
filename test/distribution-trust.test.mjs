@@ -498,16 +498,10 @@ test("verified npm provenance is bound to exact public workflow, source, and tar
 test("packed thin installer contains only the reviewed dependency-free bootstrap", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-thin-shape-"));
   try {
-    fs.mkdirSync(path.join(root, "bootstrap"), { recursive: true });
-    fs.writeFileSync(path.join(root, "bootstrap", "linux-systemd.cjs"), "module.exports = {}\n");
-    fs.writeFileSync(path.join(root, "bootstrap", "owned-node-runtime.cjs"), "module.exports = {}\n");
-    fs.writeFileSync(path.join(root, "bootstrap", "relay-background-install.cjs"), "module.exports = {}\n");
-    fs.writeFileSync(path.join(root, "bootstrap", "relay-setup.cjs"), "module.exports = {}\n");
-    fs.writeFileSync(path.join(root, "bootstrap", "relay-skill.cjs"), "module.exports = {}\n");
-    fs.writeFileSync(path.join(root, "bootstrap", "release-signature.cjs"), "module.exports = {}\n");
-    fs.writeFileSync(path.join(root, "bootstrap", "runtime-executables.cjs"), "module.exports = {}\n");
-    fs.writeFileSync(path.join(root, "bootstrap", "runtime-health.cjs"), "module.exports = {}\n");
-    fs.writeFileSync(path.join(root, "bootstrap", "trust.json"), "{}\n");
+    // Copy the actual shipped bootstrap: a hand-written fixture cannot catch a
+    // runtime-only file accidentally entering the dependency-free npm package.
+    fs.cpSync(new URL("../bootstrap", import.meta.url), path.join(root, "bootstrap"), { recursive: true });
+    assert.ok(fs.existsSync(new URL("../src/relay-update-worker.cjs", import.meta.url)));
     fs.writeFileSync(path.join(root, "README.md"), "Relay\n");
     fs.writeFileSync(path.join(root, "LICENSE"), "MIT\n");
     fs.cpSync(new URL("../skill", import.meta.url), path.join(root, "skill"), { recursive: true });
