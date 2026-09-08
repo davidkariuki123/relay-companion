@@ -3054,7 +3054,7 @@
           <span class="cv-add-slot" id="cvAddHome"><button class="cv-add" type="button" id="cvAdd" aria-label="Add person">Add</button></span>
           <button class="cv-add gone" type="button" id="cvgNew" aria-label="Add channel">Add</button>
         </div>
-        <section class="cv-google" id="cvGoogle" aria-label="Google contacts">
+        <section class="cv-google gone" id="cvGoogle" aria-label="Google contacts">
           <div class="cv-google-top"><span class="cv-google-title">Google contacts</span><button type="button" class="cv-add" id="cvGoogleAction" disabled>Checking…</button></div>
           <div class="cv-google-detail" id="cvGoogleDetail" aria-live="polite">Checking Google contacts…</div>
           <div class="cv-google-note" id="cvGoogleNote">Names and email addresses. Read-only.</div>
@@ -10433,6 +10433,7 @@
     cvGoogleNoteEl.textContent = view.note;
   }
   async function loadGoogleContacts() {
+    if (payload.features?.googleContacts !== true) return;
     const key = signupAccountKey();
     if (googleAccount !== key) {
       googleAccount = key; googleStatus = null; googleBusy = false; googleError = false;
@@ -10454,6 +10455,7 @@
     renderGoogleContacts();
   }
   cvGoogleActionEl.addEventListener("click", async () => {
+    if (payload.features?.googleContacts !== true) return;
     if (googleBusy) return;
     if (googleError) { await loadGoogleContacts(); return; }
     const key = signupAccountKey();
@@ -10484,8 +10486,8 @@
   });
   // Poll only while People is visible. This also observes browser OAuth return
   // without exposing device credentials in a callback URL.
-  setInterval(() => { if (rendererSurfaceActive() && activeView === "contacts" && contactsPane === "people") void loadGoogleContacts(); }, 5000);
-  window.addEventListener("focus", () => { if (activeView === "contacts") void loadGoogleContacts(); });
+  setInterval(() => { if (payload.features?.googleContacts === true && rendererSurfaceActive() && activeView === "contacts" && contactsPane === "people") void loadGoogleContacts(); }, 5000);
+  window.addEventListener("focus", () => { if (payload.features?.googleContacts === true && activeView === "contacts") void loadGoogleContacts(); });
 
   async function loadContacts() {
     try { contactsList = (await window.relay.contacts()) || []; }
@@ -10518,7 +10520,7 @@
       el.classList.toggle("active", on);
       el.setAttribute("aria-selected", String(on));
     }
-    cvGoogleEl.classList.toggle("gone", !people);
+    cvGoogleEl.classList.toggle("gone", !people || payload.features?.googleContacts !== true);
     cvListEl.classList.toggle("gone", !people);
     document.getElementById("cvBlockedEntry").classList.toggle("gone", !people);
     cvLatentEl.classList.toggle("gone", !people);
@@ -16334,7 +16336,7 @@
       requestDetailTimer = null;
     }
     if (activeView === "contacts" && viewChanged) {
-      void loadGoogleContacts();
+      if (payload.features?.googleContacts === true) void loadGoogleContacts();
       applyContactsPane();
       loadContacts();
       loadGroups(); // counts on the segment must be right before it is tapped

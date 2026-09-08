@@ -16,7 +16,7 @@ function renderer(bridge) {
   const html = readFileSync(new URL("../overlay/inbox.html", import.meta.url), "utf8");
   const block = html.slice(html.indexOf('  const cvGoogleEl ='), html.indexOf('  async function loadContacts()'));
   const elements = new Map(); const intervals = []; let loads = 0;
-  const context = vm.createContext({ RelayGoogleContacts: { view }, document: { getElementById(id) { if (!elements.has(id)) elements.set(id, { textContent: "", addEventListener(_, fn) { this.click = fn; } }); return elements.get(id); } }, window: { relay: bridge, addEventListener() {} }, signupAccountKey: () => context.accountKey, accountKey: "one", activeView: "contacts", contactsPane: "people", loadContacts: async () => { loads++; }, setInterval: (fn) => intervals.push(fn) });
+  const context = vm.createContext({ RelayGoogleContacts: { view }, document: { getElementById(id) { if (!elements.has(id)) elements.set(id, { textContent: "", addEventListener(_, fn) { this.click = fn; } }); return elements.get(id); } }, window: { relay: bridge, addEventListener() {} }, payload: { features: { googleContacts: true } }, signupAccountKey: () => context.accountKey, accountKey: "one", activeView: "contacts", contactsPane: "people", loadContacts: async () => { loads++; }, setInterval: (fn) => intervals.push(fn) });
   vm.runInContext(block, context);
   return { context, elements, intervals, loads: () => loads };
 }
@@ -56,4 +56,15 @@ test("Google consent follows the dev API despite a saved production account webs
     assert.equal(url.origin, expected); assert.equal(url.pathname, "/app/contacts/google");
     assert.equal(url.searchParams.get("account"), "account/with spaces");
   }
+});
+
+test("Google Contacts stays hidden and unreachable outside the Dev feature gate", () => {
+  const inbox = readFileSync(new URL("../overlay/inbox.html", import.meta.url), "utf8");
+  const main = readFileSync(new URL("../overlay/main.cjs", import.meta.url), "utf8");
+  assert.match(inbox, /class="cv-google gone" id="cvGoogle"/);
+  assert.match(inbox, /cvGoogleEl\.classList\.toggle\("gone", !people \|\| payload\.features\?\.googleContacts !== true\)/);
+  assert.match(inbox, /async function loadGoogleContacts\(\) \{\s*if \(payload\.features\?\.googleContacts !== true\) return;/);
+  assert.match(main, /relay:googleContactsStatus[\s\S]*PRODUCT_FEATURES\.googleContacts === true/);
+  assert.match(main, /relay:googleContactsSync[\s\S]*PRODUCT_FEATURES\.googleContacts !== true/);
+  assert.match(main, /relay:googleContactsConnect[\s\S]*PRODUCT_FEATURES\.googleContacts !== true/);
 });

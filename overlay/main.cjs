@@ -9482,13 +9482,18 @@ ipcMain.handle("relay:capabilities", async () => {
   return capabilitiesCache || {};
 });
 ipcMain.handle("relay:contacts", () => readContacts());
-ipcMain.handle("relay:googleContactsStatus", () => groupCall((c) => c.googleContactsStatus()));
+const googleContactsUnavailable = () => ({ ok: false, error: "Google contacts are available only in Relay Dev." });
+ipcMain.handle("relay:googleContactsStatus", () => PRODUCT_FEATURES.googleContacts === true
+  ? groupCall((c) => c.googleContactsStatus())
+  : googleContactsUnavailable());
 ipcMain.handle("relay:googleContactsSync", async () => {
+  if (PRODUCT_FEATURES.googleContacts !== true) return googleContactsUnavailable();
   const result = await groupCall((c) => c.syncGoogleContacts());
   if (result.ok) { await refreshContacts(); pushInbox(false); }
   return result;
 });
 ipcMain.handle("relay:googleContactsConnect", async () => {
+  if (PRODUCT_FEATURES.googleContacts !== true) return googleContactsUnavailable();
   const userId = account().userId;
   if (!userId) return { ok: false, error: "Sign into Relay before connecting Google." };
   await shell.openExternal(googleContactsWebUrl(userId));

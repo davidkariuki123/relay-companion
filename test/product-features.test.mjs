@@ -21,23 +21,29 @@ const ORDINARY_SURFACES = {
 
 test("developer capabilities require both the server-owned role and a non-production environment", () => {
   assert.deepEqual(productFeatures({ env: { NODE_ENV: "development" }, user: ORDINARY_USER }), {
-    environment: "local", developer: false, requests: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
+    environment: "local", developer: false, googleContacts: true, requests: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { NODE_ENV: "development" }, user: DEVELOPER }), {
-    environment: "local", developer: true, requests: true, todo: true, cowork: false, ...DEVELOPER_SURFACES,
+    environment: "local", developer: true, googleContacts: true, requests: true, todo: true, cowork: false, ...DEVELOPER_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { RELAY_UPDATE_CHANNEL: "dev" }, user: DEVELOPER }), {
-    environment: "dev", developer: true, requests: true, todo: true, cowork: false, ...DEVELOPER_SURFACES,
+    environment: "dev", developer: true, googleContacts: true, requests: true, todo: true, cowork: false, ...DEVELOPER_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { RELAY_UPDATE_CHANNEL: "staging" }, user: DEVELOPER }), {
-    environment: "staging", developer: false, requests: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
+    environment: "staging", developer: false, googleContacts: false, requests: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { RELAY_ENV: "staging" }, user: DEVELOPER }), {
-    environment: "staging", developer: false, requests: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
+    environment: "staging", developer: false, googleContacts: false, requests: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: {}, user: DEVELOPER }), {
-    environment: "production", developer: false, requests: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
+    environment: "production", developer: false, googleContacts: false, requests: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
   });
+});
+
+test("Google Contacts sync follows the deployment rather than the account role", () => {
+  assert.equal(productFeatures({ env: { RELAY_UPDATE_CHANNEL: "dev" }, user: ORDINARY_USER }).googleContacts, true);
+  assert.equal(productFeatures({ env: { RELAY_UPDATE_CHANNEL: "staging" }, user: DEVELOPER }).googleContacts, false);
+  assert.equal(productFeatures({ env: { RELAY_UPDATE_CHANNEL: "stable" }, user: DEVELOPER }).googleContacts, false);
 });
 
 test("live server role outranks the cached pairing profile", async () => {
