@@ -716,3 +716,20 @@ test("cancel is serialized behind an in-flight poll and cannot be undone by its 
   assert.equal(stores.peekDurable(), null);
   assert.equal(stores.peekSecret(), null);
 });
+
+test("explicit browser sign-in opens the existing-account route, retains PKCE, and does not approve", async () => {
+  const opened = [];
+  const { controller, calls, stores } = harness({ openExternal: async (url) => { opened.push(url); } });
+  assert.equal(calls.length, 0);
+  const state = await controller.signIn();
+  assert.equal(state.status, "pending_identity");
+  const url = new URL(opened[0]);
+  assert.equal(url.origin, "https://sendrelays.com");
+  assert.equal(url.searchParams.get("signin"), "1");
+  assert.equal(new URLSearchParams(url.hash.slice(1)).get("activationToken"), ACTIVATION_TOKEN);
+  assert.equal(calls.length, 1);
+  assert.equal(stores.peekDurable().status, "pending_identity");
+  await controller.signIn({ forceAccountSelection: true });
+  assert.equal(new URLSearchParams(new URL(opened[1]).hash.slice(1)).get("switchAccount"), "1");
+  assert.equal(calls.length, 1, "reopening uses the existing authorization");
+});

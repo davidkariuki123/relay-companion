@@ -158,11 +158,11 @@ try {
   const states = [
     ["resume", "Continue your setup."],
     ["restart-required", "Restart this setup."],
-    ["method", "Connect Relay."],
+    ["method", "Set up Relay with"],
     ["email", "What’s your email?"],
     ["code", "Enter your code."],
-    ["google", "Finish with Google."],
-    ["approval", "Connect this computer?"],
+    ["google", "Continue in your browser."],
+    ["approval", "Welcome back."],
     ["finishing", "Finishing setup…"],
     ["expired", "Start setup again."],
     ["first-relay", "Follow the instructions in", "checking"],
@@ -185,14 +185,14 @@ try {
       const layout = await evaluate(page, `(() => {
         const cardRect = document.getElementById("card").getBoundingClientRect();
         const bodyRect = document.getElementById("signupBody").getBoundingClientRect();
-        const skipRect = document.getElementById("suChatSkip").getBoundingClientRect();
+
         return {
           bodyInside:bodyRect.top >= cardRect.top && bodyRect.bottom <= cardRect.bottom,
-          skipInside:skipRect.top >= cardRect.top && skipRect.bottom <= cardRect.bottom,
-          skipVisible:getComputedStyle(document.getElementById("suChatSkip")).display !== "none",
+
+          hasSkip:!!document.getElementById("suChatSkip"),
         };
       })()`);
-      assert.deepEqual(layout, { bodyInside:true, skipInside:true, skipVisible:true });
+      assert.deepEqual(layout, { bodyInside:true, hasSkip:false });
     }
     if (stage === "method") {
       const expandedLockup = await evaluate(page, `(() => {
@@ -221,7 +221,7 @@ try {
       rendered.push(await capture(page, "pill-method-collapsed"));
       await clickAt(page, compact.x, compact.y);
       await waitFor(page, `!document.getElementById("card").classList.contains("collapsed") && document.getElementById("card").getBoundingClientRect().height > 520`);
-      assert.match(await evaluate(page, `document.getElementById("signupBody").innerText`), /Connect Relay\./);
+      assert.match(await evaluate(page, `document.getElementById("signupBody").innerText`), /Set up Relay with/);
       rendered.push(await capture(page, "pill-method-reexpanded"));
     }
   }

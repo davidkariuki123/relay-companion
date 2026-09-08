@@ -2787,6 +2787,10 @@
   .su-send-progress { display:flex; align-items:baseline; gap:7px; margin-top:24px; color:var(--muted); font-size:11px; line-height:1.5; }
   .su-send-progress > span { flex:none; width:5px; height:5px; border-radius:50%; background:var(--muted-3); }
   .su-first-relay .su-form { margin-top:18px; }
+  .su-setup-prompt { margin-top:18px; padding:14px; border:1px solid var(--edge); border-radius:10px; background:var(--wash); font-size:12px; line-height:1.6; user-select:text; }
+  .su-copy-setup { width:100%; margin-top:10px; }
+  .su-returning { margin:23px 0 0; text-align:center; font-size:11px; line-height:1.6; color:var(--muted); }
+  .su-signin { padding:0; border:0; background:none; color:var(--ink); font:inherit; font-weight:600; text-decoration:underline; text-underline-offset:3px; cursor:pointer; }
   .su-divider { display:flex; align-items:center; gap:10px; color:var(--muted-3); font-size:10px; text-transform:uppercase; letter-spacing:.12em; }
   .su-divider::before, .su-divider::after { content:""; flex:1 1 auto; height:1px; background:var(--hair); }
   .su-google { display:flex; align-items:center; justify-content:center; gap:8px; }
@@ -15584,7 +15588,7 @@
         signupPollFailures = 0; signupPollErrorVisible = false; signupConnectionCommitted = false;
         signupBusy = false; signupStage = "method"; signupAccount = null; signupEmail = "";
         signupStateLoaded = false; signupInitializationFailed = false;
-        window.relay.dismiss?.();
+        renderSignup();
       } catch (reason) { signupFailure(reason, "Relay could not cancel setup safely."); }
     });
   }
@@ -15727,7 +15731,7 @@
       let state = await window.relay.installationAuthState();
       const resumedExistingApproval = state?.status === "pending_identity";
       if (!state || state.status === "idle") {
-        state = await window.relay.installationAuthBegin();
+        state = { status: "idle" };
       } else if (state.status === "expired") {
         signupStage = "expired";
       } else if (resumedExistingApproval) {
@@ -15911,9 +15915,8 @@
         <p class="su-step">${checking || unavailable ? "Connected to Relay" : "Your first Relay"}</p>
         <h1 class="su-title su-handoff-title">${title}</h1><p class="su-copy">${copy}</p>
         <p class="su-send-progress" role="status"><span aria-hidden="true"></span>${progress}</p>
-        <div class="su-form">${error}<button class="su-link" id="suChatSkip" type="button"${busy}>Skip for now</button></div>
+        ${error}
       </div>`;
-      document.getElementById("suChatSkip")?.addEventListener("click", () => completeSignupTutorial());
       return;
     }
     if (signupStage === "restart-required") {
@@ -15942,22 +15945,23 @@
       return;
     }
     if (signupStage === "method") {
-      const retry = signupInitializationFailed
-        ? `<button class="su-primary" id="suInitializeRetry" type="button"${busy}>Try again</button>`
-        : "";
-      const methodDisabled = signupInitializationFailed ? " disabled" : busy;
-      signupBodyEl.innerHTML = `<p class="su-step">Agent installed</p><h1 class="su-title">Connect Relay.</h1><p class="su-copy">Sign in to connect this computer. Your agent can’t see your identity or sign-in details.</p><div class="su-form">${retry}<button class="su-secondary su-google" id="suGoogle" type="button"${methodDisabled}>${googleMark()} Continue with Google</button><div class="su-divider">or</div><button class="su-primary" id="suEmail" type="button"${methodDisabled}>Continue with email</button>${cancelSetupButton()}</div>${error}`;
-      document.getElementById("suInitializeRetry")?.addEventListener("click", () => initializeInstallationAuthorization({ force:true }));
-      document.getElementById("suGoogle")?.addEventListener("click", async () => {
+      const prompt = payload.ui?.setupPrompt || "Read https://sendrelays.com/for-agents and set me up on Relay.";
+      signupBodyEl.innerHTML = `<div class="su-first-relay"><p class="su-step">Get started with Relay</p><h1 class="su-title su-handoff-title"><span class="su-handoff-intro">Set up Relay with</span><span class="su-host-claude">Claude Code</span><span class="su-handoff-or">or <span class="su-host-codex">Codex</span>.</span></h1><p class="su-copy">Paste this into your agent to get started.</p><div class="su-setup-prompt">${esc(prompt)}</div><button class="su-primary su-copy-setup" id="suCopySetup" type="button">Copy setup prompt</button><p class="su-returning">Already have an account? <button class="su-signin" id="suSignIn" type="button"${busy}>Sign in</button></p>${error}</div>`;
+      document.getElementById("suCopySetup")?.addEventListener("click", async (event) => {
+        try {
+          const result = await window.relay.copySetupPrompt();
+          if (!result?.ok) throw new Error("copy_failed");
+          event.target.textContent = "Copied";
+        } catch { signupError = "Could not copy the prompt. Select and copy the text above."; renderSignup(); }
+      });
+      document.getElementById("suSignIn")?.addEventListener("click", async () => {
         signupBusy = true; signupError = ""; renderSignup();
         try {
-          const state = await window.relay.installationAuthGoogle({ forceAccountSelection:signupForceGoogleSelection });
+          const state = await window.relay.installationAuthSignIn({ forceAccountSelection: signupForceGoogleSelection });
           signupForceGoogleSelection = false;
           signupBusy = false; signupStage = "google"; applyInstallationState(state); renderSignup(); pollInstallationState();
-        } catch (reason) { signupFailure(reason, "Google sign-in did not open."); }
+        } catch (reason) { signupFailure(reason, "Relay could not open sign-in. Try again."); }
       });
-      document.getElementById("suEmail")?.addEventListener("click", () => { signupStage = "email"; signupError = ""; renderSignup(); });
-      bindSignupCancel();
       return;
     }
     if (signupStage === "email") {
@@ -16003,14 +16007,14 @@
     }
     if (signupStage === "google") {
       const retry = signupError ? `<button class="su-primary" id="suResume" type="button"${busy}>Try again</button>` : "";
-      signupBodyEl.innerHTML = `<p class="su-step">Google sign-in</p><h1 class="su-title">Finish with Google.</h1><p class="su-copy">Complete Google sign-in in your default browser.</p><div class="su-account"><span class="su-account-name">Waiting for Google…</span><span class="su-account-email">Your agent cannot see this sign-in.</span></div><div class="su-form">${retry}${cancelSetupButton()}</div>${error}`;
+      signupBodyEl.innerHTML = `<p class="su-step">Sign in</p><h1 class="su-title">Continue in your browser.</h1><p class="su-copy">Sign in to your Relay account with Google or email.</p><div class="su-account"><span class="su-account-name">Waiting for sign-in…</span><span class="su-account-email">Your agent cannot see this sign-in.</span></div><div class="su-form">${retry}${cancelSetupButton()}</div>${error}`;
       bindSignupResume();
       bindSignupCancel();
       return;
     }
     if (signupStage === "approval") {
       const account = signupAccount || {};
-      signupBodyEl.innerHTML = `<p class="su-step">Ready to connect</p><h1 class="su-title">Connect this computer?</h1><p class="su-copy">Check the account and agent apps before you approve.</p><div class="su-account"><span class="su-account-name">${esc(account.displayName || account.email || "Relay account")}</span>${account.email ? `<span class="su-account-email">${esc(account.email)}</span>` : ""}<span class="su-device">This computer<br />Claude Code · Cowork · Codex</span></div><div class="su-form"><button class="su-primary" id="suApprove" type="button"${busy}>Connect Relay</button><button class="su-link" id="suAnother" type="button"${busy}>Change account</button>${cancelSetupButton()}</div>${error}`;
+      signupBodyEl.innerHTML = `<p class="su-step">Your account</p><h1 class="su-title">Welcome back.</h1><p class="su-copy">Use this account in Relay and its Claude Code and Codex integrations on this computer.</p><div class="su-account"><span class="su-account-name">${esc(account.displayName || account.email || "Relay account")}</span>${account.email ? `<span class="su-account-email">${esc(account.email)}</span>` : ""}<span class="su-device">This computer<br />Claude Code · Cowork · Codex</span></div><div class="su-form"><button class="su-primary" id="suApprove" type="button"${busy}>Sign in to Relay</button><button class="su-link" id="suAnother" type="button"${busy}>Change account</button>${cancelSetupButton()}</div>${error}`;
       document.getElementById("suApprove")?.addEventListener("click", async () => {
         signupBusy = true; signupError = ""; renderSignup();
         try {
@@ -16375,6 +16379,8 @@
       roomViewTransitionDeferredPayload = next;
       return;
     }
+    // A completed sign-in lands on conversations, including after account switch.
+    if (payload.account?.paired === false && next.account?.paired === true) activeView = "relays";
     const incomingAccount = next.account || payload.account;
     const nextAccountIdentity = accountCacheIdentity(incomingAccount);
     if ((canonicalAccountIdentity && nextAccountIdentity !== canonicalAccountIdentity)

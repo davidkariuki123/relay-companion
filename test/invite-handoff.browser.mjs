@@ -15,7 +15,7 @@ try {
   },{get:(t,k)=>k in t?t[k]:(...args)=>Promise.resolve({})});
  });
  await page.goto(new URL('../overlay/inbox.html',import.meta.url).href);
- await page.locator('#suChatSkip').waitFor();
+ await page.locator('.su-first-relay').waitFor();
  await page.evaluate(()=>document.fonts.ready);
  await page.evaluate(()=>{window.fixture.ui.firstRelayStatus='sent';window.deliver(window.fixture);});
  assert.equal(await page.locator('#signupBody h1').innerText(),'Your first Relay is sent.');

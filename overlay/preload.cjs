@@ -217,6 +217,8 @@ contextBridge.exposeInMainWorld("relay", {
   // Restart is an explicit human act. Main deletes only the one-time
   // installation-authorization namespace, and does so before minting again.
   installationAuthRestart: () => ipcRenderer.invoke("relay:installationAuthRestart"),
+  copySetupPrompt: () => ipcRenderer.invoke("relay:copySetupPrompt"),
+  installationAuthSignIn: (options = {}) => ipcRenderer.invoke("relay:installationAuthSignIn", { forceAccountSelection: options?.forceAccountSelection === true }),
   installationAuthGoogle: (options = {}) => ipcRenderer.invoke("relay:installationAuthGoogle", {
     forceAccountSelection: options?.forceAccountSelection === true,
   }),

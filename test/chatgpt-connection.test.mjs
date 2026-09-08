@@ -74,5 +74,5 @@ test("versioned first-send onboarding keeps durable progress for each account", 
   assert.match(html, /signupStage === "first-relay"/);
   // The send itself ends the chapter (2026-09-08): no "sent" screen follows.
   assert.match(html, /if \(status === "sent"\) \{ landOnFirstRelay\(\); return; \}/);
-  assert.match(html, /id="suChatSkip"/);
+  assert.doesNotMatch(html, /id="suChatSkip"/);
 });

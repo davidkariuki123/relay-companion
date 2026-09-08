@@ -542,9 +542,10 @@ export function createInstallationAuthorizationController({
     return serialize(stateInternal);
   }
 
-  async function googleInternal({ forceAccountSelection = false } = {}) {
+  async function googleInternal({ forceAccountSelection = false, browserSignIn = false } = {}) {
     const { state: durable, secret } = await activeContext({ create: true });
     const target = new URL(secret.activationUrl);
+    if (browserSignIn) target.searchParams.set("signin", "1");
     if (forceAccountSelection) {
       const fragment = new URLSearchParams(target.hash.slice(1));
       fragment.set("switchAccount", "1");
@@ -727,5 +728,5 @@ export function createInstallationAuthorizationController({
     return serialize(restartInternal);
   }
 
-  return { state, begin, resume, restart, google, emailStart, emailVerify, approve, cancel };
+  return { state, begin, resume, restart, signIn: (options = {}) => google({ ...options, browserSignIn: true }), google, emailStart, emailVerify, approve, cancel };
 }

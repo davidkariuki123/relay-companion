@@ -582,6 +582,11 @@ function installationAuthorizationController() {
           slackChatsCache = [];
           canonicalChatsFingerprint = "";
           canonicalChatsLoadedOnce = null;
+          // Explicit desktop sign-in restores access; it is not the agent's
+          // first-send tutorial. Persist before refreshing so no tutorial flashes.
+          const signedInKey = onboardingAccountKey({ userId: registration.user.id, email: registration.user.email });
+          onboardingVersions[signedInKey] = COMPANION_ONBOARDING_VERSION;
+          writeOverlayPrefs();
           await restartCompanionDaemon();
           await Promise.allSettled([refreshSent(), refreshContacts(), refreshCanonicalChats()]);
           await pushInbox(true);
@@ -2207,6 +2212,7 @@ function buildPayload() {
       reopenSurface: reopenSurfaceName(),
       notificationDurationMs: Number(process.env.RELAY_OVERLAY_NOTIFICATION_MS) || 7000,
       onboardingVersion: COMPANION_ONBOARDING_VERSION,
+      setupPrompt: `Read ${webBase()}/for-agents and set me up on Relay.`,
       completedOnboardingVersion,
       onboardingRequired: currentAccount.paired && completedOnboardingVersion < COMPANION_ONBOARDING_VERSION,
       firstRelayStatus: firstRelayOnboarding.status(onboardingAccountKey(currentAccount)),
@@ -9626,6 +9632,12 @@ ipcMain.handle("relay:installationAuthResume", () => installationAuthorizationIp
   (await installationAuthorizationController()).resume()));
 ipcMain.handle("relay:installationAuthRestart", () => installationAuthorizationIpc(async () =>
   (await installationAuthorizationController()).restart()));
+ipcMain.handle("relay:copySetupPrompt", () => {
+  clipboard.writeText(`Read ${webBase()}/for-agents and set me up on Relay.`);
+  return { ok: true };
+});
+ipcMain.handle("relay:installationAuthSignIn", (_event, input = {}) => installationAuthorizationIpc(async () =>
+  (await installationAuthorizationController()).signIn({ forceAccountSelection: input?.forceAccountSelection === true })));
 ipcMain.handle("relay:installationAuthGoogle", (_event, input = {}) => installationAuthorizationIpc(async () =>
   (await installationAuthorizationController()).google({
     forceAccountSelection: input?.forceAccountSelection === true,

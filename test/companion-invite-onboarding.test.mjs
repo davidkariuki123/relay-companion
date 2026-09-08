@@ -17,7 +17,7 @@ test("first-send onboarding is versioned, per-account and skippable", () => {
   assert.match(html, /payload\.ui\?\.onboardingRequired === true/);
   assert.match(html, /Follow the instructions in/);
   assert.match(html, /firstRelayStatus/);
-  assert.match(html, /id="suChatSkip"[\s\S]*Skip for now/);
+  assert.doesNotMatch(html, /id="suChatSkip"/);
 });
 
 test("invite-link onboarding calls the direct authenticated API and copies only in main", () => {

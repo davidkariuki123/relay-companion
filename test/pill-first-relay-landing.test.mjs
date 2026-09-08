@@ -25,7 +25,7 @@ test("the chapter has one screen before the send and none after it", () => {
   assert.match(stage, /Follow the instructions in/);
   assert.match(stage, /Your agent will help you send your first Relay\./);
   assert.match(stage, /This screen will update when your Relay is sent\./);
-  assert.match(stage, /id="suChatSkip" type="button"\$\{busy\}>Skip for now</);
+  assert.doesNotMatch(stage, /id="suChatSkip"/);
   assert.doesNotMatch(stage, /Nicely done\.|Your first Relay is sent\.|>Open Relay<|su-relay-moment/);
   assert.doesNotMatch(html, /signupStage === "invite"|signupInviteAccount|suInviteCopy|Copy invitation|\.su-invite|su-first-send/);
   assert.match(html, /signupStage = "first-relay";/);
