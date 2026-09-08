@@ -8,6 +8,7 @@ import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { createRequire } from "node:module";
 import { PassThrough } from "node:stream";
+import { fileURLToPath } from "node:url";
 
 import { exactCompanionSpec, npmInstallArgs } from "../src/install.js";
 import {
@@ -34,7 +35,7 @@ import {
 } from "../scripts/build-runtime-artifact.mjs";
 import { bridgeShrinkwrap, publishPackageJson } from "../scripts/prepare-publish-package.mjs";
 import { assertMonotonicVersion, compareExactVersions } from "../scripts/assert-monotonic-version.mjs";
-import { electronVersionArgs } from "../scripts/verify-installed-runtime.mjs";
+import { electronVersionArgs, verifyInstalledManagedSkills } from "../scripts/verify-installed-runtime.mjs";
 import {
   installLinuxElectronSandboxAsRoot,
   linuxElectronSandboxPlan,
@@ -658,6 +659,25 @@ test("release dependency locks retain identical bytes on every build platform", 
     assert.match(publicAttributes, new RegExp(`${relative.replaceAll("/", "\\/")} text eol=lf`));
   }
   assert.match(publicAttributes, /npm-shrinkwrap\.json text eol=lf/);
+  assert.ok(publicAttributes.includes("skill/** text eol=lf"));
+});
+
+test("built skill verification installs every host and rejects Windows newline drift", async () => {
+  const companionRoot = fileURLToPath(new URL("..", import.meta.url));
+  const result = await verifyInstalledManagedSkills(companionRoot);
+  assert.equal(result.targets, 3);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-skill-drift-"));
+  try {
+    fs.cpSync(path.join(companionRoot, "bootstrap"), path.join(root, "bootstrap"), { recursive: true });
+    fs.cpSync(path.join(companionRoot, "skill"), path.join(root, "skill"), { recursive: true });
+    const guide = path.join(root, "skill", "relay", "SKILL.md");
+    fs.writeFileSync(guide, fs.readFileSync(guide, "utf8").replace(/\r?\n/g, "\r\n"));
+    await assert.rejects(verifyInstalledManagedSkills(root), /modified skill file \(SKILL.md\)/);
+  } finally {
+    assert.equal(path.dirname(path.resolve(root)), path.resolve(os.tmpdir()));
+    assert.ok(path.basename(root).startsWith("relay-skill-drift-"));
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("the migration bridge publishes an exact npm shrinkwrap for its full graph", () => {

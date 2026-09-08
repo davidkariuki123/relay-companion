@@ -2,6 +2,7 @@
 
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
@@ -47,6 +48,28 @@ export function verifyMacElectronIdentity(electronPath, {
   return { verified: true, appPath, bundleIdentifier: identifier };
 }
 
+export async function verifyInstalledManagedSkills(packageRoot) {
+  const root = path.resolve(packageRoot);
+  const skill = createRequire(import.meta.url)(path.join(root, "bootstrap", "relay-skill.cjs"));
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, "skill", "manifest.json"), "utf8"));
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-built-skill-"));
+  try {
+    const result = await skill.installBundled({ homeDir, env: {}, consent: true });
+    if (!result.ok) throw new Error(`Built runtime cannot install its managed skills: ${JSON.stringify(result.results)}`);
+    for (const target of skill.defaultTargets({ homeDir, env: {} })) {
+      if (skill.readState(target.directory)?.version !== manifest.version || skill.localChanges(target.directory).length) {
+        throw new Error(`Built runtime installed an invalid managed skill for ${target.host}`);
+      }
+    }
+    return { version: manifest.version, targets: result.results.length };
+  } finally {
+    if (path.dirname(path.resolve(homeDir)) !== path.resolve(os.tmpdir()) || !path.basename(homeDir).startsWith("relay-built-skill-")) {
+      throw new Error("Refusing unsafe skill verification cleanup");
+    }
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  }
+}
+
 export async function verifyInstalledRuntime({ packageRoot, version, platform = process.platform } = {}) {
   const root = path.resolve(String(packageRoot || ""));
   const expectedVersion = String(version || "").trim();
@@ -57,6 +80,7 @@ export async function verifyInstalledRuntime({ packageRoot, version, platform = 
     throw new Error("Installed Relay package executes an npm install lifecycle");
   }
   assertRuntimeCapabilities(root);
+  await verifyInstalledManagedSkills(root);
   const nativeBridge = path.join(root, "native", platform === "win32" ? "mcp-bridge.exe" : "mcp-bridge");
   const bridgeIdentity = spawnSync(nativeBridge, ["--version"], { encoding: "utf8", windowsHide: true, timeout: 30_000 });
   if (bridgeIdentity.error || bridgeIdentity.status !== 0 || String(bridgeIdentity.stdout || "").trim() !== "relay-mcp-bridge-v1") {

@@ -4,3 +4,4 @@ npm-shrinkwrap.json text eol=lf
 runtime-dependencies.json text eol=lf
 runtime-lock/package.json text eol=lf
 runtime-lock/package-lock.json text eol=lf
+skill/** text eol=lf
