@@ -17,14 +17,14 @@ function harness({ saved = {}, surfaces = "both", preference = null } = {}) {
   const footer = section("  function relayHostActionsHtml(", "  // The row's click");
   const api = new Function("protoPref", "setProtoPref", "signupAccountKey", "payload", `
     const hostKeyFor = app => app === "Codex" ? "codex" : "claude";
-    const esc = text => String(text);
+    ${section("  function esc(s)", "  function agentMentionSpans(")}
     const readerRow = () => null, relayById = () => null;
     const relaySubject = row => row.title || "Test";
     const relaySender = () => "Taylor";
     ${code}
     ${ui}
     ${footer}
-    return { agentAppSelection, requestedAgentApps, setAgentAppEnabled, saveAgentApps,
+    return { agentAppSelection, requestedAgentApps, setAgentAppEnabled, saveAgentApps, otherAgentEnabled, setOtherAgentEnabled,
       agentAppHosts, agentAppName, agentSurfacePreference, yourAgentHtml, relayHostActionsHtml,
       setSurfaces: value => { agentSurfaces = value; } };
   `)((key, fallback) => store.has(key) ? store.get(key) : fallback,
@@ -46,7 +46,8 @@ test("independent switches round trip both, one, none and back on", () => {
   assert.deepEqual(h.agentAppSelection(), ["Claude Code"]);
   h.setAgentAppEnabled("Claude Code", false);
   assert.deepEqual(h.agentAppSelection(), []);
-  assert.match(h.yourAgentHtml(), /My own session[\s\S]*Chosen/);
+  assert.equal(h.otherAgentEnabled(), false, "turning off desktop apps does not silently enable Other");
+  assert.match(h.yourAgentHtml(), /svOtherAgent" aria-checked="false"/);
   h.setAgentAppEnabled("Codex", true);
   assert.deepEqual(h.agentAppSelection(), ["Codex"]);
   h.setAgentAppEnabled("Claude Code", true);
@@ -103,8 +104,9 @@ test("both enabled desktop providers render separate actions without automatical
   h.setAgentAppEnabled("Claude Code", false);
   assert.doesNotMatch(h.relayHostActionsHtml({ id: "relay-test" }), /Open in Claude Code/);
   h.saveAgentApps([]);
+  h.setOtherAgentEnabled(true);
   const copy = h.relayHostActionsHtml({ id: "relay-test" });
-  assert.match(copy, /Copy for your agent/);
+  assert.match(copy, /Copy this prompt for your agent/);
   assert.doesNotMatch(copy, /data-host-open=/);
 });
 
@@ -115,5 +117,67 @@ test("mixed terminal/desktop choices do not leak one provider's surface onto the
   const footer = h.relayHostActionsHtml({ id: "relay-test" });
   assert.match(footer, /Open in Codex/);
   assert.doesNotMatch(footer, /Open in Claude Code/);
-  assert.match(footer, /Copy for your agent/);
+  assert.match(footer, /Copy this prompt for your agent/);
+});
+
+test("Other stays independent, account scoped, and controls the full matching prompt", () => {
+  const h = harness();
+  h.setOtherAgentEnabled(true);
+  let footer = h.relayHostActionsHtml({ id:"relay-test", title:"Privacy notice" });
+  assert.equal((footer.match(/data-host-open=/g) || []).length, 2);
+  assert.match(footer, /Or tell your agent this:/);
+  const displayed = footer.match(/class="th-pull-q">([^<]+)</)[1];
+  const copied = footer.match(/data-pull-copy="([^"]+)"/)[1];
+  assert.equal(displayed, copied);
+  assert.equal(copied, "Pull Taylor’s relay “Privacy notice” from Relay and tell me what’s happening.");
+  h.saveAgentApps([]);
+  assert.equal(h.otherAgentEnabled(), true);
+  footer = h.relayHostActionsHtml({ id:"relay-test", direction:"out" });
+  assert.match(footer, /Tell your agent this:/);
+  assert.doesNotMatch(footer, /Or tell|data-host-open=/);
+  assert.match(footer, /Pull my sent relay/);
+  h.setOtherAgentEnabled(false);
+  assert.equal(h.relayHostActionsHtml({ id:"relay-test" }), "");
+  h.switchAccount("account-b");
+  h.setOtherAgentEnabled(true);
+  h.switchAccount("account-a");
+  assert.equal(h.otherAgentEnabled(), false);
+  assert.doesNotMatch(h.yourAgentHtml(), /My own session|Use this one|Chosen/);
+});
+
+test("legacy Other and terminal choices migrate and explicit off is preserved", () => {
+  for (const preference of [{surface:"other"}, {surface:"terminal",provider:"codex"}]) {
+    const h = harness({preference});
+    assert.equal(h.otherAgentEnabled(), true);
+    h.setOtherAgentEnabled(false);
+    assert.equal(h.otherAgentEnabled(), false);
+  }
+  const h = harness({saved:{"proto.agentApps.v3:account-a":"__none__"}});
+  assert.equal(h.otherAgentEnabled(), true);
+  h.setAgentAppEnabled("Claude Code", true);
+  assert.equal(h.otherAgentEnabled(), true);
+});
+
+test("prompt titles cannot inject markup into the visible text or clipboard attribute", () => {
+  const h = harness();
+  h.setOtherAgentEnabled(true);
+  const footer = h.relayHostActionsHtml({id:'relay-test',title:'A "quoted" <img src=x> & note'});
+  assert.doesNotMatch(footer, /<img src=x>/);
+  assert.match(footer, /A &quot;quoted&quot; &lt;img src=x&gt; &amp; note/);
+  assert.equal(footer.match(/class="th-pull-q">([^<]+)</)[1], footer.match(/data-pull-copy="([^"]+)"/)[1]);
+});
+
+test("copy binds the exact prompt, reports success, and restores the approved button label", async () => {
+  const handlers = new Map();
+  const button = {isConnected:true,textContent:'Copy this prompt for your agent',getAttribute:()=> 'Pull Sven’s relay “Test” from Relay and tell me what’s happening.',addEventListener:(event,fn)=>handlers.set(event,fn)};
+  const scope = {querySelectorAll:selector=>selector === '[data-pull-copy]' ? [button] : []};
+  const timers = [];
+  let copied = null;
+  const bind = new Function('navigator','setTimeout',`${section('  function wireHostOpen(scope)', '  // Retired with the one-verb letter')}; return wireHostOpen;`)({clipboard:{writeText:async text=>{copied=text;}}},fn=>timers.push(fn));
+  bind(scope);
+  await handlers.get('click')({stopPropagation(){}});
+  assert.equal(copied, button.getAttribute());
+  assert.equal(button.textContent,'Copied');
+  timers[0]();
+  assert.equal(button.textContent,'Copy this prompt for your agent');
 });

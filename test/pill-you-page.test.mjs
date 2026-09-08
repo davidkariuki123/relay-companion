@@ -38,9 +38,9 @@ test("the account is a row you tap; its actions unfold beneath it", () => {
 test("Your agent restores independent switches and a same-list own-session choice", () => {
   const agent = slice("function yourAgentHtml()", "function yourLinkHtml()");
   assert.match(agent, /<div class="sv-open-title">Your agent<\/div>/);
-  assert.match(agent, /Choose which agents you use\. Turn on one or both\./);
+  assert.match(agent, /Choose which agents you use\. Turn on one or more\./);
   assert.match(agent, /role="switch" data-agent-app="\$\{app\}" aria-checked=/);
-  assert.match(agent, /My own session/);
+  assert.match(agent, /svOtherAgent/);
   assert.match(agent, /Relay copies the sentence for you/);
   assert.doesNotMatch(agent, /svOpeningSurface|<select|Opening an app does not|Available ·/);
   assert.match(agent, /Connected · opens relays in a new chat/);

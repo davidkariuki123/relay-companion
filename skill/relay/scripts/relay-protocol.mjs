@@ -6,7 +6,7 @@ import path from "node:path";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { prepareOrdinaryRelayAttachments } from "./relay-attachments.mjs";
-import { readLocalDescriptor, localRequest } from "./relay-local.mjs";
+import { readLocalDescriptor, localRequest, LOCAL_TOOL_TIMEOUT_MS } from "./relay-local.mjs";
 import { spawnSync } from "node:child_process";
 
 const DEFAULT_CONFIG = path.join(os.homedir(), ".relay", "agent-protocol.json");
@@ -544,6 +544,21 @@ async function main(argv = process.argv.slice(2)) {
     return { ok: true, connected: true, account: config.account || {}, inviter: config.inviter, invite: config.invite, tutorial: config.tutorial, lastSend: config.lastSend, expiresAt: config.expiresAt || "" };
   }
   if (command === "groups") return request("GET", "/v1/contact-groups");
+  if (command === "tools" || command === "call") {
+    const config = readConfig();
+    const local = readLocalDescriptor();
+    if ((config.consentVersion ?? 1) < 2 || !local) throw new Error("The complete tool catalog requires Relay Companion. Open or update Companion and retry; this command does not use direct HTTPS fallback.");
+    if (local.accountId !== config.account?.relayUserId || local.apiUrl !== config.apiUrl) throw new Error("Companion is connected to a different Relay account or environment. Nothing was sent or read.");
+    if (command === "call" && !rest[0]) throw new Error("call requires an exact tool name from tools; pass its JSON arguments on stdin.");
+    if (local.toolCatalogVersion !== 1) throw new Error("This Companion does not expose the complete tool catalog yet. Update and reopen Relay Companion, then retry the same command.");
+    const target = currentSkillTarget(process.env);
+    const host = process.env.CODEX_THREAD_ID ? "codex" : process.env.CLAUDE_CODE_SESSION_ID || process.env.CLAUDE_SESSION_ID ? "claude_code" : target?.host === "codex" ? "codex" : target?.host === "claude" ? "claude_code" : "";
+    const caller = { cwd: process.cwd(), host, nativeId: host === "codex" ? process.env.CODEX_THREAD_ID || "" : process.env.CLAUDE_CODE_SESSION_ID || process.env.CLAUDE_SESSION_ID || "" };
+    const body = command === "call" ? { name: rest[0], arguments: parseJson(await readStdin() || "{}", "Tool arguments") } : undefined;
+    const result = await localRequest(local, { method: command === "tools" ? "GET" : "POST", path: command === "tools" ? "/local/tools" : "/local/tools/call", body, caller, accountId: config.account.relayUserId }, { timeoutMs: LOCAL_TOOL_TIMEOUT_MS });
+    if (result?.isError) process.exitCode = 1;
+    return result;
+  }
   if (command === "chats") return request("GET", "/v1/chats");
   if (command === "chat") return request("GET", `/v1/chats/${encodeURIComponent(rest[0] || "")}`);
   if (command === "thread") return request("GET", `/v1/threads/${encodeURIComponent(rest[0] || "")}`);
@@ -630,6 +645,8 @@ async function main(argv = process.argv.slice(2)) {
       "relay-protocol connect-start <api-origin> <invite-token> claude_code|codex",
       "relay-protocol connect-finish   # run after approving the returned browser URL",
       "relay-protocol status",
+      "relay-protocol tools            # complete account-specific catalog with descriptions and JSON schemas; requires Companion",
+      "relay-protocol call <tool-name> # JSON arguments on stdin; same capabilities and results as MCP; requires Companion",
       "relay-protocol inbox | sent | groups | chats | outbox",
       "relay-protocol outbox retry <original-idempotency-key>",
       "relay-protocol wait-reply <sent-relay-id> [seconds:0-45]",

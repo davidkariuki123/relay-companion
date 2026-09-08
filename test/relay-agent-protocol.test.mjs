@@ -567,3 +567,65 @@ test("bounded reply checks use the sent conversation and never mark a message re
   assert.equal(JSON.parse(reply.stdout).items[0].id, "rel_reply");
   assert.ok(requests.every((url) => !url.includes("/read")));
 });
+
+test("CLI discovers the live catalog and executes mutations through the authenticated Companion socket", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-tools-"));
+  const originalConfig = process.env.RELAY_CONFIG_DIR;
+  const originalEnvironment = process.env.RELAY_ENV;
+  process.env.RELAY_CONFIG_DIR = root;
+  process.env.RELAY_ENV = "dev";
+  t.after(() => { if (originalEnvironment === undefined) delete process.env.RELAY_ENV; else process.env.RELAY_ENV = originalEnvironment; });
+  t.after(() => { if (originalConfig === undefined) delete process.env.RELAY_CONFIG_DIR; else process.env.RELAY_CONFIG_DIR = originalConfig; fs.rmSync(root, { recursive: true, force: true }); });
+  const file = path.join(root, "agent-local.json");
+  const writes = [];
+  const client = {
+    identity: { userId: "usr_tools" }, accountDrift: () => ({ status: "same" }),
+    token: "test-token", me: async () => ({ user: { id: "usr_tools", accountKind: "human", isDeveloper: true } }),
+    groups: async () => ({ groups: [{ id: "grp_tools", name: "Tools" }] }),
+    updateContact: async (id, body) => { writes.push({ id, body }); return { contactId: id, firstName: body.firstName }; },
+    deleteInboxItem: async (id, body) => { writes.push({ id, body }); return { itemId: id, deleted: true }; },
+    restoreInboxItem: async (id, body) => { writes.push({ id, body }); return { itemId: id, restored: true }; },
+  };
+  const server = await startAgentLocalServer({ client, accountId: "usr_tools", apiUrl: "https://dev-api.sendrelays.com", file });
+  t.after(() => server.close());
+  const env = { RELAY_CONFIG_DIR: root, RELAY_AGENT_CONFIG: path.join(root, "agent-protocol.json"), RELAY_AGENT_LOCAL: file, CODEX_THREAD_ID: "thread_cli" };
+  const listed = await runProtocol(["tools"], { env });
+  assert.equal(listed.code, 0, listed.stderr);
+  const tools = JSON.parse(listed.stdout).tools;
+  assert.ok(tools.some(tool => tool.name === "relay_contact_update" && tool.inputSchema.properties.contactId));
+  assert.ok(tools.some(tool => tool.name === "relay_group_create"));
+  const fetched = await runProtocol(["call", "relay_groups_list"], { env });
+  assert.equal(fetched.code, 0, fetched.stderr);
+  assert.equal(JSON.parse(JSON.parse(fetched.stdout).content[0].text).groups[0].id, "grp_tools");
+  for (const [name, args] of [
+    ["relay_contact_update", { contactId: "con_tools", firstName: "Updated", idempotencyKey: "contact-key" }],
+    ["relay_inbox_delete", { itemId: "item_tools", idempotencyKey: "delete-key" }],
+    ["relay_recently_deleted_restore", { itemId: "item_tools", idempotencyKey: "restore-key" }],
+  ]) {
+    const result = await runProtocol(["call", name], { env, input: JSON.stringify(args) });
+    assert.equal(result.code, 0, result.stderr + result.stdout);
+  }
+  assert.equal(writes.length, 3);
+  assert.equal(writes[0].body.firstName, "Updated");
+  assert.equal(writes[1].body.idempotencyKey, "delete-key");
+  const denied = await runProtocol(["call", "relay_not_a_tool"], { env });
+  assert.equal(denied.code, 1);
+  assert.equal(JSON.parse(denied.stdout).isError, true);
+  const malformed = await runProtocol(["call", "relay_contact_update"], { env, input: "[]" });
+  assert.equal(malformed.code, 1);
+  assert.equal(writes.length, 3);
+  client.updateContact = async () => { throw Object.assign(new Error("permission denied"), { status: 403 }); };
+  const refused = await runProtocol(["call", "relay_contact_update"], { env, input: JSON.stringify({ contactId: "con_tools" }) });
+  assert.equal(refused.code, 1);
+  assert.match(refused.stdout, /permission denied/);
+  const descriptor = JSON.parse(fs.readFileSync(file, "utf8"));
+  fs.writeFileSync(file, JSON.stringify({ ...descriptor, accountId: "usr_other" }));
+  const mismatch = await runProtocol(["tools"], { env });
+  assert.equal(mismatch.code, 1);
+  assert.match(mismatch.stderr, /account changed|different Relay account/);
+  fs.writeFileSync(file, JSON.stringify({ ...descriptor, toolCatalogVersion: undefined }));
+  const older = await runProtocol(["tools"], { env });
+  assert.equal(older.code, 1);
+  assert.match(older.stderr, /Update and reopen/);
+  fs.writeFileSync(file, JSON.stringify(descriptor));
+});

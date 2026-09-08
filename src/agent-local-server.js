@@ -3,13 +3,14 @@ import net from "node:net";
 import path from "node:path";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { allowed, atomicWrite } from "../skill/relay/scripts/relay-protocol.mjs";
-import { LOCAL_MAX_BYTES, localDescriptorPath, localEndpoint, readLocalDescriptor } from "../skill/relay/scripts/relay-local.mjs";
+import { LOCAL_MAX_BYTES, LOCAL_TOOL_TIMEOUT_MS, localDescriptorPath, localEndpoint, readLocalDescriptor } from "../skill/relay/scripts/relay-local.mjs";
 import outboxModule from "./outbox.cjs";
 import { relayReferencePrompt } from "./session-delivery.js";
 
 // The daemon owns the credential, encrypted client and durable outgoing queue.
 // MCP and command clients share RelayClient operations, not transport framing.
 export function createAgentDispatcher({ client, outboxFile, listDestinations, deliver, accountId }) {
+  let toolSurface;
   function assertAccount(expected = accountId) {
     if (expected !== accountId || client.identity?.userId !== accountId || client.accountDrift().status !== "same") {
       throw new Error("Relay's account changed. Reconnect this agent to the intended account. Nothing was sent or read.");
@@ -20,8 +21,15 @@ export function createAgentDispatcher({ client, outboxFile, listDestinations, de
     writeStore: atomicWrite,
     send: async (entry) => { assertAccount(); return client.sendRelay(entry.protocolBody); },
   });
-  async function dispatch({ method, path: route, body, accountId: expected }) {
+  async function dispatch({ method, path: route, body, caller, accountId: expected }) {
     assertAccount(expected);
+    if ((method === "GET" && route === "/local/tools") || (method === "POST" && route === "/local/tools/call")) {
+      toolSurface ??= import("./agent-tool-surface.js").then(({ createAgentToolSurface }) => createAgentToolSurface(client));
+      const surface = await toolSurface;
+      // Recheck after loading the tool graph; pairing may have changed meanwhile.
+      assertAccount(expected);
+      return method === "GET" ? surface.list(caller) : surface.call(body?.name, body?.arguments, caller);
+    }
     const url = new URL(route, "http://relay.local");
     const parts = url.pathname.split("/").map(decodeURIComponent);
     if (method === "GET" && url.pathname === "/local/outbox") return { items: queue.list().map(({ idempotencyKey, state, relayId, lastError }) => ({ idempotencyKey, state, relayId, lastError })) };
@@ -121,6 +129,7 @@ export async function startAgentLocalServer({ client, accountId, apiUrl, file = 
       chunks.push(chunk);
       if (!chunk.includes(10)) return;
       consumed = true;
+      socket.setTimeout(LOCAL_TOOL_TIMEOUT_MS);
       chain = chain.then(async () => {
         try {
           const request = JSON.parse(Buffer.concat(chunks).toString("utf8").trim());
@@ -138,7 +147,7 @@ export async function startAgentLocalServer({ client, accountId, apiUrl, file = 
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(endpoint, resolve); });
   if (process.platform !== "win32") fs.chmodSync(endpoint, 0o600);
   try {
-    atomicWrite(file, { version: 1, endpoint, capability, accountId, apiUrl, pid: process.pid });
+    atomicWrite(file, { version: 1, toolCatalogVersion: 1, endpoint, capability, accountId, apiUrl, pid: process.pid });
     dispatcher.start();
   } catch (error) { dispatcher.stop(); server.close(); throw error; }
   return { close: async () => { await dispatcher.stop(); await new Promise((resolve) => server.close(resolve)); fs.rmSync(file, { force: true }); } };

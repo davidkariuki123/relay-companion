@@ -880,6 +880,21 @@
   }
   .cv-add:hover { background:var(--accent-press); }
   .cv-list { display:flex; flex-direction:column; padding:0; }
+  .cv-person { display:flex; align-items:center; border-bottom:1px solid var(--hair); padding-right:12px; gap:4px; }
+  .cv-person .cv-item { flex:1; min-width:0; border-bottom:0; padding-right:4px; }
+  .cv-person .cv-edit { appearance:none; border:0; background:transparent; cursor:pointer; padding:8px 4px; opacity:1; }
+  .cv-person-more { appearance:none; border:0; background:transparent; color:var(--muted); font:600 20px var(--sans); border-radius:var(--r-2); width:30px; height:32px; flex:none; cursor:pointer; }
+  .cv-person-more:hover { background:var(--wash-2); color:var(--ink); }
+  .cv-add-slot { display:flex; flex:0 0 auto; min-width:46px; justify-content:flex-end; }
+  .cv-blocked-entry { padding:14px 16px; text-align:left; }
+  .people-dialog { box-sizing:border-box; width:calc(100% - 32px); max-width:360px; max-height:calc(100% - 32px); overflow:auto; padding:22px; border:1px solid var(--edge); border-radius:var(--r-3,16px); background:var(--bg); color:var(--ink); font:13px/1.5 var(--sans); box-shadow:0 12px 48px #0004; }
+  .people-dialog::backdrop { background:#0007; }
+  .people-dialog h2 { margin:0 0 10px; font:500 23px/1.15 var(--serif); overflow-wrap:anywhere; }
+  .people-dialog p { margin:0 0 16px; color:var(--muted); }
+  .people-dialog-actions { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:10px; margin-top:18px; }
+  .people-dialog-error { color:var(--ink); margin-top:12px; }
+  .people-blocked-row { display:flex; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid var(--hair); }
+  .people-blocked-row span { flex:1; overflow-wrap:anywhere; }
   .cv-item {
     display:flex; align-items:center; gap:12px; padding:13px 16px; cursor:pointer;
     text-align:left; appearance:none; border:0; border-bottom:1px solid var(--hair);
@@ -1420,6 +1435,7 @@
     transition:transform .32s var(--soft); }
   /* Terminal only: the sentence to say, and the button that copies it. */
   .th-pull { padding:10px 14px 12px; display:flex; flex-direction:column; gap:8px; }
+  .th-pull-heading { font:600 12px/1.4 var(--sans); color:var(--muted); }
   .th-pull-q { font-family:var(--serif); font-size:14px; line-height:1.4; color:var(--ink); overflow-wrap:anywhere; }
   .th-pull-q .t { color:var(--muted); }
   .th-pull-acts { display:flex; gap:8px; }
@@ -2993,7 +3009,7 @@
             <button class="cv-seg-btn" type="button" role="tab" data-pane="groups" id="cvSegGroups">Channels <span class="cv-seg-n" id="cvSegGroupsN"></span></button>
             <button class="cv-seg-btn" type="button" role="tab" data-pane="requests" id="cvSegRequests">Requests <span class="cv-seg-n" id="cvSegRequestsN"></span></button>
           </div>
-          <button class="cv-add" type="button" id="cvAdd" aria-label="Add person">Add</button>
+          <span class="cv-add-slot" id="cvAddHome"><button class="cv-add" type="button" id="cvAdd" aria-label="Add person">Add</button></span>
           <button class="cv-add gone" type="button" id="cvgNew" aria-label="Add channel">Add</button>
         </div>
         <section class="cv-google" id="cvGoogle" aria-label="Google contacts">
@@ -3007,8 +3023,8 @@
         <div class="cv-add-sheet hidden" id="cvAddSheet">
           <div class="cv-add-t">On Relay already</div>
           <div class="cv-add-line">
-            <input class="cv-input" id="cvAddInput" type="email" placeholder="name@company.com" autocomplete="off" spellcheck="false" />
-            <button class="cv-add" type="button" id="cvAddGo">Add</button>
+            <input class="cv-input" id="cvAddInput" type="email" aria-label="Person’s email address" placeholder="name@company.com" autocomplete="off" spellcheck="false" />
+            <span class="cv-add-slot" id="cvAddTarget"></span>
           </div>
           <div class="cv-add-note" id="cvAddNote">They show up in your People right away.</div>
           <div class="cv-add-t cv-add-t2" id="cvAddT2">Not on Relay yet</div>
@@ -3052,6 +3068,7 @@
         </div>
         <div class="cvg-error" id="cvPeopleError"></div>
         <div class="cv-list" id="cvList"></div>
+        <div class="cv-blocked-entry" id="cvBlockedEntry"><button class="cv-latent-link" type="button" id="cvBlockedPeople">Blocked people</button></div>
         <div class="cv-latent" id="cvLatent">Not on Relay yet? <button type="button" class="cv-latent-link" id="cvLatentLink">Copy your link</button> and send it to them.</div>
         <!-- Requests: a first message from someone not in your People waits
              here, out of the feed and the count, until you accept it, reply,
@@ -3143,7 +3160,7 @@
   const cvNameEl = document.getElementById("cvName");
   const cvAddSheetEl = document.getElementById("cvAddSheet");
   const cvAddInputEl = document.getElementById("cvAddInput");
-  const cvAddGoEl = document.getElementById("cvAddGo");
+  const cvAddGoEl = cvAddEl; // One real button moves between the toolbar and form.
   const cvAddNoteEl = document.getElementById("cvAddNote");
   const cvAddT2El = document.getElementById("cvAddT2");
   const cvAddLinkEl = document.getElementById("cvAddLink");
@@ -4950,10 +4967,19 @@
     ) || null;
   }
 
-  function mentionDisplayName(handle) {
-    const contact = mentionContact(handle);
-    if (!contact) return "";
-    const name = String(contact.name || "").trim();
+  function mentionDisplayName(handle, groupId = "") {
+    const account = payload.account || {};
+    const group = groupId ? groupsList.find((candidate) => String(candidate.id) === String(groupId)) : null;
+    // The viewer is deliberately absent from their own contact book. Received
+    // mentions can also use the channel owner's saved token, so match the raw
+    // roster before choosing the viewer's preferred display name.
+    const key = normalizedMentionToken(handle);
+    const person = mentionContact(handle) || [account, group?.owner, ...(group?.members || [])]
+      .find((candidate) => candidate && key && normalizedMentionToken(mentionTokenForContact(candidate)) === key);
+    if (!person) return "";
+    const email = String(person.email || "").trim().toLowerCase();
+    const self = person === account || (email && email === String(account.email || "").trim().toLowerCase());
+    const name = String((self ? account.name : contactNameForEmail(email)) || person.name || "").trim();
     return name && name.indexOf("@") === -1 ? name : "";
   }
 
@@ -5117,9 +5143,10 @@
   }
 
   // Escape once while turning bare URLs into live anchors and known @handles
-  // into named mention chips. Unknown handles remain literal text; the wire
+  // into named mention chips using contacts, self and this channel's roster.
+  // Unknown handles remain literal text; the wire
   // value is never rewritten, so routing stays stable when a contact is renamed.
-  function linkify(text) {
+  function linkify(text, groupId = "") {
     const source = String(text || "");
     const token = /https?:\/\/[^\s<]+|@[A-Za-z0-9][A-Za-z0-9._-]*/g;
     let html = "";
@@ -5135,7 +5162,7 @@
       } else {
         // Do not turn the domain half of an email address into a mention.
         const previous = index > 0 ? source[index - 1] : "";
-        const displayName = /[A-Za-z0-9._%+-]/.test(previous) ? "" : mentionDisplayName(value);
+        const displayName = /[A-Za-z0-9._%+-]/.test(previous) ? "" : mentionDisplayName(value, groupId);
         html += displayName
           ? `<span class="th-mention" aria-label="Mentioned ${esc(displayName)}">@${esc(displayName)}</span>`
           : esc(value);
@@ -6358,8 +6385,21 @@
     return requestedAgentApps().filter(appAvailable);
   }
   function agentAppChoice() { return agentAppSelection()[0] || ""; }
+  function otherAgentPreferenceKey() { return `proto.otherAgent.v1:${signupAccountKey()}`; }
+  function otherAgentEnabled() {
+    const saved = protoPref(otherAgentPreferenceKey(), "");
+    if (saved) return saved === "on";
+    // Migrate the old terminal/own-session fallback once, without coupling
+    // subsequent independent switches to the native app selection.
+    return requestedAgentApps().length === 0 || openingPreference()?.surface === "terminal"
+      || requestedAgentApps().some((app) => agentSurfacePreference(app) === "terminal");
+  }
+  function setOtherAgentEnabled(enabled) {
+    if (signupAccountKey()) setProtoPref(otherAgentPreferenceKey(), enabled ? "on" : "off");
+  }
   function saveAgentApps(apps) {
     if (!signupAccountKey()) return;
+    setOtherAgentEnabled(otherAgentEnabled());
     const next = AGENT_APP_OPTIONS.filter((app) => apps.includes(app));
     const saved = next.length ? next.join("|") : "__none__";
     setProtoPref(agentAppsPreferenceKey(), saved);
@@ -7561,6 +7601,9 @@
       relayNotificationKind: "plain_relay",
       unread: false,
       outbound: true,
+      // The expanded reader uses this projection, not the conversation's
+      // attachment cargo. Preserve the sent copy's exact file identities.
+      attachments: Array.isArray(sent.attachments) ? sent.attachments : [],
       source: sent.source || { host:"relay-pill" },
       provider: sent.provider || null,
       materializedCodex: Boolean(sent.materializedCodex),
@@ -9981,6 +10024,7 @@
       const more = emails.length > 1 ? `+${emails.length - 1} more` : "";
       const recent = c.updatedAt ? timeAgo(c.updatedAt) : "";
       return `
+      <div class="cv-person">
       <button class="cv-item" type="button" data-contact="${esc(contactKey(c))}">
         <span class="cv-avatar" style="--cv-h:${cvHue(c.name || primary)}">${esc(cvInitials(c.name, primary))}</span>
         <span class="cv-body">
@@ -9991,9 +10035,11 @@
             ${c.onRelay === false ? `<span class="cv-more">· not on Relay yet</span>` : ""}
           </span>
         </span>
-        <span class="cv-edit" role="button" tabindex="0" data-contact-edit="${esc(contactKey(c))}">Edit</span>
         ${recent ? `<span class="cv-meta">${esc(recent)}</span>` : ""}
-      </button>`;
+      </button>
+      <button class="cv-edit" type="button" aria-label="Edit ${esc(c.name || primary)}" data-contact-edit="${esc(contactKey(c))}">Edit</button>
+      <button class="cv-person-more" type="button" aria-label="Block options for ${esc(c.name || primary)}" aria-haspopup="dialog" data-contact-block="${esc(contactKey(c))}">⋯</button>
+      </div>`;
     }).join("");
     for (const el of cvListEl.querySelectorAll(".cv-item")) {
       el.addEventListener("click", () => {
@@ -10009,16 +10055,111 @@
         openContactForm(edit.getAttribute("data-contact-edit"));
       };
       edit.addEventListener("click", open);
-      // Now that the row and the control do DIFFERENT things, the card has to
-      // be reachable without a mouse. The row is a <button> and answers Enter
-      // itself; this gives its control the same manners.
-      edit.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter" && event.key !== " ") return;
-        event.preventDefault();
-        open(event);
-      });
+    }
+    for (const button of cvListEl.querySelectorAll("[data-contact-block]")) {
+      button.addEventListener("click", () => openPersonBlock(button.dataset.contactBlock, button));
     }
   }
+  // Native dialog keeps focus inside the confirmation, makes the pill inert,
+  // and supports Escape. No block is sent until the explicit confirmation.
+  const peopleDialog = document.createElement("dialog");
+  peopleDialog.className = "people-dialog";
+  peopleDialog.setAttribute("aria-labelledby", "peopleDialogTitle");
+  document.body.append(peopleDialog);
+  let peopleDialogAccount = null;
+  let peopleDialogGeneration = 0;
+  let peopleDialogReturnFocus = null;
+  function closePeopleDialog() {
+    peopleDialogGeneration += 1;
+    peopleDialog.close();
+    peopleDialog.innerHTML = "";
+    if (peopleDialogAccount === signupAccountKey() && peopleDialogReturnFocus?.isConnected) peopleDialogReturnFocus.focus();
+    peopleDialogAccount = null;
+  }
+  peopleDialog.addEventListener("cancel", (event) => { event.preventDefault(); closePeopleDialog(); });
+  function showPeopleDialog(content, trigger) {
+    if (peopleDialog.open) closePeopleDialog();
+    peopleDialogAccount = signupAccountKey();
+    peopleDialogReturnFocus = trigger || document.activeElement;
+    const generation = ++peopleDialogGeneration;
+    peopleDialog.innerHTML = content;
+    setInteractive(true);
+    peopleDialog.showModal();
+    peopleDialog.querySelector("[data-dialog-close]")?.addEventListener("click", closePeopleDialog);
+    return () => peopleDialog.open && generation === peopleDialogGeneration && peopleDialogAccount === signupAccountKey();
+  }
+  function openPersonBlock(key, trigger) {
+    const person = contactsList.find((contact) => contactKey(contact) === key);
+    if (!person) return;
+    const name = person.name || contactEmails(person)[0] || "this person";
+    const canBlock = Boolean(person.id && person.relayUserId && window.relay.blockPerson);
+    const current = showPeopleDialog(`<h2 id="peopleDialogTitle">Block ${esc(name)}?</h2>
+      <p>${canBlock ? "You won’t be able to send each other direct messages or connect through invite links. Your existing messages stay. You can unblock them in People → Blocked people." : "This contact isn’t linked to a Relay account, so there’s no Relay account to block yet."}</p>
+      <div class="people-dialog-error" role="alert"></div><div class="people-dialog-actions">
+      <button class="cv-cancel" type="button" data-dialog-close autofocus>${canBlock ? "Cancel" : "Close"}</button>
+      ${canBlock ? '<button class="cv-add" type="button" data-block-confirm>Block person</button>' : ""}</div>`, trigger);
+    peopleDialog.querySelector("[data-block-confirm]")?.addEventListener("click", async (event) => {
+      if (!current()) { closePeopleDialog(); return; }
+      const button = event.currentTarget;
+      if (button.disabled) return;
+      button.disabled = true;
+      button.textContent = "Blocking…";
+      try {
+        const result = await window.relay.blockPerson({ contactId:person.id, relayUserId:person.relayUserId });
+        if (!current()) return;
+        if (result?.blocked !== true) throw new Error("Could not block this person. Try again.");
+        peopleDialog.innerHTML = `<h2 id="peopleDialogTitle">${esc(name)} is blocked</h2><p>Your existing messages and contact stay. You can unblock them in Blocked people.</p><div class="people-dialog-actions"><button class="cv-add" type="button" data-blocked-list>Blocked people</button><button class="cv-cancel" type="button" data-dialog-close>Done</button></div>`;
+        peopleDialog.querySelector("[data-dialog-close]").addEventListener("click", closePeopleDialog);
+        peopleDialog.querySelector("[data-blocked-list]").addEventListener("click", () => openBlockedPeople(trigger));
+        peopleDialog.querySelector("[data-dialog-close]").focus();
+      } catch {
+        if (!current()) return;
+        peopleDialog.querySelector(".people-dialog-error").textContent = "Could not block this person. Refresh People and try again.";
+        button.disabled = false; button.textContent = "Block person";
+      }
+    });
+  }
+  async function openBlockedPeople(trigger) {
+    const current = showPeopleDialog(`<h2 id="peopleDialogTitle">Blocked people</h2><p>You can’t send each other direct messages while blocked. Existing messages stay.</p>
+      <div data-blocked-list aria-live="polite">Loading…</div><div class="people-dialog-error" role="alert"></div>
+      <div class="people-dialog-actions"><button class="cv-cancel" type="button" data-dialog-close autofocus>Done</button></div>`, trigger);
+    const list = peopleDialog.querySelector("[data-blocked-list]");
+    let currentBlocks = [];
+    const paint = (blocks) => {
+      currentBlocks = blocks;
+      list.innerHTML = blocks.map((person) => `<div class="people-blocked-row"><span>${esc(person.name || "Relay member")}</span><button class="cv-add" type="button" data-unblock="${esc(person.relayUserId)}" aria-label="Unblock ${esc(person.name || "Relay member")}">Unblock</button></div>`).join("") || "No blocked people.";
+      for (const button of list.querySelectorAll("[data-unblock]")) {
+        button.addEventListener("click", async () => {
+          if (!current()) { closePeopleDialog(); return; }
+          if (button.disabled) return;
+          button.disabled = true;
+          try {
+            const result = await window.relay.unblockPerson(button.dataset.unblock);
+            if (!current()) return;
+            if (result?.blocked !== false) throw new Error("Unblock failed");
+            paint(currentBlocks.filter((person) => person.relayUserId !== button.dataset.unblock));
+            peopleDialog.querySelector(".people-dialog-error").textContent = "";
+            peopleDialog.querySelector("[data-unblock], [data-dialog-close]")?.focus();
+          } catch {
+            if (!current()) return;
+            peopleDialog.querySelector(".people-dialog-error").textContent = "Could not unblock this person. Try again.";
+            button.disabled = false;
+          }
+        });
+      }
+    };
+    try {
+      const result = await window.relay.connectionBlocks();
+      if (!current()) return;
+      if (!Array.isArray(result?.blocks)) throw new Error("Blocks unavailable");
+      paint(result.blocks);
+    } catch {
+      if (!current()) return;
+      list.innerHTML = 'Blocked people are unavailable right now. <button class="cv-add" type="button" data-blocks-retry>Try again</button>';
+      list.querySelector("button").addEventListener("click", () => openBlockedPeople(trigger));
+    }
+  }
+  document.getElementById("cvBlockedPeople").addEventListener("click", (event) => openBlockedPeople(event.currentTarget));
   /**
    * Open the conversation a contact row names.
    *
@@ -10209,12 +10350,14 @@
     }
     cvGoogleEl.classList.toggle("gone", !people);
     cvListEl.classList.toggle("gone", !people);
+    document.getElementById("cvBlockedEntry").classList.toggle("gone", !people);
     cvLatentEl.classList.toggle("gone", !people);
     contactsEmptyEl.classList.toggle("gone", !people || contactsList.length > 0);
     cvGroupsEl.classList.toggle("gone", !groups);
     cvRequestsEl.classList.toggle("gone", !requests);
     // The add button follows the pane it belongs to; Requests has none.
     cvAddEl.classList.toggle("gone", !people);
+    document.getElementById("cvAddHome").classList.toggle("gone", !people);
     cvgNewEl.classList.toggle("gone", !groups);
     if (!groups) cvgNewFormEl.classList.add("hidden");
     if (!people) { cvFormEl.classList.add("hidden"); closeAddSheet(); }
@@ -10936,20 +11079,39 @@
     }
   }
   // ---- Add: someone on Relay by address, or your link for everyone else ----
+  let addSheetGeneration = 0;
+  let addButtonAnimation = null;
+  function moveAddButton(open) {
+    const before = cvAddEl.getBoundingClientRect();
+    addButtonAnimation?.cancel();
+    cvAddSheetEl.classList.toggle("hidden", !open);
+    document.getElementById(open ? "cvAddTarget" : "cvAddHome").append(cvAddEl);
+    const after = cvAddEl.getBoundingClientRect();
+    if (before.width && after.width && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      addButtonAnimation = cvAddEl.animate([
+        { transform:`translate(${before.left - after.left}px, ${before.top - after.top}px) scale(${before.width / after.width}, ${before.height / after.height})` },
+        { transform:"none" },
+      ], { duration:340, easing:"cubic-bezier(.2,.8,.2,1)" });
+    }
+  }
   function openAddSheet() {
+    addSheetGeneration += 1;
     cvFormEl.classList.add("hidden");
     cvAddInputEl.value = "";
     cvAddNoteEl.textContent = "They show up in your People right away.";
     cvAddNoteEl.classList.remove("warn");
     cvAddT2El.classList.remove("lit");
-    cvAddSheetEl.classList.remove("hidden");
+    moveAddButton(true);
     setInteractive(true);
     setTimeout(() => cvAddInputEl.focus(), 30);
   }
   function closeAddSheet() {
-    cvAddSheetEl.classList.add("hidden");
+    addSheetGeneration += 1;
+    const wasOpen = !cvAddSheetEl.classList.contains("hidden");
+    moveAddButton(false);
     cvAddInputEl.value = "";
     cvAddGoEl.disabled = false;
+    if (wasOpen && contactsPane === "people") cvAddEl.focus();
   }
   function addSheetWarn(text) {
     cvAddNoteEl.textContent = text;
@@ -10959,6 +11121,7 @@
     const address = String(cvAddInputEl.value || "").trim().toLowerCase();
     if (!isValidEmail(address)) { addSheetWarn("That doesn't look like an address."); return; }
     if (cvAddGoEl.disabled) return;
+    const generation = addSheetGeneration;
     cvAddGoEl.disabled = true;
     cvAddNoteEl.textContent = "Adding…";
     cvAddNoteEl.classList.remove("warn");
@@ -10969,6 +11132,7 @@
       if (!window.relay.contactAdd) throw new Error("Could not add them.");
       const res = await window.relay.contactAdd({ email:address });
       if (account !== signupAccountKey()) return; // a different account is looking now
+      if (generation !== addSheetGeneration) return; // the form was closed/reopened
       if (res?.ok && res.found === false) {
         addSheetWarn(`${address} isn't on Relay yet. Send them your link.`);
         cvAddT2El.classList.add("lit");
@@ -10982,9 +11146,10 @@
       closeAddSheet();
     } catch (error) {
       if (account !== signupAccountKey()) return;
+      if (generation !== addSheetGeneration) return;
       addSheetWarn((error && error.message) || "Could not add them.");
     } finally {
-      cvAddGoEl.disabled = false;
+      if (generation === addSheetGeneration) cvAddGoEl.disabled = false;
     }
   }
   // The link lands on the clipboard from main; the button says so for a moment.
@@ -11002,8 +11167,7 @@
       setTimeout(() => { if (button.isConnected) { button.textContent = label; button.disabled = false; } }, 1400);
     }
   }
-  cvAddEl.addEventListener("click", openAddSheet);
-  cvAddGoEl.addEventListener("click", addPersonByAddress);
+  cvAddEl.addEventListener("click", () => cvAddSheetEl.classList.contains("hidden") ? openAddSheet() : addPersonByAddress());
   cvAddInputEl.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); addPersonByAddress(); } });
   cvAddInputEl.addEventListener("mousedown", () => setInteractive(true));
   cvAddCancelEl.addEventListener("click", closeAddSheet);
@@ -12633,9 +12797,10 @@
     const actionsId = `relay-host-actions-${id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
     const source = message && message.direction === "out" ? "sent" : "relay";
     const desktopHosts = agentAppHosts().filter((host) => agentOpensInApp(host === "codex" ? "Codex" : "Claude Code"));
-    const needsCopy = !desktopHosts.length || agentAppSelection().some((app) => !agentOpensInApp(app));
+    const needsCopy = otherAgentEnabled();
     const inner = desktopHosts.map((host) => hostActionRowHtml(host, message, source)).join("")
-      + (needsCopy ? pullSentenceHtml(message) : "");
+      + (needsCopy ? pullSentenceHtml(message, { hasAppAction: desktopHosts.length > 0 }) : "");
+    if (!inner) return "";
     return `${persistent ? "" : `<button class="th-host-disclosure" type="button" data-host-disclosure="${esc(id)}" data-stop="1" aria-expanded="false" aria-controls="${esc(actionsId)}"><span>Open with an agent</span><span class="chev" aria-hidden="true">⌄</span></button>`}<div id="${esc(actionsId)}" class="th-host-actions${persistent ? " persistent" : ""}" data-host-actions="${esc(id)}" data-stop="1" aria-hidden="${persistent ? "false" : "true"}"${persistent ? "" : " inert"}>
       <div class="th-host-actions-inner">
         ${inner}
@@ -12657,7 +12822,7 @@
   }
   // "Pull David’s relay “Updater rollback postmortem”" — the thing to say in
   // a session, and the exact sentence the button copies for the agent.
-  function pullSentenceHtml(message) {
+  function pullSentenceHtml(message, { hasAppAction = false } = {}) {
     const id = String(message && message.id || "");
     const row = readerRow(id) || relayById(id)
       || (payload.sent || []).find((item) => String(item.relayId || item.id || "") === id) || message || {};
@@ -12665,10 +12830,11 @@
     const mine = (message && message.direction === "out") || row.direction === "out" || Boolean(row.recipient && !row.senderEmail);
     const first = mine ? "" : String(relaySender(row) || message?.party || "their").trim().split(/\s+/)[0];
     const whose = mine ? "my sent" : `${first}${/s$/i.test(first) ? "’" : "’s"}`;
-    const sentence = `Pull ${whose} relay “${subject}” from Relay and read it to me.`;
+    const sentence = `Pull ${whose} relay “${subject}” from Relay and tell me what’s happening.`;
     return `<div class="th-pull">
-        <div class="th-pull-q">Pull ${esc(whose)} relay <span class="t">“${esc(subject)}”</span></div>
-        <div class="th-pull-acts"><button class="th-pull-copy" type="button" data-pull-copy="${esc(sentence)}">Copy for your agent</button></div>
+        <div class="th-pull-heading">${hasAppAction ? "Or tell your agent this:" : "Tell your agent this:"}</div>
+        <div class="th-pull-q">${esc(sentence)}</div>
+        <div class="th-pull-acts"><button class="th-pull-copy" type="button" data-pull-copy="${esc(sentence)}">Copy this prompt for your agent</button></div>
       </div>`;
   }
   // The row's click, wherever the row is painted (a room bubble, the reader).
@@ -12690,7 +12856,7 @@
         try {
           await navigator.clipboard.writeText(b.getAttribute("data-pull-copy") || "");
           b.textContent = "Copied";
-          setTimeout(() => { if (b.isConnected) b.textContent = "Copy for your agent"; }, 1400);
+          setTimeout(() => { if (b.isConnected) b.textContent = "Copy this prompt for your agent"; }, 1400);
         } catch { b.textContent = "Could not copy"; }
       });
     }
@@ -13130,7 +13296,7 @@
           </div>` : `
           <span class="th-msg-title">${agentWorking
             ? '<span class="agent-working-indicator" aria-hidden="true"><span class="agent-working-dot"></span><span class="agent-working-dot"></span><span class="agent-working-dot"></span></span>'
-            : `${m.request ? '<span class="kchip">Task</span>' : ""}${textLike ? linkify(m.title) : esc(m.title)}${textLike ? "" : `<span class="th-more">${open ? "‹" : "›"}</span>`}${m.editedAt && !m.deletedAt ? '<span class="th-edited">edited</span>' : ""}`}</span><span class="th-blk-time">${esc(timeAgo(m.at))}</span>
+            : `${m.request ? '<span class="kchip">Task</span>' : ""}${textLike ? linkify(m.title, m.groupId || thread.groupId) : esc(m.title)}${textLike ? "" : `<span class="th-more">${open ? "‹" : "›"}</span>`}${m.editedAt && !m.deletedAt ? '<span class="th-edited">edited</span>' : ""}`}</span><span class="th-blk-time">${esc(timeAgo(m.at))}</span>
 
           ${!textLike && !open && !inlineBody && m.preview ? `<span class="th-preview">${esc(m.preview)}</span>` : ""}
           ${!textLike && !open && inlineBody ? `<div class="th-body" data-stop="0">${readerParagraphs(m.body)}</div>` : ""}
@@ -14479,11 +14645,10 @@
   // Connected copy from the Minimal pill's integrated setup contract.
   function yourAgentHtml() {
     const selected = agentAppSelection();
-    const ownSession = requestedAgentApps().length === 0;
     return `
       <div class="sv-open-section" id="yourAgent" data-stop="1">
         <div class="sv-open-title">Your agent</div>
-        <div class="sv-open-intro">Choose which agents you use. Turn on one or both.</div>
+        <div class="sv-open-intro">Choose which agents you use. Turn on one or more.</div>
         <div class="sv-open-list">
           ${AGENT_APP_OPTIONS.map((app) => {
             const available = appAvailable(app);
@@ -14500,8 +14665,8 @@
           }).join("")}
           <div class="sv-open-row">
             <span class="sv-open-logo sv-open-logo-blank" aria-hidden="true"></span>
-            <span class="sv-open-copy"><span class="sv-open-name">My own session</span><span class="sv-open-why">Relay copies the sentence for you</span></span>
-            ${ownSession ? `<span class="sv-open-state">Chosen</span>` : `<button class="sv-choose" type="button" id="svOwnSession">Use this one</button>`}
+            <span class="sv-open-copy"><span class="sv-open-name">Other</span><span class="sv-open-why">Terminal or another agent. Relay copies the sentence for you.</span></span>
+            <button class="sv-switch" type="button" role="switch" id="svOtherAgent" aria-checked="${otherAgentEnabled() ? "true" : "false"}" aria-label="Copy prompts for another agent"></button>
           </div>
         </div>
       </div>`;
@@ -14770,29 +14935,11 @@
         renderSettings();
       });
     }
-    document.getElementById("svOwnSession")?.addEventListener("click", () => {
-      saveAgentApps([]);
+    document.getElementById("svOtherAgent")?.addEventListener("click", () => {
+      setOtherAgentEnabled(!otherAgentEnabled());
       renderSettings();
     });
-    document.getElementById("svBlockedPeople")?.addEventListener("click", async () => {
-      const list = document.getElementById("svBlockedList");
-      const account = signupAccountKey();
-      list.textContent = "Loading…";
-      try {
-        const result = await window.relay.connectionBlocks();
-        if (account !== signupAccountKey() || !list.isConnected) return;
-        list.innerHTML = (result.blocks || []).map((person) => `<div class="sv-open-row"><span class="sv-open-copy">${esc(person.name || "Relay member")}</span><button class="sv-choose" data-unblock="${esc(person.relayUserId)}" type="button">Unblock</button></div>`).join("") || "No blocked people.";
-        for (const button of list.querySelectorAll("[data-unblock]")) {
-          button.addEventListener("click", async () => {
-            button.disabled = true;
-            try {
-              await window.relay.unblockPerson(button.dataset.unblock);
-              if (account === signupAccountKey() && button.isConnected) button.closest(".sv-open-row").remove();
-            } catch { if (account === signupAccountKey()) { button.disabled = false; button.textContent = "Retry unblock"; } }
-          });
-        }
-      } catch { if (account === signupAccountKey() && list.isConnected) list.textContent = "Blocked people are unavailable right now. Try again."; }
-    });
+    document.getElementById("svBlockedPeople")?.addEventListener("click", (event) => openBlockedPeople(event.currentTarget));
     const accountRow = document.getElementById("svAccountRow");
     if (accountRow) accountRow.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -16053,6 +16200,7 @@
   }
 
   function renderAll() {
+    if (peopleDialog.open && peopleDialogAccount !== signupAccountKey()) closePeopleDialog();
     if (activeView !== "tasks") closeTodoActions();
     todoRemovalNotice?.classList.toggle("hidden", activeView !== "tasks" && todoRemovalNotice.dataset.error !== "true");
     // Build the destination BEFORE applyView reveals/resizes it. This ordering

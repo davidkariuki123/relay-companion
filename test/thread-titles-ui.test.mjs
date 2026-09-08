@@ -28,7 +28,7 @@ test("chat text bubbles preserve authored line breaks", () => {
   const rule = html.match(/\.th-msg\.text \.th-msg-title \{([^}]+)\}/)?.[1] || "";
   assert.match(rule, /white-space:pre-wrap/);
 
-  assert.match(html, /<span class="th-msg-title">\$\{agentWorking[\s\S]*?textLike \? linkify\(m\.title\)/);
+  assert.match(html, /<span class="th-msg-title">\$\{agentWorking[\s\S]*?textLike \? linkify\(m\.title, m\.groupId \|\| thread\.groupId\)/);
 });
 
 test("legacy threadTitle stays readable in storage but never reaches the visible pill", () => {
@@ -78,23 +78,31 @@ test("a conversation is named only by its person or saved group", () => {
   assert.doesNotMatch(chat, />See all</);
 });
 
-test("known @handles render as highlighted contact names without changing unknown text", () => {
+function mentionRenderer({ contacts = [], account = {}, groups = [] } = {}) {
   const start = html.indexOf("function normalizedMentionToken(");
   const end = html.indexOf("\n  function relaySender(", start);
   assert.notEqual(start, -1, "missing mention renderer");
   assert.notEqual(end, -1, "missing mention renderer boundary");
-  const source = html.slice(start, end);
+  const source = html.slice(start, end)
+    + html.slice(html.indexOf("function contactNameForEmail("), html.indexOf("function emailPrefix("))
+    + html.slice(html.indexOf("function contactEmails("), html.indexOf("function contactKey("));
   const escapeHtml = (value) => String(value)
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
-  const linkify = Function(
+  return Function(
     "contactsList",
+    "payload",
+    "groupsList",
     "esc",
     `"use strict"; ${source}; return linkify;`,
-  )([{ handle:"shane_acton", name:"Shane Acton" }], escapeHtml);
+  )(contacts, { account }, groups, escapeHtml);
+}
+
+test("known @handles render as highlighted contact names without changing unknown text", () => {
+  const linkify = mentionRenderer({ contacts:[{ handle:"shane_acton", name:"Shane Acton" }] });
 
   assert.equal(
     linkify("@Shane_Acton what's the word?"),
@@ -105,6 +113,67 @@ test("known @handles render as highlighted contact names without changing unknow
   assert.match(linkify("https://example.com/@shane_acton"), /^<a href=/, "a URL remains one link token");
   assert.match(html, /\.th-msg\.text \.th-mention \{[\s\S]*?border:1px solid[\s\S]*?background:/);
   assert.match(html, /else if \(activeView === "threads"\) renderThreads\(\)/, "an open room repaints after contact names load");
+});
+
+test("mentions of the viewer render as name chips without a self contact or loaded roster", () => {
+  const account = { name:"David Kariuki", email:"david@example.com" };
+  const linkify = mentionRenderer({ account });
+  assert.equal(
+    linkify("ah here it is @David_Kariuki"),
+    'ah here it is <span class="th-mention" aria-label="Mentioned David Kariuki">@David Kariuki</span>',
+  );
+  assert.match(linkify("@dAvId_KaRiUkI"), />@David Kariuki<\/span>$/);
+  assert.equal(account.name, "David Kariuki", "rendering never rewrites the account or message");
+});
+
+test("an explicit self handle is supported without inventing another name token", () => {
+  const linkify = mentionRenderer({ account:{ name:"David Kariuki", handle:"david", email:"david@example.com" } });
+  assert.match(linkify("@david"), />@David Kariuki<\/span>$/);
+  assert.equal(linkify("@David_Kariuki"), "@David_Kariuki");
+});
+
+test("received mentions resolve unsaved channel owners and members only in their own channel", () => {
+  const linkify = mentionRenderer({
+    groups:[{
+      id:"grp_designs", owned:false,
+      owner:{ name:"Sven Wellmann", email:"sven@example.com" },
+      members:[{ name:"Shane Acton", handle:"shane", email:"shane@example.com" }],
+    }],
+  });
+  assert.match(linkify("Ask @Sven_Wellmann and @shane", "grp_designs"),
+    /Mentioned Sven Wellmann[\s\S]*Mentioned Shane Acton/);
+  assert.equal(linkify("@Sven_Wellmann @shane", "grp_unrelated"), "@Sven_Wellmann @shane");
+  assert.equal(linkify("@Sven_Wellmann @shane"), "@Sven_Wellmann @shane", "a DM does not borrow another room's roster");
+  assert.equal(linkify("@Shane_Acton @unknown", "grp_designs"), "@Shane_Acton @unknown");
+});
+
+test("channel tokens keep the viewer's preferred names, including their own profile", () => {
+  const linkify = mentionRenderer({
+    account:{ name:"David Kariuki", email:"david@example.com" },
+    contacts:[{ name:"Sven Ozwellmann", handle:"sven", emails:["sven@example.com"] }],
+    groups:[{
+      id:"grp_designs", owned:false,
+      owner:{ name:"Sven Wellmann", email:"sven@example.com" },
+      members:[{ name:"David K", handle:"dk", email:"DAVID@example.com" }],
+    }],
+  });
+  assert.match(linkify("@Sven_Wellmann", "grp_designs"), />@Sven Ozwellmann<\/span>$/);
+  assert.match(linkify("@sven", "grp_designs"), />@Sven Ozwellmann<\/span>$/);
+  assert.match(linkify("@dk", "grp_designs"), />@David Kariuki<\/span>$/);
+  assert.equal(linkify("@dk", "grp_other"), "@dk");
+});
+
+test("self and roster rendering escapes names and preserves emails and links", () => {
+  const linkify = mentionRenderer({
+    account:{ name:'David <b> & "K"', handle:"david" },
+    groups:[{ id:"grp_designs", members:[{ name:"bad@example.com", handle:"bad" }] }],
+  });
+  assert.equal(linkify("hello @david"),
+    'hello <span class="th-mention" aria-label="Mentioned David &lt;b&gt; &amp; &quot;K&quot;">@David &lt;b&gt; &amp; &quot;K&quot;</span>');
+  assert.equal(linkify("name@david"), "name@david");
+  assert.equal(linkify("https://example.com/@david"),
+    '<a href="https://example.com/@david" data-stop="1" target="_blank" rel="noreferrer noopener">https://example.com/@david</a>');
+  assert.equal(linkify("@bad", "grp_designs"), "@bad", "email-only labels do not become named chips");
 });
 
 test("direct and group conversations share one newest-first chronology", () => {

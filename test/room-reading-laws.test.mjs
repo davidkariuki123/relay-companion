@@ -306,7 +306,7 @@ test("enabled app rows share the same binder on the bubble and in the reader", (
   const footer = html.slice(html.indexOf("function relayHostActionsHtml"), html.indexOf("// ---- the thread reply composer"));
   assert.match(footer, /const desktopHosts = agentAppHosts\(\)\.filter/);
   assert.match(footer, /desktopHosts\.map\(\(host\) => hostActionRowHtml\(host, message, source\)\)/);
-  assert.match(footer, /needsCopy \? pullSentenceHtml\(message\) : ""/);
+  assert.match(footer, /needsCopy \? pullSentenceHtml\(message, \{ hasAppAction: desktopHosts.length > 0 \}\) : ""/);
   assert.doesNotMatch(footer, /sessionPickerInlineHtml/, "no picker unfolds under the row");
   assert.doesNotMatch(footer, /data-host="codex"[\s\S]*?data-host="claude"/, "no fixed pair of rows");
   assert.match(footer, /function wireHostOpen\(scope\)/);
@@ -346,8 +346,8 @@ test("the verb opens a new chat straight away; nothing is picked, and the same p
   assert.doesNotMatch(footer, /"Choose where this Relay lands"|\$\{selected \? " pressed" : ""\}/);
   assert.doesNotMatch(html, /id="sessionPickerView"/, "there is still no standalone picker page");
   // Terminal only: the sentence, and the button that copies exactly it.
-  assert.match(footer, /Pull \$\{esc\(whose\)\} relay <span class="t">“\$\{esc\(subject\)\}”<\/span>/);
-  assert.match(footer, /data-pull-copy="\$\{esc\(sentence\)\}">Copy for your agent<\/button>/);
+  assert.match(footer, /class="th-pull-q">\$\{esc\(sentence\)\}/);
+  assert.match(footer, /data-pull-copy="\$\{esc\(sentence\)\}">Copy this prompt for your agent<\/button>/);
   assert.match(wire, /navigator\.clipboard\.writeText\(b\.getAttribute\("data-pull-copy"\) \|\| ""\)/);
   assert.doesNotMatch(footer.slice(footer.indexOf("function pullSentenceHtml"), footer.indexOf("function wireHostOpen")), /https?:|shareLink|\/i\//,
     "no link in the sentence: the pill is here, so Relay is installed, and the agent pulls by name");

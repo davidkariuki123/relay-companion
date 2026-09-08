@@ -8,7 +8,7 @@
        connect-src, so this window cannot be made to fetch anything at all. -->
   <meta
     http-equiv="Content-Security-Policy"
-    content="default-src 'none'; base-uri 'none'; form-action 'none'; connect-src 'none'; media-src 'none'; object-src 'none'; img-src 'self' file: data:; frame-src 'self' file:; font-src 'self' file:; script-src 'self'; style-src 'unsafe-inline'"
+    content="default-src 'none'; base-uri 'none'; form-action 'none'; connect-src 'none'; media-src 'none'; object-src 'none'; img-src 'self' file: data:; frame-src 'self' file: about: data:; font-src 'self' file: data:; script-src 'self'; style-src 'unsafe-inline'"
   />
   <title>Relay</title>
   <style>
@@ -115,7 +115,8 @@
     .code .ln.bad { color:var(--danger); }
     .code .more { display:block; margin-top:10px; color:var(--muted-3); }
 
-    .pdf { flex:1 1 auto; min-height:0; border:0; width:100%; background:var(--stage); }
+    .pdf, .html-preview { flex:1 1 auto; min-height:0; border:0; width:100%; background:var(--stage); }
+    .html-note { padding:8px 16px; color:var(--muted); font-size:11px; border-bottom:1px solid var(--hair); }
     .none { flex:1 1 auto; display:grid; place-items:center; padding:20px; }
     .none .card { display:flex; flex-direction:column; align-items:center; gap:14px; padding:26px 32px;
       border:1px solid var(--hair); border-radius:14px; text-align:center; }
@@ -159,6 +160,8 @@
   </div>
   <pre class="code" id="vText" hidden></pre>
   <iframe class="pdf" id="vPdf" hidden title="PDF"></iframe>
+  <div class="html-note" id="vHtmlNote" hidden>HTML preview · Scripts and external content are disabled.</div>
+  <iframe class="html-preview" id="vHtml" name="vHtml" sandbox="" referrerpolicy="no-referrer" hidden title="HTML preview"></iframe>
   <div class="none" id="vNone" hidden>
     <div class="card">
       <span class="tile" id="vNoneTile"></span>

@@ -5,6 +5,8 @@ import net from "node:net";
 import { createHash } from "node:crypto";
 
 export const LOCAL_MAX_BYTES = 160 * 1024 * 1024;
+// AI-session inspection may wait 45 seconds, plus API and catalog lookups.
+export const LOCAL_TOOL_TIMEOUT_MS = 120_000;
 export function localDescriptorPath(env = process.env) {
   return env.RELAY_AGENT_LOCAL || path.join(env.RELAY_CONFIG_DIR || path.join(os.homedir(), ".relay"), "agent-local.json");
 }

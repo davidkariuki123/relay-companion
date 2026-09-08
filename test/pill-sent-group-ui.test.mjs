@@ -78,6 +78,62 @@ function readerFor(payload, id, canonicalChatDetails = new Map()) {
   );
 }
 
+const HTML_ATTACHMENT = {
+  id: "att_design", fileId: "att_design", name: "settings-and-other.html",
+  contentType: "text/html", bytes: 2417885, sha256: "fixture-checksum",
+};
+
+function attachmentShelfFor(row) {
+  return new Function("relay", "esc", "fmtBytes", "fileFamilyOf", "fileIconSvg",
+    `${pillFunction("relaySharedShelf")}\nreturn relaySharedShelf(relay);`)(
+    row, (value) => String(value), (value) => `${value} bytes`, () => "code", () => "<svg></svg>",
+  );
+}
+
+test("sent attachments survive the reader projection and render an actionable shared shelf", () => {
+  const sent = {relayId:"relay_sent_file", title:"Design", recipient:{name:"Sven"}, attachments:[HTML_ATTACHMENT]};
+  const row = readerFor({relays:[], sent:[sent]}, sent.relayId);
+  assert.deepEqual(row.attachments, sent.attachments, "the reader must not drop the file the conversation already shows");
+  const shelf = attachmentShelfFor(row);
+  assert.match(shelf, /Attached to this Relay/);
+  assert.match(shelf, /settings-and-other\.html/);
+  assert.match(shelf, /2417885 bytes/);
+  assert.match(shelf, /data-att-relay="relay_sent_file" data-att-id="att_design" data-att-preview="1"/,
+    "opening the attachment uses the exact sent Relay and file identity");
+});
+
+test("a group sent reader retains only the opened sibling's attachment identities", () => {
+  const sent = [
+    {relayId:"relay_a", groupSendId:"group_send", recipientGroupName:"Designs", attachments:[HTML_ATTACHMENT]},
+    {relayId:"relay_b", groupSendId:"group_send", recipientGroupName:"Designs", attachments:[{...HTML_ATTACHMENT, id:"att_b",fileId:"att_b"}]},
+  ];
+  const row = readerFor({relays:[],sent}, "relay_b");
+  assert.equal(row.senderName,"You → Designs");
+  assert.deepEqual(row.attachments, sent[1].attachments);
+  assert.match(attachmentShelfFor(row), /data-att-relay="relay_b" data-att-id="att_b"/);
+});
+
+test("received and canonically hydrated readers keep their existing attachment behavior", () => {
+  const inbound = {id:"relay_received",attachments:[HTML_ATTACHMENT]};
+  assert.equal(readerFor({relays:[inbound],sent:[]},inbound.id),inbound);
+  assert.match(attachmentShelfFor(inbound), /Attached to this Relay/);
+  for (const direction of ["inbound","outbound"]) {
+    const item = {relayId:"relay_chat",direction,attachments:[HTML_ATTACHMENT]};
+    const chats = new Map([["chat_test",{chatId:"chat_test",title:"Sven",items:[item]}]]);
+    const row = readerFor({relays:[],sent:[]},item.relayId,chats);
+    assert.deepEqual(row.attachments,item.attachments);
+    assert.match(attachmentShelfFor(row), /data-att-relay="relay_chat" data-att-id="att_design"/);
+  }
+});
+
+test("sent messages without files have an empty attachment list and no empty shelf", () => {
+  for (const attachments of [undefined, null, [], {id:"malformed"}]) {
+    const row = readerFor({relays:[],sent:[{relayId:"relay_no_files",attachments}]},"relay_no_files");
+    assert.deepEqual(row.attachments,[]);
+    assert.equal(attachmentShelfFor(row),"");
+  }
+});
+
 const GROUP_SEND = [
   {
     relayId: "r_sven", groupSendId: "gs_1", recipientGroupName: "Bugs and Features",

@@ -20,7 +20,7 @@ const slice = (start, end) => {
 test("Add offers two cases: an address for someone on Relay, your link for everyone else", () => {
   const sheet = slice('<div class="cv-add-sheet hidden" id="cvAddSheet">', '<form class="cv-form hidden" id="cvForm">');
   assert.match(sheet, /<div class="cv-add-t">On Relay already<\/div>/);
-  assert.match(sheet, /id="cvAddInput" type="email" placeholder="name@company\.com"/);
+  assert.match(sheet, /id="cvAddInput" type="email"[^>]*placeholder="name@company\.com"/);
   assert.match(sheet, /id="cvAddNote">They show up in your People right away\.<\/div>/);
   assert.match(sheet, /id="cvAddT2">Not on Relay yet<\/div>/);
   assert.match(sheet, /id="cvAddLink">Copy your invite link<\/button>/);
@@ -46,7 +46,7 @@ function addPersonHarness({ contactAdd, accountSwitch = false }) {
   let account = "user_a";
   const src = slice("  function addSheetWarn(text)", "  // The link lands on the clipboard from main");
   const run = new Function("cvAddInputEl", "cvAddGoEl", "cvAddNoteEl", "cvAddT2El", "window", "calls", "signupAccountKey", "isValidEmail", "contactKey", "seed",
-    `"use strict"; let contactsList = seed;
+    `"use strict"; let contactsList = seed; let addSheetGeneration = 0;
      const closeAddSheet = () => { calls.closeAddSheet += 1; };
      const renderContacts = () => { calls.renderContacts += 1; };
      const renderAll = () => { calls.renderAll += 1; };

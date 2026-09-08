@@ -4,7 +4,7 @@ import path from "node:path";
 import { createHash, timingSafeEqual } from "node:crypto";
 
 const MAX_BYTES = 10 * 1024 * 1024;
-const MAX_HTML_BYTES = 2 * 1024 * 1024;
+const MAX_HTML_BYTES = MAX_BYTES;
 
 function imageMime(bytes) {
   if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return "image/png";
@@ -17,7 +17,7 @@ function imageMime(bytes) {
 function isHtmlAttachment(attachment, bytes) {
   if (bytes.length > MAX_HTML_BYTES || bytes.includes(0)) return false;
   const contentType = String(attachment?.contentType || "").toLowerCase().split(";", 1)[0].trim();
-  const name = String(attachment?.name || "").toLowerCase();
+  const name = String(attachment?.filename || attachment?.name || "").toLowerCase();
   if (contentType !== "text/html" && !/\.html?$/.test(name)) return false;
   const head = bytes.subarray(0, Math.min(bytes.length, 4096)).toString("utf8").trimStart().toLowerCase();
   return head.startsWith("<!doctype html") || head.startsWith("<html") || /<(head|body|main|section|div)[\s>]/.test(head);

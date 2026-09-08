@@ -16,7 +16,9 @@ try {
     const relays=Array.from({length:32},(_,index)=>({
       id:`relay_m${index}`,threadId:`relay_m${index}`,groupSendId:`gsend_${index}`,recipientGroupId:"grp_granular",recipientGroupName:"Granular",
       kind:"message",relayNotificationKind:"plain_relay",senderName:index%2 ? "Shane Acton" : "David Kariuki",senderEmail:index%2 ? "shane@example.com" : "david@example.com",
-      forHuman:[2,12,22].includes(index) ? "@Sven_Wellmann please check this image." : `Conversation message ${index}. Some context around the image attachment.`,
+      forHuman:[2,12,22].includes(index) ? "@Sven_Wellmann please check this image."
+        : index===31 ? "Ask @Shane_Acton about the image."
+        : `Conversation message ${index}. Some context around the image attachment.`,
       forAgent:"",title:"",unread:true,recipientMentioned:[2,12,22].includes(index),attachments:[],
       createdAt:new Date(now-(32-index)*60000).toISOString(),updatedAt:new Date(now-(32-index)*60000).toISOString(),
     }));
@@ -26,7 +28,7 @@ try {
       isTestOverlay:true,
       refresh:async()=>structuredClone(window.fixturePayload),
       refreshSent:async()=>({items:[]}),
-      contacts:async()=>[{id:"david",name:"David Kariuki",email:"david@example.com"},{id:"shane",name:"Shane Acton",email:"shane@example.com"}],
+      contacts:async()=>[{id:"david",name:"David Kariuki",email:"david@example.com"}],
       groups:async()=>({ok:true,result:[group]}),
       accountInfo:async()=>({name:"Sven Wellmann",email:"sven@example.com",hasSentRelay:true}),
       agentSurfaces:async()=>({}),
@@ -49,9 +51,21 @@ try {
   await page.locator('[data-mention-nav="first"]').waitFor();
   await page.waitForFunction(()=>document.querySelector(".th-mention-jump")?.textContent.includes("3 mentions"));
   assert.match(await page.locator('.th-mention-jump').innerText(),/3 mentions/);
+  const rosterChip=page.locator('[data-msg="relay_m31"] .th-mention');
+  await rosterChip.waitFor();
+  assert.equal(await rosterChip.textContent(),"@Shane Acton","unsaved participants resolve from this channel's roster");
   if(process.env.RELAY_MENTION_SCREENSHOT) await page.locator('#card').screenshot({path:process.env.RELAY_MENTION_SCREENSHOT.replace('.png','-idle.png')});
   await page.locator('[data-mention-nav="first"]').click();
   await page.locator('[data-msg="relay_m2"].mention-target').waitFor();
+  const selfChip=page.locator('[data-msg="relay_m2"] .th-mention');
+  assert.equal(await selfChip.textContent(),"@Sven Wellmann","the viewer needs no self contact to get a mention chip");
+  const chipStyle=await selfChip.evaluate(element=>{
+    const style=getComputedStyle(element);
+    return {background:style.backgroundColor,borderWidth:style.borderTopWidth,color:style.color,bodyColor:getComputedStyle(element.parentElement).color};
+  });
+  assert.equal(chipStyle.borderWidth,"1px");
+  assert.notEqual(chipStyle.background,"rgba(0, 0, 0, 0)");
+  assert.notEqual(chipStyle.color,chipStyle.bodyColor);
   await page.waitForFunction(()=>{
     const bounds=document.querySelector('[data-msg="relay_m2"].mention-target')?.getBoundingClientRect();
     const card=document.querySelector('#card').getBoundingClientRect();
@@ -91,5 +105,5 @@ try {
   await page.waitForFunction(()=>document.querySelector('.th-mention-jump')?.textContent.includes('2 mentions'));
   assert.equal(await page.locator('[data-msg="relay_m22"].mention-target').count(),0);
   assert.deepEqual(errors,[]);
-  console.log("Real Companion renderer: older missing mentions, exact notification target, three-message navigation, refresh, deletion, completion and revisit passed.");
+  console.log("Real Companion renderer: self and unsaved roster chips, older missing mentions, exact notification target, three-message navigation, refresh, deletion, completion and revisit passed.");
 } finally { await browser.close(); }

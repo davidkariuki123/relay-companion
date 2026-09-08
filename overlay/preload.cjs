@@ -189,6 +189,7 @@ contextBridge.exposeInMainWorld("relay", {
   contactDelete: (input) => ipcRenderer.invoke("relay:contactDelete", input),
   contactAdd: (input) => ipcRenderer.invoke("relay:contactAdd", input),
   blockRequest: (relayId) => ipcRenderer.invoke("relay:blockRequest", relayId),
+  blockPerson: (input) => ipcRenderer.invoke("relay:blockPerson", input),
   connectionBlocks: () => ipcRenderer.invoke("relay:connectionBlocks"),
   unblockPerson: (userId) => ipcRenderer.invoke("relay:unblockPerson", userId),
 

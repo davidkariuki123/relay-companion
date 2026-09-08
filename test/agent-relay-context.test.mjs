@@ -117,6 +117,7 @@ test("claims separate RECENT cold-start from NEW arrivals and reserve atomically
   assert.match(first.text, /<untrusted_recent_relay_title_records>/);
   assert.doesNotMatch(first.text, /<untrusted_new_relay_title_records>/);
   assert.match(first.text, /Do not enumerate or mention irrelevant RECENT history/);
+  assert.match(first.text, /set it in_progress with relay_todo_update before starting and done when finished/);
   assert.equal((first.text.match(/\"relayId\"/g) || []).length, CONTEXT_MAX_ITEMS);
   assert.equal(claimAgentRelayHookContext(home, scope, {
     sessionId: "session",

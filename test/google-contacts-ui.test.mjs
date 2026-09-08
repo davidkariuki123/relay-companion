@@ -41,3 +41,19 @@ test("failed sync rechecks permission and stale account responses never paint", 
   release({ ok: true, result: { state: "healthy", contactCount: 999 } }); await pending;
   assert.doesNotMatch(r.elements.get("cvGoogleDetail").textContent, /999/);
 });
+
+test("Google consent follows the dev API despite a saved production account website", () => {
+  const source = readFileSync(new URL("../overlay/main.cjs", import.meta.url), "utf8");
+  const block = source.slice(source.indexOf("function googleContactsWebUrl("), source.indexOf("function accountSettingsPath("));
+  for (const [api, web, expected] of [
+    ["https://dev-api.sendrelays.com", "https://sendrelays.com", "https://dev.sendrelays.com"],
+    ["https://api.sendrelays.com", "https://sendrelays.com", "https://sendrelays.com"],
+    ["http://localhost:4000", "http://localhost:3000", "http://localhost:3000"],
+  ]) {
+    const context = vm.createContext({ URL, process: { env: {} }, readConfigFile: () => ({ apiUrl: api }), webBase: () => web });
+    vm.runInContext(block, context);
+    const url = new URL(context.googleContactsWebUrl("account/with spaces"));
+    assert.equal(url.origin, expected); assert.equal(url.pathname, "/app/contacts/google");
+    assert.equal(url.searchParams.get("account"), "account/with spaces");
+  }
+});

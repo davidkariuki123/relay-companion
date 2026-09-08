@@ -240,3 +240,17 @@ test("the first turn wakes Relay's own live Claude session and uses Desktop's su
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a hand-off moves the titled Relay to In Progress itself, with a note the person reads", () => {
+  // The hand-off IS the start of the work (David, 2026-09-08).
+  assert.match(handoff, /if \(!isRequest && firstTurn\) void markHandoffInProgress\(row, host\);/);
+  const mark = between(main, "async function markHandoffInProgress(row, host)", "async function handOffToAgent(input)");
+  assert.match(mark, /if \(\["in_progress", "done"\]\.includes\(String\(row\?\.todoStatus \|\| ""\)\)\) return/);
+  assert.match(mark, /status: "in_progress",/);
+  assert.match(mark, /note: `You handed this to \$\{app\}; it is working on it\.`/);
+  // A stale local version is refreshed once through the packets endpoint, which now carries the Todo state.
+  assert.match(mark, /const fresh = await client\.fetchRelayPackets\(\[id\]\);/);
+  assert.match(mark, /const todo = fresh\?\.packets\?\.\[id\]\?\.todo;/);
+  const update = between(main, "async function updateTodoStatus(relayId, input = {})", "const statusChanged =");
+  assert.match(update, /\.\.\.\(String\(input\.note \|\| ""\)\.trim\(\) \? \{ note: String\(input\.note\)\.trim\(\) \} : \{\}\)/);
+});

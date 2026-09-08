@@ -1368,6 +1368,17 @@ async function signOutAccount() {
 const SETUP_PATH = "/sign-in?switch=1&redirect_url=%2Fapp%2Fsetup";
 const ACCOUNT_SETTINGS_PATH = "/account/settings";
 
+function googleContactsWebUrl(userId) {
+  // Account settings intentionally use the production website even in dev.
+  // This newly deployed consent page must instead reach the matching dev web.
+  const api = process.env.RELAY_API_URL || readConfigFile().apiUrl || "";
+  let origin = webBase();
+  try { if (new URL(api).hostname === "dev-api.sendrelays.com") origin = "https://dev.sendrelays.com"; } catch {}
+  const url = new URL("/app/contacts/google", origin);
+  url.searchParams.set("account", userId);
+  return url.toString();
+}
+
 function accountSettingsPath(user = {}) {
   const query = new URLSearchParams();
   const accountId = String(user.id || "").trim();
@@ -1996,8 +2007,8 @@ let contactsCache = [];
 let contactsLoadedOnce = null;
 let contactsFingerprint = "";
 function contactsFingerprintOf(list) {
-  // Same triple the inbox signature hashes for contacts.
-  return JSON.stringify((list || []).map((c) => [c.id, c.name, c.email]));
+  // Include identity/link status: a formerly offline contact can become blockable.
+  return JSON.stringify((list || []).map((c) => [c.id, c.name, c.email, c.relayUserId, c.onRelay]));
 }
 async function refreshContacts() {
   const contactFixtures = testFixtures("RELAY_OVERLAY_TEST_CONTACTS_FIXTURES");
@@ -2035,6 +2046,7 @@ function contactBookRow(c) {
     name: c.name || emails[0] || "",
     email: emails[0] || c.email || "",
     emails,
+    ...(c.relayUserId ? { relayUserId: c.relayUserId } : {}),
     onRelay: Boolean(c.onRelay),
     source: c.source || "",
     updatedAt: c.updatedAt || null,
@@ -2668,7 +2680,7 @@ async function pushInboxNow(force) {
       r.agentHandoff,
       reactionStateFingerprint(r.reactions),
     ]),
-    contacts: payload.contacts.map((c) => [c.id, c.name, c.email]),
+    contacts: payload.contacts.map((c) => [c.id, c.name, c.email, c.relayUserId, c.onRelay]),
     chats: (payload.chats || []).map((chat) => [
       chat.chatId, chat.updatedAt, chat.messageCount, chat.unreadCount,
       chat.lastMessage && chat.lastMessage.relayId,
@@ -3424,6 +3436,8 @@ async function updateTodoStatus(relayId, input = {}) {
       ...(String(input.duplicateOfItemId || "").trim()
         ? { duplicateOfItemId: String(input.duplicateOfItemId).trim() }
         : {}),
+      ...(String(input.note || "").trim() ? { note: String(input.note).trim() } : {}),
+      ...(Array.isArray(input.evidence) && input.evidence.length ? { evidence: input.evidence } : {}),
     });
     const statusChanged = current?.todoStatus && current.todoStatus !== result.status;
     const projection = {
@@ -5140,12 +5154,7 @@ async function openRelayAttachment(relayId, attachmentId) {
 }
 
 function lockedHtmlPreviewDocument(source) {
-  const policy = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; object-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src 'none'; connect-src 'none'";
-  const head = `<meta http-equiv="Content-Security-Policy" content="${policy}"><meta name="viewport" content="width=device-width,initial-scale=1">`;
-  const html = String(source || "");
-  if (/<head(?:\s[^>]*)?>/i.test(html)) return html.replace(/<head(?:\s[^>]*)?>/i, (match) => `${match}${head}`);
-  if (/<html(?:\s[^>]*)?>/i.test(html)) return html.replace(/<html(?:\s[^>]*)?>/i, (match) => `${match}<head>${head}</head>`);
-  return `<!doctype html><html><head>${head}</head><body>${html}</body></html>`;
+  return require("./attachment-html-preview.cjs").htmlPreviewDocument(source);
 }
 
 async function renderSafeHtmlThumbnail(source) {
@@ -5229,6 +5238,7 @@ function liveAttachmentViewers() {
 }
 function viewerEntryForEvent(event) {
   if (!event || !event.sender) return null;
+  if (event.senderFrame !== event.sender.mainFrame) return null;
   return liveAttachmentViewers().find((entry) => entry.win.webContents === event.sender) || null;
 }
 
@@ -5320,6 +5330,7 @@ function createAttachmentViewerWindow(key) {
     title: "Relay",
     webPreferences: {
       preload: path.join(__dirname, "viewer-preload.cjs"),
+      partition: `relay-attachment-viewer-${randomUUID()}`,
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -5328,8 +5339,31 @@ function createAttachmentViewerWindow(key) {
       plugins: true,
     },
   });
-  const entry = { key, slot, win: viewerWin, ready: false, payload: null };
+  const entry = { key, slot, win: viewerWin, ready: false, payload: null, allowedFiles: new Set() };
   attachmentViewers.set(key, entry);
+
+  const viewerUrl = pathToFileURL(path.join(__dirname, "viewer.html")).href;
+  viewerWin.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  viewerWin.webContents.session.setPermissionCheckHandler(() => false);
+  viewerWin.webContents.session.on("will-download", (event) => event.preventDefault());
+  viewerWin.webContents.session.webRequest.onBeforeRequest((details, callback) => {
+    // Defense in depth: no attachment can navigate out to the network, even
+    // via a meta refresh or link inside a nested srcdoc/data document.
+    callback({ cancel: !/^(?:file:|data:|about:|chrome-extension:)/.test(details.url) });
+  });
+  viewerWin.webContents.on("will-frame-navigate", (event) => {
+    const url = String(event.url || "").split("#", 1)[0];
+    // Data-document navigation is allowed only under the no-permissions HTML
+    // sandbox, never in the privileged viewer or its unsandboxed PDF frame.
+    let frame = event.frame;
+    while (frame?.parent?.parent) frame = frame.parent;
+    const htmlSubtree = frame?.name === "vHtml"
+      && frame.parent?.routingId === viewerWin.webContents.mainFrame.routingId
+      && frame.parent?.processId === viewerWin.webContents.mainFrame.processId;
+    if (htmlSubtree && /^data:text\/html(?:;[^,]*)?,/i.test(url)) return;
+    if (url !== viewerUrl && url !== "about:blank" && url !== "about:srcdoc"
+      && !entry.allowedFiles.has(url)) event.preventDefault();
+  });
 
   viewerWin.setMenuBarVisibility(false);
   viewerWin.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
@@ -5433,6 +5467,10 @@ async function attachmentViewerContent(relayId, attachmentId) {
   // reaches this window, so the viewer cannot be made to fetch anything.
   const fileUrl = pathToFileURL(resolved.target).href;
   const base = { ok: true, name, contentType, size, fileUrl };
+  const { isHtmlPreviewable, htmlViewerContent } = require("./attachment-html-preview.cjs");
+  if (isHtmlPreviewable({ name, contentType })) {
+    return htmlViewerContent({ ...attachment, name, size }, resolved.target, resolved.attachmentsRoot);
+  }
   if (attachmentIsImageRow(attachment)) return { ...base, kind: "image" };
   if (/^application\/pdf$/i.test(contentType) || /\.pdf$/i.test(name)) return { ...base, kind: "pdf" };
   const { isTextPreviewable, textPreviewLines } = require("./attachment-text-preview.cjs");
@@ -5445,7 +5483,8 @@ async function attachmentViewerContent(relayId, attachmentId) {
       console.error("[viewer] text read failed:", error && error.message);
     }
   }
-  return { ...base, kind: "none" };
+  return { ...base, kind: "none", previewReason: isTextPreviewable({ name, contentType, size: 0 })
+    ? "Text preview is limited to 2 MB" : "no preview for this type" };
 }
 
 async function revealRelayAttachment(relayId, attachmentId) {
@@ -6620,6 +6659,39 @@ function reconcileStaleHandoffs() {
   }
   return changed;
 }
+// Move a handed-off titled Relay to In Progress with a note the person can
+// read. Best-effort: a stale local version is refreshed once through the
+// packets endpoint (which now carries the Todo state) and retried; anything
+// else is logged and left to the session, which carries the same rule.
+async function markHandoffInProgress(row, host) {
+  const id = String(row?.id || "").trim();
+  if (!id || !String(row?.title || row?.displayTitle || "").trim()) return { ok: false, skipped: "untitled" };
+  if (["in_progress", "done"].includes(String(row?.todoStatus || ""))) return { ok: false, skipped: row.todoStatus };
+  const app = host === "codex" ? "Codex" : "Claude Code";
+  const write = (version) => updateTodoStatus(id, {
+    status: "in_progress",
+    expectedVersion: version,
+    idempotencyKey: `handoff:${id}:${version}`,
+    note: `You handed this to ${app}; it is working on it.`,
+    evidence: [{ kind: "relay", ref: id, label: `Handed to ${app} from Relay` }],
+  });
+  let version = Number.isInteger(row?.todoVersion) ? row.todoVersion : null;
+  let result = version ? await write(version) : { ok: false, error: "no local todoVersion" };
+  if (result?.ok) return result;
+  try {
+    const client = await relayClient();
+    const fresh = await client.fetchRelayPackets([id]);
+    const todo = fresh?.packets?.[id]?.todo;
+    if (todo && Number.isInteger(todo.version) && todo.version !== version && !["in_progress", "done"].includes(String(todo.status || ""))) {
+      result = await write(todo.version);
+    }
+  } catch (error) {
+    result = { ok: false, error: (error && error.message) || String(error) };
+  }
+  if (!result?.ok) log(`handoff todo in_progress skipped for ${id}: ${result?.error || result?.skipped || "unknown"}`);
+  return result;
+}
+
 async function handOffToAgent(input) {
   const requestedId = String((input && input.relayId) || "").trim();
   const source = String((input && input.source) || "").toLowerCase() === "sent" ? "sent" : "relay";
@@ -6812,6 +6884,10 @@ async function handOffToAgent(input) {
   // its thread live; Claude gets the import when its worker settles.
   const claudeDeferred = false; // Claude is live in Desktop before its turn runs
   agentHandoffPatch(id, { state: "running", error: "", deliveredAt: firstTurn ? stamped : "", imported: !claudeDeferred });
+  // The hand-off IS the start of the work (David, 2026-09-08): the Todo item
+  // moves to In Progress here, deterministically, instead of hoping the
+  // session marks it. Tasks are moved by their Start receipt already.
+  if (!isRequest && firstTurn) void markHandoffInProgress(row, host);
   pushInbox(true);
   if (firstTurn) {
     void ensureCanonicalCompletionMonitor(id)
@@ -9180,9 +9256,11 @@ ipcMain.on("relay:viewer:ready", (event) => {
   entry.ready = true;
   if (sendAttachmentViewerPayload(entry)) showAttachmentViewer(entry);
 });
-ipcMain.handle("relay:viewer:item", (event, relayId, attachmentId) => {
+ipcMain.handle("relay:viewer:item", async (event, relayId, attachmentId) => {
   if (!viewerEntryForEvent(event)) return { ok: false, error: "Not a viewer window." };
-  return attachmentViewerContent(relayId, attachmentId);
+  const result = await attachmentViewerContent(relayId, attachmentId);
+  if (result.ok && result.fileUrl) viewerEntryForEvent(event)?.allowedFiles.add(result.fileUrl);
+  return result;
 });
 ipcMain.handle("relay:viewer:download", (event, items, options) => {
   if (!viewerEntryForEvent(event)) return { ok: false, error: "Not a viewer window." };
@@ -9407,15 +9485,28 @@ ipcMain.handle("relay:googleContactsSync", async () => {
 ipcMain.handle("relay:googleContactsConnect", async () => {
   const userId = account().userId;
   if (!userId) return { ok: false, error: "Sign into Relay before connecting Google." };
-  const url = new URL("/app/contacts/google", webBase());
-  url.searchParams.set("account", userId);
-  await shell.openExternal(url.toString());
+  await shell.openExternal(googleContactsWebUrl(userId));
   return { ok: true };
 });
 
 ipcMain.handle("relay:contactSave", (_e, input) => saveContact(input));
 ipcMain.handle("relay:contactDelete", (_e, input) => deleteContactFromBook(input));
 ipcMain.handle("relay:contactAdd", (_e, input) => addContactByAddress(input));
+async function blockSavedPerson(input) {
+  const key = onboardingAccountKey();
+  if (!key || !input?.contactId || !input?.relayUserId) throw new Error("Could not verify this person.");
+  const client = await relayClient();
+  // Use the live, authenticated contact book, never a display name or stale
+  // cache. Refuse if an edited contact now resolves to a different person.
+  const result = await client.listContacts();
+  const contact = (result?.contacts || []).find((row) => (row.id || row.contactId) === input.contactId);
+  const userId = contact?.relayUserId;
+  if (key !== onboardingAccountKey() || !userId || userId !== input.relayUserId || userId === account().userId) {
+    throw new Error("This contact changed or is not on Relay. Refresh People and try again.");
+  }
+  return client.setConnectionBlocked(userId, true);
+}
+ipcMain.handle("relay:blockPerson", (_e, input) => blockSavedPerson(input));
 ipcMain.handle("relay:blockRequest", async (_e, relayId) => {
   const key = onboardingAccountKey();
   const client = await relayClient();
@@ -9426,7 +9517,12 @@ ipcMain.handle("relay:blockRequest", async (_e, relayId) => {
   return client.setConnectionBlocked(userId, true);
 });
 ipcMain.handle("relay:connectionBlocks", async () => (await relayClient()).connectionBlocks());
-ipcMain.handle("relay:unblockPerson", async (_e, userId) => (await relayClient()).setConnectionBlocked(String(userId || ""), false));
+ipcMain.handle("relay:unblockPerson", async (_e, userId) => {
+  const key = onboardingAccountKey();
+  const client = await relayClient();
+  if (!key || key !== onboardingAccountKey() || !userId) throw new Error("The account changed. Open Blocked people again.");
+  return client.setConnectionBlocked(String(userId), false);
+});
 
 // Contact groups (People tab): thin proxies over the API. Owner administration
 // returns the updated group view; leaving removes only the authenticated

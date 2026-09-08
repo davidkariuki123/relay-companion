@@ -15,7 +15,7 @@
     min: $("vMin"), close: $("vClose"), message: $("vMessage"),
     stage: $("vStage"), image: $("vImage"), prev: $("vPrev"), next: $("vNext"), strip: $("vStrip"),
     fileHead: $("vFileHead"), fileTile: $("vFileTile"), fileName: $("vFileName"), fileMeta: $("vFileMeta"),
-    text: $("vText"), pdf: $("vPdf"),
+    text: $("vText"), pdf: $("vPdf"), html: $("vHtml"), htmlNote: $("vHtmlNote"),
     none: $("vNone"), noneTile: $("vNoneTile"), noneName: $("vNoneName"),
     noneWhat: $("vNoneWhat"), noneDownload: $("vNoneDownload"),
   };
@@ -93,8 +93,9 @@
   }
 
   function showOnly(...visible) {
-    const all = [el.message, el.stage, el.strip, el.fileHead, el.text, el.pdf, el.none];
+    const all = [el.message, el.stage, el.strip, el.fileHead, el.text, el.pdf, el.html, el.htmlNote, el.none];
     for (const node of all) node.hidden = !visible.includes(node);
+    if (!visible.includes(el.html)) el.html.removeAttribute("srcdoc");
   }
 
   function paintHeader(item, extra = "") {
@@ -174,6 +175,14 @@
       if (item.sender) facts.push(item.sender);
       el.fileMeta.textContent = facts.filter(Boolean).join(" · ");
 
+      if (result.kind === "html") {
+        // Main returns digest-verified markup with a restrictive CSP prepended.
+        // The frame has no sandbox permissions: no scripts, same-origin, forms,
+        // pop-ups, downloads, or access to the privileged viewer bridge.
+        el.html.srcdoc = result.html;
+        showOnly(el.htmlNote, el.html);
+        return;
+      }
       if (result.kind === "text") {
         paintText(result);
         showOnly(el.fileHead, el.text);
@@ -191,7 +200,7 @@
       // one filled button on the screen.
       el.noneTile.replaceChildren(icon("file", 22));
       el.noneName.textContent = result.name || item.name;
-      el.noneWhat.textContent = `${extensionTag(result.name || item.name)} · ${fmtBytes(result.size) || "unknown size"} · no preview for this type`;
+      el.noneWhat.textContent = `${extensionTag(result.name || item.name)} · ${fmtBytes(result.size) || "unknown size"} · ${result.previewReason || "no preview for this type"}`;
       label(el.noneDownload, "download", "Download");
       showOnly(el.none);
     }).catch(() => fail());

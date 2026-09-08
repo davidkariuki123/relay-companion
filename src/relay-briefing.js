@@ -103,11 +103,30 @@ export function renderRelayOpenSeed(row, { includeActionPrompt = true } = {}) {
   }
   return {
     visible,
-    operatorNote: documentPaths
-      ? renderRelayOpenContext({ forHuman, forAgent, documentPaths })
-      : forAgent ? renderForAgentDocument(forAgent) : "",
+    operatorNote: joinSections([
+      documentPaths
+        ? renderRelayOpenContext({ forHuman, forAgent, documentPaths })
+        : forAgent ? renderForAgentDocument(forAgent) : "",
+      renderTodoWorkingNote(row),
+    ]),
     draft,
   };
+}
+
+// THE TODO RULE in the seed (David, 2026-09-08): the session that opens a
+// titled Relay is the one that will work it, and until now nothing in front of
+// that session said the item has a status to move. The note is agent-only
+// (operator channel), so the ids are allowed here. Tasks have their own
+// lifecycle tools and Start already moves them; typed texts are not on Todo.
+export function renderTodoWorkingNote(row) {
+  const relayId = String(row?.relayId || row?.id || "").trim();
+  const titled = Boolean(String(row?.title || row?.displayTitle || "").trim());
+  const kind = String(row?.kind || "").trim().toLowerCase();
+  if (!relayId || !titled || kind === "task" || row?.relayNotificationKind === "task") return "";
+  const status = String(row?.todoStatus || "").trim();
+  const version = Number.isInteger(row?.todoVersion) ? row.todoVersion : null;
+  const seen = status ? ` (${status}${version ? `, version ${version}` : ""} when opened)` : "";
+  return `Todo: this Relay is item ${relayId}${seen}. If the human tells you to act on it, call relay_todo_update with status in_progress before substantive work, and status done with a one-line second-person note when the work is genuinely finished. Read the item with relay_inbox_list relayIds first for its current todoVersion; on a version conflict re-read and retry with the version the error names. If the human only reads or discusses it, leave the status alone.`;
 }
 
 function renderOpenDocumentLink(label, filePath) {

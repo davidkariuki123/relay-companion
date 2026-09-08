@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-import { RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS, TOOLS, toolsForAccount } from "../src/mcp.js";
+import { E2EE_LOCAL_MCP_INSTRUCTIONS, E2EE_REMOTE_MCP_INSTRUCTIONS, TODO_STATUS_RULE, RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS, TOOLS, toolsForAccount } from "../src/mcp.js";
 
 const byName = new Map(TOOLS.map((tool) => [tool.name, tool]));
 const codexByName = new Map(toolsForAccount(
@@ -298,4 +298,21 @@ test("agent teaching uses the current Todo vocabulary everywhere", async () => {
     assert.deepEqual(byName.get(name).inputSchema.properties.status.enum, ["triage", "in_progress", "done"]);
   }
   assert.deepEqual(byName.get("relay_inbox_list").inputSchema.properties.todoStatuses.items.enum, ["triage", "in_progress", "done"]);
+});
+
+// THE TODO RULE (David, 2026-09-08). Before this, no interactive session had
+// ever moved a Todo item: the always-on text named only the Task tools and the
+// status tool sat deferred behind a description that read as a prohibition.
+test("every instruction variant carries the Todo rule, and the status tool teaches it", () => {
+  assert.match(TODO_STATUS_RULE, /act on an inbound titled Relay, set it in_progress with relay_todo_update before starting and done when finished/);
+  for (const instructions of [RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS, E2EE_LOCAL_MCP_INSTRUCTIONS, E2EE_REMOTE_MCP_INSTRUCTIONS]) {
+    assert.match(instructions, /relay_todo_update in_progress before starting, done when finished|in_progress with relay_todo_update before starting and done when finished/);
+    assert.ok(Buffer.byteLength(instructions, "utf8") <= 2_048, "every variant stays under the always-on byte budget");
+  }
+  const update = byName.get("relay_todo_update");
+  assert.match(update.description, /^Set the workflow status of one exact Relay or Task\. The rule: when the human has you act on an inbound titled Relay in this session, set in_progress before substantive work and done, with a note, when that work is genuinely finished\./);
+  assert.match(update.description, /an opened item and a Todo listing both carry todoStatus and todoVersion/);
+  assert.match(update.description, /on a version conflict the error names the current version/);
+  assert.doesNotMatch(update.description, /only when the human instructed it/);
+  assert.match(byName.get("relay_inbox_list").description, /Opened items and Todo listings both carry todoStatus and todoVersion/);
 });
