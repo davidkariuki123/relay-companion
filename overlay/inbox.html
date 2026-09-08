@@ -260,10 +260,9 @@
   .tab:not(.active) .tab-badge { opacity:.45; }
   .tab-badge.gone { display:none; }
   /* You is your avatar (Sven, 2026-09-04): initials, never a gear. */
-  .tab-you { height:44px; padding:2px 6px 2px 2px; gap:7px; margin-inline-start:auto; flex-shrink:0; border-radius:var(--r-pill); color:var(--ink-2); }
+  .tab-you { height:44px; padding:2px; gap:0; margin-inline-start:auto; flex-shrink:0; border-radius:var(--r-pill); color:var(--ink-2); }
   .tab-avatar { min-width:40px; height:40px; border-radius:var(--r-pill); display:inline-flex; align-items:center; justify-content:center;
     font-family:var(--sans); font-size:14px; font-weight:600; letter-spacing:.02em; background:var(--ink); color:var(--bg); }
-  .tab-you::after { content:""; width:6px; height:6px; margin:0 2px 3px; border-right:1.5px solid currentColor; border-bottom:1.5px solid currentColor; transform:rotate(45deg); }
   .tab-avatar.word { padding:0 6px; font-size:11px; letter-spacing:0; }
   .tab-you.active .tab-avatar { background:var(--accent); color:var(--on-accent); }
   /* Tasks debt is a different color from unread ink — amber, not accent. */
@@ -887,6 +886,19 @@
   .cv-person-more:hover { background:var(--wash-2); color:var(--ink); }
   .cv-add-slot { display:flex; flex:0 0 auto; min-width:46px; justify-content:flex-end; }
   .cv-blocked-entry { padding:14px 16px; text-align:left; }
+  .cv-blocked-page { padding:14px 16px 24px; }
+  .cv-blocked-back { appearance:none; border:0; border-radius:var(--r-2); background:transparent; color:var(--accent); font:500 13px var(--sans); padding:8px 6px; margin-left:-6px; cursor:pointer; }
+  .cv-blocked-back:hover { background:var(--wash); }
+  .cv-blocked-page h2 { margin:12px 0 10px; font:500 25px/1.2 var(--serif); overflow-wrap:anywhere; }
+  .cv-blocked-copy { margin:0 0 20px; color:var(--muted); font:13px/1.6 var(--sans); }
+  .cv-blocked-list { font:13px/1.5 var(--sans); }
+  .cv-blocked-empty { padding:46px 0 54px; text-align:center; }
+  .cv-blocked-empty strong { display:block; color:var(--ink); font:500 17px/1.4 var(--sans); }
+  .cv-blocked-empty p { margin:8px 0 0; color:var(--muted); }
+  .cv-blocked-status { color:var(--accent); font:12px/1.5 var(--sans); }
+  .cv-blocked-page .people-blocked-row .cv-avatar { flex:0 0 36px; }
+  .cv-blocked-page .people-blocked-row .cv-add { flex:none; }
+
   .people-dialog { box-sizing:border-box; width:calc(100% - 32px); max-width:360px; max-height:calc(100% - 32px); overflow:auto; padding:22px; border:1px solid var(--edge); border-radius:var(--r-3,16px); background:var(--bg); color:var(--ink); font:13px/1.5 var(--sans); box-shadow:0 12px 48px #0004; }
   .people-dialog::backdrop { background:#0007; }
   .people-dialog h2 { margin:0 0 10px; font:500 23px/1.15 var(--serif); overflow-wrap:anywhere; }
@@ -2074,6 +2086,31 @@
   .th-message-action:focus-visible { opacity:.78; }
   .th-message-action:hover { color:var(--ink); opacity:1; }
   .th-message-action.danger, .th-message-action.confirm { color:var(--danger); }
+
+  /* Text actions sit beside the bubble without adding a footer row. */
+  .th-msg.text:has(.th-message-more) { max-width:calc(100% - 64px); }
+  .th-message-more { position:absolute; top:50%; right:-32px; transform:translateY(-50%);
+    width:32px; height:32px; padding:0; border:0; border-radius:8px; background:transparent;
+    color:var(--muted-2); font:20px var(--sans); cursor:pointer; opacity:0; }
+  .th-msg.mine .th-message-more { right:auto; left:-32px; }
+  .th-msg:hover .th-message-more, .th-msg:focus-within .th-message-more,
+  .th-message-more[aria-expanded="true"] { opacity:1; }
+  .th-message-more:hover, .th-message-more[aria-expanded="true"] { background:var(--wash-2); color:var(--ink); }
+  .th-message-menu { position:fixed; inset:auto; margin:0; padding:5px; min-width:172px;
+    max-width:calc(100vw - 16px); border:1px solid var(--edge); border-radius:10px;
+    background:var(--bg); color:var(--ink); box-shadow:0 8px 24px #0003; }
+  .th-message-menu button { display:block; position:static; width:100%; padding:9px 11px;
+    border:0; border-radius:5px; background:transparent; color:var(--ink); opacity:1;
+    text-align:left; font:12px var(--sans); cursor:pointer; }
+  .th-message-menu button::first-letter { text-transform:uppercase; }
+  .th-message-menu button:hover, .th-message-menu button:focus-visible { background:var(--wash-2); opacity:1; }
+  .th-message-menu button.danger, .th-message-menu button.confirm { color:var(--danger); border-top:1px solid var(--hair); }
+  @media (hover:none), (pointer:coarse) {
+    .th-msg.text:has(.th-message-more) { max-width:calc(100% - 76px); }
+    .th-message-more { width:44px; height:44px; right:-44px; opacity:1; }
+    .th-msg.mine .th-message-more { left:-44px; }
+    .th-message-menu button { min-height:44px; }
+  }
   .th-message-edit { display:grid; gap:8px; min-width:min(310px, 72vw); padding-top:2px; }
   .th-message-edit textarea { width:100%; min-height:72px; max-height:220px; resize:vertical; border:1px solid var(--edge); border-radius:9px;
     background:var(--bg); color:var(--ink); padding:9px 10px; font:14px/1.45 var(--sans); outline:none; }
@@ -3003,6 +3040,7 @@
 
       <!-- Contacts view -->
       <section class="view hidden" id="contactsView">
+        <div id="cvOverview">
         <div class="cv-head">
           <!-- One island, two lists. Groups used to sit below every contact, so a
                long book hid them completely; stacking them the other way would just
@@ -3086,6 +3124,15 @@
           <div class="t2">Add someone, or your agent saves them as you relay.</div>
         </div>
 
+        </div>
+        <section class="cv-blocked-page gone" id="cvBlockedPage" aria-labelledby="cvBlockedTitle">
+          <button class="cv-blocked-back" id="cvBlockedBack" type="button">← People</button>
+          <h2 id="cvBlockedTitle">Blocked people</h2>
+          <p class="cv-blocked-copy">You can’t send each other direct messages while blocked. Existing messages stay.</p>
+          <div class="cv-blocked-list" id="cvBlockedList" aria-live="polite"></div>
+          <div class="cv-blocked-status" id="cvBlockedStatus" role="status"></div>
+          <div class="people-dialog-error" id="cvBlockedError" role="alert"></div>
+        </section>
       </section>
 
       <!-- Settings view (account card + sign-out / switch-account; rendered by JS) -->
@@ -5954,6 +6001,62 @@
   // relays list while a reply is being written; the refresh is deferred (pendingRelaysRender)
   // and flushed once the input blurs / the answer is sent.
   let pendingRelaysRender = false;
+  function wireMessageSideMenus(container) {
+    for (const trigger of container.querySelectorAll("[data-message-more]")) {
+      const menu = document.getElementById(trigger.getAttribute("aria-controls"));
+      if (!menu) continue;
+      const open = () => {
+        menu.showPopover();
+        const rect = trigger.getBoundingClientRect();
+        const bounds = menu.getBoundingClientRect();
+        const left = Math.min(Math.max(8, rect.right - bounds.width), window.innerWidth - bounds.width - 8);
+        const top = rect.bottom + bounds.height + 4 <= window.innerHeight - 8
+          ? rect.bottom + 4 : Math.max(8, rect.top - bounds.height - 4);
+        menu.style.left = `${left}px`;
+        menu.style.top = `${top}px`;
+        trigger.setAttribute("aria-expanded", "true");
+        (menu.querySelector("[data-message-delete-cancel]") || menu.querySelector("button"))?.focus();
+      };
+      trigger.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (menu.matches(":popover-open")) { menu.hidePopover(); trigger.focus(); }
+        else open();
+      });
+      menu.addEventListener("toggle", () => {
+        trigger.setAttribute("aria-expanded", String(menu.matches(":popover-open")));
+      });
+      menu.addEventListener("click", (event) => {
+        if (event.target.closest("button")) menu.hidePopover();
+      });
+      menu.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          event.preventDefault(); menu.hidePopover(); trigger.focus();
+        } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+          event.preventDefault();
+          const buttons = [...menu.querySelectorAll("button:not(:disabled)")];
+          const index = buttons.indexOf(document.activeElement);
+          const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1
+            : (index + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length;
+          buttons[next]?.focus();
+        }
+      });
+      menu.addEventListener("focusout", () => {
+        queueMicrotask(() => {
+          if (menu.isConnected && !menu.contains(document.activeElement) && document.activeElement !== trigger
+            && menu.matches(":popover-open")) menu.hidePopover();
+        });
+      });
+      if (menu.querySelector("[data-message-delete-confirm]")) open();
+    }
+  }
+  // A top-layer menu must not remain floating over a different message after scrolling.
+  document.addEventListener("scroll", () => {
+    document.querySelectorAll(".th-message-menu:popover-open").forEach((menu) => menu.hidePopover());
+  }, true);
+  window.addEventListener("resize", () => {
+    document.querySelectorAll(".th-message-menu:popover-open").forEach((menu) => menu.hidePopover());
+  });
+
   function quickReplyIsActive() {
     const active = document.activeElement;
     if (active && active.classList && active.classList.contains("qr-input")) return true;
@@ -10123,31 +10226,85 @@
       }
     });
   }
+  const cvOverviewEl = document.getElementById("cvOverview");
+  const cvBlockedPageEl = document.getElementById("cvBlockedPage");
+  const cvBlockedBackEl = document.getElementById("cvBlockedBack");
+  const cvBlockedListEl = document.getElementById("cvBlockedList");
+  const cvBlockedErrorEl = document.getElementById("cvBlockedError");
+  const cvBlockedStatusEl = document.getElementById("cvBlockedStatus");
+  let blockedPeoplePage = null;
+  let blockedPeopleAnimation = null;
+  function animatePeoplePage(element, forward) {
+    blockedPeopleAnimation?.cancel();
+    blockedPeopleAnimation = null;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    blockedPeopleAnimation = element.animate([
+      { opacity:0, transform:`translateX(${forward ? 28 : -20}px)` },
+      { opacity:1, transform:"translateX(0)" },
+    ], { duration:220, easing:"cubic-bezier(.2,.7,.2,1)" });
+  }
+  function closeBlockedPeople({ restoreFocus = true, animate = true } = {}) {
+    const previous = blockedPeoplePage;
+    if (!previous) return;
+    blockedPeoplePage = null; // invalidate pending reads and Unblock responses
+    blockedPeopleAnimation?.cancel();
+    cvBlockedPageEl.classList.add("gone");
+    cvOverviewEl.classList.remove("gone");
+    cvBlockedListEl.innerHTML = "";
+    cvBlockedErrorEl.textContent = "";
+    cvBlockedStatusEl.textContent = "";
+    if (activeView === "contacts") {
+      scrollEl.scrollTop = previous.scrollTop;
+      if (animate) animatePeoplePage(cvOverviewEl, false);
+      if (restoreFocus && previous.account === signupAccountKey()) {
+        const trigger = previous.trigger?.isConnected ? previous.trigger : document.getElementById("cvBlockedPeople");
+        trigger.focus({ preventScroll:true });
+      }
+    }
+  }
   async function openBlockedPeople(trigger) {
-    const current = showPeopleDialog(`<h2 id="peopleDialogTitle">Blocked people</h2><p>You can’t send each other direct messages while blocked. Existing messages stay.</p>
-      <div data-blocked-list aria-live="polite">Loading…</div><div class="people-dialog-error" role="alert"></div>
-      <div class="people-dialog-actions"><button class="cv-cancel" type="button" data-dialog-close autofocus>Done</button></div>`, trigger);
-    const list = peopleDialog.querySelector("[data-blocked-list]");
+    if (peopleDialog.open) closePeopleDialog();
+    const previous = blockedPeoplePage;
+    const page = { account:signupAccountKey(), trigger:previous?.trigger || trigger, scrollTop:previous?.scrollTop ?? scrollEl.scrollTop };
+    blockedPeoplePage = page;
+    const current = () => blockedPeoplePage === page && activeView === "contacts" && page.account === signupAccountKey();
+    cvOverviewEl.classList.add("gone");
+    cvBlockedPageEl.classList.remove("gone");
+    cvBlockedErrorEl.textContent = "";
+    cvBlockedStatusEl.textContent = "";
+    const list = cvBlockedListEl;
+    list.textContent = "Loading…";
+    list.setAttribute("aria-busy", "true");
+    setInteractive(true);
+    scrollEl.scrollTop = 0;
+    if (!previous) animatePeoplePage(cvBlockedPageEl, true);
+    cvBlockedBackEl.focus({ preventScroll:true });
     let currentBlocks = [];
     const paint = (blocks) => {
       currentBlocks = blocks;
-      list.innerHTML = blocks.map((person) => `<div class="people-blocked-row"><span>${esc(person.name || "Relay member")}</span><button class="cv-add" type="button" data-unblock="${esc(person.relayUserId)}" aria-label="Unblock ${esc(person.name || "Relay member")}">Unblock</button></div>`).join("") || "No blocked people.";
+      list.innerHTML = blocks.map((person) => `<div class="people-blocked-row"><span class="cv-avatar" aria-hidden="true">${esc(cvInitials(person.name || "Relay member", ""))}</span><span>${esc(person.name || "Relay member")}</span><button class="cv-add" type="button" data-unblock="${esc(person.relayUserId)}" aria-label="Unblock ${esc(person.name || "Relay member")}">Unblock</button></div>`).join("") || '<div class="cv-blocked-empty"><strong>No blocked people</strong><p>People you block will appear here.</p></div>';
       for (const button of list.querySelectorAll("[data-unblock]")) {
         button.addEventListener("click", async () => {
-          if (!current()) { closePeopleDialog(); return; }
-          if (button.disabled) return;
-          button.disabled = true;
+          if (!current() || button.disabled) return;
+          // Keep one mutation in flight even if another row is clicked.
+          for (const control of list.querySelectorAll("[data-unblock]")) control.disabled = true;
+          button.textContent = "Unblocking…";
+          cvBlockedErrorEl.textContent = "";
+          cvBlockedStatusEl.textContent = "";
+          const person = currentBlocks.find((item) => item.relayUserId === button.dataset.unblock);
           try {
             const result = await window.relay.unblockPerson(button.dataset.unblock);
             if (!current()) return;
             if (result?.blocked !== false) throw new Error("Unblock failed");
-            paint(currentBlocks.filter((person) => person.relayUserId !== button.dataset.unblock));
-            peopleDialog.querySelector(".people-dialog-error").textContent = "";
-            peopleDialog.querySelector("[data-unblock], [data-dialog-close]")?.focus();
+            const restoreFocus = document.activeElement === button || document.activeElement === document.body;
+            paint(currentBlocks.filter((item) => item.relayUserId !== button.dataset.unblock));
+            cvBlockedStatusEl.textContent = `${person?.name || "Relay member"} unblocked.`;
+            if (restoreFocus) (list.querySelector("[data-unblock]") || cvBlockedBackEl).focus({ preventScroll:true });
           } catch {
             if (!current()) return;
-            peopleDialog.querySelector(".people-dialog-error").textContent = "Could not unblock this person. Try again.";
-            button.disabled = false;
+            cvBlockedErrorEl.textContent = "Could not unblock this person. Try again.";
+            for (const control of list.querySelectorAll("[data-unblock]")) control.disabled = false;
+            button.textContent = "Unblock";
           }
         });
       }
@@ -10161,8 +10318,17 @@
       if (!current()) return;
       list.innerHTML = 'Blocked people are unavailable right now. <button class="cv-add" type="button" data-blocks-retry>Try again</button>';
       list.querySelector("button").addEventListener("click", () => openBlockedPeople(trigger));
+    } finally {
+      if (current()) list.setAttribute("aria-busy", "false");
     }
   }
+  cvBlockedBackEl.addEventListener("click", () => closeBlockedPeople());
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && activeView === "contacts" && blockedPeoplePage && !event.defaultPrevented) {
+      event.preventDefault();
+      closeBlockedPeople();
+    }
+  });
   document.getElementById("cvBlockedPeople").addEventListener("click", (event) => openBlockedPeople(event.currentTarget));
   /**
    * Open the conversation a contact row names.
@@ -13257,6 +13423,33 @@
       const attachmentOnly = textLike && attachments.length > 0
         && !String(m.body || "").trim() && !editingMessage && !m.deletedAt;
       const hasHostActions = !textLike && !m.request;
+      const sideActions = textLike && !m.ownedAgent && !attachmentOnly && !m.deletedAt;
+      const messageActionBits = [];
+      if (m.ownedAgent) {
+        messageActionBits.push(`<button type="button" class="th-reply-ghost" data-open-agent-work="${esc(m.id)}" data-stop="1">Open Work</button>`);
+      } else if (!m.request && !groupPostingBlocked) {
+        messageActionBits.push(`<button type="button" class="th-reply-ghost" data-reply-to="${esc(m.id)}" data-stop="1">reply</button>`);
+      }
+      if (payload.features?.messageMutations === true && mine && !m.pending && !m.request && !m.deletedAt) {
+        if (String(m.body || "").trim()) {
+          messageActionBits.push(`<button type="button" class="th-message-action" data-message-edit="${esc(m.id)}" data-stop="1">edit</button>`);
+        }
+        if (messageDeleteConfirmIds.has(m.id)) {
+          messageActionBits.push(`<button type="button" class="th-message-action confirm" data-message-delete-confirm="${esc(m.id)}" data-stop="1">Delete for everyone</button>`);
+          messageActionBits.push(`<button type="button" class="th-message-action" data-message-delete-cancel="${esc(m.id)}" data-stop="1">keep</button>`);
+        } else {
+          messageActionBits.push(`<button type="button" class="th-message-action danger" data-message-delete="${esc(m.id)}" data-stop="1">delete</button>`);
+        }
+      }
+
+      const sideMenuId = `message-options-${m.id}`;
+      const sideMenuHtml = sideActions && messageActionBits.length ? `
+        <button type="button" class="th-message-more" data-message-more="${esc(m.id)}" data-stop="1"
+          aria-label="Message options" aria-haspopup="true" aria-expanded="false" aria-controls="${esc(sideMenuId)}">…</button>
+        <div id="${esc(sideMenuId)}" class="th-message-menu" popover="auto" role="group" aria-label="Message options" data-stop="1">
+          ${messageActionBits.join("")}
+        </div>` : "";
+
       const chunkDivider = chunkDateLabel
         ? `<div class="th-chunk-date${firstChunk ? " first" : ""}" role="separator"><span>${esc(chunkDateLabel)}</span></div>`
         : "";
@@ -13289,6 +13482,7 @@
       return `${slackThreadContextHtml(m)}${chunkDivider}${runHeader}
       ${channelTask ? `<div class="th-task-stack${mine ? " mine" : ""}">` : ""}<div class="th-msg${hasHostActions ? " has-host-actions" : ""}${m.unread ? " unread" : ""}${mine ? " mine" : ""}${cont ? " cont" : ""}${textLike ? " text" : ""}${attachmentOnly ? " attachment-only" : ""}${agentWorking ? " agent-working" : ""}${open ? " open" : ""}${activeMentionVisit?.selected === String(m.id) ? " mention-target" : ""}${m.deletedAt ? " deleted" : ""}${aggregates.length ? " has-rx" : ""}${liveCanonicalArrivalIds.has(String(m.id || "")) ? " live-arrival" : ""}"${textLike ? "" : ' role="button" tabindex="0"'}${agentWorking ? ' aria-busy="true"' : ""}${hasHostActions ? ` aria-expanded="${hostActionsPersistent ? "true" : "false"}"` : ""} data-msg="${esc(m.id)}" data-dir="${m.direction}" data-opening-id="${esc(m.id)}">
         ${!REACTIONS_ENABLED || m.request ? "" : messageReactionPickerHtml(m.id)}
+        ${sideMenuHtml}
         ${messageReplyReferenceHtml(m)}
         ${editingMessage ? `
           <div class="th-message-edit" data-stop="1">
@@ -13339,28 +13533,11 @@
         return `<div class="th-cargo${mine ? " mine" : ""}" data-att-msg="${esc(m.id)}"${canReplyHere ? ` data-att-reply="${esc(m.id)}"` : ""}>${chatAttachmentCargo(attachments, { relayId, mine })}</div>`;
       })()}
       ${(() => {
-        // A receipt and a reply control are ABOUT the message, not part of it.
-        // Inside the bubble the receipt collided with the timestamp and the
-        // reply button sat on the words themselves (David). They live under it.
+        // Receipts stay beneath the bubble; text actions use the side menu.
         const receipt = receiptFor(m, msgs);
         const bits = [];
         const settleReceipt = receipt && (receipt.label === "Sent" || receipt.label === "Delivered") ? " th-settling" : "";
-        if (m.ownedAgent) {
-          bits.push(`<button type="button" class="th-reply-ghost" data-open-agent-work="${esc(m.id)}" data-stop="1">Open Work</button>`);
-        } else if (!m.request && !groupPostingBlocked) {
-          bits.push(`<button type="button" class="th-reply-ghost" data-reply-to="${esc(m.id)}" data-stop="1">reply</button>`);
-        }
-        if (payload.features?.messageMutations === true && mine && !m.pending && !m.request && !m.deletedAt) {
-          if (String(m.body || "").trim()) {
-            bits.push(`<button type="button" class="th-message-action" data-message-edit="${esc(m.id)}" data-stop="1">edit</button>`);
-          }
-          if (messageDeleteConfirmIds.has(m.id)) {
-            bits.push(`<button type="button" class="th-message-action confirm" data-message-delete-confirm="${esc(m.id)}" data-stop="1">Delete for everyone</button>`);
-            bits.push(`<button type="button" class="th-message-action" data-message-delete-cancel="${esc(m.id)}" data-stop="1">keep</button>`);
-          } else {
-            bits.push(`<button type="button" class="th-message-action danger" data-message-delete="${esc(m.id)}" data-stop="1">delete</button>`);
-          }
-        }
+        if (!sideActions) bits.push(...messageActionBits);
         if (mine && m.pending) bits.push(...outboxStatusBits(m));
         if (receipt) bits.push(receipt.expandable
           ? `<button type="button" class="th-seen" data-receipt-toggle="${esc(m.id)}" data-stop="1" aria-expanded="${expandedReceiptIds.has(m.id) ? "true" : "false"}">${esc(receipt.label)}</button>`
@@ -13489,6 +13666,7 @@
     for (const z of thHistoryEl.querySelectorAll('[data-stop="1"]')) {
       z.addEventListener("click", (e) => e.stopPropagation());
     }
+    wireMessageSideMenus(thHistoryEl);
     for (const input of thHistoryEl.querySelectorAll("[data-message-edit-input]")) {
       const id = String(input.getAttribute("data-message-edit-input") || "");
       input.addEventListener("input", () => messageEditDrafts.set(id, input.value));
@@ -16196,7 +16374,10 @@
         if (view !== lit) { threadsSource = view === "chat" ? "chat" : threadsCameFrom; syncTabs(); return; }
         // second tap on the lit tab: fall through and navigate to its list
       }
-      if (view === activeView) return;
+      if (view === activeView) {
+        if (view === "contacts" && blockedPeoplePage) closeBlockedPeople();
+        return;
+      }
       if (sessionPickerState) sessionPickerState = null;
       activeView = view;
       commitNavigation();
@@ -16204,6 +16385,9 @@
   }
 
   function renderAll() {
+    if (blockedPeoplePage && (activeView !== "contacts" || blockedPeoplePage.account !== signupAccountKey())) {
+      closeBlockedPeople({ restoreFocus:false, animate:false });
+    }
     if (peopleDialog.open && peopleDialogAccount !== signupAccountKey()) closePeopleDialog();
     if (activeView !== "tasks") closeTodoActions();
     todoRemovalNotice?.classList.toggle("hidden", activeView !== "tasks" && todoRemovalNotice.dataset.error !== "true");
