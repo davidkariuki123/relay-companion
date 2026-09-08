@@ -102,7 +102,7 @@ test("startup guidance and owner schemas preserve the complete product ontology"
   assert.match(inboxContract, /Relay itself notifies the human of every arrival/i);
   assert.match(inboxContract, /If it is not relevant, do not open it and do not mention it/i);
   assert.match(inboxContract, /Never open or use a Relay's content without telling the human/i);
-  assert.match(inboxContract, /cold-start recent backlog.*do not enumerate irrelevant ones/i);
+  assert.match(inboxContract, /cold-start recent history.*do not enumerate irrelevant ones/i);
   assert.ok(Buffer.byteLength(RELAY_MCP_INSTRUCTIONS, "utf8") <= 2_048,
     "Claude receives the complete startup ontology instead of a truncated prefix");
   assert.match(
@@ -255,7 +255,8 @@ test("model-facing Relay product language calls work Tasks, never Requests", asy
     assert.doesNotMatch(pill, retired);
   }
   assert.match(pill, /data-view="tasks">Todo/);
-  for (const status of ["Needs attention", "Backlog", "Todo", "In Progress", "Done", "Canceled", "Duplicate"]) {
+  assert.doesNotMatch(pill, /Backlog/);
+  for (const status of ["Needs attention", "Todo", "In Progress", "Done", "Canceled", "Duplicate"]) {
     assert.match(pill, new RegExp(status));
   }
 });
@@ -274,4 +275,27 @@ test("a link is what an unresolvable recipient turns into, in both instruction s
   assert.deepEqual(share.inputSchema.required, ["idempotencyKey"]);
   assert.match(share.description, /ONE LINK IS ONE PERSON/);
   assert.match(share.description, /never report it as sent, delivered, or on its way/);
+});
+
+
+test("agent teaching uses the current Todo vocabulary everywhere", async () => {
+  assert.doesNotMatch(JSON.stringify(TOOLS), /backlog/i);
+  assert.doesNotMatch(RELAY_MCP_INSTRUCTIONS, /backlog/i);
+  assert.doesNotMatch(skillGuide, /backlog/i);
+  for (const file of [
+    "../src/todo-steward.js",
+    "../src/agent-relay-context.cjs",
+    "../src/agent-instructions.js",
+    "../../shared/src/agent-guide.ts",
+    "../../../apps/api/src/mcp/contract.ts",
+    "../../../apps/web/public/llm_guide.md",
+    "../../../docs/RELAY_TODO_STEWARD_2026-09-02.md",
+    "../../../docs/RELAY_TODO_PRIORITIZATION_AUDIT_2026-09-08.md",
+  ]) {
+    assert.doesNotMatch(await readFile(new URL(file, import.meta.url), "utf8"), /backlog/i, file);
+  }
+  for (const name of ["relay_todo_update", "relay_todo_reorder"]) {
+    assert.deepEqual(byName.get(name).inputSchema.properties.status.enum, ["triage", "in_progress", "done"]);
+  }
+  assert.deepEqual(byName.get("relay_inbox_list").inputSchema.properties.todoStatuses.items.enum, ["triage", "in_progress", "done"]);
 });

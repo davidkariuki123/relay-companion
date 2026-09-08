@@ -2301,7 +2301,6 @@
   .todo-filter.on .n { color:var(--muted); }
   .todo-mark { position:relative; width:8px; height:8px; flex:none; border:1px solid currentColor; border-radius:50%; box-sizing:border-box; opacity:.8; }
   .todo-mark.triage { border-style:dashed; }
-  .todo-mark.backlog { opacity:.48; }
   .todo-mark.in_progress { border:0; background:conic-gradient(currentColor 0 50%,transparent 50% 100%); box-shadow:inset 0 0 0 1px currentColor; }
   .todo-mark.done { border:0; background:currentColor; }
   .todo-mark.done::after { content:""; position:absolute; left:2px; top:1px; width:3px; height:4px; border:solid var(--bg); border-width:0 1px 1px 0; transform:rotate(45deg); }
@@ -2542,6 +2541,10 @@
   .sv-choose:disabled { opacity:.55; cursor:default; }
   .sv-open-state { flex:0 0 auto; font-family:var(--sans); font-size:11px; font-weight:600; color:var(--accent); }
   .sv-link-url { font-family:var(--mono); font-size:12px; font-weight:500; overflow-wrap:anywhere; }
+  .sv-invite-field { display:flex; align-items:center; gap:12px; padding:10px 12px;
+    border:1px solid var(--edge); border-radius:var(--r-3); background:var(--bg); }
+  .sv-invite-field .sv-link-url { flex:1 1 auto; min-width:0; }
+  .sv-invite-note { margin:12px 4px 0; font:400 11px/1.5 var(--sans); color:var(--muted-2); }
   /* armed sign-out: the same flat menu row, flipped to the danger ink */
   .oa-item.sv-signout-armed { color:var(--danger); }
   .oa-item.sv-signout-armed:hover { background:var(--danger-soft); }
@@ -6304,7 +6307,8 @@
   }
   function agentSurfacePreference(app) {
     const preference = openingPreference();
-    if (["desktop", "terminal", "other"].includes(preference?.surface)) return preference.surface;
+    if ((!preference?.provider || preference.provider === hostKeyFor(app))
+      && ["desktop", "terminal", "other"].includes(preference?.surface)) return preference.surface;
     const available = agentSurfaceOptions(app);
     const saved = protoPref(`proto.agentSurface.${hostKeyFor(app)}.v1`, "");
     if (available.includes(saved)) return saved;
@@ -6315,66 +6319,63 @@
     let next = null;
     try { next = await window.relay.capabilities(); } catch { next = null; }
     if (!next || typeof next !== "object" || !Object.keys(next).length) return;
-    const before = agentAppName();
+    const before = JSON.stringify(agentAppSelection());
     agentSurfaces = next;
     // The effective app can change with the answer (nothing saved, only Codex
     // here): repaint whatever names it — Settings' rows or a room's verbs.
     if (activeView === "settings") renderSettings();
-    else if (agentAppName() !== before) renderAll();
+    else if (JSON.stringify(agentAppSelection()) !== before) renderAll();
   }
-  // ONE APP OPENS RELAYS (Sven, 2026-09-08, the Minimal design): the choice is
-  // a single app, never a pair of switches, because a letter carries one verb.
-  // The v2 pref keeps its shape ("Claude Code", "Codex", or the old "a|b"
-  // pair); a saved pair collapses to its first app, and no saved choice means
-  // the first app this Mac has. There is no "none": a letter always has a
-  // door, and the app that opens it is always named.
+  // Independent agent switches (David, 2026-09-08). Preserve earlier choices,
+  // but keep new choices account-scoped and never replace an unavailable app
+  // with another one. The first selected app is only the Task default.
   const AGENT_APPS_PREF = "proto.agentApps.v2";
-  function agentAppSelection() {
+  function agentAppsPreferenceKey() { return `proto.agentApps.v3:${signupAccountKey()}`; }
+  function requestedAgentApps() {
+    const scoped = protoPref(agentAppsPreferenceKey(), "");
+    if (scoped) return scoped.split("|").filter((app) => AGENT_APP_OPTIONS.includes(app));
     const preference = openingPreference();
     if (preference?.surface === "other") return [];
-    if (preference?.provider) {
-      const app = preference.provider === "codex" ? "Codex" : "Claude Code";
-      return appAvailable(app) ? [app] : [];
-    }
+    if (preference?.provider) return [preference.provider === "codex" ? "Codex" : "Claude Code"];
     const saved = protoPref(AGENT_APPS_PREF, "");
-    const present = AGENT_APP_OPTIONS.filter(appAvailable);
-    const requested = saved.split("|").filter((app) => AGENT_APP_OPTIONS.includes(app) && appAvailable(app));
-    const chosen = requested[0] || (saved ? "" : present[0]) || "";
-    return chosen ? [chosen] : [];
+    return saved ? saved.split("|").filter((app) => AGENT_APP_OPTIONS.includes(app)) : [...AGENT_APP_OPTIONS];
+  }
+  function agentAppSelection() {
+    return requestedAgentApps().filter(appAvailable);
   }
   function agentAppChoice() { return agentAppSelection()[0] || ""; }
-  // The third row on the You page: no app opens relays, the sentence is
-  // copied for whatever session you are in. Same pref the app rows write.
-  function setAgentOwnSession() {
+  function saveAgentApps(apps) {
+    if (!signupAccountKey()) return;
+    const next = AGENT_APP_OPTIONS.filter((app) => apps.includes(app));
+    const saved = next.length ? next.join("|") : "__none__";
+    setProtoPref(agentAppsPreferenceKey(), saved);
+    // Retain the account-scoped single-app preference for older clients.
+    // Do not rewrite legacy global keys with this account's new choices.
     setProtoPref(`proto.openingPreference.v1:${signupAccountKey()}`, JSON.stringify({
-      ...(openingPreference() || {}), surface: "other",
+      surface: next.length ? (desktopEntry(next[0])?.available === true ? "desktop" : "terminal") : "other",
+      ...(next.length ? { provider: hostKeyFor(next[0]) } : {}),
     }));
   }
-  function setAgentOpeningApp(app) {
-    if (!AGENT_APP_OPTIONS.includes(app) || !appAvailable(app)) return;
-    setProtoPref(AGENT_APPS_PREF, app);
-    // Keep downgrade behavior coherent for a previous Relay build.
-    setProtoPref("proto.agentApp", app);
-    setProtoPref(`proto.openingPreference.v1:${signupAccountKey()}`, JSON.stringify({
-      surface: desktopEntry(app)?.available === true ? "desktop" : "terminal",
-      provider: hostKeyFor(app),
-    }));
+  function setAgentAppEnabled(app, enabled) {
+    if (!AGENT_APP_OPTIONS.includes(app) || (enabled && !appAvailable(app))) return;
+    const selected = new Set(requestedAgentApps());
+    if (enabled) selected.add(app); else selected.delete(app);
+    saveAgentApps([...selected]);
   }
-  // The label: the app's name, or "your agent" when this Mac has neither app
-  // and main must pick the app you are working in.
-  function agentAppName() { return agentAppChoice() || "your agent"; }
-  // The one row on a letter: the app you chose.
+  function agentAppName() {
+    const selected = agentAppSelection();
+    return selected.length === 1 ? selected[0] : "your agent";
+  }
+  // Codex first when both are enabled, matching the original picker.
   function agentAppHosts() {
-    const choice = agentAppChoice();
-    if (!choice) return [];
-    return [hostKeyFor(choice) === "codex" ? "codex" : "claude"];
+    const selected = agentAppSelection();
+    return ["Codex", "Claude Code"].filter((app) => selected.includes(app)).map(hostKeyFor);
   }
   // Whether the chosen app takes a relay into a new chat, or only into a
   // terminal session. The letter's verb depends on it: an app opens the
   // relay; a session is told the sentence to say.
-  function agentOpensInApp() {
-    const choice = agentAppChoice();
-    return Boolean(choice) && agentSurfacePreference(choice) === "desktop" && desktopEntry(choice)?.available === true;
+  function agentOpensInApp(app = agentAppChoice()) {
+    return Boolean(app) && agentSurfacePreference(app) === "desktop" && desktopEntry(app)?.available === true;
   }
   function chatOrder() { return protoPref("proto.convOrder", "chat"); } // "chat" | "inbox"
   const taskLocal = new Map(); // packetId -> "running" | "parked" (prototype-local approval state)
@@ -6395,20 +6396,34 @@
     return k === "task_request" || k === "task";
   }
   function taskRows() { return (payload.relays || []).filter(isTaskRow); }
-  // The wire ontology keeps seven statuses; the person sees three. Needs
-  // attention, In Progress and Done are the only places an item can be
-  // (David, 2026-09-03: "the rest are redundant"). Anything still sitting in
-  // a legacy status is shown under All until it moves, never in the rail.
+  // Legacy waiting states belong to Needs attention. Keep their wire keys
+  // for compatibility with older servers, never as separate places in Todo.
+  function currentTodoStatus(status) { return status === "backlog" || status === "todo" ? "triage" : status; }
   const TODO_STATUS_ORDER = ["triage", "backlog", "todo", "in_progress", "done", "canceled", "duplicate"];
   const TODO_VISIBLE_ORDER = ["triage", "in_progress", "done"];
-  const TODO_LEGACY_ORDER = ["todo", "backlog"];
-  const TODO_ACTIVE_ORDER = ["triage", "in_progress", ...TODO_LEGACY_ORDER];
+  const TODO_ACTIVE_ORDER = ["triage", "in_progress"];
   const TODO_ALL_PREVIEW_ORDER = [...TODO_ACTIVE_ORDER, "done"];
   const TODO_TERMINAL_ORDER = ["canceled", "duplicate"];
   const TODO_LABEL = {
-    triage:"Needs attention", backlog:"Backlog", todo:"Todo", in_progress:"In Progress",
+    triage:"Needs attention", in_progress:"In Progress",
     done:"Done", canceled:"Canceled", duplicate:"Duplicate",
   };
+  function normalizeTodoResponse(response) {
+    const counts = { ...response.counts };
+    counts.triage = Number(counts.triage || 0) + Number(counts.backlog || 0) + Number(counts.todo || 0);
+    counts.backlog = 0;
+    counts.todo = 0;
+    const normalizeItem = (item) => ({ ...item, todoStatus:currentTodoStatus(item.todoStatus) });
+    const groups = new Map();
+    for (const group of response.groups || []) {
+      const status = currentTodoStatus(group.status);
+      const merged = groups.get(status) || { status, count:0, items:[] };
+      merged.count += Number(group.count || 0);
+      merged.items.push(...(group.items || []).map(normalizeItem));
+      groups.set(status, merged);
+    }
+    return { ...response, counts, groups:[...groups.values()], items:(response.items || []).map(normalizeItem) };
+  }
   const EMPTY_TODO_COUNTS = Object.fromEntries(TODO_STATUS_ORDER.map((status) => [status, 0]));
   const todoState = {
     selected:new Set(), counts:{ ...EMPTY_TODO_COUNTS }, groups:[], items:[], nextCursor:null,
@@ -6510,7 +6525,7 @@
       }
     }
     const statuses = todoSelectedStatuses();
-    const response = await window.relay.todoList({
+    let response = await window.relay.todoList({
       statuses,
       ...(statuses.length === 1 ? { limit:25 } : {}),
       ...(append && todoState.nextCursor ? { cursor:todoState.nextCursor } : {}),
@@ -6526,6 +6541,7 @@
       }
       return;
     }
+    response = normalizeTodoResponse(response);
     todoState.loaded = true;
     todoState.error = "";
     todoState.counts = { ...EMPTY_TODO_COUNTS, ...(response.counts || {}) };
@@ -7432,9 +7448,8 @@
       onDone("later", id);
     });
   }
-  // Todo's amber number is narrowly Triage: items that have not yet been
-  // intentionally classified. Backlog and Todo are deliberate states, not
-  // notification debt, and never inflate this badge.
+  // Todo's amber number counts Needs attention, including waiting obligations.
+  // In Progress and Done do not contribute to it.
   function requestsOutstandingCount() {
     return Number(todoState.counts.triage || 0);
   }
@@ -8414,7 +8429,7 @@
     if (visibility?.todoRemoved && Number.isInteger(visibility.todoVisibilityVersion) && window.relay.todoVisibilityUpdate) {
       return `<div class="todo-reader-status" data-stop="1"><button class="todo-reader-current" type="button" data-todo-restore data-todo-restore-version="${Number(visibility.todoVisibilityVersion)}">Add to Todo</button></div>`;
     }
-    const status = row?.todoStatus;
+    const status = currentTodoStatus(row?.todoStatus);
     if (!TODO_STATUS_ORDER.includes(status) || !Number.isInteger(row?.todoVersion)) return "";
     const task = isTaskRow(row);
     return `<div class="todo-reader-status" data-stop="1">
@@ -12524,22 +12539,17 @@
     for (let i = 0; i < key.length; i += 1) h = (h * 31 + key.charCodeAt(i)) >>> 0;
     return `p${h % 8}`;
   }
-  // ONE VERB ON A LETTER (Sven, 2026-09-08, the Minimal design): the app you
-  // chose on the You page, opening the relay in a new chat that starts by
-  // reading it. Nothing goes to a chat that is already open; nothing is
-  // picked (Sven, 2026-09-04). David's subline stays truthful per relay: this
-  // pill has already put THIS relay into a chat there, or it has not. When
-  // the chosen app has no desktop surface on this Mac, the letter carries the
-  // sentence to say in whatever session you are in, and a button that copies
-  // it — the pill is here, so Relay is installed, and the agent pulls the
-  // relay by name. No link.
+  // Offer only enabled desktop apps. Opening still creates a new chat or
+  // continues this Relay's bound chat; enabling both never sends to both.
+  // Terminal/own-session users retain the copyable pull sentence.
   function relayHostActionsHtml(message, { persistent = false } = {}) {
     const id = String(message && message.id || "");
     const actionsId = `relay-host-actions-${id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
     const source = message && message.direction === "out" ? "sent" : "relay";
-    const inner = agentOpensInApp()
-      ? agentAppHosts().map((host) => hostActionRowHtml(host, message, source)).join("")
-      : pullSentenceHtml(message);
+    const desktopHosts = agentAppHosts().filter((host) => agentOpensInApp(host === "codex" ? "Codex" : "Claude Code"));
+    const needsCopy = !desktopHosts.length || agentAppSelection().some((app) => !agentOpensInApp(app));
+    const inner = desktopHosts.map((host) => hostActionRowHtml(host, message, source)).join("")
+      + (needsCopy ? pullSentenceHtml(message) : "");
     return `${persistent ? "" : `<button class="th-host-disclosure" type="button" data-host-disclosure="${esc(id)}" data-stop="1" aria-expanded="false" aria-controls="${esc(actionsId)}"><span>Open with an agent</span><span class="chev" aria-hidden="true">⌄</span></button>`}<div id="${esc(actionsId)}" class="th-host-actions${persistent ? " persistent" : ""}" data-host-actions="${esc(id)}" data-stop="1" aria-hidden="${persistent ? "false" : "true"}"${persistent ? "" : " inert"}>
       <div class="th-host-actions-inner">
         ${inner}
@@ -14378,46 +14388,34 @@
       ${chatAgentPreferencesError ? `<div class="row-err sv-err">${esc(chatAgentPreferencesError)}</div>` : ""}
     </div>`;
   }
-  // YOUR AGENT. The skill and the MCP are installed for everyone by setup
-  // (Shane, 2026-09-07), so there is nothing to connect here; the one choice
-  // is which app opens a relay. One app, not two switches: a letter carries
-  // one verb (Sven, 2026-09-08).
+  // YOUR AGENT. Independent switches restored at David's request. These are
+  // opening preferences, not separate setup steps. Preserve the reviewed
+  // Connected copy from the Minimal pill's integrated setup contract.
   function yourAgentHtml() {
-    const chosen = agentAppChoice();
-    const inApp = agentOpensInApp();
-    const present = AGENT_APP_OPTIONS.filter(appAvailable);
-    // No chosen app means the sentence goes to whatever session you are in:
-    // either you chose that, or this Mac has no app to choose.
-    const ownSession = !chosen;
-    const intro = present.length === 2
-      ? "Relay is set up in Claude Code and Codex on this Mac. One of them opens relays."
-      : present.length === 1
-        ? `Relay is set up in ${present[0]} on this Mac. It opens relays.`
-        : "Relay is set up in your sessions on this Mac. Install Claude Code or Codex and it opens relays there.";
+    const selected = agentAppSelection();
+    const ownSession = requestedAgentApps().length === 0;
     return `
       <div class="sv-open-section" id="yourAgent" data-stop="1">
         <div class="sv-open-title">Your agent</div>
-        <div class="sv-open-intro">${esc(intro)}</div>
+        <div class="sv-open-intro">Choose which agents you use. Turn on one or both.</div>
         <div class="sv-open-list">
           ${AGENT_APP_OPTIONS.map((app) => {
             const available = appAvailable(app);
-            const on = available && app === chosen;
+            const on = selected.includes(app);
             const logo = app === "Codex" ? "codexMark.svg" : "claudeCodeMark.svg";
             const why = !available ? appUnavailableReason(app)
-              : on ? (inApp ? "Connected · opens relays in a new chat" : "Connected · Relay copies the sentence for you")
+              : on ? (agentOpensInApp(app) ? "Connected · opens relays in a new chat" : "Connected · Relay copies the sentence for you")
               : "Connected";
             return `<div class="sv-open-row${available ? "" : " off"}">
               <img class="sv-open-logo" src="${logo}" alt="" />
               <span class="sv-open-copy"><span class="sv-open-name">${app}</span><span class="sv-open-why">${esc(why)}</span></span>
-              ${on ? `<span class="sv-open-state">${inApp ? "Opens relays" : "Chosen"}</span>`
-                : available ? `<button class="sv-choose" type="button" data-agent-choose="${app}">Use this one</button>` : ""}
+              <button class="sv-switch" type="button" role="switch" data-agent-app="${app}" aria-checked="${on ? "true" : "false"}" aria-label="Open Relays with ${app}"${!available ? " disabled" : ""}></button>
             </div>`;
           }).join("")}
           <div class="sv-open-row">
             <span class="sv-open-logo sv-open-logo-blank" aria-hidden="true"></span>
             <span class="sv-open-copy"><span class="sv-open-name">My own session</span><span class="sv-open-why">Relay copies the sentence for you</span></span>
-            ${ownSession ? `<span class="sv-open-state">Chosen</span>`
-              : `<button class="sv-choose" type="button" data-agent-choose="session">Use this one</button>`}
+            ${ownSession ? `<span class="sv-open-state">Chosen</span>` : `<button class="sv-choose" type="button" id="svOwnSession">Use this one</button>`}
           </div>
         </div>
       </div>`;
@@ -14435,16 +14433,13 @@
     const shown = url.replace(/^https?:\/\//, "").replace(/\/$/, "");
     return `
       <div class="sv-open-section" id="yourLink" data-stop="1">
-        <div class="sv-open-title">Your link</div>
-        <div class="sv-open-list">
-          <div class="sv-open-row">
-            <span class="sv-open-copy">
-              <span class="sv-open-name sv-link-url">${esc(shown || (inviteLinkUnavailable ? "Your link is not available right now." : "Loading your link…"))}</span>
-              <span class="sv-open-why">Anyone with it can join Relay and reach you. They land in your People.</span>
-            </span>
-            <button class="sv-choose" type="button" id="svCopyLink" ${inviteLinkBusy ? "disabled" : ""}>${inviteLinkCopied ? "Copied" : "Copy"}</button>
-          </div>
+        <div class="sv-open-title">Your invite link</div>
+        <div class="sv-open-intro">Share it with someone you want to message on Relay.</div>
+        <div class="sv-invite-field">
+          <span class="sv-open-name sv-link-url">${esc(shown || (inviteLinkUnavailable ? "Your invite link is not available right now." : "Loading your invite link…"))}</span>
+          <button class="sv-choose" type="button" id="svCopyLink" ${inviteLinkBusy ? "disabled" : ""}>${inviteLinkCopied ? "Copied" : "Copy link"}</button>
         </div>
+        <div class="sv-invite-note">When they join, you’ll find each other in People.</div>
         ${inviteLinkError ? `<div class="row-err sv-err">${esc(inviteLinkError)}</div>` : ""}
       </div>`;
   }
@@ -14585,11 +14580,10 @@
     if (svPairOpen) html += svPairRowHtml();
     if (svNote) html += `<div class="sv-note">${esc(svNote)}</div>`;
     html += `<div class="row-err sv-err" id="svErr">${esc(svError)}</div>`;
-    // YOUR AGENT, YOUR LINK: the two things a person comes to this page for
-    // sit right under the account (Sven, 2026-09-08).
+    // David's selected B layout: account, invite link, then agent switches.
     if (info.paired) {
-      html += yourAgentHtml();
       html += yourLinkHtml();
+      html += yourAgentHtml();
       html += blockedPeopleHtml();
     }
     html += slackSettingsHtml(info);
@@ -14683,15 +14677,17 @@
         renderSettings();
       });
     }
-    for (const button of settingsViewEl.querySelectorAll("[data-agent-choose]")) {
+    for (const button of settingsViewEl.querySelectorAll("[data-agent-app]")) {
       button.addEventListener("click", (e) => {
         e.stopPropagation();
-        const choice = button.getAttribute("data-agent-choose");
-        if (choice === "session") setAgentOwnSession();
-        else setAgentOpeningApp(choice);
+        setAgentAppEnabled(button.getAttribute("data-agent-app"), button.getAttribute("aria-checked") !== "true");
         renderSettings();
       });
     }
+    document.getElementById("svOwnSession")?.addEventListener("click", () => {
+      saveAgentApps([]);
+      renderSettings();
+    });
     document.getElementById("svBlockedPeople")?.addEventListener("click", async () => {
       const list = document.getElementById("svBlockedList");
       const account = signupAccountKey();

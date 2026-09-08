@@ -1,3 +1,4 @@
+import vm from "node:vm";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
@@ -15,7 +16,7 @@ function between(source, start, end) {
 }
 
 test("Triage is shown to the person as Needs attention; the wire value never changes", () => {
-  assert.match(inbox, /triage:"Needs attention", backlog:"Backlog", todo:"Todo", in_progress:"In Progress"/);
+  assert.match(inbox, /triage:"Needs attention", in_progress:"In Progress"/);
   assert.match(inbox, /const TODO_STATUS_ORDER = \["triage", "backlog", "todo", "in_progress", "done", "canceled", "duplicate"\]/);
   assert.doesNotMatch(inbox, /triage:"Triage"/);
 });
@@ -27,8 +28,8 @@ test("the person sees three places only: Needs attention, In Progress, Done", ()
   assert.doesNotMatch(rail, /TODO_STATUS_ORDER\.map/);
   const menu = between(inbox, "function todoReaderStatusHtml(row)", "async function commitTodoStatus");
   assert.match(menu, /\[\.\.\.TODO_VISIBLE_ORDER, \.\.\.\(TODO_VISIBLE_ORDER\.includes\(status\) \? \[\] : \[status\]\)\]\.map/);
-  // Legacy statuses still surface under All until they move, so nothing can hide.
-  assert.match(inbox, /const TODO_LEGACY_ORDER = \["todo", "backlog"\]/);
+  // Retired waiting states fold into Needs attention instead of creating headings.
+  assert.doesNotMatch(inbox, /TODO_LEGACY_ORDER/);
 });
 
 test("Needs attention stays bold after reading; other statuses keep their read treatment", () => {
@@ -94,4 +95,29 @@ test("main hands the renderer a bounded steward view and forwards preferences to
   assert.match(main, /assessment: p\.assessment \|\| null,/);
   assert.match(main, /r\.assessment,\n\s+r\.attentionRank,/);
   assert.match(preload, /todoStewardPrefs: \(input = \{\}\) => ipcRenderer\.invoke\("relay:todoStewardPrefs", input \|\| \{\}\)/);
+});
+
+
+test("legacy waiting groups fold into Needs attention without losing notes or versions", () => {
+  const context = vm.createContext({});
+  vm.runInContext(between(inbox, "  function currentTodoStatus(", "  const EMPTY_TODO_COUNTS"), context);
+  const item = (id, status) => ({ relayId:id, todoStatus:status, todoVersion:7, assessment:"Waiting for a reply" });
+  const result = context.normalizeTodoResponse({ counts:{triage:1, backlog:1, todo:1, done:397}, groups:[
+    {status:"triage", count:1, items:[item("a", "triage")]},
+    {status:"backlog", count:1, items:[item("b", "backlog")]},
+    {status:"todo", count:1, items:[item("c", "todo")]},
+  ] });
+  assert.equal(result.counts.triage, 3);
+  assert.equal(result.counts.backlog, 0);
+  assert.equal(result.counts.todo, 0);
+  assert.equal(result.counts.done, 397);
+  assert.equal(result.groups.length, 1);
+  assert.equal(result.groups[0].status, "triage");
+  assert.equal(result.groups[0].items.length, 3);
+  for (const row of result.groups[0].items) {
+    assert.equal(row.todoStatus, "triage");
+    assert.equal(row.todoVersion, 7);
+    assert.equal(row.assessment, "Waiting for a reply");
+  }
+  assert.equal(JSON.stringify(context.normalizeTodoResponse(result)), JSON.stringify(result));
 });

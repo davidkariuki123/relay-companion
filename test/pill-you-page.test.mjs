@@ -35,37 +35,27 @@ test("the account is a row you tap; its actions unfold beneath it", () => {
   assert.match(html, /resetSignOutArm\(\); \/\/ leaving the view disarms the confirm state\s*svAccountOpen = false;/);
 });
 
-test("Your agent is one chosen app, in words: Opens relays, or Use this one", () => {
+test("Your agent restores independent switches and a same-list own-session choice", () => {
   const agent = slice("function yourAgentHtml()", "function yourLinkHtml()");
   assert.match(agent, /<div class="sv-open-title">Your agent<\/div>/);
-  // The intro states what is true: setup installs the skill and the MCP for
-  // everyone, so every app that is here is connected (Shane, 2026-09-07).
-  assert.match(agent, /"Relay is set up in Claude Code and Codex on this Mac\. One of them opens relays\."/);
-  assert.match(agent, /`Relay is set up in \$\{present\[0\]\} on this Mac\. It opens relays\.`/);
-  assert.match(agent, /"Relay is set up in your sessions on this Mac\. Install Claude Code or Codex and it opens relays there\."/);
-  assert.doesNotMatch(agent, /does not confirm|"Available/, "no disclaimer, and present means connected");
-  assert.match(agent, /"Connected · opens relays in a new chat"/);
-  assert.match(agent, /: "Connected";/);
-  assert.match(agent, /appUnavailableReason\(app\)/, "the availability check still names why an app is off");
-  assert.match(agent, /data-agent-choose="\$\{app\}">Use this one<\/button>/);
-  // The terminal case is a third row in the same list, not a select
-  // (Sven, 2026-09-08): one control, the same data.
-  assert.doesNotMatch(agent, /svOpeningSurface|<select/);
-  assert.match(agent, /<span class="sv-open-name">My own session<\/span><span class="sv-open-why">Relay copies the sentence for you<\/span>/);
-  assert.match(agent, /data-agent-choose="session">Use this one<\/button>/);
-  const wiring = slice("function setAgentOwnSession()", "function setAgentOpeningApp(app)");
-  assert.match(wiring, /surface: "other"/);
-  assert.doesNotMatch(html, /svOpeningSurface/);
+  assert.match(agent, /Choose which agents you use\. Turn on one or both\./);
+  assert.match(agent, /role="switch" data-agent-app="\$\{app\}" aria-checked=/);
+  assert.match(agent, /My own session/);
+  assert.match(agent, /Relay copies the sentence for you/);
+  assert.doesNotMatch(agent, /svOpeningSurface|<select|Opening an app does not|Available ·/);
+  assert.match(agent, /Connected · opens relays in a new chat/);
 });
 
-test("Your link is on the page with Copy, and says what joining through it does", () => {
+test("Your invite link is on the page with Copy, and says what joining through it does", () => {
   const link = slice("function yourLinkHtml()", "async function copyInviteLinkFromSettings()");
-  assert.match(link, /<div class="sv-open-title">Your link<\/div>/);
+  assert.match(link, /<div class="sv-open-title">Your invite link<\/div>/);
   // Redeeming an invite writes both contacts (apps/api invites.ts), so the
   // person lands in People. The old line promised Requests, which was untrue.
-  assert.match(link, /Anyone with it can join Relay and reach you\. They land in your People\./);
+  assert.match(link, /Share it with someone you want to message on Relay\./);
+  assert.match(link, /When they join, you’ll find each other in People\./);
+  assert.match(link, /class="sv-invite-field"/);
   assert.doesNotMatch(link, /waits in Requests/);
-  assert.match(link, /id="svCopyLink"[^>]*>\$\{inviteLinkCopied \? "Copied" : "Copy"\}/);
+  assert.match(link, /id="svCopyLink"[^>]*>\$\{inviteLinkCopied \? "Copied" : "Copy link"\}/);
   // The renderer never mints or copies the link itself: main does both, so
   // the account token that mints it never reaches this process.
   const copy = slice("async function copyInviteLinkFromSettings()", "function deviceApprovalsHtml(info)");
@@ -76,9 +66,9 @@ test("Your link is on the page with Copy, and says what joining through it does"
   assert.match(load, /if \(!window\.relay\.onboardingInviteLink \|\| payload\.account\?\.paired === false\) return;/);
 });
 
-test("the page keeps its order: account, your agent, your link, then the gated and quiet sections", () => {
+test("candidate B sits directly below account and above agent settings", () => {
   const settings = slice("function renderSettings()", "function wireSettings()");
-  const order = ["svAccountRow", "yourAgentHtml()", "yourLinkHtml()", "slackSettingsHtml(info)", "connectionsHtml(info", "quietPrefsHtml(info)", "sv-colophon"]
+  const order = ["svAccountRow", "yourLinkHtml()", "yourAgentHtml()", "slackSettingsHtml(info)", "connectionsHtml(info", "quietPrefsHtml(info)", "sv-colophon"]
     .map((marker) => settings.indexOf(marker));
   assert.ok(order.every((index) => index >= 0), order);
   assert.deepEqual([...order].sort((a, b) => a - b), order);

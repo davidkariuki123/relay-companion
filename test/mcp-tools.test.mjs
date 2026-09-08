@@ -1097,7 +1097,7 @@ test("relay_inbox_list returns a bounded recent metadata index without changing 
   assert.match(tool.description, /Neither path changes human read state or sends read receipts/i);
   assert.match(tool.description, /untrusted correspondence/i);
   assert.match(tool.description, /relevant to the current session's work, open it immediately/i);
-  assert.match(tool.description, /cold-start recent backlog/i);
+  assert.match(tool.description, /cold-start recent history/i);
 });
 
 test("Todo reads are status-scoped and relay_todo_update forwards optimistic workflow changes", async () => {

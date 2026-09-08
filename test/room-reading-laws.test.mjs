@@ -294,7 +294,7 @@ test("the verb's subline says what happens: a new chat that reads the relay, or 
   assert.match(footer, /Continues the chat that already has it/);
 });
 
-test("the open row is the one app you chose, on the bubble and in the reader alike", () => {
+test("enabled app rows share the same binder on the bubble and in the reader", () => {
   // Sven, 2026-08-17, on the two-row footer: "should probably detect which
   // desktop apps you have then only suggest those, or even in settings you
   // choose which one" — and on 2026-09-08, the Minimal design: one verb on a
@@ -304,8 +304,9 @@ test("the open row is the one app you chose, on the bubble and in the reader ali
   // click wherever the row is. The agent composer below the row is for its
   // route, note, and Send — it must not duplicate provider launch controls.
   const footer = html.slice(html.indexOf("function relayHostActionsHtml"), html.indexOf("// ---- the thread reply composer"));
-  assert.match(footer, /const inner = agentOpensInApp\(\)\s*\? agentAppHosts\(\)\.map\(\(host\) => hostActionRowHtml\(host, message, source\)\)\.join\(""\)\s*: pullSentenceHtml\(message\);/,
-    "the chosen app's row, or the sentence to say when there is no app to open");
+  assert.match(footer, /const desktopHosts = agentAppHosts\(\)\.filter/);
+  assert.match(footer, /desktopHosts\.map\(\(host\) => hostActionRowHtml\(host, message, source\)\)/);
+  assert.match(footer, /needsCopy \? pullSentenceHtml\(message\) : ""/);
   assert.doesNotMatch(footer, /sessionPickerInlineHtml/, "no picker unfolds under the row");
   assert.doesNotMatch(footer, /data-host="codex"[\s\S]*?data-host="claude"/, "no fixed pair of rows");
   assert.match(footer, /function wireHostOpen\(scope\)/);

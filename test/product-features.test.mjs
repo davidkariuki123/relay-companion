@@ -195,8 +195,8 @@ test("the You page always offers which app opens relays, and the fresh open goes
   // fresh open honours it.
   const source = fs.readFileSync(path.join(here, "../overlay/inbox.html"), "utf8");
   const settings = source.slice(source.indexOf("function renderSettings()"), source.indexOf("function wireSettings()"));
-  assert.match(settings, /if \(info\.paired\) \{\s*html \+= yourAgentHtml\(\);\s*html \+= yourLinkHtml\(\);/);
-  assert.doesNotMatch(settings, /Open Relays with|protoPrefs/, "the two-switch picker is gone");
+  assert.match(settings, /if \(info\.paired\) \{\s*html \+= yourLinkHtml\(\);\s*html \+= yourAgentHtml\(\);/);
+  assert.match(settings, /if \(info\.paired\) \{\s*html \+= yourLinkHtml\(\);/);
   assert.match(source, /<div class="sv-open-section" id="yourAgent" data-stop="1">\s*<div class="sv-open-title">Your agent<\/div>/);
   const open = source.slice(source.indexOf("function openRelayFromUI("), source.indexOf("let unreadCount = 0;"));
   assert.match(open, /mode === "fresh" && window\.relay\.openFresh\) window\.relay\.openFresh\(id, host \|\| hostKeyFor\(agentAppName\(\)\), note\)/);
@@ -302,7 +302,7 @@ test("production agent-work entry points enforce the feature row before native t
   assert.match(cli, /--full and --messages-only were removed/);
 });
 
-test("detection feeds one chosen app, desktop when present and terminal as the fallback", () => {
+test("detection feeds independent app switches with strict availability checks", () => {
   const source = fs.readFileSync(path.join(here, "../overlay/inbox.html"), "utf8");
   const pick = source.slice(source.indexOf("let agentSurfaces = null;"), source.indexOf("function chatOrder()"));
   assert.match(pick, /const key = app === "Codex" \? "_codexDesktop" : app === "Claude Code" \? "_claudeDesktop" : "";/);
@@ -312,29 +312,20 @@ test("detection feeds one chosen app, desktop when present and terminal as the f
   assert.match(pick, /return available\.includes\("desktop"\) \? "desktop" : "terminal";/,
     "desktop is the default when present and terminal is the CLI-only fallback");
   assert.match(pick, /const AGENT_APPS_PREF = "proto\.agentApps\.v2";/);
-  assert.match(pick, /const requested = saved\.split\("\|"\)\.filter\(\(app\) => AGENT_APP_OPTIONS\.includes\(app\) && appAvailable\(app\)\);/);
-  // ONE app (Sven, 2026-09-08): a saved pair collapses to its first entry, no
-  // saved choice means the first installed app, and there is no "none" — a
-  // letter always has a door.
-  assert.match(pick, /const chosen = requested\[0\] \|\| \(saved \? "" : present\[0\]\) \|\| "";/);
+  assert.match(pick, /return requestedAgentApps\(\)\.filter\(appAvailable\);/);
   assert.match(pick, /preference\?\.surface === "other"/);
-  assert.doesNotMatch(pick, /__none__|AGENT_APP_BOTH|setAgentAppEnabled/);
-  assert.match(pick, /function agentAppName\(\) \{ return agentAppChoice\(\) \|\| "your agent"; \}/);
-  assert.match(pick, /return \[hostKeyFor\(choice\) === "codex" \? "codex" : "claude"\];/, "one host row per letter");
-  assert.match(pick, /function agentOpensInApp\(\)[\s\S]*agentSurfacePreference\(choice\) === "desktop"/);
+  assert.match(pick, /proto\.agentApps\.v3:/);
+  assert.match(pick, /return selected\.length === 1 \? selected\[0\] : "your agent";/);
+  assert.match(pick, /\["Codex", "Claude Code"\]\.filter/);
+  assert.match(pick, /function agentOpensInApp\(app = agentAppChoice\(\)\)/);
   assert.match(pick, /try \{ next = await window\.relay\.capabilities\(\); \}/, "the renderer asks main, never probes the disk itself");
   const settings = source.slice(source.indexOf("function renderSettings()"), source.indexOf("function wireSettings()"));
   const agent = source.slice(source.indexOf("function yourAgentHtml()"), source.indexOf("function yourLinkHtml()"));
   assert.match(agent, /\$\{AGENT_APP_OPTIONS\.map\(\(app\) => \{/);
   assert.match(agent, /const logo = app === "Codex" \? "codexMark\.svg" : "claudeCodeMark\.svg";/, "the page uses Relay's shipped app marks");
-  // The chosen app wears its state in words; the other offers itself in words.
-  assert.match(agent, /<span class="sv-open-state">\$\{inApp \? "Opens relays" : "Chosen"\}<\/span>/);
-  assert.match(agent, /<button class="sv-choose" type="button" data-agent-choose="\$\{app\}">Use this one<\/button>/);
-  assert.doesNotMatch(agent, /role="switch"|data-agent-surface/, "no switches, no surface select");
-  // The third row (your own session) writes the same pref through its own
-  // setter; app rows still go through setAgentOpeningApp.
-  assert.match(settings, /if \(choice === "session"\) setAgentOwnSession\(\);\s*else setAgentOpeningApp\(choice\);/);
-  assert.doesNotMatch(settings, /svOpeningSurface/, "the surface select is gone");
+  assert.match(agent, /role="switch" data-agent-app="\$\{app\}"/);
+  assert.doesNotMatch(agent, /<select|svOpeningSurface/, "no competing surface selector");
+  assert.match(settings, /setAgentAppEnabled\(button\.getAttribute\("data-agent-app"\)/);
   assert.match(source, /loadAgentSurfaces\(\)\.catch\(\(\) => \{\}\);/, "capabilities load at boot");
   assert.match(source, /const seq = \+\+settingsLoadSeq;\s*loadAgentSurfaces\(\)/, "and again whenever Settings loads");
 });

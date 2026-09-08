@@ -16,7 +16,7 @@ const board = between(inbox, "function renderTasksBoard()", "// Grow the window 
 
 test("All is attention-first with a bounded recent Done preview", () => {
   assert.match(inbox, /const TODO_VISIBLE_ORDER = \["triage", "in_progress", "done"\]/);
-  assert.match(inbox, /const TODO_ACTIVE_ORDER = \["triage", "in_progress", \.\.\.TODO_LEGACY_ORDER\]/);
+  assert.match(inbox, /const TODO_ACTIVE_ORDER = \["triage", "in_progress"\]/);
   assert.match(inbox, /const TODO_ALL_PREVIEW_ORDER = \[\.\.\.TODO_ACTIVE_ORDER, "done"\]/);
   assert.doesNotMatch(inbox, /completedTasksExpanded/);
   assert.match(board, /TODO_ALL_PREVIEW_ORDER\.map/);
