@@ -6,6 +6,17 @@ import { createFirstRelayOnboarding, hasSentRelay } from "../overlay/first-relay
 
 const sent = { relayId: "relay_first", state: "delivered" };
 
+test("the exact tutorial wins over racing sends, remains stable, and is account scoped", () => {
+  const flow = createFirstRelayOnboarding();
+  flow.observe("a", { items: [] });
+  flow.observe("a", { items: [sent, { ...sent, relayId: "other" }] }, { state: "accepted", relayId: "tutorial" });
+  assert.equal(flow.relayId("a"), "tutorial");
+  flow.observe("a", { items: [{ ...sent, relayId: "later" }] });
+  assert.equal(flow.relayId("a"), "tutorial");
+  assert.equal(flow.relayId("b"), "");
+  assert.equal(flow.observe("b", { items: [] }, { state: "skipped" }), "complete");
+});
+
 test("confirmed sends count without a read receipt; pending sends and unclaimed links do not", () => {
   assert.equal(hasSentRelay({ items: [sent] }), true);
   assert.equal(hasSentRelay({ items: [{ ...sent, state: "queued" }] }), false);
@@ -59,6 +70,8 @@ function refreshHarness() {
     credential: "a", key: "user:a", firstRelayOnboarding: flow,
     onboardingVersions: {}, COMPANION_ONBOARDING_VERSION: 2, SENT_FETCH_LIMIT: 200,
     testFixtures: () => null, console: { error() {} },
+    fs: { readFileSync() { throw new Error("no tutorial"); } }, process: { env: {} },
+    path: { join: (...parts) => parts.join("/") }, os: { homedir: () => "/tmp" },
     deviceToken: () => scope.credential, onboardingAccountKey: () => scope.key,
     relayClient: async () => ({ sent: () => new Promise((resolve, reject) => pending.push({ resolve, reject })) }),
     sentFingerprintOf: JSON.stringify, writeOverlayPrefs() {},

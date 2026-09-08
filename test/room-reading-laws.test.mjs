@@ -284,30 +284,29 @@ test("only two-document Relays carry provider actions, and the newest Relay stay
   assert.match(html, /\.th-host-actions\.persistent/);
 });
 
-test("provider footer copy distinguishes a first open from an existing task or session", () => {
+test("the verb's subline says what happens: a new chat that reads the relay, or the chat that already has it", () => {
   const footer = html.slice(html.indexOf("function relayHostActionsHtml"), html.indexOf("// ---- the thread reply composer"));
   assert.match(footer, /message\?\.materializedCodex/);
-  assert.match(footer, /Start a new task with this Relay/);
-  assert.match(footer, /Continue in its existing task/);
+  assert.match(footer, /A new task\. It starts by reading this relay\./);
+  assert.match(footer, /Continues the task that already has it/);
   assert.match(footer, /message\?\.materializedClaude/);
-  assert.match(footer, /Start a new session with this Relay/);
-  assert.match(footer, /Continue in its existing session/);
+  assert.match(footer, /A new chat\. It starts by reading this relay\./);
+  assert.match(footer, /Continues the chat that already has it/);
 });
 
-test("the open rows are the apps you chose — one, or both — on the bubble and in the reader alike", () => {
+test("the open row is the one app you chose, on the bubble and in the reader alike", () => {
   // Sven, 2026-08-17, on the two-row footer: "should probably detect which
   // desktop apps you have then only suggest those, or even in settings you
-  // choose which one" — and, after David and Shane: "they would want an
-  // option to always have both… I would always choose one (claude)." The
-  // rows are the choice Settings holds (one app, or Both in David's order),
-  // detection-backed; the other app is one tap away. David's per-relay
-  // subline stays. Both immutable reader documents paint the SAME rows as the
-  // footer, so the surfaces cannot drift, and one binder wires the click
-  // wherever the rows are. The agent composer below those rows is for its
+  // choose which one" — and on 2026-09-08, the Minimal design: one verb on a
+  // letter. The row is the app the You page holds; the other app is one tap
+  // away there. David's per-relay subline stays. The reader paints the SAME
+  // row as the footer, so the surfaces cannot drift, and one binder wires the
+  // click wherever the row is. The agent composer below the row is for its
   // route, note, and Send — it must not duplicate provider launch controls.
   const footer = html.slice(html.indexOf("function relayHostActionsHtml"), html.indexOf("// ---- the thread reply composer"));
-  assert.match(footer, /\$\{agentAppHosts\(\)\.map\(\(host\) => hostActionRowHtml\(host, message, source\) \+ sessionPickerInlineHtml\(id, host\)\)\.join\(""\)\}/,
-    "the configured provider rows remain the choice and own their inline picker state");
+  assert.match(footer, /const inner = agentOpensInApp\(\)\s*\? agentAppHosts\(\)\.map\(\(host\) => hostActionRowHtml\(host, message, source\)\)\.join\(""\)\s*: pullSentenceHtml\(message\);/,
+    "the chosen app's row, or the sentence to say when there is no app to open");
+  assert.doesNotMatch(footer, /sessionPickerInlineHtml/, "no picker unfolds under the row");
   assert.doesNotMatch(footer, /data-host="codex"[\s\S]*?data-host="claude"/, "no fixed pair of rows");
   assert.match(footer, /function wireHostOpen\(scope\)/);
   assert.match(html, /wireHostOpen\(thHistoryEl\);/, "the room binds through the shared binder");
@@ -328,37 +327,29 @@ test("the open rows are the apps you chose — one, or both — on the bubble an
   const humanComposer = reader.slice(humanComposerStart, reader.indexOf('id="qrSend"', humanComposerStart) + 80);
   assert.doesNotMatch(humanComposer, /data-open-in-host=/,
     "the human reply composer does not duplicate provider actions from the agent face");
-  assert.match(reader, /<button type="button" id="qrSend">Send<\/button>/);
+  assert.match(reader, /<button type="button" id="qrSend">Relay<\/button>/);
 });
 
-test("a compact provider-row click expands the existing conversation and unfolds destinations beneath that row", () => {
-  const picker = html.slice(html.indexOf("function renderSessionPickerSurface"), html.indexOf('// The verb NAMES an app'));
+test("the verb opens a new chat straight away; nothing is picked, and the same path serves sent rows", () => {
+  // Sven, 2026-09-04: "Nothing goes to a chat that is already open; nothing
+  // is picked." The click is the open. A relay that already went to this app
+  // continues there (main knows); every other click forges a new chat. The
+  // session picker keeps its code but no letter reaches it — that entry is
+  // named retired so the review can delete it with the picker.
   const footer = html.slice(html.indexOf("function relayHostActionsHtml"), html.indexOf("// Before 0.1.290"));
-  assert.doesNotMatch(html, /id="sessionPickerView"/, "there is no standalone picker page");
-  assert.doesNotMatch(picker, /data-sp-host|sp-hosts/, "there is no duplicate Claude/Codex toggle");
-  assert.match(footer, /class="th-host-action\$\{selected \? " pressed" : ""\}"/,
-    "the provider row itself owns the pressed state");
-  assert.match(footer, /selected[\s\S]*"Choose where this Relay lands"/);
-  assert.match(picker, /const expandConversation = activeView === "threads" && !chatExpanded/);
-  assert.match(picker, /const morphFromCompact = expandConversation && prepareReaderMorph\("threads"\)/);
-  assert.match(picker, /chatExpanded = true;[\s\S]*commitNavigation\(\);[\s\S]*startReaderMorph\("threads"\)/,
-    "the existing compact room becomes the existing expanded room before the picker is shown");
-  assert.match(picker, /New Codex task/);
-  assert.match(picker, /New Claude Code session/);
-  assert.match(picker, /current \$\{session\.surface === "terminal" \? "terminal " : ""\}\$\{noun\}/);
-  assert.match(picker, /lastMessageAt \|\| session\.lastActiveAt/);
-  assert.doesNotMatch(footer, /if \(bound\) \{[\s\S]*openRelayFromUI\(id, source, "open", host\)/,
-    "legacy materialization cannot bypass destination choice");
-  assert.doesNotMatch(picker, /if \(result\?\.binding\) \{[\s\S]*window\.relay\.continueSession/,
-    "a remembered binding is labeled in the picker instead of short-circuiting it");
-  assert.match(picker, /if \(!state \|\| state\.delivering \|\| button\.disabled\) return;/,
-    "one picker selection blocks every competing row until delivery settles");
-  assert.match(picker, /querySelectorAll\("\.sp-row"\)[\s\S]*row\.disabled = true/,
-    "double-clicks and rapid destination changes cannot emit concurrent IPC deliveries");
-  assert.match(footer, /loadSessionPicker\(id, host, relaySubject\(message\) \|\| "Relay", null, source\)/,
-    "received and sent rows enter the same immediate picker path");
-  assert.doesNotMatch(footer, /if \(source === "relay"\)/,
-    "sent Relays cannot bypass the picker and silently create a fresh session");
+  const wire = footer.slice(footer.indexOf("function wireHostOpen(scope)"), footer.indexOf("function retiredSessionPickerEntry"));
+  assert.match(wire, /openRelayFromUI\(id, source, b\.getAttribute\("data-continues"\) === "1" \? "open" : "fresh", host\);/);
+  assert.doesNotMatch(wire, /loadSessionPicker|closeSessionPicker|wireSessionPickerRows/);
+  assert.doesNotMatch(wire, /if \(source === "relay"\)/, "sent Relays take the same path as received ones");
+  assert.match(footer, /data-continues="\$\{continues \? "1" : "0"\}"/, "the row carries the fact the click acts on");
+  assert.doesNotMatch(footer, /"Choose where this Relay lands"|\$\{selected \? " pressed" : ""\}/);
+  assert.doesNotMatch(html, /id="sessionPickerView"/, "there is still no standalone picker page");
+  // Terminal only: the sentence, and the button that copies exactly it.
+  assert.match(footer, /Pull \$\{esc\(whose\)\} relay <span class="t">“\$\{esc\(subject\)\}”<\/span>/);
+  assert.match(footer, /data-pull-copy="\$\{esc\(sentence\)\}">Copy for your agent<\/button>/);
+  assert.match(wire, /navigator\.clipboard\.writeText\(b\.getAttribute\("data-pull-copy"\) \|\| ""\)/);
+  assert.doesNotMatch(footer.slice(footer.indexOf("function pullSentenceHtml"), footer.indexOf("function wireHostOpen")), /https?:|shareLink|\/i\//,
+    "no link in the sentence: the pill is here, so Relay is installed, and the agent pulls by name");
 });
 
 test("composer attachments are enabled across picker, paste, and drop", () => {

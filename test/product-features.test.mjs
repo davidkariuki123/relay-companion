@@ -185,18 +185,19 @@ test("disabled Tasks and Cowork do not remain in Settings", () => {
   assert.doesNotMatch(source, /\bproductFeatures\b/, "renderer must use feature flags from its payload");
 });
 
-test("Settings always offers where relays open, and the fresh open goes there", () => {
+test("the You page always offers which app opens relays, and the fresh open goes there", () => {
   // Sven, 2026-08-17: "settings ... just needs to have which client you use
   // (codex and claude) ... and users can change it." The setting used to render
   // only with Tasks, so every prod user was pinned to Claude Code; and a
   // fresh open passed no host, so the frontmost-window heuristic — not the
-  // person's choice — decided where the relay landed. The enabled apps are a
-  // promise: the switches are unconditional and every fresh open honours them.
+  // person's choice — decided where the relay landed. The chosen app is a
+  // promise: the section is unconditional for a paired account and every
+  // fresh open honours it.
   const source = fs.readFileSync(path.join(here, "../overlay/inbox.html"), "utf8");
   const settings = source.slice(source.indexOf("function renderSettings()"), source.indexOf("function wireSettings()"));
-  assert.match(settings, /<div class="sv-open-section" id="protoPrefs" data-stop="1">\s*<div class="sv-open-title">Open Relays with<\/div>/);
-  assert.match(settings, /Choose which app buttons appear on each Relay\./);
-  assert.doesNotMatch(settings, /features\?\.requests === true\) html \+= `\s*<div id="protoPrefs"/, "the picker no longer hides with Tasks");
+  assert.match(settings, /if \(info\.paired\) \{\s*html \+= yourAgentHtml\(\);\s*html \+= yourLinkHtml\(\);/);
+  assert.doesNotMatch(settings, /Open Relays with|protoPrefs/, "the two-switch picker is gone");
+  assert.match(source, /<div class="sv-open-section" id="yourAgent" data-stop="1">\s*<div class="sv-open-title">Your agent<\/div>/);
   const open = source.slice(source.indexOf("function openRelayFromUI("), source.indexOf("let unreadCount = 0;"));
   assert.match(open, /mode === "fresh" && window\.relay\.openFresh\) window\.relay\.openFresh\(id, host \|\| hostKeyFor\(agentAppName\(\)\), note\)/);
   // The same default on every un-hosted open: plain, current, and the sent copy.
@@ -205,11 +206,15 @@ test("Settings always offers where relays open, and the fresh open goes there", 
   assert.match(open, /window\.relay\.openSent\(id, host \|\| hostKeyFor\(agentAppName\(\)\)\)/);
 });
 
-test("Agent connection rows stay gated while the unified chat rows remain available", () => {
+test("Agent connection rows stay gated, and the chat-connector rows are gone", () => {
+  // The You page says what is connected; setup installs the skill for
+  // everyone (Shane, 2026-09-07). "ChatGPT coming soon" and "Claude · Set up"
+  // were a second place to configure an agent, and Sven's Settings has none.
   const source = fs.readFileSync(path.join(here, "../overlay/inbox.html"), "utf8");
   const settings = source.slice(source.indexOf("function renderSettings()"), source.indexOf("function wireSettings()"));
   assert.match(settings, /html \+= connectionsHtml\(info, payload\.features\?\.agentConnections === true\)/);
-  assert.match(source, /const rows = `\$\{includeAgentProviders \? providerConnectionRowsHtml\(\) : ""\}\$\{chatConnectionRowsHtml\(info\)\}`/);
+  assert.match(source, /const rows = includeAgentProviders \? providerConnectionRowsHtml\(\) : "";/);
+  assert.doesNotMatch(source, /chatConnectionRowsHtml|connectClaudeFromSettings|Relay in ChatGPT is coming soon/);
   assert.doesNotMatch(settings, /providerConnectionHtml|chatConnectionsHtml/);
   const load = source.slice(source.indexOf("async function loadSettings()"), source.indexOf("// Provider state is live product state"));
   assert.match(load, /const connectionsOn = payload\.features\?\.agentConnections === true;/);
@@ -297,32 +302,36 @@ test("production agent-work entry points enforce the feature row before native t
   assert.match(cli, /--full and --messages-only were removed/);
 });
 
-test("detection feeds independent provider switches and desktop/terminal surface choices", () => {
+test("detection feeds one chosen app, desktop when present and terminal as the fallback", () => {
   const source = fs.readFileSync(path.join(here, "../overlay/inbox.html"), "utf8");
   const pick = source.slice(source.indexOf("let agentSurfaces = null;"), source.indexOf("function chatOrder()"));
   assert.match(pick, /const key = app === "Codex" \? "_codexDesktop" : app === "Claude Code" \? "_claudeDesktop" : "";/);
   assert.match(pick, /const key = app === "Codex" \? "_codexCli" : app === "Claude Code" \? "_claudeCli" : "";/);
-  assert.match(pick, /function appAvailable\(app\) \{\s*const entry = providerEntry\(app\);\s*return !entry \|\| entry\.available !== false;/,
-    "CLI-only providers remain usable even without a desktop bundle");
+  assert.match(pick, /return entry\?\.available === true;/,
+    "unknown availability never claims a connected provider");
   assert.match(pick, /return available\.includes\("desktop"\) \? "desktop" : "terminal";/,
     "desktop is the default when present and terminal is the CLI-only fallback");
   assert.match(pick, /const AGENT_APPS_PREF = "proto\.agentApps\.v2";/);
   assert.match(pick, /const requested = saved\.split\("\|"\)\.filter\(\(app\) => AGENT_APP_OPTIONS\.includes\(app\) && appAvailable\(app\)\);/);
-  assert.match(pick, /if \(saved === "__none__"\) return \[\];/);
-  assert.match(pick, /return present;/, "missing v2 state defaults to all installed providers without inventing Claude");
-  assert.doesNotMatch(pick, /if \(selected\.size <= 1\) return;/, "the final provider can be switched off");
-  assert.match(pick, /next\.length \? next\.join\("\|"\) : "__none__"/);
-  // The label and the rows follow the selected set: "your agent" and both rows when both are on.
-  assert.match(pick, /choice === AGENT_APP_BOTH \|\| !choice \? "your agent" : choice/);
-  assert.match(pick, /if \(choice === AGENT_APP_BOTH\) return \["codex", "claude"\];/);
+  // ONE app (Sven, 2026-09-08): a saved pair collapses to its first entry, no
+  // saved choice means the first installed app, and there is no "none" — a
+  // letter always has a door.
+  assert.match(pick, /const chosen = requested\[0\] \|\| \(saved \? "" : present\[0\]\) \|\| "";/);
+  assert.match(pick, /preference\?\.surface === "other"/);
+  assert.doesNotMatch(pick, /__none__|AGENT_APP_BOTH|setAgentAppEnabled/);
+  assert.match(pick, /function agentAppName\(\) \{ return agentAppChoice\(\) \|\| "your agent"; \}/);
+  assert.match(pick, /return \[hostKeyFor\(choice\) === "codex" \? "codex" : "claude"\];/, "one host row per letter");
+  assert.match(pick, /function agentOpensInApp\(\)[\s\S]*agentSurfacePreference\(choice\) === "desktop"/);
   assert.match(pick, /try \{ next = await window\.relay\.capabilities\(\); \}/, "the renderer asks main, never probes the disk itself");
   const settings = source.slice(source.indexOf("function renderSettings()"), source.indexOf("function wireSettings()"));
-  assert.match(settings, /\$\{AGENT_APP_OPTIONS\.map\(\(app\) => \{/);
-  assert.match(settings, /const logo = app === "Codex" \? "codexMark\.svg" : "claudeCodeMark\.svg";/, "the settings use Relay's shipped app marks");
-  assert.match(settings, /role="switch" data-agent-app="\$\{app\}" aria-checked="\$\{on \? "true" : "false"\}"/);
-  assert.match(settings, /data-agent-surface="\$\{app\}"/, "machines with both surfaces can choose Desktop or Terminal");
-  assert.match(settings, /\$\{!available \? "disabled" : ""\}/, "only unavailable providers have disabled switches");
-  assert.match(settings, /setAgentAppEnabled\(sw\.getAttribute\("data-agent-app"\), sw\.getAttribute\("aria-checked"\) !== "true"\);/);
+  const agent = source.slice(source.indexOf("function yourAgentHtml()"), source.indexOf("function yourLinkHtml()"));
+  assert.match(agent, /\$\{AGENT_APP_OPTIONS\.map\(\(app\) => \{/);
+  assert.match(agent, /const logo = app === "Codex" \? "codexMark\.svg" : "claudeCodeMark\.svg";/, "the page uses Relay's shipped app marks");
+  // The chosen app wears its state in words; the other offers itself in words.
+  assert.match(agent, /<span class="sv-open-state">\$\{inApp \? "Opens relays" : "Chosen"\}<\/span>/);
+  assert.match(agent, /<button class="sv-choose" type="button" data-agent-choose="\$\{app\}">Use this one<\/button>/);
+  assert.doesNotMatch(agent, /role="switch"|data-agent-surface/, "no switches, no surface select");
+  assert.match(settings, /setAgentOpeningApp\(button\.getAttribute\("data-agent-choose"\)\);/);
   assert.match(source, /loadAgentSurfaces\(\)\.catch\(\(\) => \{\}\);/, "capabilities load at boot");
   assert.match(source, /const seq = \+\+settingsLoadSeq;\s*loadAgentSurfaces\(\)/, "and again whenever Settings loads");
 });

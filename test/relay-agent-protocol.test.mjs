@@ -180,6 +180,48 @@ test("thin and full package CLIs expose the bundled protocol helper without hand
   assert.doesNotMatch(help.stdout, /accessToken|clientSecret|codeVerifier/);
 });
 
+test("custom tutorial freezes both documents across an uncertain result, supports skip and saves preference", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-tutorial-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const requests = [];
+  const server = http.createServer(async (req, res) => {
+    res.setHeader("content-type", "application/json");
+    if (req.url === "/v1/e2ee/status") return res.end(JSON.stringify({ mode: "off" }));
+    let body = ""; for await (const chunk of req) body += chunk;
+    if (req.url !== "/v1/relays") { res.statusCode = 404; return res.end("{}"); }
+    requests.push(JSON.parse(body));
+    res.statusCode = requests.length === 1 ? 503 : 200;
+    res.end(JSON.stringify(requests.length === 1 ? { error: "uncertain" } : { relayId: "first_custom", state: "delivered" }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const configFile = path.join(root, "agent-protocol.json");
+  const initial = { version: 1, consentVersion: 2, apiUrl: `http://127.0.0.1:${server.address().port}`,
+    accessToken: "web_0123456789012345678901234567890123456789", account: { relayUserId: "usr_receiver" },
+    inviter: { relayUserId: "usr_inviter", name: "Inviter" }, tutorial: { state: "pending", idempotencyKey: "custom-tutorial-key" } };
+  fs.writeFileSync(configFile, JSON.stringify(initial));
+  const env = { RELAY_CONFIG_DIR: root, RELAY_AGENT_CONFIG: configFile, RELAY_AGENT_LOCAL: path.join(root, "absent"), RELAY_AGENT_ALLOW_LOOPBACK: "1" };
+  const draft = { forHuman: "Hi! Here is my own message.", forAgent: "This is my approved custom welcome." };
+  assert.equal((await runProtocol(["tutorial-send", "--draft-stdin"], { env, input: JSON.stringify(draft) })).code, 1);
+  assert.equal(requests.length, 0, "setup does not approve a send");
+  assert.equal((await runProtocol(["tutorial-send", "--approved", "--draft-stdin"], { env, input: JSON.stringify(draft) })).code, 1);
+  assert.equal(requests.length, 1);
+  assert.equal((await runProtocol(["tutorial-skip"], { env })).code, 1, "an uncertain send cannot be hidden as skipped");
+  const changed = await runProtocol(["tutorial-send", "--approved", "--draft-stdin"], { env, input: JSON.stringify({ ...draft, forHuman: "Changed" }) });
+  assert.match(changed.stderr, /exact approved payload/);
+  assert.equal(requests.length, 1);
+  const retry = await runProtocol(["tutorial-send", "--approved"], { env });
+  assert.equal(retry.code, 0, retry.stderr);
+  assert.deepEqual(requests[0], requests[1]);
+  assert.equal(requests[1].forHuman, draft.forHuman);
+  assert.equal((await runProtocol(["opening-preference", "terminal", "codex"], { env })).code, 0);
+  assert.deepEqual(JSON.parse(fs.readFileSync(configFile)).openingPreference, { surface: "terminal", provider: "codex" });
+  fs.writeFileSync(configFile, JSON.stringify(initial));
+  assert.equal((await runProtocol(["tutorial-skip"], { env })).code, 0);
+  assert.equal(JSON.parse((await runProtocol(["tutorial-send", "--approved"], { env })).stdout).status, "skipped");
+  assert.equal(requests.length, 2, "skip sends nothing");
+});
+
 test("browser-approved PKCE connection keeps secrets out of output and powers direct sends", async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-agent-protocol-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

@@ -1260,6 +1260,8 @@ async function main() {
   const { flags, positional } = parseFlags(rest);
   rejectRemovedCapabilityFlags(command, flags);
   switch (command) {
+    case "review-onboarding":
+      return (await import("../src/onboarding-review.js")).runOnboardingReview();
     case "version":
     case "--version":
     case "-v":
@@ -1392,6 +1394,7 @@ async function main() {
           "  relay open --task <taskId> --host claude|codex        Materialize a developer Request into a native agent session",
           "  relay daemon [--interval MS]                          Run Relay delivery; developer accounts also receive Requests",
           "  relay pill                                            Launch the Relay pill",
+          "  relay review-onboarding                               Start an isolated local onboarding rehearsal (no real sends)",
           "  relay mcp                                             Run tools allowed by the signed-in account",
           "  relay update                                          Update Relay",
           "  relay update-channel [dev|staging|stable]             Show or switch the release channel",

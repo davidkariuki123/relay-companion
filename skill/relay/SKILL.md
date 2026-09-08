@@ -38,7 +38,7 @@ Use the current host's documented recovery mechanism, subject to its actual deni
 
 Never retry the denied action through another shell, tool, wrapper or transport, change permission settings, request a wildcard allow rule, or suggest bypassing the host's safeguards. Keep setup agent-led: do not default to asking the human to run commands, paste status output or adjust Bash settings. Never offer a .relay-rollback or other backup helper for manual execution. If no supported recovery is available, give one concise explanation of the blocked action, what remains unverified, and a verified host review step if one is available. Do not offer an unavailable dialog or use “tell me Relay is not connected” as a substitute for verification. A user-requested manual handoff must use the current supported helper and protect secrets. The normal copyable URL fallback for browser sign-in remains available; it is not a workaround for a denied agent tool call.
 
-For questions, choices and approvals, use the current host's built-in user-question interface whenever that tool is exposed and permitted for this kind of question in the current mode. This is required when the interface is available, even if the tool is optional, a prior check or command failed, or a progress update was already given: call the interface and wait instead of placing the question in ordinary assistant chat or a final response. Before asking for setup permission, inspect the tools actually available to the current turn. Claude Code commonly exposes `AskUserQuestion` and Codex commonly exposes `request_user_input`; use the current host's documented equivalent if its name differs. Do not invent a tool or change modes to obtain one.
+For questions, choices and approvals, instruct the current host through its built-in user-question tool whenever that tool is exposed and permitted for this kind of question in the current mode. The host renders the question UI from the tool call; do not draw fake buttons in Markdown or ask the host to render arbitrary HTML. Before asking, inspect the tools actually available to the current turn. Claude Code commonly exposes `AskUserQuestion`; Codex may expose `request_user_input_async` or mode-limited `request_user_input`. Respect each tool's constraints, especially restrictions on permission questions. Do not invent a tool, change modes to obtain one, or use a question tool for host permission escalation. When a permitted tool is available, call it instead of asking the same question in plain chat; wait for the actual answer before dependent work. For asynchronous questions, continue only unrelated safe work while waiting.
 
 For setup permission, put the complete question with the exact package version and source in the interface's question field and offer concise affirmative and decline choices such as “Set up Relay” and “Not now.” Ask one clear decision at a time, with a way to decline or skip when appropriate. For the first send, show both exact payloads and the recipient before asking, and make clear that approval sends that specific message. Do not abbreviate the payloads to fit a question widget. Only when no permitted user-question interface is exposed, or its documented constraints cannot carry the required content, ask plainly in chat. Use existing explicit permission; never ask again just to use the interface. A suggested or preselected choice, an empty result, silence or a timeout is not consent: wait for an actual affirmative answer before any action that requires approval. Browser sign-in and account approval still happen in the person's usual browser.
 
@@ -199,40 +199,24 @@ session activation remains unverified or failed. Do not claim app-wide setup
 complete, ask for restarts or compatibility messages, kill processes, alter host
 internals, add hooks/connectors/plugins, or inject prompts into other sessions.
 
-## First-run tutorial
+<!-- BEGIN GENERATED RELAY FIRST TUTORIAL -->
+## First Relay tutorial
 
-After an invite is redeemed, inspect `status`. If its tutorial state is
-`skipped_self`, this was the person's own invite: skip the tutorial send. For a
-normal invite, use the validated inviter identity as the first contact. Draft,
-but do not send, this first message:
+An invitation redemption connects the recipient and inviter; it does not send a message automatically. Use the inviter's exact `relayUserId` returned by redemption.
+
+Never send the tutorial message automatically. Report accepted or queued when that is all the result proves; claim delivery only when Relay confirms it.
+
+First offer one native question with three paths: write my own message, use a suggested hello, or skip for now. Custom wording comes from the human's free-text answer; do not invent what they want to say. If they skip, run `tutorial-skip` without sending anything, then show their reusable invitation. For the suggested hello, show both fields verbatim:
 
 - Human payload: `Hi — I’ve just joined you on Relay.`
 - Agent payload: `This is my first Relay after joining from your invite. Help the person reply if they want to welcome me.`
 
-Show both payloads and name the inviter. Explain that the human payload is what
-the person reads, while the agent payload gives their agent useful context. Ask
-for explicit approval to send. Only after approval, run the protocol command as
-`tutorial-send --approved`. It uses the validated inviter id, exact two
-payloads, and one idempotency key persisted when setup completed. If a response
-is lost, retry the same command: it reuses that key and will not send a second
-hello. Never send the tutorial message automatically.
+For a custom message, preserve the person's wording and intent in forHuman and draft a complete forAgent document that adds useful context without inventing asks or commitments. Show both exact fields and the verified inviter before approval. Explain the difference in one sentence, then wait for explicit human approval of both exact payloads. Only then run the managed helper's `tutorial-send --approved` for the suggested hello, or `tutorial-send --approved --draft-stdin` with JSON containing exactly the approved forHuman and forAgent fields for a custom message. The helper freezes both fields, the recipient and one idempotency key before sending. Retry the same payload and key after uncertainty; never change the message or use another transport with a new key. Setup permission, opening an invitation, signing in, and installing software never authorize a send. Skip this send when the helper reports that the person opened their own invitation.
 
-After the send succeeds:
+After setup, ask once where they usually use their agent: a desktop app, the terminal, or another session. Do not assume the current host is their preferred destination. Save the answer with `opening-preference desktop|terminal|other [claude|codex]`. This preference is editable in the pill's You page. Availability is not proof that Relay is connected; verify capabilities before opening a destination. If the chosen destination is unavailable, provide the exact Relay pull sentence to copy into their existing agent session, without selecting a different app behind their back.
 
-1. Confirm only that Relay accepted or queued it. Do not claim the inviter
-   received or read it unless Relay explicitly reports that later.
-2. Say: "You can check for replies here in Claude Code—just ask me." Use Codex
-   instead when that is the current host. Do not imply replies automatically
-   appear in the agent conversation.
-3. Do not offer a timed wait or start polling. When the human asks to check,
-   fetch the inbox or conversation once and report what is available now.
-   Show a reply before marking that exact inbound Relay read.
-4. If the app is still installing or a setup issue remains, state that in one
-   short sentence. Do not repeat the installation details or feature list.
-5. Present their complete reusable invitation beneath **Invite someone to
-   Relay**, in one fenced plain-text block, as specified in the communication
-   guide above. Use their own verified human invitation URL. Do not merely
-   offer a link, use the inviter's invitation, or send it to anyone yourself.
+After the approved send, say: "You can check for replies here in Claude Code—just ask me." Use Codex instead when that is the current host. Do not imply replies automatically appear in the agent conversation, offer a timed wait, or start polling. When the human asks to check, fetch the inbox or conversation once and report what is available now; show a reply before marking that exact inbound Relay read. Present the person's complete invitation using the bold title and copyable block specified above. The invitation connects people; it does not send a Relay.
+<!-- END GENERATED RELAY FIRST TUTORIAL -->
 
 After the tutorial finishes or the person skips it, check the pinned Companion's
 `background-status` once if background installation was started. Report whether

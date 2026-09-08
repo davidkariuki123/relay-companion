@@ -453,12 +453,15 @@ test("open-in-current on a sent relay forges the sent copy first and never acks"
   assert.match(main, /openPacket\(id, \{ sent: true, fresh: true, host: String\(host \|\| ""\) \}\)/);
 });
 
-test("the agent row always opens the exact provider's destination picker", () => {
+test("the agent row opens the exact provider straight away, naming its host on every IPC", () => {
+  // The Minimal design (Sven, 2026-09-08): the click is the open. The row
+  // carries whether this app already has the relay, and the open names the
+  // host so main never falls back to the frontmost-window guess.
   assert.match(preload, /open: \(id, host\) => ipcRenderer\.send\("relay:open", id, host\)/);
   assert.match(preload, /openSent: \(id, host\) => ipcRenderer\.send\("relay:openSent", id, host\)/);
-  const wire = html.slice(html.indexOf("function wireHostOpen"), html.indexOf("// Before 0.1.290"));
-  assert.match(wire, /loadSessionPicker\(id, host, relaySubject\(message\) \|\| "Relay", null, source\)/);
-  assert.doesNotMatch(wire, /materializedCodex|materializedClaude|openRelayFromUI/);
+  const wire = html.slice(html.indexOf("function wireHostOpen"), html.indexOf("function retiredSessionPickerEntry"));
+  assert.match(wire, /openRelayFromUI\(id, source, b\.getAttribute\("data-continues"\) === "1" \? "open" : "fresh", host\);/);
+  assert.doesNotMatch(wire, /loadSessionPicker/);
 });
 
 test("Open in Codex imports the request's existing native thread instead of forking it", () => {

@@ -39,6 +39,7 @@ function runThreadMessages(payload, optimisticChatReplies, { realDelivery = fals
     "const activeMentionVisit = null;",
     realDelivery ? pillFunction("sentIsRead") : "",
     realDelivery ? pillFunction("sentIsDelivered") : "",
+    realDelivery ? pillFunction("sentIsAcknowledged") : "",
     realClassifier ? pillFunction("relayTextLike") : "",
     selfAuthored,
     pillFunction("threadMessages"),
@@ -48,7 +49,7 @@ function runThreadMessages(payload, optimisticChatReplies, { realDelivery = fals
     "payload", "optimisticChatReplies", "canonicalChatDetails", "contactChatAnchors",
     "requestThreadIds", "isTaskRow", "isRelayListKind", "onRequestThread",
     "relaySubject", "relayTextLike", "isCompletionRelay", "relaySender",
-    "bodyPreview", "sentRecipient", "sentIsRead", "sentIsDelivered", "sentSubject",
+    "bodyPreview", "sentRecipient", "sentIsRead", "sentIsDelivered", "sentIsAcknowledged", "sentSubject",
     `"use strict"; ${source}`,
   )(
     payload, optimisticChatReplies, new Map(), new Map(),
@@ -56,7 +57,7 @@ function runThreadMessages(payload, optimisticChatReplies, { realDelivery = fals
     (r) => String(r.title || ""), () => true, () => false,
     (r) => String(r.senderName || "Sender"),
     () => "", (s) => (s.recipient && s.recipient.name) || "member",
-    () => false, () => false, (s) => String(s.title || ""),
+    () => false, () => false, () => false, (s) => String(s.title || ""),
   );
 }
 

@@ -159,8 +159,9 @@ test("the Relays tab is one latest-message row per exact identity", () => {
     people: ["Shane", "Sven"],
   };
   const quiet = { name: "New group", hasActivity: false, latest: { at: "2026-08-13T14:00:00Z" } };
-  const relayIdentityRows = Function("chatSections", `"use strict"; ${identitySource}; return relayIdentityRows;`)(
-    () => ({ rooms: [shane, granular, quiet] }),
+  // Nobody here is a stranger: every room is known, so no request is hidden.
+  const relayIdentityRows = Function("chatSections", "knownAddresses", "isRequestRoom", `"use strict"; ${identitySource}; return relayIdentityRows;`)(
+    () => ({ rooms: [shane, granular, quiet] }), () => new Set(), () => false,
   );
   const rows = relayIdentityRows();
   assert.deepEqual(rows, [shane, granular]);
@@ -170,7 +171,8 @@ test("the Relays tab is one latest-message row per exact identity", () => {
   const render = html.slice(html.indexOf("function renderRelays()"), html.indexOf("function relayIdentityRowHtml"));
   assert.match(render, /const allRows = threadMessages\(\)[\s\S]*?\.sort\(\(a, b\) => new Date\(b\.at/);
   assert.match(identitySource, /const \{ rooms \} = chatSections\(\)/);
-  assert.match(identitySource, /filter\(\(room\) => room\.hasActivity !== false\)/);
+  // A stranger's first message is a request and waits in People (2026-09-08).
+  assert.match(identitySource, /filter\(\(room\) => room\.hasActivity !== false && !isRequestRoom\(room, known\)\)/);
   assert.match(identitySource, /latestAt: room\.latestAt \|\| \(room\.latest && room\.latest\.at\)/);
   assert.doesNotMatch(identitySource, /message\.party|message\.partyKey|new Map/,
     "Relays must not rebuild room identity from agent-authored messages");
@@ -195,8 +197,8 @@ test("a newer Task becomes the person's latest Relays preview", () => {
       request: true,
     },
   };
-  const relayIdentityRows = Function("chatSections", `"use strict"; ${identitySource}; return relayIdentityRows;`)(
-    () => ({ rooms: [room] }),
+  const relayIdentityRows = Function("chatSections", "knownAddresses", "isRequestRoom", `"use strict"; ${identitySource}; return relayIdentityRows;`)(
+    () => ({ rooms: [room] }), () => new Set(), () => false,
   );
   const [shane] = relayIdentityRows();
 
@@ -1002,7 +1004,7 @@ test("hand-offs speak in conversation terms: starts vs continues, said BEFORE th
   assert.match(html, /if \(request && taskClaimAllowsStart\(r\) && \(onAgent \|\| requestActionable\)\) return requestDockHtml\(r, \{ inline: true \}\)/);
   assert.match(html, /if \(onAgent\) return relayWorkDockHtml\(r, \{ inline: true \}\)/);
   assert.match(html, /data-handoff="\$\{esc\(r\.id\)\}"/);
-  assert.match(html, /<button type="button" id="qrSend">Send<\/button>/);
+  assert.match(html, /<button type="button" id="qrSend">Relay<\/button>/);
   assert.match(html, /if \(onAgent && !workOn\) return "";/,
     "the agent document ends after its full provider actions when Relay Work is unavailable");
   // And the destination line lives where hand-offs actually happen — inside

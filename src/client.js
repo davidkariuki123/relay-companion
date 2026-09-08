@@ -1561,6 +1561,18 @@ export class RelayClient {
     return this.#req("GET", "/v1/contacts");
   }
 
+  addRelayContact(email) {
+    return this.#req("POST", "/v1/contacts/on-relay", { email });
+  }
+
+  connectionBlocks() {
+    return this.#req("GET", "/v1/invites-v2/blocks");
+  }
+
+  setConnectionBlocked(userId, blocked) {
+    return this.#req(blocked ? "POST" : "DELETE", `/v1/invites-v2/blocks/${encodeURIComponent(userId)}`, blocked ? {} : undefined);
+  }
+
   upsertContact({ name, firstName, surname, lastName, email, emails, notes, idempotencyKey }) {
     return this.#req("POST", "/v1/contacts", { name, firstName, surname, lastName, email, emails, notes, idempotencyKey });
   }

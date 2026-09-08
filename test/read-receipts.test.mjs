@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -58,6 +59,27 @@ test("the ladder before anyone has read it: Sent, then Delivered", () => {
   assert.equal(receipts.forLatest(delivered, [delivered], format).expandable, false);
   const read = { ...delivered, readReceipts:[member("Shane", 4)] };
   assert.equal(receipts.forLatest(read, [read], format).label, "Seen t4");
+});
+
+test("the rung past Seen: their agent opened it", () => {
+  // The server's ladder has a fourth rung — acknowledged — set when the
+  // recipient's pill hands the relay to an app. A sender reads it as the
+  // thing they actually wanted to know (Sven, 2026-09-08). A person who only
+  // read it stays at Seen; a group keeps its roster labels.
+  const seen = { direction:"out", at:at(0), delivered:true, readReceipts:[member("Shane", 4)] };
+  assert.equal(receipts.forLatest(seen, [seen], format).label, "Seen t4");
+  const opened = { ...seen, agentOpened:true };
+  assert.equal(receipts.forLatest(opened, [opened], format).label, "Their agent opened it");
+  const group = { ...opened, isGroup:true, readReceipts:[member("Shane", 4), member("David")] };
+  assert.equal(receipts.forLatest(group, [group], format).label, "Seen by Shane · t4");
+});
+
+test("every outbound row carries the rung from the sent item's state", () => {
+  const html = fs.readFileSync(new URL("../overlay/inbox.html", import.meta.url), "utf8");
+  assert.match(html, /function sentIsAcknowledged\(r\) \{\s*return String\(\(r && r\.state\) \|\| ""\)\.toLowerCase\(\) === "acknowledged";/);
+  assert.match(html, /agentOpened: sentTwin \? sentIsAcknowledged\(sentTwin\) : false,/, "a self-authored inbound twin");
+  assert.match(html, /agentOpened: !s\.groupSendId && sentIsAcknowledged\(s\),/, "a sent row");
+  assert.match(html, /agentOpened:mine && String\(item\?\.state \|\| ""\)\.toLowerCase\(\) === "acknowledged",/, "a resolved direct-chat row");
 });
 
 test("a message still on this device shows no receipt at all", () => {

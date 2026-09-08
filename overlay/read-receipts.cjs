@@ -62,8 +62,11 @@
     let label;
 
     if (!isGroup) {
+      // THE RUNG PAST SEEN (Sven, 2026-09-08): the recipient's pill handed the
+      // relay to their agent. That is the server's "acknowledged" state, set by
+      // the host open; a person who only read it stays at Seen.
       const time = showTime(readers[0].readAt);
-      label = `Seen${time ? ` ${time}` : ""}`;
+      label = message.agentOpened ? "Their agent opened it" : `Seen${time ? ` ${time}` : ""}`;
     } else if (!unread.length) {
       const completion = readers.reduce((latest, reader) => {
         const at = timestamp(reader.readAt);

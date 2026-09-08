@@ -70,7 +70,7 @@ test("Connections uses the shared section species and concise privacy copy", () 
   assert.match(html, /class="sv-provider-section" data-stop="1">\s*<div class="sv-open-title">Connections<\/div>\s*<div class="sv-provider-list sv-agent-provider-list">/);
   assert.doesNotMatch(html, /Chat connections/);
   assert.equal((html.match(/<div class="sv-open-title">Connections<\/div>/g) || []).length, 1);
-  assert.match(html, /const rows = `\$\{includeAgentProviders \? providerConnectionRowsHtml\(\) : ""\}\$\{chatConnectionRowsHtml\(info\)\}`/);
+  assert.match(html, /const rows = includeAgentProviders \? providerConnectionRowsHtml\(\) : "";/);
   assert.doesNotMatch(html, /sv-provider-intro/);
   assert.doesNotMatch(html, /Relay uses each app's local profile/);
 });

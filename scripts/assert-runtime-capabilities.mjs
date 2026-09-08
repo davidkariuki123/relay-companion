@@ -30,8 +30,11 @@ export const REQUIRED_RUNTIME_CAPABILITIES = {
       'deliverToSession: (id, selection) => ipcRenderer.invoke("relay:deliverToSession"',
     ],
     "overlay/inbox.html": [
-      "function sessionPickerInlineHtml(",
-      "Choose where this Relay lands",
+      // The letter's one verb continues the exact chat that already has the
+      // relay (mode "open") or forges a new one; the picker's code stays
+      // behind retiredSessionPickerEntry for the surfaces that still choose.
+      'data-continues="${continues ? "1" : "0"}"',
+      "function retiredSessionPickerEntry(",
       "window.relay.sessionPicker",
       "window.relay.deliverToSession",
     ],

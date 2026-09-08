@@ -49,23 +49,20 @@ test("required E2EE routes Claude through the local runtime with no hosted fallb
   assert.match(body, /ChatGPT connections are not available with Relay E2EE yet/);
 });
 
-test("ordinary users see ChatGPT as coming soon and Claude as connectable", () => {
+test("the pill's You page carries no chat-connector rows; the setup flow keeps its own", () => {
+  // The chat connectors (ChatGPT coming soon, Claude chat) left the pill's
+  // Settings with the Minimal design (Sven, 2026-09-08): setup installs the
+  // skill for everyone, and the You page says what is connected. The
+  // connector hand-off itself still lives in main for the signup flow.
   assert.doesNotMatch(html, /Chat connections/);
   assert.equal((html.match(/<div class="sv-open-title">Connections<\/div>/g) || []).length, 1);
   assert.match(html, /function connectionsHtml\(info, includeAgentProviders\)/);
-  assert.match(html, /includeAgentProviders \? providerConnectionRowsHtml\(\) : ""/);
-  assert.match(html, /chatConnectionRowsHtml\(info\)/);
-  assert.match(html, /id:"chatgpt-chat",\s*label:"ChatGPT",\s*logo:"codexMark\.svg"/);
-  assert.match(html, /meta:"Relay in ChatGPT is coming soon\."/);
-  assert.match(html, /<button class="sv-provider-btn" type="button" disabled>Coming soon<\/button>/);
-  assert.match(html, /id:"claude-chat",\s*label:"Claude",\s*logo:"claudeCodeMark\.svg"/);
-  assert.doesNotMatch(html, /id="svConnectChatGPT"/);
-  assert.doesNotMatch(html, /connectChatGptFromSettings/);
-  assert.match(html, /id="svConnectClaude"/);
+  assert.match(html, /const rows = includeAgentProviders \? providerConnectionRowsHtml\(\) : "";/);
+  assert.doesNotMatch(html, /chatConnectionRowsHtml|id:"chatgpt-chat"|id:"claude-chat"|id="svConnectClaude"|connectClaudeFromSettings/);
   const render = html.slice(html.indexOf("function renderSettings()"), html.indexOf("function wireSettings()"));
   assert.match(render, /html \+= connectionsHtml\(info, payload\.features\?\.agentConnections === true\)/);
   assert.doesNotMatch(render, /chatConnectionsHtml|providerConnectionHtml/);
-  assert.match(html, /connectClaude\.addEventListener\("click", connectClaudeFromSettings\)/);
+  assert.match(main, /ipcMain\.handle\("relay:connectClaude", \(\) => connectClaude\(\)\)/);
 });
 
 test("versioned first-send onboarding keeps durable progress for each account", () => {
@@ -75,7 +72,7 @@ test("versioned first-send onboarding keeps durable progress for each account", 
   assert.match(main, /ipcMain\.handle\("relay:completeSetupTutorial", \(\) => completeSetupTutorial\(\)\)/);
   assert.match(html, /payload\.ui\?\.onboardingRequired === true/);
   assert.match(html, /signupStage === "first-relay"/);
-  assert.match(html, /Your first Relay is sent\./);
-  assert.match(html, /id="suChatSkip"/);
+  // The send itself ends the chapter (2026-09-08): no "sent" screen follows.
+  assert.match(html, /if \(status === "sent"\) \{ landOnFirstRelay\(\); return; \}/);
   assert.match(html, /id="suChatSkip"/);
 });

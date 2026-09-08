@@ -6,11 +6,13 @@ const html = fs.readFileSync(new URL("../overlay/inbox.html", import.meta.url), 
 const main = fs.readFileSync(new URL("../overlay/main.cjs", import.meta.url), "utf8");
 
 test("People and Channels are distinct counted panes with one consistent add action", () => {
-  assert.match(html, /data-view="contacts">People</);
+  assert.match(html, /data-view="contacts">People <span class="tab-badge gone" id="peopleBadge"/);
   assert.match(html, /id="cvSegPeople"[^>]*>People <span class="cv-seg-n" id="cvSegPeopleN"/);
   assert.match(html, /id="cvSegGroups"[^>]*>Channels <span class="cv-seg-n" id="cvSegGroupsN"/);
-  assert.match(html, /id="cvAdd" aria-label="Add person">\+ Add</);
-  assert.match(html, /id="cvgNew" aria-label="Add channel">\+ Add</);
+  assert.match(html, /id="cvSegRequests"[^>]*>Requests <span class="cv-seg-n" id="cvSegRequestsN"/);
+  // Words over glyphs (Sven, 2026-09-08): the button says Add, not "+ Add".
+  assert.match(html, /id="cvAdd" aria-label="Add person">Add</);
+  assert.match(html, /id="cvgNew" aria-label="Add channel">Add</);
 });
 
 test("People rows use colored identity, editorial metadata, and recency without chevrons", () => {
@@ -19,8 +21,9 @@ test("People rows use colored identity, editorial metadata, and recency without 
   assert.match(render, /class="cv-subrow"/);
   assert.match(render, /class="cv-sub"/);
   assert.match(render, /class="cv-more"/);
-  assert.match(render, /class="cv-via"/);
-  assert.match(render, /!c\.onRelay \? "· by email"/);
+  // No "· by email": there is no email door any more (Sven, 2026-09-08). A
+  // person is in your People because Relay knows them, or not at all.
+  assert.doesNotMatch(render, /cv-via|by email/);
   assert.doesNotMatch(render, /· on Relay|On Relay/);
   assert.match(render, /const recent = c\.updatedAt \? timeAgo\(c\.updatedAt\) : ""/);
   assert.match(render, /class="cv-meta"/);

@@ -475,26 +475,40 @@ async function sendPersisted(body) {
   }
 }
 
-async function sendTutorial(approved) {
+async function sendTutorial(approved, draft) {
   if (!approved) throw new Error("Relay tutorial send requires --approved after the person explicitly approves both payloads.");
   const config = readConfig();
   const tutorial = config.tutorial || {};
-  if (tutorial.state === "skipped_self") return { ok: true, status: "skipped_self" };
+  if (["skipped_self", "skipped"].includes(tutorial.state)) return { ok: true, status: tutorial.state };
   if (tutorial.state === "accepted" && tutorial.relayId) {
     return { ok: true, status: "already_accepted", relayId: tutorial.relayId, state: tutorial.responseState || "" };
   }
   const inviter = requiredRelayIdentity(config.inviter, "inviter");
   const key = String(tutorial.idempotencyKey || "");
   if (key.length < 8) throw new Error("Relay tutorial state is missing its stable idempotency key. Connect again.");
-  config.tutorial = { ...tutorial, state: "attempting", updatedAt: new Date().toISOString() };
-  atomicWrite(configPath(), config);
-  const body = {
+  if (draft && (typeof draft.forHuman !== "string" || !draft.forHuman.trim()
+    || typeof draft.forAgent !== "string" || !draft.forAgent.trim()
+    || Object.keys(draft).some((key) => !["forHuman", "forAgent"].includes(key)))) {
+    throw new Error("The tutorial draft must contain only the two approved, non-empty forHuman and forAgent fields.");
+  }
+  const proposed = {
     recipient: { relayUserId: inviter.relayUserId },
     kind: "message",
-    forHuman: TUTORIAL_HUMAN,
-    forAgent: TUTORIAL_AGENT,
+    forHuman: draft?.forHuman ?? TUTORIAL_HUMAN,
+    forAgent: draft?.forAgent ?? TUTORIAL_AGENT,
     idempotencyKey: key,
   };
+  if (tutorial.payload && draft && JSON.stringify(proposed) !== JSON.stringify(tutorial.payload)) {
+    throw new Error("This tutorial send was already attempted. Retry its exact approved payload; do not change it after an uncertain result.");
+  }
+  // Older attempts used the fixed hello. Preserve that payload across upgrades.
+  if (!tutorial.payload && ["attempting", "rejected"].includes(tutorial.state) && draft
+    && (draft.forHuman !== TUTORIAL_HUMAN || draft.forAgent !== TUTORIAL_AGENT)) {
+    throw new Error("Retry the original tutorial hello without changing its payload.");
+  }
+  const body = tutorial.payload || proposed;
+  config.tutorial = { ...tutorial, payload: body, recipient: body.recipient, state: "attempting", updatedAt: new Date().toISOString() };
+  atomicWrite(configPath(), config);
   try {
     const result = await request("POST", "/v1/relays", body);
     const latest = readConfig();
@@ -588,7 +602,22 @@ async function main(argv = process.argv.slice(2)) {
     const body = parseJson(await readStdin(), "Relay message");
     return sendPersisted(body);
   }
-  if (command === "tutorial-send") return sendTutorial(rest.includes("--approved"));
+  if (command === "tutorial-send") return sendTutorial(rest.includes("--approved"), rest.includes("--draft-stdin") ? parseJson(await readStdin()) : undefined);
+  if (command === "tutorial-skip") {
+    const config = readConfig();
+    if (["attempting", "accepted"].includes(config.tutorial?.state)) throw new Error("The first Relay was already attempted. Check its outcome before skipping.");
+    config.tutorial = { ...config.tutorial, state: "skipped", updatedAt: new Date().toISOString() };
+    atomicWrite(configPath(), config);
+    return { ok: true, status: "skipped" };
+  }
+  if (command === "opening-preference") {
+    const [surface, provider] = rest;
+    if (!["desktop", "terminal", "other"].includes(surface) || (provider && !["claude", "codex"].includes(provider))) throw new Error("Choose desktop, terminal, or other; optionally name claude or codex.");
+    const config = readConfig();
+    config.openingPreference = { surface, ...(provider ? { provider } : {}) };
+    atomicWrite(configPath(), config);
+    return { ok: true, openingPreference: config.openingPreference };
+  }
   if (command === "request") {
     const method = String(rest.shift() || "GET").toUpperCase();
     const requestPath = String(rest.shift() || "");
@@ -609,7 +638,9 @@ async function main(argv = process.argv.slice(2)) {
       "relay-protocol contacts <name-or-email>",
       "relay-protocol read <relay-id>",
       "relay-protocol mark-read <relay-id> [idempotency-key]",
-      "relay-protocol tutorial-send --approved",
+      "relay-protocol tutorial-send --approved [--draft-stdin] # optional JSON: exact approved forHuman and forAgent",
+      "relay-protocol tutorial-skip",
+      "relay-protocol opening-preference desktop|terminal|other [claude|codex]",
       "relay-protocol send             # read body with stable idempotencyKey from stdin",
       "relay-protocol invite-link",
       "relay-protocol disconnect",
@@ -619,7 +650,7 @@ async function main(argv = process.argv.slice(2)) {
 
 export { allowed, authenticatedRequest, readConfig, configPath, atomicWrite, protectOwnerOnly };
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url))) {
 try {
   const result = await main();
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

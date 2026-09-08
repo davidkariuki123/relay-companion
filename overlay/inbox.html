@@ -259,6 +259,12 @@
   }
   .tab:not(.active) .tab-badge { opacity:.45; }
   .tab-badge.gone { display:none; }
+  /* You is your avatar (Sven, 2026-09-04): initials, never a gear. */
+  .tab-you { padding:0 2px; margin-inline-start:auto; flex-shrink:0; }
+  .tab-avatar { min-width:20px; height:20px; border-radius:var(--r-pill); display:inline-flex; align-items:center; justify-content:center;
+    font-family:var(--sans); font-size:9px; font-weight:600; letter-spacing:.02em; background:var(--wash-2); color:var(--ink-2); }
+  .tab-avatar.word { padding:0 6px; font-size:11px; letter-spacing:0; }
+  .tab-you.active .tab-avatar { background:var(--accent); color:var(--on-accent); }
   /* Tasks debt is a different color from unread ink — amber, not accent. */
   .tab-badge.amber { background:color-mix(in srgb, var(--warn, #8A5A32) 16%, transparent); color:var(--warn, #8A5A32); }
   .mark-all-read { display:none !important; } /* leaving the rail — tray menu owns bulk-clear next */
@@ -882,7 +888,7 @@
   .cv-name { font-size:13px; font-weight:600; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .cv-subrow { display:flex; align-items:baseline; gap:6px; min-width:0; margin-top:2px; }
   .cv-sub { flex:0 1 auto; min-width:0; font-family:var(--serif); font-size:14.5px; line-height:1.2; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .cv-more, .cv-via { flex:0 0 auto; font-family:var(--serif); font-size:14.5px; line-height:1.2; color:var(--muted-2); white-space:nowrap; }
+  .cv-more { flex:0 0 auto; font-family:var(--serif); font-size:14.5px; line-height:1.2; color:var(--muted-2); white-space:nowrap; }
   .cv-meta { flex:0 0 auto; align-self:flex-start; padding-top:1px; font-size:11px; color:var(--muted-2); font-variant-numeric:tabular-nums; white-space:nowrap; }
   .cv-edit { flex:0 0 auto; color:var(--muted-2); font-size:11px; font-weight:600; opacity:0; transition:opacity var(--t-fast) var(--settle), color var(--t-fast) var(--settle); }
   .cv-item:hover .cv-edit, .cv-item:focus-visible .cv-edit { opacity:1; color:var(--ink-2); }
@@ -985,8 +991,6 @@
   .cvg-act.danger { color:var(--danger); }
   .cv-form { display:flex; flex-direction:column; gap:7px; padding:8px 16px 14px; border-bottom:1px solid var(--hair); }
   .cv-form.hidden { display:none; }
-  .cv-row2 { display:flex; gap:7px; }
-  .cv-row2 .cv-input { flex:1 1 0; min-width:0; }
   .cv-input {
     appearance:none; border:1px solid var(--edge); border-radius:var(--r-2); padding:8px 10px;
     font-family:var(--sans); font-size:13px; color:var(--ink); background:var(--bg); outline:none;
@@ -995,6 +999,31 @@
   .cv-input::placeholder { color:var(--muted-3); }
   .cv-input:focus { border-color:var(--edge-accent); box-shadow:var(--focus-ring); }
   .cv-form-actions { display:flex; align-items:center; justify-content:flex-end; gap:14px; margin-top:1px; }
+  /* Add: two cases, told apart. */
+  .cv-add-sheet { display:flex; flex-direction:column; gap:7px; padding:8px 16px 14px; border-bottom:1px solid var(--hair); }
+  .cv-add-sheet.hidden { display:none; }
+  .cv-add-t { font-family:var(--sans); font-size:12px; font-weight:600; color:var(--ink); }
+  .cv-add-t2 { margin-top:10px; padding-top:12px; border-top:1px solid var(--hair); }
+  .cv-add-t2.lit { color:var(--accent); }
+  .cv-add-line { display:flex; gap:8px; }
+  .cv-add-line .cv-input { flex:1 1 auto; min-width:0; }
+  .cv-add-note { font-family:var(--sans); font-size:11px; line-height:1.45; color:var(--muted-2); }
+  .cv-add-note.warn { color:var(--accent); }
+  .cv-add.quiet { align-self:flex-start; background:var(--wash-2); color:var(--ink-2); }
+  .cv-add.quiet:hover { background:var(--wash-3); }
+  .cv-add:disabled { opacity:.55; cursor:default; }
+  /* Not on Relay yet? Your link, under the list. */
+  .cv-latent { padding:16px 16px 18px; font-family:var(--sans); font-size:12px; line-height:1.5; color:var(--muted-2); text-align:center; }
+  .cv-latent.gone { display:none; }
+  .cv-latent-link { appearance:none; border:0; background:transparent; padding:0; font:inherit; font-weight:600; color:var(--accent); cursor:pointer; }
+  .cv-latent-link:disabled { cursor:default; }
+  /* Requests: a first message from someone not in your People. */
+  .cv-requests.gone { display:none; }
+  .cv-request { border-bottom:1px solid var(--hair); }
+  .cv-request .cv-item { border-bottom:0; padding-bottom:6px; }
+  .cv-request-why { margin-top:3px; font-family:var(--sans); font-size:10.5px; color:var(--muted-3); }
+  .cv-request-acts { display:flex; gap:8px; padding:0 16px 12px 64px; }
+  .cv-request-note { padding:14px 16px 18px; font-family:var(--sans); font-size:11px; line-height:1.5; color:var(--muted-2); }
   .cv-delete {
     appearance:none; border:0; background:transparent; color:var(--danger); font-family:var(--sans);
     font-size:13px; font-weight:600; cursor:pointer; transition:opacity var(--t-fast) var(--settle), color var(--t-fast) var(--settle);
@@ -1381,6 +1410,14 @@
     text-overflow:ellipsis; white-space:nowrap; }
   .th-host-arrow { color:var(--host-color); font-family:var(--sans); font-size:17px; line-height:1;
     transition:transform .32s var(--soft); }
+  /* Terminal only: the sentence to say, and the button that copies it. */
+  .th-pull { padding:10px 14px 12px; display:flex; flex-direction:column; gap:8px; }
+  .th-pull-q { font-family:var(--serif); font-size:14px; line-height:1.4; color:var(--ink); overflow-wrap:anywhere; }
+  .th-pull-q .t { color:var(--muted); }
+  .th-pull-acts { display:flex; gap:8px; }
+  .th-pull-copy { appearance:none; border:0; background:var(--accent-soft); color:var(--accent); font-family:var(--sans);
+    font-size:12px; font-weight:600; padding:6px 11px; border-radius:var(--r-2); cursor:pointer; }
+  .th-pull-copy:hover { background:var(--accent-press); }
   .th-msg.opening .th-host-logo { animation:hostOpenBreathe .8s ease-in-out infinite alternate; animation-play-state:var(--relay-loop-state); }
   @keyframes hostOpenBreathe { to { opacity:.42; transform:scale(.94); } }
   @media (hover:none), (pointer:coarse) {
@@ -1451,6 +1488,20 @@
   .ap-check { flex:none; color:var(--accent); opacity:0; transition:opacity var(--t-base) var(--settle); }
   .ap-row.on .ap-check { opacity:1; }
   .rd-agentcopy { max-width:520px; margin:0 auto; padding-bottom:22px; }
+  /* Details: the agent's part of the letter, folded under the words until
+     this person opens it. Always "Details", never "for your agent". */
+  .rd-details { max-width:34em; margin:22px auto 0; border:1px solid var(--hair); border-radius:12px; background:var(--wash); overflow:hidden; }
+  .rd-details-head { appearance:none; border:0; background:transparent; width:100%; min-height:44px; padding:9px 12px;
+    display:grid; grid-template-columns:minmax(0,1fr) auto; grid-template-rows:auto auto; column-gap:10px; align-items:center;
+    text-align:left; cursor:pointer; font:inherit; color:inherit; }
+  .rd-details-head:hover { background:var(--wash-2); }
+  .rd-details-head:focus-visible { outline:none; box-shadow:var(--focus-ring); }
+  .rd-details-name { font-family:var(--sans); font-size:12px; font-weight:650; color:var(--ink); }
+  .rd-details-meta { grid-column:1; font-family:var(--sans); font-size:10.5px; line-height:1.35; color:var(--muted-2); }
+  .rd-details-chev { grid-column:2; grid-row:1 / span 2; color:var(--muted-2); font-size:16px; line-height:1; transition:transform .18s var(--settle); }
+  .rd-details.open .rd-details-chev { transform:rotate(90deg); }
+  .rd-details-body { padding:2px 14px 0; border-top:1px solid var(--hair); }
+  @media (prefers-reduced-motion:reduce) { .rd-details-chev { transition:none; } }
   .rd-agentcopy p { font-family:var(--sans); font-size:13px; line-height:1.7; color:var(--ink); margin:14px 0 0; overflow-wrap:anywhere; }
   @keyframes rdPaneIn { from { opacity:0; transform:translateY(5px); } }
   .rd-col.swap { animation:rdPaneIn .35s var(--settle); }
@@ -2476,9 +2527,19 @@
   .sv-id { min-width:0; display:flex; flex-direction:column; }
   .sv-name { font-family:var(--serif); font-size:15px; font-weight:500; color:var(--ink); line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .sv-email { font-size:12px; color:var(--muted); margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .sv-device { font-size:11px; color:var(--muted-2); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .sv-copy { padding:2px 16px 0; font-size:12px; line-height:1.5; color:var(--muted); }
   .sv-actions { margin:14px 12px 0; }
+  /* The account row is a button; its actions unfold beneath it. */
+  .sv-account { appearance:none; border:0; background:transparent; width:100%; text-align:left; font:inherit; color:inherit; cursor:pointer; }
+  .sv-account-more { flex:0 0 auto; margin-left:auto; font-family:var(--sans); font-size:11px; font-weight:600; color:var(--muted-2); }
+  .sv-account:hover .sv-account-more, .sv-account.open .sv-account-more { color:var(--accent); }
+  .sv-account:focus-visible { outline:none; box-shadow:var(--focus-ring); border-radius:var(--r-2); }
+  .sv-choose { appearance:none; flex:0 0 auto; border:0; background:var(--accent-soft); color:var(--accent);
+    font-family:var(--sans); font-size:11px; font-weight:600; padding:5px 10px; border-radius:var(--r-2); cursor:pointer; }
+  .sv-choose:hover { background:var(--accent-press); }
+  .sv-choose:disabled { opacity:.55; cursor:default; }
+  .sv-open-state { flex:0 0 auto; font-family:var(--sans); font-size:11px; font-weight:600; color:var(--accent); }
+  .sv-link-url { font-family:var(--mono); font-size:12px; font-weight:500; overflow-wrap:anywhere; }
   /* armed sign-out: the same flat menu row, flipped to the danger ink */
   .oa-item.sv-signout-armed { color:var(--danger); }
   .oa-item.sv-signout-armed:hover { background:var(--danger-soft); }
@@ -2686,41 +2747,7 @@
   .su-secondary { border:1px solid var(--edge); color:var(--ink); background:transparent; }
   .su-secondary:hover { background:var(--wash); }
   .su-link { min-height:32px; padding:0; color:var(--muted); background:transparent; text-decoration:underline; text-decoration-color:var(--edge); text-underline-offset:3px; }
-  .su-invite { text-align:center; }
-  .su-invite-art { height:56px; position:relative; display:flex; align-items:center; justify-content:center; margin-bottom:16px; }
-  .su-invite-mark { display:flex; gap:8px; }
-  .su-invite-mark i { display:block; width:29px; height:29px; border-radius:4px; background:#d67b5d; }
-  .su-invite-mark i:nth-child(2) { background:var(--ink); }
-  .su-invite-mark i:nth-child(3) { background:#7164ff; }
-  .su-invite-hero i { animation:su-first-send .65s var(--settle) both; }
-  .su-invite-hero i:nth-child(2) { animation-delay:70ms; }
-  .su-invite-hero i:nth-child(3) { animation-delay:140ms; }
-  .su-invite-echo { position:absolute; gap:4px; opacity:.24; }
-  .su-invite-echo i { width:9px; height:9px; border-radius:1.5px; }
-  .su-invite-echo:nth-child(2) { left:17px; top:10px; transform:rotate(-12deg); }
-  .su-invite-echo:nth-child(3) { right:17px; top:12px; transform:rotate(12deg); }
-  .su-invite-echo:nth-child(4) { left:21px; bottom:7px; transform:rotate(9deg); }
-  .su-invite-echo:nth-child(5) { right:21px; bottom:9px; transform:rotate(-9deg); }
-  .su-invite .su-title { font-size:37px; line-height:1.04; letter-spacing:-.032em; text-wrap:balance; margin:0; }
-  .su-invite .su-copy { margin:17px auto 0; max-width:274px; line-height:1.55; }
-  #suInviteCopy { display:flex; align-items:center; justify-content:center; gap:8px; }
-  .su-invite-actions { display:grid; margin-top:20px; }
-  .su-invite button { min-height:42px; font-weight:500; }
-  .su-invite-hint { min-height:49.5px; margin:12px auto 0; max-width:255px; font-size:11px; line-height:1.5; color:var(--muted); }
-  .su-invite-feedback { display:block; color:var(--accent); animation:suInviteFeedback .25s ease-out; }
-  .su-invite-exit { display:grid; margin-top:9px; }
-  .su-invite:has(#suInviteError:not([hidden])) .su-invite-art { height:20px; margin-bottom:10px; }
-  .su-invite:has(#suInviteError:not([hidden])) .su-invite-echo { visibility:hidden; }
-  .su-invite-open { animation:suInviteOpen .24s ease-out; }
-  @keyframes suInviteFeedback { from { opacity:.4; } to { opacity:1; } }
-  @keyframes suInviteOpen { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
-  @media(prefers-reduced-motion:reduce) { .su-invite-hero i, .su-invite-feedback, .su-invite-open { animation:none; } }
   .su-first-relay { padding:4px 0; }
-  .su-relay-moment { display:flex; align-items:center; gap:6px; height:34px; margin-bottom:20px; }
-  .su-relay-moment i { display:block; width:19px; height:19px; border-radius:3px; background:#d67b5d; }
-  .su-relay-moment i:nth-child(2) { background:var(--ink); }
-  .su-relay-moment i:nth-child(3) { background:#7164ff; }
-  .su-relay-moment svg { width:23px; height:23px; margin-left:7px; fill:none; stroke:var(--accent); stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
   .su-first-relay .su-title { max-width:260px; font-size:30px; line-height:1.1; }
   .su-first-relay .su-handoff-title { max-width:none; margin-top:13px; font-size:38px; line-height:1.04; letter-spacing:-.025em; }
   .su-handoff-intro { display:block; max-width:245px; }
@@ -2731,11 +2758,6 @@
   .su-send-progress { display:flex; align-items:baseline; gap:7px; margin-top:24px; color:var(--muted); font-size:11px; line-height:1.5; }
   .su-send-progress > span { flex:none; width:5px; height:5px; border-radius:50%; background:var(--muted-3); }
   .su-first-relay .su-form { margin-top:18px; }
-  .su-first-relay-sent .su-relay-moment i { animation:su-first-send .65s var(--settle) both; }
-  .su-first-relay-sent .su-relay-moment i:nth-child(2) { animation-delay:.07s; }
-  .su-first-relay-sent .su-relay-moment i:nth-child(3) { animation-delay:.14s; }
-  @keyframes su-first-send { from { opacity:0; transform:translateY(9px) rotate(-8deg); } to { opacity:1; transform:none; } }
-  @media (prefers-reduced-motion:reduce) { .su-first-relay-sent .su-relay-moment i { animation:none; } }
   .su-divider { display:flex; align-items:center; gap:10px; color:var(--muted-3); font-size:10px; text-transform:uppercase; letter-spacing:.12em; }
   .su-divider::before, .su-divider::after { content:""; flex:1 1 auto; height:1px; background:var(--hair); }
   .su-google { display:flex; align-items:center; justify-content:center; gap:8px; }
@@ -2826,8 +2848,8 @@
       <button class="tab" type="button" data-view="slack">
         Slack <span class="tab-badge gone" id="slackBadge">0</span>
       </button>
-      <button class="tab" type="button" data-view="contacts">People</button>
-      <button class="tab" type="button" data-view="settings">Settings</button>
+      <button class="tab" type="button" data-view="contacts">People <span class="tab-badge gone" id="peopleBadge">0</span></button>
+      <button class="tab tab-you" type="button" data-view="settings" aria-label="You"><span class="tab-avatar word" id="youTabAvatar" aria-hidden="true">You</span></button>
       <button class="mark-all-read gone" id="markAllRead" type="button">Mark all as read</button>
     </nav>
 
@@ -2953,18 +2975,34 @@
                long book hid them completely; stacking them the other way would just
                bury people instead. A segment switches the pane and keeps both a
                single tap away, with counts so neither looks empty when it isn't. -->
-          <div class="cv-seg" role="tablist" aria-label="People and channels">
+          <div class="cv-seg" role="tablist" aria-label="People, channels and requests">
             <button class="cv-seg-btn active" type="button" role="tab" data-pane="people" id="cvSegPeople">People <span class="cv-seg-n" id="cvSegPeopleN"></span></button>
             <button class="cv-seg-btn" type="button" role="tab" data-pane="groups" id="cvSegGroups">Channels <span class="cv-seg-n" id="cvSegGroupsN"></span></button>
+            <button class="cv-seg-btn" type="button" role="tab" data-pane="requests" id="cvSegRequests">Requests <span class="cv-seg-n" id="cvSegRequestsN"></span></button>
           </div>
-          <button class="cv-add" type="button" id="cvAdd" aria-label="Add person">+ Add</button>
-          <button class="cv-add gone" type="button" id="cvgNew" aria-label="Add channel">+ Add</button>
+          <button class="cv-add" type="button" id="cvAdd" aria-label="Add person">Add</button>
+          <button class="cv-add gone" type="button" id="cvgNew" aria-label="Add channel">Add</button>
         </div>
-        <form class="cv-form hidden" id="cvForm">
-          <div class="cv-row2">
-            <input class="cv-input" id="cvFirst" placeholder="First name" autocomplete="off" spellcheck="false" />
-            <input class="cv-input" id="cvLast" placeholder="Surname" autocomplete="off" spellcheck="false" />
+        <!-- Add: two cases, told apart (Sven, 2026-09-08). An address finds
+             someone already on Relay; everyone else gets your link and shows
+             up here when they use it. Nobody is "invited by email". -->
+        <div class="cv-add-sheet hidden" id="cvAddSheet">
+          <div class="cv-add-t">On Relay already</div>
+          <div class="cv-add-line">
+            <input class="cv-input" id="cvAddInput" type="email" placeholder="name@company.com" autocomplete="off" spellcheck="false" />
+            <button class="cv-add" type="button" id="cvAddGo">Add</button>
           </div>
+          <div class="cv-add-note" id="cvAddNote">They show up in your People right away.</div>
+          <div class="cv-add-t cv-add-t2" id="cvAddT2">Not on Relay yet</div>
+          <button class="cv-add quiet" type="button" id="cvAddLink">Copy your invite link</button>
+          <div class="cv-add-note">Send it however you talk to them. They paste it into Claude Code or Codex and show up here.</div>
+          <div class="cv-form-actions"><button class="cv-cancel" type="button" id="cvAddCancel">Cancel</button></div>
+        </div>
+        <!-- Edit: a contact is an address and what you call them. No first
+             name, no surname, no form to fill: their name arrives with their
+             account (the revamp, 2026-09-03). -->
+        <form class="cv-form hidden" id="cvForm">
+          <input class="cv-input" id="cvName" placeholder="What you call them" autocomplete="off" spellcheck="false" />
           <div class="cv-flabel">
             <span class="l">Emails</span>
             <span class="h">One or more — the identity</span>
@@ -2996,6 +3034,11 @@
         </div>
         <div class="cvg-error" id="cvPeopleError"></div>
         <div class="cv-list" id="cvList"></div>
+        <div class="cv-latent" id="cvLatent">Not on Relay yet? <button type="button" class="cv-latent-link" id="cvLatentLink">Copy your link</button> and send it to them.</div>
+        <!-- Requests: a first message from someone not in your People waits
+             here, out of the feed and the count, until you accept it, reply,
+             or ignore it. -->
+        <div class="cv-requests gone" id="cvRequests"></div>
         <div id="contactsEmpty" class="empty gone">
           <svg class="mark" width="22" height="22" viewBox="0 0 16 16" aria-hidden="true">
             <rect x="0" y="6" width="4" height="4"/><rect x="6" y="6" width="4" height="4"/><rect x="12" y="6" width="4" height="4"/>
@@ -3047,11 +3090,13 @@
   const closeXEl = document.getElementById("closeX");
   const countEl = document.getElementById("count");
   const tabEls = [...document.querySelectorAll(".tab")];
+  const youTabAvatarEl = document.getElementById("youTabAvatar");
   const scrollEl = document.getElementById("scroll");
   const relaysViewEl = document.getElementById("relaysView");
   const relaysListEl = document.getElementById("relaysList");
   const relaysEmptyEl = document.getElementById("relaysEmpty");
   const relaysBadgeEl = document.getElementById("relaysBadge");
+  const peopleBadgeEl = document.getElementById("peopleBadge");
   const slackViewEl = document.getElementById("slackView");
   const slackListEl = document.getElementById("slackList");
   const slackEmptyEl = document.getElementById("slackEmpty");
@@ -3076,8 +3121,17 @@
   const cvListEl = document.getElementById("cvList");
   const contactsEmptyEl = document.getElementById("contactsEmpty");
   const cvFormEl = document.getElementById("cvForm");
-  const cvFirstEl = document.getElementById("cvFirst");
-  const cvLastEl = document.getElementById("cvLast");
+  const cvNameEl = document.getElementById("cvName");
+  const cvAddSheetEl = document.getElementById("cvAddSheet");
+  const cvAddInputEl = document.getElementById("cvAddInput");
+  const cvAddGoEl = document.getElementById("cvAddGo");
+  const cvAddNoteEl = document.getElementById("cvAddNote");
+  const cvAddT2El = document.getElementById("cvAddT2");
+  const cvAddLinkEl = document.getElementById("cvAddLink");
+  const cvAddCancelEl = document.getElementById("cvAddCancel");
+  const cvLatentEl = document.getElementById("cvLatent");
+  const cvLatentLinkEl = document.getElementById("cvLatentLink");
+  const cvRequestsEl = document.getElementById("cvRequests");
   const cvEmailEl = document.getElementById("cvEmail");      // the draft <input> inside the chip field
   const cvEmailsEl = document.getElementById("cvEmails");    // the bordered chip container (click -> focus)
   const cvSuggestEl = document.getElementById("cvSuggest");  // domain autocomplete dropdown
@@ -5361,9 +5415,6 @@
     finally { activeCanonicalChatRefresh = null; }
   }
   let signupStage = "method";
-  let signupInviteAccount = null;
-  let signupInviteCopied = false;
-  let signupInviteCopyBusy = false;
   function signupAccountKey() { return payload.account?.userId || payload.account?.email || null; }
 
   let signupBusy = false;
@@ -5874,8 +5925,10 @@
     // leak into a group's avatar roster. Quiet saved groups belong in Chat but
     // not in the correspondence index, so Relays keeps only active rooms.
     const { rooms } = chatSections();
+    // A stranger's first message waits in People › Requests, not here.
+    const known = knownAddresses();
     return rooms
-      .filter((room) => room.hasActivity !== false)
+      .filter((room) => room.hasActivity !== false && !isRequestRoom(room, known))
       .map((room) => ({ ...room, latestAt: room.latestAt || (room.latest && room.latest.at) || "" }));
   }
   function renderRelays() {
@@ -6230,27 +6283,30 @@
   }
   function appAvailable(app) {
     const entry = providerEntry(app);
-    return !entry || entry.available !== false;
+    return entry?.available === true;
   }
   function appUnavailableReason(app) {
     const entry = providerEntry(app);
-    return entry && entry.available === false ? String(entry.reason || `${app} isn’t installed on this computer`) : "";
+    return entry && entry.available === false ? String(entry.reason || `${app} isn’t installed on this computer`) : "Checking availability…";
   }
   function agentSurfaceOptions(app) {
     const options = [];
-    if (desktopEntry(app)?.available !== false) options.push("desktop");
+    if (desktopEntry(app)?.available === true) options.push("desktop");
     if (cliEntry(app)?.available === true) options.push("terminal");
-    return options.length ? options : ["desktop"];
+    return options;
+  }
+  function openingPreference() {
+    const saved = protoPref(`proto.openingPreference.v1:${signupAccountKey()}`, "");
+    try { if (saved) return JSON.parse(saved); } catch {}
+    return payload.ui?.openingPreference || null;
   }
   function agentSurfacePreference(app) {
+    const preference = openingPreference();
+    if (["desktop", "terminal", "other"].includes(preference?.surface)) return preference.surface;
     const available = agentSurfaceOptions(app);
     const saved = protoPref(`proto.agentSurface.${hostKeyFor(app)}.v1`, "");
     if (available.includes(saved)) return saved;
     return available.includes("desktop") ? "desktop" : "terminal";
-  }
-  function setAgentSurfacePreference(app, surface) {
-    if (!agentSurfaceOptions(app).includes(surface)) return;
-    setProtoPref(`proto.agentSurface.${hostKeyFor(app)}.v1`, surface);
   }
   async function loadAgentSurfaces() {
     if (!window.relay.capabilities) return;
@@ -6264,49 +6320,52 @@
     if (activeView === "settings") renderSettings();
     else if (agentAppName() !== before) renderAll();
   }
-  // THE CHOICE: independent app switches. Missing v2 state intentionally does
-  // not inherit proto.agentApp: the old radio picker wrote a single app on
-  // machines that should have offered both, leaving Relays stuck with one
-  // action after both desktop apps were installed. The first v2 render starts
-  // from detection — both on when both are present, the installed app when
-  // only one is present. Once touched, the exact enabled set is durable.
-  const AGENT_APP_BOTH = "Both";
+  // ONE APP OPENS RELAYS (Sven, 2026-09-08, the Minimal design): the choice is
+  // a single app, never a pair of switches, because a letter carries one verb.
+  // The v2 pref keeps its shape ("Claude Code", "Codex", or the old "a|b"
+  // pair); a saved pair collapses to its first app, and no saved choice means
+  // the first app this Mac has. There is no "none": a letter always has a
+  // door, and the app that opens it is always named.
   const AGENT_APPS_PREF = "proto.agentApps.v2";
   function agentAppSelection() {
+    const preference = openingPreference();
+    if (preference?.surface === "other") return [];
+    if (preference?.provider) {
+      const app = preference.provider === "codex" ? "Codex" : "Claude Code";
+      return appAvailable(app) ? [app] : [];
+    }
     const saved = protoPref(AGENT_APPS_PREF, "");
     const present = AGENT_APP_OPTIONS.filter(appAvailable);
     const requested = saved.split("|").filter((app) => AGENT_APP_OPTIONS.includes(app) && appAvailable(app));
-    if (saved === "__none__") return [];
-    if (saved && requested.length) return AGENT_APP_OPTIONS.filter((app) => requested.includes(app));
-    return present;
+    const chosen = requested[0] || (saved ? "" : present[0]) || "";
+    return chosen ? [chosen] : [];
   }
-  function agentAppChoice() {
-    const selected = agentAppSelection();
-    return selected.length === 2 ? AGENT_APP_BOTH : selected[0];
-  }
-  function setAgentAppEnabled(app, enabled) {
+  function agentAppChoice() { return agentAppSelection()[0] || ""; }
+  function setAgentOpeningApp(app) {
     if (!AGENT_APP_OPTIONS.includes(app) || !appAvailable(app)) return;
-    const selected = new Set(agentAppSelection());
-    if (enabled) selected.add(app);
-    else selected.delete(app);
-    const next = AGENT_APP_OPTIONS.filter((option) => selected.has(option));
-    setProtoPref(AGENT_APPS_PREF, next.length ? next.join("|") : "__none__");
+    setProtoPref(AGENT_APPS_PREF, app);
     // Keep downgrade behavior coherent for a previous Relay build.
-    setProtoPref("proto.agentApp", next.length === 2 ? AGENT_APP_BOTH : next[0] || "");
+    setProtoPref("proto.agentApp", app);
+    setProtoPref(`proto.openingPreference.v1:${signupAccountKey()}`, JSON.stringify({
+      surface: desktopEntry(app)?.available === true ? "desktop" : "terminal",
+      provider: hostKeyFor(app),
+    }));
   }
-  // The label: the app's name, or "your agent" when the choice is Both — the
-  // reader's second document is then "For your agent", and an open with no
-  // host named lets main pick the app you are working in.
-  function agentAppName() {
-    const choice = agentAppChoice();
-    return choice === AGENT_APP_BOTH || !choice ? "your agent" : choice;
-  }
-  // The rows: David's order when both, else the one you chose.
+  // The label: the app's name, or "your agent" when this Mac has neither app
+  // and main must pick the app you are working in.
+  function agentAppName() { return agentAppChoice() || "your agent"; }
+  // The one row on a letter: the app you chose.
   function agentAppHosts() {
     const choice = agentAppChoice();
     if (!choice) return [];
-    if (choice === AGENT_APP_BOTH) return ["codex", "claude"];
     return [hostKeyFor(choice) === "codex" ? "codex" : "claude"];
+  }
+  // Whether the chosen app takes a relay into a new chat, or only into a
+  // terminal session. The letter's verb depends on it: an app opens the
+  // relay; a session is told the sentence to say.
+  function agentOpensInApp() {
+    const choice = agentAppChoice();
+    return Boolean(choice) && agentSurfacePreference(choice) === "desktop" && desktopEntry(choice)?.available === true;
   }
   function chatOrder() { return protoPref("proto.convOrder", "chat"); } // "chat" | "inbox"
   const taskLocal = new Map(); // packetId -> "running" | "parked" (prototype-local approval state)
@@ -7372,6 +7431,7 @@
   }
   let chatExpanded = false; // the conversation borrowing the reader's frame (⤢)
   let readerTab = "you"; // which face of the Task folder is open ("you" | "agent")
+  const readerDetailsOpen = new Set(); // letters whose Details this person opened; closed until then
   let readerTabSwap = false; // true only for the render caused by a tab switch (drives the pane animation)
   const requestWorkDrafts = new Map(); // switching documents never eats an unsent Start/Steer note
   const readerHumanDrafts = new Map(); // For-you replies survive source/Work tab hops independently
@@ -7999,7 +8059,12 @@
     // agent face keeps a receipt (David, 2026-09-03: hand-off, not runner).
     const agentText = String(r.forAgent || "").trim();
     if (readerTab === "work") readerTab = "agent";
-    const onAgent = Boolean(agentText || request) && readerTab === "agent";
+    // TWO FACES FOR A TASK ONLY. A letter is one page: the words, then its
+    // Details folded under them, then the one verb and the reply. Sven,
+    // 2026-09-08: "I also love the details section instead of for you and
+    // for your agent. also details should start closed and open if clicked."
+    const twoFaces = request;
+    const onAgent = twoFaces && readerTab === "agent";
     const requestActionable = request && taskClaimAllowsStart(r) && ["waiting", "parked", "stopped"].includes(taskBoardState(r.id));
     const agentWords = agentWordCount(agentText);
     const onHuman = !onAgent;
@@ -8013,7 +8078,7 @@
         : handoff?.state === "starting"
           ? `opening ${handoffAppName(handoff)}…`
           : agentWords ? `${agentWords} ${agentWords === 1 ? "word" : "words"} ›` : "view ›";
-    const documentList = (request || agentText) ? `
+    const documentList = twoFaces ? `
       <nav class="relay-contents" data-stop="1" aria-label="Relay contents">
         <span class="relay-contents-label">This Relay contains</span>
         <span class="relay-contents-list">
@@ -8025,6 +8090,19 @@
           </button>
         </span>
       </nav>` : "";
+    // DETAILS. Always "Details", never "for your agent": the specifics under
+    // the words, in the agent's register, closed until this person opens it.
+    // Remembered per letter while the pill runs.
+    const detailsOpen = readerDetailsOpen.has(String(r.id));
+    const details = !twoFaces && agentText ? `
+        <div class="rd-details${detailsOpen ? " open" : ""}" data-stop="1">
+          <button type="button" class="rd-details-head" data-rd-details="${esc(r.id)}" aria-expanded="${detailsOpen ? "true" : "false"}">
+            <span class="rd-details-name">Details</span>
+            <span class="rd-details-meta">${esc(`${agentWords.toLocaleString("en-US")} ${agentWords === 1 ? "word" : "words"} · the specifics · your agent gets these too`)}</span>
+            <span class="rd-details-chev" aria-hidden="true">›</span>
+          </button>
+          ${detailsOpen ? `<div class="rd-details-body rd-agentcopy">${readerParagraphs(agentText)}</div>` : ""}
+        </div>` : "";
     const agentDoc = `
         <div class="rd-kicker"><span class="ksq"></span>MESSAGE FOR YOUR AGENT${agentWeightLabel(agentText)}</div>
         <div class="rd-rule"></div>
@@ -8034,6 +8112,7 @@
         <div class="rd-headline${headlineClass}">${esc(subject)}</div>
         <div class="rd-rule"></div>
         <div class="rd-body">${readerParagraphs(r.forHuman)}</div>
+        ${details}
         ${todoWhyHtml(r)}
         ${scheduleContractHtml(r)}`;
     const doc = onAgent ? agentDoc : humanDoc;
@@ -8080,7 +8159,7 @@
           ${replyRail([replyChat.party], replyChat.groupName)}
           <span class="rt-spacer"></span>
           <span class="ta-acts">
-            <button type="button" id="qrSend">Send</button>
+            <button type="button" id="qrSend">Relay</button>
           </span>
         </div>
       </div></div>`;
@@ -8134,6 +8213,17 @@
         readerTabSwap = true;
         renderReader();
         readerTabSwap = false;
+      });
+    }
+    for (const b of readerBodyEl.querySelectorAll("[data-rd-details]")) {
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const id = b.getAttribute("data-rd-details");
+        if (readerDetailsOpen.has(id)) readerDetailsOpen.delete(id); else readerDetailsOpen.add(id);
+        // The page repaints in place; the reader stays where it was.
+        const top = scrollEl ? scrollEl.scrollTop : 0;
+        renderReader();
+        if (scrollEl) scrollEl.scrollTop = top;
       });
     }
     wireHostOpen(readerBodyEl);
@@ -9064,6 +9154,11 @@
     const state = String((r && r.state) || "").toLowerCase();
     return state === "read" || state === "acknowledged";
   }
+  // The rung past Read: the recipient's pill handed the relay to their agent
+  // (main's /open/relay/ack after a host open sets "acknowledged").
+  function sentIsAcknowledged(r) {
+    return String((r && r.state) || "").toLowerCase() === "acknowledged";
+  }
   // The rung below Read. The server's relay state is a ladder — pending (the
   // API has it) → delivered (it has been routed to the recipient's device, or
   // to the email that stands in for one) → read — and "delivered" is the fact
@@ -9676,6 +9771,155 @@
     return e ? [e] : [];
   }
   function contactKey(c) { return c.id || (contactEmails(c)[0] || "") || c.name; }
+  // REQUESTS (Sven, 2026-09-08): a first message from someone who is not in
+  // your People is a request. It waits in People › Requests — not in the
+  // feed, not in the count — until you accept it (save them), reply, or
+  // ignore it. Only a direct Relay room can be one: never a saved channel, a
+  // Slack room, the viewer, or a person you have already written to. Ignored
+  // requests are a per-device pref; they come back the moment you write to
+  // that person yourself, because then they are simply a conversation.
+  const IGNORED_REQUESTS_PREF = "proto.ignoredRequests.v1";
+  // Keyed by the signed-in account: one person's Ignore never hides a request
+  // from the next account on this Mac, and with no account known there is
+  // nothing to read and nothing to write.
+  function ignoredRequestsKey() {
+    const account = signupAccountKey();
+    return account ? `${IGNORED_REQUESTS_PREF}:${account}` : "";
+  }
+  function ignoredRequestKeys() {
+    const key = ignoredRequestsKey();
+    if (!key) return new Set();
+    try { return new Set(JSON.parse(protoPref(key, "[]"))); } catch { return new Set(); }
+  }
+  function ignoreRequest(address) {
+    const key = ignoredRequestsKey();
+    if (!key) return;
+    const next = ignoredRequestKeys();
+    next.add(String(address || "").trim().toLowerCase());
+    setProtoPref(key, JSON.stringify([...next]));
+  }
+  function knownAddresses() {
+    const known = new Set();
+    for (const c of [...(payload.contacts || []), ...contactsList]) {
+      for (const email of contactEmails(c)) known.add(String(email).trim().toLowerCase());
+    }
+    const mine = String(payload.account?.email || "").trim().toLowerCase();
+    if (mine) known.add(mine);
+    for (const item of payload.sent || []) {
+      const email = String((item.recipient && item.recipient.email) || "").trim().toLowerCase();
+      if (email) known.add(email);
+    }
+    return known;
+  }
+  function roomAddress(room) {
+    const key = String((room && room.partyKey) || "");
+    return key.startsWith("email:") ? key.slice(6).trim().toLowerCase() : "";
+  }
+  function isRequestRoom(room, known = knownAddresses()) {
+    if (!room || room.isGroup || room.provider === "slack" || room.integration) return false;
+    const address = roomAddress(room);
+    if (!address || known.has(address)) return false;
+    if ((room.msgs || []).some((message) => message.direction === "out")) return false;
+    return true;
+  }
+  function requestAddresses() {
+    const known = knownAddresses();
+    return new Set(chatSections("relay").people.filter((room) => isRequestRoom(room, known)).map(roomAddress));
+  }
+  function requestRooms() {
+    const known = knownAddresses();
+    const ignored = ignoredRequestKeys();
+    return chatSections("relay").people.filter((room) => isRequestRoom(room, known) && !ignored.has(roomAddress(room)));
+  }
+  let showIgnoredRequests = false;
+  function renderRequestsPane() {
+    const ignored = ignoredRequestKeys();
+    const rooms = showIgnoredRequests
+      ? chatSections("relay").people.filter((room) => isRequestRoom(room) && ignored.has(roomAddress(room)))
+      : requestRooms();
+    cvRequestsEl.innerHTML = rooms.map((room) => {
+      const address = roomAddress(room);
+      const name = room.name || address;
+      const preview = String((room.latest && room.latest.title) || "").trim() || address;
+      const inboundId = (room.msgs || []).find((message) => message.direction === "in")?.id || "";
+      return `
+      <div class="cv-request" data-request="${esc(address)}">
+        <button class="cv-item" type="button" data-request-open="${esc(room.threadId)}" data-party="${esc(name)}">
+          <span class="cv-avatar" style="--cv-h:${cvHue(name)}">${esc(cvInitials(name, address))}</span>
+          <span class="cv-body">
+            <span class="cv-name">${esc(name)}</span>
+            <span class="cv-subrow"><span class="cv-sub">${esc(preview)}</span></span>
+            <span class="cv-request-why">Not in your People</span>
+          </span>
+          ${room.latest && room.latest.at ? `<span class="cv-meta">${esc(timeAgo(room.latest.at))}</span>` : ""}
+        </button>
+        <div class="cv-request-acts">
+          <button class="cv-add" type="button" data-request-accept="${esc(address)}" data-name="${esc(name)}">Accept</button>
+          ${showIgnoredRequests ? `<button class="cv-add quiet" type="button" data-request-restore="${esc(address)}">Restore</button>`
+            : `<button class="cv-add quiet" type="button" data-request-ignore="${esc(address)}">Ignore</button>`}
+          ${inboundId ? `<button class="cv-add quiet" type="button" data-request-block="${esc(inboundId)}" data-address="${esc(address)}">Block</button>` : ""}
+        </div>
+      </div>`;
+    }).join("") + `${rooms.length ? "" : `<div class="cv-empty">No ${showIgnoredRequests ? "ignored requests" : "requests"}.</div>`}<div class="cv-request-note">Ignore hides a request on this computer. Block stops direct Relays in both directions; existing history stays.</div>
+      <button class="cv-add quiet" type="button" id="cvShowIgnored">${showIgnoredRequests ? "Back to requests" : "Show ignored requests"}</button>`;
+    document.getElementById("cvShowIgnored")?.addEventListener("click", () => {
+      showIgnoredRequests = !showIgnoredRequests; renderRequestsPane();
+    });
+    for (const button of cvRequestsEl.querySelectorAll("[data-request-restore]")) {
+      button.addEventListener("click", () => {
+        const next = ignoredRequestKeys(); next.delete(button.dataset.requestRestore);
+        setProtoPref(ignoredRequestsKey(), JSON.stringify([...next]));
+        renderRequestsPane(); renderAll();
+      });
+    }
+    for (const button of cvRequestsEl.querySelectorAll("[data-request-block]")) {
+      button.addEventListener("click", async () => {
+        if (!button.dataset.confirmed) { button.dataset.confirmed = "1"; button.textContent = "Block this person?"; return; }
+        const account = signupAccountKey(); button.disabled = true;
+        try {
+          await window.relay.blockRequest(button.dataset.requestBlock);
+          if (account !== signupAccountKey()) return;
+          ignoreRequest(button.dataset.address); renderRequestsPane(); renderAll();
+        } catch {
+          if (account === signupAccountKey()) { cvPeopleErrorEl.textContent = "Could not block this person. Try again."; button.disabled = false; }
+        }
+      });
+    }
+    for (const el of cvRequestsEl.querySelectorAll("[data-request-open]")) {
+      el.addEventListener("click", () => {
+        const morphFromList = prepareReaderMorph(activeView);
+        openThreadDetail(el.getAttribute("data-request-open"), el.getAttribute("data-party") || "", "contacts", { expanded:true });
+        if (morphFromList) startReaderMorph("threads");
+      });
+    }
+    for (const b of cvRequestsEl.querySelectorAll("[data-request-accept]")) {
+      b.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (b.disabled) return;
+        b.disabled = true;
+        const address = b.getAttribute("data-request-accept");
+        const name = b.getAttribute("data-name") || address;
+        const account = signupAccountKey();
+        // Accepting is saving them: the room moves to Relays on its own.
+        const res = await contactWriteResult(window.relay.contactSave({ contactId:"", name, emails:[address], email:address }), "Could not accept.");
+        if (account !== signupAccountKey()) return; // a different account is looking now
+        if (!res.ok) { cvPeopleErrorEl.textContent = res.error; b.disabled = false; return; }
+        if (Array.isArray(res.contacts)) contactsList = res.contacts;
+        else if (res.contact) contactsList = [...contactsList.filter((c) => contactKey(c) !== contactKey(res.contact)), res.contact];
+        renderContacts();
+        renderRequestsPane();
+        renderAll();
+      });
+    }
+    for (const b of cvRequestsEl.querySelectorAll("[data-request-ignore]")) {
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        ignoreRequest(b.getAttribute("data-request-ignore"));
+        renderRequestsPane();
+        renderAll();
+      });
+    }
+  }
   function renderContacts() {
     contactsEmptyEl.classList.toggle("gone", contactsPane !== "people" || contactsList.length > 0);
     refreshPaneCounts();
@@ -9683,7 +9927,6 @@
       const emails = contactEmails(c);
       const primary = emails[0] || "";
       const more = emails.length > 1 ? `+${emails.length - 1} more` : "";
-      const via = primary && !c.onRelay ? "· by email" : "";
       const recent = c.updatedAt ? timeAgo(c.updatedAt) : "";
       return `
       <button class="cv-item" type="button" data-contact="${esc(contactKey(c))}">
@@ -9693,7 +9936,7 @@
           <span class="cv-subrow">
             <span class="cv-sub">${esc(primary || "no email")}</span>
             ${more ? `<span class="cv-more">${esc(more)}</span>` : ""}
-            ${via ? `<span class="cv-via">${esc(via)}</span>` : ""}
+            ${c.onRelay === false ? `<span class="cv-more">· not on Relay yet</span>` : ""}
           </span>
         </span>
         <span class="cv-edit" role="button" tabindex="0" data-contact-edit="${esc(contactKey(c))}">Edit</span>
@@ -9830,33 +10073,43 @@
   const cvSegPeopleNEl = document.getElementById("cvSegPeopleN");
   const cvSegGroupsNEl = document.getElementById("cvSegGroupsN");
   const cvGroupsEl = document.getElementById("cvGroups");
+  const cvSegRequestsEl = document.getElementById("cvSegRequests");
+  const cvSegRequestsNEl = document.getElementById("cvSegRequestsN");
   let contactsPane = "people";
   function applyContactsPane() {
     const people = contactsPane === "people";
-    cvSegPeopleEl.classList.toggle("active", people);
-    cvSegGroupsEl.classList.toggle("active", !people);
-    cvSegPeopleEl.setAttribute("aria-selected", String(people));
-    cvSegGroupsEl.setAttribute("aria-selected", String(!people));
+    const groups = contactsPane === "groups";
+    const requests = contactsPane === "requests";
+    for (const [el, on] of [[cvSegPeopleEl, people], [cvSegGroupsEl, groups], [cvSegRequestsEl, requests]]) {
+      el.classList.toggle("active", on);
+      el.setAttribute("aria-selected", String(on));
+    }
     cvListEl.classList.toggle("gone", !people);
+    cvLatentEl.classList.toggle("gone", !people);
     contactsEmptyEl.classList.toggle("gone", !people || contactsList.length > 0);
-    cvGroupsEl.classList.toggle("gone", people);
-    // The add button follows the pane it belongs to.
+    cvGroupsEl.classList.toggle("gone", !groups);
+    cvRequestsEl.classList.toggle("gone", !requests);
+    // The add button follows the pane it belongs to; Requests has none.
     cvAddEl.classList.toggle("gone", !people);
-    cvgNewEl.classList.toggle("gone", people);
-    if (people) cvgNewFormEl.classList.add("hidden");
-    else cvFormEl.classList.add("hidden");
+    cvgNewEl.classList.toggle("gone", !groups);
+    if (!groups) cvgNewFormEl.classList.add("hidden");
+    if (!people) { cvFormEl.classList.add("hidden"); closeAddSheet(); }
     // Neither pane inherits the other's refusal, and neither keeps one across
     // a return to the tab — an error names a click, and the click is over.
     cvPeopleErrorEl.textContent = "";
     cvOpeningKey = null;
     cvgShowError("");
+    if (requests) renderRequestsPane();
   }
   function refreshPaneCounts() {
     cvSegPeopleNEl.textContent = contactsList.length ? String(contactsList.length) : "";
     cvSegGroupsNEl.textContent = groupsList.length ? String(groupsList.length) : "";
+    const requests = requestRooms().length;
+    cvSegRequestsNEl.textContent = requests ? String(requests) : "";
   }
   cvSegPeopleEl.addEventListener("click", () => { contactsPane = "people"; applyContactsPane(); });
   cvSegGroupsEl.addEventListener("click", () => { contactsPane = "groups"; applyContactsPane(); loadGroups(); });
+  cvSegRequestsEl.addEventListener("click", () => { contactsPane = "requests"; applyContactsPane(); });
 
   const cvgListEl = document.getElementById("cvgList");
   const cvgEmptyEl = document.getElementById("cvgEmpty");
@@ -10407,10 +10660,6 @@
       cvgApply(view);
     }
   });
-  function cvSplitName(name) {
-    const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
-    return { first: parts[0] || "", last: parts.slice(1).join(" ") };
-  }
   // ---- multi-email chip input (ported from the website's EmailsInput) ----
   // The form holds the committed addresses here; the draft <input> (#cvEmail) holds whatever
   // is being typed. Enter / comma / space (or a suggestion click) commits the draft as a chip.
@@ -10522,9 +10771,7 @@
   function openContactForm(key) {
     const c = key ? contactsList.find((x) => contactKey(x) === key) : null;
     cvEditing = c || null;
-    const { first, last } = cvSplitName(c ? c.name : "");
-    cvFirstEl.value = first;
-    cvLastEl.value = last;
+    cvNameEl.value = c ? String(c.name || "") : "";
     cvEmailsList = c ? contactEmails(c).slice() : [];
     cvEmailEl.value = "";
     cvSuggIdx = 0;
@@ -10534,7 +10781,7 @@
     syncDeleteButton();
     cvFormEl.classList.remove("hidden");
     setInteractive(true);
-    setTimeout(() => cvFirstEl.focus(), 30);
+    setTimeout(() => cvNameEl.focus(), 30);
   }
   function closeContactForm() {
     cvFormEl.classList.add("hidden");
@@ -10556,7 +10803,7 @@
       const res = await promise;
       if (Array.isArray(res)) return { ok: true, contacts: res }; // older main process
       if (res && res.ok === false) return { ok: false, error: res.error || fallback };
-      if (res && res.ok === true) return { ok: true, contacts: Array.isArray(res.contacts) ? res.contacts : null };
+      if (res && res.ok === true) return { ok: true, contact: res.contact || null, contacts: Array.isArray(res.contacts) ? res.contacts : null };
       return { ok: true, contacts: null };
     } catch (err) {
       const raw = (err && err.message) ? String(err.message) : "";
@@ -10564,7 +10811,80 @@
       return { ok: false, error: clean || fallback };
     }
   }
-  cvAddEl.addEventListener("click", () => openContactForm(null));
+  // ---- Add: someone on Relay by address, or your link for everyone else ----
+  function openAddSheet() {
+    cvFormEl.classList.add("hidden");
+    cvAddInputEl.value = "";
+    cvAddNoteEl.textContent = "They show up in your People right away.";
+    cvAddNoteEl.classList.remove("warn");
+    cvAddT2El.classList.remove("lit");
+    cvAddSheetEl.classList.remove("hidden");
+    setInteractive(true);
+    setTimeout(() => cvAddInputEl.focus(), 30);
+  }
+  function closeAddSheet() {
+    cvAddSheetEl.classList.add("hidden");
+    cvAddInputEl.value = "";
+    cvAddGoEl.disabled = false;
+  }
+  function addSheetWarn(text) {
+    cvAddNoteEl.textContent = text;
+    cvAddNoteEl.classList.add("warn");
+  }
+  async function addPersonByAddress() {
+    const address = String(cvAddInputEl.value || "").trim().toLowerCase();
+    if (!isValidEmail(address)) { addSheetWarn("That doesn't look like an address."); return; }
+    if (cvAddGoEl.disabled) return;
+    cvAddGoEl.disabled = true;
+    cvAddNoteEl.textContent = "Adding…";
+    cvAddNoteEl.classList.remove("warn");
+    cvAddT2El.classList.remove("lit");
+    // A miss is not a contact. Errors remain distinct from a confirmed miss.
+    const account = signupAccountKey();
+    try {
+      if (!window.relay.contactAdd) throw new Error("Could not add them.");
+      const res = await window.relay.contactAdd({ email:address });
+      if (account !== signupAccountKey()) return; // a different account is looking now
+      if (res?.ok && res.found === false) {
+        addSheetWarn(`${address} isn't on Relay yet. Send them your link.`);
+        cvAddT2El.classList.add("lit");
+        return;
+      }
+      if (!res || res.ok === false || !res.contact) { addSheetWarn((res && res.error) || "Could not add them."); return; }
+      if (Array.isArray(res.contacts)) contactsList = res.contacts;
+      else contactsList = [...contactsList.filter((c) => contactKey(c) !== contactKey(res.contact)), res.contact];
+      renderContacts();
+      renderAll();
+      closeAddSheet();
+    } catch (error) {
+      if (account !== signupAccountKey()) return;
+      addSheetWarn((error && error.message) || "Could not add them.");
+    } finally {
+      cvAddGoEl.disabled = false;
+    }
+  }
+  // The link lands on the clipboard from main; the button says so for a moment.
+  async function copyInviteLinkFromPeople(button) {
+    if (!window.relay.copyOnboardingInviteLink || button.disabled) return;
+    const label = button.textContent;
+    button.disabled = true;
+    try {
+      const result = await window.relay.copyOnboardingInviteLink();
+      if (!result?.ok) throw new Error(result?.error || "The link could not be copied.");
+      button.textContent = "Copied";
+    } catch {
+      button.textContent = "Could not copy";
+    } finally {
+      setTimeout(() => { if (button.isConnected) { button.textContent = label; button.disabled = false; } }, 1400);
+    }
+  }
+  cvAddEl.addEventListener("click", openAddSheet);
+  cvAddGoEl.addEventListener("click", addPersonByAddress);
+  cvAddInputEl.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); addPersonByAddress(); } });
+  cvAddInputEl.addEventListener("mousedown", () => setInteractive(true));
+  cvAddCancelEl.addEventListener("click", closeAddSheet);
+  cvAddLinkEl.addEventListener("click", () => copyInviteLinkFromPeople(cvAddLinkEl));
+  cvLatentLinkEl.addEventListener("click", () => copyInviteLinkFromPeople(cvLatentLinkEl));
   cvCancelEl.addEventListener("click", closeContactForm);
   cvDeleteEl.addEventListener("click", async () => {
     const contactId = editingContactId();
@@ -10599,11 +10919,11 @@
   });
   cvFormEl.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const name = [cvFirstEl.value, cvLastEl.value].map((s) => s.trim()).filter(Boolean).join(" ");
+    const name = String(cvNameEl.value || "").trim();
     // fold any half-typed draft into the chips before validating.
     if (cvEmailEl.value.trim() && !addEmail(cvEmailEl.value)) return;
     const emails = cvEmailsList.filter(isValidEmail);
-    if (!name) { cvErrorEl.textContent = "A first name is required."; return; }
+    if (!name) { cvErrorEl.textContent = "A name is required."; return; }
     if (!emails.length) { cvErrorEl.textContent = "At least one email is required."; return; }
     cvSaveEl.disabled = true;
     cvErrorEl.textContent = "";
@@ -11052,6 +11372,7 @@
         seen: sentTwin ? sentIsRead(sentTwin) : false,
         seenAt: sentTwin?.readAt || null,
         delivered: sentTwin ? sentIsDelivered(sentTwin) : false,
+        agentOpened: sentTwin ? sentIsAcknowledged(sentTwin) : false,
         readReceipts: sentTwin
           ? [{ name:sentRecipient(sentTwin), seen:sentIsRead(sentTwin), readAt:sentTwin.readAt || "" }]
           : [],
@@ -11125,6 +11446,7 @@
       msgs.push({
         id, threadId: s.threadId || id, direction: "out", seen: sentIsRead(s), seenAt: s.readAt || null,
         delivered: s.groupSendId ? groupDelivered.get(s.groupSendId) === true : sentIsDelivered(s),
+        agentOpened: !s.groupSendId && sentIsAcknowledged(s),
         inReplyToRelayId: s.inReplyToRelayId || "",
         // A share-link id is a room address, not a posting gate. The server
         // recognises its synthetic mailbox only for owned-agent invocations and
@@ -11409,6 +11731,7 @@
         seen:mine && (item?.readReceipts || []).some((receipt) => receipt && receipt.seen),
         seenAt:mine ? ((item?.readReceipts || []).find((receipt) => receipt && receipt.readAt)?.readAt || null) : null,
         delivered:mine && !new Set(["pending", "failed"]).has(String(item?.state || "")),
+        agentOpened:mine && String(item?.state || "").toLowerCase() === "acknowledged",
         readReceipts:Array.isArray(item?.readReceipts) ? item.readReceipts : [],
         addressRecipient:recipient,
         title:textLike ? (body || title || "Message") : (title || "Relay"),
@@ -12178,39 +12501,56 @@
     for (let i = 0; i < key.length; i += 1) h = (h * 31 + key.charCodeAt(i)) >>> 0;
     return `p${h % 8}`;
   }
-  // ONE ROW, THE APP YOU CHOSE (Sven, 2026-08-17, on David's two-row footer:
-  // "should probably detect which desktop apps you have then only suggest
-  // those, or even in settings you choose which one"). The row names the app
-  // Settings picked (which detection defaults to the app this Mac has); the
-  // other app is one tap away in Settings. David's subline stays: per relay,
-  // from real state — this pill has already put THIS relay into a task/
-  // session there, or it has not.
+  // ONE VERB ON A LETTER (Sven, 2026-09-08, the Minimal design): the app you
+  // chose on the You page, opening the relay in a new chat that starts by
+  // reading it. Nothing goes to a chat that is already open; nothing is
+  // picked (Sven, 2026-09-04). David's subline stays truthful per relay: this
+  // pill has already put THIS relay into a chat there, or it has not. When
+  // the chosen app has no desktop surface on this Mac, the letter carries the
+  // sentence to say in whatever session you are in, and a button that copies
+  // it — the pill is here, so Relay is installed, and the agent pulls the
+  // relay by name. No link.
   function relayHostActionsHtml(message, { persistent = false } = {}) {
     const id = String(message && message.id || "");
     const actionsId = `relay-host-actions-${id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
     const source = message && message.direction === "out" ? "sent" : "relay";
+    const inner = agentOpensInApp()
+      ? agentAppHosts().map((host) => hostActionRowHtml(host, message, source)).join("")
+      : pullSentenceHtml(message);
     return `${persistent ? "" : `<button class="th-host-disclosure" type="button" data-host-disclosure="${esc(id)}" data-stop="1" aria-expanded="false" aria-controls="${esc(actionsId)}"><span>Open with an agent</span><span class="chev" aria-hidden="true">⌄</span></button>`}<div id="${esc(actionsId)}" class="th-host-actions${persistent ? " persistent" : ""}" data-host-actions="${esc(id)}" data-stop="1" aria-hidden="${persistent ? "false" : "true"}"${persistent ? "" : " inert"}>
       <div class="th-host-actions-inner">
-        ${agentAppHosts().map((host) => hostActionRowHtml(host, message, source) + sessionPickerInlineHtml(id, host)).join("")}
+        ${inner}
       </div>
     </div>`;
   }
   function hostActionRowHtml(host, message, source) {
     const id = String(message && message.id || "");
     const codex = host === "codex";
-    const selected = sessionPickerState
-      && String(sessionPickerState.id) === id
-      && sessionPickerState.provider === host;
-    const context = selected
-      ? "Choose where this Relay lands"
-      : codex
-        ? (message?.materializedCodex ? "Continue in its existing task" : "Start a new task with this Relay")
-        : (message?.materializedClaude ? "Continue in its existing session" : "Start a new session with this Relay");
-    return `<button class="th-host-action${selected ? " pressed" : ""}" type="button" data-host-open="${esc(id)}" data-host="${codex ? "codex" : "claude"}" data-source="${source}" aria-expanded="${selected ? "true" : "false"}">
+    const continues = codex ? Boolean(message?.materializedCodex) : Boolean(message?.materializedClaude);
+    const context = continues
+      ? (codex ? "Continues the task that already has it" : "Continues the chat that already has it")
+      : (codex ? "A new task. It starts by reading this relay." : "A new chat. It starts by reading this relay.");
+    return `<button class="th-host-action" type="button" data-host-open="${esc(id)}" data-host="${codex ? "codex" : "claude"}" data-source="${source}" data-continues="${continues ? "1" : "0"}">
           <img class="th-host-logo" src="${codex ? "codexMark.svg" : "claudeCodeMark.svg"}" alt="" />
           <span class="th-host-copy"><span class="th-host-label">Open in ${codex ? "Codex" : "Claude Code"}</span><span class="th-host-context">${esc(context)}</span></span>
           <span class="th-host-arrow" aria-hidden="true">→</span>
         </button>`;
+  }
+  // "Pull David’s relay “Updater rollback postmortem”" — the thing to say in
+  // a session, and the exact sentence the button copies for the agent.
+  function pullSentenceHtml(message) {
+    const id = String(message && message.id || "");
+    const row = readerRow(id) || relayById(id)
+      || (payload.sent || []).find((item) => String(item.relayId || item.id || "") === id) || message || {};
+    const subject = String(row.title || row.displayTitle || "").trim() || relaySubject(row) || String(message?.title || "").trim() || "Relay";
+    const mine = (message && message.direction === "out") || row.direction === "out" || Boolean(row.recipient && !row.senderEmail);
+    const first = mine ? "" : String(relaySender(row) || message?.party || "their").trim().split(/\s+/)[0];
+    const whose = mine ? "my sent" : `${first}${/s$/i.test(first) ? "’" : "’s"}`;
+    const sentence = `Pull ${whose} relay “${subject}” from Relay and read it to me.`;
+    return `<div class="th-pull">
+        <div class="th-pull-q">Pull ${esc(whose)} relay <span class="t">“${esc(subject)}”</span></div>
+        <div class="th-pull-acts"><button class="th-pull-copy" type="button" data-pull-copy="${esc(sentence)}">Copy for your agent</button></div>
+      </div>`;
   }
   // The row's click, wherever the row is painted (a room bubble, the reader).
   function wireHostOpen(scope) {
@@ -12220,21 +12560,32 @@
         const id = b.getAttribute("data-host-open");
         const host = b.getAttribute("data-host") === "claude" ? "claude" : "codex";
         const source = b.getAttribute("data-source") === "sent" ? "sent" : "relay";
-        const message = readerRow(id) || relayById(id) || { id };
-        if (sessionPickerState
-          && String(sessionPickerState.id) === String(id)
-          && sessionPickerState.provider === host) {
-          closeSessionPicker();
-          return;
-        }
+        // A relay that already went to this app continues there; otherwise a
+        // new chat — never the one that happens to be open, and no picker.
+        openRelayFromUI(id, source, b.getAttribute("data-continues") === "1" ? "open" : "fresh", host);
+      });
+    }
+    for (const b of scope.querySelectorAll("[data-pull-copy]")) {
+      b.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        try {
+          await navigator.clipboard.writeText(b.getAttribute("data-pull-copy") || "");
+          b.textContent = "Copied";
+          setTimeout(() => { if (b.isConnected) b.textContent = "Copy for your agent"; }, 1400);
+        } catch { b.textContent = "Could not copy"; }
+      });
+    }
+  }
+  // Retired with the one-verb letter: no row reaches the session picker any
+  // more. Its code is left whole for David's call — delete it with the
+  // picker, or keep it for a surface that still wants to choose.
+  function retiredSessionPickerEntry(id, host, source) {
         // Paint the pressed row and loading disclosure in this click task.
         // Native discovery continues behind that visible response; awaiting it
         // here made the control feel dead and sent rows skipped this path
         // entirely, silently creating a fresh session.
+        const message = readerRow(id) || relayById(id) || { id };
         loadSessionPicker(id, host, relaySubject(message) || "Relay", null, source);
-      });
-    }
-    wireSessionPickerRows(scope);
   }
   // Before 0.1.290, inReplyToRelayId doubled as a default reply-chain key: the
   // room composer anchored every ordinary message to the newest one even when
@@ -12549,7 +12900,7 @@
           <div id="thQrInput" class="th-rich-composer" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Reply" data-placeholder="Reply…"></div>
           <div class="ta-rail">
             <span class="rt-spacer"></span>
-            <button type="button" id="thQrSend"${chatReplySending.has(threadStateKey) ? " disabled" : ""}>Send</button>
+            <button type="button" id="thQrSend"${chatReplySending.has(threadStateKey) ? " disabled" : ""}>Relay</button>
           </div>
         </div></div>`;
     const visibleThreadComposer = groupPostingBlocked
@@ -13645,6 +13996,13 @@
   let providerAuthPollTimer = null;
   let settingsLoadSeq = 0;
   let svPairOpen = false;       // inline code-entry row revealed
+  let svAccountOpen = false;    // the account row's actions are unfolded
+  let inviteLinkInfo = null;    // { url } once main has minted this account's link
+  let inviteLinkUnavailable = false;
+  let inviteLinkBusy = false;
+  let inviteLinkCopied = false;
+  let inviteLinkCopyTimer = null;
+  let inviteLinkError = "";
   let permTrayOpen = null;      // vendor key whose mode tray is unfolded
   let svDraft = "";             // pairing-code text preserved across re-renders
   let svBusy = false;           // pair / sign-out in flight
@@ -13657,9 +14015,6 @@
   let deviceApprovalBusy = "";
   let deviceApprovalError = "";
   let deviceApprovalNote = "";
-  let chatConnectionBusy = false;
-  let chatConnectionError = "";
-  let chatConnectionNote = "";
 
   const SLACK_CONNECTION_POLL_MS = 2000;
   const SLACK_CONNECTION_WAIT_TIMEOUT_MS = 2 * 60 * 1000;
@@ -13906,33 +14261,8 @@
       });
     }).join("");
   }
-  function chatConnectionRowsHtml(info) {
-    if (!info?.paired || (!window.relay.connectChatGPT && !window.relay.connectClaude)) return "";
-    const chatgpt = connectionDisclosureHtml({
-      id:"chatgpt-chat",
-      label:"ChatGPT",
-      logo:"codexMark.svg",
-      meta:"Relay in ChatGPT is coming soon.",
-      stateHtml:'<span class="sv-agent-provider-state">Coming soon</span>',
-      detailHtml:`<div class="sv-agent-provider-note">Relay connections for ChatGPT are not available yet.</div>
-        <div class="sv-agent-provider-actions"><button class="sv-provider-btn" type="button" disabled>Coming soon</button></div>`,
-    });
-    const claudeMeta = chatConnectionNote || chatConnectionError || "Use Relay in your Claude chats.";
-    const claude = connectionDisclosureHtml({
-      id:"claude-chat",
-      label:"Claude",
-      logo:"claudeCodeMark.svg",
-      meta:claudeMeta,
-      stateHtml:`<span class="sv-agent-provider-state ${chatConnectionBusy ? "busy" : "available"}">${chatConnectionBusy ? "Opening" : "Set up"}</span>`,
-      detailHtml:`<div class="sv-agent-provider-note">Relay copies its connector address and opens Claude at the right setup page.</div>
-        ${chatConnectionNote ? `<div class="sv-agent-provider-note success">${esc(chatConnectionNote)}</div>` : ""}
-        ${chatConnectionError ? `<div class="sv-agent-provider-note error">${esc(chatConnectionError)}</div>` : ""}
-        <div class="sv-agent-provider-actions"><button class="sv-provider-btn primary" type="button" id="svConnectClaude" ${chatConnectionBusy || !window.relay.connectClaude ? "disabled" : ""}>${chatConnectionBusy ? "Opening…" : "Connect Claude"}</button></div>`,
-    });
-    return `${chatgpt}${claude}`;
-  }
   function connectionsHtml(info, includeAgentProviders) {
-    const rows = `${includeAgentProviders ? providerConnectionRowsHtml() : ""}${chatConnectionRowsHtml(info)}`;
+    const rows = includeAgentProviders ? providerConnectionRowsHtml() : "";
     if (!rows) return "";
     return `<section class="sv-provider-section" data-stop="1">
       <div class="sv-open-title">Connections</div>
@@ -13943,23 +14273,6 @@
     </section>`;
   }
 
-  async function connectClaudeFromSettings() {
-    if (chatConnectionBusy || !window.relay.connectClaude) return;
-    chatConnectionBusy = true;
-    chatConnectionError = "";
-    chatConnectionNote = "";
-    renderSettings();
-    try {
-      const result = await window.relay.connectClaude();
-      if (!result?.ok) throw new Error(result?.error || "Claude setup could not be opened.");
-      chatConnectionNote = "Relay’s address is copied. In Claude, choose +, Add custom connector, then paste it.";
-    } catch (error) {
-      chatConnectionError = error?.message || "Claude setup could not be opened.";
-    } finally {
-      chatConnectionBusy = false;
-      renderSettings();
-    }
-  }
   // Notification preferences. Unlike a ✕ (a snooze that the next relay revokes),
   // these are durable choices: nothing in the product undoes them but the user.
   function todoStewardSettingsHtml() {
@@ -14041,6 +14354,92 @@
       }).join("")}</div>
       ${chatAgentPreferencesError ? `<div class="row-err sv-err">${esc(chatAgentPreferencesError)}</div>` : ""}
     </div>`;
+  }
+  // YOUR AGENT. The skill and the MCP are installed for everyone by setup
+  // (Shane, 2026-09-07), so there is nothing to connect here; the one choice
+  // is which app opens a relay. One app, not two switches: a letter carries
+  // one verb (Sven, 2026-09-08).
+  function yourAgentHtml() {
+    const chosen = agentAppChoice();
+    const inApp = agentOpensInApp();
+    const intro = inApp
+      ? "Choose where to open a Relay. Opening an app does not confirm its Relay connection."
+      : "Copy the sentence on a Relay into your current agent session. You can change this preference here.";
+    const surface = openingPreference()?.surface || (chosen ? agentSurfacePreference(chosen) : "other");
+    return `
+      <div class="sv-open-section" id="yourAgent" data-stop="1">
+        <div class="sv-open-title">Your agent</div>
+        <div class="sv-open-intro">${esc(intro)}</div>
+        <label class="sv-open-row"><span class="sv-open-copy">I use my agent in</span>
+          <select id="svOpeningSurface" class="sv-agent-select" aria-label="Where I use my agent">
+            ${[["desktop", "A desktop app"], ["terminal", "The terminal"], ["other", "Another session"]].map(([value, label]) => `<option value="${value}"${surface === value ? " selected" : ""}>${label}</option>`).join("")}
+          </select>
+        </label>
+        <div class="sv-open-list">
+          ${AGENT_APP_OPTIONS.map((app) => {
+            const available = appAvailable(app);
+            const on = available && app === chosen;
+            const logo = app === "Codex" ? "codexMark.svg" : "claudeCodeMark.svg";
+            const why = !available ? appUnavailableReason(app)
+              : on ? (inApp ? "Available · opens relays in a new chat" : "Available · copy the sentence into your session")
+              : "Available on this computer";
+            return `<div class="sv-open-row${available ? "" : " off"}">
+              <img class="sv-open-logo" src="${logo}" alt="" />
+              <span class="sv-open-copy"><span class="sv-open-name">${app}</span><span class="sv-open-why">${esc(why)}</span></span>
+              ${on ? `<span class="sv-open-state">${inApp ? "Opens relays" : "Chosen"}</span>`
+                : available ? `<button class="sv-choose" type="button" data-agent-choose="${app}">Use this one</button>` : ""}
+            </div>`;
+          }).join("")}
+        </div>
+      </div>`;
+  }
+  function blockedPeopleHtml() {
+    return `<div class="sv-open-section" data-stop="1"><button class="sv-choose" id="svBlockedPeople" type="button">Blocked people</button><div id="svBlockedList" aria-live="polite"></div></div>`;
+  }
+  // YOUR LINK. One reusable link, copied from where you are. Joining through
+  // it connects the two of you (the server writes both contacts), so they land
+  // in People, not in Requests; Requests is for someone who writes unasked.
+  // The link used to live only on the last screen of the first-run chapter,
+  // where nobody could find it again.
+  function yourLinkHtml() {
+    const url = String(inviteLinkInfo?.url || "");
+    const shown = url.replace(/^https?:\/\//, "").replace(/\/$/, "");
+    return `
+      <div class="sv-open-section" id="yourLink" data-stop="1">
+        <div class="sv-open-title">Your link</div>
+        <div class="sv-open-list">
+          <div class="sv-open-row">
+            <span class="sv-open-copy">
+              <span class="sv-open-name sv-link-url">${esc(shown || (inviteLinkUnavailable ? "Your link is not available right now." : "Loading your link…"))}</span>
+              <span class="sv-open-why">Anyone with it can join Relay and reach you. They land in your People.</span>
+            </span>
+            <button class="sv-choose" type="button" id="svCopyLink" ${inviteLinkBusy ? "disabled" : ""}>${inviteLinkCopied ? "Copied" : "Copy"}</button>
+          </div>
+        </div>
+        ${inviteLinkError ? `<div class="row-err sv-err">${esc(inviteLinkError)}</div>` : ""}
+      </div>`;
+  }
+  // The link lands on the clipboard from main (the renderer never sees the
+  // account token that mints it); the button says so for a moment.
+  async function copyInviteLinkFromSettings() {
+    if (inviteLinkBusy || !window.relay.copyOnboardingInviteLink) return;
+    inviteLinkBusy = true; inviteLinkError = ""; renderSettings();
+    try {
+      const result = await window.relay.copyOnboardingInviteLink();
+      if (!result?.ok) throw new Error(result?.error || "The link could not be copied. Try again.");
+      if (result.url) { inviteLinkInfo = { ...(inviteLinkInfo || {}), url:result.url }; inviteLinkUnavailable = false; }
+      inviteLinkCopied = true;
+      if (inviteLinkCopyTimer) clearTimeout(inviteLinkCopyTimer);
+      inviteLinkCopyTimer = setTimeout(() => {
+        inviteLinkCopied = false;
+        if (activeView === "settings") renderSettings();
+      }, 1600);
+    } catch (error) {
+      inviteLinkError = error?.message || "The link could not be copied. Try again.";
+    } finally {
+      inviteLinkBusy = false;
+      renderSettings();
+    }
   }
   function deviceApprovalsHtml(info) {
     // Device trust is an E2EE-only concept. Keep the entire section absent
@@ -14129,21 +14528,23 @@
     let html = "";
     if (info.paired) {
       const name = info.name || info.email || "Relay account";
+      // THE ACCOUNT IS A ROW YOU TAP (One Door, 2026-09-03): its actions
+      // unfold under it instead of standing open above everything else.
       html += `
-        <div class="sv-account">
+        <button class="sv-account${svAccountOpen ? " open" : ""}" type="button" id="svAccountRow" aria-expanded="${svAccountOpen ? "true" : "false"}" aria-controls="svAccountActions">
           <span class="sv-avatar">${esc(cvInitials(info.name, info.email))}</span>
           <span class="sv-id">
             <span class="sv-name">${esc(name)}</span>
             ${info.email ? `<span class="sv-email">${esc(info.email)}</span>` : ""}
-            <span class="sv-device">This device · ${esc(info.deviceName || "")}</span>
           </span>
-        </div>
-        <div class="open-actions sv-actions" data-stop="1" aria-label="Account actions">
+          <span class="sv-account-more">${svAccountOpen ? "Close" : "Settings"}</span>
+        </button>
+        ${svAccountOpen ? `<div class="open-actions sv-actions" id="svAccountActions" data-stop="1" aria-label="Account actions">
           <button class="oa-item" type="button" id="svAccount" ${svBusy ? "disabled" : ""}>Account Settings…</button>
           <button class="oa-item oa-primary" type="button" id="svSwitch" ${svBusy ? "disabled" : ""}>Switch Account…</button>
           <div class="oa-sep" role="separator"></div>
           <button class="oa-item${svSignOutArmed ? " sv-signout-armed" : ""}" type="button" id="svSignOut" ${svBusy ? "disabled" : ""}>${svSignOutArmed ? "Sign Out — click again to confirm" : "Sign Out"}</button>
-        </div>`;
+        </div>` : ""}`;
     } else {
       html += `
         <div class="sv-head"><span class="sv-title">Sign in to Relay.</span></div>
@@ -14155,14 +14556,20 @@
     if (svPairOpen) html += svPairRowHtml();
     if (svNote) html += `<div class="sv-note">${esc(svNote)}</div>`;
     html += `<div class="row-err sv-err" id="svErr">${esc(svError)}</div>`;
+    // YOUR AGENT, YOUR LINK: the two things a person comes to this page for
+    // sit right under the account (Sven, 2026-09-08).
+    if (info.paired) {
+      html += yourAgentHtml();
+      html += yourLinkHtml();
+      html += blockedPeopleHtml();
+    }
     html += slackSettingsHtml(info);
     html += deviceApprovalsHtml(info);
-    // ONE CONNECTIONS SURFACE. Claude Code and Codex are the subscription
-    // runtimes behind Tasks; ChatGPT and Claude are the chat surfaces. They
-    // share one contained disclosure list because they are all ways Relay
-    // connects to an agent, even though each provider keeps its own setup path.
-    // The native-runtime rows remain gated while their product feature is off;
-    // the chat rows stay available to every paired Companion account.
+    // CONNECTIONS. Claude Code and Codex as the subscription runtimes behind
+    // Tasks — gated with that product feature. The chat-connector rows that
+    // used to sit here (ChatGPT coming soon, Claude chat) are gone: the You
+    // page says what is connected, and the skill is installed for everyone
+    // by setup (Sven, 2026-09-08).
     html += connectionsHtml(info, payload.features?.agentConnections === true);
     // Version line doubles as the manual update backstop: if the auto-updater
     // has not refreshed this machine, say so here and make it one click.
@@ -14190,38 +14597,9 @@
     // species as everything below it. The explanation sits under the switch
     // it explains, never as a paragraph above the list.
     if (payload.features?.todo === true) html += todoStewardSettingsHtml();
-    // WHERE RELAYS OPEN. Provider switches use runtime availability (CLI or
-    // desktop), while the optional surface selector decides where a new/idle
-    // session is presented when both surfaces exist.
-    const selectedAgentApps = agentAppSelection();
-    html += `
-      <div class="sv-open-section" id="protoPrefs" data-stop="1">
-        <div class="sv-open-title">Open Relays with</div>
-        <div class="sv-open-intro">Choose which app buttons appear on each Relay.</div>
-        <div class="sv-open-list">
-          ${AGENT_APP_OPTIONS.map((app) => {
-            const available = appAvailable(app);
-            const on = selectedAgentApps.includes(app);
-            const logo = app === "Codex" ? "codexMark.svg" : "claudeCodeMark.svg";
-            const surfaces = agentSurfaceOptions(app);
-            const surface = agentSurfacePreference(app);
-            const why = !available
-              ? appUnavailableReason(app)
-              : surfaces.length === 1
-                ? `Uses ${surface === "terminal" ? "Terminal" : "Desktop"}.`
-                : "";
-            return `<div class="sv-open-row${available ? "" : " off"}">
-              <img class="sv-open-logo" src="${logo}" alt="" />
-              <span class="sv-open-copy"><span class="sv-open-name">${app}</span>${why ? `<span class="sv-open-why">${esc(why)}</span>` : ""}</span>
-              ${available && surfaces.length > 1 ? `<select class="sv-surface-select" data-agent-surface="${app}" aria-label="Open ${app} in"><option value="desktop"${surface === "desktop" ? " selected" : ""}>Desktop</option><option value="terminal"${surface === "terminal" ? " selected" : ""}>Terminal</option></select>` : ""}
-              <button class="sv-switch" type="button" role="switch" data-agent-app="${app}" aria-checked="${on ? "true" : "false"}" aria-label="Open Relays with ${app}" ${!available ? "disabled" : ""}></button>
-            </div>`;
-          }).join("")}
-        </div>
-      </div>`;
     html += chatAgentDefaultsHtml();
     // WHAT TASKS MAY DO. One value row per app — the same species as the
-    // "Open Relays with" rows above (logo, name, current state), under the
+    // "Your agent" rows above (logo, name, current state), under the
     // shared section title style. Tapping a row unfolds the standard
     // open-actions tray inline with each vendor's real modes in their own
     // words — never ours; picking one (or tapping again) folds it back. The
@@ -14276,20 +14654,47 @@
         renderSettings();
       });
     }
-    for (const sw of settingsViewEl.querySelectorAll("[data-agent-app]")) {
-      sw.addEventListener("click", (e) => {
+    for (const button of settingsViewEl.querySelectorAll("[data-agent-choose]")) {
+      button.addEventListener("click", (e) => {
         e.stopPropagation();
-        setAgentAppEnabled(sw.getAttribute("data-agent-app"), sw.getAttribute("aria-checked") !== "true");
+        setAgentOpeningApp(button.getAttribute("data-agent-choose"));
         renderSettings();
       });
     }
-    for (const select of settingsViewEl.querySelectorAll("[data-agent-surface]")) {
-      select.addEventListener("change", (e) => {
-        e.stopPropagation();
-        setAgentSurfacePreference(select.getAttribute("data-agent-surface"), select.value);
-        renderSettings();
-      });
-    }
+    document.getElementById("svOpeningSurface")?.addEventListener("change", (event) => {
+      setProtoPref(`proto.openingPreference.v1:${signupAccountKey()}`, JSON.stringify({
+        ...(openingPreference() || {}), surface: event.target.value,
+      }));
+      renderSettings();
+    });
+    document.getElementById("svBlockedPeople")?.addEventListener("click", async () => {
+      const list = document.getElementById("svBlockedList");
+      const account = signupAccountKey();
+      list.textContent = "Loading…";
+      try {
+        const result = await window.relay.connectionBlocks();
+        if (account !== signupAccountKey() || !list.isConnected) return;
+        list.innerHTML = (result.blocks || []).map((person) => `<div class="sv-open-row"><span class="sv-open-copy">${esc(person.name || "Relay member")}</span><button class="sv-choose" data-unblock="${esc(person.relayUserId)}" type="button">Unblock</button></div>`).join("") || "No blocked people.";
+        for (const button of list.querySelectorAll("[data-unblock]")) {
+          button.addEventListener("click", async () => {
+            button.disabled = true;
+            try {
+              await window.relay.unblockPerson(button.dataset.unblock);
+              if (account === signupAccountKey() && button.isConnected) button.closest(".sv-open-row").remove();
+            } catch { if (account === signupAccountKey()) { button.disabled = false; button.textContent = "Retry unblock"; } }
+          });
+        }
+      } catch { if (account === signupAccountKey() && list.isConnected) list.textContent = "Blocked people are unavailable right now. Try again."; }
+    });
+    const accountRow = document.getElementById("svAccountRow");
+    if (accountRow) accountRow.addEventListener("click", (e) => {
+      e.stopPropagation();
+      svAccountOpen = !svAccountOpen;
+      if (!svAccountOpen) resetSignOutArm();
+      renderSettings();
+    });
+    const copyLink = document.getElementById("svCopyLink");
+    if (copyLink) copyLink.addEventListener("click", (e) => { e.stopPropagation(); copyInviteLinkFromSettings(); });
 
     for (const select of settingsViewEl.querySelectorAll("[data-chat-agent-model],[data-chat-agent-effort]")) {
       select.addEventListener("change", async (event) => {
@@ -14331,8 +14736,6 @@
         saveTodoStewardPrefs({ provider:option.getAttribute("data-steward-provider") });
       });
     }
-    const connectClaude = document.getElementById("svConnectClaude");
-    if (connectClaude) connectClaude.addEventListener("click", connectClaudeFromSettings);
     const slackConnect = document.getElementById("svSlackConnect");
     if (slackConnect) slackConnect.addEventListener("click", connectSlackFromSurface);
     const slackDisconnect = document.getElementById("svSlackDisconnect");
@@ -14799,7 +15202,17 @@
       }
       renderSettings();
     })();
-    await Promise.allSettled([accountTask, slackTask, deviceApprovalTask, authTask, inventoryTask, chatAgentTask]);
+    const inviteLinkTask = (async () => {
+      if (!window.relay.onboardingInviteLink || payload.account?.paired === false) return;
+      let result = null;
+      try { result = await window.relay.onboardingInviteLink(); }
+      catch (error) { result = { ok:false, error:error?.message || "" }; }
+      if (seq !== settingsLoadSeq) return;
+      if (result?.ok && result.invite?.url) { inviteLinkInfo = result.invite; inviteLinkUnavailable = false; }
+      else inviteLinkUnavailable = !inviteLinkInfo;
+      renderSettings();
+    })();
+    await Promise.allSettled([accountTask, slackTask, deviceApprovalTask, authTask, inventoryTask, chatAgentTask, inviteLinkTask]);
   }
   // Provider state is live product state, not something the user should have
   // to refresh manually. Re-read it whenever Settings becomes visible again
@@ -15100,30 +15513,6 @@
     }
   }
 
-  function updateSignupInvite(refreshFeedback = false) {
-    const copy = document.getElementById("suInviteCopy");
-    if (!copy) return;
-    copy.disabled = signupInviteCopyBusy || signupBusy;
-    copy.innerHTML = '<svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg><span>' + (signupInviteCopyBusy ? "Copying…" : signupInviteCopied ? "Copy again" : "Copy invitation") + '</span>';
-    copy.className = signupInviteCopied ? "su-secondary" : "su-primary";
-    const open = document.getElementById("suInviteOpen");
-    open.disabled = signupBusy || signupInviteCopyBusy;
-    const label = signupInviteCopied ? "Open Relay →" : "Maybe later";
-    if (open.textContent !== label) {
-      open.textContent = label;
-      open.className = signupInviteCopied ? "su-primary su-invite-open" : "su-link";
-    }
-    const hint = document.getElementById("suInviteHint");
-    if (hint.dataset.copied !== String(signupInviteCopied) || refreshFeedback) {
-      hint.dataset.copied = String(signupInviteCopied);
-      hint.innerHTML = signupInviteCopied
-        ? (signupError ? '' : '<span class="su-invite-feedback">Invitation copied.</span>') + 'Share it with everyone you want to invite to Relay.'
-        : 'One reusable link for everyone you work with.';
-    }
-    const error = document.getElementById("suInviteError");
-    error.textContent = signupError; error.hidden = !signupError;
-  }
-
   async function completeSignupTutorial() {
     if (signupBusy || !window.relay.completeSetupTutorial) return;
     signupBusy = true; signupError = ""; renderSignup();
@@ -15131,7 +15520,6 @@
       const result = await window.relay.completeSetupTutorial();
       if (!result?.ok) throw new Error(result?.error || "Relay could not finish setup.");
       signupBusy = false; signupNote = ""; signupStage = "installed";
-      signupInviteAccount = null; signupInviteCopied = false;
       payload.ui = {
         ...payload.ui,
         completedOnboardingVersion:Number(result.version || payload.ui?.onboardingVersion || 1),
@@ -15141,6 +15529,33 @@
     } catch (reason) {
       signupFailure(reason, "Relay could not finish setup. Try again.");
     }
+  }
+
+  // THE LANDING AFTER THE FIRST SEND (Sven, 2026-09-08): complete the chapter,
+  // then open the room of the relay you just wrote. Once per account; a
+  // completion that did not take shows on the card and the next poll tries
+  // again; a result that lands after the account changed opens nothing.
+  let firstRelayLanding = null;
+  async function landOnFirstRelay() {
+    const account = signupAccountKey();
+    if (!account || firstRelayLanding === account) return;
+    firstRelayLanding = account;
+    await completeSignupTutorial();
+    if (account !== signupAccountKey()) return;
+    if (payload.ui?.onboardingRequired !== false) { firstRelayLanding = null; return; }
+    openFirstRelayRoom();
+  }
+  function openFirstRelayRoom() {
+    const relayId = payload.ui?.firstRelayId || "";
+    const first = (payload.sent || []).find((item) => item.relayId === relayId);
+    const address = String(first?.recipient?.email || "").trim().toLowerCase();
+    const room = relayId ? chatSections("relay").people.find((candidate) =>
+      (candidate.msgs || []).some((message) => message.id === relayId)
+      || (first?.threadId && candidate.threadIds?.has(first.threadId))
+      || (address && candidate.partyKey === `email:${address}`)) : null;
+    if (room) { openThreadDetail(room.threadId, room.name || "", "relays", { expanded:true }); return; }
+    activeView = "relays";
+    commitNavigation();
   }
 
   function pendingOpenSignupCard() {
@@ -15217,65 +15632,34 @@
       });
       return;
     }
-    if (signupStage === "invite") {
-      if (!signupBodyEl.querySelector(".su-invite")) {
-        const mark = '<i></i><i></i><i></i>';
-        signupBodyEl.innerHTML = `<div class="su-invite"><div class="su-invite-art" aria-hidden="true"><span class="su-invite-mark su-invite-hero">${mark}</span>${Array.from({length:4}, () => `<span class="su-invite-mark su-invite-echo">${mark}</span>`).join("")}</div><h1 class="su-title">Send Relays to everyone you work with.</h1><p class="su-copy">Share your invite link. When they join, you can send each other messages and context directly from Claude Code or Codex.</p><div class="su-invite-actions"><button class="su-primary" id="suInviteCopy" type="button">Copy invitation</button></div><p class="su-invite-hint" id="suInviteHint" role="status" aria-atomic="true"></p><div class="su-invite-exit"><button class="su-link" id="suInviteOpen" type="button">Maybe later</button></div><p class="su-note su-error" id="suInviteError" role="alert" hidden></p></div>`;
-        document.getElementById("suInviteCopy").addEventListener("click", async () => {
-          if (signupInviteCopyBusy || signupBusy) return;
-          const account = signupAccountKey();
-          signupInviteCopyBusy = true; signupError = ""; updateSignupInvite();
-          try {
-            const result = await window.relay.copyOnboardingInviteLink();
-            if (!result?.ok) throw new Error(result?.error || "The invitation could not be copied. Try again.");
-            if (signupInviteAccount !== account || signupAccountKey() !== account) return;
-            signupInviteCopied = true;
-          } catch (reason) {
-            if (signupInviteAccount !== account || signupAccountKey() !== account) return;
-            signupError = signupFailureMessage(reason, "The invitation could not be copied. Try again.");
-          } finally {
-            if (signupInviteAccount === account && signupAccountKey() === account) {
-              signupInviteCopyBusy = false;
-              if (signupStage === "invite") updateSignupInvite(true);
-            }
-          }
-        });
-        document.getElementById("suInviteOpen").addEventListener("click", completeSignupTutorial);
-      }
-      updateSignupInvite();
-      return;
-    }
     if (signupStage === "first-relay") {
       const status = payload.ui?.firstRelayStatus || "checking";
+      // THE FIRST RELAY IS THE LANDING (Sven, 2026-09-08). When the account's
+      // history shows the send, the chapter is over: the tutorial completes
+      // itself and the pill opens the room of the relay you just wrote — the
+      // conversation, not a "Nicely done" screen and not a Copy-invitation
+      // screen. Your link lives on the You page and in People now. Until the
+      // send, the pill has nothing else to show, so this screen stays.
+      if (status === "sent") { landOnFirstRelay(); return; }
       const signature = JSON.stringify([status, signupBusy, signupError]);
       if (signupBodyEl.dataset.firstRelaySignature === signature && signupBodyEl.querySelector(".su-first-relay")) return;
       signupBodyEl.dataset.firstRelaySignature = signature;
-      const sent = status === "sent";
       const unavailable = status === "unavailable";
       const checking = status === "checking";
-      const title = sent ? "Your first Relay is sent."
-        : '<span class="su-handoff-intro">Follow the instructions in</span><span class="su-host-claude">Claude Code</span><span class="su-handoff-or">or <span class="su-host-codex">Codex</span>.</span>';
-      const copy = sent
-        ? "Nicely done. You can keep the conversation going in Claude Code or Codex. Click below to open the Relay app."
-        : checking || unavailable
+      const title = '<span class="su-handoff-intro">Follow the instructions in</span><span class="su-host-claude">Claude Code</span><span class="su-handoff-or">or <span class="su-host-codex">Codex</span>.</span>';
+      const copy = checking || unavailable
         ? "Keep going in the conversation where you set up Relay."
         : "Your agent will help you send your first Relay.";
       const progress = unavailable ? "We couldn’t check your send yet. We’ll try again."
         : checking ? "Checking whether you’ve already sent a Relay…"
         : "This screen will update when your Relay is sent.";
-      signupBodyEl.innerHTML = `<div class="su-first-relay${sent ? " su-first-relay-sent" : ""}">
-        ${sent ? '<div class="su-relay-moment" aria-hidden="true"><i></i><i></i><i></i><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></svg></div>' : ""}
-        <p class="su-step">${sent ? "You’re on your way" : checking || unavailable ? "Connected to Relay" : "Your first Relay"}</p>
-        <h1 class="su-title${sent ? "" : " su-handoff-title"}">${title}</h1><p class="su-copy">${copy}</p>
-        ${sent ? "" : `<p class="su-send-progress" role="status"><span aria-hidden="true"></span>${progress}</p>`}
-        <div class="su-form">${error}<button class="${sent ? "su-primary" : "su-link"}" id="suChatSkip" type="button"${busy}>${sent ? "Open Relay" : "Skip for now"}</button></div>
+      signupBodyEl.innerHTML = `<div class="su-first-relay">
+        <p class="su-step">${checking || unavailable ? "Connected to Relay" : "Your first Relay"}</p>
+        <h1 class="su-title su-handoff-title">${title}</h1><p class="su-copy">${copy}</p>
+        <p class="su-send-progress" role="status"><span aria-hidden="true"></span>${progress}</p>
+        <div class="su-form">${error}<button class="su-link" id="suChatSkip" type="button"${busy}>Skip for now</button></div>
       </div>`;
-      document.getElementById("suChatSkip")?.addEventListener("click", () => {
-        if (!sent) return completeSignupTutorial();
-        signupInviteAccount = signupAccountKey();
-        signupInviteCopied = false; signupInviteCopyBusy = false; signupError = "";
-        signupStage = "invite"; renderSignup();
-      });
+      document.getElementById("suChatSkip")?.addEventListener("click", () => completeSignupTutorial());
       return;
     }
     if (signupStage === "restart-required") {
@@ -15461,6 +15845,13 @@
       ));
       tab.classList.toggle("active", view === tabView);
     }
+    // You is your avatar: your initials once an account is paired, the word
+    // until then. Words over glyphs — a gear says "machine", initials say "you".
+    if (youTabAvatarEl) {
+      const paired = Boolean(payload.account) && payload.account.paired !== false;
+      youTabAvatarEl.textContent = paired ? cvInitials(payload.account.name, payload.account.email) : "You";
+      youTabAvatarEl.classList.toggle("word", !paired);
+    }
   }
   function applyView() {
     // Visibility is committed only after renderAll has built the destination.
@@ -15491,6 +15882,7 @@
       }
     } else {
       resetSignOutArm(); // leaving the view disarms the confirm state
+      svAccountOpen = false; // and folds the account row
     }
     if (activeView === "slack" && payload.features?.slack === true && viewChanged) {
       refreshSlackConnection({ preserveWaiting:true });
@@ -15568,10 +15960,7 @@
       signupStage = "credential-recovery";
     } else if (tutorialPending) {
       stopSignupPolling();
-      if (signupInviteAccount !== signupAccountKey()) {
-        signupInviteAccount = null; signupInviteCopied = false; signupInviteCopyBusy = false;
-      }
-      signupStage = signupInviteAccount ? "invite" : "first-relay";
+      signupStage = "first-relay";
     }
     const needsSignup = credentialRecovery || payload.account?.paired === false || tutorialPending;
     cardEl.classList.toggle("signup", needsSignup);
@@ -15615,12 +16004,16 @@
       .map((item) => [String(item.relayId || item.id || ""), item])
       .filter(([id]) => Boolean(id)));
     const viewerEmail = String(payload.account?.email || "").trim().toLowerCase();
+    // A request is not unread mail: it waits, quietly, in People (the tab
+    // wears its count instead).
+    const quiet = requestAddresses();
     const relayUnreadIds = new Set(
       (payload.relays || [])
         .filter((r) => r.unread
           && isRelayListKind(r)
           && !onRequestThread(r, reqThreads)
-          && !relayIsSelfAuthored(r, sentByRelayId.get(String(r.id || r.relayId || "")), viewerEmail))
+          && !relayIsSelfAuthored(r, sentByRelayId.get(String(r.id || r.relayId || "")), viewerEmail)
+          && !quiet.has(String(r.senderEmail || "").trim().toLowerCase()))
         .map((r) => r.id),
     );
     const unread = relayUnreadIds.size;
@@ -15631,6 +16024,11 @@
     markAllReadEl.classList.toggle("gone", activeView !== "relays" || unread === 0);
     markAllReadEl.disabled = unread === 0;
     setBadge(tasksBadgeEl, requestsOutstandingCount());
+    setBadge(peopleBadgeEl, requestRooms().length);
+    if (paintSurface && activeView === "contacts") {
+      refreshPaneCounts();
+      if (contactsPane === "requests") renderRequestsPane();
+    }
     if (paintSurface) {
       if (activeView === "chat") renderChat();
       if (activeView === "relays") renderRelays();

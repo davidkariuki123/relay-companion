@@ -184,6 +184,10 @@ contextBridge.exposeInMainWorld("relay", {
   groupLeave: (id) => ipcRenderer.invoke("relay:groupLeave", id),
   contactSave: (input) => ipcRenderer.invoke("relay:contactSave", input),
   contactDelete: (input) => ipcRenderer.invoke("relay:contactDelete", input),
+  contactAdd: (input) => ipcRenderer.invoke("relay:contactAdd", input),
+  blockRequest: (relayId) => ipcRenderer.invoke("relay:blockRequest", relayId),
+  connectionBlocks: () => ipcRenderer.invoke("relay:connectionBlocks"),
+  unblockPerson: (userId) => ipcRenderer.invoke("relay:unblockPerson", userId),
 
   // settings / account (switch + sign-out relaunch the pill on success)
   accountInfo: () => ipcRenderer.invoke("relay:accountInfo"),

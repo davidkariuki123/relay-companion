@@ -110,8 +110,9 @@ test("thread preview and provider actions keep their source direction explicit",
   const footer = between(inbox, "function relayHostActionsHtml", "// ---- the thread reply composer");
   assert.match(footer, /message && message\.direction === "out" \? "sent" : "relay"/);
   assert.match(footer, /data-source="\$\{source\}"/);
-  const wire = between(inbox, "function wireHostOpen", "// Before 0.1.290");
-  assert.match(wire, /loadSessionPicker\(id, host, relaySubject\(message\) \|\| "Relay", null, source\)/);
+  const wire = between(inbox, "function wireHostOpen", "function retiredSessionPickerEntry");
+  assert.match(wire, /const source = b\.getAttribute\("data-source"\) === "sent" \? "sent" : "relay";/);
+  assert.match(wire, /openRelayFromUI\(id, source, /);
 });
 
 test("older Relay provider rows use explicit hover intent, keyboard and touch disclosure", () => {

@@ -1803,9 +1803,19 @@ async function refreshSent() {
   }
   return sentCache;
 }
+function onboardingProtocolState() {
+  try {
+    const file = process.env.RELAY_AGENT_CONFIG || path.join(process.env.RELAY_CONFIG_DIR || path.join(os.homedir(), ".relay"), "agent-protocol.json");
+    const config = JSON.parse(fs.readFileSync(file, "utf8"));
+    const current = readConfigFile();
+    if (!account().userId || config.account?.relayUserId !== account().userId
+      || config.apiUrl !== (process.env.RELAY_API_URL || current.apiUrl || "https://api.sendrelays.com")) return null;
+    return { tutorial: config.tutorial, openingPreference: config.openingPreference };
+  } catch { return null; }
+}
 function updateFirstRelayOnboarding(key, response) {
   if (!key) return;
-  const status = firstRelayOnboarding.observe(key, response);
+  const status = firstRelayOnboarding.observe(key, response, onboardingProtocolState()?.tutorial);
   // A first send completed before this app opened: no remedial tutorial and
   // no replayed celebration for an existing sender on a new computer.
   if (status === "complete" && (Number(onboardingVersions[key]) || 0) < COMPANION_ONBOARDING_VERSION) {
@@ -2002,18 +2012,7 @@ async function refreshContacts() {
     const res = await client.listContacts();
     const contacts = Array.isArray(res && res.contacts) ? res.contacts : [];
     contactsCache = contacts
-      .map((c) => {
-        const emails = Array.isArray(c.emails) ? c.emails.filter(Boolean) : c.email ? [c.email] : [];
-        return {
-          id: c.id || c.contactId || "",
-          name: c.name || emails[0] || "",
-          email: emails[0] || c.email || "",
-          emails,
-          onRelay: Boolean(c.onRelay),
-          source: c.source || "",
-          updatedAt: c.updatedAt || null,
-        };
-      })
+      .map(contactBookRow)
       // Managed Granular employees/agents are machine recipients, not people
       // in the human contact book. They remain available to Relay's recipient
       // resolver, while the People surface shows humans and the Groups pane
@@ -2026,6 +2025,20 @@ async function refreshContacts() {
     console.error("[overlay] listContacts failed:", error && error.message);
   }
   return contactsCache;
+}
+// One shape for a contact wherever it enters the book: the poll, or a write
+// that hands the exact row back.
+function contactBookRow(c) {
+  const emails = Array.isArray(c.emails) ? c.emails.filter(Boolean) : c.email ? [c.email] : [];
+  return {
+    id: c.id || c.contactId || "",
+    name: c.name || emails[0] || "",
+    email: emails[0] || c.email || "",
+    emails,
+    onRelay: Boolean(c.onRelay),
+    source: c.source || "",
+    updatedAt: c.updatedAt || null,
+  };
 }
 function ensureContactsLoaded() {
   if (!contactsLoadedOnce) contactsLoadedOnce = refreshContacts().catch(() => contactsCache);
@@ -2060,6 +2073,7 @@ async function contactsAfterWrite() {
 }
 
 async function saveContact(input) {
+  const accountKey = onboardingAccountKey();
   const contactId = String((input && input.contactId) || "").trim();
   const name = String((input && input.name) || "").trim();
   const emails = Array.isArray(input && input.emails)
@@ -2071,12 +2085,25 @@ async function saveContact(input) {
   for (const e of emails) if (!e.includes("@")) return { ok: false, error: "That email looks off." };
   try {
     const client = await relayClient();
-    if (contactId) await client.updateContact(contactId, { name, emails, email: emails[0] || "" });
-    else await client.upsertContact({ name, emails, email: emails[0] || "" });
+    const saved = contactId
+      ? await client.updateContact(contactId, { name, emails, email: emails[0] || "" })
+      : await client.upsertContact({ name, emails, email: emails[0] || "" });
+    if (accountKey !== onboardingAccountKey()) return { ok: false, error: "The account changed. Open People again." };
+    const contact = cacheContact(saved);
+    return { ok: true, contact, contacts: await contactsAfterWrite() };
   } catch (error) {
     return { ok: false, error: contactErrorText(error, "Could not save this contact.") };
   }
-  return { ok: true, contacts: await contactsAfterWrite() };
+}
+
+function cacheContact(saved) {
+  const contact = contactBookRow(saved || {});
+  if (contact.id) {
+    contactsCache = [...contactsCache.filter((c) => c.id !== contact.id), contact]
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    contactsFingerprint = contactsFingerprintOf(contactsCache);
+  }
+  return contact;
 }
 
 async function deleteContactFromBook(input) {
@@ -2094,6 +2121,27 @@ async function deleteContactFromBook(input) {
   contactsCache = contactsCache.filter((c) => c.id !== contactId);
   contactsFingerprint = contactsFingerprintOf(contactsCache);
   return { ok: true, contacts: await contactsAfterWrite(), deletedContactId: contactId };
+}
+
+// The server checks membership before writing anything. Never downgrade this
+// to an ordinary upsert on an older server or a network failure.
+async function addContactByAddress(input) {
+  const accountKey = onboardingAccountKey();
+  const email = String((input && input.email) || "").trim().toLowerCase();
+  if (!email.includes("@")) return { ok: false, error: "That email looks off." };
+  let saved;
+  try {
+    const client = await relayClient();
+    const result = await client.addRelayContact(email);
+    if (accountKey !== onboardingAccountKey()) return { ok: false, error: "The account changed. Open People again." };
+    if (result?.found === false) return { ok: true, found: false };
+    if (!result?.contact?.onRelay) return { ok: false, error: "Could not verify this Relay account. Try again." };
+    saved = result.contact;
+  } catch (error) {
+    return { ok: false, error: contactErrorText(error, "Could not add them.") };
+  }
+  const contact = cacheContact(saved);
+  return { ok: true, found: true, contact, contacts: await contactsAfterWrite() };
 }
 
 // ---- the send outbox ------------------------------------------------------
@@ -2150,6 +2198,8 @@ function buildPayload() {
       completedOnboardingVersion,
       onboardingRequired: currentAccount.paired && completedOnboardingVersion < COMPANION_ONBOARDING_VERSION,
       firstRelayStatus: firstRelayOnboarding.status(onboardingAccountKey(currentAccount)),
+      firstRelayId: firstRelayOnboarding.relayId(onboardingAccountKey(currentAccount)),
+      openingPreference: onboardingProtocolState()?.openingPreference || null,
       // The renderer's playTink gate. Sound preferences are not in the push
       // signature, so relay:setSoundsMuted explicitly forces a push.
       soundsMuted,
@@ -2632,7 +2682,7 @@ async function pushInboxNow(force) {
     // moves while a message sits offline.
     outbox: (payload.outbox || []).map((e) => [e.id, e.state, e.attempts, e.nextAttemptAt, e.relayId, e.lastError]),
     account: [payload.account.paired, payload.account.email],
-    onboarding: [payload.ui.onboardingRequired, payload.ui.completedOnboardingVersion, payload.ui.firstRelayStatus],
+    onboarding: [payload.ui.onboardingRequired, payload.ui.completedOnboardingVersion, payload.ui.firstRelayStatus, payload.ui.firstRelayId, payload.ui.openingPreference],
     pendingOpen: payload.pendingOpen
       ? [payload.pendingOpen.relayId, payload.pendingOpen.title, payload.pendingOpen.forHuman, payload.pendingOpen.error]
       : null,
@@ -9350,6 +9400,18 @@ ipcMain.handle("relay:capabilities", async () => {
 ipcMain.handle("relay:contacts", () => readContacts());
 ipcMain.handle("relay:contactSave", (_e, input) => saveContact(input));
 ipcMain.handle("relay:contactDelete", (_e, input) => deleteContactFromBook(input));
+ipcMain.handle("relay:contactAdd", (_e, input) => addContactByAddress(input));
+ipcMain.handle("relay:blockRequest", async (_e, relayId) => {
+  const key = onboardingAccountKey();
+  const client = await relayClient();
+  // Resolve identity from the authenticated packet, never a display name.
+  const packet = await client.fetchRelay(String(relayId || ""));
+  const userId = packet?.sender?.relayUserId;
+  if (key !== onboardingAccountKey() || !userId || userId === account().userId) throw new Error("Could not verify this sender.");
+  return client.setConnectionBlocked(userId, true);
+});
+ipcMain.handle("relay:connectionBlocks", async () => (await relayClient()).connectionBlocks());
+ipcMain.handle("relay:unblockPerson", async (_e, userId) => (await relayClient()).setConnectionBlocked(String(userId || ""), false));
 
 // Contact groups (People tab): thin proxies over the API. Owner administration
 // returns the updated group view; leaving removes only the authenticated
