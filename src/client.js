@@ -1510,6 +1510,10 @@ export class RelayClient {
     return this.#req("POST", "/v1/chats/resolve", { groupId: String(groupId || "") });
   }
 
+  googleContactsStatus() { return this.#req("GET", "/v1/google-contacts/status"); }
+
+  syncGoogleContacts() { return this.#req("POST", "/v1/google-contacts/sync", {}); }
+
   searchContacts(q) {
     return this.#req("GET", `/v1/contacts/search?q=${encodeURIComponent(q)}`);
   }

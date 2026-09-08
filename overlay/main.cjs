@@ -9398,6 +9398,21 @@ ipcMain.handle("relay:capabilities", async () => {
   return capabilitiesCache || {};
 });
 ipcMain.handle("relay:contacts", () => readContacts());
+ipcMain.handle("relay:googleContactsStatus", () => groupCall((c) => c.googleContactsStatus()));
+ipcMain.handle("relay:googleContactsSync", async () => {
+  const result = await groupCall((c) => c.syncGoogleContacts());
+  if (result.ok) { await refreshContacts(); pushInbox(false); }
+  return result;
+});
+ipcMain.handle("relay:googleContactsConnect", async () => {
+  const userId = account().userId;
+  if (!userId) return { ok: false, error: "Sign into Relay before connecting Google." };
+  const url = new URL("/app/contacts/google", webBase());
+  url.searchParams.set("account", userId);
+  await shell.openExternal(url.toString());
+  return { ok: true };
+});
+
 ipcMain.handle("relay:contactSave", (_e, input) => saveContact(input));
 ipcMain.handle("relay:contactDelete", (_e, input) => deleteContactFromBook(input));
 ipcMain.handle("relay:contactAdd", (_e, input) => addContactByAddress(input));

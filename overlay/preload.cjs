@@ -156,6 +156,9 @@ contextBridge.exposeInMainWorld("relay", {
   openTask: (taskId) => ipcRenderer.send("relay:openTask", taskId),
   taskStatus: (taskId) => ipcRenderer.invoke("relay:taskStatus", taskId),
 
+  googleContactsStatus: () => ipcRenderer.invoke("relay:googleContactsStatus"),
+  googleContactsSync: () => ipcRenderer.invoke("relay:googleContactsSync"),
+  googleContactsConnect: () => ipcRenderer.invoke("relay:googleContactsConnect"),
   // contacts
   capabilities: () => ipcRenderer.invoke("relay:capabilities"),
   contacts: () => ipcRenderer.invoke("relay:contacts"),

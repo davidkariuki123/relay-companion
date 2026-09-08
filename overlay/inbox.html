@@ -224,7 +224,7 @@
   /* tab control — individual rounded-rect buttons (the loved control) */
   .tabs {
     flex:0 0 auto;
-    display:flex; gap:4px; flex-wrap:nowrap;
+    display:flex; align-items:center; gap:4px; flex-wrap:nowrap;
     padding:0 12px 6px;
     opacity:1;
     transition:opacity var(--t-base) var(--settle);
@@ -260,9 +260,10 @@
   .tab:not(.active) .tab-badge { opacity:.45; }
   .tab-badge.gone { display:none; }
   /* You is your avatar (Sven, 2026-09-04): initials, never a gear. */
-  .tab-you { padding:0 2px; margin-inline-start:auto; flex-shrink:0; }
-  .tab-avatar { min-width:20px; height:20px; border-radius:var(--r-pill); display:inline-flex; align-items:center; justify-content:center;
-    font-family:var(--sans); font-size:9px; font-weight:600; letter-spacing:.02em; background:var(--wash-2); color:var(--ink-2); }
+  .tab-you { height:44px; padding:2px 6px 2px 2px; gap:7px; margin-inline-start:auto; flex-shrink:0; border-radius:var(--r-pill); color:var(--ink-2); }
+  .tab-avatar { min-width:40px; height:40px; border-radius:var(--r-pill); display:inline-flex; align-items:center; justify-content:center;
+    font-family:var(--sans); font-size:14px; font-weight:600; letter-spacing:.02em; background:var(--ink); color:var(--bg); }
+  .tab-you::after { content:""; width:6px; height:6px; margin:0 2px 3px; border-right:1.5px solid currentColor; border-bottom:1.5px solid currentColor; transform:rotate(45deg); }
   .tab-avatar.word { padding:0 6px; font-size:11px; letter-spacing:0; }
   .tab-you.active .tab-avatar { background:var(--accent); color:var(--on-accent); }
   /* Tasks debt is a different color from unread ink — amber, not accent. */
@@ -863,6 +864,13 @@
     *, *::before, *::after { transition-duration:.001s !important; }
   }
 
+  /* Google contacts uses the People row typography and Add control. */
+  .cv-google { margin:0 16px; padding:14px 0 15px; border-bottom:1px solid var(--hair); }
+  .cv-google-top { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  .cv-google-title { font-family:var(--sans); font-size:13px; font-weight:600; color:var(--ink); }
+  .cv-google-detail { margin-top:5px; font-family:var(--serif); font-size:14.5px; line-height:1.25; color:var(--muted); overflow-wrap:anywhere; }
+  .cv-google-note { margin-top:6px; font-size:11px; line-height:1.5; color:var(--muted); }
+  .cv-google .cv-add:disabled { opacity:.5; cursor:default; }
   /* ---- People tab ---- */
   .cv-head { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 16px 8px; }
   .cv-add {
@@ -2988,6 +2996,11 @@
           <button class="cv-add" type="button" id="cvAdd" aria-label="Add person">Add</button>
           <button class="cv-add gone" type="button" id="cvgNew" aria-label="Add channel">Add</button>
         </div>
+        <section class="cv-google" id="cvGoogle" aria-label="Google contacts">
+          <div class="cv-google-top"><span class="cv-google-title">Google contacts</span><button type="button" class="cv-add" id="cvGoogleAction" disabled>Checking…</button></div>
+          <div class="cv-google-detail" id="cvGoogleDetail" aria-live="polite">Checking Google contacts…</div>
+          <div class="cv-google-note" id="cvGoogleNote">Names and email addresses. Read-only.</div>
+        </section>
         <!-- Add: two cases, told apart (Sven, 2026-09-08). An address finds
              someone already on Relay; everyone else gets your link and shows
              up here when they use it. Nobody is "invited by email". -->
@@ -3061,6 +3074,7 @@
     </div>
   </div>
 
+<script src="./google-contacts-ui.cjs"></script>
 <script src="./hover-intent.js"></script>
 <script src="./read-receipts.cjs"></script>
 <script src="./chat-presentation.js"></script>
@@ -10091,6 +10105,77 @@
       })
       .catch(() => onThisRow("That conversation could not be opened."));
   }
+  const cvGoogleEl = document.getElementById("cvGoogle");
+  const cvGoogleActionEl = document.getElementById("cvGoogleAction");
+  const cvGoogleDetailEl = document.getElementById("cvGoogleDetail");
+  const cvGoogleNoteEl = document.getElementById("cvGoogleNote");
+  let googleStatus = null;
+  let googleBusy = false;
+  let googleError = false;
+  let googleAccount = null;
+  let googleRequest = 0;
+  function renderGoogleContacts() {
+    const view = RelayGoogleContacts.view(googleStatus, googleBusy, googleError);
+    cvGoogleActionEl.textContent = view.action;
+    cvGoogleActionEl.disabled = view.disabled;
+    cvGoogleDetailEl.textContent = view.detail;
+    cvGoogleNoteEl.textContent = view.note;
+  }
+  async function loadGoogleContacts() {
+    const key = signupAccountKey();
+    if (googleAccount !== key) {
+      googleAccount = key; googleStatus = null; googleBusy = false; googleError = false;
+      renderGoogleContacts();
+    }
+    if (googleBusy || !key) return;
+    const request = ++googleRequest;
+    try {
+      const result = await window.relay.googleContactsStatus();
+      if (key !== signupAccountKey() || request !== googleRequest) return;
+      if (!result?.ok) throw new Error("unavailable");
+      const changed = result.result.lastSyncedAt !== googleStatus?.lastSyncedAt;
+      googleStatus = result.result; googleError = false;
+      if (changed && googleStatus.state === "healthy") void loadContacts();
+    } catch {
+      if (key !== signupAccountKey() || request !== googleRequest) return;
+      googleError = true;
+    }
+    renderGoogleContacts();
+  }
+  cvGoogleActionEl.addEventListener("click", async () => {
+    if (googleBusy) return;
+    if (googleError) { await loadGoogleContacts(); return; }
+    const key = signupAccountKey();
+    if (!googleStatus || googleStatus.state === "pending" || googleStatus.state === "permission_required") {
+      try {
+        const opened = await window.relay.googleContactsConnect();
+        if (key !== signupAccountKey()) return;
+        if (!opened?.ok) throw new Error("unavailable");
+        cvGoogleDetailEl.textContent = "Continue in your browser to connect Google.";
+      } catch { if (key === signupAccountKey()) { googleError = true; renderGoogleContacts(); } }
+      return;
+    }
+    googleBusy = true; ++googleRequest; renderGoogleContacts();
+    try {
+      const result = await window.relay.googleContactsSync();
+      if (key !== signupAccountKey()) return;
+      if (result?.ok) googleStatus = result.result;
+      // Failures may be permission changes. Read the durable server state to
+      // choose Reconnect instead of trapping the user in a retry loop.
+    } catch { /* Refresh server state below. */ }
+    finally {
+      if (key === signupAccountKey()) {
+        googleBusy = false;
+        await loadGoogleContacts();
+        void loadContacts();
+      }
+    }
+  });
+  // Poll only while People is visible. This also observes browser OAuth return
+  // without exposing device credentials in a callback URL.
+  setInterval(() => { if (rendererSurfaceActive() && activeView === "contacts" && contactsPane === "people") void loadGoogleContacts(); }, 5000);
+  window.addEventListener("focus", () => { if (activeView === "contacts") void loadGoogleContacts(); });
+
   async function loadContacts() {
     try { contactsList = (await window.relay.contacts()) || []; }
     catch { contactsList = []; }
@@ -10122,6 +10207,7 @@
       el.classList.toggle("active", on);
       el.setAttribute("aria-selected", String(on));
     }
+    cvGoogleEl.classList.toggle("gone", !people);
     cvListEl.classList.toggle("gone", !people);
     cvLatentEl.classList.toggle("gone", !people);
     contactsEmptyEl.classList.toggle("gone", !people || contactsList.length > 0);
@@ -15919,6 +16005,7 @@
       requestDetailTimer = null;
     }
     if (activeView === "contacts" && viewChanged) {
+      void loadGoogleContacts();
       applyContactsPane();
       loadContacts();
       loadGroups(); // counts on the segment must be right before it is tapped
@@ -16170,6 +16257,7 @@
       slackChats: Array.isArray(next.slackChats) ? next.slackChats : (payload.slackChats || []),
       todoSteward: next.todoSteward && typeof next.todoSteward === "object" ? next.todoSteward : null,
     };
+    if (googleAccount !== signupAccountKey()) void loadGoogleContacts();
     // A finished steward run reordered or re-noted the list without moving
     // any row's version; the board must reload on its own account.
     const stewardFinishedAt = Number(payload.todoSteward?.lastRun?.finishedAt || 0);

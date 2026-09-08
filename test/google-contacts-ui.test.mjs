@@ -1,0 +1,43 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
+import vm from "node:vm";
+const require = createRequire(import.meta.url);
+const { view } = require("../overlay/google-contacts-ui.cjs");
+test("Google contacts distinguishes initial, empty success, permission, transport, and in-flight states", () => {
+  assert.equal(view(null, false, false).action, "Connect");
+  assert.match(view({ state: "healthy", contactCount: 0 }, false, false).detail, /^0 contacts synced/);
+  assert.equal(view({ state: "permission_required", connected: true }, false, false).action, "Reconnect");
+  assert.equal(view({ state: "healthy" }, false, true).action, "Try again");
+  assert.equal(view({ state: "syncing" }, false, false).disabled, true);
+});
+function renderer(bridge) {
+  const html = readFileSync(new URL("../overlay/inbox.html", import.meta.url), "utf8");
+  const block = html.slice(html.indexOf('  const cvGoogleEl ='), html.indexOf('  async function loadContacts()'));
+  const elements = new Map(); const intervals = []; let loads = 0;
+  const context = vm.createContext({ RelayGoogleContacts: { view }, document: { getElementById(id) { if (!elements.has(id)) elements.set(id, { textContent: "", addEventListener(_, fn) { this.click = fn; } }); return elements.get(id); } }, window: { relay: bridge, addEventListener() {} }, signupAccountKey: () => context.accountKey, accountKey: "one", activeView: "contacts", contactsPane: "people", loadContacts: async () => { loads++; }, setInterval: (fn) => intervals.push(fn) });
+  vm.runInContext(block, context);
+  return { context, elements, intervals, loads: () => loads };
+}
+test("People connect opens browser, observes completed sync, and refreshes people", async () => {
+  let connected = false, opened = 0;
+  const r = renderer({ googleContactsStatus: async () => ({ ok: true, result: connected ? { state: "healthy", lastSyncedAt: "2026-09-08T14:00:00Z", contactCount: 2 } : { state: "pending" } }), googleContactsConnect: async () => { opened++; return { ok: true }; } });
+  await r.context.loadGoogleContacts();
+  await r.elements.get("cvGoogleAction").click(); assert.equal(opened, 1);
+  assert.match(r.elements.get("cvGoogleDetail").textContent, /browser/);
+  connected = true; await r.context.loadGoogleContacts();
+  assert.match(r.elements.get("cvGoogleDetail").textContent, /^2 contacts synced/);
+  assert.equal(r.loads(), 1);
+});
+test("failed sync rechecks permission and stale account responses never paint", async () => {
+  let permission = false;
+  const r = renderer({ googleContactsStatus: async () => ({ ok: true, result: { state: permission ? "permission_required" : "healthy", connected: true, contactCount: 1 } }), googleContactsSync: async () => { permission = true; return { ok: false }; } });
+  await r.context.loadGoogleContacts(); await r.elements.get("cvGoogleAction").click();
+  assert.equal(r.elements.get("cvGoogleAction").textContent, "Reconnect");
+  let release;
+  r.context.window.relay.googleContactsStatus = () => new Promise(resolve => { release = resolve; });
+  const pending = r.context.loadGoogleContacts(); r.context.accountKey = "two";
+  release({ ok: true, result: { state: "healthy", contactCount: 999 } }); await pending;
+  assert.doesNotMatch(r.elements.get("cvGoogleDetail").textContent, /999/);
+});
