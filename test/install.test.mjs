@@ -106,8 +106,12 @@ test("agent repair refreshes MCP launchers and preserves Relay hooks for existin
   const codexHooks = JSON.parse(fs.readFileSync(codexHooksFile, "utf8"));
   assert.equal(codexHooks.description, "keep me");
   assert.equal(codexHooks.hooks.Stop[0].hooks[0].command, "audit-codex");
-  assert.ok(codexHooks.hooks.Stop.some((entry) =>
-    entry.hooks.some((hook) => isRelayCodexHookCommand(hook.command))));
+  assert.equal(codexHooks.hooks.Stop.some((entry) =>
+    entry.hooks.some((hook) => isRelayCodexHookCommand(hook.command))), false);
+  for (const event of ["UserPromptSubmit", "PostToolUse"]) {
+    assert.ok(codexHooks.hooks[event].some((entry) =>
+      entry.hooks.some((hook) => isRelayCodexHookCommand(hook.command))));
+  }
 });
 
 function relayDesktopFixture() {

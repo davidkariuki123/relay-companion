@@ -13,7 +13,7 @@ import {
   uninstallCodexHooks,
 } from "../src/install.js";
 
-const HOOK_EVENTS = ["UserPromptSubmit", "PostToolUse", "Stop"];
+const HOOK_EVENTS = ["UserPromptSubmit", "PostToolUse"];
 const NODE = "/opt/homebrew/bin/node";
 const BIN = "/Users/x/.relay/lib/node_modules/relay-companion/bin/relay.js";
 
@@ -50,6 +50,8 @@ test("Codex hook install is preserving, idempotent, and requests trust only when
   assert.equal(config.description, "user hooks");
   assert.deepEqual(config.hooks.PostToolUse[0], userEntry);
   assert.deepEqual(config.hooks.Stop[0], userStopEntry);
+  assert.equal(relayEntries(config, "Stop").length, 0);
+  assert.deepEqual(first.events, HOOK_EVENTS);
   for (const event of HOOK_EVENTS) {
     const entries = relayEntries(config, event);
     assert.equal(entries.length, 1);
@@ -73,6 +75,25 @@ test("Codex hook install is preserving, idempotent, and requests trust only when
   for (const event of HOOK_EVENTS) {
     assert.equal(relayEntries(config, event).length, 1);
     assert.equal(relayEntries(config, event)[0].hooks[0].command, `/usr/local/bin/node ${BIN} codex-hook`);
+  }
+});
+
+test("Codex hook repair removes legacy Relay Stop handlers while preserving user handlers", () => {
+  const userHook = { type: "command", command: "audit-stop" };
+  const relayHook = { type: "command", command: codexHookCommand(BIN, NODE), timeout: 5 };
+  for (const userHooks of [[], [userHook]]) {
+    const hooksPath = hooksFixture(JSON.stringify({
+      hooks: { Stop: [{ matcher: "*", hooks: [...userHooks, relayHook] }] },
+    }));
+    const result = installCodexHooks(BIN, NODE, { hooksPath });
+    assert.equal(result.ok, true);
+    const config = readHooks(hooksPath);
+    assert.equal(relayEntries(config, "Stop").length, 0);
+    assert.deepEqual(config.hooks.Stop, userHooks.length
+      ? [{ matcher: "*", hooks: userHooks }]
+      : undefined);
+    for (const event of HOOK_EVENTS) assert.equal(relayEntries(config, event).length, 1);
+    assert.equal(installCodexHooks(BIN, NODE, { hooksPath }).changed, false);
   }
 });
 

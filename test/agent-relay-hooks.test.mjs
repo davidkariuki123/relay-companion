@@ -109,7 +109,7 @@ test("Claude subagent events cannot claim the parent session's title context", a
   assert.match(root.hookSpecificOutput.additionalContext, /relay_protected/);
 });
 
-test("Codex protects subagents, emits PostTool additionalContext, and Stop is one-shot", async () => {
+test("Codex protects subagents and emits automatic arrivals only as additionalContext", async () => {
   const homeDir = tempHome();
   const accountScope = "codex-account";
   const rootMeta = () => ({ subagent: false, cwd: "/tmp" });
@@ -146,28 +146,36 @@ test("Codex protects subagents, emits PostTool additionalContext, and Stop is on
     /A Relay was selected for this task/,
     "automatic arrival context never impersonates an explicit picker selection",
   );
-
-  const stopItem = item("stop", new Date(now.getTime() + 2000).toISOString());
-  recordAgentRelayIndex(homeDir, accountScope, { items: [stopItem, fresh, old] }, { nowMs: now.getTime() + 2000 });
-  assert.equal(await invoke(runCodexHook, {
-    hook_event_name: "Stop",
-    session_id: "codex-session",
-    transcript_path: "/tmp/root.jsonl",
-    stop_hook_active: true,
-  }, { homeDir, accountScope, readRolloutMetaImpl: rootMeta }), null);
-  const stop = await invoke(runCodexHook, {
-    hook_event_name: "Stop",
-    session_id: "codex-session",
-    transcript_path: "/tmp/root.jsonl",
-  }, { homeDir, accountScope, readRolloutMetaImpl: rootMeta });
-  assert.equal(stop.decision, "block");
-  assert.match(stop.reason, /relay_stop/);
-  assert.equal(await invoke(runCodexHook, {
-    hook_event_name: "Stop",
-    session_id: "codex-session",
-    transcript_path: "/tmp/root.jsonl",
-  }, { homeDir, accountScope, readRolloutMetaImpl: rootMeta }), null);
 });
+
+for (const nextEvent of ["UserPromptSubmit", "PostToolUse"]) {
+  test(`Codex Stop never prompts or consumes arrivals pending for ${nextEvent}`, async () => {
+    const homeDir = tempHome();
+    const accountScope = "codex-stop-account";
+    const options = { homeDir, accountScope, readRolloutMetaImpl: () => ({ subagent: false }) };
+    const base = { session_id: "codex-stop-session", transcript_path: "/tmp/root.jsonl" };
+    const old = item("old", new Date().toISOString());
+    recordAgentRelayIndex(homeDir, accountScope, { items: [old] });
+    await invoke(runCodexHook, { ...base, hook_event_name: "UserPromptSubmit" }, options);
+
+    // Arrival after the final tool boundary: the old Stop block became a
+    // role:user HookPrompt in Codex, even without a picker selection.
+    const fresh = item("after_last_tool", new Date().toISOString());
+    recordAgentRelayIndex(homeDir, accountScope, { items: [fresh, old] });
+    for (const stopHookActive of [false, true, false]) {
+      assert.equal(await invoke(runCodexHook, {
+        ...base, hook_event_name: "Stop", stop_hook_active: stopHookActive,
+      }, options), null, "a legacy Stop registration must not create a continuation prompt");
+    }
+
+    const next = await invoke(runCodexHook, { ...base, hook_event_name: nextEvent }, options);
+    assert.deepEqual(Object.keys(next), ["hookSpecificOutput"]);
+    assert.equal(next.hookSpecificOutput.hookEventName, nextEvent);
+    assert.match(next.hookSpecificOutput.additionalContext, /NEW Relay context/);
+    assert.match(next.hookSpecificOutput.additionalContext, /NEW .*relay_after_last_tool/);
+    assert.equal(await invoke(runCodexHook, { ...base, hook_event_name: nextEvent }, options), null);
+  });
+}
 
 test("Codex rolls back failed output and refuses unreadable transcript metadata", async () => {
   const homeDir = tempHome();

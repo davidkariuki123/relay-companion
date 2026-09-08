@@ -1713,7 +1713,7 @@ export function uninstallClaudeHooks({ settingsPath = claudeSettingsPath() } = {
 
 // ---- Codex hooks (private recent Relay context) ----------------------------
 
-const CODEX_RELAY_CONTEXT_EVENTS = ["UserPromptSubmit", "PostToolUse", "Stop"];
+const CODEX_RELAY_CONTEXT_EVENTS = ["UserPromptSubmit", "PostToolUse"];
 const RELAY_CODEX_HOOK_COMMAND_RE = /relay\.js["']?\s+codex-hook(?:\s|$)/;
 
 export function codexHookCommand(bin = relayBinPath(), node = stableNodePath(), hookInvocation = null) {
@@ -1766,6 +1766,13 @@ export function installCodexHooks(
     const hooks = config.hooks && typeof config.hooks === "object" && !Array.isArray(config.hooks)
       ? config.hooks
       : {};
+    // Retire only Relay's Stop handler: Codex renders its blocking response as
+    // a user prompt. Preserve other tools' and the user's Stop handlers.
+    if (Array.isArray(hooks.Stop)) {
+      const cleaned = withoutRelayCodexHooks(hooks.Stop);
+      if (cleaned.length) hooks.Stop = cleaned;
+      else delete hooks.Stop;
+    }
     for (const event of CODEX_RELAY_CONTEXT_EVENTS) {
       const cleaned = withoutRelayCodexHooks(hooks[event]);
       cleaned.push({ matcher: "*", hooks: [{ type: "command", command, timeout: 5 }] });

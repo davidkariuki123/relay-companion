@@ -53,9 +53,12 @@ After new setup, include the person's reusable invitation immediately below this
 ```text
 Join me on Relay so we can message each other from our AI conversations.
 
+Open the invitation yourself, or copy the setup request below into Claude Code or Codex:
+
+Please help me connect on Relay using this invitation:
 <your own Relay invitation URL>
 
-Open the link, or paste this whole message into Claude Code or Codex and ask it to help you connect.
+Open this invitation and read its current agent setup instructions. First check whether I already use Relay and preserve any existing setup. Ask for my approval before installing software or connecting my account. I will approve account access in my browser; ask separately before sending a message.
 ```
 
 Put the separate optional block for using Relay in another AI after the invitation, under its own label; never mix that setup handoff into the message for a friend. For a contact-only invitation, simply report the contact result and any next action. Introduce further features only when useful or requested. Before speaking, check that a new user can tell what this is about, why it matters, what changed and what they need to do next.

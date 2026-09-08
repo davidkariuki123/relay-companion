@@ -57,7 +57,6 @@ function isRootCodexEvent(event, eventName, readMeta = readRolloutMeta) {
 }
 
 function responseFor(eventName, text) {
-  if (eventName === "Stop") return { decision: "block", reason: text };
   return { hookSpecificOutput: { hookEventName: eventName, additionalContext: text } };
 }
 
@@ -73,12 +72,15 @@ export async function runCodexHook({
     const event = JSON.parse(String(await readAll(input) || ""));
     const sessionId = String(event?.session_id || "").trim();
     const eventName = String(event?.hook_event_name || "").trim();
-    if (!sessionId || !["UserPromptSubmit", "PostToolUse", "Stop"].includes(eventName)) return;
+    // Codex turns Stop's decision:block/reason into a visible role:user
+    // HookPrompt. Automatic arrivals must only add developer context. Ignore
+    // legacy Stop registrations before claiming, so arrivals after the last
+    // tool remain pending for the next prompt or tool boundary.
+    if (!sessionId || !["UserPromptSubmit", "PostToolUse"].includes(eventName)) return;
     if (!isRootCodexEvent(event, eventName, readRolloutMetaImpl)) return;
     claim = claimAgentRelayHookContext(homeDir, accountScope, {
       sessionId: `codex:${sessionId}`,
       eventName,
-      stopHookActive: Boolean(event?.stop_hook_active),
     });
     if (!claim?.text) return;
     const response = responseFor(eventName, claim.text);

@@ -199,11 +199,14 @@ test("repair migrates and deduplicates only existing Relay hooks", () => {
   for (const entries of Object.values(claude.hooks)) {
     assert.equal(entries.filter((entry) => entry.hooks.some(isRelayClaudeHookCommand)).length, 1);
   }
-  for (const entries of Object.values(codex.hooks)) {
+  for (const event of ["UserPromptSubmit", "PostToolUse"]) {
+    const entries = codex.hooks[event];
     assert.equal(entries.filter((entry) => entry.hooks.some((hook) => isRelayCodexHookCommand(hook.command))).length, 1);
   }
   assert.ok(claude.hooks.Stop[0].hooks.some((hook) => hook.command === "user-stop"));
   assert.ok(codex.hooks.Stop[0].hooks.some((hook) => hook.command === "user-stop"));
+  assert.equal(codex.hooks.Stop.some((entry) =>
+    entry.hooks.some((hook) => isRelayCodexHookCommand(hook.command))), false);
 });
 
 test("repair does not create absent host configs and ignores unrelated malformed configs", () => {
