@@ -2332,10 +2332,11 @@
   .todo-row:last-child .todo-row-main { border-bottom:0; }
   .todo-row-meta { display:flex; align-items:baseline; gap:5px; min-width:0; margin-bottom:4px; color:var(--muted-2); font:10px/1.25 var(--sans); }
   .todo-row-meta .kind { color:var(--muted); font-weight:600; }
-  /* Read and unread are the same words as the Relays list: ink and weight
-     mean "you have not seen this", never "this is a title". */
+  /* Read state and action state are distinct: outstanding work stays bold. */
   .todo-row-title { overflow:hidden; color:var(--muted); font:400 15px/1.32 var(--serif); text-overflow:ellipsis; white-space:nowrap; }
   .todo-row.unread .todo-row-title { color:var(--ink); font-weight:500; }
+  .todo-row[data-todo-status="triage"] .todo-row-title { color:var(--ink); font-weight:600; }
+  .todo-row[data-todo-status="triage"] .todo-row-why { color:var(--ink-2); }
   .todo-row-preview { overflow:hidden; margin-top:3px; color:var(--muted-2); font:11px/1.35 var(--sans); text-overflow:ellipsis; white-space:nowrap; }
   /* The steward's one line: why this item sits where it does, in the
      person's own second person. The accent dot is the only mark that says
@@ -8610,9 +8611,8 @@
     const title = rawTitle || preview || (item.kind === "task" ? "Untitled Task" : "");
     const showPreview = Boolean(rawTitle && preview && preview !== rawTitle);
     const context = item.recipientGroupName ? `${item.recipientGroupName} · ` : "";
-    // Unread means the person has not opened it: same words as the Relays
-    // list. The steward's reason, when there is one, replaces the preview:
-    // "what you did and what is left" beats the first line of the message.
+    // Reading and completion are separate: Needs attention stays emphasized
+    // after reading. The reason says what still needs the person.
     const unread = item.state === "delivered";
     const why = String(item.assessment || "").trim();
     return `
@@ -8686,10 +8686,20 @@
         await openTodoItem(id);
       };
       row.querySelector("[data-todo-open]")?.addEventListener("click", open);
-      row.querySelector("[data-todo-actions]")?.addEventListener("click", (event) => {
+      const actions = row.querySelector("[data-todo-actions]");
+      const showActions = (event) => {
+        if (!actions || actions.disabled || todoDuplicateSource) return;
+        event.preventDefault();
         event.stopPropagation();
         const item = todoItemById(row.getAttribute("data-todo-item"));
-        if (item) openTodoActions(event.currentTarget, item);
+        if (item) openTodoActions(actions, item);
+      };
+      actions?.addEventListener("click", showActions);
+      // macOS two-finger/Control-click and the keyboard context-menu gesture
+      // use exactly the same menu and visibility mutation as the ellipsis.
+      row.addEventListener("contextmenu", showActions);
+      row.addEventListener("keydown", (event) => {
+        if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) showActions(event);
       });
     }
     for (const button of tasksListEl.querySelectorAll("[data-todo-view-all],[data-todo-terminal]")) {

@@ -3,7 +3,31 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import test from "node:test";
+import vm from "node:vm";
 import { startOnboardingReview } from "../src/onboarding-review.js";
+
+test("practice invitation bridge matches the pill's initial-load and copy contracts", async () => {
+  const copied = [];
+  const window = { practiceBase: "http://127.0.0.1:12345", practiceAccess: "practice-only" };
+  const url = window.practiceBase + "/";
+  vm.runInNewContext(fs.readFileSync(new URL("../src/onboarding-review-bridge.js", import.meta.url), "utf8"), {
+    window,
+    fetch: async (requested, options) => {
+      assert.equal(requested, window.practiceBase + "/v1/invite-link");
+      assert.equal(options.headers.Authorization, "Bearer practice-only");
+      return { ok: true, json: async () => ({ url, shareText: "Local practice only." }) };
+    },
+    navigator: { clipboard: { writeText: async (text) => copied.push(text) } },
+    setInterval: () => {},
+  });
+  const initial = await window.relay.onboardingInviteLink();
+  assert.equal(initial.ok, true);
+  assert.equal(initial.invite.url, url);
+  const copy = await window.relay.copyOnboardingInviteLink();
+  assert.equal(copy.ok, true);
+  assert.equal(copy.url, url);
+  assert.deepEqual(copied, [url]);
+});
 
 test("local rehearsal uses the real helper, contains sends, rejects other origins and keeps profiles separate", async (t) => {
   const review = await startOnboardingReview();

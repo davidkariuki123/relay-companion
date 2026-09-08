@@ -80,7 +80,7 @@ test("the menu has its own button and cannot trigger the row's read/open handler
   const menuButton={addEventListener:(name,handler) => {listeners.menu=handler;}};
   const item={relayId:"relay_1",todoVisibilityVersion:0};
   let opens=0, reads=0, menus=0;
-  const row={getAttribute:() => "relay_1",querySelector:selector => selector==="[data-todo-open]"?openButton:menuButton};
+  const row={addEventListener:(name,handler) => {listeners[name]=handler;},getAttribute:() => "relay_1",querySelector:selector => selector==="[data-todo-open]"?openButton:menuButton};
   const context=vm.createContext({
     tasksListEl:{querySelectorAll:selector => selector==="[data-todo-item]"?[row]:[],querySelector:() => null},
     todoDuplicateSource:null, todoItemById:() => item, openTodoActions:() => {menus++;},
@@ -88,8 +88,24 @@ test("the menu has its own button and cannot trigger the row's read/open handler
   });
   vm.runInContext(between("  function wireTodoBoard()", "  function renderTasksBoard()"),context);
   context.wireTodoBoard();
-  listeners.menu({stopPropagation(){},currentTarget:menuButton});
+  listeners.menu({preventDefault(){},stopPropagation(){},currentTarget:menuButton});
   assert.equal(menus,1); assert.equal(reads,0); assert.equal(opens,0);
+  const event = { preventDefault(){this.prevented=true;}, stopPropagation(){this.stopped=true;} };
+  listeners.contextmenu(event);
+  assert.equal(menus,2); assert.equal(event.prevented,true); assert.equal(event.stopped,true);
+  assert.equal(reads,0); assert.equal(opens,0);
+  listeners.keydown({...event,key:"F10",shiftKey:true});
+  assert.equal(menus,3);
+  listeners.keydown({...event,key:"ContextMenu"});
+  assert.equal(menus,4);
+  menuButton.disabled=true;
+  listeners.contextmenu({...event});
+  assert.equal(menus,4, "pending actions cannot open another menu");
+  menuButton.disabled=false;
+  context.todoDuplicateSource={itemId:"another"};
+  listeners.contextmenu({...event});
+  assert.equal(menus,4, "duplicate selection cannot expose removal");
+  context.todoDuplicateSource=null;
   await listeners.open(); assert.equal(reads,1); assert.equal(opens,1);
 });
 

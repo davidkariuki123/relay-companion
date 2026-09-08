@@ -7,6 +7,9 @@ import { PassThrough } from "node:stream";
 import test from "node:test";
 import {
   DEFAULT_CADENCE_MS,
+  RECOVERY_CADENCE_MS,
+  RECENT_DONE_LIMIT,
+  fetchStewardBoard,
   IDLE_CADENCE_MS,
   LIVELY_WINDOW_MS,
   MIN_GAP_MS,
@@ -30,10 +33,10 @@ function tempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "relay-steward-"));
 }
 
-test("provider choice: both installed → Codex 5.6 Sol medium; Claude only → Opus 5 high", () => {
+test("provider choice: both installed → Codex 5.6 Sol high; Claude only → Opus 5 high", () => {
   assert.deepEqual(chooseStewardProvider({ codexAvailable: true, claudeAvailable: true }), STEWARD_ROUTES.codex);
   assert.equal(STEWARD_ROUTES.codex.model, "gpt-5.6-sol");
-  assert.equal(STEWARD_ROUTES.codex.effort, "medium");
+  assert.equal(STEWARD_ROUTES.codex.effort, "high");
   assert.deepEqual(chooseStewardProvider({ codexAvailable: false, claudeAvailable: true }), STEWARD_ROUTES.claude);
   assert.equal(STEWARD_ROUTES.claude.model, "opus");
   assert.equal(STEWARD_ROUTES.claude.effort, "high");
@@ -82,16 +85,59 @@ test("the board signature reacts to arrivals, reads and status changes only", ()
   assert.notEqual(boardSignature({ ...base, counts: { ...base.counts, triage: 3 } }), same);
 });
 
-test("the brief carries the person, the rules, the local transcript paths and the board in order", () => {
+test("an empty attention list still gets a bounded daily recovery check", () => {
+  const now = 3 * RECOVERY_CADENCE_MS;
+  const state = { lastRun:{startedAt:now - RECOVERY_CADENCE_MS} };
+  assert.deepEqual(stewardShouldRun({state, nowMs:now, attention:0, settled:1}), {run:true, reason:"recovery"});
+  assert.equal(stewardShouldRun({state:{lastRun:{startedAt:now - 1000}}, nowMs:now, attention:0, settled:1}).run, false);
+  assert.equal(stewardShouldRun({state, nowMs:now, attention:0, settled:0}).run, false);
+  assert.equal(stewardShouldRun({state:{...state,prefs:{enabled:false}}, nowMs:now, attention:0, settled:1}).run, false);
+});
+
+test("recovery reaches beyond five closures and excludes human decisions, texts and completed Tasks", async () => {
+  const done = Array.from({length:12}, (_, index) => ({relayId:`done-${index}`, title:`Design ${index}`, kind:"message", assessedBy:"codex", updatedAt:"2026-09-08T10:00:00Z", assessedAt:"2026-09-08T10:00:00Z"}));
+  done[0].assessedBy="human";
+  done[1].title="";
+  done[2].kind="task";
+  done[3].assessedAt="2026-09-08T11:00:00Z"; // later note, not an agent closure
+  done[4].todoRemoved=true;
+  done[5].updatedAt=undefined;
+  const calls=[];
+  const board = await fetchStewardBoard({todo:async input => {
+    calls.push(input);
+    return {items:input.statuses[0]==="done" ? done : []};
+  }});
+  const snapshot=stewardBoardSnapshot(board);
+  assert.deepEqual(calls.at(-1), {statuses:["done"],limit:RECENT_DONE_LIMIT});
+  assert.deepEqual(snapshot.recentDone.map(item=>item.relayId), done.slice(6).map(item=>item.relayId));
+  const prompt=buildStewardPrompt({snapshot});
+  assert.match(prompt, /read BOTH forHuman and forAgent/);
+  assert.match(prompt, /Acknowledgement, reading, opening material, discussion or starting work is not sufficient/);
+  assert.match(prompt, /Never override a human's Done\/removal/);
+  assert.match(prompt, /ensure it remains open before closing the earlier copy/);
+  assert.match(prompt, /Judge completion against what was actually requested or agreed/);
+  assert.match(prompt, /use triage even if the session just ended/);
+});
+
+test("the policy is independent of the user's subject matter and workflow", () => {
+  const prompt = buildStewardPrompt({user:{name:"Alex"}, snapshot:{}});
+  assert.doesNotMatch(prompt, /pill design|minimal playground|nice work|Sven|Shane|origin\/main|onboarding/i);
+  assert.match(prompt, /not a keyword classifier or a fixed ranking by topic, profession or sender/);
+  assert.match(prompt, /Work may have been completed anywhere the user works/);
+  assert.match(prompt, /A self-addressed Relay may contain a real reminder or commitment/);
+  assert.match(prompt, /do not dismiss a response merely because it is short/);
+});
+
+test("the brief carries the person, general evidence discovery and optional board leads", () => {
   const snapshot = stewardBoardSnapshot({
     triage: [
       { relayId: "r1", todoStatus: "triage", todoVersion: 2, attentionRank: 1, kind: "message", title: "What's your GitHub username?", sender: { name: "Schalk Dormehl", email: "s@x.com" }, createdAt: "2026-09-02T11:30:00Z", state: "read", threadId: "r1", preview: "Hey David…",
         sessions: [{ provider: "codex", nativeSessionId: "01a0-thread", touches: 2, lastSeenAt: "2026-09-02T12:00:00Z" }, { provider: "claude", nativeSessionId: "8d86682-claude", touches: 1, lastSeenAt: "2026-09-02T11:40:00Z", cwd: "/Users/david/src/relay" }] },
       { relayId: "r2", todoStatus: "triage", todoVersion: 1, kind: "task", title: "Ship it", sender: { name: "Sven" }, createdAt: "2026-09-01T11:30:00Z", state: "delivered", recipientGroupName: "Granular", assessment: "You started this", assessedAt: "2026-09-02T10:00:00Z" },
     ],
-    done: [{ relayId: "d1", todoStatus: "done", todoVersion: 3, kind: "message", title: "Old", sender: { name: "X" }, createdAt: "2026-08-01T00:00:00Z", state: "read" }],
+    done: [{ relayId: "d1", todoStatus: "done", todoVersion: 3, kind: "message", title: "Old", assessedBy: "codex", updatedAt:"2026-09-08T10:00:00Z", assessedAt:"2026-09-08T10:00:00Z", sender: { name: "X" }, createdAt: "2026-08-01T00:00:00Z", state: "read" }],
   }, { resolveSession: (touch) => touch.provider === "codex" ? { title: "Design Todo ontology", cwd: "/Users/david/src/relay", transcriptPath: "/Users/david/.codex/sessions/rollout-01a0.jsonl", state: "idle" } : null });
-  assert.equal(snapshot.triage[0].rank, undefined, "the board is a plain newest-first list; there is no rank to reason about");
+  assert.equal(snapshot.triage[0].rank, 1, "the steward sees the current priority order");
   assert.deepEqual(snapshot.triage[0].openedIn, [
     { provider: "codex", id: "01a0-thread", title: "Design Todo ontology", cwd: "/Users/david/src/relay", transcriptPath: "/Users/david/.codex/sessions/rollout-01a0.jsonl", state: "idle", lastOpenedAt: "2026-09-02T12:00:00Z" },
     { provider: "claude", id: "8d86682-claude", cwd: "/Users/david/src/relay", lastOpenedAt: "2026-09-02T11:40:00Z" },
@@ -111,8 +157,6 @@ test("the brief carries the person, the rules, the local transcript paths and th
     route: STEWARD_ROUTES.codex,
     nowMs: Date.parse("2026-09-02T12:40:00Z"),
     timeZone: "Africa/Johannesburg",
-    homeDir: "/Users/david",
-    aiSessionTools: true,
     reason: "manual",
   });
   assert.match(prompt, /David Kariuki's own computer as Codex/);
@@ -120,32 +164,26 @@ test("the brief carries the person, the rules, the local transcript paths and th
   assert.match(prompt, /Africa\/Johannesburg/);
   assert.match(prompt, /relay_todo_update/);
   assert.match(prompt, /relay_todo_reorder/);
-  assert.match(prompt, /relay_ai_sessions/);
-  assert.match(prompt, /\/Users\/david\/\.claude\/projects/);
-  assert.match(prompt, /\/Users\/david\/\.codex\/sessions/);
   assert.match(prompt, /never call relay_mark_read, never send or reply/);
-  assert.match(prompt, /Only three statuses exist for you: triage \(Needs attention\), in_progress, done/);
-  assert.match(prompt, /Never use backlog, todo, canceled or duplicate/);
-  assert.match(prompt, /Start with openedIn: those are the exact Claude Code \/ Codex sessions this Relay was opened in/);
-  assert.match(prompt, /Never reorder\. Needs attention is a plain list, newest arrival first/);
+  assert.match(prompt, /backlog for real work that can wait/);
+  assert.match(prompt, /Never write todo, canceled or duplicate/);
+  assert.match(prompt, /Rank Needs attention using relay_todo_reorder/);
   assert.match(prompt, /previousNote is a claim to re-test, never a fact to repeat/);
-  assert.match(prompt, /Tasks are yours to move too/);
-  assert.match(prompt, /A text that asks a question is exactly as owed as a titled Relay/);
-  assert.match(prompt, /Judge 'merged' against origin\/main, never against a local HEAD/);
-  assert.doesNotMatch(prompt, /HOW TO ORDER/);
-  assert.doesNotMatch(prompt, /SHIPPING FACTS \(measured/, "no facts block when none were measured");
-  const withFacts = buildStewardPrompt({ snapshot, homeDir: "/Users/david", facts: ["- Production (stable) Companion right now: 0.1.454."] });
-  assert.match(withFacts, /SHIPPING FACTS \(measured just now by Relay/);
-  assert.match(withFacts, /Production \(stable\) Companion right now: 0\.1\.454/);
+  assert.match(prompt, /Never substitute a Todo status write for delivering a Task result/);
+  assert.match(prompt, /Typed texts are conversation context, not independent Todo items/);
+  assert.match(prompt, /HOW TO ORDER/);
   assert.match(prompt, /"transcriptPath": "\/Users\/david\/\.codex\/sessions\/rollout-01a0\.jsonl"/);
   assert.doesNotMatch(prompt, /backlog: only when they/);
   assert.match(prompt, /"What's your GitHub username\?"/);
   assert.match(prompt, /Answer with JSON only/);
   assert.match(prompt, /Write nothing else: the person reads your notes on the items, never a report\./);
   assert.doesNotMatch(prompt, /"summary"/);
-  const withoutSessions = buildStewardPrompt({ snapshot, aiSessionTools: false, homeDir: "/Users/david" });
-  assert.doesNotMatch(withoutSessions, /relay_ai_sessions/);
-  assert.match(withoutSessions, /\.codex\/sessions/);
+  assert.match(prompt, /Discover what is available and search across the computer, connected services/);
+  assert.match(prompt, /there is no prescribed source list or search order/);
+  assert.match(prompt, /openedIn links are optional leads, not a required starting point/);
+  const instructions=prompt.split("THE BOARD NOW")[0];
+  assert.doesNotMatch(instructions, /\.claude\/projects|\.codex\/sessions|relay_ai_sessions|origin\/main|SHIPPING FACTS/);
+
 });
 
 test("the final answer is read from JSON, fenced JSON, or falls back to the prose", () => {

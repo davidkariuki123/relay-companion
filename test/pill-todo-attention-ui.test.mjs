@@ -31,9 +31,10 @@ test("the person sees three places only: Needs attention, In Progress, Done", ()
   assert.match(inbox, /const TODO_LEGACY_ORDER = \["todo", "backlog"\]/);
 });
 
-test("a read item is not bold: Todo rows wear the Relays list's unread words", () => {
+test("Needs attention stays bold after reading; other statuses keep their read treatment", () => {
   assert.match(inbox, /\.todo-row-title \{ overflow:hidden; color:var\(--muted\); font:400 15px/);
   assert.match(inbox, /\.todo-row\.unread \.todo-row-title \{ color:var\(--ink\); font-weight:500; \}/);
+  assert.match(inbox, /\.todo-row\[data-todo-status="triage"\] \.todo-row-title \{ color:var\(--ink\); font-weight:600; \}/);
   const row = between(inbox, "function todoRowHtml(item, status)", "function stewardAgentLabel");
   assert.match(row, /const unread = item\.state === "delivered";/);
   assert.match(row, /class="todo-row\$\{unread \? " unread" : ""\}"/);

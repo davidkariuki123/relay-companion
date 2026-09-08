@@ -20,7 +20,7 @@
     contactAdd: async ({ email }) => ({ ok: true, ...await call("/v1/contacts/on-relay", { email }) }),
     groups: async () => [],
     completeSetupTutorial: () => call("/practice/complete", {}),
-    onboardingInviteLink: async () => ({ ok: true, ...await call("/v1/invite-link", {}) }),
+    onboardingInviteLink: async () => ({ ok: true, invite: await call("/v1/invite-link", {}) }),
     copyOnboardingInviteLink: async () => { const result = await call("/v1/invite-link", {}); await navigator.clipboard.writeText(result.url); return { ok: true, ...result }; },
     copyText: async (text) => { await navigator.clipboard.writeText(String(text)); return { ok: true }; },
   };
