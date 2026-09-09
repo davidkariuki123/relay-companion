@@ -13,6 +13,7 @@ import {
   recoverCanonicalRuntime,
   pruneCanonicalReleases,
   repairCanonicalRuntime,
+  verifyCanonicalTreeComplete,
 } from "../src/canonical-runtime.js";
 
 // These integration cases deliberately exercise POSIX permissions and atomic
@@ -58,6 +59,199 @@ function existingPointer(homeDir, version = "0.1.240", platform = "linux", fsImp
   fsImpl.writeFileSync(layout.pointerPath, `${JSON.stringify(pointer)}\n`);
   return pointer;
 }
+
+// Declare `dependencies` on the seeded relay-companion and place packages in the
+// release's node_modules. `present` is the list actually written; anything
+// declared but not present is what a half-deleted tree looks like.
+function seedDependencies(packageRoot, declared, present = declared, { platform = process.platform, fsImpl = fs } = {}) {
+  const api = platform === "win32" ? path.win32 : path.posix;
+  const manifestPath = api.join(packageRoot, "package.json");
+  const manifest = JSON.parse(fsImpl.readFileSync(manifestPath, "utf8"));
+  manifest.dependencies = Object.fromEntries(declared.map((name) => [name, "1.0.0"]));
+  fsImpl.writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`);
+  const nodeModules = api.resolve(packageRoot, "..");
+  for (const name of present) {
+    const directory = api.join(nodeModules, name);
+    fsImpl.mkdirSync(directory, { recursive: true });
+    fsImpl.writeFileSync(api.join(directory, "package.json"), `${JSON.stringify({ name, version: "1.0.0" })}\n`);
+  }
+}
+
+// A pointer whose tree is real on disk: the shape a rollback would restore.
+function seededPointer(homeDir, releaseId, version, { platform = process.platform, declared = [], present = declared } = {}) {
+  const layout = canonicalRuntimeLayout({ homeDir, platform, releaseId });
+  seedCandidate(layout.packageRoot, version, { platform });
+  seedDependencies(layout.packageRoot, declared, present, { platform });
+  return {
+    schema: 1,
+    active: true,
+    version,
+    releaseId: layout.releaseId,
+    releaseRoot: layout.releaseRoot,
+    packageRoot: layout.packageRoot,
+    bin: layout.bin,
+    node: process.execPath,
+    committedAt: 1,
+  };
+}
+
+function writePointer(homeDir, pointer, platform = process.platform) {
+  const layout = canonicalRuntimeLayout({ homeDir, platform });
+  fs.mkdirSync(path.dirname(layout.pointerPath), { recursive: true });
+  fs.writeFileSync(layout.pointerPath, `${JSON.stringify(pointer)}\n`);
+}
+
+test("release tree completeness follows Node resolution and names what is missing", t => {
+  const homeDir = fixture(), platform = process.platform;
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  const layout = canonicalRuntimeLayout({ homeDir, platform, releaseId: "0.1.240-complete" });
+  seedCandidate(layout.packageRoot, "0.1.240", { platform });
+  seedDependencies(layout.packageRoot, ["alpha", "beta"]);
+  const nodeModules = path.resolve(layout.packageRoot, "..");
+  // alpha needs gamma nested under itself; beta needs delta hoisted to the top.
+  fs.writeFileSync(path.join(nodeModules, "alpha", "package.json"), JSON.stringify({ name: "alpha", dependencies: { gamma: "1" } }));
+  fs.mkdirSync(path.join(nodeModules, "alpha", "node_modules", "gamma"), { recursive: true });
+  fs.writeFileSync(path.join(nodeModules, "alpha", "node_modules", "gamma", "package.json"), JSON.stringify({ name: "gamma" }));
+  fs.writeFileSync(path.join(nodeModules, "beta", "package.json"), JSON.stringify({ name: "beta", dependencies: { delta: "1" } }));
+  fs.mkdirSync(path.join(nodeModules, "delta"), { recursive: true });
+  fs.writeFileSync(path.join(nodeModules, "delta", "package.json"), JSON.stringify({ name: "delta" }));
+  const complete = verifyCanonicalTreeComplete(layout.packageRoot, { platform });
+  assert.equal(complete.ok, true, complete.detail);
+  assert.equal(complete.verified, true);
+  assert.equal(complete.packages, 5);
+
+  fs.rmSync(path.join(nodeModules, "delta"), { recursive: true, force: true });
+  const incomplete = verifyCanonicalTreeComplete(layout.packageRoot, { platform });
+  assert.equal(incomplete.ok, false);
+  assert.equal(incomplete.reason, "release-tree-incomplete");
+  assert.match(incomplete.detail, /beta needs delta/);
+
+  const absent = verifyCanonicalTreeComplete(path.join(homeDir, "nowhere", "node_modules", "relay-companion"), { platform });
+  assert.deepEqual(absent, { ok: true, verified: false, reason: "release-tree-absent" });
+});
+
+test("a failed activation refuses a half-deleted previous tree and restores a complete sibling instead", async t => {
+  const homeDir = fixture(), platform = process.platform;
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  const broken = seededPointer(homeDir, "0.1.240-broken", "0.1.240", { declared: ["acme-client"], present: [] });
+  const sibling = seededPointer(homeDir, "0.1.240-sibling", "0.1.240", { declared: ["acme-client"] });
+  writePointer(homeDir, broken);
+  const restored = [];
+  const result = await repairCanonicalRuntime({
+    homeDir,
+    platform,
+    version: "0.1.241",
+    node: process.execPath,
+    installCandidate: ({ stagingRoot }) => { seedCandidate(path.join(stagingRoot, "node_modules", "relay-companion"), "0.1.241", { platform }); return { ok: true }; },
+    postCommitActivate: async () => ({ ok: false, reason: "exact-root-health-failed" }),
+    rollbackActivate: async (target, context) => { restored.push({ target, context }); return { ok: true }; },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.rolledBack, true);
+  assert.equal(restored.length, 1);
+  assert.equal(restored[0].target.packageRoot, sibling.packageRoot, "services are pointed at the complete tree");
+  assert.equal(restored[0].context.refusedPrevious.reason, "release-tree-incomplete");
+  assert.match(restored[0].context.refusedPrevious.detail, /acme-client/);
+  const pointer = readCanonicalRuntime({ homeDir, platform });
+  assert.equal(pointer.packageRoot, sibling.packageRoot);
+  assert.equal(pointer.releaseId, sibling.releaseId);
+  assert.equal(pointer.version, "0.1.240");
+  assert.equal(fs.existsSync(path.join(broken.packageRoot, "package.json")), true, "the refused tree is evidence, not deleted here");
+});
+
+test("a failed activation with no complete tree refuses the rollback and leaves the journal for recovery", async t => {
+  const homeDir = fixture(), platform = process.platform;
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  const broken = seededPointer(homeDir, "0.1.240-broken", "0.1.240", { declared: ["acme-client"], present: [] });
+  writePointer(homeDir, broken);
+  let rollbackCalls = 0;
+  const result = await repairCanonicalRuntime({
+    homeDir,
+    platform,
+    version: "0.1.241",
+    node: process.execPath,
+    installCandidate: ({ stagingRoot }) => { seedCandidate(path.join(stagingRoot, "node_modules", "relay-companion"), "0.1.241", { platform }); return { ok: true }; },
+    postCommitActivate: async () => ({ ok: false, reason: "exact-root-health-failed" }),
+    rollbackActivate: async () => { rollbackCalls += 1; return { ok: true }; },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.rolledBack, false);
+  assert.equal(rollbackCalls, 0, "a tree that cannot be imported is never activated, not even for five minutes");
+  assert.equal(readCanonicalRuntime({ homeDir, platform }), null);
+  const journal = readCanonicalRuntimeState({ homeDir, platform });
+  assert.equal(journal.state, "recovery-required");
+  assert.equal(journal.failure.reason, "release-tree-incomplete");
+  assert.equal(journal.candidate.version, "0.1.241");
+  assert.equal(fs.existsSync(journal.candidate.packageRoot), true, "the verified candidate stays as the recovery repair executable");
+});
+
+test("recovery refuses an incomplete previous and leaves the pointer inactive for a fresh runtime", async t => {
+  const homeDir = fixture(), platform = process.platform;
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  const broken = seededPointer(homeDir, "0.1.240-broken", "0.1.240", { declared: ["acme-client"], present: [] });
+  writePointer(homeDir, { schema: 1, state: "activating", active: false, candidate: { releaseId: "0.1.241-candidate", version: "0.1.241" }, previous: broken, preparedAt: 1 });
+  const targets = [];
+  const result = await recoverCanonicalRuntime({
+    homeDir,
+    platform,
+    rollbackActivate: async (target) => { targets.push(target); return { ok: true }; },
+  });
+  assert.equal(result.ok, true, result.reason);
+  assert.equal(result.recovered, true);
+  assert.deepEqual(targets, [null], "the broken previous is never handed to activation");
+  assert.equal(result.refusedPrevious.reason, "release-tree-incomplete");
+  assert.equal(readCanonicalRuntime({ homeDir, platform }), null);
+  const pointer = JSON.parse(fs.readFileSync(canonicalRuntimeLayout({ homeDir, platform }).pointerPath, "utf8"));
+  assert.equal(pointer.state, "inactive");
+  assert.equal(pointer.rolledBackFrom, "0.1.241-candidate");
+});
+
+test("recovery restores a complete sibling when the journal's previous tree is broken", async t => {
+  const homeDir = fixture(), platform = process.platform;
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  const broken = seededPointer(homeDir, "0.1.240-broken", "0.1.240", { declared: ["acme-client"], present: [] });
+  const sibling = seededPointer(homeDir, "0.1.240-sibling", "0.1.240", { declared: ["acme-client"] });
+  writePointer(homeDir, { schema: 1, state: "activating", active: false, candidate: { releaseId: "0.1.241-candidate", version: "0.1.241" }, previous: broken, preparedAt: 1 });
+  const targets = [];
+  const result = await recoverCanonicalRuntime({
+    homeDir,
+    platform,
+    rollbackActivate: async (target) => { targets.push(target); return { ok: true }; },
+  });
+  assert.equal(result.ok, true, result.reason);
+  assert.equal(result.substituted, true);
+  assert.equal(targets[0].packageRoot, sibling.packageRoot);
+  assert.equal(readCanonicalRuntime({ homeDir, platform }).packageRoot, sibling.packageRoot);
+});
+
+test("pruning never half-deletes a release that is still in use", t => {
+  const homeDir = fixture(), platform = process.platform;
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  const { releasesDir } = canonicalRuntimeLayout({ homeDir, platform });
+  const releases = ["release-00", "release-01", "release-02"].map((releaseId) => {
+    const layout = canonicalRuntimeLayout({ homeDir, platform, releaseId });
+    for (const name of ["aardvark", "electron", "zebra"]) {
+      fs.mkdirSync(path.join(layout.releaseRoot, "node_modules", name), { recursive: true });
+      fs.writeFileSync(path.join(layout.releaseRoot, "node_modules", name, "package.json"), "{}");
+    }
+    return layout;
+  });
+  fs.mkdirSync(path.join(releasesDir, ".trash-release-99"), { recursive: true });
+  fs.writeFileSync(path.join(releasesDir, ".trash-release-99", "leftover"), "junk");
+  const inUse = releases[1].releaseRoot;
+  const fsImpl = Object.create(fs);
+  // Windows refuses to rename a directory with an open file inside it; emulate
+  // that for release-01 the way electron.exe pins a tree while the pill runs.
+  fsImpl.renameSync = (from, to) => {
+    if (path.resolve(from) === path.resolve(inUse)) throw Object.assign(new Error("EPERM: operation not permitted, rename"), { code: "EPERM" });
+    return fs.renameSync(from, to);
+  };
+  const result = pruneCanonicalReleases({ homeDir, platform, active: { releaseId: "release-02" }, retainRecent: 0, fsImpl });
+  assert.deepEqual(result.removed.sort(), [".trash-release-99", "release-00"]);
+  assert.deepEqual(result.inUse, ["release-01"]);
+  assert.deepEqual(fs.readdirSync(releasesDir).sort(), ["release-01", "release-02"]);
+  assert.deepEqual(fs.readdirSync(path.join(inUse, "node_modules")).sort(), ["aardvark", "electron", "zebra"], "an in-use tree keeps every package");
+});
 
 test("runtime repair atomically replaces a stale pointer Node without changing release identity", () => {
   const homeDir = fixture();

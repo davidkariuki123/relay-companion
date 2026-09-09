@@ -197,37 +197,200 @@ export function pruneCanonicalReleases({
   } catch {
     return { ok: true, removed: [], retained: [...keep], skipped: "releases-unreadable" };
   }
+  // A `.trash-` entry is a tree already renamed aside for deletion; it is never
+  // evidence worth retaining and never a release anything may point at.
   const forensic = entries
-    .filter((entry) => !keep.has(entry.name))
+    .filter((entry) => !keep.has(entry.name) && !entry.name.startsWith(TRASH_PREFIX))
     .sort((a, b) => b.modified - a.modified || b.name.localeCompare(a.name))
     .slice(0, Math.max(0, Number(retainRecent) || 0));
   for (const entry of forensic) keep.add(entry.name);
   const removed = [];
+  const inUse = [];
+  const renameSync = typeof fsImpl.renameSync === "function" ? fsImpl.renameSync.bind(fsImpl) : undefined;
   for (const entry of entries) {
     if (keep.has(entry.name)) continue;
     // `entry.name` came directly from readdir and resolve must remain one direct
     // child of Relay's own releases directory. Never follow a symlink or accept a
     // path-shaped name from an injected/corrupt directory listing.
     if (api.dirname(api.resolve(entry.releaseRoot)) !== api.resolve(releasesDir)) continue;
-    try {
-      fsImpl.rmSync(entry.releaseRoot, { recursive: true, force: true });
-      removed.push(entry.name);
-    } catch {}
+    const result = removeReleaseTree(entry.releaseRoot, { platform, rmSync: fsImpl.rmSync.bind(fsImpl), renameSync });
+    if (result.ok) removed.push(entry.name);
+    else if (result.reason === "release-in-use") inUse.push(entry.name);
   }
-  return { ok: true, removed, retained: [...keep] };
+  return { ok: true, removed, retained: [...keep], inUse };
+}
+
+const TRASH_PREFIX = ".trash-";
+
+// Delete a release tree all-or-nothing. A recursive rmSync deletes node_modules in
+// directory order and stops at the first locked file; on Windows that file is
+// electron.exe whenever the pill still runs from the tree, and the tree is left
+// with an alphabetical prefix of its packages gone. On 2026-09-09 such a remnant
+// was later chosen as a rollback target, the daemon died on a missing import, and
+// the Companion vanished. Windows refuses to rename a directory that has any open
+// file inside it, so rename first: a refused rename means "in use" and the tree
+// stays intact; a renamed tree is unreferenced junk that can safely be deleted
+// (a leftover from a failed delete is swept by the next prune).
+function removeReleaseTree(releaseRoot, { platform, rmSync, renameSync }) {
+  const api = pathsFor(platform);
+  const name = api.basename(releaseRoot);
+  let doomed = releaseRoot;
+  if (typeof renameSync === "function" && !name.startsWith(TRASH_PREFIX)) {
+    doomed = api.join(api.dirname(releaseRoot), `${TRASH_PREFIX}${name}`);
+    try {
+      renameSync(releaseRoot, doomed);
+    } catch (error) {
+      return { ok: false, reason: "release-in-use", detail: error?.message || String(error) };
+    }
+  }
+  try {
+    rmSync(doomed, { recursive: true, force: true });
+  } catch (error) {
+    return { ok: false, reason: "release-remove-failed", detail: error?.message || String(error) };
+  }
+  return { ok: true };
 }
 
 // One direct child of Relay's own releases directory, gone. The guard mirrors
 // pruneCanonicalReleases: never follow a path-shaped name out of the tree.
-function removeStrandedRelease(releaseRoot, { releasesDir, platform, rmSync = fs.rmSync }) {
+function removeStrandedRelease(releaseRoot, { releasesDir, platform, rmSync = fs.rmSync, renameSync = fs.renameSync }) {
   const api = pathsFor(platform);
   try {
     if (api.dirname(api.resolve(releaseRoot)) !== api.resolve(releasesDir)) return false;
-    rmSync(releaseRoot, { recursive: true, force: true });
-    return true;
+    return removeReleaseTree(releaseRoot, { platform, rmSync, renameSync }).ok;
   } catch {
     return false;
   }
+}
+
+/**
+ * Prove a release tree still has every package its code can import. Node's
+ * resolution walks up through node_modules directories, so a dependency counts as
+ * present when any ancestor of the requiring package inside the release supplies
+ * it. Only `dependencies` are required; optional and peer ranges are not. An
+ * absent tree is reported as unverified rather than incomplete: activation's own
+ * health check already handles "nothing there", this check exists for the tree
+ * that is there but has lost packages.
+ */
+export function verifyCanonicalTreeComplete(packageRoot, {
+  platform = process.platform,
+  existsSync = fs.existsSync,
+  readFileSync = fs.readFileSync,
+  limit = 5000,
+} = {}) {
+  const api = pathsFor(platform);
+  const root = api.resolve(String(packageRoot || ""));
+  const releaseRoot = api.resolve(root, "..", "..");
+  const normalize = (value) => (platform === "win32" ? value.toLowerCase() : value);
+  const manifestOf = (directory) => {
+    try {
+      const parsed = JSON.parse(String(readFileSync(api.join(directory, "package.json"), "utf8")));
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  };
+  const own = manifestOf(root);
+  if (!own) return { ok: true, verified: false, reason: "release-tree-absent" };
+  const resolveDependency = (from, name) => {
+    let directory = from;
+    for (let depth = 0; depth < 64; depth += 1) {
+      const candidate = api.join(directory, "node_modules", name);
+      let present = false;
+      try { present = existsSync(api.join(candidate, "package.json")); } catch { present = false; }
+      if (present) return candidate;
+      if (normalize(directory) === normalize(releaseRoot)) return null;
+      const parent = api.dirname(directory);
+      if (parent === directory) return null;
+      directory = parent;
+    }
+    return null;
+  };
+  const seen = new Set([normalize(root)]);
+  const queue = [root];
+  const missing = [];
+  while (queue.length && seen.size <= limit) {
+    const directory = queue.shift();
+    const manifest = manifestOf(directory);
+    if (!manifest) continue;
+    const dependencies = manifest.dependencies && typeof manifest.dependencies === "object" ? Object.keys(manifest.dependencies) : [];
+    for (const name of dependencies) {
+      const resolved = resolveDependency(directory, name);
+      if (!resolved) {
+        missing.push(`${manifest.name || api.basename(directory)} needs ${name}`);
+        continue;
+      }
+      const key = normalize(resolved);
+      if (!seen.has(key)) {
+        seen.add(key);
+        queue.push(resolved);
+      }
+    }
+  }
+  if (missing.length) {
+    return { ok: false, verified: true, reason: "release-tree-incomplete", detail: missing.slice(0, 8).join("; "), missing };
+  }
+  return { ok: true, verified: true, packages: seen.size };
+}
+
+/**
+ * The tree a rollback would restore must be usable before services are pointed at
+ * it. A target that is present but fails file or dependency verification is never
+ * activated; a complete release of the same version already on disk replaces it,
+ * otherwise the rollback is refused and the journal is left for the verified
+ * recovery engine, which stages a fresh runtime instead of a known-broken root.
+ */
+function completeRollbackTarget(target, { layout, platform, io, verifyCandidate, exclude = [] }) {
+  if (!target?.packageRoot || !target?.version) return { target, verified: false };
+  const api = pathsFor(platform);
+  const options = {
+    platform,
+    existsSync: io.existsSync,
+    readFileSync: io.readFileSync,
+    statSync: io.statSync,
+    accessSync: io.accessSync,
+  };
+  let present = false;
+  try { present = io.existsSync(api.join(target.packageRoot, "package.json")); } catch { present = false; }
+  if (!present) return { target, verified: false };
+  let files = null;
+  try { files = verifyCandidate(target.packageRoot, target.version, options); } catch (error) {
+    files = { ok: false, reason: "candidate-verification-threw", detail: error?.message || String(error) };
+  }
+  const tree = files?.ok ? verifyCanonicalTreeComplete(target.packageRoot, options) : null;
+  if (files?.ok && tree?.ok) return { target, verified: true };
+  const refused = files?.ok
+    ? { reason: tree?.reason || "release-tree-incomplete", detail: tree?.detail || "" }
+    : { reason: files?.reason || "rollback-target-invalid", detail: files?.detail || "" };
+  const targetRelease = api.basename(api.resolve(target.packageRoot, "..", ".."));
+  const skip = new Set([...exclude, target.releaseId, targetRelease].filter(Boolean));
+  let sibling = null;
+  try {
+    sibling = findReusableRelease({ version: target.version, layout, platform, io, exclude: skip, verifyCandidate });
+  } catch {
+    sibling = null;
+  }
+  if (sibling) {
+    const complete = verifyCanonicalTreeComplete(sibling.packageRoot, options);
+    let verified = null;
+    try { verified = verifyCandidate(sibling.packageRoot, target.version, options); } catch { verified = null; }
+    if (complete.ok && verified?.ok) {
+      return {
+        target: {
+          ...target,
+          releaseId: sibling.releaseId,
+          releaseRoot: sibling.releaseRoot,
+          packageRoot: sibling.packageRoot,
+          bin: sibling.bin,
+          electronPath: verified.electronPath,
+        },
+        verified: true,
+        substituted: true,
+        refused,
+      };
+    }
+  }
+  return { target: null, verified: true, refused };
 }
 
 // An already-installed release of the exact target version, verified, and neither
@@ -283,6 +446,7 @@ export async function recoverCanonicalRuntime({
   fsImpl = fs,
   protectedPackageRoots = [],
   cleanupReleases = pruneCanonicalReleases,
+  verifyCandidate = verifyCanonicalCandidate,
   onLockAcquired = () => {},
   lockIdentity = {},
 } = {}) {
@@ -295,6 +459,9 @@ export async function recoverCanonicalRuntime({
     writeFileSync: fsImpl.writeFileSync.bind(fsImpl),
     renameSync: fsImpl.renameSync.bind(fsImpl),
     rmSync: fsImpl.rmSync.bind(fsImpl),
+    existsSync: typeof fsImpl.existsSync === "function" ? fsImpl.existsSync.bind(fsImpl) : fs.existsSync,
+    statSync: typeof fsImpl.statSync === "function" ? fsImpl.statSync.bind(fsImpl) : fs.statSync,
+    accessSync: typeof fsImpl.accessSync === "function" ? fsImpl.accessSync.bind(fsImpl) : fs.accessSync,
     readdirSync: typeof fsImpl.readdirSync === "function" ? fsImpl.readdirSync.bind(fsImpl) : undefined,
     processAlive: typeof fsImpl.processAlive === "function" ? fsImpl.processAlive.bind(fsImpl) : undefined,
     processIdentity: typeof fsImpl.processIdentity === "function" ? fsImpl.processIdentity.bind(fsImpl) : undefined,
@@ -316,10 +483,22 @@ export async function recoverCanonicalRuntime({
     try { lock.release(); } catch {}
     return { ok: false, phase: "admission", reason: "worker-admission-failed", detail: error?.message || String(error) };
   }
-  const target = state.previous || null;
+  // A journal's `previous` is whatever the failed transaction believed it could
+  // restore. Prove that before restoring it: a half-deleted tree looped this exact
+  // recovery for hours on 2026-09-09 (rollback → exact-root-health-failed → same
+  // tree again). Refusing it leaves the pointer inactive so a verified recovery
+  // runtime stages a fresh release instead of re-activating a known-broken root.
+  const selection = completeRollbackTarget(state.previous || null, {
+    layout,
+    platform,
+    io,
+    verifyCandidate,
+    exclude: [state.candidate?.releaseId].filter(Boolean),
+  });
+  const target = selection.target;
   let rollback = null;
   try {
-    rollback = await rollbackActivate(target, { recovery: state });
+    rollback = await rollbackActivate(target, { recovery: state, refusedPrevious: selection.refused || null });
     if (!rollback?.ok) {
       atomicWritePointer(layout.pointerPath, {
         ...state,
@@ -350,7 +529,7 @@ export async function recoverCanonicalRuntime({
         fsImpl,
       });
     } catch {}
-    return { ok: true, phase: "recovered", recovered: true, target };
+    return { ok: true, phase: "recovered", recovered: true, target, refusedPrevious: selection.refused || null, substituted: selection.substituted === true };
   } catch (error) {
     atomicWritePointer(layout.pointerPath, {
       ...state,
@@ -1052,13 +1231,13 @@ export async function repairCanonicalRuntime({
     if (!published?.ok) {
       // Renamed out of staging (or adopted) but invalid: nothing references it and
       // the `finally` only cleans staging, so without this it leaks a full release.
-      removeStrandedRelease(chosen.releaseRoot, { releasesDir: layout.releasesDir, platform, rmSync: io.rmSync });
+      removeStrandedRelease(chosen.releaseRoot, { releasesDir: layout.releasesDir, platform, rmSync: io.rmSync, renameSync: io.renameSync });
       return { ok: false, phase: "publish-verify", reason: published?.reason || "published-candidate-invalid", detail: published?.detail || "", previous };
     }
     if (reused) {
       const smoke = await preCommitVerify({ ...published, releaseRoot: chosen.releaseRoot, node, version });
       if (!smoke?.ok) {
-        removeStrandedRelease(chosen.releaseRoot, { releasesDir: layout.releasesDir, platform, rmSync: io.rmSync });
+        removeStrandedRelease(chosen.releaseRoot, { releasesDir: layout.releasesDir, platform, rmSync: io.rmSync, renameSync: io.renameSync });
         return { ok: false, phase: "pre-commit", reason: smoke?.reason || "candidate-smoke-failed", detail: smoke?.detail || "", previous };
       }
     }
@@ -1087,14 +1266,28 @@ export async function repairCanonicalRuntime({
     activationStarted = true;
     const activated = await postCommitActivate(candidate, { previous });
     if (!activated?.ok) {
-      const target = previous || rollbackTarget || null;
+      // Never point services at a tree that is present but broken. A complete
+      // release of the same version replaces it; otherwise the rollback is refused
+      // and the journal goes to recovery-required for the verified recovery engine.
+      const selection = completeRollbackTarget(previous || rollbackTarget || null, {
+        layout,
+        platform,
+        io,
+        verifyCandidate,
+        exclude: [candidate.releaseId],
+      });
+      const target = selection.target;
       let rollback = null;
-      try {
-        rollback = await rollbackActivate(target, { failed: candidate, activation: activated, previous });
-      } catch (error) {
-        rollback = { ok: false, reason: "rollback-threw", detail: error?.message || String(error) };
+      if (selection.refused && !target) {
+        rollback = { ok: false, reason: selection.refused.reason, detail: selection.refused.detail, refused: true };
+      } else {
+        try {
+          rollback = await rollbackActivate(target, { failed: candidate, activation: activated, previous: target, refusedPrevious: selection.refused || null });
+        } catch (error) {
+          rollback = { ok: false, reason: "rollback-threw", detail: error?.message || String(error) };
+        }
       }
-      const rollbackPointer = previous || {
+      const rollbackPointer = previous && selection.substituted ? target : previous || {
         schema: CANONICAL_RUNTIME_SCHEMA,
         active: false,
         rolledBackFrom: candidate.releaseId,
@@ -1110,7 +1303,7 @@ export async function repairCanonicalRuntime({
         // whose updates keep FAILING still converges to a bounded disk footprint.
         // On recovery-required the tree stays: recovery uses it as the repair
         // executable and may adopt it outright on the next attempt.
-        removeStrandedRelease(candidate.releaseRoot, { releasesDir: layout.releasesDir, platform, rmSync: io.rmSync });
+        removeStrandedRelease(candidate.releaseRoot, { releasesDir: layout.releasesDir, platform, rmSync: io.rmSync, renameSync: io.renameSync });
         try {
           cleanupReleases({
             homeDir,
@@ -1162,15 +1355,29 @@ export async function repairCanonicalRuntime({
   } catch (error) {
     if (activationJournalWritten && candidate) {
       let rollback = null;
+      let selection = { target: previous || rollbackTarget || null };
       try {
-        rollback = await rollbackActivate(previous || rollbackTarget || null, { failed: candidate, error, previous });
+        selection = completeRollbackTarget(previous || rollbackTarget || null, {
+          layout,
+          platform,
+          io,
+          verifyCandidate,
+          exclude: [candidate.releaseId],
+        });
+      } catch {}
+      try {
+        if (selection.refused && !selection.target) {
+          rollback = { ok: false, reason: selection.refused.reason, detail: selection.refused.detail, refused: true };
+        } else {
+          rollback = await rollbackActivate(selection.target, { failed: candidate, error, previous: selection.target, refusedPrevious: selection.refused || null });
+        }
         rollbackSucceeded = rollback?.ok === true;
       } catch (rollbackError) {
         rollback = { ok: false, reason: "rollback-threw", detail: rollbackError?.message || String(rollbackError) };
       }
       try {
         if (rollback?.ok) {
-          atomicWritePointer(layout.pointerPath, previous || {
+          atomicWritePointer(layout.pointerPath, (previous && selection.substituted ? selection.target : previous) || {
             schema: CANONICAL_RUNTIME_SCHEMA,
             active: false,
             rolledBackFrom: candidate.releaseId,
@@ -1178,7 +1385,7 @@ export async function repairCanonicalRuntime({
           }, { ...io, platform });
           // Same as the explicit activation-failure branch: rolled back, pointer
           // restored, the candidate tree is debris.
-          removeStrandedRelease(candidate.releaseRoot, { releasesDir: layout.releasesDir, platform, rmSync: io.rmSync });
+          removeStrandedRelease(candidate.releaseRoot, { releasesDir: layout.releasesDir, platform, rmSync: io.rmSync, renameSync: io.renameSync });
         } else atomicWritePointer(layout.pointerPath, {
           schema: CANONICAL_RUNTIME_SCHEMA,
           state: "recovery-required",

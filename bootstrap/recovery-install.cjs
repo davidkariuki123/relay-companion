@@ -13,6 +13,47 @@ const xml = (s) => String(s).replaceAll("&", "&amp;").replaceAll("<", "&lt;").re
 const unit = (s) => '"' + String(s).replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("%", "%%") + '"';
 function run(command, args) { return spawnSync(command, args, { encoding: "utf8", windowsHide: true, timeout: 30_000 }); }
 
+// Task Scheduler reads this XML as UTF-16 (the caller adds the BOM). The settings
+// that differ from schtasks' `/SC MINUTE` defaults are the load-bearing ones: both
+// battery flags, StartWhenAvailable for missed ticks, and a run-time limit that
+// still covers the launcher's own 25 minute deadline.
+function windowsRecoveryTaskXml(script, startAt = new Date()) {
+  const pad = (n) => String(n).padStart(2, "0");
+  const boundary = `${startAt.getFullYear()}-${pad(startAt.getMonth() + 1)}-${pad(startAt.getDate())}T${pad(startAt.getHours())}:${pad(startAt.getMinutes())}:${pad(startAt.getSeconds())}`;
+  return `<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <Triggers>
+    <TimeTrigger>
+      <StartBoundary>${boundary}</StartBoundary>
+      <Repetition><Interval>PT5M</Interval><StopAtDurationEnd>false</StopAtDurationEnd></Repetition>
+      <Enabled>true</Enabled>
+    </TimeTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="RelayUser"><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings><StopOnIdleEnd>false</StopOnIdleEnd><RestartOnIdle>false</RestartOnIdle></IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT30M</ExecutionTimeLimit>
+  </Settings>
+  <Actions Context="RelayUser">
+    <Exec><Command>wscript.exe</Command><Arguments>//B ${xml(`"${script}"`)}</Arguments></Exec>
+  </Actions>
+</Task>
+`;
+}
+
 function installRecovery({ packageRoot, node = process.execPath, homeDir = os.homedir(), platform = process.platform,
   runCommand = run, reload = true, preserveNode = relayOwnedNodePath } = {}) {
   if (!["darwin", "linux", "win32"].includes(platform)) return { ok: false, reason: "recovery-platform-unsupported" };
@@ -73,7 +114,12 @@ function installRecovery({ packageRoot, node = process.execPath, homeDir = os.ho
       const script = path.join(root, "launch.vbs");
       const command = `"${launcherNode}" "${launcher}"`;
       fs.writeFileSync(script, `Set sh = CreateObject("WScript.Shell")\r\nWScript.Quit sh.Run("${command.replaceAll('"', '""')}", 0, True)\r\n`);
-      results.push(runCommand("schtasks.exe", ["/Create", "/TN", TASK, "/TR", `wscript.exe //B "${script}"`, "/SC", "MINUTE", "/MO", "5", "/RL", "LIMITED", "/F"]));
+      // Register from XML rather than `/SC MINUTE /MO 5`: schtasks' defaults refuse
+      // to start a task on battery power and stop it when the plug comes out, so a
+      // laptop that lost its Companion while unplugged never got this engine.
+      const taskXml = path.join(root, "task.xml");
+      fs.writeFileSync(taskXml, `\uFEFF${windowsRecoveryTaskXml(script)}`, "utf16le");
+      results.push(runCommand("schtasks.exe", ["/Create", "/TN", TASK, "/XML", taskXml, "/F"]));
     } else if (platform === "darwin") {
       const plist = path.join(homeDir, "Library", "LaunchAgents", `${LABEL}.plist`);
       fs.mkdirSync(path.dirname(plist), { recursive: true });
@@ -124,4 +170,4 @@ function uninstallRecovery({ homeDir = os.homedir(), platform = process.platform
   for (const file of files) fs.rmSync(file, { force: true });
   return { ok: true };
 }
-module.exports = { installRecovery, uninstallRecovery, LABEL, TASK };
+module.exports = { installRecovery, uninstallRecovery, windowsRecoveryTaskXml, LABEL, TASK };

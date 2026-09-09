@@ -5,7 +5,46 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { installRecovery, uninstallRecovery, LABEL } from "../bootstrap/recovery-install.cjs";
+import { installRecovery, uninstallRecovery, windowsRecoveryTaskXml, LABEL, TASK } from "../bootstrap/recovery-install.cjs";
+
+test("Windows recovery task registers from XML that starts and keeps running on battery", t => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-recovery-battery-"));
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  const calls = [];
+  const result = installRecovery({ homeDir, platform: "win32", packageRoot: fileURLToPath(new URL("..", import.meta.url)),
+    preserveNode: () => path.join(homeDir, ".relay", "recovery", "node", "node.exe"),
+    runCommand: (command, args) => {
+      calls.push([command, args]);
+      if (args[0] === "--check") return spawnSync(process.execPath, args, { encoding: "utf8", windowsHide: true });
+      return { status: 0 };
+    } });
+  assert.equal(result.ok, true, result.detail);
+  const create = calls.find(([command, args]) => command === "schtasks.exe" && args[0] === "/Create");
+  assert.ok(create, "the task is created");
+  assert.deepEqual(create[1].slice(0, 3), ["/Create", "/TN", TASK]);
+  assert.equal(create[1][3], "/XML", "schtasks /TR and /SC defaults refuse battery starts; register from XML instead");
+  assert.ok(!create[1].includes("/SC") && !create[1].includes("/TR"));
+  const xmlPath = create[1][4];
+  const bytes = fs.readFileSync(xmlPath);
+  assert.deepEqual([...bytes.subarray(0, 2)], [0xff, 0xfe], "Task Scheduler needs a UTF-16 BOM");
+  const xml = bytes.toString("utf16le").slice(1);
+  assert.match(xml, /<DisallowStartIfOnBatteries>false<\/DisallowStartIfOnBatteries>/);
+  assert.match(xml, /<StopIfGoingOnBatteries>false<\/StopIfGoingOnBatteries>/);
+  assert.match(xml, /<StartWhenAvailable>true<\/StartWhenAvailable>/);
+  assert.match(xml, /<Repetition><Interval>PT5M<\/Interval><StopAtDurationEnd>false<\/StopAtDurationEnd><\/Repetition>/);
+  assert.match(xml, /<RunLevel>LeastPrivilege<\/RunLevel>/);
+  assert.match(xml, /<Command>wscript\.exe<\/Command>/);
+  const script = path.join(homeDir, ".relay", "recovery", "launch.vbs");
+  assert.ok(xml.includes(`<Arguments>//B &quot;${script}&quot;</Arguments>`), "the hidden launcher script is the task action");
+  assert.ok(fs.existsSync(script));
+});
+
+test("Windows recovery task XML is deterministic for a given start time", () => {
+  const xml = windowsRecoveryTaskXml("C:\\Users\\x\\.relay\\recovery\\launch.vbs", new Date(2026, 8, 10, 1, 2, 3));
+  assert.match(xml, /<StartBoundary>2026-09-10T01:02:03<\/StartBoundary>/);
+  assert.match(xml, /<ExecutionTimeLimit>PT30M<\/ExecutionTimeLimit>/);
+  assert.equal((xml.match(/OnBatteries>false</g) || []).length, 2);
+});
 
 for (const platform of ["win32", "darwin", "linux"]) test(`independent ${platform} registration uses a Relay-owned node and survives an older rollback`, t => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-recovery-registration-"));

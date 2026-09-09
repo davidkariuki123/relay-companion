@@ -13,6 +13,7 @@ import {
   recoverCanonicalRuntime,
   repairCanonicalRuntime,
   verifyCanonicalCandidate,
+  verifyCanonicalTreeComplete,
 } from "./canonical-runtime.js";
 
 const WINDOWS_DAEMON_TASK = "Relay Companion Daemon";
@@ -56,6 +57,10 @@ export function legacyRuntimeTarget(packageRoot, version, {
 } = {}) {
   const verified = verifyCanonicalCandidate(packageRoot, version, { platform });
   if (!verified.ok) return null;
+  // The running tree is only a rollback target while it can still be imported.
+  // A tree that lost packages to a partial delete is worse than no target: the
+  // transaction then leaves repair to the verified recovery engine.
+  if (!verifyCanonicalTreeComplete(packageRoot, { platform }).ok) return null;
   return {
     kind: "legacy",
     version,
