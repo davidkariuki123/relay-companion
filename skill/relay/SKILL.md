@@ -1,6 +1,6 @@
 ---
 name: relay
-description: Use Relay from Claude Code or Codex with Companion's local MCP tools and the protocol helper for setup and fallback. Use when the person asks to set up Relay, read or send a Relay, check messages, reply to a contact, share their invite link, or continue the first-run Relay tutorial. Preserve existing integrations.
+description: Use Relay from Claude Code or Codex with Companion's local MCP tools and the protocol helper for setup and fallback. Use when the person asks to set up Relay, read or send a Relay, check messages, act on a received Relay or continue that work, reply to a contact, share their invite link, or continue the first-run Relay tutorial. Preserve existing integrations.
 ---
 
 # Relay
@@ -240,6 +240,59 @@ installation succeeded, is still running, or failed; keep the working helper
 available. Installation success does not prove MCP is active in this session.
 
 The tutorial activation event is the approved first Relay, not app installation.
+
+<!-- BEGIN GENERATED RELAY TODO WORKFLOW -->
+## Keep Todo aligned with work
+
+When the human asks you to act on an inbound titled Relay, update its Todo
+status as part of doing the work. This also applies when you read the Relay
+earlier and the human later says "fix this", sends a screenshot of the same
+issue, or continues the work in an existing conversation. Keep the exact source
+Relay ID associated with that work; do not require the person to say "update Todo".
+
+Check relevant Todo state when starting or resuming Relay-related work, at
+meaningful milestones during sustained work (such as completed implementation,
+verification, or a requested push), and before the final completion response.
+Use relay_inbox_list with todoStatuses ["triage", "in_progress"] to find relevant
+open items; use relayIds for exact source items already known. One-status Todo
+queries support limit and cursor pagination; follow nextCursor when the item
+may be beyond the returned page. Include done when verifying a completed item.
+The CLI has the same read capability: call relay_inbox_list through the installed
+helper with the same JSON arguments. An inbox call without todoStatuses is only
+recent arrivals, not the current Todo board.
+
+Compare the relevant items with what this session actually started or finished.
+Make the needed In Progress or Done updates, then check the returned status and
+version before claiming success. Keep a failure visible in the final response.
+Do not poll unchanged state between every tool call, change unrelated items,
+start work merely because it is listed, or create a background schedule unless
+the human asks for one.
+
+Before substantive work, read the exact item with relay_inbox_list relayIds for
+its current todoVersion, then call relay_todo_update with status in_progress.
+Before reporting completion, call it with status done and a brief note plus
+relevant evidence. Judge completion against the outcome the human requested:
+if they asked for a fix on main, an unrequested later deployment is not a new
+condition for Done. If they asked for deployment, a push alone is not Done.
+If work remains, keep its status accurate and explain the actual remaining step.
+
+On a version conflict, re-read the item, reconsider the latest state, and retry
+only if the update still applies. If the write fails, report that Todo was not
+updated; do not present it as successful. If MCP is unavailable, use the installed
+helper's tools and call relay_todo_update with the same arguments through the
+supported Companion connection. Preserve the idempotency key on retries.
+
+Reading, summarizing, discussing or drafting about a Relay does not authorize
+acting on it and does not itself change its Todo status. For an inbound Task,
+use relay_task_start before the authorized work and relay_task_complete with its
+result afterward; do not substitute ordinary Relay status updates for Task
+completion. Cancellation or removal requires the human's corresponding request.
+
+Before ending work on a Relay, check that its status matches what you actually
+finished, or explain the specific update failure. A follow-up coding request
+does not detach the work from the Relay that introduced it.
+
+<!-- END GENERATED RELAY TODO WORKFLOW -->
 
 ## Everyday Relay work
 

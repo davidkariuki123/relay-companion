@@ -604,6 +604,7 @@ test("CLI discovers the live catalog and executes mutations through the authenti
   const file = path.join(root, "agent-local.json");
   const writes = [];
   const client = {
+    todo: async input => ({mode:"continuous",items:[{relayId:"item_tools",todoStatus:input.statuses[0],todoVersion:3}],counts:{triage:1,in_progress:0,done:0},nextCursor:input.cursor?null:"todo-page-2"}),
     todoVisibility: async id => ({itemId:id,removed:false,version:0}),
     updateTodoVisibility: async (id,body) => { writes.push({id,body});return {ok:true,...body}; },
     updateTodoStatus: async (id,body) => { writes.push({id,body});return {ok:true,status:body.status}; },
@@ -642,6 +643,17 @@ test("CLI discovers the live catalog and executes mutations through the authenti
   const malformed = await runProtocol(["call", "relay_contact_update"], { env, input: "[]" });
   assert.equal(malformed.code, 1);
   assert.equal(writes.length, 3);
+  for (const cursor of [undefined,"todo-page-2"]) {
+    const listedTodo=await runProtocol(["call","relay_inbox_list"],{env,input:JSON.stringify({todoStatuses:["triage"],limit:1,...(cursor?{cursor}:{})})});
+    assert.equal(listedTodo.code,0,listedTodo.stderr);
+    const board=JSON.parse(JSON.parse(listedTodo.stdout).content[0].text);
+    assert.equal(board.items[0].todoVersion,3);
+    assert.equal(board.items[0].todoStatus,"triage");
+    assert.equal(board.nextCursor,cursor?null:"todo-page-2");
+    assert.equal(board.readStateChanged,false);
+    assert.equal(board.readReceiptsSent,false);
+  }
+  assert.equal(writes.length,3,"Todo checkpoint reads cause no mutations");
   const visibilityRead = await runProtocol(["call", "relay_todo_visibility"], {env,input:JSON.stringify({itemId:"item_tools"})});
   assert.equal(visibilityRead.code,0,visibilityRead.stderr);
   assert.equal(JSON.parse(JSON.parse(visibilityRead.stdout).content[0].text).version,0);

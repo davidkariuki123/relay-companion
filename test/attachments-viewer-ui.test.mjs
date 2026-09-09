@@ -359,10 +359,10 @@ test("main validates every id and answers viewer channels only for a live viewer
   );
 });
 
-test("downloads land in ~/Downloads/Relay/<chat>/, report per item, and reveal exactly once", () => {
+test("downloads land directly in the system Downloads folder, report per item, and reveal exactly once", () => {
   const download = between(main, "async function downloadRelayAttachments(", "function reportAttachmentDownload(");
-  assert.match(main, /path\.join\(downloads \|\| path\.join\(os\.homedir\(\), "Downloads"\), "Relay"\)/);
-  assert.match(download, /sanitizeChatFolderName\(options\?\.chatTitle\)/);
+  assert.match(main, /return downloads \|\| path\.join\(os\.homedir\(\), "Downloads"\);/);
+  assert.match(download, /const folder = relayDownloadsRoot\(\);/);
   assert.match(download, /uniqueDownloadName\(/);
   assert.match(download, /fs\.mkdirSync\(folder, \{ recursive: true \}\)/);
   assert.match(download, /tell\("downloading", \{ loaded, total \}\)/);

@@ -5552,12 +5552,12 @@ async function copyRelayAttachmentImage(relayId, attachmentId) {
   return { ok: true };
 }
 
-// ---- Download to ~/Downloads/Relay/<chat>/ ---------------------------------
+// ---- Download to the system Downloads folder ------------------------------
 
 function relayDownloadsRoot() {
   let downloads = "";
   try { downloads = app.getPath("downloads"); } catch { downloads = ""; }
-  return path.join(downloads || path.join(os.homedir(), "Downloads"), "Relay");
+  return downloads || path.join(os.homedir(), "Downloads");
 }
 
 function copyWithProgress(from, to, onProgress) {
@@ -5597,8 +5597,8 @@ async function downloadRelayAttachments(input, options, report) {
     .map((row) => ({ relayId: safeAttachmentId(row?.relayId), attachmentId: safeAttachmentId(row?.attachmentId) }))
     .filter((row) => row.relayId && row.attachmentId);
   if (!items.length) return { ok: false, error: "nothing to download" };
-  const { sanitizeChatFolderName, uniqueDownloadName } = require("./attachment-downloads.cjs");
-  const folder = path.join(relayDownloadsRoot(), sanitizeChatFolderName(options?.chatTitle));
+  const { uniqueDownloadName } = require("./attachment-downloads.cjs");
+  const folder = relayDownloadsRoot();
   try {
     fs.mkdirSync(folder, { recursive: true });
   } catch (error) {

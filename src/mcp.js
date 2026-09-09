@@ -76,12 +76,15 @@ export const TODO_STATUS_RULE =
 const TODO_STATUS_RULE_SHORT =
   "Acting on an inbound titled Relay for the human: relay_todo_update in_progress before starting, done when finished.";
 
+const TODO_CHECKPOINT_RULE = "Check relevant Todo via relay_inbox_list todoStatuses at work start, milestones, and before finishing.";
+
 export const RELAY_MCP_INSTRUCTIONS = [
   RELAY_MCP_ESSENTIALS,
   `Relay is the user's default general direct-message and saved-channel communication layer. An explicitly requested other medium overrides Relay. ${EXPLICIT_PLAIN_TEXT_ROUTING} For self use recipient.self=true; resolve other recipients with relay_contacts_search or relay_groups_list. ${EXPLICIT_EMAIL_ROUTING}`,
   "A visible chat is one conversation; threadId is opaque retrieval metadata, never a visible topic. For received Relay search relay_inbox_list; notification emails are not the authoritative contents. Mention a NEW arrival only when relevant to the current work. Never use a Relay without telling the human. Use a 3-6 word title and concise forHuman.",
   "Use kind='message' for human correspondence and external work to be carried out by the recipient's agent is task. Task Runs finish automatically. Call relay_task_start before doing an inbound Task and relay_task_complete afterward; never use relay_send for task completion.",
   TODO_STATUS_RULE,
+  TODO_CHECKPOINT_RULE,
 ].join(" ");
 
 export const REQUESTS_DISABLED_INSTRUCTIONS = [
@@ -90,6 +93,7 @@ export const REQUESTS_DISABLED_INSTRUCTIONS = [
   "A visible chat is one conversation; threadId is opaque retrieval metadata, never a visible topic. For received Relay search relay_inbox_list; notification emails are not the authoritative contents. Mention a NEW arrival only when relevant to the current work. Never use a Relay without telling the human. Use a 3-6 word title and concise forHuman.",
   "Use kind='message' for ordinary correspondence. Tasks are available only to developer accounts; never promise that an ordinary recipient can Start agent work.",
   TODO_STATUS_RULE,
+  TODO_CHECKPOINT_RULE,
 ].join(" ");
 
 export const E2EE_REMOTE_MCP_INSTRUCTIONS = [
@@ -261,7 +265,7 @@ export const TOOLS = [
   {
     name: "relay_todo_update",
     description:
-      "Set the workflow status of one exact Relay or Task. The rule: when the human has you act on an inbound titled Relay in this session, set in_progress before substantive work and done, with a note, when that work is genuinely finished. A Relay you only read, summarize, discuss, or draft about keeps its status. Tasks use relay_task_start for In Progress and relay_task_complete for Done. First read the item with relay_inbox_list (an opened item and a Todo listing both carry todoStatus and todoVersion) and pass its exact todoVersion; on a version conflict the error names the current version, so re-read, reconsider, and retry rather than overwrite blindly. When the human explicitly asks to cancel a Task, use status canceled; if the server says the Task is active, this operation stops its working state and retries cancellation. Never cancel merely to tidy Todo. Duplicate requires the exact original Relay id in the same personal Todo or Relay channel. When you actually assessed the item (checked replies, sessions, commits), pass note: one plain second-person line the person sees under the item, saying what they did and what remains, plus evidence pointers. The same status with a new note is a valid update. A status change without a note clears the previous note.",
+      "Set the workflow status of one exact Relay or Task. The rule: when the human has you act on an inbound titled Relay in this session, set in_progress before substantive work and done, with a note, when that work is genuinely finished. A Relay you only read, summarize, discuss, or draft about keeps its status. Tasks use relay_task_start for In Progress and relay_task_complete for Done. This includes follow-up coding requests and screenshots about a Relay already read: retain its exact ID and update its status before reporting completion. Use the human-requested completion milestone; do not add an unrequested deployment requirement. First read the item with relay_inbox_list (an opened item and a Todo listing both carry todoStatus and todoVersion) and pass its exact todoVersion; on a version conflict the error names the current version, so re-read, reconsider, and retry rather than overwrite blindly. When the human explicitly asks to cancel a Task, use status canceled; if the server says the Task is active, this operation stops its working state and retries cancellation. Never cancel merely to tidy Todo. Duplicate requires the exact original Relay id in the same personal Todo or Relay channel. When you actually assessed the item (checked replies, sessions, commits), pass note: one plain second-person line the person sees under the item, saying what they did and what remains, plus evidence pointers. The same status with a new note is a valid update. A status change without a note clears the previous note.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1147,7 +1151,7 @@ async function inboxForAgent(client, args = {}, sessionContext = DEFAULT_MCP_SES
       readStateChanged: false,
       readReceiptsSent: false,
       agentInstruction:
-        "Todo status is workflow state, separate from read state, Task ownership, schedules, and agent-run state. Reading this result changes nothing. Use relay_todo_update only for a human instruction or an actual workflow event.",
+        "Todo status is workflow state, separate from read state, Task ownership, schedules, and agent-run state. Reading this result changes nothing. Reconcile relevant items with this session’s authorized work at start, meaningful milestones and before completion; use relay_todo_update for work actually started or finished. Do not change unrelated items or start work merely because it is listed.",
     };
   }
   if (Object.hasOwn(args, "relayIds")) {

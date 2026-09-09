@@ -317,3 +317,15 @@ test("every instruction variant carries the Todo rule, and the status tool teach
   assert.doesNotMatch(update.description, /only when the human instructed it/);
   assert.match(byName.get("relay_inbox_list").description, /Opened items and Todo listings both carry todoStatus and todoVersion/);
 });
+
+test("the generated skill and public guide include the complete Todo workflow, not just MCP descriptions", async () => {
+  const { RELAY_TODO_WORKFLOW_GUIDE } = await import('../../shared/dist/agent-guide.js');
+  const skill = await readFile(new URL('../skill/relay/SKILL.md',import.meta.url),'utf8');
+  const guide = await readFile(new URL('../../../apps/web/public/llm_guide.md',import.meta.url),'utf8');
+  assert.ok(RELAY_TODO_WORKFLOW_GUIDE?.length > 0);
+  const start='<!-- BEGIN GENERATED RELAY TODO WORKFLOW -->\n';
+  const end='\n<!-- END GENERATED RELAY TODO WORKFLOW -->';
+  assert.equal(skill.split(start)[1]?.split(end)[0],RELAY_TODO_WORKFLOW_GUIDE);
+  assert.ok(guide.includes(RELAY_TODO_WORKFLOW_GUIDE));
+  assert.match(skill.split('---')[1],/act on a received Relay or continue that work/);
+});
