@@ -18,6 +18,7 @@ const cases = {
   relay_task_complete: [{ taskRelayId: 'relay_test', ...message }, 'taskCompleted'],
   relay_task_unclaim: [{ taskRelayId: 'relay_test', idempotencyKey: key }, 'taskUnclaimed'],
   relay_todo_update: [{ itemId: 'item_test', status: 'triage', expectedVersion: 1, idempotencyKey: key }, 'updateTodoStatus'],
+  relay_todo_visibility: [{ itemId: 'item_test', removed: true, expectedVersion: 1, idempotencyKey: key }, 'updateTodoVisibility'],
   relay_todo_reorder: [{ status: 'triage', itemIds: ['item_test'], idempotencyKey: key }, 'reorderTodo'],
   relay_agent_complete: [{ runRelayId: 'run_test', ...message }, 'agentRunComplete'],
   relay_send: [{ recipient: { contactId: 'con_test' }, kind: 'message', ...message }, 'sendRelay'],

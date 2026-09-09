@@ -283,13 +283,14 @@ test("browser-approved PKCE connection keeps secrets out of output and powers di
   const env = { RELAY_AGENT_AUTHORIZATION: pendingFile, RELAY_AGENT_CONFIG: configFile, RELAY_AGENT_LOCAL: path.join(root, "no-daemon.json"), RELAY_AGENT_ALLOW_LOOPBACK: "1" };
   const api = `http://127.0.0.1:${server.address().port}`;
 
-  const started = await runProtocol(["connect-start", api, "invite_token_01234567890123456789", "codex"], { env });
+  const started = await runProtocol(["connect-start", api, "david", "codex"], { env });
   assert.equal(started.code, 0, started.stderr);
   assert.equal(JSON.parse(started.stdout).approvalUrl.includes("approvalToken="), true);
   assert.doesNotMatch(started.stdout, /ivcs_|codeVerifier|codeChallenge/);
   assert.match(requests[0].body.codeChallenge, /^[A-Za-z0-9_-]{43}$/);
   assert.equal(requests[0].body.codeChallengeMethod, "S256");
   assert.equal(requests[0].body.consentVersion, 2);
+  assert.equal(requests[0].body.inviteToken, "david");
 
   const finished = await runProtocol(["connect-finish"], { env });
   assert.equal(finished.code, 0, finished.stderr);
@@ -579,6 +580,9 @@ test("CLI discovers the live catalog and executes mutations through the authenti
   const file = path.join(root, "agent-local.json");
   const writes = [];
   const client = {
+    todoVisibility: async id => ({itemId:id,removed:false,version:0}),
+    updateTodoVisibility: async (id,body) => { writes.push({id,body});return {ok:true,...body}; },
+    updateTodoStatus: async (id,body) => { writes.push({id,body});return {ok:true,status:body.status}; },
     identity: { userId: "usr_tools" }, accountDrift: () => ({ status: "same" }),
     token: "test-token", me: async () => ({ user: { id: "usr_tools", accountKind: "human", isDeveloper: true } }),
     groups: async () => ({ groups: [{ id: "grp_tools", name: "Tools" }] }),
@@ -614,6 +618,19 @@ test("CLI discovers the live catalog and executes mutations through the authenti
   const malformed = await runProtocol(["call", "relay_contact_update"], { env, input: "[]" });
   assert.equal(malformed.code, 1);
   assert.equal(writes.length, 3);
+  const visibilityRead = await runProtocol(["call", "relay_todo_visibility"], {env,input:JSON.stringify({itemId:"item_tools"})});
+  assert.equal(visibilityRead.code,0,visibilityRead.stderr);
+  assert.equal(JSON.parse(JSON.parse(visibilityRead.stdout).content[0].text).version,0);
+  for (const [name,args] of [
+    ["relay_todo_update",{itemId:"item_tools",status:"done",expectedVersion:1,idempotencyKey:"cli-done"}],
+    ["relay_todo_update",{itemId:"task_tools",status:"canceled",expectedVersion:1,idempotencyKey:"cli-cancel"}],
+    ["relay_todo_visibility",{itemId:"item_tools",removed:true,expectedVersion:0,idempotencyKey:"cli-remove"}],
+    ["relay_todo_visibility",{itemId:"item_tools",removed:false,expectedVersion:1,idempotencyKey:"cli-restore"}],
+  ]) {
+    const result=await runProtocol(["call",name],{env,input:JSON.stringify(args)});
+    assert.equal(result.code,0,result.stderr+result.stdout);
+  }
+  assert.equal(writes.length,7);
   client.updateContact = async () => { throw Object.assign(new Error("permission denied"), { status: 403 }); };
   const refused = await runProtocol(["call", "relay_contact_update"], { env, input: JSON.stringify({ contactId: "con_tools" }) });
   assert.equal(refused.code, 1);

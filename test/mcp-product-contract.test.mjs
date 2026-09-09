@@ -21,6 +21,7 @@ const EXPECTED_TOOLS = [
   "relay_task_complete",
   "relay_task_unclaim",
   "relay_todo_update",
+  "relay_todo_visibility",
   "relay_todo_reorder",
   "relay_agent_complete",
   "relay_send",
@@ -295,7 +296,7 @@ test("agent teaching uses the current Todo vocabulary everywhere", async () => {
     assert.doesNotMatch(await readFile(new URL(file, import.meta.url), "utf8"), /backlog/i, file);
   }
   for (const name of ["relay_todo_update", "relay_todo_reorder"]) {
-    assert.deepEqual(byName.get(name).inputSchema.properties.status.enum, ["triage", "in_progress", "done"]);
+    assert.deepEqual(byName.get(name).inputSchema.properties.status.enum, name === "relay_todo_update" ? ["triage", "in_progress", "done", "canceled"] : ["triage", "in_progress", "done"]);
   }
   assert.deepEqual(byName.get("relay_inbox_list").inputSchema.properties.todoStatuses.items.enum, ["triage", "in_progress", "done"]);
 });

@@ -309,7 +309,7 @@ async function publicRequest(apiUrl, requestPath, body) {
 async function connectStart(apiUrl, inviteToken, surface) {
   const cleanSurface = surface === "codex" ? "codex" : surface === "claude_code" ? "claude_code" : "";
   if (!cleanSurface) throw new Error("Relay connect-start requires surface claude_code or codex.");
-  if (!/^[A-Za-z0-9_-]{20,200}$/.test(String(inviteToken || ""))) throw new Error("Relay invite token is invalid.");
+  if (!/^[A-Za-z0-9_-]{1,200}$/.test(String(inviteToken || ""))) throw new Error("Relay invite token is invalid.");
   const verifier = randomBytes(48).toString("base64url");
   const codeChallenge = createHash("sha256").update(verifier).digest("base64url");
   const trustedApiUrl = relayApiOrigin(apiUrl);

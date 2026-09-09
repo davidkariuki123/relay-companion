@@ -16,6 +16,8 @@ function harness({ saved = {}, surfaces = "both", preference = null } = {}) {
   const ui = section("  function yourAgentHtml()", "  function blockedPeopleHtml()");
   const footer = section("  function relayHostActionsHtml(", "  // The row's click");
   const api = new Function("protoPref", "setProtoPref", "signupAccountKey", "payload", `
+    const sessionPickerState = null;
+    ${section("  function sessionPickerInlineHtml(", "  function wireSessionPickerRows(")}
     const hostKeyFor = app => app === "Codex" ? "codex" : "claude";
     ${section("  function esc(s)", "  function agentMentionSpans(")}
     const readerRow = () => null, relayById = () => null;
@@ -173,7 +175,7 @@ test("copy binds the exact prompt, reports success, and restores the approved bu
   const scope = {querySelectorAll:selector=>selector === '[data-pull-copy]' ? [button] : []};
   const timers = [];
   let copied = null;
-  const bind = new Function('navigator','setTimeout',`${section('  function wireHostOpen(scope)', '  // Retired with the one-verb letter')}; return wireHostOpen;`)({clipboard:{writeText:async text=>{copied=text;}}},fn=>timers.push(fn));
+  const bind = new Function('navigator','setTimeout',`const wireSessionPickerRows = () => {}; ${section('  function wireHostOpen(scope)', '  function defaultReplyAnchorMap(')}; return wireHostOpen;`)({clipboard:{writeText:async text=>{copied=text;}}},fn=>timers.push(fn));
   bind(scope);
   await handlers.get('click')({stopPropagation(){}});
   assert.equal(copied, button.getAttribute());

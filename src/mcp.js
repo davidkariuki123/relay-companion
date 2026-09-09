@@ -261,14 +261,14 @@ export const TOOLS = [
   {
     name: "relay_todo_update",
     description:
-      "Set the workflow status of one exact Relay or Task. The rule: when the human has you act on an inbound titled Relay in this session, set in_progress before substantive work and done, with a note, when that work is genuinely finished. A Relay you only read, summarize, discuss, or draft about keeps its status. Tasks use relay_task_start for In Progress and relay_task_complete for Done. First read the item with relay_inbox_list (an opened item and a Todo listing both carry todoStatus and todoVersion) and pass its exact todoVersion; on a version conflict the error names the current version, so re-read, reconsider, and retry rather than overwrite blindly. Duplicate requires the exact original Relay id in the same personal Todo or Relay channel. When you actually assessed the item (checked replies, sessions, commits), pass note: one plain second-person line the person sees under the item, saying what they did and what remains, plus evidence pointers. The same status with a new note is a valid update. A status change without a note clears the previous note.",
+      "Set the workflow status of one exact Relay or Task. The rule: when the human has you act on an inbound titled Relay in this session, set in_progress before substantive work and done, with a note, when that work is genuinely finished. A Relay you only read, summarize, discuss, or draft about keeps its status. Tasks use relay_task_start for In Progress and relay_task_complete for Done. First read the item with relay_inbox_list (an opened item and a Todo listing both carry todoStatus and todoVersion) and pass its exact todoVersion; on a version conflict the error names the current version, so re-read, reconsider, and retry rather than overwrite blindly. When the human explicitly asks to cancel a Task, use status canceled; if the server says the Task is active, this operation stops its working state and retries cancellation. Never cancel merely to tidy Todo. Duplicate requires the exact original Relay id in the same personal Todo or Relay channel. When you actually assessed the item (checked replies, sessions, commits), pass note: one plain second-person line the person sees under the item, saying what they did and what remains, plus evidence pointers. The same status with a new note is a valid update. A status change without a note clears the previous note.",
     inputSchema: {
       type: "object",
       properties: {
         itemId: { type: "string", description: "Exact relayId returned by Relay." },
         status: {
           type: "string",
-          enum: ["triage", "in_progress", "done"],
+          enum: ["triage", "in_progress", "done", "canceled"],
         },
         duplicateOfItemId: { type: "string", description: "Required only for Duplicate: the exact accessible original relayId." },
         expectedVersion: { type: "integer", minimum: 1, description: "Exact todoVersion from the latest Relay read." },
@@ -290,6 +290,20 @@ export const TOOLS = [
         },
       },
       required: ["itemId", "status", "expectedVersion", "idempotencyKey"],
+    },
+  },
+  {
+    name: "relay_todo_visibility",
+    description: "Read or change one item's personal Todo membership. Omit removed to read its current removed flag and visibility version, including items already removed from Todo. When the human asks to remove it, pass removed=true; for Undo or restore pass removed=false. Read the visibility version first and pass it as expectedVersion with a stable idempotencyKey. A conflict requires re-reading and reconsidering. This does not delete the Relay, mark it read, complete it, or cancel its Task; it stays in the chat. Use relay_todo_update for Mark as done or Cancel task.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        itemId: { type: "string" },
+        removed: { type: "boolean", description: "Omit to read; true removes from personal Todo, false restores it." },
+        expectedVersion: { type: "integer", minimum: 0, description: "Current visibility version, required when changing membership." },
+        idempotencyKey: { type: "string", minLength: 8, description: "Required when changing membership." },
+      },
+      required: ["itemId"],
     },
   },
   {
@@ -776,6 +790,7 @@ export const ORDINARY_RELAY_TOOL_NAMES = new Set([
   "relay_group_delete",
   "relay_inbox_list",
   "relay_todo_update",
+  "relay_todo_visibility",
   "relay_todo_reorder",
   // The sender-side history an agent needs to thread a follow-up. Without it,
   // ordinary messaging can only ever start new conversations.
@@ -1840,18 +1855,37 @@ async function handleAdmittedCall(client, name, args, {
       if (status === "duplicate" && !duplicateOfItemId) throw new Error("Duplicate requires duplicateOfItemId");
       if (status !== "duplicate" && duplicateOfItemId) throw new Error("duplicateOfItemId is valid only for Duplicate");
       const sourceBinding = sessionSourceBinding(sessionContext);
-      return text(await client.updateTodoStatus(itemId, {
+      const input = {
         status,
         ...(duplicateOfItemId ? { duplicateOfItemId } : {}),
         expectedVersion: args.expectedVersion,
         idempotencyKey,
         ...todoAssessmentInput(args),
-      }, {
+      };
+      const provenance = {
         clientName:"relay-local-mcp",
         sourceProvider:sourceBinding.sourceProvider,
         nativeSessionId:sourceBinding.sourceNativeId,
-      }));
+      };
+      try {
+        return text(await client.updateTodoStatus(itemId, input, provenance));
+      } catch (error) {
+        if (status !== "canceled" || error?.body?.error !== "task_active") throw error;
+        await client.taskStopped(itemId, { idempotencyKey });
+        return text(await client.updateTodoStatus(itemId, input, provenance));
+      }
     }
+    case "relay_todo_visibility": {
+      const itemId = String(args.itemId || "").trim();
+      if (!itemId) throw new Error("itemId is required");
+      if (args.removed === undefined) return text(await client.todoVisibility(itemId));
+      const idempotencyKey = String(args.idempotencyKey || "").trim();
+      if (typeof args.removed !== "boolean" || !Number.isInteger(args.expectedVersion) || args.expectedVersion < 0 || idempotencyKey.length < 8) {
+        throw new Error("removed, exact visibility expectedVersion, and an idempotencyKey of at least 8 characters are required");
+      }
+      return text(await client.updateTodoVisibility(itemId, { removed:args.removed, expectedVersion:args.expectedVersion, idempotencyKey }));
+    }
+
     case "relay_todo_reorder": {
       const status = String(args.status || "").trim();
       const itemIds = (Array.isArray(args.itemIds) ? args.itemIds : []).map((id) => String(id || "").trim()).filter(Boolean);

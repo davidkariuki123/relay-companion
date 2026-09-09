@@ -1579,7 +1579,7 @@ test("obsolete coordination protocol is absent and rejected before any API call"
   // state an agent sets on its own, so a human-initiated pull clears unread
   // and sends the read receipt — without it the sender sees "delivered"
   // forever). relay_acknowledge stays retired.
-  assert.equal(TOOLS.length, 33, "the full model catalog contains only current product tools");
+  assert.equal(TOOLS.length, 34, "the full model catalog contains only current product tools");
 
   const client = new Proxy({}, {
     get() { throw new Error("removed tool must not touch the API client"); },
@@ -2100,4 +2100,29 @@ test("a claimed relay reaches the inbox as ordinary correspondence, with no trac
   assert.doesNotMatch(serialized, /Someone with the link/);
   assert.doesNotMatch(serialized, /@guests\.sendrelays\.com/);
   assert.equal(claimed.items[0].sender.name, "Priya Nair");
+});
+
+test('Todo cancellation recovers only task_active and preserves the exact request', async () => {
+  assert.ok(TOOLS.find(t=>t.name==='relay_todo_update').inputSchema.properties.status.enum.includes('canceled'));
+  const calls=[];
+  const client={updateTodoStatus:async(id,input)=>{calls.push(['update',id,input]);if(calls.length===1)throw Object.assign(new Error('active'),{body:{error:'task_active'}});return {ok:true};},taskStopped:async(id,input)=>{calls.push(['stop',id,input]);return {ok:true};}};
+  const args={itemId:'task_1',status:'canceled',expectedVersion:3,idempotencyKey:'cancel-task-1'};
+  await handleCall(client,'relay_todo_update',args);
+  assert.deepEqual(calls.map(c=>c[0]),['update','stop','update']);
+  assert.strictEqual(calls[0][2],calls[2][2]);
+  for(const code of ['todo_version_conflict','forbidden']) {
+    calls.length=0;client.updateTodoStatus=async()=>{throw Object.assign(new Error(code),{body:{error:code}});};
+    await assert.rejects(handleCall(client,'relay_todo_update',args),new RegExp(code));assert.equal(calls.length,0);
+  }
+});
+
+test('personal Todo visibility reads, removes and restores without changing status or read state',async()=>{
+ const calls=[];
+ const client={todoVisibility:async id=>({itemId:id,removed:false,version:0}),updateTodoVisibility:async(id,input)=>{calls.push([id,input]);return {ok:true,...input,version:input.expectedVersion+1};}};
+ const read=JSON.parse((await handleCall(client,'relay_todo_visibility',{itemId:'relay_1'})).content[0].text);assert.equal(read.version,0);
+ for(const [removed,expectedVersion] of [[true,0],[false,1]])await handleCall(client,'relay_todo_visibility',{itemId:'relay_1',removed,expectedVersion,idempotencyKey:'visibility-'+expectedVersion});
+ assert.equal(calls.length,2);assert.equal(calls[0][1].removed,true);assert.equal(calls[1][1].removed,false);
+ await assert.rejects(handleCall(client,'relay_todo_visibility',{itemId:'relay_1',removed:true,idempotencyKey:'no-version'}),/expectedVersion/);
+ assert.equal(calls.length,2);
+ assert.ok(ORDINARY_RELAY_TOOL_NAMES.has('relay_todo_visibility'));
 });

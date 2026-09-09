@@ -8616,13 +8616,27 @@
       </div>
     </div>`;
   }
-  async function commitTodoStatus(itemId, status, expectedVersion, duplicateOfItemId = "") {
-    const result = await window.relay.todoStatusUpdate(itemId, {
+  async function commitTodoStatus(itemId, status, expectedVersion, duplicateOfItemId = "", cancelActiveTask = false) {
+    const account = accountCacheIdentity(payload.account);
+    const input = {
       status,
       expectedVersion,
       idempotencyKey:`todo-human:${itemId}:${crypto.randomUUID()}`,
       ...(duplicateOfItemId ? { duplicateOfItemId } : {}),
-    }).catch((error) => ({ ok:false, error:String(error?.message || error) }));
+    };
+    const update = () => window.relay.todoStatusUpdate(itemId, input)
+      .catch((error) => ({ ok:false, error:String(error?.message || error) }));
+    let result = await update();
+    if (account !== accountCacheIdentity(payload.account)) return false;
+    // Recover the dead-run case only after the server identifies an active Task.
+    // Preserve version checking: a conflict never authorizes stopping newer work.
+    if (!result?.ok && result?.code === "task_active" && status === "canceled" && cancelActiveTask) {
+      const stopped = await window.relay.taskStop(itemId)
+        .catch((error) => ({ ok:false, error:String(error?.message || error) }));
+      if (account !== accountCacheIdentity(payload.account)) return false;
+      result = stopped?.ok ? await update() : stopped;
+    }
+    if (account !== accountCacheIdentity(payload.account)) return false;
     if (!result?.ok) {
       const detail = result?.details || {};
       const row = readerRow(itemId);
@@ -8631,6 +8645,7 @@
         row.todoStatus = detail.currentStatus || row.todoStatus;
       }
       setRowNote(itemId, result?.error || "That status could not be changed.", "err");
+      if (activeView === "tasks") showTodoRemovalNotice(result?.error || "That status could not be changed.", { error:true });
       await loadTodo();
       if (activeView === "reader" && readerId === itemId) renderReader();
       return false;
@@ -8707,7 +8722,9 @@
     menu.className = "todo-row-menu";
     menu.setAttribute("role", "menu");
     menu.setAttribute("aria-label", "Todo item actions");
-    menu.innerHTML = `<button type="button" role="menuitem"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M5 8h6"/></svg>Remove from Todo</button><div class="note">The Relay stays in your chat.</div>`;
+    const isTask = item.kind === "task";
+    const canChangeStatus = !["done", "canceled", "duplicate"].includes(currentTodoStatus(item.todoStatus));
+    menu.innerHTML = `${canChangeStatus ? `<button type="button" role="menuitem" data-todo-menu-status>${isTask ? "Cancel task" : "Mark as done"}</button>` : ""}<button type="button" role="menuitem" data-todo-menu-remove><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M5 8h6"/></svg>Remove from Todo</button><div class="note">The Relay stays in your chat.</div>`;
     document.body.append(menu);
     todoActionsMenu = menu;
     todoActionsTrigger = trigger;
@@ -8717,9 +8734,22 @@
     const size = menu.getBoundingClientRect();
     menu.style.left = `${Math.round(Math.max(bounds.left + 6, Math.min(anchor.right - size.width, bounds.right - size.width - 6)))}px`;
     menu.style.top = `${Math.round(Math.max(bounds.top + 6, Math.min(anchor.bottom + 3, bounds.bottom - size.height - 6)))}px`;
-    const action = menu.querySelector("button");
-    action.focus({ preventScroll:true });
-    action.addEventListener("click", (event) => {
+    menu.querySelector("button").focus({ preventScroll:true });
+    menu.querySelector("[data-todo-menu-status]")?.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const id = String(item.relayId);
+      if (todoVisibilityPending.has(id)) return;
+      todoVisibilityPending.add(id);
+      closeTodoActions();
+      renderTasksBoard();
+      try {
+        await commitTodoStatus(id, isTask ? "canceled" : "done", Number(item.todoVersion), "", isTask);
+      } finally {
+        todoVisibilityPending.delete(id);
+        if (activeView === "tasks") renderTasksBoard();
+      }
+    });
+    menu.querySelector("[data-todo-menu-remove]").addEventListener("click", (event) => {
       event.stopPropagation();
       closeTodoActions();
       commitTodoVisibility(String(item.relayId), true, item.todoVisibilityVersion);
@@ -8792,6 +8822,13 @@
     if (!todoActionsMenu) return;
     if (event.key === "Escape") {
       event.preventDefault(); event.stopImmediatePropagation(); closeTodoActions({ focus:true });
+    } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+      event.preventDefault();
+      const buttons = [...todoActionsMenu.querySelectorAll("button:not(:disabled)")];
+      const index = buttons.indexOf(document.activeElement);
+      const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1
+        : (index + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length;
+      buttons[next]?.focus({ preventScroll:true });
     } else if (event.key === "Tab") closeTodoActions({ focus:true });
   }, true);
   scrollEl.addEventListener("scroll", () => closeTodoActions());
@@ -9579,7 +9616,9 @@
       const id = btn.getAttribute("data-sent-copy-link");
       btn.addEventListener("click", async () => {
         try {
-          await navigator.clipboard.writeText(btn.getAttribute("data-share-url") || "");
+          const url = btn.getAttribute("data-share-url") || "";
+          if (!url) throw new Error("Share link is unavailable.");
+          await navigator.clipboard.writeText(`I sent you a Relay. Paste this into Claude Code or Codex to read it, or just click the link:\n${url}`);
           setRowNote(id, "Link copied", "ok");
         } catch {
           setRowNote(id, "Copy the link from the message page instead.", "err");

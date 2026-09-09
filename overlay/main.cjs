@@ -9676,7 +9676,7 @@ ipcMain.handle("relay:copyOnboardingInviteLink", async (_event, expectedUserId) 
     const loopback = ["localhost", "127.0.0.1", "::1"].includes(parsed.hostname);
     if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && loopback)) throw new Error("Relay returned an unsafe invite link.");
     if (who && (networkOnboardingIdentity()?.key !== who.key || deviceToken() !== who.credential)) throw new Error("Relay account changed. Try again.");
-    clipboard.writeText(parsed.toString());
+    clipboard.writeText(invite.shareText || require("./invitation-share-copy.cjs")(parsed.toString()).shareText);
     return { ok: true, url: parsed.toString() };
   } catch (error) {
     return { ok: false, error: error?.message || String(error) };
