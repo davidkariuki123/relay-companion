@@ -15,6 +15,8 @@ import {
   packageRootForModule,
 } from "./mcp-broker-state.js";
 import { packagedNativeMcpBridgePath } from "./mcp-launcher.js";
+import updateActivity from "../bootstrap/update-activity.cjs";
+function protectTurn() { return updateActivity.beginCall({ configDir: configDir(), kind: "work" }); }
 
 const { atomicWriteJsonSync } = atomicJson;
 
@@ -352,6 +354,7 @@ class CodexAppServerConnection {
       const emittedAtMs = Date.now();
       const turnId = this.activeTurnId;
       this.closed = true;
+      this.releaseUpdateWork?.(); this.releaseUpdateWork = null;
       for (const pending of this.pending.values()) {
         clearTimeout(pending.timer);
         pending.reject(err);
@@ -403,6 +406,7 @@ class CodexAppServerConnection {
       this.pending.delete(message.id);
       clearTimeout(pending.timer);
       if (message.error) {
+        if (pending.method === "turn/start") { this.releaseUpdateWork?.(); this.releaseUpdateWork = null; }
         const err = new Error(message.error.message || `${pending.method} failed`);
         err.code = message.error.code;
         err.data = message.error.data;
@@ -440,10 +444,15 @@ class CodexAppServerConnection {
     const turnId = message.params?.turn?.id;
     if (message.method === "turn/started" && turnId) {
       this.activeTurnId = turnId;
+      this.protectedTurnId = turnId;
     }
     if (message.method === "turn/completed" && turnId) {
       this.lastCompletedTurnId = turnId;
-      if (this.activeTurnId === turnId) this.activeTurnId = null;
+      if (this.activeTurnId === turnId || this.protectedTurnId === turnId) {
+        this.activeTurnId = null;
+        this.protectedTurnId = null;
+        this.releaseUpdateWork?.(); this.releaseUpdateWork = null;
+      }
     }
     if (message.method === "error") {
       this.lastError = message.params?.error ?? message.params ?? null;
@@ -463,6 +472,7 @@ class CodexAppServerConnection {
 
   request(method, params, timeoutMs = CODEX_APP_SERVER_TIMEOUT_MS) {
     if (this.closed) return Promise.reject(new Error("codex app-server connection is closed"));
+    if (method === "turn/start" && !this.releaseUpdateWork) this.releaseUpdateWork = protectTurn();
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -473,6 +483,7 @@ class CodexAppServerConnection {
       try {
         this.send({ method, id, params });
       } catch (err) {
+        if (method === "turn/start") { this.releaseUpdateWork?.(); this.releaseUpdateWork = null; }
         clearTimeout(timer);
         this.pending.delete(id);
         reject(err);
@@ -804,7 +815,7 @@ function claudeSdkOptions({ host, cwd, hostSessionId, previousRef }) {
   };
 }
 
-function pumpClaudeQuery({ query, ref }) {
+function pumpClaudeQuery({ query, ref, releaseUpdateWork }) {
   const run = {
     ref,
     done: false,
@@ -826,6 +837,7 @@ function pumpClaudeQuery({ query, ref }) {
     } finally {
       run.done = true;
       claudeSdkRuns.delete(ref.runId);
+      releaseUpdateWork();
     }
   })();
   return run;
@@ -851,7 +863,10 @@ async function launchClaudeSdkTurn({ host, session, messages = [], previousRef =
   ensureDir(path.dirname(logPath));
   fs.appendFileSync(logPath, `[relay] starting Claude Agent SDK query\n`, { mode: 0o600 });
   const options = claudeSdkOptions({ host, cwd, hostSessionId, previousRef });
-  const query = sdk.query({ prompt, options });
+  const releaseUpdateWork = protectTurn();
+  let query;
+  try { query = sdk.query({ prompt, options }); }
+  catch (e) { releaseUpdateWork(); throw e; }
   const ref = {
     mode: "claude_agent_sdk",
     host: host.kind,
@@ -868,7 +883,7 @@ async function launchClaudeSdkTurn({ host, session, messages = [], previousRef =
     resumed: Boolean(previousRef?.hostSessionId),
     startedAt: now(),
   };
-  pumpClaudeQuery({ query, ref });
+  pumpClaudeQuery({ query, ref, releaseUpdateWork });
   await waitForClaudeSessionId(ref);
   return ref;
 }
@@ -1024,9 +1039,11 @@ export function createHostAdapters({
       };
     }
 
-    const out = fs.openSync(logPath, "a", 0o600);
+    const releaseUpdateWork = protectTurn();
+    let out;
     let child;
     try {
+      out = fs.openSync(logPath, "a", 0o600);
       child = spawnProcess(command, args, {
         cwd,
         detached: true,
@@ -1037,7 +1054,7 @@ export function createHostAdapters({
         },
         stdio: ["pipe", out, out],
       });
-    } finally {
+    } catch (e) { releaseUpdateWork(); throw e; } finally {
       // Close our copy of the dup'd log fd (leak → EMFILE otherwise).
       try {
         fs.closeSync(out);
@@ -1046,7 +1063,8 @@ export function createHostAdapters({
     // A CLI that exits before draining stdin (expired auth, bad flag, deleted
     // resume session) emits EPIPE on stdin; without a listener that async error
     // crashes the daemon. Absorb child + stdin errors, and pass a callback to end().
-    child.on?.("error", (e) => appendLogLine(logPath, `[relay] cli spawn error: ${e && e.message ? e.message : e}`));
+    child.on?.("exit", releaseUpdateWork);
+    child.on?.("error", (e) => { releaseUpdateWork(); appendLogLine(logPath, `[relay] cli spawn error: ${e && e.message ? e.message : e}`); });
     if (child.stdin) {
       child.stdin.on("error", (e) => appendLogLine(logPath, `[relay] cli stdin error: ${e && e.message ? e.message : e}`));
       child.stdin.end(prompt, () => {});

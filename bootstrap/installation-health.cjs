@@ -40,6 +40,8 @@ function collectInstallationHealth({ homeDir = os.homedir(), platform = process.
   const activeVersion = current?.active === true ? current.version : null;
   const inventory = componentInventory(commands || runtimeProcessCommands(platform), activeVersion);
   const supervisor = read(path.join(root, "recovery", "status.json"));
+  const monitor = require("./recovery-monitor.cjs").recoveryMonitor({ homeDir, now });
+  const monitorFailure = ({ missing: "recovery-checks-missing", overdue: "recovery-checks-overdue", "launcher-failed": "recovery-launcher-failed", fallback: "recovery-fallback" })[monitor.state] || null;
   const heartbeat = read(path.join(root, "recovery", "daemon.json"));
   const transport = (name) => {
     const report = read(path.join(root, "transport-health", `${name}.json`));
@@ -48,12 +50,14 @@ function collectInstallationHealth({ homeDir = os.homedir(), platform = process.
   return {
     installationId: installationId({ homeDir }), os: platform, osVersion: osVersion.slice(0, 80), arch,
     ...inventory, daemonResponsive: Boolean(heartbeat?.at <= now && now - heartbeat.at < 60_000),
-    recovery: supervisor ? { status: supervisor.status, version: supervisor.launcherVersion || null,
-      checkedAt: supervisor.checkedAt > 0 ? new Date(supervisor.checkedAt).toISOString() : null,
-      desiredVersion: supervisor.desiredVersion || null,
-      lastSuccessAt: supervisor.lastSuccessAt > 0 ? new Date(supervisor.lastSuccessAt).toISOString() : null,
+    recovery: supervisor || monitorFailure ? { status: supervisor?.status || monitor.state, version: supervisor?.launcherVersion || null,
+      checkedAt: supervisor?.checkedAt > 0 ? new Date(supervisor.checkedAt).toISOString() : null,
+      desiredVersion: supervisor?.desiredVersion || null,
+      lastSuccessAt: supervisor?.lastSuccessAt > 0 ? new Date(supervisor.lastSuccessAt).toISOString() : null,
+      monitor: { state: monitor.state, repairStatus: monitor.repairStatus,
+        lastRepairAt: monitor.lastRepairAt > 0 ? new Date(monitor.lastRepairAt).toISOString() : null },
       // Do not upload logs, URLs, usernames, or raw errors. These stay in doctor.
-      failureCode: supervisor.ok === false ? "recovery-failed" : null } : null,
+      failureCode: monitorFailure || (supervisor?.ok === false ? "recovery-failed" : null) } : null,
     transports: { mcpLastUsedAt: transport("mcp"), httpsLastUsedAt: transport("https") },
   };
 }

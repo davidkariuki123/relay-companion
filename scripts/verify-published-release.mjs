@@ -177,7 +177,9 @@ export function validateInstalledPackageShape(packageRoot, { version, distributi
       "trust.json",
     ];
     const recoveryBootstrap = [...legacyBootstrap, "installation-health.cjs", "recovery-install.cjs", "recovery-runner.cjs", "update-activity.cjs", "update-watchdog.cjs"].sort();
-    if (![legacyBootstrap, recoveryBootstrap].some(shape => JSON.stringify(bootstrapFiles) === JSON.stringify(shape))) {
+    const resilientBootstrap = [...recoveryBootstrap, "recovery-launcher.cjs"].sort();
+    const monitoredBootstrap = [...resilientBootstrap, "recovery-monitor.cjs"].sort();
+    if (![legacyBootstrap, recoveryBootstrap, resilientBootstrap, monitoredBootstrap].some(shape => JSON.stringify(bootstrapFiles) === JSON.stringify(shape))) {
       throw new Error("Thin installer bootstrap contents do not match the reviewed shape");
     }
     const manifest = JSON.parse(fs.readFileSync(path.join(packageRoot, "skill", "manifest.json"), "utf8"));

@@ -3,6 +3,8 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
+import updateActivity from "../bootstrap/update-activity.cjs";
+import { configDir } from "./config.js";
 import { CodexAppServerClient, defaultCodexCommand } from "./codex-app-server.js";
 import { codexRelayCompletion, runCodexAppServerOneShot, runCodexOneShot } from "./codex-one-shot.js";
 import { claudeNativeEventsToWorkEvents, readClaudeNativeTranscriptRows } from "./claude-native-work-feed.js";
@@ -1225,12 +1227,17 @@ export async function runSessionDirectoryOnce({
   const ordinary = operations.filter((operation) => !urgent.includes(operation));
   const claim = async (operation) => {
     if (activeOperations.has(operation.id)) return;
+    let releaseUpdateWork;
     try {
+      // Admission precedes claiming server work so an update never strands a
+      // claimed operation between the claim and starting its local worker.
+      releaseUpdateWork = updateActivity.beginCall({ configDir: configDir(), kind: "work" });
       const claim = await client.claimSessionOperation(operation.id);
-      if (claim.terminal) return;
+      if (claim.terminal) { releaseUpdateWork(); return; }
       activeOperations.add(operation.id);
-      void processClaim(client, claim, log);
+      void processClaim(client, claim, log).finally(releaseUpdateWork).catch(error => log(`session operation failed: ${error?.message || error}`));
     } catch (error) {
+      releaseUpdateWork?.();
       if (![409, 404].includes(error?.status)) log(`session operation claim failed for ${operation.id}: ${error?.message || error}`);
     }
   };

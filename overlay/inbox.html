@@ -16180,13 +16180,11 @@
         <h1 class="su-title">Grow your network.</h1>
         <p class="su-copy">Share your invite link with someone you’d like to Relay. When they join, you can message each other from your agents.</p>
         <div class="su-form"><button class="su-primary" id="suNetworkCopy" type="button"${state.busy ? " disabled" : ""}>${state.copied ? "Copy link again" : "Copy invite link"}</button>
-        <button class="su-primary" id="suNetworkContinue" type="button"${state.busy ? " disabled" : ""}>Continue to Relay</button>
-        <button class="su-link" id="suNetworkSkip" type="button"${state.busy ? " disabled" : ""}>Skip for now</button></div>
+        <button class="su-primary" id="suNetworkContinue" type="button"${state.busy ? " disabled" : ""}>Continue to Relay</button></div>
         ${state.copied ? '<p class="su-copy" role="status">Link copied. Paste it wherever you talk to them.</p>' : ""}
         ${state.error ? `<p class="su-error" role="alert">${esc(state.error)}</p>` : ""}</div>`;
       document.getElementById("suNetworkCopy")?.addEventListener("click", copyNetworkInvitation);
       document.getElementById("suNetworkContinue")?.addEventListener("click", finishNetworkInvitation);
-      document.getElementById("suNetworkSkip")?.addEventListener("click", finishNetworkInvitation);
       return;
     }
     if (signupStage === "first-relay") {

@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
-const { recover, discover, busyLease, compare, write, execute } = require("../bootstrap/recovery-runner.cjs");
+const { recover, discover, busyLease, busyDecision, BUSY_GRACE_MS, compare, write, execute } = require("../bootstrap/recovery-runner.cjs");
 const { exactRuntimeHealth } = require("../bootstrap/runtime-health.cjs");
 function fixture(t) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "relay-recovery-test-"));
@@ -36,6 +36,26 @@ test("live active-work lease prevents replacement while allowing release discove
   const result = await recover({ homeDir, env: {}, now: () => 1010, discoverImpl: async () => { checks++; return "1.2.3"; }, stage: () => assert.fail("must not stage") });
   assert.equal(checks, 1); assert.equal(result.status, "deferred-busy");
   assert.equal(busyLease({ busy: true, at: 1000 }, 100000), false);
+});
+
+test("a refreshed but uncorroborated busy bit cannot postpone recovery forever", t => {
+  const homeDir = fixture(t);
+  const heartbeat = now => ({pid:process.pid,busy:true,at:now,activityVersion:1});
+  assert.equal(busyDecision(heartbeat(1000),{homeDir,now:1000}),"deferred-busy");
+  assert.equal(busyDecision(heartbeat(1000+BUSY_GRACE_MS),{homeDir,now:1000+BUSY_GRACE_MS}),null);
+  // Restarts of the recovery runner do not restart the daemon's grace period.
+  assert.equal(busyDecision(heartbeat(2000+BUSY_GRACE_MS),{homeDir,now:2000+BUSY_GRACE_MS}),null);
+});
+
+test("genuine long work remains protected; old uninstrumented daemons are never forcibly interrupted", t => {
+  const homeDir=fixture(t), now=BUSY_GRACE_MS+1000;
+  busyDecision({pid:process.pid,busy:true,at:1000,activityVersion:1},{homeDir,now:1000});
+  const release=require('../bootstrap/update-activity.cjs').beginCall({homeDir,kind:'work'});
+  const heartbeat={pid:process.pid,busy:true,at:now,activityVersion:1};
+  assert.equal(busyDecision(heartbeat,{homeDir,now}),"deferred-active-work");
+  release();
+  assert.equal(busyDecision(heartbeat,{homeDir,now}),null);
+  assert.equal(busyDecision({...heartbeat,activityVersion:undefined},{homeDir,now}),"deferred-unverified-work");
 });
 test("discovery failure is recorded and does not alter the runtime pointer", async t => {
   const homeDir = fixture(t), pointer = path.join(homeDir, ".relay", "runtime", "current.json");

@@ -118,6 +118,11 @@ test("the MCP server adopts a same-user re-pair silently and refuses a changed o
     assert.match(text, /new@example\.com/);
     assert.match(text, /Restart this agent session/i);
     assert.match(text, /Nothing was sent or read/i);
+    // The fallback is named before the restart so agents try it instead of
+    // asking the human to restart, and the credential file stays off limits.
+    assert.match(text, /installed Relay skill helper/i);
+    assert.match(text, /request GET \/v1\/me/);
+    assert.match(text, /Never read or copy the credential file/);
     assert.equal(client.token, "dev_old_2", "the refusing client did NOT adopt the other person's token");
 
     // Signed out: same shape, different words.

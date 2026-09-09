@@ -13,6 +13,7 @@ const trust = require("./trust.json");
 const CHECK_MS = 5 * 60_000;
 const DEADLINE_MS = 25 * 60_000;
 const HEARTBEAT_MS = 60_000;
+const BUSY_GRACE_MS = 15 * 60_000;
 
 function read(file) { try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return null; } }
 function write(file, value) {
@@ -45,6 +46,22 @@ async function discover(channel, { fetchImpl = fetch, trustStore = trust } = {})
 }
 function busyLease(heartbeat, now = Date.now()) {
   return Boolean(heartbeat && heartbeat.busy === true && Number.isFinite(heartbeat.at) && now >= heartbeat.at && now - heartbeat.at < HEARTBEAT_MS);
+}
+function busyDecision(heartbeat, { homeDir = os.homedir(), now = Date.now() } = {}) {
+  const file = path.join(homeDir, ".relay", "recovery", "busy.json");
+  if (!busyLease(heartbeat, now)) { try { fs.rmSync(file, { force: true }); } catch {} return null; }
+  const previous = read(file);
+  const since = previous && previous.pid === heartbeat.pid && Number.isFinite(previous.since) && previous.since <= now ? previous.since : now;
+  write(file, { pid: heartbeat.pid, since });
+  if (now - since < BUSY_GRACE_MS) return "deferred-busy";
+  // Older daemons do not protect their owned turns with independent leases.
+  // Never mistake missing instrumentation for permission to interrupt them.
+  if (heartbeat.activityVersion !== 1) return "deferred-unverified-work";
+  const active = require("./update-activity.cjs").activeCalls({ homeDir });
+  if (active === null || active > 0) return "deferred-active-work";
+  // The canonical activation still closes admission and drains again, covering
+  // real work beginning after this observation. Only the summary bit is ignored.
+  return null;
 }
 function channelFrom(config, env = process.env) {
   const value = env.RELAY_UPDATE_CHANNEL || config?.updateChannel || "stable";
@@ -104,7 +121,7 @@ async function recover({ homeDir = os.homedir(), env = process.env, now = Date.n
   if (!config) return { ok: false, status: "configuration-unavailable" };
   const channel = channelFrom(config, env);
   const previous = read(stateFile);
-  const status = (value) => { write(stateFile, { schema: 1, channel, launcherVersion: require("../package.json").version, checkedAt: now(), lastSuccessAt: previous?.lastSuccessAt || null, ...value }); return value; };
+  const status = (value) => { write(stateFile, { schema: 1, channel, runId: env.RELAY_RECOVERY_RUN_ID || null, launcherVersion: require("../package.json").version, checkedAt: now(), lastSuccessAt: previous?.lastSuccessAt || null, ...value }); return value; };
   if (/^(0|false|off|no)$/i.test(String(env.RELAY_AUTO_UPDATE || "")) || read(path.join(root, "recovery", "policy.json"))?.autoUpdate === false) return status({ ok: true, status: "disabled" });
   let lock;
   try { lock = require("./relay-setup.cjs").acquireCanonicalLock(path.join(root, "recovery", "run.lock")); }
@@ -120,8 +137,10 @@ async function recover({ homeDir = os.homedir(), env = process.env, now = Date.n
     if (current?.active && current.version === desiredVersion && heartbeatFresh && heartbeat.version === desiredVersion && health(current, { platform }).ok) {
       return status({ ok: true, status: "current", desiredVersion, lastSuccessAt: previous?.lastSuccessAt || now() });
     }
-    if (busyLease(heartbeat, now())) return status({ ok: true, status: "deferred-busy", desiredVersion });
-    if (previous?.desiredVersion === desiredVersion && previous.retryAt > now()) return { ...previous, status: "backoff" };
+    const busy = busyDecision(heartbeat, { homeDir, now: now() });
+    if (busy) return status({ ok: true, status: busy, desiredVersion });
+    if (previous?.desiredVersion === desiredVersion && previous.retryAt > now()) return status({ ok: false, status: "backoff", desiredVersion,
+      failures: previous.failures, retryAt: previous.retryAt, lastError: previous.lastError });
     status({ ok: true, status: "downloading", desiredVersion });
     const downloads = path.join(root, "recovery", "downloads");
     fs.mkdirSync(downloads, { recursive: true, mode: 0o700 });
@@ -132,7 +151,8 @@ async function recover({ homeDir = os.homedir(), env = process.env, now = Date.n
     if (!latestConfig) throw new Error("configuration-unavailable");
     if (channelFrom(latestConfig, env) !== channel) return status({ ok: true, status: "channel-changed", desiredVersion });
     if (read(path.join(root, "recovery", "policy.json"))?.autoUpdate === false) return status({ ok: true, status: "disabled", desiredVersion });
-    if (busyLease(read(path.join(root, "recovery", "daemon.json")), now())) return status({ ok: true, status: "deferred-busy", desiredVersion });
+    const stillBusy = busyDecision(read(path.join(root, "recovery", "daemon.json")), { homeDir, now: now() });
+    if (stillBusy) return status({ ok: true, status: stillBusy, desiredVersion });
     const entry = path.join(candidate.packageRoot, "src", "recovery-entry.js");
     if (!fs.existsSync(entry)) throw new Error("candidate-missing-recovery-engine");
     status({ ok: true, status: "activating", desiredVersion });
@@ -161,5 +181,12 @@ async function recover({ homeDir = os.homedir(), env = process.env, now = Date.n
   }
 }
 
-module.exports = { recover, discover, busyLease, channelFrom, compare, execute, read, write, CHECK_MS, DEADLINE_MS };
-if (require.main === module) recover().then((result) => { console.log(JSON.stringify(result)); process.exitCode = result.ok ? 0 : 1; }).catch((error) => { console.error(error.message); process.exitCode = 1; });
+module.exports = { recover, discover, busyLease, busyDecision, BUSY_GRACE_MS, channelFrom, compare, execute, read, write, CHECK_MS, DEADLINE_MS };
+if (require.main === module) {
+  if (process.argv.includes("--self-check")) {
+    require("./release-signature.cjs").releaseKeys(trust);
+    releasePlatform();
+    if (typeof require("./runtime-health.cjs").exactRuntimeHealth !== "function") throw Error("recovery-health-unavailable");
+    console.log("recovery-ready");
+  } else recover().then((result) => { console.log(JSON.stringify(result)); process.exitCode = result.ok ? 0 : 1; }).catch((error) => { console.error(error.message); process.exitCode = 1; });
+}

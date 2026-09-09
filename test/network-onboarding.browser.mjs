@@ -44,8 +44,8 @@ try {
   await page.locator('#suNetworkContinue').click();
   await page.getByText('Relay couldn’t save your progress. Check your connection and try again.').waitFor();
   await page.evaluate(() => {window.fixtureFail = false;});
-  await page.locator('#suNetworkSkip').click();
-  await page.locator('#suNetworkSkip').waitFor({state:'hidden'});
+  await page.locator('#suNetworkContinue').click();
+  await page.locator('#suNetworkContinue').waitFor({state:'hidden'});
   assert.deepEqual(await page.evaluate(() => window.fixtureWrites), [['copy','a'],['complete','a'],['complete','a']]);
   // A second account must get its own invitation step, without the copied/error state.
   await page.evaluate(() => {
@@ -66,5 +66,5 @@ try {
   await page.locator('#suNetworkContinue:not([disabled])').waitFor();
   assert.equal(await page.locator('#suNetworkCopy').isVisible(), true, 'late completion never dismisses another account');
   assert.deepEqual(errors, []);
-  console.log('Network onboarding renderer: copy, retry, skip and account-switch checks passed.');
+  console.log('Network onboarding renderer: copy, retry, continue and account-switch checks passed.');
 } finally {await browser.close();}

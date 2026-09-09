@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { beginCall, drainCalls } from "../bootstrap/update-activity.cjs";
+import { beginCall, drainCalls, activeCalls } from "../bootstrap/update-activity.cjs";
 
 test("activation drains admitted calls and blocks new calls until the barrier is released", async t => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-drain-"));
@@ -25,4 +25,15 @@ test("a long call defers activation without being killed or replayed", async t =
   await assert.rejects(drainCalls({ homeDir, attempts: 1, sleep: async () => {} }), /still active/);
   beginCall({ homeDir })();
   release();
+});
+
+test("an unreadable work owner cannot be treated as proof of idle", async t => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-drain-"));
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  beginCall({ homeDir })();
+  const file = path.join(homeDir, ".relay", "recovery", "activity", "call-bad.json");
+  fs.writeFileSync(file, JSON.stringify({ pid: "unknown" }));
+  assert.equal(activeCalls({ homeDir }), null);
+  await assert.rejects(drainCalls({ homeDir, attempts: 1, sleep: async () => {} }), /still active/);
+  assert.equal(fs.existsSync(file), true);
 });

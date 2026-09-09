@@ -442,14 +442,38 @@ test("the helper retains direct auth and falls back after Companion stops withou
     const refused = await runProtocol(["groups"], { env });
     assert.equal(refused.code, 1);
     assert.match(refused.stderr, /different Relay account/);
-    fs.writeFileSync(config, JSON.stringify({ ...after, apiUrl: "https://api.sendrelays.com" }));
-    assert.match((await runProtocol(["groups"], { env })).stderr, /different Relay account or environment/);
+    // Same person, Companion on another Relay environment: scoped requests fall
+    // through to the approved origin after the direct account check, and the
+    // helper names both origins so the agent can say what differs. Companion-only
+    // commands still refuse with the same explanation.
     fs.writeFileSync(config, JSON.stringify(after));
+    const otherEnvironment = { ...JSON.parse(staleDescriptor), apiUrl: "http://127.0.0.1:1" };
+    fs.writeFileSync(descriptor, JSON.stringify(otherEnvironment), { mode: 0o600 });
+    const directBefore = requests.filter((url) => url === "/v1/contact-groups").length;
+    const crossEnvironment = await runProtocol(["groups"], { env });
+    assert.equal(crossEnvironment.code, 0, crossEnvironment.stderr);
+    assert.equal(JSON.parse(crossEnvironment.stdout).groups[0].id, "grp_direct");
+    assert.match(crossEnvironment.stderr, /signed in to http:\/\/127\.0\.0\.1:1 while this connection was approved on/);
+    assert.ok(requests.includes("/v1/me"), "the direct account is verified before reading across environments");
+    assert.equal(requests.filter((url) => url === "/v1/contact-groups").length, directBefore + 1);
+    assert.doesNotMatch(crossEnvironment.stdout + crossEnvironment.stderr, /web_test/);
+    const toolsRefused = await runProtocol(["tools"], { env });
+    assert.equal(toolsRefused.code, 1);
+    assert.match(toolsRefused.stderr, /signed in to http:\/\/127\.0\.0\.1:1 .*requires Companion on the approved account and environment/s);
+    assert.match((await runProtocol(["destinations", "claude"], { env })).stderr, /Local agent targeting requires Companion on the approved account and environment/);
+    // A different person on another environment is still an identity conflict.
+    fs.writeFileSync(descriptor, JSON.stringify({ ...otherEnvironment, accountId: "usr_other" }), { mode: 0o600 });
+    const otherPerson = await runProtocol(["groups"], { env });
+    assert.equal(otherPerson.code, 1);
+    assert.match(otherPerson.stderr, /different Relay account. Nothing was sent or read/);
+    fs.writeFileSync(descriptor, staleDescriptor, { mode: 0o600 });
+    fs.writeFileSync(config, JSON.stringify(after));
+    const directAfterCrossEnvironment = requests.length;
     client.groups = async () => { throw Object.assign(new Error("Permission refused"), { status: 403, code: "forbidden" }); };
     assert.match((await runProtocol(["groups"], { env })).stderr, /Permission refused/);
     client.groups = async () => { throw new Error("Relay's account changed"); };
     assert.match((await runProtocol(["groups"], { env })).stderr, /account changed/);
-    assert.equal(requests.length, 0, "refusals never fall back");
+    assert.equal(requests.length, directAfterCrossEnvironment, "refusals never fall back");
     client.groups = async () => { throw Object.assign(new Error("Device token expired"), { status: 401 }); };
     const authFallback = await runProtocol(["groups"], { env });
     assert.equal(authFallback.code, 0, authFallback.stderr);

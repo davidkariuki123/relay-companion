@@ -238,6 +238,28 @@ async function authenticatedRequest(apiUrl, accessToken, method, requestPath, bo
   return payload;
 }
 
+/**
+ * Classify the local Companion descriptor against this connection's approved
+ * account and origin. A different person is an identity conflict and is never
+ * bypassed. The same person on another Relay environment leaves Companion
+ * unusable for this credential; scoped HTTPS may still answer after the direct
+ * account check, and every message names both origins so the agent can report
+ * exactly what differs instead of asking the human to restart.
+ */
+function companionAvailability(config, local) {
+  if (!local || (config.consentVersion ?? 1) < 2) return { status: "absent" };
+  if (local.accountId !== config.account?.relayUserId) {
+    return { status: "other_account", message: "Companion is connected to a different Relay account. Nothing was sent or read." };
+  }
+  if (local.apiUrl !== config.apiUrl) {
+    return {
+      status: "other_environment",
+      message: `Companion is signed in to ${local.apiUrl} while this connection was approved on ${config.apiUrl}. Companion-only commands are unavailable until they match; scoped requests read from ${config.apiUrl} directly.`,
+    };
+  }
+  return { status: "ready" };
+}
+
 async function request(method, requestPath, body) {
   const verb = String(method || "GET").toUpperCase();
   const cleanPath = String(requestPath || "");
@@ -246,8 +268,17 @@ async function request(method, requestPath, body) {
   }
   const config = readConfig();
   const local = readLocalDescriptor();
-  if (local && (config.consentVersion ?? 1) >= 2) {
-    if (local.accountId !== config.account?.relayUserId || local.apiUrl !== config.apiUrl) throw new Error("Companion is connected to a different Relay account or environment. Nothing was sent or read.");
+  const companion = companionAvailability(config, local);
+  if (companion.status === "other_account") throw new Error(companion.message);
+  if (companion.status === "other_environment") {
+    // Same person, different Relay environment (for example Companion on the
+    // staging channel while this browser approval was granted on dev). The
+    // approved credential still names one exact origin, and the direct path
+    // below re-verifies the account against it, so this is a Companion outage
+    // for this connection rather than an identity conflict. Say which origin
+    // answers so the human is never silently reading a different environment.
+    process.stderr.write(`${companion.message}\n`);
+  } else if (companion.status === "ready") {
     // Retain the browser-approved credential independently of Companion. Record
     // the local attempt before dispatch so a lost response still requires the
     // encryption/account checks on a later direct retry.
@@ -267,7 +298,7 @@ async function request(method, requestPath, body) {
     throw new Error("This connection has no direct Relay credential. Reopen Relay Companion, or renew browser approval to enable direct fallback.");
   }
   if (config.expiresAt && Date.parse(config.expiresAt) <= Date.now()) throw new Error("Relay's direct authorization expired. Renew browser approval to use direct fallback.");
-  if (config.local) {
+  if (config.local || companion.status === "other_environment") {
     const me = await authenticatedRequest(config.apiUrl, config.accessToken, "GET", "/v1/me");
     if (!config.account?.relayUserId || me.user?.id !== config.account.relayUserId) throw new Error("Direct Relay is connected to a different account. Nothing was sent or read.");
     const encryption = await authenticatedRequest(config.apiUrl, config.accessToken, "GET", "/v1/e2ee/status");
@@ -553,7 +584,8 @@ async function main(argv = process.argv.slice(2)) {
     const config = readConfig();
     const local = readLocalDescriptor();
     if ((config.consentVersion ?? 1) < 2 || !local) throw new Error("The complete tool catalog requires Relay Companion. Open or update Companion and retry; this command does not use direct HTTPS fallback.");
-    if (local.accountId !== config.account?.relayUserId || local.apiUrl !== config.apiUrl) throw new Error("Companion is connected to a different Relay account or environment. Nothing was sent or read.");
+    const companion = companionAvailability(config, local);
+    if (companion.status !== "ready") throw new Error(`${companion.message} This command requires Companion on the approved account and environment.`);
     if (command === "call" && !rest[0]) throw new Error("call requires an exact tool name from tools; pass its JSON arguments on stdin.");
     if (local.toolCatalogVersion !== 1) throw new Error("This Companion does not expose the complete tool catalog yet. Update and reopen Relay Companion, then retry the same command.");
     const target = currentSkillTarget(process.env);
@@ -570,7 +602,9 @@ async function main(argv = process.argv.slice(2)) {
   if (command === "destinations" || command === "deliver" || command === "outbox") {
     const config = readConfig();
     const local = readLocalDescriptor();
-    if ((config.consentVersion ?? 1) < 2 || !local || local.accountId !== config.account?.relayUserId || local.apiUrl !== config.apiUrl) throw new Error("Local agent targeting requires Companion connected to this Relay account.");
+    const companion = companionAvailability(config, local);
+    if (companion.status === "absent") throw new Error("Local agent targeting requires Companion connected to this Relay account.");
+    if (companion.status !== "ready") throw new Error(`${companion.message} Local agent targeting requires Companion on the approved account and environment.`);
     const retry = command === "outbox" && rest[0] === "retry";
     if (retry && !rest[1]) throw new Error("outbox retry requires the original idempotency key.");
     const body = command === "deliver" ? parseJson(await readStdin()) : retry ? { idempotencyKey: rest[1] } : undefined;

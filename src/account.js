@@ -147,7 +147,9 @@ export function accountDriftMessage(status, { bound = {}, current = {} } = {}) {
   const now = current.email || current.userId || "a different account";
   return (
     `Relay's account on this computer changed: this agent session's Relay tools are bound to ${was}, ` +
-    `but Relay is now signed in as ${now}. Restart this agent session (Claude Code / Codex) so its ` +
-    "Relay tools use the current account. Nothing was sent or read."
+    `but Relay is now signed in as ${now}. Nothing was sent or read. Use the installed Relay skill helper ` +
+    "(relay-protocol.mjs) now: it follows the current account, so run its status and request GET /v1/me, " +
+    "then continue through it when the account matches. Otherwise restart this agent session " +
+    "(Claude Code / Codex) so its Relay tools use the current account. Never read or copy the credential file."
   );
 }
