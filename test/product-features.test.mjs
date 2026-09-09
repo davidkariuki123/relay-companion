@@ -21,7 +21,7 @@ const ORDINARY_SURFACES = {
 
 test("developer capabilities require both the server-owned role and a non-production environment", () => {
   assert.deepEqual(productFeatures({ env: { NODE_ENV: "development" }, user: ORDINARY_USER }), {
-    environment: "local", developer: false, googleContacts: true, requests: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
+    environment: "local", developer: false, googleContacts: false, requests: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { NODE_ENV: "development" }, user: DEVELOPER }), {
     environment: "local", developer: true, googleContacts: true, requests: true, todo: true, cowork: false, ...DEVELOPER_SURFACES,
@@ -40,8 +40,9 @@ test("developer capabilities require both the server-owned role and a non-produc
   });
 });
 
-test("Google Contacts sync follows the deployment rather than the account role", () => {
-  assert.equal(productFeatures({ env: { RELAY_UPDATE_CHANNEL: "dev" }, user: ORDINARY_USER }).googleContacts, true);
+test("Google Contacts sync requires both the Dev deployment and developer account role", () => {
+  assert.equal(productFeatures({ env: { RELAY_UPDATE_CHANNEL: "dev" }, user: ORDINARY_USER }).googleContacts, false);
+  assert.equal(productFeatures({ env: { RELAY_UPDATE_CHANNEL: "dev" }, user: DEVELOPER }).googleContacts, true);
   assert.equal(productFeatures({ env: { RELAY_UPDATE_CHANNEL: "staging" }, user: DEVELOPER }).googleContacts, false);
   assert.equal(productFeatures({ env: { RELAY_UPDATE_CHANNEL: "stable" }, user: DEVELOPER }).googleContacts, false);
 });

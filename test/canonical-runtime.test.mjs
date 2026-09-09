@@ -135,6 +135,24 @@ async function runPosix({ homeDir, version = "0.1.241", ...overrides } = {}) {
   });
 }
 
+test("a verified recovery transaction can replace an unrepairable journal without losing its evidence", async t => {
+  const homeDir = fixture(), platform = process.platform;
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  const layout = canonicalRuntimeLayout({ homeDir, platform });
+  fs.mkdirSync(path.dirname(layout.pointerPath), { recursive: true });
+  const journal = { schema: 1, active: false, state: "recovery-required", previous: null, candidate: { version: "0.1.490" }, failure: { reason: "broken-old-code" } };
+  fs.writeFileSync(layout.pointerPath, JSON.stringify(journal));
+  const result = await repairCanonicalRuntime({ homeDir, platform, version: "0.1.501", archiveRecoveryJournal: true,
+    node: process.execPath,
+    installCandidate: ({ stagingRoot }) => { seedCandidate(path.join(stagingRoot, "node_modules", "relay-companion"), "0.1.501", { platform }); return { ok: true }; },
+    postCommitActivate: async () => ({ ok: true }),
+  });
+  assert.equal(result.ok, true, result.reason);
+  assert.equal(readCanonicalRuntime({ homeDir, platform }).version, "0.1.501");
+  const archive = path.join(layout.root, "recovery-history");
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(archive, fs.readdirSync(archive)[0]))), journal);
+});
+
 posixFsTest("POSIX success verifies staging, atomically commits an immutable release, then activates", async () => {
   const homeDir = fixture();
   const legacy = path.join(homeDir, ".hermes", "node", "lib", "node_modules", "relay-companion");

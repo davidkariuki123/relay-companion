@@ -8,9 +8,10 @@ import { createRequire } from "node:module";
 import {
   UPDATE_WORKER_LABEL,
   UPDATE_WORKER_LABEL_PREFIX,
-  activateCanonicalRuntime,
+  activateCanonicalRuntime as activateWithDrain,
   exactRuntimeHealth,
   isElectronExecutable,
+  launchHiddenWindowsProcess,
   listUpdateWorkerJobs,
   resolveUpdateWorkerNode,
   reconcileUpdateWorkerJobs,
@@ -31,6 +32,9 @@ import {
 } from "../src/canonical-runtime.js";
 
 const { installedServiceProcessRows } = createRequire(import.meta.url)("../bootstrap/runtime-health.cjs");
+// Service registration fixtures use foreign OS paths; activity admission is
+// exercised separately with real temporary homes in update-activity.test.mjs.
+const activateCanonicalRuntime = (target, options) => activateWithDrain(target, { ...options, drain: async () => () => {} });
 
 // These cases create a POSIX runtime tree on the real host filesystem. They
 // remain active on macOS/Linux; Windows behavior is covered by injected-path
@@ -501,6 +505,37 @@ test("detached launch uses a one-shot LaunchAgent on macOS and WMI handoff on Wi
   const script = Buffer.from(powershell[1].at(-1), "base64").toString("utf16le");
   assert.match(script, /Invoke-CimMethod/);
   assert.match(script, /--worker/);
+  // The WMI-created worker must not show a console window (field-observed as a
+  // black node.exe window on every Windows machine during each update).
+  assert.match(script, /Win32_ProcessStartup/);
+  assert.match(script, /ShowWindow=\[uint16\]0/);
+  assert.match(script, /ProcessStartupInformation=\$s/);
+});
+
+test("launchHiddenWindowsProcess creates the process through WMI with a hidden console and returns its pid", () => {
+  const captured = [];
+  const run = (command, args) => {
+    captured.push([command, args]);
+    return { status: 0, stdout: "4242\r\n", stderr: "" };
+  };
+  const launched = launchHiddenWindowsProcess(["C:\\node.exe", "C:\\pkg\\bootstrap\\update-watchdog.cjs", "--worker", "it's"], {
+    run, env: { SystemRoot: "C:\\Windows" },
+  });
+  assert.deepEqual(launched, { ok: true, pid: 4242, detail: "" });
+  assert.equal(captured.length, 1);
+  assert.equal(captured[0][0], "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
+  assert.deepEqual(captured[0][1].slice(0, 5), ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand"]);
+  const script = Buffer.from(captured[0][1].at(-1), "base64").toString("utf16le");
+  assert.match(script, /ShowWindow=\[uint16\]0/);
+  assert.match(script, /ProcessStartupInformation=\$s/);
+  // Command-line quoting and PowerShell single-quote escaping both survive.
+  assert.match(script, /CommandLine='"C:\\node\.exe" "C:\\pkg\\bootstrap\\update-watchdog\.cjs" "--worker" "it''s"'/);
+  assert.doesNotMatch(script, /CREATE_NO_WINDOW|134217728/);
+
+  const failed = launchHiddenWindowsProcess(["C:\\node.exe"], {
+    run: () => ({ status: 1, stdout: "", stderr: "Access denied" }), env: {},
+  });
+  assert.deepEqual(failed, { ok: false, pid: null, detail: "Access denied" });
 });
 
 // The pill launches `relay update` with ELECTRON_RUN_AS_NODE=1, which changes

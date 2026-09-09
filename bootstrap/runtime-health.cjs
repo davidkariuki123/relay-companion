@@ -23,7 +23,7 @@ function defaultRun(command, args, options = {}) {
 
 function runtimeProcessCommands(platform, run = defaultRun, userId = typeof process.getuid === "function" ? process.getuid() : 0) {
   if (platform === "win32") {
-    const script = "Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | ForEach-Object { $_.CommandLine }";
+    const script = "$relaySid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { $_.CommandLine -match 'node_modules[\\\\/]relay-companion[\\\\/]' } | ForEach-Object { $relayOwner = Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid -ErrorAction SilentlyContinue; if ($relayOwner.Sid -eq $relaySid) { $_.CommandLine } }";
     const result = run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]);
     return commandOk(result) ? String(result.stdout || "").split(/\r?\n/) : [];
   }
@@ -50,11 +50,15 @@ function exactRuntimeHealth(target, {
   const pillNeedle = normalize(api.join(target.packageRoot, "overlay", "main.cjs"));
   const relayDaemons = lines.filter((line) => SERVICE_TREE_RE.test(line) && /(?:^|[\\/])relay\.js(?:"|'|\s).*\bdaemon\b/i.test(line));
   const relayPills = lines.filter((line) => SERVICE_TREE_RE.test(line) && /(?:^|[\\/])overlay[\\/]main\.cjs(?:"|'|\s|$)/i.test(line));
-  const daemon = relayDaemons.some((line) => normalize(line).includes(daemonNeedle));
-  const pill = relayPills.some((line) => normalize(line).includes(pillNeedle));
+  const daemonCount = relayDaemons.filter((line) => normalize(line).includes(daemonNeedle)).length;
+  const pillCount = relayPills.filter((line) => normalize(line).includes(pillNeedle)).length;
+  const daemon = daemonCount === 1;
+  const pill = pillCount === 1;
+  const brokers = lines.filter((line) => SERVICE_TREE_RE.test(line) && /[\\/]mcp-broker-entry\.js(?:"|'|\s|$)/i.test(line));
+  const oldBroker = brokers.some((line) => !normalize(line).includes(normalize(target.packageRoot)));
   const oldDaemon = relayDaemons.some((line) => !normalize(line).includes(daemonNeedle));
   const oldPill = relayPills.some((line) => !normalize(line).includes(pillNeedle));
-  return { ok: daemon && pill && !oldDaemon && !oldPill, daemon, pill, oldDaemon, oldPill, packageRoot: target.packageRoot };
+  return { ok: daemon && pill && !oldDaemon && !oldPill && !oldBroker, daemon, pill, daemonCount, pillCount, brokerCount: brokers.length, oldBroker, oldDaemon, oldPill, packageRoot: target.packageRoot };
 }
 
 function linuxPillStatusPath({ homeDir = os.homedir(), env = process.env } = {}) {
@@ -112,7 +116,8 @@ function installedServiceProcessRows(target, {
     if (!SERVICE_TREE_RE.test(command)) continue;
     const isDaemon = /(?:^|[\\/])relay\.js(?:"|'|\s).*\bdaemon\b/i.test(command);
     const isPill = /(?:^|[\\/])overlay[\\/]main\.cjs(?:"|'|\s|$)/i.test(command);
-    if (!isDaemon && !isPill) continue;
+    const isBroker = /[\\/]mcp-broker-entry\.js(?:"|'|\s|$)/i.test(command);
+    if (!isDaemon && !isPill && !isBroker) continue;
     if (!includeTarget && targetNeedle && command.replaceAll("\\", "/").includes(targetNeedle)) continue;
     if (!Number.isInteger(pid) || pid <= 0 || pid === processId) continue;
     rows.push({ pid, command });

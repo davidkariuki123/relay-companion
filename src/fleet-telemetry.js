@@ -8,6 +8,7 @@ import { readCanonicalRuntimeState } from "./canonical-runtime.js";
 
 const require = createRequire(import.meta.url);
 const relaySkill = require("../bootstrap/relay-skill.cjs");
+const { collectInstallationHealth } = require("../bootstrap/installation-health.cjs");
 
 export const COMPANION_TELEMETRY_SCHEMA = 1;
 export const COMPANION_TELEMETRY_HEADER = "x-relay-companion-telemetry";
@@ -93,6 +94,7 @@ export function collectCompanionFleetTelemetry({
   channel = updateChannel(),
   updateStatePath = path.join(storeDir(), "update-state.json"),
   readFileSync = fs.readFileSync,
+  collectHealth = collectInstallationHealth,
 } = {}) {
   const canonical = readCanonicalRuntimeState({ homeDir, platform, readFileSync });
   const updateState = readObject(updateStatePath, readFileSync);
@@ -114,11 +116,16 @@ export function collectCompanionFleetTelemetry({
     stateChangedAt: isoFromMillis(stateMillis),
     failures: failureTelemetry(updateState),
     skills: managedSkillTelemetry({ homeDir, env }),
+    installation: collectHealth({ homeDir, platform }),
   };
 }
 
 export function encodeCompanionFleetTelemetry(value) {
-  return Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
+  const encode = (report) => Buffer.from(JSON.stringify(report), "utf8").toString("base64url");
+  let header = encode(value);
+  // Never lose the entire report at the API's 4096-byte header boundary.
+  if (header.length > 4096) header = encode({ ...value, installation: undefined });
+  return header.length <= 4096 ? header : "";
 }
 
 let cachedAt = 0;

@@ -33,13 +33,13 @@ test('stale, missing, self, unlinked and cross-account identities never block an
   assert.deepEqual(h.writes,[]);
 });
 
-test('person controls are sibling buttons, with a modal and a visible recovery path', () => {
+test('person controls are sibling buttons, with an anchored popover and a visible recovery path', () => {
   const rows = html.slice(html.indexOf('function renderContacts()'), html.indexOf('const peopleDialog ='));
   assert.match(rows, /<div class="cv-person">/);
-  assert.match(rows, /<button class="cv-person-more"[^>]*aria-haspopup="dialog"[^>]*data-contact-block=/);
+  assert.match(rows, /<button class="cv-person-more"[^>]*aria-haspopup="menu"[^>]*data-message-more/);
   assert.doesNotMatch(rows, /<span class="cv-edit" role="button"/);
   assert.match(html, /id="cvBlockedPeople">Blocked people/);
-  assert.match(html, /peopleDialog\.showModal\(\)/);
+  assert.match(html, /peopleDialog\.showPopover\(\)/);
   assert.match(html, /peopleDialogAccount !== signupAccountKey\(\)\) closePeopleDialog/);
   const block = html.slice(html.indexOf('function openPersonBlock('), html.indexOf('async function openBlockedPeople('));
   assert.match(block, /\[data-block-confirm\].*addEventListener/);

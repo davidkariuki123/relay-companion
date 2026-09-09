@@ -26,6 +26,13 @@ test("the release gate rejects a runtime whose capability wiring disappeared", (
       }
     }
     assert.equal(assertRuntimeCapabilities(root).ok, true);
+    const rendererPath = path.join(root, "overlay", "inbox.html");
+    const renderer = fs.readFileSync(rendererPath, "utf8");
+    for (const marker of REQUIRED_RUNTIME_CAPABILITIES.exactSessionRouting["overlay/inbox.html"]) {
+      fs.writeFileSync(rendererPath, renderer.replace(marker, ""));
+      assert.throws(() => assertRuntimeCapabilities(root), /exactSessionRouting/);
+    }
+    fs.writeFileSync(rendererPath, renderer);
     fs.writeFileSync(path.join(root, "src", "session-delivery.js"), "feature removed\n");
     assert.throws(() => assertRuntimeCapabilities(root), /exactSessionRouting/);
   } finally {

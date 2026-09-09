@@ -320,6 +320,10 @@ export class RelayClient {
     return this.#req("GET", "/v1/me");
   }
 
+  completeNetworkOnboarding(version) {
+    return this.#req("POST", "/v1/me/onboarding-complete", { version });
+  }
+
   // The server holds healthy waits for 25 seconds. The ordinary request's
   // 15-second deadline must not interrupt them; reconnect belongs to the receiver.
   waitForAccountChange(since, signal) {

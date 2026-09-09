@@ -21,8 +21,8 @@ try {
       isTestOverlay:true,
       refresh:async()=>structuredClone(window.fixturePayload),
       refreshSent:async()=>({items:[]}),
-      contacts:async()=>Array.from({length:12},(_,i)=>({id:`con_${i}`,relayUserId:`usr_${i}`,name:`Contact ${i}`,email:`contact${i}@example.com`})),
-      blockPerson:async()=>({blocked:true}),
+      contacts:async()=>Array.from({length:12},(_,i)=>({id:`con_${i}`,relayUserId:i===1?undefined:`usr_${i}`,onRelay:i===1?false:true,name:`Contact ${i}`,email:`contact${i}@example.com`})),
+      blockPerson:async input=>{window.fixtureWrites.push(input);return {blocked:true};},
       groups:async()=>({ok:true,result:[]}),
       accountInfo:async()=>structuredClone(window.fixturePayload.account),
       agentSurfaces:async()=>({}),
@@ -48,6 +48,26 @@ try {
   await page.goto(new URL('../overlay/inbox.html',import.meta.url).href);
   await page.locator('.tab[data-view="contacts"]').click();
   await page.locator('#cvList .cv-person').first().waitFor();
+  // Unlinked contacts have a useful Edit menu, with no impossible Block action.
+  await page.locator('#cvList [data-message-more]').nth(1).click();
+  assert.equal(await page.locator('#person-menu-1 [data-contact-edit]').isVisible(),true);
+  assert.equal(await page.locator('#person-menu-1 [data-contact-block]').count(),0);
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#cvList [data-message-more]').nth(1).evaluate(el=>el===document.activeElement),true);
+  await page.locator('#cvList [data-message-more]').first().click();
+  assert.deepEqual(await page.evaluate(()=>window.fixtureWrites),[],'opening the menu never blocks');
+  await page.locator('#person-menu-0 [data-contact-block]').click();
+  await page.locator('.people-dialog:popover-open').waitFor();
+  assert.equal(await page.locator('dialog[open]').count(),0);
+  assert.equal(await page.locator('.people-dialog').evaluate(el=>getComputedStyle(el,'::backdrop').backgroundColor),'rgba(0, 0, 0, 0)');
+  const confirmation=await page.locator('.people-dialog').boundingBox();
+  const card=await page.locator('#card').boundingBox();
+  assert.ok(confirmation.width<=260 && confirmation.x>=card.x && confirmation.x+confirmation.width<=card.x+card.width);
+  assert.deepEqual(await page.evaluate(()=>window.fixtureWrites),[],'confirmation requires an explicit action');
+  await page.locator('#card').screenshot({path:'/tmp/people-confirmation-real.png'});
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('.people-dialog:popover-open').count(),0);
+  assert.equal(await page.locator('#cvList [data-message-more]').first().evaluate(el=>el===document.activeElement),true);
   const open = () => page.locator('#cvBlockedPeople').click();
   const back = () => page.locator('#cvBlockedBack').click();
   await open();
@@ -125,13 +145,14 @@ try {
   await page.locator('.tab[data-view="contacts"]').click();
   assert.equal(await page.locator('#cvOverview').isVisible(),true,'leaving People resets the subpage');
   // The existing block confirmation's recovery link lands on this same page.
+  await page.locator('#cvList [data-message-more]').first().click();
   await page.locator('[data-contact-block]').first().click();
   await page.locator('[data-block-confirm]').click();
-  await page.locator('dialog [data-blocked-list]').click();
+  await page.locator('.people-dialog [data-blocked-list]').click();
   await page.locator('.cv-blocked-empty').waitFor();
   assert.equal(await page.locator('dialog[open]').count(),0);
   await back();
-  assert.equal(await page.locator('[data-contact-block]').first().evaluate(el=>el===document.activeElement),true);
+  assert.equal(await page.locator('#cvList [data-message-more]').first().evaluate(el=>el===document.activeElement),true);
   assert.deepEqual(errors,[]);
   console.log('Blocked People browser checks passed: containment, navigation/focus/scroll, retry, unblock, duplicate prevention, stale reads, account switch, reduced motion.');
 } finally { await browser.close(); }

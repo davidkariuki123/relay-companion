@@ -466,6 +466,7 @@ test("repairDesktopSurfaces --no-restart rewrites both LaunchAgents and Relay.ap
   const fixture = relayDesktopFixture();
   const calls = [];
   const result = repairDesktopSurfaces({
+    recoveryInstaller: () => ({ ok: true }),
     bin: fixture.bin,
     node: "/opt/homebrew/bin/node",
     platform: "darwin",
@@ -506,6 +507,7 @@ test("non-destructive installation repair preserves account, encryption, message
   }
 
   const result = repairDesktopSurfaces({
+    recoveryInstaller: () => ({ ok: true }),
     bin: fixture.bin,
     node: "/opt/homebrew/bin/node",
     platform: "darwin",
@@ -524,6 +526,7 @@ test("desktop repair removes capability modes from daemon, pill, and Relay.app",
   const fixture = relayDesktopFixture();
   const calls = [];
   const result = repairDesktopSurfaces({
+    recoveryInstaller: () => ({ ok: true }),
     bin: fixture.bin,
     node: "/opt/homebrew/bin/node",
     platform: "darwin",

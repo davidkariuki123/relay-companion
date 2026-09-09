@@ -29,14 +29,12 @@ function productFeatures(options = {}) {
   // profile; the API independently enforces the same deployment boundary.
   const developerAccount = user?.accountKind === "human" && user?.isDeveloper === true;
   const developer = (environment === "local" || environment === "dev") && developerAccount;
-  const developmentEnvironment = environment === "local" || environment === "dev";
   return Object.freeze({
     environment,
     developer,
-    // Google Contacts sync is still under Dev validation. Keep it available
-    // to every account pointed at local/Dev, but absent from staging and the
-    // production product even when a developer profile is cached locally.
-    googleContacts: developmentEnvironment,
+    // Google Contacts sync is still under Dev validation, so it follows the
+    // same server-owned developer-account gate as the other unreleased tools.
+    googleContacts: developer,
     requests: developer,
     // Todo is still in product development, so expose it through the same
     // developer-account gate as the other unreleased surfaces.

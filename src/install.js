@@ -47,6 +47,7 @@ const DEFAULT_NPM_INSTALL_TIMEOUT_MS = 10 * 60 * 1000;
 const RELAY_MAC_APP_NAME = "Relay.app";
 const RELAY_MAC_APP_FALLBACK_NAME = "Relay Companion.app";
 const RELAY_MAC_BUNDLE_IDENTIFIER = "work.relay.companion.launcher";
+const { installRecovery, uninstallRecovery } = createRequire(import.meta.url)("../bootstrap/recovery-install.cjs");
 const { deleteDeviceToken } = createRequire(import.meta.url)("./credential-store.cjs");
 const {
   canonicalCliLauncherSource,
@@ -3014,6 +3015,8 @@ export async function runSetupInstall({ claim = false, reload = true, agentProto
   const hookRepair = repairExistingAgentHooks({ bin, node });
   claudeHooks = hookRepair.claudeHooks || null;
   codexHooks = hookRepair.codexHooks || null;
+  const recovery = installRecovery({ packageRoot: path.resolve(path.dirname(bin), ".."), node, reload });
+  if (!recovery.ok) throw new Error(`Relay recovery setup failed: ${recovery.detail || recovery.reason}`);
   const daemon = installDaemonAutostart(bin, node, { claim, reload, env: serviceEnv });
   const pill = installPillAutostart(bin, { claim, reload, env: serviceEnv });
   return {
@@ -3314,6 +3317,7 @@ export function repairDesktopSurfaces({
   homeDir = os.homedir(),
   claim = false,
   env = process.env,
+  recoveryInstaller = installRecovery,
 } = {}) {
   try {
     node = persistentNodePath(node, { platform, homeDir });
@@ -3339,6 +3343,8 @@ export function repairDesktopSurfaces({
     };
     return { ok: false, daemon: failure, pill: failure, updateAgents };
   }
+  const recovery = recoveryInstaller({ packageRoot: path.resolve(path.dirname(bin), ".."), node, platform, runCommand, reload, homeDir });
+  if (!recovery.ok) return { ok: false, daemon: recovery, pill: recovery, recovery };
   const pill = installPillAutostart(bin, { platform, runCommand, reload, homeDir, claim, node, env });
   // Reload the daemon last. A repair may be invoked by the updater's detached child;
   // replacing the pill first avoids killing the update-owning daemon before all other
@@ -3772,6 +3778,8 @@ export function runUninstall({
     return step;
   };
 
+  const recovery = record("recovery", "independent Relay updater", () => uninstallRecovery({ homeDir, platform, runCommand }));
+  if (!recovery.ok) return { ok: false, steps, failures: [recovery] };
   const updateAgents = record("update_agents", "older Relay update agents", () => {
     const result = cleanupMacUpdateAgents({ platform, runCommand, homeDir });
     return result.ok ? result : { ...result, detail: updateAgentCleanupDetail(result) || "launchd cleanup failed" };

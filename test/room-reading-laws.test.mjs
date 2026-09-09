@@ -284,14 +284,11 @@ test("only two-document Relays carry provider actions, and the newest Relay stay
   assert.match(html, /\.th-host-actions\.persistent/);
 });
 
-test("the verb's subline says what happens: a new chat that reads the relay, or the chat that already has it", () => {
-  const footer = html.slice(html.indexOf("function relayHostActionsHtml"), html.indexOf("// ---- the thread reply composer"));
-  assert.match(footer, /message\?\.materializedCodex/);
-  assert.match(footer, /A new task\. It starts by reading this relay\./);
-  assert.match(footer, /Continues the task that already has it/);
-  assert.match(footer, /message\?\.materializedClaude/);
-  assert.match(footer, /A new chat\. It starts by reading this relay\./);
-  assert.match(footer, /Continues the chat that already has it/);
+test("provider footer promises task or session choice", () => {
+  const footer = html.slice(html.indexOf("function hostActionRowHtml"), html.indexOf("function pullSentenceHtml"));
+  assert.match(footer, /Choose a task or start a new one/);
+  assert.match(footer, /Choose a session or start a new one/);
+  assert.doesNotMatch(footer, /materializedCodex|materializedClaude|data-continues/);
 });
 
 test("enabled app rows share the same binder on the bubble and in the reader", () => {
@@ -305,9 +302,9 @@ test("enabled app rows share the same binder on the bubble and in the reader", (
   // route, note, and Send — it must not duplicate provider launch controls.
   const footer = html.slice(html.indexOf("function relayHostActionsHtml"), html.indexOf("// ---- the thread reply composer"));
   assert.match(footer, /const desktopHosts = agentAppHosts\(\)\.filter/);
-  assert.match(footer, /desktopHosts\.map\(\(host\) => hostActionRowHtml\(host, message, source\)\)/);
+  assert.match(footer, /desktopHosts\.map\(\(host\) => hostActionRowHtml\(host, message, source\) \+ sessionPickerInlineHtml\(id, host\)\)/);
   assert.match(footer, /needsCopy \? pullSentenceHtml\(message, \{ hasAppAction: desktopHosts.length > 0 \}\) : ""/);
-  assert.doesNotMatch(footer, /sessionPickerInlineHtml/, "no picker unfolds under the row");
+  assert.match(footer, /sessionPickerInlineHtml/, "the picker unfolds under the selected row");
   assert.doesNotMatch(footer, /data-host="codex"[\s\S]*?data-host="claude"/, "no fixed pair of rows");
   assert.match(footer, /function wireHostOpen\(scope\)/);
   assert.match(html, /wireHostOpen\(thHistoryEl\);/, "the room binds through the shared binder");
@@ -331,20 +328,14 @@ test("enabled app rows share the same binder on the bubble and in the reader", (
   assert.match(reader, /<button type="button" id="qrSend">Relay<\/button>/);
 });
 
-test("the verb opens a new chat straight away; nothing is picked, and the same path serves sent rows", () => {
-  // Sven, 2026-09-04: "Nothing goes to a chat that is already open; nothing
-  // is picked." The click is the open. A relay that already went to this app
-  // continues there (main knows); every other click forges a new chat. The
-  // session picker keeps its code but no letter reaches it — that entry is
-  // named retired so the review can delete it with the picker.
+test("received and sent rows choose a destination before opening", () => {
   const footer = html.slice(html.indexOf("function relayHostActionsHtml"), html.indexOf("// Before 0.1.290"));
-  const wire = footer.slice(footer.indexOf("function wireHostOpen(scope)"), footer.indexOf("function retiredSessionPickerEntry"));
-  assert.match(wire, /openRelayFromUI\(id, source, b\.getAttribute\("data-continues"\) === "1" \? "open" : "fresh", host\);/);
-  assert.doesNotMatch(wire, /loadSessionPicker|closeSessionPicker|wireSessionPickerRows/);
+  const wire = footer.slice(footer.indexOf("function wireHostOpen(scope)"));
+  assert.match(wire, /loadSessionPicker\(id, host, relaySubject\(message\) \|\| "Relay", null, source\)/);
+  assert.doesNotMatch(wire, /openRelayFromUI|materializedCodex|materializedClaude/);
   assert.doesNotMatch(wire, /if \(source === "relay"\)/, "sent Relays take the same path as received ones");
-  assert.match(footer, /data-continues="\$\{continues \? "1" : "0"\}"/, "the row carries the fact the click acts on");
-  assert.doesNotMatch(footer, /"Choose where this Relay lands"|\$\{selected \? " pressed" : ""\}/);
-  assert.doesNotMatch(html, /id="sessionPickerView"/, "there is still no standalone picker page");
+  assert.match(footer, /aria-expanded="\$\{selected \? "true" : "false"\}"/);
+  assert.doesNotMatch(html, /retiredSessionPickerEntry/);
   // Terminal only: the sentence, and the button that copies exactly it.
   assert.match(footer, /class="th-pull-q">\$\{esc\(sentence\)\}/);
   assert.match(footer, /data-pull-copy="\$\{esc\(sentence\)\}">Copy this prompt for your agent<\/button>/);

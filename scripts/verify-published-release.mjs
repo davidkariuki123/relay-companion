@@ -165,7 +165,7 @@ export function validateInstalledPackageShape(packageRoot, { version, distributi
       throw new Error("Thin installer contains files outside the reviewed bootstrap");
     }
     const bootstrapFiles = fs.readdirSync(path.join(packageRoot, "bootstrap")).sort();
-    if (JSON.stringify(bootstrapFiles) !== JSON.stringify([
+    const legacyBootstrap = [
       "linux-systemd.cjs",
       "owned-node-runtime.cjs",
       "relay-background-install.cjs",
@@ -175,7 +175,9 @@ export function validateInstalledPackageShape(packageRoot, { version, distributi
       "runtime-executables.cjs",
       "runtime-health.cjs",
       "trust.json",
-    ])) {
+    ];
+    const recoveryBootstrap = [...legacyBootstrap, "installation-health.cjs", "recovery-install.cjs", "recovery-runner.cjs", "update-activity.cjs", "update-watchdog.cjs"].sort();
+    if (![legacyBootstrap, recoveryBootstrap].some(shape => JSON.stringify(bootstrapFiles) === JSON.stringify(shape))) {
       throw new Error("Thin installer bootstrap contents do not match the reviewed shape");
     }
     const manifest = JSON.parse(fs.readFileSync(path.join(packageRoot, "skill", "manifest.json"), "utf8"));

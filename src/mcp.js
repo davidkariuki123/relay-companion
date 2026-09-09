@@ -1683,7 +1683,13 @@ export function relayCallErrorResult(err) {
   return { content: [{ type: "text", text: `Relay error: ${err.message}${detail}` }], isError: true };
 }
 
-export async function handleCall(client, name, args, {
+export async function handleCall(client, name, args, options = {}) {
+  const release = require("../bootstrap/update-activity.cjs").beginCall();
+  try { return await handleAdmittedCall(client, name, args, options); }
+  finally { release(); }
+}
+
+async function handleAdmittedCall(client, name, args, {
   features = { requests: true },
   shareLinks = true,
   sessionContext = DEFAULT_MCP_SESSION_CONTEXT,
@@ -2289,6 +2295,7 @@ export async function createRelayMcpSession({
     return { tools: encryption.enabled ? toolsForE2eeLocalAccount(features, surface) : toolsForAccount(features, surface) };
   });
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
+    require("../bootstrap/installation-health.cjs").recordTransport("mcp");
     // Who is calling, straight from the handshake this client already sent.
     rememberCallingClient(server.getClientVersion(), sessionContext);
     // This process is a child of the agent host and outlives any pairing the

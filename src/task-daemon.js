@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { startRecoveryHeartbeat } from "./recovery-health.js";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { RelayClient, secureRelayApiUrl } from "./client.js";
@@ -925,6 +926,7 @@ export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
     log(`MCP launcher repair failed: ${error?.message || error}`);
   }
   startDesktopStartupMigration({ log });
+  startRecoveryHeartbeat({ hasActiveWork: () => hasActiveTurns() || activeSessionOperationCount() > 0 });
   const autoUpdater = createAutoUpdater({
     log,
     hasActiveWork: () => hasActiveTurns() || activeSessionOperationCount() > 0,

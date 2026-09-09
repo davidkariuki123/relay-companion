@@ -318,7 +318,7 @@ test("updateRetryCooldownMs backs off exponentially and is capped", () => {
   assert.equal(updateRetryCooldownMs(99, { baseMs: 100, maxMs: 1600 }), 1600, "capped, never unbounded");
 });
 
-test("canonical updater migrates the exact running version before checking the registry", async () => {
+test("canonical migration discovers and targets a newer fix before migrating", async () => {
   const launched = [];
   let registryCalls = 0;
   const updater = createAutoUpdater({
@@ -336,8 +336,8 @@ test("canonical updater migrates the exact running version before checking the r
   });
   const result = await updater.tick();
   assert.equal(result.status, "migrating-runtime");
-  assert.equal(registryCalls, 0);
-  assert.equal(launched[0].targetVersion, "0.1.240");
+  assert.equal(registryCalls, 1);
+  assert.equal(launched[0].targetVersion, "0.1.241");
   assert.equal(launched[0].canonicalMigration, true);
 });
 
@@ -892,4 +892,32 @@ test("a repoint that fails to launch backs off durably instead of hammering ever
   clock += 200_000;
   assert.equal((await make().tick()).status, "autostart-repoint-failed");
   assert.equal(attempts, 2, "after the cooldown it tries again");
+});
+
+test("a Windows autostart repoint launches repair-runtime through the hidden WMI path, never a detached child", () => {
+  const { submitCanonicalRepoint } = autoUpdateModule;
+  const spawned = [];
+  const hidden = [];
+  const canonical = { bin: "C:\Users\test\.relay\runtime\current\bin\relay.js", node: "C:\definitely\missing\node.exe" };
+  const ok = submitCanonicalRepoint({
+    canonical,
+    platform: "win32",
+    spawnImpl: (...args) => { spawned.push(args); return { unref() {} }; },
+    launchHidden: (parts) => { hidden.push(parts); return { ok: true, pid: 77, detail: "" }; },
+  });
+  assert.equal(ok, true);
+  assert.equal(spawned.length, 0, "a detached node child has no console, so its first stdio-inheriting grandchild would pop a visible one");
+  assert.deepEqual(hidden, [[process.execPath, canonical.bin, "repair-runtime"]]);
+
+  const logged = [];
+  const failed = submitCanonicalRepoint({
+    canonical,
+    platform: "win32",
+    log: (line) => logged.push(line),
+    spawnImpl: (...args) => { spawned.push(args); return { unref() {} }; },
+    launchHidden: () => ({ ok: false, pid: null, detail: "Access denied" }),
+  });
+  assert.equal(failed, false);
+  assert.equal(spawned.length, 0);
+  assert.match(logged.join("\n"), /autostart repoint launch failed: Access denied/);
 });

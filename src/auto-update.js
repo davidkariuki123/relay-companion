@@ -26,6 +26,7 @@ import {
 import {
   exactRuntimeHealth,
   inspectUpdateRequest,
+  launchHiddenWindowsProcess,
   reconcileUpdateWorkerJobs,
   spawnCanonicalUpdate,
   waitForUpdateRequestTerminal,
@@ -489,6 +490,7 @@ export function submitCanonicalRepoint({
   env = process.env,
   log = () => {},
   spawnImpl = spawn,
+  launchHidden = (parts) => launchHiddenWindowsProcess(parts, { env }),
   label = null,
 }) {
   if (!canonical?.bin) return false;
@@ -521,6 +523,17 @@ export function submitCanonicalRepoint({
         { detached: true, stdio: "ignore" },
       );
       child?.unref?.();
+      return true;
+    }
+    if (platform === "win32") {
+      // A detached node child has no console, so the first stdio-inheriting
+      // grandchild of `repair-runtime` would pop a visible one. Launch through
+      // the same hidden WMI path the update worker uses.
+      const launched = launchHidden([node, canonical.bin, "repair-runtime"]);
+      if (!launched?.ok) {
+        log(`autostart repoint launch failed: ${launched?.detail || "hidden launch rejected"}`);
+        return false;
+      }
       return true;
     }
     const child = spawnImpl(node, [canonical.bin, "repair-runtime"], { detached: true, stdio: "ignore" });
@@ -807,6 +820,45 @@ export function createAutoUpdater({
     return { status: "updating", current: runningVersion, latest, channel, launch };
   }
 
+  async function checkForRelease(t) {
+    if (state.checking) return { status: "check-in-flight", current: runningVersion };
+    if (t < state.nextCheckAt) return { status: "not-due", current: runningVersion };
+    state.lastCheckAt = t;
+    state.checking = true;
+
+    let latest = null;
+    const checkedChannel = liveChannel();
+    try {
+      latest = await getLatestVersion({ channel: checkedChannel });
+    } catch (err) {
+      log(`auto-update registry check failed: ${err && err.message ? err.message : String(err)}`);
+    } finally {
+      state.checking = false;
+    }
+    if (!latest) {
+      state.consecutiveCheckFailures += 1;
+      const backoff = Math.min(
+        maxCheckFailureRetryMs,
+        checkFailureRetryMs * 2 ** Math.max(0, state.consecutiveCheckFailures - 1),
+      );
+      state.nextCheckAt = t + backoff;
+      // Keep an already-discovered update pending through a transient check failure.
+
+      return { status: "check-failed", current: runningVersion, retryAt: state.nextCheckAt };
+    }
+    state.consecutiveCheckFailures = 0;
+    state.nextCheckAt = t + Math.max(0, checkIntervalMs);
+
+    if (!isNewerVersion(latest, runningVersion)) {
+      state.pendingVersion = null;
+      state.pendingChannel = null;
+      return { status: "up-to-date", current: runningVersion, latest };
+    }
+    state.pendingVersion = latest;
+    state.pendingChannel = checkedChannel;
+    return { status: "discovered", current: runningVersion, latest };
+  }
+
   async function tick() {
     if (!autoUpdateEnabled(env)) return { status: "disabled" };
     // Every admitted platform has an independent supervisor-owned worker and a
@@ -814,6 +866,7 @@ export function createAutoUpdater({
     // unit. Anything else remains fail-closed.
     if (!["darwin", "win32", "linux"].includes(platform)) return { status: "unsupported-platform" };
     const t = now();
+    const discovery = await checkForRelease(t);
     let canonical = null;
     let canonicalState = null;
     if (!state.workersReconciled && platform === "darwin") {
@@ -1012,7 +1065,8 @@ export function createAutoUpdater({
       // on disk survives the restart the attempt itself causes — see
       // readMigrationFailure. Written BEFORE the launch, and read back only by a
       // daemon that returned still-not-canonical, i.e. only after a failure.
-      const migrationTarget = `canonical-migration:${runningVersion}`;
+      const migrationVersion = state.pendingVersion && isNewerVersion(state.pendingVersion, runningVersion) ? state.pendingVersion : runningVersion;
+      const migrationTarget = `canonical-migration:${migrationVersion}`;
       const priorMigration = readMigrationFailure(updateStatePath);
       if (priorMigration && priorMigration.target === migrationTarget) {
         const wait = updateRetryCooldownMs(priorMigration.count, { baseMs: retryCooldownMs });
@@ -1022,7 +1076,7 @@ export function createAutoUpdater({
       }
       state.updating = true;
       state.updateStartedAt = t;
-      state.pendingVersion = runningVersion;
+      state.pendingVersion = migrationVersion;
       state.pendingChannel = liveChannel();
       let launch = null;
       try {
@@ -1030,7 +1084,7 @@ export function createAutoUpdater({
           log,
           currentVersion: runningVersion,
           currentChannel: state.pendingChannel,
-          targetVersion: runningVersion,
+          targetVersion: migrationVersion,
           packageRoot,
           platform,
           canonicalMigration: true,
@@ -1083,42 +1137,7 @@ export function createAutoUpdater({
       return pending;
     }
 
-    if (state.checking) return { status: "check-in-flight", current: runningVersion };
-    if (t < state.nextCheckAt) return pending || { status: "not-due", current: runningVersion };
-    state.lastCheckAt = t;
-    state.checking = true;
-
-    let latest = null;
-    const checkedChannel = liveChannel();
-    try {
-      latest = await getLatestVersion({ channel: checkedChannel });
-    } catch (err) {
-      log(`auto-update registry check failed: ${err && err.message ? err.message : String(err)}`);
-    } finally {
-      state.checking = false;
-    }
-    if (!latest) {
-      state.consecutiveCheckFailures += 1;
-      const backoff = Math.min(
-        maxCheckFailureRetryMs,
-        checkFailureRetryMs * 2 ** Math.max(0, state.consecutiveCheckFailures - 1),
-      );
-      state.nextCheckAt = t + backoff;
-      // Keep an already-discovered update pending through a transient check failure.
-      if (pending) return { ...pending, checkFailed: true, retryAt: state.nextCheckAt };
-      return { status: "check-failed", current: runningVersion, retryAt: state.nextCheckAt };
-    }
-    state.consecutiveCheckFailures = 0;
-    state.nextCheckAt = t + Math.max(0, checkIntervalMs);
-
-    if (!isNewerVersion(latest, runningVersion)) {
-      state.pendingVersion = null;
-      state.pendingChannel = null;
-      return { status: "up-to-date", current: runningVersion, latest };
-    }
-    state.pendingVersion = latest;
-    state.pendingChannel = checkedChannel;
-    return launchPending(t);
+    return pending || launchPending(t) || discovery;
   }
 
   return { tick, state, runningVersion, bootChannel };

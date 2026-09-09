@@ -899,11 +899,12 @@
   .cv-blocked-page .people-blocked-row .cv-avatar { flex:0 0 36px; }
   .cv-blocked-page .people-blocked-row .cv-add { flex:none; }
 
-  .people-dialog { box-sizing:border-box; width:calc(100% - 32px); max-width:360px; max-height:calc(100% - 32px); overflow:auto; padding:22px; border:1px solid var(--edge); border-radius:var(--r-3,16px); background:var(--bg); color:var(--ink); font:13px/1.5 var(--sans); box-shadow:0 12px 48px #0004; }
-  .people-dialog::backdrop { background:#0007; }
-  .people-dialog h2 { margin:0 0 10px; font:500 23px/1.15 var(--serif); overflow-wrap:anywhere; }
-  .people-dialog p { margin:0 0 16px; color:var(--muted); }
-  .people-dialog-actions { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:10px; margin-top:18px; }
+  .th-message-menu.people-dialog { box-sizing:border-box; width:260px; min-width:0; max-width:calc(100vw - 32px); padding:12px; }
+  .people-dialog::backdrop { background:transparent; }
+  .people-dialog h2 { margin:0 0 8px; font:500 13px/1.4 var(--sans); overflow-wrap:anywhere; }
+  .people-dialog p { margin:0 0 10px; color:var(--muted); font:12px/1.5 var(--sans); }
+  .people-dialog-actions { display:flex; justify-content:flex-end; gap:4px; margin-top:10px; }
+  .people-dialog .people-dialog-actions button { width:auto; text-align:center; }
   .people-dialog-error { color:var(--ink); margin-top:12px; }
   .people-blocked-row { display:flex; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid var(--hair); }
   .people-blocked-row span { flex:1; overflow-wrap:anywhere; }
@@ -6015,7 +6016,7 @@
         menu.style.left = `${left}px`;
         menu.style.top = `${top}px`;
         trigger.setAttribute("aria-expanded", "true");
-        (menu.querySelector("[data-message-delete-cancel]") || menu.querySelector("button"))?.focus();
+        (menu.querySelector("[data-message-delete-cancel]") || menu.querySelector("button"))?.focus({ preventScroll:true });
       };
       trigger.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -6025,8 +6026,13 @@
       menu.addEventListener("toggle", () => {
         trigger.setAttribute("aria-expanded", String(menu.matches(":popover-open")));
       });
+      menu.addEventListener("pointerdown", (event) => {
+        // Focusing a top-layer button must not scroll its underlying contact row
+        // and dismiss the menu before the click reaches that button.
+        if (event.target.closest("button")) event.preventDefault();
+      });
       menu.addEventListener("click", (event) => {
-        if (event.target.closest("button")) menu.hidePopover();
+        if (event.target.closest("button") && menu.matches(":popover-open")) menu.hidePopover();
       });
       menu.addEventListener("keydown", (event) => {
         if (event.key === "Escape") {
@@ -6037,7 +6043,7 @@
           const index = buttons.indexOf(document.activeElement);
           const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1
             : (index + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length;
-          buttons[next]?.focus();
+          buttons[next]?.focus({ preventScroll:true });
         }
       });
       menu.addEventListener("focusout", () => {
@@ -10125,7 +10131,7 @@
   function renderContacts() {
     contactsEmptyEl.classList.toggle("gone", contactsPane !== "people" || contactsList.length > 0);
     refreshPaneCounts();
-    cvListEl.innerHTML = contactsList.map((c) => {
+    cvListEl.innerHTML = contactsList.map((c, index) => {
       const emails = contactEmails(c);
       const primary = emails[0] || "";
       const more = emails.length > 1 ? `+${emails.length - 1} more` : "";
@@ -10144,8 +10150,11 @@
         </span>
         ${recent ? `<span class="cv-meta">${esc(recent)}</span>` : ""}
       </button>
-      <button class="cv-edit" type="button" aria-label="Edit ${esc(c.name || primary)}" data-contact-edit="${esc(contactKey(c))}">Edit</button>
-      <button class="cv-person-more" type="button" aria-label="Block options for ${esc(c.name || primary)}" aria-haspopup="dialog" data-contact-block="${esc(contactKey(c))}">⋯</button>
+      <button class="cv-person-more" type="button" aria-label="More actions for ${esc(c.name || primary)}" aria-haspopup="menu" aria-expanded="false" aria-controls="person-menu-${index}" data-message-more>⋯</button>
+      <div class="th-message-menu" id="person-menu-${index}" popover="auto" role="menu" aria-label="Actions for ${esc(c.name || primary)}">
+        <button type="button" role="menuitem" data-contact-edit="${esc(contactKey(c))}">Edit contact</button>
+        ${canBlockPerson(c) ? `<button type="button" role="menuitem" class="danger" data-contact-block="${esc(contactKey(c))}">Block person…</button>` : ""}
+      </div>
       </div>`;
     }).join("");
     for (const el of cvListEl.querySelectorAll(".cv-item")) {
@@ -10159,18 +10168,30 @@
     for (const edit of cvListEl.querySelectorAll("[data-contact-edit]")) {
       const open = (event) => {
         event.stopPropagation(); // the card, not the room
+        edit.closest("[popover]")?.hidePopover();
         openContactForm(edit.getAttribute("data-contact-edit"));
       };
       edit.addEventListener("click", open);
     }
+    wireMessageSideMenus(cvListEl);
     for (const button of cvListEl.querySelectorAll("[data-contact-block]")) {
-      button.addEventListener("click", () => openPersonBlock(button.dataset.contactBlock, button));
+      button.addEventListener("click", () => {
+        const trigger = button.closest(".cv-person").querySelector("[data-message-more]");
+        button.closest("[popover]").hidePopover();
+        openPersonBlock(button.dataset.contactBlock, trigger);
+      });
     }
   }
-  // Native dialog keeps focus inside the confirmation, makes the pill inert,
-  // and supports Escape. No block is sent until the explicit confirmation.
-  const peopleDialog = document.createElement("dialog");
-  peopleDialog.className = "people-dialog";
+  function canBlockPerson(person) {
+    return Boolean(person.id && person.relayUserId && person.onRelay !== false
+      && person.relayUserId !== signupAccountKey() && window.relay.blockPerson);
+  }
+  // Match the message menu: an anchored, light-dismiss popover, without a scrim.
+  // Blocking still requires a separate explicit confirmation.
+  const peopleDialog = document.createElement("div");
+  peopleDialog.className = "th-message-menu people-dialog";
+  peopleDialog.setAttribute("popover", "auto");
+  peopleDialog.setAttribute("role", "dialog");
   peopleDialog.setAttribute("aria-labelledby", "peopleDialogTitle");
   document.body.append(peopleDialog);
   let peopleDialogAccount = null;
@@ -10178,33 +10199,50 @@
   let peopleDialogReturnFocus = null;
   function closePeopleDialog() {
     peopleDialogGeneration += 1;
-    peopleDialog.close();
+    if (peopleDialog.matches(":popover-open")) peopleDialog.hidePopover();
     peopleDialog.innerHTML = "";
     if (peopleDialogAccount === signupAccountKey() && peopleDialogReturnFocus?.isConnected) peopleDialogReturnFocus.focus();
     peopleDialogAccount = null;
   }
-  peopleDialog.addEventListener("cancel", (event) => { event.preventDefault(); closePeopleDialog(); });
+  peopleDialog.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { event.preventDefault(); closePeopleDialog(); }
+  });
+  peopleDialog.addEventListener("beforetoggle", (event) => {
+    if (event.newState === "closed") peopleDialogGeneration += 1;
+  });
+  function positionPeopleDialog() {
+    const trigger = peopleDialogReturnFocus;
+    if (!trigger?.isConnected) { closePeopleDialog(); return; }
+    const rect = trigger.getBoundingClientRect();
+    const card = cardEl.getBoundingClientRect();
+    const bounds = peopleDialog.getBoundingClientRect();
+    peopleDialog.style.left = `${Math.max(card.left + 8, Math.min(rect.right - bounds.width, card.right - bounds.width - 8))}px`;
+    peopleDialog.style.top = `${rect.bottom + bounds.height + 4 <= card.bottom - 8
+      ? rect.bottom + 4 : Math.max(card.top + 8, rect.top - bounds.height - 4)}px`;
+  }
   function showPeopleDialog(content, trigger) {
-    if (peopleDialog.open) closePeopleDialog();
+    if (peopleDialog.matches(":popover-open")) closePeopleDialog();
     peopleDialogAccount = signupAccountKey();
     peopleDialogReturnFocus = trigger || document.activeElement;
     const generation = ++peopleDialogGeneration;
     peopleDialog.innerHTML = content;
     setInteractive(true);
-    peopleDialog.showModal();
+    peopleDialog.showPopover();
+    positionPeopleDialog();
+    peopleDialog.querySelector("[data-dialog-close]")?.focus();
     peopleDialog.querySelector("[data-dialog-close]")?.addEventListener("click", closePeopleDialog);
-    return () => peopleDialog.open && generation === peopleDialogGeneration && peopleDialogAccount === signupAccountKey();
+    return () => peopleDialog.matches(":popover-open") && generation === peopleDialogGeneration && peopleDialogAccount === signupAccountKey();
   }
   function openPersonBlock(key, trigger) {
     const person = contactsList.find((contact) => contactKey(contact) === key);
     if (!person) return;
     const name = person.name || contactEmails(person)[0] || "this person";
-    const canBlock = Boolean(person.id && person.relayUserId && window.relay.blockPerson);
+    if (!canBlockPerson(person)) return;
     const current = showPeopleDialog(`<h2 id="peopleDialogTitle">Block ${esc(name)}?</h2>
-      <p>${canBlock ? "You won’t be able to send each other direct messages or connect through invite links. Your existing messages stay. You can unblock them in People → Blocked people." : "This contact isn’t linked to a Relay account, so there’s no Relay account to block yet."}</p>
+      <p>You won’t be able to message each other or connect through invite links. Existing messages stay. You can unblock them in Blocked people.</p>
       <div class="people-dialog-error" role="alert"></div><div class="people-dialog-actions">
-      <button class="cv-cancel" type="button" data-dialog-close autofocus>${canBlock ? "Cancel" : "Close"}</button>
-      ${canBlock ? '<button class="cv-add" type="button" data-block-confirm>Block person</button>' : ""}</div>`, trigger);
+      <button class="cv-cancel" type="button" data-dialog-close autofocus>Cancel</button>
+      <button class="danger" type="button" data-block-confirm>Block person</button></div>`, trigger);
     peopleDialog.querySelector("[data-block-confirm]")?.addEventListener("click", async (event) => {
       if (!current()) { closePeopleDialog(); return; }
       const button = event.currentTarget;
@@ -10218,6 +10256,7 @@
         peopleDialog.innerHTML = `<h2 id="peopleDialogTitle">${esc(name)} is blocked</h2><p>Your existing messages and contact stay. You can unblock them in Blocked people.</p><div class="people-dialog-actions"><button class="cv-add" type="button" data-blocked-list>Blocked people</button><button class="cv-cancel" type="button" data-dialog-close>Done</button></div>`;
         peopleDialog.querySelector("[data-dialog-close]").addEventListener("click", closePeopleDialog);
         peopleDialog.querySelector("[data-blocked-list]").addEventListener("click", () => openBlockedPeople(trigger));
+        positionPeopleDialog();
         peopleDialog.querySelector("[data-dialog-close]").focus();
       } catch {
         if (!current()) return;
@@ -10263,7 +10302,7 @@
     }
   }
   async function openBlockedPeople(trigger) {
-    if (peopleDialog.open) closePeopleDialog();
+    if (peopleDialog.matches(":popover-open")) closePeopleDialog();
     const previous = blockedPeoplePage;
     const page = { account:signupAccountKey(), trigger:previous?.trigger || trigger, scrollTop:previous?.scrollTop ?? scrollEl.scrollTop };
     blockedPeoplePage = page;
@@ -12961,8 +13000,8 @@
     for (let i = 0; i < key.length; i += 1) h = (h * 31 + key.charCodeAt(i)) >>> 0;
     return `p${h % 8}`;
   }
-  // Offer only enabled desktop apps. Opening still creates a new chat or
-  // continues this Relay's bound chat; enabling both never sends to both.
+  // Offer only enabled desktop apps. Each row opens destination choice;
+  // a saved destination is a choice, never permission to skip the picker.
   // Terminal/own-session users retain the copyable pull sentence.
   function relayHostActionsHtml(message, { persistent = false } = {}) {
     const id = String(message && message.id || "");
@@ -12970,7 +13009,7 @@
     const source = message && message.direction === "out" ? "sent" : "relay";
     const desktopHosts = agentAppHosts().filter((host) => agentOpensInApp(host === "codex" ? "Codex" : "Claude Code"));
     const needsCopy = otherAgentEnabled();
-    const inner = desktopHosts.map((host) => hostActionRowHtml(host, message, source)).join("")
+    const inner = desktopHosts.map((host) => hostActionRowHtml(host, message, source) + sessionPickerInlineHtml(id, host)).join("")
       + (needsCopy ? pullSentenceHtml(message, { hasAppAction: desktopHosts.length > 0 }) : "");
     if (!inner) return "";
     return `${persistent ? "" : `<button class="th-host-disclosure" type="button" data-host-disclosure="${esc(id)}" data-stop="1" aria-expanded="false" aria-controls="${esc(actionsId)}"><span>Open with an agent</span><span class="chev" aria-hidden="true">⌄</span></button>`}<div id="${esc(actionsId)}" class="th-host-actions${persistent ? " persistent" : ""}" data-host-actions="${esc(id)}" data-stop="1" aria-hidden="${persistent ? "false" : "true"}"${persistent ? "" : " inert"}>
@@ -12982,11 +13021,11 @@
   function hostActionRowHtml(host, message, source) {
     const id = String(message && message.id || "");
     const codex = host === "codex";
-    const continues = codex ? Boolean(message?.materializedCodex) : Boolean(message?.materializedClaude);
-    const context = continues
-      ? (codex ? "Continues the task that already has it" : "Continues the chat that already has it")
-      : (codex ? "A new task. It starts by reading this relay." : "A new chat. It starts by reading this relay.");
-    return `<button class="th-host-action" type="button" data-host-open="${esc(id)}" data-host="${codex ? "codex" : "claude"}" data-source="${source}" data-continues="${continues ? "1" : "0"}">
+    const selected = sessionPickerState
+      && String(sessionPickerState.id) === id
+      && sessionPickerState.provider === host;
+    const context = codex ? "Choose a task or start a new one" : "Choose a session or start a new one";
+    return `<button class="th-host-action${selected ? " pressed" : ""}" type="button" data-host-open="${esc(id)}" data-host="${codex ? "codex" : "claude"}" data-source="${source}" aria-expanded="${selected ? "true" : "false"}">
           <img class="th-host-logo" src="${codex ? "codexMark.svg" : "claudeCodeMark.svg"}" alt="" />
           <span class="th-host-copy"><span class="th-host-label">Open in ${codex ? "Codex" : "Claude Code"}</span><span class="th-host-context">${esc(context)}</span></span>
           <span class="th-host-arrow" aria-hidden="true">→</span>
@@ -13017,9 +13056,9 @@
         const id = b.getAttribute("data-host-open");
         const host = b.getAttribute("data-host") === "claude" ? "claude" : "codex";
         const source = b.getAttribute("data-source") === "sent" ? "sent" : "relay";
-        // A relay that already went to this app continues there; otherwise a
-        // new chat — never the one that happens to be open, and no picker.
-        openRelayFromUI(id, source, b.getAttribute("data-continues") === "1" ? "open" : "fresh", host);
+        if (sessionPickerState?.delivering) return;
+        const message = readerRow(id) || relayById(id) || { id };
+        loadSessionPicker(id, host, relaySubject(message) || "Relay", null, source);
       });
     }
     for (const b of scope.querySelectorAll("[data-pull-copy]")) {
@@ -13032,17 +13071,7 @@
         } catch { b.textContent = "Could not copy"; }
       });
     }
-  }
-  // Retired with the one-verb letter: no row reaches the session picker any
-  // more. Its code is left whole for David's call — delete it with the
-  // picker, or keep it for a surface that still wants to choose.
-  function retiredSessionPickerEntry(id, host, source) {
-        // Paint the pressed row and loading disclosure in this click task.
-        // Native discovery continues behind that visible response; awaiting it
-        // here made the control feel dead and sent rows skipped this path
-        // entirely, silently creating a fresh session.
-        const message = readerRow(id) || relayById(id) || { id };
-        loadSessionPicker(id, host, relaySubject(message) || "Relay", null, source);
+    wireSessionPickerRows(scope);
   }
   // Before 0.1.290, inReplyToRelayId doubled as a default reply-chain key: the
   // room composer anchored every ordinary message to the newest one even when
@@ -15951,6 +15980,39 @@
     }
   }
 
+  let networkInvite = { account:null, busy:false, copied:false, error:"" };
+  function networkInviteForAccount() {
+    const account = signupAccountKey();
+    if (networkInvite.account !== account) networkInvite = { account, busy:false, copied:false, error:"" };
+    return networkInvite;
+  }
+  async function copyNetworkInvitation() {
+    const state = networkInviteForAccount();
+    if (state.busy) return;
+    state.busy = true; state.error = ""; renderSignup();
+    try {
+      const result = await window.relay.copyOnboardingInviteLink(payload.account?.userId);
+      if (!result?.ok) throw new Error();
+      state.copied = true;
+    } catch { state.error = "Your invite link couldn’t be copied. Try again, or continue and find it in People."; }
+    finally { state.busy = false; if (state.account === signupAccountKey()) renderAll(); }
+  }
+  async function finishNetworkInvitation() {
+    const state = networkInviteForAccount();
+    if (state.busy || !window.relay.completeNetworkOnboarding) return;
+    const userId = payload.account?.userId;
+    state.busy = true; state.error = ""; renderSignup();
+    try {
+      const result = await window.relay.completeNetworkOnboarding(userId);
+      if (state.account !== signupAccountKey()) return;
+      if (!result?.ok || result.userId !== userId) throw new Error();
+      payload.ui = { ...payload.ui, onboardingRequired:false,
+        completedOnboardingVersion:payload.ui?.onboardingVersion || 2,
+        networkOnboarding:{ ...payload.ui?.networkOnboarding, required:false, checking:false } };
+    } catch { state.error = "Relay couldn’t save your progress. Check your connection and try again."; }
+    finally { state.busy = false; if (state.account === signupAccountKey()) renderAll(); }
+  }
+
   async function completeSignupTutorial() {
     if (signupBusy || !window.relay.completeSetupTutorial) return;
     signupBusy = true; signupError = ""; renderSignup();
@@ -15961,7 +16023,7 @@
       payload.ui = {
         ...payload.ui,
         completedOnboardingVersion:Number(result.version || payload.ui?.onboardingVersion || 1),
-        onboardingRequired:false,
+        onboardingRequired:payload.ui?.networkOnboarding?.required === true,
       };
       renderAll();
     } catch (reason) {
@@ -16068,6 +16130,24 @@
           if (!result?.ok) throw new Error(result?.error || "Relay could not prepare this computer to reconnect.");
         } catch (reason) { signupFailure(reason, "Relay could not prepare this computer to reconnect."); }
       });
+      return;
+    }
+    if (signupStage === "network") {
+      const state = networkInviteForAccount();
+      const signature = JSON.stringify([state.account, state.busy, state.copied, state.error]);
+      if (signupBodyEl.dataset.networkSignature === signature && signupBodyEl.querySelector("#suNetworkCopy")) return;
+      signupBodyEl.dataset.networkSignature = signature;
+      signupBodyEl.innerHTML = `<div class="su-first-relay"><p class="su-step">Welcome to Relay</p>
+        <h1 class="su-title">Grow your network.</h1>
+        <p class="su-copy">Share your invite link with someone you’d like to Relay. When they join, you can message each other from your agents.</p>
+        <div class="su-form"><button class="su-primary" id="suNetworkCopy" type="button"${state.busy ? " disabled" : ""}>${state.copied ? "Copy link again" : "Copy invite link"}</button>
+        <button class="su-primary" id="suNetworkContinue" type="button"${state.busy ? " disabled" : ""}>Continue to Relay</button>
+        <button class="su-link" id="suNetworkSkip" type="button"${state.busy ? " disabled" : ""}>Skip for now</button></div>
+        ${state.copied ? '<p class="su-copy" role="status">Link copied. Paste it wherever you talk to them.</p>' : ""}
+        ${state.error ? `<p class="su-error" role="alert">${esc(state.error)}</p>` : ""}</div>`;
+      document.getElementById("suNetworkCopy")?.addEventListener("click", copyNetworkInvitation);
+      document.getElementById("suNetworkContinue")?.addEventListener("click", finishNetworkInvitation);
+      document.getElementById("suNetworkSkip")?.addEventListener("click", finishNetworkInvitation);
       return;
     }
     if (signupStage === "first-relay") {
@@ -16390,7 +16470,7 @@
     if (blockedPeoplePage && (activeView !== "contacts" || blockedPeoplePage.account !== signupAccountKey())) {
       closeBlockedPeople({ restoreFocus:false, animate:false });
     }
-    if (peopleDialog.open && peopleDialogAccount !== signupAccountKey()) closePeopleDialog();
+    if (peopleDialog.matches(":popover-open") && peopleDialogAccount !== signupAccountKey()) closePeopleDialog();
     if (activeView !== "tasks") closeTodoActions();
     todoRemovalNotice?.classList.toggle("hidden", activeView !== "tasks" && todoRemovalNotice.dataset.error !== "true");
     // Build the destination BEFORE applyView reveals/resizes it. This ordering
@@ -16407,6 +16487,7 @@
     } else if (tutorialPending) {
       stopSignupPolling();
       signupStage = "first-relay";
+      if (payload.ui?.networkOnboarding?.required === true) signupStage = "network";
     }
     const needsSignup = credentialRecovery || payload.account?.paired === false || tutorialPending;
     cardEl.classList.toggle("signup", needsSignup);

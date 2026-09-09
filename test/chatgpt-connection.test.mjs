@@ -68,7 +68,7 @@ test("the pill's You page carries no chat-connector rows; the setup flow keeps i
 test("versioned first-send onboarding keeps durable progress for each account", () => {
   assert.match(main, /const COMPANION_ONBOARDING_VERSION = 2/);
   assert.match(main, /let onboardingVersions = overlayPrefs\.onboardingVersions/);
-  assert.match(main, /onboardingRequired: currentAccount\.paired && completedOnboardingVersion < COMPANION_ONBOARDING_VERSION/);
+  assert.match(main, /onboardingRequired: currentAccount\.paired && \(networkOnboardingState.required \|\| completedOnboardingVersion < COMPANION_ONBOARDING_VERSION\)/);
   assert.match(main, /ipcMain\.handle\("relay:completeSetupTutorial", \(\) => completeSetupTutorial\(\)\)/);
   assert.match(html, /payload\.ui\?\.onboardingRequired === true/);
   assert.match(html, /signupStage === "first-relay"/);

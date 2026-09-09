@@ -929,6 +929,7 @@ export async function repairCanonicalRuntime({
   postCommitActivate = async () => ({ ok: true }),
   rollbackActivate = async () => ({ ok: true }),
   rollbackTarget = null,
+  archiveRecoveryJournal = false,
   now = Date.now,
   nonce = () => `${process.pid}-${Math.random().toString(16).slice(2)}`,
   fsImpl = fs,
@@ -977,6 +978,22 @@ export async function repairCanonicalRuntime({
     return { ok: false, phase: "admission", reason: "worker-admission-failed", detail: error?.message || String(error) };
   }
   const storedPrevious = readCanonicalRuntime({ homeDir, platform, readFileSync: io.readFileSync });
+  if (archiveRecoveryJournal) {
+    try {
+      const journal = readCanonicalRuntimeState({ homeDir, platform, readFileSync: io.readFileSync });
+      if (journal && ["activating", "recovery-required"].includes(journal.state)) {
+        // Only the newly verified recovery engine requests this. Preserve the
+        // failed journal and its trees while the normal transaction stages a fix.
+        const directory = pathsFor(platform).join(layout.root, "recovery-history");
+        io.mkdirSync(directory, { recursive: true });
+        io.writeFileSync(pathsFor(platform).join(directory, `${releaseId}.json`), JSON.stringify(journal), { flag: "wx", mode: 0o600 });
+        protectedPackageRoots = [...protectedPackageRoots, journal.previous?.packageRoot, journal.candidate?.packageRoot].filter(Boolean);
+      }
+    } catch (error) {
+      lock.release();
+      return { ok: false, phase: "recovery", reason: "recovery-journal-archive-failed", detail: error.message };
+    }
+  }
   let previous = storedPrevious;
   if (storedPrevious) {
     try { previous = normalizePreviousTarget(storedPrevious) || storedPrevious; } catch {}

@@ -230,6 +230,11 @@ async function authenticatedRequest(apiUrl, accessToken, method, requestPath, bo
     error.body = payload;
     throw error;
   }
+  try {
+    const healthRoot = path.join(os.homedir(), ".relay", "transport-health");
+    fs.mkdirSync(healthRoot, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(path.join(healthRoot, "https.json"), JSON.stringify({ at: Date.now() }), { mode: 0o600 });
+  } catch { /* Diagnostics must not change the outcome of a successful request. */ }
   return payload;
 }
 

@@ -22,6 +22,7 @@
 const { app, BrowserWindow, Menu, Tray, clipboard, ipcMain, nativeImage, powerMonitor, powerSaveBlocker, shell, screen, systemPreferences } = require("electron");
 const { createCompanionWindow } = require("./companion-window.cjs");
 const { createFirstRelayOnboarding } = require("./first-relay-onboarding.cjs");
+const { createNetworkOnboarding } = require("./network-onboarding.cjs");
 
 if (process.platform === "linux") {
   app.setName("Relay");
@@ -282,6 +283,38 @@ const firstRelayOnboarding = createFirstRelayOnboarding();
 let onboardingVersions = overlayPrefs.onboardingVersions && typeof overlayPrefs.onboardingVersions === "object"
   ? { ...overlayPrefs.onboardingVersions }
   : {};
+const networkOnboardingCompleted = { ...overlayPrefs.networkOnboardingCompleted };
+const networkOnboardingPresented = { ...overlayPrefs.networkOnboardingPresented };
+function networkOnboardingIdentity() {
+  const current = account();
+  if (!current.paired || !current.userId) return null;
+  const apiUrl = process.env.RELAY_API_URL || readConfigFile().apiUrl || "https://api.sendrelays.com";
+  return { key: `${apiUrl}|user:${current.userId}`, userId: current.userId, credential: deviceToken() };
+}
+const networkOnboarding = createNetworkOnboarding({
+  identity: networkOnboardingIdentity,
+  completed: networkOnboardingCompleted,
+  presented: networkOnboardingPresented,
+  persist: () => writeOverlayPrefs(),
+  read: async (who) => {
+    const client = await relayClient();
+    if (networkOnboardingIdentity()?.key !== who.key || deviceToken() !== who.credential) throw new Error("account_changed");
+    return client.me();
+  },
+  complete: async (who, version) => {
+    const client = await relayClient();
+    if (networkOnboardingIdentity()?.key !== who.key || deviceToken() !== who.credential) throw new Error("account_changed");
+    return client.completeNetworkOnboarding(version);
+  },
+  changed: () => { void pushInbox(true).then(() => presentNetworkOnboarding()).catch(() => {}); },
+});
+function presentNetworkOnboarding() {
+  if (!pillReady || !win || win.isDestroyed() || pillHidden || userIsAway()
+      || !networkOnboarding.shouldPresent(pillVersion())) return;
+  dismissed = false;
+  maybeShow({ force: true });
+  if (win.isVisible()) networkOnboarding.markPresented(pillVersion());
+}
 const presentedRelayIds = new Set(
   Array.isArray(overlayPrefs.presentedRelayIds) ? overlayPrefs.presentedRelayIds.filter(Boolean).map(String) : [],
 );
@@ -374,6 +407,8 @@ function writeOverlayPrefs() {
       pillHidden,
       soundsMuted,
       onboardingVersions,
+      networkOnboardingCompleted,
+      networkOnboardingPresented,
       presentedRelayIds: [...presentedRelayIds],
       activeAttentionIds: [...activeAttentionIds],
     });
@@ -2204,6 +2239,8 @@ function buildPayload() {
     }).catch(() => {});
   }
   const currentAccount = account();
+  void networkOnboarding.refresh();
+  const networkOnboardingState = networkOnboarding.status();
   const completedOnboardingVersion = onboardingVersionFor(currentAccount);
   return {
     account: currentAccount,
@@ -2214,7 +2251,8 @@ function buildPayload() {
       onboardingVersion: COMPANION_ONBOARDING_VERSION,
       setupPrompt: `Read ${webBase()}/for-agents and set me up on Relay.`,
       completedOnboardingVersion,
-      onboardingRequired: currentAccount.paired && completedOnboardingVersion < COMPANION_ONBOARDING_VERSION,
+      onboardingRequired: currentAccount.paired && (networkOnboardingState.required || completedOnboardingVersion < COMPANION_ONBOARDING_VERSION),
+      networkOnboarding: networkOnboardingState,
       firstRelayStatus: firstRelayOnboarding.status(onboardingAccountKey(currentAccount)),
       firstRelayId: firstRelayOnboarding.relayId(onboardingAccountKey(currentAccount)),
       openingPreference: onboardingProtocolState()?.openingPreference || null,
@@ -2700,7 +2738,7 @@ async function pushInboxNow(force) {
     // moves while a message sits offline.
     outbox: (payload.outbox || []).map((e) => [e.id, e.state, e.attempts, e.nextAttemptAt, e.relayId, e.lastError]),
     account: [payload.account.paired, payload.account.email],
-    onboarding: [payload.ui.onboardingRequired, payload.ui.completedOnboardingVersion, payload.ui.firstRelayStatus, payload.ui.firstRelayId, payload.ui.openingPreference],
+    onboarding: [payload.ui.onboardingRequired, payload.ui.networkOnboarding, payload.ui.completedOnboardingVersion, payload.ui.firstRelayStatus, payload.ui.firstRelayId, payload.ui.openingPreference],
     pendingOpen: payload.pendingOpen
       ? [payload.pendingOpen.relayId, payload.pendingOpen.title, payload.pendingOpen.forHuman, payload.pendingOpen.error]
       : null,
@@ -6045,6 +6083,7 @@ function createWindow() {
     // the app restarting is not their problem.
     outbox.start();
     pillReady = true;
+    presentNetworkOnboarding();
     // Relay is independently useful and searchable even when no host app happens to
     // be open. A normal login launch still respects the persisted dismissed preference.
     maybeShow({ force: true });
@@ -9604,6 +9643,17 @@ ipcMain.handle("relay:chatAgentPreferencesSave", async (_event, input = {}) =>
 ipcMain.handle("relay:connectChatGPT", () => connectChatGPT());
 ipcMain.handle("relay:connectClaude", () => connectClaude());
 ipcMain.handle("relay:completeSetupTutorial", () => completeSetupTutorial());
+ipcMain.handle("relay:completeNetworkOnboarding", async (_event, userId) => {
+  const key = onboardingAccountKey();
+  const result = await networkOnboarding.finish(userId);
+  if (account().userId !== userId) throw new Error("Relay account changed. Try again.");
+  // Finishing the invitation page must not send an existing user backwards
+  // into the first-send tutorial on an installation with no local history.
+  onboardingVersions[key] = COMPANION_ONBOARDING_VERSION;
+  writeOverlayPrefs();
+  await pushInbox(true);
+  return result;
+});
 ipcMain.handle("relay:onboardingInviteLink", async () => {
   try {
     const invite = await (await relayClient()).inviteLink();
@@ -9615,12 +9665,17 @@ ipcMain.handle("relay:onboardingInviteLink", async () => {
     return { ok: false, error: error?.message || String(error) };
   }
 });
-ipcMain.handle("relay:copyOnboardingInviteLink", async () => {
+ipcMain.handle("relay:copyOnboardingInviteLink", async (_event, expectedUserId) => {
   try {
-    const invite = await (await relayClient()).inviteLink();
+    const who = networkOnboardingIdentity();
+    if (expectedUserId && (!who || who.userId !== expectedUserId)) throw new Error("Relay account changed. Try again.");
+    const client = await relayClient();
+    if (who && (networkOnboardingIdentity()?.key !== who.key || deviceToken() !== who.credential)) throw new Error("Relay account changed. Try again.");
+    const invite = await client.inviteLink();
     const parsed = new URL(String(invite?.url || ""));
     const loopback = ["localhost", "127.0.0.1", "::1"].includes(parsed.hostname);
     if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && loopback)) throw new Error("Relay returned an unsafe invite link.");
+    if (who && (networkOnboardingIdentity()?.key !== who.key || deviceToken() !== who.credential)) throw new Error("Relay account changed. Try again.");
     clipboard.writeText(parsed.toString());
     return { ok: true, url: parsed.toString() };
   } catch (error) {
@@ -10042,6 +10097,9 @@ if (!gotSingleInstanceLock) {
     // role immediately afterward, then keep it fresh so an operator can opt a
     // developer in or out without re-pairing this device.
     refreshAccountProductFeatures().catch(() => {});
+    setInterval(() => {
+      void networkOnboarding.refresh().then(() => presentNetworkOnboarding()).catch(() => {});
+    }, 30_000).unref?.();
     setInterval(() => refreshAccountProductFeatures().catch(() => {}), 5 * 60 * 1000).unref?.();
     // Update availability: one check after boot, then hourly. Cheap (a dist-tags
     // GET) and it only ever surfaces UI — the daemon still owns actual updating.

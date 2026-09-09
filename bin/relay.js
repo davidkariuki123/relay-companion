@@ -799,6 +799,19 @@ async function cmdPill(flags = {}, positional = []) {
 // never notify again. --requeue-unseen strands them back into the queue;
 // --restart-pill makes the running pill reload the healed prefs.
 async function cmdDoctor(flags = {}) {
+  const { collectCompanionFleetTelemetry } = await import("../src/fleet-telemetry.js");
+  const health = collectCompanionFleetTelemetry();
+  if (flags.json) {
+    console.log(JSON.stringify({ schema: 1, cliVersion: companionVersion(), ...health }, null, 2));
+    return;
+  }
+  const installation = health.installation;
+  console.log(`  installation: ${installation.installationId || "not yet assigned"}`);
+  console.log(`  OS: ${installation.os} ${installation.osVersion} (${installation.arch})`);
+  console.log(`  daemon responding: ${installation.daemonResponsive ? "yes" : "not verified"}`);
+  for (const component of installation.components) console.log(`  ${component.role}: ${component.version || "unknown version"} × ${component.count}`);
+  console.log(`  component health: ${installation.duplicates ? "duplicate services" : installation.mixed ? "mixed versions" : "see reported processes above"}`);
+  console.log(`  independent recovery: ${installation.recovery?.status || "not reported"} (checked ${installation.recovery?.checkedAt || "never"})`);
   const home = process.env.RELAY_HOME || process.env.RELAY_COMPANION_HOME || path.join(os.homedir(), ".relay-companion");
   const statePath = path.join(home, "state.json");
   const prefsPath = path.join(home, "overlay-prefs.json");

@@ -127,7 +127,17 @@ export function processReferencedCanonicalRoots({
     .filter((packageRoot) => commands.some((command) => normalize(command).includes(normalize(packageRoot))));
 }
 
-export async function activateCanonicalRuntime(target, {
+export async function activateCanonicalRuntime(target, options = {}) {
+  let release;
+  try {
+    const drain = options.drain || require("../bootstrap/update-activity.cjs").drainCalls;
+    release = await drain({ homeDir: options.homeDir, sleep: options.sleep });
+    return await activateDrainedRuntime(target, options);
+  } catch (error) { return { ok: false, reason: "activation-drain-failed", detail: error.message }; }
+  finally { release?.(); }
+}
+
+async function activateDrainedRuntime(target, {
   homeDir = os.homedir(),
   platform = process.platform,
   run = defaultRun,
@@ -184,9 +194,10 @@ export async function activateCanonicalRuntime(target, {
     // every Relay service process by command-line identity before starting the new
     // exact-root actions; the updater worker itself does not match either pattern.
     const stopRelayChildren = [
+      "$relaySid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value;",
       "$p=Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {",
-      "  $_.CommandLine -and ($_.CommandLine -match '[\\\\/]node_modules[\\\\/]relay-companion[\\\\/]') -and (($_.CommandLine -match '[\\\\/]relay\\.js.*\\bdaemon\\b') -or ($_.CommandLine -match '[\\\\/]overlay[\\\\/]main\\.cjs'))",
-      "}; foreach($x in $p){ try { Invoke-CimMethod -InputObject $x -MethodName Terminate -ErrorAction Stop | Out-Null } catch {} }",
+      "  $_.CommandLine -and ($_.CommandLine -match '[\\\\/]node_modules[\\\\/]relay-companion[\\\\/]') -and (($_.CommandLine -match '[\\\\/]relay\\.js.*\\bdaemon\\b') -or ($_.CommandLine -match '[\\\\/]overlay[\\\\/]main\\.cjs') -or ($_.CommandLine -match '[\\\\/]mcp-broker-entry\\.js'))",
+      "}; foreach($x in $p){ try { $relayOwner=Invoke-CimMethod -InputObject $x -MethodName GetOwnerSid -ErrorAction Stop; if($relayOwner.Sid -eq $relaySid){ Invoke-CimMethod -InputObject $x -MethodName Terminate -ErrorAction Stop | Out-Null } } catch {} }",
     ].join(" ");
     const stopped = run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", stopRelayChildren]);
     if (!commandOk(stopped)) return { ok: false, reason: "old-service-stop-failed", detail: stopped?.stderr || stopped?.stdout || "" };
@@ -224,6 +235,8 @@ export async function runCanonicalUpdateTransaction({
   onLockAcquired = () => {},
   requestId = null,
   workerId = null,
+  repairExecutableOverride = null,
+  supersedeBrokenRecovery = false,
   onProgress = () => {},
   now = Date.now,
 } = {}) {
@@ -284,21 +297,22 @@ export async function runCanonicalUpdateTransaction({
       ? activate({
           ...target,
           node: persistentTargetNode(target?.node || serviceNode),
-        }, { homeDir, platform, repairExecutable: context?.recovery?.candidate })
+        }, { homeDir, platform, repairExecutable: repairExecutableOverride || context?.recovery?.candidate })
       : { ok: true },
     onLockAcquired: admit,
     lockIdentity,
   }));
-  if (!recovered.ok) return recovered;
+  if (!recovered.ok && !(supersedeBrokenRecovery && recovered.phase === "recovery")) return recovered;
   if (recovered.recovered) return recovered;
   // npm is resolved beside the worker's own runtime; when that yields nothing (the
   // worker was handed a bare binary with no sibling npm), fall back to the durable
   // service node's npm rather than failing the whole transaction.
   const npmExecutable = npmCommand || runtimeNpmCommand(serviceNode, { platform });
   const previous = readCanonicalRuntime({ homeDir, platform });
-  const legacy = previous ? null : legacyRuntimeTarget(runningPackageRoot, runningVersion, { node: serviceNode, platform });
-  if (!previous && !legacy) return { ok: false, phase: "input", reason: "legacy-runtime-invalid" };
+  const legacy = previous || supersedeBrokenRecovery ? null : legacyRuntimeTarget(runningPackageRoot, runningVersion, { node: serviceNode, platform });
+  if (!previous && !legacy && !supersedeBrokenRecovery) return { ok: false, phase: "input", reason: "legacy-runtime-invalid" };
   return repair({
+    archiveRecoveryJournal: supersedeBrokenRecovery,
     version,
     homeDir,
     platform,
@@ -555,6 +569,40 @@ export async function waitForUpdateRequestTerminal(requestPath, {
   return readUpdateRequest(requestPath, { fsImpl });
 }
 
+/**
+ * Start a Windows process that outlives the daemon, with no console window.
+ *
+ * The daemon runs under a Task Scheduler job, so a plain child would die with
+ * `schtasks /End`. WMI's Win32_Process.Create parents the new process to the WMI
+ * service instead. The WMI service has no console, so CreateProcess allocates a
+ * fresh one for node.exe — and shows it, which every Windows user saw as a black
+ * window during each update. A Win32_ProcessStartup with ShowWindow=0 (SW_HIDE)
+ * keeps that console hidden; every descendant that inherits stdio inherits the
+ * hidden console too, so the watchdog, worker, and relay-setup all stay
+ * invisible. CREATE_NO_WINDOW is not accepted through WMI (verified: ReturnValue
+ * 21, invalid parameter), and a detached node child is no alternative: it has no
+ * console at all, so its first stdio-inheriting grandchild pops a visible one.
+ */
+export function launchHiddenWindowsProcess(commandParts, { run = defaultRun, env = process.env } = {}) {
+  const quote = (value) => `"${String(value).replaceAll('"', '\\"')}"`;
+  const commandLine = commandParts.map(quote).join(" ");
+  const ps = [
+    "$s=New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ShowWindow=[uint16]0}",
+    `$r=Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine='${commandLine.replaceAll("'", "''")}';ProcessStartupInformation=$s} -ErrorAction Stop`,
+    "if($r.ReturnValue-ne 0){exit 1}",
+    "Write-Output $r.ProcessId",
+  ].join(";");
+  const encoded = Buffer.from(ps, "utf16le").toString("base64");
+  const systemRoot = env.SystemRoot || env.windir || "C:\\Windows";
+  const submitted = run(path.win32.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), [
+    "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded,
+  ]);
+  if (!commandOk(submitted)) {
+    return { ok: false, pid: null, detail: submitted?.stderr || submitted?.stdout || submitted?.error?.message || "" };
+  }
+  return { ok: true, pid: Number(String(submitted.stdout || "").trim()) || null, detail: "" };
+}
+
 export function spawnCanonicalUpdate({
   version,
   runningPackageRoot,
@@ -605,7 +653,7 @@ export function spawnCanonicalUpdate({
     const logPath = api.join(homeDir, ".relay", "update.log");
     atomicWriteText(
       workerPlistPath,
-      updateWorkerPlist([workerNode, workerPath(), "--worker", payload], logPath),
+      updateWorkerPlist([workerNode, api.join(runningPackageRoot, "bootstrap", "update-watchdog.cjs"), workerPath(), "--worker", payload], logPath),
       { fsImpl, platform },
     );
     const submitted = run("/bin/launchctl", ["bootstrap", domain, workerPlistPath]);
@@ -614,19 +662,15 @@ export function spawnCanonicalUpdate({
       return { status: "launch-failed", requestId, workerId, requestPath };
     }
   } else if (platform === "win32") {
-    const quote = (value) => `"${String(value).replaceAll('"', '\\"')}"`;
-    const commandLine = [workerNode, workerPath(), "--worker", payload].map(quote).join(" ");
-    const ps = `$r=Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine='${commandLine.replaceAll("'", "''")}'} -ErrorAction Stop;if($r.ReturnValue-ne 0){exit 1};Write-Output $r.ProcessId`;
-    const encoded = Buffer.from(ps, "utf16le").toString("base64");
-    const systemRoot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
-    const submitted = run(path.win32.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), [
-      "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded,
-    ]);
-    if (!commandOk(submitted)) {
-      atomicWriteRequest(requestPath, { ...prepared, state: "rejected", reason: "launch-failed", detail: submitted?.stderr || submitted?.stdout || "", completedAt: Date.now() }, { fsImpl, platform });
+    const launched = launchHiddenWindowsProcess(
+      [workerNode, api.join(runningPackageRoot, "bootstrap", "update-watchdog.cjs"), workerPath(), "--worker", payload],
+      { run },
+    );
+    if (!launched.ok) {
+      atomicWriteRequest(requestPath, { ...prepared, state: "rejected", reason: "launch-failed", detail: launched.detail, completedAt: Date.now() }, { fsImpl, platform });
       return { status: "launch-failed", requestId, workerId, requestPath };
     }
-    launchedPid = Number(String(submitted.stdout || "").trim()) || null;
+    launchedPid = launched.pid;
   } else if (platform === "linux") {
     linuxWorkerUnit = `${UPDATE_WORKER_LABEL_PREFIX}${requestId}`;
     const logPath = api.join(homeDir, ".relay", "update.log");
@@ -637,9 +681,12 @@ export function spawnCanonicalUpdate({
       `--unit=${linuxWorkerUnit}`,
       ...systemdRunEnvironmentArgs(env),
       "--property=Type=exec",
+      "--property=RuntimeMaxSec=1800",
+      "--property=KillMode=control-group",
       `--property=StandardOutput=append:${logPath}`,
       `--property=StandardError=append:${logPath}`,
       workerNode,
+      api.join(runningPackageRoot, "bootstrap", "update-watchdog.cjs"),
       workerPath(),
       "--worker",
       payload,
