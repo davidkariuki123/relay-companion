@@ -77,7 +77,8 @@ test("clicking a contact opens the conversation; only Edit opens the card", () =
   assert.match(edit, /openContactForm\(edit\.getAttribute\("data-contact-edit"\)\)/);
   // The row and the control now do different things, so the card must be
   // reachable without a mouse.
-  assert.match(html, /<button class="cv-edit" type="button"[^>]*data-contact-edit=/);
+  assert.match(html, /<button type="button" role="menuitem"[^>]*data-contact-edit=/);
+  assert.match(edit, /edit\.closest\("\[popover\]"\)\?\.hidePopover\(\)/);
   assert.doesNotMatch(edit, /addEventListener\("keydown"/, "native sibling buttons supply keyboard activation without double firing");
 
   const room = between(html, "function openContactRoom(key)", "  /**");
