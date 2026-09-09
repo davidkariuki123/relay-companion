@@ -3,12 +3,12 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import vm from "node:vm";
 import test from "node:test";
-import { invitationShareCopy } from "../../shared/dist/agent-guide.js";
 
 const main = readFileSync(new URL("../overlay/main.cjs", import.meta.url), "utf8");
 const start = main.indexOf('ipcMain.handle("relay:copyOnboardingInviteLink"');
 const handler = main.slice(start, main.indexOf('ipcMain.handle("relay:e2eeDeviceApprovals"', start));
 const require = createRequire(new URL("../overlay/main.cjs", import.meta.url));
+const invitationShareCopy = require("./invitation-share-copy.cjs");
 
 async function copy(invite, requestedAccount) {
   let callback, clipboard;
