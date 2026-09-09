@@ -129,8 +129,12 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
   // that starts, messages or inspects a native session is listed anywhere.
   const shipped = productFeatures({ env: {}, user: ORDINARY_USER });
   const ordinary = toolsForAccount(shipped).map((tool) => tool.name);
+  // Todo is a developer row in productFeatures and the overlay hides its tab,
+  // but it had no catalog gate, so this list used to open with the three
+  // relay_todo_* tools: every staging and production account was offered a
+  // surface it is not entitled to call, and this assertion pinned that.
   assert.deepEqual(ordinary, [
-    "relay_todo_update", "relay_todo_visibility", "relay_todo_reorder", "relay_send", "relay_share_link", "relay_contacts_search", "relay_groups_list", "relay_group_create", "relay_group_update",
+    "relay_send", "relay_share_link", "relay_contacts_search", "relay_groups_list", "relay_group_create", "relay_group_update",
     "relay_group_delete", "relay_contact_update", "relay_inbox_list", "relay_sent_list", "relay_thread_fetch",
     "relay_chats_list", "relay_chat_fetch", "relay_chat_send", "relay_mark_read",
   ]);
@@ -157,6 +161,36 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
       handleCall(client, name, { relayId: "relay_1", idempotencyKey: "stale_tool_call" }, { features: shipped }),
       /available only to Relay developer accounts on dev/,
     );
+  }
+  // A session still holding relay_todo_* from before the gate is refused before
+  // transport, the same as every other unreleased tool.
+  for (const [name, args] of [
+    ["relay_todo_update", { itemId: "relay_1", status: "done", expectedVersion: 1, idempotencyKey: "stale_todo_1" }],
+    ["relay_todo_visibility", { itemId: "relay_1", removed: true, expectedVersion: 0, idempotencyKey: "stale_todo_2" }],
+    ["relay_todo_reorder", { status: "triage", itemIds: ["relay_1"], idempotencyKey: "stale_todo_3" }],
+  ]) {
+    await assert.rejects(handleCall(client, name, args, { features: shipped }), /unavailable in this Relay release/);
+  }
+  // The developer catalog is unchanged: Todo is listed wherever it is entitled.
+  for (const name of ["relay_todo_update", "relay_todo_visibility", "relay_todo_reorder"]) {
+    assert.ok(toolsForAccount(developer).some((tool) => tool.name === name), `${name} stays on dev`);
+  }
+  // Removing the tools is not the whole gate. relay_inbox_list ships in every
+  // profile, and its contract taught todoStatuses and relay_todo_update by
+  // name, so a production agent that could not call Todo was still told it
+  // existed. Off, no tool in the shipped catalog mentions it at all, the read
+  // tool declares none of its Todo fields, and a remembered Todo read is refused
+  // before transport. On dev the read tool keeps the full contract.
+  for (const tool of toolsForAccount(shipped)) {
+    assert.doesNotMatch(JSON.stringify(tool), /todo/i, `${tool.name} must not mention Todo to a production agent`);
+  }
+  const shippedInbox = toolsForAccount(shipped).find((tool) => tool.name === "relay_inbox_list");
+  assert.deepEqual(Object.keys(shippedInbox.inputSchema.properties), ["relayIds"]);
+  const developerInbox = toolsForAccount(developer).find((tool) => tool.name === "relay_inbox_list");
+  assert.deepEqual(Object.keys(developerInbox.inputSchema.properties), ["relayIds", "todoStatuses", "cursor", "limit"]);
+  assert.match(developerInbox.description, /todoStatuses/);
+  for (const args of [{ todoStatuses: ["triage"] }, { todoStatuses: ["triage"], cursor: "c1" }, { limit: 5 }]) {
+    await assert.rejects(handleCall(client, "relay_inbox_list", args, { features: shipped }), /Todo reads are unavailable in this Relay release/);
   }
 });
 

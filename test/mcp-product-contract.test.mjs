@@ -304,12 +304,19 @@ test("agent teaching uses the current Todo vocabulary everywhere", async () => {
 // THE TODO RULE (David, 2026-09-08). Before this, no interactive session had
 // ever moved a Todo item: the always-on text named only the Task tools and the
 // status tool sat deferred behind a description that read as a prohibition.
-test("every instruction variant carries the Todo rule, and the status tool teaches it", () => {
+test("every entitled instruction variant carries the Todo rule, and the status tool teaches it", () => {
   assert.match(TODO_STATUS_RULE, /act on an inbound titled Relay, set it in_progress with relay_todo_update before starting and done when finished/);
-  for (const instructions of [RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS, E2EE_LOCAL_MCP_INSTRUCTIONS, E2EE_REMOTE_MCP_INSTRUCTIONS]) {
+  for (const instructions of [RELAY_MCP_INSTRUCTIONS, E2EE_LOCAL_MCP_INSTRUCTIONS, E2EE_REMOTE_MCP_INSTRUCTIONS]) {
     assert.match(instructions, /relay_todo_update in_progress before starting, done when finished|in_progress with relay_todo_update before starting and done when finished/);
+  }
+  for (const instructions of [RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS, E2EE_LOCAL_MCP_INSTRUCTIONS, E2EE_REMOTE_MCP_INSTRUCTIONS]) {
     assert.ok(Buffer.byteLength(instructions, "utf8") <= 2_048, "every variant stays under the always-on byte budget");
   }
+  // The requests-disabled profile is the staging/production one. Todo is off in
+  // productFeatures there, the overlay hides its tab, and the relay_todo_* tools
+  // have left the catalog, so teaching the rule aimed a production session at a
+  // tool it cannot see.
+  assert.doesNotMatch(REQUESTS_DISABLED_INSTRUCTIONS, /relay_todo_update|todoStatuses/);
   const update = byName.get("relay_todo_update");
   assert.match(update.description, /^Set the workflow status of one exact Relay or Task\. The rule: when the human has you act on an inbound titled Relay in this session, set in_progress before substantive work and done, with a note, when that work is genuinely finished\./);
   assert.match(update.description, /an opened item and a Todo listing both carry todoStatus and todoVersion/);
@@ -318,14 +325,22 @@ test("every instruction variant carries the Todo rule, and the status tool teach
   assert.match(byName.get("relay_inbox_list").description, /Opened items and Todo listings both carry todoStatus and todoVersion/);
 });
 
-test("the generated skill and public guide include the complete Todo workflow, not just MCP descriptions", async () => {
+test("the dev skill carries the complete Todo workflow, and the production skill and public guide do not", async () => {
   const { RELAY_TODO_WORKFLOW_GUIDE } = await import('../../shared/dist/agent-guide.js');
+  const devSkill = await readFile(new URL('../skill/variants/SKILL.dev.md',import.meta.url),'utf8');
   const skill = await readFile(new URL('../skill/relay/SKILL.md',import.meta.url),'utf8');
   const guide = await readFile(new URL('../../../apps/web/public/llm_guide.md',import.meta.url),'utf8');
   assert.ok(RELAY_TODO_WORKFLOW_GUIDE?.length > 0);
   const start='<!-- BEGIN GENERATED RELAY TODO WORKFLOW -->\n';
   const end='\n<!-- END GENERATED RELAY TODO WORKFLOW -->';
-  assert.equal(skill.split(start)[1]?.split(end)[0],RELAY_TODO_WORKFLOW_GUIDE);
-  assert.ok(guide.includes(RELAY_TODO_WORKFLOW_GUIDE));
+  // Whole and verbatim where Todo exists.
+  assert.equal(devSkill.split(start)[1]?.split(end)[0],RELAY_TODO_WORKFLOW_GUIDE);
+  // Absent, with its markers, where it does not. llm_guide.md is fetched signed
+  // out from the production site, so it can only describe the production product.
+  for (const [label, rendered] of [["production skill", skill], ["public guide", guide]]) {
+    assert.ok(!rendered.includes(RELAY_TODO_WORKFLOW_GUIDE), `${label} must not carry the Todo workflow`);
+    assert.ok(!rendered.includes(start.trim()), `${label} must not carry its section markers`);
+    assert.ok(!rendered.includes('relay_todo_update'), `${label} must not name a Todo tool`);
+  }
   assert.match(skill.split('---')[1],/act on a received Relay or continue that work/);
 });

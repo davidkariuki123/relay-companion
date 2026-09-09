@@ -2250,6 +2250,7 @@ function buildPayload() {
       notificationDurationMs: Number(process.env.RELAY_OVERLAY_NOTIFICATION_MS) || 7000,
       onboardingVersion: COMPANION_ONBOARDING_VERSION,
       setupPrompt: `Read ${webBase()}/for-agents and set me up on Relay.`,
+      tutorialPrompt: require("./returning-tutorial-prompt.cjs")(`${webBase()}/llm_guide.md`),
       completedOnboardingVersion,
       onboardingRequired: currentAccount.paired && (networkOnboardingState.required || completedOnboardingVersion < COMPANION_ONBOARDING_VERSION),
       networkOnboarding: networkOnboardingState,
@@ -9694,6 +9695,11 @@ ipcMain.handle("relay:installationAuthRestart", () => installationAuthorizationI
   (await installationAuthorizationController()).restart()));
 ipcMain.handle("relay:copySetupPrompt", () => {
   clipboard.writeText(`Read ${webBase()}/for-agents and set me up on Relay.`);
+  return { ok: true };
+});
+ipcMain.handle("relay:copyTutorialPrompt", (_event, expectedUserId) => {
+  if (!expectedUserId || account().userId !== expectedUserId) throw new Error("Relay account changed. Try again.");
+  clipboard.writeText(require("./returning-tutorial-prompt.cjs")(`${webBase()}/llm_guide.md`));
   return { ok: true };
 });
 ipcMain.handle("relay:installationAuthSignIn", (_event, input = {}) => installationAuthorizationIpc(async () =>

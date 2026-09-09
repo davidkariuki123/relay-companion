@@ -347,6 +347,23 @@ test("Windows activation restarts tasks pill-first and rejects processes from an
   assert.equal(mixed.ok, false);
   assert.equal(mixed.oldDaemon, true);
   assert.equal(mixed.oldPill, true);
+  // The hidden cmd.exe launcher wrapper repeats the whole service command line;
+  // it is the same daemon or pill, not a second one, and a second stale wrapper
+  // from another tree must not count as an old service either.
+  const wrapped = exactRuntimeHealth(target, {
+    platform: "win32",
+    commands: [
+      `"C:\\Windows\\system32\\cmd.exe"  /d /s /c ""C:\\node\\node.exe" "--max-old-space-size=128" "${target.bin}" "daemon" >> "C:\\u\\.relay\\daemon.log" 2>&1"`,
+      `"C:\\node\\node.exe"  "--max-old-space-size=128" "${target.bin}" "daemon"`,
+      `"C:\\Windows\\system32\\cmd.exe"  /d /s /c ""${target.packageRoot}\\node_modules\\electron\\dist\\electron.exe" "${target.packageRoot}\\overlay\\main.cjs""`,
+      `"${target.packageRoot}\\node_modules\\electron\\dist\\electron.exe"  "${target.packageRoot}\\overlay\\main.cjs"`,
+      "C:\\Windows\\system32\\cmd.exe /d /s /c \"\"C:\\node\\node.exe\" \"C:\\legacy\\node_modules\\relay-companion\\bin\\relay.js\" \"daemon\"\"",
+    ],
+  });
+  assert.equal(wrapped.ok, true, "cmd.exe wrappers are the same service, not extra ones");
+  assert.equal(wrapped.daemonCount, 1);
+  assert.equal(wrapped.pillCount, 1);
+  assert.equal(wrapped.oldDaemon, false);
 });
 
 test("legacy rollback is repaired by the failed candidate CLI with explicit target overrides", async () => {

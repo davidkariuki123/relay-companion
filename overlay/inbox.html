@@ -2827,6 +2827,14 @@
   .su-first-relay .su-form { margin-top:18px; }
   .su-setup-prompt { margin-top:18px; padding:14px; border:1px solid var(--edge); border-radius:10px; background:var(--wash); font-size:12px; line-height:1.6; user-select:text; }
   .su-copy-setup { width:100%; margin-top:10px; }
+  .su-tutorial { margin-top:18px; padding-top:14px; border-top:1px solid var(--edge); }
+  .su-body:has(.su-network) { justify-content:flex-start; overflow:hidden; }
+  .su-network { display:flex; flex-direction:column; flex:1; min-height:0; }
+  .su-network-content { flex:1; min-height:0; overflow:auto; }
+  .su-tutorial h2 { margin:0; font:600 15px/1.3 var(--sans); color:var(--ink); }
+  .su-tutorial details { margin-top:10px; font-size:12px; color:var(--muted); }
+  .su-tutorial summary { cursor:pointer; }
+  .su-tutorial .su-setup-prompt { max-height:180px; overflow:auto; white-space:pre-wrap; }
   .su-returning { margin:23px 0 0; text-align:center; font-size:11px; line-height:1.6; color:var(--muted); }
   .su-signin { padding:0; border:0; background:none; color:var(--ink); font:inherit; font-weight:600; text-decoration:underline; text-underline-offset:3px; cursor:pointer; }
   .su-divider { display:flex; align-items:center; gap:10px; color:var(--muted-3); font-size:10px; text-transform:uppercase; letter-spacing:.12em; }
@@ -8291,7 +8299,7 @@
     const details = !twoFaces && agentText ? `
         <div class="rd-details${detailsOpen ? " open" : ""}" data-stop="1">
           <button type="button" class="rd-details-head" data-rd-details="${esc(r.id)}" aria-expanded="${detailsOpen ? "true" : "false"}">
-            <span class="rd-details-name">Details</span>
+            <span class="rd-details-name">Details for your agent</span>
             <span class="rd-details-meta">${esc(`${agentWords.toLocaleString("en-US")} ${agentWords === 1 ? "word" : "words"} · the specifics · your agent gets these too`)}</span>
             <span class="rd-details-chev" aria-hidden="true">›</span>
           </button>
@@ -16019,10 +16027,10 @@
     }
   }
 
-  let networkInvite = { account:null, busy:false, copied:false, error:"" };
+  let networkInvite = { account:null, busy:false, copied:false, tutorialCopied:false, tutorialError:"", error:"" };
   function networkInviteForAccount() {
     const account = signupAccountKey();
-    if (networkInvite.account !== account) networkInvite = { account, busy:false, copied:false, error:"" };
+    if (networkInvite.account !== account) networkInvite = { account, busy:false, copied:false, tutorialCopied:false, tutorialError:"", error:"" };
     return networkInvite;
   }
   async function copyNetworkInvitation() {
@@ -16034,6 +16042,17 @@
       if (!result?.ok) throw new Error();
       state.copied = true;
     } catch { state.error = "Your invite link couldn’t be copied. Try again, or continue and find it in People."; }
+    finally { state.busy = false; if (state.account === signupAccountKey()) renderAll(); }
+  }
+  async function copyReturningTutorial() {
+    const state = networkInviteForAccount();
+    if (state.busy) return;
+    state.busy = true; state.tutorialError = ""; renderSignup();
+    try {
+      const result = await window.relay.copyTutorialPrompt(payload.account?.userId);
+      if (!result?.ok) throw new Error();
+      state.tutorialCopied = true;
+    } catch { state.tutorialError = "The tutorial prompt couldn’t be copied. Open Show prompt and copy the text."; }
     finally { state.busy = false; if (state.account === signupAccountKey()) renderAll(); }
   }
   async function finishNetworkInvitation() {
@@ -16173,17 +16192,24 @@
     }
     if (signupStage === "network") {
       const state = networkInviteForAccount();
-      const signature = JSON.stringify([state.account, state.busy, state.copied, state.error]);
+      const signature = JSON.stringify([state.account, state.busy, state.copied, state.tutorialCopied, state.tutorialError, state.error, payload.ui?.tutorialPrompt]);
       if (signupBodyEl.dataset.networkSignature === signature && signupBodyEl.querySelector("#suNetworkCopy")) return;
       signupBodyEl.dataset.networkSignature = signature;
-      signupBodyEl.innerHTML = `<div class="su-first-relay"><p class="su-step">Welcome to Relay</p>
+      signupBodyEl.innerHTML = `<div class="su-first-relay su-network"><div class="su-network-content"><p class="su-step">Welcome to Relay</p>
         <h1 class="su-title">Grow your network.</h1>
         <p class="su-copy">Share your invite link with someone you’d like to Relay. When they join, you can message each other from your agents.</p>
-        <div class="su-form"><button class="su-primary" id="suNetworkCopy" type="button"${state.busy ? " disabled" : ""}>${state.copied ? "Copy link again" : "Copy invite link"}</button>
-        <button class="su-primary" id="suNetworkContinue" type="button"${state.busy ? " disabled" : ""}>Continue to Relay</button></div>
+        <div class="su-form"><button class="su-primary" id="suNetworkCopy" type="button"${state.busy ? " disabled" : ""}>${state.copied ? "Copy link again" : "Copy invite link"}</button></div>
         ${state.copied ? '<p class="su-copy" role="status">Link copied. Paste it wherever you talk to them.</p>' : ""}
+        ${payload.ui?.tutorialPrompt ? `<section class="su-tutorial"><h2>Learn Relay with your agent</h2>
+          <p class="su-copy">Paste this prompt into Claude Code or Codex for a guided tour and an optional practice message.</p>
+          <button class="su-secondary su-copy-setup" id="suTutorialCopy" type="button"${state.busy ? " disabled" : ""}>${state.tutorialCopied ? "Copy tutorial prompt again" : "Copy tutorial prompt"}</button>
+          ${state.tutorialCopied ? '<p class="su-copy" role="status">Prompt copied. Paste it into your agent to begin.</p>' : ""}
+          ${state.tutorialError ? `<p class="su-error" role="alert">${esc(state.tutorialError)}</p>` : ""}
+          <details><summary>Show prompt</summary><div class="su-setup-prompt" id="suTutorialPrompt">${esc(payload.ui.tutorialPrompt)}</div></details></section>` : ""}
+        </div><div class="su-form"><button class="su-primary" id="suNetworkContinue" type="button"${state.busy ? " disabled" : ""}>Continue to Relay</button></div>
         ${state.error ? `<p class="su-error" role="alert">${esc(state.error)}</p>` : ""}</div>`;
       document.getElementById("suNetworkCopy")?.addEventListener("click", copyNetworkInvitation);
+      document.getElementById("suTutorialCopy")?.addEventListener("click", copyReturningTutorial);
       document.getElementById("suNetworkContinue")?.addEventListener("click", finishNetworkInvitation);
       return;
     }

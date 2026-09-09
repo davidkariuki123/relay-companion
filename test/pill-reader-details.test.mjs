@@ -22,9 +22,9 @@ test("a letter has no contents strip; only a Task keeps its two faces", () => {
   assert.match(reader, /Message for your agent<\/span>/);
 });
 
-test("Details is always called Details and starts closed", () => {
+test("Details for your agent starts closed", () => {
   assert.match(reader, /const details = !twoFaces && agentText \? `/);
-  assert.match(reader, /<span class="rd-details-name">Details<\/span>/);
+  assert.match(reader, /<span class="rd-details-name">Details for your agent<\/span>/);
   assert.match(reader, /· the specifics · your agent gets these too/);
   // Closed until this person opens it: the body renders only when the id is
   // in the set, and nothing puts an id there but a click.

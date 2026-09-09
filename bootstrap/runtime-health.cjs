@@ -13,6 +13,17 @@ const PILL_LABEL = "work.relay.companion.pill";
 // runtime. Only installed relay-companion trees count as production services.
 const SERVICE_TREE_RE = /node_modules[\\/]relay-companion[\\/]/i;
 
+// Windows starts each service through a hidden `cmd.exe /d /s /c "..."` wrapper
+// (install.js windowsTaskAction) whose command line repeats the whole service
+// command. That row is the same daemon or pill, not a second one: counting it
+// made every exact-root health check on Windows report two daemons and two
+// pills, so activation failed forever and the updater re-staged in a loop.
+const WINDOWS_SHELL_WRAPPER_RE = /^\s*"?(?:[^"\r\n]*[\\/])?cmd\.exe"?\s/i;
+
+function withoutWindowsShellWrappers(lines) {
+  return lines.filter((line) => !WINDOWS_SHELL_WRAPPER_RE.test(line));
+}
+
 function commandOk(result) {
   return Boolean(result && !result.error && result.status === 0);
 }
@@ -25,7 +36,7 @@ function runtimeProcessCommands(platform, run = defaultRun, userId = typeof proc
   if (platform === "win32") {
     const script = "$relaySid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { $_.CommandLine -match 'node_modules[\\\\/]relay-companion[\\\\/]' } | ForEach-Object { $relayOwner = Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid -ErrorAction SilentlyContinue; if ($relayOwner.Sid -eq $relaySid) { $_.CommandLine } }";
     const result = run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]);
-    return commandOk(result) ? String(result.stdout || "").split(/\r?\n/) : [];
+    return commandOk(result) ? withoutWindowsShellWrappers(String(result.stdout || "").split(/\r?\n/)) : [];
   }
   const result = run("/bin/ps", ["-axo", "uid=,command="]);
   if (!commandOk(result)) return [];
@@ -44,7 +55,7 @@ function exactRuntimeHealth(target, {
   userId = typeof process.getuid === "function" ? process.getuid() : 0,
 } = {}) {
   const api = platform === "win32" ? path.win32 : path.posix;
-  const lines = commands || runtimeProcessCommands(platform, run, userId);
+  const lines = withoutWindowsShellWrappers(commands || runtimeProcessCommands(platform, run, userId));
   const normalize = (value) => (platform === "win32" ? String(value).toLowerCase() : String(value)).replaceAll("\\", "/");
   const daemonNeedle = normalize(target.bin);
   const pillNeedle = normalize(api.join(target.packageRoot, "overlay", "main.cjs"));

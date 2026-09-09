@@ -1,21 +1,28 @@
 // Real pill renderer, in-memory IPC. No account, installation or delivery changes.
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
+import tutorialPrompt from '../overlay/returning-tutorial-prompt.cjs';
 const browser = await chromium.launch({headless:true});
 try {
   const page = await browser.newPage({viewport:{width:850,height:850}});
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
-  await page.addInitScript(() => {
+  const prompt = tutorialPrompt('https://sendrelays.com/llm_guide.md');
+  await page.addInitScript(prompt => {
     window.fixtureEvents = {};
     window.fixtureWrites = [];
+    window.fixtureTutorialCopies = [];
     window.fixtureFail = false;
     window.fixturePayload = {account:{paired:true,userId:'a',name:'Preview Person',email:'preview@example.test'},
-      ui:{canDismiss:true,onboardingRequired:true,onboardingVersion:2,completedOnboardingVersion:2,
+      ui:{canDismiss:true,onboardingRequired:true,onboardingVersion:2,completedOnboardingVersion:2,tutorialPrompt:prompt,
         networkOnboarding:{required:true,checking:false,version:2}},features:{},relays:[],sent:[],contacts:[],chats:[]};
     const api = {isTestOverlay:true, refresh:async () => structuredClone(window.fixturePayload),
       contacts:async () => [], groups:async () => ({ok:true,result:[]}),
       copyOnboardingInviteLink:async userId => {window.fixtureWrites.push(['copy',userId]); return {ok:true};},
+      copyTutorialPrompt:async userId => {
+        if (window.fixtureCopyFailure) throw Error('clipboard unavailable');
+        window.fixtureTutorialCopies.push([userId,prompt]);return {ok:true};
+      },
       completeNetworkOnboarding:async userId => {
         window.fixtureWrites.push(['complete',userId]);
         if(window.fixtureFail) throw Error('offline');
@@ -30,16 +37,33 @@ try {
       if(String(key).startsWith('on')) return callback => {window.fixtureEvents[key]=callback;return () => {};};
       return async () => ({ok:true});
     }});
-  });
+  }, prompt);
   await page.goto(new URL('../overlay/inbox.html',import.meta.url).href);
   await page.locator('#suNetworkCopy').waitFor();
   assert.deepEqual(await page.evaluate(() => window.fixtureWrites), []);
   assert.equal(await page.locator('#signupView').getByText('Grow your network.').isVisible(), true);
+  const footerInCard = () => page.locator('#suNetworkContinue').evaluate(el => {
+    const button = el.getBoundingClientRect(), card = document.getElementById('card').getBoundingClientRect();
+    return button.top >= card.top && button.bottom <= card.bottom;
+  });
+  assert.equal(await footerInCard(), true);
+  if(process.env.RELAY_ONBOARDING_SCREENSHOT) await page.locator('#card').screenshot({path:process.env.RELAY_ONBOARDING_SCREENSHOT});
+  await page.evaluate(() => {window.fixtureCopyFailure = true;});
+  await page.locator('#suTutorialCopy').click();
+  await page.getByText('The tutorial prompt couldn’t be copied. Open Show prompt and copy the text.').waitFor();
+  await page.getByText('Show prompt', {exact:true}).click();
+  assert.equal(await page.locator('#suTutorialPrompt').innerText(), prompt);
+  assert.equal(await footerInCard(), true, 'expanded instructions keep Continue reachable');
+  await page.evaluate(() => {window.fixtureCopyFailure = false;});
+  await page.locator('#suTutorialCopy').click();
+  await page.getByText('Prompt copied. Paste it into your agent to begin.').waitFor();
+  assert.deepEqual(await page.evaluate(() => window.fixtureTutorialCopies), [['a',prompt]]);
+  assert.deepEqual(await page.evaluate(() => window.fixtureWrites), [], 'tutorial copying never completes onboarding or sends');
   await page.locator('#suNetworkCopy').click();
   await page.getByText('Link copied. Paste it wherever you talk to them.').waitFor();
   assert.deepEqual(await page.evaluate(() => window.fixtureWrites), [['copy','a']]);
   assert.equal(await page.locator('#suNetworkContinue').isVisible(), true, 'copying is not completion');
-  if(process.env.RELAY_ONBOARDING_SCREENSHOT) await page.locator('#card').screenshot({path:process.env.RELAY_ONBOARDING_SCREENSHOT});
+  assert.equal(await footerInCard(), true, 'copy confirmations keep Continue reachable');
   await page.evaluate(() => {window.fixtureFail = true;});
   await page.locator('#suNetworkContinue').click();
   await page.getByText('Relay couldn’t save your progress. Check your connection and try again.').waitFor();
@@ -55,6 +79,7 @@ try {
   });
   await page.locator('#suNetworkCopy').waitFor();
   assert.equal(await page.locator('#suNetworkCopy').textContent(), 'Copy invite link');
+  assert.equal(await page.locator('#suTutorialCopy').textContent(), 'Copy tutorial prompt');
   await page.evaluate(() => {window.fixturePending = true;});
   await page.locator('#suNetworkContinue').click();
   await page.waitForFunction(() => typeof window.fixtureResolve === 'function');

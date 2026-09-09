@@ -30,7 +30,14 @@ export function nativeCredentialAccessAllowed(env = process.env, platform = proc
   // custom path: refusing it left every Windows MCP tool call without a token
   // (missing_authorization) while the daemon and pill authenticated fine.
   if (!env.RELAY_CONFIG_DIR) return true;
-  return path.resolve(String(env.RELAY_CONFIG_DIR)) === path.resolve(path.join(homeDir, ".relay"));
+  const configured = path.resolve(String(env.RELAY_CONFIG_DIR));
+  const defaultDir = path.resolve(path.join(homeDir, ".relay"));
+  // Windows paths are case-insensitive, and the broker descriptor hands hosts a
+  // lowercased config root (mcp-broker-state normalizedPath), so a broker the
+  // Codex steward or a Task run spawned saw `c:\users\...` here and lost its
+  // token while a Claude-spawned one with `C:\Users\...` kept it.
+  if (platform === "win32") return configured.toLowerCase() === defaultDir.toLowerCase();
+  return configured === defaultDir;
 }
 const nativeCredentialBackend = {
   writeDeviceToken: (token, options) => nativeCredentialAccessAllowed()

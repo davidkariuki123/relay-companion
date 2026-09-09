@@ -3,6 +3,23 @@ name: relay
 description: Use Relay from Claude Code or Codex with Companion's local MCP tools and the protocol helper for setup and fallback. Use when the person asks to set up Relay, read or send a Relay, check messages, act on a received Relay or continue that work, reply to a contact, share their invite link, or continue the first-run Relay tutorial. Preserve existing integrations.
 ---
 
+<!--
+AUTHORED SOURCE. `npm run agent-guide:generate` renders this file into the two
+skills that actually ship: SKILL.md for staging and production, and the dev
+channel variant under skill/variants. Edit this file, never those.
+
+Three rules when editing:
+  * The GENERATED blocks below are replaced wholesale at build time. Editing
+    their prose here does nothing - change packages/shared/src/agent-guide.ts.
+  * Anything true only for developer accounts on dev (Tasks, Todo, AI sessions,
+    connectors, message mutations) belongs in [[dev]]...[[/dev]], with any
+    replacement wording for everyone else in [[prod]]...[[/prod]]. Production
+    users cannot reach those features, so naming them describes a door that is
+    not there.
+  * skill/relay holds exactly the manifest files and nothing else. The helper
+    reports an installation as modified when it finds a stranger there.
+-->
+
 # Relay
 
 Use Relay inside the current agent conversation. Companion supplies a visual
@@ -12,7 +29,7 @@ Hosted/headless agents can use the authenticated HTTPS protocol directly.
 ## Agent transport
 
 <!-- BEGIN GENERATED RELAY TRANSPORT -->
-Use the available Relay MCP tools first when they answer. If they are absent or fail with an authentication or transport error, use the installed skill's protocol helper without repeatedly retrying MCP. If MCP refuses because this session's Relay tools are bound to a previous account while Relay is now signed in as someone else, that is also a reason to use the helper before reporting a problem or asking the human to restart: the helper follows the current sign-in, so run its status and request GET /v1/me, and continue through it when the account is the one the human intends. Keep the exact approved message and idempotency key when switching transport. Do not treat permission refusals, invalid requests, encryption requirements or a mismatch reported by the helper itself as connection failures: when the helper refuses for a different account or environment, stop and tell the human exactly which account or origin differs. A refused helper is never a reason to open agent-protocol.json, copy its token, or make Relay requests outside the helper. The helper prefers the matching Companion and retains browser-approved HTTPS access for fallback; when Companion is signed in to the same account on a different Relay environment, scoped requests read directly from the approved origin and the helper says so on stderr. New setup uses the pinned helper immediately while Companion installs and registers local MCP for later sessions; registering MCP does not prove it is available in an already-open session. Existing hooks are preserved and new users receive no hooks. For full capability coverage without MCP, run the installed helper with tools to discover the current account-specific catalog, descriptions and JSON schemas, then call <exact-tool-name> with the tool arguments as JSON on stdin. These commands use Companion’s same handlers as MCP, including group/contact management and share links. They require the matching current Companion; direct HTTPS remains limited to its scoped messaging routes and cannot substitute for these calls. Preserve approval requirements and the exact payload and idempotency key on retries; tool calls are never automatically retried or switched to HTTPS. Call results preserve content and isError; an error exits nonzero. The existing send shortcut retains its durable outgoing queue.
+Use the available Relay MCP tools first when they answer. If they are absent or fail with an authentication or transport error, use the installed skill's protocol helper without repeatedly retrying MCP. If MCP refuses because this session's Relay tools are bound to a previous account while Relay is now signed in as someone else, that is also a reason to use the helper before reporting a problem or asking the human to restart: the helper follows the current sign-in, so run its status and request GET /v1/me, and continue through it when the account is the one the human intends. Keep the exact approved message and idempotency key when switching transport. Do not treat permission refusals, invalid requests, encryption requirements or a mismatch reported by the helper itself as connection failures: when the helper refuses for a different account or environment, stop and tell the human exactly which account or origin differs. A refused helper is never a reason to open agent-protocol.json, copy its token, or make Relay requests outside the helper. The helper prefers the matching Companion and retains browser-approved HTTPS access for fallback; when Companion is signed in to the same account on a different Relay environment, scoped requests read directly from the approved origin and the helper says so on stderr. New setup uses the pinned helper immediately while Companion installs and registers local MCP for later sessions; registering MCP does not prove it is available in an already-open session. Existing hooks are preserved and new users receive no hooks. For full capability coverage without MCP, run the installed helper with tools to discover the current account-specific catalog, descriptions and JSON schemas, then call <exact-tool-name> with the tool arguments as JSON on stdin. These commands use Companion’s same handlers as MCP, including group/contact management, message edits/deletion/restoration, share links, Tasks/Todo, AI sessions and connectors where enabled for this account. They require the matching current Companion; direct HTTPS remains limited to its scoped messaging routes and cannot substitute for these calls. Preserve approval requirements and the exact payload and idempotency key on retries; tool calls are never automatically retried or switched to HTTPS. Call results preserve content and isError; an error exits nonzero. The existing send shortcut retains its durable outgoing queue.
 <!-- END GENERATED RELAY TRANSPORT -->
 
 <!-- BEGIN GENERATED RELAY ONBOARDING -->
@@ -241,7 +258,60 @@ available. Installation success does not prove MCP is active in this session.
 
 The tutorial activation event is the approved first Relay, not app installation.
 
-## Everyday Relay work
+[[dev]]<!-- BEGIN GENERATED RELAY TODO WORKFLOW -->
+## Keep Todo aligned with work
+
+When the human asks you to act on an inbound titled Relay, update its Todo
+status as part of doing the work. This also applies when you read the Relay
+earlier and the human later says "fix this", sends a screenshot of the same
+issue, or continues the work in an existing conversation. Keep the exact source
+Relay ID associated with that work; do not require the person to say "update Todo".
+
+Check relevant Todo state when starting or resuming Relay-related work, at
+meaningful milestones during sustained work (such as completed implementation,
+verification, or a requested push), and before the final completion response.
+Use relay_inbox_list with todoStatuses ["triage", "in_progress"] to find relevant
+open items; use relayIds for exact source items already known. One-status Todo
+queries support limit and cursor pagination; follow nextCursor when the item
+may be beyond the returned page. Include done when verifying a completed item.
+The CLI has the same read capability: call relay_inbox_list through the installed
+helper with the same JSON arguments. An inbox call without todoStatuses is only
+recent arrivals, not the current Todo board.
+
+Compare the relevant items with what this session actually started or finished.
+Make the needed In Progress or Done updates, then check the returned status and
+version before claiming success. Keep a failure visible in the final response.
+Do not poll unchanged state between every tool call, change unrelated items,
+start work merely because it is listed, or create a background schedule unless
+the human asks for one.
+
+Before substantive work, read the exact item with relay_inbox_list relayIds for
+its current todoVersion, then call relay_todo_update with status in_progress.
+Before reporting completion, call it with status done and a brief note plus
+relevant evidence. Judge completion against the outcome the human requested:
+if they asked for a fix on main, an unrequested later deployment is not a new
+condition for Done. If they asked for deployment, a push alone is not Done.
+If work remains, keep its status accurate and explain the actual remaining step.
+
+On a version conflict, re-read the item, reconsider the latest state, and retry
+only if the update still applies. If the write fails, report that Todo was not
+updated; do not present it as successful. If MCP is unavailable, use the installed
+helper's tools and call relay_todo_update with the same arguments through the
+supported Companion connection. Preserve the idempotency key on retries.
+
+Reading, summarizing, discussing or drafting about a Relay does not authorize
+acting on it and does not itself change its Todo status. For an inbound Task,
+use relay_task_start before the authorized work and relay_task_complete with its
+result afterward; do not substitute ordinary Relay status updates for Task
+completion. Cancellation or removal requires the human's corresponding request.
+
+Before ending work on a Relay, check that its status matches what you actually
+finished, or explain the specific update failure. A follow-up coding request
+does not detach the work from the Relay that introduced it.
+
+<!-- END GENERATED RELAY TODO WORKFLOW -->
+
+[[/dev]]## Everyday Relay work
 
 Before sending, resolve a named recipient with contact search and ask if the
 result is ambiguous. Never invent an address or recipient identifier. Always
@@ -365,8 +435,12 @@ For a titled Relay, use a natural 3–6 word gist in the sender's register. Name
 the single ask, outcome, update or decision someone should recognize at a
 glance. Do not concatenate every finding or write a report headline.
 
-Every Relay is `kind: "message"`: human correspondence, including
-technical notes, suggestions, opinions and decisions.
+Classify the requested outcome: `kind: "message"` is human correspondence,
+including technical notes, suggestions, opinions and decisions. Use
+`kind: "task"` only for requested external work by the recipient's agent, such
+as inspecting, retrieving, changing, testing or verifying something. A small
+operation or one addressed as "you" is still work; dense agent context alone
+is not. Respect the account's available capabilities.
 
 Before presenting or sending, check both documents against the user's request:
 every intended point is preserved; no ask or commitment was invented; the person
@@ -381,7 +455,8 @@ Use `groups` to find a channel, `chats` to find a conversation, and `chat <id>`
 or `thread <id>` to read it. A send body uses one exact recipient identifier:
 `recipient: {relayUserId}`, `{contactId}`, `{groupId}` or `{chatId}`. Confirm an
 ambiguous name before sending. Include `kind: "message"`, `forHuman`, `forAgent`
-and the same `idempotencyKey` for every retry. An optional `title` is also supported under the existing send contract. Set
+and the same `idempotencyKey` for every retry. [[dev]]`kind: "task"` and an optional
+`title` are[[/dev]][[prod]]An optional `title` is[[/prod]] also supported under the existing send contract. Set
 `inReplyToRelayId` only for an explicitly selected message.
 
 To attach a local file, add `files: ["<absolute path>"]` to the JSON passed on

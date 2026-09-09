@@ -219,6 +219,7 @@ contextBridge.exposeInMainWorld("relay", {
   // installation-authorization namespace, and does so before minting again.
   installationAuthRestart: () => ipcRenderer.invoke("relay:installationAuthRestart"),
   copySetupPrompt: () => ipcRenderer.invoke("relay:copySetupPrompt"),
+  copyTutorialPrompt: (userId) => ipcRenderer.invoke("relay:copyTutorialPrompt", userId),
   installationAuthSignIn: (options = {}) => ipcRenderer.invoke("relay:installationAuthSignIn", { forceAccountSelection: options?.forceAccountSelection === true }),
   installationAuthGoogle: (options = {}) => ipcRenderer.invoke("relay:installationAuthGoogle", {
     forceAccountSelection: options?.forceAccountSelection === true,

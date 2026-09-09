@@ -16,6 +16,16 @@ test("the default config directory keeps native credential access on Windows", (
   assert.equal(nativeCredentialAccessAllowed({ RELAY_CONFIG_DIR: path.join(home, ".relay", "..", ".relay") }, "win32", home), true);
 });
 
+test("the default directory still counts when a host spells it in another case", () => {
+  // mcp-broker-state normalizes the config root to lowercase on Windows and the
+  // Go bridge derives RELAY_CONFIG_DIR from that descriptor path, so a broker
+  // the Codex steward spawned saw `c:\users\...` and answered every tool call
+  // with missing_authorization while a Claude-spawned one worked.
+  assert.equal(nativeCredentialAccessAllowed({ RELAY_CONFIG_DIR: path.join(home, ".relay").toLowerCase() }, "win32", home), true);
+  assert.equal(nativeCredentialAccessAllowed({ RELAY_CONFIG_DIR: path.join(home, ".RELAY") }, "win32", home), true);
+  assert.equal(nativeCredentialAccessAllowed({ RELAY_CONFIG_DIR: path.join(home, ".relay") }, "win32", home.toLowerCase()), true);
+});
+
 test("a custom config path still needs the explicit opt-in on Windows", () => {
   assert.equal(nativeCredentialAccessAllowed({ RELAY_CONFIG_DIR: path.join(home, "sandbox") }, "win32", home), false);
   assert.equal(nativeCredentialAccessAllowed({ RELAY_CONFIG: path.join(home, ".relay", "other.json") }, "win32", home), false);

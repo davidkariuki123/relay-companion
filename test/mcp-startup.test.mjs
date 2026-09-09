@@ -16,9 +16,15 @@ import {
 
 const relayBin = fileURLToPath(new URL("../bin/relay.js", import.meta.url));
 
+// ORDINARY_RELAY_TOOL_NAMES is the ordinary-messaging profile; these are the
+// members of it still gated to developer accounts on dev, so a production
+// session never sees them. Todo joined this list once its catalog gate existed:
+// productFeatures has always had it on the developer row and the Companion
+// overlay has always hidden its tab.
 const PRODUCTION_ORDINARY_RELAY_TOOL_NAMES = new Set(ORDINARY_RELAY_TOOL_NAMES);
-PRODUCTION_ORDINARY_RELAY_TOOL_NAMES.delete("relay_message_edit");
-PRODUCTION_ORDINARY_RELAY_TOOL_NAMES.delete("relay_message_delete");
+for (const gated of ["relay_message_edit", "relay_message_delete", "relay_todo_update", "relay_todo_visibility", "relay_todo_reorder"]) {
+  PRODUCTION_ORDINARY_RELAY_TOOL_NAMES.delete(gated);
+}
 
 async function inspectMcp({ developer = false, updateChannel = "stable" }) {
   const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-mcp-startup-"));
