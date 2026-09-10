@@ -6,6 +6,29 @@ import MarkdownIt from "markdown-it";
 import { renderRelayOpenDocuments, renderRelayOpenSeed, renderRelayRowSeed } from "../src/relay-briefing.js";
 import { localIso } from "../src/local-time.cjs";
 
+test("Open stages personalized reading guidance without changing either original document", () => {
+  const row = {
+    id: "relay_reading",
+    senderName: "Sven",
+    title: "An idea to explore",
+    forHuman: "Could this help our work?\n\n- What would change?\n- What remains uncertain?",
+    forAgent: "Reasoning, rejected alternatives and evidence.\nDo not assume the recipient agrees.",
+  };
+  for (const relayOpenDocumentPaths of [undefined, { forHuman: "/tmp/human.md", forAgent: "/tmp/agent.md" }]) {
+    const seed = renderRelayOpenSeed({ ...row, relayOpenDocumentPaths });
+    assert.match(seed.operatorNote, /recipient's specific request first/);
+    assert.match(seed.operatorNote, /For a vague read request/);
+    assert.match(seed.operatorNote, /Distinguish what the sender said/);
+    assert.match(seed.operatorNote, /Do not append a routine footer/);
+    assert.match(seed.operatorNote, /does not itself request an explanation turn/);
+    assert.match(seed.operatorNote, /Do not start background work/);
+    assert.doesNotMatch(seed.visible, /## Reading a Relay/);
+  }
+  const documents = renderRelayOpenDocuments(row);
+  for (const line of row.forHuman.split("\n").filter(Boolean)) assert.ok(documents.includes(line));
+  assert.ok(documents.includes(row.forAgent));
+});
+
 test("renderRelayRowSeed puts ordinary relay attachments in a compact clickable section near the top", () => {
   const seed = renderRelayRowSeed({
     relayNotificationKind: "plain_relay",

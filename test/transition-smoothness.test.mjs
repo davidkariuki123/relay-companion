@@ -85,8 +85,8 @@ test("the exact-session picker expands and retires as one continuous disclosure"
   assert.match(lifecycle, /armSessionPickerReveal\(\)/);
   assert.match(lifecycle, /requestAnimationFrame\(\(\) => requestAnimationFrame\(\(\) =>/,
     "the zero-height disclosure is committed before the open class is painted");
-  assert.match(lifecycle, /reveal\.classList\.remove\("open"\)[\s\S]*transitionend/,
-    "closing keeps the existing DOM alive until its grid track reaches zero");
+  assert.match(lifecycle, /reveal\.classList\.remove\("open"\)[\s\S]*height:"0px"[\s\S]*animation\.finished/,
+    "closing keeps the existing DOM alive until its measured height reaches zero");
   assert.match(lifecycle, /function followSessionPickerIntoView[\s\S]*requestAnimationFrame\(follow\)/,
     "the scrollport follows every disclosure frame instead of jumping after it opens");
 

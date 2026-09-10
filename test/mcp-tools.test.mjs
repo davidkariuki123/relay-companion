@@ -5,10 +5,6 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
-  FOR_HUMAN_DEFAULT_SENTENCE_LIMIT,
-  FOR_HUMAN_EXCEPTIONAL_SENTENCE_LIMIT,
-  FOR_HUMAN_SOFT_WORD_LIMIT,
-  FOR_HUMAN_TYPICAL_WORD_LIMIT,
   E2EE_LOCAL_MCP_INSTRUCTIONS,
   E2EE_LOCAL_TOOL_NAMES,
   ORDINARY_RELAY_TOOL_NAMES,
@@ -413,15 +409,12 @@ test("ordinary Relay MCP directs Claude and Codex to the membership-scoped Granu
   assert.match(humanDescription, /idempotencyKey.*change of transport/);
   assert.match(humanFieldDescription, /Writing a Relay/);
   assert.match(humanFieldDescription, /sender's intent and voice/);
-  assert.match(humanFieldDescription, /someone arriving fresh/);
-  assert.match(humanFieldDescription, /95 words/);
-  const longConfirmation = send.inputSchema.properties.longForHumanConfirmed;
-  assert.equal(longConfirmation.type, "boolean");
-  assert.match(longConfirmation.description, /already rejected this exact draft/i);
-  assert.match(longConfirmation.description, /Never set it preemptively/i);
+  assert.match(humanFieldDescription, /enough background for someone arriving fresh/);
+  assert.match(humanFieldDescription, /without a numerical target/);
+  assert.equal(send.inputSchema.properties.longForHumanConfirmed, undefined);
   const agentDescription = send.inputSchema.properties.forAgent.description;
   assert.match(agentDescription, /complete document/i);
-  assert.match(agentDescription, /under-sending here is worse than over-sending/i);
+  assert.match(agentDescription, /omitting potentially useful authorized context is massively more costly/i);
   assert.match(agentDescription, /do not repeat forHuman/i);
   assert.match(agentDescription, /Draft it first for every Relay/i);
   assert.match(agentDescription, /Never leave it empty/i);
@@ -1316,47 +1309,28 @@ test("relay_message_edit exposes either payload independently", () => {
   assert.ok(edit.inputSchema.properties.forAgent);
 });
 
-test("relay_message_edit keeps the MCP-only human-writing review", async () => {
-  let edits = 0;
-  const client = { async editMessage() { edits += 1; return { ok: true, relayId: "relay_1" }; } };
-  const args = {
-    relayId: "relay_1", forHuman: Array.from({ length: 96 }, (_, i) => `word${i}`).join(" "),
-    idempotencyKey: "edit_review_1", longForHumanConfirmed: true,
-  };
-  await assert.rejects(handleCall(client, "relay_message_edit", args, { mode: "messages-only" }), /review threshold is 95 words/);
-  assert.equal(edits, 0);
+test("relay_message_edit accepts a long human message on its first attempt", async () => {
+  const calls = [];
+  const client = { async editMessage(...args) { calls.push(args); return { ok: true }; } };
+  const args = { relayId: "relay_1", forHuman: "Full explanation. ".repeat(100), idempotencyKey: "long_edit_1" };
   await handleCall(client, "relay_message_edit", args, { mode: "messages-only" });
-  assert.equal(edits, 1);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][1].forHuman, args.forHuman);
 });
 
-test("relay_chat_reply reviews an overlong human message before reading or sending", async () => {
+test("relay_chat_reply preserves a long message on its first attempt", async () => {
   const calls = [];
-  const fakeClient = {
-    async chat(id) {
-      calls.push(["chat", id]);
-      return { chatId: id, items: [] };
-    },
-    async sendRelay(body) {
-      calls.push(["send", body]);
-      return { relayId: "relay_reviewed_reply", state: "delivered" };
-    },
+  const client = {
+    async chat(id) { return { chatId: id, items: [] }; },
+    async sendRelay(body) { calls.push(body); return { relayId: "relay_reply", state: "delivered" }; },
   };
-  const args = {
-    chatId: "chat_a",
-    forHuman: Array.from({ length: 96 }, (_, index) => `reply${index + 1}`).join(" "),
-    longForHumanConfirmed: true,
-    idempotencyKey: "long_chat_review_1",
-  };
-
-  await assert.rejects(
-    handleCall(fakeClient, "relay_chat_reply", args, { mode: "messages-only" }),
-    /review threshold is 95 words[\s\S]*Nothing was sent/i,
-  );
-  assert.deepEqual(calls, [], "review happens before the content-bearing chat fetch or delivery");
-
-  await handleCall(fakeClient, "relay_chat_reply", args, { mode: "messages-only" });
-  assert.deepEqual(calls.map(([name]) => name), ["chat", "send"]);
-  assert.equal(calls[1][1].longForHumanConfirmed, true, "the reviewed attempt reaches the API soft-review gate");
+  const forHuman = "Context and reasoning. ".repeat(100);
+  await handleCall(client, "relay_chat_reply", {
+    chatId: "chat_a", forHuman, idempotencyKey: "long_reply_1",
+  }, { mode: "messages-only" });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].forHuman, forHuman);
+  assert.equal(calls[0].longForHumanConfirmed, undefined);
 });
 
 test("relay_send teaches the relay-vs-REQUEST decision — David's discernment law", () => {
@@ -1464,101 +1438,23 @@ test("relay_send rejects report headlines before delivery", async () => {
   assert.equal(calls, 0, "an invalid draft never reaches the API");
 });
 
-test("relay_send requires an exact second review for human messages over 95 words", async () => {
-  assert.equal(FOR_HUMAN_SOFT_WORD_LIMIT, 95);
-  assert.equal(FOR_HUMAN_TYPICAL_WORD_LIMIT, 95);
-  assert.equal(FOR_HUMAN_DEFAULT_SENTENCE_LIMIT, 3);
-  assert.equal(FOR_HUMAN_EXCEPTIONAL_SENTENCE_LIMIT, 4);
+test("relay_send preserves long prose and multiple questions without review flags", async () => {
   const calls = [];
   const client = {
-    async sendRelay(payload) {
-      calls.push(payload);
-      return { relayId: "relay_long_reviewed", state: "delivered" };
-    },
+    async sendRelay(body) { calls.push(body); return { relayId: "relay_long", state: "delivered" }; },
   };
-  const forHuman = Array.from({ length: 96 }, (_, index) => `word${index + 1}`).join(" ");
-  const args = {
-    recipient: { relayUserId: "usr_sven" },
-    kind: "message",
-    title: "Read receipt design",
-    forHuman,
-    forAgent: "The complete technical document.",
-    // A model must not be able to preempt the review by setting this on its
-    // first call. The same exact draft may pass only after Relay rejects it.
-    longForHumanConfirmed: true,
-    idempotencyKey: "long_human_review_1",
-  };
-
-  await assert.rejects(
-    handleCall(client, "relay_send", args),
-    /forHuman is 96 words[\s\S]*Nothing was sent[\s\S]*hearing about it for the first time[\s\S]*longForHumanConfirmed: true/i,
-  );
-  assert.equal(calls.length, 0, "the first over-limit attempt has no delivery side effects");
-
-  const changedDraft = { ...args, forHuman: `${forHuman} changed` };
-  await assert.rejects(
-    handleCall(client, "relay_send", changedDraft),
-    /forHuman is 97 words[\s\S]*Nothing was sent/i,
-  );
-  assert.equal(calls.length, 0, "editing the rejected draft requires a fresh review");
-
-  await handleCall(client, "relay_send", changedDraft);
-  assert.equal(calls.length, 1, "the exact reviewed draft can be deliberately confirmed");
-  assert.equal(calls[0].forHuman, changedDraft.forHuman);
-  assert.equal(calls[0].longForHumanConfirmed, true, "the API can require its own exact-draft review token");
-});
-
-test("long-message review state never crosses broker connections", async () => {
-  const calls = [];
-  const client = {
-    async sendRelay(payload) {
-      calls.push(payload);
-      return { relayId: "relay_isolated_review", state: "delivered" };
-    },
-  };
-  const args = {
-    recipient: { relayUserId: "usr_sven" },
-    kind: "message",
-    title: "Read receipt design",
-    forHuman: Array.from({ length: 96 }, (_, index) => `word${index + 1}`).join(" "),
-    forAgent: "The complete technical document.",
-    longForHumanConfirmed: true,
-    idempotencyKey: "isolated_review_1",
-  };
-  const firstConnection = createMcpSessionContext();
-  const secondConnection = createMcpSessionContext();
-  await assert.rejects(
-    handleCall(client, "relay_send", args, { sessionContext: firstConnection }),
-    /Nothing was sent/,
-  );
-  await assert.rejects(
-    handleCall(client, "relay_send", args, { sessionContext: secondConnection }),
-    /Nothing was sent/,
-  );
-  assert.equal(calls.length, 0);
-  await handleCall(client, "relay_send", args, { sessionContext: firstConnection });
-  assert.equal(calls.length, 1, "only the connection that saw the rejection may confirm it");
-});
-
-test("relay_send accepts the 95-word review boundary without making it a target", async () => {
-  const calls = [];
-  const client = {
-    async sendRelay(payload) {
-      calls.push(payload);
-      return { relayId: "relay_at_review_boundary", state: "delivered" };
-    },
-  };
-  const forHuman = Array.from({ length: 95 }, (_, index) => `word${index + 1}`).join(" ");
-  await handleCall(client, "relay_send", {
-    recipient: { relayUserId: "usr_sven" },
-    kind: "message",
-    title: "Review boundary proof",
-    forHuman,
-    forAgent: "This payload proves that exactly 95 forHuman words remain within the boundary.",
-    idempotencyKey: "human_review_boundary_1",
-  });
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].forHuman, forHuman);
+  for (const words of [94, 95, 96, 300]) {
+    const forHuman = "Context ".repeat(words - 9).trim()
+      + "\n\n- Which option fits?\n- What evidence is missing?";
+    assert.equal(forHuman.split(/\s+/u).length, words);
+    await handleCall(client, "relay_send", {
+      recipient: { relayUserId: "usr_sven" }, kind: "message", title: "Questions about this approach",
+      forHuman, forAgent: "Full useful context", idempotencyKey: `long_${words}`,
+    });
+    assert.equal(calls.at(-1).forHuman, forHuman);
+    assert.equal(calls.at(-1).longForHumanConfirmed, undefined);
+  }
+  assert.equal(calls.length, 4);
 });
 
 test("obsolete coordination protocol is absent and rejected before any API call", async () => {
@@ -1772,55 +1668,18 @@ test("a supplied share title obeys the 3-6 word gate and an omitted one does not
   assert.equal(Object.hasOwn(payload, "title"), false);
 });
 
-test("a mint runs the 95-word review before it reads a single file", async () => {
-  const draft = Array.from({ length: 100 }, (_, index) => `word${index}`).join(" ");
-  let minted = 0;
-  const fakeClient = {
-    async mintShareLink() {
-      minted += 1;
-      return { url: "https://sendrelays.com/s/tok", relayId: "relay_share_1", state: "unopened" };
-    },
+test("a share link accepts a long explanation on its first attempt", async () => {
+  const calls = [];
+  const client = {
+    async mintShareLink(body) { calls.push(body); return { relayId: "relay_link", url: "https://example.com/r/link" }; },
   };
-  await assert.rejects(
-    handleCall(fakeClient, "relay_share_link", {
-      files: ["/nonexistent/relay-share-test-file"],
-      forHuman: draft,
-      idempotencyKey: "idem_share_review_1",
-    }),
-    /review threshold is 95 words/,
-    "the refusal arrives before prepareOrdinaryRelayAttachments touches the disk",
-  );
-  assert.equal(minted, 0);
-
-  await handleCall(fakeClient, "relay_share_link", {
-    forHuman: draft,
-    longForHumanConfirmed: true,
-    idempotencyKey: "idem_share_review_1",
+  const forHuman = "Useful explanation ".repeat(100);
+  await handleCall(client, "relay_share_link", {
+    forHuman, forAgent: "Useful supporting context", title: "An idea to explore", idempotencyKey: "long_link_1",
   });
-  assert.equal(minted, 1);
-
-  // The review key is `${toolName}:${idempotencyKey}`, so a confirmation earned
-  // by a relay_send draft can never satisfy a mint of the same key.
-  await assert.rejects(
-    handleCall({ async sendRelay() { return { relayId: "relay_1" }; } }, "relay_send", {
-      recipient: { email: "sven@example.com" },
-      kind: "message",
-      title: "Checking in today",
-      forHuman: draft,
-      forAgent: "This call verifies that relay_send and relay_share_link keep independent review state.",
-      idempotencyKey: "idem_share_review_2",
-    }),
-    /review threshold is 95 words/,
-  );
-  await assert.rejects(
-    handleCall(fakeClient, "relay_share_link", {
-      forHuman: draft,
-      longForHumanConfirmed: true,
-      idempotencyKey: "idem_share_review_2",
-    }),
-    /review threshold is 95 words/,
-  );
-  assert.equal(minted, 1);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].forHuman, forHuman);
+  assert.equal(calls[0].longForHumanConfirmed, undefined);
 });
 
 test("attachments over the inline budget are refused with the remedy, before the network", async () => {

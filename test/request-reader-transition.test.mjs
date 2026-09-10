@@ -26,7 +26,7 @@ function between(source, start, end) {
 
 test("Tasks stages an inert source snapshot before exposing the prepared reader", () => {
   const prepare = between(html, "function prepareReaderMorph", "function startReaderMorph");
-  const open = between(html, "function openReader", "function closeReader");
+  const open = between(html, "function openReader(id, source)", "function closeReader()");
 
   assert.match(prepare, /const source = \{/);
   assert.match(prepare, /const snapshot = source\.cloneNode\(true\)/);

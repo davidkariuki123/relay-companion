@@ -638,11 +638,7 @@ export class RelayClient {
   }
 
   async sendRelay(payload) {
-    if (!localE2eeIdentityAvailable()) return this.#req("POST", "/v1/relays", payload).catch((error) => {
-      const reviewToken = error?.body?.error === "human_message_review_required" ? error.body.reviewToken : null;
-      if (!reviewToken || payload?.longForHumanConfirmed !== true) throw error;
-      return this.#req("POST", "/v1/relays", { ...payload, longForHumanReviewToken: reviewToken });
-    });
+    if (!localE2eeIdentityAvailable()) return this.#req("POST", "/v1/relays", payload);
     const status = await verifiedE2eeStatus(this);
     if (status.mode !== "off") {
       if (payload.recipient?.groupId || String(payload.recipient?.chatId || "").startsWith("grp_")) {
@@ -650,22 +646,11 @@ export class RelayClient {
       }
       return encryptE2eeMessage(this, payload, status);
     }
-    return this.#req("POST", "/v1/relays", payload).catch((error) => {
-      const reviewToken = error?.body?.error === "human_message_review_required" ? error.body.reviewToken : null;
-      if (!reviewToken || payload?.longForHumanConfirmed !== true) throw error;
-      return this.#req("POST", "/v1/relays", { ...payload, longForHumanReviewToken: reviewToken });
-    });
+    return this.#req("POST", "/v1/relays", payload);
   }
 
-  // The mint route runs the same 95-word review gate as POST /v1/relays, and the
-  // confirmation the server accepts is an HMAC token it issued, not a boolean.
-  // Without this retry a legitimate longForHumanConfirmed can never be honoured.
   mintShareLink(payload) {
-    return this.#req("POST", "/v1/share-links", payload).catch((error) => {
-      const reviewToken = error?.body?.error === "human_message_review_required" ? error.body.reviewToken : null;
-      if (!reviewToken || payload?.longForHumanConfirmed !== true) throw error;
-      return this.#req("POST", "/v1/share-links", { ...payload, longForHumanReviewToken: reviewToken });
-    });
+    return this.#req("POST", "/v1/share-links", payload);
   }
 
   revokeShareLink(relayId) {

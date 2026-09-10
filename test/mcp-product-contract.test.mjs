@@ -92,8 +92,8 @@ test("startup guidance and owner schemas preserve the complete product ontology"
   assert.match(skillGuide, /uncertainty would materially change the meaning or commitment/);
   assert.match(skillGuide, /History cannot\s+revive superseded intent/);
   assert.match(skillGuide, /mechanisms, evidence, code, paths, logs, reproduction steps/);
-  assert.match(skillGuide, /under 95\s+words by default/);
-  assert.match(skillGuide, /only after rejection/);
+  assert.match(skillGuide, /no word-count target,\s+sentence-count limit/);
+  assert.match(skillGuide, /Check clarity as part of composing/);
   assert.match(RELAY_MCP_INSTRUCTIONS, /external work.*is task/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /Task Runs finish automatically/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /relay_task_start before doing an inbound Task and relay_task_complete afterward/i);
@@ -148,10 +148,10 @@ test("relay_send requires one recipient, an explicit kind, and the two-document 
   assert.match(humanDescription, /preserve the human's intent and invent no asks or commitments/);
   assert.match(humanFieldDescription, /sender's intent and voice/);
   assert.match(humanFieldDescription, /never invent, strengthen or soften an ask or commitment/);
-  assert.match(humanFieldDescription, /plain, complete spoken sentences/);
+  assert.match(humanFieldDescription, /Let content determine length and format/);
   assert.match(humanFieldDescription, /enough background for someone arriving fresh/);
-  assert.match(humanFieldDescription, /under 95 words/);
-  assert.match(send.inputSchema.properties.longForHumanConfirmed.description, /already rejected this exact draft/i);
+  assert.match(humanFieldDescription, /without a numerical target/);
+  assert.equal(send.inputSchema.properties.longForHumanConfirmed, undefined);
   assert.ok(Buffer.byteLength(send.description, "utf8") <= 2048,
     "relay_send keeps its skill pointer and essentials within the host description limit");
   assert.ok(humanFieldDescription.trim().split(/\s+/u).length <= 120,
@@ -184,7 +184,7 @@ test("every human-message writing surface preserves the sender's intended speech
     assert.match(guidance, /preserve the human's intent and invent no asks or commitments/i);
   }
   assert.match(skillGuide, /Sending information or attaching a file does not imply/);
-  assert.match(skillGuide, /Never add text just because space remains/);
+  assert.match(skillGuide, /Stop when the meaning is clear/);
 
 });
 

@@ -106,15 +106,15 @@ test('caller workspace, provenance and native session survive the helper boundar
   assert.equal(started.sourceNativeId, 'thread_test');
 });
 
-test('review state persists across calls and is isolated between callers; API remedies survive', async () => {
+test('long messages pass on first call for each caller; API remedies survive', async () => {
   let sends = 0;
   const api = surface({ sendRelay: async () => { sends++; return { relayId: 'relay_test' }; }, updateContact: async () => { throw Object.assign(new Error('invalid_request'), { body: { issues: [{ path: ['firstName'], message: 'Required' }] } }); } });
   const draft = { ...cases.relay_send[0], forHuman: 'word '.repeat(100).trim(), longForHumanConfirmed: true };
-  assert.equal((await api.call('relay_send', draft, caller)).isError, true);
-  assert.equal((await api.call('relay_send', draft, { ...caller, nativeId: 'other' })).isError, true);
-  assert.equal(sends, 0);
   assert.notEqual((await api.call('relay_send', draft, caller)).isError, true);
-  assert.equal(sends, 1);
+  assert.notEqual((await api.call('relay_send', draft, { ...caller, nativeId: 'other' })).isError, true);
+  assert.equal(sends, 2);
+  assert.notEqual((await api.call('relay_send', draft, caller)).isError, true);
+  assert.equal(sends, 3);
   const error = await api.call('relay_contact_update', {}, caller);
   assert.equal(error.isError, true);
   assert.match(error.content[0].text, /firstName: Required/);

@@ -5756,26 +5756,26 @@
     cancelAnimationFrame(sessionPickerViewportRaf);
     sessionPickerViewportRaf = 0;
     if (!render) return;
-    if (!REDUCED && reveal?.classList.contains("open")) {
-      // Retire the pressed row and the disclosure in the same motion. Keep the
-      // current DOM alive until the grid track reaches zero; rebuilding first
-      // is the discrete close the user reported.
+    const fromHeight = reveal?.getBoundingClientRect().height || 0;
+    closingState.resizeAnimation?.cancel?.();
+    if (!REDUCED && reveal && fromHeight > 0) {
+      // Start at the painted height, including an interrupted discovery reflow.
+      // Keep the footer in layout throughout closing, just as it is on opening.
       const row = reveal.previousElementSibling;
       row?.classList.remove("pressed");
       row?.setAttribute("aria-expanded", "false");
+      reveal.style.height = `${fromHeight}px`;
+      reveal.classList.add("reflowing");
       reveal.classList.remove("open");
-      let finished = false;
-      const finish = () => {
-        if (finished) return;
-        finished = true;
-        reveal.removeEventListener("transitionend", onTransitionEnd);
-        if (!sessionPickerState) renderSessionPickerSurface();
-      };
-      const onTransitionEnd = (event) => {
-        if (event.propertyName === "grid-template-rows") finish();
-      };
-      reveal.addEventListener("transitionend", onTransitionEnd);
-      setTimeout(finish, 420);
+      const animation = reveal.animate(
+        [{ height:`${fromHeight}px` }, { height:"0px" }],
+        { duration:320, easing:"cubic-bezier(.22,.78,.18,1)", fill:"both" },
+      );
+      animation.finished.catch(() => {}).then(() => {
+        reveal.style.height = "0px";
+        animation.cancel();
+        if (!sessionPickerState && reveal.isConnected) renderSessionPickerSurface();
+      });
       return;
     }
     renderSessionPickerSurface();
@@ -5940,6 +5940,9 @@
       state.resizeAnimation = null;
       reveal.style.removeProperty("height");
       reveal.classList.remove("reflowing");
+      // fill:both otherwise keeps overriding layout after this handle is cleared,
+      // pinning the open height until the closing DOM is finally removed.
+      animation.cancel();
     });
   }
 

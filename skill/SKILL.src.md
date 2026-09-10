@@ -311,7 +311,10 @@ does not detach the work from the Relay that introduced it.
 
 <!-- END GENERATED RELAY TODO WORKFLOW -->
 
-[[/dev]]## Everyday Relay work
+[[/dev]]<!-- BEGIN GENERATED RELAY READING -->
+<!-- END GENERATED RELAY READING -->
+
+## Everyday Relay work
 
 Before sending, resolve a named recipient with contact search and ask if the
 result is ambiguous. Never invent an address or recipient identifier. Always
