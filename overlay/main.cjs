@@ -498,7 +498,7 @@ function loadRelayModules() {
   const setupOpenUrl = pathToFileURL(path.join(__dirname, "..", "src", "setup-open.js")).href;
   relayModulesPromise = Promise.all([import(clientUrl), import(configUrl), import(setupOpenUrl)])
     .then(([client, config, setupOpen]) => {
-      relayModules = { RelayClient: client.RelayClient, config, setupOpen };
+      relayModules = { RelayClient: client.RelayClient, relayTransportHealth: client.relayTransportHealth, config, setupOpen };
       return relayModules;
     })
     .catch((error) => {
@@ -9903,6 +9903,7 @@ ipcMain.on("relay:stall", (_e, info) => {
 });
 // Main-process side of the same detector: a blocked main loop delays the click
 // hit-test and every IPC the renderer is waiting on.
+let worstMainStallMs = 0;
 {
   let lastTick = Date.now();
   setInterval(() => {
@@ -9910,6 +9911,7 @@ ipcMain.on("relay:stall", (_e, info) => {
     const drift = now - lastTick - 500;
     lastTick = now;
     if (drift < 400) return;
+    worstMainStallMs = Math.max(worstMainStallMs, Math.round(drift));
     try {
       fs.appendFileSync(
         PERF_LOG_PATH,
@@ -9917,6 +9919,38 @@ ipcMain.on("relay:stall", (_e, info) => {
       );
     } catch {}
   }, 500).unref?.();
+}
+// Liveness for the daemon's pill supervisor (src/pill-supervisor.js). Written
+// from the main process every 5 s, so a blocked main loop shows up as a stale
+// file rather than as a person noticing. Carries the worst recent stall and the
+// API transport streak so the supervisor logs the reason, not just the silence.
+// The same tick is where the pill heals its own wedged transport: every call
+// failing for minutes while the daemon on this machine keeps reaching Relay
+// (observed 2026-09-10 after memory starvation ended) means only a relaunch helps.
+const pillLiveness = require("../src/pill-liveness.cjs");
+const PILL_HEARTBEAT_PATH = pillLiveness.pillHeartbeatPath(os.homedir());
+const DAEMON_HEARTBEAT_PATH = path.join(os.homedir(), ".relay", "recovery", "daemon.json");
+{
+  const startedAt = Date.now();
+  let relaunchRequested = false;
+  const readJson = (file) => { try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return null; } };
+  setInterval(() => {
+    const now = Date.now();
+    const transport = relayModules && typeof relayModules.relayTransportHealth === "function" ? relayModules.relayTransportHealth() : null;
+    try {
+      fs.mkdirSync(path.dirname(PILL_HEARTBEAT_PATH), { recursive: true, mode: 0o700 });
+      const tmp = `${PILL_HEARTBEAT_PATH}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, `${JSON.stringify({ schema: 1, pid: process.pid, version: pillVersion(), at: now, startedAt, worstStallMs: worstMainStallMs, transport })}\n`, { mode: 0o600 });
+      fs.renameSync(tmp, PILL_HEARTBEAT_PATH);
+    } catch {}
+    worstMainStallMs = 0;
+    if (relaunchRequested || !transport) return;
+    const verdict = pillLiveness.shouldRelaunchForWedgedTransport({ transport, daemon: readJson(DAEMON_HEARTBEAT_PATH), now });
+    if (!verdict.relaunch) return;
+    relaunchRequested = true;
+    console.error(`[overlay] every Relay API call has failed since ${new Date(transport.failingSince).toISOString()} while the background service reaches Relay; relaunching the Relay app`);
+    relaunchPillSoon();
+  }, pillLiveness.PILL_HEARTBEAT_MS).unref?.();
 }
 
 let latestCardMotionId = 0;

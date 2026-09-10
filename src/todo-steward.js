@@ -21,6 +21,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import atomicJson from "./atomic-json.cjs";
+import runtimeHealth from "../bootstrap/runtime-health.cjs";
 import { storeDir } from "./host-paths.js";
 
 const { atomicWriteJsonSync } = atomicJson;
@@ -521,6 +522,7 @@ export async function runTodoStewardOnce({
   runProvider,
   fetchBoard = fetchStewardBoard,
   resolveSession = null,
+  memory = () => runtimeHealth.memoryPressure(),
 } = {}) {
   const todoEnabled = features.todo === true;
   let state = readStewardState(baseDir);
@@ -562,6 +564,14 @@ export async function runTodoStewardOnce({
       },
     });
     return { ran: false, reason: "no_provider" };
+  }
+  // Starting Codex or Claude on a machine already out of memory made a real
+  // outage worse (2026-09-10: the steward spawned Codex while the pill was
+  // paged out). The request stays pending; the next tick asks again.
+  const pressure = memory();
+  if (pressure?.pressured) {
+    log(`todo steward: deferred, this computer is low on memory (${pressure.freeMB} MB free)`);
+    return { ran: false, reason: "memory_pressure" };
   }
   const startedAt = nowMs;
   state = updateStewardState(baseDir, {

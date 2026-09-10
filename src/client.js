@@ -173,6 +173,25 @@ function requestCanRetry(method, body) {
   );
 }
 
+// Per-process transport health. The daemon publishes lastSuccessAt in its
+// recovery heartbeat; the pill compares its own failing streak against it to
+// tell "my transport is wedged" from "Relay is down" (src/pill-liveness.cjs).
+const transportHealth = { lastSuccessAt: 0, lastFailureAt: 0, failingSince: 0, failureStreak: 0 };
+function noteTransportSuccess(at = Date.now()) {
+  transportHealth.lastSuccessAt = at;
+  transportHealth.failingSince = 0;
+  transportHealth.failureStreak = 0;
+}
+function noteTransportFailure(at = Date.now()) {
+  transportHealth.lastFailureAt = at;
+  transportHealth.failureStreak += 1;
+  if (!transportHealth.failingSince) transportHealth.failingSince = at;
+}
+/** Snapshot of this process's Relay transport health: success and failure times, current failing streak. */
+export function relayTransportHealth() {
+  return { ...transportHealth };
+}
+
 function recordTransportFailure(error, attempts) {
   const { code, name } = transportFailureDetails(error);
   try {
@@ -287,6 +306,8 @@ export class RelayClient {
           // payload pushes behind these calls). Live waits opt into a longer deadline.
           signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
         }, transportRef);
+        // Any HTTP answer proves the transport; the status code is the API's business.
+        noteTransportSuccess();
         const text = await res.text();
         const data = text ? JSON.parse(text) : {};
         if (!res.ok) {
@@ -303,6 +324,7 @@ export class RelayClient {
       } catch (error) {
         if (signal?.aborted) throw error;
         if (!isRetryableTransportFailure(error)) throw error;
+        noteTransportFailure();
         retireRelayTransport(transportRef.current);
         const retrying = retryable && attempts === 1;
         const cause = recordTransportFailure(error, attempts);

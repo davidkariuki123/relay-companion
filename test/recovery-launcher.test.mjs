@@ -82,3 +82,39 @@ test('a genuinely hung recovery process is stopped before the fallback starts', 
   fs.writeFileSync(path.join(older.bundle,'bootstrap','recovery-runner.cjs'),`const fs=require('node:fs');const {pid}=JSON.parse(fs.readFileSync(${JSON.stringify(pidFile)}));try{process.kill(pid,0);process.exit(2);}catch{};fs.writeFileSync(${JSON.stringify(path.join(root,'status.json'))},JSON.stringify({ok:true,status:'current',launcherVersion:'1.0.0',runId:process.env.RELAY_RECOVERY_RUN_ID,checkedAt:Date.now()}));`);
   assert.equal((await launch({root,timeoutMs:5000,attemptTimeoutMs:500})).status,'fallback');
 });
+test('a deadline that interrupts a working runner does not quarantine its bundle, and the log says why', async t => {
+  const {root,older,newer}=fixture(t); const calls=[];
+  const run = async (p,{runId}) => {
+    calls.push(p.version);
+    if (p.version===newer.version) { write(path.join(root,'status.json'),{ok:true,status:'downloading',launcherVersion:p.version,runId,checkedAt:Date.now()}); return {ok:false,reason:'deadline'}; }
+    write(path.join(root,'status.json'),{ok:true,status:'current',launcherVersion:p.version,runId,checkedAt:Date.now()}); return {ok:true};
+  };
+  assert.equal((await launch({root,run})).status,'fallback');
+  const status=read(path.join(root,'launcher-status.json'));
+  assert.equal(status.failedBundle,null); assert.equal(status.retryAt,null);
+  // The selected bundle is tried first again on the next check: slow is not broken.
+  calls.length=0; await launch({root,run}); assert.deepEqual(calls,['1.0.1','1.0.0']);
+  const log=fs.readFileSync(path.join(root,'recovery.log'),'utf8');
+  assert.match(log,/launcher result bundle=1\.0\.1 .*ok=false reason=deadline reported=downloading/);
+  assert.match(log,/launcher done status=fallback quarantined=no/);
+  // A silent hang (no status written) is still a real failure of that bundle.
+  const silent = async (p,{runId}) => { if (p.version===newer.version) return {ok:false,reason:'deadline'};
+    write(path.join(root,'status.json'),{ok:true,status:'current',launcherVersion:p.version,runId,checkedAt:Date.now()}); return {ok:true}; };
+  await launch({root,run:silent});
+  assert.equal(read(path.join(root,'launcher-status.json')).failedBundle,newer.bundle);
+  assert.equal(older.version,'1.0.0');
+});
+test('a failed in-place repair is retried by the same bundle next check, never handed to an older runner', async t => {
+  const {root,newer}=fixture(t); const calls=[];
+  for (const status of ['restart-failed','reactivate-failed']) {
+    write(path.join(root,'launcher-status.json'),{schema:1,status:'healthy'});
+    const result=await launch({root,run:async(p,{runId})=>{
+      calls.push(p.version);
+      write(path.join(root,'status.json'),{ok:false,status,restarts:1,lastError:'service-start-failed',launcherVersion:p.version,runId,checkedAt:Date.now()});
+      return {ok:false,reason:'exit'};
+    }});
+    assert.equal(result.status,'runner-error');
+    assert.equal(read(path.join(root,'launcher-status.json')).failedBundle,undefined);
+  }
+  assert.deepEqual(calls,[newer.version,newer.version]);
+});

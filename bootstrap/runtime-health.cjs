@@ -296,13 +296,108 @@ async function activateLinuxRuntimeServices(target, {
   return { ok: false, reason: "exact-root-readiness-failed", detail: `${target.packageRoot}; ${statusPath}` };
 }
 
+// Physical memory left for new work. A machine this starved cannot extract a
+// 245 MB runtime or start Codex without making everything else worse, so the
+// callers that would do those things ask first. A restart of what is already
+// installed stays allowed under pressure: it frees memory rather than taking it.
+const MEMORY_PRESSURE_MIN_FREE_BYTES = 768 * 1024 * 1024;
+const MEMORY_PRESSURE_MIN_FREE_RATIO = 0.05;
+function memoryPressure({
+  freeBytes = os.freemem(),
+  totalBytes = os.totalmem(),
+  minFreeBytes = MEMORY_PRESSURE_MIN_FREE_BYTES,
+  minFreeRatio = MEMORY_PRESSURE_MIN_FREE_RATIO,
+} = {}) {
+  const free = Number(freeBytes);
+  const total = Number(totalBytes);
+  const known = Number.isFinite(free) && Number.isFinite(total) && total > 0;
+  const pressured = known && (free < minFreeBytes || free / total < minFreeRatio);
+  return {
+    pressured,
+    freeBytes: known ? free : null,
+    totalBytes: known ? total : null,
+    freeMB: known ? Math.round(free / 1048576) : null,
+  };
+}
+
+// Windows service identity for the in-place restart: the same task names
+// install.js registers. The bootstrap must not import the application tree.
+const WINDOWS_DAEMON_TASK = "Relay Companion Daemon";
+const WINDOWS_PILL_TASK = "Relay Companion Pill";
+// Only installed relay-companion trees, only this user's processes, and the
+// whole tree of each (an Electron main process leaves renderers behind otherwise).
+const WINDOWS_STOP_INSTALLED_SERVICES_PS = [
+  "$relaySid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value",
+  "Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match 'node_modules[\\\\/]relay-companion[\\\\/]' -and ($_.CommandLine -match '[\\\\/]relay\\.js.*\\bdaemon\\b' -or $_.CommandLine -match '[\\\\/]overlay[\\\\/]main\\.cjs') } | ForEach-Object { $relayOwner = Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid -ErrorAction SilentlyContinue; if ($relayOwner.Sid -eq $relaySid) { & taskkill.exe /PID $_.ProcessId /T /F | Out-Null; Write-Output $_.ProcessId } }",
+].join("; ");
+
+/**
+ * Restart the installed Windows daemon and pill from their existing scheduled
+ * tasks, then prove the exact package root is the one running. No download and
+ * no re-registration: this is the rung that repairs a starved or wedged runtime
+ * whose code on disk is already the code we want.
+ */
+async function activateWindowsRuntimeServices(target, {
+  platform = process.platform,
+  run = defaultRun,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  now = Date.now,
+  healthCheck = exactRuntimeHealth,
+  activationDeadlineMs = 90_000,
+  healthPollMs = 1000,
+  settleMs = 800,
+} = {}) {
+  if (platform !== "win32") return { ok: false, reason: "activation-platform-unsupported" };
+  if (!target?.packageRoot || !target?.bin) return { ok: false, reason: "activation-target-invalid" };
+  const tasks = [WINDOWS_DAEMON_TASK, WINDOWS_PILL_TASK];
+  for (const task of tasks) {
+    const registered = run("schtasks.exe", ["/Query", "/TN", task]);
+    if (!commandOk(registered)) return { ok: false, reason: "service-task-missing", detail: task };
+  }
+  const stopped = run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_STOP_INSTALLED_SERVICES_PS]);
+  if (!commandOk(stopped)) {
+    return { ok: false, reason: "service-process-stop-failed", detail: String(stopped?.stderr || stopped?.error?.message || "").trim() };
+  }
+  const terminated = String(stopped.stdout || "").split(/\r?\n/)
+    .map((line) => Number(line.trim()))
+    .filter((pid) => Number.isInteger(pid) && pid > 0);
+  if (terminated.length) await sleep(settleMs);
+  for (const task of tasks) {
+    const started = run("schtasks.exe", ["/Run", "/TN", task]);
+    if (!commandOk(started)) {
+      return { ok: false, reason: "service-start-failed", detail: `${task}: ${String(started?.stderr || started?.stdout || "").trim()}` };
+    }
+  }
+  const deadline = now() + Math.max(1, activationDeadlineMs);
+  let health = null;
+  while (now() <= deadline) {
+    health = await healthCheck(target, { platform, run });
+    if (health?.ok) return { ok: true, health, terminated };
+    await sleep(healthPollMs);
+  }
+  return { ok: false, reason: "activation-deadline-exceeded", detail: target.packageRoot, health, terminated };
+}
+
+/** One entry point for "restart what is already installed" on every platform. */
+function restartInstalledRuntimeServices(target, { platform = process.platform, ...options } = {}) {
+  if (platform === "darwin") return activateMacRuntimeServices(target, { platform, ...options });
+  if (platform === "linux") return activateLinuxRuntimeServices(target, { platform, ...options });
+  if (platform === "win32") return activateWindowsRuntimeServices(target, { platform, ...options });
+  return Promise.resolve({ ok: false, reason: "activation-platform-unsupported" });
+}
+
 module.exports = {
   activateLinuxRuntimeServices,
   activateMacRuntimeServices,
+  activateWindowsRuntimeServices,
   exactRuntimeHealth,
   exactLinuxPillReady,
   installedServiceProcessRows,
   linuxPillStatusPath,
+  memoryPressure,
+  MEMORY_PRESSURE_MIN_FREE_BYTES,
+  restartInstalledRuntimeServices,
   runtimeProcessCommands,
   terminateInstalledServiceProcesses,
+  WINDOWS_STOP_INSTALLED_SERVICES_PS,
 };
