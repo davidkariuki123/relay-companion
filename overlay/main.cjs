@@ -8749,6 +8749,46 @@ ipcMain.on("relay:preview", (event, id) => {
   if (win && !win.isDestroyed() && event && event.sender !== win.webContents) return;
   if (!openPreview(id)) console.error("[preview] relay not found:", id);
 });
+// Presence has its own IPC path: it must never pushInbox/rebuild a composer.
+function isTypingPill(event) {
+  return Boolean(win && !win.isDestroyed() && event.sender === win.webContents);
+}
+ipcMain.handle("relay:typingContext", async (event, input) => {
+  if (!isTypingPill(event) || !chatReadPresenceIsAvailable(win)) return { ok:false };
+  const email = String(input?.peerEmail || "").trim().toLowerCase();
+  const groupId = String(input?.groupId || "");
+  if (groupId.startsWith("grp_") && groupId.length <= 128) return { ok:true, chatId:groupId };
+  if (!email || email.length > 320 || !email.includes("@")) return { ok:false };
+  try {
+    const client = await relayClient();
+    const chat = await client.chatWith(email);
+    return { ok:true, chatId:chat.chatId, peerEmail:email };
+  } catch { return { ok:false }; }
+});
+ipcMain.handle("relay:chatTyping", async (event, chatId) => {
+  if (!isTypingPill(event) || !chatReadPresenceIsAvailable(win)) return { ok:false };
+  if (typeof chatId !== "string" || !/^(chat|grp)_[a-zA-Z0-9_-]{1,123}$/.test(chatId)) return { ok:false };
+  try { return { ok:true, ...await (await relayClient()).chatTyping(chatId) }; }
+  catch { return { ok:false }; }
+});
+// One ordered stream per installed device. A slow start cannot overtake the
+// stop sent on blur/navigation, or overwrite a subsequent room's heartbeat.
+let typingWriteQueue = Promise.resolve();
+ipcMain.handle("relay:setChatTyping", (event, input) => {
+  if (!isTypingPill(event)) return { ok:false };
+  const chatId = String(input?.chatId || "");
+  const typing = input?.typing === true;
+  const peerEmail = String(input?.peerEmail || "").slice(0, 320);
+  if (!/^(chat|grp)_[a-zA-Z0-9_-]{1,123}$/.test(chatId)) return { ok:false };
+  const action = typingWriteQueue.catch(() => {}).then(async () => {
+    if (typing && (!chatReadPresenceIsAvailable(win) || !win.isFocused())) return { ok:false };
+    try { return await (await relayClient()).setChatTyping(chatId, typing, peerEmail); }
+    catch { return { ok:false }; }
+  });
+  typingWriteQueue = action;
+  return action;
+});
+
 function canonicalChatIpcInput(input) {
   const value = input && typeof input === "object" ? input : { chatId: input };
   const surface = value.surface === "slack" ? "slack" : "relay";

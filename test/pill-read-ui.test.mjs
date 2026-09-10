@@ -190,8 +190,9 @@ test("reader attachments share the deployed frosted footer above both document a
   assert.match(shelf, /data-att-preview="1"/,
     "previewable files reuse the existing bounded preview path");
   assert.match(reader, /const sharedShelf = relaySharedShelf\(r\)/);
-  assert.match(reader, /<div class="rd-foot"><div class="rd-col">\$\{sharedShelf\}\$\{status\}\$\{bothNote\}\$\{claimControl\}\$\{documentHostActions\}\$\{composer\}/,
+  assert.match(reader, /<div class="rd-foot"><div class="rd-col">[\s\S]*id="readerActions"[\s\S]*id="readerComposer"/,
     "the shelf is inside the deployed footer and precedes document actions and the composer");
+  assert.match(reader, /querySelector\("#readerActions"\)\.innerHTML = `\$\{sharedShelf\}\$\{status\}\$\{bothNote\}\$\{claimControl\}\$\{documentHostActions\}`/);
   assert.match(html, /\.rd-foot \{[^}]*backdrop-filter:blur\(14px\)/,
     "the shelf inherits the deployed 14px frost and long-document reveal");
   assert.match(reader, /wireAttachmentChips\(readerBodyEl\)/,
@@ -310,7 +311,8 @@ test("automatic chat reads require recent system-wide activity without requiring
   assert.match(main, /ipcMain\.handle\("relay:canonicalChatRead"[\s\S]*chatReadPresenceIsAvailable\(win\)/);
   assert.match(main, /interruptChatReadPresence\(\);[\s\S]*requeueActiveAttention\(\)/,
     "sleep and lock invalidate read presence alongside notification presence");
-  assert.doesNotMatch(main, /chatReadPresenceIsAvailable[\s\S]{0,500}isFocused/,
+  const readPresence = main.slice(main.indexOf("function chatReadPresenceIsAvailable("), main.indexOf("function chatReadPresenceIsAvailable(") + 1000);
+  assert.doesNotMatch(readPresence, /isFocused/,
     "using another app does not prevent an otherwise visible chat from recording reads");
 });
 

@@ -26,7 +26,7 @@ function readerHarness({ row, sent = [], chats = [], groups = [], canonical = []
     id, payload: { relays: row ? [row] : [], sent, chats }, groupsList: groups,
     canonicalChatDetails: new Map(canonical.map((chat) => [chat.chatId, chat])),
     optimisticChatReplies: new Map(), readerHumanDrafts: new Map(),
-    input: { value: "Thanks, that makes sense.", addEventListener() {}, focus() {} },
+    input: { value: "Thanks, that makes sense.", isConnected:true, addEventListener() {}, focus() {} },
     send: { disabled: false, addEventListener(_event, handler) { state.click = handler; } },
     notes: [], calls: [],
     window: { relay: { async sendReply(request) {
@@ -40,6 +40,7 @@ function readerHarness({ row, sent = [], chats = [], groups = [], canonical = []
     const { id, payload, groupsList, canonicalChatDetails, optimisticChatReplies,
       readerHumanDrafts, input, send, window } = state;
     const request = false, onWork = false, onAgent = false, providerPrompt = null;
+    const activeView = "reader", readerId = id;
     const directContactAnchorForChatId = () => null;
     const relaySender = (r) => r.senderName || r.senderEmail || "Someone";
     const sentRecipient = (r) => r.recipient?.name || r.recipient?.email || "Recipient";
@@ -50,10 +51,12 @@ function readerHarness({ row, sent = [], chats = [], groups = [], canonical = []
     const setRowNote = (...note) => state.notes.push(note);
     const fadeRowNoteLater = () => {};
     const renderReader = () => {};
+    const chatTypingController = { stop() {} };
     ${functions.map(pillFunction).join("\n")}
     const r = readerRow(id);
     const sender = relaySender(r);
     const replyChat = readerReplyChat(r);
+    input.relayReplyContext = { r, replyChat };
     ${html.slice(start, end)}
     return { r, replyChat, markup: composerHtml(), syncOutboxProjection };
   `);

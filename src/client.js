@@ -1471,6 +1471,18 @@ export class RelayClient {
     });
   }
 
+  chatTyping(chatId) {
+    return this.#req("GET", `/v1/chats/${encodeURIComponent(chatId)}/typing`, undefined, {
+      timeoutMs:4000, retry:false,
+    });
+  }
+
+  setChatTyping(chatId, typing, peerEmail) {
+    return this.#req("POST", `/v1/chats/${encodeURIComponent(chatId)}/typing`, {
+      typing:Boolean(typing), ...(peerEmail ? { peerEmail:String(peerEmail) } : {}),
+    }, { timeoutMs:3000, retry:false });
+  }
+
   /** The chat around an open message, in one round trip. */
   async chatForThread(threadId) {
     if (!localE2eeIdentityAvailable()) return this.#req("GET", `/v1/chats/by-thread/${encodeURIComponent(threadId)}`);

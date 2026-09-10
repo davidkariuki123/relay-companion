@@ -316,7 +316,7 @@ test("enabled app rows share the same binder on the bubble and in the reader", (
   assert.match(reader, /if \(onAgent && !workOn\) return "";/);
   assert.match(reader, /if \(onAgent\) return relayWorkDockHtml\(r, \{ inline: true \}\)/,
     "the agent composer is the hand-off and carries no provider launch buttons");
-  assert.match(reader, /\$\{documentHostActions\}\$\{composer\}/,
+  assert.match(reader, /id="readerActions"[\s\S]*id="readerComposer"/,
     "provider rows precede the active document's composer");
   assert.match(reader, /wireHostOpen\(readerBodyEl\);/, "the reader binds through the shared binder");
   // The letter keeps its reply — the loudest control on a person's letter.

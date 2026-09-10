@@ -171,6 +171,9 @@ contextBridge.exposeInMainWorld("relay", {
     surface: options && options.surface === "slack" ? "slack" : "relay",
     includeSlack: Boolean(options && options.includeSlack),
   }),
+  typingContext: (input) => ipcRenderer.invoke("relay:typingContext", input),
+  chatTyping: (chatId) => ipcRenderer.invoke("relay:chatTyping", String(chatId || "")),
+  setChatTyping: (input) => ipcRenderer.invoke("relay:setChatTyping", input),
   mentionVisit: (chatId, visitId) => ipcRenderer.invoke("relay:mentionVisit", { chatId: String(chatId || ""), visitId: String(visitId || "") }),
   canonicalChatRead: (chatId, options = {}) => ipcRenderer.invoke("relay:canonicalChatRead", {
     chatId: String(chatId || ""),
