@@ -27,7 +27,7 @@ test("the transport throws, because the queue judges the failure", () => {
   // the composer unable to tell a dead wifi from a rejected message — and so it
   // treated both as "give the words back".
   assert.match(main, /async function postQueuedRelay\(entry\)/);
-  assert.match(main, /return client\.sendRelay\(\{/);
+  assert.match(main, /const result = await client\.sendRelay\(\{/);
   assert.match(main, /idempotencyKey: entry\.idempotencyKey/);
   const transport = main.slice(main.indexOf("async function postQueuedRelay"), main.indexOf("function enqueueReplyFromPill"));
   assert.doesNotMatch(transport, /catch \(error\)/, "the transport reports the real error, it does not swallow it");

@@ -133,7 +133,9 @@
 
   function paintImage() {
     const item = current();
-    showOnly(el.stage, el.strip);
+    showOnly(el.message, el.strip);
+    el.message.textContent = "Opening…";
+    el.image.removeAttribute("src");
     paintHeader(item);
     el.prev.disabled = view.index <= 0;
     el.next.disabled = view.index >= view.items.length - 1;
@@ -141,9 +143,10 @@
     contentFor(item).then((result) => {
       if (current() !== item) return;
       if (!result || result.ok === false) { fail(result?.error); return; }
+      showOnly(el.stage, ...(view.items.length > 1 ? [el.strip] : []));
       el.image.src = result.fileUrl || "";
       el.image.alt = item.name;
-    }).catch(() => fail());
+    }).catch(() => { if (current() === item) fail(); });
     paintStrip();
   }
 

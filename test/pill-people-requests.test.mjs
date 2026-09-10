@@ -21,7 +21,7 @@ test("Add offers two cases: an address for someone on Relay, your link for every
   const sheet = slice('<div class="cv-add-sheet hidden" id="cvAddSheet">', '<form class="cv-form hidden" id="cvForm">');
   assert.match(sheet, /<div class="cv-add-t">On Relay already<\/div>/);
   assert.match(sheet, /id="cvAddInput" type="email"[^>]*placeholder="name@company\.com"/);
-  assert.match(sheet, /id="cvAddNote">They show up in your People right away\.<\/div>/);
+  assert.match(sheet, /id="cvAddNote">They show up in your Contacts right away\.<\/div>/);
   assert.match(sheet, /id="cvAddT2">Not on Relay yet<\/div>/);
   assert.match(sheet, /id="cvAddLink">Copy your invite link<\/button>/);
   assert.match(sheet, /They paste it into Claude Code or Codex and show up here\./);
@@ -159,7 +159,7 @@ test("a request is a direct Relay room from an address you do not know and never
   assert.match(model, /if \(!room \|\| room\.isGroup \|\| room\.provider === "slack" \|\| room\.integration\) return false;/);
   assert.match(model, /if \(!address \|\| known\.has\(address\)\) return false;/);
   assert.match(model, /\.some\(\(message\) => message\.direction === "out"\)\) return false;/, "writing to someone makes them a conversation");
-  // Known = your People, you, and everyone you have sent to.
+  // Known = your Contacts, you, and everyone you have sent to.
   assert.match(model, /for \(const c of \[\.\.\.\(payload\.contacts \|\| \[\]\), \.\.\.contactsList\]\)/);
   assert.match(model, /for \(const item of payload\.sent \|\| \[\]\)/);
   assert.match(model, /const mine = String\(payload\.account\?\.email \|\| ""\)\.trim\(\)\.toLowerCase\(\);/);
@@ -186,46 +186,12 @@ test("Ignore belongs to the account that clicked it, and nothing is read or writ
   assert.deepEqual([...store.keys()], ["proto.ignoredRequests.v1:user_a"], "nothing was written under an unknown owner");
 });
 
-test("requests stay out of the Relays list and the unread count; People wears their number", () => {
+test("requests use one Relays entry, with no Contacts badge or third Contacts pane", () => {
   const rows = slice("function relayIdentityRows()", "function renderRelays()");
-  assert.match(rows, /\.filter\(\(room\) => room\.hasActivity !== false && !isRequestRoom\(room, known\)\)/);
-  const all = slice("function renderAll()", 'if (activeView === "chat") renderChat();');
-  assert.match(all, /const quiet = requestAddresses\(\);/);
-  assert.match(all, /&& !quiet\.has\(String\(r\.senderEmail \|\| ""\)\.trim\(\)\.toLowerCase\(\)\)\)/);
-  assert.match(all, /setBadge\(peopleBadgeEl, requestRooms\(\)\.length\);/);
-  assert.match(html, /data-view="contacts">People <span class="tab-badge gone" id="peopleBadge">0<\/span><\/button>/);
-});
-
-test("a request supports Accept, reversible Ignore, and confirmed server blocking", () => {
-  const pane = slice("function renderRequestsPane()", "function renderContacts()");
-  // The way back from Ignore is a quiet line in the People pane's shape, not
-  // a bare button, and only while something is hidden (Sven, 2026-09-08).
-  assert.match(pane, /ignored\.size \? `<div class="cv-latent">Ignored requests are hidden\. <button type="button" class="cv-latent-link" id="cvShowIgnored">Show them<\/button>\.<\/div>`/);
-  assert.match(pane, /<div class="cv-latent">Showing ignored requests\. <button type="button" class="cv-latent-link" id="cvShowIgnored">Back to requests<\/button>\.<\/div>/);
-  assert.doesNotMatch(pane, /cv-add quiet" type="button" id="cvShowIgnored"/);
-  assert.match(pane, /"No requests\. Someone new writing to you shows up here first\."/);
-  assert.match(pane, /"No ignored requests\."/);
-  assert.match(pane, /<span class="cv-request-why">Not in your People<\/span>/);
-  assert.match(pane, /data-request-accept="\$\{esc\(address\)\}"[^>]*>Accept<\/button>/);
-  assert.match(pane, /data-request-ignore="\$\{esc\(address\)\}">Ignore<\/button>/);
-  // Ignore and Block are plain words; the one hint sits under the rows.
-  assert.doesNotMatch(pane, /Ignore hides a request on this computer/);
-  assert.match(pane, /`<div class="cv-request-note">Open one to read it\. Replying accepts it too\.<\/div>`/);
-  // Accepting is saving them: the same write the People form does.
-  assert.match(pane, /window\.relay\.contactSave\(\{ contactId:"", name, emails:\[address\], email:address \}\)/);
-  assert.match(pane, /openThreadDetail\(el\.getAttribute\("data-request-open"\), el\.getAttribute\("data-party"\) \|\| "", "contacts", \{ expanded:true \}\);/);
-  assert.match(pane, /await window\.relay\.blockRequest/);
-  assert.match(pane, /Block this person\?/);
-  assert.match(pane, /data-request-restore/);
-});
-
-test("People has three panes and the Add sheet belongs to the first", () => {
-  const panes = slice("function applyContactsPane()", "const cvgListEl = document.getElementById(\"cvgList\");");
-  assert.match(panes, /const requests = contactsPane === "requests";/);
-  assert.match(panes, /cvRequestsEl\.classList\.toggle\("gone", !requests\);/);
-  assert.match(panes, /cvLatentEl\.classList\.toggle\("gone", !people\);/);
-  assert.match(panes, /if \(!people\) \{ cvFormEl\.classList\.add\("hidden"\); closeAddSheet\(\); \}/);
-  assert.match(panes, /if \(requests\) renderRequestsPane\(\);/);
-  assert.match(panes, /cvSegRequestsNEl\.textContent = requests \? String\(requests\) : "";/);
-  assert.match(html, /aria-label="People, channels and requests"/);
+  assert.match(rows, /!isRequestRoom/);
+  assert.match(html, /requestSummaryHtml\(requestCount\)/);
+  assert.match(html, /setBadge\(peopleBadgeEl, 0\)/);
+  assert.doesNotMatch(html, /id="cvSegRequests"/);
+  assert.match(html, /aria-label="Contacts and channels"/);
+  assert.match(html, /data-view="contacts">Contacts /);
 });

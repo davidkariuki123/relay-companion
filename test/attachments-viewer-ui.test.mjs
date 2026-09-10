@@ -32,7 +32,7 @@ const cargoSource = between(
 const esc = (value) => String(value).replace(/[&<>"']/g, "");
 const cargo = new Function(
   "esc", "fmtBytes", "fileIconSvg", "fileFamilyOf", "attachmentIsImage",
-  `"use strict"; ${cargoSource}; return { chatAttachmentCargo, fileKindLabel, attachmentMetaText, attachmentKey };`,
+  `"use strict"; ${cargoSource}; return { chatAttachmentCargo, chatAttachmentSource, fileKindLabel, attachmentMetaText, attachmentKey };`,
 )(
   esc,
   (bytes) => {
@@ -109,13 +109,13 @@ test("images and files split: photos collage, everything else gets its own file 
   assert.match(html, /data-family="pdf"/);
 });
 
-test("an outbound message's cargo wears the accent side, and an optimistic one is inert", () => {
+test("outbound cargo keeps its accent side, while uncommitted draft metadata is inert", () => {
   const mine = cargo.chatAttachmentCargo([photo(1), { id: "f1", name: "a.pdf" }], { ...RELAY, mine: true });
   assert.match(mine, /class="ca-att ca-photo mine pending"/);
   assert.match(mine, /class="ca-att ca-file mine"/);
   assert.match(mine, /class="ca-row mine"/);
 
-  // Just picked, no canonical id yet: the same plate, with nothing to open.
+  // Draft-only metadata has no local send identity yet.
   const optimistic = cargo.chatAttachmentCargo([
     { name: "photo.jpeg", contentType: "image/jpeg", image: true, previewUrl: "blob:relay-preview" },
     { name: "notes.txt" },
@@ -124,6 +124,20 @@ test("an outbound message's cargo wears the accent side, and an optimistic one i
   assert.match(optimistic, /<img src="blob:relay-preview"/);
   assert.match(optimistic, /<div class="ca-att ca-file">/);
   assert.doesNotMatch(optimistic, /<button/, "nothing without an id pretends to be clickable");
+});
+
+test("a newly sent photo is clickable using its local id and keeps the visible preview", () => {
+  const source = cargo.chatAttachmentSource({ outboxId: "send_1", relayId: "" }, [
+    { name: "photo.png", contentType: "image/png", previewUrl: "blob:relay-preview" },
+    { name: "notes.txt" },
+  ]);
+  const html = cargo.chatAttachmentCargo(source.attachments, { relayId: source.relayId, mine: true });
+  assert.match(html, /<button type="button" class="ca-att ca-photo mine ready"/);
+  assert.match(html, /data-att-relay="outbox:send_1"/);
+  assert.match(html, /data-att-id="file-0"/);
+  assert.match(html, /<img src="blob:relay-preview"/);
+  assert.match(html, /data-att-id="file-1"/);
+  assert.match(html, /data-att-key="outbox:send_1::file-0"/);
 });
 
 test("every selectable attachment carries a check circle in the gutter", () => {

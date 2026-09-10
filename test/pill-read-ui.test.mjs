@@ -101,7 +101,8 @@ test("attachments use image plates and quiet file rows backed only by main-proce
   assert.match(html, /const attachments = Array\.isArray\(m\.attachments\) \? m\.attachments : \[\]/);
   // The chat thread now builds Option A bubbles instead of the inline plates —
   // the reader and the relay list still use attachmentPlates above.
-  assert.match(html, /chatAttachmentCargo\(attachments, \{ relayId, mine \}\)/);
+  assert.match(html, /chatAttachmentSource\(m, attachments\)/);
+  assert.match(html, /chatAttachmentCargo\(cargoAttachments, \{ relayId, mine \}\)/);
   assert.doesNotMatch(html, /function relayAttachmentsForId\(/,
     "the renderer cannot fall back to an inbound-only attachment lookup");
   assert.match(html, /attachmentOnly = textLike && attachments\.length > 0/);

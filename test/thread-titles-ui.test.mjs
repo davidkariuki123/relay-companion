@@ -28,7 +28,7 @@ test("chat text bubbles preserve authored line breaks", () => {
   const rule = html.match(/\.th-msg\.text \.th-msg-title \{([^}]+)\}/)?.[1] || "";
   assert.match(rule, /white-space:pre-wrap/);
 
-  assert.match(html, /<span class="th-msg-title">\$\{agentWorking[\s\S]*?textLike \? linkify\(m\.title, m\.groupId \|\| thread\.groupId\)/);
+  assert.match(html, /<span class="th-msg-title"[\s\S]*?\$\{agentWorking[\s\S]*?textLike \? linkify\(m\.title, m\.groupId \|\| thread\.groupId\)/);
 });
 
 test("legacy threadTitle stays readable in storage but never reaches the visible pill", () => {
@@ -511,14 +511,29 @@ test("an unsent message is the device's business, not the composer's", () => {
   assert.match(html, /outboxState: String\(entry\.state \|\| "queued"\)/);
   assert.match(html, /function outboxStatusBits\(m\)/);
   assert.match(html, /Trying again…/);
-  assert.match(html, /th-status-settle/);
-  assert.match(html, /receipt\.label === "Sent" \|\| receipt\.label === "Delivered"/);
+  assert.doesNotMatch(html, /th-status-settle|th-settling/,
+    "payload refreshes must not repeatedly hide delivery status");
   assert.match(html, /data-outbox-retry/);
   assert.match(html, /data-outbox-discard/);
   // A regained connection must flush the queue rather than wait out the
   // backoff the outage earned.
   assert.match(html, /window\.addEventListener\("online"/);
   assert.match(html, /window\.relay\.networkOnline/);
+});
+
+test("the first in-flight send is not described as a retry", () => {
+  const start = html.indexOf("  function outboxStatusBits(m) {");
+  const end = html.indexOf("  function receiptTimestamp", start);
+  const status = new Function("esc", `${html.slice(start, end)}; return outboxStatusBits;`)(String);
+  const queued = { outboxId:"test-send", outboxState:"queued", outboxAttempts:0, outboxError:"" };
+  assert.match(status(queued).join(""), />Sending…</);
+  assert.match(status({ ...queued, outboxAttempts:1 }).join(""), />Sending…</,
+    "attempt starts before any response or failure exists");
+  assert.match(status({ ...queued, outboxAttempts:1, outboxError:"Request timed out" }).join(""), />Trying again…</);
+  const failed = status({ ...queued, outboxState:"failed", outboxError:"Recipient unavailable" }).join("");
+  assert.match(failed, />Not sent</);
+  assert.match(failed, />Retry</);
+  assert.match(failed, />Delete</);
 });
 
 test("a room has at most one Seen receipt and a pending send suppresses the old one", () => {
@@ -910,7 +925,7 @@ test("unfinished owned-agent replies visibly pulse until their final agent paylo
   assert.match(html, /const agentWorking = m\.ownedAgent[\s\S]*!String\(m\.body \|\| ""\)\.trim\(\)[\s\S]*!String\(m\.agent \|\| ""\)\.trim\(\)/);
   assert.match(html, /agentWorking \? " agent-working"/);
   assert.match(html, /agent-working-indicator[\s\S]*agent-working-dot[\s\S]*agent-working-dot[\s\S]*agent-working-dot/);
-  assert.match(html, /<span class="th-msg-title">\$\{agentWorking[\s\S]*agent-working-indicator/,
+  assert.match(html, /<span class="th-msg-title"[\s\S]*?\$\{agentWorking[\s\S]*agent-working-indicator/,
     "the loading bubble contains the dots instead of invented prose");
   assert.match(html, /@keyframes agentWorkingPulse/);
   assert.match(html, /prefers-reduced-motion: reduce/);
@@ -1009,11 +1024,10 @@ test("opening a conversation reads ALL of it — never a per-message click", () 
   assert.match(html, /if \(projected\?\.unread\) \{/);
   assert.match(html, /projected\.unread = false;/);
   assert.match(html, /persistReadIds\(\[id\], \{ afterPaint:true \}\)/);
-  // And the bubble clock anchors TOP-RIGHT regardless of how the title wraps —
-  // absolutely positioned, out of the flex flow (in-flow it landed wherever
-  // the wrapped title pushed it).
-  assert.match(html, /\.th-blk-time \{ position:absolute; top:10px; right:13px;/);
-  assert.match(html, /\.th-msg \.th-msg-title \{ padding-right:34px; \}/);
+  // The clock sits in a reserved bottom corner. A full last line makes room
+  // underneath; it never shares the text's painted area.
+  assert.match(html, /\.th-text-content \.th-blk-time \{ position:absolute; bottom:0; right:0; margin:0; \}/);
+  assert.match(html, /\.th-text-content \.th-msg-title::after \{ content:attr\(data-clock\); visibility:hidden; display:inline-block;/);
   // Relays stays a message ledger rather than collapsing those reads into one
   // grouped row whose own latest send could mask earlier unread arrivals.
   const renderRelays = html.slice(html.indexOf("function renderRelays()"), html.indexOf("function relayIdentityRowHtml"));

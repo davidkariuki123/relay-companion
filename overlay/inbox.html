@@ -1053,7 +1053,7 @@
   .cv-latent.gone { display:none; }
   .cv-latent-link { appearance:none; border:0; background:transparent; padding:0; font:inherit; font-weight:600; color:var(--accent); cursor:pointer; }
   .cv-latent-link:disabled { cursor:default; }
-  /* Requests: a first message from someone not in your People. */
+  /* Requests: a first message from someone not in your Contacts. */
   .cv-requests.gone { display:none; }
   .cv-request { border-bottom:1px solid var(--hair); }
   .cv-request .cv-item { border-bottom:0; padding-bottom:6px; }
@@ -1302,7 +1302,7 @@
      message node in the DOM for receipts, reply anchoring and reconciliation,
      but let its attachment cargo own the visible geometry. */
   .th-msg.attachment-only { display:contents; }
-  .th-msg.attachment-only :is(.th-msg-title, .th-blk-time, .rx-msg-picker, .rx-confirm, .rx-badges) { display:none; }
+  .th-msg.attachment-only :is(.th-text-content, .th-msg-title, .th-blk-time, .rx-msg-picker, .rx-confirm, .rx-badges) { display:none; }
   .th-msg.live-arrival { animation:thMessageArrival .28s var(--soft) both; }
   @keyframes thMessageArrival {
     from { opacity:.25; transform:translateY(7px) scale(.985); }
@@ -1367,8 +1367,19 @@
      out of the flex flow entirely. In-flow it landed wherever the wrapped
      title pushed it: "not at the top, the bottom or in the middle" (Sven).
      The title reserves its lane so the first line never runs under it. */
-  .th-blk-time { position:absolute; top:10px; right:13px; font-family:var(--mono); font-size:9.5px; color:var(--muted-3); }
-  .th-msg .th-msg-title { padding-right:34px; }
+  .th-blk-time, .th-cargo-time { display:block; font-family:var(--mono); font-size:11px; line-height:14px;
+    font-weight:400; color:var(--muted-2); font-variant-numeric:tabular-nums; white-space:nowrap; text-align:right; }
+  .th-blk-time { flex:1 0 100%; margin-top:3px; }
+  .th-msg .th-msg-title { padding-right:0; }
+  /* Reserve the clock's width after the last character. If that line is full,
+     the reservation wraps, giving the clock its own row inside the bubble.
+     Keep the clock with the text so agent bylines and actions cannot cover it. */
+  .th-msg.text { display:block; }
+  .th-text-content { position:relative; }
+  .th-text-content .th-msg-title::after { content:attr(data-clock); visibility:hidden; display:inline-block;
+    font-family:var(--mono); font-size:11px; line-height:14px; padding-left:12px; white-space:nowrap; }
+  .th-text-content .th-blk-time { position:absolute; bottom:0; right:0; margin:0; }
+  .th-cargo-time { width:100%; margin-top:1px; }
   .th-msg .row-err { flex-basis:100%; }
   .th-provider-byline { flex:1 0 calc(100% + 26px); width:calc(100% + 26px); margin:7px -13px -8px;
     padding:6px 12px 7px; border-top:1px solid var(--hair); display:flex; align-items:center; gap:6px;
@@ -2102,12 +2113,8 @@
   .th-under { display:flex; align-items:center; gap:10px; height:15px; margin:3px 16px 0; }
   .th-under.mine { justify-content:flex-end; }
   .th-under .th-seen { appearance:none; border:0; padding:0; background:transparent; font-family:var(--sans); font-size:10px; color:var(--muted-2); opacity:.75; }
-  /* A healthy send can cross several true states in a few hundred
-     milliseconds. Hold transient words for one quiet beat so the person sees
-     the first stable result, not transport chatter. Permanent failure is
-     deliberately not delayed. */
-  @keyframes th-status-settle { from { opacity:0; } to { opacity:.75; } }
-  .th-under .th-seen.th-settling { animation:th-status-settle 1ms 900ms both; }
+  /* Rows are recreated when delivery state changes. Keep the status visible:
+     an entry animation would hide it again on every payload refresh. */
   .th-under button.th-seen { cursor:pointer; }
   .th-under button.th-seen:hover { color:var(--ink); opacity:1; }
   .th-message-action { appearance:none; border:0; padding:0; background:transparent; font-family:var(--sans); font-size:10px;
@@ -2964,6 +2971,26 @@
   @keyframes suSpin { to { transform:rotate(360deg); } }
   @media (prefers-reduced-motion:reduce) { .su-spinner { animation:none; border-top-color:var(--hair); } }
   @media (prefers-reduced-motion:reduce) { .su-check-active .su-check-mark { animation:none; border-top-color:var(--hair); } }
+
+  /* The accepted compact Requests row: one slot regardless of request count. */
+  .requests-entry { width:calc(100% - 24px); margin:4px 12px; padding:9px 4px 11px; display:flex; align-items:center; gap:10px; border:0; border-bottom:1px solid var(--hair); border-radius:0; background:transparent; color:var(--ink); font:600 12px var(--sans); text-align:left; cursor:pointer; }
+  .requests-entry:hover { background:var(--wash); }
+  .requests-icon { flex:none; width:18px; color:var(--accent); }
+  .requests-count { margin-left:auto; color:var(--muted-2); font:11px var(--mono); white-space:nowrap; }
+  .requests-chevron { color:var(--muted-2); font-size:19px; }
+  .requests-head { display:flex; align-items:center; gap:6px; padding:0 16px; height:46px; border-bottom:1px solid var(--hair); }
+  .requests-head strong { font:600 12px var(--sans); }
+  .requests-head .th-back { width:18px; font-size:24px; }
+  .requests-head .requests-count { margin-left:0; font-size:10px; }
+  .requests-delete-all { margin-left:auto; padding:6px 0; border:0; background:transparent; color:var(--danger); font:11px var(--sans); cursor:pointer; }
+  .requests-delete-all:disabled { opacity:.45; cursor:default; }
+  .requests-note { padding:10px 16px 3px; color:var(--muted-2); font:10.5px var(--sans); }
+  .requests-error { padding:8px 16px; color:var(--danger); font:11px var(--sans); }
+  .request-inbox-row { position:relative; }
+  .request-inbox-row .th-time { margin-right:22px; }
+  .request-inbox-more { position:absolute; top:8px; right:7px; width:24px; height:24px; border:0; border-radius:var(--r-1); background:transparent; color:var(--muted-2); font:18px var(--sans); cursor:pointer; }
+  .request-inbox-more:hover, .request-inbox-more:focus-visible { color:var(--ink); background:var(--wash-2); }
+
 </style>
 </head>
 <body>
@@ -3015,7 +3042,7 @@
       <button class="tab" type="button" data-view="slack">
         Slack <span class="tab-badge gone" id="slackBadge">0</span>
       </button>
-      <button class="tab" type="button" data-view="contacts">People <span class="tab-badge gone" id="peopleBadge">0</span></button>
+      <button class="tab" type="button" data-view="contacts">Contacts <span class="tab-badge gone" id="peopleBadge">0</span></button>
       <button class="tab tab-you" type="button" data-view="settings" aria-label="You"><span class="tab-avatar word" id="youTabAvatar" aria-hidden="true">You</span></button>
       <button class="mark-all-read gone" id="markAllRead" type="button">Mark all as read</button>
     </nav>
@@ -3158,12 +3185,11 @@
                long book hid them completely; stacking them the other way would just
                bury people instead. A segment switches the pane and keeps both a
                single tap away, with counts so neither looks empty when it isn't. -->
-          <div class="cv-seg" role="tablist" aria-label="People, channels and requests">
-            <button class="cv-seg-btn active" type="button" role="tab" data-pane="people" id="cvSegPeople">People <span class="cv-seg-n" id="cvSegPeopleN"></span></button>
+          <div class="cv-seg" role="tablist" aria-label="Contacts and channels">
+            <button class="cv-seg-btn active" type="button" role="tab" data-pane="people" id="cvSegPeople">Contacts <span class="cv-seg-n" id="cvSegPeopleN"></span></button>
             <button class="cv-seg-btn" type="button" role="tab" data-pane="groups" id="cvSegGroups">Channels <span class="cv-seg-n" id="cvSegGroupsN"></span></button>
-            <button class="cv-seg-btn" type="button" role="tab" data-pane="requests" id="cvSegRequests">Requests <span class="cv-seg-n" id="cvSegRequestsN"></span></button>
           </div>
-          <span class="cv-add-slot" id="cvAddHome"><button class="cv-add" type="button" id="cvAdd" aria-label="Add person">Add</button></span>
+          <span class="cv-add-slot" id="cvAddHome"><button class="cv-add" type="button" id="cvAdd" aria-label="Add contact">Add</button></span>
           <button class="cv-add gone" type="button" id="cvgNew" aria-label="Add channel">Add</button>
         </div>
         <section class="cv-google gone" id="cvGoogle" aria-label="Google contacts">
@@ -3177,10 +3203,10 @@
         <div class="cv-add-sheet hidden" id="cvAddSheet">
           <div class="cv-add-t">On Relay already</div>
           <div class="cv-add-line">
-            <input class="cv-input" id="cvAddInput" type="email" aria-label="Person’s email address" placeholder="name@company.com" autocomplete="off" spellcheck="false" />
+            <input class="cv-input" id="cvAddInput" type="email" aria-label="Contact’s email address" placeholder="name@company.com" autocomplete="off" spellcheck="false" />
             <span class="cv-add-slot" id="cvAddTarget"></span>
           </div>
-          <div class="cv-add-note" id="cvAddNote">They show up in your People right away.</div>
+          <div class="cv-add-note" id="cvAddNote">They show up in your Contacts right away.</div>
           <div class="cv-add-t cv-add-t2" id="cvAddT2">Not on Relay yet</div>
           <button class="cv-add quiet" type="button" id="cvAddLink">Copy your invite link</button>
           <div class="cv-add-note">Send it however you talk to them. They paste it into Claude Code or Codex and show up here.</div>
@@ -3222,12 +3248,11 @@
         </div>
         <div class="cvg-error" id="cvPeopleError"></div>
         <div class="cv-list" id="cvList"></div>
-        <div class="cv-blocked-entry" id="cvBlockedEntry"><button class="cv-latent-link" type="button" id="cvBlockedPeople">Blocked people</button></div>
+        <div class="cv-blocked-entry" id="cvBlockedEntry"><button class="cv-latent-link" type="button" id="cvBlockedPeople">Blocked contacts</button></div>
         <div class="cv-latent" id="cvLatent">Not on Relay yet? <button type="button" class="cv-latent-link" id="cvLatentLink">Copy your link</button> and send it to them.</div>
-        <!-- Requests: a first message from someone not in your People waits
+        <!-- Requests: a first message from someone not in your Contacts waits
              here, out of the feed and the count, until you accept it, reply,
              or ignore it. -->
-        <div class="cv-requests gone" id="cvRequests"></div>
         <div id="contactsEmpty" class="empty gone">
           <svg class="mark" width="22" height="22" viewBox="0 0 16 16" aria-hidden="true">
             <rect x="0" y="6" width="4" height="4"/><rect x="6" y="6" width="4" height="4"/><rect x="12" y="6" width="4" height="4"/>
@@ -3238,8 +3263,8 @@
 
         </div>
         <section class="cv-blocked-page gone" id="cvBlockedPage" aria-labelledby="cvBlockedTitle">
-          <button class="cv-blocked-back" id="cvBlockedBack" type="button">← People</button>
-          <h2 id="cvBlockedTitle">Blocked people</h2>
+          <button class="cv-blocked-back" id="cvBlockedBack" type="button">← Contacts</button>
+          <h2 id="cvBlockedTitle">Blocked contacts</h2>
           <p class="cv-blocked-copy">You can’t send each other direct messages while blocked. Existing messages stay.</p>
           <div class="cv-blocked-list" id="cvBlockedList" aria-live="polite"></div>
           <div class="cv-blocked-status" id="cvBlockedStatus" role="status"></div>
@@ -3335,7 +3360,6 @@
   const cvAddCancelEl = document.getElementById("cvAddCancel");
   const cvLatentEl = document.getElementById("cvLatent");
   const cvLatentLinkEl = document.getElementById("cvLatentLink");
-  const cvRequestsEl = document.getElementById("cvRequests");
   const cvEmailEl = document.getElementById("cvEmail");      // the draft <input> inside the chip field
   const cvEmailsEl = document.getElementById("cvEmails");    // the bordered chip container (click -> focus)
   const cvSuggestEl = document.getElementById("cvSuggest");  // domain autocomplete dropdown
@@ -4191,6 +4215,18 @@
     return Math.floor(s / 604800) + "w";
   }
 
+  function formatChatTime(iso) {
+    const date = new Date(iso || "");
+    if (!Number.isFinite(date.getTime())) return "";
+    return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  }
+  function chatTimestampHtml(iso, className = "th-blk-time") {
+    const clock = formatChatTime(iso);
+    if (!clock) return "";
+    const date = new Date(iso);
+    return `<time class="${esc(className)}" datetime="${esc(date.toISOString())}" title="${esc(date.toLocaleString([], { dateStyle:"medium", timeStyle:"short" }))}">${clock}</time>`;
+  }
+
   function formatChatDate(iso, nowValue = Date.now()) {
     const date = new Date(iso);
     const now = new Date(nowValue);
@@ -4611,6 +4647,16 @@
     return `${String(relayId || "")}::${String(attachmentId || "")}`;
   }
 
+  // The send's stable local identity exists before any server receipt. Keep
+  // using it while the outbox row stands in for the canonical message.
+  function chatAttachmentSource(message, attachments) {
+    const outboxId = String(message.outboxId || "");
+    return outboxId ? {
+      relayId: `outbox:${outboxId}`,
+      attachments: attachments.map((attachment, index) => ({ ...attachment, id: `file-${index}` })),
+    } : { relayId: String(message.relayId || message.id || ""), attachments };
+  }
+
   const CARGO_CHECK_SVG = '<svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5L6.5 11.5 12.5 4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
   // One selectable object per row: the 20px circle sits in the 16px gutter and
@@ -4640,19 +4686,18 @@
     const cls = `ca-att ${tile ? "ca-tile" : "ca-photo"}${mine ? " mine" : ""}`;
     const overlay = more > 0 ? `<span class="ca-more" aria-hidden="true">+${more}</span>` : "";
     const note = `<span class="ca-note" data-att-note="1" hidden></span>`;
+    const previewUrl = /^(?:blob:|data:image\/)/i.test(String(attachment?.previewUrl || ""))
+      ? String(attachment.previewUrl)
+      : "";
     if (!relayId || !attachment?.id) {
-      // Optimistic (just picked, not yet canonical) or queued after a restart:
-      // the same plate, without an id to open.
-      const previewUrl = /^(?:blob:|data:image\/)/i.test(String(attachment?.previewUrl || ""))
-        ? String(attachment.previewUrl)
-        : "";
+      // Draft-only metadata has no committed local or canonical identity yet.
       return `<div class="${cls}${previewUrl ? " ready" : " pending"}" role="img" aria-label="Attached image: ${esc(name)}">`
         + `<span class="att-plate" aria-hidden="true">${previewUrl ? `<img src="${esc(previewUrl)}" alt="">` : ""}</span>${overlay}${note}</div>`;
     }
-    return `<button type="button" class="${cls} pending" data-att-relay="${esc(relayId)}" data-att-id="${esc(attachment.id)}"`
+    return `<button type="button" class="${cls}${previewUrl ? " ready" : " pending"}" data-att-relay="${esc(relayId)}" data-att-id="${esc(attachment.id)}"`
       + ` data-att-key="${esc(key)}" data-att-kind="image" data-att-preview="1" data-att-name="${esc(name)}" data-stop="1"`
       + ` title="${esc(name)}" aria-label="Open image ${esc(name)}">`
-      + `<span class="att-plate" aria-hidden="true"></span>${overlay}${note}</button>`;
+      + `<span class="att-plate" aria-hidden="true">${previewUrl ? `<img src="${esc(previewUrl)}" alt="">` : ""}</span>${overlay}${note}</button>`;
   }
 
   // 2 → side by side. 3 → one tall left, two stacked right. 4+ → a 2×2 whose
@@ -6294,13 +6339,15 @@
     // leak into a group's avatar roster. Quiet saved groups belong in Chat but
     // not in the correspondence index, so Relays keeps only active rooms.
     const { rooms } = chatSections();
-    // A stranger's first message waits in People › Requests, not here.
+    // A stranger's first message waits in Relays › Requests, not here.
     const known = knownAddresses();
     return rooms
       .filter((room) => room.hasActivity !== false && !isRequestRoom(room, known))
       .map((room) => ({ ...room, latestAt: room.latestAt || (room.latest && room.latest.at) || "" }));
   }
   function renderRelays() {
+    if (requestInboxAccount !== signupAccountKey()) { requestInboxOpen = false; requestInboxError = ""; requestInboxAccount = signupAccountKey(); }
+    if (requestInboxOpen && !peeking) { renderRequestsPane(); return; }
     // WhatsApp chronology: a room's preview is the newest correspondence in
     // either direction. `threadMessages` already normalizes staged inbound and
     // live Sent rows, deduplicates group fan-out siblings, and keeps optimistic
@@ -6349,15 +6396,17 @@
     }
     // Relays is the WhatsApp-shaped identity index: exactly one row per person
     // or exact saved group, carrying that room's latest Relay and unread sum.
-    relaysEmptyEl.classList.toggle("gone", identityRows.length > 0);
+    const requestCount = requestEntries().length;
+    relaysEmptyEl.classList.toggle("gone", identityRows.length > 0 || requestCount > 0);
     hasMoreThreads = identityRows.length > renderedThreadCount + RENDER_WINDOW;
     const visible = identityRows.slice(0, renderedThreadCount + RENDER_WINDOW);
     // Identical markup means NO DOM write (main's guard, kept): a 4s poll that
     // rebuilds the list destroys open menus and their handlers, and flickers.
     prevRelayIds = new Set(allRows.map((r) => r.id));
-    const nextListHtml = visible.map((row) => relayIdentityRowHtml(row)).join("");
+    const nextListHtml = requestSummaryHtml(requestCount) + visible.map((row) => relayIdentityRowHtml(row)).join("");
     if (relaysListEl.innerHTML === nextListHtml) return;
     relaysListEl.innerHTML = nextListHtml;
+    document.getElementById("requestsEntry")?.addEventListener("click", openRequestInbox);
     for (const el of relaysListEl.querySelectorAll(".relay-arrival")) {
       el.addEventListener("click", () => {
         // One tap, straight into the conversation (Sven's standing call).
@@ -8222,7 +8271,7 @@
   }
   let chatExpanded = false; // the conversation borrowing the reader's frame (⤢)
   let readerTab = "you"; // which face of the Task folder is open ("you" | "agent")
-  const readerDetailsOpen = new Set(); // letters whose Details this person opened; closed until then
+  const readerDetailsOpen = new Set(); // letters whose Details this contact opened; closed until then
   let readerTabSwap = false; // true only for the render caused by a tab switch (drives the pane animation)
   const requestWorkDrafts = new Map(); // switching documents never eats an unsent Start/Steer note
   const readerHumanDrafts = new Map(); // For-you replies survive source/Work tab hops independently
@@ -8887,7 +8936,7 @@
         </span>
       </nav>` : "";
     // DETAILS. Always "Details", never "for your agent": the specifics under
-    // the words, in the agent's register, closed until this person opens it.
+    // the words, in the agent's register, closed until this contact opens it.
     // Remembered per letter while the pill runs.
     const sharedShelf = relaySharedShelf(r);
     const detailsOpen = readerDetailsOpen.has(String(r.id));
@@ -10649,13 +10698,10 @@
     return e ? [e] : [];
   }
   function contactKey(c) { return c.id || (contactEmails(c)[0] || "") || c.name; }
-  // REQUESTS (Sven, 2026-09-08): a first message from someone who is not in
-  // your People is a request. It waits in People › Requests — not in the
-  // feed, not in the count — until you accept it (save them), reply, or
-  // ignore it. Only a direct Relay room can be one: never a saved channel, a
-  // Slack room, the viewer, or a person you have already written to. Ignored
-  // requests are a per-device pref; they come back the moment you write to
-  // that person yourself, because then they are simply a conversation.
+  // Requests collect inbound direct correspondence from unknown contacts.
+  // Relays keeps one compact summary; accepting or replying makes the sender
+  // an ordinary conversation. Channels, Slack and self never become requests.
+  // Preserve the account-scoped hidden-address preference used by blocking.
   const IGNORED_REQUESTS_PREF = "proto.ignoredRequests.v1";
   // Keyed by the signed-in account: one person's Ignore never hides a request
   // from the next account on this Mac, and with no account known there is
@@ -10709,100 +10755,144 @@
     const ignored = ignoredRequestKeys();
     return chatSections("relay").people.filter((room) => isRequestRoom(room, known) && !ignored.has(roomAddress(room)));
   }
-  let showIgnoredRequests = false;
+  let requestInboxOpen = false;
+  let requestInboxLimit = 50;
+  let requestInboxError = "";
+  let requestInboxBusy = false;
+  let requestInboxAccount = "";
+  function requestEntries() {
+    const seen = new Set();
+    return requestRooms().flatMap((room) => (room.msgs || [])
+      .filter((message) => message.direction === "in" && !message.deletedAt && !seen.has(message.id) && seen.add(message.id))
+      .map((message) => ({ room, message })))
+      .sort((a, b) => new Date(b.message.at || 0) - new Date(a.message.at || 0));
+  }
+  function openRequestInbox() {
+    requestInboxAccount = signupAccountKey();
+    requestInboxOpen = true;
+    requestInboxLimit = 50;
+    requestInboxError = "";
+    activeView = "relays";
+    commitNavigation();
+    scrollEl.scrollTop = 0;
+  }
+  function requestSummaryHtml(count) {
+    return count ? `<button class="requests-entry" type="button" id="requestsEntry">
+      <svg class="requests-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+      <span>Requests</span><span class="requests-count">${count.toLocaleString()}</span><span class="requests-chevron" aria-hidden="true">›</span></button>` : "";
+  }
   function renderRequestsPane() {
-    const ignored = ignoredRequestKeys();
-    const rooms = showIgnoredRequests
-      ? chatSections("relay").people.filter((room) => isRequestRoom(room) && ignored.has(roomAddress(room)))
-      : requestRooms();
-    cvRequestsEl.innerHTML = rooms.map((room) => {
-      const address = roomAddress(room);
-      const name = room.name || address;
-      const preview = String((room.latest && room.latest.title) || "").trim() || address;
-      const inboundId = (room.msgs || []).find((message) => message.direction === "in")?.id || "";
-      return `
-      <div class="cv-request" data-request="${esc(address)}">
-        <button class="cv-item" type="button" data-request-open="${esc(room.threadId)}" data-party="${esc(name)}">
-          <span class="cv-avatar" style="--cv-h:${cvHue(name)}">${esc(cvInitials(name, address))}</span>
-          <span class="cv-body">
-            <span class="cv-name">${esc(name)}</span>
-            <span class="cv-subrow"><span class="cv-sub">${esc(preview)}</span></span>
-            <span class="cv-request-why">Not in your People</span>
-          </span>
-          ${room.latest && room.latest.at ? `<span class="cv-meta">${esc(timeAgo(room.latest.at))}</span>` : ""}
-        </button>
-        <div class="cv-request-acts">
-          <button class="cv-add" type="button" data-request-accept="${esc(address)}" data-name="${esc(name)}">Accept</button>
-          ${showIgnoredRequests ? `<button class="cv-add quiet" type="button" data-request-restore="${esc(address)}">Restore</button>`
-            : `<button class="cv-add quiet" type="button" data-request-ignore="${esc(address)}">Ignore</button>`}
-          ${inboundId ? `<button class="cv-add quiet" type="button" data-request-block="${esc(inboundId)}" data-address="${esc(address)}">Block</button>` : ""}
-        </div>
-      </div>`;
-    }).join("") + `${rooms.length
-      ? (showIgnoredRequests ? "" : `<div class="cv-request-note">Open one to read it. Replying accepts it too.</div>`)
-      : `<div class="cv-empty">${showIgnoredRequests ? "No ignored requests." : "No requests. Someone new writing to you shows up here first."}</div>`}${
-      // The way back from Ignore, in the People pane's quiet-line shape; only
-      // when there is something hidden to show.
-      showIgnoredRequests ? `<div class="cv-latent">Showing ignored requests. <button type="button" class="cv-latent-link" id="cvShowIgnored">Back to requests</button>.</div>`
-      : ignored.size ? `<div class="cv-latent">Ignored requests are hidden. <button type="button" class="cv-latent-link" id="cvShowIgnored">Show them</button>.</div>` : ""}`;
-    document.getElementById("cvShowIgnored")?.addEventListener("click", () => {
-      showIgnoredRequests = !showIgnoredRequests; renderRequestsPane();
-    });
-    for (const button of cvRequestsEl.querySelectorAll("[data-request-restore]")) {
-      button.addEventListener("click", () => {
-        const next = ignoredRequestKeys(); next.delete(button.dataset.requestRestore);
-        setProtoPref(ignoredRequestsKey(), JSON.stringify([...next]));
-        renderRequestsPane(); renderAll();
-      });
-    }
-    for (const button of cvRequestsEl.querySelectorAll("[data-request-block]")) {
-      button.addEventListener("click", async () => {
-        if (!button.dataset.confirmed) { button.dataset.confirmed = "1"; button.textContent = "Block this person?"; return; }
-        const account = signupAccountKey(); button.disabled = true;
-        try {
-          await window.relay.blockRequest(button.dataset.requestBlock);
-          if (account !== signupAccountKey()) return;
-          ignoreRequest(button.dataset.address); renderRequestsPane(); renderAll();
-        } catch {
-          if (account === signupAccountKey()) { cvPeopleErrorEl.textContent = "Could not block this person. Try again."; button.disabled = false; }
-        }
-      });
-    }
-    for (const el of cvRequestsEl.querySelectorAll("[data-request-open]")) {
-      el.addEventListener("click", () => {
-        const morphFromList = prepareReaderMorph(activeView);
-        openThreadDetail(el.getAttribute("data-request-open"), el.getAttribute("data-party") || "", "contacts", { expanded:true });
-        if (morphFromList) startReaderMorph("threads");
-      });
-    }
-    for (const b of cvRequestsEl.querySelectorAll("[data-request-accept]")) {
-      b.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        if (b.disabled) return;
-        b.disabled = true;
-        const address = b.getAttribute("data-request-accept");
-        const name = b.getAttribute("data-name") || address;
-        const account = signupAccountKey();
-        // Accepting is saving them: the room moves to Relays on its own.
-        const res = await contactWriteResult(window.relay.contactSave({ contactId:"", name, emails:[address], email:address }), "Could not accept.");
-        if (account !== signupAccountKey()) return; // a different account is looking now
-        if (!res.ok) { cvPeopleErrorEl.textContent = res.error; b.disabled = false; return; }
-        if (Array.isArray(res.contacts)) contactsList = res.contacts;
-        else if (res.contact) contactsList = [...contactsList.filter((c) => contactKey(c) !== contactKey(res.contact)), res.contact];
-        renderContacts();
-        renderRequestsPane();
-        renderAll();
-      });
-    }
-    for (const b of cvRequestsEl.querySelectorAll("[data-request-ignore]")) {
-      b.addEventListener("click", (e) => {
-        e.stopPropagation();
-        ignoreRequest(b.getAttribute("data-request-ignore"));
-        renderRequestsPane();
-        renderAll();
+    if (requestInboxBusy) return;
+    const entries = requestEntries();
+    relaysEmptyEl.classList.add("gone");
+    hasMoreThreads = false;
+    const next = `<div class="requests-head"><button class="th-back" type="button" id="requestsBack" aria-label="Back to Relays">‹</button><strong>Requests</strong><span class="requests-count">${entries.length.toLocaleString()}</span><button class="requests-delete-all" type="button" id="requestsDeleteAll"${entries.length ? "" : " disabled"}>Delete all</button></div>
+      <div class="requests-note">Relays from senders outside your Contacts</div>
+      ${requestInboxError ? `<div class="requests-error" role="alert">${esc(requestInboxError)}</div>` : ""}
+      ${entries.slice(0, requestInboxLimit).map(({room, message}, index) => {
+        const name = room.name || roomAddress(room);
+        return `<div class="request-inbox-row" data-request-id="${esc(message.id)}">
+          <button class="th-item${message.unread ? " unread" : ""}" type="button" data-request-open="${index}">
+            <span class="avatar" style="--av-h:${avatarHue(name)}" aria-hidden="true">${esc(avatarInitials(name))}</span>
+            <span class="rk-body"><span class="th-top"><span class="th-party">${esc(name)}</span><span class="th-time">${esc(timeAgo(message.at))}</span></span><span class="th-title">${esc(relayListGist(message.title || message.body || "Message", 90))}</span></span>
+          </button>
+          <button class="request-inbox-more" type="button" data-message-more aria-label="Actions for ${esc(name)}: ${esc(message.title || "Relay")}" aria-haspopup="menu" aria-expanded="false" aria-controls="request-menu-${index}">⋯</button>
+          <div class="th-message-menu" id="request-menu-${index}" popover="auto" role="menu" aria-label="Request actions">
+            <button type="button" role="menuitem" data-request-accept="${index}">Add to Contacts</button>
+            <button type="button" role="menuitem" class="danger" data-request-delete="${index}">Delete relay</button>
+            <button type="button" role="menuitem" class="danger" data-request-block="${index}">Block sender…</button>
+          </div></div>`;
+      }).join("")}
+      ${entries.length > requestInboxLimit ? '<button class="todo-load-more" type="button" id="requestsMore">Load more</button>' : ""}
+      ${entries.length ? "" : '<div class="cv-empty">No requests. Someone new writing to you shows up here first.</div>'}`;
+    if (relaysListEl.innerHTML === next) return;
+    relaysListEl.innerHTML = next;
+    document.getElementById("requestsBack").onclick = () => { requestInboxOpen = false; renderRelays(); scrollEl.scrollTop = 0; document.getElementById("requestsEntry")?.focus(); };
+    document.getElementById("requestsMore")?.addEventListener("click", () => { requestInboxLimit += 50; renderRequestsPane(); });
+    document.getElementById("requestsDeleteAll").onclick = (event) => confirmRequestAction("delete-all", entries, event.currentTarget);
+    wireMessageSideMenus(relaysListEl);
+    for (const button of relaysListEl.querySelectorAll("[data-request-open]")) button.onclick = () => {
+      const {room} = entries[Number(button.dataset.requestOpen)];
+      startRoomViewTransition(() => openThreadDetail(room.chatId || room.threadId, room.name, "relays", {expanded:true}), {motion:"forward"});
+    };
+    for (const action of ["delete", "block", "accept"]) {
+      for (const button of relaysListEl.querySelectorAll(`[data-request-${action}]`)) button.addEventListener("click", () => {
+        const entry = entries[Number(button.getAttribute(`data-request-${action}`))];
+        const trigger = button.closest(".request-inbox-row").querySelector("[data-message-more]");
+        button.closest("[popover]").hidePopover();
+        if (action === "delete") void deleteRequestEntries([entry]);
+        else if (action === "block") confirmRequestAction("block", [entry], trigger);
+        else void acceptRequestEntry(entry);
       });
     }
   }
+  async function deleteRequestEntries(entries) {
+    if (requestInboxBusy) return;
+    const account = signupAccountKey();
+    if (!account) return;
+    requestInboxBusy = true;
+    for (const button of relaysListEl.querySelectorAll("button")) button.disabled = true;
+    const bulkButton = document.getElementById("requestsDeleteAll");
+    if (bulkButton) bulkButton.textContent = "Deleting…";
+    requestInboxError = "";
+    let failures = 0;
+    try {
+      for (const {room, message} of entries) {
+        if (account !== signupAccountKey()) return;
+        // Snapshot the intended IDs, but do not delete a message whose sender
+        // was accepted while a long bulk operation was running.
+        if (!isRequestRoom(room, knownAddresses())) continue;
+        try {
+          const result = await window.relay.deleteRelay(message.id);
+          if (account !== signupAccountKey()) return;
+          if (result?.ok !== true) throw new Error(result?.error || "Could not delete relay.");
+          payload.relays = (payload.relays || []).filter((row) => row.id !== message.id);
+        } catch { failures += 1; }
+      }
+    } finally {
+      requestInboxBusy = false;
+      if (account === signupAccountKey()) {
+        requestInboxError = failures ? `${failures} ${failures === 1 ? "relay could" : "relays could"} not be deleted. Try again.` : "";
+        renderAll();
+      }
+    }
+  }
+  function confirmRequestAction(action, entries, trigger) {
+    if (!entries.length || requestInboxBusy) return;
+    const account = signupAccountKey();
+    const blocking = action === "block";
+    const {room, message} = entries[0];
+    const current = showPeopleDialog(`<h2 id="peopleDialogTitle">${blocking ? `Block ${esc(room.name || roomAddress(room))}?` : `Delete all ${entries.length.toLocaleString()} requests?`}</h2>
+      <p>${blocking ? "You won’t be able to message each other or connect through invite links. You can unblock them in Contacts → Blocked contacts." : "These relays will move to Recently Deleted for 30 days. Your other conversations will stay."}</p>
+      <div class="people-dialog-error" role="alert"></div><div class="people-dialog-actions"><button type="button" data-dialog-close>Cancel</button><button type="button" class="danger" data-request-confirm>${blocking ? "Block sender" : "Delete all"}</button></div>`, trigger);
+    peopleDialog.querySelector("[data-request-confirm]").onclick = async (event) => {
+      if (!current() || account !== signupAccountKey() || event.currentTarget.disabled) return;
+      event.currentTarget.disabled = true;
+      if (!blocking) { closePeopleDialog(); await deleteRequestEntries(entries); return; }
+      try {
+        const result = await window.relay.blockRequest(message.id);
+        if (account !== signupAccountKey()) return;
+        if (result?.blocked !== true) throw new Error("Could not block sender.");
+        ignoreRequest(roomAddress(room));
+        closePeopleDialog(); renderAll();
+      } catch {
+        if (!current()) return;
+        peopleDialog.querySelector(".people-dialog-error").textContent = "Could not block this sender. Try again.";
+        peopleDialog.querySelector("[data-request-confirm]").disabled = false;
+      }
+    };
+  }
+  async function acceptRequestEntry({room}) {
+    const account = signupAccountKey();
+    const address = roomAddress(room);
+    const res = await contactWriteResult(window.relay.contactSave({contactId:"", name:room.name || address, emails:[address], email:address}), "Could not add to Contacts.");
+    if (account !== signupAccountKey()) return;
+    if (!res.ok) requestInboxError = res.error;
+    else if (Array.isArray(res.contacts)) contactsList = res.contacts;
+    else if (res.contact) contactsList = [...contactsList.filter((c) => contactKey(c) !== contactKey(res.contact)), res.contact];
+    renderAll();
+  }
+
   function renderContacts() {
     contactsEmptyEl.classList.toggle("gone", contactsPane !== "people" || contactsList.length > 0);
     refreshPaneCounts();
@@ -10828,7 +10918,7 @@
       <button class="cv-person-more" type="button" aria-label="More actions for ${esc(c.name || primary)}" aria-haspopup="menu" aria-expanded="false" aria-controls="person-menu-${index}" data-message-more>⋯</button>
       <div class="th-message-menu" id="person-menu-${index}" popover="auto" role="menu" aria-label="Actions for ${esc(c.name || primary)}">
         <button type="button" role="menuitem" data-contact-edit="${esc(contactKey(c))}">Edit contact</button>
-        ${canBlockPerson(c) ? `<button type="button" role="menuitem" class="danger" data-contact-block="${esc(contactKey(c))}">Block person…</button>` : ""}
+        ${canBlockPerson(c) ? `<button type="button" role="menuitem" class="danger" data-contact-block="${esc(contactKey(c))}">Block contact…</button>` : ""}
       </div>
       </div>`;
     }).join("");
@@ -10911,13 +11001,13 @@
   function openPersonBlock(key, trigger) {
     const person = contactsList.find((contact) => contactKey(contact) === key);
     if (!person) return;
-    const name = person.name || contactEmails(person)[0] || "this person";
+    const name = person.name || contactEmails(person)[0] || "this contact";
     if (!canBlockPerson(person)) return;
     const current = showPeopleDialog(`<h2 id="peopleDialogTitle">Block ${esc(name)}?</h2>
-      <p>You won’t be able to message each other or connect through invite links. Existing messages stay. You can unblock them in Blocked people.</p>
+      <p>You won’t be able to message each other or connect through invite links. Existing messages stay. You can unblock them in Blocked contacts.</p>
       <div class="people-dialog-error" role="alert"></div><div class="people-dialog-actions">
       <button class="cv-cancel" type="button" data-dialog-close autofocus>Cancel</button>
-      <button class="danger" type="button" data-block-confirm>Block person</button></div>`, trigger);
+      <button class="danger" type="button" data-block-confirm>Block contact</button></div>`, trigger);
     peopleDialog.querySelector("[data-block-confirm]")?.addEventListener("click", async (event) => {
       if (!current()) { closePeopleDialog(); return; }
       const button = event.currentTarget;
@@ -10927,16 +11017,16 @@
       try {
         const result = await window.relay.blockPerson({ contactId:person.id, relayUserId:person.relayUserId });
         if (!current()) return;
-        if (result?.blocked !== true) throw new Error("Could not block this person. Try again.");
-        peopleDialog.innerHTML = `<h2 id="peopleDialogTitle">${esc(name)} is blocked</h2><p>Your existing messages and contact stay. You can unblock them in Blocked people.</p><div class="people-dialog-actions"><button class="cv-add" type="button" data-blocked-list>Blocked people</button><button class="cv-cancel" type="button" data-dialog-close>Done</button></div>`;
+        if (result?.blocked !== true) throw new Error("Could not block this contact. Try again.");
+        peopleDialog.innerHTML = `<h2 id="peopleDialogTitle">${esc(name)} is blocked</h2><p>Your existing messages and contact stay. You can unblock them in Blocked contacts.</p><div class="people-dialog-actions"><button class="cv-add" type="button" data-blocked-list>Blocked contacts</button><button class="cv-cancel" type="button" data-dialog-close>Done</button></div>`;
         peopleDialog.querySelector("[data-dialog-close]").addEventListener("click", closePeopleDialog);
         peopleDialog.querySelector("[data-blocked-list]").addEventListener("click", () => openBlockedPeople(trigger));
         positionPeopleDialog();
         peopleDialog.querySelector("[data-dialog-close]").focus();
       } catch {
         if (!current()) return;
-        peopleDialog.querySelector(".people-dialog-error").textContent = "Could not block this person. Refresh People and try again.";
-        button.disabled = false; button.textContent = "Block person";
+        peopleDialog.querySelector(".people-dialog-error").textContent = "Could not block this contact. Refresh Contacts and try again.";
+        button.disabled = false; button.textContent = "Block contact";
       }
     });
   }
@@ -10996,7 +11086,7 @@
     let currentBlocks = [];
     const paint = (blocks) => {
       currentBlocks = blocks;
-      list.innerHTML = blocks.map((person) => `<div class="people-blocked-row"><span class="cv-avatar" aria-hidden="true">${esc(cvInitials(person.name || "Relay member", ""))}</span><span>${esc(person.name || "Relay member")}</span><button class="cv-add" type="button" data-unblock="${esc(person.relayUserId)}" aria-label="Unblock ${esc(person.name || "Relay member")}">Unblock</button></div>`).join("") || '<div class="cv-blocked-empty"><strong>No blocked people</strong><p>People you block will appear here.</p></div>';
+      list.innerHTML = blocks.map((person) => `<div class="people-blocked-row"><span class="cv-avatar" aria-hidden="true">${esc(cvInitials(person.name || "Relay member", ""))}</span><span>${esc(person.name || "Relay member")}</span><button class="cv-add" type="button" data-unblock="${esc(person.relayUserId)}" aria-label="Unblock ${esc(person.name || "Relay member")}">Unblock</button></div>`).join("") || '<div class="cv-blocked-empty"><strong>No blocked contacts</strong><p>Contacts you block will appear here.</p></div>';
       for (const button of list.querySelectorAll("[data-unblock]")) {
         button.addEventListener("click", async () => {
           if (!current() || button.disabled) return;
@@ -11016,7 +11106,7 @@
             if (restoreFocus) (list.querySelector("[data-unblock]") || cvBlockedBackEl).focus({ preventScroll:true });
           } catch {
             if (!current()) return;
-            cvBlockedErrorEl.textContent = "Could not unblock this person. Try again.";
+            cvBlockedErrorEl.textContent = "Could not unblock this contact. Try again.";
             for (const control of list.querySelectorAll("[data-unblock]")) control.disabled = false;
             button.textContent = "Unblock";
           }
@@ -11030,7 +11120,7 @@
       paint(result.blocks);
     } catch {
       if (!current()) return;
-      list.innerHTML = 'Blocked people are unavailable right now. <button class="cv-add" type="button" data-blocks-retry>Try again</button>';
+      list.innerHTML = 'Blocked contacts are unavailable right now. <button class="cv-add" type="button" data-blocks-retry>Try again</button>';
       list.querySelector("button").addEventListener("click", () => openBlockedPeople(trigger));
     } finally {
       if (current()) list.setAttribute("aria-busy", "false");
@@ -11223,14 +11313,11 @@
   const cvSegPeopleNEl = document.getElementById("cvSegPeopleN");
   const cvSegGroupsNEl = document.getElementById("cvSegGroupsN");
   const cvGroupsEl = document.getElementById("cvGroups");
-  const cvSegRequestsEl = document.getElementById("cvSegRequests");
-  const cvSegRequestsNEl = document.getElementById("cvSegRequestsN");
   let contactsPane = "people";
   function applyContactsPane() {
     const people = contactsPane === "people";
     const groups = contactsPane === "groups";
-    const requests = contactsPane === "requests";
-    for (const [el, on] of [[cvSegPeopleEl, people], [cvSegGroupsEl, groups], [cvSegRequestsEl, requests]]) {
+    for (const [el, on] of [[cvSegPeopleEl, people], [cvSegGroupsEl, groups]]) {
       el.classList.toggle("active", on);
       el.setAttribute("aria-selected", String(on));
     }
@@ -11240,8 +11327,7 @@
     cvLatentEl.classList.toggle("gone", !people);
     contactsEmptyEl.classList.toggle("gone", !people || contactsList.length > 0);
     cvGroupsEl.classList.toggle("gone", !groups);
-    cvRequestsEl.classList.toggle("gone", !requests);
-    // The add button follows the pane it belongs to; Requests has none.
+    // The add button follows the pane it belongs to; the other pane has its own.
     cvAddEl.classList.toggle("gone", !people);
     document.getElementById("cvAddHome").classList.toggle("gone", !people);
     cvgNewEl.classList.toggle("gone", !groups);
@@ -11252,17 +11338,13 @@
     cvPeopleErrorEl.textContent = "";
     cvOpeningKey = null;
     cvgShowError("");
-    if (requests) renderRequestsPane();
   }
   function refreshPaneCounts() {
     cvSegPeopleNEl.textContent = contactsList.length ? String(contactsList.length) : "";
     cvSegGroupsNEl.textContent = groupsList.length ? String(groupsList.length) : "";
-    const requests = requestRooms().length;
-    cvSegRequestsNEl.textContent = requests ? String(requests) : "";
   }
   cvSegPeopleEl.addEventListener("click", () => { contactsPane = "people"; applyContactsPane(); });
   cvSegGroupsEl.addEventListener("click", () => { contactsPane = "groups"; applyContactsPane(); loadGroups(); });
-  cvSegRequestsEl.addEventListener("click", () => { contactsPane = "requests"; applyContactsPane(); });
 
   const cvgListEl = document.getElementById("cvgList");
   const cvgEmptyEl = document.getElementById("cvgEmpty");
@@ -11984,7 +12066,7 @@
     addSheetGeneration += 1;
     cvFormEl.classList.add("hidden");
     cvAddInputEl.value = "";
-    cvAddNoteEl.textContent = "They show up in your People right away.";
+    cvAddNoteEl.textContent = "They show up in your Contacts right away.";
     cvAddNoteEl.classList.remove("warn");
     cvAddT2El.classList.remove("lit");
     moveAddButton(true);
@@ -12387,10 +12469,12 @@
         `<button type="button" class="th-seen act" data-outbox-discard="${esc(m.outboxId)}" data-stop="1">Delete</button>`,
       ];
     }
-    if (state === "queued" && Number(m.outboxAttempts || 0) >= 1) {
-      return [`<span class="th-seen th-settling">Trying again…</span>`];
+    // The attempt count increases before the request finishes. Only a recorded
+    // failure means we are retrying; the first in-flight attempt is Sending.
+    if (state === "queued" && String(m.outboxError || "").trim()) {
+      return [`<span class="th-seen">Trying again…</span>`];
     }
-    return [`<span class="th-seen th-settling">Sending…</span>`];
+    return [`<span class="th-seen">Sending…</span>`];
   }
   function receiptTimestamp(value) {
     const date = new Date(value || "");
@@ -12524,7 +12608,7 @@
     const visitRows = (activeMentionVisit?.rows || []).filter((item) => !stagedIds.has(String(item.id)));
     for (const r of [...(payload.relays || []), ...visitRows]) {
       // The REQUEST ROOT is correspondence: the sender delivered a named job
-      // to this person, so it must be visible in their room like any other
+      // to this contact, so it must be visible in their room like any other
       // relay. Progress stays on the Tasks page; the terminal completion Relay
       // also returns to this room with both of its documents intact.
       const request = isTaskRow(r);
@@ -13466,7 +13550,7 @@
       rooms.map(row).join("") +
       `<button class="people-row" type="button" id="peopleRow">
          <span class="pd">${(contactsList.slice(0, 2).map((c) => `<span class="avatar" style="--av-h:${avatarHue(c.name || c.email)}" aria-hidden="true">${esc(avatarInitials(c.name || c.email))}</span>`).join("")) || '<span class="avatar" aria-hidden="true">·</span>'}</span>
-         <span class="lab">Your people</span>
+         <span class="lab">Your contacts</span>
          <span class="n">${contactsList.length || ""}</span><span class="chev">&#8250;</span>
        </button>`;
     // The "Your people" discs need the contact book; load it lazily once.
@@ -13494,22 +13578,34 @@
     if (pr) pr.addEventListener("click", () => { activeView = "contacts"; commitNavigation(); });
   }
   function renderSlack() {
+    // An unresolved status is not a disconnected account. Keep the connect
+    // page out of the first paint until Slack has answered successfully.
+    if (!slackConnectionLoaded) {
+      slackEmptyEl.classList.add("gone");
+      slackListEl.innerHTML = `<div class="cv-empty" data-slack-connect-state="${slackConnectionError ? "error" : "loading"}" role="status">
+        ${esc(slackConnectionError || "Loading Slack…")}
+        ${slackConnectionError ? '<button class="cv-empty-retry" id="slackTabRetry" type="button">Try again</button>' : ""}
+      </div>`;
+      document.getElementById("slackTabRetry")?.addEventListener("click", () => {
+        slackConnectionError = "";
+        paintSlackConnectionSurface();
+        refreshSlackConnection({ preserveWaiting:true });
+      });
+      return;
+    }
     if (!slackConnectionReady(slackConnectionInfo)) {
       slackEmptyEl.classList.add("gone");
       const connection = slackConnectionInfo;
       const team = connection?.team;
       const teamConnected = team?.connected === true;
       const teamName = team?.name || "your team";
-      const checking = !slackConnectionLoaded;
-      const connectLabel = checking
-        ? "Checking Slack…"
-        : slackConnectionWaiting
-          ? "Waiting for Slack…"
-          : connection?.state === "paused"
-            ? "Reconnect Slack"
-            : "Connect Slack";
+      const connectLabel = slackConnectionWaiting
+        ? "Waiting for Slack…"
+        : connection?.state === "paused"
+          ? "Reconnect Slack"
+          : "Connect Slack";
       const account = payload.account || {};
-      slackListEl.innerHTML = `<div class="slack-connect" data-slack-connect-state="${checking ? "loading" : "disconnected"}">
+      slackListEl.innerHTML = `<div class="slack-connect" data-slack-connect-state="disconnected">
         <p class="slack-connect-kicker">Slack integration</p>
         <h1 class="slack-connect-title">Connect your Slack to Relay.</h1>
         <p class="slack-connect-copy">${teamConnected
@@ -13525,7 +13621,7 @@
             <span class="slack-connect-row-copy"><span class="slack-connect-row-name">Your Slack</span><span class="slack-connect-row-note">Sync conversations you can access and keep Relays in place</span></span>
           </div>
         </div>
-        <button class="sv-connect slack-connect-action" type="button" id="slackTabConnect" ${checking || slackConnectionBusy || slackConnectionWaiting ? "disabled" : ""}>${esc(connectLabel)}</button>
+        <button class="sv-connect slack-connect-action" type="button" id="slackTabConnect" ${slackConnectionBusy || slackConnectionWaiting ? "disabled" : ""}>${esc(connectLabel)}</button>
         ${slackConnectionError ? `<div class="row-err" role="status">${esc(slackConnectionError)}</div>` : ""}
         <p class="slack-connect-foot">Sync starts when you connect. Relay does not import earlier Slack history.</p>
       </div>`;
@@ -13610,7 +13706,7 @@
       </button>`;
     const peopleFooter = surface === "slack" ? "" : `<button class="people-row" type="button" data-rail-people>
          <span class="pd">${contactsList.slice(0, 2).map((c) => `<span class="avatar" style="--av-h:${avatarHue(c.name || c.email)}" aria-hidden="true">${esc(avatarInitials(c.name || c.email))}</span>`).join("")}</span>
-         <span class="lab">Your people</span>
+         <span class="lab">Your contacts</span>
          <span class="n">${contactsList.length || ""}</span><span class="chev">&#8250;</span>
        </button>`;
     const nextHtml = rooms.map(row).join("") + peopleFooter;
@@ -14089,7 +14185,7 @@
       }
       const m = entry.message;
       // Direction decides the side. Every outbound Relay approaches from the
-      // right, including work sent by this person's owned agent; every inbound
+      // right, including work sent by this contact's owned agent; every inbound
       // Relay stays on the left. `ownedAgent` may change the truthful byline to
       // "My Codex" / "My Claude", but it cannot make an outbound message look
       // as though the other person sent it.
@@ -14199,9 +14295,9 @@
               <button type="button" data-message-edit-save="${esc(m.id)}"${messageMutationIds.has(m.id) ? " disabled" : ""}>${messageMutationIds.has(m.id) ? "Saving…" : "Save changes"}</button>
             </div>
           </div>` : `
-          <span class="th-msg-title">${agentWorking
+          ${textLike ? '<div class="th-text-content">' : ""}<span class="th-msg-title"${textLike ? ` data-clock="${esc(formatChatTime(m.at))}"` : ""}>${agentWorking
             ? '<span class="agent-working-indicator" aria-hidden="true"><span class="agent-working-dot"></span><span class="agent-working-dot"></span><span class="agent-working-dot"></span></span>'
-            : `${m.request ? '<span class="kchip">Task</span>' : ""}${textLike ? linkify(m.title, m.groupId || thread.groupId) : esc(m.title)}${textLike ? "" : `<span class="th-more">${open ? "‹" : "›"}</span>`}${m.editedAt && !m.deletedAt ? '<span class="th-edited">edited</span>' : ""}`}</span><span class="th-blk-time">${esc(timeAgo(m.at))}</span>
+            : `${m.request ? '<span class="kchip">Task</span>' : ""}${textLike ? linkify(m.title, m.groupId || thread.groupId) : esc(m.title)}${textLike ? "" : `<span class="th-more">${open ? "‹" : "›"}</span>`}${m.editedAt && !m.deletedAt ? '<span class="th-edited">edited</span>' : ""}`}</span>${textLike ? `${chatTimestampHtml(m.at)}</div>` : ""}
 
           ${!textLike && !open && !inlineBody && m.preview ? `<span class="th-preview">${esc(m.preview)}</span>` : ""}
           ${!textLike && !open && inlineBody ? `<div class="th-body" data-stop="0">${readerParagraphs(m.body)}</div>` : ""}
@@ -14213,6 +14309,7 @@
         ${badges}
         ${showProviderByline ? providerBylineHtml(m) : ""}
         ${hasHostActions ? relayHostActionsHtml(m, { persistent:hostActionsPersistent }) : ""}
+        ${!textLike && !editingMessage ? chatTimestampHtml(m.at) : ""}
       </div>${channelTask ? `${claimControl}</div>` : ""}
       ${slackThreadLinkHtml(m)}
       ${(() => {
@@ -14222,11 +14319,11 @@
         // them up again in the inbound-only payload made every sent image
         // disappear at the final presentation boundary.
         if (!attachments.length) return "";
-        const relayId = String(m.relayId || m.id || "");
+        const { relayId, attachments: cargoAttachments } = chatAttachmentSource(m, attachments);
         // Option A: each attachment is its own bubble beneath the words, so the
         // cargo no longer needs the room-relative 88% measure the old inline
         // plates did — a photo bubble hugs its picture at a definite width.
-        roomAttachmentIndex.push(...attachments.map((attachment) => ({
+        roomAttachmentIndex.push(...cargoAttachments.map((attachment) => ({
           relayId,
           attachmentId: String(attachment?.id || ""),
           name: String(attachment?.filename || attachment?.name || "file"),
@@ -14237,18 +14334,17 @@
           at: String(m.at || ""),
           messageId: String(m.id || ""),
         })).filter((item) => item.attachmentId));
-        return `<div class="th-cargo${mine ? " mine" : ""}" data-att-msg="${esc(m.id)}"${canReplyHere ? ` data-att-reply="${esc(m.id)}"` : ""}>${chatAttachmentCargo(attachments, { relayId, mine })}</div>`;
+        return `<div class="th-cargo${mine ? " mine" : ""}" data-att-msg="${esc(m.id)}"${canReplyHere ? ` data-att-reply="${esc(m.id)}"` : ""}>${chatAttachmentCargo(cargoAttachments, { relayId, mine })}${attachmentOnly ? chatTimestampHtml(m.at, "th-cargo-time") : ""}</div>`;
       })()}
       ${(() => {
         // Receipts stay beneath the bubble; text actions use the side menu.
         const receipt = receiptFor(m, msgs);
         const bits = [];
-        const settleReceipt = receipt && (receipt.label === "Sent" || receipt.label === "Delivered") ? " th-settling" : "";
         if (!sideActions) bits.push(...messageActionBits);
         if (mine && m.pending) bits.push(...outboxStatusBits(m));
         if (receipt) bits.push(receipt.expandable
           ? `<button type="button" class="th-seen" data-receipt-toggle="${esc(m.id)}" data-stop="1" aria-expanded="${expandedReceiptIds.has(m.id) ? "true" : "false"}">${esc(receipt.label)}</button>`
-          : `<span class="th-seen${settleReceipt}">${esc(receipt.label)}</span>`);
+          : `<span class="th-seen">${esc(receipt.label)}</span>`);
         const under = bits.length ? `<div class="th-under${mine ? " mine" : ""}">${bits.join("")}</div>` : "";
         const details = receipt && expandedReceiptIds.has(m.id) ? receiptDetailsHtml(receipt) : "";
         return under + details;
@@ -14706,6 +14802,7 @@
         const optimisticId = `optimistic:${idempotencyKey}`;
         optimisticChatReplies.set(idempotencyKey, {
           id: optimisticId,
+          outboxId: idempotencyKey,
           relayId: "",
           threadId: sendAnchor.threadId || thread.threadId,
           inReplyToRelayId: inReplyToRelayId || "",
@@ -15028,7 +15125,7 @@
       threadDetailLiveFollow = RelayChatPresentation.reduceChatLiveFollow(threadDetailLiveFollow, { type:"reset" });
       chatExpanded = false;
       // Back goes back to the LIST that was clicked. A room entered from People
-      // returns to People, on the row it left, not to Relays.
+      // returns to Contacts, on the row it left, not to Relays.
       activeView = destinationView;
       commitNavigation({ outerScrollTop: returnTop });
     };
@@ -15154,7 +15251,7 @@
   // RESTARTING the pill into the new account, so the success note is brief.
   let settingsInfo = null;      // last relay:accountInfo payload (null while loading)
   let slackConnectionInfo = null;
-  let slackConnectionLoaded = false;
+  let slackConnectionLoaded = false; // true only after a successful status check
   let slackConnectionBusy = false;
   let slackConnectionWaiting = false;
   let slackConnectionWaitingSince = 0;
@@ -15248,7 +15345,6 @@
         slackConnectionWaitingSince = 0;
       }
     } else {
-      slackConnectionLoaded = true;
       slackConnectionError = result?.error || "Could not check Slack.";
     }
     const after = JSON.stringify({
@@ -15567,11 +15663,11 @@
       </div>`;
   }
   function blockedPeopleHtml() {
-    return `<div class="sv-open-section" data-stop="1"><button class="sv-choose" id="svBlockedPeople" type="button">Blocked people</button><div id="svBlockedList" aria-live="polite"></div></div>`;
+    return `<div class="sv-open-section" data-stop="1"><button class="sv-choose" id="svBlockedPeople" type="button">Blocked contacts</button><div id="svBlockedList" aria-live="polite"></div></div>`;
   }
   // YOUR LINK. One reusable link, copied from where you are. Joining through
   // it connects the two of you (the server writes both contacts), so they land
-  // in People, not in Requests; Requests is for someone who writes unasked.
+  // in Contacts, not in Requests; Requests is for someone who writes unasked.
   // The link used to live only on the last screen of the first-run chapter,
   // where nobody could find it again.
   function yourLinkHtml() {
@@ -15585,7 +15681,7 @@
           <span class="sv-open-name sv-link-url">${esc(shown || (inviteLinkUnavailable ? "Your invite link is not available right now." : "Loading your invite link…"))}</span>
           <button class="sv-choose" type="button" id="svCopyLink" ${inviteLinkBusy ? "disabled" : ""}>${inviteLinkCopied ? "Copied" : "Copy link"}</button>
         </div>
-        <div class="sv-invite-note">When they join, you’ll find each other in People.</div>
+        <div class="sv-invite-note">When they join, you’ll find each other in Contacts.</div>
         ${inviteLinkError ? `<div class="row-err sv-err">${esc(inviteLinkError)}</div>` : ""}
       </div>`;
   }
@@ -16676,7 +16772,7 @@
       const result = await window.relay.copyOnboardingInviteLink(payload.account?.userId);
       if (!result?.ok) throw new Error();
       state.copied = true;
-    } catch { state.error = "Your invite link couldn’t be copied. Try again, or continue and find it in People."; }
+    } catch { state.error = "Your invite link couldn’t be copied. Try again, or continue and find it in Contacts."; }
     finally { state.busy = false; if (state.account === signupAccountKey()) renderAll(); }
   }
   async function copyReturningTutorial() {
@@ -16854,7 +16950,7 @@
       // history shows the send, the chapter is over: the tutorial completes
       // itself and the pill opens the room of the relay you just wrote — the
       // conversation, not a "Nicely done" screen and not a Copy-invitation
-      // screen. Your link lives on the You page and in People now. Until the
+      // screen. Your link lives on the You page and in Contacts now. Until the
       // send, the pill has nothing else to show, so this screen stays.
       if (status === "sent") { landOnFirstRelay(); return; }
       const signature = JSON.stringify([status, signupBusy, signupError]);
@@ -17160,6 +17256,7 @@
         if (view !== lit) { threadsSource = view === "chat" ? "chat" : threadsCameFrom; syncTabs(); return; }
         // second tap on the lit tab: fall through and navigate to its list
       }
+      if (view === "relays" && requestInboxOpen) { requestInboxOpen = false; requestInboxError = ""; if (view === activeView) { renderRelays(); scrollEl.scrollTop = 0; return; } }
       if (view === activeView) {
         if (view === "contacts" && blockedPeoplePage) closeBlockedPeople();
         return;
@@ -17308,8 +17405,7 @@
       .map((item) => [String(item.relayId || item.id || ""), item])
       .filter(([id]) => Boolean(id)));
     const viewerEmail = String(payload.account?.email || "").trim().toLowerCase();
-    // A request is not unread mail: it waits, quietly, in People (the tab
-    // wears its count instead).
+    // A request is not unread mail: it waits in the single Requests row.
     const quiet = requestAddresses();
     const relayUnreadIds = new Set(
       (payload.relays || [])
@@ -17329,10 +17425,9 @@
     markAllReadEl.disabled = unread === 0;
     setBadge(tasksBadgeEl, requestsOutstandingCount());
     setBadge(topicsBadgeEl, payload.features?.topics === true ? topicsAttentionCount() : 0);
-    setBadge(peopleBadgeEl, requestRooms().length);
+    setBadge(peopleBadgeEl, 0);
     if (paintSurface && activeView === "contacts") {
       refreshPaneCounts();
-      if (contactsPane === "requests") renderRequestsPane();
     }
     if (paintSurface) {
       if (activeView === "chat") renderChat();

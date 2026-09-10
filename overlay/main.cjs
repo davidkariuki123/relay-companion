@@ -2141,7 +2141,7 @@ async function saveContact(input) {
     const saved = contactId
       ? await client.updateContact(contactId, { name, emails, email: emails[0] || "" })
       : await client.upsertContact({ name, emails, email: emails[0] || "" });
-    if (accountKey !== onboardingAccountKey()) return { ok: false, error: "The account changed. Open People again." };
+    if (accountKey !== onboardingAccountKey()) return { ok: false, error: "The account changed. Open Contacts again." };
     const contact = cacheContact(saved);
     return { ok: true, contact, contacts: await contactsAfterWrite() };
   } catch (error) {
@@ -2186,7 +2186,7 @@ async function addContactByAddress(input) {
   try {
     const client = await relayClient();
     const result = await client.addRelayContact(email);
-    if (accountKey !== onboardingAccountKey()) return { ok: false, error: "The account changed. Open People again." };
+    if (accountKey !== onboardingAccountKey()) return { ok: false, error: "The account changed. Open Contacts again." };
     if (result?.found === false) return { ok: true, found: false };
     if (!result?.contact?.onRelay) return { ok: false, error: "Could not verify this Relay account. Try again." };
     saved = result.contact;
@@ -2203,6 +2203,11 @@ async function addContactByAddress(input) {
 // the delivery from there, across a dead connection and across a restart. See
 // src/outbox.cjs for why that is the only behaviour that keeps a message when
 // the wifi does not.
+const outgoingAttachmentCache = require("./outgoing-attachment-cache.cjs").createOutgoingAttachmentCache({
+  attachmentsRoot: path.join(RELAY_HOME, "attachments"),
+  spoolRoot: path.join(path.dirname(OUTBOX_PATH), "outbox-files"),
+  log: (message, error) => console.error(`[overlay] ${message}`, error?.message || ""),
+});
 const outbox = createOutbox({
   file: OUTBOX_PATH,
   send: (entry) => postQueuedRelay(entry),
@@ -5095,6 +5100,8 @@ async function resolveRelayAttachment(relayId, attachmentId) {
   const id = String(relayId || "").trim();
   const attId = String(attachmentId || "").trim();
   if (!id || !attId) return { ok: false, error: "missing id" };
+  const outgoing = outgoingAttachmentCache.resolveLocal(id, attId, outbox.list());
+  if (outgoing) return outgoing;
   let store = readStore();
   let stateId = (store.packets || {})[id] ? id : (store.packets || {})[`sent_${id}`] ? `sent_${id}` : "";
   if (!stateId) {
@@ -5146,6 +5153,8 @@ async function resolveRelayAttachment(relayId, attachmentId) {
   const attachments = Array.isArray(row.attachments) ? row.attachments : [];
   const attachment = attachments.find((a) => a && a.id === attId);
   if (!attachment) return { ok: false, error: "attachment not found" };
+  const retained = outgoingAttachmentCache.resolveCanonical(attachment);
+  if (retained) return { ...retained, id, stateId, attachment: { ...attachment, localPath: retained.target } };
 
   const attachmentsRoot = path.join(RELAY_HOME, "attachments");
   const containedLocalPath = (candidate) => {
@@ -5466,11 +5475,13 @@ async function openRelayAttachmentViewer(relayId, attachmentId, context) {
   const id = safeAttachmentId(relayId);
   const attId = safeAttachmentId(attachmentId);
   if (!id || !attId) return { ok: false, error: "missing id" };
-  const resolved = await resolveRelayAttachment(id, attId);
-  if (!resolved.ok) return resolved;
   const safe = safeViewerContext(context);
-  const image = attachmentIsImageRow(resolved.attachment);
   const known = safe.items.find((item) => item.relayId === id && item.attachmentId === attId);
+  // Open the window from display metadata. Its item IPC resolves the bytes and
+  // shows progress/errors inside the window, without swallowing the first click.
+  const resolved = known ? null : await resolveRelayAttachment(id, attId);
+  if (resolved && !resolved.ok) return resolved;
+  const image = known ? known.image : attachmentIsImageRow(resolved.attachment);
   const self = known || {
     relayId: id,
     attachmentId: attId,
@@ -9453,6 +9464,7 @@ async function postQueuedRelay(entry) {
       .filter((f) => f && f.spoolPath)
       .map((f) => ({ path: f.spoolPath, name: f.name, ...(f.contentType ? { contentType: f.contentType } : {}) })),
   });
+  outgoingAttachmentCache.retain(entry, prepared);
   const explicit = entry.recipient || {};
   const hasRecipient = explicit.email || explicit.contactId || explicit.relayUserId || explicit.groupId || explicit.chatId;
   if (explicit.chatId && entry.chat && entry.chat.provider === "slack") {
@@ -9465,7 +9477,7 @@ async function postQueuedRelay(entry) {
     await refreshCanonicalChats();
     return result;
   }
-  return client.sendRelay({
+  const result = await client.sendRelay({
     recipient: hasRecipient ? explicit : {},
     kind: "message",
     // A typed text sends no title — titlelessness IS what marks it as a
@@ -9484,6 +9496,11 @@ async function postQueuedRelay(entry) {
     // relay-mcp: source also drives trustworthy provider attribution.
     source: { host: "relay-preview" },
   });
+  // The server auto-saves a direct recipient after a successful send. Refresh
+  // the contact book now so replying to a request also updates Contacts. A
+  // refresh failure must never retry an already delivered message.
+  await refreshContacts().catch(() => {});
+  return result;
 }
 
 // Send hands the message to the DEVICE. The queue owes the delivery from there:
@@ -9506,6 +9523,7 @@ function enqueueReplyFromPill(input = {}) {
       files,
       chat: input.chat || {},
     });
+    outgoingAttachmentCache.retain(entry);
     outbox.kick(0);
     return { ok: true, queued: true, entry };
   } catch (error) {
@@ -9597,7 +9615,7 @@ async function blockSavedPerson(input) {
   const contact = (result?.contacts || []).find((row) => (row.id || row.contactId) === input.contactId);
   const userId = contact?.relayUserId;
   if (key !== onboardingAccountKey() || !userId || userId !== input.relayUserId || userId === account().userId) {
-    throw new Error("This contact changed or is not on Relay. Refresh People and try again.");
+    throw new Error("This contact changed or is not on Relay. Refresh Contacts and try again.");
   }
   return client.setConnectionBlocked(userId, true);
 }
@@ -9615,7 +9633,7 @@ ipcMain.handle("relay:connectionBlocks", async () => (await relayClient()).conne
 ipcMain.handle("relay:unblockPerson", async (_e, userId) => {
   const key = onboardingAccountKey();
   const client = await relayClient();
-  if (!key || key !== onboardingAccountKey() || !userId) throw new Error("The account changed. Open Blocked people again.");
+  if (!key || key !== onboardingAccountKey() || !userId) throw new Error("The account changed. Open Blocked contacts again.");
   return client.setConnectionBlocked(String(userId), false);
 });
 

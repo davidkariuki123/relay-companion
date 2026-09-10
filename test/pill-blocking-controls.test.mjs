@@ -38,7 +38,7 @@ test('person controls are sibling buttons, with an anchored popover and a visibl
   assert.match(rows, /<div class="cv-person">/);
   assert.match(rows, /<button class="cv-person-more"[^>]*aria-haspopup="menu"[^>]*data-message-more/);
   assert.doesNotMatch(rows, /<span class="cv-edit" role="button"/);
-  assert.match(html, /id="cvBlockedPeople">Blocked people/);
+  assert.match(html, /id="cvBlockedPeople">Blocked contacts/);
   assert.match(html, /peopleDialog\.showPopover\(\)/);
   assert.match(html, /peopleDialogAccount !== signupAccountKey\(\)\) closePeopleDialog/);
   const block = html.slice(html.indexOf('function openPersonBlock('), html.indexOf('async function openBlockedPeople('));
@@ -48,8 +48,8 @@ test('person controls are sibling buttons, with an anchored popover and a visibl
   assert.doesNotMatch(block, /contactDelete|contactsList\s*=/);
   const unblock = html.slice(html.indexOf('async function openBlockedPeople('), html.indexOf('document.getElementById("cvBlockedPeople").addEventListener'));
   assert.match(unblock, /result\?\.blocked !== false/);
-  assert.match(unblock, /No blocked people/);
-  assert.match(unblock, /Could not unblock this person/);
+  assert.match(unblock, /No blocked contacts/);
+  assert.match(unblock, /Could not unblock this contact/);
 });
 
 test('one Add button moves between form and toolbar and honors reduced motion', () => {

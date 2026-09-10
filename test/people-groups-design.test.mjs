@@ -6,12 +6,11 @@ const html = fs.readFileSync(new URL("../overlay/inbox.html", import.meta.url), 
 const main = fs.readFileSync(new URL("../overlay/main.cjs", import.meta.url), "utf8");
 
 test("People and Channels are distinct counted panes with one consistent add action", () => {
-  assert.match(html, /data-view="contacts">People <span class="tab-badge gone" id="peopleBadge"/);
-  assert.match(html, /id="cvSegPeople"[^>]*>People <span class="cv-seg-n" id="cvSegPeopleN"/);
+  assert.match(html, /data-view="contacts">Contacts <span class="tab-badge gone" id="peopleBadge"/);
+  assert.match(html, /id="cvSegPeople"[^>]*>Contacts <span class="cv-seg-n" id="cvSegPeopleN"/);
   assert.match(html, /id="cvSegGroups"[^>]*>Channels <span class="cv-seg-n" id="cvSegGroupsN"/);
-  assert.match(html, /id="cvSegRequests"[^>]*>Requests <span class="cv-seg-n" id="cvSegRequestsN"/);
   // Words over glyphs (Sven, 2026-09-08): the button says Add, not "+ Add".
-  assert.match(html, /id="cvAdd" aria-label="Add person">Add</);
+  assert.match(html, /id="cvAdd" aria-label="Add contact">Add</);
   assert.match(html, /id="cvgNew" aria-label="Add channel">Add</);
 });
 

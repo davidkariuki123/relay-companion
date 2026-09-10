@@ -260,10 +260,13 @@ test("model-facing Relay product language calls work Tasks, never Requests", asy
     assert.doesNotMatch(catalog, retired);
   }
   const pill = await readFile(new URL("../overlay/inbox.html", import.meta.url), "utf8");
-  for (const retired of [/>Requests</i, /No requests yet/i, /Untitled request/i, /What requests may do/i, /kchip">Request</i]) {
+  // Requests now names messages from people outside Contacts. Work retains
+  // the Task/Todo vocabulary in its navigation, badges and empty states.
+  for (const retired of [/data-view="tasks">Requests</i, /No requests yet/i, /Untitled request/i, /What requests may do/i, /kchip">Request</i]) {
     assert.doesNotMatch(pill, retired);
   }
   assert.match(pill, /data-view="tasks">Todo/);
+  assert.match(pill, /Relays from senders outside your Contacts/);
   assert.doesNotMatch(pill, /Backlog/);
   for (const status of ["Needs attention", "Todo", "In Progress", "Done", "Canceled", "Duplicate"]) {
     assert.match(pill, new RegExp(status));

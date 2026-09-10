@@ -50,9 +50,9 @@ test("Your invite link is on the page with Copy, and says what joining through i
   const link = slice("function yourLinkHtml()", "async function copyInviteLinkFromSettings()");
   assert.match(link, /<div class="sv-open-title">Your invite link<\/div>/);
   // Redeeming an invite writes both contacts (apps/api invites.ts), so the
-  // person lands in People. The old line promised Requests, which was untrue.
+  // person lands in Contacts. The old line promised Requests, which was untrue.
   assert.match(link, /Share it with someone you want to message on Relay\./);
-  assert.match(link, /When they join, you’ll find each other in People\./);
+  assert.match(link, /When they join, you’ll find each other in Contacts\./);
   assert.match(link, /class="sv-invite-field"/);
   assert.doesNotMatch(link, /waits in Requests/);
   assert.match(link, /id="svCopyLink"[^>]*>\$\{inviteLinkCopied \? "Copied" : "Copy link"\}/);
