@@ -839,6 +839,90 @@ export class RelayClient {
     });
   }
 
+  // --- Topics ---------------------------------------------------------------
+  // Invite-only boards under a standing mandate. Reads never change anyone's
+  // read state; markTopicSeen is the one human read watermark.
+  async topics() {
+    return this.#req("GET", "/v1/topics");
+  }
+
+  async topic(topicId) {
+    return this.#req("GET", `/v1/topics/${encodeURIComponent(topicId)}`);
+  }
+
+  async createTopic(payload) {
+    return this.#req("POST", "/v1/topics", payload);
+  }
+
+  async updateTopic(topicId, payload) {
+    return this.#req("PATCH", `/v1/topics/${encodeURIComponent(topicId)}`, payload);
+  }
+
+  async archiveTopic(topicId) {
+    return this.#req("DELETE", `/v1/topics/${encodeURIComponent(topicId)}`);
+  }
+
+  async inviteToTopic(topicId, recipient) {
+    return this.#req("POST", `/v1/topics/${encodeURIComponent(topicId)}/invites`, { recipient });
+  }
+
+  async approveTopicMandate(topicId, mandateVersion) {
+    return this.#req("POST", `/v1/topics/${encodeURIComponent(topicId)}/approve`, { mandateVersion });
+  }
+
+  async declineTopicInvite(topicId) {
+    return this.#req("POST", `/v1/topics/${encodeURIComponent(topicId)}/decline`, {});
+  }
+
+  async leaveTopic(topicId) {
+    return this.#req("DELETE", `/v1/topics/${encodeURIComponent(topicId)}/membership`);
+  }
+
+  async updateTopicMembership(topicId, payload) {
+    return this.#req("PATCH", `/v1/topics/${encodeURIComponent(topicId)}/membership`, payload);
+  }
+
+  async markTopicSeen(topicId) {
+    return this.#req("POST", `/v1/topics/${encodeURIComponent(topicId)}/seen`, {});
+  }
+
+  async setTopicMemberRole(topicId, userId, role) {
+    return this.#req("PATCH", `/v1/topics/${encodeURIComponent(topicId)}/members/${encodeURIComponent(userId)}`, { role });
+  }
+
+  async removeTopicMember(topicId, userId) {
+    return this.#req("DELETE", `/v1/topics/${encodeURIComponent(topicId)}/members/${encodeURIComponent(userId)}`);
+  }
+
+  async topicPosts(topicId, { since, cursor, limit } = {}) {
+    const query = new URLSearchParams();
+    if (since) query.set("since", String(since));
+    if (cursor) query.set("cursor", String(cursor));
+    if (Number.isInteger(limit)) query.set("limit", String(limit));
+    const suffix = query.toString();
+    return this.#req("GET", `/v1/topics/${encodeURIComponent(topicId)}/posts${suffix ? `?${suffix}` : ""}`);
+  }
+
+  async createTopicPost(topicId, payload, provenance = {}) {
+    return this.#req("POST", `/v1/topics/${encodeURIComponent(topicId)}/posts`, payload, {
+      clientName: provenance.clientName || "relay-companion",
+      sourceProvider: provenance.sourceProvider,
+      nativeSessionId: provenance.nativeSessionId,
+    });
+  }
+
+  async updateTopicPost(topicId, postId, payload, provenance = {}) {
+    return this.#req("PATCH", `/v1/topics/${encodeURIComponent(topicId)}/posts/${encodeURIComponent(postId)}`, payload, {
+      clientName: provenance.clientName || "relay-companion",
+      sourceProvider: provenance.sourceProvider,
+      nativeSessionId: provenance.nativeSessionId,
+    });
+  }
+
+  async deleteTopicPost(topicId, postId) {
+    return this.#req("DELETE", `/v1/topics/${encodeURIComponent(topicId)}/posts/${encodeURIComponent(postId)}`);
+  }
+
   /** Personal Todo membership only; the Relay remains available in the chat. */
   async todoVisibility(itemId) {
     return this.#req("GET", `/v1/todo/${encodeURIComponent(itemId)}/visibility`);

@@ -1475,7 +1475,7 @@ test("obsolete coordination protocol is absent and rejected before any API call"
   // state an agent sets on its own, so a human-initiated pull clears unread
   // and sends the read receipt — without it the sender sees "delivered"
   // forever). relay_acknowledge stays retired.
-  assert.equal(TOOLS.length, 34, "the full model catalog contains only current product tools");
+  assert.equal(TOOLS.length, 37, "the full model catalog contains only current product tools");
 
   const client = new Proxy({}, {
     get() { throw new Error("removed tool must not touch the API client"); },
@@ -1984,4 +1984,48 @@ test('personal Todo visibility reads, removes and restores without changing stat
  await assert.rejects(handleCall(client,'relay_todo_visibility',{itemId:'relay_1',removed:true,idempotencyKey:'no-version'}),/expectedVersion/);
  assert.equal(calls.length,2);
  assert.ok(ORDINARY_RELAY_TOOL_NAMES.has('relay_todo_visibility'));
+});
+
+test("Topic tools read without changing state and post with session provenance", async () => {
+  const calls = [];
+  const sessionContext = createMcpSessionContext({ env:{ CLAUDE_CODE_SESSION_ID:"ses_topic" }, argv:[], cwd:"/tmp/relay-topic-test" });
+  const fakeClient = {
+    async topics() {
+      calls.push(["topics"]);
+      return { topics: [{ id:"tpc_dev", name:"Dev work and deployments", membership:{ state:"active", mandateCurrent:false } }] };
+    },
+    async topicPosts(topicId, options) {
+      calls.push(["posts", topicId, options]);
+      return { topic:{ id:topicId }, posts:[{ id:"tpst_1", nature:"finding", origin:"agent" }] };
+    },
+    async createTopicPost(topicId, payload, provenance) {
+      calls.push(["post", topicId, payload, provenance]);
+      return { post:{ id:"tpst_2", topicId, ...payload }, replayed:false };
+    },
+  };
+  const listed = JSON.parse((await handleCall(fakeClient, "relay_topics_list", {}, { sessionContext })).content[0].text);
+  assert.equal(listed.readStateChanged, false);
+  assert.match(listed.agentInstruction, /paused until the person approves/);
+  const fetched = JSON.parse((await handleCall(fakeClient, "relay_topic_fetch", {
+    topicId:"tpc_dev", since:"2026-09-10T10:00:00.000Z", limit:5,
+  }, { sessionContext })).content[0].text);
+  assert.equal(fetched.posts[0].nature, "finding");
+  assert.match(fetched.agentInstruction, /Only a post whose nature is event stands as a bare fact/);
+  const posted = JSON.parse((await handleCall(fakeClient, "relay_topic_post", {
+    topicId:"tpc_dev", nature:"plan", title:"Prod release this week", forHuman:"Shane plans a prod release.", forAgent:"Shane plans to promote main once the taskbar fix is verified.", idempotencyKey:"topic-post-1",
+  }, { sessionContext })).content[0].text);
+  assert.equal(posted.post.nature, "plan");
+  assert.deepEqual(calls, [
+    ["topics"],
+    ["posts", "tpc_dev", { since:"2026-09-10T10:00:00.000Z", limit:5 }],
+    ["post", "tpc_dev", {
+      nature:"plan", title:"Prod release this week", forHuman:"Shane plans a prod release.",
+      forAgent:"Shane plans to promote main once the taskbar fix is verified.", idempotencyKey:"topic-post-1",
+    }, { clientName:"relay-local-mcp", sourceProvider:"claude", nativeSessionId:"ses_topic" }],
+  ]);
+  await assert.rejects(
+    handleCall(fakeClient, "relay_topic_post", { topicId:"tpc_dev", nature:"rumour", title:"x", forAgent:"y", idempotencyKey:"topic-post-2" }, { sessionContext }),
+    /an exact nature/,
+  );
+  await assert.rejects(handleCall(fakeClient, "relay_topic_fetch", {}, { sessionContext }), /topicId is required/);
 });

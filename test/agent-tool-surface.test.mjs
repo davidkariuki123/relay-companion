@@ -6,7 +6,7 @@ import test from 'node:test';
 import { createAgentToolSurface } from '../src/agent-tool-surface.js';
 import { TOOLS, toolsForAccount, toolsForE2eeLocalAccount } from '../src/mcp.js';
 
-const features = { requests: true, todo: true, aiSessions: true, connectors: true, messageMutations: true };
+const features = { requests: true, todo: true, topics: true, aiSessions: true, connectors: true, messageMutations: true };
 const caller = { host: 'codex', nativeId: 'thread_test', cwd: os.tmpdir() };
 const key = 'stable-test-key';
 const message = { title: 'A useful test message', forHuman: 'Here is the update.', forAgent: 'The complete context.', idempotencyKey: key };
@@ -20,6 +20,9 @@ const cases = {
   relay_todo_update: [{ itemId: 'item_test', status: 'triage', expectedVersion: 1, idempotencyKey: key }, 'updateTodoStatus'],
   relay_todo_visibility: [{ itemId: 'item_test', removed: true, expectedVersion: 1, idempotencyKey: key }, 'updateTodoVisibility'],
   relay_todo_reorder: [{ status: 'triage', itemIds: ['item_test'], idempotencyKey: key }, 'reorderTodo'],
+  relay_topics_list: [{}, 'topics'],
+  relay_topic_fetch: [{ topicId: 'tpc_test' }, 'topicPosts'],
+  relay_topic_post: [{ topicId: 'tpc_test', nature: 'event', title: 'Deployed', forAgent: 'Complete context.', idempotencyKey: key }, 'createTopicPost'],
   relay_agent_complete: [{ runRelayId: 'run_test', ...message }, 'agentRunComplete'],
   relay_send: [{ recipient: { contactId: 'con_test' }, kind: 'message', ...message }, 'sendRelay'],
   relay_share_link: [{ ...message }, 'mintShareLink'],

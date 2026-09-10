@@ -11,11 +11,11 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const DEVELOPER = { accountKind: "human", isDeveloper: true };
 const ORDINARY_USER = { accountKind: "human", isDeveloper: false };
 const DEVELOPER_SURFACES = {
-  slack: true, peopleMentions: true, agentMentions: true,
+  topics: true, slack: true, peopleMentions: true, agentMentions: true,
   relayWork: true, agentConnections: true, aiSessions: true, connectors: true, messageMutations: true,
 };
 const ORDINARY_SURFACES = {
-  slack: false, peopleMentions: true, agentMentions: false,
+  topics: false, slack: false, peopleMentions: true, agentMentions: false,
   relayWork: false, agentConnections: false, aiSessions: false, connectors: false, messageMutations: false,
 };
 
@@ -76,7 +76,7 @@ test("developer status brings the complete Task substrate on dev but never Cowor
   assert.equal(features.requests, true);
   assert.deepEqual(
     {
-      slack: features.slack, peopleMentions: features.peopleMentions, agentMentions: features.agentMentions,
+      topics: features.topics, slack: features.slack, peopleMentions: features.peopleMentions, agentMentions: features.agentMentions,
       relayWork: features.relayWork, agentConnections: features.agentConnections,
       aiSessions: features.aiSessions, connectors: features.connectors, messageMutations: features.messageMutations,
     },
@@ -92,7 +92,7 @@ test("an explicit production environment wins over a local API URL, so the clone
   assert.equal(clone.environment, "production");
   assert.deepEqual(
     {
-      slack: clone.slack, peopleMentions: clone.peopleMentions, agentMentions: clone.agentMentions,
+      topics: clone.topics, slack: clone.slack, peopleMentions: clone.peopleMentions, agentMentions: clone.agentMentions,
       relayWork: clone.relayWork, agentConnections: clone.agentConnections,
       aiSessions: clone.aiSessions, connectors: clone.connectors, messageMutations: clone.messageMutations,
     },
@@ -143,7 +143,7 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
   assert.deepEqual(toolsForAccount(productionDeveloper).map((tool) => tool.name), ordinary);
   // The complete catalog requires the role and the dev channel together.
   const developer = productFeatures({ env: { RELAY_UPDATE_CHANNEL: "dev" }, user: DEVELOPER });
-  assert.equal(toolsForAccount(developer).length, 34);
+  assert.equal(toolsForAccount(developer).length, 37);
   assert.ok(toolsForAccount(developer).some((tool) => tool.name === "relay_task_unclaim"));
   assert.ok(toolsForAccount(developer).some((tool) => tool.name === "relay_message_edit"));
   assert.ok(toolsForAccount(developer).some((tool) => tool.name === "relay_message_delete"));
@@ -170,6 +170,21 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
     ["relay_todo_reorder", { status: "triage", itemIds: ["relay_1"], idempotencyKey: "stale_todo_3" }],
   ]) {
     await assert.rejects(handleCall(client, name, args, { features: shipped }), /unavailable in this Relay release/);
+  }
+  // Topics ride the same developer row: refused before transport when off, and
+  // no shipped tool so much as names them.
+  for (const [name, args] of [
+    ["relay_topics_list", {}],
+    ["relay_topic_fetch", { topicId: "tpc_1" }],
+    ["relay_topic_post", { topicId: "tpc_1", nature: "event", title: "Deployed", forAgent: "ctx", idempotencyKey: "stale_topic_1" }],
+  ]) {
+    await assert.rejects(handleCall(client, name, args, { features: shipped }), /unavailable in this Relay release/);
+  }
+  for (const tool of toolsForAccount(shipped)) {
+    assert.doesNotMatch(JSON.stringify(tool), /relay_topic|Topics/, `${tool.name} must not mention Topics to a production agent`);
+  }
+  for (const name of ["relay_topics_list", "relay_topic_fetch", "relay_topic_post"]) {
+    assert.ok(toolsForAccount(developer).some((tool) => tool.name === name), `${name} stays on dev`);
   }
   // The developer catalog is unchanged: Todo is listed wherever it is entitled.
   for (const name of ["relay_todo_update", "relay_todo_visibility", "relay_todo_reorder"]) {

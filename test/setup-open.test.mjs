@@ -62,7 +62,8 @@ test("first-run open intent is owner-only, durable, and never needs renderer sto
   const saved = persistPendingSetupOpen({ token: "public_token", host: "codex", directory });
   assert.equal(saved.token, "public_token");
   assert.deepEqual(readPendingSetupOpen({ directory }), saved);
-  assert.equal(fs.statSync(pendingSetupOpenPath({ directory })).mode & 0o777, 0o600);
+  // Windows reports 0o666 for every file; owner-only there is an ACL, not a mode bit.
+  if (process.platform !== "win32") assert.equal(fs.statSync(pendingSetupOpenPath({ directory })).mode & 0o777, 0o600);
   assert.equal(clearPendingSetupOpen({ directory }), true);
   assert.equal(readPendingSetupOpen({ directory }), null);
 });

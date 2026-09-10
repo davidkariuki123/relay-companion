@@ -1590,6 +1590,7 @@ function readRelays() {
       taskCompletedAt: p.taskCompletedAt || null,
       taskClaim: p.taskClaim || null,
       todoStatus: p.todoStatus || null,
+      nature: p.nature || null,
       todoVersion: Number.isInteger(p.todoVersion) ? p.todoVersion : null,
       todoRemoved: p.todoRemoved === true,
       todoVisibilityVersion: Number.isInteger(p.todoVisibilityVersion) ? p.todoVisibilityVersion : null,
@@ -9635,6 +9636,52 @@ ipcMain.handle("relay:groupAddMember", (_e, id, contactId) => groupCall((c) => c
 ipcMain.handle("relay:groupRemoveMember", (_e, id, contactId) => groupCall((c) => c.removeGroupMember(id, contactId)));
 ipcMain.handle("relay:groupLeave", (_e, id) => groupCall((c) => c.leaveGroup(id)));
 ipcMain.handle("relay:contactsSearch", (_e, q) => groupCall((c) => c.searchContacts(String(q || ""))));
+
+// Topics (Topics tab): thin proxies over the API, gated like every other
+// developer surface. Membership and the versioned mandate are enforced by the
+// server; every mutation returns its view so the renderer never guesses.
+const topicCall = async (fn) => {
+  if (PRODUCT_FEATURES.topics !== true) {
+    return { ok: false, error: "Topics are available only to Relay developer accounts on dev." };
+  }
+  return groupCall(fn);
+};
+ipcMain.handle("relay:topicsList", () => topicCall(async (c) => (await c.topics()).topics || []));
+ipcMain.handle("relay:topicGet", (_e, id) => topicCall((c) => c.topic(id)));
+ipcMain.handle("relay:topicCreate", (_e, input) => topicCall((c) => c.createTopic({
+  name: String(input?.name || ""),
+  mandate: String(input?.mandate || ""),
+})));
+ipcMain.handle("relay:topicUpdate", (_e, id, input) => topicCall((c) => c.updateTopic(id, {
+  ...(input?.name !== undefined ? { name: String(input.name) } : {}),
+  ...(input?.mandate !== undefined ? { mandate: String(input.mandate) } : {}),
+})));
+ipcMain.handle("relay:topicArchive", (_e, id) => topicCall((c) => c.archiveTopic(id)));
+ipcMain.handle("relay:topicInvite", (_e, id, recipient) => topicCall((c) => c.inviteToTopic(id, recipient || {})));
+ipcMain.handle("relay:topicApprove", (_e, id, mandateVersion) => topicCall((c) => c.approveTopicMandate(id, Number(mandateVersion))));
+ipcMain.handle("relay:topicDecline", (_e, id) => topicCall((c) => c.declineTopicInvite(id)));
+ipcMain.handle("relay:topicLeave", (_e, id) => topicCall((c) => c.leaveTopic(id)));
+ipcMain.handle("relay:topicMembership", (_e, id, input) => topicCall((c) => c.updateTopicMembership(id, {
+  postConfirmation: input?.postConfirmation === "ask" ? "ask" : "auto",
+})));
+ipcMain.handle("relay:topicSeen", (_e, id) => topicCall((c) => c.markTopicSeen(id)));
+ipcMain.handle("relay:topicMemberRole", (_e, id, userId, role) => topicCall((c) => c.setTopicMemberRole(id, userId, role === "admin" ? "admin" : "member")));
+ipcMain.handle("relay:topicMemberRemove", (_e, id, userId) => topicCall((c) => c.removeTopicMember(id, userId)));
+ipcMain.handle("relay:topicPosts", (_e, id, input) => topicCall((c) => c.topicPosts(id, {
+  ...(input?.cursor ? { cursor: String(input.cursor) } : {}),
+  ...(input?.since ? { since: String(input.since) } : {}),
+  ...(Number.isInteger(input?.limit) ? { limit: input.limit } : {}),
+})));
+// A person's own post from the pill: the same text serves both lanes, so what
+// they typed is also the complete context another member's agent receives.
+ipcMain.handle("relay:topicPostCreate", (_e, id, input) => topicCall((c) => c.createTopicPost(id, {
+  nature: String(input?.nature || ""),
+  title: String(input?.title || ""),
+  forHuman: String(input?.forHuman || ""),
+  forAgent: String(input?.forAgent || input?.forHuman || ""),
+  idempotencyKey: String(input?.idempotencyKey || `pill-topic-post:${randomUUID()}`),
+})));
+ipcMain.handle("relay:topicPostDelete", (_e, id, postId) => topicCall((c) => c.deleteTopicPost(id, postId)));
 
 // Settings tab: account card + the sign-out / switch-account lifecycle.
 ipcMain.handle("relay:accountInfo", () => accountInfo());

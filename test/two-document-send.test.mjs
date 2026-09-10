@@ -75,8 +75,10 @@ test("the concise human document is derived from a complete unlimited agent docu
   assert.match(tool.description, /Read the installed Relay skill/);
   assert.match(skill, /Compose the complete\s+`forAgent` first, then write `forHuman`/);
   assert.match(skill, /no word-count target,\s+sentence-count limit/);
-  assert.match(skill, /Let content determine length and format/);
-  assert.match(skill, /These are possible ingredients, not mandatory fields/);
+  assert.match(skill, /Every sentence must earn its place, and the bar rises with length/);
+  assert.match(skill, /Tell, do not explain/);
+  assert.match(skill, /has become an inventory of `forAgent`, whatever its length/);
+  assert.match(skill, /These are what an\s+exchange might call for, never fields to fill/);
   assert.match(skill, /omitting potentially useful context is massively higher/);
   assert.match(skill, /preserve that orientation when cutting/);
   assert.match(tool.inputSchema.properties.forHuman.description, /enough background for someone arriving fresh/);

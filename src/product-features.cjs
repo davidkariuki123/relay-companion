@@ -39,6 +39,9 @@ function productFeatures(options = {}) {
     // Todo is still in product development, so expose it through the same
     // developer-account gate as the other unreleased surfaces.
     todo: developer,
+    // Topics (invite-only boards kept in sync by members' agents under an
+    // approved mandate) are being proven by the developers first.
+    topics: developer,
     // Slack is an internal proving surface alongside Tasks. Staging and
     // production exercise the customer product, even for developer accounts.
     slack: developer,

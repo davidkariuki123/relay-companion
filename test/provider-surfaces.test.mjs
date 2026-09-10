@@ -30,7 +30,9 @@ test("the product contains no ChatGPT Work provider route", () => {
   }
 });
 
-test("provider availability includes CLI-only installs while desktop and terminal remain separate surfaces", () => {
+test("provider availability includes CLI-only installs while desktop and terminal remain separate surfaces", {
+  skip: process.platform === "win32" ? "CLI lookup shells to /usr/bin/which; the picker is a macOS surface" : false,
+}, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-desktop-surfaces-"));
   try {
     // /Applications is the machine's own; only ~/Applications is sandboxed here,

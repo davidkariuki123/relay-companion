@@ -23,6 +23,9 @@ const EXPECTED_TOOLS = [
   "relay_todo_update",
   "relay_todo_visibility",
   "relay_todo_reorder",
+  "relay_topics_list",
+  "relay_topic_fetch",
+  "relay_topic_post",
   "relay_agent_complete",
   "relay_send",
   "relay_share_link",
@@ -148,7 +151,9 @@ test("relay_send requires one recipient, an explicit kind, and the two-document 
   assert.match(humanDescription, /preserve the human's intent and invent no asks or commitments/);
   assert.match(humanFieldDescription, /sender's intent and voice/);
   assert.match(humanFieldDescription, /never invent, strengthen or soften an ask or commitment/);
-  assert.match(humanFieldDescription, /Let content determine length and format/);
+  assert.match(humanFieldDescription, /Every sentence must earn its place, and the bar rises with length/);
+  assert.match(humanFieldDescription, /what to do or think about next, and nothing more/);
+  assert.doesNotMatch(humanFieldDescription, /massively more costly/);
   assert.match(humanFieldDescription, /enough background for someone arriving fresh/);
   assert.match(humanFieldDescription, /without a numerical target/);
   assert.equal(send.inputSchema.properties.longForHumanConfirmed, undefined);
@@ -184,7 +189,7 @@ test("every human-message writing surface preserves the sender's intended speech
     assert.match(guidance, /preserve the human's intent and invent no asks or commitments/i);
   }
   assert.match(skillGuide, /Sending information or attaching a file does not imply/);
-  assert.match(skillGuide, /Stop when the meaning is clear/);
+  assert.match(skillGuide, /Stop when the reader can\s+orient and understand/);
 
 });
 

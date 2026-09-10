@@ -454,7 +454,7 @@ instruction to "capture these points" followed by a shorter paraphrase of the
 human message. Avoid repeating `forHuman` verbatim; enough shared context to
 make the agent document understandable is appropriate.
 
-### The human document: write for someone arriving fresh
+### The human document: what the person needs for their next step
 
 Start by plainly saying what this is about. Assume the reader has done a dozen
 other things since it last came up. Give the minimum background needed before
@@ -464,19 +464,40 @@ relevant thing in familiar words. A follow-up to an issue the recipient raised
 within the last day may need only a sentence about the result and the closing
 state the sender intended.
 
-Explain the actual point and enough of its reason for the recipient to
-understand, contribute to or pick up what is being shared. Match the exchange:
-an idea may need reasoning and an example; a question needs enough background
-to answer; an update needs its result and significance; an unfinished-work
-handoff may need previous attempts, the stopping point and unresolved questions.
-These are possible ingredients, not mandatory fields. Do not force every
-message into an immediate decision or assignment.
+Then give the person what they need to understand what to do or think about
+next, and nothing more. The human message does not have to tell them
+everything: their agent holds the full picture in `forAgent` and can answer
+any question about it. Human attention is the scarce resource, so write for
+useful meaning per second of reading. The person reads one document and their
+agent reads the other; each does its own job.
 
-Let content determine length and format. Two questions may work best as bullets,
-a comparison as a short list or table, an idea as prose, and a confirmation as
-one sentence. Preserve all intended questions. There is no word-count target,
-sentence-count limit or required length ratio between the documents. Brevity
-comes from removing repetition and unnecessary detail, not cutting reasoning.
+Tell, do not explain. What happened, what the sender thinks, what they decided
+and what they need belong in the human message. Explaining how a system or a
+design works belongs in `forAgent`, because the recipient's agent can walk
+them through it and answer their questions. A message that describes a
+mechanism paragraph by paragraph, or whose sections mirror the agent
+document's, has become an inventory of `forAgent`, whatever its length. Keep
+one mechanism or example in the human message only when the point cannot be
+understood without it, and say it in the reader's words.
+
+Every sentence must earn its place, and the bar rises with length. A sentence
+stays only if removing it would change the reader's understanding of the point
+or its reasoning, their decision or action, their priority, their confidence,
+or what they are agreeing to. Ask of each one: would the reader rather read
+this here than ask their agent? Match the exchange without stuffing it: an idea
+may need its one reason and an example; a question needs enough background to
+answer; an update needs its result and significance; an unfinished-work handoff
+may need the stopping point and unresolved questions. These are what an
+exchange might call for, never fields to fill. Do not force every message into
+an immediate decision or assignment.
+
+There is no word-count target, sentence-count limit or required length ratio
+between the documents. A long human message is allowed when every paragraph
+earns it: a conversation reported in the sender's own words and judgment can
+run long and still read well, because nothing in it could be had by asking an
+agent. Read a long draft again with the bar raised. Brevity comes from removing
+what the reader does not need for their next step, never from cutting reasoning
+they do need.
 
 Use complete, spoken sentences and plain words. Read it aloud: would the sender
 say this to the recipient's face, and would the recipient understand it without
@@ -488,22 +509,25 @@ the underlying investigation. Say what happened to someone: "A supplier
 charged us more than we agreed" or "People who opened the invite saw a blank
 page."
 
-Keep necessary reasoning, useful specifics and concrete examples in the human
-message, including a technical mechanism when it makes the point understandable.
 Move supporting evidence, paths, commands, logs, versions and chronology to
-`forAgent` when the person does not need them to understand or work with the
-message. Do not pack four findings into one sentence, squeeze a checklist into
-prose, or turn the human document into an inventory of the agent document. Cut
-details the person need not read before cutting meaning or necessary background.
-Never add text just because space remains. Do not repeat the title in forHuman.
+`forAgent`. Do not pack four findings into one sentence or squeeze a checklist
+into prose. Write prose by default. A list is fine when its items are genuinely
+parallel and each still reads as something the sender would say; never use one
+to inventory findings or to map points one by one against the agent document.
+Cut details the person need not read before cutting meaning or necessary
+background. Never add text just because space remains. Do not repeat the title
+in forHuman.
 
 Check clarity as part of composing: can the recipient explain the point and its
-reason back without opening `forAgent`? Is enough context present to work with
-it? Have intended questions, qualifications and uncertainty survived? Does an
-unfamiliar term or missing connection prevent understanding? Can repetition be
-removed, or the format improved, without losing meaning? A short message can
-fail and a longer one can pass. This is not a separate product step, approval
-request or rejection mechanism. Stop when the meaning is clear.
+reason back without opening `forAgent`? Have intended questions, qualifications
+and uncertainty survived? Does an unfamiliar term or missing connection prevent
+understanding? Read it as someone who did not do this work and is hearing about
+it for the first time: cut the words they would only know from doing the job,
+never cut something they would decide differently about if they knew it, and
+move mechanisms and evidence into `forAgent`. Length neither passes nor fails
+a message; whether each sentence earns its place does. This is not a separate
+product step, approval request or rejection mechanism. Stop when the reader can
+orient and understand, and the sender's meaning is preserved.
 
 ### Title, message kind and final review
 

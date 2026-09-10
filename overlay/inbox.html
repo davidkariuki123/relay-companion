@@ -2467,6 +2467,51 @@
   .todo-load-more { text-align:center; margin-top:10px; border-bottom:1px solid var(--hair); }
   .todo-load-more:disabled { cursor:default; opacity:.55; }
   .todo-status-note { margin:8px 16px 0; color:var(--muted-3); font:10px/1.4 var(--sans); }
+  /* Topics: invite-only boards kept in sync by members' agents under a mandate. */
+  .tp-list { padding:0 0 8px; }
+  .tp-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:0 10px; align-items:center; padding:12px 16px; border-bottom:1px solid var(--hair); cursor:pointer; }
+  .tp-row:hover { background:var(--wash); }
+  .tp-row-name { overflow:hidden; color:var(--ink); font:500 15px/1.32 var(--serif); text-overflow:ellipsis; white-space:nowrap; }
+  .tp-row-meta { margin-top:3px; color:var(--muted-2); font:10.5px/1.35 var(--sans); }
+  .tp-row-meta .attn { color:var(--accent); font-weight:600; }
+  .tp-count { min-width:18px; padding:2px 6px; border-radius:var(--r-pill); background:var(--accent); color:var(--on-accent); font:600 10px/1.4 var(--sans); text-align:center; }
+  .tp-count.quiet { background:var(--wash-2); color:var(--muted); }
+  .tp-new, .tp-compose { display:flex; flex-direction:column; gap:8px; padding:12px 16px 14px; border-bottom:1px solid var(--hair); }
+  .tp-compose { background:var(--wash); }
+  .tp-new .cv-input, .tp-compose .cv-input { width:100%; box-sizing:border-box; }
+  .tp-new textarea.cv-input, .tp-compose textarea.cv-input { min-height:84px; resize:vertical; font-family:var(--sans); line-height:1.45; }
+  .tp-compose select.cv-input { width:auto; }
+  .tp-actions { display:flex; align-items:center; gap:14px; }
+  .tp-new-toggle { appearance:none; width:100%; padding:10px 16px; border:0; border-bottom:1px solid var(--hair); background:transparent; color:var(--accent); text-align:left; font:500 12px/1.2 var(--sans); cursor:pointer; }
+  .tp-new-toggle:hover { background:var(--wash); }
+  .tp-head { padding:12px 16px 10px; border-bottom:1px solid var(--hair); }
+  .tp-head h2 { margin:0; color:var(--ink); font:500 18px/1.25 var(--serif); }
+  .tp-head p { margin:3px 0 0; color:var(--muted-2); font:11px/1.4 var(--sans); }
+  .tp-banner { margin:12px 16px 0; padding:12px 13px; border:1px solid var(--edge); border-radius:10px; background:var(--wash); color:var(--ink); font:12px/1.5 var(--sans); }
+  .tp-banner strong { display:block; margin-bottom:4px; font-weight:600; }
+  .tp-banner .mandate { margin:8px 0 10px; padding:9px 11px; border-left:2px solid var(--accent); background:var(--bg); color:var(--ink-2); font:12.5px/1.55 var(--serif); white-space:pre-wrap; overflow-wrap:anywhere; }
+  .tp-banner .acts { display:flex; align-items:center; gap:14px; }
+  .tp-lanes { display:flex; gap:4px; padding:10px 16px 4px; }
+  .tp-lane { appearance:none; border:0; border-radius:var(--r-pill); padding:5px 11px; background:transparent; color:var(--muted-2); font:600 11px/1.2 var(--sans); cursor:pointer; }
+  .tp-lane.on { background:var(--wash-2); color:var(--ink); }
+  .tp-post { padding:12px 16px; border-bottom:1px solid var(--hair); }
+  .tp-post-meta { display:flex; align-items:baseline; flex-wrap:wrap; gap:5px; color:var(--muted-2); font:10.5px/1.3 var(--sans); }
+  .tp-post-meta .who { color:var(--muted); font-weight:600; }
+  .tp-nature { padding:1px 6px; border-radius:var(--r-1); background:var(--wash-2); color:var(--muted); font:600 9.5px/1.5 var(--mono); letter-spacing:.06em; text-transform:uppercase; }
+  .tp-nature.event { background:var(--accent); color:var(--on-accent); }
+  .tp-post-title { margin-top:4px; color:var(--ink); font:500 14.5px/1.35 var(--serif); }
+  .tp-post-body { margin-top:4px; color:var(--ink-2); font:12.5px/1.55 var(--sans); overflow-wrap:anywhere; }
+  .tp-post-body p { margin:6px 0 0; }
+  .tp-post-body.agent { margin-top:8px; padding:8px 10px; border-left:2px solid var(--hair); color:var(--muted); font:11px/1.5 var(--mono); white-space:pre-wrap; }
+  .tp-post-acts { display:flex; gap:12px; margin-top:6px; }
+  .tp-post-acts button { appearance:none; border:0; padding:0; background:transparent; color:var(--muted-2); font:500 10.5px/1.2 var(--sans); cursor:pointer; }
+  .tp-post-acts button:hover { color:var(--ink); }
+  .tp-note { padding:10px 16px 0; color:var(--muted-3); font:10.5px/1.45 var(--sans); }
+  .tp-note .gd-action { margin-left:6px; }
+  .tp-error { padding:6px 16px 0; color:var(--danger); font:11px/1.4 var(--sans); }
+  .tp-error:empty { padding:0; }
+  .tp-more { appearance:none; width:calc(100% - 32px); margin:4px 16px 8px; padding:8px 0; border:0; border-top:1px solid var(--hair); background:transparent; color:var(--muted-2); cursor:pointer; text-align:center; font:500 10.5px/1.2 var(--sans); }
+  .tp-loading { padding:28px 16px; text-align:center; color:var(--muted-2); font:11.5px/1.5 var(--sans); }
   #tasksList { min-height:1px; transform-origin:top center; transition:opacity 150ms var(--settle),transform 180ms var(--settle); }
   #tasksList.todo-switching { opacity:.52; transform:translateY(2px); pointer-events:none; }
   #tasksList.todo-arriving { animation:todoContentArrive 210ms var(--settle) both; }
@@ -2964,6 +3009,7 @@
         Relays <span class="tab-badge gone" id="relaysBadge">0</span>
       </button>
       <button class="tab" type="button" data-view="tasks">Todo <span class="tab-badge amber gone" id="tasksBadge">0</span></button>
+      <button class="tab" type="button" data-view="topics">Topics <span class="tab-badge amber gone" id="topicsBadge">0</span></button>
       <button class="tab" type="button" data-view="slack">
         Slack <span class="tab-badge gone" id="slackBadge">0</span>
       </button>
@@ -3082,6 +3128,18 @@
           </svg>
           <div class="t1">Nothing here</div>
           <div class="t2">Relays and Tasks will appear here as they enter your workflow.</div>
+        </div>
+      </section>
+
+      <!-- Topics view: invite-only boards kept in sync by members' agents under a mandate. -->
+      <section class="view hidden" id="topicsView">
+        <div id="topicsBody"></div>
+        <div class="empty gone" id="topicsEmpty">
+          <svg class="mark" width="22" height="22" viewBox="0 0 16 16" aria-hidden="true">
+            <rect x="0" y="6" width="4" height="4"/><rect x="6" y="6" width="4" height="4"/><rect x="12" y="6" width="4" height="4"/>
+          </svg>
+          <div class="t1">No topics yet</div>
+          <div class="t2">A topic is a board your agent keeps in sync with other people's agents, under a mandate you approve.</div>
         </div>
       </section>
 
@@ -3251,6 +3309,10 @@
   const tasksListEl = document.getElementById("tasksList");
   const tasksEmptyEl = document.getElementById("tasksEmpty");
   const tasksBadgeEl = document.getElementById("tasksBadge");
+  const topicsViewEl = document.getElementById("topicsView");
+  const topicsBodyEl = document.getElementById("topicsBody");
+  const topicsEmptyEl = document.getElementById("topicsEmpty");
+  const topicsBadgeEl = document.getElementById("topicsBadge");
   const readerViewEl = document.getElementById("readerView");
   const readerBodyEl = document.getElementById("readerBody");
   const sentListEl = document.getElementById("sentList");
@@ -3560,6 +3622,7 @@
       sent: sentViewEl,
       tasks: tasksViewEl,
       requests: tasksViewEl, // compatibility alias for pre-Task view state
+      topics: topicsViewEl,
       contacts: contactsViewEl,
     }[sourceView];
     if (!source || source.classList.contains("hidden")) return false;
@@ -3608,6 +3671,7 @@
       sent: sentViewEl,
       tasks: tasksViewEl,
       requests: tasksViewEl, // compatibility alias for pre-Task view state
+      topics: topicsViewEl,
       reader: readerViewEl,
       contacts: contactsViewEl,
       settings: settingsViewEl,
@@ -6822,6 +6886,387 @@
     tasksListEl.classList.add("todo-arriving");
     todoArrivalTimer = setTimeout(() => tasksListEl.classList.remove("todo-arriving"), 240);
   }
+  // ---- Topics ---------------------------------------------------------------
+  // Invite-only boards kept in sync by members' agents under a mandate the
+  // person approved. Posts never enter Relays. The tab badge counts posts by
+  // others since the person last opened each topic, plus invitations and
+  // mandate changes waiting on them; opening a topic is the one human read
+  // (agent fetches never move it). Every mutation re-renders from the server's
+  // returned view, never a local guess (the channel pane's rule).
+  const TOPIC_NATURES = ["event", "decision", "plan", "finding", "opinion", "question"];
+  const TOPIC_NATURE_LABEL = { event:"Event", decision:"Decision", plan:"Plan", finding:"Finding", opinion:"Opinion", question:"Question" };
+  const topicsState = {
+    loaded:false, loading:false, error:"", topics:[], generation:0,
+    openId:null, detail:null, posts:[], nextCursor:null, postsLoading:false, postsError:"",
+    lane:"human", composing:false, creating:false, editingMandate:false, inviteQuery:"", armed:null,
+  };
+  function topicsAttentionCount() {
+    return topicsState.topics.reduce((sum, t) => {
+      const m = t.membership || {};
+      if (m.state === "invited") return sum + 1;
+      if (m.state === "active" && m.mandateCurrent === false) return sum + 1;
+      return sum + Math.max(0, Number(t.newPostCount || 0));
+    }, 0);
+  }
+  function topicById(id) { return topicsState.topics.find((t) => t.id === id) || null; }
+  function topicNeedsAttention(t) {
+    const m = t?.membership || {};
+    return m.state === "invited" || (m.state === "active" && m.mandateCurrent === false);
+  }
+  async function topicCall(fn, ...args) {
+    let res = null;
+    try { res = await fn(...args); } catch (error) { res = { ok:false, error:String(error?.message || error) }; }
+    if (!res || res.ok !== true) return { error: res?.error || "That did not go through." };
+    return { result: res.result };
+  }
+  function mergeTopicSummary(summary) {
+    if (!summary || !summary.id) return;
+    const { members, ...rest } = summary;
+    const i = topicsState.topics.findIndex((t) => t.id === summary.id);
+    if (i >= 0) topicsState.topics[i] = { ...topicsState.topics[i], ...rest }; else topicsState.topics.unshift(rest);
+    if (topicsState.detail && topicsState.detail.id === summary.id) topicsState.detail = { ...topicsState.detail, ...summary };
+    setBadge(topicsBadgeEl, topicsAttentionCount());
+  }
+  async function loadTopics({ quiet = false } = {}) {
+    if (!window.relay.topicsList || payload.features?.topics !== true) return;
+    const generation = ++topicsState.generation;
+    if (!quiet) {
+      topicsState.loading = true;
+      topicsState.error = "";
+      if (activeView === "topics" && !topicsState.loaded) renderTopics();
+    }
+    const { result, error } = await topicCall(window.relay.topicsList);
+    if (generation !== topicsState.generation) return;
+    topicsState.loading = false;
+    if (error) {
+      topicsState.error = error;
+      if (activeView === "topics") renderTopics();
+      return;
+    }
+    const topics = Array.isArray(result) ? result : [];
+    const changed = JSON.stringify(topics) !== JSON.stringify(topicsState.topics);
+    topicsState.topics = topics;
+    topicsState.loaded = true;
+    topicsState.error = "";
+    setBadge(topicsBadgeEl, topicsAttentionCount());
+    if (topicsState.openId && !topicById(topicsState.openId)) { topicsState.openId = null; topicsState.detail = null; }
+    if (activeView === "topics" && (changed || !quiet)) renderTopics();
+  }
+  async function openTopic(id) {
+    Object.assign(topicsState, { openId:id, detail:null, posts:[], nextCursor:null, postsError:"", composing:false, editingMandate:false, armed:null, inviteQuery:"" });
+    renderTopics();
+    const { result, error } = await topicCall(window.relay.topicGet, id);
+    if (topicsState.openId !== id) return;
+    if (error) { topicsState.postsError = error; renderTopics(); return; }
+    topicsState.detail = result;
+    mergeTopicSummary(result);
+    renderTopics();
+    const m = result.membership || {};
+    if (m.state !== "active" || m.mandateCurrent !== true) return;
+    await loadTopicPosts();
+    if (Number(result.newPostCount || 0) > 0) {
+      const seen = await topicCall(window.relay.topicSeen, id);
+      if (seen.result) mergeTopicSummary(seen.result);
+    }
+  }
+  async function loadTopicPosts({ append = false } = {}) {
+    const id = topicsState.openId;
+    if (!id || (append && (!topicsState.nextCursor || topicsState.postsLoading))) return;
+    topicsState.postsLoading = true;
+    topicsState.postsError = "";
+    renderTopics();
+    const { result, error } = await topicCall(window.relay.topicPosts, id, append ? { cursor: topicsState.nextCursor } : {});
+    if (topicsState.openId !== id) return;
+    topicsState.postsLoading = false;
+    if (error) { topicsState.postsError = error; renderTopics(); return; }
+    const posts = Array.isArray(result?.posts) ? result.posts : [];
+    topicsState.posts = append ? [...topicsState.posts, ...posts] : posts;
+    topicsState.nextCursor = result?.nextCursor || null;
+    if (result?.topic) mergeTopicSummary(result.topic);
+    renderTopics();
+  }
+  function closeTopic() {
+    Object.assign(topicsState, { openId:null, detail:null, posts:[], nextCursor:null, postsError:"", armed:null });
+    renderTopics();
+  }
+  function topicRowHtml(t) {
+    const m = t.membership || {};
+    const attention = m.state === "invited" ? "Invited · read the mandate to join"
+      : m.state === "active" && m.mandateCurrent === false ? "Mandate changed · approve to continue"
+      : "";
+    const fresh = Math.max(0, Number(t.newPostCount || 0));
+    const count = attention ? "" : fresh ? `<span class="tp-count">${fresh}</span>` : `<span class="tp-count quiet">${Number(t.postCount || 0)}</span>`;
+    const people = `${Number(t.memberCount || 0)} ${Number(t.memberCount) === 1 ? "person" : "people"}`;
+    const latest = t.latestPostAt ? ` · last post ${timeAgo(t.latestPostAt)}` : "";
+    return `<div class="tp-row" role="button" tabindex="0" data-topic-open="${esc(t.id)}">
+      <div><div class="tp-row-name">${esc(t.name)}</div><div class="tp-row-meta">${attention ? `<span class="attn">${esc(attention)}</span>` : esc(people + latest)}</div></div>
+      ${count}
+    </div>`;
+  }
+  function topicNewFormHtml() {
+    if (!topicsState.creating) return `<button class="tp-new-toggle" type="button" data-topic-new>+ New topic</button>`;
+    return `<form class="tp-new" data-topic-new-form>
+      <input class="cv-input" name="name" placeholder="Topic name" autocomplete="off" spellcheck="false" required />
+      <textarea class="cv-input" name="mandate" placeholder="The mandate: what members' agents should post here and read here. Post it if a member would act differently knowing it." required></textarea>
+      <div class="tp-actions"><button class="cv-save" type="submit">Create topic</button><button class="cv-cancel" type="button" data-topic-new-cancel>Cancel</button></div>
+      <div class="tp-error" data-topic-new-error></div>
+    </form>`;
+  }
+  function topicPostHtml(p, lane, detail) {
+    const who = p.author?.name || "Someone";
+    const origin = p.origin === "agent" ? `${who}'s agent` : who;
+    const mine = Boolean(p.author?.relayUserId) && p.author.relayUserId === payload.account?.userId;
+    const admin = detail?.membership?.role === "admin";
+    const body = lane === "agent"
+      ? `${p.forHuman ? `<div class="tp-post-body">${readerParagraphs(p.forHuman)}</div>` : ""}<div class="tp-post-body agent">${esc(p.forAgent || "")}</div>`
+      : `<div class="tp-post-body">${readerParagraphs(p.forHuman || "")}</div>`;
+    const acts = (mine || admin) ? `<div class="tp-post-acts">${
+      topicsState.armed === `delete:${p.id}`
+        ? `<button type="button" data-topic-post-delete-confirm="${esc(p.id)}">Really delete?</button><button type="button" data-topic-armed-cancel>Cancel</button>`
+        : `<button type="button" data-topic-post-delete="${esc(p.id)}">Delete</button>`}</div>` : "";
+    return `<article class="tp-post" data-topic-post="${esc(p.id)}">
+      <div class="tp-post-meta"><span class="tp-nature ${esc(p.nature)}">${esc(TOPIC_NATURE_LABEL[p.nature] || p.nature)}</span><span class="who">${esc(origin)}</span><span>${esc(timeAgo(p.createdAt))}${p.editedAt ? " · edited" : ""}</span></div>
+      <div class="tp-post-title">${esc(p.title)}</div>
+      ${body}${acts}
+    </article>`;
+  }
+  function topicComposeHtml() {
+    if (!topicsState.composing) return `<button class="tp-new-toggle" type="button" data-topic-compose>+ Post to this topic</button>`;
+    return `<form class="tp-compose" data-topic-compose-form>
+      <select class="cv-input" name="nature" aria-label="What kind of post">${TOPIC_NATURES.map((n) => `<option value="${n}"${n === "opinion" ? " selected" : ""}>${TOPIC_NATURE_LABEL[n]}</option>`).join("")}</select>
+      <input class="cv-input" name="title" placeholder="Title" autocomplete="off" required />
+      <textarea class="cv-input" name="body" placeholder="Say it plainly. Only an event is a bare fact; everything else is your take, your plan, or your question." required></textarea>
+      <div class="tp-actions"><button class="cv-save" type="submit">Post</button><button class="cv-cancel" type="button" data-topic-compose-cancel>Cancel</button></div>
+      <div class="tp-error" data-topic-compose-error></div>
+    </form>`;
+  }
+  function topicMembersHtml(d) {
+    const admin = d.membership?.role === "admin" && d.membership?.state === "active" && !d.archivedAt;
+    const me = payload.account?.userId;
+    const rows = (d.members || []).map((m) => {
+      const name = m.name || m.email || "Member";
+      const isMe = m.relayUserId === me;
+      const status = m.state === "invited" ? "Invited" : m.role === "admin" ? "Admin" : "";
+      const label = [status, isMe ? "You" : ""].filter(Boolean).join(" · ");
+      const acts = admin && !isMe
+        ? `<span class="gd-actions">${m.state === "active" ? `<button type="button" class="gd-action" data-topic-role="${esc(m.relayUserId)}" data-role="${m.role === "admin" ? "member" : "admin"}">${m.role === "admin" ? "Make member" : "Make admin"}</button>` : `<span class="gd-role">Invited</span>`}<button type="button" class="gd-remove" data-topic-remove="${esc(m.relayUserId)}">Remove</button></span>`
+        : label ? `<span class="gd-role">${esc(label)}</span>` : "";
+      return `<div class="gd-member"><span class="avatar" style="--av-h:${avatarHue(name)}" aria-hidden="true">${esc(avatarInitials(name))}</span><span class="gd-member-copy"><span class="nm">${esc(name)}</span>${m.email ? `<span class="em">${esc(m.email)}</span>` : ""}</span>${acts}</div>`;
+    }).join("");
+    const invite = admin ? `<div class="gd-owner-tools"><div class="gd-add"><input class="cv-input" data-topic-invite placeholder="Invite — type a name…" autocomplete="off" spellcheck="false" /><div class="cvg-sugg" data-topic-invite-suggestions></div></div></div>` : "";
+    return `<div class="gd-section-label">Members</div><div class="gd-members">${rows || `<div class="cv-empty">Nobody yet.</div>`}</div>${invite}`;
+  }
+  function topicDetailHtml(d) {
+    const m = d.membership || {};
+    const admin = m.role === "admin" && m.state === "active" && !d.archivedAt;
+    const current = m.state === "active" && m.mandateCurrent === true && !d.archivedAt;
+    let banner = "";
+    if (m.state === "invited") {
+      const inviter = (d.members || []).find((x) => x.relayUserId === payload.account?.userId)?.invitedBy?.name || "Someone";
+      banner = `<div class="tp-banner" role="status"><strong>${esc(inviter)} invited you to “${esc(d.name)}”.</strong>Joining lets your agent read this board and post to it under this mandate, on its own. Read it first.<div class="mandate">${esc(d.mandate)}</div><div class="acts"><button class="cv-save" type="button" data-topic-approve="${Number(d.mandateVersion)}">Join under this mandate</button><button class="cv-cancel" type="button" data-topic-decline>Decline</button></div></div>`;
+    } else if (m.state === "active" && m.mandateCurrent === false) {
+      banner = `<div class="tp-banner" role="status"><strong>The mandate changed${d.mandateUpdatedBy?.name ? ` (${esc(d.mandateUpdatedBy.name)})` : ""}.</strong>Your agent is paused on this topic until you approve version ${Number(d.mandateVersion)}.<div class="mandate">${esc(d.mandate)}</div><div class="acts"><button class="cv-save" type="button" data-topic-approve="${Number(d.mandateVersion)}">Approve and continue</button><button class="cv-cancel" type="button" data-topic-leave>Leave topic</button></div></div>`;
+    } else if (d.archivedAt) {
+      banner = `<div class="tp-banner" role="status"><strong>This topic is archived.</strong>Its posts stay readable; nobody can post.</div>`;
+    }
+    const mandateBlock = topicsState.editingMandate
+      ? `<form class="tp-new" data-topic-mandate-form><textarea class="cv-input" name="mandate" required>${esc(d.mandate)}</textarea><div class="tp-note">Saving a changed mandate pauses every other member's agent until they approve it.</div><div class="tp-actions"><button class="cv-save" type="submit">Save mandate</button><button class="cv-cancel" type="button" data-topic-mandate-cancel>Cancel</button></div><div class="tp-error" data-topic-mandate-error></div></form>`
+      : (m.state === "active" && m.mandateCurrent !== false ? `<div class="tp-banner"><strong>Mandate · v${Number(d.mandateVersion)}</strong><div class="mandate">${esc(d.mandate)}</div>${admin ? `<div class="acts"><button class="gd-action" type="button" data-topic-mandate-edit>Edit mandate</button></div>` : ""}</div>` : "");
+    const settings = current ? `<div class="tp-note">Your agent ${m.postConfirmation === "ask" ? "shows you each post before it goes out." : "posts here on its own and tells you."}<button class="gd-action" type="button" data-topic-confirmation="${m.postConfirmation === "ask" ? "auto" : "ask"}">${m.postConfirmation === "ask" ? "Let it post on its own" : "Ask me first"}</button></div>` : "";
+    const lanes = current ? `<div class="tp-lanes"><button class="tp-lane${topicsState.lane === "human" ? " on" : ""}" type="button" data-topic-lane="human">People</button><button class="tp-lane${topicsState.lane === "agent" ? " on" : ""}" type="button" data-topic-lane="agent">Agents</button></div>` : "";
+    const visible = topicsState.lane === "agent" ? topicsState.posts : topicsState.posts.filter((p) => String(p.forHuman || "").trim());
+    const posts = !current ? ""
+      : topicsState.postsLoading && !topicsState.posts.length ? `<div class="tp-loading">Loading posts…</div>`
+      : visible.length ? visible.map((p) => topicPostHtml(p, topicsState.lane, d)).join("")
+      : `<div class="tp-loading">${topicsState.lane === "agent" ? "No posts yet." : "Nothing in the people lane yet. Agents shows what agents have posted."}</div>`;
+    const more = current && topicsState.nextCursor ? `<button class="tp-more" type="button" data-topic-more>${topicsState.postsLoading ? "Loading…" : "Older posts"}</button>` : "";
+    const leave = current
+      ? (topicsState.armed === "leave"
+        ? `<div class="gd-membership gd-membership-confirm"><div class="gd-confirm"><strong>Leave ${esc(d.name)}?</strong><p>Your agent stops reading and posting here. Your posts stay on the board.</p><div class="gd-confirm-actions"><button class="cancel" type="button" data-topic-armed-cancel>Cancel</button><button class="confirm" type="button" data-topic-leave-confirm>Leave topic</button></div></div></div>`
+        : `<div class="gd-membership"><button class="gd-leave" type="button" data-topic-leave>Leave topic</button>${admin ? `<button class="gd-action danger" type="button" data-topic-archive>${topicsState.armed === "archive" ? "Really archive? Posts stay" : "Archive topic"}</button>` : ""}</div>`)
+      : "";
+    return `<div class="tp-detail" data-topic-detail="${esc(d.id)}">
+      <button class="gd-back" type="button" data-topic-back>‹ Topics</button>
+      <div class="tp-head"><h2>${esc(d.name)}</h2><p>${Number(d.memberCount || 0)} ${Number(d.memberCount) === 1 ? "person" : "people"} · ${Number(d.postCount || 0)} ${Number(d.postCount) === 1 ? "post" : "posts"}</p></div>
+      ${banner}
+      <div class="tp-error" data-topic-error>${esc(topicsState.postsError || "")}</div>
+      ${current ? topicComposeHtml() : ""}
+      ${lanes}${posts}${more}
+      ${mandateBlock}${settings}
+      ${topicMembersHtml(d)}
+      ${leave}
+    </div>`;
+  }
+  function renderTopics() {
+    if (!topicsBodyEl) return;
+    if (topicsState.openId) {
+      topicsEmptyEl.classList.add("gone");
+      const d = topicsState.detail;
+      topicsBodyEl.innerHTML = d ? topicDetailHtml(d)
+        : topicsState.postsError ? `<div class="tp-detail"><button class="gd-back" type="button" data-topic-back>‹ Topics</button><div class="tp-error">${esc(topicsState.postsError)}</div></div>`
+        : `<div class="tp-loading">Loading…</div>`;
+      wireTopicDetail();
+      return;
+    }
+    if (topicsState.loading && !topicsState.loaded) {
+      topicsEmptyEl.classList.add("gone");
+      topicsBodyEl.innerHTML = `<div class="tp-loading">Loading topics…</div>`;
+      return;
+    }
+    if (topicsState.error && !topicsState.loaded) {
+      topicsEmptyEl.classList.add("gone");
+      topicsBodyEl.innerHTML = `<div class="tp-error">${esc(topicsState.error)}</div>`;
+      return;
+    }
+    const attention = topicsState.topics.filter(topicNeedsAttention);
+    const rest = topicsState.topics.filter((t) => !topicNeedsAttention(t));
+    topicsEmptyEl.classList.toggle("gone", topicsState.topics.length > 0 || topicsState.creating);
+    topicsBodyEl.innerHTML = topicNewFormHtml() + `<div class="tp-list">${[...attention, ...rest].map(topicRowHtml).join("")}</div>`;
+    wireTopicList();
+  }
+  function wireTopicList() {
+    for (const row of topicsBodyEl.querySelectorAll("[data-topic-open]")) {
+      const open = () => openTopic(row.getAttribute("data-topic-open"));
+      row.addEventListener("click", open);
+      row.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
+    }
+    const toggle = topicsBodyEl.querySelector("[data-topic-new]");
+    if (toggle) toggle.addEventListener("click", () => { topicsState.creating = true; renderTopics(); topicsBodyEl.querySelector("[data-topic-new-form] input")?.focus(); });
+    const cancel = topicsBodyEl.querySelector("[data-topic-new-cancel]");
+    if (cancel) cancel.addEventListener("click", () => { topicsState.creating = false; renderTopics(); });
+    const form = topicsBodyEl.querySelector("[data-topic-new-form]");
+    if (form) form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errorEl = form.querySelector("[data-topic-new-error]");
+      const save = form.querySelector(".cv-save");
+      save.disabled = true;
+      const { result, error } = await topicCall(window.relay.topicCreate, { name: form.elements.name.value.trim(), mandate: form.elements.mandate.value.trim() });
+      if (error) { errorEl.textContent = error; save.disabled = false; return; }
+      topicsState.creating = false;
+      mergeTopicSummary(result);
+      Object.assign(topicsState, { openId: result.id, detail: result, posts: [], nextCursor: null, postsError: "" });
+      renderTopics();
+    });
+  }
+  function wireTopicDetail() {
+    const c = topicsBodyEl;
+    const d = topicsState.detail;
+    const id = topicsState.openId;
+    const on = (sel, fn) => { for (const el of c.querySelectorAll(sel)) el.addEventListener("click", () => fn(el)); };
+    on("[data-topic-back]", () => closeTopic());
+    if (!d) return;
+    const errorEl = c.querySelector("[data-topic-error]");
+    const apply = async (fn, ...args) => {
+      if (errorEl) errorEl.textContent = "";
+      const { result, error } = await topicCall(fn, ...args);
+      if (error) { topicsState.postsError = error; renderTopics(); return null; }
+      topicsState.postsError = "";
+      return result;
+    };
+    const applyDetail = (result) => { topicsState.detail = result; topicsState.armed = null; mergeTopicSummary(result); renderTopics(); };
+    on("[data-topic-approve]", async (el) => {
+      const wasInvited = d.membership?.state === "invited";
+      const result = await apply(window.relay.topicApprove, id, Number(el.getAttribute("data-topic-approve")));
+      if (!result) return;
+      applyDetail(result);
+      await loadTopicPosts();
+      if (!wasInvited) { const seen = await topicCall(window.relay.topicSeen, id); if (seen.result) mergeTopicSummary(seen.result); }
+    });
+    const drop = () => { topicsState.topics = topicsState.topics.filter((t) => t.id !== id); closeTopic(); setBadge(topicsBadgeEl, topicsAttentionCount()); };
+    on("[data-topic-decline]", async () => { if (await apply(window.relay.topicDecline, id)) drop(); });
+    on("[data-topic-leave]", () => { topicsState.armed = "leave"; renderTopics(); });
+    on("[data-topic-armed-cancel]", () => { topicsState.armed = null; renderTopics(); });
+    on("[data-topic-leave-confirm]", async () => { if (await apply(window.relay.topicLeave, id)) drop(); });
+    on("[data-topic-archive]", async () => {
+      if (topicsState.armed !== "archive") { topicsState.armed = "archive"; renderTopics(); return; }
+      const result = await apply(window.relay.topicArchive, id);
+      if (result) applyDetail(result);
+    });
+    on("[data-topic-lane]", (el) => { topicsState.lane = el.getAttribute("data-topic-lane"); renderTopics(); });
+    on("[data-topic-more]", () => loadTopicPosts({ append:true }));
+    on("[data-topic-compose]", () => { topicsState.composing = true; renderTopics(); c.querySelector("[data-topic-compose-form] input[name=title]")?.focus(); });
+    on("[data-topic-compose-cancel]", () => { topicsState.composing = false; renderTopics(); });
+    const compose = c.querySelector("[data-topic-compose-form]");
+    if (compose) compose.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errEl = compose.querySelector("[data-topic-compose-error]");
+      const save = compose.querySelector(".cv-save");
+      save.disabled = true;
+      const body = compose.elements.body.value.trim();
+      const { result, error } = await topicCall(window.relay.topicPostCreate, id, {
+        nature: compose.elements.nature.value, title: compose.elements.title.value.trim(), forHuman: body, forAgent: body,
+        idempotencyKey: `pill-topic-post:${id}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`,
+      });
+      if (error) { errEl.textContent = error; save.disabled = false; return; }
+      topicsState.composing = false;
+      if (result?.post) topicsState.posts = [result.post, ...topicsState.posts.filter((p) => p.id !== result.post.id)];
+      renderTopics();
+      loadTopics({ quiet:true });
+    });
+    on("[data-topic-post-delete]", (el) => { topicsState.armed = `delete:${el.getAttribute("data-topic-post-delete")}`; renderTopics(); });
+    on("[data-topic-post-delete-confirm]", async (el) => {
+      const postId = el.getAttribute("data-topic-post-delete-confirm");
+      if (!(await apply(window.relay.topicPostDelete, id, postId))) return;
+      topicsState.armed = null;
+      topicsState.posts = topicsState.posts.filter((p) => p.id !== postId);
+      renderTopics();
+      loadTopics({ quiet:true });
+    });
+    on("[data-topic-mandate-edit]", () => { topicsState.editingMandate = true; renderTopics(); });
+    on("[data-topic-mandate-cancel]", () => { topicsState.editingMandate = false; renderTopics(); });
+    const mandateForm = c.querySelector("[data-topic-mandate-form]");
+    if (mandateForm) mandateForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errEl = mandateForm.querySelector("[data-topic-mandate-error]");
+      const { result, error } = await topicCall(window.relay.topicUpdate, id, { mandate: mandateForm.elements.mandate.value.trim() });
+      if (error) { errEl.textContent = error; return; }
+      topicsState.editingMandate = false;
+      applyDetail(result);
+    });
+    on("[data-topic-confirmation]", async (el) => {
+      const result = await apply(window.relay.topicMembership, id, { postConfirmation: el.getAttribute("data-topic-confirmation") });
+      if (result) { mergeTopicSummary(result); topicsState.detail = { ...topicsState.detail, ...result }; renderTopics(); }
+    });
+    on("[data-topic-role]", async (el) => {
+      const result = await apply(window.relay.topicMemberRole, id, el.getAttribute("data-topic-role"), el.getAttribute("data-role"));
+      if (result) applyDetail(result);
+    });
+    on("[data-topic-remove]", async (el) => {
+      const result = await apply(window.relay.topicMemberRemove, id, el.getAttribute("data-topic-remove"));
+      if (result) applyDetail(result);
+    });
+    // Invite picker: the server contact book (contactId-accurate), minus people
+    // already on the board.
+    const input = c.querySelector("[data-topic-invite]");
+    const sugg = c.querySelector("[data-topic-invite-suggestions]");
+    if (input && sugg) {
+      let timer = null;
+      input.value = topicsState.inviteQuery;
+      input.addEventListener("input", () => {
+        topicsState.inviteQuery = input.value;
+        clearTimeout(timer);
+        const q = input.value.trim();
+        if (q.length < 2) { sugg.innerHTML = ""; return; }
+        timer = setTimeout(async () => {
+          const { result } = await topicCall(window.relay.contactsSearch, q);
+          const existing = new Set((d.members || []).map((member) => member.relayUserId).filter(Boolean));
+          const matches = (result?.matches || []).filter((match) => match.contactId && !(match.relayUserId && existing.has(match.relayUserId))).slice(0, 5);
+          sugg.innerHTML = matches.length
+            ? matches.map((match) => `<button type="button" data-topic-invite-pick="${esc(match.contactId)}">${esc(match.name || match.email)}${match.email && match.name ? ` — ${esc(match.email)}` : ""}</button>`).join("")
+            : `<div class="cv-empty">No matching contact.</div>`;
+          for (const button of sugg.querySelectorAll("[data-topic-invite-pick]")) {
+            button.addEventListener("click", async () => {
+              button.disabled = true;
+              const result = await apply(window.relay.topicInvite, id, { contactId: button.getAttribute("data-topic-invite-pick") });
+              if (result) { topicsState.inviteQuery = ""; applyDetail(result); } else button.disabled = false;
+            });
+          }
+        }, 220);
+      });
+    }
+  }
+  // A quiet refresh keeps the tab badge honest without opening the tab.
+  setInterval(() => { if (payload.features?.topics === true) loadTopics({ quiet:true }); }, 90_000);
   async function loadTodo({ append = false } = {}) {
     if (!window.relay.todoList || (append && (todoState.loading || todoState.loadingMore || !todoState.nextCursor))) return;
     const generation = append ? todoState.generation : ++todoState.generation;
@@ -8450,7 +8895,7 @@
         <div class="rd-rule"></div>
         <div class="rd-agentcopy">${readerParagraphs(agentText)}</div>`;
     const humanDoc = `
-        <div class="rd-kicker">${request ? `Task · Created by ${esc(sender)}` : esc(sender)}${r.e2ee ? " · end-to-end encrypted" : ""} · ${esc(timeAgo(r.createdAt))}${r.unread ? "" : " · read"}</div>
+        <div class="rd-kicker">${request ? `Task · Created by ${esc(sender)}` : esc(sender)}${r.nature ? ` · ${esc(TOPIC_NATURE_LABEL[r.nature] || r.nature)}` : ""}${r.e2ee ? " · end-to-end encrypted" : ""} · ${esc(timeAgo(r.createdAt))}${r.unread ? "" : " · read"}</div>
         <div class="rd-headline${headlineClass}">${esc(subject)}</div>
         <div class="rd-rule"></div>
         <div class="rd-body">${readerParagraphs(r.forHuman)}</div>
@@ -16601,6 +17046,8 @@
       tab.classList.toggle("gone", (
         view === "tasks" && payload.features?.todo !== true
       ) || (
+        view === "topics" && payload.features?.topics !== true
+      ) || (
         view === "slack" && payload.features?.slack !== true
       ));
       tab.classList.toggle("active", view === tabView);
@@ -16626,6 +17073,7 @@
     threadsViewEl.classList.toggle("hidden", activeView !== "threads");
     sentViewEl.classList.toggle("hidden", activeView !== "sent");
     tasksViewEl.classList.toggle("hidden", activeView !== "tasks");
+    topicsViewEl.classList.toggle("hidden", activeView !== "topics");
     readerViewEl.classList.toggle("hidden", activeView !== "reader");
     if (activeView !== "reader") closeReaderAttachments();
     requestDetailViewEl.classList.toggle("hidden", activeView !== "requestDetail");
@@ -16671,6 +17119,7 @@
       window.relay.refreshSent().catch(() => {});
     }
     if (activeView === "tasks" && payload.features?.todo === true && viewChanged) loadTodo();
+    if (activeView === "topics" && payload.features?.topics === true && viewChanged) loadTopics();
     // The reader — or an expanded conversation — holds the card at READER size.
     syncCardSize(activeView === "reader" || (activeView === "threads" && chatExpanded));
   }
@@ -16868,6 +17317,7 @@
     markAllReadEl.classList.toggle("gone", activeView !== "relays" || unread === 0);
     markAllReadEl.disabled = unread === 0;
     setBadge(tasksBadgeEl, requestsOutstandingCount());
+    setBadge(topicsBadgeEl, payload.features?.topics === true ? topicsAttentionCount() : 0);
     setBadge(peopleBadgeEl, requestRooms().length);
     if (paintSurface && activeView === "contacts") {
       refreshPaneCounts();
@@ -17040,6 +17490,12 @@
     if (payload.features?.todo !== true && activeView === "tasks") {
       activeView = "relays";
     }
+    if (payload.features?.topics !== true && activeView === "topics") {
+      activeView = "relays";
+    }
+    // The Topics badge is a live hosted count, not part of the state file; load
+    // it once the account's entitlement is known so the tab is honest unopened.
+    if (payload.features?.topics === true && !topicsState.loaded && !topicsState.loading) loadTopics({ quiet:true });
     if (payload.features?.slack !== true && (activeView === "slack" || threadsSource === "slack")) {
       activeView = "relays";
       threadsSource = "relay";

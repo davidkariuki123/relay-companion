@@ -925,7 +925,9 @@ test("same runtime tree builds byte-identical archives and SBOM identities twice
     fs.utimesSync(path.join(root, "node_modules", "relay-companion", "bin", "relay.js"), new Date(), new Date());
     createDeterministicArchive({ sourceRoot: root, outputPath: second });
     assert.deepEqual(fs.readFileSync(first), fs.readFileSync(second));
-    const listed = spawnSync("tar", ["-tzf", first], { encoding: "utf8" });
+    // Relative name + cwd: GNU tar on Windows reads an absolute `C:...` as a
+    // remote host. The bootstrap lists archives the same way.
+    const listed = spawnSync("tar", ["-tzf", path.basename(first)], { cwd: root, encoding: "utf8" });
     assert.equal(listed.status, 0, listed.stderr || listed.stdout);
     assert.match(listed.stdout, /node_modules\/relay-companion\/bin\/relay\.js/);
     const identity = { version, platformKey: "darwin-arm64", sourceSha, dependencyLockSha512: "sha512-lock" };

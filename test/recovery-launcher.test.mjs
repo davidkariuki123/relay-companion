@@ -77,10 +77,24 @@ test('a genuinely hung recovery process is stopped before the fallback starts', 
   const {root,older,newer}=fixture(t);
   fs.mkdirSync(path.dirname(older.node),{recursive:true});fs.copyFileSync(process.execPath,older.node);fs.chmodSync(older.node,0o700);
   for(const p of [older,newer]) fs.mkdirSync(path.join(p.bundle,'bootstrap'),{recursive:true});
-  const pidFile=path.join(root,'hung.json');
-  fs.writeFileSync(path.join(newer.bundle,'bootstrap','recovery-runner.cjs'),`require('node:fs').writeFileSync(${JSON.stringify(pidFile)},JSON.stringify({pid:process.pid}));setInterval(()=>{},1000);`);
-  fs.writeFileSync(path.join(older.bundle,'bootstrap','recovery-runner.cjs'),`const fs=require('node:fs');const {pid}=JSON.parse(fs.readFileSync(${JSON.stringify(pidFile)}));try{process.kill(pid,0);process.exit(2);}catch{};fs.writeFileSync(${JSON.stringify(path.join(root,'status.json'))},JSON.stringify({ok:true,status:'current',launcherVersion:'1.0.0',runId:process.env.RELAY_RECOVERY_RUN_ID,checkedAt:Date.now()}));`);
-  assert.equal((await launch({root,timeoutMs:5000,attemptTimeoutMs:500})).status,'fallback');
+  // Liveness is proven through a socket the hung runner listens on, never its pid:
+  // Windows hands a freed pid to the next process within milliseconds, so under a
+  // busy suite a pid probe can meet a stranger and call the stopped runner "hung".
+  const readyFile=path.join(root,'hung.json'), verdictFile=path.join(root,'verdict.txt');
+  fs.writeFileSync(path.join(newer.bundle,'bootstrap','recovery-runner.cjs'),`const server=require('node:net').createServer(socket=>socket.on('error',()=>{}));server.listen(0,'127.0.0.1',()=>require('node:fs').writeFileSync(${JSON.stringify(readyFile)},JSON.stringify({pid:process.pid,port:server.address().port})));`);
+  fs.writeFileSync(path.join(older.bundle,'bootstrap','recovery-runner.cjs'),`const fs=require('node:fs');const net=require('node:net');
+    let ready;try{ready=JSON.parse(fs.readFileSync(${JSON.stringify(readyFile)}));}catch(e){fs.writeFileSync(${JSON.stringify(verdictFile)},'hung runner never became ready: '+e.code);process.exit(3);}
+    const probe=net.connect(ready.port,'127.0.0.1');
+    probe.once('connect',()=>{fs.writeFileSync(${JSON.stringify(verdictFile)},'hung runner still accepting connections');process.exit(2);});
+    probe.once('error',()=>{fs.writeFileSync(${JSON.stringify(verdictFile)},'stopped');fs.writeFileSync(${JSON.stringify(path.join(root,'status.json'))},JSON.stringify({ok:true,status:'current',launcherVersion:'1.0.0',runId:process.env.RELAY_RECOVERY_RUN_ID,checkedAt:Date.now()}));process.exit(0);});`);
+  // A cold node start on a loaded machine can exceed half a second; the attempt
+  // window must let the hung runner become ready before the launcher stops it.
+  const result=await launch({root,timeoutMs:20000,attemptTimeoutMs:2000});
+  const verdict=fs.existsSync(verdictFile)?fs.readFileSync(verdictFile,'utf8'):'fallback runner never ran';
+  const log=fs.existsSync(path.join(root,'recovery.log'))?fs.readFileSync(path.join(root,'recovery.log'),'utf8'):'';
+  assert.equal(result.status,'fallback',`${verdict}
+${log}`);
+  assert.equal(verdict,'stopped');
 });
 test('a deadline that interrupts a working runner does not quarantine its bundle, and the log says why', async t => {
   const {root,older,newer}=fixture(t); const calls=[];

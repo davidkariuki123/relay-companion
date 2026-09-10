@@ -48,7 +48,31 @@ import {
   queueTaskCompletionWake as defaultQueueTaskCompletionWake,
 } from "./task-completion-wake.js";
 
-const { recordAgentRelayIndex } = agentRelayContext;
+const { recordAgentRelayIndex, recordAgentTopicIndex } = agentRelayContext;
+
+// Topics change far less often than the inbox, and the hook only needs counts
+// and mandates, so one lightweight list per minute is enough.
+export const TOPICS_POLL_MS = 60_000;
+
+/**
+ * Refresh the hook's subscribed-topics snapshot. Failure only logs: topics are
+ * advisory context and must never delay Relay delivery.
+ */
+export async function pollTopicsOnce({
+  client,
+  log = () => {},
+  agentContextHome = storeDir(),
+  agentContextScope = client?.token || "",
+} = {}) {
+  if (typeof client?.topics !== "function") return { changed: false };
+  try {
+    const response = await client.topics();
+    return recordAgentTopicIndex(agentContextHome, agentContextScope, response);
+  } catch (err) {
+    log(`topics context refresh failed: ${err && err.message ? err.message : err}`);
+    return { changed: false };
+  }
+}
 
 function idempotencyKey(prefix) {
   return `${prefix}_${randomUUID()}`;
@@ -1021,6 +1045,7 @@ export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
   let claudeRuntime = createE2eeClaudeRuntimeController({ client, logger: log });
   void claudeRuntime.tick();
   let featureRefreshAt = Date.now() + ACCOUNT_FEATURE_REFRESH_MS;
+  let topicsPolledAt = 0;
   let consecutiveFailures = 0;
   let stewardInFlight = null;
   let inboxWorkInFlight = null;
@@ -1057,6 +1082,15 @@ export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
     if (!stewardInFlight) {
       stewardInFlight = todoStewardTick({ client, log, features, user: (rebound || me).user })
         .finally(() => { stewardInFlight = null; });
+    }
+    if (features.topics && Date.now() - topicsPolledAt >= TOPICS_POLL_MS) {
+      topicsPolledAt = Date.now();
+      await pollTopicsOnce({ client, log });
+    } else if (!features.topics && topicsPolledAt === 0) {
+      // A machine moved off the developer row keeps no topic list for the hook:
+      // a production session must never be shown a stale dev snapshot.
+      topicsPolledAt = Date.now();
+      try { recordAgentTopicIndex(storeDir(), client?.token || "", { topics: [] }); } catch {}
     }
     try {
       const result = await daemonDeliveryTick({ client, log, features, includeOrdinary: false });

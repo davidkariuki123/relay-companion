@@ -28,6 +28,15 @@ function sleepSync(ms) {
   }
 }
 
+// Windows reports EPERM (or EACCES) for a mkdir that races the owner's rmdir: the
+// lock directory is delete-pending while another waiter's stat still holds a
+// handle on it, and the name is unusable for a few microseconds. That is
+// contention, not a broken filesystem, so it is retried like EEXIST. Anything
+// else (parent missing, read-only fs) still must not block the write path.
+function lockContended(error) {
+  return Boolean(error) && (error.code === "EEXIST" || error.code === "EPERM" || error.code === "EACCES");
+}
+
 function acquireJsonLock(targetPath, { timeoutMs = 2000, staleMs = 10000 } = {}) {
   const lockPath = `${targetPath}.lock`;
   const deadline = Date.now() + timeoutMs;
@@ -40,8 +49,8 @@ function acquireJsonLock(targetPath, { timeoutMs = 2000, staleMs = 10000 } = {})
         } catch {}
       };
     } catch (error) {
-      if (!error || error.code !== "EEXIST") {
-        // Parent dir missing, permissions, read-only fs: don't block the write path.
+      if (!lockContended(error)) {
+        // Parent dir missing, read-only fs: don't block the write path.
         return function release() {};
       }
       try {
@@ -82,7 +91,7 @@ function withJsonLockStrict(targetPath, fn, { timeoutMs = 2000, staleMs = 10000 
       fs.mkdirSync(lockPath, { recursive: false });
       break;
     } catch (error) {
-      if (!error || error.code !== "EEXIST") return { ok: false, reason: String((error && error.code) || "lock-error") };
+      if (!lockContended(error)) return { ok: false, reason: String((error && error.code) || "lock-error") };
       try {
         const stat = fs.statSync(lockPath);
         if (Date.now() - stat.mtimeMs > staleMs) {

@@ -387,7 +387,9 @@ test("a product open of an unmatched passport lands in the Relay folder, never h
     ensureDirectory: (dir) => { created.push(dir); return true; },
     allowUnanchoredFallback: true,
   });
-  assert.equal(cwd, `${homedir}/Relay`);
+  // Resolved with the HOST's path semantics: on Windows the same correct value
+  // reads `C:Users	esterRelay`.
+  assert.equal(cwd, path.resolve(homedir, "Relay"));
   assert.equal(reason, "workspace-unmapped-fallback");
   assert.equal(openable, true);
   assert.equal(workspaceKey, "git:github.com/sjalq/rerelay", "the unmatched passport stays on record");

@@ -607,6 +607,9 @@ export function stagePlainRelayItem(
     // row so status changes made by a person or agent repaint the installed
     // app without conflating workflow with read or Task-run state.
     todoStatus: item.todoStatus || existing.todoStatus || null,
+    // The sender-declared nature (event, decision, plan, finding, opinion,
+    // question) travels with the packet so the reader can label the message.
+    nature: item.nature || existing.nature || null,
     todoVersion: Number.isInteger(item.todoVersion) ? item.todoVersion : (existing.todoVersion || null),
     // A poll already in flight must not overwrite a newer removal or Undo.
     todoRemoved: Number(item.todoVisibilityVersion ?? -1) >= Number(existing.todoVisibilityVersion ?? -1) ? item.todoRemoved === true : existing.todoRemoved === true,

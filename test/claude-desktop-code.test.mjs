@@ -30,7 +30,15 @@ function fakeChild(onSpawn) {
   return child;
 }
 
-test("Claude Code launch uses the supported subscription-authenticated CLI without copying credentials", async () => {
+test("Claude Code launch uses the supported subscription-authenticated CLI without copying credentials", async (t) => {
+  // The worker inherits process.env. When this suite itself runs inside a Claude
+  // host (Claude Desktop's Code tab exports CLAUDE_CODE_ENTRYPOINT and
+  // ANTHROPIC_BASE_URL), those ambient values would leak into the assertions
+  // below without being a product defect. Scrub them for this test only.
+  const ambientKeys = ["CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_BASE_URL"];
+  const ambient = Object.fromEntries(ambientKeys.map((key) => [key, process.env[key]]));
+  for (const key of ambientKeys) delete process.env[key];
+  t.after(() => { for (const key of ambientKeys) if (ambient[key] !== undefined) process.env[key] = ambient[key]; });
   const cwd = "/tmp/Relay";
   const sessionId = "11111111-2222-4333-8444-555555555555";
   let invocation = null;

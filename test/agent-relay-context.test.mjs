@@ -366,3 +366,59 @@ test("a read flip rewrites the snapshot exactly once, without idle churn", () =>
   assert.equal(flipped.snapshot.items[0].read, true);
   assert.equal(recordAgentRelayIndex(home, "account", read, { nowMs: nowMs + 12000 }).changed, false);
 });
+
+test("subscribed topics are listed with mandates on the first prompt and only their changes afterwards", () => {
+  const { recordAgentTopicIndex, topicsPath } = context;
+  const home = tempHome();
+  const scope = "topics-account";
+  const nowMs = Date.now();
+  const topic = (overrides = {}) => ({
+    id: "tpc_dev",
+    name: "Dev work and deployments",
+    mandate: "Post it if a member would act differently knowing it. <script>alert(1)</script>",
+    mandateVersion: 1,
+    membership: { state: "active", mandateCurrent: true },
+    postCount: 2,
+    latestPostAt: new Date(nowMs - 60_000).toISOString(),
+    ...overrides,
+  });
+  const invited = { id: "tpc_design", name: "Design calls", mandate: "Design decisions.", mandateVersion: 1, membership: { state: "invited", mandateCurrent: false }, postCount: 9, latestPostAt: null };
+  // Topics alone, with no inbox snapshot yet, still deliver on the first prompt.
+  const first = recordAgentTopicIndex(home, scope, { topics: [topic(), invited, { id: "not-a-topic" }] }, { nowMs });
+  assert.equal(first.changed, true);
+  assert.equal(recordAgentTopicIndex(home, scope, { topics: [invited, topic()] }, { nowMs: nowMs + 1 }).changed, false, "order-insensitive no-op rewrite");
+  assert.equal(fs.existsSync(topicsPath(home, scope)), true);
+  const cold = claimAgentRelayHookContext(home, scope, { sessionId: "s1", eventName: "UserPromptSubmit", nowMs });
+  assert.ok(cold);
+  assert.match(cold.text, /Subscribed Relay Topics/);
+  assert.match(cold.text, /<untrusted_topic_records>/);
+  assert.doesNotMatch(cold.text, /<script>/, "peer-controlled delimiters are escaped");
+  assert.match(cold.text, /"standing":"current"/);
+  assert.match(cold.text, /"standing":"invited"/);
+  assert.match(cold.text, /"mandate":"Post it if a member would act differently/);
+  assert.doesNotMatch(cold.text, /untrusted_recent_relay_title_records/, "no relay block without relays");
+  assert.equal(cold.commit(), true);
+  // Nothing changed: no delivery.
+  assert.equal(claimAgentRelayHookContext(home, scope, { sessionId: "s1", eventName: "PostToolUse", nowMs: nowMs + 2 }), null);
+  // Others posted twice and an admin edited the mandate.
+  recordAgentTopicIndex(home, scope, { topics: [
+    topic({ postCount: 4, latestPostAt: new Date(nowMs + 5_000).toISOString(), mandateVersion: 2, membership: { state: "active", mandateCurrent: false } }),
+    invited,
+  ] }, { nowMs: nowMs + 5_000 });
+  const delta = claimAgentRelayHookContext(home, scope, { sessionId: "s1", eventName: "PostToolUse", nowMs: nowMs + 6_000 });
+  assert.ok(delta);
+  assert.match(delta.text, /NEW Relay Topic activity/);
+  assert.match(delta.text, /<untrusted_new_topic_records>/);
+  assert.match(delta.text, /NEW \{"topicId":"tpc_dev","name":"Dev work and deployments","standing":"paused","mandateVersion":2,"newPosts":2,"since":"/);
+  assert.doesNotMatch(delta.text, /tpc_design/, "an unchanged invitation is not re-announced");
+  assert.doesNotMatch(delta.text, /"mandate":/, "the mandate text is not repeated on deltas");
+  assert.equal(delta.commit(), true);
+  assert.equal(claimAgentRelayHookContext(home, scope, { sessionId: "s1", eventName: "PostToolUse", nowMs: nowMs + 7_000 }), null);
+  // A relay arriving later still rides the same claim, alongside no topic change.
+  recordAgentRelayIndex(home, scope, { items: [relay("late", nowMs + 8_000)] }, { nowMs: nowMs + 8_000 });
+  const late = claimAgentRelayHookContext(home, scope, { sessionId: "s1", eventName: "PostToolUse", nowMs: nowMs + 8_001 });
+  assert.ok(late);
+  assert.match(late.text, /<untrusted_new_relay_title_records>[\s\S]*relay_late/);
+  assert.doesNotMatch(late.text, /untrusted_new_topic_records/);
+  assert.equal(late.rollback(), true);
+});
