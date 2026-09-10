@@ -452,6 +452,6 @@ test("the composer's own chips and the other attachment surfaces are untouched",
   assert.match(inbox, /function attachmentPlates\(attachments, \{ relayId = "" \} = \{\}\)/);
   assert.match(inbox, /attachmentPlates\(r\.attachments, \{ relayId: r\.id \}\)/, "the relay list still uses plates");
   assert.match(inbox, /\$\{attachmentChips\(m\.attachments\)\}/, "task messages still use chips");
-  assert.match(inbox, /class="rd-shelf-card td-att-open"/, "the reader shelf is unchanged");
+  assert.match(inbox, /function relaySharedShelf\(relay\)/, "the reader keeps its shared collection entry point");
   assert.match(inbox, /\.th-msg\.attachment-only \{ display:contents; \}/);
 });

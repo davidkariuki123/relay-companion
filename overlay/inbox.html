@@ -1707,27 +1707,34 @@
      able to grow past it for a long rail. Its children stay centred. */
   .rd-foot .rd-col { padding-top:0; padding-bottom:0; max-width:none; }
   .rd-foot .rd-end { margin-top:0; }
-  /* Shared shelf: attachments belong to the Relay, not to either document.
-     It sits inside the deployed frosted footer, above the existing actions, so
-     a long For-agent document scrolls out from under the same 14px blur while
-     its files remain reachable on both folder faces. */
-  .rd-shelf { width:min(100%, 560px); margin:0 auto 18px; }
-  .rd-shelf-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:0 2px 8px;
-    color:var(--muted-3); font:10px/1.2 var(--mono); letter-spacing:.16em; text-transform:uppercase; }
-  .rd-shelf-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
-  .rd-shelf-card { appearance:none; width:100%; min-width:0; padding:0; overflow:hidden; text-align:left; cursor:pointer;
-    color:var(--ink); background:color-mix(in srgb,var(--bg) 76%,transparent); border:1px solid var(--hair);
-    border-radius:13px; box-shadow:0 1px 0 color-mix(in srgb,var(--bg) 82%,transparent);
-    transition:transform .35s var(--spring),border-color .2s,background .2s; }
-  .rd-shelf-card:hover { transform:translateY(-1px); border-color:var(--muted-3); background:color-mix(in srgb,var(--bg) 88%,transparent); }
-  .rd-shelf-preview { position:relative; display:grid; place-items:center; height:64px; overflow:hidden; border-bottom:1px solid var(--hair);
-    color:var(--muted-3); background:color-mix(in srgb,var(--wash) 76%,transparent); }
-  .rd-shelf-preview img { width:100%; height:100%; object-fit:cover; }
-  .rd-shelf-preview svg { width:21px; height:21px; }
-  .rd-shelf-meta { display:flex; align-items:center; gap:8px; min-width:0; padding:9px 10px 10px; }
-  .rd-shelf-name { min-width:0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font:11.5px/1.25 var(--sans); }
-  .rd-shelf-size { flex:none; color:var(--muted-3); font:9.5px/1 var(--mono); }
-  @media (max-width:520px) { .rd-shelf-grid { grid-template-columns:1fr; } }
+  /* One row regardless of file count; the native modal owns overflow and focus. */
+  .rd-attachments { appearance:none; width:100%; min-height:38px; padding:9px 12px; display:flex; align-items:center; gap:9px;
+    border:0; background:transparent; color:var(--ink); font:11.5px/1.4 var(--sans); text-align:left; cursor:pointer; }
+  .rd-details .rd-attachments { border-top:1px solid var(--hair); }
+  .rd-attachments:hover { background:var(--wash-2); }
+  .rd-attachments > svg { flex:none; width:15px; height:15px; color:var(--muted-2); }
+  .rd-attachments-chevron { margin-left:auto; color:var(--muted-2); font-size:17px; line-height:1; }
+  .rd-attachments-standalone { max-width:34em; margin:22px auto 0; border:1px solid var(--hair); border-radius:12px; background:var(--wash); overflow:hidden; }
+  .rd-attachments-dialog { width:472px; max-width:calc(100vw - 32px); height:340px; max-height:calc(100vh - 32px); padding:0;
+    border:1px solid var(--edge); border-radius:12px; background:var(--bg); color:var(--ink); box-shadow:var(--shadow-pop); overflow:hidden; }
+  .rd-attachments-dialog[open] { display:flex; flex-direction:column; }
+  .rd-attachments-dialog::backdrop { background:rgba(0,0,0,.28); }
+  .rd-attachments-heading { flex:none; min-height:48px; display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:0 10px 0 16px; border-bottom:1px solid var(--hair); font:600 12px/1.4 var(--sans); }
+  .rd-attachments-close { appearance:none; width:32px; height:32px; border:0; border-radius:6px; background:transparent;
+    color:var(--muted-2); font:22px/1 var(--sans); cursor:pointer; }
+  .rd-attachments-close:hover { color:var(--ink); background:var(--wash-2); }
+  .rd-attachments-files { flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain; scrollbar-width:thin; scrollbar-color:var(--edge) transparent; }
+  .rd-attachment-file { appearance:none; width:100%; min-height:44px; display:grid; grid-template-columns:16px minmax(0,1fr) auto;
+    align-items:center; gap:10px; padding:8px 16px; border:0; border-bottom:1px solid var(--hair); background:transparent;
+    color:var(--ink); text-align:left; font:11.5px/1.4 var(--sans); cursor:pointer; }
+  .rd-attachment-file:hover { background:var(--wash); }
+  .rd-attachment-file:disabled { opacity:.5; cursor:default; }
+  .rd-attachment-file > svg { width:16px; height:16px; color:var(--muted-2); }
+  .rd-attachment-name { overflow-wrap:anywhere; min-width:0; }
+  .rd-attachment-size { color:var(--muted-2); font:10px/1.4 var(--mono); white-space:nowrap; }
+  .rd-attachments-error { flex:none; margin:0; padding:8px 16px; max-height:70px; overflow-y:auto; overflow-wrap:anywhere;
+    color:var(--danger); border-top:1px solid var(--hair); font:11px/1.4 var(--sans); }
   /* A page that FITS must not scroll: the pane relaxes into plain end-of-page
      chrome — no frost, no fade, no stolen height. Assessed after each render
      and re-assessed when the agent lane opens (which may tip it into overlay). */
@@ -4317,28 +4324,95 @@
     return `<div class="att-zone"><div class="att-grid${images.length === 1 ? " one" : ""}">${plates}</div>${files.length ? `<div class="att-files">${attachmentChips(files, { relayId })}</div>` : ""}</div>`;
   }
 
+  // ---- compact reader attachments -----------------------------------------
   function relaySharedShelf(relay) {
     const list = Array.isArray(relay?.attachments) ? relay.attachments : [];
     if (!list.length) return "";
-    const noun = list.length === 1 ? "file" : "files";
-    const cards = list.map((attachment) => {
-      const name = attachment?.filename || attachment?.name || "File";
-      const size = fmtBytes(attachment?.sizeBytes != null ? attachment.sizeBytes : attachment?.bytes);
-      const family = fileFamilyOf(name, attachment?.contentType);
-      const image = family === "image";
-      const htmlPreview = /^text\/html(?:;|$)/i.test(String(attachment?.contentType || "")) || /\.html?$/i.test(String(name));
-      return `<button class="rd-shelf-card td-att-open" type="button"
-        data-att-relay="${esc(relay.id)}" data-att-id="${esc(attachment?.id || "")}"${image || htmlPreview ? ' data-att-preview="1"' : ""}
-        data-stop="1" title="Open ${esc(name)}" aria-label="Open attachment ${esc(name)}">
-        <span class="rd-shelf-preview att-plate" aria-hidden="true">${fileIconSvg(family)}</span>
-        <span class="rd-shelf-meta"><span class="rd-shelf-name td-att-name">${esc(name)}</span>${size ? `<span class="rd-shelf-size">${esc(size)}</span>` : ""}</span>
-      </button>`;
-    }).join("");
-    return `<section class="rd-shelf" aria-label="Attachments">
-      <div class="rd-shelf-head"><span>Attached to this Relay</span><span>${list.length} ${noun}</span></div>
-      <div class="rd-shelf-grid">${cards}</div>
-    </section>`;
+    return `<button class="rd-attachments" type="button" data-reader-attachments="${esc(relay.id)}"
+      aria-haspopup="dialog" aria-expanded="false">
+      ${fileIconSvg("file")}<span>${list.length} ${list.length === 1 ? "attachment" : "attachments"}</span>
+      <span class="rd-attachments-chevron" aria-hidden="true">›</span></button>`;
   }
+
+  function readerAttachmentRows(relay) {
+    return (Array.isArray(relay?.attachments) ? relay.attachments : []).map((attachment) => {
+      const name = attachment?.filename || attachment?.name || "File";
+      const size = fmtBytes(attachment?.sizeBytes ?? attachment?.bytes);
+      return `<button type="button" class="rd-attachment-file" data-reader-file="${esc(attachment?.id || "")}"${attachment?.id ? "" : " disabled"}
+        aria-label="Open attachment ${esc(name)}">
+        ${fileIconSvg(fileFamilyOf(name, attachment?.contentType))}
+        <span class="rd-attachment-name">${esc(name)}</span><span class="rd-attachment-size">${esc(size)}</span></button>`;
+    }).join("");
+  }
+
+  let readerAttachmentsDialog = null;
+  function closeReaderAttachments() {
+    readerAttachmentsDialog?.close();
+  }
+  function openReaderAttachments(relay, trigger) {
+    if (!relay?.attachments?.length) return;
+    closeReaderAttachments();
+    const dialog = document.createElement("dialog");
+    dialog.className = "rd-attachments-dialog";
+    dialog.setAttribute("aria-labelledby", "rdAttachmentsTitle");
+    dialog.innerHTML = `<div class="rd-attachments-heading"><span id="rdAttachmentsTitle">${relay.attachments.length} ${relay.attachments.length === 1 ? "attachment" : "attachments"}</span>
+      <button type="button" class="rd-attachments-close" aria-label="Close attachments" autofocus>×</button></div>
+      <div class="rd-attachments-files">${readerAttachmentRows(relay)}</div>
+      <div class="rd-attachments-error" role="alert" hidden></div>`;
+    dialog.dataset.relayId = String(relay.id);
+    document.body.append(dialog);
+    readerAttachmentsDialog = dialog;
+    trigger.setAttribute("aria-expanded", "true");
+    dialog.addEventListener("close", () => {
+      if (readerAttachmentsDialog === dialog) readerAttachmentsDialog = null;
+      dialog.remove();
+      // Polling may have replaced the trigger, but must not lose the reader's place.
+      const current = Array.from(readerBodyEl.querySelectorAll("[data-reader-attachments]"))
+        .find((button) => button.dataset.readerAttachments === String(relay.id));
+      current?.setAttribute("aria-expanded", "false");
+      if (!readerAttachmentsDialog && activeView === "reader" && String(readerId) === String(relay.id)) (current || trigger).focus({ preventScroll: true });
+    });
+    dialog.querySelector(".rd-attachments-close").addEventListener("click", () => dialog.close());
+    // Both ends must be on the backdrop, so dragging a file row outside cannot dismiss it.
+    let backdropDown = false;
+    const outside = (event) => {
+      const box = dialog.getBoundingClientRect();
+      return event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom;
+    };
+    dialog.addEventListener("pointerdown", (event) => { backdropDown = event.target === dialog && outside(event); });
+    dialog.addEventListener("click", (event) => {
+      if (backdropDown && event.target === dialog && outside(event)) dialog.close();
+      backdropDown = false;
+    });
+    dialog.querySelector(".rd-attachments-files").addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-reader-file]");
+      if (!button || button.disabled) return;
+      const error = dialog.querySelector(".rd-attachments-error");
+      error.hidden = true;
+      button.disabled = true;
+      try {
+        const result = await window.relay.openAttachment(String(relay.id), button.dataset.readerFile);
+        if (!result || result.ok === false) throw new Error(result?.error || "Could not open this attachment.");
+      } catch (failure) {
+        error.textContent = failure?.message || "Could not open this attachment.";
+        error.hidden = false;
+      } finally {
+        button.disabled = false;
+      }
+    });
+    dialog.addEventListener("keydown", (event) => {
+      event.stopPropagation();
+      if (event.key === "Escape") { event.preventDefault(); dialog.close(); }
+    });
+    dialog.showModal();
+  }
+  function wireReaderAttachments(root, relay) {
+    for (const button of root.querySelectorAll("[data-reader-attachments]")) {
+      button.setAttribute("aria-expanded", String(readerAttachmentsDialog?.open === true));
+      button.addEventListener("click", () => openReaderAttachments(relay, button));
+    }
+  }
+  // ---- end compact reader attachments -------------------------------------
 
   function safeAttachmentImageUrl(result) {
     const mimeType = /^image\/(?:png|jpeg|gif|webp)$/i.test(String(result?.mimeType || "")) ? String(result.mimeType) : "";
@@ -8062,6 +8136,7 @@
     if (morphFromList) startReaderMorph();
   }
   function closeReader() {
+    closeReaderAttachments();
     cleanReaderMorph();
     sessionPickerState = null;
     const back = readerReturn || { view: readerSource === "tasks" ? "tasks" : "relays", threadId: null };
@@ -8286,6 +8361,7 @@
   }
   function renderReader() {
     const r = readerRow(readerId);
+    if (readerAttachmentsDialog && (!r || readerAttachmentsDialog.dataset.relayId !== String(r.id))) closeReaderAttachments();
     if (!r) { readerBodyEl.innerHTML = '<div class="cv-empty">This relay is gone.</div>'; return; }
     const request = isTaskRow(r);
     const sender = relaySender(r);
@@ -8344,6 +8420,7 @@
     // DETAILS. Always "Details", never "for your agent": the specifics under
     // the words, in the agent's register, closed until this person opens it.
     // Remembered per letter while the pill runs.
+    const sharedShelf = relaySharedShelf(r);
     const detailsOpen = readerDetailsOpen.has(String(r.id));
     const details = !twoFaces && agentText ? `
         <div class="rd-details${detailsOpen ? " open" : ""}" data-stop="1">
@@ -8353,6 +8430,7 @@
             <span class="rd-details-chev" aria-hidden="true">›</span>
           </button>
           ${detailsOpen ? `<div class="rd-details-body rd-agentcopy">${readerParagraphs(agentText)}</div>` : ""}
+          ${sharedShelf}
         </div>` : "";
     const agentDoc = `
         <div class="rd-kicker"><span class="ksq"></span>MESSAGE FOR YOUR AGENT${agentWeightLabel(agentText)}</div>
@@ -8366,7 +8444,8 @@
         ${details}
         ${todoWhyHtml(r)}
         ${scheduleContractHtml(r)}`;
-    const doc = onAgent ? agentDoc : humanDoc;
+    const standaloneAttachments = sharedShelf && (onAgent || !details) ? `<div class="rd-attachments-standalone">${sharedShelf}</div>` : "";
+    const doc = (onAgent ? agentDoc : humanDoc) + standaloneAttachments;
     // RELAY WORK IS REQUESTS SUBSTRATE (Sven, 2026-08-17): a plain relay's
     // agent composer exists only where the product row allows it (local
     // builds). A Task keeps its own — that surface is gated by features.requests.
@@ -8389,7 +8468,6 @@
     // A composer that throws must never take the page down with it: the reader
     // is the surface, and it renders even if its dock cannot.
     const composer = (() => { try { return composerHtml(); } catch (error) { console.error("[reader] composer failed:", error); return ""; } })();
-    const sharedShelf = relaySharedShelf(r);
     const todoStatusControl = todoReaderStatusHtml(r);
     const claimControl = request ? taskClaimControlHtml(r, { surface: "reader" }) : "";
     function composerHtml() {
@@ -8441,7 +8519,7 @@
       </div>
       ${documentList}
       <div class="rd-col${readerTabSwap ? " swap" : ""}">${doc}</div>`;
-    readerBodyEl.querySelector("#readerActions").innerHTML = `${sharedShelf}${status}${bothNote}${claimControl}${documentHostActions}`;
+    readerBodyEl.querySelector("#readerActions").innerHTML = `${status}${bothNote}${claimControl}${documentHostActions}`;
     readerBodyEl.querySelector("#readerFeedback").innerHTML = `
       <div class="row-err${note && note.cls === "ok" ? " ok" : ""}" data-err="${esc(r.id)}" data-stop="1">${esc((note && note.text) || "")}</div>`;
     if (!keepReply) {
@@ -8503,6 +8581,7 @@
     wireHostOpen(readerBodyEl);
     wireTaskClaimControls(readerBodyEl, () => { renderReader(); renderAll(); });
     wireAttachmentChips(readerBodyEl);
+    wireReaderAttachments(readerBodyEl, r);
     for (const button of readerBodyEl.querySelectorAll("[data-code-wrap]")) {
       button.addEventListener("click", () => {
         const block = button.closest(".md-codeblock");
@@ -16535,6 +16614,7 @@
     sentViewEl.classList.toggle("hidden", activeView !== "sent");
     tasksViewEl.classList.toggle("hidden", activeView !== "tasks");
     readerViewEl.classList.toggle("hidden", activeView !== "reader");
+    if (activeView !== "reader") closeReaderAttachments();
     requestDetailViewEl.classList.toggle("hidden", activeView !== "requestDetail");
     contactsViewEl.classList.toggle("hidden", activeView !== "contacts");
     settingsViewEl.classList.toggle("hidden", activeView !== "settings");

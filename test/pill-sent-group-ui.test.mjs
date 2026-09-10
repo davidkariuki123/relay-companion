@@ -85,7 +85,7 @@ const HTML_ATTACHMENT = {
 
 function attachmentShelfFor(row) {
   return new Function("relay", "esc", "fmtBytes", "fileFamilyOf", "fileIconSvg",
-    `${pillFunction("relaySharedShelf")}\nreturn relaySharedShelf(relay);`)(
+    `${pillFunction("relaySharedShelf")}\n${pillFunction("readerAttachmentRows")}\nreturn relaySharedShelf(relay) + readerAttachmentRows(relay);`)(
     row, (value) => String(value), (value) => `${value} bytes`, () => "code", () => "<svg></svg>",
   );
 }
@@ -95,10 +95,10 @@ test("sent attachments survive the reader projection and render an actionable sh
   const row = readerFor({relays:[], sent:[sent]}, sent.relayId);
   assert.deepEqual(row.attachments, sent.attachments, "the reader must not drop the file the conversation already shows");
   const shelf = attachmentShelfFor(row);
-  assert.match(shelf, /Attached to this Relay/);
+  assert.match(shelf, /1 attachment/);
   assert.match(shelf, /settings-and-other\.html/);
   assert.match(shelf, /2417885 bytes/);
-  assert.match(shelf, /data-att-relay="relay_sent_file" data-att-id="att_design" data-att-preview="1"/,
+  assert.match(shelf, /data-reader-attachments="relay_sent_file"[\s\S]*data-reader-file="att_design"/,
     "opening the attachment uses the exact sent Relay and file identity");
 });
 
@@ -110,19 +110,19 @@ test("a group sent reader retains only the opened sibling's attachment identitie
   const row = readerFor({relays:[],sent}, "relay_b");
   assert.equal(row.senderName,"You → Designs");
   assert.deepEqual(row.attachments, sent[1].attachments);
-  assert.match(attachmentShelfFor(row), /data-att-relay="relay_b" data-att-id="att_b"/);
+  assert.match(attachmentShelfFor(row), /data-reader-attachments="relay_b"[\s\S]*data-reader-file="att_b"/);
 });
 
 test("received and canonically hydrated readers keep their existing attachment behavior", () => {
   const inbound = {id:"relay_received",attachments:[HTML_ATTACHMENT]};
   assert.equal(readerFor({relays:[inbound],sent:[]},inbound.id),inbound);
-  assert.match(attachmentShelfFor(inbound), /Attached to this Relay/);
+  assert.match(attachmentShelfFor(inbound), /1 attachment/);
   for (const direction of ["inbound","outbound"]) {
     const item = {relayId:"relay_chat",direction,attachments:[HTML_ATTACHMENT]};
     const chats = new Map([["chat_test",{chatId:"chat_test",title:"Sven",items:[item]}]]);
     const row = readerFor({relays:[],sent:[]},item.relayId,chats);
     assert.deepEqual(row.attachments,item.attachments);
-    assert.match(attachmentShelfFor(row), /data-att-relay="relay_chat" data-att-id="att_design"/);
+    assert.match(attachmentShelfFor(row), /data-reader-attachments="relay_chat"[\s\S]*data-reader-file="att_design"/);
   }
 });
 

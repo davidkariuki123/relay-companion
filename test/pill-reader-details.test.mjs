@@ -42,8 +42,8 @@ test("a click toggles Details in place and the reader keeps its scroll", () => {
 });
 
 test("Details sits under the words, before the verb and the reply", () => {
-  const humanDoc = reader.slice(reader.indexOf("const humanDoc = `"), reader.indexOf("const doc = onAgent ? agentDoc : humanDoc;"));
+  const humanDoc = reader.slice(reader.indexOf("const humanDoc = `"), reader.indexOf("const doc = (onAgent ? agentDoc : humanDoc) + standaloneAttachments;"));
   assert.match(humanDoc, /<div class="rd-body">\$\{readerParagraphs\(r\.forHuman\)\}<\/div>\s*\$\{details\}/);
   assert.match(reader, /id="readerActions"[\s\S]*id="readerComposer"/, "the actions stay above the persistent composer");
-  assert.match(reader, /#readerActions"\)\.innerHTML = `\$\{sharedShelf\}\$\{status\}\$\{bothNote\}\$\{claimControl\}\$\{documentHostActions\}`/);
+  assert.match(reader, /#readerActions"\)\.innerHTML = `\$\{status\}\$\{bothNote\}\$\{claimControl\}\$\{documentHostActions\}`/);
 });

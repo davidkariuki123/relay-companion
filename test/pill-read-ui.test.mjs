@@ -140,7 +140,7 @@ test("attachments use image plates and quiet file rows backed only by main-proce
 
 test("the shared image plate renders through optimistic, queued, and canonical attachment states", () => {
   const start = html.indexOf("  function attachmentIsImage(");
-  const end = html.indexOf("\n  function relaySharedShelf", start);
+  const end = html.indexOf("\n  // ---- compact reader attachments", start);
   assert.ok(start >= 0 && end > start, "image attachment helpers have a complete source boundary");
   const source = html.slice(start, end);
   const attachmentPlates = new Function(
@@ -178,25 +178,13 @@ test("the shared image plate renders through optimistic, queued, and canonical a
   assert.doesNotMatch(canonical, /class="att-cap"/);
 });
 
-test("reader attachments share the deployed frosted footer above both document actions", () => {
+test("reader attachments join Details and stay reachable on either document", () => {
   const shelf = html.slice(html.indexOf("function relaySharedShelf"), html.indexOf("function safeAttachmentImageUrl"));
-  const reader = html.slice(html.indexOf("function renderReader()"), html.indexOf("// ---------- the Tasks board"));
-
-  assert.match(shelf, /Array\.isArray\(relay\?\.attachments\)/,
-    "the shelf projects the Relay's one shared attachment collection");
-  assert.match(shelf, /Attached to this Relay/);
-  assert.match(shelf, /class="rd-shelf-card td-att-open"/,
-    "shelf cards reuse the existing authorized attachment-open path");
-  assert.match(shelf, /data-att-preview="1"/,
-    "previewable files reuse the existing bounded preview path");
-  assert.match(reader, /const sharedShelf = relaySharedShelf\(r\)/);
-  assert.match(reader, /<div class="rd-foot"><div class="rd-col">[\s\S]*id="readerActions"[\s\S]*id="readerComposer"/,
-    "the shelf is inside the deployed footer and precedes document actions and the composer");
-  assert.match(reader, /querySelector\("#readerActions"\)\.innerHTML = `\$\{sharedShelf\}\$\{status\}\$\{bothNote\}\$\{claimControl\}\$\{documentHostActions\}`/);
-  assert.match(html, /\.rd-foot \{[^}]*backdrop-filter:blur\(14px\)/,
-    "the shelf inherits the deployed 14px frost and long-document reveal");
-  assert.match(reader, /wireAttachmentChips\(readerBodyEl\)/,
-    "reader shelf clicks are wired after every tab render");
+  assert.match(shelf, /aria-haspopup="dialog"/);
+  assert.match(shelf, /window\.relay\.openAttachment/);
+  assert.match(html, /const sharedShelf = relaySharedShelf\(r\)/);
+  assert.match(html, /sharedShelf && \(onAgent \|\| !details\)/);
+  assert.match(html, /wireReaderAttachments\(readerBodyEl, r\)/);
 });
 
 test("Slack Settings is one truthful card with the official mark and no optimistic toggle", () => {
