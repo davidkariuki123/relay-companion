@@ -396,6 +396,8 @@ test("subscribed topics are listed with mandates on the first prompt and only th
   assert.match(cold.text, /"standing":"current"/);
   assert.match(cold.text, /"standing":"invited"/);
   assert.match(cold.text, /"mandate":"Post it if a member would act differently/);
+  assert.match(cold.text, /Every topic has the same standing rules: 1\. Post it if a member or an agent would act differently knowing it\. 2\. Only something that actually happened is an event/);
+  assert.match(cold.text, /4\. Respect members' privacy/);
   assert.doesNotMatch(cold.text, /untrusted_recent_relay_title_records/, "no relay block without relays");
   assert.equal(cold.commit(), true);
   // Nothing changed: no delivery.

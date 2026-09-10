@@ -74,7 +74,7 @@ test("the concise human document is derived from a complete unlimited agent docu
   const skill = readFileSync(new URL("../skill/relay/SKILL.md", import.meta.url), "utf8");
   assert.match(tool.description, /Read the installed Relay skill/);
   assert.match(skill, /Compose the complete\s+`forAgent` first, then write `forHuman`/);
-  assert.match(skill, /no word-count target,\s+sentence-count limit/);
+  assert.match(skill, /Stay within 120 words by default; that is a ceiling, never a target/);
   assert.match(skill, /Every sentence must earn its place, and the bar rises with length/);
   assert.match(skill, /Tell, do not explain/);
   assert.match(skill, /has become an inventory of `forAgent`, whatever its length/);
@@ -82,8 +82,8 @@ test("the concise human document is derived from a complete unlimited agent docu
   assert.match(skill, /omitting potentially useful context is massively higher/);
   assert.match(skill, /preserve that orientation when cutting/);
   assert.match(tool.inputSchema.properties.forHuman.description, /enough background for someone arriving fresh/);
-  assert.match(tool.inputSchema.properties.forHuman.description, /Draft the complete forAgent document first/);
-  assert.equal(tool.inputSchema.properties.longForHumanConfirmed, undefined);
+  assert.match(tool.inputSchema.properties.forHuman.description, /leave explaining a system or design to forAgent/);
+  assert.match(tool.inputSchema.properties.longForHumanConfirmed.description, /already rejected this exact draft/i);
   assert.match(tool.inputSchema.properties.forAgent.description, /complete .*document/i);
   assert.match(tool.inputSchema.properties.forAgent.description, /may be as long and detailed as necessary/i);
 });

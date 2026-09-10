@@ -22,7 +22,7 @@ const relayBin = fileURLToPath(new URL("../bin/relay.js", import.meta.url));
 // productFeatures has always had it on the developer row and the Companion
 // overlay has always hidden its tab.
 const PRODUCTION_ORDINARY_RELAY_TOOL_NAMES = new Set(ORDINARY_RELAY_TOOL_NAMES);
-for (const gated of ["relay_message_edit", "relay_message_delete", "relay_todo_update", "relay_todo_visibility", "relay_todo_reorder", "relay_topics_list", "relay_topic_fetch", "relay_topic_post"]) {
+for (const gated of ["relay_message_edit", "relay_message_delete", "relay_todo_update", "relay_todo_visibility", "relay_todo_reorder", "relay_topics_list", "relay_topic_fetch", "relay_topic_post", "relay_topic_create", "relay_topic_invite", "relay_topic_member"]) {
   PRODUCTION_ORDINARY_RELAY_TOOL_NAMES.delete(gated);
 }
 

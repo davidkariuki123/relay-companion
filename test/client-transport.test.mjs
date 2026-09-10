@@ -315,7 +315,7 @@ test("opening a canonical chat uses the accepted pill source and qualifies the v
   });
 });
 
-test("a legacy confirmation flag does not bypass an older server refusal", async (t) => {
+test("a locally reviewed long relay completes the API's exact-draft soft review", async (t) => {
   const requests = [];
   const server = http.createServer((req, res) => {
     let body = "";
@@ -343,8 +343,9 @@ test("a legacy confirmation flag does not bypass an older server refusal", async
   });
   const relayClient = new RelayClient({ url: `http://127.0.0.1:${address.port}`, token: "dev_test" });
   const payload = { forHuman: "long draft", longForHumanConfirmed: true, idempotencyKey: "review-key" };
-  await assert.rejects(relayClient.sendRelay(payload), /human_message_review_required/);
-  assert.deepEqual(requests, [payload]);
+  const result = await relayClient.sendRelay(payload);
+  assert.equal(result.relayId, "relay_sent");
+  assert.deepEqual(requests, [payload, { ...payload, longForHumanReviewToken: "review_exact_draft" }]);
 });
 
 test("an unreviewed client receives the API soft review without automatic bypass", async (t) => {

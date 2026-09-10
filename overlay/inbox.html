@@ -2491,6 +2491,8 @@
   .tp-banner strong { display:block; margin-bottom:4px; font-weight:600; }
   .tp-banner .mandate { margin:8px 0 10px; padding:9px 11px; border-left:2px solid var(--accent); background:var(--bg); color:var(--ink-2); font:12.5px/1.55 var(--serif); white-space:pre-wrap; overflow-wrap:anywhere; }
   .tp-banner .acts { display:flex; align-items:center; gap:14px; }
+  .tp-rules ol { margin:6px 0 0; padding-left:18px; color:var(--ink-2); font:12px/1.5 var(--sans); }
+  .tp-rules li { margin-top:3px; }
   .tp-lanes { display:flex; gap:4px; padding:10px 16px 4px; }
   .tp-lane { appearance:none; border:0; border-radius:var(--r-pill); padding:5px 11px; background:transparent; color:var(--muted-2); font:600 11px/1.2 var(--sans); cursor:pointer; }
   .tp-lane.on { background:var(--wash-2); color:var(--ink); }
@@ -7003,11 +7005,20 @@
       ${count}
     </div>`;
   }
+  // The four rules every topic has, whatever its mandate says. They come from
+  // the same generated list the agents read, so nobody has to write them into
+  // a mandate and no two topics can disagree about them.
+  function topicStandingRulesHtml() {
+    const rules = Array.isArray(payload.ui?.topicStandingRules) ? payload.ui.topicStandingRules : [];
+    if (!rules.length) return "";
+    return `<div class="tp-banner tp-rules"><strong>Every topic</strong><ol>${rules.map((rule) => `<li>${esc(rule)}</li>`).join("")}</ol></div>`;
+  }
   function topicNewFormHtml() {
     if (!topicsState.creating) return `<button class="tp-new-toggle" type="button" data-topic-new>+ New topic</button>`;
     return `<form class="tp-new" data-topic-new-form>
       <input class="cv-input" name="name" placeholder="Topic name" autocomplete="off" spellcheck="false" required />
-      <textarea class="cv-input" name="mandate" placeholder="The mandate: what members' agents should post here and read here. Post it if a member would act differently knowing it." required></textarea>
+      <textarea class="cv-input" name="mandate" placeholder="The mandate: what this topic is about, in a sentence or two. The rules every topic has are below; no need to repeat them." required></textarea>
+      ${topicStandingRulesHtml()}
       <div class="tp-actions"><button class="cv-save" type="submit">Create topic</button><button class="cv-cancel" type="button" data-topic-new-cancel>Cancel</button></div>
       <div class="tp-error" data-topic-new-error></div>
     </form>`;
@@ -7092,7 +7103,7 @@
       <div class="tp-error" data-topic-error>${esc(topicsState.postsError || "")}</div>
       ${current ? topicComposeHtml() : ""}
       ${lanes}${posts}${more}
-      ${mandateBlock}${settings}
+      ${mandateBlock}${m.state === "active" || m.state === "invited" ? topicStandingRulesHtml() : ""}${settings}
       ${topicMembersHtml(d)}
       ${leave}
     </div>`;

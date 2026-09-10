@@ -2252,6 +2252,9 @@ function buildPayload() {
       onboardingVersion: COMPANION_ONBOARDING_VERSION,
       setupPrompt: `Read ${webBase()}/for-agents and set me up on Relay.`,
       tutorialPrompt: require("./returning-tutorial-prompt.cjs")(`${webBase()}/llm_guide.md`),
+      // The rules every Topic has, shown under each mandate; generated from
+      // the shared guide so the pill and the agents read the same list.
+      topicStandingRules: require("../src/topic-standing-rules.cjs"),
       completedOnboardingVersion,
       onboardingRequired: currentAccount.paired && (networkOnboardingState.required || completedOnboardingVersion < COMPANION_ONBOARDING_VERSION),
       networkOnboarding: networkOnboardingState,

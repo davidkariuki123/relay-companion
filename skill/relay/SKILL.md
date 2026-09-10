@@ -491,13 +491,14 @@ may need the stopping point and unresolved questions. These are what an
 exchange might call for, never fields to fill. Do not force every message into
 an immediate decision or assignment.
 
-There is no word-count target, sentence-count limit or required length ratio
-between the documents. A long human message is allowed when every paragraph
-earns it: a conversation reported in the sender's own words and judgment can
-run long and still read well, because nothing in it could be had by asking an
-agent. Read a long draft again with the bar raised. Brevity comes from removing
-what the reader does not need for their next step, never from cutting reasoning
-they do need.
+Stay within 120 words by default; that is a ceiling, never a target, and a
+small update is usually a line or two. Relay refuses a longer agent-written
+human message once with a review instruction. Read the draft back as the
+person who will get it, move mechanisms, evidence and chronology into
+`forAgent`, and shorten it in the sender's voice. Resend the exact draft only after rejection, and only when the extra length
+is genuinely necessary to preserve what the sender means, with the same
+idempotency key and longForHumanConfirmed set, and tell the person you did so. Brevity comes from removing what the reader does not need
+for their next step, never from cutting reasoning they do need.
 
 Use complete, spoken sentences and plain words. Read it aloud: would the sender
 say this to the recipient's face, and would the recipient understand it without

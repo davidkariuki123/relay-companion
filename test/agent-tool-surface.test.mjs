@@ -23,6 +23,9 @@ const cases = {
   relay_topics_list: [{}, 'topics'],
   relay_topic_fetch: [{ topicId: 'tpc_test' }, 'topicPosts'],
   relay_topic_post: [{ topicId: 'tpc_test', nature: 'event', title: 'Deployed', forAgent: 'Complete context.', idempotencyKey: key }, 'createTopicPost'],
+  relay_topic_create: [{ name: 'Dev work', mandate: 'Post it if a member would act differently.' }, 'createTopic'],
+  relay_topic_invite: [{ topicId: 'tpc_test', recipient: { contactId: 'con_test' } }, 'inviteToTopic'],
+  relay_topic_member: [{ topicId: 'tpc_test', relayUserId: 'usr_test', action: 'make_admin' }, 'setTopicMemberRole'],
   relay_agent_complete: [{ runRelayId: 'run_test', ...message }, 'agentRunComplete'],
   relay_send: [{ recipient: { contactId: 'con_test' }, kind: 'message', ...message }, 'sendRelay'],
   relay_share_link: [{ ...message }, 'mintShareLink'],
@@ -109,15 +112,15 @@ test('caller workspace, provenance and native session survive the helper boundar
   assert.equal(started.sourceNativeId, 'thread_test');
 });
 
-test('long messages pass on first call for each caller; API remedies survive', async () => {
+test('review state persists across calls and is isolated between callers; API remedies survive', async () => {
   let sends = 0;
   const api = surface({ sendRelay: async () => { sends++; return { relayId: 'relay_test' }; }, updateContact: async () => { throw Object.assign(new Error('invalid_request'), { body: { issues: [{ path: ['firstName'], message: 'Required' }] } }); } });
-  const draft = { ...cases.relay_send[0], forHuman: 'word '.repeat(100).trim(), longForHumanConfirmed: true };
+  const draft = { ...cases.relay_send[0], forHuman: 'word '.repeat(130).trim(), longForHumanConfirmed: true };
+  assert.equal((await api.call('relay_send', draft, caller)).isError, true);
+  assert.equal((await api.call('relay_send', draft, { ...caller, nativeId: 'other' })).isError, true);
+  assert.equal(sends, 0);
   assert.notEqual((await api.call('relay_send', draft, caller)).isError, true);
-  assert.notEqual((await api.call('relay_send', draft, { ...caller, nativeId: 'other' })).isError, true);
-  assert.equal(sends, 2);
-  assert.notEqual((await api.call('relay_send', draft, caller)).isError, true);
-  assert.equal(sends, 3);
+  assert.equal(sends, 1);
   const error = await api.call('relay_contact_update', {}, caller);
   assert.equal(error.isError, true);
   assert.match(error.content[0].text, /firstName: Required/);

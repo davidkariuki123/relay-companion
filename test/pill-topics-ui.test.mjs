@@ -101,3 +101,14 @@ test("invitation and re-approval are one act on the exact mandate version, and m
   assert.match(html, /Only an event is a bare fact; everything else is your take, your plan, or your question\./);
   assert.match(html, /const TOPIC_NATURES = \["event", "decision", "plan", "finding", "opinion", "question"\];/);
 });
+
+test("the four standing rules are a feature of every topic, rendered from the shared list, never mandate text", () => {
+  const rules = fs.readFileSync(new URL("../src/topic-standing-rules.cjs", import.meta.url), "utf8");
+  for (const phrase of ["act differently knowing it", "actually happened is an event", "edit an earlier post rather than repeating it", "Respect members' privacy"]) {
+    assert.ok(rules.includes(phrase), phrase);
+  }
+  assert.match(main, /topicStandingRules: require\("\.\.\/src\/topic-standing-rules\.cjs"\)/);
+  assert.match(html, /function topicStandingRulesHtml\(\)[\s\S]*?payload\.ui\?\.topicStandingRules/);
+  assert.match(html, /placeholder="The mandate: what this topic is about, in a sentence or two\. The rules every topic has are below; no need to repeat them\."/);
+  assert.match(html, /\$\{mandateBlock\}\$\{m\.state === "active" \|\| m\.state === "invited" \? topicStandingRulesHtml\(\) : ""\}/);
+});

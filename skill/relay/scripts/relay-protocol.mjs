@@ -304,7 +304,11 @@ async function request(method, requestPath, body) {
     const encryption = await authenticatedRequest(config.apiUrl, config.accessToken, "GET", "/v1/e2ee/status");
     if (encryption.mode !== "off") throw new Error("Reopen Relay Companion for this connection's encryption. Direct fallback is unavailable.");
   }
-  return authenticatedRequest(config.apiUrl, config.accessToken, verb, cleanPath, body);
+  try { return await authenticatedRequest(config.apiUrl, config.accessToken, verb, cleanPath, body); }
+  catch (error) {
+    if (verb !== "POST" || cleanPath !== "/v1/relays" || body?.longForHumanConfirmed !== true || error.code !== "human_message_review_required" || !error.body?.reviewToken) throw error;
+    return authenticatedRequest(config.apiUrl, config.accessToken, verb, cleanPath, { ...body, longForHumanReviewToken: error.body.reviewToken });
+  }
 }
 
 function parseJson(value, label = "JSON body") {

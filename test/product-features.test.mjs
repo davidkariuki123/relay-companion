@@ -143,7 +143,7 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
   assert.deepEqual(toolsForAccount(productionDeveloper).map((tool) => tool.name), ordinary);
   // The complete catalog requires the role and the dev channel together.
   const developer = productFeatures({ env: { RELAY_UPDATE_CHANNEL: "dev" }, user: DEVELOPER });
-  assert.equal(toolsForAccount(developer).length, 37);
+  assert.equal(toolsForAccount(developer).length, 40);
   assert.ok(toolsForAccount(developer).some((tool) => tool.name === "relay_task_unclaim"));
   assert.ok(toolsForAccount(developer).some((tool) => tool.name === "relay_message_edit"));
   assert.ok(toolsForAccount(developer).some((tool) => tool.name === "relay_message_delete"));
@@ -177,13 +177,16 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
     ["relay_topics_list", {}],
     ["relay_topic_fetch", { topicId: "tpc_1" }],
     ["relay_topic_post", { topicId: "tpc_1", nature: "event", title: "Deployed", forAgent: "ctx", idempotencyKey: "stale_topic_1" }],
+    ["relay_topic_create", { name: "x", mandate: "y" }],
+    ["relay_topic_invite", { topicId: "tpc_1", recipient: { contactId: "con_1" } }],
+    ["relay_topic_member", { topicId: "tpc_1", relayUserId: "usr_1", action: "remove" }],
   ]) {
     await assert.rejects(handleCall(client, name, args, { features: shipped }), /unavailable in this Relay release/);
   }
   for (const tool of toolsForAccount(shipped)) {
     assert.doesNotMatch(JSON.stringify(tool), /relay_topic|Topics/, `${tool.name} must not mention Topics to a production agent`);
   }
-  for (const name of ["relay_topics_list", "relay_topic_fetch", "relay_topic_post"]) {
+  for (const name of ["relay_topics_list", "relay_topic_fetch", "relay_topic_post", "relay_topic_create", "relay_topic_invite", "relay_topic_member"]) {
     assert.ok(toolsForAccount(developer).some((tool) => tool.name === name), `${name} stays on dev`);
   }
   // The developer catalog is unchanged: Todo is listed wherever it is entitled.
