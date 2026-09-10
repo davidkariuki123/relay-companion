@@ -9512,6 +9512,7 @@
     if (state === "opened") return "Opened";
     if (state === "failed") return "Failed";
     if (state === "pending") return "Pending";
+    if (r.awaitingSignup) return "Saved — awaiting recipient signup";
     if (channel === "email") return "Emailed";
     return "Sent";
   }
