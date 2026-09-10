@@ -1,6 +1,6 @@
 ---
 name: relay
-description: Use Relay from Claude Code or Codex with Companion's local MCP tools and the protocol helper for setup and fallback. Use when the person asks to set up Relay, read or send a Relay, check messages, act on a received Relay or continue that work, reply to a contact, share their invite link, or continue the first-run Relay tutorial. Preserve existing integrations.
+description: Use Relay from Claude Code or Codex with Companion's local MCP tools and the protocol helper for setup and fallback. Use when the person asks what Relay is or what they can do with it, to set up Relay, read or send a Relay, check messages, act on a received Relay or continue that work, reply to a contact, share their invite link, or continue the first-run Relay tutorial. Preserve existing integrations.
 ---
 
 <!--
@@ -25,6 +25,9 @@ Three rules when editing:
 Use Relay inside the current agent conversation. Companion supplies a visual
 view and, once connected, manages its credentials, encryption and outgoing queue.
 Hosted/headless agents can use the authenticated HTTPS protocol directly.
+
+<!-- BEGIN GENERATED RELAY VALUE -->
+<!-- END GENERATED RELAY VALUE -->
 
 ## Agent transport
 
