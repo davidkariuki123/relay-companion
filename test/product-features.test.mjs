@@ -135,7 +135,7 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
   // surface it is not entitled to call, and this assertion pinned that.
   assert.deepEqual(ordinary, [
     "relay_send", "relay_share_link", "relay_contacts_search", "relay_groups_list", "relay_group_create", "relay_group_update",
-    "relay_group_delete", "relay_contact_update", "relay_inbox_list", "relay_sent_list", "relay_thread_fetch",
+    "relay_group_delete", "relay_contact_update", "relay_session_updates", "relay_inbox_list", "relay_sent_list", "relay_thread_fetch",
     "relay_chats_list", "relay_chat_fetch", "relay_chat_send", "relay_mark_read",
   ]);
   // A developer on production gets the same catalog as every ordinary user.
@@ -143,7 +143,7 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
   assert.deepEqual(toolsForAccount(productionDeveloper).map((tool) => tool.name), ordinary);
   // The complete catalog requires the role and the dev channel together.
   const developer = productFeatures({ env: { RELAY_UPDATE_CHANNEL: "dev" }, user: DEVELOPER });
-  assert.equal(toolsForAccount(developer).length, 40);
+  assert.equal(toolsForAccount(developer).length, 41);
   assert.ok(toolsForAccount(developer).some((tool) => tool.name === "relay_task_unclaim"));
   assert.ok(toolsForAccount(developer).some((tool) => tool.name === "relay_message_edit"));
   assert.ok(toolsForAccount(developer).some((tool) => tool.name === "relay_message_delete"));

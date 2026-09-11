@@ -38,6 +38,7 @@ const EXPECTED_TOOLS = [
   "relay_group_update",
   "relay_group_delete",
   "relay_contact_update",
+  "relay_session_updates",
   "relay_inbox_list",
   "relay_sent_list",
   "relay_thread_fetch",
@@ -114,7 +115,7 @@ test("startup guidance and owner schemas preserve the complete product ontology"
     "Claude receives the complete startup ontology instead of a truncated prefix");
   assert.match(
     source,
-    /instructions:\s*startupEncryption\.enabled\s*\?\s*E2EE_LOCAL_MCP_INSTRUCTIONS\s*:\s*\(features\.requests\s*\?\s*RELAY_MCP_INSTRUCTIONS\s*:\s*REQUESTS_DISABLED_INSTRUCTIONS\)/,
+    /instructions:\s*startupEncryption\.enabled\s*\?\s*E2EE_LOCAL_MCP_INSTRUCTIONS\s*:\s*features\.requests[\s\S]{0,400}?instructionsWithTopics\(RELAY_MCP_INSTRUCTIONS[\s\S]{0,200}?:\s*REQUESTS_DISABLED_INSTRUCTIONS/,
     "the MCP initialize response carries guidance for the active encryption and product surface",
   );
 });

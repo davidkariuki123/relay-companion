@@ -115,7 +115,6 @@ function execute(node, entry, args, { timeoutMs = DEADLINE_MS, spawnImpl = spawn
 // former while the process is still alive. A missing process needs no second look.
 const STALE_CONFIRM_MS = 4 * 60_000;
 const MAX_IN_PLACE_RESTARTS = 2;
-const RESTART_SETTLE_ATTEMPTS = 45;
 
 // A runner killed mid-extraction by the launcher's deadline leaves its staged
 // tree behind. The next runner owns the recovery lock, so anything still in
@@ -138,13 +137,51 @@ function recoveryLogger(root, runId, now) {
   return (line) => appendRecoveryLog(path.join(root, "recovery"), `runner run=${runId || "-"} +${now() - started}ms ${line}`, now);
 }
 
-async function recover({ homeDir = os.homedir(), env = process.env, now = Date.now, discoverImpl = discover,
+async function recover(options = {}) {
+  const homeDir = options.homeDir || os.homedir();
+  let lock;
+  try { lock = require("./relay-setup.cjs").acquireCanonicalLock(path.join(homeDir, ".relay", "recovery", "run.lock")); }
+  catch (error) { return { ok: false, status: "recovery-lock-unavailable", lastError: error.message }; }
+  try { return await recoverLocked(options); } finally { lock.release(); }
+}
+
+async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = Date.now, discoverImpl = discover,
   stage = stageVerifiedRuntime, run = execute, platform = process.platform, arch = process.arch,
   sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms)),
   health = require("./runtime-health.cjs").exactRuntimeHealth,
   restart = require("./runtime-health.cjs").restartInstalledRuntimeServices,
-  memory = require("./runtime-health.cjs").memoryPressure } = {}) {
+  memory = require("./runtime-health.cjs").memoryPressure,
+  verifyReady = require("./recovery-readiness.cjs").waitForRecoveryReady,
+  validateLocal = require("./recovery-local.cjs").validateLocalRuntime,
+  repairServices = require("./mac-service-recovery.cjs").repairMacServiceRegistrations } = {}) {
   const root = path.join(homeDir, ".relay");
+  // Local availability is independent of update eligibility, network, memory,
+  // and the journal's active flag. This helper shares the activation lock.
+  let progress, reservedService;
+  try {
+    progress = require("./recovery-progress.cjs").repairProgress(homeDir, now);
+    reservedService = progress.claim("services", 2);
+  } catch (error) {
+    // Bookkeeping failure must not suppress the minimal availability repair.
+    const repaired = await repairServices({ homeDir, platform });
+    return { ...repaired, ok: false, status: "repair-progress-unavailable", runtimeHealthy: false, lastError: error.message };
+  }
+  let services;
+  try { services = await repairServices({ homeDir, platform }); }
+  catch (error) { services = { ok: false, status: "service-repair-failed", lastError: error.message }; }
+  if (reservedService && (services.status === "deferred-update-owner" || (services.ok && !services.changed))) progress.refund("services");
+  const ready = (target = null, after = 0) => verifyReady({ homeDir, platform, target, after, now, sleep, health });
+  const rememberReady = observed => {
+    progress.reset();
+    const active = observed?.current || read(path.join(root, "runtime", "current.json"));
+    if (active?.active && active.packageRoot) {
+      const goodFile = path.join(root, "recovery", "runtime-good.json");
+      const old = read(goodFile);
+      if (old?.packageRoot && old.packageRoot !== active.packageRoot) write(path.join(root, "recovery", "runtime-previous-good.json"), old);
+      write(goodFile, { ...active, channel });
+    }
+  };
+  const proven = (value, observed) => { rememberReady(observed); return status({ ...value, runtimeHealthy: true }); };
   const stateFile = path.join(root, "recovery", "status.json");
   const configFile = env.RELAY_CONFIG || path.join(env.RELAY_CONFIG_DIR || root, "config.json");
   const config = read(configFile);
@@ -159,10 +196,16 @@ async function recover({ homeDir = os.homedir(), env = process.env, now = Date.n
     log(`status=${value.status}${value.desiredVersion ? ` desired=${value.desiredVersion}` : ""}${value.lastError ? ` error=${value.lastError}` : ""}`);
     return value;
   };
+  if (services.status === "deferred-update-owner") return status({ ...services, runtimeHealthy: false });
+  if (services.changed || !services.ok) {
+    const observed = await ready();
+    if (observed.ok) return proven({ ok: true, status: "current", version: observed.current?.version, repair: "services", lastSuccessAt: now() }, observed);
+    progress.fail(services.lastError || observed.reason);
+    if (progress.count("services") < 2 && !progress.exhausted) return status({ ...services, ok: false, status: "service-repair-unhealthy", runtimeHealthy: false });
+    // Accepted commands are not recovery. Repeated failure advances even when
+    // an inactive journal or unusable registration snapshot is still present.
+  }
   if (/^(0|false|off|no)$/i.test(String(env.RELAY_AUTO_UPDATE || "")) || read(path.join(root, "recovery", "policy.json"))?.autoUpdate === false) return status({ ok: true, status: "disabled" });
-  let lock;
-  try { lock = require("./relay-setup.cjs").acquireCanonicalLock(path.join(root, "recovery", "run.lock")); }
-  catch (error) { return { ok: false, status: "recovery-lock-unavailable", lastError: error.message }; }
   const downloads = path.join(root, "recovery", "downloads");
   let staged = null;
   let discoveryError = null;
@@ -176,13 +219,17 @@ async function recover({ homeDir = os.homedir(), env = process.env, now = Date.n
     try { desiredVersion = await discoverImpl(channel); log(`discovered ${desiredVersion} on ${channel}`); }
     catch (error) { discoveryError = error; log(`discovery failed: ${error.message}`); }
     current = read(path.join(root, "runtime", "current.json"));
-    if (desiredVersion && current?.active && compare(desiredVersion, current.version) === -1) return status({ ok: true, status: "ahead", desiredVersion });
     const heartbeat = read(path.join(root, "recovery", "daemon.json"));
     const heartbeatFresh = heartbeat?.at <= now() && now() - heartbeat.at < HEARTBEAT_MS;
-    const installedIsDesired = current?.active === true && (!desiredVersion || current.version === desiredVersion);
-    const live = installedIsDesired ? health(current, { platform }) : null;
+    const installedIsDesired = current?.active === true;
+    const live = installedIsDesired ? await health(current, { platform }) : null;
+    if (live && platform === "darwin" && !services.ok) live.ok = false;
     if (installedIsDesired && heartbeatFresh && heartbeat.version === current.version && live.ok) {
-      return status({ ok: true, status: "current", desiredVersion: desiredVersion || current.version, lastSuccessAt: previous?.lastSuccessAt || now() });
+      const observed = await ready(current);
+      if (observed.ok) {
+        if (!desiredVersion || compare(current.version, desiredVersion) >= 0) return proven({ ok: true, status: current.version === desiredVersion || !desiredVersion ? "current" : "ahead", desiredVersion: desiredVersion || current.version, lastSuccessAt: previous?.lastSuccessAt || now() }, observed);
+        rememberReady(observed);
+      } else live.ok = false;
     }
     const memoryNow = memory();
     // Repair progress for the installed version survives every later status
@@ -192,10 +239,10 @@ async function recover({ homeDir = os.homedir(), env = process.env, now = Date.n
     if (installedIsDesired) {
       repairState.version = current.version;
       const sameTarget = previous?.version === current.version;
-      repairState.restarts = sameTarget ? Number(previous.restarts) || 0 : 0;
+      repairState.restarts = progress.count(`restart:${current.packageRoot || current.version}`);
       repairState.staleSince = sameTarget && Number.isFinite(previous.staleSince) && previous.staleSince <= now() ? previous.staleSince : now();
     }
-    if (installedIsDesired) {
+    if (installedIsDesired && !(live.ok && heartbeatFresh && heartbeat.version === current.version)) {
       // The code on disk is the code we want; the problem is liveness. Repair in
       // place before touching the network: restart, then re-activate from disk.
       const { version, restarts, staleSince } = repairState;
@@ -206,51 +253,59 @@ async function recover({ homeDir = os.homedir(), env = process.env, now = Date.n
       if (daemonAlive && now() - staleSince < STALE_CONFIRM_MS) return status({ ok: true, status: "stale-observed", ...base });
       const busy = busyDecision(heartbeat, { homeDir, now: now() });
       if (busy) return status({ ok: true, status: busy, ...base });
-      if (restarts < MAX_IN_PLACE_RESTARTS) {
+      const restartKey = `restart:${current.packageRoot || current.version}`;
+      if (progress.claim(restartKey, MAX_IN_PLACE_RESTARTS)) {
         status({ ok: true, status: "restarting", ...base, restarts: restarts + 1 });
         const restartedAt = now();
         let outcome;
-        try { outcome = await restart(current, { platform }); }
+        try { outcome = await restart(current, { platform, homeDir }); }
         catch (error) { outcome = { ok: false, reason: error.message }; }
         log(`restart ${outcome?.ok ? "ok" : `failed: ${outcome?.reason || "unknown"}`} terminated=${JSON.stringify(outcome?.terminated || [])}`);
-        let responding = false;
-        for (let attempt = 0; outcome?.ok && attempt < RESTART_SETTLE_ATTEMPTS; attempt++) {
-          const response = read(path.join(root, "recovery", "daemon.json"));
-          responding = response?.version === version && response.at >= restartedAt && response.at <= now() && now() - response.at < HEARTBEAT_MS;
-          if (responding) break;
-          await sleep(1000);
+        if (outcome?.reason === "deferred-update-owner" || outcome?.reason === "runtime-changed") {
+          progress.refund(restartKey);
+          return status({ ok: true, status: outcome.reason, runtimeHealthy: false, ...base });
         }
-        if (responding && health(current, { platform }).ok) {
-          return status({ ok: true, status: "current", desiredVersion: base.desiredVersion, version, repair: "restart", restarts: 0, lastSuccessAt: now(), failures: 0 });
-        }
+        const observed = outcome?.ok ? await ready(current, restartedAt) : null;
+        if (observed?.ok) return proven({ ok: true, status: "current", desiredVersion: base.desiredVersion, version, repair: "restart", restarts: 0, lastSuccessAt: now(), failures: 0 }, observed);
+        progress.fail(outcome?.reason || observed?.reason);
         return status({ ok: false, status: "restart-failed", ...base, restarts: restarts + 1,
           lastError: outcome?.ok ? "restarted-daemon-not-responding" : String(outcome?.reason || "restart-failed").slice(0, 300) });
       }
       // Two restarts did not bring it back. Re-activate the release already on
       // disk: same verified tree, no download. Only then does the network rung run.
       const entry = path.join(current.packageRoot || "", "src", "recovery-entry.js");
-      if (current.packageRoot && fs.existsSync(entry) && previous?.status !== "reactivate-failed" && !memoryNow.pressured) {
+      if (current.packageRoot && validateLocal(current, { platform, arch }) && progress.claim(`reactivate:${current.packageRoot}`, 1)) {
         status({ ok: true, status: "reactivating", ...base });
         const activationAt = now();
         try {
           await run(process.execPath, entry, [version, channel], { env: { ...env, RELAY_RECOVERY_WORKER: "1" } });
-          const active = read(path.join(root, "runtime", "current.json"));
-          if (!active?.active || active.version !== version || !health(active, { platform }).ok) throw new Error("reactivated-runtime-not-healthy");
-          let responding = false;
-          for (let attempt = 0; attempt < 30; attempt++) {
-            const response = read(path.join(root, "recovery", "daemon.json"));
-            responding = response?.version === version && response.at >= activationAt && response.at <= now() && now() - response.at < HEARTBEAT_MS;
-            if (responding) break;
-            await sleep(1000);
-          }
-          if (!responding) throw new Error("reactivated-daemon-not-responding");
-          return status({ ok: true, status: "current", desiredVersion: base.desiredVersion, version, repair: "reactivate", restarts: 0, lastSuccessAt: now(), failures: 0 });
+          const observed = await ready({ version }, activationAt);
+          if (!observed.ok) throw new Error("reactivated-runtime-not-healthy");
+          return proven({ ok: true, status: "current", desiredVersion: base.desiredVersion, version, repair: "reactivate", restarts: 0, lastSuccessAt: now(), failures: 0 }, observed);
         } catch (error) {
+          progress.fail(error.message);
           log(`reactivate failed: ${error.message}`);
           status({ ok: false, status: "reactivate-failed", ...base, lastError: String(error.message).slice(0, 300) });
           // Fall through to the download rung below.
         }
       }
+    }
+    // Try a distinct, previously committed local release before requiring a
+    // network download. Validation reads the tree without executing its imports.
+    const good = read(path.join(root, "recovery", "runtime-good.json"));
+    const olderGood = read(path.join(root, "recovery", "runtime-previous-good.json"));
+    const alternatives = [good?.channel === channel ? good : null, olderGood?.channel === channel ? olderGood : null, current?.previous];
+    const localBusy = busyDecision(read(path.join(root, "recovery", "daemon.json")), { homeDir, now: now() });
+    if (!localBusy && (!installedIsDesired || !live?.ok || !heartbeatFresh)) for (const target of alternatives) {
+      if (!target?.packageRoot || target.packageRoot === current?.packageRoot || !validateLocal(target, { platform, arch }) || !progress.claim('local:' + target.packageRoot, 1)) continue;
+      status({ ok: false, status: "restoring-local", desiredVersion, version: target.version, runtimeHealthy: false });
+      try {
+        const activationAt = now();
+        await run(process.execPath, path.join(target.packageRoot, "src", "recovery-entry.js"), [target.version, channel], { env: { ...env, RELAY_RECOVERY_WORKER: "1" } });
+        const observed = await ready({ version: target.version }, activationAt);
+        if (!observed.ok) throw Error("local-runtime-not-healthy");
+        return proven({ ok: true, status: "current", desiredVersion, version: target.version, repair: "local", lastSuccessAt: now(), failures: 0 }, observed);
+      } catch (error) { progress.fail(error.message); log('local recovery failed: ' + error.message); }
     }
     if (discoveryError) throw discoveryError;
     const busy = busyDecision(heartbeat, { homeDir, now: now() });
@@ -279,17 +334,9 @@ async function recover({ homeDir = os.homedir(), env = process.env, now = Date.n
     status({ ok: true, status: "activating", desiredVersion, ...repairState });
     const activationAt = now();
     await run(process.execPath, entry, [desiredVersion, channel], { env: { ...env, RELAY_RECOVERY_WORKER: "1" } });
-    const active = read(path.join(root, "runtime", "current.json"));
-    if (!active?.active || active.version !== desiredVersion || !health(active, { platform }).ok) throw new Error("replacement-not-healthy");
-    let responding = false;
-    for (let attempt = 0; attempt < 30; attempt++) {
-      const response = read(path.join(root, "recovery", "daemon.json"));
-      responding = response?.version === desiredVersion && response.at >= activationAt && response.at <= now() && now() - response.at < HEARTBEAT_MS;
-      if (responding) break;
-      await sleep(1000);
-    }
-    if (!responding) throw new Error("replacement-daemon-not-responding");
-    return status({ ok: true, status: "current", desiredVersion, version: desiredVersion, repair: "download", restarts: 0, lastSuccessAt: now(), failures: 0 });
+    const observed = await ready({ version: desiredVersion }, activationAt);
+    if (!observed.ok) throw new Error("replacement-not-healthy");
+    return proven({ ok: true, status: "current", desiredVersion, version: desiredVersion, repair: "download", restarts: 0, lastSuccessAt: now(), failures: 0 }, observed);
   } catch (error) {
     const activeStatus = read(stateFile);
     const failures = previous && previous.desiredVersion === activeStatus?.desiredVersion ? (previous.failures || 0) + 1 : 1;
@@ -299,7 +346,7 @@ async function recover({ homeDir = os.homedir(), env = process.env, now = Date.n
   } finally {
     // Only our fresh UUID directory; never remove a canonical or rollback release.
     try { if (staged && path.dirname(staged) === downloads) fs.rmSync(staged, { recursive: true, force: true }); }
-    finally { lock.release(); }
+    catch {}
   }
 }
 

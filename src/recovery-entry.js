@@ -1,5 +1,5 @@
-// Executed only from a newly downloaded, signature-verified release. Both normal
-// updates and recovery use the same canonical transaction and ownership lock.
+// Executed from a signature-verified download or a validated, previously
+// installed release. Normal updates and recovery share the canonical lock.
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

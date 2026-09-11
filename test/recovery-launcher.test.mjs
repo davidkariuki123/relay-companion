@@ -13,12 +13,23 @@ function fixture(t) {
   write(path.join(root,'current.json'),newer); write(path.join(root,'known-good.json'),older);
   return {root,older,newer};
 }
+
+test('a completed deferral never calls the installation healthy or promotes the engine', async t => {
+  const {root,older} = fixture(t);
+  const result = await launch({root,run:async(p,{runId}) => {
+    write(path.join(root,'status.json'),{ok:true,status:'deferred-memory-pressure',launcherVersion:p.version,runId,checkedAt:Date.now()});
+    return {ok:true};
+  }});
+  assert.equal(result.status,'runner-completed');
+  assert.equal(read(path.join(root,'launcher-status.json')).runtimeStatus,'deferred-memory-pressure');
+  assert.equal(read(path.join(root,'known-good.json')).bundle,older.bundle);
+});
 test('crashed selected engine falls back, and the next scheduled check prefers the proven copy', async t => {
   const {root,older,newer} = fixture(t); const calls=[];
   const run = async (p,{runId}) => {
     calls.push(p.version);
     if(p.version === newer.version) return {ok:false,reason:'exit'};
-    write(path.join(root,'status.json'),{ok:true,status:'current',launcherVersion:p.version,runId,checkedAt:Date.now()});
+    write(path.join(root,'status.json'),{ok:true,status:'current',runtimeHealthy:true,launcherVersion:p.version,runId,checkedAt:Date.now()});
     return {ok:true};
   };
   assert.equal((await launch({root,run})).status,'fallback');
@@ -30,10 +41,20 @@ test('crashed selected engine falls back, and the next scheduled check prefers t
 test('fresh successful check promotes a candidate and retains the previous proven engine', async t => {
   const {root,older,newer}=fixture(t);
   await launch({root,run:async (p,{runId}) => {
-    write(path.join(root,'status.json'),{ok:true,status:'current',launcherVersion:p.version,runId,checkedAt:Date.now()}); return {ok:true};
+    write(path.join(root,'status.json'),{ok:true,status:'current',runtimeHealthy:true,launcherVersion:p.version,runId,checkedAt:Date.now()}); return {ok:true};
   }});
   assert.equal(read(path.join(root,'known-good.json')).bundle,newer.bundle);
   assert.equal(read(path.join(root,'previous-good.json')).bundle,older.bundle);
+});
+
+test('a legacy current label without readiness evidence cannot promote a recovery engine', async t => {
+  const {root,older}=fixture(t);
+  const result = await launch({root,run:async(p,{runId}) => {
+    write(path.join(root,'status.json'),{ok:true,status:'current',launcherVersion:p.version,runId,checkedAt:Date.now()});
+    return {ok:true};
+  }});
+  assert.equal(result.status,'runner-completed');
+  assert.equal(read(path.join(root,'known-good.json')).bundle,older.bundle);
 });
 test('an internal failure cannot carry its retry backoff into the proven fallback', async t => {
   const {root,newer}=fixture(t);
@@ -43,7 +64,7 @@ test('an internal failure cannot carry its retry backoff into the proven fallbac
       return {ok:false,reason:'exit'};
     }
     assert.equal(read(path.join(root,'status.json')).retryAt,0);
-    write(path.join(root,'status.json'),{ok:true,status:'current',launcherVersion:p.version,runId,checkedAt:Date.now()});return {ok:true};
+    write(path.join(root,'status.json'),{ok:true,status:'current',runtimeHealthy:true,launcherVersion:p.version,runId,checkedAt:Date.now()});return {ok:true};
   }});
   assert.equal(result.status,'fallback');
 });
@@ -58,7 +79,7 @@ test('network errors are retryable; startup success alone never proves a replace
 test('corrupt pointer uses the recorded fallback, without trusting an arbitrary path', async t => {
   const {root,older}=fixture(t);write(path.join(root,'current.json'),{schema:1,bundle:'/elsewhere',version:'1.2.3'});
   await launch({root,run:async(p,{runId}) => {
-    assert.equal(p.bundle,older.bundle);write(path.join(root,'status.json'),{ok:true,status:'ahead',launcherVersion:p.version,runId,checkedAt:Date.now()});return {ok:true};
+    assert.equal(p.bundle,older.bundle);write(path.join(root,'status.json'),{ok:true,status:'ahead',runtimeHealthy:true,launcherVersion:p.version,runId,checkedAt:Date.now()});return {ok:true};
   }});
   assert.equal(read(path.join(root,'launcher-status.json')).status,'fallback');
 });
@@ -67,7 +88,7 @@ test('the installed standalone launcher survives a real syntax error in the sele
   fs.mkdirSync(path.dirname(older.node),{recursive:true});fs.copyFileSync(process.execPath,older.node);fs.chmodSync(older.node,0o700);
   for(const p of [older,newer]) fs.mkdirSync(path.join(p.bundle,'bootstrap'),{recursive:true});
   fs.writeFileSync(path.join(newer.bundle,'bootstrap','recovery-runner.cjs'),'this is invalid javascript {{');
-  fs.writeFileSync(path.join(older.bundle,'bootstrap','recovery-runner.cjs'),`require('node:fs').writeFileSync(${JSON.stringify(path.join(root,'status.json'))},JSON.stringify({ok:true,status:'current',launcherVersion:'1.0.0',runId:process.env.RELAY_RECOVERY_RUN_ID,checkedAt:Date.now()}));`);
+  fs.writeFileSync(path.join(older.bundle,'bootstrap','recovery-runner.cjs'),`require('node:fs').writeFileSync(${JSON.stringify(path.join(root,'status.json'))},JSON.stringify({ok:true,status:'current',runtimeHealthy:true,launcherVersion:'1.0.0',runId:process.env.RELAY_RECOVERY_RUN_ID,checkedAt:Date.now()}));`);
   fs.copyFileSync(new URL('../bootstrap/recovery-launcher.cjs',import.meta.url),path.join(root,'launch.cjs'));
   const result=spawnSync(process.execPath,[path.join(root,'launch.cjs')],{encoding:'utf8',timeout:10000,windowsHide:true});
   assert.equal(result.status,0,result.stderr);
@@ -86,7 +107,7 @@ test('a genuinely hung recovery process is stopped before the fallback starts', 
     let ready;try{ready=JSON.parse(fs.readFileSync(${JSON.stringify(readyFile)}));}catch(e){fs.writeFileSync(${JSON.stringify(verdictFile)},'hung runner never became ready: '+e.code);process.exit(3);}
     const probe=net.connect(ready.port,'127.0.0.1');
     probe.once('connect',()=>{fs.writeFileSync(${JSON.stringify(verdictFile)},'hung runner still accepting connections');process.exit(2);});
-    probe.once('error',()=>{fs.writeFileSync(${JSON.stringify(verdictFile)},'stopped');fs.writeFileSync(${JSON.stringify(path.join(root,'status.json'))},JSON.stringify({ok:true,status:'current',launcherVersion:'1.0.0',runId:process.env.RELAY_RECOVERY_RUN_ID,checkedAt:Date.now()}));process.exit(0);});`);
+    probe.once('error',()=>{fs.writeFileSync(${JSON.stringify(verdictFile)},'stopped');fs.writeFileSync(${JSON.stringify(path.join(root,'status.json'))},JSON.stringify({ok:true,status:'current',runtimeHealthy:true,launcherVersion:'1.0.0',runId:process.env.RELAY_RECOVERY_RUN_ID,checkedAt:Date.now()}));process.exit(0);});`);
   // A cold node start on a loaded machine can exceed half a second; the attempt
   // window must let the hung runner become ready before the launcher stops it.
   const result=await launch({root,timeoutMs:20000,attemptTimeoutMs:2000});
@@ -101,7 +122,7 @@ test('a deadline that interrupts a working runner does not quarantine its bundle
   const run = async (p,{runId}) => {
     calls.push(p.version);
     if (p.version===newer.version) { write(path.join(root,'status.json'),{ok:true,status:'downloading',launcherVersion:p.version,runId,checkedAt:Date.now()}); return {ok:false,reason:'deadline'}; }
-    write(path.join(root,'status.json'),{ok:true,status:'current',launcherVersion:p.version,runId,checkedAt:Date.now()}); return {ok:true};
+    write(path.join(root,'status.json'),{ok:true,status:'current',runtimeHealthy:true,launcherVersion:p.version,runId,checkedAt:Date.now()}); return {ok:true};
   };
   assert.equal((await launch({root,run})).status,'fallback');
   const status=read(path.join(root,'launcher-status.json'));
@@ -113,7 +134,7 @@ test('a deadline that interrupts a working runner does not quarantine its bundle
   assert.match(log,/launcher done status=fallback quarantined=no/);
   // A silent hang (no status written) is still a real failure of that bundle.
   const silent = async (p,{runId}) => { if (p.version===newer.version) return {ok:false,reason:'deadline'};
-    write(path.join(root,'status.json'),{ok:true,status:'current',launcherVersion:p.version,runId,checkedAt:Date.now()}); return {ok:true}; };
+    write(path.join(root,'status.json'),{ok:true,status:'current',runtimeHealthy:true,launcherVersion:p.version,runId,checkedAt:Date.now()}); return {ok:true}; };
   await launch({root,run:silent});
   assert.equal(read(path.join(root,'launcher-status.json')).failedBundle,newer.bundle);
   assert.equal(older.version,'1.0.0');

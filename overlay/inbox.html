@@ -6759,12 +6759,8 @@
   function agentAppChoice() { return agentAppSelection()[0] || ""; }
   function otherAgentPreferenceKey() { return `proto.otherAgent.v1:${signupAccountKey()}`; }
   function otherAgentEnabled() {
-    const saved = protoPref(otherAgentPreferenceKey(), "");
-    if (saved) return saved === "on";
-    // Migrate the old terminal/own-session fallback once, without coupling
-    // subsequent independent switches to the native app selection.
-    return requestedAgentApps().length === 0 || openingPreference()?.surface === "terminal"
-      || requestedAgentApps().some((app) => agentSurfacePreference(app) === "terminal");
+    // All three options start enabled; preserve an explicit account choice.
+    return protoPref(otherAgentPreferenceKey(), "on") === "on";
   }
   function setOtherAgentEnabled(enabled) {
     if (signupAccountKey()) setProtoPref(otherAgentPreferenceKey(), enabled ? "on" : "off");

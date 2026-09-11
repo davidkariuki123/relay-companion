@@ -103,17 +103,18 @@ async function launch({ root = __dirname, run = runChild, now = Date.now, env = 
         && (!report.runId || report.runId === runId); // pre-launcher stock releases
       log(`result bundle=${candidate.version} run=${runId} ok=${result.ok} reason=${result.reason || "-"} reported=${reported ? report.status : "none"} elapsedMs=${now() - attemptAt}`);
       if (result.ok && reported && report.ok !== false) {
-        if (["current", "ahead"].includes(report.status)) {
+        if (["current", "ahead"].includes(report.status) && report.runtimeHealthy === true) {
           const previous = read(path.join(root, "known-good.json"));
           if (validPointer(previous, root) && previous.bundle !== candidate.bundle) write(path.join(root, "previous-good.json"), previous);
           write(path.join(root, "known-good.json"), candidate);
         }
         const fallback = selected?.bundle !== candidate.bundle;
         const quarantined = fallback ? failedBundle : null;
-        write(path.join(root, "launcher-status.json"), { schema: 1, at: now(), status: fallback ? "fallback" : "healthy",
+        const completionStatus = fallback ? "fallback" : ["current", "ahead"].includes(report.status) && report.runtimeHealthy === true ? "healthy" : "runner-completed";
+        write(path.join(root, "launcher-status.json"), { schema: 1, at: now(), status: completionStatus, runtimeStatus: report.status,
           version: candidate.version, failedBundle: quarantined, retryAt: quarantined ? now() + 60 * 60_000 : null });
-        log(`done status=${fallback ? "fallback" : "healthy"} quarantined=${quarantined ? "yes" : "no"}`);
-        return { ok: true, status: fallback ? "fallback" : "healthy" };
+        log(`done status=${completionStatus} quarantined=${quarantined ? "yes" : "no"}`);
+        return { ok: true, status: completionStatus };
       }
       // A live runner reporting a download/configuration error is still running.
       // Don't discard a healthy engine just because its network is unavailable.
@@ -122,7 +123,7 @@ async function launch({ root = __dirname, run = runChild, now = Date.now, env = 
       // to an older bundle here would hand the problem to a runner that only
       // knows how to download.
       const networkFailure = /fetch failed|offline|ENOTFOUND|ECONN|ETIMEDOUT|manifest-http-|channel-discovery-http-|download.*(timed out|stalled|ended early|failed after)|configuration-unavailable/i.test(report?.lastError || "");
-      const retryableReport = ["disabled", "backoff", "restart-failed", "reactivate-failed"].includes(report?.status) || (report?.status === "failed" && networkFailure);
+      const retryableReport = ["disabled", "backoff", "restart-failed", "reactivate-failed", "service-repair-failed", "service-repair-unhealthy"].includes(report?.status) || (report?.status === "failed" && networkFailure);
       if (reported && retryableReport && result.reason !== "deadline") {
         write(path.join(root, "launcher-status.json"), { schema: 1, at: now(), status: "runner-error", version: candidate.version });
         log("done status=runner-error");

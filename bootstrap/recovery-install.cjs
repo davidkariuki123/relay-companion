@@ -5,6 +5,7 @@ const os = require("node:os");
 const crypto = require("node:crypto");
 const { spawnSync } = require("node:child_process");
 const { relayOwnedNodePath } = require("./owned-node-runtime.cjs");
+const { atomicFile } = require("./mac-registration-transaction.cjs");
 const { read, write, compare } = require("./recovery-runner.cjs");
 const LABEL = "work.relay.companion.recovery";
 const TASK = "Relay Companion Recovery";
@@ -55,7 +56,7 @@ function windowsRecoveryTaskXml(script, startAt = new Date()) {
 }
 
 function installRecovery({ packageRoot, node = process.execPath, homeDir = os.homedir(), platform = process.platform,
-  runCommand = run, reload = true, preserveNode = relayOwnedNodePath } = {}) {
+  runCommand = run, reload = true, preserveNode = relayOwnedNodePath, userId = process.getuid?.() ?? 0 } = {}) {
   if (!["darwin", "linux", "win32"].includes(platform)) return { ok: false, reason: "recovery-platform-unsupported" };
   try {
     const root = path.join(homeDir, ".relay", "recovery");
@@ -74,65 +75,95 @@ function installRecovery({ packageRoot, node = process.execPath, homeDir = os.ho
     const hash = crypto.createHash("sha256");
     for (const name of names) hash.update(name).update(fs.readFileSync(path.join(source, name)));
     hash.update(fs.readFileSync(path.join(packageRoot, "package.json")));
-    const bundle = path.join(root, "versions", hash.digest("hex"));
+    const digest = hash.digest("hex");
+    let bundle = path.join(root, "versions", digest);
+    const matches = directory => {
+      try { return fs.readFileSync(path.join(directory, "package.json")).equals(fs.readFileSync(path.join(packageRoot, "package.json")))
+        && names.every(name => fs.readFileSync(path.join(directory, "bootstrap", name)).equals(fs.readFileSync(path.join(source, name)))); }
+      catch { return false; }
+    };
+    // A live runner may still import these files. Never repair them in place.
+    if (fs.existsSync(bundle) && !matches(bundle)) bundle = path.join(root, "versions", crypto.createHash("sha256").update(digest + crypto.randomUUID()).digest("hex"));
     const runtimeNode = preserveNode(node, { platform, runtimeRoot: root, isTemporary: () => true });
-    fs.mkdirSync(path.join(bundle, "bootstrap"), { recursive: true, mode: 0o700 });
-    for (const name of names) fs.copyFileSync(path.join(source, name), path.join(bundle, "bootstrap", name));
-    fs.copyFileSync(path.join(packageRoot, "package.json"), path.join(bundle, "package.json"));
+    if (!fs.existsSync(bundle)) {
+      const pending = path.join(root, "versions", '.pending-' + crypto.randomUUID());
+      fs.mkdirSync(path.join(pending, "bootstrap"), { recursive: true, mode: 0o700 });
+      try {
+        for (const name of names) atomicFile(path.join(pending, "bootstrap", name), fs.readFileSync(path.join(source, name)));
+        atomicFile(path.join(pending, "package.json"), fs.readFileSync(path.join(packageRoot, "package.json")));
+        if (!ok(runCommand(runtimeNode, [path.join(pending, "bootstrap", "recovery-runner.cjs"), "--self-check"]))) throw Error("recovery-bundle-verification-failed");
+        try { fs.renameSync(pending, bundle); }
+        catch (error) { if (!matches(bundle)) throw error; }
+      } finally { fs.rmSync(pending, { recursive: true, force: true }); }
+    }
     const pointer = path.join(root, "current.json");
     // Import an older stock engine only when it has already reported a healthy
     // check. Merely passing the installation probe does not make it known-good.
     const priorStatus = read(path.join(root, "status.json"));
     if (current && !read(path.join(root, "known-good.json")) && current.version === priorStatus?.launcherVersion
-      && priorStatus.ok === true && ["current", "ahead"].includes(priorStatus.status)
+      && priorStatus.ok === true && priorStatus.runtimeHealthy === true && ["current", "ahead"].includes(priorStatus.status)
       && require("./recovery-launcher.cjs").validPointer(current, root)) {
       write(path.join(root, "known-good.json"), current);
     }
-    const temporary = `${pointer}.${process.pid}.tmp`;
     const checked = runCommand(runtimeNode, [path.join(bundle, "bootstrap", "recovery-runner.cjs"), "--self-check"]);
     if (!ok(checked)) throw Error("recovery-bundle-verification-failed");
-    fs.writeFileSync(temporary, JSON.stringify({ schema: 1, version: incoming, node: runtimeNode, bundle }), { mode: 0o600 });
-    fs.renameSync(temporary, pointer);
+    atomicFile(pointer, JSON.stringify({ schema: 1, version: incoming, node: runtimeNode, bundle }));
     const launcher = path.join(root, "launch.cjs");
     // Static launcher dispatches through a replaceable pointer. Never overwrite
     // the executable currently running; old bundles are recovery fallbacks.
-    const launcherTemp = `${launcher}.${process.pid}.tmp.cjs`;
-    fs.writeFileSync(launcherTemp, fs.readFileSync(path.join(source, "recovery-launcher.cjs")), { mode: 0o700 });
-    if (!ok(runCommand(runtimeNode, ["--check", launcherTemp]))) throw Error("recovery-launcher-verification-failed");
-    fs.renameSync(launcherTemp, launcher);
     // The scheduler must not depend on an unproven replacement Node binary to
     // reach the fallback launcher. Advance this host only from proven recovery.
     const proven = read(path.join(root, "known-good.json"));
     const oldHost = read(path.join(root, "launcher-node.json"))?.node;
-    const preferredHost = proven?.node || oldHost;
+    const preferredHost = oldHost || proven?.node;
     const launcherNode = typeof preferredHost === "string" && path.resolve(preferredHost).startsWith(path.join(root,"node") + path.sep)
       && ok(runCommand(preferredHost, ["--version"])) ? preferredHost : runtimeNode;
     write(path.join(root, "launcher-node.json"), { node: launcherNode });
+    const hostFile = path.join(root, "launcher-host.json");
+    // This stdlib host is deliberately independent of bundle upgrades. A future
+    // host protocol change must bump this schema to request an atomic upgrade.
+    const host = read(hostFile);
+    let hostIntact = false;
+    try { hostIntact = host?.schema === 1 && host.sha256 === crypto.createHash("sha256").update(fs.readFileSync(launcher)).digest("hex"); } catch {}
+    if (!hostIntact || !ok(runCommand(launcherNode, ["--check", launcher]))) {
+      const bytes = fs.readFileSync(path.join(source, "recovery-launcher.cjs"));
+      const launcherTemp = path.join(root, 'launcher-' + crypto.randomUUID() + '.cjs');
+      try {
+        atomicFile(launcherTemp, bytes);
+        if (!ok(runCommand(launcherNode, ["--check", launcherTemp]))) throw Error("recovery-launcher-verification-failed");
+        atomicFile(launcher, bytes);
+        atomicFile(hostFile, JSON.stringify({ schema: 1, sha256: crypto.createHash("sha256").update(bytes).digest("hex") }));
+      } finally { fs.rmSync(launcherTemp, { force: true }); }
+    }
     const log = path.join(root, "recovery.log");
     const results = [];
     if (platform === "win32") {
       const script = path.join(root, "launch.vbs");
       const command = `"${launcherNode}" "${launcher}"`;
-      fs.writeFileSync(script, `Set sh = CreateObject("WScript.Shell")\r\nWScript.Quit sh.Run("${command.replaceAll('"', '""')}", 0, True)\r\n`);
+      atomicFile(script, `Set sh = CreateObject("WScript.Shell")\r\nWScript.Quit sh.Run("${command.replaceAll('"', '""')}", 0, True)\r\n`);
       // Register from XML rather than `/SC MINUTE /MO 5`: schtasks' defaults refuse
       // to start a task on battery power and stop it when the plug comes out, so a
       // laptop that lost its Companion while unplugged never got this engine.
       const taskXml = path.join(root, "task.xml");
-      fs.writeFileSync(taskXml, `\uFEFF${windowsRecoveryTaskXml(script)}`, "utf16le");
+      atomicFile(taskXml, Buffer.from(`\uFEFF${windowsRecoveryTaskXml(script)}`, "utf16le"));
       results.push(runCommand("schtasks.exe", ["/Create", "/TN", TASK, "/XML", taskXml, "/F"]));
     } else if (platform === "darwin") {
       const plist = path.join(homeDir, "Library", "LaunchAgents", `${LABEL}.plist`);
       fs.mkdirSync(path.dirname(plist), { recursive: true });
-      fs.writeFileSync(plist, `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>${LABEL}</string><key>ProgramArguments</key><array><string>${xml(launcherNode)}</string><string>${xml(launcher)}</string></array><key>StartInterval</key><integer>300</integer><key>RunAtLoad</key><true/><key>ProcessType</key><string>Background</string><key>StandardOutPath</key><string>${xml(log)}</string><key>StandardErrorPath</key><string>${xml(log)}</string></dict></plist>`);
-      if (reload && process.env.RELAY_RECOVERY_WORKER !== "1") {
-        runCommand("launchctl", ["unload", plist]);
-        results.push(runCommand("launchctl", ["load", plist]));
+      atomicFile(plist, `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>${LABEL}</string><key>ProgramArguments</key><array><string>${xml(launcherNode)}</string><string>${xml(launcher)}</string></array><key>StartInterval</key><integer>300</integer><key>RunAtLoad</key><true/><key>ProcessType</key><string>Background</string><key>StandardOutPath</key><string>${xml(log)}</string><key>StandardErrorPath</key><string>${xml(log)}</string></dict></plist>`);
+      // The job dispatches through the stable host. Do not unload it on update.
+      const observed = runCommand("launchctl", ["print", `gui/${userId}/${LABEL}`]);
+      if (!ok(observed)) {
+        const missing = !observed?.error && (observed?.status === 113 || /Could not find service/i.test(String(observed?.stderr || "")));
+        if (!missing) throw Error("recovery-registration-query-failed");
+        results.push(runCommand("launchctl", ["bootstrap", `gui/${userId}`, plist]));
+        results.push(runCommand("launchctl", ["print", `gui/${userId}/${LABEL}`]));
       }
     } else {
       const dir = path.join(homeDir, ".config", "systemd", "user");
       fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, `${LABEL}.service`), `[Unit]\nDescription=Relay update recovery\n[Service]\nType=oneshot\nExecStart=${unit(launcherNode)} ${unit(launcher)}\nTimeoutStartSec=1800\nKillMode=control-group\n`);
-      fs.writeFileSync(path.join(dir, `${LABEL}.timer`), `[Unit]\nDescription=Check Relay update health\n[Timer]\nOnBootSec=2min\nOnUnitInactiveSec=5min\nPersistent=true\n[Install]\nWantedBy=timers.target\n`);
+      atomicFile(path.join(dir, `${LABEL}.service`), `[Unit]\nDescription=Relay update recovery\n[Service]\nType=oneshot\nExecStart=${unit(launcherNode)} ${unit(launcher)}\nTimeoutStartSec=1800\nKillMode=control-group\n`);
+      atomicFile(path.join(dir, `${LABEL}.timer`), `[Unit]\nDescription=Check Relay update health\n[Timer]\nOnBootSec=2min\nOnUnitInactiveSec=5min\nPersistent=true\n[Install]\nWantedBy=timers.target\n`);
       // The user manager can retain a different HOME from this installer.
       // Registration is required even when thin setup defers starting services.
       for (const ext of ["service", "timer"]) {

@@ -7,6 +7,80 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { installRecovery, uninstallRecovery, windowsRecoveryTaskXml, LABEL, TASK } from "../bootstrap/recovery-install.cjs";
 
+test("Mac watchdog update keeps its registration and host while publishing a complete new bundle", t => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-watchdog-safe-"));
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  let registered = false, failCheck = false;
+  const calls = [];
+  const options = { homeDir, platform: "darwin", packageRoot: fileURLToPath(new URL("..", import.meta.url)),
+    preserveNode: () => process.execPath,
+    runCommand: (command, args) => {
+      calls.push([command, ...args]);
+      if (command === "launchctl") {
+        if (args[0] === "print") return { status: registered ? 0 : 113 };
+        assert.equal(args[0], "bootstrap", "updates must not unregister their watchdog");
+        registered = true; return { status: 0 };
+      }
+      if (args.includes("--self-check") && failCheck) return { status: 1 };
+      return { status: 0 };
+    } };
+  const first = installRecovery(options);
+  assert.equal(first.ok, true, first.detail); assert.equal(registered, true);
+  const launcher = fs.readFileSync(first.launcher), pointer = fs.readFileSync(path.join(homeDir, ".relay", "recovery", "current.json"));
+  const damaged = path.join(first.bundle, "bootstrap", "recovery-runner.cjs");
+  fs.writeFileSync(damaged, "damaged previous bundle");
+  failCheck = true;
+  assert.equal(installRecovery(options).ok, false);
+  assert.deepEqual(fs.readFileSync(path.join(homeDir, ".relay", "recovery", "current.json")), pointer);
+  assert.deepEqual(fs.readFileSync(first.launcher), launcher);
+  assert.equal(registered, true);
+  failCheck = false;
+  const repaired = installRecovery(options);
+  assert.equal(repaired.ok, true, repaired.detail);
+  assert.notEqual(repaired.bundle, first.bundle);
+  assert.equal(fs.readFileSync(damaged, "utf8"), "damaged previous bundle", "published bundles are never rewritten in place");
+  assert.equal(calls.filter(call => call[1] === "bootstrap").length, 1);
+  assert.deepEqual(fs.readFileSync(first.launcher), launcher);
+  assert.ok(!fs.readdirSync(path.dirname(first.bundle)).some(name => name.startsWith(".pending-")));
+});
+
+test("an uncertain Mac watchdog query never unloads or bootstraps a possibly live job", t => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-watchdog-query-"));
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  const result = installRecovery({ homeDir, platform: "darwin", preserveNode: () => process.execPath,
+    packageRoot: fileURLToPath(new URL("..", import.meta.url)),
+    runCommand: (command, args) => {
+      if (command === "launchctl") { assert.equal(args[0], "print"); return { error: Error("ETIMEDOUT") }; }
+      return { status: 0 };
+    } });
+  assert.equal(result.ok, false); assert.equal(result.detail, "recovery-registration-query-failed");
+});
+
+test("installer process death during bundle preparation leaves the prior launch path usable", t => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-watchdog-crash-"));
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  const packageRoot = fileURLToPath(new URL("..", import.meta.url));
+  const options = { homeDir, packageRoot, platform: "darwin", preserveNode: () => process.execPath, runCommand: () => ({ status: 0 }) };
+  const first = installRecovery(options);
+  assert.equal(first.ok, true);
+  const root = path.join(homeDir, ".relay", "recovery"), pointer = fs.readFileSync(path.join(root, "current.json")), launcher = fs.readFileSync(first.launcher);
+  // A new release's source differs, forcing preparation of a new bundle.
+  const source = path.join(homeDir, "candidate");
+  fs.cpSync(path.join(packageRoot, "bootstrap"), path.join(source, "bootstrap"), { recursive: true });
+  fs.copyFileSync(path.join(packageRoot, "package.json"), path.join(source, "package.json"));
+  fs.appendFileSync(path.join(source, "bootstrap", "recovery-runner.cjs"), "\n// next release\n");
+  const child = spawnSync(process.execPath, ["-e", `
+    const {installRecovery}=require(${JSON.stringify(path.join(packageRoot, "bootstrap", "recovery-install.cjs"))});
+    installRecovery({homeDir:${JSON.stringify(homeDir)},packageRoot:${JSON.stringify(source)},platform:'darwin',preserveNode:()=>process.execPath,
+      runCommand:(_cmd,args)=>{if(args.includes('--self-check'))process.exit(19);return {status:0};}});
+  `], { windowsHide: true, timeout: 10000, encoding: "utf8" });
+  assert.equal(child.status, 19, child.stderr);
+  assert.deepEqual(fs.readFileSync(path.join(root, "current.json")), pointer);
+  assert.deepEqual(fs.readFileSync(first.launcher), launcher);
+  assert.equal(spawnSync(process.execPath, [path.join(first.bundle, "bootstrap", "recovery-runner.cjs"), "--self-check"], { windowsHide: true }).status, 0);
+  assert.equal(installRecovery({ ...options, packageRoot: source }).ok, true, "a later installation can finish after the crash");
+});
+
 test("Windows recovery task registers from XML that starts and keeps running on battery", t => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-recovery-battery-"));
   t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));

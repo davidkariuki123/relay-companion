@@ -108,12 +108,17 @@ function relayOwnedNodePath(executable, {
   try {
     fsImpl.mkdirSync(directory, { recursive: true, mode: 0o700 });
     fsImpl.chmodSync(directory, 0o700);
-    const temporary = api.join(directory, `.node-${process.pid}-${randomBytes(6).toString("hex")}`);
+    const temporary = api.join(directory, `.node-${process.pid}-${randomBytes(6).toString("hex")}${platform === "win32" ? ".exe" : ""}`);
     try {
       fsImpl.writeFileSync(temporary, fsImpl.readFileSync(source), { mode: 0o700, flag: "wx" });
       fsImpl.chmodSync(temporary, 0o700);
       if (fileDigest(temporary, fsImpl) !== digest) throw new Error("the copied executable failed its integrity check");
-      fsImpl.rmSync(destination, { force: true });
+      const checked = verifiedNodeVersion(temporary, { runCommand });
+      if (!checked.ok || checked.version !== sourceRuntime.version) throw new Error("owned Node runtime failed verification before publication");
+      const fd = fsImpl.openSync(temporary, "r+");
+      try { fsImpl.fsyncSync(fd); } finally { fsImpl.closeSync(fd); }
+      // Keep the old path until replacement is complete. An interrupted repair
+      // must never erase the interpreter used by the independent watchdog.
       fsImpl.renameSync(temporary, destination);
     } finally {
       try { fsImpl.rmSync(temporary, { force: true }); } catch {}
@@ -125,7 +130,8 @@ function relayOwnedNodePath(executable, {
 
   const installedRuntime = verifiedNodeVersion(destination, { runCommand });
   if (!installedRuntime.ok || installedRuntime.version !== sourceRuntime.version) {
-    try { fsImpl.rmSync(destination, { force: true }); } catch {}
+    // A transient execution failure is not permission to remove a scheduler's
+    // executable. Its bytes already passed validation before atomic publication.
     throw new Error(`Relay's owned Node runtime failed verification (${installedRuntime.detail || installedRuntime.version || destination}).`);
   }
   return destination;

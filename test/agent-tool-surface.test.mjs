@@ -35,6 +35,7 @@ const cases = {
   relay_group_update: [{ groupId: 'grp_test', name: 'Renamed' }, 'renameGroup'],
   relay_group_delete: [{ groupId: 'grp_test' }, 'deleteGroup'],
   relay_contact_update: [{ contactId: 'con_test', firstName: 'Test', idempotencyKey: key }, 'updateContact'],
+  relay_session_updates: [{}, null],
   relay_inbox_list: [{}, 'inbox'],
   relay_sent_list: [{}, 'sent'],
   relay_thread_fetch: [{ threadId: 'relay_test' }, 'thread'],
@@ -69,7 +70,8 @@ test('every current MCP capability is discoverable and reaches its canonical han
     calls.length = 0;
     const result = await api.call(name, args, caller);
     assert.notEqual(result.isError, true, `${name}: ${JSON.stringify(result)}`);
-    assert.ok(calls.some(c => c.method === expectedMethod), `${name} must invoke ${expectedMethod}`);
+    // The event board reads local snapshots, never the API.
+    if (expectedMethod) assert.ok(calls.some(c => c.method === expectedMethod), `${name} must invoke ${expectedMethod}`);
   }
 });
 

@@ -6,6 +6,8 @@ import path from "node:path";
 import context from "../src/agent-relay-context.cjs";
 
 const {
+  readAgentTopicIndex,
+  recordAgentTopicIndex,
   CONTEXT_MAX_ITEMS,
   INDEX_MAX_ITEMS,
   claimAgentRelayHookContext,
@@ -183,6 +185,18 @@ test("untitled relays render as full-text message records, titled ones as title 
   assert.match(claim.text, /"title":"Untitled Relay","relayId":"relay_bare"/, "no text at all falls back safely");
   assert.match(claim.text, /A record with "message" is a typed text shown in full/);
   assert.match(claim.text, /never call relay_inbox_list just to read one/);
+});
+
+test("the MCP process can read the daemon topic snapshot for a session with no hook", () => {
+  const home = tempHome();
+  const scope = "topic-index-account";
+  assert.deepEqual(readAgentTopicIndex(home, scope), []);
+  recordAgentTopicIndex(home, scope, { topics: [
+    { id: "tpc_dev", name: "Dev work and deploys", mandate: "Deploys.", mandateVersion: 1, postCount: 2, latestPostAt: "2026-09-10T19:00:00.000Z", membership: { state: "active", mandateCurrent: true } },
+    { id: "tpc_old", name: "Declined", mandate: "x", mandateVersion: 1, postCount: 0, membership: { state: "declined", mandateCurrent: false } },
+  ] });
+  const topics = readAgentTopicIndex(home, scope);
+  assert.deepEqual(topics.map((topic) => [topic.topicId, topic.standing, topic.postCount]), [["tpc_dev", "current", 2]]);
 });
 
 test("first prompt before a snapshot initializes cursor zero so a later Relay is NEW", () => {

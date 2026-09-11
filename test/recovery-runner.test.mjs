@@ -5,7 +5,15 @@ import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
-const { recover, discover, busyLease, busyDecision, BUSY_GRACE_MS, compare, write, execute } = require("../bootstrap/recovery-runner.cjs");
+const { recover: recoverImpl, discover, busyLease, busyDecision, BUSY_GRACE_MS, compare, write, execute } = require("../bootstrap/recovery-runner.cjs");
+// These routing tests inject readiness; sustained sampling is tested separately.
+const recover = options => recoverImpl({ repairServices: async () => ({ ok: true, changed: false }),
+  validateLocal: target => fs.existsSync(path.join(target.packageRoot, "src", "recovery-entry.js")),
+  verifyReady: async ({ homeDir, target, after, now, health, platform }) => {
+    const current = JSON.parse(fs.readFileSync(path.join(homeDir, ".relay", "runtime", "current.json")));
+    let beat; try { beat = JSON.parse(fs.readFileSync(path.join(homeDir, ".relay", "recovery", "daemon.json"))); } catch {}
+    return { ok: !!(current.active && (!target || current.version === target.version) && beat?.version === current.version && beat.at >= after && beat.at <= now() && now() - beat.at < 60000 && (await health(current, { platform })).ok), current };
+  }, ...options });
 const { exactRuntimeHealth } = require("../bootstrap/runtime-health.cjs");
 function fixture(t) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "relay-recovery-test-"));
@@ -177,10 +185,24 @@ test("a dead daemon is restarted without waiting for a second observation", asyn
     memory: () => ({ pressured: false }), health: () => ({ ok: false, daemonCount: 0 }), restart: async () => { restarts++; return { ok: false, reason: "service-start-failed" }; } });
   assert.equal(restarts, 1); assert.equal(result.status, "restart-failed"); assert.equal(result.restarts, 1); assert.equal(result.lastError, "service-start-failed");
 });
+
+test("a newer desired version cannot bypass repair of the installed runtime", async t => {
+  const homeDir = fixture(t); installed(homeDir);
+  let restarted = false;
+  const result = await recover({ homeDir, env: {}, now: () => 1000, discoverImpl: async () => "1.0.1",
+    stage: () => assert.fail("repair must precede download"), memory: () => ({ pressured: true }),
+    health: () => ({ ok: false, daemonCount: 0 }), restart: async target => {
+      assert.equal(target.version, "1.0.0"); restarted = true; return { ok: false, reason: "test-stop" };
+    } });
+  assert.equal(restarted, true); assert.equal(result.status, "restart-failed");
+});
 test("after the restart budget is spent the release already on disk is re-activated; the download rung waits for memory", async t => {
   const homeDir = fixture(t);
   const packageRoot = installed(homeDir);
   write(path.join(homeDir, ".relay", "recovery", "status.json"), { version: "1.0.0", desiredVersion: "1.0.0", status: "restart-failed", restarts: MAX_IN_PLACE_RESTARTS, staleSince: 0 });
+  const progress = require("../bootstrap/recovery-progress.cjs").repairProgress(homeDir);
+  const target = JSON.parse(fs.readFileSync(path.join(homeDir, ".relay", "runtime", "current.json")));
+  for (let i = 0; i < MAX_IN_PLACE_RESTARTS; i++) progress.claim(`restart:${target.packageRoot}`, MAX_IN_PLACE_RESTARTS);
   const ran = [];
   const clock = 50_000;
   let reactivated = false;
@@ -190,10 +212,7 @@ test("after the restart budget is spent the release already on disk is re-activa
       ran.push({ entry, args }); reactivated = true;
       write(path.join(homeDir, ".relay", "recovery", "daemon.json"), { version: "1.0.0", at: clock });
     } };
-  // Under memory pressure neither re-activation nor download runs.
-  const deferred = await recover({ ...opts, memory: () => ({ pressured: true, freeMB: 40 }) });
-  assert.equal(deferred.status, "deferred-memory-pressure"); assert.deepEqual(ran, []);
-  const result = await recover({ ...opts, memory: () => ({ pressured: false }) });
+  const result = await recover({ ...opts, memory: () => ({ pressured: true, freeMB: 40 }) });
   assert.equal(result.status, "current"); assert.equal(result.repair, "reactivate");
   assert.equal(ran.length, 1); assert.equal(ran[0].entry, path.join(packageRoot, "src", "recovery-entry.js")); assert.deepEqual(ran[0].args, ["1.0.0", "stable"]);
 });
@@ -201,6 +220,9 @@ test("a failed re-activation falls through to the download rung, and memory pres
   const homeDir = fixture(t);
   installed(homeDir);
   write(path.join(homeDir, ".relay", "recovery", "status.json"), { version: "1.0.0", desiredVersion: "1.0.0", status: "restart-failed", restarts: MAX_IN_PLACE_RESTARTS, staleSince: 0 });
+  const progress = require("../bootstrap/recovery-progress.cjs").repairProgress(homeDir);
+  const target = JSON.parse(fs.readFileSync(path.join(homeDir, ".relay", "runtime", "current.json")));
+  for (let i = 0; i < MAX_IN_PLACE_RESTARTS; i++) progress.claim(`restart:${target.packageRoot}`, MAX_IN_PLACE_RESTARTS);
   let staged = false;
   const result = await recover({ homeDir, env: {}, now: () => 9000, discoverImpl: async () => "1.0.0", memory: () => ({ pressured: false }), sleep: async () => {},
     restart: () => assert.fail("restart budget is spent"), health: () => ({ ok: false, daemonCount: 0 }), run: async () => { throw Error("worker-exit-1"); },

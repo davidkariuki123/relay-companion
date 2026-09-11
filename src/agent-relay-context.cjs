@@ -287,6 +287,19 @@ function recordAgentTopicIndex(homeDir, accountScope, response, { nowMs = Date.n
   return { changed: true, snapshot };
 }
 
+/**
+ * The person's subscribed topics as the daemon last recorded them, for a
+ * session that has no hook to deliver the topic block (the MCP process reads
+ * this once at startup). Empty when nothing was recorded.
+ */
+function readAgentTopicIndex(homeDir, accountScope) {
+  const snapshot = readJson(topicsPath(homeDir, accountScope), null);
+  // Records were cleaned by recordAgentTopicIndex when written; only their
+  // shape is checked here.
+  return (Array.isArray(snapshot?.topics) ? snapshot.topics : []).filter((topic) =>
+    /^tpc_[0-9A-Za-z_-]+$/.test(String(topic?.topicId || "")) && ["current", "invited", "paused"].includes(topic?.standing));
+}
+
 function escapeRecord(payload) {
   return JSON.stringify(payload).replace(/[<>&]/g, (character) => ({
     "<": "\\u003c",
@@ -551,6 +564,7 @@ module.exports = {
   claimAgentRelayHookContext,
   normalizeMetadata,
   recordAgentRelayIndex,
+  readAgentTopicIndex,
   recordAgentTopicIndex,
   snapshotPath,
   topicsPath,

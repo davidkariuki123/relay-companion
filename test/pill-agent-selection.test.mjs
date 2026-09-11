@@ -44,6 +44,9 @@ test("independent switches round trip both, one, none and back on", () => {
   const h = harness();
   assert.deepEqual(h.agentAppSelection(), ["Claude Code", "Codex"]);
   assert.deepEqual(h.agentAppHosts(), ["codex", "claude"]);
+  assert.equal(h.otherAgentEnabled(), true);
+  assert.equal((h.yourAgentHtml().match(/aria-checked="true"/g) || []).length, 3);
+  h.setOtherAgentEnabled(false);
   h.setAgentAppEnabled("Codex", false);
   assert.deepEqual(h.agentAppSelection(), ["Claude Code"]);
   h.setAgentAppEnabled("Claude Code", false);
@@ -56,6 +59,7 @@ test("independent switches round trip both, one, none and back on", () => {
   assert.deepEqual(h.agentAppSelection(), ["Claude Code", "Codex"]);
   const restored = harness({ saved: Object.fromEntries(h.store) });
   assert.deepEqual(restored.agentAppSelection(), ["Claude Code", "Codex"]);
+  assert.equal(restored.otherAgentEnabled(), false, "explicit Other opt-out survives a reload");
   h.saveAgentApps([]);
   assert.deepEqual(h.agentAppHosts(), []);
 });
@@ -103,6 +107,7 @@ test("both enabled desktop providers render separate actions without automatical
   assert.equal((footer.match(/data-host-open=/g) || []).length, 2);
   assert.match(footer, /Open in Codex/);
   assert.match(footer, /Open in Claude Code/);
+  assert.match(footer, /Copy this prompt for your agent/);
   h.setAgentAppEnabled("Claude Code", false);
   assert.doesNotMatch(h.relayHostActionsHtml({ id: "relay-test" }), /Open in Claude Code/);
   h.saveAgentApps([]);
@@ -141,7 +146,7 @@ test("Other stays independent, account scoped, and controls the full matching pr
   h.setOtherAgentEnabled(false);
   assert.equal(h.relayHostActionsHtml({ id:"relay-test" }), "");
   h.switchAccount("account-b");
-  h.setOtherAgentEnabled(true);
+  assert.equal(h.otherAgentEnabled(), true, "another account starts with Other enabled");
   h.switchAccount("account-a");
   assert.equal(h.otherAgentEnabled(), false);
   assert.doesNotMatch(h.yourAgentHtml(), /My own session|Use this one|Chosen/);

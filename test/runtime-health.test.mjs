@@ -5,15 +5,30 @@ const require = createRequire(import.meta.url);
 const health = require("../bootstrap/runtime-health.cjs");
 
 test("memory pressure trips on a small absolute reserve or a small share of the machine", () => {
-  assert.equal(health.memoryPressure({ freeBytes: 11 * 1024 * 1024, totalBytes: 16e9 }).pressured, true);
-  assert.equal(health.memoryPressure({ freeBytes: 700 * 1024 * 1024, totalBytes: 16e9 }).pressured, true);
-  assert.equal(health.memoryPressure({ freeBytes: 3.6e9, totalBytes: 16e9 }).pressured, false);
+  const pressure = options => health.memoryPressure({ platform: "win32", ...options });
+  assert.equal(pressure({ freeBytes: 11 * 1024 * 1024, totalBytes: 16e9 }).pressured, true);
+  assert.equal(pressure({ freeBytes: 700 * 1024 * 1024, totalBytes: 16e9 }).pressured, true);
+  assert.equal(pressure({ freeBytes: 3.6e9, totalBytes: 16e9 }).pressured, false);
   // 1 GB free on a 64 GB machine is under 5%: still pressure for a 245 MB extraction.
-  assert.equal(health.memoryPressure({ freeBytes: 1e9, totalBytes: 64e9 }).pressured, true);
-  const unknown = health.memoryPressure({ freeBytes: NaN, totalBytes: 0 });
+  assert.equal(pressure({ freeBytes: 1e9, totalBytes: 64e9 }).pressured, true);
+  const unknown = pressure({ freeBytes: NaN, totalBytes: 0 });
   assert.equal(unknown.pressured, false);
   assert.equal(unknown.freeMB, null);
   assert.equal(typeof health.memoryPressure().pressured, "boolean");
+});
+
+test("macOS uses dispatch pressure flags, not free pages or XNU's internal enum", () => {
+  for (const [output, expected] of [["1\n", "normal"], ["2", "warning"], ["4", "critical"], ["0", "unknown"], ["", "unknown"]]) {
+    const result = health.memoryPressure({ platform: "darwin", freeBytes: 166 * 1048576, totalBytes: 16e9,
+      run: (command, args) => {
+        assert.equal(command, "/usr/sbin/sysctl"); assert.deepEqual(args, ["-n", "kern.memorystatus_vm_pressure_level"]);
+        return { status: 0, stdout: output };
+      } });
+    assert.equal(result.level, expected);
+    assert.equal(result.pressured, ["warning", "critical"].includes(expected));
+  }
+  const unavailable = health.memoryPressure({ platform: "darwin", run: () => { throw Error("timeout"); } });
+  assert.equal(unavailable.level, "unknown"); assert.equal(unavailable.pressured, false);
 });
 
 test("the Windows in-place restart stops only installed services, runs both tasks, and proves the exact root came back", async () => {

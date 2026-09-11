@@ -189,6 +189,8 @@ async function activateMacRuntimeServices(target, {
   const agents = path.posix.join(String(homeDir || ""), "Library", "LaunchAgents");
   const labels = [PILL_LABEL, DAEMON_LABEL];
   const deadline = now() + Math.max(1, activationDeadlineMs);
+  const preflight = installedServiceProcessRows(target, { run, includeTarget: true, processId });
+  if (!preflight.ok) return { ...preflight, unchanged: true };
   for (const label of labels) run("/bin/launchctl", ["bootout", `${domain}/${label}`]);
 
   // launchctl bootout is asynchronous. Keep quiescence, bootstrap, and liveness
@@ -303,6 +305,8 @@ async function activateLinuxRuntimeServices(target, {
 const MEMORY_PRESSURE_MIN_FREE_BYTES = 768 * 1024 * 1024;
 const MEMORY_PRESSURE_MIN_FREE_RATIO = 0.05;
 function memoryPressure({
+  platform = process.platform,
+  run = defaultRun,
   freeBytes = os.freemem(),
   totalBytes = os.totalmem(),
   minFreeBytes = MEMORY_PRESSURE_MIN_FREE_BYTES,
@@ -311,6 +315,17 @@ function memoryPressure({
   const free = Number(freeBytes);
   const total = Number(totalBytes);
   const known = Number.isFinite(free) && Number.isFinite(total) && total > 0;
+  if (platform === "darwin") {
+    // XNU exports dispatch flags here (1 normal, 2 warning, 4 critical),
+    // NOT its internal 0..3 pressure enum. Never infer pressure from free pages.
+    // bsd/kern/kern_memorystatus_notify.c: sysctl_memorystatus_vm_pressure_level.
+    let result;
+    try { result = run("/usr/sbin/sysctl", ["-n", "kern.memorystatus_vm_pressure_level"], { timeout: 3000 }); } catch {}
+    const value = commandOk(result) ? String(result.stdout || "").trim() : "";
+    const level = ({ "1": "normal", "2": "warning", "4": "critical" })[value] || "unknown";
+    return { pressured: level === "warning" || level === "critical", level, source: "macos-memory-pressure",
+      freeBytes: known ? free : null, totalBytes: known ? total : null, freeMB: known ? Math.round(free / 1048576) : null };
+  }
   const pressured = known && (free < minFreeBytes || free / total < minFreeRatio);
   return {
     pressured,
@@ -380,7 +395,7 @@ async function activateWindowsRuntimeServices(target, {
 
 /** One entry point for "restart what is already installed" on every platform. */
 function restartInstalledRuntimeServices(target, { platform = process.platform, ...options } = {}) {
-  if (platform === "darwin") return activateMacRuntimeServices(target, { platform, ...options });
+  if (platform === "darwin") return require("./mac-service-recovery.cjs").restartMacRegisteredServices(target, options);
   if (platform === "linux") return activateLinuxRuntimeServices(target, { platform, ...options });
   if (platform === "win32") return activateWindowsRuntimeServices(target, { platform, ...options });
   return Promise.resolve({ ok: false, reason: "activation-platform-unsupported" });

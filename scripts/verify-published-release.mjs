@@ -179,7 +179,22 @@ export function validateInstalledPackageShape(packageRoot, { version, distributi
     const recoveryBootstrap = [...legacyBootstrap, "installation-health.cjs", "recovery-install.cjs", "recovery-runner.cjs", "update-activity.cjs", "update-watchdog.cjs"].sort();
     const resilientBootstrap = [...recoveryBootstrap, "recovery-launcher.cjs"].sort();
     const monitoredBootstrap = [...resilientBootstrap, "recovery-monitor.cjs"].sort();
-    if (![legacyBootstrap, recoveryBootstrap, resilientBootstrap, monitoredBootstrap].some(shape => JSON.stringify(bootstrapFiles) === JSON.stringify(shape))) {
+    // Mac service recovery (2026-09-11): durable registration/activation
+    // transactions, power assertion, readiness and progress records, and the
+    // runtime-tree helper. Reviewed: each requires only node builtins and
+    // sibling bootstrap files.
+    const macRecoveryBootstrap = [
+      ...monitoredBootstrap,
+      "mac-activation-transaction.cjs",
+      "mac-power-assertion.cjs",
+      "mac-registration-transaction.cjs",
+      "mac-service-recovery.cjs",
+      "recovery-local.cjs",
+      "recovery-progress.cjs",
+      "recovery-readiness.cjs",
+      "runtime-tree.cjs",
+    ].sort();
+    if (![legacyBootstrap, recoveryBootstrap, resilientBootstrap, monitoredBootstrap, macRecoveryBootstrap].some(shape => JSON.stringify(bootstrapFiles) === JSON.stringify(shape))) {
       throw new Error("Thin installer bootstrap contents do not match the reviewed shape");
     }
     const manifest = JSON.parse(fs.readFileSync(path.join(packageRoot, "skill", "manifest.json"), "utf8"));

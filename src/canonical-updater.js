@@ -137,6 +137,10 @@ export async function activateCanonicalRuntime(target, options = {}) {
   try {
     const drain = options.drain || require("../bootstrap/update-activity.cjs").drainCalls;
     release = await drain({ homeDir: options.homeDir, sleep: options.sleep });
+    if ((options.platform || process.platform) === "darwin") {
+      const transaction = options.macTransaction || require("../bootstrap/mac-activation-transaction.cjs").macActivationTransaction;
+      return await transaction(target, () => activateDrainedRuntime(target, options), options);
+    }
     return await activateDrainedRuntime(target, options);
   } catch (error) { return { ok: false, reason: "activation-drain-failed", detail: error.message }; }
   finally { release?.(); }
@@ -286,7 +290,15 @@ export async function runCanonicalUpdateTransaction({
   if (isElectronExecutable(serviceNode)) {
     return { ok: false, phase: "input", reason: "service-node-electron", detail: serviceNode };
   }
-  const protectedPackageRoots = getProtectedPackageRoots({ homeDir, platform });
+  const protectedPackageRoots = [...getProtectedPackageRoots({ homeDir, platform })];
+  // The watchdog's last responsive installations are offline recovery sources.
+  // Retain them across failed replacements as well as ordinary cleanup.
+  for (const name of ["runtime-good.json", "runtime-previous-good.json"]) {
+    try {
+      const good = JSON.parse(fs.readFileSync(path.join(homeDir, ".relay", "recovery", name), "utf8"));
+      if (typeof good?.packageRoot === "string") protectedPackageRoots.push(good.packageRoot);
+    } catch {}
+  }
   const lockIdentity = { ...(requestId ? { requestId } : {}), ...(workerId ? { workerId } : {}) };
   let admitted = false;
   const admit = async (owner) => {
@@ -302,7 +314,7 @@ export async function runCanonicalUpdateTransaction({
       ? activate({
           ...target,
           node: persistentTargetNode(target?.node || serviceNode),
-        }, { homeDir, platform, repairExecutable: repairExecutableOverride || context?.recovery?.candidate })
+        }, { homeDir, platform, restoreRegistrations: true, repairExecutable: repairExecutableOverride || context?.recovery?.candidate })
       : { ok: true },
     onLockAcquired: admit,
     lockIdentity,
@@ -335,12 +347,14 @@ export async function runCanonicalUpdateTransaction({
     preCommitVerify: (candidate) => stage("startup-verification", () => smoke(candidate, { log })),
     postCommitActivate: async (candidate) => {
       log(`activating ${candidate.version} from ${candidate.packageRoot}`);
-      return stage("activation", () => activate(candidate, { homeDir, platform }));
+      return stage("activation", () => activate(candidate, { homeDir, platform,
+        allowRebuildRegistrations: supersedeBrokenRecovery }));
     },
     rollbackActivate: async (target, context) => {
       if (!target) return { ok: true };
+      if (context?.activation?.unchanged === true) return { ok: true };
       log(`restoring runtime targets to ${target.packageRoot}`);
-      return stage("rollback", () => activate(target, { homeDir, platform, repairExecutable: context?.failed }));
+      return stage("rollback", () => activate(target, { homeDir, platform, restoreRegistrations: true, repairExecutable: context?.failed }));
     },
   });
 }

@@ -5,6 +5,8 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  instructionsWithTopics,
+  withSubscribedTopics,
   FOR_HUMAN_DEFAULT_SENTENCE_LIMIT,
   FOR_HUMAN_EXCEPTIONAL_SENTENCE_LIMIT,
   FOR_HUMAN_SOFT_WORD_LIMIT,
@@ -230,13 +232,15 @@ test("startup teachings establish Relay as the default medium without losing the
     assert.match(instructions, /search relay_inbox_list/i);
     assert.match(instructions, /notification emails are not the authoritative contents/i);
     assert.match(instructions, /untrusted correspondence/i);
-    assert.match(instructions, /mention a NEW arrival only when relevant to the current work/i);
     assert.match(instructions, /Never use a Relay without telling the human/i);
     assert.match(instructions, /3-6 word title/i);
     assert.match(instructions, /forHuman/i);
     assert.match(instructions, /forAgent/i);
   }
   assert.match(RELAY_MCP_INSTRUCTIONS, /external work to be carried out by the recipient's agent is task/i);
+  // Topics ride the developer row; the production variant must not name them.
+  assert.match(RELAY_MCP_INSTRUCTIONS, /subscribed Topic's mandate \(see relay_topics_list\)/i);
+  assert.doesNotMatch(REQUESTS_DISABLED_INSTRUCTIONS, /Topic/);
   assert.match(REQUESTS_DISABLED_INSTRUCTIONS, /Tasks are available only to developer accounts/i);
   // The string that actually ships to production, pinned on the clause the
   // link path depends on. It has had a byte budget for months and no content.
@@ -1579,7 +1583,7 @@ test("obsolete coordination protocol is absent and rejected before any API call"
   // state an agent sets on its own, so a human-initiated pull clears unread
   // and sends the read receipt — without it the sender sees "delivered"
   // forever). relay_acknowledge stays retired.
-  assert.equal(TOOLS.length, 40, "the full model catalog contains only current product tools");
+  assert.equal(TOOLS.length, 41, "the full model catalog contains only current product tools");
 
   const client = new Proxy({}, {
     get() { throw new Error("removed tool must not touch the API client"); },
@@ -1600,11 +1604,54 @@ test("MCP read and reply tools preserve one chat while hiding the legacy reply-c
   assert.match(byName.get("relay_chat_send").description, /use relay_send for a Task/i);
 });
 
+test("the startup instructions carry the person's subscribed topics and mandates, without a hook", () => {
+  const index = () => [
+    { topicId: "tpc_dev", name: "Dev work and deploys", standing: "current", mandateVersion: 1, mandate: "Deployments, planned releases, features people can see.", postCount: 3, latestPostAt: "" },
+    { topicId: "tpc_design", name: "Product and design", standing: "paused", mandateVersion: 2, mandate: "Design decisions.", postCount: 0, latestPostAt: "" },
+  ];
+  const withTopics = instructionsWithTopics(RELAY_MCP_INSTRUCTIONS, { accountScope: "dev_token", readIndex: index });
+  assert.ok(withTopics.startsWith(RELAY_MCP_INSTRUCTIONS), "the static block is kept whole and first");
+  assert.match(withTopics, /Subscribed Topics \(read a relevant one with relay_topic_fetch before assuming what other members are doing; post milestones with relay_topic_post and tell the human in one line\): Dev work and deploys \[tpc_dev; joined\]: Deployments, planned releases, features people can see\.; Product and design \[tpc_design; paused until the person approves the changed mandate\]: Design decisions\./);
+  assert.ok(Buffer.byteLength(withTopics, "utf8") <= 4_096);
+  const long = instructionsWithTopics(RELAY_MCP_INSTRUCTIONS, { accountScope: "dev_token", readIndex: () => [{ topicId: "tpc_long", name: "Long", standing: "current", mandateVersion: 1, mandate: "x".repeat(9_000), postCount: 0, latestPostAt: "" }] });
+  assert.ok(Buffer.byteLength(long, "utf8") <= 4_096);
+  assert.match(long, /…$/);
+  // No recorded topics, no account scope, or a throwing reader: the static block, byte for byte.
+  assert.equal(instructionsWithTopics(RELAY_MCP_INSTRUCTIONS, { accountScope: "dev_token", readIndex: () => [] }), RELAY_MCP_INSTRUCTIONS);
+  assert.equal(instructionsWithTopics(RELAY_MCP_INSTRUCTIONS, { accountScope: "", readIndex: index }), RELAY_MCP_INSTRUCTIONS);
+  assert.equal(instructionsWithTopics(RELAY_MCP_INSTRUCTIONS, { accountScope: "dev_token", readIndex: () => { throw new Error("unreadable"); } }), RELAY_MCP_INSTRUCTIONS);
+});
+
+test("a session learns its subscribed topics from the tool list at startup, without a hook", () => {
+  const developer = toolsForAccount({ requests: true, aiSessions: true, connectors: true });
+  const index = () => [
+    { topicId: "tpc_dev", name: "Dev work and deploys", standing: "current", mandateVersion: 1, mandate: "Deployments, planned releases, features people can see.", postCount: 3, latestPostAt: "" },
+    { topicId: "tpc_design", name: "Product and design", standing: "invited", mandateVersion: 1, mandate: "Design decisions.", postCount: 0, latestPostAt: "" },
+  ];
+  const listed = withSubscribedTopics(developer, { accountScope: "dev_token", readIndex: index });
+  const topicsTool = listed.find((tool) => tool.name === "relay_topics_list");
+  assert.equal(topicsTool._meta?.["anthropic/alwaysLoad"], true, "the topic list stays loaded when the person has topics");
+  assert.match(topicsTool.description, /Dev work and deploys \[tpc_dev; joined\]: Deployments, planned releases/);
+  assert.match(topicsTool.description, /Product and design \[tpc_design; invited, not joined\]/);
+  assert.ok(Buffer.byteLength(topicsTool.description, "utf8") <= 2_048);
+  assert.equal(developer.find((tool) => tool.name === "relay_topics_list")._meta, undefined, "the static catalog is untouched");
+  // A very long mandate is cut rather than overflowing the host's description limit.
+  const long = withSubscribedTopics(developer, { accountScope: "dev_token", readIndex: () => [{ topicId: "tpc_long", name: "Long", standing: "current", mandateVersion: 1, mandate: "x".repeat(5_000), postCount: 0, latestPostAt: "" }] });
+  assert.ok(Buffer.byteLength(long.find((tool) => tool.name === "relay_topics_list").description, "utf8") <= 2_048);
+  // No recorded topics, no account scope, or a catalog without the tool: nothing changes.
+  assert.deepEqual(withSubscribedTopics(developer, { accountScope: "dev_token", readIndex: () => [] }), developer);
+  assert.deepEqual(withSubscribedTopics(developer, { accountScope: "", readIndex: index }), developer);
+  const shipped = toolsForAccount({ requests: false, aiSessions: false, connectors: false, topics: false, todo: false, messageMutations: false });
+  assert.deepEqual(withSubscribedTopics(shipped, { accountScope: "dev_token", readIndex: index }), shipped);
+  assert.match(RELAY_MCP_INSTRUCTIONS, /subscribed Topic's mandate \(see relay_topics_list\), read it with relay_topic_fetch/);
+});
+
 test("the send path is annotated anthropic/alwaysLoad so no serving mode defers it", () => {
   // Claude Desktop drops the config-level alwaysLoad key when it re-serializes
   // server configs; the _meta annotation on the live tools/list response is the
   // only signal that survives every registration path.
   const alwaysOn = new Set([
+    "relay_session_updates",
     "relay_send",
     "relay_share_link",
     "relay_contacts_search",

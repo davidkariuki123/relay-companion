@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 import test from "node:test";
+import { spawnSync } from "node:child_process";
 import { stableNodePath } from "../src/install.js";
 
 const require = createRequire(import.meta.url);
@@ -80,7 +81,9 @@ test("temporary Node is copied, integrity checked, executed, and reused from Rel
   const digest = crypto.createHash("sha256").update(bytes).digest("hex");
   assert.equal(owned, path.win32.join(runtimeRoot, "node", digest, "node.exe"));
   assert.deepEqual(fs.readFileSync(owned), bytes);
-  assert.deepEqual(calls, [fs.realpathSync(source), owned]);
+  assert.equal(calls[0], fs.realpathSync(source));
+  assert.match(calls[1], /\.node-.*\.exe$/);
+  assert.equal(calls[2], owned);
 
   calls.length = 0;
   assert.equal(relayOwnedNodePath(source, options), owned);
@@ -104,7 +107,7 @@ test("a corrupt owned copy is replaced from the verified temporary source", (t) 
   assert.deepEqual(fs.readFileSync(owned), bytes);
 });
 
-test("an owned copy that cannot execute is deleted and setup fails visibly", (t) => {
+test("an owned copy that cannot execute is rejected before publication", (t) => {
   const root = tempRoot(t);
   const source = path.join(root, "temporary-node.exe");
   fs.writeFileSync(source, "node-binary");
@@ -120,6 +123,27 @@ test("an owned copy that cannot execute is deleted and setup fails visibly", (t)
     },
   }), /owned Node runtime failed verification/);
   assert.equal(fs.existsSync(destination), false);
+});
+
+test("interrupted owned Node publication leaves its previous executable at the registered path", t => {
+  const root = tempRoot(t), source = path.join(root, "source-node.exe");
+  fs.writeFileSync(source, "stock node");
+  const options = { platform: "win32", runtimeRoot: path.join(root, "runtime"), isTemporary: () => true,
+    runCommand: () => ({ status: 0, stdout: "22.14.0" }) };
+  const owned = relayOwnedNodePath(source, options);
+  // Force a repair of the existing path, then interrupt its atomic publication.
+  fs.writeFileSync(owned, "previous bytes");
+  assert.throws(() => relayOwnedNodePath(source, { ...options,
+    fsImpl: { ...fs, renameSync: () => { throw Error("interrupted-before-rename"); } },
+  }), /interrupted-before-rename/);
+  assert.equal(fs.readFileSync(owned, "utf8"), "previous bytes");
+});
+
+test("the actual host Node executes before and after owned-runtime publication", t => {
+  const root = tempRoot(t);
+  const owned = relayOwnedNodePath(process.execPath, { runtimeRoot: root, isTemporary: () => true });
+  const result = spawnSync(owned, ["-p", "process.versions.node"], { windowsHide: true, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr); assert.equal(result.stdout.trim(), process.versions.node);
 });
 
 test("a durable Node path is returned without touching the filesystem", () => {

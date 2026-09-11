@@ -56,7 +56,7 @@ import {
 const { installedServiceProcessRows } = createRequire(import.meta.url)("../bootstrap/runtime-health.cjs");
 // Service registration fixtures use foreign OS paths; activity admission is
 // exercised separately with real temporary homes in update-activity.test.mjs.
-const activateCanonicalRuntime = (target, options) => activateWithDrain(target, { ...options, drain: async () => () => {} });
+const activateCanonicalRuntime = (target, options) => activateWithDrain(target, { macTransaction: async (_target, operation) => operation(), ...options, drain: async () => () => {} });
 
 // These cases create a POSIX runtime tree on the real host filesystem. They
 // remain active on macOS/Linux; Windows behavior is covered by injected-path
@@ -802,6 +802,7 @@ test("macOS activation fails closed when installed service processes cannot be e
   assert.equal(result.ok, false);
   assert.equal(result.reason, "service-process-query-failed");
   assert.equal(calls.some((call) => call[1] === "bootstrap"), false);
+  assert.equal(calls.some((call) => call[1] === "bootout"), false);
 });
 
 // A pill that left the launchd domain without exiting (or predates the labels)
