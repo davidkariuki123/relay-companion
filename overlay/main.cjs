@@ -10209,6 +10209,20 @@ if (!gotSingleInstanceLock) {
   app.on("activate", () => requestExternalReopen());
 
   app.whenReady().then(async () => {
+    if (process.env.RELAY_OVERLAY_TEST !== "1" && process.env.RELAY_OVERLAY_PERF !== "1") {
+      try {
+        const responder = await require("../bootstrap/recovery-probe.cjs").startRecoveryResponder({
+          role: "pill", packageRoot: path.resolve(__dirname, ".."), version: pillVersion(),
+          ready: async () => {
+            if (!rendererListening || !win || win.isDestroyed() || win.webContents.isDestroyed()) return false;
+            // This traverses Electron IPC and runs on the renderer's event loop;
+            // a living main process with a frozen UI cannot answer it.
+            return await win.webContents.executeJavaScript("document.readyState === 'complete'") === true;
+          },
+        });
+        app.once("will-quit", () => responder.stop());
+      } catch (error) { console.error("[overlay] local recovery responder unavailable:", error.message); }
+    }
     // The pill can be launched directly, without the always-on daemon or CLI
     // having run first. Upgrade durable Relay documents before the first
     // readRelays/buildPayload call so historical messages cannot paint blank.

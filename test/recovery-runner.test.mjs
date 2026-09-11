@@ -7,7 +7,8 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { recover: recoverImpl, discover, busyLease, busyDecision, BUSY_GRACE_MS, compare, write, execute } = require("../bootstrap/recovery-runner.cjs");
 // These routing tests inject readiness; sustained sampling is tested separately.
-const recover = options => recoverImpl({ repairServices: async () => ({ ok: true, changed: false }),
+const recover = options => recoverImpl({
+  policyFactory: () => ({ observe: () => ({ proven: true }), failure() {}, interrupt() {}, decision: () => ({ blocked: false }), emergency: () => ({ allowed: true }) }), repairServices: async () => ({ ok: true, changed: false }),
   validateLocal: target => fs.existsSync(path.join(target.packageRoot, "src", "recovery-entry.js")),
   verifyReady: async ({ homeDir, target, after, now, health, platform }) => {
     const current = JSON.parse(fs.readFileSync(path.join(homeDir, ".relay", "runtime", "current.json")));
@@ -216,7 +217,7 @@ test("after the restart budget is spent the release already on disk is re-activa
   assert.equal(result.status, "current"); assert.equal(result.repair, "reactivate");
   assert.equal(ran.length, 1); assert.equal(ran[0].entry, path.join(packageRoot, "src", "recovery-entry.js")); assert.deepEqual(ran[0].args, ["1.0.0", "stable"]);
 });
-test("a failed re-activation falls through to the download rung, and memory pressure defers a fresh install too", async t => {
+test("a failed re-activation reaches download and a dead installation can use emergency replacement under pressure", async t => {
   const homeDir = fixture(t);
   installed(homeDir);
   write(path.join(homeDir, ".relay", "recovery", "status.json"), { version: "1.0.0", desiredVersion: "1.0.0", status: "restart-failed", restarts: MAX_IN_PLACE_RESTARTS, staleSince: 0 });
@@ -229,8 +230,8 @@ test("a failed re-activation falls through to the download rung, and memory pres
     stage: async () => { staged = true; throw Error("test-stop"); } });
   assert.equal(staged, true); assert.equal(result.status, "failed"); assert.equal(result.lastError, "test-stop");
   const nothingInstalled = fixture(t);
-  const deferred = await recover({ homeDir: nothingInstalled, env: {}, discoverImpl: async () => "1.2.3", memory: () => ({ pressured: true, freeMB: 9 }), stage: () => assert.fail("no download under pressure") });
-  assert.equal(deferred.status, "deferred-memory-pressure");
+  const emergency = await recover({ homeDir: nothingInstalled, env: {}, discoverImpl: async () => "1.2.3", memory: () => ({ pressured: true, freeMB: 9 }), stage: () => { throw Error("emergency-download-reached"); } });
+  assert.equal(emergency.lastError, "emergency-download-reached");
 });
 test("abandoned staged downloads are swept once the next runner owns the lock; canonical releases are untouched", async t => {
   const homeDir = fixture(t);

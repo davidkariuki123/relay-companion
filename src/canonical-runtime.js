@@ -1,3 +1,4 @@
+import { nativeProcessIdentity, nativeIdentityBirth } from "../bootstrap/recovery-launcher.cjs";
 import { verifyCanonicalTreeComplete } from "../bootstrap/runtime-tree.cjs";
 import fs from "node:fs";
 import os from "node:os";
@@ -759,10 +760,10 @@ function canonicalLockOwnerState(owner, { processAlive, processIdentity }) {
   if (!Number.isInteger(pid) || pid <= 0) return "unknown";
   if (!processAlive(pid)) return "dead";
   const expectedIdentity = typeof owner?.processIdentity === "string" ? owner.processIdentity : "";
-  if (expectedIdentity) {
-    const actualIdentity = processIdentity(pid);
-    if (actualIdentity && actualIdentity !== expectedIdentity) return "dead";
-  }
+  const actualIdentity = processIdentity(pid);
+  if (expectedIdentity && actualIdentity && actualIdentity !== expectedIdentity) return "dead";
+  const born = nativeIdentityBirth(actualIdentity);
+  if (!expectedIdentity && born && owner.createdAt > 0 && born > owner.createdAt + 2000) return "dead";
   return "live";
 }
 
@@ -860,7 +861,7 @@ function acquireLock(lockPath, {
   statSync = fs.statSync,
   existsSync = fs.existsSync,
   processAlive: isProcessAlive = (pid) => processAlive(pid, { platform, readFileSync }),
-  processIdentity = (pid) => linuxProcessIdentity(pid, { platform, readFileSync }),
+  processIdentity = (pid) => nativeProcessIdentity(pid, { platform, readFileSync }),
   now = Date.now,
   ownerIdentity = {},
 } = {}) {

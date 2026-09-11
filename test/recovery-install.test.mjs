@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { installRecovery, uninstallRecovery, windowsRecoveryTaskXml, LABEL, TASK } from "../bootstrap/recovery-install.cjs";
@@ -54,6 +55,24 @@ test("an uncertain Mac watchdog query never unloads or bootstraps a possibly liv
       return { status: 0 };
     } });
   assert.equal(result.ok, false); assert.equal(result.detail, "recovery-registration-query-failed");
+});
+
+test("the probation host upgrade replaces a valid older launcher without unloading the watchdog", t => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-host-upgrade-"));
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  const options = { homeDir, platform: "darwin", packageRoot: fileURLToPath(new URL("..", import.meta.url)),
+    preserveNode: () => process.execPath, runCommand: (command, args) => {
+      if (command === "launchctl") assert.equal(args[0], "print");
+      return { status: 0 };
+    } };
+  const first = installRecovery(options);
+  assert.equal(first.ok, true);
+  const root = path.join(homeDir, ".relay", "recovery"), old = Buffer.from("// valid old launcher\n");
+  fs.writeFileSync(first.launcher, old);
+  fs.writeFileSync(path.join(root, "launcher-host.json"), JSON.stringify({ schema: 1, sha256: crypto.createHash("sha256").update(old).digest("hex") }));
+  assert.equal(installRecovery(options).ok, true);
+  assert.match(fs.readFileSync(first.launcher, "utf8"), /runtimeProven === true/);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root, "launcher-host.json"))).schema, 3);
 });
 
 test("installer process death during bundle preparation leaves the prior launch path usable", t => {

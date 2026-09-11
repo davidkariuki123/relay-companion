@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 import atomicJson from "./atomic-json.cjs";
+import recoveryConfig from "../bootstrap/recovery-config.cjs";
 
 const { atomicWriteJsonSync } = atomicJson;
 const { writeDeviceToken, readDeviceToken, deleteDeviceToken } = createRequire(import.meta.url)("./credential-store.cjs");
@@ -322,7 +323,13 @@ export function readConfig(options) {
  * Replace config.json with exactly `next` (no merge). This is the primitive that
  * lets sign-out REMOVE keys — writeConfig's patch merge can only add or overwrite.
  */
-export function writeConfigObject(
+export function writeConfigObject(next, options = {}) {
+  const lock = recoveryConfig.configLock(configPath());
+  try { return writeConfigObjectLocked(next, options); }
+  finally { lock.release(); }
+}
+
+function writeConfigObjectLocked(
   next,
   { credentialBackend = nativeCredentialBackend, requireNativeCredential = false, atomicWrite = atomicWriteJsonSync } = {},
 ) {
@@ -369,6 +376,9 @@ export function writeConfigObject(
     }
     throw error;
   }
+  // This contains only routing settings. A backup failure cannot roll back a
+  // successful credential commit; the next recovery tick will seed it again.
+  try { recoveryConfig.rememberConfig(file, cleaned); } catch {}
   if (storedNativeCredential) {
     cachedCredentialVersion = cleaned.credentialVersion;
     cachedDeviceToken = tokenForCache;

@@ -101,7 +101,7 @@ function installRecovery({ packageRoot, node = process.execPath, homeDir = os.ho
     // check. Merely passing the installation probe does not make it known-good.
     const priorStatus = read(path.join(root, "status.json"));
     if (current && !read(path.join(root, "known-good.json")) && current.version === priorStatus?.launcherVersion
-      && priorStatus.ok === true && priorStatus.runtimeHealthy === true && ["current", "ahead"].includes(priorStatus.status)
+      && priorStatus.ok === true && priorStatus.runtimeHealthy === true && priorStatus.runtimeProven === true && ["current", "ahead"].includes(priorStatus.status)
       && require("./recovery-launcher.cjs").validPointer(current, root)) {
       write(path.join(root, "known-good.json"), current);
     }
@@ -124,7 +124,7 @@ function installRecovery({ packageRoot, node = process.execPath, homeDir = os.ho
     // host protocol change must bump this schema to request an atomic upgrade.
     const host = read(hostFile);
     let hostIntact = false;
-    try { hostIntact = host?.schema === 1 && host.sha256 === crypto.createHash("sha256").update(fs.readFileSync(launcher)).digest("hex"); } catch {}
+    try { hostIntact = host?.schema === 3 && host.sha256 === crypto.createHash("sha256").update(fs.readFileSync(launcher)).digest("hex"); } catch {}
     if (!hostIntact || !ok(runCommand(launcherNode, ["--check", launcher]))) {
       const bytes = fs.readFileSync(path.join(source, "recovery-launcher.cjs"));
       const launcherTemp = path.join(root, 'launcher-' + crypto.randomUUID() + '.cjs');
@@ -132,7 +132,7 @@ function installRecovery({ packageRoot, node = process.execPath, homeDir = os.ho
         atomicFile(launcherTemp, bytes);
         if (!ok(runCommand(launcherNode, ["--check", launcherTemp]))) throw Error("recovery-launcher-verification-failed");
         atomicFile(launcher, bytes);
-        atomicFile(hostFile, JSON.stringify({ schema: 1, sha256: crypto.createHash("sha256").update(bytes).digest("hex") }));
+        atomicFile(hostFile, JSON.stringify({ schema: 3, sha256: crypto.createHash("sha256").update(bytes).digest("hex") }));
       } finally { fs.rmSync(launcherTemp, { force: true }); }
     }
     const log = path.join(root, "recovery.log");

@@ -7,6 +7,7 @@ const read = file => { try { return JSON.parse(fs.readFileSync(file, "utf8")); }
 async function waitForRecoveryReady({ homeDir = os.homedir(), platform = process.platform,
   target = null, after = 0, now = Date.now, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
   health = exactRuntimeHealth, inspect = registration, stableMs = 10_000, timeoutMs = 30_000,
+  probe = require("./recovery-probe.cjs").probeRuntime,
   readCurrent = () => read(path.join(homeDir, ".relay", "runtime", "current.json")),
   readHeartbeat = () => read(path.join(homeDir, ".relay", "recovery", "daemon.json")),
 } = {}) {
@@ -19,16 +20,20 @@ async function waitForRecoveryReady({ homeDir = os.homedir(), platform = process
       (current.version === target.version && (!target.packageRoot || target.packageRoot === current.packageRoot)))
       ? await health(current, { platform }) : null;
     const jobs = platform === "darwin" ? LABELS.map(label => inspect(label)) : [];
+    const responsive = live?.ok ? await probe(current, { homeDir }) : { ok: false };
     const jobsReady = platform !== "darwin" || (jobs.every(job => job.known && job.present && job.pid > 0) && jobs[0].pid === beat?.pid);
     const fresh = beat?.version === current?.version && Number.isSafeInteger(beat?.pid) && beat.pid > 0
       && Number.isFinite(beat.at) && beat.at >= after && beat.at <= at && at - beat.at < 15_000;
-    const key = `${current?.packageRoot}:${beat?.pid}:${jobs[1]?.pid || "pill"}`;
-    if (at < lastNow || at - lastNow > 5000 || !live?.ok || !jobsReady || !fresh || key !== identity) {
+    const probeMatches = responsive.ok && (responsive.legacy || (responsive.daemon?.pid === beat?.pid
+      && (platform !== "darwin" || responsive.pill?.pid === jobs[1]?.pid)));
+    const key = `${current?.packageRoot}:${beat?.pid}:${jobs[1]?.pid || "pill"}:${responsive.identity || "legacy"}`;
+    if (at < lastNow || at - lastNow > 5000 || !live?.ok || !jobsReady || !fresh || !probeMatches || key !== identity) {
       since = null; firstBeat = null; identity = key;
     }
-    if (live?.ok && jobsReady && fresh) {
+    if (live?.ok && jobsReady && fresh && probeMatches) {
       if (since === null) { since = at; firstBeat = beat.at; }
-      if (at - since >= stableMs && beat.at > firstBeat) return { ok: true, current, heartbeatAt: beat.at };
+      if (at - since >= stableMs && beat.at > firstBeat) return { ok: true, current, heartbeatAt: beat.at,
+        identity: responsive.legacy ? null : key, legacy: responsive.legacy === true };
     }
     lastNow = at;
     if (at - started >= timeoutMs) break;

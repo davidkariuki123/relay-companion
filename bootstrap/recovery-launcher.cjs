@@ -15,7 +15,370 @@ function validPointer(p, root) {
     && path.dirname(p.bundle) === path.join(root, "versions")
     && typeof p.node === "string" && path.resolve(p.node).startsWith(path.join(root, "node") + path.sep);
 }
-function alive(pid) { try { process.kill(pid, 0); return true; } catch(e) { return e.code !== "ESRCH"; } }
+// Process birth identity is shared by launcher, worker and transaction locks.
+// Keep it in this standalone stdlib host: a broken bundle must not disable it.
+let selfIdentity;
+let linuxBootClock;
+function nativeIdentityBirth(identity) {
+  const match = /^(?:win32|darwin):.*:(\d+)$/.exec(identity || "");
+  if (match) return Number(match[1]);
+  const linux = /^([a-f0-9-]{36}):(\d+)$/.exec(identity || "");
+  if (linux && process.platform === "linux") {
+    try {
+      if (!linuxBootClock) {
+        const boot = fs.readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+        const seconds = Number(fs.readFileSync("/proc/stat", "utf8").match(/^btime (\d+)$/m)?.[1]);
+        const result = spawnSync("getconf", ["CLK_TCK"], { encoding: "utf8", timeout: 5000 });
+        const ticks = Number(result.stdout);
+        if (result.status === 0 && seconds > 0 && ticks > 0) linuxBootClock = { boot, seconds, ticks };
+      }
+      if (linuxBootClock?.boot === linux[1]) return linuxBootClock.seconds * 1000 + Number(linux[2]) * 1000 / linuxBootClock.ticks;
+    } catch {}
+  }
+  return 0;
+}
+function nativeProcessIdentity(pid, { platform = process.platform, readFileSync = fs.readFileSync, run = spawnSync } = {}) {
+  if (!Number.isSafeInteger(pid) || pid < 1) return "";
+  const cacheable = pid === process.pid && platform === process.platform && readFileSync === fs.readFileSync && run === spawnSync;
+  if (cacheable && selfIdentity) return selfIdentity;
+  let identity = "";
+  try {
+    if (platform === "linux") identity = linuxProcessIdentity(pid, { platform, readFileSync });
+    else if (platform === "win32") {
+      const command = '$p=Get-Process -Id ' + pid + ' -ErrorAction Stop; $s=$p.StartTime.ToUniversalTime(); [Console]::Write($s.Ticks.ToString()+":"+([DateTimeOffset]$s).ToUnixTimeMilliseconds().ToString())';
+      const result = run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", windowsHide: true, timeout: 5000 });
+      const value = String(result.stdout || "").trim();
+      if (!result.error && result.status === 0 && /^\d+:\d+$/.test(value)) identity = 'win32:' + value;
+    } else if (platform === "darwin") {
+      const options = { encoding: "utf8", timeout: 5000, env: { ...process.env, LC_ALL: "C", TZ: "UTC0" } };
+      const boot = run("/usr/sbin/sysctl", ["-n", "kern.bootsessionuuid"], options);
+      const birth = run("/bin/ps", ["-p", String(pid), "-o", "lstart="], options);
+      const bootId = String(boot.stdout || "").trim(), at = Date.parse(String(birth.stdout || "").trim() + " UTC");
+      if (!boot.error && boot.status === 0 && /^[a-f0-9-]{36}$/i.test(bootId) && !birth.error && birth.status === 0 && Number.isFinite(at)) identity = 'darwin:' + bootId + ':' + at;
+    }
+  } catch { /* Unknown is not evidence of a dead owner. */ }
+  if (cacheable && identity) selfIdentity = identity;
+  return identity;
+}
+function lockFail(message) { throw new Error(message); }
+
+function processAlive(pid, {
+  platform = process.platform,
+  readFileSync = fs.readFileSync,
+  kill = process.kill.bind(process),
+} = {}) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    kill(pid, 0);
+    if (platform === "linux") {
+      const details = linuxProcessDetails(pid, { platform, readFileSync });
+      if (details && ["Z", "X", "x"].includes(details.state)) return false;
+    }
+    return true;
+  }
+  catch (error) { return error?.code === "EPERM"; }
+}
+
+function linuxProcessDetails(pid, {
+  platform = process.platform,
+  readFileSync = fs.readFileSync,
+} = {}) {
+  if (platform !== "linux" || !Number.isInteger(pid) || pid <= 0) return null;
+  try {
+    const bootId = String(readFileSync("/proc/sys/kernel/random/boot_id", "utf8")).trim();
+    const stat = String(readFileSync(`/proc/${pid}/stat`, "utf8"));
+    const commandEnd = stat.lastIndexOf(")");
+    if (!bootId || commandEnd < 0) return null;
+    // Fields after the parenthesized command start at field 3 (state); process
+    // start time is field 22, so it is index 19 in this suffix.
+    const fields = stat.slice(commandEnd + 1).trim().split(/\s+/);
+    const state = fields[0];
+    const startTicks = fields[19];
+    if (!/^[A-Za-z]$/.test(state || "") || !/^\d+$/.test(startTicks || "")) return null;
+    return { state, identity: `${bootId}:${startTicks}` };
+  } catch {
+    return null;
+  }
+}
+
+function linuxProcessIdentity(pid, options = {}) {
+  return linuxProcessDetails(pid, options)?.identity || "";
+}
+
+function canonicalLockOwnerState(owner, { isProcessAlive, processIdentity }) {
+  const pid = Number(owner?.pid);
+  if (!Number.isInteger(pid) || pid <= 0) return "unknown";
+  if (!isProcessAlive(pid)) return "dead";
+  const expectedIdentity = typeof owner?.processIdentity === "string" ? owner.processIdentity : "";
+  const actualIdentity = processIdentity(pid);
+  if (expectedIdentity && actualIdentity && actualIdentity !== expectedIdentity) return "dead";
+  // Legacy records have no identity. A process born after the record was written
+  // cannot own it. Never use elapsed lock age to evict a still-live process.
+  const born = nativeIdentityBirth(actualIdentity);
+  if (!expectedIdentity && born && owner.createdAt > 0 && born > owner.createdAt + 2000) return "dead";
+  return "live";
+}
+
+function sameCanonicalLockGeneration(left, right, { requireBirth = false } = {}) {
+  if (!left || !right || left.dev === undefined || left.ino === undefined
+    || right.dev === undefined || right.ino === undefined) return false;
+  const leftBirth = left.birthtimeNs ?? (left.birthtimeMs !== undefined ? Math.trunc(Number(left.birthtimeMs) * 1e6) : null);
+  const rightBirth = right.birthtimeNs ?? (right.birthtimeMs !== undefined ? Math.trunc(Number(right.birthtimeMs) * 1e6) : null);
+  const sameObject = String(left.dev) === String(right.dev) && String(left.ino) === String(right.ino);
+  if (!sameObject) return false;
+  const hasBirth = leftBirth !== null && rightBirth !== null
+    && String(leftBirth) !== "0" && String(rightBirth) !== "0";
+  return hasBirth ? String(leftBirth) === String(rightBirth) : !requireBirth;
+}
+
+function canonicalLockGenerationNonce(owner) {
+  return typeof owner?.nonce === "string" && /^[0-9a-f]{32}$/.test(owner.nonce)
+    ? owner.nonce
+    : "";
+}
+
+function acquireCanonicalReclaimClaim(reclaimPath, {
+  nonce,
+  now,
+  staleAfterMs = 30_000,
+  readFileSync,
+  writeFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  existsSync,
+  isProcessAlive,
+  processIdentity,
+}) {
+  const ownerProcessIdentity = processIdentity(process.pid);
+  const claim = {
+    pid: process.pid,
+    nonce,
+    createdAt: now(),
+    ...(ownerProcessIdentity ? { processIdentity: ownerProcessIdentity } : {}),
+  };
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      writeFileSync(reclaimPath, `${JSON.stringify(claim)}\n`, { mode: 0o600, flag: "wx" });
+      return true;
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      if (!existsSync(reclaimPath)) continue;
+      let priorBytes = null;
+      let prior = null;
+      try {
+        priorBytes = String(readFileSync(reclaimPath, "utf8"));
+      } catch (error) {
+        if (error?.code === "ENOENT") continue;
+        return false;
+      }
+      try { prior = JSON.parse(priorBytes); } catch {}
+      let priorAt = Number(prior?.createdAt || 0);
+      if (!priorAt) {
+        try { priorAt = Number(statSync(reclaimPath).mtimeMs || 0); } catch {}
+      }
+      const state = canonicalLockOwnerState(prior, { isProcessAlive, processIdentity });
+      const stale = state === "dead" || (state === "unknown" && priorAt > 0 && now() - priorAt > staleAfterMs);
+      if (!stale || attempt > 0) return false;
+      const staleClaimPath = `${reclaimPath}.stale-${process.pid}-${nonce}`;
+      try {
+        renameSync(reclaimPath, staleClaimPath);
+        const movedBytes = String(readFileSync(staleClaimPath, "utf8"));
+        if (movedBytes !== priorBytes) {
+          try { if (!existsSync(reclaimPath)) renameSync(staleClaimPath, reclaimPath); } catch {}
+          return false;
+        }
+        rmSync(staleClaimPath, { force: true });
+      } catch (error) {
+        if (error?.code === "ENOENT") continue;
+        throw error;
+      }
+    }
+  }
+  return false;
+}
+
+function acquireCanonicalLock(lockPath, {
+  now = Date.now,
+  // Preserve the shipped bootstrap's two-hour grace for incomplete records.
+  // Legacy writers did not use exclusive publication or the reclaim handshake,
+  // so a shorter default would let them resume into a successor lock. Complete
+  // dead owners are still recovered immediately regardless of this value.
+  staleAfterMs = 2 * 60 * 60_000,
+  mkdirSync = fs.mkdirSync,
+  readFileSync = fs.readFileSync,
+  writeFileSync = fs.writeFileSync,
+  renameSync = fs.renameSync,
+  rmSync = fs.rmSync,
+  readdirSync = fs.readdirSync,
+  statSync = fs.statSync,
+  existsSync = fs.existsSync,
+  isProcessAlive = processAlive,
+  processIdentity = (pid) => nativeProcessIdentity(pid, { readFileSync }),
+} = {}) {
+  fs.mkdirSync(path.dirname(lockPath), { recursive: true, mode: 0o700 });
+  const nonce = crypto.randomBytes(16).toString("hex");
+  const ownerPath = path.join(lockPath, "owner.json");
+  const reclaimPath = path.join(lockPath, "reclaim.json");
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      mkdirSync(lockPath, { mode: 0o700 });
+      let createdStat = null;
+      try { createdStat = statSync(lockPath, { bigint: true }); } catch {}
+      try {
+        const ownerProcessIdentity = processIdentity(process.pid);
+        const publishedOwnerBytes = `${JSON.stringify({
+          pid: process.pid,
+          nonce,
+          createdAt: now(),
+          operation: "bootstrap-setup",
+          ...(ownerProcessIdentity ? { processIdentity: ownerProcessIdentity } : {}),
+        })}\n`;
+        writeFileSync(
+          ownerPath,
+          publishedOwnerBytes,
+          { mode: 0o600, flag: "wx" },
+        );
+        // Publication and reclamation form a two-sided handshake. Check the
+        // claim first: if a reclaimer already won, abort; if it arrives after
+        // this check, its mandatory owner re-read will observe us as live.
+        try {
+          readFileSync(reclaimPath, "utf8");
+          throw new Error("Relay lost canonical install lock ownership to a recovery claimant.");
+        } catch (error) {
+          if (error?.code !== "ENOENT") throw error;
+        }
+        let confirmedOwnerBytes = null;
+        let confirmedStat = null;
+        try { confirmedOwnerBytes = String(readFileSync(ownerPath, "utf8")); } catch {}
+        try { confirmedStat = statSync(lockPath, { bigint: true }); } catch {}
+        const comparableGeneration = createdStat?.dev !== undefined && createdStat?.ino !== undefined
+          && confirmedStat?.dev !== undefined && confirmedStat?.ino !== undefined;
+        if (confirmedOwnerBytes !== publishedOwnerBytes
+          || (comparableGeneration && !sameCanonicalLockGeneration(createdStat, confirmedStat))) {
+          throw new Error("Relay lost canonical install lock ownership while publishing its owner record.");
+        }
+      } catch (error) {
+        // If a paused owner resumes after its ownerless directory was reclaimed,
+        // wx prevents it from overwriting the successor. Never delete that newer
+        // lock; clean up only our still-empty, provably identical generation.
+        if (error?.code !== "EEXIST") {
+          let currentStat = null;
+          try { currentStat = statSync(lockPath, { bigint: true }); } catch {}
+          if (!existsSync(ownerPath)
+            && sameCanonicalLockGeneration(createdStat, currentStat, { requireBirth: true })) {
+            try { rmSync(lockPath, { recursive: true, force: true }); } catch {}
+          }
+        }
+        throw error;
+      }
+      try {
+        const parent = path.dirname(lockPath);
+        const prefix = `${path.basename(lockPath)}.stale-`;
+        for (const entry of readdirSync(parent)) {
+          if (String(entry).startsWith(prefix)) {
+            try { rmSync(path.join(parent, entry), { recursive: true, force: true }); } catch {}
+          }
+        }
+      } catch {}
+      return {
+        release() {
+          let owner = null;
+          try { owner = JSON.parse(readFileSync(ownerPath, "utf8")); } catch {}
+          if (owner?.nonce === nonce) rmSync(lockPath, { recursive: true, force: true });
+        },
+      };
+    } catch (error) {
+      if (!["EEXIST", "ENOTEMPTY", "EPERM", "EACCES"].includes(error?.code)) throw error;
+      if (!existsSync(lockPath)) {
+        if (attempt === 0) continue;
+        throw error;
+      }
+      let ownerBytes = null;
+      let owner = null;
+      try {
+        ownerBytes = String(readFileSync(ownerPath, "utf8"));
+      } catch (readError) {
+        if (readError?.code !== "ENOENT") lockFail("Relay could not safely inspect the existing install lock.");
+      }
+      if (ownerBytes !== null) try { owner = JSON.parse(ownerBytes); } catch {}
+      let observedStat = null;
+      try { observedStat = statSync(lockPath, { bigint: true }); } catch {}
+      let observedAt = Number(owner?.createdAt || 0);
+      if (!observedAt) {
+        observedAt = Number(observedStat?.mtimeMs || 0);
+      }
+      const ownerState = canonicalLockOwnerState(owner, { isProcessAlive, processIdentity });
+      // A complete owner record whose exact process is gone can be recovered at
+      // once. Only incomplete records need the age grace: another contender may
+      // have observed the directory between mkdir and owner.json being written.
+      const stale = ownerState === "dead"
+        || (ownerState === "unknown" && observedAt > 0 && now() - observedAt > staleAfterMs);
+      if (!stale || attempt > 0) lockFail("Another verified Relay install or update is already in progress.");
+
+      // Serialize reclaimers inside this exact lock generation, then re-read the
+      // owner after winning. This closes the race where one retry replaced the
+      // lock while another retry was still acting on the previous owner's PID.
+      let claimed = acquireCanonicalReclaimClaim(reclaimPath, {
+        nonce,
+        now,
+        readFileSync,
+        writeFileSync,
+        renameSync,
+        rmSync,
+        statSync,
+        existsSync,
+        isProcessAlive,
+        processIdentity,
+      });
+      if (!claimed) lockFail("Another verified Relay install or update is already in progress.");
+      try {
+        let confirmedOwnerBytes = null;
+        let confirmedOwner = null;
+        try {
+          confirmedOwnerBytes = String(readFileSync(ownerPath, "utf8"));
+        } catch (readError) {
+          if (readError?.code !== "ENOENT") lockFail("Relay could not safely recheck the existing install lock.");
+        }
+        if (confirmedOwnerBytes !== null) try { confirmedOwner = JSON.parse(confirmedOwnerBytes); } catch {}
+        let confirmedStat = null;
+        try { confirmedStat = statSync(lockPath, { bigint: true }); } catch {}
+        // Only a fully parsed random nonce supplies generation identity. Missing
+        // or partial records can repeat across generations; without birth time,
+        // inode reuse makes those indistinguishable, so fail closed.
+        const ownerNonce = canonicalLockGenerationNonce(owner);
+        const confirmedNonce = canonicalLockGenerationNonce(confirmedOwner);
+        const requireBirth = !ownerNonce || ownerNonce !== confirmedNonce;
+        const sameGeneration = sameCanonicalLockGeneration(observedStat, confirmedStat, { requireBirth })
+          && ownerBytes === confirmedOwnerBytes;
+        if (!sameGeneration) lockFail("Another verified Relay install or update is already in progress.");
+        const confirmedAt = Number(confirmedOwner?.createdAt || observedAt || 0);
+        const confirmedState = canonicalLockOwnerState(confirmedOwner, { isProcessAlive, processIdentity });
+        const confirmedStale = confirmedState === "dead"
+          || (confirmedState === "unknown" && confirmedAt > 0 && now() - confirmedAt > staleAfterMs);
+        if (!confirmedStale) lockFail("Another verified Relay install or update is already in progress.");
+        let confirmedClaim = null;
+        try { confirmedClaim = JSON.parse(readFileSync(reclaimPath, "utf8")); } catch {}
+        if (confirmedClaim?.nonce !== nonce) lockFail("Another verified Relay install or update is already in progress.");
+        const stalePath = `${lockPath}.stale-${now()}-${process.pid}-${nonce}`;
+        renameSync(lockPath, stalePath);
+        claimed = false;
+        try { rmSync(stalePath, { recursive: true, force: true }); } catch {}
+      } finally {
+        if (claimed) {
+          let claim = null;
+          try { claim = JSON.parse(readFileSync(reclaimPath, "utf8")); } catch {}
+          if (claim?.nonce === nonce) {
+            try { rmSync(reclaimPath, { force: true }); } catch {}
+          }
+        }
+      }
+    }
+  }
+  lockFail("Relay could not acquire its canonical install lock.");
+}
+
+
 function stop(child) {
   if (!Number.isSafeInteger(child.pid) || child.pid < 1) return;
   if (process.platform === "win32") {
@@ -42,18 +405,37 @@ function runChild(pointer, { root, runId, timeoutMs, env = process.env }) {
     child.once("exit", code => { clearTimeout(timer); resolve({ ok: code === 0 && !expired, reason: expired ? "deadline" : "exit" }); });
   });
 }
-function acquireLauncherLock(root) {
-  // Launcher ownership is separate from the transaction/recovery locks. A failed
-  // child must actually exit before the fallback gets a chance to own those locks.
+function acquireLauncherLock(root, options = {}) {
   const lock = path.join(root, "launcher.lock");
-  fs.mkdirSync(root, { recursive: true, mode: 0o700 });
-  const owner = read(lock);
-  if (owner && Number.isSafeInteger(owner.pid) && owner.pid > 0 && alive(owner.pid)) return null;
-  if (fs.existsSync(lock)) fs.rmSync(lock);
-  const nonce = crypto.randomUUID();
-  try { fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, nonce }), { flag: "wx", mode: 0o600 }); }
-  catch (e) { if (e.code === "EEXIST") return null; throw e; }
-  return () => { if (read(lock)?.nonce === nonce) fs.rmSync(lock, { force: true }); };
+  // Convert the old single-file lock under a separately serialized migration.
+  // All new launchers pass through this gate; old launchers fail closed when
+  // they meet the new directory, rather than unlinking a successor's owner.
+  let migration;
+  try {
+    migration = acquireCanonicalLock(path.join(root, "launcher-migration.lock"), options);
+    if (fs.existsSync(lock) && fs.statSync(lock).isFile()) {
+      const bytes = fs.readFileSync(lock, "utf8"), createdAt = fs.statSync(lock).mtimeMs;
+      let owner; try { owner = JSON.parse(bytes); } catch {}
+      const state = canonicalLockOwnerState({ ...owner, createdAt }, {
+        isProcessAlive: options.isProcessAlive || processAlive,
+        processIdentity: options.processIdentity || nativeProcessIdentity,
+      });
+      const staleIncomplete = state === "unknown" && Date.now() - createdAt > 2 * 60 * 60_000;
+      if (state !== "dead" && !staleIncomplete) return null;
+      const archived = lock + '.legacy-' + crypto.randomUUID();
+      fs.renameSync(lock, archived);
+      // An older launcher does not know about the migration gate. If it
+      // replaced the file meanwhile, restore its claim without overwriting any
+      // subsequent owner, and do not enter recovery alongside it.
+      if (fs.readFileSync(archived, "utf8") !== bytes) {
+        try { fs.linkSync(archived, lock); } catch (error) { if (error.code !== "EEXIST") throw error; }
+        return null;
+      }
+    }
+    const acquired = acquireCanonicalLock(lock, options);
+    return () => acquired.release();
+  } catch { return null; }
+  finally { migration?.release(); }
 }
 // One line per launcher decision in recovery/recovery.log, shared with the
 // runner. Reconstructing a bad hour from status.json snapshots alone took an
@@ -103,7 +485,7 @@ async function launch({ root = __dirname, run = runChild, now = Date.now, env = 
         && (!report.runId || report.runId === runId); // pre-launcher stock releases
       log(`result bundle=${candidate.version} run=${runId} ok=${result.ok} reason=${result.reason || "-"} reported=${reported ? report.status : "none"} elapsedMs=${now() - attemptAt}`);
       if (result.ok && reported && report.ok !== false) {
-        if (["current", "ahead"].includes(report.status) && report.runtimeHealthy === true) {
+        if (["current", "ahead"].includes(report.status) && report.runtimeHealthy === true && report.runtimeProven === true) {
           const previous = read(path.join(root, "known-good.json"));
           if (validPointer(previous, root) && previous.bundle !== candidate.bundle) write(path.join(root, "previous-good.json"), previous);
           write(path.join(root, "known-good.json"), candidate);
@@ -123,7 +505,7 @@ async function launch({ root = __dirname, run = runChild, now = Date.now, env = 
       // to an older bundle here would hand the problem to a runner that only
       // knows how to download.
       const networkFailure = /fetch failed|offline|ENOTFOUND|ECONN|ETIMEDOUT|manifest-http-|channel-discovery-http-|download.*(timed out|stalled|ended early|failed after)|configuration-unavailable/i.test(report?.lastError || "");
-      const retryableReport = ["disabled", "backoff", "restart-failed", "reactivate-failed", "service-repair-failed", "service-repair-unhealthy"].includes(report?.status) || (report?.status === "failed" && networkFailure);
+      const retryableReport = ["disabled", "backoff", "emergency-backoff", "restart-failed", "reactivate-failed", "service-repair-failed", "service-repair-unhealthy"].includes(report?.status) || (report?.status === "failed" && networkFailure);
       if (reported && retryableReport && result.reason !== "deadline") {
         write(path.join(root, "launcher-status.json"), { schema: 1, at: now(), status: "runner-error", version: candidate.version });
         log("done status=runner-error");
@@ -140,5 +522,5 @@ async function launch({ root = __dirname, run = runChild, now = Date.now, env = 
     return { ok: false, status: "failed" };
   } finally { release(); }
 }
-module.exports = { launch, validPointer, read, write, acquireLauncherLock, appendRecoveryLog };
+module.exports = { launch, validPointer, read, write, acquireLauncherLock, appendRecoveryLog, acquireCanonicalLock, processAlive, nativeProcessIdentity, nativeIdentityBirth };
 if (require.main === module) launch().then(result => { process.exitCode = result.ok ? 0 : 1; }).catch(e => { console.error(e.message); process.exitCode = 1; });

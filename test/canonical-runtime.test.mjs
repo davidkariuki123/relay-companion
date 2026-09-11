@@ -820,16 +820,19 @@ posixFsTest("a live owner still holds the lock rather than having it stolen", as
 posixFsTest("a live transaction is never stolen because an elapsed-time deadline passed", async () => {
   const homeDir = fixture();
   const layout = canonicalRuntimeLayout({ homeDir, platform: "linux" });
+  // Use the native clock epoch: createdAt=1 predates this process's birth and
+  // now correctly describes a reused PID, rather than a long-running owner.
+  const startedAt = Date.now();
   fs.mkdirSync(layout.lockPath, { recursive: true });
   fs.writeFileSync(path.posix.join(layout.lockPath, "owner.json"), JSON.stringify({
     pid: process.pid,
-    createdAt: 1,
+    createdAt: startedAt,
     requestId: "old-request",
     workerId: "old-worker",
   }));
   const result = await runPosix({
     homeDir,
-    now: () => 20 * 60 * 1000 + 2,
+    now: () => startedAt + 20 * 60 * 1000,
     processAlive: () => true,
   });
   assert.equal(result.ok, false);

@@ -60,6 +60,8 @@ test("restart and reactivation budgets survive overwritten status and memory def
     write(path.join(f.homeDir, ".relay", "recovery", "status.json"), { status: "unrelated-status" });
   }
   assert.equal(restarts, 2); assert.equal(runs, 1); assert.equal(staged, 0);
+  // The same failed release is now shared-quarantined even after pressure clears.
+  for (let i = 0; i < 6; i++) f.tick();
   await recover({ ...options, memory: () => ({ pressured: false }) });
   assert.equal(staged, 1); assert.equal(restarts, 2); assert.equal(runs, 1);
 });
@@ -76,7 +78,8 @@ test("a validated previous local runtime can restore service while offline", asy
     verifyReady: async () => ({ ok: ran, current: target }),
   });
   assert.equal(result.repair, "local"); assert.equal(result.runtimeHealthy, true);
-  assert.deepEqual(read(path.join(f.homeDir, ".relay", "recovery", "repair-progress.json")).attempts, {});
+  assert.equal(result.runtimeProven, false, "one successful start does not erase repair history");
+  assert.equal(read(path.join(f.homeDir, ".relay", "recovery", "repair-progress.json")).attempts['local:' + target.packageRoot], 1);
 });
 
 test("reserving an attempt before worker death survives a new progress instance", t => {

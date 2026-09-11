@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { startRecoveryHeartbeat } from "./recovery-health.js";
+import { startRecoveryResponder } from "../bootstrap/recovery-probe.cjs";
 import { startRecoveryMaintenance } from "./recovery-maintenance.js";
 import { startPillSupervisor } from "./pill-supervisor.js";
 import { readFileSync } from "node:fs";
@@ -956,6 +957,10 @@ export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
     hasActiveWork: () => hasActiveTurns() || activeSessionOperationCount() > 0,
     apiOkAt: () => relayTransportHealth().lastSuccessAt,
   });
+  try {
+    const packageRoot = companionPackageRoot();
+    await startRecoveryResponder({ role: "daemon", packageRoot, version: currentCompanionVersion(packageRoot) });
+  } catch (error) { log(`local recovery responder unavailable: ${error.message}`); }
   startRecoveryMaintenance();
   startPillSupervisor({ log });
   const autoUpdater = createAutoUpdater({

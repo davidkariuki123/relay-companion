@@ -11,6 +11,7 @@ export async function runRecovery(version, channel) {
   const manifest = JSON.parse(fs.readFileSync(path.join(packageRoot, "package.json"), "utf8"));
   if (manifest.version !== version || updateChannel() !== channel) throw new Error("Recovery release or channel changed");
   const execute = () => runCanonicalUpdateTransaction({ version, runningVersion: version, runningPackageRoot: packageRoot,
+    requestId: /^[a-f0-9-]{36}$/i.test(process.env.RELAY_RECOVERY_ATTEMPT_ID || "") ? process.env.RELAY_RECOVERY_ATTEMPT_ID : null,
     supersedeBrokenRecovery: true,
     repairExecutableOverride: { bin: path.join(packageRoot, "bin", "relay.js"), node: process.execPath },
     installCandidate: async ({ stagingRoot }) => {

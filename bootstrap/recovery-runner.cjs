@@ -152,6 +152,7 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
   restart = require("./runtime-health.cjs").restartInstalledRuntimeServices,
   memory = require("./runtime-health.cjs").memoryPressure,
   verifyReady = require("./recovery-readiness.cjs").waitForRecoveryReady,
+  policyFactory = require("./recovery-policy.cjs").recoveryPolicy,
   validateLocal = require("./recovery-local.cjs").validateLocalRuntime,
   repairServices = require("./mac-service-recovery.cjs").repairMacServiceRegistrations } = {}) {
   const root = path.join(homeDir, ".relay");
@@ -172,25 +173,31 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
   if (reservedService && (services.status === "deferred-update-owner" || (services.ok && !services.changed))) progress.refund("services");
   const ready = (target = null, after = 0) => verifyReady({ homeDir, platform, target, after, now, sleep, health });
   const rememberReady = observed => {
-    progress.reset();
     const active = observed?.current || read(path.join(root, "runtime", "current.json"));
+    const probation = policy.observe(channel, { ...observed, current: active });
+    if (!probation.proven) return probation;
+    progress.reset();
     if (active?.active && active.packageRoot) {
       const goodFile = path.join(root, "recovery", "runtime-good.json");
       const old = read(goodFile);
       if (old?.packageRoot && old.packageRoot !== active.packageRoot) write(path.join(root, "recovery", "runtime-previous-good.json"), old);
       write(goodFile, { ...active, channel });
     }
+    return probation;
   };
-  const proven = (value, observed) => { rememberReady(observed); return status({ ...value, runtimeHealthy: true }); };
+  const proven = (value, observed) => { const probation = rememberReady(observed); return status({ ...value, runtimeHealthy: !observed.legacy, runtimeAvailable: true, runtimeProven: probation.proven, probationRemainingMs: probation.remainingMs }); };
   const stateFile = path.join(root, "recovery", "status.json");
   const configFile = env.RELAY_CONFIG || path.join(env.RELAY_CONFIG_DIR || root, "config.json");
-  const config = read(configFile);
+  const recoveredConfig = require("./recovery-config.cjs").loadRecoveryConfig(configFile);
+  const config = recoveredConfig.config;
   // A missing/malformed config must not silently switch a developer to stable.
   if (!config) return { ok: false, status: "configuration-unavailable" };
   const channel = channelFrom(config, env);
+  const policy = policyFactory({ root: path.join(root, "recovery"), now });
   const previous = read(stateFile);
   const runId = env.RELAY_RECOVERY_RUN_ID || null;
   const log = recoveryLogger(root, runId, now);
+  if (recoveredConfig.restored) log("restored recovery settings from validated local copy");
   const status = (value) => {
     write(stateFile, { schema: 1, channel, runId, launcherVersion: require("../package.json").version, checkedAt: now(), lastSuccessAt: previous?.lastSuccessAt || null, ...value });
     log(`status=${value.status}${value.desiredVersion ? ` desired=${value.desiredVersion}` : ""}${value.lastError ? ` error=${value.lastError}` : ""}`);
@@ -200,6 +207,7 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
   if (services.changed || !services.ok) {
     const observed = await ready();
     if (observed.ok) return proven({ ok: true, status: "current", version: observed.current?.version, repair: "services", lastSuccessAt: now() }, observed);
+    policy.interrupt();
     progress.fail(services.lastError || observed.reason);
     if (progress.count("services") < 2 && !progress.exhausted) return status({ ...services, ok: false, status: "service-repair-unhealthy", runtimeHealthy: false });
     // Accepted commands are not recovery. Repeated failure advances even when
@@ -211,6 +219,8 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
   let discoveryError = null;
   let desiredVersion = null;
   let current = null;
+  let runtimeResponsive = false;
+  let runtimeVerified = false;
   try {
     sweepAbandonedDownloads(downloads, log);
     // Discovery still comes first, but an unreachable registry no longer blocks
@@ -227,9 +237,12 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
     if (installedIsDesired && heartbeatFresh && heartbeat.version === current.version && live.ok) {
       const observed = await ready(current);
       if (observed.ok) {
+        runtimeResponsive = true;
+        runtimeVerified = !observed.legacy;
         if (!desiredVersion || compare(current.version, desiredVersion) >= 0) return proven({ ok: true, status: current.version === desiredVersion || !desiredVersion ? "current" : "ahead", desiredVersion: desiredVersion || current.version, lastSuccessAt: previous?.lastSuccessAt || now() }, observed);
-        rememberReady(observed);
-      } else live.ok = false;
+        const probation = rememberReady(observed);
+        if (!probation.proven && !observed.legacy) return status({ ok: true, status: "probation", runtimeHealthy: true, runtimeProven: false, desiredVersion, version: current.version, probationRemainingMs: probation.remainingMs });
+      } else { live.ok = false; policy.interrupt(); }
     }
     const memoryNow = memory();
     // Repair progress for the installed version survives every later status
@@ -245,6 +258,7 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
     if (installedIsDesired && !(live.ok && heartbeatFresh && heartbeat.version === current.version)) {
       // The code on disk is the code we want; the problem is liveness. Repair in
       // place before touching the network: restart, then re-activate from disk.
+      policy.interrupt();
       const { version, restarts, staleSince } = repairState;
       const daemonAlive = Number(live?.daemonCount) >= 1;
       const base = { desiredVersion: desiredVersion || version, version, staleSince, restarts, discoveryError: discoveryError ? String(discoveryError.message).slice(0, 300) : undefined,
@@ -271,6 +285,7 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
         return status({ ok: false, status: "restart-failed", ...base, restarts: restarts + 1,
           lastError: outcome?.ok ? "restarted-daemon-not-responding" : String(outcome?.reason || "restart-failed").slice(0, 300) });
       }
+      policy.failure(channel, version, { id: `unhealthy:${current.packageRoot || version}:${heartbeat?.pid || "missing"}`, reason: "restart-budget-exhausted" });
       // Two restarts did not bring it back. Re-activate the release already on
       // disk: same verified tree, no download. Only then does the network rung run.
       const entry = path.join(current.packageRoot || "", "src", "recovery-entry.js");
@@ -292,12 +307,14 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
     }
     // Try a distinct, previously committed local release before requiring a
     // network download. Validation reads the tree without executing its imports.
+    const failedCandidate = current?.active !== true ? current?.candidate : null;
+    if (failedCandidate?.version) policy.failure(channel, failedCandidate.version, { id: `journal:${failedCandidate.packageRoot || failedCandidate.version}`, reason: "incomplete-update" });
     const good = read(path.join(root, "recovery", "runtime-good.json"));
     const olderGood = read(path.join(root, "recovery", "runtime-previous-good.json"));
     const alternatives = [good?.channel === channel ? good : null, olderGood?.channel === channel ? olderGood : null, current?.previous];
     const localBusy = busyDecision(read(path.join(root, "recovery", "daemon.json")), { homeDir, now: now() });
     if (!localBusy && (!installedIsDesired || !live?.ok || !heartbeatFresh)) for (const target of alternatives) {
-      if (!target?.packageRoot || target.packageRoot === current?.packageRoot || !validateLocal(target, { platform, arch }) || !progress.claim('local:' + target.packageRoot, 1)) continue;
+      if (!target?.packageRoot || target.packageRoot === current?.packageRoot || policy.decision(channel, target.version).blocked || !validateLocal(target, { platform, arch }) || !progress.claim('local:' + target.packageRoot, 1)) continue;
       status({ ok: false, status: "restoring-local", desiredVersion, version: target.version, runtimeHealthy: false });
       try {
         const activationAt = now();
@@ -308,14 +325,26 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
       } catch (error) { progress.fail(error.message); log('local recovery failed: ' + error.message); }
     }
     if (discoveryError) throw discoveryError;
+    let quarantine = policy.decision(channel, desiredVersion);
+    if (quarantine.blocked && !runtimeResponsive) {
+      // A signed re-download of a proven version can restore a missing local
+      // backup without retrying the release that caused the outage.
+      const fallback = [good, olderGood].find(target => target?.channel === channel && target.version !== desiredVersion && !policy.decision(channel, target.version).blocked);
+      if (fallback) { desiredVersion = fallback.version; quarantine = policy.decision(channel, desiredVersion); }
+    }
+    if (quarantine.blocked) return status({ ok: true, status: "deferred-release-cooldown", desiredVersion, runtimeHealthy: runtimeVerified, runtimeAvailable: runtimeResponsive, retryAt: quarantine.retryAt, failures: quarantine.failures });
     const busy = busyDecision(heartbeat, { homeDir, now: now() });
     if (busy) return status({ ok: true, status: busy, desiredVersion, ...repairState });
     if (previous?.desiredVersion === desiredVersion && previous.retryAt > now()) return status({ ok: false, status: "backoff", desiredVersion, ...repairState,
       failures: previous.failures, retryAt: previous.retryAt, lastError: previous.lastError });
-    // Downloading and extracting a runtime on a starved machine made the outage
-    // longer last time. Wait for memory to come back; the restart rungs above
-    // already ran, and the next check is five minutes away.
-    if (memoryNow.pressured) return status({ ok: true, status: "deferred-memory-pressure", desiredVersion, ...repairState, memoryFreeMB: memoryNow.freeMB });
+    // Ordinary upgrades wait for pressure to clear. An unavailable installation
+    // can use the final recovery route at a bounded cadence after local repairs.
+    if (memoryNow.pressured) {
+      if (runtimeResponsive) return status({ ok: true, status: "deferred-memory-pressure", desiredVersion, ...repairState, memoryFreeMB: memoryNow.freeMB });
+      const emergency = policy.emergency();
+      if (!emergency.allowed) return status({ ok: false, status: "emergency-backoff", desiredVersion, runtimeHealthy: false, retryAt: emergency.retryAt });
+      log("local recovery exhausted; allowing bounded emergency download despite memory pressure");
+    }
     status({ ok: true, status: "downloading", desiredVersion, ...repairState });
     fs.mkdirSync(downloads, { recursive: true, mode: 0o700 });
     staged = path.join(downloads, crypto.randomUUID());
@@ -333,10 +362,17 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
     if (!fs.existsSync(entry)) throw new Error("candidate-missing-recovery-engine");
     status({ ok: true, status: "activating", desiredVersion, ...repairState });
     const activationAt = now();
-    await run(process.execPath, entry, [desiredVersion, channel], { env: { ...env, RELAY_RECOVERY_WORKER: "1" } });
-    const observed = await ready({ version: desiredVersion }, activationAt);
-    if (!observed.ok) throw new Error("replacement-not-healthy");
-    return proven({ ok: true, status: "current", desiredVersion, version: desiredVersion, repair: "download", restarts: 0, lastSuccessAt: now(), failures: 0 }, observed);
+    const attemptId = crypto.randomUUID();
+    try {
+      await run(process.execPath, entry, [desiredVersion, channel], { env: { ...env, RELAY_RECOVERY_WORKER: "1", RELAY_RECOVERY_ATTEMPT_ID: attemptId } });
+      const observed = await ready({ version: desiredVersion }, activationAt);
+      if (!observed.ok) throw new Error("replacement-not-healthy");
+      return proven({ ok: true, status: "current", desiredVersion, version: desiredVersion, repair: "download", restarts: 0, lastSuccessAt: now(), failures: 0 }, observed);
+    } catch (error) {
+      policy.failure(channel, desiredVersion, { id: attemptId, reason: error.message });
+      policy.interrupt();
+      throw error;
+    }
   } catch (error) {
     const activeStatus = read(stateFile);
     const failures = previous && previous.desiredVersion === activeStatus?.desiredVersion ? (previous.failures || 0) + 1 : 1;

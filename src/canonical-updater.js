@@ -5,6 +5,8 @@ import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+import { updateChannel } from "./config.js";
+import { recoveryPolicy } from "../bootstrap/recovery-policy.cjs";
 import { compatibleNodeRuntime, persistentNodePath, stableNodePath } from "./install.js";
 import { ACTIVE_UPDATE_WORKER_ENV } from "./update-agent-cleanup.js";
 import {
@@ -248,16 +250,29 @@ export async function runCanonicalUpdateTransaction({
   supersedeBrokenRecovery = false,
   onProgress = () => {},
   now = Date.now,
+  releasePolicy = recoveryPolicy({ root: path.join(homeDir, ".relay", "recovery"), now }),
 } = {}) {
+  const releaseChannel = updateChannel();
+  const releaseFailureId = requestId || workerId || randomUUID();
+  const noteReleaseFailure = reason => {
+    try { releasePolicy.failure(releaseChannel, version, { id: releaseFailureId, reason }); }
+    catch (error) { log(`release failure history could not be saved: ${error.message}`); }
+  };
   const stage = async (name, operation) => {
     const startedAt = now();
     onProgress({ stage: name, stageStartedAt: startedAt });
     log(`stage ${name} started`);
     try {
       const result = await operation();
+      if (result?.ok === false && ["activation", "startup-verification"].includes(name)) {
+        noteReleaseFailure(result.reason);
+      }
       log(`stage ${name} ${result?.ok === false ? "failed" : "finished"}; elapsed=${Math.max(0, now() - startedAt)}ms`);
       return result;
     } catch (error) {
+      if (["activation", "startup-verification"].includes(name)) {
+        noteReleaseFailure(error.message);
+      }
       log(`stage ${name} threw; elapsed=${Math.max(0, now() - startedAt)}ms; ${error?.message || error}`);
       throw error;
     }

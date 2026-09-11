@@ -9,6 +9,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
+import { recoveryPolicy } from "../bootstrap/recovery-policy.cjs";
 import {
   UPDATE_CHANNEL_STABLE,
   UPDATE_CHANNEL_DEV,
@@ -591,6 +592,7 @@ export function createAutoUpdater({
   useFailureBackoff = true,
   log = () => {},
   explicitRepair = false,
+  releasePolicy = recoveryPolicy({ now }),
 } = {}) {
   // This is the version of the code loaded in THIS process, not a fresh read of the
   // package.json on every tick. If npm writes a new tree but launchctl restart fails,
@@ -698,6 +700,8 @@ export function createAutoUpdater({
   // Prefer a terminal worker result; use an observation deadline only when the
   // worker cannot be observed. Persist the request identity to survive restarts.
   function noteUpdateFailure(target, t, result = null) {
+    try { releasePolicy.failure(activeAttempt?.channel || liveChannel(), target, { id: activeAttempt?.id, reason: result?.reason || "update-failed" }); }
+    catch (error) { log(`release failure history could not be saved: ${error.message}`); }
     if (state.failingTarget !== target) {
       state.failingTarget = target;
       state.updateFailures = 0;
@@ -739,6 +743,14 @@ export function createAutoUpdater({
     }
   }
 
+  function releaseDeferral(latest) {
+    if (!useFailureBackoff) return null;
+    let release;
+    try { release = releasePolicy.decision(liveChannel(), latest); }
+    catch { return { status: "deferred-backoff", current: runningVersion, latest, reason: "release-history-unavailable" }; }
+    return release.blocked ? { status: "deferred-backoff", current: runningVersion, latest, failures: release.failures, retryAt: release.retryAt, reason: "release-cooldown" } : null;
+  }
+
   function launchPending(t) {
     const latest = state.pendingVersion;
     if (!latest || !isNewerVersion(latest, runningVersion)) return null;
@@ -760,6 +772,8 @@ export function createAutoUpdater({
       return { status: "stale-process", current: runningVersion, onDisk: diskVersion, channel };
     }
     // Exponential backoff between failed attempts at the same version.
+    const releaseWait = releaseDeferral(latest);
+    if (releaseWait) return releaseWait;
     if (useFailureBackoff && state.nextAttemptAt > 0 && t < state.nextAttemptAt && state.failingTarget === latest) {
       return {
         status: "deferred-backoff",
@@ -897,6 +911,7 @@ export function createAutoUpdater({
         try { equalExplicitRepair = getCanonicalRuntimeHealth(canonical)?.ok === false; } catch {}
       }
       if ((newerGlobal || equalExplicitRepair) && managedInstallInfo(packageRoot, { platform })) {
+        const releaseWait = releaseDeferral(runningVersion); if (releaseWait) return releaseWait;
         if (busy()) return { status: "deferred-rescue-busy", current: runningVersion, onDisk: canonical.version };
         let launch = null;
         try {
@@ -973,6 +988,7 @@ export function createAutoUpdater({
       let health = null;
       try { health = getCanonicalRuntimeHealth(canonical); } catch {}
       if (health && !health.ok) {
+        const releaseWait = releaseDeferral(runningVersion); if (releaseWait) return releaseWait;
         if (busy()) return { status: "deferred-repair-busy", current: runningVersion, health };
         let launch = null;
         try {
@@ -1066,6 +1082,7 @@ export function createAutoUpdater({
       // readMigrationFailure. Written BEFORE the launch, and read back only by a
       // daemon that returned still-not-canonical, i.e. only after a failure.
       const migrationVersion = state.pendingVersion && isNewerVersion(state.pendingVersion, runningVersion) ? state.pendingVersion : runningVersion;
+      const releaseWait = releaseDeferral(migrationVersion); if (releaseWait) return releaseWait;
       const migrationTarget = `canonical-migration:${migrationVersion}`;
       const priorMigration = readMigrationFailure(updateStatePath);
       if (priorMigration && priorMigration.target === migrationTarget) {

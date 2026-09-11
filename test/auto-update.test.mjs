@@ -28,7 +28,7 @@ const {
   autoUpdateEnabled,
   fetchLatestVersion,
   versionFromSignedRuntimeManifest,
-  createAutoUpdater,
+  createAutoUpdater: createAutoUpdaterImpl,
   DEFAULT_RESTART_COOLDOWN_MS,
   CANONICAL_TRANSACTION_IN_FLIGHT_MS,
   readUpdateFailure,
@@ -36,8 +36,58 @@ const {
   recordUpdateFailure,
   updateRetryCooldownMs,
 } = await import("../src/auto-update.js");
+const createAutoUpdater = options => createAutoUpdaterImpl({ releasePolicy: { failure() {}, decision() { return { blocked: false }; } }, ...options });
 const autoUpdateModule = await import("../src/auto-update.js");
+const { recoveryPolicy } = await import("../bootstrap/recovery-policy.cjs");
 const { startAutoUpdateLoop } = await import("../src/task-daemon.js");
+
+test("daemon failures reach the watchdog policy and a landed boot cannot erase them", async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-daemon-policy-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const releasePolicy = recoveryPolicy({ root, now: () => 100000 });
+  const packageRoot = path.join(os.homedir(), ".relay", "runtime", "releases", "test", "node_modules", "relay-companion");
+  let outcome = "admitted";
+  const build = version => createAutoUpdater({
+    platform: "darwin", packageRoot, releasePolicy, now: () => 100000,
+    getCurrentVersion: () => version, getCurrentChannel: () => "stable",
+    getCanonicalRuntime: () => ({ packageRoot, version }), getCanonicalRuntimeState: () => null,
+    getLatestVersion: async () => "1.0.1", updateStatePath: path.join(root, "update-state.json"),
+    spawnUpdate: () => ({ status: "admitted", requestId: "shared-attempt", requestPath: "fake-request" }),
+    inspectRequest: () => ({ state: outcome, result: { reason: "startup-verification-failed" } }),
+    checkIntervalMs: 0, restartCooldownMs: 0,
+  });
+  const updater = build("1.0.0");
+  assert.equal((await updater.tick()).status, "updating");
+  outcome = "failed";
+  assert.equal((await updater.tick()).status, "deferred-backoff");
+  const watchdogPolicy = recoveryPolicy({ root, now: () => 100000 });
+  assert.equal(watchdogPolicy.decision("stable", "1.0.1").failures, 1);
+  build("1.0.1");
+  assert.equal(watchdogPolicy.decision("stable", "1.0.1").blocked, true);
+  assert.equal((await build("1.0.0").tick()).reason, "release-cooldown");
+});
+
+test("watchdog release failures block both normal upgrades and legacy migration after daemon restart", async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-shared-policy-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const policy = recoveryPolicy({ root, now: () => 100000 });
+  policy.failure("stable", "1.0.1", { id: "watchdog-rollback" });
+  for (const canonical of [true, false]) {
+    const packageRoot = canonical ? "C:\\Users\\test\\.relay\\runtime\\releases\\current\\node_modules\\relay-companion" : "C:\\Users\\test\\.relay\\lib\\node_modules\\relay-companion";
+    const options = { env: {}, platform: "win32", useCanonicalRuntime: true, packageRoot, releasePolicy: policy,
+      getCurrentVersion: () => "1.0.0", getOnDiskVersion: () => "1.0.0", getCurrentChannel: () => "stable",
+      getCanonicalRuntime: () => canonical ? { packageRoot, version: "1.0.0" } : null,
+      getCanonicalRuntimeState: () => null, getLatestVersion: async () => "1.0.1",
+      now: () => 100000, restartCooldownMs: 0, updateStatePath: path.join(root, String(canonical), "update.json"),
+      spawnUpdate: () => assert.fail("quarantined release must not launch"),
+    };
+    const blocked = await createAutoUpdater(options).tick();
+    assert.equal(blocked.reason, "release-cooldown", JSON.stringify({ canonical, blocked }));
+    assert.equal((await createAutoUpdater(options).tick()).reason, "release-cooldown", "restarting the daemon does not forget the failed version");
+    const next = await createAutoUpdater({ ...options, getLatestVersion: async () => "1.0.2", spawnUpdate: () => ({ status: "admitted", requestId: "next-fix" }) }).tick();
+    assert.equal(next.status, canonical ? "updating" : "migrating-runtime");
+  }
+});
 const currentVersion = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 const releaseTrust = JSON.parse(fs.readFileSync(new URL("../src/release-trust.json", import.meta.url), "utf8"));
 const hasReleaseTrust = Array.isArray(releaseTrust.keys) && releaseTrust.keys.length > 0;

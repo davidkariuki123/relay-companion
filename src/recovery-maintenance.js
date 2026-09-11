@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,12 +7,6 @@ import io from "../bootstrap/recovery-launcher.cjs";
 import installer from "../bootstrap/recovery-install.cjs";
 import setup from "../bootstrap/relay-setup.cjs";
 
-function liveOwner(file) {
-  if (!fs.existsSync(file)) return false;
-  const owner = io.read(file);
-  if (!Number.isSafeInteger(owner?.pid) || owner.pid < 1) return true;
-  try { process.kill(owner.pid, 0); return true; } catch(e) { return e.code !== "ESRCH"; }
-}
 export function repairRecoverySchedule({ homeDir = os.homedir(), now = Date.now(), repair = installer.installRecovery,
   packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..") } = {}) {
   const root = path.join(homeDir, ".relay", "recovery");
@@ -22,7 +15,6 @@ export function repairRecoverySchedule({ homeDir = os.homedir(), now = Date.now(
   const previous = io.read(path.join(root, "maintenance.json"));
   if (previous?.at <= now && now - previous.at < monitor.REPAIR_RETRY_MS) return { status: "backoff" };
   // Re-register only the recovery job, never a running recovery/activation tree.
-  if (liveOwner(path.join(root, "launcher.lock")) || liveOwner(path.join(root, "run.lock", "owner.json"))) return { status: "busy" };
   const releaseLauncher = io.acquireLauncherLock(root);
   if (!releaseLauncher) return { status: "busy" };
   let runLock;

@@ -194,7 +194,11 @@ export function validateInstalledPackageShape(packageRoot, { version, distributi
       "recovery-readiness.cjs",
       "runtime-tree.cjs",
     ].sort();
-    if (![legacyBootstrap, recoveryBootstrap, resilientBootstrap, monitoredBootstrap, macRecoveryBootstrap].some(shape => JSON.stringify(bootstrapFiles) === JSON.stringify(shape))) {
+    // Shared release cooldown/probation and local challenge-response health.
+    // Both modules remain dependency-free bootstrap code.
+    const responsiveRecoveryBootstrap = [...macRecoveryBootstrap, "recovery-policy.cjs", "recovery-probe.cjs"].sort();
+    const configRecoveryBootstrap = [...responsiveRecoveryBootstrap, "recovery-config.cjs"].sort();
+    if (![legacyBootstrap, recoveryBootstrap, resilientBootstrap, monitoredBootstrap, macRecoveryBootstrap, responsiveRecoveryBootstrap, configRecoveryBootstrap].some(shape => JSON.stringify(bootstrapFiles) === JSON.stringify(shape))) {
       throw new Error("Thin installer bootstrap contents do not match the reviewed shape");
     }
     const manifest = JSON.parse(fs.readFileSync(path.join(packageRoot, "skill", "manifest.json"), "utf8"));

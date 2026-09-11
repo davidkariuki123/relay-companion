@@ -9,6 +9,7 @@ function probe(overrides = {}) {
     readCurrent: () => ({ active: true, version: "1.0.0", packageRoot: "/relay/node_modules/relay-companion" }),
     readHeartbeat: () => ({ version: "1.0.0", pid: 12, at: clock - clock % 5000 }),
     health: () => ({ ok: true }),
+    probe: async () => ({ ok: true, daemon: { pid: 12 }, pill: { pid: 13 }, identity: "daemon:renderer" }),
     inspect: label => ({ known: true, present: true, pid: label.endsWith("pill") ? 13 : 12 }),
     ...overrides({ now: () => clock, advance: ms => { clock += ms; } }),
   });
@@ -30,9 +31,16 @@ for (const [name, change] of [
   ["a pill that crashes every five seconds", ({ now }) => ({ health: () => ({ ok: now() % 5000 !== 0 }) })],
   ["sleep between samples", ({ advance }) => ({ sleep: async () => advance(6000) })],
   ["a healthy but different canonical release", () => ({ target: { version: "2.0.0" } })],
+  ["a live pill whose renderer cannot answer", () => ({ probe: async () => ({ ok: false }) })],
+  ["a response from an unrelated daemon PID", () => ({ probe: async () => ({ ok: true, daemon: { pid: 99 }, pill: { pid: 13 }, identity: "other" }) })],
 ]) test(`readiness rejects ${name}`, async () => assert.equal((await probe(change)).ok, false));
 
 test("an interruption resets the healthy window instead of counting disconnected good samples", async () => {
   const result = await probe(({ now }) => ({ health: () => ({ ok: now() !== 105000 }) }));
   assert.equal(result.ok, true); assert.equal(result.heartbeatAt, 115000);
+});
+
+test("legacy liveness never receives a probation identity", async () => {
+  const result = await probe(() => ({ probe: async () => ({ ok: true, legacy: true }) }));
+  assert.equal(result.ok, true); assert.equal(result.legacy, true); assert.equal(result.identity, null);
 });
