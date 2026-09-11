@@ -113,7 +113,10 @@ function execute(node, entry, args, { timeoutMs = DEADLINE_MS, spawnImpl = spawn
 // daemon, or a machine so starved that a healthy daemon missed a few ticks.
 // Only a heartbeat that stays stale across two scheduled checks proves the
 // former while the process is still alive. A missing process needs no second look.
-const STALE_CONFIRM_MS = 4 * 60_000;
+// Ten minutes, two scheduled checks apart: a daemon whose process is present
+// and whose heartbeat was recent is far more often slow than dead, and every
+// false restart takes the person's Companion away with it.
+const STALE_CONFIRM_MS = 10 * 60_000;
 const MAX_IN_PLACE_RESTARTS = 2;
 
 // A runner killed mid-extraction by the launcher's deadline leaves its staged

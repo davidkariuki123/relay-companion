@@ -3,7 +3,16 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { discoverClaudeSessions, discoverCodexSessions, recordAnonymousSession } from "../src/session-directory.js";
+import {
+  discoverClaudeSessions,
+  discoverCodexSessions,
+  discoverSessions,
+  discoverSessionsAsync,
+  readClaudeTranscriptActivity,
+  recordAnonymousSession,
+  resetSessionDirectoryCaches,
+} from "../src/session-directory.js";
+import { readRolloutActivity, readRolloutMeta } from "../src/codex-inject.js";
 
 function fixture() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "relay-session-directory-"));
@@ -12,6 +21,58 @@ function fixture() {
 function codexLine(type, payload, timestamp = new Date().toISOString()) {
   return JSON.stringify({ timestamp, type, payload });
 }
+
+test("rollout and transcript reads are served from cache until the file changes", () => {
+  resetSessionDirectoryCaches();
+  const root = fixture();
+  const id = "019fa000-0000-7000-8000-000000000041";
+  const rollout = path.join(root, `rollout-2026-09-11T10-00-00-${id}.jsonl`);
+  fs.writeFileSync(rollout, `${[
+    codexLine("session_meta", { id, session_id: id, cwd: "/work/relay" }),
+    codexLine("event_msg", { type: "task_started", turn_id: "turn-1" }),
+  ].join("\n")}\n`);
+  const firstMeta = readRolloutMeta(rollout);
+  const firstActivity = readRolloutActivity(rollout);
+  assert.equal(firstActivity.busy, true);
+  // Unchanged size and mtime: the parsed result is the very same object.
+  assert.equal(readRolloutMeta(rollout), firstMeta);
+  assert.equal(readRolloutActivity(rollout), firstActivity);
+  // An appended row changes the size, so the next read sees the new tail.
+  fs.appendFileSync(rollout, `${codexLine("event_msg", { type: "task_complete", turn_id: "turn-1" })}\n`);
+  const secondActivity = readRolloutActivity(rollout);
+  assert.notEqual(secondActivity, firstActivity);
+  assert.equal(secondActivity.busy, false);
+
+  const transcript = path.join(root, "claude.jsonl");
+  fs.writeFileSync(transcript, `${JSON.stringify({ type: "user", timestamp: "2026-09-11T10:00:00Z", message: { role: "user" } })}\n`);
+  const firstTranscript = readClaudeTranscriptActivity(transcript);
+  assert.equal(firstTranscript.state, "active");
+  assert.equal(readClaudeTranscriptActivity(transcript), firstTranscript);
+  fs.appendFileSync(transcript, `${JSON.stringify({ type: "assistant", timestamp: "2026-09-11T10:00:05Z", message: { role: "assistant", stop_reason: "end_turn" } })}\n`);
+  assert.equal(readClaudeTranscriptActivity(transcript).state, "idle");
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("the async sweep reports exactly what the synchronous directory reports", async () => {
+  resetSessionDirectoryCaches();
+  const root = fixture();
+  const home = path.join(root, "codex");
+  const day = path.join(home, "sessions", "2026", "09", "11");
+  fs.mkdirSync(day, { recursive: true });
+  const ids = Array.from({ length: 60 }, (_, i) => `019fa000-0000-7000-8000-0000000001${String(i).padStart(2, "0")}`);
+  ids.forEach((id, i) => fs.writeFileSync(path.join(day, `rollout-2026-09-11T10-00-00-${id}.jsonl`), `${[
+    codexLine("session_meta", { id, session_id: id, cwd: `/work/project-${i % 5}` }),
+    codexLine("event_msg", { type: "task_started", turn_id: `turn-${i}` }),
+    ...(i % 2 ? [codexLine("event_msg", { type: "task_complete", turn_id: `turn-${i}` })] : []),
+  ].join("\n")}\n`));
+  const nowMs = Date.parse("2026-09-11T10:01:00Z");
+  const options = { provider: "codex", codex: { homeDir: home, nowMs }, terminalBindings: new Map() };
+  const sync = discoverSessions(options);
+  const async = await discoverSessionsAsync(options);
+  assert.equal(sync.length, 60);
+  assert.deepEqual(async, sync);
+  fs.rmSync(root, { recursive: true, force: true });
+});
 
 test("directory reports native Codex parent tasks as active/idle and excludes subagents", () => {
   const root = fixture();

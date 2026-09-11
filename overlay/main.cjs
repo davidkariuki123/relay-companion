@@ -803,6 +803,7 @@ async function openRelayDeepLink(parsed) {
       sender: packet.sender,
       preview: packet.forHuman,
       inReplyToRelayId: packet.inReplyToRelayId,
+      inReplyToTopicPost: packet.inReplyToTopicPost || null,
       threadId: packet.threadId || packet.id,
       recipientGroupId: packet.recipientGroupId,
       recipientGroupName: packet.recipientGroupName,
@@ -1654,6 +1655,7 @@ function readRelays() {
       deletedAt: p.deletedAt || null,
       source: p.source || null,
       inReplyToRelayId: p.inReplyToRelayId || null,
+      inReplyToTopicPost: p.inReplyToTopicPost && typeof p.inReplyToTopicPost === "object" ? p.inReplyToTopicPost : null,
       threadId: p.threadId || null,
       groupSendId: p.groupSendId || null,
       recipientGroupId: p.recipientGroupId || null,
@@ -2693,6 +2695,7 @@ async function pushInboxNow(force) {
       // per-thread grouping and unread counts stay correct.
       r.threadId,
       r.inReplyToRelayId,
+      r.inReplyToTopicPost ? r.inReplyToTopicPost.postId : "",
       // Task receipts: a request that starts or finishes changes NOTHING else
       // on the row, so leaving these out meant a completion landing on the
       // daemon poll never reached the renderer and the card sat on "Running"
@@ -3450,6 +3453,7 @@ async function readTodoItem(relayId) {
         updatedAt: packet.updatedAt || local.updatedAt || packet.createdAt || new Date().toISOString(),
         threadId: packet.threadId || local.threadId || id,
         inReplyToRelayId: packet.inReplyToRelayId || local.inReplyToRelayId || null,
+        inReplyToTopicPost: packet.inReplyToTopicPost || local.inReplyToTopicPost || null,
         groupSendId: packet.groupSendId || local.groupSendId || null,
         recipientGroupId: packet.recipientGroupId || local.recipientGroupId || null,
         recipientGroupName: packet.recipientGroupName || local.recipientGroupName || "",
@@ -9703,6 +9707,22 @@ ipcMain.handle("relay:topicPostCreate", (_e, id, input) => topicCall((c) => c.cr
   idempotencyKey: String(input?.idempotencyKey || `pill-topic-post:${randomUUID()}`),
 })));
 ipcMain.handle("relay:topicPostDelete", (_e, id, postId) => topicCall((c) => c.deleteTopicPost(id, postId)));
+// A reply from the pill: the post's author gets a Relay that quotes the post
+// ("private"), and in "topic" mode the same words also go on the board as a
+// post answering the original. The Relay lands in the sender's room with the
+// author, so the sent cache refreshes once the server has it.
+ipcMain.handle("relay:topicPostReply", async (_e, id, postId, input) => {
+  const result = await topicCall((c) => c.replyToTopicPost(id, postId, {
+    mode: input?.mode === "topic" ? "topic" : "private",
+    forHuman: String(input?.forHuman || ""),
+    forAgent: String(input?.forAgent || input?.forHuman || ""),
+    ...(input?.nature ? { nature: String(input.nature) } : {}),
+    ...(input?.title ? { title: String(input.title) } : {}),
+    idempotencyKey: String(input?.idempotencyKey || `pill-topic-reply:${randomUUID()}`),
+  }));
+  if (result && result.ok && result.result && result.result.relay) refreshSent().catch(() => {});
+  return result;
+});
 
 // Settings tab: account card + the sign-out / switch-account lifecycle.
 ipcMain.handle("relay:accountInfo", () => accountInfo());

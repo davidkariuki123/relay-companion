@@ -934,6 +934,15 @@ export class RelayClient {
     });
   }
 
+  /** Answer one post: the author gets a Relay quoting it; mode "topic" also puts the reply on the board. */
+  async replyToTopicPost(topicId, postId, payload, provenance = {}) {
+    return this.#req("POST", `/v1/topics/${encodeURIComponent(topicId)}/posts/${encodeURIComponent(postId)}/replies`, payload, {
+      clientName: provenance.clientName || "relay-companion",
+      sourceProvider: provenance.sourceProvider,
+      nativeSessionId: provenance.nativeSessionId,
+    });
+  }
+
   async deleteTopicPost(topicId, postId) {
     return this.#req("DELETE", `/v1/topics/${encodeURIComponent(topicId)}/posts/${encodeURIComponent(postId)}`);
   }

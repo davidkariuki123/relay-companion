@@ -92,6 +92,78 @@ function readFileSlice(filePath, { fromEnd = null, fromStart = null }) {
   }
 }
 
+async function readFileSliceAsync(filePath, { fromEnd = null, fromStart = null }) {
+  let handle = null;
+  try {
+    handle = await fs.promises.open(filePath, "r");
+    const size = (await handle.stat()).size;
+    const length = Math.min(size, fromEnd ?? fromStart ?? size);
+    if (length <= 0) return { text: "", truncatedHead: false };
+    const position = fromEnd != null ? size - length : 0;
+    const buffer = Buffer.alloc(length);
+    await handle.read(buffer, 0, length, position);
+    return { text: buffer.toString("utf8"), truncatedHead: fromEnd != null && size > length };
+  } catch {
+    return { text: "", truncatedHead: false };
+  } finally {
+    if (handle) {
+      try { await handle.close(); } catch {}
+    }
+  }
+}
+
+// ---- parsed-slice cache -----------------------------------------------------
+//
+// The session directory re-reads the head and tail of every rollout on every
+// daemon tick. On a machine with a few thousand rollouts that is close to a
+// gigabyte of file reads and JSON parsing every four seconds, all on the main
+// thread, while only the handful of rollouts that are actually being written
+// ever change. A rollout whose size and mtime are unchanged has the same head
+// and tail it had last time, so its parsed result is reused. The cache is
+// process-local and bounded; size+mtime is the identity, so an appended
+// rollout is re-read on the next look.
+const SLICE_CACHE_MAX = 20_000;
+const sliceCache = new Map();
+
+function cacheStamp(stat) {
+  return stat ? `${stat.size}:${stat.mtimeMs}` : "";
+}
+
+function cachedSlice(key, stamp) {
+  const entry = sliceCache.get(key);
+  if (!entry || entry.stamp !== stamp) return undefined;
+  // Re-insert so a bounded eviction drops the least recently used entries.
+  sliceCache.delete(key);
+  sliceCache.set(key, entry);
+  return entry.value;
+}
+
+function rememberSlice(key, stamp, value) {
+  if (!stamp) return value;
+  sliceCache.delete(key);
+  sliceCache.set(key, { stamp, value });
+  if (sliceCache.size > SLICE_CACHE_MAX) {
+    for (const oldest of sliceCache.keys()) {
+      sliceCache.delete(oldest);
+      if (sliceCache.size <= SLICE_CACHE_MAX) break;
+    }
+  }
+  return value;
+}
+
+/** Test hook: forget every cached rollout slice. */
+export function resetRolloutSliceCache() {
+  sliceCache.clear();
+}
+
+function statOrNull(filePath) {
+  try { return fs.statSync(filePath); } catch { return null; }
+}
+
+async function statOrNullAsync(filePath) {
+  try { return await fs.promises.stat(filePath); } catch { return null; }
+}
+
 function parseJsonLines(text, { dropFirst = false } = {}) {
   const lines = String(text || "").split("\n");
   if (dropFirst && lines.length) lines.shift(); // partial first line of a tail read
@@ -148,16 +220,25 @@ export function parseRolloutActivity(text, { truncatedHead = false } = {}) {
   };
 }
 
-export function readRolloutActivity(sessionPath, { tailBytes = ROLLOUT_TAIL_BYTES } = {}) {
+export function readRolloutActivity(sessionPath, { tailBytes = ROLLOUT_TAIL_BYTES, stat = null } = {}) {
+  const key = `activity:${tailBytes}:${sessionPath}`;
+  const stamp = cacheStamp(stat || statOrNull(sessionPath));
+  const cached = cachedSlice(key, stamp);
+  if (cached !== undefined) return cached;
   const { text, truncatedHead } = readFileSlice(sessionPath, { fromEnd: tailBytes });
-  return parseRolloutActivity(text, { truncatedHead });
+  return rememberSlice(key, stamp, parseRolloutActivity(text, { truncatedHead }));
 }
 
-// First session_meta line of a rollout: cwd + whether this is a subagent
-// rollout (subagent forks share the sessions dir but are not user-facing
-// "current chats").
-export function readRolloutMeta(sessionPath, { headBytes = ROLLOUT_HEAD_BYTES } = {}) {
-  const { text } = readFileSlice(sessionPath, { fromStart: headBytes });
+export async function readRolloutActivityAsync(sessionPath, { tailBytes = ROLLOUT_TAIL_BYTES, stat = null } = {}) {
+  const key = `activity:${tailBytes}:${sessionPath}`;
+  const stamp = cacheStamp(stat || await statOrNullAsync(sessionPath));
+  const cached = cachedSlice(key, stamp);
+  if (cached !== undefined) return cached;
+  const { text, truncatedHead } = await readFileSliceAsync(sessionPath, { fromEnd: tailBytes });
+  return rememberSlice(key, stamp, parseRolloutActivity(text, { truncatedHead }));
+}
+
+function parseRolloutMeta(text) {
   for (const row of parseJsonLines(text)) {
     if (!row || row.type !== "session_meta" || !row.payload || typeof row.payload !== "object") continue;
     const payload = row.payload;
@@ -167,6 +248,27 @@ export function readRolloutMeta(sessionPath, { headBytes = ROLLOUT_HEAD_BYTES } 
     };
   }
   return null;
+}
+
+// First session_meta line of a rollout: cwd + whether this is a subagent
+// rollout (subagent forks share the sessions dir but are not user-facing
+// "current chats").
+export function readRolloutMeta(sessionPath, { headBytes = ROLLOUT_HEAD_BYTES, stat = null } = {}) {
+  const key = `meta:${headBytes}:${sessionPath}`;
+  const stamp = cacheStamp(stat || statOrNull(sessionPath));
+  const cached = cachedSlice(key, stamp);
+  if (cached !== undefined) return cached;
+  const { text } = readFileSlice(sessionPath, { fromStart: headBytes });
+  return rememberSlice(key, stamp, parseRolloutMeta(text));
+}
+
+export async function readRolloutMetaAsync(sessionPath, { headBytes = ROLLOUT_HEAD_BYTES, stat = null } = {}) {
+  const key = `meta:${headBytes}:${sessionPath}`;
+  const stamp = cacheStamp(stat || await statOrNullAsync(sessionPath));
+  const cached = cachedSlice(key, stamp);
+  if (cached !== undefined) return cached;
+  const { text } = await readFileSliceAsync(sessionPath, { fromStart: headBytes });
+  return rememberSlice(key, stamp, parseRolloutMeta(text));
 }
 
 // ---- current-thread resolution ---------------------------------------------
@@ -203,15 +305,28 @@ function dateDirParts(date) {
 
 // Newest rollout file per thread id across the last few day-directories. mtime
 // is the liveness signal: every rollout event touches the file.
-export function listRecentRollouts(sessionsRoot, { nowMs = Date.now(), dayLookback = 3 } = {}) {
+function rolloutDayDirs(sessionsRoot, nowMs, dayLookback) {
   const dirs = new Set();
   for (let back = 0; back < dayLookback; back += 1) {
     for (const part of dateDirParts(new Date(nowMs - back * 24 * 60 * 60 * 1000))) {
       dirs.add(path.join(sessionsRoot, part));
     }
   }
+  return dirs;
+}
+
+function rememberRollout(byId, threadId, filePath, stat) {
+  const existing = byId.get(threadId);
+  if (!existing || stat.mtimeMs > existing.mtimeMs) {
+    // `stat` rides along so readers can check the parsed-slice cache without a
+    // second stat per file.
+    byId.set(threadId, { threadId, sessionPath: filePath, mtimeMs: stat.mtimeMs, size: stat.size, stat });
+  }
+}
+
+export function listRecentRollouts(sessionsRoot, { nowMs = Date.now(), dayLookback = 3 } = {}) {
   const byId = new Map();
-  for (const dir of dirs) {
+  for (const dir of rolloutDayDirs(sessionsRoot, nowMs, dayLookback)) {
     let names = [];
     try {
       names = fs.readdirSync(dir);
@@ -222,14 +337,33 @@ export function listRecentRollouts(sessionsRoot, { nowMs = Date.now(), dayLookba
       const threadId = rolloutThreadIdFromName(name);
       if (!threadId) continue;
       const filePath = path.join(dir, name);
-      let mtimeMs = 0;
-      try {
-        mtimeMs = fs.statSync(filePath).mtimeMs;
-      } catch {
-        continue;
-      }
-      const existing = byId.get(threadId);
-      if (!existing || mtimeMs > existing.mtimeMs) byId.set(threadId, { threadId, sessionPath: filePath, mtimeMs });
+      const stat = statOrNull(filePath);
+      if (!stat) continue;
+      rememberRollout(byId, threadId, filePath, stat);
+    }
+  }
+  return byId;
+}
+
+// Same listing without blocking the event loop: the directory reads and stats
+// go through the thread pool and the loop stays free for heartbeats, probes,
+// and delivery between files.
+export async function listRecentRolloutsAsync(sessionsRoot, { nowMs = Date.now(), dayLookback = 3 } = {}) {
+  const byId = new Map();
+  for (const dir of rolloutDayDirs(sessionsRoot, nowMs, dayLookback)) {
+    let names = [];
+    try {
+      names = await fs.promises.readdir(dir);
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      const threadId = rolloutThreadIdFromName(name);
+      if (!threadId) continue;
+      const filePath = path.join(dir, name);
+      const stat = await statOrNullAsync(filePath);
+      if (!stat) continue;
+      rememberRollout(byId, threadId, filePath, stat);
     }
   }
   return byId;

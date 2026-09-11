@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { configDir, taskLedgerPath } from "./config.js";
+import { commandExists } from "./command-path.js";
 import {
   ensureMcpBrokerProvisioned,
   MCP_BRIDGE_MAX_OLD_SPACE_MB,
@@ -72,13 +73,11 @@ export function writeTaskLedger(ledger) {
   atomicWriteJsonSync(taskLedgerPath(), { ...ledger, updatedAt: now() }, { mode: 0o600 });
 }
 
+// A PATH walk, not `which`: `which` is a Git Bash tool on Windows and is absent
+// from the scheduled-task environment that runs the daemon and the pill, which
+// made every host read as "not installed" there (see command-path.js).
 function defaultCommandExists(command) {
-  try {
-    execFileSync("which", [command], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
+  return commandExists(command);
 }
 
 function defaultCommandVersion(command) {

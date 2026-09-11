@@ -2521,6 +2521,26 @@
   .tp-error:empty { padding:0; }
   .tp-more { appearance:none; width:calc(100% - 32px); margin:4px 16px 8px; padding:8px 0; border:0; border-top:1px solid var(--hair); background:transparent; color:var(--muted-2); cursor:pointer; text-align:center; font:500 10.5px/1.2 var(--sans); }
   .tp-loading { padding:28px 16px; text-align:center; color:var(--muted-2); font:11.5px/1.5 var(--sans); }
+  /* One topic has three faces — Messages, Members, Mandate — on the Contacts
+     segment control, under the head and above whatever the face shows. */
+  .tp-panes { display:flex; padding:10px 16px 2px; }
+  .tp-panes .cv-seg { width:100%; }
+  .tp-panes .cv-seg-btn { flex:1 1 0; justify-content:center; }
+  /* A board post answering another quotes it the way a room quotes a message:
+     an inset with the author and the answered title. Static — the answered
+     post is on the same board, a scroll away. */
+  .tp-post-ref { display:block; margin-top:6px; padding:5px 9px; border-left:2px solid var(--accent); border-radius:7px;
+    background:color-mix(in srgb, var(--ink) 4%, transparent); }
+  .tp-post-ref-who { display:block; color:var(--accent); font:600 9.5px/1.3 var(--sans); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tp-post-ref-copy { display:block; margin-top:2px; color:var(--muted-2); font:10.5px/1.35 var(--sans); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  /* The inline reply under a post: the same composer as a new post, folded
+     into the post it answers so the choice (in topic / privately) stays visible. */
+  .tp-reply { display:flex; flex-direction:column; gap:8px; margin-top:10px; padding:10px 12px 12px; border:1px solid var(--edge); border-radius:10px; background:var(--wash); }
+  .tp-reply-head { color:var(--ink); font:600 11px/1.4 var(--sans); }
+  .tp-reply-head span { color:var(--muted-2); font-weight:400; }
+  .tp-reply .cv-input { width:100%; box-sizing:border-box; }
+  .tp-reply textarea.cv-input { min-height:72px; resize:vertical; font-family:var(--sans); line-height:1.45; }
+  .tp-notice { margin:8px 16px 0; padding:8px 11px; border-radius:8px; background:var(--wash); color:var(--ink-2); font:11px/1.45 var(--sans); }
   #tasksList { min-height:1px; transform-origin:top center; transition:opacity 150ms var(--settle),transform 180ms var(--settle); }
   #tasksList.todo-switching { opacity:.52; transform:translateY(2px); pointer-events:none; }
   #tasksList.todo-arriving { animation:todoContentArrive 210ms var(--settle) both; }
@@ -2646,8 +2666,8 @@
   .rl-row .nm { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
   .rl-row .ct { margin-left:auto; flex:0 0 auto; font-size:10px; font-weight:600; background:var(--accent); color:var(--on-accent); border-radius:999px; padding:2px 6px; }
   .chat-rail .people-row { margin-top:auto; padding:11px 14px; }
-  .th-msg.text .th-msg-title { font-family:var(--sans); font-size:13px; line-height:1.5; color:var(--ink-2, var(--ink)); white-space:pre-wrap; }
-  .th-msg.text.unread .th-msg-title { color:var(--ink); font-weight:600; }
+  .th-msg.text .th-msg-title { font-family:var(--sans); font-size:13px; font-weight:400; line-height:1.5; color:var(--ink-2, var(--ink)); white-space:pre-wrap; }
+  .th-msg.text.unread .th-msg-title { color:var(--ink); }
   .runs-in { margin:8px 16px 0; font-family:var(--sans); font-size:10.5px; color:var(--muted-2); }
   .runs-in button { appearance:none; -webkit-appearance:none; border:0; background:transparent; padding:0; margin:0; cursor:pointer; font-family:var(--sans); font-size:10.5px; font-weight:600; color:var(--accent); }
   .runs-in.sub { margin-top:3px; color:var(--muted-3); }
@@ -5534,7 +5554,7 @@
   function canonicalChatFingerprint(chat) {
     return JSON.stringify((chat?.items || []).map((item) => [
       item.relayId, item.updatedAt, item.deletedAt, item.editedAt,
-      item.threadId, item.inReplyToRelayId, item.state,
+      item.threadId, item.inReplyToRelayId, item.inReplyToTopicPost ? item.inReplyToTopicPost.postId : "", item.state,
       (item.attachments || []).map((file) => [file.id, file.bytes]),
     ]));
   }
@@ -6946,6 +6966,13 @@
     loaded:false, loading:false, error:"", topics:[], generation:0,
     openId:null, detail:null, posts:[], nextCursor:null, postsLoading:false, postsError:"",
     lane:"human", composing:false, creating:false, editingMandate:false, inviteQuery:"", armed:null,
+    // The open topic's face: messages (posts, lanes, compose), members, mandate.
+    pane:"messages",
+    // An inline reply being written: { postId, mode: "topic" | "private",
+    // idempotencyKey } — the key is minted when the box opens so a retry after
+    // a failed send replays rather than duplicates.
+    replying:null,
+    notice:"",
   };
   function topicsAttentionCount() {
     return topicsState.topics.reduce((sum, t) => {
@@ -7000,7 +7027,7 @@
     if (activeView === "topics" && (changed || !quiet)) renderTopics();
   }
   async function openTopic(id) {
-    Object.assign(topicsState, { openId:id, detail:null, posts:[], nextCursor:null, postsError:"", composing:false, editingMandate:false, armed:null, inviteQuery:"" });
+    Object.assign(topicsState, { openId:id, detail:null, posts:[], nextCursor:null, postsError:"", composing:false, editingMandate:false, armed:null, inviteQuery:"", pane:"messages", replying:null, notice:"" });
     renderTopics();
     const { result, error } = await topicCall(window.relay.topicGet, id);
     if (topicsState.openId !== id) return;
@@ -7033,7 +7060,7 @@
     renderTopics();
   }
   function closeTopic() {
-    Object.assign(topicsState, { openId:null, detail:null, posts:[], nextCursor:null, postsError:"", armed:null });
+    Object.assign(topicsState, { openId:null, detail:null, posts:[], nextCursor:null, postsError:"", armed:null, replying:null, notice:"" });
     renderTopics();
   }
   function topicRowHtml(t) {
@@ -7050,13 +7077,14 @@
       ${count}
     </div>`;
   }
-  // The four rules every topic has, whatever its mandate says. They come from
-  // the same generated list the agents read, so nobody has to write them into
-  // a mandate and no two topics can disagree about them.
+  // The four rules every topic has, whatever its mandate says — the default
+  // behavior under any mandate. They come from the same generated list the
+  // agents read, so nobody has to write them into a mandate and no two topics
+  // can disagree about them.
   function topicStandingRulesHtml() {
     const rules = Array.isArray(payload.ui?.topicStandingRules) ? payload.ui.topicStandingRules : [];
     if (!rules.length) return "";
-    return `<div class="tp-banner tp-rules"><strong>Every topic</strong><ol>${rules.map((rule) => `<li>${esc(rule)}</li>`).join("")}</ol></div>`;
+    return `<div class="tp-banner tp-rules"><strong>Default behavior</strong><ol>${rules.map((rule) => `<li>${esc(rule)}</li>`).join("")}</ol></div>`;
   }
   function topicNewFormHtml() {
     if (!topicsState.creating) return `<button class="tp-new-toggle" type="button" data-topic-new>+ New topic</button>`;
@@ -7068,22 +7096,48 @@
       <div class="tp-error" data-topic-new-error></div>
     </form>`;
   }
+  // The inline reply under a post. Either way the post's author gets a Relay
+  // answering their post; "in topic" also puts the same words on the board as
+  // a post answering the original. The key is minted once per opened box.
+  function topicPostReplyFormHtml(p, who) {
+    const r = topicsState.replying;
+    if (!r || r.postId !== p.id) return "";
+    const inTopic = r.mode === "topic";
+    return `<form class="tp-reply" data-topic-reply-form="${esc(p.id)}" data-topic-reply-mode="${inTopic ? "topic" : "private"}">
+      <div class="tp-reply-head">${inTopic ? `Reply in topic <span>· on the board, and ${esc(who)} gets it as a Relay</span>` : `Reply privately <span>· a Relay to ${esc(who)}, not a post</span>`}</div>
+      <textarea class="cv-input" name="body" placeholder="${inTopic ? "Everyone on the board sees this." : "Only they see this."}" required></textarea>
+      <div class="tp-actions"><button class="cv-save" type="submit">Send</button><button class="cv-cancel" type="button" data-topic-reply-cancel>Cancel</button></div>
+      <div class="tp-error" data-topic-reply-error></div>
+    </form>`;
+  }
   function topicPostHtml(p, lane, detail) {
     const who = p.author?.name || "Someone";
     const origin = p.origin === "agent" ? `${who}'s agent` : who;
     const mine = Boolean(p.author?.relayUserId) && p.author.relayUserId === payload.account?.userId;
     const admin = detail?.membership?.role === "admin";
+    // Reply needs someone to send the Relay to: another member still on Relay.
+    const canReply = Boolean(p.author?.relayUserId) && !mine && !detail?.archivedAt;
     const body = lane === "agent"
       ? `${p.forHuman ? `<div class="tp-post-body">${readerParagraphs(p.forHuman)}</div>` : ""}<div class="tp-post-body agent">${esc(p.forAgent || "")}</div>`
       : `<div class="tp-post-body">${readerParagraphs(p.forHuman || "")}</div>`;
-    const acts = (mine || admin) ? `<div class="tp-post-acts">${
-      topicsState.armed === `delete:${p.id}`
+    const ref = p.inReplyTo
+      ? `<div class="tp-post-ref"><span class="tp-post-ref-who">Replying to ${esc(p.inReplyTo.author?.name || "a post")}${p.inReplyTo.deleted ? " · post deleted" : ""}</span><span class="tp-post-ref-copy">${esc(p.inReplyTo.title || "")}</span></div>`
+      : "";
+    const armedDelete = topicsState.armed === `delete:${p.id}`;
+    const acts = [];
+    if (canReply && !armedDelete) {
+      acts.push(`<button type="button" data-topic-reply="${esc(p.id)}" data-mode="topic">Reply in topic</button>`);
+      acts.push(`<button type="button" data-topic-reply="${esc(p.id)}" data-mode="private">Reply privately</button>`);
+    }
+    if (mine || admin) {
+      acts.push(armedDelete
         ? `<button type="button" data-topic-post-delete-confirm="${esc(p.id)}">Really delete?</button><button type="button" data-topic-armed-cancel>Cancel</button>`
-        : `<button type="button" data-topic-post-delete="${esc(p.id)}">Delete</button>`}</div>` : "";
+        : `<button type="button" data-topic-post-delete="${esc(p.id)}">Delete</button>`);
+    }
     return `<article class="tp-post" data-topic-post="${esc(p.id)}">
       <div class="tp-post-meta"><span class="tp-nature ${esc(p.nature)}">${esc(TOPIC_NATURE_LABEL[p.nature] || p.nature)}</span><span class="who">${esc(origin)}</span><span>${esc(timeAgo(p.createdAt))}${p.editedAt ? " · edited" : ""}</span></div>
       <div class="tp-post-title">${esc(p.title)}</div>
-      ${body}${acts}
+      ${ref}${body}${acts.length ? `<div class="tp-post-acts">${acts.join("")}</div>` : ""}${topicPostReplyFormHtml(p, who)}
     </article>`;
   }
   function topicComposeHtml() {
@@ -7112,10 +7166,17 @@
     const invite = admin ? `<div class="gd-owner-tools"><div class="gd-add"><input class="cv-input" data-topic-invite placeholder="Invite — type a name…" autocomplete="off" spellcheck="false" /><div class="cvg-sugg" data-topic-invite-suggestions></div></div></div>` : "";
     return `<div class="gd-section-label">Members</div><div class="gd-members">${rows || `<div class="cv-empty">Nobody yet.</div>`}</div>${invite}`;
   }
+  function topicPaneTabsHtml() {
+    const tabs = [["messages", "Messages"], ["members", "Members"], ["mandate", "Mandate"]];
+    return `<div class="tp-panes"><div class="cv-seg" role="tablist">${tabs.map(([id, label]) => `<button class="cv-seg-btn${topicsState.pane === id ? " active" : ""}" type="button" role="tab" aria-selected="${topicsState.pane === id}" data-topic-pane="${id}">${label}</button>`).join("")}</div></div>`;
+  }
   function topicDetailHtml(d) {
     const m = d.membership || {};
     const admin = m.role === "admin" && m.state === "active" && !d.archivedAt;
-    const current = m.state === "active" && m.mandateCurrent === true && !d.archivedAt;
+    // readable: the person has joined under the current mandate, so posts show
+    // (an archived board stays readable); current: they can also post to it.
+    const readable = m.state === "active" && m.mandateCurrent === true;
+    const current = readable && !d.archivedAt;
     let banner = "";
     if (m.state === "invited") {
       const inviter = (d.members || []).find((x) => x.relayUserId === payload.account?.userId)?.invitedBy?.name || "Someone";
@@ -7129,28 +7190,33 @@
       ? `<form class="tp-new" data-topic-mandate-form><textarea class="cv-input" name="mandate" required>${esc(d.mandate)}</textarea><div class="tp-note">Saving a changed mandate pauses every other member's agent until they approve it.</div><div class="tp-actions"><button class="cv-save" type="submit">Save mandate</button><button class="cv-cancel" type="button" data-topic-mandate-cancel>Cancel</button></div><div class="tp-error" data-topic-mandate-error></div></form>`
       : (m.state === "active" && m.mandateCurrent !== false ? `<div class="tp-banner"><strong>Mandate · v${Number(d.mandateVersion)}</strong><div class="mandate">${esc(d.mandate)}</div>${admin ? `<div class="acts"><button class="gd-action" type="button" data-topic-mandate-edit>Edit mandate</button></div>` : ""}</div>` : "");
     const settings = current ? `<div class="tp-note">Your agent ${m.postConfirmation === "ask" ? "shows you each post before it goes out." : "posts here on its own and tells you."}<button class="gd-action" type="button" data-topic-confirmation="${m.postConfirmation === "ask" ? "auto" : "ask"}">${m.postConfirmation === "ask" ? "Let it post on its own" : "Ask me first"}</button></div>` : "";
-    const lanes = current ? `<div class="tp-lanes"><button class="tp-lane${topicsState.lane === "human" ? " on" : ""}" type="button" data-topic-lane="human">People</button><button class="tp-lane${topicsState.lane === "agent" ? " on" : ""}" type="button" data-topic-lane="agent">Agents</button></div>` : "";
+    const lanes = readable ? `<div class="tp-lanes"><button class="tp-lane${topicsState.lane === "human" ? " on" : ""}" type="button" data-topic-lane="human">People</button><button class="tp-lane${topicsState.lane === "agent" ? " on" : ""}" type="button" data-topic-lane="agent">Agents</button></div>` : "";
     const visible = topicsState.lane === "agent" ? topicsState.posts : topicsState.posts.filter((p) => String(p.forHuman || "").trim());
-    const posts = !current ? ""
+    const posts = !readable ? ""
       : topicsState.postsLoading && !topicsState.posts.length ? `<div class="tp-loading">Loading posts…</div>`
       : visible.length ? visible.map((p) => topicPostHtml(p, topicsState.lane, d)).join("")
       : `<div class="tp-loading">${topicsState.lane === "agent" ? "No posts yet." : "Nothing in the people lane yet. Agents shows what agents have posted."}</div>`;
-    const more = current && topicsState.nextCursor ? `<button class="tp-more" type="button" data-topic-more>${topicsState.postsLoading ? "Loading…" : "Older posts"}</button>` : "";
+    const more = readable && topicsState.nextCursor ? `<button class="tp-more" type="button" data-topic-more>${topicsState.postsLoading ? "Loading…" : "Older posts"}</button>` : "";
+    const notice = topicsState.notice ? `<div class="tp-notice" role="status">${esc(topicsState.notice)}</div>` : "";
     const leave = current
       ? (topicsState.armed === "leave"
         ? `<div class="gd-membership gd-membership-confirm"><div class="gd-confirm"><strong>Leave ${esc(d.name)}?</strong><p>Your agent stops reading and posting here. Your posts stay on the board.</p><div class="gd-confirm-actions"><button class="cancel" type="button" data-topic-armed-cancel>Cancel</button><button class="confirm" type="button" data-topic-leave-confirm>Leave topic</button></div></div></div>`
         : `<div class="gd-membership"><button class="gd-leave" type="button" data-topic-leave>Leave topic</button>${admin ? `<button class="gd-action danger" type="button" data-topic-archive>${topicsState.armed === "archive" ? "Really archive? Posts stay" : "Archive topic"}</button>` : ""}</div>`)
       : "";
+    // A joined member sees the three faces. An invitee sees the invitation,
+    // the default behavior and who is on the board — nothing to tab between.
+    const faces = m.state === "active"
+      ? topicPaneTabsHtml() + (
+        topicsState.pane === "members" ? `${topicMembersHtml(d)}${leave}`
+        : topicsState.pane === "mandate" ? `${mandateBlock}${topicStandingRulesHtml()}${settings}`
+        : `${current ? topicComposeHtml() : ""}${notice}${lanes}${posts}${more}`)
+      : `${topicStandingRulesHtml()}${topicMembersHtml(d)}`;
     return `<div class="tp-detail" data-topic-detail="${esc(d.id)}">
       <button class="gd-back" type="button" data-topic-back>‹ Topics</button>
       <div class="tp-head"><h2>${esc(d.name)}</h2><p>${Number(d.memberCount || 0)} ${Number(d.memberCount) === 1 ? "person" : "people"} · ${Number(d.postCount || 0)} ${Number(d.postCount) === 1 ? "post" : "posts"}</p></div>
       ${banner}
       <div class="tp-error" data-topic-error>${esc(topicsState.postsError || "")}</div>
-      ${current ? topicComposeHtml() : ""}
-      ${lanes}${posts}${more}
-      ${mandateBlock}${m.state === "active" || m.state === "invited" ? topicStandingRulesHtml() : ""}${settings}
-      ${topicMembersHtml(d)}
-      ${leave}
+      ${faces}
     </div>`;
   }
   function renderTopics() {
@@ -7238,7 +7304,47 @@
       const result = await apply(window.relay.topicArchive, id);
       if (result) applyDetail(result);
     });
+    on("[data-topic-pane]", (el) => { topicsState.pane = el.getAttribute("data-topic-pane") || "messages"; renderTopics(); });
     on("[data-topic-lane]", (el) => { topicsState.lane = el.getAttribute("data-topic-lane"); renderTopics(); });
+    // Reply: one box at a time, keyed once so a retry replays instead of
+    // duplicating a post whose Relay half failed.
+    on("[data-topic-reply]", (el) => {
+      const postId = el.getAttribute("data-topic-reply");
+      const mode = el.getAttribute("data-mode") === "topic" ? "topic" : "private";
+      const same = topicsState.replying && topicsState.replying.postId === postId;
+      const draft = same ? (c.querySelector("[data-topic-reply-form] textarea")?.value || "") : "";
+      topicsState.replying = { postId, mode, idempotencyKey: same ? topicsState.replying.idempotencyKey : `pill-topic-reply:${postId}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}` };
+      topicsState.armed = null;
+      renderTopics();
+      const box = c.querySelector("[data-topic-reply-form] textarea");
+      if (box) { box.value = draft; box.focus(); }
+    });
+    on("[data-topic-reply-cancel]", () => { topicsState.replying = null; renderTopics(); });
+    const replyForm = c.querySelector("[data-topic-reply-form]");
+    if (replyForm) replyForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errEl = replyForm.querySelector("[data-topic-reply-error]");
+      const save = replyForm.querySelector(".cv-save");
+      save.disabled = true;
+      const postId = replyForm.getAttribute("data-topic-reply-form");
+      const mode = replyForm.getAttribute("data-topic-reply-mode") === "topic" ? "topic" : "private";
+      const body = replyForm.elements.body.value.trim();
+      const { result, error } = await topicCall(window.relay.topicPostReply, id, postId, {
+        mode, forHuman: body, forAgent: body,
+        idempotencyKey: topicsState.replying?.idempotencyKey || `pill-topic-reply:${postId}:${Date.now()}`,
+      });
+      if (error) { errEl.textContent = error; save.disabled = false; return; }
+      topicsState.replying = null;
+      if (result?.post) topicsState.posts = [result.post, ...topicsState.posts.filter((p) => p.id !== result.post.id)];
+      const who = result?.recipient?.name || "";
+      const notice = who
+        ? (mode === "topic" ? `Posted, and sent to ${who} as a Relay.` : `Sent to ${who} as a Relay.`)
+        : (mode === "topic" ? "Posted." : "Nobody to send it to.");
+      topicsState.notice = notice;
+      setTimeout(() => { if (topicsState.notice === notice) { topicsState.notice = ""; if (activeView === "topics") renderTopics(); } }, 6000);
+      renderTopics();
+      loadTopics({ quiet:true });
+    });
     on("[data-topic-more]", () => loadTopicPosts({ append:true }));
     on("[data-topic-compose]", () => { topicsState.composing = true; renderTopics(); c.querySelector("[data-topic-compose-form] input[name=title]")?.focus(); });
     on("[data-topic-compose-cancel]", () => { topicsState.composing = false; renderTopics(); });
@@ -7320,6 +7426,13 @@
         }, 220);
       });
     }
+  }
+  // A room's quote of a Topic post opens that board: the Topics tab, then the
+  // topic, the same two steps a person would take.
+  function openTopicFromRoom(topicId) {
+    if (!topicId || payload.features?.topics !== true) return;
+    document.querySelector('.tab[data-view="topics"]')?.click();
+    openTopic(topicId);
   }
   // A quiet refresh keeps the tab badge honest without opening the tab.
   setInterval(() => { if (payload.features?.topics === true) loadTopics({ quiet:true }); }, 90_000);
@@ -11349,6 +11462,17 @@
   let groupsList = [];
   let groupsLoaded = false;
   let groupsLoading = null;
+  // A failed group fetch must not be retried by the very render it triggers.
+  // The room render used to call loadGroups(), whose completion re-rendered the
+  // room, which called loadGroups() again: with the API unreachable that was a
+  // full rewrite of the history every round trip, and a pressed photo was
+  // detached before the mouse button came up, so no click ever fired (Shane,
+  // Windows, 2026-09-11). Failures now wait this long before the next attempt.
+  const GROUPS_RETRY_MS = 15000;
+  let groupsRetryAt = 0;
+  function groupsLoadDue() {
+    return !groupsLoaded && !groupsLoading && Date.now() >= groupsRetryAt;
+  }
   let cvgExpandedId = null; // group whose full details screen is open
   let cvgRenamingId = null;
   let cvgDeleteArmedId = null;
@@ -11412,14 +11536,20 @@
     }
     return res.result;
   }
+  // Resolves true when the roster arrived. A failure arms the retry delay and
+  // resolves false, so callers can skip the re-render nothing would change.
   async function loadGroups() {
     const groups = await cvgCall(window.relay.groups);
-    if (Array.isArray(groups)) {
-      groupsList = groups.slice();
-      syncSlackChannelRows();
-      groupsLoaded = true;
-      renderGroups();
+    if (!Array.isArray(groups)) {
+      groupsRetryAt = Date.now() + GROUPS_RETRY_MS;
+      return false;
     }
+    groupsList = groups.slice();
+    syncSlackChannelRows();
+    groupsLoaded = true;
+    groupsRetryAt = 0;
+    renderGroups();
+    return true;
   }
 
   // ---- room-level group info ----------------------------------------------
@@ -12631,6 +12761,7 @@
           ? [{ name:sentRecipient(sentTwin), seen:sentIsRead(sentTwin), readAt:sentTwin.readAt || "" }]
           : [],
         inReplyToRelayId: r.inReplyToRelayId || "",
+        inReplyToTopicPost: r.inReplyToTopicPost || null,
         addressRecipient: r.recipientGroupId ? { groupId:r.recipientGroupId } : (r.senderEmail ? { email:r.senderEmail } : null),
         title: textLike ? String(r.forHuman || subj) : subj, party: relaySender(r), at: r.createdAt || r.updatedAt,
         partyKey: r.recipientGroupName
@@ -12702,6 +12833,7 @@
         delivered: s.groupSendId ? groupDelivered.get(s.groupSendId) === true : sentIsDelivered(s),
         agentOpened: !s.groupSendId && sentIsAcknowledged(s),
         inReplyToRelayId: s.inReplyToRelayId || "",
+        inReplyToTopicPost: s.inReplyToTopicPost || null,
         // A share-link id is a room address, not a posting gate. The server
         // recognises its synthetic mailbox only for owned-agent invocations and
         // never attempts to deliver email to it. Keeping that address here lets
@@ -12795,6 +12927,7 @@
           chatId: chat.chatId,
           threadId: item.threadId || id,
           inReplyToRelayId: item.inReplyToRelayId || "",
+          inReplyToTopicPost: item.inReplyToTopicPost || null,
           direction: mine ? "out" : "in",
           addressRecipient: { chatId:chat.chatId },
           title: textLike ? (body || item.title || "Message") : String(item.title || "Relay"),
@@ -12981,6 +13114,7 @@
         chatId:String(chat.chatId),
         threadId:String(item?.threadId || id || `direct-chat:${chat.chatId}`),
         inReplyToRelayId:String(item?.inReplyToRelayId || ""),
+        inReplyToTopicPost:item?.inReplyToTopicPost || null,
         direction:mine ? "out" : "in",
         seen:mine && (item?.readReceipts || []).some((receipt) => receipt && receipt.seen),
         seenAt:mine ? ((item?.readReceipts || []).find((receipt) => receipt && receipt.readAt)?.readAt || null) : null,
@@ -13371,6 +13505,10 @@
             row.unread = true;
             row.state = "unread";
           }
+          // The rollback changed the painted count outside onPayload. A later
+          // successful retry can match the previous optimistic signature but
+          // must still repaint the badge and message that were restored unread.
+          lastPayloadSignature = "";
           if (!readerMorphSnapshot) renderAll();
         });
     };
@@ -13549,14 +13687,21 @@
          <span class="lab">Your contacts</span>
          <span class="n">${contactsList.length || ""}</span><span class="chev">&#8250;</span>
        </button>`;
-    // The "Your people" discs need the contact book; load it lazily once.
-    if (!contactsList.length && !renderChat._loading) {
+    // The "Your people" discs need the contact book; load it lazily once. An
+    // empty book after a failed fetch waits before it is asked for again, so
+    // this render cannot chain into the next one.
+    if (!contactsList.length && !renderChat._loading && Date.now() >= (renderChat._retryAt || 0)) {
       renderChat._loading = true;
-      loadContacts().then(() => { renderChat._loading = false; if (activeView === "chat") renderChat(); });
+      loadContacts().then(() => {
+        renderChat._loading = false;
+        if (!contactsList.length) { renderChat._retryAt = Date.now() + GROUPS_RETRY_MS; return; }
+        if (activeView === "chat") renderChat();
+      });
     }
-    if (!groupsLoaded && !groupsLoading) {
-      groupsLoading = Promise.resolve(loadGroups()).finally(() => {
+    if (groupsLoadDue()) {
+      groupsLoading = Promise.resolve(loadGroups()).then((loaded) => loaded === true, () => false).then((loaded) => {
         groupsLoading = null;
+        if (!loaded) return;
         if (activeView === "chat") renderChat();
         else if (activeView === "threads" && threadDetailId) renderThreadDetail();
       });
@@ -13921,10 +14066,12 @@
       ? chatRoomForThread(threadDetailId)
       : null;
     const threadMessageOptions = { includeSlack:slackMessagesVisible(chatRoom) };
-    if (chatRoom && chatRoom.isGroup && !groupsLoaded && !groupsLoading) {
-      groupsLoading = Promise.resolve(loadGroups()).finally(() => {
+    // Only a roster that actually arrived is worth repainting the room for; a
+    // failed fetch waits GROUPS_RETRY_MS instead of re-rendering into itself.
+    if (chatRoom && chatRoom.isGroup && groupsLoadDue()) {
+      groupsLoading = Promise.resolve(loadGroups()).then((loaded) => loaded === true, () => false).then((loaded) => {
         groupsLoading = null;
-        if (activeView === "threads" && threadDetailId) renderThreadDetail();
+        if (loaded && activeView === "threads" && threadDetailId) renderThreadDetail();
       });
     }
     const groupPostingState = groupRoomPostingState(chatRoom);
@@ -14129,6 +14276,14 @@
           return `${slackThreadContextHtml(first)}<button type="button" class="th-thread-link" data-slack-thread-focus="${esc(key)}" data-stop="1"><img src="slackMark.png" alt="" /><span>${count} ${count === 1 ? "reply" : "replies"}</span></button>`;
         }).join("");
     const messageReplyReferenceHtml = (message) => {
+      // A reply to a Topic post quotes the post from the snapshot the server
+      // stored with the message: no topic read, and it outlives a takedown.
+      const topicPost = message && message.inReplyToTopicPost;
+      if (topicPost && topicPost.postId) {
+        const authorId = String(topicPost.author?.relayUserId || "");
+        const whose = !authorId ? "a post" : authorId === String(payload.account?.userId || "") ? "your post" : `${topicPost.author.name || "someone"}'s post`;
+        return `<button type="button" class="th-reply-ref" data-topic-jump="${esc(topicPost.topicId || "")}" data-stop="1"><span class="th-reply-ref-who">Replying to ${esc(whose)} in ${esc(topicPost.topicName || "a topic")}</span><span class="th-reply-ref-copy">${esc(topicPost.title || "")}</span></button>`;
+      }
       const parentId = String((message && message.inReplyToRelayId) || "");
       if (!parentId) return "";
       const defaults = defaultReplyAnchorIds.get(String((message && message.id) || ""));
@@ -14981,6 +15136,9 @@
         openReader(String(button.getAttribute("data-open-agent-work") || ""), "threads");
       });
     }
+    for (const b of thHistoryEl.querySelectorAll("[data-topic-jump]")) {
+      b.addEventListener("click", (e) => { e.stopPropagation(); openTopicFromRoom(b.getAttribute("data-topic-jump")); });
+    }
     for (const b of thHistoryEl.querySelectorAll("[data-reply-ref]")) {
       b.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -15180,6 +15338,10 @@
     threadDetailRecovery = null;
     threadDetailPartyHint = partyHint;
     activeView = "threads";
+    // Entering a room is deliberate presentation, including from the initial
+    // already-expanded card. Without this, later arrivals fail the on-stage
+    // check until the reader happens to use the tray or fold/unfold the pill.
+    presented = true;
     // Entering a conversation READS IT — all of it, like every messenger.
     // Letters used to be exempt, waiting for a per-message unfold, so a reader
     // could open a chat, read the thing, come back, and still find it bold with

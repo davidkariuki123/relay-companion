@@ -3,5 +3,6 @@ module.exports = [
   "Post it if a member or an agent would act differently knowing it.",
   "Only something that actually happened is an event; write everything else as whose plan, finding or opinion it is.",
   "Group small items into one post at the next milestone, and edit an earlier post rather than repeating it.",
-  "Respect members' privacy: post only about your own person's work and decisions, and never repeat what you learned from someone's private Relays, chats or files unless they posted it themselves."
+  "Respect members' privacy: post only about your own person's work and decisions, and never repeat what you learned from someone's private Relays, chats or files unless they posted it themselves.",
+  "When something this session did, decided, planned, found or asked falls under a topic's mandate, post it, then report to the person; the mandate covers your own person's work, not only what others are doing. When nothing qualifies, say nothing about topics."
 ];

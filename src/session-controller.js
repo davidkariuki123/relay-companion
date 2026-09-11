@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { commandExists } from "./command-path.js";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
@@ -22,6 +23,7 @@ import { setClaudeDesktopSessionPermissionMode } from "./claude-session-writer.j
 import {
   cachePublishedSessions,
   discoverSessions,
+  discoverSessionsAsync,
   recordAnonymousSession,
   recordControlledSession,
   sessionPlacement,
@@ -110,8 +112,7 @@ export function sendClaudeSocket(socketPath, prompt, timeoutMs = 30_000) {
 // downloaded binary so background task runs work there too.
 export function claudeCommand() {
   if (process.env.CLAUDE_CLI_PATH) return process.env.CLAUDE_CLI_PATH;
-  const onPath = spawnSync("which", ["claude"], { stdio: "ignore" });
-  if (!onPath.error && onPath.status === 0) return "claude";
+  if (commandExists("claude")) return "claude";
   try {
     const versions = installedCliVersions();
     for (let i = versions.length - 1; i >= 0; i -= 1) {
@@ -1215,7 +1216,9 @@ async function processClaim(client, claim, log) {
 export async function runSessionDirectoryOnce({
   client,
   log = () => {},
-  discover = discoverSessions,
+  // The periodic sweep must never block the daemon: heartbeats, recovery
+  // probes, and Relay delivery share this event loop with it.
+  discover = discoverSessionsAsync,
   controller = controllerObservation,
 } = {}) {
   // Owned chat agents are user-visible foreground work. Claim them before the
@@ -1243,7 +1246,7 @@ export async function runSessionDirectoryOnce({
   };
   for (const operation of urgent) await claim(operation);
 
-  const observations = discover();
+  const observations = await discover();
   const published = await client.publishSessionObservations(observations, controller());
   cachePublishedSessions(published);
   for (const operation of ordinary) {

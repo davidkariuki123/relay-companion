@@ -18,7 +18,7 @@ test("RelayClient carries the complete topic surface", () => {
   for (const m of [
     "topics", "topic", "createTopic", "updateTopic", "archiveTopic", "inviteToTopic", "approveTopicMandate",
     "declineTopicInvite", "leaveTopic", "updateTopicMembership", "markTopicSeen", "setTopicMemberRole",
-    "removeTopicMember", "topicPosts", "createTopicPost", "updateTopicPost", "deleteTopicPost",
+    "removeTopicMember", "topicPosts", "createTopicPost", "updateTopicPost", "deleteTopicPost", "replyToTopicPost",
   ]) {
     assert.equal(typeof c[m], "function", `RelayClient.${m}`);
   }
@@ -38,6 +38,7 @@ test("preload bridges every topic operation", () => {
     'topicMemberRemove: (id, userId) => ipcRenderer.invoke("relay:topicMemberRemove", String(id || ""), String(userId || ""))',
     'topicPosts: (id, input = {}) => ipcRenderer.invoke("relay:topicPosts", String(id || ""), input || {})',
     'topicPostCreate: (id, input = {}) => ipcRenderer.invoke("relay:topicPostCreate", String(id || ""), input || {})',
+    'topicPostReply: (id, postId, input = {}) => ipcRenderer.invoke("relay:topicPostReply", String(id || ""), String(postId || ""), input || {})',
     'topicPostDelete: (id, postId) => ipcRenderer.invoke("relay:topicPostDelete", String(id || ""), String(postId || ""))',
   ]) {
     assert.ok(preload.includes(bridge), bridge);
@@ -50,6 +51,7 @@ test("main proxies topic calls through the API client behind the developer gate"
     "relay:topicsList", "relay:topicGet", "relay:topicCreate", "relay:topicUpdate", "relay:topicArchive", "relay:topicInvite",
     "relay:topicApprove", "relay:topicDecline", "relay:topicLeave", "relay:topicMembership", "relay:topicSeen",
     "relay:topicMemberRole", "relay:topicMemberRemove", "relay:topicPosts", "relay:topicPostCreate", "relay:topicPostDelete",
+    "relay:topicPostReply",
   ]) {
     assert.ok(main.includes(`ipcMain.handle("${h}"`), h);
   }
@@ -104,11 +106,66 @@ test("invitation and re-approval are one act on the exact mandate version, and m
 
 test("the four standing rules are a feature of every topic, rendered from the shared list, never mandate text", () => {
   const rules = fs.readFileSync(new URL("../src/topic-standing-rules.cjs", import.meta.url), "utf8");
-  for (const phrase of ["act differently knowing it", "actually happened is an event", "edit an earlier post rather than repeating it", "Respect members' privacy"]) {
+  for (const phrase of ["act differently knowing it", "actually happened is an event", "edit an earlier post rather than repeating it", "Respect members' privacy", "post it, then report to the person", "say nothing about topics"]) {
     assert.ok(rules.includes(phrase), phrase);
   }
   assert.match(main, /topicStandingRules: require\("\.\.\/src\/topic-standing-rules\.cjs"\)/);
   assert.match(html, /function topicStandingRulesHtml\(\)[\s\S]*?payload\.ui\?\.topicStandingRules/);
   assert.match(html, /placeholder="The mandate: what this topic is about, in a sentence or two\. The rules every topic has are below; no need to repeat them\."/);
-  assert.match(html, /\$\{mandateBlock\}\$\{m\.state === "active" \|\| m\.state === "invited" \? topicStandingRulesHtml\(\) : ""\}/);
+  // Joined: the rules sit on the Mandate face under the mandate itself, headed
+  // "Default behavior". Invited: they sit under the invitation, no faces yet.
+  assert.match(html, /<strong>Default behavior<\/strong>/);
+  assert.doesNotMatch(html, /<strong>Every topic<\/strong>/);
+  assert.match(html, /topicsState\.pane === "mandate" \? `\$\{mandateBlock\}\$\{topicStandingRulesHtml\(\)\}\$\{settings\}`/);
+  assert.match(html, /: `\$\{topicStandingRulesHtml\(\)\}\$\{topicMembersHtml\(d\)\}`;/);
+});
+
+test("an open topic has three faces — Messages, Members, Mandate — and the lanes live only on Messages", () => {
+  assert.match(html, /const tabs = \[\["messages", "Messages"\], \["members", "Members"\], \["mandate", "Mandate"\]\];/);
+  assert.match(html, /pane:"messages",/);
+  assert.match(html, /on\("\[data-topic-pane\]", \(el\) => \{ topicsState\.pane = el\.getAttribute\("data-topic-pane"\) \|\| "messages"; renderTopics\(\); \}\);/);
+  // Every face is chosen by pane; members (with leave/archive) and mandate (with
+  // the agent-posting setting) never render on the Messages face.
+  assert.match(html, /topicsState\.pane === "members" \? `\$\{topicMembersHtml\(d\)\}\$\{leave\}`/);
+  assert.match(html, /: `\$\{current \? topicComposeHtml\(\) : ""\}\$\{notice\}\$\{lanes\}\$\{posts\}\$\{more\}`\)/);
+  // Opening another topic lands on Messages again.
+  assert.match(html, /Object\.assign\(topicsState, \{ openId:id,[^\n]*pane:"messages", replying:null, notice:"" \}\);/);
+});
+
+test("a post offers Reply in topic and Reply privately; either way the author gets a Relay quoting the post", () => {
+  // The two verbs sit next to Delete, only on someone else's post, never on an archived board.
+  assert.match(html, /const canReply = Boolean\(p\.author\?\.relayUserId\) && !mine && !detail\?\.archivedAt;/);
+  assert.match(html, /data-topic-reply="\$\{esc\(p\.id\)\}" data-mode="topic">Reply in topic<\/button>/);
+  assert.match(html, /data-topic-reply="\$\{esc\(p\.id\)\}" data-mode="private">Reply privately<\/button>/);
+  assert.match(html, /data-topic-post-delete="\$\{esc\(p\.id\)\}">Delete<\/button>/);
+  // One inline box, keyed once when it opens so a retry replays rather than duplicates.
+  assert.match(html, /idempotencyKey: same \? topicsState\.replying\.idempotencyKey : `pill-topic-reply:\$\{postId\}/);
+  assert.match(html, /topicCall\(window\.relay\.topicPostReply, id, postId, \{\s*mode, forHuman: body, forAgent: body,/);
+  // The server does both halves; main passes the mode through and refreshes the
+  // sent cache so the Relay shows in the room with the author.
+  assert.match(main, /ipcMain\.handle\("relay:topicPostReply", async \(_e, id, postId, input\) => \{[\s\S]*?c\.replyToTopicPost\(id, postId, \{\s*mode: input\?\.mode === "topic" \? "topic" : "private",/);
+  assert.match(main, /if \(result && result\.ok && result\.result && result\.result\.relay\) refreshSent\(\)\.catch\(\(\) => \{\}\);/);
+  // A board post answering another quotes it; the quote survives a takedown.
+  assert.match(html, /Replying to \$\{esc\(p\.inReplyTo\.author\?\.name \|\| "a post"\)\}\$\{p\.inReplyTo\.deleted \? " · post deleted" : ""\}/);
+});
+
+test("a room quotes the Topic post a Relay answers, from the server's snapshot, and the quote opens the board", () => {
+  assert.match(html, /const topicPost = message && message\.inReplyToTopicPost;/);
+  assert.match(html, /Replying to \$\{esc\(whose\)\} in \$\{esc\(topicPost\.topicName \|\| "a topic"\)\}/);
+  assert.match(html, /data-topic-jump="\$\{esc\(topicPost\.topicId \|\| ""\)\}"/);
+  assert.match(html, /function openTopicFromRoom\(topicId\) \{[\s\S]*?document\.querySelector\('\.tab\[data-view="topics"\]'\)\?\.click\(\);\s*openTopic\(topicId\);/);
+  // The snapshot rides every row shape the room is built from, and repaints when it changes.
+  for (const carrier of [
+    'inReplyToTopicPost: r.inReplyToTopicPost || null,',
+    'inReplyToTopicPost: s.inReplyToTopicPost || null,',
+    'inReplyToTopicPost: item.inReplyToTopicPost || null,',
+    'inReplyToTopicPost:item?.inReplyToTopicPost || null,',
+    'item.inReplyToTopicPost ? item.inReplyToTopicPost.postId : "", item.state,',
+  ]) assert.ok(html.includes(carrier), carrier);
+  for (const carrier of [
+    'inReplyToTopicPost: packet.inReplyToTopicPost || null,',
+    'inReplyToTopicPost: p.inReplyToTopicPost && typeof p.inReplyToTopicPost === "object" ? p.inReplyToTopicPost : null,',
+    'inReplyToTopicPost: packet.inReplyToTopicPost || local.inReplyToTopicPost || null,',
+    'r.inReplyToTopicPost ? r.inReplyToTopicPost.postId : "",',
+  ]) assert.ok(main.includes(carrier), carrier);
 });
