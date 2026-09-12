@@ -568,6 +568,61 @@ async function retryAgentWrite(write, { attempts = 8, wait = sleep } = {}) {
   throw lastError;
 }
 
+// Claude Code serializes some launch-time failures as a terminal assistant
+// row and exits. The credential refresh lock is the common one: another
+// Claude Code process held it (or died holding it), so this run never reached
+// the model. It is transient by the CLI's own wording ("try again in a
+// minute"), so the controller retries it before reporting a failed run.
+const CLAUDE_TRANSIENT_LAUNCH_FAILURE = /could not refresh your login because another claude code process/i;
+export const CLAUDE_TRANSIENT_RETRY_DELAYS_MS = [15_000, 45_000];
+
+export function claudeTransientLaunchFailure(value) {
+  return CLAUDE_TRANSIENT_LAUNCH_FAILURE.test(String(value?.message || value || ""));
+}
+
+// The completion wait observes the live registration, which can go idle a
+// beat before Claude flushes its final transcript rows. Reading exactly once
+// at that instant produced "finished without returning a Relay answer" for a
+// run whose transcript carried a real error a moment later.
+export async function claudeRelayTerminalWhenSettled(transcriptPath, sessionId, {
+  attempts = 6,
+  delayMs = 500,
+  read = claudeRelayCompletionFromTranscript,
+  sleep: pause = sleep,
+} = {}) {
+  let terminal = read(transcriptPath, sessionId);
+  for (let attempt = 1; attempt < attempts && !terminal.completion && !terminal.error; attempt += 1) {
+    await pause(delayMs);
+    terminal = read(transcriptPath, sessionId);
+  }
+  return terminal;
+}
+
+// Retry a transient launch failure on the same native session so the Work
+// session keeps one identity. `relaunch` is absent when the run was handed to
+// a live Claude Desktop socket: that adapter owns its own recovery.
+export async function settleClaudeRelayRun({
+  readTerminal,
+  relaunch = null,
+  wait = async () => {},
+  delays = CLAUDE_TRANSIENT_RETRY_DELAYS_MS,
+  progress = () => {},
+  sleep: pause = sleep,
+}) {
+  let terminal = await readTerminal();
+  if (!relaunch) return terminal;
+  for (let attempt = 0; attempt < delays.length; attempt += 1) {
+    if (terminal.completion || !claudeTransientLaunchFailure(terminal.error)) break;
+    const seconds = Math.round(delays[attempt] / 1000);
+    progress(`Claude Code on your laptop could not refresh its sign-in because another Claude Code window was refreshing it. Retrying in ${seconds} seconds.`);
+    await pause(delays[attempt]);
+    await relaunch();
+    await wait();
+    terminal = await readTerminal();
+  }
+  return terminal;
+}
+
 export function claudeRelayCompletionFromTranscript(transcriptPath, sessionId) {
   const rows = readClaudeNativeTranscriptRows(transcriptPath);
   if (!rows.length) return { completion: null, error: "" };
@@ -665,6 +720,14 @@ async function waitForClaudeRemoteAuthSubmission(client, sessionId, attempt, aft
 function providerAuthenticationFailure(value) {
   return /authentication_failed|login expired|failed to authenticate|oauth access token.*revoked|not logged in|please run \/login/i
     .test(String(value?.message || value || ""));
+}
+
+// An owned run is worth a sign-in from the phone when the provider says it is
+// signed out, or when its login refresh stayed locked through every retry: the
+// lock goes stale after a minute, so a persisting failure means the saved
+// login can no longer be refreshed in place and a fresh sign-in replaces it.
+export function agentRunRecoverableBySignIn(value) {
+  return providerAuthenticationFailure(value) || claudeTransientLaunchFailure(value);
 }
 
 export async function ensureAgentRunProviderAuthentication({
@@ -790,17 +853,38 @@ async function executeClaude({ client, claim, target, operation, input, prompt }
     ...(stable?.id ? { sessionId: stable.id } : {}),
     nativeSessionId: sessionId,
   });
+  const renew = () => client.renewSessionOperationLease(operation.id, claim.claimToken);
   await waitForClaudeCompletion(sessionId, {
     baselineMtime,
     transcriptPath: resolvedTranscriptPath,
-    renew: () => client.renewSessionOperationLease(operation.id, claim.claimToken),
+    renew,
   });
-  const terminal = claudeRelayCompletionFromTranscript(resolvedTranscriptPath, sessionId);
+  const terminal = await settleClaudeRelayRun({
+    readTerminal: () => claudeRelayTerminalWhenSettled(resolvedTranscriptPath, sessionId),
+    relaunch: registration ? null : () => {
+      try { baselineMtime = fs.statSync(resolvedTranscriptPath).mtimeMs; } catch {}
+      spawnBackgroundClaude({
+        sessionId,
+        title,
+        cwd,
+        prompt,
+        resume: true,
+        model: input.model || "",
+        effort: input.effort || "",
+      });
+    },
+    wait: () => waitForClaudeCompletion(sessionId, {
+      baselineMtime,
+      transcriptPath: resolvedTranscriptPath,
+      renew,
+    }),
+    progress: reporter.progress,
+  });
   if (terminal.completion) {
     await reporter.complete(terminal.completion.body, terminal.completion.body);
   } else {
     const reason = terminal.error || "Claude Code finished without returning a Relay answer";
-    if (providerAuthenticationFailure(reason)) throw new Error(reason);
+    if (agentRunRecoverableBySignIn(reason)) throw new Error(reason);
     // Claude normally completes the owned Relay through its MCP tool. If that
     // happened, finish is an idempotent no-op and confirms the existing result.
     // Otherwise it records the native failure before processClaim stores failed
@@ -1194,7 +1278,7 @@ async function processClaim(client, claim, log) {
     try {
       await execute();
     } catch (error) {
-      if (!input.agentRunRelayId || signedInDuringOperation || !providerAuthenticationFailure(error)) throw error;
+      if (!input.agentRunRelayId || signedInDuringOperation || !agentRunRecoverableBySignIn(error)) throw error;
       await ensureAgentRunProviderAuthentication({ client, provider, input, force:true });
       signedInDuringOperation = true;
       await execute();

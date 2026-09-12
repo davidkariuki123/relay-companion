@@ -271,15 +271,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # npm's own publish notice says a new version "may take a few minutes
+          # to become available". A sixty-second wait here failed two releases
+          # in a row (0.1.508, 0.1.509) after their publish had already
+          # succeeded, and each failure cost a manual rerun plus a second
+          # protected approval. Wait as long as the registry needs, within reason.
           published=""
-          for attempt in $(seq 1 20); do
-            published="$(npm view "relay-companion@$VERSION" version 2>/dev/null || true)"
+          for attempt in $(seq 1 40); do
+            published="$(npm view "relay-companion@$VERSION" version --prefer-online 2>/dev/null || true)"
             [ "$published" = "$VERSION" ] && break
-            echo "waiting for relay-companion@$VERSION to propagate ($attempt/20)"
-            sleep 3
+            echo "waiting for relay-companion@$VERSION to propagate ($attempt/40, 15s apart)"
+            sleep 15
           done
           [ "$published" = "$VERSION" ] || {
-            echo "::error::relay-companion@$VERSION did not propagate within 60 seconds"
+            echo "::error::relay-companion@$VERSION did not propagate within 10 minutes. The publish step already succeeded, so do not republish: rerun this job (gh run rerun <run-id> --failed) and re-approve the companion-candidate gate."
             exit 1
           }
           verified=0

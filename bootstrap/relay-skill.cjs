@@ -114,6 +114,37 @@ function pathInside(parent, child) {
   return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
 }
 
+// Where the previous skill tree is kept for `relay skill rollback`. It used to
+// be a sibling of the installed skill (`.relay-rollback` inside the host's
+// skills folder), and Claude Code and Codex load any directory there that has
+// a SKILL.md, so every session saw the Relay skill twice. It now lives under
+// Relay's own state directory, keyed by the target it backs.
+function rollbackRoot({ homeDir = os.homedir(), env = process.env } = {}) {
+  return path.join(env.RELAY_CONFIG_DIR || path.join(homeDir, ".relay"), "skill-rollback");
+}
+
+function rollbackPathFor(directory, options = {}) {
+  return path.join(rollbackRoot(options), sha256(path.resolve(directory)).slice(0, 16));
+}
+
+function legacyRollbackPath(directory) {
+  return path.join(path.dirname(directory), `.${SKILL_NAME}-rollback`);
+}
+
+// A rename when both paths share a volume; a copy and remove when they do not
+// (CODEX_HOME or RELAY_CONFIG_DIR may point at another drive).
+function moveTree(from, to) {
+  fs.mkdirSync(path.dirname(to), { recursive: true, mode: 0o700 });
+  try {
+    fs.renameSync(from, to);
+    return;
+  } catch (error) {
+    if (error.code !== "EXDEV") throw error;
+  }
+  fs.cpSync(from, to, { recursive: true, errorOnExist: true, force: false });
+  fs.rmSync(from, { recursive: true, force: true });
+}
+
 function fileHash(file) {
   return sha256(fs.readFileSync(file));
 }
@@ -244,10 +275,12 @@ function removeSkillArtifact(directory) {
     : { ok: true, status: managed ? "removed" : "empty_debris_removed", directory };
 }
 
-function skillArtifacts(directory) {
+function skillArtifacts(directory, options = {}) {
   const parent = path.dirname(directory);
   const name = path.basename(directory);
   const artifacts = [directory];
+  const rollback = rollbackPathFor(directory, options);
+  if (fs.existsSync(rollback)) artifacts.push(rollback);
   let entries = [];
   try { entries = fs.readdirSync(parent, { withFileTypes: true }); }
   catch (error) {
@@ -270,7 +303,7 @@ function uninstallManaged(options = {}) {
   const seen = new Set();
   for (const target of targets) {
     let artifacts;
-    try { artifacts = skillArtifacts(target.directory); }
+    try { artifacts = skillArtifacts(target.directory, options); }
     catch (error) {
       results.push({ host: target.host, ok: false, status: "failed", directory: target.directory, error: error?.message || String(error) });
       continue;
@@ -345,16 +378,23 @@ async function installOne(directory, manifest, readFile, options = {}) {
 
   fs.mkdirSync(parent, { recursive: true, mode: 0o700 });
   const staging = fs.mkdtempSync(path.join(parent, `.${SKILL_NAME}-staging-`));
-  const rollback = path.join(parent, `.${SKILL_NAME}-rollback`);
-  if (!pathInside(parent, staging) || !pathInside(parent, rollback)) throw new Error("Relay refused an unsafe skill update location.");
+  const rollback = rollbackPathFor(directory, options);
+  const legacyRollback = legacyRollbackPath(directory);
+  if (!pathInside(parent, staging) || !pathInside(rollbackRoot(options), rollback) || !pathInside(parent, legacyRollback)) {
+    throw new Error("Relay refused an unsafe skill update location.");
+  }
   try {
     await materialize(manifest, staging, readFile, options, existing);
-    if (fs.existsSync(rollback)) fs.rmSync(rollback, { recursive: true, force: true });
-    if (fs.existsSync(directory)) fs.renameSync(directory, rollback);
+    // One rollback copy per target. A copy an earlier installer left beside
+    // the skill goes too: hosts load it as a second skill.
+    for (const stale of [rollback, legacyRollback]) {
+      if (fs.existsSync(stale)) fs.rmSync(stale, { recursive: true, force: true });
+    }
+    if (fs.existsSync(directory)) moveTree(directory, rollback);
     try {
       fs.renameSync(staging, directory);
     } catch (error) {
-      if (!fs.existsSync(directory) && fs.existsSync(rollback)) fs.renameSync(rollback, directory);
+      if (!fs.existsSync(directory) && fs.existsSync(rollback)) moveTree(rollback, directory);
       throw error;
     }
     return { ok: true, status: existing ? "updated" : "installed", directory, version: manifest.version, rollback: fs.existsSync(rollback) ? rollback : null };
@@ -396,10 +436,13 @@ async function updateFromRemote(options = {}) {
   return installManifest(manifest, (entry) => fetchBytes(`${manifest.baseUrl}/${entry.path.split("/").map(encodeURIComponent).join("/")}`, options), options);
 }
 
-function rollbackOne(directory) {
+function rollbackOne(directory, options = {}) {
   const parent = path.dirname(directory);
-  const rollback = path.join(parent, `.${SKILL_NAME}-rollback`);
-  if (!pathInside(parent, rollback) || !fs.existsSync(rollback)) return { ok: false, status: "no_rollback", directory };
+  // The current location first; a copy an earlier installer left beside the
+  // skill still rolls back once.
+  const rollback = [rollbackPathFor(directory, options), legacyRollbackPath(directory)].find((candidate) => fs.existsSync(candidate));
+  if (!rollback) return { ok: false, status: "no_rollback", directory };
+  if (!pathInside(rollbackRoot(options), rollback) && !pathInside(parent, rollback)) throw new Error("Relay refused an unsafe rollback location.");
   const currentChanges = localChanges(directory);
   if (currentChanges.length) return { ok: false, status: readState(directory) ? "modified" : "unmanaged", directory, changedFiles: currentChanges };
   const rollbackChanges = localChanges(rollback);
@@ -408,7 +451,7 @@ function rollbackOne(directory) {
   if (!pathInside(parent, current)) throw new Error("Relay refused an unsafe rollback location.");
   if (fs.existsSync(directory)) fs.renameSync(directory, current);
   try {
-    fs.renameSync(rollback, directory);
+    moveTree(rollback, directory);
     if (fs.existsSync(current)) fs.rmSync(current, { recursive: true, force: true });
     return { ok: true, status: "rolled_back", directory, version: readState(directory)?.version || "" };
   } catch (error) {
@@ -430,7 +473,7 @@ async function runCli(argv = process.argv.slice(2), options = {}) {
   if (command === "install") return installBundled(common);
   if (command === "update") return updateFromRemote(common);
   if (command === "rollback") {
-    const results = defaultTargets(common).map((target) => ({ host: target.host, ...rollbackOne(target.directory) }));
+    const results = defaultTargets(common).map((target) => ({ host: target.host, ...rollbackOne(target.directory, common) }));
     return { ok: results.every((item) => item.ok), results };
   }
   if (command === "status") {
@@ -470,6 +513,7 @@ module.exports = {
   parseManifest,
   readState,
   rollbackOne,
+  rollbackPathFor,
   runCli,
   sha256,
   uninstallManaged,

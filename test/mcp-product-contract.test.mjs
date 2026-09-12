@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-import { E2EE_LOCAL_MCP_INSTRUCTIONS, E2EE_REMOTE_MCP_INSTRUCTIONS, TODO_STATUS_RULE, RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS, TOOLS, toolsForAccount } from "../src/mcp.js";
+import { E2EE_LOCAL_MCP_INSTRUCTIONS, E2EE_REMOTE_MCP_INSTRUCTIONS, TODO_STATUS_RULE, RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS, STARTUP_INSTRUCTIONS_BUDGET, STARTUP_INSTRUCTIONS_RESERVE, TOOLS, toolsForAccount } from "../src/mcp.js";
 
 const byName = new Map(TOOLS.map((tool) => [tool.name, tool]));
 const codexByName = new Map(toolsForAccount(
@@ -88,9 +88,18 @@ test("startup guidance and owner schemas preserve the complete product ontology"
   assert.match(RELAY_MCP_INSTRUCTIONS, /explicitly requested other medium overrides/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /mint a link with relay_share_link/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /notification emails are not the authoritative contents/i);
-  assert.match(RELAY_MCP_INSTRUCTIONS, /visible chat is one conversation/i);
-  assert.match(RELAY_MCP_INSTRUCTIONS, /threadId is opaque retrieval metadata/i);
-  assert.match(RELAY_MCP_INSTRUCTIONS, /3-6 word title/i);
+  // The check-in is the one unconditional instruction: it must arrive cold in
+  // every profile, because the reply is what carries the boards and mandates.
+  for (const instructions of [RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS]) {
+    assert.match(instructions, /Call relay_session_updates when a piece of work starts and again before your final response/);
+  }
+  // Composition detail (title length, kind, chat ontology) rides the tools and
+  // the skill, read at the moment they apply; the startup block stays routing.
+  for (const moved of [/visible chat is one conversation/i, /threadId is opaque/i, /3-6 word title/i, /external work.*is task/i]) {
+    assert.doesNotMatch(RELAY_MCP_INSTRUCTIONS, moved);
+  }
+  assert.match(byName.get("relay_send").inputSchema.properties.title.description, /3-6 word gist/i);
+  assert.match(byName.get("relay_chat_fetch").description, /no user-visible threads or topics/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /relay_send requires a complete, non-empty forAgent/i);
   assert.doesNotMatch(RELAY_MCP_INSTRUCTIONS, /Plain text uses relay_chat_send/i);
   assert.doesNotMatch(RELAY_MCP_INSTRUCTIONS, /optional (?:detailed forAgent|agent context)/i);
@@ -101,7 +110,6 @@ test("startup guidance and owner schemas preserve the complete product ontology"
   assert.match(skillGuide, /mechanisms, evidence, code, paths, logs, reproduction steps/);
   assert.match(skillGuide, /within 120 words by default/);
   assert.match(skillGuide, /only after rejection/);
-  assert.match(RELAY_MCP_INSTRUCTIONS, /external work.*is task/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /Task Runs finish automatically/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /relay_task_start before doing an inbound Task and relay_task_complete afterward/i);
   assert.match(inboxContract, /With no arguments, returns only metadata for the newest 50 arrivals from the last 7 days/i);
@@ -113,6 +121,15 @@ test("startup guidance and owner schemas preserve the complete product ontology"
   assert.match(inboxContract, /cold-start recent history.*do not enumerate irrelevant ones/i);
   assert.ok(Buffer.byteLength(RELAY_MCP_INSTRUCTIONS, "utf8") <= 2_048,
     "Claude receives the complete startup ontology instead of a truncated prefix");
+  // Hosts show nothing past the cap, and the person's subscribed topics are
+  // appended after the static block. It once sat at 2047 of 2048 bytes and
+  // silently pushed every topic off the end; the reserve keeps room for the
+  // head and at least one board line.
+  assert.equal(STARTUP_INSTRUCTIONS_BUDGET, 2_048);
+  for (const instructions of [RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS]) {
+    assert.ok(Buffer.byteLength(instructions, "utf8") <= STARTUP_INSTRUCTIONS_BUDGET - STARTUP_INSTRUCTIONS_RESERVE,
+      `the static block leaves ${STARTUP_INSTRUCTIONS_RESERVE} bytes for the subscribed topics (${Buffer.byteLength(instructions, "utf8")} used)`);
+  }
   assert.match(
     source,
     /instructions:\s*startupEncryption\.enabled\s*\?\s*E2EE_LOCAL_MCP_INSTRUCTIONS\s*:\s*features\.requests[\s\S]{0,400}?instructionsWithTopics\(RELAY_MCP_INSTRUCTIONS[\s\S]{0,200}?:\s*REQUESTS_DISABLED_INSTRUCTIONS/,
@@ -151,7 +168,7 @@ test("relay_send requires one recipient, an explicit kind, and the two-document 
   assert.match(send.inputSchema.properties.kind.description, /MUST be kind='task', not kind='message'/);
   assert.match(send.inputSchema.properties.kind.description, /Do you think we should switch to dev\?' is kind='message'/);
   assert.match(send.inputSchema.properties.title.description, /3-6 word gist/i);
-  assert.match(humanDescription, /Read the installed Relay skill/);
+  assert.match(humanDescription, /read the installed Relay skill/i);
   assert.match(humanDescription, /preserve the human's intent and invent no asks or commitments/);
   assert.match(humanFieldDescription, /sender's intent and voice/);
   assert.match(humanFieldDescription, /never invent, strengthen or soften an ask or commitment/);

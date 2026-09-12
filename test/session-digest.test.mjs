@@ -10,7 +10,7 @@ import context from "../src/agent-relay-context.cjs";
 import digestModule from "../src/session-digest.cjs";
 
 const { recordAgentRelayIndex, recordAgentTopicIndex } = context;
-const { QUIET_DESCRIPTION, createSessionDigest, describeDigest, watchSessionDigest, statePath } = digestModule;
+const { QUIET_DESCRIPTION, QUIET_DESCRIPTION_ORDINARY, createSessionDigest, describeDigest, watchSessionDigest, statePath } = digestModule;
 
 function tempHome() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "relay-session-digest-"));
@@ -96,7 +96,33 @@ test("the description stays within the host budget and topics are omitted off th
   assert.match(description, /Relays \(40\):/);
   assert.doesNotMatch(description, /Topics:/);
   assert.deepEqual(board.take().topics, []);
-  assert.equal(describeDigest({ newRelays: [], topicChanges: [{ topicId: "tpc_x", name: "X", change: "invited" }] }, { topicsEnabled: false }), QUIET_DESCRIPTION);
+  // Off the developer row the quiet text names no Topics at all.
+  assert.equal(describeDigest({ newRelays: [], topicChanges: [{ topicId: "tpc_x", name: "X", change: "invited" }] }, { topicsEnabled: false }), QUIET_DESCRIPTION_ORDINARY);
+  assert.doesNotMatch(QUIET_DESCRIPTION_ORDINARY, /Topic/);
+  assert.match(QUIET_DESCRIPTION, /subscribed Topics with their mandates/);
+});
+
+test("the board lists the person's subscribed topics with their mandates for the check-in reply", () => {
+  const home = tempHome();
+  const scope = "dev_token";
+  const nowMs = Date.parse("2026-09-11T09:00:00.000Z");
+  recordAgentRelayIndex(home, scope, { items: [] }, { nowMs });
+  recordAgentTopicIndex(home, scope, { topics: [
+    topic("tpc_dev", { name: "Dev work", mandate: "What we ship.", postCount: 3, latestPostAt: "2026-09-11T08:00:00.000Z" }),
+    topic("tpc_design", { name: "Design", mandate: "Design calls.", mandateVersion: 2, membership: { state: "active", mandateCurrent: false } }),
+  ] });
+  const board = createSessionDigest({ homeDir: home, accountScope: scope, sessionKey: "ses_6", nowMs });
+  const listed = board.subscribedTopics();
+  assert.deepEqual(listed.map((entry) => [entry.topicId, entry.name, entry.standing, entry.mandate, entry.posts]), [
+    ["tpc_design", "Design", "paused", "Design calls.", 0],
+    ["tpc_dev", "Dev work", "current", "What we ship.", 3],
+  ]);
+  assert.equal(listed[0].mandateVersion, 2, "a paused topic names the mandate version awaiting approval");
+  assert.match(listed[1].latestPostAt, /^2026-09-11T/);
+  // Listing is a read: the board stays quiet and no cursor moves.
+  assert.equal(board.refresh().description, QUIET_DESCRIPTION);
+  recordAgentTopicIndex(home, scope, { topics: [] });
+  assert.deepEqual(board.subscribedTopics(), []);
 });
 
 test("the watcher announces a changed digest once per snapshot change", async () => {

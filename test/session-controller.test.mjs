@@ -7,6 +7,9 @@ import path from "node:path";
 import {
   commandAvailable,
   claudeRelayCompletionFromTranscript,
+  claudeRelayTerminalWhenSettled,
+  claudeTransientLaunchFailure,
+  agentRunRecoverableBySignIn,
   claudeSessionNeedsCatalogRestart,
   codexRecoveryWaitMs,
   ensureAgentRunProviderAuthentication,
@@ -15,6 +18,7 @@ import {
   resolveClaudeBackgroundAgent,
   runSessionDirectoryOnce,
   sessionOperationPrompt,
+  settleClaudeRelayRun,
   waitForClaudeCompletion,
 } from "../src/session-controller.js";
 
@@ -193,6 +197,116 @@ test("Claude transcript completion preserves authentication failure truth", () =
   const result = claudeRelayCompletionFromTranscript(transcript, "claude-failed");
   assert.equal(result.completion, null);
   assert.match(result.error, /Login expired/);
+});
+
+test("Claude transcript completion surfaces the login-refresh lock failure", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-claude-lock-"));
+  const transcript = path.join(root, "locked.jsonl");
+  const text = "Could not refresh your login because another Claude Code process is refreshing it (or exited mid-refresh) · Try again in a minute; if it keeps happening, close other Claude Code windows or sign in again with /login";
+  fs.writeFileSync(transcript, [
+    { type:"user", uuid:"prompt", origin:{ kind:"human" }, message:{ role:"user", content:"@Claude what has David posted?" }, timestamp:"2026-09-11T17:01:27.022Z" },
+    { type:"assistant", uuid:"failure", parentUuid:"prompt", isApiErrorMessage:true, error:"server_error", message:{ role:"assistant", stop_reason:"stop_sequence", content:[{ type:"text", text }] }, timestamp:"2026-09-11T17:01:40.490Z" },
+  ].map((row) => JSON.stringify(row)).join("\n"));
+  const result = claudeRelayCompletionFromTranscript(transcript, "claude-locked");
+  assert.equal(result.completion, null);
+  assert.match(result.error, /Could not refresh your login/);
+  assert.equal(claudeTransientLaunchFailure(result.error), true);
+  assert.equal(claudeTransientLaunchFailure("authentication_failed: Login expired"), false);
+  assert.equal(claudeTransientLaunchFailure(""), false);
+});
+
+test("Claude terminal read waits for a late transcript flush instead of reporting nothing", async () => {
+  const reads = [
+    { completion:null, error:"" },
+    { completion:null, error:"" },
+    { completion:null, error:"Could not refresh your login because another Claude Code process is refreshing it" },
+    { completion:{ body:"never reached" }, error:"" },
+  ];
+  const pauses = [];
+  const terminal = await claudeRelayTerminalWhenSettled("transcript.jsonl", "sess", {
+    read:() => reads.shift(),
+    sleep:async (ms) => { pauses.push(ms); },
+    delayMs:5,
+  });
+  assert.match(terminal.error, /Could not refresh/);
+  assert.deepEqual(pauses, [5, 5]);
+  assert.equal(reads.length, 1);
+});
+
+test("Claude terminal read gives up after its attempts when the transcript stays empty", async () => {
+  let reads = 0;
+  const terminal = await claudeRelayTerminalWhenSettled("transcript.jsonl", "sess", {
+    read:() => { reads += 1; return { completion:null, error:"" }; },
+    sleep:async () => {},
+    attempts:3,
+  });
+  assert.deepEqual(terminal, { completion:null, error:"" });
+  assert.equal(reads, 3);
+});
+
+test("a transient Claude launch failure is retried on the same native session before failing", async () => {
+  const lock = "Could not refresh your login because another Claude Code process is refreshing it (or exited mid-refresh) · Try again in a minute";
+  const terminals = [
+    { completion:null, error:lock },
+    { completion:null, error:lock },
+    { completion:{ body:"Done." }, error:"" },
+  ];
+  const calls = [];
+  const terminal = await settleClaudeRelayRun({
+    readTerminal:async () => terminals.shift(),
+    relaunch:async () => { calls.push("relaunch"); },
+    wait:async () => { calls.push("wait"); },
+    delays:[10, 20],
+    progress:(summary) => { calls.push(["progress", summary]); },
+    sleep:async (ms) => { calls.push(["sleep", ms]); },
+  });
+  assert.equal(terminal.completion?.body, "Done.");
+  assert.deepEqual(calls, [
+    ["progress", "Claude Code on your laptop could not refresh its sign-in because another Claude Code window was refreshing it. Retrying in 0 seconds."],
+    ["sleep", 10], "relaunch", "wait",
+    ["progress", "Claude Code on your laptop could not refresh its sign-in because another Claude Code window was refreshing it. Retrying in 0 seconds."],
+    ["sleep", 20], "relaunch", "wait",
+  ]);
+});
+
+test("a transient Claude launch failure stops retrying after the last delay and keeps the real reason", async () => {
+  const lock = "Could not refresh your login because another Claude Code process is refreshing it";
+  let relaunches = 0;
+  const terminal = await settleClaudeRelayRun({
+    readTerminal:async () => ({ completion:null, error:lock }),
+    relaunch:async () => { relaunches += 1; },
+    delays:[1, 1],
+    sleep:async () => {},
+  });
+  assert.equal(relaunches, 2);
+  assert.match(terminal.error, /Could not refresh your login/);
+});
+
+test("non-transient Claude failures and socket-delivered runs are never relaunched", async () => {
+  let relaunches = 0;
+  const failed = await settleClaudeRelayRun({
+    readTerminal:async () => ({ completion:null, error:"authentication_failed: Login expired" }),
+    relaunch:async () => { relaunches += 1; },
+    delays:[1],
+    sleep:async () => {},
+  });
+  assert.match(failed.error, /Login expired/);
+  const socket = await settleClaudeRelayRun({
+    readTerminal:async () => ({ completion:null, error:"Could not refresh your login because another Claude Code process is refreshing it" }),
+    relaunch:null,
+    delays:[1],
+    sleep:async () => {},
+  });
+  assert.match(socket.error, /Could not refresh/);
+  assert.equal(relaunches, 0);
+});
+
+test("a login-refresh lock that outlasts every retry escalates to the phone sign-in, like a signed-out provider", () => {
+  const lock = new Error("Could not refresh your login because another Claude Code process is refreshing it (or exited mid-refresh)");
+  assert.equal(agentRunRecoverableBySignIn(lock), true);
+  assert.equal(agentRunRecoverableBySignIn("authentication_failed: Login expired"), true);
+  assert.equal(agentRunRecoverableBySignIn("Claude Code finished without returning a Relay answer"), false);
+  assert.equal(agentRunRecoverableBySignIn(new Error("worker exited")), false);
 });
 
 test("owned-agent controller inbox is checked before the native session inventory", async () => {

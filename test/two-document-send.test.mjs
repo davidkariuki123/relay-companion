@@ -72,7 +72,7 @@ test("the concise human document is derived from a complete unlimited agent docu
   const tool = toolsForAccount({ requests: true, aiSessions: true, connectors: true }, "codex")
     .find((t) => t.name === "relay_send");
   const skill = readFileSync(new URL("../skill/relay/SKILL.md", import.meta.url), "utf8");
-  assert.match(tool.description, /Read the installed Relay skill/);
+  assert.match(tool.description, /read the installed Relay skill/i);
   assert.match(skill, /Compose the complete\s+`forAgent` first, then write `forHuman`/);
   assert.match(skill, /Stay within 120 words by default; that is a ceiling, never a target/);
   assert.match(skill, /Every sentence must earn its place, and the bar rises with length/);

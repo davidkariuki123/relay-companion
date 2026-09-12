@@ -75,14 +75,15 @@ test("managed Relay skill install is consented, verified, atomic, and rollback-c
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-skill-test-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const directory = path.join(root, ".codex", "skills", "relay");
+  const env = { RELAY_CONFIG_DIR: path.join(root, ".relay") };
   const target = [{ host: "codex", directory }];
   const first = fixture("1.0.0");
 
-  const refused = await skill.installManifest(first.manifest, (entry) => first.files.get(entry.path), { targets: target });
+  const refused = await skill.installManifest(first.manifest, (entry) => first.files.get(entry.path), { targets: target, env });
   assert.equal(refused.ok, false);
   assert.equal(refused.results[0].status, "consent_required");
 
-  const installed = await skill.installManifest(first.manifest, (entry) => first.files.get(entry.path), { targets: target, consent: true });
+  const installed = await skill.installManifest(first.manifest, (entry) => first.files.get(entry.path), { targets: target, consent: true, env });
   assert.equal(installed.ok, true);
   assert.equal(installed.results[0].status, "installed");
   assert.equal(fs.readFileSync(path.join(directory, "SKILL.md"), "utf8"), first.files.get("SKILL.md").toString());
@@ -96,17 +97,29 @@ test("managed Relay skill install is consented, verified, atomic, and rollback-c
   second.files.set("SKILL.md", Buffer.from("---\nname: relay\ndescription: updated\n---\n"));
   second.manifest.files.find((entry) => entry.path === "SKILL.md").sha256 = digest(second.files.get("SKILL.md"));
   fs.writeFileSync(path.join(directory, "MY-NOTES.md"), "keep me\n");
-  const protectedAddition = await skill.installManifest(second.manifest, (entry) => second.files.get(entry.path), { targets: target });
+  const protectedAddition = await skill.installManifest(second.manifest, (entry) => second.files.get(entry.path), { targets: target, env });
   assert.equal(protectedAddition.results[0].status, "modified");
   assert.deepEqual(protectedAddition.results[0].changedFiles, ["MY-NOTES.md"]);
   fs.rmSync(path.join(directory, "MY-NOTES.md"));
-  const updated = await skill.installManifest(second.manifest, (entry) => second.files.get(entry.path), { targets: target });
+  // A rollback copy an earlier installer left beside the skill: hosts load any
+  // sibling with a SKILL.md as a second skill, so an update removes it.
+  const legacyRollback = path.join(path.dirname(directory), ".relay-rollback");
+  fs.mkdirSync(legacyRollback, { recursive: true });
+  fs.writeFileSync(path.join(legacyRollback, "SKILL.md"), "---\nname: relay\ndescription: stale copy\n---\n");
+  const updated = await skill.installManifest(second.manifest, (entry) => second.files.get(entry.path), { targets: target, env });
   assert.equal(updated.ok, true);
   assert.equal(updated.results[0].status, "updated");
   assert.equal(skill.readState(directory).version, "1.1.0");
   assert.equal(skill.readState(directory).installationId, firstState.installationId);
+  // The previous tree is kept outside the host's skills folder, keyed by target.
+  const rollback = skill.rollbackPathFor(directory, { env });
+  assert.equal(updated.results[0].rollback, rollback);
+  assert.ok(rollback.startsWith(path.join(root, ".relay", "skill-rollback")));
+  assert.equal(skill.readState(rollback).version, "1.0.0");
+  assert.equal(fs.existsSync(legacyRollback), false, "the sibling copy is gone");
+  assert.deepEqual(fs.readdirSync(path.dirname(directory)), ["relay"], "the skills folder holds only the skill");
 
-  const refusedDowngrade = await skill.installManifest(first.manifest, (entry) => first.files.get(entry.path), { targets: target });
+  const refusedDowngrade = await skill.installManifest(first.manifest, (entry) => first.files.get(entry.path), { targets: target, env });
   assert.equal(refusedDowngrade.ok, true);
   assert.equal(refusedDowngrade.results[0].status, "downgrade_refused");
   assert.equal(skill.readState(directory).version, "1.1.0");
@@ -124,12 +137,30 @@ test("managed Relay skill install is consented, verified, atomic, and rollback-c
   assert.equal(remoteFetches, 1, "a refused downgrade must not fetch its files");
 
   fs.appendFileSync(path.join(directory, "SKILL.md"), "local rollback edit\n");
-  const protectedRollback = skill.rollbackOne(directory);
+  const protectedRollback = skill.rollbackOne(directory, { env });
   assert.equal(protectedRollback.status, "modified");
   fs.writeFileSync(path.join(directory, "SKILL.md"), second.files.get("SKILL.md"));
-  const rolledBack = skill.rollbackOne(directory);
+  const rolledBack = skill.rollbackOne(directory, { env });
   assert.equal(rolledBack.ok, true);
   assert.equal(skill.readState(directory).version, "1.0.0");
+  assert.equal(fs.existsSync(rollback), false, "the copy moved back into place");
+  assert.equal(skill.rollbackOne(directory, { env }).status, "no_rollback");
+
+  // A copy left beside the skill by an earlier installer still rolls back once.
+  fs.mkdirSync(legacyRollback, { recursive: true });
+  for (const [file, bytes] of second.files) {
+    fs.mkdirSync(path.dirname(path.join(legacyRollback, file)), { recursive: true });
+    fs.writeFileSync(path.join(legacyRollback, file), bytes);
+  }
+  fs.copyFileSync(path.join(directory, ".relay-managed.json"), path.join(legacyRollback, ".relay-managed.json"));
+  const legacyState = JSON.parse(fs.readFileSync(path.join(legacyRollback, ".relay-managed.json"), "utf8"));
+  legacyState.version = "1.1.0";
+  legacyState.files = second.manifest.files;
+  fs.writeFileSync(path.join(legacyRollback, ".relay-managed.json"), JSON.stringify(legacyState));
+  const legacyRolledBack = skill.rollbackOne(directory, { env });
+  assert.equal(legacyRolledBack.ok, true);
+  assert.equal(skill.readState(directory).version, "1.1.0");
+  assert.equal(fs.existsSync(legacyRollback), false);
 });
 
 test("managed Relay skill refuses checksum failures, user edits, and new consent", async (t) => {
@@ -163,30 +194,35 @@ test("managed Relay skill uninstall removes owned trees, rollback copies, and em
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-skill-uninstall-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const directory = path.join(root, "skills", "relay");
+  const env = { RELAY_CONFIG_DIR: path.join(root, ".relay") };
   const targets = [{ host: "codex", directory }];
   const first = fixture("1.0.0");
   const second = fixture("1.1.0");
   second.files.set("SKILL.md", Buffer.from("---\nname: relay\ndescription: updated\n---\n"));
   second.manifest.files.find((entry) => entry.path === "SKILL.md").sha256 = digest(second.files.get("SKILL.md"));
 
-  await skill.installManifest(first.manifest, (entry) => first.files.get(entry.path), { targets, consent: true });
-  await skill.installManifest(second.manifest, (entry) => second.files.get(entry.path), { targets });
-  const rollback = path.join(path.dirname(directory), ".relay-rollback");
+  await skill.installManifest(first.manifest, (entry) => first.files.get(entry.path), { targets, consent: true, env });
+  await skill.installManifest(second.manifest, (entry) => second.files.get(entry.path), { targets, env });
+  const rollback = skill.rollbackPathFor(directory, { env });
+  assert.ok(fs.existsSync(rollback), "the update kept a rollback copy");
+  const legacyRollback = path.join(path.dirname(directory), ".relay-rollback");
   const emptyDebris = path.join(path.dirname(directory), ".relay-staging-interrupted");
   const unrelated = path.join(path.dirname(directory), "keep");
+  fs.mkdirSync(path.join(legacyRollback, "nested"), { recursive: true });
   fs.mkdirSync(path.join(emptyDebris, "nested"), { recursive: true });
   fs.mkdirSync(unrelated);
   fs.writeFileSync(path.join(unrelated, "notes.txt"), "keep\n");
   fs.rmSync(path.join(directory, "scripts", "relay-protocol.mjs"));
 
-  const removed = skill.uninstallManaged({ targets });
+  const removed = skill.uninstallManaged({ targets, env });
   assert.equal(removed.ok, true);
   assert.equal(fs.existsSync(directory), false, "partially removed managed tree is finished");
   assert.equal(fs.existsSync(rollback), false, "verified rollback copy is removed");
+  assert.equal(fs.existsSync(legacyRollback), false, "an old sibling rollback copy is removed");
   assert.equal(fs.existsSync(emptyDebris), false, "empty generated debris is removed");
   assert.equal(fs.readFileSync(path.join(unrelated, "notes.txt"), "utf8"), "keep\n");
 
-  const repeated = skill.uninstallManaged({ targets });
+  const repeated = skill.uninstallManaged({ targets, env });
   assert.equal(repeated.ok, true, "uninstall is idempotent");
   assert.ok(repeated.results.every((result) => result.status === "already_absent"));
 });

@@ -129,7 +129,7 @@ test("an open topic has three faces — Messages, Members, Mandate — and the l
   assert.match(html, /topicsState\.pane === "members" \? `\$\{topicMembersHtml\(d\)\}\$\{leave\}`/);
   assert.match(html, /: `\$\{current \? topicComposeHtml\(\) : ""\}\$\{notice\}\$\{lanes\}\$\{posts\}\$\{more\}`\)/);
   // Opening another topic lands on Messages again.
-  assert.match(html, /Object\.assign\(topicsState, \{ openId:id,[^\n]*pane:"messages", replying:null, notice:"" \}\);/);
+  assert.match(html, /Object\.assign\(topicsState, \{ openId:id,[^\n]*pane:"messages", replying:null, notice:"", openPostId:null, postDetailsOpen:false \}\);/);
 });
 
 test("a post offers Reply in topic and Reply privately; either way the author gets a Relay quoting the post", () => {
@@ -168,4 +168,27 @@ test("a room quotes the Topic post a Relay answers, from the server's snapshot, 
     'inReplyToTopicPost: packet.inReplyToTopicPost || local.inReplyToTopicPost || null,',
     'r.inReplyToTopicPost ? r.inReplyToTopicPost.postId : "",',
   ]) assert.ok(main.includes(carrier), carrier);
+});
+
+test("in the people lane a post card opens the full post on its own page, the way a Relay row opens the reader", () => {
+  // The card is the door; its buttons and boxes keep their own jobs.
+  assert.match(html, /const card = lane === "human" \? ` tp-post-card" role="button" tabindex="0" data-topic-post-open="\$\{esc\(p\.id\)\}"` : `"`;/);
+  assert.match(html, /el\.addEventListener\("click", \(e\) => \{ if \(e\.target\.closest\("button, a, form, textarea, input, select"\)\) return; openPost\(postId\); \}\);/);
+  // The page is the reader's letter: kicker, headline, rule, the words, then
+  // Details folded under them only when the agent document says more.
+  const page = html.slice(html.indexOf("function topicPostPageHtml(p, d)"), html.indexOf("function topicComposeHtml()"));
+  assert.match(page, /data-topic-post-back/);
+  assert.match(page, /class="rd-kicker">\$\{esc\(origin\)\}/);
+  assert.match(page, /class="rd-headline\$\{headlineClass\}">\$\{esc\(subject\)\}/);
+  assert.match(page, /class="rd-body">\$\{readerParagraphs\(words\)\}/);
+  assert.match(page, /agentText && agentText !== words \? `[\s\S]*?Details for your agent/);
+  // Same replies and Delete on the page as on the card; deleting the open
+  // post returns to the board, and a post gone from the server says so.
+  assert.match(page, /\$\{topicPostActsHtml\(p, d\)\}\$\{topicPostReplyFormHtml\(p, who\)\}/);
+  assert.match(page, /This post is gone\./);
+  assert.match(html, /if \(topicsState\.openPostId === postId\) topicsState\.openPostId = null;/);
+  assert.match(html, /topicsState\.openPostId \? topicPostPageHtml\(topicsState\.posts\.find\(\(p\) => p\.id === topicsState\.openPostId\) \|\| null, d\) : topicDetailHtml\(d\)/);
+  // Opening or leaving a topic never carries a post page across.
+  assert.match(html, /async function openTopic\(id\) \{\s*Object\.assign\(topicsState, \{[^}]*openPostId:null/);
+  assert.match(html, /function closeTopic\(\) \{\s*Object\.assign\(topicsState, \{[^}]*openPostId:null/);
 });

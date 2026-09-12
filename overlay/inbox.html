@@ -2515,6 +2515,18 @@
   .tp-post-acts { display:flex; gap:12px; margin-top:6px; }
   .tp-post-acts button { appearance:none; border:0; padding:0; background:transparent; color:var(--muted-2); font:500 10.5px/1.2 var(--sans); cursor:pointer; }
   .tp-post-acts button:hover { color:var(--ink); }
+  /* In the people lane a post is a card: the whole card opens the post on its
+     own page, the way a Relay row opens the reader. Its buttons keep their jobs. */
+  .tp-post.tp-post-card { cursor:pointer; }
+  .tp-post.tp-post-card:hover { background:var(--wash); }
+  .tp-post.tp-post-card:focus-visible { outline:none; box-shadow:inset var(--focus-ring); }
+  /* The open post: the reader's letter — kicker, headline, rule, the words,
+     Details folded under them — then the same replies the card offered. */
+  .tp-post-page .tp-post-ref, .tp-post-page .tp-reply, .tp-post-page .tp-notice { max-width:34em; margin-left:auto; margin-right:auto; }
+  .tp-post-page .tp-post-ref { margin-top:14px; }
+  .tp-post-page .tp-post-acts { justify-content:center; margin-top:18px; }
+  .tp-post-page .tp-post-acts button { font-size:11.5px; }
+  .tp-post-page .rd-details { margin-top:18px; }
   .tp-note { padding:10px 16px 0; color:var(--muted-3); font:10.5px/1.45 var(--sans); }
   .tp-note .gd-action { margin-left:6px; }
   .tp-error { padding:6px 16px 0; color:var(--danger); font:11px/1.4 var(--sans); }
@@ -6973,6 +6985,11 @@
     // a failed send replays rather than duplicates.
     replying:null,
     notice:"",
+    // The post opened from the people lane onto its own page, and whether its
+    // Details fold is open. Null while the board itself is showing.
+    openPostId:null, postDetailsOpen:false,
+    // Where the board was scrolled when a post opened, so Back lands there.
+    boardScrollTop:0,
   };
   function topicsAttentionCount() {
     return topicsState.topics.reduce((sum, t) => {
@@ -7027,7 +7044,7 @@
     if (activeView === "topics" && (changed || !quiet)) renderTopics();
   }
   async function openTopic(id) {
-    Object.assign(topicsState, { openId:id, detail:null, posts:[], nextCursor:null, postsError:"", composing:false, editingMandate:false, armed:null, inviteQuery:"", pane:"messages", replying:null, notice:"" });
+    Object.assign(topicsState, { openId:id, detail:null, posts:[], nextCursor:null, postsError:"", composing:false, editingMandate:false, armed:null, inviteQuery:"", pane:"messages", replying:null, notice:"", openPostId:null, postDetailsOpen:false });
     renderTopics();
     const { result, error } = await topicCall(window.relay.topicGet, id);
     if (topicsState.openId !== id) return;
@@ -7060,7 +7077,7 @@
     renderTopics();
   }
   function closeTopic() {
-    Object.assign(topicsState, { openId:null, detail:null, posts:[], nextCursor:null, postsError:"", armed:null, replying:null, notice:"" });
+    Object.assign(topicsState, { openId:null, detail:null, posts:[], nextCursor:null, postsError:"", armed:null, replying:null, notice:"", openPostId:null, postDetailsOpen:false });
     renderTopics();
   }
   function topicRowHtml(t) {
@@ -7110,19 +7127,13 @@
       <div class="tp-error" data-topic-reply-error></div>
     </form>`;
   }
-  function topicPostHtml(p, lane, detail) {
-    const who = p.author?.name || "Someone";
-    const origin = p.origin === "agent" ? `${who}'s agent` : who;
+  // What a post offers, on its card and on its page alike: the two replies
+  // (another member still on Relay), and Delete for its author or an admin.
+  function topicPostActsHtml(p, detail) {
     const mine = Boolean(p.author?.relayUserId) && p.author.relayUserId === payload.account?.userId;
     const admin = detail?.membership?.role === "admin";
     // Reply needs someone to send the Relay to: another member still on Relay.
     const canReply = Boolean(p.author?.relayUserId) && !mine && !detail?.archivedAt;
-    const body = lane === "agent"
-      ? `${p.forHuman ? `<div class="tp-post-body">${readerParagraphs(p.forHuman)}</div>` : ""}<div class="tp-post-body agent">${esc(p.forAgent || "")}</div>`
-      : `<div class="tp-post-body">${readerParagraphs(p.forHuman || "")}</div>`;
-    const ref = p.inReplyTo
-      ? `<div class="tp-post-ref"><span class="tp-post-ref-who">Replying to ${esc(p.inReplyTo.author?.name || "a post")}${p.inReplyTo.deleted ? " · post deleted" : ""}</span><span class="tp-post-ref-copy">${esc(p.inReplyTo.title || "")}</span></div>`
-      : "";
     const armedDelete = topicsState.armed === `delete:${p.id}`;
     const acts = [];
     if (canReply && !armedDelete) {
@@ -7134,11 +7145,68 @@
         ? `<button type="button" data-topic-post-delete-confirm="${esc(p.id)}">Really delete?</button><button type="button" data-topic-armed-cancel>Cancel</button>`
         : `<button type="button" data-topic-post-delete="${esc(p.id)}">Delete</button>`);
     }
-    return `<article class="tp-post" data-topic-post="${esc(p.id)}">
+    return acts.length ? `<div class="tp-post-acts">${acts.join("")}</div>` : "";
+  }
+  function topicPostRefHtml(p) {
+    return p.inReplyTo
+      ? `<div class="tp-post-ref"><span class="tp-post-ref-who">Replying to ${esc(p.inReplyTo.author?.name || "a post")}${p.inReplyTo.deleted ? " · post deleted" : ""}</span><span class="tp-post-ref-copy">${esc(p.inReplyTo.title || "")}</span></div>`
+      : "";
+  }
+  function topicPostOrigin(p) {
+    const who = p.author?.name || "Someone";
+    return { who, origin: p.origin === "agent" ? `${who}'s agent` : who };
+  }
+  function topicPostHtml(p, lane, detail) {
+    const { who, origin } = topicPostOrigin(p);
+    const body = lane === "agent"
+      ? `${p.forHuman ? `<div class="tp-post-body">${readerParagraphs(p.forHuman)}</div>` : ""}<div class="tp-post-body agent">${esc(p.forAgent || "")}</div>`
+      : `<div class="tp-post-body">${readerParagraphs(p.forHuman || "")}</div>`;
+    // In the people lane the card is the door to the full post, the way a
+    // Relay row opens the reader. The agent lane already shows both documents.
+    const card = lane === "human" ? ` tp-post-card" role="button" tabindex="0" data-topic-post-open="${esc(p.id)}"` : `"`;
+    return `<article class="tp-post${card} data-topic-post="${esc(p.id)}">
       <div class="tp-post-meta"><span class="tp-nature ${esc(p.nature)}">${esc(TOPIC_NATURE_LABEL[p.nature] || p.nature)}</span><span class="who">${esc(origin)}</span><span>${esc(timeAgo(p.createdAt))}${p.editedAt ? " · edited" : ""}</span></div>
       <div class="tp-post-title">${esc(p.title)}</div>
-      ${ref}${body}${acts.length ? `<div class="tp-post-acts">${acts.join("")}</div>` : ""}${topicPostReplyFormHtml(p, who)}
+      ${topicPostRefHtml(p)}${body}${topicPostActsHtml(p, detail)}${topicPostReplyFormHtml(p, who)}
     </article>`;
+  }
+  // One post on its own page: the reader's letter (kicker, headline, rule,
+  // the words, Details folded under them) with the board's name as the way
+  // back. Details shows only when the agent document says more than the words.
+  function topicPostPageHtml(p, d) {
+    const back = `<div class="reader-bar"><button class="th-back" type="button" data-topic-post-back aria-label="Back to ${esc(d.name)}"><svg width="8" height="13" viewBox="0 0 8 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M7 1L1 7l6 6"/></svg></button><span class="reader-name">${esc(d.name)}</span></div>`;
+    if (!p) return `<div class="tp-detail tp-post-page">${back}<div class="tp-error" data-topic-error>${esc(topicsState.postsError || "")}</div><div class="tp-loading">This post is gone.</div></div>`;
+    const { who, origin } = topicPostOrigin(p);
+    const words = String(p.forHuman || "").trim();
+    const agentText = String(p.forAgent || "").trim();
+    const agentWords = agentWordCount(agentText);
+    const detailsOpen = topicsState.postDetailsOpen;
+    const details = agentText && agentText !== words ? `
+        <div class="rd-details${detailsOpen ? " open" : ""}">
+          <button type="button" class="rd-details-head" data-topic-post-details aria-expanded="${detailsOpen ? "true" : "false"}">
+            <span class="rd-details-name">Details for your agent</span>
+            <span class="rd-details-meta">${esc(`${agentWords.toLocaleString("en-US")} ${agentWords === 1 ? "word" : "words"} · the specifics · your agent reads these too`)}</span>
+            <span class="rd-details-chev" aria-hidden="true">›</span>
+          </button>
+          ${detailsOpen ? `<div class="rd-details-body rd-agentcopy">${readerParagraphs(agentText)}</div>` : ""}
+        </div>` : "";
+    const subject = String(p.title || "").trim();
+    const headlineClass = subject.length > 120 ? " long very-long" : subject.length > 70 ? " long" : "";
+    const notice = topicsState.notice ? `<div class="tp-notice" role="status">${esc(topicsState.notice)}</div>` : "";
+    return `<div class="tp-detail tp-post-page" data-topic-post-page="${esc(p.id)}">
+      ${back}
+      <div class="tp-error" data-topic-error>${esc(topicsState.postsError || "")}</div>
+      <div class="rd-col">
+        <div class="rd-kicker">${esc(origin)} · ${esc(TOPIC_NATURE_LABEL[p.nature] || p.nature)} · ${esc(timeAgo(p.createdAt))}${p.editedAt ? " · edited" : ""}</div>
+        <div class="rd-headline${headlineClass}">${esc(subject)}</div>
+        <div class="rd-rule"></div>
+        ${topicPostRefHtml(p)}
+        <div class="rd-body">${readerParagraphs(words)}</div>
+        ${details}
+        ${notice}
+        ${topicPostActsHtml(p, d)}${topicPostReplyFormHtml(p, who)}
+      </div>
+    </div>`;
   }
   function topicComposeHtml() {
     if (!topicsState.composing) return `<button class="tp-new-toggle" type="button" data-topic-compose>+ Post to this topic</button>`;
@@ -7224,7 +7292,7 @@
     if (topicsState.openId) {
       topicsEmptyEl.classList.add("gone");
       const d = topicsState.detail;
-      topicsBodyEl.innerHTML = d ? topicDetailHtml(d)
+      topicsBodyEl.innerHTML = d ? (topicsState.openPostId ? topicPostPageHtml(topicsState.posts.find((p) => p.id === topicsState.openPostId) || null, d) : topicDetailHtml(d))
         : topicsState.postsError ? `<div class="tp-detail"><button class="gd-back" type="button" data-topic-back>‹ Topics</button><div class="tp-error">${esc(topicsState.postsError)}</div></div>`
         : `<div class="tp-loading">Loading…</div>`;
       wireTopicDetail();
@@ -7305,6 +7373,28 @@
       if (result) applyDetail(result);
     });
     on("[data-topic-pane]", (el) => { topicsState.pane = el.getAttribute("data-topic-pane") || "messages"; renderTopics(); });
+    // A people-lane card opens its post; the buttons and boxes inside it keep
+    // their own jobs, so a click that landed on one never also opens the page.
+    // The page starts at its top, the way the reader does: the board's scroll
+    // would otherwise carry over and park the kicker and headline under the
+    // sticky back bar. Back returns to where the board was.
+    const openPost = (postId) => {
+      topicsState.boardScrollTop = scrollEl ? scrollEl.scrollTop : 0;
+      Object.assign(topicsState, { openPostId: postId, postDetailsOpen: false, armed: null });
+      renderTopics();
+      if (scrollEl) scrollEl.scrollTop = 0;
+    };
+    for (const el of c.querySelectorAll("[data-topic-post-open]")) {
+      const postId = el.getAttribute("data-topic-post-open");
+      el.addEventListener("click", (e) => { if (e.target.closest("button, a, form, textarea, input, select")) return; openPost(postId); });
+      el.addEventListener("keydown", (e) => { if ((e.key === "Enter" || e.key === " ") && e.target === el) { e.preventDefault(); openPost(postId); } });
+    }
+    on("[data-topic-post-back]", () => {
+      Object.assign(topicsState, { openPostId: null, postDetailsOpen: false, armed: null });
+      renderTopics();
+      if (scrollEl) scrollEl.scrollTop = Math.max(0, Number(topicsState.boardScrollTop) || 0);
+    });
+    on("[data-topic-post-details]", () => { topicsState.postDetailsOpen = !topicsState.postDetailsOpen; renderTopics(); });
     on("[data-topic-lane]", (el) => { topicsState.lane = el.getAttribute("data-topic-lane"); renderTopics(); });
     // Reply: one box at a time, keyed once so a retry replays instead of
     // duplicating a post whose Relay half failed.
@@ -7371,6 +7461,7 @@
       if (!(await apply(window.relay.topicPostDelete, id, postId))) return;
       topicsState.armed = null;
       topicsState.posts = topicsState.posts.filter((p) => p.id !== postId);
+      if (topicsState.openPostId === postId) topicsState.openPostId = null;
       renderTopics();
       loadTopics({ quiet:true });
     });

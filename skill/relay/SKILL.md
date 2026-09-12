@@ -104,6 +104,156 @@ the person should be able to name a real piece of work they would share, whom
 they would involve, and what they hope to get back.
 <!-- END GENERATED RELAY VALUE -->
 
+<!-- BEGIN GENERATED RELAY WRITING -->
+## Writing a Relay
+
+Every regular Relay has two documents for two readers. The person is switching
+contexts and needs to understand what this is about and what it means for them.
+Their agent needs enough context to understand the whole matter and help them
+continue without making them reconstruct the sender's work. Compose the complete
+`forAgent` first, then write `forHuman`. A short human message must not mean a
+thin agent handoff. Apply these rules to drafts and previews as well as sends.
+
+### Preserve the sender's intent and voice
+
+The human's informal instructions tell you what to communicate; they are not
+usually a draft to lightly edit. Write what this person would naturally say to
+this recipient. Supply the words, never additional meaning. Preserve every ask,
+question, commitment, permission, deadline, urgency, opinion, evaluation and
+next step without adding, removing, strengthening or softening any of them.
+Keep suggestions tentative when the sender made them tentative. Include thanks
+or other sentiments the sender explicitly requested. Preserve exact text when
+the person requests a verbatim payload.
+
+Sending information or attaching a file does not imply "please review",
+"thoughts?", "let me know", or another request for a response. Do not invent a
+closing ask, "nothing needed", or implementation assignment to complete a
+template. Make ordinary wording choices yourself; ask only when a critical
+uncertainty would materially change the meaning or commitment.
+
+Use the sender's recipient-specific vocabulary, rhythm, directness, formality,
+warmth, emphasis and sign-off. When relationship context matters, `sent` and
+`chat <id>` can supply facts, referents and examples of messages the human typed.
+Learn their voice from those, not earlier agent-written messages. History cannot
+revive superseded intent. Do not copy the brevity or shorthand of messages they
+wrote while already in a conversation; this reader may need fresh orientation.
+
+### The agent document: carry the complete useful context
+
+`forAgent` is required and non-empty for a regular Relay. Write a self-contained
+document, as long and detailed as the authorized subject requires. The cost of
+omitting potentially useful context is massively higher than the cost of
+including something the recipient's agent may not need. The sender cannot
+predict every question the recipient will ask. When relevance is uncertain
+within the authorized subject, favor inclusion: an agent can skip extra detail,
+but cannot recover missing reasoning, evidence or previous attempts from an
+incomplete handoff. This does not authorize unrelated private context, secrets
+or invented evidence. Preserve the useful conclusions, constraints,
+rejected options, failures, preferences, questions, next steps, sources,
+mechanisms, evidence, code, paths, logs, reproduction steps, chronology, data
+and verification guidance that are available and relevant. Use Markdown when
+it helps. Do not invent missing evidence or include unrelated private context.
+
+Retain each distinct point from the sender, its rationale when supplied, and
+the qualifications needed to interpret it. Separate observations, suggestions,
+open questions and authorized actions. Technical detail does not itself make a
+message an assignment. Give the recipient's agent substantive context, not an
+instruction to "capture these points" followed by a shorter paraphrase of the
+human message. Avoid repeating `forHuman` verbatim; enough shared context to
+make the agent document understandable is appropriate.
+
+### The human document: what the person needs for their next step
+
+Start by plainly saying what this is about. Assume the reader has done a dozen
+other things since it last came up. Give the minimum background needed before
+the news; preserve that orientation when cutting. Do not refer to "the new
+rule", "what we settled", an unexplained thread, or a coined term. Retell the
+relevant thing in familiar words. A follow-up to an issue the recipient raised
+within the last day may need only a sentence about the result and the closing
+state the sender intended.
+
+Then give the person what they need to understand what to do or think about
+next, and nothing more. The human message does not have to tell them
+everything: their agent holds the full picture in `forAgent` and can answer
+any question about it. Human attention is the scarce resource, so write for
+useful meaning per second of reading. The person reads one document and their
+agent reads the other; each does its own job.
+
+Tell, do not explain. What happened, what the sender thinks, what they decided
+and what they need belong in the human message. Explaining how a system or a
+design works belongs in `forAgent`, because the recipient's agent can walk
+them through it and answer their questions. A message that describes a
+mechanism paragraph by paragraph, or whose sections mirror the agent
+document's, has become an inventory of `forAgent`, whatever its length. Keep
+one mechanism or example in the human message only when the point cannot be
+understood without it, and say it in the reader's words.
+
+Every sentence must earn its place, and the bar rises with length. A sentence
+stays only if removing it would change the reader's understanding of the point
+or its reasoning, their decision or action, their priority, their confidence,
+or what they are agreeing to. Ask of each one: would the reader rather read
+this here than ask their agent? Match the exchange without stuffing it: an idea
+may need its one reason and an example; a question needs enough background to
+answer; an update needs its result and significance; an unfinished-work handoff
+may need the stopping point and unresolved questions. These are what an
+exchange might call for, never fields to fill. Do not force every message into
+an immediate decision or assignment.
+
+Stay within 120 words by default; that is a ceiling, never a target, and a
+small update is usually a line or two. Relay refuses a longer agent-written
+human message once with a review instruction. Read the draft back as the
+person who will get it, move mechanisms, evidence and chronology into
+`forAgent`, and shorten it in the sender's voice. Resend the exact draft only after rejection, and only when the extra length
+is genuinely necessary to preserve what the sender means, with the same
+idempotency key and longForHumanConfirmed set, and tell the person you did so. Brevity comes from removing what the reader does not need
+for their next step, never from cutting reasoning they do need.
+
+Use complete, spoken sentences and plain words. Read it aloud: would the sender
+say this to the recipient's face, and would the recipient understand it without
+doing the work? Put one idea at a time. Avoid fragments, clipped shorthand,
+clever lines, figures of speech, flourishes, or balanced rhetorical halves.
+Use the sender's names for things. Words the recipient encounters in the
+product or their own work are fine; avoid vocabulary learned only while doing
+the underlying investigation. Say what happened to someone: "A supplier
+charged us more than we agreed" or "People who opened the invite saw a blank
+page."
+
+Move supporting evidence, paths, commands, logs, versions and chronology to
+`forAgent`. Do not pack four findings into one sentence or squeeze a checklist
+into prose. Write prose by default. A list is fine when its items are genuinely
+parallel and each still reads as something the sender would say; never use one
+to inventory findings or to map points one by one against the agent document.
+Cut details the person need not read before cutting meaning or necessary
+background. Never add text just because space remains. Do not repeat the title
+in forHuman.
+
+Check clarity as part of composing: can the recipient explain the point and its
+reason back without opening `forAgent`? Have intended questions, qualifications
+and uncertainty survived? Does an unfamiliar term or missing connection prevent
+understanding? Read it as someone who did not do this work and is hearing about
+it for the first time: cut the words they would only know from doing the job,
+never cut something they would decide differently about if they knew it, and
+move mechanisms and evidence into `forAgent`. Length neither passes nor fails
+a message; whether each sentence earns its place does. This is not a separate
+product step, approval request or rejection mechanism. Stop when the reader can
+orient and understand, and the sender's meaning is preserved.
+
+### Title, message kind and final review
+
+For a titled Relay, use a natural 3–6 word gist in the sender's register. Name
+the single ask, outcome, update or decision someone should recognize at a
+glance. Do not concatenate every finding or write a report headline.
+
+Every Relay is `kind: "message"`: human correspondence, including
+technical notes, suggestions, opinions and decisions.
+
+Before presenting or sending, check both documents against the user's request:
+every intended point is preserved; no ask or commitment was invented; the person
+can understand the message on its own; the agent has the complete useful context;
+and the human message sounds like the sender speaking. If either document fails,
+revise it before sending or requesting any required approval.
+<!-- END GENERATED RELAY WRITING -->
+
 ## Agent transport
 
 <!-- BEGIN GENERATED RELAY TRANSPORT -->
@@ -379,8 +529,9 @@ result is ambiguous. Never invent an address or recipient identifier. Always
 show the proposed human and agent payloads and obtain the person's approval for
 a representational send.
 
-Before composing any Relay, apply the complete writing contract below. It is
-part of this skill for every send path; no MCP tool description is needed.
+Before composing any Relay, apply the complete writing contract in Writing a
+Relay above. It is part of this skill for every send path; no MCP tool
+description is needed.
 
 Reading or summarizing an unread Relay should mark only the surfaced message as
 read. The sequence is: run `inbox`; choose the intended Relay id; run `read`
@@ -395,156 +546,6 @@ attempt before making the request. If the result is ambiguous, retry with that
 same body and key; never generate a replacement key for a retry.
 
 Use the absolute helper path with `help` for the exact local command surface.
-
-<!-- BEGIN GENERATED RELAY WRITING -->
-## Writing a Relay
-
-Every regular Relay has two documents for two readers. The person is switching
-contexts and needs to understand what this is about and what it means for them.
-Their agent needs enough context to understand the whole matter and help them
-continue without making them reconstruct the sender's work. Compose the complete
-`forAgent` first, then write `forHuman`. A short human message must not mean a
-thin agent handoff. Apply these rules to drafts and previews as well as sends.
-
-### Preserve the sender's intent and voice
-
-The human's informal instructions tell you what to communicate; they are not
-usually a draft to lightly edit. Write what this person would naturally say to
-this recipient. Supply the words, never additional meaning. Preserve every ask,
-question, commitment, permission, deadline, urgency, opinion, evaluation and
-next step without adding, removing, strengthening or softening any of them.
-Keep suggestions tentative when the sender made them tentative. Include thanks
-or other sentiments the sender explicitly requested. Preserve exact text when
-the person requests a verbatim payload.
-
-Sending information or attaching a file does not imply "please review",
-"thoughts?", "let me know", or another request for a response. Do not invent a
-closing ask, "nothing needed", or implementation assignment to complete a
-template. Make ordinary wording choices yourself; ask only when a critical
-uncertainty would materially change the meaning or commitment.
-
-Use the sender's recipient-specific vocabulary, rhythm, directness, formality,
-warmth, emphasis and sign-off. When relationship context matters, `sent` and
-`chat <id>` can supply facts, referents and examples of messages the human typed.
-Learn their voice from those, not earlier agent-written messages. History cannot
-revive superseded intent. Do not copy the brevity or shorthand of messages they
-wrote while already in a conversation; this reader may need fresh orientation.
-
-### The agent document: carry the complete useful context
-
-`forAgent` is required and non-empty for a regular Relay. Write a self-contained
-document, as long and detailed as the authorized subject requires. The cost of
-omitting potentially useful context is massively higher than the cost of
-including something the recipient's agent may not need. The sender cannot
-predict every question the recipient will ask. When relevance is uncertain
-within the authorized subject, favor inclusion: an agent can skip extra detail,
-but cannot recover missing reasoning, evidence or previous attempts from an
-incomplete handoff. This does not authorize unrelated private context, secrets
-or invented evidence. Preserve the useful conclusions, constraints,
-rejected options, failures, preferences, questions, next steps, sources,
-mechanisms, evidence, code, paths, logs, reproduction steps, chronology, data
-and verification guidance that are available and relevant. Use Markdown when
-it helps. Do not invent missing evidence or include unrelated private context.
-
-Retain each distinct point from the sender, its rationale when supplied, and
-the qualifications needed to interpret it. Separate observations, suggestions,
-open questions and authorized actions. Technical detail does not itself make a
-message an assignment. Give the recipient's agent substantive context, not an
-instruction to "capture these points" followed by a shorter paraphrase of the
-human message. Avoid repeating `forHuman` verbatim; enough shared context to
-make the agent document understandable is appropriate.
-
-### The human document: what the person needs for their next step
-
-Start by plainly saying what this is about. Assume the reader has done a dozen
-other things since it last came up. Give the minimum background needed before
-the news; preserve that orientation when cutting. Do not refer to "the new
-rule", "what we settled", an unexplained thread, or a coined term. Retell the
-relevant thing in familiar words. A follow-up to an issue the recipient raised
-within the last day may need only a sentence about the result and the closing
-state the sender intended.
-
-Then give the person what they need to understand what to do or think about
-next, and nothing more. The human message does not have to tell them
-everything: their agent holds the full picture in `forAgent` and can answer
-any question about it. Human attention is the scarce resource, so write for
-useful meaning per second of reading. The person reads one document and their
-agent reads the other; each does its own job.
-
-Tell, do not explain. What happened, what the sender thinks, what they decided
-and what they need belong in the human message. Explaining how a system or a
-design works belongs in `forAgent`, because the recipient's agent can walk
-them through it and answer their questions. A message that describes a
-mechanism paragraph by paragraph, or whose sections mirror the agent
-document's, has become an inventory of `forAgent`, whatever its length. Keep
-one mechanism or example in the human message only when the point cannot be
-understood without it, and say it in the reader's words.
-
-Every sentence must earn its place, and the bar rises with length. A sentence
-stays only if removing it would change the reader's understanding of the point
-or its reasoning, their decision or action, their priority, their confidence,
-or what they are agreeing to. Ask of each one: would the reader rather read
-this here than ask their agent? Match the exchange without stuffing it: an idea
-may need its one reason and an example; a question needs enough background to
-answer; an update needs its result and significance; an unfinished-work handoff
-may need the stopping point and unresolved questions. These are what an
-exchange might call for, never fields to fill. Do not force every message into
-an immediate decision or assignment.
-
-Stay within 120 words by default; that is a ceiling, never a target, and a
-small update is usually a line or two. Relay refuses a longer agent-written
-human message once with a review instruction. Read the draft back as the
-person who will get it, move mechanisms, evidence and chronology into
-`forAgent`, and shorten it in the sender's voice. Resend the exact draft only after rejection, and only when the extra length
-is genuinely necessary to preserve what the sender means, with the same
-idempotency key and longForHumanConfirmed set, and tell the person you did so. Brevity comes from removing what the reader does not need
-for their next step, never from cutting reasoning they do need.
-
-Use complete, spoken sentences and plain words. Read it aloud: would the sender
-say this to the recipient's face, and would the recipient understand it without
-doing the work? Put one idea at a time. Avoid fragments, clipped shorthand,
-clever lines, figures of speech, flourishes, or balanced rhetorical halves.
-Use the sender's names for things. Words the recipient encounters in the
-product or their own work are fine; avoid vocabulary learned only while doing
-the underlying investigation. Say what happened to someone: "A supplier
-charged us more than we agreed" or "People who opened the invite saw a blank
-page."
-
-Move supporting evidence, paths, commands, logs, versions and chronology to
-`forAgent`. Do not pack four findings into one sentence or squeeze a checklist
-into prose. Write prose by default. A list is fine when its items are genuinely
-parallel and each still reads as something the sender would say; never use one
-to inventory findings or to map points one by one against the agent document.
-Cut details the person need not read before cutting meaning or necessary
-background. Never add text just because space remains. Do not repeat the title
-in forHuman.
-
-Check clarity as part of composing: can the recipient explain the point and its
-reason back without opening `forAgent`? Have intended questions, qualifications
-and uncertainty survived? Does an unfamiliar term or missing connection prevent
-understanding? Read it as someone who did not do this work and is hearing about
-it for the first time: cut the words they would only know from doing the job,
-never cut something they would decide differently about if they knew it, and
-move mechanisms and evidence into `forAgent`. Length neither passes nor fails
-a message; whether each sentence earns its place does. This is not a separate
-product step, approval request or rejection mechanism. Stop when the reader can
-orient and understand, and the sender's meaning is preserved.
-
-### Title, message kind and final review
-
-For a titled Relay, use a natural 3–6 word gist in the sender's register. Name
-the single ask, outcome, update or decision someone should recognize at a
-glance. Do not concatenate every finding or write a report headline.
-
-Every Relay is `kind: "message"`: human correspondence, including
-technical notes, suggestions, opinions and decisions.
-
-Before presenting or sending, check both documents against the user's request:
-every intended point is preserved; no ask or commitment was invented; the person
-can understand the message on its own; the agent has the complete useful context;
-and the human message sounds like the sender speaking. If either document fails,
-revise it before sending or requesting any required approval.
-<!-- END GENERATED RELAY WRITING -->
 
 ## Attachments, channels and conversations
 
