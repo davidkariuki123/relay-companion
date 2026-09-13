@@ -311,8 +311,8 @@ test("enabled app rows share the same binder on the bubble and in the reader", (
   const reader = html.slice(html.indexOf("function renderReader()"), html.indexOf("wireHostOpen(readerBodyEl);") + 30);
   assert.match(reader, /const workOn = payload\.features\?\.relayWork === true;/);
   assert.match(reader, /const bothNote = onAgent && workOn && !handoff \?/);
-  assert.match(reader, /const documentHostActions = !request && onHuman \? `<div class="rd-host-actions" data-stop="1">\$\{relayHostActionsHtml\(\{/,
-    "the provider rows live on the human document; the agent face's rail names the app and Send opens it");
+  assert.match(reader, /const documentHostActions = onHuman \? `<div class="rd-host-actions" data-stop="1">\$\{relayHostActionsHtml\(\{/,
+    "the provider rows live on every letter's page, a Task's included (David, 2026-09-13: a Task opens like a Relay)");
   assert.match(reader, /if \(onAgent && !workOn\) return "";/);
   assert.match(reader, /if \(onAgent\) return relayWorkDockHtml\(r, \{ inline: true \}\)/,
     "the agent composer is the hand-off and carries no provider launch buttons");

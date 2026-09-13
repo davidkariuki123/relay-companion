@@ -1073,6 +1073,9 @@ async function setup(argv = []) {
       console.log(`Relay ${version} is installed and paired. The Relay pill is open.`);
     } else {
       console.log(`Relay ${version} is installed. The Relay pill is open; sign in there to finish.`);
+      // A person set up from sendrelays.com has no invitation document telling
+      // their agent what comes after sign-in; the public guide does.
+      console.log("Once the pill shows the account is paired, read https://sendrelays.com/llm_guide.md and follow \"Set up without an invitation\" to offer the first-Relay tutorial from this conversation.");
     }
     if (activated?.cliLauncher?.ok && activated.cliLauncher.shimPath && !activated.cliLauncher.pathAvailable) {
       console.log(`Relay's command is installed at ${activated.cliLauncher.shimPath}. Open a new login session to add ~/.local/bin to PATH.`);

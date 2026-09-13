@@ -150,9 +150,11 @@ test("a task relay seed briefs the job while Relay owns provider completion", ()
   assert.match(seed.visible, /Repro on the VM/);
   // The job contract rides the hidden channel, never the visible transcript.
   assert.doesNotMatch(seed.visible, /relay_send|completion|operator/i);
-  assert.match(seed.operatorNote, /pressed Start/);
+  assert.match(seed.operatorNote, /opened this Task in this session; nothing runs until they tell you to/);
+  assert.match(seed.operatorNote, /relay_task_start with taskRelayId relay_task_9/);
+  assert.match(seed.operatorNote, /relay_task_complete with the result/);
   assert.doesNotMatch(seed.operatorNote, /inReplyToRelayId|type "completion"|DRAFT the final result/);
-  assert.match(seed.operatorNote, /captures the provider's final answer automatically/);
+  assert.doesNotMatch(seed.operatorNote, /pressed Start|relay-output-risk|captures the provider/);
   assert.match(seed.operatorNote, /Do not call relay_send merely/);
   assert.match(seed.operatorNote, /failed or was blocked/);
   assert.match(seed.operatorNote, /<relay_for_agent>/);

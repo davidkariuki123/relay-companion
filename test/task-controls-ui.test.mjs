@@ -50,9 +50,14 @@ test("Canceled is workflow state while Recently Deleted remains a separate reade
   assert.match(reader, /Move task to Recently Deleted/);
 });
 
-test("both source faces expose Start task while a Task is actionable", () => {
+test("a Task has no Start dock: its verbs are a Relay's Open rows and the reply dock", () => {
+  // David, 2026-09-13: a Task opens like any Relay. No Start label, no
+  // actionable-state gate, no task-only composer; the host rows render on the
+  // page and the agent stamps Started / Done via relay_task_start / complete.
   const reader = between(inbox, "function renderReader()", "// ---------- the Tasks board");
-  assert.match(inbox, /label: failed \? "Retry" : state === "stopped" \? "Start again" : "Start task"/);
-  assert.match(reader, /const requestActionable = request/);
-  assert.match(reader, /onAgent \|\| requestActionable/);
+  assert.equal(inbox.includes('"Start again" : "Start task"'), false);
+  assert.equal(reader.includes("requestActionable"), false);
+  assert.equal(reader.includes("requestDockHtml"), false);
+  assert.match(reader, /const documentHostActions = onHuman \? `<div class="rd-host-actions"/);
+  assert.match(reader, /<textarea id="qrInput" rows="1" placeholder="Reply…">/);
 });

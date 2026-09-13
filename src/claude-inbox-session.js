@@ -154,3 +154,28 @@ export function stopClaudeInboxSession(sessionId) {
 export function stopAllClaudeInboxSessions() {
   for (const sid of [...liveInboxSessions.keys()]) stopClaudeInboxSession(sid);
 }
+
+// A live engine is "in use" while its registered session is mid-turn or waiting
+// on the human (running / needs input). Reaping one of those kills the turn the
+// user is actively watching in Desktop.
+export function inboxSessionBusy(sessionId, registrations = liveClaudeRegistrations) {
+  const row = registrations().get(String(sessionId || ""));
+  if (!row?.socketLive) return false;
+  const status = String(row.status || "").toLowerCase();
+  return ["running", "busy", "working", "active", "waiting", "needs_input", "permission", "approval"].includes(status);
+}
+
+// Reap only the engines that are idle right now, leaving any live turn running.
+// The pill's before-quit fires on a genuine user quit AND on the launchd
+// bootout the self-updater performs to swap the runtime (David + Sven, live
+// 2026-09-11: a background 0.1.496->0.1.499 self-update reaped the very Claude
+// session Sven was working in, because before-quit called stopAll). Engines are
+// detached and unref'd, so idle survivors are only reaped to bound orphans on a
+// real quit; a busy one must outlive the restart. Desktop keeps talking to it
+// over the same socket, and a future hand-off re-spawns any reaped idle one.
+export function stopIdleClaudeInboxSessions() {
+  for (const sid of [...liveInboxSessions.keys()]) {
+    if (inboxSessionBusy(sid)) continue;
+    stopClaudeInboxSession(sid);
+  }
+}

@@ -1084,7 +1084,10 @@ test("hand-offs speak in conversation terms: starts vs continues, said BEFORE th
   // person, while For Agent starts or continues Work.
   assert.doesNotMatch(html, /data-reply-mode|__relayToggleReplyMode|replyTarget\(/);
   assert.doesNotMatch(html, /Talk to \$\{esc\(app\)\}|Reply to \$\{esc/);
-  assert.match(html, /if \(request && taskClaimAllowsStart\(r\) && \(onAgent \|\| requestActionable\)\) return requestDockHtml\(r, \{ inline: true \}\)/);
+  // A Task has no Start dock in the reader any more (David, 2026-09-13): it
+  // gets the plain reply dock and the same host rows as a Relay.
+  assert.equal(html.includes("requestDockHtml"), false);
+  assert.match(html, /const documentHostActions = onHuman \? `<div class="rd-host-actions"/);
   assert.match(html, /if \(onAgent\) return relayWorkDockHtml\(r, \{ inline: true \}\)/);
   assert.match(html, /data-handoff="\$\{esc\(r\.id\)\}"/);
   assert.match(html, /<button type="button" id="qrSend">Relay<\/button>/);

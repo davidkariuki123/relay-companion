@@ -112,6 +112,7 @@ test("claims separate RECENT cold-start from NEW arrivals and reserve atomically
   const first = claimAgentRelayHookContext(home, scope, {
     sessionId: "session",
     eventName: "UserPromptSubmit",
+    todo: true,
     nowMs,
   });
   assert.ok(first);
@@ -439,4 +440,18 @@ test("subscribed topics are listed with mandates on the first prompt and only th
   assert.match(late.text, /<untrusted_new_relay_title_records>[\s\S]*relay_late/);
   assert.doesNotMatch(late.text, /untrusted_new_topic_records/);
   assert.equal(late.rollback(), true);
+});
+
+// Todo and Tasks ride the developer row. A hook that does not pass todo (or
+// passes false, the staging/production case) must not name relay_todo_update
+// or the Task tools: the session cannot see them.
+test("the hook context names Todo and the Task tools only when the row has them", () => {
+  const home = tempHome();
+  const nowMs = Date.now();
+  recordAgentRelayIndex(home, "account", { items: [relay(1, nowMs)] }, { nowMs });
+  const ordinary = claimAgentRelayHookContext(home, "account", { sessionId: "ordinary", eventName: "UserPromptSubmit", nowMs });
+  assert.ok(ordinary?.text);
+  assert.doesNotMatch(ordinary.text, /relay_todo_update|relay_task_start|relay_task_complete|\btasks?\b/i);
+  const developer = claimAgentRelayHookContext(home, "account", { sessionId: "developer", eventName: "UserPromptSubmit", todo: true, nowMs });
+  assert.match(developer.text, /relay_todo_update before starting and done when finished; Tasks use relay_task_start and relay_task_complete/);
 });

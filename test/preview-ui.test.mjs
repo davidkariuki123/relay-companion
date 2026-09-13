@@ -471,7 +471,7 @@ test("a rendered conversation marks every visible inbound message read", () => {
 });
 
 
-test("the Task face offers a local Review Safety before one-click Start task", () => {
+test("the retired standalone preview keeps its Review Safety; the pill reader has no Start", () => {
   assert.match(previewHtml, /id="safetyButton"[^>]*>Review Safety<\/button>/);
   assert.match(previewHtml, /id="safetyPanel"/);
   assert.match(previewPreloadSource, /reviewSafety:[\s\S]*relay:preview:reviewSafety/);
@@ -481,11 +481,10 @@ test("the Task face offers a local Review Safety before one-click Start task", (
   assert.match(reviewHandler, /reviewRequestSafetyById/);
   assert.match(previewRenderer, /async function reviewSafety\(\)/);
   assert.match(previewRenderer, /plainLanguage/);
-  // The current pill reader, not only the retired standalone preview, carries
-  // the two-button consent surface.
-  assert.match(inbox, /data-request-safety/);
-  assert.match(inbox, />Review Safety<\/button>/);
-  assert.match(inbox, /label: failed \? "Retry" : state === "stopped" \? "Start again" : "Start task"/);
+  // The pill reader no longer has a Start dock or its safety review: a Task
+  // opens like a Relay (David, 2026-09-13). The retired standalone preview
+  // keeps its surface as history.
+  assert.equal(inbox.includes("requestDockHtml"), false);
   assert.match(pillPreload, /relay:requestReviewSafety/);
 });
 
@@ -493,7 +492,6 @@ test("a consequential Task result waits on the recipient device before encrypted
   assert.match(main, /candidate\.assessment\?\.level !== "none"/);
   assert.match(main, /completionReview/);
   assert.match(main, /releaseProviderCompletion/);
-  assert.match(inbox, />Send result<\/button>/);
   assert.match(inbox, /data-result-send/);
   assert.match(pillPreload, /relay:requestCompletionSend/);
 });
@@ -773,7 +771,6 @@ test("ordinary window focus survives reader refreshes and run retries invalidate
 test("terminal request status shares the centered runner and composer measure", () => {
   assert.match(inbox, /\.request-terminal-status \{ width:100%; max-width:34em; margin:0 auto 4px;/);
   assert.match(inbox, /\.request-terminal-status[^}]*text-align:center/);
-  assert.match(inbox, /class="request-terminal-status\$\{inline \? " inline" : ""\}"/);
   assert.doesNotMatch(inbox, /Didn't finish[^`]*reader-from/);
 });
 

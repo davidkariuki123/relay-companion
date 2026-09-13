@@ -31,7 +31,6 @@ ipcMain.on("relay:preview:close", () => app.quit());
 ipcMain.on("relay:preview:openExternal", () => {});
 ipcMain.handle("relay:preview:chat", async () => ({ ok: true, messages: [], participants: [] }));
 ipcMain.handle("relay:preview:reply", async () => ({ ok: true }));
-ipcMain.handle("relay:preview:startTask", async () => ({ ok: false, error: "Already started" }));
 ipcMain.handle("relay:preview:session", async () => feed);
 ipcMain.handle("relay:preview:steer", async () => ({ ok: true }));
 ipcMain.handle("relay:runFeed:watch", async () => feed);

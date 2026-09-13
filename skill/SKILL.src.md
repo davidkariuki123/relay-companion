@@ -469,6 +469,16 @@ and the same `idempotencyKey` for every retry. [[dev]]`kind: "task"` and an opti
 `title` are[[/dev]][[prod]]An optional `title` is[[/prod]] also supported under the existing send contract. Set
 `inReplyToRelayId` only for an explicitly selected message.
 
+To forward a Relay the person sent or received, use `relay_forward` (or the
+helper's `forward <relay-id>` with JSON on stdin) with the exact relay id, one
+exact recipient identifier, an optional `note` in the person's own words to the
+new recipient, and a stable `idempotencyKey`. Relay copies the original's
+title, both documents and attachments itself and marks the new Relay as
+forwarded from its original sender by name; do not restate the original in the
+note. The original sender is not notified and does not join the new
+conversation, so treat forwarding as disclosure: confirm who is receiving it.
+Encrypted messages cannot be forwarded. Ask for approval as for any send.
+
 To attach a local file, add `files: ["<absolute path>"]` to the JSON passed on
 stdin to `send`, or `attachments: [{path: "<absolute path>", name: "report.pdf"}]`.
 The helper reads and hashes files before sending. Companion encrypts them when

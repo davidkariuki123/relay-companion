@@ -29,7 +29,14 @@ export function materializeRowForClaude(row, { cwd = process.cwd(), forceClaudeC
   const paths = [];
   let openRow = row;
   if (wantsClaudeCode) {
-    const { forHuman: forHumanPath, forAgent: forAgentPath } = materializeRelayOpenDocumentFiles(row, { provider: "claude-inbox" });
+    // Write the open documents UNDER the session cwd. Claude Desktop's file
+    // panel only reads paths inside the session's granted roots (its cwd first
+    // of all); the previous ~/.relay-companion location is outside every root,
+    // so every For-Agent / For-Human link died with "Couldn't find this file"
+    // (Sven, 2026-09-10). Declaring the dir on the forged session record does
+    // NOT survive Desktop's import (it wipes sessionPermissionUpdates), so the
+    // documents themselves have to live where the panel already looks.
+    const { forHuman: forHumanPath, forAgent: forAgentPath } = materializeRelayOpenDocumentFiles(row, { provider: "claude-inbox", cwd });
     paths.push(forHumanPath, forAgentPath);
     openRow = {
       ...row,
@@ -56,8 +63,8 @@ export function materializeRowForClaude(row, { cwd = process.cwd(), forceClaudeC
   };
 }
 
-export function materializeRelayOpenDocumentFiles(row, { provider = "provider-inbox" } = {}) {
-  const relayDir = path.join(storeDir(), safeFileStem(provider), safeFileStem(row?.id || row?.createdAt));
+export function materializeRelayOpenDocumentFiles(row, { provider = "provider-inbox", cwd = "" } = {}) {
+  const relayDir = relayOpenDocumentsDir({ provider, id: row?.id || row?.createdAt, cwd });
   fs.mkdirSync(relayDir, { recursive: true });
   // Hyphenated, not spaced: a space forces the link renderer to escape the path,
   // and only Claude is known to percent-decode it. A space-free name needs no
@@ -67,6 +74,33 @@ export function materializeRelayOpenDocumentFiles(row, { provider = "provider-in
   fs.writeFileSync(forHumanPath, `# For Human\n\n${String(row?.forHuman || "").trim()}\n`);
   fs.writeFileSync(forAgentPath, `# For Agent\n\n${String(row?.forAgent || "").trim()}\n`);
   return { forHuman: forHumanPath, forAgent: forAgentPath };
+}
+
+// Where a relay's open documents live. Under the session cwd when we have one
+// (so Claude Desktop's file panel, which only reads inside the session's
+// granted roots, resolves the links), otherwise the shared companion store.
+// The cwd copy sits in a self-ignoring `.relay-inbox/` so it never shows up in
+// the git status of a passport-anchored checkout.
+export function relayOpenDocumentsDir({ provider = "provider-inbox", id, cwd = "" } = {}) {
+  const stem = safeFileStem(id);
+  const base = String(cwd || "").trim();
+  if (base && path.isAbsolute(base)) {
+    const inboxRoot = path.join(base, ".relay-inbox");
+    try {
+      // Recursive mkdir also creates the cwd itself when it does not exist yet
+      // (an unanchored relay's ~/Relay is created on first use), so the panel's
+      // granted-root copy is always written, not just when the cwd pre-exists.
+      fs.mkdirSync(inboxRoot, { recursive: true });
+      // `*` ignores every file in here, including this .gitignore itself, so the
+      // whole directory is invisible to git even under `git add -A`.
+      const ignorePath = path.join(inboxRoot, ".gitignore");
+      if (!fs.existsSync(ignorePath)) fs.writeFileSync(ignorePath, "*\n");
+      return path.join(inboxRoot, stem);
+    } catch {
+      // Fall through to the companion store if the cwd is not writable.
+    }
+  }
+  return path.join(storeDir(), safeFileStem(provider), stem);
 }
 
 export function renderClaudeHandoffMarkdown(row) {

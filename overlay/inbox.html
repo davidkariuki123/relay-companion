@@ -2491,6 +2491,8 @@
   .tp-actions { display:flex; align-items:center; gap:14px; }
   .tp-new-toggle { appearance:none; width:100%; padding:10px 16px; border:0; border-bottom:1px solid var(--hair); background:transparent; color:var(--accent); text-align:left; font:500 12px/1.2 var(--sans); cursor:pointer; }
   .tp-new-toggle:hover { background:var(--wash); }
+  .tp-new-cancel { appearance:none; align-self:flex-start; margin:-4px 0 0 -2px; padding:2px; border:0; background:transparent; color:var(--accent); font:500 12px/1.2 var(--sans); cursor:pointer; transition:opacity var(--t-fast) var(--settle); }
+  .tp-new-cancel:hover { opacity:.75; }
   .tp-head { padding:12px 16px 10px; border-bottom:1px solid var(--hair); }
   .tp-head h2 { margin:0; color:var(--ink); font:500 18px/1.25 var(--serif); }
   .tp-head p { margin:3px 0 0; color:var(--muted-2); font:11px/1.4 var(--sans); }
@@ -2600,6 +2602,28 @@
   .th-mention-menu { position:absolute; left:10px; right:10px; bottom:100%; margin-bottom:7px; z-index:8; overflow:hidden;
     border:1px solid var(--edge); border-radius:12px; background:var(--bg); box-shadow:0 12px 30px color-mix(in srgb, #000 18%, transparent); }
   .th-mention-menu.hidden { display:none; }
+  /* A long paste is probably a document, not chat. Keep the suggestion tied
+     to the composer that received it, using the same raised surface as the
+     mention picker; typed drafts never enter this path. */
+  .qr.long-paste-anchor { position:relative; }
+  .long-paste-prompt { position:absolute; left:0; right:0; bottom:calc(100% + 7px); z-index:10; padding:12px 13px;
+    border:1px solid var(--edge); border-radius:12px; background:var(--bg);
+    box-shadow:0 12px 30px color-mix(in srgb, #000 18%, transparent); animation:longPastePromptIn var(--t-base) var(--soft) both; }
+  .long-paste-prompt::after { content:""; position:absolute; right:28px; bottom:-5px; width:9px; height:9px; transform:rotate(45deg);
+    border-right:1px solid var(--edge); border-bottom:1px solid var(--edge); background:var(--bg); }
+  .long-paste-meta { display:flex; align-items:center; gap:6px; padding-right:25px; color:var(--muted-2);
+    font:500 9.5px/1.3 var(--mono); letter-spacing:.01em; text-transform:uppercase; }
+  .long-paste-meta::before { content:""; width:5px; height:5px; flex:none; border-radius:50%; background:var(--accent); }
+  .long-paste-title { margin-top:4px; color:var(--ink); font:600 12.5px/1.35 var(--sans); }
+  .long-paste-copy { margin-top:4px; color:var(--muted); font:11px/1.45 var(--sans); }
+  .long-paste-actions { display:flex; align-items:center; gap:14px; margin-top:9px; }
+  .qr .long-paste-actions button, .qr .long-paste-close { appearance:none; border:0; background:transparent; padding:0; border-radius:0;
+    color:var(--muted-2); font:500 11px/1.25 var(--sans); }
+  .qr .long-paste-actions .long-paste-copy-button { color:var(--accent); font-weight:600; }
+  .qr .long-paste-close { position:absolute; top:8px; right:8px; width:22px; height:22px; border-radius:6px;
+    display:inline-flex; align-items:center; justify-content:center; font-size:15px; font-weight:400; }
+  .qr .long-paste-close:hover { background:var(--wash-2); color:var(--ink); }
+  @keyframes longPastePromptIn { from { opacity:0; transform:translateY(6px) scale(.985); } to { opacity:1; transform:none; } }
   .th-mention-item { width:100%; display:flex; align-items:center; gap:9px; padding:9px 11px !important; border-radius:0 !important;
     background:transparent !important; color:var(--ink) !important; text-align:left; font-size:12px !important; }
   .th-mention-item.on { background:var(--wash) !important; }
@@ -2953,14 +2977,36 @@
   .su-first-relay .su-form { margin-top:18px; }
   .su-setup-prompt { margin-top:18px; padding:14px; border:1px solid var(--edge); border-radius:10px; background:var(--wash); font-size:12px; line-height:1.6; user-select:text; }
   .su-copy-setup { width:100%; margin-top:10px; }
-  .su-tutorial { margin-top:18px; padding-top:14px; border-top:1px solid var(--edge); }
+  .su-copy strong { color:var(--ink); font-weight:600; }
+  /* THE CHAPTER AFTER THE FIRST SEND (2026-09-13). The celebration's three
+     relay squares settle in, then keep hopping while the bar under Continue
+     fills over the ten seconds before the next screen, so the wait has
+     something to watch; Continue skips it. Your link is ready shows the
+     message to send in the same box the setup prompt uses. */
+  .su-relay-moment { display:flex; align-items:center; gap:6px; height:34px; margin-bottom:20px; }
+  .su-relay-moment i { display:block; width:19px; height:19px; border-radius:3px; background:#d67b5d; }
+  .su-relay-moment i:nth-child(2) { background:var(--ink); }
+  .su-relay-moment i:nth-child(3) { background:#7164ff; }
+  .su-relay-moment svg { width:23px; height:23px; margin-left:7px; fill:none; stroke:var(--accent); stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+  .su-first-relay-sent .su-relay-moment i { animation:su-first-send .65s var(--settle) both, su-relay-hop 1.8s ease-in-out 1s infinite; animation-play-state:var(--relay-loop-state); }
+  .su-first-relay-sent .su-relay-moment i:nth-child(2) { animation-delay:.07s, 1.15s; }
+  .su-first-relay-sent .su-relay-moment i:nth-child(3) { animation-delay:.14s, 1.3s; }
+  .su-first-relay-sent .su-relay-moment svg { animation:su-first-send .65s var(--settle) .3s both; }
+  @keyframes su-first-send { from { opacity:0; transform:translateY(9px) rotate(-8deg); } to { opacity:1; transform:none; } }
+  @keyframes su-relay-hop { 0%, 100% { transform:none; } 50% { transform:translateY(-7px) rotate(8deg); } }
+  .su-countdown { margin-top:12px; height:3px; border-radius:2px; background:var(--hair); overflow:hidden; }
+  .su-countdown > span { display:block; height:100%; width:0; border-radius:2px; background:var(--accent); animation:su-countdown var(--su-countdown-ms, 10s) linear forwards; }
+  @keyframes su-countdown { from { width:0; } to { width:100%; } }
+  @media (prefers-reduced-motion:reduce) {
+    .su-first-relay-sent .su-relay-moment i, .su-first-relay-sent .su-relay-moment svg { animation:none; }
+    .su-countdown > span { animation:none; width:100%; }
+  }
+  .su-share-text { white-space:pre-wrap; overflow-wrap:anywhere; max-height:190px; overflow:auto; }
+  .su-first-link .su-share-text + .su-copy { margin-top:14px; }
+  .su-form-row { grid-template-columns:1fr 1fr; }
   .su-body:has(.su-network) { justify-content:flex-start; overflow:hidden; }
   .su-network { display:flex; flex-direction:column; flex:1; min-height:0; }
   .su-network-content { flex:1; min-height:0; overflow:auto; }
-  .su-tutorial h2 { margin:0; font:600 15px/1.3 var(--sans); color:var(--ink); }
-  .su-tutorial details { margin-top:10px; font-size:12px; color:var(--muted); }
-  .su-tutorial summary { cursor:pointer; }
-  .su-tutorial .su-setup-prompt { max-height:180px; overflow:auto; white-space:pre-wrap; }
   .su-returning { margin:23px 0 0; text-align:center; font-size:11px; line-height:1.6; color:var(--muted); }
   .su-signin { padding:0; border:0; background:none; color:var(--ink); font:inherit; font-weight:600; text-decoration:underline; text-underline-offset:3px; cursor:pointer; }
   .su-divider { display:flex; align-items:center; gap:10px; color:var(--muted-3); font-size:10px; text-transform:uppercase; letter-spacing:.12em; }
@@ -6642,6 +6688,95 @@
       .map((item) => item.getAsFile())
       .filter(Boolean);
   }
+  const LONG_PASTE_MIN_CHARACTERS = 240;
+  const LONG_PASTE_MIN_SENTENCES = 5;
+  const LONG_PASTE_FALLBACK_CHARACTERS = 900;
+  function longPasteSentenceCount(value) {
+    const source = String(value || "").trim();
+    if (!source) return 0;
+    try {
+      if (Intl && Intl.Segmenter) {
+        const segments = new Intl.Segmenter(undefined, { granularity:"sentence" }).segment(source);
+        return [...segments].filter((segment) => /[\p{L}\p{N}]/u.test(segment.segment)).length;
+      }
+    } catch {}
+    return (source.match(/[^.!?\n]+(?:[.!?]+(?=\s|$)|\n+|$)/g) || [])
+      .filter((sentence) => /[A-Za-z0-9]/.test(sentence)).length;
+  }
+  function longPasteStats(value) {
+    const source = String(value || "").trim();
+    return { characters:[...source].length, sentences:longPasteSentenceCount(source) };
+  }
+  function shouldSuggestRelayForPaste(value) {
+    const stats = longPasteStats(value);
+    return { ...stats, suggest:stats.characters >= LONG_PASTE_FALLBACK_CHARACTERS
+      || (stats.characters >= LONG_PASTE_MIN_CHARACTERS && stats.sentences >= LONG_PASTE_MIN_SENTENCES) };
+  }
+  function longPasteRecipient(field) {
+    return String(field?.relayLongPasteParty || field?.relayReplyContext?.replyChat?.party || "them").trim() || "them";
+  }
+  function clearLongPastePrompt(field, { resetDismissed = false } = {}) {
+    field?.closest(".qr")?.querySelector(".long-paste-prompt")?.remove();
+    if (field && resetDismissed) field.relayLongPasteDismissed = false;
+  }
+  function showLongPastePrompt(field, pastedText, stats) {
+    const qr = field?.closest(".qr");
+    if (!qr || field.relayLongPasteDismissed) return;
+    clearLongPastePrompt(field);
+    qr.classList.add("long-paste-anchor");
+    const recipient = longPasteRecipient(field);
+    const prompt = document.createElement("aside");
+    prompt.className = "long-paste-prompt";
+    prompt.setAttribute("role", "dialog");
+    prompt.setAttribute("aria-label", "Send pasted text as a Relay");
+    prompt.setAttribute("aria-live", "polite");
+    const meta = document.createElement("div");
+    meta.className = "long-paste-meta";
+    meta.textContent = `Pasted · ${stats.sentences} ${stats.sentences === 1 ? "sentence" : "sentences"} · ${stats.characters.toLocaleString()} characters`;
+    const title = document.createElement("div");
+    title.className = "long-paste-title";
+    title.textContent = "This belongs in a Relay";
+    const copy = document.createElement("div");
+    copy.className = "long-paste-copy";
+    copy.textContent = `Ask Claude or Codex to send it to ${recipient} as a Relay, which will be easier for them to go through.`;
+    const actions = document.createElement("div");
+    actions.className = "long-paste-actions";
+    const copyButton = document.createElement("button");
+    copyButton.type = "button";
+    copyButton.className = "long-paste-copy-button";
+    copyButton.textContent = "Copy for my agent";
+    const keepButton = document.createElement("button");
+    keepButton.type = "button";
+    keepButton.textContent = "Keep as text";
+    const closeButton = document.createElement("button");
+    closeButton.type = "button";
+    closeButton.className = "long-paste-close";
+    closeButton.setAttribute("aria-label", "Dismiss suggestion");
+    closeButton.textContent = "×";
+    const dismiss = () => {
+      field.relayLongPasteDismissed = true;
+      clearLongPastePrompt(field);
+      field.focus();
+    };
+    copyButton.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const draft = String(field.value || "").trim() || String(pastedText || "").trim();
+      try {
+        await navigator.clipboard.writeText(`Send this to ${recipient} as a Relay:\n\n${draft}`);
+        copyButton.textContent = "Copied";
+      } catch {
+        copyButton.textContent = "Copy failed";
+      }
+    });
+    keepButton.addEventListener("click", (event) => { event.stopPropagation(); dismiss(); });
+    closeButton.addEventListener("click", (event) => { event.stopPropagation(); dismiss(); });
+    prompt.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); dismiss(); }
+    });
+    actions.append(copyButton, keepButton);
+    prompt.append(meta, title, copy, actions, closeButton);
+    qr.append(prompt);
+  }
   const COMPOSER_ATTACHMENTS_ENABLED = true;
   function dressComposer(field, onSend) {
     if (!field || field.dataset.dressed) return;
@@ -6670,7 +6805,11 @@
     }
     field.addEventListener("paste", (e) => {
       const files = clipboardFiles(e);
-      if (files.length) { e.preventDefault(); stageFileList(field, files); }
+      if (files.length) { e.preventDefault(); stageFileList(field, files); return; }
+      if (!field.matches("#qrInput, #thQrInput")) return;
+      const pastedText = e.clipboardData?.getData("text/plain") || "";
+      const stats = shouldSuggestRelayForPaste(pastedText);
+      if (stats.suggest) showLongPastePrompt(field, pastedText, stats);
     });
     field.addEventListener("dragover", (e) => {
       if (e.dataTransfer && [...(e.dataTransfer.types || [])].includes("Files")) e.preventDefault();
@@ -6693,7 +6832,10 @@
       const box = field.closest(".qr");
       if (box && !box.classList.contains("col")) box.style.borderRadius = field.scrollHeight > 34 ? "16px" : "22px";
     };
-    field.addEventListener("input", grow);
+    field.addEventListener("input", () => {
+      grow();
+      if (!String(field.value || "").trim()) clearLongPastePrompt(field, { resetDismissed:true });
+    });
     requestAnimationFrame(grow);
     field.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); onSend(); }
@@ -6701,6 +6843,7 @@
     // grow() is bound to input, so a composer that survives a send must be told
     // to shrink back after its value is cleared out from under it.
     field.relayResize = grow;
+    field.relayLongPasteReset = () => clearLongPastePrompt(field, { resetDismissed:true });
   }
   let readerSource = "relays";
   let readerReturn = null; // exact view/room/scroll state the reader must return to
@@ -7106,10 +7249,11 @@
   function topicNewFormHtml() {
     if (!topicsState.creating) return `<button class="tp-new-toggle" type="button" data-topic-new>+ New topic</button>`;
     return `<form class="tp-new" data-topic-new-form>
+      <button class="tp-new-cancel" type="button" data-topic-new-cancel>Cancel</button>
       <input class="cv-input" name="name" placeholder="Topic name" autocomplete="off" spellcheck="false" required />
       <textarea class="cv-input" name="mandate" placeholder="The mandate: what this topic is about, in a sentence or two. The rules every topic has are below; no need to repeat them." required></textarea>
       ${topicStandingRulesHtml()}
-      <div class="tp-actions"><button class="cv-save" type="submit">Create topic</button><button class="cv-cancel" type="button" data-topic-new-cancel>Cancel</button></div>
+      <div class="tp-actions"><button class="cv-save" type="submit">Create topic</button></div>
       <div class="tp-error" data-topic-new-error></div>
     </form>`;
   }
@@ -7605,10 +7749,6 @@
     const claim = row && row.taskClaim;
     return claim && claim.scope === "channel" ? claim : null;
   }
-  function taskClaimAllowsStart(row) {
-    const claim = row && row.taskClaim;
-    return !claim || claim.scope === "direct" || claim.capabilities?.canStart === true;
-  }
   function taskClaimControlHtml(row, { surface = "default" } = {}) {
     const claim = taskClaimFor(row);
     if (!claim) return "";
@@ -7879,39 +8019,8 @@
       }
     }
   }
-  function workProviderPromptHtml(r) {
-    const prompt = workProviderPrompts.get(String(r.id)) || {};
-    const busyProvider = prompt.busy || providerAuthBusy;
-    const row = (provider) => {
-      const app = providerAppName(provider);
-      const item = providerStatusForWork(provider);
-      const connected = providerReadyForWork(provider);
-      const busy = busyProvider === provider;
-      const disabled = Boolean(busyProvider && !busy) || Boolean(item?.authLoaded && (!item.installed || !item.enabled) && !connected);
-      const label = connected ? `Use ${app}` : busy ? `Connecting ${app}…` : `Connect ${app}`;
-      const context = connected ? "Ready for Tasks" : provider === "codex" ? "ChatGPT subscription" : "Claude subscription";
-      return `<button class="th-host-action" type="button" data-work-provider="${provider}" data-work-provider-relay="${esc(r.id)}" data-host="${provider}"${busy || disabled ? " disabled" : ""}>
-        <img class="th-host-logo" src="${provider === "codex" ? "codexMark.svg" : "claudeCodeMark.svg"}" alt="" />
-        <span class="th-host-copy"><span class="th-host-label">${esc(label)}</span><span class="th-host-context">${esc(context)}</span></span>
-        <span class="th-host-arrow" aria-hidden="true">→</span>
-      </button>`;
-    };
-    return `<div class="work-connect" role="region" aria-label="Agent connection required">
-      <div class="work-connect-title">Connect an agent to start this Task</div>
-      <div class="work-connect-copy">Work runs in Codex or Claude Code using your existing subscription. Choose one to connect and continue.</div>
-      <div class="work-connect-actions">${row("codex")}${row("claude")}</div>
-      <div class="work-connect-error" role="status" aria-live="polite">${esc(prompt.error || "")}</div>
-    </div>`;
-  }
-  function workProviderPromptDockHtml() {
-    return `<div class="ta-dock inline work-connect-dock" data-stop="1"><div class="qr ta-qr col">
-      <textarea rows="1" class="ta-note" placeholder="Connect an agent to send a follow-up…" disabled></textarea>
-      <div class="ta-rail"><div class="rt-chips"><span class="rt-chip static"><span class="sq"></span>No agent connected</span></div>
-        <span class="rt-spacer"></span><span class="ta-acts"><button class="ta-later" type="button" disabled>Open in agent</button><button class="ta-approve" type="button" disabled>Send</button></span>
-      </div></div></div>`;
-  }
-  // The route menu: the island's night material, one list, current choice
-  // wears the blue square.
+
+
   let routeMenuEl = null;
   function closeRouteMenu() { if (routeMenuEl) { routeMenuEl.remove(); routeMenuEl = null; } }
   function openRouteMenu(anchor, kind, requestId, rerender) {
@@ -7949,16 +8058,7 @@
   // bubbles, board rows) are the same markup; `inline` only drops the sticky
   // page-bottom chrome. Reply boxes talk to people, this box talks to your
   // agent, and Approve sits where Send sits.
-  function taskStatusLine(r, { inline = false } = {}) {
-    const state = taskBoardState(r.id);
-    if (handoffFor(r)?.state === "failed") return "";
-    if (state === "waiting" || state === "running" || state === "done") return "";
-    if (state === "stopped") {
-      const recovery = requestHasNativeSession(r) ? "Send a follow-up to resume it." : "Start it again.";
-      return `<div class="request-terminal-status${inline ? " inline" : ""}"><b>Didn't finish — the agent stopped before it reported back. ${recovery}</b></div>`;
-    }
-    return `<div class="request-terminal-status${inline ? " inline" : ""}"><b>Parked — waiting in Tasks</b></div>`;
-  }
+
   // --- The run stream ---------------------------------------------------------
   // The reader MORPHS IN PLACE when a request starts (§2.15 / §4b): the kicker
   // says who is working and for how long, and the agent's own events accrete
@@ -8242,67 +8342,7 @@
         </div>
       </div>`;
   }
-  function requestDockHtml(r, { inline = false } = {}) {
-    if (r.historyImported) {
-      return `<div class="ta-dock${inline ? " inline" : ""}" data-stop="1">
-        <div class="qr ta-qr col"><div class="request-safety" role="status">
-          <strong>Imported Task history</strong>
-          <div>This is a private copy of an earlier Task. It cannot be accepted or run again.</div>
-        </div></div>
-      </div>`;
-    }
-    const state = taskBoardState(r.id);
-    const h = handoffFor(r);
-    const failed = h?.state === "failed" ? h : null;
-    const draft = String(requestWorkDrafts.get(String(r.id)) || (failed ? failed.note || "" : ""));
-    if (state === "review") {
-      const pending = r.completionReview || {};
-      const assessment = pending.assessment || {};
-      const effects = Array.isArray(assessment.effects) ? assessment.effects : [];
-      return `
-      <div class="ta-dock${inline ? " inline" : ""}" data-stop="1">
-        <div class="qr ta-qr col">
-          <div class="result-review" role="status">
-            <strong>Result ready — check its release risk</strong>
-            <div>${esc(assessment.summary || "Check this result before it leaves your device.")}</div>
-            ${effects.length ? `<ul>${effects.map((effect) => `<li>${esc(effect)}</li>`).join("")}</ul>` : ""}
-          </div>
-          <div class="ta-rail">
-            ${continuedRouteChipsHtml(r)}
-            <span class="rt-spacer"></span>
-            <span class="ta-acts">
-              ${h ? `<button class="ta-later" type="button" data-handoff-open="${esc(r.id)}">Open result</button>` : ""}
-              <button type="button" class="ta-approve" data-result-send="${esc(r.id)}">Send result</button>
-            </span>
-          </div>
-        </div>
-      </div>`;
-    }
-    // A session in the desktop app is the receipt for running AND done: the
-    // card names the app and opens the exact session.
-    if (h && (h.state === "starting" || h.state === "running") && state !== "stopped") return handoffCardHtml(r, h, { inline });
-    if (state === "done") {
-      if (h) return handoffCardHtml(r, h, { inline });
-      return `<div class="ta-dock${inline ? " inline" : ""}" data-stop="1">
-        <div class="qr ta-qr col">
-          <textarea rows="1" class="ta-note" placeholder="This Task is complete" disabled></textarea>
-          <div class="ta-rail"><div class="rt-chips"><span class="rt-chip static"><span class="sq"></span>Older Task</span></div>
-            <span class="rt-spacer"></span><span class="ta-acts"><button class="ta-later" type="button" disabled>Native session unavailable</button><button class="ta-approve" type="button" disabled>Done</button></span>
-          </div>
-        </div>
-      </div>`;
-    }
-    // Parked is deferred, never dead: unfolding a parked request brings the dock
-    // back so Start stays one tap away — only "Not now" leaves (it already
-    // happened; the Parked group says so).
-    return idleRunDockHtml(r, {
-      inline,
-      draft,
-      failed,
-      label: failed ? "Retry" : state === "stopped" ? "Start again" : "Start task",
-      actions: failed ? "" : scheduleActionsHtml(r),
-    });
-  }
+
   function relayWorkDockHtml(r, { inline = false } = {}) {
     const h = handoffFor(r);
     const failed = h?.state === "failed" ? h : null;
@@ -8311,7 +8351,6 @@
     if (h && r.workCompletedAt) return handoffCardHtml(r, h, { inline });
     return idleRunDockHtml(r, { inline, draft, failed, label: failed ? "Retry" : "Send" });
   }
-  function requestControlsHtml(r, opts) { return requestDockHtml(r, opts) || taskStatusLine(r, opts); }
   function wireRequestControls(scope, onDone) {
     for (const button of scope.querySelectorAll("[data-work-provider]")) button.addEventListener("click", async (event) => {
       event.stopPropagation();
@@ -9091,12 +9130,9 @@
       : request ? (String(r.title || "").trim() || relaySubject(r)) : relaySubject(r);
     const headlineClass = subject.length > 120 ? " long very-long" : subject.length > 70 ? " long" : "";
     const note = rowNotes.get(r.id);
-    const providerPrompt = request ? workProviderPrompts.get(String(r.id)) : null;
-    // A Task whose chosen provider is not signed in asks for one in the
-    // status slot, above the composer, on the agent face.
-    const status = request && providerPrompt
-      ? (readerTab === "agent" ? workProviderPromptHtml(r) : "")
-      : request ? taskStatusLine(r, { inline: true }) : "";
+    // A Task carries no status line or connect-an-agent prompt any more: it
+    // opens like a Relay, and the app it opens in owns the work.
+    const status = "";
     // The FOLDER: tabs cut from the paper, one per document — only when the
     // relay actually carries two. Orange square = you, blue = your agent app.
     // TWO FACES, never three. The Work face — Relay's own transcript of a
@@ -9104,37 +9140,21 @@
     // agent face keeps a receipt (David, 2026-09-03: hand-off, not runner).
     const agentText = String(r.forAgent || "").trim();
     if (readerTab === "work") readerTab = "agent";
-    // TWO FACES FOR A TASK ONLY. A letter is one page: the words, then its
-    // Details folded under them, then the one verb and the reply. Sven,
-    // 2026-09-08: "I also love the details section instead of for you and
-    // for your agent. also details should start closed and open if clicked."
-    const twoFaces = request;
+    // ONE FACE, ALWAYS. A letter is one page: the words, then the agent's
+    // Details folded under them (closed until clicked), then the one verb and
+    // the reply. A Task used to split into "Message for you / Message for your
+    // agent" tabs; Sven (2026-09-08, 2026-09-11) wanted a Task to read like an
+    // ordinary Relay — the agent part is an attachment-style Details section,
+    // not a second tab: "the details section instead of for you and for your
+    // agent. also details should start closed and open if clicked."
+    const twoFaces = false;
     const onAgent = twoFaces && readerTab === "agent";
-    const requestActionable = request && taskClaimAllowsStart(r) && ["waiting", "parked", "stopped"].includes(taskBoardState(r.id));
     const agentWords = agentWordCount(agentText);
     const onHuman = !onAgent;
     const handoff = handoffFor(r);
-    // The agent row's state whispers where the Relay went, so the receipt is
-    // visible from the human face too.
-    const agentRowState = onAgent
-      ? "reading now"
-      : handoff?.state === "running"
-        ? `in ${handoffAppName(handoff)} ›`
-        : handoff?.state === "starting"
-          ? `opening ${handoffAppName(handoff)}…`
-          : agentWords ? `${agentWords} ${agentWords === 1 ? "word" : "words"} ›` : "view ›";
-    const documentList = twoFaces ? `
-      <nav class="relay-contents" data-stop="1" aria-label="Relay contents">
-        <span class="relay-contents-label">This Relay contains</span>
-        <span class="relay-contents-list">
-          <button type="button" class="relay-contents-row${onHuman ? " on" : ""}" data-rtab="you" aria-current="${onHuman ? "page" : "false"}">
-            <span class="sq you"></span><span class="relay-contents-name">Message for you</span><span class="relay-contents-state">${onHuman ? "reading now" : "view ›"}</span>
-          </button>
-          <button type="button" class="relay-contents-row${onAgent ? " on" : ""}" data-rtab="agent" aria-current="${onAgent ? "page" : "false"}">
-            <span class="sq ag"></span><span class="relay-contents-name">Message for your agent</span><span class="relay-contents-state">${esc(agentRowState)}</span>
-          </button>
-        </span>
-      </nav>` : "";
+    // No contents strip on any letter: a Task folds its agent document into
+    // Details like every Relay (David, 2026-09-13), so nothing renders here.
+    const documentList = "";
     // DETAILS. Always "Details", never "for your agent": the specifics under
     // the words, in the agent's register, closed until this contact opens it.
     // Remembered per letter while the pill runs.
@@ -9173,7 +9193,7 @@
     // Host rows live on Message for you only. On the agent face the rail's
     // chip names the app and Send opens it; a second "Open in…" beside that
     // was two ways to say one thing (David, 2026-09-03).
-    const documentHostActions = !request && onHuman ? `<div class="rd-host-actions" data-stop="1">${relayHostActionsHtml({
+    const documentHostActions = onHuman ? `<div class="rd-host-actions" data-stop="1">${relayHostActionsHtml({
       id: r.id,
       direction: r.outbound ? "out" : "in",
       materializedCodex: Boolean(r.materializedCodex),
@@ -9189,12 +9209,10 @@
     const todoStatusControl = todoReaderStatusHtml(r);
     const claimControl = request ? taskClaimControlHtml(r, { surface: "reader" }) : "";
     function composerHtml() {
-      // An unstarted Task is actionable from either immutable source document:
-      // both For you and For <agent> expose the same Start task dock. Once it
-      // starts, each visible source document owns its usual addressee and the
-      // agent face carries the receipt.
-      if (request && providerPrompt && onAgent) return workProviderPromptDockHtml();
-      if (request && taskClaimAllowsStart(r) && (onAgent || requestActionable)) return requestDockHtml(r, { inline: true });
+      // A Task has no Start dock (David, 2026-09-13): its verbs are the same
+      // Open in Codex / Open in Claude Code rows a Relay has, and this reply
+      // dock. The agent stamps Started / Done itself with relay_task_start and
+      // relay_task_complete once the human tells it to begin in the app.
       // The agent composer is the hand-off: route, words, and Send. When Relay
       // Work is disabled, the agent face ends after its document.
       if (onAgent && !workOn) return "";
@@ -9336,6 +9354,7 @@
       // Claude Code" used to throw here and strand every control wired below.
       if (send && input) {
         input.relayReplyContext = { r, replyChat };
+        input.relayLongPasteParty = replyChat.party;
       }
       if (send && input && !input.dataset.readerReplyWired) {
         input.dataset.readerReplyWired = "1";
@@ -9388,6 +9407,7 @@
           }
           input.value = "";
           input.relayResize?.();
+          input.relayLongPasteReset?.();
           readerHumanDrafts.delete(String(r.id));
           // "Queued" would be a lie the instant the network is fine, and "Sent"
           // would be one while it is not. The message's own bubble carries the
@@ -9930,22 +9950,6 @@
     const previewItem = previewable
       ? `<button class="oa-item oa-primary" type="button" role="menuitem" ${preview}>Preview</button><div class="oa-sep" role="separator"></div>`
       : "";
-    // A task's verbs are Preview and Start — "Current chat"/"New chat" describe
-    // reading surfaces, but a task is a job you ignite. Start currently rides
-    // the fresh-open wiring; the full start flow (note, model, receipt) lands
-    // with the task preview face.
-    if (task) {
-      // Start from the tray = the REAL start flow (receipt, background run,
-      // sender reply) with the default runtime — never a bare fresh-open,
-      // which forges a chat that sits idle.
-      return `
-      <div class="open-actions row-open-card" data-stop="1" role="menu">
-        ${previewItem}
-        <button class="oa-item${previewable ? "" : " oa-primary"}" type="button" role="menuitem" data-task-start="${esc(id)}">Start</button>
-        ${threadId ? `<div class="oa-sep" role="separator"></div>
-        <button class="oa-item" type="button" role="menuitem" data-thread-history="${esc(threadId)}">Read conversation${messageCount ? ` · ${messageCount}` : ""}</button>` : ""}
-      </div>`;
-    }
     // A link that still resolves is pasted, not opened: copying it is the only
     // action on this row that sends anything.
     const copyLink = shareLinkUrl
@@ -10223,19 +10227,6 @@
       btn.addEventListener("click", () => {
         expandedRelayId = null;
         openRelayFromUI(id, "relay", "fresh");
-        renderRelays();
-      });
-    }
-    for (const btn of relaysListEl.querySelectorAll("[data-task-start]")) {
-      const id = btn.getAttribute("data-task-start");
-      btn.addEventListener("click", () => {
-        expandedRelayId = null;
-        // Start carries the ROUTE: the app/model/effort the rail (or Settings)
-        // named for this Task — never a hardcoded runtime.
-        const rt = routeFor(id);
-        runRowAction(id, btn, () => window.relay.taskStart(id, {
-          host: hostKeyFor(rt.app), model: modelIdFor(rt.app, rt.model), effort: String(rt.effort || "high").toLowerCase(),
-        }));
         renderRelays();
       });
     }
@@ -10925,6 +10916,9 @@
   function knownAddresses() {
     const known = new Set();
     for (const c of [...(payload.contacts || []), ...contactsList]) {
+      // Delivery records the sender for addressing replies; that is not the
+      // recipient accepting them. Explicit contacts and outbound history are.
+      if (c.source === "inbound") continue;
       for (const email of contactEmails(c)) known.add(String(email).trim().toLowerCase());
     }
     const mine = String(payload.account?.email || "").trim().toLowerCase();
@@ -12698,7 +12692,7 @@
     if (!Number.isFinite(date.getTime())) return "Seen";
     return date.toLocaleString([], { dateStyle:"medium", timeStyle:"short" });
   }
-  function receiptDetailsHtml(receipt) {
+  function receiptDetailsHtml(receipt, id) {
     if (!receipt || !receipt.expandable) return "";
     const seen = receipt.readers.map((member) =>
       `<div class="th-receipt-row"><span>${esc(member.name)}</span><span class="th-receipt-when">${esc(member.readAt ? receiptTimestamp(member.readAt) : "Seen")}</span></div>`
@@ -12706,7 +12700,32 @@
     const unread = receipt.unread.map((member) =>
       `<div class="th-receipt-row"><span>${esc(member.name)}</span><span class="th-receipt-when">Not seen</span></div>`
     ).join("");
-    return `<div class="th-receipt-panel">${seen}${unread}</div>`;
+    return `<div class="th-receipt-panel" data-receipt-details="${esc(id)}">${seen}${unread}</div>`;
+  }
+  function revealReceiptDetails(id) {
+    const roomId = threadDetailId;
+    requestAnimationFrame(() => {
+      if (activeView !== "threads" || threadDetailId !== roomId) return;
+      const button = thHistoryEl.querySelector(`[data-receipt-toggle="${CSS.escape(id)}"]`);
+      const panel = thHistoryEl.querySelector(`[data-receipt-details="${CSS.escape(id)}"]`);
+      const scroller = roomScrollElement();
+      if (!button || !panel || !scroller) return;
+      const viewport = scroller.getBoundingClientRect();
+      const header = thDetailEl.querySelector(".th-detail-head")?.getBoundingClientRect();
+      const dock = thHistoryEl.querySelector(".th-composer-dock.chat-shaped")?.getBoundingClientRect();
+      const top = Math.max(viewport.top, header?.bottom ?? viewport.top) + 8;
+      const bottom = Math.min(viewport.bottom, dock?.top ?? viewport.bottom) - 8;
+      const trigger = button.getBoundingClientRect();
+      const details = panel.getBoundingClientRect();
+      // The sticky reply dock covers newly inserted rows without changing
+      // scrollTop. Reveal this receipt above it; newer messages may follow,
+      // so jumping to the end of the conversation would hide it again.
+      if (details.bottom - trigger.top > bottom - top || trigger.top < top) {
+        scroller.scrollTop += trigger.top - top;
+      } else if (details.bottom > bottom) {
+        scroller.scrollTop += details.bottom - bottom;
+      }
+    });
   }
   let activeMentionVisit = null;
 
@@ -14588,7 +14607,7 @@
           ? `<button type="button" class="th-seen" data-receipt-toggle="${esc(m.id)}" data-stop="1" aria-expanded="${expandedReceiptIds.has(m.id) ? "true" : "false"}">${esc(receipt.label)}</button>`
           : `<span class="th-seen">${esc(receipt.label)}</span>`);
         const under = bits.length ? `<div class="th-under${mine ? " mine" : ""}">${bits.join("")}</div>` : "";
-        const details = receipt && expandedReceiptIds.has(m.id) ? receiptDetailsHtml(receipt) : "";
+        const details = receipt && expandedReceiptIds.has(m.id) ? receiptDetailsHtml(receipt, m.id) : "";
         return under + details;
       })()}`;
     }).join("");
@@ -14819,9 +14838,14 @@
       receiptButton.addEventListener("click", (event) => {
         event.stopPropagation();
         const id = receiptButton.getAttribute("data-receipt-toggle");
+        const restoreFocus = document.activeElement === receiptButton;
         if (expandedReceiptIds.has(id)) expandedReceiptIds.delete(id);
         else expandedReceiptIds.add(id);
+        threadDetailEntryFollow = null;
+        threadDetailLiveFollow = RelayChatPresentation.reduceChatLiveFollow(threadDetailLiveFollow, { type:"reset" });
         renderThreadDetail();
+        if (restoreFocus) thHistoryEl.querySelector(`[data-receipt-toggle="${CSS.escape(id)}"]`)?.focus({ preventScroll:true });
+        if (expandedReceiptIds.has(id)) revealReceiptDetails(id);
       });
     }
     for (const badge of thHistoryEl.querySelectorAll("[data-rx-toggle]")) {
@@ -14859,6 +14883,7 @@
     const thQrSend = document.getElementById("thQrSend");
     const thQrInput = document.getElementById("thQrInput");
     if (thQrSend && thQrInput) {
+      thQrInput.relayLongPasteParty = thread.groupName || thread.party || chatRoom?.name || "them";
       let thReplySending = false;
       const mentionMenu = document.getElementById("thMentionMenu");
       let mentionMatches = [];
@@ -15097,6 +15122,7 @@
         thQrInput.value = "";
         thQrInput.setSelectionRange(0, 0);
         thQrInput.relayResize?.();
+        thQrInput.relayLongPasteReset?.();
         threadComposerDrafts.delete(threadStateKey);
         renderThreadDetail();
         // Send COMMITS the message to this device. The answer is immediate on
@@ -17007,10 +17033,10 @@
     }
   }
 
-  let networkInvite = { account:null, busy:false, copied:false, tutorialCopied:false, tutorialError:"", error:"" };
+  let networkInvite = { account:null, busy:false, copied:false, error:"" };
   function networkInviteForAccount() {
     const account = signupAccountKey();
-    if (networkInvite.account !== account) networkInvite = { account, busy:false, copied:false, tutorialCopied:false, tutorialError:"", error:"" };
+    if (networkInvite.account !== account) networkInvite = { account, busy:false, copied:false, error:"" };
     return networkInvite;
   }
   async function copyNetworkInvitation() {
@@ -17021,33 +17047,7 @@
       const result = await window.relay.copyOnboardingInviteLink(payload.account?.userId);
       if (!result?.ok) throw new Error();
       state.copied = true;
-    } catch { state.error = "Your invite link couldn’t be copied. Try again, or continue and find it in Contacts."; }
-    finally { state.busy = false; if (state.account === signupAccountKey()) renderAll(); }
-  }
-  async function copyReturningTutorial() {
-    const state = networkInviteForAccount();
-    if (state.busy) return;
-    state.busy = true; state.tutorialError = ""; renderSignup();
-    try {
-      const result = await window.relay.copyTutorialPrompt(payload.account?.userId);
-      if (!result?.ok) throw new Error();
-      state.tutorialCopied = true;
-    } catch { state.tutorialError = "The tutorial prompt couldn’t be copied. Open Show prompt and copy the text."; }
-    finally { state.busy = false; if (state.account === signupAccountKey()) renderAll(); }
-  }
-  async function finishNetworkInvitation() {
-    const state = networkInviteForAccount();
-    if (state.busy || !window.relay.completeNetworkOnboarding) return;
-    const userId = payload.account?.userId;
-    state.busy = true; state.error = ""; renderSignup();
-    try {
-      const result = await window.relay.completeNetworkOnboarding(userId);
-      if (state.account !== signupAccountKey()) return;
-      if (!result?.ok || result.userId !== userId) throw new Error();
-      payload.ui = { ...payload.ui, onboardingRequired:false,
-        completedOnboardingVersion:payload.ui?.onboardingVersion || 2,
-        networkOnboarding:{ ...payload.ui?.networkOnboarding, required:false, checking:false } };
-    } catch { state.error = "Relay couldn’t save your progress. Check your connection and try again."; }
+    } catch { state.error = "Your invite link couldn’t be copied. Try again, or open Relay and find it in Contacts."; }
     finally { state.busy = false; if (state.account === signupAccountKey()) renderAll(); }
   }
 
@@ -17069,22 +17069,157 @@
     }
   }
 
-  // THE LANDING AFTER THE FIRST SEND (Sven, 2026-09-08): complete the chapter,
-  // then open the room of the relay you just wrote. Once per account; a
-  // completion that did not take shows on the card and the next poll tries
-  // again; a result that lands after the account changed opens nothing.
-  let firstRelayLanding = null;
-  async function landOnFirstRelay() {
+  // THE CHAPTER AFTER THE FIRST SEND (2026-09-13). The send no longer ends
+  // onboarding. Three screens follow it, held in memory per account: the
+  // celebration (ten seconds, or Continue), Your first link (the tutorial's
+  // second half, which the agent runs in the conversation; the screen updates
+  // itself when the account's history shows a minted link), and Grow your
+  // network, whose Open Relay button completes both chapters at once and then
+  // opens the room of the relay you wrote. A first send that was itself a link
+  // has no hello to celebrate, so it starts at Your first link. Nothing here
+  // persists: closing the pill mid-chapter replays the celebration.
+  function firstRelayCelebrationMs() { return Number(window.__relayCelebrationMs) > 0 ? Number(window.__relayCelebrationMs) : 10000; }
+  let firstRelayChapter = { account:null, stage:"celebrate", timer:null, linkCopied:false, linkError:"" };
+  function firstRelayChapterForAccount() {
     const account = signupAccountKey();
-    if (!account || firstRelayLanding === account) return;
-    firstRelayLanding = account;
-    await completeSignupTutorial();
-    if (account !== signupAccountKey()) return;
-    if (payload.ui?.onboardingRequired !== false) { firstRelayLanding = null; return; }
-    openFirstRelayRoom();
+    if (firstRelayChapter.account !== account) {
+      clearTimeout(firstRelayChapter.timer);
+      firstRelayChapter = { account, stage:"celebrate", timer:null, linkCopied:false, linkError:"" };
+    }
+    return firstRelayChapter;
   }
-  function openFirstRelayRoom() {
-    const relayId = payload.ui?.firstRelayId || "";
+  function advanceFirstRelayChapter(stage) {
+    const chapter = firstRelayChapterForAccount();
+    clearTimeout(chapter.timer); chapter.timer = null;
+    chapter.stage = stage;
+    renderSignup();
+  }
+  function firstLinkForChapter() {
+    const link = payload.ui?.firstLink;
+    return link && typeof link === "object" && link.url ? link : null;
+  }
+  async function copyFirstLinkMessage() {
+    const chapter = firstRelayChapterForAccount();
+    if (signupBusy || !window.relay.copyFirstLinkMessage) return;
+    const account = chapter.account;
+    signupBusy = true; chapter.linkError = ""; renderSignup();
+    try {
+      const result = await window.relay.copyFirstLinkMessage(payload.account?.userId);
+      if (!result?.ok) throw new Error();
+      if (account === signupAccountKey()) chapter.linkCopied = true;
+    } catch { if (account === signupAccountKey()) chapter.linkError = "The message couldn’t be copied. Select the text above and copy it."; }
+    finally { if (account === signupAccountKey()) { signupBusy = false; renderSignup(); } }
+  }
+  function renderNetworkScreen(step) {
+    const state = networkInviteForAccount();
+    const signature = JSON.stringify(["network", step, state.account, state.busy, state.copied, state.error]);
+    if (signupBodyEl.dataset.networkSignature === signature && signupBodyEl.querySelector("#suNetworkCopy")) return;
+    signupBodyEl.dataset.networkSignature = signature;
+    signupBodyEl.innerHTML = `<div class="su-first-relay su-network"><div class="su-network-content"><p class="su-step">${esc(step)}</p>
+      <h1 class="su-title">Grow your network.</h1>
+      <p class="su-copy">Share your invite link with someone you’d like to Relay. When they join, you can message each other from your agents.</p>
+      <div class="su-form"><button class="su-secondary" id="suNetworkCopy" type="button"${state.busy ? " disabled" : ""}>${state.copied ? "Copy link again" : "Copy invite link"}</button></div>
+      ${state.copied ? '<p class="su-copy" role="status">Link copied. Paste it wherever you talk to them.</p>' : ""}
+      </div><div class="su-form"><button class="su-primary" id="suNetworkContinue" type="button"${state.busy ? " disabled" : ""}>Open Relay</button></div>
+      ${state.error ? `<p class="su-error" role="alert">${esc(state.error)}</p>` : ""}</div>`;
+    document.getElementById("suNetworkCopy")?.addEventListener("click", copyNetworkInvitation);
+    document.getElementById("suNetworkContinue")?.addEventListener("click", finishNetworkInvitation);
+  }
+  function renderFirstRelayChapter() {
+    const chapter = firstRelayChapterForAccount();
+    const link = firstLinkForChapter();
+    if (chapter.stage === "celebrate" && link && link.relayId === payload.ui?.firstRelayId) chapter.stage = "link";
+    if (chapter.stage === "celebrate") {
+      if (!chapter.timer) chapter.timer = setTimeout(() => {
+        if (chapter !== firstRelayChapter || chapter.stage !== "celebrate") return;
+        chapter.timer = null; chapter.stage = "link"; renderSignup();
+      }, firstRelayCelebrationMs());
+      if (signupBodyEl.querySelector("#suCelebrationContinue")) return;
+      signupBodyEl.dataset.firstRelaySignature = "celebrate";
+      signupBodyEl.innerHTML = `<div class="su-first-relay su-first-relay-sent" style="--su-countdown-ms:${firstRelayCelebrationMs()}ms">
+        <div class="su-relay-moment" aria-hidden="true"><i></i><i></i><i></i><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></svg></div>
+        <p class="su-step">You’re on your way</p>
+        <h1 class="su-title">Your first Relay is sent.</h1>
+        <p class="su-copy">Nicely done. Replies land here, and in Claude Code or Codex whenever you ask.</p>
+        <div class="su-form"><button class="su-primary" id="suCelebrationContinue" type="button">Continue</button></div>
+        <div class="su-countdown" aria-hidden="true"><span></span></div>
+      </div>`;
+      document.getElementById("suCelebrationContinue")?.addEventListener("click", () => advanceFirstRelayChapter("link"));
+      return;
+    }
+    if (chapter.stage === "link") {
+      const signature = JSON.stringify(["link", link?.relayId || "", link?.shareText || "", signupBusy, chapter.linkCopied, chapter.linkError]);
+      if (signupBodyEl.dataset.firstRelaySignature === signature && signupBodyEl.querySelector(".su-first-link")) return;
+      signupBodyEl.dataset.firstRelaySignature = signature;
+      if (!link) {
+        signupBodyEl.innerHTML = `<div class="su-first-relay su-first-link">
+          <p class="su-step">Your first link</p>
+          <h1 class="su-title">Now relay someone who isn’t on Relay.</h1>
+          <p class="su-copy">Ask your agent to <strong>make you a relay about something you’re working on</strong>. It gives you a link and the message to send with it.</p>
+          <p class="su-send-progress" role="status"><span aria-hidden="true"></span>This screen updates when your link is ready.</p>
+          <div class="su-form"><button class="su-link" id="suLinkSkip" type="button">Skip for now</button></div>
+        </div>`;
+        document.getElementById("suLinkSkip")?.addEventListener("click", () => advanceFirstRelayChapter("network"));
+        return;
+      }
+      const shareText = link.shareText || `${link.forHuman || ""}\n\nPaste this into your Claude Code or Codex and it'll fetch the full relay: ${link.url}`;
+      signupBodyEl.innerHTML = `<div class="su-first-relay su-first-link">
+        <p class="su-step">Your first link</p>
+        <h1 class="su-title">Your link is ready.</h1>
+        <div class="su-setup-prompt su-share-text" id="suFirstLinkText">${esc(shareText)}</div>
+        <p class="su-copy">Send it wherever you talk to them. Their reply lands here as its own chat.</p>
+        <div class="su-form su-form-row"><button class="su-secondary" id="suLinkCopy" type="button"${signupBusy ? " disabled" : ""}>${chapter.linkCopied ? "Copied" : "Copy message"}</button><button class="su-primary" id="suLinkContinue" type="button"${signupBusy ? " disabled" : ""}>Continue</button></div>
+        ${chapter.linkError ? `<p class="su-error" role="alert">${esc(chapter.linkError)}</p>` : ""}
+      </div>`;
+      document.getElementById("suLinkCopy")?.addEventListener("click", copyFirstLinkMessage);
+      document.getElementById("suLinkContinue")?.addEventListener("click", () => advanceFirstRelayChapter("network"));
+      return;
+    }
+    renderNetworkScreen("Last step");
+  }
+
+  // OPEN RELAY (2026-09-13): the one completion for both chapters. When the
+  // account's invitation chapter is pending it completes on the server, which
+  // also marks this computer's first-send chapter; otherwise the local chapter
+  // completes on its own. Then the room of the first relay opens, once per
+  // account; a result that lands after the account changed changes nothing.
+  let firstRelayLanding = null;
+  async function finishNetworkInvitation() {
+    const state = networkInviteForAccount();
+    if (state.busy) return;
+    const account = state.account;
+    const userId = payload.account?.userId;
+    const firstRelayId = payload.ui?.firstRelayId || "";
+    const invitationPending = payload.ui?.networkOnboarding?.required === true;
+    state.busy = true; state.error = ""; renderSignup();
+    let finished = false;
+    try {
+      if (invitationPending) {
+        if (!window.relay.completeNetworkOnboarding) throw new Error();
+        const result = await window.relay.completeNetworkOnboarding(userId);
+        if (account !== signupAccountKey()) return;
+        if (!result?.ok || result.userId !== userId) throw new Error();
+        payload.ui = { ...payload.ui, onboardingRequired:false,
+          completedOnboardingVersion:payload.ui?.onboardingVersion || 2,
+          networkOnboarding:{ ...payload.ui?.networkOnboarding, required:false, checking:false } };
+      } else {
+        if (!window.relay.completeSetupTutorial) throw new Error();
+        const result = await window.relay.completeSetupTutorial();
+        if (account !== signupAccountKey()) return;
+        if (!result?.ok) throw new Error();
+        payload.ui = { ...payload.ui, onboardingRequired:false,
+          completedOnboardingVersion:Number(result.version || payload.ui?.onboardingVersion || 2) };
+      }
+      finished = true;
+    } catch { if (account === signupAccountKey()) state.error = "Relay couldn’t save your progress. Check your connection and try again."; }
+    finally { if (account === signupAccountKey()) state.busy = false; }
+    if (account !== signupAccountKey()) return;
+    if (!finished) { renderAll(); return; }
+    signupStage = "installed";
+    renderAll();
+    if (firstRelayId && firstRelayLanding !== account) { firstRelayLanding = account; openFirstRelayRoom(firstRelayId); }
+  }
+  function openFirstRelayRoom(relayId = payload.ui?.firstRelayId || "") {
     const first = (payload.sent || []).find((item) => item.relayId === relayId);
     const address = String(first?.recipient?.email || "").trim().toLowerCase();
     const room = relayId ? chatSections("relay").people.find((candidate) =>
@@ -17170,38 +17305,14 @@
       });
       return;
     }
-    if (signupStage === "network") {
-      const state = networkInviteForAccount();
-      const signature = JSON.stringify([state.account, state.busy, state.copied, state.tutorialCopied, state.tutorialError, state.error, payload.ui?.tutorialPrompt]);
-      if (signupBodyEl.dataset.networkSignature === signature && signupBodyEl.querySelector("#suNetworkCopy")) return;
-      signupBodyEl.dataset.networkSignature = signature;
-      signupBodyEl.innerHTML = `<div class="su-first-relay su-network"><div class="su-network-content"><p class="su-step">Welcome to Relay</p>
-        <h1 class="su-title">Grow your network.</h1>
-        <p class="su-copy">Share your invite link with someone you’d like to Relay. When they join, you can message each other from your agents.</p>
-        <div class="su-form"><button class="su-primary" id="suNetworkCopy" type="button"${state.busy ? " disabled" : ""}>${state.copied ? "Copy link again" : "Copy invite link"}</button></div>
-        ${state.copied ? '<p class="su-copy" role="status">Link copied. Paste it wherever you talk to them.</p>' : ""}
-        ${payload.ui?.tutorialPrompt ? `<section class="su-tutorial"><h2>Learn Relay with your agent</h2>
-          <p class="su-copy">Paste this prompt into Claude Code or Codex for a guided tour and an optional practice message.</p>
-          <button class="su-secondary su-copy-setup" id="suTutorialCopy" type="button"${state.busy ? " disabled" : ""}>${state.tutorialCopied ? "Copy tutorial prompt again" : "Copy tutorial prompt"}</button>
-          ${state.tutorialCopied ? '<p class="su-copy" role="status">Prompt copied. Paste it into your agent to begin.</p>' : ""}
-          ${state.tutorialError ? `<p class="su-error" role="alert">${esc(state.tutorialError)}</p>` : ""}
-          <details><summary>Show prompt</summary><div class="su-setup-prompt" id="suTutorialPrompt">${esc(payload.ui.tutorialPrompt)}</div></details></section>` : ""}
-        </div><div class="su-form"><button class="su-primary" id="suNetworkContinue" type="button"${state.busy ? " disabled" : ""}>Continue to Relay</button></div>
-        ${state.error ? `<p class="su-error" role="alert">${esc(state.error)}</p>` : ""}</div>`;
-      document.getElementById("suNetworkCopy")?.addEventListener("click", copyNetworkInvitation);
-      document.getElementById("suTutorialCopy")?.addEventListener("click", copyReturningTutorial);
-      document.getElementById("suNetworkContinue")?.addEventListener("click", finishNetworkInvitation);
-      return;
-    }
+    if (signupStage === "network") { renderNetworkScreen("Welcome to Relay"); return; }
     if (signupStage === "first-relay") {
       const status = payload.ui?.firstRelayStatus || "checking";
-      // THE FIRST RELAY IS THE LANDING (Sven, 2026-09-08). When the account's
-      // history shows the send, the chapter is over: the tutorial completes
-      // itself and the pill opens the room of the relay you just wrote — the
-      // conversation, not a "Nicely done" screen and not a Copy-invitation
-      // screen. Your link lives on the You page and in Contacts now. Until the
-      // send, the pill has nothing else to show, so this screen stays.
-      if (status === "sent") { landOnFirstRelay(); return; }
+      // THE FIRST SEND OPENS THE NEXT CHAPTER (2026-09-13): when the account's
+      // history shows the send (or a minted link), the celebration, Your first
+      // link and Grow your network follow, and Open Relay ends onboarding.
+      // Until the send, the pill has nothing else to show, so this screen stays.
+      if (status === "sent") { renderFirstRelayChapter(); return; }
       const signature = JSON.stringify([status, signupBusy, signupError]);
       if (signupBodyEl.dataset.firstRelaySignature === signature && signupBodyEl.querySelector(".su-first-relay")) return;
       signupBodyEl.dataset.firstRelaySignature = signature;
@@ -17357,9 +17468,12 @@
       signupError = String(data.error || "");
       signupNote = String(data.note || "");
       signupInitializationFailed = data.initializationFailed === true;
-      const tutorial = signupStage === "first-relay";
-      payload.account = { paired:tutorial, email:"preview@example.com" };
-      payload.ui = { ...payload.ui, onboardingRequired:tutorial, firstRelayStatus:data.firstRelayStatus || "waiting" };
+      const tutorial = signupStage === "first-relay" || signupStage === "network";
+      payload.account = { paired:tutorial, email:"preview@example.com", userId:"preview" };
+      payload.ui = { ...payload.ui, onboardingRequired:tutorial, onboardingVersion:2,
+        completedOnboardingVersion:signupStage === "network" ? 2 : 0,
+        networkOnboarding:{ required:signupStage === "network" || data.networkRequired === true, checking:false },
+        firstRelayStatus:data.firstRelayStatus || "waiting", firstRelayId:data.firstRelayId || "", firstLink:data.firstLink || null };
       renderAll();
     };
   }
@@ -17610,7 +17724,11 @@
     } else if (tutorialPending) {
       stopSignupPolling();
       signupStage = "first-relay";
-      if (payload.ui?.networkOnboarding?.required === true) signupStage = "network";
+      // A returning account's invitation chapter stands alone on a computer
+      // whose local first-send chapter is already complete; for a new account
+      // Grow your network is the last screen of the first-send chapter instead.
+      const localChapterDone = Number(payload.ui?.completedOnboardingVersion || 0) >= Number(payload.ui?.onboardingVersion || 0);
+      if (payload.ui?.networkOnboarding?.required === true && localChapterDone) signupStage = "network";
     }
     const needsSignup = credentialRecovery || payload.account?.paired === false || tutorialPending;
     cardEl.classList.toggle("signup", needsSignup);

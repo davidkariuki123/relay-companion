@@ -6533,14 +6533,6 @@ contextBridge.exposeInMainWorld("relayPreview", {
     idempotencyKey: String(idempotencyKey || ""),
     files: normalizedReplyFiles(files)
   }),
-  // The task face's ignition. Same coercion discipline as sendReply.
-  startTask: (relayId, note, host, model, effort) => ipcRenderer.invoke("relay:preview:startTask", {
-    relayId: String(relayId || ""),
-    note: String(note || ""),
-    host: String(host || "claude"),
-    model: String(model || ""),
-    effort: String(effort || "")
-  }),
   reviewSafety: (relayId) => ipcRenderer.invoke("relay:preview:reviewSafety", String(relayId || "")),
   // The session face: the live transcript feed and the Steer verb.
   loadSession: (relayId) => ipcRenderer.invoke("relay:preview:session", String(relayId || "")),

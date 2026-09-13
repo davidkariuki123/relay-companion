@@ -39,7 +39,9 @@ test("Todo rows name a channel when present and omit a direct-task placeholder",
 
 test("Task ownership stays in reader/chat while Todo status remains independent", () => {
   assert.match(html, /taskClaimControlHtml\(r, \{ surface: "reader" \}\)/);
-  assert.match(html, /taskClaimAllowsStart\(r\) && \["waiting", "parked", "stopped"\]/);
+  // Start is gone (David, 2026-09-13): a Task opens like a Relay, so there is
+  // no actionable-state gate in the reader any more.
+  assert.equal(html.includes('taskClaimAllowsStart(r) && ["waiting", "parked", "stopped"]'), false);
   assert.match(html, /wireTaskClaimControls\(readerBodyEl/);
   assert.match(html, /wireTaskClaimControls\(thHistoryEl/);
   assert.match(html, /lifecycleOnly = task && \["in_progress", "done"\]\.includes\(candidate\)/);

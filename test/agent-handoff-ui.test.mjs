@@ -34,7 +34,6 @@ test("Send on the agent document is a hand-off: one verb, one IPC, no runner", (
   // as its verb, and Start on a Task is the same capsule with a Task verb.
   assert.match(docks, /function relayWorkDockHtml\(r, \{ inline = false \} = \{\}\)/);
   assert.match(docks, /return idleRunDockHtml\(r, \{ inline, draft, failed, label: failed \? "Retry" : "Send" \}\);/);
-  assert.match(docks, /label: failed \? "Retry" : state === "stopped" \? "Start again" : "Start task"/);
   assert.match(docks, /data-handoff="\$\{esc\(r\.id\)\}">\$\{esc\(label\)\}<\/button>/);
   assert.match(docks, /placeholder="Tell \$\{esc\(rt\.app\)\} anything…"/);
   assert.match(docks, /data-route-menu="app"/);
@@ -85,22 +84,24 @@ test("the composer becomes the receipt card in the same click", () => {
   assert.match(preload, /continueSession: \(id, source\) => ipcRenderer\.invoke\("relay:continueSession"/);
 });
 
-test("the hand-off orders its steps: sign-in, open, first turn, then Started", () => {
+test("the hand-off orders its steps: sign-in, open, then the first turn", () => {
   const authAt = handoff.indexOf("assertProviderReady(host)");
   const openAt = handoff.indexOf("deliverPacketToSession(requestedId, {");
   const turnAt = handoff.indexOf("deliverTurnToSession(binding, firstTurn");
-  const stampAt = handoff.indexOf("taskStarted(id)");
-  assert.ok(authAt > -1 && openAt > authAt && turnAt > openAt && stampAt > turnAt, "sign-in, open, first turn, Started stay ordered");
+  assert.ok(authAt > -1 && openAt > authAt && turnAt > openAt, "sign-in, open, first turn stay ordered");
+  // A Task never reaches the hand-off: it opens like a Relay (David, 2026-09-13).
+  assert.match(handoff, /if \(row\?\.relayNotificationKind === "task"\) \{\s*return \{ ok: false, error: "A Task opens like a Relay/);
+  assert.equal(handoff.includes("taskKickPrompt("), false, "no kick prompt rides a hand-off");
+  assert.equal(handoff.includes("taskStarted(id)"), false, "the pill never stamps Started; relay_task_start does");
   // The words are a turn, never a "Draft (not sent)" section of the letter.
   assert.match(handoff, /fs\.rmSync\(path\.join\(RELAY_HOME, "task-notes"/);
-  assert.match(handoff, /const firstTurn = isRequest \? taskKickPrompt\(\{ note \}\) : note;/);
+  assert.match(handoff, /const firstTurn = note;/);
   assert.match(handoff, /if \(firstTurn\) \{/, "an empty Send on a plain Relay is a plain open");
   // The route rides into the forge and into the turn.
   assert.match(main, /model: String\(selection\.model \|\| ""\),\s*effort: String\(selection\.effort \|\| ""\),/);
   assert.match(handoff, /host === "codex" && \/\^claude-\/i\.test\(requestedModel\)/);
   // Receipts: Started only after the words are in; the row carries the state.
   assert.match(handoff, /agentHandoffPatch\(id, \{ state: "running", error: "", deliveredAt: firstTurn \? stamped : "", imported: !claudeDeferred \}\)/);
-  assert.match(handoff, /isRequest\s*\? \{[^]*taskState: "started",[^]*taskStartedAt: startedReceipt\?\.startedAt \|\| stamped,/);
   assert.match(handoff, /workStartedAt: stamped,[^]*workCompletedAt: firstTurn \? null : stamped/);
   assert.match(main, /agentHandoff: p\.agentHandoff && typeof p\.agentHandoff === "object" \? p\.agentHandoff : null,/);
   // Task completion still settles from the transcript the app writes.
@@ -130,7 +131,7 @@ test("a failed hand-off keeps the words and offers the other app", () => {
   assert.match(handoff, /host === "claude" \? \{ permissionMode: permission \|\| "auto" \} : \{\}/);
   assert.equal(main.includes("claudeDesktopSessionCap"), false, "the governor probe is gone");
   assert.match(handoff, /previous\?\.state === "failed" && previous\.opened && bound && bound\.provider === host/, "a retry after the app opened delivers there again instead of forging a second session");
-  assert.match(main, /async function stampHandoffFailed\(id, isRequest, host\)/);
+  assert.match(main, /async function stampHandoffFailed\(id\)/);
   assert.match(docks, /const draft = String\(requestWorkDrafts\.get\(String\(r\.id\)\) \|\| \(failed \? failed\.note \|\| "" : ""\)\);/, "the words come back into the composer");
   assert.match(docks, /data-handoff-other="\$\{esc\(r\.id\)\}" data-handoff-other-app="\$\{esc\(otherApp\)\}">\$\{esc\(otherApp\)\} instead<\/button>/);
   assert.match(controls, /setRoute\(id, \{ app, model:spec\.model, effort:spec\.effort \}\);\s*other\.closest\("\.ta-dock"\)\?\.querySelector\("\[data-handoff\]"\)\?\.click\(\);/);
@@ -140,18 +141,26 @@ test("a failed hand-off keeps the words and offers the other app", () => {
   assert.match(main, /if \(reconcileStaleHandoffs\(\)\) pushInbox\(false\);/);
   assert.match(main, /Relay restarted before your message reached \$\{appName\}\./);
   // A failed Task goes back to waiting; its status line defers to the card.
-  assert.match(inbox, /if \(handoffFor\(r\)\?\.state === "failed"\) return "";/);
 });
 
-test("the reader keeps two faces; the agent row whispers where the Relay went", () => {
-  assert.match(reader, /if \(readerTab === "work"\) readerTab = "agent";/);
-  assert.doesNotMatch(reader, /relay-contents-name">Work</);
-  assert.match(reader, /`in \$\{handoffAppName\(handoff\)\} ›`/);
-  assert.match(reader, /`opening \$\{handoffAppName\(handoff\)\}…`/);
-  // Host rows live on Message for you only; the agent face's rail names the app.
-  assert.match(reader, /const documentHostActions = !request && onHuman \?/);
-  assert.match(reader, /const bothNote = onAgent && workOn && !handoff \?/);
-  assert.match(reader, /if \(onAgent\) return relayWorkDockHtml\(r, \{ inline: true \}\);/);
+test("a Task reads as one page: the agent document folds into Details, not a second tab (bug 1)", () => {
+  // Sven, 2026-09-11: a Task should read like an ordinary Relay — no
+  // "Message for you / Message for your agent" tab split; the agent part is an
+  // attachment-style Details section under the letter.
+  assert.match(reader, /const twoFaces = false;/);
+  // The Details block (closed until clicked) renders whenever there is agent
+  // text, Task or not — it is gated only on !twoFaces, never on the row kind.
+  assert.match(reader, /const details = !twoFaces && agentText \?/);
+  // Start and the connect-an-agent prompt no longer hide behind the agent tab:
+  // they render on the one page (Start via requestActionable, which is true for
+  // a fresh "waiting" Task).
+  // No Start dock, no connect-an-agent prompt, no status line: a Task gets the
+  // plain reply dock and the same host rows as a Relay (David, 2026-09-13).
+  for (const gone of ["requestDockHtml", "workProviderPromptHtml", "workProviderPromptDockHtml", "taskStatusLine", "requestActionable"]) {
+    assert.equal(inbox.includes(gone), false, `${gone} survives in the pill`);
+  }
+  assert.match(reader, /const status = "";/);
+  assert.match(reader, /const documentHostActions = onHuman \? `<div class="rd-host-actions"/, "the host rows show on a Task too");
   // Opening a Relay that already went to an app lands on its receipt.
   const open = between(inbox, "function openReader", "function closeReader");
   assert.match(open, /readerTab = openedHandoff && \["starting", "running", "failed"\]\.includes\(openedHandoff\.state\) \? "agent" : "you"/);
@@ -162,14 +171,16 @@ test("the reader keeps two faces; the agent row whispers where the Relay went", 
   assert.match(state, /if \(h\?\.state === "failed"\) return "stopped";/);
 });
 
-test("Start on a Task is the same hand-off, from the pill and the preview window", () => {
-  const taskIpc = between(main, 'ipcMain.handle("relay:taskStart"', 'ipcMain.handle("relay:taskClaim"');
-  assert.match(taskIpc, /handOffToAgent\(\{/);
-  const previewIpc = between(main, 'ipcMain.handle("relay:preview:startTask"', "});");
-  assert.match(previewIpc, /return handOffToAgent\(input\);/);
-  const kick = between(main, "function taskKickPrompt", "// Matches src/materializer.js");
-  assert.match(kick, /note \|\| "Begin the task as briefed\."/);
-  assert.match(inbox, /data-task-start="\$\{esc\(id\)\}"/);
+test("a Task has no Start: it opens like a Relay from every surface", () => {
+  // The two Start IPCs, the tray's Start verb and the preload bridge are gone;
+  // the agent stamps Started / Done with relay_task_start / relay_task_complete.
+  for (const gone of ['ipcMain.handle("relay:taskStart"', 'ipcMain.handle("relay:preview:startTask"']) {
+    assert.equal(main.includes(gone), false, `${gone} survives in main`);
+  }
+  assert.equal(inbox.includes("data-task-start"), false, "the tray's Start verb is gone");
+  assert.equal(preload.includes("relay:taskStart"), false, "the preload bridge is gone");
+  // The row menu no longer forks on task: a Task gets the Relay menu.
+  assert.equal(inbox.includes("A task's verbs are Preview and Start"), false);
 });
 
 test("the first turn wakes Relay's own live Claude session and uses Desktop's submit for Codex", async () => {
@@ -181,7 +192,7 @@ test("the first turn wakes Relay's own live Claude session and uses Desktop's su
   assert.match(turn, /adapter: "claude_inbox_socket", live: true/);
   assert.equal(delivery.includes("claude_desktop_code_worker"), false, "the worker fallback is retired");
   assert.match(turn, /locateClaudeTranscript\(nativeId, \[/, "the durable check reads the transcript the engine actually writes");
-  assert.match(main, /app\.on\("before-quit"[^]*stopAllClaudeInboxSessions/, "Relay reaps the engines it spawned");
+  assert.match(main, /app\.on\("before-quit"[^]*stopIdleClaudeInboxSessions/, "before-quit reaps only idle engines, so a self-update restart never kills a live turn");
   // Codex: Desktop's own submit, with the route forwarded.
   assert.match(turn, /return deliverCodex\(\{ \.\.\.exact, surface: "desktop" \}, prompt, \{/);
   assert.match(delivery, /\.\.\.\(options\.model \? \{ model: options\.model \} : \{\}\),/, "the hand-off's route reaches Desktop's submit");
@@ -243,7 +254,7 @@ test("the first turn wakes Relay's own live Claude session and uses Desktop's su
 
 test("a hand-off moves the titled Relay to In Progress itself, with a note the person reads", () => {
   // The hand-off IS the start of the work (David, 2026-09-08).
-  assert.match(handoff, /if \(!isRequest && firstTurn\) void markHandoffInProgress\(row, host\);/);
+  assert.match(handoff, /if \(firstTurn\) void markHandoffInProgress\(row, host\);/);
   const mark = between(main, "async function markHandoffInProgress(row, host)", "async function handOffToAgent(input)");
   assert.match(mark, /if \(\["in_progress", "done"\]\.includes\(String\(row\?\.todoStatus \|\| ""\)\)\) return/);
   assert.match(mark, /status: "in_progress",/);

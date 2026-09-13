@@ -31,6 +31,7 @@ const EXPECTED_TOOLS = [
   "relay_topic_member",
   "relay_agent_complete",
   "relay_send",
+  "relay_forward",
   "relay_share_link",
   "relay_contacts_search",
   "relay_groups_list",
@@ -132,7 +133,7 @@ test("startup guidance and owner schemas preserve the complete product ontology"
   }
   assert.match(
     source,
-    /instructions:\s*startupEncryption\.enabled\s*\?\s*E2EE_LOCAL_MCP_INSTRUCTIONS\s*:\s*features\.requests[\s\S]{0,400}?instructionsWithTopics\(RELAY_MCP_INSTRUCTIONS[\s\S]{0,200}?:\s*REQUESTS_DISABLED_INSTRUCTIONS/,
+    /instructions:\s*startupEncryption\.enabled\s*\?\s*e2eeLocalInstructionsFor\(features\)\s*:\s*features\.requests[\s\S]{0,400}?instructionsWithTopics\(RELAY_MCP_INSTRUCTIONS[\s\S]{0,200}?:\s*REQUESTS_DISABLED_INSTRUCTIONS/,
     "the MCP initialize response carries guidance for the active encryption and product surface",
   );
 });
@@ -303,8 +304,20 @@ test("a link is what an unresolvable recipient turns into, in both instruction s
   assert.equal(share.inputSchema.allOf, undefined,
     "conditional required-ness stays in the handler; Codex refuses unresolved conditionals");
   assert.deepEqual(share.inputSchema.required, ["idempotencyKey"]);
-  assert.match(share.description, /ONE LINK IS ONE PERSON/);
+  // Create means a link: the description carries the rule, says a link takes
+  // replies with no account, and says each replier is their own private chat.
+  assert.match(share.description, /CREATE MEANS A LINK/);
+  assert.match(share.description, /create, make, write or draft a Relay or a Task/);
+  assert.match(share.description, /own private conversation with this human/);
+  assert.match(share.description, /never see each other/);
   assert.match(share.description, /never report it as sent, delivered, or on its way/);
+  assert.deepEqual(share.inputSchema.properties.kind.enum, ["message", "task"]);
+  for (const instructions of [RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS]) {
+    assert.match(instructions, /'create a Relay' or 'a link': mint a link with relay_share_link/);
+  }
+  assert.doesNotMatch(JSON.stringify(TOOLS), /A LINK IS A ROOM|one link per audience|ends 7 days/);
+  assert.doesNotMatch(byName.get("relay_send").inputSchema.properties.kind.description, /a Task cannot be handed over as a share link/);
+  assert.match(byName.get("relay_send").inputSchema.properties.kind.description, /relay_share_link kind='task'/);
 });
 
 

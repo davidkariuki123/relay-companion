@@ -15,13 +15,15 @@ test("a request row carries the Task chip and the chip recipe exists once", () =
   assert.match(html, /\.kchip \{/);
 });
 
-test("a request's open actions are Preview and Start, not chat destinations", () => {
+test("a Task's open actions are a Relay's: no Start verb, no task-only tray", () => {
+  // David, 2026-09-13: a Task opens like any Relay. The row menu no longer
+  // forks on `task`, so a Task row gets Preview / Current chat / New chat and
+  // its reader carries the Open in Codex / Claude Code rows. The agent stamps
+  // Started and Done itself with relay_task_start / relay_task_complete.
   assert.match(html, /task = false, shareLinkUrl = "" \} = \{\}/);
-  assert.match(html, /if \(task\) \{/);
-  assert.match(html, />Start</);
-  // The task tray must not offer Current chat / New chat.
-  const taskTray = html.split("if (task) {")[1].split("return `")[1].split("`;")[0];
-  assert.doesNotMatch(taskTray, /Current chat|New chat/);
+  assert.equal(html.includes("A task's verbs are Preview and Start"), false, "the task tray fork is gone");
+  assert.equal(html.includes("data-task-start"), false, "no Start verb on the row");
+  assert.equal(html.includes("window.relay.taskStart"), false, "no Start IPC from the pill");
 });
 
 test("task rows are deletable like plain relays", () => {

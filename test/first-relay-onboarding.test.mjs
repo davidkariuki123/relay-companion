@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import test from "node:test";
-import { createFirstRelayOnboarding, hasSentRelay } from "../overlay/first-relay-onboarding.cjs";
+import { createFirstRelayOnboarding, firstMintedLink, hasSentRelay } from "../overlay/first-relay-onboarding.cjs";
 
 const sent = { relayId: "relay_first", state: "delivered" };
 
@@ -17,25 +17,42 @@ test("the exact tutorial wins over racing sends, remains stable, and is account 
   assert.equal(flow.observe("b", { items: [] }, { state: "skipped" }), "complete");
 });
 
-test("confirmed sends count without a read receipt; pending sends and unclaimed links do not", () => {
+test("confirmed sends count without a read receipt; pending sends do not, and a minted link does", () => {
   assert.equal(hasSentRelay({ items: [sent] }), true);
   assert.equal(hasSentRelay({ items: [{ ...sent, state: "queued" }] }), false);
   assert.equal(hasSentRelay({ items: [{ ...sent, state: "pending" }] }), false);
-  assert.equal(hasSentRelay({ items: [{ ...sent, shareLink: { state: "active" } }] }), false);
-  assert.equal(hasSentRelay({ items: [{ ...sent, shareLink: { state: "revoked" } }] }), false);
+  // A link's relay row stays pending until its first open; the link itself is
+  // the first Relay, because pasting the url is what sends it (2026-09-13).
+  assert.equal(hasSentRelay({ items: [{ ...sent, state: "pending", shareLink: { state: "unopened", url: "https://relay.test/s/a" } }] }), true);
+  assert.equal(hasSentRelay({ items: [{ ...sent, state: "pending", shareLink: { state: "revoked", url: "https://relay.test/s/a" } }] }), true);
   assert.equal(hasSentRelay({ items: [{ ...sent, shareLink: { state: "claimed" } }] }), true);
   assert.equal(hasSentRelay({ items: [{ ...sent, deletedAt: "2026-09-07" }] }), true);
   assert.equal(hasSentRelay({}), null);
 });
 
 test("account history works beyond the returned page, with conservative old-server compatibility", () => {
-  const links = Array.from({ length: 200 }, () => ({ ...sent, shareLink: { state: "active" } }));
-  assert.equal(hasSentRelay({ items: links }), null);
-  assert.equal(hasSentRelay({ items: links, hasSentRelay: true }), true);
-  assert.equal(hasSentRelay({ items: links, hasSentRelay: false }), false);
+  const pending = Array.from({ length: 200 }, () => ({ ...sent, state: "pending" }));
+  assert.equal(hasSentRelay({ items: pending }), null);
+  assert.equal(hasSentRelay({ items: pending, hasSentRelay: true }), true);
+  assert.equal(hasSentRelay({ items: pending, hasSentRelay: false }), false);
   assert.equal(hasSentRelay({ items: [] }), false);
   // A send can land between the parallel server history and list queries.
   assert.equal(hasSentRelay({ items: [sent], hasSentRelay: false }), true);
+});
+
+test("the first link is the earliest live one, with its ready message, and nothing when none was minted", () => {
+  const link = (relayId, createdAt, state, extra = {}) => ({ relayId, createdAt, state: "pending", forHuman: `Words for ${relayId}`, shareLink: { state, url: `https://relay.test/s/${relayId}`, ...extra } });
+  assert.equal(firstMintedLink({ items: [sent] }), null);
+  assert.equal(firstMintedLink({}), null);
+  const revokedFirst = link("l_revoked", "2026-09-13T09:00:00Z", "revoked");
+  const live = link("l_live", "2026-09-13T10:00:00Z", "unopened", { shareText: "Words for l_live\n\nPaste this into your Claude Code or Codex and it'll fetch the full relay: https://relay.test/s/l_live" });
+  const later = link("l_later", "2026-09-13T11:00:00Z", "opened");
+  assert.deepEqual(firstMintedLink({ items: [later, sent, live, revokedFirst] }), {
+    relayId: "l_live", url: "https://relay.test/s/l_live", shareText: live.shareLink.shareText, forHuman: "Words for l_live", state: "unopened",
+  });
+  // Only revoked links: the earliest still names the chapter as done.
+  assert.equal(firstMintedLink({ items: [revokedFirst] }).relayId, "l_revoked");
+  assert.equal(firstMintedLink({ items: [revokedFirst] }).shareText, "", "an older server sends no ready message; the caller composes it");
 });
 
 test("a send made before the app opens bypasses the tutorial; a send during it celebrates once", () => {

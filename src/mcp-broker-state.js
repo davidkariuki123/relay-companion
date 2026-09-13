@@ -9,6 +9,7 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { atomicWriteFileSync, atomicWriteJsonSync } = require("./atomic-json.cjs");
 const { withJsonLockStrict } = require("./state-lock.cjs");
+import { isCanonicalPackageRoot, readCanonicalRuntime } from "./canonical-runtime.js";
 
 export const MCP_BROKER_PROTOCOL = 1;
 export const MCP_BRIDGE_MAX_OLD_SPACE_MB = 32;
@@ -103,9 +104,53 @@ export function brokerEndpoint({ env = process.env, identity = brokerIdentity({ 
   return path.join(brokerRunDir({ env, identity, platform }), `b-v${MCP_BROKER_PROTOCOL}-${identity.domainId.slice(0, 16)}.sock`);
 }
 
-export function brokerProvisioningPaths({ env = process.env, identity = brokerIdentity({ env }) } = {}) {
+/**
+ * Who may write the shared descriptor. The descriptor lives at one fixed path
+ * per config root, but its contents (domain, endpoint, broker command) are
+ * derived from the package root that wrote it. A source checkout or a private
+ * worktree that provisioned itself therefore used to overwrite the installed
+ * runtime's descriptor with an endpoint nothing was listening on and a broker
+ * command that did not exist, and every host bridge failed until something
+ * canonical wrote it back. Once a canonical runtime is installed, only its
+ * release trees own the shared file; every other package root gets a private
+ * descriptor beside it, named by its own domain.
+ */
+function homeDirFor(env = process.env) {
+  return env.HOME || os.homedir();
+}
+
+export function brokerDescriptorOwnership({
+  packageRoot = packageRootForModule(),
+  env = process.env,
+  homeDir = homeDirFor(env),
+  platform = process.platform,
+  readCurrent = readCanonicalRuntime,
+} = {}) {
+  let current = null;
+  try { current = readCurrent({ homeDir, platform }); } catch { current = null; }
+  if (!current) return { shared: true, current: null, reason: "no-canonical-runtime" };
+  const pathApi = platform === "win32" ? path.win32 : path;
+  const mine = normalizedPath(packageRoot, platform);
+  const theirs = normalizedPath(current.packageRoot, platform);
+  if (mine === theirs) return { shared: true, current, reason: "canonical-current" };
+  if (isCanonicalPackageRoot(pathApi.resolve(String(packageRoot || "")), { homeDir, platform })) {
+    return { shared: true, current, reason: "canonical-release" };
+  }
+  return { shared: false, current, reason: "private-checkout" };
+}
+
+export function brokerProvisioningPaths({
+  env = process.env,
+  identity = brokerIdentity({ env }),
+  homeDir = homeDirFor(env),
+  platform = process.platform,
+  ownership = brokerDescriptorOwnership({ packageRoot: identity.runtimeRoot, env, homeDir, platform }),
+} = {}) {
   const dir = path.join(identity.configRoot, "run", "mcp");
-  return { dir, descriptor: path.join(dir, DESCRIPTOR_NAME), capability: path.join(dir, CAPABILITY_NAME) };
+  const descriptorName = ownership.shared
+    ? DESCRIPTOR_NAME
+    : `broker-v${MCP_BROKER_PROTOCOL}.private-${identity.domainId.slice(0, 16)}.json`;
+  return { dir, descriptor: path.join(dir, descriptorName), capability: path.join(dir, CAPABILITY_NAME), shared: ownership.shared };
 }
 
 function assertProtectedFile(file, { bytes = null, platform = process.platform } = {}) {
@@ -145,10 +190,11 @@ export function ensureMcpBrokerProvisioned({
   packageRoot = packageRootForModule(),
   brokerNode = process.execPath,
   platform = process.platform,
+  homeDir = homeDirFor(env),
   windowsAclProtector = protectWindowsCapability,
 } = {}) {
-  const identity = brokerIdentity({ env, packageRoot, platform });
-  const files = brokerProvisioningPaths({ env, identity });
+  const identity = brokerIdentity({ env, packageRoot, platform, homeDir });
+  const files = brokerProvisioningPaths({ env, identity, homeDir, platform });
   fs.mkdirSync(files.dir, { recursive: true, mode: 0o700 });
   try { fs.chmodSync(files.dir, 0o700); } catch {}
   const locked = withJsonLockStrict(files.descriptor, () => {
@@ -196,9 +242,10 @@ export function readMcpBrokerProvisioning({
   env = process.env,
   packageRoot = packageRootForModule(),
   platform = process.platform,
+  homeDir = homeDirFor(env),
 } = {}) {
-  const identity = brokerIdentity({ env, packageRoot, platform });
-  const files = brokerProvisioningPaths({ env, identity });
+  const identity = brokerIdentity({ env, packageRoot, platform, homeDir });
+  const files = brokerProvisioningPaths({ env, identity, homeDir, platform });
   let descriptor;
   try {
     descriptor = JSON.parse(assertProtectedFile(files.descriptor, { platform }).toString("utf8"));
@@ -220,13 +267,42 @@ export function readMcpBrokerProvisioning({
   return { identity, files, capability, endpoint: brokerEndpoint({ env, identity, platform }) };
 }
 
+/**
+ * Put the shared descriptor back when something else has overwritten it. Only
+ * the canonical current runtime (or any runtime when none is installed) may
+ * heal: a stale release or a private checkout reporting a mismatch is the
+ * expected state, not a fault. Returns what happened so the caller can log it.
+ */
+export function healMcpBrokerProvisioning({
+  env = process.env,
+  packageRoot = packageRootForModule(),
+  brokerNode = process.execPath,
+  platform = process.platform,
+  homeDir = homeDirFor(env),
+  readCurrent = readCanonicalRuntime,
+} = {}) {
+  const ownership = brokerDescriptorOwnership({ packageRoot, env, homeDir, platform, readCurrent });
+  if (ownership.reason === "canonical-release") return { healed: false, reason: ownership.reason };
+  let fault = null;
+  try {
+    readMcpBrokerProvisioning({ env, packageRoot, platform, homeDir });
+    return { healed: false, reason: "healthy" };
+  } catch (error) {
+    fault = error?.message || String(error);
+  }
+  if (!ownership.shared) return { healed: false, reason: ownership.reason, fault };
+  ensureMcpBrokerProvisioned({ env, packageRoot, brokerNode, platform, homeDir });
+  return { healed: true, reason: ownership.reason, fault };
+}
+
 export function removeMcpBrokerProvisioning({
   env = process.env,
   packageRoot = packageRootForModule(),
   platform = process.platform,
+  homeDir = homeDirFor(env),
 } = {}) {
-  const identity = brokerIdentity({ env, packageRoot, platform });
-  const files = brokerProvisioningPaths({ env, identity });
+  const identity = brokerIdentity({ env, packageRoot, platform, homeDir });
+  const files = brokerProvisioningPaths({ env, identity, homeDir, platform });
   const endpoint = brokerEndpoint({ env, identity, platform });
   if (platform !== "win32") {
     try { fs.rmSync(endpoint, { force: true }); } catch {}

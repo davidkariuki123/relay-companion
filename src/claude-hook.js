@@ -33,10 +33,21 @@ import {
   writeRendezvous,
 } from "./claude-inject.cjs";
 import { storeDir } from "./host-paths.js";
-import { deviceToken } from "./config.js";
+import { apiUrl, deviceToken, readConfig } from "./config.js";
+import { pairedProfileTodoEnabled } from "./product-features.js";
 import agentRelayContext from "./agent-relay-context.cjs";
 
 const { claimAgentRelayHookContext } = agentRelayContext;
+
+// Whether this account's row has Todo and Tasks, read from the paired profile
+// without a network call.
+function hookTodoEnabled() {
+  try {
+    return pairedProfileTodoEnabled({ config: readConfig(), apiUrl: apiUrl() });
+  } catch {
+    return false;
+  }
+}
 
 const STDIN_TIMEOUT_MS = 2500;
 const MAX_HOOK_INPUT_CHARS = 1_000_000;
@@ -116,6 +127,7 @@ export async function runClaudeHook({
         sessionId: `claude:${sessionId}`,
         eventName,
         stopHookActive: Boolean(event.stop_hook_active),
+        todo: hookTodoEnabled(),
       });
     } catch {}
     const instruction = [injection?.instruction, relayClaim?.text].filter(Boolean).join("\n\n");

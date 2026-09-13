@@ -72,7 +72,8 @@ test("versioned first-send onboarding keeps durable progress for each account", 
   assert.match(main, /ipcMain\.handle\("relay:completeSetupTutorial", \(\) => completeSetupTutorial\(\)\)/);
   assert.match(html, /payload\.ui\?\.onboardingRequired === true/);
   assert.match(html, /signupStage === "first-relay"/);
-  // The send itself ends the chapter (2026-09-08): no "sent" screen follows.
-  assert.match(html, /if \(status === "sent"\) \{ landOnFirstRelay\(\); return; \}/);
+  // The send opens the next chapter (2026-09-13): celebration, first link,
+  // Grow your network; Open Relay completes it.
+  assert.match(html, /if \(status === "sent"\) \{ renderFirstRelayChapter\(\); return; \}/);
   assert.doesNotMatch(html, /id="suChatSkip"/);
 });

@@ -21,7 +21,7 @@
 
 const { app, BrowserWindow, Menu, Tray, clipboard, ipcMain, nativeImage, powerMonitor, powerSaveBlocker, shell, screen, systemPreferences } = require("electron");
 const { createCompanionWindow } = require("./companion-window.cjs");
-const { createFirstRelayOnboarding } = require("./first-relay-onboarding.cjs");
+const { createFirstRelayOnboarding, firstMintedLink } = require("./first-relay-onboarding.cjs");
 const { createNetworkOnboarding } = require("./network-onboarding.cjs");
 
 if (process.platform === "linux") {
@@ -111,11 +111,14 @@ function registerRelayProtocol() {
 }
 registerRelayProtocol();
 
-// The Claude engines a hand-off spawns are Relay's children; they must not
-// outlive the pill as orphans.
+// The Claude engines a hand-off spawns are Relay's children; idle ones must not
+// outlive the pill as orphans. But before-quit also fires on the launchd bootout
+// the self-updater uses to swap the runtime, so reaping a BUSY engine here kills
+// the live turn the user is watching in Desktop (David + Sven, 2026-09-11). Reap
+// only idle engines; a mid-turn one is detached and survives the restart.
 app.on("before-quit", () => {
   import("../src/claude-inbox-session.js")
-    .then((inbox) => inbox.stopAllClaudeInboxSessions())
+    .then((inbox) => inbox.stopIdleClaudeInboxSessions())
     .catch(() => {});
 });
 app.on("open-url", (event, url) => {
@@ -1867,6 +1870,16 @@ function onboardingProtocolState() {
     return { tutorial: config.tutorial, openingPreference: config.openingPreference };
   } catch { return null; }
 }
+// The tutorial's second half: the person's first link and the message to send
+// with it. Sent items carry shareText from the server; an older server's item
+// gets the same text composed here from the shared source, so the pill never
+// shows a bare url.
+function firstLinkForOnboarding() {
+  const link = firstMintedLink({ items: sentCache });
+  if (!link) return null;
+  const shareText = link.shareText || (link.forHuman && link.url ? require("./message-share-copy.cjs")(link.forHuman, link.url) : "");
+  return { relayId: link.relayId, url: link.url, shareText, state: link.state };
+}
 function updateFirstRelayOnboarding(key, response) {
   if (!key) return;
   const status = firstRelayOnboarding.observe(key, response, onboardingProtocolState()?.tutorial);
@@ -2051,7 +2064,7 @@ let contactsLoadedOnce = null;
 let contactsFingerprint = "";
 function contactsFingerprintOf(list) {
   // Include identity/link status: a formerly offline contact can become blockable.
-  return JSON.stringify((list || []).map((c) => [c.id, c.name, c.email, c.relayUserId, c.onRelay]));
+  return JSON.stringify((list || []).map((c) => [c.id, c.name, c.email, c.relayUserId, c.onRelay, c.source]));
 }
 async function refreshContacts() {
   const contactFixtures = testFixtures("RELAY_OVERLAY_TEST_CONTACTS_FIXTURES");
@@ -2267,6 +2280,7 @@ function buildPayload() {
       networkOnboarding: networkOnboardingState,
       firstRelayStatus: firstRelayOnboarding.status(onboardingAccountKey(currentAccount)),
       firstRelayId: firstRelayOnboarding.relayId(onboardingAccountKey(currentAccount)),
+      firstLink: firstLinkForOnboarding(),
       openingPreference: onboardingProtocolState()?.openingPreference || null,
       // The renderer's playTink gate. Sound preferences are not in the push
       // signature, so relay:setSoundsMuted explicitly forces a push.
@@ -2737,7 +2751,7 @@ async function pushInboxNow(force) {
       r.agentHandoff,
       reactionStateFingerprint(r.reactions),
     ]),
-    contacts: payload.contacts.map((c) => [c.id, c.name, c.email, c.relayUserId, c.onRelay]),
+    contacts: payload.contacts.map((c) => [c.id, c.name, c.email, c.relayUserId, c.onRelay, c.source]),
     chats: (payload.chats || []).map((chat) => [
       chat.chatId, chat.updatedAt, chat.messageCount, chat.unreadCount,
       chat.lastMessage && chat.lastMessage.relayId,
@@ -2751,7 +2765,8 @@ async function pushInboxNow(force) {
     // moves while a message sits offline.
     outbox: (payload.outbox || []).map((e) => [e.id, e.state, e.attempts, e.nextAttemptAt, e.relayId, e.lastError]),
     account: [payload.account.paired, payload.account.email],
-    onboarding: [payload.ui.onboardingRequired, payload.ui.networkOnboarding, payload.ui.completedOnboardingVersion, payload.ui.firstRelayStatus, payload.ui.firstRelayId, payload.ui.openingPreference],
+    onboarding: [payload.ui.onboardingRequired, payload.ui.networkOnboarding, payload.ui.completedOnboardingVersion, payload.ui.firstRelayStatus, payload.ui.firstRelayId, payload.ui.openingPreference,
+      payload.ui.firstLink ? [payload.ui.firstLink.relayId, payload.ui.firstLink.state, payload.ui.firstLink.shareText] : null],
     pendingOpen: payload.pendingOpen
       ? [payload.pendingOpen.relayId, payload.pendingOpen.title, payload.pendingOpen.forHuman, payload.pendingOpen.error]
       : null,
@@ -6690,17 +6705,9 @@ function publicHandoffError(error, appName) {
   if (/timed out|did not register|has not appeared/i.test(message)) return `${appName} didn't open in time.`;
   return message ? `${appName} didn't open: ${message.slice(0, 160)}` : `${appName} didn't open.`;
 }
-async function stampHandoffFailed(id, isRequest, host) {
-  if (isRequest && String(id).startsWith("erelay_")) {
-    try {
-      const client = await relayClient();
-      await client.e2eeTaskChanged(id, "failed", { idempotencyKey: `task-failed:${id}:${host}` });
-    } catch (error) {
-      console.error("[overlay] encrypted task failed stamp failed:", id, error && error.message);
-    }
-  }
+async function stampHandoffFailed(id) {
   try {
-    updateStagedPacket(id, isRequest ? { taskState: "failed", taskStartedAt: null } : { workStartedAt: null });
+    updateStagedPacket(id, { workStartedAt: null });
   } catch {}
 }
 // A hand-off lives in one promise in this process. A pill that quit or
@@ -6779,10 +6786,16 @@ async function handOffToAgent(input) {
   }
   const id = prepared.packetId;
   const row = prepared.row;
-  const isRequest = row?.relayNotificationKind === "task";
+  // A Task opens like every other Relay now (David, 2026-09-13): Open in
+  // Codex / Claude Code stages the letter and the human says what they want
+  // in the app. No kick prompt, no Relay-owned engine, no Start receipt here;
+  // the agent stamps Started / Done with relay_task_start / relay_task_complete.
+  if (row?.relayNotificationKind === "task") {
+    return { ok: false, error: "A Task opens like a Relay: use Open in Codex or Open in Claude Code." };
+  }
   const isRelayWork = ["plain_relay", "sent_relay"].includes(row?.relayNotificationKind)
     && Boolean(String(row?.forAgent || "").trim());
-  if (!row || (!isRequest && !isRelayWork)) {
+  if (!row || !isRelayWork) {
     return { ok: false, error: row ? "This Relay has no agent document." : "This message cannot start agent work." };
   }
   if (!agentWorkEnabledForRow(row)) return agentWorkUnavailable();
@@ -6793,22 +6806,11 @@ async function handOffToAgent(input) {
   } catch (error) {
     return { ok: false, code: "provider_not_ready", provider: host, error: (error && error.message) || String(error) };
   }
-  // A Task always gets a first turn (Start means run, "Begin the task as
-  // briefed." when nothing was typed). A plain Relay with no words is a plain
-  // open: the letter lands, nothing runs.
-  const firstTurn = isRequest ? taskKickPrompt({ note }) : note;
+  // A plain Relay with no words is a plain open: the letter lands, nothing runs.
+  const firstTurn = note;
   // The old Start folded a note file into the letter as "Draft (not sent)".
   // The words go in as a real turn now, so no note may ride the seed.
   try { fs.rmSync(path.join(RELAY_HOME, "task-notes", `${safeNoteStem(id)}.md`), { force: true }); } catch {}
-  if (isRequest && id.startsWith("erelay_")) {
-    try {
-      const client = await relayClient();
-      await client.e2eeTaskChanged(id, "accepted", { idempotencyKey: `task-accepted:${id}` });
-      updateStagedPacket(id, { taskState: "accepted", taskAcceptedAt: new Date().toISOString() });
-    } catch (error) {
-      console.error("[overlay] encrypted task accepted stamp failed:", id, error && error.message);
-    }
-  }
   const previous = row.agentHandoff && typeof row.agentHandoff === "object" ? row.agentHandoff : null;
   agentHandoffPatch(id, {
     state: "starting", provider: host, model, effort, note, error: "",
@@ -6846,14 +6848,14 @@ async function handOffToAgent(input) {
     console.error("[overlay] hand-off open failed:", id, host, error && error.message);
     const message = publicHandoffError(error, appName);
     agentHandoffPatch(id, { state: "failed", error: message, opened: false });
-    await stampHandoffFailed(id, isRequest, host);
+    await stampHandoffFailed(id);
     pushInbox(true);
     return { ok: false, error: message };
   }
   if (!binding || !binding.nativeId) {
     const message = `${appName} didn't report the new session.`;
     agentHandoffPatch(id, { state: "failed", error: message, opened: false });
-    await stampHandoffFailed(id, isRequest, host);
+    await stampHandoffFailed(id);
     pushInbox(true);
     return { ok: false, error: message };
   }
@@ -6914,36 +6916,20 @@ async function handOffToAgent(input) {
       console.error("[overlay] hand-off first turn failed:", id, host, error && error.message);
       const message = `${appName} opened, but your message didn't go in. Retry, or open it and send there.`;
       agentHandoffPatch(id, { state: "failed", error: message, opened: true });
-      await stampHandoffFailed(id, isRequest, host);
+      await stampHandoffFailed(id);
       pushInbox(true);
       return { ok: false, error: message, opened: true };
     }
   }
   // Started is a receipt about a real session with the words inside it, never
-  // about a click. Receipt failure is retriable and does not undo the session.
-  let startedReceipt = null;
-  if (isRequest) {
-    try {
-      const client = await relayClient();
-      startedReceipt = await client.taskStarted(id);
-    } catch (error) {
-      console.error("[overlay] encrypted task started stamp failed:", id, error && error.message);
-    }
-  }
+  // about a click.
   const stamped = new Date().toISOString();
   try {
-    updateStagedPacket(id, isRequest
-      ? {
-          taskState: "started",
-          taskStartedAt: startedReceipt?.startedAt || stamped,
-          ...(startedReceipt?.taskRunOwner ? { taskRunOwner: startedReceipt.taskRunOwner } : {}),
-          ...(startedReceipt?.taskClaim ? { taskClaim: startedReceipt.taskClaim } : {}),
-        }
-      : {
-          workStartedAt: stamped,
-          // An empty plain-Relay Send is an open, not a running turn.
-          workCompletedAt: firstTurn ? null : stamped,
-        });
+    updateStagedPacket(id, {
+      workStartedAt: stamped,
+      // An empty plain-Relay Send is an open, not a running turn.
+      workCompletedAt: firstTurn ? null : stamped,
+    });
   } catch {}
   // "imported" = Desktop holds a transcript with the words in it. Codex owns
   // its thread live; Claude gets the import when its worker settles.
@@ -6952,7 +6938,7 @@ async function handOffToAgent(input) {
   // The hand-off IS the start of the work (David, 2026-09-08): the Todo item
   // moves to In Progress here, deterministically, instead of hoping the
   // session marks it. Tasks are moved by their Start receipt already.
-  if (!isRequest && firstTurn) void markHandoffInProgress(row, host);
+  if (firstTurn) void markHandoffInProgress(row, host);
   pushInbox(true);
   if (firstTurn) {
     void ensureCanonicalCompletionMonitor(id)
@@ -6963,8 +6949,9 @@ async function handOffToAgent(input) {
 
 // The kick prompt is the task's REAL first user message. It must contain only
 // words the human deliberately sent (or the short default Start instruction).
-// Relay owns Task settlement out of band after the native turn settles, so
-// internal completion/ownership machinery never belongs in the user turn.
+// Since 2026-09-13 a Task no longer starts from the pill (it opens like a
+// Relay), so this only serves the follow-up-turn path, which keeps a default
+// sentence for an empty follow-up.
 function taskKickPrompt({ note }) {
   return String(note || "Begin the task as briefed.").trim();
 }
@@ -8997,33 +8984,10 @@ ipcMain.handle("relay:preview:reviewSafety", async (event, relayId) => {
 });
 ipcMain.handle("relay:requestReviewSafety", (_event, relayId) => reviewRequestSafetyById(relayId));
 ipcMain.handle("relay:requestCompletionSend", (_event, relayId) => releaseProviderCompletion(relayId));
-// The task preview's ignition. One press does four things, in an order chosen
-// so a partial failure degrades honestly: persist the note, launch the session
-// on the chosen runtime, then stamp the encrypted Started receipt.
-ipcMain.handle("relay:preview:startTask", async (event, input) => {
-  if (!isPreviewEvent(event)) return { ok: false, error: "Not the preview window." };
-  return handOffToAgent(input);
-});
-// The pill tray's Start task: same flow, default runtime.
-ipcMain.handle("relay:taskStart", (_e, id, route) =>
-  // The REQUEST'S ROUTE decides the runtime (route rail / Settings default) —
-  // hardcoding claude here is why Start ignored the chosen provider (David).
-  handOffToAgent({
-    relayId: id,
-    note: (route && route.note) || "",
-    host: (route && route.host) || "claude",
-    // Leave an omitted model empty. startTaskFromPreview/materializer then use
-    // the selected provider's own default instead of a Claude-only fallback.
-    model: (route && route.model) || "",
-    effort: (route && route.effort) || "high",
-    // The reader's Settings choice must survive the IPC boundary too, or the
-    // picker is decoration (and referencing `route` inside the handler body
-    // threw ReferenceError, killing Start outright — David, live).
-    permission: (route && route.permission) || "",
-    clientMessageId: (route && route.clientMessageId) || "",
-    files: Array.isArray(route && route.files) ? route.files : [],
-  }),
-);
+// Start is gone (David, 2026-09-13): a Task opens like a Relay through the
+// Open in Codex / Open in Claude Code rows, and the agent stamps Started and
+// Done itself with relay_task_start / relay_task_complete. The retired IPCs
+// were relay:preview:startTask and relay:taskStart.
 ipcMain.handle("relay:taskClaim", (_e, id, expectedVersion) =>
   mutateTaskClaim(id, "claim", expectedVersion),
 );
@@ -9824,6 +9788,15 @@ ipcMain.handle("relay:installationAuthRestart", () => installationAuthorizationI
 ipcMain.handle("relay:copySetupPrompt", () => {
   clipboard.writeText(`Read ${webBase()}/for-agents and set me up on Relay.`);
   return { ok: true };
+});
+// The Your link is ready screen: the message to send with the first link, as
+// the server composed it, copied only for the account still on screen.
+ipcMain.handle("relay:copyFirstLinkMessage", (_event, expectedUserId) => {
+  if (!expectedUserId || account().userId !== expectedUserId) throw new Error("Relay account changed. Try again.");
+  const link = firstLinkForOnboarding();
+  if (!link?.shareText) throw new Error("Relay has no link to copy yet.");
+  clipboard.writeText(link.shareText);
+  return { ok: true, url: link.url };
 });
 ipcMain.handle("relay:copyTutorialPrompt", (_event, expectedUserId) => {
   if (!expectedUserId || account().userId !== expectedUserId) throw new Error("Relay account changed. Try again.");

@@ -38,6 +38,7 @@ import { migratePersistedContentFields } from "./content-field-migration.js";
 import agentRelayContext from "./agent-relay-context.cjs";
 import { storeDir } from "./host-paths.js";
 import { readCanonicalRuntime } from "./canonical-runtime.js";
+import { healMcpBrokerProvisioning } from "./mcp-broker-state.js";
 import { inspectUpdateRequest } from "./canonical-updater.js";
 import { autostartWillReplace } from "./autostart-registration.js";
 import { startRelayCodexProjectRepairLoop } from "./codex-project-repair.js";
@@ -929,6 +930,44 @@ async function followAccountDrift({ client, log, role }) {
   return next;
 }
 
+// A private checkout or an older release can overwrite the shared MCP broker
+// descriptor with its own endpoint and broker command; from then on every host
+// bridge fails to dial and the pill's own tools go dark until something
+// canonical writes it back. The daemon is the always-on canonical process, so
+// it re-reads the descriptor on a slow cadence and repairs it when it owns it.
+export const MCP_BROKER_DESCRIPTOR_GUARD_INTERVAL_MS = 60_000;
+export function startMcpBrokerDescriptorGuard({
+  log = () => {},
+  packageRoot,
+  heal = healMcpBrokerProvisioning,
+  intervalMs = MCP_BROKER_DESCRIPTOR_GUARD_INTERVAL_MS,
+  setIntervalImpl = setInterval,
+} = {}) {
+  let lastFault = null;
+  const check = () => {
+    let outcome;
+    try {
+      outcome = heal({ packageRoot });
+    } catch (error) {
+      const message = error?.message || String(error);
+      if (message !== lastFault) log(`MCP broker descriptor guard failed: ${message}`);
+      lastFault = message;
+      return;
+    }
+    if (outcome.healed) {
+      log(`MCP broker descriptor rewritten for this runtime (${outcome.reason}); it read: ${outcome.fault}`);
+      lastFault = null;
+    } else if (outcome.fault && outcome.fault !== lastFault) {
+      log(`MCP broker descriptor does not belong to this runtime (${outcome.reason}); leaving it: ${outcome.fault}`);
+      lastFault = outcome.fault;
+    }
+  };
+  check();
+  const timer = setIntervalImpl(check, intervalMs);
+  if (timer && typeof timer.unref === "function") timer.unref();
+  return { stop: () => clearInterval(timer), check };
+}
+
 export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
   // Last-resort safety net: the daemon is always-on and launchd-restarted, but a
   // restart re-delivers in-flight work and can duplicate agent turns. Keep it alive
@@ -963,6 +1002,7 @@ export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
   } catch (error) { log(`local recovery responder unavailable: ${error.message}`); }
   startRecoveryMaintenance();
   startPillSupervisor({ log });
+  startMcpBrokerDescriptorGuard({ log, packageRoot: companionPackageRoot() });
   const autoUpdater = createAutoUpdater({
     log,
     hasActiveWork: () => hasActiveTurns() || activeSessionOperationCount() > 0,

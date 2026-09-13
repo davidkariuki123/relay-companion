@@ -177,6 +177,7 @@ test("thin and full package CLIs expose the bundled protocol helper without hand
   assert.equal(help.code, 0, help.stderr);
   assert.match(help.stdout, /connect-start/);
   assert.match(help.stdout, /tutorial-send --approved/);
+  assert.match(help.stdout, /share-link --approved --draft-stdin/);
   assert.doesNotMatch(help.stdout, /accessToken|clientSecret|codeVerifier/);
 });
 
@@ -220,6 +221,68 @@ test("custom tutorial freezes both documents across an uncertain result, support
   assert.equal((await runProtocol(["tutorial-skip"], { env })).code, 0);
   assert.equal(JSON.parse((await runProtocol(["tutorial-send", "--approved"], { env })).stdout).status, "skipped");
   assert.equal(requests.length, 2, "skip sends nothing");
+});
+
+test("the first link is minted once from the approved draft, retried unchanged after an uncertain result, and can be skipped", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-first-link-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const requests = [];
+  const server = http.createServer(async (req, res) => {
+    res.setHeader("content-type", "application/json");
+    if (req.url === "/v1/e2ee/status") return res.end(JSON.stringify({ mode: "off" }));
+    let body = ""; for await (const chunk of req) body += chunk;
+    if (req.url !== "/v1/share-links" || req.method !== "POST") { res.statusCode = 404; return res.end("{}"); }
+    requests.push(JSON.parse(body));
+    res.statusCode = requests.length === 1 ? 503 : 200;
+    res.end(JSON.stringify(requests.length === 1 ? { error: "uncertain" } : {
+      url: "https://relay.test/s/first_link", relayId: "relay_first_link", threadId: "relay_first_link", shareLinkId: "shl_1",
+      recipient: { name: "Priya", named: true }, state: "unopened", senderGuidance: "Here's a Relay for you: https://relay.test/s/first_link",
+      shareText: `${requests[1].forHuman}\n\nPaste this into your Claude Code or Codex and it'll fetch the full relay: https://relay.test/s/first_link`,
+    }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const configFile = path.join(root, "agent-protocol.json");
+  const initial = { version: 1, consentVersion: 2, apiUrl: `http://127.0.0.1:${server.address().port}`,
+    accessToken: "web_0123456789012345678901234567890123456789", account: { relayUserId: "usr_receiver" },
+    inviter: { relayUserId: "usr_inviter", name: "Inviter" }, tutorial: { state: "accepted", idempotencyKey: "hello-key-0001", relayId: "relay_hello" } };
+  fs.writeFileSync(configFile, JSON.stringify(initial));
+  const env = { RELAY_CONFIG_DIR: root, RELAY_AGENT_CONFIG: configFile, RELAY_AGENT_LOCAL: path.join(root, "absent"), RELAY_AGENT_ALLOW_LOOPBACK: "1" };
+  const draft = { recipientName: "Priya", title: "Where the plan stands", forHuman: "Here is where the plan stands.", forAgent: "The approved context." };
+  const unapproved = await runProtocol(["share-link", "--draft-stdin"], { env, input: JSON.stringify(draft) });
+  assert.equal(unapproved.code, 1);
+  assert.match(unapproved.stderr, /--approved/);
+  assert.equal(requests.length, 0, "approval is the only thing that mints");
+  const badField = await runProtocol(["share-link", "--approved", "--draft-stdin"], { env, input: JSON.stringify({ ...draft, recipient: { email: "x@example.test" } }) });
+  assert.equal(badField.code, 1, "only the approved draft fields are accepted");
+  assert.equal((await runProtocol(["share-link", "--approved", "--draft-stdin"], { env, input: JSON.stringify(draft) })).code, 1, "an uncertain result is reported");
+  assert.equal(requests.length, 1);
+  assert.equal(JSON.parse(fs.readFileSync(configFile)).tutorial.share.state, "attempting");
+  assert.equal((await runProtocol(["share-link", "--skip"], { env })).code, 1, "an uncertain mint cannot be hidden as skipped");
+  const changed = await runProtocol(["share-link", "--approved", "--draft-stdin"], { env, input: JSON.stringify({ ...draft, forHuman: "Changed" }) });
+  assert.match(changed.stderr, /exact approved draft/);
+  assert.equal(requests.length, 1);
+  const retry = await runProtocol(["share-link", "--approved"], { env });
+  assert.equal(retry.code, 0, retry.stderr);
+  assert.deepEqual(requests[0], requests[1], "the retry carries the identical body and key");
+  assert.equal(requests[1].idempotencyKey.length >= 8, true);
+  const minted = JSON.parse(retry.stdout);
+  assert.equal(minted.url, "https://relay.test/s/first_link");
+  assert.match(minted.shareText, /^Here is where the plan stands\.\n\nPaste this into your Claude Code or Codex and it'll fetch the full relay: https:\/\/relay\.test\/s\/first_link$/);
+  const saved = JSON.parse(fs.readFileSync(configFile)).tutorial;
+  assert.equal(saved.state, "accepted", "the hello's state is untouched");
+  assert.equal(saved.share.state, "minted");
+  assert.equal(saved.share.url, minted.url);
+  const again = JSON.parse((await runProtocol(["share-link", "--approved"], { env })).stdout);
+  assert.equal(again.status, "already_minted");
+  assert.equal(again.shareText, minted.shareText);
+  assert.equal(requests.length, 2, "a minted link is never minted twice");
+  const status = JSON.parse((await runProtocol(["status"], { env })).stdout);
+  assert.equal(status.tutorial.share.url, minted.url, "status reports the link for the pill and the agent");
+  fs.writeFileSync(configFile, JSON.stringify(initial));
+  assert.equal(JSON.parse((await runProtocol(["share-link", "--skip"], { env })).stdout).status, "skipped");
+  assert.equal(JSON.parse((await runProtocol(["share-link", "--approved", "--draft-stdin"], { env, input: JSON.stringify(draft) })).stdout).status, "skipped");
+  assert.equal(requests.length, 2, "skip mints nothing");
 });
 
 test("browser-approved PKCE connection keeps secrets out of output and powers direct sends", async (t) => {

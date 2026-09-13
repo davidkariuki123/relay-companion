@@ -10,7 +10,7 @@ import { localE2eeIdentityAvailable, verifiedE2eeStatus } from "./e2ee-mls.js";
 import { accountProductFeatures } from "./product-features.js";
 import { apiUrl, readConfig } from "./config.js";
 import {
-  E2EE_REMOTE_MCP_INSTRUCTIONS,
+  e2eeRemoteInstructionsFor,
   E2EE_REMOTE_TOOL_NAMES,
   accountDriftRefusal,
   handleCall,
@@ -189,7 +189,7 @@ export function createE2eeRemoteMcpServer({
 } = {}) {
   const server = new Server(
     { name: "relay-e2ee-device", version: "1.0.0" },
-    { capabilities: { tools: {} }, instructions: E2EE_REMOTE_MCP_INSTRUCTIONS },
+    { capabilities: { tools: {} }, instructions: e2eeRemoteInstructionsFor(features) },
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {

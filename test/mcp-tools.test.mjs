@@ -12,6 +12,11 @@ import {
   FOR_HUMAN_SOFT_WORD_LIMIT,
   FOR_HUMAN_TYPICAL_WORD_LIMIT,
   E2EE_LOCAL_MCP_INSTRUCTIONS,
+  E2EE_LOCAL_MCP_INSTRUCTIONS_ORDINARY,
+  E2EE_REMOTE_MCP_INSTRUCTIONS_ORDINARY,
+  e2eeLocalInstructionsFor,
+  e2eeRemoteInstructionsFor,
+  toolsForE2eeRemoteAccount,
   E2EE_LOCAL_TOOL_NAMES,
   ORDINARY_RELAY_TOOL_NAMES,
   RELAY_MCP_INSTRUCTIONS,
@@ -244,7 +249,10 @@ test("startup teachings establish Relay as the default medium without losing the
   // topic posts follow the mandate.
   assert.match(RELAY_MCP_INSTRUCTIONS, /Topic posts are the one thing sent unasked: when something this session did, decided, planned, found or asked falls under a subscribed Topic's mandate, post it with relay_topic_post, then tell the person/);
   assert.doesNotMatch(REQUESTS_DISABLED_INSTRUCTIONS, /Topic/);
-  assert.match(REQUESTS_DISABLED_INSTRUCTIONS, /Tasks are available only to developer accounts/i);
+  // Tasks ride the same developer row. The production block used to say
+  // "Tasks are available only to developer accounts", which taught a staging
+  // or production agent a product it cannot use; now it says nothing.
+  assert.doesNotMatch(REQUESTS_DISABLED_INSTRUCTIONS, /\btasks?\b/i);
   // The string that actually ships to production, pinned on the clause the
   // link path depends on. It has had a byte budget for months and no content.
   assert.match(REQUESTS_DISABLED_INSTRUCTIONS, /relay_share_link/);
@@ -385,6 +393,59 @@ test("relay_send forwards an ordinary relay payload to the API client", async ()
     assert.ok(!repo.originKey.startsWith("/"));
     assert.ok(!repo.originKey.includes("@"));
     assert.equal(JSON.stringify(repo).includes(process.env.HOME || "\0"), false);
+  }
+});
+
+test("relay_forward hands the exact relay id, recipient and note to the API client and never composes content", async () => {
+  const calls = [];
+  const fakeClient = {
+    async forwardRelay(relayId, payload) {
+      calls.push([relayId, payload]);
+      return {
+        relayId: "relay_fwd_1",
+        state: "delivered",
+        deliveredVia: "device",
+        recipient: { name: "Sven", onRelay: true },
+        forwardedFrom: { relayId, sender: { relayUserId: "usr_schalk", name: "Schalk" }, sentAt: "2026-09-01T13:48:00.000Z", title: "Make Relay fully curl-drivable" },
+        threadId: "relay_fwd_1",
+        attachments: [],
+        uploads: [],
+      };
+    },
+    async sendRelay() { throw new Error("a forward must not compose a send"); },
+  };
+  const result = await handleCall(fakeClient, "relay_forward", {
+    relayId: "relay_20260901134800000_abc",
+    recipient: { contactId: "contact_sven" },
+    note: "Sven, this is the HTTP proposal I mentioned.",
+    idempotencyKey: "idem_forward_1",
+  }, { mode: "full" });
+  assert.equal(calls.length, 1);
+  const [relayId, payload] = calls[0];
+  assert.equal(relayId, "relay_20260901134800000_abc");
+  assert.deepEqual(payload.recipient, { contactId: "contact_sven" });
+  assert.equal(payload.note, "Sven, this is the HTTP proposal I mentioned.");
+  assert.equal(payload.idempotencyKey, "idem_forward_1");
+  assert.equal(payload.source.host, "relay-mcp");
+  assert.equal("forHuman" in payload, false, "the server copies the original; the tool sends no content");
+  const parsed = JSON.parse(result.content[0].text);
+  assert.equal(parsed.forwardedFrom.sender.name, "Schalk");
+
+  // The tool is ordinary messaging, so every account sees it.
+  assert.ok(toolsForAccount({ requests: false, aiSessions: false, connectors: false }).some((tool) => tool.name === "relay_forward"));
+  const tool = TOOLS.find((item) => item.name === "relay_forward");
+  assert.deepEqual(tool.inputSchema.required, ["relayId", "recipient", "idempotencyKey"]);
+  assert.match(tool.description, /not notified/);
+
+  // Nothing reaches the client for an encrypted id, a missing recipient, or a short key.
+  const untouched = new Proxy({}, { get() { throw new Error("must not touch the API client"); } });
+  for (const args of [
+    { relayId: "erelay_1", recipient: { contactId: "c" }, idempotencyKey: "idem_forward_2" },
+    { relayId: "relay_1", recipient: {}, idempotencyKey: "idem_forward_3" },
+    { relayId: "relay_1", recipient: { contactId: "c" }, idempotencyKey: "short" },
+    { recipient: { contactId: "c" }, idempotencyKey: "idem_forward_4" },
+  ]) {
+    await assert.rejects(handleCall(untouched, "relay_forward", args, { mode: "full" }), Error, JSON.stringify(args));
   }
 });
 
@@ -1586,7 +1647,7 @@ test("obsolete coordination protocol is absent and rejected before any API call"
   // state an agent sets on its own, so a human-initiated pull clears unread
   // and sends the read receipt — without it the sender sees "delivered"
   // forever). relay_acknowledge stays retired.
-  assert.equal(TOOLS.length, 41, "the full model catalog contains only current product tools");
+  assert.equal(TOOLS.length, 42, "the full model catalog contains only current product tools");
 
   const client = new Proxy({}, {
     get() { throw new Error("removed tool must not touch the API client"); },
@@ -1785,18 +1846,31 @@ test("revoke stops one url and says so without claiming the message was withdraw
   );
 });
 
-test("a Task is refused rather than quietly minted as a message", async () => {
-  let called = false;
-  const fakeClient = { async mintShareLink() { called = true; return {}; } };
+test("a Task link carries its kind to the mint, and any other kind is refused before the API", async () => {
+  let payload = null;
+  const fakeClient = {
+    async mintShareLink(input) {
+      payload = input;
+      return { url: "https://sendrelays.com/s/tok", relayId: "relay_share_task", state: "unopened" };
+    },
+  };
+  await handleCall(fakeClient, "relay_share_link", {
+    kind: "task",
+    title: "Switch Relay to dev",
+    forHuman: "Switch your Relay install to dev.",
+    idempotencyKey: "idem_share_task_1",
+  });
+  assert.equal(payload.kind, "task");
+  payload = null;
   await assert.rejects(
     handleCall(fakeClient, "relay_share_link", {
-      kind: "task",
+      kind: "handoff",
       forHuman: "Switch your Relay install to dev.",
-      idempotencyKey: "idem_share_task_1",
+      idempotencyKey: "idem_share_task_2",
     }),
-    /will not quietly turn a Task into a message/,
+    /kind must be 'message' or 'task'/,
   );
-  assert.equal(called, false, "nothing reaches the API on a refused kind");
+  assert.equal(payload, null, "nothing reaches the API on a refused kind");
 });
 
 test("a supplied share title obeys the 3-6 word gate and an omitted one does not", async () => {
@@ -2253,4 +2327,45 @@ test("the check-in reply carries the person's boards, mandates, standing rules a
   const bare = createMcpSessionContext({ env:{}, argv:[], cwd:"/tmp/relay-checkin-bare" });
   const none = JSON.parse((await handleCall({}, "relay_session_updates", {}, { sessionContext: bare })).content[0].text);
   assert.match(none.agentInstruction, /No event board for this session/);
+});
+
+// The staging/production row must not mention Tasks anywhere the agent reads:
+// not the always-on instructions, not a description, not a schema. An agent
+// that cannot send or receive a Task is not told Tasks exist (Shane,
+// 2026-09-12). The developer row keeps the full text.
+test("no Task reaches an agent on the ordinary row, in any transport", () => {
+  const ordinary = { requests: false, aiSessions: false, connectors: false, todo: false, topics: false, messageMutations: false };
+  const word = /\btasks?\b/i;
+  for (const surface of ["claude_code", "codex", ""]) {
+    for (const [label, tools] of [
+      ["plain", toolsForAccount(ordinary, surface)],
+      ["e2ee-local", toolsForE2eeLocalAccount(ordinary, surface)],
+      ["e2ee-remote", toolsForE2eeRemoteAccount(ordinary, surface)],
+    ]) {
+      assert.ok(tools.length > 0, `${label} catalog lists tools`);
+      for (const tool of tools) {
+        assert.doesNotMatch(JSON.stringify(tool), word, `${label}/${surface || "default"} ${tool.name} names no Task`);
+        assert.doesNotMatch(JSON.stringify(tool), /relay_task_|relay_todo_|todoStatus/, `${label} ${tool.name} names no Task or Todo tool`);
+      }
+      const send = tools.find((tool) => tool.name === "relay_send");
+      assert.deepEqual(send.inputSchema.properties.kind.enum, ["message"]);
+    }
+  }
+  for (const [label, text] of [
+    ["requests-disabled", REQUESTS_DISABLED_INSTRUCTIONS],
+    ["e2ee-local ordinary", E2EE_LOCAL_MCP_INSTRUCTIONS_ORDINARY],
+    ["e2ee-remote ordinary", E2EE_REMOTE_MCP_INSTRUCTIONS_ORDINARY],
+  ]) {
+    assert.doesNotMatch(text, word, `${label} instructions name no Task`);
+    assert.doesNotMatch(text, /relay_task_|relay_todo_|Todo/, `${label} instructions name no Task or Todo tool`);
+    assert.ok(Buffer.byteLength(text, "utf8") <= 2_048, `${label} fits the always-on budget`);
+  }
+  assert.equal(e2eeLocalInstructionsFor({ requests: false }), E2EE_LOCAL_MCP_INSTRUCTIONS_ORDINARY);
+  assert.equal(e2eeRemoteInstructionsFor({ requests: false }), E2EE_REMOTE_MCP_INSTRUCTIONS_ORDINARY);
+  assert.equal(e2eeLocalInstructionsFor({ requests: true }), E2EE_LOCAL_MCP_INSTRUCTIONS);
+  assert.equal(e2eeLocalInstructionsFor(), E2EE_LOCAL_MCP_INSTRUCTIONS);
+  // The developer row still teaches Tasks.
+  const developer = toolsForAccount({ requests: true, aiSessions: true, connectors: true, todo: true, topics: true, messageMutations: true }, "claude_code");
+  assert.match(developer.find((tool) => tool.name === "relay_send").description, /kind='task'/);
+  assert.match(toolsForE2eeLocalAccount({ requests: true }, "").find((tool) => tool.name === "relay_send").description, /kind='task'/);
 });

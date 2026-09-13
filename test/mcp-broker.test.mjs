@@ -21,10 +21,13 @@ import {
   brokerIdentity,
   brokerProvisioningPaths,
   ensureMcpBrokerProvisioned,
+  healMcpBrokerProvisioning,
   isMainModule,
   readMcpBrokerProvisioning,
   removeMcpBrokerProvisioning,
 } from "../src/mcp-broker-state.js";
+import { canonicalRuntimeLayout } from "../src/canonical-runtime.js";
+import { startMcpBrokerDescriptorGuard } from "../src/task-daemon.js";
 import { ensureStableMcpLauncher } from "../src/mcp-launcher.js";
 
 const companionBin = fileURLToPath(new URL("../bin/relay.js", import.meta.url));
@@ -207,4 +210,121 @@ test("eight simultaneous hosts share exactly one broker and all retain MCP parit
   for (const catalog of catalogs) assert.deepEqual(catalog.tools.map((tool) => tool.name), expected);
   const log = fs.readFileSync(path.join(configDir, "logs", "broker.log"), "utf8");
   assert.equal(log.split("\n").filter((line) => / start domain=/.test(line)).length, 1, log);
+});
+
+function canonicalPointer(homeDir, releaseId = "0.1.510-test") {
+  const layout = canonicalRuntimeLayout({ homeDir, releaseId });
+  fs.mkdirSync(layout.packageRoot, { recursive: true });
+  const pointer = {
+    schema: 1,
+    active: true,
+    version: "0.1.510",
+    releaseId: layout.releaseId,
+    releaseRoot: layout.releaseRoot,
+    packageRoot: layout.packageRoot,
+    bin: layout.bin,
+    node: process.execPath,
+    committedAt: 1,
+  };
+  fs.mkdirSync(path.dirname(layout.pointerPath), { recursive: true });
+  fs.writeFileSync(layout.pointerPath, `${JSON.stringify(pointer)}\n`);
+  return { pointer, layout };
+}
+
+test("a private checkout provisions its own descriptor and never touches the canonical one", { skip: process.platform === "win32" }, (t) => {
+  const { root, env } = tempConfig();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const { layout } = canonicalPointer(root);
+  const canonical = ensureMcpBrokerProvisioned({ env, packageRoot: layout.packageRoot, homeDir: root });
+  assert.equal(canonical.files.shared, true);
+  assert.equal(path.basename(canonical.files.descriptor), "broker-v1.json");
+  const before = fs.readFileSync(canonical.files.descriptor, "utf8");
+
+  const checkout = path.join(root, "src", "relay-worktree", "packages", "companion");
+  fs.mkdirSync(checkout, { recursive: true });
+  const priv = ensureMcpBrokerProvisioned({ env, packageRoot: checkout, homeDir: root });
+  assert.equal(priv.files.shared, false);
+  assert.match(path.basename(priv.files.descriptor), /^broker-v1\.private-[0-9a-f]{16}\.json$/);
+  assert.equal(fs.readFileSync(canonical.files.descriptor, "utf8"), before, "the canonical descriptor is untouched");
+  assert.equal(readMcpBrokerProvisioning({ env, packageRoot: checkout, homeDir: root }).endpoint, brokerEndpoint({ env, identity: priv.identity }));
+  assert.equal(readMcpBrokerProvisioning({ env, packageRoot: layout.packageRoot, homeDir: root }).endpoint, brokerEndpoint({ env, identity: canonical.identity }));
+  assert.deepEqual(priv.capability, canonical.capability, "one owner-only capability serves both");
+
+  // Another release of the canonical runtime shares the file: an update hands
+  // the descriptor over rather than forking it.
+  const other = canonicalRuntimeLayout({ homeDir: root, releaseId: "0.1.511-test" });
+  fs.mkdirSync(other.packageRoot, { recursive: true });
+  assert.equal(brokerProvisioningPaths({ env, identity: brokerIdentity({ env, packageRoot: other.packageRoot }), homeDir: root }).shared, true);
+});
+
+test("without a canonical runtime every package root shares the descriptor", { skip: process.platform === "win32" }, (t) => {
+  const { root, env } = tempConfig();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const files = ensureMcpBrokerProvisioned({ env, packageRoot: companionRoot, homeDir: root }).files;
+  assert.equal(files.shared, true);
+  assert.equal(path.basename(files.descriptor), "broker-v1.json");
+});
+
+test("the canonical runtime heals a descriptor another tree overwrote; a foreign tree leaves it alone", { skip: process.platform === "win32" }, (t) => {
+  const { root, env } = tempConfig();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const { layout } = canonicalPointer(root);
+  const canonical = ensureMcpBrokerProvisioned({ env, packageRoot: layout.packageRoot, homeDir: root });
+  assert.deepEqual(healMcpBrokerProvisioning({ env, packageRoot: layout.packageRoot, homeDir: root }), { healed: false, reason: "healthy" });
+
+  // What an older checkout without private descriptors did on 2026-09-13:
+  // the shared file named a socket nothing listened on and a broker command
+  // that did not exist.
+  const poisoned = {
+    ...JSON.parse(fs.readFileSync(canonical.files.descriptor, "utf8")),
+    domainId: "d03cc7d14c5e7ab75d972a21ab3344a34ef8c7c89073c2c05fdb761a0b65261b",
+    endpoint: path.join(canonical.files.dir, "b-v1-d03cc7d14c5e7ab7.sock"),
+    brokerNode: "/Applications/Relay.app/Contents/MacOS/Relay",
+    brokerEntry: "/private/tmp/relay-long-paste/packages/companion/src/mcp-broker-entry.js",
+  };
+  fs.writeFileSync(canonical.files.descriptor, JSON.stringify(poisoned), { mode: 0o600 });
+  assert.throws(() => readMcpBrokerProvisioning({ env, packageRoot: layout.packageRoot, homeDir: root }), /does not match this installation/);
+
+  const foreign = path.join(root, "src", "relay-other", "packages", "companion");
+  fs.mkdirSync(foreign, { recursive: true });
+  const refused = healMcpBrokerProvisioning({ env, packageRoot: foreign, homeDir: root });
+  assert.equal(refused.healed, false);
+  assert.equal(refused.reason, "private-checkout");
+  assert.equal(JSON.parse(fs.readFileSync(canonical.files.descriptor, "utf8")).brokerNode, poisoned.brokerNode, "a private checkout never rewrites the shared descriptor");
+
+  const stale = canonicalRuntimeLayout({ homeDir: root, releaseId: "0.1.400-old" });
+  fs.mkdirSync(stale.packageRoot, { recursive: true });
+  assert.equal(healMcpBrokerProvisioning({ env, packageRoot: stale.packageRoot, homeDir: root }).reason, "canonical-release");
+  assert.equal(JSON.parse(fs.readFileSync(canonical.files.descriptor, "utf8")).brokerNode, poisoned.brokerNode, "a non-current release never rewrites it either");
+
+  const healed = healMcpBrokerProvisioning({ env, packageRoot: layout.packageRoot, brokerNode: process.execPath, homeDir: root });
+  assert.equal(healed.healed, true);
+  assert.equal(healed.reason, "canonical-current");
+  assert.match(healed.fault, /does not match this installation/);
+  const repaired = readMcpBrokerProvisioning({ env, packageRoot: layout.packageRoot, homeDir: root });
+  assert.equal(repaired.endpoint, brokerEndpoint({ env, identity: canonical.identity }));
+  assert.equal(JSON.parse(fs.readFileSync(canonical.files.descriptor, "utf8")).brokerEntry, path.join(layout.packageRoot, "src", "mcp-broker-entry.js"));
+});
+
+test("the daemon guard heals once and logs a foreign descriptor once", () => {
+  const logs = [];
+  const outcomes = [
+    { healed: false, reason: "healthy" },
+    { healed: true, reason: "canonical-current", fault: "Relay MCP broker state does not match this installation" },
+    { healed: false, reason: "private-checkout", fault: "mismatch" },
+    { healed: false, reason: "private-checkout", fault: "mismatch" },
+  ];
+  const guard = startMcpBrokerDescriptorGuard({
+    log: (line) => logs.push(line),
+    packageRoot: "/runtime/current",
+    heal: () => outcomes.shift(),
+    setIntervalImpl: () => ({ unref() {} }),
+  });
+  guard.check();
+  guard.check();
+  guard.check();
+  assert.deepEqual(logs, [
+    "MCP broker descriptor rewritten for this runtime (canonical-current); it read: Relay MCP broker state does not match this installation",
+    "MCP broker descriptor does not belong to this runtime (private-checkout); leaving it: mismatch",
+  ]);
 });

@@ -72,8 +72,16 @@ export function createAgentDispatcher({ client, outboxFile, listDestinations, de
         return client.attachmentDownloadUrl(parts[3], parts[5]);
       }
       if (parts[2] === "relays") return client.fetchRelay(parts[3]);
+      if (parts[2] === "share-links") return client.shareLinkStatus(parts[3]);
     }
+    // A Relay for someone who is not on Relay, minted once by idempotency key
+    // on the server; no local queue, because nothing is delivered by minting.
+    if (method === "DELETE" && parts[2] === "share-links" && parts[3]) return client.revokeShareLink(parts[3]);
     if (method === "POST") {
+      if (url.pathname === "/v1/share-links") {
+        if (typeof body?.idempotencyKey !== "string" || body.idempotencyKey.length < 8) throw new Error("A stable idempotency key is required.");
+        return client.mintShareLink(body);
+      }
       if (url.pathname === "/v1/invite-link" || url.pathname === "/v1/invites-v2/link") return client.inviteLink();
       if (parts[4] === "read") return client.markRead(parts[3], body);
       if (url.pathname === "/v1/relays") {

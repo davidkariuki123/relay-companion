@@ -679,6 +679,11 @@ export class RelayClient {
     });
   }
 
+  /** Forward a plaintext relay the account sent or received; the server copies its content. */
+  forwardRelay(relayId, payload) {
+    return this.#req("POST", `/v1/relays/${encodeURIComponent(relayId)}/forward`, payload);
+  }
+
   // The mint route runs the same 120-word review gate as POST /v1/relays, and the
   // confirmation the server accepts is an HMAC token it issued, not a boolean.
   // Without this retry a legitimate longForHumanConfirmed can never be honoured.
@@ -692,6 +697,10 @@ export class RelayClient {
 
   revokeShareLink(relayId) {
     return this.#req("DELETE", `/v1/share-links/${encodeURIComponent(relayId)}`);
+  }
+
+  shareLinkStatus(relayId) {
+    return this.#req("GET", `/v1/share-links/${encodeURIComponent(relayId)}`);
   }
 
   async editMessage(relayId, payload) {

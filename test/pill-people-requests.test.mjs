@@ -186,6 +186,37 @@ test("Ignore belongs to the account that clicked it, and nothing is read or writ
   assert.deepEqual([...store.keys()], ["proto.ignoredRequests.v1:user_a"], "nothing was written under an unknown owner");
 });
 
+test("delivery-created contacts remain requests until accepted or sent to", () => {
+  const src = slice("  function knownAddresses()", "  function requestAddresses()");
+  const stranger = { email: "stranger@example.test", emails: ["stranger@example.test"], source: "inbound" };
+  const payload = { contacts: [stranger], sent: [], account: { email: "me@example.test" } };
+  const api = new Function("payload", "contactsList", "contactEmails", `${src}; return { knownAddresses, isRequestRoom };`)(
+    payload, [stranger], (c) => c.emails || [c.email]);
+  const room = { partyKey: "email:stranger@example.test", msgs: [{ direction: "in" }] };
+  assert.equal(api.isRequestRoom(room), true, "both contact caches may contain an inbound-only sender");
+  assert.equal(api.isRequestRoom({ ...room, msgs: [...room.msgs, { direction: "out" }] }), false, "a text or Relay reply accepts the room");
+  payload.sent.push({ recipient: { email: "STRANGER@example.test" } });
+  assert.equal(api.isRequestRoom(room), false, "previous outbound correspondence counts even outside this room");
+  payload.sent = [];
+  for (const source of ["manual", "inferred", "invite", "google", "companion"]) {
+    stranger.source = source;
+    assert.equal(api.isRequestRoom(room), false, `${source} is an owner-established contact`);
+  }
+  stranger.source = "inbound";
+  assert.equal(api.isRequestRoom({ ...room, isGroup: true }), false);
+  assert.equal(api.isRequestRoom({ ...room, provider: "slack" }), false);
+  assert.equal(api.isRequestRoom({ partyKey: "email:me@example.test" }), false);
+});
+
+test("source-only acceptance invalidates the contact cache fingerprint", () => {
+  const main = fs.readFileSync(new URL("../overlay/main.cjs", import.meta.url), "utf8");
+  const src = main.slice(main.indexOf("function contactsFingerprintOf(list)"), main.indexOf("async function refreshContacts()"));
+  const fingerprint = new Function(`${src}; return contactsFingerprintOf;`)();
+  const row = { id: "con_a", email: "a@example.test", source: "inbound" };
+  assert.notEqual(fingerprint([row]), fingerprint([{ ...row, source: "manual" }]));
+  assert.match(main, /contacts: payload.contacts.map\(\(c\) => \[c.id, c.name, c.email, c.relayUserId, c.onRelay, c.source\]\)/);
+});
+
 test("requests use one Relays entry, with no Contacts badge or third Contacts pane", () => {
   const rows = slice("function relayIdentityRows()", "function renderRelays()");
   assert.match(rows, /!isRequestRoom/);

@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { randomUUID, randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import messageShareCopy from "../overlay/message-share-copy.cjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const overlayRoot = path.join(packageRoot, "overlay");
@@ -30,10 +31,13 @@ export async function startOnboardingReview() {
     let protocol = {};
     try { protocol = JSON.parse(fs.readFileSync(path.join(root, "agent-protocol.json"), "utf8")); } catch {}
     const skipped = protocol.tutorial?.state === "skipped";
+    const firstLink = sent.find((row) => row.shareLink);
     return { account, relays: [], sent, contacts, chats: [], outbox: [], features: {},
       ui: { canDismiss: true, onboardingRequired: !completed && !skipped, onboardingVersion: 2,
         completedOnboardingVersion: completed || skipped ? 2 : 0,
+        networkOnboarding: { required: false, checking: false, version: 2 },
         firstRelayStatus: sent.length ? "sent" : "waiting", firstRelayId: sent[0]?.relayId || "",
+        firstLink: firstLink ? { relayId: firstLink.relayId, url: firstLink.shareLink.url, shareText: firstLink.shareLink.shareText, state: firstLink.shareLink.state } : null,
         openingPreference: protocol.openingPreference || null } };
   }
   const json = (res, data, status = 200) => { res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" }); res.end(JSON.stringify(data)); };
@@ -46,7 +50,7 @@ export async function startOnboardingReview() {
       const body = raw && req.headers["content-type"]?.includes("application/json") ? JSON.parse(raw) : {};
       if (url.pathname === "/") {
         const command = `node ${JSON.stringify(path.join(root, "practice-relay.mjs"))}`;
-        const prompt = `Help me rehearse Relay onboarding using only the local practice server at ${base}. This is a simulation: do not install anything, change my real Relay connection, or use Relay MCP. Use ${command} as the practice protocol helper. Run connect-start ${base} invite_practice_01234567890123456789 codex (or claude_code in Claude). Let me approve the local practice account in my browser, then run connect-finish. Use your permitted native question interface to let me write my own first message, use the suggested hello, or skip. Show both exact payloads and Taylor Demo as the practice recipient; wait for approval before tutorial-send --approved (add --draft-stdin and the approved JSON for custom wording). Never send automatically. Ask whether I prefer desktop, terminal, or another session, and save with opening-preference. All messages must stay on this local server.`;
+        const prompt = `Help me rehearse Relay onboarding using only the local practice server at ${base}. This is a simulation: do not install anything, change my real Relay connection, or use Relay MCP. Use ${command} as the practice protocol helper. Run connect-start ${base} invite_practice_01234567890123456789 codex (or claude_code in Claude). Let me approve the local practice account in my browser, then run connect-finish. Use your permitted native question interface to let me write my own first message, use the suggested hello, or skip. Show both exact payloads and Taylor Demo as the practice recipient; wait for approval before tutorial-send --approved (add --draft-stdin and the approved JSON for custom wording). Never send automatically. Ask whether I prefer desktop, terminal, or another session, and save with opening-preference. Then offer the second half: a Relay for someone who is not on Relay. Ask me what it is about and who it is for, show me the exact draft, and only after I approve run share-link --approved --draft-stdin with that JSON; present the returned shareText under Send this to them. All messages must stay on this local server.`;
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
         return res.end(`<!doctype html><title>Relay onboarding rehearsal</title><style>body{font:16px system-ui;background:#f6f3ed;color:#241d18;margin:32px}main{display:grid;grid-template-columns:minmax(300px,560px) 540px;gap:32px}textarea{width:100%;height:310px;box-sizing:border-box;padding:16px;font:14px/1.5 monospace}iframe{width:540px;height:780px;border:0;background:white;border-radius:24px}button{padding:10px 18px}p{line-height:1.6}</style><h1>Relay onboarding rehearsal</h1><p><strong>Practice only.</strong> The real pill UI and question flow; simulated account approval and delivery. Nothing reaches your contacts or changes your installation.</p><main><section><h2>Try it yourself</h2><p>Copy this prompt into a new Claude Code or Codex conversation. The agent will guide you through the questions. This page shows the pill as you go.</p><textarea readonly>${escapeHtml(prompt)}</textarea><p>Approve the practice account when the agent opens the local approval page. To start again, stop this rehearsal and run <code>relay review-onboarding</code> again. Each run has its own temporary profile.</p><p>For a real sign-in/install test, use a separate OS account and a fresh Relay account. This rehearsal does not claim to test OAuth or the installer.</p></section><iframe src="/pill" title="Practice Relay pill"></iframe></main>`);
       }
@@ -91,6 +95,25 @@ export async function startOnboardingReview() {
         const contact = contacts.find((c) => c.email === String(body.email || "").toLowerCase());
         return json(res, contact ? { found: true, contact } : { found: false });
       }
+      if (url.pathname === "/v1/share-links" && req.method === "POST") {
+        if (!approved) return json(res, { error: "practice_approval_required" }, 403);
+        if (!body.idempotencyKey || typeof body.forHuman !== "string" || !body.forHuman.trim()) return json(res, { error: "invalid_message" }, 400);
+        const existing = requests.get(body.idempotencyKey);
+        if (existing) return json(res, existing.body === raw ? existing.result : { error: "idempotency_conflict" }, existing.body === raw ? 200 : 409);
+        const relayId = `review_link_${randomUUID()}`;
+        const linkUrl = `${base}/s/${relayId}`;
+        const recipientName = String(body.recipientName || "").trim();
+        const shareText = messageShareCopy(body.forHuman, linkUrl);
+        const row = { relayId, id: relayId, threadId: relayId, kind: body.kind || "message", ...(body.title ? { title: body.title } : {}),
+          forHuman: body.forHuman, forAgent: body.forAgent || "", recipient: { name: recipientName || "Someone with the link", onRelay: false },
+          state: "pending", createdAt: new Date().toISOString(),
+          shareLink: { id: `shl_${relayId}`, url: linkUrl, state: "unopened", shareText } };
+        sent.push(row);
+        const result = { url: linkUrl, relayId, threadId: relayId, shareLinkId: row.shareLink.id, recipient: { name: row.recipient.name, named: Boolean(recipientName) },
+          state: "unopened", senderGuidance: `Here's a Relay for you. This link opens it: ${linkUrl}`, shareText };
+        requests.set(body.idempotencyKey, { body: raw, result });
+        return json(res, result);
+      }
       if (url.pathname === "/v1/relays" && req.method === "POST") {
         if (!approved) return json(res, { error: "practice_approval_required" }, 403);
         if (body.recipient?.relayUserId !== inviter.relayUserId) return json(res, { error: "practice_recipient_only" }, 400);
@@ -111,7 +134,7 @@ export async function startOnboardingReview() {
   base = `http://127.0.0.1:${server.address().port}`;
   // A narrowly scoped wrapper prevents an agent from accidentally using the
   // person's real credential files or their installed MCP during practice.
-  const wrapper = `import {spawn} from 'node:child_process';\nimport fs from 'node:fs';\nconst args=process.argv.slice(2);const base=${JSON.stringify(base)};\nif(!['connect-start','connect-finish','status','tutorial-send','tutorial-skip','opening-preference','invite-link','inbox','sent','read'].includes(args[0])||(args[0]==='connect-start'&&args[1]!==base))throw new Error('Only the local onboarding rehearsal is allowed.');\nfor(const file of ${JSON.stringify([path.join(root,"agent-protocol.json"),path.join(root,"agent-authorization.json")])}){if(fs.existsSync(file)&&JSON.parse(fs.readFileSync(file)).apiUrl!==base)throw new Error('Practice profile origin changed. Start a fresh rehearsal.');}\nconst child=spawn(process.execPath,[${JSON.stringify(path.join(packageRoot, "skill/relay/scripts/relay-protocol.mjs"))},...args],{stdio:'inherit',env:{...process.env,RELAY_CONFIG_DIR:${JSON.stringify(root)},RELAY_AGENT_CONFIG:${JSON.stringify(path.join(root,"agent-protocol.json"))},RELAY_AGENT_AUTHORIZATION:${JSON.stringify(path.join(root,"agent-authorization.json"))},RELAY_AGENT_LOCAL:${JSON.stringify(path.join(root,"no-local-daemon.json"))},RELAY_AGENT_ALLOW_LOOPBACK:'1'}});child.on('exit',code=>process.exit(code||0));\n`;
+  const wrapper = `import {spawn} from 'node:child_process';\nimport fs from 'node:fs';\nconst args=process.argv.slice(2);const base=${JSON.stringify(base)};\nif(!['connect-start','connect-finish','status','tutorial-send','tutorial-skip','share-link','opening-preference','invite-link','inbox','sent','read'].includes(args[0])||(args[0]==='connect-start'&&args[1]!==base))throw new Error('Only the local onboarding rehearsal is allowed.');\nfor(const file of ${JSON.stringify([path.join(root,"agent-protocol.json"),path.join(root,"agent-authorization.json")])}){if(fs.existsSync(file)&&JSON.parse(fs.readFileSync(file)).apiUrl!==base)throw new Error('Practice profile origin changed. Start a fresh rehearsal.');}\nconst child=spawn(process.execPath,[${JSON.stringify(path.join(packageRoot, "skill/relay/scripts/relay-protocol.mjs"))},...args],{stdio:'inherit',env:{...process.env,RELAY_CONFIG_DIR:${JSON.stringify(root)},RELAY_AGENT_CONFIG:${JSON.stringify(path.join(root,"agent-protocol.json"))},RELAY_AGENT_AUTHORIZATION:${JSON.stringify(path.join(root,"agent-authorization.json"))},RELAY_AGENT_LOCAL:${JSON.stringify(path.join(root,"no-local-daemon.json"))},RELAY_AGENT_ALLOW_LOOPBACK:'1'}});child.on('exit',code=>process.exit(code||0));\n`;
   fs.writeFileSync(path.join(root, "practice-relay.mjs"), wrapper, { mode: 0o600 });
   return { url: base, root, close: () => new Promise((resolve) => server.close(resolve)) };
 }

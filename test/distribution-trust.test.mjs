@@ -2100,9 +2100,14 @@ test("public release owns immutable publication while private promotion owns fle
   const privatePromotion = new URL("../../../.github/workflows/promote-prod.yml", import.meta.url);
   if (fs.existsSync(privatePromotion)) {
     const promote = fs.readFileSync(privatePromotion, "utf8");
-    assert.match(promote, /\(cd "\$runtime_prefix" && tar -xzf runtime\.tar\.gz\)/);
-    assert.doesNotMatch(promote, /tar -xzf "\$runtime_prefix\/runtime\.tar\.gz"/);
-    assert.match(promote, /verify-installed-runtime\.mjs/);
+    // The per-platform runtime verification lives in the Release candidate
+    // gate that both staging and production promotions call.
+    const gate = fs.readFileSync(new URL("../../../.github/workflows/release-candidate-gate.yml", import.meta.url), "utf8");
+    assert.match(promote, /uses: \.\/\.github\/workflows\/release-candidate-gate\.yml/);
+    assert.match(gate, /\(cd "\$runtime_prefix" && tar -xzf runtime\.tar\.gz\)/);
+    assert.doesNotMatch(gate, /tar -xzf "\$runtime_prefix\/runtime\.tar\.gz"/);
+    assert.match(gate, /verify-installed-runtime\.mjs/);
+    assert.match(gate, /assert-runtime-capabilities\.mjs/);
     assert.match(promote, /assert-runtime-capabilities\.mjs/);
     assert.match(promote, /thin-installer\) TAG=installer/);
     assert.match(promote, /thin installer must never replace bridge latest/);

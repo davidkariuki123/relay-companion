@@ -13,13 +13,13 @@ assert.ok(reader.length > 0, "renderReader is available");
 // for you and for your agent. also details should start closed and open if
 // clicked."
 
-test("a letter has no contents strip; only a Task keeps its two faces", () => {
-  assert.match(reader, /const twoFaces = request;/);
+test("no letter has a contents strip: a Task folds its agent document too", () => {
+  // David, 2026-09-13: a Task reads exactly like a Relay — one page, Details
+  // folded — so the "This Relay contains" folder is gone for every kind.
+  assert.match(reader, /const twoFaces = false;/);
   assert.match(reader, /const onAgent = twoFaces && readerTab === "agent";/);
-  assert.match(reader, /const documentList = twoFaces \? `/);
-  // The Task folder is untouched: it still names both documents.
-  assert.match(reader, /Message for you<\/span>/);
-  assert.match(reader, /Message for your agent<\/span>/);
+  assert.match(reader, /const documentList = "";/);
+  assert.doesNotMatch(reader, /This Relay contains|Message for your agent<\/span>|relay-contents-row/);
 });
 
 test("Details for your agent starts closed", () => {

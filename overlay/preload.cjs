@@ -41,7 +41,6 @@ contextBridge.exposeInMainWorld("relay", {
   openInCurrent: (id, host) => ipcRenderer.send("relay:openInCurrent", id, host),
   openFresh: (id, host, note) => ipcRenderer.send("relay:openFresh", id, host, note),
   // The pill tray's Start task: the full start flow with the default runtime.
-  taskStart: (id, route) => ipcRenderer.invoke("relay:taskStart", String(id || ""), route || null),
   taskClaim: (id, expectedVersion) => ipcRenderer.invoke("relay:taskClaim", String(id || ""), expectedVersion),
   taskUnclaim: (id, expectedVersion) => ipcRenderer.invoke("relay:taskUnclaim", String(id || ""), expectedVersion),
   taskStop: (id) => ipcRenderer.invoke("relay:taskStop", String(id || "")),
@@ -242,6 +241,7 @@ contextBridge.exposeInMainWorld("relay", {
   installationAuthRestart: () => ipcRenderer.invoke("relay:installationAuthRestart"),
   copySetupPrompt: () => ipcRenderer.invoke("relay:copySetupPrompt"),
   copyTutorialPrompt: (userId) => ipcRenderer.invoke("relay:copyTutorialPrompt", userId),
+  copyFirstLinkMessage: (userId) => ipcRenderer.invoke("relay:copyFirstLinkMessage", userId),
   installationAuthSignIn: (options = {}) => ipcRenderer.invoke("relay:installationAuthSignIn", { forceAccountSelection: options?.forceAccountSelection === true }),
   installationAuthGoogle: (options = {}) => ipcRenderer.invoke("relay:installationAuthGoogle", {
     forceAccountSelection: options?.forceAccountSelection === true,

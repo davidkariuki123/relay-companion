@@ -28,6 +28,7 @@ const cases = {
   relay_topic_member: [{ topicId: 'tpc_test', relayUserId: 'usr_test', action: 'make_admin' }, 'setTopicMemberRole'],
   relay_agent_complete: [{ runRelayId: 'run_test', ...message }, 'agentRunComplete'],
   relay_send: [{ recipient: { contactId: 'con_test' }, kind: 'message', ...message }, 'sendRelay'],
+  relay_forward: [{ relayId: 'relay_test', recipient: { contactId: 'con_test' }, idempotencyKey: key }, 'forwardRelay'],
   relay_share_link: [{ ...message }, 'mintShareLink'],
   relay_contacts_search: [{ query: 'Test' }, 'searchContacts'],
   relay_groups_list: [{}, 'groups'],

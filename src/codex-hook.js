@@ -2,11 +2,21 @@
 // Every failure exits silently so an advisory hook can never break a turn.
 
 import agentRelayContext from "./agent-relay-context.cjs";
-import { deviceToken } from "./config.js";
+import { apiUrl, deviceToken, readConfig } from "./config.js";
+import { pairedProfileTodoEnabled } from "./product-features.js";
 import { readRolloutMeta } from "./codex-inject.js";
 import { storeDir } from "./host-paths.js";
 
 const { claimAgentRelayHookContext } = agentRelayContext;
+
+// Same offline read as the Claude hook: Todo and Tasks ride the developer row.
+function hookTodoEnabled() {
+  try {
+    return pairedProfileTodoEnabled({ config: readConfig(), apiUrl: apiUrl() });
+  } catch {
+    return false;
+  }
+}
 const STDIN_TIMEOUT_MS = 2500;
 const MAX_HOOK_INPUT_CHARS = 1_000_000;
 
@@ -81,6 +91,7 @@ export async function runCodexHook({
     claim = claimAgentRelayHookContext(homeDir, accountScope, {
       sessionId: `codex:${sessionId}`,
       eventName,
+      todo: hookTodoEnabled(),
     });
     if (!claim?.text) return;
     const response = responseFor(eventName, claim.text);

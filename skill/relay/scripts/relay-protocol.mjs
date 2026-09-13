@@ -30,12 +30,19 @@ const SAFE_GET = [
   /^\/v1\/contacts\/search\?q=.+$/,
   /^\/v1\/relays\/[A-Za-z0-9_-]+$/,
   /^\/v1\/threads\/[A-Za-z0-9_-]+$/,
+  /^\/v1\/share-links\/[A-Za-z0-9_-]+$/,
 ];
 const SAFE_POST = [
   /^\/v1\/relays$/,
+  /^\/v1\/relays\/[A-Za-z0-9_-]+\/forward$/,
   /^\/v1\/relays\/[A-Za-z0-9_-]+\/read$/,
   /^\/v1\/invite-link$/,
   /^\/v1\/invites-v2\/link$/,
+  /^\/v1\/share-links$/,
+];
+// A person may take back a link they minted from the same conversation.
+const SAFE_DELETE = [
+  /^\/v1\/share-links\/[A-Za-z0-9_-]+$/,
 ];
 
 function configPath(env = process.env) {
@@ -201,7 +208,7 @@ async function readStdin() {
 }
 
 function allowed(method, requestPath) {
-  const list = method === "GET" ? SAFE_GET : method === "POST" ? SAFE_POST : [];
+  const list = method === "GET" ? SAFE_GET : method === "POST" ? SAFE_POST : method === "DELETE" ? SAFE_DELETE : [];
   return list.some((pattern) => pattern.test(requestPath));
 }
 
@@ -567,6 +574,62 @@ async function sendTutorial(approved, draft) {
   }
 }
 
+// The tutorial's second half (2026-09-13): a Relay for someone who is not on
+// Relay. Like the hello, the approved draft and one idempotency key are frozen
+// before the mint, so an uncertain result is retried with the identical body
+// and nothing is minted twice. The result carries the url and shareText: the
+// person's own message, then the one sentence the recipient needs.
+const SHARE_DRAFT_FIELDS = ["recipientName", "title", "forHuman", "forAgent", "kind"];
+async function shareLinkTutorial(rest) {
+  const config = readConfig();
+  const tutorial = config.tutorial || {};
+  const share = tutorial.share || {};
+  const now = () => new Date().toISOString();
+  if (rest.includes("--skip")) {
+    if (["attempting", "minted"].includes(share.state)) throw new Error("The first link was already attempted. Check its outcome before skipping.");
+    config.tutorial = { ...tutorial, share: { ...share, state: "skipped", updatedAt: now() } };
+    atomicWrite(configPath(), config);
+    return { ok: true, status: "skipped" };
+  }
+  if (share.state === "skipped") return { ok: true, status: "skipped" };
+  if (share.state === "minted" && share.url) {
+    return { ok: true, status: "already_minted", relayId: share.relayId || "", url: share.url, shareText: share.shareText || "" };
+  }
+  if (!rest.includes("--approved")) throw new Error("Relay's first link requires --approved after the person explicitly approves the exact draft.");
+  const draft = rest.includes("--draft-stdin") ? parseJson(await readStdin(), "Relay link draft") : null;
+  if (draft && (typeof draft !== "object" || Array.isArray(draft) || typeof draft.forHuman !== "string" || !draft.forHuman.trim()
+    || Object.keys(draft).some((key) => !SHARE_DRAFT_FIELDS.includes(key))
+    || Object.entries(draft).some(([key, value]) => key !== "forHuman" && typeof value !== "string"))) {
+    throw new Error("The link draft must contain the approved non-empty forHuman and only recipientName, title, forAgent or kind besides it.");
+  }
+  if (!draft && !share.payload) throw new Error("Relay's first link needs the approved draft: pass --draft-stdin with its JSON.");
+  const key = String(share.idempotencyKey || "").length >= 8 ? share.idempotencyKey : randomUUID();
+  const proposed = draft ? { ...draft, idempotencyKey: key } : null;
+  if (share.payload && proposed && JSON.stringify(proposed) !== JSON.stringify(share.payload)) {
+    throw new Error("This first link was already attempted. Retry its exact approved draft; do not change it after an uncertain result.");
+  }
+  const body = share.payload || proposed;
+  config.tutorial = { ...tutorial, share: { ...share, idempotencyKey: key, payload: body, state: "attempting", updatedAt: now() } };
+  atomicWrite(configPath(), config);
+  try {
+    const result = await request("POST", "/v1/share-links", body);
+    const latest = readConfig();
+    latest.tutorial = { ...latest.tutorial, share: {
+      ...latest.tutorial?.share, state: "minted",
+      relayId: String(result?.relayId || ""), url: String(result?.url || ""), shareText: String(result?.shareText || ""), updatedAt: now(),
+    } };
+    atomicWrite(configPath(), latest);
+    return result;
+  } catch (error) {
+    if (Number(error?.status) >= 400 && Number(error?.status) < 500) {
+      const latest = readConfig();
+      latest.tutorial = { ...latest.tutorial, share: { ...latest.tutorial?.share, state: "rejected", updatedAt: now() } };
+      atomicWrite(configPath(), latest);
+    }
+    throw error;
+  }
+}
+
 async function main(argv = process.argv.slice(2)) {
   const [command, ...rest] = argv;
   if (command === "connect-start") return connectStart(rest[0], rest[1], rest[2]);
@@ -656,7 +719,15 @@ async function main(argv = process.argv.slice(2)) {
     const body = parseJson(await readStdin(), "Relay message");
     return sendPersisted(body);
   }
+  if (command === "forward") {
+    if (!rest[0]) throw new Error("Relay forward requires the exact id of the relay to forward.");
+    const body = parseJson(await readStdin(), "Relay forward");
+    if (!body?.recipient) throw new Error("Relay forward requires a recipient in the JSON body.");
+    if (String(body.idempotencyKey || "").length < 8) throw new Error("Relay forward requires an idempotencyKey of at least 8 characters.");
+    return request("POST", `/v1/relays/${encodeURIComponent(rest[0])}/forward`, body);
+  }
   if (command === "tutorial-send") return sendTutorial(rest.includes("--approved"), rest.includes("--draft-stdin") ? parseJson(await readStdin()) : undefined);
+  if (command === "share-link") return shareLinkTutorial(rest);
   if (command === "tutorial-skip") {
     const config = readConfig();
     if (["attempting", "accepted"].includes(config.tutorial?.state)) throw new Error("The first Relay was already attempted. Check its outcome before skipping.");
@@ -696,8 +767,11 @@ async function main(argv = process.argv.slice(2)) {
       "relay-protocol mark-read <relay-id> [idempotency-key]",
       "relay-protocol tutorial-send --approved [--draft-stdin] # optional JSON: exact approved forHuman and forAgent",
       "relay-protocol tutorial-skip",
+      "relay-protocol share-link --approved --draft-stdin # JSON: exact approved forHuman, optional recipientName, title, forAgent; returns url and shareText, minted once",
+      "relay-protocol share-link --skip",
       "relay-protocol opening-preference desktop|terminal|other [claude|codex]",
       "relay-protocol send             # read body with stable idempotencyKey from stdin",
+      "relay-protocol forward <relay-id> # JSON on stdin: exact recipient, optional note, stable idempotencyKey; the server copies the original",
       "relay-protocol invite-link",
       "relay-protocol disconnect",
     ],

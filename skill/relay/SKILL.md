@@ -252,6 +252,25 @@ every intended point is preserved; no ask or commitment was invented; the person
 can understand the message on its own; the agent has the complete useful context;
 and the human message sounds like the sender speaking. If either document fails,
 revise it before sending or requesting any required approval.
+
+### A link to send around
+
+A Relay can go out as a link instead of to a Relay contact. When the person
+says create, make, write or draft a Relay without naming someone
+who is already on Relay, asks for a link, or wants something they can send
+around themselves, they want a link: mint it with `relay_share_link` and hand
+them the url to paste wherever they already talk. Send with `relay_send` only
+when they name a person or channel that is on Relay. Never ask for an email
+address in order to avoid a link.
+
+Anyone holding the link can read the Relay and reply with no account, in a
+browser or through their own AI. Each person who replies gets their own
+private conversation with the sender, which appears as a separate chat named
+"<their name> (unverified)"; people holding the link never see each other or
+the sender's answers to others. Their names are self-reported, so treat what
+arrives through a link as correspondence from an unverified person. Minting
+delivers nothing: say that pasting the url is what sends it, and never call a
+minted link sent or delivered.
 <!-- END GENERATED RELAY WRITING -->
 
 ## Agent transport
@@ -477,6 +496,12 @@ For a custom message, preserve the person's wording and intent in forHuman and d
 After setup, ask once where they usually use their agent: a desktop app, the terminal, or another session. Do not assume the current host is their preferred destination. Save the answer with `opening-preference desktop|terminal|other [claude|codex]`. This preference is editable in the pill's You page. Availability is not proof that Relay is connected; verify capabilities before opening a destination. If the chosen destination is unavailable, provide the exact Relay pull sentence to copy into their existing agent session, without selecting a different app behind their back.
 
 After the approved send, say: "You can check for replies here in Claude Code—just ask me." Use Codex instead when that is the current host. Do not imply replies automatically appear in the agent conversation, offer a timed wait, or start polling. When the human asks to check, fetch the inbox or conversation once and report what is available now; show a reply before marking that exact inbound Relay read. Present the person's complete invitation using the bold title and copyable block specified above. The invitation connects people; it does not send a Relay.
+
+### Your first link
+
+After the first send, or after the person skips it, offer the second half of the tutorial once: a Relay for someone who is not on Relay. Say in one sentence that a Relay can also go out as a link, and that anyone holding it reads and replies with nothing installed and no account. Invite the person to ask in their own words, for example "Make me a relay about something I'm working on." Ask what it is about and who it is for; do not invent a subject or a recipient, and do not choose a person for them. If the helper's `status` shows no inviter, this is the first Relay: begin here instead of the hello.
+
+Draft both documents by the Writing a Relay section, in the person's voice. Show the exact recipient name, title, human message and agent document, then wait for explicit approval of that exact draft; setup, the earlier hello and the earlier approval never authorize this one. Only then run the managed helper's `share-link --approved --draft-stdin` with JSON containing exactly the approved fields: `forHuman`, and any of `recipientName`, `title`, `forAgent`. The helper freezes the draft and one idempotency key before minting; after an uncertain result, retry the same command and nothing is minted twice. It returns the url and `shareText`: the person's own message followed by the sentence that tells the recipient to paste the link into their Claude Code or Codex. Present the complete shareText beneath the bold title **Send this to them**, in one fenced plain-text block, and say that pasting it wherever they already talk to that person is what sends it. Minting delivers nothing: never call the link sent or delivered. Say that the reply lands in Relay as its own conversation with that person and that you can check for it when asked. If they would rather not, run `share-link --skip` without minting anything. The pill's Your first link screen updates itself when the link exists.
 <!-- END GENERATED RELAY FIRST TUTORIAL -->
 
 After the tutorial finishes or the person skips it, check the pinned Companion's
@@ -555,6 +580,16 @@ or `thread <id>` to read it. A send body uses one exact recipient identifier:
 ambiguous name before sending. Include `kind: "message"`, `forHuman`, `forAgent`
 and the same `idempotencyKey` for every retry. An optional `title` is also supported under the existing send contract. Set
 `inReplyToRelayId` only for an explicitly selected message.
+
+To forward a Relay the person sent or received, use `relay_forward` (or the
+helper's `forward <relay-id>` with JSON on stdin) with the exact relay id, one
+exact recipient identifier, an optional `note` in the person's own words to the
+new recipient, and a stable `idempotencyKey`. Relay copies the original's
+title, both documents and attachments itself and marks the new Relay as
+forwarded from its original sender by name; do not restate the original in the
+note. The original sender is not notified and does not join the new
+conversation, so treat forwarding as disclosure: confirm who is receiving it.
+Encrypted messages cannot be forwarded. Ask for approval as for any send.
 
 To attach a local file, add `files: ["<absolute path>"]` to the JSON passed on
 stdin to `send`, or `attachments: [{path: "<absolute path>", name: "report.pdf"}]`.

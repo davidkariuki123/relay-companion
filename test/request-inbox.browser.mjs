@@ -12,7 +12,8 @@ try {
   await page.addInitScript(()=>{
     window.events={}; window.writes=[]; window.failDelete=false; window.failBlock=false;
     const at='2026-09-11T08:00:00Z';
-    window.contactsFixture=[{id:'friend',name:'Friend',emails:['friend@example.com'],email:'friend@example.com',onRelay:true}];
+    window.contactsFixture=[{id:'friend',name:'Friend',emails:['friend@example.com'],email:'friend@example.com',onRelay:true},
+      ...Array.from({length:3},(_,i)=>({id:`inbound-${i}`,name:`Sender ${i}`,email:`sender${i}@example.com`,emails:[`sender${i}@example.com`],onRelay:true,source:'inbound'}))];
     window.payloadFixture={account:{paired:true,userId:'self',name:'Test User',email:'self@example.com',hasSentRelay:true},ui:{canDismiss:true,onboardingRequired:false,completedOnboardingVersion:1},features:{todo:true,slack:true},relays:[
       ...Array.from({length:2050},(_,i)=>({id:`r${i}`,threadId:`t${i%3}`,direction:'inbound',state:'read',relayNotificationKind:'plain_relay',senderName:`Sender ${i%3}`,senderEmail:`sender${i%3}@example.com`,title:`Request ${i}`,forHuman:'Hello',forAgent:'Context',createdAt:at,attachments:[]})),
       {id:'friend-relay',threadId:'friend-thread',direction:'inbound',state:'read',relayNotificationKind:'plain_relay',senderName:'Friend',senderEmail:'friend@example.com',title:'Known conversation',forHuman:'Hello',createdAt:at,attachments:[]}
@@ -20,7 +21,7 @@ try {
     const api={isTestOverlay:true,refresh:async()=>structuredClone(window.payloadFixture),refreshSent:async()=>({items:[]}),contacts:async()=>structuredClone(window.contactsFixture),groups:async()=>({ok:true,result:[]}),accountInfo:async()=>structuredClone(window.payloadFixture.account),agentSurfaces:async()=>({}),
       deleteRelay:async id=>{window.writes.push(['delete',id]);if(window.failDelete)return {ok:false,error:'offline'};window.payloadFixture.relays=window.payloadFixture.relays.filter(r=>r.id!==id);return {ok:true};},
       blockRequest:async id=>{window.writes.push(['block',id]);if(window.failBlock)throw Error('offline');return {blocked:true};},
-      contactSave:async input=>{window.writes.push(['contact',input.email]);const contact={id:input.email,name:input.name,email:input.email,emails:input.emails,onRelay:true};window.contactsFixture.push(contact);return {ok:true,contact,contacts:structuredClone(window.contactsFixture)};}
+      contactSave:async input=>{window.writes.push(['contact',input.email]);const contact={id:input.email,name:input.name,email:input.email,emails:input.emails,onRelay:true,source:'manual'};window.contactsFixture=window.contactsFixture.filter(c=>c.email!==input.email);window.contactsFixture.push(contact);return {ok:true,contact,contacts:structuredClone(window.contactsFixture)};}
     };
     window.relay=new Proxy(api,{get:(target,key)=>key in target?target[key]:String(key).startsWith('on')?callback=>{window.events[key]=callback;return ()=>{};}:async()=>({ok:true})});
   });
