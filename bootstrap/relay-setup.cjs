@@ -1051,6 +1051,19 @@ async function activateRuntime(layout, runtime, version, {
   return { candidate, cliLauncher };
 }
 
+// The setup-intent marker, read by the pill (overlay/main.cjs readSetupIntent).
+// Plain setup opens the pill signed out for a person who will sign in there
+// (sendrelays.com's Get started); the marker is what lets the pill start that
+// sign-in without a click. The --code and --agent-protocol paths pair without
+// a pill sign-in, so they must not leave one behind. Only the fact, the time
+// and the version are recorded: never a credential.
+const SETUP_INTENT_FILE = "setup-intent.json";
+function writeSetupIntent(configDir, version, setupCompatibilityArgs = [], { now = new Date(), write = atomicWriteJson } = {}) {
+  if (setupCompatibilityArgs.includes("--code") || setupCompatibilityArgs.includes("--agent-protocol")) return false;
+  write(path.join(configDir, SETUP_INTENT_FILE), { agentInstalled: true, at: now.toISOString(), version });
+  return true;
+}
+
 async function setup(argv = []) {
   assertCompatibleNode();
   const setupCompatibilityArgs = validateSetupCompatibilityArgs(argv);
@@ -1068,6 +1081,12 @@ async function setup(argv = []) {
     if (setupCompatibilityArgs.includes("--agent-protocol") && process.env.RELAY_BACKGROUND_INSTALL_WORKER === "1") {
       await require("./relay-background-install.cjs").waitForAgentAuthorization();
     }
+    // Before activation, so the pill it opens reads the marker on first paint.
+    // A marker that cannot be written costs the person one click, not the
+    // install, so it never fails setup.
+    try {
+      writeSetupIntent(process.env.RELAY_CONFIG_DIR || path.join(os.homedir(), ".relay"), version, setupCompatibilityArgs);
+    } catch {}
     const activated = await activateRuntime(layout, runtime, version, { setupCompatibilityArgs });
     if (setupCompatibilityArgs.includes("--code")) {
       console.log(`Relay ${version} is installed and paired. The Relay pill is open.`);
@@ -1203,6 +1222,7 @@ module.exports = {
   validateArchiveEntries,
   verifyExtractedRuntime,
   waitForRuntimeHealth,
+  writeSetupIntent,
 };
 
 if (require.main === module) {

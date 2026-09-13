@@ -625,6 +625,8 @@ test("the attention pump leaves setup arrivals pending before starting or showin
       currentShow: null, attention: { hasShowing: () => false, pendingCount: () => 1 },
       attentionQueue: new Map([["arrival", { state: "pending" }]]),
       pillHidden: false, userIsAway: () => false, dismissed: false, payload,
+      // A sign-in still reading its history also holds arrivals (get started, 2026-09-13).
+      signInHistoryPending: new Set(), onboardingAccountKey: () => "user:test",
     });
     vm.runInContext(`${sliceFunction(main, "function pumpAttention(")}\nresult = pumpAttention(payload);`, context);
     assert.equal(context.result, false);

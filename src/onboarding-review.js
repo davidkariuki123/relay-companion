@@ -38,6 +38,10 @@ export async function startOnboardingReview() {
         networkOnboarding: { required: false, checking: false, version: 2 },
         firstRelayStatus: sent.length ? "sent" : "waiting", firstRelayId: sent[0]?.relayId || "",
         firstLink: firstLink ? { relayId: firstLink.relayId, url: firstLink.shareLink.url, shareText: firstLink.shareLink.shareText, state: firstLink.shareLink.state } : null,
+        // The rehearsal always has an inviter (Taylor). Reading it off the
+        // protocol file would show the link-first copy until the agent's
+        // connect-finish writes that file, minutes into an invite walk-through.
+        firstRelayKind: "hello",
         openingPreference: protocol.openingPreference || null } };
   }
   const json = (res, data, status = 200) => { res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" }); res.end(JSON.stringify(data)); };

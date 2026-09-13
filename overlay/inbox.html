@@ -1333,16 +1333,15 @@
   .task-claim-status.mine { color:var(--accent); }
   .task-claim-release { padding:0 2px 6px; color:var(--faint); font:500 10.5px/1.35 var(--sans); }
   .task-claim-error { padding:6px 2px 0; color:var(--danger); font:500 10.5px/1.35 var(--sans); }
-  /* Reactions B2 — live badges cling to the original bubble; the separately
-     rendered serif whisper is the chronological conversation record. */
-  .th-msg.has-rx { margin-bottom:12px; padding-bottom:19px; }
-  .rx-badges { position:absolute; bottom:-12px; left:10px; display:flex; gap:4px; z-index:5; }
-  .th-msg.mine .rx-badges { left:auto; right:10px; }
+  /* Attached badges wrap in the message flow, then overlap its lower edge. */
+  .th-msg.has-rx { margin-bottom:12px; padding-bottom:8px; }
+  .rx-badges { position:relative; bottom:-20px; flex-basis:100%; display:flex; flex-wrap:wrap; gap:4px; margin-top:-12px; z-index:5; }
+  .th-msg.mine .rx-badges { justify-content:flex-end; }
   .rx-badge { appearance:none; display:flex; align-items:center; gap:3px; background:var(--bg); color:var(--ink); border:1px solid var(--edge);
     border-radius:999px; padding:2px 7px; font-size:12px; line-height:1.3; box-shadow:0 2px 6px -2px rgba(42,37,33,.28); cursor:pointer;
-    transform-origin:center bottom; animation:rxBadgePop .6s var(--spring) both; }
-  .rx-badge.mine { border-color:color-mix(in srgb,var(--brand-anthropic) 55%,var(--edge)); }
-  .rx-badge .n { font-family:var(--mono); font-size:9px; color:var(--muted-2); }
+    min-height:24px; font-family:var(--sans); }
+  .rx-badge.mine { border-color:var(--edge-accent); background:color-mix(in srgb,var(--accent) 10%,var(--bg)); }
+  .rx-badge .n { font-family:var(--mono); font-size:11px; color:var(--muted-2); }
   @keyframes rxBadgePop { from { transform:scale(.2); } 60% { transform:scale(1.18); } }
   /* The picker belongs to ONE message, never to a reader, Task or run.
      It appears just outside the hovered bubble and unfurls back across that
@@ -2148,6 +2147,16 @@
     .th-message-more { width:44px; height:44px; right:-44px; opacity:1; }
     .th-msg.mine .th-message-more { left:-44px; }
     .th-message-menu button { min-height:44px; }
+  }
+  /* The existing message popover owns both reactions and Reply. */
+  .th-message-menu:has(.rx-menu) { width:246px; }
+  .th-message-menu .rx-menu { display:flex; flex-wrap:wrap; gap:1px; padding:3px 2px 8px; border-bottom:1px solid var(--hair); }
+  .th-message-menu .rx-menu button { width:auto; min-width:32px; padding:6px; border-radius:6px; text-align:center; font-size:19px; line-height:1; }
+  .th-msg:has(.th-message-more) { max-width:calc(100% - 64px); }
+  @media (hover:none), (pointer:coarse) {
+    .rx-badge { min-width:44px; min-height:44px; justify-content:center; }
+    .th-message-menu .rx-menu button { min-width:44px; min-height:44px; }
+    .th-msg:has(.th-message-more) { max-width:calc(100% - 76px); }
   }
   /* The editor takes its width from the bubble, never from its text or viewport.
      Keep the action row outside the scrolling field so long edits stay saveable. */
@@ -3070,6 +3079,7 @@
   .request-inbox-more:hover, .request-inbox-more:focus-visible { color:var(--ink); background:var(--wash-2); }
 
 </style>
+<link rel="stylesheet" href="./relay-anyone-tip.css" />
 </head>
 <body>
   <svg width="0" height="0" viewBox="0 0 0 0" aria-hidden="true" focusable="false">
@@ -3128,6 +3138,7 @@
     <div class="scroll" id="scroll">
       <!-- Relays view -->
       <section class="view" id="relaysView">
+        <div id="relaysIntro" hidden><div id="relaysRequestsSummary"></div><div id="relayAnyoneTip" hidden></div></div>
         <div id="relaysList"></div>
         <div id="relaysEmpty" class="empty gone">
           <svg class="mark" width="22" height="22" viewBox="0 0 16 16" aria-hidden="true">
@@ -3362,6 +3373,7 @@
 <script src="./read-receipts.cjs"></script>
 <script src="./chat-typing.cjs"></script>
 <script src="./chat-presentation.js"></script>
+<script src="./relay-anyone-tip.cjs"></script>
 <script>
   // Theme, two layers (Sven, round 5): the pill FOLLOWS the OS appearance by
   // default; the moon/sun button is the override — an explicit pick persists
@@ -3396,6 +3408,8 @@
   const youTabAvatarEl = document.getElementById("youTabAvatar");
   const scrollEl = document.getElementById("scroll");
   const relaysViewEl = document.getElementById("relaysView");
+  const relaysIntroEl = document.getElementById("relaysIntro");
+  const relaysRequestsSummaryEl = document.getElementById("relaysRequestsSummary");
   const relaysListEl = document.getElementById("relaysList");
   const relaysEmptyEl = document.getElementById("relaysEmpty");
   const relaysBadgeEl = document.getElementById("relaysBadge");
@@ -4051,6 +4065,7 @@
   }
   // Status-area Relay mark clicked: the card comes back FULLY OPEN (never the pill).
   function trayOpen() {
+    relayAnyoneTip.reset();
     const wasOffstage = cardEl.classList.contains("offstage") || cardEl.classList.contains("bye");
     // Opening from the tray is deliberate engagement with whatever is on stage.
     notifInteracted = notifInteracted || activeNotificationIds.length > 0;
@@ -5589,6 +5604,17 @@
   // ---------- state ----------
   let activeView = "relays";
   let payload = { account: { paired: false }, ui: { canDismiss: true, reopenSurface: "the Relay icon", onboardingVersion:1, completedOnboardingVersion:0, onboardingRequired:false }, features: { requests:false, todo:false, slack:false, peopleMentions:true, agentMentions:false, cowork:false, messageMutations:false, environment:"production" }, pendingOpen:null, relays: [], sent: [], requests: [], contacts: [], chats: [], slackChats: [] };
+  // The teaching card owns its DOM: inbox polls must preserve its current
+  // example, timer, focus and session-only minimise state.
+  const relayAnyoneTip = window.RelayAnyoneTip.create(document.getElementById("relayAnyoneTip"));
+  function syncRelayAnyoneTip() {
+    const visible = activeView === "relays" && !peeking && !requestInboxOpen
+      && payload.account?.paired !== false && !cardEl.classList.contains("signup");
+    relaysIntroEl.hidden = !visible;
+    relayAnyoneTip.setVisible(visible);
+    relayAnyoneTip.setActive(visible && rendererSurfaceActive());
+  }
+  continuousMotionListeners.add(syncRelayAnyoneTip);
   const canonicalChatDetails = new Map();
   const canonicalChatFingerprints = new Map();
   const canonicalChatDetailProjectionKeys = new Map();
@@ -5835,6 +5861,10 @@
   let signupStateLoaded = false;
   let signupInitializationFailed = false;
   let signupForceGoogleSelection = false;
+  // GET STARTED (2026-09-13): a pill that "npx relay-companion setup" opened
+  // begins the browser sign-in itself, once, exactly as the Sign in link
+  // does. A paired account resets it, so a later sign-out needs the click.
+  let signupAutoSignInStarted = false;
   const SIGNUP_POLL_BASE_MS = 1400;
   const SIGNUP_POLL_MAX_MS = 11200;
   const SIGNUP_POLL_SURFACE_FAILURE = 3;
@@ -6424,7 +6454,8 @@
       .map((room) => ({ ...room, latestAt: room.latestAt || (room.latest && room.latest.at) || "" }));
   }
   function renderRelays() {
-    if (requestInboxAccount !== signupAccountKey()) { requestInboxOpen = false; requestInboxError = ""; requestInboxAccount = signupAccountKey(); }
+    if (requestInboxAccount !== signupAccountKey()) { requestInboxOpen = false; requestInboxError = ""; requestInboxAccount = signupAccountKey(); relayAnyoneTip.reset(); }
+    syncRelayAnyoneTip();
     if (requestInboxOpen && !peeking) { renderRequestsPane(); return; }
     // WhatsApp chronology: a room's preview is the newest correspondence in
     // either direction. `threadMessages` already normalizes staged inbound and
@@ -6481,10 +6512,14 @@
     // Identical markup means NO DOM write (main's guard, kept): a 4s poll that
     // rebuilds the list destroys open menus and their handlers, and flickers.
     prevRelayIds = new Set(allRows.map((r) => r.id));
-    const nextListHtml = requestSummaryHtml(requestCount) + visible.map((row) => relayIdentityRowHtml(row)).join("");
+    const nextSummaryHtml = requestSummaryHtml(requestCount);
+    if (relaysRequestsSummaryEl.innerHTML !== nextSummaryHtml) {
+      relaysRequestsSummaryEl.innerHTML = nextSummaryHtml;
+      document.getElementById("requestsEntry")?.addEventListener("click", openRequestInbox);
+    }
+    const nextListHtml = visible.map((row) => relayIdentityRowHtml(row)).join("");
     if (relaysListEl.innerHTML === nextListHtml) return;
     relaysListEl.innerHTML = nextListHtml;
-    document.getElementById("requestsEntry")?.addEventListener("click", openRequestInbox);
     for (const el of relaysListEl.querySelectorAll(".relay-arrival")) {
       el.addEventListener("click", () => {
         // One tap, straight into the conversation (Sven's standing call).
@@ -8615,23 +8650,16 @@
       reactions: sent.reactions || { aggregates: [], events: [] },
     };
   }
-  const RX_PRIMARY = ["👍", "❤️", "😂", "🎉", "👀"];
+  const RX_PRIMARY = ["👍", "❤️", "😂", "🙌", "‼️", "🙏"];
   const RX_MORE = ["😮", "😢", "🔥", "✅", "🙏", "💯"];
-  // Reactions remain implemented and durable, but are deliberately dark.
-  // This is a reversible product gate—not a data/schema deletion.
-  const REACTIONS_ENABLED = false;
+  // Reactions stay attached to their message; adding one does not create a chat row.
+  const REACTIONS_ENABLED = true;
   const reactionNotes = new Map();
+  const reactionMutationIds = new Set();
   function messageReactionPickerHtml(id) {
     if (!REACTIONS_ENABLED) return "";
-    return `<div class="rx-colo rx-msg-picker" data-rx-colo="${esc(id)}" data-stop="1">
-      <button type="button" class="rx-face" data-rx-face="${esc(id)}" title="React to this message" aria-label="React to this message">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9.2"/><path d="M8.4 14.2c.9 1.2 2.1 1.9 3.6 1.9s2.7-.7 3.6-1.9"/><circle cx="9" cy="9.8" r=".7" fill="currentColor" stroke="none"/><circle cx="15" cy="9.8" r=".7" fill="currentColor" stroke="none"/></svg>
-      </button>
-      <div class="rx-bar rx-unfurl" data-rx-bar="${esc(id)}">
-        ${RX_PRIMARY.map((emoji, i) => `<button type="button" class="rx-em" style="animation-delay:${i * 28}ms" data-rx-pick="${esc(id)}" data-emoji="${emoji}" title="React ${emoji}">${emoji}</button>`).join("")}
-        ${RX_MORE.map((emoji) => `<button type="button" class="rx-em more" data-rx-pick="${esc(id)}" data-emoji="${emoji}" title="React ${emoji}">${emoji}</button>`).join("")}
-        <button type="button" class="rx-more" data-rx-more="${esc(id)}" title="More reactions">+</button>
-      </div>
+    return `<div class="rx-menu" role="group" aria-label="React to this message" data-stop="1">
+      ${RX_PRIMARY.map((emoji) => `<button type="button" data-rx-pick="${esc(id)}" data-emoji="${emoji}" aria-label="React ${emoji}">${emoji}</button>`).join("")}
     </div>`;
   }
   function reactionConfirmationHtml(id) {
@@ -8640,10 +8668,23 @@
     return note ? `<div class="rx-confirm">you reacted <span class="emoji">${esc(note.emoji)}</span> — sent to the conversation &nbsp;·&nbsp; <button type="button" class="rx-undo" data-rx-undo="${esc(id)}" data-emoji="${esc(note.emoji)}">undo</button></div>` : "";
   }
   async function commitReaction(id, emoji, action) {
-    if (!window.relay.react) return { ok:false, error:"Reactions need a newer Relay companion." };
-    const result = await window.relay.react(id, emoji, action).catch((error) => ({ ok:false, error:String(error && error.message || error) }));
-    if (!result || !result.ok) setRowNote(id, (result && result.error) || "Reaction did not send.", "err");
-    return result;
+    const key = `${id}:${emoji}`;
+    if (reactionMutationIds.has(key)) return { ok:false, pending:true };
+    reactionMutationIds.add(key);
+    clearRowNote(id);
+    try {
+      const result = window.relay.react
+        ? await window.relay.react(id, emoji, action)
+        : { ok:false, error:"Reactions need a newer Relay companion." };
+      if (!result?.ok) setRowNote(id, result?.error || "Reaction did not send.", "err");
+      return result;
+    } catch (error) {
+      const message = String(error?.message || error);
+      setRowNote(id, message, "err");
+      return { ok:false, error:message };
+    } finally {
+      reactionMutationIds.delete(key);
+    }
   }
   function dismissReactionPickers(root = document, except = null) {
     for (const picker of root.querySelectorAll("[data-rx-colo].open")) {
@@ -8693,9 +8734,11 @@
       const id = pick.getAttribute("data-rx-pick");
       const emoji = pick.getAttribute("data-emoji");
       dismissReactionPickers();
+      const menu = pick.closest(".th-message-menu");
+      if (menu?.matches(":popover-open")) menu.hidePopover();
       pick.disabled = true;
       const result = await commitReaction(id, emoji, "add");
-      if (result && result.ok) reactionNotes.set(id, { emoji });
+      if (result && result.ok) clearRowNote(id);
       renderAll();
     });
     for (const undo of scope.querySelectorAll("[data-rx-undo]")) undo.addEventListener("click", async (event) => {
@@ -10976,6 +11019,8 @@
       <span>Requests</span><span class="requests-count">${count.toLocaleString()}</span><span class="requests-chevron" aria-hidden="true">›</span></button>` : "";
   }
   function renderRequestsPane() {
+    relaysIntroEl.hidden = true;
+    relayAnyoneTip.setVisible(false);
     if (requestInboxBusy) return;
     const entries = requestEntries();
     relaysEmptyEl.classList.add("gone");
@@ -14291,15 +14336,9 @@
     // Settings → Prototype, so the flip is revocable by feel, not by revert.
     const chatShaped = chatOrder() === "chat";
     const msgs = chatShaped ? [...thread.msgs] : [...thread.msgs].reverse();
-    // Reactions are messages in Relay's ontology. Interleave their durable add
-    // events by timestamp, while the aggregate remains attached to its target.
-    const chronological = [];
-    for (const message of thread.msgs) {
-      chronological.push({ kind:"message", at:message.at, message });
-      for (const event of (!REACTIONS_ENABLED || message.request) ? [] : ((message.reactions && message.reactions.events) || [])) {
-        if (event.action === "add") chronological.push({ kind:"reaction", at:event.at, event });
-      }
-    }
+    // Preserve durable reaction events in the data, but render only aggregate
+    // badges on the original message: a signoff should not reopen the transcript.
+    const chronological = thread.msgs.map((message) => ({ kind:"message", at:message.at, message }));
     chronological.sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));
     const timeline = chatShaped ? chronological : chronological.reverse();
     threadPalette = new Map();
@@ -14486,7 +14525,9 @@
       const attachmentOnly = textLike && attachments.length > 0
         && !String(m.body || "").trim() && !editingMessage && !m.deletedAt;
       const hasHostActions = !textLike && !m.request;
-      const sideActions = textLike && !m.ownedAgent && !attachmentOnly && !m.deletedAt;
+      const canReact = REACTIONS_ENABLED && !m.request && !m.ownedAgent && !m.pending
+        && !m.deletedAt && !attachmentOnly && !editingMessage && !groupPostingBlocked;
+      const sideActions = (textLike || canReact) && !m.ownedAgent && !attachmentOnly && !m.deletedAt;
       const messageActionBits = [];
       if (m.ownedAgent) {
         messageActionBits.push(`<button type="button" class="th-reply-ghost" data-open-agent-work="${esc(m.id)}" data-stop="1">Open Work</button>`);
@@ -14506,10 +14547,11 @@
       }
 
       const sideMenuId = `message-options-${m.id}`;
-      const sideMenuHtml = sideActions && messageActionBits.length ? `
+      const sideMenuHtml = sideActions && (messageActionBits.length || canReact) ? `
         <button type="button" class="th-message-more" data-message-more="${esc(m.id)}" data-stop="1"
           aria-label="Message options" aria-haspopup="true" aria-expanded="false" aria-controls="${esc(sideMenuId)}"><svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor" aria-hidden="true"><circle cx="4" cy="9" r="1.3"/><circle cx="9" cy="9" r="1.3"/><circle cx="14" cy="9" r="1.3"/></svg></button>
         <div id="${esc(sideMenuId)}" class="th-message-menu" popover="auto" role="group" aria-label="Message options" data-stop="1">
+          ${canReact ? messageReactionPickerHtml(m.id) : ""}
           ${messageActionBits.join("")}
         </div>` : "";
 
@@ -14521,9 +14563,9 @@
       const open = expandedMsgIds.has(m.id);
       const inlineBody = !textLike && !m.request && !open
         && !!m.body && String(m.body).length <= INLINE_BODY_MAX;
-      const aggregates = (!REACTIONS_ENABLED || m.request) ? [] : ((m.reactions && m.reactions.aggregates) || []);
+      const aggregates = (!REACTIONS_ENABLED || m.request || m.deletedAt || attachmentOnly) ? [] : ((m.reactions && m.reactions.aggregates) || []);
       const badges = aggregates.length ? `<div class="rx-badges" data-stop="1">${aggregates.map((reaction) =>
-        `<button type="button" class="rx-badge${reaction.reactedByMe ? " mine" : ""}" data-rx-toggle="${esc(m.id)}" data-emoji="${esc(reaction.emoji)}" data-mine="${reaction.reactedByMe ? "1" : "0"}" title="${esc((reaction.actors || []).map((actor) => actor.self ? "You" : actor.name).join(", "))}">${esc(reaction.emoji)}${reaction.count > 1 ? `<span class="n">${reaction.count}</span>` : ""}</button>`
+        `<button type="button" class="rx-badge${reaction.reactedByMe ? " mine" : ""}"${canReact ? "" : " disabled"} data-rx-toggle="${esc(m.id)}" data-emoji="${esc(reaction.emoji)}" data-mine="${reaction.reactedByMe ? "1" : "0"}" aria-pressed="${reaction.reactedByMe ? "true" : "false"}" aria-label="${esc(reaction.emoji)} · ${reaction.count} · ${reaction.reactedByMe ? "Remove your reaction" : "Add your reaction"}" title="${esc((reaction.actors || []).map((actor) => actor.self ? "You" : actor.name).join(", "))}">${esc(reaction.emoji)}${reaction.count > 1 ? `<span class="n">${reaction.count}</span>` : ""}</button>`
       ).join("")}</div>` : "";
       const hostActionsPersistent = hasHostActions && (
         String(m.id) === latestHostActionRelayId
@@ -14544,7 +14586,6 @@
       const claimControl = channelTask ? taskClaimControlHtml(m, { surface: "chat" }) : "";
       return `${slackThreadContextHtml(m)}${chunkDivider}${runHeader}
       ${channelTask ? `<div class="th-task-stack${mine ? " mine" : ""}">` : ""}<div class="th-msg${hasHostActions ? " has-host-actions" : ""}${m.unread ? " unread" : ""}${mine ? " mine" : ""}${cont ? " cont" : ""}${textLike ? " text" : ""}${attachmentOnly ? " attachment-only" : ""}${agentWorking ? " agent-working" : ""}${open ? " open" : ""}${activeMentionVisit?.selected === String(m.id) ? " mention-target" : ""}${m.deletedAt ? " deleted" : ""}${aggregates.length ? " has-rx" : ""}${liveCanonicalArrivalIds.has(String(m.id || "")) ? " live-arrival" : ""}"${textLike ? "" : ' role="button" tabindex="0"'}${agentWorking ? ' aria-busy="true"' : ""}${hasHostActions ? ` aria-expanded="${hostActionsPersistent ? "true" : "false"}"` : ""} data-msg="${esc(m.id)}" data-dir="${m.direction}" data-opening-id="${esc(m.id)}">
-        ${!REACTIONS_ENABLED || m.request ? "" : messageReactionPickerHtml(m.id)}
         ${sideMenuHtml}
         ${messageReplyReferenceHtml(m)}
         ${editingMessage ? `
@@ -14566,11 +14607,10 @@
         `}
 
         <div class="row-err${rowNotes.get(m.id)?.cls === "ok" ? " ok" : ""}" data-err="${esc(m.id)}" data-stop="1">${esc(rowNotes.get(m.id)?.text || "")}</div>
-        ${!REACTIONS_ENABLED || m.request ? "" : reactionConfirmationHtml(m.id)}
-        ${badges}
         ${showProviderByline ? providerBylineHtml(m) : ""}
         ${hasHostActions ? relayHostActionsHtml(m, { persistent:hostActionsPersistent }) : ""}
         ${!textLike && !editingMessage ? chatTimestampHtml(m.at) : ""}
+        ${badges}
       </div>${channelTask ? `${claimControl}</div>` : ""}
       ${slackThreadLinkHtml(m)}
       ${(() => {
@@ -17001,6 +17041,13 @@
       }
       signupBusy = false;
       applyInstallationState(state);
+      // Only a fresh setup with nothing pending starts on its own: an expired
+      // or half-finished approval keeps its recovery screen.
+      if (state.status === "idle" && payload.ui?.agentInstalled === true && !signupAutoSignInStarted) {
+        signupAutoSignInStarted = true;
+        await startInstallationSignIn();
+        return;
+      }
       if (rendererSurfaceActive()) renderSignup();
       else surfaceRenderDeferred = true;
       if (["google", "finishing"].includes(signupStage)) pollInstallationState();
@@ -17012,6 +17059,23 @@
       if (rendererSurfaceActive()) renderSignup();
       else surfaceRenderDeferred = true;
     }
+  }
+
+  // The method stage's Sign in link and the Get started auto-start share one
+  // path. A failure leaves the method stage showing the error, so the
+  // person can click Sign in themselves.
+  async function startInstallationSignIn() {
+    signupBusy = true; signupError = "";
+    if (rendererSurfaceActive()) renderSignup();
+    else surfaceRenderDeferred = true;
+    try {
+      const state = await window.relay.installationAuthSignIn({ forceAccountSelection: signupForceGoogleSelection });
+      signupForceGoogleSelection = false;
+      signupBusy = false; signupStage = "google"; applyInstallationState(state);
+      if (rendererSurfaceActive()) renderSignup();
+      else surfaceRenderDeferred = true;
+      pollInstallationState();
+    } catch (reason) { signupFailure(reason, "Relay could not open sign-in. Try again."); }
   }
 
   async function connectChatFromSignup(provider) {
@@ -17110,6 +17174,25 @@
     } catch { if (account === signupAccountKey()) chapter.linkError = "The message couldn’t be copied. Select the text above and copy it."; }
     finally { if (account === signupAccountKey()) { signupBusy = false; renderSignup(); } }
   }
+  // The ready screen's controls, updated without rebuilding the screen. False
+  // when the screen on show is not the ready screen, so the caller renders it.
+  function syncFirstLinkControls(chapter) {
+    const screen = signupBodyEl.querySelector(".su-first-link");
+    const copy = screen?.querySelector("#suLinkCopy");
+    const next = screen?.querySelector("#suLinkContinue");
+    if (!copy || !next) return false;
+    copy.disabled = signupBusy; next.disabled = signupBusy;
+    copy.textContent = chapter.linkCopied ? "Copied" : "Copy message";
+    let errorEl = screen.querySelector(".su-error");
+    if (chapter.linkError && !errorEl) {
+      errorEl = document.createElement("p");
+      errorEl.className = "su-error"; errorEl.setAttribute("role", "alert");
+      screen.appendChild(errorEl);
+    }
+    if (chapter.linkError) errorEl.textContent = chapter.linkError;
+    else errorEl?.remove();
+    return true;
+  }
   function renderNetworkScreen(step) {
     const state = networkInviteForAccount();
     const signature = JSON.stringify(["network", step, state.account, state.busy, state.copied, state.error]);
@@ -17148,8 +17231,14 @@
       return;
     }
     if (chapter.stage === "link") {
-      const signature = JSON.stringify(["link", link?.relayId || "", link?.shareText || "", signupBusy, chapter.linkCopied, chapter.linkError]);
-      if (signupBodyEl.dataset.firstRelaySignature === signature && signupBodyEl.querySelector(".su-first-link")) return;
+      // The signature covers what the screen is about, not the state of its
+      // controls: Copy message re-renders twice (busy, then copied or failed),
+      // and rebuilding the screen for that would replay the celebration
+      // marks' entrance when the link was the first Relay. The controls are
+      // patched in place instead (syncFirstLinkControls).
+      const signature = JSON.stringify(["link", link?.relayId || "", link?.shareText || "", payload.ui?.firstRelayId || ""]);
+      const rendered = signupBodyEl.dataset.firstRelaySignature === signature && signupBodyEl.querySelector(".su-first-link");
+      if (rendered && (!link || syncFirstLinkControls(chapter))) return;
       signupBodyEl.dataset.firstRelaySignature = signature;
       if (!link) {
         signupBodyEl.innerHTML = `<div class="su-first-relay su-first-link">
@@ -17163,11 +17252,15 @@
         return;
       }
       const shareText = link.shareText || `${link.forHuman || ""}\n\nPaste this into your Claude Code or Codex and it'll fetch the full relay: ${link.url}`;
-      signupBodyEl.innerHTML = `<div class="su-first-relay su-first-link">
-        <p class="su-step">Your first link</p>
+      // A link that was itself the first Relay skipped the celebration, so the
+      // moment (the squares and the tick) lands on this screen instead.
+      const firstRelayWasLink = link.relayId === payload.ui?.firstRelayId;
+      signupBodyEl.innerHTML = `<div class="su-first-relay su-first-link${firstRelayWasLink ? " su-first-relay-sent" : ""}">
+        ${firstRelayWasLink ? '<div class="su-relay-moment" aria-hidden="true"><i></i><i></i><i></i><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></svg></div>' : ""}
+        <p class="su-step">${firstRelayWasLink ? "Your first Relay" : "Your first link"}</p>
         <h1 class="su-title">Your link is ready.</h1>
         <div class="su-setup-prompt su-share-text" id="suFirstLinkText">${esc(shareText)}</div>
-        <p class="su-copy">Send it wherever you talk to them. Their reply lands here as its own chat.</p>
+        <p class="su-copy">Send it wherever you talk to them. They can ask their Claude Code or Codex to reply. Their reply will appear inside your Relay app, even if they don’t have Relay.</p>
         <div class="su-form su-form-row"><button class="su-secondary" id="suLinkCopy" type="button"${signupBusy ? " disabled" : ""}>${chapter.linkCopied ? "Copied" : "Copy message"}</button><button class="su-primary" id="suLinkContinue" type="button"${signupBusy ? " disabled" : ""}>Continue</button></div>
         ${chapter.linkError ? `<p class="su-error" role="alert">${esc(chapter.linkError)}</p>` : ""}
       </div>`;
@@ -17313,7 +17406,10 @@
       // link and Grow your network follow, and Open Relay ends onboarding.
       // Until the send, the pill has nothing else to show, so this screen stays.
       if (status === "sent") { renderFirstRelayChapter(); return; }
-      const signature = JSON.stringify([status, signupBusy, signupError]);
+      // GET STARTED (2026-09-13): with no inviter there is nobody to say hello
+      // to, so the first Relay is a link for someone who is not on Relay yet.
+      const linkFirst = payload.ui?.firstRelayKind === "link";
+      const signature = JSON.stringify([status, signupBusy, signupError, linkFirst]);
       if (signupBodyEl.dataset.firstRelaySignature === signature && signupBodyEl.querySelector(".su-first-relay")) return;
       signupBodyEl.dataset.firstRelaySignature = signature;
       const unavailable = status === "unavailable";
@@ -17321,16 +17417,29 @@
       const title = '<span class="su-handoff-intro">Follow the instructions in</span><span class="su-host-claude">Claude Code</span><span class="su-handoff-or">or <span class="su-host-codex">Codex</span>.</span>';
       const copy = checking || unavailable
         ? "Keep going in the conversation where you set up Relay."
-        : "Your agent will help you send your first Relay.";
+        : linkFirst
+          ? 'Ask your agent to <strong>make you a relay about something you’re working on</strong>. It gives you a link and the message to send with it, and the other person needs nothing installed.'
+          : "Your agent will help you send your first Relay.";
       const progress = unavailable ? "We couldn’t check your send yet. We’ll try again."
         : checking ? "Checking whether you’ve already sent a Relay…"
+        : linkFirst ? "This screen updates when your link is ready."
         : "This screen will update when your Relay is sent.";
+      // With no inviter, no agent conversation is known to be driving this
+      // screen, and the signup card hides the tab strip (so the You page and
+      // Sign out). A sign-in into an account with an empty history would be
+      // parked here with no exit, so the link handoff offers the same Skip as
+      // Your first link; it completes the local chapter, and Grow your network
+      // still follows for an account whose invitation chapter is pending.
+      const skip = linkFirst && !checking
+        ? `<div class="su-form"><button class="su-link" id="suHandoffSkip" type="button"${busy}>Skip for now</button></div>`
+        : "";
       signupBodyEl.innerHTML = `<div class="su-first-relay">
         <p class="su-step">${checking || unavailable ? "Connected to Relay" : "Your first Relay"}</p>
         <h1 class="su-title su-handoff-title">${title}</h1><p class="su-copy">${copy}</p>
         <p class="su-send-progress" role="status"><span aria-hidden="true"></span>${progress}</p>
-        ${error}
+        ${skip}${error}
       </div>`;
+      document.getElementById("suHandoffSkip")?.addEventListener("click", completeSignupTutorial);
       return;
     }
     if (signupStage === "restart-required") {
@@ -17368,14 +17477,7 @@
           event.target.textContent = "Copied";
         } catch { signupError = "Could not copy the prompt. Select and copy the text above."; renderSignup(); }
       });
-      document.getElementById("suSignIn")?.addEventListener("click", async () => {
-        signupBusy = true; signupError = ""; renderSignup();
-        try {
-          const state = await window.relay.installationAuthSignIn({ forceAccountSelection: signupForceGoogleSelection });
-          signupForceGoogleSelection = false;
-          signupBusy = false; signupStage = "google"; applyInstallationState(state); renderSignup(); pollInstallationState();
-        } catch (reason) { signupFailure(reason, "Relay could not open sign-in. Try again."); }
-      });
+      document.getElementById("suSignIn")?.addEventListener("click", startInstallationSignIn);
       return;
     }
     if (signupStage === "email") {
@@ -17473,7 +17575,8 @@
       payload.ui = { ...payload.ui, onboardingRequired:tutorial, onboardingVersion:2,
         completedOnboardingVersion:signupStage === "network" ? 2 : 0,
         networkOnboarding:{ required:signupStage === "network" || data.networkRequired === true, checking:false },
-        firstRelayStatus:data.firstRelayStatus || "waiting", firstRelayId:data.firstRelayId || "", firstLink:data.firstLink || null };
+        firstRelayStatus:data.firstRelayStatus || "waiting", firstRelayId:data.firstRelayId || "", firstLink:data.firstLink || null,
+        firstRelayKind:data.firstRelayKind === "link" ? "link" : "hello", agentInstalled:data.agentInstalled === true };
       renderAll();
     };
   }
@@ -17532,6 +17635,7 @@
   }
   function applyView() {
     syncChatTypingContext();
+    syncRelayAnyoneTip();
     // Visibility is committed only after renderAll has built the destination.
     // Toggle layout first; retarget the native/card frame last so its first
     // animated frame already contains the final view rather than a blank pane.
@@ -17734,6 +17838,7 @@
     cardEl.classList.toggle("signup", needsSignup);
     signupViewEl?.classList.toggle("gone", !needsSignup);
     if (needsSignup) {
+      syncRelayAnyoneTip();
       if (paintSurface) {
         renderSignup();
         surfacePaintCount += 1;
@@ -17752,6 +17857,7 @@
     signupNote = "";
     signupStateLoaded = false;
     signupInitializationFailed = false;
+    signupAutoSignInStarted = false;
     // Feature policy arrives with the first main-process payload, after the
     // static HTML has already painted. Reconcile the tab strip on every
     // payload-driven render so a disabled surface never survives as stale
@@ -18028,6 +18134,7 @@
   // pointer enters the card again.
   if (window.relay.onShown) window.relay.onShown(() => {
     interactive = false;
+    relayAnyoneTip.reset();
     syncContinuousMotion();
     flushDeferredSurfaceRender();
   });

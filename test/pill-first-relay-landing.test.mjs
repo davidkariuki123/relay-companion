@@ -29,6 +29,18 @@ test("before the send, the handoff screen stays; after it, the chapter renders",
   assert.match(html, /signupStage = "first-relay";/);
 });
 
+// GET STARTED (2026-09-13): an account with no inviter has nobody to say
+// hello to, so the handoff asks the agent for a link instead. The title and
+// the eyebrow are the invite path's; only the ask and the progress line change.
+test("with no inviter, the handoff asks for a link and waits for it", () => {
+  const stage = slice('if (signupStage === "first-relay") {', 'if (signupStage === "restart-required") {');
+  assert.match(stage, /const linkFirst = payload\.ui\?\.firstRelayKind === "link";/);
+  assert.match(stage, /Ask your agent to <strong>make you a relay about something you’re working on<\/strong>\. It gives you a link and the message to send with it, and the other person needs nothing installed\./);
+  assert.match(stage, /linkFirst \? "This screen updates when your link is ready\."/);
+  assert.match(stage, /JSON\.stringify\(\[status, signupBusy, signupError, linkFirst\]\)/, "the kind is part of the render signature");
+  assert.match(stage, /"Your first Relay"/);
+});
+
 test("the celebration auto-advances after ten seconds and Continue skips the wait", () => {
   const chapter = slice("  function renderFirstRelayChapter() {", "  // OPEN RELAY (2026-09-13)");
   assert.match(html, /function firstRelayCelebrationMs\(\) \{ return Number\(window\.__relayCelebrationMs\) > 0 \? Number\(window\.__relayCelebrationMs\) : 10000; \}/);
@@ -55,7 +67,14 @@ test("Your first link asks for a relay in the person's own words, then shows the
   assert.match(chapter, /id="suLinkSkip" type="button">Skip for now</);
   assert.match(chapter, /Your link is ready\./);
   assert.match(chapter, /id="suFirstLinkText">\$\{esc\(shareText\)\}/);
-  assert.match(chapter, /Send it wherever you talk to them\. Their reply lands here as its own chat\./);
+  assert.match(chapter, /Send it wherever you talk to them\. They can ask their Claude Code or Codex to reply\. Their reply will appear inside your Relay app, even if they don’t have Relay\./);
+  assert.doesNotMatch(chapter, /Their reply lands here as its own chat\./);
+  // A link that was itself the first Relay wears the celebration on this
+  // screen, since it never had one of its own.
+  assert.match(chapter, /const firstRelayWasLink = link\.relayId === payload\.ui\?\.firstRelayId;/);
+  assert.match(chapter, /su-first-link\$\{firstRelayWasLink \? " su-first-relay-sent" : ""\}/);
+  assert.match(chapter, /\$\{firstRelayWasLink \? '<div class="su-relay-moment" aria-hidden="true">/);
+  assert.match(chapter, /\$\{firstRelayWasLink \? "Your first Relay" : "Your first link"\}/);
   assert.match(chapter, /id="suLinkCopy"[^>]*>\$\{chapter\.linkCopied \? "Copied" : "Copy message"\}/);
   assert.match(chapter, /id="suLinkContinue"[^>]*>Continue</);
   assert.match(chapter, /suLinkContinue"\)\?\.addEventListener\("click", \(\) => advanceFirstRelayChapter\("network"\)\)/);

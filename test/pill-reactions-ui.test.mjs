@@ -49,16 +49,23 @@ test("successful reaction polls repaint only when reaction state actually change
   assert.match(push, /reactionStateFingerprint\(r\.reactions\)/);
 });
 
-test("the picker unfurls five emoji plus the expansion set on a specific conversation bubble", () => {
-  assert.ok(html.includes('const RX_PRIMARY = ["👍", "❤️", "😂", "🎉", "👀"]'));
-  for (const token of ["rx-msg-picker", "rx-face", "rx-unfurl", "rx-more", "scaleX(.04)", "var(--spring)"]) {
-    assert.ok(html.includes(token), token);
-  }
-  assert.match(html, /function messageReactionPickerHtml\(id\)/);
-  assert.match(html, /title="React to this message" aria-label="React to this message"/);
-  assert.match(html, /you reacted <span class="emoji">\$\{esc\(note\.emoji\)\}<\/span> — sent to the conversation/);
-  assert.match(html, /data-rx-undo=/);
-  assert.match(html, /commitReaction\(id, emoji, "remove"\)/);
+test("the message menu exposes the approved six reactions on its own message", () => {
+  const source = between(html, "  function messageReactionPickerHtml(id)", "  function reactionConfirmationHtml");
+  const render = Function("REACTIONS_ENABLED", "RX_PRIMARY", "esc", `${source}; return messageReactionPickerHtml;`)(true, ["👍", "❤️", "😂", "🙌", "‼️", "🙏"], String);
+  const menu = render("relay_target");
+  assert.equal((menu.match(/data-rx-pick="relay_target"/g) || []).length, 6);
+  assert.match(menu, /aria-label="React ‼️"/);
+  assert.doesNotMatch(menu, /rx-face|rx-unfurl/);
+  assert.match(html, /canReact \? messageReactionPickerHtml\(m\.id\) : ""/);
+});
+
+test("reaction failures remain visible and successful mutations retain their explicit action", async () => {
+  const source = between(html, "  async function commitReaction(", "  function dismissReactionPickers(");
+  const notes = [], calls = [];
+  const commit = Function("window", "setRowNote", "clearRowNote", "reactionMutationIds", `${source}; return commitReaction;`)({relay:{react:async (...args) => { calls.push(args); return {ok:false,error:"Offline"}; }}}, (...args) => notes.push(args), () => {}, new Set());
+  await commit("message-one", "👍", "remove");
+  assert.deepEqual(calls, [["message-one", "👍", "remove"]]);
+  assert.deepEqual(notes, [["message-one", "Offline", "err"]]);
 });
 
 test("the picker lifecycle dismisses on outside pointer, Escape, scroll, and replacement", () => {
@@ -144,15 +151,14 @@ test("room and view transitions explicitly retire an open picker", () => {
 });
 
 test("Task, reader and AI-runner surfaces never render a reaction trigger", () => {
-  assert.match(html, /const REACTIONS_ENABLED = false;/, "reactions stay implemented but ship behind the reversible off switch");
+  assert.match(html, /const REACTIONS_ENABLED = true;/, "conversation reactions are enabled");
   const reader = between(html, "function renderReader()", "// ---------- the Tasks board:");
   assert.doesNotMatch(reader, /messageReactionPickerHtml|data-rx-face|reactionConfirmationHtml|wireReactionControls/);
 
   const conversation = between(html, "const rowsHtml = timeline.map", "// Chat order: history above");
-  assert.match(conversation, /\$\{!REACTIONS_ENABLED \|\| m\.request \? "" : messageReactionPickerHtml\(m\.id\)\}/);
-  assert.match(conversation, /\$\{!REACTIONS_ENABLED \|\| m\.request \? "" : reactionConfirmationHtml\(m\.id\)\}/);
-  assert.match(html, /for \(const event of \(!REACTIONS_ENABLED \|\| message\.request\) \? \[\] :/, "disabled and Task reactions do not enter the timeline");
-  assert.match(conversation, /const aggregates = \(!REACTIONS_ENABLED \|\| m\.request\) \? \[\] :/, "disabled and Task bubbles do not show reaction badges");
+  assert.match(conversation, /const canReact = REACTIONS_ENABLED && !m\.request && !m\.ownedAgent && !m\.pending/);
+  assert.match(conversation, /!m\.deletedAt && !attachmentOnly && !editingMessage && !groupPostingBlocked/);
+  assert.doesNotMatch(conversation, /reactionConfirmationHtml\(m\.id\)/);
   assert.match(conversation, /<span class="kchip">Task<\/span>/, "Task roots can remain visible as bubbles");
 
   const requests = between(html, "function renderTasksBoard()", "function wireRequestDetail()");
@@ -160,11 +166,10 @@ test("Task, reader and AI-runner surfaces never render a reaction trigger", () =
   assert.equal((html.match(/wireReactionControls\(thHistoryEl\)/g) || []).length, 1);
 });
 
-test("B2 keeps both truths: aggregate badges cling while add events enter the chronological stream", () => {
-  assert.match(html, /\.rx-badges \{ position:absolute; bottom:-12px/);
-  assert.match(html, /class="rx-badge\$\{reaction\.reactedByMe/);
-  assert.match(html, /chronological\.sort\(\(a, b\) => new Date\(a\.at \|\| 0\) - new Date\(b\.at \|\| 0\)\)/);
-  assert.match(html, /if \(event\.action === "add"\) chronological\.push/);
-  assert.match(html, /\$\{esc\(label\)\}<\/span> reacted <span class="emoji">\$\{esc\(event\.emoji\)\}/);
+test("attached badges wrap, identify your reaction, and add no chronological chat rows", () => {
+  assert.match(html, /\.rx-badges \{ position:relative; bottom:-20px;[^}]*flex-wrap:wrap/);
+  assert.match(html, /\.rx-badge\.mine \{ border-color:var\(--edge-accent\)/);
+  assert.match(html, /aria-pressed="\$\{reaction\.reactedByMe/);
+  assert.doesNotMatch(html, /chronological\.push\(\{ kind:"reaction"/);
   assert.match(html, /data-mine="\$\{reaction\.reactedByMe \? "1" : "0"\}"/);
 });

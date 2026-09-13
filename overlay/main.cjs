@@ -283,6 +283,12 @@ let soundsMuted = overlayPrefs.soundsMuted === true;
 // agent or skip. Completion belongs to the account, never the whole device.
 const COMPANION_ONBOARDING_VERSION = 2;
 const firstRelayOnboarding = createFirstRelayOnboarding();
+// Accounts whose sign-in (onConnected) or Switch Account (pairWithCode) is
+// still reading their history. The chapter is reported complete for them until
+// the answer is in, and pushInboxNow delivers nothing for them meanwhile, so
+// neither a returning sender nor a brand-new account sees another screen
+// (the tutorial, the inbox, Grow your network) flash before the decided one.
+const signInHistoryPending = new Set();
 let onboardingVersions = overlayPrefs.onboardingVersions && typeof overlayPrefs.onboardingVersions === "object"
   ? { ...overlayPrefs.onboardingVersions }
   : {};
@@ -620,13 +626,25 @@ function installationAuthorizationController() {
           slackChatsCache = [];
           canonicalChatsFingerprint = "";
           canonicalChatsLoadedOnce = null;
-          // Explicit desktop sign-in restores access; it is not the agent's
-          // first-send tutorial. Persist before refreshing so no tutorial flashes.
+          // A desktop sign-in is either an existing sender restoring access or
+          // a brand-new account set up from sendrelays.com, and only the
+          // account's history can tell them apart. Hold the chapter back (never
+          // flash it) until the sent page has been read, then decide once.
           const signedInKey = onboardingAccountKey({ userId: registration.user.id, email: registration.user.email });
-          onboardingVersions[signedInKey] = COMPANION_ONBOARDING_VERSION;
-          writeOverlayPrefs();
-          await restartCompanionDaemon();
-          await Promise.allSettled([refreshSent(), refreshContacts(), refreshCanonicalChats()]);
+          signInHistoryPending.add(signedInKey);
+          try {
+            await restartCompanionDaemon();
+            await Promise.allSettled([refreshSent(), refreshContacts(), refreshCanonicalChats()]);
+          } finally {
+            // Only a confirmed empty history opens the first-send chapter. A
+            // history with sends, or one that could not be checked, keeps the
+            // sign-in as it was: straight to Relay, no tutorial.
+            if (firstRelayOnboarding.status(signedInKey) !== "waiting") {
+              onboardingVersions[signedInKey] = COMPANION_ONBOARDING_VERSION;
+              writeOverlayPrefs();
+            }
+            signInHistoryPending.delete(signedInKey);
+          }
           await pushInbox(true);
         },
       }))
@@ -1143,6 +1161,34 @@ function onboardingVersionFor(accountValue = account()) {
   return key ? Math.max(0, Number(onboardingVersions[key]) || 0) : 0;
 }
 
+// The setup-intent marker, written by the thin installer (bootstrap/relay-setup.cjs
+// writeSetupIntent) when it opens the pill signed out for a person who will
+// sign in here: sendrelays.com's Get started. A fresh marker with no paired
+// account lets the renderer start that sign-in without a click. It never
+// carries a credential, and it is consumed by the sign-in that used it. The
+// freshness window keeps a forgotten marker from opening a browser weeks
+// later on some unrelated sign-out.
+const SETUP_INTENT_FILE = "setup-intent.json";
+const SETUP_INTENT_FRESH_MS = 30 * 60 * 1000;
+function relayConfigDir() {
+  return process.env.RELAY_CONFIG_DIR || path.join(os.homedir(), ".relay");
+}
+function readSetupIntent(configDir, now = Date.now()) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(path.join(configDir, SETUP_INTENT_FILE), "utf8"));
+    if (parsed?.agentInstalled !== true) return null;
+    const age = now - Date.parse(parsed.at);
+    // A future timestamp is not a fresh marker; it is a malformed one.
+    if (!(age >= 0 && age <= SETUP_INTENT_FRESH_MS)) return null;
+    return { at: String(parsed.at), version: String(parsed.version || "") };
+  } catch {
+    return null;
+  }
+}
+function consumeSetupIntent(configDir = relayConfigDir()) {
+  try { fs.rmSync(path.join(configDir, SETUP_INTENT_FILE), { force: true }); } catch {}
+}
+
 function pillVersion() {
   try {
     return String(require("../package.json").version || "");
@@ -1370,12 +1416,32 @@ async function pairWithCode(input) {
     });
     persistPairedIdentity(encryptionIdentity.state, res);
     accountMod.persistPairedAccount({ deviceName, registration: res });
-    await new RelayClient().ensureE2eeReady();
-    notifications.resetCompanionStateForAccount(
-      { user: res.user, deviceId: res.deviceId },
-      { statePath: STATE_PATH },
-    );
-    const daemon = await restartCompanionDaemon();
+    // The same history gate as a desktop sign-in (onConnected): the account is
+    // current from this line on, so its first-send chapter is decided from its
+    // sent page before anything paints for it. Otherwise an existing account
+    // flashes the "Checking..." handoff over the You page until the relaunch,
+    // and the fresh process repeats it until its own first sent fetch.
+    const switchedKey = onboardingAccountKey({ userId: res.user.id, email: res.user.email });
+    signInHistoryPending.add(switchedKey);
+    let daemon;
+    try {
+      await new RelayClient().ensureE2eeReady();
+      notifications.resetCompanionStateForAccount(
+        { user: res.user, deviceId: res.deviceId },
+        { statePath: STATE_PATH },
+      );
+      daemon = await restartCompanionDaemon();
+      await refreshSent();
+    } finally {
+      // Persisted before the relaunch so the fresh process does not re-check.
+      // Only a confirmed empty history opens the chapter, as in onConnected.
+      if (firstRelayOnboarding.status(switchedKey) !== "waiting") {
+        onboardingVersions[switchedKey] = COMPANION_ONBOARDING_VERSION;
+        writeOverlayPrefs();
+      }
+      signInHistoryPending.delete(switchedKey);
+    }
+    await pushInbox(true);
     relaunchPillSoon({ delayMs: ACCOUNT_CHANGE_RELAUNCH_DELAY_MS });
     return { ok: true, email: (res.user && res.user.email) || "", daemon };
   } catch (error) {
@@ -1867,8 +1933,14 @@ function onboardingProtocolState() {
     const current = readConfigFile();
     if (!account().userId || config.account?.relayUserId !== account().userId
       || config.apiUrl !== (process.env.RELAY_API_URL || current.apiUrl || "https://api.sendrelays.com")) return null;
-    return { tutorial: config.tutorial, openingPreference: config.openingPreference };
+    return { tutorial: config.tutorial, openingPreference: config.openingPreference, inviter: config.inviter || null };
   } catch { return null; }
+}
+// The first-send chapter has two shapes. An invited person hellos their
+// inviter; a person set up from sendrelays.com has nobody on Relay yet, so
+// their first Relay is a share link for someone who is not on it.
+function firstRelayKindFor(protocolState) {
+  return String(protocolState?.inviter?.relayUserId || "").trim() ? "hello" : "link";
 }
 // The tutorial's second half: the person's first link and the message to send
 // with it. Sent items carry shareText from the server; an older server's item
@@ -2262,7 +2334,17 @@ function buildPayload() {
   const currentAccount = account();
   void networkOnboarding.refresh();
   const networkOnboardingState = networkOnboarding.status();
-  const completedOnboardingVersion = onboardingVersionFor(currentAccount);
+  // A sign-in still reading its history reports the chapter complete for now
+  // (and pushInboxNow delivers nothing for it); onConnected or pairWithCode
+  // settles the real version once the sent page has answered.
+  const completedOnboardingVersion = signInHistoryPending.has(onboardingAccountKey(currentAccount))
+    ? COMPANION_ONBOARDING_VERSION
+    : onboardingVersionFor(currentAccount);
+  const protocolState = onboardingProtocolState();
+  // A marker left by an account that paired without the pill's sign-in is
+  // stale: remove it so a later sign-out cannot replay the auto sign-in.
+  if (currentAccount.paired) consumeSetupIntent();
+  const setupIntent = currentAccount.paired ? null : readSetupIntent(relayConfigDir());
   return {
     account: currentAccount,
     ui: {
@@ -2281,7 +2363,13 @@ function buildPayload() {
       firstRelayStatus: firstRelayOnboarding.status(onboardingAccountKey(currentAccount)),
       firstRelayId: firstRelayOnboarding.relayId(onboardingAccountKey(currentAccount)),
       firstLink: firstLinkForOnboarding(),
-      openingPreference: onboardingProtocolState()?.openingPreference || null,
+      // "hello" when an inviter is waiting for the first Relay, "link" when
+      // the person has nobody on Relay yet and starts with a share link.
+      firstRelayKind: firstRelayKindFor(protocolState),
+      // The thin installer opened this signed-out pill moments ago for a person
+      // who signs in here: the renderer may start that sign-in without a click.
+      agentInstalled: Boolean(setupIntent),
+      openingPreference: protocolState?.openingPreference || null,
       // The renderer's playTink gate. Sound preferences are not in the push
       // signature, so relay:setSoundsMuted explicitly forces a push.
       soundsMuted,
@@ -2538,7 +2626,10 @@ function pumpAttention(prebuiltPayload = null) {
   const payload = prebuiltPayload || buildPayload();
   // Setup owns the card until it finishes. Keep arrivals pending without
   // starting a presentation that would squeeze the invite page into a banner.
+  // A sign-in still deciding its first screen masks onboardingRequired, so it
+  // is checked on its own: the welcome relay waits for the decided screen.
   if (payload.account?.paired === false || payload.ui?.onboardingRequired === true
+      || signInHistoryPending.has(onboardingAccountKey(payload.account))
       || ["unavailable", "missing", "corrupt"].includes(payload.account?.credentialStatus)) return false;
   const unreadRows = new Map(
     visibleRelayRows(payload.relays).filter((r) => r.unread).map((r) => [r.id, r]),
@@ -2669,6 +2760,15 @@ function pushInbox(force) {
 }
 async function pushInboxNow(force) {
   if (!win || win.isDestroyed()) return;
+  // An account whose history is still being read has not decided its first
+  // screen. Deliver nothing for it, forced or not: the state.json write and
+  // the daemon restart that a sign-in performs would otherwise paint the
+  // inbox, and a new account's server-side onboarding answer would paint Grow
+  // your network, seconds before the handoff replaces them. The renderer keeps
+  // its "Finishing setup" (or You page) until the forced push that ends the
+  // decision, which is the first payload it sees for the account. Returning
+  // before lastStateStatSig advances keeps the safety poll owing a re-push.
+  if (signInHistoryPending.has(onboardingAccountKey())) return;
   // Record the state.json generation BEFORE reading it: a write that lands
   // mid-read leaves the stat differing on the next safety tick, so the racing
   // change is re-pushed rather than silently skipped.
@@ -2766,6 +2866,7 @@ async function pushInboxNow(force) {
     outbox: (payload.outbox || []).map((e) => [e.id, e.state, e.attempts, e.nextAttemptAt, e.relayId, e.lastError]),
     account: [payload.account.paired, payload.account.email],
     onboarding: [payload.ui.onboardingRequired, payload.ui.networkOnboarding, payload.ui.completedOnboardingVersion, payload.ui.firstRelayStatus, payload.ui.firstRelayId, payload.ui.openingPreference,
+      payload.ui.firstRelayKind, payload.ui.agentInstalled,
       payload.ui.firstLink ? [payload.ui.firstLink.relayId, payload.ui.firstLink.state, payload.ui.firstLink.shareText] : null],
     pendingOpen: payload.pendingOpen
       ? [payload.pendingOpen.relayId, payload.pendingOpen.title, payload.pendingOpen.forHuman, payload.pendingOpen.error]
@@ -9803,8 +9904,12 @@ ipcMain.handle("relay:copyTutorialPrompt", (_event, expectedUserId) => {
   clipboard.writeText(require("./returning-tutorial-prompt.cjs")(`${webBase()}/llm_guide.md`));
   return { ok: true };
 });
-ipcMain.handle("relay:installationAuthSignIn", (_event, input = {}) => installationAuthorizationIpc(async () =>
-  (await installationAuthorizationController()).signIn({ forceAccountSelection: input?.forceAccountSelection === true })));
+ipcMain.handle("relay:installationAuthSignIn", (_event, input = {}) => installationAuthorizationIpc(async () => {
+  // The setup-intent marker asked for exactly one sign-in start. Whoever
+  // starts it, the renderer's auto start or a click, has used it up.
+  consumeSetupIntent();
+  return (await installationAuthorizationController()).signIn({ forceAccountSelection: input?.forceAccountSelection === true });
+}));
 ipcMain.handle("relay:installationAuthGoogle", (_event, input = {}) => installationAuthorizationIpc(async () =>
   (await installationAuthorizationController()).google({
     forceAccountSelection: input?.forceAccountSelection === true,
