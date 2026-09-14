@@ -187,10 +187,16 @@ function archiveEntryList(sourceRoot, entryRoot) {
   const entries = [];
   function visit(absolute, relative) {
     if (/[\r\n\0]/.test(relative)) throw new Error(`Runtime archive path contains a control character: ${relative}`);
-    entries.push(relative.replaceAll(path.sep, "/"));
     const stat = fs.lstatSync(absolute);
     if (stat.isDirectory()) {
-      for (const name of fs.readdirSync(absolute).sort()) visit(path.join(absolute, name), path.join(relative, name));
+      const names = fs.readdirSync(absolute).sort();
+      // Tar creates parent directories when extracting files. Preserve empty
+      // directories, but omit redundant parent entries so stock installers
+      // with the original 1 MiB listing limit can reach the buffer-limit fix.
+      if (!names.length) entries.push(relative.replaceAll(path.sep, "/"));
+      for (const name of names) visit(path.join(absolute, name), path.join(relative, name));
+    } else {
+      entries.push(relative.replaceAll(path.sep, "/"));
     }
   }
   visit(absoluteRoot, entryRoot);
@@ -304,6 +310,18 @@ export function createDeterministicArchive({ sourceRoot, entryRoot = "node_modul
   }
 }
 
+export function verifyLegacyArchiveListing(archivePath) {
+  for (const mode of ["-tzf", "-tvzf"]) {
+    const result = spawnSync("tar", [mode, path.basename(archivePath)], {
+      cwd: path.dirname(archivePath), encoding: "utf8", windowsHide: true,
+      maxBuffer: 1024 * 1024,
+    });
+    if (result.error || result.status !== 0) {
+      throw new Error(`Runtime archive cannot be inspected by existing installers: ${result.error?.message || result.stderr}`);
+    }
+  }
+}
+
 function sha512File(file) {
   const hash = crypto.createHash("sha512");
   const fd = fs.openSync(file, "r");
@@ -391,6 +409,7 @@ export function buildRuntimeArtifact({
     const filename = `relay-runtime-${packageJson.version}-${platformKey}.tar.gz`;
     const artifactPath = path.join(destination, filename);
     createDeterministicArchive({ sourceRoot: temporary, entryRoot: "node_modules", outputPath: artifactPath });
+    verifyLegacyArchiveListing(artifactPath);
     if (fs.statSync(artifactPath).size > 300 * 1024 * 1024) {
       throw new Error("Relay runtime artifact exceeds the 300 MiB no-bloat budget");
     }

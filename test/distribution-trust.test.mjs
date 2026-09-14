@@ -30,6 +30,7 @@ import { verifyRuntimeManifestEnvelope } from "../scripts/verify-runtime-manifes
 import {
   captureInternalLinks,
   createDeterministicArchive,
+  verifyLegacyArchiveListing,
   deterministicSbomSerial,
   npmRuntimeInvocation,
 } from "../scripts/build-runtime-artifact.mjs";
@@ -887,19 +888,20 @@ test("artifact construction signs a compact internal-link map and refuses escapi
 test("bootstrap inspects complete runtime archive listings larger than one MiB", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-large-archive-"));
   try {
-    const filename = `relay-runtime-${"x".repeat(180)}.txt`;
-    fs.writeFileSync(path.join(root, filename), "runtime bytes");
-    // Repeat one file to exercise real tar output without creating thousands
-    // of filesystem entries. Both listings exceed Node's default 1 MiB buffer.
-    fs.writeFileSync(path.join(root, "entries.txt"), `${filename}\n`.repeat(7000));
+    const filenames = Array.from({ length: 7000 }, (_, index) => `relay-runtime-${"x".repeat(180)}-${index}.txt`);
+    // Distinct files avoid GNU tar representing repeated entries as hard links.
+    // Both real listings exceed Node's default 1 MiB buffer.
+    for (const filename of filenames) fs.writeFileSync(path.join(root, filename), "runtime bytes");
+    fs.writeFileSync(path.join(root, "entries.txt"), `${filenames.join("\n")}\n`);
     const packed = spawnSync("tar", ["-czf", "runtime.tar.gz", "-T", "entries.txt"], {
       cwd: root, encoding: "utf8", windowsHide: true,
     });
     assert.equal(packed.status, 0, packed.error?.message || packed.stderr);
     assert.doesNotThrow(() => validateArchiveListing(path.join(root, "runtime.tar.gz")));
+    assert.throws(() => verifyLegacyArchiveListing(path.join(root, "runtime.tar.gz")), /existing installers/);
 
     if (process.platform !== "win32") {
-      fs.symlinkSync(filename, path.join(root, "unsafe-link"));
+      fs.symlinkSync(filenames[0], path.join(root, "unsafe-link"));
       fs.appendFileSync(path.join(root, "entries.txt"), "unsafe-link\n");
       const unsafe = spawnSync("tar", ["-czf", "unsafe.tar.gz", "-T", "entries.txt"], {
         cwd: root, encoding: "utf8",
@@ -946,6 +948,7 @@ test("same runtime tree builds byte-identical archives and SBOM identities twice
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-runtime-deterministic-"));
   try {
     fs.mkdirSync(path.join(root, "node_modules", "relay-companion", "bin"), { recursive: true });
+    fs.mkdirSync(path.join(root, "node_modules", "relay-companion", "empty"));
     fs.writeFileSync(path.join(root, "node_modules", "relay-companion", "bin", "relay.js"), "console.log('relay')\n");
     fs.writeFileSync(path.join(root, "node_modules", "relay-companion", "package.json"), JSON.stringify({ version }));
     const first = path.join(root, "first.tar.gz");
@@ -959,6 +962,18 @@ test("same runtime tree builds byte-identical archives and SBOM identities twice
     const listed = spawnSync("tar", ["-tzf", path.basename(first)], { cwd: root, encoding: "utf8" });
     assert.equal(listed.status, 0, listed.stderr || listed.stdout);
     assert.match(listed.stdout, /node_modules\/relay-companion\/bin\/relay\.js/);
+    assert.deepEqual(listed.stdout.trim().split(/\r?\n/), [
+      "node_modules/relay-companion/bin/relay.js",
+      "node_modules/relay-companion/empty/",
+      "node_modules/relay-companion/package.json",
+    ]);
+    assert.doesNotThrow(() => verifyLegacyArchiveListing(first));
+    const extracted = path.join(root, "extracted");
+    fs.mkdirSync(extracted);
+    const unpacked = spawnSync("tar", ["-xzf", path.basename(first), "-C", "extracted"], { cwd: root, encoding: "utf8" });
+    assert.equal(unpacked.status, 0, unpacked.error?.message || unpacked.stderr);
+    assert.equal(fs.readFileSync(path.join(extracted, "node_modules", "relay-companion", "bin", "relay.js"), "utf8"), "console.log('relay')\n");
+    assert.ok(fs.statSync(path.join(extracted, "node_modules", "relay-companion", "empty")).isDirectory());
     const identity = { version, platformKey: "darwin-arm64", sourceSha, dependencyLockSha512: "sha512-lock" };
     assert.equal(deterministicSbomSerial(identity), deterministicSbomSerial(identity));
     const builder = fs.readFileSync(new URL("../scripts/build-runtime-artifact.mjs", import.meta.url), "utf8");
@@ -2137,7 +2152,6 @@ test("public release owns immutable publication while private promotion owns fle
     assert.doesNotMatch(gate, /tar -xzf "\$runtime_prefix\/runtime\.tar\.gz"/);
     assert.match(gate, /verify-installed-runtime\.mjs/);
     assert.match(gate, /assert-runtime-capabilities\.mjs/);
-    assert.match(promote, /assert-runtime-capabilities\.mjs/);
     assert.match(promote, /thin-installer\) TAG=installer/);
     assert.match(promote, /thin installer must never replace bridge latest/);
     assert.match(promote, /companion-releases\/stable\/manifest\.json/);
@@ -2150,7 +2164,11 @@ test("public release owns immutable publication while private promotion owns fle
   for (const workflow of ["promote-dev-companion.yml", "promote-companion-dev.yml", "promote-staging.yml"]) {
     const path = new URL(`../../../.github/workflows/${workflow}`, import.meta.url);
     if (!fs.existsSync(path)) continue;
-    const source = fs.readFileSync(path, "utf8");
+    // Staging verifies the Companion through the shared Release candidate gate
+    // rather than a private copy of these steps.
+    const source = workflow === "promote-staging.yml"
+      ? fs.readFileSync(new URL("../../../.github/workflows/release-candidate-gate.yml", import.meta.url), "utf8")
+      : fs.readFileSync(path, "utf8");
     assert.match(source, /verify-runtime-manifest\.mjs/);
     assert.match(source, /assert-runtime-capabilities\.mjs/);
     assert.match(source, /relay-runtime-\$VERSION-linux-x64\.tar\.gz/);
