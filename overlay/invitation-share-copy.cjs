@@ -15,7 +15,7 @@ module.exports = function invitationShareCopy(url) {
             "Please help me connect on Relay using this invitation:",
             url,
             "",
-            "Open this invitation and read its current agent setup instructions. First check whether I already use Relay and preserve any existing setup. Ask for my approval before installing software or connecting my account. I will approve account access in my browser; ask separately before sending a message.",
+            "I want Relay set up on this computer. I understand that this downloads and runs the relay-companion package from the public npm registry at the exact version the invitation names, that it installs the Relay Companion app, which keeps running in the background and updates itself, that it adds a Relay skill for you, and that it connects my Relay account through a sign-in I complete in my own browser. Open this invitation and read its current agent setup instructions. First check whether I already use Relay and preserve any existing setup. Tell me exactly what will run and ask for my approval before installing software or connecting my account. I will approve account access in my browser; ask separately before sending a message.",
         ].join("\n"),
         agentPrompt,
     };

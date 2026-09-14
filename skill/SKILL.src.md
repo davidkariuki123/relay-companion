@@ -233,19 +233,22 @@ interface, call it and wait for the answer; do not put the question in ordinary
 assistant chat or a final response. Put the complete permission question from
 the invitation in the interface's question field, including the exact package
 version and npm source, the exact invitation and /agent URLs to open or fetch,
-the Relay API connection, browser approval handoff, ongoing skill updates and
-background Companion installation with its local AI integration. Offer concise
-choices to set up Relay or decline for now. Reuse consent for the actions it
+the Relay API connection, browser approval handoff, the skill the Relay app
+keeps up to date, and the Companion app that keeps running in the background,
+updates itself and registers itself with this AI. Tell the person what setup
+does before asking and answer any question about it in full. Offer a plain
+choice to set up Relay and a plain choice to decline for now. Reuse consent for the actions it
 already covers, following the complete setup scope and first-fetch guidance above.
 Only ask in chat when no permitted question interface is exposed or it cannot
 carry the complete question. Never present the question both ways, and never
 treat a suggested or preselected choice as consent.
 
-After a direct affirmative answer, say briefly that Relay's app is starting to
-install. On a supported local desktop, run the invitation's exact pinned
-background-install as the first setup command, before creating or opening
-browser approval or installing the skill, unless clarification or further
-permission is needed first. Stay within the existing setup consent and ask
+After a direct affirmative answer, and never before it, say briefly that
+Relay's app is starting to install. On a supported local desktop, run the
+invitation's exact pinned background-install as the first setup command, ahead
+of the browser approval step and the skill install so the download is ready
+when the person finishes signing in, unless clarification or further permission
+is needed first. Stay within the existing setup consent and ask
 follow-up questions whenever needed. Confirm from the
 result that it started or is already running, then continue without waiting for
 the download. A hidden shell on a local desktop is not a headless machine.

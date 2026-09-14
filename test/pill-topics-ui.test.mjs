@@ -127,7 +127,7 @@ test("an open topic has three faces — Messages, Members, Mandate — and the l
   // Every face is chosen by pane; members (with leave/archive) and mandate (with
   // the agent-posting setting) never render on the Messages face.
   assert.match(html, /topicsState\.pane === "members" \? `\$\{topicMembersHtml\(d\)\}\$\{leave\}`/);
-  assert.match(html, /: `\$\{current \? topicComposeHtml\(\) : ""\}\$\{notice\}\$\{lanes\}\$\{posts\}\$\{more\}`\)/);
+  assert.match(html, /: `\$\{current \? topicComposeHtml\(\) : ""\}\$\{notice\}\$\{lanes\}\$\{readable \? topicIncomingHtml\(\) : ""\}\$\{posts\}\$\{more\}`\)/);
   // Opening another topic lands on Messages again.
   assert.match(html, /Object\.assign\(topicsState, \{ openId:id,[^\n]*pane:"messages", replying:null, notice:"", openPostId:null, postDetailsOpen:false \}\);/);
 });
@@ -168,6 +168,34 @@ test("a room quotes the Topic post a Relay answers, from the server's snapshot, 
     'inReplyToTopicPost: packet.inReplyToTopicPost || local.inReplyToTopicPost || null,',
     'r.inReplyToTopicPost ? r.inReplyToTopicPost.postId : "",',
   ]) assert.ok(main.includes(carrier), carrier);
+});
+
+test("new posts reach an open board as an 'N new posts' pill, never by redrawing the list under the reader", () => {
+  const check = html.slice(html.indexOf("async function checkTopicIncoming()"), html.indexOf("async function showTopicIncoming()"));
+  // Asks only for what is newer than the board, only while the board is on screen.
+  assert.match(check, /if \(activeView !== "topics" \|\| document\.visibilityState === "hidden"\) return;/);
+  assert.match(check, /topicCall\(window\.relay\.topicPosts, id, newest \? \{ since: newest \} : \{\}\)/);
+  // A post the board already shows (including the person's own, from any surface) is never counted twice.
+  assert.match(check, /filter\(\(p\) => p\?\.id && !known\.has\(p\.id\)\)/);
+  // Arrival repaints the pill alone: no renderTopics, so drafts and scroll stay put.
+  assert.match(check, /paintTopicIncoming\(\);/);
+  assert.doesNotMatch(check, /renderTopics\(\)/);
+  assert.match(html, /function paintTopicIncoming\(\) \{[\s\S]*?slot\.outerHTML = topicIncomingHtml\(\);/);
+  // The pill counts what the current lane would show.
+  assert.match(html, /function topicIncomingCount\(\) \{[\s\S]*?topicsState\.lane === "agent" \|\| String\(p\.forHuman \|\| ""\)\.trim\(\)/);
+  // Tapping it is the human read: posts go on the board, the board lands at its top, the watermark moves.
+  const show = html.slice(html.indexOf("async function showTopicIncoming()"), html.indexOf("function closeTopic()"));
+  assert.match(show, /if \(topicsState\.incomingGap\) \{\s*await loadTopicPosts\(\);/);
+  assert.match(show, /topicCall\(window\.relay\.topicSeen, id\)/);
+  assert.match(show, /if \(scrollEl\) scrollEl\.scrollTop = 0;/);
+  // Triggers: a short timer, the quiet list refresh, and the window coming back.
+  assert.match(html, /setInterval\(\(\) => \{ if \(payload\.features\?\.topics === true\) checkTopicIncoming\(\); \}, 20_000\);/);
+  assert.match(html, /loadTopics\(\{ quiet:true \}\)\.then\(checkTopicIncoming\)/);
+  assert.match(html, /document\.addEventListener\("visibilitychange", \(\) => \{ if \(payload\.features\?\.topics === true\) checkTopicIncoming\(\); \}\);/);
+  // Opening, closing, or a fresh first page clears what was held.
+  assert.match(html, /async function openTopic\(id\) \{\s*Object\.assign\(topicsState, \{[^}]*incoming:\[\], incomingGap:false/);
+  assert.match(html, /function closeTopic\(\) \{\s*Object\.assign\(topicsState, \{[^}]*incoming:\[\], incomingGap:false/);
+  assert.match(html, /if \(!append\) Object\.assign\(topicsState, \{ incoming:\[\], incomingGap:false \}\);/);
 });
 
 test("in the people lane a post card opens the full post on its own page, the way a Relay row opens the reader", () => {

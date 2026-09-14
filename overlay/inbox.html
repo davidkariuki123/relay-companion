@@ -2565,6 +2565,15 @@
   .tp-reply .cv-input { width:100%; box-sizing:border-box; }
   .tp-reply textarea.cv-input { min-height:72px; resize:vertical; font-family:var(--sans); line-height:1.45; }
   .tp-notice { margin:8px 16px 0; padding:8px 11px; border-radius:8px; background:var(--wash); color:var(--ink-2); font:11px/1.45 var(--sans); }
+  /* "N new posts": floats over the board (zero height, so nothing shifts when it
+     appears) and stays pinned at the top while the person scrolls. */
+  .tp-incoming-slot { position:sticky; top:8px; z-index:3; display:flex; align-items:flex-start; justify-content:center; height:0; overflow:visible; pointer-events:none; }
+  .tp-incoming { pointer-events:auto; appearance:none; margin-top:6px; padding:6px 13px; border:0; border-radius:var(--r-pill); background:var(--accent); color:var(--on-accent);
+    font:600 11px/1.2 var(--sans); box-shadow:var(--shadow-pop), 0 1px 3px rgba(0,0,0,.14); cursor:pointer; animation:tp-incoming-in 180ms var(--settle); }
+  .tp-incoming:hover { filter:brightness(1.08); }
+  .tp-incoming:focus-visible { outline:none; box-shadow:var(--focus-ring), var(--shadow-pop); }
+  @keyframes tp-incoming-in { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
+  @media (prefers-reduced-motion: reduce) { .tp-incoming { animation:none; } }
   #tasksList { min-height:1px; transform-origin:top center; transition:opacity 150ms var(--settle),transform 180ms var(--settle); }
   #tasksList.todo-switching { opacity:.52; transform:translateY(2px); pointer-events:none; }
   #tasksList.todo-arriving { animation:todoContentArrive 210ms var(--settle) both; }
@@ -7171,6 +7180,9 @@
   const topicsState = {
     loaded:false, loading:false, error:"", topics:[], generation:0,
     openId:null, detail:null, posts:[], nextCursor:null, postsLoading:false, postsError:"",
+    // Posts newer than the open board, held behind the "N new posts" pill until
+    // the person asks for them. incomingGap: more arrived than one page holds.
+    incoming:[], incomingGap:false,
     lane:"human", composing:false, creating:false, editingMandate:false, inviteQuery:"", armed:null,
     // The open topic's face: messages (posts, lanes, compose), members, mandate.
     pane:"messages",
@@ -7238,7 +7250,7 @@
     if (activeView === "topics" && (changed || !quiet)) renderTopics();
   }
   async function openTopic(id) {
-    Object.assign(topicsState, { openId:id, detail:null, posts:[], nextCursor:null, postsError:"", composing:false, editingMandate:false, armed:null, inviteQuery:"", pane:"messages", replying:null, notice:"", openPostId:null, postDetailsOpen:false });
+    Object.assign(topicsState, { openId:id, detail:null, posts:[], nextCursor:null, incoming:[], incomingGap:false, postsError:"", composing:false, editingMandate:false, armed:null, inviteQuery:"", pane:"messages", replying:null, notice:"", openPostId:null, postDetailsOpen:false });
     renderTopics();
     const { result, error } = await topicCall(window.relay.topicGet, id);
     if (topicsState.openId !== id) return;
@@ -7267,11 +7279,85 @@
     const posts = Array.isArray(result?.posts) ? result.posts : [];
     topicsState.posts = append ? [...topicsState.posts, ...posts] : posts;
     topicsState.nextCursor = result?.nextCursor || null;
+    // A fresh first page already holds the newest posts.
+    if (!append) Object.assign(topicsState, { incoming:[], incomingGap:false });
     if (result?.topic) mergeTopicSummary(result.topic);
     renderTopics();
   }
+  // New posts reach an open board as a "N new posts" pill, never by redrawing
+  // the list under the reader: inserting them would move what they are reading
+  // and wipe a half-written post. Topics have no push channel, so while a board
+  // is on screen it asks for anything newer than its newest post — on a short
+  // timer, when the window comes back, and when the quiet list refresh runs.
+  let topicIncomingInFlight = false;
+  function topicIncomingCount() {
+    const shown = new Set(topicsState.posts.map((p) => p.id));
+    return topicsState.incoming.filter((p) => !shown.has(p.id) && (topicsState.lane === "agent" || String(p.forHuman || "").trim())).length;
+  }
+  function topicIncomingHtml() {
+    const n = topicIncomingCount();
+    const label = `${n}${topicsState.incomingGap ? "+" : ""} new ${n === 1 && !topicsState.incomingGap ? "post" : "posts"}`;
+    return `<div class="tp-incoming-slot" data-topic-incoming-slot>${n ? `<button class="tp-incoming" type="button" data-topic-incoming aria-live="polite">${esc(label)}</button>` : ""}</div>`;
+  }
+  function wireTopicIncoming(root) {
+    root.querySelector("[data-topic-incoming]")?.addEventListener("click", () => showTopicIncoming());
+  }
+  // Repaint only the pill, so a draft, an open reply box and the scroll stay put.
+  // A pill already showing only changes its words, so it does not flash again.
+  function paintTopicIncoming() {
+    const slot = topicsBodyEl?.querySelector("[data-topic-incoming-slot]");
+    if (!slot) return;
+    const next = document.createRange().createContextualFragment(topicIncomingHtml()).firstElementChild;
+    const shown = slot.querySelector("[data-topic-incoming]");
+    const label = next.querySelector("[data-topic-incoming]");
+    if (shown && label) { shown.textContent = label.textContent; return; }
+    slot.outerHTML = topicIncomingHtml();
+    wireTopicIncoming(topicsBodyEl);
+  }
+  async function checkTopicIncoming() {
+    const id = topicsState.openId;
+    const m = topicsState.detail?.membership || {};
+    if (!id || m.state !== "active" || m.mandateCurrent !== true) return;
+    if (topicIncomingInFlight || topicsState.postsLoading || topicsState.incomingGap) return;
+    if (activeView !== "topics" || document.visibilityState === "hidden") return;
+    let newest = null;
+    for (const p of [...topicsState.incoming, ...topicsState.posts]) {
+      if (!newest || Date.parse(p.createdAt) > Date.parse(newest)) newest = p.createdAt;
+    }
+    topicIncomingInFlight = true;
+    const { result, error } = await topicCall(window.relay.topicPosts, id, newest ? { since: newest } : {});
+    topicIncomingInFlight = false;
+    if (error || topicsState.openId !== id || topicsState.postsLoading) return;
+    const known = new Set([...topicsState.posts, ...topicsState.incoming].map((p) => p.id));
+    const fresh = (Array.isArray(result?.posts) ? result.posts : []).filter((p) => p?.id && !known.has(p.id));
+    const gap = Boolean(result?.nextCursor);
+    if (!fresh.length && !gap) return;
+    topicsState.incoming = [...fresh, ...topicsState.incoming];
+    topicsState.incomingGap = gap;
+    paintTopicIncoming();
+  }
+  // The person asked for them: put the new posts on the board, land at its
+  // top where they are, and count them read — this is the human read.
+  async function showTopicIncoming() {
+    const id = topicsState.openId;
+    if (!id) return;
+    if (topicsState.incomingGap) {
+      await loadTopicPosts();
+    } else {
+      const incoming = topicsState.incoming;
+      const ids = new Set(incoming.map((p) => p.id));
+      topicsState.posts = [...incoming, ...topicsState.posts.filter((p) => !ids.has(p.id))];
+      Object.assign(topicsState, { incoming:[], incomingGap:false });
+    }
+    if (topicsState.openId !== id) return;
+    const seen = await topicCall(window.relay.topicSeen, id);
+    if (topicsState.openId !== id) return;
+    if (seen.result) mergeTopicSummary(seen.result);
+    renderTopics();
+    if (scrollEl) scrollEl.scrollTop = 0;
+  }
   function closeTopic() {
-    Object.assign(topicsState, { openId:null, detail:null, posts:[], nextCursor:null, postsError:"", armed:null, replying:null, notice:"", openPostId:null, postDetailsOpen:false });
+    Object.assign(topicsState, { openId:null, detail:null, posts:[], nextCursor:null, incoming:[], incomingGap:false, postsError:"", armed:null, replying:null, notice:"", openPostId:null, postDetailsOpen:false });
     renderTopics();
   }
   function topicRowHtml(t) {
@@ -7472,7 +7558,7 @@
       ? topicPaneTabsHtml() + (
         topicsState.pane === "members" ? `${topicMembersHtml(d)}${leave}`
         : topicsState.pane === "mandate" ? `${mandateBlock}${topicStandingRulesHtml()}${settings}`
-        : `${current ? topicComposeHtml() : ""}${notice}${lanes}${posts}${more}`)
+        : `${current ? topicComposeHtml() : ""}${notice}${lanes}${readable ? topicIncomingHtml() : ""}${posts}${more}`)
       : `${topicStandingRulesHtml()}${topicMembersHtml(d)}`;
     return `<div class="tp-detail" data-topic-detail="${esc(d.id)}">
       <button class="gd-back" type="button" data-topic-back>‹ Topics</button>
@@ -7591,6 +7677,7 @@
     });
     on("[data-topic-post-details]", () => { topicsState.postDetailsOpen = !topicsState.postDetailsOpen; renderTopics(); });
     on("[data-topic-lane]", (el) => { topicsState.lane = el.getAttribute("data-topic-lane"); renderTopics(); });
+    wireTopicIncoming(c);
     // Reply: one box at a time, keyed once so a retry replays instead of
     // duplicating a post whose Relay half failed.
     on("[data-topic-reply]", (el) => {
@@ -7721,7 +7808,10 @@
     openTopic(topicId);
   }
   // A quiet refresh keeps the tab badge honest without opening the tab.
-  setInterval(() => { if (payload.features?.topics === true) loadTopics({ quiet:true }); }, 90_000);
+  setInterval(() => { if (payload.features?.topics === true) loadTopics({ quiet:true }).then(checkTopicIncoming); }, 90_000);
+  // An open board on screen looks for new posts sooner than the badge does.
+  setInterval(() => { if (payload.features?.topics === true) checkTopicIncoming(); }, 20_000);
+  document.addEventListener("visibilitychange", () => { if (payload.features?.topics === true) checkTopicIncoming(); });
   async function loadTodo({ append = false } = {}) {
     if (!window.relay.todoList || (append && (todoState.loading || todoState.loadingMore || !todoState.nextCursor))) return;
     const generation = append ? todoState.generation : ++todoState.generation;
@@ -18153,6 +18243,7 @@
     relayAnyoneTip.reset();
     syncContinuousMotion();
     flushDeferredSurfaceRender();
+    if (payload.features?.topics === true) checkTopicIncoming();
   });
   if (window.relay.onOpenDone) window.relay.onOpenDone((id) => { stopOpening(id); retireOpeningNote(id); });
   if (window.relay.onChooseSession) window.relay.onChooseSession((id, selection) => {
