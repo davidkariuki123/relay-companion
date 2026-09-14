@@ -1447,7 +1447,8 @@
   .th-host-actions { flex:1 0 calc(100% + 26px); width:calc(100% + 26px); margin:8px -13px -8px;
     display:grid; grid-template-rows:0fr; opacity:0; transform:translateY(-7px); pointer-events:none;
     transition:grid-template-rows .18s var(--soft), opacity .16s var(--settle), transform .18s var(--soft); }
-  .th-host-actions-inner { min-height:0; overflow:hidden; border-top:1px solid var(--hair); border-radius:0 0 14px 14px; background:var(--wash); }
+  /* The timestamp follows these rows; the message bubble owns the bottom corners. */
+  .th-host-actions-inner { min-height:0; overflow:hidden; border-top:1px solid var(--hair); background:var(--wash); }
   .th-msg.host-intent-open .th-host-actions,
   .th-msg.host-focus-open .th-host-actions,
   .th-msg.host-touch-open .th-host-actions,
