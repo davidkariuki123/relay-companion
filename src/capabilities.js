@@ -75,6 +75,7 @@ export function appPath(appName, { platform = process.platform, homedir = os.hom
  *   keyed by the exact names the pill's picker shows.
  */
 export function detectAgentSurfaces(options = {}) {
+  const machine = machineNoun(options.platform);
   const codexCli = codexCliPath(options);
   const claudeCli = claudeCliPath(options);
   const chatgptApp = appPath("Codex", options); // ChatGPT.app (or Codex.app)
@@ -83,7 +84,7 @@ export function detectAgentSurfaces(options = {}) {
   return {
     "Claude Code": claudeCli || claudeApp
       ? { available: true, reason: "", via: claudeCli || claudeApp }
-      : { available: false, reason: "Claude Code isn’t installed on this Mac", via: "" },
+      : { available: false, reason: `Claude Code isn’t installed on this ${machine}`, via: "" },
     "Claude Cowork": {
       available: false,
       reason: "Claude Cowork is temporarily unavailable in Relay",
@@ -91,7 +92,7 @@ export function detectAgentSurfaces(options = {}) {
     },
     Codex: codexCli || chatgptApp
       ? { available: true, reason: "", via: codexCli || chatgptApp }
-      : { available: false, reason: "Codex isn’t installed on this Mac", via: "" },
+      : { available: false, reason: `Codex isn’t installed on this ${machine}`, via: "" },
     // Provider availability and presentation surface are deliberately separate.
     // A CLI-only machine can still open a Relay in a real provider session; when
     // both are installed the desktop app remains the default and Terminal is an
@@ -101,6 +102,11 @@ export function detectAgentSurfaces(options = {}) {
     _claudeDesktop: desktopSurface("Claude", claudeApp, options),
     _codexDesktop: desktopSurface("Codex", chatgptApp, options),
   };
+}
+
+/** The word the picker uses for this machine: only macOS is a "Mac". */
+function machineNoun(platform = process.platform) {
+  return platform === "darwin" ? "Mac" : "computer";
 }
 
 function cliSurface(label, hit) {

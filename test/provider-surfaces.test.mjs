@@ -78,6 +78,15 @@ test("provider availability includes CLI-only installs while desktop and termina
     const elsewhere = detectAgentSurfaces({ platform: "linux", homedir: root, env: { HOME: root, PATH: "" } });
     assert.equal(elsewhere._claudeDesktop.available, false);
     assert.equal(elsewhere._codexDesktop.available, false);
+    // A Linux or Windows user is never told about "this Mac".
+    for (const name of ["Claude Code", "Codex"]) {
+      if (elsewhere[name].available) continue;
+      assert.equal(elsewhere[name].reason, `${name} isn’t installed on this computer`);
+    }
+    for (const name of ["Claude Code", "Codex"]) {
+      if (bare[name].available) continue;
+      assert.equal(bare[name].reason, `${name} isn’t installed on this Mac`);
+    }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
