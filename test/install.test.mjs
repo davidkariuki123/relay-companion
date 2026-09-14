@@ -490,6 +490,24 @@ test("repairDesktopSurfaces --no-restart rewrites both LaunchAgents and Relay.ap
   assert.doesNotMatch(pillPlist, /--full|--messages-only/);
 });
 
+test("Mac services retain the installation home instead of inheriting launchd's login home", t => {
+  const fixture = relayDesktopFixture();
+  t.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+  const homeDir = path.join(fixture.root, "isolated & home");
+  const result = repairDesktopSurfaces({
+    recoveryInstaller: () => ({ ok: true }),
+    bin: fixture.bin, node: process.execPath, platform: "darwin", homeDir,
+    reload: false, runCommand: fakeMacCommands([]),
+  });
+  assert.equal(result.ok, true);
+  for (const service of [result.daemon, result.pill]) {
+    const plist = fs.readFileSync(service.plistPath, "utf8");
+    const environment = plist.match(/<key>EnvironmentVariables<\/key>\s*<dict>([\s\S]*?)<\/dict>/)?.[1];
+    const home = environment?.match(/<key>HOME<\/key><string>(.*?)<\/string>/)?.[1];
+    assert.equal(home, homeDir.replaceAll("&", "&amp;"), "heartbeat and probe files must use setup's home, with valid XML");
+  }
+});
+
 test("non-destructive installation repair preserves account, message, outbox, and preference state", () => {
   const fixture = relayDesktopFixture();
   const protectedFiles = new Map([

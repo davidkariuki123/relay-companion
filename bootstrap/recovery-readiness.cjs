@@ -72,7 +72,7 @@ async function waitForRecoveryReady({ homeDir = os.homedir(), platform = process
       block = suspended ? `not-watched-continuously:gap=${gap}ms,sample=${sampleMs}ms`
         : !live ? "runtime-pointer-not-active-for-target"
         : !live.ok ? `health:${healthSummary(live)}`
-        : !jobsReady ? "launchd-jobs-not-matching-heartbeat"
+        : !jobsReady ? `launchd-jobs-not-matching-heartbeat:daemon=${jobs[0]?.pid || "missing"},pill=${jobs[1]?.pid || "missing"},heartbeat=${beat?.pid || "missing"}`
         : !fresh ? `heartbeat-stale:${beat?.at ? `${at - beat.at}ms old` : "missing"}`
         : key !== identity ? "process-identity-changed" : "probe-identity-changed";
       reset(key);
@@ -94,7 +94,7 @@ async function waitForRecoveryReady({ homeDir = os.homedir(), platform = process
       // but cannot satisfy activation of a release requiring this capability.
       const progressRequired = requireProgress || firstProgress !== null
         || (current?.packageRoot && fs.existsSync(path.join(current.packageRoot, "bootstrap", "daemon-progress.cjs")));
-      if (progressRequired && !progressAdvanced) block = "daemon-loop-not-advancing";
+      if (probeMatches && progressRequired && !progressAdvanced) block = "daemon-loop-not-advancing";
       if (at - since >= stableMs && beat.at > firstBeat && probeSeen && (!progressRequired || progressAdvanced)) {
         return { ok: true, current, heartbeatAt: beat.at,
           identity: legacy ? null : `${key}:${probeIdentity || "legacy"}`, legacy };

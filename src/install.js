@@ -2324,6 +2324,8 @@ export function installDaemonAutostart(
   fs.mkdirSync(path.dirname(plistPath), { recursive: true });
   fs.mkdirSync(path.dirname(logPath), { recursive: true });
   const pathEnv = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin";
+  // launchd does not inherit setup's environment. Keep readiness files and
+  // account state in the installation home, including isolated setup canaries.
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -2340,6 +2342,7 @@ ${daemonArgs.map((argument) => `    <string>${plistEscape(argument)}</string>`).
   <key>StandardErrorPath</key><string>${plistEscape(logPath)}</string>
   <key>EnvironmentVariables</key>
   <dict>
+    <key>HOME</key><string>${plistEscape(home)}</string>
     <key>PATH</key><string>${plistEscape(pathEnv)}</string>
   </dict>
 </dict>
@@ -2459,6 +2462,7 @@ ${pillArgs.map((argument) => `    <string>${plistEscape(argument)}</string>`).jo
   <key>StandardErrorPath</key><string>${plistEscape(logPath)}</string>
   <key>EnvironmentVariables</key>
   <dict>
+    <key>HOME</key><string>${plistEscape(home)}</string>
     <key>PATH</key><string>${plistEscape(pathEnv)}</string>
   </dict>
 </dict>

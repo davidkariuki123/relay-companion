@@ -138,3 +138,17 @@ test("a failed proof says which condition blocked it", async () => {
   const gap = await probe(({ advance }) => ({ sleep: async () => advance(6000) }));
   assert.match(gap.detail, /^not-watched-continuously:gap=6000ms/);
 });
+
+test("activation reports a missing probe instead of blaming daemon loop progress", async () => {
+  const result = await probe(() => ({ requireProgress: true,
+    probe: async () => ({ ok: false, daemon: { ok: true, pid: 12 }, pill: { ok: false, reason: "pill-probe-unavailable" } }),
+  }));
+  assert.equal(result.ok, false);
+  assert.match(result.detail, /^probe:pill-probe-unavailable;/);
+});
+
+test("Mac readiness distinguishes missing heartbeat evidence from launchd process IDs", async () => {
+  const result = await probe(() => ({ readHeartbeat: () => null }));
+  assert.equal(result.ok, false);
+  assert.match(result.detail, /launchd-jobs-not-matching-heartbeat:daemon=12,pill=13,heartbeat=missing/);
+});

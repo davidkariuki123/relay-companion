@@ -43,6 +43,9 @@ test("Mac watchdog update keeps its registration and host while publishing a com
     } };
   const first = installRecovery(options);
   assert.equal(first.ok, true, first.detail); assert.equal(registered, true);
+  const plist = fs.readFileSync(path.join(homeDir, "Library", "LaunchAgents", `${LABEL}.plist`), "utf8");
+  assert.ok(plist.includes(`<key>EnvironmentVariables</key><dict><key>HOME</key><string>${homeDir}</string></dict>`),
+    "the scheduled recovery worker must inspect the same home as the installed daemon and pill");
   const launcher = fs.readFileSync(first.launcher), pointer = fs.readFileSync(path.join(homeDir, ".relay", "recovery", "current.json"));
   const damaged = path.join(first.bundle, "bootstrap", "recovery-runner.cjs");
   fs.writeFileSync(damaged, "damaged previous bundle");

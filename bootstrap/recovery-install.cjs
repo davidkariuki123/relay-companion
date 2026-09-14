@@ -183,7 +183,7 @@ function installRecovery({ packageRoot, node = process.execPath, homeDir = os.ho
     } else if (platform === "darwin") {
       const plist = path.join(homeDir, "Library", "LaunchAgents", `${LABEL}.plist`);
       fs.mkdirSync(path.dirname(plist), { recursive: true });
-      atomicFile(plist, `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>${LABEL}</string><key>ProgramArguments</key><array><string>${xml(launcherNode)}</string><string>${xml(launcher)}</string></array><key>StartInterval</key><integer>300</integer><key>RunAtLoad</key><true/><key>ProcessType</key><string>Background</string><key>StandardOutPath</key><string>${xml(log)}</string><key>StandardErrorPath</key><string>${xml(log)}</string></dict></plist>`);
+      atomicFile(plist, `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>${LABEL}</string><key>ProgramArguments</key><array><string>${xml(launcherNode)}</string><string>${xml(launcher)}</string></array><key>EnvironmentVariables</key><dict><key>HOME</key><string>${xml(homeDir)}</string></dict><key>StartInterval</key><integer>300</integer><key>RunAtLoad</key><true/><key>ProcessType</key><string>Background</string><key>StandardOutPath</key><string>${xml(log)}</string><key>StandardErrorPath</key><string>${xml(log)}</string></dict></plist>`);
       // The job dispatches through the stable host. Do not unload it on update.
       const observed = runCommand("launchctl", ["print", `gui/${userId}/${LABEL}`]);
       if (!ok(observed)) {

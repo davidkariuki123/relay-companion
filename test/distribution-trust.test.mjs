@@ -1812,9 +1812,9 @@ test("bootstrap rolls back a launched daemon that never proves working-loop read
         probes++; assert.equal(options.requireProgress, true);
         assert.equal(options.readCurrent().packageRoot, packageRoot);
         assert.equal(JSON.parse(fs.readFileSync(pointerPath)).state, "activating");
-        return { ok: false, reason: "runtime-did-not-stay-responsive" };
+        return { ok: false, reason: "runtime-did-not-stay-responsive", detail: "heartbeat-stale:missing; samples=91" };
       },
-    }), /activation failed readiness/);
+    }), /activation failed readiness \(runtime-did-not-stay-responsive\): heartbeat-stale:missing; samples=91/);
   assert.equal(probes, 1); assert.deepEqual(JSON.parse(fs.readFileSync(pointerPath)), previous);
 });
 

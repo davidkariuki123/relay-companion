@@ -1053,7 +1053,7 @@ async function activateRuntime(layout, runtime, version, {
       requireProgress: true, timeoutMs: 90_000,
     });
     if (!observed.ok) {
-      const message = `Relay runtime activation failed readiness (${observed.reason}).`;
+      const message = `Relay runtime activation failed readiness (${observed.reason})${observed.detail ? `: ${observed.detail}` : "."}`;
       rollback(message);
       fail(message);
     }
