@@ -1067,15 +1067,13 @@ test("the pill never shows a layout-taking scrollbar", () => {
   assert.match(html, /\.qr textarea::-webkit-scrollbar \{ display:none; \}/);
 });
 
-test("hand-offs speak in conversation terms: starts vs continues, said BEFORE the tap", () => {
+test("handoffs retain conversation context while a picker choice makes no delivery claim", () => {
   // The B-rule: the conversation owns the agent thread. First hand-off starts
   // the agent on it; later ones continue that same chat — never "current
   // chat"/"new chat" vocabulary, which failed every first-timer it met.
   assert.match(html, /const handedThreads = new Map\(\)/);
-  assert.match(html, /Reopening the \$\{agentAppName\(\)\} chat that knows this conversation/); // Open-in, not Hand
-  assert.match(html, /Opening \$\{agentAppName\(\)\} on this conversation — staged, nothing sends until you do/);
   // Any real hand-off marks the conversation (current or fresh, never preview).
-  assert.match(html, /source !== "sent" && \(mode === "current" \|\| mode === "fresh"\)/);
+  assert.match(html, /source !== "sent" && mode === "fresh"/);
   // The header-name sheet is GONE ("no one will see it" — Sven).
   assert.doesNotMatch(html, /convSheet/);
   // The redundant Talk/Reply mode button is gone. The visible document owns
@@ -1096,7 +1094,6 @@ test("hand-offs speak in conversation terms: starts vs continues, said BEFORE th
   // And the destination line lives where hand-offs actually happen — inside
   // the unfolded bubble, not only on the off-path reader page (Sven:
   // "havent implemented anything for that which i can see").
-  // The destination whisper under the verb was CUT (David): the button says\n  // where it goes, and the row note says what happened after the tap.\n  assert.match(html, /Reopening the \$\{agentAppName\(\)\} chat that knows this conversation/);
 });
 
 test("ordinary titled bubbles open the reader while owned-agent bubbles open Work", () => {

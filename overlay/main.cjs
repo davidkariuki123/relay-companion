@@ -151,7 +151,6 @@ const { appendLocalTrace, appendLocalTraces } = require("../src/local-trace.cjs"
 const { createPairingIdentity, persistPairedIdentity, readPairedIdentity } = require("../src/e2ee-identity.cjs");
 const { canonicalInboxItemId, packetIdsForCanonicalItem } = require("../src/inbox-item-id.cjs");
 const claudeInject = require("../src/claude-inject.cjs");
-const codexOpenCurrent = require("./codex-open-current.cjs");
 const { commandAvailable, launchLinuxAgentTerminal } = require("./linux-terminal.cjs");
 const {
   reinforceSpacePresence,
@@ -872,25 +871,6 @@ function loadChannelDeps() {
     });
   }
   return channelDepsPromise;
-}
-
-// Codex "Open in current chat" deps (ESM, loaded lazily like the modules
-// above): codex-inject resolves the current thread / stages the heartbeat
-// automation, codex-desktop drives the live bridge submit. The tier ordering
-// itself lives in codex-open-current.cjs so it stays unit-testable.
-let codexCurrentDepsPromise = null;
-function loadCodexCurrentDeps() {
-  if (!codexCurrentDepsPromise) {
-    const injectUrl = pathToFileURL(path.join(__dirname, "..", "src", "codex-inject.js")).href;
-    const desktopUrl = pathToFileURL(path.join(__dirname, "..", "src", "codex-desktop.js")).href;
-    codexCurrentDepsPromise = Promise.all([import(injectUrl), import(desktopUrl)])
-      .then(([inject, desktop]) => ({ inject, desktop }))
-      .catch((error) => {
-        codexCurrentDepsPromise = null;
-        throw error;
-      });
-  }
-  return codexCurrentDepsPromise;
 }
 
 async function relayClient(options) {
@@ -4205,62 +4185,6 @@ function tailFor(stream) {
   return String(stream || "").trim().split("\n").slice(-2).join(" | ");
 }
 
-// Whether the `relay claude-hook` runtime is registered in ~/.claude/settings.json.
-// "Open in current chat" stages a file that ONLY that runtime consumes, so without
-// it the click is a silent no-op. Loaded lazily like the modules above (install.js
-// is ESM; this overlay is CommonJS).
-let claudeHooksModulePromise = null;
-function loadClaudeHooksModule() {
-  if (!claudeHooksModulePromise) {
-    const installUrl = pathToFileURL(path.join(__dirname, "..", "src", "install.js")).href;
-    claudeHooksModulePromise = import(installUrl).catch((error) => {
-      claudeHooksModulePromise = null;
-      throw error;
-    });
-  }
-  return claudeHooksModulePromise;
-}
-
-// A missing or unparseable settings file counts as NOT installed: staging into a
-// machine with no hook runtime is worse than a fresh open, so fail closed.
-function claudeHooksInstalled(install) {
-  let settings;
-  try {
-    settings = JSON.parse(fs.readFileSync(install.claudeSettingsPath(), "utf8")) || {};
-  } catch {
-    return false;
-  }
-  const hooks = settings.hooks;
-  if (!hooks || typeof hooks !== "object" || Array.isArray(hooks)) return false;
-  for (const entries of Object.values(hooks)) {
-    for (const entry of Array.isArray(entries) ? entries : []) {
-      for (const hook of entry && Array.isArray(entry.hooks) ? entry.hooks : []) {
-        if (install.isRelayClaudeHookCommand(hook)) return true;
-      }
-    }
-  }
-  return false;
-}
-
-// Register the claude-hook runtime for FUTURE Claude sessions (idempotent; it preserves
-// every user hook). installClaudeHooks defaults its node to process.execPath, which under
-// Electron is the OVERLAY binary — a hook command Claude could never run, and one that
-// would make the presence check above pass forever. So resolve a real node first and skip
-// the repair entirely when the machine has none.
-function repairClaudeHooks(install) {
-  execFile(process.platform === "win32" ? "where" : "/usr/bin/which", ["node"], (error, out) => {
-    const node = String(out || "").split("\n")[0].trim();
-    if (error || !node) {
-      console.error("[overlay] cannot register the claude-hook runtime: no node found on PATH");
-      return;
-    }
-    const result = install.installClaudeHooksWithStableLauncher(undefined, install.stableNodePath(node));
-    if (!result || !result.ok) {
-      console.error("[overlay] claude-hook registration failed:", (result && result.reason) || "unknown");
-    }
-  });
-}
-
 function preferredSessionProvider() {
   return new Promise((resolve) => frontmostBundleId((bundle) => {
     const host = resolveClickHost(bundle);
@@ -4277,6 +4201,7 @@ async function focusedNativeSession(provider, routing) {
     const current = claudeInject.findCurrentClaudeSession({
       homeDir: RELAY_HOME,
       desktopSessionsDir: claudeDesktopSessionsDir(),
+      includeRendezvous: false,
     });
     return current ? { nativeId: current.sessionId } : null;
   } catch {
@@ -4735,369 +4660,16 @@ async function openPacket(packetId, { sent = false, fresh = false, host: hostOve
   });
 }
 
-// "Open in current chat": instead of forging a native session, deliver the
-// shared injection instruction into the user's LIVE session on the resolved
-// host. Claude: stage an injection file that the `relay claude-hook` runtime
-// (installed into ~/.claude/settings.json) consumes — mid-turn via PostToolUse,
-// at turn end via Stop (decision:block wakes a new turn), or on the next prompt
-// via UserPromptSubmit/SessionStart. Codex: the tiered flow in
-// codex-open-current.cjs — live bridge submit into the current thread, else a
-// near-now heartbeat automation, else the fresh-open flow. Both hosts share the
-// SAME instruction builder: the model FETCHES the relay through the Relay MCP
-// tools; the sender's content is never inlined (relay-briefing's
-// untrusted-content discipline). A missing row or no live session/thread
-// within 6h falls back to the fresh-open flow.
-// How many messages (inbound rows + sent copies, deduped) share a thread.
-// Gives the injected instruction its "N messages so far" and tells the model
-// when fetching the whole thread is worth it.
-// The staged injection file is consume-once: the claude-hook renames it away at
-// the moment of delivery. Watching for its disappearance is therefore a REAL
-// delivery signal, and the row note can tell the truth in realtime — "waiting
-// for that chat's turn" versus "delivered". Field lesson (2026-08-05): an
-// injection for an idle session sat invisible for minutes and the click read as
-// completely dead; a waiting state that never lies beats a success toast.
-//
-// Nothing outside a session can make it take a turn (verified against the
-// platform docs: deep links only pre-fill NEW sessions; no external submit API
-// exists), so an idle chat cannot be woken — the honest waiting/delivered
-// states are the truth until the Relay channel plugin (the platform's supported
-// push-into-a-running-session mechanism) lands. The 0.1.82 grace hop — reclaim
-// after 6s and open a fresh chat — is now OFF by default: the same-evening
-// field verdict was that silently converting "current chat" into "new chat"
-// betrays the button. The user chose current; Open in New Chat sits one row
-// below for when they want instant. RELAY_CURRENT_CHAT_GRACE_MS > 0 re-enables
-// the hop for anyone who prefers motion over fidelity.
-const injectionWatchers = new Map(); // packetId -> interval
-const AUTO_FRESH_GRACE_MS = (() => {
-  const raw = Number(process.env.RELAY_CURRENT_CHAT_GRACE_MS);
-  return Number.isFinite(raw) && raw > 0 ? raw : 0; // 0 (default): never hop
-})();
-function reclaimInjection(stagedPath) {
-  const claimed = `${stagedPath}.${process.pid}.${Date.now()}.autofresh`;
-  try {
-    fs.renameSync(stagedPath, claimed); // loses the race iff the hook consumed it
-  } catch {
-    return false;
+// Legacy IPC can only ask the person to choose an exact native destination.
+// Opening the picker does not stage content, acknowledge a Relay, or start a turn.
+function requestSessionPicker(packetId, { sent = false, host = "" } = {}) {
+  if (!packetId || !win || win.isDestroyed()) return;
+  win.webContents.send("openDone", packetId);
+  if (host === "cowork") {
+    win.webContents.send("openError", packetId, "Claude Cowork is temporarily unavailable in Relay.");
+    return;
   }
-  try {
-    fs.rmSync(claimed, { force: true });
-  } catch {}
-  return true;
-}
-function watchInjectionDelivery(packetId, stagedPath, { timeoutMs = 10 * 60 * 1000, intervalMs = 500, autoFreshMs = AUTO_FRESH_GRACE_MS, onAutoFresh = null, onTimeout = null } = {}) {
-  if (!stagedPath) return;
-  const existing = injectionWatchers.get(packetId);
-  if (existing) clearInterval(existing); // newest click owns the watch
-  const startedAt = Date.now();
-  const timer = setInterval(() => {
-    let gone = false;
-    try {
-      gone = !fs.existsSync(stagedPath);
-    } catch {
-      gone = false;
-    }
-    if (gone) {
-      clearInterval(timer);
-      injectionWatchers.delete(packetId);
-      console.error(`[overlay] openInCurrent ${packetId}: delivered (injection consumed after ${Math.round((Date.now() - startedAt) / 1000)}s)`);
-      if (win && !win.isDestroyed()) win.webContents.send("injectionDelivered", packetId);
-      return;
-    }
-    if (onAutoFresh && autoFreshMs > 0 && Date.now() - startedAt >= autoFreshMs) {
-      clearInterval(timer);
-      injectionWatchers.delete(packetId);
-      if (!reclaimInjection(stagedPath)) {
-        // The hook won the rename race: this IS a delivery.
-        console.error(`[overlay] openInCurrent ${packetId}: delivered (won by the hook at the grace boundary)`);
-        if (win && !win.isDestroyed()) win.webContents.send("injectionDelivered", packetId);
-        return;
-      }
-      console.error(`[overlay] openInCurrent ${packetId}: current chat idle for ${autoFreshMs}ms; reclaimed the injection and opening fresh`);
-      onAutoFresh();
-      return;
-    }
-    // A restaged/overwritten click or a very long idle: stop polling quietly
-    // (the waiting note remains accurate — the injection is still pending),
-    // unless the caller owns the timeout (channel wake falls back to staging).
-    if (Date.now() - startedAt > timeoutMs) {
-      clearInterval(timer);
-      injectionWatchers.delete(packetId);
-      if (onTimeout) onTimeout();
-    }
-  }, intervalMs);
-  if (typeof timer.unref === "function") timer.unref();
-  injectionWatchers.set(packetId, timer);
-}
-
-function threadInfoFor(row) {
-  const threadId = (row && row.threadId) || null;
-  if (!threadId) return { threadId: null, threadCount: 0 };
-  const ids = new Set();
-  for (const r of readRelays()) if (r.threadId === threadId) ids.add(r.id);
-  for (const s of sentCache || []) {
-    const sid = s.relayId || s.id;
-    if (sid && (s.threadId || sid) === threadId) ids.add(sid);
-  }
-  return { threadId, threadCount: ids.size };
-}
-
-async function openPacketInCurrent(packetId, { sent = false, host: hostOverride = "" } = {}) {
-  if (String(hostOverride || "").toLowerCase() === "cowork") {
-    throw new Error("Claude Cowork is temporarily unavailable in Relay.");
-  }
-  if (!packetId) return;
-  let row = rowById(packetId);
-  if (sent) {
-    // A sent relay has no staged inbound row: forge its `sent_<relayId>` copy
-    // exactly as the fresh-open path does, then inject THAT. The renderer keeps
-    // addressing the row by its relayId, so spinner/notes stay on the right row.
-    const sentItem = (sentCache || []).find((item) => String(item.relayId || item.id || "") === String(packetId));
-    if (!sentItem) {
-      console.error("[overlay] sent relay missing from cache:", packetId);
-      if (win && !win.isDestroyed()) win.webContents.send("openDone", packetId);
-      return;
-    }
-    try {
-      const stageSentRelayItem = await loadSentStager();
-      const staged = stageSentRelayItem({ item: sentItem, sender: account() }, { statePath: STATE_PATH });
-      row = rowById(staged.itemId) || row;
-    } catch (error) {
-      console.error("[overlay] sent staging for in-chat open failed:", packetId, error && error.message);
-      if (win && !win.isDestroyed()) win.webContents.send("openDone", packetId);
-      return;
-    }
-  }
-  if (win && !win.isDestroyed()) win.webContents.send("opening", packetId);
-  const finish = () => {
-    // Sent relays carry no unread state of their own; acking one would touch the
-    // inbound copy of a self-send. Only inbound opens ack.
-    if (!sent) ackPacket(packetId);
-    if (win && !win.isDestroyed()) win.webContents.send("openDone", packetId); // stop the row spinner
-  };
-  // Confirm the staging in the UI: without this, a successful injection is
-  // indistinguishable from a dead click until the agent's next checkpoint.
-  // extra.awaitingTurn tells the renderer this is a WAITING state (idle target
-  // session), not a completed hand-off.
-  const confirmInjected = (host, extra = {}) => {
-    if (win && !win.isDestroyed()) win.webContents.send("injected", packetId, { host, ...extra });
-  };
-  const fallbackFresh = (note) => {
-    // The click said "current chat" but we're opening a NEW one — never do that
-    // silently: an unexplained new window reads as "the button doesn't work".
-    if (note) {
-      console.error(`[overlay] openInCurrent fallback for ${packetId}: ${note}`);
-      if (win && !win.isDestroyed()) win.webContents.send("openError", packetId, `${note} — opening a new chat instead.`);
-    }
-    // CROSS-VENDOR FALLBACK IS FORBIDDEN (David's live test): "Open in Codex"
-    // with no live Codex thread opens a NEW CODEX thread — it never hands the
-    // message to Claude instead. The named app is a promise about destination,
-    // not a hint, so the override rides into the fresh open too.
-    openPacket(packetId, { fresh: true, sent, host: hostOverride }).catch((error) =>
-      console.error("[overlay] openInCurrent fresh fallback failed:", error && error.message),
-    );
-  };
-  if (!row) return fallbackFresh(); // deleted from under the click: the open path handles it
-  if (!TASK_FEATURES_ALLOWED && (row.taskId || isRelayTaskWebTarget(row.actionUrl))) {
-    console.error("[overlay] refusing to open a Task for a non-developer account:", packetId);
-    return finish();
-  }
-  if (process.env.RELAY_OVERLAY_TEST_NO_HOST_OPEN === "1") return finish();
-  if (row.relayNotificationKind === "connector_reauth") return openPacket(packetId); // web OAuth flow
-  frontmostBundleId((bundle) => {
-    // An explicitly NAMED app wins: the button is a promise, not a hint.
-    const host = hostOverride || resolveClickHost(bundle);
-    if (host === "codex") {
-      loadCodexCurrentDeps()
-        .then(({ inject, desktop }) =>
-          codexOpenCurrent.openCodexInCurrent(
-            {
-              packetId,
-              senderName: row.senderName || "",
-              title: row.title || row.displayTitle || "",
-              ...threadInfoFor(row),
-            },
-            {
-              inject,
-              desktop,
-              codexRunning,
-              activateHost: () => activateHost("codex", bundle),
-              finish: () => {
-                confirmInjected("codex");
-                finish();
-              },
-              fallbackFresh,
-            },
-          ),
-        )
-        .catch((error) => {
-          // Only the dep import can reject (the orchestrator never throws).
-          console.error("[overlay] codex openInCurrent modules failed to load:", error && error.message);
-          fallbackFresh();
-        });
-      return;
-    }
-    let target = null;
-    if (host === "claude") {
-      try {
-        target = claudeInject.findCurrentClaudeSession({
-          homeDir: RELAY_HOME,
-          desktopSessionsDir: claudeDesktopSessionsDir(),
-        });
-      } catch (error) {
-        console.error("[overlay] claude session resolution failed:", error && error.message);
-      }
-    }
-    // Tier 0 (focus log) returns null when Claude Desktop reports NO chat on
-    // screen — the Home screen. That is a real answer, not a failure: there is
-    // no "current chat" to hand this to, so say so instead of guessing at the
-    // last chat the user happened to visit.
-    if (!target) return fallbackFresh("No chat is open in Claude");
-    // COLD START: a DESKTOP chat can only take a turn while Claude Desktop is
-    // running. findCurrentClaudeSession is liveness-blind by construction — it
-    // ranks on-disk evidence (the focus log, up to 12h old; local_<uuid>.json
-    // lastFocusedAt, up to 6h) that long outlives the app — so with Claude quit
-    // it still names a "current chat". Staging into that dead session leaves an
-    // injection nothing will ever consume while the pill says "waiting for that
-    // chat's turn" and the relay is ACKED: a silent no-op, the exact failure the
-    // fresh-open fallback exists to prevent. (Observed on this machine with
-    // Claude RUNNING it even returned a just-forged session that had never been
-    // opened at all.) A TERMINAL session is the opposite case — its hook runtime
-    // lives in its own process and is unaffected by the app — so gate only the
-    // desktop source. Mirrors the Codex tier's own not-running gate in
-    // codex-open-current.cjs.
-    if (target.source === "desktop" && !claudeRunning) return fallbackFresh("Claude isn't running");
-    console.error(
-      `[overlay] openInCurrent ${packetId}: staging for claude session ${String(target.sessionId).slice(0, 8)}… ` +
-        `(${target.source} via ${target.via || "ranking"}${target.label ? `, "${target.label}"` : ""}, active ${Math.round((Date.now() - target.lastActiveAt) / 1000)}s ago` +
-        `${target.skippedStubs ? `, skipped ${target.skippedStubs} never-used chat(s)` : ""})`,
-    );
-    const stageNow = () => {
-      let staged = null;
-      try {
-        staged = claudeInject.stageInjection(RELAY_HOME, target.sessionId, {
-          relayId: packetId,
-          senderName: row.senderName || "",
-          title: row.title || row.displayTitle || "",
-          ...threadInfoFor(row),
-        });
-      } catch (error) {
-        console.error("[overlay] claude injection staging failed:", error && error.message);
-        return fallbackFresh();
-      }
-      // Raise Claude Desktop so the user watches the instruction land; a
-      // terminal-only session stays where it is (its window is not ours to raise).
-      if (target.source === "desktop") activateHost("claude", bundle);
-      // awaitingTurn: an idle session consumes only on its NEXT hook event, so the
-      // renderer must show an honest "waiting for that chat's turn" state, not a
-      // success toast. The watcher below flips it to Delivered in realtime — or,
-      // past the grace window, hops to a fresh chat so the click is never slow.
-      // Name the chat the relay actually went to: "your granular-relay chat"
-      // beats "your current chat" when several are open (field report — the
-      // injection landed somewhere invisible and nothing said where).
-      confirmInjected("claude", { awaitingTurn: true, chat: target.label || "" });
-      finish();
-      watchInjectionDelivery(packetId, staged.path, {
-        onAutoFresh: () => {
-          if (win && !win.isDestroyed()) win.webContents.send("injectionAutoFresh", packetId);
-          openPacket(packetId, { fresh: true }).catch((error) =>
-            console.error("[overlay] auto-fresh after idle grace failed:", error && error.message),
-          );
-        },
-      });
-    };
-    // WAKE TIER (live-proven): when the resolved CURRENT chat is itself a
-    // relay-channel session, push the instruction as a channel event — the
-    // session takes a REAL turn on it even when idle, which hook staging can
-    // never cause. The join is by working directory: the channel instance's
-    // recorded cwd must uniquely match the target session's rendezvous cwd, so
-    // a click aimed at a desktop chat NEVER wakes some other terminal session.
-    // If the claimed event somehow never gets picked up (server died between
-    // heartbeats), the watcher falls back to hook staging — never a dead end.
-    const tryChannelWake = () =>
-      loadChannelDeps().then((channel) => {
-        // Join by the chat's own CLI PROCESS, not its directory. cwd cannot
-        // identify a chat — most people keep several chats open in one repo, and
-        // the cwd join then finds no unique match and silently never wakes
-        // anything. The hook records cliPid on every event (it is the one thing
-        // running inside the session that knows both the session id and the
-        // process tree), so this addresses exactly one chat.
-        let targetCliPid = 0;
-        try {
-          const rendezvousPath = path.join(
-            claudeInject.rendezvousDir(RELAY_HOME),
-            `${claudeInject.safeSessionKey(target.sessionId)}.json`,
-          );
-          targetCliPid = Number(JSON.parse(fs.readFileSync(rendezvousPath, "utf8")).cliPid) || 0;
-        } catch {
-          return false; // no rendezvous -> no join evidence -> hook path
-        }
-        if (!targetCliPid || !channel.channelWakeAvailable(RELAY_HOME, targetCliPid)) return false;
-        const instruction = claudeInject.buildInjectionInstruction({
-          relayId: packetId,
-          senderName: row.senderName || "",
-          title: row.title || row.displayTitle || "",
-          ...threadInfoFor(row),
-        });
-        const eventFile = channel.enqueueChannelEvent(RELAY_HOME, {
-          content: instruction,
-          meta: { relayId: packetId, source: "relay-pill-open-in-current" },
-          targetCliPid,
-        });
-        console.error(`[overlay] openInCurrent ${packetId}: pushed via relay channel (wake path, CLI ${targetCliPid})`);
-        if (target.source === "desktop") activateHost("claude", bundle);
-        confirmInjected("claude", { awaitingTurn: true, channel: true });
-        finish();
-        watchInjectionDelivery(packetId, eventFile, {
-          autoFreshMs: 0,
-          timeoutMs: 15_000,
-          onTimeout: () => {
-            // Presence lied (instance died between heartbeats): reclaim the
-            // event and hand the click to the hook path so it still lands.
-            console.error(`[overlay] openInCurrent ${packetId}: channel event unclaimed after 15s; falling back to hook staging`);
-            try {
-              fs.rmSync(eventFile, { force: true });
-            } catch {}
-            stageNow();
-          },
-        });
-        return true;
-      });
-    // NOTHING but the `relay claude-hook` runtime registered in ~/.claude/settings.json
-    // ever reads the staged file. Where setup never wrote those hooks (Windows installs
-    // where the `claude` CLI isn't on PATH — see src/install.js runSetupInstall) staging
-    // succeeds and the click is a silent, acked no-op. Check before staging. Two-arg
-    // then, not .catch: a throw out of stageNow must not re-enter the failure handler
-    // and finish the click twice.
-    loadClaudeHooksModule().then(
-      (install) => {
-        if (claudeHooksInstalled(install)) {
-          return tryChannelWake()
-            .catch((error) => {
-              console.error("[overlay] channel wake unavailable:", error && error.message);
-              return false;
-            })
-            .then((woke) => {
-              if (!woke) stageNow();
-            });
-        }
-        // Repair for FUTURE sessions — but a Claude session that is already running
-        // loaded its hooks at startup and will never consume a file staged now, so this
-        // click has to take the fresh-open path, the only one that actually shows the
-        // relay. No ack here: openPacket owns the read state for the fresh open.
-        console.error(
-          "[overlay] claude-hook runtime not registered in",
-          install.claudeSettingsPath(),
-          "— 'Open in current chat' would have been a silent no-op; installing it for future sessions and opening a fresh chat instead (restart Claude to use it)",
-        );
-        repairClaudeHooks(install);
-        fallbackFresh("Claude needs a restart before in-chat opens work");
-      },
-      (error) => {
-        console.error("[overlay] claude-hook runtime check failed:", error && error.message);
-        fallbackFresh();
-      },
-    );
-  });
+  win.webContents.send("chooseSession", packetId, { source: sent ? "sent" : "relay", provider: host });
 }
 
 // Click-to-open a task row. Mirrors openPacket: materialize the task into a REAL
@@ -8751,20 +8323,8 @@ ipcMain.handle("relay:continueSession", async (_event, id, source) => {
 ipcMain.on("relay:open", (_e, id, host) => {
   openPacket(id, { host: String(host || "") }).catch((error) => console.error("[overlay] open failed:", error && error.message));
 });
-// Sent rows get the same three actions as received relays. "In current chat"
-// stages the sent copy through the SAME injection path (the materializer's
-// sent stager already forges a `sent_<relayId>` row), so the agent opens the
-// user's own message in the chat they are looking at.
 ipcMain.on("relay:openSentInCurrent", (_e, id, host) => {
-  const selectedHost = String(host || "");
-  const action = selectedHost === "codex"
-    ? openPacket(id, { sent: true, host: "codex" })
-    : selectedHost === "cowork"
-      ? openPacket(id, { sent: true, host: "cowork" })
-      : openPacketInCurrent(id, { sent: true, host: selectedHost });
-  action.catch((error) =>
-    console.error("[overlay] sent open-in-current failed:", error && error.message),
-  );
+  requestSessionPicker(id, { sent: true, host: String(host || "") });
 });
 ipcMain.on("relay:openSentFresh", (_e, id, host) => {
   openPacket(id, { sent: true, fresh: true, host: String(host || "") }).catch((error) =>
@@ -8835,22 +8395,8 @@ ipcMain.handle("relay:openRunSession", async (_e, id) => {
     return { ok: false, error: error?.message || String(error) };
   }
 });
-// "Open in current chat": inject into the live Claude session (fresh fallback inside).
 ipcMain.on("relay:openInCurrent", (_e, id, host) => {
-  const selectedHost = String(host || "");
-  // Cowork has no "current Claude Code chat" injection target. Its Open verb
-  // creates the Cowork composer payload through the dedicated route.
-  // The reader says "Open in Codex", not "inject into whichever Codex task is
-  // currently active". Open therefore stages/navigates the packet's exact
-  // Codex thread. It never starts a turn and never rematerializes a settled
-  // Relay-owned run. Claude's current-session route remains separate because
-  // it has an explicit consume/receipt handshake.
-  const action = selectedHost === "codex"
-    ? openPacket(id, { host: "codex" })
-    : selectedHost === "cowork"
-      ? openPacket(id, { host: "cowork" })
-      : openPacketInCurrent(id, { host: selectedHost });
-  action.catch((error) => console.error("[overlay] open-in-current failed:", error && error.message));
+  requestSessionPicker(id, { host: String(host || "") });
 });
 ipcMain.on("relay:preview", (event, id) => {
   if (win && !win.isDestroyed() && event && event.sender !== win.webContents) return;

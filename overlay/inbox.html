@@ -3174,7 +3174,7 @@
             <rect x="0" y="6" width="4" height="4"/><rect x="6" y="6" width="4" height="4"/><rect x="12" y="6" width="4" height="4"/>
           </svg>
           <div class="t1">No conversations yet</div>
-          <div class="t2">Channels and people you talk to will gather here.</div>
+          <div class="t2">Groups and people you talk to will gather here.</div>
         </div>
       </section>
 
@@ -3186,7 +3186,7 @@
             <rect x="0" y="6" width="4" height="4"/><rect x="6" y="6" width="4" height="4"/><rect x="12" y="6" width="4" height="4"/>
           </svg>
           <div class="t1">No conversations yet</div>
-          <div class="t2">Messages with people and channels appear here.</div>
+          <div class="t2">Messages with people and groups appear here.</div>
         </div>
         <div id="chatRail" class="chat-rail"></div>
         <div id="thDetail" class="gone">
@@ -3216,8 +3216,8 @@
       </section>
 
       <div class="group-info-backdrop hidden" id="groupInfoBackdrop" data-stop="1">
-        <section class="group-info-sheet" role="dialog" aria-modal="true" aria-label="Channel information">
-          <button type="button" class="group-info-close" id="groupInfoClose" aria-label="Close channel info">×</button>
+        <section class="group-info-sheet" role="dialog" aria-modal="true" aria-label="Group information">
+          <button type="button" class="group-info-close" id="groupInfoClose" aria-label="Close group info">×</button>
           <div id="groupInfoDetail"></div>
         </section>
       </div>
@@ -3275,12 +3275,18 @@
                long book hid them completely; stacking them the other way would just
                bury people instead. A segment switches the pane and keeps both a
                single tap away, with counts so neither looks empty when it isn't. -->
-          <div class="cv-seg" role="tablist" aria-label="Contacts and channels">
+          <div class="cv-seg" role="tablist" aria-label="Contacts and groups">
             <button class="cv-seg-btn active" type="button" role="tab" data-pane="people" id="cvSegPeople">Contacts <span class="cv-seg-n" id="cvSegPeopleN"></span></button>
-            <button class="cv-seg-btn" type="button" role="tab" data-pane="groups" id="cvSegGroups">Channels <span class="cv-seg-n" id="cvSegGroupsN"></span></button>
+            <button class="cv-seg-btn" type="button" role="tab" data-pane="groups" id="cvSegGroups">Groups <span class="cv-seg-n" id="cvSegGroupsN"></span></button>
           </div>
-          <span class="cv-add-slot" id="cvAddHome"><button class="cv-add" type="button" id="cvAdd" aria-label="Add contact">Add</button></span>
-          <button class="cv-add gone" type="button" id="cvgNew" aria-label="Add channel">Add</button>
+          <span id="cvCreateActions">
+            <button class="cv-add" type="button" id="cvNew" aria-label="New contact or group" aria-haspopup="menu" aria-expanded="false" aria-controls="cvNewMenu" data-message-more>New ▾</button>
+            <div class="th-message-menu" id="cvNewMenu" popover="auto" role="menu" aria-label="Create">
+              <button type="button" role="menuitem" id="cvNewContact">New Contact</button>
+              <button type="button" role="menuitem" id="cvgNew">New Group</button>
+            </div>
+          </span>
+          <span class="cv-add-slot gone" id="cvAddHome"><button class="cv-add" type="button" id="cvAdd" aria-label="Add contact">Add</button></span>
         </div>
         <section class="cv-google gone" id="cvGoogle" aria-label="Google contacts">
           <div class="cv-google-top"><span class="cv-google-title">Google contacts</span><button type="button" class="cv-add" id="cvGoogleAction" disabled>Checking…</button></div>
@@ -3327,14 +3333,14 @@
              member under ONE shared thread; replies reach everyone. -->
         <div class="cvg" id="cvGroups">
           <form class="cvg-newform hidden" id="cvgNewForm">
-            <input class="cv-input" id="cvgNewName" placeholder="Channel name" autocomplete="off" spellcheck="false" />
+            <input class="cv-input" id="cvgNewName" placeholder="Group name" autocomplete="off" spellcheck="false" />
             <button class="cv-save" type="submit">Create</button>
             <button class="cv-cancel" type="button" id="cvgNewCancel">Cancel</button>
           </form>
           <div class="cvg-error" id="cvgError"></div>
           <section class="cvg-detail gone" id="cvgDetail" aria-live="polite"></section>
           <div id="cvgList"></div>
-          <div class="cv-empty" id="cvgEmpty">No channels yet. A channel relays to everyone in it as one conversation.</div>
+          <div class="cv-empty" id="cvgEmpty">No groups yet. A group relays to everyone in it as one conversation.</div>
         </div>
         <div class="cvg-error" id="cvPeopleError"></div>
         <div class="cv-list" id="cvList"></div>
@@ -6199,6 +6205,9 @@
   }
 
   async function loadSessionPicker(id, provider = "", title = "Relay", prefetchedResult = null, source = "relay") {
+    // Legacy list menus must remain expanded while their inline picker is open.
+    if (source === "sent") expandedSentId = id;
+    else expandedRelayId = id;
     const selectedProvider = provider === "codex" ? "codex" : "claude";
     if (sessionPickerState
       && String(sessionPickerState.id) === String(id)
@@ -6292,26 +6301,32 @@
   }
   function openRelayFromUI(id, source = "relay", mode = "open", host = "", note = "") {
     if (!id || openingIds.has(id)) return;
+    if (mode === "current") {
+      const provider = host || hostKeyFor(agentAppName());
+      if (provider === "cowork") {
+        setRowNote(id, "Claude Cowork is temporarily unavailable in Relay.", "err");
+        return;
+      }
+      return loadSessionPicker(id, provider, "Relay", null, source);
+    }
     clearRowNote(id); // a previous open's failure text must not outlive the retry
     openingIds.set(id, performance.now());
     for (const el of openingTargets(id)) el.classList.add("opening");
     setTimeout(() => stopOpening(id), 6000); // safety: never spin forever if openDone is missed
     // B-rule bookkeeping: a real hand-off (current or fresh, never preview)
     // teaches the agent this conversation — later hand-offs say "continues".
-    if (source !== "sent" && (mode === "current" || mode === "fresh")) {
+    if (source !== "sent" && mode === "fresh") {
       const row = (payload.relays || []).find((r) => r.id === id);
       if (row) handedThreads.set(row.threadId || row.id, Date.now());
     }
     // Sent rows carry the same three modes as received relays; each has its own
     // IPC so the sent copy is staged/forged before the open.
-    if (source === "sent" && mode === "current" && window.relay.openSentInCurrent) window.relay.openSentInCurrent(id, host || hostKeyFor(agentAppName()));
-    else if (source === "sent" && mode === "fresh" && window.relay.openSentFresh) window.relay.openSentFresh(id, host || hostKeyFor(agentAppName()));
+    if (source === "sent" && mode === "fresh" && window.relay.openSentFresh) window.relay.openSentFresh(id, host || hostKeyFor(agentAppName()));
     // THE NAMED APP IS A PROMISE: every button that opens says "Open in {app}",
     // so an open with no host named by its caller goes where Settings says,
     // not where the frontmost-window heuristic guesses. Callers that name a
     // host themselves (David's per-relay rows, the Task rail's route) win.
     else if (source === "sent" && window.relay.openSent) window.relay.openSent(id, host || hostKeyFor(agentAppName()));
-    else if (mode === "current" && window.relay.openInCurrent) window.relay.openInCurrent(id, host || hostKeyFor(agentAppName()));
     else if (mode === "fresh" && window.relay.openFresh) window.relay.openFresh(id, host || hostKeyFor(agentAppName()), note);
     else window.relay.open(id, host || hostKeyFor(agentAppName()));
   }
@@ -8570,7 +8585,7 @@
       // whichever copy has it instead of letting iteration order pick Relay.
       const ownedAgentSource = [item.source, sentTwin?.source, anchorTwin?.source]
         .find((source) => source?.host === "relay-agent-run");
-      const channelName = directAnchor?.name || chat.channel?.name || chat.title || "Channel";
+      const channelName = directAnchor?.name || chat.channel?.name || chat.title || (chat.channel?.slack ? "Channel" : "Group");
       return {
         id: item.relayId,
         title: String(item.title || "Relay"),
@@ -9145,7 +9160,7 @@
       candidate.group?.groupId === groupId || candidate.chatId === groupId) : null;
     const groupName = group?.name || chat?.group?.name || chat?.channel?.name || chat?.title || r.recipientGroupName || "";
     const isGroup = Boolean(groupId || groupName || r.groupSendId);
-    const party = isGroup ? (groupName || "Channel")
+    const party = isGroup ? (groupName || "Group")
       : r.outbound ? (r.recipientName || "Recipient") : relaySender(r);
     const email = r.outbound ? r.recipientEmail : (r.senderEmail || r.fromEmail);
     return {
@@ -9156,7 +9171,7 @@
         : email ? `email:${String(email).trim().toLowerCase()}` : `name:${String(party).trim().toLowerCase()}`,
       isGroup,
       groupId,
-      groupName: isGroup ? (groupName || "Channel") : "",
+      groupName: isGroup ? (groupName || "Group") : "",
       chatId: r.chatId || chat?.chatId || "",
     };
   }
@@ -9466,19 +9481,7 @@
       const oc = readerBodyEl.querySelector("[data-open-current]");
       if (oc) oc.addEventListener("click", (e) => {
         clearRowNote(r.id);
-        const whole = e.altKey && r.threadId;
-        const n = whole ? threadMessages().filter((m) => m.threadId === r.threadId).length : 0;
-        // Continuity is judged BEFORE the hand-off marks the conversation.
-        const knows = threadHanded(r.threadId || r.id);
-        // An in-chat open answers with its own note (staged / delivered / woken),
-        // which supersedes this one; the paths that answer with nothing used to
-        // leave this line up for good, so it retires with the open too.
         openRelayFromUI(r.id, r.outbound ? "sent" : "relay", "current");
-        setOpeningNote(r.id, whole
-          ? (knows ? `Opening the whole conversation (${n} relays) in the ${agentAppName()} chat that knows it — staged…`
-                   : `Opening ${agentAppName()} on this whole conversation (${n} relays) — staged, nothing sends until you do…`)
-          : (knows ? `Reopening the ${agentAppName()} chat that knows this conversation…`
-                   : `Opening ${agentAppName()} on this conversation — staged, nothing sends until you do…`));
         renderReader();
       });
       // The reader's old "open in a window" hatch pointed at preview.html too;
@@ -9986,10 +9989,10 @@
     const preview = sent ? `data-sent-preview="${esc(id)}"` : thread ? `data-thread-preview="${esc(id)}"` : `data-preview="${esc(id)}"`;
     const cur = sent ? `data-sent-open-current="${esc(id)}"` : thread ? `data-thread-open-current="${esc(id)}"` : `data-open-current="${esc(id)}"`;
     const fresh = sent ? `data-sent-open-fresh="${esc(id)}"` : thread ? `data-thread-open-fresh="${esc(id)}"` : `data-open-fresh="${esc(id)}"`;
-    // Labels name the destination and nothing else — "Current chat" / "New
+    // Labels name the destination choice — "Choose chat" / "New
     // chat". (Host-branded labels were tried and cut: the pill already opens
     // into the right app; saying so per-row was noise. Sven, 2026-08-06.)
-    const curLabel = "Current chat";
+    const curLabel = "Choose chat";
     const freshLabel = "New chat";
     const previewItem = previewable
       ? `<button class="oa-item oa-primary" type="button" role="menuitem" ${preview}>Preview</button><div class="oa-sep" role="separator"></div>`
@@ -10004,6 +10007,7 @@
       <div class="open-actions row-open-card" data-stop="1" role="menu">
         ${previewItem}
         <button class="oa-item${previewable ? "" : " oa-primary"}" type="button" role="menuitem" ${cur}>${esc(curLabel)}</button>
+        ${sessionPickerInlineHtml(id, sessionPickerState?.provider)}
         <div class="oa-sep" role="separator"></div>
         <button class="oa-item" type="button" role="menuitem" ${fresh}>${esc(freshLabel)}</button>
         ${copyLink}
@@ -10188,6 +10192,7 @@
   }
 
   function wireRelayRows() {
+    wireSessionPickerRows(relaysListEl);
     // stop clicks inside action zones from triggering the row open
     for (const z of relaysListEl.querySelectorAll('[data-stop="1"]')) {
       z.addEventListener("click", (e) => e.stopPropagation());
@@ -10499,6 +10504,7 @@
   // Preview (read your own message in place), Open in Current Chat, Open in
   // New Chat — each routed to the sent-side IPC.
   function wireSentRows() {
+    wireSessionPickerRows(sentListEl);
     for (const el of sentListEl.querySelectorAll(".row.sent")) {
       const id = el.getAttribute("data-sent-id");
       if (openingIds.has(id)) el.classList.add("opening");
@@ -10521,7 +10527,7 @@
       btn.addEventListener("click", () => {
         expandedSentId = null;
         openRelayFromUI(id, "sent", "current");
-        renderSent(); // the menu must close on screen, not just in state
+        renderSent(); // retain the menu while choosing a destination
       });
     }
     for (const btn of sentListEl.querySelectorAll("[data-sent-open-fresh]")) {
@@ -11567,10 +11573,8 @@
     cvLatentEl.classList.toggle("gone", !people);
     contactsEmptyEl.classList.toggle("gone", !people || contactsList.length > 0);
     cvGroupsEl.classList.toggle("gone", !groups);
-    // The add button follows the pane it belongs to; the other pane has its own.
+    // The shared creation menu stays available from either Contacts pane.
     cvAddEl.classList.toggle("gone", !people);
-    document.getElementById("cvAddHome").classList.toggle("gone", !people);
-    cvgNewEl.classList.toggle("gone", !groups);
     if (!groups) cvgNewFormEl.classList.add("hidden");
     if (!people) { cvFormEl.classList.add("hidden"); closeAddSheet(); }
     // Neither pane inherits the other's refusal, and neither keeps one across
@@ -11773,19 +11777,19 @@
       : "";
     const ownerTools = editable ? `<div class="gd-owner-tools">
       <div class="gd-add"><input class="cv-input" data-gd-add placeholder="Add member — type a name…" autocomplete="off" spellcheck="false" /><div class="cvg-sugg" data-gd-suggestions></div></div>
-      ${rename || `<div class="gd-actions"><button class="gd-action" type="button" data-gd-rename>Rename</button><button class="gd-action danger" type="button" data-gd-archive>${cvgDeleteArmedId === g.id ? "Really archive? Messages stay" : "Archive channel"}</button></div>`}
+      ${rename || `<div class="gd-actions"><button class="gd-action" type="button" data-gd-rename>Rename</button><button class="gd-action danger" type="button" data-gd-archive>${cvgDeleteArmedId === g.id ? "Really archive? Messages stay" : "Archive group"}</button></div>`}
     </div>` : "";
     let membershipAction = "";
     if (archived) {
-      membershipAction = `<div class="gd-membership"><div class="gd-status">This channel is archived. Its messages stay readable, but nobody can post in it.</div></div>`;
+      membershipAction = `<div class="gd-membership"><div class="gd-status">This ${slack ? "channel" : "group"} is archived. Its messages stay readable, but nobody can post in it.</div></div>`;
     } else if (!mine && !slack) {
       membershipAction = groupLeaveArmedId === g.id
-        ? `<div class="gd-membership gd-membership-confirm"><div class="gd-confirm"><strong>Leave ${esc(g.name)}?</strong><p>You’ll stop receiving new messages. Your existing messages will remain in Relays.</p><div class="gd-confirm-actions"><button class="cancel" type="button" data-gd-leave-cancel>Cancel</button><button class="confirm" type="button" data-gd-leave-confirm>Leave channel</button></div></div></div>`
-        : `<div class="gd-membership"><button class="gd-leave" type="button" data-gd-leave>Leave channel</button></div>`;
+        ? `<div class="gd-membership gd-membership-confirm"><div class="gd-confirm"><strong>Leave ${esc(g.name)}?</strong><p>You’ll stop receiving new messages. Your existing messages will remain in Relays.</p><div class="gd-confirm-actions"><button class="cancel" type="button" data-gd-leave-cancel>Cancel</button><button class="confirm" type="button" data-gd-leave-confirm>Leave group</button></div></div></div>`
+        : `<div class="gd-membership"><button class="gd-leave" type="button" data-gd-leave>Leave group</button></div>`;
     }
     return `<div class="group-detail${sheet ? " in-sheet" : ""}" data-group-detail="${esc(g.id)}">
-      ${sheet ? "" : `<button class="gd-back" type="button" data-gd-back>‹ Channels</button>`}
-      <div class="gd-identity"><span class="cvg-stack">${groupAvatarStack(g, roster)}</span><span class="gd-title"><h2>${esc(g.name || "Channel")}</h2><p>${count} ${count === 1 ? "person" : "people"}</p></span></div>
+      ${sheet ? "" : `<button class="gd-back" type="button" data-gd-back>‹ Groups</button>`}
+      <div class="gd-identity"><span class="cvg-stack">${groupAvatarStack(g, roster)}</span><span class="gd-title"><h2>${esc(g.name || (slack ? "Channel" : "Group"))}</h2><p>${count} ${count === 1 ? "person" : "people"}</p></span></div>
       <div class="gd-section-label">Members</div>
       <div class="gd-members">${memberRows}</div>
       ${ownerTools}${membershipAction}
@@ -11912,16 +11916,16 @@
     const room = threadDetailId ? chatRoomForThread(threadDetailId) : null;
     if (!room || !room.isGroup) return;
     groupInfoBackdropEl.classList.remove("hidden");
-    groupInfoDetailEl.innerHTML = `<div class="cv-empty">Loading channel info…</div>`;
+    groupInfoDetailEl.innerHTML = `<div class="cv-empty">Loading group info…</div>`;
     const result = await cvgCall(window.relay.groups);
     if (!Array.isArray(result)) {
-      groupInfoDetailEl.innerHTML = `<div class="cv-empty">This channel’s roster is unavailable.</div>`;
+      groupInfoDetailEl.innerHTML = `<div class="cv-empty">This group’s roster is unavailable.</div>`;
       return;
     }
     groupsLoaded = true;
     groupsList = result.slice().sort((a, b) => String(a.name).localeCompare(String(b.name)));
     // Native groups and Slack channels are two projections of the same
-    // Channels surface. Reloading the native roster must never discard the
+    // Groups surface. Reloading the native roster must never discard the
     // current Slack projection or turn a cache miss into a fake departure.
     syncSlackChannelRows();
     const wantedId = String(room.chatId || room.groupId || "");
@@ -11931,8 +11935,8 @@
       || null;
     if (!groupInfoGroup) {
       groupInfoDetailEl.innerHTML = leftGroupIds.has(String(room.groupId || room.chatId || ""))
-        ? `<div class="cv-empty">You left this channel. Existing messages remain readable.</div>`
-        : `<div class="cv-empty">Channel info is still syncing.</div>`;
+        ? `<div class="cv-empty">You left this group. Existing messages remain readable.</div>`
+        : `<div class="cv-empty">Group info is still syncing.</div>`;
       return;
     }
     renderGroupInfo();
@@ -12020,7 +12024,7 @@
   function groupRoomPostingState(room) {
     if (!room || !room.isGroup || !room.groupId) return { blocked:false, reason:"" };
     const groupId = String(room.groupId);
-    if (leftGroupIds.has(groupId)) return { blocked:true, reason:"You left this channel. Existing messages remain readable." };
+    if (leftGroupIds.has(groupId)) return { blocked:true, reason:"You left this group. Existing messages remain readable." };
     const slackChat = [...(payload.chats || []), ...(payload.slackChats || [])].find((chat) =>
       slackIntegrationForChat(chat) && (String(chat.chatId) === String(room.chatId || groupId)),
     );
@@ -12035,7 +12039,7 @@
     // A local roster miss is not evidence of departure. The API remains the
     // write authority and will reject a send if membership really changed.
     if (!group) return { blocked:false, reason:"" };
-    if (group.archivedAt) return { blocked:true, reason:"This channel is archived. Existing messages remain readable." };
+    if (group.archivedAt) return { blocked:true, reason:"This group is archived. Existing messages remain readable." };
     return { blocked:false, reason:"" };
   }
   function wireGroupRows() {
@@ -12134,12 +12138,17 @@
     }
   }
   cvgNewEl.addEventListener("click", () => {
-    cvgNewFormEl.classList.toggle("hidden");
-    if (!cvgNewFormEl.classList.contains("hidden")) {
-      cvgNewNameEl.focus();
-    }
+    contactsPane = "groups";
+    applyContactsPane();
+    loadGroups();
+    cvgNewFormEl.classList.remove("hidden");
+    cvgNewNameEl.focus();
   });
-  cvgNewCancelEl.addEventListener("click", () => { cvgNewNameEl.value = ""; cvgNewFormEl.classList.add("hidden"); });
+  cvgNewCancelEl.addEventListener("click", () => {
+    cvgNewNameEl.value = "";
+    cvgNewFormEl.classList.add("hidden");
+    document.getElementById("cvNew").focus();
+  });
   cvgNewFormEl.addEventListener("submit", async (ev) => {
     ev.preventDefault();
     const name = cvgNewNameEl.value.trim();
@@ -12328,7 +12337,7 @@
     cvAddT2El.classList.remove("lit");
     moveAddButton(true);
     setInteractive(true);
-    setTimeout(() => cvAddInputEl.focus(), 30);
+    cvAddInputEl.focus();
   }
   function closeAddSheet() {
     addSheetGeneration += 1;
@@ -12336,7 +12345,7 @@
     moveAddButton(false);
     cvAddInputEl.value = "";
     cvAddGoEl.disabled = false;
-    if (wasOpen && contactsPane === "people") cvAddEl.focus();
+    if (wasOpen && contactsPane === "people") document.getElementById("cvNew").focus();
   }
   function addSheetWarn(text) {
     cvAddNoteEl.textContent = text;
@@ -12392,7 +12401,13 @@
       setTimeout(() => { if (button.isConnected) { button.textContent = label; button.disabled = false; } }, 1400);
     }
   }
-  cvAddEl.addEventListener("click", () => cvAddSheetEl.classList.contains("hidden") ? openAddSheet() : addPersonByAddress());
+  wireMessageSideMenus(document.getElementById("cvCreateActions"));
+  document.getElementById("cvNewContact").addEventListener("click", () => {
+    contactsPane = "people";
+    applyContactsPane();
+    openAddSheet();
+  });
+  cvAddEl.addEventListener("click", addPersonByAddress);
   cvAddInputEl.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); addPersonByAddress(); } });
   cvAddInputEl.addEventListener("mousedown", () => setInteractive(true));
   cvAddCancelEl.addEventListener("click", closeAddSheet);
@@ -13581,12 +13596,12 @@
         msgs: [],
         latest: { at:quietAt, title:"No messages yet", direction:"", party:"" },
         unreadCount: 0,
-        party: group.name || "Channel",
+        party: group.name || "Group",
         partyKey: key,
         isGroup: true,
         groupId: String(group.id),
-        groupName: group.name || "Channel",
-        name: group.name || "Channel",
+        groupName: group.name || "Group",
+        name: group.name || "Group",
         people,
         setLabel: groupMemberSummary(roster),
         hasActivity: false,
@@ -18140,44 +18155,10 @@
     flushDeferredSurfaceRender();
   });
   if (window.relay.onOpenDone) window.relay.onOpenDone((id) => { stopOpening(id); retireOpeningNote(id); });
-  // Visible confirmation for "Open in current chat". Two honest states:
-  //   waiting   — staged for an idle chat; ONLY that chat's next turn can ingest
-  //               it, so the note stays up (surviving re-renders) until delivery
-  //               and tells the user how to pull it in themselves.
-  //   delivered — main watched the consume-once injection file disappear; the
-  //               instruction is IN the chat. Green check, then fade.
-  // A Codex bridge/automation hand-off keeps the classic brief confirmation.
-  const deliveredChatNames = new Map(); // packetId -> chat the injection was staged for
-  if (window.relay.onInjected) window.relay.onInjected((id, info) => {
-    if (info.channel) {
-      // Wake path: a channel event starts a real turn even in an idle chat.
-      cancelNoteTimer(id);
-      setRowNote(id, "Pushed to your current Claude chat — waking it now…", "ok");
-      return;
-    }
-    if (info.awaitingTurn) {
-      // Persistent until delivery / the auto-fresh hop — never a silent limbo.
-      cancelNoteTimer(id);
-      // Name the destination chat when we know it: "your \u201cgranular-relay\u201d chat"
-      // tells the user WHERE to look; "your current chat" leaves them hunting
-      // (field report: the injection landed in a chat they never found).
-      if (info.chat) deliveredChatNames.set(id, info.chat);
-      const where = info.chat ? `your \u201c${info.chat}\u201d chat` : "your current Claude chat";
-      setRowNote(id, `Delivered into ${where} — lands when it next takes a turn. If it\u2019s idle: type anything there, or use Open in New Chat for instant.`, "ok");
-      return;
-    }
-    const hostName = info.host === "codex" ? "Codex" : "Claude";
-    setRowNote(id, `✓ Sent to your current ${hostName} chat — it will pick this up at its next checkpoint.`, "ok");
-    fadeRowNoteLater(id, 12000);
-  });
-  if (window.relay.onInjectionDelivered) window.relay.onInjectionDelivered((id) => {
-    const chat = deliveredChatNames.get(id);
-    setRowNote(id, `✓ Delivered — ${chat ? `your \u201c${chat}\u201d chat` : "your current Claude chat"} is acting on it now.`, "ok");
-    fadeRowNoteLater(id, 8000);
-  });
-  if (window.relay.onInjectionAutoFresh) window.relay.onInjectionAutoFresh((id) => {
-    setRowNote(id, "Your current chat was idle, so this is opening in a new chat instead.", "ok");
-    fadeRowNoteLater(id, 10000);
+  if (window.relay.onChooseSession) window.relay.onChooseSession((id, selection) => {
+    stopOpening(id);
+    // openDone may retain the old spinner briefly; it must not block the picker.
+    loadSessionPicker(id, selection.provider || hostKeyFor(agentAppName()), "Relay", null, selection.source || "relay");
   });
   // An open that failed leaves the relay UNREAD on purpose (it never reached the user),
   // so the row has to say what happened — otherwise the spinner just stops and the click

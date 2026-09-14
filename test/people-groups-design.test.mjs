@@ -5,13 +5,17 @@ import test from "node:test";
 const html = fs.readFileSync(new URL("../overlay/inbox.html", import.meta.url), "utf8");
 const main = fs.readFileSync(new URL("../overlay/main.cjs", import.meta.url), "utf8");
 
-test("People and Channels are distinct counted panes with one consistent add action", () => {
+test("Contacts and Groups share one creation menu with both actions", () => {
   assert.match(html, /data-view="contacts">Contacts <span class="tab-badge gone" id="peopleBadge"/);
   assert.match(html, /id="cvSegPeople"[^>]*>Contacts <span class="cv-seg-n" id="cvSegPeopleN"/);
-  assert.match(html, /id="cvSegGroups"[^>]*>Channels <span class="cv-seg-n" id="cvSegGroupsN"/);
-  // Words over glyphs (Sven, 2026-09-08): the button says Add, not "+ Add".
+  assert.match(html, /id="cvSegGroups"[^>]*>Groups <span class="cv-seg-n" id="cvSegGroupsN"/);
+  assert.match(html, /id="cvNew"[^>]*aria-haspopup="menu"[^>]*>New ▾</);
+  assert.match(html, /role="menuitem" id="cvNewContact">New Contact</);
+  assert.match(html, /role="menuitem" id="cvgNew">New Group</);
+  // The existing Add button submits the contact sheet, rather than taking
+  // another slot beside the shared creation menu.
   assert.match(html, /id="cvAdd" aria-label="Add contact">Add</);
-  assert.match(html, /id="cvgNew" aria-label="Add channel">Add</);
+  assert.match(html, /class="cv-add-slot gone" id="cvAddHome"/);
 });
 
 test("People rows use colored identity, editorial metadata, and recency without chevrons", () => {

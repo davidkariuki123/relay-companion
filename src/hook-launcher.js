@@ -1,6 +1,9 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import retiredHook from "./retired-hook.cjs";
+
+const RETIRED_PROGRAM = `(${retiredHook.drainRetiredHookInput.toString()})(process.stdin);`;
 
 function posixQuote(value) {
   return `'${String(value).replaceAll("'", `'"'"'`)}'`;
@@ -34,45 +37,27 @@ export function stableWindowsHookScriptPath(homeDir = os.homedir()) {
   return path.join(homeDir, ".relay", "bin", "hook-launcher.ps1");
 }
 
-function posixLauncherSource({ targetBin, dedicatedBin, nodeCandidates }) {
+function posixLauncherSource({ nodeCandidates }) {
   return `#!/bin/sh
-# Relay's hook bridge lives outside the replaceable npm/runtime tree.
-hook="$1"
-case "$hook" in claude-hook|codex-hook) ;; *) exit 0 ;; esac
-target=${posixQuote(targetBin)}
-dedicated=${posixQuote(dedicatedBin)}
+# Relay hooks are retired. Never dispatch into a current or rollback runtime.
 node=""
 for candidate in ${nodeCandidates.map(posixQuote).join(" ")}; do
   if [ -x "$candidate" ]; then node="$candidate"; break; fi
 done
 [ -n "$node" ] || exit 0
-if [ -f "$dedicated" ]; then
-  # Replace the shell so a host timeout cannot leave the hook Node child alive.
-  # The dedicated entrypoint is itself fail-open and exits zero.
-  exec "$node" --max-old-space-size=96 "$dedicated" "$hook" 2>/dev/null
-fi
-[ -f "$target" ] || exit 0
-# Compatibility for a downgrade to a Relay version without relay-hook.js.
-"$node" --max-old-space-size=96 "$target" "$hook" 2>/dev/null || :
-exit 0
+exec "$node" --max-old-space-size=32 -e ${posixQuote(RETIRED_PROGRAM)} 2>/dev/null
 `;
 }
 
-function windowsLauncherSource({ targetBin, dedicatedBin, nodeCandidates }) {
-  return `# Relay's hook bridge lives outside the replaceable npm/runtime tree.
+function windowsLauncherSource({ nodeCandidates }) {
+  return `# Relay hooks are retired. Retained for cached host registrations.
 param([string]$RelayMarker, [string]$RelayHook)
-if ($RelayHook -ne 'claude-hook' -and $RelayHook -ne 'codex-hook') { exit 0 }
-$target = ${powershellQuote(targetBin)}
-$dedicated = ${powershellQuote(dedicatedBin)}
 $node = $null
 foreach ($candidate in @(${nodeCandidates.map(powershellQuote).join(", ")})) {
   if (Test-Path -LiteralPath $candidate -PathType Leaf) { $node = $candidate; break }
 }
 if (-not $node) { exit 0 }
-$script = $dedicated
-if (-not (Test-Path -LiteralPath $script -PathType Leaf)) { $script = $target }
-if (-not (Test-Path -LiteralPath $script -PathType Leaf)) { exit 0 }
-try { & $node '--max-old-space-size=96' $script $RelayHook 2>$null } catch {}
+try { & $node '--max-old-space-size=32' '-e' ${powershellQuote(RETIRED_PROGRAM)} 2>$null } catch {}
 exit 0
 `;
 }
@@ -82,9 +67,9 @@ function unique(values) {
 }
 
 /**
- * Atomically point the upgrade-surviving hook bridge at a verified runtime.
- * The returned command/argsPrefix can be written directly into Claude's
- * exec-form hook; Codex receives the equivalent shell command.
+ * Atomically neutralize the old stable bridge, including cached registrations.
+ * The invocation shape stays compatible with legacy commands. Callers must not
+ * register new hooks; this bridge intentionally never invokes targetBin.
  */
 export function ensureStableHookLauncher({
   targetBin,

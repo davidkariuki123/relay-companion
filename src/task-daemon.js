@@ -988,7 +988,11 @@ export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
   // Repair Relay.app + launchd surfaces independently of npm postinstall. This is a
   // bounded, per-version migration; it reloads only the pill and never unloads this
   // currently running daemon.
-  try { repairAgentMcpRegistrations(); } catch (error) {
+  try {
+    const repair = repairAgentMcpRegistrations();
+    if (!repair.ok) throw new Error(repair.hookRepair?.detail || repair.hookRepair?.reason || "agent registration repair failed");
+    if (repair.hookRepair?.restartRequired) log("Restart agent hosts to clear cached hooks pointing into an older Relay runtime.");
+  } catch (error) {
     log(`MCP launcher repair failed: ${error?.message || error}`);
   }
   startDesktopStartupMigration({ log });

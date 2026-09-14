@@ -441,7 +441,7 @@ test("browser-approved PKCE connection keeps secrets out of output and powers di
   assert.match(untrustedApi.stderr, /production or development Relay API host/);
 });
 
-test("setup converges on MCP and skill without retiring integrations or adding hooks", () => {
+test("setup preserves MCP and skill while retiring Relay hooks", () => {
   const start = installer.indexOf("export async function runSetupInstall");
   const end = installer.indexOf("export async function installAgentSkills", start);
   const setup = installer.slice(start, end);
@@ -449,7 +449,8 @@ test("setup converges on MCP and skill without retiring integrations or adding h
   assert.match(setup, /installClaudeCode\(/);
   assert.match(setup, /installCodex\(/);
   assert.match(setup, /installClaudeDesktop\(/);
-  assert.match(setup, /repairExistingAgentHooks\(/);
+  assert.match(setup, /retireAgentHooks\(/);
+  assert.match(setup, /if \(!hookRepair\.ok\) throw new Error/);
   assert.doesNotMatch(setup, /removeClaudeCodeMcpConfig|removeCodexMcpConfig|uninstallClaudeHooks|uninstallCodexHooks|installClaudeHooksWithStableLauncher|installCodexHooksWithStableLauncher/);
 });
 

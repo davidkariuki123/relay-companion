@@ -12,7 +12,7 @@ import {
 test("the shipped runtime retains exact session routing and task completion wakes", () => {
   const root = fileURLToPath(new URL("..", import.meta.url));
   const result = assertRuntimeCapabilities(root);
-  assert.deepEqual(result.capabilities, ["agentProtocol", "exactSessionRouting", "taskCompletionWake"]);
+  assert.deepEqual(result.capabilities, ["agentProtocol", "exactSessionRouting", "hookRetirement", "taskCompletionWake"]);
 });
 
 test("the release gate rejects a runtime whose capability wiring disappeared", () => {
@@ -22,7 +22,7 @@ test("the release gate rejects a runtime whose capability wiring disappeared", (
       for (const [relative, markers] of Object.entries(files)) {
         const absolute = path.join(root, relative);
         fs.mkdirSync(path.dirname(absolute), { recursive: true });
-        fs.writeFileSync(absolute, markers.join("\n"));
+        fs.appendFileSync(absolute, markers.join("\n") + "\n");
       }
     }
     assert.equal(assertRuntimeCapabilities(root).ok, true);
@@ -38,4 +38,20 @@ test("the release gate rejects a runtime whose capability wiring disappeared", (
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("the release gate rejects hook resurrection even when capability markers remain", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-runtime-retirement-"));
+  try {
+    for (const files of Object.values(REQUIRED_RUNTIME_CAPABILITIES)) {
+      for (const [relative, markers] of Object.entries(files)) {
+        const absolute = path.join(root, relative);
+        fs.mkdirSync(path.dirname(absolute), { recursive: true });
+        fs.appendFileSync(absolute, markers.join("\n") + "\n");
+      }
+    }
+    assert.equal(assertRuntimeCapabilities(root).ok, true);
+    fs.appendFileSync(path.join(root, "overlay/main.cjs"), "repairClaudeHooks(install);\n");
+    assert.throws(() => assertRuntimeCapabilities(root), /hookRetirement contains retired wiring/);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

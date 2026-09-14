@@ -1,199 +1,133 @@
-// Tests for the Claude Code hook installer (install.js installClaudeHooks /
-// uninstallClaudeHooks): idempotent merge into settings.json, full preservation
-// of user content, and uninstall that removes ONLY Relay's entries. All against
-// temp settings files — never the real ~/.claude/settings.json.
-
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
-  claudeHookCommand,
-  claudeHookHandler,
-  installClaudeHooks,
-  isRelayClaudeHookCommand,
-  uninstallClaudeHooks,
+  installClaudeHooks, installCodexHooks, uninstallClaudeHooks, uninstallCodexHooks,
+  isRelayClaudeHookCommand, isRelayCodexHookCommand, retireAgentHooks,
+  installClaudeHooksWithStableLauncher, installCodexHooksWithStableLauncher,
+  agentHookRetirementStatus,
 } from "../src/install.js";
 
-const HOOK_EVENTS = ["PostToolUse", "Stop", "UserPromptSubmit", "SessionStart"];
-const NODE = "/opt/homebrew/bin/node";
-const BIN = "/Users/x/.relay/lib/node_modules/relay-companion/bin/relay.js";
-const RELAY_ALLOWED_TOOLS = [
-  "mcp__relay__relay_ai_sessions",
-  "mcp__relay__relay_ai_session",
-  "mcp__relay__relay_sessions",
-  "mcp__relay__relay_session",
-];
-
-function settingsFixture(initial) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-claude-hooks-"));
-  const settingsPath = path.join(dir, "settings.json");
-  if (initial !== undefined) fs.writeFileSync(settingsPath, initial);
-  return settingsPath;
+function fixture(t) {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-hook-retirement-"));
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  const claudeSettingsFile = path.join(homeDir, ".claude", "settings.json");
+  const codexHooksFile = path.join(homeDir, ".codex", "hooks.json");
+  return { homeDir, claudeSettingsFile, codexHooksFile, node: process.execPath,
+    bin: path.join(homeDir, "runtime", "bin", "relay.js") };
+}
+function write(file, content) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, typeof content === "string" ? content : JSON.stringify(content));
+}
+const userHook = { type: "command", command: "user-owned-command", timeout: 11 };
+const permissions = { allow: ["Bash(ls:*)", "mcp__relay__relay_ai_session"], deny: ["Bash(rm:*)"] };
+function legacy(host) {
+  return { theme: "keep", permissions, hooks: Object.fromEntries(
+    ["Stop", "PostToolUse", "SessionStart", "UserPromptSubmit", "FutureEvent"].map(event => [event, [
+      { matcher: "Edit", custom: true, hooks: [userHook, { type: "command", command: `node '/old path/relay.js' '${host}-hook'` }] },
+      { hooks: [{ type: "command", command: "node", args: ["C:\\old\\relay-hook.js", `${host}-hook`] }] },
+    ]])) };
 }
 
-function readSettings(settingsPath) {
-  return JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-}
-
-function relayEntries(settings, event) {
-  return (settings.hooks?.[event] || []).filter((entry) =>
-    (entry.hooks || []).some((hook) => isRelayClaudeHookCommand(hook)),
-  );
-}
-
-test("installClaudeHooks creates settings.json with one tagged entry per event", () => {
-  const settingsPath = settingsFixture();
-  const res = installClaudeHooks(BIN, NODE, { settingsPath });
-  assert.equal(res.ok, true);
-  const settings = readSettings(settingsPath);
-  assert.deepEqual(settings.permissions.allow, RELAY_ALLOWED_TOOLS);
-  for (const event of HOOK_EVENTS) {
-    const entries = relayEntries(settings, event);
-    assert.equal(entries.length, 1, `${event} gets exactly one Relay entry`);
-    assert.equal(entries[0].matcher, "*");
-    const hook = entries[0].hooks[0];
-    assert.equal(hook.type, "command");
-    assert.equal(hook.timeout, 5);
-    assert.equal(hook.command, NODE);
-    assert.deepEqual(hook.args, [BIN, "claude-hook"]);
-    assert.equal(isRelayClaudeHookCommand(hook), true, "exec-form hook is recognizably Relay-owned");
-  }
-});
-
-test("reinstalling is idempotent and refreshes a moved runtime path without duplicates", () => {
-  const settingsPath = settingsFixture();
-  installClaudeHooks(BIN, NODE, { settingsPath });
-  installClaudeHooks(BIN, NODE, { settingsPath });
-  const movedNode = "/usr/local/bin/node";
-  installClaudeHooks(BIN, movedNode, { settingsPath });
-  const settings = readSettings(settingsPath);
-  for (const event of HOOK_EVENTS) {
-    const entries = relayEntries(settings, event);
-    assert.equal(entries.length, 1, `${event} never accumulates duplicates`);
-    assert.equal(entries[0].hooks[0].command, movedNode);
-    assert.deepEqual(entries[0].hooks[0].args, [BIN, "claude-hook"]);
-  }
-});
-
-test("install preserves every user setting and every user hook", () => {
-  const userSettings = {
-    permissions: { allow: ["Bash(ls:*)"] },
-    model: "opus",
-    hooks: {
-      PostToolUse: [{ matcher: "Edit", hooks: [{ type: "command", command: "eslint --fix" }] }],
-      Notification: [{ hooks: [{ type: "command", command: "afplay ding.wav" }] }],
-    },
-  };
-  const settingsPath = settingsFixture(JSON.stringify(userSettings, null, 2));
-  const res = installClaudeHooks(BIN, NODE, { settingsPath });
-  assert.equal(res.ok, true);
-  const settings = readSettings(settingsPath);
-  assert.deepEqual(settings.permissions, {
-    allow: ["Bash(ls:*)", ...RELAY_ALLOWED_TOOLS],
+for (const [host, install, uninstall, predicate] of [
+  ["claude", installClaudeHooks, uninstallClaudeHooks, isRelayClaudeHookCommand],
+  ["codex", installCodexHooks, uninstallCodexHooks, isRelayCodexHookCommand],
+]) {
+  test(`${host} legacy installer removes only Relay handlers across all event names`, t => {
+    const f = fixture(t);
+    const file = host === "claude" ? f.claudeSettingsFile : f.codexHooksFile;
+    const options = host === "claude" ? { settingsPath: file } : { hooksPath: file };
+    write(file, legacy(host));
+    assert.equal(install(f.bin, f.node, options).retired, true);
+    const content = JSON.parse(fs.readFileSync(file, "utf8"));
+    assert.deepEqual(content.permissions, permissions);
+    assert.equal(content.theme, "keep");
+    for (const entries of Object.values(content.hooks)) {
+      assert.deepEqual(entries, [{ matcher: "Edit", custom: true, hooks: [userHook] }]);
+    }
+    const before = fs.readFileSync(file, "utf8");
+    assert.equal(install(f.bin, f.node, options).ok, true);
+    assert.equal(fs.readFileSync(file, "utf8"), before);
+    assert.equal(fs.existsSync(path.join(f.homeDir, ".relay")), false, "legacy per-file API has no unrelated filesystem effects");
   });
-  assert.equal(settings.model, "opus");
-  assert.deepEqual(settings.hooks.Notification, userSettings.hooks.Notification);
-  const postToolUse = settings.hooks.PostToolUse;
-  assert.equal(postToolUse.length, 2);
-  assert.deepEqual(postToolUse[0], userSettings.hooks.PostToolUse[0], "user entry survives untouched, in place");
-  assert.equal(relayEntries(settings, "PostToolUse").length, 1);
-});
 
-test("a corrupt settings.json is never clobbered", () => {
-  const broken = '{ "hooks": { this is not json';
-  const settingsPath = settingsFixture(broken);
-  const res = installClaudeHooks(BIN, NODE, { settingsPath });
-  assert.equal(res.ok, false);
-  assert.equal(res.reason, "claude_settings_unreadable");
-  assert.equal(fs.readFileSync(settingsPath, "utf8"), broken, "file left byte-identical");
-});
-
-test("uninstall removes only Relay entries and drops event keys Relay emptied", () => {
-  const settingsPath = settingsFixture(
-    JSON.stringify({
-      permissions: { allow: ["Bash(ls:*)"] },
-      hooks: {
-        PostToolUse: [{ matcher: "Edit", hooks: [{ type: "command", command: "eslint --fix" }] }],
-        SessionEnd: [],
-      },
-    }),
-  );
-  installClaudeHooks(BIN, NODE, { settingsPath });
-  const res = uninstallClaudeHooks({ settingsPath });
-  assert.equal(res.ok, true);
-  const settings = readSettings(settingsPath);
-  assert.deepEqual(settings.permissions, { allow: ["Bash(ls:*)"] });
-  assert.deepEqual(settings.hooks.PostToolUse, [
-    { matcher: "Edit", hooks: [{ type: "command", command: "eslint --fix" }] },
-  ]);
-  // events that only ever held our entry are gone; the user's own empty array stays
-  for (const event of ["Stop", "UserPromptSubmit", "SessionStart"]) {
-    assert.equal(settings.hooks[event], undefined, `${event} emptied by our removal is dropped`);
-  }
-  assert.deepEqual(settings.hooks.SessionEnd, [], "user's own empty array is untouched");
-});
-
-test("uninstall strips a Relay hook that was merged into a shared entry, keeping the user's hook", () => {
-  const settingsPath = settingsFixture(
-    JSON.stringify({
-      hooks: {
-        Stop: [
-          {
-            matcher: "*",
-            hooks: [
-              { type: "command", command: "say done" },
-              { type: "command", command: claudeHookCommand(BIN, NODE) },
-            ],
-          },
-        ],
-      },
-    }),
-  );
-  const res = uninstallClaudeHooks({ settingsPath });
-  assert.equal(res.ok, true);
-  const settings = readSettings(settingsPath);
-  assert.deepEqual(settings.hooks.Stop, [{ matcher: "*", hooks: [{ type: "command", command: "say done" }] }]);
-});
-
-test("uninstall on a settings file without Relay hooks changes nothing", () => {
-  const original = JSON.stringify({ hooks: { PostToolUse: [{ hooks: [{ type: "command", command: "true" }] }] } }, null, 2);
-  const settingsPath = settingsFixture(original);
-  const res = uninstallClaudeHooks({ settingsPath });
-  assert.equal(res.ok, true);
-  assert.equal(fs.readFileSync(settingsPath, "utf8"), original, "no gratuitous rewrite");
-  const missing = uninstallClaudeHooks({ settingsPath: path.join(path.dirname(settingsPath), "absent.json") });
-  assert.equal(missing.ok, true);
-});
-
-test("hook commands with spaces use Claude exec form and remain recognizably ours", () => {
-  const handler = claudeHookHandler("/Users/x y/relay companion/bin/relay.js", "/opt/some node/bin/node");
-  assert.deepEqual(handler, {
-    type: "command",
-    command: "/opt/some node/bin/node",
-    args: ["/Users/x y/relay companion/bin/relay.js", "claude-hook"],
-    timeout: 5,
+  test(`${host} absent and malformed settings are never overwritten`, t => {
+    const f = fixture(t);
+    const file = host === "claude" ? f.claudeSettingsFile : f.codexHooksFile;
+    const options = host === "claude" ? { settingsPath: file } : { hooksPath: file };
+    assert.equal(install(f.bin, f.node, options).ok, true);
+    assert.equal(fs.existsSync(file), false);
+    write(file, '{"hooks": invalid');
+    assert.equal(install(f.bin, f.node, options).ok, false);
+    assert.equal(fs.readFileSync(file, "utf8"), '{"hooks": invalid');
+    assert.equal(uninstall(options).ok, false);
   });
-  assert.equal(isRelayClaudeHookCommand(handler), true);
-  const legacyCommand = claudeHookCommand("/Users/x y/relay companion/bin/relay.js", "/opt/some node/bin/node");
-  assert.equal(isRelayClaudeHookCommand(legacyCommand), true, "legacy shell form remains removable");
-  assert.equal(isRelayClaudeHookCommand("eslint --fix"), false);
-  assert.equal(isRelayClaudeHookCommand("node relay.js mcp"), false);
+
+  test(`${host} recognizes historic shell, dedicated entry, exec and Windows shapes only`, () => {
+    for (const command of [
+      `node /old/relay.js ${host}-hook`, `node '/path with spaces/relay-hook.js' '${host}-hook'`,
+      { command: "node", args: ["C:\\Users\\A B\\relay.js", `${host}-hook`] },
+      { command: "powershell", args: ["-File", "C:\\Users\\A B\\.relay\\bin\\hook-launcher.ps1", "C:\\Users\\A B\\.relay\\bin\\relay.js", `${host}-hook`] },
+    ]) assert.equal(predicate(command), true, JSON.stringify(command));
+    for (const command of ["user-owned-command", `node /other/not-relay.js ${host}-hook`, `node /x/relay.js ${host}-hook-extra`, `echo "node /x/relay.js ${host}-hook"`, `node -e "console.log('relay.js ${host}-hook')"`, "relay mcp"]) {
+      assert.equal(predicate(command), false, command);
+    }
+  });
+}
+
+test("retirement covers primary, local and Codex files and leaves a silent bridge", t => {
+  const f = fixture(t);
+  const local = path.join(path.dirname(f.claudeSettingsFile), "settings.local.json");
+  write(f.claudeSettingsFile, legacy("claude"));
+  write(local, legacy("claude"));
+  write(f.codexHooksFile, legacy("codex"));
+  const first = retireAgentHooks(f);
+  assert.equal(first.ok, true);
+  assert.equal(first.restartRequired, true);
+  assert.equal(first.claudeHooks.files.length, 2);
+  assert.equal(agentHookRetirementStatus(f).registeredHandlers, 0);
+  const report = agentHookRetirementStatus(f).lastMigration;
+  assert.ok(report.lastRawHookRemovalAt);
+  assert.doesNotMatch(JSON.stringify(report), /user-owned-command|old path/);
+  assert.equal(retireAgentHooks(f).attempted, false);
+  assert.equal(agentHookRetirementStatus(f).lastMigration.lastRawHookRemovalAt, report.lastRawHookRemovalAt, "repeat repair cannot claim cached raw hooks have stopped");
+  const bridge = fs.readFileSync(first.hookInvocation.scriptPath, "utf8");
+  assert.match(bridge, /Relay hooks are retired/);
+  assert.doesNotMatch(bridge, /runtime\/bin|relay-hook\.js/);
 });
 
-test("install replaces legacy shell-form Relay hooks with exec form", () => {
-  const settingsPath = settingsFixture(JSON.stringify({
-    hooks: {
-      UserPromptSubmit: [{
-        matcher: "*",
-        hooks: [{ type: "command", command: claudeHookCommand(BIN, NODE), timeout: 5 }],
-      }],
-    },
-  }));
-  installClaudeHooks(BIN, NODE, { settingsPath });
-  const entry = relayEntries(readSettings(settingsPath), "UserPromptSubmit")[0];
-  assert.equal(entry.hooks.length, 1);
-  assert.equal(entry.hooks[0].command, NODE);
-  assert.deepEqual(entry.hooks[0].args, [BIN, "claude-hook"]);
+test("unreadable Relay settings fail visibly after neutralizing the bridge", t => {
+  const f = fixture(t);
+  const malformed = '{"hooks": [{ "command": "node /old/relay.js claude-hook"';
+  write(f.claudeSettingsFile, malformed);
+  const result = retireAgentHooks(f);
+  assert.equal(result.ok, false);
+  assert.equal(result.retired, false);
+  assert.equal(result.reason, "hook_retirement_incomplete");
+  assert.equal(fs.readFileSync(f.claudeSettingsFile, "utf8"), malformed);
+  assert.match(fs.readFileSync(result.hookInvocation.scriptPath, "utf8"), /Relay hooks are retired/);
+  assert.deepEqual(agentHookRetirementStatus(f).unreadableFiles, [f.claudeSettingsFile]);
+});
+
+test("a bridge write failure cannot report a completed migration or alter settings", t => {
+  const f = fixture(t);
+  write(f.claudeSettingsFile, legacy("claude"));
+  write(path.join(f.homeDir, ".relay"), "not a directory");
+  const before = fs.readFileSync(f.claudeSettingsFile, "utf8");
+  const result = retireAgentHooks(f);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "hook_launcher_write_failed");
+  assert.equal(fs.readFileSync(f.claudeSettingsFile, "utf8"), before);
+});
+
+test("legacy stable installers respect the supplied home and can only retire", t => {
+  const f = fixture(t);
+  write(f.claudeSettingsFile, legacy("claude"));
+  write(f.codexHooksFile, legacy("codex"));
+  assert.equal(installClaudeHooksWithStableLauncher(f.bin, f.node, { homeDir: f.homeDir, settingsPath: f.claudeSettingsFile }).ok, true);
+  assert.equal(installCodexHooksWithStableLauncher(f.bin, f.node, { homeDir: f.homeDir, hooksPath: f.codexHooksFile }).ok, true);
+  assert.equal(agentHookRetirementStatus(f).registeredHandlers, 0);
 });

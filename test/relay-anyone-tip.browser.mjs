@@ -77,9 +77,7 @@ try {
     assert.equal(await page.locator(".rat-viewport").evaluate((el) => el.getBoundingClientRect().height), height);
   }
 
-  await page.getByRole("button", {name:"Pause example rotation",exact:true}).click();
-  await page.clock.runFor(30000);
-  assert.equal(await current(), `“${EXAMPLES[0]}”`, "Pause holds the visible example");
+  assert.equal(await page.getByRole("button", {name:/^(Pause|Resume) example rotation$/}).count(), 0);
   await page.getByRole("button", {name:"Example 4 of 5",exact:true}).click();
   await page.clock.runFor(400);
   await page.getByRole("button", {name:"Copy example",exact:true}).click();
@@ -118,7 +116,7 @@ try {
   await page.clock.runFor(500);
   assert.equal(await page.locator(".rat-card").isVisible(), true, "close and reopen always expands the tip");
   assert.equal(await current(), `“${EXAMPLES[0]}”`);
-  assert.equal(await page.getByRole("button", {name:"Pause example rotation",exact:true}).count(), 1);
+  assert.equal(await page.getByRole("button", {name:/^(Pause|Resume) example rotation$/}).count(), 0);
 
   // No requests and thousands of requests both keep the same expanded card.
   for (const count of [0,2847]) {
@@ -136,7 +134,6 @@ try {
   await page.getByRole("button", {name:"Example 3 of 5",exact:true}).click();
   assert.equal(await page.locator(".rat-slide:visible").count(), 1);
   assert.equal(await page.locator(".rat-track").evaluate((el) => el.getAnimations({subtree:true}).filter((animation) => animation.effect.getKeyframes().some((frame) => "transform" in frame)).length), 0, "reduced motion suppresses the swipe");
-  await page.getByRole("button", {name:"Pause example rotation",exact:true}).click();
   await page.clock.resume();
   for (const width of [360,736]) {
     await page.setViewportSize({width,height:800});
@@ -150,9 +147,12 @@ try {
       if (process.env.RELAY_TIP_SCREENSHOTS) {
         fs.mkdirSync(process.env.RELAY_TIP_SCREENSHOTS, {recursive:true});
         await page.locator("#card").screenshot({path:`${process.env.RELAY_TIP_SCREENSHOTS}/tip-${width}-${theme}.png`,animations:"disabled"});
+        await page.getByRole("button", {name:"Minimise tip",exact:true}).click();
+        await page.locator(".rat-summary").screenshot({path:`${process.env.RELAY_TIP_SCREENSHOTS}/tip-collapsed-${width}-${theme}.png`,animations:"disabled"});
+        await page.locator(".rat-summary").click();
       }
     }
   }
   assert.deepEqual(errors, []);
-  console.log("PASS: five timed examples, poll stability, pause, copy success/failure, keyboard/swipe, minimise, Requests, close/reopen, reduced motion, light/dark layout.");
+  console.log("PASS: five timed examples, poll stability, no pause button, copy success/failure, keyboard/swipe, minimise, Requests, close/reopen, reduced motion, light/dark layout.");
 } finally { await browser.close(); }

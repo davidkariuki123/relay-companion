@@ -1,28 +1,7 @@
-// Open-in-current-chat plumbing for the Claude host.
-//
-// The pill's "Open in current chat" action does NOT forge a new native session.
-// Instead it stages a small injection file that the `relay claude-hook` runtime
-// (installed into ~/.claude/settings.json hooks; see install.js) consumes from
-// inside the user's LIVE Claude session and turns into the event-appropriate
-// hook output — mid-turn (PostToolUse), at turn end (Stop), or on the next
-// prompt (UserPromptSubmit / SessionStart).
-//
-// Files (all under RELAY_HOME, overridable for tests):
-//   claude-sessions/<session_id>.json — rendezvous: refreshed by the hook on
-//     EVERY event, so the pill can find the most recently active live session
-//     (terminal Claude Code included, which has no desktop metadata).
-//   claude-inject/<session_id>.json   — one pending injection for that session
-//     ({ relayId, senderName, title, createdAt, instruction }).
-//   claude-inject/any.json            — broadcast: consumed by whichever live
-//     session sees an event first.
-//
-// The injection instruction deliberately does NOT inline the relay body: the
-// model fetches it through the Relay MCP tools, preserving the untrusted-content
-// quoting discipline in relay-briefing.js. Only the (sanitized, length-capped)
-// sender name and title ride along for orientation.
-//
-// CommonJS on purpose: required by the Electron overlay (overlay/main.cjs) and
-// imported by the ESM hook runtime (src/claude-hook.js), like state-lock.cjs.
+// Legacy injection fixtures and native Claude session metadata helpers.
+// Hook entrypoints are retired and never stage, consume, or emit these payloads.
+// The picker uses native focus metadata with includeRendezvous:false; process
+// identity and the instruction builder remain shared by explicit native delivery.
 
 const fs = require("node:fs");
 const os = require("node:os");
@@ -415,22 +394,8 @@ function isSubagentHookEvent(transcriptPath) {
   return /[\\/]subagents[\\/]/.test(String(transcriptPath || ""));
 }
 
-// The event-appropriate hook stdout for a consumed injection. Shapes follow the
-// Claude Code hooks contract: additionalContext feeds context into the running
-// turn (PostToolUse) / the next turn (UserPromptSubmit, SessionStart); a Stop
-// "block" wakes a just-finished session into a new turn whose input is `reason`.
-function hookResponseFor(eventName, instruction) {
-  const text = String(instruction || "").trim();
-  if (!text) return null;
-  const event = String(eventName || "");
-  if (event === "PostToolUse" || event === "UserPromptSubmit" || event === "SessionStart") {
-    return { hookSpecificOutput: { hookEventName: event, additionalContext: text } };
-  }
-  if (event === "Stop") {
-    return { decision: "block", reason: text };
-  }
-  return null;
-}
+// Retired compatibility export; explicit opening now uses native delivery.
+function hookResponseFor() { return null; }
 
 // ---- current-session resolution (pill side) --------------------------------
 
@@ -692,6 +657,7 @@ function findCurrentClaudeSession({
   focusPriorityMs = DESKTOP_FOCUS_PRIORITY_MS,
   logDir = defaultClaudeLogDir(),
   useFocusLog = true,
+  includeRendezvous = true,
 } = {}) {
   // TIER 0 — what is on screen RIGHT NOW, straight from Claude Desktop.
   // Everything below this point reasons about timestamps of past events, which
@@ -753,7 +719,9 @@ function findCurrentClaudeSession({
   if (desktopSessionsDir) {
     for (const candidate of listDesktopSessionCandidates(desktopSessionsDir, { nowMs, maxAgeMs })) fold(candidate);
   }
-  for (const candidate of listRendezvousCandidates(homeDir, { nowMs, maxAgeMs })) fold(candidate);
+  if (includeRendezvous) {
+    for (const candidate of listRendezvousCandidates(homeDir, { nowMs, maxAgeMs })) fold(candidate);
+  }
   // Chats nobody has ever spoken in are a LAST resort, not a rival: they win on
   // raw activity (a stub can log file/hook events forever) while being exactly
   // the place a relay must not be delivered. A never-used chat is still allowed

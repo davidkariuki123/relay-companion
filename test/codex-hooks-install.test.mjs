@@ -34,47 +34,18 @@ function relayEntries(config, event) {
   );
 }
 
-test("Codex hook install is preserving, idempotent, and requests trust only when changed", () => {
-  const userEntry = { matcher: "^Bash$", hooks: [{ type: "command", command: "review-bash" }] };
-  const userStopEntry = { matcher: "*", hooks: [{ type: "command", command: "audit-stop" }] };
-  const hooksPath = hooksFixture(JSON.stringify({
-    description: "user hooks",
-    hooks: { PostToolUse: [userEntry], Stop: [userStopEntry] },
-  }, null, 2));
-
-  const first = installCodexHooks(BIN, NODE, { hooksPath });
-  assert.equal(first.ok, true);
-  assert.equal(first.changed, true);
-  assert.equal(first.requiresTrustReview, true);
-  let config = readHooks(hooksPath);
-  assert.equal(config.description, "user hooks");
-  assert.deepEqual(config.hooks.PostToolUse[0], userEntry);
-  assert.deepEqual(config.hooks.Stop[0], userStopEntry);
-  assert.equal(relayEntries(config, "Stop").length, 0);
-  assert.deepEqual(first.events, HOOK_EVENTS);
-  for (const event of HOOK_EVENTS) {
-    const entries = relayEntries(config, event);
-    assert.equal(entries.length, 1);
-    assert.deepEqual(entries[0], {
-      matcher: "*",
-      hooks: [{ type: "command", command: `${NODE} ${BIN} codex-hook`, timeout: 5 }],
-    });
-  }
-
+test("legacy Codex installation preserves user hooks and never requests hook trust", () => {
+  const hooksPath = hooksFixture(JSON.stringify({ description: "keep", hooks: {
+    PostToolUse: [{ hooks: [{ type: "command", command: "review-bash" }] }],
+  } }));
   const before = fs.readFileSync(hooksPath, "utf8");
-  const second = installCodexHooks(BIN, NODE, { hooksPath });
-  assert.equal(second.ok, true);
-  assert.equal(second.changed, false);
-  assert.equal(second.requiresTrustReview, false);
-  assert.equal(fs.readFileSync(hooksPath, "utf8"), before, "unchanged install does not rewrite hooks.json");
-
-  const moved = installCodexHooks(BIN, "/usr/local/bin/node", { hooksPath });
-  assert.equal(moved.changed, true);
-  assert.equal(moved.requiresTrustReview, true);
-  config = readHooks(hooksPath);
-  for (const event of HOOK_EVENTS) {
-    assert.equal(relayEntries(config, event).length, 1);
-    assert.equal(relayEntries(config, event)[0].hooks[0].command, `/usr/local/bin/node ${BIN} codex-hook`);
+  for (const node of [NODE, "/usr/local/bin/node"]) {
+    const result = installCodexHooks(BIN, node, { hooksPath });
+    assert.equal(result.ok, true);
+    assert.equal(result.retired, true);
+    assert.equal(result.requiresTrustReview, false);
+    assert.deepEqual(result.events, []);
+    assert.equal(fs.readFileSync(hooksPath, "utf8"), before);
   }
 });
 
@@ -89,11 +60,11 @@ test("Codex hook repair removes legacy Relay Stop handlers while preserving user
     assert.equal(result.ok, true);
     const config = readHooks(hooksPath);
     assert.equal(relayEntries(config, "Stop").length, 0);
-    assert.deepEqual(config.hooks.Stop, userHooks.length
+    assert.deepEqual(config.hooks?.Stop, userHooks.length
       ? [{ matcher: "*", hooks: userHooks }]
       : undefined);
-    for (const event of HOOK_EVENTS) assert.equal(relayEntries(config, event).length, 1);
-    assert.equal(installCodexHooks(BIN, NODE, { hooksPath }).changed, false);
+    for (const event of HOOK_EVENTS) assert.equal(relayEntries(config, event).length, 0);
+    assert.equal(installCodexHooks(BIN, NODE, { hooksPath }).removed, undefined);
   }
 });
 
@@ -131,13 +102,13 @@ test("Codex hook install never clobbers malformed user config", () => {
   assert.equal(fs.readFileSync(hooksPath, "utf8"), broken);
 });
 
-test("hook install notices surface failures and Codex trust review", () => {
+test("hook retirement notices surface failures and cached-runtime restart guidance", () => {
   assert.deepEqual(hookInstallNotices({
     claudeHooks: { ok: false, reason: "claude_settings_unreadable", detail: "bad JSON" },
-    codexHooks: { ok: true, requiresTrustReview: true },
+    codexHooks: { ok: true, restartRequired: true },
   }), [
-    "Could not install Relay hooks for Claude Code (claude_settings_unreadable: bad JSON).",
-    "Codex requires one final step: open `/hooks` in Codex and trust the Relay hook.",
+    "Could not remove Relay's retired hooks for Claude Code (claude_settings_unreadable: bad JSON).",
+    "Restart Codex to clear cached hooks pointing into an older Relay runtime.",
   ]);
   assert.deepEqual(hookInstallNotices({ codexHooks: { ok: true, requiresTrustReview: false } }), []);
 });

@@ -261,7 +261,8 @@ test("the You page always offers which app opens relays, and the fresh open goes
   assert.match(open, /mode === "fresh" && window\.relay\.openFresh\) window\.relay\.openFresh\(id, host \|\| hostKeyFor\(agentAppName\(\)\), note\)/);
   // The same default on every un-hosted open: plain, current, and the sent copy.
   assert.match(open, /else window\.relay\.open\(id, host \|\| hostKeyFor\(agentAppName\(\)\)\);/);
-  assert.match(open, /window\.relay\.openInCurrent\(id, host \|\| hostKeyFor\(agentAppName\(\)\)\)/);
+  assert.match(open, /const provider = host \|\| hostKeyFor\(agentAppName\(\)\)/);
+  assert.match(open, /return loadSessionPicker\(id, provider, "Relay", null, source\)/);
   assert.match(open, /window\.relay\.openSent\(id, host \|\| hostKeyFor\(agentAppName\(\)\)\)/);
 });
 

@@ -49,7 +49,7 @@ test("Windows task status distinguishes a missing task from an unavailable sched
   ]);
 });
 
-test("agent repair refreshes MCP launchers and preserves Relay hooks for existing fleets", () => {
+test("agent repair refreshes MCP launchers and retires Relay hooks for existing fleets", () => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-agent-mcp-repair-"));
   const bin = path.join(homeDir, ".relay", "lib", "node_modules", "relay-companion", "bin", "relay.js");
   const claudeConfigFile = path.join(homeDir, ".claude.json");
@@ -101,16 +101,15 @@ test("agent repair refreshes MCP launchers and preserves Relay hooks for existin
   const claudeSettings = JSON.parse(fs.readFileSync(claudeSettingsFile, "utf8"));
   assert.equal(claudeSettings.theme, "dark");
   assert.equal(claudeSettings.hooks.UserPromptSubmit[0].hooks[0].command, "audit-claude");
-  assert.ok(claudeSettings.hooks.UserPromptSubmit.some((entry) =>
-    entry.hooks.some((hook) => isRelayClaudeHookCommand(hook))));
+  assert.equal(claudeSettings.hooks.UserPromptSubmit.some((entry) =>
+    entry.hooks.some((hook) => isRelayClaudeHookCommand(hook))), false);
   const codexHooks = JSON.parse(fs.readFileSync(codexHooksFile, "utf8"));
   assert.equal(codexHooks.description, "keep me");
   assert.equal(codexHooks.hooks.Stop[0].hooks[0].command, "audit-codex");
   assert.equal(codexHooks.hooks.Stop.some((entry) =>
     entry.hooks.some((hook) => isRelayCodexHookCommand(hook.command))), false);
   for (const event of ["UserPromptSubmit", "PostToolUse"]) {
-    assert.ok(codexHooks.hooks[event].some((entry) =>
-      entry.hooks.some((hook) => isRelayCodexHookCommand(hook.command))));
+    assert.equal(codexHooks.hooks[event], undefined);
   }
 });
 
@@ -967,27 +966,12 @@ test("claudeAppearsPresent honors an explicit CLAUDE_SETTINGS override", () => {
   }
 });
 
-test("a CLI-less Claude install still gets a working Open-in-current-chat hook", () => {
-  // The Windows failure mode: installClaudeCode returns claude_code_not_found, so
-  // the old `if (claude.ok)` gate skipped installClaudeHooks and the pill action
-  // died silently. Same gate expression as runSetupInstall, with the CLI absent.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-claude-present-"));
-  const claudeHome = path.join(dir, ".claude");
-  fs.mkdirSync(claudeHome, { recursive: true });
-
-  const res = withClaudeHome(claudeHome, () => {
-    const claude = { ok: false, reason: "claude_code_not_found" };
-    return claude.ok || claudeAppearsPresent()
-      ? installClaudeHooks("C:\\Relay\\relay.js", "C:\\Node\\node.exe")
-      : null;
-  });
-
-  assert.ok(res, "hook install must be attempted without the claude CLI");
-  assert.equal(res.ok, true);
-  assert.equal(res.settingsPath, path.join(claudeHome, "settings.json"));
-  assert.ok(isRelayClaudeHookCommand({ command: res.command, args: res.args }));
-  const settings = JSON.parse(fs.readFileSync(res.settingsPath, "utf8"));
-  assert.deepEqual(Object.keys(settings.hooks).sort(), [...res.events].sort());
+test("a CLI-less Claude install never gains hooks through the legacy installer", () => {
+  const settingsPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "relay-cli-less-")), "settings.json");
+  const result = installClaudeHooks("C:\\Relay\\relay.js", "C:\\Node\\node.exe", { settingsPath });
+  assert.equal(result.ok, true);
+  assert.equal(result.retired, true);
+  assert.equal(fs.existsSync(settingsPath), false);
 });
 
 test("no Claude on the machine still means no hook install", () => {

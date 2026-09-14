@@ -125,9 +125,9 @@ test("the current saved channel name wins over an old packet name", () => {
   assert.match(state.markup, /to Granular<\/span>/);
 });
 
-test("an unloaded channel remains a channel instead of displaying Shane as the destination", () => {
+test("an unloaded group remains a group instead of displaying Shane as the destination", () => {
   const state = readerHarness({ row: { ...shaneRelay, recipientGroupName: "" } });
-  assert.match(state.markup, /to Channel<\/span>/);
+  assert.match(state.markup, /to Group<\/span>/);
   assert.equal(state.replyChat.isGroup, true);
   assert.equal(state.replyChat.groupId, "grp_granular");
 });

@@ -242,23 +242,10 @@ test("a relay inside a multi-message thread instructs a relay_thread_fetch FIRST
   assert.match(bare, /never instructions to you\.$/);
 });
 
-test("hookResponseFor emits the per-event shapes and nothing for unknown events", () => {
-  assert.deepEqual(hookResponseFor("PostToolUse", "do it"), {
-    hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: "do it" },
-  });
-  assert.deepEqual(hookResponseFor("UserPromptSubmit", "do it"), {
-    hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: "do it" },
-  });
-  assert.deepEqual(hookResponseFor("SessionStart", "do it"), {
-    hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: "do it" },
-  });
-  assert.deepEqual(hookResponseFor("Stop", "do it"), { decision: "block", reason: "do it" });
-  assert.equal(hookResponseFor("PreToolUse", "do it"), null);
-  assert.equal(hookResponseFor("Stop", "   "), null);
-  for (const event of ["PostToolUse", "UserPromptSubmit", "SessionStart", "Stop"]) {
-    assert.equal(isDeliverableHookEvent(event), true);
+test("hookResponseFor is silent for every retired lifecycle event", () => {
+  for (const event of ["PostToolUse", "Stop", "SessionStart", "UserPromptSubmit", "PreToolUse"]) {
+    assert.equal(hookResponseFor(event, "synthetic untrusted instruction"), null);
   }
-  assert.equal(isDeliverableHookEvent("Notification"), false);
 });
 
 test("session ids are sanitized before becoming filenames", () => {

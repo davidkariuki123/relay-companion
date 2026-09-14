@@ -8,15 +8,7 @@ contextBridge.exposeInMainWorld("relay", {
   onInbox: (cb) => ipcRenderer.on("inbox", (_e, payload) => cb(payload)),
   onNewRelay: (cb) => ipcRenderer.on("newRelay", (_e, relay, opts) => cb(relay, opts || {})),
   onOpenDone: (cb) => ipcRenderer.on("openDone", (_e, id) => cb(id)),
-  // "Open in current chat" staged an injection: the UI confirms it so the
-  // click has visible feedback (delivery is checkpoint-based, not instant).
-  onInjected: (cb) => ipcRenderer.on("injected", (_e, id, info) => cb(id, info || {})),
-  // The staged injection was actually CONSUMED by the target session — flip the
-  // waiting note to a delivered one (main watches the consume-once file).
-  onInjectionDelivered: (cb) => ipcRenderer.on("injectionDelivered", (_e, id) => cb(id)),
-  // The current chat stayed idle through the grace window; the injection was
-  // reclaimed and the relay is opening in a fresh chat instead.
-  onInjectionAutoFresh: (cb) => ipcRenderer.on("injectionAutoFresh", (_e, id) => cb(id)),
+  onChooseSession: (cb) => ipcRenderer.on("chooseSession", (_e, id, selection) => cb(id, selection || {})),
   // The open failed (CLI error / helper wouldn't spawn). The row stays unread, so
   // say why inline instead of letting the spinner just stop.
   onOpenError: (cb) => ipcRenderer.on("openError", (_e, id, message) => cb(id, message || "")),

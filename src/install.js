@@ -17,7 +17,7 @@ import { activateCodexMcp, verifyClaudeMcpRegistration } from "./setup-activatio
 import { ensureStableMcpLauncher, mcpLaunchCommand, removeStableMcpLauncher } from "./mcp-launcher.js";
 import { brokerIdentity, removeMcpBrokerProvisioning } from "./mcp-broker-state.js";
 import { canonicalOwnershipGuard, verifyCanonicalCandidate } from "./canonical-runtime.js";
-import { ensureStableHookLauncher, removeStableHookLauncher } from "./hook-launcher.js";
+import { ensureStableHookLauncher, removeStableHookLauncher, stableHookLauncherPath, stableWindowsHookScriptPath } from "./hook-launcher.js";
 import { readConfig, writeConfig } from "./config.js";
 import { deleteInstallationAuthorizationCredentials } from "./installation-authorization.js";
 import {
@@ -1467,15 +1467,8 @@ export function removeClaudeCodeMcpConfig(configPath = claudeCodeConfigPath()) {
   }
 }
 
-// ---- Claude Code hooks (Open-in-current-chat runtime) ----------------------
-//
-// `relay claude-hook` (src/claude-hook.js) must run on PostToolUse / Stop /
-// UserPromptSubmit / SessionStart so a pill "Open in current chat" click can be
-// delivered into the user's LIVE Claude session mid-turn, at turn end, or on
-// the next prompt. Claude Code hot-reloads settings hooks on change, so the
-// registration takes effect without restarting Claude.
+// ---- Retired agent hooks (upgrade and cached-command compatibility) --------
 
-const CLAUDE_HOOK_EVENTS = ["PostToolUse", "Stop", "UserPromptSubmit", "SessionStart"];
 // These are Relay's own bounded AI-session capabilities. Claude otherwise pauses
 // a background/idle agent for an interactive MCP approval that no foreground UI
 // exists to answer, which makes agent-to-agent delivery look completed while the
@@ -1489,12 +1482,12 @@ const RELAY_CLAUDE_ALLOWED_TOOLS = [
 ];
 // Ours is identifiable by the command containing "relay.js claude-hook"
 // (quoting-tolerant): install replaces exactly these, uninstall removes ONLY these.
-const RELAY_CLAUDE_HOOK_COMMAND_RE = /relay\.js["']?\s+claude-hook(?:\s|$)/;
+const RELAY_CLAUDE_HOOK_COMMAND_RE = /(?:^|[\s/\\"'])relay(?:-hook)?\.js["']?\s+["']?claude-hook["']?(?:\s|$)/;
 
 export function claudeSettingsPath() {
   return (
     process.env.CLAUDE_SETTINGS ||
-    path.join(process.env.CLAUDE_HOME || path.join(os.homedir(), ".claude"), "settings.json")
+    path.join(process.env.CLAUDE_CONFIG_DIR || process.env.CLAUDE_HOME || path.join(os.homedir(), ".claude"), "settings.json")
   );
 }
 
@@ -1503,7 +1496,7 @@ export function claudeSettingsPath() {
  * that holds claudeSettingsPath() (so CLAUDE_SETTINGS / CLAUDE_HOME overrides are
  * respected for tests). Deliberately not a `claude` CLI probe: Windows installs
  * routinely have Claude Code/Desktop with ~/.claude configured by hand and no
- * `claude` on PATH, and those installs still need the hook runtime.
+ * `claude` on PATH, and their existing settings still need inspection during cleanup.
  */
 export function claudeAppearsPresent({ settingsPath = claudeSettingsPath() } = {}) {
   try {
@@ -1552,14 +1545,37 @@ export function claudeHookHandler(bin = relayBinPath(), node = stableNodePath(),
   };
 }
 
+// Ownership requires an invocation of the Relay entrypoint. Mentioning its
+// name in an echo, a script body, or another tool's arguments is not ownership.
+function isHookInterpreter(command) {
+  const source = String(command || "").trim();
+  let word = "", quote = "";
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i];
+    if (ch === "\\" && source[i + 1] && /[\s"'\\]/.test(source[i + 1]) && quote !== "'") {
+      word += source[++i];
+    } else if (quote) {
+      if (ch === quote) quote = "";
+      else word += ch;
+    } else if (ch === '"' || ch === "'") quote = ch;
+    else if (/\s/.test(ch)) break;
+    else word += ch;
+  }
+  const executable = word.replaceAll("\\", "/").split("/").at(-1);
+  return /^(?:node(?:js|\d+)?|sh|bash|powershell|pwsh)(?:\.exe)?$/i.test(executable)
+    && !/\s(?:-c|-e|-p|--eval|--print|-Command)(?:\s|$)/i.test(source);
+}
+
 export function isRelayClaudeHookCommand(commandOrHook) {
   if (commandOrHook && typeof commandOrHook === "object") {
+    if (!isHookInterpreter(commandOrHook.command)) return false;
     const args = Array.isArray(commandOrHook.args) ? commandOrHook.args.map(String) : [];
+    if (args.some((arg) => /^(?:-c|-e|-p|--eval|--print|-Command)$/i.test(arg))) return false;
     const script = String(args.at(-2) || "").replaceAll("\\", "/");
-    if (args.at(-1) === "claude-hook" && script.endsWith("/relay.js")) return true;
+    if (args.at(-1) === "claude-hook" && /(?:^|\/)relay(?:-hook)?\.js$/.test(script)) return true;
     return RELAY_CLAUDE_HOOK_COMMAND_RE.test(String(commandOrHook.command || ""));
   }
-  return RELAY_CLAUDE_HOOK_COMMAND_RE.test(String(commandOrHook || ""));
+  return isHookInterpreter(commandOrHook) && RELAY_CLAUDE_HOOK_COMMAND_RE.test(String(commandOrHook || ""));
 }
 
 // Strip our hook from a settings hook-entry list, preserving everything the
@@ -1579,86 +1595,22 @@ function withoutRelayClaudeHooks(entries) {
   return kept;
 }
 
-/**
- * Merge the Relay claude-hook into ~/.claude/settings.json (path overridable via
- * CLAUDE_SETTINGS / CLAUDE_HOME for tests). Idempotent — reinstalling never
- * duplicates — and preserves all user content; creates the file if missing.
- */
-export function installClaudeHooks(
-  bin = relayBinPath(),
-  node = stableNodePath(),
-  { settingsPath = claudeSettingsPath(), hookInvocation = null } = {},
-) {
-  const handler = claudeHookHandler(bin, node, hookInvocation);
-  let settings = {};
-  if (fs.existsSync(settingsPath)) {
-    try {
-      settings = readJsonObject(settingsPath);
-    } catch (error) {
-      // Never clobber a settings file we cannot parse — the user's own hooks
-      // and permissions live in it.
-      return {
-        ok: false,
-        reason: "claude_settings_unreadable",
-        settingsPath,
-        detail: error && error.message ? error.message : String(error),
-      };
-    }
-  }
-  try {
-    const permissions =
-      settings.permissions && typeof settings.permissions === "object" && !Array.isArray(settings.permissions)
-        ? settings.permissions
-        : {};
-    const allowed = Array.isArray(permissions.allow) ? permissions.allow : [];
-    permissions.allow = [...allowed];
-    for (const tool of RELAY_CLAUDE_ALLOWED_TOOLS) {
-      if (!permissions.allow.includes(tool)) permissions.allow.push(tool);
-    }
-    settings.permissions = permissions;
-    const hooks =
-      settings.hooks && typeof settings.hooks === "object" && !Array.isArray(settings.hooks) ? settings.hooks : {};
-    for (const event of CLAUDE_HOOK_EVENTS) {
-      const cleaned = withoutRelayClaudeHooks(hooks[event]);
-      const installedHandler = Array.isArray(handler.args) ? { ...handler, args: [...handler.args] } : { ...handler };
-      cleaned.push({ matcher: "*", hooks: [installedHandler] });
-      hooks[event] = cleaned;
-    }
-    settings.hooks = hooks;
-    writeJsonAtomic(settingsPath, settings);
-    return {
-      ok: true,
-      settingsPath,
-      command: handler.command,
-      ...(Array.isArray(handler.args) ? { args: [...handler.args] } : {}),
-      events: [...CLAUDE_HOOK_EVENTS],
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      reason: "claude_settings_write_failed",
-      settingsPath,
-      detail: error && error.message ? error.message : String(error),
-    };
-  }
+// Legacy installer exports deliberately retire registrations. No call site,
+// including an older overlay module, may create hooks through these names.
+export function installClaudeHooks(_bin, _node, { settingsPath = claudeSettingsPath() } = {}) {
+  const result = uninstallClaudeHooks({ settingsPath, removePermissions: false });
+  return { ...result, retired: result.ok, events: [] };
 }
 
-/** Install Claude hooks through the upgrade-surviving bridge. */
-export function installClaudeHooksWithStableLauncher(
-  bin = relayBinPath(),
-  node = stableNodePath(),
-  { homeDir = os.homedir(), platform = process.platform, ...options } = {},
-) {
-  try {
-    const hookInvocation = ensureStableHookLauncher({ targetBin: bin, node, homeDir, platform });
-    return installClaudeHooks(bin, node, { ...options, hookInvocation });
-  } catch (error) {
-    return { ok: false, reason: "hook_launcher_write_failed", detail: error?.message || String(error) };
-  }
+export function installClaudeHooksWithStableLauncher(bin = relayBinPath(), node = stableNodePath(), options = {}) {
+  const result = retireAgentHooks({ bin, node, ...options, codexHooksFile: null,
+    ...(options.settingsPath ? { claudeSettingsFile: options.settingsPath } : {}) });
+  return { ...result.claudeHooks, ok: result.ok, retired: result.ok, events: [],
+    ...(!result.ok ? { reason: result.reason, detail: result.detail } : {}) };
 }
 
 /** Remove ONLY the Relay claude-hook entries; every user hook survives. */
-export function uninstallClaudeHooks({ settingsPath = claudeSettingsPath() } = {}) {
+export function uninstallClaudeHooks({ settingsPath = claudeSettingsPath(), removePermissions = true } = {}) {
   if (!fs.existsSync(settingsPath)) return { ok: true, settingsPath };
   let settings;
   try {
@@ -1674,7 +1626,7 @@ export function uninstallClaudeHooks({ settingsPath = claudeSettingsPath() } = {
   const hooks = settings.hooks;
   let changed = false;
   const permissions = settings.permissions;
-  if (permissions && typeof permissions === "object" && !Array.isArray(permissions) && Array.isArray(permissions.allow)) {
+  if (removePermissions && permissions && typeof permissions === "object" && !Array.isArray(permissions) && Array.isArray(permissions.allow)) {
     const kept = permissions.allow.filter((tool) => !RELAY_CLAUDE_ALLOWED_TOOLS.includes(tool));
     if (kept.length !== permissions.allow.length) {
       changed = true;
@@ -1686,7 +1638,7 @@ export function uninstallClaudeHooks({ settingsPath = claudeSettingsPath() } = {
     if (changed) writeJsonAtomic(settingsPath, settings);
     return { ok: true, settingsPath };
   }
-  // Sweep every event key (not just the four we install today) so entries from
+  // Sweep every event key (including historical and unknown events) so entries from
   // older/newer Relay versions are removed too.
   for (const event of Object.keys(hooks)) {
     if (!Array.isArray(hooks[event])) continue;
@@ -1712,10 +1664,9 @@ export function uninstallClaudeHooks({ settingsPath = claudeSettingsPath() } = {
   }
 }
 
-// ---- Codex hooks (private recent Relay context) ----------------------------
+// ---- Retired Codex hook compatibility --------------------------------------
 
-const CODEX_RELAY_CONTEXT_EVENTS = ["UserPromptSubmit", "PostToolUse"];
-const RELAY_CODEX_HOOK_COMMAND_RE = /relay\.js["']?\s+codex-hook(?:\s|$)/;
+const RELAY_CODEX_HOOK_COMMAND_RE = /(?:^|[\s/\\"'])relay(?:-hook)?\.js["']?\s+["']?codex-hook["']?(?:\s|$)/;
 
 export function codexHookCommand(bin = relayBinPath(), node = stableNodePath(), hookInvocation = null) {
   if (hookInvocation) {
@@ -1725,7 +1676,14 @@ export function codexHookCommand(bin = relayBinPath(), node = stableNodePath(), 
 }
 
 export function isRelayCodexHookCommand(command) {
-  return RELAY_CODEX_HOOK_COMMAND_RE.test(String(command || ""));
+  if (command && typeof command === "object") {
+    if (!isHookInterpreter(command.command)) return false;
+    const args = Array.isArray(command.args) ? command.args.map(String) : [];
+    if (args.some((arg) => /^(?:-c|-e|-p|--eval|--print|-Command)$/i.test(arg))) return false;
+    if (args.at(-1) === "codex-hook" && /(?:^|\/)relay(?:-hook)?\.js$/.test(String(args.at(-2) || "").replaceAll("\\", "/"))) return true;
+    return RELAY_CODEX_HOOK_COMMAND_RE.test(String(command.command || ""));
+  }
+  return isHookInterpreter(command) && RELAY_CODEX_HOOK_COMMAND_RE.test(String(command || ""));
 }
 
 function withoutRelayCodexHooks(entries) {
@@ -1735,170 +1693,140 @@ function withoutRelayCodexHooks(entries) {
       kept.push(entry);
       continue;
     }
-    const keptHooks = entry.hooks.filter((hook) => !isRelayCodexHookCommand(hook && hook.command));
+    const keptHooks = entry.hooks.filter((hook) => !isRelayCodexHookCommand(hook));
     if (keptHooks.length === entry.hooks.length) kept.push(entry);
     else if (keptHooks.length) kept.push({ ...entry, hooks: keptHooks });
   }
   return kept;
 }
 
-/** Merge Relay's hooks into ~/.codex/hooks.json without replacing user hooks. */
-export function installCodexHooks(
-  bin = relayBinPath(),
-  node = stableNodePath(),
-  { hooksPath = codexHooksPath(), hookInvocation = null } = {},
-) {
-  const command = codexHookCommand(bin, node, hookInvocation);
-  let config = {};
-  if (fs.existsSync(hooksPath)) {
-    try {
-      config = readJsonObject(hooksPath);
-    } catch (error) {
-      return {
-        ok: false,
-        reason: "codex_hooks_unreadable",
-        hooksPath,
-        detail: error && error.message ? error.message : String(error),
-      };
-    }
-  }
+export function installCodexHooks(_bin, _node, { hooksPath = codexHooksPath() } = {}) {
+  const result = uninstallCodexHooks({ hooksPath });
+  return { ...result, retired: result.ok, events: [], requiresTrustReview: false };
+}
+
+export function installCodexHooksWithStableLauncher(bin = relayBinPath(), node = stableNodePath(), options = {}) {
+  const result = retireAgentHooks({ bin, node, ...options, claudeSettingsFile: null,
+    ...(options.hooksPath ? { codexHooksFile: options.hooksPath } : {}) });
+  return { ...result.codexHooks, ok: result.ok, retired: result.ok, events: [], requiresTrustReview: false,
+    ...(!result.ok ? { reason: result.reason, detail: result.detail } : {}) };
+}
+
+function inspectRetiredHooks(filePath, host) {
+  if (!filePath || !fs.existsSync(filePath)) return { filePath, host, hooks: [] };
+  const predicate = host === "claude" ? isRelayClaudeHookCommand : isRelayCodexHookCommand;
   try {
-    const before = JSON.stringify(config);
-    const hooks = config.hooks && typeof config.hooks === "object" && !Array.isArray(config.hooks)
-      ? config.hooks
-      : {};
-    // Retire only Relay's Stop handler: Codex renders its blocking response as
-    // a user prompt. Preserve other tools' and the user's Stop handlers.
-    if (Array.isArray(hooks.Stop)) {
-      const cleaned = withoutRelayCodexHooks(hooks.Stop);
-      if (cleaned.length) hooks.Stop = cleaned;
-      else delete hooks.Stop;
-    }
-    for (const event of CODEX_RELAY_CONTEXT_EVENTS) {
-      const cleaned = withoutRelayCodexHooks(hooks[event]);
-      cleaned.push({ matcher: "*", hooks: [{ type: "command", command, timeout: 5 }] });
-      hooks[event] = cleaned;
-    }
-    config.hooks = hooks;
-    const changed = JSON.stringify(config) !== before;
-    if (changed) writeJsonAtomic(hooksPath, config);
-    return {
-      ok: true,
-      hooksPath,
-      command,
-      events: [...CODEX_RELAY_CONTEXT_EVENTS],
-      changed,
-      requiresTrustReview: changed,
-    };
+    const config = readJsonObject(filePath);
+    const hooks = Object.values(config.hooks || {}).flatMap((entries) =>
+      (Array.isArray(entries) ? entries : []).flatMap((entry) =>
+        (Array.isArray(entry?.hooks) ? entry.hooks : []).filter(predicate)));
+    return { filePath, host, hooks };
   } catch (error) {
-    return {
-      ok: false,
-      reason: "codex_hooks_write_failed",
-      hooksPath,
-      detail: error && error.message ? error.message : String(error),
-    };
-  }
-}
-
-/** Install Codex hooks through the upgrade-surviving bridge. */
-export function installCodexHooksWithStableLauncher(
-  bin = relayBinPath(),
-  node = stableNodePath(),
-  { homeDir = os.homedir(), platform = process.platform, ...options } = {},
-) {
-  try {
-    const hookInvocation = ensureStableHookLauncher({ targetBin: bin, node, homeDir, platform });
-    return installCodexHooks(bin, node, { ...options, hookInvocation });
-  } catch (error) {
-    return { ok: false, reason: "hook_launcher_write_failed", detail: error?.message || String(error) };
-  }
-}
-
-function jsonFileHasRelayHook(filePath, predicate) {
-  if (!fs.existsSync(filePath)) return false;
-  const config = readJsonObject(filePath);
-  const hooks = config.hooks;
-  if (!hooks || typeof hooks !== "object" || Array.isArray(hooks)) return false;
-  for (const entries of Object.values(hooks)) {
-    for (const entry of Array.isArray(entries) ? entries : []) {
-      for (const hook of entry && Array.isArray(entry.hooks) ? entry.hooks : []) {
-        if (predicate(hook)) return true;
-      }
+    // An unrelated malformed config is not Relay's to repair. A recognizable
+    // retired command in unreadable JSON must remain a visible migration failure.
+    let source = "";
+    try { source = fs.readFileSync(filePath, "utf8"); } catch {
+      return { filePath, host, hooks: [], error, reason: `${host}_settings_unreadable` };
     }
+    const looksOwned = /relay(?:-hook)?\.js[\s\S]{0,512}(?:claude|codex)-hook/.test(source);
+    return looksOwned
+      ? { filePath, host, hooks: [], error, reason: `${host}_settings_unreadable` }
+      : { filePath, host, hooks: [], skippedUnreadable: true };
   }
-  return false;
 }
 
-function unreadableFileLooksRelayOwned(filePath, hookName) {
-  try {
-    const source = fs.readFileSync(filePath, "utf8");
-    return new RegExp(`relay\\.js[\\s\\S]{0,512}${hookName}`).test(source);
-  } catch {
-    return false;
-  }
+function referencesOldRuntime(hook) {
+  const command = [hook?.command, ...(Array.isArray(hook?.args) ? hook.args : [])].join(" ").replaceAll("\\", "/");
+  return !command.includes("/.relay/bin/relay.js") && !command.includes("/.relay/bin/hook-launcher.ps1");
 }
 
 /**
- * Move only already-installed Relay hooks onto the stable bridge. This is the
- * updater/repair migration path: it never creates a host config merely because
- * Relay happens to be updating on the machine.
+ * Retire only Relay-owned host handlers. The stable bridge becomes a bounded,
+ * silent stub first, so even cached registrations cannot invoke an old runtime.
+ * MCP, account state, unrelated hooks, and AI-session permissions are preserved.
  */
-export function repairExistingAgentHooks({
+export function retireAgentHooks({
   bin = relayBinPath(),
   node = stableNodePath(),
   homeDir = os.homedir(),
   platform = process.platform,
   claudeSettingsFile = process.env.CLAUDE_SETTINGS
-    || path.join(process.env.CLAUDE_HOME || path.join(homeDir, ".claude"), "settings.json"),
+    || path.join(process.env.CLAUDE_CONFIG_DIR || process.env.CLAUDE_HOME || path.join(homeDir, ".claude"), "settings.json"),
   codexHooksFile = process.env.CODEX_HOOKS
     || path.join(process.env.CODEX_HOME || path.join(homeDir, ".codex"), "hooks.json"),
 } = {}) {
-  try {
-    node = persistentNodePath(node, { platform, homeDir });
-  } catch (error) {
-    return { ok: false, reason: "node_runtime_preservation_failed", detail: error?.message || String(error) };
-  }
-  let claudeInstalled = false;
-  let codexInstalled = false;
-  try {
-    claudeInstalled = jsonFileHasRelayHook(claudeSettingsFile, isRelayClaudeHookCommand);
-  } catch (error) {
-    if (unreadableFileLooksRelayOwned(claudeSettingsFile, "claude-hook")) {
-      return { ok: false, attempted: false, reason: "claude_settings_unreadable", detail: error?.message || String(error) };
-    }
-  }
-  try {
-    codexInstalled = jsonFileHasRelayHook(
-      codexHooksFile,
-      (hook) => isRelayCodexHookCommand(hook && hook.command),
-    );
-  } catch (error) {
-    if (unreadableFileLooksRelayOwned(codexHooksFile, "codex-hook")) {
-      return { ok: false, attempted: false, reason: "codex_hooks_unreadable", detail: error?.message || String(error) };
-    }
-  }
-  if (!claudeInstalled && !codexInstalled) return { ok: true, attempted: false };
-
+  const claudeFiles = claudeSettingsFile
+    ? [...new Set([claudeSettingsFile, path.join(path.dirname(claudeSettingsFile), "settings.local.json")])]
+    : [];
+  const targets = [
+    ...claudeFiles.map((file) => inspectRetiredHooks(file, "claude")),
+    ...(codexHooksFile ? [inspectRetiredHooks(codexHooksFile, "codex")] : []),
+  ];
+  const owned = targets.flatMap((target) => target.hooks);
+  const unreadable = targets.filter((target) => target.error);
+  const bridgeExists = [stableHookLauncherPath(homeDir), stableWindowsHookScriptPath(homeDir)].some((file) => fs.existsSync(file));
+  if (!owned.length && !unreadable.length && !bridgeExists) return { ok: true, attempted: false, retired: true };
   let hookInvocation;
   try {
     hookInvocation = ensureStableHookLauncher({ targetBin: bin, node, homeDir, platform });
   } catch (error) {
-    return { ok: false, attempted: true, reason: "hook_launcher_write_failed", detail: error?.message || String(error) };
+    return { ok: false, attempted: true, retired: false, reason: "hook_launcher_write_failed", detail: error?.message || String(error) };
   }
-  const claudeHooks = claudeInstalled
-    ? installClaudeHooks(bin, node, { settingsPath: claudeSettingsFile, hookInvocation })
-    : null;
-  const codexHooks = codexInstalled
-    ? installCodexHooks(bin, node, { hooksPath: codexHooksFile, hookInvocation })
-    : null;
-  return {
-    ok: Boolean((!claudeHooks || claudeHooks.ok) && (!codexHooks || codexHooks.ok)),
-    attempted: true,
-    hookInvocation,
-    claudeHooks,
-    codexHooks,
+  const results = targets.map((target) => {
+    const common = { retired: !target.error, host: target.host, filePath: target.filePath,
+      restartRequired: target.hooks.some(referencesOldRuntime) };
+    if (target.error) return { ...common, ok: false, reason: target.reason, detail: "Host settings could not be read or parsed; the file was left unchanged." };
+    if (!target.hooks.length) return { ...common, ok: true, removed: false };
+    const result = target.host === "claude"
+      ? uninstallClaudeHooks({ settingsPath: target.filePath, removePermissions: false })
+      : uninstallCodexHooks({ hooksPath: target.filePath });
+    return { ...common, ...result, retired: result.ok, removedCount: result.ok ? target.hooks.length : 0 };
+  });
+  const summarize = (host) => {
+    const rows = results.filter((row) => row.host === host);
+    if (!rows.length) return null;
+    return { ...rows.find((row) => !row.ok), ok: rows.every((row) => row.ok),
+      retired: rows.every((row) => row.ok), removed: rows.some((row) => row.removed),
+      restartRequired: rows.some((row) => row.restartRequired), files: rows, events: [] };
   };
+  const ok = results.every((row) => row.ok);
+  const result = { ok, attempted: owned.length > 0 || unreadable.length > 0, retired: ok,
+    hookInvocation, claudeHooks: summarize("claude"), codexHooks: summarize("codex"),
+    restartRequired: results.some((row) => row.restartRequired),
+    ...(!ok ? { reason: "hook_retirement_incomplete", detail: results.filter((row) => !row.ok).map((row) => `${row.filePath}: ${row.reason}`).join("; ") } : {}) };
+  // A local diagnostic record contains paths and outcomes, never hook commands
+  // or message contents. Failure to persist it is itself a visible repair error.
+  try {
+    const reportPath = path.join(homeDir, ".relay", "hook-retirement.json");
+    let previous = {};
+    try { previous = readJsonObject(reportPath); } catch {}
+    const checkedAt = new Date().toISOString();
+    writeJsonAtomic(reportPath, {
+      version: 1, checkedAt, ok, retired: ok, bridgeRetained: true,
+      lastRawHookRemovalAt: result.restartRequired ? checkedAt : previous.lastRawHookRemovalAt || null,
+      files: results,
+    });
+  } catch (error) {
+    return { ...result, ok: false, retired: false, reason: "hook_retirement_report_failed", detail: error.message };
+  }
+  return result;
 }
+
+export function agentHookRetirementStatus({ homeDir = os.homedir(),
+  claudeSettingsFile = process.env.CLAUDE_SETTINGS || path.join(process.env.CLAUDE_CONFIG_DIR || process.env.CLAUDE_HOME || path.join(homeDir, ".claude"), "settings.json"),
+  codexHooksFile = process.env.CODEX_HOOKS || path.join(process.env.CODEX_HOME || path.join(homeDir, ".codex"), "hooks.json") } = {}) {
+  const files = [...new Set([claudeSettingsFile, path.join(path.dirname(claudeSettingsFile), "settings.local.json")])]
+    .map((file) => inspectRetiredHooks(file, "claude"));
+  files.push(inspectRetiredHooks(codexHooksFile, "codex"));
+  let lastMigration = null;
+  try { lastMigration = readJsonObject(path.join(homeDir, ".relay", "hook-retirement.json")); } catch {}
+  return { registeredHandlers: files.reduce((count, file) => count + file.hooks.length, 0),
+    unreadableFiles: files.filter((file) => file.error).map((file) => file.filePath),
+    lastMigration };
+}
+
+// Compatibility for already-loaded installers; repair can only retire hooks.
+export const repairExistingAgentHooks = retireAgentHooks;
 
 /** Remove only Relay command handlers from Codex hooks.json. */
 export function uninstallCodexHooks({ hooksPath = codexHooksPath() } = {}) {
@@ -1944,12 +1872,13 @@ export function uninstallCodexHooks({ hooksPath = codexHooksPath() } = {}) {
 export function hookInstallNotices({ claudeHooks = null, codexHooks = null } = {}) {
   const notices = [];
   for (const [host, result] of [["Claude Code", claudeHooks], ["Codex", codexHooks]]) {
-    if (!result || result.ok) continue;
-    const detail = [result.reason, result.detail].filter(Boolean).join(": ");
-    notices.push(`Could not install Relay hooks for ${host}${detail ? ` (${detail})` : ""}.`);
-  }
-  if (codexHooks?.ok && codexHooks.requiresTrustReview) {
-    notices.push("Codex requires one final step: open `/hooks` in Codex and trust the Relay hook.");
+    if (!result) continue;
+    if (!result.ok) {
+      const detail = [result.reason, result.detail].filter(Boolean).join(": ");
+      notices.push(`Could not remove Relay's retired hooks for ${host}${detail ? ` (${detail})` : ""}.`);
+    } else if (result.restartRequired) {
+      notices.push(`Restart ${host} to clear cached hooks pointing into an older Relay runtime.`);
+    }
   }
   return notices;
 }
@@ -3011,8 +2940,9 @@ export async function runSetupInstall({ claim = false, reload = true, agentProto
   } else {
     missing.push("Codex (registration failed)");
   }
-  // Existing hooks survive and receive launcher repairs; new users get none.
-  const hookRepair = repairExistingAgentHooks({ bin, node });
+  // Retire old registrations on both setup and upgrade; never add a new hook.
+  const hookRepair = retireAgentHooks({ bin, node });
+  if (!hookRepair.ok) throw new Error(`Relay hook retirement failed: ${hookRepair.detail || hookRepair.reason}`);
   claudeHooks = hookRepair.claudeHooks || null;
   codexHooks = hookRepair.codexHooks || null;
   const recovery = installRecovery({ packageRoot: path.resolve(path.dirname(bin), ".."), node, reload });
@@ -3048,9 +2978,9 @@ export function uninstallAgentSkills(options = {}) {
 }
 
 /**
- * Refresh agent MCP registrations and Relay-owned hooks after an auto-update.
+ * Refresh agent MCP registrations and retire Relay-owned hooks after an auto-update.
  * The daemon calls this from the newly installed tree, so future host sessions
- * point at the current launcher and existing fleets receive new hook events
+ * point at the current launcher and existing fleets retire their hook events
  * without having to rerun setup.
  */
 export function repairAgentMcpRegistrations({
@@ -3060,7 +2990,7 @@ export function repairAgentMcpRegistrations({
   claudeConfigFile = process.env.CLAUDE_CODE_CONFIG || path.join(homeDir, ".claude.json"),
   codexConfigFile = process.env.CODEX_CONFIG || path.join(process.env.CODEX_HOME || path.join(homeDir, ".codex"), "config.toml"),
   claudeSettingsFile = process.env.CLAUDE_SETTINGS
-    || path.join(process.env.CLAUDE_HOME || path.join(homeDir, ".claude"), "settings.json"),
+    || path.join(process.env.CLAUDE_CONFIG_DIR || process.env.CLAUDE_HOME || path.join(homeDir, ".claude"), "settings.json"),
   codexHooksFile = process.env.CODEX_HOOKS
     || path.join(process.env.CODEX_HOME || path.join(homeDir, ".codex"), "hooks.json"),
 } = {}) {
@@ -3068,9 +2998,8 @@ export function repairAgentMcpRegistrations({
   const claude = writeClaudeCodeMcpConfig(mcpBin, node, claudeConfigFile);
   const codex = writeCodexMcpConfig(mcpBin, node, codexConfigFile);
   const claudeDesktop = installClaudeDesktop(mcpBin, node, { env: { ...process.env, HOME: homeDir } });
-  // Updates migrate hooks only when Relay already owns a handler in the host
-  // config. Do not manufacture settings for agents that are not installed.
-  const hookRepair = repairExistingAgentHooks({
+  // Updates remove only Relay handlers. No new host configuration is created.
+  const hookRepair = retireAgentHooks({
     bin,
     node,
     homeDir,
@@ -3079,7 +3008,7 @@ export function repairAgentMcpRegistrations({
   });
   const claudeHooks = hookRepair.claudeHooks || null;
   const codexHooks = hookRepair.codexHooks || null;
-  return { mcpBin, claude, codex, claudeDesktop, hookRepair, claudeHooks, codexHooks };
+  return { ok: hookRepair.ok, mcpBin, claude, codex, claudeDesktop, hookRepair, claudeHooks, codexHooks };
 }
 
 function claudeConfigHasRelay(configPath) {
@@ -3135,7 +3064,7 @@ export function repairExistingAgentRegistrations({
   claudeConfigFile = process.env.CLAUDE_CODE_CONFIG || path.join(homeDir, ".claude.json"),
   codexConfigFile = process.env.CODEX_CONFIG || path.join(process.env.CODEX_HOME || path.join(homeDir, ".codex"), "config.toml"),
   claudeSettingsFile = process.env.CLAUDE_SETTINGS
-    || path.join(process.env.CLAUDE_HOME || path.join(homeDir, ".claude"), "settings.json"),
+    || path.join(process.env.CLAUDE_CONFIG_DIR || process.env.CLAUDE_HOME || path.join(homeDir, ".claude"), "settings.json"),
   codexHooksFile = process.env.CODEX_HOOKS
     || path.join(process.env.CODEX_HOME || path.join(homeDir, ".codex"), "hooks.json"),
 } = {}) {
@@ -3191,7 +3120,7 @@ export function repairExistingAgentRegistrations({
       }
     }
   }
-  const hookRepair = repairExistingAgentHooks({
+  const hookRepair = retireAgentHooks({
     bin,
     node,
     homeDir,

@@ -52,7 +52,7 @@ test('person controls are sibling buttons, with an anchored popover and a visibl
   assert.match(unblock, /Could not unblock this contact/);
 });
 
-test('one Add button moves between form and toolbar and honors reduced motion', () => {
+test('one Add button submits the contact form and honors reduced motion', () => {
   assert.equal((html.match(/id="cvAdd"/g) || []).length, 1);
   assert.doesNotMatch(html, /id="cvAddGo"/);
   const motion = html.slice(html.indexOf('function moveAddButton('), html.indexOf('function openAddSheet()'));
@@ -60,5 +60,6 @@ test('one Add button moves between form and toolbar and honors reduced motion', 
   assert.match(motion, /open \? "cvAddTarget" : "cvAddHome"\)\.append\(cvAddEl\)/);
   assert.match(motion, /prefers-reduced-motion: reduce/);
   assert.match(motion, /addButtonAnimation\?\.cancel/);
-  assert.match(html, /cvAddEl.addEventListener\("click", \(\) => cvAddSheetEl.classList.contains\("hidden"\) \? openAddSheet\(\) : addPersonByAddress\(\)\)/);
+  assert.match(html, /cvAddEl.addEventListener\("click", addPersonByAddress\)/);
+  assert.match(html, /class="cv-add-slot gone" id="cvAddHome"/);
 });

@@ -39,7 +39,8 @@ import {
   relayBinPath,
   windowsAutostartTaskStatus,
   repairDesktopSurfaces,
-  repairExistingAgentHooks,
+  retireAgentHooks,
+  agentHookRetirementStatus,
   repairExistingAgentRegistrations,
   installAgentSkills,
   accountRestartLines,
@@ -460,13 +461,13 @@ function cmdRepairDesktop(flags = {}) {
   // config, deletes credentials/E2EE state, clears messages/outboxes/preferences,
   // or calls a cloud revocation endpoint.
   // The updater invokes this command from the verified candidate tree before it
-  // switches/restarts services. First atomically migrate any existing raw hook
-  // registrations to Relay's stable bridge; if that fails, do not claim the
-  // candidate is safe to activate.
-  const hookRepair = repairExistingAgentHooks();
+  // switches/restarts services. Neutralize the stable bridge and remove Relay
+  // registrations first; a failed retirement must remain a visible failure.
+  const hookRepair = retireAgentHooks();
   if (!hookRepair.ok) {
-    throw new Error(`Could not repair Relay agent hooks (${hookRepair.reason || "migration failed"}).`);
+    throw new Error(`Could not retire Relay agent hooks (${hookRepair.reason || "migration failed"}).`);
   }
+  for (const notice of hookInstallNotices(hookRepair)) console.log(notice);
   const repaired = repairDesktopSurfaces({ reload, claim: Boolean(flags.claim), env });
   if (!repaired.ok) {
     const failures = [
@@ -824,10 +825,17 @@ async function cmdPill(flags = {}, positional = []) {
 // --restart-pill makes the running pill reload the healed prefs.
 async function cmdDoctor(flags = {}) {
   const { collectCompanionFleetTelemetry } = await import("../src/fleet-telemetry.js");
-  const health = collectCompanionFleetTelemetry();
+  const health = { ...collectCompanionFleetTelemetry(), hookRetirement: agentHookRetirementStatus() };
   if (flags.json) {
     console.log(JSON.stringify({ schema: 1, cliVersion: companionVersion(), ...health }, null, 2));
     return;
+  }
+  const hooks = health.hookRetirement;
+  console.log(`  retired Relay hooks still registered: ${hooks.registeredHandlers}`);
+  if (hooks.unreadableFiles.length) console.log(`  hook cleanup could not inspect: ${hooks.unreadableFiles.join(", ")}`);
+  if (hooks.registeredHandlers || hooks.unreadableFiles.length) console.log("    run: relay repair-installation");
+  if (hooks.lastMigration?.lastRawHookRemovalAt) {
+    console.log(`  raw hooks removed: ${hooks.lastMigration.lastRawHookRemovalAt}; restart agent hosts if still running since then`);
   }
   const installation = health.installation;
   console.log(`  installation: ${installation.installationId || "not yet assigned"}`);
@@ -1354,13 +1362,10 @@ async function main() {
     case "open":
       return cmdOpen(positional, flags);
     case "claude-hook":
-      // Internal: Claude Code hook runtime (installed by `relay install` into
-      // ~/.claude/settings.json). Reads the hook event JSON on stdin and must
-      // never fail the hosting Claude session.
+      // Retired compatibility command: drain stdin and emit no context.
       return runClaudeHook();
     case "codex-hook":
-      // Internal: Codex hook runtime. It offers private Relay context without
-      // changing human read state or starting a turn.
+      // Retired compatibility command; no event may inject context.
       return runCodexHook();
     case "daemon":
       return runTaskDaemon({ intervalMs: Number(flags.interval) || 4000 });

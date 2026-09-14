@@ -36,7 +36,6 @@ function sliceFunction(src, header) {
 
 const openPacket = sliceFunction(main, "async function openPacket(");
 const openTaskDetail = sliceFunction(main, "function openTaskDetail(");
-const openInCurrent = sliceFunction(main, "async function openPacketInCurrent(");
 
 // ---- macOS launch ownership ------------------------------------------------
 
@@ -217,182 +216,36 @@ test("openError reaches the row through preload and the renderer", () => {
   assert.match(html, /function clearRowNote\(id\) \{[\s\S]*?data-err="\$\{CSS\.escape\(id\)\}"/);
 });
 
-// ---- Fix 3: no silent staging without the hook runtime ---------------------
-
-test("openPacketInCurrent stages only when the claude-hook runtime is registered", () => {
-  assert.equal(openInCurrent.match(/stageInjection\(/g).length, 1);
-  assert.match(openInCurrent, /const stageNow = \(\) => \{[\s\S]*?claudeInject\.stageInjection\(/);
-  assert.match(openInCurrent, /loadClaudeHooksModule\(\)\.then\(/);
-  // 0.1.84: the hook gate now routes through the channel wake tier first,
-  // falling back to stageNow when no (or several) channel sessions are live.
-  assert.match(openInCurrent, /if \(claudeHooksInstalled\(install\)\) \{\s*\n\s*return tryChannelWake\(\)/);
-  assert.match(openInCurrent, /\.then\(\(woke\) => \{\s*\n\s*if \(!woke\) stageNow\(\);/);
+test("legacy current-chat IPC only opens an explicit destination picker", () => {
+  const sent = [];
+  const win = { isDestroyed: () => false, webContents: { send: (...args) => sent.push(args) } };
+  const run = new Function("win", `${sliceFunction(main, "function requestSessionPicker(")}\nreturn requestSessionPicker;`)(win);
+  run("r_inbound", { host: "claude" });
+  run("r_sent", { sent: true, host: "codex" });
+  assert.deepEqual(sent, [
+    ["openDone", "r_inbound"], ["chooseSession", "r_inbound", { source: "relay", provider: "claude" }],
+    ["openDone", "r_sent"], ["chooseSession", "r_sent", { source: "sent", provider: "codex" }],
+  ]);
+  assert.doesNotMatch(main, /repairClaudeHooks|installClaudeHooks|stageInjection|watchInjectionDelivery|openPacketInCurrent/);
+  assert.match(preload, /onChooseSession/);
+  assert.match(html, /window\.relay\.onChooseSession/);
 });
 
-test("a missing hook runtime installs for next time and opens fresh now", () => {
-  // Since 0.1.77 the fallback carries a user-visible note (row note in the pill)
-  // so a "current chat" click never silently turns into a new chat.
-  assert.match(openInCurrent, /console\.error\([\s\S]*?repairClaudeHooks\(install\);\s*\n\s*fallbackFresh\("Claude needs a restart before in-chat opens work"\);/);
-  // The repair must NOT bake process.execPath (the Electron binary) in as the hook's node.
-  const repair = sliceFunction(main, "function repairClaudeHooks(");
-  assert.match(repair, /install\.installClaudeHooksWithStableLauncher\(undefined, install\.stableNodePath\(node\)\)/);
-  assert.match(repair, /no node found on PATH/);
-  // No ack on that path — openPacket owns the read state for the fresh open.
-  const notInstalled = openInCurrent.slice(openInCurrent.indexOf("if (claudeHooksInstalled(install))"));
-  assert.doesNotMatch(notInstalled, /ackPacket\(/);
-});
-
-test("the hook check uses install.js exports through a cached lazy import", () => {
-  assert.match(main, /let claudeHooksModulePromise = null;/);
-  assert.match(main, /claudeHooksModulePromise = import\(installUrl\)/);
-  assert.match(main, /install\.claudeSettingsPath\(\)/);
-  assert.match(main, /install\.isRelayClaudeHookCommand\(hook\)/);
-  // Unreadable/missing settings must read as "not installed".
-  assert.match(main, /function claudeHooksInstalled\(install\) \{[\s\S]*?\} catch \{\s*\n\s*return false;/);
-});
-
-// claudeHooksInstalled only closes over `fs`, so it can be lifted out and run against a
-// settings file written by the REAL installer — the detection is the crux of the fix.
-const claudeHooksInstalled = new Function(
-  "fs",
-  `${sliceFunction(main, "function claudeHooksInstalled(")}\nreturn claudeHooksInstalled;`,
-)(fs);
-
-test("claudeHooksInstalled agrees with the real installer", async (t) => {
-  const install = await import("../src/install.js");
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-hookcheck-"));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const settingsPath = path.join(dir, "settings.json");
-  const module = { claudeSettingsPath: () => settingsPath, isRelayClaudeHookCommand: install.isRelayClaudeHookCommand };
-
-  assert.equal(claudeHooksInstalled(module), false, "missing file counts as not installed");
-  fs.writeFileSync(settingsPath, "{ not json");
-  assert.equal(claudeHooksInstalled(module), false, "unparseable file counts as not installed");
-  // A settings file full of the user's OWN hooks is still not our runtime.
-  fs.writeFileSync(
-    settingsPath,
-    JSON.stringify({ hooks: { Stop: [{ matcher: "*", hooks: [{ type: "command", command: "echo hi" }] }] } }),
-  );
-  assert.equal(claudeHooksInstalled(module), false);
-  assert.equal(install.installClaudeHooks(undefined, "/usr/bin/node", { settingsPath }).ok, true);
-  assert.equal(claudeHooksInstalled(module), true);
-  install.uninstallClaudeHooks({ settingsPath });
-  assert.equal(claudeHooksInstalled(module), false);
+test("choosing a chat does not start opening, acknowledge or deliver content", () => {
+  const calls = [];
+  const run = new Function("openingIds", "loadSessionPicker", "hostKeyFor", "agentAppName",
+    `${sliceFunction(html, "function openRelayFromUI(")}\nreturn openRelayFromUI;`)(new Map(), (...args) => calls.push(args), () => "claude", () => "Claude Code");
+  run("r_inbound", "relay", "current", "claude");
+  run("r_sent", "sent", "current", "codex");
+  assert.deepEqual(calls, [["r_inbound", "claude", "Relay", null, "relay"], ["r_sent", "codex", "Relay", null, "sent"]]);
+  assert.match(html, /const curLabel = "Choose chat"/);
+  assert.match(main, /includeRendezvous: false/);
 });
 
 // ---- Fix 4: topmost level on Windows --------------------------------------
 
 test("the overlay window uses the screen-saver level on win32", () => {
   assert.match(main, /win\.setAlwaysOnTop\(true, process\.platform === "win32" \? "screen-saver" : "floating"\)/);
-});
-
-// ---- 0.1.81: visible hand-off — waiting vs delivered ----------------------
-
-test("stageNow stages, confirms an awaiting-turn hand-off, and arms the delivery watcher", () => {
-  assert.match(openInCurrent, /staged = claudeInject\.stageInjection\(/);
-  // 0.1.95: the confirmation also names the chat it went to.
-  assert.match(openInCurrent, /confirmInjected\("claude", \{ awaitingTurn: true, chat: target\.label \|\| "" \}\)/);
-  assert.match(openInCurrent, /watchInjectionDelivery\(packetId, staged\.path, \{/);
-  // 0.1.83: the hop is opt-in — default grace is 0 (current chat means current chat).
-  assert.match(main, /return Number\.isFinite\(raw\) && raw > 0 \? raw : 0;/);
-  assert.match(openInCurrent, /onAutoFresh: \(\) => \{[\s\S]*?send\("injectionAutoFresh", packetId\)[\s\S]*?openPacket\(packetId, \{ fresh: true \}\)/);
-});
-
-test("watchInjectionDelivery reports delivery when the consume-once file disappears", async () => {
-  const src = sliceFunction(main, "function watchInjectionDelivery(");
-  const sent = [];
-  const fakeWin = { isDestroyed: () => false, webContents: { send: (...args) => sent.push(args) } };
-  const fsMod = await import("node:fs");
-  const osMod = await import("node:os");
-  const pathMod = await import("node:path");
-  const dir = fsMod.mkdtempSync(pathMod.join(osMod.tmpdir(), "relay-inject-watch-"));
-  const stagedPath = pathMod.join(dir, "sess.json");
-  fsMod.writeFileSync(stagedPath, "{}");
-  const injectionWatchers = new Map();
-  const reclaimSrc = sliceFunction(main, "function reclaimInjection(");
-  const fn = new Function(
-    "fs",
-    "win",
-    "injectionWatchers",
-    "console",
-    "AUTO_FRESH_GRACE_MS",
-    "process",
-    `${reclaimSrc}; ${src}; return watchInjectionDelivery;`,
-  )(fsMod, fakeWin, injectionWatchers, { error: () => {} }, 6000, process);
-  fn("relay_x", stagedPath, { intervalMs: 20, timeoutMs: 5000 });
-  await new Promise((r) => setTimeout(r, 60));
-  assert.equal(sent.length, 0, "file still present -> no delivery signal");
-  fsMod.rmSync(stagedPath); // the hook consumed it
-  await new Promise((r) => setTimeout(r, 120));
-  assert.deepEqual(sent, [["injectionDelivered", "relay_x"]]);
-  assert.equal(injectionWatchers.size, 0, "watcher cleans up after delivery");
-});
-
-test("the renderer shows a persistent waiting note, a delivered flip, and rebuild-proof notes", async () => {
-  const fsMod = await import("node:fs");
-  const pathMod = await import("node:path");
-  const url = await import("node:url");
-  const here = pathMod.dirname(url.fileURLToPath(import.meta.url));
-  const html = fsMod.readFileSync(pathMod.join(here, "..", "overlay", "inbox.html"), "utf8");
-  assert.match(html, /Delivered into \$\{where\} — lands when it next takes a turn/); // the Hand verb is retired
-  assert.match(html, /your \\u201c\$\{info\.chat\}\\u201d chat/, "the destination chat is named when known");
-  assert.match(html, /Your current chat was idle, so this is opening in a new chat instead\./);
-  assert.match(html, /onInjectionAutoFresh/);
-  assert.match(html, /✓ Delivered — \$\{chat \? `your/);
-  assert.match(html, /onInjectionDelivered/);
-  // Notes are rendered from state during row rebuilds, not one-shot DOM writes.
-  assert.match(html, /rowNotes\.get\(r\.id\)/);
-  const preload = fsMod.readFileSync(pathMod.join(here, "..", "overlay", "preload.cjs"), "utf8");
-  assert.match(preload, /onInjectionDelivered: \(cb\) => ipcRenderer\.on\("injectionDelivered"/);
-});
-
-
-test("past the grace window an idle target's injection is reclaimed and the fresh hop fires", async () => {
-  const src = sliceFunction(main, "function watchInjectionDelivery(");
-  const reclaimSrc = sliceFunction(main, "function reclaimInjection(");
-  const sent = [];
-  const fakeWin = { isDestroyed: () => false, webContents: { send: (...args) => sent.push(args) } };
-  const fsMod = await import("node:fs");
-  const osMod = await import("node:os");
-  const pathMod = await import("node:path");
-  const dir = fsMod.mkdtempSync(pathMod.join(osMod.tmpdir(), "relay-inject-grace-"));
-  const stagedPath = pathMod.join(dir, "sess.json");
-  fsMod.writeFileSync(stagedPath, "{}");
-  const injectionWatchers = new Map();
-  let freshFired = 0;
-  const fn = new Function(
-    "fs", "win", "injectionWatchers", "console", "AUTO_FRESH_GRACE_MS", "process",
-    `${reclaimSrc}; ${src}; return watchInjectionDelivery;`,
-  )(fsMod, fakeWin, injectionWatchers, { error: () => {} }, 6000, process);
-  fn("relay_idle", stagedPath, { intervalMs: 20, autoFreshMs: 80, onAutoFresh: () => { freshFired += 1; } });
-  await new Promise((r) => setTimeout(r, 200));
-  assert.equal(freshFired, 1, "grace expiry hops to a fresh open");
-  assert.equal(fsMod.existsSync(stagedPath), false, "the injection was reclaimed — no later double delivery");
-  assert.deepEqual(sent, [["injectionAutoFresh is sent by the caller, not the watcher"]].slice(0, 0), "no delivery event on the reclaim path");
-  assert.equal(injectionWatchers.size, 0);
-});
-
-
-// ---- 0.1.84: channel wake tier --------------------------------------------
-
-test("the wake tier addresses the chat's own CLI process, never just its directory", () => {
-  // A cwd join cannot identify a chat: several chats commonly share one repo,
-  // so the join finds no unique match and the wake silently never fires. The
-  // hook records cliPid, which is unique per chat, and the event is addressed
-  // to it — so a wake can only ever surface in the chat that was clicked.
-  assert.match(openInCurrent, /targetCliPid = Number\(JSON\.parse\(fs\.readFileSync\(rendezvousPath, "utf8"\)\)\.cliPid\) \|\| 0/);
-  assert.match(openInCurrent, /if \(!targetCliPid \|\| !channel\.channelWakeAvailable\(RELAY_HOME, targetCliPid\)\) return false/);
-  assert.match(openInCurrent, /targetCliPid,/);
-  assert.match(openInCurrent, /safeSessionKey\(target\.sessionId\)/);
-  assert.match(openInCurrent, /return false; \/\/ no rendezvous -> no join evidence -> hook path/);
-  assert.match(openInCurrent, /enqueueChannelEvent\(RELAY_HOME, \{/);
-  assert.match(openInCurrent, /confirmInjected\("claude", \{ awaitingTurn: true, channel: true \}\)/);
-  // Unclaimed event falls back to session-targeted hook staging — never a dead end.
-  assert.match(openInCurrent, /onTimeout: \(\) => \{[\s\S]*?stageNow\(\)/);
-  // The wake tier runs only when the hook runtime exists (fallback must work).
-  const gated = openInCurrent.indexOf("if (claudeHooksInstalled(install))");
-  assert.ok(gated !== -1 && openInCurrent.indexOf("tryChannelWake()", gated) > gated);
-  assert.match(html, /Pushed to your current Claude chat — waking it now…/);
 });
 
 // ---- 0.1.87: open-status notes reach the thread surfaces too ---------------
@@ -417,7 +270,7 @@ test("open-status notes render where actions happen: the reader and every bubble
 
 // ---- 0.1.93: Sent rows get the same three-action menu ---------------------
 
-test("sent rows expand into Preview / Open in Current Chat / Open in New Chat", () => {
+test("sent rows expand into Preview / Choose chat / New chat", () => {
   // The shared menu builder has a sent namespace so the two lists wire independently.
   assert.match(html, /const preview = sent \? `data-sent-preview=/);
   assert.match(html, /const cur = sent \? `data-sent-open-current=/);
@@ -426,7 +279,7 @@ test("sent rows expand into Preview / Open in Current Chat / Open in New Chat", 
   assert.match(html, /const openCard = expanded \? openActionsHtml\(id, \{ sent: true, shareLinkUrl: shareCopyUrl \}\) : "";/);
   assert.match(html, /data-err="\$\{esc\(id\)\}">\$\{esc\(rowNotes\.get\(id\)\?\.text \|\| ""\)\}/);
   // Each action routes to its own sent-side path.
-  assert.match(html, /source === "sent" && mode === "current" && window\.relay\.openSentInCurrent/);
+  assert.match(html, /return loadSessionPicker\(id, provider, "Relay", null, source\)/);
   assert.match(html, /source === "sent" && mode === "fresh" && window\.relay\.openSentFresh/);
   assert.match(preload, /openSentInCurrent: \(id, host\) => ipcRenderer\.send\("relay:openSentInCurrent", id, host\)/);
   assert.match(html, /window\.relay\.openSentFresh\(id, host \|\| hostKeyFor\(agentAppName\(\)\)\)/);
@@ -442,16 +295,6 @@ test("previewing a sent relay reads sentCache and never acks a read receipt", ()
   assert.match(main, /return previewPayloadForSent\(id\);/);
 });
 
-test("open-in-current on a sent relay forges the sent copy first and never acks", () => {
-  assert.match(openInCurrent, /async function openPacketInCurrent\(packetId, \{ sent = false, host: hostOverride = "" \} = \{\}\)/);
-  assert.match(openInCurrent, /const stageSentRelayItem = await loadSentStager\(\);/);
-  assert.match(openInCurrent, /if \(!sent\) ackPacket\(packetId\);/);
-  // The fresh fallback keeps the sent flag, so it opens the sent copy too.
-  assert.match(openInCurrent, /openPacket\(packetId, \{ fresh: true, sent, host: hostOverride \}\)/);
-  assert.match(main, /ipcMain\.on\("relay:openSentInCurrent"/);
-  assert.match(main, /ipcMain\.on\("relay:openSentFresh"/);
-  assert.match(main, /openPacket\(id, \{ sent: true, fresh: true, host: String\(host \|\| ""\) \}\)/);
-});
 
 test("the agent row opens the named provider's picker before any native launch", () => {
   assert.match(preload, /open: \(id, host\) => ipcRenderer\.send\("relay:open", id, host\)/);
@@ -460,9 +303,9 @@ test("the agent row opens the named provider's picker before any native launch",
   assert.doesNotMatch(wire, /openRelayFromUI|data-continues/);
 });
 
-test("Open in Codex imports the request's existing native thread instead of forking it", () => {
+test("legacy current-chat IPC keeps the selected provider for the picker", () => {
   const handler = main.slice(main.indexOf('ipcMain.on("relay:openInCurrent"'), main.indexOf('ipcMain.on("relay:preview"'));
-  assert.match(handler, /selectedHost === "codex"[\s\S]*?openPacket\(id, \{ host: "codex" \}\)/);
+  assert.match(handler, /requestSessionPicker\(id, \{ host: String\(host \|\| ""\) \}\)/);
   assert.doesNotMatch(handler, /selectedHost === "codex"[\s\S]*?fresh: true/);
 });
 
@@ -876,4 +719,13 @@ test("one completed visible dwell retires a notification — it never re-pops fo
   assert.match(handler, /const confirm = dwelled && visibleNow && !userIsAway\(\)/);
   assert.doesNotMatch(handler, /humanEvidence/);
   assert.doesNotMatch(handler, /currentShow\.inputSeen/);
+});
+
+test("legacy list menus render and wire the picker while remaining expanded", () => {
+  const menu = sliceFunction(html, "function openActionsHtml(");
+  assert.match(menu, /sessionPickerInlineHtml\(id, sessionPickerState\?\.provider\)/);
+  assert.match(sliceFunction(html, "function wireSentRows("), /wireSessionPickerRows\(sentListEl\)/);
+  assert.match(sliceFunction(html, "function wireRelayRows("), /wireSessionPickerRows\(relaysListEl\)/);
+  const loader = sliceFunction(html, "async function loadSessionPicker(");
+  assert.match(loader, /if \(source === "sent"\) expandedSentId = id;\s*else expandedRelayId = id;/);
 });

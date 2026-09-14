@@ -44,7 +44,7 @@ test("main proxies group calls through the API client with inline error shape", 
 
 test("the renderer manages channels from server truth: list, create, rename, archive, members", () => {
   assert.match(html, /id="cvGroups"/);
-  assert.match(html, /No channels yet\. A channel relays to everyone in it as one conversation\./);
+  assert.match(html, /No groups yet\. A group relays to everyone in it as one conversation\./);
   // Mutations re-render from the RETURNED view (cvgApply), never a local guess.
   assert.match(html, /function cvgApply\(result\)/);
   assert.match(html, /groupDetailCall\(container, window\.relay\.groupRename, g\.id, name\)/);
@@ -71,7 +71,7 @@ test("foreign channels expose a self-only leave action without roster administra
   assert.match(html, /else if \(!mine && !slack\)/,
     "only native Relay channels expose the legacy leave action");
   assert.match(html, /data-gd-leave/);
-  assert.match(html, /<button class="gd-leave" type="button" data-gd-leave>Leave channel<\/button>/);
+  assert.match(html, /<button class="gd-leave" type="button" data-gd-leave>Leave group<\/button>/);
   assert.doesNotMatch(html, /gd-leave-copy/);
   assert.match(html, /window\.relay\.groupLeave/);
   assert.match(html, /leftGroupIds\.add\(g\.id\)/);
@@ -150,10 +150,10 @@ test("group info joins creator, current user, and every member into one exact ro
 
 test("leaving keeps history but disables every group reply affordance", () => {
   assert.match(html, /function groupRoomPostingState\(room\)/);
-  assert.match(html, /You left this channel\. Existing messages remain readable\./);
+  assert.match(html, /You left this group\. Existing messages remain readable\./);
   assert.match(html, /if \(leftGroupIds\.has\(groupId\)\) return \{ blocked:true/,
     "only an explicit local leave is allowed to claim that the person left");
-  assert.doesNotMatch(html, /if \(!group\) return \{ blocked:true, reason:"You left this channel/,
+  assert.doesNotMatch(html, /if \(!group\) return \{ blocked:true, reason:"You left this group/,
     "a cache miss must never invent a departure");
   assert.match(html, /const visibleThreadComposer = groupPostingBlocked/);
   assert.match(html, /chatShaped \? rowsShell \+ visibleThreadComposer : visibleThreadComposer \+ rowsShell/);
@@ -163,7 +163,7 @@ test("leaving keeps history but disables every group reply affordance", () => {
   assert.match(html, /!m\.request && !groupPostingBlocked/);
 });
 
-test("Slack-owned channels join the Channels pane without becoming editable Relay rosters", () => {
+test("Slack-owned channels join the Groups pane without becoming editable Relay rosters", () => {
   assert.match(html, /function syncSlackChannelRows\(\)/);
   assert.match(html, /payload\.chats \|\| \[\]/);
   assert.match(html, /chat\.channel\?\.slack/);
@@ -177,7 +177,7 @@ test("Slack-owned channels join the Channels pane without becoming editable Rela
   assert.match(html, /Posting is unavailable for this Slack channel\./);
   assert.match(html, /groupsList = result\.slice[\s\S]*syncSlackChannelRows\(\);[\s\S]*const wantedId/,
     "refreshing native groups must restore the Slack channel projection before lookup");
-  assert.match(html, /Channel info is still syncing\./);
+  assert.match(html, /Group info is still syncing\./);
   assert.match(html, /src="slackMark\.png" alt="Slack"/);
   assert.match(html, /slack \? "" : `<span class="cvg-edit"/,
     "Slack controls its channel roster, so Relay must not expose the legacy editor");

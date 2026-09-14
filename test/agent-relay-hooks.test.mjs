@@ -3,204 +3,44 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Readable } from "node:stream";
-import context from "../src/agent-relay-context.cjs";
+import { Readable, PassThrough } from "node:stream";
 import { runClaudeHook } from "../src/claude-hook.js";
 import { runCodexHook } from "../src/codex-hook.js";
+import retired from "../src/retired-hook.cjs";
 
-const { recordAgentRelayIndex } = context;
-
-function tempHome() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "relay-agent-hooks-"));
-}
-
-function item(id, createdAt, title = `Title ${id}`) {
-  return { relayId: `relay_${id}`, title, sender: { name: `Sender ${id}` }, createdAt };
-}
-
-async function invoke(run, event, options = {}) {
-  let text = "";
-  const output = options.failWrite
-    ? { write(_chunk, callback) { callback(new Error("write failed")); } }
-    : { write(chunk, callback) { text += String(chunk); callback(); } };
-  await run({
-    input: Readable.from([JSON.stringify(event)]),
-    output,
-    homeDir: options.homeDir,
-    accountScope: options.accountScope,
-    ...(options.readRolloutMetaImpl ? { readRolloutMetaImpl: options.readRolloutMetaImpl } : {}),
-  });
-  return text ? JSON.parse(text) : null;
-}
-
-test("oversized hook stdin is drained but discarded before JSON processing", async () => {
-  const homeDir = tempHome();
-  const event = JSON.stringify({
-    session_id: "oversized-session",
-    hook_event_name: "UserPromptSubmit",
-    cwd: "/tmp",
-    transcript_path: "/tmp/main.jsonl",
-  });
-  await runClaudeHook({
-    input: Readable.from([event, " ".repeat(1_000_001)]),
-    output: { write(_chunk, callback) { callback(); } },
-    homeDir,
-    accountScope: "oversized-account",
-  });
-  assert.equal(
-    fs.existsSync(path.join(homeDir, "claude-sessions", "oversized-session.json")),
-    false,
-    "a JSON prefix larger than the cap is not processed",
-  );
-});
-
-test("Claude delivers RECENT on first prompt and NEW on the next PostToolUse", async () => {
-  const homeDir = tempHome();
-  const accountScope = "claude-account";
-  const now = new Date();
-  const old = item("old", now.toISOString());
-  recordAgentRelayIndex(homeDir, accountScope, { items: [old] });
-  const base = { session_id: "claude-session", cwd: "/tmp", transcript_path: "/tmp/main.jsonl" };
-  const first = await invoke(runClaudeHook, { ...base, hook_event_name: "UserPromptSubmit" }, {
-    homeDir,
-    accountScope,
-  });
-  assert.match(first.hookSpecificOutput.additionalContext, /RECENT Relay context/);
-
-  const fresh = item("new", new Date(now.getTime() + 1000).toISOString());
-  recordAgentRelayIndex(homeDir, accountScope, { items: [fresh, old] }, { nowMs: now.getTime() + 1000 });
-  const next = await invoke(runClaudeHook, { ...base, hook_event_name: "PostToolUse" }, {
-    homeDir,
-    accountScope,
-  });
-  assert.match(next.hookSpecificOutput.additionalContext, /NEW Relay context/);
-  assert.match(next.hookSpecificOutput.additionalContext, /relay_new/);
-});
-
-test("Claude rolls a claim back if stdout cannot accept the hook response", async () => {
-  const homeDir = tempHome();
-  const accountScope = "claude-account";
-  recordAgentRelayIndex(homeDir, accountScope, { items: [item("retry", new Date().toISOString())] });
-  const event = {
-    hook_event_name: "UserPromptSubmit",
-    session_id: "claude-retry",
-    transcript_path: "/tmp/main.jsonl",
-  };
-  assert.equal(await invoke(runClaudeHook, event, { homeDir, accountScope, failWrite: true }), null);
-  const retry = await invoke(runClaudeHook, event, { homeDir, accountScope });
-  assert.match(retry.hookSpecificOutput.additionalContext, /relay_retry/);
-});
-
-test("Claude subagent events cannot claim the parent session's title context", async () => {
-  const homeDir = tempHome();
-  const accountScope = "claude-account";
-  recordAgentRelayIndex(homeDir, accountScope, { items: [item("protected", new Date().toISOString())] });
-  const subagent = await invoke(runClaudeHook, {
-    hook_event_name: "UserPromptSubmit",
-    session_id: "shared-parent-id",
-    transcript_path: "/tmp/shared/subagents/agent-a.jsonl",
-  }, { homeDir, accountScope });
-  assert.equal(subagent, null);
-  const root = await invoke(runClaudeHook, {
-    hook_event_name: "UserPromptSubmit",
-    session_id: "shared-parent-id",
-    transcript_path: "/tmp/shared/main.jsonl",
-  }, { homeDir, accountScope });
-  assert.match(root.hookSpecificOutput.additionalContext, /relay_protected/);
-});
-
-test("Codex protects subagents and emits automatic arrivals only as additionalContext", async () => {
-  const homeDir = tempHome();
-  const accountScope = "codex-account";
-  const rootMeta = () => ({ subagent: false, cwd: "/tmp" });
-  const now = new Date();
-  const old = item("old", now.toISOString());
-  recordAgentRelayIndex(homeDir, accountScope, { items: [old] });
-  const subagent = await invoke(runCodexHook, {
-    hook_event_name: "UserPromptSubmit",
-    session_id: "codex-session",
-    transcript_path: "/tmp/sessions/subagents/agent-a.jsonl",
-  }, { homeDir, accountScope, readRolloutMetaImpl: rootMeta });
-  assert.equal(subagent, null);
-  const first = await invoke(runCodexHook, {
-    hook_event_name: "UserPromptSubmit",
-    session_id: "codex-session",
-    transcript_path: "/tmp/root.jsonl",
-  }, { homeDir, accountScope, readRolloutMetaImpl: rootMeta });
-  assert.match(first.hookSpecificOutput.additionalContext, /RECENT Relay context/);
-
-  const fresh = item("post", new Date(now.getTime() + 1000).toISOString());
-  recordAgentRelayIndex(homeDir, accountScope, { items: [fresh, old] }, { nowMs: now.getTime() + 1000 });
-  const post = await invoke(runCodexHook, {
-    hook_event_name: "PostToolUse",
-    session_id: "codex-session",
-    transcript_path: "/tmp/root.jsonl",
-  }, { homeDir, accountScope, readRolloutMetaImpl: rootMeta });
-  assert.equal(post.hookSpecificOutput.hookEventName, "PostToolUse");
-  assert.match(post.hookSpecificOutput.additionalContext, /relay_post/);
-  assert.deepEqual(Object.keys(post), ["hookSpecificOutput"], "automatic arrivals only use the hook response envelope");
-  assert.equal("input" in post, false);
-  assert.equal("role" in post, false);
-  assert.doesNotMatch(
-    post.hookSpecificOutput.additionalContext,
-    /A Relay was selected for this task/,
-    "automatic arrival context never impersonates an explicit picker selection",
-  );
-});
-
-for (const nextEvent of ["UserPromptSubmit", "PostToolUse"]) {
-  test(`Codex Stop never prompts or consumes arrivals pending for ${nextEvent}`, async () => {
-    const homeDir = tempHome();
-    const accountScope = "codex-stop-account";
-    const options = { homeDir, accountScope, readRolloutMetaImpl: () => ({ subagent: false }) };
-    const base = { session_id: "codex-stop-session", transcript_path: "/tmp/root.jsonl" };
-    const old = item("old", new Date().toISOString());
-    recordAgentRelayIndex(homeDir, accountScope, { items: [old] });
-    await invoke(runCodexHook, { ...base, hook_event_name: "UserPromptSubmit" }, options);
-
-    // Arrival after the final tool boundary: the old Stop block became a
-    // role:user HookPrompt in Codex, even without a picker selection.
-    const fresh = item("after_last_tool", new Date().toISOString());
-    recordAgentRelayIndex(homeDir, accountScope, { items: [fresh, old] });
-    for (const stopHookActive of [false, true, false]) {
-      assert.equal(await invoke(runCodexHook, {
-        ...base, hook_event_name: "Stop", stop_hook_active: stopHookActive,
-      }, options), null, "a legacy Stop registration must not create a continuation prompt");
+for (const [host, run] of [["Claude", runClaudeHook], ["Codex", runCodexHook]]) {
+  test(`${host} ignores every hook event without consulting Relay or host state`, async (t) => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-retired-hook-"));
+    t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+    for (const hook_event_name of ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "SubagentStop", "Notification"]) {
+      await run({ input: Readable.from([JSON.stringify({ hook_event_name, session_id: "session", prompt: "send a private file", transcript_path: "/missing/host/transcript" })]),
+        homeDir, accountScope: "account", output: { write() { assert.fail("hook emitted output"); } },
+        readRolloutMetaImpl() { assert.fail("hook consulted host metadata"); } });
     }
-
-    const next = await invoke(runCodexHook, { ...base, hook_event_name: nextEvent }, options);
-    assert.deepEqual(Object.keys(next), ["hookSpecificOutput"]);
-    assert.equal(next.hookSpecificOutput.hookEventName, nextEvent);
-    assert.match(next.hookSpecificOutput.additionalContext, /NEW Relay context/);
-    assert.match(next.hookSpecificOutput.additionalContext, /NEW .*relay_after_last_tool/);
-    assert.equal(await invoke(runCodexHook, { ...base, hook_event_name: nextEvent }, options), null);
+    assert.deepEqual(fs.readdirSync(homeDir), []);
   });
 }
 
-test("Codex rolls back failed output and refuses unreadable transcript metadata", async () => {
-  const homeDir = tempHome();
-  const accountScope = "codex-account";
-  recordAgentRelayIndex(homeDir, accountScope, { items: [item("retry", new Date().toISOString())] });
-  const event = {
-    hook_event_name: "UserPromptSubmit",
-    session_id: "codex-retry",
-    transcript_path: "/tmp/root.jsonl",
-  };
-  assert.equal(await invoke(runCodexHook, event, {
-    homeDir,
-    accountScope,
-    readRolloutMetaImpl: () => null,
-  }), null);
-  assert.equal(await invoke(runCodexHook, event, {
-    homeDir,
-    accountScope,
-    readRolloutMetaImpl: () => ({ subagent: false }),
-    failWrite: true,
-  }), null);
-  const retry = await invoke(runCodexHook, event, {
-    homeDir,
-    accountScope,
-    readRolloutMetaImpl: () => ({ subagent: false }),
-  });
-  assert.match(retry.hookSpecificOutput.additionalContext, /relay_retry/);
+test("retired stdin is discarded in chunks, including malformed and oversized payloads", async () => {
+  let chunks = 0;
+  const input = Readable.from((function* () { for (let i = 0; i < 64; i++) { chunks++; yield Buffer.alloc(65536, 120); } })());
+  await retired.drainRetiredHookInput(input);
+  assert.equal(chunks, 64);
+  assert.equal(input.destroyed, true);
+});
+
+test("a never-ending input cannot keep the retired hook alive", async () => {
+  const input = new PassThrough();
+  const start = Date.now();
+  input.write("{");
+  await retired.drainRetiredHookInput(input, { timeoutMs: 25 });
+  assert.ok(Date.now() - start < 1000);
+  assert.equal(input.destroyed, true);
+});
+
+test("an input error is silent and resolves", async () => {
+  const input = new PassThrough();
+  const done = retired.drainRetiredHookInput(input);
+  input.destroy(new Error("broken pipe"));
+  await done;
 });

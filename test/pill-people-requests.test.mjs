@@ -223,6 +223,6 @@ test("requests use one Relays entry, with no Contacts badge or third Contacts pa
   assert.match(html, /requestSummaryHtml\(requestCount\)/);
   assert.match(html, /setBadge\(peopleBadgeEl, 0\)/);
   assert.doesNotMatch(html, /id="cvSegRequests"/);
-  assert.match(html, /aria-label="Contacts and channels"/);
+  assert.match(html, /aria-label="Contacts and groups"/);
   assert.match(html, /data-view="contacts">Contacts /);
 });

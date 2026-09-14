@@ -39,6 +39,17 @@ export const REQUIRED_RUNTIME_CAPABILITIES = {
       "window.relay.deliverToSession",
     ],
   },
+  hookRetirement: {
+    "src/retired-hook.cjs": ["function drainRetiredHookInput", "input.resume()", "input.destroy()"],
+    "src/claude-hook.js": ["retiredHook.drainRetiredHookInput(input)"],
+    "src/codex-hook.js": ["retiredHook.drainRetiredHookInput(input)"],
+    "bin/relay-hook.js": ["retiredHook.drainRetiredHookInput()"],
+    "src/hook-launcher.js": ["Relay hooks are retired", "RETIRED_PROGRAM"],
+    "src/install.js": ["export function retireAgentHooks", "hook_retirement_incomplete"],
+    "bin/relay.js": ["const hookRepair = retireAgentHooks()"],
+    "overlay/main.cjs": ["function requestSessionPicker(", 'send("chooseSession"'],
+    "src/session-digest.cjs": ["Arrival descriptions contain only trusted prose and numeric counts"],
+  },
   taskCompletionWake: {
     "src/task-completion-wake.js": [
       "export function recordOutboundTaskOrigin",
@@ -72,6 +83,18 @@ export function assertRuntimeCapabilities(packageRoot) {
       }
     }
     verified.push(capability);
+  }
+  const forbidden = {
+    "overlay/main.cjs": /repairClaudeHooks|installClaudeHooks|stageInjection|openPacketInCurrent/,
+    "src/claude-hook.js": /claimAgentRelayHookContext|consumeInjection|writeRendezvous|deviceToken/,
+    "src/codex-hook.js": /claimAgentRelayHookContext|deviceToken|readRolloutMeta/,
+    "src/hook-launcher.js": /if \[ -f "\$dedicated" \]|\$script = \$target/,
+    "src/session-digest.cjs": /function relayLine|function topicLine/,
+  };
+  for (const [relative, pattern] of Object.entries(forbidden)) {
+    if (pattern.test(fs.readFileSync(path.join(root, relative), "utf8"))) {
+      throw new Error(`Runtime capability hookRetirement contains retired wiring in ${relative}`);
+    }
   }
   return { ok: true, capabilities: verified };
 }

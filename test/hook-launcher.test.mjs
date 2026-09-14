@@ -30,7 +30,7 @@ function writeExecutable(filePath, source) {
 
 const posixExecTest = process.platform === "win32" ? test.skip : test;
 
-posixExecTest("POSIX bridge survives spaces and apostrophes, streams stdin, and prefers the dedicated entry", () => {
+posixExecTest("POSIX bridge survives spaces and apostrophes, discards stdin, and never executes either runtime entry", () => {
   const root = fixture("quoted");
   const homeDir = path.join(root, "Relay user's home");
   const targetBin = path.join(root, "runtime user's tree", "bin", "relay.js");
@@ -51,13 +51,13 @@ process.stdout.write(process.argv[2] + ":" + body);
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stderr, "");
-  assert.equal(result.stdout, `claude-hook:${input}`);
+  assert.equal(result.stdout, "");
   assert.equal(invocation.markerPath, stableHookLauncherPath(homeDir));
   assert.match(fs.readFileSync(invocation.scriptPath, "utf8"), /exec "\$node"/);
   const handler = claudeHookHandler("ignored", "ignored", invocation);
   const throughHostShell = spawnSync("/bin/sh", ["-c", handler.command], { input, encoding: "utf8" });
   assert.equal(throughHostShell.status, 0, throughHostShell.stderr);
-  assert.equal(throughHostShell.stdout, `claude-hook:${input}`);
+  assert.equal(throughHostShell.stdout, "");
   assert.match(handler.command, /relay\.js'\s+claude-hook$/);
 });
 
@@ -81,41 +81,36 @@ posixExecTest("bridge fails silently and immediately when the target runtime is 
   assert.ok(Date.now() - started < 1000, "missing runtime does not wait through the five-second host deadline");
 });
 
-posixExecTest("POSIX host timeout terminates the dedicated hook process, not an orphaned child", async () => {
+posixExecTest("the retained bridge exits with open stdin and never starts the obsolete process", async () => {
   const root = fixture("timeout");
   const targetBin = path.join(root, "runtime", "bin", "relay.js");
   const pidFile = path.join(root, "hook.pid");
-  writeExecutable(targetBin, "// legacy fallback\n");
-  writeExecutable(path.join(path.dirname(targetBin), "relay-hook.js"), `
-import fs from "node:fs";
-fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
-setInterval(() => {}, 1000);
-`);
+  const program = `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);`;
+  writeExecutable(targetBin, program);
+  writeExecutable(path.join(path.dirname(targetBin), "relay-hook.js"), program);
   const invocation = ensureStableHookLauncher({ targetBin, node: process.execPath, homeDir: root, platform: "linux" });
-  const child = spawn(invocation.command, [...invocation.argsPrefix, "claude-hook"], { stdio: "ignore" });
-  const deadline = Date.now() + 3000;
-  while (!fs.existsSync(pidFile) && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  assert.equal(fs.existsSync(pidFile), true, "dedicated runtime started");
-  assert.equal(Number(fs.readFileSync(pidFile, "utf8")), child.pid, "shell was replaced with Node");
-  child.kill("SIGTERM");
-  await new Promise((resolve) => child.once("exit", resolve));
-  assert.throws(() => process.kill(child.pid, 0), { code: "ESRCH" });
+  const child = spawn(invocation.command, [...invocation.argsPrefix, "claude-hook"], { stdio: ["pipe", "pipe", "pipe"] });
+  const deadline = setTimeout(() => child.kill("SIGKILL"), 3000);
+  try {
+    const code = await new Promise((resolve) => child.once("close", resolve));
+    assert.equal(code, 0);
+    assert.equal(fs.existsSync(pidFile), false);
+    assert.throws(() => process.kill(child.pid, 0), { code: "ESRCH" });
+  } finally { clearTimeout(deadline); child.stdin.destroy(); }
 });
 
-posixExecTest("legacy relay.js remains a silent fail-open downgrade fallback", () => {
+posixExecTest("a rollback runtime cannot be invoked through the retained bridge", () => {
   const root = fixture("legacy");
   const targetBin = path.join(root, "old runtime", "bin", "relay.js");
   writeExecutable(targetBin, "process.stdout.write('old'); process.stderr.write('hidden'); process.exit(7);\n");
   const invocation = ensureStableHookLauncher({ targetBin, node: process.execPath, homeDir: root, platform: "darwin" });
   const result = spawnSync(invocation.command, [...invocation.argsPrefix, "claude-hook"], { encoding: "utf8" });
   assert.equal(result.status, 0);
-  assert.equal(result.stdout, "old");
+  assert.equal(result.stdout, "");
   assert.equal(result.stderr, "");
 });
 
-test("atomic target refresh keeps the host command stable", () => {
+test("changing the runtime cannot re-enable the retired bridge", () => {
   const homeDir = fixture("refresh");
   const first = ensureStableHookLauncher({
     targetBin: path.join(homeDir, "release-a", "bin", "relay.js"),
@@ -133,9 +128,8 @@ test("atomic target refresh keeps the host command stable", () => {
   const after = fs.readFileSync(second.scriptPath, "utf8");
   assert.equal(second.command, first.command);
   assert.deepEqual(second.argsPrefix, first.argsPrefix);
-  assert.notEqual(after, before);
-  assert.match(after, /release-b/);
-  assert.doesNotMatch(after, /release-a/);
+  assert.equal(after, before);
+  assert.doesNotMatch(after, /release-a|release-b|relay-hook\.js/);
 });
 
 test("Windows bridge uses a stable PowerShell script and legacy-compatible ownership marker", () => {
@@ -165,7 +159,7 @@ test("Windows bridge uses a stable PowerShell script and legacy-compatible owner
   assert.match(codex, /relay\.js["']? codex-hook$/);
 });
 
-test("repair migrates and deduplicates only existing Relay hooks", () => {
+test("repair removes every Relay hook and preserves other hooks", () => {
   const homeDir = fixture("migration");
   const claudeSettingsFile = path.join(homeDir, ".claude", "settings.json");
   const codexHooksFile = path.join(homeDir, ".codex", "hooks.json");
@@ -196,13 +190,11 @@ test("repair migrates and deduplicates only existing Relay hooks", () => {
   assert.equal(result.attempted, true);
   const claude = JSON.parse(fs.readFileSync(claudeSettingsFile));
   const codex = JSON.parse(fs.readFileSync(codexHooksFile));
-  for (const entries of Object.values(claude.hooks)) {
-    assert.equal(entries.filter((entry) => entry.hooks.some(isRelayClaudeHookCommand)).length, 1);
+  for (const config of [claude, codex]) {
+    assert.deepEqual(Object.keys(config.hooks), ["Stop"]);
+    assert.deepEqual(config.hooks.Stop[0].hooks, [{ type: "command", command: "user-stop" }]);
   }
-  for (const event of ["UserPromptSubmit", "PostToolUse"]) {
-    const entries = codex.hooks[event];
-    assert.equal(entries.filter((entry) => entry.hooks.some((hook) => isRelayCodexHookCommand(hook.command))).length, 1);
-  }
+  assert.equal(result.restartRequired, true);
   assert.ok(claude.hooks.Stop[0].hooks.some((hook) => hook.command === "user-stop"));
   assert.ok(codex.hooks.Stop[0].hooks.some((hook) => hook.command === "user-stop"));
   assert.equal(codex.hooks.Stop.some((entry) =>
@@ -223,20 +215,20 @@ test("repair does not create absent host configs and ignores unrelated malformed
     claudeSettingsFile,
     codexHooksFile,
   });
-  assert.deepEqual(result, { ok: true, attempted: false });
+  assert.deepEqual(result, { ok: true, attempted: false, retired: true });
   assert.equal(fs.readFileSync(claudeSettingsFile, "utf8"), before);
   assert.equal(fs.existsSync(codexHooksFile), false);
   assert.equal(fs.existsSync(stableHookLauncherPath(homeDir)), false);
 });
 
-test("repair-installation preserves state while migrating hooks before refreshing restartable services", () => {
+test("repair-installation preserves state while retiring hooks before refreshing restartable services", () => {
   const cliPath = fileURLToPath(new URL("../bin/relay.js", import.meta.url));
   const cli = fs.readFileSync(cliPath, "utf8");
   const start = cli.indexOf("function cmdRepairDesktop(");
   const end = cli.indexOf("\n}\n", start);
   const command = cli.slice(start, end);
-  assert.ok(command.indexOf("repairExistingAgentHooks()") >= 0);
-  assert.ok(command.indexOf("repairDesktopSurfaces(") > command.indexOf("repairExistingAgentHooks()"));
+  assert.ok(command.indexOf("retireAgentHooks()") >= 0);
+  assert.ok(command.indexOf("repairDesktopSurfaces(") > command.indexOf("retireAgentHooks()"));
   assert.doesNotMatch(command, /writeConfig|purgeLocalState|revoke/i);
   assert.match(cli, /case "repair-installation":\s*case "repair-desktop":\s*return cmdRepairDesktop/);
   assert.match(cli, /preserves account, encryption, messages, outbox, and preferences/);
