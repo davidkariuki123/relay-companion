@@ -820,25 +820,7 @@ function relayAttachmentRoot(filePath, row) {
     "attachments",
     safeFileStem(row?.id || row?.relayId || "relay"),
   );
-  const e2eeRoot = e2eeAttachmentCacheRoot();
-  const e2eeCandidates = [row?.messageId, row?.id]
-    .map(e2eeAttachmentDirStem)
-    .filter(Boolean)
-    .map((leaf) => path.resolve(e2eeRoot, leaf));
-  return [ordinaryRoot, ...e2eeCandidates].some((candidate) => samePath(root, candidate)) ? root : "";
-}
-
-function e2eeAttachmentDirStem(value) {
-  const clean = String(value || "").trim();
-  return clean ? clean.replace(/[^A-Za-z0-9_-]/g, "_") : "";
-}
-
-function e2eeAttachmentCacheRoot() {
-  const explicitConfig = String(process.env.RELAY_CONFIG || "").trim();
-  const configRoot = explicitConfig
-    ? path.dirname(path.resolve(explicitConfig))
-    : path.resolve(process.env.RELAY_CONFIG_DIR || path.join(os.homedir(), ".relay"));
-  return path.join(configRoot, "attachments");
+  return samePath(root, ordinaryRoot) ? root : "";
 }
 
 function existingAbsoluteFile(value) {

@@ -111,7 +111,7 @@ test("provider routes never inherit another provider's model or historical trans
 });
 
 test("Chat agents uses labelled compact controls below each agent identity", () => {
-  const section = between(html, 'function chatAgentDefaultsHtml()', "function deviceApprovalsHtml");
+  const section = between(html, 'function chatAgentDefaultsHtml()', "function slackSettingsHtml");
   assert.match(section, /class="sv-agent-identity"/);
   assert.match(section, /class="sv-agent-fields"/);
   assert.match(section, /class="sv-agent-field-label">Model<\/span><select class="sv-agent-select" data-chat-agent-model=/);

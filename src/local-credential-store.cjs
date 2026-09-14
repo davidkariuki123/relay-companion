@@ -1,7 +1,7 @@
 "use strict";
 
-// Relay's macOS credential store deliberately uses the same local trust
-// boundary as its E2EE device identity: one owner-only file under ~/.relay.
+// Relay's macOS credential store deliberately uses a local trust boundary:
+// one owner-only file under ~/.relay.
 // The legacy login Keychain can be made permanently unavailable by third-party
 // SecurityAgent plug-ins. A device-scoped, revocable Relay token must not make
 // the whole Companion depend on that shared and interactive global vault.

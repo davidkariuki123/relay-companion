@@ -1,10 +1,6 @@
 import os from "node:os";
 import { createRequire } from "node:module";
 import { readConfig, withoutDeprecatedCapabilityConfig, writeConfigObject } from "./config.js";
-import e2eeIdentity from "./e2ee-identity.cjs";
-import { removeE2eeRuntimeState } from "./e2ee-state.js";
-
-const { removePairedIdentity } = e2eeIdentity;
 
 const { deleteDeviceToken } = createRequire(import.meta.url)("./credential-store.cjs");
 
@@ -39,7 +35,7 @@ export function deviceNameForPairing(config = readConfig()) {
  */
 export function pairedAccountConfig(existing, { apiUrl, webUrl, deviceName, registration } = {}) {
   const res = registration || {};
-  return withoutDeprecatedCapabilityConfig({
+  const next = {
     ...(existing || {}),
     ...(apiUrl ? { apiUrl } : {}),
     ...(webUrl ? { webUrl } : {}),
@@ -47,7 +43,94 @@ export function pairedAccountConfig(existing, { apiUrl, webUrl, deviceName, regi
     deviceToken: res.deviceToken || "",
     deviceId: res.deviceId || "",
     user: res.user || null,
-  });
+  };
+  // Which machine issued this credential (src/installation-key.cjs). A later
+  // re-pair or sign-out revokes the credential only when it was issued here,
+  // never one that arrived in a copied home folder from another computer.
+  if (res.installationKey) next.installationKey = res.installationKey;
+  else delete next.installationKey;
+  return withoutDeprecatedCapabilityConfig(next);
+}
+
+/**
+ * The credential a pairing is about to replace. Read it BEFORE persisting the
+ * new registration: afterwards the old token is gone from protected storage
+ * and its device could only be revoked from the web.
+ */
+export function replacedDeviceCredential(config) {
+  try {
+    const current = config === undefined ? readConfig() : config;
+    const deviceToken = String(current?.deviceToken || "");
+    if (!deviceToken.startsWith("dev_")) return null;
+    return {
+      deviceToken,
+      deviceId: String(current.deviceId || ""),
+      apiUrl: String(current.apiUrl || ""),
+      installationKey: String(current.installationKey || ""),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function defaultDeviceClient(url, token) {
+  const { RelayClient } = await import("./client.js");
+  return new RelayClient({ ...(url ? { url } : {}), token });
+}
+
+async function revokeWithOwnToken(credential, makeClient, timeoutMs) {
+  try {
+    const client = await makeClient(credential.apiUrl, credential.deviceToken);
+    await client.revokeSelf({ timeoutMs });
+    return "revoked";
+  } catch (error) {
+    // A token the server no longer accepts is already retired (the server
+    // replaces a same-installation device itself when the new one registers).
+    return Number(error?.status) === 401 ? "already_revoked" : "failed";
+  }
+}
+
+/**
+ * Retire the device a pairing just replaced, using that device's own token.
+ *
+ * Only a credential issued on this same installation is revoked: its stored
+ * installation key must equal the new registration's. That covers a re-pair
+ * and Switch Account on this computer, and it refuses a credential copied in
+ * from another machine (a cloned VM, a restored home folder), whose device is
+ * still live elsewhere. Credentials from before installation keys existed are
+ * left alone. Best effort: never throws and never blocks the new pairing.
+ */
+export async function revokeReplacedDevice(previous, registration, {
+  makeClient = defaultDeviceClient,
+  timeoutMs = 5000,
+} = {}) {
+  if (!previous?.deviceToken) return "none";
+  if (previous.deviceToken === registration?.deviceToken) return "same_device";
+  if (previous.deviceId && previous.deviceId === registration?.deviceId) return "same_device";
+  if (!previous.installationKey || previous.installationKey !== registration?.installationKey) return "not_this_installation";
+  return revokeWithOwnToken(previous, makeClient, timeoutMs);
+}
+
+/**
+ * Revoke this computer's device before its credential is deleted on sign-out,
+ * so signing out does not leave a live token and a stale device behind. The
+ * same guard applies: only a credential issued on this installation.
+ */
+export async function revokeSignedOutDevice(config, {
+  currentKey,
+  makeClient = defaultDeviceClient,
+  timeoutMs = 5000,
+} = {}) {
+  const credential = replacedDeviceCredential(config);
+  if (!credential) return "none";
+  if (!credential.installationKey) return "not_this_installation";
+  let key = currentKey;
+  if (key === undefined) {
+    const { installationKey } = createRequire(import.meta.url)("./installation-key.cjs");
+    key = await installationKey();
+  }
+  if (!key || key !== credential.installationKey) return "not_this_installation";
+  return revokeWithOwnToken(credential, makeClient, timeoutMs);
 }
 
 /**
@@ -60,6 +143,7 @@ export function signedOutAccountConfig(existing) {
   delete next.user;
   delete next.deviceToken;
   delete next.deviceId;
+  delete next.installationKey;
   delete next.credentialStore;
   delete next.credentialVersion;
   delete next.credentialAccount;
@@ -75,7 +159,6 @@ export function persistPairedAccount({
   credentialBackend,
 } = {}) {
   const existing = readConfig();
-  if (existing.deviceId && existing.deviceId !== registration?.deviceId) removeE2eeRuntimeState();
   return writeConfigObject(
     pairedAccountConfig(existing, { apiUrl, webUrl, deviceName, registration }),
     { requireNativeCredential, ...(credentialBackend ? { credentialBackend } : {}) },
@@ -89,8 +172,6 @@ export function persistSignedOutAccount({ credentialBackend = { deleteDeviceToke
     if (!removed.ok) throw new Error(`Could not remove Relay credential from protected storage (${removed.detail || "unknown error"}).`);
   }
   const next = writeConfigObject(signedOutAccountConfig(config));
-  removeE2eeRuntimeState();
-  removePairedIdentity();
   return next;
 }
 

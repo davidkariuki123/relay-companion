@@ -80,7 +80,13 @@ test("MCP initialize returns complete startup teachings before tools are selecte
 
   const full = await inspectMcp({ developer: true, updateChannel: "dev" });
   assert.equal(full.instructions, RELAY_MCP_INSTRUCTIONS);
-  assert.deepEqual(full.tools.map((tool) => tool.name), TOOLS.map((tool) => tool.name));
+  const pausedTodoTools = new Set(["relay_todo_update", "relay_todo_visibility", "relay_todo_reorder"]);
+  assert.deepEqual(
+    full.tools.map((tool) => tool.name),
+    TOOLS.filter((tool) => !pausedTodoTools.has(tool.name)).map((tool) => tool.name),
+  );
+  assert.doesNotMatch(full.instructions, /relay_todo_update|todoStatuses/);
+  assert.deepEqual(Object.keys(full.tools.find((tool) => tool.name === "relay_inbox_list").inputSchema.properties), ["relayIds"]);
 });
 
 // The 0%-reachable failure this catches: runtimeEnvironment returns
@@ -139,52 +145,6 @@ test("tools/list survives account drift; only calls refuse", async () => {
     assert.equal(call.isError, true);
     assert.match(call.content[0].text, /signed out/i);
     assert.match(call.content[0].text, /bound@example\.com/);
-  } finally {
-    await client.close();
-    fs.rmSync(configDir, { recursive: true, force: true });
-  }
-});
-
-test("tools/list survives an unreachable E2EE status route on a paired, never-encrypted device", async () => {
-  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-mcp-e2ee-status-"));
-  fs.writeFileSync(path.join(configDir, "config.json"), JSON.stringify({
-    user: { id: "usr_paired", email: "paired@example.com", accountKind: "human", isDeveloper: false },
-    deviceId: "dev_paired",
-    deviceToken: "dev_token_paired",
-    updateChannel: "stable",
-  }));
-  // What every pairing leaves behind: an enrolled identity, no verified mode yet.
-  fs.writeFileSync(path.join(configDir, "e2ee-device-identity.json"), JSON.stringify({
-    version: 1,
-    protocol: "mls10",
-    cipherSuite: "MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519",
-    signaturePublicKey: "A".repeat(43),
-    fingerprint: "B".repeat(43),
-    privateKeyJwk: { kty: "OKP", crv: "Ed25519", x: "A".repeat(43), d: "C".repeat(43) },
-    createdAt: new Date().toISOString(),
-    deviceId: "dev_paired",
-    userId: "usr_paired",
-  }), { mode: 0o600 });
-  const transport = new StdioClientTransport({
-    command: process.execPath,
-    args: [relayBin, "mcp"],
-    env: {
-      ...process.env,
-      RELAY_CONFIG_DIR: configDir,
-      RELAY_HOME: configDir,
-      RELAY_COMPANION_HOME: configDir,
-      RELAY_UPDATE_CHANNEL: "stable",
-      // The API is unreachable: GET /v1/e2ee/status fails with "fetch failed".
-      RELAY_API_URL: "http://127.0.0.1:9",
-    },
-    stderr: "pipe",
-  });
-  const client = new Client({ name: "relay-e2ee-status-test", version: "1.0.0" }, { capabilities: {} });
-  try {
-    await client.connect(transport);
-    const names = (await client.listTools()).tools.map((tool) => tool.name);
-    assert.ok(names.includes("relay_inbox_list"), `plaintext catalog expected, got ${names.length} tools`);
-    assert.ok(names.includes("relay_send"));
   } finally {
     await client.close();
     fs.rmSync(configDir, { recursive: true, force: true });

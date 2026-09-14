@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { adoptAgentConnection } from "../src/agent-connection.js";
 
-test("Companion adopts one approved account and recovers a lost registration response with the same proof and keys", async (t) => {
+test("Companion adopts one approved account and recovers a lost registration response with the same proof", async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-adoption-test-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const agent = { consentVersion: 2, account: { relayUserId: "usr_test" }, apiUrl: "https://dev-api.sendrelays.com", accessToken: "web_test_only" };
@@ -22,13 +22,11 @@ test("Companion adopts one approved account and recovers a lost registration res
       pairings++;
       return { code: "ABCDEFGH" };
     },
-    createIdentity: () => ({ request: { publicKey: "fixture" }, state: { privateKey: "fixture" } }),
     makeClient: () => ({ registerDevice: async (input) => {
       enrollments.push(input);
       if (enrollments.length === 1) throw new Error("response lost");
       return registration;
     } }),
-    persistIdentity: (keys, response) => { assert.equal(keys.privateKey, "fixture"); assert.deepEqual(response, registration); },
     persistAccount: (input) => { assert.equal(input.requireNativeCredential, true); assert.deepEqual(input.registration, registration); },
   };
   await assert.rejects(adoptAgentConnection(options), /response lost/);

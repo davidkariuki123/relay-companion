@@ -37,7 +37,7 @@ test("the pill stages picker and dropped files, and serializes them through one 
   assert.match(inbox, /field\.addEventListener\("drop"/);
   assert.match(inbox, /composerFilePayloads\(staged\)/);
   const roomSend = between(inbox, "const doThReply = async () =>", "threadComposerSend = doThReply");
-  assert.match(roomSend, /\(\{ files, attachments \} = await composerFilePayloads\(staged\)\)/);
+  assert.match(roomSend, /\(\{ files, attachments \} = staged\.length\s*\? await composerFilePayloads\(staged\)/);
   assert.doesNotMatch(roomSend, /for \(let i = 0; i < bytes\.length; i \+= 1\)/);
   assert.match(roomSend, /attachments,/);
   assert.match(inbox, /attachments\.push\(\{ name, bytes:size, contentType, image, previewUrl \}\)/,

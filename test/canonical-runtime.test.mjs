@@ -133,8 +133,8 @@ test("release tree completeness follows Node resolution and names what is missin
 test("a failed activation refuses a half-deleted previous tree and restores a complete sibling instead", async t => {
   const homeDir = fixture(), platform = process.platform;
   t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
-  const broken = seededPointer(homeDir, "0.1.240-broken", "0.1.240", { declared: ["acme-client"], present: [] });
-  const sibling = seededPointer(homeDir, "0.1.240-sibling", "0.1.240", { declared: ["acme-client"] });
+  const broken = seededPointer(homeDir, "0.1.240-broken", "0.1.240", { declared: ["sample-dependency"], present: [] });
+  const sibling = seededPointer(homeDir, "0.1.240-sibling", "0.1.240", { declared: ["sample-dependency"] });
   writePointer(homeDir, broken);
   const restored = [];
   const result = await repairCanonicalRuntime({
@@ -151,7 +151,7 @@ test("a failed activation refuses a half-deleted previous tree and restores a co
   assert.equal(restored.length, 1);
   assert.equal(restored[0].target.packageRoot, sibling.packageRoot, "services are pointed at the complete tree");
   assert.equal(restored[0].context.refusedPrevious.reason, "release-tree-incomplete");
-  assert.match(restored[0].context.refusedPrevious.detail, /acme-client/);
+  assert.match(restored[0].context.refusedPrevious.detail, /sample-dependency/);
   const pointer = readCanonicalRuntime({ homeDir, platform });
   assert.equal(pointer.packageRoot, sibling.packageRoot);
   assert.equal(pointer.releaseId, sibling.releaseId);
@@ -162,7 +162,7 @@ test("a failed activation refuses a half-deleted previous tree and restores a co
 test("a failed activation with no complete tree refuses the rollback and leaves the journal for recovery", async t => {
   const homeDir = fixture(), platform = process.platform;
   t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
-  const broken = seededPointer(homeDir, "0.1.240-broken", "0.1.240", { declared: ["acme-client"], present: [] });
+  const broken = seededPointer(homeDir, "0.1.240-broken", "0.1.240", { declared: ["sample-dependency"], present: [] });
   writePointer(homeDir, broken);
   let rollbackCalls = 0;
   const result = await repairCanonicalRuntime({
@@ -188,7 +188,7 @@ test("a failed activation with no complete tree refuses the rollback and leaves 
 test("recovery refuses an incomplete previous and leaves the pointer inactive for a fresh runtime", async t => {
   const homeDir = fixture(), platform = process.platform;
   t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
-  const broken = seededPointer(homeDir, "0.1.240-broken", "0.1.240", { declared: ["acme-client"], present: [] });
+  const broken = seededPointer(homeDir, "0.1.240-broken", "0.1.240", { declared: ["sample-dependency"], present: [] });
   writePointer(homeDir, { schema: 1, state: "activating", active: false, candidate: { releaseId: "0.1.241-candidate", version: "0.1.241" }, previous: broken, preparedAt: 1 });
   const targets = [];
   const result = await recoverCanonicalRuntime({
@@ -209,8 +209,8 @@ test("recovery refuses an incomplete previous and leaves the pointer inactive fo
 test("recovery restores a complete sibling when the journal's previous tree is broken", async t => {
   const homeDir = fixture(), platform = process.platform;
   t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
-  const broken = seededPointer(homeDir, "0.1.240-broken", "0.1.240", { declared: ["acme-client"], present: [] });
-  const sibling = seededPointer(homeDir, "0.1.240-sibling", "0.1.240", { declared: ["acme-client"] });
+  const broken = seededPointer(homeDir, "0.1.240-broken", "0.1.240", { declared: ["sample-dependency"], present: [] });
+  const sibling = seededPointer(homeDir, "0.1.240-sibling", "0.1.240", { declared: ["sample-dependency"] });
   writePointer(homeDir, { schema: 1, state: "activating", active: false, candidate: { releaseId: "0.1.241-candidate", version: "0.1.241" }, previous: broken, preparedAt: 1 });
   const targets = [];
   const result = await recoverCanonicalRuntime({

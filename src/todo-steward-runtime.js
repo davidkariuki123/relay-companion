@@ -111,6 +111,7 @@ export function stewardSessionResolver(sessions = discoverSessions()) {
 
 /** The daemon's per-tick entry point. Never throws; the daemon loop must stay up. */
 export async function todoStewardTick({ client, features, user, log = () => {} } = {}) {
+  if (features?.todo !== true) return { ran: false, reason: "todo_off" };
   try {
     return await runTodoStewardOnce({
       client,

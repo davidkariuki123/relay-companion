@@ -40,15 +40,14 @@ try {
   assert.equal(await app.evaluate(() => global.__relayTest.state().dismissed), true);
   assert.equal(await app.evaluate(() => global.__relayTest.getWin().isVisible()), false);
   await app.evaluate(() => global.__relayTest.showFromTray());
-  await page.locator(".rat-card").waitFor();
-  assert.equal(await page.locator(".rat-summary").isVisible(), false);
+  await page.locator(".rat-summary").waitFor();
+  assert.equal(await page.locator(".rat-card").isVisible(), false);
   assert.equal(await page.locator(".rat-slide.active").innerText(), first);
   assert.equal(await app.evaluate(() => global.__relayTest.getWin().isVisible()), true);
-  await page.getByRole("button", {name:"Minimise tip",exact:true}).click();
   await page.locator("#closeX").click();
   // Also cover a reopen while the renderer's 300 ms exit is still in flight.
   await app.evaluate(() => global.__relayTest.showFromTray());
-  await page.locator(".rat-card").waitFor();
+  await page.locator(".rat-summary").waitFor();
   await page.waitForFunction(() => !document.getElementById("card").classList.contains("bye"));
   assert.equal(await app.evaluate(() => global.__relayTest.state().dismissed), false);
   assert.deepEqual(errors, []);

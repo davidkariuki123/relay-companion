@@ -114,7 +114,19 @@ try {
   assert.equal(await page.evaluate(() => window.dismissed), 1);
   await page.evaluate(() => { window.events.onShown(); window.events.onOpenFull(); });
   await page.clock.runFor(500);
-  assert.equal(await page.locator(".rat-card").isVisible(), true, "close and reopen always expands the tip");
+  assert.equal(await page.locator(".rat-summary").isVisible(), true, "close and reopen preserves minimisation");
+  assert.equal(await page.locator(".rat-card").isVisible(), false);
+  await page.reload();
+  await page.locator(".rat-summary").waitFor();
+  await page.evaluate(() => window.events.onOpenFull());
+  await page.clock.runFor(500);
+  assert.equal(await page.locator(".rat-card").isVisible(), false, "renderer restart preserves minimisation");
+  await page.getByRole("button", {name:"Expand tip: Relay anyone",exact:true}).click();
+  await page.reload();
+  await page.locator(".rat-card").waitFor();
+  await page.evaluate(() => window.events.onOpenFull());
+  await page.clock.runFor(500);
+  assert.equal(await page.locator(".rat-summary").isVisible(), false, "explicit expansion is saved too");
   assert.equal(await current(), `“${EXAMPLES[0]}”`);
   assert.equal(await page.getByRole("button", {name:/^(Pause|Resume) example rotation$/}).count(), 0);
 

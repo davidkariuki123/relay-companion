@@ -35,20 +35,6 @@ test("Claude setup copies Relay's stable website MCP URL", () => {
   assert.match(main, /claude: "\/connect\/claude"/);
 });
 
-test("required E2EE routes Claude through the local runtime with no hosted fallback", () => {
-  const start = main.indexOf("async function connectChatApp(provider)");
-  const end = main.indexOf("// After an account change", start);
-  const body = main.slice(start, end);
-  const required = body.indexOf('e2ee?.mode === "required"');
-  const hosted = body.indexOf("client.createMcpBrowserHandoff(provider)");
-  assert.ok(required >= 0 && hosted > required);
-  assert.match(body, /client\.e2eeRemoteEndpoint\(\)/);
-  assert.match(body, /requestE2eeClaudeConnection/);
-  assert.match(body, /waitForE2eeClaudeConnection/);
-  assert.match(body, /https:\/\/claude\.ai\/customize\/connectors/);
-  assert.match(body, /ChatGPT connections are not available with Relay E2EE yet/);
-});
-
 test("the pill's You page carries no chat-connector rows; the setup flow keeps its own", () => {
   // The chat connectors (ChatGPT coming soon, Claude chat) left the pill's
   // Settings with the Minimal design (Sven, 2026-09-08): setup installs the

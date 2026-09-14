@@ -15,6 +15,15 @@ function between(source, start, end) {
   return source.slice(from, to);
 }
 
+test("paused Todo renders no reader controls even when a Relay has cached status or removal data", () => {
+  const context = vm.createContext({ payload: { features: { todo: false } } });
+  vm.runInContext(between(inbox, "function todoReaderStatusHtml(row)", "async function commitTodoStatus"), context);
+  assert.equal(context.todoReaderStatusHtml({
+    id: "relay_cached", todoStatus: "triage", todoVersion: 4,
+    todoRemoved: true, todoVisibilityVersion: 2,
+  }), "");
+});
+
 test("Triage is shown to the person as Needs attention; the wire value never changes", () => {
   assert.match(inbox, /triage:"Needs attention", in_progress:"In Progress"/);
   assert.match(inbox, /const TODO_STATUS_ORDER = \["triage", "backlog", "todo", "in_progress", "done", "canceled", "duplicate"\]/);

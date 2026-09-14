@@ -10,7 +10,7 @@ export const REQUIRED_RUNTIME_CAPABILITIES = {
     "skill/relay/scripts/relay-attachments.mjs": ["export async function prepareOrdinaryRelayAttachments"],
     "skill/relay/scripts/relay-local.mjs": ["export function localRequest"],
     "src/agent-local-server.js": ["export async function startAgentLocalServer", "createOutbox", "/local/tools/call", "toolCatalogVersion"],
-    "src/agent-tool-surface.js": ["export function createAgentToolSurface", "toolsForAccount", "toolsForE2eeLocalAccount", "handleCall"],
+    "src/agent-tool-surface.js": ["export function createAgentToolSurface", "toolsForAccount", "handleCall"],
     "src/agent-connection.js": ["export async function adoptAgentConnection"],
   },
   exactSessionRouting: {

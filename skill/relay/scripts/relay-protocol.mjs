@@ -24,7 +24,6 @@ const SAFE_GET = [
   /^\/v1\/chats\/[A-Za-z0-9_-]+$/,
   /^\/v1\/relays\/[A-Za-z0-9_-]+\/attachments\/[A-Za-z0-9_-]+\/download-url$/,
   /^\/v1\/me$/,
-  /^\/v1\/e2ee\/status$/,
   /^\/v1\/inbox(?:\?.*)?$/,
   /^\/v1\/sent(?:\?.*)?$/,
   /^\/v1\/contacts\/search\?q=.+$/,
@@ -308,8 +307,6 @@ async function request(method, requestPath, body) {
   if (config.local || companion.status === "other_environment") {
     const me = await authenticatedRequest(config.apiUrl, config.accessToken, "GET", "/v1/me");
     if (!config.account?.relayUserId || me.user?.id !== config.account.relayUserId) throw new Error("Direct Relay is connected to a different account. Nothing was sent or read.");
-    const encryption = await authenticatedRequest(config.apiUrl, config.accessToken, "GET", "/v1/e2ee/status");
-    if (encryption.mode !== "off") throw new Error("Reopen Relay Companion for this connection's encryption. Direct fallback is unavailable.");
   }
   try { return await authenticatedRequest(config.apiUrl, config.accessToken, verb, cleanPath, body); }
   catch (error) {

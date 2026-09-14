@@ -662,10 +662,8 @@ export function stagePlainRelayItem(
     recipientGroupId: item.recipientGroupId || packet?.recipientGroupId || null,
     recipientGroupName: item.recipientGroupName || packet?.recipientGroupName || null,
     recipientMentioned: item.recipientMentioned ?? packet?.recipientMentioned ?? existing.recipientMentioned,
-    // This marker is created only after authenticated local MLS decryption. It
-    // drives a visible trust label; the server cannot manufacture it in a
-    // plaintext inbox response.
-    e2ee: packet?.e2ee || item.e2ee || null,
+    // Rows copied in from an account's earlier history stay visibly
+    // non-runnable and are staged as read.
     historyImported: packet?.historyImported === true || item.historyImported === true,
     // A restoration is a fresh inbox delivery even when the underlying relay was
     // read before deletion. Use that timestamp so an older account read-all

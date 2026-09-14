@@ -2,16 +2,15 @@ import path from "node:path";
 import { accountProductFeatures } from "./product-features.js";
 import { apiUrl, readConfig } from "./config.js";
 import {
-  activeMcpEncryptionState, createMcpSessionContext, handleCall,
+  createMcpSessionContext, handleCall,
   rememberCallingClient, relayCallingSurface, relayCallErrorResult,
-  toolsForAccount, toolsForE2eeLocalAccount,
+  toolsForAccount,
 } from "./mcp.js";
 
 // A transport-independent entry to the same catalog and handlers used by MCP.
 // No MCP server, session handshake, or agent restart is involved.
 export function createAgentToolSurface(client, {
   featuresReader = () => accountProductFeatures({ client, config: readConfig(), apiUrl: apiUrl() }),
-  encryptionReader = () => activeMcpEncryptionState(client),
 } = {}) {
   const contexts = new Map();
   function context(caller = {}) {
@@ -33,19 +32,18 @@ export function createAgentToolSurface(client, {
   async function catalog(caller) {
     const sessionContext = context(caller);
     const features = await featuresReader();
-    const encryption = await encryptionReader();
     const surface = relayCallingSurface(sessionContext);
-    const tools = encryption.enabled ? toolsForE2eeLocalAccount(features, surface) : toolsForAccount(features, surface);
-    return { sessionContext, features, encryption, tools };
+    const tools = toolsForAccount(features, surface);
+    return { sessionContext, features, tools };
   }
   return {
     async list(caller) { return { tools: (await catalog(caller)).tools }; },
     async call(name, args = {}, caller) {
       try {
         if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error("Tool arguments must be a JSON object.");
-        const { tools, features, encryption, sessionContext } = await catalog(caller);
-        if (!tools.some((tool) => tool.name === name)) throw new Error(`Tool ${name} is unavailable for this Relay account or encryption mode. Run tools to list available capabilities.`);
-        return await handleCall(client, name, args, { features, shareLinks: !encryption.enabled, sessionContext });
+        const { tools, features, sessionContext } = await catalog(caller);
+        if (!tools.some((tool) => tool.name === name)) throw new Error(`Tool ${name} is unavailable for this Relay account. Run tools to list available capabilities.`);
+        return await handleCall(client, name, args, { features, sessionContext });
       } catch (error) { return relayCallErrorResult(error); }
     },
   };

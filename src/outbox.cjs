@@ -178,6 +178,7 @@ function createOutbox({
   now = () => Date.now(),
   spoolDir,
   onChange = () => {},
+  onSent = () => {},
   writeStore = atomicWriteJsonSync,
   log = () => {},
   scheduleTimer = setTimeout,
@@ -191,6 +192,7 @@ function createOutbox({
   let flushing = null;
   let timer = null;
   let stopped = false;
+  let revision = 0;
 
   function persist() {
     withJsonLock(file, () => {
@@ -200,6 +202,7 @@ function createOutbox({
 
   function changed() {
     persist();
+    revision += 1;
     try { onChange(list()); } catch (error) { log("outbox onChange failed", error); }
   }
 
@@ -267,6 +270,7 @@ function createOutbox({
     const entry = {
       id: idempotencyKey,
       idempotencyKey,
+      ...(input.clientMessageId ? { clientMessageId: String(input.clientMessageId) } : {}),
       state: "queued",
       createdAt: localIso(at),
       attempts: 0,
@@ -374,6 +378,10 @@ function createOutbox({
         threadId: String((result && result.threadId) || entry.threadId || ""),
       });
       changed();
+      // Delivery is durable before optional cache refreshes run. Those reads
+      // must neither delay the next send nor turn an accepted send into a retry.
+      try { Promise.resolve(onSent({ ...entry })).catch((error) => log("outbox onSent failed", error)); }
+      catch (error) { log("outbox onSent failed", error); }
       return "sent";
     } catch (error) {
       const kind = classifySendError(error);
@@ -434,9 +442,15 @@ function createOutbox({
   function arm() {
     if (timer) { cancelTimer(timer); timer = null; }
     if (stopped) return;
-    const due = store.entries
-      .filter((e) => e.state === "queued")
-      .map((e) => Number(e.nextAttemptAt) || 0);
+    // Only the first queued message in each room is eligible. Scheduling a
+    // follower that is already due while its head backs off spins at 0ms.
+    const heads = new Map();
+    for (const entry of store.entries) {
+      if (entry.state !== "queued") continue;
+      const key = chatKeyOf(entry);
+      if (!heads.has(key)) heads.set(key, Number(entry.nextAttemptAt) || 0);
+    }
+    const due = [...heads.values()];
     if (!due.length) return;
     const wait = Math.max(0, Math.min(...due) - now());
     timer = scheduleTimer(() => { timer = null; flush().catch(() => {}); }, wait);
@@ -500,7 +514,7 @@ function createOutbox({
 
   return {
     enqueue, list, flush, retire, retireConfirmed, retry, start, stop, reload,
-    resume, pendingCount, kick,
+    resume, pendingCount, kick, revision: () => revision,
   };
 }
 

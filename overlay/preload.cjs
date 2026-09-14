@@ -220,8 +220,6 @@ contextBridge.exposeInMainWorld("relay", {
   onboardingInviteLink: () => ipcRenderer.invoke("relay:onboardingInviteLink"),
   completeNetworkOnboarding: (userId) => ipcRenderer.invoke("relay:completeNetworkOnboarding", userId),
   copyOnboardingInviteLink: (userId) => ipcRenderer.invoke("relay:copyOnboardingInviteLink", userId),
-  e2eeDeviceApprovals: () => ipcRenderer.invoke("relay:e2eeDeviceApprovals"),
-  approveE2eeDevice: (deviceId) => ipcRenderer.invoke("relay:approveE2eeDevice", String(deviceId || "")),
   // Agent-installed first run. Main/core owns the installation authorization,
   // its client secret, activation token and PKCE verifier. The renderer sees
   // only status + verified account summary and can request the next human act.

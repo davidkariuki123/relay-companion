@@ -126,18 +126,21 @@ function switchHarness({ history, daemonFails = false }) {
   const res = { user: { id: 'switched', email: 'switched@example.com', name: 'Switched' }, deviceId: 'device' };
   class RelayClient {
     async registerDevice() { calls.push('register'); return res; }
-    async ensureE2eeReady() { calls.push('e2ee'); }
   }
   const context = vm.createContext({
     console: { error: () => {} },
     loadAccountModules: async () => ({
       account: { normalizePairingCode: (code) => code, deviceNameForPairing: () => 'Mac',
-        persistPairedAccount: () => { calls.push('persist-account'); observed.pendingAtPersist = [...pending]; } },
+        replacedDeviceCredential: () => { calls.push('read-previous'); return { deviceToken: 'dev_previous' }; },
+        persistPairedAccount: () => { calls.push('persist-account'); observed.pendingAtPersist = [...pending]; },
+        revokeReplacedDevice: async (previous, registration) => {
+          calls.push('revoke-replaced');
+          observed.revoked = { previous, registration };
+          return 'revoked';
+        } },
       notifications: { resetCompanionStateForAccount: () => { calls.push('reset'); observed.pendingAtReset = [...pending]; } },
     }),
     loadRelayModules: async () => ({ RelayClient }),
-    createPairingIdentity: () => ({ request: {}, state: {} }),
-    persistPairedIdentity: () => calls.push('persist-identity'),
     readConfigFile: () => ({}), STATE_PATH: '/test/state', process: { platform: 'darwin' },
     onboardingAccountKey: (account) => `user:${account.userId}`, onboardingVersions: versions, COMPANION_ONBOARDING_VERSION: 2,
     signInHistoryPending: pending, firstRelayOnboarding: { status: (key) => statuses[key] || 'checking' },
@@ -169,7 +172,9 @@ test('Switch Account decides the new account from its history before the pill pa
   assert.deepEqual(h.observed.pendingDuringRefresh, ['user:switched']);
   assert.equal(h.observed.versionDuringRefresh, 'unset');
   assert.equal(h.versions['user:switched'], 2);
-  assert.deepEqual(h.calls, ['register', 'persist-identity', 'persist-account', 'e2ee', 'reset', 'daemon', 'sent', 'persist', 'inbox', 'relaunch']);
+  assert.deepEqual(h.calls, ['read-previous', 'register', 'persist-account', 'revoke-replaced', 'reset', 'daemon', 'sent', 'persist', 'inbox', 'relaunch']);
+  assert.equal(h.observed.revoked.previous.deviceToken, 'dev_previous', 'the credential read before registering is the one retired');
+  assert.equal(h.observed.revoked.registration.deviceId, 'device', 'and only after the new one is stored');
   assert.equal(h.pending.size, 0);
 });
 

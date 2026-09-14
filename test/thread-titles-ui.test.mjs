@@ -451,7 +451,11 @@ test("a live refresh repaints the history around the composer, never through it"
   assert.match(html, /restored\.value = text;/);
   // The rows keep the flex geometry they had as direct children of #thHistory:
   // block flow would collapse the margins between bubbles.
-  assert.match(html, /#thRows \{ display:flex; flex-direction:column; \}/);
+  const rowsStyle = html.match(/#thRows\s*\{([^}]+)\}/)?.[1] || "";
+  assert.match(rowsStyle, /\bdisplay\s*:\s*flex\s*;/);
+  assert.match(rowsStyle, /\bflex-direction\s*:\s*column\s*;/);
+  // Reactions must stay in the history's stacking context, below the composer.
+  assert.match(rowsStyle, /\bisolation\s*:\s*isolate\s*;/);
   assert.match(html, /#thRows\.inbox-order \.th-msg:last-of-type \{ margin-bottom:10px; \}/);
 });
 

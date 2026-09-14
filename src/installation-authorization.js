@@ -17,6 +17,7 @@ import {
 
 const { atomicWriteJsonSync } = atomicJson;
 const { writeCredential, readCredential, deleteCredential } = createRequire(import.meta.url)("./credential-store.cjs");
+const { installationKey: currentInstallationKey } = createRequire(import.meta.url)("./installation-key.cjs");
 
 export const INSTALLATION_AUTHORIZATION_FILE = "installation-authorization.json";
 export const INSTALLATION_CREDENTIAL_SERVICE = "work.relay.companion.installation";
@@ -339,6 +340,10 @@ export function createInstallationAuthorizationController({
   secretStore = createNativeInstallationSecretStore({ webBase }),
   now = () => Date.now(),
   isPaired = defaultIsPaired,
+  // One key per installation on one machine (src/installation-key.cjs). The
+  // server replaces this installation's earlier device when the new one is
+  // issued, e.g. after signing out and back in to the same account.
+  installationKey = currentInstallationKey,
   persistAccount = (registration) => persistPairedAccount({
     apiUrl: normalizeApiBase(apiBase),
     webUrl: webBase,
@@ -353,6 +358,9 @@ export function createInstallationAuthorizationController({
   if (!fetchImpl) throw new Error("Relay setup requires HTTPS support.");
   if (!["darwin", "win32", "linux"].includes(platform)) {
     throw new Error("Relay setup supports macOS, Windows, and Linux.");
+  }
+  async function safeInstallationKey() {
+    try { return (await installationKey()) || null; } catch { return null; }
   }
   let beginInFlight = null;
   let consumeInFlight = null;
@@ -457,11 +465,13 @@ export function createInstallationAuthorizationController({
     }
 
     const { codeVerifier, codeChallenge } = pkcePair();
+    const key = await safeInstallationKey();
     const created = await postJson(fetchImpl, base, "/v1/installation-authorizations", {
       deviceName: String(deviceName || "").trim() || "This computer",
       platform,
       codeChallenge,
       codeChallengeMethod: "S256",
+      ...(key ? { installationKey: key } : {}),
     });
     const authorizationId = String(created.authorizationId || "");
     const clientSecret = String(created.clientSecret || "");
@@ -656,7 +666,8 @@ export function createInstallationAuthorizationController({
     // retried idempotently. If account persistence fails after it succeeds,
     // durable `consumed` + the PKCE secret is the recovery receipt.
     await durableStore.write(connected);
-    await persistAccount(registration);
+    const issuedOnKey = await safeInstallationKey();
+    await persistAccount(issuedOnKey ? { ...registration, installationKey: issuedOnKey } : registration);
     const removed = await secretStore.delete();
     if (removed?.ok) await durableStore.remove();
     try { await onConnected(registration); } catch {}
@@ -719,7 +730,7 @@ export function createInstallationAuthorizationController({
   async function restartInternal() {
     if (await isPaired()) throw new Error("Relay is already connected on this computer.");
     // This touches only the one-time installation-authorization namespace. It
-    // never signs out, revokes a device, or removes account/E2EE/message state.
+    // never signs out, revokes a device, or removes account/message state.
     await removeAuthorization();
     return beginInternal();
   }

@@ -139,7 +139,6 @@ test("an installed direct helper reports bounded managed-skill identity and inte
     headers.push(request.headers);
     response.setHeader("content-type", "application/json");
     if (request.url === "/v1/me") return response.end(JSON.stringify({ user: { id: "usr_test" } }));
-    if (request.url === "/v1/e2ee/status") return response.end(JSON.stringify({ mode: "off" }));
     response.end(JSON.stringify({ groups: [] }));
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -187,7 +186,6 @@ test("custom tutorial freezes both documents across an uncertain result, support
   const requests = [];
   const server = http.createServer(async (req, res) => {
     res.setHeader("content-type", "application/json");
-    if (req.url === "/v1/e2ee/status") return res.end(JSON.stringify({ mode: "off" }));
     let body = ""; for await (const chunk of req) body += chunk;
     if (req.url !== "/v1/relays") { res.statusCode = 404; return res.end("{}"); }
     requests.push(JSON.parse(body));
@@ -229,7 +227,6 @@ test("the first link is minted once from the approved draft, retried unchanged a
   const requests = [];
   const server = http.createServer(async (req, res) => {
     res.setHeader("content-type", "application/json");
-    if (req.url === "/v1/e2ee/status") return res.end(JSON.stringify({ mode: "off" }));
     let body = ""; for await (const chunk of req) body += chunk;
     if (req.url !== "/v1/share-links" || req.method !== "POST") { res.statusCode = 404; return res.end("{}"); }
     requests.push(JSON.parse(body));
@@ -454,13 +451,12 @@ test("setup preserves MCP and skill while retiring Relay hooks", () => {
   assert.doesNotMatch(setup, /removeClaudeCodeMcpConfig|removeCodexMcpConfig|uninstallClaudeHooks|uninstallCodexHooks|installClaudeHooksWithStableLauncher|installCodexHooksWithStableLauncher/);
 });
 
-test("the helper retains direct auth and falls back after Companion stops without bypassing account or encryption checks", async (t) => {
+test("the helper retains direct auth and falls back after Companion stops without bypassing account checks", async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-handoff-test-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const config = path.join(root, "config.json");
   const descriptor = path.join(root, "local.json");
   const requests = [];
-  let mode = "off";
   let directUser = "usr_test";
   let directStatus = 200;
   const api = http.createServer((request, response) => {
@@ -469,7 +465,6 @@ test("the helper retains direct auth and falls back after Companion stops withou
     response.statusCode = directStatus;
     if (directStatus !== 200) return response.end(JSON.stringify({ error: "invalid_token" }));
     if (request.url === "/v1/me") return response.end(JSON.stringify({ user: { id: directUser } }));
-    if (request.url === "/v1/e2ee/status") return response.end(JSON.stringify({ mode }));
     return response.end(JSON.stringify({ groups: [{ id: "grp_direct" }] }));
   });
   await new Promise((resolve) => api.listen(0, "127.0.0.1", resolve));
@@ -551,12 +546,6 @@ test("the helper retains direct auth and falls back after Companion stops withou
   const crashed = await runProtocol(["groups"], { env });
   assert.equal(crashed.code, 0, crashed.stderr);
   assert.equal(JSON.parse(crashed.stdout).groups[0].id, "grp_direct");
-  for (mode of ["optional", "required", "unknown"]) {
-    const before = requests.filter((url) => url === "/v1/contact-groups").length;
-    assert.match((await runProtocol(["groups"], { env })).stderr, /encryption/);
-    assert.equal(requests.filter((url) => url === "/v1/contact-groups").length, before);
-  }
-  mode = "off";
   directUser = "usr_other";
   assert.match((await runProtocol(["groups"], { env })).stderr, /different account/);
   directUser = "usr_test";
@@ -590,7 +579,6 @@ test("a lost local send response uses the identical direct request and key, whil
     for await (const chunk of request) text += chunk;
     response.setHeader("content-type", "application/json");
     if (request.url === "/v1/me") return response.end(JSON.stringify({ user: { id: "usr_test" } }));
-    if (request.url === "/v1/e2ee/status") return response.end(JSON.stringify({ mode: "off" }));
     assert.equal(request.url, "/v1/relays");
     assert.equal(request.headers.authorization, "Bearer web_test_only_01234567890123456789");
     response.end(JSON.stringify(accept(JSON.parse(text))));
@@ -707,30 +695,18 @@ test("CLI discovers the live catalog and executes mutations through the authenti
   const malformed = await runProtocol(["call", "relay_contact_update"], { env, input: "[]" });
   assert.equal(malformed.code, 1);
   assert.equal(writes.length, 3);
-  for (const cursor of [undefined,"todo-page-2"]) {
-    const listedTodo=await runProtocol(["call","relay_inbox_list"],{env,input:JSON.stringify({todoStatuses:["triage"],limit:1,...(cursor?{cursor}:{})})});
-    assert.equal(listedTodo.code,0,listedTodo.stderr);
-    const board=JSON.parse(JSON.parse(listedTodo.stdout).content[0].text);
-    assert.equal(board.items[0].todoVersion,3);
-    assert.equal(board.items[0].todoStatus,"triage");
-    assert.equal(board.nextCursor,cursor?null:"todo-page-2");
-    assert.equal(board.readStateChanged,false);
-    assert.equal(board.readReceiptsSent,false);
-  }
-  assert.equal(writes.length,3,"Todo checkpoint reads cause no mutations");
-  const visibilityRead = await runProtocol(["call", "relay_todo_visibility"], {env,input:JSON.stringify({itemId:"item_tools"})});
-  assert.equal(visibilityRead.code,0,visibilityRead.stderr);
-  assert.equal(JSON.parse(JSON.parse(visibilityRead.stdout).content[0].text).version,0);
-  for (const [name,args] of [
-    ["relay_todo_update",{itemId:"item_tools",status:"done",expectedVersion:1,idempotencyKey:"cli-done"}],
-    ["relay_todo_update",{itemId:"task_tools",status:"canceled",expectedVersion:1,idempotencyKey:"cli-cancel"}],
-    ["relay_todo_visibility",{itemId:"item_tools",removed:true,expectedVersion:0,idempotencyKey:"cli-remove"}],
-    ["relay_todo_visibility",{itemId:"item_tools",removed:false,expectedVersion:1,idempotencyKey:"cli-restore"}],
+  for (const [name, args] of [
+    ["relay_inbox_list", { todoStatuses: ["triage"], limit: 1 }],
+    ["relay_todo_update", { itemId: "item_tools", status: "done", expectedVersion: 1, idempotencyKey: "cli-done" }],
+    ["relay_todo_visibility", { itemId: "item_tools" }],
+    ["relay_todo_reorder", { status: "triage", itemIds: ["item_tools"], idempotencyKey: "cli-order" }],
   ]) {
-    const result=await runProtocol(["call",name],{env,input:JSON.stringify(args)});
-    assert.equal(result.code,0,result.stderr+result.stdout);
+    const result = await runProtocol(["call", name], { env, input: JSON.stringify(args) });
+    assert.equal(result.code, 1, result.stderr + result.stdout);
+    assert.match(result.stdout, /unavailable|Unknown tool/);
   }
-  assert.equal(writes.length,7);
+  assert.ok(!tools.some(tool => tool.name.startsWith("relay_todo_")));
+  assert.equal(writes.length, 3, "paused Todo never reaches a mutation");
   client.updateContact = async () => { throw Object.assign(new Error("permission denied"), { status: 403 }); };
   const refused = await runProtocol(["call", "relay_contact_update"], { env, input: JSON.stringify({ contactId: "con_tools" }) });
   assert.equal(refused.code, 1);

@@ -36,9 +36,9 @@ function productFeatures(options = {}) {
     // same server-owned developer-account gate as the other unreleased tools.
     googleContacts: developer,
     requests: developer,
-    // Todo is still in product development, so expose it through the same
-    // developer-account gate as the other unreleased surfaces.
-    todo: developer,
+    // Todo is paused everywhere, including local/dev developer accounts.
+    // Keep its data and implementation available for a later re-enable.
+    todo: false,
     // Topics (invite-only boards kept in sync by members' agents under an
     // approved mandate) are being proven by the developers first.
     topics: developer,

@@ -109,7 +109,7 @@ export function renderRelayOpenSeed(row, { includeActionPrompt = true } = {}) {
       documentPaths
         ? renderRelayOpenContext({ forHuman, forAgent, documentPaths })
         : forAgent ? renderForAgentDocument(forAgent) : "",
-      renderTodoWorkingNote(row),
+      // Todo is paused; opening a Relay must not ask the agent to update it.
     ]),
     draft,
   };

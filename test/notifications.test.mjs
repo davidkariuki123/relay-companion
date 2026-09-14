@@ -145,11 +145,6 @@ test("stagePlainRelayItem writes an ordinary relay row for the existing pill UI"
         source: { host: "relay-mcp" },
         targetSurfaces: ["codex"],
         attachments: [],
-        e2ee: {
-          protocol: "mls10",
-          cipherSuite: "MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519",
-          senderDeviceId: "dev_sven",
-        },
       },
     },
     { statePath },
@@ -166,7 +161,6 @@ test("stagePlainRelayItem writes an ordinary relay row for the existing pill UI"
   assert.equal(row.forHuman, "How are you doing?");
   assert.equal(row.todoStatus, "triage");
   assert.equal(row.todoVersion, 4);
-  assert.equal(row.e2ee.senderDeviceId, "dev_sven");
   const packet = JSON.parse(fs.readFileSync(result.contentPath, "utf8"));
   assert.equal(packet.schemaVersion, 2);
   assert.equal(packet.delivery.transport, "relay_api");

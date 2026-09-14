@@ -68,7 +68,7 @@ import { liveToolRequirement, requiredLiveHosts, shouldRequireLiveTools } from "
 import { openRelay, openTask } from "../src/materializer.js";
 import { runClaudeHook } from "../src/claude-hook.js";
 import { runCodexHook } from "../src/codex-hook.js";
-import { normalizePairingCode, persistPairedAccount } from "../src/account.js";
+import { normalizePairingCode, persistPairedAccount, replacedDeviceCredential, revokeReplacedDevice } from "../src/account.js";
 import { resetCompanionStateForAccount } from "../src/notifications.js";
 import {
   finishPendingSetupOpenRelay,
@@ -80,13 +80,6 @@ import {
 } from "../src/setup-open.js";
 import { migratePersistedContentFields } from "../src/content-field-migration.js";
 import { accountProductFeatures } from "../src/product-features.js";
-import {
-  importLegacyHistory,
-  prepareE2eeHistoryImport,
-} from "../src/e2ee-history-import.js";
-import e2eeIdentity from "../src/e2ee-identity.cjs";
-
-const { createPairingIdentity, persistPairedIdentity } = e2eeIdentity;
 
 function parseFlags(argv) {
   const flags = {};
@@ -169,24 +162,21 @@ async function cmdPair(flags, { promptForDefaults = true } = {}) {
   if (!name) {
     name = promptForDefaults ? await prompt(`Device name [${os.hostname()}]: `, os.hostname()) : os.hostname();
   }
+  // The credential this pairing replaces, read before the URLs or token change.
+  const previous = replacedDeviceCredential();
   writeConfig({ apiUrl: url, webUrl: appUrl });
   const client = new RelayClient({ url });
   const pairingCode = normalizePairingCode(code);
-  const encryptionIdentity = createPairingIdentity({ pairingCode, name, platform: process.platform });
   const res = await client.registerDevice({
     pairingCode,
     name,
     platform: process.platform,
-    e2eeIdentity: encryptionIdentity.request,
   });
-  // Persist the private key before the bearer token. If the second write fails,
-  // the key is still recoverable; the reverse ordering could leave a registered
-  // public identity whose private half was permanently lost.
-  persistPairedIdentity(encryptionIdentity.state, res);
   // The same persistence the pill's Settings tab uses (src/account.js), so the
   // stored credential shape can never drift between the two pairing surfaces.
   persistPairedAccount({ apiUrl: url, webUrl: appUrl, deviceName: name, registration: res });
-  await new RelayClient({ url }).ensureE2eeReady();
+  // Retire the device this computer just replaced, as the pill's Switch Account does.
+  await revokeReplacedDevice(previous, res);
   resetCompanionStateForAccount({ user: res.user, deviceId: res.deviceId });
   console.log(`Paired as ${res.user.name} <${res.user.email}>. This device is now connected to Relay.`);
   // A re-pair on a machine whose services are already running must reach
@@ -458,7 +448,7 @@ function cmdRepairDesktop(flags = {}) {
     : process.env;
   // Repair is deliberately local and non-destructive. It may rewrite Relay's
   // launchers and Relay-owned hook registrations, but it never rewrites account
-  // config, deletes credentials/E2EE state, clears messages/outboxes/preferences,
+  // config, deletes credentials, clears messages/outboxes/preferences,
   // or calls a cloud revocation endpoint.
   // The updater invokes this command from the verified candidate tree before it
   // switches/restarts services. Neutralize the stable bridge and remove Relay
@@ -1230,38 +1220,6 @@ function cmdUpdateChannel(positional = []) {
   if (requested === UPDATE_CHANNEL_STABLE) return cmdEnv(["prod"]);
 }
 
-async function cmdE2eeHistoryImport(flags) {
-  const client = new RelayClient();
-  const prepared = await prepareE2eeHistoryImport(client);
-  const { me, items, summary } = prepared;
-  console.log(`[relay] encrypted history import plan for ${me.user.name} <${me.user.email}>`);
-  console.log(`[relay] ${summary.messages} authored Relays: ${summary.direct} direct, ${summary.groups} group, ${summary.requests} Requests`);
-  console.log(`[relay] ${summary.attachments} attachments; ${summary.edited} edited; ${summary.deleted} deleted`);
-  console.log("[relay] destination ids and dates will be fresh; no legacy mapping is stored by Relay");
-  if (!flags.execute) {
-    console.log(`[relay] dry run only — execute with: relay e2ee-history-import --execute --confirm ${me.user.email}`);
-    return;
-  }
-  const confirmation = String(flags.confirm || "").trim().toLowerCase();
-  if (confirmation !== String(me.user.email || "").trim().toLowerCase()) {
-    throw new Error(`Refusing to write history: --confirm must exactly match ${me.user.email}.`);
-  }
-  let maxItems = Number.POSITIVE_INFINITY;
-  if (flags.max !== undefined) {
-    maxItems = Number(flags.max);
-    if (!(maxItems > 0) || !Number.isInteger(maxItems)) {
-      throw new Error("--max must be a positive whole number when supplied.");
-    }
-  }
-  const result = await importLegacyHistory(client, items, {
-    accountId: me.user.id,
-    maxItems,
-    onProgress: ({ index, total }) => console.log(`[relay] imported ${index}/${total}`),
-  });
-  console.log(`[relay] import complete: ${result.imported} new, ${result.alreadyImported} already checkpointed, ${result.remaining} remaining`);
-  console.log(`[relay] local retry checkpoint: ${result.checkpointPath}`);
-}
-
 // Set when this process is the trampoline's hop target (see main()).
 let trampolineArrival = null;
 
@@ -1409,8 +1367,6 @@ async function main() {
       return cmdUpdateChannel(positional);
     case "env":
       return cmdEnv(positional, flags);
-    case "e2ee-history-import":
-      return cmdE2eeHistoryImport(flags);
     case "doctor":
       return cmdDoctor(flags);
     default:
@@ -1448,8 +1404,6 @@ async function main() {
           "  relay <command> --no-trampoline                       Run the invoked install itself instead of handing off to the canonical runtime",
           "  relay <command> --claim                               Let this tree take over the machine's autostart even when it is not the canonical runtime",
           "  relay env [dev|staging|prod] [--api URL]              Switch API + release channel together",
-          "  relay e2ee-history-import                             Dry-run the signed-in account's one-off encrypted history copy",
-          "  relay e2ee-history-import --execute --confirm EMAIL   Encrypt and copy that account's authored legacy history",
           "  relay whoami                                          Show the paired account",
         ].join("\n"),
       );

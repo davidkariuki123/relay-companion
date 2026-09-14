@@ -5,7 +5,6 @@ import path from "node:path";
 import { RelayClient } from "./client.js";
 import { readConfig as companionConfig, writeConfig } from "./config.js";
 import { persistPairedAccount } from "./account.js";
-import identity from "./e2ee-identity.cjs";
 import { readConfig, configPath, authenticatedRequest, atomicWrite } from "../skill/relay/scripts/relay-protocol.mjs";
 
 // Called only by the explicitly consented agent-protocol setup. Startup and
@@ -17,8 +16,6 @@ export async function adoptAgentConnection({
   makeClient = (url, token = "") => new RelayClient({ url, token }),
   request = authenticatedRequest,
   persistAccount = persistPairedAccount,
-  createIdentity = identity.createPairingIdentity,
-  persistIdentity = identity.persistPairedIdentity,
   journalFile = path.join(path.dirname(configPath()), "agent-companion-pairing.json"),
 } = {}) {
   const agent = readAgent();
@@ -52,17 +49,16 @@ export async function adoptAgentConnection({
     const pairing = await request(agent.apiUrl, agent.accessToken, "POST", "/v1/agent/companion/pairing-code", { recoverySecret });
     const name = os.hostname();
     const platform = process.platform;
-    const keys = createIdentity({ pairingCode: pairing.code, name, platform });
-    return { accountId: expected, apiUrl: agent.apiUrl, name, platform, pairingCode: pairing.code, recoverySecret, keys };
+    return { accountId: expected, apiUrl: agent.apiUrl, name, platform, pairingCode: pairing.code, recoverySecret };
   }
   if (!journal) {
     journal = await freshEnrollment();
     atomicWrite(journalFile, journal);
   }
   if (!journal.registration) {
-    // Persist the exact keys and code first. An ambiguous registration never
-    // silently creates another identity; a retry uses the same enrollment.
-    const register = () => client.registerDevice({ pairingCode: journal.pairingCode, recoverySecret: journal.recoverySecret, name: journal.name, platform: journal.platform, e2eeIdentity: journal.keys.request });
+    // Persist the exact code first. An ambiguous registration never silently
+    // creates another enrollment; a retry uses the same one.
+    const register = () => client.registerDevice({ pairingCode: journal.pairingCode, recoverySecret: journal.recoverySecret, name: journal.name, platform: journal.platform });
     try { journal.registration = await register(); }
     catch (error) {
       // Refresh only when the server proves the old code was never consumed.
@@ -75,7 +71,6 @@ export async function adoptAgentConnection({
     atomicWrite(journalFile, journal);
   }
   if (journal.registration.user?.id !== expected) throw new Error("Companion pairing returned another account.");
-  persistIdentity(journal.keys.state, journal.registration);
   persistAccount({ apiUrl: agent.apiUrl, webUrl, deviceName: journal.name, registration: journal.registration, requireNativeCredential: true });
   writeCompanion({ updateChannel });
   fs.rmSync(journalFile, { force: true });

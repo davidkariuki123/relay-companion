@@ -7,8 +7,8 @@ import path from "node:path";
 import { RelayClient, closeRelayConnections, secureRelayApiUrl } from "../src/client.js";
 
 // Transport tests exercise tiny fake HTTP servers. They must not discover the
-// developer's real enrolled device and add E2EE status traffic those servers do
-// not implement. A test run is hermetic regardless of who runs it.
+// developer's real paired device and add traffic those servers do not
+// implement. A test run is hermetic regardless of who runs it.
 const previousRelayConfig = process.env.RELAY_CONFIG;
 const transportConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-client-transport-"));
 process.env.RELAY_CONFIG = path.join(transportConfigDir, "config.json");

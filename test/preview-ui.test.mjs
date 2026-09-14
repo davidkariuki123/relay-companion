@@ -233,7 +233,6 @@ test("preview payload is an explicit allowlist and never exposes briefingMarkdow
     "title",
     "forHuman",
     "senderName",
-    "e2ee",
     "createdAt",
     "unread",
     "threadId",
@@ -605,7 +604,7 @@ test("a For-you Task reply is optimistic correspondence and remains in the perso
   // across a dead connection; the canonical relayId arrives later, on the
   // payload, through syncOutboxProjection. The reader no longer waits for a
   // send response to stamp it.
-  assert.match(reader, /optimistic\.outboxId = String\(res\.entry\.id \|\| idempotencyKey\)/);
+  assert.match(reader, /acceptOutboxReceipt\(res, idempotencyKey\)/);
   assert.match(reader, /optimisticChatReplies\.delete\(idempotencyKey\)/, "only a device that cannot hold the message removes the row");
   const sentProjection = between(inbox, "for (const s of payload.sent", "const canonicalIds");
   assert.doesNotMatch(sentProjection, /!request && onRequestThread/, "ordinary human replies are not hidden merely because they answer a Task");

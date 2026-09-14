@@ -203,11 +203,6 @@ test("Slack Settings is one truthful card with the official mark and no optimist
   assert.match(preload, /slackConnection: \(\) => ipcRenderer\.invoke\("relay:slackConnection"\)/);
 });
 
-test("Device approvals exists only when E2EE is actually available", () => {
-  assert.match(html, /deviceApprovalInfo\?\.available !== true\) return ""/,
-    "disabled encryption removes the whole section, including its loading and error states");
-});
-
 test("Slack Settings follows browser-owned OAuth to its real server state", () => {
   assert.match(html, /const SLACK_CONNECTION_POLL_MS = 2000/,
     "a visible Slack connection surface polls the lightweight status endpoint");

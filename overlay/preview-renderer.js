@@ -132,7 +132,7 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
 
   function senderFor(row) {
     const sender = text(row.senderName);
-    if (sender) return `From ${sender}${row.e2ee ? " · End-to-end encrypted" : ""}`;
+    if (sender) return `From ${sender}`;
     return "Relay";
   }
 

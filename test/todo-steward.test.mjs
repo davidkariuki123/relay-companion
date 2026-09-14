@@ -262,7 +262,7 @@ test("one daemon tick fingerprints the board, runs when due, and records what ha
   requestStewardRun(baseDir, 5_100_000);
   const ran = await runTodoStewardOnce({
     client, features: { todo: true, aiSessions: true }, user: { name: "David" }, baseDir, nowMs: 5_100_000,
-    providers: { codex: true, claude: true }, runProvider,
+    providers: { codex: true, claude: true }, runProvider, memory: () => ({ pressured: false }),
   });
   assert.equal(ran.ran, true);
   assert.equal(ran.reason, "manual");
@@ -296,6 +296,7 @@ test("a provider failure is recorded and never leaves a live run behind", async 
   const result = await runTodoStewardOnce({
     client, features: { todo: true }, baseDir, nowMs: 1_000_000, providers: { claude: true },
     runProvider: async () => { throw new Error("claude: not signed in"); },
+    memory: () => ({ pressured: false }),
   });
   assert.equal(result.ran, true);
   assert.equal(result.error, "claude: not signed in");

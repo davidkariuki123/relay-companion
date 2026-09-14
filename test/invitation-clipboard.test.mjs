@@ -6,7 +6,7 @@ import test from "node:test";
 
 const main = readFileSync(new URL("../overlay/main.cjs", import.meta.url), "utf8");
 const start = main.indexOf('ipcMain.handle("relay:copyOnboardingInviteLink"');
-const handler = main.slice(start, main.indexOf('ipcMain.handle("relay:e2eeDeviceApprovals"', start));
+const handler = main.slice(start, main.indexOf('ipcMain.handle("relay:installationAuthState"', start));
 const require = createRequire(new URL("../overlay/main.cjs", import.meta.url));
 const invitationShareCopy = require("./invitation-share-copy.cjs");
 

@@ -35,11 +35,12 @@ function readerHarness({ row, sent = [], chats = [], groups = [], canonical = []
         : { ok: true, entry: { id: request.idempotencyKey, state: "queued" } };
     } } },
   };
-  const functions = ["readerRow", "sentGroupLabel", "readerReplyChat", "replyRail", "composerHtml", "syncOutboxProjection"];
+  const functions = ["readerRow", "sentGroupLabel", "readerReplyChat", "replyRail", "composerHtml", "syncOutboxProjection", "acceptOutboxReceipt"];
   const render = new Function("state", `
     const { id, payload, groupsList, canonicalChatDetails, optimisticChatReplies,
       readerHumanDrafts, input, send, window } = state;
     const request = false, onWork = false, onAgent = false, providerPrompt = null;
+    let latestOutboxRevision = 0;
     const activeView = "reader", readerId = id;
     const directContactAnchorForChatId = () => null;
     const relaySender = (r) => r.senderName || r.senderEmail || "Someone";

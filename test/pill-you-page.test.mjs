@@ -58,7 +58,7 @@ test("Your invite link is on the page with Copy, and says what joining through i
   assert.match(link, /id="svCopyLink"[^>]*>\$\{inviteLinkCopied \? "Copied" : "Copy link"\}/);
   // The renderer never mints or copies the link itself: main does both, so
   // the account token that mints it never reaches this process.
-  const copy = slice("async function copyInviteLinkFromSettings()", "function deviceApprovalsHtml(info)");
+  const copy = slice("async function copyInviteLinkFromSettings()", "function slackSettingsHtml(info)");
   assert.match(copy, /await window\.relay\.copyOnboardingInviteLink\(\)/);
   assert.doesNotMatch(copy, /navigator\.clipboard/);
   const load = slice("async function loadSettings()", "// Provider state is live product state");

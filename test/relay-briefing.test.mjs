@@ -360,7 +360,7 @@ test("the staged sent record carries shareLink, without which the seed's branch 
   assert.match(source, /shareLink: item\.shareLink \|\| existing\.shareLink \|\| null,/);
 });
 
-test("the open seed's operator note names the Todo item and the in_progress/done rule; Tasks and texts are left alone", () => {
+test("opening a Relay does not teach Todo while it is paused", () => {
   const row = {
     id: "relay_todo_item",
     kind: "message",
@@ -373,14 +373,11 @@ test("the open seed's operator note names the Todo item and the in_progress/done
     relayOpenDocumentPaths: { forHuman: "/tmp/relay/For-Human.md", forAgent: "/tmp/relay/For-Agent.md" },
   };
   const seed = renderRelayOpenSeed(row);
-  assert.match(seed.operatorNote, /Todo: this Relay is item relay_todo_item \(triage, version 3 when opened\)\./);
-  assert.match(seed.operatorNote, /call relay_todo_update with status in_progress before substantive work/);
-  assert.match(seed.operatorNote, /status done with a one-line second-person note when the work is genuinely finished/);
-  assert.match(seed.operatorNote, /If the human only reads or discusses it, leave the status alone\./);
   assert.doesNotMatch(seed.visible, /relay_todo_update|relay_todo_item/, "the ids and the rule stay on the agent-only channel");
   // Without document paths the note still rides beside the For Agent document.
   const bare = renderRelayOpenSeed({ ...row, relayOpenDocumentPaths: undefined });
-  assert.match(bare.operatorNote, /Todo: this Relay is item relay_todo_item/);
+  assert.doesNotMatch(bare.operatorNote, /relay_todo_update|Todo:/);
+  assert.doesNotMatch(seed.operatorNote, /relay_todo_update|Todo:/);
   // A Task has its own lifecycle tools; a typed text is not on Todo.
   assert.doesNotMatch(renderRelayOpenSeed({ ...row, kind: "task" }).operatorNote, /relay_todo_update/);
   assert.doesNotMatch(renderRelayOpenSeed({ ...row, title: "", displayTitle: "" }).operatorNote, /relay_todo_update/);

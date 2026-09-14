@@ -19,15 +19,15 @@ const ORDINARY_SURFACES = {
   relayWork: false, agentConnections: false, aiSessions: false, connectors: false, messageMutations: false,
 };
 
-test("developer capabilities require both the server-owned role and a non-production environment", () => {
+test("developer capabilities require both the server-owned role and a non-production environment", async () => {
   assert.deepEqual(productFeatures({ env: { NODE_ENV: "development" }, user: ORDINARY_USER }), {
     environment: "local", developer: false, googleContacts: false, requests: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { NODE_ENV: "development" }, user: DEVELOPER }), {
-    environment: "local", developer: true, googleContacts: true, requests: true, todo: true, cowork: false, ...DEVELOPER_SURFACES,
+    environment: "local", developer: true, googleContacts: true, requests: true, todo: false, cowork: false, ...DEVELOPER_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { RELAY_UPDATE_CHANNEL: "dev" }, user: DEVELOPER }), {
-    environment: "dev", developer: true, googleContacts: true, requests: true, todo: true, cowork: false, ...DEVELOPER_SURFACES,
+    environment: "dev", developer: true, googleContacts: true, requests: true, todo: false, cowork: false, ...DEVELOPER_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { RELAY_UPDATE_CHANNEL: "staging" }, user: DEVELOPER }), {
     environment: "staging", developer: false, googleContacts: false, requests: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
@@ -38,6 +38,12 @@ test("developer capabilities require both the server-owned role and a non-produc
   assert.deepEqual(productFeatures({ env: {}, user: DEVELOPER }), {
     environment: "production", developer: false, googleContacts: false, requests: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
   });
+  const { todoStewardTick } = await import("../src/todo-steward-runtime.js");
+  const untouchable = new Proxy({}, { get() { throw new Error("Todo client must not run"); } });
+  for (const environment of ["local", "dev", "staging", "production"]) {
+    const features = productFeatures({ env: { RELAY_ENV: environment }, user: DEVELOPER });
+    assert.deepEqual(await todoStewardTick({ client: untouchable, features }), { ran: false, reason: "todo_off" });
+  }
 });
 
 test("Google Contacts sync requires both the Dev deployment and developer account role", () => {
@@ -143,7 +149,7 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
   assert.deepEqual(toolsForAccount(productionDeveloper).map((tool) => tool.name), ordinary);
   // The complete catalog requires the role and the dev channel together.
   const developer = productFeatures({ env: { RELAY_UPDATE_CHANNEL: "dev" }, user: DEVELOPER });
-  assert.equal(toolsForAccount(developer).length, 42);
+  assert.equal(toolsForAccount(developer).length, 39);
   assert.ok(toolsForAccount(developer).some((tool) => tool.name === "relay_task_unclaim"));
   assert.ok(toolsForAccount(developer).some((tool) => tool.name === "relay_message_edit"));
   assert.ok(toolsForAccount(developer).some((tool) => tool.name === "relay_message_delete"));
@@ -189,24 +195,24 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
   for (const name of ["relay_topics_list", "relay_topic_fetch", "relay_topic_post", "relay_topic_create", "relay_topic_invite", "relay_topic_member"]) {
     assert.ok(toolsForAccount(developer).some((tool) => tool.name === name), `${name} stays on dev`);
   }
-  // The developer catalog is unchanged: Todo is listed wherever it is entitled.
+  // Todo is paused for developer accounts as well.
   for (const name of ["relay_todo_update", "relay_todo_visibility", "relay_todo_reorder"]) {
-    assert.ok(toolsForAccount(developer).some((tool) => tool.name === name), `${name} stays on dev`);
+    assert.ok(!toolsForAccount(developer).some((tool) => tool.name === name), `${name} is paused on dev`);
   }
   // Removing the tools is not the whole gate. relay_inbox_list ships in every
   // profile, and its contract taught todoStatuses and relay_todo_update by
   // name, so a production agent that could not call Todo was still told it
   // existed. Off, no tool in the shipped catalog mentions it at all, the read
   // tool declares none of its Todo fields, and a remembered Todo read is refused
-  // before transport. On dev the read tool keeps the full contract.
+  // before transport, including on dev.
   for (const tool of toolsForAccount(shipped)) {
     assert.doesNotMatch(JSON.stringify(tool), /todo/i, `${tool.name} must not mention Todo to a production agent`);
   }
   const shippedInbox = toolsForAccount(shipped).find((tool) => tool.name === "relay_inbox_list");
   assert.deepEqual(Object.keys(shippedInbox.inputSchema.properties), ["relayIds"]);
   const developerInbox = toolsForAccount(developer).find((tool) => tool.name === "relay_inbox_list");
-  assert.deepEqual(Object.keys(developerInbox.inputSchema.properties), ["relayIds", "todoStatuses", "cursor", "limit"]);
-  assert.match(developerInbox.description, /todoStatuses/);
+  assert.deepEqual(Object.keys(developerInbox.inputSchema.properties), ["relayIds"]);
+  assert.doesNotMatch(developerInbox.description, /todo/i);
   for (const args of [{ todoStatuses: ["triage"] }, { todoStatuses: ["triage"], cursor: "c1" }, { limit: 5 }]) {
     await assert.rejects(handleCall(client, "relay_inbox_list", args, { features: shipped }), /Todo reads are unavailable in this Relay release/);
   }

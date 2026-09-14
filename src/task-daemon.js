@@ -32,7 +32,6 @@ import { ensureWindowsAutostartTasks, repairAgentMcpRegistrations } from "./inst
 import { apiUrl, readConfig } from "./config.js";
 import { activeSessionOperationCount, runSessionDirectoryOnce } from "./session-controller.js";
 import { todoStewardTick } from "./todo-steward-runtime.js";
-import { createE2eeClaudeRuntimeController } from "./e2ee-claude-runtime.js";
 import { productFeatures } from "./product-features.js";
 import { migratePersistedContentFields } from "./content-field-migration.js";
 import agentRelayContext from "./agent-relay-context.cjs";
@@ -1091,8 +1090,6 @@ export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
   // eslint-disable-next-line no-console
   console.log(`[relay] receiver for ${me.user.email}; polling every ${intervalMs}ms`);
   let features = daemonProductFeatures(log, me.user);
-  let claudeRuntime = createE2eeClaudeRuntimeController({ client, logger: log });
-  void claudeRuntime.tick();
   let featureRefreshAt = Date.now() + ACCOUNT_FEATURE_REFRESH_MS;
   let topicsPolledAt = 0;
   let consecutiveFailures = 0;
@@ -1106,8 +1103,6 @@ export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
     const rebound = await followAccountDrift({ client, log, role: "receiver" });
     if (rebound) {
       await bindLocalAgentConnection(rebound.user);
-      await claudeRuntime.stop();
-      claudeRuntime = createE2eeClaudeRuntimeController({ client, logger: log });
       features = daemonProductFeatures(log, rebound.user);
       featureRefreshAt = Date.now() + ACCOUNT_FEATURE_REFRESH_MS;
     } else if (Date.now() >= featureRefreshAt) {
@@ -1128,7 +1123,7 @@ export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
     await sessionControllerTick({ client, log, features });
     // The Todo steward decides for itself whether anything is due; a run is a
     // background provider process and never blocks delivery below.
-    if (!stewardInFlight) {
+    if (features.todo === true && !stewardInFlight) {
       stewardInFlight = todoStewardTick({ client, log, features, user: (rebound || me).user })
         .finally(() => { stewardInFlight = null; });
     }
@@ -1179,9 +1174,6 @@ export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
         client = new RelayClient();
         const recovered = await resolveMe(client);
         await bindLocalAgentConnection(recovered.user);
-        await claudeRuntime.stop();
-        claudeRuntime = createE2eeClaudeRuntimeController({ client, logger: log });
-        void claudeRuntime.tick();
         features = daemonProductFeatures(log, recovered.user);
         featureRefreshAt = Date.now() + ACCOUNT_FEATURE_REFRESH_MS;
         consecutiveFailures = 0;

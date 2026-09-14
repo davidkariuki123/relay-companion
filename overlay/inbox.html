@@ -580,12 +580,6 @@
     background:var(--accent-soft); border-radius:var(--r-pill); padding:3px 7px;
     transform:translateY(-1px);
   }
-  .echip {
-    flex:0 0 auto; font-family:var(--sans); font-size:10px; font-weight:600;
-    letter-spacing:.01em; line-height:1; color:var(--ok);
-    border:1px solid color-mix(in srgb, var(--ok) 38%, transparent);
-    border-radius:var(--r-pill); padding:3px 7px; transform:translateY(-1px);
-  }
   .row.settled .rk-subject { color:var(--muted-2); }
 
   /* subject: single-line serif, right-edge fade mask */
@@ -1449,6 +1443,8 @@
     transition:grid-template-rows .18s var(--soft), opacity .16s var(--settle), transform .18s var(--soft); }
   /* The timestamp follows these rows; the message bubble owns the bottom corners. */
   .th-host-actions-inner { min-height:0; overflow:hidden; border-top:1px solid var(--hair); background:var(--wash); }
+  /* Use the message bubble's wash through the prompt and timestamp, avoiding a second tinted panel. */
+  .th-msg .th-host-actions-inner { background:transparent; }
   .th-msg.host-intent-open .th-host-actions,
   .th-msg.host-focus-open .th-host-actions,
   .th-msg.host-touch-open .th-host-actions,
@@ -2690,7 +2686,9 @@
      cannot tear down the textarea the caret is sitting in. #thRows repeats
      the column so every row keeps the flex-item geometry it had when the
      rows were direct children (block flow would collapse their margins). */
-  #thRows { display:flex; flex-direction:column; }
+  /* Keep message-local layers, including attached reactions, beneath the
+     sticky composer and header when the conversation scrolls behind them. */
+  #thRows { display:flex; flex-direction:column; isolation:isolate; }
   #thRows > * { flex:none; }
   /* Expanded chat (v1): the conversation borrows the reader's frame; content
      keeps a centered measure. The devotional pass is queued. */
@@ -2856,16 +2854,6 @@
   .sv-update { display:flex; flex-direction:column; gap:8px; align-items:flex-start; }
   .sv-setup-link { appearance:none; border:0; padding:0; background:transparent; color:var(--ink); font:inherit; cursor:pointer; text-decoration:underline; text-decoration-color:color-mix(in srgb, var(--ink) 38%, transparent); text-underline-offset:2px; }
   .sv-update-btn { width:auto; padding:7px 12px; border-radius:var(--r-2); font-family:var(--sans); font-size:12px; }
-  .sv-device-section { margin:24px 12px 0; }
-  .sv-device-list { overflow:hidden; border-radius:var(--r-3); background:var(--raised); box-shadow:inset 0 0 0 1px var(--edge); }
-  .sv-device-row { display:flex; align-items:center; gap:10px; min-height:58px; padding:11px 12px; }
-  .sv-device-row + .sv-device-row { border-top:1px solid var(--edge); }
-  .sv-device-shield { flex:0 0 auto; width:28px; height:28px; border-radius:50%; display:grid; place-items:center; background:var(--accent-soft); color:var(--accent); font-size:14px; }
-  .sv-device-copy { min-width:0; flex:1 1 auto; display:flex; flex-direction:column; }
-  .sv-device-name { font-size:13px; font-weight:600; color:var(--ink); }
-  .sv-device-note { margin-top:3px; font-size:11px; line-height:1.35; color:var(--muted-2); }
-  .sv-device-approve { appearance:none; border:1px solid color-mix(in srgb, var(--accent) 32%, var(--edge)); border-radius:999px; padding:6px 10px; background:var(--accent-soft); color:var(--accent); font:600 11px/1 var(--sans); cursor:pointer; }
-  .sv-device-approve:disabled { opacity:.45; cursor:default; }
   .sv-provider-section { margin:24px 12px 0; }
   .sv-provider-list { overflow:hidden; border-radius:var(--r-3); background:var(--raised); box-shadow:inset 0 0 0 1px var(--edge); }
   .sv-provider { padding:12px; }
@@ -6585,7 +6573,6 @@
         <span class="rk-body">
           <span class="th-top">
             <span class="th-party${mention ? " mention-arrival-label" : ""}">${esc(mention ? `${String(mention.party || "Someone").split(" ")[0]} mentioned you in ${name}` : name)}</span>
-            ${row.e2ee ? `<span class="echip" title="Only the sender's and recipient's devices can read this message">Encrypted</span>` : ""}
             <span class="th-time">${esc(timeAgo(identity.latestAt))}</span>
           </span>
           <span class="rk-line"><span class="th-title">${senderPrefix}${esc(gist)}</span>${identity.unreadCount ? `<span class="th-count">${identity.unreadCount}</span>` : ""}</span>
@@ -8536,7 +8523,7 @@
         button.textContent = "Send result";
         setRowNote(id, result?.error || "The result could not be sent.", "err");
       } else {
-        setRowNote(id, "Encrypted result sent.", "ok");
+        setRowNote(id, "Result sent.", "ok");
         fadeRowNoteLater(id, 3000);
       }
       renderAll();
@@ -9324,7 +9311,7 @@
         <div class="rd-rule"></div>
         <div class="rd-agentcopy">${readerParagraphs(agentText)}</div>`;
     const humanDoc = `
-        <div class="rd-kicker">${request ? `Task · Created by ${esc(sender)}` : esc(sender)}${r.nature ? ` · ${esc(TOPIC_NATURE_LABEL[r.nature] || r.nature)}` : ""}${r.e2ee ? " · end-to-end encrypted" : ""} · ${esc(timeAgo(r.createdAt))}${r.unread ? "" : " · read"}</div>
+        <div class="rd-kicker">${request ? `Task · Created by ${esc(sender)}` : esc(sender)}${r.nature ? ` · ${esc(TOPIC_NATURE_LABEL[r.nature] || r.nature)}` : ""} · ${esc(timeAgo(r.createdAt))}${r.unread ? "" : " · read"}</div>
         <div class="rd-headline${headlineClass}">${esc(subject)}</div>
         <div class="rd-rule"></div>
         <div class="rd-body">${readerParagraphs(r.forHuman)}</div>
@@ -9547,13 +9534,7 @@
             if (activeView === "reader" && String(readerId) === String(r.id) && input.isConnected) input.focus();
             return;
           }
-          const optimistic = optimisticChatReplies.get(idempotencyKey);
-          if (optimistic && res.entry) {
-            optimistic.fromOutbox = true;
-            optimistic.outboxId = String(res.entry.id || idempotencyKey);
-            optimistic.outboxState = String(res.entry.state || "queued");
-            optimistic.outboxAttempts = Number(res.entry.attempts || 0);
-          }
+          acceptOutboxReceipt(res, idempotencyKey);
           input.value = "";
           input.relayResize?.();
           input.relayLongPasteReset?.();
@@ -9621,6 +9602,7 @@
       evidence.length ? `<div class="rd-why-evidence">Based on ${esc(evidence.join(", "))}</div>` : ""}</div></div>`;
   }
   function todoReaderStatusHtml(row) {
+    if (payload.features?.todo !== true) return "";
     // Old chat messages can be outside the bounded inbox cache. Read just their
     // personal membership so recovery is available there too, without read receipts.
     if (row?.id && !row.outbound && row.direction !== "outbound" && payload.features?.todo === true && window.relay.todoVisibilityRead && !todoReaderVisibility.has(row.id)) {
@@ -10148,7 +10130,6 @@
         <div class="rk-top">
           <span class="rk-sender">${esc(sender)}</span>
           ${isTask ? `<span class="kchip">Task</span>` : ""}
-          ${r.e2ee ? `<span class="echip" title="Only the sender's and recipient's devices can read this message">Encrypted</span>` : ""}
           <span class="rk-time">${timeAgo(r.createdAt)}</span>
         </div>
         <div class="rk-subject">${esc(subject)}</div>
@@ -12606,6 +12587,26 @@
   // canonical relay id appears on either side of the local payload.
   const optimisticChatReplies = new Map(); // idempotencyKey -> thread-message row
   const chatReplySending = new Set(); // visible room/thread id
+  let latestOutboxRevision = 0;
+
+  function acceptOutboxReceipt(res, key) {
+    const revision = Number(res?.outboxRevision || 0);
+    latestOutboxRevision = Math.max(latestOutboxRevision, revision);
+    const optimistic = optimisticChatReplies.get(key);
+    // A payload can beat its IPC acknowledgement back to the renderer. The
+    // older queued receipt must not overwrite a newer sent projection.
+    if (!optimistic || !res?.entry || revision < Number(optimistic.outboxRevision || 0)) return;
+    optimistic.fromOutbox = true;
+    optimistic.outboxRevision = revision;
+    optimistic.outboxId = String(res.entry.id || key);
+    optimistic.outboxState = String(res.entry.state || "queued");
+    optimistic.outboxAttempts = Number(res.entry.attempts || 0);
+    optimistic.relayId = String(res.entry.relayId || "");
+    optimistic.groupSendId = String(res.entry.groupSendId || "");
+    optimistic.pending = optimistic.outboxState !== "sent";
+    if (optimistic.relayId) optimistic.id = optimistic.relayId;
+    if (res.entry.threadId) optimistic.threadId = String(res.entry.threadId);
+  }
 
   function activeSlackRoomRecoveryMatches(chatId) {
     return activeView === "threads" && threadsSource === "slack"
@@ -12720,6 +12721,7 @@
         ...existing,
         id: entry.relayId || `outbox:${key}`,
         fromOutbox: true,
+        outboxRevision: Number(payload.outboxRevision || 0),
         outboxId: key,
         // "queued" is the honest word for what the clock means in every other
         // messenger: this device has it, the server does not yet.
@@ -13048,7 +13050,6 @@
         taskClaim: r.taskClaim || null,
         materializedCodex: Boolean(r.materializedCodex),
         materializedClaude: Boolean(r.materializedClaude),
-        e2ee: Boolean(r.e2ee),
         body: r.forHuman || "",
         agent: String(r.forAgent || ""),
         reactions: r.reactions || { aggregates: [], events: [] },
@@ -13232,7 +13233,17 @@
       }
     }
     const canonicalIds = new Set(msgs.map((message) => String(message.id || "")));
+    // History and delivery events can beat the POST response. Use the stable
+    // composer identity carried by our own server echo, never text matching:
+    // sending the same words twice still creates two distinct messages.
+    const canonicalClientIds = new Set(msgs
+      .filter((message) => message.direction === "out" && message.source?.host === "relay-preview")
+      .map((message) => String(message.source?.clientMessageId || "")).filter(Boolean));
     for (const [key, optimistic] of optimisticChatReplies) {
+      if (canonicalClientIds.has(String(key))) {
+        optimisticChatReplies.delete(key);
+        continue;
+      }
       if (optimistic.agentInvocation) {
         const matched = msgs.some((message) => message.ownedAgent
           && message.source?.surface === optimistic.source?.surface
@@ -14665,7 +14676,7 @@
         ? `<div class="th-chunk-date${firstChunk ? " first" : ""}" role="separator"><span>${esc(chunkDateLabel)}</span></div>`
         : "";
       const runHeader = cont ? "" : `
-      <div class="th-run${mine ? " mine" : ""}"><span class="th-party ${partyColorClass(who, mine)}">${esc(who)}</span>${m.e2ee ? `<span class="echip" title="Only the sender's and recipient's devices can read this message">Encrypted</span>` : ""}</div>`;
+      <div class="th-run${mine ? " mine" : ""}"><span class="th-party ${partyColorClass(who, mine)}">${esc(who)}</span></div>`;
       const open = expandedMsgIds.has(m.id);
       const inlineBody = !textLike && !m.request && !open
         && !!m.body && String(m.body).length <= INLINE_BODY_MAX;
@@ -14874,7 +14885,12 @@
       return; // nothing changed at all
     }
     for (const z of thHistoryEl.querySelectorAll('[data-stop="1"]')) {
-      z.addEventListener("click", (e) => e.stopPropagation());
+      z.addEventListener("click", (e) => {
+        // The prompt's text and padding are part of the Relay card's hit area.
+        // Its copy button and the other host controls keep their own actions.
+        if (z.matches(".th-host-actions") && e.target.closest(".th-pull") && !e.target.closest("button")) return;
+        e.stopPropagation();
+      });
     }
     wireMessageSideMenus(thHistoryEl);
     for (const input of thHistoryEl.querySelectorAll("[data-message-edit-input]")) {
@@ -15193,12 +15209,22 @@
           setRowNote(newest ? newest.id : thread.threadId, "This conversation cannot be replied to yet.", "err");
           return;
         }
+        // Lock before file preparation yields: a second Enter/click, including
+        // through a rerendered closure, must still belong to this one send.
+        thReplySending = true;
+        chatReplySending.add(threadStateKey);
+        thQrSend.disabled = true;
         takeStagedFiles(thQrInput);
         let files;
         let attachments;
         try {
-          ({ files, attachments } = await composerFilePayloads(staged));
+          ({ files, attachments } = staged.length
+            ? await composerFilePayloads(staged)
+            : { files: [], attachments: [] });
         } catch (error) {
+          thReplySending = false;
+          chatReplySending.delete(threadStateKey);
+          thQrSend.disabled = false;
           stageFileList(thQrInput, staged.map((f) => f.file || f));
           setRowNote(newest ? newest.id : thread.threadId, `Could not attach that file: ${(error && error.message) || String(error)}`, "err");
           return;
@@ -15330,13 +15356,7 @@
         }
         // The queue's own record supersedes this bubble from the next payload
         // onward; until then it keeps the row on screen under the same key.
-        const optimistic = optimisticChatReplies.get(idempotencyKey);
-        if (optimistic && res.entry) {
-          optimistic.fromOutbox = true;
-          optimistic.outboxId = String(res.entry.id || idempotencyKey);
-          optimistic.outboxState = String(res.entry.state || "queued");
-          optimistic.outboxAttempts = Number(res.entry.attempts || 0);
-        }
+        acceptOutboxReceipt(res, idempotencyKey);
         threadComposerDrafts.delete(threadStateKey);
         threadReplyTargets.delete(threadStateKey);
         threadReplyAttemptKeys.delete(threadStateKey);
@@ -15344,8 +15364,8 @@
         thReplySending = false;
         threadDetailFollowSendFor = threadStateKey;
         renderThreadDetail();
-        if (window.relay.refreshSent) window.relay.refreshSent().catch(() => {});
-        if (window.relay.refresh) window.relay.refresh().catch(() => {});
+        // Main refreshes history after the send is accepted. Fetching here
+        // races the POST and usually brings back the pre-send transcript.
       };
       threadComposerSend = doThReply;
       if (!thQrSend.dataset.wired) {
@@ -15709,10 +15729,6 @@
   let svSignOutArmed = false;
   let svSignOutTimer = null;
   let svFocusCodeOnce = false;
-  let deviceApprovalInfo = null;
-  let deviceApprovalBusy = "";
-  let deviceApprovalError = "";
-  let deviceApprovalNote = "";
 
   const SLACK_CONNECTION_POLL_MS = 2000;
   const SLACK_CONNECTION_WAIT_TIMEOUT_MS = 2 * 60 * 1000;
@@ -16128,37 +16144,6 @@
       renderSettings();
     }
   }
-  function deviceApprovalsHtml(info) {
-    // Device trust is an E2EE-only concept. Keep the entire section absent
-    // until the server explicitly says encrypted delivery is available; an
-    // `e2ee_disabled` response is product state, not an error the user needs
-    // to see in ordinary Settings.
-    if (!info?.paired || !window.relay.e2eeDeviceApprovals || deviceApprovalInfo?.available !== true) return "";
-    const pending = Array.isArray(deviceApprovalInfo?.pendingDevices) ? deviceApprovalInfo.pendingDevices : [];
-    const body = !deviceApprovalInfo
-      ? '<div class="sv-device-row"><span class="sv-device-copy"><span class="sv-device-note">Checking trusted devices…</span></span></div>'
-      : pending.length
-        ? pending.map((device) => {
-            const enrolled = device.enrolledAt ? new Date(device.enrolledAt).toLocaleDateString() : "recently";
-            const shortId = String(device.deviceId || "").slice(-6);
-            const busy = deviceApprovalBusy === device.deviceId;
-            return `<div class="sv-device-row">
-              <span class="sv-device-shield" aria-hidden="true">◇</span>
-              <span class="sv-device-copy">
-                <span class="sv-device-name">New Relay device</span>
-                <span class="sv-device-note">Paired ${esc(enrolled)}${shortId ? ` · ${esc(shortId)}` : ""}. Approving lets encrypted messages and history include it.</span>
-              </span>
-              <button class="sv-device-approve" type="button" data-device-approve="${esc(device.deviceId)}" ${deviceApprovalBusy ? "disabled" : ""}>${busy ? "Approving…" : "Approve"}</button>
-            </div>`;
-          }).join("")
-        : '<div class="sv-device-row"><span class="sv-device-shield" aria-hidden="true">✓</span><span class="sv-device-copy"><span class="sv-device-name">No devices awaiting approval</span><span class="sv-device-note">New devices cannot join encrypted delivery until a trusted device vouches for them.</span></span></div>';
-    return `<section class="sv-device-section" data-stop="1">
-      <div class="sv-open-title">Device approvals</div>
-      <div class="sv-device-list">${body}</div>
-      ${deviceApprovalNote ? `<div class="sv-note">${esc(deviceApprovalNote)}</div>` : ""}
-      ${deviceApprovalError ? `<div class="row-err sv-err">${esc(deviceApprovalError)}</div>` : ""}
-    </section>`;
-  }
   function slackSettingsHtml(info) {
     if (payload.features?.slack !== true) return "";
     if (!info?.paired || !window.relay.slackConnection) return "";
@@ -16250,7 +16235,6 @@
       html += blockedPeopleHtml();
     }
     html += slackSettingsHtml(info);
-    html += deviceApprovalsHtml(info);
     // CONNECTIONS. Claude Code and Codex as the subscription runtimes behind
     // Tasks — gated with that product feature. The chat-connector rows that
     // used to sit here (ChatGPT coming soon, Claude chat) are gone: the You
@@ -16484,9 +16468,6 @@
         button.getAttribute("data-enabled") !== "1",
       ));
     }
-    for (const button of settingsViewEl.querySelectorAll("[data-device-approve]")) {
-      button.addEventListener("click", () => approveDeviceFromSettings(button.getAttribute("data-device-approve")));
-    }
     // Managing addresses lives on the web (Clerk owns verification and the
     // reverification challenge), so the pill's job is to get you there rather
     // than to reimplement it. Without this the account panel showed an email the
@@ -16657,28 +16638,6 @@
     await refreshProviderAuth();
     if (result?.ok) refreshProviderInventory({ force:true }).catch(() => {});
   }
-  async function approveDeviceFromSettings(deviceId) {
-    if (!deviceId || deviceApprovalBusy || !window.relay.approveE2eeDevice) return;
-    deviceApprovalBusy = deviceId;
-    deviceApprovalError = "";
-    deviceApprovalNote = "";
-    renderSettings();
-    let result = null;
-    try { result = await window.relay.approveE2eeDevice(deviceId); } catch (error) {
-      result = { ok:false, error:error?.message || "Could not approve this device." };
-    }
-    deviceApprovalBusy = "";
-    if (!result?.ok) {
-      deviceApprovalError = result?.error || "Could not approve this device.";
-      renderSettings();
-      return;
-    }
-    deviceApprovalNote = result.historyError
-      ? `Device approved for new encrypted messages. Prior history is still waiting: ${result.historyError}`
-      : "Device approved. Its encrypted history transfer has been offered.";
-    try { deviceApprovalInfo = await window.relay.e2eeDeviceApprovals(); } catch {}
-    renderSettings();
-  }
   // Notification switches are phrased positively while storage remains the
   // original hidden/muted booleans. Optimistic: flip the visible state and the
   // local sound gate first, then reconcile from main's authoritative answer.
@@ -16805,17 +16764,6 @@
       // its local read finishes; provider health must never hold this card up.
       if (JSON.stringify(settingsInfo) !== before) renderSettings();
     })();
-    const deviceApprovalTask = (async () => {
-      if (!window.relay.e2eeDeviceApprovals) return;
-      let result = null;
-      try { result = await window.relay.e2eeDeviceApprovals(); } catch (error) {
-        result = { ok:false, error:error?.message || "Could not check device approvals." };
-      }
-      if (seq !== settingsLoadSeq) return;
-      deviceApprovalInfo = result?.ok === false ? { available:false, pendingDevices:[] } : result;
-      deviceApprovalError = result?.ok === false ? result.error || "Could not check device approvals." : "";
-      renderSettings();
-    })();
     const slackTask = (async () => {
       if (payload.features?.slack !== true) return;
       if (seq !== settingsLoadSeq) return;
@@ -16878,7 +16826,7 @@
       else inviteLinkUnavailable = !inviteLinkInfo;
       renderSettings();
     })();
-    await Promise.allSettled([accountTask, slackTask, deviceApprovalTask, authTask, inventoryTask, chatAgentTask, inviteLinkTask]);
+    await Promise.allSettled([accountTask, slackTask, authTask, inventoryTask, chatAgentTask, inviteLinkTask]);
   }
   // Provider state is live product state, not something the user should have
   // to refresh manually. Re-read it whenever Settings becomes visible again
@@ -18090,6 +18038,11 @@
   }
   function onPayload(next) {
     if (!next || typeof next !== "object") return;
+    // A refresh requested before enqueue can arrive after the local receipt.
+    // Its empty queue/older Sent list cannot retract a committed bubble.
+    const outboxRevision = Number(next.outboxRevision || 0);
+    if (outboxRevision < latestOutboxRevision) return;
+    latestOutboxRevision = outboxRevision;
     if (readerMorphSnapshot) {
       readerMorphDeferredPayload = next;
       return;

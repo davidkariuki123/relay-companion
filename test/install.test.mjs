@@ -490,12 +490,12 @@ test("repairDesktopSurfaces --no-restart rewrites both LaunchAgents and Relay.ap
   assert.doesNotMatch(pillPlist, /--full|--messages-only/);
 });
 
-test("non-destructive installation repair preserves account, encryption, message, outbox, and preference state", () => {
+test("non-destructive installation repair preserves account, message, outbox, and preference state", () => {
   const fixture = relayDesktopFixture();
   const protectedFiles = new Map([
     [path.join(fixture.homeDir, ".relay", "config.json"), '{"deviceId":"device-1","credentialAccount":"device-token-1"}\n'],
-    [path.join(fixture.homeDir, ".relay", "e2ee-device-identity.json"), '{"privateKey":"keep"}\n'],
-    [path.join(fixture.homeDir, ".relay", "e2ee-outbox.json"), '{"pending":["message-1"]}\n'],
+    [path.join(fixture.homeDir, ".relay", "agent.json"), '{"accessToken":"keep"}\n'],
+    [path.join(fixture.homeDir, ".relay", "outbox.json"), '{"pending":["message-1"]}\n'],
     [path.join(fixture.homeDir, ".relay", "prefs.json"), '{"pillHidden":true}\n'],
     [path.join(fixture.homeDir, ".relay-companion", "state.json"), '{"packets":{"relay-1":{"state":"delivered"}}}\n'],
     [path.join(fixture.homeDir, ".relay-companion", "packets", "relay-1.json"), '{"forHuman":"keep"}\n'],

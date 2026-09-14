@@ -33,14 +33,14 @@ test("a running tree that lost packages is not offered as a legacy rollback targ
     fs.mkdirSync(path.dirname(path.join(packageRoot, relative)), { recursive: true });
     fs.writeFileSync(path.join(packageRoot, relative), contents, { mode: 0o700 });
   };
-  write("package.json", JSON.stringify({ name: "relay-companion", version: "0.1.494", dependencies: { "acme-client": "1" } }));
+  write("package.json", JSON.stringify({ name: "relay-companion", version: "0.1.494", dependencies: { "sample-dependency": "1" } }));
   write(path.join("bin", "relay.js"), "// relay");
   write(path.join("src", "task-daemon.js"), "// daemon");
   write(path.join("overlay", "main.cjs"), "// pill");
   write(path.join("node_modules", "electron", "dist", process.platform === "win32" ? "electron.exe" : "electron"));
-  assert.equal(legacyRuntimeTarget(packageRoot, "0.1.494"), null, "acme-client is declared but gone, as after a partial delete");
-  fs.mkdirSync(path.join(root, "node_modules", "acme-client"), { recursive: true });
-  fs.writeFileSync(path.join(root, "node_modules", "acme-client", "package.json"), JSON.stringify({ name: "acme-client" }));
+  assert.equal(legacyRuntimeTarget(packageRoot, "0.1.494"), null, "a declared dependency is gone, as after a partial delete");
+  fs.mkdirSync(path.join(root, "node_modules", "sample-dependency"), { recursive: true });
+  fs.writeFileSync(path.join(root, "node_modules", "sample-dependency", "package.json"), JSON.stringify({ name: "sample-dependency" }));
   const target = legacyRuntimeTarget(packageRoot, "0.1.494");
   assert.equal(target?.kind, "legacy");
   assert.equal(target.packageRoot, packageRoot);

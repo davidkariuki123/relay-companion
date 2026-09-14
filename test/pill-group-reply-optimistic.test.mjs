@@ -115,6 +115,35 @@ test("a direct reply still retires on its exact relay id", () => {
   assert.equal(optimistic.size, 0);
 });
 
+test("a server echo arriving before the send response replaces exactly its matching local text", () => {
+  const optimistic = new Map(["first", "second"].map((key) => [key, {
+    id: `optimistic:${key}`, relayId: "", body: "hello", title: "hello", direction: "out", pending: true,
+  }]));
+  const sent = [{ relayId: "server-first", forHuman: "hello", title: "hello",
+    source: { host: "relay-preview", clientMessageId: "first" }, recipient: { name: "Friend" } }];
+  const messages = runThreadMessages({ relays: [], sent }, optimistic);
+  assert.equal(messages.length, 2, "one confirmed text and the second, deliberately identical text");
+  assert.equal(optimistic.has("first"), false);
+  assert.equal(optimistic.has("second"), true);
+});
+
+test("an inbound message cannot retire my local send by copying its composer identity", () => {
+  const optimistic = new Map([["local", { id: "optimistic:local", body: "hello", direction: "out", pending: true }]]);
+  const messages = runThreadMessages({ sent: [], relays: [{
+    id: "someone-else", forHuman: "hello", source: { host: "relay-preview", clientMessageId: "local" },
+  }] }, optimistic);
+  assert.equal(messages.length, 2);
+  assert.equal(optimistic.size, 1);
+});
+
+test("a group echo reconciles before the send response supplies its fan-out identity", () => {
+  const payload = groupReplyPayload();
+  for (const row of payload.sent) row.source = { host: "relay-preview", clientMessageId: "group-local" };
+  const optimistic = new Map([["group-local", { id: "optimistic:group-local", relayId: "", groupSendId: "", direction: "out", pending: true }]]);
+  assert.equal(runThreadMessages(payload, optimistic).length, 1);
+  assert.equal(optimistic.size, 0);
+});
+
 test("an inbound file-only chat message stays an ordinary message and owns its attachment", () => {
   const image = { id: "att_in", name: "photo.jpeg", bytes: 23165, contentType: "image/jpeg" };
   const msgs = runThreadMessages({
@@ -252,7 +281,7 @@ test("the groupSendId that retires a bubble is stamped by the device's queue, no
   );
   // Both composers hand the message to the queue and hold their bubble under
   // the queue's own key until the projection takes it over.
-  const handoffs = html.match(/optimistic\.outboxId = String\(res\.entry\.id \|\| idempotencyKey\);/g) || [];
+  const handoffs = html.match(/acceptOutboxReceipt\(res, idempotencyKey\);/g) || [];
   assert.equal(handoffs.length, 2, "room composer and reader reply both hand off to the outbox");
 });
 

@@ -12,7 +12,7 @@ function fixture(t) {
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const calls = [];
   const client = { identity: { userId: "usr_test" }, accountDrift: () => ({ status: "same" }) };
-  for (const method of ["me", "e2eeStatus", "inbox", "sent", "searchContacts", "groups", "chats", "chat", "thread", "chatForThread", "fetchRelay", "attachmentDownloadUrl", "markRead", "inviteLink"]) {
+  for (const method of ["me", "inbox", "sent", "searchContacts", "groups", "chats", "chat", "thread", "chatForThread", "fetchRelay", "attachmentDownloadUrl", "markRead", "inviteLink"]) {
     client[method] = async (...args) => { calls.push([method, ...args]); return { method, args }; };
   }
   client.sendRelay = async (body) => { calls.push(["sendRelay", body]); return { relayId: "rel_sent", threadId: "thread_one" }; };
@@ -26,7 +26,6 @@ test("daemon dispatch restores groups, chats, attachment reads and exact local d
   t.after(() => dispatcher.stop());
   const get = (route) => dispatcher.dispatch({ method: "GET", path: route, accountId: "usr_test" });
   assert.equal((await get("/v1/contact-groups")).method, "groups");
-  assert.equal((await get("/v1/e2ee/status")).method, "e2eeStatus");
   assert.deepEqual((await get("/v1/chats/chat_one")).args, ["chat_one"]);
   assert.deepEqual((await get("/v1/relays/rel_one/attachments/att_one/download-url")).args, ["rel_one", "att_one"]);
   assert.equal((await get("/local/destinations/codex"))[0].nativeId, "session_one");

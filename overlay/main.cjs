@@ -148,7 +148,6 @@ const { withJsonLock } = require("../src/state-lock.cjs");
 const { atomicWriteJsonSync } = require("../src/atomic-json.cjs");
 const { readDeviceToken } = require("../src/credential-store.cjs");
 const { appendLocalTrace, appendLocalTraces } = require("../src/local-trace.cjs");
-const { createPairingIdentity, persistPairedIdentity, readPairedIdentity } = require("../src/e2ee-identity.cjs");
 const { canonicalInboxItemId, packetIdsForCanonicalItem } = require("../src/inbox-item-id.cjs");
 const claudeInject = require("../src/claude-inject.cjs");
 const { commandAvailable, launchLinuxAgentTerminal } = require("./linux-terminal.cjs");
@@ -542,39 +541,6 @@ function loadSessionRouting() {
       });
   }
   return sessionRoutingPromise;
-}
-
-let e2eeDeviceTrustModulePromise = null;
-function loadE2eeDeviceTrustModule() {
-  if (!e2eeDeviceTrustModulePromise) {
-    const trustUrl = pathToFileURL(path.join(__dirname, "..", "src", "e2ee-device-trust.js")).href;
-    e2eeDeviceTrustModulePromise = import(trustUrl).catch((error) => {
-      e2eeDeviceTrustModulePromise = null;
-      throw error;
-    });
-  }
-  return e2eeDeviceTrustModulePromise;
-}
-
-async function e2eeDeviceApprovalStatus() {
-  if (!deviceToken()) return { ok: true, available: false, devices: [], pendingDevices: [] };
-  try {
-    const [{ RelayClient }, trust] = await Promise.all([loadRelayModules(), loadE2eeDeviceTrustModule()]);
-    return { ok: true, ...(await trust.listOwnE2eeDeviceApprovals(new RelayClient())) };
-  } catch (error) {
-    return { ok: false, error: error?.message || String(error), available: false, devices: [], pendingDevices: [] };
-  }
-}
-
-async function approveE2eeDevice(deviceId) {
-  const target = String(deviceId || "").trim();
-  if (!target) return { ok: false, error: "Choose a device to approve." };
-  try {
-    const [{ RelayClient }, trust] = await Promise.all([loadRelayModules(), loadE2eeDeviceTrustModule()]);
-    return { ok: true, ...(await trust.approveOwnE2eeDevice(new RelayClient(), target)) };
-  } catch (error) {
-    return { ok: false, error: error?.message || String(error) };
-  }
 }
 
 // Account lifecycle deps (ESM, lazy like the modules above): src/account.js is
@@ -1252,32 +1218,6 @@ async function connectChatApp(provider) {
   if (!deviceToken()) return { ok: false, error: `Sign in to Relay before connecting ${label}.` };
   try {
     const client = await relayClient();
-    const e2ee = await client.e2eeStatus();
-    if (e2ee?.mode === "required") {
-      if (provider !== "claude") {
-        return { ok: false, error: "ChatGPT connections are not available with Relay E2EE yet." };
-      }
-      const availability = await client.e2eeRemoteEndpoint();
-      if (availability?.enabled !== true) {
-        return { ok: false, error: "Encrypted Claude access is not enabled in this Relay environment yet." };
-      }
-      const identity = readPairedIdentity();
-      if (!identity) throw new Error("Re-pair this device before connecting encrypted Claude access.");
-      const provisioned = await client.provisionE2eeRemoteEndpoint();
-      const endpointUrl = String(provisioned?.endpoint?.url || "");
-      const endpoint = new URL(endpointUrl);
-      if (endpoint.protocol !== "https:" || endpoint.pathname !== "/mcp" || endpoint.search || endpoint.hash) {
-        throw new Error("Relay returned an invalid encrypted Claude endpoint.");
-      }
-      const controlUrl = pathToFileURL(path.join(__dirname, "..", "src", "e2ee-claude-control.js")).href;
-      const { requestE2eeClaudeConnection, waitForE2eeClaudeConnection } = await import(controlUrl);
-      const request = requestE2eeClaudeConnection(identity);
-      const ready = await waitForE2eeClaudeConnection(identity, request.requestId);
-      if (ready.endpointUrl !== endpointUrl) throw new Error("The Relay daemon prepared a different Claude endpoint.");
-      clipboard.writeText(endpointUrl);
-      await shell.openExternal("https://claude.ai/customize/connectors");
-      return { ok: true, expiresAt: ready.enrollmentExpiresAt || "", copiedMcpUrl: endpointUrl, e2ee: true };
-    }
     const handoff = await client.createMcpBrowserHandoff(provider);
     const relayWeb = new URL(`${webBase()}/`);
     const target = new URL(String(handoff?.url || ""));
@@ -1386,16 +1326,19 @@ async function pairWithCode(input) {
     const code = accountMod.normalizePairingCode(raw);
     if (!code) return { ok: false, error: "Enter the pairing code from your browser." };
     const deviceName = accountMod.deviceNameForPairing(readConfigFile());
+    // The credential this switch replaces, read while it is still stored.
+    const previous = accountMod.replacedDeviceCredential();
     const client = new RelayClient();
-    const encryptionIdentity = createPairingIdentity({ pairingCode: code, name: deviceName, platform: process.platform });
     const res = await client.registerDevice({
       pairingCode: code,
       name: deviceName,
       platform: process.platform,
-      e2eeIdentity: encryptionIdentity.request,
     });
-    persistPairedIdentity(encryptionIdentity.state, res);
     accountMod.persistPairedAccount({ deviceName, registration: res });
+    // Retire the device this computer just stopped using (only when that
+    // credential was issued on this installation), so a switch never leaves a
+    // live token and a stale device on the previous account.
+    await accountMod.revokeReplacedDevice(previous, res);
     // The same history gate as a desktop sign-in (onConnected): the account is
     // current from this line on, so its first-send chapter is decided from its
     // sent page before anything paints for it. Otherwise an existing account
@@ -1405,7 +1348,6 @@ async function pairWithCode(input) {
     signInHistoryPending.add(switchedKey);
     let daemon;
     try {
-      await new RelayClient().ensureE2eeReady();
       notifications.resetCompanionStateForAccount(
         { user: res.user, deviceId: res.deviceId },
         { statePath: STATE_PATH },
@@ -1431,11 +1373,13 @@ async function pairWithCode(input) {
   }
 }
 
-// Sign out: drop the credentials (keeping URLs + device name), wipe the local
-// packet store, then restart the daemon and the pill into the signed-out state.
+// Sign out: revoke this computer's device while its token is still stored, drop
+// the credentials (keeping URLs + device name), wipe the local packet store,
+// then restart the daemon and the pill into the signed-out state.
 async function signOutAccount() {
   try {
     const { account: accountMod, notifications } = await loadAccountModules();
+    await accountMod.revokeSignedOutDevice();
     accountMod.persistSignedOutAccount();
     notifications.resetCompanionStateForAccount(
       { user: null, deviceId: "", force: true },
@@ -2281,8 +2225,20 @@ const outbox = createOutbox({
   // Every state change is a bubble changing under someone's eyes: queued to
   // sent, an attempt that failed, a message that will not go. Repaint.
   onChange: () => pushInboxQuiet(),
+  onSent: () => refreshAfterQueuedSend(),
   log: (message, error) => console.error(`[overlay] ${message}`, (error && error.message) || ""),
 });
+
+let queuedSendRefreshTimer = null;
+function refreshAfterQueuedSend() {
+  if (queuedSendRefreshTimer) return;
+  queuedSendRefreshTimer = setTimeout(() => {
+    queuedSendRefreshTimer = null;
+    Promise.allSettled([refreshSent(), refreshContacts(), refreshCanonicalChats()])
+      .then(() => pushInboxQuiet());
+  }, 32);
+  queuedSendRefreshTimer.unref?.();
+}
 
 // ---- payload assembly + push to renderer ---------------------------------
 
@@ -2364,6 +2320,7 @@ function buildPayload() {
     // survive a repaint and a restart where an in-renderer optimistic map did
     // not.
     outbox: outbox.list(),
+    outboxRevision: outbox.revision(),
     tasks: [],
     contacts: contactsCache,
     chats: canonicalChatsCache,
@@ -2844,6 +2801,7 @@ async function pushInboxNow(force) {
     // refused — would never reach the renderer: nothing else in the payload
     // moves while a message sits offline.
     outbox: (payload.outbox || []).map((e) => [e.id, e.state, e.attempts, e.nextAttemptAt, e.relayId, e.lastError]),
+    outboxRevision: payload.outboxRevision,
     account: [payload.account.paired, payload.account.email],
     onboarding: [payload.ui.onboardingRequired, payload.ui.networkOnboarding, payload.ui.completedOnboardingVersion, payload.ui.firstRelayStatus, payload.ui.firstRelayId, payload.ui.openingPreference,
       payload.ui.firstRelayKind, payload.ui.agentInstalled,
@@ -3510,6 +3468,7 @@ async function stopTaskWork(relayId) {
 }
 
 async function listTodo(input = {}) {
+  if (!PRODUCT_FEATURES.todo) return { ok: false, error: "Todo is currently unavailable." };
   try {
     const client = await relayClient();
     return await client.todo({
@@ -3523,6 +3482,7 @@ async function listTodo(input = {}) {
 }
 
 async function readTodoItem(relayId) {
+  if (!PRODUCT_FEATURES.todo) return { ok: false, error: "Todo is currently unavailable." };
   const id = String(relayId || "").trim();
   if (!id) return { ok: false, error: "Missing Todo item id." };
   try {
@@ -3578,6 +3538,7 @@ async function readTodoItem(relayId) {
 }
 
 async function updateTodoStatus(relayId, input = {}) {
+  if (!PRODUCT_FEATURES.todo) return { ok: false, error: "Todo is currently unavailable." };
   const id = String(relayId || "").trim();
   if (!id) return { ok: false, error: "Missing Todo item id." };
   const current = rowById(id);
@@ -3629,6 +3590,7 @@ async function updateTodoStatus(relayId, input = {}) {
 }
 
 async function updateTodoVisibility(relayId, input = {}) {
+  if (!PRODUCT_FEATURES.todo) return { ok: false, error: "Todo is currently unavailable." };
   const id = String(relayId || "").trim();
   if (!id) return { ok: false, error: "Missing Todo item id." };
   try {
@@ -3679,7 +3641,6 @@ function previewPayloadForPacket(packetId) {
     title: String(row.title || row.displayTitle || ""),
     forHuman: String(row.forHuman || ""),
     senderName: String(row.senderName || "Relay"),
-    e2ee: Boolean(row.e2ee),
     createdAt: String(row.createdAt || ""),
     unread: row.state !== "read",
     // The thread this message belongs to, so the preview can ask for the
@@ -6409,6 +6370,7 @@ function reconcileStaleHandoffs() {
 // packets endpoint (which now carries the Todo state) and retried; anything
 // else is logged and left to the session, which carries the same rule.
 async function markHandoffInProgress(row, host) {
+  if (!PRODUCT_FEATURES.todo) return { ok: false, skipped: "todo_off" };
   const id = String(row?.id || "").trim();
   if (!id || !String(row?.title || row?.displayTitle || "").trim()) return { ok: false, skipped: "untitled" };
   if (["in_progress", "done"].includes(String(row?.todoStatus || ""))) return { ok: false, skipped: row.todoStatus };
@@ -8647,6 +8609,7 @@ ipcMain.handle("relay:todoItem", (_e, id) => readTodoItem(id));
 ipcMain.handle("relay:todoStatusUpdate", (_e, id, input) => updateTodoStatus(id, input));
 ipcMain.handle("relay:todoVisibilityUpdate", (_e, id, input) => updateTodoVisibility(id, input));
 ipcMain.handle("relay:todoVisibilityRead", async (_e, id) => {
+  if (!PRODUCT_FEATURES.todo) return { ok: false, error: "Todo is currently unavailable." };
   try { return await (await relayClient()).todoVisibility(String(id || "")); }
   catch { return { ok:false }; }
 });
@@ -8689,6 +8652,7 @@ function readTodoStewardState() {
   }
 }
 ipcMain.handle("relay:todoStewardPrefs", async (_e, input) => {
+  if (!PRODUCT_FEATURES.todo) return { ok: false, error: "Todo is currently unavailable." };
   try {
     const steward = await todoStewardModule();
     steward.saveStewardPreferences(RELAY_HOME, {
@@ -9089,7 +9053,6 @@ async function postQueuedRelay(entry) {
       ...(entry.inReplyToRelayId ? { inReplyToMessageId: String(entry.inReplyToRelayId) } : {}),
       idempotencyKey: entry.idempotencyKey,
     });
-    await refreshCanonicalChats();
     return result;
   }
   const result = await client.sendRelay({
@@ -9109,12 +9072,11 @@ async function postQueuedRelay(entry) {
     // Human-authored pill text must never enter the MCP-only forHuman review
     // gate. Keep this explicit even though the API now positively gates only
     // relay-mcp: source also drives trustworthy provider attribution.
-    source: { host: "relay-preview" },
+    source: { host: "relay-preview", ...(entry.clientMessageId ? { clientMessageId: entry.clientMessageId } : {}) },
   });
-  // The server auto-saves a direct recipient after a successful send. Refresh
-  // the contact book now so replying to a request also updates Contacts. A
-  // refresh failure must never retry an already delivered message.
-  await refreshContacts().catch(() => {});
+  // The outbox records this receipt before refreshing contacts and history.
+  // A slow contact fetch must not leave this accepted message "Sending" or
+  // hold the next text behind an unrelated network round trip.
   return result;
 }
 
@@ -9129,8 +9091,10 @@ function enqueueReplyFromPill(input = {}) {
   const files = Array.isArray(input.files) ? input.files : [];
   if (!text && !files.length) return { ok: false, error: "empty reply" };
   try {
+    const idempotencyKey = String(input.idempotencyKey || "").trim() || `pill-reply-${crypto.randomUUID()}`;
     const entry = outbox.enqueue({
-      idempotencyKey: String(input.idempotencyKey || "").trim() || `pill-reply-${crypto.randomUUID()}`,
+      idempotencyKey,
+      clientMessageId: idempotencyKey,
       text,
       agentMentions: Array.isArray(input.agentMentions) ? input.agentMentions : undefined,
       recipient: input.recipient || {},
@@ -9140,7 +9104,7 @@ function enqueueReplyFromPill(input = {}) {
     });
     outgoingAttachmentCache.retain(entry);
     outbox.kick(0);
-    return { ok: true, queued: true, entry };
+    return { ok: true, queued: true, entry, outboxRevision: outbox.revision() };
   } catch (error) {
     return { ok: false, error: error && error.message ? error.message : String(error) };
   }
@@ -9422,8 +9386,6 @@ ipcMain.handle("relay:copyOnboardingInviteLink", async (_event, expectedUserId) 
     return { ok: false, error: error?.message || String(error) };
   }
 });
-ipcMain.handle("relay:e2eeDeviceApprovals", () => e2eeDeviceApprovalStatus());
-ipcMain.handle("relay:approveE2eeDevice", (_event, deviceId) => approveE2eeDevice(deviceId));
 ipcMain.handle("relay:installationAuthState", () => installationAuthorizationIpc(async () =>
   (await installationAuthorizationController()).state()));
 ipcMain.handle("relay:installationAuthBegin", () => installationAuthorizationIpc(async () =>

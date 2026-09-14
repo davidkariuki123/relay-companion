@@ -88,7 +88,6 @@ export async function startOnboardingReview() {
       if (url.pathname === "/practice/state") return json(res, payload());
       if (url.pathname === "/practice/complete") { completed = true; return json(res, { ok: true, version: 2 }); }
       if (url.pathname === "/v1/me") return json(res, { user: account });
-      if (url.pathname === "/v1/e2ee/status") return json(res, { mode: "off" });
       if (url.pathname === "/v1/sent") return json(res, { items: sent, hasSentRelay: sent.length > 0 });
       if (url.pathname === "/v1/inbox") return json(res, { items: [] });
       if (url.pathname === "/v1/contacts") return json(res, { contacts });

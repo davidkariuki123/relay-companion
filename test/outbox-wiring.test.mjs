@@ -15,7 +15,7 @@ test("Send commits to the queue and answers; it does not wait for the network", 
   assert.match(main, /ipcMain\.handle\("relay:sendReply", \(_e, input\) => enqueueReplyFromPill\(input\)\)/);
   assert.match(main, /function enqueueReplyFromPill\(input = \{\}\)/);
   assert.match(main, /const entry = outbox\.enqueue\(\{/);
-  assert.match(main, /return \{ ok: true, queued: true, entry \}/);
+  assert.match(main, /return \{ ok: true, queued: true, entry, outboxRevision: outbox\.revision\(\) \}/);
   // The old handler awaited one HTTP attempt and flattened the outcome. Nothing
   // on the composer's path may await a send again.
   assert.doesNotMatch(main, /async function sendReplyFromPill/);

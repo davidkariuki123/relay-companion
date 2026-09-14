@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { createAgentToolSurface } from '../src/agent-tool-surface.js';
-import { TOOLS, toolsForAccount, toolsForE2eeLocalAccount } from '../src/mcp.js';
+import { TOOLS, toolsForAccount } from '../src/mcp.js';
 
 const features = { requests: true, todo: true, topics: true, aiSessions: true, connectors: true, messageMutations: true };
 const caller = { host: 'codex', nativeId: 'thread_test', cwd: os.tmpdir() };
@@ -55,7 +55,7 @@ const cases = {
   relay_connector_call_tool: [{ provider: 'test', toolName: 'read', arguments: {}, idempotencyKey: key }, 'callTool'],
 };
 function surface(client, options = {}) {
-  return createAgentToolSurface(client, { featuresReader: async () => features, encryptionReader: async () => ({ enabled: false }), ...options });
+  return createAgentToolSurface(client, { featuresReader: async () => features, ...options });
 }
 
 test('every current MCP capability is discoverable and reaches its canonical handler without MCP', async () => {
@@ -76,22 +76,17 @@ test('every current MCP capability is discoverable and reaches its canonical han
   }
 });
 
-test('catalog and calls obey live product and encryption restrictions', async () => {
+test('catalog and calls obey live product restrictions', async () => {
   let current = features;
-  let encrypted = false;
   let writes = 0;
   const api = surface({ deleteMessage: async () => { writes++; } }, {
     featuresReader: async () => current,
-    encryptionReader: async () => ({ enabled: encrypted }),
   });
   current = { requests: false, aiSessions: false, todo: false, connectors: false, messageMutations: false };
   assert.deepEqual((await api.list(caller)).tools, toolsForAccount(current, 'codex'));
   assert.equal((await api.call('relay_message_delete', cases.relay_message_delete[0], caller)).isError, true);
   assert.equal((await api.call('relay_connector_call_tool', {}, caller)).isError, true);
   current = features;
-  encrypted = true;
-  assert.deepEqual((await api.list(caller)).tools, toolsForE2eeLocalAccount(features, 'codex'));
-  assert.equal((await api.call('relay_share_link', message, caller)).isError, true);
   assert.equal(writes, 0);
   assert.equal((await api.call('relay_unknown', {}, caller)).isError, true);
   assert.equal((await api.call('relay_groups_list', [], caller)).isError, true);

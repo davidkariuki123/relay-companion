@@ -11,6 +11,7 @@
     "Create a Relay asking the team to try the new app before we release it. Include what changed, how to try it and what to check.",
   ]);
   const INTERVAL_MS = 10000;
+  const COLLAPSED_KEY = "relayAnyoneTipCollapsed";
 
   function create(root) {
     const doc = root.ownerDocument, win = doc.defaultView;
@@ -34,6 +35,12 @@
     const viewport = find(".rat-viewport"), track = find(".rat-track"), dots = find(".rat-dots");
     const copy = find(".rat-copy"), status = find(".rat-status");
     let index = 0, expanded = true, paused = false, visible = false, active = false;
+    try { expanded = win.localStorage.getItem(COLLAPSED_KEY) !== "true"; } catch {}
+    function setExpanded(next) {
+      expanded = next;
+      try { win.localStorage.setItem(COLLAPSED_KEY, String(!expanded)); } catch {}
+      controls();
+    }
     let inViewport = false, timer = null, animations = [], generation = 0;
     const slides = EXAMPLES.map((text, i) => {
       const slide = doc.createElement("div");
@@ -88,8 +95,8 @@
       status.textContent = manual ? `Example ${index + 1} of ${EXAMPLES.length}` : "";
       controls();
     }
-    summary.addEventListener("click", () => { expanded = true; controls(); minimise.focus({preventScroll:true}); });
-    minimise.addEventListener("click", () => { expanded = false; controls(); summary.focus({preventScroll:true}); });
+    summary.addEventListener("click", () => { setExpanded(true); minimise.focus({preventScroll:true}); });
+    minimise.addEventListener("click", () => { setExpanded(false); summary.focus({preventScroll:true}); });
     find(".rat-carousel").addEventListener("keydown", (event) => {
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
       event.preventDefault();
@@ -141,7 +148,8 @@
         if (active === next) return;
         active = next; schedule();
       },
-      reset() { expanded = true; paused = false; select(0); },
+      // Reset transient carousel state without undoing the user’s display preference.
+      reset() { paused = false; select(0); },
       destroy() { visible = false; schedule(); observer.disconnect(); doc.removeEventListener("visibilitychange", schedule); },
     };
   }
