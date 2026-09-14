@@ -1972,7 +1972,7 @@ test("bootstrap stops Windows Relay grandchildren before candidate setup", async
     assert.equal(calls[2].command, "powershell.exe");
     assert.match(calls[2].args.join(" "), /relay\\\.js.*daemon/);
     assert.match(calls[2].args.join(" "), /overlay.*main\\\.cjs/);
-    assert.equal(calls[3].command, process.execPath, "candidate setup starts only after the old grandchildren are swept");
+    assert.equal(fs.realpathSync(calls[3].command), fs.realpathSync(process.execPath), "candidate setup uses the same Node (possibly through its stable symlink) only after the old grandchildren are swept");
     assert.equal(calls[3].args[0], nextBin);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

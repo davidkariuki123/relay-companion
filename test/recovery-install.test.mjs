@@ -8,6 +8,22 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { installRecovery, uninstallRecovery, windowsRecoveryTaskXml, renameWithRetry, LABEL, TASK } from "../bootstrap/recovery-install.cjs";
 
+test("real host Node preserves and verifies the complete recovery engine before native registration", { skip: process.platform !== "darwin" }, t => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-watchdog-real-node-"));
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  const result = installRecovery({ homeDir, packageRoot: fileURLToPath(new URL("..", import.meta.url)),
+    runCommand(command, args) {
+      // Do not install a scheduler on the test host; execute every Node probe.
+      if (command === "launchctl") return { status: 0 };
+      return spawnSync(command, args, { encoding: "utf8", timeout: 30_000 });
+    } });
+  assert.equal(result.ok, true, result.detail);
+  assert.ok(result.node.startsWith(path.join(homeDir, ".relay", "recovery", "node") + path.sep));
+  const check = spawnSync(result.node, [path.join(result.bundle, "bootstrap", "recovery-runner.cjs"), "--self-check"], { encoding: "utf8" });
+  assert.equal(check.status, 0, check.stderr);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(homeDir, ".relay", "recovery", "current.json"))).node, result.node);
+});
+
 test("Mac watchdog update keeps its registration and host while publishing a complete new bundle", t => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-watchdog-safe-"));
   t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));

@@ -105,6 +105,12 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Prove the native credential store round trip
         run: node --test test/credential-store-darwin.integration.test.mjs
+      - name: Prove owned Node and recovery survive macOS shared-library relocation
+        if: startsWith(matrix.platform, 'darwin-')
+        run: >-
+          node --test test/owned-node-runtime.test.mjs
+          test/macos-node-bundle.test.mjs test/recovery-install.test.mjs
+          test/recovery-launcher.test.mjs
       - name: Prove AppKit honors Relay's first-run tray ordering
         if: startsWith(matrix.platform, 'darwin-')
         shell: bash

@@ -5,8 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { launch, write, read } from '../bootstrap/recovery-launcher.cjs';
+import { relayOwnedNodePath } from '../bootstrap/owned-node-runtime.cjs';
 function fixture(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-launcher-'));
+  // The standalone Node entrypoint resolves macOS /var -> /private/var;
+  // its path-scoped pointer validation needs the same canonical fixture root.
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'relay-launcher-')));
   t.after(() => fs.rmSync(root, {recursive:true,force:true}));
   const pointer = (v, hash) => ({schema:1,version:v,bundle:path.join(root,'versions',hash.repeat(64)),node:path.join(root,'node','owned',process.platform === 'win32' ? 'node.exe' : 'node')});
   const older = pointer('1.0.0','a'), newer = pointer('1.0.1','b');
@@ -94,18 +97,20 @@ test('corrupt pointer uses the recorded fallback, without trusting an arbitrary 
 });
 test('the installed standalone launcher survives a real syntax error in the selected recovery module', async t => {
   const {root,older,newer}=fixture(t);
-  fs.mkdirSync(path.dirname(older.node),{recursive:true});fs.copyFileSync(process.execPath,older.node);fs.chmodSync(older.node,0o700);
+  older.node = newer.node = relayOwnedNodePath(process.execPath, { runtimeRoot: root, isTemporary: () => true });
+  write(path.join(root,'current.json'),newer); write(path.join(root,'known-good.json'),older);
   for(const p of [older,newer]) fs.mkdirSync(path.join(p.bundle,'bootstrap'),{recursive:true});
   fs.writeFileSync(path.join(newer.bundle,'bootstrap','recovery-runner.cjs'),'this is invalid javascript {{');
   fs.writeFileSync(path.join(older.bundle,'bootstrap','recovery-runner.cjs'),`require('node:fs').writeFileSync(${JSON.stringify(path.join(root,'status.json'))},JSON.stringify({ok:true,status:'current',runtimeHealthy:true,runtimeProven:true,launcherVersion:'1.0.0',runId:process.env.RELAY_RECOVERY_RUN_ID,checkedAt:Date.now()}));`);
   fs.copyFileSync(new URL('../bootstrap/recovery-launcher.cjs',import.meta.url),path.join(root,'launch.cjs'));
   const result=spawnSync(process.execPath,[path.join(root,'launch.cjs')],{encoding:'utf8',timeout:10000,windowsHide:true});
-  assert.equal(result.status,0,result.stderr);
+  assert.equal(result.status,0,`${result.error?.message || result.stderr}\n${fs.readFileSync(path.join(root,'recovery.log'),'utf8')}`);
   assert.equal(read(path.join(root,'launcher-status.json')).status,'fallback');
 });
 test('a genuinely hung recovery process is stopped before the fallback starts', async t => {
   const {root,older,newer}=fixture(t);
-  fs.mkdirSync(path.dirname(older.node),{recursive:true});fs.copyFileSync(process.execPath,older.node);fs.chmodSync(older.node,0o700);
+  older.node = newer.node = relayOwnedNodePath(process.execPath, { runtimeRoot: root, isTemporary: () => true });
+  write(path.join(root,'current.json'),newer); write(path.join(root,'known-good.json'),older);
   for(const p of [older,newer]) fs.mkdirSync(path.join(p.bundle,'bootstrap'),{recursive:true});
   // Liveness is proven through a socket the hung runner listens on, never its pid:
   // Windows hands a freed pid to the next process within milliseconds, so under a

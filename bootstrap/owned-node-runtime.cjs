@@ -18,11 +18,11 @@ function commandOutput(result) {
   return String(result?.stdout ?? result?.out ?? "").trim();
 }
 
-function verifiedNodeVersion(executable, { runCommand = spawnSync } = {}) {
+function verifiedNodeVersion(executable, { runCommand = spawnSync, timeout = 5_000 } = {}) {
   try {
     const result = runCommand(executable, ["-p", "process.versions.node"], {
       encoding: "utf8",
-      timeout: 5_000,
+      timeout,
       windowsHide: true,
     });
     const ok = result?.ok === true || (!result?.error && result?.status === 0);
@@ -114,7 +114,18 @@ function relayOwnedNodePath(executable, {
       fsImpl.chmodSync(temporary, 0o700);
       if (fileDigest(temporary, fsImpl) !== digest) throw new Error("the copied executable failed its integrity check");
       const checked = verifiedNodeVersion(temporary, { runCommand });
-      if (!checked.ok || checked.version !== sourceRuntime.version) throw new Error("owned Node runtime failed verification before publication");
+      if (!checked.ok && platform === "darwin") {
+        const { preserveMacOSNodeBundle } = require("./macos-node-bundle.cjs");
+        try {
+          return preserveMacOSNodeBundle(source, { runtimeRoot, fsImpl, runCommand,
+            // macOS may spend several seconds validating the newly signed
+            // dependency closure on its first launch; subsequent starts are fast.
+            version: sourceRuntime.version, verify: (candidate) => verifiedNodeVersion(candidate, { runCommand, timeout: 30_000 }) });
+        } catch (error) {
+          throw new Error(`owned Node runtime failed verification before publication: ${checked.detail}; shared-library preservation failed: ${error.message}`);
+        }
+      }
+      if (!checked.ok || checked.version !== sourceRuntime.version) throw new Error(`owned Node runtime failed verification before publication: ${checked.detail || `expected ${sourceRuntime.version}, got ${checked.version}`}`);
       const fd = fsImpl.openSync(temporary, "r+");
       try { fsImpl.fsyncSync(fd); } finally { fsImpl.closeSync(fd); }
       // Keep the old path until replacement is complete. An interrupted repair
