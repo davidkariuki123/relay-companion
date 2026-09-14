@@ -19,12 +19,12 @@ const slice = (start, end) => {
 
 test("Add offers two cases: an address for someone on Relay, your link for everyone else", () => {
   const sheet = slice('<div class="cv-add-sheet hidden" id="cvAddSheet">', '<form class="cv-form hidden" id="cvForm">');
-  assert.match(sheet, /<div class="cv-add-t">On Relay already<\/div>/);
-  assert.match(sheet, /id="cvAddInput" type="email"[^>]*placeholder="name@company\.com"/);
-  assert.match(sheet, /id="cvAddNote">They show up in your Contacts right away\.<\/div>/);
-  assert.match(sheet, /id="cvAddT2">Not on Relay yet<\/div>/);
+  assert.match(sheet, /<div class="cv-add-t">Add someone who already uses Relay<\/div>/);
+  assert.match(sheet, /id="cvAddInput" type="email"[^>]*placeholder="their@email\.com"/);
+  assert.match(sheet, /id="cvAddNote">Enter the email address they use for Relay\.<\/div>/);
+  assert.match(sheet, /id="cvAddT2">Invite someone to join Relay<\/div>/);
   assert.match(sheet, /id="cvAddLink">Copy your invite link<\/button>/);
-  assert.match(sheet, /They paste it into Claude Code or Codex and show up here\./);
+  assert.match(sheet, /They can paste it into Claude Code or Codex to set up Relay and appear in your Contacts\./);
   assert.doesNotMatch(sheet, /invite by email|Invite by email/);
 });
 
@@ -33,7 +33,7 @@ test("Add is one write with the exact row back; nothing is deleted, and the outc
   assert.match(add, /await window\.relay\.contactAdd\(\{ email:address \}\)/, "one IPC, one upsert");
   assert.doesNotMatch(add, /contactDelete|contactSave|openChatWith/, "no compensating delete, no lookup by side effect");
   assert.match(add, /res\.found === false/);
-  assert.match(add, /\$\{address\} isn't on Relay yet\. Send them your link\./);
+  assert.match(add, /No Relay account found for \$\{address\}\. Check their email or invite them using your link below\./);
   assert.match(add, /if \(account !== signupAccountKey\(\)\) return;/, "a late result never paints another account's People");
 });
 
@@ -73,7 +73,7 @@ test("an address not on Relay leaves People unchanged and points at your link", 
   h.cvAddInputEl.value = "new@example.test";
   await h.api.addPersonByAddress();
   assert.equal(h.calls.closeAddSheet, 0, "the sheet stays so the person sees the outcome");
-  assert.equal(h.cvAddNoteEl.textContent, "new@example.test isn't on Relay yet. Send them your link.");
+  assert.equal(h.cvAddNoteEl.textContent, "No Relay account found for new@example.test. Check their email or invite them using your link below.");
   assert.ok(h.cvAddT2El.classList.has("lit"));
   assert.equal(h.api.list().length, 1, "a miss never creates a row");
 });
@@ -146,7 +146,7 @@ test("a contact is an address and what you call them; no first name, no surname"
 });
 
 test("your link sits under the list for whoever is not on Relay yet", () => {
-  assert.match(html, /<div class="cv-latent" id="cvLatent">Not on Relay yet\? <button type="button" class="cv-latent-link" id="cvLatentLink">Copy your link<\/button> and send it to them\.<\/div>/);
+  assert.match(html, /<div class="cv-latent" id="cvLatent">Invite someone to join Relay\. <button type="button" class="cv-latent-link" id="cvLatentLink">Copy your invite link<\/button> and share it with them\.<\/div>/);
   const copy = slice("async function copyInviteLinkFromPeople(", "cvAddEl.addEventListener(");
   assert.match(copy, /window\.relay\.copyOnboardingInviteLink\(\)/, "main mints the link and puts it on the clipboard");
   assert.match(copy, /button\.textContent = "Copied";/);

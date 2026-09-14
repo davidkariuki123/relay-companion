@@ -211,8 +211,9 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
     const observed = await ready();
     if (observed.ok) return proven({ ok: true, status: "current", version: observed.current?.version, repair: "services", lastSuccessAt: now() }, observed);
     policy.interrupt();
-    progress.fail(services.lastError || observed.reason);
-    if (progress.count("services") < 2 && !progress.exhausted) return status({ ...services, ok: false, status: "service-repair-unhealthy", runtimeHealthy: false });
+    progress.fail(services.lastError || (observed.detail ? `${observed.reason}: ${observed.detail}` : observed.reason));
+    log(`services ${services.status}; runtime not ready afterwards: ${observed.reason || "-"}${observed.detail ? ` (${observed.detail})` : ""}`);
+    if (progress.count("services") < 2 && !progress.exhausted) return status({ ...services, ok: false, status: "service-repair-unhealthy", runtimeHealthy: false, lastError: observed.detail || observed.reason });
     // Accepted commands are not recovery. Repeated failure advances even when
     // an inactive journal or unusable registration snapshot is still present.
   }
@@ -237,8 +238,10 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
     const installedIsDesired = current?.active === true;
     const live = installedIsDesired ? await health(current, { platform }) : null;
     if (live && platform === "darwin" && !services.ok) live.ok = false;
+    let readiness = null;
     if (installedIsDesired && heartbeatFresh && heartbeat.version === current.version && live.ok) {
       const observed = await ready(current);
+      readiness = observed;
       if (observed.ok) {
         runtimeResponsive = true;
         runtimeVerified = !observed.legacy;
@@ -266,7 +269,7 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
       const daemonAlive = Number(live?.daemonCount) >= 1;
       const base = { desiredVersion: desiredVersion || version, version, staleSince, restarts, discoveryError: discoveryError ? String(discoveryError.message).slice(0, 300) : undefined,
         memoryFreeMB: memoryNow.freeMB };
-      log(`installed ${version} not healthy: heartbeatFresh=${heartbeatFresh} daemonAlive=${daemonAlive} health=${JSON.stringify({ daemon: live?.daemon, pill: live?.pill, oldDaemon: live?.oldDaemon, oldPill: live?.oldPill })} memoryPressured=${memoryNow.pressured}`);
+      log(`installed ${version} not healthy: heartbeatFresh=${heartbeatFresh} daemonAlive=${daemonAlive} health=${JSON.stringify({ daemon: live?.daemon, pill: live?.pill, oldDaemon: live?.oldDaemon, oldPill: live?.oldPill })} readiness=${readiness ? `${readiness.reason || "ok"}${readiness.detail ? ` (${readiness.detail})` : ""}` : "not-attempted"} memoryPressured=${memoryNow.pressured}`);
       if (daemonAlive && now() - staleSince < STALE_CONFIRM_MS) return status({ ok: true, status: "stale-observed", ...base });
       const busy = busyDecision(heartbeat, { homeDir, now: now() });
       if (busy) return status({ ok: true, status: busy, ...base });

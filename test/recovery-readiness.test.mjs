@@ -75,3 +75,39 @@ test("legacy liveness never receives a probation identity", async () => {
   const result = await probe(() => ({ probe: async () => ({ ok: true, legacy: true }) }));
   assert.equal(result.ok, true); assert.equal(result.legacy, true); assert.equal(result.identity, null);
 });
+
+// One Windows process-health sample is a PowerShell query that takes seconds;
+// the time spent taking a sample is not a gap in watching the runtime.
+test("slow health sampling does not reset the healthy window", async () => {
+  let sampled = 0;
+  const result = await probe(({ advance }) => ({ health: () => { sampled++; advance(6000); return { ok: true }; } }));
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.ok(sampled <= 3, `ten seconds of liveness should need few slow samples, took ${sampled}`);
+});
+
+test("a probe that times out for ten seconds does not reset the healthy window either", async () => {
+  let calls = 0;
+  const result = await probe(({ advance }) => ({ probe: async () => {
+    calls++;
+    if (calls === 2) { advance(10_000); return { ok: false, reason: "daemon-probe-timeout" }; }
+    return { ok: true, daemon: { pid: 12 }, pill: { pid: 13 }, identity: "daemon:renderer" };
+  } }));
+  assert.equal(result.ok, true, JSON.stringify(result));
+});
+
+test("a machine suspended in the middle of a sample is still rejected", async () => {
+  const result = await probe(({ advance }) => ({ health: () => { advance(40_000); return { ok: true }; } }));
+  assert.equal(result.ok, false);
+  assert.match(result.detail, /^not-watched-continuously:/);
+});
+
+test("a failed proof says which condition blocked it", async () => {
+  const stale = await probe(({ now }) => ({ readHeartbeat: () => ({ version: "1.0.0", pid: 12, at: now() - 70_000 }) }));
+  assert.match(stale.detail, /^heartbeat-stale:/);
+  const unanswered = await probe(() => ({ probe: async () => ({ ok: false, reason: "pill-probe-timeout" }) }));
+  assert.match(unanswered.detail, /^probe:pill-probe-timeout; samples=\d+ slowestSampleMs=\d+ probeSeen=false$/);
+  const sick = await probe(() => ({ health: () => ({ ok: false, daemon: true, pill: false, daemonCount: 1, pillCount: 0 }) }));
+  assert.match(sick.detail, /^health:\{"daemon":true,"pill":false/);
+  const gap = await probe(({ advance }) => ({ sleep: async () => advance(6000) }));
+  assert.match(gap.detail, /^not-watched-continuously:gap=6000ms/);
+});

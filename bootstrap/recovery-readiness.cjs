@@ -14,7 +14,18 @@ const read = file => { try { return JSON.parse(fs.readFileSync(file, "utf8")); }
 // process alive, advance its heartbeat, and answer the probe at least once.
 const HEARTBEAT_FRESH_MS = 60_000;
 const PROBE_TIMEOUT_MS = 10_000;
+// The gap is the time this process spent NOT sampling: the sleep between
+// samples, plus anything that suspended the process. Taking the sample itself
+// is excluded, because on Windows one process-health sample is a PowerShell
+// query that costs two to three seconds on a good laptop and more on a loaded
+// two-core runner, and a probe that times out costs ten. Counting that time
+// as a gap reset the stability window on every sample and called a healthy
+// daemon unresponsive (2026-09-14, Windows x64 release gate). A sample that
+// takes longer than SAMPLE_MAX_MS is still treated as a gap: a machine that
+// suspended mid-sample cannot be told apart from a slow one, and the proof
+// must not vouch for a runtime it did not watch continuously.
 const SAMPLE_GAP_MAX_MS = 5000;
+const SAMPLE_MAX_MS = 30_000;
 
 async function waitForRecoveryReady({ homeDir = os.homedir(), platform = process.platform,
   target = null, after = 0, now = Date.now, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
@@ -25,17 +36,24 @@ async function waitForRecoveryReady({ homeDir = os.homedir(), platform = process
   readHeartbeat = () => read(path.join(homeDir, ".relay", "recovery", "daemon.json")),
 } = {}) {
   const started = now();
-  let since = null, identity = null, firstBeat = null, lastNow = started;
+  let since = null, identity = null, firstBeat = null, lastSampleEnd = started;
   let probeSeen = false, probeIdentity = null, legacy = false;
+  // Why the last sample did not count, for the log line a failed proof leaves.
+  let block = null, samples = 0, slowestSampleMs = 0;
   const reset = (key) => { since = null; firstBeat = null; identity = key; probeSeen = false; probeIdentity = null; legacy = false; };
+  const healthSummary = (value) => value ? JSON.stringify({ daemon: value.daemon, pill: value.pill, daemonCount: value.daemonCount, pillCount: value.pillCount, oldDaemon: value.oldDaemon, oldPill: value.oldPill, oldBroker: value.oldBroker }) : "null";
+  const probeSummary = (value) => value?.reason || value?.daemon?.reason || value?.pill?.reason || "answer-did-not-match-the-live-processes";
   // The attempt bound also terminates a faulty/frozen clock in injected hosts.
   for (let attempt = 0; attempt <= Math.ceil(timeoutMs / 1000); attempt++) {
     const at = now(), current = readCurrent(), beat = readHeartbeat();
+    const gap = at - lastSampleEnd;
     const live = current?.active === true && current.packageRoot && (!target ||
       (current.version === target.version && (!target.packageRoot || target.packageRoot === current.packageRoot)))
       ? await health(current, { platform }) : null;
     const jobs = platform === "darwin" ? LABELS.map(label => inspect(label)) : [];
     const responsive = live?.ok ? await probe(current, { homeDir, timeoutMs: probeTimeoutMs }) : { ok: false };
+    const sampled = now(), sampleMs = sampled - at;
+    samples += 1; slowestSampleMs = Math.max(slowestSampleMs, sampleMs);
     const jobsReady = platform !== "darwin" || (jobs.every(job => job.known && job.present && job.pid > 0) && jobs[0].pid === beat?.pid);
     const fresh = beat?.version === current?.version && Number.isSafeInteger(beat?.pid) && beat.pid > 0
       && Number.isFinite(beat.at) && beat.at >= after && beat.at <= at && at - beat.at < heartbeatFreshMs;
@@ -46,8 +64,15 @@ async function waitForRecoveryReady({ homeDir = os.homedir(), platform = process
     const key = `${current?.packageRoot}:${beat?.pid}:${jobs[1]?.pid || "pill"}`;
     const alive = Boolean(live?.ok) && jobsReady && fresh;
     const probeIdentityNow = probeMatches && !responsive.legacy ? responsive.identity || null : null;
-    if (at < lastNow || at - lastNow > SAMPLE_GAP_MAX_MS || !alive || key !== identity
+    const suspended = gap < 0 || gap > SAMPLE_GAP_MAX_MS || sampleMs > SAMPLE_MAX_MS;
+    if (suspended || !alive || key !== identity
       || (probeIdentityNow && probeIdentity && probeIdentityNow !== probeIdentity)) {
+      block = suspended ? `not-watched-continuously:gap=${gap}ms,sample=${sampleMs}ms`
+        : !live ? "runtime-pointer-not-active-for-target"
+        : !live.ok ? `health:${healthSummary(live)}`
+        : !jobsReady ? "launchd-jobs-not-matching-heartbeat"
+        : !fresh ? `heartbeat-stale:${beat?.at ? `${at - beat.at}ms old` : "missing"}`
+        : key !== identity ? "process-identity-changed" : "probe-identity-changed";
       reset(key);
     }
     if (alive) {
@@ -56,16 +81,18 @@ async function waitForRecoveryReady({ homeDir = os.homedir(), platform = process
         probeSeen = true;
         legacy = responsive.legacy === true;
         if (probeIdentityNow) probeIdentity = probeIdentityNow;
-      }
+      } else block = `probe:${probeSummary(responsive)}`;
       if (at - since >= stableMs && beat.at > firstBeat && probeSeen) {
         return { ok: true, current, heartbeatAt: beat.at,
           identity: legacy ? null : `${key}:${probeIdentity || "legacy"}`, legacy };
       }
+      if (!block && at - since >= stableMs && !(beat.at > firstBeat)) block = "heartbeat-not-advancing";
     }
-    lastNow = at;
+    lastSampleEnd = sampled;
     if (at - started >= timeoutMs) break;
     await sleep(1000);
   }
-  return { ok: false, reason: "runtime-did-not-stay-responsive" };
+  return { ok: false, reason: "runtime-did-not-stay-responsive",
+    detail: `${block || "no-sample"}; samples=${samples} slowestSampleMs=${slowestSampleMs} probeSeen=${probeSeen}` };
 }
-module.exports = { waitForRecoveryReady, HEARTBEAT_FRESH_MS, PROBE_TIMEOUT_MS };
+module.exports = { waitForRecoveryReady, HEARTBEAT_FRESH_MS, PROBE_TIMEOUT_MS, SAMPLE_GAP_MAX_MS, SAMPLE_MAX_MS };
