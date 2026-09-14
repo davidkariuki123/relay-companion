@@ -21,6 +21,9 @@ const {
 const RELEASE_ORIGIN = "https://api.sendrelays.com";
 const RELEASE_BASE_PATH = "/v1/companion-releases";
 const PACKAGE_NAME = "relay-companion";
+// Native macOS bundles exceed Node's default 1 MiB tar-output buffer. Keep a
+// bounded limit while inspecting every path and file type before extraction.
+const ARCHIVE_LISTING_MAX_BYTES = 16 * 1024 * 1024;
 const WINDOWS_RELAY_TASKS = ["Relay Companion Pill", "Relay Companion Daemon"];
 const WINDOWS_STOP_RELAY_SERVICES_PS = [
   "$p=Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {",
@@ -386,8 +389,9 @@ function tarInvocation({ archivePath, mode, destination, pathImpl = path }) {
 function validateArchiveListing(archivePath) {
   const nameInvocation = tarInvocation({ archivePath, mode: "list-names" });
   const detailInvocation = tarInvocation({ archivePath, mode: "list-details" });
-  const names = spawnSync(nameInvocation.command, nameInvocation.args, { cwd: nameInvocation.cwd, encoding: "utf8", windowsHide: true });
-  const details = spawnSync(detailInvocation.command, detailInvocation.args, { cwd: detailInvocation.cwd, encoding: "utf8", windowsHide: true });
+  const listingOptions = { encoding: "utf8", windowsHide: true, maxBuffer: ARCHIVE_LISTING_MAX_BYTES };
+  const names = spawnSync(nameInvocation.command, nameInvocation.args, { ...listingOptions, cwd: nameInvocation.cwd });
+  const details = spawnSync(detailInvocation.command, detailInvocation.args, { ...listingOptions, cwd: detailInvocation.cwd });
   if (names.error || names.status !== 0 || details.error || details.status !== 0) {
     fail(`Relay could not inspect its runtime archive: ${names.error?.message || details.error?.message || names.stderr || details.stderr}`);
   }
@@ -1220,6 +1224,7 @@ module.exports = {
   tarInvocation,
   validateSetupCompatibilityArgs,
   validateArchiveEntries,
+  validateArchiveListing,
   verifyExtractedRuntime,
   waitForRuntimeHealth,
   writeSetupIntent,

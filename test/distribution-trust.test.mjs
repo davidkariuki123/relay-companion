@@ -61,6 +61,7 @@ const {
   tarInvocation,
   validateSetupCompatibilityArgs,
   validateArchiveEntries,
+  validateArchiveListing,
 } = createRequire(import.meta.url)("../bootstrap/relay-setup.cjs");
 const credentialStore = createRequire(import.meta.url)("../src/credential-store.cjs");
 const {
@@ -878,6 +879,34 @@ test("artifact construction signs a compact internal-link map and refuses escapi
     fs.rmSync(path.join(packageRoot, "Current"));
     fs.symlinkSync(path.dirname(root), path.join(root, "escape"), "dir");
     assert.throws(() => captureInternalLinks(root, { platform: "darwin" }), /escapes the locked install/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("bootstrap inspects complete runtime archive listings larger than one MiB", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-large-archive-"));
+  try {
+    const filename = `relay-runtime-${"x".repeat(180)}.txt`;
+    fs.writeFileSync(path.join(root, filename), "runtime bytes");
+    // Repeat one file to exercise real tar output without creating thousands
+    // of filesystem entries. Both listings exceed Node's default 1 MiB buffer.
+    fs.writeFileSync(path.join(root, "entries.txt"), `${filename}\n`.repeat(7000));
+    const packed = spawnSync("tar", ["-czf", "runtime.tar.gz", "-T", "entries.txt"], {
+      cwd: root, encoding: "utf8", windowsHide: true,
+    });
+    assert.equal(packed.status, 0, packed.error?.message || packed.stderr);
+    assert.doesNotThrow(() => validateArchiveListing(path.join(root, "runtime.tar.gz")));
+
+    if (process.platform !== "win32") {
+      fs.symlinkSync(filename, path.join(root, "unsafe-link"));
+      fs.appendFileSync(path.join(root, "entries.txt"), "unsafe-link\n");
+      const unsafe = spawnSync("tar", ["-czf", "unsafe.tar.gz", "-T", "entries.txt"], {
+        cwd: root, encoding: "utf8",
+      });
+      assert.equal(unsafe.status, 0, unsafe.error?.message || unsafe.stderr);
+      assert.throws(() => validateArchiveListing(path.join(root, "unsafe.tar.gz")), /regular files and directories only/);
+    }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
