@@ -54,7 +54,7 @@ try {
   assert.equal(await page.locator(".rat-dot").count(), 5);
   assert.equal(await page.getByText("Ask for help", {exact:true}).count(), 0);
   assert.equal(await page.locator(".rat-card .rat-title").innerText(), "Relay anyone even if they aren’t on Relay");
-  assert.equal(await page.locator(".rat-result").evaluate((el) => getComputedStyle(el).textDecorationLine), "underline");
+  assert.equal(await page.locator(".rat-result").evaluate((el) => getComputedStyle(el).textDecorationLine), "none");
   assert.ok(await page.locator("#requestsEntry").evaluate((el) => el.getBoundingClientRect().bottom <= document.querySelector(".rat-card").getBoundingClientRect().top));
 
   // Frequent inbox pushes must not reset or replace a card in use.

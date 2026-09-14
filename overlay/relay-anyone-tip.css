@@ -17,7 +17,7 @@
 .rat-dot[aria-current="true"] span { background:var(--accent); }
 .rat-dot:hover { background:var(--wash-2); }
 .rat-footer { display:flex; align-items:center; gap:9px; margin-top:11px; }
-.rat-result { flex:1; min-width:0; font:400 11px/1.45 var(--sans); color:var(--muted); text-decoration:underline; text-underline-offset:2px; }
+.rat-result { flex:1; min-width:0; font:400 11px/1.45 var(--sans); color:var(--muted); }
 .rat-copy { min-width:89px; padding:6px 9px; }
 .rat-summary { display:flex; width:calc(100% - 24px); margin:4px 12px 6px; padding:9px 10px; border:1px solid var(--hair); border-radius:var(--r-2); background:var(--wash); align-items:center; gap:10px; text-align:left; cursor:pointer; }
 .rat-summary:hover { background:var(--wash-2); }
