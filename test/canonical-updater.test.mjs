@@ -56,7 +56,7 @@ import {
 const { installedServiceProcessRows } = createRequire(import.meta.url)("../bootstrap/runtime-health.cjs");
 // Service registration fixtures use foreign OS paths; activity admission is
 // exercised separately with real temporary homes in update-activity.test.mjs.
-const activateCanonicalRuntime = (target, options) => activateWithDrain(target, { macTransaction: async (_target, operation) => operation(), ...options, drain: async () => () => {} });
+const activateCanonicalRuntime = (target, options) => activateWithDrain(target, { macTransaction: async (_target, operation) => operation(), verifyReady: async () => ({ ok: true }), ...options, drain: async () => () => {} });
 
 // These cases create a POSIX runtime tree on the real host filesystem. They
 // remain active on macOS/Linux; Windows behavior is covered by injected-path
@@ -331,6 +331,15 @@ test("macOS activation repairs all runtime registrations before restart and requ
   assert.ok(calls.some((call) => call[0] === "/bin/launchctl" && call[1] === "bootout"));
   assert.ok(calls.some((call) => call[0] === "/bin/launchctl" && call[1] === "bootstrap"));
   assert.equal(calls.at(-1)[0], "/bin/ps");
+  const unready = await activateCanonicalRuntime(target, {
+    platform: "darwin", homeDir: "/Users/test", run, attempts: 1,
+    verifyReady: async ({ target: observed }) => {
+      assert.equal(observed.packageRoot, target.packageRoot);
+      return { ok: false, reason: "runtime-did-not-stay-responsive", detail: "daemon-loop-not-advancing" };
+    },
+  });
+  assert.equal(unready.ok, false);
+  assert.equal(unready.reason, "activation-not-ready");
 });
 
 test("Windows activation restarts tasks pill-first and rejects processes from an old root", async () => {

@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { startRecoveryHeartbeat } from "./recovery-health.js";
 import { startRecoveryResponder } from "../bootstrap/recovery-probe.cjs";
+import { createDaemonProgress, recordDaemonCrash } from "../bootstrap/daemon-progress.cjs";
+import { createDaemonComponents } from "./daemon-components.js";
 import { startRecoveryMaintenance } from "./recovery-maintenance.js";
 import { startPillSupervisor } from "./pill-supervisor.js";
 import { readFileSync } from "node:fs";
@@ -394,7 +396,7 @@ async function pollPlainInbox({
     }
     const failed = [];
     // Carried on the array so both callers keep their existing shape. A wedged
-    // client (see SELF_HEAL_FAILURE_STREAK) can only be recognised by whether
+    // client can only be recognised by whether
     // the inbox call itself succeeded, not by how much it staged.
     failed.inboxOk = false;
     return failed;
@@ -797,14 +799,6 @@ export function startAutoUpdateLoop({
   return { run, timer, stop: () => clearIntervalImpl(timer) };
 }
 
-/**
- * Consecutive failed inbox polls before the receiver rebuilds itself. Each cycle
- * is the poll interval plus up to the client's 15s request timeout, so 60 is
- * roughly 5-20 minutes of continuous failure — long enough that ordinary
- * sleep/suspend and transient network loss never trip it.
- */
-export const SELF_HEAL_FAILURE_STREAK = 60;
-
 // The session controller — publish this machine's session directory, then
 // claim and execute remote session operations — is the substrate under
 // relay_ai_sessions / relay_ai_session. On the product row it shares with
@@ -875,17 +869,21 @@ async function refreshDaemonProductFeatures(client, current, log) {
 // Each retry also re-reads the account: a daemon that booted unpaired, or was
 // signed out underneath, must pick up the credential a later pairing writes
 // instead of 401-ing forever on the token it started with.
-async function resolveMe(client) {
+async function resolveMe(client, health) {
   let waitingForSignIn = false;
   for (let attempt = 1; ; attempt += 1) {
     try {
-      return await client.me();
+      return health ? await health.waiting(() => client.me()) : await client.me();
     } catch (err) {
       const wait = Math.min(60_000, 2_000 * attempt);
       const detail = String(err?.code || err?.message || err || "").toLowerCase();
       const missingAuthorization = detail.includes("missing_authorization")
         || detail.includes("missing authorization")
         || detail.includes("not paired");
+      // Network/auth waiting is a functioning local service, not a crash.
+      // Programming errors must still reject startup and its readiness proof.
+      if (err instanceof ReferenceError || err instanceof SyntaxError) throw err;
+      health?.advance(missingAuthorization ? "signed-out" : "offline");
       if (missingAuthorization) {
         if (!waitingForSignIn) {
           waitingForSignIn = true;
@@ -896,7 +894,9 @@ async function resolveMe(client) {
         // eslint-disable-next-line no-console
         console.error(`[relay] startup me() failed (${err && err.message}); retrying in ${Math.round(wait / 1000)}s`);
       }
-      await new Promise((resolve) => setTimeout(resolve, wait));
+      const pause = () => new Promise((resolve) => setTimeout(resolve, wait));
+      if (health) await health.waiting(pause, missingAuthorization ? "signed-out" : "offline");
+      else await pause();
       if (client.accountDrift().status !== "same") client.rebindToCurrentAccount();
     }
   }
@@ -917,14 +917,14 @@ async function resolveMe(client) {
  * A sign-out parks in resolveMe's retry loop exactly as an unpaired boot does,
  * until a credential appears.
  */
-async function followAccountDrift({ client, log, role }) {
+async function followAccountDrift({ client, log, role, health }) {
   const drift = client.accountDrift();
   if (drift.status === "same") return null;
   const was = drift.bound.email || drift.bound.userId || "(unpaired)";
   const now = drift.current.email || drift.current.userId || "(signed out)";
   log(`account ${drift.status} on this computer (${was} -> ${now}); rebinding the ${role}`);
   client.rebindToCurrentAccount();
-  const next = await resolveMe(client);
+  const next = await resolveMe(client, health);
   log(`${role} for ${next.user.email} (rebound without a restart)`);
   return next;
 }
@@ -967,7 +967,14 @@ export function startMcpBrokerDescriptorGuard({
   return { stop: () => clearInterval(timer), check };
 }
 
-export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
+export async function runTaskDaemon(options = {}) {
+  const packageRoot = companionPackageRoot(), version = currentCompanionVersion(packageRoot);
+  const health = createDaemonProgress({ packageRoot, version });
+  try { return await runTaskDaemonImpl({ ...options, health }); }
+  catch (error) { recordDaemonCrash(error, { packageRoot, version }); throw error; }
+}
+
+async function runTaskDaemonImpl({ intervalMs = 4000, health } = {}) {
   // Last-resort safety net: the daemon is always-on and launchd-restarted, but a
   // restart re-delivers in-flight work and can duplicate agent turns. Keep it alive
   // through any stray async error rather than crash-looping.
@@ -1001,7 +1008,8 @@ export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
   });
   try {
     const packageRoot = companionPackageRoot();
-    await startRecoveryResponder({ role: "daemon", packageRoot, version: currentCompanionVersion(packageRoot) });
+    await startRecoveryResponder({ role: "daemon", packageRoot, version: currentCompanionVersion(packageRoot),
+      ready: () => health.ready(), progress: () => health.snapshot() });
   } catch (error) { log(`local recovery responder unavailable: ${error.message}`); }
   startRecoveryMaintenance();
   startPillSupervisor({ log });
@@ -1069,12 +1077,15 @@ export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
     log(`autostart repair check failed: ${err && err.message ? err.message : err}`);
   }
   let client = new RelayClient();
-  const me = await resolveMe(client);
+  const me = await resolveMe(client, health);
   const { startAgentLocalServer } = await import("./agent-local-server.js");
   const { listRelayDestinations, deliverRelayToSession } = await import("./session-delivery.js");
   let localServer;
-  async function bindLocalAgentConnection(user) {
+  async function closeLocalAgentConnection() {
     if (localServer) { await localServer.close(); localServer = null; }
+  }
+  async function bindLocalAgentConnection(user) {
+    await closeLocalAgentConnection();
     try {
       // Keep this client bound for the service's lifetime. The receiver may
       // rebind its own client after an account switch; queued sends must not.
@@ -1089,55 +1100,68 @@ export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
   startRelayCodexProjectRepairLoop({ log });
   // eslint-disable-next-line no-console
   console.log(`[relay] receiver for ${me.user.email}; polling every ${intervalMs}ms`);
-  let features = daemonProductFeatures(log, me.user);
+  return runReceiverLoop({ client, me, intervalMs, log, closeLocalAgentConnection, bindLocalAgentConnection, health });
+}
+
+// Exercise the real orchestration in tests without registering OS services or
+// touching an account. Production supplies the same defaults used below.
+export async function runReceiverLoop({ client, me, intervalMs = 4000, log = () => {}, closeLocalAgentConnection = async () => {},
+  bindLocalAgentConnection, health, stop = () => false, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
+  getFeatures = daemonProductFeatures, refreshFeatures = refreshDaemonProductFeatures,
+  followAccount = followAccountDrift, makeClient = () => new RelayClient(),
+  sessionTick = sessionControllerTick, stewardTick = todoStewardTick, topicsPoll = pollTopicsOnce,
+  deliveryTick = daemonDeliveryTick, attachments = processInboxAttachments, completionWakes = defaultProcessTaskCompletionWakes,
+} = {}) {
+  let features = getFeatures(log, me.user);
+  let user = me.user;
   let featureRefreshAt = Date.now() + ACCOUNT_FEATURE_REFRESH_MS;
   let topicsPolledAt = 0;
-  let consecutiveFailures = 0;
-  let stewardInFlight = null;
-  let inboxWorkInFlight = null;
-  for (;;) {
-    if (client.accountDrift().status !== "same" && localServer) {
-      await localServer.close();
-      localServer = null;
-    }
-    const rebound = await followAccountDrift({ client, log, role: "receiver" });
+  const components = createDaemonComponents({ health, log });
+  for (; !stop();) {
+    components.inspect();
+    if (client.accountDrift().status !== "same") await closeLocalAgentConnection();
+    const rebound = await followAccount({ client, log, role: "receiver", health });
     if (rebound) {
       await bindLocalAgentConnection(rebound.user);
-      features = daemonProductFeatures(log, rebound.user);
+      user = rebound.user;
+      features = getFeatures(log, rebound.user);
       featureRefreshAt = Date.now() + ACCOUNT_FEATURE_REFRESH_MS;
     } else if (Date.now() >= featureRefreshAt) {
-      features = await refreshDaemonProductFeatures(client, features, log);
+      features = await refreshFeatures(client, features, log);
       featureRefreshAt = Date.now() + ACCOUNT_FEATURE_REFRESH_MS;
     }
-    void claudeRuntime.tick();
-    if (!inboxWorkInFlight) {
-      const backgroundClient = new RelayClient();
+    void components.run("inbox-background", async () => {
+      const backgroundClient = makeClient();
       const isCurrent = () => backgroundClient.accountDrift().status === "same" && backgroundClient.url === secureRelayApiUrl(apiUrl());
-      inboxWorkInFlight = Promise.allSettled([
-        processInboxAttachments({ scope: inboxAccountScope(backgroundClient), isCurrent, log }),
-        defaultProcessTaskCompletionWakes({ log }),
-      ]).then((results) => {
-        for (const result of results) if (result.status === "rejected") log(`inbox background work failed: ${result.reason?.message || result.reason}`);
-      }).finally(() => { inboxWorkInFlight = null; });
-    }
-    await sessionControllerTick({ client, log, features });
+      const results = await Promise.allSettled([
+        attachments({ scope: inboxAccountScope(backgroundClient), isCurrent, log }),
+        completionWakes({ log }),
+      ]);
+      const failed = results.find(result => result.status === "rejected");
+      if (failed) throw failed.reason;
+    });
+    const featureSnapshot = features, userSnapshot = user;
+    // Do not rebind an in-flight operation's client during account switches.
+    void components.run("agent-sessions", () => sessionTick({ client: makeClient(), log, features: featureSnapshot }));
     // The Todo steward decides for itself whether anything is due; a run is a
     // background provider process and never blocks delivery below.
-    if (features.todo === true && !stewardInFlight) {
-      stewardInFlight = todoStewardTick({ client, log, features, user: (rebound || me).user })
-        .finally(() => { stewardInFlight = null; });
-    }
+    if (features.todo === true) {
+      void components.run("todo", () => stewardTick({ client: makeClient(), log, features: featureSnapshot, user: userSnapshot }));
+    } else components.disable("todo");
+    if (!features.topics) components.disable("topics");
     if (features.topics && Date.now() - topicsPolledAt >= TOPICS_POLL_MS) {
       topicsPolledAt = Date.now();
-      await pollTopicsOnce({ client, log });
+      void components.run("topics", () => topicsPoll({ client: makeClient(), log }));
     } else if (!features.topics && topicsPolledAt === 0) {
       // A machine moved off the developer row keeps no topic list for the hook:
       // a production session must never be shown a stale dev snapshot.
       topicsPolledAt = Date.now();
       try { recordAgentTopicIndex(storeDir(), client?.token || "", { topics: [] }); } catch {}
     }
-    try {
-      const result = await daemonDeliveryTick({ client, log, features, includeOrdinary: false });
+    void components.run("tasks", async () => {
+      // A fresh client avoids a permanently stale transport. Single-flight
+      // component ownership protects in-flight work without blocking delivery.
+      const result = await deliveryTick({ client: makeClient(), log, features: featureSnapshot, includeOrdinary: false });
       if (result.ordinaryOnly) {
         if (result.ordinaryRelays.length) log(`processed ${result.ordinaryRelays.length} ordinary relay(s)`);
       } else if (
@@ -1151,38 +1175,10 @@ export async function runTaskDaemon({ intervalMs = 4000 } = {}) {
           `processed ${result.sessions.length} session(s), ${result.messages.length} message(s), ${result.notifications.length} task attention item(s), ${result.ordinaryRelays.length} ordinary relay(s), ${result.events.length} event(s)`,
         );
       }
-      if (result.inboxOk) {
-        if (consecutiveFailures >= SELF_HEAL_FAILURE_STREAK / 2) {
-          log(`inbox polling recovered after ${consecutiveFailures} consecutive failure(s)`);
-        }
-        consecutiveFailures = 0;
-      } else {
-        consecutiveFailures += 1;
-      }
-    } catch (err) {
-      consecutiveFailures += 1;
-      // eslint-disable-next-line no-console
-      console.error(`[relay] task daemon error: ${err.message}`);
-    }
-    if (consecutiveFailures >= SELF_HEAL_FAILURE_STREAK) {
-      // A long-lived process can keep rendering stale local state while every
-      // API call fails. Rebuild its client after a bounded streak. launchd can
-      // restart on macOS; Windows Scheduled Tasks cannot, so Windows repairs in
-      // place and waits for connectivity without giving up its logon process.
-      if (process.platform === "win32") {
-        log(`inbox polling has failed ${consecutiveFailures} times; rebuilding the Windows receiver client`);
-        client = new RelayClient();
-        const recovered = await resolveMe(client);
-        await bindLocalAgentConnection(recovered.user);
-        features = daemonProductFeatures(log, recovered.user);
-        featureRefreshAt = Date.now() + ACCOUNT_FEATURE_REFRESH_MS;
-        consecutiveFailures = 0;
-      } else {
-        log(`inbox polling has failed ${consecutiveFailures} times; restarting the receiver`);
-        process.exit(1);
-      }
-    }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      if (result.inboxOk === false) throw new Error("Task polling unavailable");
+    });
+    health?.advance("running");
+    await sleep(intervalMs);
   }
 }
 

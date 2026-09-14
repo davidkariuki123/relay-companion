@@ -139,11 +139,24 @@ export async function activateCanonicalRuntime(target, options = {}) {
   try {
     const drain = options.drain || require("../bootstrap/update-activity.cjs").drainCalls;
     release = await drain({ homeDir: options.homeDir, sleep: options.sleep });
+    const activateReady = async () => {
+      const activated = await activateDrainedRuntime(target, options);
+      if (!activated.ok) return activated;
+      const ready = options.verifyReady || require("../bootstrap/recovery-readiness.cjs").waitForRecoveryReady;
+      const requiresProgress = fs.existsSync(path.join(target.packageRoot, "bootstrap", "daemon-progress.cjs"));
+      const observed = await ready({ homeDir: options.homeDir, platform: options.platform, target,
+        // The transaction deliberately keeps the pointer in "activating"
+        // until this proof finishes. Probe the lock-owned target, not an
+        // already-committed pointer, including when proving rollback.
+        readCurrent: () => ({ ...target, active: true }),
+        requireProgress: requiresProgress, timeoutMs: 90_000 });
+      return observed.ok ? { ...activated, readiness: observed } : { ok: false, reason: "activation-not-ready", detail: observed.detail || observed.reason };
+    };
     if ((options.platform || process.platform) === "darwin") {
       const transaction = options.macTransaction || require("../bootstrap/mac-activation-transaction.cjs").macActivationTransaction;
-      return await transaction(target, () => activateDrainedRuntime(target, options), options);
+      return await transaction(target, activateReady, options);
     }
-    return await activateDrainedRuntime(target, options);
+    return await activateReady();
   } catch (error) { return { ok: false, reason: "activation-drain-failed", detail: error.message }; }
   finally { release?.(); }
 }

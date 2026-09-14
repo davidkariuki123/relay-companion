@@ -36,3 +36,25 @@ test("large optional process report cannot discard the base fleet report", () =>
   assert.ok(encoded.length < 4096);
   assert.deepEqual(JSON.parse(Buffer.from(encoded, "base64url")), { schema: 1 });
 });
+
+test("active pointer and recent heartbeat cannot hide a missing daemon; UI and doctor share the verdict", t => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-health-verdict-"));
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  const root = path.join(homeDir, ".relay"), packageRoot = path.join(root, "runtime", "releases", "1.0.0-test", "node_modules", "relay-companion");
+  const write = (file, value) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(value)); };
+  write(path.join(root, "runtime", "current.json"), { active: true, version: "1.0.0", packageRoot, bin: path.join(packageRoot, "bin", "relay.js") });
+  write(path.join(root, "recovery", "daemon.json"), { version: "1.0.0", pid: 12, at: 1000 });
+  write(path.join(root, "recovery", "status.json"), { status: "restarting", ok: true, checkedAt: 1000 });
+  let report = health.collectInstallationHealth({ homeDir, commands: [`electron ${packageRoot}/overlay/main.cjs`], now: 1001 });
+  assert.equal(report.daemonResponsive, false); assert.equal(report.health.state, "failed");
+  assert.equal(health.describeInstallationHealth(report), "Background service stopped; recovery in progress");
+  const commands = [`node ${packageRoot}/bin/relay.js daemon`, `electron ${packageRoot}/overlay/main.cjs`];
+  fs.mkdirSync(path.join(packageRoot, "bootstrap"), { recursive: true }); fs.writeFileSync(path.join(packageRoot, "bootstrap", "daemon-progress.cjs"), "");
+  write(path.join(root, "recovery", "daemon-progress.json"), { packageRoot, version: "1.0.0", pid: 12, at: 1000, sequence: 2, phase: "running", components: { todo: "failed" } });
+  report = health.collectInstallationHealth({ homeDir, commands, now: 1001 });
+  assert.equal(report.daemonResponsive, true); assert.equal(report.health.state, "degraded");
+  assert.deepEqual(report.health.components, ["todo"]);
+  write(path.join(root, "recovery", "daemon-progress.json"), { packageRoot, version: "1.0.0", pid: 999, at: 1000, sequence: 2 });
+  report = health.collectInstallationHealth({ homeDir, commands, now: 1001 });
+  assert.equal(report.daemonResponsive, false); assert.equal(report.health.reason, "daemon-not-responsive");
+});

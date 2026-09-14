@@ -11,16 +11,15 @@
     "Create a Relay asking the team to try the new app before we release it. Include what changed, how to try it and what to check.",
   ]);
   const INTERVAL_MS = 10000;
-  const COLLAPSED_KEY = "relayAnyoneTipCollapsed";
 
   function create(root) {
     const doc = root.ownerDocument, win = doc.defaultView;
     root.classList.add("relay-anyone-tip");
     root.innerHTML = `
-      <button class="rat-summary" type="button" aria-expanded="false" aria-label="Expand tip: Relay anyone" hidden>
+      <button class="rat-summary" type="button" aria-expanded="false" aria-label="Expand tip: Relay anyone">
         <span class="rat-title">Relay anyone even if they aren’t on Relay</span><span class="rat-see">See how <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5"/></svg></span>
       </button>
-      <section class="rat-card" aria-label="Relay anyone">
+      <section class="rat-card" aria-label="Relay anyone" hidden>
         <div class="rat-head"><span class="rat-title">Relay anyone even if they aren’t on Relay</span><button class="rat-minimise" type="button" aria-label="Minimise tip" aria-expanded="true">−</button></div>
         <div class="rat-label">Tell Claude Code or Codex:</div>
         <div class="rat-carousel" role="region" aria-roledescription="carousel" aria-label="Example Relay prompts" aria-live="off">
@@ -34,11 +33,10 @@
     const card = find(".rat-card"), summary = find(".rat-summary"), minimise = find(".rat-minimise");
     const viewport = find(".rat-viewport"), track = find(".rat-track"), dots = find(".rat-dots");
     const copy = find(".rat-copy"), status = find(".rat-status");
-    let index = 0, expanded = true, paused = false, visible = false, active = false;
-    try { expanded = win.localStorage.getItem(COLLAPSED_KEY) !== "true"; } catch {}
+    // Collapsed on every open; "See how" expands it until Relay next opens.
+    let index = 0, expanded = false, paused = false, visible = false, active = false;
     function setExpanded(next) {
       expanded = next;
-      try { win.localStorage.setItem(COLLAPSED_KEY, String(!expanded)); } catch {}
       controls();
     }
     let inViewport = false, timer = null, animations = [], generation = 0;
@@ -148,8 +146,8 @@
         if (active === next) return;
         active = next; schedule();
       },
-      // Reset transient carousel state without undoing the user’s display preference.
-      reset() { paused = false; select(0); },
+      // Every open starts from the collapsed tip and the first example.
+      reset() { paused = false; expanded = false; select(0); },
       destroy() { visible = false; schedule(); observer.disconnect(); doc.removeEventListener("visibilitychange", schedule); },
     };
   }

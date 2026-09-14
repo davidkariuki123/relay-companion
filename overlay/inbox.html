@@ -5609,7 +5609,7 @@
   let activeView = "relays";
   let payload = { account: { paired: false }, ui: { canDismiss: true, reopenSurface: "the Relay icon", onboardingVersion:1, completedOnboardingVersion:0, onboardingRequired:false }, features: { requests:false, todo:false, slack:false, peopleMentions:true, agentMentions:false, cowork:false, messageMutations:false, environment:"production" }, pendingOpen:null, relays: [], sent: [], requests: [], contacts: [], chats: [], slackChats: [] };
   // The teaching card owns its DOM: inbox polls must preserve its current
-  // example, timer, focus and session-only minimise state.
+  // example, timer, focus and expanded state (each open collapses it again).
   const relayAnyoneTip = window.RelayAnyoneTip.create(document.getElementById("relayAnyoneTip"));
   function syncRelayAnyoneTip() {
     const visible = activeView === "relays" && !peeking && !requestInboxOpen
@@ -16248,6 +16248,9 @@
     // failed N times, without saying so, is how someone sits 62 versions behind
     // without ever knowing (field report, Shane 2026-08-11). Say what is
     // happening, keep the retry — the usual cause is one they can fix.
+    if (info.serviceHealth && info.serviceHealth.state !== "healthy") {
+      html += `<div class="sv-version sv-update"><span>Relay ${esc(info.version || "")} · ${esc(info.serviceHealth.message)}</span></div>`;
+    }
     if (info.updateFailing) {
       html += `<div class="sv-version sv-update">
         <span>Relay ${esc(info.version || "")} · ${esc(String(info.updateFailing.count))} failed attempts to install ${esc(info.updateFailing.target)}</span>

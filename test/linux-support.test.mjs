@@ -387,7 +387,7 @@ test("Linux canonical activation repairs, restarts pill then daemon, and proves 
     }
     return { status: 0, stdout: "", stderr: "" };
   };
-  const result = await activateCanonicalRuntime(target, { platform: "linux", homeDir, run, attempts: 4, sleep: async () => {} });
+  const result = await activateCanonicalRuntime(target, { platform: "linux", homeDir, run, attempts: 4, sleep: async () => {}, verifyReady: async () => ({ ok: true }) });
   fs.rmSync(homeDir, { recursive: true, force: true });
   assert.equal(result.ok, true);
   const starts = calls.filter(([command, user, verb]) => command === "systemctl" && user === "--user" && verb === "start");

@@ -1162,6 +1162,7 @@ function accountInfo() {
     // Surfaced in the Settings card so a stale machine is visible in the app,
     // not only in the tray menu.
     updateAvailable: availableUpdate || "",
+    serviceHealth: localServiceHealth,
     updating: updateInFlight,
     // A machine whose updates keep failing is a different state from one that
     // merely has an update pending, and the Settings card must not claim the
@@ -7999,7 +8000,7 @@ function syncTray() {
   // menu, so a stuck machine has to be able to change it — gate on the health
   // string too, not just visibility, or the early-out below would pin the
   // tooltip to whatever it said when the pill last toggled.
-  const health = updateFailure ? `failing:${updateFailure.count}:${updateFailure.target}` : "";
+  const health = `${localServiceHealth?.state || ""}:${localServiceHealth?.message || ""}:${updateFailure ? `failing:${updateFailure.count}:${updateFailure.target}` : ""}`;
   // Unread belongs in the tooltip because with skipTaskbar (Windows) and
   // app.dock.hide() (macOS) the status-area icon is the ONLY passive surface Relay
   // has. A hidden pill with waiting mail otherwise looks exactly like a dead one —
@@ -8017,6 +8018,7 @@ function syncTray() {
         base,
         unread ? `${unread} waiting` : "",
         updateFailure ? "Updates are failing — open the menu" : "",
+        localServiceHealth && localServiceHealth.state !== "healthy" ? localServiceHealth.message : "",
       ].filter(Boolean).join("\n"),
     );
   } catch {}
@@ -8072,6 +8074,23 @@ let updateInFlight = false;
 // writes this record and escalates on the same number, so a second copy here
 // would be a second definition of "stuck" that could silently drift out of step.
 let updateFailure = null; // {target, count, firstAt} once the failures are chronic
+let localServiceHealth = null;
+let serviceHealthWorker = null;
+function refreshLocalServiceHealth() {
+  if (serviceHealthWorker || process.env.RELAY_OVERLAY_TEST === "1" || process.env.RELAY_OVERLAY_PERF === "1") return;
+  // Process enumeration can take seconds on Windows. Keep it off Electron's
+  // UI thread, and keep local diagnostics independent of registry discovery.
+  try {
+    const worker = new (require("node:worker_threads").Worker)(path.join(__dirname, "..", "bootstrap", "installation-health-worker.cjs"));
+    serviceHealthWorker = worker;
+    const timeout = setTimeout(() => { void worker.terminate(); }, 30_000);
+    timeout.unref?.(); worker.unref();
+    worker.once("message", report => { localServiceHealth = report; syncTray(); });
+    worker.once("error", () => { localServiceHealth = { state: "unverified", message: "Runtime health has not been verified" }; });
+    worker.once("exit", () => { clearTimeout(timeout); serviceHealthWorker = null; });
+  } catch { localServiceHealth = { state: "unverified", message: "Runtime health has not been verified" }; }
+}
+setInterval(refreshLocalServiceHealth, 30_000).unref?.();
 
 // Open the updater log in the user's editor/viewer of choice. This is the one
 // file that says WHY, and asking a stuck user to find it by hand is how Shane
@@ -8084,6 +8103,7 @@ function openUpdateLog() {
   }
 }
 async function checkForUpdate() {
+  refreshLocalServiceHealth();
   // A sandboxed harness must never consult the registry: whether an update
   // happens to be published mid-run would otherwise change the Settings card's
   // version line and make an assertion pass or fail on release timing.

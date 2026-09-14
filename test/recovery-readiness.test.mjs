@@ -76,6 +76,33 @@ test("legacy liveness never receives a probation identity", async () => {
   assert.equal(result.ok, true); assert.equal(result.legacy, true); assert.equal(result.identity, null);
 });
 
+test("activation rejects a ticking heartbeat and answering socket when the working loop is frozen", async () => {
+  const result = await probe(({ now }) => ({ requireProgress: true,
+    probe: async () => ({ ok: true, daemon: { pid: 12, progress: { sequence: 1, at: now(), phase: "running" } }, pill: { pid: 13 }, identity: "daemon:renderer" }),
+  }));
+  assert.equal(result.ok, false); assert.match(result.detail, /daemon-loop-not-advancing/);
+});
+
+test("activation accepts sustained local loop progress while network or sign-in is unavailable", async () => {
+  for (const phase of ["offline", "signed-out", "running"]) {
+    const result = await probe(({ now }) => ({ requireProgress: true,
+      probe: async () => ({ ok: true, daemon: { pid: 12, progress: { sequence: now(), at: now(), phase } }, pill: { pid: 13 }, identity: "daemon:renderer" }),
+    }));
+    assert.equal(result.ok, true, phase);
+  }
+});
+
+test("new activation cannot pass with a legacy socket lacking loop progress", async () => {
+  assert.equal((await probe(() => ({ requireProgress: true }))).ok, false);
+});
+
+test("one quick progress increment followed by a frozen loop does not satisfy the observation window", async () => {
+  const result = await probe(({ now }) => ({ requireProgress: true,
+    probe: async () => ({ ok: true, daemon: { pid: 12, progress: { sequence: now() === 100000 ? 1 : 2, at: Math.min(now(), 101000), phase: "running" } }, pill: { pid: 13 }, identity: "daemon:renderer" }),
+  }));
+  assert.equal(result.ok, false);
+});
+
 // One Windows process-health sample is a PowerShell query that takes seconds;
 // the time spent taking a sample is not a gap in watching the runtime.
 test("slow health sampling does not reset the healthy window", async () => {

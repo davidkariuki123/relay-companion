@@ -5,7 +5,7 @@ const read = file => { try { return JSON.parse(fs.readFileSync(file, "utf8")); }
 const endpointPath = (homeDir, role) => path.join(homeDir, ".relay", "recovery", "probes", `${role}.json`);
 
 async function startRecoveryResponder({ role, packageRoot, version, homeDir = os.homedir(),
-  ready = async () => true, pid = process.pid } = {}) {
+  ready = async () => true, progress = () => null, pid = process.pid } = {}) {
   if (!["daemon", "pill"].includes(role)) throw Error("invalid-probe-role");
   const instance = crypto.randomUUID(), token = crypto.randomBytes(32).toString("hex");
   const file = endpointPath(homeDir, role), clients = new Set();
@@ -25,7 +25,9 @@ async function startRecoveryResponder({ role, packageRoot, version, homeDir = os
         const request = JSON.parse(buffer.slice(0, buffer.indexOf("\n")));
         if (request.token !== token || !/^[a-f0-9]{32}$/.test(request.nonce)) { socket.destroy(); return; }
         const responsive = await ready();
-        if (!socket.destroyed) socket.end(JSON.stringify({ schema: 1, ok: responsive === true, role, pid, packageRoot, version, instance, nonce: request.nonce }) + "\n");
+        const state = progress();
+        if (!socket.destroyed) socket.end(JSON.stringify({ schema: 1, ok: responsive === true, role, pid, packageRoot, version, instance,
+          progress: state ? { sequence: state.sequence, at: state.at, phase: state.phase } : null, nonce: request.nonce }) + "\n");
       } catch { socket.destroy(); }
     });
   });
@@ -64,7 +66,7 @@ async function requestProbe(role, target, { homeDir, timeoutMs }) {
         const response = JSON.parse(buffer.slice(0, buffer.indexOf("\n")));
         const ok = response.schema === 1 && response.ok === true && response.nonce === nonce && response.role === role
           && response.instance === endpoint.instance && response.pid === endpoint.pid && response.packageRoot === target.packageRoot && response.version === target.version;
-        finish({ ok, pid: response.pid, instance: response.instance });
+        finish({ ok, pid: response.pid, instance: response.instance, progress: response.progress || null });
       } catch { finish({ ok: false, reason: "probe-response-invalid" }); }
     });
   });

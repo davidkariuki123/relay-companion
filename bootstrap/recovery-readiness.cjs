@@ -32,15 +32,17 @@ async function waitForRecoveryReady({ homeDir = os.homedir(), platform = process
   health = exactRuntimeHealth, inspect = registration, stableMs = 10_000, timeoutMs = 45_000,
   heartbeatFreshMs = HEARTBEAT_FRESH_MS, probeTimeoutMs = PROBE_TIMEOUT_MS,
   probe = require("./recovery-probe.cjs").probeRuntime,
+  requireProgress = false,
   readCurrent = () => read(path.join(homeDir, ".relay", "runtime", "current.json")),
   readHeartbeat = () => read(path.join(homeDir, ".relay", "recovery", "daemon.json")),
 } = {}) {
   const started = now();
   let since = null, identity = null, firstBeat = null, lastSampleEnd = started;
   let probeSeen = false, probeIdentity = null, legacy = false;
+  let firstProgress = null, firstProgressAt = null, progressAdvanced = false;
   // Why the last sample did not count, for the log line a failed proof leaves.
   let block = null, samples = 0, slowestSampleMs = 0;
-  const reset = (key) => { since = null; firstBeat = null; identity = key; probeSeen = false; probeIdentity = null; legacy = false; };
+  const reset = (key) => { since = null; firstBeat = null; identity = key; probeSeen = false; probeIdentity = null; legacy = false; firstProgress = null; firstProgressAt = null; progressAdvanced = false; };
   const healthSummary = (value) => value ? JSON.stringify({ daemon: value.daemon, pill: value.pill, daemonCount: value.daemonCount, pillCount: value.pillCount, oldDaemon: value.oldDaemon, oldPill: value.oldPill, oldBroker: value.oldBroker }) : "null";
   const probeSummary = (value) => value?.reason || value?.daemon?.reason || value?.pill?.reason || "answer-did-not-match-the-live-processes";
   // The attempt bound also terminates a faulty/frozen clock in injected hosts.
@@ -81,8 +83,19 @@ async function waitForRecoveryReady({ homeDir = os.homedir(), platform = process
         probeSeen = true;
         legacy = responsive.legacy === true;
         if (probeIdentityNow) probeIdentity = probeIdentityNow;
+        const progress = responsive.daemon?.progress;
+        if (Number.isSafeInteger(progress?.sequence) && progress.sequence > 0 && ["running", "offline", "signed-out"].includes(progress.phase) && Number.isFinite(progress.at)
+          && progress.at >= after && progress.at <= sampled && sampled - progress.at < heartbeatFreshMs) {
+          if (firstProgress === null) { firstProgress = progress.sequence; firstProgressAt = progress.at; }
+          else if (progress.sequence > firstProgress && progress.at - firstProgressAt >= stableMs) progressAdvanced = true;
+        }
       } else block = `probe:${probeSummary(responsive)}`;
-      if (at - since >= stableMs && beat.at > firstBeat && probeSeen) {
+      // New daemons prove real loop progress; legacy recovery remains possible
+      // but cannot satisfy activation of a release requiring this capability.
+      const progressRequired = requireProgress || firstProgress !== null
+        || (current?.packageRoot && fs.existsSync(path.join(current.packageRoot, "bootstrap", "daemon-progress.cjs")));
+      if (progressRequired && !progressAdvanced) block = "daemon-loop-not-advancing";
+      if (at - since >= stableMs && beat.at > firstBeat && probeSeen && (!progressRequired || progressAdvanced)) {
         return { ok: true, current, heartbeatAt: beat.at,
           identity: legacy ? null : `${key}:${probeIdentity || "legacy"}`, legacy };
       }

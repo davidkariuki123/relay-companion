@@ -22,6 +22,29 @@ function fixture(t) {
   write(path.join(home, ".relay", "config.json"), { updateChannel: "stable" });
   return home;
 }
+test("two matching startup crashes skip restart and reactivation and restore a distinct local release", async t => {
+  const homeDir = fixture(t);
+  const root = path.join(homeDir, ".relay");
+  const target = version => ({ active: true, version, packageRoot: path.join(root, "runtime", "releases", version, "node_modules", "relay-companion"), channel: "stable" });
+  const broken = target("1.2.3"), good = target("1.2.2");
+  for (const item of [broken, good]) { fs.mkdirSync(path.join(item.packageRoot, "src"), { recursive: true }); fs.writeFileSync(path.join(item.packageRoot, "src", "recovery-entry.js"), ""); }
+  write(path.join(root, "runtime", "current.json"), broken);
+  write(path.join(root, "recovery", "runtime-good.json"), good);
+  const { recordDaemonCrash } = require("../bootstrap/daemon-progress.cjs");
+  const error = new ReferenceError("removed runtime");
+  for (const pid of [10, 11]) recordDaemonCrash(error, { ...broken, homeDir, pid, now: () => 1000 });
+  let restored = false;
+  const result = await recover({ homeDir, env: {}, now: () => 2000, discoverImpl: async () => broken.version,
+    memory: () => ({ pressured: false }), restart: () => assert.fail("must skip repeatable crash"), stage: () => assert.fail("local copy is sufficient"),
+    health: () => ({ ok: restored, daemonCount: restored ? 1 : 0 }),
+    run: async (_node, entry) => {
+      assert.equal(entry, path.join(good.packageRoot, "src", "recovery-entry.js"));
+      restored = true; write(path.join(root, "runtime", "current.json"), good);
+      write(path.join(root, "recovery", "daemon.json"), { version: good.version, at: 2000 });
+    },
+  });
+  assert.equal(result.ok, true); assert.equal(result.repair, "local"); assert.equal(result.version, good.version);
+});
 test("recovery discovers newer code with a missing application and never imports the old tree", async t => {
   const homeDir = fixture(t); const calls = [];
   const result = await recover({ homeDir, env: {}, now: () => 1000, memory: () => ({ pressured: false }),

@@ -3,7 +3,8 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { runtimeProcessCommands } = require("./runtime-health.cjs");
+const { runtimeProcessCommands, exactRuntimeHealth } = require("./runtime-health.cjs");
+const { progressPath, PROGRESS_FRESH_MS } = require("./daemon-progress.cjs");
 function read(file) { try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return null; } }
 function installationId({ homeDir = os.homedir(), create = false } = {}) {
   const file = path.join(homeDir, ".relay", "installation-id.json");
@@ -38,18 +39,37 @@ function collectInstallationHealth({ homeDir = os.homedir(), platform = process.
   osVersion = os.release(), commands, now = Date.now() } = {}) {
   const root = path.join(homeDir, ".relay"), current = read(path.join(root, "runtime", "current.json"));
   const activeVersion = current?.active === true ? current.version : null;
-  const inventory = componentInventory(commands || runtimeProcessCommands(platform), activeVersion);
+  const processCommands = commands || runtimeProcessCommands(platform);
+  const inventory = componentInventory(processCommands, activeVersion);
+  const live = current?.bin && current.packageRoot ? exactRuntimeHealth(current, { platform, commands: processCommands }) : null;
   const supervisor = read(path.join(root, "recovery", "status.json"));
   const monitor = require("./recovery-monitor.cjs").recoveryMonitor({ homeDir, now });
   const monitorFailure = ({ missing: "recovery-checks-missing", overdue: "recovery-checks-overdue", "launcher-failed": "recovery-launcher-failed", fallback: "recovery-fallback" })[monitor.state] || null;
   const heartbeat = read(path.join(root, "recovery", "daemon.json"));
+  const progress = read(progressPath(homeDir));
+  const progressSupported = !!current?.packageRoot && fs.existsSync(path.join(current.packageRoot, "bootstrap", "daemon-progress.cjs"));
+  const progressMatches = progress?.packageRoot === current?.packageRoot && progress?.version === activeVersion && progress?.pid === heartbeat?.pid;
+  const progressFresh = progressMatches && progress.sequence > 0 && progress.at <= now && now - progress.at < PROGRESS_FRESH_MS;
+  const daemonResponsive = Boolean(live?.daemon && heartbeat?.version === activeVersion && heartbeat?.at <= now && now - heartbeat.at < 60_000
+    && (!progressSupported || progressFresh));
+  const componentNames = ["inbox-background", "agent-sessions", "todo", "topics", "tasks"];
+  const unhealthyComponents = progressMatches ? componentNames.filter(name => ["failed", "stalled"].includes(progress.components?.[name])) : [];
+  let serviceHealth = { state: "healthy", reason: "ready", components: unhealthyComponents };
+  if (!activeVersion) serviceHealth = { ...serviceHealth, state: "unverified", reason: "runtime-not-active" };
+  else if (!live?.daemon) serviceHealth = { ...serviceHealth, state: "failed", reason: "daemon-missing" };
+  else if (!daemonResponsive) serviceHealth = { ...serviceHealth, state: "failed", reason: "daemon-not-responsive" };
+  else if (!live?.ok) serviceHealth = { ...serviceHealth, state: "failed", reason: "service-process-mismatch" };
+  else if (unhealthyComponents.length) serviceHealth = { ...serviceHealth, state: "degraded", reason: "component-failed" };
+  else if (progressMatches && ["offline", "signed-out"].includes(progress.phase)) serviceHealth = { ...serviceHealth, state: "waiting", reason: progress.phase };
+  else if (monitorFailure || supervisor?.ok === false) serviceHealth = { ...serviceHealth, state: "degraded", reason: "recovery-failed" };
+  else if (!progressSupported) serviceHealth = { ...serviceHealth, state: "unverified", reason: "legacy-readiness" };
   const transport = (name) => {
     const report = read(path.join(root, "transport-health", `${name}.json`));
     return report?.at > 0 && now >= report.at ? new Date(report.at).toISOString() : null;
   };
   return {
     installationId: installationId({ homeDir }), os: platform, osVersion: osVersion.slice(0, 80), arch,
-    ...inventory, daemonResponsive: Boolean(heartbeat?.at <= now && now - heartbeat.at < 60_000),
+    ...inventory, daemonResponsive, health: serviceHealth,
     recovery: supervisor || monitorFailure ? { status: supervisor?.status || monitor.state, version: supervisor?.launcherVersion || null,
       checkedAt: supervisor?.checkedAt > 0 ? new Date(supervisor.checkedAt).toISOString() : null,
       desiredVersion: supervisor?.desiredVersion || null,
@@ -66,4 +86,13 @@ function recordTransport(name, { homeDir = os.homedir(), now = Date.now() } = {}
   const root = path.join(homeDir, ".relay", "transport-health");
   try { fs.mkdirSync(root, { recursive: true, mode: 0o700 }); fs.writeFileSync(path.join(root, `${name}.json`), JSON.stringify({ at: now }), { mode: 0o600 }); } catch {}
 }
-module.exports = { installationId, componentInventory, collectInstallationHealth, recordTransport };
+function describeInstallationHealth(installation) {
+  const reason = installation?.health?.reason;
+  const message = ({ "daemon-missing": "Background service stopped", "daemon-not-responsive": "Background service is not responding",
+    "service-process-mismatch": "Relay services are not running together correctly", "component-failed": "An optional background component needs attention",
+    "recovery-failed": "Recovery needs attention", "offline": "Waiting for Relay's connection", "signed-out": "Waiting for sign-in",
+    "runtime-not-active": "Runtime health has not been verified", "legacy-readiness": "Background service running; readiness not verified",
+    "ready": "Relay is running" })[reason] || "Runtime health has not been verified";
+  return message + (["restarting", "reactivating", "restoring-local", "downloading"].includes(installation?.recovery?.status) ? "; recovery in progress" : "");
+}
+module.exports = { installationId, componentInventory, collectInstallationHealth, recordTransport, describeInstallationHealth };

@@ -274,7 +274,12 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
       const busy = busyDecision(heartbeat, { homeDir, now: now() });
       if (busy) return status({ ok: true, status: busy, ...base });
       const restartKey = `restart:${current.packageRoot || current.version}`;
-      if (progress.claim(restartKey, MAX_IN_PLACE_RESTARTS)) {
+      const repeatedCrash = require("./daemon-progress.cjs").repeatedStartupCrash(current, { homeDir, now: now() });
+      if (repeatedCrash) {
+        log(`repeated startup crash; skipping restart/reactivation for ${version}`);
+        policy.failure(channel, version, { id: `startup:${current.packageRoot}:${repeatedCrash.fingerprint}`, reason: "repeated-startup-crash" });
+      }
+      if (!repeatedCrash && progress.claim(restartKey, MAX_IN_PLACE_RESTARTS)) {
         status({ ok: true, status: "restarting", ...base, restarts: restarts + 1 });
         const restartedAt = now();
         let outcome;
@@ -295,7 +300,7 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
       // Two restarts did not bring it back. Re-activate the release already on
       // disk: same verified tree, no download. Only then does the network rung run.
       const entry = path.join(current.packageRoot || "", "src", "recovery-entry.js");
-      if (current.packageRoot && validateLocal(current, { platform, arch }) && progress.claim(`reactivate:${current.packageRoot}`, 1)) {
+      if (!repeatedCrash && current.packageRoot && validateLocal(current, { platform, arch }) && progress.claim(`reactivate:${current.packageRoot}`, 1)) {
         status({ ok: true, status: "reactivating", ...base });
         const activationAt = now();
         try {

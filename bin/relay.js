@@ -13,6 +13,7 @@ import {
   writeConfig,
   readConfig,
   apiUrl,
+  webUrl,
   DEFAULT_API_URL,
   DEFAULT_WEB_URL,
   DEFAULT_DEV_API_URL,
@@ -816,11 +817,15 @@ async function cmdPill(flags = {}, positional = []) {
 async function cmdDoctor(flags = {}) {
   const { collectCompanionFleetTelemetry } = await import("../src/fleet-telemetry.js");
   const health = { ...collectCompanionFleetTelemetry(), hookRetirement: agentHookRetirementStatus() };
+  const { describeInstallationHealth } = await import("../bootstrap/installation-health.cjs");
+  const serviceStatus = describeInstallationHealth(health.installation);
   if (flags.json) {
-    console.log(JSON.stringify({ schema: 1, cliVersion: companionVersion(), ...health }, null, 2));
+    console.log(JSON.stringify({ schema: 1, cliVersion: companionVersion(), ...health,
+      ok: health.installation.health?.state === "healthy", serviceStatus }, null, 2));
     return;
   }
   const hooks = health.hookRetirement;
+  console.log(`  health: ${serviceStatus}`);
   console.log(`  retired Relay hooks still registered: ${hooks.registeredHandlers}`);
   if (hooks.unreadableFiles.length) console.log(`  hook cleanup could not inspect: ${hooks.unreadableFiles.join(", ")}`);
   if (hooks.registeredHandlers || hooks.unreadableFiles.length) console.log("    run: relay repair-installation");

@@ -872,6 +872,7 @@ async function activateRuntime(layout, runtime, version, {
   writePointer = atomicWriteJson,
   removePointer = (file) => fs.rmSync(file, { force: true }),
   healthCheck = exactRuntimeHealth,
+  verifyReady = require("./recovery-readiness.cjs").waitForRecoveryReady,
   healthAttempts = 60,
   healthIntervalMs = 500,
   sleep,
@@ -1045,6 +1046,17 @@ async function activateRuntime(layout, runtime, version, {
     const message = `Relay runtime activation failed exact-root health${missing ? ` (${missing} did not start)` : ""}.`;
     rollback(message);
     fail(message);
+  }
+  if (existsSync(path.join(candidate.packageRoot, "bootstrap", "daemon-progress.cjs"))) {
+    const observed = await verifyReady({
+      homeDir, platform, target: candidate, readCurrent: () => ({ ...candidate, active: true }),
+      requireProgress: true, timeoutMs: 90_000,
+    });
+    if (!observed.ok) {
+      const message = `Relay runtime activation failed readiness (${observed.reason}).`;
+      rollback(message);
+      fail(message);
+    }
   }
   try {
     writePointer(layout.pointerPath, candidate);

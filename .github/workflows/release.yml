@@ -41,6 +41,10 @@ jobs:
           echo "source-sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Run release, updater, credential, and authorization security tests
+        # This checks all shipped server-side JS, including function bodies
+        # that a CLI import/help smoke test never executes.
+        run: npx --no-install eslint src bootstrap bin
+      - name: Run release regression tests
         run: >-
           node --test
           test/distribution-trust.test.mjs
@@ -72,6 +76,10 @@ jobs:
           test/inbox-ingest.test.mjs
           test/inbox-worker.test.mjs
           test/runtime-capabilities.test.mjs
+          test/daemon-robustness.test.mjs
+          test/recovery-readiness.test.mjs
+          test/recovery-runner.test.mjs
+          test/installation-health.test.mjs
 
   runtime:
     needs: identity
@@ -105,6 +113,8 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Prove the native credential store round trip
         run: node --test test/credential-store-darwin.integration.test.mjs
+      - name: Prove daemon orchestration and readiness on this platform
+        run: node --test test/daemon-robustness.test.mjs test/recovery-readiness.test.mjs test/recovery-probe.test.mjs
       - name: Prove owned Node and recovery survive macOS shared-library relocation
         if: startsWith(matrix.platform, 'darwin-')
         run: >-

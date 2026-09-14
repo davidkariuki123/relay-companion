@@ -40,11 +40,15 @@ try {
       : async () => ({ok:true})});
   });
   await page.goto(new URL("../overlay/inbox.html", import.meta.url).href);
-  await page.locator(".rat-card").waitFor();
+  await page.locator(".rat-summary").waitFor();
   await page.locator("#requestsEntry").waitFor();
   await page.clock.pauseAt(new Date(Date.now() + 1000));
   await page.evaluate(() => window.events.onOpenFull());
   await page.clock.runFor(500);
+  assert.equal(await page.locator(".rat-card").isVisible(), false, "the tip opens collapsed");
+  assert.equal(await page.locator(".rat-summary .rat-see").innerText(), "See how");
+  await page.getByRole("button", {name:"Expand tip: Relay anyone",exact:true}).click();
+  await page.locator(".rat-card").waitFor();
   const current = () => page.locator(".rat-slide.active").innerText();
   // Playwright's virtual timer advances JS; CSS/WAAPI uses the compositor's
   // clock, so wait for the finite swipe before checking the resting layout.
@@ -114,19 +118,22 @@ try {
   assert.equal(await page.evaluate(() => window.dismissed), 1);
   await page.evaluate(() => { window.events.onShown(); window.events.onOpenFull(); });
   await page.clock.runFor(500);
-  assert.equal(await page.locator(".rat-summary").isVisible(), true, "close and reopen preserves minimisation");
+  assert.equal(await page.locator(".rat-summary").isVisible(), true, "close and reopen stays collapsed");
   assert.equal(await page.locator(".rat-card").isVisible(), false);
+  await page.getByRole("button", {name:"Expand tip: Relay anyone",exact:true}).click();
+  await page.locator("#closeX").click();
+  await page.clock.runFor(500);
+  await page.evaluate(() => { window.events.onShown(); window.events.onOpenFull(); });
+  await page.clock.runFor(500);
+  assert.equal(await page.locator(".rat-card").isVisible(), false, "reopening collapses an expanded tip");
+  await page.getByRole("button", {name:"Expand tip: Relay anyone",exact:true}).click();
   await page.reload();
   await page.locator(".rat-summary").waitFor();
   await page.evaluate(() => window.events.onOpenFull());
   await page.clock.runFor(500);
-  assert.equal(await page.locator(".rat-card").isVisible(), false, "renderer restart preserves minimisation");
+  assert.equal(await page.locator(".rat-card").isVisible(), false, "renderer restart starts collapsed");
   await page.getByRole("button", {name:"Expand tip: Relay anyone",exact:true}).click();
-  await page.reload();
   await page.locator(".rat-card").waitFor();
-  await page.evaluate(() => window.events.onOpenFull());
-  await page.clock.runFor(500);
-  assert.equal(await page.locator(".rat-summary").isVisible(), false, "explicit expansion is saved too");
   assert.equal(await current(), `“${EXAMPLES[0]}”`);
   assert.equal(await page.getByRole("button", {name:/^(Pause|Resume) example rotation$/}).count(), 0);
 

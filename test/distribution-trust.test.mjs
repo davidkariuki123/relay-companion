@@ -1795,6 +1795,29 @@ const healthyMacActivation = async () => ({
   health: { ok: true, daemon: true, pill: true, oldDaemon: false, oldPill: false },
 });
 
+test("bootstrap rolls back a launched daemon that never proves working-loop readiness", async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-bootstrap-loop-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const packageRoot = path.join(root, "candidate"), oldBin = path.join(root, "old", "relay.js");
+  fs.mkdirSync(path.dirname(oldBin), { recursive: true }); fs.writeFileSync(oldBin, "// previous");
+  fs.mkdirSync(path.join(packageRoot, "bootstrap"), { recursive: true });
+  fs.writeFileSync(path.join(packageRoot, "bootstrap", "daemon-progress.cjs"), "// capability marker");
+  const pointerPath = path.join(root, "current.json"), previous = { active: true, version: "1.2.2", bin: oldBin };
+  fs.writeFileSync(pointerPath, JSON.stringify(previous));
+  let probes = 0;
+  await assert.rejects(() => activateRuntime({ pointerPath, root, releaseId: "candidate", releaseRoot: packageRoot },
+    { bin: path.join(packageRoot, "relay.js"), packageRoot }, version, {
+      platform: "darwin", homeDir: root, spawnImpl: () => ({ status: 0 }), activateMacServices: healthyMacActivation,
+      verifyReady: async options => {
+        probes++; assert.equal(options.requireProgress, true);
+        assert.equal(options.readCurrent().packageRoot, packageRoot);
+        assert.equal(JSON.parse(fs.readFileSync(pointerPath)).state, "activating");
+        return { ok: false, reason: "runtime-did-not-stay-responsive" };
+      },
+    }), /activation failed readiness/);
+  assert.equal(probes, 1); assert.deepEqual(JSON.parse(fs.readFileSync(pointerPath)), previous);
+});
+
 test("bootstrap writes the active pointer only after setup and shared exact-root activation succeed", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-bootstrap-pointer-"));
   try {

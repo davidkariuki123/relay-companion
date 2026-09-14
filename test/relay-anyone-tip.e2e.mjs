@@ -30,6 +30,9 @@ try {
   page.on("pageerror", (error) => errors.push(error.message));
   await page.waitForFunction(() => typeof window.RelayAnyoneTip === "object");
   await app.evaluate(() => global.__relayTest.showFromTray());
+  await page.locator(".rat-summary").waitFor();
+  assert.equal(await page.locator(".rat-card").isVisible(), false, "the tip opens collapsed");
+  await page.getByRole("button", {name:"Expand tip: Relay anyone",exact:true}).click();
   await page.locator(".rat-card").waitFor();
   const first = await page.locator(".rat-slide.active").innerText();
   assert.match(first, /asking Alex/);
