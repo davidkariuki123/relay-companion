@@ -3199,8 +3199,15 @@ export function repairExistingAgentRegistrations({
     claudeSettingsFile,
     codexHooksFile,
   });
+  // Name the first surface that refused, so a caller that can only relay one
+  // line (the update worker's log) still says which registration failed and why.
+  const failing = [["claude", claude], ["codex", codex], ["claude_desktop", claudeDesktop], ["hooks", hookRepair]]
+    .find(([, result]) => result && result.ok === false);
+  const reason = failing ? `${failing[0]}:${failing[1].reason || "failed"}` : undefined;
+  const detail = failing ? String(failing[1].detail || failing[1].reason || "").slice(0, 600) : undefined;
   return {
     ok: Boolean((!claude || claude.ok) && (!codex || codex.ok) && (!claudeDesktop || claudeDesktop.ok) && hookRepair.ok),
+    ...(reason ? { reason, detail } : {}),
     mcpBin,
     claude,
     codex,

@@ -52,6 +52,9 @@ const RETRY_COOLDOWN_MS = 2 * 60 * 1000;
 // remains alive throughout immutable staging, so its ordinary two-minute failed-
 // update heuristic must not launch duplicate workers while the first is healthy.
 export const CANONICAL_TRANSACTION_IN_FLIGHT_MS = 20 * 60 * 1000;
+// After this many failed recoveries of one candidate, a newer release on the
+// channel supersedes it rather than the same candidate being retried forever.
+export const RECOVERY_SUPERSEDE_AFTER = 3;
 // ...but do not retry at that rate forever. A machine whose update can never complete
 // (field report: Scheduled Tasks registered by hand under different names) used to
 // re-download and re-install every two minutes indefinitely — ~2,679 attempts for a
@@ -562,6 +565,7 @@ export function createAutoUpdater({
         homeDir: os.homedir(),
         platform: opts.platform,
         env,
+        supersedeBrokenRecovery: opts.supersedeBrokenRecovery === true,
       }),
   getCanonicalRuntime = () => readCanonicalRuntime({ platform }),
   readAutostart = () => readAutostartDaemonRoot({ platform }),
@@ -1036,12 +1040,33 @@ export function createAutoUpdater({
       // LATE — activation, not install — leaves a journal that sends every restart
       // straight back here, which is how a fixed install turned into a hot recovery
       // loop instead of a hot migration loop. Same durable record, same backoff.
-      const recoveryTarget = `canonical-recovery:${canonicalState.candidate?.version || runningVersion}`;
+      const failedCandidate = canonicalState.candidate?.version || runningVersion;
+      let recoveryTarget = `canonical-recovery:${failedCandidate}`;
+      let targetVersion = failedCandidate;
+      let supersede = false;
       const priorRecovery = readMigrationFailure(updateStatePath, { slot: RECOVERY_FAILURE_SLOT });
       if (priorRecovery && priorRecovery.target === recoveryTarget) {
         const wait = updateRetryCooldownMs(priorRecovery.count, { baseMs: retryCooldownMs });
         if (t - priorRecovery.lastAt < wait) {
           return { status: "deferred-recovery-backoff", current: runningVersion, recovery: canonicalState, failures: priorRecovery.count };
+        }
+        // A candidate that has refused to activate this many times is not going
+        // to succeed on the next identical attempt. If the channel has moved on,
+        // take the newer release instead: its repair code may carry the fix, and
+        // the machine otherwise retries the same broken candidate hourly forever
+        // (six 0.1.490 machines did exactly that on 2026-09-13). The journal's
+        // recovery still runs first inside the new transaction; only when that
+        // fails again does the newer release supersede it.
+        if (priorRecovery.count >= RECOVERY_SUPERSEDE_AFTER) {
+          let latest = null;
+          try { latest = await getLatestVersion({ channel: liveChannel() }); }
+          catch (err) { log(`recovery supersede check failed: ${err && err.message ? err.message : String(err)}`); }
+          if (latest && isNewerVersion(latest, failedCandidate) && !releaseDeferral(latest)) {
+            targetVersion = latest;
+            recoveryTarget = `canonical-recovery:${latest}`;
+            supersede = true;
+            log(`canonical recovery of ${failedCandidate} failed ${priorRecovery.count} times; superseding it with ${latest}`);
+          }
         }
       }
       let launch = null;
@@ -1050,10 +1075,11 @@ export function createAutoUpdater({
           log,
           currentVersion: runningVersion,
           currentChannel: liveChannel(),
-          targetVersion: canonicalState.candidate?.version || runningVersion,
+          targetVersion,
           packageRoot,
           platform,
           canonicalRecovery: true,
+          supersedeBrokenRecovery: supersede,
         });
       } catch (err) {
         log(`canonical runtime recovery launch failed: ${err && err.message ? err.message : String(err)}`);
@@ -1065,7 +1091,7 @@ export function createAutoUpdater({
       try { recordMigrationFailure(updateStatePath, recoveryTarget, { now: () => t, slot: RECOVERY_FAILURE_SLOT }); } catch {}
       state.updating = true;
       state.updateStartedAt = t;
-      return { status: "recovering-runtime", current: runningVersion, recovery: canonicalState, launch };
+      return { status: "recovering-runtime", current: runningVersion, recovery: canonicalState, launch, ...(supersede ? { superseded: failedCandidate, target: targetVersion } : {}) };
     }
     // First move a healthy npm/global/Hermes-owned install into Relay's immutable
     // runtime at the exact version currently executing. No update is attempted in

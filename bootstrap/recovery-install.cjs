@@ -13,6 +13,32 @@ const ok = (r) => r?.ok === true || (!r?.error && r?.status === 0);
 const xml = (s) => String(s).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 const unit = (s) => '"' + String(s).replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("%", "%%") + '"';
 function run(command, args) { return spawnSync(command, args, { encoding: "utf8", windowsHide: true, timeout: 30_000 }); }
+// Why a command failed, in one line: the spawn error first, then whatever the
+// child said. Callers embed this in their own error so update.log names the step.
+function commandDetail(r) {
+  const text = r?.error?.message || String(r?.stderr || r?.out || r?.stdout || "").trim();
+  return `${r?.error ? "" : `exit ${r?.status ?? "unknown"}`}${text ? `${r?.error ? "" : ": "}${text}` : ""}`.slice(0, 600);
+}
+// Windows refuses to rename a directory or file while an antivirus scanner or
+// indexer still holds a handle on something it just wrote. Those holds last
+// milliseconds to a couple of seconds and then clear on their own, so a short
+// bounded retry turns a spurious EPERM into the rename that was asked for. The
+// same install step, run by hand a minute later, succeeded on the first try on
+// Dino's machine (2026-09-13) after eight consecutive worker failures.
+const RENAME_RETRY_CODES = new Set(["EPERM", "EBUSY", "EACCES", "ENOTEMPTY"]);
+const RENAME_RETRY_TOTAL_MS = 3000;
+function renameWithRetry(from, to, { fsImpl = fs, totalMs = RENAME_RETRY_TOTAL_MS, sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) } = {}) {
+  const started = Date.now();
+  let wait = 50;
+  for (;;) {
+    try { fsImpl.renameSync(from, to); return; }
+    catch (error) {
+      if (!RENAME_RETRY_CODES.has(error?.code) || Date.now() - started + wait > totalMs) throw error;
+      sleep(wait);
+      wait = Math.min(500, wait * 2);
+    }
+  }
+}
 
 // Task Scheduler reads this XML as UTF-16 (the caller adds the BOM). The settings
 // that differ from schtasks' `/SC MINUTE` defaults are the load-bearing ones: both
@@ -84,16 +110,23 @@ function installRecovery({ packageRoot, node = process.execPath, homeDir = os.ho
     };
     // A live runner may still import these files. Never repair them in place.
     if (fs.existsSync(bundle) && !matches(bundle)) bundle = path.join(root, "versions", crypto.createHash("sha256").update(digest + crypto.randomUUID()).digest("hex"));
-    const runtimeNode = preserveNode(node, { platform, runtimeRoot: root, isTemporary: () => true });
+    let runtimeNode;
+    try { runtimeNode = preserveNode(node, { platform, runtimeRoot: root, isTemporary: () => true }); }
+    catch (error) { throw Error(`recovery-node-preservation-failed: ${error.message}`); }
     if (!fs.existsSync(bundle)) {
       const pending = path.join(root, "versions", '.pending-' + crypto.randomUUID());
       fs.mkdirSync(path.join(pending, "bootstrap"), { recursive: true, mode: 0o700 });
+      // Each step names itself when it fails. The update worker records only the
+      // message, and "recovery-install-failed" alone cost a day of guessing.
       try {
-        for (const name of names) atomicFile(path.join(pending, "bootstrap", name), fs.readFileSync(path.join(source, name)));
-        atomicFile(path.join(pending, "package.json"), fs.readFileSync(path.join(packageRoot, "package.json")));
-        if (!ok(runCommand(runtimeNode, [path.join(pending, "bootstrap", "recovery-runner.cjs"), "--self-check"]))) throw Error("recovery-bundle-verification-failed");
-        try { fs.renameSync(pending, bundle); }
-        catch (error) { if (!matches(bundle)) throw error; }
+        try {
+          for (const name of names) atomicFile(path.join(pending, "bootstrap", name), fs.readFileSync(path.join(source, name)));
+          atomicFile(path.join(pending, "package.json"), fs.readFileSync(path.join(packageRoot, "package.json")));
+        } catch (error) { throw Error(`recovery-bundle-copy-failed: ${error.message}`); }
+        const pendingCheck = runCommand(runtimeNode, [path.join(pending, "bootstrap", "recovery-runner.cjs"), "--self-check"]);
+        if (!ok(pendingCheck)) throw Error(`recovery-bundle-verification-failed: ${commandDetail(pendingCheck)}`);
+        try { renameWithRetry(pending, bundle); }
+        catch (error) { if (!matches(bundle)) throw Error(`recovery-bundle-publish-failed: ${error.message}`); }
       } finally { fs.rmSync(pending, { recursive: true, force: true }); }
     }
     const pointer = path.join(root, "current.json");
@@ -106,7 +139,7 @@ function installRecovery({ packageRoot, node = process.execPath, homeDir = os.ho
       write(path.join(root, "known-good.json"), current);
     }
     const checked = runCommand(runtimeNode, [path.join(bundle, "bootstrap", "recovery-runner.cjs"), "--self-check"]);
-    if (!ok(checked)) throw Error("recovery-bundle-verification-failed");
+    if (!ok(checked)) throw Error(`recovery-bundle-verification-failed: ${commandDetail(checked)}`);
     atomicFile(pointer, JSON.stringify({ schema: 1, version: incoming, node: runtimeNode, bundle }));
     const launcher = path.join(root, "launch.cjs");
     // Static launcher dispatches through a replaceable pointer. Never overwrite
@@ -201,4 +234,4 @@ function uninstallRecovery({ homeDir = os.homedir(), platform = process.platform
   for (const file of files) fs.rmSync(file, { force: true });
   return { ok: true };
 }
-module.exports = { installRecovery, uninstallRecovery, windowsRecoveryTaskXml, LABEL, TASK };
+module.exports = { installRecovery, uninstallRecovery, windowsRecoveryTaskXml, renameWithRetry, commandDetail, LABEL, TASK };

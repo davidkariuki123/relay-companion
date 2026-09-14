@@ -550,7 +550,7 @@ test("slow canonical staging never launches a duplicate worker inside its full t
   assert.equal(launched.length, 1);
 });
 
-import { readMigrationFailure } from "../src/auto-update.js";
+import { readMigrationFailure, RECOVERY_SUPERSEDE_AFTER } from "../src/auto-update.js";
 
 // ---- the canonical migration must back off across daemon restarts -----------
 // Launching a migration quiesces and exits the daemon, launchd restarts it, and the
@@ -970,4 +970,62 @@ test("a Windows autostart repoint launches repair-runtime through the hidden WMI
   assert.equal(failed, false);
   assert.equal(spawned.length, 0);
   assert.match(logged.join("\n"), /autostart repoint launch failed: Access denied/);
+});
+
+// Six 0.1.490 machines spent 2026-09-13 retrying the same 0.1.510 recovery every
+// hour. A candidate that has failed this often will not pass on the next identical
+// attempt; once the channel has moved on, the newer release supersedes it.
+function supersedingUpdater({ statePath, launched, now, latest, releasePolicy }) {
+  return createAutoUpdater({
+    useCanonicalRuntime: true,
+    platform: "darwin",
+    packageRoot: "/opt/homebrew/lib/node_modules/relay-companion",
+    getCurrentVersion: () => "0.1.490",
+    getCanonicalRuntime: () => null,
+    getCanonicalRuntimeState: () => ({ state: "recovery-required", candidate: { version: "0.1.510" } }),
+    getLatestVersion: async () => latest,
+    spawnUpdate: (options) => launched.push(options),
+    now,
+    retryCooldownMs: 1_000,
+    restartCooldownMs: 0,
+    updateStatePath: statePath,
+    ...(releasePolicy ? { releasePolicy } : {}),
+    log: () => {},
+  });
+}
+
+test("a candidate that keeps failing recovery is superseded by a newer release once one exists", async () => {
+  const statePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "relay-supersede-")), "update-state.json");
+  const launched = [];
+  let clock = 10;
+  // Three failed recoveries of 0.1.510, each after its own backoff.
+  for (let attempt = 0; attempt < RECOVERY_SUPERSEDE_AFTER; attempt++) {
+    const result = await supersedingUpdater({ statePath, launched, now: () => clock, latest: "0.1.512" }).tick();
+    assert.equal(result.status, "recovering-runtime");
+    assert.equal(launched.at(-1).targetVersion, "0.1.510", "the candidate is retried until the threshold");
+    assert.equal(launched.at(-1).supersedeBrokenRecovery, false);
+    clock += 1_000 * 2 ** attempt + 1;
+  }
+  // The next attempt sees the channel has moved on and takes the newer release.
+  const superseded = await supersedingUpdater({ statePath, launched, now: () => clock, latest: "0.1.512" }).tick();
+  assert.equal(superseded.status, "recovering-runtime");
+  assert.equal(superseded.superseded, "0.1.510");
+  assert.equal(launched.at(-1).targetVersion, "0.1.512");
+  assert.equal(launched.at(-1).supersedeBrokenRecovery, true);
+  assert.equal(readMigrationFailure(statePath, { slot: "recoveryFailure" }).target, "canonical-recovery:0.1.512", "the new target starts its own failure count");
+  assert.equal(readMigrationFailure(statePath, { slot: "recoveryFailure" }).count, 1);
+});
+
+test("without a newer release the failing candidate keeps its own backoff", async () => {
+  const statePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "relay-supersede-none-")), "update-state.json");
+  const launched = [];
+  let clock = 10;
+  for (let attempt = 0; attempt < RECOVERY_SUPERSEDE_AFTER + 1; attempt++) {
+    const result = await supersedingUpdater({ statePath, launched, now: () => clock, latest: "0.1.510" }).tick();
+    assert.equal(result.status, "recovering-runtime");
+    assert.equal(launched.at(-1).targetVersion, "0.1.510");
+    assert.equal(launched.at(-1).supersedeBrokenRecovery, false);
+    clock += 1_000 * 2 ** attempt + 1;
+  }
+  assert.equal(readMigrationFailure(statePath, { slot: "recoveryFailure" }).count, RECOVERY_SUPERSEDE_AFTER + 1);
 });

@@ -501,15 +501,39 @@ async function cmdRepairRuntime(flags = {}) {
     bin: runtimeBin,
     node: runtimeNode,
   };
+  // When the update worker runs this command, the only trace it keeps of a
+  // failure is this process's stderr. Every refusal below therefore names the
+  // step, the reason, and the underlying detail in the thrown message.
+  const describe = (label, result) => {
+    const parts = [];
+    const seen = new Set();
+    for (const [name, value] of Object.entries(result || {})) {
+      if (!value || typeof value !== "object" || value.ok !== false) continue;
+      const text = `${value.reason || "failed"}${value.detail ? ` [${String(value.detail).replace(/\s+/g, " ").slice(0, 400)}]` : ""}`;
+      // One failed step is often reported under several surface names.
+      if (seen.has(text)) continue;
+      seen.add(text);
+      parts.push(`${name}=${text}`);
+    }
+    return `${label}${parts.length ? `: ${parts.join("; ")}` : ""}`;
+  };
   const registrations = repairExistingAgentRegistrations(target);
   if (!registrations.ok) {
-    throw new Error(`Could not repair Relay agent registrations (${registrations.reason || "migration failed"}).`);
+    throw new Error(`Could not repair Relay agent registrations (${registrations.reason || "migration failed"}${registrations.detail ? `: ${registrations.detail}` : ""}). ${describe("surfaces", registrations)}`);
   }
-  const skillInstall = await installAgentSkills();
-  printSkillInstallResult(skillInstall);
+  // A skill copy that cannot be written must not stop the runtime itself from
+  // activating; the daemon retries skills, a half-activated runtime is worse.
+  let skillInstall;
+  try {
+    skillInstall = await installAgentSkills();
+    printSkillInstallResult(skillInstall);
+  } catch (error) {
+    skillInstall = { ok: false, reason: "skill-install-threw", detail: error?.message || String(error) };
+    console.error(`[relay] agent skills were not refreshed (${skillInstall.detail}); continuing with the runtime repair`);
+  }
   const repaired = repairDesktopSurfaces({ reload, ...target, claim: Boolean(flags.claim) || Boolean(targetBin) });
   if (!repaired.ok) {
-    throw new Error("Could not repair Relay runtime services.");
+    throw new Error(`Could not repair Relay runtime services. ${describe("surfaces", repaired)}`);
   }
   const pointer = reconcileCanonicalRuntimeNode({ node: runtimeNode });
   if (!pointer.ok) {

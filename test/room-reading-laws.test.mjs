@@ -284,10 +284,9 @@ test("only two-document Relays carry provider actions, and the newest Relay stay
   assert.match(html, /\.th-host-actions\.persistent/);
 });
 
-test("provider footer promises task or session choice", () => {
+test("provider footer promises chat choice", () => {
   const footer = html.slice(html.indexOf("function hostActionRowHtml"), html.indexOf("function pullSentenceHtml"));
-  assert.match(footer, /Choose a task or start a new one/);
-  assert.match(footer, /Choose a session or start a new one/);
+  assert.match(footer, /Choose a chat or start a new one/);
   assert.doesNotMatch(footer, /materializedCodex|materializedClaude|data-continues/);
 });
 

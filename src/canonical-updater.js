@@ -469,12 +469,34 @@ function requestDirectory(homeDir, platform) {
   return api.join(canonicalRuntimeLayout({ homeDir, platform }).root, "update-requests");
 }
 
+// Windows antivirus and indexing hold a handle on a freshly written file for a
+// moment, and rename fails with EPERM/EBUSY for exactly that moment. Two update
+// workers on Dino's machine (2026-09-13) died on this rename of their own request
+// file. Retry briefly; the hold clears by itself.
+const RENAME_RETRY_CODES = new Set(["EPERM", "EBUSY", "EACCES"]);
+export function renameWithRetry(fsImpl, from, to, {
+  totalMs = 3000,
+  sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms),
+} = {}) {
+  const started = Date.now();
+  let wait = 50;
+  for (;;) {
+    try { fsImpl.renameSync(from, to); return; }
+    catch (error) {
+      if (!RENAME_RETRY_CODES.has(error?.code) || Date.now() - started + wait > totalMs) throw error;
+      sleep(wait);
+      wait = Math.min(500, wait * 2);
+    }
+  }
+}
+
 function atomicWriteText(destination, value, { fsImpl = fs, platform = process.platform } = {}) {
   const api = platform === "win32" ? path.win32 : path.posix;
   fsImpl.mkdirSync(api.dirname(destination), { recursive: true, mode: 0o700 });
   const temporary = `${destination}.tmp-${process.pid}-${Math.random().toString(16).slice(2)}`;
   fsImpl.writeFileSync(temporary, value, { mode: 0o600 });
-  fsImpl.renameSync(temporary, destination);
+  try { renameWithRetry(fsImpl, temporary, destination); }
+  catch (error) { try { fsImpl.unlinkSync(temporary); } catch {} throw error; }
 }
 
 function atomicWriteRequest(requestPath, value, options = {}) {
@@ -651,6 +673,10 @@ export function spawnCanonicalUpdate({
   requestId = randomUUID(),
   workerId = randomUUID(),
   waitForAdmission = waitForUpdateRequestAdmission,
+  // The daemon sets this when a candidate has failed recovery repeatedly and a
+  // newer release should take over. The worker's transaction then continues
+  // past a recovery that fails again instead of stopping at it.
+  supersedeBrokenRecovery = false,
 } = {}) {
   const workerNode = resolveUpdateWorkerNode(node, { platform, homeDir, existsSync, run });
   if (!workerNode) {
@@ -671,6 +697,7 @@ export function spawnCanonicalUpdate({
   const payload = encodePayload({
     version, runningPackageRoot, runningVersion, node: workerNode, homeDir, platform,
     requestId, workerId, requestPath,
+    ...(supersedeBrokenRecovery ? { supersedeBrokenRecovery: true } : {}),
   });
   let launchedPid = null;
   let linuxWorkerUnit = null;

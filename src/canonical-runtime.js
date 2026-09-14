@@ -449,7 +449,9 @@ export async function recoverCanonicalRuntime({
         failure: { phase: "recovery", reason: rollback?.reason || "rollback-failed", detail: rollback?.detail || "" },
         updatedAt: now(),
       }, { ...io, platform });
-      return { ok: false, phase: "recovery", reason: rollback?.reason || "rollback-failed", state };
+      // The detail reaches update.log through the worker; the journal alone
+      // told nobody which repair step had refused.
+      return { ok: false, phase: "recovery", reason: rollback?.reason || "rollback-failed", detail: rollback?.detail || "", state };
     }
     atomicWritePointer(layout.pointerPath, target?.active === true ? target : {
       schema: CANONICAL_RUNTIME_SCHEMA,

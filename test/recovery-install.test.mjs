@@ -6,7 +6,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { installRecovery, uninstallRecovery, windowsRecoveryTaskXml, LABEL, TASK } from "../bootstrap/recovery-install.cjs";
+import { installRecovery, uninstallRecovery, windowsRecoveryTaskXml, renameWithRetry, LABEL, TASK } from "../bootstrap/recovery-install.cjs";
 
 test("Mac watchdog update keeps its registration and host while publishing a complete new bundle", t => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-watchdog-safe-"));
@@ -218,4 +218,36 @@ test("Linux recovery refuses the wrong systemd fragment and preserves files when
   assert.equal(removed.ok, false);
   assert.equal(removed.detail, "Failed to connect to bus");
   assert.equal(fs.existsSync(path.join(homeDir, ".config", "systemd", "user", `${LABEL}.timer`)), true);
+});
+
+test("a rename refused by a transient Windows handle is retried, other refusals are not", () => {
+  const attempts = [];
+  const flaky = (failures, code) => ({ renameSync(from, to) {
+    attempts.push([from, to]);
+    if (attempts.length <= failures) { const error = new Error(code); error.code = code; throw error; }
+  } });
+  attempts.length = 0;
+  renameWithRetry("a", "b", { fsImpl: flaky(2, "EPERM"), sleep: () => {} });
+  assert.equal(attempts.length, 3, "two EPERM refusals then success");
+  attempts.length = 0;
+  assert.throws(() => renameWithRetry("a", "b", { fsImpl: flaky(1, "ENOENT"), sleep: () => {} }), /ENOENT/);
+  assert.equal(attempts.length, 1, "a missing source is not retried");
+  attempts.length = 0;
+  assert.throws(() => renameWithRetry("a", "b", { fsImpl: flaky(100, "EBUSY"), totalMs: 200, sleep: () => {} }), /EBUSY/);
+  assert.ok(attempts.length > 1 && attempts.length < 100, "a hold that never clears gives up within the budget");
+});
+
+test("a recovery bundle that fails to install says which step refused and why", t => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-recovery-detail-"));
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  const result = installRecovery({ homeDir, platform: "darwin", preserveNode: () => process.execPath,
+    packageRoot: fileURLToPath(new URL("..", import.meta.url)),
+    runCommand: (command, args) => args.includes("--self-check") ? { status: 1, stderr: "Error: recovery-health-unavailable" } : { status: 0 } });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "recovery-install-failed");
+  assert.match(result.detail, /^recovery-bundle-verification-failed: exit 1: Error: recovery-health-unavailable/);
+  assert.ok(!fs.readdirSync(path.join(homeDir, ".relay", "recovery", "versions")).some(name => name.startsWith(".pending-")), "the pending bundle is removed");
+  const preserved = installRecovery({ homeDir, platform: "darwin", preserveNode: () => { throw new Error("EACCES: node copy refused"); },
+    packageRoot: fileURLToPath(new URL("..", import.meta.url)), runCommand: () => ({ status: 0 }) });
+  assert.match(preserved.detail, /^recovery-node-preservation-failed: EACCES/);
 });

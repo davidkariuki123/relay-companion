@@ -9,6 +9,23 @@ const defaultRun = (cmd, args, options = {}) => spawnSync(cmd, args, { encoding:
 const snapshotPath = homeDir => path.join(homeDir, ".relay", "runtime", "mac-registrations.json");
 const ok = r => Boolean(r && !r.error && r.status === 0);
 
+// Windows antivirus and indexing hold a handle on a file for a moment after it
+// is written, and rename fails with EPERM/EBUSY for exactly that moment. Retry
+// briefly instead of failing an entire repair on a hold that clears by itself.
+const RENAME_RETRY_CODES = new Set(["EPERM", "EBUSY", "EACCES"]);
+function renameWithRetry(fsImpl, from, to, { totalMs = 3000, sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) } = {}) {
+  const started = Date.now();
+  let wait = 50;
+  for (;;) {
+    try { fsImpl.renameSync(from, to); return; }
+    catch (error) {
+      if (!RENAME_RETRY_CODES.has(error?.code) || Date.now() - started + wait > totalMs) throw error;
+      sleep(wait);
+      wait = Math.min(500, wait * 2);
+    }
+  }
+}
+
 function atomicFile(file, bytes, fsImpl = fs) {
   fsImpl.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const temporary = `${file}.${crypto.randomUUID()}.tmp`;
@@ -16,7 +33,7 @@ function atomicFile(file, bytes, fsImpl = fs) {
   try {
     fd = fsImpl.openSync(temporary, "wx", 0o600);
     fsImpl.writeFileSync(fd, bytes); fsImpl.fsyncSync(fd); fsImpl.closeSync(fd); fd = undefined;
-    fsImpl.renameSync(temporary, file);
+    renameWithRetry(fsImpl, temporary, file);
     // macOS can flush a directory after rename. Keep this conditional for test
     // hosts (Windows cannot open directory handles through this API).
     if (process.platform !== "win32") {
@@ -162,4 +179,4 @@ async function restoreSnapshot({ homeDir = os.homedir(), fsImpl = fs, run = defa
   }
 }
 
-module.exports = { atomicFile, snapshotPath, readSnapshot, clearSnapshot, prepareSnapshot, restoreSnapshot };
+module.exports = { atomicFile, renameWithRetry, snapshotPath, readSnapshot, clearSnapshot, prepareSnapshot, restoreSnapshot };

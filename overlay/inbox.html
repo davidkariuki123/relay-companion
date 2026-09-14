@@ -14091,7 +14091,7 @@
     const selected = sessionPickerState
       && String(sessionPickerState.id) === id
       && sessionPickerState.provider === host;
-    const context = codex ? "Choose a task or start a new one" : "Choose a session or start a new one";
+    const context = "Choose a chat or start a new one";
     return `<button class="th-host-action${selected ? " pressed" : ""}" type="button" data-host-open="${esc(id)}" data-host="${codex ? "codex" : "claude"}" data-source="${source}" aria-expanded="${selected ? "true" : "false"}">
           <img class="th-host-logo" src="${codex ? "codexMark.svg" : "claudeCodeMark.svg"}" alt="" />
           <span class="th-host-copy"><span class="th-host-label">Open in ${codex ? "Codex" : "Claude Code"}</span><span class="th-host-context">${esc(context)}</span></span>
