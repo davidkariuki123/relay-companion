@@ -114,6 +114,34 @@ continue without making them reconstruct the sender's work. Compose the complete
 `forAgent` first, then write `forHuman`. A short human message must not mean a
 thin agent handoff. Apply these rules to drafts and previews as well as sends.
 
+### Classify the content and the ask
+
+Use two independent label arrays on Relays, shared links, replies and posts:
+
+- `nature`: event, decision, plan, finding, opinion, question. Include every
+  clearly applicable kind of content; a question stays content even if it is
+  quoted or rhetorical.
+- `asks`: answer (supply information), feedback (review or give judgment),
+  handover (continue unfinished work), action (another concrete act). Choose
+  the specific contribution requested; do not add action to every other ask.
+
+A plan asking for review can have nature ["plan", "question"] and asks
+["feedback"]. An informational question expecting a reply has nature
+["question"] and asks ["answer"]. A report can have nature ["finding"] and
+asks []. Tag only what the sender actually communicates. Omit an unclassified
+lane; [] explicitly means no labels apply. Incorrect labels can hide a
+teaching hint before the person has tried it, so do not guess.
+
+Labels never authorize sending, acting or changing message kind.
+They are metadata, not text to add to the human message. Only event claims
+stand as bare facts; mixed event/finding/opinion content still needs attribution.
+When editing the words, refresh both lanes or leave them unclassified.
+
+Published scalar nature inputs remain accepted. Responses carry the full
+arrays in `classification` with version 1, alongside a legacy scalar `nature`
+for older clients. Prefer classification when present. A missing asks lane
+on an old message means unknown, not proof that nobody requested anything.
+
 ### Preserve the sender's intent and voice
 
 The human's informal instructions tell you what to communicate; they are not

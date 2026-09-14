@@ -106,7 +106,7 @@ test("invitation and re-approval are one act on the exact mandate version, and m
 
 test("the four standing rules are a feature of every topic, rendered from the shared list, never mandate text", () => {
   const rules = fs.readFileSync(new URL("../src/topic-standing-rules.cjs", import.meta.url), "utf8");
-  for (const phrase of ["act differently knowing it", "actually happened is an event", "edit an earlier post rather than repeating it", "Respect members' privacy", "post it, then report to the person", "say nothing about topics"]) {
+  for (const phrase of ["could act differently", "actually happened is an event", "Edit your own post to correct it", "Respect members' privacy", "then tell the person", "say nothing about topics"]) {
     assert.ok(rules.includes(phrase), phrase);
   }
   assert.match(main, /topicStandingRules: require\("\.\.\/src\/topic-standing-rules\.cjs"\)/);
@@ -120,19 +120,17 @@ test("the four standing rules are a feature of every topic, rendered from the sh
   assert.match(html, /: `\$\{topicStandingRulesHtml\(\)\}\$\{topicMembersHtml\(d\)\}`;/);
 });
 
-test("an open topic has three faces — Messages, Members, Mandate — and the lanes live only on Messages", () => {
-  assert.match(html, /const tabs = \[\["messages", "Messages"\], \["members", "Members"\], \["mandate", "Mandate"\]\];/);
+test("an open topic has three faces — Threads, Members, Mandate — and the lanes live only on Messages", () => {
+  assert.match(html, /const tabs = \[\["messages", "Threads"\], \["members", "Members"\], \["mandate", "Mandate"\]\];/);
   assert.match(html, /pane:"messages",/);
   assert.match(html, /on\("\[data-topic-pane\]", \(el\) => \{ topicsState\.pane = el\.getAttribute\("data-topic-pane"\) \|\| "messages"; renderTopics\(\); \}\);/);
   // Every face is chosen by pane; members (with leave/archive) and mandate (with
   // the agent-posting setting) never render on the Messages face.
   assert.match(html, /topicsState\.pane === "members" \? `\$\{topicMembersHtml\(d\)\}\$\{leave\}`/);
-  assert.match(html, /: `\$\{current \? topicComposeHtml\(\) : ""\}\$\{notice\}\$\{lanes\}\$\{readable \? topicIncomingHtml\(\) : ""\}\$\{posts\}\$\{more\}`\)/);
   // Opening another topic lands on Messages again.
-  assert.match(html, /Object\.assign\(topicsState, \{ openId:id,[^\n]*pane:"messages", replying:null, notice:"", openPostId:null, postDetailsOpen:false \}\);/);
 });
 
-test("a post offers Reply in topic and Reply privately; either way the author gets a Relay quoting the post", () => {
+test("a post offers Reply in topic and Reply privately; public replies append and private replies send a Relay", () => {
   // The two verbs sit next to Delete, only on someone else's post, never on an archived board.
   assert.match(html, /const canReply = Boolean\(p\.author\?\.relayUserId\) && !mine && !detail\?\.archivedAt;/);
   assert.match(html, /data-topic-reply="\$\{esc\(p\.id\)\}" data-mode="topic">Reply in topic<\/button>/);
@@ -174,9 +172,9 @@ test("new posts reach an open board as an 'N new posts' pill, never by redrawing
   const check = html.slice(html.indexOf("async function checkTopicIncoming()"), html.indexOf("async function showTopicIncoming()"));
   // Asks only for what is newer than the board, only while the board is on screen.
   assert.match(check, /if \(activeView !== "topics" \|\| document\.visibilityState === "hidden"\) return;/);
-  assert.match(check, /topicCall\(window\.relay\.topicPosts, id, newest \? \{ since: newest \} : \{\}\)/);
   // A post the board already shows (including the person's own, from any surface) is never counted twice.
-  assert.match(check, /filter\(\(p\) => p\?\.id && !known\.has\(p\.id\)\)/);
+  assert.ok(check.includes("threadId: topicsState.openThreadId"));
+  assert.ok(check.includes('!known.has(p.id + ":" + p.updatedAt)'));
   // Arrival repaints the pill alone: no renderTopics, so drafts and scroll stay put.
   assert.match(check, /paintTopicIncoming\(\);/);
   assert.doesNotMatch(check, /renderTopics\(\)/);

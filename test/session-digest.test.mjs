@@ -67,9 +67,10 @@ test("taking the board returns the records and clears it; narrower reads clear o
   board.commitTopicList();
   digest = board.refresh().digest;
   assert.deepEqual(digest.topicChanges.map((change) => [change.topicId, change.change]), [["tpc_dev", "new posts"]]);
-  // Reading the board clears its posts.
-  board.commitTopic("tpc_dev");
-  assert.deepEqual(board.refresh().digest.topicChanges, []);
+  // Partial retrieval never acknowledges the whole board.
+  board.commitTopic("tpc_dev", [{ id:"tpst_one", updatedAt:"2026-09-11T09:05:00.000Z" }]);
+  assert.equal(board.refresh().digest.topicChanges.length, 1);
+  assert.deepEqual(board.retrievedTopicPosts(), [{ topicId:"tpc_dev", postId:"tpst_one", updatedAt:"2026-09-11T09:05:00.000Z" }]);
   // Taking everything returns the rest and leaves the board quiet.
   const taken = board.take();
   assert.deepEqual(taken.relays.map((item) => item.relayId), ["relay_2", "relay_3"]);
@@ -165,4 +166,23 @@ test("peer-controlled strings remain in read-free tool results, never the tool d
   assert.equal(taken.relays[1].title, attack);
   assert.equal(taken.topics[0].name, attack);
   assert.equal(fs.readFileSync(context.snapshotPath(home, scope), "utf8"), before);
+});
+
+test('quiet details do not generate a notice; corrections do, and fetched revisions remain separate', () => {
+  const home=tempHome(), scope='quiet_scope';
+  recordAgentTopicIndex(home,scope,{topics:[topic('tpc_dev',{postCount:1,attentionPostCount:1,latestPostAt:'2026-09-15T01:00:00.000Z'})]});
+  const board=createSessionDigest({homeDir:home,accountScope:scope,sessionKey:'quiet'});
+  recordAgentTopicIndex(home,scope,{topics:[topic('tpc_dev',{postCount:2,attentionPostCount:1,latestPostAt:'2026-09-15T01:00:00.000Z'})]});
+  assert.deepEqual(board.refresh().digest.topicChanges,[]);
+  assert.match(board.description(),/relay_topic_context/,'quiet still teaches context retrieval');
+  board.take(); assert.deepEqual(board.retrievedTopicPosts(),[]);
+  board.commitTopic('tpc_dev',[{id:'tpst_one',updatedAt:'2026-09-15T01:00:00.000Z'}]);
+  recordAgentTopicIndex(home,scope,{topics:[topic('tpc_dev',{postCount:2,attentionPostCount:1,latestPostAt:'2026-09-15T02:00:00.000Z'})]});
+  assert.equal(board.refresh().digest.topicChanges[0].change,'posts changed');
+  assert.equal(board.retrievedTopicPosts()[0].updatedAt,'2026-09-15T01:00:00.000Z');
+  board.take(); assert.equal(board.retrievedTopicPosts()[0].updatedAt,'2026-09-15T01:00:00.000Z');
+  board.commitTopic('tpc_dev',[{id:'tpst_one',updatedAt:'2026-09-15T02:00:00.000Z'}]);
+  assert.equal(board.retrievedTopicPosts().length,1);
+  recordAgentTopicIndex(home,scope,{topics:[]});
+  assert.deepEqual(board.retrievedTopicPosts(),[],'removed subscriptions reveal no retained retrieval records');
 });

@@ -16,7 +16,7 @@ try {
   await page.addInitScript(() => {
     const topicId = 'tpc_fixture';
     const at = (minutes) => new Date(Date.UTC(2026, 8, 14, 10, minutes)).toISOString().replace('Z', '+00:00');
-    const post = (n, extra = {}) => ({ id:`tpst_${n}`, topicId, author:{relayUserId:'usr_other',name:'David Kariuki'}, origin:'agent', nature:'finding',
+    const post = (n, extra = {}) => ({ id:`tpst_${n}`, threadId:"tpth_fixture", topicId, author:{relayUserId:'usr_other',name:'David Kariuki'}, origin:'agent', nature:'finding',
       title:`Post ${n}`, forHuman:`Human words for post ${n}. `.repeat(8), forAgent:`Agent words ${n}`, createdAt:at(n), updatedAt:at(n), editedAt:null, ...extra });
     window.fixturePosts = Array.from({ length:12 }, (_, i) => post(i + 1)).reverse();
     window.fixtureMakePost = post;
@@ -39,9 +39,10 @@ try {
       topicsList:async()=>({ok:true,result:[summary()]}),
       topicGet:async()=>({ok:true,result:{...summary(),members:[]}}),
       topicSeen:async()=>{ window.fixtureSeen++; return {ok:true,result:summary()}; },
+      topicThreads:async()=>({ok:true,result:{topic:summary(),threads:[{id:"tpth_fixture",title:"Windows readiness",summary:"David found a blocker; a fix awaits release.",summaryAuthor:{name:"David"},summaryOrigin:"agent",status:"open",postCount:window.fixturePosts.length,contributorCount:2,version:1,attentionAt:at(12)}]}}),
       topicPosts:async(_id, input = {})=>{
         const since = input.since ? Date.parse(input.since) : null;
-        const posts = window.fixturePosts.filter((p) => since === null || Date.parse(p.createdAt) > since);
+        const posts = window.fixturePosts.filter((p) => since === null || Date.parse(p.updatedAt) > since);
         return {ok:true,result:{topic:summary(),posts:structuredClone(posts.slice(0, 50)),nextCursor:posts.length > 50 ? 'more' : null}};
       },
     };
@@ -54,6 +55,7 @@ try {
   await page.goto(new URL('../overlay/inbox.html',import.meta.url).href);
   await page.locator('.tab[data-view="topics"]').click();
   await page.locator('[data-topic-open="tpc_fixture"]').click();
+  await page.locator('[data-thread-open="tpth_fixture"]').click();
   await page.locator('[data-topic-post="tpst_12"]').waitFor();
   const board = () => page.evaluate(() => ({
     posts:[...document.querySelectorAll('[data-topic-post]')].map((el) => el.getAttribute('data-topic-post')),

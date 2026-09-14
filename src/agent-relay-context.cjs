@@ -182,6 +182,7 @@ function cleanTopic(topic) {
     mandateVersion: Number(topic?.mandateVersion) || 1,
     mandate: normalizeMetadata(topic?.mandate, TOPIC_MANDATE_MAX),
     postCount: Math.max(0, Number(topic?.postCount) || 0),
+    attentionPostCount: Math.max(0, Number(topic?.attentionPostCount ?? topic?.postCount) || 0),
     latestPostAt: normalizeMetadata(topic?.latestPostAt, 50),
   };
 }

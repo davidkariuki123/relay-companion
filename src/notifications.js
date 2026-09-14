@@ -610,6 +610,7 @@ export function stagePlainRelayItem(
     // The sender-declared nature (event, decision, plan, finding, opinion,
     // question) travels with the packet so the reader can label the message.
     nature: item.nature || existing.nature || null,
+    classification: item.classification ?? (item.editedAt && item.editedAt !== existing.editedAt ? null : existing.classification) ?? null,
     todoVersion: Number.isInteger(item.todoVersion) ? item.todoVersion : (existing.todoVersion || null),
     // A poll already in flight must not overwrite a newer removal or Undo.
     todoRemoved: Number(item.todoVisibilityVersion ?? -1) >= Number(existing.todoVisibilityVersion ?? -1) ? item.todoRemoved === true : existing.todoRemoved === true,

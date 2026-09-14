@@ -14,6 +14,7 @@ const skillGuide = await readFile(new URL("../skill/relay/SKILL.md", import.meta
 const SEND_GATE = "Only send a Relay when the user asks you to send (or relay) something to someone.";
 
 const EXPECTED_TOOLS = [
+  "relay_topic_context", "relay_topic_threads", "relay_topic_edit",
   "relay_ai_sessions",
   "relay_ai_session",
   "relay_agent_progress",
@@ -35,6 +36,7 @@ const EXPECTED_TOOLS = [
   "relay_share_link",
   "relay_contacts_search",
   "relay_groups_list",
+  "relay_team_prepare", "relay_group_transfer_admin",
   "relay_group_create",
   "relay_group_update",
   "relay_group_delete",
@@ -140,12 +142,13 @@ test("startup guidance and owner schemas preserve the complete product ontology"
 
 test("no model-facing tool resurrects removed content fields or visible topic names", () => {
   const catalog = JSON.stringify(TOOLS);
-  for (const removed of ["bodyMarkdown", "userInstructions", "briefingMarkdown", "threadTitle"]) {
+  for (const removed of ["bodyMarkdown", "userInstructions", "briefingMarkdown"]) {
     assert.doesNotMatch(catalog, new RegExp(removed, "i"), `${removed} is absent from every model contract`);
   }
 
   for (const name of ["relay_inbox_list", "relay_sent_list", "relay_thread_fetch", "relay_chats_list", "relay_chat_fetch", "relay_chat_send"]) {
     const contract = JSON.stringify(byName.get(name));
+    assert.doesNotMatch(contract, /threadTitle/i, "conversation metadata stays internal");
     if (/thread/i.test(contract)) {
       assert.match(contract, /(opaque|internal|unnamed)/i, `${name} teaches that thread metadata is internal`);
     }

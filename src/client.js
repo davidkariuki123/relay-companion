@@ -606,9 +606,29 @@ export class RelayClient {
     return this.#req("DELETE", `/v1/topics/${encodeURIComponent(topicId)}/members/${encodeURIComponent(userId)}`);
   }
 
-  async topicPosts(topicId, { since, cursor, limit } = {}) {
+  async topicContext(query, { topicId, limit } = {}) {
+    const params = new URLSearchParams({ query: String(query || "") });
+    if (topicId) params.set("topicId", topicId);
+    if (limit) params.set("limit", String(limit));
+    return this.#req("GET", `/v1/topics/context?${params}`);
+  }
+
+  async topicThreads(topicId, { query, cursor, limit, threadId } = {}) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries({ query, cursor, limit, threadId })) if (value) params.set(key, String(value));
+    return this.#req("GET", `/v1/topics/${encodeURIComponent(topicId)}/threads?${params}`);
+  }
+
+  async moveTopicPosts(topicId, threadId, payload) {
+    return this.#req("POST", `/v1/topics/${encodeURIComponent(topicId)}/threads/${encodeURIComponent(threadId)}/move`, payload);
+  }
+
+  async topicPosts(topicId, { since, cursor, limit, threadId, postIds, updatesOnly } = {}) {
     const query = new URLSearchParams();
     if (since) query.set("since", String(since));
+    if (threadId) query.set("threadId", String(threadId));
+    if (Array.isArray(postIds)) query.set("postIds", postIds.join(","));
+    if (updatesOnly) query.set("updatesOnly", "true");
     if (cursor) query.set("cursor", String(cursor));
     if (Number.isInteger(limit)) query.set("limit", String(limit));
     const suffix = query.toString();
@@ -1020,6 +1040,14 @@ export class RelayClient {
 
   createGroup({ name }) {
     return this.#req("POST", "/v1/contact-groups", { name });
+  }
+
+  prepareTeam(input) {
+    return this.#req("POST", "/v1/contact-groups/prepare-team", input);
+  }
+
+  transferGroupAdmin(groupId, input) {
+    return this.#req("POST", `/v1/contact-groups/${encodeURIComponent(groupId)}/admin`, input);
   }
 
   renameGroup(groupId, { name }) {

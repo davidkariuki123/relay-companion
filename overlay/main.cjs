@@ -9287,9 +9287,18 @@ ipcMain.handle("relay:topicMembership", (_e, id, input) => topicCall((c) => c.up
 ipcMain.handle("relay:topicSeen", (_e, id) => topicCall((c) => c.markTopicSeen(id)));
 ipcMain.handle("relay:topicMemberRole", (_e, id, userId, role) => topicCall((c) => c.setTopicMemberRole(id, userId, role === "admin" ? "admin" : "member")));
 ipcMain.handle("relay:topicMemberRemove", (_e, id, userId) => topicCall((c) => c.removeTopicMember(id, userId)));
+ipcMain.handle("relay:topicThreads", (_e, id, input = {}) => topicCall(c => c.topicThreads(id, {
+  query: String(input.query || ""), cursor: String(input.cursor || ""), threadId: String(input.threadId || ""), limit: 30,
+})));
+ipcMain.handle("relay:topicMovePosts", (_e, id, threadId, input = {}) => topicCall(c => c.moveTopicPosts(id, threadId, {
+  postIds: Array.isArray(input.postIds) ? input.postIds.map(String) : [], targetThreadId: input.targetThreadId,
+  title: input.title, expectedVersion: input.expectedVersion,
+})));
 ipcMain.handle("relay:topicPosts", (_e, id, input) => topicCall((c) => c.topicPosts(id, {
   ...(input?.cursor ? { cursor: String(input.cursor) } : {}),
   ...(input?.since ? { since: String(input.since) } : {}),
+  ...(input?.threadId ? { threadId: String(input.threadId) } : {}),
+  ...(input?.updatesOnly === true ? { updatesOnly:true } : {}),
   ...(Number.isInteger(input?.limit) ? { limit: input.limit } : {}),
 })));
 // A person's own post from the pill: the same text serves both lanes, so what
@@ -9299,6 +9308,10 @@ ipcMain.handle("relay:topicPostCreate", (_e, id, input) => topicCall((c) => c.cr
   title: String(input?.title || ""),
   forHuman: String(input?.forHuman || ""),
   forAgent: String(input?.forAgent || input?.forHuman || ""),
+  ...(input?.threadId ? { threadId: String(input.threadId) } : {}),
+  ...(input?.inReplyToPostId ? { inReplyToPostId: String(input.inReplyToPostId) } : {}),
+  ...(input?.newThread === true ? { newThread: true } : {}),
+  importance: input?.importance === "detail" ? "detail" : "update",
   idempotencyKey: String(input?.idempotencyKey || `pill-topic-post:${randomUUID()}`),
 })));
 ipcMain.handle("relay:topicPostDelete", (_e, id, postId) => topicCall((c) => c.deleteTopicPost(id, postId)));

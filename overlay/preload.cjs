@@ -52,6 +52,8 @@ contextBridge.exposeInMainWorld("relay", {
   topicSeen: (id) => ipcRenderer.invoke("relay:topicSeen", String(id || "")),
   topicMemberRole: (id, userId, role) => ipcRenderer.invoke("relay:topicMemberRole", String(id || ""), String(userId || ""), String(role || "")),
   topicMemberRemove: (id, userId) => ipcRenderer.invoke("relay:topicMemberRemove", String(id || ""), String(userId || "")),
+  topicThreads: (id, input = {}) => ipcRenderer.invoke("relay:topicThreads", String(id || ""), input),
+  topicMovePosts: (id, threadId, input) => ipcRenderer.invoke("relay:topicMovePosts", String(id || ""), String(threadId || ""), input),
   topicPosts: (id, input = {}) => ipcRenderer.invoke("relay:topicPosts", String(id || ""), input || {}),
   topicPostCreate: (id, input = {}) => ipcRenderer.invoke("relay:topicPostCreate", String(id || ""), input || {}),
   topicPostReply: (id, postId, input = {}) => ipcRenderer.invoke("relay:topicPostReply", String(id || ""), String(postId || ""), input || {}),

@@ -3076,6 +3076,14 @@
   .request-inbox-more { position:absolute; top:8px; right:7px; width:24px; height:24px; border:0; border-radius:var(--r-1); background:transparent; color:var(--muted-2); font:18px var(--sans); cursor:pointer; }
   .request-inbox-more:hover, .request-inbox-more:focus-visible { color:var(--ink); background:var(--wash-2); }
 
+.tp-thread-search { display:flex; gap:8px; padding:12px 16px; box-sizing:border-box; width:100%; }
+.tp-thread-search input { min-width:0; width:0; flex:1 1 0; }
+.tp-thread-search button { flex:0 0 auto; margin:0; }
+.tp-thread { display:flex; flex-direction:column; gap:9px; width:100%; text-align:left; border:0; border-bottom:1px solid var(--hair); background:transparent; color:var(--ink); padding:16px; box-sizing:border-box; cursor:pointer; font:inherit; }
+.tp-thread:hover strong { text-decoration:underline; }
+.tp-thread strong { font:500 17px/1.35 var(--serif); }
+.tp-thread-summary { white-space:pre-line; font:12.5px/1.55 var(--sans); color:var(--ink-2); display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:4; overflow:hidden; }
+.tp-thread-meta { font:10.5px/1.3 var(--sans); color:var(--muted); }
 </style>
 <link rel="stylesheet" href="./relay-anyone-tip.css" />
 </head>
@@ -7166,6 +7174,7 @@
   const TOPIC_NATURE_LABEL = { event:"Event", decision:"Decision", plan:"Plan", finding:"Finding", opinion:"Opinion", question:"Question" };
   const topicsState = {
     loaded:false, loading:false, error:"", topics:[], generation:0,
+    threads:[], threadsCursor:null, threadQuery:"", openThreadId:null, threadDetail:null, threadGeneration:0, movePostId:null,
     openId:null, detail:null, posts:[], nextCursor:null, postsLoading:false, postsError:"",
     // Posts newer than the open board, held behind the "N new posts" pill until
     // the person asks for them. incomingGap: more arrived than one page holds.
@@ -7234,10 +7243,10 @@
     topicsState.error = "";
     setBadge(topicsBadgeEl, topicsAttentionCount());
     if (topicsState.openId && !topicById(topicsState.openId)) { topicsState.openId = null; topicsState.detail = null; }
-    if (activeView === "topics" && (changed || !quiet)) renderTopics();
+    if (activeView === "topics" && (!quiet || (changed && !topicsState.openId && !topicsState.creating))) renderTopics();
   }
   async function openTopic(id) {
-    Object.assign(topicsState, { openId:id, detail:null, posts:[], nextCursor:null, incoming:[], incomingGap:false, postsError:"", composing:false, editingMandate:false, armed:null, inviteQuery:"", pane:"messages", replying:null, notice:"", openPostId:null, postDetailsOpen:false });
+    Object.assign(topicsState, { threads:[], threadQuery:"", openThreadId:null, threadDetail:null, movePostId:null, openId:id, detail:null, posts:[], nextCursor:null, incoming:[], incomingGap:false, postsError:"", composing:false, editingMandate:false, armed:null, inviteQuery:"", pane:"messages", replying:null, notice:"", openPostId:null, postDetailsOpen:false });
     renderTopics();
     const { result, error } = await topicCall(window.relay.topicGet, id);
     if (topicsState.openId !== id) return;
@@ -7247,20 +7256,103 @@
     renderTopics();
     const m = result.membership || {};
     if (m.state !== "active" || m.mandateCurrent !== true) return;
-    await loadTopicPosts();
+    await loadTopicThreads();
     if (Number(result.newPostCount || 0) > 0) {
       const seen = await topicCall(window.relay.topicSeen, id);
       if (seen.result) mergeTopicSummary(seen.result);
     }
   }
-  async function loadTopicPosts({ append = false } = {}) {
+  async function loadTopicThreads({ append = false } = {}) {
+    const id = topicsState.openId, generation = ++topicsState.threadGeneration;
+    if (!id) return;
+    topicsState.postsLoading = true;
+    renderTopics();
+    const { result, error } = await topicCall(window.relay.topicThreads, id, {
+      query: topicsState.threadQuery, ...(append ? { cursor: topicsState.threadsCursor } : {}),
+    });
+    if (topicsState.openId !== id || generation !== topicsState.threadGeneration) return;
+    topicsState.postsLoading = false;
+    if (error) { topicsState.postsError = error; renderTopics(); return; }
+    topicsState.threads = append ? [...topicsState.threads, ...(result?.threads || [])] : result?.threads || [];
+    topicsState.threadsCursor = result?.nextCursor || null;
+    topicsState.incoming = [];
+    topicsState.incomingGap = false;
+    if (result?.topic) mergeTopicSummary(result.topic);
+    renderTopics();
+  }
+  async function openTopicThread(threadId) {
     const id = topicsState.openId;
+    Object.assign(topicsState, { openThreadId:threadId, threadDetail:topicsState.threads.find(t => t.id === threadId),
+      posts:[], nextCursor:null, openPostId:null, composing:false, replying:null, movePostId:null, incoming:[], incomingGap:false });
+    renderTopics();
+    const { result, error } = await topicCall(window.relay.topicThreads, id, { threadId });
+    if (topicsState.openId !== id || topicsState.openThreadId !== threadId) return;
+    if (error) { topicsState.postsError = error; renderTopics(); return; }
+    topicsState.threadDetail = result?.threads?.[0] || null;
+    await loadTopicPosts();
+    if (scrollEl) scrollEl.scrollTop = 0;
+  }
+  async function checkThreadIncoming() {
+    const id = topicsState.openId, m = topicsState.detail?.membership;
+    if (activeView !== 'topics' || !id || m?.state !== 'active' || !m.mandateCurrent || topicsState.postsLoading || topicIncomingInFlight) return;
+    topicIncomingInFlight = true;
+    const { result } = await topicCall(window.relay.topicThreads, id, { query:topicsState.threadQuery });
+    topicIncomingInFlight = false;
+    if (topicsState.openId !== id || topicsState.openThreadId) return;
+    const existing = new Map(topicsState.threads.map(t => [t.id, t.attentionAt]));
+    topicsState.incoming = (result?.threads || []).filter(t => existing.get(t.id) !== t.attentionAt)
+      .map(t => ({ id:t.id, forHuman:t.summary, importance:'update' }));
+    paintTopicIncoming();
+  }
+  function topicThreadHeaderHtml() {
+    const t = topicsState.threadDetail;
+    return `<button class="gd-back" type="button" data-thread-back>‹ All threads</button>${t ? `<div class="tp-banner"><strong>${esc(t.title)}</strong><div class="tp-note">${t.status === 'resolved' ? 'Resolved' : 'Open'} · ${Number(t.postCount)} posts · ${Number(t.contributorCount)} contributors</div><div class="mandate">${esc(t.summary)}</div><div class="tp-note">${esc(t.summaryAuthor?.name || 'Former member')}${t.summaryOrigin === 'agent' ? "’s agent" : ''} · ${esc(timeAgo(t.attentionAt))}</div>${t.relatedThreadId ? `<button class="gd-action" data-thread-open="${esc(t.relatedThreadId)}">Earlier related thread</button>` : ''}</div>` : ''}`;
+  }
+  function topicThreadsHtml() {
+    const rows = topicsState.threads.filter(t => topicsState.lane === 'agent' || t.summary.trim());
+    return `<form class="tp-thread-search" data-thread-search><input class="cv-input" name="query" aria-label="Search threads" placeholder="Search this topic…" value="${esc(topicsState.threadQuery)}"/><button class="gd-action" type="submit">Search</button></form>${rows.map(t => `<button type="button" class="tp-thread" data-thread-open="${esc(t.id)}"><span class="tp-thread-meta">${t.status === 'resolved' ? 'Resolved' : 'Open'} · ${Number(t.postCount)} posts · ${Number(t.contributorCount)} contributors${t.newPostCount ? ' · updated' : ''}</span><strong>${esc(t.title)}</strong><span class="tp-thread-summary">${esc(t.summary || 'Agent context available inside.')}</span><span class="tp-thread-meta">${esc(t.summaryAuthor?.name || 'Former member')}${t.summaryOrigin === 'agent' ? "’s agent" : ''} · ${esc(timeAgo(t.attentionAt))}</span></button>`).join('') || `<div class="tp-loading">${topicsState.postsLoading ? 'Loading threads…' : topicsState.threadQuery ? 'No matching threads.' : 'No threads in this lane yet.'}</div>`}${topicsState.threadsCursor ? '<button class="tp-more" data-thread-more>Older threads</button>' : ''}`;
+  }
+  function topicMoveFormHtml(p) {
+    if (topicsState.movePostId !== p.id) return '';
+    return `<form class="tp-new" data-topic-move-form="${esc(p.id)}"><label>Move to<select class="cv-input" name="target"><option value="">A new thread</option>${topicsState.threads.filter(t => t.id !== topicsState.openThreadId).map(t => `<option value="${esc(t.id)}">${esc(t.title)}</option>`).join('')}</select></label><input class="cv-input" name="title" aria-label="New thread title" placeholder="New thread title" value="${esc(p.title)}"/>${!topicsState.nextCursor && topicsState.posts.length <= 100 ? `<label class="tp-note"><input type="checkbox" name="whole"/> Move the whole thread</label>` : ""}<div class="tp-actions"><button type="submit" class="cv-save">Move</button><button type="button" class="cv-cancel" data-move-cancel>Cancel</button></div><div class="tp-error" data-move-error></div></form>`;
+  }
+  function wireTopicThreads(c, d) {
+    for (const el of c.querySelectorAll('[data-thread-open]')) el.addEventListener('click', () => openTopicThread(el.dataset.threadOpen));
+    c.querySelector('[data-thread-back]')?.addEventListener('click', () => {
+      Object.assign(topicsState, { openThreadId:null, threadDetail:null, openPostId:null, composing:false, replying:null, posts:[] });
+      loadTopicThreads();
+    });
+    c.querySelector('[data-thread-more]')?.addEventListener('click', () => loadTopicThreads({ append:true }));
+    c.querySelector('[data-thread-search]')?.addEventListener('submit', e => {
+      e.preventDefault(); topicsState.threadQuery = e.target.elements.query.value.trim(); loadTopicThreads();
+    });
+    for (const el of c.querySelectorAll('[data-topic-move]')) el.addEventListener('click', () => {
+      topicsState.movePostId = el.dataset.topicMove; renderTopics();
+    });
+    c.querySelector('[data-move-cancel]')?.addEventListener('click', () => { topicsState.movePostId = null; renderTopics(); });
+    c.querySelector('[data-topic-move-form]')?.addEventListener('submit', async e => {
+      e.preventDefault();
+      const form = e.target, button = form.querySelector('[type=submit]'); button.disabled = true;
+      const source = topicsState.threadDetail;
+      const { result, error } = await topicCall(window.relay.topicMovePosts, topicsState.openId, source.id, {
+        postIds:form.elements.whole?.checked ? topicsState.posts.map(p => p.id) : [form.dataset.topicMoveForm],
+        ...(form.elements.target.value ? { targetThreadId:form.elements.target.value } : { title:form.elements.title.value.trim() }),
+        expectedVersion:source.version,
+      });
+      if (error) { form.querySelector('[data-move-error]').textContent = error; button.disabled = false; return; }
+      topicsState.movePostId = null;
+      await loadTopicThreads(); await openTopicThread(result.threadId);
+    });
+  }
+  async function loadTopicPosts({ append = false } = {}) {
+    const id = topicsState.openId, threadId = topicsState.openThreadId;
+    if (!threadId) return loadTopicThreads({ append });
     if (!id || (append && (!topicsState.nextCursor || topicsState.postsLoading))) return;
     topicsState.postsLoading = true;
     topicsState.postsError = "";
     renderTopics();
-    const { result, error } = await topicCall(window.relay.topicPosts, id, append ? { cursor: topicsState.nextCursor } : {});
-    if (topicsState.openId !== id) return;
+    const { result, error } = await topicCall(window.relay.topicPosts, id, { threadId, ...(append ? { cursor: topicsState.nextCursor } : {}) });
+    if (topicsState.openId !== id || topicsState.openThreadId !== threadId) return;
     topicsState.postsLoading = false;
     if (error) { topicsState.postsError = error; renderTopics(); return; }
     const posts = Array.isArray(result?.posts) ? result.posts : [];
@@ -7279,7 +7371,7 @@
   let topicIncomingInFlight = false;
   function topicIncomingCount() {
     const shown = new Set(topicsState.posts.map((p) => p.id));
-    return topicsState.incoming.filter((p) => !shown.has(p.id) && (topicsState.lane === "agent" || String(p.forHuman || "").trim())).length;
+    return topicsState.incoming.filter((p) => p.importance !== "detail" && (topicsState.lane === "agent" || String(p.forHuman || "").trim())).length;
   }
   function topicIncomingHtml() {
     const n = topicIncomingCount();
@@ -7302,6 +7394,7 @@
     wireTopicIncoming(topicsBodyEl);
   }
   async function checkTopicIncoming() {
+    if (!topicsState.openThreadId && topicsState.openId) return checkThreadIncoming();
     const id = topicsState.openId;
     const m = topicsState.detail?.membership || {};
     if (!id || m.state !== "active" || m.mandateCurrent !== true) return;
@@ -7309,17 +7402,17 @@
     if (activeView !== "topics" || document.visibilityState === "hidden") return;
     let newest = null;
     for (const p of [...topicsState.incoming, ...topicsState.posts]) {
-      if (!newest || Date.parse(p.createdAt) > Date.parse(newest)) newest = p.createdAt;
+      if (!newest || Date.parse(p.updatedAt) > Date.parse(newest)) newest = p.updatedAt;
     }
     topicIncomingInFlight = true;
-    const { result, error } = await topicCall(window.relay.topicPosts, id, newest ? { since: newest } : {});
+    const { result, error } = await topicCall(window.relay.topicPosts, id, { threadId: topicsState.openThreadId, updatesOnly:true, ...(newest ? { since: newest } : {}) });
     topicIncomingInFlight = false;
     if (error || topicsState.openId !== id || topicsState.postsLoading) return;
-    const known = new Set([...topicsState.posts, ...topicsState.incoming].map((p) => p.id));
-    const fresh = (Array.isArray(result?.posts) ? result.posts : []).filter((p) => p?.id && !known.has(p.id));
+    const known = new Set([...topicsState.posts, ...topicsState.incoming].map((p) => p.id + ":" + p.updatedAt));
+    const fresh = (Array.isArray(result?.posts) ? result.posts : []).filter((p) => p?.id && !known.has(p.id + ":" + p.updatedAt));
     const gap = Boolean(result?.nextCursor);
     if (!fresh.length && !gap) return;
-    topicsState.incoming = [...fresh, ...topicsState.incoming];
+    topicsState.incoming = [...fresh, ...topicsState.incoming.filter(p => !fresh.some(n => n.id === p.id))];
     topicsState.incomingGap = gap;
     paintTopicIncoming();
   }
@@ -7328,7 +7421,9 @@
   async function showTopicIncoming() {
     const id = topicsState.openId;
     if (!id) return;
-    if (topicsState.incomingGap) {
+    if (!topicsState.openThreadId) {
+      await loadTopicThreads();
+    } else if (topicsState.incomingGap) {
       await loadTopicPosts();
     } else {
       const incoming = topicsState.incoming;
@@ -7337,6 +7432,12 @@
       Object.assign(topicsState, { incoming:[], incomingGap:false });
     }
     if (topicsState.openId !== id) return;
+    const threadId = topicsState.openThreadId;
+    if (threadId) {
+      const latest = await topicCall(window.relay.topicThreads, id, { threadId });
+      if (topicsState.openId !== id || topicsState.openThreadId !== threadId) return;
+      if (latest.result?.threads?.[0]) topicsState.threadDetail = latest.result.threads[0];
+    }
     const seen = await topicCall(window.relay.topicSeen, id);
     if (topicsState.openId !== id) return;
     if (seen.result) mergeTopicSummary(seen.result);
@@ -7389,7 +7490,7 @@
     if (!r || r.postId !== p.id) return "";
     const inTopic = r.mode === "topic";
     return `<form class="tp-reply" data-topic-reply-form="${esc(p.id)}" data-topic-reply-mode="${inTopic ? "topic" : "private"}">
-      <div class="tp-reply-head">${inTopic ? `Reply in topic <span>· on the board, and ${esc(who)} gets it as a Relay</span>` : `Reply privately <span>· a Relay to ${esc(who)}, not a post</span>`}</div>
+      <div class="tp-reply-head">${inTopic ? `Reply in topic <span>· everyone in this thread can read it</span>` : `Reply privately <span>· a Relay to ${esc(who)}, not a post</span>`}</div>
       <textarea class="cv-input" name="body" placeholder="${inTopic ? "Everyone on the board sees this." : "Only they see this."}" required></textarea>
       <div class="tp-actions"><button class="cv-save" type="submit">Send</button><button class="cv-cancel" type="button" data-topic-reply-cancel>Cancel</button></div>
       <div class="tp-error" data-topic-reply-error></div>
@@ -7408,7 +7509,8 @@
       acts.push(`<button type="button" data-topic-reply="${esc(p.id)}" data-mode="topic">Reply in topic</button>`);
       acts.push(`<button type="button" data-topic-reply="${esc(p.id)}" data-mode="private">Reply privately</button>`);
     }
-    if (mine || admin) {
+    if ((mine || admin) && !detail?.archivedAt) {
+      acts.push(`<button type="button" data-topic-move="${esc(p.id)}">Move</button>`);
       acts.push(armedDelete
         ? `<button type="button" data-topic-post-delete-confirm="${esc(p.id)}">Really delete?</button><button type="button" data-topic-armed-cancel>Cancel</button>`
         : `<button type="button" data-topic-post-delete="${esc(p.id)}">Delete</button>`);
@@ -7435,7 +7537,7 @@
     return `<article class="tp-post${card} data-topic-post="${esc(p.id)}">
       <div class="tp-post-meta"><span class="tp-nature ${esc(p.nature)}">${esc(TOPIC_NATURE_LABEL[p.nature] || p.nature)}</span><span class="who">${esc(origin)}</span><span>${esc(timeAgo(p.createdAt))}${p.editedAt ? " · edited" : ""}</span></div>
       <div class="tp-post-title">${esc(p.title)}</div>
-      ${topicPostRefHtml(p)}${body}${topicPostActsHtml(p, detail)}${topicPostReplyFormHtml(p, who)}
+      ${topicPostRefHtml(p)}${body}${topicPostActsHtml(p, detail)}${topicPostReplyFormHtml(p, who)}${topicMoveFormHtml(p)}
     </article>`;
   }
   // One post on its own page: the reader's letter (kicker, headline, rule,
@@ -7472,16 +7574,17 @@
         <div class="rd-body">${readerParagraphs(words)}</div>
         ${details}
         ${notice}
-        ${topicPostActsHtml(p, d)}${topicPostReplyFormHtml(p, who)}
+        ${topicPostActsHtml(p, d)}${topicPostReplyFormHtml(p, who)}${topicMoveFormHtml(p)}
       </div>
     </div>`;
   }
   function topicComposeHtml() {
-    if (!topicsState.composing) return `<button class="tp-new-toggle" type="button" data-topic-compose>+ Post to this topic</button>`;
+    if (!topicsState.composing) return `<button class="tp-new-toggle" type="button" data-topic-compose>+ ${topicsState.openThreadId ? "Add update" : "New thread"}</button>`;
     return `<form class="tp-compose" data-topic-compose-form>
       <select class="cv-input" name="nature" aria-label="What kind of post">${TOPIC_NATURES.map((n) => `<option value="${n}"${n === "opinion" ? " selected" : ""}>${TOPIC_NATURE_LABEL[n]}</option>`).join("")}</select>
       <input class="cv-input" name="title" placeholder="Title" autocomplete="off" required />
       <textarea class="cv-input" name="body" placeholder="Say it plainly. Only an event is a bare fact; everything else is your take, your plan, or your question." required></textarea>
+      ${topicsState.openThreadId ? `<select class="cv-input" name="importance" aria-label="Importance"><option value="update">Update — changed understanding or availability</option><option value="detail">Supporting detail — stays quiet</option></select>` : ""}
       <div class="tp-actions"><button class="cv-save" type="submit">Post</button><button class="cv-cancel" type="button" data-topic-compose-cancel>Cancel</button></div>
       <div class="tp-error" data-topic-compose-error></div>
     </form>`;
@@ -7503,7 +7606,7 @@
     return `<div class="gd-section-label">Members</div><div class="gd-members">${rows || `<div class="cv-empty">Nobody yet.</div>`}</div>${invite}`;
   }
   function topicPaneTabsHtml() {
-    const tabs = [["messages", "Messages"], ["members", "Members"], ["mandate", "Mandate"]];
+    const tabs = [["messages", "Threads"], ["members", "Members"], ["mandate", "Mandate"]];
     return `<div class="tp-panes"><div class="cv-seg" role="tablist">${tabs.map(([id, label]) => `<button class="cv-seg-btn${topicsState.pane === id ? " active" : ""}" type="button" role="tab" aria-selected="${topicsState.pane === id}" data-topic-pane="${id}">${label}</button>`).join("")}</div></div>`;
   }
   function topicDetailHtml(d) {
@@ -7545,7 +7648,7 @@
       ? topicPaneTabsHtml() + (
         topicsState.pane === "members" ? `${topicMembersHtml(d)}${leave}`
         : topicsState.pane === "mandate" ? `${mandateBlock}${topicStandingRulesHtml()}${settings}`
-        : `${current ? topicComposeHtml() : ""}${notice}${lanes}${readable ? topicIncomingHtml() : ""}${posts}${more}`)
+        : `${current ? topicComposeHtml() : ""}${notice}${lanes}${readable ? topicIncomingHtml() : ""}${topicsState.openThreadId ? topicThreadHeaderHtml() + posts + more : topicThreadsHtml()}`)
       : `${topicStandingRulesHtml()}${topicMembersHtml(d)}`;
     return `<div class="tp-detail" data-topic-detail="${esc(d.id)}">
       <button class="gd-back" type="button" data-topic-back>‹ Topics</button>
@@ -7557,6 +7660,11 @@
   }
   function renderTopics() {
     if (!topicsBodyEl) return;
+    const renderKey = [topicsState.openId, topicsState.openThreadId].join(":");
+    const keepDraft = topicsBodyEl.dataset.topicRenderKey === renderKey && topicsState.composing;
+    const form = keepDraft && topicsBodyEl.querySelector("[data-topic-compose-form]");
+    const draft = form ? Object.fromEntries([...form.elements].filter(e => e.name).map(e => [e.name, e.value])) : null;
+    topicsBodyEl.dataset.topicRenderKey = renderKey;
     if (topicsState.openId) {
       topicsEmptyEl.classList.add("gone");
       const d = topicsState.detail;
@@ -7564,6 +7672,8 @@
         : topicsState.postsError ? `<div class="tp-detail"><button class="gd-back" type="button" data-topic-back>‹ Topics</button><div class="tp-error">${esc(topicsState.postsError)}</div></div>`
         : `<div class="tp-loading">Loading…</div>`;
       wireTopicDetail();
+      const nextForm = topicsBodyEl.querySelector("[data-topic-compose-form]");
+      if (draft && nextForm) for (const [name, value] of Object.entries(draft)) if (nextForm.elements[name]) nextForm.elements[name].value = value;
       return;
     }
     if (topicsState.loading && !topicsState.loaded) {
@@ -7627,7 +7737,7 @@
       const result = await apply(window.relay.topicApprove, id, Number(el.getAttribute("data-topic-approve")));
       if (!result) return;
       applyDetail(result);
-      await loadTopicPosts();
+      await loadTopicThreads();
       if (!wasInvited) { const seen = await topicCall(window.relay.topicSeen, id); if (seen.result) mergeTopicSummary(seen.result); }
     });
     const drop = () => { topicsState.topics = topicsState.topics.filter((t) => t.id !== id); closeTopic(); setBadge(topicsBadgeEl, topicsAttentionCount()); };
@@ -7688,12 +7798,16 @@
       const postId = replyForm.getAttribute("data-topic-reply-form");
       const mode = replyForm.getAttribute("data-topic-reply-mode") === "topic" ? "topic" : "private";
       const body = replyForm.elements.body.value.trim();
-      const { result, error } = await topicCall(window.relay.topicPostReply, id, postId, {
-        mode, forHuman: body, forAgent: body,
-        idempotencyKey: topicsState.replying?.idempotencyKey || `pill-topic-reply:${postId}:${Date.now()}`,
-      });
+      const key = topicsState.replying?.idempotencyKey || ("pill-topic-reply:" + postId + ":" + Date.now());
+      const parent = topicsState.posts.find(p => p.id === postId);
+      const { result, error } = mode === "topic"
+        ? await topicCall(window.relay.topicPostCreate, id, { threadId: parent?.threadId || parent?.id,
+            inReplyToPostId: postId, title: "Re: " + (parent?.title || "Update"), nature: "opinion",
+            forHuman: body, forAgent: body, idempotencyKey: key })
+        : await topicCall(window.relay.topicPostReply, id, postId, { mode, forHuman: body, forAgent: body, idempotencyKey: key });
       if (error) { errEl.textContent = error; save.disabled = false; return; }
       topicsState.replying = null;
+      if (result?.post?.threadId) await openTopicThread(result.post.threadId);
       if (result?.post) topicsState.posts = [result.post, ...topicsState.posts.filter((p) => p.id !== result.post.id)];
       const who = result?.recipient?.name || "";
       const notice = who
@@ -7704,6 +7818,7 @@
       renderTopics();
       loadTopics({ quiet:true });
     });
+    wireTopicThreads(c, d);
     on("[data-topic-more]", () => loadTopicPosts({ append:true }));
     on("[data-topic-compose]", () => { topicsState.composing = true; renderTopics(); c.querySelector("[data-topic-compose-form] input[name=title]")?.focus(); });
     on("[data-topic-compose-cancel]", () => { topicsState.composing = false; renderTopics(); });
@@ -7716,10 +7831,13 @@
       const body = compose.elements.body.value.trim();
       const { result, error } = await topicCall(window.relay.topicPostCreate, id, {
         nature: compose.elements.nature.value, title: compose.elements.title.value.trim(), forHuman: body, forAgent: body,
+        ...(topicsState.openThreadId ? { threadId: topicsState.openThreadId } : { newThread:true }),
+        importance: compose.elements.importance?.value || "update",
         idempotencyKey: `pill-topic-post:${id}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`,
       });
       if (error) { errEl.textContent = error; save.disabled = false; return; }
       topicsState.composing = false;
+      if (result?.post?.threadId) { await loadTopicThreads(); await openTopicThread(result.post.threadId); }
       if (result?.post) topicsState.posts = [result.post, ...topicsState.posts.filter((p) => p.id !== result.post.id)];
       renderTopics();
       loadTopics({ quiet:true });
@@ -7731,6 +7849,8 @@
       topicsState.armed = null;
       topicsState.posts = topicsState.posts.filter((p) => p.id !== postId);
       if (topicsState.openPostId === postId) topicsState.openPostId = null;
+      if (topicsState.posts.length) await openTopicThread(topicsState.openThreadId);
+      else { topicsState.openThreadId = null; await loadTopicThreads(); }
       renderTopics();
       loadTopics({ quiet:true });
     });

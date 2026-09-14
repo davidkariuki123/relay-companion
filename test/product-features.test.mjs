@@ -140,7 +140,7 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
   // relay_todo_* tools: every staging and production account was offered a
   // surface it is not entitled to call, and this assertion pinned that.
   assert.deepEqual(ordinary, [
-    "relay_send", "relay_forward", "relay_share_link", "relay_contacts_search", "relay_groups_list", "relay_group_create", "relay_group_update",
+    "relay_send", "relay_forward", "relay_share_link", "relay_contacts_search", "relay_groups_list", "relay_team_prepare", "relay_group_transfer_admin", "relay_group_create", "relay_group_update",
     "relay_group_delete", "relay_contact_update", "relay_session_updates", "relay_inbox_list", "relay_sent_list", "relay_thread_fetch",
     "relay_chats_list", "relay_chat_fetch", "relay_chat_send", "relay_mark_read",
   ]);
@@ -149,7 +149,7 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
   assert.deepEqual(toolsForAccount(productionDeveloper).map((tool) => tool.name), ordinary);
   // The complete catalog requires the role and the dev channel together.
   const developer = productFeatures({ env: { RELAY_UPDATE_CHANNEL: "dev" }, user: DEVELOPER });
-  assert.equal(toolsForAccount(developer).length, 39);
+  assert.equal(toolsForAccount(developer).length, 44);
   assert.ok(toolsForAccount(developer).some((tool) => tool.name === "relay_task_unclaim"));
   assert.ok(toolsForAccount(developer).some((tool) => tool.name === "relay_message_edit"));
   assert.ok(toolsForAccount(developer).some((tool) => tool.name === "relay_message_delete"));
@@ -192,7 +192,7 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
   for (const tool of toolsForAccount(shipped)) {
     assert.doesNotMatch(JSON.stringify(tool), /relay_topic|Topics/, `${tool.name} must not mention Topics to a production agent`);
   }
-  for (const name of ["relay_topics_list", "relay_topic_fetch", "relay_topic_post", "relay_topic_create", "relay_topic_invite", "relay_topic_member"]) {
+  for (const name of ["relay_topics_list", "relay_topic_fetch", "relay_topic_context", "relay_topic_threads", "relay_topic_edit", "relay_topic_post", "relay_topic_create", "relay_topic_invite", "relay_topic_member"]) {
     assert.ok(toolsForAccount(developer).some((tool) => tool.name === name), `${name} stays on dev`);
   }
   // Todo is paused for developer accounts as well.

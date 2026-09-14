@@ -17,10 +17,12 @@ const path = require("node:path");
 const context = require("./agent-relay-context.cjs");
 const { localIso } = require("./local-time.cjs");
 
+const { TOPIC_CONTEXT_INSTRUCTION } = require("./topic-tool-contract.cjs");
+
 const SESSION_DIR = "mcp-sessions";
 const DESCRIPTION_BUDGET = 2_048;
 const QUIET_DESCRIPTION =
-  "Nothing new for this session since it last checked. Call this when a piece of work starts and again before your final response: the reply lists this session's subscribed Topics with their mandates and the standing rules, and reading here changes no human read state. Before your final response, check what this session did, decided, planned, found or asked against each subscribed Topic mandate: post what qualifies with relay_topic_post, then report; when nothing qualifies, say nothing about topics.";
+  "Nothing new for this session since it last checked. Call at work start and before finishing; the reply includes subscribed Topics with their mandates and standing rules. " + TOPIC_CONTEXT_INSTRUCTION + " Reading here acknowledges notices only and changes no human read state.";
 // Off the developer row there are no Topics to name.
 const QUIET_DESCRIPTION_ORDINARY =
   "Nothing new for this session since it last checked. Call this when a piece of work starts and again before your final response to re-check for Relays that arrived; reading here changes no human read state.";
@@ -69,7 +71,7 @@ function topicMemory(topics) {
     memory[topic.topicId] = {
       standing: topic.standing,
       mandateVersion: Number(topic.mandateVersion) || 1,
-      postCount: Number(topic.postCount) || 0,
+      postCount: Number(topic.attentionPostCount ?? topic.postCount) || 0,
       latestPostAt: topic.latestPostAt || "",
     };
   }
@@ -114,11 +116,11 @@ function computeDigest(state, { inbox, topics }) {
       topicChanges.push({ topicId: topic.topicId, name: topic.name, change: topic.standing === "invited" ? "invited" : "joined", standing: topic.standing });
       continue;
     }
-    const newPosts = Math.max(0, (Number(topic.postCount) || 0) - (Number(prior.postCount) || 0));
+    const newPosts = Math.max(0, (Number(topic.attentionPostCount ?? topic.postCount) || 0) - (Number(prior.postCount) || 0));
     if (prior.standing !== topic.standing) {
       topicChanges.push({ topicId: topic.topicId, name: topic.name, change: topic.standing === "paused" ? "mandate changed, approval needed" : topic.standing === "current" ? "active again" : topic.standing, standing: topic.standing, newPosts });
-    } else if (newPosts) {
-      topicChanges.push({ topicId: topic.topicId, name: topic.name, change: "new posts", standing: topic.standing, newPosts, since: prior.latestPostAt || "" });
+    } else if (newPosts || topic.latestPostAt !== prior.latestPostAt) {
+      topicChanges.push({ topicId: topic.topicId, name: topic.name, change: newPosts ? "new posts" : "posts changed", standing: topic.standing, newPosts, since: prior.latestPostAt || "" });
     }
   }
   for (const topicId of Object.keys(remembered)) {
@@ -210,11 +212,22 @@ function createSessionDigest({ homeDir, accountScope, sessionKey, topicsEnabled 
       }
       persist();
     },
-    /** The session read this board: its posts are no longer new. */
-    commitTopic(topicId) {
-      const topic = readTopics(homeDir, accountScope).find((candidate) => candidate.topicId === topicId);
-      if (topic) state.topics[topicId] = topicMemory([topic])[topicId];
+    /** Record only the exact source revisions returned, never the whole board. */
+    commitTopic(topicId, posts = []) {
+      const accessible = readTopics(homeDir, accountScope).some(t => t.topicId === topicId && t.standing === "current");
+      if (!accessible || !topicsEnabled) return;
+      const entries = new Map((state.retrievedTopicPosts || []).map(p => [p.topicId + ":" + p.postId, p]));
+      for (const post of posts) {
+        if (!post?.id || !post.updatedAt) continue;
+        entries.delete(topicId + ":" + post.id);
+        entries.set(topicId + ":" + post.id, { topicId, postId: post.id, updatedAt: post.updatedAt });
+      }
+      state.retrievedTopicPosts = [...entries.values()].slice(-128);
       persist();
+    },
+    retrievedTopicPosts() {
+      const current = new Set(readTopics(homeDir, accountScope).filter(t => t.standing === "current").map(t => t.topicId));
+      return topicsEnabled ? (state.retrievedTopicPosts || []).filter(p => current.has(p.topicId)) : [];
     },
     /** The session listed its topics: membership changes are no longer new, unread posts still are. */
     commitTopicList() {
