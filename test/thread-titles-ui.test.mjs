@@ -1106,7 +1106,7 @@ test("ordinary titled bubbles open the reader while owned-agent bubbles open Wor
   assert.match(html, /if \(m && m\.textLike && !m\.ownedAgent\) return;/);
   assert.match(html, /if \(m && m\.ownedAgent\)[\s\S]*openReader\(id, m\.direction === "out" \? "sent" : "threads"\)/,
     "clicking the owned-agent bubble takes the Work path");
-  assert.match(html, /const openedHandoff = handoffFor\(opened\);[\s\S]*readerTab = openedHandoff && \["starting", "running", "failed"\]\.includes\(openedHandoff\.state\) \? "agent" : "you"/,
+  assert.match(html, /const openedHandoff = handoffFor\(opened\);[\s\S]*readerTab = !picker && openedHandoff && \["starting", "running", "failed"\]\.includes\(openedHandoff\.state\) \? "agent" : "you"/,
     "a Relay that went to an app opens on its receipt");
   assert.match(html, /data-open-agent-work/, "the explicit Open Work affordance uses the same path");
   assert.match(html, /openReader\(id, m\.direction === "out" \? "sent" : \(m\.request \? "tasks" : "threads"\)\)/);
