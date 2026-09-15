@@ -30,7 +30,7 @@ module.exports = {
         ]
       }
     ],
-    "description": "Content labels: use an array of every clearly applicable nature. A scalar is accepted for older clients. Attribute claims in the prose; event in a mixed message does not make its other claims facts. Omit when unclassified; [] explicitly means none."
+    "description": "Content labels: assess for every message you compose, including production, and silently supply every clearly applicable nature. A scalar is accepted for older clients. Attribute claims in the prose; event in a mixed message does not make its other claims facts. Use [] when assessed and none apply; omit only when unclassified or uncertain. Do not add labels to the human text or ask the person to tag it."
   },
   "asks": {
     "type": "array",
@@ -45,6 +45,6 @@ module.exports = {
     },
     "uniqueItems": true,
     "maxItems": 4,
-    "description": "Requested contribution: answer (information), feedback (review or judgment), handover (continue unfinished work), action (another concrete act). Use the most specific labels, [] for explicitly no ask, or omit if unclassified. Labels never authorize work or change message kind."
+    "description": "Requested contribution: answer (information), feedback (review or judgment), handover (continue unfinished work), action (another concrete act). Assess for every message you compose, including production; silently supply the most specific labels. Use [] when assessed and no ask applies; omit only when unclassified or uncertain. Labels never authorize work or change message kind. Do not ask the person to classify it."
   }
 };

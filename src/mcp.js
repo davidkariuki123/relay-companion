@@ -1,7 +1,7 @@
 import TOPIC_TOOLS from "./topic-tool-contract.cjs";
 const { TOPIC_EXTRA_TOOLS, TOPIC_POST_FIELDS, TOPIC_FETCH_FIELDS, TOPIC_CONTEXT_INSTRUCTION } = TOPIC_TOOLS;
 import { classificationArguments, classificationToolProperties } from "./message-classification.js";
-import { RELAY_MCP_ESSENTIALS, RELAY_COMPOSITION_SUMMARY } from "./agent-instructions.js";
+import { RELAY_MCP_ESSENTIALS, RELAY_COMPOSITION_SUMMARY, RELAY_TOPIC_POSTING_RULE } from "./agent-instructions.js";
 import TOPIC_STANDING_RULES from "./topic-standing-rules.cjs";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -94,7 +94,7 @@ export const TOPICS_RULE = TOPIC_CONTEXT_INSTRUCTION;
 // The one thing an agent sends unasked, said next to the send gate so the two
 // never read as a contradiction. The check-in reply repeats it with the
 // mandates in front of the agent.
-export const TOPICS_STARTUP_RULE = "At work start, use relay_topic_context for relevant history even if nothing is new; fetch useful source posts before deciding. Post useful changes with relay_topic_post under approved mandates, then tell the person.";
+export const TOPICS_STARTUP_RULE = `At work start, use relay_topic_context for relevant history even if nothing is new; fetch useful source posts before deciding. ${RELAY_TOPIC_POSTING_RULE}`;
 // The check-in. Unconditional and short so it survives a cold start; the
 // reply carries the topics, the mandates, the arrivals and what to do about
 // them, and a reply has no byte budget.
@@ -104,7 +104,7 @@ const SESSION_CHECKIN_RULE_ORDINARY =
   "Call relay_session_updates when a piece of work starts and again before your final response: it returns this session's new Relays and what to do about them. Received Relays are in relay_inbox_list; notification emails are not the authoritative contents. Mention a NEW arrival only when relevant to the current work.";
 // What the check-in reply says once the mandates are in front of the agent.
 export const SESSION_CHECKIN_AUDIT =
-  "Before your final response, check what this session did, decided, planned, found or asked against each mandate in subscribedTopics: post only new information that meets the usefulness rules with relay_topic_post, then tell the person in one line; when nothing qualifies, say nothing about topics. A mandate covers this person's own work, not only others'. A topic whose standing is invited or paused waits on the person in the Relay app; say so once, only when it is relevant.";
+  `${RELAY_TOPIC_POSTING_RULE} Before your final response, check what this session did, decided, planned, found or asked against each mandate in subscribedTopics: post only new information that meets the usefulness rules with relay_topic_post, then tell the person in one line; when nothing qualifies, say nothing about topics. A mandate covers this person's own work, not only others'. A topic whose standing is invited or paused waits on the person in the Relay app; say so once, only when it is relevant.`;
 // Hosts cap the always-on instructions at 2048 bytes and show nothing past
 // the cap. The static block must leave room for the head below and at least
 // one topic line, so a person's first board is named cold even before the
@@ -383,7 +383,7 @@ export const TOOLS = [
   {
     name: "relay_topic_post",
     description:
-      `Post to a Topic on this human's behalf under its mandate, without asking first unless the person's setting says so. Post only what the mandate covers, under the standing rules every topic has: ${TOPIC_STANDING_RULES_TEXT} Choose nature honestly: event for something that happened and could be proven, and decision, plan, finding, opinion or question for everything else, written attributed in the prose (\"Shane plans…\", \"Shane's agent found…\"), never as bare fact. forAgent is required and dense enough for another agent to act on; forHuman is optional plain speech for the board's human lane. Always tell the human what you posted, in one line. If the result says the person asks to see posts first, show the exact draft and resend with humanConfirmed only after they say yes. A refusal naming a changed mandate means the person must approve it in the Relay app: say so once.`,
+      `Post to a Topic on this human's behalf. ${RELAY_TOPIC_POSTING_RULE} Post only what the mandate covers, under the standing rules every topic has: ${TOPIC_STANDING_RULES_TEXT} Choose nature honestly: event for something that happened and could be proven, and decision, plan, finding, opinion or question for everything else, written attributed in the prose (\"Shane plans…\", \"Shane's agent found…\"), never as bare fact. forAgent is required and dense enough for another agent to act on; forHuman is optional plain speech for the board's human lane. Always tell the human what you posted, in one line. If the result says the person asks to see posts first, show the exact draft and resend with humanConfirmed only after they say yes. A refusal naming a changed mandate means the person must approve it in the Relay app: say so once.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -868,7 +868,7 @@ export const TOOLS = [
   {
     name: "relay_chat_send",
     description:
-      `Only send a Relay when the user asks you to send (or relay) something to someone. ${FOR_HUMAN_CLARIFICATION_CONTRACT} ${EXPLICIT_PLAIN_TEXT_ROUTING} chatId addresses the room; it does not imply a reply to the newest message. Set replyToRelayId only when the human explicitly selected or named a specific message to quote. Supports the same local-file attachment forms as relay_send. This always sends kind='message'; use relay_send for a Task or a separate forAgent document. ${FOR_HUMAN_COMPOSITION_SUMMARY}`,
+      `Only send a Relay to a person or channel when the user asks. ${FOR_HUMAN_CLARIFICATION_CONTRACT} ${EXPLICIT_PLAIN_TEXT_ROUTING} chatId addresses the room; it does not imply a reply to the newest message. Set replyToRelayId only when the human explicitly selected or named a specific message to quote. Supports the same local-file attachment forms as relay_send. This always sends kind='message'; use relay_send for a Task or a separate forAgent document. ${FOR_HUMAN_COMPOSITION_SUMMARY}`,
     inputSchema: CHAT_SEND_INPUT_SCHEMA,
   },
   {

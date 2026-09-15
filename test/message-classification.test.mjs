@@ -9,6 +9,8 @@ test("ordinary accounts can classify a Relay without acquiring Topic or Task cap
   const send = tools.find((tool) => tool.name === "relay_send");
   assert.deepEqual(send.inputSchema.properties.nature, classificationToolProperties.nature);
   assert.deepEqual(send.inputSchema.properties.asks, classificationToolProperties.asks);
+  assert.match(send.inputSchema.properties.nature.description, /including production/);
+  assert.match(send.inputSchema.properties.asks.description, /silently supply/);
   assert.equal(tools.some((tool) => tool.name === "relay_topic_post"), false);
   let body;
   await handleCall({ async sendRelay(value) { body = value; return { relayId: "relay_labels" }; } }, "relay_send", {
@@ -18,6 +20,7 @@ test("ordinary accounts can classify a Relay without acquiring Topic or Task cap
   assert.deepEqual(body.nature, ["plan", "question"]);
   assert.deepEqual(body.asks, ["feedback"]);
   assert.equal(body.kind, "message");
+  assert.equal(body.forHuman, "Here is the plan. What would you change?");
 });
 
 test("Topic posting transports every nature and ask unchanged", async () => {

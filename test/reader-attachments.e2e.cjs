@@ -6,7 +6,7 @@ app.setPath('userData',path.join(temp,'profile'));
 const html=fs.readFileSync(path.join(__dirname,'../overlay/inbox.html'),'utf8');
 const css=html.match(/<style>([\s\S]*?)<\/style>/)[1];
 const source=html.slice(html.indexOf('  // ---- compact reader attachments'),html.indexOf('  // ---- end compact reader attachments'));
-const fixture=`<!doctype html><html><head><style>${css}body{overflow:auto;background:var(--bg)}#reader{height:1200px;padding-top:400px}</style></head><body><div id="reader"><div class="rd-details" id="entry"></div><textarea>Unsent reply</textarea></div><script>
+const fixture=`<!doctype html><html><head><style>${css}body{overflow:auto;background:var(--bg)}#reader{height:1200px;padding-top:400px}</style></head><body><div id="reader"><div class="rd-details" id="entry"></div><textarea>Unsent reply</textarea></div><div id="thHistory"><div class="ca-file-shelf" id="timelineEntry"></div></div><script>
 const readerBodyEl=document.getElementById('reader');let activeView='reader',readerId='r';
 const esc=v=>String(v).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
 const fmtBytes=v=>String(v||0)+' B';const fileIconSvg=()=>'<svg></svg>';const fileFamilyOf=()=> 'file';
@@ -52,7 +52,13 @@ app.whenReady().then(async()=>{
    await js('closeReaderAttachments()');await closed();
   }
  }
- console.log('PASS: 1/12/100 files, 720/360 widths, fixed height, scroll/focus restoration, polling, Escape/backdrop/close, exact open ids and errors.');
+ await js(`activeView='threads';timelineEntry.innerHTML=relaySharedShelf(row);wireReaderAttachments(timelineEntry,row);timelineEntry.querySelector('button').click()`);
+ assert.equal(await js(`document.querySelector('dialog').open`),true);
+ await js(`timelineEntry.innerHTML=relaySharedShelf(row);wireReaderAttachments(timelineEntry,row);closeReaderAttachments()`);
+ await closed();
+ assert.equal(await js(`document.activeElement===timelineEntry.querySelector('button')`),true);
+ assert.equal(await js(`timelineEntry.querySelector('button').getAttribute('aria-expanded')`),'false');
+ console.log('PASS: 1/12/100 files, 720/360 widths, fixed height, reader/timeline focus restoration, polling, Escape/backdrop/close, exact open ids and errors.');
  win.destroy();app.exit(0);
  }catch(e){console.error(e);win.destroy();app.exit(1)}
 });

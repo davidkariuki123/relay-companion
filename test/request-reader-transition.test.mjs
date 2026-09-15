@@ -5,7 +5,7 @@ import test from "node:test";
 const html = fs.readFileSync(new URL("../overlay/inbox.html", import.meta.url), "utf8");
 
 test("opening a row retires notification peek before reader geometry is sampled", () => {
-  const start = html.indexOf("function openReader(id, source)");
+  const start = html.indexOf("function openReader(id, source, picker = null)");
   const end = html.indexOf("\n  function closeReader", start);
   assert.ok(start >= 0 && end > start, "openReader is present");
   const openReader = html.slice(start, end);
@@ -25,7 +25,7 @@ function between(source, start, end) {
 }
 
 test("reader navigation captures the whole card before committing its destination", () => {
-  const open = between(html, "function openReader(id, source)", "function closeReader()");
+  const open = between(html, "function openReader(id, source, picker = null)", "function closeReader()");
   assert.ok(open.indexOf("captureRoomScroll()") < open.indexOf("startCardViewTransition("));
   assert.ok(open.indexOf("startCardViewTransition(") < open.indexOf('activeView = "reader"'));
   assert.doesNotMatch(open, /prepareReaderMorph|startReaderMorph/);

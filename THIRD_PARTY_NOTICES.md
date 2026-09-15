@@ -1,5 +1,15 @@
 # Third-party notices
 
+## Bundled ACP adapters
+
+Relay's runtime includes `@agentclientprotocol/claude-agent-acp` 0.77.0 and
+`@agentclientprotocol/codex-acp` 1.11.0 under Apache License 2.0. Their package
+LICENSE files, and the licenses/notices of their dependencies, are retained
+in the distributed runtime. Codex and the Claude Agent SDK's native binaries
+are included as dependencies of these adapters. Their respective package
+license terms continue to apply. The signed runtime SBOM records the exact
+resolved dependency versions.
+
 The Relay preview preload embeds the following open-source software in
 `overlay/preview-preload.cjs`.
 

@@ -634,16 +634,15 @@ test("a cold Claude session finishes its background owner before Relay opens it"
       target,
       deliveryMode: delivery.EXPLICIT_PICKER_DELIVERY,
       discover: () => [target],
-      spawnClaude: ({ sessionId, prompt }) => {
+      startAcpRun: async ({ sessionId, prompt }) => {
         events.push("spawn");
         fs.appendFileSync(transcript, `${JSON.stringify({ type: "user", message: { role: "user", content: prompt } })}\n`);
-        return { sessionId };
+        return { sessionId, done: Promise.resolve().then(() => { events.push("complete"); }) };
       },
-      waitForClaudeCompletion: async () => { events.push("complete"); },
       pollMs: 1,
     });
     assert.deepEqual(events, ["spawn", "complete"]);
-    assert.equal(result.delivery.adapter, "claude_background_resume");
+    assert.equal(result.delivery.adapter, "acp");
     assert.equal(result.url, `claude://resume?session=${target.nativeId}`);
   } finally {
     if (previousHome === undefined) delete process.env.RELAY_HOME;

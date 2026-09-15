@@ -410,8 +410,11 @@ export function buildRuntimeArtifact({
     const artifactPath = path.join(destination, filename);
     createDeterministicArchive({ sourceRoot: temporary, entryRoot: "node_modules", outputPath: artifactPath });
     verifyLegacyArchiveListing(artifactPath);
-    if (fs.statSync(artifactPath).size > 300 * 1024 * 1024) {
-      throw new Error("Relay runtime artifact exceeds the 300 MiB no-bloat budget");
+    // ACP includes both provider engines: pinned Windows dependencies measure
+    // 382 MiB compressed before Relay source. Keep an explicit build budget
+    // below the installer's independent 750 MiB download safety limit.
+    if (fs.statSync(artifactPath).size > 512 * 1024 * 1024) {
+      throw new Error("Relay runtime artifact exceeds the 512 MiB bundled-engine budget");
     }
     // Prove the exact archived bytes reconstruct their signed internal links,
     // import the updater, and launch the pinned Electron runtime.

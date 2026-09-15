@@ -100,3 +100,80 @@ for (const mode of ["existing", "new"]) test(`${mode} selection delivers once, i
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(context.sessionPickerState, null);
 });
+
+const loader = section("  async function loadSessionPicker(", "  async function refreshSessionPickerPresence(");
+const reader = section("  function openReader(", "  function closeReader(");
+
+for (const provider of ["codex", "claude"]) {
+  for (const expanded of [false, true]) {
+    for (const source of ["relay", "sent"]) {
+      test(`${provider} ${source} from ${expanded ? "expanded" : "compact"} chat opens reader before revealing choices`, async () => {
+        const calls = [];
+        let commit;
+        const context = vm.createContext({
+          activeView: "threads", chatExpanded: expanded, readerId: null,
+          readerSource: "relays", readerReturn: null, readerTab: "agent",
+          threadDetailId: "chat-fixture", threadDetailPartyHint: "Fixture",
+          threadsSource: "relays", expandedMsgIds: new Set(["fixture"]),
+          scrollEl: { scrollTop: 12 }, peeking: false,
+          sessionPickerState: null, expandedRelayId: null, expandedSentId: null,
+          READER: { w: 720, h: 760 },
+          captureRoomScroll: () => ({ top: 234, anchorId: "fixture" }),
+          readerRow: () => ({ id: "fixture" }),
+          handoffFor: () => ({ state: "running" }),
+          agentSurfacePreference: () => "desktop",
+          startCardViewTransition: (update, size) => {
+            calls.push(["transition", size.w]);
+            return new Promise(resolve => { commit = () => { update(); resolve(); }; });
+          },
+          commitNavigation: () => calls.push(["render", context.activeView, context.sessionPickerState?.provider]),
+          armSessionPickerReveal: () => calls.push(["reveal", context.activeView]),
+          paintSessionPickerResult: () => calls.push(["result"]),
+          closeSessionPicker: () => { context.sessionPickerState = null; calls.push(["close"]); },
+          setInterval: () => 1,
+          window: { relay: { sessionPicker: async (...args) => {
+            calls.push(["fetch", ...args]);
+            return { ok: true, provider, recent: [] };
+          } } },
+        });
+        vm.runInContext(loader + reader, context);
+        const pending = context.loadSessionPicker("fixture", provider, "Fixture", null, source);
+        assert.equal(context.activeView, "threads", "source remains visible until transition commits");
+        assert.equal(context.readerReturn.expanded, expanded);
+        assert.equal(context.readerReturn.roomScroll.top, 234);
+        assert.equal(context.readerReturn.threadId, "chat-fixture");
+        assert.deepEqual(calls, [["transition", 720]]);
+        commit();
+        await pending;
+        assert.equal(context.activeView, "reader");
+        assert.equal(context.readerId, "fixture");
+        assert.equal(context.readerTab, "you", "provider click shows the letter even with an active handoff");
+        assert.equal(context.readerSource, source === "sent" ? "sent" : "threads");
+        assert.equal(context.chatExpanded, expanded, "chat geometry is preserved for Back");
+        assert.deepEqual(calls.slice(1), [
+          ["render", "reader", provider], ["reveal", "reader"],
+          ["fetch", "fixture", provider, source, "desktop"], ["result"],
+        ]);
+        await context.loadSessionPicker("fixture", provider, "Fixture", null, source);
+        assert.equal(calls.at(-1)[0], "close", "same provider still toggles in the reader");
+      });
+    }
+  }
+}
+
+test("leaving during reader expansion does not reveal or fetch a stale picker", async () => {
+  let finish;
+  const context = vm.createContext({
+    activeView: "threads", readerId: null, expandedRelayId: null,
+    sessionPickerState: null, agentSurfacePreference: () => "desktop",
+    openReader: () => new Promise(resolve => { finish = resolve; }),
+    armSessionPickerReveal: () => assert.fail("Revealed a cancelled picker"),
+    window: { relay: { sessionPicker: () => assert.fail("Fetched a cancelled picker") } },
+  });
+  vm.runInContext(loader, context);
+  const pending = context.loadSessionPicker("fixture", "codex");
+  context.sessionPickerState = null;
+  context.activeView = "relays";
+  finish();
+  await pending;
+});

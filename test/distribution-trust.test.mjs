@@ -978,7 +978,7 @@ test("same runtime tree builds byte-identical archives and SBOM identities twice
     assert.equal(deterministicSbomSerial(identity), deterministicSbomSerial(identity));
     const builder = fs.readFileSync(new URL("../scripts/build-runtime-artifact.mjs", import.meta.url), "utf8");
     assert.match(builder, /captureInternalLinks\(temporary,/);
-    assert.match(builder, /300 \* 1024 \* 1024/);
+    assert.match(builder, /512 \* 1024 \* 1024/);
     assert.doesNotMatch(builder, /randomUUID\(|new Date\(\)\.toISOString/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

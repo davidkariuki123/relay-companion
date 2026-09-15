@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-import { TODO_STATUS_RULE, RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS, STARTUP_INSTRUCTIONS_BUDGET, STARTUP_INSTRUCTIONS_RESERVE, TOOLS, toolsForAccount } from "../src/mcp.js";
+import { TODO_STATUS_RULE, RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS, STARTUP_INSTRUCTIONS_BUDGET, STARTUP_INSTRUCTIONS_RESERVE, SESSION_CHECKIN_AUDIT, TOOLS, toolsForAccount } from "../src/mcp.js";
 
 const byName = new Map(TOOLS.map((tool) => [tool.name, tool]));
 const codexByName = new Map(toolsForAccount(
@@ -11,7 +11,8 @@ const codexByName = new Map(toolsForAccount(
 ).map((tool) => [tool.name, tool]));
 const source = await readFile(new URL("../src/mcp.js", import.meta.url), "utf8");
 const skillGuide = await readFile(new URL("../skill/relay/SKILL.md", import.meta.url), "utf8");
-const SEND_GATE = "Only send a Relay when the user asks you to send (or relay) something to someone.";
+const devSkillGuide = await readFile(new URL("../skill/variants/SKILL.dev.md", import.meta.url), "utf8");
+const SEND_GATE = "Only send a Relay to a person or channel when the user asks.";
 
 const EXPECTED_TOOLS = [
   "relay_topic_context", "relay_topic_threads", "relay_topic_edit",
@@ -113,6 +114,13 @@ test("startup guidance and owner schemas preserve the complete product ontology"
   assert.match(skillGuide, /mechanisms, evidence, code, paths, logs, reproduction steps/);
   assert.match(skillGuide, /within 120 words by default/);
   assert.match(skillGuide, /only after rejection/);
+  // Standing approval must be visible before a deferred posting tool is opened.
+  for (const guidance of [RELAY_MCP_INSTRUCTIONS, SESSION_CHECKIN_AUDIT, byName.get("relay_topic_post").description, devSkillGuide]) {
+    assert.match(guidance, /Joining a Topic approves posting under its current mandate/);
+    assert.match(guidance, /auto-post enabled \(the default\).*post qualifying work.*without asking.*tell the person/);
+    assert.match(guidance, /otherwise show the exact draft and ask first/);
+  }
+  assert.doesNotMatch(REQUESTS_DISABLED_INSTRUCTIONS, /Topic|auto-post/);
   assert.match(RELAY_MCP_INSTRUCTIONS, /Task Runs finish automatically/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /relay_task_start before doing an inbound Task and relay_task_complete afterward/i);
   assert.match(inboxContract, /With no arguments, returns only metadata for the newest 50 arrivals from the last 7 days/i);

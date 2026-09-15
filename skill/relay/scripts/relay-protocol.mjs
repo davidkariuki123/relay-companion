@@ -684,6 +684,7 @@ const DIRECT_TOOLS = {
     action: { type: "string", enum: ["mint", "revoke"] }, relayId: idField,
     kind: { type: "string", enum: ["message", "task"] }, title: stringField, recipientName: stringField, forHuman: stringField, forAgent: { type: "string" }, repo: stringField,
     files: { type: "array", items: stringField }, idempotencyKey: { type: "string", minLength: 8 }, longForHumanConfirmed: { type: "boolean" },
+    nature: { anyOf: [{ type: "string" }, { type: "array", items: stringField }] }, asks: { type: "array", items: stringField },
   }, ["idempotencyKey"], { full: true, readOnly: false }),
 };
 

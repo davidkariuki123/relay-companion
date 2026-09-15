@@ -19,7 +19,7 @@
 //   - Mutations (accept/reject/approve/decline/answer) call RelayClient with device-token
 //     auth. ack/mark-read writes state.json directly (atomic temp+rename).
 
-const { app, BrowserWindow, Menu, Tray, clipboard, ipcMain, nativeImage, powerMonitor, powerSaveBlocker, shell, screen, systemPreferences } = require("electron");
+const { app, dialog, BrowserWindow, Menu, Tray, clipboard, ipcMain, nativeImage, powerMonitor, powerSaveBlocker, shell, screen, systemPreferences } = require("electron");
 const { createCompanionWindow } = require("./companion-window.cjs");
 const { createFirstRelayOnboarding, firstMintedLink } = require("./first-relay-onboarding.cjs");
 const { createNetworkOnboarding } = require("./network-onboarding.cjs");
@@ -116,11 +116,6 @@ registerRelayProtocol();
 // the self-updater uses to swap the runtime, so reaping a BUSY engine here kills
 // the live turn the user is watching in Desktop (David + Sven, 2026-09-11). Reap
 // only idle engines; a mid-turn one is detached and survives the restart.
-app.on("before-quit", () => {
-  import("../src/claude-inbox-session.js")
-    .then((inbox) => inbox.stopIdleClaudeInboxSessions())
-    .catch(() => {});
-});
 app.on("open-url", (event, url) => {
   event.preventDefault();
   queueRelayDeepLink(parseRelayDeepLink(url));
@@ -6499,24 +6494,6 @@ async function handOffToAgent(input) {
   let turnDelivery = null;
   if (firstTurn) {
     try {
-      if (host === "claude") {
-        // 1. Bring the forged session up on an engine RELAY owns (Desktop's
-        //    cap never applies), then 2. let Desktop display that live session
-        //    before 3. the human's turn is injected into it below.
-        const inbox = await import("../src/claude-inbox-session.js");
-        await inbox.startClaudeInboxSession({
-          sessionId: String(binding.nativeId),
-          cwd: binding.cwd || row.openCwd || "",
-          model: model || "claude-opus-5",
-          effort: effort || "high",
-          permissionMode: permission || "auto",
-        });
-        const observedBundle = await new Promise((resolve) => frontmostBundleId(resolve));
-        const focused = await routing.delivery.focusSession(binding);
-        await presentSessionOpen(focused, host, id, observedBundle);
-        agentHandoffPatch(id, { imported: true });
-        pushInbox(true);
-      }
       const codexPermission = host === "codex" ? (CODEX_PERMISSION[permission] || CODEX_PERMISSION.full) : {};
       turnDelivery = await routing.delivery.deliverTurnToSession(binding, firstTurn, {
         model,
@@ -6541,7 +6518,7 @@ async function handOffToAgent(input) {
       // imported once, in the background, when the worker settles — see
       // Codex's submit bridge already navigated the primary window, except
       // for its safe app-server fallback which needs the ordinary focus path.
-      if (turnDelivery?.adapter !== "codex_desktop_owner" && host !== "claude") {
+      if (turnDelivery?.adapter !== "acp" && turnDelivery?.adapter !== "codex_desktop_owner" && host !== "claude") {
         // Live: Desktop already holds and runs the session (Claude socket, or
         // Codex's app-server fallback). Bring it forward now.
         const observedBundle = await new Promise((resolve) => frontmostBundleId(resolve));
@@ -6569,8 +6546,22 @@ async function handOffToAgent(input) {
   } catch {}
   // "imported" = Desktop holds a transcript with the words in it. Codex owns
   // its thread live; Claude gets the import when its worker settles.
-  const claudeDeferred = false; // Claude is live in Desktop before its turn runs
+  const claudeDeferred = Boolean(firstTurn && turnDelivery?.adapter === "acp");
   agentHandoffPatch(id, { state: "running", error: "", deliveredAt: firstTurn ? stamped : "", imported: !claudeDeferred });
+  if (claudeDeferred) {
+    const { acpWorker } = await import("../src/acp-session.js");
+    const worker = acpWorker(binding.nativeId);
+    void worker?.done.then(async () => {
+      const focused = await routing.delivery.focusSession(binding);
+      const observedBundle = await new Promise(resolve => frontmostBundleId(resolve));
+      await presentSessionOpen(focused, host, id, observedBundle);
+      agentHandoffPatch(id, { imported: true });
+      pushInbox(true);
+    }).catch(error => {
+      agentHandoffPatch(id, { state: "failed", error: String(error.message || error), imported: false });
+      pushInbox(true);
+    });
+  }
   // The hand-off IS the start of the work (David, 2026-09-08): the Todo item
   // moves to In Progress here, deterministically, instead of hoping the
   // session marks it. Tasks are moved by their Start receipt already.
@@ -6638,7 +6629,7 @@ function providerWorkIdentity(relayId) {
     };
   }
   const sessionRef = row?.codexRuntimeSessionRef;
-  if (!row || !sessionRef?.mode?.startsWith?.("codex_app_server")) return null;
+  if (!row || sessionRef?.mode !== "acp") return null;
   const sessionId = String(sessionRef.relaySessionId || "").trim();
   if (!sessionId) return null;
   return {
@@ -6742,7 +6733,7 @@ function canonicalWorkBridge() {
     import("../src/runtime.js"),
     import("../src/codex-app-server-activity.js"),
     import("../src/claude-native-work-feed.js"),
-    import("../src/claude-desktop-code.js"),
+    import("../src/claude-acp-session.js"),
     import("../src/provider-work-feed.js"),
     import("../src/cowork-sessions.js"),
     import("../src/safe-attachment-preview.js"),
@@ -6751,11 +6742,11 @@ function canonicalWorkBridge() {
     const claudeReconcilers = new Map();
     const buildClaudeReconciler = (identity) => {
       const key = String(identity.sessionId || "");
-      const live = claudeCode.claudeDesktopCodeNativeSnapshot(identity.sessionId);
+      const live = claudeCode.claudeAcpWorkSnapshot(identity.sessionId);
       const transcript = claudeNative.readClaudeNativeTranscriptRows(identity.transcriptPath || live?.transcriptPath);
       const reconciler = claudeNative.createClaudeNativeWorkEventReconciler([
         ...transcript,
-        ...(live?.events || []),
+
       ], {
         sessionId: identity.sessionId,
         ownerAlive: Boolean(live?.ownerAlive),
@@ -6782,7 +6773,10 @@ function canonicalWorkBridge() {
           events:chatAgentWork.chatAgentSessionToWorkEvents(data),
         };
       }
-      if (identity.provider === "claude") return { provider: "claude", events: canonicalizeWorkUserIdentity(relayId, buildClaudeReconciler(identity).adapter.snapshotEvents()) };
+      if (identity.provider === "claude") {
+        const live = claudeCode.claudeAcpWorkSnapshot(sessionId);
+        return { provider: "claude", events: canonicalizeWorkUserIdentity(relayId, live?.events || buildClaudeReconciler(identity).adapter.snapshotEvents()) };
+      }
       if (identity.provider === "cowork") {
         const remote = await coworkSessions.readCoworkSession(sessionId);
         return {
@@ -6806,20 +6800,14 @@ function canonicalWorkBridge() {
         }, listener, { intervalMs:400, maxIntervalMs:5_000 });
       }
       if (identity.provider === "claude") {
-        const worker = claudeCode.claudeDesktopCodeNativeSnapshot(sessionId);
+        const worker = claudeCode.claudeAcpWorkSnapshot(sessionId);
         if (!worker?.ownerAlive) {
           const detached = () => {};
           detached.detached = identity.expectedActive;
           return detached;
         }
-        const reconciler = claudeReconciler(identity);
-        return claudeCode.subscribeClaudeDesktopCodeWorker(sessionId, (nativeRow) => {
-          const currentIdentity = providerWorkIdentity(relayId) || identity;
-          const currentWorker = claudeCode.claudeDesktopCodeNativeSnapshot(sessionId);
-          for (const event of canonicalizeWorkUserIdentity(relayId, reconciler.adapter.push(nativeRow, {
-            ownerAlive: Boolean(currentWorker?.ownerAlive),
-            expectedActive: currentIdentity.expectedActive && !currentWorker?.settled,
-          }))) listener(event);
+        return claudeCode.subscribeClaudeAcpWorker(sessionId, event => {
+          for (const mapped of canonicalizeWorkUserIdentity(relayId, [event])) listener(mapped);
         });
       }
       if (identity.provider === "cowork") {
@@ -7341,8 +7329,8 @@ async function previewTaskSession(relayId) {
     const page = await inspectAiSession(target, { limit: 200 });
     let records = Array.isArray(page.records) ? page.records : [];
     if (provider === "claude") {
-      const { claudeDesktopCodeWorkerSnapshot } = await import("../src/claude-desktop-code.js");
-      const snapshot = claudeDesktopCodeWorkerSnapshot(row.claudeNativeSession?.sessionId);
+      const { claudeAcpWorkerSnapshot } = await import("../src/claude-acp-session.js");
+      const snapshot = claudeAcpWorkerSnapshot(row.claudeNativeSession?.sessionId);
       const followUpText = String((isRequest ? row.taskFollowUpText : row.workFollowUpText) || snapshot?.userText || "").trim();
       const followUpAt = String((isRequest ? row.taskFollowUpAt : row.workFollowUpAt) || snapshot?.startedAt || "");
       const followUpMs = Date.parse(followUpAt);
@@ -7701,12 +7689,12 @@ async function previewTaskSteer(input) {
       const { createHostAdapters } = await import("../src/runtime.js");
       const adapters = createHostAdapters();
       const nativeHost = adapters.selectHost("codex");
-      if (!nativeHost.installed || nativeHost.adapter !== "app_server") {
-        return { ok: false, error: "Codex's native app-server is unavailable." };
+      if (!nativeHost.installed || nativeHost.adapter !== "acp") {
+        return { ok: false, error: "The bundled Codex ACP adapter is unavailable." };
       }
       const relaySession = { id: `${isRequest ? "relay-request" : "relay-work"}-${safeNoteStem(id)}`, taskId: id };
       const previousRef = row.codexRuntimeSessionRef || {
-        mode: "codex_app_server",
+        mode: "acp",
         host: "codex",
         relaySessionId: relaySession.id,
         taskId: id,
@@ -7777,34 +7765,15 @@ async function previewTaskSteer(input) {
     const { liveClaudeRegistrations } = await import("../src/session-directory.js");
     const { sendClaudeSocket } = await import("../src/session-controller.js");
     const match = liveClaudeRegistrations().get(String(sessionId));
-    // A stopped Relay turn may still have a zombie Claude socket. Sending to
-    // that socket only queues the follow-up behind the dead tool forever. A
-    // deliberate follow-up retires this exact Relay-owned session process,
-    // then resumes the same transcript in a fresh Desktop worker below.
-    if (newTurn && match && match.socketLive) {
-      const pid = Number(match.pid || 0);
-      if (!pid) return { ok: false, error: "Claude's stalled session has no recoverable process id." };
-      try { process.kill(pid, "SIGTERM"); }
-      catch (error) { if (error?.code !== "ESRCH") throw error; }
-      const deadline = Date.now() + 5_000;
-      while (Date.now() < deadline) {
-        const current = liveClaudeRegistrations().get(String(sessionId));
-        if (!current || !current.socketLive || Number(current.pid || 0) !== pid) break;
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
-      const current = liveClaudeRegistrations().get(String(sessionId));
-      if (current?.socketLive && Number(current.pid || 0) === pid) {
-        return { ok: false, error: "Claude's stalled turn did not close cleanly. Try again." };
-      }
-    } else if (match && match.socketLive && match.messagingSocketPath) {
+    if (match && match.socketLive && match.messagingSocketPath) {
       await sendClaudeSocket(match.messagingSocketPath, providerBody);
       markTaskFollowUpStarted(id, newTurn, body, clientMessageId);
       return { ok: true };
     }
-    const claudeCode = await import("../src/claude-desktop-code.js");
+    const claudeCode = await import("../src/claude-acp-session.js");
     const claudeModel = requestedModel || row.claudeNativeSession.model || "claude-opus-5";
     const claudeEffort = requestedEffort || row.claudeNativeSession.effort || "high";
-    await claudeCode.continueClaudeDesktopCodeSession({
+    await claudeCode.continueClaudeAcpSession({
       sessionId,
       cwd: row.claudeNativeSession.cwd || row.openCwd || os.homedir(),
       title: row.claudeNativeSession.title || row.title || row.displayTitle || "Relay Task",
@@ -8347,12 +8316,12 @@ ipcMain.handle("relay:openRunSession", async (_e, id) => {
   const sessionId = String(native?.sessionId || "");
   if (!sessionId) return { ok: false, error: "This work has no Claude Code session to open." };
   try {
-    const { claudeDesktopCodeWorker, waitForClaudeDesktopCodeMaterialization } = await import("../src/claude-desktop-code.js");
-    const worker = claudeDesktopCodeWorker(sessionId);
+    const { claudeAcpWorker, waitForClaudeAcpMaterialization } = await import("../src/claude-acp-session.js");
+    const worker = claudeAcpWorker(sessionId);
     if (worker && !worker.closed) {
       return { ok: false, error: "Claude Code is still working. Open becomes available after this run settles." };
     }
-    if (worker) await waitForClaudeDesktopCodeMaterialization(sessionId);
+    if (worker) await waitForClaudeAcpMaterialization(sessionId);
     // Claude Desktop owns this metadata on macOS and Windows. Linux resumes the
     // provider's materialized CLI transcript directly and has no desktop index.
     if (process.platform !== "linux" && !claudeSessionMetaPath(sessionId)) {
@@ -8741,7 +8710,7 @@ const relayOwnedClaudeRuns = new Set();
 const relayOwnedCodexRuns = new Set();
 function trackClaudeRunOwnership(sessionId, claudeCode) {
   const key = String(sessionId || "");
-  const worker = claudeCode?.claudeDesktopCodeWorker?.(key);
+  const worker = claudeCode?.claudeAcpWorker?.(key);
   if (!key || !worker) return;
   relayOwnedClaudeRuns.add(key);
   Promise.resolve(worker.materializedPromise).finally(() => {
@@ -9848,6 +9817,34 @@ if (!gotSingleInstanceLock) {
   app.on("activate", () => requestExternalReopen());
 
   app.whenReady().then(async () => {
+    const acpPermissions = await import("../src/acp-permissions.js");
+    let permissionDialogOpen = false;
+    const permissionTimer = setInterval(async () => {
+      if (permissionDialogOpen) return;
+      const request = acpPermissions.pendingAcpPermissions()[0];
+      if (!request) return;
+      permissionDialogOpen = true;
+      const dialogAbort = new AbortController();
+      const expiryTimer = setInterval(() => {
+        if (!acpPermissions.pendingAcpPermissions().some(entry => entry.id === request.id)) dialogAbort.abort();
+      }, 250);
+      try {
+        const options = request.options || [];
+        const rejectIndex = options.findIndex(option => option.kind === "reject_once");
+        const cancelIndex = options.length;
+        const response = await dialog.showMessageBox({ type: "question", title: "Relay agent permission", signal: dialogAbort.signal,
+          message: String(request.toolCall?.title || "The agent needs your permission"),
+          detail: [request.provider === "claude" ? "Claude Code" : "Codex", request.cwd,
+            JSON.stringify(request.toolCall?.rawInput || {}, null, 2).slice(0, 8000)].join("\n\n"),
+          buttons: [...options.map(option => option.name), "Cancel"],
+          defaultId: rejectIndex >= 0 ? rejectIndex : cancelIndex, cancelId: cancelIndex, noLink: true });
+        const selected = options[response.response];
+        if (selected) acpPermissions.answerAcpPermission(request.id, selected.optionId);
+        else acpPermissions.answerAcpPermission(request.id, null);
+      } catch (error) { console.error("[overlay] ACP permission dialog failed:", error.message); }
+      finally { clearInterval(expiryTimer); permissionDialogOpen = false; }
+    }, 500);
+    permissionTimer.unref();
     if (process.env.RELAY_OVERLAY_TEST !== "1" && process.env.RELAY_OVERLAY_PERF !== "1") {
       try {
         const responder = await require("../bootstrap/recovery-probe.cjs").startRecoveryResponder({

@@ -32,7 +32,7 @@ const cargoSource = between(
 const esc = (value) => String(value).replace(/[&<>"']/g, "");
 const cargo = new Function(
   "esc", "fmtBytes", "fileIconSvg", "fileFamilyOf", "attachmentIsImage",
-  `"use strict"; ${cargoSource}; return { chatAttachmentCargo, chatAttachmentSource, fileKindLabel, attachmentMetaText, attachmentKey };`,
+  `"use strict"; ${between(inbox, "  function relaySharedShelf", "  function readerAttachmentRows")}; ${cargoSource}; return { chatAttachmentCargo, chatAttachmentSource, fileKindLabel, attachmentMetaText, attachmentKey, chatFileShelves };`,
 )(
   esc,
   (bytes) => {
@@ -94,7 +94,7 @@ test("beyond four photos the last tile carries +N and still opens on its own pho
   assert.match(seven, /data-att-id="img_4"[^>]*>[\s\S]*ca-more/);
 });
 
-test("images and files split: photos collage, everything else gets its own file bubble", () => {
+test("images and files split: photos collage, files share one reader shelf", () => {
   const html = cargo.chatAttachmentCargo([
     photo(1),
     photo(2),
@@ -102,17 +102,16 @@ test("images and files split: photos collage, everything else gets its own file 
     { id: "f2", name: "vineyard-deck.pdf", contentType: "application/pdf", bytes: 2.4 * 1024 * 1024 },
   ], RELAY);
   assert.match(html, /class="ca-collage ca-two"/);
-  assert.equal(html.match(/class="ca-att ca-file"/g).length, 2);
-  assert.match(html, />11 KB · Log</, "a log says what it is, in the meta, after its size");
-  assert.match(html, />2\.4 MB · PDF</);
-  assert.match(html, /data-family="code"/, "the log wears the code glyph");
-  assert.match(html, /data-family="pdf"/);
+  assert.equal((html.match(/class="ca-file-shelf"/g) || []).length, 1);
+  assert.match(html, /2 attachments/);
+  assert.doesNotMatch(html, /class="ca-att ca-file"/);
+  assert.deepEqual(cargo.chatFileShelves.get("relay_1").map(file => file.id), ["f1", "f2"]);
 });
 
 test("outbound cargo keeps its accent side, while uncommitted draft metadata is inert", () => {
   const mine = cargo.chatAttachmentCargo([photo(1), { id: "f1", name: "a.pdf" }], { ...RELAY, mine: true });
   assert.match(mine, /class="ca-att ca-photo mine pending"/);
-  assert.match(mine, /class="ca-att ca-file mine"/);
+  assert.match(mine, /1 attachment/);
   assert.match(mine, /class="ca-row mine"/);
 
   // Draft-only metadata has no local send identity yet.
@@ -122,8 +121,8 @@ test("outbound cargo keeps its accent side, while uncommitted draft metadata is 
   ]);
   assert.match(optimistic, /<div class="ca-att ca-photo ready"/);
   assert.match(optimistic, /<img src="blob:relay-preview"/);
-  assert.match(optimistic, /<div class="ca-att ca-file">/);
-  assert.doesNotMatch(optimistic, /<button/, "nothing without an id pretends to be clickable");
+  assert.match(optimistic, /<button disabled class="rd-attachments"/);
+  assert.doesNotMatch(optimistic, /<button (?!disabled)/, "uncommitted file shelves are disabled");
 });
 
 test("a newly sent photo is clickable using its local id and keeps the visible preview", () => {
@@ -136,15 +135,15 @@ test("a newly sent photo is clickable using its local id and keeps the visible p
   assert.match(html, /data-att-relay="outbox:send_1"/);
   assert.match(html, /data-att-id="file-0"/);
   assert.match(html, /<img src="blob:relay-preview"/);
-  assert.match(html, /data-att-id="file-1"/);
+  assert.equal(cargo.chatFileShelves.get("outbox:send_1")[0].id, "file-1");
   assert.match(html, /data-att-key="outbox:send_1::file-0"/);
 });
 
 test("every selectable attachment carries a check circle in the gutter", () => {
   const html = cargo.chatAttachmentCargo([photo(1), { id: "f1", name: "a.pdf" }], RELAY);
-  assert.equal(html.match(/data-att-check="/g).length, 2);
+  assert.equal(html.match(/data-att-check="/g).length, 1);
   assert.match(html, /data-att-row="relay_1::img_1"/);
-  assert.match(html, /data-att-row="relay_1::f1"/);
+  assert.match(html, /data-reader-attachments="relay_1"/);
   assert.match(html, /aria-pressed="false"/);
 });
 
@@ -468,4 +467,14 @@ test("the composer's own chips and the other attachment surfaces are untouched",
   assert.match(inbox, /\$\{attachmentChips\(m\.attachments\)\}/, "task messages still use chips");
   assert.match(inbox, /function relaySharedShelf\(relay\)/, "the reader keeps its shared collection entry point");
   assert.match(inbox, /\.th-msg\.attachment-only \{ display:contents; \}/);
+});
+
+test("one or many files use a single shelf and preserve all dialog metadata", () => {
+  for (const count of [1, 5, 100]) {
+    const files = Array.from({length:count}, (_, i) => ({id:`file-${i}`, name:`file-${i}.txt`, bytes:i + 1}));
+    const html = cargo.chatAttachmentCargo(files, RELAY);
+    assert.equal((html.match(/class="rd-attachments"/g) || []).length, 1);
+    assert.match(html, new RegExp(`${count} ${count === 1 ? "attachment" : "attachments"}`));
+    assert.deepEqual(cargo.chatFileShelves.get("relay_1"), files);
+  }
 });

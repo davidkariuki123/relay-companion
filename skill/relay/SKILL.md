@@ -118,6 +118,14 @@ thin agent handoff. Apply these rules to drafts and previews as well as sends.
 
 Use two independent label arrays on Relays, shared links, replies and posts:
 
+Assess both lanes whenever you compose a new Relay, link, reply or post,
+including for ordinary production accounts. Supply every lane you can classify
+from the message; use [] when you assessed it and no label applies. Leave a
+lane absent only when it is unclassified or uncertain. Collect this metadata
+silently: do not add badges or labels to the human text, ask the person to tag
+their message, or announce routine classification. These fields support
+telemetry now; they do not enable a user-facing classification feature.
+
 - `nature`: event, decision, plan, finding, opinion, question. Include every
   clearly applicable kind of content; a question stays content even if it is
   quoted or rhetorical.

@@ -107,12 +107,8 @@ test("the hand-off orders its steps: sign-in, open, then the first turn", () => 
   // Task completion still settles from the transcript the app writes.
   assert.match(handoff, /ensureCanonicalCompletionMonitor\(id\)[^]*ensurePlainHandoffCompletionMonitor\(id\)/);
   assert.match(handoff, /deferPresentation: Boolean\(firstTurn\)/, "the provider is not exposed before its user turn exists");
-  // Claude: Relay owns the engine (governor-free), Desktop displays that live
-  // session, and only then is the human's turn injected into it.
-  assert.match(handoff, /startClaudeInboxSession\(\{[^]*?sessionId: String\(binding\.nativeId\)/);
-  assert.match(handoff, /await presentSessionOpen\(focused, host, id, observedBundle\);[^]*?agentHandoffPatch\(id, \{ imported: true \}\)/);
-  assert.match(handoff, /const claudeDeferred = false;/);
-  assert.equal(main.includes("settleClaudeHandoff"), false, "the worker settle path is retired");
+  assert.match(handoff, /const claudeDeferred = Boolean\(firstTurn && turnDelivery\?\.adapter === "acp"\)/);
+  assert.match(handoff, /worker\?\.done\.then/);
   assert.match(delivery, /export async function waitForClaudeUserRow/);
   assert.match(delivery, /if \(row\?\.type !== "user" \|\| row\?\.isMeta\) continue;/, "the queue-operation echo of the prompt is not the user row");
   assert.match(docks, /const pending = !done && h\.imported === false;/);
@@ -162,8 +158,8 @@ test("a Task reads as one page: the agent document folds into Details, not a sec
   assert.match(reader, /const status = "";/);
   assert.match(reader, /const documentHostActions = onHuman \? `<div class="rd-host-actions"/, "the host rows show on a Task too");
   // Opening a Relay that already went to an app lands on its receipt.
-  const open = between(inbox, "function openReader", "function closeReader");
-  assert.match(open, /readerTab = openedHandoff && \["starting", "running", "failed"\]\.includes\(openedHandoff\.state\) \? "agent" : "you"/);
+  const open = between(inbox, "function openReader(", "function closeReader(");
+  assert.match(open, /readerTab = !picker && openedHandoff && \["starting", "running", "failed"\]\.includes\(openedHandoff\.state\) \? "agent" : "you"/);
   // The Task board reads the receipt too.
   const state = between(inbox, "function taskBoardState", "function relayWorkState");
   assert.match(state, /if \(h\?\.state === "starting"\) return "running";/);
@@ -183,72 +179,21 @@ test("a Task has no Start: it opens like a Relay from every surface", () => {
   assert.equal(inbox.includes("A task's verbs are Preview and Start"), false);
 });
 
-test("the first turn wakes Relay's own live Claude session and uses Desktop's submit for Codex", async () => {
-  const turn = between(delivery, "export async function deliverTurnToSession", "throw new Error(`Unsupported provider");
-  // Claude: Relay's own governor-free CLI worker (never Desktop's warm slot).
-  // One Claude path: a governor-free engine Relay owns, woken through its
-  // inbox socket. No Desktop-cap dependency, no headless worker.
-  assert.match(turn, /startClaudeInboxSession/);
-  assert.match(turn, /adapter: "claude_inbox_socket", live: true/);
-  assert.equal(delivery.includes("claude_desktop_code_worker"), false, "the worker fallback is retired");
-  assert.match(turn, /locateClaudeTranscript\(nativeId, \[/, "the durable check reads the transcript the engine actually writes");
-  assert.match(main, /app\.on\("before-quit"[^]*stopIdleClaudeInboxSessions/, "before-quit reaps only idle engines, so a self-update restart never kills a live turn");
-  // Codex: Desktop's own submit, with the route forwarded.
-  assert.match(turn, /return deliverCodex\(\{ \.\.\.exact, surface: "desktop" \}, prompt, \{/);
-  assert.match(delivery, /\.\.\.\(options\.model \? \{ model: options\.model \} : \{\}\),/, "the hand-off's route reaches Desktop's submit");
-
+test("new native hand-off turns use ACP and preserve route and session identity", async () => {
   const mod = await import("../src/session-delivery.js");
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-handoff-"));
-  try {
-    // Claude: Relay brings up its own live engine for the exact session, then
-    // wakes it through that session's inbox socket with the human's words.
-    const claudeSeen = [];
-    const claudePath = path.join(dir, "claude.jsonl");
-    const sockPath = path.join(dir, "inbox.sock");
-    fs.writeFileSync(claudePath, "");
-    const claudeResult = await mod.deliverTurnToSession({ provider: "claude", nativeId: "abc", title: "Exact title" }, "testing", {
-      discover: () => [{ provider: "claude", nativeId: "abc", cwd: dir, title: "Relay", state: "idle", nativeRef: { transcriptPath: claudePath } }],
-      startInboxSession: async (input) => { claudeSeen.push({ start: input }); return { sessionId: input.sessionId, socketPath: sockPath }; },
-      sendClaude: async (socketPath, text) => {
-        claudeSeen.push({ send: { socketPath, text } });
-        // Claude's own message system wraps the words; the durable check must still find them.
-        fs.appendFileSync(claudePath, `${JSON.stringify({ type:"user", message:{ role:"user", content:`Another Claude session sent a message:\n${text}` } })}\n`);
-      },
-      model: "claude-opus-5",
-      effort: "high",
-      permissionMode: "acceptEdits",
-    });
-    assert.equal(claudeResult.adapter, "claude_inbox_socket");
-    assert.equal(claudeResult.live, true, "the Claude hand-off is a live session from its first second");
-    assert.equal(claudeSeen.length, 2);
-    assert.equal(claudeSeen[0].start.sessionId, "abc");
-    assert.equal(claudeSeen[0].start.cwd, dir);
-    assert.equal(claudeSeen[0].start.model, "claude-opus-5");
-    assert.equal(claudeSeen[0].start.permissionMode, "acceptEdits");
-    assert.equal(claudeSeen[1].send.socketPath, sockPath, "the turn goes through the session's own inbox socket");
-    assert.equal(claudeSeen[1].send.text, "testing");
-
-    // Codex: Desktop's own submit, with the route forwarded.
+  for (const provider of ["claude", "codex"]) {
     const seen = [];
-    const codexPath = path.join(dir, "rollout.jsonl");
-    fs.writeFileSync(codexPath, "");
-    const codexResult = await mod.deliverTurnToSession({ provider: "codex", nativeId: "thread-1" }, "testing", {
-      discover: () => [{ provider: "codex", nativeId: "thread-1", cwd: dir, state: "idle", nativeRef: { sessionPath: codexPath } }],
-      waitForCodexIdle: async () => ({ idle: true }),
-      submitCodex: async (input) => { seen.push(input); return { ran: true, submitted: true, clientUserMessageId: input.clientUserMessageId }; },
-      model: "gpt-5.6-sol",
-      effort: "high",
-      approvalPolicy: "never",
-      sandboxPolicy: { type: "dangerFullAccess" },
+    const result = await mod.deliverTurnToSession({ provider, nativeId: "native-1", cwd: os.tmpdir() }, "testing", {
+      discover: () => [], model: "test-model", effort: "high", permissionMode: "auto",
+      startAcpRun: async input => { seen.push(input); return { sessionId: input.sessionId }; },
     });
-    assert.equal(codexResult.adapter, "codex_desktop_owner");
+    assert.equal(result.adapter, "acp");
+    assert.equal(result.nativeId, "native-1");
     assert.equal(seen.length, 1);
-    assert.equal(seen[0].text, "testing");
-    assert.equal(seen[0].model, "gpt-5.6-sol");
-    assert.equal(seen[0].approvalPolicy, "never");
-    assert.deepEqual(seen[0].sandboxPolicy, { type: "dangerFullAccess" });
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    assert.equal(seen[0].prompt, "testing");
+    assert.equal(seen[0].model, "test-model");
+    assert.equal(seen[0].effort, "high");
+    assert.ok(seen[0].mcpServers.some(server => server.name === "relay"));
   }
 });
 

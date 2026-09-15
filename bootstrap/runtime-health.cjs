@@ -32,20 +32,28 @@ function defaultRun(command, args, options = {}) {
   return spawnSync(command, args, { encoding: "utf8", timeout: 30_000, windowsHide: true, ...options });
 }
 
-function runtimeProcessCommands(platform, run = defaultRun, userId = typeof process.getuid === "function" ? process.getuid() : 0) {
+function runtimeProcessQuery(platform) {
   if (platform === "win32") {
     const script = "$relaySid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { $_.CommandLine -match 'node_modules[\\\\/]relay-companion[\\\\/]' } | ForEach-Object { $relayOwner = Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid -ErrorAction SilentlyContinue; if ($relayOwner.Sid -eq $relaySid) { $_.CommandLine } }";
-    const result = run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]);
-    return commandOk(result) ? withoutWindowsShellWrappers(String(result.stdout || "").split(/\r?\n/)) : [];
+    return { command: "powershell.exe", args: ["-NoProfile", "-NonInteractive", "-Command", script] };
   }
-  const result = run("/bin/ps", ["-axo", "uid=,command="]);
-  if (!commandOk(result)) return [];
+  return { command: "/bin/ps", args: ["-axo", "uid=,command="] };
+}
+
+function parseRuntimeProcessCommands(stdout, platform, userId = typeof process.getuid === "function" ? process.getuid() : 0) {
+  if (platform === "win32") return withoutWindowsShellWrappers(String(stdout || "").split(/\r?\n/));
   const lines = [];
-  for (const row of String(result.stdout || "").split(/\r?\n/)) {
+  for (const row of String(stdout || "").split(/\r?\n/)) {
     const match = row.match(/^\s*(\d+)\s+(.*)$/);
     if (match && Number(match[1]) === userId) lines.push(match[2]);
   }
   return lines;
+}
+
+function runtimeProcessCommands(platform, run = defaultRun, userId = typeof process.getuid === "function" ? process.getuid() : 0) {
+  const { command, args } = runtimeProcessQuery(platform);
+  const result = run(command, args);
+  return commandOk(result) ? parseRuntimeProcessCommands(result.stdout, platform, userId) : [];
 }
 
 function exactRuntimeHealth(target, {
@@ -418,6 +426,8 @@ module.exports = {
   MEMORY_PRESSURE_MIN_FREE_BYTES,
   restartInstalledRuntimeServices,
   runtimeProcessCommands,
+  runtimeProcessQuery,
+  parseRuntimeProcessCommands,
   terminateInstalledServiceProcesses,
   WINDOWS_STOP_INSTALLED_SERVICES_PS,
 };

@@ -8,6 +8,7 @@ import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import readline from "node:readline";
+import { acpProviderBinary } from "./acp-provider-binary.js";
 
 export class CodexAppServerClient {
   constructor({
@@ -350,48 +351,6 @@ export async function stopSharedCodexAppServer() {
   sharedServerPromise = null;
 }
 
-export function windowsBundledCodexCommand({
-  env = process.env,
-  readdirSync = fs.readdirSync,
-  existsSync = fs.existsSync,
-  statSync = fs.statSync,
-} = {}) {
-  const localAppData = String(env.LOCALAPPDATA || "").trim();
-  if (!localAppData) return "";
-  const binDir = path.win32.join(localAppData, "OpenAI", "Codex", "bin");
-  let entries;
-  try {
-    entries = readdirSync(binDir, { withFileTypes: true });
-  } catch {
-    return "";
-  }
-  const candidates = [];
-  for (const entry of entries) {
-    if (!entry?.isDirectory?.()) continue;
-    const candidate = path.win32.join(binDir, entry.name, "codex.exe");
-    if (!existsSync(candidate)) continue;
-    let modified = 0;
-    try { modified = Number(statSync(candidate).mtimeMs) || 0; } catch {}
-    candidates.push({ candidate, modified });
-  }
-  candidates.sort((a, b) => b.modified - a.modified || b.candidate.localeCompare(a.candidate));
-  return candidates[0]?.candidate || "";
-}
-
-export function defaultCodexCommand({ env = process.env, platform = process.platform } = {}) {
-  if (env.CODEX_CLI_PATH) return env.CODEX_CLI_PATH;
-  if (platform === "win32") {
-    // Codex Desktop keeps its matching CLI in a versioned/hash directory. The
-    // unversioned binary and a separate PATH install can lag behind the app and
-    // write a rollout shape the current Desktop cannot project.
-    const bundled = windowsBundledCodexCommand({ env });
-    if (bundled) return bundled;
-  }
-  for (const appBundledCodex of [
-    "/Applications/ChatGPT.app/Contents/Resources/codex",
-    "/Applications/Codex.app/Contents/Resources/codex",
-  ]) {
-    if (fs.existsSync(appBundledCodex)) return appBundledCodex;
-  }
-  return "codex";
-}
+// Native app metadata/materialization still uses the native provider API.
+// Its binary is the same pinned one used by ACP; no separate CLI is needed.
+export function defaultCodexCommand() { return acpProviderBinary("codex"); }

@@ -175,10 +175,13 @@ test("reply selection and share links retain the approved wire contract", async 
   assert.deepEqual(body.nature, ["finding"]);
   assert.deepEqual(body.asks, []);
   const minted = await f.run(["--transport=https", "call", "relay_share_link"], {
-    forHuman: "A letter for a guest", forAgent: "Guest context", idempotencyKey: "direct-link-1",
+    forHuman: "A letter for a guest", forAgent: "Guest context", idempotencyKey: "direct-link-1", nature: ["finding"], asks: [],
   });
   assert.equal(minted.code, 0, minted.stderr);
   assert.ok(f.calls.some((call) => call.path === "/v1/share-links" && call.body.forAgent === "Guest context"));
+  const linkBody = f.calls.find((call) => call.path === "/v1/share-links").body;
+  assert.deepEqual(linkBody.nature, ["finding"]);
+  assert.deepEqual(linkBody.asks, []);
   const revoked = await f.run(["--transport=https", "call", "relay_share_link"], { action: "revoke", relayId: "relay_link", idempotencyKey: "direct-revoke-1" });
   assert.equal(revoked.code, 0, revoked.stderr);
   assert.ok(f.calls.some((call) => call.path === "/v1/share-links/relay_link" && call.method === "DELETE"));

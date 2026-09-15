@@ -5,9 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import {
   collectCompanionFleetTelemetry,
-  companionFleetTelemetryHeader,
   encodeCompanionFleetTelemetry,
-  resetCompanionFleetTelemetryCache,
 } from "../src/fleet-telemetry.js";
 import { canonicalRuntimeLayout } from "../src/canonical-runtime.js";
 
@@ -104,10 +102,8 @@ test("fleet telemetry surfaces a pinned recovery candidate and all durable failu
   ]);
 });
 
-test("fleet telemetry header is compact base64url and cached briefly", () => {
-  resetCompanionFleetTelemetryCache();
-  let collections = 0;
-  const collect = () => ({
+test("fleet telemetry header remains compact base64url", () => {
+  const report = {
     schema: 1,
     channel: "stable",
     autoUpdate: true,
@@ -118,12 +114,8 @@ test("fleet telemetry header is compact base64url and cached briefly", () => {
     previousVersion: null,
     stateChangedAt: null,
     failures: [],
-    sequence: ++collections,
-  });
-  const first = companionFleetTelemetryHeader({ now: () => 1000, collect });
-  const second = companionFleetTelemetryHeader({ now: () => 2000, collect });
-  assert.equal(first, second);
-  assert.equal(collections, 1);
-  assert.match(first, /^[A-Za-z0-9_-]+$/);
-  assert.equal(Buffer.from(encodeCompanionFleetTelemetry(collect()), "base64url").toString("utf8").includes("stable"), true);
+  };
+  const header = encodeCompanionFleetTelemetry(report);
+  assert.match(header, /^[A-Za-z0-9_-]+$/);
+  assert.deepEqual(JSON.parse(Buffer.from(header, "base64url")), report);
 });

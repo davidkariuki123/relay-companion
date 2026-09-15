@@ -532,9 +532,9 @@ test("a live Claude socket needs recent native activity and stale sockets stop h
   assert.match(liveState, /if \(!match \|\| !match\.socketLive\) return "offline"/);
   assert.match(liveState, /Date\.now\(\) - lastActivityAt <= 90_000 \? "active" : "stalled"/);
   const steer = between(main, "async function previewTaskSteer", "function installActiveSpaceWatcher");
-  assert.match(steer, /if \(newTurn && match && match\.socketLive\)/);
-  assert.match(steer, /process\.kill\(pid, "SIGTERM"\)/);
-  assert.match(steer, /continueClaudeDesktopCodeSession/);
+  assert.match(steer, /if \(match && match\.socketLive && match\.messagingSocketPath\)/);
+  assert.doesNotMatch(steer, /process\.kill\(pid, "SIGTERM"\)/);
+  assert.match(steer, /continueClaudeAcpSession/);
 });
 
 

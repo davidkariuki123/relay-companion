@@ -15,7 +15,6 @@ import {
   ensureAgentRunProviderAuthentication,
   materializeRelayOperation,
   publishAndFind,
-  resolveClaudeBackgroundAgent,
   runSessionDirectoryOnce,
   sessionOperationPrompt,
   settleClaudeRelayRun,
@@ -380,48 +379,6 @@ test("a live Claude task restarts only for a one-time stale MCP catalog migratio
   const liveRegistration = { pid: 50_097 };
   assert.equal(claudeSessionNeedsCatalogRestart({ relayMcpCatalogVersion: 1 }, liveRegistration), true);
   assert.equal(claudeSessionNeedsCatalogRestart({ relayMcpCatalogVersion: 1 }, null), false);
-});
-
-test("Claude background launch resolves the provider-issued session id rather than the ignored requested id", () => {
-  const agents = [
-    {
-      id: "3c79bc6d",
-      sessionId: "3c79bc6d-3b89-4f7f-aef8-64e0c991c542",
-      name: "Relay proof",
-      cwd: "/work/relay",
-      startedAt: 10_000,
-    },
-  ];
-  const resolved = resolveClaudeBackgroundAgent(agents, {
-    output: "warning: --bg manages the session id; ignoring --session-id\nbackgrounded · 3c79bc6d · Relay proof",
-    title: "Relay proof",
-    cwd: "/work/relay",
-    resumeSessionId: "9edea3b3-b334-4a59-8161-7c97989e9fe0",
-    startedAfter: 9_000,
-  });
-  assert.equal(resolved?.sessionId, "3c79bc6d-3b89-4f7f-aef8-64e0c991c542");
-});
-
-test("Claude recovery can resolve an already-finished background session by title and cwd", () => {
-  const resolved = resolveClaudeBackgroundAgent([
-    { sessionId: "older", name: "Relay proof", cwd: "/work/relay", startedAt: 5_000 },
-    { sessionId: "actual", name: "Relay proof", cwd: "/work/relay", startedAt: 12_000 },
-  ], { title: "Relay proof", cwd: "/work/relay", startedAfter: 9_000 });
-  assert.equal(resolved?.sessionId, "actual");
-});
-
-test("Claude recovery skips a newer stale registration with no durable transcript", () => {
-  const durable = new Set(["actual"]);
-  const resolved = resolveClaudeBackgroundAgent([
-    { sessionId: "actual", name: "Relay proof", cwd: "/work/relay", startedAt: 12_000 },
-    { sessionId: "stale", name: "Relay proof", cwd: "/work/relay", startedAt: 13_000 },
-  ], {
-    title: "Relay proof",
-    cwd: "/work/relay",
-    startedAfter: 9_000,
-    acceptAgent: (agent) => durable.has(agent.sessionId),
-  });
-  assert.equal(resolved?.sessionId, "actual");
 });
 
 test("native session publication sends only the target row and retries a transient timeout", async () => {

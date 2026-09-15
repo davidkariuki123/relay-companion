@@ -81,6 +81,17 @@ export async function verifyInstalledRuntime({ packageRoot, version, platform = 
   }
   assertRuntimeCapabilities(root);
   await verifyInstalledManagedSkills(root);
+  const { AcpClient } = await import(pathToFileURL(path.join(root, "src", "acp-client.js")).href);
+  for (const provider of ["claude", "codex"]) {
+    const adapter = new AcpClient({ provider, timeoutMs: 30_000 });
+    try {
+      const initialized = await adapter.start();
+      const packageName = provider === "claude" ? "@agentclientprotocol/claude-agent-acp" : "@agentclientprotocol/codex-acp";
+      if (initialized.agentInfo?.version !== manifest.dependencies?.[packageName] || !initialized.agentCapabilities?.loadSession) {
+        throw new Error(`Bundled ${provider} ACP identity or native-session support is invalid`);
+      }
+    } finally { await adapter.stop(); }
+  }
   const nativeBridge = path.join(root, "native", platform === "win32" ? "mcp-bridge.exe" : "mcp-bridge");
   const bridgeIdentity = spawnSync(nativeBridge, ["--version"], { encoding: "utf8", windowsHide: true, timeout: 30_000 });
   if (bridgeIdentity.error || bridgeIdentity.status !== 0 || String(bridgeIdentity.stdout || "").trim() !== "relay-mcp-bridge-v1") {

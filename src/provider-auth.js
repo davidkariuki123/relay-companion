@@ -14,35 +14,19 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { withCodexAppServer } from "./codex-app-server.js";
-import { cliBinaryPath, installedCliVersions } from "./desktop-wake.js";
+import { acpProviderBinary } from "./acp-provider-binary.js";
 
 const execFileDefault = promisify(execFileCallback);
 const PROVIDERS = Object.freeze({
   claude: {
     id: "claude",
     label: "Claude Code",
-    candidates: (env = process.env) => [
-      env.CLAUDE_CLI_PATH,
-      "/opt/homebrew/bin/claude",
-      "/usr/local/bin/claude",
-      path.join(os.homedir(), ".local", "bin", "claude"),
-      ...installedCliVersions().reverse().map((version) => cliBinaryPath(version)),
-      "claude",
-    ],
     statusArgs: ["auth", "status", "--json"],
     loginArgs: ["auth", "login", "--claudeai"],
   },
   codex: {
     id: "codex",
     label: "Codex",
-    candidates: (env = process.env) => [
-      env.CODEX_CLI_PATH,
-      "/Applications/ChatGPT.app/Contents/Resources/codex",
-      "/opt/homebrew/bin/codex",
-      "/usr/local/bin/codex",
-      path.join(os.homedir(), ".local", "bin", "codex"),
-      "codex",
-    ],
     statusArgs: ["login", "status"],
     loginArgs: ["login"],
   },
@@ -124,7 +108,7 @@ export function resolveProviderCommand(provider, { command = "", env = process.e
   const spec = PROVIDERS[String(provider || "")];
   if (!spec) throw new Error("Unknown provider connection.");
   if (command) return String(command).trim();
-  return spec.candidates(env).map(normalizedProviderCommand).find(Boolean) || "";
+  try { return acpProviderBinary(provider); } catch { return ""; }
 }
 
 function safeMessage(value, max = 500) {

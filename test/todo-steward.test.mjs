@@ -18,10 +18,8 @@ import {
   boardSignature,
   buildStewardPrompt,
   chooseStewardProvider,
-  claudeStewardArgs,
   readStewardState,
   requestStewardRun,
-  runClaudeSteward,
   runTodoStewardOnce,
   saveStewardPreferences,
   stewardBoardSnapshot,
@@ -192,46 +190,6 @@ test("the final answer is read from JSON, fenced JSON, or falls back to the pros
   assert.deepEqual(stewardResultFromText('Done.\n```json\n{"checked":"3","changed":0}\n```'), { checked: 3, changed: 0 });
   assert.deepEqual(stewardResultFromText("I looked at everything and nothing changed."), { checked: 0, changed: 0 }, "prose is never surfaced; only counts survive");
   assert.equal(stewardResultFromText(""), null);
-});
-
-test("claude -p arguments grant only Relay tools and read-only shell, and carry model/effort/permission", () => {
-  const args = claudeStewardArgs({ model: "opus", effort: "high", permissionMode: "auto", mcpConfigPath: "/tmp/relay-mcp.json", mcpServerNames: ["granular-brain", "relay"] });
-  assert.deepEqual(args.slice(0, 5), ["-p", "--output-format", "json", "--model", "opus"]);
-  assert.ok(args.includes("--effort") && args[args.indexOf("--effort") + 1] === "high");
-  assert.ok(args.includes("--permission-mode") && args[args.indexOf("--permission-mode") + 1] === "auto");
-  assert.ok(args.includes("--mcp-config"));
-  assert.ok(args.includes("mcp__relay"));
-  assert.ok(args.includes("mcp__granular-brain"), "the person's own MCP servers ride along, exactly as in their sessions");
-  assert.equal(args.filter((arg) => arg === "mcp__relay").length, 1);
-  assert.ok(!args.includes("--strict-mcp-config"), "the person's own MCP config stays loaded");
-  assert.ok(args.includes("Bash(git log:*)"));
-  assert.ok(!args.some((arg) => /Bash\(git push|Bash\(rm|Write|Edit/.test(arg)));
-  assert.ok(!args.includes("--allow-dangerously-skip-permissions"));
-  assert.ok(claudeStewardArgs({ permissionMode: "bypassPermissions" }).includes("--allow-dangerously-skip-permissions"));
-});
-
-function fakeChild() {
-  const child = new EventEmitter();
-  child.stdout = new PassThrough();
-  child.stderr = new PassThrough();
-  child.stdin = new PassThrough();
-  child.exitCode = null;
-  child.kill = () => { child.exitCode = 143; return true; };
-  return child;
-}
-
-test("the Claude lane feeds the brief over stdin and reads the JSON result envelope", async () => {
-  const child = fakeChild();
-  let stdin = "";
-  child.stdin.on("data", (chunk) => { stdin += chunk; });
-  const pending = runClaudeSteward({ command: "claude", cwd: os.tmpdir(), prompt: "BRIEF", args: ["-p"], spawnProcess: () => child });
-  await new Promise((resolve) => setTimeout(resolve, 10));
-  child.stdout.write(JSON.stringify({ type: "result", is_error: false, result: '{"checked":2,"changed":0}' }));
-  child.exitCode = 0;
-  child.emit("exit", 0);
-  const result = await pending;
-  assert.equal(stdin, "BRIEF");
-  assert.deepEqual(stewardResultFromText(result.finalMessage), { checked: 2, changed: 0 });
 });
 
 test("one daemon tick fingerprints the board, runs when due, and records what happened", async () => {

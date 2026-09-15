@@ -16,7 +16,6 @@
 // never cancels or removes work, and every change it makes carries a
 // note the person can see and evidence they can check.
 
-import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -401,109 +400,6 @@ export function stewardWorkDir(baseDir = storeDir()) {
   const dir = path.join(baseDir, "todo-steward");
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   return dir;
-}
-
-/** The MCP servers the person's own Claude Code sessions carry (user scope of ~/.claude.json). */
-export function claudeUserMcpServerNames(configPath = path.join(os.homedir(), ".claude.json")) {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(configPath, "utf8"));
-    const servers = parsed?.mcpServers;
-    if (!servers || typeof servers !== "object" || Array.isArray(servers)) return [];
-    return Object.keys(servers).filter((name) => /^[A-Za-z0-9_.-]+$/.test(name));
-  } catch {
-    return [];
-  }
-}
-
-/**
- * `claude -p` arguments for one steward run. This is the same Claude Code the
- * person uses: their own MCP servers stay loaded (the Relay server is only
- * pinned so it is always present) and the permission mode is the one Relay's
- * Task runs use. The allow list only removes prompts a background run could
- * never answer: every MCP server the person has, plus read-only shell.
- */
-export function claudeStewardArgs({
-  model = STEWARD_ROUTES.claude.model,
-  effort = STEWARD_ROUTES.claude.effort,
-  permissionMode = "auto",
-  mcpConfigPath = "",
-  mcpServerNames = claudeUserMcpServerNames(),
-} = {}) {
-  const args = ["-p", "--output-format", "json", "--model", model];
-  if (effort && effort !== "auto") args.push("--effort", effort);
-  args.push("--permission-mode", permissionMode);
-  if (permissionMode === "bypassPermissions") args.push("--allow-dangerously-skip-permissions");
-  if (mcpConfigPath) args.push("--mcp-config", mcpConfigPath);
-  const servers = [...new Set(["relay", ...mcpServerNames])].map((name) => `mcp__${name}`);
-  args.push(
-    "--allowedTools",
-    ...servers,
-    "Read", "Grep", "Glob",
-    "Bash(git log:*)", "Bash(git branch:*)", "Bash(git status:*)", "Bash(git show:*)", "Bash(git diff:*)",
-    "Bash(git fetch:*)", "Bash(git ls-remote:*)", "Bash(git merge-base:*)", "Bash(git rev-parse:*)",
-    "Bash(rg:*)", "Bash(grep:*)", "Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)",
-    "--max-turns", "120",
-  );
-  return args;
-}
-
-/** Run Claude Code headless; the prompt goes over stdin so its size never matters. */
-export function runClaudeSteward({
-  command = "claude",
-  cwd,
-  prompt,
-  args,
-  env = process.env,
-  runTimeoutMs = RUN_TIMEOUT_MS,
-  onHeartbeat = () => {},
-  spawnProcess = spawn,
-} = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawnProcess(command, args, {
-      cwd,
-      env: { ...env, RELAY_TODO_STEWARD: "1" },
-      stdio: ["pipe", "pipe", "pipe"],
-      windowsHide: true,
-    });
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      if (child.exitCode == null) child.kill("SIGTERM");
-      reject(new Error("Claude Code reached the steward's run time limit."));
-    }, runTimeoutMs);
-    const beat = setInterval(() => { try { onHeartbeat(); } catch {} }, 30_000);
-    beat.unref?.();
-    child.once("error", (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      clearInterval(beat);
-      reject(error);
-    });
-    child.stdout.on("data", (chunk) => { stdout += chunk; });
-    child.stderr.on("data", (chunk) => { stderr = `${stderr}${chunk}`.slice(-4_000); });
-    child.once("exit", (code) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      clearInterval(beat);
-      let finalText = stdout.trim();
-      try {
-        const parsed = JSON.parse(stdout);
-        if (parsed && typeof parsed === "object") {
-          if (parsed.is_error) return reject(new Error(String(parsed.result || "Claude Code reported an error.")));
-          finalText = String(parsed.result || "");
-        }
-      } catch {}
-      if (code !== 0 && !finalText) return reject(new Error(stderr.trim() || `Claude Code exited with ${code}.`));
-      resolve({ finalMessage: finalText });
-    });
-    child.stdin.once("error", () => {});
-    child.stdin.end(String(prompt || ""));
-  });
 }
 
 /**

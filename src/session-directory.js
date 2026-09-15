@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { acpSessionOwner } from "./acp-session-owner.js";
 import { codexHome, claudeDesktopSessionsDir, claudeHome, storeDir } from "./host-paths.js";
 import {
   RECENT_ROLLOUT_ACTIVITY_MS,
@@ -161,7 +162,7 @@ function codexSessionRow({ rollout, meta, activity, indexed, nowMs }) {
     title: indexed?.threadName || `Codex ${rollout.threadId.slice(0, 8)}`,
     projectName: basenameProject(meta.cwd),
     cwd: meta.cwd,
-    state: busy ? "active" : "idle",
+    state: acpSessionOwner("codex", rollout.threadId)?.state || (busy ? "active" : "idle"),
     lastActiveAt: new Date(lastActiveAt || nowMs).toISOString(),
     lastMessageAt: new Date(activity.lastMessageAt || lastActiveAt || nowMs).toISOString(),
     nativeRef: {
@@ -363,7 +364,9 @@ export async function readClaudeTranscriptActivityAsync(transcriptPath, { tailBy
   }
 }
 
-function liveClaudeState(registration, transcriptActivity, recoverable) {
+function liveClaudeState(registration, transcriptActivity, recoverable, nativeId) {
+  const owner = acpSessionOwner("claude", nativeId);
+  if (owner) return owner.state;
   const registryState = registration ? claudeState(registration) : recoverable ? "idle" : "offline";
   // A transcript can refine a LIVE registry's missing busy flag. It cannot
   // make a dead process active: a crashed turn often ends on a user/tool row.
@@ -421,7 +424,7 @@ function claudeSessionRow(candidate, transcriptActivity, nowMs) {
       title: String(row.title || `Claude ${nativeId.slice(0, 8)}`),
       projectName: basenameProject(cwd),
       cwd,
-      state: liveClaudeState(registration, transcriptActivity, recoverable),
+      state: liveClaudeState(registration, transcriptActivity, recoverable, nativeId),
       lastActiveAt: new Date(Math.max(lastActiveAt, registration?.updatedAt || 0)).toISOString(),
       lastMessageAt: new Date(transcriptActivity.lastMessageAt || lastActiveAt).toISOString(),
       nativeRef: {
@@ -445,7 +448,7 @@ function claudeSessionRow(candidate, transcriptActivity, nowMs) {
       title: String(registration.name || registration.title || `Claude ${nativeId.slice(0, 8)}`),
       projectName: basenameProject(cwd),
       cwd,
-      state: liveClaudeState(registration, transcriptActivity, Boolean(transcriptPath)),
+      state: liveClaudeState(registration, transcriptActivity, Boolean(transcriptPath), nativeId),
       lastActiveAt: new Date(registration.updatedAt || registration.startedAt || nowMs).toISOString(),
       lastMessageAt: new Date(transcriptActivity.lastMessageAt || registration.updatedAt || registration.startedAt || nowMs).toISOString(),
       nativeRef: {
@@ -467,7 +470,7 @@ function claudeSessionRow(candidate, transcriptActivity, nowMs) {
     title: saved.title || `Claude ${String(nativeId).slice(0, 8)}`,
     projectName: basenameProject(saved.cwd),
     cwd: saved.cwd || "",
-    state: liveClaudeState(registration, transcriptActivity, recoverable),
+    state: liveClaudeState(registration, transcriptActivity, recoverable, nativeId),
     lastActiveAt: new Date(Math.max(Number(saved.lastActiveAt || 0), registration?.updatedAt || 0)).toISOString(),
     lastMessageAt: new Date(transcriptActivity.lastMessageAt || Number(saved.lastActiveAt || 0) || registration?.updatedAt || nowMs).toISOString(),
     nativeRef: {

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { commandExists } from "./command-path.js";
 import fs from "node:fs";
@@ -6,10 +6,12 @@ import net from "node:net";
 import path from "node:path";
 import updateActivity from "../bootstrap/update-activity.cjs";
 import { configDir } from "./config.js";
-import { CodexAppServerClient, defaultCodexCommand } from "./codex-app-server.js";
-import { codexRelayCompletion, runCodexAppServerOneShot, runCodexOneShot } from "./codex-one-shot.js";
+import { acpAvailable, acpMcpServers } from "./acp-client.js";
+import { startAcpRun, acpPermissionMode } from "./acp-session.js";
+import { acpSessionOwner } from "./acp-session-owner.js";
+import { relayMcpLaunchSpec } from "./runtime.js";
+import { relayCompletion } from "./relay-completion.js";
 import { claudeNativeEventsToWorkEvents, readClaudeNativeTranscriptRows } from "./claude-native-work-feed.js";
-import { cliBinaryPath, installedCliVersions } from "./desktop-wake.js";
 import { inspectAiSession } from "./ai-session-transcript.js";
 import { waitForCodexIdle, waitForRolloutGrowth, rolloutSize } from "./codex-inject.js";
 import { claudeHome, storeDir } from "./host-paths.js";
@@ -105,104 +107,6 @@ export function sendClaudeSocket(socketPath, prompt, timeoutMs = 30_000) {
       resolve({ adapter: "claude_inbox_socket" });
     });
   });
-}
-
-// Exported for the task start flow. Desktop-only machines have no `claude` on
-// PATH, but Claude Desktop downloads the real CLI — fall through to the newest
-// downloaded binary so background task runs work there too.
-export function claudeCommand() {
-  if (process.env.CLAUDE_CLI_PATH) return process.env.CLAUDE_CLI_PATH;
-  if (commandExists("claude")) return "claude";
-  try {
-    const versions = installedCliVersions();
-    for (let i = versions.length - 1; i >= 0; i -= 1) {
-      const bin = cliBinaryPath(versions[i]);
-      if (fs.existsSync(bin)) return bin;
-    }
-  } catch {}
-  return "claude";
-}
-
-function claudeBackgroundAgents(cwd) {
-  const listed = spawnSync(claudeCommand(), ["agents", "--json", "--all"], {
-    cwd: cwd && fs.existsSync(cwd) ? cwd : process.cwd(),
-    env: process.env,
-    encoding: "utf8",
-    timeout: 30_000,
-    maxBuffer: 4 * 1024 * 1024,
-  });
-  if (listed.error || listed.status !== 0) return [];
-  try {
-    const rows = JSON.parse(listed.stdout || "[]");
-    return Array.isArray(rows) ? rows : [];
-  } catch {
-    return [];
-  }
-}
-
-export function resolveClaudeBackgroundAgent(
-  agents,
-  {
-    output = "",
-    title = "",
-    cwd = "",
-    resumeSessionId = "",
-    startedAfter = 0,
-    acceptAgent = () => true,
-  } = {},
-) {
-  const shortId = String(output).match(/backgrounded\s+[·:]\s+([0-9a-f]{8,36})/i)?.[1] || "";
-  const candidates = (Array.isArray(agents) ? agents : [])
-    .filter((row) => row && typeof row === "object" && row.sessionId)
-    .filter((row) => !cwd || path.resolve(String(row.cwd || "")) === path.resolve(cwd))
-    .filter((row) => !startedAfter || Number(row.startedAt || 0) >= startedAfter)
-    .filter((row) => acceptAgent(row))
-    .sort((a, b) => Number(b.startedAt || 0) - Number(a.startedAt || 0));
-  return candidates.find((row) => shortId && String(row.sessionId).startsWith(shortId))
-    || candidates.find((row) => resumeSessionId && row.sessionId === resumeSessionId)
-    || candidates.find((row) => title && row.name === title)
-    || null;
-}
-
-// Exported for the task start flow: a forged, never-run session only becomes a
-// RUN when something launches the turn — resume via the background runner is
-// the proven way (a claude://resume deep link opens a chat that sits idle).
-export function spawnBackgroundClaude({ sessionId, title, cwd, prompt, resume = false, model = "", effort = "", permissionMode = "" }) {
-  const args = ["--bg"];
-  if (resume) args.push("--resume", sessionId);
-  if (title) args.push("--name", title);
-  // The forged transcript's seed rows carry a placeholder model the CLI cannot
-  // restore; an explicit --model is what makes the runtime picker's choice real.
-  if (model) args.push("--model", model);
-  if (effort && effort !== "auto") args.push("--effort", effort);
-  // The reader's Settings choice wins over the default for THIS run.
-  args.push("--permission-mode", permissionMode || relayClaudePermissionMode());
-  args.push(prompt);
-  const startedAfter = Date.now() - 5_000;
-  const launched = spawnSync(claudeCommand(), args, {
-    cwd: cwd && fs.existsSync(cwd) ? cwd : process.cwd(),
-    env: {
-      ...process.env,
-      ...(resume && sessionId ? { RELAY_CALLING_NATIVE_SESSION_ID: sessionId } : {}),
-    },
-    encoding: "utf8",
-    timeout: 30_000,
-    maxBuffer: 4 * 1024 * 1024,
-  });
-  if (launched.error) throw launched.error;
-  if (launched.status !== 0) {
-    throw new Error(`Claude background launch failed: ${String(launched.stderr || launched.stdout || "unknown error").trim()}`);
-  }
-  const output = `${launched.stdout || ""}\n${launched.stderr || ""}`;
-  const agent = resolveClaudeBackgroundAgent(claudeBackgroundAgents(cwd), {
-    output,
-    title,
-    cwd,
-    resumeSessionId: resume ? sessionId : "",
-    startedAfter,
-  });
-  if (!agent?.sessionId) throw new Error("Claude background launch returned no resolvable native session id");
-  return { sessionId: String(agent.sessionId), pid: Number(agent.pid || 0) || null };
 }
 
 function claudeResumeDeepLink(sessionId) {
@@ -475,8 +379,8 @@ function controllerObservation() {
   // executable probe so a queued @mention resumes without a Relay restart.
   if (!cachedControllerCapabilities || Date.now() - cachedControllerCapabilitiesAt > 10_000) {
     cachedControllerCapabilities = {
-      claude: commandAvailable(claudeCommand()),
-      codex: commandAvailable(defaultCodexCommand()),
+      claude: acpAvailable("claude"),
+      codex: acpAvailable("codex"),
       start: true,
       send: true,
     };
@@ -780,396 +684,96 @@ export async function ensureAgentRunProviderAuthentication({
   }
 }
 
-async function executeClaude({ client, claim, target, operation, input, prompt }) {
-  const reporter = agentRunReporter(client, input.agentRunRelayId);
-  let sessionId = target?.nativeId || randomUUID();
-  const cwd = target?.cwd || input.cwd || process.cwd();
-  const title = target?.title || input.title || "Relay Claude session";
-  let baselineMtime = 0;
-  const transcriptPath = target?.nativeRef?.transcriptPath;
-  let resolvedTranscriptPath = transcriptPath || path.join(
-    claudeHome(),
-    "projects",
-    String(cwd).replace(/[^a-zA-Z0-9]/g, "-"),
-    `${sessionId}.jsonl`,
-  );
-  if (transcriptPath) {
-    try { baselineMtime = fs.statSync(transcriptPath).mtimeMs; } catch {}
-  }
-  let registration = liveClaudeRegistration(sessionId);
-  if (target) {
-    registration = await ensureClaudeCatalogCurrent({
-      sessionId,
-      title,
-      cwd,
-      transcriptPath: resolvedTranscriptPath,
-      registration,
-    });
-    try { baselineMtime = fs.statSync(resolvedTranscriptPath).mtimeMs; } catch {}
-  }
-  if (registration) {
-    await sendClaudeSocket(registration.socketPath, prompt);
-    await evidence(client, operation.id, claim.claimToken, "handed_off", {
-      adapter: "claude_inbox_socket",
-      nativeSessionId: sessionId,
-    });
-  } else {
-    const launched = spawnBackgroundClaude({
-      sessionId,
-      title,
-      cwd,
-      prompt,
-      resume: Boolean(target),
-      model: input.model || "",
-      effort: input.effort || "",
-    });
-    sessionId = launched.sessionId;
-    resolvedTranscriptPath = path.join(
-      claudeHome(),
-      "projects",
-      String(cwd).replace(/[^a-zA-Z0-9]/g, "-"),
-      `${sessionId}.jsonl`,
-    );
-    if (input.oneShot) recordAnonymousSession("claude", sessionId);
-    else {
-      recordControlledSession({
-        provider: "claude",
-        nativeId: sessionId,
-        title,
-        cwd,
-        transcriptPath: resolvedTranscriptPath,
-        permissionMode: relayClaudePermissionMode(),
-        relayMcpCatalogVersion: RELAY_AI_SESSION_MCP_CATALOG_VERSION,
-      });
-    }
-    await evidence(client, operation.id, claim.claimToken, "handed_off", {
-      adapter: "claude_background",
-      nativeSessionId: sessionId,
-    });
-  }
-  const stable = target || (input.oneShot ? null : await publishAndFind(client, sessionId));
-  await evidence(client, operation.id, claim.claimToken, "applied", {
-    adapter: registration ? "claude_inbox_socket" : "claude_background",
-    ...(stable?.id ? { sessionId: stable.id } : {}),
-    nativeSessionId: sessionId,
-  });
-  const renew = () => client.renewSessionOperationLease(operation.id, claim.claimToken);
-  await waitForClaudeCompletion(sessionId, {
-    baselineMtime,
-    transcriptPath: resolvedTranscriptPath,
-    renew,
-  });
-  const terminal = await settleClaudeRelayRun({
-    readTerminal: () => claudeRelayTerminalWhenSettled(resolvedTranscriptPath, sessionId),
-    relaunch: registration ? null : () => {
-      try { baselineMtime = fs.statSync(resolvedTranscriptPath).mtimeMs; } catch {}
-      spawnBackgroundClaude({
-        sessionId,
-        title,
-        cwd,
-        prompt,
-        resume: true,
-        model: input.model || "",
-        effort: input.effort || "",
-      });
-    },
-    wait: () => waitForClaudeCompletion(sessionId, {
-      baselineMtime,
-      transcriptPath: resolvedTranscriptPath,
-      renew,
-    }),
-    progress: reporter.progress,
-  });
-  if (terminal.completion) {
-    await reporter.complete(terminal.completion.body, terminal.completion.body);
-  } else {
-    const reason = terminal.error || "Claude Code finished without returning a Relay answer";
-    if (agentRunRecoverableBySignIn(reason)) throw new Error(reason);
-    // Claude normally completes the owned Relay through its MCP tool. If that
-    // happened, finish is an idempotent no-op and confirms the existing result.
-    // Otherwise it records the native failure before processClaim stores failed
-    // controller evidence below.
-    const settled = await reporter.finish(reason);
-    if (!settled?.completed) throw new Error(reason);
-  }
-  await evidence(client, operation.id, claim.claimToken, "completed", {
-    ...(stable?.id ? { sessionId: stable.id } : {}),
-    nativeSessionId: sessionId,
-  });
+function acpOperationLog(operationId) {
+  return path.join(configDir(), "acp-operations", createHash("sha256").update(operationId).digest("hex") + ".jsonl");
 }
 
-async function executeCodex({ client, claim, target, operation, input, prompt }) {
-  if (target) {
-    const reporter = agentRunReporter(client, input.agentRunRelayId);
-    let finalMessage = "";
-    const sessionPath = String(target.nativeRef?.sessionPath || "");
-    if (sessionPath) {
-      const idle = await waitForCodexIdle(sessionPath, { timeoutMs: 12 * 60 * 60 * 1000, pollMs: 1000 });
-      if (!idle.idle) throw new Error("Codex target did not become idle");
-    }
-    const baseline = sessionPath ? rolloutSize(sessionPath) : -1;
-    // Resume the native thread through a short-lived background App Server.
-    // This appends to the same rollout watched by Codex Desktop without
-    // foregrounding Codex or changing the chat the user is looking at.
-    const appServer = new CodexAppServerClient({
-      command: defaultCodexCommand(),
-      cwd: target.cwd || process.cwd(),
-      onNotification: (message) => {
-        if (message?.method === "item/completed" && message.params?.item?.type === "agentMessage") {
-          finalMessage = String(message.params.item.text || "").trim() || finalMessage;
-        }
-      },
-    });
-    await appServer.start();
-    try {
-      const full = currentPlacement() === "cloud" || process.env.RELAY_SESSION_FULL_ACCESS === "1";
-      const resumed = await appServer.request("thread/resume", {
-        threadId: target.nativeId,
-        cwd: target.cwd || process.cwd(),
-        approvalPolicy: full ? "never" : "on-request",
-        sandbox: full ? "danger-full-access" : "workspace-write",
-      });
-      if (resumed.thread?.id && resumed.thread.id !== target.nativeId) {
-        throw new Error("Codex resumed a different native thread");
-      }
-      const turn = await appServer.request("turn/start", {
-        threadId: target.nativeId,
-        input: [{ type: "text", text: prompt, text_elements: [] }],
-      });
-      const turnId = turn.turn?.id;
-      await evidence(client, operation.id, claim.claimToken, "handed_off", {
-        adapter: "codex_app_server_resume",
-        sessionId: target.id,
-        nativeThreadId: target.nativeId,
-        nativeTurnId: turnId || null,
-      });
-      if (sessionPath) {
-        const growth = await waitForRolloutGrowth(sessionPath, baseline, { timeoutMs: 15_000, pollMs: 250 });
-        if (!growth.grew) throw new Error("Codex turn was submitted but no rollout event appeared");
-      }
-      await evidence(client, operation.id, claim.claimToken, "applied", {
-        adapter: "codex_app_server_resume",
-        sessionId: target.id,
-        nativeTurnId: turnId || null,
-      });
-      const renewTimer = setInterval(() => {
-        void client.renewSessionOperationLease(operation.id, claim.claimToken).catch(() => {});
-      }, 10_000);
-      renewTimer.unref?.();
-      try {
-        await appServer.waitForNotification(
-          (message) => message.method === "turn/completed" && (!turnId || message.params?.turn?.id === turnId),
-          { timeoutMs: 12 * 60 * 60 * 1000 },
-        );
-      } finally {
-        clearInterval(renewTimer);
-      }
-      if (input.agentRunRelayId) {
-        const completion = codexRelayCompletion(finalMessage);
-        if (!completion) throw new Error("Codex finished without returning a Relay answer");
-        await reporter.complete(completion.forHuman, completion.forAgent);
-      }
-      await evidence(client, operation.id, claim.claimToken, "completed", {
-        adapter: "codex_app_server_resume",
-        sessionId: target.id,
-        nativeTurnId: turnId || null,
-      });
-      return;
-    } finally {
-      await appServer.stop();
-    }
+async function executeAcp({ client, claim, target, operation, input, prompt, provider }) {
+  const reporter = agentRunReporter(client, input.agentRunRelayId);
+  const cwd = target?.cwd || input.cwd || process.cwd();
+  const title = target?.title || input.title || "Relay session";
+  let stable = target;
+  const waitingSince = Date.now();
+  while (target && acpSessionOwner(provider, target.nativeId)) {
+    if (Date.now() - waitingSince > 12 * 60 * 60 * 1000) throw new Error("The selected ACP session is still working");
+    await sleep(1000);
   }
-
-  if (input.oneShot) {
-    const runRelayId = String(input.agentRunRelayId || "");
-    let applied = false;
-    let nativeThreadId = "";
-    let writes = Promise.resolve();
-    const reporter = agentRunReporter(client, runRelayId);
-    const queueProgress = reporter.progress;
-    queueProgress("Codex is starting on your laptop.");
-    await evidence(client, operation.id, claim.claimToken, "handed_off", {
-      adapter: "codex_cli_one_shot",
-    });
-    const runnerOptions = {
-      command: defaultCodexCommand(),
-      cwd: input.cwd || process.cwd(),
-      prompt,
-      model: input.model || "",
-      effort: input.effort || "",
-      fullAccess: currentPlacement() === "cloud" || process.env.RELAY_SESSION_FULL_ACCESS === "1",
-      onEvent: (event, status) => {
-        if (event?.type === "thread.started") nativeThreadId = String(event.thread_id || event.threadId || "");
-        if (!applied && ["thread.started", "turn.started"].includes(event?.type)) {
-          applied = true;
-          writes = writes.then(() => evidence(client, operation.id, claim.claimToken, "applied", {
-            adapter: "codex_cli_one_shot",
-            ...(nativeThreadId ? { nativeThreadId } : {}),
-          })).catch(() => {});
-        }
-        queueProgress(status);
-      },
-    };
-    let result;
-    try {
-      result = await runCodexAppServerOneShot(runnerOptions);
-    } catch (error) {
-      if (!error?.relayExecFallbackSafe) throw error;
-      queueProgress("Codex is starting with its compatible CLI runner.");
-      result = await runCodexOneShot(runnerOptions);
+  const liveClaude = provider === "claude" && target && liveClaudeRegistration(target.nativeId);
+  if (liveClaude) {
+    const { deliverToLiveClaudeSession } = await import("./session-delivery.js");
+    const transcriptPath = target.nativeRef?.transcriptPath;
+    if (!transcriptPath) throw new Error("The selected Claude session has no transcript for delivery verification");
+    const baselineMtime = fs.statSync(transcriptPath).mtimeMs;
+    const receipt = { adapter: "native_app", nativeSessionId: target.nativeId, sessionId: target.id };
+    await evidence(client, operation.id, claim.claimToken, "handed_off", receipt);
+    await deliverToLiveClaudeSession({ ...target, nativeRef: { ...target.nativeRef, messagingSocketPath: liveClaude.socketPath, pid: liveClaude.pid || liveClaude.cliPid } }, prompt);
+    await evidence(client, operation.id, claim.claimToken, "applied", receipt);
+    await waitForClaudeCompletion(target.nativeId, { transcriptPath, baselineMtime });
+    if (input.agentRunRelayId) {
+      const terminal = await claudeRelayTerminalWhenSettled(transcriptPath, target.nativeId);
+      const completion = relayCompletion(terminal.completion?.body);
+      if (!completion) throw new Error(terminal.error || "The app session finished without returning an answer");
+      await reporter.complete(completion.forHuman, completion.forAgent);
     }
-    await writes;
-    const completion = codexRelayCompletion(result.finalMessage);
-    if (!completion) throw new Error("Codex finished without returning a Relay answer");
-    if (runRelayId) await reporter.complete(completion.forHuman, completion.forAgent);
-    await evidence(client, operation.id, claim.claimToken, "completed", {
-      adapter: "codex_cli_one_shot",
-      ...(result.threadId ? { nativeThreadId: result.threadId } : {}),
-    });
+    await evidence(client, operation.id, claim.claimToken, "completed", receipt);
     return;
   }
-
-  const runRelayId = String(input.agentRunRelayId || "");
-  const reporter = agentRunReporter(client, runRelayId);
-  let stable = null;
-  let nativeThreadId = "";
-  let nativeTurnId = "";
-  const result = await runCodexAppServerOneShot({
-    command: defaultCodexCommand(),
-    cwd: input.cwd || process.cwd(),
-    prompt,
-    model: input.model || "",
-    effort: input.effort || "",
-    fullAccess: currentPlacement() === "cloud" || process.env.RELAY_SESSION_FULL_ACCESS === "1",
-    ephemeral: false,
-    title: input.title || "Relay @Codex",
-    onThreadStarted: async ({ threadId }) => {
-      nativeThreadId = threadId;
-      recordControlledSession({
-        provider: "codex",
-        nativeId: threadId,
-        title: input.title || "Relay @Codex",
-        cwd: input.cwd || process.cwd(),
-      });
+  if (target?.nativeRef?.sessionPath && provider === "codex") {
+    const idle = await waitForCodexIdle(target.nativeRef.sessionPath, { timeoutMs: 12 * 60 * 60 * 1000, pollMs: 1000 });
+    if (!idle.idle) throw new Error("The selected native session is still working");
+  }
+  const worker = await startAcpRun({ provider, sessionId: target?.nativeId, cwd, prompt, logPath: acpOperationLog(operation.id),
+    model: input.model, effort: input.effort,
+    mode: acpPermissionMode(provider, provider === "claude" ? { permissionMode: relayClaudePermissionMode() } : input),
+    mcpServers: acpMcpServers({ relay: relayMcpLaunchSpec() }),
+    onUpdate: update => {
+      if (update.sessionUpdate === "tool_call" && update.title) reporter.progress(String(update.title).slice(0, 280));
     },
-    onTurnStarted: async ({ threadId, turnId }) => {
-      nativeThreadId = threadId;
-      nativeTurnId = turnId;
-      const handoff = {
-        adapter: "codex_app_server_visible",
-        nativeThreadId: threadId,
-        nativeTurnId: turnId,
-      };
-      // The native turn is already running at this point. Publish its durable
-      // GUI identity afterwards so session-directory latency never delays the
-      // model's first token or the first visible progress event.
-      await evidence(client, operation.id, claim.claimToken, "handed_off", handoff);
-      stable = await publishAndFind(client, threadId);
-      await evidence(client, operation.id, claim.claimToken, "applied", {
-        ...handoff,
-        ...(stable?.id ? { sessionId: stable.id } : {}),
-      });
+    onSession: async nativeId => {
+      const transcriptPath = provider === "claude" ? path.join(claudeHome(), "projects", String(cwd).replace(/[^a-zA-Z0-9]/g, "-"), nativeId + ".jsonl") : "";
+      if (input.oneShot) recordAnonymousSession(provider, nativeId);
+      else recordControlledSession({ provider, nativeId, title, cwd, transcriptPath, permissionMode: relayClaudePermissionMode(), relayMcpCatalogVersion: RELAY_AI_SESSION_MCP_CATALOG_VERSION });
+      // Persist identity before the prompt can have side effects. Recovery must
+      // observe this exact session; it must never replay an uncertain prompt.
+      await evidence(client, operation.id, claim.claimToken, "handed_off", { adapter: "acp", nativeSessionId: nativeId });
     },
-    onEvent: (_event, status) => reporter.progress(status),
   });
-  const completion = codexRelayCompletion(result.finalMessage);
-  if (!completion) throw new Error("Codex finished without returning a Relay answer");
-  if (runRelayId) await reporter.complete(completion.forHuman, completion.forAgent);
-  await evidence(client, operation.id, claim.claimToken, "completed", {
-    adapter: "codex_app_server_visible",
-    nativeTurnId: nativeTurnId || null,
-    nativeThreadId: nativeThreadId || result.threadId,
-    ...(stable?.id ? { sessionId: stable.id } : {}),
-  });
+  try {
+    const nativeSessionId = worker.sessionId;
+    if (!stable && !input.oneShot) stable = await publishAndFind(client, nativeSessionId);
+    await evidence(client, operation.id, claim.claimToken, "applied", { adapter: "acp", nativeSessionId, ...(stable?.id ? { sessionId: stable.id } : {}) });
+    const result = await worker.done;
+    if (result.stopReason === "cancelled") throw new Error("The ACP run was cancelled");
+    const completion = relayCompletion(result.text);
+    if (completion) await reporter.complete(completion.forHuman, completion.forAgent);
+    else {
+      const settled = await reporter.finish("The agent finished without returning an answer");
+      if (!settled?.completed) throw new Error("The agent finished without returning an answer");
+    }
+    await evidence(client, operation.id, claim.claimToken, "completed", { adapter: "acp", nativeSessionId, ...(stable?.id ? { sessionId: stable.id } : {}) });
+  } finally { if (!worker.closed) await worker.client.stop(); }
 }
 
-async function recoverClaim({ client, claim, target, operation }) {
-  // Anonymous chat runs deliberately have no persisted provider session to
-  // recover. If a daemon dies after handoff, rerun the idempotent one-shot and
-  // replace the same Relay response instead of looking for a rollout that can
-  // never exist.
-  if (operation.input?.oneShot) return false;
-  const previousState = claim.recovery?.previousState;
-  if (!["handed_off", "applied"].includes(previousState)) return false;
+async function recoverClaim({ client, claim, operation }) {
+  if (!["handed_off", "applied"].includes(claim.recovery?.previousState)) return false;
   const result = claim.recovery?.result || {};
-  const provider = target?.provider || operation.input?.provider;
-  let nativeId = String(
-    result.nativeSessionId || result.nativeThreadId || target?.nativeId || "",
-  );
-  if (!nativeId) throw new Error("Recovered session operation has no native provider id");
-  const renew = () => client.renewSessionOperationLease(operation.id, claim.claimToken);
-  if (provider === "claude") {
-    const cwd = target?.cwd || operation.input?.cwd || process.cwd();
-    let transcriptPath = target?.nativeRef?.transcriptPath || path.join(
-      claudeHome(),
-      "projects",
-      String(cwd).replace(/[^a-zA-Z0-9]/g, "-"),
-      `${nativeId}.jsonl`,
-    );
-    let stable = target;
-    if (!fs.existsSync(transcriptPath)) {
-      const recovered = resolveClaudeBackgroundAgent(claudeBackgroundAgents(cwd), {
-        title: target?.title || operation.input?.title || "",
-        cwd,
-        startedAfter: Math.max(0, Date.parse(operation.createdAt || "") - 60_000),
-        // A stale `claude agents` registration may outlive a failed background
-        // launch without ever creating a transcript. Selecting that newest row
-        // strands recovery forever because there is no turn to observe. During
-        // recovery (unlike the immediate post-launch lookup), only a provider
-        // session with durable on-disk state is a valid continuation target.
-        acceptAgent: (agent) => fs.existsSync(path.join(
-          claudeHome(),
-          "projects",
-          String(cwd).replace(/[^a-zA-Z0-9]/g, "-"),
-          `${agent.sessionId}.jsonl`,
-        )),
-      });
-      if (recovered?.sessionId) {
-        nativeId = String(recovered.sessionId);
-        transcriptPath = path.join(
-          claudeHome(),
-          "projects",
-          String(cwd).replace(/[^a-zA-Z0-9]/g, "-"),
-          `${nativeId}.jsonl`,
-        );
-        stable = (await publishAndFind(client, nativeId)) || target;
-      }
-    }
-    await waitForClaudeCompletion(nativeId, { transcriptPath, renew });
-    if (operation.input?.agentRunRelayId) {
-      await agentRunReporter(client, operation.input.agentRunRelayId).finish();
-    }
-    await evidence(client, operation.id, claim.claimToken, "completed", {
-      ...result,
-      nativeSessionId: nativeId,
-      ...(stable?.id ? { sessionId: stable.id } : {}),
-    });
-    return true;
-  } else if (provider === "codex") {
-    const sessionPath = String(target?.nativeRef?.sessionPath || "");
-    if (!sessionPath) throw new Error("Recovered Codex operation has no rollout path");
-    let lastActivityAt = 0;
-    try { lastActivityAt = fs.statSync(sessionPath).mtimeMs; } catch {}
-    const remainingMs = codexRecoveryWaitMs(lastActivityAt);
-    const idle = await waitForCodexIdle(sessionPath, { timeoutMs: remainingMs, pollMs: 1_000 });
-    if (!idle.idle) throw new Error("Recovered Codex turn stopped producing activity before it completed");
-    if (operation.input?.agentRunRelayId) {
-      const page = await inspectAiSession(target, { limit: 200 });
-      const final = (page.records || []).find(
-        (record) => record?.type === "message" && record?.role === "assistant" && String(record.text || "").trim(),
-      );
-      const completion = codexRelayCompletion(final?.text || "");
-      if (!completion) throw new Error("Recovered Codex run has no final answer");
-      await agentRunReporter(client, operation.input.agentRunRelayId)
-        .complete(completion.forHuman, completion.forAgent);
-    }
-  } else {
-    throw new Error(`Unsupported recovered provider: ${provider}`);
+  if (result.adapter === "native_app") throw new Error("Relay restarted before the native app confirmed completion. The submitted message was not replayed.");
+  if (result.adapter !== "acp") throw new Error("This operation belongs to a retired runner. Start a new ACP run.");
+  let events = [];
+  try { events = fs.readFileSync(acpOperationLog(operation.id), "utf8").split("\n").filter(Boolean).map(line => JSON.parse(line)); } catch {}
+  const terminal = events.findLast(event => event.method === "turn/completed");
+  if (!terminal || terminal.params.turn.status !== "completed") {
+    throw new Error("Relay restarted before this ACP run was confirmed complete. Its native session was preserved; the prompt was not replayed.");
   }
-  await evidence(client, operation.id, claim.claimToken, "completed", {
-    ...result,
-    ...(target?.id ? { sessionId: target.id } : {}),
-  });
+  const final = events.findLast(event => event.method === "item/completed"
+    && event.params.turnId === terminal.params.turn.id
+    && event.params.item?.type === "agentMessage" && event.params.item.phase === "final_answer");
+  const completion = relayCompletion(final?.params.item.text);
+  if (operation.input?.agentRunRelayId) {
+    if (!completion) throw new Error("The recovered ACP run has no final answer");
+    await agentRunReporter(client, operation.input.agentRunRelayId).complete(completion.forHuman, completion.forAgent);
+  }
+  await evidence(client, operation.id, claim.claimToken, "completed", result);
   return true;
 }
 
@@ -1267,8 +871,7 @@ async function processClaim(client, claim, log) {
     const prompt = sessionOperationPrompt(operation, source, target);
     const provider = target?.provider || input.provider;
     const execute = async () => {
-      if (provider === "claude") await executeClaude({ client, claim, target, operation, input, prompt });
-      else if (provider === "codex") await executeCodex({ client, claim, target, operation, input, prompt });
+      if (["claude", "codex"].includes(provider)) await executeAcp({ client, claim, target, operation, input, prompt, provider });
       else throw new Error(`Unsupported provider: ${provider}`);
     };
     let signedInDuringOperation = false;
@@ -1278,7 +881,7 @@ async function processClaim(client, claim, log) {
     try {
       await execute();
     } catch (error) {
-      if (!input.agentRunRelayId || signedInDuringOperation || !agentRunRecoverableBySignIn(error)) throw error;
+      if ((operationEvidenceRanks.get(operation.id) || 0) >= 1 || !input.agentRunRelayId || signedInDuringOperation || !agentRunRecoverableBySignIn(error)) throw error;
       await ensureAgentRunProviderAuthentication({ client, provider, input, force:true });
       signedInDuringOperation = true;
       await execute();

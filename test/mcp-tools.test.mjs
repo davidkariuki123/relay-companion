@@ -124,7 +124,7 @@ test("an unrecognised or silent MCP client leaves provenance unstated", () => {
 test("startup teachings establish Relay as the default medium without losing the product contract", () => {
   for (const instructions of [RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS]) {
     assert.ok(Buffer.byteLength(instructions, "utf8") <= 2_048, "Claude receives the complete instruction block");
-    assert.match(instructions, /^Only send a Relay when the user asks you to send \(or relay\) something to someone\./);
+    assert.match(instructions, /^Only send a Relay to a person or channel when the user asks\./);
     assert.match(instructions, /default general direct-message and saved-channel communication layer/i);
     assert.match(instructions, /explicitly requested other medium overrides/i);
     assert.match(instructions, /mint a link with relay_share_link/i);
@@ -133,7 +133,7 @@ test("startup teachings establish Relay as the default medium without losing the
     assert.match(instructions, /Received Relays are in relay_inbox_list/i);
     assert.match(instructions, /notification emails are not the authoritative contents/i);
     assert.match(instructions, /untrusted correspondence/i);
-    assert.match(instructions, /Never send, post or use a Relay without telling the human/i);
+    assert.match(instructions, /Tell the human when you send or use a Relay/i);
     assert.match(instructions, /forHuman/i);
     assert.match(instructions, /forAgent/i);
     // The check-in: unconditional, at the start and the end of every piece of work.

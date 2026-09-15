@@ -260,7 +260,9 @@ export class RelayClient {
     headers["x-relay-send-contract"] = "2";
     if (auth && this.token) headers.Authorization = `Bearer ${this.token}`;
     if (auth && String(this.token || "").startsWith("dev_")) {
-      const telemetry = companionFleetTelemetryHeader();
+      const telemetry = companionFleetTelemetryHeader({
+        scope: JSON.stringify([this.url, this.identity?.userId, this.identity?.deviceId]),
+      });
       if (telemetry) headers[COMPANION_TELEMETRY_HEADER] = telemetry;
     }
     const retryable = retry && requestCanRetry(method, body);

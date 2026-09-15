@@ -1984,6 +1984,10 @@
      is now a bubble of its own — the same object the words are — and photos
      drop the plate entirely and hug the picture. */
   .th-cargo { display:flex; flex-direction:column; align-items:flex-start; gap:5px; margin:5px 16px 14px; max-width:88%; width:fit-content; }
+  .th-cargo:has(.ca-file-shelf) { width:calc(100% - 32px); max-width:88%; }
+  .th-msg.has-host-actions + .th-cargo:has(.ca-file-shelf) { min-width:min(300px, calc(100% - 32px)); }
+  .ca-file-shelf { width:100%; border:1px solid var(--hair); border-radius:12px; background:var(--wash); overflow:hidden; }
+
   .th-cargo.mine { margin-left:auto; align-items:flex-end; }
   .ca-row { display:flex; align-items:center; gap:0; max-width:100%; min-width:0; }
   .th-cargo.mine .ca-row { justify-content:flex-end; }
@@ -4721,14 +4725,17 @@
     dialog.dataset.relayId = String(relay.id);
     document.body.append(dialog);
     readerAttachmentsDialog = dialog;
+    const timelineTrigger = Boolean(trigger.closest(".ca-file-shelf"));
     trigger.setAttribute("aria-expanded", "true");
     dialog.addEventListener("close", () => {
       if (readerAttachmentsDialog === dialog) readerAttachmentsDialog = null;
       dialog.remove();
       // Polling may have replaced the trigger, but must not lose the reader's place.
-      const current = Array.from(readerBodyEl.querySelectorAll("[data-reader-attachments]"))
+      const triggerRoot = timelineTrigger ? document.getElementById("thHistory") : readerBodyEl;
+      const current = Array.from(triggerRoot?.querySelectorAll("[data-reader-attachments]") || [])
         .find((button) => button.dataset.readerAttachments === String(relay.id));
       current?.setAttribute("aria-expanded", "false");
+      if (timelineTrigger && !readerAttachmentsDialog && activeView === "threads") (current || trigger).focus({ preventScroll: true });
       if (!readerAttachmentsDialog && activeView === "reader" && String(readerId) === String(relay.id)) (current || trigger).focus({ preventScroll: true });
     });
     dialog.querySelector(".rd-attachments-close").addEventListener("click", () => dialog.close());
@@ -4990,9 +4997,10 @@
 
   /**
    * Everything one message sent, as the objects beneath its bubble: the photos
-   * first as one picture or one collage, then a file bubble each. Returns the
+   * first as one picture or one collage, then one shared file shelf. Returns the
    * inside of `.th-cargo` — the cargo law still decides where that sits.
    */
+  const chatFileShelves = new Map();
   function chatAttachmentCargo(attachments, { relayId = "", mine = false } = {}) {
     const list = Array.isArray(attachments) ? attachments : [];
     const images = list.filter(attachmentIsImage);
@@ -5016,16 +5024,22 @@
         label: `${images.length} photos`,
       }));
     }
-    for (const file of files) {
-      rows.push(cargoRowHtml(cargoFileHtml(file, { relayId, mine }), {
-        mine,
-        keys: keysFor([file]),
-        label: file?.filename || file?.name || "file",
-      }));
+    if (files.length) {
+      chatFileShelves.set(String(relayId), files);
+      const shelf = relaySharedShelf({ id: relayId, attachments: files });
+      rows.push(`<div class="ca-file-shelf">${relayId ? shelf : shelf.replace("<button ", "<button disabled ")}</div>`);
     }
     return rows.join("");
   }
   // ---- end chat attachment cargo -------------------------------------------
+
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest?.(".ca-file-shelf [data-reader-attachments]");
+    if (!button) return;
+    event.stopPropagation();
+    const id = button.dataset.readerAttachments;
+    openReaderAttachments({ id, attachments: chatFileShelves.get(id) || [] }, button);
+  });
 
   // ---- attachments: selection, menu, viewers -------------------------------
   // The room's whole cargo manifest, rebuilt with every row render. The viewer's
@@ -6375,9 +6389,6 @@
       closeSessionPicker();
       return;
     }
-    const savedRoomScroll = activeView === "threads" ? captureRoomScroll() : null;
-    const expandConversation = activeView === "threads" && !chatExpanded;
-    const morphFromCompact = expandConversation && prepareReaderMorph("threads");
     sessionPickerState = {
       id,
       provider:selectedProvider,
@@ -6389,19 +6400,16 @@
       data:prefetchedResult?.ok === false ? null : prefetchedResult,
       motion:"opening",
     };
-    if (expandConversation) {
-      chatExpanded = true;
-      syncExpandButton();
-      renderChatRail();
-    }
-    // Build the selected provider row and its loading dropdown before the
-    // compact-to-expanded morph begins. The original chat chip itself is not
-    // changed; only the destination frame gains this pressed state.
-    commitNavigation();
-    armSessionPickerReveal();
-    if (morphFromCompact) startReaderMorph("threads");
-    if (savedRoomScroll) requestAnimationFrame(() => restoreRoomScroll(savedRoomScroll));
     const state = sessionPickerState;
+    if (activeView === "threads") {
+      // Use the header's reader navigation, including its chat return state and
+      // whole-card transition. Reveal the menu once the reader is on stage.
+      await openReader(id, source === "sent" ? "sent" : "threads", state);
+      if (sessionPickerState !== state || activeView !== "reader" || readerId !== id) return;
+    } else {
+      commitNavigation();
+    }
+    armSessionPickerReveal();
     if (prefetchedResult) return;
     let result;
     try { result = await window.relay.sessionPicker(id, selectedProvider, state.source, state.surface); }
@@ -9402,7 +9410,7 @@
     const currentOffset = anchor.getBoundingClientRect().top - viewportTop;
     roomScrollEl.scrollTop += currentOffset - (Number(saved.anchorOffset) || 0);
   }
-  function openReader(id, source) {
+  function openReader(id, source, picker = null) {
     // A notification banner remains `peeking` even after the user moves into
     // Tasks. A lingering peek can suppress reader sizing and paint the full
     // reader into the 400x118 banner window. The click explicitly asks for the
@@ -9411,7 +9419,7 @@
       clearPeek();
       presented = true;
     }
-    sessionPickerState = null;
+    sessionPickerState = picker;
     if (activeView !== "reader") {
       readerReturn = {
         view: activeView,
@@ -9424,12 +9432,12 @@
         outerScrollTop: scrollEl ? scrollEl.scrollTop : 0,
       };
     }
-    startCardViewTransition(() => {
+    return startCardViewTransition(() => {
       readerId = id;
       const opened = readerRow(id);
       // A Relay that already went to an app opens on its receipt.
       const openedHandoff = handoffFor(opened);
-      readerTab = openedHandoff && ["starting", "running", "failed"].includes(openedHandoff.state) ? "agent" : "you";
+      readerTab = !picker && openedHandoff && ["starting", "running", "failed"].includes(openedHandoff.state) ? "agent" : "you";
       readerSource = source || (activeView === "threads" || activeView === "reader" ? readerSource : activeView);
       activeView = "reader";
       commitNavigation({ outerScrollTop: 0 });
@@ -15040,6 +15048,7 @@
     // built. The viewer's filmstrip and Select all both need the whole room,
     // and the row loop is the one place that already knows each sender/time.
     roomAttachmentIndex.length = 0;
+    chatFileShelves.clear();
     roomAttachmentChat = { key:threadStateKey, title:String(roomName || voices || "Relay") };
     const rowsHtml = timeline.map((entry, i) => {
       if (entry.kind === "reaction") {

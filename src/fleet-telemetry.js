@@ -2,7 +2,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { updateChannel } from "./config.js";
+import { updateChannel, configPath } from "./config.js";
+import { createFleetTelemetryCache } from "./fleet-telemetry-background.js";
 import { storeDir } from "./host-paths.js";
 import { readCanonicalRuntimeState } from "./canonical-runtime.js";
 
@@ -12,7 +13,6 @@ const { collectInstallationHealth } = require("../bootstrap/installation-health.
 
 export const COMPANION_TELEMETRY_SCHEMA = 1;
 export const COMPANION_TELEMETRY_HEADER = "x-relay-companion-telemetry";
-const TELEMETRY_CACHE_MS = 30_000;
 const FAILURE_SLOTS = [
   ["failure", "update"],
   ["migrationFailure", "migration"],
@@ -128,24 +128,35 @@ export function encodeCompanionFleetTelemetry(value) {
   return header.length <= 4096 ? header : "";
 }
 
-let cachedAt = 0;
-let cachedHeader = "";
-
-/** A short-lived cache avoids synchronous filesystem reads on every API call. */
-export function companionFleetTelemetryHeader({ now = Date.now, collect = collectCompanionFleetTelemetry } = {}) {
-  const timestamp = now();
-  if (cachedHeader && timestamp - cachedAt >= 0 && timestamp - cachedAt < TELEMETRY_CACHE_MS) return cachedHeader;
+function fileGeneration(file) {
   try {
-    cachedHeader = encodeCompanionFleetTelemetry(collect());
-    cachedAt = timestamp;
-  } catch {
-    cachedHeader = "";
-    cachedAt = timestamp;
+    const stat = fs.statSync(file);
+    return [stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs];
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
   }
-  return cachedHeader;
+}
+
+export function fleetTelemetryContext(scope = "") {
+  const homeDir = os.homedir();
+  const configFile = configPath();
+  const updateStatePath = path.join(storeDir(), "update-state.json");
+  // Cheap generation checks prevent a late scan crossing a config/account or
+  // canonical-runtime change. No credentials, process scans or file hashing.
+  const key = JSON.stringify([scope, homeDir, configFile, updateStatePath,
+    process.env.RELAY_UPDATE_CHANNEL, process.env.RELAY_AUTO_UPDATE,
+    process.env.CODEX_HOME, process.env.CLAUDE_HOME,
+    fileGeneration(configFile), fileGeneration(path.join(homeDir, ".relay", "runtime", "current.json"))]);
+  return { key, homeDir, configFile, updateStatePath };
+}
+
+const telemetryCache = createFleetTelemetryCache({ context: fleetTelemetryContext });
+
+export function companionFleetTelemetryHeader({ scope = "" } = {}) {
+  return telemetryCache.header(scope);
 }
 
 export function resetCompanionFleetTelemetryCache() {
-  cachedAt = 0;
-  cachedHeader = "";
+  telemetryCache.reset();
 }
