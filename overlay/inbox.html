@@ -240,7 +240,15 @@
   .chat-finder-field input::-webkit-search-cancel-button { -webkit-appearance:none; }
   .chat-finder-field input::placeholder { color:var(--muted); }
   .chat-finder-status { margin:10px 0 2px; color:var(--muted); font-size:var(--fs-note); }
-  .chat-finder-results { overflow-y:auto; min-height:0; overscroll-behavior:contain; }
+  /* Search owns the one visible scroll lane while it is open. Explicitly clip
+     the other axis: overflow-y:auto otherwise computes overflow-x to auto and
+     the full-width conversation rows grow a native horizontal scrollbar. */
+  .chat-finder-results { overflow-y:auto; overflow-x:hidden; min-height:0; overscroll-behavior:contain; }
+  .chat-finder-results::-webkit-scrollbar { width:10px; height:0; }
+  .chat-finder-results::-webkit-scrollbar-thumb { background:var(--edge); border-radius:var(--r-pill); border:3px solid var(--bg); background-clip:padding-box; }
+  .chat-finder-results::-webkit-scrollbar-thumb:hover { background:var(--edge); background-clip:padding-box; }
+  .chat-finder-results::-webkit-scrollbar-corner { background:transparent; }
+  body:has(.chat-finder:popover-open) .scroll { overflow-y:hidden; }
   .chat-finder-result { display:block; width:100%; text-align:left; padding:0; border:0; background:transparent; color:inherit; cursor:pointer; }
   .chat-finder-result:hover, .chat-finder-result:focus-visible { background:var(--wash-2); }
   .chat-finder-result .relay-row { padding-left:0; padding-right:0; }
@@ -9171,7 +9179,7 @@
       reactions: sent.reactions || { aggregates: [], events: [] },
     };
   }
-  const RX_PRIMARY = ["👍", "❤️", "😂", "🙌", "‼️", "🙏"];
+  const RX_PRIMARY = ["👍", "❤️", "😂", "🙌", "‼️", "🙏", "👀"];
   const RX_MORE = ["😮", "😢", "🔥", "✅", "🙏", "💯"];
   // Reactions stay attached to their message; adding one does not create a chat row.
   const REACTIONS_ENABLED = true;

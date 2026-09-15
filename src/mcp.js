@@ -13,6 +13,7 @@ import { localizeAtFields } from "./local-time.cjs";
 import { createRequire } from "node:module";
 import { createHash, randomUUID } from "node:crypto";
 import { RelayClient } from "./client.js";
+import { CHAT_READ_TOOLS, recordReadTiming, withReadContext } from "./read-context.js";
 import { accountDriftMessage } from "./account.js";
 import { apiUrl, readConfig } from "./config.js";
 import { storeDir } from "./host-paths.js";
@@ -917,16 +918,19 @@ export const TOOLS = [
   {
     name: "relay_chats_list",
     description:
-      "List every visible Relay conversation this human is part of, most recently active first. There are direct conversations and channels. A CHANNEL is identified by its existing grp_... id for compatibility; it keeps its name and history as membership changes, and two channels with the same people remain distinct. A DIRECT conversation is the one chat between two people. Internal reply-chain keys may be returned for AI retrieval, but they are unnamed implementation metadata and never separate the chat into visible topics, sections, or panes. Each entry carries chatId, title, kind (`direct` or the legacy `group` value), participants, the legacy group metadata object for a channel, unreadCount, messageCount, and lastMessage. Start here whenever the human refers to a conversation by person or channel name, then call relay_chat_fetch. Use relay_inbox_list instead when they ask what arrived.",
+      "List every visible Relay conversation this human is part of, most recently active first. There are direct conversations and channels. A CHANNEL is identified by its existing grp_... id for compatibility; it keeps its name and history as membership changes, and two channels with the same people remain distinct. A DIRECT conversation is the one chat between two people. Internal reply-chain keys may be returned for AI retrieval, but they are unnamed implementation metadata and never separate the chat into visible topics, sections, or panes. Each entry carries chatId, title, kind (`direct` or the legacy `group` value), participants, the legacy group metadata object for a channel, unreadCount, messageCount, and lastMessage. Start here to resolve a conversation by person or channel name. For one recent inbound Relay, prefer relay_inbox_list metadata and then its exact relayIds. Fetch a chat page only when conversation context is needed. Use relay_inbox_list instead when they ask what arrived.",
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "relay_chat_fetch",
     description:
-      "Fetch one visible direct conversation or channel's full transcript, oldest message first. This is always private and read-free: fetching bodies never changes human read state or sends receipts. There are no user-visible threads or topics in Relay itself; externally bound replies such as Slack threads may still carry visible reply context. Every Relay and text message between the same participants appears in this one history. Identify it by chatId from relay_chats_list, or by an internal threadId already carried on a Relay; the latter is only a lookup shortcut to the enclosing conversation. Prefer this whenever the human asks about or sends into a chat; use relay_thread_fetch only when an AI deliberately needs one unnamed related-Relay subset. When the human explicitly asked to read Relay contents and you surface them, call relay_mark_read for each exact unread inbound Relay shown. Read forHuman in the senders' words. A non-empty forAgent is a second document addressed to you; do not paste it into a human reply unless asked. Empty forAgent denotes an ordinary text message." + " Read the skill's Reading a Relay section before explaining.",
+      "Fetch a page of one visible direct conversation or channel, oldest message first. Defaults to the newest 25 messages; limit accepts 1–200. Continue with nextBeforeCursor for older messages or nextAfterCursor for newer ones, keeping the same chat. A page is not the full transcript. This is always private and read-free: fetching bodies never changes human read state or sends receipts. There are no user-visible threads or topics in Relay itself; externally bound replies such as Slack threads may still carry visible reply context. Every Relay and text message between the same participants appears in this one history. Identify it by chatId from relay_chats_list, or by an internal threadId already carried on a Relay; the latter is only a lookup shortcut to the enclosing conversation. Use this when the request needs conversation context; use relay_thread_fetch only when an AI deliberately needs one unnamed related-Relay subset. When the human explicitly asked to read Relay contents and you surface them, call relay_mark_read for each exact unread inbound Relay shown. Read forHuman in the senders' words. A non-empty forAgent is a second document addressed to you; do not paste it into a human reply unless asked. Empty forAgent denotes an ordinary text message." + " Read the skill's Reading a Relay section before explaining.",
     inputSchema: {
       type: "object",
       properties: {
+        limit: { type: "integer", minimum: 1, maximum: 200, default: 25, description: "Messages per page; defaults to the newest 25, oldest first." },
+        beforeCursor: { type: "string", description: "Opaque nextBeforeCursor from this chat. Do not combine with afterCursor." },
+        afterCursor: { type: "string", description: "Opaque nextAfterCursor from this chat. Do not combine with beforeCursor." },
         chatId: {
           type: "string",
           description: "The chat id from relay_chats_list — chat_... for a direct conversation, or the legacy grp_... id for a channel. Pass this or threadId.",
@@ -1748,7 +1752,10 @@ function text(obj) {
   // local-offset form on the way out: agents parrot clock digits verbatim, so
   // they must see the human's wall clock, not UTC (12:02Z read back to a
   // Johannesburg user as "12:02" — it was 14:02 his time).
-  return { content: [{ type: "text", text: typeof obj === "string" ? obj : JSON.stringify(obj, localizeAtFields, 2) }] };
+  const started = performance.now();
+  const rendered = typeof obj === "string" ? obj : JSON.stringify(obj, localizeAtFields, 2);
+  recordReadTiming({ phase: "serialization", elapsedMs: Math.round(performance.now() - started), responseBytes: Buffer.byteLength(rendered) });
+  return { content: [{ type: "text", text: rendered }] };
 }
 
 function publicAiSession(session) {
@@ -1793,11 +1800,13 @@ async function waitForAiSessionInspection(client, operationId, { timeoutMs = 45_
  * Requiring one or the other (rather than defaulting) keeps a vague call from
  * quietly acting on the wrong conversation.
  */
-async function fetchChatForAgent(client, args) {
+async function fetchChatForAgent(client, args, paged = false) {
   const chatId = String(args?.chatId || "").trim();
   const threadId = String(args?.threadId || "").trim();
-  if (chatId) return client.chat(chatId);
-  if (threadId) return client.chatForThread(threadId);
+  const page = paged ? { limit: args.limit ?? 25, beforeCursor: args.beforeCursor, afterCursor: args.afterCursor } : {};
+  if (paged && (!Number.isInteger(page.limit) || page.limit < 1 || page.limit > 200 || (page.beforeCursor && page.afterCursor))) throw new Error("Use limit 1–200 and only one of beforeCursor or afterCursor.");
+  if (chatId) return client.chat(chatId, page);
+  if (threadId) return client.chatForThread(threadId, page);
   throw new Error(
     "Name the conversation: pass chatId from relay_chats_list, or threadId from any relay in it.",
   );
@@ -2010,6 +2019,9 @@ function shareLabelNames(label, needle) {
  * dead string until this read it, and nothing else proves that path is live.
  */
 export function relayCallErrorResult(err) {
+  if (["relay_timeout", "relay_cancelled"].includes(err?.code)) {
+    return { content: [{ type: "text", text: JSON.stringify({ error: err.code, message: err.message, retryable: err.retryable, requestId: err.requestId }) }], isError: true };
+  }
   // Surface the API's validation detail so the calling agent can self-correct
   // instead of guessing what "invalid_request" meant.
   let detail = "";
@@ -2029,7 +2041,10 @@ export function relayCallErrorResult(err) {
 
 export async function handleCall(client, name, args, options = {}) {
   const release = require("../bootstrap/update-activity.cjs").beginCall();
-  try { return await handleAdmittedCall(client, name, args, options); }
+  try {
+    const run = () => handleAdmittedCall(client, name, args, options);
+    return await (CHAT_READ_TOOLS.has(name) ? withReadContext(name, run, { signal: options.signal }) : run());
+  }
   finally { release(); }
 }
 
@@ -2629,7 +2644,7 @@ async function handleAdmittedCall(client, name, args, {
       return text(withoutThreadTitles(await client.chats()));
     case "relay_chat_fetch":
       try {
-        return text(withoutThreadTitles(await fetchChatForAgent(client, args)));
+        return text(withoutThreadTitles(await fetchChatForAgent(client, args, true)));
       } catch (err) {
         const moved = movedChatResult(err);
         if (moved) return text(moved);
@@ -2791,7 +2806,7 @@ export async function createRelayMcpSession({
     const catalog = toolsForAccount(features, surface);
     return { tools: withSessionUpdates(withSubscribedTopics(catalog, { accountScope: client.token || "" }), sessionContext) };
   });
-  server.setRequestHandler(CallToolRequestSchema, async (req) => {
+  server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
     require("../bootstrap/installation-health.cjs").recordTransport("mcp");
     // Who is calling, straight from the handshake this client already sent.
     rememberCallingClient(server.getClientVersion(), sessionContext);
@@ -2810,6 +2825,7 @@ export async function createRelayMcpSession({
         }
       }
       return await handleCall(client, req.params.name, req.params.arguments || {}, {
+        signal: extra?.signal,
         features,
         sessionContext,
       });

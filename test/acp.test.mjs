@@ -16,7 +16,7 @@ import { createHostAdapters, ensureRuntimeSession } from "../src/runtime.js";
 import { claimAcpSession, acpSessionOwner } from "../src/acp-session-owner.js";
 import { spawnSync } from "node:child_process";
 
-function fakeAgent({ onPrompt, onPermissionAnswer, exitOnPrompt = false } = {}) {
+function fakeAgent({ onPrompt, onPermissionAnswer, exitOnPrompt = false, models = [{ value: "test-model" }] } = {}) {
   const messages = [];
   const child = new EventEmitter();
   child.stdout = new PassThrough(); child.stderr = new PassThrough();
@@ -28,7 +28,7 @@ function fakeAgent({ onPrompt, onPermissionAnswer, exitOnPrompt = false } = {}) 
   let promptId;
   const sessionId = `native-${Math.random()}`;
   const state = { sessionId, modes: { availableModes: [{ id: "agent" }, { id: "auto" }] }, configOptions: [
-    { id: "model", category: "model", options: [{ value: "test-model" }] },
+    { id: "model", category: "model", options: models },
     { id: "effort", category: "thought_level", options: [{ value: "high" }] },
   ] };
   child.stdin = new Writable({ write(chunk, _encoding, done) {
@@ -147,6 +147,45 @@ test("a missing model fails before prompting; there is no execution fallback", a
   await assert.rejects(startAcpRun({ provider: "codex", prompt: "Do work", model: "missing", clientFactory: agent.factory }), /does not support model/);
   assert.equal(agent.messages.some(m => m.method === "session/prompt"), false);
   assert.equal(agent.child.exitCode, 0);
+});
+
+// Model choices returned by the stock Claude ACP 0.77.0 adapter. In
+// particular, neither the default `opus` nor the saved `fable` is a value.
+const claudeModels = [
+  { value: "default", name: "Default (recommended)" },
+  { value: "opus[1m]", name: "Opus 5" },
+  { value: "claude-fable-5-1[1m]", name: "Fable 5.1" },
+  { value: "sonnet", name: "Sonnet 5" },
+  { value: "haiku", name: "Haiku 4.5" },
+];
+
+test("Claude chat defaults and saved family selections configure ACP before prompting", async t => {
+  temporaryHome(t);
+  for (const [model, expected] of [["opus", "opus[1m]"], ["fable", "claude-fable-5-1[1m]"], ["sonnet", "sonnet"], ["haiku", "haiku"]]) {
+    const agent = fakeAgent({ models: claudeModels });
+    const worker = await startAcpRun({ provider: "claude", model, effort: "high", mode: "auto", prompt: "Say hello", clientFactory: agent.factory });
+    assert.equal((await worker.done).text, "DONE");
+    const config = agent.messages.filter(message => message.method === "session/set_config_option");
+    assert.deepEqual(config.map(message => [message.params.configId, message.params.value]), [["model", expected], ["effort", "high"]]);
+    assert.equal(agent.messages.filter(message => message.method === "session/prompt").length, 1);
+    assert.equal(agent.child.exitCode, 0);
+  }
+});
+
+test("Claude alias resolution preserves exact versions and rejects ambiguous or absent choices", async t => {
+  temporaryHome(t);
+  assert.equal(acpModelOption(claudeModels, "claude-opus-5", "claude"), "opus[1m]");
+  assert.equal(acpModelOption(claudeModels, "claude-fable-5-1", "claude"), "claude-fable-5-1[1m]");
+  assert.equal(acpModelOption(claudeModels, "opus", "codex"), null);
+  assert.equal(acpModelOption(claudeModels, "opus", "claude_code"), "opus[1m]");
+  assert.equal(acpModelOption([{ value: "opus", name: "Opus 5" }, ...claudeModels], "opus", "claude"), "opus", "An exact native alias wins");
+  const ambiguous = [...claudeModels, { value: "claude-opus-4", name: "Opus 4" }];
+  for (const [model, models] of [["opus", ambiguous], ["claude-opus-4", claudeModels], ["claude-fable-5", claudeModels], ["fable", claudeModels.filter(option => !option.name.startsWith("Fable"))]]) {
+    const agent = fakeAgent({ models });
+    await assert.rejects(startAcpRun({ provider: "claude", model, prompt: "Say hello", clientFactory: agent.factory }), /does not support model/);
+    assert.equal(agent.messages.some(message => message.method === "session/prompt"), false);
+    assert.equal(agent.child.exitCode, 0);
+  }
 });
 
 test("provider exit rejects the run and records failure without replaying it", async t => {

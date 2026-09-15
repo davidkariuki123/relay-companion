@@ -30,15 +30,22 @@ export function acpMcpServers(servers) {
     ...(server.command ? { env: Object.entries(server.env || {}).map(([name, value]) => ({ name, value: String(value) })) } : {}),
   }));
 }
-export function acpModelOption(options, requested) {
+export function acpModelOption(options, requested, provider) {
   const direct = options.find(option => option.value === requested);
   if (direct) return direct.value;
-  // Native model pickers expose aliases (for example opus[1m]) while Relay's
-  // route carries a versioned model id. Match the exact advertised display
-  // name, including its generation; never guess from the model family alone.
+  // Versioned selections must match the advertised generation exactly.
   const normalize = value => String(value || "").toLowerCase().replace(/^claude[ -]?/, "").replace(/[^a-z0-9]/g, "");
   const matches = options.filter(option => normalize(option.name) === normalize(requested));
-  return matches.length === 1 ? matches[0].value : null;
+  if (matches.length) return matches.length === 1 ? matches[0].value : null;
+  // Chat preferences and the Todo steward use Claude family aliases. ACP may
+  // advertise only a context-qualified alias or a concrete model id. Resolve
+  // an unversioned family only when the provider offers one matching choice.
+  if (acpProvider(provider) === "claude" && /^(opus|fable|sonnet|haiku)$/.test(requested)) {
+    const family = new RegExp(`^(?:claude[ -])?${requested}(?:$|\\[|[ -]\\d)`, "i");
+    const choices = options.filter(option => family.test(option.value || "") || family.test(option.name || ""));
+    if (choices.length === 1) return choices[0].value;
+  }
+  return null;
 }
 
 export class AcpClient {
@@ -176,7 +183,7 @@ export class AcpClient {
         const option = configOptions.find(option => option.category === category || option.id === category);
         if (!option) throw new Error(`ACP ${this.provider} does not expose ${category} selection`);
         const options = (option.options || []).flatMap(entry => entry.options || [entry]);
-        const selectedValue = category === "model" ? acpModelOption(options, value) : options.find(entry => entry.value === value)?.value;
+        const selectedValue = category === "model" ? acpModelOption(options, value, this.provider) : options.find(entry => entry.value === value)?.value;
         if (!selectedValue) throw new Error(`ACP ${this.provider} does not support ${category} ${value}`);
         const selected = await this.request("session/set_config_option", { sessionId: actual, configId: option.id, value: selectedValue });
         configOptions = selected?.configOptions || configOptions;

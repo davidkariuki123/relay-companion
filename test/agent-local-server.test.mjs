@@ -26,7 +26,7 @@ test("daemon dispatch restores groups, chats, attachment reads and exact local d
   t.after(() => dispatcher.stop());
   const get = (route) => dispatcher.dispatch({ method: "GET", path: route, accountId: "usr_test" });
   assert.equal((await get("/v1/contact-groups")).method, "groups");
-  assert.deepEqual((await get("/v1/chats/chat_one")).args, ["chat_one"]);
+  assert.deepEqual((await get("/v1/chats/chat_one")).args, ["chat_one", {}]);
   assert.deepEqual((await get("/v1/relays/rel_one/attachments/att_one/download-url")).args, ["rel_one", "att_one"]);
   assert.equal((await get("/local/destinations/codex"))[0].nativeId, "session_one");
   client.fetchRelay = async () => ({ packet: { attachments: [{ id: "att_secret", localPath: "/private/decrypted.pdf", name: "report.pdf" }] } });

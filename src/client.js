@@ -2,6 +2,7 @@ import { accountIdentity, apiUrl, deviceToken } from "./config.js";
 import { compareAccountIdentity } from "./account.js";
 import { createRequire } from "node:module";
 import { COMPANION_TELEMETRY_HEADER, companionFleetTelemetryHeader } from "./fleet-telemetry.js";
+import { readContext, recordReadTiming, readTimeout } from "./read-context.js";
 
 const { installationKey: currentInstallationKey } = createRequire(import.meta.url)("./installation-key.cjs");
 
@@ -250,6 +251,8 @@ export class RelayClient {
     retry = true,
   } = {}) {
     const hasBody = body !== undefined;
+    const context = readContext();
+    if (context) signal = signal ? AbortSignal.any([signal, context.signal]) : context.signal;
     const headers = hasBody ? { "Content-Type": "application/json" } : {};
     if (COMPANION_VERSION) headers["x-relay-version"] = COMPANION_VERSION;
     headers["x-relay-client"] = String(clientName || "relay-companion").replace(/[^\x20-\x7e]/g, "_").trim().slice(0, 80);
@@ -258,6 +261,7 @@ export class RelayClient {
     if (provider) headers["x-relay-source-provider"] = provider;
     if (nativeSession) headers["x-relay-native-session-id"] = nativeSession;
     headers["x-relay-send-contract"] = "2";
+    if (context) headers["x-relay-request-id"] = context.requestId;
     if (auth && this.token) headers.Authorization = `Bearer ${this.token}`;
     if (auth && String(this.token || "").startsWith("dev_")) {
       const telemetry = companionFleetTelemetryHeader({
@@ -266,22 +270,37 @@ export class RelayClient {
       if (telemetry) headers[COMPANION_TELEMETRY_HEADER] = telemetry;
     }
     const retryable = retry && requestCanRetry(method, body);
+    const deadline = context?.deadline ?? Date.now() + timeoutMs * (retryable ? 2 : 1);
     for (let attempts = 1; attempts <= 2; attempts += 1) {
       const transportRef = { current: null };
+      const attemptStarted = performance.now();
+      let headersMs;
+      let receivedHeaders = false;
       try {
         signal?.throwIfAborted();
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) throw readTimeout();
         const res = await keepAliveFetch(`${this.url}${path}`, {
           method,
           headers,
           body: hasBody ? JSON.stringify(body) : undefined,
           // A hung request must never stall a caller forever (the pill serializes its
           // payload pushes behind these calls). Live waits opt into a longer deadline.
-          signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
+          signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(Math.min(timeoutMs, remaining))]) : AbortSignal.timeout(Math.min(timeoutMs, remaining)),
         }, transportRef);
+        receivedHeaders = true;
+        headersMs = Math.round(performance.now() - attemptStarted);
         // Any HTTP answer proves the transport; the status code is the API's business.
         noteTransportSuccess();
+        const bodyAt = performance.now();
         const text = await res.text();
+        const parseAt = performance.now();
         const data = text ? JSON.parse(text) : {};
+        recordReadTiming({ phase: "http", attempt: attempts, status: res.status, headersMs,
+          bodyMs: Math.round(parseAt - bodyAt), parseMs: Math.round(performance.now() - parseAt),
+          serverMs: Number(res.headers.get("x-relay-read-ms")) || undefined,
+          elapsedMs: Math.round(performance.now() - attemptStarted), responseBytes: Buffer.byteLength(text),
+          messageCount: Array.isArray(data.items) ? data.items.length : undefined });
         if (!res.ok) {
           const err = new Error(data.message || data.error || `HTTP ${res.status}`);
           err.status = res.status;
@@ -294,11 +313,14 @@ export class RelayClient {
         }
         return data;
       } catch (error) {
+        recordReadTiming({ phase: "http_failure", attempt: attempts, headersMs,
+          elapsedMs: Math.round(performance.now() - attemptStarted), receivedHeaders,
+          outcome: signal?.aborted ? "cancelled_or_deadline" : error?.name === "TimeoutError" ? "timeout" : "error" });
         if (signal?.aborted) throw error;
         if (!isRetryableTransportFailure(error)) throw error;
         noteTransportFailure();
         retireRelayTransport(transportRef.current);
-        const retrying = retryable && attempts === 1;
+        const retrying = retryable && attempts === 1 && !receivedHeaders && Date.now() < deadline;
         const cause = recordTransportFailure(error, attempts);
         console.warn(
           `[relay] API transport ${retrying ? "interrupted" : "failed"}: ${cause}; `
@@ -952,10 +974,13 @@ export class RelayClient {
     const surface = options && options.surface === "slack" ? "slack" : "relay";
     const includeSlack = options && options.includeSlack === true;
     const managedBase = `/v1/chats/${encodeURIComponent(chatId)}`;
-    const relayPath = `${managedBase}?surface=relay`;
+    const page = new URLSearchParams();
+    for (const key of ["limit", "beforeCursor", "afterCursor"]) if (options[key] !== undefined) page.set(key, String(options[key]));
+    const suffix = page.size ? `&${page}` : "";
+    const relayPath = `${managedBase}?surface=relay${suffix}`;
     // Native surfaces address the managed canonical room directly.
-    if (surface === "slack") return this.#req("GET", `${managedBase}?surface=slack&includeSlack=true`);
-    if (includeSlack) return this.#req("GET", `${managedBase}?surface=relay&includeSlack=true`);
+    if (surface === "slack") return this.#req("GET", `${managedBase}?surface=slack&includeSlack=true${suffix}`);
+    if (includeSlack) return this.#req("GET", `${managedBase}?surface=relay&includeSlack=true${suffix}`);
     return this.#req("GET", relayPath);
   }
 
@@ -1005,8 +1030,10 @@ export class RelayClient {
   }
 
   /** The chat around an open message, in one round trip. */
-  chatForThread(threadId) {
-    return this.#req("GET", `/v1/chats/by-thread/${encodeURIComponent(threadId)}`);
+  chatForThread(threadId, options = {}) {
+    const page = new URLSearchParams();
+    for (const key of ["limit", "beforeCursor", "afterCursor"]) if (options[key] !== undefined) page.set(key, String(options[key]));
+    return this.#req("GET", `/v1/chats/by-thread/${encodeURIComponent(threadId)}${page.size ? `?${page}` : ""}`);
   }
 
   /**

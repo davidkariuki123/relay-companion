@@ -941,7 +941,8 @@ test("chat tools are registered for ordinary accounts and teach the ontology", (
   // Choosing between the two read tools has to be unambiguous.
   const fetch = byName.get("relay_chat_fetch").description;
   assert.match(fetch, /no user-visible threads or topics/i);
-  assert.match(fetch, /Prefer this whenever/i);
+  assert.match(fetch, /when the request needs conversation context/i);
+  assert.match(fetch, /newest 25 messages/);
   assert.match(byName.get("relay_thread_fetch").description, /Prefer relay_chat_fetch/);
   assert.match(byName.get("relay_inbox_list").description, /relay_chats_list and relay_chat_fetch/);
 
@@ -986,14 +987,19 @@ test("the retired relay_chat_reply alias is unlisted but still sends", async () 
 test("relay_chat_fetch resolves a chat by id or by any thread in it, and refuses to guess", async () => {
   const calls = [];
   const fakeClient = {
-    async chat(id) { calls.push(["chat", id]); return { chatId: id, replyToRelayId: "legacy_latest", items: [] }; },
-    async chatForThread(id) { calls.push(["byThread", id]); return { chatId: "chat_x", items: [] }; },
+    async chat(id, page) { calls.push(["chat", id, page]); return { chatId: id, replyToRelayId: "legacy_latest", items: [] }; },
+    async chatForThread(id, page) { calls.push(["byThread", id, page]); return { chatId: "chat_x", items: [] }; },
   };
   const fetched = await handleCall(fakeClient, "relay_chat_fetch", { chatId: "chat_a" }, { mode: "messages-only" });
   assert.equal(JSON.parse(fetched.content[0].text).replyToRelayId, undefined,
     "the rolling-server compatibility hint is never exposed to current agents");
   await handleCall(fakeClient, "relay_chat_fetch", { threadId: "relay_root" }, { mode: "messages-only" });
-  assert.deepEqual(calls, [["chat", "chat_a"], ["byThread", "relay_root"]]);
+  const defaultPage = { limit: 25, beforeCursor: undefined, afterCursor: undefined };
+  assert.deepEqual(calls, [["chat", "chat_a", defaultPage], ["byThread", "relay_root", defaultPage]]);
+  await handleCall(fakeClient, "relay_chat_fetch", { chatId: "chat_a", limit: 10, beforeCursor: "opaque" });
+  assert.deepEqual(calls.at(-1)[2], { limit: 10, beforeCursor: "opaque", afterCursor: undefined });
+  await assert.rejects(handleCall(fakeClient, "relay_chat_fetch", { chatId: "chat_a", limit: 201 }), /limit/);
+  await assert.rejects(handleCall(fakeClient, "relay_chat_fetch", { chatId: "chat_a", beforeCursor: "a", afterCursor: "b" }), /only one/);
 
   // Naming nothing must fail loudly rather than act on some default conversation.
   await assert.rejects(

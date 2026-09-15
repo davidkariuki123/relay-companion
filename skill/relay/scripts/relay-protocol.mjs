@@ -24,7 +24,7 @@ const DIRECT_RECOVERY = "To renew browser approval, use connect-start <approved-
 const SAFE_GET = [
   /^\/v1\/contact-groups$/,
   /^\/v1\/chats(?:\?.*)?$/,
-  /^\/v1\/chats\/[A-Za-z0-9_-]+$/,
+  /^\/v1\/chats\/[A-Za-z0-9_-]+(?:\?.*)?$/,
   /^\/v1\/relays\/[A-Za-z0-9_-]+\/attachments\/[A-Za-z0-9_-]+\/download-url$/,
   /^\/v1\/me$/,
   /^\/v1\/inbox(?:\?.*)?$/,
@@ -679,7 +679,7 @@ const DIRECT_TOOLS = {
   relay_contacts_search: directTool("Search this account's contacts. Resolve recipients before sending.", { query: stringField }, ["query"]),
   relay_groups_list: directTool("List this account's existing channels.", {}, [], { full: true }),
   relay_chats_list: directTool("List this account's conversations without changing read state.", {}, [], { full: true }),
-  relay_chat_fetch: directTool("Read one exact chat without receipts. HTTPS requires chatId; returns the server's chat document.", { chatId: idField }, ["chatId"], { full: true }),
+  relay_chat_fetch: directTool("Read a page of one chat without receipts. Defaults to the newest 25, oldest first. HTTPS requires chatId. Continue with nextBeforeCursor or nextAfterCursor; a page is not the full history.", { chatId: idField, limit: { type: "integer", minimum: 1, maximum: 200 }, beforeCursor: { type: "string" }, afterCursor: { type: "string" } }, ["chatId"], { full: true }),
   relay_thread_fetch: directTool("Read related Relays by their internal threadId without receipts.", { threadId: idField }, ["threadId"]),
   relay_inbox_list: directTool("Read recent inbox metadata, or up to 20 exact Relay packet envelopes in items [{relayId, ...response}]. Does not send receipts. Todo queries require Companion.", { relayIds: { type: "array", items: idField, minItems: 1, maxItems: 20 } }),
   relay_sent_list: directTool("Read sent history. Optional recipient matches a name or address.", { recipient: stringField, limit: { type: "integer", minimum: 1, maximum: 100 } }),
@@ -742,7 +742,12 @@ async function directToolCommand(command, body, config) {
   if (name === "relay_contacts_search") value = await request("GET", `/v1/contacts/search?q=${encodeURIComponent(args.query)}`);
   else if (name === "relay_groups_list") value = await request("GET", "/v1/contact-groups");
   else if (name === "relay_chats_list") value = await request("GET", "/v1/chats");
-  else if (name === "relay_chat_fetch") value = await request("GET", `/v1/chats/${args.chatId}`);
+  else if (name === "relay_chat_fetch") {
+    if (args.beforeCursor && args.afterCursor) throw new Error("Pass beforeCursor or afterCursor, not both.");
+    const page = new URLSearchParams({ surface: "relay", limit: String(args.limit ?? 25) });
+    for (const key of ["beforeCursor", "afterCursor"]) if (args[key]) page.set(key, args[key]);
+    value = await request("GET", `/v1/chats/${encodeURIComponent(args.chatId)}?${page}`);
+  }
   else if (name === "relay_thread_fetch") value = await request("GET", `/v1/threads/${args.threadId}`);
   else if (name === "relay_inbox_list") {
     if (args.relayIds) {

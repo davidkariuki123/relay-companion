@@ -74,7 +74,7 @@ test("the Companion requests Relay-hidden and Slack-visible projections explicit
     "Relay list requests never rely on a server default that can drift");
   assert.match(listClient, /\/v1\/chats\?surface=slack/,
     "Slack has its own linked-conversation projection");
-  assert.match(detailClient, /const relayPath = `\$\{managedBase\}\?surface=relay`/);
+  assert.match(detailClient, /const relayPath = `\$\{managedBase\}\?surface=relay\$\{suffix\}`/);
   assert.match(detailClient, /surface=slack&includeSlack=true/);
   assert.match(detailClient, /surface=relay&includeSlack=true/,
     "Slack enters Relays only through the explicit reveal path");

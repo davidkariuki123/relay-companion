@@ -56,7 +56,10 @@ export function createAgentDispatcher({ client, outboxFile, listDestinations, de
       if (url.pathname === "/v1/contacts/search") return client.searchContacts(url.searchParams.get("q") || "");
       if (url.pathname === "/v1/contact-groups") return client.groups();
       if (url.pathname === "/v1/chats") return client.chats();
-      if (parts[2] === "chats") return client.chat(parts[3]);
+      if (parts[2] === "chats") {
+        const page = Object.fromEntries(["limit", "beforeCursor", "afterCursor"].filter((key) => url.searchParams.has(key)).map((key) => [key, url.searchParams.get(key)]));
+        return client.chat(parts[3], page);
+      }
       if (parts[2] === "threads") {
         if (/^(erelay_|egmsg_)/.test(parts[3])) return client.chatForThread(parts[3]);
         return client.thread(parts[3]);

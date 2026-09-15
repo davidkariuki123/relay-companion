@@ -44,10 +44,14 @@ try {
   await page.getByRole('button',{name:'Clear search',exact:true}).click();
   assert.equal(await input.inputValue(),'');
   assert.equal(await page.locator('.chat-finder-result').count(),67);
+  assert.equal(await page.locator('#scroll').evaluate(el=>getComputedStyle(el).overflowY),'hidden','the covered inbox does not keep a second scrollbar');
+  assert.equal(await page.locator('#chatFinderResults').evaluate(el=>getComputedStyle(el).overflowX),'hidden','finder results never scroll sideways');
+  await page.screenshot({path:'/tmp/relay-chat-finder.png'});
   await input.fill('Granular');
   assert.equal(await page.locator('.chat-finder-result').count(),1,'groups are searchable');
   await input.press('Escape');
   assert.equal(await trigger.getAttribute('aria-expanded'),'false');
+  assert.equal(await page.locator('#scroll').evaluate(el=>getComputedStyle(el).overflowY),'auto','closing search restores inbox scrolling');
   assert.equal(await trigger.evaluate(el=>el===document.activeElement),true);
   await trigger.click();
   await page.locator('[data-view="relays"]').click();
@@ -72,7 +76,6 @@ try {
     }
   }
   await page.setViewportSize({width:360,height:700});
-  await page.screenshot({path:'/tmp/relay-chat-finder.png'});
   await input.press('Enter');
   await page.waitForFunction(()=>!document.getElementById('threadsView').classList.contains('hidden'));
   assert.equal(await page.locator('#chatFinder').evaluate(el=>el.matches(':popover-open')),false);

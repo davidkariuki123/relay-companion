@@ -107,6 +107,21 @@ test("HTTPS never contacts a live Companion, changes identities, or bypasses rev
   assert.ok(f.calls.every((call) => call.path === "/v1/me"));
 });
 
+test("direct HTTPS chat reads default to 25 and carry opaque paging cursors", async (t) => {
+  const f = await fixture(t);
+  const first = await f.run(["--transport=https", "call", "relay_chat_fetch"], { chatId: "chat_one" });
+  assert.equal(first.code, 0, first.stderr);
+  assert.equal(f.calls.at(-1).path, "/v1/chats/chat_one?surface=relay&limit=25");
+  const older = await f.run(["--transport=https", "call", "relay_chat_fetch"], { chatId: "chat_one", limit: 10, beforeCursor: "opaque+/=" });
+  assert.equal(older.code, 0, older.stderr);
+  const query = new URL(f.calls.at(-1).path, "http://localhost").searchParams;
+  assert.equal(query.get("beforeCursor"), "opaque+/=");
+  assert.equal(query.get("limit"), "10");
+  const invalid = await f.run(["--transport=https", "call", "relay_chat_fetch"], { chatId: "chat_one", beforeCursor: "a", afterCursor: "b" });
+  assert.equal(invalid.code, 1);
+  assert.match(invalid.stderr, /not both/);
+});
+
 test("missing, expired and guest credentials give independent recovery without consulting Companion", async (t) => {
   const f = await fixture(t);
   fs.writeFileSync(f.descriptor, "invalid");
