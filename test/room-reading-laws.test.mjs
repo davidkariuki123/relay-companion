@@ -68,8 +68,8 @@ test("every room entry follows newest through every asynchronous hydration phase
   assert.match(back, /threadDetailScrolledFor = null;/);
 
   const close = html.slice(html.indexOf("function closeReader()"), html.indexOf("// Paragraph-level rendering"));
-  assert.ok(close.indexOf("openThreadDetail(") < close.indexOf("requestAnimationFrame("));
-  assert.match(close, /requestAnimationFrame\(\(\) => \{[\s\S]*?restoreRoomScroll\(back\.roomScroll\)/);
+  assert.ok(close.indexOf("openThreadDetail(") < close.indexOf("return () => restoreRoomScroll("));
+  assert.match(close, /return \(\) => restoreRoomScroll\(back\.roomScroll\)/);
 
   for (const start of ["function ghostArrival(row)", "function notifyArrival(rows, meta)"]) {
     const startAt = html.indexOf(start);

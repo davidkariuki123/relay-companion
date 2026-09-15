@@ -189,6 +189,7 @@ async function activateMacRuntimeServices(target, {
   const agents = path.posix.join(String(homeDir || ""), "Library", "LaunchAgents");
   const labels = [PILL_LABEL, DAEMON_LABEL];
   const deadline = now() + Math.max(1, activationDeadlineMs);
+  let lastHealth = null;
   const preflight = installedServiceProcessRows(target, { run, includeTarget: true, processId });
   if (!preflight.ok) return { ...preflight, unchanged: true };
   for (const label of labels) run("/bin/launchctl", ["bootout", `${domain}/${label}`]);
@@ -231,15 +232,19 @@ async function activateMacRuntimeServices(target, {
 
     while (now() <= deadline) {
       const health = await healthCheck(target, { platform, run });
+      lastHealth = health;
       if (health?.ok) return { ok: true, health };
-      if (health?.oldDaemon || health?.oldPill) {
+      // A host bridge can restart an old broker after the initial reap. Treat
+      // it like any other stale service so activation can converge again.
+      if (health?.oldDaemon || health?.oldPill || health?.oldBroker) {
         for (const label of labels) run("/bin/launchctl", ["bootout", `${domain}/${label}`]);
         break;
       }
       await sleep(healthPollMs);
     }
   }
-  return { ok: false, reason: "activation-deadline-exceeded", detail: target.packageRoot };
+  return { ok: false, reason: "activation-deadline-exceeded", health: lastHealth,
+    detail: `${target.packageRoot}; ${JSON.stringify(lastHealth)}` };
 }
 
 /** Restart Linux user services from their already-repaired unit files. */

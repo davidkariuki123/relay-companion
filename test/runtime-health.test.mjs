@@ -4,6 +4,48 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const health = require("../bootstrap/runtime-health.cjs");
 
+test("macOS activation reaps an old broker that a host restarted during activation", async () => {
+  const root = "/Users/test/.relay/runtime/releases";
+  const target = { packageRoot: `${root}/new/node_modules/relay-companion`,
+    bin: `${root}/new/node_modules/relay-companion/bin/relay.js` };
+  let clock = 0;
+  let bootstraps = 0;
+  let staleBroker = false;
+  const killed = [];
+  const run = (command, args) => {
+    if (command === "/bin/ps") return { status: 0, stdout: staleBroker
+      ? `${process.getuid()} 98765 node ${root}/old/node_modules/relay-companion/src/mcp-broker-entry.js\n` : "" };
+    if (command === "/bin/kill") { killed.push(args); staleBroker = false; }
+    if (args[0] === "print") return { status: 1 };
+    if (args[0] === "bootstrap") bootstraps += 1;
+    return { status: 0, stdout: "" };
+  };
+  const result = await health.activateMacRuntimeServices(target, {
+    platform: "darwin", homeDir: "/Users/test", run,
+    now: () => clock, sleep: async ms => { clock += ms; }, activationDeadlineMs: 5000,
+    healthCheck: () => {
+      if (bootstraps === 2) staleBroker = true;
+      return { ok: !staleBroker, daemon: true, pill: true, oldBroker: staleBroker };
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(killed, [["-TERM", "98765"]]);
+  assert.equal(bootstraps, 4);
+});
+
+test("macOS activation timeout preserves the failing health observation", async () => {
+  let clock = 0;
+  const failed = { ok: false, daemon: false, pill: true, daemonCount: 0 };
+  const result = await health.activateMacRuntimeServices({ packageRoot: "/test", bin: "/test/bin/relay.js" }, {
+    platform: "darwin", run: (_command, args) => ({ status: args[0] === "print" ? 1 : 0, stdout: "" }),
+    now: () => clock, sleep: async ms => { clock += ms; }, activationDeadlineMs: 1000,
+    healthCheck: () => failed,
+  });
+  assert.equal(result.reason, "activation-deadline-exceeded");
+  assert.deepEqual(result.health, failed);
+  assert.match(result.detail, /"daemonCount":0/);
+});
+
 test("memory pressure trips on a small absolute reserve or a small share of the machine", () => {
   const pressure = options => health.memoryPressure({ platform: "win32", ...options });
   assert.equal(pressure({ freeBytes: 11 * 1024 * 1024, totalBytes: 16e9 }).pressured, true);

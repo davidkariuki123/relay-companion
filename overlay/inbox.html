@@ -445,6 +445,24 @@
   html.room-view-transition[data-room-motion="back"]::view-transition-new(relay-room) {
     animation:roomPixelsBackNew .36s cubic-bezier(.32,.72,0,1) both;
   }
+  /* The whole card is a pixel surface during a resize. Sticky/backdrop-filter
+     descendants cannot change stacking or layout halfway through the motion. */
+  html.card-view-transition::view-transition-old(root),
+  html.card-view-transition::view-transition-new(root) {
+    animation:none; mix-blend-mode:normal;
+  }
+  html.card-view-transition::view-transition-group(relay-card) {
+    animation-duration:.36s;
+    animation-timing-function:cubic-bezier(.32,.72,0,1);
+    overflow:hidden; border-radius:16px;
+  }
+  html.card-view-transition::view-transition-image-pair(relay-card) { isolation:isolate; }
+  html.card-view-transition::view-transition-old(relay-card),
+  html.card-view-transition::view-transition-new(relay-card) {
+    width:100%; height:100%; object-fit:fill;
+    animation-duration:.36s;
+    animation-timing-function:cubic-bezier(.32,.72,0,1);
+  }
   /* A room is spatial navigation, not a dissolve. Keep the application chrome
      still and move one opaque content face at a time, using the same direction
      on entry and its exact inverse on Back. The trailing face travels farther;
@@ -3518,7 +3536,7 @@
   const EXPANDED = { w: 344, h: 524 };
   // Tap a letter and the PILL EXPANDS INTO the reader — the old preview
   // window's exact size, but one surface and one motion instead of a second
-  // window beside the pill (David's round). Same spring as fold/expand.
+  // window beside the pill (David's round). A whole-card snapshot owns the resize.
   const READER = { w: 720, h: 760 };
   const PILL = { w: 244, h: 44 }; // wide enough for mark + word + "N unread" + ✕
   const PEEK = { w: 400, h: 118 };
@@ -3719,7 +3737,7 @@
   let readerMorphDeferredPayload = null;
   function syncCardSize(readerOpen) {
     readerOpenNow = Boolean(readerOpen);
-    if (collapsed || peeking || ghost || readerMorphInFlight) return;
+    if (collapsed || peeking || ghost || readerMorphInFlight || cardViewTransition) return;
     const t = readerOpenNow ? READER : EXPANDED;
     if (W.t !== t.w || H.t !== t.h) springTo(t.w, t.h);
   }
@@ -3744,7 +3762,7 @@
   }
   function prepareReaderMorph(sourceView, { motion = "morph" } = {}) {
     cleanReaderMorph();
-    if (REDUCED || collapsed || peeking || ghost) return false;
+    if (REDUCED || collapsed || peeking || ghost || cardViewTransition) return false;
     const source = {
       relays: relaysViewEl,
       chat: chatViewEl,
@@ -3841,6 +3859,10 @@
   const roomViewTransitionDeferredWork = new Set();
   function afterRoomViewTransition(update) {
     if (typeof update !== "function") return;
+    if (cardViewTransition) {
+      cardViewTransition.work.add(update);
+      return;
+    }
     if (roomViewTransition) {
       roomViewTransitionDeferredWork.add(update);
       return;
@@ -3919,6 +3941,83 @@
       return false;
     }
   }
+  let cardViewTransition = null;
+  function snapCardLayout(size) {
+    if (raf) { cancelAnimationFrame(raf); raf = null; }
+    W.v = W.t = size.w; H.v = H.t = size.h;
+    W.vel = H.vel = 0;
+    cardEl.style.width = size.w + "px";
+    cardEl.style.height = size.h + "px";
+    scrollEl.style.width = Math.max(size.w, EXPANDED.w) + "px";
+  }
+  function finishCardViewTransition(state) {
+    if (cardViewTransition !== state) return;
+    cardViewTransition = null;
+    cardEl.style.viewTransitionName = "";
+    document.documentElement.classList.remove("card-view-transition");
+    // Keep the native viewport at the larger size until Chromium retires the
+    // snapshots. Resizing it during capture/animation aborts View Transitions.
+    commitSettledCardSize(W.t, H.t, ++cardMotionId);
+    const next = state.payload;
+    if (next) queueMicrotask(() => onPayload(next));
+    for (const work of state.work) queueMicrotask(work);
+  }
+  function cancelCardViewTransition() {
+    const state = cardViewTransition;
+    if (!state) return;
+    state.transition?.skipTransition();
+    finishCardViewTransition(state);
+  }
+  async function startCardViewTransition(update, size) {
+    cancelCardViewTransition();
+    supersedeRoomViewTransition();
+    cleanReaderMorph();
+    const state = { transition:null, updating:false, updated:false, payload:null, work:new Set() };
+    cardViewTransition = state;
+    const commit = () => {
+      if (cardViewTransition !== state) return;
+      state.updating = true;
+      snapCardLayout(size);
+      state.updated = true;
+      const restore = update();
+      // Chromium pauses rendering inside this callback: never wait for rAF.
+      // A return to a saved position also retires room-entry auto-follow so
+      // its queued frame cannot move the live page behind the new snapshot.
+      if (typeof restore === "function") {
+        threadDetailEntryFollow = null;
+        restore();
+      }
+      if (activeView === "reader") assessReaderFit();
+      state.updating = false;
+    };
+    try {
+      if (raf) { cancelAnimationFrame(raf); raf = null; }
+      const envelope = { w:Math.max(W.v, size.w), h:Math.max(H.v, size.h) };
+      publishCardSize(envelope.w, envelope.h, { phase:"prepare", motionId:++cardMotionId });
+      if (window.relay.prepareCardSize) await window.relay.prepareCardSize(envelope.w, envelope.h);
+      if (cardViewTransition !== state) return;
+      if (REDUCED || collapsed || ghost || typeof document.startViewTransition !== "function") {
+        await commit();
+        finishCardViewTransition(state);
+        return;
+      }
+      // Let Chromium observe the grown native viewport BEFORE old capture.
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      if (cardViewTransition !== state) return;
+      document.documentElement.classList.add("card-view-transition");
+      cardEl.style.viewTransitionName = "relay-card";
+      state.transition = document.startViewTransition(commit);
+      state.transition.ready.catch(() => {});
+      state.transition.updateCallbackDone.catch(() => {});
+      await state.transition.finished;
+    } catch {
+      // An unavailable native barrier/transition must still navigate. Never
+      // replay an obsolete callback after a newer click has superseded it.
+      if (cardViewTransition === state && !state.updated) await commit();
+    } finally {
+      finishCardViewTransition(state);
+    }
+  }
   let peeking = false, peekTimer = null;
   let notificationDurationMs = 7000;
   let activeNotificationIds = [];
@@ -3937,6 +4036,7 @@
     cardEl.classList.remove("peek", "notifying");
   }
   function setCollapsed(v) {
+    cancelCardViewTransition();
     clearPeek();
     if (v === collapsed) return;
     collapsed = v;
@@ -9114,8 +9214,7 @@
   }
   function openReader(id, source) {
     // A notification banner remains `peeking` even after the user moves into
-    // Tasks. Both prepareReaderMorph() and syncCardSize() deliberately
-    // refuse to resize in that state, so opening a row could paint the full
+    // Tasks. A lingering peek can suppress reader sizing and paint the full
     // reader into the 400x118 banner window. The click explicitly asks for the
     // full surface: retire the transient banner before taking the snapshot.
     if (peeking) {
@@ -9123,15 +9222,6 @@
       presented = true;
     }
     sessionPickerState = null;
-    const morphFromList = prepareReaderMorph(activeView);
-    readerId = id;
-    const opened = readerRow(id);
-    // A Relay that already went to an app opens on its receipt.
-    const openedHandoff = handoffFor(opened);
-    readerTab = openedHandoff && ["starting", "running", "failed"].includes(openedHandoff.state) ? "agent" : "you";
-    // Remember the WHOLE place, not just the view: a room is a person, so
-    // coming back without the party hint (or without the split) left the rail
-    // standing beside an empty pane (David, live).
     if (activeView !== "reader") {
       readerReturn = {
         view: activeView,
@@ -9140,33 +9230,43 @@
         expanded: chatExpanded,
         source: threadsSource,
         roomScroll: captureRoomScroll(),
+        expandedMessages: [...expandedMsgIds],
         outerScrollTop: scrollEl ? scrollEl.scrollTop : 0,
       };
     }
-    readerSource = source || (activeView === "threads" || activeView === "reader" ? readerSource : activeView);
-    activeView = "reader";
-    commitNavigation({ outerScrollTop: 0 });
-    if (morphFromList) startReaderMorph();
+    startCardViewTransition(() => {
+      readerId = id;
+      const opened = readerRow(id);
+      // A Relay that already went to an app opens on its receipt.
+      const openedHandoff = handoffFor(opened);
+      readerTab = openedHandoff && ["starting", "running", "failed"].includes(openedHandoff.state) ? "agent" : "you";
+      readerSource = source || (activeView === "threads" || activeView === "reader" ? readerSource : activeView);
+      activeView = "reader";
+      commitNavigation({ outerScrollTop: 0 });
+    }, READER);
   }
   function closeReader() {
     closeReaderAttachments();
     cleanReaderMorph();
     sessionPickerState = null;
     const back = readerReturn || { view: readerSource === "tasks" ? "tasks" : "relays", threadId: null };
-    readerId = null;
-    if (back.view === "threads" && back.threadId) {
-      // Re-ENTER the room through the same door that opened it. Restoring the
-      // fields by hand looked equivalent and was not: the pane came back blank
-      // (David, live). One entry point, one state.
-      const wasExpanded = Boolean(back.expanded);
-      openThreadDetail(back.threadId, back.party || "", back.source || "chat", { expanded: wasExpanded });
-      requestAnimationFrame(() => {
-        if (activeView === "threads" && threadDetailId === back.threadId) restoreRoomScroll(back.roomScroll);
-      });
-      return;
-    }
-    activeView = back.view || "relays";
-    commitNavigation({ outerScrollTop: back.outerScrollTop });
+    startCardViewTransition(() => {
+      readerId = null;
+      if (back.view === "threads" && back.threadId) {
+        // Re-ENTER the room through the same door that opened it. Restoring the
+        // fields by hand looked equivalent and was not: the pane came back blank
+        // (David, live). One entry point, one state.
+        const wasExpanded = Boolean(back.expanded);
+        openThreadDetail(back.threadId, back.party || "", back.source || "chat", { expanded: wasExpanded });
+        if (back.expandedMessages?.length) {
+          for (const id of back.expandedMessages) expandedMsgIds.add(id);
+          renderThreadDetail();
+        }
+        return () => restoreRoomScroll(back.roomScroll);
+      }
+      activeView = back.view || "relays";
+      commitNavigation({ outerScrollTop: back.outerScrollTop });
+    }, back.view === "threads" && back.expanded ? READER : EXPANDED);
   }
   // Paragraph-level rendering only: escaped text, blank-line splits.
   // The letter's markdown. Agents write the way agents write — bold, code,
@@ -15637,20 +15737,24 @@
       readVisible:true,
     });
   });
+  let compactRoomResizeReturn = null;
   document.getElementById("thExpand").addEventListener("click", (e) => {
     e.stopPropagation();
-    const roomScroll = captureRoomScroll();
+    const roomScroll = chatExpanded && compactRoomResizeReturn?.threadId === threadDetailId
+      ? compactRoomResizeReturn.scroll : captureRoomScroll();
+    if (!chatExpanded) compactRoomResizeReturn = { threadId:threadDetailId, scroll:roomScroll };
+    else compactRoomResizeReturn = null;
     rememberChatRailScroll();
-    const morphFromCompact = !chatExpanded && prepareReaderMorph(activeView);
-    if (chatExpanded) sessionPickerState = null;
-    chatExpanded = !chatExpanded;
-    syncExpandButton();
-    // Populate/clear the rail before the frame begins moving. Building it
-    // after springTo made the first wide frame an empty column.
-    renderChatRail();
-    applyView();
-    if (morphFromCompact) startReaderMorph("threads");
-    requestAnimationFrame(() => restoreRoomScroll(roomScroll));
+    startCardViewTransition(() => {
+      if (chatExpanded) sessionPickerState = null;
+      chatExpanded = !chatExpanded;
+      syncExpandButton();
+      // Populate/clear the rail before the frame begins moving. Building it
+      // after springTo made the first wide frame an empty column.
+      renderChatRail();
+      applyView();
+      return () => restoreRoomScroll(roomScroll);
+    }, chatExpanded ? EXPANDED : READER);
   });
   thBackEl.addEventListener("click", () => {
     sessionPickerState = null;
@@ -15690,9 +15794,7 @@
       startRoomViewTransition(navigateBack, { motion:"back" });
       return;
     }
-    const morphBackToList = prepareReaderMorph("threads", { motion:"morph" });
-    navigateBack();
-    if (morphBackToList) startReaderMorph(activeView);
+    startCardViewTransition(navigateBack, EXPANDED);
   });
   let threadsSource = "chat"; // which tab the open conversation belongs to (the reader's readerSource law)
   let threadsCameFrom = "relays"; // where it was born — that tab also re-homes instead of navigating
@@ -17766,6 +17868,7 @@
   // second applyView inside renderAll. Scroll is restored in the same task,
   // before Chromium can paint the destination at its default origin.
   function commitNavigation({ outerScrollTop = null } = {}) {
+    if (cardViewTransition && !cardViewTransition.updating) cancelCardViewTransition();
     if (activeView !== "contacts") {
       cvOpenGeneration += 1;
       cvOpeningKey = null;
@@ -18166,6 +18269,10 @@
     const outboxRevision = Number(next.outboxRevision || 0);
     if (outboxRevision < latestOutboxRevision) return;
     latestOutboxRevision = outboxRevision;
+    if (cardViewTransition) {
+      cardViewTransition.payload = next;
+      return;
+    }
     if (readerMorphSnapshot) {
       readerMorphDeferredPayload = next;
       return;

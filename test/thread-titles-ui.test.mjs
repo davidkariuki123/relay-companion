@@ -358,7 +358,7 @@ test("reader Back restores the exact room scroll anchor", () => {
   assert.match(navigation, /roomScroll: captureRoomScroll\(\)/);
   assert.match(navigation, /roomScrollEl\.scrollTop = Number\(saved\.top\) \|\| 0/);
   assert.match(navigation, /roomScrollEl\.scrollTop \+= currentOffset - \(Number\(saved\.anchorOffset\) \|\| 0\)/);
-  assert.match(navigation, /requestAnimationFrame\(\(\) => \{[\s\S]*?restoreRoomScroll\(back\.roomScroll\)/);
+  assert.match(navigation, /return \(\) => restoreRoomScroll\(back\.roomScroll\)/);
 
   const captureSource = html.slice(html.indexOf("function captureRoomScroll()"), html.indexOf("function restoreRoomScroll("));
   const restoreSource = html.slice(html.indexOf("function restoreRoomScroll("), html.indexOf("function openReader("));

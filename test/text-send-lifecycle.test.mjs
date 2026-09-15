@@ -89,7 +89,7 @@ test("an upgrade never adds new request metadata to a previously queued retry", 
 });
 
 function renderer() {
-  const context = vm.createContext({ latestOutboxRevision: 0, optimisticChatReplies: new Map(), payload: {} });
+  const context = vm.createContext({ latestOutboxRevision: 0, cardViewTransition: null, optimisticChatReplies: new Map(), payload: {} });
   vm.runInContext(section("  function acceptOutboxReceipt(", "  function activeSlackRoomRecoveryMatches("), context);
   vm.runInContext(section("  function syncOutboxProjection()", "  // The room composer is wired ONCE"), context);
   // Run the real payload admission guard, then the real queue projection. The

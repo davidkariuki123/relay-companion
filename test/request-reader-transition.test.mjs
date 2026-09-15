@@ -10,7 +10,7 @@ test("opening a row retires notification peek before reader geometry is sampled"
   assert.ok(start >= 0 && end > start, "openReader is present");
   const openReader = html.slice(start, end);
   const clear = openReader.indexOf("clearPeek()");
-  const morph = openReader.indexOf("prepareReaderMorph(activeView)");
+  const morph = openReader.indexOf("startCardViewTransition(");
   assert.ok(clear >= 0, "the transient notification is explicitly retired");
   assert.ok(morph > clear, "peek state is retired before the morph snapshot is taken");
 });
@@ -24,24 +24,14 @@ function between(source, start, end) {
   return source.slice(from, to);
 }
 
-test("Tasks stages an inert source snapshot before exposing the prepared reader", () => {
-  const prepare = between(html, "function prepareReaderMorph", "function startReaderMorph");
+test("reader navigation captures the whole card before committing its destination", () => {
   const open = between(html, "function openReader(id, source)", "function closeReader()");
-
-  assert.match(prepare, /const source = \{/);
-  assert.match(prepare, /const snapshot = source\.cloneNode\(true\)/);
-  assert.match(prepare, /querySelectorAll\("\[id\]"\)/, "the visual clone cannot duplicate live selector ids");
-  assert.match(prepare, /setAttribute\("aria-hidden", "true"\)/);
-  assert.match(prepare, /readerMorphInFlight = true/);
-
-  const preparedAt = open.indexOf("prepareReaderMorph(activeView)");
-  const switchedAt = open.indexOf('activeView = "reader"');
-  const committedAt = open.indexOf("commitNavigation(");
-  const startedAt = open.indexOf("startReaderMorph()");
-  assert.ok(preparedAt >= 0 && preparedAt < switchedAt, "source pixels are captured before navigation state changes");
-  assert.ok(switchedAt < committedAt && committedAt < startedAt, "the atomic navigation fully renders the reader before the morph starts");
-  const commit = between(html, "function commitNavigation", "function syncTabs");
-  assert.match(commit, /renderAll\(\)/, "the shared navigation commit builds the destination before the morph");
+  assert.ok(open.indexOf("captureRoomScroll()") < open.indexOf("startCardViewTransition("));
+  assert.ok(open.indexOf("startCardViewTransition(") < open.indexOf('activeView = "reader"'));
+  assert.doesNotMatch(open, /prepareReaderMorph|startReaderMorph/);
+  const close = between(html, "function closeReader()", "function safeHref");
+  assert.match(close, /startCardViewTransition/);
+  assert.match(close, /return \(\) => restoreRoomScroll\(back.roomScroll\)/);
 });
 
 test("the native window growth barrier resolves before visible reader motion begins", () => {

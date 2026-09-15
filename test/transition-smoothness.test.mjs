@@ -155,7 +155,7 @@ test("all compact-to-reader resize transitions can hold a frozen source face", (
   for (const view of ["relays", "chat", "threads", "sent", "tasks", "contacts"]) {
     assert.match(prepare, new RegExp(`${view}:`));
   }
-  assert.match(html, /const morphFromCompact = !chatExpanded && prepareReaderMorph\(activeView\)/);
+  assert.match(html, /\}, chatExpanded \? EXPANDED : READER\)/);
   assert.match(prepare, /snapshot\.style\.width = `\$\{Math\.round\(cardEl\.getBoundingClientRect\(\)\.width\)\}px`/);
   assert.match(prepare, /node\.dataset\.readerMorphId = node\.id/);
   assert.match(prepare, /frozen\.scrollTop = live\.scrollTop/);
@@ -200,13 +200,12 @@ test("compact room navigation animates exact viewport pixels with a matching Bac
   const back = between(html, 'thBackEl.addEventListener("click", () => {', "let threadsSource");
   assert.match(back, /startRoomViewTransition\(navigateBack, \{ motion:"back" \}\)/,
     "compact Back reverses the exact-pixel transition");
-  assert.match(back, /prepareReaderMorph\("threads", \{ motion:"morph" \}\)/,
-    "expanded Back still coordinates its real native resize");
-  assert.match(back, /navigateBack\(\);[\s\S]*startReaderMorph\(activeView\)/);
+  assert.match(back, /startCardViewTransition\(navigateBack, EXPANDED\)/,
+    "expanded Back uses the whole-card snapshot resize");
 });
 
 test("the room transition names one stable viewport and cleans up on actual completion", () => {
-  const room = between(html, "let roomViewTransition = null", "let peeking");
+  const room = between(html, "let roomViewTransition = null", "let cardViewTransition = null");
   assert.match(room, /typeof document\.startViewTransition !== "function"/);
   assert.match(room, /scrollEl\.style\.viewTransitionName = "relay-room"/,
     "the scroller viewport is the sole pixel snapshot");
