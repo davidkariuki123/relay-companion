@@ -30,7 +30,7 @@ function pillFunction(name) {
 // Run the real threadMessages against a minimal payload. Every collaborator it
 // reaches for is stubbed to its plain-correspondence behavior; the collapse
 // and reconciliation under test are the extracted code itself.
-function runThreadMessages(payload, optimisticChatReplies, { realDelivery = false, realClassifier = false } = {}) {
+function runThreadMessages(payload, optimisticChatReplies, { realDelivery = false, realClassifier = false, localChatSendTimes = new Map() } = {}) {
   // The delivery fold is the code under test in its own case, so that case runs
   // the REAL sentIsRead/sentIsDelivered pair (the declarations shadow the
   // stub parameters of the same name) instead of a stub that would beg it.
@@ -46,13 +46,13 @@ function runThreadMessages(payload, optimisticChatReplies, { realDelivery = fals
     "return threadMessages();",
   ].filter(Boolean).join("\n");
   return new Function(
-    "payload", "optimisticChatReplies", "canonicalChatDetails", "contactChatAnchors",
+    "payload", "optimisticChatReplies", "canonicalChatDetails", "contactChatAnchors", "localChatSendTimes",
     "requestThreadIds", "isTaskRow", "isRelayListKind", "onRequestThread",
     "relaySubject", "relayTextLike", "isCompletionRelay", "relaySender",
     "bodyPreview", "sentRecipient", "sentIsRead", "sentIsDelivered", "sentIsAcknowledged", "sentSubject",
     `"use strict"; ${source}`,
   )(
-    payload, optimisticChatReplies, new Map(), new Map(),
+    payload, optimisticChatReplies, new Map(), new Map(), localChatSendTimes,
     () => new Set(), () => false, () => true, () => false,
     (r) => String(r.title || ""), () => true, () => false,
     (r) => String(r.senderName || "Sender"),
@@ -309,4 +309,36 @@ test("a group is Delivered only when EVERY member's sibling is", () => {
 
   const none = runThreadMessages(siblings(["pending", "pending"]), new Map(), { realDelivery: true });
   assert.equal(none.find((m) => m.direction === "out").delivered, false);
+});
+
+
+test("an image followed by text keeps its order through partial and complete history reconciliation", () => {
+  const localChatSendTimes = new Map();
+  const optimistic = new Map([
+    ["image", { id:"optimistic:image", direction:"out", at:"2026-09-15T07:36:00Z", body:"", attachments:[{name:"photo.png"}] }],
+    ["text", { id:"optimistic:text", direction:"out", at:"2026-09-15T07:36:01Z", body:"btw" }],
+  ]);
+  const payload = { relays:[], sent:[] };
+  const render = () => runThreadMessages(payload, optimistic, { localChatSendTimes })
+    .sort((a,b) => new Date(a.at) - new Date(b.at)).map(m => m.body);
+  assert.deepEqual(render(), ["", "btw"]);
+  payload.sent.push({relayId:"image-relay", threadId:"room", forHuman:"", createdAt:"2026-09-15T07:36:03Z",
+    source:{host:"relay-preview", clientMessageId:"image"}, attachments:[{name:"photo.png"}]});
+  assert.deepEqual(render(), ["", "btw"], "server acceptance must not move the image past queued text");
+  assert.equal(optimistic.has("image"), false);
+  assert.deepEqual(render(), ["", "btw"], "the time survives optimistic retirement");
+  payload.sent.push({relayId:"text-relay", threadId:"room", forHuman:"btw", createdAt:"2026-09-15T07:36:04Z",
+    source:{host:"relay-preview", clientMessageId:"text"}});
+  assert.deepEqual(render(), ["", "btw"]);
+  assert.equal(optimistic.size, 0);
+});
+
+test("queue timestamps survive restart projection and relay-id reconciliation without a client echo", () => {
+  const localChatSendTimes = new Map();
+  const optimistic = new Map();
+  const payload = {relays:[], sent:[{relayId:"image-relay", forHuman:"", createdAt:"2026-09-15T07:36:03Z"}],
+    outbox:[{id:"image", relayId:"image-relay", createdAt:"2026-09-15T07:36:00Z"}]};
+  assert.equal(runThreadMessages(payload, optimistic, {localChatSendTimes})[0].at, "2026-09-15T07:36:00Z");
+  payload.outbox=[];
+  assert.equal(runThreadMessages(payload, optimistic, {localChatSendTimes})[0].at, "2026-09-15T07:36:00Z");
 });

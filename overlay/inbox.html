@@ -1385,7 +1385,7 @@
   /* Reserve the clock's width after the last character. If that line is full,
      the reservation wraps, giving the clock its own row inside the bubble.
      Keep the clock with the text so agent bylines and actions cannot cover it. */
-  .th-msg.text { display:block; }
+  .th-msg.text:not(.attachment-only) { display:block; }
   .th-text-content { position:relative; }
   .th-text-content .th-msg-title::after { content:attr(data-clock); visibility:hidden; display:inline-block;
     font-family:var(--mono); font-size:11px; line-height:14px; padding-left:12px; white-space:nowrap; }
@@ -12806,6 +12806,7 @@
   // the follow-up Sent fetch is slow or fails. Entries leave only when the
   // canonical relay id appears on either side of the local payload.
   const optimisticChatReplies = new Map(); // idempotencyKey -> thread-message row
+  const localChatSendTimes = new Map(); // send identity -> stable local transcript time
   const chatReplySending = new Set(); // visible room/thread id
   let latestOutboxRevision = 0;
 
@@ -12965,7 +12966,7 @@
         body: entry.text || "",
         party: chat.party || "",
         partyKey: chat.partyKey || "",
-        at: entry.createdAt,
+        at: existing.at || entry.createdAt,
         isGroup: Boolean(chat.isGroup),
         groupId: chat.groupId || "",
         groupName: chat.groupName || "",
@@ -13204,6 +13205,21 @@
   function threadMessages() {
     const { includeSlack = false } = arguments[0] || {};
     const msgs = [];
+    // Uploads can take longer than typing the next message. Keep each local
+    // send at its original time when history replaces its queue row; mixing
+    // server acceptance time with the next queued send time reverses the pair.
+    // Read the durable queue too: syncOutboxProjection may already have retired
+    // the optimistic row by the time this history snapshot is rendered.
+    for (const [key, row] of [
+      ...optimisticChatReplies,
+      ...(payload.outbox || []).map((entry) => [entry.id, entry]),
+    ]) {
+      const at = localChatSendTimes.get(`client:${key}`) || row.at || row.createdAt;
+      if (!at) continue;
+      localChatSendTimes.set(`client:${key}`, at);
+      if (row.relayId) localChatSendTimes.set(`relay:${row.relayId}`, at);
+      if (row.groupSendId) localChatSendTimes.set(`group:${row.groupSendId}`, at);
+    }
     const reqThreads = requestThreadIds();
     // A note-to-self is projected on both inbox and sent surfaces. Keep the
     // inbox copy because it carries the complete locally materialized message,
@@ -13487,6 +13503,15 @@
         continue;
       }
       msgs.push(optimistic);
+    }
+    for (const message of msgs) {
+      if (message.direction !== "out") continue;
+      const localTime = localChatSendTimes.get(`client:${message.source?.clientMessageId || ""}`)
+        || localChatSendTimes.get(`relay:${message.id}`)
+        || localChatSendTimes.get(`group:${message.groupSendId || ""}`);
+      if (!localTime) continue;
+      localChatSendTimes.set(`relay:${message.id}`, localTime);
+      message.at = localTime;
     }
     return msgs;
   }

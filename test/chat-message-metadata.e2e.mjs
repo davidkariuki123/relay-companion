@@ -90,6 +90,37 @@ try {
   await page.locator('.ca-photo[data-att-id="file-0"]').click();
   assert.equal(await page.evaluate(()=>window.viewerCalls.length),1);
   assert.equal(await page.evaluate(()=>window.viewerCalls[0][0]),"outbox:photo-send");
+  // The photo wrapper must generate no box even though it also has .text.
+  // A later clock-layout rule used to restore display:block and leave a pill.
+  for (const theme of ["light", "dark"]) {
+    await page.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);
+    assert.equal(await page.locator('.th-msg.attachment-only').evaluate(node=>getComputedStyle(node).display), "contents");
+    assert.equal(await page.locator('.th-msg.attachment-only').evaluate(node=>node.getClientRects().length), 0);
+  }
+  fixture.outbox.push({id:"btw-send",createdAt:"2026-09-10T22:51:02Z",state:"queued",attempts:0,text:"btw",files:[],
+    chat:{threadId:"thread_fixture",party:"Test",partyKey:"email:test@example.com"},recipient:{email:"test@example.com"}});
+  const assertImageBeforeText = async () => {
+    assert.equal(await page.evaluate(()=>{
+      const image=document.querySelector('.th-cargo');
+      const text=[...document.querySelectorAll('.th-msg-title')].find(node=>node.textContent==="btw");
+      return Boolean(image.compareDocumentPosition(text) & Node.DOCUMENT_POSITION_FOLLOWING);
+    }), true, "the image stays above btw at every reconciliation stage");
+  };
+  await page.evaluate(input=>onPayload(input),fixture);
+  await assertImageBeforeText();
+  fixture.sent.push({relayId:"photo-relay",threadId:"thread_fixture",createdAt:"2026-09-10T22:51:05Z",kind:"message",
+    title:"photo.png",forHuman:" ",forAgent:"",recipient:{name:"Test",email:"test@example.com"},
+    source:{host:"relay-preview",clientMessageId:"photo-send"},attachments:[{id:"photo-file",name:"photo.png",contentType:"image/png",bytes:68}]});
+  fixture.outbox=fixture.outbox.filter(row=>row.id!=="photo-send");
+  await page.evaluate(input=>onPayload(input),fixture);
+  await assertImageBeforeText();
+  assert.equal(await photoTime.textContent(), "00:51");
+  fixture.sent.push({relayId:"btw-relay",threadId:"thread_fixture",createdAt:"2026-09-10T22:51:06Z",kind:"message",
+    title:"",forHuman:"btw",forAgent:"",recipient:{name:"Test",email:"test@example.com"},source:{host:"relay-preview",clientMessageId:"btw-send"}});
+  fixture.outbox=[];
+  await page.evaluate(input=>onPayload(input),fixture);
+  await assertImageBeforeText();
+  assert.equal(await page.locator('.th-msg.attachment-only').evaluate(node=>getComputedStyle(node).display), "contents");
   assert.deepEqual(errors,[]);
   console.log("PASS: actual renderer, two-line reservations, clock stability, both themes, refreshes, and Sending → Sent → Delivered without hidden states.");
 } finally { await browser.close(); await new Promise(resolve=>server.close(resolve)); }
