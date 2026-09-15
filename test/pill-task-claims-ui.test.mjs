@@ -43,6 +43,6 @@ test("Task ownership stays in reader/chat while Todo status remains independent"
   // no actionable-state gate in the reader any more.
   assert.equal(html.includes('taskClaimAllowsStart(r) && ["waiting", "parked", "stopped"]'), false);
   assert.match(html, /wireTaskClaimControls\(readerBodyEl/);
-  assert.match(html, /wireTaskClaimControls\(thHistoryEl/);
+  assert.match(html, /wireTaskClaimControls\(newControls/);
   assert.match(html, /lifecycleOnly = task && \["in_progress", "done"\]\.includes\(candidate\)/);
 });

@@ -10,7 +10,7 @@ const main = fs.readFileSync(new URL("../overlay/main.cjs", import.meta.url), "u
 // behavioral halves live in notifications.test.mjs / relay-briefing.test.mjs.
 
 test("a request row carries the Task chip and the chip recipe exists once", () => {
-  assert.match(html, /const isTask = kind === "task"/);
+  assert.match(html, /const isTask = isTaskRow\(r\)/);
   assert.match(html, /\$\{isTask \? `<span class="kchip">Task<\/span>` : ""\}/);
   assert.match(html, /\.kchip \{/);
 });

@@ -163,7 +163,8 @@ test("Task, reader and AI-runner surfaces never render a reaction trigger", () =
 
   const requests = between(html, "function renderTasksBoard()", "function wireRequestDetail()");
   assert.doesNotMatch(requests, /messageReactionPickerHtml|data-rx-face|wireReactionControls/);
-  assert.equal((html.match(/wireReactionControls\(thHistoryEl\)/g) || []).length, 1);
+  assert.match(html, /const newControls = RelayChatRows\.newControlsScope\(thHistoryEl\);/, "new reaction controls are scoped to the conversation");
+  assert.equal((html.match(/wireReactionControls\(newControls\)/g) || []).length, 1);
 });
 
 test("attached badges wrap, identify your reaction, and add no chronological chat rows", () => {

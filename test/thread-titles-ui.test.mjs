@@ -211,7 +211,7 @@ test("direct and group conversations share one newest-first chronology", () => {
 });
 
 test("the Relays tab is one latest-message row per exact identity", () => {
-  const identitySource = html.slice(html.indexOf("function relayIdentityRows("), html.indexOf("function renderRelays()"));
+  const identitySource = html.slice(html.indexOf("function relayIdentityRows("), html.indexOf("// This is a layout preference", html.indexOf("function relayIdentityRows(")));
   const shane = {
     name: "Shane",
     latest: { id: "agent", party: "Shane's Codex", ownedAgent: true, at: "2026-08-13T13:00:00Z" },
@@ -254,7 +254,7 @@ test("the Relays tab is one latest-message row per exact identity", () => {
 });
 
 test("a newer Task becomes the person's latest Relays preview", () => {
-  const identitySource = html.slice(html.indexOf("function relayIdentityRows("), html.indexOf("function renderRelays()"));
+  const identitySource = html.slice(html.indexOf("function relayIdentityRows("), html.indexOf("// This is a layout preference", html.indexOf("function relayIdentityRows(")));
   const room = {
     name: "Shane Acton",
     latest: {
@@ -413,8 +413,8 @@ test("every outbound Relay uses the incoming rectangle geometry on the right", (
 });
 
 test("the thread view never repaints identical markup (the Read-the-Conversation flash)", () => {
-  assert.match(html, /const rowsChanged = Boolean\(thRowsEl\) && thRowsEl\.innerHTML !== finalRowsHtml;/);
-  assert.match(html, /if \(rowsChanged\) \{\s*thRowsEl\.innerHTML = finalRowsHtml;/);
+  assert.match(html, /const rowsChanged = Boolean\(thRowsEl\) && RelayChatRows\.reconcile\(thRowsEl, finalRowsHtml\);/);
+  assert.doesNotMatch(html, /thRowsEl\.innerHTML = finalRowsHtml;/, "refreshes preserve surviving transcript nodes");
   assert.match(html, /if \(shellChanged \|\| rowsChanged\) \{/);
   assert.match(html, /return; \/\/ markup unchanged: existing handlers are still bound/);
   assert.match(html, /return; \/\/ nothing changed at all/);
@@ -585,7 +585,7 @@ test("conversation chunks carry the selected Relay date divider", () => {
   assert.equal(chatChunkDateLabel(sameChunk, first, now), "", "six hours or less stays in one chunk");
   assert.equal(chatChunkDateLabel(nextChunk, first, now), "Today", "a pause over six hours starts a labelled chunk");
 
-  assert.match(html, /class="th-chunk-date\$\{firstChunk \? " first" : ""\}" role="separator"/);
+  assert.match(html, /class="th-chunk-date\$\{firstChunk \? " first" : ""\}" data-chat-key="\$\{esc\(renderKey\)\}:date" role="separator"/);
   assert.match(html, /return `\$\{slackThreadContextHtml\(m\)\}\$\{chunkDivider\}\$\{runHeader\}/);
   assert.doesNotMatch(html, /\.th-run\.th-seam|\.th-msg\.gap-mid|\.th-run\.gap-mid/);
 });

@@ -45,8 +45,8 @@ test("every room entry follows newest through every asynchronous hydration phase
 
   const render = html.slice(html.indexOf("function renderThreadDetail()"), html.indexOf('document.getElementById("thExpand")'));
   assert.match(render, /const entryFollowToken = threadEntryFollowToken\(\)/);
-  assert.match(render, /if \(threadDetailScrolledFor !== thread\.threadId \|\| followOwnSend \|\| followLiveAgent \|\| entryFollowToken\)/);
-  assert.match(render, /else if \(threadDetailScrolledFor !== thread\.threadId \|\| entryFollowToken\)/);
+  assert.match(render, /if \(threadDetailScrolledFor !== threadStateKey \|\| followOwnSend \|\| followLiveAgent \|\| entryFollowToken\)/);
+  assert.match(render, /else if \(threadDetailScrolledFor !== threadStateKey \|\| entryFollowToken\)/);
   assert.match(render, /if \(entryFollowToken \|\| followLiveAgent\) scrollRoomToNewest\(chatShaped\);/);
   assert.match(render, /if \(entryFollowToken\) scrollRoomToNewest\(chatShaped\);/,
     "entry hydration pins synchronously before a backgrounded Electron window can defer paint");
@@ -188,7 +188,7 @@ test("a titled letter's tap is the reader in either frame; texts stay inert", ()
   // production's tap ontology, kept. If an unfold toggle returns to the room
   // tap, this is the law it breaks.
   const bind = html.slice(
-    html.indexOf('for (const el of thHistoryEl.querySelectorAll(".th-msg"))'),
+    html.indexOf('for (const el of newControls.querySelectorAll(".th-msg"))'),
     html.indexOf("function syncExpandButton"),
   );
   assert.match(bind, /const m = messageById\.get\(String\(id\)\)/,
@@ -306,7 +306,7 @@ test("enabled app rows share the same binder on the bubble and in the reader", (
   assert.match(footer, /sessionPickerInlineHtml/, "the picker unfolds under the selected row");
   assert.doesNotMatch(footer, /data-host="codex"[\s\S]*?data-host="claude"/, "no fixed pair of rows");
   assert.match(footer, /function wireHostOpen\(scope\)/);
-  assert.match(html, /wireHostOpen\(thHistoryEl\);/, "the room binds through the shared binder");
+  assert.match(html, /wireHostOpen\(newControls\);/, "the room binds through the shared binder");
   const reader = html.slice(html.indexOf("function renderReader()"), html.indexOf("wireHostOpen(readerBodyEl);") + 30);
   assert.match(reader, /const workOn = payload\.features\?\.relayWork === true;/);
   assert.match(reader, /const bothNote = onAgent && workOn && !handoff \?/);
