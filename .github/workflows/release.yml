@@ -70,6 +70,9 @@ jobs:
           test/mac-app-identity.test.mjs
           test/pill-open-flow.test.mjs
           test/session-routing.test.mjs
+          test/acp.test.mjs
+          test/session-controller.test.mjs
+          test/agent-handoff-ui.test.mjs
           test/task-completion-wake.test.mjs
           test/client-transport.test.mjs
           test/inbox-receiver.test.mjs
