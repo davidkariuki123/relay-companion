@@ -64,6 +64,18 @@ try {
   assert.equal(await page.locator('[data-id="task2"] .kchip').innerText(),'Task');
   assert.equal(await page.locator('[data-id="legacy3"] .kchip').innerText(),'Task');
   assert.equal(await page.locator('[data-id="task2"] .rk-subject').innerText(),'Title task2');
+  const groupBadge=page.locator('[data-id="group8"] .rk-recipient-group');
+  assert.equal(await groupBadge.innerText(),'Team');
+  assert.equal(await groupBadge.getAttribute('aria-label'),'Sent to group: Team');
+  assert.equal(await page.locator('[data-id="relay1"] .rk-recipient-group').count(),0);
+  assert.equal(await page.locator('[data-id="relay1"] .rk-subject').evaluate(el=>getComputedStyle(el).cursor),'pointer');
+  await page.evaluate(()=>{
+    window.fixture.relays.find(r=>r.id==='group8').recipientGroupName='Granular <Design & Product> with a very long group name';
+    window.events.onInbox(structuredClone(window.fixture));
+  });
+  assert.equal(await groupBadge.innerText(),'Granular <Design & Product> with a very long group name');
+  assert.equal(await groupBadge.locator('svg').count(),1);
+  assert.equal(await groupBadge.evaluate(el=>el.getBoundingClientRect().width<=100),true);
   assert.deepEqual(await page.evaluate(()=>window.readIds),[],'listing does not read items');
   await page.locator('#requestsEntry').click();
   assert.equal(await page.locator('#relaysLayout').isVisible(),false);
@@ -76,6 +88,11 @@ try {
   await page.locator('#scroll').evaluate(el=>el.scrollTop=0);
   // Electron grows the native window for the existing wide reader.
   await page.setViewportSize({width:900,height:900});
+  await groupBadge.click();
+  await page.locator('#readerView').waitFor({state:'visible'});
+  assert.match(await page.locator('#readerView').innerText(),/Human body group8/);
+  await page.locator('#readerBack').click();
+  await page.locator('#relaysLayout').waitFor({state:'visible'});
   await page.locator('[data-id="task2"]').press('Enter');
   await page.locator('#readerView').waitFor({state:'visible'});
   assert.match(await page.locator('#readerView').innerText(),/Human body task2/);

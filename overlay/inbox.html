@@ -599,6 +599,16 @@
   @keyframes dotSpin { to { transform:rotate(1turn); } }
   .rk-top { display:flex; align-items:baseline; gap:7px; }
   .rk-sender { font-size:13px; font-weight:600; color:var(--ink); letter-spacing:.1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .rk-recipient-group {
+    align-self:center; transform:translateY(-1px); flex:0 0 auto;
+    display:inline-flex; align-items:center; gap:4px; min-width:0; max-width:100px;
+    font-family:var(--sans); font-size:10px; font-weight:400; line-height:1;
+    color:var(--muted); background:var(--wash); border:1px solid var(--hair);
+    border-radius:3px; padding:3px 6px; white-space:nowrap;
+  }
+  .rk-recipient-group svg { width:11px; height:11px; flex:none; stroke-width:1.5; }
+  .rk-recipient-group-label { overflow:hidden; text-overflow:ellipsis; }
+  #relaysList .row .rk-subject { cursor:pointer; }
   .rk-time { margin-left:auto; font-family:var(--mono); font-size:11px; color:var(--muted-2); font-variant-numeric:tabular-nums; padding-left:6px; }
   /* ONE chip recipe. A number on a conversation means unread, nothing else. */
   .chip {
@@ -10527,6 +10537,8 @@
     const isTask = isTaskRow(r);
     const subject = isTask ? (r.title || relaySubject(r)) : relaySubject(r);
     const sender = relaySender(r);
+    const groupName = received ? String(r.recipientGroupName || "").trim() : "";
+    const groupBadge = groupName ? `<span class="rk-recipient-group" title="Sent to group: ${esc(groupName)}" aria-label="Sent to group: ${esc(groupName)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 10a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 14.286V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/><path d="M20 9a2 2 0 0 1 2 2v10.286a.71.71 0 0 1-1.212.502l-2.202-2.202A2 2 0 0 0 17.172 19H10a2 2 0 0 1-2-2v-1"/></svg><span class="rk-recipient-group-label">${esc(groupName)}</span></span>` : "";
     const actions = relayActionsHtml(r);
     // Cards show the TITLE ONLY. The old truncated body preview leaked the
     // agent-oriented detail layer — often unreadable out of context — and cost a
@@ -10547,6 +10559,7 @@
       <div class="rk-body">
         <div class="rk-top">
           <span class="rk-sender">${esc(sender)}</span>
+          ${groupBadge}
           ${isTask ? `<span class="kchip">Task</span>` : ""}
           <span class="rk-time">${timeAgo(r.createdAt)}</span>
         </div>
