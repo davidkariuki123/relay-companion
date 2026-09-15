@@ -32,10 +32,10 @@ try {
   await app.evaluate(() => global.__relayTest.showFromTray());
   await page.locator(".rat-summary").waitFor();
   assert.equal(await page.locator(".rat-card").isVisible(), false, "the tip opens collapsed");
-  await page.getByRole("button", {name:"Expand tip: Relay anyone",exact:true}).click();
+  await page.getByRole("button", {name:"Expand tip: Five ways to use Relay",exact:true}).click();
   await page.locator(".rat-card").waitFor();
-  const first = await page.locator(".rat-slide.active").innerText();
-  assert.match(first, /asking Alex/);
+  const first = await page.locator(".rat-slide.active .rat-prompt").innerText();
+  assert.match(first, /asking Maya/);
   await page.getByRole("button", {name:"Minimise tip",exact:true}).click();
   assert.equal(await page.locator(".rat-summary").isVisible(), true);
   await page.locator("#closeX").click();
@@ -45,7 +45,7 @@ try {
   await app.evaluate(() => global.__relayTest.showFromTray());
   await page.locator(".rat-summary").waitFor();
   assert.equal(await page.locator(".rat-card").isVisible(), false);
-  assert.equal(await page.locator(".rat-slide.active").innerText(), first);
+  assert.equal(await page.locator(".rat-slide.active .rat-prompt").innerText(), first);
   assert.equal(await app.evaluate(() => global.__relayTest.getWin().isVisible()), true);
   await page.locator("#closeX").click();
   // Also cover a reopen while the renderer's 300 ms exit is still in flight.

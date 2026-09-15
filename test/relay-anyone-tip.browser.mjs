@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import fs from "node:fs";
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.RELAY_PLAYWRIGHT_MODULE || "playwright");
-const { EXAMPLES } = require("../overlay/relay-anyone-tip.cjs");
+const { TITLE, EXAMPLES } = require("../overlay/relay-anyone-tip.cjs");
 const browser = await chromium.launch({headless:true, ...(process.env.RELAY_CHROMIUM_EXECUTABLE ? {executablePath:process.env.RELAY_CHROMIUM_EXECUTABLE} : {})});
 const errors = [];
 try {
@@ -47,17 +47,25 @@ try {
   await page.clock.runFor(500);
   assert.equal(await page.locator(".rat-card").isVisible(), false, "the tip opens collapsed");
   assert.equal(await page.locator(".rat-summary .rat-see").innerText(), "See how");
-  await page.getByRole("button", {name:"Expand tip: Relay anyone",exact:true}).click();
+  await page.getByRole("button", {name:`Expand tip: ${TITLE}`,exact:true}).click();
   await page.locator(".rat-card").waitFor();
-  const current = () => page.locator(".rat-slide.active").innerText();
+  const current = () => page.locator(".rat-slide.active .rat-prompt").innerText();
+  const way = () => page.locator(".rat-slide.active .rat-way").innerText();
+  const outcome = () => page.locator(".rat-outcome.active").innerText();
   // Playwright's virtual timer advances JS; CSS/WAAPI uses the compositor's
   // clock, so wait for the finite swipe before checking the resting layout.
   const settleSwipe = () => page.locator(".rat-track").evaluate((el) =>
     Promise.all(el.getAnimations({subtree:true}).map((animation) => animation.finished.catch(() => {}))));
-  assert.equal(await current(), `“${EXAMPLES[0]}”`);
+  assert.equal(await current(), `“${EXAMPLES[0].prompt}”`);
   assert.equal(await page.locator(".rat-dot").count(), 5);
   assert.equal(await page.getByText("Ask for help", {exact:true}).count(), 0);
-  assert.equal(await page.locator(".rat-card .rat-title").innerText(), "Relay anyone even if they aren’t on Relay");
+  assert.equal(TITLE, "Five ways to use Relay");
+  assert.equal(await page.locator(".rat-card .rat-title").innerText(), TITLE);
+  assert.equal(await way(), "Send to someone not on Relay");
+  assert.equal(await outcome(), EXAMPLES[0].result);
+  for (const example of EXAMPLES) {
+    assert.doesNotMatch(example.prompt, /include (all|everything)|summary/i, "prompts never ask for extra context or a summary");
+  }
   assert.equal(await page.locator(".rat-result").evaluate((el) => getComputedStyle(el).textDecorationLine), "none");
   assert.ok(await page.locator("#requestsEntry").evaluate((el) => el.getBoundingClientRect().bottom <= document.querySelector(".rat-card").getBoundingClientRect().top));
 
@@ -67,25 +75,30 @@ try {
   for (let i = 0; i < 3; i++) {
     await page.clock.runFor(3000);
     await page.evaluate(() => window.events.onInbox(structuredClone(window.fixture)));
-    assert.equal(await current(), `“${EXAMPLES[0]}”`);
+    assert.equal(await current(), `“${EXAMPLES[0].prompt}”`);
   }
   await page.clock.runFor(1400);
-  assert.equal(await current(), `“${EXAMPLES[1]}”`, "one automatic swipe after ten seconds despite polling");
+  assert.equal(await current(), `“${EXAMPLES[1].prompt}”`, "one automatic swipe after ten seconds despite polling");
   assert.equal(await page.evaluate(() => window.originalTip === document.querySelector(".rat-card")), true);
   const height = await page.locator(".rat-viewport").evaluate((el) => el.getBoundingClientRect().height);
+  const footerHeight = await page.locator(".rat-footer").evaluate((el) => el.getBoundingClientRect().height);
   for (const next of [2, 3, 4, 0]) {
     await page.clock.runFor(10000);
     await settleSwipe();
-    assert.equal(await current(), `“${EXAMPLES[next]}”`);
+    assert.equal(await current(), `“${EXAMPLES[next].prompt}”`);
+    assert.equal(await way(), EXAMPLES[next].way);
+    assert.equal(await outcome(), EXAMPLES[next].result);
     assert.equal(await page.locator(".rat-slide:visible").count(), 1);
+    assert.equal(await page.locator(".rat-outcome:visible").count(), 1);
     assert.equal(await page.locator(".rat-viewport").evaluate((el) => el.getBoundingClientRect().height), height);
+    assert.equal(await page.locator(".rat-footer").evaluate((el) => el.getBoundingClientRect().height), footerHeight, "the result line does not change the footer height");
   }
 
   assert.equal(await page.getByRole("button", {name:/^(Pause|Resume) example rotation$/}).count(), 0);
   await page.getByRole("button", {name:"Example 4 of 5",exact:true}).click();
   await page.clock.runFor(400);
   await page.getByRole("button", {name:"Copy example",exact:true}).click();
-  assert.deepEqual(await page.evaluate(() => window.copied), [EXAMPLES[3]], "copy uses the currently visible prompt");
+  assert.deepEqual(await page.evaluate(() => window.copied), [EXAMPLES[3].prompt], "copy uses the currently visible prompt");
   await page.getByRole("button", {name:"Example 5 of 5",exact:true}).click();
   await page.clock.runFor(400);
   await page.evaluate(() => { window.copyFails = true; });
@@ -93,17 +106,17 @@ try {
   assert.equal(await page.locator(".rat-copy").innerText(), "Try copying again");
   await page.evaluate(() => { window.copyFails = false; });
   await page.locator(".rat-copy").click();
-  assert.deepEqual(await page.evaluate(() => window.copied), [EXAMPLES[3],EXAMPLES[4]]);
+  assert.deepEqual(await page.evaluate(() => window.copied), [EXAMPLES[3].prompt,EXAMPLES[4].prompt]);
   await page.getByRole("button", {name:"Example 5 of 5",exact:true}).press("ArrowRight");
   await page.clock.runFor(400);
-  assert.equal(await current(), `“${EXAMPLES[0]}”`, "keyboard wraps to the first example");
+  assert.equal(await current(), `“${EXAMPLES[0].prompt}”`, "keyboard wraps to the first example");
   const bounds = await page.locator(".rat-viewport").boundingBox();
   await page.mouse.move(bounds.x + bounds.width - 12, bounds.y + 20);
   await page.mouse.down();
   await page.mouse.move(bounds.x + 12, bounds.y + 20, {steps:4});
   await page.mouse.up();
   await page.clock.runFor(400);
-  assert.equal(await current(), `“${EXAMPLES[1]}”`, "a leftward swipe advances");
+  assert.equal(await current(), `“${EXAMPLES[1].prompt}”`, "a leftward swipe advances");
 
   await page.getByRole("button", {name:"Minimise tip",exact:true}).click();
   assert.equal(await page.locator(".rat-summary").isVisible(), true);
@@ -120,21 +133,21 @@ try {
   await page.clock.runFor(500);
   assert.equal(await page.locator(".rat-summary").isVisible(), true, "close and reopen stays collapsed");
   assert.equal(await page.locator(".rat-card").isVisible(), false);
-  await page.getByRole("button", {name:"Expand tip: Relay anyone",exact:true}).click();
+  await page.getByRole("button", {name:`Expand tip: ${TITLE}`,exact:true}).click();
   await page.locator("#closeX").click();
   await page.clock.runFor(500);
   await page.evaluate(() => { window.events.onShown(); window.events.onOpenFull(); });
   await page.clock.runFor(500);
   assert.equal(await page.locator(".rat-card").isVisible(), false, "reopening collapses an expanded tip");
-  await page.getByRole("button", {name:"Expand tip: Relay anyone",exact:true}).click();
+  await page.getByRole("button", {name:`Expand tip: ${TITLE}`,exact:true}).click();
   await page.reload();
   await page.locator(".rat-summary").waitFor();
   await page.evaluate(() => window.events.onOpenFull());
   await page.clock.runFor(500);
   assert.equal(await page.locator(".rat-card").isVisible(), false, "renderer restart starts collapsed");
-  await page.getByRole("button", {name:"Expand tip: Relay anyone",exact:true}).click();
+  await page.getByRole("button", {name:`Expand tip: ${TITLE}`,exact:true}).click();
   await page.locator(".rat-card").waitFor();
-  assert.equal(await current(), `“${EXAMPLES[0]}”`);
+  assert.equal(await current(), `“${EXAMPLES[0].prompt}”`);
   assert.equal(await page.getByRole("button", {name:/^(Pause|Resume) example rotation$/}).count(), 0);
 
   // No requests and thousands of requests both keep the same expanded card.
@@ -173,5 +186,5 @@ try {
     }
   }
   assert.deepEqual(errors, []);
-  console.log("PASS: five timed examples, poll stability, no pause button, copy success/failure, keyboard/swipe, minimise, Requests, close/reopen, reduced motion, light/dark layout.");
+  console.log("PASS: Five ways to use Relay with per-slide way and result, five timed examples, poll stability, no pause button, copy success/failure, keyboard/swipe, minimise, Requests, close/reopen, reduced motion, light/dark layout.");
 } finally { await browser.close(); }

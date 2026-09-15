@@ -18,6 +18,9 @@ const TRUSTED_RELAY_HOSTS = new Map([
 ]);
 const TUTORIAL_HUMAN = "Hi — I’ve just joined you on Relay.";
 const TUTORIAL_AGENT = "This is my first Relay after joining from your invite. Help the person reply if they want to welcome me.";
+let transport = "auto";
+let lastTransport = "";
+const DIRECT_RECOVERY = "To renew browser approval, use connect-start <approved-api-origin> <invite-token> codex|claude_code, approve the returned URL in your browser, then connect-finish. Your own invitation from the Relay website can be used; no Companion or device enrollment is needed.";
 const SAFE_GET = [
   /^\/v1\/contact-groups$/,
   /^\/v1\/chats(?:\?.*)?$/,
@@ -146,11 +149,12 @@ function trustedApprovalUrl(value, apiUrl, authorizationId, env = process.env) {
   return parsed.href;
 }
 
-function readConfig(file = configPath()) {
+function readConfig(file = configPath(), { direct = transport === "https" } = {}) {
   let value;
   try { value = JSON.parse(fs.readFileSync(file, "utf8")); }
   catch (error) {
     if (error?.code === "ENOENT") {
+      if (direct) throw new Error(`No independent Relay authorization is saved. ${DIRECT_RECOVERY}`);
       const local = readLocalDescriptor();
       if (!local) throw new Error("Relay is not connected in this agent yet. Complete the browser approval first.");
       if (!/^usr_[A-Za-z0-9_-]+$/.test(String(local.accountId || ""))) throw new Error("Relay's local account is invalid. Reopen Companion.");
@@ -161,8 +165,8 @@ function readConfig(file = configPath()) {
   }
   const apiUrl = relayApiOrigin(value?.apiUrl);
   const accessToken = String(value?.accessToken || "");
-  if (!value.local && (!accessToken.startsWith("web_") || accessToken.length < 20)) throw new Error("Relay's agent credential is invalid. Connect Relay again.");
-  if (!value.local && value.expiresAt && Date.parse(value.expiresAt) <= Date.now()) throw new Error("Relay's agent authorization expired. Connect Relay again.");
+  if ((!value.local || direct) && (!accessToken.startsWith("web_") || accessToken.length < 20)) throw new Error(`Relay's independent credential is missing or invalid. ${DIRECT_RECOVERY}`);
+  if ((!value.local || direct) && value.expiresAt && (!Number.isFinite(Date.parse(value.expiresAt)) || Date.parse(value.expiresAt) <= Date.now())) throw new Error(`Relay's agent authorization expired or has an invalid expiry. ${DIRECT_RECOVERY}`);
   return { ...value, apiUrl, accessToken };
 }
 
@@ -213,8 +217,10 @@ function allowed(method, requestPath) {
 
 async function authenticatedRequest(apiUrl, accessToken, method, requestPath, body) {
   const skillTelemetry = managedSkillTelemetryHeader();
-  const response = await fetch(`${apiUrl}${requestPath}`, {
+  let response;
+  try { response = await fetch(`${apiUrl}${requestPath}`, {
     method,
+    redirect: "error",
     headers: {
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
@@ -224,13 +230,16 @@ async function authenticatedRequest(apiUrl, accessToken, method, requestPath, bo
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     signal: AbortSignal.timeout(15_000),
-  });
+  }); } catch (error) {
+    throw Object.assign(new Error(`Direct HTTPS could not reach ${apiUrl} (${error.cause?.code || error.name || "network_error"}). No response was confirmed; preserve the original body and idempotency key for any retry.`), { code: error.cause?.code || error.name || "network_error" });
+  }
   const text = await response.text();
   let payload = {};
   try { payload = text ? JSON.parse(text) : {}; }
   catch { throw new Error(`Relay returned an unreadable response (${response.status}).`); }
   if (!response.ok) {
-    const error = new Error(payload.message || payload.error || `Relay request failed (${response.status}).`);
+    const message = payload.message || payload.error || `Relay request failed (${response.status}).`;
+    const error = new Error(response.status === 401 ? `${message}. ${DIRECT_RECOVERY}` : message);
     error.status = response.status;
     error.code = payload.error || "";
     error.body = payload;
@@ -273,7 +282,7 @@ async function request(method, requestPath, body) {
     throw new Error(`Relay agent protocol does not allow ${verb} ${cleanPath || "<missing path>"}.`);
   }
   const config = readConfig();
-  const local = readLocalDescriptor();
+  const local = transport === "https" ? null : readLocalDescriptor();
   const companion = companionAvailability(config, local);
   if (companion.status === "other_account") throw new Error(companion.message);
   if (companion.status === "other_environment") {
@@ -290,29 +299,48 @@ async function request(method, requestPath, body) {
     // encryption/account checks on a later direct retry.
     if (!config.local) { config.local = true; atomicWrite(configPath(), config); }
     try {
-      return await localRequest(local, { method: verb, path: cleanPath, body, accountId: config.account.relayUserId });
+      const result = await localRequest(local, { method: verb, path: cleanPath, body, accountId: config.account.relayUserId });
+      lastTransport = "local";
+      return result;
     } catch (error) {
-      const stableMutation = typeof body?.idempotencyKey === "string" && body.idempotencyKey.trim().length >= 8;
+      const stableMutation = replaySafe(verb, cleanPath, body);
       // Permission and application refusals are authoritative; an expired local
       // authentication can use the separately approved direct credential.
       // An uncertain mutation can only cross transports with the same body
       // and stable deduplication key.
-      if ((!error.localTransportFailure && error.status !== 401) || (error.possiblySent && verb !== "GET" && !stableMutation)) throw error;
+      if (transport === "local" || !localUnavailable(error) || (error.possiblySent && verb !== "GET" && !stableMutation)) throw error;
     }
   }
+  if (transport === "local") throw new Error("The matching Relay Companion is unavailable; local transport was explicitly selected.");
   if (!config.accessToken.startsWith("web_") || config.accessToken.length < 20) {
-    throw new Error("This connection has no direct Relay credential. Reopen Relay Companion, or renew browser approval to enable direct fallback.");
+    throw new Error(`This connection has no direct Relay credential. ${DIRECT_RECOVERY}`);
   }
-  if (config.expiresAt && Date.parse(config.expiresAt) <= Date.now()) throw new Error("Relay's direct authorization expired. Renew browser approval to use direct fallback.");
-  if (config.local || companion.status === "other_environment") {
+  if (config.expiresAt && (!Number.isFinite(Date.parse(config.expiresAt)) || Date.parse(config.expiresAt) <= Date.now())) throw new Error(`Relay's direct authorization expired or has an invalid expiry. ${DIRECT_RECOVERY}`);
+  if (transport === "https" || config.local || companion.status === "other_environment") {
     const me = await authenticatedRequest(config.apiUrl, config.accessToken, "GET", "/v1/me");
     if (!config.account?.relayUserId || me.user?.id !== config.account.relayUserId) throw new Error("Direct Relay is connected to a different account. Nothing was sent or read.");
+    lastTransport = "https";
+    if (verb === "GET" && cleanPath === "/v1/me") return me;
   }
+  lastTransport = "https";
   try { return await authenticatedRequest(config.apiUrl, config.accessToken, verb, cleanPath, body); }
   catch (error) {
     if (verb !== "POST" || cleanPath !== "/v1/relays" || body?.longForHumanConfirmed !== true || error.code !== "human_message_review_required" || !error.body?.reviewToken) throw error;
     return authenticatedRequest(config.apiUrl, config.accessToken, verb, cleanPath, { ...body, longForHumanReviewToken: error.body.reviewToken });
   }
+}
+
+function replaySafe(method, route, body) {
+  // Only these operations have server-backed deduplication. An arbitrary key
+  // on another mutation is not proof that replay is safe.
+  return method === "GET" || (method === "POST"
+    && (route === "/v1/relays" || route === "/v1/share-links" || /^\/v1\/relays\/[A-Za-z0-9_-]+\/forward$/.test(route))
+    && typeof body?.idempotencyKey === "string" && body.idempotencyKey.trim().length >= 8);
+}
+
+function localUnavailable(error) {
+  return error.localTransportFailure || error.status === 401
+    || (error.status === 404 && error.code === "local_route_unavailable");
 }
 
 function parseJson(value, label = "JSON body") {
@@ -324,6 +352,7 @@ async function publicRequest(apiUrl, requestPath, body) {
   const trustedApiUrl = relayApiOrigin(apiUrl);
   const response = await fetch(`${trustedApiUrl}${requestPath}`, {
     method: "POST",
+    redirect: "error",
     headers: { "Content-Type": "application/json", "X-Relay-Client": "relay-agent-skill" },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(15_000),
@@ -627,7 +656,119 @@ async function shareLinkTutorial(rest) {
   }
 }
 
+const stringField = { type: "string", minLength: 1 };
+const idField = { type: "string", pattern: "^[A-Za-z0-9_-]+$" };
+function directTool(description, properties, required = [], { full = false, readOnly = true } = {}) {
+  return { description, inputSchema: { type: "object", properties, required, additionalProperties: false }, full, readOnly };
+}
+// This is a bounded client adapter for the existing scoped HTTP routes, not a
+// new authorization surface. The server still checks every operation and grant.
+const DIRECT_TOOLS = {
+  relay_contacts_search: directTool("Search this account's contacts. Resolve recipients before sending.", { query: stringField }, ["query"]),
+  relay_groups_list: directTool("List this account's existing channels.", {}, [], { full: true }),
+  relay_chats_list: directTool("List this account's conversations without changing read state.", {}, [], { full: true }),
+  relay_chat_fetch: directTool("Read one exact chat without receipts. HTTPS requires chatId; returns the server's chat document.", { chatId: idField }, ["chatId"], { full: true }),
+  relay_thread_fetch: directTool("Read related Relays by their internal threadId without receipts.", { threadId: idField }, ["threadId"]),
+  relay_inbox_list: directTool("Read recent inbox metadata, or up to 20 exact Relay packet envelopes in items [{relayId, ...response}]. Does not send receipts. Todo queries require Companion.", { relayIds: { type: "array", items: idField, minItems: 1, maxItems: 20 } }),
+  relay_sent_list: directTool("Read sent history. Optional recipient matches a name or address.", { recipient: stringField, limit: { type: "integer", minimum: 1, maximum: 100 } }),
+  relay_mark_read: directTool("Send a read receipt only when the person requested reading this exact Relay and you present it.", { relayId: idField, idempotencyKey: stringField }, ["relayId", "idempotencyKey"], { readOnly: false }),
+  relay_send: directTool("Send authorized correspondence or a Task using a resolved recipient, a title and both documents. Preserve the exact body and idempotency key on retry. HTTPS cannot send to unresolved names or email addresses; resolve an existing contact first or mint a link.", {
+    recipient: { type: "object", properties: { contactId: idField, relayUserId: idField, groupId: idField, chatId: idField, self: { type: "boolean" } }, additionalProperties: false },
+    kind: { type: "string", enum: ["message", "task"] }, title: stringField, forHuman: stringField, forAgent: stringField,
+    idempotencyKey: { type: "string", minLength: 8 }, replyToRelayId: idField, repo: stringField,
+    nature: { anyOf: [{ type: "string" }, { type: "array", items: stringField }] }, asks: { type: "array", items: stringField },
+    files: { type: "array", items: stringField }, attachments: { type: "array", items: { type: "object" } }, longForHumanConfirmed: { type: "boolean" },
+  }, ["recipient", "kind", "title", "forHuman", "forAgent", "idempotencyKey"], { full: true, readOnly: false }),
+  relay_forward: directTool("Forward an exact Relay only when asked. The server copies its documents and attachments; note is the person's own message.", { relayId: idField, recipient: { type: "object" }, note: stringField, idempotencyKey: { type: "string", minLength: 8 } }, ["relayId", "recipient", "idempotencyKey"], { full: true, readOnly: false }),
+  relay_share_link: directTool("Mint an authorized Relay as a link for the person to paste; nothing is delivered or emailed. Revoke only the exact relayId of a link the person asked to revoke. Guests can reply using their existing HTTP tools without installing this helper.", {
+    action: { type: "string", enum: ["mint", "revoke"] }, relayId: idField,
+    kind: { type: "string", enum: ["message", "task"] }, title: stringField, recipientName: stringField, forHuman: stringField, forAgent: { type: "string" }, repo: stringField,
+    files: { type: "array", items: stringField }, idempotencyKey: { type: "string", minLength: 8 }, longForHumanConfirmed: { type: "boolean" },
+  }, ["idempotencyKey"], { full: true, readOnly: false }),
+};
+
+function validateDirectArguments(args, schema, label = "arguments") {
+  if (schema.anyOf) {
+    if (!schema.anyOf.some((candidate) => { try { validateDirectArguments(args, candidate, label); return true; } catch { return false; } })) throw new Error(`Invalid ${label}.`);
+    return;
+  }
+  const matches = schema.type === "array" ? Array.isArray(args) : schema.type === "integer" ? Number.isInteger(args)
+    : schema.type === "object" ? args !== null && typeof args === "object" && !Array.isArray(args) : typeof args === schema.type;
+  if (!matches || (schema.enum && !schema.enum.includes(args))) throw new Error(`Invalid ${label}.`);
+  if (schema.type === "object") {
+    for (const field of schema.required || []) if (!Object.hasOwn(args, field)) throw new Error(`${label}.${field} is required.`);
+    for (const [key, value] of Object.entries(args)) {
+      if (schema.additionalProperties === false && !Object.hasOwn(schema.properties || {}, key)) throw new Error(`${label}.${key} is not supported over direct HTTPS. Run tools for its scoped schema.`);
+      if (schema.properties?.[key]) validateDirectArguments(value, schema.properties[key], `${label}.${key}`);
+    }
+  }
+  if (schema.type === "array") {
+    if (args.length < (schema.minItems ?? 0) || args.length > (schema.maxItems ?? Infinity)) throw new Error(`Invalid ${label} length.`);
+    for (const item of args) validateDirectArguments(item, schema.items, label);
+  }
+  if (schema.type === "string" && (args.trim().length < (schema.minLength ?? 0) || (schema.pattern && !new RegExp(schema.pattern).test(args)))) throw new Error(`Invalid ${label}.`);
+  if (schema.type === "integer" && (args < (schema.minimum ?? -Infinity) || args > (schema.maximum ?? Infinity))) throw new Error(`Invalid ${label}.`);
+}
+
+async function directToolCommand(command, body, config) {
+  transport = "https";
+  // Explicit HTTPS verifies the independent credential and account. It never
+  // consults the local descriptor, including on validation or renewal failure.
+  await request("GET", "/v1/me");
+  const names = Object.keys(DIRECT_TOOLS).filter((name) => !DIRECT_TOOLS[name].full || (config.consentVersion ?? 1) >= 2);
+  if (command === "tools") return {
+    transport: "https", apiUrl: config.apiUrl, account: config.account, scope: "browser-approved member",
+    serverAuthorizationRequired: true,
+    tools: names.map((name) => ({ name, description: DIRECT_TOOLS[name].description, inputSchema: DIRECT_TOOLS[name].inputSchema })),
+    limitations: "Scoped messaging only. Use request for the remaining allowlisted HTTP routes. Topics, connectors, device queues and native sessions require Companion. Guest conversation keys use their link's HTTP instructions, not this member credential.",
+  };
+  const { name, arguments: args } = body;
+  if (!names.includes(name)) throw new Error(`${name} is unavailable over direct HTTPS for this authorization. Run tools for the scoped catalog; broader operations require Companion.`);
+  validateDirectArguments(args, DIRECT_TOOLS[name].inputSchema);
+  let value;
+  if (name === "relay_contacts_search") value = await request("GET", `/v1/contacts/search?q=${encodeURIComponent(args.query)}`);
+  else if (name === "relay_groups_list") value = await request("GET", "/v1/contact-groups");
+  else if (name === "relay_chats_list") value = await request("GET", "/v1/chats");
+  else if (name === "relay_chat_fetch") value = await request("GET", `/v1/chats/${args.chatId}`);
+  else if (name === "relay_thread_fetch") value = await request("GET", `/v1/threads/${args.threadId}`);
+  else if (name === "relay_inbox_list") {
+    if (args.relayIds) {
+      const items = [];
+      for (const relayId of new Set(args.relayIds)) items.push({ relayId, ...await request("GET", `/v1/relays/${relayId}`) });
+      value = { items, readStateChanged: false, readReceiptsSent: false };
+    } else value = await request("GET", "/v1/inbox?view=summary");
+  } else if (name === "relay_sent_list") {
+    const result = await request("GET", "/v1/sent?limit=100");
+    const needle = String(args.recipient || "").toLowerCase();
+    const matched = (result.items || []).filter((item) => !needle || [item.recipient?.name, item.recipient?.email, item.recipientGroupName].filter(Boolean).join(" ").toLowerCase().includes(needle));
+    value = { ...result, items: matched.slice(0, args.limit || 20), recipientFilter: args.recipient, searchedRecentLimit: 100 };
+  }
+  else if (name === "relay_mark_read") value = await request("POST", `/v1/relays/${args.relayId}/read`, { idempotencyKey: args.idempotencyKey });
+  else if (name === "relay_send") {
+    const { replyToRelayId, ...draft } = args;
+    value = await sendPersisted({ ...draft, ...(replyToRelayId ? { inReplyToRelayId: replyToRelayId } : {}) });
+  }
+  else if (name === "relay_forward") {
+    const { relayId, ...forward } = args;
+    value = await request("POST", `/v1/relays/${relayId}/forward`, forward);
+  } else if (name === "relay_share_link") {
+    const { action = "mint", relayId, ...draft } = args;
+    if (action === "revoke") {
+      if (!relayId) throw new Error("Revoking a share link requires its exact relayId.");
+      if (Object.keys(draft).some((key) => key !== "idempotencyKey")) throw new Error("Revocation accepts only action, relayId and idempotencyKey.");
+      value = await request("DELETE", `/v1/share-links/${relayId}`);
+    } else {
+      if (!draft.forHuman || relayId) throw new Error("Minting a share link requires forHuman and no relayId.");
+      value = await request("POST", "/v1/share-links", await prepareSendBody(draft));
+    }
+  }
+  return { content: [{ type: "text", text: JSON.stringify(value) }], isError: false };
+}
+
 async function main(argv = process.argv.slice(2)) {
+  if (argv[0]?.startsWith("--transport=")) transport = argv.shift().slice("--transport=".length);
+  else transport = process.env.RELAY_AGENT_TRANSPORT || "auto";
+  if (!["auto", "https", "local"].includes(transport)) throw new Error("Choose --transport=auto, --transport=https or --transport=local before the command.");
   const [command, ...rest] = argv;
   if (command === "connect-start") return connectStart(rest[0], rest[1], rest[2]);
   if (command === "connect-finish") return connectFinish();
@@ -636,30 +777,48 @@ async function main(argv = process.argv.slice(2)) {
     return { ok: true, disconnected: true };
   }
   if (command === "status") {
-    const config = readConfig();
-    return { ok: true, connected: true, account: config.account || {}, inviter: config.inviter, invite: config.invite, tutorial: config.tutorial, lastSend: config.lastSend, expiresAt: config.expiresAt || "" };
+    try {
+      const config = readConfig();
+      const me = await request("GET", "/v1/me");
+      if (me.user?.id !== config.account?.relayUserId) throw new Error("Relay returned a different account. Connection is unverified.");
+      return { ok: true, connected: true, transport: lastTransport, apiUrl: config.apiUrl, account: config.account || {}, inviter: config.inviter, invite: config.invite, tutorial: config.tutorial, lastSend: config.lastSend, expiresAt: config.expiresAt || "", independentAuthorizationSaved: config.accessToken.startsWith("web_") };
+    } catch (error) {
+      process.exitCode = 1;
+      return { ok: false, connected: false, transport: transport === "auto" ? lastTransport || "unresolved" : transport, error: error.code || "connection_unverified", message: error.message, ...(error.status ? { status: error.status } : {}) };
+    }
   }
   if (command === "groups") return request("GET", "/v1/contact-groups");
   if (command === "tools" || command === "call") {
     const config = readConfig();
-    const local = readLocalDescriptor();
-    if ((config.consentVersion ?? 1) < 2 || !local) throw new Error("The complete tool catalog requires Relay Companion. Open or update Companion and retry; this command does not use direct HTTPS fallback.");
+    const local = transport === "https" ? null : readLocalDescriptor();
     const companion = companionAvailability(config, local);
-    if (companion.status !== "ready") throw new Error(`${companion.message} This command requires Companion on the approved account and environment.`);
+    if (companion.status === "other_account") throw new Error(companion.message);
     if (command === "call" && !rest[0]) throw new Error("call requires an exact tool name from tools; pass its JSON arguments on stdin.");
-    if (local.toolCatalogVersion !== 1) throw new Error("This Companion does not expose the complete tool catalog yet. Update and reopen Relay Companion, then retry the same command.");
+    const body = command === "call" ? { name: rest[0], arguments: parseJson(await readStdin() || "{}", "Tool arguments") } : undefined;
+    if (companion.status !== "ready" || local.toolCatalogVersion !== 1) {
+      if (transport === "local") throw new Error("The complete tool catalog requires an updated, matching Relay Companion.");
+      return directToolCommand(command, body, config);
+    }
     const target = currentSkillTarget(process.env);
     const host = process.env.CODEX_THREAD_ID ? "codex" : process.env.CLAUDE_CODE_SESSION_ID || process.env.CLAUDE_SESSION_ID ? "claude_code" : target?.host === "codex" ? "codex" : target?.host === "claude" ? "claude_code" : "";
     const caller = { cwd: process.cwd(), host, nativeId: host === "codex" ? process.env.CODEX_THREAD_ID || "" : process.env.CLAUDE_CODE_SESSION_ID || process.env.CLAUDE_SESSION_ID || "" };
-    const body = command === "call" ? { name: rest[0], arguments: parseJson(await readStdin() || "{}", "Tool arguments") } : undefined;
-    const result = await localRequest(local, { method: command === "tools" ? "GET" : "POST", path: command === "tools" ? "/local/tools" : "/local/tools/call", body, caller, accountId: config.account.relayUserId }, { timeoutMs: LOCAL_TOOL_TIMEOUT_MS });
-    if (result?.isError) process.exitCode = 1;
-    return result;
+    try {
+      const result = await localRequest(local, { method: command === "tools" ? "GET" : "POST", path: command === "tools" ? "/local/tools" : "/local/tools/call", body, caller, accountId: config.account.relayUserId }, { timeoutMs: LOCAL_TOOL_TIMEOUT_MS });
+      if (result?.isError) process.exitCode = 1;
+      return result;
+    } catch (error) {
+      // Tool handlers can perform several writes. Never replay a dispatched
+      // mutation through a different handler, even when an argument has a key.
+      const readOnly = command === "tools" || DIRECT_TOOLS[body?.name]?.readOnly;
+      if (transport === "local" || !localUnavailable(error) || (error.possiblySent && !readOnly)) throw error;
+      return directToolCommand(command, body, config);
+    }
   }
   if (command === "chats") return request("GET", "/v1/chats");
   if (command === "chat") return request("GET", `/v1/chats/${encodeURIComponent(rest[0] || "")}`);
   if (command === "thread") return request("GET", `/v1/threads/${encodeURIComponent(rest[0] || "")}`);
   if (command === "destinations" || command === "deliver" || command === "outbox") {
+    if (transport === "https") throw new Error("Local destinations, delivery and the device outbox require Companion; they are unavailable over direct HTTPS.");
     const config = readConfig();
     const local = readLocalDescriptor();
     const companion = companionAvailability(config, local);
@@ -751,9 +910,10 @@ async function main(argv = process.argv.slice(2)) {
     usage: [
       "relay-protocol connect-start <api-origin> <invite-token> claude_code|codex",
       "relay-protocol connect-finish   # run after approving the returned browser URL",
-      "relay-protocol status",
-      "relay-protocol tools            # complete account-specific catalog with descriptions and JSON schemas; requires Companion",
-      "relay-protocol call <tool-name> # JSON arguments on stdin; same capabilities and results as MCP; requires Companion",
+      "relay-protocol [--transport=auto|https|local] <command> # https never reads or contacts Companion",
+      "relay-protocol --transport=https status # live check of browser-approved identity and API reachability",
+      "relay-protocol tools            # current transport's catalog; HTTPS covers scoped messaging only",
+      "relay-protocol call <tool-name> # JSON arguments on stdin; discover the transport-specific schema with tools",
       "relay-protocol inbox | sent | groups | chats | outbox",
       "relay-protocol outbox retry <original-idempotency-key>",
       "relay-protocol wait-reply <sent-relay-id> [seconds:0-45]",

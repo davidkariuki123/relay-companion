@@ -228,6 +228,7 @@ test("the first link is minted once from the approved draft, retried unchanged a
   const server = http.createServer(async (req, res) => {
     res.setHeader("content-type", "application/json");
     let body = ""; for await (const chunk of req) body += chunk;
+    if (req.url === "/v1/me") return res.end(JSON.stringify({ user: { id: "usr_receiver" } }));
     if (req.url !== "/v1/share-links" || req.method !== "POST") { res.statusCode = 404; return res.end("{}"); }
     requests.push(JSON.parse(body));
     res.statusCode = requests.length === 1 ? 503 : 200;
@@ -516,9 +517,9 @@ test("the helper retains direct auth and falls back after Companion stops withou
     assert.ok(requests.includes("/v1/me"), "the direct account is verified before reading across environments");
     assert.equal(requests.filter((url) => url === "/v1/contact-groups").length, directBefore + 1);
     assert.doesNotMatch(crossEnvironment.stdout + crossEnvironment.stderr, /web_test/);
-    const toolsRefused = await runProtocol(["tools"], { env });
-    assert.equal(toolsRefused.code, 1);
-    assert.match(toolsRefused.stderr, /signed in to http:\/\/127\.0\.0\.1:1 .*requires Companion on the approved account and environment/s);
+    const directTools = await runProtocol(["tools"], { env });
+    assert.equal(directTools.code, 0, directTools.stderr);
+    assert.equal(JSON.parse(directTools.stdout).transport, "https");
     assert.match((await runProtocol(["destinations", "claude"], { env })).stderr, /Local agent targeting requires Companion on the approved account and environment/);
     // A different person on another environment is still an identity conflict.
     fs.writeFileSync(descriptor, JSON.stringify({ ...otherEnvironment, accountId: "usr_other" }), { mode: 0o600 });
@@ -719,6 +720,6 @@ test("CLI discovers the live catalog and executes mutations through the authenti
   fs.writeFileSync(file, JSON.stringify({ ...descriptor, toolCatalogVersion: undefined }));
   const older = await runProtocol(["tools"], { env });
   assert.equal(older.code, 1);
-  assert.match(older.stderr, /Update and reopen/);
+  assert.match(older.stderr, /No independent Relay authorization.*connect-start/);
   fs.writeFileSync(file, JSON.stringify(descriptor));
 });

@@ -50,14 +50,14 @@ export function localRequest(descriptor, request, { timeoutMs = 30000 } = {}) {
     });
     socket.on("data", (chunk) => {
       bytes += chunk.length;
-      if (bytes > LOCAL_MAX_BYTES) return finish(new Error("Relay's local response is too large."));
+      if (bytes > LOCAL_MAX_BYTES) return finish(transportError("Relay's local response is too large."));
       chunks.push(chunk);
       if (chunk.includes(10)) {
         try {
           const result = JSON.parse(Buffer.concat(chunks).toString("utf8").trim());
-          if (result.error) return finish(Object.assign(new Error(result.message || result.error), { code: result.error, status: result.status }));
+          if (result.error) return finish(Object.assign(new Error(result.message || result.error), { code: result.error, status: result.status, possiblySent: ["local_authorization_failed", "local_route_unavailable"].includes(result.error) ? false : possiblySent }));
           finish(null, result.value);
-        } catch (error) { finish(error); }
+        } catch { finish(transportError("Companion returned an unreadable response. The request may have been sent.")); }
       }
     });
     socket.once("error", () => finish(transportError("Companion is unavailable. Reopen Relay and retry; your agent conversation can stay open.")));

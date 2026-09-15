@@ -3,36 +3,60 @@
   if (typeof module === "object" && module.exports) module.exports = api;
   root.RelayAnyoneTip = api;
 })(globalThis, function () {
+  // One use of Relay per slide. Prompts are what a person would type: never
+  // "include everything their agent needs" or "a summary" — the Relay spec
+  // already gives the person the gist and their agent every detail.
+  const TITLE = "Five ways to use Relay";
   const EXAMPLES = Object.freeze([
-    "Create a Relay asking Alex to compare these venues and recommend one. Include all the context his agent needs to do it.",
-    "Create a Relay asking Maya what she thinks of this launch plan. Include the plan, our goals and the trade-offs we discussed.",
-    "Create a Relay handing this project to Sam. Include our progress, key decisions and files, and what his agent should do next.",
-    "Create a Relay asking Shane to fix images not opening in the app. Include what we tried and everything his agent needs to reproduce it.",
-    "Create a Relay asking the team to try the new app before we release it. Include what changed, how to try it and what to check.",
-  ]);
+    {
+      way: "Send to someone not on Relay",
+      prompt: "Create a Relay asking Maya what she thinks of this launch plan.",
+      result: "You’ll get a link to share. They can read and reply from Claude or Codex, without a Relay account.",
+    },
+    {
+      way: "Pick up where you left off",
+      prompt: "Relay this session to me so I can carry on in Codex later.",
+      result: "Your next session starts with everything this one knows, on any computer and in any AI.",
+    },
+    {
+      way: "Carry on work someone sent you",
+      prompt: "Open the Relay from Alex and carry on the work here.",
+      result: "Their agent’s notes become your agent’s starting point, so nobody has to re-explain.",
+    },
+    {
+      way: "Check what needs you",
+      prompt: "Check my Relay inbox and tell me what needs me today.",
+      result: "Your agent reads your inbox and gives you a short list instead of a pile.",
+    },
+    {
+      way: "Pull your work together",
+      prompt: "Relay Sam everything I did on the pricing page this week in Claude Code and Codex.",
+      result: "Your agent gathers the work from your other sessions. Sam reads the gist and their agent gets every detail.",
+    },
+  ].map(Object.freeze));
   const INTERVAL_MS = 10000;
 
   function create(root) {
     const doc = root.ownerDocument, win = doc.defaultView;
     root.classList.add("relay-anyone-tip");
     root.innerHTML = `
-      <button class="rat-summary" type="button" aria-expanded="false" aria-label="Expand tip: Relay anyone">
-        <span class="rat-title">Relay anyone even if they aren’t on Relay</span><span class="rat-see">See how <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5"/></svg></span>
+      <button class="rat-summary" type="button" aria-expanded="false" aria-label="Expand tip: ${TITLE}">
+        <span class="rat-title">${TITLE}</span><span class="rat-see">See how <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5"/></svg></span>
       </button>
-      <section class="rat-card" aria-label="Relay anyone" hidden>
-        <div class="rat-head"><span class="rat-title">Relay anyone even if they aren’t on Relay</span><button class="rat-minimise" type="button" aria-label="Minimise tip" aria-expanded="true">−</button></div>
+      <section class="rat-card" aria-label="${TITLE}" hidden>
+        <div class="rat-head"><span class="rat-title">${TITLE}</span><button class="rat-minimise" type="button" aria-label="Minimise tip" aria-expanded="true">−</button></div>
         <div class="rat-label">Tell Claude Code or Codex:</div>
         <div class="rat-carousel" role="region" aria-roledescription="carousel" aria-label="Example Relay prompts" aria-live="off">
           <div class="rat-viewport"><div class="rat-track"></div></div>
           <div class="rat-controls"><div class="rat-dots" role="group" aria-label="Choose an example"></div></div>
         </div>
-        <div class="rat-footer"><div class="rat-result">You’ll get a link to share. They can read and reply from Claude or Codex, without a Relay account.</div><button class="sv-choose rat-copy" type="button">Copy example</button></div>
+        <div class="rat-footer"><div class="rat-result"></div><button class="sv-choose rat-copy" type="button">Copy example</button></div>
       </section>
       <span class="rat-status" role="status"></span>`;
     const find = (selector) => root.querySelector(selector);
     const card = find(".rat-card"), summary = find(".rat-summary"), minimise = find(".rat-minimise");
     const viewport = find(".rat-viewport"), track = find(".rat-track"), dots = find(".rat-dots");
-    const copy = find(".rat-copy"), status = find(".rat-status");
+    const copy = find(".rat-copy"), status = find(".rat-status"), result = find(".rat-result");
     // Collapsed on every open; "See how" expands it until Relay next opens.
     let index = 0, expanded = false, paused = false, visible = false, active = false;
     function setExpanded(next) {
@@ -40,14 +64,26 @@
       controls();
     }
     let inViewport = false, timer = null, animations = [], generation = 0;
-    const slides = EXAMPLES.map((text, i) => {
+    const slides = EXAMPLES.map((example, i) => {
       const slide = doc.createElement("div");
       slide.className = "rat-slide";
       slide.setAttribute("role", "group");
       slide.setAttribute("aria-roledescription", "slide");
-      slide.setAttribute("aria-label", `${i + 1} of ${EXAMPLES.length}`);
-      slide.textContent = `“${text}”`;
+      slide.setAttribute("aria-label", `${i + 1} of ${EXAMPLES.length}: ${example.way}`);
+      const way = doc.createElement("div");
+      way.className = "rat-way";
+      way.textContent = example.way;
+      const prompt = doc.createElement("div");
+      prompt.className = "rat-prompt";
+      prompt.textContent = `“${example.prompt}”`;
+      slide.append(way, prompt);
       track.append(slide);
+      // Every result is laid out in the same cell so the footer keeps the
+      // height of the longest one and does not jump as slides change.
+      const outcome = doc.createElement("div");
+      outcome.className = "rat-outcome";
+      outcome.textContent = example.result;
+      result.append(outcome);
       const dot = doc.createElement("button");
       dot.type = "button";
       dot.className = "rat-dot";
@@ -89,6 +125,10 @@
         animations = [out, enter];
         out.finished.then(() => { outgoing.classList.remove("leaving"); out.cancel(); enter.cancel(); }).catch(() => {});
       }
+      [...result.children].forEach((outcome, i) => {
+        outcome.classList.toggle("active", i === index);
+        outcome.setAttribute("aria-hidden", String(i !== index));
+      });
       copy.textContent = "Copy example";
       status.textContent = manual ? `Example ${index + 1} of ${EXAMPLES.length}` : "";
       controls();
@@ -116,7 +156,7 @@
       select((index + direction + EXAMPLES.length) % EXAMPLES.length, direction, true);
     });
     copy.addEventListener("click", async () => {
-      const text = EXAMPLES[index], ticket = ++generation;
+      const text = EXAMPLES[index].prompt, ticket = ++generation;
       paused = true; controls();
       try {
         await win.navigator.clipboard.writeText(text);
@@ -151,5 +191,5 @@
       destroy() { visible = false; schedule(); observer.disconnect(); doc.removeEventListener("visibilitychange", schedule); },
     };
   }
-  return { create, EXAMPLES, INTERVAL_MS };
+  return { create, TITLE, EXAMPLES, INTERVAL_MS };
 });

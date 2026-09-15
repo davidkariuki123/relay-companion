@@ -48,7 +48,7 @@ export function createAgentDispatcher({ client, outboxFile, listDestinations, de
       await client.fetchRelay(body.relayId); // Verify account access before any local work.
       return deliver({ relayId: body.relayId, target: { provider: body.target.provider, nativeId: body.target.nativeId }, prompt: relayReferencePrompt(body.relayId, { agentProtocol: true }), deliveryMode: "explicit_picker", timeoutMs: 20000 });
     }
-    if (!allowed(method, route)) throw new Error("This operation is not part of the Relay agent protocol.");
+    if (!allowed(method, route)) throw Object.assign(new Error("This operation is not part of the Relay agent protocol."), { code: "local_route_unavailable", status: 404 });
     if (method === "GET") {
       if (url.pathname === "/v1/me") return client.me();
       if (url.pathname === "/v1/inbox") return client.inbox();
@@ -96,7 +96,7 @@ export function createAgentDispatcher({ client, outboxFile, listDestinations, de
         return { relayId: result.relayId, groupSendId: result.groupSendId, threadId: result.threadId, state: result.state === "sent" ? "sent" : "queued", queuedOnDevice: result.state !== "sent", idempotencyKey: result.idempotencyKey };
       }
     }
-    throw new Error("Unsupported Relay operation.");
+    throw Object.assign(new Error("Unsupported Relay operation."), { code: "local_route_unavailable", status: 404 });
   }
   return { dispatch, start: () => queue.start(), stop: async () => { queue.stop(); await queue.flush(); } };
 }
@@ -142,7 +142,7 @@ export async function startAgentLocalServer({ client, accountId, apiUrl, file = 
           const request = JSON.parse(Buffer.concat(chunks).toString("utf8").trim());
           const actual = Buffer.from(String(request.capability || ""));
           const expected = Buffer.from(capability);
-          if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) throw new Error("Local Relay authorization failed.");
+          if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) throw Object.assign(new Error("Local Relay authorization failed."), { code: "local_authorization_failed", status: 401 });
           const value = await dispatcher.dispatch(request);
           socket.end(JSON.stringify({ value }) + "\n");
         } catch (error) {
