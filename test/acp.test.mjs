@@ -102,6 +102,28 @@ test("ACP session ownership excludes a second process and releases after cancell
   assert.equal(acpSessionOwner("claude", "shared-native"), null);
 });
 
+test("Claude app metadata is published only after its ACP writer closes", async t => {
+  temporaryHome(t);
+  const agent = fakeAgent();
+  let metadata;
+  const worker = await startAcpRun({ provider: "claude", title: "A visible native task", prompt: "Hello", clientFactory: agent.factory,
+    materializeSession: async options => {
+      assert.equal(agent.child.exitCode, 0);
+      assert.ok(acpSessionOwner("claude", options.sessionId), "Keep ownership during metadata publication");
+      metadata = options;
+      return { materialized: true };
+    },
+  });
+  await worker.done;
+  assert.equal(metadata.sessionId, worker.sessionId);
+  assert.equal(metadata.title, "A visible native task");
+  assert.equal(metadata.importIntoDesktop, false, "Do not launch another app writer automatically");
+  let opened;
+  const hosts = createHostAdapters({ openExternal: target => { opened = target; return { ok: true }; } });
+  hosts.openUi({ sessionRef: { mode: "acp", host: "claude_code", hostSessionId: worker.sessionId } });
+  assert.equal(opened, `claude://resume?session=${encodeURIComponent(worker.sessionId)}`);
+});
+
 test("resume replay never becomes the new answer, and tool progress is not the final answer", async t => {
   const root = temporaryHome(t);
   const agent = fakeAgent({ onPrompt: ({ message, update, finish }) => {

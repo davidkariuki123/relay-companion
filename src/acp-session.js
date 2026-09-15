@@ -7,6 +7,8 @@ import { configDir } from "./config.js";
 import updateActivity from "../bootstrap/update-activity.cjs";
 import { requestAcpPermission } from "./acp-permissions.js";
 import { claimAcpSession } from "./acp-session-owner.js";
+import { adoptClaudeSessionIntoDesktop } from "./claude-session-writer.js";
+import { claudeHome } from "./host-paths.js";
 
 const workers = new Map();
 const opening = new Set();
@@ -29,7 +31,8 @@ export function subscribeAcpWorker(sessionId, listener) {
 
 // One managed writer per native session. A completed prompt is closed before
 // its promise resolves, so Desktop can safely take ownership of its transcript.
-export async function startAcpRun({ provider, sessionId, cwd = process.cwd(), prompt, displayPrompt = prompt, model, effort, mode,
+export async function startAcpRun({ provider, sessionId, cwd = process.cwd(), title = "", prompt, displayPrompt = prompt, model, effort, mode,
+  materializeSession = adoptClaudeSessionIntoDesktop,
   mcpServers = [], logPath, onUpdate, onPermission, onSession, timeoutMs, clientFactory = options => new AcpClient(options), ...transport } = {}) {
   provider = acpProvider(provider);
   const key = sessionId ? `${provider}:${sessionId}` : randomUUID();
@@ -85,6 +88,16 @@ export async function startAcpRun({ provider, sessionId, cwd = process.cwd(), pr
         result = await client.prompt(worker.sessionId, prompt, { timeoutMs });
         if (worker.error) throw worker.error;
         if (result.stopReason !== "end_turn" && result.stopReason !== "cancelled") throw new Error(`ACP run stopped: ${result.stopReason}`);
+        if (provider === "claude" && title && result.stopReason === "end_turn") {
+          await client.stop();
+          worker.closed = true;
+          worker.materialization = await materializeSession({
+            sessionId: worker.sessionId, title, cwd: worker.cwd, model, effort,
+            sessionPath: path.join(claudeHome(), "projects", worker.cwd.replace(/[^a-zA-Z0-9]/g, "-"), worker.sessionId + ".jsonl"),
+            importIntoDesktop: false,
+          });
+          if (!worker.materialization?.materialized) throw new Error("The Claude turn finished, but Relay could not make its native session available in the app");
+        }
         return { sessionId: worker.sessionId, text: worker.projection.finalText, stopReason: result.stopReason };
       } catch (error) { worker.error = error; throw error; }
       finally {

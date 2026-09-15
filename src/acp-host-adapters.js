@@ -5,6 +5,7 @@ import { configDir } from "./config.js";
 import { acpAvailable, acpMcpServers } from "./acp-client.js";
 import { startAcpRun, acpWorker, acpPermissionMode, subscribeAcpWorker } from "./acp-session.js";
 import { relayClaudePermissionMode } from "./claude-session-runtime.js";
+import { acpSessionOwner } from "./acp-session-owner.js";
 
 export function createAcpHostAdapters({ available = acpAvailable, startRun = startAcpRun, openExternal, renderAgentBriefing, relayMcpLaunchSpec, openUiTarget } = {}) {
   function detectHosts() {
@@ -42,7 +43,7 @@ export function createAcpHostAdapters({ available = acpAvailable, startRun = sta
       if (!mimeType) throw new Error("Unsupported ACP image type");
       blocks.push({ type: "image", mimeType, data: fs.readFileSync(file).toString("base64") });
     }
-    const worker = await startRun({ provider: host.kind, sessionId: previousRef?.hostSessionId, cwd, prompt: blocks,
+    const worker = await startRun({ provider: host.kind, sessionId: previousRef?.hostSessionId, cwd, title: session.title || "Relay Task", prompt: blocks,
       displayPrompt: [{ type: "text", text: prompt }, ...localImages.map(image => ({ type: "localImage", path: typeof image === "string" ? image : image.path }))],
       model: codexOptions.model, effort: codexOptions.effort || codexOptions.reasoningEffort,
       mode: acpPermissionMode(host.kind, host.kind === "claude_code" ? { permissionMode: relayClaudePermissionMode() } : codexOptions),
@@ -74,6 +75,11 @@ export function createAcpHostAdapters({ available = acpAvailable, startRun = sta
     return { ok: Boolean(worker), supported: true, host: sessionRef?.host, events, activeTurnId: worker && !worker.settled ? worker.turnId : null, lastCompletedTurnId: worker?.settled ? worker.turnId : null };
   }
   function subscribeEvents({ sessionRef }, listener) { return subscribeAcpWorker(sessionRef?.hostSessionId, listener); }
-  function openUi({ sessionRef }) { const target = openUiTarget(sessionRef); return { ...openExternal(target), supported: Boolean(target), host: sessionRef?.host, mode: sessionRef?.mode }; }
+  function openUi({ sessionRef }) {
+    const provider = sessionRef?.host === "claude_code" ? "claude" : sessionRef?.host;
+    if (acpSessionOwner(provider, sessionRef?.hostSessionId)) return { ok: false, supported: true, reason: "acp_turn_still_running" };
+    const target = openUiTarget(sessionRef);
+    return { ...openExternal(target), supported: Boolean(target), host: sessionRef?.host, mode: sessionRef?.mode };
+  }
   return { detectHosts, selectHost, preflightAuth, relayToolPlan, launchTurn, steerTurn, interruptTurn, streamEvents, subscribeEvents, openUi };
 }

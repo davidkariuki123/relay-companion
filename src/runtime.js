@@ -108,6 +108,10 @@ function openUiTarget(sessionRef) {
       relaySessionId: sessionRef?.relaySessionId || "",
     });
   }
+  if (sessionRef?.mode === "acp" && sessionRef.hostSessionId) {
+    const id = encodeURIComponent(sessionRef.hostSessionId);
+    return sessionRef.host === "claude_code" ? `claude://resume?session=${id}` : `codex://threads/${id}`;
+  }
   return sessionRef?.filePath || sessionRef?.promptPath || sessionRef?.logPath || null;
 }
 

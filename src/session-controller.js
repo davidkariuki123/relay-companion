@@ -722,7 +722,7 @@ async function executeAcp({ client, claim, target, operation, input, prompt, pro
     const idle = await waitForCodexIdle(target.nativeRef.sessionPath, { timeoutMs: 12 * 60 * 60 * 1000, pollMs: 1000 });
     if (!idle.idle) throw new Error("The selected native session is still working");
   }
-  const worker = await startAcpRun({ provider, sessionId: target?.nativeId, cwd, prompt, logPath: acpOperationLog(operation.id),
+  const worker = await startAcpRun({ provider, sessionId: target?.nativeId, cwd, title: input.oneShot ? "" : title, prompt, logPath: acpOperationLog(operation.id),
     model: input.model, effort: input.effort,
     mode: acpPermissionMode(provider, provider === "claude" ? { permissionMode: relayClaudePermissionMode() } : input),
     mcpServers: acpMcpServers({ relay: relayMcpLaunchSpec() }),
