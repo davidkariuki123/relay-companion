@@ -148,7 +148,7 @@ test("the protocol state carries the inviter for the current account only", () =
   });
   vm.runInContext(slice(main, "function onboardingProtocolState() {", "function firstRelayKindFor("), scope);
   const state = vm.runInContext("onboardingProtocolState", scope);
-  assert.deepEqual(plain(state()), { tutorial: protocol.tutorial, openingPreference: protocol.openingPreference, inviter: protocol.inviter });
+  assert.deepEqual(plain(state()), { tutorial: protocol.tutorial, openingPreference: protocol.openingPreference, inviter: protocol.inviter, org: null });
   delete protocol.inviter;
   assert.equal(state().inviter, null);
   config.userId = "usr_other";

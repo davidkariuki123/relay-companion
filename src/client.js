@@ -1044,6 +1044,10 @@ export class RelayClient {
     return this.#req("POST", "/v1/contact-groups", { name });
   }
 
+  prepareOrg(input) { return this.#req("POST", "/v1/contact-groups/prepare-org", input); }
+
+  orgInvite(groupId, input) { return this.#req("POST", `/v1/contact-groups/${encodeURIComponent(groupId)}/org-invite`, input); }
+
   prepareTeam(input) {
     return this.#req("POST", "/v1/contact-groups/prepare-team", input);
   }

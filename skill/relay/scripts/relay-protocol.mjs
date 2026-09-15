@@ -439,10 +439,18 @@ async function connectFinish() {
     connected: true,
     account: record.account,
     inviter: record.inviter,
+    org: record.org,
     invite: record.invite,
     tutorial: record.tutorial,
     expiresAt: record.expiresAt,
   };
+}
+
+function requiredOrgIdentity(value) {
+  const name = String(value?.name || "").trim();
+  const groupId = String(value?.groupId || "").trim();
+  if (!name || !/^grp_[A-Za-z0-9_-]+$/.test(groupId)) throw new Error("Relay authorization did not contain a valid organisation identity.");
+  return { name, groupId };
 }
 
 function requiredRelayIdentity(value, label, { requireName = true } = {}) {
@@ -457,17 +465,19 @@ async function configureFromResponse(input, { expectedApiUrl } = {}) {
   if (expectedApiUrl && apiUrl !== relayApiOrigin(expectedApiUrl)) throw new Error("Relay authorization changed API hosts unexpectedly.");
   const accessToken = String(input.accessToken || "");
   if (!accessToken.startsWith("web_") || accessToken.length < 20) throw new Error("Relay authorization did not contain a valid access token.");
-  const inviter = requiredRelayIdentity(input.inviter, "inviter");
+  const org = input.org ? requiredOrgIdentity(input.org) : undefined;
+  const inviter = org ? undefined : requiredRelayIdentity(input.inviter, "inviter");
   // Prove which account the new bearer credential represents before persisting
   // anything or consuming the recoverable pending authorization file.
   const me = await authenticatedRequest(apiUrl, accessToken, "GET", "/v1/me");
   const own = requiredRelayIdentity(me?.user, "account", { requireName: false });
-  const selfInvite = own.relayUserId === inviter.relayUserId;
+  const selfInvite = own.relayUserId === inviter?.relayUserId;
   let existing = null;
   try { existing = readConfig(); } catch {}
   const sameConnection = existing?.apiUrl === apiUrl
     && existing?.account?.relayUserId === own.relayUserId
-    && existing?.inviter?.relayUserId === inviter.relayUserId;
+    && existing?.inviter?.relayUserId === inviter?.relayUserId
+    && existing?.org?.groupId === org?.groupId;
   const record = {
     version: 1,
     consentVersion: input.consentVersion ?? 1,
@@ -476,6 +486,7 @@ async function configureFromResponse(input, { expectedApiUrl } = {}) {
     expiresAt: String(input.expiresAt || ""),
     account: { ...(input.account && typeof input.account === "object" ? input.account : {}), relayUserId: own.relayUserId },
     inviter,
+    org,
     invite: input.invite && typeof input.invite === "object" ? input.invite : undefined,
     tutorial: sameConnection && existing?.tutorial
       ? existing.tutorial
@@ -552,7 +563,8 @@ async function sendTutorial(approved, draft) {
   if (tutorial.state === "accepted" && tutorial.relayId) {
     return { ok: true, status: "already_accepted", relayId: tutorial.relayId, state: tutorial.responseState || "" };
   }
-  const inviter = requiredRelayIdentity(config.inviter, "inviter");
+  const org = config.org ? requiredOrgIdentity(config.org) : undefined;
+  const inviter = org ? undefined : requiredRelayIdentity(config.inviter, "inviter");
   const key = String(tutorial.idempotencyKey || "");
   if (key.length < 8) throw new Error("Relay tutorial state is missing its stable idempotency key. Connect again.");
   if (draft && (typeof draft.forHuman !== "string" || !draft.forHuman.trim()
@@ -561,10 +573,10 @@ async function sendTutorial(approved, draft) {
     throw new Error("The tutorial draft must contain only the two approved, non-empty forHuman and forAgent fields.");
   }
   const proposed = {
-    recipient: { relayUserId: inviter.relayUserId },
+    recipient: org ? { groupId: org.groupId } : { relayUserId: inviter.relayUserId },
     kind: "message",
-    forHuman: draft?.forHuman ?? TUTORIAL_HUMAN,
-    forAgent: draft?.forAgent ?? TUTORIAL_AGENT,
+    forHuman: draft?.forHuman ?? (org ? "Hi everyone — I’ve just joined our organisation on Relay." : TUTORIAL_HUMAN),
+    forAgent: draft?.forAgent ?? (org ? "This is my first Relay after joining our organisation group. Help the people in the group reply if they want to welcome me." : TUTORIAL_AGENT),
     idempotencyKey: key,
   };
   if (tutorial.payload && draft && JSON.stringify(proposed) !== JSON.stringify(tutorial.payload)) {
@@ -782,7 +794,7 @@ async function main(argv = process.argv.slice(2)) {
       const config = readConfig();
       const me = await request("GET", "/v1/me");
       if (me.user?.id !== config.account?.relayUserId) throw new Error("Relay returned a different account. Connection is unverified.");
-      return { ok: true, connected: true, transport: lastTransport, apiUrl: config.apiUrl, account: config.account || {}, inviter: config.inviter, invite: config.invite, tutorial: config.tutorial, lastSend: config.lastSend, expiresAt: config.expiresAt || "", independentAuthorizationSaved: config.accessToken.startsWith("web_") };
+      return { ok: true, connected: true, transport: lastTransport, apiUrl: config.apiUrl, account: config.account || {}, inviter: config.inviter, org: config.org, invite: config.invite, tutorial: config.tutorial, lastSend: config.lastSend, expiresAt: config.expiresAt || "", independentAuthorizationSaved: config.accessToken.startsWith("web_") };
     } catch (error) {
       process.exitCode = 1;
       return { ok: false, connected: false, transport: transport === "auto" ? lastTransport || "unresolved" : transport, error: error.code || "connection_unverified", message: error.message, ...(error.status ? { status: error.status } : {}) };

@@ -1853,14 +1853,14 @@ function onboardingProtocolState() {
     const current = readConfigFile();
     if (!account().userId || config.account?.relayUserId !== account().userId
       || config.apiUrl !== (process.env.RELAY_API_URL || current.apiUrl || "https://api.sendrelays.com")) return null;
-    return { tutorial: config.tutorial, openingPreference: config.openingPreference, inviter: config.inviter || null };
+    return { tutorial: config.tutorial, openingPreference: config.openingPreference, inviter: config.inviter || null, org: config.org || null };
   } catch { return null; }
 }
 // The first-send chapter has two shapes. An invited person hellos their
 // inviter; a person set up from sendrelays.com has nobody on Relay yet, so
 // their first Relay is a share link for someone who is not on it.
 function firstRelayKindFor(protocolState) {
-  return String(protocolState?.inviter?.relayUserId || "").trim() ? "hello" : "link";
+  return String(protocolState?.org?.groupId || protocolState?.inviter?.relayUserId || "").trim() ? "hello" : "link";
 }
 // The tutorial's second half: the person's first link and the message to send
 // with it. Sent items carry shareText from the server; an older server's item

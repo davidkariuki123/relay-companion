@@ -36,6 +36,8 @@ const cases = {
   relay_contacts_search: [{ query: 'Test' }, 'searchContacts'],
   relay_groups_list: [{}, 'groups'],
   relay_team_prepare: [{ name: 'Test team', members: [], idempotencyKey: key }, 'prepareTeam'],
+  relay_org_prepare: [{ name: 'Test company', members: [], idempotencyKey: key }, 'prepareOrg'],
+  relay_org_invite: [{ groupId: 'grp_test', action: 'get', idempotencyKey: key }, 'orgInvite'],
   relay_group_transfer_admin: [{ groupId: 'grp_test', adminUserId: 'usr_test', idempotencyKey: key }, 'transferGroupAdmin'],
   relay_group_create: [{ name: 'Test', memberContactIds: ['con_test'] }, 'addGroupMember'],
   relay_group_update: [{ groupId: 'grp_test', name: 'Renamed' }, 'renameGroup'],

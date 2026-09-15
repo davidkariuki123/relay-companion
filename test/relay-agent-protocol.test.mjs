@@ -723,3 +723,55 @@ test("CLI discovers the live catalog and executes mutations through the authenti
   assert.match(older.stderr, /No independent Relay authorization.*connect-start/);
   fs.writeFileSync(file, JSON.stringify(descriptor));
 });
+
+
+test("org authorization guides an approved group hello and preserves it across retry", async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-org-protocol-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const requests = [];
+  let invalidOrg = false;
+  const server = http.createServer(async (req, res) => {
+    let raw = ""; for await (const part of req) raw += part;
+    const body = raw ? JSON.parse(raw) : {};
+    res.setHeader("Content-Type", "application/json");
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    if (req.url === "/v1/agent/authorizations") return res.end(JSON.stringify({ authorizationId: "oiaa_test", clientSecret: "ivcs_test_012345678901234567890123456789", approvalUrl: origin + "/connect-agent/oiaa_test#approvalToken=test", expiresAt: "2099-01-01T00:00:00.000Z" }));
+    if (req.url === "/v1/agent/authorizations/oiaa_test/consume") return res.end(JSON.stringify({ status: "connected", accessToken: "web_test_012345678901234567890123456789", apiUrl: origin, expiresAt: "2099-01-01T00:00:00.000Z", account: { name: "Member", email: "member@example.com" }, org: { name: "Company", groupId: invalidOrg ? "usr_wrong" : "grp_company" } }));
+    if (req.url === "/v1/me") return res.end(JSON.stringify({ user: { id: "usr_member", name: "Member", email: "member@example.com" } }));
+    if (req.url === "/v1/relays") {
+      requests.push(body);
+      if (requests.length === 1) { res.statusCode = 503; return res.end(JSON.stringify({ error: "uncertain" })); }
+      return res.end(JSON.stringify({ relayId: "rel_org", state: "sent" }));
+    }
+    res.statusCode = 404; res.end("{}");
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const env = { RELAY_AGENT_ALLOW_LOOPBACK: "1", RELAY_AGENT_CONFIG: path.join(root, "config.json"), RELAY_AGENT_AUTHORIZATION: path.join(root, "pending.json"), RELAY_AGENT_LOCAL: path.join(root, "missing.json") };
+  const connect = await runProtocol(["connect-start", `http://127.0.0.1:${server.address().port}`, "org_test", "codex"], { env });
+  assert.equal(connect.code, 0, connect.stderr);
+  const finish = await runProtocol(["connect-finish"], { env });
+  assert.equal(finish.code, 0, finish.stderr);
+  const safe = JSON.parse(finish.stdout);
+  assert.equal(safe.inviter, undefined);
+  assert.deepEqual(safe.org, { name: "Company", groupId: "grp_company" });
+  assert.equal(safe.tutorial.state, "pending");
+  assert.equal((await runProtocol(["tutorial-send"], { env })).code, 1);
+  assert.equal(requests.length, 0, "setup and missing approval never send");
+  await runProtocol(["tutorial-send", "--approved"], { env });
+  const retry = await runProtocol(["tutorial-send", "--approved"], { env });
+  assert.equal(retry.code, 0, retry.stderr);
+  assert.deepEqual(requests[0].recipient, { groupId: "grp_company" });
+  assert.equal(requests[0].forHuman, "Hi everyone — I’ve just joined our organisation on Relay.");
+  assert.equal(requests[0].forAgent, "This is my first Relay after joining our organisation group. Help the people in the group reply if they want to welcome me.");
+  assert.deepEqual(requests[0], requests[1]);
+  await runProtocol(["tutorial-send", "--approved"], { env });
+  assert.equal(requests.length, 2, "an accepted hello is never sent again");
+  const status = await runProtocol(["status"], { env });
+  assert.equal(JSON.parse(status.stdout).org.groupId, "grp_company");
+  invalidOrg = true;
+  const invalidEnv = { ...env, RELAY_AGENT_CONFIG: path.join(root, "invalid.json") };
+  await runProtocol(["connect-start", `http://127.0.0.1:${server.address().port}`, "org_invalid", "codex"], { env: invalidEnv });
+  assert.match((await runProtocol(["connect-finish"], { env: invalidEnv })).stderr, /valid organisation identity/);
+  assert.equal(fs.existsSync(invalidEnv.RELAY_AGENT_CONFIG), false);
+});

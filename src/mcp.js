@@ -633,8 +633,83 @@ export const TOOLS = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    "name": "relay_org_prepare",
+    "description": "Prepare organisation onboarding only when the human asks. Provide a company name or an existing groupId they administer. Member emails are optional (up to 100 known people can be prepared before sign-in). Returns one reusable org invitation with instructions and URL: anyone signing in through it joins the company group and exchanges contacts with its members, without requests. The first Relay is guided to the group, with separate send approval. Does not send invitations. Preserve the returned link for sharing; retry with the same key and payload.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Company name for the organisation group; omit when using groupId."
+        },
+        "groupId": {
+          "type": "string",
+          "description": "Existing group the human administers; omit when using name."
+        },
+        "members": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "email"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 8
+        }
+      },
+      "required": [
+        "idempotencyKey"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "relay_org_invite",
+    "description": "Get, rotate or revoke an organisation invitation for a group this human administers, only when asked. Anyone using the link can join the company group and exchange contacts with current members. Rotation stops the previous link; revocation stops new joins. Existing membership and contacts stay. The link follows the group when administration is transferred. Share the returned message and URL only as the human requests.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "groupId": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "get",
+            "rotate",
+            "revoke"
+          ]
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 200
+        }
+      },
+      "required": [
+        "groupId",
+        "idempotencyKey"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "relay_team_prepare",
-    "description": "Prepare a team only when the human asks: create missing claimable human accounts, create a group or use an exact groupId they administer, and add all group members to each other’s Contacts. Provide either a new name or groupId and the human-supplied member emails (up to 100). Existing accounts and curated contacts are preserved. Returns the organiser’s ordinary reusable invite for them to share; sends no invitations and signs nobody in. Retry with the same idempotencyKey and payload.",
+    "description": "Legacy email-first preparation; prefer relay_org_prepare for organisation onboarding. Use only when the human asks: create missing claimable human accounts, create a group or use an exact groupId they administer, and add all group members to each other’s Contacts. Provide either a new name or groupId and the human-supplied member emails (up to 100). Existing accounts and curated contacts are preserved. Returns the organiser’s ordinary reusable invite for them to share; sends no invitations and signs nobody in. Retry with the same idempotencyKey and payload.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1029,6 +1104,8 @@ export const ORDINARY_RELAY_TOOL_NAMES = new Set([
   "relay_groups_list",
   // Group management is ordinary-messaging functionality (the pill and website
   // expose it for ordinary messaging), so it belongs in this profile too.
+  "relay_org_prepare",
+  "relay_org_invite",
   "relay_team_prepare",
   "relay_group_transfer_admin",
   "relay_group_create",
@@ -2411,6 +2488,10 @@ async function handleAdmittedCall(client, name, args, {
     }
     case "relay_groups_list":
       return text(await client.groups());
+    case "relay_org_prepare":
+      return text(await client.prepareOrg({ name: args.name, groupId: args.groupId, members: args.members, idempotencyKey: args.idempotencyKey }));
+    case "relay_org_invite":
+      return text(await client.orgInvite(args.groupId, { action: args.action, idempotencyKey: args.idempotencyKey }));
     case "relay_team_prepare":
       return text(await client.prepareTeam({ name: args.name, groupId: args.groupId, members: args.members, idempotencyKey: args.idempotencyKey }));
     case "relay_group_transfer_admin":

@@ -41,3 +41,17 @@ test("the client posts preparation and admin handover to their exact endpoints",
     assert.equal(calls[1].body.idempotencyKey, "transfer-once");
   } finally { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); }
 });
+
+
+test("ordinary agents can prepare an org without emails and manage its shared invitation", async () => {
+  const catalog = toolsForAccount({ requests: false });
+  const prepare = catalog.find(t => t.name === "relay_org_prepare");
+  assert.ok(prepare && !prepare.inputSchema.required.includes("members"));
+  assert.ok(catalog.some(t => t.name === "relay_org_invite"));
+  const calls = [];
+  const client = { prepareOrg: async input => { calls.push(input); return { groupId: "grp_org" }; }, orgInvite: async (id,input) => { calls.push({ id,...input }); return { invite: null }; } };
+  await handleCall(client, "relay_org_prepare", { name: "Company", idempotencyKey: "org-prepare" }, { features: { requests: false } });
+  assert.deepEqual(calls[0], { name: "Company", groupId: undefined, members: undefined, idempotencyKey: "org-prepare" });
+  await handleCall(client, "relay_org_invite", { groupId: "grp_org", action: "revoke", idempotencyKey: "org-revoke" }, { features: { requests: false } });
+  assert.deepEqual(calls[1], { id: "grp_org", action: "revoke", idempotencyKey: "org-revoke" });
+});

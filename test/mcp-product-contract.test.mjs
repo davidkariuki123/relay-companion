@@ -37,6 +37,7 @@ const EXPECTED_TOOLS = [
   "relay_share_link",
   "relay_contacts_search",
   "relay_groups_list",
+  "relay_org_prepare", "relay_org_invite",
   "relay_team_prepare", "relay_group_transfer_admin",
   "relay_group_create",
   "relay_group_update",
