@@ -419,7 +419,7 @@ function arrivalHarness({ collapsed = false, peeking = false, reader = false, si
     setTimeout: () => { calls.push(["timer"]); return 1; }, clearTimeout() {},
     notificationDurationMs: 7000,
   });
-  vm.runInContext(`${sliceFunction(html, "function sendAttentionDone(")}\n${sliceFunction(html, "function notifyArrival(")}\nnotifyArrival([{ id: "arrival" }], {});`, context);
+  vm.runInContext(`${sliceFunction(html, "function dwellFor(")}\n${sliceFunction(html, "function sendAttentionDone(")}\n${sliceFunction(html, "function notifyArrival(")}\nnotifyArrival([{ id: "arrival" }], {});`, context);
   return { context, classes, calls };
 }
 

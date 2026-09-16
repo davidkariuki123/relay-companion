@@ -9,6 +9,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 import {
   ORDINARY_RELAY_TOOL_NAMES,
+  ORG_ADMIN_TOOL_NAMES,
   RELAY_MCP_INSTRUCTIONS,
   REQUESTS_DISABLED_INSTRUCTIONS,
   TOOLS,
@@ -25,11 +26,14 @@ const PRODUCTION_ORDINARY_RELAY_TOOL_NAMES = new Set(ORDINARY_RELAY_TOOL_NAMES);
 for (const gated of ["relay_message_edit", "relay_message_delete", "relay_todo_update", "relay_todo_visibility", "relay_todo_reorder", "relay_topics_list", "relay_topic_fetch", "relay_topic_context", "relay_topic_threads", "relay_topic_edit", "relay_topic_post", "relay_topic_create", "relay_topic_invite", "relay_topic_member"]) {
   PRODUCTION_ORDINARY_RELAY_TOOL_NAMES.delete(gated);
 }
+// Organisation onboarding is internal staff work, so a session that is not
+// staff (no canViewAdminDashboard) never lists it, on any channel.
+for (const staffOnly of ORG_ADMIN_TOOL_NAMES) PRODUCTION_ORDINARY_RELAY_TOOL_NAMES.delete(staffOnly);
 
-async function inspectMcp({ developer = false, updateChannel = "stable" }) {
+async function inspectMcp({ developer = false, staff = false, updateChannel = "stable" }) {
   const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-mcp-startup-"));
   fs.writeFileSync(path.join(configDir, "config.json"), JSON.stringify({
-    user: { id: "usr_test", email: "test@example.com", accountKind: "human", isDeveloper: developer },
+    user: { id: "usr_test", email: "test@example.com", accountKind: "human", isDeveloper: developer, ...(staff ? { canViewAdminDashboard: true } : {}) },
     updateChannel,
   }));
   const transport = new StdioClientTransport({
@@ -78,7 +82,10 @@ test("MCP initialize returns complete startup teachings before tools are selecte
     PRODUCTION_ORDINARY_RELAY_TOOL_NAMES,
   );
 
-  const full = await inspectMcp({ developer: true, updateChannel: "dev" });
+  const developerNotStaff = await inspectMcp({ developer: true, updateChannel: "dev" });
+  assert.ok(developerNotStaff.tools.every((tool) => !ORG_ADMIN_TOOL_NAMES.has(tool.name)), "org onboarding is staff-only even for developers");
+
+  const full = await inspectMcp({ developer: true, staff: true, updateChannel: "dev" });
   assert.equal(full.instructions, RELAY_MCP_INSTRUCTIONS);
   const pausedTodoTools = new Set(["relay_todo_update", "relay_todo_visibility", "relay_todo_reorder"]);
   assert.deepEqual(

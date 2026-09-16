@@ -2282,7 +2282,7 @@ function buildPayload() {
     ui: {
       canDismiss: trayAvailable,
       reopenSurface: reopenSurfaceName(),
-      notificationDurationMs: Number(process.env.RELAY_OVERLAY_NOTIFICATION_MS) || 7000,
+      notificationDurationMs: dwellMs(),
       onboardingVersion: COMPANION_ONBOARDING_VERSION,
       setupPrompt: `Read ${webBase()}/for-agents and set me up on Relay.`,
       tutorialPrompt: require("./returning-tutorial-prompt.cjs")(`${webBase()}/llm_guide.md`),
@@ -2436,7 +2436,17 @@ function requeueActiveAttention() {
 // digest card carries the remainder so a 35-relay backlog is not a 4-minute
 // card marathon. A burst resets when the queue drains or the user goes away.
 const ATTENTION_DIGEST_AFTER = 5;
-const dwellMs = () => Number(process.env.RELAY_OVERLAY_NOTIFICATION_MS) || 7000;
+// A banner stays long enough to read a title and hit a verb (David, 2026-09-16:
+// 7s folded before anyone could act on it). A Task asks for a decision, so it
+// stays half as long again; nothing latches open indefinitely.
+const DEFAULT_NOTIFICATION_MS = 20000;
+const TASK_DWELL_FACTOR = 1.5;
+const dwellMs = () => Number(process.env.RELAY_OVERLAY_NOTIFICATION_MS) || DEFAULT_NOTIFICATION_MS;
+function showDwellMs(rows) {
+  const base = dwellMs();
+  const hasTask = (rows || []).some((row) => row && row.relayNotificationKind === "task");
+  return hasTask ? Math.round(base * TASK_DWELL_FACTOR) : base;
+}
 
 function idleSecondsSafe() {
   try {
@@ -2502,7 +2512,7 @@ function abortCurrentShow(reason, { penalize = true } = {}) {
 // card was visible). A wake resets the idle counter, so the sampler alone —
 // not a single end-of-dwell reading — is what makes wake-to-black-screen
 // dwells fail closed and stay queued.
-function beginShowSampling(entryIds, digest, { sticky = false } = {}) {
+function beginShowSampling(entryIds, digest, { sticky = false, dwellMs: showDwell = dwellMs() } = {}) {
   const idleAtStart = idleSecondsSafe();
   const startedAt = Date.now();
   const show = { ids: entryIds, digest: Boolean(digest), startedAt, idleAtStart, inputSeen: false, sampler: null };
@@ -2513,7 +2523,7 @@ function beginShowSampling(entryIds, digest, { sticky = false } = {}) {
   // Cap the sampler at a few dwells past the fold deadline: the renderer's
   // attentionDone lands within one dwell, and evidence gathered after ~30s
   // could never belong to this card's visible interval anyway.
-  const samplerCapMs = Math.max(dwellMs() * 4, 30000);
+  const samplerCapMs = Math.max(showDwell * 4, 30000);
   show.sampler = setInterval(() => {
     const elapsed = (Date.now() - startedAt) / 1000;
     const expected = show.idleAtStart + elapsed;
@@ -2601,7 +2611,8 @@ function pumpAttention(prebuiltPayload = null) {
   deferredAttention = false;
   maybeShow({ force: true });
   activeAttentionIds = new Set(ids);
-  currentShow = beginShowSampling(ids, digestMode, { sticky });
+  const showDwell = showDwellMs(rows);
+  currentShow = beginShowSampling(ids, digestMode, { sticky, dwellMs: showDwell });
   setThrottlingForShow(true);
   lastEngagedAt = Date.now(); // a live card warrants tight sent/host cadence briefly
   currentShow.sticky = sticky;
@@ -2615,6 +2626,7 @@ function pumpAttention(prebuiltPayload = null) {
     sequential: !digestMode,
     digest: digestMode ? { count: rows.length } : null,
     sticky,
+    dwellMs: showDwell,
     remaining: attention.pendingCount(attentionQueue) - ids.length,
   });
   syncTray();

@@ -3085,6 +3085,15 @@
   .su-divider::before, .su-divider::after { content:""; flex:1 1 auto; height:1px; background:var(--hair); }
   .su-google { display:flex; align-items:center; justify-content:center; gap:8px; }
   .su-google svg { flex:none; }
+  /* The method stage carries two ways in (agent prompt, Google) inside the
+     fixed-height pill, so its lockup and gaps run tighter than the chapters. */
+  .su-method .su-handoff-title { margin-top:9px; font-size:33px; }
+  .su-method .su-handoff-title + .su-copy { margin-top:12px; }
+  .su-method .su-setup-prompt { margin-top:12px; padding:11px 12px; }
+  .su-method .su-copy-setup { margin-top:8px; }
+  .su-method-divider { margin-top:12px; }
+  .su-method-google { width:100%; margin-top:8px; }
+  .su-method .su-returning { margin-top:9px; }
   .su-account { margin-top:21px; padding:14px; border:1px solid var(--hair); border-radius:var(--r-3); background:var(--wash); }
   .su-account-name { display:block; font-size:13px; font-weight:600; color:var(--ink); }
   .su-account-email, .su-device { display:block; margin-top:3px; font-size:11px; line-height:1.4; color:var(--muted); overflow-wrap:anywhere; }
@@ -4081,7 +4090,11 @@
     }
   }
   let peeking = false, peekTimer = null;
-  let notificationDurationMs = 7000;
+  let notificationDurationMs = 20000; // main's dwell; a show may carry its own (Tasks stay longer)
+  function dwellFor(meta) {
+    const ms = Number(meta && meta.dwellMs);
+    return Number.isFinite(ms) && ms >= 250 ? ms : notificationDurationMs;
+  }
   let activeNotificationIds = [];
   let ghost = false, ghostTimer = null; // notification-only mode while the pill is dismissed
   // Read presence requires a deliberate open, beyond the current card size.
@@ -4215,7 +4228,7 @@
   // A relay arrived while dismissed: the same designed banner, but as a free-standing
   // notification. It emerges at banner size (no pill morph — there is no pill), and
   // when done it fades away instead of folding back into anything.
-  function ghostArrival(row) {
+  function ghostArrival(row, meta) {
     if (ghostTimer) { clearTimeout(ghostTimer); ghostTimer = null; }
     cancelBye(); // a banner arriving mid-exit must not be torn down by the old exit
     clearPeek();
@@ -4235,7 +4248,7 @@
       ghostTimer = null;
       if (interactive || quickReplyIsActive()) { ghostTimer = setTimeout(tick, 4000); return; }
       dismissOverlay(); // rides the ghostOut exit, then main re-hides the window
-    }, notificationDurationMs);
+    }, dwellFor(meta));
   }
   // Status-area Relay mark clicked: the card comes back FULLY OPEN (never the pill).
   function trayOpen() {
@@ -4353,7 +4366,7 @@
       if (notifSticky) return; // repeatedly-missed relays latch until touched
       foldToPill();
       sendAttentionDone(true);
-    }, notificationDurationMs);
+    }, dwellFor(meta));
   }
   function openFull() {
     if (ghost) {
@@ -6739,6 +6752,35 @@
           if (morphFromList) startReaderMorph("threads");
         });
       }
+      // The verbs never fall through to the row's own open. Copy keeps the
+      // banner where it is; an app verb brings the pill up, opens the
+      // conversation, and lands on the reader with that app's session picker
+      // revealed — the same path as tapping the host row in the room.
+      for (const b of relaysListEl.querySelectorAll("[data-banner-copy]")) {
+        b.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          const id = b.getAttribute("data-banner-copy");
+          const message = readerRow(id) || relayById(id) || { id };
+          try {
+            await navigator.clipboard.writeText(pullSentenceFor(message));
+            b.textContent = "Copied";
+            setTimeout(() => { if (b.isConnected) b.textContent = "Copy for your agent"; }, 1400);
+          } catch { b.textContent = "Could not copy"; }
+        });
+      }
+      for (const b of relaysListEl.querySelectorAll("[data-banner-open]")) {
+        b.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (sessionPickerState?.delivering) return;
+          const id = b.getAttribute("data-banner-open");
+          const host = b.getAttribute("data-host") === "claude" ? "claude" : "codex";
+          const rowEl = b.closest(".relay-arrival");
+          openFull(); // the pill comes up for real, as a banner tap does
+          openThreadDetail(rowEl.getAttribute("data-thread"), rowEl.getAttribute("data-party") || "", "relays", { mentionRelayId:rowEl.getAttribute("data-mention-target") || "" });
+          const message = readerRow(id) || relayById(id) || { id };
+          loadSessionPicker(id, host, relaySubject(message) || "Relay", null, "relay");
+        });
+      }
       // The banner is sized to its rows, so a re-render that changes them (a second
       // arrival, a read row dropping out, a quick-reply box opening) must re-size too —
       // otherwise the card keeps the old height and either clips or shows dead space.
@@ -6864,6 +6906,30 @@
   });
   window.addEventListener("resize", positionChatFinder);
 
+  // THE BANNER'S VERBS (David, 2026-09-16): the same three the reader offers,
+  // in the row recipe. Copy for your agent is always there — whatever agent a
+  // person uses, the sentence is theirs to paste — and an app earns its Open
+  // when Settings › Your agent has it switched on and it opens Relays in its
+  // desktop app. A Task wears the same verbs as a Relay. The first verb wears
+  // the accent. Banner only: the list keeps its rows bare.
+  function bannerVerbsHtml(row) {
+    if (!row || row.direction === "out" || !String(row.id || "").startsWith("relay_")) return "";
+    const verbs = [{ label:"Copy for your agent", attrs:`data-banner-copy="${esc(row.id)}"` }];
+    for (const host of agentAppHosts()) {
+      const app = host === "codex" ? "Codex" : "Claude Code";
+      if (!agentOpensInApp(app)) continue;
+      verbs.push({ label:`Open in ${app}`, attrs:`data-banner-open="${esc(row.id)}" data-host="${host}"` });
+    }
+    if (!verbs.length) return "";
+    return `<span class="rk-actions" data-stop="1">${verbs.map((verb, index) =>
+      `<button class="act-btn ${index === 0 ? "accept" : "decline"}" type="button" ${verb.attrs}>${verb.label}</button>`).join("")}</span>`;
+  }
+  // The identity row's message is a room projection: its Task flag is `request`
+  // (the room bubble's own chip predicate), not relayNotificationKind. Fall back
+  // to the relay row for a raw row.
+  function bannerIsTask(row) {
+    return Boolean(row && (row.request || isTaskRow(relayById(row.id)) || isTaskRow(row)));
+  }
   function relayIdentityRowHtml(identity) {
     const mentionRows = peeking && identity.groupId ? threadMessages({ includeSlack:false })
       .filter((message) => message.groupId === identity.groupId && message.direction === "in" && message.unread && message.recipientMentioned && !message.deletedAt)
@@ -6895,9 +6961,11 @@
         <span class="rk-body">
           <span class="th-top">
             <span class="th-party${mention ? " mention-arrival-label" : ""}">${esc(mention ? `${String(mention.party || "Someone").split(" ")[0]} mentioned you in ${name}` : name)}</span>
+            ${peeking && row.direction !== "out" && bannerIsTask(row) ? `<span class="kchip">Task</span>` : ""}
             <span class="th-time">${esc(timeAgo(identity.latestAt))}</span>
           </span>
           <span class="rk-line"><span class="th-title">${senderPrefix}${esc(gist)}</span>${identity.unreadCount ? `<span class="th-count">${identity.unreadCount}</span>` : ""}</span>
+          ${peeking ? bannerVerbsHtml(row) : ""}
         </span>
       </div>`;
   }
@@ -7301,17 +7369,11 @@
     return requestedAgentApps().filter(appAvailable);
   }
   function agentAppChoice() { return agentAppSelection()[0] || ""; }
-  function otherAgentPreferenceKey() { return `proto.otherAgent.v1:${signupAccountKey()}`; }
-  function otherAgentEnabled() {
-    // All three options start enabled; preserve an explicit account choice.
-    return protoPref(otherAgentPreferenceKey(), "on") === "on";
-  }
-  function setOtherAgentEnabled(enabled) {
-    if (signupAccountKey()) setProtoPref(otherAgentPreferenceKey(), enabled ? "on" : "off");
-  }
+  // There is no "Other" switch any more (David, 2026-09-16): the copied
+  // sentence is offered to everyone, so the old per-account Other preference
+  // is simply no longer read.
   function saveAgentApps(apps) {
     if (!signupAccountKey()) return;
-    setOtherAgentEnabled(otherAgentEnabled());
     const next = AGENT_APP_OPTIONS.filter((app) => apps.includes(app));
     const saved = next.length ? next.join("|") : "__none__";
     setProtoPref(agentAppsPreferenceKey(), saved);
@@ -14683,16 +14745,15 @@
   }
   // Offer only enabled desktop apps. Each row opens destination choice;
   // a saved destination is a choice, never permission to skip the picker.
-  // Terminal/own-session users retain the copyable pull sentence.
+  // The copyable pull sentence is always offered (David, 2026-09-16): a
+  // terminal, another agent, or simply a person who prefers to paste.
   function relayHostActionsHtml(message, { persistent = false } = {}) {
     const id = String(message && message.id || "");
     const actionsId = `relay-host-actions-${id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
     const source = message && message.direction === "out" ? "sent" : "relay";
     const desktopHosts = agentAppHosts().filter((host) => agentOpensInApp(host === "codex" ? "Codex" : "Claude Code"));
-    const needsCopy = otherAgentEnabled();
     const inner = desktopHosts.map((host) => hostActionRowHtml(host, message, source) + sessionPickerInlineHtml(id, host)).join("")
-      + (needsCopy ? pullSentenceHtml(message, { hasAppAction: desktopHosts.length > 0 }) : "");
-    if (!inner) return "";
+      + pullSentenceHtml(message, { hasAppAction: desktopHosts.length > 0 });
     return `${persistent ? "" : `<button class="th-host-disclosure" type="button" data-host-disclosure="${esc(id)}" data-stop="1" aria-expanded="false" aria-controls="${esc(actionsId)}"><span>Open with an agent</span><span class="chev" aria-hidden="true">⌄</span></button>`}<div id="${esc(actionsId)}" class="th-host-actions${persistent ? " persistent" : ""}" data-host-actions="${esc(id)}" data-stop="1" aria-hidden="${persistent ? "false" : "true"}"${persistent ? "" : " inert"}>
       <div class="th-host-actions-inner">
         ${inner}
@@ -14714,15 +14775,23 @@
   }
   // "Pull David’s relay “Updater rollback postmortem”" — the thing to say in
   // a session, and the exact sentence the button copies for the agent.
-  function pullSentenceHtml(message, { hasAppAction = false } = {}) {
+  // The one sentence Relay copies for an agent that is not an app on this Mac
+  // — shared by the reader's pull block and the banner's Copy verb.
+  function pullSentenceFor(message, row = null) {
     const id = String(message && message.id || "");
-    const row = readerRow(id) || relayById(id)
+    row = row || readerRow(id) || relayById(id)
       || (payload.sent || []).find((item) => String(item.relayId || item.id || "") === id) || message || {};
     const subject = String(row.title || row.displayTitle || "").trim() || relaySubject(row) || String(message?.title || "").trim() || "Relay";
     const mine = (message && message.direction === "out") || row.direction === "out" || Boolean(row.recipient && !row.senderEmail);
     const first = mine ? "" : String(relaySender(row) || message?.party || "their").trim().split(/\s+/)[0];
     const whose = mine ? "my sent" : `${first}${/s$/i.test(first) ? "’" : "’s"}`;
-    const sentence = `Pull ${whose} relay “${subject}” from Relay and tell me what’s happening.`;
+    return `Pull ${whose} relay “${subject}” from Relay and tell me what’s happening.`;
+  }
+  function pullSentenceHtml(message, { hasAppAction = false } = {}) {
+    const id = String(message && message.id || "");
+    const row = readerRow(id) || relayById(id)
+      || (payload.sent || []).find((item) => String(item.relayId || item.id || "") === id) || message || {};
+    const sentence = pullSentenceFor(message, row);
     return `<div class="th-pull">
         <div class="th-pull-heading">${hasAppAction ? "Or tell your agent this:" : "Tell your agent this:"}</div>
         <div class="th-pull-q">${esc(sentence)}</div>
@@ -16609,8 +16678,7 @@
           }).join("")}
           <div class="sv-open-row">
             <span class="sv-open-logo sv-open-logo-blank" aria-hidden="true"></span>
-            <span class="sv-open-copy"><span class="sv-open-name">Other</span><span class="sv-open-why">Terminal or another agent. Relay copies the sentence for you.</span></span>
-            <button class="sv-switch" type="button" role="switch" id="svOtherAgent" aria-checked="${otherAgentEnabled() ? "true" : "false"}" aria-label="Copy prompts for another agent"></button>
+            <span class="sv-open-copy"><span class="sv-open-name">Other</span><span class="sv-open-why">Terminal or another agent. Relay always copies the sentence for you.</span></span>
           </div>
         </div>
       </div>`;
@@ -16850,10 +16918,6 @@
         renderSettings();
       });
     }
-    document.getElementById("svOtherAgent")?.addEventListener("click", () => {
-      setOtherAgentEnabled(!otherAgentEnabled());
-      renderSettings();
-    });
     document.getElementById("svBlockedPeople")?.addEventListener("click", (event) => openBlockedPeople(event.currentTarget));
     const accountRow = document.getElementById("svAccountRow");
     if (accountRow) accountRow.addEventListener("click", (e) => {
@@ -17426,6 +17490,7 @@
     if (detail.includes("linux_desktop_disabled")) return "New Linux desktop connections are temporarily paused. Try again later.";
     if (detail.includes("invalid_email")) return "Enter a valid email address.";
     if (detail.includes("browser_open_failed")) return "Relay couldn’t open your secure sign-in page. Try again.";
+    if (detail.includes("untrusted_destination")) return "Relay was given a sign-in page it does not trust. Update Relay, then try again.";
     if (detail.includes("secret_removal_failed")) return "Relay could not safely remove the old one-time setup approval. No replacement was created.";
     if (detail.includes("already_connected")) return "Relay is already connected on this computer.";
     if (detail.includes("setup_restart_required")) return "Relay found an unfinished one-time approval. Restart setup to replace it safely.";
@@ -17649,6 +17714,25 @@
       else surfaceRenderDeferred = true;
       pollInstallationState();
     } catch (reason) { signupFailure(reason, "Relay could not open sign-in. Try again."); }
+  }
+
+  // Continue with Google skips Relay's sign-in page: Google's account picker
+  // signs an existing account in or creates a new one in the same click, and
+  // Relay only sees the result at the approval step. Email sign-in and the
+  // Get started auto-start keep the browser sign-in page.
+  async function startInstallationGoogle() {
+    if (signupBusy || !window.relay.installationAuthGoogle) return;
+    signupBusy = true; signupError = "";
+    if (rendererSurfaceActive()) renderSignup();
+    else surfaceRenderDeferred = true;
+    try {
+      const state = await window.relay.installationAuthGoogle({ forceAccountSelection: signupForceGoogleSelection });
+      signupForceGoogleSelection = false;
+      signupBusy = false; signupStage = "google"; applyInstallationState(state);
+      if (rendererSurfaceActive()) renderSignup();
+      else surfaceRenderDeferred = true;
+      pollInstallationState();
+    } catch (reason) { signupFailure(reason, "Relay could not open Google sign-in. Try again."); }
   }
 
   async function connectChatFromSignup(provider) {
@@ -18042,7 +18126,7 @@
     }
     if (signupStage === "method") {
       const prompt = payload.ui?.setupPrompt || "Read https://sendrelays.com/for-agents and set me up on Relay.";
-      signupBodyEl.innerHTML = `<div class="su-first-relay"><p class="su-step">Get started with Relay</p><h1 class="su-title su-handoff-title"><span class="su-handoff-intro">Set up Relay with</span><span class="su-host-claude">Claude Code</span><span class="su-handoff-or">or <span class="su-host-codex">Codex</span>.</span></h1><p class="su-copy">Paste this into your agent to get started.</p><div class="su-setup-prompt">${esc(prompt)}</div><button class="su-primary su-copy-setup" id="suCopySetup" type="button">Copy setup prompt</button><p class="su-returning">Already have an account? <button class="su-signin" id="suSignIn" type="button"${busy}>Sign in</button></p>${error}</div>`;
+      signupBodyEl.innerHTML = `<div class="su-first-relay su-method"><p class="su-step">Get started with Relay</p><h1 class="su-title su-handoff-title"><span class="su-handoff-intro">Set up Relay with</span><span class="su-host-claude">Claude Code</span><span class="su-handoff-or">or <span class="su-host-codex">Codex</span>.</span></h1><p class="su-copy">Paste this into your agent to get started.</p><div class="su-setup-prompt">${esc(prompt)}</div><button class="su-primary su-copy-setup" id="suCopySetup" type="button">Copy setup prompt</button><div class="su-divider su-method-divider">or</div><button class="su-secondary su-google su-method-google" id="suGoogle" type="button"${busy}>${googleMark()} Continue with Google</button><p class="su-returning">New or returning, Google signs you in. <button class="su-signin" id="suSignIn" type="button"${busy}>Use email instead</button></p>${error}</div>`;
       document.getElementById("suCopySetup")?.addEventListener("click", async (event) => {
         try {
           const result = await window.relay.copySetupPrompt();
@@ -18050,6 +18134,7 @@
           event.target.textContent = "Copied";
         } catch { signupError = "Could not copy the prompt. Select and copy the text above."; renderSignup(); }
       });
+      document.getElementById("suGoogle")?.addEventListener("click", startInstallationGoogle);
       document.getElementById("suSignIn")?.addEventListener("click", startInstallationSignIn);
       return;
     }
@@ -18096,14 +18181,14 @@
     }
     if (signupStage === "google") {
       const retry = signupError ? `<button class="su-primary" id="suResume" type="button"${busy}>Try again</button>` : "";
-      signupBodyEl.innerHTML = `<p class="su-step">Sign in</p><h1 class="su-title">Continue in your browser.</h1><p class="su-copy">Sign in to your Relay account with Google or email.</p><div class="su-account"><span class="su-account-name">Waiting for sign-in…</span><span class="su-account-email">Your agent cannot see this sign-in.</span></div><div class="su-form">${retry}${cancelSetupButton()}</div>${error}`;
+      signupBodyEl.innerHTML = `<p class="su-step">Your account</p><h1 class="su-title">Continue in your browser.</h1><p class="su-copy">Sign in there, or create your Relay account if this is your first time.</p><div class="su-account"><span class="su-account-name">Waiting for sign-in…</span><span class="su-account-email">Your agent cannot see this sign-in.</span></div><div class="su-form">${retry}${cancelSetupButton()}</div>${error}`;
       bindSignupResume();
       bindSignupCancel();
       return;
     }
     if (signupStage === "approval") {
       const account = signupAccount || {};
-      signupBodyEl.innerHTML = `<p class="su-step">Your account</p><h1 class="su-title">Welcome back.</h1><p class="su-copy">Use this account in Relay and its Claude Code and Codex integrations on this computer.</p><div class="su-account"><span class="su-account-name">${esc(account.displayName || account.email || "Relay account")}</span>${account.email ? `<span class="su-account-email">${esc(account.email)}</span>` : ""}<span class="su-device">This computer<br />Claude Code · Cowork · Codex</span></div><div class="su-form"><button class="su-primary" id="suApprove" type="button"${busy}>Sign in to Relay</button><button class="su-link" id="suAnother" type="button"${busy}>Change account</button>${cancelSetupButton()}</div>${error}`;
+      signupBodyEl.innerHTML = `<p class="su-step">Your account</p><h1 class="su-title">You’re signed in.</h1><p class="su-copy">Use this account in Relay and its Claude Code and Codex integrations on this computer.</p><div class="su-account"><span class="su-account-name">${esc(account.displayName || account.email || "Relay account")}</span>${account.email ? `<span class="su-account-email">${esc(account.email)}</span>` : ""}<span class="su-device">This computer<br />Claude Code · Cowork · Codex</span></div><div class="su-form"><button class="su-primary" id="suApprove" type="button"${busy}>Use this account</button><button class="su-link" id="suAnother" type="button"${busy}>Change account</button>${cancelSetupButton()}</div>${error}`;
       document.getElementById("suApprove")?.addEventListener("click", async () => {
         signupBusy = true; signupError = ""; renderSignup();
         try {
@@ -18709,7 +18794,7 @@
   // the backoff its last attempt earned during an outage that is over.
   window.addEventListener("online", () => { window.relay.networkOnline?.().catch?.(() => {}); });
   if (window.relay.onNewRelay) window.relay.onNewRelay((row, opts) => {
-    if (opts && opts.ghost) ghostArrival(row); // pill dismissed -> free-standing banner
+    if (opts && opts.ghost) ghostArrival(row, opts); // pill dismissed -> free-standing banner
     else notifyArrival(row, opts);
     const ids = (Array.isArray(row) ? row : [row]).filter(Boolean).map((item) => item.id);
     // Two frames acknowledge presentation eligibility without marking mail read.

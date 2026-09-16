@@ -12,6 +12,7 @@ import {
   CREDENTIAL_STATUS_MISSING,
   CREDENTIAL_STATUS_UNAVAILABLE,
   DEFAULT_WEB_URL,
+  installationWebUrl,
   readConfigState,
 } from "./config.js";
 
@@ -337,7 +338,10 @@ export function createInstallationAuthorizationController({
   fetchImpl = globalThis.fetch,
   openExternal = async () => false,
   durableStore = defaultStateStore(),
-  secretStore = createNativeInstallationSecretStore({ webBase }),
+  // The native store keeps only the activation token and rebuilds the
+  // activation URL from this origin on read, so it must be the same origin the
+  // trust check below expects: the Dev website for the dev API.
+  secretStore = createNativeInstallationSecretStore({ webBase: installationWebUrl({ apiUrl: apiBase, webUrl: webBase }) }),
   now = () => Date.now(),
   isPaired = defaultIsPaired,
   // One key per installation on one machine (src/installation-key.cjs). The
@@ -354,7 +358,7 @@ export function createInstallationAuthorizationController({
   onConnected = async () => {},
 } = {}) {
   const base = normalizeApiBase(apiBase);
-  const trustedWebOrigin = normalizeWebOrigin(webBase);
+  const trustedWebOrigin = normalizeWebOrigin(installationWebUrl({ apiUrl: apiBase, webUrl: webBase }));
   if (!fetchImpl) throw new Error("Relay setup requires HTTPS support.");
   if (!["darwin", "win32", "linux"].includes(platform)) {
     throw new Error("Relay setup supports macOS, Windows, and Linux.");

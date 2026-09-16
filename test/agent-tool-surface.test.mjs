@@ -6,7 +6,7 @@ import test from 'node:test';
 import { createAgentToolSurface } from '../src/agent-tool-surface.js';
 import { TOOLS, toolsForAccount } from '../src/mcp.js';
 
-const features = { requests: true, todo: true, topics: true, aiSessions: true, connectors: true, messageMutations: true };
+const features = { orgAdmin: true, requests: true, todo: true, topics: true, aiSessions: true, connectors: true, messageMutations: true };
 const caller = { host: 'codex', nativeId: 'thread_test', cwd: os.tmpdir() };
 const key = 'stable-test-key';
 const message = { title: 'A useful test message', forHuman: 'Here is the update.', forAgent: 'The complete context.', idempotencyKey: key };
@@ -93,6 +93,10 @@ test('catalog and calls obey live product restrictions', async () => {
   assert.deepEqual((await api.list(caller)).tools, toolsForAccount(current, 'codex'));
   assert.equal((await api.call('relay_message_delete', cases.relay_message_delete[0], caller)).isError, true);
   assert.equal((await api.call('relay_connector_call_tool', {}, caller)).isError, true);
+  for (const name of ['relay_org_prepare', 'relay_org_invite', 'relay_team_prepare', 'relay_group_transfer_admin']) {
+    assert.ok(!(await api.list(caller)).tools.some(tool => tool.name === name));
+    assert.equal((await api.call(name, {}, caller)).isError, true);
+  }
   current = features;
   assert.equal(writes, 0);
   assert.equal((await api.call('relay_unknown', {}, caller)).isError, true);

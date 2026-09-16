@@ -255,7 +255,7 @@ export const TOOLS = [
     name: "relay_task_complete",
     _meta: ALWAYS_LOAD_META,
     description:
-      `Complete one exact inbound Relay Task being carried out in this agent session. Call exactly once after the requested work is genuinely finished. Relay posts one typed result into the Task chat and marks the Task Done; retries return the canonical result instead of sending a duplicate. forHuman is the concise result people should read and forAgent is the complete evidence and handoff context. ${FOR_HUMAN_COMPOSITION_SUMMARY}`,
+      `The only way a Task becomes Done. Complete one exact inbound Relay Task being carried out in this agent session. Call exactly once after the requested work is genuinely finished; when the approval or decision itself is the deliverable, this call carries it as forHuman. A reply into the Task chat never completes it. Relay posts one typed result into the Task chat and marks the Task Done; retries return the canonical result instead of sending a duplicate. forHuman is the concise result people should read and forAgent is the complete evidence and handoff context. ${FOR_HUMAN_COMPOSITION_SUMMARY}`,
     inputSchema: {
       type: "object",
       properties: {
@@ -462,7 +462,7 @@ export const TOOLS = [
     name: "relay_send",
     _meta: ALWAYS_LOAD_META,
     description:
-      `${RELAY_MCP_ESSENTIALS} Send ordinary Relay correspondence or a Task. Default to Relay when asked to send without specifying a medium; another named medium overrides. For self use recipient.self=true; resolve others with relay_contacts_search or relay_groups_list. ${EXPLICIT_EMAIL_ROUTING} CLASSIFY THE OUTCOME, NOT THE SENTENCE'S ADDRESSEE: kind='message' is human correspondence; kind='task' requests external agent work. Use a 3-6 word title and concise forHuman. Follow the installed skill's Writing a Relay section. Addressing a person, channel, or chat never implies a reply. Set replyToRelayId only when the human explicitly wants to quote or answer that exact Relay. For a Granular digital employee use the exact matching workspace-labelled contactId. Relay-owned Task Runs attach their provider's final answer automatically. Do not call relay_send merely to report completion; inbound Task completion uses relay_task_complete.`,
+      `${RELAY_MCP_ESSENTIALS} Send ordinary Relay correspondence or a Task. Default to Relay when asked to send without specifying a medium; another named medium overrides. For self use recipient.self=true; resolve others with relay_contacts_search or relay_groups_list. ${EXPLICIT_EMAIL_ROUTING} CLASSIFY BY WHAT THE SENDER EXPECTS DONE: kind='task' asks for work or an approval; kind='message' informs, hands over, or asks for thoughts, opinions or answers. Use a 3-6 word title and concise forHuman. Follow the installed skill's Writing a Relay section. Addressing a person, channel, or chat never implies a reply. Set replyToRelayId only when the human explicitly wants to quote or answer that exact Relay. For a Granular digital employee use the exact matching workspace-labelled contactId. Relay-owned Task Runs attach their provider's final answer automatically. Do not call relay_send merely to report completion; inbound Task completion uses relay_task_complete.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -491,7 +491,7 @@ export const TOOLS = [
           type: "string",
           enum: ["message", "task"],
           description:
-            "Required classification of the requested outcome, never of whether the wording addresses the person or explicitly names their agent. 'message' is correspondence whose response is the PERSON'S opinion, memory, judgment, decision, acknowledgement, or discussion. 'task' asks for external work: inspect, retrieve, analyze, create, change, configure, install, switch, coordinate, test, or verify something and report the result. A direct Task gives its one recipient a Start control. A Task sent to a saved channel first shows Claim to eligible channel members; after one person claims it, only that claimant gets Start and may Unclaim while its work is idle. Imperative wording addressed as 'you' is still a Task when it asks for that work. Exact example: 'Switch your Relay install to dev and confirm the version/channel' MUST be kind='task', not kind='message'. By contrast, 'Do you think we should switch to dev?' is kind='message'. A technical topic can still be a message; forAgent can contain dense implementation context without making it a Task. A small or quick operation is still a Task. The old 'handoff' kind no longer exists for new sends; machine detail belongs in forAgent, not in a separate message ontology. Every direct recipient or channel member must already be on Relay; for someone who is not, or when the human says create a task, mint it with relay_share_link kind='task'.",
+            "Required classification of what the sender expects done, never of whether the wording addresses the person or explicitly names their agent. 'task' asks for work or an approval: work by the recipient's agent (inspect, retrieve, analyze, create, change, configure, install, switch, coordinate, test, or verify something and report the result), or the person's approval or decision on something put to them. 'message' is everything else: informing, handing over, and asking for thoughts, opinions or answers, which come back as ordinary replies. Exact examples: 'Switch your Relay install to dev and confirm the version/channel' MUST be kind='task', not kind='message'. 'Approve the September supplier payments' is kind='task': an approval is owed. 'Do you think we should switch to dev?' is kind='message': thoughts are correspondence. 'We switched the pill to dev this morning' is kind='message'. A technical topic can still be a message; forAgent can contain dense implementation context without making it a Task. A small or quick piece of work is still a Task. A Task sent to a saved channel first shows Claim to eligible channel members; after one person claims it, only that claimant may work it and may Unclaim while its work is idle. The old 'handoff' kind no longer exists for new sends; machine detail belongs in forAgent, not in a separate message ontology. Every direct recipient or channel member must already be on Relay; for someone who is not, or when the human says create a task, mint it with relay_share_link kind='task'.",
         },
         ...classificationToolProperties,
         title: {
@@ -635,7 +635,7 @@ export const TOOLS = [
   },
   {
     "name": "relay_org_prepare",
-    "description": "Prepare organisation onboarding only when the human asks. Provide a company name or an existing groupId they administer. Member emails are optional (up to 100 known people can be prepared before sign-in). Returns one reusable org invitation with instructions and URL: anyone signing in through it joins the company group and exchanges contacts with its members, without requests. The first Relay is guided to the group, with separate send approval. Does not send invitations. Preserve the returned link for sharing; retry with the same key and payload.",
+    "description": "Internal Relay staff only: prepare organisation onboarding when the human asks. Provide a company name or an existing groupId they administer. Member emails are optional (up to 100 known people can be prepared before sign-in). Returns one reusable org invitation with instructions and URL: anyone signing in through it joins the company group and exchanges contacts with its members, without requests. The first Relay is guided to the group, with separate send approval. Does not send invitations. Preserve the returned link for sharing; retry with the same key and payload.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -680,7 +680,7 @@ export const TOOLS = [
   },
   {
     "name": "relay_org_invite",
-    "description": "Get, rotate or revoke an organisation invitation for a group this human administers, only when asked. Anyone using the link can join the company group and exchange contacts with current members. Rotation stops the previous link; revocation stops new joins. Existing membership and contacts stay. The link follows the group when administration is transferred. Share the returned message and URL only as the human requests.",
+    "description": "Internal Relay staff only: get, rotate or revoke an organisation invitation for an exact group, only when asked. Anyone using the link can join the company group and exchange contacts with current members. Rotation stops the previous link; revocation stops new joins. Existing membership and contacts stay. The link keeps working after group administration is transferred; only Relay staff can manage the invitation. Share the returned message and URL only as the human requests.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -710,7 +710,7 @@ export const TOOLS = [
   },
   {
     "name": "relay_team_prepare",
-    "description": "Legacy email-first preparation; prefer relay_org_prepare for organisation onboarding. Use only when the human asks: create missing claimable human accounts, create a group or use an exact groupId they administer, and add all group members to each other’s Contacts. Provide either a new name or groupId and the human-supplied member emails (up to 100). Existing accounts and curated contacts are preserved. Returns the organiser’s ordinary reusable invite for them to share; sends no invitations and signs nobody in. Retry with the same idempotencyKey and payload.",
+    "description": "Internal Relay staff only. Legacy email-first preparation; prefer relay_org_prepare for organisation onboarding. Use only when the human asks: create missing claimable human accounts, create a group or use an exact groupId they administer, and add all group members to each other’s Contacts. Provide either a new name or groupId and the human-supplied member emails (up to 100). Existing accounts and curated contacts are preserved. Returns the organiser’s ordinary reusable invite for them to share; sends no invitations and signs nobody in. Retry with the same idempotencyKey and payload.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -756,7 +756,7 @@ export const TOOLS = [
   },
   {
     "name": "relay_group_transfer_admin",
-    "description": "Transfer group administration to another current human member only when the human asks. Resolve groupId and adminUserId from the current roster first. The outgoing admin remains a member; the new admin can manage members, rename, archive and transfer the group again. Group identity and history stay intact. A prepared teammate can receive the role before sign-in. Retry with the same payload and idempotencyKey.",
+    "description": "Internal Relay staff only: transfer group administration to another current human member when the human asks. Resolve groupId and adminUserId from the current roster first. The outgoing admin remains a member; the new admin can manage members, rename and archive the group. Contact-writing handover and org invitation management remain staff-only. Group identity and history stay intact. A prepared teammate can receive the role before sign-in. Retry with the same payload and idempotencyKey.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1206,7 +1206,7 @@ const INBOX_RECENT_WINDOW_MS = INBOX_RECENT_DAYS * 24 * 60 * 60 * 1000;
 const SHARE_ATTACHMENT_BYTE_BUDGET = 18 * 1024 * 1024;
 
 const SHARE_MINT_INSTRUCTION =
-  "Nothing has been delivered. Relay created the message and minted its link; it reaches people only when this human pastes the url somewhere they already talk. Show them the url exactly as returned, in full, on its own line, and say that pasting it is what sends it. Do not call this sent, delivered, relayed, or on its way. senderGuidance is a sentence they can paste beside the link; offer it as written and never fold the url into a different sentence. Anyone who has the link can read it and reply with no account; each person who replies becomes their own chat with this human, named with their self-reported name and marked unverified, and nobody with the link sees anyone else's conversation. Opens and conversations appear on relay_sent_list, so read it later rather than assuming anything arrived. If this human says it reached the wrong people, stop it with action='revoke' and this relayId; the conversations it opened stay in their chats.";
+  "Nothing has been delivered. Relay minted the link; it reaches people only when this human shares the url. Show them the url exactly as returned, in full, on its own line, then one sentence: they can open it themselves to see it, and share it with whoever needs it; those people open it in the browser or in their own Claude Code or Codex and reply there, with no account. That is the whole hand-back. Do not add a message for them to paste beside the link, a block titled Send this to them, a shorter line to drop beside it, or instructions for the recipient: the page explains itself. Do not call this sent, delivered, relayed, or on its way. Each person who replies becomes their own chat with this human, named with their self-reported name and marked unverified, and nobody with the link sees anyone else's conversation. Opens and conversations appear on relay_sent_list, so read it later rather than assuming anything arrived. If this human says it reached the wrong people, stop it with action='revoke' and this relayId; the conversations it opened stay in their chats.";
 
 const SHARE_DUPLICATE_NOTE =
   " A live unclaimed link for this same message and this same person already exists. Give this human the url in duplicateHint.url instead of the new one, unless they told you this one is for a different person.";
@@ -1741,11 +1741,18 @@ function toolsForCallingSurface(tools, surface = relayCallingSurface()) {
   });
 }
 
+// Organisation onboarding is internal Relay staff work (orgAdmin follows the
+// server-owned canViewAdminDashboard flag). These stay in the ordinary profile
+// so staff on a production install still get them, but every other account
+// neither lists nor calls them.
+export const ORG_ADMIN_TOOL_NAMES = new Set(["relay_org_prepare", "relay_org_invite", "relay_team_prepare", "relay_group_transfer_admin"]);
+const ORG_ADMIN_TOOLS = ORG_ADMIN_TOOL_NAMES;
+
 export function toolsForAccount(features = { requests: true }, surface = relayCallingSurface()) {
   const tools = features.requests
     ? TOOLS
     : TOOLS.filter((tool) => ORDINARY_RELAY_TOOL_NAMES.has(tool.name));
-  return toolsForCallingSurface(toolsForFeatures(tools, features), surface);
+  return toolsForCallingSurface(toolsForFeatures(tools.filter(tool => !ORG_ADMIN_TOOLS.has(tool.name) || features.orgAdmin === true), features), surface);
 }
 function text(obj) {
   // localizeAtFields rewrites every `*At` UTC timestamp into the machine's
@@ -2053,6 +2060,7 @@ async function handleAdmittedCall(client, name, args, {
   sessionContext = DEFAULT_MCP_SESSION_CONTEXT,
   recordTaskOrigin = recordOutboundTaskOrigin,
 } = {}) {
+  if (ORG_ADMIN_TOOLS.has(name) && features.orgAdmin !== true) throw new Error("Organisation onboarding is available only to Relay staff.");
   if (
     features.requests === false
     && !ORDINARY_RELAY_TOOL_NAMES.has(name)
@@ -2476,8 +2484,13 @@ async function handleAdmittedCall(client, name, args, {
         idempotencyKey: args.idempotencyKey,
       }));
       // No nextRecommendedTool: the next actor is the human, not a tool.
+      // The API still returns shareText and senderGuidance for older clients
+      // and the pill's own copy actions. Neither reaches the model: shown to
+      // it, they came back as a "Send this to them" block and a spare line to
+      // "drop beside the link", when the hand-back is the url and one sentence.
+      const { shareText: _shareText, senderGuidance: _senderGuidance, ...handBack } = minted;
       return text({
-        ...minted,
+        ...handBack,
         agentInstruction: SHARE_MINT_INSTRUCTION + (minted.duplicateHint ? SHARE_DUPLICATE_NOTE : ""),
       });
     }

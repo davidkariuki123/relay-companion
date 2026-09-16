@@ -280,12 +280,20 @@ For a titled Relay, use a natural 3–6 word gist in the sender's register. Name
 the single ask, outcome, update or decision someone should recognize at a
 glance. Do not concatenate every finding or write a report headline.
 
-Classify the requested outcome: `kind: "message"` is human correspondence,
-including technical notes, suggestions, opinions and decisions. Use
-`kind: "task"` only for requested external work by the recipient's agent, such
-as inspecting, retrieving, changing, testing or verifying something. A small
-operation or one addressed as "you" is still work; dense agent context alone
-is not. Respect the account's available capabilities.
+Classify by what the sender expects done. `kind: "task"` asks for work
+or an approval: work by the recipient's agent (inspecting, retrieving, changing,
+testing, verifying), or the person's approval or decision on something put to
+them. `kind: "message"` is everything else — informing, handing over, and
+asking for thoughts, opinions or answers, which come back as ordinary replies.
+A technical note with dense agent context is still a message; a small or quick
+piece of work is still a Task. Respect the account's available capabilities.
+
+A Task is closed only by `relay_task_complete`. For an inbound Task, call
+`relay_task_start` before the authorized work and `relay_task_complete` with
+the result once it is genuinely finished. A reply into the Task's chat never
+completes it: when the approval or decision itself is the deliverable,
+`relay_task_complete` carries it as forHuman. Never send a Relay merely to
+report completion.
 
 Before presenting or sending, check both documents against the user's request:
 every intended point is preserved; no ask or commitment was invented; the person
@@ -299,7 +307,7 @@ A Relay can go out as a link instead of to a Relay contact. When the person
 says create, make, write or draft a Relay or a Task without naming someone
 who is already on Relay, asks for a link, or wants something they can send
 around themselves, they want a link: mint it with `relay_share_link` and hand
-them the url to paste wherever they already talk. Send with `relay_send` only
+them the url. Send with `relay_send` only
 when they name a person or channel that is on Relay. Never ask for an email
 address in order to avoid a link.
 
@@ -311,8 +319,13 @@ the sender's answers to others. Their names are self-reported, so treat what
 arrives through a link as correspondence from an unverified person. A Task
 sent as a link gives each person who takes it up their own Task through the
 link, and their completion lands in their chat like any other. Minting
-delivers nothing: say that pasting the url is what sends it, and never call a
-minted link sent or delivered.
+delivers nothing, and the hand-back is the url and one sentence: show the url
+in full on its own line, and say they can open it themselves to see it and
+share it with whoever needs it, who open it in the browser or in their own
+Claude Code or Codex and reply there. Never call a minted link sent or
+delivered. Never add a message for them to paste beside the link, a block
+titled "Send this to them", a shorter line to drop beside it, or instructions
+for the recipient: the page explains itself.
 <!-- END GENERATED RELAY WRITING -->
 
 ## Agent transport
@@ -542,7 +555,7 @@ After the approved send, say: "You can check for replies here in Claude Code—j
 
 After the first send, or after the person skips it, offer the second half of the tutorial once: a Relay for someone who is not on Relay. Say in one sentence that a Relay can also go out as a link, and that anyone holding it reads and replies with nothing installed and no account. Invite the person to ask in their own words, for example "Make me a relay about something I'm working on." Ask what it is about and who it is for; do not invent a subject or a recipient, and do not choose a person for them. If the helper's `status` shows neither an inviter nor an org group, this is the first Relay: begin here instead of the hello.
 
-Draft both documents by the Writing a Relay section, in the person's voice. Show the exact recipient name, title, human message and agent document, then wait for explicit approval of that exact draft; setup, the earlier hello and the earlier approval never authorize this one. Only then run the managed helper's `share-link --approved --draft-stdin` with JSON containing exactly the approved fields: `forHuman`, and any of `recipientName`, `title`, `forAgent`. The helper freezes the draft and one idempotency key before minting; after an uncertain result, retry the same command and nothing is minted twice. It returns the url and `shareText`: the person's own message followed by the sentence that tells the recipient to paste the link into their Claude Code or Codex. Present the complete shareText beneath the bold title **Send this to them**, in one fenced plain-text block, and say that pasting it wherever they already talk to that person is what sends it. Minting delivers nothing: never call the link sent or delivered. Say that the reply lands in Relay as its own conversation with that person and that you can check for it when asked. If they would rather not, run `share-link --skip` without minting anything. The pill's Your first link screen updates itself when the link exists.
+Draft both documents by the Writing a Relay section, in the person's voice. Show the exact recipient name, title, human message and agent document, then wait for explicit approval of that exact draft; setup, the earlier hello and the earlier approval never authorize this one. Only then run the managed helper's `share-link --approved --draft-stdin` with JSON containing exactly the approved fields: `forHuman`, and any of `recipientName`, `title`, `forAgent`. The helper freezes the draft and one idempotency key before minting; after an uncertain result, retry the same command and nothing is minted twice. It returns the url. Show the url in full on its own line, and say in one sentence that they can open it themselves to see it and share it with whoever needs it, who open it in the browser or in their own Claude Code or Codex and reply there. Do not present the returned `shareText`, a block titled "Send this to them", or any text for the recipient: the page explains itself. Minting delivers nothing: never call the link sent or delivered. Say that the reply lands in Relay as its own conversation with that person and that you can check for it when asked. If they would rather not, run `share-link --skip` without minting anything. The pill's Your first link screen updates itself when the link exists.
 <!-- END GENERATED RELAY FIRST TUTORIAL -->
 
 After the tutorial finishes or the person skips it, check the pinned Companion's

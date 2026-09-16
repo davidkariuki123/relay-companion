@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import {
@@ -732,4 +733,35 @@ test("explicit browser sign-in opens the existing-account route, retains PKCE, a
   await controller.signIn({ forceAccountSelection: true });
   assert.equal(new URLSearchParams(new URL(opened[1]).hash.slice(1)).get("switchAccount"), "1");
   assert.equal(calls.length, 1, "reopening uses the existing authorization");
+});
+
+// Since the 2026-09-04 Dev web promotion, dev-api mints activation links on
+// dev.sendrelays.com while `relay env dev` and the Dev installer leave the web
+// URL at the production default. 0.1.534 refused every such sign-in as
+// untrusted_destination; the controller now trusts the Dev website there.
+test("a dev-API install with the production default web URL activates on the Dev website", async () => {
+  const devActivationUrl = `https://dev.sendrelays.com/activate/${AUTHORIZATION_ID}#activationToken=${ACTIVATION_TOKEN}`;
+  const opened = [];
+  const { controller, stores } = harness({
+    apiBase: "https://dev-api.sendrelays.com",
+    webBase: "https://sendrelays.com",
+    openExternal: async (url) => { opened.push(url); return true; },
+    fetchImpl: async () => response({ ...createReply(), activationUrl: devActivationUrl }),
+  });
+  await controller.begin();
+  assert.equal(stores.peekSecret().activationUrl, devActivationUrl);
+  await controller.google();
+  assert.equal(new URL(opened[0]).origin, "https://dev.sendrelays.com");
+});
+
+test("a dev-API install still refuses activation anywhere but the Dev website", async () => {
+  const { controller } = harness({ apiBase: "https://dev-api.sendrelays.com", webBase: "https://sendrelays.com" });
+  await assert.rejects(controller.begin(), /untrusted setup destination/);
+});
+
+test("the default native secret store rebuilds activation on the same origin the trust check expects", () => {
+  const source = fs.readFileSync(new URL("../src/installation-authorization.js", import.meta.url), "utf8");
+  const resolved = "installationWebUrl({ apiUrl: apiBase, webUrl: webBase })";
+  assert.ok(source.includes(`secretStore = createNativeInstallationSecretStore({ webBase: ${resolved} })`));
+  assert.ok(source.includes(`const trustedWebOrigin = normalizeWebOrigin(${resolved})`));
 });

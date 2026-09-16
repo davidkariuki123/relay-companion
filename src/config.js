@@ -66,6 +66,12 @@ export const DEFAULT_WEB_URL = "https://sendrelays.com";
 // server code — the RelayDevApi App Runner service, deployed 2026-08-14.
 // `relay env dev` flips a machine here with no flags.
 export const DEFAULT_DEV_API_URL = "https://dev-api.sendrelays.com";
+// The stable Dev website (DEPLOY.md "Dev web"). Since the 2026-09-04 Dev web
+// promotion the dev API mints account activation links there
+// (INSTALLATION_WEB_URL in infra/lib/relay-dev-api-stack.ts), while
+// `relay env dev` and the Dev installer leave the account web URL at the
+// production default. installationWebUrl() below joins the two.
+export const DEFAULT_DEV_WEB_URL = "https://dev.sendrelays.com";
 // Staging is intentionally dormant until its App Runner service is provisioned.
 // `relay env staging --api https://...` can persist the assigned URL once it
 // exists; a later stock build may bake it here after the endpoint is stable.
@@ -116,6 +122,21 @@ function normalizeOrigin(value) {
 export function canonicalizeApiUrl(value) {
   if (!value) return value;
   return LEGACY_API_ORIGINS.has(normalizeOrigin(value)) ? DEFAULT_API_URL : value;
+}
+
+/**
+ * The web origin account activation is trusted from, given the API a
+ * Companion talks to. A dev-API install whose web URL is still the production
+ * default activates on the Dev website, because that is the origin dev-api
+ * puts in every activation link; trusting only sendrelays.com there refused
+ * every dev sign-in (untrusted_destination, 0.1.534 Dev installer). An
+ * explicit custom web URL (local, staging) is kept as the person chose it.
+ */
+export function installationWebUrl({ apiUrl: api, webUrl: web } = {}) {
+  const chosenWeb = String(web || DEFAULT_WEB_URL).replace(/\/+$/, "");
+  const devApi = normalizeOrigin(api) === normalizeOrigin(DEFAULT_DEV_API_URL);
+  const productionWeb = normalizeOrigin(chosenWeb) === normalizeOrigin(DEFAULT_WEB_URL);
+  return devApi && productionWeb ? DEFAULT_DEV_WEB_URL : chosenWeb;
 }
 /**
  * Release channels. "stable" follows npm's `latest` dist-tag (every user's

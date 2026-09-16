@@ -162,7 +162,9 @@ async function display(body, name = "design.html") {
     assert.ok(texts.some((text) => text.includes("Your invite link") && text.includes("Claude Code") && text.includes("Other")));
     assert.ok(texts.some((text) => text.includes("Or tell your agent this:") && text.includes("Copy this prompt for your agent")));
     if (!body.includes("[Truncated]")) {
-      const toggle = await inspect("#settingsView:not(.hidden)", "({width:document.getElementById('svOtherAgent').getBoundingClientRect().width,background:getComputedStyle(document.getElementById('svOtherAgent')).backgroundColor})");
+      // The Other row is a statement now (no switch): the app switches are the only ones.
+      const toggle = await inspect("#settingsView:not(.hidden)", "({count:document.querySelectorAll('#yourAgent .sv-switch').length,width:document.querySelector('#yourAgent .sv-switch').getBoundingClientRect().width,background:getComputedStyle(document.querySelector('#yourAgent .sv-switch')).backgroundColor})");
+      assert.equal(toggle.count, 2);
       assert.equal(toggle.width, 34);
       assert.equal(toggle.background, "rgb(143, 176, 192)");
     }

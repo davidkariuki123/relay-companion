@@ -317,6 +317,7 @@ test("artifact download resumes a short first response and verifies the complete
   const bytes = Buffer.from("a signed runtime that survives an interrupted first response");
   const firstBytes = 17;
   const requests = [];
+  const progress = [];
   const artifact = {
     bytes: bytes.length,
     sha512: `sha512-${crypto.createHash("sha512").update(bytes).digest("base64")}`,
@@ -341,16 +342,51 @@ test("artifact download resumes a short first response and verifies the complete
       "https://api.sendrelays.com/v1/companion-releases/v1.2.3/runtime.tar.gz",
       destination,
       artifact,
-      { get, sleep: async () => {}, attempts: 3 },
+      { get, sleep: async () => {}, attempts: 3, onProgress: value => progress.push(value) },
     );
     assert.deepEqual(fs.readFileSync(destination), bytes);
     assert.equal(requests.length, 2);
     assert.equal(requests[0].headers.range, undefined);
     assert.equal(requests[1].headers.range, `bytes=${firstBytes}-`);
     assert.equal(requests[1].headers["accept-encoding"], "identity");
+    assert.deepEqual(progress.at(-1), { receivedBytes: bytes.length, totalBytes: bytes.length });
+    assert.ok(progress.some(value => value.receivedBytes === firstBytes));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("cancelled artifact download does not retry or create a new file", async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-cancel-download-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const controller = new AbortController(); controller.abort();
+  const file = path.join(root, "runtime.tar.gz");
+  await assert.rejects(downloadVerifiedArtifact("https://api.sendrelays.com/runtime", file, { bytes: 5 },
+    { signal: controller.signal, get: () => assert.fail("Cancelled downloads must not contact the server") }), /abort/i);
+  assert.equal(fs.existsSync(file), false);
+});
+
+test("cancelling an in-flight transfer stops it without network retries", async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-cancel-active-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const controller = new AbortController();
+  let requests = 0;
+  const get = (_url, options, callback) => {
+    requests++;
+    const request = new EventEmitter();
+    request.setTimeout = () => request;
+    request.destroy = error => queueMicrotask(() => request.emit("error", error));
+    options.signal.addEventListener("abort", () => request.destroy(options.signal.reason), { once: true });
+    queueMicrotask(() => {
+      const response = new PassThrough(); response.statusCode = 200; response.headers = { "content-length": "10" };
+      callback(response); response.write("partial");
+    });
+    return request;
+  };
+  await assert.rejects(downloadVerifiedArtifact("https://api.sendrelays.com/runtime", path.join(root, "runtime.tar.gz"), { bytes: 10 },
+    { signal: controller.signal, get, sleep: () => assert.fail("Cancelled transfer must not retry"),
+      onProgress: value => { if (value.receivedBytes) controller.abort(); } }), /abort/i);
+  assert.equal(requests, 1);
 });
 
 test("artifact resume rejects a mismatched Content-Range without retrying corrupt bytes", async () => {

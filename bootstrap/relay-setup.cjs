@@ -215,7 +215,7 @@ function artifactResponseShape(response, offset, totalBytes) {
   return expectedBytes;
 }
 
-function downloadArtifactAttempt({ parsed, file, artifact, offset, get }) {
+function downloadArtifactAttempt({ parsed, file, artifact, offset, get, signal, onProgress }) {
   return new Promise((resolve, reject) => {
     let complete = false;
     let responseStream = null;
@@ -232,7 +232,7 @@ function downloadArtifactAttempt({ parsed, file, artifact, offset, get }) {
       "accept-encoding": "identity",
       ...(offset > 0 ? { range: `bytes=${offset}-` } : {}),
     };
-    const request = get(parsed, { headers }, async (response) => {
+    const request = get(parsed, { headers, ...(signal ? { signal } : {}) }, async (response) => {
       if (responseDeadline) clearTimeout(responseDeadline);
       responseStream = response;
       let expectedBytes;
@@ -247,7 +247,7 @@ function downloadArtifactAttempt({ parsed, file, artifact, offset, get }) {
         received += chunk.length;
         if (received > expectedBytes) {
           request.destroy(new PermanentArtifactDownloadError("Release artifact exceeded its signed size"));
-        }
+        } else onProgress?.({ receivedBytes: offset + received, totalBytes: artifact.bytes });
       });
       try {
         if (fs.statSync(file).size !== offset) {
@@ -291,6 +291,7 @@ function sha512File(file) {
 }
 
 async function downloadVerifiedArtifact(url, file, artifact, options = {}) {
+  options.signal?.throwIfAborted();
   const parsed = new URL(url);
   if (parsed.protocol !== "https:" || parsed.origin !== RELEASE_ORIGIN) {
     fail(`Relay refused an untrusted artifact origin: ${parsed.origin}`);
@@ -304,12 +305,15 @@ async function downloadVerifiedArtifact(url, file, artifact, options = {}) {
   fs.closeSync(fs.openSync(file, "wx", 0o600));
   let lastError;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    options.signal?.throwIfAborted();
     const offset = fs.statSync(file).size;
     if (offset > artifact.bytes) fail("Release artifact exceeded its signed size");
     if (offset === artifact.bytes) break;
     try {
-      await downloadArtifactAttempt({ parsed, file, artifact, offset, get });
+      options.onProgress?.({ receivedBytes: offset, totalBytes: artifact.bytes });
+      await downloadArtifactAttempt({ parsed, file, artifact, offset, get, signal: options.signal, onProgress: options.onProgress });
     } catch (error) {
+      options.signal?.throwIfAborted();
       lastError = error;
       if (error instanceof PermanentArtifactDownloadError) throw error;
       if (attempt + 1 >= attempts) break;
@@ -322,6 +326,7 @@ async function downloadVerifiedArtifact(url, file, artifact, options = {}) {
     throw new Error(`Relay artifact download failed after ${attempts} attempts (${downloadedBytes}/${artifact.bytes} bytes): ${lastError?.message || lastError || "incomplete response"}`);
   }
   const actual = await sha512File(file);
+  options.signal?.throwIfAborted();
   if (actual.length !== artifact.sha512.length || !crypto.timingSafeEqual(Buffer.from(actual), Buffer.from(artifact.sha512))) {
     fs.rmSync(file, { force: true });
     fail("Relay artifact checksum is invalid.");

@@ -5,8 +5,8 @@ import { RelayClient } from "../src/client.js";
 import { createServer } from "node:http";
 import { once } from "node:events";
 
-test("ordinary agents can prepare a team and transfer admin with stable request identities", async () => {
-  const catalog = toolsForAccount({ requests: false });
+test("internal staff agents can prepare a team and transfer admin with stable request identities", async () => {
+  const catalog = toolsForAccount({ requests: false, orgAdmin: true });
   for (const name of ["relay_team_prepare", "relay_group_transfer_admin"]) assert.ok(catalog.some((tool) => tool.name === name));
   const calls = [];
   const client = {
@@ -14,10 +14,10 @@ test("ordinary agents can prepare a team and transfer admin with stable request 
     transferGroupAdmin: async (id, input) => { calls.push({ id, ...input }); return { groupId: id, admin: { relayUserId: input.adminUserId } }; },
   };
   const prepare = { name: "Team", members: [{ email: "a@example.com" }], idempotencyKey: "prepare-once" };
-  const prepared = await handleCall(client, "relay_team_prepare", prepare, { features: { requests: false } });
+  const prepared = await handleCall(client, "relay_team_prepare", prepare, { features: { requests: false, orgAdmin: true } });
   assert.equal(JSON.parse(prepared.content[0].text).groupId, "grp_team");
   assert.deepEqual(calls[0], { ...prepare, groupId: undefined });
-  await handleCall(client, "relay_group_transfer_admin", { groupId: "grp_team", adminUserId: "usr_a", idempotencyKey: "transfer-once" }, { features: { requests: false } });
+  await handleCall(client, "relay_group_transfer_admin", { groupId: "grp_team", adminUserId: "usr_a", idempotencyKey: "transfer-once" }, { features: { requests: false, orgAdmin: true } });
   assert.deepEqual(calls[1], { id: "grp_team", adminUserId: "usr_a", idempotencyKey: "transfer-once" });
 });
 
@@ -43,15 +43,25 @@ test("the client posts preparation and admin handover to their exact endpoints",
 });
 
 
-test("ordinary agents can prepare an org without emails and manage its shared invitation", async () => {
-  const catalog = toolsForAccount({ requests: false });
+test("internal staff agents can prepare an org without emails and manage its shared invitation", async () => {
+  const catalog = toolsForAccount({ requests: false, orgAdmin: true });
   const prepare = catalog.find(t => t.name === "relay_org_prepare");
   assert.ok(prepare && !prepare.inputSchema.required.includes("members"));
   assert.ok(catalog.some(t => t.name === "relay_org_invite"));
   const calls = [];
   const client = { prepareOrg: async input => { calls.push(input); return { groupId: "grp_org" }; }, orgInvite: async (id,input) => { calls.push({ id,...input }); return { invite: null }; } };
-  await handleCall(client, "relay_org_prepare", { name: "Company", idempotencyKey: "org-prepare" }, { features: { requests: false } });
+  await handleCall(client, "relay_org_prepare", { name: "Company", idempotencyKey: "org-prepare" }, { features: { requests: false, orgAdmin: true } });
   assert.deepEqual(calls[0], { name: "Company", groupId: undefined, members: undefined, idempotencyKey: "org-prepare" });
-  await handleCall(client, "relay_org_invite", { groupId: "grp_org", action: "revoke", idempotencyKey: "org-revoke" }, { features: { requests: false } });
+  await handleCall(client, "relay_org_invite", { groupId: "grp_org", action: "revoke", idempotencyKey: "org-revoke" }, { features: { requests: false, orgAdmin: true } });
   assert.deepEqual(calls[1], { id: "grp_org", action: "revoke", idempotencyKey: "org-revoke" });
+});
+
+
+test("ordinary and unknown account profiles neither see nor call privileged onboarding tools", async () => {
+  for (const features of [{ requests: false }, { requests: true }, { requests: false, orgAdmin: false }]) {
+    for (const name of ["relay_org_prepare", "relay_org_invite", "relay_team_prepare", "relay_group_transfer_admin"]) {
+      assert.ok(!toolsForAccount(features).some(t => t.name === name));
+      await assert.rejects(handleCall({}, name, {}, { features }), /Relay staff/);
+    }
+  }
 });

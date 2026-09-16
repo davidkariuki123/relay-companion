@@ -129,12 +129,20 @@ For a titled Relay, use a natural 3–6 word gist in the sender's register. Name
 the single ask, outcome, update or decision someone should recognize at a
 glance. Do not concatenate every finding or write a report headline.
 
-Classify the requested outcome: `kind: "message"` is human correspondence,
-including technical notes, suggestions, opinions and decisions. Use
-`kind: "task"` only for requested external work by the recipient's agent, such
-as inspecting, retrieving, changing, testing or verifying something. A small
-operation or one addressed as "you" is still work; dense agent context alone
-is not. Respect the account's available capabilities.
+Classify by what the sender expects done. `kind: "task"` asks for work
+or an approval: work by the recipient's agent (inspecting, retrieving, changing,
+testing, verifying), or the person's approval or decision on something put to
+them. `kind: "message"` is everything else — informing, handing over, and
+asking for thoughts, opinions or answers, which come back as ordinary replies.
+A technical note with dense agent context is still a message; a small or quick
+piece of work is still a Task. Respect the account's available capabilities.
+
+A Task is closed only by `relay_task_complete`. For an inbound Task, call
+`relay_task_start` before the authorized work and `relay_task_complete` with
+the result once it is genuinely finished. A reply into the Task's chat never
+completes it: when the approval or decision itself is the deliverable,
+`relay_task_complete` carries it as forHuman. Never send a Relay merely to
+report completion.
 
 Before presenting or sending, check both documents against the user's request:
 every intended point is preserved; no ask or commitment was invented; the person

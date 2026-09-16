@@ -179,7 +179,20 @@ test("relay_send requires one recipient, an explicit kind, and the two-document 
   assert.deepEqual(send.inputSchema.properties.kind.enum, ["message", "task"]);
   assert.match(send.inputSchema.properties.kind.description, /Switch your Relay install to dev and confirm the version\/channel/);
   assert.match(send.inputSchema.properties.kind.description, /MUST be kind='task', not kind='message'/);
+  // Task versus message is decided by what the sender expects done (David, 2026-09-17): work or an
+  // approval is a Task; informing, handing over, and asking for thoughts or answers is a message.
+  assert.match(send.inputSchema.properties.kind.description, /classification of what the sender expects done/);
+  assert.match(send.inputSchema.properties.kind.description, /Approve the September supplier payments' is kind='task'/);
   assert.match(send.inputSchema.properties.kind.description, /Do you think we should switch to dev\?' is kind='message'/);
+  assert.match(send.inputSchema.properties.kind.description, /We switched the pill to dev this morning' is kind='message'/);
+  assert.doesNotMatch(send.inputSchema.properties.kind.description, /Start control/, "there is no Start any more");
+  assert.match(send.description, /CLASSIFY BY WHAT THE SENDER EXPECTS DONE/);
+  assert.match(byName.get("relay_task_complete").description, /^The only way a Task becomes Done\./);
+  assert.match(byName.get("relay_task_complete").description, /A reply into the Task chat never completes it/);
+  assert.match(devSkillGuide, /Classify by what the sender expects done/);
+  assert.match(devSkillGuide, /asking for thoughts, opinions or answers, which come back as ordinary replies/);
+  assert.match(devSkillGuide, /A Task is closed only by `relay_task_complete`/);
+  assert.doesNotMatch(skillGuide, /relay_task_complete/, "prod has no Tasks yet");
   assert.match(send.inputSchema.properties.title.description, /3-6 word gist/i);
   assert.match(humanDescription, /read the installed Relay skill/i);
   assert.match(humanDescription, /preserve the human's intent and invent no asks or commitments/);

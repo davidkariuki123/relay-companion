@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import crypto from "node:crypto";
+import bootstrap from "../bootstrap/relay-setup.cjs";
 import installer from "../bootstrap/application-install.cjs";
 import ownership from "../bootstrap/application-owner.cjs";
 import removal from "../bootstrap/application-uninstall.cjs";
@@ -63,6 +64,69 @@ test("preview and missing activation permission cannot write to an installation"
   fs.writeFileSync(path.join(options.resourcesDir, "candidate.json"), JSON.stringify({ distribution: "application-preview" }));
   await assert.rejects(installer.verifyBundle({ resourcesDir: options.resourcesDir, activationEnabled: true }), /preview/);
   assert.equal(fs.existsSync(path.join(options.homeDir, ".relay", "application-owner.json")), false);
+});
+
+test("online setup downloads before extraction, reports progress and cleans its staging files", async t => {
+  for (const outcome of ["success", "network-failure", "cancelled"]) {
+    const f = fixture(t);
+    f.receipt.runtimeDelivery = "download";
+    const artifact = { url: "https://api.sendrelays.com/exact-runtime", bytes: 4, sha512: "signed-digest" };
+    f.options.verify = async () => ({ receipt: f.receipt, artifact, platformKey: f.receipt.platform });
+    const progress = [], controller = new AbortController();
+    const abandoned = path.join(f.options.homeDir, ".relay/runtime/releases/.relay-download-application-interrupted");
+    fs.mkdirSync(abandoned, { recursive: true });
+    fs.writeFileSync(path.join(abandoned, "runtime.tar.gz"), "partial");
+    let downloaded;
+    f.options.onProgress = value => progress.push(value);
+    f.options.signal = controller.signal;
+    f.options.download = async (url, file, identity, options) => {
+      assert.equal(url, artifact.url); assert.deepEqual(identity, artifact);
+      downloaded = file; fs.writeFileSync(file, "test");
+      assert.equal(fs.existsSync(abandoned), false);
+      assert.ok(!f.events.includes("extract")); assert.ok(!f.events.includes("drain"));
+      options.onProgress({ receivedBytes: 4, totalBytes: 4 });
+      if (outcome === "network-failure") throw new Error("offline");
+      if (outcome === "cancelled") controller.abort();
+    };
+    if (outcome === "success") {
+      const extract = f.options.extract;
+      f.options.extract = (bundle, destination) => { assert.equal(bundle.archive, downloaded); return extract(bundle, destination); };
+      assert.equal((await installer.installFromApplication(f.options)).ok, true);
+      assert.deepEqual(progress.map(item => item.phase), ["verifying", "downloading", "downloading", "extracting", "installing", "ready"]);
+    } else {
+      await assert.rejects(installer.installFromApplication(f.options), /offline|abort/i);
+      assert.deepEqual(JSON.parse(fs.readFileSync(f.pointer)), f.previous);
+      assert.ok(!f.events.includes("extract")); assert.ok(!f.events.includes("activate"));
+    }
+    assert.equal(fs.existsSync(path.dirname(downloaded)), false);
+    assert.equal(f.events.at(-1), "unlock");
+  }
+});
+
+test("download mode still verifies signed identity and bundled Node before touching the network", async t => {
+  const f = fixture(t, false), platformKey = f.receipt.platform;
+  const key = crypto.generateKeyPairSync("ed25519"), keyId = "relay-runtime-release-v1";
+  const trustStore = { schema: 2, activeKeyId: keyId, keys: [{ keyId, algorithm: "ED25519_SHA_512", publicKeyPem: key.publicKey.export({ type: "spki", format: "pem" }).toString() }] };
+  const digest = `sha512-${crypto.createHash("sha512").update("runtime").digest("base64")}`;
+  const artifact = { bytes: 7, sha512: digest, dependencyLockSha512: digest, url: `https://api.sendrelays.com/v1/companion-releases/v0.2.0/relay-runtime-0.2.0-${platformKey}.tar.gz` };
+  const sourceSha = "b".repeat(40);
+  const payload = Buffer.from(JSON.stringify({ product: "Relay", version: "0.2.0", sourceSha, artifacts: { [platformKey]: artifact } }));
+  const envelope = { schema: 1, algorithm: "ED25519_SHA_512", keyId, payload: payload.toString("base64"), signature: crypto.sign(null, payload, key.privateKey).toString("base64") };
+  fs.writeFileSync(path.join(f.options.resourcesDir, "runtime-manifest.json"), JSON.stringify(envelope));
+  const node = path.join(f.options.resourcesDir, process.platform === "win32" ? "node.exe" : "node");
+  fs.writeFileSync(node, "test node");
+  Object.assign(f.receipt, { packagingSourceDirty: false, runtimeDelivery: "download", runtimeSourceSha: sourceSha,
+    nodeSha256: crypto.createHash("sha256").update("test node").digest("hex") });
+  fs.writeFileSync(path.join(f.options.resourcesDir, "candidate.json"), JSON.stringify(f.receipt));
+  const options = { resourcesDir: f.options.resourcesDir, activationEnabled: true, platformKey, trustStore };
+  assert.equal(bootstrap.parseSignedManifest(Buffer.from(JSON.stringify(envelope)), { version: "0.2.0", platformKey, trustStore }).artifact.url, artifact.url);
+  const result = await installer.verifyBundle(options);
+  assert.equal(result.archive, null); assert.deepEqual(result.artifact, artifact);
+  fs.appendFileSync(node, "tampered");
+  await assert.rejects(installer.verifyBundle(options), /Node digest/);
+  envelope.signature = Buffer.alloc(64).toString("base64");
+  fs.writeFileSync(path.join(f.options.resourcesDir, "runtime-manifest.json"), JSON.stringify(envelope));
+  await assert.rejects(installer.verifyBundle(options), /signature/);
 });
 
 test("fresh and bridge installation share existing transaction engine and preserve account data", async (t) => {

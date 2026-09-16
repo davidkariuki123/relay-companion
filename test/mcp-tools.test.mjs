@@ -12,6 +12,7 @@ import {
   FOR_HUMAN_SOFT_WORD_LIMIT,
   FOR_HUMAN_TYPICAL_WORD_LIMIT,
   ORDINARY_RELAY_TOOL_NAMES,
+  ORG_ADMIN_TOOL_NAMES,
   RELAY_MCP_INSTRUCTIONS,
   REQUESTS_DISABLED_INSTRUCTIONS,
   TOOLS,
@@ -399,12 +400,19 @@ test("ordinary Relay MCP directs Claude and Codex to the membership-scoped Granu
 test("ordinary accounts list only messaging tools and reject developer operations before any client call", async () => {
   const ordinaryFeatures = { requests: false, aiSessions: false, connectors: false };
   const listed = toolsForAccount(ordinaryFeatures);
+  // Organisation onboarding is internal staff work: it stays in the ordinary
+  // profile for staff on production, and is withheld from everyone else.
   assert.deepEqual(
     new Set(listed.map((tool) => tool.name)),
-    ORDINARY_RELAY_TOOL_NAMES,
+    new Set([...ORDINARY_RELAY_TOOL_NAMES].filter((name) => !ORG_ADMIN_TOOL_NAMES.has(name))),
   );
   assert.ok(listed.every((tool) => !/task|connector|approval|result|file/i.test(tool.name)));
-  assert.deepEqual(toolsForAccount({ requests: true, aiSessions: true, connectors: true }), TOOLS);
+  assert.deepEqual(
+    new Set(toolsForAccount({ ...ordinaryFeatures, orgAdmin: true }).map((tool) => tool.name)),
+    ORDINARY_RELAY_TOOL_NAMES,
+  );
+  assert.deepEqual(toolsForAccount({ requests: true, aiSessions: true, connectors: true, orgAdmin: true }), TOOLS);
+  assert.ok(toolsForAccount({ requests: true, aiSessions: true, connectors: true }).every((tool) => !ORG_ADMIN_TOOL_NAMES.has(tool.name)));
 
   const calls = [];
   const client = new Proxy(
@@ -1335,20 +1343,27 @@ test("relay_send teaches the relay-vs-REQUEST decision — David's discernment l
   const kind = send.inputSchema.properties.kind;
   assert.deepEqual(kind.enum, ["message", "task"]);
   assert.ok(send.inputSchema.required.includes("kind"), "the model must make the classification explicitly");
-  assert.match(send.description, /classify the outcome, not the sentence's addressee/i);
+  // The law since 2026-09-17: classify by what the sender expects done. A Task
+  // asks for work or an approval — agent work, or the person's approval or
+  // decision; a message informs, hands over, or asks for thoughts or answers.
+  assert.match(send.description, /classify by what the sender expects done/i);
   assert.equal(send.inputSchema.properties.type, undefined, "legacy completion controls are not model-facing");
   assert.match(kind.description, /old 'handoff' kind no longer exists/i);
   assert.match(kind.description, /including a forAgent document never turns a message into one|forAgent can contain dense implementation context without making it a Task/i);
-  assert.match(kind.description, /Start control/i);
-  assert.match(kind.description, /requested outcome/i);
-  assert.match(kind.description, /Imperative wording addressed as 'you' is still a Task/i);
+  assert.doesNotMatch(kind.description, /Start control/i, "there is no Start any more");
+  assert.match(kind.description, /what the sender expects done/i);
+  assert.match(kind.description, /never of whether the wording addresses the person/i);
+  assert.match(kind.description, /person's approval or decision on something put to them/i);
+  assert.match(kind.description, /asking for thoughts, opinions or answers, which come back as ordinary replies/i);
   assert.match(kind.description, /Switch your Relay install to dev and confirm the version\/channel/i);
   assert.match(kind.description, /MUST be kind='task', not kind='message'/i);
-  assert.match(kind.description, /small or quick operation is still a Task/i);
+  assert.match(kind.description, /Approve the September supplier payments' is kind='task'/i);
+  assert.match(kind.description, /small or quick piece of work is still a Task/i);
   assert.match(kind.description, /Do you think we should switch to dev\?' is kind='message'/i);
+  assert.match(kind.description, /We switched the pill to dev this morning' is kind='message'/i);
   assert.match(kind.description, /saved channel[^]*shows Claim/i);
-  assert.match(kind.description, /only that claimant gets Start[^]*Unclaim while its work is idle/i);
-  assert.match(kind.description, /PERSON'S opinion, memory, judgment.*decision/i);
+  assert.match(kind.description, /only that claimant may work it[^]*Unclaim while its work is idle/i);
+  assert.doesNotMatch(kind.description, /PERSON'S opinion, memory, judgment/i, "an opinion owed back is a Task now");
   assert.doesNotMatch(kind.description, /relay_task_create/i);
   // And it is available in the default messages-only profile: a task is an
   // ordinary relay, sent by the same tool as every message.

@@ -21,22 +21,22 @@ const ORDINARY_SURFACES = {
 
 test("developer capabilities require both the server-owned role and a non-production environment", async () => {
   assert.deepEqual(productFeatures({ env: { NODE_ENV: "development" }, user: ORDINARY_USER }), {
-    environment: "local", developer: false, googleContacts: false, requests: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
+    environment: "local", developer: false, orgAdmin: false, googleContacts: false, requests: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { NODE_ENV: "development" }, user: DEVELOPER }), {
-    environment: "local", developer: true, googleContacts: true, requests: true, todo: false, cowork: false, ...DEVELOPER_SURFACES,
+    environment: "local", developer: true, orgAdmin: false, googleContacts: true, requests: true, todo: false, cowork: false, ...DEVELOPER_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { RELAY_UPDATE_CHANNEL: "dev" }, user: DEVELOPER }), {
-    environment: "dev", developer: true, googleContacts: true, requests: true, todo: false, cowork: false, ...DEVELOPER_SURFACES,
+    environment: "dev", developer: true, orgAdmin: false, googleContacts: true, requests: true, todo: false, cowork: false, ...DEVELOPER_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { RELAY_UPDATE_CHANNEL: "staging" }, user: DEVELOPER }), {
-    environment: "staging", developer: false, googleContacts: false, requests: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
+    environment: "staging", developer: false, orgAdmin: false, googleContacts: false, requests: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { RELAY_ENV: "staging" }, user: DEVELOPER }), {
-    environment: "staging", developer: false, googleContacts: false, requests: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
+    environment: "staging", developer: false, orgAdmin: false, googleContacts: false, requests: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: {}, user: DEVELOPER }), {
-    environment: "production", developer: false, googleContacts: false, requests: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
+    environment: "production", developer: false, orgAdmin: false, googleContacts: false, requests: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
   });
   const { todoStewardTick } = await import("../src/todo-steward-runtime.js");
   const untouchable = new Proxy({}, { get() { throw new Error("Todo client must not run"); } });
@@ -140,7 +140,7 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
   // relay_todo_* tools: every staging and production account was offered a
   // surface it is not entitled to call, and this assertion pinned that.
   assert.deepEqual(ordinary, [
-    "relay_send", "relay_forward", "relay_share_link", "relay_contacts_search", "relay_groups_list", "relay_org_prepare", "relay_org_invite", "relay_team_prepare", "relay_group_transfer_admin", "relay_group_create", "relay_group_update",
+    "relay_send", "relay_forward", "relay_share_link", "relay_contacts_search", "relay_groups_list", "relay_group_create", "relay_group_update",
     "relay_group_delete", "relay_contact_update", "relay_session_updates", "relay_inbox_list", "relay_sent_list", "relay_thread_fetch",
     "relay_chats_list", "relay_chat_fetch", "relay_chat_send", "relay_mark_read",
   ]);
@@ -149,7 +149,8 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
   assert.deepEqual(toolsForAccount(productionDeveloper).map((tool) => tool.name), ordinary);
   // The complete catalog requires the role and the dev channel together.
   const developer = productFeatures({ env: { RELAY_UPDATE_CHANNEL: "dev" }, user: DEVELOPER });
-  assert.equal(toolsForAccount(developer).length, 46);
+  assert.equal(toolsForAccount(developer).length, 42);
+  assert.equal(toolsForAccount({ ...developer, orgAdmin: true }).length, 46);
   assert.ok(toolsForAccount(developer).some((tool) => tool.name === "relay_task_unclaim"));
   assert.ok(toolsForAccount(developer).some((tool) => tool.name === "relay_message_edit"));
   assert.ok(toolsForAccount(developer).some((tool) => tool.name === "relay_message_delete"));
@@ -394,4 +395,14 @@ test("detection feeds independent app switches with strict availability checks",
   assert.match(settings, /setAgentAppEnabled\(button\.getAttribute\("data-agent-app"\)/);
   assert.match(source, /loadAgentSurfaces\(\)\.catch\(\(\) => \{\}\);/, "capabilities load at boot");
   assert.match(source, /const seq = \+\+settingsLoadSeq;\s*loadAgentSurfaces\(\)/, "and again whenever Settings loads");
+});
+
+
+test("org administration uses the server staff role even in production, never a group role", () => {
+  for (const environment of ["local", "dev", "staging", "production"]) {
+    assert.equal(productFeatures({ env: { RELAY_ENV: environment }, user: { accountKind: "human", canViewAdminDashboard: true } }).orgAdmin, true);
+    for (const user of [null, { accountKind: "human", isDeveloper: true }, { accountKind: "human", groupAdmin: true }, { accountKind: "agent", canViewAdminDashboard: true }]) {
+      assert.equal(productFeatures({ env: { RELAY_ENV: environment }, user }).orgAdmin, false);
+    }
+  }
 });

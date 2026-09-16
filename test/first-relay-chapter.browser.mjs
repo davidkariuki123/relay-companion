@@ -252,7 +252,8 @@ try {
   const manual = await openSignedOut({agentInstalled:false, authState:{status:'idle'}});
   await manual.signedOut.locator('#suCopySetup').waitFor();
   assert.equal(await manual.signedOut.locator('#suCopySetup').textContent(), 'Copy setup prompt');
-  assert.equal(await manual.signedOut.locator('#suSignIn').textContent(), 'Sign in');
+  assert.equal((await manual.signedOut.locator('#suGoogle').textContent()).trim(), 'Continue with Google');
+  assert.equal(await manual.signedOut.locator('#suSignIn').textContent(), 'Use email instead');
   await manual.signedOut.waitForTimeout(250);
   assert.deepEqual(await manual.signedOut.evaluate(() => window.fixtureSignIns), [], 'no marker: the person clicks Sign in');
   assert.equal(await manual.signedOut.locator('#signupView').getByText('Continue in your browser.').count(), 0);

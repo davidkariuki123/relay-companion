@@ -6,10 +6,12 @@ import path from "node:path";
 import {
   DEFAULT_API_URL,
   DEFAULT_DEV_API_URL,
+  DEFAULT_DEV_WEB_URL,
   LEGACY_API_URLS,
   apiUrl,
   canonicalizeApiUrl,
   configPath,
+  installationWebUrl,
   normalizeUpdateChannel,
   readConfig,
   webUrl,
@@ -188,4 +190,15 @@ test("webUrl preserves explicit custom and environment origins", () => {
     assert.equal(webUrl(), "http://localhost:3100");
     assert.equal(readConfig().webUrl, "http://localhost:3000/");
   });
+});
+
+test("installationWebUrl activates a dev-API install on the Dev website unless a custom web URL was chosen", () => {
+  // `relay env dev` and the Dev installer both leave the web URL at the
+  // production default while dev-api mints activation links on dev.sendrelays.com.
+  assert.equal(installationWebUrl({ apiUrl: DEFAULT_DEV_API_URL, webUrl: undefined }), DEFAULT_DEV_WEB_URL);
+  assert.equal(installationWebUrl({ apiUrl: `${DEFAULT_DEV_API_URL}/`, webUrl: "https://sendrelays.com/" }), DEFAULT_DEV_WEB_URL);
+  assert.equal(installationWebUrl({ apiUrl: DEFAULT_API_URL, webUrl: undefined }), "https://sendrelays.com");
+  assert.equal(installationWebUrl({ apiUrl: DEFAULT_API_URL, webUrl: "https://sendrelays.com" }), "https://sendrelays.com");
+  assert.equal(installationWebUrl({ apiUrl: DEFAULT_DEV_API_URL, webUrl: "http://localhost:3000/" }), "http://localhost:3000");
+  assert.equal(installationWebUrl({ apiUrl: "http://127.0.0.1:4000", webUrl: "http://localhost:3000" }), "http://localhost:3000");
 });

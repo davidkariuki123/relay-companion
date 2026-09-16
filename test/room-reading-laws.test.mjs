@@ -71,7 +71,7 @@ test("every room entry follows newest through every asynchronous hydration phase
   assert.ok(close.indexOf("openThreadDetail(") < close.indexOf("return () => restoreRoomScroll("));
   assert.match(close, /return \(\) => restoreRoomScroll\(back\.roomScroll\)/);
 
-  for (const start of ["function ghostArrival(row)", "function notifyArrival(rows, meta)"]) {
+  for (const start of ["function ghostArrival(row, meta)", "function notifyArrival(rows, meta)"]) {
     const startAt = html.indexOf(start);
     assert.ok(startAt >= 0, `notification entry exists: ${start}`);
     const banner = html.slice(startAt, html.indexOf("commitNavigation({ outerScrollTop: 0 });", startAt) + 48);
@@ -302,7 +302,7 @@ test("enabled app rows share the same binder on the bubble and in the reader", (
   const footer = html.slice(html.indexOf("function relayHostActionsHtml"), html.indexOf("// ---- the thread reply composer"));
   assert.match(footer, /const desktopHosts = agentAppHosts\(\)\.filter/);
   assert.match(footer, /desktopHosts\.map\(\(host\) => hostActionRowHtml\(host, message, source\) \+ sessionPickerInlineHtml\(id, host\)\)/);
-  assert.match(footer, /needsCopy \? pullSentenceHtml\(message, \{ hasAppAction: desktopHosts.length > 0 \}\) : ""/);
+  assert.match(footer, /\+ pullSentenceHtml\(message, \{ hasAppAction: desktopHosts.length > 0 \}\);/, "the pull sentence is always offered");
   assert.match(footer, /sessionPickerInlineHtml/, "the picker unfolds under the selected row");
   assert.doesNotMatch(footer, /data-host="codex"[\s\S]*?data-host="claude"/, "no fixed pair of rows");
   assert.match(footer, /function wireHostOpen\(scope\)/);

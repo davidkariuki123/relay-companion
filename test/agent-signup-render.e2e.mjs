@@ -162,7 +162,7 @@ try {
     ["email", "What’s your email?"],
     ["code", "Enter your code."],
     ["google", "Continue in your browser."],
-    ["approval", "Welcome back."],
+    ["approval", "You’re signed in."],
     ["finishing", "Finishing setup…"],
     ["expired", "Start setup again."],
     ["first-relay", "Follow the instructions in", "checking"],

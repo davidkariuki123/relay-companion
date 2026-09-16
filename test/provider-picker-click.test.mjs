@@ -55,7 +55,7 @@ test("the footer renders destination choice even when the Relay already has a ta
     esc: String, REDUCED: true,
     sessionPickerState: { id: "fixture", provider: "codex", motion: "open" },
     agentAppHosts: () => ["codex", "claude"], agentOpensInApp: () => true,
-    otherAgentEnabled: () => false,
+    pullSentenceHtml: () => "", // the sentence is always offered; this test is about the picker rows
     sessionPickerBodyHtml: () => '<button data-sp-new>New task</button><button data-session-id="chosen">Existing task</button>',
   });
   vm.runInContext(section("  function sessionPickerInlineHtml(", "  function wireSessionPickerRows(")

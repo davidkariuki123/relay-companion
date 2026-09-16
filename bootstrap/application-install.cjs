@@ -1,5 +1,5 @@
 "use strict";
-// Offline entry point for the native application. No npm, no remote feed lookup,
+// Entry point for the native application. No npm, no remote feed lookup,
 // no automatic execution on import. Preview receipts can never activate it.
 const fs = require("node:fs");
 const os = require("node:os");
@@ -40,15 +40,19 @@ async function verifyBundle({ resourcesDir, activationEnabled = false, trustStor
   const verified = bootstrap.parseSignedManifest(fs.readFileSync(path.join(resourcesDir, "runtime-manifest.json")),
     { version: receipt.version, platformKey, ...(trustStore ? { trustStore } : {}) });
   if (verified.payload.sourceSha !== receipt.runtimeSourceSha) throw new Error("Application runtime source mismatch");
-  const archive = path.join(resourcesDir, "runtime.tar.gz");
-  if (fs.statSync(archive).size !== verified.artifact.bytes) throw new Error("Bundled runtime size mismatch");
-  const hash = crypto.createHash("sha512");
-  for await (const chunk of fs.createReadStream(archive)) hash.update(chunk);
-  if (`sha512-${hash.digest("base64")}` !== verified.artifact.sha512) throw new Error("Bundled runtime digest mismatch");
+  const delivery = receipt.runtimeDelivery || "bundled";
+  if (!["bundled", "download"].includes(delivery)) throw new Error("Unsupported application runtime delivery");
+  const archive = delivery === "bundled" ? path.join(resourcesDir, "runtime.tar.gz") : null;
+  if (archive) {
+    if (fs.statSync(archive).size !== verified.artifact.bytes) throw new Error("Bundled runtime size mismatch");
+    const hash = crypto.createHash("sha512");
+    for await (const chunk of fs.createReadStream(archive)) hash.update(chunk);
+    if (`sha512-${hash.digest("base64")}` !== verified.artifact.sha512) throw new Error("Bundled runtime digest mismatch");
+  }
   const node = path.join(resourcesDir, process.platform === "win32" ? "node.exe" : "node");
   const nodeDigest = crypto.createHash("sha256").update(fs.readFileSync(node)).digest("hex");
   if (nodeDigest !== receipt.nodeSha256) throw new Error("Bundled Node digest mismatch");
-  return { receipt, archive, node, platformKey };
+  return { receipt, archive, artifact: verified.artifact, node, platformKey };
 }
 
 function extractBundle(bundle, destination, { run = spawnSync } = {}) {
@@ -74,7 +78,9 @@ function readCurrent(homeDir) {
 async function installFromApplication({ resourcesDir, applicationRoot, executable, activationEnabled = false,
   homeDir = os.homedir(), verify = verifyBundle, extract = extractBundle, activate = bootstrap.activateRuntime,
   acquireLock = bootstrap.acquireCanonicalLock, health = require("./runtime-health.cjs").exactRuntimeHealth,
-  drain = require("./update-activity.cjs").drainCalls } = {}) {
+  drain = require("./update-activity.cjs").drainCalls, download = bootstrap.downloadVerifiedArtifact,
+  onProgress = () => {}, signal } = {}) {
+  onProgress({ phase: "verifying", canCancel: false });
   // Verification finishes before creating anything in the person's Relay home.
   const bundle = await verify({ resourcesDir, activationEnabled });
   const channel = bundle.receipt.channel || "stable";
@@ -90,6 +96,7 @@ async function installFromApplication({ resourcesDir, applicationRoot, executabl
   const ownerPath = path.join(homeDir, ".relay", "application-owner.json");
   const journalPath = path.join(homeDir, ".relay", "application-migration.json");
   let releaseDrain;
+  let downloadDirectory;
   try {
     const recordedCurrent = readCurrent(homeDir);
     let removed;
@@ -130,8 +137,24 @@ async function installFromApplication({ resourcesDir, applicationRoot, executabl
     if (installedOwner?.root === root && installedOwner.packagingSourceSha === bundle.receipt.packagingSourceSha
       && (installedOwner.applicationVersion || installedOwner.version) === (bundle.receipt.applicationVersion || bundle.receipt.version)
       && current && versionCompare(current.version, bundle.receipt.version) >= 0) {
+      onProgress({ phase: "ready", canCancel: false });
       return { ok: true, alreadyInstalled: true, owner: installedOwner, runtime: current, updateOwner: "canonical-runtime" };
     }
+    if (bundle.receipt.runtimeDelivery === "download") {
+      signal?.throwIfAborted();
+      // Stage beside releases: tar requires archive and destination on one volume.
+      const releasesDir = path.join(runtimeRoot, "releases");
+      fs.mkdirSync(releasesDir, { recursive: true, mode: 0o700 });
+      // The canonical lock proves no other setup owns these partial downloads.
+      bootstrap.removeAbandonedRuntimeDownloads(releasesDir);
+      downloadDirectory = fs.mkdtempSync(path.join(releasesDir, ".relay-download-application-"));
+      bundle.archive = path.join(downloadDirectory, "runtime.tar.gz");
+      onProgress({ phase: "downloading", receivedBytes: 0, totalBytes: bundle.artifact.bytes, canCancel: true });
+      await download(bundle.artifact.url, bundle.archive, bundle.artifact, { signal,
+        onProgress: progress => onProgress({ ...progress, phase: "downloading", canCancel: true }) });
+      signal?.throwIfAborted();
+    }
+    onProgress({ phase: "extracting", canCancel: false });
     const releaseId = `${bundle.receipt.version}-${bundle.platformKey}-${crypto.randomBytes(8).toString("hex")}`;
     const releaseRoot = path.join(runtimeRoot, "releases", releaseId);
     const runtime = extract(bundle, releaseRoot);
@@ -144,6 +167,7 @@ async function installFromApplication({ resourcesDir, applicationRoot, executabl
       updateOwner: "canonical-runtime" };
     const journal = { schema: 1, state: "prepared", owner, previousOwner, previous: current, releaseId, at: Date.now() };
     atomic(journalPath, journal);
+    onProgress({ phase: "installing", canCancel: false });
     releaseDrain = await drain({ homeDir });
     atomic(journalPath, { ...journal, state: "activating" });
     // Fresh Dev setup selects its account API before any runtime connects.
@@ -155,6 +179,7 @@ async function installFromApplication({ resourcesDir, applicationRoot, executabl
       // exact-root health, advancing heartbeat, durable Node and rollback.
       const result = await activate(layout, runtime, bundle.receipt.version, { homeDir });
       atomic(journalPath, { ...journal, state: "complete", completedAt: Date.now() });
+      onProgress({ phase: "ready", canCancel: false });
       return { ok: true, owner, runtime: result.candidate, updateOwner: "canonical-runtime" };
     } catch (error) {
       // Bootstrap owns service rollback. Only restore our launcher marker once
@@ -167,7 +192,13 @@ async function installFromApplication({ resourcesDir, applicationRoot, executabl
       } else atomic(journalPath, { ...journal, state: "recovery-required", failure: String(error.message).slice(0, 500) });
       throw error;
     }
-  } finally { releaseDrain?.(); lock.release(); }
+  } finally {
+    try { releaseDrain?.(); }
+    finally {
+      lock.release();
+      if (downloadDirectory) fs.rmSync(downloadDirectory, { recursive: true, force: true });
+    }
+  }
 }
 
 async function reconcileApplication({ homeDir = os.homedir(), acquireLock = bootstrap.acquireCanonicalLock,

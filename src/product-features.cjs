@@ -32,6 +32,7 @@ function productFeatures(options = {}) {
   return Object.freeze({
     environment,
     developer,
+    orgAdmin: user?.accountKind === "human" && user?.canViewAdminDashboard === true,
     // Google Contacts sync is still under Dev validation, so it follows the
     // same server-owned developer-account gate as the other unreleased tools.
     googleContacts: developer,

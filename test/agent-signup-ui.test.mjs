@@ -15,11 +15,13 @@ test("first run offers agent setup and explicit sign-in without starting authori
   for (const copy of [
     "Get started with Relay",
     "Set up Relay with",
-    "Already have an account?",
+    "New or returning, Google signs you in.",
     "What’s your email?",
     "Enter your code.",
     "Continue in your browser.",
-    "Welcome back.",
+    "You’re signed in.",
+    "Continue with Google",
+    "Use email instead",
     "Finishing setup…",
     "Continue your setup.",
     "Restart this setup.",
@@ -35,6 +37,11 @@ test("first run offers agent setup and explicit sign-in without starting authori
   assert.match(overlay, /Your agent will help you send your first Relay\./);
   assert.match(overlay, /firstRelayStatus/);
   assert.doesNotMatch(overlay, /id="suChatSkip"/);
+  // A new person signs up with the same Google click a returning one signs in with.
+  assert.match(overlay, /document\.getElementById\("suGoogle"\)\?\.addEventListener\("click", startInstallationGoogle\);/);
+  assert.match(overlay, /installationAuthGoogle\(\{ forceAccountSelection: signupForceGoogleSelection \}\)/);
+  assert.doesNotMatch(overlay, /Already have an account\?/);
+  assert.doesNotMatch(overlay, /Welcome back\./);
 });
 
 test("a first-run Relay is readable before account approval and binds only afterward", () => {
