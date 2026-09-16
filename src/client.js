@@ -2,6 +2,7 @@ import { accountIdentity, apiUrl, deviceToken } from "./config.js";
 import { compareAccountIdentity } from "./account.js";
 import { createRequire } from "node:module";
 import { COMPANION_TELEMETRY_HEADER, companionFleetTelemetryHeader } from "./fleet-telemetry.js";
+import { applicationTelemetryHeader } from "./application-telemetry.js";
 import { readContext, recordReadTiming, readTimeout } from "./read-context.js";
 
 const { installationKey: currentInstallationKey } = createRequire(import.meta.url)("./installation-key.cjs");
@@ -268,6 +269,8 @@ export class RelayClient {
         scope: JSON.stringify([this.url, this.identity?.userId, this.identity?.deviceId]),
       });
       if (telemetry) headers[COMPANION_TELEMETRY_HEADER] = telemetry;
+      const application = applicationTelemetryHeader();
+      if (application) headers["x-relay-application-telemetry"] = application;
     }
     const retryable = retry && requestCanRetry(method, body);
     const deadline = context?.deadline ?? Date.now() + timeoutMs * (retryable ? 2 : 1);

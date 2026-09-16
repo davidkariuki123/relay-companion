@@ -99,9 +99,9 @@ test("invitation and re-approval are one act on the exact mandate version, and m
   assert.match(html, /Really archive\? Posts stay/);
   assert.match(html, /data-topic-leave-confirm>Leave topic<\/button>/);
   assert.match(html, /Really delete\?/);
-  // Nature is chosen per post; the composer says what a bare fact is.
-  assert.match(html, /Only an event is a bare fact; everything else is your take, your plan, or your question\./);
-  assert.match(html, /const TOPIC_NATURES = \["event", "decision", "plan", "finding", "opinion", "question"\];/);
+  // Topics are passive and agent-authored: the board has no composer for a
+  // new thread or a top-level update. People reply to posts; agents post.
+  assert.doesNotMatch(html, /data-topic-compose|\+ New thread|Add update/);
 });
 
 test("the four standing rules are a feature of every topic, rendered from the shared list, never mandate text", () => {
@@ -202,7 +202,7 @@ test("in the people lane a post card opens the full post on its own page, the wa
   assert.match(html, /el\.addEventListener\("click", \(e\) => \{ if \(e\.target\.closest\("button, a, form, textarea, input, select"\)\) return; openPost\(postId\); \}\);/);
   // The page is the reader's letter: kicker, headline, rule, the words, then
   // Details folded under them only when the agent document says more.
-  const page = html.slice(html.indexOf("function topicPostPageHtml(p, d)"), html.indexOf("function topicComposeHtml()"));
+  const page = html.slice(html.indexOf("function topicPostPageHtml(p, d)"), html.indexOf("function topicMembersHtml(d)"));
   assert.match(page, /data-topic-post-back/);
   assert.match(page, /class="rd-kicker">\$\{esc\(origin\)\}/);
   assert.match(page, /class="rd-headline\$\{headlineClass\}">\$\{esc\(subject\)\}/);

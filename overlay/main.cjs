@@ -9817,6 +9817,7 @@ if (!gotSingleInstanceLock) {
   app.on("activate", () => requestExternalReopen());
 
   app.whenReady().then(async () => {
+    require("./application-update-notice.cjs").startInstallerNotices({ Notification: require("electron").Notification, shell });
     const acpPermissions = await import("../src/acp-permissions.js");
     let permissionDialogOpen = false;
     const permissionTimer = setInterval(async () => {

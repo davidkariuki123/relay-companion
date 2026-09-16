@@ -4,6 +4,7 @@ import { startRecoveryResponder } from "../bootstrap/recovery-probe.cjs";
 import { createDaemonProgress, recordDaemonCrash } from "../bootstrap/daemon-progress.cjs";
 import { createDaemonComponents } from "./daemon-components.js";
 import { startRecoveryMaintenance } from "./recovery-maintenance.js";
+import { startApplicationMaintenance } from "./application-maintenance.js";
 import { startPillSupervisor } from "./pill-supervisor.js";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -1012,6 +1013,7 @@ async function runTaskDaemonImpl({ intervalMs = 4000, health } = {}) {
       ready: () => health.ready(), progress: () => health.snapshot() });
   } catch (error) { log(`local recovery responder unavailable: ${error.message}`); }
   startRecoveryMaintenance();
+  startApplicationMaintenance();
   startPillSupervisor({ log });
   startMcpBrokerDescriptorGuard({ log, packageRoot: companionPackageRoot() });
   const autoUpdater = createAutoUpdater({

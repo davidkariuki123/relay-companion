@@ -1,8 +1,8 @@
 // Run with RELAY_PLAYWRIGHT_MODULE pointing at an installed Playwright module.
 // Uses the real renderer and in-memory IPC; never changes an installed app/account.
 // An open topic board learns about posts made elsewhere (another member, or the
-// person's own agent) as an "N new posts" pill; the list, scroll and a draft stay
-// put until the person taps it.
+// person's own agent) as an "N new posts" pill; the list and scroll stay put
+// until the person taps it.
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
@@ -61,7 +61,6 @@ try {
     posts:[...document.querySelectorAll('[data-topic-post]')].map((el) => el.getAttribute('data-topic-post')),
     scrollTop:document.getElementById('scroll').scrollTop,
     pill:document.querySelector('[data-topic-incoming]')?.textContent || '',
-    draft:document.querySelector('[data-topic-compose-form] input[name=title]')?.value ?? null,
   }));
   const wake = () => page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
 
@@ -70,9 +69,7 @@ try {
   await page.waitForTimeout(150);
   assert.equal((await board()).pill, '');
 
-  // A half-written post and a scrolled board.
-  await page.locator('[data-topic-compose]').click();
-  await page.locator('[data-topic-compose-form] input[name=title]').fill('My unsent draft');
+  // A scrolled board.
   await page.evaluate(() => { document.getElementById('scroll').scrollTop = 600; });
   const before = await board();
   assert.ok(before.scrollTop > 0, 'the board scrolls');
@@ -85,7 +82,6 @@ try {
   assert.equal(now.pill, '1 new post');
   assert.deepEqual(now.posts, before.posts, 'the list is not redrawn under the reader');
   assert.equal(now.scrollTop, before.scrollTop, 'scroll position is kept');
-  assert.equal(now.draft, 'My unsent draft', 'the draft survives');
   assert.equal(await page.locator('[data-topic-incoming]').evaluate((el) => {
     const r = el.getBoundingClientRect(); const s = document.getElementById('scroll').getBoundingClientRect();
     return r.top >= s.top && r.bottom <= s.bottom;
@@ -100,7 +96,6 @@ try {
   await wake();
   await page.waitForFunction(() => document.querySelector('[data-topic-incoming]')?.textContent === '2 new posts');
   now = await board();
-  assert.equal(now.draft, 'My unsent draft');
   assert.equal(now.scrollTop, before.scrollTop);
   // Updating the count keeps the same pill: it does not flash in again.
   assert.equal(await page.locator('[data-topic-incoming]').evaluate((el) => el.dataset.fixtureFirst === '1' && el.getAnimations().length === 0

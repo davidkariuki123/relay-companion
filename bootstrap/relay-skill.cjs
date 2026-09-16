@@ -4,6 +4,40 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { acquireCanonicalLock } = require("./recovery-launcher.cjs");
+
+// Both the application updater and protocol helper use this per-target lock.
+// A lease may be passed back only to this module, while it is still held.
+const skillLeases = new WeakMap();
+function skillLockPath(directory) {
+  let ancestor = path.resolve(directory);
+  const missing = [];
+  while (!fs.existsSync(ancestor)) {
+    missing.unshift(path.basename(ancestor));
+    const parent = path.dirname(ancestor);
+    if (parent === ancestor) throw new Error("Cannot resolve the Relay skill directory");
+    ancestor = parent;
+  }
+  const resolved = path.join(fs.realpathSync(ancestor), ...missing);
+  const lock = path.join(path.dirname(resolved), `.${path.basename(resolved)}-update.lock`);
+  return process.platform === "win32" ? lock.toLowerCase() : lock;
+}
+
+function acquireSkillLock(directory) {
+  const lockPath = skillLockPath(directory);
+  const lock = acquireCanonicalLock(lockPath);
+  const lease = { release() { skillLeases.delete(lease); lock.release(); } };
+  skillLeases.set(lease, lockPath);
+  return lease;
+}
+
+function ownSkillLock(directory, options) {
+  if (options.skillLock) {
+    if (skillLeases.get(options.skillLock) !== skillLockPath(directory)) throw new Error("Invalid or expired Relay skill lock");
+    return { release() {} };
+  }
+  return acquireSkillLock(directory);
+}
 
 const SKILL_NAME = "relay";
 const STATE_FILE = ".relay-managed.json";
@@ -302,18 +336,19 @@ function uninstallManaged(options = {}) {
   const results = [];
   const seen = new Set();
   for (const target of targets) {
-    let artifacts;
-    try { artifacts = skillArtifacts(target.directory, options); }
-    catch (error) {
+    let lease;
+    try {
+      lease = ownSkillLock(target.directory, options);
+      const artifacts = skillArtifacts(target.directory, options);
+      for (const directory of artifacts) {
+        const key = path.resolve(directory);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        results.push({ host: target.host, ...removeSkillArtifact(directory) });
+      }
+    } catch (error) {
       results.push({ host: target.host, ok: false, status: "failed", directory: target.directory, error: error?.message || String(error) });
-      continue;
-    }
-    for (const directory of artifacts) {
-      const key = path.resolve(directory);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      results.push({ host: target.host, ...removeSkillArtifact(directory) });
-    }
+    } finally { lease?.release(); }
   }
   const failures = results.filter((result) => !result.ok);
   return {
@@ -362,6 +397,12 @@ async function materialize(manifest, staging, readFile, target, existing) {
 }
 
 async function installOne(directory, manifest, readFile, options = {}) {
+  const lease = ownSkillLock(directory, options);
+  try { return await installOneUnlocked(directory, manifest, readFile, options); }
+  finally { lease.release(); }
+}
+
+async function installOneUnlocked(directory, manifest, readFile, options = {}) {
   const { consent = false, renewConsent = false } = options;
   const parent = path.dirname(directory);
   const existing = readState(directory);
@@ -437,6 +478,12 @@ async function updateFromRemote(options = {}) {
 }
 
 function rollbackOne(directory, options = {}) {
+  const lease = ownSkillLock(directory, options);
+  try { return rollbackOneUnlocked(directory, options); }
+  finally { lease.release(); }
+}
+
+function rollbackOneUnlocked(directory, options = {}) {
   const parent = path.dirname(directory);
   // The current location first; a copy an earlier installer left beside the
   // skill still rolls back once.
@@ -499,6 +546,8 @@ if (require.main === module) {
 }
 
 module.exports = {
+  acquireSkillLock,
+  skillLockPath,
   BUNDLED_ROOT,
   MANIFEST_URL,
   SKILL_NAME,

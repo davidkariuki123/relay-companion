@@ -20,6 +20,7 @@ import { canonicalOwnershipGuard, verifyCanonicalCandidate } from "./canonical-r
 import { ensureStableHookLauncher, removeStableHookLauncher, stableHookLauncherPath, stableWindowsHookScriptPath } from "./hook-launcher.js";
 import { readConfig, writeConfig } from "./config.js";
 import { deleteInstallationAuthorizationCredentials } from "./installation-authorization.js";
+import applicationOwnership from "../bootstrap/application-owner.cjs";
 import {
   ACTIVE_UPDATE_WORKER_ENV,
   cleanupMacUpdateAgents,
@@ -873,11 +874,12 @@ function installLinuxPillAutostart({ bin, node, electronPath, overlayMain, runCo
   const iconPath = path.posix.join(packageRootForBin(bin, "linux"), "overlay", "relayAppIcon.svg");
   writeLinuxDesktopFile(paths.pillUnitPath, linuxPillUnitText({ electronPath, overlayMain, homeDir, env }));
   writeLinuxDesktopFile(paths.pillStarterPath, linuxPillStarterText(), 0o700);
-  writeLinuxDesktopFile(paths.applicationPath, linuxApplicationDesktopText({ node, bin, iconPath }));
+  const nativeOwner = applicationOwnership.applicationOwner({ homeDir, platform: "linux" });
+  if (!nativeOwner) writeLinuxDesktopFile(paths.applicationPath, linuxApplicationDesktopText({ node, bin, iconPath }));
   writeLinuxDesktopFile(paths.autostartPath, linuxAutostartDesktopText({ pillStarterPath: paths.pillStarterPath }));
   const linked = linkLinuxUserUnit(paths.pillUnitPath, LINUX_PILL_UNIT, { runCommand });
   if (!linked.ok) return { ...linked, ...paths, started: false };
-  const protocol = registerLinuxProtocolHandler(paths.applicationPath, { runCommand });
+  const protocol = nativeOwner ? { ok: true } : registerLinuxProtocolHandler(paths.applicationPath, { runCommand });
   if (!protocol.ok) return { ...protocol, ...paths, started: false };
   if (!reload) {
     return {
@@ -1042,6 +1044,8 @@ export function installRelayMacApp({
   homeDir = os.homedir(),
   runCommand = run,
 } = {}) {
+  const nativeOwner = applicationOwnership.applicationOwner({ homeDir, platform: "darwin" });
+  if (nativeOwner) return { ok: true, appPath: nativeOwner.root, appExecutablePath: nativeOwner.executable, nativeApplication: true };
   if (!electronPath || !overlayMain || !fs.existsSync(electronPath) || !fs.existsSync(overlayMain)) {
     return { ok: false, reason: "pill_runtime_missing", electronPath, overlayMain };
   }
@@ -2655,6 +2659,8 @@ export function installWindowsStartMenuShortcut({
   remove = fs.rmSync,
 } = {}) {
   if (platform !== "win32") return { ok: false, reason: "unsupported_platform" };
+  const nativeOwner = applicationOwnership.applicationOwner({ homeDir, platform });
+  if (nativeOwner) return { ok: true, nativeApplication: true, executable: nativeOwner.executable };
   const lnkPath = windowsStartMenuShortcutPath(env, homeDir);
   const stagingPath = `${lnkPath}.${process.pid}.tmp.lnk`;
   const packageRoot = packageRootForBin(bin);

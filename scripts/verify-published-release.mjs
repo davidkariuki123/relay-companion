@@ -203,7 +203,13 @@ export function validateInstalledPackageShape(packageRoot, { version, distributi
     // Loop progress/crash fingerprints and off-UI-thread health collection:
     // both require only Node builtins and reviewed sibling bootstrap helpers.
     const daemonProgressBootstrap = [...bundledNodeBootstrap, "daemon-progress.cjs", "installation-health-worker.cjs"].sort();
-    if (![legacyBootstrap, recoveryBootstrap, resilientBootstrap, monitoredBootstrap, macRecoveryBootstrap, responsiveRecoveryBootstrap, configRecoveryBootstrap, bundledNodeBootstrap, daemonProgressBootstrap].some(shape => JSON.stringify(bootstrapFiles) === JSON.stringify(shape))) {
+    // Dormant native lifecycle entry points; stdlib and sibling bootstrap only.
+    // Importing them neither activates a package nor changes the current route.
+    const applicationBootstrap = [...daemonProgressBootstrap, "application-install.cjs", "application-owner.cjs",
+      "application-release.cjs", "application-uninstall.cjs"].sort();
+    const handoffBootstrap = [...applicationBootstrap, "application-bridge.cjs", "application-package.cjs",
+      "application-handoff.cjs", "application-rollout.cjs", "application-update.cjs"].sort();
+    if (![legacyBootstrap, recoveryBootstrap, resilientBootstrap, monitoredBootstrap, macRecoveryBootstrap, responsiveRecoveryBootstrap, configRecoveryBootstrap, bundledNodeBootstrap, daemonProgressBootstrap, applicationBootstrap, handoffBootstrap].some(shape => JSON.stringify(bootstrapFiles) === JSON.stringify(shape))) {
       throw new Error("Thin installer bootstrap contents do not match the reviewed shape");
     }
     const manifest = JSON.parse(fs.readFileSync(path.join(packageRoot, "skill", "manifest.json"), "utf8"));

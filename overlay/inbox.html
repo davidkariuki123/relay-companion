@@ -2556,11 +2556,9 @@
   .tp-row-meta .attn { color:var(--accent); font-weight:600; }
   .tp-count { min-width:18px; padding:2px 6px; border-radius:var(--r-pill); background:var(--accent); color:var(--on-accent); font:600 10px/1.4 var(--sans); text-align:center; }
   .tp-count.quiet { background:var(--wash-2); color:var(--muted); }
-  .tp-new, .tp-compose { display:flex; flex-direction:column; gap:8px; padding:12px 16px 14px; border-bottom:1px solid var(--hair); }
-  .tp-compose { background:var(--wash); }
-  .tp-new .cv-input, .tp-compose .cv-input { width:100%; box-sizing:border-box; }
-  .tp-new textarea.cv-input, .tp-compose textarea.cv-input { min-height:84px; resize:vertical; font-family:var(--sans); line-height:1.45; }
-  .tp-compose select.cv-input { width:auto; }
+  .tp-new { display:flex; flex-direction:column; gap:8px; padding:12px 16px 14px; border-bottom:1px solid var(--hair); }
+  .tp-new .cv-input { width:100%; box-sizing:border-box; }
+  .tp-new textarea.cv-input { min-height:84px; resize:vertical; font-family:var(--sans); line-height:1.45; }
   .tp-actions { display:flex; align-items:center; gap:14px; }
   .tp-new-toggle { appearance:none; width:100%; padding:10px 16px; border:0; border-bottom:1px solid var(--hair); background:transparent; color:var(--accent); text-align:left; font:500 12px/1.2 var(--sans); cursor:pointer; }
   .tp-new-toggle:hover { background:var(--wash); }
@@ -7486,7 +7484,6 @@
   // mandate changes waiting on them; opening a topic is the one human read
   // (agent fetches never move it). Every mutation re-renders from the server's
   // returned view, never a local guess (the channel pane's rule).
-  const TOPIC_NATURES = ["event", "decision", "plan", "finding", "opinion", "question"];
   const TOPIC_NATURE_LABEL = { event:"Event", decision:"Decision", plan:"Plan", finding:"Finding", opinion:"Opinion", question:"Question" };
   const topicsState = {
     loaded:false, loading:false, error:"", topics:[], generation:0,
@@ -7495,7 +7492,7 @@
     // Posts newer than the open board, held behind the "N new posts" pill until
     // the person asks for them. incomingGap: more arrived than one page holds.
     incoming:[], incomingGap:false,
-    lane:"human", composing:false, creating:false, editingMandate:false, inviteQuery:"", armed:null,
+    lane:"human", creating:false, editingMandate:false, inviteQuery:"", armed:null,
     // The open topic's face: messages (posts, lanes, compose), members, mandate.
     pane:"messages",
     // An inline reply being written: { postId, mode: "topic" | "private",
@@ -7562,7 +7559,7 @@
     if (activeView === "topics" && (!quiet || (changed && !topicsState.openId && !topicsState.creating))) renderTopics();
   }
   async function openTopic(id) {
-    Object.assign(topicsState, { threads:[], threadQuery:"", openThreadId:null, threadDetail:null, movePostId:null, openId:id, detail:null, posts:[], nextCursor:null, incoming:[], incomingGap:false, postsError:"", composing:false, editingMandate:false, armed:null, inviteQuery:"", pane:"messages", replying:null, notice:"", openPostId:null, postDetailsOpen:false });
+    Object.assign(topicsState, { threads:[], threadQuery:"", openThreadId:null, threadDetail:null, movePostId:null, openId:id, detail:null, posts:[], nextCursor:null, incoming:[], incomingGap:false, postsError:"", editingMandate:false, armed:null, inviteQuery:"", pane:"messages", replying:null, notice:"", openPostId:null, postDetailsOpen:false });
     renderTopics();
     const { result, error } = await topicCall(window.relay.topicGet, id);
     if (topicsState.openId !== id) return;
@@ -7599,7 +7596,7 @@
   async function openTopicThread(threadId) {
     const id = topicsState.openId;
     Object.assign(topicsState, { openThreadId:threadId, threadDetail:topicsState.threads.find(t => t.id === threadId),
-      posts:[], nextCursor:null, openPostId:null, composing:false, replying:null, movePostId:null, incoming:[], incomingGap:false });
+      posts:[], nextCursor:null, openPostId:null, replying:null, movePostId:null, incoming:[], incomingGap:false });
     renderTopics();
     const { result, error } = await topicCall(window.relay.topicThreads, id, { threadId });
     if (topicsState.openId !== id || topicsState.openThreadId !== threadId) return;
@@ -7635,7 +7632,7 @@
   function wireTopicThreads(c, d) {
     for (const el of c.querySelectorAll('[data-thread-open]')) el.addEventListener('click', () => openTopicThread(el.dataset.threadOpen));
     c.querySelector('[data-thread-back]')?.addEventListener('click', () => {
-      Object.assign(topicsState, { openThreadId:null, threadDetail:null, openPostId:null, composing:false, replying:null, posts:[] });
+      Object.assign(topicsState, { openThreadId:null, threadDetail:null, openPostId:null, replying:null, posts:[] });
       loadTopicThreads();
     });
     c.querySelector('[data-thread-more]')?.addEventListener('click', () => loadTopicThreads({ append:true }));
@@ -7894,17 +7891,6 @@
       </div>
     </div>`;
   }
-  function topicComposeHtml() {
-    if (!topicsState.composing) return `<button class="tp-new-toggle" type="button" data-topic-compose>+ ${topicsState.openThreadId ? "Add update" : "New thread"}</button>`;
-    return `<form class="tp-compose" data-topic-compose-form>
-      <select class="cv-input" name="nature" aria-label="What kind of post">${TOPIC_NATURES.map((n) => `<option value="${n}"${n === "opinion" ? " selected" : ""}>${TOPIC_NATURE_LABEL[n]}</option>`).join("")}</select>
-      <input class="cv-input" name="title" placeholder="Title" autocomplete="off" required />
-      <textarea class="cv-input" name="body" placeholder="Say it plainly. Only an event is a bare fact; everything else is your take, your plan, or your question." required></textarea>
-      ${topicsState.openThreadId ? `<select class="cv-input" name="importance" aria-label="Importance"><option value="update">Update — changed understanding or availability</option><option value="detail">Supporting detail — stays quiet</option></select>` : ""}
-      <div class="tp-actions"><button class="cv-save" type="submit">Post</button><button class="cv-cancel" type="button" data-topic-compose-cancel>Cancel</button></div>
-      <div class="tp-error" data-topic-compose-error></div>
-    </form>`;
-  }
   function topicMembersHtml(d) {
     const admin = d.membership?.role === "admin" && d.membership?.state === "active" && !d.archivedAt;
     const me = payload.account?.userId;
@@ -7964,7 +7950,7 @@
       ? topicPaneTabsHtml() + (
         topicsState.pane === "members" ? `${topicMembersHtml(d)}${leave}`
         : topicsState.pane === "mandate" ? `${mandateBlock}${topicStandingRulesHtml()}${settings}`
-        : `${current ? topicComposeHtml() : ""}${notice}${lanes}${readable ? topicIncomingHtml() : ""}${topicsState.openThreadId ? topicThreadHeaderHtml() + posts + more : topicThreadsHtml()}`)
+        : `${notice}${lanes}${readable ? topicIncomingHtml() : ""}${topicsState.openThreadId ? topicThreadHeaderHtml() + posts + more : topicThreadsHtml()}`)
       : `${topicStandingRulesHtml()}${topicMembersHtml(d)}`;
     return `<div class="tp-detail" data-topic-detail="${esc(d.id)}">
       <button class="gd-back" type="button" data-topic-back>‹ Topics</button>
@@ -7976,11 +7962,6 @@
   }
   function renderTopics() {
     if (!topicsBodyEl) return;
-    const renderKey = [topicsState.openId, topicsState.openThreadId].join(":");
-    const keepDraft = topicsBodyEl.dataset.topicRenderKey === renderKey && topicsState.composing;
-    const form = keepDraft && topicsBodyEl.querySelector("[data-topic-compose-form]");
-    const draft = form ? Object.fromEntries([...form.elements].filter(e => e.name).map(e => [e.name, e.value])) : null;
-    topicsBodyEl.dataset.topicRenderKey = renderKey;
     if (topicsState.openId) {
       topicsEmptyEl.classList.add("gone");
       const d = topicsState.detail;
@@ -7988,8 +7969,6 @@
         : topicsState.postsError ? `<div class="tp-detail"><button class="gd-back" type="button" data-topic-back>‹ Topics</button><div class="tp-error">${esc(topicsState.postsError)}</div></div>`
         : `<div class="tp-loading">Loading…</div>`;
       wireTopicDetail();
-      const nextForm = topicsBodyEl.querySelector("[data-topic-compose-form]");
-      if (draft && nextForm) for (const [name, value] of Object.entries(draft)) if (nextForm.elements[name]) nextForm.elements[name].value = value;
       return;
     }
     if (topicsState.loading && !topicsState.loaded) {
@@ -8136,28 +8115,6 @@
     });
     wireTopicThreads(c, d);
     on("[data-topic-more]", () => loadTopicPosts({ append:true }));
-    on("[data-topic-compose]", () => { topicsState.composing = true; renderTopics(); c.querySelector("[data-topic-compose-form] input[name=title]")?.focus(); });
-    on("[data-topic-compose-cancel]", () => { topicsState.composing = false; renderTopics(); });
-    const compose = c.querySelector("[data-topic-compose-form]");
-    if (compose) compose.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const errEl = compose.querySelector("[data-topic-compose-error]");
-      const save = compose.querySelector(".cv-save");
-      save.disabled = true;
-      const body = compose.elements.body.value.trim();
-      const { result, error } = await topicCall(window.relay.topicPostCreate, id, {
-        nature: compose.elements.nature.value, title: compose.elements.title.value.trim(), forHuman: body, forAgent: body,
-        ...(topicsState.openThreadId ? { threadId: topicsState.openThreadId } : { newThread:true }),
-        importance: compose.elements.importance?.value || "update",
-        idempotencyKey: `pill-topic-post:${id}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`,
-      });
-      if (error) { errEl.textContent = error; save.disabled = false; return; }
-      topicsState.composing = false;
-      if (result?.post?.threadId) { await loadTopicThreads(); await openTopicThread(result.post.threadId); }
-      if (result?.post) topicsState.posts = [result.post, ...topicsState.posts.filter((p) => p.id !== result.post.id)];
-      renderTopics();
-      loadTopics({ quiet:true });
-    });
     on("[data-topic-post-delete]", (el) => { topicsState.armed = `delete:${el.getAttribute("data-topic-post-delete")}`; renderTopics(); });
     on("[data-topic-post-delete-confirm]", async (el) => {
       const postId = el.getAttribute("data-topic-post-delete-confirm");
@@ -12206,6 +12163,57 @@
     return true;
   }
 
+  // A room can arrive before its roster. Sven created Silhouette, added
+  // Chandler and mentioned him inside one minute, but this pill had loaded its
+  // groups earlier and never asked again: the mention printed as a raw
+  // @handle and the picker offered nobody until an unrelated contacts reload
+  // happened to chain into loadGroups() (David, live, 2026-09-16). A payload
+  // that names a group this roster does not know, or a sender or @handle the
+  // known roster does not list, marks the roster stale. The retry gate above
+  // still bounds how often a failing API is asked again.
+  function groupRosterStaleFor(rows) {
+    if (!groupsLoaded) return false;
+    const known = new Map(groupsList.map((group) => [String((group && group.id) || ""), group]));
+    const token = /@[A-Za-z0-9][A-Za-z0-9._-]*/g;
+    for (const row of rows || []) {
+      const groupId = String((row && (row.recipientGroupId || row.groupId)) || "");
+      if (!groupId.startsWith("grp_")) continue;
+      const group = known.get(groupId);
+      if (!group) return true;
+      const people = [group.owner, ...(group.members || [])].filter(Boolean);
+      const sender = String((row && row.senderEmail) || "").trim().toLowerCase();
+      if (sender && !people.some((person) => String(person.email || "").trim().toLowerCase() === sender)) return true;
+      const body = String((row && (row.forHuman || row.body)) || "");
+      const tokens = new Set(people.map((person) => normalizedMentionToken(mentionTokenForContact(person))).filter(Boolean));
+      for (const contact of contactsList) {
+        const key = normalizedMentionToken(mentionTokenForContact(contact));
+        if (key) tokens.add(key);
+      }
+      let match;
+      token.lastIndex = 0;
+      while ((match = token.exec(body))) {
+        const previous = match.index > 0 ? body[match.index - 1] : "";
+        if (/[A-Za-z0-9._%+-]/.test(previous)) continue; // the domain half of an email
+        if (!tokens.has(normalizedMentionToken(match[0]))) return true;
+      }
+    }
+    return false;
+  }
+  // Returns true when the roster was found stale; the refetch itself waits on
+  // the same in-flight and retry rules as a first load.
+  function refreshGroupRosterIfStale(rows) {
+    if (!groupRosterStaleFor(rows)) return false;
+    groupsLoaded = false;
+    if (!groupsLoadDue()) return true;
+    groupsLoading = Promise.resolve(loadGroups()).then((loaded) => loaded === true, () => false).then((loaded) => {
+      groupsLoading = null;
+      if (!loaded) return;
+      if (activeView === "chat") renderChat();
+      else if (activeView === "threads" && threadDetailId) renderThreadDetail();
+    });
+    return true;
+  }
+
   // ---- room-level group info ----------------------------------------------
   // Contacts already had the complete roster editor, but a person should not
   // have to leave the conversation to discover who is in the room. This sheet
@@ -13456,6 +13464,20 @@
     const sentByRelayId = new Map((payload.sent || [])
       .map((item) => [String(item.relayId || item.id || ""), item])
       .filter(([id]) => Boolean(id)));
+    // EVERY sibling id of a fan-out I sent, keyed by groupSendId. The room
+    // keeps ONE bubble per fan-out, but a member's reply names the sibling
+    // THEY received — a different id for every member — so the bubble must
+    // answer to all of its ids or the reply quotes nothing (Shane, Granular,
+    // 2026-09-16: "the reply didnt come through"). The renderer registers
+    // these as aliases when it indexes the room.
+    const sentGroupSiblings = new Map();
+    for (const member of payload.sent || []) {
+      const memberId = String(member.relayId || member.id || "");
+      if (!memberId || !member.groupSendId) continue;
+      const bucket = sentGroupSiblings.get(member.groupSendId) || [];
+      bucket.push(memberId);
+      sentGroupSiblings.set(member.groupSendId, bucket);
+    }
     const viewerEmail = String(payload.account?.email || "").trim().toLowerCase();
     const stagedIds = new Set((payload.relays || []).map((item) => String(item.id)));
     const visitRows = (activeMentionVisit?.rows || []).filter((item) => !stagedIds.has(String(item.id)));
@@ -13509,6 +13531,7 @@
         deletedAt: r.deletedAt || null,
         textLike, request,
         groupSendId: r.groupSendId || "",
+        siblingIds: r.groupSendId ? (sentGroupSiblings.get(r.groupSendId) || []) : [],
         taskStartedAt: r.taskStartedAt || null,
         taskCompletedAt: r.taskCompletedAt || null,
         taskClaim: r.taskClaim || null,
@@ -13603,6 +13626,7 @@
         textLike: sentTextLike,
         request,
         groupSendId: s.groupSendId || "",
+        siblingIds: s.groupSendId ? (sentGroupSiblings.get(s.groupSendId) || []) : [],
         taskStartedAt: s.taskStartedAt || null,
         taskCompletedAt: s.taskCompletedAt || null,
         taskClaim: s.taskClaim || null,
@@ -14943,6 +14967,15 @@
     }
     const threadDraft = threadComposerDrafts.get(threadStateKey) || "";
     const messageById = new Map(thread.msgs.map((message) => [String(message.id || ""), message]));
+    // A fan-out I sent is one bubble with many ids: a reply from any member
+    // names the sibling that member received. Resolve every sibling to the
+    // bubble, or the reply-ref below finds no parent and quotes nothing.
+    for (const message of thread.msgs) {
+      for (const sibling of message.siblingIds || []) {
+        const siblingId = String(sibling || "");
+        if (siblingId && !messageById.has(siblingId)) messageById.set(siblingId, message);
+      }
+    }
     const focusedSlackParent = slackFocusedThreadId
       ? thread.msgs.find((message) => String(message.id || "") === slackFocusedThreadId) || thread.msgs[0] || null
       : null;
@@ -15035,7 +15068,9 @@
       // default anchor, and the default is overwhelmingly the case — so a
       // placeholder here is noise on old messages, not context. Say nothing.
       if (!parent) return "";
-      return `<button type="button" class="th-reply-ref" data-reply-ref="${esc(parentId)}" data-stop="1"><span class="th-reply-ref-who">${esc(replyPreviewAuthor(parent))}</span><span class="th-reply-ref-copy">${esc(replyPreviewCopy(parent))}</span></button>`;
+      // Jump to the bubble the room kept: for a fan-out that is the surviving
+      // sibling, which may not be the id the reply named.
+      return `<button type="button" class="th-reply-ref" data-reply-ref="${esc(String(parent.id || parentId))}" data-stop="1"><span class="th-reply-ref-who">${esc(replyPreviewAuthor(parent))}</span><span class="th-reply-ref-copy">${esc(replyPreviewCopy(parent))}</span></button>`;
     };
     const composerReplyTargetHtml = replyTargetId
       ? replyTarget
@@ -18577,6 +18612,7 @@
       todoSteward: next.todoSteward && typeof next.todoSteward === "object" ? next.todoSteward : null,
     };
     if (googleAccount !== signupAccountKey()) void loadGoogleContacts();
+    refreshGroupRosterIfStale(payload.relays);
     // A finished steward run reordered or re-noted the list without moving
     // any row's version; the board must reload on its own account.
     const stewardFinishedAt = Number(payload.todoSteward?.lastRun?.finishedAt || 0);

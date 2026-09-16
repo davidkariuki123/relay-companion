@@ -40,7 +40,6 @@ try {
       topicGet:async()=>({ok:true,result:{...summary(),members:[]}}),
       topicSeen:async()=>{ window.fixtureSeen++; return {ok:true,result:summary()}; },
       topicThreads:async(_id,input={})=>({ok:true,result:{topic:summary(),threads:[{id:input.threadId || (window.fixtureMoved ? "tpth_separate" : "tpth_fixture"),title:"Windows readiness",summary:"David found a blocker; a fix awaits release.",summaryAuthor:{name:"David"},summaryOrigin:"agent",status:"open",postCount:window.fixturePosts.length,contributorCount:2,version:1,attentionAt:at(12)}]}}),
-      topicPostCreate:async(_id,input)=>{ window.fixtureCreated=input; const p=post(99,{...input,author:{relayUserId:'usr_self',name:'Preview Person'}}); window.fixturePosts.unshift(p);return {ok:true,result:{post:p}}; },
       topicMovePosts:async(_id,_thread,input)=>{window.fixtureMoved=input; for(const p of window.fixturePosts) if(input.postIds.includes(p.id))p.threadId='tpth_separate';return {ok:true,result:{threadId:'tpth_separate'}};},
       topicPosts:async(_id, input = {})=>{
         const since = input.since ? Date.parse(input.since) : null;
@@ -63,21 +62,14 @@ try {
   await page.locator('[data-thread-search] button').click();
   await page.locator('[data-thread-open="tpth_fixture"]').click();
   await page.locator('[data-topic-post="tpst_12"]').waitFor();
-  await page.locator('[data-topic-compose]').click();
-  await page.locator('[data-topic-compose-form] input[name=title]').fill('More evidence');
-  await page.locator('[data-topic-compose-form] textarea').fill('The trace confirms the original finding.');
-  await page.locator('[data-topic-compose-form] select[name=importance]').selectOption('detail');
-  await page.locator('[data-topic-compose-form] button[type=submit]').click();
-  await page.locator('[data-topic-post="tpst_99"]').waitFor();
-  const posted=await page.evaluate(()=>window.fixtureCreated);
-  assert.equal(posted.threadId,'tpth_fixture'); assert.equal(posted.importance,'detail');
-  await page.locator('[data-topic-move="tpst_99"]').click();
+  assert.equal(await page.locator('[data-topic-compose]').count(),0,'topics are agent-authored: no New thread or Add update');
+  await page.locator('[data-topic-move="tpst_12"]').click();
   await page.locator('[data-topic-move-form] input[name=title]').fill('Separate investigation');
   await page.locator('[data-topic-move-form] button[type=submit]').click();
   await page.waitForFunction(()=>window.fixtureMoved);
-  assert.deepEqual(await page.evaluate(()=>window.fixtureMoved.postIds),['tpst_99']);
+  assert.deepEqual(await page.evaluate(()=>window.fixtureMoved.postIds),['tpst_12']);
   assert.equal(await page.evaluate(()=>window.fixtureMoved.expectedVersion),1);
-  assert.equal(await page.locator('[data-topic-post="tpst_99"]').count(),1);
+  assert.equal(await page.locator('[data-topic-post="tpst_12"]').count(),1);
   await page.locator('[data-thread-back]').click();
   await page.locator('[data-thread-open="tpth_separate"]').waitFor();
   if(process.env.RELAY_SCREENSHOT_DIR) await page.screenshot({path:process.env.RELAY_SCREENSHOT_DIR+'/topic-threads.png'});

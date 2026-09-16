@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { managedInstallInfo } from "./auto-update.js";
+import applicationOwnership from "../bootstrap/application-owner.cjs";
 import {
   installDaemonAutostart,
   installPillAutostart,
@@ -111,6 +112,9 @@ export function runDesktopStartupMigration({
   runCommand,
 } = {}) {
   if (platform !== "darwin") return { attempted: false, ok: true, reason: "not-darwin", retryable: false };
+  if (applicationOwnership.applicationOwner({ homeDir, platform })) {
+    return { attempted: false, ok: true, reason: "native-application-owned", retryable: false };
+  }
   if (!managedInstallInfo(packageRoot, { home: homeDir })) {
     return { attempted: false, ok: true, reason: "unmanaged-install", retryable: false };
   }
