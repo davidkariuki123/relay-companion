@@ -1401,6 +1401,34 @@
     min-height:24px; font-family:var(--sans); }
   .rx-badge.mine { border-color:var(--edge-accent); background:color-mix(in srgb,var(--accent) 10%,var(--bg)); }
   .rx-badge .n { font-family:var(--mono); font-size:11px; color:var(--muted-2); }
+  .rx-badge[aria-disabled="true"] { cursor:default; }
+  /* Who reacted. One top-layer card follows the hovered or focused badge: up to
+     three names read at a glance, "See all" pins the whole list until it is
+     closed. A native title= never shows inside the pill on macOS. */
+  .rx-names { position:fixed; inset:auto; margin:0; padding:0; width:max-content; max-width:236px; max-height:260px;
+    display:flex; flex-direction:column; overflow:visible; border:1px solid var(--edge); border-radius:var(--r-2);
+    background:var(--bg); color:var(--ink); box-shadow:var(--shadow-pop); font:400 12px/1.45 var(--sans); overflow-wrap:anywhere; }
+  .rx-names:not(:popover-open) { display:none; }
+  /* An invisible bridge across the gap keeps the card open while the pointer crosses from the badge. */
+  .rx-names::before { content:""; position:absolute; left:0; right:0; bottom:100%; height:10px; }
+  .rx-names[data-side="above"]::before { top:100%; bottom:auto; }
+  .rx-names-summary { padding:8px 10px; }
+  .rx-names-more { color:var(--muted); }
+  .rx-names-all { appearance:none; display:block; padding:7px 10px; border:0; border-top:1px solid var(--hair); background:transparent;
+    color:var(--accent); text-align:left; font:500 11.5px/1.4 var(--sans); cursor:pointer; }
+  .rx-names-all:hover, .rx-names-all:focus-visible { background:var(--wash); }
+  .rx-names.full { width:220px; border-radius:var(--r-3); }
+  .rx-names-head { display:flex; align-items:center; gap:7px; flex:none; min-height:35px; padding:8px 11px;
+    border-bottom:1px solid var(--hair); color:var(--muted); font-size:11px; }
+  .rx-names-head .emoji { font-size:14px; }
+  .rx-names-close { appearance:none; margin-left:auto; padding:1px 3px; border:0; border-radius:var(--r-1); background:transparent;
+    color:var(--muted); font:400 17px/1 var(--sans); cursor:pointer; }
+  .rx-names-close:hover, .rx-names-close:focus-visible { color:var(--ink); background:var(--wash-2); }
+  .rx-names-list { flex:1; min-height:0; padding:3px 0; overflow-y:auto; overscroll-behavior:contain;
+    scrollbar-width:thin; scrollbar-color:var(--edge) transparent; }
+  .rx-names-person { min-height:30px; padding:6px 11px; line-height:1.5; }
+  .rx-names-person.unavailable { color:var(--muted); }
+  .rx-names-foot { flex:none; padding:6px 11px; border-top:1px solid var(--hair); color:var(--muted); font:400 10px/1.4 var(--mono); }
   @keyframes rxBadgePop { from { transform:scale(.2); } 60% { transform:scale(1.18); } }
   /* The picker belongs to ONE message, never to a reader, Task or run.
      It appears just outside the hovered bubble and unfurls back across that
@@ -10550,6 +10578,258 @@
       renderAll();
     });
   }
+  // ---------- who reacted ----------
+  // The API sends every actor with each count, so the names ride on the badge
+  // itself and a hover never reaches back into the timeline.
+  const RX_NAMES_SHOWN = 3;
+  function reactionActorName(actor) {
+    if (actor && actor.self) return "You";
+    const name = String(actor?.name || "").trim();
+    return name || "Name unavailable";
+  }
+  function reactionBadgeActors(reaction) {
+    return (Array.isArray(reaction?.actors) ? reaction.actors : [])
+      .map((actor) => ({ name:String(actor?.name || "").trim(), self:Boolean(actor?.self) }));
+  }
+  // Up to three names read at a glance; everyone else becomes "and N others".
+  function reactionNamesSummary(reaction) {
+    const actors = reactionBadgeActors(reaction);
+    const count = Math.max(actors.length, Number(reaction?.count) || 0);
+    const names = actors.slice(0, RX_NAMES_SHOWN).map(reactionActorName);
+    const others = count - names.length;
+    let text = "";
+    if (others > 0) text = names.join(", ");
+    else if (names.length === 1) text = names[0];
+    else if (names.length === 2) text = `${names[0]} and ${names[1]}`;
+    else if (names.length) text = `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
+    const more = others > 0 ? ` and ${others} ${others === 1 ? "other" : "others"}` : "";
+    return { count, names, others, text, more };
+  }
+  function reactionBadgeHtml(id, reaction, canReact) {
+    const summary = reactionNamesSummary(reaction);
+    const who = summary.names.length ? ` · ${summary.text}${summary.more}` : "";
+    const verb = !canReact ? "" : reaction.reactedByMe ? " · Remove your reaction" : " · Add your reaction";
+    return `<button type="button" class="rx-badge${reaction.reactedByMe ? " mine" : ""}"${canReact ? "" : ' aria-disabled="true"'} data-rx-toggle="${esc(id)}" data-emoji="${esc(reaction.emoji)}" data-mine="${reaction.reactedByMe ? "1" : "0"}" data-rx-count="${summary.count}" data-rx-actors="${esc(JSON.stringify(reactionBadgeActors(reaction)))}" aria-pressed="${reaction.reactedByMe ? "true" : "false"}" aria-label="${esc(`${reaction.emoji} · ${summary.count}${who}${verb}`)}">${esc(reaction.emoji)}${reaction.count > 1 ? `<span class="n">${reaction.count}</span>` : ""}</button>`;
+  }
+  function reactionNamesHtml(reaction, { full = false } = {}) {
+    const summary = reactionNamesSummary(reaction);
+    if (!summary.names.length) return "";
+    if (!full) {
+      return `<div class="rx-names-summary">${esc(summary.text)}${summary.more ? `<span class="rx-names-more">${esc(summary.more)}</span>` : ""}</div>`
+        + (summary.others > 0 ? `<button type="button" class="rx-names-all" data-rx-names-all>See all ${summary.count}</button>` : "");
+    }
+    const people = reactionBadgeActors(reaction).map((actor) =>
+      `<div class="rx-names-person${actor.self ? " self" : ""}${!actor.self && !actor.name ? " unavailable" : ""}" role="listitem">${esc(reactionActorName(actor))}</div>`).join("");
+    return `<div class="rx-names-head"><span class="emoji">${esc(reaction.emoji)}</span><span>${summary.count} ${summary.count === 1 ? "reaction" : "reactions"}</span><button type="button" class="rx-names-close" data-rx-names-close aria-label="Close">×</button></div>`
+      + `<div class="rx-names-list" role="list" aria-label="People who reacted">${people}</div>`
+      + (summary.count > 4 ? `<div class="rx-names-foot" data-rx-names-foot>${summary.count} people</div>` : "");
+  }
+  // One card serves every badge. A hover shows it after a short dwell, keyboard
+  // focus shows it at once, and "See all" pins the whole list until it is closed.
+  // It leaves with the badge: a repaint re-anchors it, a pointer elsewhere, a
+  // scroll, a card resize or a lost window hides it, like the pickers.
+  const RX_NAMES_SHOW_MS = 220;
+  const RX_NAMES_HIDE_MS = 180;
+  function installReactionNames(root = document, { anchors = () => ({}) } = {}) {
+    const view = root.defaultView;
+    const card = root.createElement("div");
+    card.className = "rx-names";
+    card.id = "rxNames";
+    card.setAttribute("popover", "manual");
+    card.setAttribute("role", "tooltip");
+    root.body.append(card);
+    const state = { badge:null, key:"", html:"", reaction:null, full:false, pinned:false, showTimer:null, hideTimer:null, refocusing:false };
+    const isOpen = () => card.matches(":popover-open");
+    const badgeOf = (target) => target && typeof target.closest === "function" ? target.closest("[data-rx-toggle]") : null;
+    function readReaction(badge) {
+      let actors = [];
+      try { actors = JSON.parse(badge.getAttribute("data-rx-actors") || "[]"); } catch { actors = []; }
+      return { emoji:badge.getAttribute("data-emoji") || "", count:Number(badge.getAttribute("data-rx-count")) || actors.length, actors };
+    }
+    function clearTimers() {
+      clearTimeout(state.showTimer); clearTimeout(state.hideTimer);
+      state.showTimer = null; state.hideTimer = null;
+    }
+    function hide({ refocus = false } = {}) {
+      clearTimers();
+      const badge = state.badge;
+      state.badge = null; state.key = ""; state.html = ""; state.reaction = null; state.full = false; state.pinned = false;
+      if (isOpen()) card.hidePopover();
+      card.innerHTML = "";
+      if (refocus && badge?.isConnected) {
+        // Handing the keyboard back must not reopen what Escape just closed.
+        state.refocusing = true;
+        try { badge.focus({ preventScroll:true }); } finally { state.refocusing = false; }
+      }
+    }
+    function place() {
+      const badge = state.badge;
+      if (!badge || !isOpen()) return;
+      const chip = badge.getBoundingClientRect();
+      const { bounds, top: topEdge, bottom: bottomEdge } = anchors();
+      const box = bounds || { left:0, top:0, right:view.innerWidth, bottom:view.innerHeight };
+      const top = Math.max(box.top, topEdge ?? -Infinity) + 4;
+      const bottom = Math.min(box.bottom, bottomEdge ?? Infinity) - 4;
+      const GAP = 7;
+      card.style.maxHeight = "260px";
+      const wanted = card.offsetHeight;
+      const below = bottom - chip.bottom - GAP;
+      const above = chip.top - top - GAP;
+      const useBelow = below >= wanted || below > above;
+      card.style.maxHeight = `${Math.max(72, Math.min(260, useBelow ? below : above))}px`;
+      const width = card.offsetWidth;
+      const height = card.offsetHeight;
+      const left = Math.max(box.left + 12, Math.min(chip.left + chip.width / 2 - width / 2, box.right - width - 12));
+      const y = useBelow ? chip.bottom + GAP : chip.top - GAP - height;
+      card.dataset.side = useBelow ? "below" : "above";
+      card.style.left = `${Math.round(left)}px`;
+      card.style.top = `${Math.round(Math.max(top, y))}px`;
+      const list = card.querySelector(".rx-names-list");
+      const foot = card.querySelector("[data-rx-names-foot]");
+      if (list && foot) foot.textContent = list.scrollHeight > list.clientHeight + 1
+        ? `${state.reaction.count} people · scroll for more` : `${state.reaction.count} people`;
+    }
+    function show(badge, { full = false, pinned = false } = {}) {
+      // Only the hide timer yields here: a repaint that re-anchors an open card
+      // must not cancel a hover that is still dwelling on another badge.
+      clearTimeout(state.hideTimer); state.hideTimer = null;
+      const reaction = readReaction(badge);
+      const html = reactionNamesHtml(reaction, { full });
+      if (!html) return hide();
+      const key = `${badge.getAttribute("data-rx-toggle")}\u0000${badge.getAttribute("data-emoji")}`;
+      const unchanged = isOpen() && state.key === key && state.html === html;
+      state.badge = badge; state.key = key; state.reaction = reaction; state.full = full; state.pinned = pinned;
+      if (!unchanged) {
+        // The same names under a resting pointer keep their node, their scroll
+        // position and the keyboard; only different names repaint.
+        const list = card.querySelector(".rx-names-list");
+        const scrollTop = list ? list.scrollTop : 0;
+        const hadFocus = card.contains(root.activeElement);
+        state.html = html;
+        card.classList.toggle("full", full);
+        card.innerHTML = html;
+        const dialog = full || summaryNeedsSeeAll(reaction);
+        card.setAttribute("role", dialog ? "dialog" : "tooltip");
+        if (dialog) card.setAttribute("aria-label", `${reaction.emoji} reaction details`);
+        else card.removeAttribute("aria-label");
+        if (!isOpen()) card.showPopover();
+        const next = card.querySelector(".rx-names-list");
+        if (next) next.scrollTop = scrollTop;
+        if (hadFocus) card.querySelector("[data-rx-names-close]")?.focus({ preventScroll:true });
+      }
+      place();
+    }
+    function summaryNeedsSeeAll(reaction) { return reactionNamesSummary(reaction).others > 0; }
+    // The card stays while the pointer rests on it or on its badge, while
+    // either holds focus, or while "See all" has pinned it. Hover state is
+    // read late, after the dwell, so a repaint under a resting pointer keeps
+    // the card and a pointer that has really left lets it go.
+    function scheduleHide() {
+      clearTimeout(state.hideTimer);
+      state.hideTimer = setTimeout(() => {
+        state.hideTimer = null;
+        if (state.pinned) return;
+        if (card.matches(":hover") || state.badge?.matches(":hover")) return;
+        const active = root.activeElement;
+        if (active && (card.contains(active) || active === state.badge)) return;
+        hide();
+      }, RX_NAMES_HIDE_MS);
+    }
+    function sync(scope) {
+      // A thread repaint replaces every badge. Re-anchor to the same message
+      // and emoji, refresh the names, and vanish with a reaction that is gone.
+      if (!isOpen() || !state.badge) return;
+      const badge = state.badge.isConnected ? state.badge : scope?.querySelector(
+        `[data-rx-toggle="${CSS.escape(state.badge.getAttribute("data-rx-toggle") || "")}"][data-emoji="${CSS.escape(state.badge.getAttribute("data-emoji") || "")}"]`);
+      if (!badge) return hide();
+      show(badge, { full:state.full, pinned:state.pinned });
+      if (!state.pinned) scheduleHide();
+    }
+    root.addEventListener("pointerover", (event) => {
+      if (event.pointerType === "touch") return;
+      const badge = badgeOf(event.target);
+      if (!badge) return;
+      clearTimeout(state.hideTimer);
+      if (state.badge === badge && isOpen()) return;
+      clearTimeout(state.showTimer);
+      state.showTimer = setTimeout(() => { state.showTimer = null; if (badge.isConnected) show(badge); }, RX_NAMES_SHOW_MS);
+    });
+    root.addEventListener("pointerout", (event) => {
+      if (!badgeOf(event.target)) return;
+      const next = event.relatedTarget;
+      if (next && (card.contains(next) || badgeOf(next))) return;
+      clearTimeout(state.showTimer);
+      if (isOpen()) scheduleHide();
+    });
+    card.addEventListener("pointerenter", () => clearTimeout(state.hideTimer));
+    card.addEventListener("pointerleave", () => { if (!state.pinned) scheduleHide(); });
+    root.addEventListener("focusin", (event) => {
+      const badge = badgeOf(event.target);
+      if (!badge || state.refocusing) return;
+      clearTimeout(state.hideTimer);
+      if (state.badge === badge && isOpen()) return;
+      show(badge);
+    });
+    root.addEventListener("focusout", (event) => {
+      if (!badgeOf(event.target) && !card.contains(event.target)) return;
+      const next = event.relatedTarget;
+      if (next && (card.contains(next) || badgeOf(next))) return;
+      if (isOpen() && !state.pinned) scheduleHide();
+    });
+    card.addEventListener("pointerdown", (event) => {
+      // Focusing a top-layer button must not scroll the room underneath it.
+      if (event.target.closest("button")) event.preventDefault();
+    });
+    card.addEventListener("click", (event) => {
+      if (event.target.closest("[data-rx-names-all]")) {
+        if (state.badge) show(state.badge, { full:true, pinned:true });
+        card.querySelector("[data-rx-names-close]")?.focus({ preventScroll:true });
+      } else if (event.target.closest("[data-rx-names-close]")) {
+        hide({ refocus:true });
+      }
+    });
+    root.addEventListener("pointerdown", (event) => {
+      if (!isOpen()) return;
+      const target = event.target;
+      if (card.contains(target) || (badgeOf(target) && badgeOf(target) === state.badge)) return;
+      hide();
+    }, true);
+    root.addEventListener("keydown", (event) => {
+      if (!isOpen()) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        if (state.pinned) event.stopPropagation();
+        hide({ refocus:state.pinned });
+        return;
+      }
+      const list = card.querySelector(".rx-names-list");
+      const active = root.activeElement;
+      if (!list || !active || !(card.contains(active) || active === state.badge)) return;
+      if (["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End"].includes(event.key)) {
+        event.preventDefault();
+        if (event.key === "Home") list.scrollTop = 0;
+        else if (event.key === "End") list.scrollTop = list.scrollHeight;
+        else list.scrollTop += { ArrowDown:30, ArrowUp:-30, PageDown:list.clientHeight, PageUp:-list.clientHeight }[event.key];
+      }
+    }, true);
+    // scroll does not bubble, so capture reaches every nested room scroller;
+    // the card's own list may scroll freely.
+    root.addEventListener("scroll", (event) => { if (isOpen() && !card.contains(event.target)) hide(); }, true);
+    view?.addEventListener("resize", () => hide());
+    view?.addEventListener("blur", () => hide());
+    return { hide:() => hide(), sync, place, isOpen };
+  }
+  const reactionNames = installReactionNames(document, {
+    // The card lives in the top layer, so it is clamped to the visible pill by
+    // hand: inside the card, below the room header and above the composer.
+    anchors: () => ({
+      bounds: cardEl.getBoundingClientRect(),
+      top: thDetailEl.querySelector(".th-detail-head")?.getBoundingClientRect().bottom,
+      bottom: thHistoryEl.querySelector(".th-composer-dock")?.getBoundingClientRect().top,
+    }),
+  });
+  // Every fold, expansion and reader morph passes through the card's size.
+  new ResizeObserver(() => reactionNames.hide()).observe(cardEl);
   // The cancel control lives on the composer's reply face, which is inserted
   // both by a full shell paint and by an in-place face swap. One wiring, marked
   // on the node, so neither path can double-bind it.
@@ -16686,7 +16966,7 @@
         && !!m.body && String(m.body).length <= INLINE_BODY_MAX;
       const aggregates = (!REACTIONS_ENABLED || m.request || m.deletedAt || attachmentOnly) ? [] : ((m.reactions && m.reactions.aggregates) || []);
       const badges = aggregates.length ? `<div class="rx-badges" data-stop="1">${aggregates.map((reaction) =>
-        `<button type="button" class="rx-badge${reaction.reactedByMe ? " mine" : ""}"${canReact ? "" : " disabled"} data-rx-toggle="${esc(m.id)}" data-emoji="${esc(reaction.emoji)}" data-mine="${reaction.reactedByMe ? "1" : "0"}" aria-pressed="${reaction.reactedByMe ? "true" : "false"}" aria-label="${esc(reaction.emoji)} · ${reaction.count} · ${reaction.reactedByMe ? "Remove your reaction" : "Add your reaction"}" title="${esc((reaction.actors || []).map((actor) => actor.self ? "You" : actor.name).join(", "))}">${esc(reaction.emoji)}${reaction.count > 1 ? `<span class="n">${reaction.count}</span>` : ""}</button>`
+        reactionBadgeHtml(m.id, reaction, canReact)
       ).join("")}</div>` : "";
       const hostActionsPersistent = hasHostActions && (
         String(m.id) === latestHostActionRelayId
@@ -17024,6 +17304,8 @@
     for (const badge of newControls.querySelectorAll("[data-rx-toggle]")) {
       badge.addEventListener("click", async (event) => {
         event.stopPropagation();
+        // A read-only badge still answers a hover with its names; it just does not toggle.
+        if (badge.getAttribute("aria-disabled") === "true") return;
         const id = badge.getAttribute("data-rx-toggle");
         const emoji = badge.getAttribute("data-emoji");
         const action = badge.getAttribute("data-mine") === "1" ? "remove" : "add";
@@ -17034,6 +17316,7 @@
       });
     }
     wireReactionControls(newControls);
+    reactionNames.sync(thHistoryEl);
     wireTaskClaimControls(newControls, renderThreadDetail);
     wireAttachmentChips(newControls);
     wireRoomAttachments();
@@ -17611,6 +17894,7 @@
       : source === "slack" ? String(threadId || "") : "";
     const roomCoordinate = canonicalChatId || threadId;
     dismissReactionPickers();
+    reactionNames.hide();
     slackFocusedThreadId = "";
     threadDetailScrolledFor = null;
     threadDetailLiveFollow = RelayChatPresentation.reduceChatLiveFollow(threadDetailLiveFollow, { type:"reset" });
@@ -18060,7 +18344,9 @@
       </div>`;
   }
   function chatAgentDefaultsHtml() {
-    if (payload.features?.requests !== true || !window.relay.chatAgentPreferences) return "";
+    // Chat-agent defaults belong to @Claude/@Codex mentions, which keep their
+    // own gate now that Tasks are on for everyone.
+    if (payload.features?.agentMentions !== true || !window.relay.chatAgentPreferences) return "";
     if (!chatAgentPreferences) return `<div class="sv-open-section" data-stop="1"><div class="sv-open-title">Chat agents</div><div class="sv-open-intro">${esc(chatAgentPreferencesError || "Loading model defaults…")}</div></div>`;
     const rows = [
       { key:"claude", label:"@Claude", logo:"claudeCodeMark.svg", models:[["opus","Opus 5"],["fable","Fable 5"],["sonnet","Sonnet 5"],["haiku","Haiku 4.5"]], efforts:["low","medium","high","xhigh","max"] },
@@ -18840,7 +19126,7 @@
       refreshProviderInventory({ seq }).catch(() => {});
     })();
     const chatAgentTask = (async () => {
-      if (payload.features?.requests !== true || !window.relay.chatAgentPreferences) return;
+      if (payload.features?.agentMentions !== true || !window.relay.chatAgentPreferences) return;
       try {
         const result = await window.relay.chatAgentPreferences();
         if (seq !== settingsLoadSeq) return;
@@ -19782,6 +20068,7 @@
     const viewChanged = applyView._last !== activeView;
     applyView._last = activeView;
     if (viewChanged) dismissReactionPickers();
+    if (viewChanged) reactionNames.hide();
     if (activeView === "settings") {
       if (viewChanged) {
         loadSettings(); // renderAll painted the cached card; refresh it now

@@ -114,7 +114,7 @@ async function resolveRow(id, { log = () => {}, allowTaskRows = false } = {}) {
   if (!rowState) {
     const resolved = await resolvePublicOpenToken(id, { log });
     if (!allowTaskRows && resolved?.row?.taskId) {
-      throw new Error("Tasks are currently available only to Relay developer accounts on dev.");
+      throw new Error("The legacy task protocol is available only to Relay developer accounts on dev.");
     }
     return resolved;
   }
@@ -122,7 +122,7 @@ async function resolveRow(id, { log = () => {}, allowTaskRows = false } = {}) {
   // an ordinary-account open. Reject before reading content or calling
   // GET /v1/tasks/:id; explicit full callers opt in through allowTaskRows.
   if (!allowTaskRows && rowState.taskId) {
-    throw new Error("Tasks are currently available only to Relay developer accounts on dev.");
+    throw new Error("The legacy task protocol is available only to Relay developer accounts on dev.");
   }
   const content = readRowContent(rowState);
   // The staged packet's canonical Relay documents are the only content Open may
@@ -169,7 +169,7 @@ async function resolveRow(id, { log = () => {}, allowTaskRows = false } = {}) {
     ),
   };
   if (!allowTaskRows && row.taskId) {
-    throw new Error("Tasks are currently available only to Relay developer accounts on dev.");
+    throw new Error("The legacy task protocol is available only to Relay developer accounts on dev.");
   }
 
   // When the row points at a task, fetch the verified task object so the per-kind

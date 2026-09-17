@@ -104,12 +104,14 @@ test("downloads remain durable after failure and never erase concurrently queued
 });
 
 test("daemon delegates ordinary mail to its worker for every account role", async () => {
-  for (const requests of [false, true]) {
+  // The legacy task-protocol poll is the developers'; Tasks themselves are
+  // Relay rows and ride the ordinary poll on every row.
+  for (const legacyTaskProtocol of [false, true]) {
     let taskRan = false;
-    await daemonDeliveryTick({ includeOrdinary: false, features: { requests },
+    await daemonDeliveryTick({ includeOrdinary: false, features: { requests: true, legacyTaskProtocol },
       ordinaryPoll: () => assert.fail("ordinary mail must have only one owner"),
       taskPoll: async ({ includeOrdinary }) => { taskRan = true; assert.equal(includeOrdinary, false); return {}; },
     });
-    assert.equal(taskRan, requests);
+    assert.equal(taskRan, legacyTaskProtocol);
   }
 });

@@ -27,6 +27,7 @@ function productFeatures(options = {}) {
   // entitlement exists only on local/dev. Staging deliberately exercises the
   // production product surface even when it is offline with a cached developer
   // profile; the API independently enforces the same deployment boundary.
+  // Tasks are the exception: they left the developer row on 2026-09-17.
   const developerAccount = user?.accountKind === "human" && user?.isDeveloper === true;
   const developer = (environment === "local" || environment === "dev") && developerAccount;
   return Object.freeze({
@@ -36,7 +37,16 @@ function productFeatures(options = {}) {
     // Google Contacts sync is still under Dev validation, so it follows the
     // same server-owned developer-account gate as the other unreleased tools.
     googleContacts: developer,
-    requests: developer,
+    // Tasks are the shipped product on every deployment and for every account
+    // (David, 2026-09-17). The server enforces the same rule: any personal
+    // account may send, receive and act on a Task, on dev, staging and
+    // production alike. Until then a staging or production agent was handed a
+    // catalog with no Task in it and wrote a work request as a message.
+    requests: true,
+    // The pre-Requests task protocol (/v1/tasks, the agent inbox, task
+    // sessions) the daemon polls and relay_task_create drives. Its routes
+    // stay behind the developer gate on the server.
+    legacyTaskProtocol: developer,
     // Todo is paused everywhere, including local/dev developer accounts.
     // Keep its data and implementation available for a later re-enable.
     todo: false,
@@ -61,8 +71,8 @@ function productFeatures(options = {}) {
     // MCP / connected-apps inventory. Substrate for runs, not for reading —
     // so it rides the Tasks switch: the day Tasks turns on in an
     // environment, its Settings surfaces (permission modes + connections)
-    // turn on with it (David, 2026-08-18).
-    agentConnections: developer,
+    // turn on with it (David, 2026-08-18). That day is 2026-09-17.
+    agentConnections: true,
     // relay_ai_sessions / relay_ai_session and the daemon's session controller
     // (the observations upload + remote session operations they run on).
     aiSessions: developer,

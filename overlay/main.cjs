@@ -943,6 +943,10 @@ let PRODUCT_FEATURES = productFeatures({
   apiUrl: process.env.RELAY_API_URL || readConfigFile().apiUrl || "",
 });
 let TASK_FEATURES_ALLOWED = PRODUCT_FEATURES.requests;
+// The pre-Requests task protocol (/v1/tasks and its invitations, approvals and
+// task pages) stays a developer surface on the server; a shipped Task is a
+// Relay row and rides TASK_FEATURES_ALLOWED with the rest of the Requests board.
+let LEGACY_TASK_PROTOCOL_ALLOWED = PRODUCT_FEATURES.legacyTaskProtocol === true;
 let remoteCredentialRejected = false;
 let pendingSetupOpenRecord = null;
 let pendingSetupOpenPreviewCache = null;
@@ -1042,6 +1046,7 @@ async function refreshAccountProductFeatures() {
     remoteCredentialRejected = false;
     PRODUCT_FEATURES = next;
     TASK_FEATURES_ALLOWED = next.requests;
+    LEGACY_TASK_PROTOCOL_ALLOWED = next.legacyTaskProtocol === true;
     if (changed) {
       tasksLoadedOnce = null;
       canonicalChatsLoadedOnce = null;
@@ -1581,7 +1586,7 @@ function readRelays() {
     // "task" here is the NEW tasks-as-relays kind (an ordinary relay carrying a
     // job), allowed for ordinary accounts — unlike the legacy task protocol
     // kinds the mode gate exists to keep out.
-    .filter((p) => TASK_FEATURES_ALLOWED || p.relayNotificationKind === "plain_relay" || p.relayNotificationKind === "task")
+    .filter((p) => LEGACY_TASK_PROTOCOL_ALLOWED || p.relayNotificationKind === "plain_relay" || p.relayNotificationKind === "task")
     .map((p) => ({ p, documents: documentsForPacket(p) }))
     .map(({ p, documents }) => ({
       id: p.id,
@@ -2042,7 +2047,7 @@ async function refreshReactions(ids, { force = false } = {}) {
 let tasksCache = [];
 let tasksLoadedOnce = null; // a promise that resolves after the first task load
 async function refreshTasks() {
-  if (!TASK_FEATURES_ALLOWED) {
+  if (!LEGACY_TASK_PROTOCOL_ALLOWED) {
     tasksCache = [];
     return tasksCache;
   }
@@ -3873,8 +3878,8 @@ function approvalIdForRow(row) {
 }
 
 async function runMutation(label, fn) {
-  if (!TASK_FEATURES_ALLOWED) {
-    return { ok: false, error: "Tasks are currently available only to Relay developer accounts on dev." };
+  if (!LEGACY_TASK_PROTOCOL_ALLOWED) {
+    return { ok: false, error: "The legacy task protocol is available only to Relay developer accounts on dev." };
   }
   try {
     await fn();
@@ -4668,8 +4673,8 @@ async function openPacket(packetId, { sent = false, fresh = false, host: hostOve
     }
     finishFailed(message);
   };
-  if (!TASK_FEATURES_ALLOWED && (row?.taskId || isRelayTaskWebTarget(row?.actionUrl))) {
-    console.error("[overlay] refusing to open a Task for a non-developer account:", packetId);
+  if (!LEGACY_TASK_PROTOCOL_ALLOWED && (row?.taskId || isRelayTaskWebTarget(row?.actionUrl))) {
+    console.error("[overlay] refusing to open a legacy task for a non-developer account:", packetId);
     return finishFailed();
   }
   if (process.env.RELAY_OVERLAY_TEST_NO_HOST_OPEN === "1") return finishOpened();
@@ -4812,7 +4817,7 @@ function requestSessionPicker(packetId, { sent = false, host = "" } = {}) {
 // rail seeded with the task's objective + state. Historical coordination state
 // is read-only to the model. The web view is only used if the CLI fails.
 function openTaskDetail(taskId) {
-  if (!TASK_FEATURES_ALLOWED) return;
+  if (!LEGACY_TASK_PROTOCOL_ALLOWED) return;
   if (!taskId) return;
   frontmostBundleId((bundle) => {
     const host = resolveClickHost(bundle);
@@ -4899,8 +4904,8 @@ function openTaskDetail(taskId) {
 }
 
 function openUrlTarget(url) {
-  if (!TASK_FEATURES_ALLOWED && isRelayTaskWebTarget(url)) {
-    console.error("[overlay] refusing to open a Task URL for a non-developer account");
+  if (!LEGACY_TASK_PROTOCOL_ALLOWED && isRelayTaskWebTarget(url)) {
+    console.error("[overlay] refusing to open a legacy task URL for a non-developer account");
     return;
   }
   const target = absoluteUrl(url);
@@ -9252,8 +9257,8 @@ ipcMain.handle("relay:refreshTasks", async () => {
 // Live task detail for the in-pill task view (GET /v1/tasks/:id, same payload the
 // web detail page renders from). The renderer polls this while the view is open.
 ipcMain.handle("relay:taskStatus", async (_e, taskId) => {
-  if (!TASK_FEATURES_ALLOWED) {
-    return { ok: false, error: "Tasks are currently available only to Relay developer accounts on dev." };
+  if (!LEGACY_TASK_PROTOCOL_ALLOWED) {
+    return { ok: false, error: "The legacy task protocol is available only to Relay developer accounts on dev." };
   }
   if (!taskId) return { ok: false, error: "Missing task id." };
   try {

@@ -16,29 +16,33 @@ const DEVELOPER_SURFACES = {
 };
 // Editing and deleting one's own sent messages ship to every account on every
 // channel (David, 2026-09-17), so the flag reads true on both rows.
+// Tasks are on for every account on every deployment (David, 2026-09-17), and
+// Settings → Agent connections rides the Tasks switch (David, 2026-08-18), so
+// both read true on the ordinary row; only the legacy task protocol stays with
+// the developers.
 const ORDINARY_SURFACES = {
   topics: false, slack: false, peopleMentions: true, agentMentions: false,
-  relayWork: false, agentConnections: false, aiSessions: false, connectors: false, messageMutations: true,
+  relayWork: false, agentConnections: true, aiSessions: false, connectors: false, messageMutations: true,
 };
 
 test("developer capabilities require both the server-owned role and a non-production environment", async () => {
   assert.deepEqual(productFeatures({ env: { NODE_ENV: "development" }, user: ORDINARY_USER }), {
-    environment: "local", developer: false, orgAdmin: false, googleContacts: false, requests: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
+    environment: "local", developer: false, orgAdmin: false, googleContacts: false, requests: true, legacyTaskProtocol: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { NODE_ENV: "development" }, user: DEVELOPER }), {
-    environment: "local", developer: true, orgAdmin: false, googleContacts: true, requests: true, todo: false, cowork: false, ...DEVELOPER_SURFACES,
+    environment: "local", developer: true, orgAdmin: false, googleContacts: true, requests: true, legacyTaskProtocol: true, todo: false, cowork: false, ...DEVELOPER_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { RELAY_UPDATE_CHANNEL: "dev" }, user: DEVELOPER }), {
-    environment: "dev", developer: true, orgAdmin: false, googleContacts: true, requests: true, todo: false, cowork: false, ...DEVELOPER_SURFACES,
+    environment: "dev", developer: true, orgAdmin: false, googleContacts: true, requests: true, legacyTaskProtocol: true, todo: false, cowork: false, ...DEVELOPER_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { RELAY_UPDATE_CHANNEL: "staging" }, user: DEVELOPER }), {
-    environment: "staging", developer: false, orgAdmin: false, googleContacts: false, requests: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
+    environment: "staging", developer: false, orgAdmin: false, googleContacts: false, requests: true, legacyTaskProtocol: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { RELAY_ENV: "staging" }, user: DEVELOPER }), {
-    environment: "staging", developer: false, orgAdmin: false, googleContacts: false, requests: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
+    environment: "staging", developer: false, orgAdmin: false, googleContacts: false, requests: true, legacyTaskProtocol: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: {}, user: DEVELOPER }), {
-    environment: "production", developer: false, orgAdmin: false, googleContacts: false, requests: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
+    environment: "production", developer: false, orgAdmin: false, googleContacts: false, requests: true, legacyTaskProtocol: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
   });
   const { todoStewardTick } = await import("../src/todo-steward-runtime.js");
   const untouchable = new Proxy({}, { get() { throw new Error("Todo client must not run"); } });
@@ -61,6 +65,7 @@ test("live server role outranks the cached pairing profile", async () => {
     config: { user: ORDINARY_USER },
     env: { RELAY_UPDATE_CHANNEL: "dev" },
   });
+  assert.equal(promoted.legacyTaskProtocol, true);
   assert.equal(promoted.requests, true);
 
   const demoted = await accountProductFeatures({
@@ -68,7 +73,8 @@ test("live server role outranks the cached pairing profile", async () => {
     config: { user: DEVELOPER },
     env: { RELAY_UPDATE_CHANNEL: "dev" },
   });
-  assert.equal(demoted.requests, false);
+  assert.equal(demoted.legacyTaskProtocol, false);
+  assert.equal(demoted.requests, true, "Tasks are on for every account");
 
   const production = await accountProductFeatures({
     client: { token: "dev_test", async me() { return { user: DEVELOPER }; } },
@@ -76,7 +82,8 @@ test("live server role outranks the cached pairing profile", async () => {
     env: { RELAY_UPDATE_CHANNEL: "stable" },
   });
   assert.equal(production.developer, false);
-  assert.equal(production.requests, false);
+  assert.equal(production.legacyTaskProtocol, false);
+  assert.equal(production.requests, true, "Tasks are on for every deployment");
 });
 
 test("developer status brings the complete Task substrate on dev but never Cowork", () => {
@@ -143,10 +150,14 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
   // surface it is not entitled to call, and this assertion pinned that.
   // Editing and deleting one's own sent messages joined the shipped catalog on
   // 2026-09-17: they are ordinary messaging, like sending.
+  // Tasks joined the shipped catalog on 2026-09-17, with the inbox housekeeping
+  // that rides the same row.
   assert.deepEqual(ordinary, [
+    "relay_task_start", "relay_task_complete", "relay_task_unclaim",
     "relay_send", "relay_forward", "relay_share_link", "relay_contacts_search", "relay_groups_list", "relay_group_create", "relay_group_update",
     "relay_group_delete", "relay_contact_update", "relay_session_updates", "relay_inbox_list", "relay_sent_list", "relay_thread_fetch",
     "relay_chats_list", "relay_chat_fetch", "relay_chat_send", "relay_message_edit", "relay_message_delete", "relay_mark_read",
+    "relay_inbox_delete", "relay_recently_deleted_list", "relay_recently_deleted_restore", "relay_file_download",
   ]);
   // A developer on production gets the same catalog as every ordinary user.
   const productionDeveloper = productFeatures({ env: {}, user: DEVELOPER });
@@ -165,7 +176,7 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
     ["relay_ai_session", { action: "start", provider: "claude", message: "hi", idempotencyKey: "k1" }],
     ["relay_connector_call_tool", { provider: "gmail", toolName: "GMAIL_FETCH", idempotencyKey: "k2" }],
   ]) {
-    await assert.rejects(handleCall(client, name, args, { features: shipped }), /available only to Relay developer accounts/);
+    await assert.rejects(handleCall(client, name, args, { features: shipped }), /unavailable in this Relay release/);
   }
   // The shipped row reaches transport for an edit or a delete; the switch, when
   // off, still refuses before transport.
@@ -330,7 +341,7 @@ test("the daemon's session controller neither uploads nor listens when AI sessio
   assert.deepEqual(logs, ["session directory unavailable: 503 during a rolling deploy"]);
 });
 
-test("one role-aware daemon polls tasks only for a developer account", async () => {
+test("one role-aware daemon polls the legacy task protocol only for a developer account", async () => {
   const { daemonDeliveryTick } = await import("../src/task-daemon.js");
   const shipped = productFeatures({ env: {}, user: ORDINARY_USER });
   let ordinaryRuns = 0;
@@ -374,7 +385,7 @@ test("production agent-work entry points enforce the feature row before native t
   const cli = fs.readFileSync(path.join(here, "../bin/relay.js"), "utf8");
   const gate = cli.slice(cli.indexOf("async function requireTaskFeatures("), cli.indexOf("function companionVersion()"));
   assert.match(gate, /accountProductFeatures\(\{/);
-  assert.match(gate, /if \(!features\.requests\)/);
+  assert.match(gate, /if \(!features\.legacyTaskProtocol\)/);
   assert.match(gate, /only to Relay developer accounts/);
   assert.match(cli, /--full and --messages-only were removed/);
 });

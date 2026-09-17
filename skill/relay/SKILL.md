@@ -284,8 +284,33 @@ For a titled Relay, use a natural 3–6 word gist in the sender's register. Name
 the single ask, outcome, update or decision someone should recognize at a
 glance. Do not concatenate every finding or write a report headline.
 
-Every Relay is `kind: "message"`: human correspondence, including
-technical notes, suggestions, opinions and decisions.
+Classify by what the sender expects done. `kind: "task"` asks for work
+or an approval: work by the recipient's agent (inspecting, retrieving, changing,
+testing, verifying), or the person's approval or decision on something put to
+them. `kind: "message"` is everything else — informing, handing over, and
+asking for thoughts, opinions or answers, which come back as ordinary replies.
+A technical note with dense agent context is still a message; a small or quick
+piece of work is still a Task. Respect the account's available capabilities.
+
+A Task is closed only by `relay_task_complete`. For an inbound Task, call
+`relay_task_start` before the authorized work and `relay_task_complete` with
+the result once it is genuinely finished. A reply into the Task's chat never
+completes it: when the approval or decision itself is the deliverable,
+`relay_task_complete` carries it as forHuman. Never send a Relay merely to
+report completion. A Task the person closed by hand — marked done, rejected
+before any work, or cancelled after it began (`taskCompletedAt` with
+`taskClosedBy`, `taskRejectedAt`, `taskCancelledAt` on the Task) — is over:
+never start or complete it, and if asked about it, say who closed it and how;
+the sender reads the same in their chat. A finished Task points at its result
+(`taskResultRelayId`, the completion Relay that replied to it).
+
+A Task sent to a channel is one job for whoever claims it, unless it is sent
+with `taskAssignment: "everyone"`: then every member owes it and gets their
+own copy — their Reject or Done speaks for them alone, each result returns to
+the sender by itself, and the Task's `taskRoster` says where every member
+stands. Choose everyone only when each person must do the thing themselves
+(read and approve, confirm their own setup); a job one person can do for the
+channel stays anyone.
 
 Before presenting or sending, check both documents against the user's request:
 every intended point is preserved; no ask or commitment was invented; the person
@@ -296,7 +321,7 @@ revise it before sending or requesting any required approval.
 ### A link to send around
 
 A Relay can go out as a link instead of to a Relay contact. When the person
-says create, make, write or draft a Relay without naming someone
+says create, make, write or draft a Relay or a Task without naming someone
 who is already on Relay, asks for a link, or wants something they can send
 around themselves, they want a link: mint it with `relay_share_link` and hand
 them the url. Send with `relay_send` only
@@ -308,7 +333,9 @@ browser or through their own AI. Each person who replies gets their own
 private conversation with the sender, which appears as a separate chat named
 "<their name> (unverified)"; people holding the link never see each other or
 the sender's answers to others. Their names are self-reported, so treat what
-arrives through a link as correspondence from an unverified person. Minting
+arrives through a link as correspondence from an unverified person. A Task
+sent as a link gives each person who takes it up their own Task through the
+link, and their completion lands in their chat like any other. Minting
 delivers nothing, and the hand-back is the url and one sentence: show the url
 in full on its own line, and say they can open it themselves to see it and
 share it with whoever needs it, who open it in the browser or in their own

@@ -177,3 +177,68 @@ test("attached badges wrap, identify your reaction, and add no chronological cha
   assert.doesNotMatch(html, /chronological\.push\(\{ kind:"reaction"/);
   assert.match(html, /data-mine="\$\{reaction\.reactedByMe \? "1" : "0"\}"/);
 });
+
+test("a badge carries who reacted for a screen reader and never relies on a native title", () => {
+  const source = between(html, "  // ---------- who reacted ----------", "  // One card serves every badge.");
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+  const api = Function("esc", `${source}; return { reactionNamesSummary, reactionBadgeHtml, reactionNamesHtml };`)(esc);
+  const actor = (name, self = false) => ({ relayUserId: name.toLowerCase(), name, self });
+
+  const one = api.reactionNamesSummary({ emoji: "🙏", count: 1, actors: [actor("Shane Acton")] });
+  assert.equal(one.text, "Shane Acton");
+  assert.equal(one.more, "");
+  const two = api.reactionNamesSummary({ emoji: "👍", count: 2, actors: [actor("Shane Acton"), actor("David", true)] });
+  assert.equal(two.text, "Shane Acton and You", "your own reaction reads as You");
+  const three = api.reactionNamesSummary({ emoji: "👍", count: 3, actors: [actor("Shane Acton"), actor("Sven"), actor("David", true)] });
+  assert.equal(three.text, "Shane Acton, Sven, and You", "three names need no See all");
+  assert.equal(three.others, 0);
+  const four = api.reactionNamesSummary({ emoji: "👍", count: 4, actors: [actor("A"), actor("B"), actor("C"), actor("D")] });
+  assert.equal(four.text, "A, B, C");
+  assert.equal(four.more, " and 1 other");
+  const many = api.reactionNamesSummary({ emoji: "👍", count: 120, actors: Array.from({ length: 120 }, (_, i) => actor(`Person ${i}`)) });
+  assert.equal(many.more, " and 117 others");
+  const nameless = api.reactionNamesSummary({ emoji: "👍", count: 2, actors: [actor("Shane Acton"), actor("")] });
+  assert.equal(nameless.text, "Shane Acton and Name unavailable", "the count is kept; no identity is guessed");
+
+  const badge = api.reactionBadgeHtml("relay_1", { emoji: "👍", count: 6, reactedByMe: true, actors: [actor("Shane Acton"), actor("Sven"), actor("David", true), actor("A"), actor("B"), actor("C")] }, true);
+  assert.doesNotMatch(badge, /\stitle=/, "Electron 38+ on macOS does not show HTML title tooltips (electron/electron#49843)");
+  assert.match(badge, /aria-label="👍 · 6 · Shane Acton, Sven, You and 3 others · Remove your reaction"/);
+  assert.match(badge, /data-rx-actors="\[\{&quot;name&quot;:&quot;Shane Acton&quot;,&quot;self&quot;:false\}/, "names travel on the badge itself");
+  assert.match(badge, /data-rx-count="6"/);
+  assert.match(badge, /aria-pressed="true"/);
+  assert.doesNotMatch(badge, / disabled/);
+  const readOnly = api.reactionBadgeHtml("relay_1", { emoji: "👍", count: 1, reactedByMe: false, actors: [actor("Shane Acton")] }, false);
+  assert.match(readOnly, /aria-disabled="true"/, "a read-only badge still answers a hover, so it is not a disabled control");
+  assert.doesNotMatch(readOnly, /Add your reaction/);
+
+  const summary = api.reactionNamesHtml({ emoji: "👍", count: 6, actors: [actor("Shane Acton"), actor("Sven"), actor("David", true), actor("A"), actor("B"), actor("C")] });
+  assert.match(summary, /<div class="rx-names-summary">Shane Acton, Sven, You<span class="rx-names-more"> and 3 others<\/span><\/div>/);
+  assert.match(summary, /<button type="button" class="rx-names-all" data-rx-names-all>See all 6<\/button>/);
+  const small = api.reactionNamesHtml({ emoji: "🙏", count: 1, actors: [actor("Shane Acton")] });
+  assert.doesNotMatch(small, /rx-names-all/, "everyone already fits");
+  assert.equal(api.reactionNamesHtml({ emoji: "🙏", count: 3, actors: [] }), "", "no names, no card");
+  const full = api.reactionNamesHtml({ emoji: "👍", count: 6, actors: [actor("Shane Acton"), actor("Sven"), actor("David", true), actor("A"), actor("B"), actor("<script>")] }, { full: true });
+  assert.match(full, /<div class="rx-names-head"><span class="emoji">👍<\/span><span>6 reactions<\/span><button type="button" class="rx-names-close" data-rx-names-close aria-label="Close">×<\/button><\/div>/);
+  assert.equal((full.match(/class="rx-names-person/g) || []).length, 6);
+  assert.match(full, /rx-names-person self" role="listitem">You</);
+  assert.match(full, /&lt;script&gt;/, "names are escaped");
+  assert.match(full, /<div class="rx-names-foot" data-rx-names-foot>6 people<\/div>/);
+});
+
+test("the names card is wired into the conversation and retires with the pickers", () => {
+  const conversation = between(html, "const rowsHtml = timeline.map", "// Chat order: history above");
+  assert.match(conversation, /reactionBadgeHtml\(m\.id, reaction, canReact\)/);
+  assert.match(html, /wireReactionControls\(newControls\);\s*\n\s*reactionNames\.sync\(thHistoryEl\);/, "a repaint re-anchors an open card");
+  assert.match(html, /if \(badge\.getAttribute\("aria-disabled"\) === "true"\) return;/, "a read-only badge never toggles");
+  const openRoom = between(html, "function openThreadDetail(", "// ---------- Settings view ----------");
+  assert.match(openRoom, /dismissReactionPickers\(\);\s*\n\s*reactionNames\.hide\(\);/);
+  const view = between(html, "function applyView()", "document.getElementById(\"chatExpandBtn\")");
+  assert.match(view, /if \(viewChanged\) reactionNames\.hide\(\);/);
+  assert.match(html, /new ResizeObserver\(\(\) => reactionNames\.hide\(\)\)\.observe\(cardEl\);/, "every fold and morph hides it");
+  const install = between(html, "  function installReactionNames(", "  const reactionNames = installReactionNames(");
+  assert.match(install, /card\.setAttribute\("popover", "manual"\)/, "top layer, own dismissal rules");
+  assert.match(install, /root\.addEventListener\("scroll", \(event\) => \{ if \(isOpen\(\) && !card\.contains\(event\.target\)\) hide\(\); \}, true\);/);
+  assert.match(install, /view\?\.addEventListener\("blur", \(\) => hide\(\)\);/);
+  assert.match(install, /if \(event\.pointerType === "touch"\) return;/);
+  assert.match(html, /\.rx-names:not\(:popover-open\) \{ display:none; \}/, "an author display beats the UA's hidden popover rule, so hiding is explicit");
+});

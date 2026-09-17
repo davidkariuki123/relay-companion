@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-import { TODO_STATUS_RULE, RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS, STARTUP_INSTRUCTIONS_BUDGET, STARTUP_INSTRUCTIONS_RESERVE, SESSION_CHECKIN_AUDIT, TOOLS, toolsForAccount } from "../src/mcp.js";
+import { TODO_STATUS_RULE, RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS, STARTUP_INSTRUCTIONS_BUDGET, STARTUP_INSTRUCTIONS_RESERVE, SESSION_CHECKIN_AUDIT, TOOLS, startupInstructionsFor, toolsForAccount } from "../src/mcp.js";
 
 const byName = new Map(TOOLS.map((tool) => [tool.name, tool]));
 const codexByName = new Map(toolsForAccount(
@@ -145,9 +145,16 @@ test("startup guidance and owner schemas preserve the complete product ontology"
   }
   assert.match(
     source,
-    /instructions:\s*features\.requests[\s\S]{0,400}?instructionsWithTopics\(RELAY_MCP_INSTRUCTIONS[\s\S]{0,200}?:\s*REQUESTS_DISABLED_INSTRUCTIONS/,
+    /instructions:\s*features\.topics === false[\s\S]{0,120}?startupInstructionsFor\(features\)[\s\S]{0,120}?instructionsWithTopics\(startupInstructionsFor\(features\)/,
     "the MCP initialize response carries guidance for the active product surface",
   );
+  // Tasks and Topics are separate switches: the production row (Tasks on,
+  // Topics off) is taught the Task close rule and nothing about boards.
+  const production = startupInstructionsFor({ requests: true, topics: false });
+  assert.match(production, /relay_task_start before doing an inbound Task/);
+  assert.doesNotMatch(production, /Topic|auto-post/);
+  assert.equal(startupInstructionsFor({ requests: true, topics: true }), RELAY_MCP_INSTRUCTIONS);
+  assert.equal(startupInstructionsFor({ requests: false, topics: false }), REQUESTS_DISABLED_INSTRUCTIONS);
 });
 
 test("no model-facing tool resurrects removed content fields or visible topic names", () => {
@@ -193,7 +200,7 @@ test("relay_send requires one recipient, an explicit kind, and the two-document 
   assert.match(devSkillGuide, /Classify by what the sender expects done/);
   assert.match(devSkillGuide, /asking for thoughts, opinions or answers, which come back as ordinary replies/);
   assert.match(devSkillGuide, /A Task is closed only by `relay_task_complete`/);
-  assert.doesNotMatch(skillGuide, /relay_task_complete/, "prod has no Tasks yet");
+  assert.match(skillGuide, /A Task is closed only by `relay_task_complete`/, "Tasks ship on every deployment, so the production skill teaches them too");
   assert.match(send.inputSchema.properties.title.description, /3-6 word gist/i);
   assert.match(humanDescription, /read the installed Relay skill/i);
   assert.match(humanDescription, /preserve the human's intent and invent no asks or commitments/);

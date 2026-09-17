@@ -135,13 +135,31 @@ const TOPIC_STANDING_RULES_TEXT = TOPIC_STANDING_RULES.map((rule, index) => `${i
 const MEDIUM_ROUTING =
   `Relay is the user's default general direct-message and saved-channel communication layer; an explicitly requested other medium overrides Relay. ${EXPLICIT_PLAIN_TEXT_ROUTING} ${UNRESOLVED_RECIPIENT_ROUTING}`;
 
+const TASK_STARTUP_RULE =
+  "Call relay_task_start before doing an inbound Task and relay_task_complete afterward; Task Runs finish automatically.";
+
 export const RELAY_MCP_INSTRUCTIONS = [
   RELAY_MCP_ESSENTIALS,
   SESSION_CHECKIN_RULE,
   MEDIUM_ROUTING,
   TOPICS_STARTUP_RULE,
-  "Call relay_task_start before doing an inbound Task and relay_task_complete afterward; Task Runs finish automatically.",
+  TASK_STARTUP_RULE,
 ].join(" ");
+
+// Tasks and Topics are separate switches: Tasks are on for every account on
+// every deployment, Topics are still the developers'. The startup block names
+// exactly the features the account has, no more (a production agent must not
+// be told about a Topic surface it cannot reach) and no less (it must be told
+// how to close a Task it can receive).
+export function startupInstructionsFor({ requests = true, topics = true } = {}) {
+  return [
+    RELAY_MCP_ESSENTIALS,
+    topics ? SESSION_CHECKIN_RULE : SESSION_CHECKIN_RULE_ORDINARY,
+    MEDIUM_ROUTING,
+    ...(topics ? [TOPICS_STARTUP_RULE] : []),
+    ...(requests ? [TASK_STARTUP_RULE] : []),
+  ].join(" ");
+}
 
 export const REQUESTS_DISABLED_INSTRUCTIONS = [
   RELAY_MCP_ESSENTIALS,
@@ -1597,6 +1615,7 @@ function sentListLimit(value) {
 function toolsForFeatures(tools, {
   requests = true,
   aiSessions = true,
+  agentMentions,
   connectors = true,
   messageMutations = true,
   todo = true,
@@ -1604,6 +1623,10 @@ function toolsForFeatures(tools, {
 } = {}) {
   let listed = tools;
   if (!aiSessions) listed = listed.filter((tool) => !AI_SESSION_TOOL_NAMES.has(tool.name));
+  // The legacy owned @Claude/@Codex run reporters ride agent mentions, not
+  // Tasks: their routes stay behind the developer gate on the server, so an
+  // account whose policy says agent mentions are off must not be offered them.
+  if (agentMentions === false) listed = listed.filter((tool) => !AGENT_RUN_TOOL_NAMES.has(tool.name));
   // Message classification is available to every account, independently of Topics.
   if (!topics) listed = listed.filter((tool) => !TOPIC_TOOL_NAMES.has(tool.name));
   if (!connectors) listed = listed.filter((tool) => !CONNECTOR_TOOL_NAMES.has(tool.name));
@@ -1793,6 +1816,7 @@ function toolsForCallingSurface(tools, surface = relayCallingSurface()) {
 // server-owned canViewAdminDashboard flag). These stay in the ordinary profile
 // so staff on a production install still get them, but every other account
 // neither lists nor calls them.
+const AGENT_RUN_TOOL_NAMES = new Set(["relay_agent_progress", "relay_agent_complete"]);
 export const ORG_ADMIN_TOOL_NAMES = new Set(["relay_org_prepare", "relay_org_invite", "relay_team_prepare", "relay_group_transfer_admin"]);
 const ORG_ADMIN_TOOLS = ORG_ADMIN_TOOL_NAMES;
 
@@ -2125,6 +2149,9 @@ async function handleAdmittedCall(client, name, args, {
     throw new Error(`Tool ${name} is unavailable in this Relay release`);
   }
   if (features.connectors === false && CONNECTOR_TOOL_NAMES.has(name)) {
+    throw new Error(`Tool ${name} is unavailable in this Relay release`);
+  }
+  if (features.agentMentions === false && AGENT_RUN_TOOL_NAMES.has(name)) {
     throw new Error(`Tool ${name} is unavailable in this Relay release`);
   }
   if (features.messageMutations === false && MESSAGE_MUTATION_TOOL_NAMES.has(name)) {
@@ -2857,11 +2884,11 @@ export async function createRelayMcpSession({
       // announces it (see session-digest.cjs); the SDK refuses the notification
       // unless the capability is declared.
       capabilities: { tools: { listChanged: true }, experimental: { "claude/channel": {} } },
-      instructions: features.requests
-        // Developer row: the person's subscribed topics ride the block so a
-        // session with no hook still knows them from its first prompt.
-        ? (features.topics === false ? RELAY_MCP_INSTRUCTIONS : instructionsWithTopics(RELAY_MCP_INSTRUCTIONS, { accountScope: client.token || "" }))
-        : REQUESTS_DISABLED_INSTRUCTIONS,
+      // With Topics on, the person's subscribed topics ride the block so a
+      // session with no hook still knows them from its first prompt.
+      instructions: features.topics === false
+        ? startupInstructionsFor(features)
+        : instructionsWithTopics(startupInstructionsFor(features), { accountScope: client.token || "" }),
     },
   );
 

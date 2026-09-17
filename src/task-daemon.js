@@ -829,7 +829,12 @@ export async function daemonDeliveryTick({
   ordinaryPoll = pollOrdinaryRelayOnce,
   includeOrdinary = true,
 } = {}) {
-  if (features && features.requests === false) {
+  // The task poll is the legacy task protocol (/v1/tasks, agent-inbox,
+  // connectors), whose routes stay behind the developer gate on the server.
+  // A shipped Task is a Relay row and arrives through the ordinary poll, so
+  // an account with Tasks on but no developer row must not poll the legacy
+  // routes: every tick would log a 403.
+  if (features && features.legacyTaskProtocol === false) {
     const result = includeOrdinary ? await ordinaryPoll({ client, log }) : { ordinaryRelays: [], inboxOk: true };
     return {
       ordinaryOnly: true,
@@ -849,7 +854,7 @@ function daemonProductFeatures(log, user) {
   // meets these lines while debugging an agent must not read them as "your
   // Relay tools were removed" — ordinary MCP tools and delivery are untouched.
   if (!features.aiSessions) log("remote session operations off (developer-only feature); ordinary Relay tools and delivery unaffected");
-  if (!features.requests) log("Tasks off (developer-only feature); ordinary Relay tools, sending, and delivery all stay on");
+  if (!features.legacyTaskProtocol) log("legacy task protocol off (developer-only feature); Tasks, ordinary Relay tools, sending, and delivery all stay on");
   return features;
 }
 

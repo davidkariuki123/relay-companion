@@ -11,8 +11,8 @@ import {
   ORDINARY_RELAY_TOOL_NAMES,
   ORG_ADMIN_TOOL_NAMES,
   RELAY_MCP_INSTRUCTIONS,
-  REQUESTS_DISABLED_INSTRUCTIONS,
   TOOLS,
+  startupInstructionsFor,
 } from "../src/mcp.js";
 
 const relayBin = fileURLToPath(new URL("../bin/relay.js", import.meta.url));
@@ -30,6 +30,14 @@ for (const gated of ["relay_todo_update", "relay_todo_visibility", "relay_todo_r
 // Organisation onboarding is internal staff work, so a session that is not
 // staff (no canViewAdminDashboard) never lists it, on any channel.
 for (const staffOnly of ORG_ADMIN_TOOL_NAMES) PRODUCTION_ORDINARY_RELAY_TOOL_NAMES.delete(staffOnly);
+// Tasks are on for every account on every deployment (2026-09-17): the Task
+// tools and the inbox housekeeping that rides the same row ship to production.
+for (const task of ["relay_task_start", "relay_task_complete", "relay_task_unclaim", "relay_inbox_delete", "relay_recently_deleted_list", "relay_recently_deleted_restore", "relay_file_download"]) {
+  PRODUCTION_ORDINARY_RELAY_TOOL_NAMES.add(task);
+}
+// Production has Tasks but not Topics, so its startup block teaches the Task
+// close rule and stays silent about boards.
+const PRODUCTION_INSTRUCTIONS = startupInstructionsFor({ requests: true, topics: false });
 
 async function inspectMcp({ developer = false, staff = false, updateChannel = "stable" }) {
   const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-mcp-startup-"));
@@ -70,14 +78,16 @@ async function inspectMcp({ developer = false, staff = false, updateChannel = "s
 
 test("MCP initialize returns complete startup teachings before tools are selected", async () => {
   const messages = await inspectMcp({ developer: false });
-  assert.equal(messages.instructions, REQUESTS_DISABLED_INSTRUCTIONS);
+  assert.equal(messages.instructions, PRODUCTION_INSTRUCTIONS);
+  assert.match(messages.instructions, /relay_task_start/);
+  assert.doesNotMatch(messages.instructions, /Topic/);
   assert.deepEqual(
     new Set(messages.tools.map((tool) => tool.name)),
     PRODUCTION_ORDINARY_RELAY_TOOL_NAMES,
   );
 
   const productionDeveloper = await inspectMcp({ developer: true });
-  assert.equal(productionDeveloper.instructions, REQUESTS_DISABLED_INSTRUCTIONS);
+  assert.equal(productionDeveloper.instructions, PRODUCTION_INSTRUCTIONS);
   assert.deepEqual(
     new Set(productionDeveloper.tools.map((tool) => tool.name)),
     PRODUCTION_ORDINARY_RELAY_TOOL_NAMES,

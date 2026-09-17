@@ -120,8 +120,10 @@ async function requireTaskFeatures() {
     apiUrl: apiUrl(),
     timeoutMs: 15_000,
   });
-  if (!features.requests) {
-    throw new Error("Requests are currently available only to Relay developer accounts on dev.");
+  // Both callers drive the legacy task protocol (the task-session poll and
+  // `open --task`); a shipped Task is a Relay row and needs no gate here.
+  if (!features.legacyTaskProtocol) {
+    throw new Error("The legacy task protocol is available only to Relay developer accounts on dev.");
   }
   return features;
 }
@@ -701,7 +703,9 @@ async function cmdOpen(positional, flags) {
     id,
     host,
     log,
-    allowTaskRows: features.requests,
+    // A row with a taskId is the legacy task protocol (GET /v1/tasks/:id);
+    // a shipped Task is a Relay row and opens like any other.
+    allowTaskRows: features.legacyTaskProtocol === true,
     forceFresh: Boolean(flags.fresh),
     cwd: flags.cwd ? String(flags.cwd) : "",
     model: flags.model ? String(flags.model) : "",
