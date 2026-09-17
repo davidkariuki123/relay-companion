@@ -1557,7 +1557,7 @@
     .th-host-actions, .th-msg.host-intent-open .th-host-actions,
     .th-msg.host-focus-open .th-host-actions, .th-msg.host-touch-open .th-host-actions {
       transition:none !important; }
-    .th-msg.opening .th-host-logo { animation:none; }
+    .th-msg.opening .th-host-logo, .th-host-col.opening .th-host-logo { animation:none; }
     .th-host-disclosure .chev { transition:none; }
   }
   /* The B-rule, said where hand-offs actually happen (the reader is off the
@@ -1603,7 +1603,6 @@
   .sv-open-row { display:flex; align-items:center; gap:11px; min-height:54px; padding:10px 12px; }
   .sv-open-row + .sv-open-row { border-top:1px solid var(--edge); }
   .sv-open-logo { width:28px; height:28px; flex:0 0 28px; border-radius:7px; object-fit:contain; }
-  .sv-open-logo-blank { display:block; }
   .sv-open-copy { min-width:0; flex:1 1 auto; display:flex; flex-direction:column; }
   .sv-open-name { font-family:var(--sans); font-size:14px; line-height:1.3; font-weight:600; color:var(--ink); }
   .sv-open-why { margin-top:2px; font-family:var(--sans); font-size:10.5px; line-height:1.4; color:var(--muted-3); }
@@ -1729,39 +1728,34 @@
   .rd-host-actions { margin:18px auto 0; width:min(100%, 560px); }
   .rd-host-actions .th-host-actions { flex:none; width:100%; margin:0; }
   .rd-host-actions .th-host-actions-inner { border:1px solid var(--hair); border-radius:14px; }
-  /* The reader's sheet: four tiles across, the mark on top, two words under
-     the name; the chat apps first, the agents on this Mac after. */
-  .th-host-sheet { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:8px; padding:10px; }
-  .th-host-tile { --host-color:var(--brand-codex); appearance:none; min-width:0; padding:14px 4px 12px; cursor:pointer; text-align:center;
-    border:1px solid var(--hair); border-radius:12px;
-    background:linear-gradient(180deg, color-mix(in srgb, var(--host-color) 9%, var(--wash)), var(--wash) 80%);
-    display:grid; justify-items:center; gap:7px;
-    transition:border-color var(--t-fast) var(--settle), transform var(--t-fast) var(--settle); }
+  /* The reader's sheet: one line of chips — "Open in" once, then each app as
+     a rectangular chip with its mark and its name; the chat apps first, the
+     agents on this Mac after. A chip is there only while its switch is on;
+     the row centres whatever is left. Chips, not tiles, so the letter keeps
+     the screen: the sheet is 40px tall, not 120 (David, 2026-09-17). */
+  .th-host-sheet { display:flex; flex-wrap:wrap; justify-content:center; align-items:center; gap:6px; padding:8px 10px; }
+  .th-host-lead { font:600 11.5px/1 var(--sans); color:var(--muted); margin-right:4px; }
+  .th-host-tile { --host-color:var(--brand-codex); appearance:none; flex:0 0 auto; display:inline-flex; align-items:center; gap:7px; padding:6px 11px 6px 7px; cursor:pointer; text-align:left;
+    border:1px solid var(--hair); border-radius:8px;
+    background:linear-gradient(180deg, color-mix(in srgb, var(--host-color) 9%, var(--wash)), var(--wash) 80%); }
   .th-host-tile[data-host="claude"], .th-host-tile[data-host="claude-app"] { --host-color:var(--brand-anthropic); }
   .th-host-tile[data-host="chatgpt"] { --host-color:var(--ink); background:linear-gradient(180deg, color-mix(in srgb, var(--ink) 6%, var(--wash)), var(--wash) 80%); }
-  .th-host-tile .th-host-logo { width:36px; height:36px; border-radius:9px; }
-  .th-host-tile .th-host-copy { align-items:center; max-width:100%; gap:2px; }
-  .th-host-tile .th-host-label, .th-host-tile .th-host-context { max-width:100%; }
-  /* Four across in a 560px reader leaves 132px a tile: "Open in Claude Code" needs the half point. */
-  .th-host-tile .th-host-label { font-size:11.5px; letter-spacing:-0.01em; }
+  .th-host-tile .th-host-logo { width:20px; height:20px; border-radius:5px; }
+  .th-host-tile .th-host-label { font-size:12px; letter-spacing:-0.01em; }
   .th-host-tile:hover { border-color:color-mix(in srgb, var(--host-color) 40%, var(--hair)); transform:translateY(-1px); }
   .th-host-tile:hover .th-host-logo { transform:translateY(-1px) scale(1.04); }
   .th-host-tile:active { transform:translateY(0) scale(.985); transition-duration:.08s; }
   .th-host-tile:focus-visible { outline:2px solid var(--host-color); outline-offset:2px; }
-  /* Pressed: the tile lights in its app's colour, the other three step back,
-     and a notch under it points into the picker that unfolds beneath the row,
-     so the list reads as belonging to the tile rather than appearing below
-     the sheet. The picker's own reveal (grid rows, fade, 320 ms soft) stays;
-     its rows arrive one after another. */
-  .th-host-tile { position:relative; transition:border-color var(--t-fast) var(--settle), transform var(--t-fast) var(--settle), opacity .26s var(--settle), box-shadow .26s var(--settle), filter .26s var(--settle); }
+  /* Pressed: the chip lights in its app's colour with a halo and the others
+     step back; that light IS the selection, so nothing points at it (David:
+     no notch). The picker unfolds under the row, its rows one after another,
+     and folds the same way: the light fades as the rows leave, on the same
+     easing, so pressing the lit chip again is one continuous motion. */
+  .th-host-tile { position:relative; transition:border-color .26s var(--settle), background-color .26s var(--settle), transform var(--t-fast) var(--settle), opacity .26s var(--settle), box-shadow .26s var(--settle), filter .26s var(--settle); }
   .th-host-tile .th-host-logo { transition:transform var(--t-fast) var(--settle); }
   .th-host-tile.pressed { z-index:1; border-color:var(--host-color); transform:none;
     background:linear-gradient(180deg, color-mix(in srgb, var(--host-color) 18%, var(--wash)), color-mix(in srgb, var(--host-color) 7%, var(--wash)) 80%);
     box-shadow:0 0 0 3px color-mix(in srgb, var(--host-color) 14%, transparent); }
-  .th-host-tile.pressed::after { content:""; position:absolute; left:50%; bottom:-17px; width:12px; height:12px; transform:translateX(-50%) rotate(45deg);
-    background:color-mix(in srgb,var(--bg) 62%,var(--wash)); border-left:1px solid var(--hair); border-top:1px solid var(--hair);
-    opacity:0; animation:hostNotchIn .28s var(--settle) .12s forwards; }
-  @keyframes hostNotchIn { from { opacity:0; transform:translateX(-50%) translateY(-4px) rotate(45deg); } to { opacity:1; transform:translateX(-50%) rotate(45deg); } }
   .th-host-sheet:has(.th-host-tile.pressed) .th-host-tile:not(.pressed) { opacity:.5; filter:saturate(.6); }
   .th-host-sheet:has(.th-host-tile.pressed) .th-host-tile:not(.pressed):hover { opacity:.85; filter:none; }
   .rd-host-actions .sp-list.open .sp-row { animation:spRowIn .30s var(--settle) both; }
@@ -1773,11 +1767,43 @@
   .rd-host-actions .sp-list.open .sp-row:nth-child(6) { animation-delay:.26s; }
   .rd-host-actions .sp-list.open .sp-row:nth-child(n+7) { animation-delay:.30s; }
   @keyframes spRowIn { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:none; } }
+  /* Folding: the rows fade and lift over the whole fold, not in its first
+     fifth, so the list leaves at the pace the height does. */
+  .sp-list.closing { transition:opacity .30s var(--settle), transform .36s var(--settle); }
   @media (prefers-reduced-motion:reduce) {
-    .th-host-tile, .th-host-tile .th-host-logo, .th-host-tile.pressed::after, .rd-host-actions .sp-list.open .sp-row { transition:none; animation:none; opacity:1; }
+    .th-host-tile, .th-host-tile .th-host-logo, .rd-host-actions .sp-list.open .sp-row { transition:none; animation:none; opacity:1; }
   }
+  /* The reader's pull block sits under the chips on two lines: the heading,
+     then the sentence with Copy beside it. */
+  .rd-host-actions .th-pull { flex-direction:row; flex-wrap:wrap; align-items:center; gap:4px 10px; padding:8px 12px 9px; }
+  .rd-host-actions .th-pull-heading { flex:0 0 100%; }
+  .rd-host-actions .th-pull-q { flex:1 1 260px; font-size:13px; }
+  .rd-host-actions .th-pull-copy { padding:5px 9px; font-size:11.5px; }
   /* One box holds the tiles and, under a hairline, the pull block. */
   .th-host-sheet ~ .th-pull { border-top:1px solid var(--hair); }
+  /* The bubble's strip (David, 2026-09-17): "Open in" once, then four across
+     with the mark over the name, 86px where the two rows took 104. Padding
+     and gaps are as tight as they are so "Claude Code" fits its column at
+     the bubble's 300px. The pressed mark breathes while the app takes it. */
+  .th-host-col { --host-color:var(--brand-codex); appearance:none; cursor:pointer; position:relative; min-width:0; }
+  .th-host-col[data-host="claude"], .th-host-col[data-host="claude-app"] { --host-color:var(--brand-anthropic); }
+  .th-host-col[data-host="chatgpt"] { --host-color:var(--ink); }
+  .th-host-col:focus-visible { outline:2px solid var(--host-color); outline-offset:1px; }
+  .th-host-strip-lead { font:600 10px/1.2 var(--sans); letter-spacing:.07em; text-transform:uppercase; color:var(--muted-2); padding-left:10px; }
+  .th-host-name { font-family:var(--sans); font-size:10px; font-weight:650; letter-spacing:-0.02em; color:var(--host-color);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; }
+  .th-host-strip ~ .th-pull { border-top:1px solid var(--hair); }
+  .th-host-strip { padding:8px 4px 8px; display:flex; flex-direction:column; gap:5px; }
+  /* Fewer than four keep the four-across width and sit centred, like the sheet. */
+  .th-host-strip-row { --strip-gap:2px; display:flex; justify-content:center; gap:var(--strip-gap); }
+  .th-host-col { flex:0 1 calc((100% - 3 * var(--strip-gap)) / 4); border:0; background:transparent; border-radius:10px; padding:6px 1px 5px; display:grid; justify-items:center; gap:4px;
+    transition:background-color var(--t-fast) var(--settle), opacity .26s var(--settle), filter .26s var(--settle); }
+  .th-host-col .th-host-logo { width:26px; height:26px; border-radius:7px; }
+  .th-host-col:hover { background:var(--wash-2); }
+  .th-host-col:active { transform:scale(.97); }
+  .th-host-col.opening { background:color-mix(in srgb, var(--host-color) 14%, var(--wash)); }
+  .th-host-col.opening .th-host-logo { animation:hostOpenBreathe .8s ease-in-out infinite alternate; animation-play-state:var(--relay-loop-state); }
+  .th-host-strip-row:has(.opening) .th-host-col:not(.opening) { opacity:.5; filter:saturate(.6); }
   /* THE HAND-OFF RECEIPT. Send turns the composer capsule into this card in
      place: the app's mark, one line of state, and the card itself is Open. It
      wears the app's colour the way the host rows do, and nothing streams — the
@@ -2825,6 +2851,13 @@
        every conversation above the viewport after a room opens. */
     overflow-anchor:none; }
   #threadsView.chat-max #thDetail { flex:1 1 auto; min-width:0; height:100%; margin:0; max-width:none; overflow-y:auto; }
+  /* The expanded rail and room scroll on their own (the shared .scroll is
+     not their scroller here), so they wear the same 4px hairline thumb the
+     list does — never Chromium's 15px grey default down the frame's right edge. */
+  :is(#threadsView.chat-max .chat-rail, #threadsView.chat-max #thDetail)::-webkit-scrollbar { width:10px; }
+  :is(#threadsView.chat-max .chat-rail, #threadsView.chat-max #thDetail)::-webkit-scrollbar-thumb { background:var(--edge); border-radius:var(--r-pill); border:3px solid var(--bg); background-clip:padding-box; }
+  :is(#threadsView.chat-max .chat-rail, #threadsView.chat-max #thDetail)::-webkit-scrollbar:horizontal { height:0; }
+  :is(#threadsView.chat-max .chat-rail, #threadsView.chat-max #thDetail)::-webkit-scrollbar-corner { background:transparent; }
   .rl-h { font-family:var(--sans); font-size:10px; font-weight:600; letter-spacing:.02em; color:var(--muted-2); padding:10px 14px 5px; }
   .rl-row { display:flex; align-items:center; gap:8px; padding:6px 14px; cursor:pointer; border:0; background:transparent;
     font-family:var(--sans); font-size:12px; color:var(--ink-2); min-width:0; width:100%; text-align:left;
@@ -3040,6 +3073,9 @@
   .sv-switch[aria-checked="true"]::after { transform:translateX(14px); }
   .sv-switch:focus-visible { outline:none; box-shadow:var(--focus-ring); }
   .sv-switch:disabled { opacity:.4; cursor:default; }
+  /* The last agent on stays on: the switch keeps its colour (it IS on) and
+     only loses the hand; its row says why. */
+  .sv-switch[aria-disabled="true"] { cursor:default; }
   @media (prefers-reduced-motion:reduce) { .sv-switch, .sv-switch::after { transition:none; } }
   /* signed-out call-to-action on the Relays empty state — quiet filled pill (th-count language) */
   .sv-signin-banner {
@@ -6461,15 +6497,21 @@
     if (!REDUCED && reveal && fromHeight > 0) {
       // Start at the painted height, including an interrupted discovery reflow.
       // Keep the footer in layout throughout closing, just as it is on opening.
-      const row = reveal.previousElementSibling;
-      row?.classList.remove("pressed");
-      row?.setAttribute("aria-expanded", "false");
+      // The pressed control — a room row or the reader's chip — lets go of its
+      // light NOW, so it fades with the rows instead of blinking off when the
+      // fold's re-render lands (David, 2026-09-17: "smooth, not discrete").
+      for (const control of document.querySelectorAll(`[data-host-open="${CSS.escape(String(closingState.id))}"][data-host="${closingState.provider}"].pressed`)) {
+        control.classList.remove("pressed");
+        control.setAttribute("aria-expanded", "false");
+      }
       reveal.style.height = `${fromHeight}px`;
-      reveal.classList.add("reflowing");
+      reveal.classList.add("reflowing", "closing");
       reveal.classList.remove("open");
+      // Ease in as well as out: the open's curve starts fast, which on a fold
+      // reads as a snap — half the rows gone in the first frames.
       const animation = reveal.animate(
         [{ height:`${fromHeight}px` }, { height:"0px" }],
-        { duration:320, easing:"cubic-bezier(.22,.78,.18,1)", fill:"both" },
+        { duration:360, easing:"cubic-bezier(.4,0,.2,1)", fill:"both" },
       );
       animation.finished.catch(() => {}).then(() => {
         reveal.style.height = "0px";
@@ -7846,9 +7888,49 @@
   }
   function setAgentAppEnabled(app, enabled) {
     if (!AGENT_APP_OPTIONS.includes(app) || (enabled && !appAvailable(app))) return;
+    if (!enabled && isLastAgentAppOn(app)) return;
     const selected = new Set(requestedAgentApps());
     if (enabled) selected.add(app); else selected.delete(app);
     saveAgentApps([...selected]);
+  }
+  // THE CHAT APPS (David, 2026-09-17). Claude and ChatGPT are the reader's
+  // other two tiles: they reach a Relay through the Relay connector, not an
+  // app on this Mac, so there is nothing to detect and each is a plain switch,
+  // on until the person turns it off. Their own key: the desktop selection
+  // above also names the Task default and the opening preference, and a chat
+  // app is neither.
+  const CHAT_APP_OPTIONS = ["Claude", "ChatGPT"];
+  function chatAppsPreferenceKey() { return `proto.chatApps.v1:${signupAccountKey()}`; }
+  function chatAppSelection() {
+    const saved = protoPref(chatAppsPreferenceKey(), "");
+    if (!saved) return [...CHAT_APP_OPTIONS];
+    const chosen = saved.split("|");
+    return CHAT_APP_OPTIONS.filter((app) => chosen.includes(app));
+  }
+  function chatAppEnabled(app) { return chatAppSelection().includes(app); }
+  function saveChatApps(apps) {
+    if (!signupAccountKey()) return;
+    const next = CHAT_APP_OPTIONS.filter((app) => apps.includes(app));
+    setProtoPref(chatAppsPreferenceKey(), next.length ? next.join("|") : "__none__");
+  }
+  function setChatAppEnabled(app, enabled) {
+    if (!CHAT_APP_OPTIONS.includes(app)) return;
+    if (!enabled && isLastAgentAppOn(app)) return;
+    const selected = new Set(chatAppSelection());
+    if (enabled) selected.add(app); else selected.delete(app);
+    saveChatApps([...selected]);
+  }
+  // The four Settings › Your agent offers, as they stand now: the chat apps
+  // and the desktop apps that are on AND detected (an undetected app's switch
+  // is disabled, so it is not on). Read by the switches and the reader alike.
+  function enabledAgentApps() {
+    return [...chatAppSelection(), ...agentAppSelection()];
+  }
+  // At least one stays on (David, 2026-09-17): the last switch will not turn
+  // off, and its row says so, where the decision is made.
+  function isLastAgentAppOn(app) {
+    const on = enabledAgentApps();
+    return on.length === 1 && on[0] === app;
   }
   function agentAppName() {
     const selected = agentAppSelection();
@@ -10367,7 +10449,7 @@
       reactions: sent.reactions || { aggregates: [], events: [] },
     };
   }
-  const RX_PRIMARY = ["👍", "❤️", "😂", "🙌", "‼️", "🙏", "👀"];
+  const RX_PRIMARY = ["👍", "❤️", "😂", "🙌", "‼️", "🙏", "👀", "🔥"];
   const RX_MORE = ["😮", "😢", "🔥", "✅", "🙏", "💯"];
   // Reactions stay attached to their message; adding one does not create a chat row.
   const REACTIONS_ENABLED = true;
@@ -10958,7 +11040,7 @@
       direction: r.outbound ? "out" : "in",
       materializedCodex: Boolean(r.materializedCodex),
       materializedClaude: Boolean(r.materializedClaude),
-    }, { persistent: true })}</div>` : "";
+    }, { persistent: true, sheet: true })}</div>` : "";
     // The open folder owns the addressee. For you replies to the human sender;
     // For <agent> hands the Relay to your agent app. Switching documents must
     // never silently keep Shane as the recipient of a message typed while
@@ -15996,20 +16078,26 @@
   // a saved destination is a choice, never permission to skip the picker.
   // The copyable pull sentence is always offered (David, 2026-09-16): a
   // terminal, another agent, or simply a person who prefers to paste.
-  function relayHostActionsHtml(message, { persistent = false } = {}) {
+  function relayHostActionsHtml(message, { persistent = false, sheet = false } = {}) {
     const id = String(message && message.id || "");
     const actionsId = `relay-host-actions-${id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
     const source = message && message.direction === "out" ? "sent" : "relay";
     const desktopHosts = agentAppHosts().filter((host) => agentOpensInApp(host === "codex" ? "Codex" : "Claude Code"));
-    // The reader offers the four the web's share page offers: the chat apps,
+    // Both surfaces offer the four the web's share page offers: the chat apps,
     // which read this Relay through the Relay connector, and the agents on this
-    // Mac, which the picker materialises it into. A room bubble keeps its rows.
-    const inner = persistent
-      ? hostSheetHtml(message, source, desktopHosts)
-        + desktopHosts.map((host) => sessionPickerInlineHtml(id, host)).join("")
-        + pullSentenceHtml(message, { hasAppAction: true })
-      : desktopHosts.map((host) => hostActionRowHtml(host, message, source) + sessionPickerInlineHtml(id, host)).join("")
-        + pullSentenceHtml(message, { hasAppAction: desktopHosts.length > 0 });
+    // Mac, which materialise it into a chat, when their app is on. Each is
+    // there only while its switch in Settings › Your agent is on (Sven saw
+    // Claude and ChatGPT with every switch off, 2026-09-17). The reader lays
+    // them out as a line of chips with the chat picker under the pressed one;
+    // a room bubble as a strip, four across with the mark over the name,
+    // inside the height its two rows took (David, 2026-09-17), and its agent
+    // tiles open a new chat at once.
+    // The sentence to paste is always there under either, and reads "Or" only
+    // beside a host.
+    const options = hostOptions(message, source, desktopHosts);
+    const inner = (sheet ? hostSheetHtml(options) : hostStripHtml(options))
+      + desktopHosts.map((host) => sessionPickerInlineHtml(id, host)).join("")
+      + pullSentenceHtml(message, { hasAppAction: options.length > 0 });
     return `${persistent ? "" : `<button class="th-host-disclosure" type="button" data-host-disclosure="${esc(id)}" data-stop="1" aria-expanded="false" aria-controls="${esc(actionsId)}"><span>Open with an agent</span><span class="chev" aria-hidden="true">⌄</span></button>`}<div id="${esc(actionsId)}" class="th-host-actions${persistent ? " persistent" : ""}" data-host-actions="${esc(id)}" data-stop="1" aria-hidden="${persistent ? "false" : "true"}"${persistent ? "" : " inert"}>
       <div class="th-host-actions-inner">
         ${inner}
@@ -16031,35 +16119,50 @@
     const q = encodeURIComponent(chatAppPromptFor(message));
     return app === "chatgpt" ? `https://chatgpt.com/?q=${q}&mode=work` : `https://claude.ai/new?q=${q}`;
   }
-  function hostSheetHtml(message, source, desktopHosts) {
+  // The four, in one order everywhere: the chat apps, then the agents on this
+  // Mac whose app is on. A chat app opens a new chat with the sentence; an
+  // agent's tile carries the picker's attributes, and in the reader the tile
+  // that is pressed is the one the picker is open under.
+  function hostOptions(message, source, desktopHosts) {
     const id = String(message && message.id || "");
-    const pressed = (host) => sessionPickerState && String(sessionPickerState.id) === id && sessionPickerState.provider === host;
-    const tile = (host, mark, label, context, attrs) => `<button class="th-host-tile${pressed(host) ? " pressed" : ""}" type="button" data-host="${host}" ${attrs}>
-          <img class="th-host-logo" src="${mark}" alt="" />
-          <span class="th-host-copy"><span class="th-host-label">${label}</span><span class="th-host-context">${esc(context)}</span></span>
-        </button>`;
-    // The agents on this Mac keep their picker: the tile's context is the picker's promise.
-    const native = (host) => tile(host, host === "codex" ? "codexMark.svg" : "claudeCodeMark.svg", `Open in ${host === "codex" ? "Codex" : "Claude Code"}`,
-      "Choose a chat", `data-host-open="${esc(id)}" data-source="${source}" aria-expanded="${pressed(host) ? "true" : "false"}"`);
+    const pressed = (host) => Boolean(sessionPickerState && String(sessionPickerState.id) === id && sessionPickerState.provider === host);
+    const app = (host, mark, name, key) => ({ host, mark, name, pressed: false,
+      attrs: `data-app-open="${esc(id)}" data-app="${key}"` });
+    const agent = (host, mark, name) => ({ host, mark, name, pressed: pressed(host),
+      attrs: `data-host-open="${esc(id)}" data-source="${source}" aria-expanded="${pressed(host) ? "true" : "false"}"` });
+    // Only the hosts whose switch is on, in one order; none at all paints no
+    // sheet and no strip, so the box holds the sentence alone.
+    return [
+      ...(chatAppEnabled("Claude") ? [app("claude-app", "claudeMark.svg", "Claude", "claude")] : []),
+      ...(chatAppEnabled("ChatGPT") ? [app("chatgpt", "chatgptMark.svg", "ChatGPT", "chatgpt")] : []),
+      ...(desktopHosts.includes("claude") ? [agent("claude", "claudeCodeMark.svg", "Claude Code")] : []),
+      ...(desktopHosts.includes("codex") ? [agent("codex", "codexMark.svg", "Codex")] : []),
+    ];
+  }
+  // One line of chips (David, 2026-09-17): "Open in" once, then each app as a
+  // rectangular chip — its mark and its name — so the sheet stays a row and
+  // the letter keeps the screen. The verb lives on the chip's aria-label and
+  // in the lead word. Only the chips whose switch is on; none at all paints
+  // no sheet, so the box holds the sentence alone.
+  function hostSheetHtml(options) {
+    if (!options.length) return "";
     return `<div class="th-host-sheet">
-        ${tile("claude-app", "claudeMark.svg", "Open in Claude", "New chat", `data-app-open="${esc(id)}" data-app="claude"`)}
-        ${tile("chatgpt", "chatgptMark.svg", "Open in ChatGPT", "New chat", `data-app-open="${esc(id)}" data-app="chatgpt"`)}
-        ${desktopHosts.includes("claude") ? native("claude") : ""}
-        ${desktopHosts.includes("codex") ? native("codex") : ""}
+        <span class="th-host-lead" aria-hidden="true">Open in</span>
+        ${options.map((o) => `<button class="th-host-tile${o.pressed ? " pressed" : ""}" type="button" data-host="${o.host}" aria-label="Open in ${esc(o.name)}" ${o.attrs}>
+          <img class="th-host-logo" src="${o.mark}" alt="" />
+          <span class="th-host-label">${esc(o.name)}</span>
+        </button>`).join("\n        ")}
       </div>`;
   }
-  function hostActionRowHtml(host, message, source) {
-    const id = String(message && message.id || "");
-    const codex = host === "codex";
-    const selected = sessionPickerState
-      && String(sessionPickerState.id) === id
-      && sessionPickerState.provider === host;
-    const context = "Choose a chat or start a new one";
-    return `<button class="th-host-action${selected ? " pressed" : ""}" type="button" data-host-open="${esc(id)}" data-host="${codex ? "codex" : "claude"}" data-source="${source}" aria-expanded="${selected ? "true" : "false"}">
-          <img class="th-host-logo" src="${codex ? "codexMark.svg" : "claudeCodeMark.svg"}" alt="" />
-          <span class="th-host-copy"><span class="th-host-label">Open in ${codex ? "Codex" : "Claude Code"}</span><span class="th-host-context">${esc(context)}</span></span>
-          <span class="th-host-arrow" aria-hidden="true">→</span>
-        </button>`;
+  // The bubble's strip: "Open in" once, then the four across, the mark over
+  // the name. The sheet in miniature, and the only shape that seats all four
+  // on one line in a 300px bubble ("Claude Code" alone is a third of it).
+  function hostStripHtml(options) {
+    if (!options.length) return "";
+    return `<div class="th-host-strip"><div class="th-host-strip-lead">Open in</div><div class="th-host-strip-row">${options.map((o) => `<button class="th-host-col" type="button" data-host="${o.host}" ${o.attrs}>
+          <img class="th-host-logo" src="${o.mark}" alt="" />
+          <span class="th-host-name">${esc(o.name)}</span>
+        </button>`).join("")}</div></div>`;
   }
   // "Pull David’s relay “Updater rollback postmortem”" — the thing to say in
   // a session, and the exact sentence the button copies for the agent.
@@ -16086,6 +16189,25 @@
         <div class="th-pull-acts"><button class="th-pull-copy" type="button" data-pull-copy="${esc(sentence)}">Copy this prompt for your agent</button></div>
       </div>`;
   }
+  // A bubble's agent tile: the same delivery the picker's "New chat" makes,
+  // with the pressed mark breathing until the app has it. A failure is written
+  // into the bubble's note slot, the way an open that went nowhere always is.
+  async function openNewSessionFromBubble(tile, id, host, source) {
+    if (!id || openingIds.has(id)) return;
+    clearRowNote(id);
+    openingIds.set(id, performance.now());
+    tile.classList.add("opening");
+    const safety = setTimeout(() => stopOpening(id), 6000);
+    let result;
+    try {
+      result = await window.relay.deliverToSession(id, { provider: host, mode: "new", source,
+        surface: agentSurfacePreference(host === "codex" ? "Codex" : "Claude Code") });
+    } catch { result = { ok: false, error: "Could not open this Relay there." }; }
+    clearTimeout(safety);
+    stopOpening(id);
+    setTimeout(() => tile.classList.remove("opening"), 380);
+    if (result?.ok === false) setRowNote(id, result.error || "Could not open this Relay there.", "err");
+  }
   // The row's click, wherever the row is painted (a room bubble, the reader).
   function wireHostOpen(scope) {
     for (const b of scope.querySelectorAll("[data-host-open]")) {
@@ -16095,6 +16217,10 @@
         const host = b.getAttribute("data-host") === "claude" ? "claude" : "codex";
         const source = b.getAttribute("data-source") === "sent" ? "sent" : "relay";
         if (sessionPickerState?.delivering) return;
+        // In a room bubble the tile opens a NEW chat in that app straight away:
+        // the picker's "New chat" without the picker (David, 2026-09-17). The
+        // reader keeps the picker, where choosing an existing chat lives.
+        if (!b.closest(".rd-host-actions")) { openNewSessionFromBubble(b, id, host, source); return; }
         const message = readerRow(id) || relayById(id) || { id };
         loadSessionPicker(id, host, relaySubject(message) || "Relay", null, source);
       });
@@ -17959,30 +18085,47 @@
   // YOUR AGENT. Independent switches restored at David's request. These are
   // opening preferences, not separate setup steps. Preserve the reviewed
   // Connected copy from the Minimal pill's integrated setup contract.
+  // Four rows, the reader's order (David, 2026-09-17): the chat apps, then
+  // the agents on this Mac. Each row is a switch that decides one tile of the
+  // reader's sheet; all four begin on, and the last one on will not turn off.
+  // There is no Other row: the copied sentence is always offered, so it has
+  // nothing to switch (David, 2026-09-16).
   function yourAgentHtml() {
     const selected = agentAppSelection();
+    // The whisper takes the place of the row's second half, so the line never
+    // wraps at the pill's width: "Connected · keep at least one on".
+    const KEEP_ONE = "keep at least one on";
     return `
       <div class="sv-open-section" id="yourAgent" data-stop="1">
         <div class="sv-open-title">Your agent</div>
         <div class="sv-open-intro">Choose which agents you use. Turn on one or more.</div>
         <div class="sv-open-list">
+          ${CHAT_APP_OPTIONS.map((app) => {
+            const on = chatAppEnabled(app);
+            const last = on && isLastAgentAppOn(app);
+            const logo = app === "ChatGPT" ? "chatgptMark.svg" : "claudeMark.svg";
+            const why = `${app === "ChatGPT" ? "chatgpt.com" : "claude.ai"} · ${last ? KEEP_ONE : "a new chat per relay"}`;
+            return `<div class="sv-open-row">
+              <img class="sv-open-logo" src="${logo}" alt="" />
+              <span class="sv-open-copy"><span class="sv-open-name">${app}</span><span class="sv-open-why">${esc(why)}</span></span>
+              <button class="sv-switch" type="button" role="switch" data-chat-app="${app}" aria-checked="${on ? "true" : "false"}"${last ? ' aria-disabled="true"' : ""} aria-label="Open Relays with ${app}"></button>
+            </div>`;
+          }).join("")}
           ${AGENT_APP_OPTIONS.map((app) => {
             const available = appAvailable(app);
             const on = selected.includes(app);
+            const last = on && isLastAgentAppOn(app);
             const logo = app === "Codex" ? "codexMark.svg" : "claudeCodeMark.svg";
             const why = !available ? appUnavailableReason(app)
+              : last ? `Connected · ${KEEP_ONE}`
               : on ? (agentOpensInApp(app) ? "Connected · opens relays in a new chat" : "Connected · Relay copies the sentence for you")
               : "Connected";
             return `<div class="sv-open-row${available ? "" : " off"}">
               <img class="sv-open-logo" src="${logo}" alt="" />
               <span class="sv-open-copy"><span class="sv-open-name">${app}</span><span class="sv-open-why">${esc(why)}</span></span>
-              <button class="sv-switch" type="button" role="switch" data-agent-app="${app}" aria-checked="${on ? "true" : "false"}" aria-label="Open Relays with ${app}"${!available ? " disabled" : ""}></button>
+              <button class="sv-switch" type="button" role="switch" data-agent-app="${app}" aria-checked="${on ? "true" : "false"}"${last ? ' aria-disabled="true"' : ""} aria-label="Open Relays with ${app}"${!available ? " disabled" : ""}></button>
             </div>`;
           }).join("")}
-          <div class="sv-open-row">
-            <span class="sv-open-logo sv-open-logo-blank" aria-hidden="true"></span>
-            <span class="sv-open-copy"><span class="sv-open-name">Other</span><span class="sv-open-why">Terminal or another agent. Relay always copies the sentence for you.</span></span>
-          </div>
         </div>
       </div>`;
   }
@@ -18218,6 +18361,13 @@
       button.addEventListener("click", (e) => {
         e.stopPropagation();
         setAgentAppEnabled(button.getAttribute("data-agent-app"), button.getAttribute("aria-checked") !== "true");
+        renderSettings();
+      });
+    }
+    for (const button of settingsViewEl.querySelectorAll("[data-chat-app]")) {
+      button.addEventListener("click", (e) => {
+        e.stopPropagation();
+        setChatAppEnabled(button.getAttribute("data-chat-app"), button.getAttribute("aria-checked") !== "true");
         renderSettings();
       });
     }

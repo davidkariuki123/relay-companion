@@ -93,6 +93,7 @@ function refreshHarness() {
     relayClient: async () => ({ sent: () => new Promise((resolve, reject) => pending.push({ resolve, reject })) }),
     sentFingerprintOf: JSON.stringify, writeOverlayPrefs() {},
     outbox: { retireConfirmed() {}, pendingCount: () => 0 },
+    prefetchSentAttachments() {},
   });
   vm.runInContext(`let sentCache = [], sentFingerprint = "", sentRefreshStarted = 0, sentRefreshCommitted = 0;\n${main.slice(main.indexOf("async function refreshSent()"), main.indexOf("function ensureSentLoaded()"))}`, scope);
   return { scope, pending, flow, refresh: () => vm.runInContext("refreshSent()", scope) };

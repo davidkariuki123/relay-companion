@@ -42,9 +42,15 @@ const SAFE_POST = [
   /^\/v1\/invites-v2\/link$/,
   /^\/v1\/share-links$/,
 ];
-// A person may take back a link they minted from the same conversation.
+// A person may correct a message they sent, or take back a link they minted
+// or a message they sent, from the same conversation. Both are sender-only on
+// the server and converge on an exact retry.
+const SAFE_PATCH = [
+  /^\/v1\/messages\/[A-Za-z0-9_-]+$/,
+];
 const SAFE_DELETE = [
   /^\/v1\/share-links\/[A-Za-z0-9_-]+$/,
+  /^\/v1\/messages\/[A-Za-z0-9_-]+$/,
 ];
 
 function configPath(env = process.env) {
@@ -211,7 +217,7 @@ async function readStdin() {
 }
 
 function allowed(method, requestPath) {
-  const list = method === "GET" ? SAFE_GET : method === "POST" ? SAFE_POST : method === "DELETE" ? SAFE_DELETE : [];
+  const list = method === "GET" ? SAFE_GET : method === "POST" ? SAFE_POST : method === "PATCH" ? SAFE_PATCH : method === "DELETE" ? SAFE_DELETE : [];
   return list.some((pattern) => pattern.test(requestPath));
 }
 
@@ -333,9 +339,12 @@ async function request(method, requestPath, body) {
 function replaySafe(method, route, body) {
   // Only these operations have server-backed deduplication. An arbitrary key
   // on another mutation is not proof that replay is safe.
-  return method === "GET" || (method === "POST"
-    && (route === "/v1/relays" || route === "/v1/share-links" || /^\/v1\/relays\/[A-Za-z0-9_-]+\/forward$/.test(route))
-    && typeof body?.idempotencyKey === "string" && body.idempotencyKey.trim().length >= 8);
+  const keyed = typeof body?.idempotencyKey === "string" && body.idempotencyKey.trim().length >= 8;
+  if (method === "GET") return true;
+  if (method === "POST") return keyed && (route === "/v1/relays" || route === "/v1/share-links" || /^\/v1\/relays\/[A-Za-z0-9_-]+\/forward$/.test(route));
+  // An exact edit or delete of a sent message converges on the server: the same
+  // content is a no-op and an already-deleted message reports its tombstone.
+  return keyed && (method === "PATCH" || method === "DELETE") && /^\/v1\/messages\/[A-Za-z0-9_-]+$/.test(route);
 }
 
 function localUnavailable(error) {
@@ -692,6 +701,14 @@ const DIRECT_TOOLS = {
     files: { type: "array", items: stringField }, attachments: { type: "array", items: { type: "object" } }, longForHumanConfirmed: { type: "boolean" },
   }, ["recipient", "kind", "title", "forHuman", "forAgent", "idempotencyKey"], { full: true, readOnly: false }),
   relay_forward: directTool("Forward an exact Relay only when asked. The server copies its documents and attachments; note is the person's own message.", { relayId: idField, recipient: { type: "object" }, note: stringField, idempotencyKey: { type: "string", minLength: 8 } }, ["relayId", "recipient", "idempotencyKey"], { full: true, readOnly: false }),
+  relay_message_edit: directTool("Edit the human message, the agent document, or both on a message this person sent, when they ask for the change. Sender-only; only ordinary messages can be edited, and one published at a share link cannot. Every recipient sees the edit and it counts as unread for them again. Omit a field to leave it unchanged; an empty forAgent removes the agent document. A group message is updated for every recipient at once.", {
+    relayId: idField, forHuman: stringField, forAgent: { type: "string" }, expectedUpdatedAt: stringField,
+    nature: { anyOf: [{ type: "string" }, { type: "array", items: stringField }] }, asks: { type: "array", items: stringField },
+    idempotencyKey: { type: "string", minLength: 8 }, longForHumanConfirmed: { type: "boolean" },
+  }, ["relayId", "idempotencyKey"], { full: true, readOnly: false }),
+  relay_message_delete: directTool("Delete for everyone a message this person sent, leaving a durable 'Message deleted' tombstone. Sender-only; only ordinary messages can be deleted. Use only when the person explicitly asks to delete the sent message.", {
+    relayId: idField, expectedUpdatedAt: stringField, idempotencyKey: { type: "string", minLength: 8 },
+  }, ["relayId", "idempotencyKey"], { full: true, readOnly: false }),
   relay_share_link: directTool("Mint an authorized Relay as a link for the person to paste; nothing is delivered or emailed. Revoke only the exact relayId of a link the person asked to revoke. Guests can reply using their existing HTTP tools without installing this helper.", {
     action: { type: "string", enum: ["mint", "revoke"] }, relayId: idField,
     kind: { type: "string", enum: ["message", "task"] }, title: stringField, recipientName: stringField, forHuman: stringField, forAgent: { type: "string" }, repo: stringField,
@@ -769,6 +786,13 @@ async function directToolCommand(command, body, config) {
   else if (name === "relay_forward") {
     const { relayId, ...forward } = args;
     value = await request("POST", `/v1/relays/${relayId}/forward`, forward);
+  } else if (name === "relay_message_edit") {
+    const { relayId, longForHumanConfirmed, ...edit } = args;
+    if (edit.forHuman === undefined && edit.forAgent === undefined && edit.nature === undefined && edit.asks === undefined) throw new Error("Editing a message requires forHuman, forAgent, nature or asks.");
+    value = await request("PATCH", `/v1/messages/${relayId}`, edit);
+  } else if (name === "relay_message_delete") {
+    const { relayId, ...remove } = args;
+    value = await request("DELETE", `/v1/messages/${relayId}`, remove);
   } else if (name === "relay_share_link") {
     const { action = "mint", relayId, ...draft } = args;
     if (action === "revoke") {

@@ -1838,6 +1838,49 @@ function testFixtures(envVar) {
   }
 }
 
+// ---- sent-row attachment prefetch ------------------------------------------
+// Received relays download their files at ingest (inbox-work.js). A relay this
+// account SENT from an agent had no such moment: its photos were fetched from
+// S3 the first time a tile asked, on the click path, one mint plus one download
+// per file in series. Fetch the newest sent rows' files in the background as
+// soon as the Sent poll shows them, so the sender's own chat paints from disk.
+const SENT_PREFETCH_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
+const SENT_PREFETCH_PER_POLL = 8;
+const sentPrefetchSeen = new Set();
+let sentPrefetchRunning = false;
+function prefetchSentAttachments(items) {
+  if (sentPrefetchRunning || process.env.RELAY_OVERLAY_TEST_NO_SENT_PREFETCH === "1") return;
+  const now = Date.now();
+  const due = (Array.isArray(items) ? items : [])
+    .filter((item) => item && Array.isArray(item.attachments) && item.attachments.length)
+    .filter((item) => now - Date.parse(item.createdAt || 0) < SENT_PREFETCH_WINDOW_MS)
+    .filter((item) => !sentPrefetchSeen.has(String(item.relayId || item.id || "")))
+    .slice(0, SENT_PREFETCH_PER_POLL);
+  if (!due.length) return;
+  sentPrefetchRunning = true;
+  (async () => {
+    for (const item of due) {
+      const id = String(item.relayId || item.id || "");
+      sentPrefetchSeen.add(id);
+      if (!deviceToken()) return;
+      try {
+        // Only the first file needs asking: resolving one materializes the
+        // whole relay (coalesced, files in parallel) and records every local
+        // path in the staged row.
+        const first = item.attachments.find((a) => a && a.id);
+        if (first) await resolveRelayAttachment(id, first.id);
+      } catch (error) {
+        console.error("[overlay] sent attachment prefetch failed:", id, error && error.message);
+      }
+    }
+  })().finally(() => {
+    sentPrefetchRunning = false;
+    // The prefetched rows' tiles may already be on screen as blank plates;
+    // the renderer re-asks on repaint.
+    pushInboxQuiet({ stateChange: true });
+  });
+}
+
 async function refreshSent() {
   const sentFixtures = testFixtures("RELAY_OVERLAY_TEST_SENT_FIXTURES");
   if (sentFixtures) {
@@ -1871,6 +1914,7 @@ async function refreshSent() {
     // This poll just proved the network is up. Anything still waiting out a
     // backoff earned during the outage is due now.
     if (outbox.pendingCount()) outbox.resume();
+    prefetchSentAttachments(sentCache);
   } catch (error) {
     if (deviceToken() === credential && refreshId >= sentRefreshCommitted) {
       firstRelayOnboarding.failed(accountKey);
@@ -3372,7 +3416,7 @@ async function deletePacket(packetId) {
 
 async function editSentMessage(input = {}) {
   if (PRODUCT_FEATURES.messageMutations !== true) {
-    return { ok: false, error: "Message editing is currently available only to Relay developer accounts on dev." };
+    return { ok: false, error: "Message editing is switched off in this Relay release." };
   }
   const id = String(input.id || "").trim();
   const forHuman = String(input.forHuman || "").trim();
@@ -3399,7 +3443,7 @@ async function editSentMessage(input = {}) {
 
 async function deleteSentMessage(input = {}) {
   if (PRODUCT_FEATURES.messageMutations !== true) {
-    return { ok: false, error: "Sent-message deletion is currently available only to Relay developer accounts on dev." };
+    return { ok: false, error: "Sent-message deletion is switched off in this Relay release." };
   }
   const id = String(input.id || "").trim();
   if (!id) return { ok: false, error: "Missing message id." };
@@ -3936,6 +3980,19 @@ function setOverlayElevated(next, { moveTop = true } = {}) {
   } catch {}
 }
 
+// A viewer or preview is one of Relay's OWN document windows, so the frontmost
+// poll sees Relay's bundle and leaves the pill's elevation as it was — floating,
+// whenever a host was in front when the window opened. Floating beats a normal
+// window at every click, which is why a just-opened GIF sat BEHIND the pill and
+// clicking it could never raise it (field report, 2026-09-17). Focus on the
+// document window drops the pill to the normal level for as long as that
+// window is in front; the next pill interaction (relay:engage) or host
+// foregrounding re-elevates it as before.
+function yieldOverlayToDocumentWindow(documentWin) {
+  if (!documentWin || typeof documentWin.on !== "function") return;
+  documentWin.on("focus", () => setOverlayElevated(false));
+}
+
 function observeFrontmostBundle(bundle) {
   const host = hostFromBundle(bundle);
   if (host) rememberForegroundHost(host);
@@ -4411,6 +4468,13 @@ async function presentSessionOpen(result, provider, packetId, observedBundle = n
 }
 
 async function deliverPacketToSession(packetId, selection = {}) {
+  // The fixture pill's seam covers this path too: a picker choice, or a bubble's
+  // tile, must not materialise a real Codex or Claude chat on the developer's
+  // Mac (2026-09-17: one did, from a capture run).
+  if (process.env.RELAY_OVERLAY_TEST_NO_HOST_OPEN === "1") {
+    console.error("[overlay] test seam: suppressed session delivery:", packetId, selection.provider, selection.mode || "existing");
+    return { ok: true, suppressed: true };
+  }
   const deliveryRow = await sessionDeliveryRow(packetId, selection.source);
   const routePacketId = deliveryRow.packetId;
   const row = deliveryRow.row;
@@ -4946,10 +5010,14 @@ async function resolveRelayAttachment(relayId, attachmentId) {
       if (target) {
         withJsonLock(STATE_PATH, () => {
           const state = readStore();
-          if (state.packets && state.packets[stateId]) {
-            state.packets[stateId].attachments = materialized.attachments;
-            writeStateAtomic(state);
-          }
+          const current = state.packets && state.packets[stateId];
+          if (!current) return;
+          // Four tiles of one message resolve together now; the first writer
+          // records every path and the rest find nothing left to record.
+          const known = new Map((current.attachments || []).map((a) => [a && a.id, a && a.localPath]));
+          if ((materialized.attachments || []).every((a) => !a.localPath || known.get(a.id) === a.localPath)) return;
+          current.attachments = materialized.attachments;
+          writeStateAtomic(state);
         });
       }
     } catch (error) {
@@ -5015,6 +5083,35 @@ async function renderSafeHtmlThumbnail(source) {
   }
 }
 
+// A chat plate is a few hundred pixels wide. Small and mid-size images cross
+// the bridge as they are — the file on disk is the truth and a re-encode costs
+// more than it saves — but a really big one (a 6 MB GIF, a 20-megapixel photo)
+// turned into an 8 MB base64 string that the renderer then decoded at full
+// size for a tile. Above this line the plate gets a downscaled copy; the
+// viewer still opens the real file.
+const PLATE_DOWNSCALE_BYTES = 5 * 1024 * 1024;
+const PLATE_MAX_WIDTH = 1200;
+function plateSizedImage(preview) {
+  try {
+    if (!preview || !preview.dataBase64 || Number(preview.size) <= PLATE_DOWNSCALE_BYTES) return {};
+    const image = nativeImage.createFromBuffer(Buffer.from(preview.dataBase64, "base64"));
+    if (image.isEmpty()) return {};
+    const { width, height } = image.getSize();
+    const scaled = width > PLATE_MAX_WIDTH
+      ? image.resize({ width: PLATE_MAX_WIDTH, height: Math.round(height * PLATE_MAX_WIDTH / width), quality: "good" })
+      : image;
+    // JPEG for photos, PNG where the source may carry transparency (an
+    // animated GIF loses its motion here; a 5 MB+ GIF tile was never going to
+    // animate smoothly in a chat row anyway).
+    const jpeg = preview.mimeType === "image/jpeg";
+    const bytes = jpeg ? scaled.toJPEG(85) : scaled.toPNG();
+    if (!bytes.length || bytes.length >= Number(preview.size)) return {};
+    return { mimeType: jpeg ? "image/jpeg" : "image/png", dataBase64: bytes.toString("base64"), plateOf: preview.size };
+  } catch {
+    return {};
+  }
+}
+
 async function previewRelayAttachment(relayId, attachmentId) {
   const resolved = await resolveRelayAttachment(relayId, attachmentId);
   if (!resolved.ok) return resolved;
@@ -5031,7 +5128,7 @@ async function previewRelayAttachment(relayId, attachmentId) {
       const rendered = await renderSafeHtmlThumbnail(preview.html);
       return { ok: true, name: preview.name, size: preview.size, previewKind: "html", ...rendered };
     }
-    return { ok: true, previewKind: "image", ...preview };
+    return { ok: true, previewKind: "image", ...preview, ...plateSizedImage(preview) };
   } catch (error) {
     return { ok: false, error: (error && error.message) || "Attachment preview failed safely." };
   }
@@ -5202,6 +5299,7 @@ function createAttachmentViewerWindow(key) {
   });
   viewerWin.webContents.on("did-finish-load", () => resetWindowZoom(viewerWin));
   viewerWin.once("ready-to-show", () => sendAttachmentViewerPayload(entry));
+  yieldOverlayToDocumentWindow(viewerWin);
   viewerWin.on("closed", () => {
     if (attachmentViewers.get(key) === entry) attachmentViewers.delete(key);
   });
@@ -6193,6 +6291,7 @@ function createPreviewWindow(payload, { recipient = null, chatSeed = null } = {}
     sendPreviewPayload(entry);
     showPreviewWindow(entry);
   });
+  yieldOverlayToDocumentWindow(previewWin);
   previewWin.on("closed", () => {
     // Guard the identity check: a relay reopened after this window closed may
     // already own the map slot, and must not be evicted by a late callback.

@@ -49,14 +49,15 @@ test("successful reaction polls repaint only when reaction state actually change
   assert.match(push, /reactionStateFingerprint\(r\.reactions\)/);
 });
 
-test("the message menu exposes the approved seven reactions on its own message", () => {
-  assert.match(html, /const RX_PRIMARY = \["👍", "❤️", "😂", "🙌", "‼️", "🙏", "👀"\];/);
+test("the message menu exposes the approved eight reactions on its own message", () => {
+  assert.match(html, /const RX_PRIMARY = \["👍", "❤️", "😂", "🙌", "‼️", "🙏", "👀", "🔥"];/);
   const source = between(html, "  function messageReactionPickerHtml(id)", "  function reactionConfirmationHtml");
-  const render = Function("REACTIONS_ENABLED", "RX_PRIMARY", "esc", `${source}; return messageReactionPickerHtml;`)(true, ["👍", "❤️", "😂", "🙌", "‼️", "🙏", "👀"], String);
+  const render = Function("REACTIONS_ENABLED", "RX_PRIMARY", "esc", `${source}; return messageReactionPickerHtml;`)(true, ["👍", "❤️", "😂", "🙌", "‼️", "🙏", "👀", "🔥"], String);
   const menu = render("relay_target");
-  assert.equal((menu.match(/data-rx-pick="relay_target"/g) || []).length, 7);
+  assert.equal((menu.match(/data-rx-pick="relay_target"/g) || []).length, 8);
   assert.match(menu, /aria-label="React ‼️"/);
   assert.match(menu, /aria-label="React 👀"/);
+  assert.match(menu, /aria-label="React 🔥"/);
   assert.doesNotMatch(menu, /rx-face|rx-unfurl/);
   assert.match(html, /canReact \? messageReactionPickerHtml\(m\.id\) : ""/);
 });

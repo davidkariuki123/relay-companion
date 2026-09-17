@@ -501,6 +501,20 @@ note. The original sender is not notified and does not join the new
 conversation, so treat forwarding as disclosure: confirm who is receiving it.
 Encrypted messages cannot be forwarded. Ask for approval as for any send.
 
+To change or take back a message the person sent, use `relay_message_edit`
+or `relay_message_delete` (or the helper's `call relay_message_edit` and
+`call relay_message_delete` with JSON on stdin) with the exact relay id from
+`relay_sent_list` or a chat, and a stable `idempotencyKey`. Only when the
+person asks: show the exact replacement text as for a send. An edit takes
+`forHuman`, `forAgent` or both and leaves an omitted document unchanged; an
+empty `forAgent` removes the agent document. Every recipient sees the new
+text and the message counts as unread for them again; the previous wording is
+replaced, not kept, so read the current text back before changing it. A
+delete leaves a "Message deleted" tombstone for everyone. Both are sender-only
+and apply to ordinary messages; a message published at a share link cannot be
+edited while the link is live, and a group message changes for every member
+at once.
+
 To attach a local file, add `files: ["<absolute path>"]` to the JSON passed on
 stdin to `send`, or `attachments: [{path: "<absolute path>", name: "report.pdf"}]`.
 The helper reads and hashes files before sending. Companion encrypts them when

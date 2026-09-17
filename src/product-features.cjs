@@ -68,10 +68,11 @@ function productFeatures(options = {}) {
     aiSessions: developer,
     // relay_connector_* — the server-side Composio gateway.
     connectors: developer,
-    // Editing or deleting already-delivered correspondence changes another
-    // person's view of history, so keep the whole mutation surface on the
-    // developer row until it has completed dev validation.
-    messageMutations: developer,
+    // Editing or deleting a message you sent is ordinary messaging, on every
+    // channel and for every account, the same as sending it (David,
+    // 2026-09-17). The flag stays as the one switch the MCP catalog, the
+    // pill's side menu and the edit/delete IPC all read.
+    messageMutations: true,
   });
 }
 

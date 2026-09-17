@@ -1625,7 +1625,7 @@ test("a session learns its subscribed topics from the tool list at startup, with
   // No recorded topics, no account scope, or a catalog without the tool: nothing changes.
   assert.deepEqual(withSubscribedTopics(developer, { accountScope: "dev_token", readIndex: () => [] }), developer);
   assert.deepEqual(withSubscribedTopics(developer, { accountScope: "", readIndex: index }), developer);
-  const shipped = toolsForAccount({ requests: false, aiSessions: false, connectors: false, topics: false, todo: false, messageMutations: false });
+  const shipped = toolsForAccount({ requests: false, aiSessions: false, connectors: false, topics: false, todo: false, messageMutations: true });
   assert.deepEqual(withSubscribedTopics(shipped, { accountScope: "dev_token", readIndex: index }), shipped);
   assert.match(RELAY_MCP_INSTRUCTIONS, /its subscribed Topics with their mandates/);
 });
@@ -2283,7 +2283,9 @@ test("the check-in reply carries the person's boards, mandates, standing rules a
 // that cannot send or receive a Task is not told Tasks exist (Shane,
 // 2026-09-12). The developer row keeps the full text.
 test("no Task reaches an agent on the ordinary row, in any transport", () => {
-  const ordinary = { requests: false, aiSessions: false, connectors: false, todo: false, topics: false, messageMutations: false };
+  // The shipped row: message edits and deletes are on it (2026-09-17), so
+  // their descriptions are scanned too.
+  const ordinary = { requests: false, aiSessions: false, connectors: false, todo: false, topics: false, messageMutations: true };
   const word = /\btasks?\b/i;
   for (const surface of ["claude_code", "codex", ""]) {
     for (const [label, tools] of [

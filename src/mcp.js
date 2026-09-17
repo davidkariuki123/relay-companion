@@ -7,6 +7,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { hasAttachmentPayload, prepareOrdinaryRelayAttachments } from "./attachments.js";
+import { retainSentAttachmentsLocally } from "./sent-attachment-retention.js";
 import { workspacePassportFromDeclaration } from "./repo-identity.js";
 import { fragileLinkWarning } from "./links.js";
 import { localizeAtFields } from "./local-time.cjs";
@@ -962,7 +963,7 @@ export const TOOLS = [
   {
     name: "relay_message_edit",
     description:
-      `Edit the human-facing payload, agent-facing payload, or both on a message this human sent. Use an exact relayId from relay_sent_list or relay_chat_fetch. Sender-only; Tasks cannot be edited. Omit a payload to leave it unchanged; pass an empty forAgent to remove the agent document. For group messages Relay updates every fan-out copy atomically. ${FOR_HUMAN_COMPOSITION_SUMMARY}`,
+      `Edit the human-facing payload, agent-facing payload, or both on a message this human sent, when the human asks for the change. Use an exact relayId from relay_sent_list or relay_chat_fetch. Sender-only; only ordinary messages can be edited, and a message published at a share link cannot. Every recipient sees the edit and it counts as unread for them again. Omit a payload to leave it unchanged; pass an empty forAgent to remove the agent document. For group messages Relay updates every fan-out copy atomically. ${FOR_HUMAN_COMPOSITION_SUMMARY}`,
     inputSchema: {
       type: "object",
       properties: {
@@ -981,7 +982,7 @@ export const TOOLS = [
   {
     name: "relay_message_delete",
     description:
-      "Delete for everyone a message this human sent. Tasks cannot be deleted with this tool. This leaves a durable 'Message deleted' tombstone so chronology and replies remain coherent; Relay stops returning its attachments and rejects future API download requests. It is distinct from relay_inbox_delete, which only cleans up this human's received inbox. Use only when the human explicitly asks to delete the sent message.",
+      "Delete for everyone a message this human sent. Sender-only; only ordinary messages can be deleted. This leaves a durable 'Message deleted' tombstone so chronology and replies remain coherent; Relay stops returning its attachments and rejects future API download requests. It is distinct from relay_inbox_delete, which only cleans up this human's received inbox. Use only when the human explicitly asks to delete the sent message.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1668,6 +1669,16 @@ function toolsForFeatures(tools, {
       );
       return chat;
     }
+    if (tool.name === "relay_message_delete") {
+      // relay_inbox_delete is not on this row, so the sent-message delete
+      // must not name it here.
+      const remove = structuredClone(tool);
+      remove.description = remove.description.replace(
+        " It is distinct from relay_inbox_delete, which only cleans up this human's received inbox.",
+        "",
+      );
+      return remove;
+    }
     return tool;
   });
 }
@@ -2117,7 +2128,7 @@ async function handleAdmittedCall(client, name, args, {
     throw new Error(`Tool ${name} is unavailable in this Relay release`);
   }
   if (features.messageMutations === false && MESSAGE_MUTATION_TOOL_NAMES.has(name)) {
-    throw new Error(`Tool ${name} is available only to Relay developer accounts on dev`);
+    throw new Error(`Tool ${name} is unavailable in this Relay release`);
   }
   if (features.todo === false && TODO_TOOL_NAMES.has(name)) {
     throw new Error(`Tool ${name} is unavailable in this Relay release`);
@@ -2415,6 +2426,7 @@ async function handleAdmittedCall(client, name, args, {
         );
       }
       requireLongForHumanReview("relay_send", args, sessionContext);
+      const sendAttachments = await prepareOrdinaryRelayAttachments(args, { baseDir: sessionContext.cwd });
       const sent = await client.sendRelay({
         recipient: args.recipient,
         kind: args.kind,
@@ -2426,7 +2438,7 @@ async function handleAdmittedCall(client, name, args, {
         ...(args.longForHumanConfirmed === true ? { longForHumanConfirmed: true } : {}),
         source: relaySource(args.repo, sessionContext),
         targetSurfaces: args.targetSurfaces || [],
-        attachments: await prepareOrdinaryRelayAttachments(args, { baseDir: sessionContext.cwd }),
+        attachments: sendAttachments,
         ...(explicitReplyToRelayId ? { inReplyToRelayId: explicitReplyToRelayId } : {}),
         // Rolling clients may still submit the old control-plane `type`.
         // Keep transport compatibility, but do not expose it in the model
@@ -2435,6 +2447,9 @@ async function handleAdmittedCall(client, name, args, {
         ...(args.type ? { type: args.type } : {}),
         idempotencyKey: args.idempotencyKey,
       });
+      // The sender's own files are already on this machine: file them in the
+      // pill's store now so its chat never downloads them back.
+      retainSentAttachmentsLocally(sendAttachments, sent, { log: (m) => console.error(`[relay] ${m}`) });
       if (args.kind === "task" && sent?.relayId) {
         try {
           await recordTaskOrigin({
@@ -2716,9 +2731,8 @@ async function handleAdmittedCall(client, name, args, {
       const chatId = String(chat?.chatId || args.chatId || "").trim();
       if (!chatId) throw new Error("Relay could not resolve that chat");
       const forHuman = String(args.forHuman || "");
-      return text(
-        relaySendResultForAgent(
-          await client.sendRelay({
+      const chatAttachments = await prepareOrdinaryRelayAttachments(args, { baseDir: sessionContext.cwd });
+      const chatSent = await client.sendRelay({
             recipient: { chatId },
             kind: "message",
             // A chat message has a body, not a subject. No title is sent —
@@ -2728,13 +2742,12 @@ async function handleAdmittedCall(client, name, args, {
             forHuman,
             ...(args.longForHumanConfirmed === true ? { longForHumanConfirmed: true } : {}),
             source: relaySource(args.repo, sessionContext),
-            attachments: await prepareOrdinaryRelayAttachments(args, { baseDir: sessionContext.cwd }),
+            attachments: chatAttachments,
             ...(args.replyToRelayId ? { inReplyToRelayId: String(args.replyToRelayId) } : {}),
             idempotencyKey: args.idempotencyKey,
-          }),
-          { linkWarning: fragileLinkWarning(forHuman) },
-        ),
-      );
+          });
+      retainSentAttachmentsLocally(chatAttachments, chatSent, { log: (m) => console.error(`[relay] ${m}`) });
+      return text(relaySendResultForAgent(chatSent, { linkWarning: fragileLinkWarning(forHuman) }));
     }
     case "relay_message_edit":
       if (args.forHuman !== undefined) requireLongForHumanReview("relay_message_edit", args, sessionContext);

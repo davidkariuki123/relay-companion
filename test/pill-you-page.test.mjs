@@ -40,11 +40,20 @@ test("Your agent restores independent switches and a same-list own-session choic
   assert.match(agent, /<div class="sv-open-title">Your agent<\/div>/);
   assert.match(agent, /Choose which agents you use\. Turn on one or more\./);
   assert.match(agent, /role="switch" data-agent-app="\$\{app\}" aria-checked=/);
-  // Other is a statement, not a switch: the copied sentence is always offered (David, 2026-09-16).
-  assert.doesNotMatch(agent, /svOtherAgent|Copy prompts for another agent/);
-  assert.match(agent, /Relay always copies the sentence for you/);
+  // The chat apps have their own switches, before the desktop ones, the way
+  // the reader's sheet is ordered (David, 2026-09-17).
+  assert.match(agent, /\$\{CHAT_APP_OPTIONS\.map\(\(app\) => \{[\s\S]*\$\{AGENT_APP_OPTIONS\.map\(\(app\) => \{/);
+  assert.match(agent, /role="switch" data-chat-app="\$\{app\}" aria-checked=/);
+  assert.match(agent, /const logo = app === "ChatGPT" \? "chatgptMark\.svg" : "claudeMark\.svg";/);
+  // No Other row: the copied sentence is always offered, so there is nothing
+  // to switch and nothing to state (David, 2026-09-16 and 2026-09-17).
+  assert.doesNotMatch(agent, /svOtherAgent|Copy prompts for another agent|Other<\/span>|Relay always copies the sentence for you|sv-open-logo-blank/);
   assert.doesNotMatch(agent, /svOpeningSurface|<select|Opening an app does not|Available ·/);
   assert.match(agent, /Connected · opens relays in a new chat/);
+  // The last switch on will not turn off, and says so where the decision is made.
+  assert.match(agent, /const KEEP_ONE = "keep at least one on";/);
+  assert.match(agent, /: last \? `Connected · \$\{KEEP_ONE\}`/);
+  assert.match(agent, /\$\{last \? ' aria-disabled="true"' : ""\}/);
 });
 
 test("Your invite link is on the page with Copy, and says what joining through it does", () => {

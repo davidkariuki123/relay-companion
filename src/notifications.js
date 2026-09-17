@@ -759,10 +759,13 @@ export function stageSentRelayItem(
       const prior = existingAttachments.get(attachment?.id);
       return prior?.localPath ? { ...attachment, localPath: prior.localPath } : attachment;
     });
+    // The newest Sent items carry a signed downloadUrl beside the durable
+    // openUrl; the materializer fetches a signed entry directly and would have
+    // to mint one for the durable route. Prefer it while it is fresh.
     const attachmentUrls = Object.fromEntries(
       attachments
-        .filter((attachment) => attachment?.id && attachment?.openUrl)
-        .map((attachment) => [attachment.id, attachment.openUrl]),
+        .filter((attachment) => attachment?.id && (attachment?.downloadUrl || attachment?.openUrl))
+        .map((attachment) => [attachment.id, attachment.downloadUrl || attachment.openUrl]),
     );
     const senderName = String(sender.name || sender.email || "You").trim() || "You";
     const recipient = item.recipient || { name: "Recipient" };

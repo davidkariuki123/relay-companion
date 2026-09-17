@@ -74,6 +74,35 @@ function createOutgoingAttachmentCache({ attachmentsRoot, spoolRoot, log = () =>
     }
   }
 
+  // The same index entry, written from bytes already in memory. An MCP send
+  // (relay_send from Claude Code or Codex) never passes through the pill's
+  // outbox spool, so until now its photos left the Mac and came back down from
+  // S3 before the sender's own chat could show them.
+  function retainCanonicalBytes(attachment, body) {
+    const id = String(attachment?.id || "").trim();
+    if (!id || !Buffer.isBuffer(body) || !body.length) return false;
+    const key = canonicalKey(id);
+    if (read(key)) return true;
+    const dir = directory(key);
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    if (!fs.realpathSync(dir).startsWith(fs.realpathSync(attachmentsRoot) + path.sep)) {
+      throw new Error("Outgoing attachment cache is outside the attachment store");
+    }
+    const name = String(attachment.name || "file");
+    const ext = /^\.[a-z0-9]{1,12}$/i.test(path.extname(name)) ? path.extname(name) : "";
+    const target = path.join(dir, `content${ext}`);
+    const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
+    fs.writeFileSync(tmp, body, { mode: 0o600 });
+    fs.renameSync(tmp, target);
+    const sha256 = attachment.sha256 || createHash("sha256").update(body).digest("hex");
+    atomicWriteJsonSync(path.join(dir, "metadata.json"), {
+      id, name, bytes: body.length,
+      contentType: String(attachment.contentType || "application/octet-stream"),
+      sha256, file: path.basename(target),
+    });
+    return true;
+  }
+
   function read(key) {
     try {
       const dir = directory(key);
@@ -107,7 +136,7 @@ function createOutgoingAttachmentCache({ attachmentsRoot, spoolRoot, log = () =>
     return result?.attachment.sha256 === attachment.sha256 ? result : null;
   }
 
-  return { retain, resolveLocal, resolveCanonical };
+  return { retain, retainCanonicalBytes, resolveLocal, resolveCanonical };
 }
 
 module.exports = { createOutgoingAttachmentCache };

@@ -14,9 +14,11 @@ const DEVELOPER_SURFACES = {
   topics: true, slack: true, peopleMentions: true, agentMentions: true,
   relayWork: true, agentConnections: true, aiSessions: true, connectors: true, messageMutations: true,
 };
+// Editing and deleting one's own sent messages ship to every account on every
+// channel (David, 2026-09-17), so the flag reads true on both rows.
 const ORDINARY_SURFACES = {
   topics: false, slack: false, peopleMentions: true, agentMentions: false,
-  relayWork: false, agentConnections: false, aiSessions: false, connectors: false, messageMutations: false,
+  relayWork: false, agentConnections: false, aiSessions: false, connectors: false, messageMutations: true,
 };
 
 test("developer capabilities require both the server-owned role and a non-production environment", async () => {
@@ -139,10 +141,12 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
   // but it had no catalog gate, so this list used to open with the three
   // relay_todo_* tools: every staging and production account was offered a
   // surface it is not entitled to call, and this assertion pinned that.
+  // Editing and deleting one's own sent messages joined the shipped catalog on
+  // 2026-09-17: they are ordinary messaging, like sending.
   assert.deepEqual(ordinary, [
     "relay_send", "relay_forward", "relay_share_link", "relay_contacts_search", "relay_groups_list", "relay_group_create", "relay_group_update",
     "relay_group_delete", "relay_contact_update", "relay_session_updates", "relay_inbox_list", "relay_sent_list", "relay_thread_fetch",
-    "relay_chats_list", "relay_chat_fetch", "relay_chat_send", "relay_mark_read",
+    "relay_chats_list", "relay_chat_fetch", "relay_chat_send", "relay_message_edit", "relay_message_delete", "relay_mark_read",
   ]);
   // A developer on production gets the same catalog as every ordinary user.
   const productionDeveloper = productFeatures({ env: {}, user: DEVELOPER });
@@ -163,10 +167,16 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
   ]) {
     await assert.rejects(handleCall(client, name, args, { features: shipped }), /available only to Relay developer accounts/);
   }
+  // The shipped row reaches transport for an edit or a delete; the switch, when
+  // off, still refuses before transport.
   for (const name of ["relay_message_edit", "relay_message_delete"]) {
     await assert.rejects(
-      handleCall(client, name, { relayId: "relay_1", idempotencyKey: "stale_tool_call" }, { features: shipped }),
-      /available only to Relay developer accounts on dev/,
+      handleCall(client, name, { relayId: "relay_1", forHuman: "Corrected.", idempotencyKey: "stale_tool_call" }, { features: shipped }),
+      /transport must not run/,
+    );
+    await assert.rejects(
+      handleCall(client, name, { relayId: "relay_1", forHuman: "Corrected.", idempotencyKey: "stale_tool_call" }, { features: { ...shipped, messageMutations: false } }),
+      /unavailable in this Relay release/,
     );
   }
   // A session still holding relay_todo_* from before the gate is refused before

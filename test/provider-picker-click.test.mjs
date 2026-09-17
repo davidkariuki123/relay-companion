@@ -13,12 +13,15 @@ function section(start, end) {
 const wire = section("  function wireHostOpen(scope)", "  // Before 0.1.290");
 const rows = section("  function wireSessionPickerRows(scope)", "  async function retrySessionPicker");
 const deliver = section("  async function deliverSessionSelection(", "  async function loadSessionPicker");
-function button(attributes = {}) {
+// A tile in the reader (inside .rd-host-actions) or in a room bubble (not).
+function button(attributes = {}, { reader = true } = {}) {
   return {
     disabled: false,
     getAttribute: (key) => attributes[key],
     addEventListener(event, callback) { this[event] = callback; },
     querySelector: () => ({ textContent: "" }),
+    closest: (selector) => reader && selector === ".rd-host-actions" ? {} : null,
+    classList: { add() {}, remove() {} },
   };
 }
 const event = () => ({ stopPropagation() {} });
@@ -26,7 +29,7 @@ const event = () => ({ stopPropagation() {} });
 for (const provider of ["codex", "claude"]) {
   for (const source of ["relay", "sent"]) {
     for (const materialized of [false, true]) {
-      test(`${provider} ${source} materialized=${materialized}: first click chooses, never launches`, () => {
+      test(`${provider} ${source} materialized=${materialized}: in the reader the first click chooses, never launches`, () => {
         const calls = [];
         const row = button({ "data-host-open": "relay-fixture", "data-host": provider, "data-source": source, "data-continues": materialized ? "1" : "0" });
         const context = vm.createContext({
@@ -36,6 +39,7 @@ for (const provider of ["codex", "claude"]) {
           relaySubject: () => "Fixture",
           loadSessionPicker: (...args) => calls.push(["picker", ...args]),
           openRelayFromUI: () => assert.fail("Provider click launched a native session"),
+          openNewSessionFromBubble: () => assert.fail("A reader tile opened a new chat without the picker"),
           wireSessionPickerRows: () => calls.push(["bind"]),
         });
         vm.runInContext(wire, context);
@@ -47,14 +51,59 @@ for (const provider of ["codex", "claude"]) {
         assert.equal(calls.length, 2, "Cannot switch provider while delivery is pending");
       });
     }
+    // David, 2026-09-17: choosing Codex or Claude Code in the chat (not the
+    // expanded view) must not bring up the menu; it opens a new chat there.
+    test(`${provider} ${source}: in a room bubble the first click opens a new chat, no picker`, () => {
+      const calls = [];
+      const tile = button({ "data-host-open": "relay-fixture", "data-host": provider, "data-source": source }, { reader: false });
+      const context = vm.createContext({
+        sessionPickerState: null,
+        readerRow: () => null, relayById: () => null, relaySubject: () => "Fixture",
+        loadSessionPicker: () => assert.fail("A bubble tile opened the picker"),
+        openNewSessionFromBubble: (...args) => calls.push(["new", ...args]),
+        wireSessionPickerRows: () => calls.push(["bind"]),
+      });
+      vm.runInContext(wire, context);
+      context.wireHostOpen({ querySelectorAll: selector => selector === "[data-host-open]" ? [tile] : [] });
+      tile.click(event());
+      assert.deepEqual(calls, [["bind"], ["new", tile, "relay-fixture", provider, source]]);
+      context.sessionPickerState = { delivering: true };
+      tile.click(event());
+      assert.equal(calls.length, 2, "A delivery in flight is not raced by a second open");
+    });
   }
 }
+
+test("a bubble's new chat is the picker's New chat: mode new, the app's surface, the mark breathing until it lands", async () => {
+  const requests = [], notes = [], classes = [];
+  let complete;
+  const tile = { classList: { add: (c) => classes.push("+" + c), remove: (c) => classes.push("-" + c) } };
+  const context = vm.createContext({
+    openingIds: new Map(), performance: { now: () => 1000 },
+    clearRowNote: () => notes.push(["clear"]), setRowNote: (id, text, cls) => notes.push([cls, text]),
+    stopOpening: (id) => notes.push(["stop", id]),
+    agentSurfacePreference: (app) => app === "Codex" ? "terminal" : "desktop",
+    setTimeout: (fn) => 0, clearTimeout() {},
+    window: { relay: { deliverToSession: (id, selection) => { requests.push({ id, ...selection }); return new Promise((resolve) => { complete = resolve; }); } } },
+  });
+  vm.runInContext(html.slice(html.indexOf("  async function openNewSessionFromBubble("), html.indexOf("  // The row's click, wherever")), context);
+  const done = context.openNewSessionFromBubble(tile, "relay-fixture", "codex", "sent");
+  assert.deepEqual(requests, [{ id: "relay-fixture", provider: "codex", mode: "new", source: "sent", surface: "terminal" }]);
+  assert.deepEqual(classes, ["+opening"]);
+  complete({ ok: false, error: "Codex is not signed in." });
+  await done;
+  assert.deepEqual(notes, [["clear"], ["stop", "relay-fixture"], ["err", "Codex is not signed in."]]);
+  // A second press while the first is still opening does nothing.
+  context.openingIds.set("relay-fixture", 1000);
+  await context.openNewSessionFromBubble(tile, "relay-fixture", "codex", "sent");
+  assert.equal(requests.length, 1);
+});
 
 test("the footer renders destination choice even when the Relay already has a task", () => {
   const context = vm.createContext({
     esc: String, REDUCED: true,
     sessionPickerState: { id: "fixture", provider: "codex", motion: "open" },
-    agentAppHosts: () => ["codex", "claude"], agentOpensInApp: () => true,
+    agentAppHosts: () => ["codex", "claude"], agentOpensInApp: () => true, chatAppEnabled: () => true,
     pullSentenceHtml: () => "", // the sentence is always offered; this test is about the picker rows
     sessionPickerBodyHtml: () => '<button data-sp-new>New task</button><button data-session-id="chosen">Existing task</button>',
   });

@@ -711,15 +711,63 @@ async function materializeRowInHost({
   return { id, host: cleanHost, url, openedInHost, skipExternalOpen, claudeFreshlyForged, cwd, cwdReason, workspaceKey };
 }
 
-export async function materializeAttachmentFiles(row, { log = () => {}, refreshUrls = defaultRefreshAttachmentUrls, mintUrl = defaultMintAttachmentUrl } = {}) {
+// One relay's attachments materialize together. Every tile of a four-photo
+// message used to ask for the whole relay at once, and each ask minted and
+// downloaded every file again because none of them could see the others'
+// in-flight `.tmp` copies. Concurrent calls for the same relay now share one
+// promise; the store is what dedups across processes (an existing file with
+// the right size is never fetched twice).
+const inFlightMaterializations = new Map();
+// Files of one relay download side by side rather than one after another. A
+// signed-URL mint plus an S3 fetch is ~2s to App Runner; four in series was the
+// eight seconds a row of small PNGs spent as blank plates.
+const ATTACHMENT_DOWNLOAD_CONCURRENCY = 4;
+
+async function mapWithConcurrency(items, limit, task) {
+  const results = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await task(items[index], index);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+export async function materializeAttachmentFiles(row, options = {}) {
+  const attachments = Array.isArray(row?.attachments) ? row.attachments : [];
+  if (!attachments.length) return row;
+  const relayId = String(row?.id || row?.relayId || "").trim();
+  if (!relayId) return materializeAttachmentFilesNow(row, options);
+  const running = inFlightMaterializations.get(relayId);
+  if (running) {
+    // The caller's row may carry a fresher or narrower view than the run in
+    // flight; reuse the run's downloaded paths on the caller's own attachments.
+    const done = await running;
+    const byId = new Map((done.attachments || []).filter((a) => a?.id).map((a) => [a.id, a]));
+    return {
+      ...row,
+      attachments: attachments.map((a) => (a?.id && byId.get(a.id)?.localPath ? { ...a, ...byId.get(a.id) } : a)),
+    };
+  }
+  const run = materializeAttachmentFilesNow(row, options).finally(() => {
+    if (inFlightMaterializations.get(relayId) === run) inFlightMaterializations.delete(relayId);
+  });
+  inFlightMaterializations.set(relayId, run);
+  return run;
+}
+
+async function materializeAttachmentFilesNow(row, { log = () => {}, refreshUrls = defaultRefreshAttachmentUrls, mintUrl = defaultMintAttachmentUrl } = {}) {
   const attachments = Array.isArray(row?.attachments) ? row.attachments : [];
   if (!attachments.length) return row;
   const attachmentUrls = row?.attachmentUrls && typeof row.attachmentUrls === "object" ? row.attachmentUrls : {};
   const dir = path.join(storeDir(), "attachments", safeFileStem(row?.id || row?.relayId || "relay"));
-  const materialized = [];
   let misses = 0;
-  for (const [index, attachment] of attachments.entries()) {
-    if (!attachment || typeof attachment !== "object") continue;
+  const relayId = String(row?.id || row?.relayId || "").trim();
+  const materialized = await mapWithConcurrency(attachments, ATTACHMENT_DOWNLOAD_CONCURRENCY, async (attachment, index) => {
+    if (!attachment || typeof attachment !== "object") return null;
     const name = String(attachment.name || attachment.filename || `attachment-${index + 1}`).trim() || `attachment-${index + 1}`;
     // Staged sent items copy each attachment's openUrl into attachmentUrls, so
     // a "signed" entry may really be the durable web route. Sort that out here,
@@ -732,7 +780,6 @@ export async function materializeAttachmentFiles(row, { log = () => {}, refreshU
     // signed URL came with the row, ask the API for one first — that route is
     // participant-scoped, so it also serves the sender, which the packet refresh
     // below never does. Resolved lazily so a cached copy costs no request.
-    const relayId = String(row?.id || row?.relayId || "").trim();
     const url = signed || (async () => {
       if (!attachment.id || !relayId || typeof mintUrl !== "function") return durable;
       try {
@@ -743,16 +790,28 @@ export async function materializeAttachmentFiles(row, { log = () => {}, refreshU
       }
       return durable;
     });
-    const localPath = await ensureAttachmentLocalCopy({ attachment, url, dir, name, index, log });
+    let localPath = await ensureAttachmentLocalCopy({ attachment, url, dir, name, index, log });
+    // A signed URL that came with the row may have expired since it was staged
+    // (a sent row re-staged days later). Mint a fresh one before giving up.
+    if (!localPath && signed && attachment.id && relayId && typeof mintUrl === "function") {
+      const minted = await (async () => {
+        try { return String((await mintUrl(relayId, attachment.id)) || "").trim(); }
+        catch (error) {
+          log(`relay attachment URL mint failed for ${name}: ${error instanceof Error ? error.message : String(error)}`);
+          return "";
+        }
+      })();
+      if (minted && minted !== signed) localPath = await ensureAttachmentLocalCopy({ attachment, url: minted, dir, name, index, log });
+    }
     if (!localPath && attachment.id) misses += 1;
-    materialized.push({
+    return {
       ...attachment,
       name,
       filename: name,
       openUrl: signed || durable || attachment.openUrl,
       ...(localPath ? { localPath } : {}),
-    });
-  }
+    };
+  }).then((rows) => rows.filter(Boolean));
   // The signed URLs in `attachmentUrls` go stale ~15 minutes after the packet
   // was fetched, so a lazy open days later downloads nothing. When anything is
   // still missing, re-fetch the packet ONCE for fresh URLs and retry just the
@@ -765,13 +824,13 @@ export async function materializeAttachmentFiles(row, { log = () => {}, refreshU
       log(`relay attachment URL refresh failed: ${error instanceof Error ? error.message : String(error)}`);
     }
     if (fresh && typeof fresh === "object") {
-      for (const [index, attachment] of materialized.entries()) {
-        if (!attachment || attachment.localPath || !attachment.id) continue;
+      await mapWithConcurrency([...materialized.entries()], ATTACHMENT_DOWNLOAD_CONCURRENCY, async ([index, attachment]) => {
+        if (!attachment || attachment.localPath || !attachment.id) return;
         const url = String(fresh[attachment.id] || "").trim();
-        if (!url) continue;
+        if (!url) return;
         const localPath = await ensureAttachmentLocalCopy({ attachment, url, dir, name: attachment.name, index, log });
         if (localPath) materialized[index] = { ...attachment, localPath };
-      }
+      });
     }
   }
   return { ...row, attachments: materialized };

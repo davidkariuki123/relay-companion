@@ -202,6 +202,34 @@ test("reply selection and share links retain the approved wire contract", async 
   assert.ok(f.calls.some((call) => call.path === "/v1/share-links/relay_link" && call.method === "DELETE"));
 });
 
+test("direct HTTPS can edit and delete the person's own sent messages under the messaging grant", async (t) => {
+  const f = await fixture(t);
+  const catalog = JSON.parse((await f.run(["--transport=https", "tools"])).stdout);
+  for (const name of ["relay_message_edit", "relay_message_delete"]) {
+    assert.ok(catalog.tools.some((tool) => tool.name === name), `${name} is in the direct catalog`);
+  }
+  const edited = await f.run(["--transport=https", "call", "relay_message_edit"], {
+    relayId: "relay_sent", forHuman: "Corrected.", forAgent: "Corrected context.", nature: ["finding"], asks: [],
+    idempotencyKey: "direct-edit-1", longForHumanConfirmed: true,
+  });
+  assert.equal(edited.code, 0, edited.stderr);
+  const patch = f.calls.find((call) => call.method === "PATCH");
+  assert.equal(patch.path, "/v1/messages/relay_sent");
+  assert.deepEqual(patch.body, { forHuman: "Corrected.", forAgent: "Corrected context.", nature: ["finding"], asks: [], idempotencyKey: "direct-edit-1" });
+  // The review flag is the helper's business; the wire body never carries it.
+  assert.equal(Object.hasOwn(patch.body, "longForHumanConfirmed"), false);
+  const nothing = await f.run(["--transport=https", "call", "relay_message_edit"], { relayId: "relay_sent", idempotencyKey: "direct-edit-2" });
+  assert.equal(nothing.code, 1);
+  assert.match(nothing.stderr, /requires forHuman, forAgent, nature or asks/);
+  const removed = await f.run(["--transport=https", "call", "relay_message_delete"], { relayId: "relay_sent", idempotencyKey: "direct-delete-1" });
+  assert.equal(removed.code, 0, removed.stderr);
+  assert.ok(f.calls.some((call) => call.method === "DELETE" && call.path === "/v1/messages/relay_sent" && call.body.idempotencyKey === "direct-delete-1"));
+  // A version-1 grant never had message writes; the operations stay out of its catalog.
+  fs.writeFileSync(f.config, JSON.stringify({ ...f.grant, consentVersion: 1 }));
+  const older = JSON.parse((await f.run(["--transport=https", "tools"])).stdout);
+  assert.ok(!older.tools.some((tool) => tool.name === "relay_message_edit" || tool.name === "relay_message_delete"));
+});
+
 test("a key alone does not make arbitrary protocol mutations replayable", async (t) => {
   const f = await fixture(t);
   await f.local((socket) => socket.end());

@@ -478,3 +478,18 @@ test("one or many files use a single shelf and preserve all dialog metadata", ()
     assert.deepEqual(cargo.chatFileShelves.get("relay_1"), files);
   }
 });
+
+// ---- a document window in front of the pill -------------------------------
+test("a focused viewer or preview drops the pill's floating level so it can be in front", () => {
+  const viewerBlock = between(main, "function createAttachmentViewerWindow(", "function sendAttachmentViewerPayload(");
+  assert.match(viewerBlock, /yieldOverlayToDocumentWindow\(viewerWin\)/);
+  const previewBlock = between(main, "function createPreviewWindow(", "function openPreview(");
+  assert.match(previewBlock, /yieldOverlayToDocumentWindow\(previewWin\)/);
+  const helper = between(main, "function yieldOverlayToDocumentWindow(", "function observeFrontmostBundle(");
+  assert.match(helper, /documentWin\.on\("focus", \(\) => setOverlayElevated\(false\)\)/);
+});
+
+test("the expanded room and rail wear the list's hairline scrollbar, not Chromium's default", () => {
+  assert.match(inbox, /:is\(#threadsView\.chat-max \.chat-rail, #threadsView\.chat-max #thDetail\)::-webkit-scrollbar \{ width:10px; \}/);
+  assert.match(inbox, /:is\(#threadsView\.chat-max \.chat-rail, #threadsView\.chat-max #thDetail\)::-webkit-scrollbar-thumb \{ background:var\(--edge\)/);
+});

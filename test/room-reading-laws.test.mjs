@@ -284,10 +284,21 @@ test("only two-document Relays carry provider actions, and the newest Relay stay
   assert.match(html, /\.th-host-actions\.persistent/);
 });
 
-test("provider footer promises chat choice", () => {
-  const footer = html.slice(html.indexOf("function hostActionRowHtml"), html.indexOf("function pullSentenceHtml"));
-  assert.match(footer, /Choose a chat or start a new one/);
-  assert.doesNotMatch(footer, /materializedCodex|materializedClaude|data-continues/);
+test("one list of hosts feeds the reader's chips and the bubble's strip; a bubble's agent tile opens a new chat at once", () => {
+  const hosts = html.slice(html.indexOf("function hostOptions("), html.indexOf("function pullSentenceHtml"));
+  assert.match(hosts, /chatAppEnabled\("Claude"\)/);
+  assert.match(hosts, /desktopHosts\.includes\("codex"\)/);
+  assert.doesNotMatch(hosts, /materializedCodex|materializedClaude|data-continues/);
+  // Both say "Open in" once: the chips as a lead word, the strip as a caption over the marks.
+  assert.match(hosts, /<span class="th-host-lead" aria-hidden="true">Open in<\/span>/);
+  assert.match(hosts, /<div class="th-host-strip-lead">Open in<\/div>/);
+  assert.match(hosts, /aria-label="Open in \$\{esc\(o\.name\)\}"/);
+  // The bubble's tile is the picker's "New chat" without the picker (David, 2026-09-17).
+  const wire = html.slice(html.indexOf("function wireHostOpen(scope)"), html.indexOf("// Before 0.1.290"));
+  assert.match(wire, /if \(!b\.closest\("\.rd-host-actions"\)\) \{ openNewSessionFromBubble\(b, id, host, source\); return; \}/);
+  const open = html.slice(html.indexOf("async function openNewSessionFromBubble("), html.indexOf("function wireHostOpen(scope)"));
+  assert.match(open, /window\.relay\.deliverToSession\(id, \{ provider: host, mode: "new", source,/);
+  assert.match(open, /setRowNote\(id, result\.error/);
 });
 
 test("enabled app rows share the same binder on the bubble and in the reader", () => {
@@ -301,9 +312,10 @@ test("enabled app rows share the same binder on the bubble and in the reader", (
   // route, note, and Send — it must not duplicate provider launch controls.
   const footer = html.slice(html.indexOf("function relayHostActionsHtml"), html.indexOf("// ---- the thread reply composer"));
   assert.match(footer, /const desktopHosts = agentAppHosts\(\)\.filter/);
-  assert.match(footer, /desktopHosts\.map\(\(host\) => hostActionRowHtml\(host, message, source\) \+ sessionPickerInlineHtml\(id, host\)\)/);
-  assert.match(footer, /\+ pullSentenceHtml\(message, \{ hasAppAction: desktopHosts.length > 0 \}\);/, "the pull sentence is always offered");
-  assert.match(footer, /sessionPickerInlineHtml/, "the picker unfolds under the selected row");
+  assert.match(footer, /const options = hostOptions\(message, source, desktopHosts\);\n\s+const inner = \(sheet \? hostSheetHtml\(options\) : hostStripHtml\(options\)\)/,
+    "one list of hosts, laid out as the reader's sheet or the bubble's strip");
+  assert.match(footer, /\+ pullSentenceHtml\(message, \{ hasAppAction: options\.length > 0 \}\);/, "the pull sentence is always offered, and reads Or only beside a host");
+  assert.match(footer, /sessionPickerInlineHtml/, "the picker unfolds under the selected tile");
   assert.doesNotMatch(footer, /data-host="codex"[\s\S]*?data-host="claude"/, "no fixed pair of rows");
   assert.match(footer, /function wireHostOpen\(scope\)/);
   assert.match(html, /wireHostOpen\(newControls\);/, "the room binds through the shared binder");
@@ -312,6 +324,7 @@ test("enabled app rows share the same binder on the bubble and in the reader", (
   assert.match(reader, /const bothNote = onAgent && workOn && !handoff \?/);
   assert.match(reader, /const documentHostActions = onHuman \? `<div class="rd-host-actions" data-stop="1">\$\{relayHostActionsHtml\(\{/,
     "the provider rows live on every letter's page, a Task's included (David, 2026-09-13: a Task opens like a Relay)");
+  assert.match(reader, /\}, \{ persistent: true, sheet: true \}\)\}<\/div>`/, "the reader asks for the sheet by name");
   assert.match(reader, /if \(onAgent && !workOn\) return "";/);
   assert.match(reader, /if \(onAgent\) return relayWorkDockHtml\(r, \{ inline: true \}\)/,
     "the agent composer is the hand-off and carries no provider launch buttons");
@@ -333,7 +346,7 @@ test("received and sent rows choose a destination before opening", () => {
   assert.match(wire, /loadSessionPicker\(id, host, relaySubject\(message\) \|\| "Relay", null, source\)/);
   assert.doesNotMatch(wire, /openRelayFromUI|materializedCodex|materializedClaude/);
   assert.doesNotMatch(wire, /if \(source === "relay"\)/, "sent Relays take the same path as received ones");
-  assert.match(footer, /aria-expanded="\$\{selected \? "true" : "false"\}"/);
+  assert.match(footer, /aria-expanded="\$\{pressed\(host\) \? "true" : "false"\}"/, "an agent tile says whether its picker is open under it");
   assert.doesNotMatch(html, /retiredSessionPickerEntry/);
   // Terminal only: the sentence, and the button that copies exactly it.
   assert.match(footer, /class="th-pull-q">\$\{esc\(sentence\)\}/);
