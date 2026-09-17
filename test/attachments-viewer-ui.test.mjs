@@ -394,6 +394,9 @@ test("the viewer window is sandboxed, isolated, frameless and loads nothing from
   assert.match(create, /sandbox: true/);
   assert.match(create, /plugins: true/, "Chromium's own PDF viewer renders the local file inside the stage");
   assert.match(create, /frame: false/);
+  // No native shadow (a black halo on a dark desktop); the page paints the edge.
+  assert.match(create, /hasShadow: false/);
+  assert.match(viewerHtml, /body::after \{ content:""; position:fixed; inset:0; pointer-events:none;[^}]*box-shadow:inset 0 0 0 1px var\(--edge\);/);
   assert.match(create, /backgroundColor: VIEWER_BACKGROUND/);
   assert.match(create, /setWindowOpenHandler\(\(\) => \(\{ action: "deny" \}\)\)/);
   assert.match(create, /on\("will-navigate"/);

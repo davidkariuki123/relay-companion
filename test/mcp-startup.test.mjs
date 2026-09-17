@@ -11,9 +11,11 @@ import {
   ORDINARY_RELAY_TOOL_NAMES,
   ORG_ADMIN_TOOL_NAMES,
   RELAY_MCP_INSTRUCTIONS,
+  instructionsForClient,
   TOOLS,
   startupInstructionsFor,
 } from "../src/mcp.js";
+import { RELAY_MILESTONE_GUIDE } from "../src/agent-instructions.js";
 
 const relayBin = fileURLToPath(new URL("../bin/relay.js", import.meta.url));
 
@@ -39,7 +41,7 @@ for (const task of ["relay_task_start", "relay_task_complete", "relay_task_uncla
 // close rule and stays silent about boards.
 const PRODUCTION_INSTRUCTIONS = startupInstructionsFor({ requests: true, topics: false });
 
-async function inspectMcp({ developer = false, staff = false, updateChannel = "stable" }) {
+async function inspectMcp({ developer = false, staff = false, updateChannel = "stable", clientName = "relay-startup-test" }) {
   const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-mcp-startup-"));
   fs.writeFileSync(path.join(configDir, "config.json"), JSON.stringify({
     user: { id: "usr_test", email: "test@example.com", accountKind: "human", isDeveloper: developer, ...(staff ? { canViewAdminDashboard: true } : {}) },
@@ -59,7 +61,7 @@ async function inspectMcp({ developer = false, staff = false, updateChannel = "s
   });
   let childStderr = "";
   transport.stderr?.on("data", (chunk) => { childStderr += String(chunk); });
-  const client = new Client({ name: "relay-startup-test", version: "1.0.0" }, { capabilities: {} });
+  const client = new Client({ name: clientName, version: "1.0.0" }, { capabilities: {} });
   try {
     try {
       await client.connect(transport);
@@ -85,6 +87,21 @@ test("MCP initialize returns complete startup teachings before tools are selecte
     new Set(messages.tools.map((tool) => tool.name)),
     PRODUCTION_ORDINARY_RELAY_TOOL_NAMES,
   );
+
+  // The host decides how much of the startup text survives: Claude Code cuts
+  // it at 2,048 chars and reads the doctrine from its rules file, Codex passes
+  // the whole text through as the tool namespace's description, so only Codex
+  // is handed the milestone doctrine in the handshake.
+  const claudeCode = await inspectMcp({ developer: false, clientName: "claude-code" });
+  assert.equal(claudeCode.instructions, PRODUCTION_INSTRUCTIONS);
+  assert.ok(Buffer.byteLength(claudeCode.instructions, "utf8") <= 2_048);
+  for (const codexClient of ["codex-mcp-client", "codex-local"]) {
+    const codex = await inspectMcp({ developer: false, clientName: codexClient });
+    assert.equal(codex.instructions, `${PRODUCTION_INSTRUCTIONS}\n\n${RELAY_MILESTONE_GUIDE}`, codexClient);
+    assert.match(codex.instructions, /## Creating a Relay at milestones/);
+    assert.match(codex.instructions, /always a link from relay_share_link/);
+  }
+  assert.equal(instructionsForClient(PRODUCTION_INSTRUCTIONS, undefined), PRODUCTION_INSTRUCTIONS, "an unnamed client gets the block alone");
 
   const productionDeveloper = await inspectMcp({ developer: true });
   assert.equal(productionDeveloper.instructions, PRODUCTION_INSTRUCTIONS);

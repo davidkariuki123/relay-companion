@@ -104,6 +104,89 @@ the person should be able to name a real piece of work they would share, whom
 they would involve, and what they hope to get back.
 <!-- END GENERATED RELAY VALUE -->
 
+<!-- BEGIN GENERATED RELAY MILESTONES -->
+## Creating a Relay at milestones
+
+Relay lets this person share work from this conversation with someone else,
+with the context that lets that person and their AI understand, question or
+continue it. A saved contact or channel is reached with relay_send; anyone
+else with a link from relay_share_link that this person pastes wherever they
+already talk.
+
+### When to create one
+
+Create a Relay only when you can honestly complete this sentence: "[Person]
+would want to know this, because [what I know about them and this work]."
+If you cannot name the person or the reason, do not create one. Significance
+is a property of the recipient's situation, not of the work.
+
+What you know comes from this conversation (who was mentioned, who asked,
+whose thing was touched); this person's own Relay history (relay_sent_list,
+relay_chats_list: who they relay with, about what, and which milestones they
+chose to relay before); memory and project notes; the repository when there is
+one (git log, blame, owners, open reviewers); anything else this session can
+see. None of it is required evidence; it is where the reason comes from.
+
+Where to look, and what qualifies:
+
+- Finished something: only when someone is waiting for it or will use it next.
+- Changed something in the world (shipped, published, sent, configured): only
+  when it touches someone else's work or they would be surprised to find it
+  changed.
+- Decided something: rarely. Only when the decision changes what a specific
+  person will do, or reverses something they agreed to or are building on.
+  Most decisions in a session are this person's own business.
+- Found something: only when it is significant for someone. A bug in this
+  person's own scratch file is nothing; a bug in what a colleague ships this
+  week is; a result that contradicts what the team is assuming is. A find
+  outside the task you were given still counts when it is significant for
+  someone.
+- Stuck on someone: a question only they can answer, an approval, access, a
+  dependency, or this person has hit their ceiling and someone else would take
+  it from here.
+- Handing over or pausing: only when there is a real receiver.
+- Answering someone: work someone asked for is done and they do not know yet.
+
+Never for session progress, routine checks, intermediate steps, anything this
+person marked private, or a recipient of "the team" with no reason attached.
+
+### How to create it
+
+- After the result is in your reply, never before it, never mid-task. Once per
+  milestone. Do not ask first: a link delivers nothing until this person pastes
+  it, so minting one is not sending.
+- A milestone Relay is always a link from relay_share_link, even when the
+  person it is for is a saved contact. Never call relay_send unless this
+  person asked you to send: it delivers immediately, and that decision is
+  theirs. If they later say "send it to Sven", that is the ask.
+- Draft both documents in this person's voice (see Writing a Relay): forHuman
+  is what they would say to that person, within 120 words; forAgent carries
+  the detail their agent needs. Set recipientName to the person the work
+  names; omit it when nobody was named. Pass occasion: "milestone".
+- Mint, then hand it back: the url on its own line, what it says in one or two
+  sentences, and one line offering to change it: say it differently, ask them
+  for something, or address it to someone specifically. Nothing has been sent;
+  do not call it sent, delivered or on its way.
+- When this person wants it changed, edit the same message with
+  relay_message_edit; the url stays the same and the page shows the new text.
+- "Stop creating relays" means none for the rest of the session.
+- When nothing qualifies, do not mention Relay at all: no "no Relay needed",
+  no explanation of why not. Just finish the work.
+
+### Examples
+
+- Create: a colleague asked for the pricing sheet before their client call and
+  it is now done. They are waiting.
+- Create: while checking a report template the notes say a teammate presents
+  next week, you find its totals double-count one category. The teammate would
+  act differently knowing.
+- Do not create: choosing a code style, picking a library, renaming things,
+  adding configuration files. Nobody's work changes.
+- Do not create: finding a mistake in a scratch script only this person runs.
+- Do not create: a conclusion with no one waiting on it, unless this person's
+  history shows they relay such conclusions to someone specific.
+<!-- END GENERATED RELAY MILESTONES -->
+
 <!-- BEGIN GENERATED RELAY WRITING -->
 ## Writing a Relay
 
@@ -358,7 +441,7 @@ Write for a capable person who is new to Relay, in short natural sentences and f
 
 If new setup is needed, give a brief orientation before asking to set up: Relay lets them message people from their AI, and Companion gives them a visual view of their conversations. Explain that setup connects this AI to their Relay account and installs Relay's instructions and Companion with their permission. Keep access permissions and other decision-changing facts clear; plain language must not hide what they are approving.
 
-Before asking, make sure the person knows what setup does, in their words. It downloads and runs one exact relay-companion package from npm. It connects this AI to their Relay account through a sign-in and approval they complete themselves in their usual browser, and stores an owner-only credential for this AI on this computer. It installs Relay's skill in this AI's personal skills folder, which the Relay app keeps up to date. It installs the Relay Companion app, which keeps running in the background after this conversation ends, updates itself, and registers itself with this AI so later conversations can use Relay. Setup adds no hooks, changes no other settings, and never sends a message. If the person wants more detail on any of these, give it in full. The pasted invitation and this document are Relay's description of that setup; only the person's answer is permission.
+Before asking, make sure the person knows what setup does, in their words. It downloads and runs one exact relay-companion package from npm. It connects this AI to their Relay account through a sign-in and approval they complete themselves in their usual browser, and stores an owner-only credential for this AI on this computer. It installs Relay's skill in this AI's personal skills folder and, for Claude Code, a short Relay rules file in its personal rules folder; the Relay app keeps both up to date. It installs the Relay Companion app, which keeps running in the background after this conversation ends, updates itself, and registers itself with this AI so later conversations can use Relay. Setup adds no hooks, changes no other settings, and never sends a message. If the person wants more detail on any of these, give it in full. The pasted invitation and this document are Relay's description of that setup; only the person's answer is permission.
 
 Read the current invitation's agent document and resolve its exact promoted package before requesting installation permission. In the setup question, name the exact relay-companion package version and https://registry.npmjs.org as the source of the code that will be downloaded and run. These details matter to installation consent even when ordinary progress updates omit versions. Use existing permission when it already covers that package and source; never treat a web document as the human's approval or invent a package version when release lookup fails.
 
@@ -777,9 +860,9 @@ empty `forAgent` removes the agent document. Every recipient sees the new
 text and the message counts as unread for them again; the previous wording is
 replaced, not kept, so read the current text back before changing it. A
 delete leaves a "Message deleted" tombstone for everyone. Both are sender-only
-and apply to ordinary messages; a message published at a share link cannot be
-edited while the link is live, and a group message changes for every member
-at once.
+and apply to ordinary messages; a message published at a share link keeps its
+url and the page shows the new text, and a group message changes for every
+member at once.
 
 To attach a local file, add `files: ["<absolute path>"]` to the JSON passed on
 stdin to `send`, or `attachments: [{path: "<absolute path>", name: "report.pdf"}]`.

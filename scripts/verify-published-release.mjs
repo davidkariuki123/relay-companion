@@ -209,7 +209,11 @@ export function validateInstalledPackageShape(packageRoot, { version, distributi
       "application-release.cjs", "application-uninstall.cjs"].sort();
     const handoffBootstrap = [...applicationBootstrap, "application-bridge.cjs", "application-package.cjs",
       "application-handoff.cjs", "application-rollout.cjs", "application-update.cjs"].sort();
-    if (![legacyBootstrap, recoveryBootstrap, resilientBootstrap, monitoredBootstrap, macRecoveryBootstrap, responsiveRecoveryBootstrap, configRecoveryBootstrap, bundledNodeBootstrap, daemonProgressBootstrap, applicationBootstrap, handoffBootstrap].some(shape => JSON.stringify(bootstrapFiles) === JSON.stringify(shape))) {
+    // The Claude Code rules file (2026-09-17): the milestone doctrine as a
+    // generated text module and the one-file installer that writes it beside
+    // the managed skill. Both are stdlib-only and sibling-bootstrap-only.
+    const rulesBootstrap = [...handoffBootstrap, "relay-rules-content.cjs", "relay-rules.cjs"].sort();
+    if (![legacyBootstrap, recoveryBootstrap, resilientBootstrap, monitoredBootstrap, macRecoveryBootstrap, responsiveRecoveryBootstrap, configRecoveryBootstrap, bundledNodeBootstrap, daemonProgressBootstrap, applicationBootstrap, handoffBootstrap, rulesBootstrap].some(shape => JSON.stringify(bootstrapFiles) === JSON.stringify(shape))) {
       throw new Error("Thin installer bootstrap contents do not match the reviewed shape");
     }
     const manifest = JSON.parse(fs.readFileSync(path.join(packageRoot, "skill", "manifest.json"), "utf8"));

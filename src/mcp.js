@@ -1,11 +1,11 @@
 import TOPIC_TOOLS from "./topic-tool-contract.cjs";
 const { TOPIC_EXTRA_TOOLS, TOPIC_POST_FIELDS, TOPIC_FETCH_FIELDS, TOPIC_CONTEXT_INSTRUCTION } = TOPIC_TOOLS;
 import { classificationArguments, classificationToolProperties } from "./message-classification.js";
-import { RELAY_MCP_ESSENTIALS, RELAY_COMPOSITION_SUMMARY, RELAY_TOPIC_POSTING_RULE } from "./agent-instructions.js";
+import { RELAY_MCP_ESSENTIALS, RELAY_COMPOSITION_SUMMARY, RELAY_TOPIC_POSTING_RULE, RELAY_MILESTONE_STARTUP_RULE, RELAY_MILESTONE_GUIDE } from "./agent-instructions.js";
 import TOPIC_STANDING_RULES from "./topic-standing-rules.cjs";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { CallToolRequestSchema, InitializeRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { hasAttachmentPayload, prepareOrdinaryRelayAttachments } from "./attachments.js";
 import { retainSentAttachmentsLocally } from "./sent-attachment-retention.js";
 import { workspacePassportFromDeclaration } from "./repo-identity.js";
@@ -32,12 +32,12 @@ export const FOR_HUMAN_DEFAULT_SENTENCE_LIMIT = 3;
 export const FOR_HUMAN_EXCEPTIONAL_SENTENCE_LIMIT = 4;
 
 const FOR_HUMAN_CLARIFICATION_CONTRACT = "Clarification before sending is uncommon. Make normal wording and presentation choices yourself. Ask the human only when a critical detail is genuinely uncertain and choosing one way or another could materially change what the human communicates or commits them to. Never resolve that uncertainty by inventing content.";
-const EXPLICIT_PLAIN_TEXT_ROUTING = "Use relay_chat_send only for explicitly requested plain text; otherwise use relay_send, even inside an existing chat.";
+const EXPLICIT_PLAIN_TEXT_ROUTING = "Use relay_chat_send only for explicitly requested plain text; otherwise relay_send, even inside an existing chat.";
 const EXPLICIT_EMAIL_ROUTING = "A human-supplied email is valid: search once, pass a miss as recipient.email (send auto-adds it); never link it. For an unresolved name with no address, 'create a Relay' or 'a link': mint a link with relay_share_link; never ask for email.";
 // The startup form of the same rule: the decision an agent makes when a
 // recipient does not resolve, which happens before it can read the fuller
 // wording on relay_send and in the contacts-search result.
-const UNRESOLVED_RECIPIENT_ROUTING = "For an unresolved recipient, 'create a Relay' or 'a link': mint a link with relay_share_link; a human-supplied email goes in recipient.email (auto-adds); never ask for one.";
+const UNRESOLVED_RECIPIENT_ROUTING = "For an unresolved recipient, 'create a Relay' or 'a link': mint a link with relay_share_link; a human-supplied email goes in recipient.email; never ask for one.";
 // Every refusal of a draft points back at the one place the writing rules
 // live, so an agent that skipped the skill is sent there before anything goes out.
 const WRITING_GUIDE_POINTER = "Read the installed Relay skill's Writing a Relay section before resending.";
@@ -96,7 +96,7 @@ export const TOPICS_RULE = TOPIC_CONTEXT_INSTRUCTION;
 // The one thing an agent sends unasked, said next to the send gate so the two
 // never read as a contradiction. The check-in reply repeats it with the
 // mandates in front of the agent.
-export const TOPICS_STARTUP_RULE = `At work start, use relay_topic_context for relevant history even if nothing is new; fetch useful source posts before deciding. ${RELAY_TOPIC_POSTING_RULE}`;
+export const TOPICS_STARTUP_RULE = `At work start, use relay_topic_context for relevant history; fetch useful source posts before deciding. ${RELAY_TOPIC_POSTING_RULE}`;
 // The check-in. Unconditional and short so it survives a cold start; the
 // reply carries the topics, the mandates, the arrivals and what to do about
 // them, and a reply has no byte budget. It sits straight after the send gate,
@@ -104,9 +104,9 @@ export const TOPICS_STARTUP_RULE = `At work start, use relay_topic_context for r
 // and its description sit hidden behind ToolSearch), and buried mid-block it
 // was followed in one session in fourteen.
 export const SESSION_CHECKIN_RULE =
-  "Call relay_session_updates when a piece of work starts and again before your final response: it returns this session's new Relays, its subscribed Topics with their mandates, and what to do about them. Received Relays are in relay_inbox_list; notification emails are not the authoritative contents.";
+  "Call relay_session_updates when a piece of work starts and before your final response: it returns this session's new Relays, Topics and mandates, and what to do about them. Received Relays are in relay_inbox_list; notification emails are not the authoritative contents.";
 const SESSION_CHECKIN_RULE_ORDINARY =
-  "Call relay_session_updates when a piece of work starts and again before your final response: it returns this session's new Relays and what to do about them. Received Relays are in relay_inbox_list; notification emails are not the authoritative contents. Mention a NEW arrival only when relevant to the current work.";
+  "Call relay_session_updates when a piece of work starts and before your final response: it returns this session's new Relays and what to do about them. Received Relays are in relay_inbox_list; notification emails are not the authoritative contents. Mention a NEW arrival only when relevant to the current work.";
 // What the check-in reply says once the mandates are in front of the agent.
 export const SESSION_CHECKIN_AUDIT =
   `${RELAY_TOPIC_POSTING_RULE} Before your final response, check what this session did, decided, planned, found or asked against each mandate in subscribedTopics: post only new information that meets the usefulness rules with relay_topic_post, then tell the person in one line; when nothing qualifies, say nothing about topics. A mandate covers this person's own work, not only others'. A topic whose standing is invited or paused waits on the person in the Relay app; say so once, only when it is relevant.`;
@@ -141,6 +141,7 @@ const TASK_STARTUP_RULE =
 export const RELAY_MCP_INSTRUCTIONS = [
   RELAY_MCP_ESSENTIALS,
   SESSION_CHECKIN_RULE,
+  RELAY_MILESTONE_STARTUP_RULE,
   MEDIUM_ROUTING,
   TOPICS_STARTUP_RULE,
   TASK_STARTUP_RULE,
@@ -155,6 +156,9 @@ export function startupInstructionsFor({ requests = true, topics = true } = {}) 
   return [
     RELAY_MCP_ESSENTIALS,
     topics ? SESSION_CHECKIN_RULE : SESSION_CHECKIN_RULE_ORDINARY,
+    // The one unasked creation, right after the send gate and the check-in so
+    // gate and rule never read as a contradiction.
+    RELAY_MILESTONE_STARTUP_RULE,
     MEDIUM_ROUTING,
     ...(topics ? [TOPICS_STARTUP_RULE] : []),
     ...(requests ? [TASK_STARTUP_RULE] : []),
@@ -164,6 +168,7 @@ export function startupInstructionsFor({ requests = true, topics = true } = {}) 
 export const REQUESTS_DISABLED_INSTRUCTIONS = [
   RELAY_MCP_ESSENTIALS,
   SESSION_CHECKIN_RULE_ORDINARY,
+  RELAY_MILESTONE_STARTUP_RULE,
   MEDIUM_ROUTING,
   // No Todo or Task rules in this profile, and no mention of either. It is
   // chosen when requests is off, so the relay_todo_* and relay_task_* tools
@@ -484,7 +489,7 @@ export const TOOLS = [
     name: "relay_send",
     _meta: ALWAYS_LOAD_META,
     description:
-      `${RELAY_MCP_ESSENTIALS} Send ordinary Relay correspondence or a Task. Default to Relay when asked to send without specifying a medium; another named medium overrides. For self use recipient.self=true; resolve others with relay_contacts_search or relay_groups_list. ${EXPLICIT_EMAIL_ROUTING} CLASSIFY BY WHAT THE SENDER EXPECTS DONE: kind='task' asks for work or an approval; kind='message' informs, hands over, or asks for thoughts, opinions or answers. Use a 3-6 word title and concise forHuman. Follow the installed skill's Writing a Relay section. Addressing a person, channel, or chat never implies a reply. Set replyToRelayId only when the human explicitly wants to quote or answer that exact Relay. For a Granular digital employee use the exact matching workspace-labelled contactId. Relay-owned Task Runs attach their provider's final answer automatically. Do not call relay_send merely to report completion; inbound Task completion uses relay_task_complete.`,
+      `${RELAY_MCP_ESSENTIALS} Only when this human asked you to send: this delivers immediately. A Relay you create at a milestone of their work is never sent with this tool; mint it with relay_share_link. Send ordinary Relay correspondence or a Task. Default to Relay when asked to send without specifying a medium; another named medium overrides. For self use recipient.self=true; resolve others with relay_contacts_search or relay_groups_list. ${EXPLICIT_EMAIL_ROUTING} CLASSIFY BY WHAT THE SENDER EXPECTS DONE: kind='task' asks for work or an approval; kind='message' informs, hands over, or asks for thoughts, opinions or answers. Use a 3-6 word title and concise forHuman. Follow the installed skill's Writing a Relay section. Addressing a person, channel, or chat never implies a reply. Set replyToRelayId only when the human explicitly wants to quote or answer that exact Relay. For a Granular digital employee use the exact matching workspace-labelled contactId. Relay-owned Task Runs attach their provider's final answer automatically. Do not call relay_send merely to report completion; inbound Task completion uses relay_task_complete.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -618,7 +623,7 @@ export const TOOLS = [
     name: "relay_share_link",
     _meta: ALWAYS_LOAD_META,
     description:
-      `Mint one Relay, a message or a Task, as a URL this human pastes themselves. CREATE MEANS A LINK: use it when this human says create, make, write or draft a Relay or a Task, asks for a link or for something to send around, names nobody, or names someone relay_contacts_search cannot resolve; use relay_send only for a named contact or channel already on Relay. Never mint for a human-supplied email; after one search miss use relay_send with recipient.email. Relay delivers nothing on this path and sends no email: it reaches people only when this human pastes the url wherever they already talk, so never report it as sent, delivered, or on its way. Anyone holding the url can read it and reply with no account, signing with a name; each person who replies gets their own private conversation with this human, shown as a separate chat named '<name> (unverified)', and people holding the link never see each other or this human's answers to others. A kind='task' link gives each person who takes it up their own Task through the link; their completion lands in their chat. action='revoke' makes one url stop resolving and mints nothing in its place; the conversations it opened stay. ${FOR_HUMAN_COMPOSITION_SUMMARY}`,
+      `Mint one Relay, a message or a Task, as a URL this human pastes themselves. CREATE MEANS A LINK: use it when this human says create, make, write or draft a Relay or a Task, asks for a link or for something to send around, names nobody, or names someone relay_contacts_search cannot resolve; use relay_send only for a named contact or channel already on Relay. Also, unasked, at a milestone of this human's work with occasion='milestone' (see the Relay skill); always a link then, even for a saved contact. Never mint for a human-supplied email; after one search miss use relay_send with recipient.email. Relay delivers nothing on this path and sends no email: it reaches people only when this human pastes the url wherever they already talk, so never report it as sent, delivered, or on its way. Anyone holding the url can read it and reply with no account, signing with a name; each person who replies gets their own private conversation with this human, and people holding the link never see each other or this human's answers to others. A kind='task' link gives each person who takes it up their own Task through the link; their completion lands in their chat. action='revoke' makes one url stop resolving and mints nothing in its place; the conversations it opened stay. ${FOR_HUMAN_COMPOSITION_SUMMARY}`,
     inputSchema: {
       type: "object",
       properties: {
@@ -631,6 +636,7 @@ export const TOOLS = [
             "What the link carries, classified exactly as relay_send.kind: 'message' is correspondence whose response is a person's opinion, judgment, decision or discussion; 'task' asks for external work (inspect, retrieve, change, test, verify something and report back). Defaults to message. A Task link is available where Tasks are; each person who takes it up gets their own Task through the link.",
         },
         recipientName: { type: "string", description: "What this human calls the audience, and ONLY when they named one: a person or a group. Omit it entirely when they said 'relay this' or asked for a link without naming anybody. Never invent a placeholder and never ask this human for a name: an unaddressed link is a supported outcome and reads as 'Someone with the link' everywhere; each reply carries the replier's own name." },
+        occasion: { type: "string", enum: ["milestone"], description: "Set to 'milestone' when you mint this at a milestone of this human's work without being asked. Omit when this human asked for the link." },
         title: { type: "string", description: "A 3-6 word gist of this Relay, same rule as relay_send.title. Name the single ask, outcome, update, or decision the person should recognize at a glance. It is the headline on the page they open, so write natural words in the sender's register, never a subject line or a report headline. Omit it only when this human is sending a plain text with no headline, the same way an ordinary chat message has none." },
         forHuman: { type: "string", description: FOR_HUMAN_COMPOSITION_SUMMARY },
         forAgent: { type: "string", description: "Complete context for the recipient's agent, without duplicating forHuman. Optional; leaving it empty makes this a plain text message. Anyone holding the url can read it, so keep out anything this human would not paste into a group chat: no internal hostnames, no local file paths, no credentials, no customer data." },
@@ -981,7 +987,7 @@ export const TOOLS = [
   {
     name: "relay_message_edit",
     description:
-      `Edit the human-facing payload, agent-facing payload, or both on a message this human sent, when the human asks for the change. Use an exact relayId from relay_sent_list or relay_chat_fetch. Sender-only; only ordinary messages can be edited, and a message published at a share link cannot. Every recipient sees the edit and it counts as unread for them again. Omit a payload to leave it unchanged; pass an empty forAgent to remove the agent document. For group messages Relay updates every fan-out copy atomically. ${FOR_HUMAN_COMPOSITION_SUMMARY}`,
+      `Edit the human-facing payload, agent-facing payload, or both on a message this human sent, when the human asks for the change. Use an exact relayId from relay_sent_list or relay_chat_fetch. Sender-only; only ordinary messages can be edited. A message published at a share link keeps its url and the page shows the new text. Every recipient sees the edit and it counts as unread for them again. Omit a payload to leave it unchanged; pass an empty forAgent to remove the agent document. For group messages Relay updates every fan-out copy atomically. ${FOR_HUMAN_COMPOSITION_SUMMARY}`,
     inputSchema: {
       type: "object",
       properties: {
@@ -1349,6 +1355,19 @@ export function rememberCallingClient(clientInfo, sessionContext = DEFAULT_MCP_S
 
 export function relayCallingSurface(sessionContext = DEFAULT_MCP_SESSION_CONTEXT) {
   return SURFACE_BY_MCP_CLIENT[sessionContext.callingClientName];
+}
+
+/**
+ * The startup instructions for the host that just said hello. Codex renders
+ * a server's instructions whole, as the description of the tool namespace, so
+ * it receives the milestone doctrine here; every other host gets the block
+ * alone (Claude Code truncates at 2,048 chars and reads the doctrine from the
+ * rules file Companion installs).
+ */
+export function instructionsForClient(base, clientInfo) {
+  const surface = SURFACE_BY_MCP_CLIENT[String(clientInfo?.name || "").trim()];
+  if (surface !== "codex") return base;
+  return `${base}\n\n${RELAY_MILESTONE_GUIDE}`;
 }
 
 function relaySource(repoDeclaration, sessionContext = DEFAULT_MCP_SESSION_CONTEXT) {
@@ -2567,7 +2586,12 @@ async function handleAdmittedCall(client, name, args, {
         forHuman: args.forHuman,
         forAgent: args.forAgent || "",
         ...(args.longForHumanConfirmed === true ? { longForHumanConfirmed: true } : {}),
-        source: relaySource(args.repo, sessionContext),
+        // An unasked milestone mint is stamped so the real-world rate can be
+        // read from source_meta; the server strips anything else.
+        source: {
+          ...relaySource(args.repo, sessionContext),
+          ...(String(args.occasion || "").trim().toLowerCase() === "milestone" ? { occasion: "milestone" } : {}),
+        },
         attachments,
         idempotencyKey: args.idempotencyKey,
       }));
@@ -2872,6 +2896,9 @@ export async function createRelayMcpSession({
     config: readConfig(),
     apiUrl: apiUrl(),
   });
+  const startupInstructions = features.topics === false
+    ? startupInstructionsFor(features)
+    : instructionsWithTopics(startupInstructionsFor(features), { accountScope: client.token || "" });
   const server = new Server(
     { name: "relay-companion", version: "0.2.0-agent-protocol" },
     // claude/channel alongside tools: this ONE server both answers tool calls
@@ -2886,11 +2913,21 @@ export async function createRelayMcpSession({
       capabilities: { tools: { listChanged: true }, experimental: { "claude/channel": {} } },
       // With Topics on, the person's subscribed topics ride the block so a
       // session with no hook still knows them from its first prompt.
-      instructions: features.topics === false
-        ? startupInstructionsFor(features)
-        : instructionsWithTopics(startupInstructionsFor(features), { accountScope: client.token || "" }),
+      instructions: startupInstructions,
     },
   );
+  // The handshake names the host, and the host decides how much of the
+  // startup text the model ever sees. Claude Code cuts server instructions at
+  // 2,048 chars, so it gets the block and reads the doctrine from its rules
+  // file; Codex passes the whole text through as the tool namespace's
+  // description (512 KiB), so it gets the doctrine here and needs no file.
+  // The SDK keeps clientInfo private until its own initialize handler has run,
+  // so this wraps that handler and sets the text it will return.
+  server.setRequestHandler(InitializeRequestSchema, async (request) => {
+    rememberCallingClient(request?.params?.clientInfo, sessionContext);
+    server._instructions = instructionsForClient(startupInstructions, request?.params?.clientInfo);
+    return server._oninitialize(request);
+  });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     rememberCallingClient(server.getClientVersion(), sessionContext);

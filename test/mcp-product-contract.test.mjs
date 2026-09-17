@@ -81,7 +81,7 @@ test("startup guidance and owner schemas preserve the complete product ontology"
   const inboxContract = JSON.stringify(byName.get("relay_inbox_list"));
   for (const instructions of [RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS]) {
     assert.ok(instructions.startsWith(SEND_GATE), "the human's ask is the first startup send rule");
-    assert.match(instructions, /relay_chat_send only for explicitly requested plain text.*otherwise use relay_send.*inside an existing chat/i);
+    assert.match(instructions, /relay_chat_send only for explicitly requested plain text.*otherwise relay_send.*inside an existing chat/i);
   }
   for (const name of ["relay_send", "relay_chat_send"]) {
     assert.ok(
@@ -96,7 +96,7 @@ test("startup guidance and owner schemas preserve the complete product ontology"
   // The check-in is the one unconditional instruction: it must arrive cold in
   // every profile, because the reply is what carries the boards and mandates.
   for (const instructions of [RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS]) {
-    assert.match(instructions, /Call relay_session_updates when a piece of work starts and again before your final response/);
+    assert.match(instructions, /Call relay_session_updates when a piece of work starts and before your final response/);
   }
   // Composition detail (title length, kind, chat ontology) rides the tools and
   // the skill, read at the moment they apply; the startup block stays routing.
@@ -106,6 +106,25 @@ test("startup guidance and owner schemas preserve the complete product ontology"
   assert.match(byName.get("relay_send").inputSchema.properties.title.description, /3-6 word gist/i);
   assert.match(byName.get("relay_chat_fetch").description, /no user-visible threads or topics/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /relay_send requires a complete, non-empty forAgent/i);
+  // The one thing an agent creates unasked, said next to the send gate in
+  // every profile so the two never read as a contradiction, and the guard on
+  // the tool that delivers: a milestone Relay is a link, never a send.
+  for (const instructions of [RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS]) {
+    assert.match(instructions, /^Only send a Relay to a person or channel when the user asks\./);
+    assert.match(instructions, /At a milestone, create a Relay as a link with relay_share_link without asking \(see the Relay skill\); relay_send only when asked\./);
+  }
+  assert.match(byName.get("relay_send").description, /Only when this human asked you to send: this delivers immediately\. A Relay you create at a milestone of their work is never sent with this tool; mint it with relay_share_link/);
+  assert.match(byName.get("relay_share_link").description, /unasked, at a milestone of this human's work with occasion='milestone'/);
+  assert.match(byName.get("relay_share_link").description, /always a link then, even for a saved contact/);
+  assert.deepEqual(byName.get("relay_share_link").inputSchema.properties.occasion.enum, ["milestone"]);
+  assert.match(byName.get("relay_message_edit").description, /keeps its url and the page shows the new text/);
+  assert.doesNotMatch(byName.get("relay_message_edit").description, /share link cannot/);
+  // Claude Code cuts every tool description at 2,048 chars, so a rule past
+  // that point on an always-loaded tool is never read.
+  for (const tool of TOOLS) {
+    if (tool._meta?.["anthropic/alwaysLoad"] !== true) continue;
+    assert.ok(Buffer.byteLength(tool.description, "utf8") <= 2_048, `${tool.name} description fits the host cap (${Buffer.byteLength(tool.description, "utf8")})`);
+  }
   assert.doesNotMatch(RELAY_MCP_INSTRUCTIONS, /Plain text uses relay_chat_send/i);
   assert.doesNotMatch(RELAY_MCP_INSTRUCTIONS, /optional (?:detailed forAgent|agent context)/i);
   assert.match(sendContract, /installed Relay skill/);
@@ -145,7 +164,7 @@ test("startup guidance and owner schemas preserve the complete product ontology"
   }
   assert.match(
     source,
-    /instructions:\s*features\.topics === false[\s\S]{0,120}?startupInstructionsFor\(features\)[\s\S]{0,120}?instructionsWithTopics\(startupInstructionsFor\(features\)/,
+    /const startupInstructions = features\.topics === false[\s\S]{0,120}?startupInstructionsFor\(features\)[\s\S]{0,120}?instructionsWithTopics\(startupInstructionsFor\(features\)[\s\S]{0,1400}?instructions: startupInstructions,[\s\S]{0,1400}?server\._instructions = instructionsForClient\(startupInstructions, request\?\.params\?\.clientInfo\)/,
     "the MCP initialize response carries guidance for the active product surface",
   );
   // Tasks and Topics are separate switches: the production row (Tasks on,

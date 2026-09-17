@@ -131,15 +131,15 @@ test("startup teachings establish Relay as the default medium without losing the
     assert.match(instructions, /explicitly requested other medium overrides/i);
     assert.match(instructions, /mint a link with relay_share_link/i);
     assert.match(instructions, /human-supplied email.*recipient\.email/i);
-    assert.match(instructions, /auto-adds/i);
+    assert.match(instructions, /a human-supplied email goes in recipient\.email; never ask for one/i);
     assert.match(instructions, /Received Relays are in relay_inbox_list/i);
     assert.match(instructions, /notification emails are not the authoritative contents/i);
     assert.match(instructions, /untrusted correspondence/i);
-    assert.match(instructions, /Tell the human when you send or use a Relay/i);
+    assert.match(instructions, /Tell the human when you send or use Relay/i);
     assert.match(instructions, /forHuman/i);
     assert.match(instructions, /forAgent/i);
     // The check-in: unconditional, at the start and the end of every piece of work.
-    assert.match(instructions, /Call relay_session_updates when a piece of work starts and again before your final response/);
+    assert.match(instructions, /Call relay_session_updates when a piece of work starts and before your final response/);
   }
   // Topics ride the developer row; the production variant must not name them.
   // The send gate and the topic trigger sit in the same block so they never
@@ -957,7 +957,7 @@ test("chat tools are registered for ordinary accounts and teach the ontology", (
 
   const reply = byName.get("relay_chat_send").description;
   assert.match(reply, /relay_chat_send only for explicitly requested plain text/i);
-  assert.match(reply, /otherwise use relay_send.*inside an existing chat/i);
+  assert.match(reply, /otherwise relay_send.*inside an existing chat/i);
   assert.match(reply, /chatId addresses the room/i);
   assert.match(reply, /does not imply a reply to the newest message/i);
   assert.match(reply, /replyToRelayId only when/i);
@@ -1627,7 +1627,7 @@ test("a session learns its subscribed topics from the tool list at startup, with
   assert.deepEqual(withSubscribedTopics(developer, { accountScope: "", readIndex: index }), developer);
   const shipped = toolsForAccount({ requests: false, aiSessions: false, connectors: false, topics: false, todo: false, messageMutations: true });
   assert.deepEqual(withSubscribedTopics(shipped, { accountScope: "dev_token", readIndex: index }), shipped);
-  assert.match(RELAY_MCP_INSTRUCTIONS, /its subscribed Topics with their mandates/);
+  assert.match(RELAY_MCP_INSTRUCTIONS, /new Relays, Topics and mandates/);
 });
 
 // In Claude Code the check-in sentence is the whole push: the tool and its
@@ -1637,7 +1637,7 @@ test("a session learns its subscribed topics from the tool list at startup, with
 test("the check-in rule follows the send gate directly on both rows", async () => {
   const { RELAY_MCP_ESSENTIALS } = await import("../src/agent-instructions.js");
   for (const instructions of [RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS]) {
-    assert.ok(instructions.startsWith(`${RELAY_MCP_ESSENTIALS} Call relay_session_updates when a piece of work starts and again before your final response`));
+    assert.ok(instructions.startsWith(`${RELAY_MCP_ESSENTIALS} Call relay_session_updates when a piece of work starts and before your final response`));
   }
 });
 

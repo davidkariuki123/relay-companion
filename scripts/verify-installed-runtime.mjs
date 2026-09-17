@@ -61,7 +61,13 @@ export async function verifyInstalledManagedSkills(packageRoot) {
         throw new Error(`Built runtime installed an invalid managed skill for ${target.host}`);
       }
     }
-    return { version: manifest.version, targets: result.results.length };
+    // The Claude Code rules file rides the Claude skill install and is counted
+    // separately: `targets` stays the number of skill trees.
+    const rules = result.results.find((item) => item.target === "rules");
+    if (!rules?.ok || !["installed", "updated", "current"].includes(rules.status)) {
+      throw new Error(`Built runtime cannot install its Claude Code rules file: ${JSON.stringify(rules)}`);
+    }
+    return { version: manifest.version, targets: result.results.filter((item) => item.target !== "rules").length, rulesFile: rules.file };
   } finally {
     if (path.dirname(path.resolve(homeDir)) !== path.resolve(os.tmpdir()) || !path.basename(homeDir).startsWith("relay-built-skill-")) {
       throw new Error("Refusing unsafe skill verification cleanup");

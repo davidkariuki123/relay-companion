@@ -55,6 +55,10 @@
     html, body { margin:0; height:100%; overflow:hidden; }
     body { display:flex; flex-direction:column; background:var(--bg); color:var(--ink);
       font-family:var(--sans); font-size:13px; -webkit-font-smoothing:antialiased; cursor:default; }
+    /* The window's edge, painted here because the window itself casts no
+       shadow: one hairline over everything, never in the way of a click. */
+    body::after { content:""; position:fixed; inset:0; pointer-events:none; z-index:2147483647;
+      box-shadow:inset 0 0 0 1px var(--edge); }
     button { appearance:none; border:0; background:transparent; font:inherit; color:inherit; cursor:pointer; }
     [hidden] { display:none !important; }
 

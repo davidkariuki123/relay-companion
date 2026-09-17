@@ -5246,7 +5246,10 @@ function createAttachmentViewerWindow(key) {
     minimizable: true,
     maximizable: true,
     fullscreenable: false,
-    hasShadow: true,
+    // No native AppKit shadow: on a dark desktop it is a large black halo
+    // around a dark window (David, 2026-09-17). The page paints a hairline
+    // edge instead, so the window still reads on any background.
+    hasShadow: false,
     acceptFirstMouse: true,
     autoHideMenuBar: true,
     title: "Relay",

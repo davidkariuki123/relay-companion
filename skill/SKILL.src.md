@@ -29,6 +29,9 @@ Hosted/headless agents can use the authenticated HTTPS protocol directly.
 <!-- BEGIN GENERATED RELAY VALUE -->
 <!-- END GENERATED RELAY VALUE -->
 
+<!-- BEGIN GENERATED RELAY MILESTONES -->
+<!-- END GENERATED RELAY MILESTONES -->
+
 <!-- BEGIN GENERATED RELAY WRITING -->
 ## Writing a Relay
 
@@ -511,9 +514,9 @@ empty `forAgent` removes the agent document. Every recipient sees the new
 text and the message counts as unread for them again; the previous wording is
 replaced, not kept, so read the current text back before changing it. A
 delete leaves a "Message deleted" tombstone for everyone. Both are sender-only
-and apply to ordinary messages; a message published at a share link cannot be
-edited while the link is live, and a group message changes for every member
-at once.
+and apply to ordinary messages; a message published at a share link keeps its
+url and the page shows the new text, and a group message changes for every
+member at once.
 
 To attach a local file, add `files: ["<absolute path>"]` to the JSON passed on
 stdin to `send`, or `attachments: [{path: "<absolute path>", name: "report.pdf"}]`.

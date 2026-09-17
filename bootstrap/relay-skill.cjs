@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { acquireCanonicalLock } = require("./recovery-launcher.cjs");
+const relayRules = require("./relay-rules.cjs");
 
 // Both the application updater and protocol helper use this per-target lock.
 // A lease may be passed back only to this module, while it is still held.
@@ -335,6 +336,9 @@ function uninstallManaged(options = {}) {
   const targets = options.targets || defaultTargets(options);
   const results = [];
   const seen = new Set();
+  if (targets.some((target) => target.host === "claude")) {
+    results.push({ host: "claude", target: "rules", ...relayRules.uninstall(options) });
+  }
   for (const target of targets) {
     let lease;
     try {
@@ -457,6 +461,13 @@ async function installManifest(manifest, readFile, options = {}) {
     try { results.push({ host: target.host, target: target.target, ...(await installOne(target.directory, manifest, readFile, { ...options, ...target })) }); }
     catch (error) { results.push({ host: target.host, ok: false, status: "failed", directory: target.directory, error: error?.message || String(error) }); }
   }
+  // Claude Code's rules file travels with the skill: same consent, same
+  // version, same update. It is written whenever the Claude skill is in
+  // place (installed, updated or already current), never on a refusal.
+  const claudeSkill = results.find((item) => item.host === "claude" && item.target !== "compatibility");
+  if (claudeSkill?.ok && claudeSkill.status !== "downgrade_refused") {
+    results.push({ host: "claude", target: "rules", ...relayRules.install({ ...options, version: manifest.version }) });
+  }
   return { ok: results.every((item) => item.ok), version: manifest.version, results };
 }
 
@@ -530,6 +541,9 @@ async function runCli(argv = process.argv.slice(2), options = {}) {
       state: readState(target.directory),
       changedFiles: localChanges(target.directory),
     }));
+    if (defaultTargets(common).some((target) => target.host === "claude")) {
+      results.push({ host: "claude", target: "rules", ...relayRules.status(common) });
+    }
     return { ok: true, results };
   }
   throw new Error("Usage: relay skill install --consent [--host all|codex|claude] | update [--renew-consent] | status | rollback");
