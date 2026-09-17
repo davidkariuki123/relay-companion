@@ -34,7 +34,7 @@ export const REQUIRED_RUNTIME_CAPABILITIES = {
       // Destination choice must remain wired into the provider footer: every
       // desktop host on the strip or sheet gets its chat picker under it.
       'desktopHosts.map((host) => sessionPickerInlineHtml(id, host)).join("")',
-      "hostStripHtml(options)",
+      "hostBarHtml(options, message)",
       'loadSessionPicker(id, host, relaySubject(message) || "Relay", null, source)',
       "wireSessionPickerRows(scope);",
       "window.relay.sessionPicker",

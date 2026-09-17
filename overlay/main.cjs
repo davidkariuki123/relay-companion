@@ -9243,6 +9243,58 @@ ipcMain.handle("relay:messageDelete", (event, input) => {
   if (!win || win.isDestroyed() || event.sender !== win.webContents) return { ok: false, error: "Not the pill." };
   return deleteSentMessage(input);
 });
+// A link to a relay this account already sent, from the reader's options
+// menu. Sent is refreshed after either call so the row carries the link's
+// state (or its absence) before the renderer paints again.
+ipcMain.handle("relay:bindShareLink", async (event, input = {}) => {
+  if (!win || win.isDestroyed() || event.sender !== win.webContents) return { ok: false, error: "Not the pill." };
+  const relayId = String(input.relayId || "").trim();
+  const access = input.access === "private" ? "private" : input.access === "public" ? "public" : "";
+  if (!relayId || !access) return { ok: false, error: "Missing relay or access." };
+  try {
+    const link = await (await relayClient()).bindShareLink(relayId, access);
+    const parsed = safeShareLinkUrl(link?.url);
+    // On the clipboard before the renderer paints, so "Copied" is true.
+    clipboard.writeText(parsed.toString());
+    await refreshSent().catch(() => {});
+    await pushInbox(true);
+    return { ok: true, url: parsed.toString(), access: link?.access === "private" ? "private" : "public", copied: true };
+  } catch (error) {
+    const message = error?.body?.message || error?.message || String(error);
+    console.error("[overlay] share link bind failed:", message);
+    return { ok: false, error: message };
+  }
+});
+function safeShareLinkUrl(value) {
+  const parsed = new URL(String(value || ""));
+  const loopback = ["localhost", "127.0.0.1", "::1"].includes(parsed.hostname);
+  if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && loopback)) throw new Error("Relay returned an unsafe link.");
+  return parsed;
+}
+ipcMain.handle("relay:copyShareLink", (event, input = {}) => {
+  if (!win || win.isDestroyed() || event.sender !== win.webContents) return { ok: false, error: "Not the pill." };
+  try {
+    clipboard.writeText(safeShareLinkUrl(input.url).toString());
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) };
+  }
+});
+ipcMain.handle("relay:revokeShareLink", async (event, input = {}) => {
+  if (!win || win.isDestroyed() || event.sender !== win.webContents) return { ok: false, error: "Not the pill." };
+  const relayId = String(input.relayId || "").trim();
+  if (!relayId) return { ok: false, error: "Missing relay id." };
+  try {
+    await (await relayClient()).revokeShareLink(relayId);
+    await refreshSent().catch(() => {});
+    await pushInbox(true);
+    return { ok: true };
+  } catch (error) {
+    const message = error?.body?.message || error?.message || String(error);
+    console.error("[overlay] share link revoke failed:", message);
+    return { ok: false, error: message };
+  }
+});
 ipcMain.handle("relay:markAllRead", () => markAllVisibleRelaysRead());
 ipcMain.handle("relay:refreshSent", async () => {
   await refreshSent();

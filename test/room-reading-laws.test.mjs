@@ -284,15 +284,16 @@ test("only two-document Relays carry provider actions, and the newest Relay stay
   assert.match(html, /\.th-host-actions\.persistent/);
 });
 
-test("one list of hosts feeds the reader's chips and the bubble's strip; a bubble's agent tile opens a new chat at once", () => {
+test("one list of hosts feeds the reader's chips and the bubble's bar; a bubble's agent mark opens a new chat at once", () => {
   const hosts = html.slice(html.indexOf("function hostOptions("), html.indexOf("function pullSentenceHtml"));
   assert.match(hosts, /chatAppEnabled\("Claude"\)/);
   assert.match(hosts, /desktopHosts\.includes\("codex"\)/);
   assert.doesNotMatch(hosts, /materializedCodex|materializedClaude|data-continues/);
-  // Both say "Open in" once: the chips as a lead word, the strip as a caption over the marks.
+  // The chips say "Open in" once as a lead word; a bubble's marks each say their verb to the pointer and the screen reader.
   assert.match(hosts, /<span class="th-host-lead" aria-hidden="true">Open in<\/span>/);
-  assert.match(hosts, /<div class="th-host-strip-lead">Open in<\/div>/);
-  assert.match(hosts, /aria-label="Open in \$\{esc\(o\.name\)\}"/);
+  assert.match(hosts, /class="th-host-mark" type="button" data-host="\$\{o\.host\}" aria-label="Open in \$\{esc\(o\.name\)\}" title="Open in \$\{esc\(o\.name\)\}"/);
+  // The bar copies the same sentence the reader shows, and shows it only as the verb's title.
+  assert.match(hosts, /data-pull-copy="\$\{esc\(sentence\)\}" title="\$\{esc\(sentence\)\}"><span>Copy prompt<\/span><span>for your agent<\/span><\/button>/);
   // The bubble's tile is the picker's "New chat" without the picker (David, 2026-09-17).
   const wire = html.slice(html.indexOf("function wireHostOpen(scope)"), html.indexOf("// Before 0.1.290"));
   assert.match(wire, /if \(!b\.closest\("\.rd-host-actions"\)\) \{ openNewSessionFromBubble\(b, id, host, source\); return; \}/);
@@ -312,9 +313,9 @@ test("enabled app rows share the same binder on the bubble and in the reader", (
   // route, note, and Send — it must not duplicate provider launch controls.
   const footer = html.slice(html.indexOf("function relayHostActionsHtml"), html.indexOf("// ---- the thread reply composer"));
   assert.match(footer, /const desktopHosts = agentAppHosts\(\)\.filter/);
-  assert.match(footer, /const options = hostOptions\(message, source, desktopHosts\);\n\s+const inner = \(sheet \? hostSheetHtml\(options\) : hostStripHtml\(options\)\)/,
-    "one list of hosts, laid out as the reader's sheet or the bubble's strip");
-  assert.match(footer, /\+ pullSentenceHtml\(message, \{ hasAppAction: options\.length > 0 \}\);/, "the pull sentence is always offered, and reads Or only beside a host");
+  assert.match(footer, /const options = hostOptions\(message, source, desktopHosts\);/, "one list of hosts");
+  assert.match(footer, /: hostBarHtml\(options, message\);/, "a bubble gets the bar");
+  assert.match(footer, /\+ pullSentenceHtml\(message, \{ hasAppAction: options\.length > 0 \}\)/, "the reader's pull sentence is always offered, and reads Or only beside a host");
   assert.match(footer, /sessionPickerInlineHtml/, "the picker unfolds under the selected tile");
   assert.doesNotMatch(footer, /data-host="codex"[\s\S]*?data-host="claude"/, "no fixed pair of rows");
   assert.match(footer, /function wireHostOpen\(scope\)/);

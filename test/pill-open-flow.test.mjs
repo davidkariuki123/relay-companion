@@ -687,8 +687,12 @@ test("card-size IPC resizes ordinary Windows windows and hit-tests only the macO
 // It stopped on its own because backlogs are finite.
 test("both relay-list renders skip the DOM write when the markup is unchanged", () => {
   const render = sliceFunction(html, "function renderRelays()");
-  // Notification (unread-only) list.
-  assert.match(render, /if \(relaysListEl\.innerHTML === nextNotifHtml\) return;/);
+  // Notification (unread-only) list — judged against the markup last painted,
+  // not the live DOM: dressing the banner's composer (its + button, its
+  // measured height) changes the DOM without changing what the rows say.
+  assert.match(render, /if \(peekListHtml === nextNotifHtml && relaysListEl\.childElementCount\) return;/);
+  assert.ok(render.indexOf("peekListHtml === nextNotifHtml") < render.indexOf("relaysListEl.innerHTML = nextNotifHtml;"), "the banner guard must precede its write");
+  assert.match(render, /relaysListEl\.innerHTML = nextNotifHtml;\n\s+peekListHtml = nextNotifHtml;/);
   // Conversation list.
   assert.match(render, /if \(relaysListEl\.innerHTML === nextListHtml\) return;/); // topic list keeps main no-op guard
   // The guard has to come BEFORE the write, or it guards nothing.

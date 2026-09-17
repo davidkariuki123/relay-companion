@@ -104,12 +104,12 @@ test("the footer renders destination choice even when the Relay already has a ta
     esc: String, REDUCED: true,
     sessionPickerState: { id: "fixture", provider: "codex", motion: "open" },
     agentAppHosts: () => ["codex", "claude"], agentOpensInApp: () => true, chatAppEnabled: () => true,
-    pullSentenceHtml: () => "", // the sentence is always offered; this test is about the picker rows
+    pullSentenceHtml: () => "", pullSentenceFor: () => "", // the sentence is always offered; this test is about the picker rows
     sessionPickerBodyHtml: () => '<button data-sp-new>New task</button><button data-session-id="chosen">Existing task</button>',
   });
   vm.runInContext(section("  function sessionPickerInlineHtml(", "  function wireSessionPickerRows(")
     + section("  function relayHostActionsHtml(", "  // \"Pull David"), context);
-  const markup = context.relayHostActionsHtml({ id: "fixture", materializedCodex: true });
+  const markup = context.relayHostActionsHtml({ id: "fixture", materializedCodex: true }, { persistent: true, sheet: true });
   assert.match(markup, /data-sp-reveal="fixture" data-sp-provider="codex"/);
   assert.match(markup, /aria-expanded="true"/);
   assert.match(markup, /data-session-id="chosen"/);

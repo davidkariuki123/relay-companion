@@ -695,59 +695,26 @@ test("specific replies use an attached composer preview and render a source refe
   assert.match(html, /margin:0 42px 7px 0/);
 });
 
-test("agent-authored relays use the shipped Codex and Claude Code marks in a bubble footer", () => {
-  // The byline reads the surface and nothing else. Gating on the transport
-  // host meant relays that DID state their surface still rendered nothing.
-  assert.doesNotMatch(html, /source\?\.host !== "relay-mcp"/);
-  assert.match(html, /const PROVIDER_BYLINE = new Map\(\[/);
-  assert.match(html, /\["codex", \{ mark: "codexMark\.svg", label: "Codex" \}\]/);
-  assert.match(html, /\["claude_code", \{ mark: "claudeCodeMark\.svg", label: "Claude Code" \}\]/);
-  assert.match(html, /\["claude_desktop", \{ mark: "claudeCodeMark\.svg", label: "Claude Desktop" \}\]/);
-  assert.match(html, /\["claude_cowork", \{ mark: "claudeCodeMark\.svg", label: "Claude Cowork" \}\]/);
-  assert.match(html, /PROVIDER_BYLINE\.get\(String\(message\?\.source\?\.surface \|\| ""\)\)/);
-  assert.match(html, /Sent with \$\{esc\(provider\.label\)\}/);
-  assert.match(html, /\.th-provider-byline \{[^}]*border-top:1px solid var\(--hair\)/s);
-});
-
-test("the byline RENDERS — executed, not pattern-matched", () => {
-  // This feature shipped with four green assertions beside it and never once
-  // appeared in production, because every one of them checked source text or
-  // an environment instead of running the thing. So run the thing.
-  const start = html.indexOf("const PROVIDER_BYLINE = ");
-  assert.notEqual(start, -1, "the byline table moved — this test extracts it by name");
+test("a bubble wears no 'Sent with' line: From Slack is the only provenance byline, and it RENDERS", () => {
+  // The "Sent with Codex / Claude Code" line went on 2026-09-17 (David): its
+  // height became the bar's marks, and which agent wrote a letter is the
+  // letter's business. Slack provenance stays, because it changes what the
+  // message is. Executed, not pattern-matched: the byline once shipped green
+  // on source-text assertions and never rendered.
+  assert.doesNotMatch(html, /PROVIDER_BYLINE|Sent with \$\{esc\(provider\.label\)\}/);
+  const start = html.indexOf("const providerBylineHtml = ");
+  assert.notEqual(start, -1, "the byline moved — this test extracts it by name");
   const source = html.slice(start, html.indexOf("const defaultReplyAnchorIds"));
   const esc = (value) => String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const providerBylineHtml = new Function("esc", `${source}; return providerBylineHtml;`)(esc);
-
-  const from = (surface, extra = {}) => providerBylineHtml({ source: { host: "relay-mcp", surface }, ...extra });
-
-  assert.match(from("codex"), /codexMark\.svg[^>]*>Sent with Codex</);
-  assert.match(from("claude_code"), /claudeCodeMark\.svg[^>]*>Sent with Claude Code</);
-  assert.match(from("claude_desktop"), /Sent with Claude Desktop</);
-  assert.match(from("claude_cowork"), /Sent with Claude Cowork</);
-
-  // A correct surface stamped by a host OTHER than relay-mcp still renders:
-  // this exact case (host "claude-code-direct") was live and showed nothing.
-  assert.match(
-    providerBylineHtml({ source: { host: "claude-code-direct", surface: "claude_code" } }),
-    /Sent with Claude Code</,
-  );
-
-  // Silence for everything that is not a known authoring surface — including
-  // "relay_companion", which the pill stamps on its own staged copy of an
-  // inbound relay and which says nothing about who wrote it.
-  assert.equal(providerBylineHtml({ source: { host: "relay", surface: "relay_companion" } }), "");
-  assert.equal(providerBylineHtml({ source: { host: "relay-mcp" } }), "");
-  assert.equal(providerBylineHtml({ source: {} }), "");
-  assert.equal(providerBylineHtml({}), "");
-  assert.equal(from("codex", { deletedAt: "2026-08-19T00:00:00Z" }), "", "a withdrawn relay keeps no footer");
-
-  // The surface is whatever the sender wrote on the wire. Looked up in an
-  // object literal, these inherit a truthy function from Object.prototype and
-  // render "Sent with undefined" next to a broken image.
-  for (const key of ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__"]) {
-    assert.equal(from(key), "", `an inherited key must not render a byline: ${key}`);
+  for (const surface of ["codex", "claude_code", "claude_desktop", "claude_cowork", "relay_companion", "constructor", "__proto__"]) {
+    assert.equal(providerBylineHtml({ source: { host: "relay-mcp", surface } }), "", `no byline for ${surface}`);
   }
+  assert.equal(providerBylineHtml({}), "");
+  assert.match(providerBylineHtml({ origin: "slack" }), /slackMark\.png[^>]*>From Slack</);
+  assert.match(providerBylineHtml({ provider: { name: "slack" } }), /From Slack</);
+  assert.equal(providerBylineHtml({ origin: "slack", deletedAt: "2026-09-17T00:00:00Z" }), "", "a withdrawn message keeps no footer");
+  assert.match(html, /\.th-provider-byline \{[^}]*border-top:1px solid var\(--hair\)/s);
 });
 
 test("the provenance byline is not confined to rows without an agent document", () => {

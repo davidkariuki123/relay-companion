@@ -51,8 +51,11 @@ test("the verbs are the pane's ⋯ options, on one line, and a guest gets neithe
   assert.match(guest, /Delete relay/);
   assert.match(guest, /Block sender…/);
   assert.doesNotMatch(guest, /Copy for your agent|Add to Contacts/);
-  // The stranger-with-an-address branch: Copy, Add to Contacts, and the rest under ⋯.
-  const stranger = request.slice(request.indexOf("return `<span class=\"rk-actions\" data-stop=\"1\"><button class=\"act-btn accept\""));
+  // The stranger-with-an-address branch: Copy, Add to Contacts, and the rest
+  // under ⋯ — for a relay. A text has nothing for an agent, so Add to Contacts
+  // leads and Copy is gone (David, 2026-09-17).
+  const stranger = request.slice(request.indexOf("const lead = row.textLike"));
+  assert.match(stranger, /const lead = row\.textLike\n\s+\? item\("accept", "Add to Contacts", "act-btn accept"\)\n\s+: `<button class="act-btn accept" type="button" data-banner-copy=/);
   assert.match(stranger, /data-banner-copy=/);
   assert.match(stranger, /Add to Contacts/);
   assert.match(stranger, /data-message-more/);

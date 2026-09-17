@@ -160,6 +160,13 @@ contextBridge.exposeInMainWorld("relay", {
     String(attachmentId || ""),
   ),
   refreshSent: () => ipcRenderer.invoke("relay:refreshSent"),
+  // A link to a sent Relay, from its reader: get one (public or private), flip
+  // it, or turn it off. The url comes back to the renderer, which owns the copy.
+  bindShareLink: (relayId, access) => ipcRenderer.invoke("relay:bindShareLink", { relayId, access }),
+  revokeShareLink: (relayId) => ipcRenderer.invoke("relay:revokeShareLink", { relayId }),
+  // The url lands on the clipboard from main, like the invite link: the
+  // renderer's clipboard needs a focused document and the pill often is not.
+  copyShareLink: (url) => ipcRenderer.invoke("relay:copyShareLink", { url }),
 
   // task mutations (return { ok, error?, conflict? })
   accept: (taskId, participantId) => ipcRenderer.invoke("relay:accept", taskId, participantId),

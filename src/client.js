@@ -538,6 +538,13 @@ export class RelayClient {
     return this.#req("DELETE", `/v1/share-links/${encodeURIComponent(relayId)}`);
   }
 
+  /** A link to a relay this account already sent: public, or private to its
+   * parties. One live link per relay; calling again with the other access
+   * flips the same url in place. */
+  bindShareLink(relayId, access) {
+    return this.#req("POST", `/v1/share-links/${encodeURIComponent(relayId)}`, { access });
+  }
+
   shareLinkStatus(relayId) {
     return this.#req("GET", `/v1/share-links/${encodeURIComponent(relayId)}`);
   }

@@ -50,10 +50,9 @@ test("Your agent restores independent switches and a same-list own-session choic
   assert.doesNotMatch(agent, /svOtherAgent|Copy prompts for another agent|Other<\/span>|Relay always copies the sentence for you|sv-open-logo-blank/);
   assert.doesNotMatch(agent, /svOpeningSurface|<select|Opening an app does not|Available ·/);
   assert.match(agent, /Connected · opens relays in a new chat/);
-  // The last switch on will not turn off, and says so where the decision is made.
-  assert.match(agent, /const KEEP_ONE = "keep at least one on";/);
-  assert.match(agent, /: last \? `Connected · \$\{KEEP_ONE\}`/);
-  assert.match(agent, /\$\{last \? ' aria-disabled="true"' : ""\}/);
+  // All four begin on and all four can go off (Sven then David, 2026-09-17):
+  // no switch is ever held, and no row wears a "keep at least one on" whisper.
+  assert.doesNotMatch(agent, /KEEP_ONE|keep at least one on|aria-disabled|isLastAgentAppOn/);
 });
 
 test("Your invite link is on the page with Copy, and says what joining through it does", () => {

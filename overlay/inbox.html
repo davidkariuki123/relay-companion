@@ -185,6 +185,14 @@
   .card.peek .rk-time, .card.peek .th-item.deletable .th-time { margin-right:0; }
   .card.peek .rk-body { margin-right:0; padding-right:0; }
   .card.peek .row { padding-right:16px; }
+  /* THE BANNER'S REPLY (David, 2026-09-17): the room's own composer — the
+     16px-cornered box with the field on top and the + and Relay rail beneath —
+     sits under the row from the moment a message arrives, so a one-line
+     answer never needs the room. Same classes as the room composer; only its
+     home changes: it lines up with the text column, like the verbs do. */
+  .card.peek .qr.qr-banner { margin:12px 0 0; padding:10px 10px 6px 16px; }
+  /* After Return the words take the row's own "You:" line, then the banner folds. */
+  .card.peek .rk-line + .rk-line { margin-top:6px; }
   /* How many relays a conversation holds is reference for the list. On an
      arrival it is a second number competing with the one that matters. */
   .card.peek .th-count.quiet { display:none; }
@@ -1585,7 +1593,7 @@
     .th-host-actions, .th-msg.host-intent-open .th-host-actions,
     .th-msg.host-focus-open .th-host-actions, .th-msg.host-touch-open .th-host-actions {
       transition:none !important; }
-    .th-msg.opening .th-host-logo, .th-host-col.opening .th-host-logo { animation:none; }
+    .th-msg.opening .th-host-logo, .th-host-mark.opening .th-host-logo { animation:none; }
     .th-host-disclosure .chev { transition:none; }
   }
   /* The B-rule, said where hand-offs actually happen (the reader is off the
@@ -1809,29 +1817,45 @@
   .rd-host-actions .th-pull-copy { padding:5px 9px; font-size:11.5px; }
   /* One box holds the tiles and, under a hairline, the pull block. */
   .th-host-sheet ~ .th-pull { border-top:1px solid var(--hair); }
-  /* The bubble's strip (David, 2026-09-17): "Open in" once, then four across
-     with the mark over the name, 86px where the two rows took 104. Padding
-     and gaps are as tight as they are so "Claude Code" fits its column at
-     the bubble's 300px. The pressed mark breathes while the app takes it. */
-  .th-host-col { --host-color:var(--brand-codex); appearance:none; cursor:pointer; position:relative; min-width:0; }
-  .th-host-col[data-host="claude"], .th-host-col[data-host="claude-app"] { --host-color:var(--brand-anthropic); }
-  .th-host-col[data-host="chatgpt"] { --host-color:var(--ink); }
-  .th-host-col:focus-visible { outline:2px solid var(--host-color); outline-offset:1px; }
-  .th-host-strip-lead { font:600 10px/1.2 var(--sans); letter-spacing:.07em; text-transform:uppercase; color:var(--muted-2); padding-left:10px; }
-  .th-host-name { font-family:var(--sans); font-size:10px; font-weight:650; letter-spacing:-0.02em; color:var(--host-color);
-    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; }
-  .th-host-strip ~ .th-pull { border-top:1px solid var(--hair); }
-  .th-host-strip { padding:8px 4px 8px; display:flex; flex-direction:column; gap:5px; }
-  /* Fewer than four keep the four-across width and sit centred, like the sheet. */
-  .th-host-strip-row { --strip-gap:2px; display:flex; justify-content:center; gap:var(--strip-gap); }
-  .th-host-col { flex:0 1 calc((100% - 3 * var(--strip-gap)) / 4); border:0; background:transparent; border-radius:10px; padding:6px 1px 5px; display:grid; justify-items:center; gap:4px;
-    transition:background-color var(--t-fast) var(--settle), opacity .26s var(--settle), filter .26s var(--settle); }
-  .th-host-col .th-host-logo { width:26px; height:26px; border-radius:7px; }
-  .th-host-col:hover { background:var(--wash-2); }
-  .th-host-col:active { transform:scale(.97); }
-  .th-host-col.opening { background:color-mix(in srgb, var(--host-color) 14%, var(--wash)); }
-  .th-host-col.opening .th-host-logo { animation:hostOpenBreathe .8s ease-in-out infinite alternate; animation-play-state:var(--relay-loop-state); }
-  .th-host-strip-row:has(.opening) .th-host-col:not(.opening) { opacity:.5; filter:saturate(.6); }
+  /* A room bubble's bar (David, 2026-09-17): four glass tiles, then Copy
+     prompt, on one 54px line, where the strip and the sentence together took
+     208 and hid a short letter behind them. The "Sent with" line above it
+     went too, and its height is in the tiles. Each tile is a 38px rounded
+     square of its app's colour at 12%, a hairline, the mark at 22px inside,
+     so the four read as four equal buttons rather than four app icons of
+     different weights (David: the bare marks were "just ugly"). He picked
+     these over a capsule dock, discs and a typographic line. The pressed
+     tile breathes while the app takes the Relay. */
+  .th-host-bar { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 13px; min-height:54px; }
+  .th-host-marks { display:flex; align-items:center; gap:4px; min-width:0; }
+  .th-host-mark { --host-color:var(--brand-codex); appearance:none; width:36px; height:36px; padding:0; border:1px solid var(--hair); border-radius:10px; cursor:pointer;
+    background:linear-gradient(180deg, color-mix(in srgb, var(--host-color) 12%, var(--wash)), var(--wash) 85%);
+    box-shadow:0 1px 0 color-mix(in srgb, var(--ink) 4%, transparent);
+    display:grid; place-items:center;
+    transition:border-color var(--t-fast) var(--settle), transform var(--t-fast) var(--settle), background-color var(--t-fast) var(--settle), opacity .26s var(--settle), filter .26s var(--settle); }
+  .th-host-mark[data-host="claude"], .th-host-mark[data-host="claude-app"] { --host-color:var(--brand-anthropic); }
+  .th-host-mark[data-host="chatgpt"] { --host-color:var(--ink); background:linear-gradient(180deg, color-mix(in srgb, var(--ink) 8%, var(--wash)), var(--wash) 85%); }
+  .th-host-mark .th-host-logo { width:22px; height:22px; border-radius:6px; }
+  .th-host-mark:hover { border-color:color-mix(in srgb, var(--host-color) 45%, var(--hair)); transform:translateY(-1px); }
+  .th-host-mark:active { transform:translateY(0) scale(.96); }
+  .th-host-mark:focus-visible { outline:2px solid var(--host-color); outline-offset:1px; }
+  .th-host-mark.opening { border-color:var(--host-color); background:color-mix(in srgb, var(--host-color) 18%, var(--wash)); }
+  .th-host-mark.opening .th-host-logo { animation:hostOpenBreathe .8s ease-in-out infinite alternate; animation-play-state:var(--relay-loop-state); }
+  .th-host-marks:has(.opening) .th-host-mark:not(.opening) { opacity:.5; filter:saturate(.6); }
+  /* The verb, whole, on two lines inside the tiles' height: the pill's own
+     copy button (accent on its 10% wash, no border, no gradient — the same
+     button the reader's pull block has), so it is the one thing in the bar
+     that is not a tile. David, 2026-09-17, on an accent-tinted glass version
+     of this: "tacky and cheap"; he picked this over the tiles' own glass with
+     ink text, a hairline outline, and a serif line. Integer line-height and no
+     transform on the text, so neither line lands on a half pixel. */
+  .th-host-copy { flex:none; appearance:none; display:flex; flex-direction:column; align-items:center; justify-content:center; height:36px; padding:0 12px; border:0; border-radius:10px; cursor:pointer;
+    background:var(--accent-soft); color:var(--accent); font:650 11.5px/14px var(--sans); letter-spacing:-0.01em; text-align:center; white-space:nowrap;
+    transition:background-color var(--t-fast) var(--settle); }
+  .th-host-copy span { display:block; }
+  .th-host-copy:hover { background:var(--accent-press); }
+  .th-host-copy:active { background:var(--accent-press); filter:brightness(.96); }
+  .th-host-copy:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
   /* THE HAND-OFF RECEIPT. Send turns the composer capsule into this card in
      place: the app's mark, one line of state, and the card itself is Open. It
      wears the app's colour the way the host rows do, and nothing streams — the
@@ -2311,6 +2335,22 @@
   .th-message-menu button::first-letter { text-transform:uppercase; }
   .th-message-menu button:hover, .th-message-menu button:focus-visible { background:var(--wash-2); opacity:1; }
   .th-message-menu button.danger, .th-message-menu button.confirm { color:var(--danger); border-top:1px solid var(--hair); }
+  /* The reader's options button: the bubble's ⋯, made a permanent bar control
+     where a Task's trash icon sits. */
+  .reader-bar .th-message-more { position:static; opacity:1; transform:none; margin-left:auto; width:25px; height:25px; flex:0 0 25px;
+    border-radius:var(--r-1); color:var(--muted-3); }
+  .reader-bar .th-message-more:hover, .reader-bar .th-message-more[aria-expanded="true"] { background:var(--wash-2); color:var(--ink); }
+  /* A link to this sent Relay: the two kinds to choose from, then the url. */
+  .sent-link-menu { width:372px; }
+  .sent-link-menu button .sv-open-name { display:block; font-size:12.5px; }
+  .sent-link-menu button .sv-open-why { display:block; margin-top:2px; }
+  .sent-link-menu .sv-invite-field { margin:4px 4px 0; }
+  .sent-link-menu .sv-invite-field .sv-choose { display:inline-block; width:auto; flex:0 0 auto; padding:5px 10px; border-radius:var(--r-2);
+    background:var(--accent-soft); color:var(--accent); font:600 11px var(--sans); text-align:center; }
+  .sent-link-menu .sv-invite-field .sv-choose:hover { background:var(--accent-press); }
+  .sent-link-menu .sv-invite-note { margin:10px 8px 8px; }
+  .sent-link-menu .row-err { margin:6px 8px 4px; }
+  .sent-link-menu button.danger { margin-top:2px; }
   @media (hover:none), (pointer:coarse) {
     .th-msg.text:has(.th-message-more) { max-width:calc(100% - 76px); }
     .th-message-more { width:44px; height:44px; right:-44px; opacity:1; }
@@ -3101,9 +3141,6 @@
   .sv-switch[aria-checked="true"]::after { transform:translateX(14px); }
   .sv-switch:focus-visible { outline:none; box-shadow:var(--focus-ring); }
   .sv-switch:disabled { opacity:.4; cursor:default; }
-  /* The last agent on stays on: the switch keeps its colour (it IS on) and
-     only loses the hand; its row says why. */
-  .sv-switch[aria-disabled="true"] { cursor:default; }
   @media (prefers-reduced-motion:reduce) { .sv-switch, .sv-switch::after { transition:none; } }
   /* signed-out call-to-action on the Relays empty state — quiet filled pill (th-count language) */
   .sv-signin-banner {
@@ -3783,6 +3820,10 @@
     </div>
   </div>
 
+<!-- A link to a sent Relay: the reader's options menu. Outside the reader on
+     purpose, because the reader's header is rebuilt on every poll and a menu
+     inside it would close mid-choice. Filled by sentLinkMenuHtml. -->
+<div class="th-message-menu sent-link-menu" id="sentLinkMenu" popover="auto" role="group" aria-label="Relay options" data-stop="1"></div>
 <section class="chat-finder" id="chatFinder" popover="auto" role="dialog" aria-labelledby="chatFinderTitle">
   <div class="chat-finder-head"><h2 id="chatFinderTitle">Find a chat</h2><button class="winbtn" id="chatFinderClose" type="button" aria-label="Close chat search">✕</button></div>
   <div class="chat-finder-field"><input id="chatFinderInput" type="search" placeholder="Search chats" aria-label="Search chats" autocomplete="off" /><button class="winbtn" id="chatFinderClear" type="button" aria-label="Clear search" hidden>✕</button></div>
@@ -4413,6 +4454,11 @@
   }
   let peeking = false, peekTimer = null;
   let notificationDurationMs = 20000; // main's dwell; a show may carry its own (Tasks stay longer)
+  // The banner's reply (see bannerComposerHtml): a reply just sent holds its
+  // row — the "You:" line — until the banner folds, and the rows are judged
+  // against what was last painted rather than the live DOM.
+  let bannerReplySettling = false;
+  let peekListHtml = "";
   function dwellFor(meta) {
     const ms = Number(meta && meta.dwellMs);
     return Number.isFinite(ms) && ms >= 250 ? ms : notificationDurationMs;
@@ -6976,6 +7022,12 @@
     for (const ta of relaysListEl.querySelectorAll(".qr-input")) {
       if (ta.value && ta.value.length) return true;
     }
+    // The banner's own composer: a draft, the caret, or a staged file is a
+    // reply being written, and the fold waits for it exactly as it waits for
+    // a pointer on the card.
+    for (const field of relaysListEl.querySelectorAll(".qr-banner .th-rich-composer")) {
+      if (active === field || String(field.value || "").trim() || peekStagedFiles(field).length) return true;
+    }
     return false;
   }
   function flushPendingRelaysRender() {
@@ -7207,6 +7259,10 @@
         .map((room) => ({ ...room, latestAt: room.latestAt || (room.latest && room.latest.at) || "", requestRoom: true }));
       const unread = identityRows.filter((row) => row.unreadCount > 0).concat(requests)
         .sort((a, b) => new Date(b.latestAt || 0) - new Date(a.latestAt || 0));
+      // A reply just sent from the banner is showing its "You:" line; the
+      // acknowledgement that follows would empty this list under it. The row
+      // holds until the banner folds on its own a moment later.
+      if (bannerReplySettling) return;
       relaysEmptyEl.classList.toggle("gone", unread.length > 0);
       const nextNotifHtml = unread.map((row) => relayIdentityRowHtml(row)).join("");
       // A BANNER WITH NOTHING IN IT IS A GLITCH, not a notification. It can
@@ -7216,11 +7272,20 @@
       if (!nextNotifHtml) {
         relaysEmptyEl.classList.add("gone");
         if (relaysListEl.innerHTML !== "") relaysListEl.innerHTML = "";
+        peekListHtml = "";
         return;
       }
       prevRelayIds = new Set(allRows.filter((r) => r.unread).map((r) => r.id));
-      if (relaysListEl.innerHTML === nextNotifHtml) return;
+      // Identical markup means NO DOM write — judged against what was last
+      // painted, not the live DOM: dressing the composer (its + button, its
+      // measured height) changes the DOM without changing what the rows say.
+      if (peekListHtml === nextNotifHtml && relaysListEl.childElementCount) return;
+      // A rebuild (a second arrival, "now" turning into "1m") must not eat the
+      // words being typed: carry every live draft over to its rebuilt row.
+      const carriedDrafts = captureBannerDrafts();
       relaysListEl.innerHTML = nextNotifHtml;
+      peekListHtml = nextNotifHtml;
+      wireBannerComposers(carriedDrafts);
       for (const el of relaysListEl.querySelectorAll(".relay-arrival")) {
         el.addEventListener("click", () => {
           openFull(); // a banner tap brings the real pill up first
@@ -7311,6 +7376,7 @@
     if (relaysListEl.innerHTML === nextListHtml) return;
     foldHoverRow();
     relaysListEl.innerHTML = nextListHtml;
+    peekListHtml = "";
     if (relaysLayout === "received") { wireRelayRows({ received:true }); return; }
     if (relaysLayout === "sent") { wireSentRows(relaysListEl); return; }
     for (const el of relaysListEl.querySelectorAll(".relay-arrival")) {
@@ -7412,10 +7478,14 @@
   // when Settings › Your agent has it switched on and it opens Relays in its
   // desktop app. A Task wears the same verbs as a Relay. The first verb wears
   // the accent. Banner only: the list keeps its rows bare.
+  // A TEXT WEARS NONE OF THEM (David, 2026-09-17): the agent verbs belong to a
+  // relay — the two-document artifact an agent carries. A typed text is a
+  // person talking; its only verb is the reply composer under the row.
   function bannerVerbsHtml(row) {
     if (!row || row.direction === "out" || !String(row.id || "").startsWith("relay_")) return "";
     const request = requestRoomOf(row);
     if (request) return requestBannerVerbsHtml(row, request);
+    if (row.textLike) return "";
     const verbs = [{ label:"Copy for your agent", attrs:`data-banner-copy="${esc(row.id)}"` }];
     for (const host of agentAppHosts()) {
       const app = host === "codex" ? "Codex" : "Claude Code";
@@ -7439,7 +7509,9 @@
   // line, so the banner keeps its size. A share-link guest has no address to
   // add and their words are not handed to the agent from here, so their two
   // are Delete relay and Block sender…. A stranger with a real address keeps
-  // Copy and Add to Contacts, with the rest under the same ⋯.
+  // Copy and Add to Contacts, with the rest under the same ⋯ — unless what
+  // arrived is a text, which has nothing for an agent: then Add to Contacts
+  // leads.
   function requestBannerVerbsHtml(row, room) {
     if (!row || row.direction === "out" || !String(row.id || "").startsWith("relay_")) return "";
     const id = esc(row.id);
@@ -7447,7 +7519,10 @@
     if (isShareGuestRoom(room)) {
       return `<span class="rk-actions" data-stop="1">${item("delete", "Delete relay")}${item("block", "Block sender…")}</span>`;
     }
-    return `<span class="rk-actions" data-stop="1"><button class="act-btn accept" type="button" data-banner-copy="${id}">Copy for your agent</button>${item("accept", "Add to Contacts", "act-btn decline")}<button class="act-btn decline banner-more" type="button" data-message-more aria-label="More actions" aria-haspopup="menu" aria-expanded="false" aria-controls="banner-request-menu-${id}">⋯</button></span>
+    const lead = row.textLike
+      ? item("accept", "Add to Contacts", "act-btn accept")
+      : `<button class="act-btn accept" type="button" data-banner-copy="${id}">Copy for your agent</button>${item("accept", "Add to Contacts", "act-btn decline")}`;
+    return `<span class="rk-actions" data-stop="1">${lead}<button class="act-btn decline banner-more" type="button" data-message-more aria-label="More actions" aria-haspopup="menu" aria-expanded="false" aria-controls="banner-request-menu-${id}">⋯</button></span>
       <div class="th-message-menu" id="banner-request-menu-${id}" popover="auto" role="menu" aria-label="Request actions">
         <button type="button" role="menuitem" class="danger" data-banner-request="delete" data-id="${id}">Delete relay</button>
         <button type="button" role="menuitem" class="danger" data-banner-request="block" data-id="${id}">Block sender…</button>
@@ -7458,6 +7533,166 @@
   // to the relay row for a raw row.
   function bannerIsTask(row) {
     return Boolean(row && (row.request || isTaskRow(relayById(row.id)) || isTaskRow(row)));
+  }
+  // THE BANNER'S REPLY (David, 2026-09-17): the room's own composer, there from
+  // the start. A one-line answer to Shane should not need the room — so the
+  // arrival row carries the same .qr.th-qr.col box the room does (field on top,
+  // + and Relay in the rail beneath), and Return sends down the room's path.
+  // The placeholder names where the words go, because the room is not on
+  // screen: "Reply in Granular…" for a channel, "Reply to Shane…" for a
+  // person. A Request (a stranger, a share-link guest) keeps its own verbs and
+  // no composer: answering them is a decision taken in the room. Slack rooms
+  // keep today's banner.
+  function bannerComposerHtml(identity, row) {
+    if (!peeking || !identity || identity.requestRoom || identity.provider === "slack") return "";
+    if (!row || !String(row.id || "").startsWith("relay_")) return "";
+    const recipient = bannerReplyRecipient(identity, row);
+    if (!recipient) return "";
+    const placeholder = identity.isGroup
+      ? `Reply in ${identity.name}…`
+      : `Reply to ${String(identity.name || row.party || "them").split(" ")[0]}…`;
+    return `<div class="qr th-qr col qr-banner" data-stop="1"><div class="th-rich-composer" contenteditable="true" role="textbox" aria-multiline="true" aria-label="${esc(placeholder.replace(/…$/, ""))}" data-placeholder="${esc(placeholder)}"></div><div class="ta-rail"><span class="rt-spacer"></span><button type="button" class="qr-banner-send" data-stop="1">Relay</button></div></div>`;
+  }
+  // The room addresses a send by the newest message that carries an address;
+  // the banner has that message in hand.
+  function bannerReplyRecipient(identity, row) {
+    const candidates = [row, ...[...(identity.msgs || [])].reverse()];
+    for (const message of candidates) {
+      const recipient = message && message.addressRecipient;
+      if (recipient && (recipient.email || recipient.contactId || recipient.relayUserId || recipient.groupId || recipient.chatId)) return recipient;
+    }
+    return null;
+  }
+  const bannerReplySending = new Set(); // rooms with a send in flight
+  // Every live draft in the banner, keyed by the room it belongs to, so a
+  // rebuild can hand the words (and the caret) back to the rebuilt row.
+  function captureBannerDrafts() {
+    const drafts = new Map();
+    for (const field of relaysListEl.querySelectorAll(".qr-banner .th-rich-composer")) {
+      const rowEl = field.closest(".relay-arrival");
+      const value = String(field.value || "");
+      const focused = document.activeElement === field;
+      if (!rowEl || (!value && !focused)) continue;
+      drafts.set(rowEl.getAttribute("data-thread"), { value, focused, caret: field.selectionStart ?? value.length });
+    }
+    return drafts;
+  }
+  function wireBannerComposers(carriedDrafts = new Map()) {
+    for (const qr of relaysListEl.querySelectorAll(".qr-banner")) {
+      const rowEl = qr.closest(".relay-arrival");
+      const field = qr.querySelector(".th-rich-composer");
+      const send = qr.querySelector(".qr-banner-send");
+      if (!rowEl || !field || !send) continue;
+      const carried = carriedDrafts.get(rowEl.getAttribute("data-thread")) || null;
+      // No click inside the composer may open the room; a click on its box
+      // puts the caret in the field (dressComposer's own focus wiring).
+      for (const evt of ["click", "mousedown"]) qr.addEventListener(evt, (e) => e.stopPropagation());
+      prepareMentionComposer(field, [], carried ? carried.value : "");
+      const submit = () => { void sendBannerReply(rowEl, field, send); };
+      dressComposer(field, submit);
+      send.addEventListener("click", (e) => { e.stopPropagation(); submit(); });
+      field.addEventListener("input", () => bannerReplyNote(rowEl, ""));
+      field.addEventListener("keydown", (e) => {
+        if (e.key !== "Escape") return;
+        e.preventDefault(); e.stopPropagation();
+        field.value = "";
+        clearStagedFiles(field);
+        field.relayResize?.();
+        field.blur();
+      });
+      // The banner is measured to its rows: the field growing with the words,
+      // or a staged file's chip, resizes the card the way a second arrival does.
+      if (typeof ResizeObserver === "function") new ResizeObserver(() => { if (peeking && qr.isConnected) sizePeek(); }).observe(qr);
+      if (carried) {
+        field.relayResize?.();
+        if (carried.focused) { field.focus(); field.setSelectionRange(carried.caret, carried.caret); }
+      }
+    }
+  }
+  // A send the device refused is said under the composer, in the row's own
+  // error line; the next keystroke clears it.
+  function bannerReplyNote(rowEl, message) {
+    const body = rowEl.querySelector(".rk-body");
+    if (!body) return;
+    body.querySelector(".row-err")?.remove();
+    if (message) body.insertAdjacentHTML("beforeend", `<span class="row-err">${esc(message)}</span>`);
+    sizePeek();
+  }
+  async function sendBannerReply(rowEl, field, send) {
+    const threadKey = rowEl.getAttribute("data-thread");
+    if (bannerReplySending.has(threadKey)) return;
+    const text = String(field.value || "").trim();
+    const staged = peekStagedFiles(field);
+    if (!text && !staged.length) return;
+    const identity = relayIdentityRows().find((room) => (room.chatId || room.threadId) === threadKey || room.threadId === threadKey)
+      || relayIdentityRows().find((room) => (room.msgs || []).some((message) => message.id === rowEl.getAttribute("data-opening-id")));
+    const arrivalId = rowEl.getAttribute("data-opening-id") || "";
+    const row = identity && ((identity.msgs || []).find((message) => message.id === arrivalId) || identity.latest);
+    const recipient = identity ? bannerReplyRecipient(identity, row) : null;
+    if (!identity || !recipient || !window.relay.sendReply) {
+      bannerReplyNote(rowEl, "This conversation cannot be replied to yet.");
+      return;
+    }
+    bannerReplyNote(rowEl, "");
+    bannerReplySending.add(threadKey);
+    send.disabled = true;
+    takeStagedFiles(field);
+    let files;
+    try {
+      ({ files } = staged.length ? await composerFilePayloads(staged) : { files: [] });
+    } catch (error) {
+      bannerReplySending.delete(threadKey);
+      send.disabled = false;
+      stageFileList(field, staged.map((f) => f.file || f));
+      bannerReplyNote(rowEl, `Could not attach that file: ${(error && error.message) || String(error)}`);
+      return;
+    }
+    const idempotencyKey = `pill-reply-${crypto.randomUUID()}`;
+    const agentMentions = payload.features?.agentMentions === true ? agentMentionSpans(text) : [];
+    let res;
+    try {
+      res = await window.relay.sendReply({
+        text, recipient, files, idempotencyKey, agentMentions,
+        chat: {
+          threadId: identity.threadId || "",
+          party: identity.name || "",
+          partyKey: identity.partyKey || "",
+          isGroup: Boolean(identity.isGroup),
+          groupId: identity.groupId || "",
+          groupName: identity.groupName || (identity.isGroup ? identity.name : "") || "",
+          chatId: identity.chatId || "",
+          provider: identity.provider || "",
+        },
+      });
+    } catch (error) {
+      res = { ok: false, error: error && error.message ? error.message : "Send failed — try again." };
+    }
+    bannerReplySending.delete(threadKey);
+    if (!res || !res.ok) {
+      // The device refused to hold the message: the words stay in the field.
+      send.disabled = false;
+      if (staged.length) stageFileList(field, staged.map((f) => f.file || f));
+      bannerReplyNote(rowEl, (res && res.error) || "Send failed — try again.");
+      return;
+    }
+    // Replying is the strongest evidence a message was read.
+    if (arrivalId) persistReadIds([arrivalId]);
+    // The words take the row's own "You:" line — what the list will show for
+    // this room from now on — and the banner folds a beat later, the way it
+    // folds after being seen.
+    const body = rowEl.querySelector(".rk-body");
+    rowEl.querySelector(".rk-actions")?.remove();
+    field.closest(".qr-banner")?.remove();
+    const shown = text || (files.length === 1 ? String(files[0].name || "1 file") : `${files.length} files`);
+    if (body) body.insertAdjacentHTML("beforeend", `<span class="rk-line"><span class="th-title"><span class="gist-who">You:</span> ${esc(shown)}</span></span><span class="row-note">Sent to ${esc(identity.name || "them")}</span>`);
+    bannerReplySettling = true;
+    sizePeek();
+    setTimeout(() => {
+      bannerReplySettling = false;
+      if (!peeking) { renderAll(); return; }
+      if (ghost) dismissOverlay();
+      else { foldToPill(); sendAttentionDone(true); }
+    }, 1800);
   }
   function relayIdentityRowHtml(identity) {
     const mentionRows = peeking && identity.groupId ? threadMessages({ includeSlack:false })
@@ -7496,6 +7731,7 @@
           </span>
           <span class="rk-line"><span class="th-title">${senderPrefix}${esc(gist)}</span>${identity.unreadCount ? `<span class="th-count">${identity.unreadCount}</span>` : ""}</span>
           ${peeking ? bannerVerbsHtml(row) : ""}
+          ${peeking ? bannerComposerHtml(identity, row) : ""}
         </span>
       </div>`;
   }
@@ -7544,6 +7780,8 @@
     if (dock) return "request:" + (dock.getAttribute("data-request") || (readerId || "dock"));
     if (field.closest("#readerView")) return "reader:" + (readerId || "");
     if (field.closest("#thDetail") || field.closest("#thHistory")) return "thread:" + (threadDetailId || "");
+    const banner = field.closest(".relay-arrival");
+    if (banner) return "banner:" + (banner.getAttribute("data-thread") || "");
     return "composer:misc";
   }
   function takeStagedFiles(field) {
@@ -7916,7 +8154,6 @@
   }
   function setAgentAppEnabled(app, enabled) {
     if (!AGENT_APP_OPTIONS.includes(app) || (enabled && !appAvailable(app))) return;
-    if (!enabled && isLastAgentAppOn(app)) return;
     const selected = new Set(requestedAgentApps());
     if (enabled) selected.add(app); else selected.delete(app);
     saveAgentApps([...selected]);
@@ -7943,7 +8180,6 @@
   }
   function setChatAppEnabled(app, enabled) {
     if (!CHAT_APP_OPTIONS.includes(app)) return;
-    if (!enabled && isLastAgentAppOn(app)) return;
     const selected = new Set(chatAppSelection());
     if (enabled) selected.add(app); else selected.delete(app);
     saveChatApps([...selected]);
@@ -7951,14 +8187,11 @@
   // The four Settings › Your agent offers, as they stand now: the chat apps
   // and the desktop apps that are on AND detected (an undetected app's switch
   // is disabled, so it is not on). Read by the switches and the reader alike.
+  // All four begin on, and every one of them can be turned off (Sven, then
+  // David, 2026-09-17: "I can't turn them all off" / "sure, I can allow all
+  // off"): with none on, a Relay offers the copied sentence alone.
   function enabledAgentApps() {
     return [...chatAppSelection(), ...agentAppSelection()];
-  }
-  // At least one stays on (David, 2026-09-17): the last switch will not turn
-  // off, and its row says so, where the decision is made.
-  function isLastAgentAppOn(app) {
-    const on = enabledAgentApps();
-    return on.length === 1 && on[0] === app;
   }
   function agentAppName() {
     const selected = agentAppSelection();
@@ -10412,6 +10645,8 @@
         workCompletedAt: sentTwin?.workCompletedAt || null,
         agentHandoff: sentTwin?.agentHandoff || null,
         reactions: item.reactions || { aggregates:[], events:[] },
+        shareLink: sentTwin?.shareLink || null,
+        deletedAt: item.deletedAt || sentTwin?.deletedAt || null,
       };
     }
     const sent = (payload.sent || []).find((row) => String(row.relayId || row.id || "") === String(id || ""));
@@ -10475,6 +10710,8 @@
       workCompletedAt: sent.workCompletedAt || null,
       agentHandoff: sent.agentHandoff || null,
       reactions: sent.reactions || { aggregates: [], events: [] },
+      shareLink: sent.shareLink || null,
+      deletedAt: sent.deletedAt || null,
     };
   }
   const RX_PRIMARY = ["👍", "❤️", "😂", "🙌", "‼️", "🙏", "👀", "🔥"];
@@ -11238,6 +11475,214 @@
       chatId: r.chatId || chat?.chatId || "",
     };
   }
+  // ---- A link to a sent Relay (the reader's ⋯ menu) ----------------------
+  // A relay minted AS a share link (relay_share_link) is an audience link: its
+  // row is the link's own room, and the Sent list says "shared by link". A
+  // link to a relay that was already sent to someone is a "sent" link: a
+  // second door to an ordinary conversation, public or private, and the row
+  // stays exactly the conversation it was. The two never mix.
+  function audienceLinkOf(row) {
+    const link = row && row.shareLink;
+    return link && link.kind !== "sent" ? link : null;
+  }
+  // Renderer-side facts about a sent link the row may not carry yet: the url
+  // the pill just minted, busy and copied states, the last error.
+  const sentLinkUi = new Map();
+  function sentLinkUiFor(id) {
+    const key = String(id);
+    if (!sentLinkUi.has(key)) sentLinkUi.set(key, { busy:false, copied:false, error:"", link:null, timer:0 });
+    return sentLinkUi.get(key);
+  }
+  function sentLinkOf(row) {
+    if (!row) return null;
+    const ui = sentLinkUi.get(String(row.id));
+    const link = row.shareLink;
+    if (link && link.kind === "sent" && link.state !== "revoked" && link.url) return { url:link.url, access:link.access === "private" ? "private" : "public" };
+    // Between the mint and the next Sent refresh, the pill knows the link
+    // before the row does. A revoke clears this along with the row.
+    return ui && ui.link ? ui.link : null;
+  }
+  function sentLinkKickerWord(link) {
+    return link ? (link.access === "private" ? " · private link" : " · public link") : "";
+  }
+  function sentLinkAudience(row) {
+    if (row && row.recipientGroupName) return `Members of ${row.recipientGroupName}`;
+    const name = String((row && row.recipientName) || "").trim() || "The person it went to";
+    return name;
+  }
+  // Only the sender links a message they sent: never a Task, never a deleted
+  // message, never someone else's words.
+  function sentLinkEligible(row) {
+    return Boolean(row && row.outbound && !isTaskRow(row) && !row.deletedAt && row.source?.host !== "relay-agent-run");
+  }
+  function sentLinkMoreHtml(row) {
+    if (!sentLinkEligible(row)) return "";
+    return `<button type="button" class="th-message-more" data-sent-link-more="${esc(row.id)}" data-stop="1"
+          aria-label="Relay options" aria-haspopup="true" aria-expanded="false" aria-controls="sentLinkMenu"><svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor" aria-hidden="true"><circle cx="4" cy="9" r="1.3"/><circle cx="9" cy="9" r="1.3"/><circle cx="14" cy="9" r="1.3"/></svg></button>`;
+  }
+  // The menu's contents: two kinds to choose from, or the link the row has.
+  function sentLinkMenuHtml(row) {
+    const ui = sentLinkUiFor(row.id);
+    const link = sentLinkOf(row);
+    const who = sentLinkAudience(row);
+    const disabled = ui.busy ? " disabled" : "";
+    if (!link) {
+      return `
+        <button type="button" data-sent-link-pick="public"${disabled}><span class="sv-open-name">Get a public link</span><span class="sv-open-why">Anyone with the link can read it.</span></button>
+        <button type="button" data-sent-link-pick="private"${disabled}><span class="sv-open-name">Get a private link</span><span class="sv-open-why">${esc(who)} ${row.recipientGroupName ? "sign" : "signs"} in to open it. Nobody else can.</span></button>
+        <div class="row-err">${esc(ui.error || "")}</div>`;
+    }
+    const shown = String(link.url).replace(/^https?:\/\//, "").replace(/\/$/, "");
+    const note = link.access === "private"
+      ? `Only you and ${esc(who).replace(/^Members of /, "the members of ")} can open it, after signing in.`
+      : "Anyone with this link can read this Relay.";
+    return `
+        <div class="sv-invite-field">
+          <span class="sv-open-name sv-link-url">${esc(shown)}</span>
+          <button class="sv-choose" type="button" data-sent-link-copy="1">${ui.copied ? "Copied" : "Copy link"}</button>
+        </div>
+        <div class="sv-invite-note">${note}</div>
+        <button type="button" data-sent-link-pick="${link.access === "private" ? "public" : "private"}"${disabled}>${link.access === "private" ? "Make public" : "Make private"}</button>
+        <button type="button" class="danger" data-sent-link-off="1"${disabled}>Turn off link</button>
+        <div class="row-err">${esc(ui.error || "")}</div>`;
+  }
+  let sentLinkMenuFor = null;
+  function sentLinkMenuEl() {
+    const menu = document.getElementById("sentLinkMenu");
+    if (!menu || menu.dataset.wired === "1") return menu;
+    menu.dataset.wired = "1";
+    menu.addEventListener("pointerdown", (event) => { if (event.target.closest("button")) event.preventDefault(); });
+    menu.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const pick = event.target.closest("[data-sent-link-pick]");
+      const copy = event.target.closest("[data-sent-link-copy]");
+      const off = event.target.closest("[data-sent-link-off]");
+      const row = sentLinkMenuFor ? readerRow(sentLinkMenuFor) : null;
+      if (!row) return;
+      if (pick) void sentLinkBind(row, pick.getAttribute("data-sent-link-pick"));
+      else if (copy) void sentLinkCopy(row);
+      else if (off) void sentLinkRevoke(row);
+    });
+    menu.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault(); menu.hidePopover();
+        document.querySelector("[data-sent-link-more]")?.focus();
+      } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+        event.preventDefault();
+        const buttons = [...menu.querySelectorAll("button:not(:disabled)")];
+        const index = buttons.indexOf(document.activeElement);
+        const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1
+          : (index + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length;
+        buttons[next]?.focus({ preventScroll:true });
+      }
+    });
+    menu.addEventListener("toggle", () => {
+      const open = menu.matches(":popover-open");
+      for (const trigger of document.querySelectorAll("[data-sent-link-more]")) trigger.setAttribute("aria-expanded", String(open));
+      if (!open) sentLinkMenuFor = null;
+    });
+    return menu;
+  }
+  function positionSentLinkMenu() {
+    const menu = document.getElementById("sentLinkMenu");
+    const trigger = sentLinkMenuFor ? document.querySelector(`[data-sent-link-more="${cssEscape(String(sentLinkMenuFor))}"]`) : null;
+    if (!menu || !trigger || !menu.matches(":popover-open")) return;
+    const rect = trigger.getBoundingClientRect();
+    const bounds = menu.getBoundingClientRect();
+    const left = Math.min(Math.max(8, rect.right - bounds.width), window.innerWidth - bounds.width - 8);
+    const top = rect.bottom + bounds.height + 4 <= window.innerHeight - 8
+      ? rect.bottom + 4 : Math.max(8, rect.top - bounds.height - 4);
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+  }
+  function cssEscape(value) {
+    return window.CSS && CSS.escape ? CSS.escape(value) : String(value).replace(/["\\]/g, "\\$&");
+  }
+  // Re-render the open menu from the row's current facts, keeping focus inside it.
+  function refreshSentLinkMenu() {
+    const menu = document.getElementById("sentLinkMenu");
+    if (!menu || !sentLinkMenuFor || !menu.matches(":popover-open")) return;
+    const row = readerRow(sentLinkMenuFor);
+    if (!row || !sentLinkEligible(row)) { menu.hidePopover(); return; }
+    const hadFocus = menu.contains(document.activeElement);
+    menu.innerHTML = sentLinkMenuHtml(row);
+    positionSentLinkMenu();
+    if (hadFocus) (menu.querySelector("[data-sent-link-copy]") || menu.querySelector("button:not(:disabled)"))?.focus({ preventScroll:true });
+  }
+  function wireSentLinkMore(row) {
+    const trigger = readerBodyEl.querySelector("[data-sent-link-more]");
+    if (!trigger) { if (sentLinkMenuFor) document.getElementById("sentLinkMenu")?.hidePopover(); return; }
+    const menu = sentLinkMenuEl();
+    trigger.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (menu.matches(":popover-open")) { menu.hidePopover(); trigger.focus(); return; }
+      sentLinkMenuFor = String(row.id);
+      menu.innerHTML = sentLinkMenuHtml(row);
+      menu.showPopover();
+      positionSentLinkMenu();
+      trigger.setAttribute("aria-expanded", "true");
+      menu.querySelector("button:not(:disabled)")?.focus({ preventScroll:true });
+    });
+    // The header was just rebuilt under an open menu: keep it where the new
+    // trigger is, showing what the row says now.
+    if (sentLinkMenuFor === String(row.id)) refreshSentLinkMenu();
+  }
+  async function sentLinkBind(row, access) {
+    const ui = sentLinkUiFor(row.id);
+    if (ui.busy || !window.relay.bindShareLink) return;
+    ui.busy = true; ui.error = ""; refreshSentLinkMenu();
+    try {
+      const res = await window.relay.bindShareLink(String(row.id), access);
+      if (!res || res.ok === false) throw new Error((res && res.error) || "Could not make a link.");
+      ui.link = { url: res.url, access: res.access === "private" ? "private" : "public" };
+      ui.busy = false;
+      // Main put the url on the clipboard as it minted; say so for a moment.
+      if (res.copied) sentLinkCopiedMoment(row);
+      else await sentLinkCopy(row);
+    } catch (error) {
+      ui.busy = false;
+      ui.error = (error && error.message) || "Could not make a link.";
+      refreshSentLinkMenu();
+    }
+  }
+  function sentLinkCopiedMoment(row) {
+    const ui = sentLinkUiFor(row.id);
+    ui.copied = true; ui.error = "";
+    clearTimeout(ui.timer);
+    ui.timer = setTimeout(() => { ui.copied = false; refreshSentLinkMenu(); }, 1600);
+    refreshSentLinkMenu();
+    renderReader();
+  }
+  async function sentLinkCopy(row) {
+    const ui = sentLinkUiFor(row.id);
+    const link = sentLinkOf(row);
+    if (!link) return;
+    // From main, like the invite link: the renderer's clipboard needs a
+    // focused document, and the pill often is not one.
+    const res = window.relay.copyShareLink ? await window.relay.copyShareLink(link.url) : null;
+    if (res && res.ok === false) {
+      ui.error = res.error || "Could not copy. Select the link and copy it.";
+      refreshSentLinkMenu();
+      return;
+    }
+    sentLinkCopiedMoment(row);
+  }
+  async function sentLinkRevoke(row) {
+    const ui = sentLinkUiFor(row.id);
+    if (ui.busy || !window.relay.revokeShareLink) return;
+    ui.busy = true; ui.error = ""; refreshSentLinkMenu();
+    try {
+      const res = await window.relay.revokeShareLink(String(row.id));
+      if (!res || res.ok === false) throw new Error((res && res.error) || "Could not turn the link off.");
+      ui.link = null; ui.copied = false;
+    } catch (error) {
+      ui.error = (error && error.message) || "Could not turn the link off.";
+    }
+    ui.busy = false;
+    refreshSentLinkMenu();
+    renderReader();
+  }
+
   function renderReader() {
     const r = readerRow(readerId);
     if (readerAttachmentsDialog && (!r || readerAttachmentsDialog.dataset.relayId !== String(r.id))) closeReaderAttachments();
@@ -11297,7 +11742,7 @@
         <div class="rd-rule"></div>
         <div class="rd-agentcopy">${readerParagraphs(agentText)}</div>`;
     const humanDoc = `
-        <div class="rd-kicker">${request ? (r.outbound ? `Task · ${esc(sender)}` : `Task · Created by ${esc(sender)}`) : esc(sender)}${r.nature ? ` · ${esc(TOPIC_NATURE_LABEL[r.nature] || r.nature)}` : ""} · ${esc(timeAgo(r.createdAt))}${r.unread ? "" : " · read"}</div>
+        <div class="rd-kicker">${request ? (r.outbound ? `Task · ${esc(sender)}` : `Task · Created by ${esc(sender)}`) : esc(sender)}${r.nature ? ` · ${esc(TOPIC_NATURE_LABEL[r.nature] || r.nature)}` : ""} · ${esc(timeAgo(r.createdAt))}${r.unread ? "" : " · read"}${esc(sentLinkKickerWord(sentLinkOf(r)))}</div>
         <div class="rd-headline${headlineClass}">${esc(subject)}</div>
         <div class="rd-rule"></div>
         <div class="rd-body">${readerParagraphs(r.forHuman)}</div>
@@ -11374,6 +11819,7 @@
         </button>
         <span class="reader-name">${esc(sender)}</span>
         ${todoStatusControl}
+        ${sentLinkMoreHtml(r)}
         ${request && taskIsOver(r) ? `<button class="reader-delete" type="button" data-reader-delete="${esc(r.id)}" aria-label="Move task to Recently Deleted" title="Move task to Recently Deleted"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button>` : ""}
       </div>
       ${documentList}
@@ -11391,6 +11837,7 @@
     }
     document.getElementById("readerBack").addEventListener("click", (e) => { e.stopPropagation(); closeReader(); });
     wireReaderTodoStatus(r);
+    wireSentLinkMore(r);
     const readerDelete = readerBodyEl.querySelector("[data-reader-delete]");
     if (readerDelete) readerDelete.addEventListener("click", async (event) => {
       event.stopPropagation();
@@ -12455,7 +12902,7 @@
   function sentDetail(r) {
     const parts = [];
     const rec = (r && r.recipient) || {};
-    const link = (r && r.shareLink) || null;
+    const link = audienceLinkOf(r);
     // A guest mailbox is an internal key, never an address to show. Suppress it
     // even when the API still sends it, so a stale server cannot leak it here.
     if (rec.email && !/@guests\.sendrelays\.com$/i.test(String(rec.email))) parts.push(rec.email);
@@ -12463,6 +12910,9 @@
     // status: the real address is the note, exactly as for any other row.
     if (link && link.state === "revoked") parts.push("link revoked");
     else if (link && link.state !== "claimed") parts.push("shared by link");
+    // A link to a relay that was already sent is a fact beside the address.
+    const sentLink = sentLinkOf(r);
+    if (sentLink) parts.push(sentLink.access === "private" ? "private link" : "public link");
     const atts = Array.isArray(r && r.attachments) ? r.attachments : [];
     if (atts.length === 1) {
       const a = atts[0];
@@ -15236,9 +15686,12 @@
         // never attempts to deliver email to it. Keeping that address here lets
         // @my_codex / @my_claude use the room without making the earlier link's
         // Opened state relevant to the new message.
+        // A link to a relay that was already sent (kind "sent") is a door to
+        // this ordinary room, never a room of its own: only an audience link
+        // (a relay minted AS a link) addresses the guest mailbox.
         addressRecipient: s.recipientGroupId
           ? { groupId:s.recipientGroupId }
-          : (s.shareLink && s.shareLink.state !== "claimed")
+          : (s.shareLink && s.shareLink.kind !== "sent" && s.shareLink.state !== "claimed")
             ? { email:`${String(s.shareLink.id)}@guests.sendrelays.com` }
             : (s.recipient || null),
         shareLink: s.shareLink || null,
@@ -15252,7 +15705,7 @@
           // address this key would be the literal "email:", which stablePartyKey
           // accepts as stable, and chatSections would merge every share relay in
           // the account into one room titled after whichever link is newest.
-          : (s.shareLink && s.shareLink.state !== "claimed")
+          : (s.shareLink && s.shareLink.kind !== "sent" && s.shareLink.state !== "claimed")
             ? `share:${String(s.shareLink.id)}`
             : `email:${String((s.recipient && s.recipient.email) || "").trim().toLowerCase()}`,
         isGroup: Boolean(s.groupSendId || s.recipientGroupName),
@@ -16369,15 +16822,20 @@
     // there only while its switch in Settings › Your agent is on (Sven saw
     // Claude and ChatGPT with every switch off, 2026-09-17). The reader lays
     // them out as a line of chips with the chat picker under the pressed one;
-    // a room bubble as a strip, four across with the mark over the name,
-    // inside the height its two rows took (David, 2026-09-17), and its agent
-    // tiles open a new chat at once.
-    // The sentence to paste is always there under either, and reads "Or" only
-    // beside a host.
+    // a room bubble as a bar of marks whose agent marks open a new chat at
+    // once (David, 2026-09-17). Copy is always there: in the reader with the
+    // sentence it copies, in a bubble as the bar's verb.
     const options = hostOptions(message, source, desktopHosts);
-    const inner = (sheet ? hostSheetHtml(options) : hostStripHtml(options))
-      + desktopHosts.map((host) => sessionPickerInlineHtml(id, host)).join("")
-      + pullSentenceHtml(message, { hasAppAction: options.length > 0 });
+    // The reader: the chips, the picker under the pressed one, and the pull
+    // block with the sentence. A room bubble: ONE line, the marks and the Copy
+    // verb, 42px (Sven and Shane, 2026-09-17, on the strip and the sentence
+    // together: "way too much, I can't see a message at all"; "I basically
+    // just want a copy prompt"). The sentence itself lives on the expanded view.
+    const inner = sheet
+      ? hostSheetHtml(options)
+        + desktopHosts.map((host) => sessionPickerInlineHtml(id, host)).join("")
+        + pullSentenceHtml(message, { hasAppAction: options.length > 0 })
+      : hostBarHtml(options, message);
     return `${persistent ? "" : `<button class="th-host-disclosure" type="button" data-host-disclosure="${esc(id)}" data-stop="1" aria-expanded="false" aria-controls="${esc(actionsId)}"><span>Open with an agent</span><span class="chev" aria-hidden="true">⌄</span></button>`}<div id="${esc(actionsId)}" class="th-host-actions${persistent ? " persistent" : ""}" data-host-actions="${esc(id)}" data-stop="1" aria-hidden="${persistent ? "false" : "true"}"${persistent ? "" : " inert"}>
       <div class="th-host-actions-inner">
         ${inner}
@@ -16434,15 +16892,17 @@
         </button>`).join("\n        ")}
       </div>`;
   }
-  // The bubble's strip: "Open in" once, then the four across, the mark over
-  // the name. The sheet in miniature, and the only shape that seats all four
-  // on one line in a 300px bubble ("Claude Code" alone is a third of it).
-  function hostStripHtml(options) {
-    if (!options.length) return "";
-    return `<div class="th-host-strip"><div class="th-host-strip-lead">Open in</div><div class="th-host-strip-row">${options.map((o) => `<button class="th-host-col" type="button" data-host="${o.host}" ${o.attrs}>
-          <img class="th-host-logo" src="${o.mark}" alt="" />
-          <span class="th-host-name">${esc(o.name)}</span>
-        </button>`).join("")}</div></div>`;
+  // A room bubble's bar: the marks on the left, each a button that says its
+  // verb on hover and to a screen reader ("Open in Claude"), and Copy for
+  // your agent on the right. No names, no sentence: the bubble is a message
+  // in a chat, and its foot must not outweigh it. With every switch off the
+  // bar is the Copy verb alone.
+  function hostBarHtml(options, message) {
+    const sentence = pullSentenceFor(message);
+    return `<div class="th-host-bar">
+        ${options.length ? `<div class="th-host-marks" role="group" aria-label="Open in">${options.map((o) => `<button class="th-host-mark" type="button" data-host="${o.host}" aria-label="Open in ${esc(o.name)}" title="Open in ${esc(o.name)}" ${o.attrs}><img class="th-host-logo" src="${o.mark}" alt="" /></button>`).join("")}</div>` : ""}
+        <button class="th-host-copy" type="button" data-pull-copy="${esc(sentence)}" title="${esc(sentence)}"><span>Copy prompt</span><span>for your agent</span></button>
+      </div>`;
   }
   // "Pull David’s relay “Updater rollback postmortem”" — the thing to say in
   // a session, and the exact sentence the button copies for the agent.
@@ -16517,9 +16977,10 @@
       b.addEventListener("click", async (e) => {
         e.stopPropagation();
         try {
+          const label = b.innerHTML;
           await navigator.clipboard.writeText(b.getAttribute("data-pull-copy") || "");
           b.textContent = "Copied";
-          setTimeout(() => { if (b.isConnected) b.textContent = "Copy this prompt for your agent"; }, 1400);
+          setTimeout(() => { if (b.isConnected) b.innerHTML = label; }, 1400);
         } catch { b.textContent = "Could not copy"; }
       });
     }
@@ -16765,25 +17226,16 @@
     // a correct surface (host "claude-code-direct") still rendered nothing.
     // Unknown values fall through to silence by construction, which is what
     // keeps a local staging stamp like surface "relay_companion" off the wire.
-    // A Map, not an object literal: the key is whatever the sender put on the
-    // wire, and a literal answers `surface: "constructor"` (or toString,
-    // valueOf, __proto__) with an inherited function — truthy, so the footer
-    // renders "Sent with undefined" beside a broken image. A Map has no
-    // prototype chain to walk, so the closed set stays closed by construction.
-    const PROVIDER_BYLINE = new Map([
-      ["codex", { mark: "codexMark.svg", label: "Codex" }],
-      ["claude_code", { mark: "claudeCodeMark.svg", label: "Claude Code" }],
-      ["claude_desktop", { mark: "claudeCodeMark.svg", label: "Claude Desktop" }],
-      ["claude_cowork", { mark: "claudeCodeMark.svg", label: "Claude Cowork" }],
-    ]);
+    // Provenance a person needs: a message that came in from Slack says so.
+    // The "Sent with Codex / Claude Code" line a bubble used to wear is gone
+    // (David, 2026-09-17): its height went to the bar's marks instead, and
+    // which agent wrote a letter is the letter's business, not its foot.
     const providerBylineHtml = (message) => {
       if (message?.deletedAt) return "";
       if (message?.origin === "slack" || message?.provider?.name === "slack") {
         return `<div class="th-provider-byline"><img src="slackMark.png" alt="" />From Slack</div>`;
       }
-      const provider = PROVIDER_BYLINE.get(String(message?.source?.surface || ""));
-      if (!provider) return "";
-      return `<div class="th-provider-byline"><img src="${provider.mark}" alt="" />Sent with ${esc(provider.label)}</div>`;
+      return "";
     };
     const defaultReplyAnchorIds = defaultReplyAnchorMap(thread.msgs);
     const renderedSlackThreadContexts = new Set();
@@ -18373,14 +18825,11 @@
   // Connected copy from the Minimal pill's integrated setup contract.
   // Four rows, the reader's order (David, 2026-09-17): the chat apps, then
   // the agents on this Mac. Each row is a switch that decides one tile of the
-  // reader's sheet; all four begin on, and the last one on will not turn off.
-  // There is no Other row: the copied sentence is always offered, so it has
-  // nothing to switch (David, 2026-09-16).
+  // reader's sheet and one of the bubble's bar; all four begin on, and all
+  // four can go off. There is no Other row: the copied sentence is always
+  // offered, so it has nothing to switch (David, 2026-09-16).
   function yourAgentHtml() {
     const selected = agentAppSelection();
-    // The whisper takes the place of the row's second half, so the line never
-    // wraps at the pill's width: "Connected · keep at least one on".
-    const KEEP_ONE = "keep at least one on";
     return `
       <div class="sv-open-section" id="yourAgent" data-stop="1">
         <div class="sv-open-title">Your agent</div>
@@ -18388,28 +18837,25 @@
         <div class="sv-open-list">
           ${CHAT_APP_OPTIONS.map((app) => {
             const on = chatAppEnabled(app);
-            const last = on && isLastAgentAppOn(app);
             const logo = app === "ChatGPT" ? "chatgptMark.svg" : "claudeMark.svg";
-            const why = `${app === "ChatGPT" ? "chatgpt.com" : "claude.ai"} · ${last ? KEEP_ONE : "a new chat per relay"}`;
+            const why = `${app === "ChatGPT" ? "chatgpt.com" : "claude.ai"} · a new chat per relay`;
             return `<div class="sv-open-row">
               <img class="sv-open-logo" src="${logo}" alt="" />
               <span class="sv-open-copy"><span class="sv-open-name">${app}</span><span class="sv-open-why">${esc(why)}</span></span>
-              <button class="sv-switch" type="button" role="switch" data-chat-app="${app}" aria-checked="${on ? "true" : "false"}"${last ? ' aria-disabled="true"' : ""} aria-label="Open Relays with ${app}"></button>
+              <button class="sv-switch" type="button" role="switch" data-chat-app="${app}" aria-checked="${on ? "true" : "false"}" aria-label="Open Relays with ${app}"></button>
             </div>`;
           }).join("")}
           ${AGENT_APP_OPTIONS.map((app) => {
             const available = appAvailable(app);
             const on = selected.includes(app);
-            const last = on && isLastAgentAppOn(app);
             const logo = app === "Codex" ? "codexMark.svg" : "claudeCodeMark.svg";
             const why = !available ? appUnavailableReason(app)
-              : last ? `Connected · ${KEEP_ONE}`
               : on ? (agentOpensInApp(app) ? "Connected · opens relays in a new chat" : "Connected · Relay copies the sentence for you")
               : "Connected";
             return `<div class="sv-open-row${available ? "" : " off"}">
               <img class="sv-open-logo" src="${logo}" alt="" />
               <span class="sv-open-copy"><span class="sv-open-name">${app}</span><span class="sv-open-why">${esc(why)}</span></span>
-              <button class="sv-switch" type="button" role="switch" data-agent-app="${app}" aria-checked="${on ? "true" : "false"}"${last ? ' aria-disabled="true"' : ""} aria-label="Open Relays with ${app}"${!available ? " disabled" : ""}></button>
+              <button class="sv-switch" type="button" role="switch" data-agent-app="${app}" aria-checked="${on ? "true" : "false"}" aria-label="Open Relays with ${app}"${!available ? " disabled" : ""}></button>
             </div>`;
           }).join("")}
         </div>
