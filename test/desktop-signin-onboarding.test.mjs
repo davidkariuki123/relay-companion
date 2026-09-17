@@ -44,6 +44,9 @@ function connectHarness({ history }) {
     canonicalChatsCache: [], slackChatsCache: [], canonicalChatsFingerprint: '', canonicalChatsLoadedOnce: null,
     onboardingAccountKey: (account) => `user:${account.userId}`, onboardingVersions: versions, COMPANION_ONBOARDING_VERSION: 2,
     signInHistoryPending: pending,
+    // The setup pill (native installer) leaves the middle of the screen for
+    // its top-right home as soon as the account connects, before the restart.
+    leaveSetupPlacement: () => calls.push('home'),
     firstRelayOnboarding: { status: (key) => statuses[key] || 'checking' },
     writeOverlayPrefs: () => calls.push('persist'), restartCompanionDaemon: async () => calls.push('daemon'),
     refreshSent: async () => {
@@ -66,6 +69,7 @@ test('an existing sender is completed only after its history is read, before the
   assert.deepEqual(h.observed.pendingDuringRefresh, ['user:signed-in'], 'held back while the history loads');
   assert.equal(h.versions['user:signed-in'], 2);
   assert.equal(h.versions['user:other'], 0, 'only the signed-in account');
+  assert.ok(h.calls.indexOf('home') < h.calls.indexOf('daemon'), 'the setup pill goes home the moment it is signed in');
   assert.ok(h.calls.indexOf('daemon') < h.calls.indexOf('sent'));
   assert.ok(h.calls.indexOf('sent') < h.calls.indexOf('persist'));
   assert.ok(h.calls.indexOf('persist') < h.calls.indexOf('inbox'));

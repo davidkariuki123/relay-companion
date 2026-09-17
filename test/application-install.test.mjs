@@ -41,6 +41,10 @@ function fixture(t, existing = true) {
       events.push("activate");
       assert.equal(JSON.parse(fs.readFileSync(path.join(homeDir, ".relay", "application-migration.json"))).state, "activating");
       assert.ok(ownership.applicationOwner({ homeDir }));
+      // The pill activation starts reads this on its first paint: it opens
+      // centred with Continue with Google in place of the setup window.
+      const intent = JSON.parse(fs.readFileSync(path.join(homeDir, ".relay", "setup-intent.json"), "utf8"));
+      assert.deepEqual({ ...intent, at: typeof intent.at }, { agentInstalled: true, application: true, at: "string", version: "0.2.0" });
       const candidate = { schema: 1, state: "active", active: true, version, ...runtime, releaseId: layout.releaseId };
       fs.writeFileSync(pointer, JSON.stringify(candidate));
       return { candidate };

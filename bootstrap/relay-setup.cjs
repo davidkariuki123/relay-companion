@@ -1078,10 +1078,15 @@ async function activateRuntime(layout, runtime, version, {
 // sign-in without a click. The --code and --agent-protocol paths pair without
 // a pill sign-in, so they must not leave one behind. Only the fact, the time
 // and the version are recorded: never a credential.
+//
+// The native application installer writes the same marker with
+// `application: true` (application-install.cjs): its pill opens in the middle
+// of the screen with Continue with Google, in place of the setup window that
+// just closed, and moves to its top-right home once the person signs in.
 const SETUP_INTENT_FILE = "setup-intent.json";
-function writeSetupIntent(configDir, version, setupCompatibilityArgs = [], { now = new Date(), write = atomicWriteJson } = {}) {
+function writeSetupIntent(configDir, version, setupCompatibilityArgs = [], { now = new Date(), write = atomicWriteJson, application = false } = {}) {
   if (setupCompatibilityArgs.includes("--code") || setupCompatibilityArgs.includes("--agent-protocol")) return false;
-  write(path.join(configDir, SETUP_INTENT_FILE), { agentInstalled: true, at: now.toISOString(), version });
+  write(path.join(configDir, SETUP_INTENT_FILE), { agentInstalled: true, ...(application ? { application: true } : {}), at: now.toISOString(), version });
   return true;
 }
 

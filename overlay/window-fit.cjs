@@ -35,6 +35,23 @@ function fittedOverlayBounds(workArea, size, {
   };
 }
 
+/**
+ * Centre the visible card on the work area. A fixed compositor surface (macOS)
+ * draws its card at its own top-right corner, so the surface is placed such
+ * that the card, not the surface, sits in the middle of the screen.
+ */
+function centeredOverlayBounds(workArea, size, { maximum = size, surface = null } = {}) {
+  const card = clampCardSize(size, maximum);
+  const cardWidth = Math.max(1, Math.ceil(card.w));
+  const cardHeight = Math.max(1, Math.ceil(card.h));
+  const width = surface ? Math.max(cardWidth, Math.ceil(finite(surface.w, cardWidth))) : cardWidth;
+  const height = surface ? Math.max(cardHeight, Math.ceil(finite(surface.h, cardHeight))) : cardHeight;
+  const wa = workArea || { x: 0, y: 0, width, height };
+  const cardX = Math.round(finite(wa.x) + (finite(wa.width, width) - cardWidth) / 2);
+  const cardY = Math.round(finite(wa.y) + (finite(wa.height, height) - cardHeight) / 2);
+  return { x: cardX + cardWidth - width, y: Math.max(Math.round(finite(wa.y)), cardY), width, height };
+}
+
 /** Resize an already-positioned pill without snapping a user-dragged window home. */
 function resizedOverlayBounds(current, size, { maximum = size } = {}) {
   const card = clampCardSize(size, maximum);
@@ -76,6 +93,7 @@ function shouldIgnoreOverlayMouse(point, card, pad = 0) {
 }
 
 module.exports = {
+  centeredOverlayBounds,
   clampCardSize,
   fittedOverlayBounds,
   resizedOverlayBounds,

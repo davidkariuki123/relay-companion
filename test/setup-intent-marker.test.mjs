@@ -45,6 +45,37 @@ test("plain setup writes a private marker that carries no credential", (t) => {
   assert.equal(writeSetupIntent(configDir, "0.1.291", ["--api", "http://localhost:4000"], { now }), true);
 });
 
+test("the application installer's marker says so, and the pill reads it as a centred sign-in", (t) => {
+  const root = tempDir(t);
+  const configDir = path.join(root, ".relay");
+  const now = new Date("2026-09-17T10:00:00.000Z");
+  assert.equal(writeSetupIntent(configDir, "0.1.540", [], { now, application: true }), true);
+  const marker = JSON.parse(fs.readFileSync(path.join(configDir, "setup-intent.json"), "utf8"));
+  assert.deepEqual(marker, { agentInstalled: true, application: true, at: "2026-09-17T10:00:00.000Z", version: "0.1.540" });
+  const { read } = readerHarness();
+  assert.deepEqual(plain(read(configDir, now.getTime())), { at: now.toISOString(), version: "0.1.540", application: true });
+  // The plain marker never grows an application flag by accident.
+  writeSetupIntent(configDir, "0.1.540", [], { now });
+  assert.deepEqual(plain(read(configDir, now.getTime())), { at: now.toISOString(), version: "0.1.540" });
+  // The native installer writes it before activation starts the pill, and a
+  // failed write costs nothing.
+  const install = fs.readFileSync(new URL("../bootstrap/application-install.cjs", import.meta.url), "utf8");
+  const marked = install.indexOf("bootstrap.writeSetupIntent(");
+  const activated = install.indexOf("await activate(layout, runtime, bundle.receipt.version, { homeDir })");
+  assert.ok(marked >= 0 && activated > marked);
+  assert.match(install, /try \{ bootstrap\.writeSetupIntent\(path\.join\(homeDir, "\.relay"\), bundle\.receipt\.version, \[\], \{ application: true \}\); \} catch \{\}/);
+  // The pill: an application marker centres the window and starts no browser
+  // sign-in on its own; the durable owner marker picks the Google-first screen.
+  const payload = slice(main, "function buildPayload() {", "// Pushes are serialized");
+  assert.match(payload, /agentInstalled: Boolean\(setupIntent\) && setupIntent\.application !== true,/);
+  assert.match(payload, /applicationSetup: setupIntent\?\.application === true,/);
+  assert.match(payload, /applicationOwned: applicationOwnedInstall\(\),/);
+  assert.match(main, /onboarding: \[[^\]]*payload\.ui\.agentInstalled, payload\.ui\.applicationSetup, payload\.ui\.applicationOwned,/);
+  assert.match(main, /setupCentered = process\.env\.RELAY_OVERLAY_TEST !== "1" && process\.env\.RELAY_OVERLAY_PERF !== "1"\s*&& readSetupIntent\(relayConfigDir\(\)\)\?\.application === true && !account\(\)\.paired;/);
+  assert.match(main, /win = createCompanionWindow\(BrowserWindow, \{\s*\.\.\.overlayHomeBounds\(\),/);
+  assert.match(main, /signInHistoryPending\.add\(signedInKey\);\s*\/\/[^\n]*\n\s*leaveSetupPlacement\(\);/);
+});
+
 test("paths that pair without a pill sign-in leave no marker", (t) => {
   const root = tempDir(t);
   const configDir = path.join(root, ".relay");
@@ -119,7 +150,7 @@ test("the pill reads the marker only while signed out, consumes it on sign-in st
   const payload = slice(main, "function buildPayload() {", "// Pushes are serialized");
   assert.match(payload, /if \(currentAccount\.paired\) consumeSetupIntent\(\);/, "a paired account's marker is stale");
   assert.match(payload, /const setupIntent = currentAccount\.paired \? null : readSetupIntent\(relayConfigDir\(\)\);/);
-  assert.match(payload, /agentInstalled: Boolean\(setupIntent\),/);
+  assert.match(payload, /agentInstalled: Boolean\(setupIntent\) && setupIntent\.application !== true,/);
   const signIn = slice(main, 'ipcMain.handle("relay:installationAuthSignIn"', 'ipcMain.handle("relay:installationAuthGoogle"');
   assert.match(signIn, /consumeSetupIntent\(\);[\s\S]*\.signIn\(\{ forceAccountSelection: input\?\.forceAccountSelection === true \}\)/);
   // The renderer decides from the payload, so a change must reach it.

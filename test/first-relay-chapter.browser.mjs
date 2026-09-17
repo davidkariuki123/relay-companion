@@ -5,6 +5,9 @@
 // pill opened by setup signs in on its own, once. No account, installation
 // or delivery changes.
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 const browser = await chromium.launch({headless:true});
 try {
@@ -209,17 +212,17 @@ try {
   //    the main process reports as ui.agentInstalled), it starts the browser
   //    sign-in itself, exactly once. Without the marker, or with an approval
   //    already in flight, it waits for the person.
-  const openSignedOut = async ({agentInstalled, authState}) => {
+  const openSignedOut = async ({agentInstalled, authState, applicationOwned = false}) => {
     const signedOut = await browser.newPage({viewport:{width:850,height:850}});
     const pageErrors = [];
     signedOut.on('pageerror', error => pageErrors.push(error.message));
-    await signedOut.addInitScript(({agentInstalled, authState}) => {
+    await signedOut.addInitScript(({agentInstalled, authState, applicationOwned}) => {
       window.fixtureEvents = {};
       window.fixtureSignIns = [];
       window.fixtureStateReads = 0;
       window.fixturePayload = {account:{paired:false,credentialStatus:'unpaired',credentialError:'',credentialStore:'',email:'',name:'',userId:''},
         ui:{canDismiss:true,onboardingRequired:false,onboardingVersion:2,completedOnboardingVersion:0,
-          setupPrompt:'Read https://sendrelays.com/for-agents and set me up on Relay.',agentInstalled,
+          setupPrompt:'Read https://sendrelays.com/for-agents and set me up on Relay.',agentInstalled,applicationOwned,
           firstRelayStatus:'checking',firstRelayId:'',firstLink:null,networkOnboarding:{required:false,checking:false,version:2}},
         features:{},relays:[],sent:[],contacts:[],chats:[]};
       const api = {isTestOverlay:true, refresh:async () => structuredClone(window.fixturePayload),
@@ -233,7 +236,7 @@ try {
         if(String(key).startsWith('on')) return callback => {window.fixtureEvents[key]=callback;return () => {};};
         return async () => ({ok:true});
       }});
-    }, {agentInstalled, authState});
+    }, {agentInstalled, authState, applicationOwned});
     await signedOut.goto(new URL('../overlay/inbox.html',import.meta.url).href);
     await signedOut.waitForFunction(() => window.fixtureStateReads > 0);
     return {signedOut, pageErrors};
@@ -258,6 +261,26 @@ try {
   assert.deepEqual(await manual.signedOut.evaluate(() => window.fixtureSignIns), [], 'no marker: the person clicks Sign in');
   assert.equal(await manual.signedOut.locator('#signupView').getByText('Continue in your browser.').count(), 0);
   assert.deepEqual(manual.pageErrors, []);
+
+  // 8b. A Relay the native application installer set up (ui.applicationOwned):
+  //     Relay is already installed, so the screen leads with Continue with
+  //     Google, keeps email as a link, shows no agent setup prompt, and opens
+  //     no browser on its own (the installer's marker is not agentInstalled).
+  const installed = await openSignedOut({agentInstalled:false, applicationOwned:true, authState:{status:'idle'}});
+  await installed.signedOut.locator('#signupView').getByText('Sign in to get started.').waitFor();
+  assert.equal(await installed.signedOut.locator('#suCopySetup').count(), 0, 'nothing for an agent to install');
+  assert.equal(await installed.signedOut.locator('.su-setup-prompt').count(), 0);
+  assert.equal((await installed.signedOut.locator('#suGoogle').textContent()).trim(), 'Continue with Google');
+  assert.equal(await installed.signedOut.locator('#suGoogle').evaluate(el => el.classList.contains('su-primary')), true, 'Google is the primary way in');
+  assert.equal(await installed.signedOut.locator('#suSignIn').textContent(), 'Use email instead');
+  assert.equal(await installed.signedOut.locator('#signupView').getByText('quit and reopen Claude Code or Codex').isVisible(), true);
+  await installed.signedOut.waitForTimeout(250);
+  assert.deepEqual(await installed.signedOut.evaluate(() => window.fixtureSignIns), [], 'the person clicks Continue with Google themselves');
+  const shot = fileURLToPath(new URL('../../../dist/setup-ui/pill-application-signin.png', import.meta.url));
+  fs.mkdirSync(path.dirname(shot), {recursive:true});
+  await installed.signedOut.locator('.card').screenshot({path:shot});
+  assert.deepEqual(installed.pageErrors, []);
+  await installed.signedOut.close();
   await manual.signedOut.close();
 
   const resumed = await openSignedOut({agentInstalled:true, authState:{status:'pending_identity',authorizationId:'auth_1',expiresAt:'2099-01-01T00:00:00Z'}});

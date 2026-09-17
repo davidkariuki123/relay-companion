@@ -162,6 +162,7 @@ const { elevationForFrontmost } = require("./elevation-policy.cjs");
 const { openingFaceFor } = require("./message-face.cjs");
 const perf = require("./perf-counters.cjs");
 const {
+  centeredOverlayBounds,
   fittedOverlayBounds,
   resizedOverlayBounds,
   shouldIgnoreOverlayMouse,
@@ -592,6 +593,8 @@ function installationAuthorizationController() {
           // flash it) until the sent page has been read, then decide once.
           const signedInKey = onboardingAccountKey({ userId: registration.user.id, email: registration.user.email });
           signInHistoryPending.add(signedInKey);
+          // Signed in: the setup pill leaves the middle of the screen for home.
+          leaveSetupPlacement();
           try {
             await restartCompanionDaemon();
             await Promise.allSettled([refreshSent(), refreshContacts(), refreshCanonicalChats()]);
@@ -1121,13 +1124,28 @@ function readSetupIntent(configDir, now = Date.now()) {
     const age = now - Date.parse(parsed.at);
     // A future timestamp is not a fresh marker; it is a malformed one.
     if (!(age >= 0 && age <= SETUP_INTENT_FRESH_MS)) return null;
-    return { at: String(parsed.at), version: String(parsed.version || "") };
+    // `application: true` is the native installer's marker: that pill opens
+    // centred with Continue with Google and starts no browser sign-in itself.
+    return { at: String(parsed.at), version: String(parsed.version || ""), ...(parsed.application === true ? { application: true } : {}) };
   } catch {
     return null;
   }
 }
 function consumeSetupIntent(configDir = relayConfigDir()) {
   try { fs.rmSync(path.join(configDir, SETUP_INTENT_FILE), { force: true }); } catch {}
+}
+// Whether the native application installer owns this Relay (its durable
+// ~/.relay/application-owner.json). Its signed-out screen leads with Continue
+// with Google: Relay is already set up, so the agent setup prompt would be
+// wrong. Cached: the marker is a handful of stats and realpaths, and pushes
+// are frequent.
+let applicationOwnedCache = { at: 0, value: false };
+function applicationOwnedInstall() {
+  if (Date.now() - applicationOwnedCache.at < 60_000) return applicationOwnedCache.value;
+  let value = false;
+  try { value = Boolean(require("../bootstrap/application-owner.cjs").applicationOwner()); } catch {}
+  applicationOwnedCache = { at: Date.now(), value };
+  return value;
 }
 
 function pillVersion() {
@@ -2315,7 +2333,12 @@ function buildPayload() {
       firstRelayKind: firstRelayKindFor(protocolState),
       // The thin installer opened this signed-out pill moments ago for a person
       // who signs in here: the renderer may start that sign-in without a click.
-      agentInstalled: Boolean(setupIntent),
+      agentInstalled: Boolean(setupIntent) && setupIntent.application !== true,
+      // The native installer's pill (setup-intent.json with application: true)
+      // stands in the middle of the screen for sign-in; an application-owned
+      // Relay leads its signed-out screen with Continue with Google.
+      applicationSetup: setupIntent?.application === true,
+      applicationOwned: applicationOwnedInstall(),
       openingPreference: protocolState?.openingPreference || null,
       // The renderer's playTink gate. Sound preferences are not in the push
       // signature, so relay:setSoundsMuted explicitly forces a push.
@@ -2839,7 +2862,7 @@ async function pushInboxNow(force) {
     outboxRevision: payload.outboxRevision,
     account: [payload.account.paired, payload.account.email],
     onboarding: [payload.ui.onboardingRequired, payload.ui.networkOnboarding, payload.ui.completedOnboardingVersion, payload.ui.firstRelayStatus, payload.ui.firstRelayId, payload.ui.openingPreference,
-      payload.ui.firstRelayKind, payload.ui.agentInstalled,
+      payload.ui.firstRelayKind, payload.ui.agentInstalled, payload.ui.applicationSetup, payload.ui.applicationOwned,
       payload.ui.firstLink ? [payload.ui.firstLink.relayId, payload.ui.firstLink.state, payload.ui.firstLink.shareText] : null],
     pendingOpen: payload.pendingOpen
       ? [payload.pendingOpen.relayId, payload.pendingOpen.title, payload.pendingOpen.forHuman, payload.pendingOpen.error]
@@ -5439,6 +5462,52 @@ function anchorTopRight() {
   return anchor;
 }
 
+// SETUP PLACEMENT (2026-09-17). The native application installer's setup
+// window closes as soon as this pill is up, and the pill takes its place in
+// the middle of the screen with Continue with Google, so the person sees one
+// surface from download to sign-in. The moment the account connects the pill
+// glides to its top-right home. Decided once, when the window is created,
+// from a fresh installer marker and a signed-out account; a harness run keeps
+// its parking spot.
+let setupCentered = false;
+let setupGlideTimer = null;
+function decideSetupPlacement() {
+  try {
+    setupCentered = process.env.RELAY_OVERLAY_TEST !== "1" && process.env.RELAY_OVERLAY_PERF !== "1"
+      && readSetupIntent(relayConfigDir())?.application === true && !account().paired;
+  } catch { setupCentered = false; }
+}
+function overlayHomeBounds() {
+  if (!setupCentered) return anchorTopRight();
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()) || screen.getPrimaryDisplay();
+  return centeredOverlayBounds(display.workArea, cardSize, { maximum: CARD_MAX, surface: FIXED_OVERLAY_SURFACE ? CARD_MAX : null });
+}
+function leaveSetupPlacement() {
+  if (!setupCentered) return;
+  setupCentered = false;
+  if (!win || win.isDestroyed()) return;
+  let from, to;
+  try { from = win.getBounds(); to = anchorTopRight(); } catch { return; }
+  if (process.platform === "darwin") {
+    try { win.setBounds(to, true); } catch {}
+    return;
+  }
+  // Windows and Linux have no native bounds animation: a short ease-out so the
+  // card is seen leaving the middle of the screen rather than teleporting.
+  const steps = 18, durationMs = 300;
+  let step = 0;
+  if (setupGlideTimer) clearInterval(setupGlideTimer);
+  setupGlideTimer = setInterval(() => {
+    step += 1;
+    const eased = 1 - (1 - step / steps) ** 3;
+    const at = step >= steps ? to : {
+      x: Math.round(from.x + (to.x - from.x) * eased), y: Math.round(from.y + (to.y - from.y) * eased), width: to.width, height: to.height,
+    };
+    try { if (win && !win.isDestroyed()) win.setBounds(at, false); } catch {}
+    if (step >= steps) { clearInterval(setupGlideTimer); setupGlideTimer = null; }
+  }, durationMs / steps);
+}
+
 // Show the overlay window. It remains an ordinary focusable window over the
 // visible card; the transparent remainder is made click-through below.
 function showOverlayWindow({ force = false, reposition = true } = {}) {
@@ -5451,7 +5520,7 @@ function showOverlayWindow({ force = false, reposition = true } = {}) {
   }
   if (reposition) {
     try {
-      const target = anchorTopRight();
+      const target = overlayHomeBounds();
       const current = win.getBounds();
       if (target.x !== current.x || target.y !== current.y || target.width !== current.width || target.height !== current.height) {
         win.setBounds(target, false);
@@ -5689,8 +5758,9 @@ function fitOverlayWindowToCard({ settle = false } = {}) {
   let current;
   try { current = win.getBounds(); } catch { return; }
   // Preserve the user's current top-right anchor while the ordinary Windows or
-  // Linux window grows and shrinks with the one visible card.
-  const target = resizedOverlayBounds(current, cardSize, { maximum: CARD_MAX });
+  // Linux window grows and shrinks with the one visible card. A card centred
+  // for setup stays centred as its sign-in screens change height.
+  const target = setupCentered ? overlayHomeBounds() : resizedOverlayBounds(current, cardSize, { maximum: CARD_MAX });
   if (target.x === current.x && target.y === current.y && target.width === current.width && target.height === current.height) {
     return;
   }
@@ -5719,6 +5789,7 @@ function scheduleNativeGeometryReconcile(delayMs) {
 }
 
 function createWindow() {
+  decideSetupPlacement();
   // Harness overlays share the user's screen with the real pill and are visually
   // identical — four "Relays" on screen at once reads as the product spazzing
   // out. Make sandbox runs unmistakable and unobtrusive: half-transparent and
@@ -5729,7 +5800,7 @@ function createWindow() {
   // but let an explicitly requested recording own the foreground for visual QA.
   const isRecordingHarness = isHarness && process.env.RELAY_OVERLAY_TEST_RECORDING === "1";
   win = createCompanionWindow(BrowserWindow, {
-    ...anchorTopRight(),
+    ...overlayHomeBounds(),
     ...(isHarness && !isRecordingHarness ? { opacity: 0.55 } : {}),
     frame: false,
     transparent: true,

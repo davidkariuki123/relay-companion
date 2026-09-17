@@ -22,6 +22,7 @@ import {
   relayCallingSurface,
   rememberCallingClient,
   toolsForAccount,
+  withSessionNotice,
 } from "../src/mcp.js";
 
 test("owned chat agent tools are developer-only and update the existing response", async () => {
@@ -1627,6 +1628,37 @@ test("a session learns its subscribed topics from the tool list at startup, with
   const shipped = toolsForAccount({ requests: false, aiSessions: false, connectors: false, topics: false, todo: false, messageMutations: false });
   assert.deepEqual(withSubscribedTopics(shipped, { accountScope: "dev_token", readIndex: index }), shipped);
   assert.match(RELAY_MCP_INSTRUCTIONS, /its subscribed Topics with their mandates/);
+});
+
+// In Claude Code the check-in sentence is the whole push: the tool and its
+// description sit hidden behind ToolSearch. Buried mid-block it was followed
+// in one session in fourteen (Sven, 2026-09-17), so on both rows it follows
+// the send gate directly, ahead of the routing paragraph.
+test("the check-in rule follows the send gate directly on both rows", async () => {
+  const { RELAY_MCP_ESSENTIALS } = await import("../src/agent-instructions.js");
+  for (const instructions of [RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS]) {
+    assert.ok(instructions.startsWith(`${RELAY_MCP_ESSENTIALS} Call relay_session_updates when a piece of work starts and again before your final response`));
+  }
+});
+
+// A rewritten description reaches only hosts that list descriptions (Codex).
+// A result reaches the model everywhere, so the board's count-only line rides
+// every other tool's result until the check-in clears it.
+test("every tool result but the check-in carries the board's notice while it is not quiet", () => {
+  const sessionContext = createMcpSessionContext({ env:{ CLAUDE_CODE_SESSION_ID:"ses_notice" }, argv:[], cwd:"/tmp/relay-notice-test" });
+  let line = "NEW since this session last checked: Relays: 2. Topic updates: 1. Call relay_session_updates for the records.";
+  sessionContext.sessionDigest = { notice() { return line; } };
+  const result = { content: [{ type:"text", text:"{\"items\":[]}" }] };
+  const noticed = withSessionNotice(result, "relay_chats_list", sessionContext);
+  assert.deepEqual(noticed.content, [result.content[0], { type:"text", text: line }]);
+  assert.deepEqual(result.content.length, 1, "the original result is left alone");
+  assert.equal(withSessionNotice(result, "relay_session_updates", sessionContext), result, "the check-in has just cleared the board");
+  const failed = { content: [{ type:"text", text:"boom" }], isError: true };
+  assert.equal(withSessionNotice(failed, "relay_chats_list", sessionContext), failed, "an error stays an error");
+  line = "";
+  assert.equal(withSessionNotice(result, "relay_chats_list", sessionContext), result, "a quiet board adds nothing");
+  const bare = createMcpSessionContext({ env:{}, argv:[], cwd:"/tmp/relay-notice-bare" });
+  assert.equal(withSessionNotice(result, "relay_chats_list", bare), result, "no board, no line");
 });
 
 test("the send path is annotated anthropic/alwaysLoad so no serving mode defers it", () => {

@@ -44,6 +44,20 @@ test("first run offers agent setup and explicit sign-in without starting authori
   assert.doesNotMatch(overlay, /Welcome back\./);
 });
 
+test("an application-installed Relay signs in with Google first and offers no agent setup prompt", () => {
+  const stage = overlay.slice(overlay.indexOf('if (signupStage === "method" && payload.ui?.applicationOwned === true) {'), overlay.indexOf('if (signupStage === "method") {'));
+  assert.ok(stage.length > 0, "the application screen is decided before the generic method stage");
+  for (const copy of ["Welcome to Relay", "Sign in to get started.", "Relay is set up on this computer.", "Continue with Google", "Use email instead",
+    "quit and reopen Claude Code or Codex"]) assert.match(stage, new RegExp(copy.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(stage, /class="su-primary su-google" id="suGoogle"/, "Google is the primary way in");
+  assert.doesNotMatch(stage, /su-setup-prompt|Copy setup prompt|setupPrompt/, "Relay is already set up; there is nothing for an agent to install");
+  assert.match(stage, /document\.getElementById\("suGoogle"\)\?\.addEventListener\("click", startInstallationGoogle\);/);
+  assert.match(stage, /document\.getElementById\("suSignIn"\)\?\.addEventListener\("click", startInstallationSignIn\);/);
+  // The installer's marker never opens a browser on its own: agentInstalled is
+  // false for it, so the person clicks Continue with Google themselves.
+  assert.match(main, /agentInstalled: Boolean\(setupIntent\) && setupIntent\.application !== true,/);
+});
+
 test("a first-run Relay is readable before account approval and binds only afterward", () => {
   const setup = readFileSync(path.join(ROOT, "src/setup-open.js"), "utf8");
   assert.match(overlay, /pendingOpenSignupCard/);

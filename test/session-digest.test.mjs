@@ -10,7 +10,7 @@ import context from "../src/agent-relay-context.cjs";
 import digestModule from "../src/session-digest.cjs";
 
 const { recordAgentRelayIndex, recordAgentTopicIndex } = context;
-const { QUIET_DESCRIPTION, QUIET_DESCRIPTION_ORDINARY, createSessionDigest, describeDigest, watchSessionDigest, statePath } = digestModule;
+const { QUIET_DESCRIPTION, QUIET_DESCRIPTION_ORDINARY, createSessionDigest, describeDigest, noticeForResult, watchSessionDigest, statePath } = digestModule;
 
 function tempHome() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "relay-session-digest-"));
@@ -81,6 +81,35 @@ test("taking the board returns the records and clears it; narrower reads clear o
   // A different session on the same account has its own cursor.
   const other = createSessionDigest({ homeDir: home, accountScope: scope, sessionKey: "ses_3" });
   assert.equal(other.refresh().description, QUIET_DESCRIPTION, "a session opened now starts at the current snapshots");
+});
+
+// Claude Code hides Relay's tools behind ToolSearch, so a rewritten
+// description is never read there; the same counts ride every other tool's
+// result instead. Reading the line moves nothing.
+test("the board renders a count-only result line while it is not quiet, without touching any cursor", () => {
+  const home = tempHome();
+  const scope = "dev_token";
+  const nowMs = Date.parse("2026-09-11T09:00:00.000Z");
+  recordAgentRelayIndex(home, scope, { items: [] }, { nowMs });
+  recordAgentTopicIndex(home, scope, { topics: [topic("tpc_dev", { postCount: 1 })] });
+  const board = createSessionDigest({ homeDir: home, accountScope: scope, sessionKey: "ses_notice", nowMs });
+  assert.equal(board.notice(), "", "a quiet board adds nothing to a result");
+
+  recordAgentRelayIndex(home, scope, { items: [relay(2, nowMs, { sender: { name: "Sven" } }), relay(1, nowMs)] }, { nowMs: nowMs + 5000 });
+  recordAgentTopicIndex(home, scope, { topics: [topic("tpc_dev", { postCount: 4, latestPostAt: "2026-09-11T09:05:00.000Z" })] });
+  const notice = board.notice();
+  assert.equal(notice, "NEW since this session last checked: Relays: 2. Topic updates: 1. Call relay_session_updates for the records.");
+  assert.doesNotMatch(notice, /Sven|Title|tpc_dev/);
+  // Reading the line is not an announcement: the watcher still sees the change once.
+  assert.equal(board.refresh().changed, true);
+  assert.equal(board.notice(), notice, "reading the line consumes nothing");
+  assert.equal(board.notice(), notice);
+  // Off the developer row the line counts Relays only.
+  assert.equal(noticeForResult({ newRelays: [{}], topicChanges: [{}] }, { topicsEnabled: false }), "NEW since this session last checked: Relays: 1. Call relay_session_updates for the records.");
+  assert.equal(noticeForResult({ newRelays: [], topicChanges: [{}] }, { topicsEnabled: false }), "");
+  // Taking the board clears the line.
+  board.take();
+  assert.equal(board.notice(), "");
 });
 
 test("the description stays within the host budget and topics are omitted off the developer row", () => {

@@ -174,6 +174,11 @@ async function installFromApplication({ resourcesDir, applicationRoot, executabl
     // Existing installations must already select this channel explicitly.
     if (!current && channel === "dev") atomic(configFile, { ...config, updateChannel: "dev", apiUrl: "https://dev-api.sendrelays.com", devApiUrl: "https://dev-api.sendrelays.com" });
     atomic(ownerPath, owner);
+    // Activation starts the pill. The marker, written first so the pill reads
+    // it on its first paint, opens that pill centred with Continue with Google
+    // in place of the setup window. A marker that cannot be written costs one
+    // window position, not the install, so it never fails setup.
+    try { bootstrap.writeSetupIntent(path.join(homeDir, ".relay"), bundle.receipt.version, [], { application: true }); } catch {}
     try {
       // This is the existing OS service/MCP/skill registration transaction, with
       // exact-root health, advancing heartbeat, durable Node and rollback.

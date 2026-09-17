@@ -328,3 +328,24 @@ test("two unclaimed links with no address are two rooms, not one", () => {
     "email:priya@example.com",
   );
 });
+
+test("a minted link is not a chat until somebody answers through it", () => {
+  // Every unclaimed link is filed as its own direct room; the Chat list used to
+  // show that room ("Someone with the link", or the link's name) with only the
+  // sender's own words in it. The server's /v1/chats drops it; the pill builds
+  // Chats from Sent, so it drops it by the same rule.
+  const isUnansweredLinkAudience = Function(
+    `"use strict"; ${between(html, "function isUnansweredLinkAudience(room)", "function sortConversationRooms(")}; return isUnansweredLinkAudience;`,
+  )();
+  const out = { id: "relay_a", direction: "out" };
+  assert.equal(isUnansweredLinkAudience({ partyKey: "share:shl_a", isGroup: false, msgs: [out] }), true);
+  assert.equal(isUnansweredLinkAudience({ partyKey: "share:shl_named", isGroup: false, msgs: [out, { id: "relay_b", direction: "out" }] }), true, "a named link is still nobody");
+  assert.equal(isUnansweredLinkAudience({ partyKey: "share:shl_a", isGroup: false, msgs: [out, { id: "relay_c", direction: "in" }] }), false);
+  assert.equal(isUnansweredLinkAudience({ partyKey: "email:priya@example.com", isGroup: false, msgs: [out] }), false, "an ordinary unanswered send is a chat");
+  assert.equal(isUnansweredLinkAudience({ partyKey: "share:shl_a", isGroup: true, msgs: [out] }), false);
+  assert.match(
+    between(html, "for (const anchor of contactChatAnchors.values())", "for (const group of groupsList)"),
+    /people = sortConversationRooms\(\[\.\.\.byParty\.values\(\)\]\.filter\(\(room\) => !isUnansweredLinkAudience\(room\)\)\)/,
+    "the last assembly of direct rooms is the one the Chat list, the rail and the composer index read",
+  );
+});

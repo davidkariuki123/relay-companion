@@ -98,7 +98,10 @@ export const TOPICS_RULE = TOPIC_CONTEXT_INSTRUCTION;
 export const TOPICS_STARTUP_RULE = `At work start, use relay_topic_context for relevant history even if nothing is new; fetch useful source posts before deciding. ${RELAY_TOPIC_POSTING_RULE}`;
 // The check-in. Unconditional and short so it survives a cold start; the
 // reply carries the topics, the mandates, the arrivals and what to do about
-// them, and a reply has no byte budget.
+// them, and a reply has no byte budget. It sits straight after the send gate,
+// ahead of routing: in Claude Code this sentence is the whole push (the tool
+// and its description sit hidden behind ToolSearch), and buried mid-block it
+// was followed in one session in fourteen.
 export const SESSION_CHECKIN_RULE =
   "Call relay_session_updates when a piece of work starts and again before your final response: it returns this session's new Relays, its subscribed Topics with their mandates, and what to do about them. Received Relays are in relay_inbox_list; notification emails are not the authoritative contents.";
 const SESSION_CHECKIN_RULE_ORDINARY =
@@ -133,16 +136,16 @@ const MEDIUM_ROUTING =
 
 export const RELAY_MCP_INSTRUCTIONS = [
   RELAY_MCP_ESSENTIALS,
-  MEDIUM_ROUTING,
   SESSION_CHECKIN_RULE,
+  MEDIUM_ROUTING,
   TOPICS_STARTUP_RULE,
   "Call relay_task_start before doing an inbound Task and relay_task_complete afterward; Task Runs finish automatically.",
 ].join(" ");
 
 export const REQUESTS_DISABLED_INSTRUCTIONS = [
   RELAY_MCP_ESSENTIALS,
-  MEDIUM_ROUTING,
   SESSION_CHECKIN_RULE_ORDINARY,
+  MEDIUM_ROUTING,
   // No Todo or Task rules in this profile, and no mention of either. It is
   // chosen when requests is off, so the relay_todo_* and relay_task_* tools
   // have left the catalog and the overlay hides the Todo tab by the time these
@@ -1736,6 +1739,22 @@ export function withSubscribedTopics(tools, {
   });
 }
 
+/**
+ * Append the board's count-only notice to any other tool's result. The
+ * description flip only reaches hosts that list descriptions (Codex); a result
+ * reaches the model everywhere. The check-in itself has just cleared the
+ * board, and an error result stays an error.
+ */
+export function withSessionNotice(result, toolName, sessionContext = DEFAULT_MCP_SESSION_CONTEXT) {
+  const board = sessionContext?.sessionDigest;
+  if (!board || typeof board.notice !== "function" || toolName === "relay_session_updates") return result;
+  if (!result || result.isError || !Array.isArray(result.content)) return result;
+  let notice = "";
+  try { notice = board.notice(); } catch { return result; }
+  if (!notice) return result;
+  return { ...result, content: [...result.content, { type: "text", text: notice }] };
+}
+
 /** Serve this session's live event board as the relay_session_updates description. */
 export function withSessionUpdates(tools, sessionContext = DEFAULT_MCP_SESSION_CONTEXT) {
   const board = sessionContext?.sessionDigest;
@@ -2864,11 +2883,12 @@ export async function createRelayMcpSession({
           throw new Error("Relay is busy sending another attachment. Retry this exact call with the same idempotency key.");
         }
       }
-      return await handleCall(client, req.params.name, req.params.arguments || {}, {
+      const result = await handleCall(client, req.params.name, req.params.arguments || {}, {
         signal: extra?.signal,
         features,
         sessionContext,
       });
+      return withSessionNotice(result, req.params.name, sessionContext);
     } catch (err) {
       return relayCallErrorResult(err);
     } finally {

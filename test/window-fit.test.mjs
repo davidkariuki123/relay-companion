@@ -3,6 +3,7 @@ import test from "node:test";
 import windowFit from "../overlay/window-fit.cjs";
 
 const {
+  centeredOverlayBounds,
   fittedOverlayBounds,
   resizedOverlayBounds,
   shouldIgnoreOverlayMouse,
@@ -50,6 +51,22 @@ test("ordinary native windows preserve the dragged card's top-right anchor", () 
   assert.deepEqual(collapsed, { x: 600, y: 120, width: 244, height: 44 });
   assert.equal(current.x + current.width, reader.x + reader.width);
   assert.equal(current.x + current.width, collapsed.x + collapsed.width);
+});
+
+test("the setup pill stands in the middle of the work area", () => {
+  // An ordinary native window is exactly the card.
+  assert.deepEqual(centeredOverlayBounds(workArea, { w: 344, h: 524 }, options), {
+    x: 628, y: 228, width: 344, height: 524,
+  });
+  // A fixed macOS surface draws its card at its own top-right corner: the
+  // surface moves so that the card, not the surface, is centred.
+  const surface = centeredOverlayBounds(workArea, { w: 344, h: 524 }, { ...options, surface: { w: 720, h: 800 } });
+  assert.deepEqual(surface, { x: 252, y: 228, width: 720, height: 800 });
+  assert.equal(surface.x + surface.width, 628 + 344, "the card's right edge is where the plain window's is");
+  // Oversized renderer claims are clamped exactly as the top-right fit clamps them.
+  assert.deepEqual(centeredOverlayBounds(workArea, { w: 99999, h: 99999 }, options), { x: 440, y: 90, width: 720, height: 800 });
+  // A card taller than the work area keeps its top on screen.
+  assert.equal(centeredOverlayBounds({ x: 0, y: 0, width: 800, height: 400 }, { w: 344, h: 524 }, options).y, 0);
 });
 
 test("only macOS requires a fixed transparent compositor surface", () => {

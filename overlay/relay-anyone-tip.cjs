@@ -36,7 +36,10 @@
   ].map(Object.freeze));
   const INTERVAL_MS = 10000;
 
-  function create(root) {
+  // `expanded: true` opens the card straight away and keeps it open across
+  // reset(): the application installer's setup window shows the five ways
+  // while Relay downloads, with nothing to minimise them into.
+  function create(root, { expanded: startExpanded = false } = {}) {
     const doc = root.ownerDocument, win = doc.defaultView;
     root.classList.add("relay-anyone-tip");
     root.innerHTML = `
@@ -58,7 +61,7 @@
     const viewport = find(".rat-viewport"), track = find(".rat-track"), dots = find(".rat-dots");
     const copy = find(".rat-copy"), status = find(".rat-status"), result = find(".rat-result");
     // Collapsed on every open; "See how" expands it until Relay next opens.
-    let index = 0, expanded = false, paused = false, visible = false, active = false;
+    let index = 0, expanded = startExpanded, paused = false, visible = false, active = false;
     function setExpanded(next) {
       expanded = next;
       controls();
@@ -187,7 +190,7 @@
         active = next; schedule();
       },
       // Every open starts from the collapsed tip and the first example.
-      reset() { paused = false; expanded = false; select(0); },
+      reset() { paused = false; expanded = startExpanded; select(0); },
       destroy() { visible = false; schedule(); observer.disconnect(); doc.removeEventListener("visibilitychange", schedule); },
     };
   }
