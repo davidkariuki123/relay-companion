@@ -828,6 +828,16 @@ export class RelayClient {
     return this.#req("POST", `/v1/relays/${encodeURIComponent(id)}/task/completed`, payload);
   }
 
+  /** The person refused a direct Task before any work; the optional note travels as the Task-event message. */
+  taskRejected(id, payload) {
+    return this.#req("POST", `/v1/relays/${encodeURIComponent(id)}/task/rejected`, payload);
+  }
+
+  /** The person dropped a direct Task after it started; the optional note travels as the Task-event message. */
+  taskCancelled(id, payload) {
+    return this.#req("POST", `/v1/relays/${encodeURIComponent(id)}/task/cancelled`, payload);
+  }
+
   deleteInboxItem(itemId, payload = {}) {
     return this.#req("POST", `/v1/inbox-items/${encodeURIComponent(itemId)}/delete`, payload);
   }

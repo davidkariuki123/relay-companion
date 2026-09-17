@@ -724,7 +724,9 @@ test("one completed visible dwell retires a notification — it never re-pops fo
 test("legacy list menus render and wire the picker while remaining expanded", () => {
   const menu = sliceFunction(html, "function openActionsHtml(");
   assert.match(menu, /sessionPickerInlineHtml\(id, sessionPickerState\?\.provider\)/);
-  assert.match(sliceFunction(html, "function wireSentRows("), /wireSessionPickerRows\(sentListEl\)/);
+  // Sent rows live in the Sent tab and in the Relays tab's Sent segment, so the
+  // wiring takes its container (the picker follows).
+  assert.match(sliceFunction(html, "function wireSentRows("), /wireSessionPickerRows\(scope\)/);
   assert.match(sliceFunction(html, "function wireRelayRows("), /wireSessionPickerRows\(relaysListEl\)/);
   const loader = sliceFunction(html, "async function loadSessionPicker(");
   assert.match(loader, /if \(source === "sent"\) expandedSentId = id;\s*else expandedRelayId = id;/);

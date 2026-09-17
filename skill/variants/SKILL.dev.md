@@ -293,7 +293,12 @@ A Task is closed only by `relay_task_complete`. For an inbound Task, call
 the result once it is genuinely finished. A reply into the Task's chat never
 completes it: when the approval or decision itself is the deliverable,
 `relay_task_complete` carries it as forHuman. Never send a Relay merely to
-report completion.
+report completion. A Task the person closed by hand — marked done, rejected
+before any work, or cancelled after it began (`taskCompletedAt` with
+`taskClosedBy`, `taskRejectedAt`, `taskCancelledAt` on the Task) — is over:
+never start or complete it, and if asked about it, say who closed it and how;
+the sender reads the same in their chat. A finished Task points at its result
+(`taskResultRelayId`, the completion Relay that replied to it).
 
 Before presenting or sending, check both documents against the user's request:
 every intended point is preserved; no ask or commitment was invented; the person

@@ -36,6 +36,10 @@ contextBridge.exposeInMainWorld("relay", {
   taskClaim: (id, expectedVersion) => ipcRenderer.invoke("relay:taskClaim", String(id || ""), expectedVersion),
   taskUnclaim: (id, expectedVersion) => ipcRenderer.invoke("relay:taskUnclaim", String(id || ""), expectedVersion),
   taskStop: (id) => ipcRenderer.invoke("relay:taskStop", String(id || "")),
+  // A person's close, from the card or the expanded Task; the note is optional.
+  taskReject: (id, note) => ipcRenderer.invoke("relay:taskReject", String(id || ""), String(note || "")),
+  taskCancel: (id, note) => ipcRenderer.invoke("relay:taskCancel", String(id || ""), String(note || "")),
+  taskDone: (id, note) => ipcRenderer.invoke("relay:taskDone", String(id || ""), String(note || "")),
   todoList: (input = {}) => ipcRenderer.invoke("relay:todoList", input || {}),
   // Topics: invite-only boards under a mandate. Every mutation returns the
   // server's view; the renderer never guesses at membership or mandate state.

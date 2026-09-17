@@ -4,19 +4,19 @@ import test from "node:test";
 
 const html = fs.readFileSync(new URL("../overlay/inbox.html", import.meta.url), "utf8");
 
-test("the existing chat Task bubble owns a separate full-width claim sibling", () => {
-  assert.match(html, /\.th-task-stack\s*>\s*\.th-msg\s*\{[^}]*width:100%/s);
-  assert.match(html, /\.task-claim-button\s*\{[^}]*width:100%/s);
-  assert.match(
-    html,
-    /<\/div>\$\{channelTask \? `\$\{claimControl}<\/div>` : ""}\s*\n\s*\$\{slackThreadLinkHtml/,
-    "the bubble closes before the ownership control is rendered",
-  );
-  assert.doesNotMatch(
-    html,
-    /class="th-msg[^`]*task-claim-button/s,
-    "Claim is not part of the message frame markup",
-  );
+test("the chat Task bubble carries its card footer inside it (the claim slot is gone)", () => {
+  // The Task card (David, 2026-09-17): the ownership, the state and the verbs
+  // live in a footer INSIDE the bubble, on its grid — no separate sibling.
+  assert.match(html, /const taskFooter = m\.request \? taskCardFooterHtml\(m\) : "";/);
+  assert.match(html, /\$\{taskFooter\}\s*\n\s*\$\{badges\}/, "the footer is the bubble's last row, before the reaction badges");
+  assert.doesNotMatch(html, /th-task-stack\$\{mine/, "no stack wrapper around a Task bubble");
+  assert.doesNotMatch(html, /taskClaimControlHtml\(m, \{ surface: "chat" \}\)/, "no claim control under the bubble");
+  assert.match(html, /\.th-msg \.tk-footer \{ flex:1 0 100%/);
+  // A channel Task's verbs are the claim lifecycle, re-homed into the footer.
+  const verbs = html.slice(html.indexOf("function taskVerbsHtml(row, st"), html.indexOf("function taskAskRowHtml(row)"));
+  assert.match(verbs, /taskBtn\("Claim", "primary", at\("claim"\)/);
+  assert.match(verbs, /taskBtn\("Unclaim", "ghost", at\("unclaim"\)/);
+  assert.match(verbs, /taskBtn\("Release", "ghost", at\("release"\)/);
 });
 
 test("claim states use obvious full-width verbs and named ownership", () => {
@@ -38,11 +38,13 @@ test("Todo rows name a channel when present and omit a direct-task placeholder",
 });
 
 test("Task ownership stays in reader/chat while Todo status remains independent", () => {
-  assert.match(html, /taskClaimControlHtml\(r, \{ surface: "reader" \}\)/);
+  // The expanded Task carries the ladder module (state, helper, verbs) where
+  // the claim slot used to be; the card's verbs are wired on both surfaces.
+  assert.match(html, /const taskModule = request \? taskStatusModuleHtml\(r\) : "";/);
   // Start is gone (David, 2026-09-13): a Task opens like a Relay, so there is
   // no actionable-state gate in the reader any more.
   assert.equal(html.includes('taskClaimAllowsStart(r) && ["waiting", "parked", "stopped"]'), false);
-  assert.match(html, /wireTaskClaimControls\(readerBodyEl/);
-  assert.match(html, /wireTaskClaimControls\(newControls/);
+  assert.match(html, /wireTaskCards\(readerBodyEl, renderReader\)/);
+  assert.match(html, /wireTaskCards\(newControls, \(\) => renderThreadDetail\(\)\)/);
   assert.match(html, /lifecycleOnly = task && \["in_progress", "done"\]\.includes\(candidate\)/);
 });

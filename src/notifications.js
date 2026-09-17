@@ -601,6 +601,12 @@ export function stagePlainRelayItem(
     taskStartedAt: item.taskStartedAt || existing.taskStartedAt || null,
     taskRunOwner: item.taskRunOwner || existing.taskRunOwner || null,
     taskCompletedAt: item.taskCompletedAt || existing.taskCompletedAt || null,
+    // A person's close (Reject / Cancel / Done by hand) and who did it; the
+    // result id lets every Done point at its completion letter.
+    taskRejectedAt: item.taskRejectedAt || existing.taskRejectedAt || null,
+    taskCancelledAt: item.taskCancelledAt || existing.taskCancelledAt || null,
+    taskClosedBy: item.taskClosedBy || existing.taskClosedBy || null,
+    taskResultRelayId: item.taskResultRelayId || existing.taskResultRelayId || null,
     // Channel Task ownership is live projection state, not packet content.
     taskClaim: item.taskClaim || existing.taskClaim || null,
     // Todo is an independent workflow projection. Persist it with the staged

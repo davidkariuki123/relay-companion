@@ -1578,6 +1578,12 @@ function readRelays() {
       taskStartedAt: p.taskStartedAt || null,
       taskRunOwner: p.taskRunOwner || null,
       taskCompletedAt: p.taskCompletedAt || null,
+      // A person's own close: Reject before any Start, Cancel after one, and
+      // who closed it (a name for a person, nothing for an agent's Done).
+      taskRejectedAt: p.taskRejectedAt || null,
+      taskCancelledAt: p.taskCancelledAt || null,
+      taskClosedBy: p.taskClosedBy || null,
+      taskResultRelayId: p.taskResultRelayId || null,
       taskClaim: p.taskClaim || null,
       todoStatus: p.todoStatus || null,
       nature: p.nature || null,
@@ -1771,6 +1777,10 @@ function sentFingerprintOf(items) {
       r.taskStartedAt,
       r.taskRunOwner,
       r.taskCompletedAt,
+      r.taskRejectedAt,
+      r.taskCancelledAt,
+      r.taskClosedBy,
+      r.taskResultRelayId,
       r.taskClaim,
       r.todoStatus,
       r.todoVersion,
@@ -2762,6 +2772,10 @@ async function pushInboxNow(force) {
       r.taskStartedAt,
       r.taskRunOwner,
       r.taskCompletedAt,
+      r.taskRejectedAt,
+      r.taskCancelledAt,
+      r.taskClosedBy,
+      r.taskResultRelayId,
       r.taskClaim,
       r.todoStatus,
       r.todoVersion,
@@ -2788,6 +2802,10 @@ async function pushInboxNow(force) {
       r.taskStartedAt,
       r.taskRunOwner,
       r.taskCompletedAt,
+      r.taskRejectedAt,
+      r.taskCancelledAt,
+      r.taskClosedBy,
+      r.taskResultRelayId,
       r.taskClaim,
       r.materializedCodex,
       r.materializedClaude,
@@ -3403,6 +3421,10 @@ function rowById(packetId) {
     taskStartedAt: sent.taskStartedAt || null,
     taskRunOwner: sent.taskRunOwner || null,
     taskCompletedAt: sent.taskCompletedAt || null,
+    taskRejectedAt: sent.taskRejectedAt || null,
+    taskCancelledAt: sent.taskCancelledAt || null,
+    taskClosedBy: sent.taskClosedBy || null,
+    taskResultRelayId: sent.taskResultRelayId || null,
     taskClaim: sent.taskClaim || null,
     workStartedAt: sent.source?.agentSessionId ? (sent.createdAt || new Date().toISOString()) : null,
   };
@@ -3475,6 +3497,43 @@ async function stopTaskWork(relayId) {
   }
 }
 
+// A person closes a Task by hand from the card or the expanded Task: Reject
+// before any Start, Cancel after one, Done at any time. Each is one server
+// post; the stamp lands on the staged row at once so the card settles in the
+// same click, and the daemon's next poll confirms it (with the real name).
+async function closeTaskByHand(relayId, kind, note) {
+  const id = String(relayId || "");
+  if (!id) return { ok: false, error: "Missing Task id." };
+  const word = String(note || "").trim();
+  try {
+    const client = await relayClient();
+    const idempotencyKey = `task-${kind}:${id}:${randomUUID()}`;
+    let response;
+    let patch;
+    if (kind === "rejected") {
+      response = await client.taskRejected(id, { idempotencyKey, ...(word ? { note: word } : {}) });
+      patch = { taskRejectedAt: response?.at || new Date().toISOString(), taskClosedBy: "you" };
+    } else if (kind === "cancelled") {
+      response = await client.taskCancelled(id, { idempotencyKey, ...(word ? { note: word } : {}) });
+      patch = { taskCancelledAt: response?.at || new Date().toISOString(), taskClosedBy: "you" };
+    } else if (kind === "done") {
+      response = await client.taskCompleted(id, { idempotencyKey, human: true, forHuman: word || "Done", forAgent: "" });
+      patch = {
+        taskCompletedAt: response?.completedAt || new Date().toISOString(),
+        taskClosedBy: "you",
+        ...(response?.resultRelayId ? { taskResultRelayId: response.resultRelayId } : {}),
+      };
+    } else {
+      return { ok: false, error: `Unknown Task close: ${kind}.` };
+    }
+    updateStagedPacket(id, patch);
+    await pushInbox(true);
+    return { ok: true, ...(response || {}) };
+  } catch (error) {
+    return { ok: false, error: (error && error.message) || String(error) };
+  }
+}
+
 async function listTodo(input = {}) {
   if (!PRODUCT_FEATURES.todo) return { ok: false, error: "Todo is currently unavailable." };
   try {
@@ -3527,6 +3586,10 @@ async function readTodoItem(relayId) {
         taskStartedAt: local.taskStartedAt || null,
         taskRunOwner: local.taskRunOwner || null,
         taskCompletedAt: local.taskCompletedAt || null,
+        taskRejectedAt: local.taskRejectedAt || null,
+        taskCancelledAt: local.taskCancelledAt || null,
+        taskClosedBy: local.taskClosedBy || null,
+        taskResultRelayId: local.taskResultRelayId || null,
         taskClaim: local.taskClaim || null,
         todoStatus: local.todoStatus || null,
         todoVersion: Number.isInteger(local.todoVersion) ? local.todoVersion : null,
@@ -8605,6 +8668,9 @@ ipcMain.handle("relay:taskUnclaim", (_e, id, expectedVersion) =>
   mutateTaskClaim(id, "unclaim", expectedVersion),
 );
 ipcMain.handle("relay:taskStop", (_e, id) => stopTaskWork(id));
+ipcMain.handle("relay:taskReject", (_e, id, note) => closeTaskByHand(id, "rejected", note));
+ipcMain.handle("relay:taskCancel", (_e, id, note) => closeTaskByHand(id, "cancelled", note));
+ipcMain.handle("relay:taskDone", (_e, id, note) => closeTaskByHand(id, "done", note));
 ipcMain.handle("relay:todoList", (_e, input) => listTodo(input));
 ipcMain.handle("relay:todoItem", (_e, id) => readTodoItem(id));
 ipcMain.handle("relay:todoStatusUpdate", (_e, id, input) => updateTodoStatus(id, input));

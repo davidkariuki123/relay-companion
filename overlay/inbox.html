@@ -3158,6 +3158,125 @@
 .tp-thread strong { font:500 17px/1.35 var(--serif); }
 .tp-thread-summary { white-space:pre-line; font:12.5px/1.55 var(--sans); color:var(--ink-2); display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:4; overflow:hidden; }
 .tp-thread-meta { font:10.5px/1.3 var(--sans); color:var(--muted); }
+  /* ---- THE TASK CARD (2026-09-17) ----
+     A Task is one object on both sides. Tokens only: ink, muted, accent, ok,
+     danger, hair, edge, the three families. The footer keeps the bubble's 13px
+     inset, so the marks sit under the chip and the verbs end under the clock.
+     --tk-on is the ink drawn ON a filled mark (white by day, the sheet by night). */
+  :root { --tk-on:#FFFFFF; }
+  :root[data-theme="dark"] { --tk-on:#141110; }
+  .th-msg .tk-footer { flex:1 0 100%; min-width:0; margin-top:7px; padding-top:8px; border-top:1px solid var(--hair); cursor:default; }
+  .th-msg .tk-foot { display:flex; align-items:center; gap:8px; min-height:26px; cursor:default; }
+  /* the agent row: the banner's row recipe at the footer's scale */
+  .tk-agents { display:flex; flex-wrap:wrap; align-items:center; gap:6px 14px; margin:0 0 8px; }
+  .tk-agents .act-btn { font-size:11.5px; line-height:1; }
+  .tk-agents.icons { justify-content:space-between; }
+  .tk-apps { display:inline-flex; gap:6px; }
+  .tk-app { appearance:none; cursor:pointer; width:24px; height:24px; padding:0; border-radius:7px; border:1px solid var(--edge); background:transparent; display:grid; place-items:center; }
+  .tk-app img { width:16px; height:16px; border-radius:4px; display:block; }
+  .tk-app:hover, .tk-app.pressed { border-color:color-mix(in srgb, var(--edge) 60%, var(--ink)); background:var(--wash); }
+  /* the state row: mark, words, verbs at the edge */
+  .tk-state { display:inline-flex; align-items:center; gap:7px; min-width:0; flex:1 1 auto;
+    font-family:var(--sans); font-size:12px; font-weight:500; line-height:1; letter-spacing:0; color:var(--muted); }
+  .tk-text { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tk-foot.started .tk-state { color:var(--accent); }
+  .tk-foot.done .tk-state { color:var(--ok); }
+  .tk-foot.rejected .tk-state { color:var(--danger); }
+  .tk-foot.cancelled .tk-state { color:var(--muted-2); }
+  /* the marks: the Todo mark's grammar at 12px */
+  .tk-mark { width:12px; height:12px; flex:none; display:inline-block; }
+  .tk-mark.open { border-radius:50%; box-sizing:border-box; border:1.5px solid currentColor; opacity:.85; }
+  .tk-mark.started { border-radius:50%; box-sizing:border-box; background:conic-gradient(currentColor 0 50%, transparent 50% 100%); box-shadow:inset 0 0 0 1.5px currentColor; }
+  /* the verbs: the composer's Relay button for the primary, its outline for the quiet one */
+  .tk-verbs { display:inline-flex; gap:6px; margin-left:auto; flex:none; }
+  .tk-btn { appearance:none; cursor:pointer; height:26px; padding:0 11px; border-radius:8px; border:1px solid transparent;
+    font-family:var(--sans); font-size:11.5px; font-weight:600; line-height:24px; letter-spacing:.01em; white-space:nowrap;
+    transition:background var(--t-fast) var(--settle), color var(--t-fast) var(--settle), border-color var(--t-fast) var(--settle); }
+  .tk-btn.primary { background:var(--accent); color:#FFFFFF; }
+  :root[data-theme="dark"] .tk-btn.primary { color:#141110; }
+  .tk-btn.primary:hover { background:color-mix(in srgb, var(--accent) 88%, black); }
+  .tk-btn.ghost { background:transparent; border-color:var(--edge); color:var(--muted); }
+  .tk-btn.ghost:hover { color:var(--ink); border-color:color-mix(in srgb, var(--edge) 60%, var(--ink)); }
+  .tk-btn.danger { background:transparent; border-color:color-mix(in srgb, var(--danger) 55%, transparent); color:var(--danger); }
+  .tk-btn.danger:hover { background:color-mix(in srgb, var(--danger) 10%, transparent); }
+  .tk-btn:active { transform:translateY(.5px); }
+  .tk-btn:disabled { opacity:.45; cursor:default; }
+  /* Reject asks for a word: a second line inside the footer, in the composer's field recipe */
+  .tk-foot.asking { flex-wrap:wrap; }
+  .tk-ask { flex:1 0 100%; display:flex; gap:6px; margin-top:8px; }
+  .tk-input { flex:1 1 auto; min-width:0; height:28px; padding:0 10px; border-radius:9px; border:1px solid var(--edge); background:transparent;
+    font-family:var(--sans); font-size:12px; color:var(--ink); outline:none; }
+  .tk-input::placeholder { color:var(--muted-2); }
+  .tk-input:focus { border-color:var(--accent); }
+  /* the pointer to the result: text in the accent, the reply-quote's voice, never a button */
+  .tk-link { appearance:none; border:0; background:transparent; cursor:pointer; padding:0; margin-left:auto; flex:none; display:inline-flex; align-items:center; gap:2px; font-family:var(--sans); font-size:11.5px; font-weight:600; color:var(--accent); line-height:1; }
+  .tk-link:hover { text-decoration:underline; text-underline-offset:2px; }
+  .tk-link-chev { font-size:14px; line-height:1; font-weight:500; }
+  .tk-foot .tk-verbs + .tk-link { margin-left:8px; }
+  .tk-rowline .tk-link { margin-left:2px; }
+  /* the Task-event message: the reply-quote recipe, toned by the event */
+  .th-msg.tk-event .th-reply-ref { width:100%; flex-basis:100%; margin-right:0; cursor:pointer; }
+  .th-msg.tk-event.bare .th-reply-ref { margin-bottom:2px; }
+  .tk-event .th-reply-ref-who { display:flex; align-items:center; gap:6px; }
+  .tk-event .th-reply-ref-who .tk-mark { width:10px; height:10px; }
+  .tk-event.rejected .th-reply-ref { border-left-color:var(--danger); } .tk-event.rejected .th-reply-ref-who { color:var(--danger); }
+  .tk-event.done .th-reply-ref { border-left-color:var(--ok); } .tk-event.done .th-reply-ref-who { color:var(--ok); }
+  .tk-event.cancelled .th-reply-ref { border-left-color:var(--muted-2); } .tk-event.cancelled .th-reply-ref-who { color:var(--muted); }
+  .th-msg.tk-event.bare .th-msg-title { min-height:1em; }
+  /* THE LADDER (the expanded Task): the foot column's 560 measure, the Details card recipe */
+  .tk-status { width:min(100%, 560px); margin:18px auto 0; border:1px solid var(--hair); border-radius:12px; background:var(--wash); padding:16px 16px 14px; box-sizing:border-box; }
+  .tk-steps { display:flex; align-items:flex-start; }
+  .tk-step { display:flex; flex-direction:column; align-items:center; gap:7px; width:64px; flex:none; color:var(--muted-2); }
+  .tk-node { width:12px; height:12px; border-radius:50%; box-sizing:border-box; border:1.5px solid currentColor; display:grid; place-items:center; }
+  .tk-node svg { width:12px; height:12px; }
+  .tk-step.past { color:var(--accent); } .tk-step.past .tk-node { border:0; background:currentColor; }
+  .tk-step.now { color:var(--accent); } .tk-step.now .tk-node { position:relative; }
+  .tk-step.now .tk-node::after { content:""; position:absolute; inset:2.5px; border-radius:50%; background:currentColor; }
+  .tk-step.todo { color:var(--muted-2); } .tk-step.todo .tk-node { opacity:.55; }
+  .tk-step.done { color:var(--ok); } .tk-step.done .tk-node { border:0; background:currentColor; }
+  .tk-step.rejected { color:var(--danger); } .tk-step.rejected .tk-node { border:0; background:currentColor; }
+  .tk-step.cancelled { color:var(--muted); } .tk-step.cancelled .tk-node { border:0; background:currentColor; }
+  .tk-label { font-family:var(--sans); font-size:11px; font-weight:600; line-height:1; letter-spacing:.01em; }
+  .tk-step.todo .tk-label { font-weight:500; }
+  .tk-when { font-family:var(--mono); font-size:10px; line-height:1; color:var(--muted-2); font-variant-numeric:tabular-nums; min-height:10px; }
+  .tk-line { flex:1 1 auto; height:1px; background:var(--edge); margin-top:5.5px; opacity:.6; }
+  .tk-line.on { background:var(--accent); opacity:1; }
+  .tk-row { display:flex; align-items:center; gap:12px; margin-top:14px; padding-top:12px; border-top:1px solid var(--hair); }
+  .tk-helper { flex:1 1 auto; min-width:0; font-family:var(--sans); font-size:12px; line-height:1.4; color:var(--muted); }
+  .tk-status.done .tk-helper { color:var(--ok); } .tk-status.rejected .tk-helper { color:var(--danger); }
+  .tk-status .tk-verbs { margin-left:auto; }
+  .tk-status .tk-btn { height:30px; line-height:28px; padding:0 14px; font-size:12px; border-radius:9px; }
+  .tk-status .tk-ask { margin-top:10px; }
+  .tk-status .task-claim-error { margin-top:8px; }
+  /* the sender's ladder in the chat card: the stepper at the chat's scale, no clocks */
+  .tk-ladder { margin:0 0 9px; }
+  .tk-ladder .tk-step { width:46px; gap:5px; }
+  .tk-ladder .tk-node { width:8px; height:8px; border-width:1.25px; }
+  .tk-ladder .tk-node svg { width:8px; height:8px; }
+  .tk-ladder .tk-step.now .tk-node::after { inset:1.75px; }
+  .tk-ladder .tk-label { font-size:10px; }
+  .tk-ladder .tk-line { margin-top:3.5px; }
+  /* the rungs in a list row's line under the title */
+  .tk-rungs { display:inline-flex; align-items:center; flex:none; }
+  .tk-rung { display:inline-block; width:6px; height:6px; border-radius:50%; box-sizing:border-box; border:1px solid currentColor; opacity:.45; }
+  .tk-rung.past, .tk-rung.done, .tk-rung.rejected, .tk-rung.cancelled { border:0; background:currentColor; opacity:1; }
+  .tk-rung.now { border:0; background:currentColor; opacity:1; box-shadow:0 0 0 2px color-mix(in srgb, currentColor 30%, transparent); }
+  .tk-rung-line { display:inline-block; width:7px; height:1px; background:currentColor; opacity:.3; }
+  .tk-rung-line.on { opacity:.8; }
+  /* THE LIST: the line under the title, the filter row, and the name never truncates */
+  .tk-rowline { display:flex; align-items:center; gap:7px; margin-top:6px; font-family:var(--sans); font-size:11px; font-weight:500; line-height:1; color:var(--muted); }
+  .tk-rowline > span:not(.tk-rungs) { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tk-rowline.started { color:var(--accent); } .tk-rowline.done { color:var(--ok); } .tk-rowline.rejected { color:var(--danger); } .tk-rowline.cancelled { color:var(--muted-2); }
+  .rk-top .rk-recipient-group { flex:0 5 auto; min-width:34px; }
+  .relays-filter { display:flex; gap:4px; padding:0 16px 6px; }
+  .relays-filter[hidden], .card.collapsed .relays-filter, .card.peek .relays-filter { display:none; }
+  .relays-filter .relays-layout-button { height:22px; font-size:10.5px; padding:0 7px; }
+  /* hover with intent: a row that the pointer RESTS on grows one line and shows its verbs */
+  .tk-hoververbs { display:flex; flex-wrap:wrap; align-items:center; gap:6px 14px; margin-top:8px; }
+  .tk-hoververbs .act-btn { font-size:12px; line-height:1; }
+  .tk-hoververbs.icons { justify-content:space-between; }
+  .row.dwelled { background:var(--wash); }
+  .row.dwelled .row-delete { opacity:1; }
 </style>
 <link rel="stylesheet" href="./relay-anyone-tip.css" />
 </head>
@@ -3221,6 +3340,12 @@
     <div class="relays-layout" id="relaysLayout" role="group" aria-label="Relays layout" hidden>
       <button class="relays-layout-button active" type="button" data-relays-layout="chats" aria-pressed="true">Chats</button>
       <button class="relays-layout-button" type="button" data-relays-layout="received" aria-pressed="false">Received</button>
+      <button class="relays-layout-button" type="button" data-relays-layout="sent" aria-pressed="false">Sent</button>
+    </div>
+    <div class="relays-filter" id="relaysFilter" role="group" aria-label="Show" hidden>
+      <button class="relays-layout-button active" type="button" data-relays-filter="all" aria-pressed="true">All</button>
+      <button class="relays-layout-button" type="button" data-relays-filter="relays" aria-pressed="false">Relays</button>
+      <button class="relays-layout-button" type="button" data-relays-filter="tasks" aria-pressed="false">Tasks</button>
     </div>
     <div class="scroll" id="scroll">
       <!-- Relays view -->
@@ -5821,6 +5946,9 @@
       && payload.account?.paired !== false && !cardEl.classList.contains("signup");
     relaysIntroEl.hidden = !visible;
     relaysLayoutEl.hidden = !visible;
+    // The filter row belongs to the two item lists only: gone with the
+    // segments, and gone on Chats.
+    if (relaysFilterEl) relaysFilterEl.hidden = !visible || relaysLayout === "chats";
     relayAnyoneTip.setVisible(visible);
     relayAnyoneTip.setActive(visible && rendererSurfaceActive());
   }
@@ -6667,19 +6795,37 @@
       .map((room) => ({ ...room, latestAt: room.latestAt || (room.latest && room.latest.at) || "" }));
   }
   // This is a layout preference, scoped to the signed-in account on this device.
+  // Three segments — Chats · Received · Sent — and, on the two item lists, a
+  // filter: All · Relays · Tasks (David, 2026-09-17). Both are preferences,
+  // scoped to the signed-in account on this device.
   let relaysLayout = "chats";
+  let relaysFilter = "all";
   let relaysLayoutAccount = null;
+  const relaysFilterEl = document.getElementById("relaysFilter");
+  const RELAYS_LAYOUTS = ["chats", "received", "sent"];
+  const RELAYS_FILTERS = ["all", "relays", "tasks"];
   function syncRelaysLayout() {
     const account = signupAccountKey();
     if (account !== relaysLayoutAccount) {
       relaysLayoutAccount = account;
-      relaysLayout = protoPref(`relayRelaysLayout:${account}`, "chats") === "received" ? "received" : "chats";
+      const savedLayout = protoPref(`relayRelaysLayout:${account}`, "chats");
+      relaysLayout = RELAYS_LAYOUTS.includes(savedLayout) ? savedLayout : "chats";
+      const savedFilter = protoPref(`relayRelaysFilter:${account}`, "all");
+      relaysFilter = RELAYS_FILTERS.includes(savedFilter) ? savedFilter : "all";
       renderedThreadCount = 0;
     }
     for (const button of relaysLayoutEl.querySelectorAll("[data-relays-layout]")) {
       const selected = button.dataset.relaysLayout === relaysLayout;
       button.classList.toggle("active", selected);
       button.setAttribute("aria-pressed", String(selected));
+    }
+    if (relaysFilterEl) {
+      relaysFilterEl.hidden = relaysLayout === "chats" || relaysLayoutEl.hidden;
+      for (const button of relaysFilterEl.querySelectorAll("[data-relays-filter]")) {
+        const selected = button.dataset.relaysFilter === relaysFilter;
+        button.classList.toggle("active", selected);
+        button.setAttribute("aria-pressed", String(selected));
+      }
     }
   }
   relaysLayoutEl.addEventListener("click", (event) => {
@@ -6689,8 +6835,128 @@
     setProtoPref(`relayRelaysLayout:${signupAccountKey()}`, relaysLayout);
     renderedThreadCount = 0;
     expandedRelayId = null;
+    expandedSentId = null;
+    foldHoverRow();
     scrollEl.scrollTop = 0;
     renderRelays();
+  });
+  if (relaysFilterEl) relaysFilterEl.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-relays-filter]");
+    if (!button || button.dataset.relaysFilter === relaysFilter) return;
+    relaysFilter = button.dataset.relaysFilter;
+    setProtoPref(`relayRelaysFilter:${signupAccountKey()}`, relaysFilter);
+    renderedThreadCount = 0;
+    expandedRelayId = null;
+    expandedSentId = null;
+    foldHoverRow();
+    scrollEl.scrollTop = 0;
+    renderRelays();
+  });
+  // Relays or Tasks, on either item list. A Task is kind "task" on the wire.
+  function relaysFilterKeeps(row) {
+    if (relaysFilter === "all") return true;
+    const task = isTaskRow(row) || row.kind === "task" || row.request === true;
+    return relaysFilter === "tasks" ? task : !task;
+  }
+  // HOVER WITH INTENT (David, 2026-09-17): a row reveals its agent verbs only
+  // when the pointer RESTS on it — 1.2 s before anything moves; leaving folds
+  // it after 350 ms; with one open, the next opens after 250 ms (the menu rule:
+  // the first decision is slow, the next ones quick). Focus reveals at once;
+  // a touch screen never reveals — a tap opens the item as today.
+  const HOVER_REST_MS = 1200;
+  const HOVER_SWITCH_MS = 250;
+  const HOVER_LEAVE_MS = 350;
+  const HOVER_MOVE_PX = 4;
+  let hoverRowEl = null;      // the row the pointer is on
+  let hoverRestTimer = null;
+  let hoverLeaveTimer = null;
+  let hoverArmedAt = null;    // pointer position when the rest timer started
+  let dwelledRowEl = null;    // the row currently showing its verbs
+  function hoverCanReveal() {
+    return !(window.matchMedia && window.matchMedia("(hover: none)").matches);
+  }
+  function hoverVerbsHtml(row) {
+    const id = taskIdOf(row);
+    const source = taskIsMine(row) ? "sent" : "relay";
+    const apps = agentAppHosts().filter((host) => agentOpensInApp(host === "codex" ? "Codex" : "Claude Code"));
+    const marks = apps.map((host) => {
+      const app = host === "codex" ? "Codex" : "Claude Code";
+      return `<button type="button" class="tk-app" data-host-open="${esc(id)}" data-host="${host}" data-source="${source}" title="Open in ${app}" aria-label="Open in ${app}"><img src="${host === "codex" ? "codexMark.svg" : "claudeCodeMark.svg"}" alt=""></button>`;
+    }).join("");
+    return `<div class="tk-hoververbs${marks ? " icons" : ""}" data-stop="1"><button type="button" class="act-btn accept" data-tk-copy="${esc(id)}">Copy for your agent</button>${marks ? `<span class="tk-apps">${marks}</span>` : ""}</div>`;
+  }
+  function revealHoverRow(rowEl) {
+    if (!rowEl || !rowEl.isConnected) return;
+    if (dwelledRowEl && dwelledRowEl !== rowEl) foldHoverRow();
+    if (dwelledRowEl === rowEl) return;
+    const id = rowEl.getAttribute("data-id") || rowEl.getAttribute("data-sent-id") || "";
+    const row = taskRowById(id);
+    const body = rowEl.querySelector(".rk-body");
+    if (!row || !body || body.querySelector(".tk-hoververbs")) return;
+    const err = body.querySelector(".row-err");
+    const holder = document.createElement("div");
+    holder.innerHTML = hoverVerbsHtml(row);
+    const verbs = holder.firstElementChild;
+    if (err) body.insertBefore(verbs, err); else body.appendChild(verbs);
+    for (const z of verbs.querySelectorAll('[data-stop="1"], .tk-hoververbs')) z.addEventListener("click", (e) => e.stopPropagation());
+    verbs.addEventListener("click", (e) => e.stopPropagation());
+    wireTaskCards(verbs, renderRelays);
+    wireHostOpen(verbs);
+    rowEl.classList.add("dwelled");
+    dwelledRowEl = rowEl;
+  }
+  function foldHoverRow() {
+    clearTimeout(hoverRestTimer); hoverRestTimer = null;
+    clearTimeout(hoverLeaveTimer); hoverLeaveTimer = null;
+    if (!dwelledRowEl) return;
+    dwelledRowEl.classList.remove("dwelled");
+    dwelledRowEl.querySelector(".tk-hoververbs")?.remove();
+    dwelledRowEl = null;
+  }
+  function armHoverRow(rowEl, event) {
+    clearTimeout(hoverRestTimer);
+    hoverArmedAt = { x: event.clientX, y: event.clientY };
+    const wait = dwelledRowEl && dwelledRowEl !== rowEl ? HOVER_SWITCH_MS : HOVER_REST_MS;
+    hoverRestTimer = setTimeout(() => { hoverRestTimer = null; if (hoverRowEl === rowEl) revealHoverRow(rowEl); }, wait);
+  }
+  relaysListEl.addEventListener("mouseover", (event) => {
+    if (!hoverCanReveal() || peeking) return;
+    const rowEl = event.target.closest(".row");
+    if (!rowEl || !relaysListEl.contains(rowEl) || rowEl === hoverRowEl) return;
+    if (relaysLayout === "chats") return;
+    hoverRowEl = rowEl;
+    clearTimeout(hoverLeaveTimer); hoverLeaveTimer = null;
+    if (rowEl === dwelledRowEl) return;
+    armHoverRow(rowEl, event);
+  });
+  relaysListEl.addEventListener("mousemove", (event) => {
+    if (!hoverRowEl || !hoverRestTimer || !hoverArmedAt) return;
+    // A pointer still travelling is not resting: restart the clock when it moves.
+    if (Math.abs(event.clientX - hoverArmedAt.x) > HOVER_MOVE_PX || Math.abs(event.clientY - hoverArmedAt.y) > HOVER_MOVE_PX) armHoverRow(hoverRowEl, event);
+  });
+  relaysListEl.addEventListener("mouseout", (event) => {
+    const rowEl = event.target.closest(".row");
+    if (!rowEl || rowEl !== hoverRowEl) return;
+    const to = event.relatedTarget;
+    if (to && rowEl.contains(to)) return;
+    hoverRowEl = null;
+    clearTimeout(hoverRestTimer); hoverRestTimer = null;
+    if (dwelledRowEl === rowEl) {
+      clearTimeout(hoverLeaveTimer);
+      hoverLeaveTimer = setTimeout(() => { hoverLeaveTimer = null; if (hoverRowEl !== rowEl) foldHoverRow(); }, HOVER_LEAVE_MS);
+    }
+  });
+  relaysListEl.addEventListener("focusin", (event) => {
+    const rowEl = event.target.closest(".row");
+    if (!rowEl || relaysLayout === "chats" || event.target !== rowEl) return;
+    revealHoverRow(rowEl);
+  });
+  relaysListEl.addEventListener("focusout", (event) => {
+    const rowEl = event.target.closest(".row");
+    if (!rowEl || rowEl !== dwelledRowEl) return;
+    const to = event.relatedTarget;
+    if (to && rowEl.contains(to)) return;
+    if (hoverRowEl !== rowEl) foldHoverRow();
   });
   function receivedRelayRows(messages, rooms) {
     // Reuse the accepted room boundary: strangers remain in Requests, including
@@ -6792,11 +7058,14 @@
     // Both layouts share Requests and the teaching card. Only the list changes;
     // its render window counts conversations or individual received items.
     const requestCount = requestEntries().length;
-    const listRows = relaysLayout === "received" ? receivedRelayRows(allRows, identityRows) : identityRows;
+    const listRows = relaysLayout === "received" ? receivedRelayRows(allRows, identityRows).filter(relaysFilterKeeps)
+      : relaysLayout === "sent" ? (payload.sent || []).filter(relaysFilterKeeps)
+      : identityRows;
     relaysEmptyEl.classList.toggle("gone", listRows.length > 0 || requestCount > 0);
-    relaysEmptyEl.querySelector(".t1").textContent = relaysLayout === "received" ? "No received relays yet" : "No relays yet";
+    const filterWord = relaysFilter === "tasks" ? "tasks" : relaysFilter === "relays" ? "relays" : "relays";
+    relaysEmptyEl.querySelector(".t1").textContent = relaysLayout === "received" ? `No received ${filterWord} yet` : relaysLayout === "sent" ? `No sent ${filterWord} yet` : "No relays yet";
     relaysEmptyEl.querySelector(".t2").textContent = relaysLayout === "received"
-      ? "Relays and tasks you receive will appear here." : "Questions, results, and notices will land here.";
+      ? "Relays and tasks you receive will appear here." : relaysLayout === "sent" ? "Relays and tasks you send will appear here." : "Questions, results, and notices will land here.";
     hasMoreThreads = listRows.length > renderedThreadCount + RENDER_WINDOW;
     const visible = listRows.slice(0, renderedThreadCount + RENDER_WINDOW);
     // Identical markup means NO DOM write (main's guard, kept): a 4s poll that
@@ -6809,10 +7078,14 @@
     }
     const nextListHtml = relaysLayout === "received"
       ? visible.map((row) => relayRowHtml(row, new Set(), { received:true })).join("")
-      : visible.map((row) => relayIdentityRowHtml(row)).join("");
+      : relaysLayout === "sent"
+        ? sentRowsHtml(visible)
+        : visible.map((row) => relayIdentityRowHtml(row)).join("");
     if (relaysListEl.innerHTML === nextListHtml) return;
+    foldHoverRow();
     relaysListEl.innerHTML = nextListHtml;
     if (relaysLayout === "received") { wireRelayRows({ received:true }); return; }
+    if (relaysLayout === "sent") { wireSentRows(relaysListEl); return; }
     for (const el of relaysListEl.querySelectorAll(".relay-arrival")) {
       el.addEventListener("click", () => {
         // One tap, straight into the conversation (Sven's standing call).
@@ -8397,6 +8670,443 @@
       });
     }
   }
+  // ---------- THE TASK CARD (2026-09-17) ----------
+  // A Task is ONE object on both sides. In the chat the bubble carries a footer
+  // inside it: the agent row (Copy for your agent, always; each app Settings ›
+  // Your agent has on, as its mark), then the state row — the mark, the state
+  // in plain words, and for the person it was sent to the two verbs. The
+  // expanded Task carries the ladder Sent · Seen · Started · Done as a stepper.
+  // Every state is a RECORD the server wrote (task_started, task_completed,
+  // task_rejected, task_cancelled, the read receipt, the channel claim); the
+  // pill remembers nothing the record does not have, except the few seconds an
+  // Undo holds a Done back and the word a Reject is asking for.
+  const TASK_MARK = {
+    open: '<span class="tk-mark open" aria-hidden="true"></span>',
+    started: '<span class="tk-mark started" aria-hidden="true"></span>',
+    done: '<svg class="tk-mark done" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="6" fill="currentColor"/><path d="M3.4 6.3l1.8 1.7 3.5-3.7" fill="none" stroke="var(--tk-on)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    rejected: '<svg class="tk-mark rejected" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="5.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M4.1 4.1l3.8 3.8M7.9 4.1l-3.8 3.8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+    cancelled: '<svg class="tk-mark cancelled" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="5.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M3.9 6h4.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  };
+  const TASK_CHECK_SVG = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3.4 6.3l1.8 1.7 3.5-3.7" fill="none" stroke="var(--tk-on)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const TASK_UNDO_MS = 5000;
+  const TASK_EVENT_PHRASES = { rejected: "Rejected this task.", cancelled: "Cancelled this task.", done: "Marked this task done." };
+  function taskMarkHtml(state) { return TASK_MARK[state] || TASK_MARK.open; }
+  // Local, short-lived: the word a Reject/Cancel is asking for, a Done held
+  // back by Undo, a post in flight, and the last error. Never a state.
+  const taskAsking = new Map();      // id -> { kind: "reject" | "cancel", draft }
+  const taskDonePending = new Map(); // id -> { at, timer }
+  const taskLocalDone = new Map();   // id -> at, a Done posted but not yet stamped by main
+  const taskBusy = new Set();
+  const taskCardNotes = new Map();   // id -> error text
+  function taskIdOf(row) { return String((row && (row.id || row.relayId)) || ""); }
+  // The sender's side of a Task, on any projection: a room message going out,
+  // a reader row that is outbound, or a Sent item (it has a recipient, no sender).
+  function taskIsMine(row) {
+    return Boolean(row && (row.direction === "out" || row.outbound === true || (row.recipient && !row.senderEmail && !row.senderName)));
+  }
+  function taskIsOver(row) { return Boolean(row && (row.taskCompletedAt || row.taskRejectedAt || row.taskCancelledAt)); }
+  function taskChannelClaim(row) { return row && row.taskClaim && row.taskClaim.scope === "channel" ? row.taskClaim : null; }
+  function firstName(name) { return String(name || "").trim().split(/\s+/)[0] || ""; }
+  // The other party's name: the recipient on the sender's side, the sender on
+  // the recipient's side.
+  function taskOtherName(row) {
+    if (!row) return "";
+    if (taskIsMine(row)) {
+      const rec = row.recipient && typeof row.recipient === "object" ? row.recipient : null;
+      return String(row.recipientName || (rec && (rec.name || rec.email)) || row.party || "").replace(/^You → /, "").trim();
+    }
+    return String(row.party || relaySender(row) || row.senderName || "").trim();
+  }
+  // "you" for the person who closed it; their name on the other side. On a
+  // channel Task the closer is the claimant, who may be a third member.
+  function taskClosedByWord(row) {
+    const name = String(row.taskClosedBy || "").trim();
+    if (!name) return "";
+    if (taskIsMine(row)) return name === "you" ? taskOtherName(row) : name;
+    const claim = taskChannelClaim(row);
+    if (claim) return claim.claimant && claim.claimant.self ? "you" : String((claim.claimant && claim.claimant.name) || name);
+    return "you";
+  }
+  function taskAppWord(row) {
+    const provider = row && row.taskRunOwner && row.taskRunOwner.provider;
+    if (provider === "codex") return "Codex";
+    if (provider === "claude") return "Claude Code";
+    return "";
+  }
+  // When the other side saw it: the sent item's receipt, or the room's readers.
+  function taskSeenAt(row) {
+    if (!row) return "";
+    const reader = Array.isArray(row.readers) ? row.readers.find((member) => member && member.seen) : null;
+    if (reader) return reader.readAt || row.readAt || row.updatedAt || row.createdAt || "";
+    if (typeof sentIsRead === "function" && sentIsRead(row)) return row.readAt || row.updatedAt || row.createdAt || "";
+    return row.readAt || "";
+  }
+  // The one state of a Task, read from the record. `tone` colours everything,
+  // `text` is the state row's words, `rungs` the ladder's states in order.
+  function taskStateFor(row) {
+    const mine = taskIsMine(row);
+    const id = taskIdOf(row);
+    const claim = taskChannelClaim(row);
+    const other = firstName(taskOtherName(row));
+    const doneAt = row.taskCompletedAt || taskLocalDone.get(id) || (taskDonePending.get(id) || {}).at || "";
+    if (row.taskRejectedAt) {
+      const by = firstName(taskClosedByWord(row)) || other;
+      return { tone: "rejected", at: row.taskRejectedAt, over: true, text: `Rejected · ${by} · ${timeAgo(row.taskRejectedAt)}`, rungs: ["past", "past", "rejected"], labels: ["Sent", "Seen", "Rejected"] };
+    }
+    if (row.taskCancelledAt) {
+      const by = firstName(taskClosedByWord(row)) || other;
+      return { tone: "cancelled", at: row.taskCancelledAt, over: true, text: `Cancelled · ${by} · ${timeAgo(row.taskCancelledAt)}`, rungs: ["past", "past", "past", "cancelled"], labels: ["Sent", claim ? "Claimed" : "Seen", "Started", "Cancelled"] };
+    }
+    if (doneAt) {
+      const pending = taskDonePending.has(id) || (!row.taskCompletedAt && taskLocalDone.has(id));
+      const by = pending ? "you" : (firstName(taskClosedByWord(row)) || taskAppWord(row) || (mine ? other : ""));
+      return { tone: "done", at: doneAt, over: true, pending, text: pending ? "Done · you · just now" : `Done${by ? ` · ${by}` : ""} · ${timeAgo(doneAt)}`, rungs: ["past", "past", row.taskStartedAt ? "past" : "todo", "done"], labels: ["Sent", claim ? "Claimed" : "Seen", "Started", "Done"] };
+    }
+    if (claim) {
+      const claimant = claim.claimant || null;
+      const working = claim.workState === "working" || (!claim.workState && Boolean(row.taskStartedAt));
+      const people = Number(claim.memberCount || 0);
+      if (claim.state === "unclaimed" || !claimant) {
+        const released = claim.releasedAt && claim.releasedBy ? `Unclaimed again · released by ${claim.releasedBy.self ? "you" : claim.releasedBy.name || "someone"}` : (people ? `Unclaimed · ${people} people` : "Unclaimed");
+        return { tone: "open", at: row.createdAt, over: false, text: released, rungs: ["now", "todo", "todo", "todo"], labels: ["Sent", "Claimed", "Started", "Done"], claim: "unclaimed" };
+      }
+      const who = claimant.self ? "you" : String(claimant.name || "someone");
+      if (working || row.taskStartedAt) {
+        return { tone: "started", at: row.taskStartedAt || claim.claimedAt || row.createdAt, over: false, text: `In progress · ${who} · ${timeAgo(row.taskStartedAt || claim.claimedAt || row.createdAt)}`, rungs: ["past", "past", "now", "todo"], labels: ["Sent", "Claimed", "Started", "Done"], claim: claimant.self ? "working" : "other" };
+      }
+      return { tone: claimant.self ? "started" : "cancelled", at: claim.claimedAt || row.createdAt, over: false, text: `Claimed by ${who}${claim.claimedAt ? ` · ${timeAgo(claim.claimedAt)}` : ""}`, rungs: ["past", "now", "todo", "todo"], labels: ["Sent", "Claimed", "Started", "Done"], claim: claimant.self ? "mine" : "other" };
+    }
+    if (row.taskStartedAt) {
+      const text = mine ? `Started · ${other || "them"} · ${timeAgo(row.taskStartedAt)}` : `In progress · ${timeAgo(row.taskStartedAt)}`;
+      return { tone: "started", at: row.taskStartedAt, over: false, text, rungs: ["past", "past", "now", "todo"], labels: ["Sent", "Seen", "Started", "Done"] };
+    }
+    const seenAt = mine ? taskSeenAt(row) : "";
+    if (mine) {
+      return seenAt
+        ? { tone: "open", at: seenAt, over: false, text: `Seen · ${timeAgo(seenAt)}`, rungs: ["past", "now", "todo", "todo"], labels: ["Sent", "Seen", "Started", "Done"] }
+        : { tone: "open", at: row.createdAt, over: false, text: `Sent · ${timeAgo(row.createdAt)}`, rungs: ["now", "todo", "todo", "todo"], labels: ["Sent", "Seen", "Started", "Done"] };
+    }
+    return { tone: "open", at: row.createdAt, over: false, text: "Yours to do", rungs: ["past", "now", "todo", "todo"], labels: ["Sent", "Seen", "Started", "Done"] };
+  }
+  // The ladder for the stepper: [{ label, when, state }], clocks from the record.
+  function taskLadder(row) {
+    const st = taskStateFor(row);
+    const claim = taskChannelClaim(row);
+    // The recipient's own Seen has no clock on their side: the ring already says "here".
+    const whens = [row.createdAt, claim ? (claim.claimedAt || "") : (taskIsMine(row) ? taskSeenAt(row) : ""), row.taskStartedAt || "", row.taskCompletedAt || row.taskRejectedAt || row.taskCancelledAt || (taskDonePending.get(taskIdOf(row)) || {}).at || ""];
+    return st.labels.map((label, index) => ({ label, state: st.rungs[index], when: st.rungs[index] === "todo" || st.rungs[index] === "now" && index > 0 && !whens[index] ? "" : (index === st.labels.length - 1 && st.labels.length === 3 ? whens[3] : whens[index]) || "" }));
+  }
+  function taskRungsHtml(rungs) {
+    return `<span class="tk-rungs" aria-hidden="true">${rungs.map((state, index) => `${index ? `<i class="tk-rung-line${state !== "todo" ? " on" : ""}"></i>` : ""}<i class="tk-rung ${state}"></i>`).join("")}</span>`;
+  }
+  // The result: the completion Relay that replied to the Task. The server
+  // names it (taskResultRelayId); before that lands, the room or the lists
+  // may already hold it as a reply of type "completion".
+  function taskResultFor(row) {
+    const id = String((row && row.taskResultRelayId) || "");
+    const taskId = taskIdOf(row);
+    const isResult = (item) => item && ((id && String(item.id || item.relayId || "") === id) || (!id && item.type === "completion" && String(item.inReplyToRelayId || "") === taskId));
+    const inbound = (payload.relays || []).find(isResult);
+    if (inbound) return { id: inbound.id, source: "relays", bare: taskResultIsBare(inbound) };
+    const sent = (payload.sent || []).find(isResult);
+    if (sent) return { id: String(sent.relayId || sent.id), source: "sent", bare: taskResultIsBare(sent) };
+    return id ? { id, source: taskIsMine(row) ? "relays" : "sent", bare: false } : null;
+  }
+  // A person's Done without a word writes "Done": nothing to point at.
+  function taskResultIsBare(item) {
+    const body = String((item && item.forHuman) || "").trim();
+    return !body || body === "Done" || body === TASK_EVENT_PHRASES.done;
+  }
+  function taskResultLinkHtml(row, st) {
+    if (!st || st.tone !== "done" || st.pending) return "";
+    const result = taskResultFor(row);
+    if (!result || (row.taskClosedBy && result.bare)) return "";
+    return `<button type="button" class="tk-link" data-task-result="${esc(taskIdOf(row))}">${row.taskClosedBy ? "Note" : "Result"}<span class="tk-link-chev" aria-hidden="true">›</span></button>`;
+  }
+  function taskRowById(id) {
+    const key = String(id || "");
+    return relayById(key) || (typeof readerRow === "function" ? readerRow(key) : null)
+      || (payload.sent || []).find((item) => String(item.relayId || item.id || "") === key) || null;
+  }
+  // Open the result: scroll the chat to the letter if it is on screen, else
+  // open it in the reader (Back returns to the Task).
+  function openTaskResult(taskId) {
+    const row = taskRowById(taskId);
+    const result = row ? taskResultFor(row) : null;
+    if (!result) { if (row) taskCardNotes.set(taskIdOf(row), "The result has not arrived on this device yet."); return; }
+    const onScreen = activeView === "threads" && thHistoryEl ? thHistoryEl.querySelector(`[data-msg="${CSS.escape(result.id)}"]`) : null;
+    if (onScreen) {
+      onScreen.scrollIntoView({ block: "center", behavior: REDUCED ? "auto" : "smooth" });
+      onScreen.classList.remove("reply-source-flash");
+      void onScreen.offsetWidth;
+      onScreen.classList.add("reply-source-flash");
+      setTimeout(() => onScreen.classList.remove("reply-source-flash"), 1250);
+      return;
+    }
+    openReader(result.id, result.source);
+  }
+  const taskBtn = (label, kind, attrs = "", disabled = false) => `<button type="button" class="tk-btn ${kind}" ${attrs}${disabled ? " disabled" : ""}>${label}</button>`;
+  // The verbs a Task offers this viewer, in this state. Two at a time, never
+  // three: Reject before any work, Cancel after it began; on a channel Task
+  // the claim lifecycle (Claim · Unclaim · Release) plus Done.
+  function taskVerbsHtml(row, st, { surface = "chat" } = {}) {
+    const id = taskIdOf(row);
+    if (taskIsMine(row)) return "";
+    const busy = taskBusy.has(id);
+    const at = (verb) => `data-task-verb="${verb}" data-task-id="${esc(id)}"`;
+    const done = surface === "reader" ? "Mark done" : "Done";
+    if (st.pending) return `<span class="tk-verbs">${taskBtn("Undo", "ghost", at("undo"))}</span>`;
+    if (st.over) return "";
+    const claim = taskChannelClaim(row);
+    if (claim) {
+      if (st.claim === "unclaimed") return claim.capabilities && claim.capabilities.canClaim === true ? `<span class="tk-verbs">${taskBtn("Claim", "primary", at("claim"), busy)}</span>` : "";
+      if (st.claim === "other") return "";
+      if (st.claim === "mine") return `<span class="tk-verbs">${claim.capabilities && claim.capabilities.canUnclaim === true ? taskBtn("Unclaim", "ghost", at("unclaim"), busy) : ""}${taskBtn(done, "primary", at("done"), busy)}</span>`;
+      return `<span class="tk-verbs">${taskBtn("Release", "ghost", at("release"), busy)}${taskBtn(done, "primary", at("done"), busy)}</span>`;
+    }
+    const asking = taskAsking.get(id);
+    if (asking) {
+      const seal = asking.kind === "cancel" ? "Cancel" : "Reject";
+      return `<span class="tk-verbs">${taskBtn("Keep", "ghost", at("keep"), busy)}${taskBtn(seal, "danger", at(asking.kind), busy)}</span>`;
+    }
+    if (st.tone === "started") return `<span class="tk-verbs">${taskBtn("Cancel", "ghost", at("cancel"), busy)}${taskBtn(done, "primary", at("done"), busy)}</span>`;
+    return `<span class="tk-verbs">${taskBtn("Reject", "ghost", at("reject"), busy)}${taskBtn(done, "primary", at("done"), busy)}</span>`;
+  }
+  // Reject asks for a word before it refuses; Cancel too. One line inside the
+  // footer, in the composer's field recipe. Nothing leaves until sealed.
+  function taskAskRowHtml(row) {
+    const id = taskIdOf(row);
+    const asking = taskAsking.get(id);
+    if (!asking || taskIsMine(row)) return "";
+    const other = firstName(taskOtherName(row)) || "them";
+    return `<div class="tk-ask"><input class="tk-input" type="text" maxlength="2000" data-task-ask="${esc(id)}" placeholder="${esc(`Tell ${other} why (optional)`)}" aria-label="${esc(`Tell ${other} why`)}"></div>`;
+  }
+  // The agent row: Copy for your agent, always; each app Settings › Your agent
+  // has on, as its mark. The marks use the host rows' own open path.
+  function taskAgentRowHtml(row) {
+    const id = taskIdOf(row);
+    const source = taskIsMine(row) ? "sent" : "relay";
+    const apps = agentAppHosts().filter((host) => agentOpensInApp(host === "codex" ? "Codex" : "Claude Code"));
+    const marks = apps.map((host) => {
+      const app = host === "codex" ? "Codex" : "Claude Code";
+      return `<button type="button" class="tk-app" data-host-open="${esc(id)}" data-host="${host}" data-source="${source}" title="Open in ${app}" aria-label="Open in ${app}"><img src="${host === "codex" ? "codexMark.svg" : "claudeCodeMark.svg"}" alt=""></button>`;
+    }).join("");
+    return `<div class="tk-agents${marks ? " icons" : ""}"><button type="button" class="act-btn accept" data-tk-copy="${esc(id)}">Copy for your agent</button>${marks ? `<span class="tk-apps">${marks}</span>` : ""}</div>`;
+  }
+  function taskStateRowHtml(row, st, { surface = "chat" } = {}) {
+    const asking = taskAsking.get(taskIdOf(row));
+    const text = asking && !taskIsMine(row) ? (asking.kind === "cancel" ? "Cancelling" : "Rejecting") : st.text;
+    return `<div class="tk-foot ${st.tone}${asking ? " asking" : ""}"><span class="tk-state">${taskMarkHtml(st.tone)}<span class="tk-text">${esc(text)}</span></span>${taskVerbsHtml(row, st, { surface })}${taskResultLinkHtml(row, st)}${taskAskRowHtml(row)}</div>`;
+  }
+  // The sender's tracker in the card: the reader's ladder at the chat's scale.
+  function taskLadderRowHtml(row) {
+    const steps = taskLadder(row);
+    return `<div class="tk-ladder"><div class="tk-steps">${steps.map((step, index) => `${index ? `<span class="tk-line${step.state !== "todo" ? " on" : ""}" aria-hidden="true"></span>` : ""}<div class="tk-step ${step.state}"><span class="tk-node">${step.state === "done" ? TASK_CHECK_SVG : ""}</span><span class="tk-label">${esc(step.label)}</span></div>`).join("")}</div></div>`;
+  }
+  function taskNoteHtml(row) {
+    const note = taskCardNotes.get(taskIdOf(row));
+    return note ? `<div class="task-claim-error" role="status">${esc(note)}</div>` : "";
+  }
+  // The card footer: the hairline, the sender's ladder, the agent row while the
+  // Task is live, and the state row with the decision.
+  function taskCardFooterHtml(row) {
+    if (!row || !row.request) return "";
+    const st = taskStateFor(row);
+    const mine = taskIsMine(row);
+    const live = !st.over;
+    return `<div class="tk-footer" data-stop="1" data-task-card="${esc(taskIdOf(row))}">${mine ? taskLadderRowHtml(row) : ""}${live ? taskAgentRowHtml(row) : ""}${taskStateRowHtml(row, st)}${taskNoteHtml(row)}</div>`;
+  }
+  // The expanded Task's module: the ladder as a stepper, one helper line in
+  // plain words, and the verbs.
+  function taskHelperText(row, st) {
+    const mine = taskIsMine(row);
+    const other = firstName(taskOtherName(row)) || (mine ? "They" : "the sender");
+    const app = taskAppWord(row);
+    if (st.tone === "rejected") return mine ? `${other} rejected it ${timeAgo(row.taskRejectedAt)} ago — the reason is in the chat.` : `You rejected this Task. ${other} sees it in the chat.`;
+    if (st.tone === "cancelled") return mine ? `${other} cancelled it after starting.` : `You cancelled this Task after starting it. ${other} sees it in the chat.`;
+    if (st.tone === "done") {
+      if (st.pending) return "Done. Undo keeps it open for a few seconds.";
+      const by = taskClosedByWord(row);
+      if (mine) return `${by && by !== "you" ? by : app || other} finished it ${timeAgo(st.at)} ago. The result is a letter in your chat with ${other}.`;
+      return by === "you" ? `Done. ${other} sees it in the chat.` : `${app || "Your agent"} finished it ${timeAgo(st.at)} ago. ${other} has the result.`;
+    }
+    const claim = taskChannelClaim(row);
+    if (claim) {
+      if (st.claim === "unclaimed") return "Nobody has this yet. Claim it to take it on.";
+      if (st.claim === "other") return `${st.text}. It is theirs unless they release it.`;
+      if (st.claim === "mine") return "Claimed by you. Start it with your agent, or Unclaim to hand it back.";
+      return `In progress since ${formatChatTime(row.taskStartedAt || st.at)}. Release stops the run and hands it back to the channel.`;
+    }
+    if (st.tone === "started") return mine ? `${other} started ${timeAgo(row.taskStartedAt)} ago.` : `In progress since ${formatChatTime(row.taskStartedAt)}. Your agent stamps Done when it finishes, or you can.`;
+    if (mine) return taskSeenAt(row) ? `${other} has seen it and not started.` : `${other} hasn't seen it yet.`;
+    return "Yours to do. Nothing has started.";
+  }
+  function taskStatusModuleHtml(row) {
+    if (!row) return "";
+    const st = taskStateFor(row);
+    const steps = taskLadder(row);
+    const stepper = `<div class="tk-steps">${steps.map((step, index) => `${index ? `<span class="tk-line${step.state !== "todo" ? " on" : ""}" aria-hidden="true"></span>` : ""}<div class="tk-step ${step.state}"><span class="tk-node">${step.state === "done" ? TASK_CHECK_SVG : ""}</span><span class="tk-label">${esc(step.label)}</span><span class="tk-when">${step.when ? esc(timeAgo(step.when)) : ""}</span></div>`).join("")}</div>`;
+    const result = st.tone === "done" && !st.pending ? taskResultFor(row) : null;
+    const resultVerb = result && !(row.taskClosedBy && result.bare) ? `<span class="tk-verbs">${taskBtn(row.taskClosedBy ? "Read the note" : "Read the result", "primary", `data-task-result="${esc(taskIdOf(row))}"`)}</span>` : "";
+    const asking = taskAsking.get(taskIdOf(row));
+    const helper = asking && !taskIsMine(row) ? (asking.kind === "cancel" ? "Cancelling. A word for them is optional." : "Rejecting. A word for them is optional.") : taskHelperText(row, st);
+    return `<div class="tk-status ${st.tone}" data-stop="1" data-task-card="${esc(taskIdOf(row))}">${stepper}<div class="tk-row"><span class="tk-helper">${esc(helper)}</span>${taskVerbsHtml(row, st, { surface: "reader" }) || resultVerb}</div>${taskAskRowHtml(row)}${taskNoteHtml(row)}</div>`;
+  }
+  // The list: every Task row tracks its state in a line under the title — the
+  // rungs, then the state in words; the clock stays a clock.
+  function taskRowLineHtml(row) {
+    if (!row) return "";
+    const st = taskStateFor(row);
+    const link = taskResultLinkHtml(row, st);
+    return `<div class="tk-rowline ${st.tone}">${taskRungsHtml(st.rungs)}<span>${esc(st.text)}</span>${link}</div>`;
+  }
+  // The Task-event message: what the other side receives when a person
+  // rejects, finishes or cancels. It wears the room's reply-quote recipe with
+  // the event on its "who" line and the person's word as the message.
+  function taskEventOf(message, lookup) {
+    if (!message || message.request) return null;
+    const parentId = String(message.inReplyToRelayId || "");
+    if (!parentId) return null;
+    const type = String(message.type || "");
+    let tone = type === "task_rejected" ? "rejected" : type === "task_cancelled" ? "cancelled" : "";
+    const parent = (lookup && lookup(parentId)) || taskRowById(parentId);
+    if (!tone && type === "completion") {
+      // An agent's completion keeps its result letter; only a person's Done reads as an event.
+      if (!parent || !parent.taskClosedBy) return null;
+      tone = "done";
+    }
+    if (!tone) return null;
+    const body = String(message.body || message.title || "").trim();
+    const bare = !body || body === TASK_EVENT_PHRASES[tone] || (tone === "done" && body === "Done");
+    const who = message.direction === "out" ? "You" : firstName(message.party) || "They";
+    const verb = tone === "done" ? "marked this task done" : `${tone} this task`;
+    const title = parent ? String(parent.title || (typeof relaySubject === "function" ? relaySubject(parent) : "") || "the Task") : "the Task";
+    return { tone, bare, note: bare ? "" : body, who, verb, parentId, title };
+  }
+  function taskEventRefHtml(event) {
+    return `<button type="button" class="th-reply-ref tk-ev-ref" data-reply-ref="${esc(event.parentId)}" data-stop="1"><span class="th-reply-ref-who">${taskMarkHtml(event.tone)}<span>${esc(`${event.who} ${event.verb}`)}</span></span><span class="th-reply-ref-copy">${esc(event.title)}</span></button>`;
+  }
+  // The verbs, wired. `rerender` repaints the surface the card lives on.
+  async function taskVerb(verb, id, rerender) {
+    const row = taskRowById(id);
+    if (!row || taskBusy.has(id)) return;
+    taskCardNotes.delete(id);
+    if (verb === "keep") { taskAsking.delete(id); rerender(); return; }
+    if (verb === "reject" || verb === "cancel") {
+      const asking = taskAsking.get(id);
+      if (!asking || asking.kind !== verb) { taskAsking.set(id, { kind: verb, draft: "", focus: true }); rerender(); return; }
+      await submitTaskClose(id, verb, rerender);
+      return;
+    }
+    if (verb === "done") { startTaskDone(id, rerender); return; }
+    if (verb === "undo") {
+      const pending = taskDonePending.get(id);
+      if (pending) { clearTimeout(pending.timer); taskDonePending.delete(id); }
+      rerender();
+      return;
+    }
+    if (verb === "claim" || verb === "unclaim" || verb === "release") {
+      taskBusy.add(id);
+      rerender();
+      try {
+        if (verb === "release") {
+          const stopped = await window.relay.taskStop(id);
+          if (!stopped || stopped.ok === false) throw new Error((stopped && stopped.error) || "Could not stop the run.");
+        }
+        const claim = taskChannelClaim(row);
+        const version = claim && Number.isInteger(claim.version) ? claim.version : undefined;
+        const result = verb === "claim" ? await window.relay.taskClaim(id, version) : await window.relay.taskUnclaim(id, version);
+        if (result && result.taskClaim) applyTaskClaimProjection(row, result.taskClaim);
+        if (!result || result.ok === false) throw new Error((result && result.error) || `Could not ${verb} this Task.`);
+      } catch (error) {
+        taskCardNotes.set(id, (error && error.message) || String(error));
+      }
+      taskBusy.delete(id);
+      rerender();
+    }
+  }
+  async function submitTaskClose(id, kind, rerender) {
+    const asking = taskAsking.get(id);
+    const note = asking ? String(asking.draft || "").trim() : "";
+    taskBusy.add(id);
+    rerender();
+    const result = kind === "cancel" ? await window.relay.taskCancel(id, note) : await window.relay.taskReject(id, note);
+    taskBusy.delete(id);
+    if (!result || result.ok === false) taskCardNotes.set(id, (result && result.error) || `Could not ${kind} this Task.`);
+    else taskAsking.delete(id);
+    rerender();
+  }
+  // Done holds for a few seconds with Undo before the stamp is written: a tap
+  // is easy to fumble on a small card, and the undo costs nothing.
+  function startTaskDone(id, rerender) {
+    if (taskDonePending.has(id)) return;
+    taskAsking.delete(id);
+    const timer = setTimeout(async () => {
+      taskDonePending.delete(id);
+      taskLocalDone.set(id, new Date().toISOString());
+      taskBusy.add(id);
+      rerender();
+      const result = await window.relay.taskDone(id, "");
+      taskBusy.delete(id);
+      if (!result || result.ok === false) {
+        taskLocalDone.delete(id);
+        taskCardNotes.set(id, (result && result.error) || "Could not mark this Task done.");
+      }
+      rerender();
+    }, TASK_UNDO_MS);
+    taskDonePending.set(id, { at: new Date().toISOString(), timer });
+    rerender();
+  }
+  function wireTaskCards(scope, rerender) {
+    if (!scope) return;
+    // The footer and the ladder are theirs: a click inside never opens the bubble under them.
+    for (const zone of scope.querySelectorAll("[data-task-card]")) zone.addEventListener("click", (event) => event.stopPropagation());
+    for (const button of scope.querySelectorAll("[data-tk-copy]")) {
+      button.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        const id = String(button.getAttribute("data-tk-copy") || "");
+        const row = taskRowById(id) || { id };
+        try {
+          await navigator.clipboard.writeText(pullSentenceFor(row, row));
+          button.textContent = "Copied";
+          setTimeout(() => { if (button.isConnected) button.textContent = "Copy for your agent"; }, 1400);
+        } catch { button.textContent = "Could not copy"; }
+      });
+    }
+    for (const button of scope.querySelectorAll("[data-task-verb]")) {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        taskVerb(String(button.getAttribute("data-task-verb") || ""), String(button.getAttribute("data-task-id") || ""), rerender);
+      });
+    }
+    for (const button of scope.querySelectorAll("[data-task-result]")) {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        openTaskResult(String(button.getAttribute("data-task-result") || ""));
+      });
+    }
+    for (const input of scope.querySelectorAll("[data-task-ask]")) {
+      const id = String(input.getAttribute("data-task-ask") || "");
+      const asking = taskAsking.get(id);
+      if (!asking) continue;
+      input.value = asking.draft || "";
+      if (asking.focus) { asking.focus = false; setTimeout(() => { if (input.isConnected) input.focus(); }, 0); }
+      input.addEventListener("click", (event) => event.stopPropagation());
+      input.addEventListener("mousedown", () => { if (typeof setInteractive === "function") setInteractive(true); });
+      input.addEventListener("input", () => { const current = taskAsking.get(id); if (current) current.draft = input.value; });
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") { event.preventDefault(); const current = taskAsking.get(id); if (current) submitTaskClose(id, current.kind, rerender); }
+        if (event.key === "Escape") { event.preventDefault(); taskAsking.delete(id); rerender(); }
+      });
+    }
+  }
+  // Once the record says Done, the local copy has done its job.
+  function settleTaskLocalState(rows) {
+    for (const row of rows || []) {
+      const id = taskIdOf(row);
+      if (row && row.taskCompletedAt && taskLocalDone.has(id)) taskLocalDone.delete(id);
+    }
+  }
   // State is READ FROM THE RECORD, not remembered in the tab. It used to be a
   // local Map, so a restarted pill forgot every run in flight and a finished
   // run sat under "Running" forever. The row's own receipts answer it: a
@@ -9133,9 +9843,26 @@
         chatId: chat.chatId,
         createdAt: item.createdAt || item.updatedAt,
         threadId: item.threadId || item.relayId,
-        relayNotificationKind: "plain_relay",
+        // A Task opened from a room is still a Task: the ladder, the verbs and
+        // the Task kicker follow the kind, on both sides.
+        relayNotificationKind: item.kind === "task" || sentTwin?.kind === "task" ? "task" : "plain_relay",
+        kind: item.kind || sentTwin?.kind || "message",
         unread: !outbound && item.state === "delivered",
         outbound,
+        // The sender's receipts and the Task's stamps ride on the Sent twin.
+        state: sentTwin?.state || item.state || null,
+        readAt: sentTwin?.readAt || null,
+        recipient: sentTwin?.recipient || null,
+        taskStartedAt: sentTwin?.taskStartedAt || item.taskStartedAt || null,
+        taskRunOwner: sentTwin?.taskRunOwner || item.taskRunOwner || null,
+        taskCompletedAt: sentTwin?.taskCompletedAt || item.taskCompletedAt || null,
+        taskRejectedAt: sentTwin?.taskRejectedAt || item.taskRejectedAt || null,
+        taskCancelledAt: sentTwin?.taskCancelledAt || item.taskCancelledAt || null,
+        taskClosedBy: sentTwin?.taskClosedBy || item.taskClosedBy || null,
+        taskResultRelayId: sentTwin?.taskResultRelayId || item.taskResultRelayId || null,
+        taskClaim: sentTwin?.taskClaim || item.taskClaim || null,
+        type: item.type || sentTwin?.type || null,
+        inReplyToRelayId: item.inReplyToRelayId || sentTwin?.inReplyToRelayId || null,
         attachments: item.attachments || [],
         // Canonical chat hydration is the only remaining copy of an older
         // message once the bounded Inbox/Sent caches roll past it. Preserve
@@ -9182,9 +9909,24 @@
       groupSendId: sent.groupSendId || "",
       createdAt: sent.createdAt || sent.updatedAt,
       threadId: sent.threadId || sent.relayId || sent.id,
-      relayNotificationKind: "plain_relay",
+      // A sent Task reads as a Task: the ladder and the Task kicker follow the kind.
+      relayNotificationKind: sent.kind === "task" ? "task" : "plain_relay",
+      kind: sent.kind || "message",
       unread: false,
       outbound: true,
+      state: sent.state || null,
+      readAt: sent.readAt || null,
+      recipient: sent.recipient || null,
+      taskStartedAt: sent.taskStartedAt || null,
+      taskRunOwner: sent.taskRunOwner || null,
+      taskCompletedAt: sent.taskCompletedAt || null,
+      taskRejectedAt: sent.taskRejectedAt || null,
+      taskCancelledAt: sent.taskCancelledAt || null,
+      taskClosedBy: sent.taskClosedBy || null,
+      taskResultRelayId: sent.taskResultRelayId || null,
+      taskClaim: sent.taskClaim || null,
+      type: sent.type || null,
+      inReplyToRelayId: sent.inReplyToRelayId || null,
       // The expanded reader uses this projection, not the conversation's
       // attachment cargo. Preserve the sent copy's exact file identities.
       attachments: Array.isArray(sent.attachments) ? sent.attachments : [],
@@ -9766,7 +10508,7 @@
         <div class="rd-rule"></div>
         <div class="rd-agentcopy">${readerParagraphs(agentText)}</div>`;
     const humanDoc = `
-        <div class="rd-kicker">${request ? `Task · Created by ${esc(sender)}` : esc(sender)}${r.nature ? ` · ${esc(TOPIC_NATURE_LABEL[r.nature] || r.nature)}` : ""} · ${esc(timeAgo(r.createdAt))}${r.unread ? "" : " · read"}</div>
+        <div class="rd-kicker">${request ? (r.outbound ? `Task · ${esc(sender)}` : `Task · Created by ${esc(sender)}`) : esc(sender)}${r.nature ? ` · ${esc(TOPIC_NATURE_LABEL[r.nature] || r.nature)}` : ""} · ${esc(timeAgo(r.createdAt))}${r.unread ? "" : " · read"}</div>
         <div class="rd-headline${headlineClass}">${esc(subject)}</div>
         <div class="rd-rule"></div>
         <div class="rd-body">${readerParagraphs(r.forHuman)}</div>
@@ -9798,7 +10540,8 @@
     // is the surface, and it renders even if its dock cannot.
     const composer = (() => { try { return composerHtml(); } catch (error) { console.error("[reader] composer failed:", error); return ""; } })();
     const todoStatusControl = todoReaderStatusHtml(r);
-    const claimControl = request ? taskClaimControlHtml(r, { surface: "reader" }) : "";
+    // The expanded Task's ladder, helper and verbs; the old claim slot is gone.
+    const taskModule = request ? taskStatusModuleHtml(r) : "";
     function composerHtml() {
       // A Task has no Start dock (David, 2026-09-13): its verbs are the same
       // Open in Codex / Open in Claude Code rows a Relay has, and this reply
@@ -9842,11 +10585,11 @@
         </button>
         <span class="reader-name">${esc(sender)}</span>
         ${todoStatusControl}
-        ${request ? `<button class="reader-delete" type="button" data-reader-delete="${esc(r.id)}" aria-label="Move task to Recently Deleted" title="Move task to Recently Deleted"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button>` : ""}
+        ${request && taskIsOver(r) ? `<button class="reader-delete" type="button" data-reader-delete="${esc(r.id)}" aria-label="Move task to Recently Deleted" title="Move task to Recently Deleted"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button>` : ""}
       </div>
       ${documentList}
       <div class="rd-col${readerTabSwap ? " swap" : ""}">${doc}</div>`;
-    readerBodyEl.querySelector("#readerActions").innerHTML = `${status}${bothNote}${claimControl}${documentHostActions}`;
+    readerBodyEl.querySelector("#readerActions").innerHTML = `${status}${bothNote}${taskModule}${documentHostActions}`;
     readerBodyEl.querySelector("#readerFeedback").innerHTML = `
       <div class="row-err${note && note.cls === "ok" ? " ok" : ""}" data-err="${esc(r.id)}" data-stop="1">${esc((note && note.text) || "")}</div>`;
     if (!keepReply) {
@@ -9906,6 +10649,7 @@
       });
     }
     wireHostOpen(readerBodyEl);
+    wireTaskCards(readerBodyEl, renderReader);
     wireTaskClaimControls(readerBodyEl, () => { renderReader(); renderAll(); });
     wireAttachmentChips(readerBodyEl);
     wireReaderAttachments(readerBodyEl, r);
@@ -10575,7 +11319,11 @@
     // "human_question" stays deletable-only compat: the retired question flow no
     // longer renders or answers, but a row staged by an old build must still be
     // removable from the list.
-    const canDelete = kind === "plain_relay" || kind === "task" || kind === "human_question" || kind === "task_completed" || kind === "task_cancelled" || kind === "task_failed";
+    // A Task's dustbin appears only once the Task is over (David, 2026-09-17):
+    // while it is open, Reject and Cancel are the acts; the tombstone is for
+    // tidying what has ended.
+    const canDelete = kind === "plain_relay" || kind === "human_question" || kind === "task_completed" || kind === "task_cancelled" || kind === "task_failed"
+      || (kind === "task" && taskIsOver(r));
     const deleteButton = canDelete ? `<button class="row-delete" type="button" data-delete="${esc(r.id)}" data-stop="1" aria-label="Move to Recently Deleted" title="Move to Recently Deleted"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button>` : "";
     const expanded = r.id === expandedRelayId;
     const openCard = expanded ? openActionsHtml(r.id, { thread: false, task: isTask }) : "";
@@ -10591,6 +11339,7 @@
           <span class="rk-time">${timeAgo(r.createdAt)}</span>
         </div>
         <div class="rk-subject">${esc(subject)}</div>
+        ${isTask ? taskRowLineHtml(r) : ""}
         ${previewHtml}
         ${expanded ? attachmentPlates(r.attachments, { relayId: r.id }) : ""}
         ${actions}
@@ -10722,6 +11471,7 @@
 
   function wireRelayRows({ received = false } = {}) {
     wireSessionPickerRows(relaysListEl);
+    wireTaskCards(relaysListEl, renderRelays);
     // stop clicks inside action zones from triggering the row open
     for (const z of relaysListEl.querySelectorAll('[data-stop="1"]')) {
       z.addEventListener("click", (e) => e.stopPropagation());
@@ -10968,7 +11718,11 @@
     const rows = payload.sent || [];
     sentEmptyEl.classList.toggle("gone", rows.length > 0);
     if (!rows.length) { sentListEl.innerHTML = ""; return; }
-    sentListEl.innerHTML = sentListRows(rows).map((members) => {
+    sentListEl.innerHTML = sentRowsHtml(rows);
+    wireSentRows(sentListEl);
+  }
+  function sentRowsHtml(rows) {
+    return sentListRows(rows).map((members) => {
       const r = members[0];
       const id = r.relayId || r.id || "";
       const subject = sentSubject(r);
@@ -11015,7 +11769,10 @@
         ? (receipt.cls ? ` ${receipt.cls}` : "")
         : `${read || linkOpened ? " read" : ""}${klass === "failed" ? " failed" : ""}`;
       // A Done task settles like a read message; Started keeps it prominent.
-      const settled = receipt ? Boolean(receipt.cls === "done") : read;
+      const settled = receipt ? Boolean(receipt.cls === "done" || taskIsOver(r)) : read;
+      // A Task row keeps the clock at the top and says its state in the line
+      // under the title, like every other Task row (David, 2026-09-17).
+      const taskRow = Boolean(receipt);
       const expanded = id === expandedSentId;
       const shareCopyUrl = !isGroup && r.shareLink && r.shareLink.state !== "revoked" ? String(r.shareLink.url || "") : "";
       const openCard = expanded ? openActionsHtml(id, { sent: true, shareLinkUrl: shareCopyUrl }) : "";
@@ -11026,9 +11783,10 @@
           <div class="rk-top">
             <span class="rk-sender">${esc(rec)}</span>
             ${receipt ? `<span class="kchip">Task</span>` : ""}
-            <span class="st${stCls}">${esc(stLabel)} ${timeAgo(stTime)}</span>
+            ${taskRow ? `<span class="rk-time">${timeAgo(r.createdAt)}</span>` : `<span class="st${stCls}">${esc(stLabel)} ${timeAgo(stTime)}</span>`}
           </div>
           <div class="rk-subject">${esc(subject)}</div>
+          ${taskRow ? taskRowLineHtml(r) : ""}
           ${preview ? `<div class="rk-preview">${esc(preview)}</div>` : ""}
           <div class="row-note">${esc(detail)}</div>
           ${openCard}
@@ -11036,47 +11794,50 @@
         </div>
       </div>`;
     }).join("");
-    wireSentRows();
   }
   // A sent row expands into the SAME three-action menu as a received relay:
   // Preview (read your own message in place), Open in Current Chat, Open in
-  // New Chat — each routed to the sent-side IPC.
-  function wireSentRows() {
-    wireSessionPickerRows(sentListEl);
-    for (const el of sentListEl.querySelectorAll(".row.sent")) {
+  // New Chat — each routed to the sent-side IPC. The rows live in the Sent tab
+  // and in the Relays tab's Sent segment; `scope` says which, and a re-render
+  // repaints the surface the row is on.
+  function wireSentRows(scope = sentListEl) {
+    const rerender = scope === relaysListEl ? renderRelays : renderSent;
+    wireSessionPickerRows(scope);
+    wireTaskCards(scope, rerender);
+    for (const el of scope.querySelectorAll(".row.sent")) {
       const id = el.getAttribute("data-sent-id");
       if (openingIds.has(id)) el.classList.add("opening");
       el.addEventListener("click", () => {
         expandedSentId = expandedSentId === id ? null : id;
-        renderSent();
+        rerender();
       });
     }
-    for (const z of sentListEl.querySelectorAll('[data-stop="1"]')) {
+    for (const z of scope.querySelectorAll('[data-stop="1"]')) {
       z.addEventListener("click", (e) => e.stopPropagation());
     }
-    for (const btn of sentListEl.querySelectorAll("[data-sent-preview]")) {
+    for (const btn of scope.querySelectorAll("[data-sent-preview]")) {
       btn.addEventListener("click", () => {
         expandedSentId = null;
         openReader(btn.getAttribute("data-sent-preview"), "sent");
       });
     }
-    for (const btn of sentListEl.querySelectorAll("[data-sent-open-current]")) {
+    for (const btn of scope.querySelectorAll("[data-sent-open-current]")) {
       const id = btn.getAttribute("data-sent-open-current");
       btn.addEventListener("click", () => {
         expandedSentId = null;
         openRelayFromUI(id, "sent", "current");
-        renderSent(); // retain the menu while choosing a destination
+        rerender(); // retain the menu while choosing a destination
       });
     }
-    for (const btn of sentListEl.querySelectorAll("[data-sent-open-fresh]")) {
+    for (const btn of scope.querySelectorAll("[data-sent-open-fresh]")) {
       const id = btn.getAttribute("data-sent-open-fresh");
       btn.addEventListener("click", () => {
         expandedSentId = null;
         openRelayFromUI(id, "sent", "fresh");
-        renderSent(); // the menu must close on screen, not just in state
+        rerender(); // the menu must close on screen, not just in state
       });
     }
-    for (const btn of sentListEl.querySelectorAll("[data-sent-copy-link]")) {
+    for (const btn of scope.querySelectorAll("[data-sent-copy-link]")) {
       const id = btn.getAttribute("data-sent-copy-link");
       btn.addEventListener("click", async () => {
         try {
@@ -13596,6 +14357,12 @@
         siblingIds: r.groupSendId ? (sentGroupSiblings.get(r.groupSendId) || []) : [],
         taskStartedAt: r.taskStartedAt || null,
         taskCompletedAt: r.taskCompletedAt || null,
+        taskRejectedAt: r.taskRejectedAt || null,
+        taskCancelledAt: r.taskCancelledAt || null,
+        taskClosedBy: r.taskClosedBy || null,
+        taskResultRelayId: r.taskResultRelayId || null,
+        taskRunOwner: r.taskRunOwner || null,
+        type: r.type || null,
         taskClaim: r.taskClaim || null,
         materializedCodex: Boolean(r.materializedCodex),
         materializedClaude: Boolean(r.materializedClaude),
@@ -13691,6 +14458,15 @@
         siblingIds: s.groupSendId ? (sentGroupSiblings.get(s.groupSendId) || []) : [],
         taskStartedAt: s.taskStartedAt || null,
         taskCompletedAt: s.taskCompletedAt || null,
+        taskRejectedAt: s.taskRejectedAt || null,
+        taskCancelledAt: s.taskCancelledAt || null,
+        taskClosedBy: s.taskClosedBy || null,
+        taskResultRelayId: s.taskResultRelayId || null,
+        taskRunOwner: s.taskRunOwner || null,
+        type: s.type || null,
+        recipient: s.recipient || null,
+        readAt: s.readAt || null,
+        state: s.state || null,
         taskClaim: s.taskClaim || null,
         materializedCodex: Boolean(s.materializedCodex),
         materializedClaude: Boolean(s.materializedClaude),
@@ -15281,12 +16057,16 @@
       // Slack shelf inside every two-word bubble made a live Slack burst look
       // like unrelated cards rather than the normal Relay chat geometry.
       const showProviderByline = !continuesIntoNext || providerKey(nextMessage) !== providerKey(m);
-      const channelTask = Boolean(m.request && m.taskClaim?.scope === "channel");
-      const claimControl = channelTask ? taskClaimControlHtml(m, { surface: "chat" }) : "";
+      // The Task card carries its own footer inside the bubble (state, verbs,
+      // the agent row); the old claim slot under the bubble is gone. A person's
+      // Reject / Done / Cancel arrives as a Task-event message: a reply to the
+      // Task in the reply-quote recipe, toned by the event.
+      const taskEvent = m.request ? null : taskEventOf(m, (parentId) => messageById.get(parentId));
+      const taskFooter = m.request ? taskCardFooterHtml(m) : "";
       return `${slackThreadContextHtml(m)}${chunkDivider}${runHeader}
-      ${channelTask ? `<div class="th-task-stack${mine ? " mine" : ""}" data-chat-key="${esc(renderKey)}:task">` : ""}<div class="th-msg${hasHostActions ? " has-host-actions" : ""}${m.unread ? " unread" : ""}${mine ? " mine" : ""}${cont ? " cont" : ""}${textLike ? " text" : ""}${attachmentOnly ? " attachment-only" : ""}${agentWorking ? " agent-working" : ""}${open ? " open" : ""}${activeMentionVisit?.selected === String(m.id) ? " mention-target" : ""}${m.deletedAt ? " deleted" : ""}${aggregates.length ? " has-rx" : ""}${liveCanonicalArrivalIds.has(String(m.id || "")) ? " live-arrival" : ""}"${textLike ? "" : ' role="button" tabindex="0"'}${agentWorking ? ' aria-busy="true"' : ""}${hasHostActions ? ` aria-expanded="${hostActionsPersistent ? "true" : "false"}"` : ""} data-chat-key="${esc(renderKey)}:body" data-msg="${esc(m.id)}" data-dir="${m.direction}" data-opening-id="${esc(m.id)}">
+      <div class="th-msg${hasHostActions ? " has-host-actions" : ""}${m.unread ? " unread" : ""}${mine ? " mine" : ""}${cont ? " cont" : ""}${textLike ? " text" : ""}${taskEvent ? ` tk-event ${taskEvent.tone}${taskEvent.bare ? " bare" : ""}` : ""}${m.request ? " tk-card" : ""}${attachmentOnly ? " attachment-only" : ""}${agentWorking ? " agent-working" : ""}${open ? " open" : ""}${activeMentionVisit?.selected === String(m.id) ? " mention-target" : ""}${m.deletedAt ? " deleted" : ""}${aggregates.length ? " has-rx" : ""}${liveCanonicalArrivalIds.has(String(m.id || "")) ? " live-arrival" : ""}"${textLike ? "" : ' role="button" tabindex="0"'}${agentWorking ? ' aria-busy="true"' : ""}${hasHostActions ? ` aria-expanded="${hostActionsPersistent ? "true" : "false"}"` : ""} data-chat-key="${esc(renderKey)}:body" data-msg="${esc(m.id)}" data-dir="${m.direction}" data-opening-id="${esc(m.id)}">
         ${sideMenuHtml}
-        ${messageReplyReferenceHtml(m)}
+        ${taskEvent ? taskEventRefHtml(taskEvent) : messageReplyReferenceHtml(m)}
         ${editingMessage ? `
           <div class="th-message-edit" data-stop="1">
             <span class="th-message-edit-label">Edit message</span>
@@ -15298,7 +16078,7 @@
           </div>` : `
           ${textLike ? '<div class="th-text-content">' : ""}<span class="th-msg-title"${textLike ? ` data-clock="${esc(formatChatTime(m.at))}"` : ""}>${agentWorking
             ? '<span class="agent-working-indicator" aria-hidden="true"><span class="agent-working-dot"></span><span class="agent-working-dot"></span><span class="agent-working-dot"></span></span>'
-            : `${m.request ? '<span class="kchip">Task</span>' : ""}${textLike ? linkify(m.title, m.groupId || thread.groupId) : esc(m.title)}${textLike ? "" : `<span class="th-more">${open ? "‹" : "›"}</span>`}${m.editedAt && !m.deletedAt ? '<span class="th-edited">edited</span>' : ""}`}</span>${textLike ? `${chatTimestampHtml(m.at)}</div>` : ""}
+            : taskEvent ? (taskEvent.bare ? "" : linkify(taskEvent.note, m.groupId || thread.groupId)) : `${m.request ? '<span class="kchip">Task</span>' : ""}${textLike ? linkify(m.title, m.groupId || thread.groupId) : esc(m.title)}${textLike ? "" : `<span class="th-more">${open ? "‹" : "›"}</span>`}${m.editedAt && !m.deletedAt ? '<span class="th-edited">edited</span>' : ""}`}</span>${textLike ? `${chatTimestampHtml(m.at)}</div>` : ""}
 
           ${!textLike && !open && !inlineBody && m.preview ? `<span class="th-preview">${esc(m.preview)}</span>` : ""}
           ${!textLike && !open && inlineBody ? `<div class="th-body" data-stop="0">${readerParagraphs(m.body)}</div>` : ""}
@@ -15309,8 +16089,9 @@
         ${showProviderByline ? providerBylineHtml(m) : ""}
         ${hasHostActions ? relayHostActionsHtml(m, { persistent:hostActionsPersistent }) : ""}
         ${!textLike && !editingMessage ? chatTimestampHtml(m.at) : ""}
+        ${taskFooter}
         ${badges}
-      </div>${channelTask ? `${claimControl}</div>` : ""}
+      </div>
       ${slackThreadLinkHtml(m)}
       ${(() => {
         // THE CARGO LAW: a bubble holds WORDS. Photos, video and files stand
@@ -15338,7 +16119,8 @@
       })()}
       ${(() => {
         // Receipts stay beneath the bubble; text actions use the side menu.
-        const receipt = receiptFor(m, msgs);
+        // The card's footer is the receipt on a Task bubble; the read line under it goes.
+        const receipt = m.request ? null : receiptFor(m, msgs);
         const bits = [];
         if (!sideActions) bits.push(...messageActionBits);
         if (mine && m.pending) bits.push(...outboxStatusBits(m));
@@ -15611,6 +16393,7 @@
     wireRoomAttachments();
     applyAttachmentSelection();
     wireHostOpen(newControls);
+    wireTaskCards(newControls, () => renderThreadDetail());
     for (const button of newControls.querySelectorAll("[data-slack-thread-open]")) {
       button.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -18650,6 +19433,7 @@
     const outboxRevision = Number(next.outboxRevision || 0);
     if (outboxRevision < latestOutboxRevision) return;
     latestOutboxRevision = outboxRevision;
+    settleTaskLocalState([...(next.relays || []), ...(next.sent || [])]);
     if (cardViewTransition) {
       cardViewTransition.payload = next;
       return;

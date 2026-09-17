@@ -14,8 +14,10 @@ test("Sent collapses fan-out siblings by groupSendId into one row", () => {
   assert.match(html, /const gid = r && r\.groupSendId/);
   // Siblings append to the FIRST row's member list instead of adding a row.
   assert.match(html, /if \(members\) \{ members\.push\(r\); continue; \}/);
-  // renderSent iterates the collapsed rows, never the raw sibling list.
-  assert.match(html, /sentListEl\.innerHTML = sentListRows\(rows\)\.map\(\(members\) => \{/);
+  // The row builder iterates the collapsed rows, never the raw sibling list,
+  // and both the Sent tab and the Relays tab's Sent segment render through it.
+  assert.match(html, /sentListEl\.innerHTML = sentRowsHtml\(rows\);/);
+  assert.match(html, /function sentRowsHtml\(rows\) \{\s*return sentListRows\(rows\)\.map\(\(members\) => \{/);
 });
 
 test("a group row is labelled by roster, not by one sibling's recipient", () => {

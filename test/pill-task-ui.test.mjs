@@ -26,8 +26,12 @@ test("a Task's open actions are a Relay's: no Start verb, no task-only tray", ()
   assert.equal(html.includes("window.relay.taskStart"), false, "no Start IPC from the pill");
 });
 
-test("task rows are deletable like plain relays", () => {
-  assert.match(html, /kind === "plain_relay" \|\| kind === "task" \|\|/);
+test("task rows are deletable only once the Task is over", () => {
+  // David (2026-09-17): while a Task is open, Reject and Cancel are the acts;
+  // the dustbin (a per-user tombstone) is for tidying what has ended.
+  assert.match(html, /kind === "plain_relay" \|\| kind === "human_question"/);
+  assert.match(html, /\|\| \(kind === "task" && taskIsOver\(r\)\)/);
+  assert.match(html, /\$\{request && taskIsOver\(r\) \? `<button class="reader-delete"/);
 });
 
 test("the Sent tab renders the task receipt ladder", () => {
