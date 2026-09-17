@@ -44,6 +44,9 @@ function boot({ relays = [], sent = [], apps = ["codex", "claude"], opens = () =
     sentIsRead: (row) => ["read", "acknowledged"].includes(String(row.state || "")),
     readerRow: () => null,
     relayById: (id) => relays.find((r) => r.id === id) || null,
+    avatarHue: () => 24,
+    avatarInitials: (name) => String(name || "?").slice(0, 2).toUpperCase(),
+    Object,
     agentAppHosts: () => apps,
     agentOpensInApp: opens,
     pullSentenceFor: () => "Pull the relay.",
@@ -58,7 +61,7 @@ function boot({ relays = [], sent = [], apps = ["codex", "claude"], opens = () =
     setTimeout, clearTimeout, console, Map, Set, Date, String, Number, Boolean, Array, JSON, Math,
   };
   vm.createContext(context);
-  vm.runInContext(block + "\nthis.__t = { taskStateFor, taskLadder, taskVerbsHtml, taskCardFooterHtml, taskStatusModuleHtml, taskRowLineHtml, taskEventOf, taskResultFor, taskResultLinkHtml, taskIsOver, taskDonePending, startTaskDone, taskVerb, TASK_UNDO_MS };", context);
+  vm.runInContext(block + "\nthis.__t = { taskStateFor, taskLadder, taskVerbsHtml, taskCardFooterHtml, taskStatusModuleHtml, taskRowLineHtml, taskEventOf, taskResultFor, taskResultLinkHtml, taskIsOver, taskDonePending, startTaskDone, taskVerb, TASK_UNDO_MS, taskIsEveryone, taskRosterCardHtml, taskRosterGroupedHtml, taskRosterYouStripHtml, taskRosterSumText, taskRosterTone, taskRosterCountsOf, taskRosterHelperText };", context);
   return context.__t;
 }
 const ago = (minutes) => new Date(Date.now() - minutes * 60000).toISOString();
@@ -270,4 +273,165 @@ test("main posts the person's close and stamps the row at once; the bridge and t
   assert.match(main, /taskRejectedAt: local\.taskRejectedAt \|\| null,/);
   assert.match(notifications, /taskRejectedAt: item\.taskRejectedAt \|\| existing\.taskRejectedAt \|\| null,/);
   assert.match(notifications, /taskResultRelayId: item\.taskResultRelayId \|\| existing\.taskResultRelayId \|\| null,/);
+});
+
+// ---- EVERYONE TASKS: the roster (David, 2026-09-17) ----
+// Each member owes it, each holds their own copy, and EVERYONE sees how
+// everyone is getting on. The wire carries a few members per state plus exact
+// counts; nothing on screen may count rows to say how many there are.
+const ROSTER_COUNTS = { total: 100, done: 12, started: 4, rejected: 3, cancelled: 0, seen: 60, sent: 21 };
+const rosterMember = (name, state, over = {}) => ({ relayId: `r-${name}`, name, self: false, state, at: ago(20), ...over });
+const ROSTER = [
+  rosterMember("You", "seen", { self: true, relayId: "t1" }),
+  rosterMember("Priya Natarajan", "done", { resultRelayId: "res-priya" }),
+  rosterMember("Anna Keller", "done", { resultRelayId: "res-anna" }),
+  rosterMember("Ben Okafor", "started"),
+  rosterMember("Dana Mori", "rejected"),
+  rosterMember("Chen Feng", "seen"),
+  rosterMember("Nils Berg", "sent", { at: undefined }),
+];
+const everyoneTask = (over = {}) => inboundTask({ taskAssignment: "everyone", taskRoster: ROSTER, taskRosterCounts: ROSTER_COUNTS, ...over });
+const everyoneSent = (over = {}) => sentTask({ taskAssignment: "everyone", taskRoster: ROSTER.filter((m) => !m.self), taskRosterCounts: ROSTER_COUNTS, ...over });
+
+test("a member's card: You first with their own verbs, then the newest movements, then the rest counted", () => {
+  const t = boot();
+  const row = everyoneTask();
+  assert.equal(t.taskIsEveryone(row), true);
+  const card = t.taskRosterCardHtml(row);
+  // You is pinned first, and carries the verbs — the sum line keeps none.
+  assert.match(card, /^<div class="tk-roster"><div class="tk-roster-row open you"/);
+  assert.match(card, /tk-roster-row open you[\s\S]*?>You<\/span>[\s\S]*?data-task-verb="reject"[\s\S]*?data-task-verb="done"/);
+  // Three movements, newest first, and never the seen or the unseen.
+  const names = [...card.matchAll(/class="tk-roster-name">([^<]*)</g)].map((m) => m[1]);
+  assert.deepEqual(names.slice(0, 4), ["You", "Priya Natarajan", "Anna Keller", "Ben Okafor"]);
+  assert.equal(names.length, 4, "the card never grows past You plus three");
+  assert.doesNotMatch(card, /Chen Feng|Nils Berg/, "people who have only seen it are counted, not listed");
+  // The counted line is the EXACT counts, not the length of the list on the wire.
+  assert.match(card, /<span class="tk-roster-more-n">96 more<\/span>/);
+  // The breakdown describes the REMAINDER it sits beside, so the four people
+  // already named above it are subtracted: it must never sum past "96 more".
+  assert.match(card, /10 done · <i class="tk-mark started"><\/i>3 in progress · <i class="tk-mark rejected"><\/i>3 rejected · <i class="tk-mark open"><\/i>80 waiting/);
+  assert.doesNotMatch(card, /0 cancelled/, "a state nobody is in is left out");
+  // A Done row is a door to that person's result; an In progress row is not.
+  assert.match(card, /data-task-result-of="res-priya"/);
+  assert.equal(card.split("data-task-result-of=").length - 1, 2);
+});
+
+test("the sender's card carries the same roster, with no You row and no verbs", () => {
+  const t = boot();
+  const card = t.taskRosterCardHtml(everyoneSent());
+  assert.doesNotMatch(card, /tk-roster-row[^"]*you/, "the sender does not owe it");
+  assert.doesNotMatch(card, /data-task-verb/, "and has nothing to press");
+  assert.match(card, /<span class="tk-roster-more-n">97 more<\/span>/, "with no You row, one more person is in the count");
+});
+
+test("the sum reads in words and takes the tone of what is happening", () => {
+  const t = boot();
+  assert.equal(t.taskRosterSumText(ROSTER_COUNTS), "Everyone · 12 of 100 done");
+  assert.equal(t.taskRosterTone(ROSTER_COUNTS), "started");
+  const allDone = { total: 4, done: 4, started: 0, rejected: 0, cancelled: 0, seen: 0, sent: 0 };
+  assert.equal(t.taskRosterSumText(allDone), "Everyone · all 4 done");
+  assert.equal(t.taskRosterTone(allDone), "done");
+  const onlyRefused = { total: 4, done: 0, started: 0, rejected: 2, cancelled: 0, seen: 2, sent: 0 };
+  assert.equal(t.taskRosterTone(onlyRefused), "rejected");
+  assert.equal(t.taskRosterTone({ total: 3, done: 0, started: 0, rejected: 0, cancelled: 0, seen: 1, sent: 2 }), "open");
+});
+
+test("an older server without the counts is counted from the members it did send", () => {
+  const t = boot();
+  const counts = t.taskRosterCountsOf({ taskRoster: ROSTER });
+  assert.equal(counts.total, ROSTER.length);
+  assert.equal(counts.done, 2);
+  assert.equal(counts.rejected, 1);
+  assert.equal(t.taskRosterCountsOf({}).total, 0);
+});
+
+test("the expanded Task groups by state: the two worth acting on open, the rest are their count", () => {
+  const t = boot();
+  const grouped = t.taskRosterGroupedHtml(everyoneTask());
+  const groups = [...grouped.matchAll(/<div class="tk-group ([a-z]+)( is-open)?">[\s\S]*?<span class="tk-group-label">([^<]*)<\/span><span class="tk-group-count">(\d+)<\/span>/g)]
+    .map((m) => ({ tone: m[1], open: Boolean(m[2]), label: m[3], count: Number(m[4]) }));
+  assert.deepEqual(groups.map((g) => [g.label, g.count, g.open]), [
+    ["In progress", 4, true],
+    ["Rejected", 3, true],
+    ["Done", 12, false],
+    ["Seen, not started", 60, false],
+    ["Not yet seen", 21, false],
+  ]);
+  // The "seen" tone is literally the word `open`, so expansion needs its own
+  // class: with one class doing both, every seen group rendered as expanded.
+  const seen = groups.find((g) => g.label === "Seen, not started");
+  assert.equal(seen.tone, "open");
+  assert.equal(seen.open, false);
+  assert.match(grouped, /\.tk-group|tk-group open">/, "the tone class survives");
+  // A group shows what the wire sent and counts the rest.
+  assert.match(grouped, /<div class="tk-group started is-open">[\s\S]*?Ben Okafor/);
+  // The wire sends a few members per state, so a remainder is SAID, never offered
+  // as a button that could only redraw the same rows.
+  assert.match(grouped, /<div class="tk-group-more">and \d+ more<\/div>/);
+  assert.doesNotMatch(grouped, /data-task-roster-more/);
+  // The viewer is never repeated inside a group: the strip above is where they are.
+  assert.doesNotMatch(grouped, /class="tk-roster-name">You</);
+});
+
+test("the You strip and the helper say what is theirs and what is the room's", () => {
+  const t = boot();
+  const row = everyoneTask();
+  const strip = t.taskRosterYouStripHtml(row, t.taskStateFor(row));
+  assert.match(strip, /<div class="tk-you open">/);
+  assert.match(strip, /<span class="tk-you-name">You<\/span>/);
+  assert.match(strip, /Yours to do/);
+  assert.match(strip, /data-task-verb="done"[^>]*>Mark done</, "the reader's verbs, not the card's");
+  assert.equal(t.taskRosterYouStripHtml(everyoneSent(), t.taskStateFor(everyoneSent())), "", "the sender has no strip");
+  assert.match(t.taskRosterHelperText(row), /^12 of 100 done · 3 people rejected it\. Your own Reject and Done speak only for you\.$/);
+  assert.match(t.taskRosterHelperText(everyoneSent()), /Every Done row opens that person's result\.$/);
+});
+
+test("the list line: a member reads their own state first, the sender reads the sum", () => {
+  const t = boot();
+  const mine = t.taskRowLineHtml(everyoneTask());
+  assert.match(mine, /<span>Yours to do · everyone · 12 of 100 done<\/span>/);
+  assert.doesNotMatch(mine, /tk-link/, "a member's own row offers no results link");
+  const theirs = t.taskRowLineHtml(everyoneSent());
+  assert.match(theirs, /<span>Everyone · 12 of 100 done · 3 rejected<\/span>/);
+  assert.match(theirs, /data-task-roster-open[^>]*>12 results/);
+  // An Everyone Task with nothing done yet offers no results link.
+  const early = t.taskRowLineHtml(everyoneSent({ taskRosterCounts: { total: 4, done: 0, started: 1, rejected: 0, cancelled: 0, seen: 3, sent: 0 } }));
+  assert.doesNotMatch(early, /results/);
+});
+
+test("the card, the reader and the lists all fork on the assignment", () => {
+  // The renderer must never fall through to the one-ladder card for an Everyone Task.
+  const footer = inbox.slice(inbox.indexOf("function taskCardFooterHtml(row)"), inbox.indexOf("// The expanded Task's module"));
+  // Every Everyone verb rides the viewer's own roster row, so a card whose
+  // roster never arrived falls back to the ordinary state row that carries them.
+  assert.match(footer, /const roster = taskIsEveryone\(row\) \? taskRosterCardHtml\(row\) : "";/);
+  assert.match(footer, /if \(taskIsEveryone\(row\) && roster\) \{/);
+  assert.match(footer, /live && !mine \? taskAgentRowHtml\(row\) : ""/, "a member may still hand their own copy to an agent");
+  const module = inbox.slice(inbox.indexOf("function taskStatusModuleHtml(row)"), inbox.indexOf("function taskRowLineHtml(row)"));
+  assert.match(module, /const grouped = taskIsEveryone\(row\) \? taskRosterGroupedHtml\(row\) : "";/);
+  assert.match(module, /if \(taskIsEveryone\(row\) && grouped\) \{/);
+  // And the server is the one source of the split.
+  const relays = fs.readFileSync(new URL("../../../apps/api/src/services/relays.ts", import.meta.url), "utf8");
+  const todo = fs.readFileSync(new URL("../../../apps/api/src/services/todo.ts", import.meta.url), "utf8");
+  assert.match(todo, /export function isSharedChannelTask\(row: RelayRow\)[\s\S]*?row\.taskAssignment !== "everyone"/);
+  assert.match(relays, /const isChannelTask = isSharedChannelTask;/, "one rule, used by claims, receipts and Todo alike");
+  assert.match(todo, /const sharedTask = isSharedChannelTask\(row\);/, "an Everyone member's Todo is their own, not the room's");
+});
+
+test("Done on an Everyone card keeps its Undo, and only the sender's rows are doors", () => {
+  const t = boot();
+  const row = everyoneTask();
+  // The verbs ride the You row; a Done being held by Undo is "over", so gating
+  // that row on !over took the Undo away with everything else.
+  t.startTaskDone("t1", () => {});
+  const held = t.taskRosterCardHtml(row);
+  assert.match(held, /data-task-verb="undo"[^>]*>Undo</, "the few seconds of Undo must be reachable");
+  assert.doesNotMatch(held, /data-task-verb="reject"/);
+  clearTimeout(t.taskDonePending.get("t1").timer);
+  t.taskDonePending.delete("t1");
+  // A member's result Relay is addressed to the sender alone: on anyone else's
+  // device that id opens nothing, so only the sender's rows carry the chevron.
+  assert.doesNotMatch(t.taskRosterCardHtml(row), /tk-roster-link/, "a member is offered no door");
+  assert.match(t.taskRosterCardHtml(everyoneSent()), /tk-roster-link/, "the sender is");
 });

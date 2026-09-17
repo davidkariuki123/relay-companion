@@ -300,6 +300,14 @@ never start or complete it, and if asked about it, say who closed it and how;
 the sender reads the same in their chat. A finished Task points at its result
 (`taskResultRelayId`, the completion Relay that replied to it).
 
+A Task sent to a channel is one job for whoever claims it, unless it is sent
+with `taskAssignment: "everyone"`: then every member owes it and gets their
+own copy — their Reject or Done speaks for them alone, each result returns to
+the sender by itself, and the Task's `taskRoster` says where every member
+stands. Choose everyone only when each person must do the thing themselves
+(read and approve, confirm their own setup); a job one person can do for the
+channel stays anyone.
+
 Before presenting or sending, check both documents against the user's request:
 every intended point is preserved; no ask or commitment was invented; the person
 can understand the message on its own; the agent has the complete useful context;

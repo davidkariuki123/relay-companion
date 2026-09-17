@@ -30,7 +30,10 @@ test("a share link's ladder is channel-scoped and does not touch other channels"
 test("Opened takes the accent but never settles the row", () => {
   assert.match(html, /read \|\| linkOpened \? " read" : ""/);
   // A Task row settles once the Task is over (done, rejected or cancelled), never on Started.
-  assert.match(html, /const settled = receipt \? Boolean\(receipt\.cls === "done" \|\| taskIsOver\(r\)\) : read;/);
+  // An Everyone Task settles when the LAST member finishes; every other row
+  // settles on its own receipt.
+  assert.match(html, /: receipt \? Boolean\(receipt\.cls === "done" \|\| taskIsOver\(r\)\) : read;/);
+  assert.match(html, /const settled = everyoneTask/);
 });
 
 test("a guest mailbox never reaches the Sent note", () => {

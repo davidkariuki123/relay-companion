@@ -493,6 +493,12 @@ export const TOOLS = [
           description:
             "Required classification of what the sender expects done, never of whether the wording addresses the person or explicitly names their agent. 'task' asks for work or an approval: work by the recipient's agent (inspect, retrieve, analyze, create, change, configure, install, switch, coordinate, test, or verify something and report the result), or the person's approval or decision on something put to them. 'message' is everything else: informing, handing over, and asking for thoughts, opinions or answers, which come back as ordinary replies. Exact examples: 'Switch your Relay install to dev and confirm the version/channel' MUST be kind='task', not kind='message'. 'Approve the September supplier payments' is kind='task': an approval is owed. 'Do you think we should switch to dev?' is kind='message': thoughts are correspondence. 'We switched the pill to dev this morning' is kind='message'. A technical topic can still be a message; forAgent can contain dense implementation context without making it a Task. A small or quick piece of work is still a Task. A Task sent to a saved channel first shows Claim to eligible channel members; after one person claims it, only that claimant may work it and may Unclaim while its work is idle. The old 'handoff' kind no longer exists for new sends; machine detail belongs in forAgent, not in a separate message ontology. Every direct recipient or channel member must already be on Relay; for someone who is not, or when the human says create a task, mint it with relay_share_link kind='task'.",
         },
+        taskAssignment: {
+          type: "string",
+          enum: ["anyone", "everyone"],
+          description:
+            "Channel Tasks only. anyone (the default): one job — whoever claims it carries it out. everyone: each member of the channel owes it; every member gets their own copy of the Task with their own Reject and Done, each result comes back to the sender on its own, and the Task carries a taskRoster saying where every member stands. Ignored on a direct Task.",
+        },
         ...classificationToolProperties,
         title: {
           type: "string",
@@ -1377,6 +1383,11 @@ function toSentSummary(item) {
     createdAt: item?.createdAt,
     ...(item?.readAt ? { readAt: item.readAt } : {}),
     state: item?.state,
+    ...(item?.taskAssignment ? { taskAssignment: item.taskAssignment } : {}),
+    // The counts are exact; `taskRoster` is a sample (a few members per state),
+    // so never count its entries to say how many people are in a state.
+    ...(item?.taskRosterCounts ? { taskRosterCounts: item.taskRosterCounts } : {}),
+    ...(Array.isArray(item?.taskRoster) ? { taskRoster: item.taskRoster.map((m) => ({ name: m.name, state: m.state, ...(m.at ? { at: m.at } : {}), ...(m.self ? { self: true } : {}), ...(m.resultRelayId ? { resultRelayId: m.resultRelayId } : {}) })) } : {}),
     hasAttachments: Boolean(item?.hasAttachments),
   };
 }
@@ -1410,6 +1421,11 @@ function toInboxSummary(item) {
     ...(item?.inReplyToRelayId ? { inReplyToRelayId: item.inReplyToRelayId } : {}),
     ...(item?.recipientGroupName ? { recipientGroupName: item.recipientGroupName } : {}),
     ...(item?.todoStatus ? { todoStatus: item.todoStatus } : {}),
+    ...(item?.taskAssignment ? { taskAssignment: item.taskAssignment } : {}),
+    // The counts are exact; `taskRoster` is a sample (a few members per state),
+    // so never count its entries to say how many people are in a state.
+    ...(item?.taskRosterCounts ? { taskRosterCounts: item.taskRosterCounts } : {}),
+    ...(Array.isArray(item?.taskRoster) ? { taskRoster: item.taskRoster.map((m) => ({ name: m.name, state: m.state, ...(m.at ? { at: m.at } : {}), ...(m.self ? { self: true } : {}), ...(m.resultRelayId ? { resultRelayId: m.resultRelayId } : {}) })) } : {}),
     ...(Number.isInteger(item?.todoVersion) ? { todoVersion: item.todoVersion } : {}),
     ...(item?.duplicateOfItemId ? { duplicateOfItemId: item.duplicateOfItemId } : {}),
     hasAttachments: Boolean(item?.hasAttachments),
@@ -1619,6 +1635,8 @@ function toolsForFeatures(tools, {
       send.inputSchema.properties.kind.enum = ["message"];
       send.inputSchema.properties.kind.description = "Required. Always 'message'.";
       delete send.inputSchema.properties.targetSurfaces;
+      // A channel Task's assignment is Task vocabulary: it goes with the rest.
+      delete send.inputSchema.properties.taskAssignment;
       return send;
     }
     if (tool.name === "relay_share_link") {
@@ -2358,6 +2376,10 @@ async function handleAdmittedCall(client, name, args, {
       if (args.kind === "task" && args.recipient?.chatId) {
         throw new Error("Address a Task to one contact/account or a saved channel groupId; chatId is for ordinary conversation messages");
       }
+      if (args.taskAssignment !== undefined) {
+        if (!["anyone", "everyone"].includes(args.taskAssignment)) throw new Error("taskAssignment must be anyone or everyone");
+        if (args.kind !== "task" || !args.recipient?.groupId) throw new Error("taskAssignment applies only to a Task sent to a saved channel (recipient.groupId)");
+      }
       if (typeof args.forAgent !== "string" || !/\S/u.test(args.forAgent)) {
         throw new Error(`forAgent is required and must be non-empty for every Relay; use relay_chat_send only when the human explicitly requested plain text. ${WRITING_GUIDE_POINTER}`);
       }
@@ -2373,6 +2395,7 @@ async function handleAdmittedCall(client, name, args, {
       const sent = await client.sendRelay({
         recipient: args.recipient,
         kind: args.kind,
+        ...(args.taskAssignment ? { taskAssignment: args.taskAssignment } : {}),
         ...classificationArguments(args),
         title: args.title,
         forHuman: args.forHuman,

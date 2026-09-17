@@ -682,7 +682,10 @@ test("specific replies use an attached composer preview and render a source refe
   assert.match(html, /if \(b\.dataset\.wired\) continue;/);
   assert.match(html, /inReplyToRelayId: r\.inReplyToRelayId \|\| ""/);
   assert.match(html, /inReplyToRelayId: s\.inReplyToRelayId \|\| ""/);
-  assert.match(html, /\$\{messageReplyReferenceHtml\(m\)\}/);
+  // An ordinary reply still quotes its source. A Task-event bubble (a person's
+  // Reject, Cancel or Done) swaps that quote for the event line, in the same
+  // slot and the same recipe — see pill-task-card.test.mjs.
+  assert.match(html, /\$\{taskEvent \? taskEventRefHtml\(taskEvent\) : messageReplyReferenceHtml\(m\)\}/);
   // The jump lands on the bubble the room KEPT: a fan-out I sent is one
   // bubble under one sibling's id, and a member's reply names the sibling
   // they received (group-reply-quote-siblings.test.mjs).

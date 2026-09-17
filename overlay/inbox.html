@@ -3271,6 +3271,83 @@
   .relays-filter { display:flex; gap:4px; padding:0 16px 6px; }
   .relays-filter[hidden], .card.collapsed .relays-filter, .card.peek .relays-filter { display:none; }
   .relays-filter .relays-layout-button { height:22px; font-size:10.5px; padding:0 7px; }
+  /* ---- THE ROSTER (an Everyone Task) ----
+     Each member and their own last rung, in the marks and tones used everywhere
+     else. One hairline between rows, the name takes the width, the state keeps
+     its own. The card shows a few rows and counts the rest; the expanded Task
+     groups them by state in the reader's disclosure recipe. */
+  .tk-roster { display:flex; flex-direction:column; gap:0; margin:0 0 8px; min-width:0; }
+  .tk-roster-row { display:flex; align-items:center; gap:8px; min-height:28px; min-width:0;
+    font-family:var(--sans); font-size:12px; font-weight:400; line-height:1.2; color:var(--ink-2, var(--ink)); }
+  .tk-roster-row + .tk-roster-row { border-top:1px solid var(--hair); }
+  .tk-roster-row .avatar { width:18px; height:18px; font-size:8px; flex:0 0 auto; margin-top:0; }
+  .tk-roster-name { flex:1 1 auto; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:500; }
+  .tk-roster-state { display:inline-flex; align-items:center; gap:6px; flex:0 0 auto;
+    font-size:11.5px; font-weight:500; white-space:nowrap; color:var(--muted); }
+  .tk-roster-state .tk-mark { width:10px; height:10px; }
+  .tk-roster-row.started .tk-roster-state { color:var(--accent); }
+  .tk-roster-row.done .tk-roster-state { color:var(--ok); }
+  .tk-roster-row.rejected .tk-roster-state { color:var(--danger); }
+  .tk-roster-row.cancelled .tk-roster-state, .tk-roster-row.unseen .tk-roster-state { color:var(--muted-2); }
+  .tk-roster-row.you { min-height:32px; }
+  .tk-roster-row.you .tk-roster-name { color:var(--ink); font-weight:600; }
+  .tk-roster-row[data-task-result-of] { cursor:pointer; }
+  .tk-roster-row[data-task-result-of]:hover { background:var(--wash); }
+  .tk-roster-row .tk-verbs { margin-left:2px; }
+  .tk-roster-row .tk-btn { height:24px; line-height:22px; padding:0 9px; font-size:11px; border-radius:7px; }
+  .tk-roster-link { flex:0 0 auto; margin-left:2px; color:var(--muted-2); font-family:var(--sans); font-size:14px; line-height:1; }
+  /* the counted line: who is left, in the same marks, ellipsised before it wraps */
+  .tk-roster-more { appearance:none; width:100%; display:flex; align-items:center; gap:8px; min-height:30px; min-width:0;
+    margin:0; padding:0; border:0; border-top:1px solid var(--hair); background:transparent; cursor:pointer;
+    text-align:left; font-family:var(--sans); color:var(--muted); overflow:hidden; }
+  .tk-roster-more:hover .tk-roster-more-n { text-decoration:underline; text-underline-offset:2px; }
+  .tk-roster-more-n { flex:0 0 auto; font-size:12px; font-weight:600; color:var(--ink-2, var(--ink)); }
+  .tk-roster-more-sum { flex:1 1 auto; min-width:0; display:inline-flex; align-items:center; gap:4px;
+    font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tk-roster-more-sum .tk-mark { width:8px; height:8px; flex:none; margin:0 1px 0 2px; }
+  .tk-roster-more-sum .tk-mark.done { color:var(--ok); }
+  .tk-roster-more-sum .tk-mark.started { color:var(--accent); }
+  .tk-roster-more-sum .tk-mark.rejected { color:var(--danger); }
+  .tk-roster-more-chev { flex:0 0 auto; font-family:var(--sans); font-size:14px; color:var(--muted-2); }
+  /* the viewer's own strip above the groups in the expanded Task */
+  .tk-you { display:flex; align-items:center; gap:10px; min-width:0; padding:0 0 12px; margin:0 0 6px;
+    border-bottom:1px solid var(--hair); font-family:var(--sans); }
+  .tk-you .avatar { width:22px; height:22px; font-size:9px; flex:0 0 auto; margin-top:0; }
+  .tk-you-name { flex:0 0 auto; font-size:13px; font-weight:600; color:var(--ink); }
+  .tk-you .tk-roster-state { font-size:12.5px; }
+  .tk-you.started .tk-roster-state { color:var(--accent); }
+  .tk-you.done .tk-roster-state { color:var(--ok); }
+  .tk-you.rejected .tk-roster-state { color:var(--danger); }
+  .tk-you.cancelled .tk-roster-state { color:var(--muted-2); }
+  .tk-you .tk-verbs { margin-left:auto; }
+  .tk-you .tk-btn { height:30px; line-height:28px; padding:0 14px; font-size:12px; border-radius:9px; }
+  /* grouped by state, in the reader */
+  .tk-status .tk-roster { margin-bottom:0; }
+  .tk-status .tk-roster-row { min-height:30px; font-size:12.5px; }
+  .tk-roster.grouped { gap:0; }
+  .tk-group + .tk-group { border-top:1px solid var(--hair); }
+  .tk-group-head { appearance:none; width:100%; display:flex; align-items:center; gap:10px; min-height:38px;
+    padding:0 2px; border:0; background:transparent; cursor:pointer; text-align:left; font-family:var(--sans); }
+  .tk-group-head:hover .tk-group-label { color:var(--ink); }
+  .tk-group-mark { display:inline-flex; width:12px; flex:none; color:var(--muted); }
+  .tk-group-mark .tk-mark { width:12px; height:12px; }
+  .tk-group-label { flex:1 1 auto; min-width:0; font-size:12.5px; font-weight:600; color:var(--muted);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tk-group-count { flex:none; font-family:var(--mono); font-size:11px; color:var(--muted-2); font-variant-numeric:tabular-nums; }
+  .tk-group.started .tk-group-mark, .tk-group.started .tk-group-label { color:var(--accent); }
+  .tk-group.done .tk-group-mark, .tk-group.done .tk-group-label { color:var(--ok); }
+  .tk-group.rejected .tk-group-mark, .tk-group.rejected .tk-group-label { color:var(--danger); }
+  .tk-group.open .tk-group-mark, .tk-group.open .tk-group-label { color:var(--muted); }
+  .tk-group.cancelled .tk-group-mark, .tk-group.cancelled .tk-group-label,
+  .tk-group.unseen .tk-group-mark, .tk-group.unseen .tk-group-label { color:var(--muted-2); }
+  .tk-group-head .rd-details-chev { flex:none; color:var(--muted-2); font-size:16px; line-height:1;
+    transition:transform var(--t-fast) var(--settle); }
+  .tk-group.is-open .tk-group-head .rd-details-chev { transform:rotate(90deg); }
+  .tk-group-body { padding:0 0 6px 22px; }
+  .tk-group-body .tk-roster-row { min-height:28px; font-size:12px; }
+  .tk-group-body .tk-roster-row .tk-roster-state .tk-mark { display:none; }
+  .tk-group-more { padding:7px 0 3px; font-family:var(--sans); font-size:11.5px; font-weight:500; color:var(--muted-2); }
+
   /* hover with intent: a row that the pointer RESTS on grows one line and shows its verbs */
   .tk-hoververbs { display:flex; flex-wrap:wrap; align-items:center; gap:6px 14px; margin-top:8px; }
   .tk-hoververbs .act-btn { font-size:12px; line-height:1; }
@@ -8685,6 +8762,7 @@
     started: '<span class="tk-mark started" aria-hidden="true"></span>',
     done: '<svg class="tk-mark done" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="6" fill="currentColor"/><path d="M3.4 6.3l1.8 1.7 3.5-3.7" fill="none" stroke="var(--tk-on)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     rejected: '<svg class="tk-mark rejected" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="5.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M4.1 4.1l3.8 3.8M7.9 4.1l-3.8 3.8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+    unseen: '<svg class="tk-mark unseen" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="5.25" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.4 2.1" stroke-linecap="round"/></svg>',
     cancelled: '<svg class="tk-mark cancelled" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="5.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M3.9 6h4.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   };
   const TASK_CHECK_SVG = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3.4 6.3l1.8 1.7 3.5-3.7" fill="none" stroke="var(--tk-on)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -8907,6 +8985,173 @@
     const note = taskCardNotes.get(taskIdOf(row));
     return note ? `<div class="task-claim-error" role="status">${esc(note)}</div>` : "";
   }
+  // ---------- EVERYONE: THE ROSTER ----------
+  // An Everyone Task is N Tasks under one letter: each member owes it, each
+  // holds their own copy with their own Reject and Done. Everyone sees how
+  // everyone is getting on (David, 2026-09-17), so the roster is on EVERY
+  // member's card, not only the sender's, and the person themself is pinned
+  // first as You. The wire carries a few members per state plus the exact
+  // counts; nothing here counts rows to know how many there are.
+  const TASK_ROSTER_CARD_ROWS = 3;
+  const TASK_ROSTER_GROUP_ROWS = 8;
+  // The order the roster reads in, and the words each state wears.
+  const TASK_ROSTER_STATES = [
+    { key: "started", tone: "started", mark: "started", label: "In progress", open: true },
+    { key: "rejected", tone: "rejected", mark: "rejected", label: "Rejected", open: true },
+    { key: "done", tone: "done", mark: "done", label: "Done", open: false },
+    { key: "cancelled", tone: "cancelled", mark: "cancelled", label: "Cancelled", open: false },
+    { key: "seen", tone: "open", mark: "open", label: "Seen, not started", open: false },
+    { key: "sent", tone: "unseen", mark: "unseen", label: "Not yet seen", open: false },
+  ];
+  const TASK_ROSTER_STATE = Object.fromEntries(TASK_ROSTER_STATES.map((state) => [state.key, state]));
+  // Which groups this contact has opened, while the pill runs. A group's
+  // default is its own `open` above: the two worth acting on.
+  const taskRosterOpen = new Map(); // `${taskId}:${stateKey}` -> boolean
+  function taskIsEveryone(row) { return Boolean(row && row.taskAssignment === "everyone"); }
+  function taskRosterOf(row) { return Array.isArray(row && row.taskRoster) ? row.taskRoster : []; }
+  function taskRosterCountsOf(row) {
+    const counts = row && row.taskRosterCounts;
+    if (counts && typeof counts === "object") return counts;
+    // An older server sent the members without the counts: count what we have.
+    const members = taskRosterOf(row);
+    const out = { total: members.length, done: 0, started: 0, rejected: 0, cancelled: 0, seen: 0, sent: 0 };
+    for (const member of members) if (out[member.state] !== undefined) out[member.state] += 1;
+    return out;
+  }
+  // The sum, in the words the state line and the row line both use.
+  function taskRosterSumText(counts) {
+    if (!counts || !counts.total) return "Everyone";
+    if (counts.done === counts.total) return `Everyone · all ${counts.total} done`;
+    return `Everyone · ${counts.done} of ${counts.total} done`;
+  }
+  // The tone the sum wears: green once everyone is done, accent while anyone
+  // is moving, danger when the only movement is refusal.
+  function taskRosterTone(counts) {
+    if (!counts || !counts.total) return "open";
+    if (counts.done === counts.total) return "done";
+    if (counts.started || counts.done) return "started";
+    if (counts.rejected) return "rejected";
+    return "open";
+  }
+  function taskRosterMemberWord(member) {
+    const state = TASK_ROSTER_STATE[member.state] || TASK_ROSTER_STATE.sent;
+    const when = member.at ? timeAgo(member.at) : "";
+    if (member.state === "sent") return "Not yet seen";
+    if (member.state === "seen") return `Seen${when ? ` · ${when}` : ""}`;
+    return `${state.label}${when ? ` · ${when}` : ""}`;
+  }
+  // The viewer's own disc is their own: "You" is a word, not initials.
+  function taskRosterSelfName() {
+    return String((payload.account && (payload.account.name || payload.account.email)) || "You").trim() || "You";
+  }
+  function taskRosterRowHtml(member, { you = false, verbs = "", chevron = false } = {}) {
+    const state = TASK_ROSTER_STATE[member.state] || TASK_ROSTER_STATE.sent;
+    const name = you ? "You" : String(member.name || "Someone");
+    const disc = you ? taskRosterSelfName() : name;
+    return `<div class="tk-roster-row ${state.tone}${you ? " you" : ""}"${member.resultRelayId ? ` data-task-result-of="${esc(member.resultRelayId)}"` : ""}>`
+      + `<span class="avatar" style="--av-h:${avatarHue(disc)}" aria-hidden="true">${esc(avatarInitials(disc))}</span>`
+      + `<span class="tk-roster-name">${esc(name)}</span>`
+      + `<span class="tk-roster-state">${taskMarkHtml(state.mark)}<span>${esc(taskRosterMemberWord(member))}</span></span>`
+      + `${verbs}${chevron && member.resultRelayId ? `<span class="tk-roster-link" aria-hidden="true">›</span>` : ""}</div>`;
+  }
+  // The counted line under the card's few rows: how the rest split, in marks
+  // and numbers — words do not fit at 344 and the state line says them anyway.
+  function taskRosterMoreHtml(row, shownMembers) {
+    const counts = taskRosterCountsOf(row);
+    const rest = Math.max(0, counts.total - shownMembers.length);
+    if (!rest) return "";
+    // It describes the REMAINDER it sits beside, so subtract whoever is already
+    // named above it — otherwise "96 more" was followed by numbers summing to 100.
+    const listed = {};
+    for (const member of shownMembers) listed[member.state] = (listed[member.state] || 0) + 1;
+    const left = (key) => Math.max(0, (counts[key] || 0) - (listed[key] || 0));
+    const waiting = left("seen") + left("sent");
+    const bits = [
+      ...["done", "started", "rejected", "cancelled"]
+        .filter((key) => left(key) > 0)
+        .map((key) => `<i class="tk-mark ${TASK_ROSTER_STATE[key].mark}"></i>${left(key)} ${key === "started" ? "in progress" : key}`),
+      ...(waiting > 0 ? [`<i class="tk-mark open"></i>${waiting} waiting`] : []),
+    ].join(" · ");
+    return `<button type="button" class="tk-roster-more" data-task-roster-open="${esc(taskIdOf(row))}">`
+      + `<span class="tk-roster-more-n">${rest} more</span>`
+      + `<span class="tk-roster-more-sum">${bits}</span>`
+      + `<span class="tk-roster-more-chev" aria-hidden="true">›</span></button>`;
+  }
+  // The card's roster: You first with your verbs, then the three people whose
+  // state changed most recently, then the counted line. It never scrolls and
+  // never grows past four rows.
+  function taskRosterCardHtml(row) {
+    const members = taskRosterOf(row);
+    if (!members.length) return "";
+    const mine = taskIsMine(row);
+    const own = mine ? null : members.find((member) => member.self);
+    const st = taskStateFor(row);
+    // Not "!st.over": a Done being held by Undo IS over, and the Undo lives in
+    // that verb row. taskVerbsHtml returns nothing for a Task that has settled.
+    const verbs = own ? taskVerbsHtml(row, st) : "";
+    const others = members.filter((member) => !own || member.relayId !== own.relayId);
+    const movements = others.filter((member) => ["done", "started", "rejected", "cancelled"].includes(member.state));
+    const shown = movements.slice(0, TASK_ROSTER_CARD_ROWS);
+    const rows = (own ? [taskRosterRowHtml(own, { you: true, verbs })] : [])
+      .concat(shown.map((member) => taskRosterRowHtml(member, { chevron: mine })));
+    return `<div class="tk-roster">${rows.join("")}${taskRosterMoreHtml(row, own ? [own, ...shown] : shown)}</div>`;
+  }
+  // The expanded Task's roster: grouped by state in the reader's disclosure
+  // recipe. In progress and Rejected open by default — they are the ones to
+  // act on; every other group is its count until it is asked for. Eight rows,
+  // then one line for the rest. The page is the only thing that scrolls.
+  function taskRosterGroupedHtml(row) {
+    const members = taskRosterOf(row);
+    const counts = taskRosterCountsOf(row);
+    if (!counts.total) return "";
+    const id = taskIdOf(row);
+    const mine = taskIsMine(row);
+    const groups = TASK_ROSTER_STATES.filter((state) => counts[state.key] > 0).map((state) => {
+      const key = `${id}:${state.key}`;
+      const open = taskRosterOpen.has(key) ? taskRosterOpen.get(key) === true : state.open;
+      const inState = members.filter((member) => member.state === state.key && !(!mine && member.self));
+      const visible = inState.slice(0, TASK_ROSTER_GROUP_ROWS);
+      // The server sends a few members per state and the exact count beside
+      // them, so the rest are named nowhere on this device: say so plainly
+      // rather than offer a button that can only redraw the same rows.
+      const shownSelf = !mine && members.some((member) => member.self && member.state === state.key) ? 1 : 0;
+      const hidden = Math.max(0, counts[state.key] - visible.length - shownSelf);
+      const body = open
+        ? `<div class="tk-group-body">${visible.map((member) => taskRosterRowHtml(member, { chevron: mine })).join("")}`
+          + `${hidden ? `<div class="tk-group-more">and ${hidden} more</div>` : ""}</div>`
+        : "";
+      return `<div class="tk-group ${state.tone}${open ? " is-open" : ""}">`
+        + `<button type="button" class="tk-group-head" data-task-roster-group="${esc(key)}" aria-expanded="${open ? "true" : "false"}">`
+        + `<span class="tk-group-mark">${taskMarkHtml(state.mark)}</span>`
+        + `<span class="tk-group-label">${esc(state.label)}</span>`
+        + `<span class="tk-group-count">${counts[state.key]}</span>`
+        + `<span class="rd-details-chev" aria-hidden="true">›</span></button>${body}</div>`;
+    });
+    return `<div class="tk-roster grouped">${groups.join("")}</div>`;
+  }
+  // The member's own strip above the groups in the expanded Task: their state,
+  // their clock, their verbs at the reader's scale. It is never repeated
+  // inside its group — the strip is where they are.
+  function taskRosterYouStripHtml(row, st) {
+    if (taskIsMine(row)) return "";
+    const own = taskRosterOf(row).find((member) => member.self);
+    if (!own) return "";
+    return `<div class="tk-you ${st.tone}">`
+      + `<span class="avatar" style="--av-h:${avatarHue(taskRosterSelfName())}" aria-hidden="true">${esc(avatarInitials(taskRosterSelfName()))}</span>`
+      + `<span class="tk-you-name">You</span>`
+      + `<span class="tk-roster-state">${taskMarkHtml(st.tone)}<span>${esc(st.text)}</span></span>`
+      + `${taskVerbsHtml(row, st, { surface: "reader" })}</div>`;
+  }
+  function taskRosterHelperText(row) {
+    const counts = taskRosterCountsOf(row);
+    const mine = taskIsMine(row);
+    const parts = [`${counts.done} of ${counts.total} done`];
+    if (counts.rejected) parts.push(`${counts.rejected} ${counts.rejected === 1 ? "person" : "people"} rejected it`);
+    const tail = mine
+      ? "Every Done row opens that person's result."
+      : "Your own Reject and Done speak only for you.";
+    return `${parts.join(" · ")}. ${tail}`;
+  }
   // The card footer: the hairline, the sender's ladder, the agent row while the
   // Task is live, and the state row with the decision.
   function taskCardFooterHtml(row) {
@@ -8914,6 +9159,19 @@
     const st = taskStateFor(row);
     const mine = taskIsMine(row);
     const live = !st.over;
+    // An Everyone Task carries the roster in place of one ladder: the sender
+    // and every member read the same card, and the state line sums it up.
+    // The verbs ride the viewer's own You row, so the sum keeps none.
+    // An Everyone Task's verbs ride the viewer's own roster row, so a card whose
+    // roster never arrived would be unactionable. Fall back to the ordinary
+    // state row, which always carries them.
+    const roster = taskIsEveryone(row) ? taskRosterCardHtml(row) : "";
+    if (taskIsEveryone(row) && roster) {
+      const counts = taskRosterCountsOf(row);
+      const tone = taskRosterTone(counts);
+      const asking = taskAsking.get(taskIdOf(row));
+      return `<div class="tk-footer" data-stop="1" data-task-card="${esc(taskIdOf(row))}">${roster}${live && !mine ? taskAgentRowHtml(row) : ""}<div class="tk-foot ${tone}${asking ? " asking" : ""}"><span class="tk-state">${taskMarkHtml(tone)}<span class="tk-text">${esc(taskRosterSumText(counts))}</span></span>${taskAskRowHtml(row)}</div>${taskNoteHtml(row)}</div>`;
+    }
     return `<div class="tk-footer" data-stop="1" data-task-card="${esc(taskIdOf(row))}">${mine ? taskLadderRowHtml(row) : ""}${live ? taskAgentRowHtml(row) : ""}${taskStateRowHtml(row, st)}${taskNoteHtml(row)}</div>`;
   }
   // The expanded Task's module: the ladder as a stepper, one helper line in
@@ -8944,6 +9202,14 @@
   function taskStatusModuleHtml(row) {
     if (!row) return "";
     const st = taskStateFor(row);
+    // An Everyone Task: the roster grouped by state in place of the ladder,
+    // with the viewer's own row as a strip above it.
+    const grouped = taskIsEveryone(row) ? taskRosterGroupedHtml(row) : "";
+    if (taskIsEveryone(row) && grouped) {
+      const counts = taskRosterCountsOf(row);
+      const tone = taskRosterTone(counts);
+      return `<div class="tk-status ${tone}" data-stop="1" data-task-card="${esc(taskIdOf(row))}">${taskRosterYouStripHtml(row, st)}${grouped}<div class="tk-row"><span class="tk-helper">${esc(taskRosterHelperText(row))}</span></div>${taskAskRowHtml(row)}${taskNoteHtml(row)}</div>`;
+    }
     const steps = taskLadder(row);
     const stepper = `<div class="tk-steps">${steps.map((step, index) => `${index ? `<span class="tk-line${step.state !== "todo" ? " on" : ""}" aria-hidden="true"></span>` : ""}<div class="tk-step ${step.state}"><span class="tk-node">${step.state === "done" ? TASK_CHECK_SVG : ""}</span><span class="tk-label">${esc(step.label)}</span><span class="tk-when">${step.when ? esc(timeAgo(step.when)) : ""}</span></div>`).join("")}</div>`;
     const result = st.tone === "done" && !st.pending ? taskResultFor(row) : null;
@@ -8957,6 +9223,21 @@
   function taskRowLineHtml(row) {
     if (!row) return "";
     const st = taskStateFor(row);
+    // An Everyone Task's line: the sender reads the sum, a member reads their
+    // own state first and then the sum — their obligation, then the room's.
+    if (taskIsEveryone(row)) {
+      const counts = taskRosterCountsOf(row);
+      const mine = taskIsMine(row);
+      const tone = mine ? taskRosterTone(counts) : st.tone;
+      const rungs = mine
+        ? ["past", "past", counts.started || counts.done ? "now" : "todo", counts.done === counts.total && counts.total ? "done" : "todo"]
+        : st.rungs;
+      const text = mine
+        ? `${taskRosterSumText(counts)}${counts.rejected ? ` · ${counts.rejected} rejected` : ""}`
+        : `${st.text} · everyone · ${counts.done} of ${counts.total} done`;
+      const results = mine && counts.done ? `<button type="button" class="tk-link" data-task-roster-open="${esc(taskIdOf(row))}">${counts.done} ${counts.done === 1 ? "result" : "results"}<span class="tk-link-chev" aria-hidden="true">›</span></button>` : "";
+      return `<div class="tk-rowline ${tone}">${taskRungsHtml(rungs)}<span>${esc(text)}</span>${results}</div>`;
+    }
     const link = taskResultLinkHtml(row, st);
     return `<div class="tk-rowline ${st.tone}">${taskRungsHtml(st.rungs)}<span>${esc(st.text)}</span>${link}</div>`;
   }
@@ -9077,6 +9358,36 @@
       button.addEventListener("click", (event) => {
         event.stopPropagation();
         taskVerb(String(button.getAttribute("data-task-verb") || ""), String(button.getAttribute("data-task-id") || ""), rerender);
+      });
+    }
+    // "97 more" and "N results" are doors: they open the expanded Task at the roster.
+    for (const button of scope.querySelectorAll("[data-task-roster-open]")) {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const id = String(button.getAttribute("data-task-roster-open") || "");
+        const row = taskRowById(id);
+        openReader(id, row && taskIsMine(row) ? "sent" : "threads");
+      });
+    }
+    for (const button of scope.querySelectorAll("[data-task-roster-group]")) {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const key = String(button.getAttribute("data-task-roster-group") || "");
+        const stateKey = key.slice(key.lastIndexOf(":") + 1);
+        const fallback = (TASK_ROSTER_STATE[stateKey] || {}).open === true;
+        const open = taskRosterOpen.has(key) ? taskRosterOpen.get(key) === true : fallback;
+        taskRosterOpen.set(key, !open);
+        // A disclosure must not move the page under the finger.
+        const top = scrollEl ? scrollEl.scrollTop : 0;
+        rerender();
+        if (scrollEl) scrollEl.scrollTop = top;
+      });
+    }
+    // A Done row on the roster opens that person's result letter.
+    for (const rosterRow of scope.querySelectorAll("[data-task-result-of]")) {
+      rosterRow.addEventListener("click", (event) => {
+        event.stopPropagation();
+        openReader(String(rosterRow.getAttribute("data-task-result-of") || ""), "threads");
       });
     }
     for (const button of scope.querySelectorAll("[data-task-result]")) {
@@ -9861,6 +10172,9 @@
         taskClosedBy: sentTwin?.taskClosedBy || item.taskClosedBy || null,
         taskResultRelayId: sentTwin?.taskResultRelayId || item.taskResultRelayId || null,
         taskClaim: sentTwin?.taskClaim || item.taskClaim || null,
+        taskAssignment: sentTwin?.taskAssignment || item.taskAssignment || null,
+        taskRoster: sentTwin?.taskRoster || item.taskRoster || null,
+        taskRosterCounts: sentTwin?.taskRosterCounts || item.taskRosterCounts || null,
         type: item.type || sentTwin?.type || null,
         inReplyToRelayId: item.inReplyToRelayId || sentTwin?.inReplyToRelayId || null,
         attachments: item.attachments || [],
@@ -9925,6 +10239,9 @@
       taskClosedBy: sent.taskClosedBy || null,
       taskResultRelayId: sent.taskResultRelayId || null,
       taskClaim: sent.taskClaim || null,
+      taskAssignment: sent.taskAssignment || null,
+      taskRoster: sent.taskRoster || null,
+      taskRosterCounts: sent.taskRosterCounts || null,
       type: sent.type || null,
       inReplyToRelayId: sent.inReplyToRelayId || null,
       // The expanded reader uses this projection, not the conversation's
@@ -11723,7 +12040,10 @@
   }
   function sentRowsHtml(rows) {
     return sentListRows(rows).map((members) => {
-      const r = members[0];
+      // An Everyone Task's siblings collapse into one row; the roster rides
+      // whichever sibling the server put it on.
+      const rosterSibling = members.find((member) => Array.isArray(member.taskRoster) && member.taskRoster.length);
+      const r = rosterSibling && members[0] !== rosterSibling ? { ...members[0], taskRoster: rosterSibling.taskRoster, taskRosterCounts: rosterSibling.taskRosterCounts, taskAssignment: rosterSibling.taskAssignment } : members[0];
       const id = r.relayId || r.id || "";
       const subject = sentSubject(r);
       const body = r.forHuman || "";
@@ -11754,12 +12074,17 @@
         : linkOpened
           ? (dd.openedAt || dd.sentAt || r.createdAt)
           : (dd.sentAt || r.createdAt);
-      // Tasks never fan out (single-recipient by design), so the task receipt
-      // only ever decorates a single row.
-      const receipt = isGroup ? null : taskReceipt(r);
+      // A direct Task never fans out — but an Everyone Task always does, and its
+      // collapsed row IS the sender's whole roster, so it keeps the Task
+      // presentation (chip, state line, results door) instead of reading as an
+      // ordinary group send.
+      const everyoneTask = taskIsEveryone(r) && taskRosterOf(r).length > 0;
+      const receipt = isGroup && !everyoneTask ? null : taskReceipt(r);
       // A partially read group send reads "Read 1/2" — the fraction is the
       // receipt, so the clock stays on the send.
-      const stLabel = receipt
+      const stLabel = everyoneTask
+        ? taskRosterSumText(taskRosterCountsOf(r))
+        : receipt
         ? receipt.label
         : isGroup && readCount && !read
           ? `Read ${readCount}/${members.length}`
@@ -11769,7 +12094,10 @@
         ? (receipt.cls ? ` ${receipt.cls}` : "")
         : `${read || linkOpened ? " read" : ""}${klass === "failed" ? " failed" : ""}`;
       // A Done task settles like a read message; Started keeps it prominent.
-      const settled = receipt ? Boolean(receipt.cls === "done" || taskIsOver(r)) : read;
+      // An Everyone row settles when the LAST member finishes, not the first.
+      const settled = everyoneTask
+        ? taskRosterCountsOf(r).total > 0 && taskRosterCountsOf(r).done === taskRosterCountsOf(r).total
+        : receipt ? Boolean(receipt.cls === "done" || taskIsOver(r)) : read;
       // A Task row keeps the clock at the top and says its state in the line
       // under the title, like every other Task row (David, 2026-09-17).
       const taskRow = Boolean(receipt);
@@ -14362,6 +14690,9 @@
         taskClosedBy: r.taskClosedBy || null,
         taskResultRelayId: r.taskResultRelayId || null,
         taskRunOwner: r.taskRunOwner || null,
+        taskAssignment: r.taskAssignment || null,
+        taskRoster: Array.isArray(r.taskRoster) ? r.taskRoster : null,
+        taskRosterCounts: r.taskRosterCounts || null,
         type: r.type || null,
         taskClaim: r.taskClaim || null,
         materializedCodex: Boolean(r.materializedCodex),
@@ -14463,6 +14794,9 @@
         taskClosedBy: s.taskClosedBy || null,
         taskResultRelayId: s.taskResultRelayId || null,
         taskRunOwner: s.taskRunOwner || null,
+        taskAssignment: s.taskAssignment || null,
+        taskRoster: Array.isArray(s.taskRoster) ? s.taskRoster : null,
+        taskRosterCounts: s.taskRosterCounts || null,
         type: s.type || null,
         recipient: s.recipient || null,
         readAt: s.readAt || null,

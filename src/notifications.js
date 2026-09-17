@@ -607,6 +607,11 @@ export function stagePlainRelayItem(
     taskCancelledAt: item.taskCancelledAt || existing.taskCancelledAt || null,
     taskClosedBy: item.taskClosedBy || existing.taskClosedBy || null,
     taskResultRelayId: item.taskResultRelayId || existing.taskResultRelayId || null,
+    // An Everyone Task’s assignment and its live roster: the server owns both,
+    // so a fresh projection always wins over the staged copy.
+    taskAssignment: item.taskAssignment || existing.taskAssignment || null,
+    taskRoster: Array.isArray(item.taskRoster) ? item.taskRoster : (existing.taskRoster || null),
+    taskRosterCounts: item.taskRosterCounts || existing.taskRosterCounts || null,
     // Channel Task ownership is live projection state, not packet content.
     taskClaim: item.taskClaim || existing.taskClaim || null,
     // Todo is an independent workflow projection. Persist it with the staged
