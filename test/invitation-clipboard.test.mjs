@@ -47,14 +47,16 @@ test("unsafe links and a changed account never touch the clipboard", async () =>
 
 test("per-Relay Copy link explains the message and preserves the browser fallback", async () => {
   const html = readFileSync(new URL("../overlay/inbox.html", import.meta.url), "utf8");
-  const start = html.indexOf('    for (const btn of sentListEl.querySelectorAll("[data-sent-copy-link]"))');
+  // Sent rows are wired by container now (the Sent tab and the Relays tab's
+  // Sent segment share them), so the loop reads `scope`, not the element.
+  const start = html.indexOf('    for (const btn of scope.querySelectorAll("[data-sent-copy-link]"))');
   assert.ok(start >= 0);
   const end = html.indexOf("\n  }\n\n  // ---------- Tasks view", start);
   assert.ok(end > start);
   let onClick, copied, note;
   const url = "https://sendrelays.com/s/test-share";
   vm.runInNewContext(html.slice(start, end), {
-    sentListEl: { querySelectorAll: () => [{
+    scope: { querySelectorAll: () => [{
       getAttribute: name => name === "data-share-url" ? url : "relay_test",
       addEventListener: (_event, fn) => { onClick = fn; },
     }] },

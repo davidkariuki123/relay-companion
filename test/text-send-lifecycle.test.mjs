@@ -89,7 +89,15 @@ test("an upgrade never adds new request metadata to a previously queued retry", 
 });
 
 function renderer() {
-  const context = vm.createContext({ latestOutboxRevision: 0, cardViewTransition: null, optimisticChatReplies: new Map(), payload: {} });
+  // onPayload also settles Task state that the record has since confirmed. That
+  // is a different surface from this race, so it is stubbed rather than run.
+  const context = vm.createContext({
+    latestOutboxRevision: 0,
+    cardViewTransition: null,
+    optimisticChatReplies: new Map(),
+    payload: {},
+    settleTaskLocalState: () => {},
+  });
   vm.runInContext(section("  function acceptOutboxReceipt(", "  function activeSlackRoomRecoveryMatches("), context);
   vm.runInContext(section("  function syncOutboxProjection()", "  // The room composer is wired ONCE"), context);
   // Run the real payload admission guard, then the real queue projection. The
