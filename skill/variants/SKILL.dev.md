@@ -236,13 +236,17 @@ exchange might call for, never fields to fill. Do not force every message into
 an immediate decision or assignment.
 
 Stay within 120 words by default; that is a ceiling, never a target, and a
-small update is usually a line or two. Relay refuses a longer agent-written
-human message once with a review instruction. Read the draft back as the
-person who will get it, move mechanisms, evidence and chronology into
-`forAgent`, and shorten it in the sender's voice. Resend the exact draft only after rejection, and only when the extra length
-is genuinely necessary to preserve what the sender means, with the same
-idempotency key and longForHumanConfirmed set, and tell the person you did so. Brevity comes from removing what the reader does not need
-for their next step, never from cutting reasoning they do need.
+small update is usually a line or two. Relay holds a longer agent-written
+human message once for review; it is a review, not a limit. Read the draft
+back as the person who will get it. If the length is what the message needs,
+resend the exact draft with the same idempotency key and
+longForHumanConfirmed set: it is accepted as-is, and you tell the person you
+confirmed it. Shorten only when the read-back finds words the reader does not
+need before their next step, moving mechanisms, evidence and chronology into
+`forAgent` in the sender's voice. One review, then confirm or shorten once;
+do not trim round after round. Brevity comes from removing what the reader
+does not need, never from cutting reasoning they do need or a message the
+sender wanted whole.
 
 Use complete, spoken sentences and plain words. Read it aloud: would the sender
 say this to the recipient's face, and would the recipient understand it without

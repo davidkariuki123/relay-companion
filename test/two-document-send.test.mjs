@@ -83,7 +83,7 @@ test("the concise human document is derived from a complete unlimited agent docu
   assert.match(skill, /preserve that orientation when cutting/);
   assert.match(tool.inputSchema.properties.forHuman.description, /enough background for someone arriving fresh/);
   assert.match(tool.inputSchema.properties.forHuman.description, /leave explaining a system or design to forAgent/);
-  assert.match(tool.inputSchema.properties.longForHumanConfirmed.description, /already rejected this exact draft/i);
+  assert.match(tool.inputSchema.properties.longForHumanConfirmed.description, /resend the exact draft Relay held for review[\s\S]*accepted as-is/i);
   assert.match(tool.inputSchema.properties.forAgent.description, /complete .*document/i);
   assert.match(tool.inputSchema.properties.forAgent.description, /may be as long and detailed as necessary/i);
 });

@@ -114,7 +114,8 @@ test("startup guidance and owner schemas preserve the complete product ontology"
   assert.match(skillGuide, /History cannot\s+revive superseded intent/);
   assert.match(skillGuide, /mechanisms, evidence, code, paths, logs, reproduction steps/);
   assert.match(skillGuide, /within 120 words by default/);
-  assert.match(skillGuide, /only after rejection/);
+  assert.match(skillGuide, /a review, not a limit/);
+  assert.match(skillGuide, /accepted as-is/);
   // Standing approval must be visible before a deferred posting tool is opened.
   for (const guidance of [RELAY_MCP_INSTRUCTIONS, SESSION_CHECKIN_AUDIT, byName.get("relay_topic_post").description, devSkillGuide]) {
     assert.match(guidance, /Joining a Topic approves posting under its current mandate/);
@@ -203,7 +204,7 @@ test("relay_send requires one recipient, an explicit kind, and the two-document 
   assert.doesNotMatch(humanFieldDescription, /massively more costly/);
   assert.match(humanFieldDescription, /enough background for someone arriving fresh/);
   assert.match(humanFieldDescription, /within 120 words/);
-  assert.match(send.inputSchema.properties.longForHumanConfirmed.description, /already rejected this exact draft/i);
+  assert.match(send.inputSchema.properties.longForHumanConfirmed.description, /resend the exact draft Relay held for review[\s\S]*accepted as-is/i);
   assert.ok(Buffer.byteLength(send.description, "utf8") <= 2048,
     "relay_send keeps its skill pointer and essentials within the host description limit");
   assert.ok(humanFieldDescription.trim().split(/\s+/u).length <= 120,

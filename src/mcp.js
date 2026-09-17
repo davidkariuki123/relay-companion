@@ -58,7 +58,7 @@ const CHAT_SEND_INPUT_SCHEMA = {
       description: "Optional exact message to quote and answer. Omit for an ordinary conversation message; Relay never selects the newest message implicitly.",
     },
     forHuman: { type: "string", description: `${FOR_HUMAN_COMPOSITION_SUMMARY} The review threshold applies only to MCP-authored text, never text typed by a person in the Relay pill.` },
-    longForHumanConfirmed: { type: "boolean", description: `Set true only after Relay rejected this exact over-${FOR_HUMAN_SOFT_WORD_LIMIT}-word MCP draft and a second review found the length necessary. Never set it preemptively.` },
+    longForHumanConfirmed: { type: "boolean", description: `Set true to resend the exact draft Relay held for review as over ${FOR_HUMAN_SOFT_WORD_LIMIT} words, once you have read it back and the length is what the message needs; it is then accepted as-is. Never set it preemptively, and never shorten a message the person wanted whole just to avoid setting it.` },
     title: { type: "string", description: "Almost always omit. An ordinary chat text is sent untitled — titlelessness is what marks it as a text everywhere. Set only to deliberately send a titled Relay into the conversation." },
     repo: { type: "string", description: "The repository this message is ABOUT, when applicable; never a filesystem path." },
     attachments: {
@@ -512,7 +512,7 @@ export const TOOLS = [
         longForHumanConfirmed: {
           type: "boolean",
           description:
-            "Set true only when Relay has already rejected this exact draft, you read it back as the person who will get it, and every sentence still earns its place. Never set it preemptively or merely because the draft feels important.",
+            "Set true to resend the exact draft Relay held for review, once you have read it back as the person who will get it and every sentence still earns its place; it is then accepted as-is. Never set it preemptively, and never shorten a message the person wanted whole just to avoid setting it.",
         },
         forAgent: { type: "string", description: "The recipient agent's complete document, self-contained and containing everything useful that the person need not read. Draft it first for every Relay. It may be as long and detailed as necessary; omitting potentially useful authorized context is massively more costly than including detail the recipient may not need. Favor inclusion within the authorized subject; never include unrelated private context or secrets. Preserve conclusions, constraints, rejected options, failures, preferences, questions, next steps, sources, mechanisms, evidence, code, paths, logs, reproduction steps, chronology, data, and verification guidance. Use Markdown when useful and do not repeat forHuman. Never leave it empty. If the human explicitly requested plain text, use relay_chat_send instead." },
         targetSurfaces: {
@@ -612,7 +612,7 @@ export const TOOLS = [
         title: { type: "string", description: "A 3-6 word gist of this Relay, same rule as relay_send.title. Name the single ask, outcome, update, or decision the person should recognize at a glance. It is the headline on the page they open, so write natural words in the sender's register, never a subject line or a report headline. Omit it only when this human is sending a plain text with no headline, the same way an ordinary chat message has none." },
         forHuman: { type: "string", description: FOR_HUMAN_COMPOSITION_SUMMARY },
         forAgent: { type: "string", description: "Complete context for the recipient's agent, without duplicating forHuman. Optional; leaving it empty makes this a plain text message. Anyone holding the url can read it, so keep out anything this human would not paste into a group chat: no internal hostnames, no local file paths, no credentials, no customer data." },
-        longForHumanConfirmed: { type: "boolean", description: `Set true only after Relay rejected this exact over-${FOR_HUMAN_SOFT_WORD_LIMIT}-word draft and a second review found the length necessary.` },
+        longForHumanConfirmed: { type: "boolean", description: `Set true to resend the exact draft Relay held for review as over ${FOR_HUMAN_SOFT_WORD_LIMIT} words, once you have read it back and the length is what the message needs; it is then accepted as-is. Never set it preemptively, and never shorten a message the person wanted whole just to avoid setting it.` },
         files: { type: "array", items: { type: "string" }, description: "Absolute local file paths to attach. The link itself serves these files, so their bytes are uploaded at mint. Keep the total under about 18 MB; there is no second upload step to fall back on." },
         repo: { type: "string", description: "The code repository this message is ABOUT, when it is about one. Same rule and same forms as relay_send.repo: a git remote or owner/name, never a filesystem path. It is stored for the recipient's Relay after they claim the link and is never shown on the public page or in the delivery envelope." },
         relayId: { type: "string", description: "Required for action='revoke': the relayId an earlier mint returned, not the link id and not the url. Never guess one; read it from the mint result or from relay_sent_list." },
@@ -968,7 +968,7 @@ export const TOOLS = [
         forHuman: { type: "string", description: `Optional replacement human-facing message. Omit to leave it unchanged. ${FOR_HUMAN_COMPOSITION_SUMMARY}` },
         forAgent: { type: "string", description: "Optional complete replacement for the agent-facing document. Omit to leave it unchanged; pass an empty string to remove it." },
         expectedUpdatedAt: { type: "string", description: "Optional updatedAt from the last read; prevents overwriting a newer edit." },
-        longForHumanConfirmed: { type: "boolean", description: `Set true only after Relay rejected this exact over-${FOR_HUMAN_SOFT_WORD_LIMIT}-word MCP edit and a second review found the length necessary.` },
+        longForHumanConfirmed: { type: "boolean", description: `Set true to resend the exact edit Relay held for review as over ${FOR_HUMAN_SOFT_WORD_LIMIT} words, once you have read it back and the length is what the message needs; it is then accepted as-is. Never set it preemptively, and never shorten a message the person wanted whole just to avoid setting it.` },
         idempotencyKey: { type: "string" },
       },
       required: ["relayId", "idempotencyKey"],
@@ -1942,11 +1942,15 @@ function requireLongForHumanReview(toolName, args, sessionContext = DEFAULT_MCP_
     return;
   }
   rememberLongForHumanReview(key, fingerprint, sessionContext);
+  // A soft review, not a limit. The first over-length draft is held once so
+  // the agent reads it back; the same draft resent with longForHumanConfirmed
+  // is accepted as-is. Say that up front: an agent that reads only "cut" will
+  // shorten a message the person wanted sent whole (David, 2026-09-17, after
+  // four rounds of trimming a 197-word update to Shane that was fine as it was).
   throw new Error(
     `forHuman is ${wordCount} words; Relay's review threshold is ${FOR_HUMAN_SOFT_WORD_LIMIT} words. `
-    + "Nothing was sent. Read the draft back as the person who will get it: someone who did not do this work and is hearing about it for the first time. Cut the words they would only know from doing the job, and never cut something they would decide differently about if they knew it. "
-    + "Shorten it in the sender's own voice by removing repetition and moving mechanisms, evidence, paths, logs, chronology, and implementation detail into forAgent. "
-    + "If, after that review, you genuinely believe the extra length is necessary to preserve what the user is trying to say to this recipient, retry this exact draft with the same idempotencyKey and longForHumanConfirmed: true, and tell the human you did so. "
+    + "Nothing was sent. This is a one-time review, not a limit: read the draft back as the person who will get it, and if the length is what this message needs, resend this exact draft with the same idempotencyKey and longForHumanConfirmed: true. It will be accepted; tell the human you confirmed it. "
+    + "Shorten only if the read-back finds words the reader would not need before their next step: repetition, mechanisms, evidence, paths, logs, chronology, or implementation detail that belongs in forAgent. Never cut something they would decide differently about if they knew it. Do not loop on trimming: one review, then confirm or shorten once. "
     + WRITING_GUIDE_POINTER,
   );
 }

@@ -382,7 +382,7 @@ test("ordinary Relay MCP directs Claude and Codex to the membership-scoped Granu
   assert.match(humanFieldDescription, /120 words/);
   const longConfirmation = send.inputSchema.properties.longForHumanConfirmed;
   assert.equal(longConfirmation.type, "boolean");
-  assert.match(longConfirmation.description, /already rejected this exact draft/i);
+  assert.match(longConfirmation.description, /resend the exact draft Relay held for review[\s\S]*accepted as-is/i);
   assert.match(longConfirmation.description, /Never set it preemptively/i);
   const agentDescription = send.inputSchema.properties.forAgent.description;
   assert.match(agentDescription, /complete document/i);
@@ -1476,7 +1476,7 @@ test("relay_send requires an exact second review for human messages over 120 wor
 
   await assert.rejects(
     handleCall(client, "relay_send", args),
-    /forHuman is 121 words[\s\S]*Nothing was sent[\s\S]*hearing about it for the first time[\s\S]*longForHumanConfirmed: true/i,
+    /forHuman is 121 words[\s\S]*Nothing was sent[\s\S]*a one-time review, not a limit[\s\S]*longForHumanConfirmed: true[\s\S]*It will be accepted/i,
   );
   assert.equal(calls.length, 0, "the first over-limit attempt has no delivery side effects");
 
