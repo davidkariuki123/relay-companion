@@ -128,6 +128,7 @@ const {
   terminalClaudeCodeRunningFromProcessList,
 } = require("./host-select.cjs");
 const { parseRelayDeepLink, relayDeepLinkFromArgv, relayDeepLinkFailureStatus } = require("./deep-link.cjs");
+const { chatAppTargets } = require("./chat-app-open.cjs");
 const {
   overlayWanted,
   createHostRunningTracker,
@@ -138,6 +139,7 @@ const {
   hostPollDelayMs,
   sentRefreshDelayMs,
 } = require("./visibility.cjs");
+const { startSentLiveWake } = require("./sent-live-wake.cjs");
 const attention = require("./attention-queue.cjs");
 const { withJsonLock } = require("../src/state-lock.cjs");
 const { atomicWriteJsonSync } = require("../src/atomic-json.cjs");
@@ -1968,6 +1970,47 @@ function ensureSentLoaded() {
   if (!sentLoadedOnce) sentLoadedOnce = refreshSent().catch(() => sentCache);
   return sentLoadedOnce;
 }
+// The live Sent wake is bound to one device token; a sign-out, sign-in or
+// account switch stops the old cursor and starts a fresh one for the new
+// account. Checked on a slow tick, the same way the daemon's receiver
+// re-binds its client (inbox-receiver-worker.js).
+let sentLiveWake = null;
+let sentLiveWakeToken = "";
+function startSentLiveWakeForAccount() {
+  const reconcile = async () => {
+    const token = deviceToken() || "";
+    if (token === sentLiveWakeToken) return;
+    if (sentLiveWake) { sentLiveWake.stop(); sentLiveWake = null; }
+    sentLiveWakeToken = token;
+    if (!token || testFixtures("RELAY_OVERLAY_TEST_SENT_FIXTURES")) return;
+    let client;
+    try { client = await relayClient(); } catch (error) {
+      console.error("[overlay] sent live wake client failed:", error && error.message);
+      sentLiveWakeToken = "";
+      return;
+    }
+    if (deviceToken() !== token) { sentLiveWakeToken = ""; return; }
+    if (typeof client.waitForAccountChange !== "function") return;
+    sentLiveWake = startSentLiveWake({
+      wait: (since, signal) => client.waitForAccountChange(since, signal),
+      onChange: async () => {
+        // refreshSent() logs its own failures and returns the old cache; the
+        // commit counter is what proves the server answered. An unanswered
+        // wake keeps its cursor so the change is asked for again.
+        const committedBefore = sentRefreshCommitted;
+        await sentLiveRefresh();
+        if (sentRefreshCommitted === committedBefore) throw new Error("Sent list not refreshed");
+      },
+      isCurrent: () => deviceToken() === token,
+      log: (message) => console.error(`[overlay] ${message}`),
+    });
+  };
+  reconcile().catch(() => {});
+  const timer = setInterval(() => { reconcile().catch(() => {}); }, 2000);
+  timer.unref?.();
+}
+// Set once the Sent loop exists (startup, below); until then a wake is a no-op.
+let sentLiveRefresh = async () => {};
 
 // Reactions are live conversation state, not part of an immutable packet.
 // Keep one account-scoped cache and hydrate both inbound local rows and Sent
@@ -4919,6 +4962,39 @@ function openUrlTarget(url) {
 }
 
 /**
+ * A chat app's tile in the reader or a room bubble. The renderer hands the
+ * app and the sentence; main decides where it goes, because only main can
+ * ask the OS which app owns claude:// (LaunchServices on macOS, the registry
+ * on Windows). The app on this computer first, the web app when there is no
+ * app or the app refuses the link after all, so the click is never a dead
+ * end (David clicked Open in Claude and got Chrome, 2026-09-17).
+ */
+async function openChatApp(chatApp, prompt) {
+  const targets = chatAppTargets(chatApp === "chatgpt" ? "chatgpt" : "claude", prompt, {
+    schemeOwner: (scheme) => app.getApplicationNameForProtocol(scheme),
+  });
+  // Sandboxed harness runs must never pop the user's real browser or apps.
+  if (process.env.RELAY_OVERLAY_TEST_NO_HOST_OPEN === "1") {
+    console.error("[overlay] test seam: suppressed external open:", targets.primary);
+    return { ok: true, via: targets.via, suppressed: true };
+  }
+  try {
+    await shell.openExternal(targets.primary);
+    return { ok: true, via: targets.via };
+  } catch (error) {
+    console.error("[overlay] chat app open failed:", targets.primary, error && error.message);
+    if (!targets.fallback) return { ok: false, via: targets.via };
+  }
+  try {
+    await shell.openExternal(targets.fallback);
+    return { ok: true, via: "web" };
+  } catch (error) {
+    console.error("[overlay] chat app web fallback failed:", error && error.message);
+    return { ok: false, via: "web" };
+  }
+}
+
+/**
  * Open one relay attachment from the pill chip. The renderer only ever holds
  * attachment metadata (id/name/bytes), so the click comes back here and main
  * resolves the actual target: the ingest-prefetched local copy when it exists
@@ -6051,17 +6127,19 @@ function createWindow() {
   // Adaptive cadences (visibility.cjs): tight loops only while the user is
   // engaged; idle machines get slow heartbeats instead of spawn/fetch storms.
   const testMode = process.env.RELAY_OVERLAY_TEST === "1";
-  const sentLoop = () => {
+  // One Sent fetch, pushed only when the sig-relevant fields moved; an idle
+  // machine's unchanged Sent list should cost the fetch and nothing more.
+  const refreshSentAndPush = () => {
     const fingerprintBefore = sentFingerprint;
     const onboardingBefore = firstRelayOnboarding.status(onboardingAccountKey());
-    refreshSent()
-      .then(() => {
-        // Only rebuild + repush when the sig-relevant fields moved; an idle
-        // machine's unchanged Sent list should cost the fetch and nothing more.
-        if (sentFingerprint !== fingerprintBefore
-          || firstRelayOnboarding.status(onboardingAccountKey()) !== onboardingBefore) return pushInbox(false);
-        perf.inc("sentPushSkips");
-      })
+    return refreshSent().then(() => {
+      if (sentFingerprint !== fingerprintBefore
+        || firstRelayOnboarding.status(onboardingAccountKey()) !== onboardingBefore) return pushInbox(false);
+      perf.inc("sentPushSkips");
+    });
+  };
+  const sentLoop = () => {
+    refreshSentAndPush()
       .catch(() => {})
       .finally(() =>
         setTimeout(sentLoop, sentRefreshDelayMs({ testMode,
@@ -6070,6 +6148,13 @@ function createWindow() {
       );
   };
   setTimeout(sentLoop, 5000);
+  // The timer above is the floor. Receipts on what you SENT (Seen, Started,
+  // Done) also ride the server's account-change cursor, held open here exactly
+  // as the daemon holds it for the inbox (see sent-live-wake.cjs): the moment
+  // the recipient reads or their agent starts, this fetches and repaints, so
+  // an open room or reader never waits out the 30 s idle cadence.
+  sentLiveRefresh = refreshSentAndPush;
+  startSentLiveWakeForAccount();
   setInterval(() => {
     const fingerprintBefore = contactsFingerprint;
     refreshContacts()
@@ -9173,6 +9258,7 @@ ipcMain.handle("relay:preview:steer", (event, input) => {
 });
 ipcMain.on("relay:openTask", (_e, taskId) => openTaskDetail(taskId));
 ipcMain.on("relay:openUrl", (_e, url) => openUrlTarget(url));
+ipcMain.handle("relay:openChatApp", (_e, chatApp, prompt) => openChatApp(String(chatApp || ""), String(prompt || "")));
 ipcMain.handle("relay:openAttachment", (_e, relayId, attachmentId) => openRelayAttachment(relayId, attachmentId));
 ipcMain.handle("relay:previewAttachment", (_e, relayId, attachmentId) => previewRelayAttachment(relayId, attachmentId));
 // Attachments open in a Relay viewer window, are saved as a set, are revealed,

@@ -61,7 +61,8 @@ function boot({ relays = [], sent = [], apps = ["codex", "claude"], opens = () =
     setTimeout, clearTimeout, console, Map, Set, Date, String, Number, Boolean, Array, JSON, Math,
   };
   vm.createContext(context);
-  vm.runInContext(block + "\nthis.__t = { taskStateFor, taskLadder, taskVerbsHtml, taskCardFooterHtml, taskStatusModuleHtml, taskRowLineHtml, taskEventOf, taskResultFor, taskResultLinkHtml, taskIsOver, taskDonePending, startTaskDone, taskVerb, TASK_UNDO_MS, taskIsEveryone, taskRosterCardHtml, taskRosterGroupedHtml, taskRosterYouStripHtml, taskRosterSumText, taskRosterTone, taskRosterCountsOf, taskRosterHelperText };", context);
+  vm.runInContext(block + "\nthis.__t = { taskStateFor, taskLadder, taskVerbsHtml, taskCardFooterHtml, taskStatusModuleHtml, taskRowLineHtml, taskEventOf, taskResultFor, taskResultLinkHtml, taskIsOver, taskAsking, taskAskRowHtml, taskStateRowHtml, taskVerb, TASK_ASK_GUARD_MS, taskIsEveryone, taskRosterCardHtml, taskRosterGroupedHtml, taskRosterYouStripHtml, taskRosterSumText, taskRosterTone, taskRosterCountsOf, taskRosterHelperText };", context);
+  context.__t.__context = context;
   return context.__t;
 }
 const ago = (minutes) => new Date(Date.now() - minutes * 60000).toISOString();
@@ -157,24 +158,99 @@ test("done names the app or the person, and points at the result", () => {
   same(t2.taskStateFor(withNote).rungs, ["past", "past", "todo", "done"]);
 });
 
-test("Done holds for a few seconds with Undo before anything is posted", () => {
-  const t = boot();
+// Done asks the way Reject and Cancel do (David's candidate A, 2026-09-17):
+// nothing is stamped on the first press, the second seals it with the word.
+function stubClose(t, context, result = { ok: true }) {
+  const calls = [];
+  for (const name of ["taskDone", "taskReject", "taskCancel"]) context.window.relay[name] = async (id, note) => { calls.push([name, id, note]); return typeof result === "function" ? result() : result; };
+  return calls;
+}
+function bootWith(relays) {
+  const t = boot({ relays });
+  return t;
+}
+const passGuard = (t, id) => { t.taskAsking.get(id).openedAt = Date.now() - t.TASK_ASK_GUARD_MS - 1; };
+
+test("Done asks before anything is posted", async () => {
   const row = inboundTask();
-  const posted = [];
+  const t = bootWith([row]);
+  const calls = stubClose(t, t.__context);
   let rerenders = 0;
-  t.startTaskDone("t1", () => { rerenders += 1; });
-  assert.equal(t.TASK_UNDO_MS, 5000);
-  assert.ok(t.taskDonePending.has("t1"));
+  const rerender = () => { rerenders += 1; };
+  await t.taskVerb("done", "t1", rerender);
+  assert.equal(calls.length, 0, "the first press posts nothing");
   const st = t.taskStateFor(row);
-  assert.equal(st.pending, true);
-  assert.equal(st.text, "Done · you · just now");
-  assert.match(t.taskVerbsHtml(row, st), /data-task-verb="undo"[^>]*>Undo</);
-  assert.doesNotMatch(t.taskVerbsHtml(row, st), /Reject|Cancel/);
-  clearTimeout(t.taskDonePending.get("t1").timer);
-  t.taskDonePending.delete("t1");
-  assert.equal(posted.length, 0);
-  assert.ok(rerenders >= 1);
-  assert.equal(t.taskStateFor(row).text, "Yours to do", "undone: the record never changed");
+  assert.equal(st.text, "Yours to do", "nothing is stamped while it asks");
+  const verbs = t.taskVerbsHtml(row, st);
+  assert.match(verbs, /data-task-verb="keep"[^>]*>Keep</);
+  assert.match(verbs, /class="tk-btn primary" data-task-verb="done"[^>]*>Done</, "the seal is primary, never danger");
+  assert.doesNotMatch(verbs, /Reject|Undo/);
+  assert.match(t.taskVerbsHtml(row, st, { surface: "reader" }), /data-task-verb="done"[^>]*>Mark done</);
+  assert.match(t.taskAskRowHtml(row), /placeholder="Tell Sven how it went \(optional\)"/);
+  assert.match(t.taskAskRowHtml(row), /aria-label="Tell Sven how it went"/);
+  assert.match(t.taskStateRowHtml(row, st), /tk-foot open asking[\s\S]*Marking done/);
+  assert.match(t.taskStatusModuleHtml(row), /Marking done\. A word for them is optional\./);
+  // The same spot pressed twice is a double-click, not a decision.
+  await t.taskVerb("done", "t1", rerender);
+  assert.equal(calls.length, 0, "a second press inside the guard is ignored");
+  passGuard(t, "t1");
+  await t.taskVerb("done", "t1", rerender);
+  same(calls, [["taskDone", "t1", ""]]);
+  assert.equal(t.taskAsking.has("t1"), false);
+  const after = t.taskStateFor(row);
+  assert.equal(after.pending, true, "posted, not yet stamped by main");
+  assert.equal(after.text, "Done · you · just now");
+  assert.equal(t.taskVerbsHtml(row, after), "", "no Undo: the Task is closed");
+  assert.doesNotMatch(t.taskStatusModuleHtml(row), /Undo/);
+  assert.ok(rerenders >= 3);
+});
+
+test("Done carries the word to the sender; Keep backs out; a failed post keeps the ask", async () => {
+  const row = inboundTask({ taskStartedAt: ago(20) });
+  const t = bootWith([row]);
+  const calls = stubClose(t, t.__context);
+  await t.taskVerb("done", "t1", () => {});
+  assert.match(t.taskStateRowHtml(row, t.taskStateFor(row)), /tk-foot started asking[\s\S]*Marking done/, "the started mark stays while it asks");
+  await t.taskVerb("keep", "t1", () => {});
+  assert.equal(t.taskAsking.has("t1"), false);
+  assert.match(t.taskVerbsHtml(row, t.taskStateFor(row)), /Cancel[\s\S]*Done/);
+  await t.taskVerb("done", "t1", () => {});
+  t.taskAsking.get("t1").draft = "  Patched and shipped.  ";
+  passGuard(t, "t1");
+  await t.taskVerb("done", "t1", () => {});
+  same(calls, [["taskDone", "t1", "Patched and shipped."]]);
+
+  const row2 = inboundTask({ id: "t2" });
+  const t2 = bootWith([row2]);
+  stubClose(t2, t2.__context, { ok: false, error: "Relay is offline." });
+  await t2.taskVerb("done", "t2", () => {});
+  passGuard(t2, "t2");
+  await t2.taskVerb("done", "t2", () => {});
+  assert.ok(t2.taskAsking.has("t2"), "the ask stays open to try again");
+  assert.equal(t2.taskStateFor(row2).text, "Yours to do", "nothing stamped on failure");
+  assert.match(t2.taskStatusModuleHtml(row2), /Relay is offline\./);
+});
+
+test("Reject and Cancel get the same double-click guard", async () => {
+  const row = inboundTask();
+  const t = bootWith([row]);
+  const calls = stubClose(t, t.__context);
+  await t.taskVerb("reject", "t1", () => {});
+  await t.taskVerb("reject", "t1", () => {});
+  assert.equal(calls.length, 0);
+  assert.match(t.taskAskRowHtml(row), /placeholder="Tell Sven why \(optional\)"/);
+  passGuard(t, "t1");
+  await t.taskVerb("reject", "t1", () => {});
+  same(calls, [["taskReject", "t1", ""]]);
+});
+
+test("a channel Task's Done asks too", async () => {
+  const row = inboundTask({ taskClaim: { scope: "channel", state: "claimed", workState: "idle", version: 1, claimant: { self: true, name: "David" }, claimedAt: ago(3), capabilities: { canUnclaim: true } } });
+  const t = bootWith([row]);
+  await t.taskVerb("done", "t1", () => {});
+  const verbs = t.taskVerbsHtml(row, t.taskStateFor(row));
+  assert.match(verbs, /Keep[\s\S]*data-task-verb="done"[^>]*>Done</);
+  assert.doesNotMatch(verbs, /Unclaim/);
 });
 
 test("the list line: rungs, the state in words, and the result link on Done rows", () => {
@@ -228,7 +304,7 @@ test("a channel Task keeps the claim lifecycle as its verbs; Reject and Cancel n
 test("the room renders the card and the event bubble in place of the claim slot and the read line", () => {
   assert.match(inbox, /const taskEvent = m\.request \? null : taskEventOf\(m, \(parentId\) => messageById\.get\(parentId\)\);/);
   assert.match(inbox, /\$\{taskEvent \? taskEventRefHtml\(taskEvent\) : messageReplyReferenceHtml\(m\)\}/);
-  assert.match(inbox, /const receipt = m\.request \? null : receiptFor\(m, msgs\);/, "the footer is the receipt on a Task bubble");
+  assert.match(inbox, /const receipt = m\.request \|\| m\.deletedAt \? null : receiptFor\(m, msgs\);/, "the footer is the receipt on a Task bubble, and a deleted message has none");
   assert.match(inbox, /tk-event \$\{taskEvent\.tone\}\$\{taskEvent\.bare \? " bare" : ""\}/);
   // The projections carry the closed-Task fields and the type on both sides.
   for (const prefix of ["r", "s"]) {
@@ -419,17 +495,17 @@ test("the card, the reader and the lists all fork on the assignment", () => {
   assert.match(todo, /const sharedTask = isSharedChannelTask\(row\);/, "an Everyone member's Todo is their own, not the room's");
 });
 
-test("Done on an Everyone card keeps its Undo, and only the sender's rows are doors", () => {
-  const t = boot();
+test("Done on an Everyone card asks on the You row, and only the sender's rows are doors", async () => {
   const row = everyoneTask();
-  // The verbs ride the You row; a Done being held by Undo is "over", so gating
-  // that row on !over took the Undo away with everything else.
-  t.startTaskDone("t1", () => {});
-  const held = t.taskRosterCardHtml(row);
-  assert.match(held, /data-task-verb="undo"[^>]*>Undo</, "the few seconds of Undo must be reachable");
-  assert.doesNotMatch(held, /data-task-verb="reject"/);
-  clearTimeout(t.taskDonePending.get("t1").timer);
-  t.taskDonePending.delete("t1");
+  const t = boot({ relays: [row] });
+  // The verbs ride the You row, so the ask does too: Keep, Done, and the field.
+  await t.taskVerb("done", "t1", () => {});
+  const asking = t.taskRosterCardHtml(row);
+  assert.match(asking, /data-task-verb="keep"[^>]*>Keep<[\s\S]*data-task-verb="done"[^>]*>Done</);
+  assert.doesNotMatch(asking, /data-task-verb="reject"|Undo/);
+  assert.match(t.taskCardFooterHtml(row), /Tell Sven how it went \(optional\)/);
+  assert.match(t.taskRosterYouStripHtml(row, t.taskStateFor(row)), /Keep[\s\S]*Mark done/);
+  t.taskAsking.delete("t1");
   // A member's result Relay is addressed to the sender alone: on anyone else's
   // device that id opens nothing, so only the sender's rows carry the chevron.
   assert.doesNotMatch(t.taskRosterCardHtml(row), /tk-roster-link/, "a member is offered no door");

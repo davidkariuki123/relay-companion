@@ -110,6 +110,9 @@ contextBridge.exposeInMainWorld("relay", {
   deleteRelay: (id) => ipcRenderer.invoke("relay:delete", id),
   markAllRead: () => ipcRenderer.invoke("relay:markAllRead"),
   openUrl: (url) => ipcRenderer.send("relay:openUrl", url),
+  // A chat app's tile: main opens the app on this computer when it owns its
+  // scheme, the web app otherwise. Returns { ok, via: "app" | "web" }.
+  openChatApp: (app, prompt) => ipcRenderer.invoke("relay:openChatApp", String(app || ""), String(prompt || "")),
   // Attachment chip click: main resolves the local copy (or downloads it) and
   // opens it; the renderer never sees paths or URLs. Returns { ok, error? }.
   openAttachment: (relayId, attachmentId) => ipcRenderer.invoke("relay:openAttachment", relayId, attachmentId),

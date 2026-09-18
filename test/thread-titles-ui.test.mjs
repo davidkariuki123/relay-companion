@@ -16,12 +16,23 @@ test("outbound message bubbles expose human-only edit and deliberate delete cont
   assert.match(main, /client\.editMessage\(id,[\s\S]*forHuman/);
   assert.match(main, /client\.deleteMessage\(id,/);
   assert.match(main, /PRODUCT_FEATURES\.messageMutations !== true/);
-  assert.match(html, /payload\.features\?\.messageMutations === true && mine && !m\.pending && !m\.request && !m\.deletedAt/);
+  // Edit and delete follow WhatsApp's windows and never confirm inside the menu.
+  assert.match(html, /const MESSAGE_EDIT_WINDOW_MS = 15 \* 60 \* 1000;/);
+  assert.match(html, /const MESSAGE_DELETE_WINDOW_MS = 2 \* 24 \* 60 \* 60 \* 1000;/);
+  assert.match(html, /if \(canEditMessage\(m, mine\)\) \{/);
+  assert.match(html, /if \(canDeleteMessage\(m, mine\)\) \{/);
   assert.match(html, /data-message-edit=/);
   assert.match(html, /data-message-delete-confirm=/);
-  assert.match(html, /window\.relay\.editMessage\(id, forHuman, message\.updatedAt/);
-  assert.match(html, /window\.relay\.deleteMessage\(id, message\.updatedAt/);
-  assert.match(html, /m\.editedAt && !m\.deletedAt \? '<span class="th-edited">edited<\/span>'/);
+  assert.match(html, /Delete for everyone\? \$\{first\} won’t see it any more\./);
+  // The content version is what the server compares once a message has been
+  // edited, so the pill sends editedAt when there is one.
+  assert.match(html, /window\.relay\.editMessage\(id, forHuman, message\.editedAt \|\| message\.updatedAt/);
+  assert.match(html, /window\.relay\.deleteMessage\(id, message\.editedAt \|\| message\.updatedAt/);
+  // The edit mark lives in the clock anchor, where WhatsApp puts its "edited";
+  // the tombstone speaks in the sender's voice on their own side.
+  assert.match(html, /const clockLabel = m\.editedAt && !m\.deletedAt \? `Edited · \$\{formatChatTime\(m\.at\)\}` : formatChatTime\(m\.at\);/);
+  assert.match(html, /mine \? "You deleted this message" : "This message was deleted"/);
+  assert.doesNotMatch(html, /th-edited/);
 });
 
 test("chat text bubbles preserve authored line breaks", () => {
@@ -542,7 +553,7 @@ test("the first in-flight send is not described as a retry", () => {
 
 test("a room has at most one Seen receipt and a pending send suppresses the old one", () => {
   assert.match(html, /function receiptFor\(m, msgs\) \{/);
-  assert.match(html, /RelayReadReceipts\.forLatest\(m, msgs, timeAgo\)/);
+  assert.match(html, /RelayReadReceipts\.forLatest\(m, msgs, timeAgoWords\)/);
   assert.match(html, /data-receipt-toggle/);
   assert.match(html, /expandedReceiptIds/);
   assert.doesNotMatch(html, /if \(m\.textLike\) \{\s*const newest = msgs\.filter/);
@@ -676,7 +687,7 @@ test("specific replies use an attached composer preview and render a source refe
   // Attaching or detaching a Relay repaints the composer's top face in place;
   // neither hands the keyboard back, and both leave the caret in the field.
   assert.doesNotMatch(html, /liveBox === document\.activeElement/);
-  assert.match(html, /composerQr\.querySelector\("\.th-reply-target"\)\?\.remove\(\)/);
+  assert.match(html, /composerQr\.querySelector\("\.th-reply-target:not\(\.th-edit-band\)"\)\?\.remove\(\)/);
   assert.match(html, /composerQr\.insertAdjacentHTML\("afterbegin", composerReplyTargetHtml\)/);
   assert.match(html, /wireReplyCancel\(composerQr, threadStateKey\)/);
   assert.match(html, /if \(b\.dataset\.wired\) continue;/);

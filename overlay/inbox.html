@@ -1495,7 +1495,6 @@
     border-bottom:1px solid var(--hair); color:var(--muted); font:11px/1.4 var(--sans); }
   .th-thread-focus img { width:13px; height:13px; object-fit:contain; }
   .th-thread-focus strong { color:var(--ink); font-weight:600; }
-  .th-edited { margin-left:5px; font-family:var(--sans); font-size:9px; color:var(--muted-3); }
   .th-msg.deleted .th-msg-title { color:var(--muted-2); font-style:italic; }
   /* Inbox order ends the pane with a message and that last bubble wants air.
      Chat order ends with the composer dock, which brings its own padding.
@@ -2367,27 +2366,22 @@
     .th-message-menu .rx-menu button { min-width:44px; min-height:44px; }
     .th-msg:has(.th-message-more) { max-width:calc(100% - 76px); }
   }
-  /* The editor takes its width from the bubble, never from its text or viewport.
-     Keep the action row outside the scrolling field so long edits stay saveable. */
-  .th-msg:has(.th-message-edit) { width:calc(100% - 32px); min-width:0; max-width:calc(100% - 32px); }
-  .th-msg.text:has(.th-message-edit) { max-width:calc(100% - 32px); }
-  .th-msg:has(.th-message-edit) .th-message-more { display:none; }
-  .th-message-edit { display:grid; grid-template-columns:minmax(0,1fr); gap:10px; flex:1 1 100%; width:100%; min-width:0; max-width:100%; padding-top:2px; }
-  .th-message-edit-label { color:var(--accent); font:500 11px var(--sans); }
-  .th-message-edit textarea { display:block; box-sizing:border-box; width:100%; min-width:0; max-width:100%; min-height:60px; max-height:220px;
-    resize:none; overflow-y:auto; overflow-x:hidden; white-space:pre-wrap; overflow-wrap:anywhere; border:1px solid var(--edge); border-radius:9px;
-    background:var(--bg); color:var(--ink); padding:9px 10px; font:13px/1.5 var(--sans); }
-  .th-message-edit textarea:focus { border-color:var(--accent); outline:2px solid color-mix(in srgb,var(--accent) 24%,transparent); outline-offset:1px; }
-  .th-message-edit-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; border-top:1px solid var(--hair); padding-top:10px; }
-  .th-message-edit-actions button { appearance:none; border:1px solid var(--edge); border-radius:999px; background:transparent; padding:7px 12px;
-    color:var(--ink); font:500 11px var(--sans); cursor:pointer; }
-  .th-message-edit-actions button[data-message-edit-save] { background:var(--accent); border-color:var(--accent); color:var(--on-accent, var(--bg)); }
-  .th-message-edit-actions button:disabled { opacity:.55; cursor:default; }
-  @media (pointer:coarse) { .th-message-edit-actions button { min-height:44px; } }
   /* A message the server refused stays a whisper — it is not an alarm — but it
      has to read as a problem, and it carries the only two acts left on it. */
   .th-under .th-seen.warn { color:var(--danger); opacity:.95; }
   .th-under button.th-seen.act { text-decoration:underline; text-underline-offset:2px; opacity:.95; }
+  /* Editing your own text (WhatsApp's way): the composer is the editor and the
+     bubble being edited wears a thin accent ring so there is no doubt which.
+     Deleting asks in place: the bubble dims and the question sits under it. */
+  .th-msg.editing { outline:1.5px solid color-mix(in srgb, var(--accent) 60%, transparent); outline-offset:1.5px; }
+  .th-msg.deleting { opacity:.55; }
+  .th-under.confirming { height:auto; min-height:15px; flex-wrap:wrap; row-gap:4px; }
+  .th-under.confirming .th-confirm-verbs { display:inline-flex; align-items:center; gap:10px; white-space:nowrap; }
+  .th-under.confirming .th-message-action { opacity:.78; }
+  .th-under.confirming .th-message-action:hover { opacity:1; }
+  .th-under .th-seen.danger-verb { appearance:none; border:0; padding:0; background:transparent; color:var(--danger); opacity:.95; cursor:pointer; font-family:var(--sans); font-size:10px; }
+  .th-under .th-seen.danger-verb:hover { opacity:1; text-decoration:underline; text-underline-offset:2px; }
+  .qr.th-qr.editing { gap:0; }
   .th-receipt-panel { width:min(280px, calc(100% - 32px)); margin:5px 16px 2px auto; padding:8px 10px;
     border:1px solid var(--hair); border-radius:var(--r-2); background:var(--wash); font-family:var(--sans); }
   .th-receipt-row { display:flex; justify-content:space-between; gap:16px; padding:3px 0; font-size:10.5px; color:var(--ink-2); }
@@ -4862,17 +4856,24 @@
     if (s < 604800) return Math.floor(s / 86400) + "d";
     return Math.floor(s / 604800) + "w";
   }
+  // The same distance said in a sentence: a receipt reads "Seen by Shane ·
+  // 2m ago", never the bare clock a row's corner wears (David, 2026-09-17).
+  function timeAgoWords(iso) {
+    const short = timeAgo(iso);
+    if (!short) return "";
+    return short === "now" ? "just now" : `${short} ago`;
+  }
 
   function formatChatTime(iso) {
     const date = new Date(iso || "");
     if (!Number.isFinite(date.getTime())) return "";
     return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
   }
-  function chatTimestampHtml(iso, className = "th-blk-time") {
+  function chatTimestampHtml(iso, className = "th-blk-time", label = "") {
     const clock = formatChatTime(iso);
     if (!clock) return "";
     const date = new Date(iso);
-    return `<time class="${esc(className)}" datetime="${esc(date.toISOString())}" title="${esc(date.toLocaleString([], { dateStyle:"medium", timeStyle:"short" }))}">${clock}</time>`;
+    return `<time class="${esc(className)}" datetime="${esc(date.toISOString())}" title="${esc(date.toLocaleString([], { dateStyle:"medium", timeStyle:"short" }))}">${esc(label || clock)}</time>`;
   }
 
   function formatChatDate(iso, nowValue = Date.now()) {
@@ -5664,6 +5665,7 @@
     if (action === "copy") { window.relay.copyAttachmentImage?.(relayId, attachmentId); return; }
     if (action === "select") { setAttachmentSelection({ type:"enter", ids:attachmentGroupOf(target) }); return; }
     if (action === "reply" && replyTo) {
+      if (threadEditTargets.has(roomAttachmentChat.key)) endThreadEdit(roomAttachmentChat.key);
       threadReplyTargets.set(roomAttachmentChat.key, replyTo);
       renderThreadDetail();
     }
@@ -6933,27 +6935,6 @@
   // relays list while a reply is being written; the refresh is deferred (pendingRelaysRender)
   // and flushed once the input blurs / the answer is sent.
   let pendingRelaysRender = false;
-  function fitMessageEditInput(input) {
-    const scroller = roomScrollElement();
-    const editor = input.closest(".th-message-edit");
-    if (!scroller || !editor) return;
-    const header = thDetailEl.querySelector(".th-detail-head");
-    const dock = thHistoryEl.querySelector(".th-composer-dock");
-    const available = scroller.clientHeight - (header?.offsetHeight || 0) - (dock?.offsetHeight || 0);
-    input.style.maxHeight = `${Math.max(60, Math.min(220, available - 110))}px`;
-    input.style.height = "auto";
-    input.style.height = `${input.scrollHeight + 2}px`;
-    requestAnimationFrame(() => {
-      if (!input.isConnected) return;
-      const bounds = scroller.getBoundingClientRect();
-      const bottom = Math.min(bounds.bottom, dock?.getBoundingClientRect().top ?? bounds.bottom) - 12;
-      const footer = editor.querySelector(".th-message-edit-actions").getBoundingClientRect();
-      if (footer.bottom > bottom) scroller.scrollTop += footer.bottom - bottom;
-    });
-  }
-  window.addEventListener("resize", () => {
-    for (const input of thHistoryEl.querySelectorAll("[data-message-edit-input]")) fitMessageEditInput(input);
-  });
 
   function wireMessageSideMenus(container) {
     for (const trigger of container.querySelectorAll("[data-message-more]")) {
@@ -7005,7 +6986,6 @@
             && menu.matches(":popover-open")) menu.hidePopover();
         });
       });
-      if (menu.querySelector("[data-message-delete-confirm]")) open();
     }
   }
   // A top-layer menu must not remain floating over a different message after scrolling.
@@ -9208,8 +9188,8 @@
   // expanded Task carries the ladder Sent · Seen · Started · Done as a stepper.
   // Every state is a RECORD the server wrote (task_started, task_completed,
   // task_rejected, task_cancelled, the read receipt, the channel claim); the
-  // pill remembers nothing the record does not have, except the few seconds an
-  // Undo holds a Done back and the word a Reject is asking for.
+  // pill remembers nothing the record does not have, except the word a Reject,
+  // Cancel or Done is asking for and a Done posted but not yet stamped.
   const TASK_MARK = {
     open: '<span class="tk-mark open" aria-hidden="true"></span>',
     started: '<span class="tk-mark started" aria-hidden="true"></span>',
@@ -9219,13 +9199,14 @@
     cancelled: '<svg class="tk-mark cancelled" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="5.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M3.9 6h4.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   };
   const TASK_CHECK_SVG = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3.4 6.3l1.8 1.7 3.5-3.7" fill="none" stroke="var(--tk-on)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-  const TASK_UNDO_MS = 5000;
   const TASK_EVENT_PHRASES = { rejected: "Rejected this task.", cancelled: "Cancelled this task.", done: "Marked this task done." };
   function taskMarkHtml(state) { return TASK_MARK[state] || TASK_MARK.open; }
-  // Local, short-lived: the word a Reject/Cancel is asking for, a Done held
-  // back by Undo, a post in flight, and the last error. Never a state.
-  const taskAsking = new Map();      // id -> { kind: "reject" | "cancel", draft }
-  const taskDonePending = new Map(); // id -> { at, timer }
+  // Local, short-lived: the word a Reject/Cancel/Done is asking for, a post in
+  // flight, and the last error. Never a state.
+  const taskAsking = new Map();      // id -> { kind: "reject" | "cancel" | "done", draft, openedAt }
+  // A second press on the sealing verb this soon after the ask opened is the
+  // same double-click falling through the confirm, not a decision.
+  const TASK_ASK_GUARD_MS = 400;
   const taskLocalDone = new Map();   // id -> at, a Done posted but not yet stamped by main
   const taskBusy = new Set();
   const taskCardNotes = new Map();   // id -> error text
@@ -9279,7 +9260,7 @@
     const id = taskIdOf(row);
     const claim = taskChannelClaim(row);
     const other = firstName(taskOtherName(row));
-    const doneAt = row.taskCompletedAt || taskLocalDone.get(id) || (taskDonePending.get(id) || {}).at || "";
+    const doneAt = row.taskCompletedAt || taskLocalDone.get(id) || "";
     if (row.taskRejectedAt) {
       const by = firstName(taskClosedByWord(row)) || other;
       return { tone: "rejected", at: row.taskRejectedAt, over: true, text: `Rejected · ${by} · ${timeAgo(row.taskRejectedAt)}`, rungs: ["past", "past", "rejected"], labels: ["Sent", "Seen", "Rejected"] };
@@ -9289,7 +9270,8 @@
       return { tone: "cancelled", at: row.taskCancelledAt, over: true, text: `Cancelled · ${by} · ${timeAgo(row.taskCancelledAt)}`, rungs: ["past", "past", "past", "cancelled"], labels: ["Sent", claim ? "Claimed" : "Seen", "Started", "Cancelled"] };
     }
     if (doneAt) {
-      const pending = taskDonePending.has(id) || (!row.taskCompletedAt && taskLocalDone.has(id));
+      // Posted, not yet stamped by main.
+      const pending = !row.taskCompletedAt && taskLocalDone.has(id);
       const by = pending ? "you" : (firstName(taskClosedByWord(row)) || taskAppWord(row) || (mine ? other : ""));
       return { tone: "done", at: doneAt, over: true, pending, text: pending ? "Done · you · just now" : `Done${by ? ` · ${by}` : ""} · ${timeAgo(doneAt)}`, rungs: ["past", "past", row.taskStartedAt ? "past" : "todo", "done"], labels: ["Sent", claim ? "Claimed" : "Seen", "Started", "Done"] };
     }
@@ -9324,7 +9306,7 @@
     const st = taskStateFor(row);
     const claim = taskChannelClaim(row);
     // The recipient's own Seen has no clock on their side: the ring already says "here".
-    const whens = [row.createdAt, claim ? (claim.claimedAt || "") : (taskIsMine(row) ? taskSeenAt(row) : ""), row.taskStartedAt || "", row.taskCompletedAt || row.taskRejectedAt || row.taskCancelledAt || (taskDonePending.get(taskIdOf(row)) || {}).at || ""];
+    const whens = [row.createdAt, claim ? (claim.claimedAt || "") : (taskIsMine(row) ? taskSeenAt(row) : ""), row.taskStartedAt || "", row.taskCompletedAt || row.taskRejectedAt || row.taskCancelledAt || taskLocalDone.get(taskIdOf(row)) || ""];
     return st.labels.map((label, index) => ({ label, state: st.rungs[index], when: st.rungs[index] === "todo" || st.rungs[index] === "now" && index > 0 && !whens[index] ? "" : (index === st.labels.length - 1 && st.labels.length === 3 ? whens[3] : whens[index]) || "" }));
   }
   function taskRungsHtml(rungs) {
@@ -9386,8 +9368,14 @@
     const busy = taskBusy.has(id);
     const at = (verb) => `data-task-verb="${verb}" data-task-id="${esc(id)}"`;
     const done = surface === "reader" ? "Mark done" : "Done";
-    if (st.pending) return `<span class="tk-verbs">${taskBtn("Undo", "ghost", at("undo"))}</span>`;
     if (st.over) return "";
+    // Asking comes before the claim: a channel Task's Done asks too (it has
+    // no Reject or Cancel, so only "done" can be asking there).
+    const asking = taskAsking.get(id);
+    if (asking) {
+      const seal = asking.kind === "cancel" ? "Cancel" : asking.kind === "reject" ? "Reject" : done;
+      return `<span class="tk-verbs">${taskBtn("Keep", "ghost", at("keep"), busy)}${taskBtn(seal, asking.kind === "done" ? "primary" : "danger", at(asking.kind), busy)}</span>`;
+    }
     const claim = taskChannelClaim(row);
     if (claim) {
       if (st.claim === "unclaimed") return claim.capabilities && claim.capabilities.canClaim === true ? `<span class="tk-verbs">${taskBtn("Claim", "primary", at("claim"), busy)}</span>` : "";
@@ -9395,22 +9383,18 @@
       if (st.claim === "mine") return `<span class="tk-verbs">${claim.capabilities && claim.capabilities.canUnclaim === true ? taskBtn("Unclaim", "ghost", at("unclaim"), busy) : ""}${taskBtn(done, "primary", at("done"), busy)}</span>`;
       return `<span class="tk-verbs">${taskBtn("Release", "ghost", at("release"), busy)}${taskBtn(done, "primary", at("done"), busy)}</span>`;
     }
-    const asking = taskAsking.get(id);
-    if (asking) {
-      const seal = asking.kind === "cancel" ? "Cancel" : "Reject";
-      return `<span class="tk-verbs">${taskBtn("Keep", "ghost", at("keep"), busy)}${taskBtn(seal, "danger", at(asking.kind), busy)}</span>`;
-    }
     if (st.tone === "started") return `<span class="tk-verbs">${taskBtn("Cancel", "ghost", at("cancel"), busy)}${taskBtn(done, "primary", at("done"), busy)}</span>`;
     return `<span class="tk-verbs">${taskBtn("Reject", "ghost", at("reject"), busy)}${taskBtn(done, "primary", at("done"), busy)}</span>`;
   }
-  // Reject asks for a word before it refuses; Cancel too. One line inside the
-  // footer, in the composer's field recipe. Nothing leaves until sealed.
+  // Reject asks for a word before it refuses; Cancel and Done too. One line
+  // inside the footer, in the composer's field recipe. Nothing leaves until sealed.
   function taskAskRowHtml(row) {
     const id = taskIdOf(row);
     const asking = taskAsking.get(id);
     if (!asking || taskIsMine(row)) return "";
     const other = firstName(taskOtherName(row)) || "them";
-    return `<div class="tk-ask"><input class="tk-input" type="text" maxlength="2000" data-task-ask="${esc(id)}" placeholder="${esc(`Tell ${other} why (optional)`)}" aria-label="${esc(`Tell ${other} why`)}"></div>`;
+    const ask = asking.kind === "done" ? `Tell ${other} how it went` : `Tell ${other} why`;
+    return `<div class="tk-ask"><input class="tk-input" type="text" maxlength="2000" data-task-ask="${esc(id)}" placeholder="${esc(`${ask} (optional)`)}" aria-label="${esc(ask)}"></div>`;
   }
   // The agent row: Copy for your agent, always; each app Settings › Your agent
   // has on, as its mark. The marks use the host rows' own open path.
@@ -9426,7 +9410,7 @@
   }
   function taskStateRowHtml(row, st, { surface = "chat" } = {}) {
     const asking = taskAsking.get(taskIdOf(row));
-    const text = asking && !taskIsMine(row) ? (asking.kind === "cancel" ? "Cancelling" : "Rejecting") : st.text;
+    const text = asking && !taskIsMine(row) ? ({ cancel: "Cancelling", reject: "Rejecting", done: "Marking done" }[asking.kind] || st.text) : st.text;
     return `<div class="tk-foot ${st.tone}${asking ? " asking" : ""}"><span class="tk-state">${taskMarkHtml(st.tone)}<span class="tk-text">${esc(text)}</span></span>${taskVerbsHtml(row, st, { surface })}${taskResultLinkHtml(row, st)}${taskAskRowHtml(row)}</div>`;
   }
   // The sender's tracker in the card: the reader's ladder at the chat's scale.
@@ -9539,8 +9523,8 @@
     const mine = taskIsMine(row);
     const own = mine ? null : members.find((member) => member.self);
     const st = taskStateFor(row);
-    // Not "!st.over": a Done being held by Undo IS over, and the Undo lives in
-    // that verb row. taskVerbsHtml returns nothing for a Task that has settled.
+    // Not "!st.over": a Done posted but not yet stamped already reads as over.
+    // taskVerbsHtml returns nothing for a Task that has settled.
     const verbs = own ? taskVerbsHtml(row, st) : "";
     const others = members.filter((member) => !own || member.relayId !== own.relayId);
     const movements = others.filter((member) => ["done", "started", "rejected", "cancelled"].includes(member.state));
@@ -9636,7 +9620,6 @@
     if (st.tone === "rejected") return mine ? `${other} rejected it ${timeAgo(row.taskRejectedAt)} ago — the reason is in the chat.` : `You rejected this Task. ${other} sees it in the chat.`;
     if (st.tone === "cancelled") return mine ? `${other} cancelled it after starting.` : `You cancelled this Task after starting it. ${other} sees it in the chat.`;
     if (st.tone === "done") {
-      if (st.pending) return "Done. Undo keeps it open for a few seconds.";
       const by = taskClosedByWord(row);
       if (mine) return `${by && by !== "you" ? by : app || other} finished it ${timeAgo(st.at)} ago. The result is a letter in your chat with ${other}.`;
       return by === "you" ? `Done. ${other} sees it in the chat.` : `${app || "Your agent"} finished it ${timeAgo(st.at)} ago. ${other} has the result.`;
@@ -9668,7 +9651,7 @@
     const result = st.tone === "done" && !st.pending ? taskResultFor(row) : null;
     const resultVerb = result && !(row.taskClosedBy && result.bare) ? `<span class="tk-verbs">${taskBtn(row.taskClosedBy ? "Read the note" : "Read the result", "primary", `data-task-result="${esc(taskIdOf(row))}"`)}</span>` : "";
     const asking = taskAsking.get(taskIdOf(row));
-    const helper = asking && !taskIsMine(row) ? (asking.kind === "cancel" ? "Cancelling. A word for them is optional." : "Rejecting. A word for them is optional.") : taskHelperText(row, st);
+    const helper = asking && !taskIsMine(row) ? `${{ cancel: "Cancelling", reject: "Rejecting", done: "Marking done" }[asking.kind]}. A word for them is optional.` : taskHelperText(row, st);
     return `<div class="tk-status ${st.tone}" data-stop="1" data-task-card="${esc(taskIdOf(row))}">${stepper}<div class="tk-row"><span class="tk-helper">${esc(helper)}</span>${taskVerbsHtml(row, st, { surface: "reader" }) || resultVerb}</div>${taskAskRowHtml(row)}${taskNoteHtml(row)}</div>`;
   }
   // The list: every Task row tracks its state in a line under the title — the
@@ -9726,17 +9709,11 @@
     if (!row || taskBusy.has(id)) return;
     taskCardNotes.delete(id);
     if (verb === "keep") { taskAsking.delete(id); rerender(); return; }
-    if (verb === "reject" || verb === "cancel") {
+    if (verb === "reject" || verb === "cancel" || verb === "done") {
       const asking = taskAsking.get(id);
-      if (!asking || asking.kind !== verb) { taskAsking.set(id, { kind: verb, draft: "", focus: true }); rerender(); return; }
+      if (!asking || asking.kind !== verb) { taskAsking.set(id, { kind: verb, draft: "", focus: true, openedAt: Date.now() }); rerender(); return; }
+      if (Date.now() - (asking.openedAt || 0) < TASK_ASK_GUARD_MS) return;
       await submitTaskClose(id, verb, rerender);
-      return;
-    }
-    if (verb === "done") { startTaskDone(id, rerender); return; }
-    if (verb === "undo") {
-      const pending = taskDonePending.get(id);
-      if (pending) { clearTimeout(pending.timer); taskDonePending.delete(id); }
-      rerender();
       return;
     }
     if (verb === "claim" || verb === "unclaim" || verb === "release") {
@@ -9764,31 +9741,16 @@
     const note = asking ? String(asking.draft || "").trim() : "";
     taskBusy.add(id);
     rerender();
-    const result = kind === "cancel" ? await window.relay.taskCancel(id, note) : await window.relay.taskReject(id, note);
+    const result = kind === "cancel" ? await window.relay.taskCancel(id, note)
+      : kind === "reject" ? await window.relay.taskReject(id, note)
+      : await window.relay.taskDone(id, note);
     taskBusy.delete(id);
-    if (!result || result.ok === false) taskCardNotes.set(id, (result && result.error) || `Could not ${kind} this Task.`);
-    else taskAsking.delete(id);
-    rerender();
-  }
-  // Done holds for a few seconds with Undo before the stamp is written: a tap
-  // is easy to fumble on a small card, and the undo costs nothing.
-  function startTaskDone(id, rerender) {
-    if (taskDonePending.has(id)) return;
-    taskAsking.delete(id);
-    const timer = setTimeout(async () => {
-      taskDonePending.delete(id);
-      taskLocalDone.set(id, new Date().toISOString());
-      taskBusy.add(id);
-      rerender();
-      const result = await window.relay.taskDone(id, "");
-      taskBusy.delete(id);
-      if (!result || result.ok === false) {
-        taskLocalDone.delete(id);
-        taskCardNotes.set(id, (result && result.error) || "Could not mark this Task done.");
-      }
-      rerender();
-    }, TASK_UNDO_MS);
-    taskDonePending.set(id, { at: new Date().toISOString(), timer });
+    if (!result || result.ok === false) taskCardNotes.set(id, (result && result.error) || (kind === "done" ? "Could not mark this Task done." : `Could not ${kind} this Task.`));
+    else {
+      taskAsking.delete(id);
+      // The card reads Done before main re-projects the record.
+      if (kind === "done") taskLocalDone.set(id, new Date().toISOString());
+    }
     rerender();
   }
   function wireTaskCards(scope, rerender) {
@@ -11067,9 +11029,60 @@
   });
   // Every fold, expansion and reader morph passes through the card's size.
   new ResizeObserver(() => reactionNames.hide()).observe(cardEl);
+  // Begin editing a text of yours in the room's composer: stash whatever the
+  // composer held, put the message's words in it, caret at the end.
+  function beginThreadEdit(stateKey, id, message) {
+    if (!message) return;
+    if (!threadEditTargets.has(stateKey)) threadEditStash.set(stateKey, String(threadComposerDrafts.get(stateKey) || ""));
+    threadEditTargets.set(stateKey, String(id));
+    messageDeleteConfirmIds.delete(String(id));
+    threadReplyTargets.delete(stateKey);
+    const words = String(message.body || message.title || "");
+    threadComposerDrafts.set(stateKey, words);
+    renderThreadDetail();
+    const box = document.getElementById("thQrInput");
+    if (box) {
+      box.value = words;
+      box.relayResize?.();
+      box.focus();
+      box.setSelectionRange?.(words.length, words.length);
+      box.scrollIntoView({ block:"nearest" });
+    }
+    // The composer grows to hold the words and floats over the room's bottom
+    // edge; once it has, lift the ringed bubble clear of it so you can see
+    // which message you are changing.
+    requestAnimationFrame(() => revealAboveComposer(id));
+  }
+  function revealAboveComposer(id) {
+    const bubble = thHistoryEl?.querySelector(`[data-msg="${CSS.escape(String(id))}"]`);
+    const dock = thHistoryEl?.querySelector(".th-composer-dock");
+    if (!bubble || !dock) return;
+    // Its whisper line (Delivered, Seen) comes up with it.
+    const under = bubble.nextElementSibling?.classList.contains("th-under") ? bubble.nextElementSibling : bubble;
+    const covered = under.getBoundingClientRect().bottom + 8 - dock.getBoundingClientRect().top;
+    if (covered > 0) roomScrollElement().scrollTop += covered;
+  }
+  // Ending an edit, saved or not, gives the composer back what it had.
+  function endThreadEdit(stateKey) {
+    if (!threadEditTargets.has(stateKey)) return;
+    threadEditTargets.delete(stateKey);
+    const stashed = threadEditStash.get(stateKey) || "";
+    threadEditStash.delete(stateKey);
+    threadComposerDrafts.set(stateKey, stashed);
+    renderThreadDetail();
+    const box = document.getElementById("thQrInput");
+    if (box) { box.value = stashed; box.relayResize?.(); box.focus(); }
+  }
   // The cancel control lives on the composer's reply face, which is inserted
   // both by a full shell paint and by an in-place face swap. One wiring, marked
   // on the node, so neither path can double-bind it.
+  function wireEditCancel(root, stateKey) {
+    for (const b of root.querySelectorAll("[data-edit-cancel]")) {
+      if (b.dataset.wired) continue;
+      b.dataset.wired = "1";
+      b.addEventListener("click", (e) => { e.stopPropagation(); endThreadEdit(stateKey); });
+    }
+  }
   function wireReplyCancel(root, stateKey) {
     for (const b of root.querySelectorAll("[data-reply-cancel]")) {
       if (b.dataset.wired) continue;
@@ -15121,7 +15134,40 @@
   const optimisticReadIds = new Set(); // a polling payload cannot resurrect a read while persistence waits
   const threadComposerDrafts = new Map(); // threadId -> text; survives live DOM replacement
   const threadReplyTargets = new Map(); // visible room/thread id -> exact Relay id being answered
-  const messageEditDrafts = new Map(); // relayId -> replacement forHuman while its inline editor is open
+  // ---- Editing and deleting your own text, on WhatsApp's rules ----
+  // A text can be edited for 15 minutes after it was sent and deleted for
+  // everyone for 2 days; past that the verb is simply not offered (David,
+  // 2026-09-17, copying WhatsApp). The server enforces the same two windows,
+  // so a stale room cannot get past them either.
+  const MESSAGE_EDIT_WINDOW_MS = 15 * 60 * 1000;
+  const MESSAGE_DELETE_WINDOW_MS = 2 * 24 * 60 * 60 * 1000;
+  function messageAgeMs(m) {
+    const t = Date.parse(m?.at || m?.createdAt || "");
+    return Number.isFinite(t) ? Math.max(0, Date.now() - t) : Infinity;
+  }
+  function messageMutable(m, mine) {
+    return payload.features?.messageMutations === true && Boolean(mine) && !m.pending && !m.request && !m.deletedAt && !m.ownedAgent;
+  }
+  function canEditMessage(m, mine) {
+    return messageMutable(m, mine) && Boolean(String(m.body || "").trim()) && messageAgeMs(m) <= MESSAGE_EDIT_WINDOW_MS;
+  }
+  function canDeleteMessage(m, mine) {
+    return messageMutable(m, mine) && messageAgeMs(m) <= MESSAGE_DELETE_WINDOW_MS;
+  }
+  // The room's composer edits one message at a time. The draft it held before
+  // is stashed and comes back when the edit ends, either way.
+  const threadEditTargets = new Map(); // threadStateKey -> relayId being edited
+  const threadEditStash = new Map();   // threadStateKey -> the draft the composer held before
+  // What the question under a bubble says: WhatsApp asks "Delete for everyone?";
+  // we add who that is, because the decision is made right here.
+  function deleteQuestionFor(thread) {
+    if (thread?.isGroup) return `Delete for everyone? Nobody in ${thread.groupName || thread.party || "the group"} will see it any more.`;
+    const first = String(thread?.party || "").trim().split(/\s+/)[0] || "They";
+    return `Delete for everyone? ${first} won’t see it any more.`;
+  }
+  function editBandHtml(message) {
+    return `<div class="th-reply-target th-edit-band"><div class="th-reply-target-who">Editing your message</div><div class="th-reply-target-copy">${esc(String(message?.body || message?.title || ""))}</div><button type="button" class="th-reply-target-close" data-edit-cancel="1" aria-label="Stop editing">×</button></div>`;
+  }
   const messageDeleteConfirmIds = new Set(); // relayIds awaiting the deliberate second Delete click
   const messageMutationIds = new Set(); // relayIds with an edit/delete request in flight
   const threadReplyAttemptKeys = new Map(); // threadId -> { fingerprint, key }; retries converge
@@ -15362,7 +15408,7 @@
   // newer optimistic item deliberately owns the slot while it says Sending…,
   // suppressing the stale receipt below instead of making Seen jump backward.
   function receiptFor(m, msgs) {
-    return RelayReadReceipts.forLatest(m, msgs, timeAgo);
+    return RelayReadReceipts.forLatest(m, msgs, timeAgoWords);
   }
   // The rungs BELOW the read receipt: this device has it, and this device is
   // waiting. Said in the same whisper, because a message on its way is not an
@@ -16853,9 +16899,17 @@
   function chatAppPromptFor(message) {
     return `${pullSentenceFor(message)} Use the Relay connector's tools for this (relay_inbox_list, relay_chat_fetch). If Relay is not connected here, tell me and I will connect it from the Relay app.`;
   }
-  function chatAppUrlFor(app, message) {
-    const q = encodeURIComponent(chatAppPromptFor(message));
-    return app === "chatgpt" ? `https://chatgpt.com/?q=${q}&mode=work` : `https://claude.ai/new?q=${q}`;
+  // Where the sentence goes is main's call (overlay/chat-app-open.cjs): the
+  // Claude app on this computer when the OS says it owns claude://, claude.ai
+  // otherwise; ChatGPT has no scheme on a computer and opens chatgpt.com.
+  function openChatApp(app, message) {
+    const key = app === "chatgpt" ? "chatgpt" : "claude";
+    const prompt = chatAppPromptFor(message);
+    if (window.relay.openChatApp) return window.relay.openChatApp(key, prompt);
+    // A preload from before the bridge existed: the web app, as before.
+    const q = encodeURIComponent(prompt);
+    window.relay.openUrl(key === "chatgpt" ? `https://chatgpt.com/?q=${q}&mode=work` : `https://claude.ai/new?q=${q}`);
+    return Promise.resolve({ ok: true, via: "web" });
   }
   // The four, in one order everywhere: the chat apps, then the agents on this
   // Mac whose app is on. A chat app opens a new chat with the sentence; an
@@ -16970,7 +17024,7 @@
         e.stopPropagation();
         const id = b.getAttribute("data-app-open");
         const message = readerRow(id) || relayById(id) || { id };
-        window.relay.openUrl(chatAppUrlFor(b.getAttribute("data-app") === "chatgpt" ? "chatgpt" : "claude", message));
+        openChatApp(b.getAttribute("data-app"), message);
       });
     }
     for (const b of scope.querySelectorAll("[data-pull-copy]")) {
@@ -17373,8 +17427,12 @@
         && !String(m.body || "").trim()
         && !String(m.agent || "").trim()
         && !m.deletedAt;
-      const editingMessage = messageEditDrafts.has(m.id);
-      const editDraft = editingMessage ? messageEditDrafts.get(m.id) : "";
+      const editingMessage = String(threadEditTargets.get(threadStateKey) || "") === String(m.id);
+      const confirmingDelete = messageDeleteConfirmIds.has(m.id);
+      // The clock the bubble reserves and shows: "Edited · 22:12" once edited,
+      // where WhatsApp puts its "edited", in the anchor's own mono.
+      const clockLabel = m.editedAt && !m.deletedAt ? `Edited · ${formatChatTime(m.at)}` : formatChatTime(m.at);
+      const tombstone = m.deletedAt ? (mine ? "You deleted this message" : "This message was deleted") : "";
       const attachmentOnly = textLike && attachments.length > 0
         && !String(m.body || "").trim() && !editingMessage && !m.deletedAt;
       const hasHostActions = !textLike && !m.request;
@@ -17387,16 +17445,14 @@
       } else if (!m.request && !groupPostingBlocked) {
         messageActionBits.push(`<button type="button" class="th-reply-ghost" data-reply-to="${esc(m.id)}" data-stop="1">reply</button>`);
       }
-      if (payload.features?.messageMutations === true && mine && !m.pending && !m.request && !m.deletedAt) {
-        if (String(m.body || "").trim()) {
-          messageActionBits.push(`<button type="button" class="th-message-action" data-message-edit="${esc(m.id)}" data-stop="1">edit</button>`);
-        }
-        if (messageDeleteConfirmIds.has(m.id)) {
-          messageActionBits.push(`<button type="button" class="th-message-action confirm" data-message-delete-confirm="${esc(m.id)}" data-stop="1">Delete for everyone</button>`);
-          messageActionBits.push(`<button type="button" class="th-message-action" data-message-delete-cancel="${esc(m.id)}" data-stop="1">keep</button>`);
-        } else {
-          messageActionBits.push(`<button type="button" class="th-message-action danger" data-message-delete="${esc(m.id)}" data-stop="1">delete</button>`);
-        }
+      // WhatsApp's windows: Edit for 15 minutes, Delete for everyone for 2 days.
+      // Outside them the verb is not offered; confirmation happens on the
+      // bubble, never inside this menu.
+      if (canEditMessage(m, mine)) {
+        messageActionBits.push(`<button type="button" class="th-message-action" data-message-edit="${esc(m.id)}" data-stop="1">edit</button>`);
+      }
+      if (canDeleteMessage(m, mine)) {
+        messageActionBits.push(`<button type="button" class="th-message-action danger" data-message-delete="${esc(m.id)}" data-stop="1">delete</button>`);
       }
 
       const sideMenuId = `message-options-${m.id}`;
@@ -17442,21 +17498,13 @@
       const taskEvent = m.request ? null : taskEventOf(m, (parentId) => messageById.get(parentId));
       const taskFooter = m.request ? taskCardFooterHtml(m) : "";
       return `${slackThreadContextHtml(m)}${chunkDivider}${runHeader}
-      <div class="th-msg${hasHostActions ? " has-host-actions" : ""}${m.unread ? " unread" : ""}${mine ? " mine" : ""}${cont ? " cont" : ""}${textLike ? " text" : ""}${taskEvent ? ` tk-event ${taskEvent.tone}${taskEvent.bare ? " bare" : ""}` : ""}${m.request ? " tk-card" : ""}${attachmentOnly ? " attachment-only" : ""}${agentWorking ? " agent-working" : ""}${open ? " open" : ""}${activeMentionVisit?.selected === String(m.id) ? " mention-target" : ""}${m.deletedAt ? " deleted" : ""}${aggregates.length ? " has-rx" : ""}${liveCanonicalArrivalIds.has(String(m.id || "")) ? " live-arrival" : ""}"${textLike ? "" : ' role="button" tabindex="0"'}${agentWorking ? ' aria-busy="true"' : ""}${hasHostActions ? ` aria-expanded="${hostActionsPersistent ? "true" : "false"}"` : ""} data-chat-key="${esc(renderKey)}:body" data-msg="${esc(m.id)}" data-dir="${m.direction}" data-opening-id="${esc(m.id)}">
+      <div class="th-msg${hasHostActions ? " has-host-actions" : ""}${m.unread ? " unread" : ""}${mine ? " mine" : ""}${cont ? " cont" : ""}${textLike ? " text" : ""}${taskEvent ? ` tk-event ${taskEvent.tone}${taskEvent.bare ? " bare" : ""}` : ""}${m.request ? " tk-card" : ""}${attachmentOnly ? " attachment-only" : ""}${agentWorking ? " agent-working" : ""}${open ? " open" : ""}${activeMentionVisit?.selected === String(m.id) ? " mention-target" : ""}${m.deletedAt ? " deleted" : ""}${editingMessage ? " editing" : ""}${confirmingDelete ? " deleting" : ""}${aggregates.length ? " has-rx" : ""}${liveCanonicalArrivalIds.has(String(m.id || "")) ? " live-arrival" : ""}"${textLike ? "" : ' role="button" tabindex="0"'}${agentWorking ? ' aria-busy="true"' : ""}${hasHostActions ? ` aria-expanded="${hostActionsPersistent ? "true" : "false"}"` : ""} data-chat-key="${esc(renderKey)}:body" data-msg="${esc(m.id)}" data-dir="${m.direction}" data-opening-id="${esc(m.id)}">
         ${sideMenuHtml}
         ${taskEvent ? taskEventRefHtml(taskEvent) : messageReplyReferenceHtml(m)}
-        ${editingMessage ? `
-          <div class="th-message-edit" data-stop="1">
-            <span class="th-message-edit-label">Edit message</span>
-            <textarea data-message-edit-input="${esc(m.id)}" aria-label="Edit message" wrap="soft" rows="4">${esc(editDraft)}</textarea>
-            <div class="th-message-edit-actions">
-              <button type="button" data-message-edit-cancel="${esc(m.id)}">Cancel</button>
-              <button type="button" data-message-edit-save="${esc(m.id)}"${messageMutationIds.has(m.id) ? " disabled" : ""}>${messageMutationIds.has(m.id) ? "Saving…" : "Save changes"}</button>
-            </div>
-          </div>` : `
-          ${textLike ? '<div class="th-text-content">' : ""}<span class="th-msg-title"${textLike ? ` data-clock="${esc(formatChatTime(m.at))}"` : ""}>${agentWorking
+        ${`
+          ${textLike ? '<div class="th-text-content">' : ""}<span class="th-msg-title"${textLike ? ` data-clock="${esc(clockLabel)}"` : ""}>${agentWorking
             ? '<span class="agent-working-indicator" aria-hidden="true"><span class="agent-working-dot"></span><span class="agent-working-dot"></span><span class="agent-working-dot"></span></span>'
-            : taskEvent ? (taskEvent.bare ? "" : linkify(taskEvent.note, m.groupId || thread.groupId)) : `${m.request ? '<span class="kchip">Task</span>' : ""}${textLike ? linkify(m.title, m.groupId || thread.groupId) : esc(m.title)}${textLike ? "" : `<span class="th-more">${open ? "‹" : "›"}</span>`}${m.editedAt && !m.deletedAt ? '<span class="th-edited">edited</span>' : ""}`}</span>${textLike ? `${chatTimestampHtml(m.at)}</div>` : ""}
+            : taskEvent ? (taskEvent.bare ? "" : linkify(taskEvent.note, m.groupId || thread.groupId)) : `${m.request ? '<span class="kchip">Task</span>' : ""}${tombstone ? esc(tombstone) : textLike ? linkify(m.title, m.groupId || thread.groupId) : esc(m.title)}${textLike ? "" : `<span class="th-more">${open ? "‹" : "›"}</span>`}`}</span>${textLike ? `${chatTimestampHtml(m.at, "th-blk-time", clockLabel)}</div>` : ""}
 
           ${!textLike && !open && !inlineBody && m.preview ? `<span class="th-preview">${esc(m.preview)}</span>` : ""}
           ${!textLike && !open && inlineBody ? `<div class="th-body" data-stop="0">${readerParagraphs(m.body)}</div>` : ""}
@@ -17498,14 +17546,26 @@
       ${(() => {
         // Receipts stay beneath the bubble; text actions use the side menu.
         // The card's footer is the receipt on a Task bubble; the read line under it goes.
-        const receipt = m.request ? null : receiptFor(m, msgs);
+        // A deleted message carries no receipt (WhatsApp shows no ticks on one).
+        const receipt = m.request || m.deletedAt ? null : receiptFor(m, msgs);
         const bits = [];
-        if (!sideActions) bits.push(...messageActionBits);
-        if (mine && m.pending) bits.push(...outboxStatusBits(m));
-        if (receipt) bits.push(receipt.expandable
-          ? `<button type="button" class="th-seen" data-receipt-toggle="${esc(m.id)}" data-stop="1" aria-expanded="${expandedReceiptIds.has(m.id) ? "true" : "false"}">${esc(receipt.label)}</button>`
-          : `<span class="th-seen">${esc(receipt.label)}</span>`);
-        const under = bits.length ? `<div class="th-under${mine ? " mine" : ""}" data-chat-key="${esc(renderKey)}:receipt">${bits.join("")}</div>` : "";
+        if (confirmingDelete) {
+          // The question sits under the bubble it is about, with who it affects.
+          // Keep restores; Delete is the only red word. The two verbs wrap as a
+          // pair, so a narrow pill never strands Delete on a line of its own.
+          bits.push(
+            `<span class="th-seen">${esc(deleteQuestionFor(thread))}</span>`,
+            `<span class="th-confirm-verbs"><button type="button" class="th-message-action" data-message-delete-cancel="${esc(m.id)}" data-stop="1">Keep</button>`
+              + `<button type="button" class="th-seen danger-verb" data-message-delete-confirm="${esc(m.id)}" data-stop="1"${messageMutationIds.has(m.id) ? " disabled" : ""}>${messageMutationIds.has(m.id) ? "Deleting…" : "Delete"}</button></span>`,
+          );
+        } else {
+          if (!sideActions) bits.push(...messageActionBits);
+          if (mine && m.pending) bits.push(...outboxStatusBits(m));
+          if (receipt) bits.push(receipt.expandable
+            ? `<button type="button" class="th-seen" data-receipt-toggle="${esc(m.id)}" data-stop="1" aria-expanded="${expandedReceiptIds.has(m.id) ? "true" : "false"}">${esc(receipt.label)}</button>`
+            : `<span class="th-seen">${esc(receipt.label)}</span>`);
+        }
+        const under = bits.length ? `<div class="th-under${mine ? " mine" : ""}${confirmingDelete ? " confirming" : ""}" data-chat-key="${esc(renderKey)}:receipt">${bits.join("")}</div>` : "";
         const details = receipt && expandedReceiptIds.has(m.id) ? receiptDetailsHtml(receipt, m.id) : "";
         return under + details;
       })()}`;
@@ -17570,11 +17630,25 @@
     if (composerQr && composerQr.dataset.replyTarget !== replyTargetId) {
       composerQr.dataset.replyTarget = replyTargetId;
       composerQr.classList.toggle("replying", Boolean(replyTargetId));
-      composerQr.querySelector(".th-reply-target")?.remove();
+      composerQr.querySelector(".th-reply-target:not(.th-edit-band)")?.remove();
       if (composerReplyTargetHtml) {
         composerQr.insertAdjacentHTML("afterbegin", composerReplyTargetHtml);
         wireReplyCancel(composerQr, threadStateKey);
       }
+    }
+    // The same for the edit band: which message the composer is editing, if any.
+    const editTargetId = String(threadEditTargets.get(threadStateKey) || "");
+    if (composerQr && composerQr.dataset.editTarget !== editTargetId) {
+      composerQr.dataset.editTarget = editTargetId;
+      composerQr.classList.toggle("editing", Boolean(editTargetId));
+      composerQr.querySelector(".th-edit-band")?.remove();
+      const editing = editTargetId ? messageById.get(editTargetId) : null;
+      if (editing) {
+        composerQr.insertAdjacentHTML("afterbegin", editBandHtml(editing));
+        wireEditCancel(composerQr, threadStateKey);
+      }
+      const sendEl = composerQr.querySelector("#thQrSend");
+      if (sendEl) sendEl.textContent = editTargetId ? "Save" : "Relay";
     }
     const composerSendEl = document.getElementById("thQrSend");
     if (composerSendEl) composerSendEl.disabled = chatReplySending.has(threadStateKey);
@@ -17636,81 +17710,22 @@
       });
     }
     wireMessageSideMenus(newControls);
-    for (const input of newControls.querySelectorAll("[data-message-edit-input]")) {
-      const id = String(input.getAttribute("data-message-edit-input") || "");
-      const sizeEditor = () => fitMessageEditInput(input);
-      sizeEditor();
-      input.addEventListener("input", () => {
-        messageEditDrafts.set(id, input.value);
-        sizeEditor();
-      });
-      input.addEventListener("keydown", (event) => {
-        if (event.key === "Escape") {
-          event.preventDefault();
-          messageEditDrafts.delete(id);
-          renderThreadDetail();
-        } else if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-          event.preventDefault();
-          thHistoryEl.querySelector(`[data-message-edit-save="${CSS.escape(id)}"]`)?.click();
-        }
-      });
-    }
     for (const button of newControls.querySelectorAll("[data-message-edit]")) {
       button.addEventListener("click", () => {
         const id = String(button.getAttribute("data-message-edit") || "");
         const message = threadMessages(threadMessageOptions).find((item) => String(item.id) === id);
         if (!message) return;
-        messageDeleteConfirmIds.delete(id);
-        messageEditDrafts.set(id, String(message.body || message.title || ""));
-        renderThreadDetail();
-        const input = thHistoryEl.querySelector(`[data-message-edit-input="${CSS.escape(id)}"]`);
-        if (input) {
-          input.focus();
-          input.setSelectionRange(input.value.length, input.value.length);
-        }
-      });
-    }
-    for (const button of newControls.querySelectorAll("[data-message-edit-cancel]")) {
-      button.addEventListener("click", () => {
-        messageEditDrafts.delete(String(button.getAttribute("data-message-edit-cancel") || ""));
-        renderThreadDetail();
-      });
-    }
-    for (const button of newControls.querySelectorAll("[data-message-edit-save]")) {
-      button.addEventListener("click", async () => {
-        const id = String(button.getAttribute("data-message-edit-save") || "");
-        const message = threadMessages(threadMessageOptions).find((item) => String(item.id) === id);
-        const input = thHistoryEl.querySelector(`[data-message-edit-input="${CSS.escape(id)}"]`);
-        const forHuman = String(input?.value || "").trim();
-        if (!message || messageMutationIds.has(id)) return;
-        if (!forHuman) {
-          setRowNote(id, "A message cannot be empty.", "err");
-          return;
-        }
-        messageEditDrafts.set(id, forHuman);
-        messageMutationIds.add(id);
-        button.disabled = true;
-        clearRowNote(id);
-        const result = await window.relay.editMessage(id, forHuman, message.updatedAt || "");
-        messageMutationIds.delete(id);
-        if (!result?.ok) {
-          setRowNote(id, result?.error || "Could not edit this message.", "err");
-          renderThreadDetail();
-          return;
-        }
-        applySentMessageMutation(result, { forHuman });
-        messageEditDrafts.delete(id);
-        setRowNote(id, "Message edited.", "ok");
-        fadeRowNoteLater(id, 2500);
-        renderThreadDetail();
+        beginThreadEdit(threadStateKey, id, message);
       });
     }
     for (const button of newControls.querySelectorAll("[data-message-delete]")) {
       button.addEventListener("click", () => {
         const id = String(button.getAttribute("data-message-delete") || "");
-        messageEditDrafts.delete(id);
+        if (String(threadEditTargets.get(threadStateKey) || "") === id) endThreadEdit(threadStateKey);
+        clearRowNote(id);
         messageDeleteConfirmIds.add(id);
         renderThreadDetail();
+        requestAnimationFrame(() => revealAboveComposer(id));
       });
     }
     for (const button of newControls.querySelectorAll("[data-message-delete-cancel]")) {
@@ -17727,10 +17742,12 @@
         messageMutationIds.add(id);
         button.disabled = true;
         clearRowNote(id);
-        const result = await window.relay.deleteMessage(id, message.updatedAt || "");
+        // The content version is what the server compares against once a
+        // message has been edited; before that, updatedAt is.
+        const result = await window.relay.deleteMessage(id, message.editedAt || message.updatedAt || "");
         messageMutationIds.delete(id);
         if (!result?.ok) {
-          setRowNote(id, result?.error || "Could not delete this message.", "err");
+          setRowNote(id, result?.error || "Couldn’t delete. Try again.", "err");
           renderThreadDetail();
           return;
         }
@@ -17882,6 +17899,16 @@
         if (!mentionMenu?.contains(event.relatedTarget)) closeMentions();
       });
       thQrInput.addEventListener("keydown", (event) => {
+        // Esc leaves an edit with the old words back where they were; ↑ in an
+        // empty composer edits your last text, as Slack and Discord do.
+        if (event.key === "Escape" && threadEditTargets.has(threadStateKey)) {
+          event.preventDefault(); event.stopImmediatePropagation(); endThreadEdit(threadStateKey); return;
+        }
+        if (event.key === "ArrowUp" && !threadEditTargets.has(threadStateKey) && !String(thQrInput.value || "").trim()
+          && (mentionMenu?.classList.contains("hidden") ?? true)) {
+          const last = [...(thread.msgs || [])].reverse().find((item) => canEditMessage(item, Boolean(item.mine || item.direction === "out")));
+          if (last) { event.preventDefault(); event.stopImmediatePropagation(); beginThreadEdit(threadStateKey, last.id, last); return; }
+        }
         if (!mentionMatches.length || mentionMenu?.classList.contains("hidden")) return;
         if (event.key === "ArrowDown" || event.key === "ArrowUp") {
           event.preventDefault(); event.stopImmediatePropagation();
@@ -17893,7 +17920,34 @@
           event.preventDefault(); event.stopImmediatePropagation(); closeMentions();
         }
       }, true);
+      // While the composer is editing one of your texts, Relay is Save: the
+      // words go to the message, not to a new one. Unchanged words end the
+      // edit quietly, as WhatsApp does; empty ones are refused (an empty
+      // message is a delete, and that has its own verb).
+      const doThEditSave = async () => {
+        const id = String(threadEditTargets.get(threadStateKey) || "");
+        const message = id ? messageById.get(id) : null;
+        if (!message) { endThreadEdit(threadStateKey); return; }
+        const forHuman = String(thQrInput.value || "").trim();
+        if (messageMutationIds.has(id)) return;
+        if (!forHuman) { setRowNote(id, "A message cannot be empty. To take it back, delete it.", "err"); return; }
+        if (forHuman === String(message.body || message.title || "").trim()) { clearRowNote(id); endThreadEdit(threadStateKey); return; }
+        messageMutationIds.add(id);
+        thQrSend.disabled = true;
+        clearRowNote(id);
+        const result = await window.relay.editMessage(id, forHuman, message.editedAt || message.updatedAt || "");
+        messageMutationIds.delete(id);
+        thQrSend.disabled = false;
+        if (!result?.ok) {
+          setRowNote(id, result?.error || "Couldn’t save. Try again.", "err");
+          renderThreadDetail();
+          return;
+        }
+        applySentMessageMutation(result, { forHuman });
+        endThreadEdit(threadStateKey);
+      };
       const doThReply = async () => {
+        if (threadEditTargets.has(threadStateKey)) return doThEditSave();
         if (thReplySending || chatReplySending.has(threadStateKey)) return;
         const text = (thQrInput.value || "").trim();
         const staged = peekStagedFiles(thQrInput);
@@ -18134,6 +18188,8 @@
         e.stopPropagation();
         const id = String(b.getAttribute("data-reply-to") || "");
         if (!id) return;
+        // A reply and an edit cannot both own the composer; the reply wins.
+        if (threadEditTargets.has(threadStateKey)) endThreadEdit(threadStateKey);
         threadReplyTargets.set(threadStateKey, id);
         renderThreadDetail();
         const box = document.getElementById("thQrInput");
@@ -18838,7 +18894,12 @@
           ${CHAT_APP_OPTIONS.map((app) => {
             const on = chatAppEnabled(app);
             const logo = app === "ChatGPT" ? "chatgptMark.svg" : "claudeMark.svg";
-            const why = `${app === "ChatGPT" ? "chatgpt.com" : "claude.ai"} · a new chat per relay`;
+            // The Claude tile opens the Claude app when it is on this Mac
+            // (main asks the OS at the click; this is the pill's own sighting
+            // of the app), claude.ai otherwise. ChatGPT has no scheme on a
+            // computer and always opens chatgpt.com.
+            const where = app === "ChatGPT" ? "chatgpt.com" : desktopEntry("Claude Code")?.available === true ? "Claude app" : "claude.ai";
+            const why = `${where} · a new chat per relay`;
             return `<div class="sv-open-row">
               <img class="sv-open-logo" src="${logo}" alt="" />
               <span class="sv-open-copy"><span class="sv-open-name">${app}</span><span class="sv-open-why">${esc(why)}</span></span>
@@ -19628,6 +19689,19 @@
   // overlap guard in refreshActiveCanonicalChat keeps slow networks from
   // stacking requests.
   setInterval(() => { refreshActiveCanonicalChat(); }, ACTIVE_CANONICAL_CHAT_POLL_MS);
+  // A receipt's "2m ago" and a kicker's "1h" are computed when painted, and a
+  // room repaints only when its data changes, so a quiet room's clocks froze
+  // at whatever minute the last message landed (David, 2026-09-17: "Seen by
+  // Shane · 2m" eight minutes later). Repaint the open surface once a minute;
+  // the row reconciler touches only the rows whose words changed.
+  const RELATIVE_TIME_TICK_MS = 60_000;
+  setInterval(() => {
+    if (!rendererSurfaceActive()) return;
+    // Never while you are editing or deciding a delete: the ring and the
+    // question under the bubble stay exactly where you left them.
+    if (activeView === "threads" && threadEditTargets.size === 0 && messageDeleteConfirmIds.size === 0) renderThreadDetail();
+    else if (activeView === "reader") renderReader();
+  }, RELATIVE_TIME_TICK_MS);
   window.addEventListener("focus", () => { refreshActiveCanonicalChat(); });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") refreshActiveCanonicalChat();

@@ -139,10 +139,12 @@ test("an IPC retry returning an already accepted entry immediately carries its c
 function composer({ files = [], prepare = async () => ({ files: [], attachments: [] }), send } = {}) {
   const calls = [];
   const input = { value: "hello", setSelectionRange() {}, focus() {} };
+  const edits = [];
   const address = { threadId: "room", party: "Friend", addressRecipient: { email: "friend@example.test" } };
   const c = vm.createContext({
     latestOutboxRevision: 0, optimisticChatReplies: new Map(), chatReplySending: new Set(),
     threadReplyAttemptKeys: new Map(), threadReplyTargets: new Map(), threadComposerDrafts: new Map(),
+    threadEditTargets: new Map(), edits, doThEditSave: () => { edits.push(input.value); },
     threadStateKey: "room", thReplySending: false, thQrInput: input, thQrSend: {},
     thread: { ...address, msgs: [] }, chatRoom: null, addressAnchor: address,
     messageById: new Map(), focusedSlackParent: null, threadDetailFollowSendFor: null,
@@ -185,6 +187,16 @@ test("rapid send gestures during attachment preparation enqueue once, including 
   prepared.resolve({ files: [{ name: "photo" }], attachments: [] });
   await sending;
   assert.equal(calls.length, 1);
+});
+
+test("Send while editing saves the edit and never sends a new message", async () => {
+  const { c, calls, input } = composer();
+  c.threadEditTargets.set("room", "sent-1");
+  await c.send();
+  assert.equal(calls.length, 0);
+  assert.equal(c.optimisticChatReplies.size, 0);
+  assert.deepEqual([...c.edits], ["hello"]);
+  assert.equal(input.value, "hello");
 });
 
 test("file preparation failure releases the send guard and retains the draft", async () => {

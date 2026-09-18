@@ -296,6 +296,21 @@ test("all four begin on, and all four can go off; with none on, the sentence sta
   const none = harness({ saved: { "proto.chatApps.v1:account-a": "__none__", "proto.agentApps.v3:account-a": "__none__" } });
   assert.deepEqual(none.enabledAgentApps(), []);
 });
+// The Claude tile opens the Claude app when it is on this Mac and claude.ai
+// otherwise (David got Chrome, 2026-09-17); the row says which. ChatGPT has
+// no scheme on a computer, so its row always names chatgpt.com.
+test("the Claude row says where the tile goes on this Mac", () => {
+  const withApp = harness();
+  assert.match(withApp.yourAgentHtml(), /Claude<\/span><span class="sv-open-why">Claude app · a new chat per relay/);
+  assert.match(withApp.yourAgentHtml(), /ChatGPT<\/span><span class="sv-open-why">chatgpt\.com · a new chat per relay/);
+  const without = harness();
+  without.setSurfaces({ ...without.detected, _claudeDesktop: { available: false, reason: "Claude isn’t installed on this Mac" } });
+  assert.match(without.yourAgentHtml(), /Claude<\/span><span class="sv-open-why">claude\.ai · a new chat per relay/);
+  assert.match(without.yourAgentHtml(), /chatgpt\.com · a new chat per relay/);
+  // Before the capabilities answer arrives, the row promises only the web app.
+  const unknown = harness({ surfaces: null });
+  assert.match(unknown.yourAgentHtml(), /claude\.ai · a new chat per relay/);
+});
 test("prompt titles cannot inject markup into the visible text or clipboard attribute", () => {
   const h = harness();
   for (const sheet of [true, false]) {
