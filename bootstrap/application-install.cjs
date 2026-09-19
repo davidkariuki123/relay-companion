@@ -75,9 +75,23 @@ function readCurrent(homeDir) {
   try { return read(file); } catch (error) { if (error.code === "ENOENT") return null; throw error; }
 }
 
+// An installed runtime whose services are not running is not proof of a
+// broken installation: a home folder restored onto a fresh OS keeps every file
+// under ~/.relay and loses every logon task (Shane, 2026-09-19). Before that
+// runtime is judged unhealthy, let its own CLI register and start its services,
+// the same command `relay doctor` names. Never throws; the caller re-checks.
+function repairInstalledRuntime(current, { run = spawnSync } = {}) {
+  if (typeof current?.node !== "string" || typeof current?.bin !== "string") return { ok: false, reason: "runtime-cli-unknown" };
+  const result = run(current.node, [current.bin, "repair-installation"], { encoding: "utf8", windowsHide: true, timeout: 3 * 60_000 });
+  const ok = !result.error && result.status === 0;
+  return { ok, reason: ok ? "repaired" : "repair-command-failed",
+    detail: String(result.error?.message || result.stderr || result.stdout || "").trim().slice(0, 500) };
+}
+
 async function installFromApplication({ resourcesDir, applicationRoot, executable, activationEnabled = false,
   homeDir = os.homedir(), verify = verifyBundle, extract = extractBundle, activate = bootstrap.activateRuntime,
   acquireLock = bootstrap.acquireCanonicalLock, health = require("./runtime-health.cjs").exactRuntimeHealth,
+  repairRuntime = repairInstalledRuntime,
   drain = require("./update-activity.cjs").drainCalls, download = bootstrap.downloadVerifiedArtifact,
   onProgress = () => {}, signal } = {}) {
   onProgress({ phase: "verifying", canCancel: false });
@@ -122,7 +136,18 @@ async function installFromApplication({ resourcesDir, applicationRoot, executabl
       throw new Error("Legacy installation requires the separately planned repair route");
     }
     if (current && versionCompare(bundle.receipt.version, current.version) < 0) throw new Error("An older installer cannot downgrade Relay");
-    if (current && !(await health(current, { platform: process.platform })).ok) throw new Error("Existing Relay is not healthy enough to bridge");
+    // Live services, not files, decide whether the existing Relay is healthy.
+    // A runtime whose daemon and pill are not running gets one repair through
+    // its own CLI before it is judged; only a runtime that stays down blocks.
+    let repairedExisting = false;
+    if (current && !(await health(current, { platform: process.platform })).ok) {
+      onProgress({ phase: "installing", canCancel: false });
+      const repaired = await repairRuntime(current);
+      if (!repaired?.ok || !(await health(current, { platform: process.platform })).ok) {
+        throw new Error("Existing Relay is not healthy enough to bridge");
+      }
+      repairedExisting = true;
+    }
     // Interrupted ownership changes require explicit reconciliation below; never
     // overwrite a journal whose runtime/owner outcome is still uncertain.
     if (priorJournal && !["complete", "rolled-back"].includes(priorJournal.state)) {
@@ -138,7 +163,7 @@ async function installFromApplication({ resourcesDir, applicationRoot, executabl
       && (installedOwner.applicationVersion || installedOwner.version) === (bundle.receipt.applicationVersion || bundle.receipt.version)
       && current && versionCompare(current.version, bundle.receipt.version) >= 0) {
       onProgress({ phase: "ready", canCancel: false });
-      return { ok: true, alreadyInstalled: true, owner: installedOwner, runtime: current, updateOwner: "canonical-runtime" };
+      return { ok: true, alreadyInstalled: true, repaired: repairedExisting, owner: installedOwner, runtime: current, updateOwner: "canonical-runtime" };
     }
     if (bundle.receipt.runtimeDelivery === "download") {
       signal?.throwIfAborted();
@@ -232,4 +257,4 @@ async function reconcileApplication({ homeDir = os.homedir(), acquireLock = boot
   } finally { lock.release(); }
 }
 
-module.exports = { verifyBundle, extractBundle, installFromApplication, reconcileApplication, versionCompare };
+module.exports = { verifyBundle, extractBundle, installFromApplication, reconcileApplication, repairInstalledRuntime, versionCompare };

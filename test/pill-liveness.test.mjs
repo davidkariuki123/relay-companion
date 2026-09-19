@@ -51,6 +51,37 @@ test("the pill relaunches only when its own transport fails while the daemon kee
   assert.equal(verdict(wedged, daemonOk).relaunch, true);
 });
 
+test("the pill repairs a daemon whose heartbeat is missing or stale, and nothing else", () => {
+  const now = 30 * 60_000;
+  const pillStartedAt = now - liveness.DAEMON_REPAIR_GRACE_MS;
+  const decide = (heartbeat, extra = {}) => liveness.daemonRepairDecision({ heartbeat, now, pillStartedAt, ...extra });
+  assert.equal(decide({ at: now - 1000 }).reason, "fresh");
+  assert.equal(decide({ at: now - 1000 }).action, "none");
+  assert.equal(decide({ at: now + 5000 }).reason, "clock-ahead");
+  // An update transaction owns the services; the pill keeps its hands off.
+  assert.equal(decide(null, { updating: true }).reason, "updating");
+  // At logon the daemon starts beside the pill: a stale file from the previous
+  // session is not yet evidence of anything.
+  assert.equal(decide({ at: now - liveness.DAEMON_STALE_MS - 1 }, { pillStartedAt: now - 1000 }).reason, "pill-just-started");
+  assert.equal(decide(null, { pillStartedAt: now - 1000 }).reason, "pill-just-started");
+  // A daemon that is already reporting needs no grace: a pill restarted on its
+  // own beside a live daemon knows at once that the service is fine.
+  assert.equal(decide({ at: now - 1000 }, { pillStartedAt: now - 1000 }).reason, "fresh");
+  const stale = decide({ at: now - liveness.DAEMON_STALE_MS - 1 });
+  assert.equal(stale.action, "repair");
+  assert.equal(stale.reason, "stale");
+  assert.ok(stale.ageMs > liveness.DAEMON_STALE_MS);
+  const never = decide(null);
+  assert.equal(never.action, "repair");
+  assert.equal(never.reason, "no-heartbeat");
+  assert.equal(decide(null, { lastRepairAt: now - 1000 }).reason, "cooldown");
+  assert.equal(decide({ at: now - liveness.DAEMON_STALE_MS - 1 }, { lastRepairAt: now - liveness.DAEMON_REPAIR_COOLDOWN_MS }).action, "repair");
+  assert.equal(liveness.daemonHeartbeatIsFresh({ at: now - 1000 }, { now }), true);
+  assert.equal(liveness.daemonHeartbeatIsFresh({ at: now - liveness.DAEMON_STALE_MS }, { now }), false);
+  assert.equal(liveness.daemonHeartbeatIsFresh(null, { now }), false);
+  assert.equal(liveness.daemonHeartbeatPath("/home/x"), path.join("/home/x", ".relay", "recovery", "daemon.json"));
+});
+
 test("the daemon-side supervisor reads the heartbeat file, restarts through the platform path once, and honours the cooldown", async (t) => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-pill-supervisor-"));
   t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));

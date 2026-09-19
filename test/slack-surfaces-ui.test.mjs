@@ -297,8 +297,8 @@ test("canonical responses match the still-visible room, surface, and Slack proje
 
 test("canonical optimistic reads are surface-keyed and update only that surface's summary", () => {
   const read = html.slice(html.indexOf("function readVisibleChatRoom()"), html.indexOf("// Open a conversation INTO"));
-  assert.match(read, /if \(\(isSlackIntegratedRoom\(visibleRoom\) \|\| resolvedDirectAnchor\) && visibleRoom\.chatId\)/,
-    "visible canonical Relay and resolved direct rows share the canonical read path");
+  assert.match(read, /if \(\(isSlackIntegratedRoom\(visibleRoom\) \|\| resolvedDirectAnchor \|\| serverTranscriptRoom\(visibleRoom\)\) && visibleRoom\.chatId\)/,
+    "visible canonical Relay, resolved direct and server-read Relay rows share the canonical read path");
   assert.doesNotMatch(read, /isSlackIntegratedRoom\(visibleRoom\) && slackMessagesVisible/,
     "Slack visibility cannot gate reading Relay-origin canonical rows");
   assert.match(read, /const generationKey = `\$\{surface\}:\$\{chatId\}`/);

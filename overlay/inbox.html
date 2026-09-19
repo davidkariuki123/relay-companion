@@ -3013,6 +3013,7 @@
   .sv-hint { padding:8px 16px 0; font-size:11px; line-height:1.45; color:var(--muted-2); }
   .sv-err { margin-top:8px; padding:0 16px; }
   .sv-note { padding:10px 16px 0; font-size:12px; color:var(--ok); line-height:1.4; }
+  .service-note { margin:8px 12px 4px; padding:9px 12px; font-size:12px; line-height:1.4; color:var(--ink); border-radius:var(--r-3); background:var(--raised); box-shadow:inset 0 0 0 1px var(--edge); }
   .sv-version { padding:20px 16px 12px; font-family:var(--mono); font-size:10px; color:var(--muted-3); }
   .sv-slack-section { margin:24px 12px 0; }
   .sv-slack-card { overflow:hidden; border-radius:var(--r-3); background:var(--raised); box-shadow:inset 0 0 0 1px var(--edge); transition:box-shadow var(--t-base) var(--settle); }
@@ -3579,6 +3580,10 @@
       <!-- Relays view -->
       <section class="view" id="relaysView">
         <div id="relaysIntro" hidden><div id="relaysRequestsSummary"></div><div id="relayAnyoneTip" hidden></div></div>
+        <!-- Said only after the pill's own repair of the background service
+             failed: a repair that works is silent, and a Repair button would
+             ask the person to do the pill's job. -->
+        <div class="service-note gone" id="serviceStoppedNote" role="status">Relay’s background service stopped and could not be restarted. Open conversations still load, but new messages won’t notify you until you restart this computer.</div>
         <div id="relaysList"></div>
         <div id="relaysEmpty" class="empty gone">
           <svg class="mark" width="22" height="22" viewBox="0 0 16 16" aria-hidden="true">
@@ -3957,6 +3962,7 @@
   const relayHostHoverIntent = window.RelayHoverIntent.installRelayHoverIntent({ document, window });
   const settingsViewEl = document.getElementById("settingsView");
   const signInBannerEl = document.getElementById("signInBanner");
+  const serviceStoppedNoteEl = document.getElementById("serviceStoppedNote");
   const signupViewEl = document.getElementById("signupView");
   const signupBodyEl = document.getElementById("signupBody");
 
@@ -6236,6 +6242,53 @@
       || room.provider === "slack"
     ));
   }
+  // The background service stages inbound Relay rows into the local store
+  // this transcript reads, while the person's own messages and their read
+  // receipts come from the live Sent page. With the service missing, that
+  // asymmetry painted a Granular chat with Shane's messages and Sven's "Seen"
+  // while every one of Sven's replies was absent (2026-09-19). While the main
+  // process reports the service as anything but "ok", a Relay room reads the
+  // server's own page of the conversation as well, the way Slack and direct
+  // rooms already do, so a dead service degrades to slower, never to half a
+  // conversation.
+  function serviceDegraded() {
+    const daemon = payload.service?.daemon;
+    return daemon === "checking" || daemon === "repairing" || daemon === "stopped";
+  }
+  // Rooms whose transcript was read from the server because the service was
+  // down. They keep projecting that page after the service returns, until the
+  // local store has caught up (rows dedupe by id), so nothing blinks out.
+  const serviceFallbackChatIds = new Set();
+  function serverTranscriptRoom(room) {
+    const chatId = String(room?.chatId || "");
+    if (!chatId || isSlackIntegratedRoom(room)) return false;
+    if (serviceFallbackChatIds.has(chatId)) return true;
+    if (!serviceDegraded()) return false;
+    serviceFallbackChatIds.add(chatId);
+    return true;
+  }
+  // A room built from the local store has no chat id unless a server summary
+  // gave it one, and the server page can only be asked for by that id. A group
+  // room's id is its group id. A direct room's is found in the server's own
+  // list (payload.service.chats, present only while the service is not ok) by
+  // the wire thread ids the two share; never by a person's name.
+  function fallbackChatIdForRoom(room) {
+    if (!room || room.chatId || isSlackIntegratedRoom(room)) return "";
+    if (room.isGroup) return String(room.groupId || "");
+    const threadIds = room.threadIds instanceof Set ? room.threadIds : new Set([room.threadId].filter(Boolean));
+    if (!threadIds.size) return "";
+    const match = (payload.service?.chats || []).find((chat) =>
+      chat.kind !== "group" && (chat.threadIds || []).some((id) => threadIds.has(String(id))));
+    return match ? String(match.chatId) : "";
+  }
+  function assignFallbackChatIds(rooms) {
+    if (!serviceDegraded() && !serviceFallbackChatIds.size) return rooms;
+    for (const room of rooms) {
+      const chatId = fallbackChatIdForRoom(room);
+      if (chatId) room.chatId = chatId;
+    }
+    return rooms;
+  }
   function slackVisibilityKey(room, source = threadsSource) {
     const chatId = String((room && room.chatId) || threadDetailId || "");
     return `${conversationSurface(source)}:${chatId}`;
@@ -6414,7 +6467,7 @@
     }
     const includeSlack = slackMessagesVisible(room);
     const resolvedDirect = room?.chatId ? directContactAnchorForChatId(room.chatId) : null;
-    if ((!isSlackIntegratedRoom(room) && !resolvedDirect) || !room.chatId || !window.relay.canonicalChat) return;
+    if ((!isSlackIntegratedRoom(room) && !resolvedDirect && !serverTranscriptRoom(room)) || !room.chatId || !window.relay.canonicalChat) return;
     const surface = conversationSurface();
     activeCanonicalChatRefresh = requestCanonicalChatDetail(room, surface, { includeSlack });
     try {
@@ -15869,6 +15922,78 @@
         });
       }
     }
+    // A Relay room read from the server because the background service was
+    // down (serverTranscriptRoom). Only the other side's rows are taken: the
+    // person's own messages are already here from the live Sent page, and a
+    // group send's server copy carries a different id from the sibling Sent
+    // holds, so projecting it would double every outbound bubble. Each row is
+    // shaped exactly like a staged inbound relay above, keyed to the same
+    // room, so the local store's copy replaces it seamlessly once the service
+    // is back.
+    for (const chat of canonicalChatDetails.values()) {
+      if (!chat?.chatId || !serviceFallbackChatIds.has(String(chat.chatId))) continue;
+      const integration = chat.integration || (chat.channel?.slack ? { provider:"slack" } : null);
+      if (integration?.provider === "slack") continue;
+      for (const item of chat.items || []) {
+        const id = String(item.relayId || "");
+        if (!id || item.direction !== "inbound" || item.origin === "slack" || item.provider?.name === "slack") continue;
+        if (msgs.some((message) => String(message.id || "") === id)) continue;
+        const sender = item.sender || {};
+        const senderName = String(sender.name || "").trim() || "Someone";
+        const senderEmail = String(sender.email || "").trim().toLowerCase();
+        const subj = String(item.title || "");
+        const attachments = Array.isArray(item.attachments) ? item.attachments : [];
+        const ownedAgent = item.source?.host === "relay-agent-run";
+        const request = String(item.kind || "") === "task" || String(item.kind || "") === "task_request";
+        const textLike = request ? false : ownedAgent || relayTextLike(item.forHuman, subj, item.forAgent, attachments);
+        const groupName = String(item.recipientGroupName || (chat.kind === "group" ? chat.title : "") || "");
+        msgs.push({
+          id, threadId: item.threadId || id, direction: "in",
+          seen: false, seenAt: null, delivered: false, agentOpened: false, readReceipts: [],
+          inReplyToRelayId: item.inReplyToRelayId || "",
+          inReplyToTopicPost: item.inReplyToTopicPost || null,
+          addressRecipient: item.recipientGroupId ? { groupId:item.recipientGroupId } : (senderEmail ? { email:senderEmail } : null),
+          title: textLike ? String(item.forHuman || subj) : subj, party: senderName, at: item.createdAt || item.updatedAt,
+          partyKey: groupName
+            ? `group:${groupName.trim().toLowerCase()}`
+            : (senderEmail ? `email:${senderEmail}` : `name:${senderName.toLowerCase()}`),
+          isGroup: Boolean(groupName),
+          groupId: item.recipientGroupId || (chat.kind === "group" ? chat.chatId : ""),
+          groupName,
+          chatId: chat.chatId,
+          unread: item.state === "pending" || item.state === "delivered",
+          recipientMentioned: item.recipientMentioned === true,
+          source: item.source || null,
+          ownedAgent,
+          updatedAt: item.updatedAt || item.createdAt,
+          editedAt: item.editedAt || null,
+          deletedAt: item.deletedAt || null,
+          textLike, request,
+          groupSendId: item.groupSendId || "",
+          siblingIds: [],
+          taskStartedAt: item.taskStartedAt || null,
+          taskCompletedAt: item.taskCompletedAt || null,
+          taskRejectedAt: item.taskRejectedAt || null,
+          taskCancelledAt: item.taskCancelledAt || null,
+          taskClosedBy: item.taskClosedBy || null,
+          taskResultRelayId: item.taskResultRelayId || null,
+          taskRunOwner: item.taskRunOwner || null,
+          taskAssignment: item.taskAssignment || null,
+          taskRoster: Array.isArray(item.taskRoster) ? item.taskRoster : null,
+          taskRosterCounts: item.taskRosterCounts || null,
+          type: item.type || null,
+          taskClaim: item.taskClaim || null,
+          materializedCodex: false,
+          materializedClaude: false,
+          body: item.forHuman || "",
+          agent: String(item.forAgent || ""),
+          reactions: item.reactions || { aggregates: [], events: [] },
+          attachments,
+          preview: textLike ? "" : bodyPreview(item.forHuman || "", subj, 72),
+          serverTranscript: true,
+        });
+      }
+    }
     // A direct conversation resolved from People can precede both the inbox
     // payload and the lazy Sent cache. Project that canonical snapshot into
     // the same message list immediately; local rows above win by relay id once
@@ -16381,6 +16506,9 @@
     // WhatsApp/iMessage law: group and direct conversations are peers. The
     // visible Chat list is one chronology, never two type-based shelves.
     const rooms = sortConversationRooms([...groups, ...people]);
+    // While the background service is not ok, every room that can be read
+    // from the server carries the chat id that page is asked for by.
+    assignFallbackChatIds(rooms);
     return { convos, groups, people, rooms };
   }
   function chatRoomForThread(threadId, surface = conversationSurface()) {
@@ -16474,7 +16602,7 @@
     const resolvedDirectAnchor = visibleRoom?.chatId
       ? directContactAnchorForChatId(visibleRoom.chatId)
       : null;
-    if ((isSlackIntegratedRoom(visibleRoom) || resolvedDirectAnchor) && visibleRoom.chatId) {
+    if ((isSlackIntegratedRoom(visibleRoom) || resolvedDirectAnchor || serverTranscriptRoom(visibleRoom)) && visibleRoom.chatId) {
       const chatId = String(visibleRoom.chatId);
       const chat = canonicalChatDetails.get(chatId);
       const includeSlack = slackMessagesVisible(visibleRoom);
@@ -16557,7 +16685,7 @@
     }
     const ackIds = [];
     for (const m of visibleChatRoomMessages()) {
-      if (!m.unread) continue;
+      if (!m.unread || m.serverTranscript) continue;
       const id = String(m.id);
       // Canonical Slack messages use the conversation cursor above. ackMany is
       // the legacy per-delivery path and cannot make these messages durable.
@@ -18446,6 +18574,9 @@
     // Slack opens are handled after the canonical transcript is rendered.
     for (const m of source === "slack" ? [] : threadMessages({ includeSlack:false })) {
       if (m.direction !== "in" || !m.unread) continue;
+      // A row read from the server page is not in the local store to ack; the
+      // canonical read in readVisibleChatRoom tells the server instead.
+      if (m.serverTranscript) continue;
       const sameRoom = room && room.isGroup
         ? (room.threadIds instanceof Set ? room.threadIds.has(m.threadId) : m.threadId === threadId)
         : partyKey || party
@@ -18466,7 +18597,7 @@
     readVisibleChatRoom();
     const includeSlack = slackMessagesVisible(room, source);
     let canonicalDetailReady = Promise.resolve(null);
-    if (isSlackIntegratedRoom(room) && room.chatId && !options.hydrated
+    if ((isSlackIntegratedRoom(room) || serverTranscriptRoom(room)) && room.chatId && !options.hydrated
       && !canonicalChatDetailIsCurrent(room, source, { includeSlack })) {
       canonicalDetailReady = requestCanonicalChatDetail(room, source, { includeSlack }).then((result) => {
         reconcileCanonicalChatResult(result, {
@@ -20798,6 +20929,9 @@
     if (signInBannerEl) {
       signInBannerEl.classList.toggle("gone", !payload.account || payload.account.paired !== false);
     }
+    // The background service could not be put back by this pill: the one
+    // state worth a sentence. "repairing" and a successful repair stay quiet.
+    serviceStoppedNoteEl?.classList.toggle("gone", payload.service?.daemon !== "stopped");
     // Relays badge/count reflect only the items that show in the Relays tab
     // (the clean split keeps task_request / share_approval out of this count).
     // ONE unread is ONE number. Relays and Chat were counting the same arrivals
@@ -20991,7 +21125,7 @@
       const surface = conversationSurface();
       const room = chatRoomForThread(threadDetailId, surface);
       const includeSlack = slackMessagesVisible(room);
-      if ((isSlackIntegratedRoom(room) || directContactAnchorForChatId(room?.chatId)) && room?.chatId) {
+      if ((isSlackIntegratedRoom(room) || directContactAnchorForChatId(room?.chatId) || serverTranscriptRoom(room)) && room?.chatId) {
         requestCanonicalChatDetail(room, surface, { includeSlack }).then((result) => {
           reconcileCanonicalChatResult(result, {
             chatId:room.chatId,

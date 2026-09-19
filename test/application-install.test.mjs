@@ -35,6 +35,7 @@ function fixture(t, existing = true) {
     verify: async () => { events.push("verified"); return { receipt, platformKey: receipt.platform }; },
     acquireLock: () => { events.push("lock"); return { release: () => events.push("unlock") }; },
     health: async () => { events.push("health"); return { ok: true }; },
+    repairRuntime: async () => { events.push("repair"); return { ok: false, reason: "runtime-cli-unknown" }; },
     drain: async () => { events.push("drain"); return () => events.push("undrain"); },
     extract: (_bundle, root) => { events.push("extract"); return { packageRoot: path.join(root, "node_modules", "relay-companion"), bin: path.join(root, "relay.js") }; },
     activate: async (layout, runtime, version) => {
@@ -146,6 +147,37 @@ test("fresh and bridge installation share existing transaction engine and preser
     assert.equal((await installer.installFromApplication(options)).alreadyInstalled, true);
     assert.equal(events.filter((event) => event === "activate").length, 1);
   }
+});
+
+test("an installed runtime whose services are not running is repaired through its own CLI before it is judged", async (t) => {
+  // The field case: every file under ~/.relay restored onto a fresh OS, no
+  // logon task, nothing running. The installer used to call this "already
+  // installed" from the markers alone and open a pill with no service behind it.
+  const { options, events, pointer } = fixture(t);
+  await installer.installFromApplication(options);
+  events.length = 0;
+  let running = false;
+  options.health = async () => { events.push(`health:${running ? "up" : "down"}`); return { ok: running }; };
+  options.repairRuntime = async (current) => {
+    assert.equal(JSON.parse(fs.readFileSync(pointer, "utf8")).packageRoot, current.packageRoot);
+    events.push("repair"); running = true; return { ok: true, reason: "repaired" };
+  };
+  const result = await installer.installFromApplication(options);
+  assert.equal(result.alreadyInstalled, true);
+  assert.equal(result.repaired, true);
+  assert.deepEqual(events.filter((event) => event !== "verified" && event !== "lock" && event !== "unlock"), ["health:down", "repair", "health:up"]);
+  assert.ok(!events.includes("activate"), "the runtime tree is never replaced to fix its services");
+  // A runtime that stays down after the repair still blocks, unchanged.
+  running = false;
+  options.repairRuntime = async () => ({ ok: false, reason: "repair-command-failed" });
+  await assert.rejects(installer.installFromApplication(options), /healthy/);
+  // The default repair shells out to the runtime's own CLI and reports rather than throws.
+  assert.equal(installer.repairInstalledRuntime({ version: "0.1.0" }).reason, "runtime-cli-unknown");
+  const runs = [];
+  const repaired = installer.repairInstalledRuntime({ node: "/n", bin: "/b/relay.js" }, { run: (cmd, args) => { runs.push([cmd, args]); return { status: 0 }; } });
+  assert.deepEqual(runs, [["/n", ["/b/relay.js", "repair-installation"]]]);
+  assert.equal(repaired.ok, true);
+  assert.equal(installer.repairInstalledRuntime({ node: "/n", bin: "/b/relay.js" }, { run: () => ({ error: new Error("ENOENT") }) }).ok, false);
 });
 
 test("unhealthy and newer existing installations are not changed", async (t) => {

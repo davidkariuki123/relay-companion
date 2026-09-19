@@ -342,6 +342,9 @@ let burstShown = 0; // sequential cards shown since the queue was last empty/awa
 // registered its listeners (a 2400-line script can still be parsing at
 // ready-to-show). The renderer pings relay:rendererReady as its LAST statement.
 let rendererListening = false;
+// The background service as this pill last judged it (see the daemon heartbeat
+// watch near the pill heartbeat below); pushed to the renderer as payload.service.
+let serviceHealth = { daemon: "ok", reason: "", detail: "", since: 0, chats: [] };
 // Engagement drives the adaptive poll cadences: fast host/sent polling only
 // while the user recently touched the pill (or a notification is on stage).
 let lastEngagedAt = 0;
@@ -2437,6 +2440,10 @@ function buildPayload() {
       soundsMuted,
     },
     features: PRODUCT_FEATURES,
+    // The background service the transcript depends on: "ok", "repairing"
+    // while this pill puts it back, or "stopped" once that repair failed.
+    // The renderer reads Relay rooms from the server while it is not "ok".
+    service: serviceHealth,
     todoSteward: PRODUCT_FEATURES.todo === true ? readTodoStewardState() : null,
     pendingOpen: pendingSetupOpenPreviewCache,
     relays: hydrateReactions(relaysNow),
@@ -10014,11 +10021,83 @@ let worstMainStallMs = 0;
 // (observed 2026-09-10 after memory starvation ended) means only a relaunch helps.
 const pillLiveness = require("../src/pill-liveness.cjs");
 const PILL_HEARTBEAT_PATH = pillLiveness.pillHeartbeatPath(os.homedir());
-const DAEMON_HEARTBEAT_PATH = path.join(os.homedir(), ".relay", "recovery", "daemon.json");
+const DAEMON_HEARTBEAT_PATH = pillLiveness.daemonHeartbeatPath(os.homedir());
+// The background service as this pill last judged it, pushed to the renderer
+// as payload.service. "ok" while the daemon's heartbeat is fresh; "checking"
+// when it is not yet, inside the logon grace; "repairing" while
+// repairCompanionDaemon puts it back, then "ok" again once a fresh heartbeat
+// proves the new process, or "stopped" when that failed. Only the failed
+// outcome is ever said out loud: a repair that works is nobody's business,
+// and a Repair button would be asking the person to do the pill's job.
+let daemonRepairInFlight = null;
+let lastDaemonRepairAt = 0;
+function setServiceHealth(daemon, reason = "", detail = "") {
+  if (serviceHealth.daemon === daemon && serviceHealth.reason === reason) return;
+  serviceHealth = { daemon, reason, detail: String(detail || "").slice(0, 400), since: Date.now(), chats: daemon === "ok" ? [] : serviceHealth.chats || [] };
+  pushInbox(true);
+  if (daemon !== "ok") void refreshServiceFallbackChats();
+}
+// While the service is not ok the renderer reads Relay rooms from the server,
+// and it needs each room's chat id to ask for the page. A group room's id is
+// its group id; a direct room's is only known from the server's own list, so
+// that list rides along in payload.service.chats (ids and thread ids only,
+// nothing that is not already in the local store) for as long as the
+// fallback lasts. Refreshed on a slow cadence: rooms rarely appear mid-outage.
+let serviceFallbackChatsAt = 0;
+async function refreshServiceFallbackChats({ force = false } = {}) {
+  if (serviceHealth.daemon === "ok" || !deviceToken()) return;
+  if (!force && Date.now() - serviceFallbackChatsAt < 60_000) return;
+  serviceFallbackChatsAt = Date.now();
+  try {
+    const client = await relayClient();
+    const result = await client.chats({ surface: "relay" });
+    const chats = (Array.isArray(result?.chats) ? result.chats : []).map((chat) => ({
+      chatId: String(chat.chatId || ""),
+      kind: chat.kind === "group" ? "group" : "direct",
+      threadIds: Array.isArray(chat.threadIds) ? chat.threadIds.map(String) : [],
+    })).filter((chat) => chat.chatId);
+    if (serviceHealth.daemon === "ok") return;
+    serviceHealth = { ...serviceHealth, chats };
+    pushInbox(true);
+  } catch (error) {
+    console.error("[overlay] service fallback chats refresh failed:", error && error.message);
+  }
+}
+setInterval(() => { void refreshServiceFallbackChats(); }, 60_000).unref?.();
+// An update transaction owns the services while it runs; the pill keeps out.
+function updateTransactionOpen() {
+  try { return fs.existsSync(path.join(os.homedir(), ".relay", "runtime", "transaction.lock")); } catch { return false; }
+}
+// Register what is missing and start the daemon (src/daemon-repair.js), once
+// per cooldown. Every self-heal used to live inside the daemon or inside a
+// logon task, so a machine whose OS reinstall dropped the tasks but kept the
+// home folder had nothing left that could notice (Shane, 2026-09-19).
+function repairCompanionDaemon(decision) {
+  if (daemonRepairInFlight) return daemonRepairInFlight;
+  lastDaemonRepairAt = Date.now();
+  console.error(`[overlay] background service heartbeat ${decision.reason}${decision.ageMs ? ` (${Math.round(decision.ageMs / 1000)}s old)` : ""}; repairing`);
+  setServiceHealth("repairing", decision.reason);
+  daemonRepairInFlight = (async () => {
+    try {
+      const repairUrl = pathToFileURL(path.join(__dirname, "..", "src", "daemon-repair.js")).href;
+      const { repairDaemonService } = await import(repairUrl);
+      const result = await repairDaemonService({ log: (line) => console.error(`[overlay] ${line}`) });
+      if (result.ok) setServiceHealth("ok");
+      else setServiceHealth("stopped", result.reason, result.detail);
+    } catch (error) {
+      console.error("[overlay] daemon repair failed:", error && error.message);
+      setServiceHealth("stopped", "repair-threw", error && error.message);
+    } finally {
+      daemonRepairInFlight = null;
+    }
+  })();
+  return daemonRepairInFlight;
+}
 {
   const startedAt = Date.now();
   let relaunchRequested = false;
   const readJson = (file) => { try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return null; } };
+  const daemonWatchEnabled = process.env.RELAY_OVERLAY_TEST !== "1" && process.env.RELAY_OVERLAY_PERF !== "1";
   setInterval(() => {
     const now = Date.now();
     const transport = relayModules && typeof relayModules.relayTransportHealth === "function" ? relayModules.relayTransportHealth() : null;
@@ -10029,6 +10108,24 @@ const DAEMON_HEARTBEAT_PATH = path.join(os.homedir(), ".relay", "recovery", "dae
       fs.renameSync(tmp, PILL_HEARTBEAT_PATH);
     } catch {}
     worstMainStallMs = 0;
+    // The same tick judges the daemon's heartbeat. A missing or stale one is
+    // repaired here, silently; the renderer only hears about a repair that failed.
+    if (daemonWatchEnabled && !daemonRepairInFlight) {
+      const decision = pillLiveness.daemonRepairDecision({
+        heartbeat: readJson(DAEMON_HEARTBEAT_PATH),
+        now,
+        pillStartedAt: startedAt,
+        lastRepairAt: lastDaemonRepairAt,
+        updating: updateInFlight || updateTransactionOpen(),
+      });
+      if (decision.action === "repair") void repairCompanionDaemon(decision);
+      // Back on its own (the recovery launcher, a logon, a person): say so.
+      else if (decision.reason === "fresh" && serviceHealth.daemon !== "ok") setServiceHealth("ok");
+      // No heartbeat yet inside the logon grace: not a verdict, but the rooms
+      // read from the server meanwhile, so a service that never comes back
+      // never had a minute in which replies were missing.
+      else if (decision.reason === "pill-just-started" && serviceHealth.daemon === "ok") setServiceHealth("checking", "pill-just-started");
+    }
     if (relaunchRequested || !transport) return;
     const verdict = pillLiveness.shouldRelaunchForWedgedTransport({ transport, daemon: readJson(DAEMON_HEARTBEAT_PATH), now });
     if (!verdict.relaunch) return;

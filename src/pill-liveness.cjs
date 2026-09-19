@@ -14,6 +14,16 @@ const PILL_RESTART_COOLDOWN_MS = 10 * 60_000;
 const TRANSPORT_WEDGE_MS = 5 * 60_000;
 const DAEMON_HEARTBEAT_FRESH_MS = 60_000;
 const DAEMON_API_FRESH_MS = 2 * 60_000;
+// The daemon writes its heartbeat every 5 s (src/recovery-health.js). Two
+// minutes of silence is a daemon that is gone or wedged, not one that is busy:
+// a machine waking from sleep re-stamps within seconds.
+const DAEMON_STALE_MS = 2 * 60_000;
+// At logon the pill and the daemon start together; give the daemon this long
+// to write its first heartbeat before the pill decides it is missing.
+const DAEMON_REPAIR_GRACE_MS = 60_000;
+// One repair per window. A daemon that keeps dying is the updater's or the
+// recovery launcher's problem; the pill must not turn into a restart loop.
+const DAEMON_REPAIR_COOLDOWN_MS = 10 * 60_000;
 
 function pillHeartbeatPath(homeDir) {
   return path.join(homeDir, ".relay", "recovery", "pill.json");
@@ -56,12 +66,56 @@ function shouldRelaunchForWedgedTransport({ transport, daemon, now = Date.now(),
   return { relaunch: true, reason: "wedged-transport", failingForMs: now - failingSince };
 }
 
+function daemonHeartbeatPath(homeDir) {
+  return path.join(homeDir, ".relay", "recovery", "daemon.json");
+}
+
+/** Whether the daemon's heartbeat file is evidence of a live daemon right now. */
+function daemonHeartbeatIsFresh(heartbeat, { now = Date.now(), staleMs = DAEMON_STALE_MS } = {}) {
+  const at = Number(heartbeat?.at) || 0;
+  return at > 0 && at <= now && now - at < staleMs;
+}
+
+/**
+ * What the pill should do about the daemon's heartbeat file. The pill is the
+ * one Relay process a person can see, so it is also the one that must notice a
+ * background service that never came back (an OS reinstall that kept the home
+ * folder but dropped the logon tasks, Shane 2026-09-19) and put it back.
+ *   none/updating          an update transaction owns the services right now.
+ *   none/pill-just-started the daemon may still be booting beside this pill.
+ *   none/fresh             reporting on time.
+ *   none/clock-ahead       a heartbeat from the future is a clock problem.
+ *   none/cooldown          repaired recently; do not flap.
+ *   repair/no-heartbeat    never wrote one: not registered or never started.
+ *   repair/stale           silent for too long: gone or wedged.
+ */
+function daemonRepairDecision({ heartbeat, now = Date.now(), pillStartedAt = 0, lastRepairAt = 0, updating = false,
+  staleMs = DAEMON_STALE_MS, graceMs = DAEMON_REPAIR_GRACE_MS, cooldownMs = DAEMON_REPAIR_COOLDOWN_MS } = {}) {
+  if (updating) return { action: "none", reason: "updating" };
+  const at = Number(heartbeat?.at) || 0;
+  if (at > now) return { action: "none", reason: "clock-ahead" };
+  const ageMs = at ? now - at : null;
+  if (at && ageMs < staleMs) return { action: "none", reason: "fresh", ageMs };
+  // Not fresh. Inside the logon grace that is not yet a verdict, but it is a
+  // reason for the pill to read rooms from the server until it is.
+  if (pillStartedAt && now - pillStartedAt < graceMs) return { action: "none", reason: "pill-just-started", ageMs };
+  if (lastRepairAt && now - lastRepairAt < cooldownMs) return { action: "none", reason: "cooldown", ageMs };
+  if (!at) return { action: "repair", reason: "no-heartbeat" };
+  return { action: "repair", reason: "stale", ageMs };
+}
+
 module.exports = {
   pillHeartbeatPath,
+  daemonHeartbeatPath,
+  daemonHeartbeatIsFresh,
   pillSupervisorDecision,
   shouldRelaunchForWedgedTransport,
+  daemonRepairDecision,
   PILL_HEARTBEAT_MS,
   PILL_STALE_MS,
   PILL_RESTART_COOLDOWN_MS,
   TRANSPORT_WEDGE_MS,
+  DAEMON_STALE_MS,
+  DAEMON_REPAIR_GRACE_MS,
+  DAEMON_REPAIR_COOLDOWN_MS,
 };
