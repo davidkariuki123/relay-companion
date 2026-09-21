@@ -239,8 +239,17 @@ test("direct and group conversations share one newest-first chronology", () => {
   assert.doesNotMatch(rail, /rl-h|>Groups<|>People</);
 });
 
+// Extract only the function under test; nearby UI copy is not a JS boundary.
+function relayIdentityFunctionSource() {
+  const start = html.indexOf("function relayIdentityRows() {");
+  assert.notEqual(start, -1, "the identity projection must exist");
+  const end = html.indexOf("\n  }", start);
+  assert.ok(end > start, "the identity projection must have a closing brace");
+  return html.slice(start, end + "\n  }".length);
+}
+
 test("the Relays tab is one latest-message row per exact identity", () => {
-  const identitySource = html.slice(html.indexOf("function relayIdentityRows("), html.indexOf("// This is a layout preference", html.indexOf("function relayIdentityRows(")));
+  const identitySource = relayIdentityFunctionSource();
   const shane = {
     name: "Shane",
     latest: { id: "agent", party: "Shane's Codex", ownedAgent: true, at: "2026-08-13T13:00:00Z" },
@@ -283,7 +292,7 @@ test("the Relays tab is one latest-message row per exact identity", () => {
 });
 
 test("a newer Task becomes the person's latest Relays preview", () => {
-  const identitySource = html.slice(html.indexOf("function relayIdentityRows("), html.indexOf("// This is a layout preference", html.indexOf("function relayIdentityRows(")));
+  const identitySource = relayIdentityFunctionSource();
   const room = {
     name: "Shane Acton",
     latest: {
