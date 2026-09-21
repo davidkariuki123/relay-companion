@@ -35,7 +35,9 @@ import {
 
 export const PACKAGE_NAME = "relay-companion";
 const DEFAULT_REGISTRY = "https://registry.npmjs.org";
-const STABLE_RUNTIME_MANIFEST = "https://api.sendrelays.com/v1/companion-releases/stable/manifest.json";
+// Keep the legacy stable feed pinned to a v2-signed bridge for offline clients.
+// Clients with the overlap keyring follow the independently promoted v3 feed.
+const STABLE_RUNTIME_MANIFEST = "https://api.sendrelays.com/v1/companion-releases/stable-v3/manifest.json";
 const releaseTrust = createRequire(import.meta.url)("./release-trust.json");
 const { RELEASE_ALGORITHM, verifyReleaseEnvelope } = createRequire(import.meta.url)("../bootstrap/release-signature.cjs");
 const { systemdRunEnvironmentArgs } = createRequire(import.meta.url)("../bootstrap/linux-systemd.cjs");

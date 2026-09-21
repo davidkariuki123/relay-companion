@@ -294,7 +294,7 @@ test("stable bridge follows only a correctly signed branded runtime manifest", a
     fetchImpl: async (url) => { requested = url; return { ok: true, json: async () => envelope }; },
   });
   assert.equal(version, "0.1.999");
-  assert.match(requested, /^https:\/\/api\.sendrelays\.com\/v1\/companion-releases\/stable\/manifest\.json\?relay_update=42$/);
+  assert.match(requested, /^https:\/\/api\.sendrelays\.com\/v1\/companion-releases\/stable-v3\/manifest\.json\?relay_update=42$/);
 });
 
 test("daemon updater loop checks immediately and independently of task polling/startup", async () => {
@@ -1028,4 +1028,19 @@ test("without a newer release the failing candidate keeps its own backoff", asyn
     clock += 1_000 * 2 ** attempt + 1;
   }
   assert.equal(readMigrationFailure(statePath, { slot: "recoveryFailure" }).count, RECOVERY_SUPERSEDE_AFTER + 1);
+});
+
+
+test("an offline v2 client can cross a retained bridge before reading the v3 feed", async () => {
+  const pair = () => crypto.generateKeyPairSync("ed25519");
+  const v2=pair(),v3=pair();
+  const entry=(key,id)=>({keyId:id,algorithm:"ED25519_SHA_512",publicKeyPem:key.publicKey.export({type:"spki",format:"pem"}).toString()});
+  const oldTrust={schema:2,activeKeyId:"relay-runtime-release-v2",keys:[entry(v2,"relay-runtime-release-v2")]};
+  const overlap={...oldTrust,keys:[...oldTrust.keys,entry(v3,"relay-runtime-release-v3")]};
+  const sign=(version,key,keyId)=>{const bytes=Buffer.from(JSON.stringify({product:"Relay",version,artifacts:{}}));return{schema:1,algorithm:"ED25519_SHA_512",keyId,payload:bytes.toString("base64"),signature:crypto.sign(null,bytes,key.privateKey).toString("base64")};};
+  const bridge=sign("0.1.900",v2,"relay-runtime-release-v2"),future=sign("0.1.901",v3,"relay-runtime-release-v3");
+  const fetchImpl=async url=>({ok:true,json:async()=>new URL(url).pathname.includes('/stable-v3/')?future:bridge});
+  assert.equal(await fetchLatestVersion({channel:"stable",trustStore:oldTrust,stableManifestUrl:"https://api.sendrelays.com/v1/companion-releases/stable/manifest.json",fetchImpl}),"0.1.900");
+  assert.equal(await fetchLatestVersion({channel:"stable",trustStore:overlap,fetchImpl}),"0.1.901");
+  assert.equal(await fetchLatestVersion({channel:"stable",trustStore:oldTrust,fetchImpl}),null,"old clients cannot skip the bridge and trust an unknown signer");
 });

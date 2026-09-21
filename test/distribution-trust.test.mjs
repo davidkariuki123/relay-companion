@@ -2213,8 +2213,8 @@ test("public release owns immutable publication while private promotion owns fle
     assert.match(gate, /assert-runtime-capabilities\.mjs/);
     assert.match(promote, /thin-installer\) TAG=installer/);
     assert.match(promote, /thin installer must never replace bridge latest/);
-    assert.match(promote, /companion-releases\/stable\/manifest\.json/);
-    assert.match(promote, /--key "companion-releases\/stable\/manifest\.json"/);
+    assert.match(promote, /companion-releases\/(?:stable|\$RELEASE_FEED)\/manifest\.json/);
+    assert.match(promote, /--key "companion-releases\/(?:stable|\$RELEASE_FEED)\/manifest\.json"/);
     assert.doesNotMatch(promote, /CURRENT_STABLE="\$\(curl/);
     assert.match(promote, /s3api get-object[\s\S]{0,1600}elif grep -q 'NoSuchKey'/);
     assert.match(promote, /could not read the authoritative stable runtime pointer/);
@@ -2312,4 +2312,11 @@ test("public export includes every script its release security suite imports", (
   assert.match(verifier, /assertRuntimeCapabilities\(root\)/);
   assert.match(verifier, /prepareLinuxElectronSandbox\(\{ electronPath: verified\.electronPath, platform \}\)/);
   assert.doesNotMatch(verifier, /["']--no-sandbox["']/);
+});
+
+test("migration feed selection preserves the legacy bridge and rejects unknown publication paths", () => {
+  const workflow = fs.readFileSync(new URL("../../../.github/workflows/promote-prod.yml", import.meta.url), "utf8");
+  assert.match(workflow, /RELEASE_FEED:.*vars\.RELAY_RELEASE_FEED.*stable/);
+  assert.ok(workflow.includes('[[ "$RELEASE_FEED" = stable || "$RELEASE_FEED" = stable-v3 ]]'));
+  assert.ok(workflow.includes('companion-releases/$RELEASE_FEED/manifest.json'));
 });

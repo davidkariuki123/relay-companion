@@ -66,3 +66,13 @@ test("application signatures and downloaded bytes must both verify", async (t) =
   fs.writeFileSync(file, "different");
   await assert.rejects(release.verifyApplicationArtifact(file, payload.artifacts["win32-x64"][0]), /digest/);
 });
+
+
+test("native update discovery follows the new trust feed without changing immutable artifact URLs", async () => {
+  const {createRequire}=await import('node:module');const require=createRequire(import.meta.url);
+  const release=require('../bootstrap/application-release.cjs');
+  assert.equal(release.applicationManifestUrl('stable'),'https://api.sendrelays.com/v1/application-releases/stable-v3/manifest.json');
+  assert.equal(release.applicationManifestUrl('dev'),'https://dev-api.sendrelays.com/v1/application-releases/dev/manifest.json');
+  assert.equal(release.applicationReleaseBase('stable'),'https://api.sendrelays.com/v1/application-releases');
+  assert.throws(()=>release.applicationManifestUrl('untrusted'));
+});

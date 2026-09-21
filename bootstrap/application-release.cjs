@@ -10,6 +10,10 @@ function applicationReleaseBase(channel = "stable") {
   return `${CHANNEL_ORIGINS[channel]}/v1/application-releases${channel === "stable" ? "" : `/${channel}`}`;
 }
 
+function applicationManifestUrl(channel = "stable") {
+  return `${applicationReleaseBase(channel)}/${channel === "stable" ? "stable-v3/" : ""}manifest.json`;
+}
+
 function validateApplicationRelease(payload, { version, sourceSha, channel } = {}) {
   if (![1, 2].includes(payload?.schema) || payload.product !== "Relay Application" || payload.version !== version
     || payload.sourceSha !== sourceSha || !/^\d+\.\d+\.\d+$/.test(version || "") || !/^[a-f0-9]{40}$/.test(sourceSha || "")
@@ -59,4 +63,4 @@ async function verifyApplicationArtifact(file, artifact) {
   return true;
 }
 
-module.exports = { PLATFORMS, CHANNEL_ORIGINS, applicationReleaseBase, validateApplicationRelease, verifyApplicationRelease, verifyApplicationArtifact };
+module.exports = { PLATFORMS, CHANNEL_ORIGINS, applicationReleaseBase, applicationManifestUrl, validateApplicationRelease, verifyApplicationRelease, verifyApplicationArtifact };

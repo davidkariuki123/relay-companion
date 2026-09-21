@@ -1606,7 +1606,7 @@ test("obsolete coordination protocol is absent and rejected before any API call"
   // state an agent sets on its own, so a human-initiated pull clears unread
   // and sends the read receipt — without it the sender sees "delivered"
   // forever). relay_acknowledge stays retired.
-  assert.equal(TOOLS.length, 49, "the full model catalog contains only current product tools");
+  assert.equal(TOOLS.length, 52, "the full model catalog contains only current product tools");
 
   const client = new Proxy({}, {
     get() { throw new Error("removed tool must not touch the API client"); },
@@ -2353,4 +2353,21 @@ test("no Task reaches an agent on the ordinary row, in any transport", () => {
   // The developer row still teaches Tasks.
   const developer = toolsForAccount({ requests: true, aiSessions: true, connectors: true, todo: true, topics: true, messageMutations: true }, "claude_code");
   assert.match(developer.find((tool) => tool.name === "relay_send").description, /kind='task'/);
+});
+
+test("share measurement tools preserve owner-scoped arguments without sending correspondence", async () => {
+  const calls = [];
+  const client = {
+    async shareStats(...args) { calls.push(["stats", ...args]); return { groups: [], limitations: ["Estimated browsers, not people"] }; },
+    async sharePlacement(...args) { calls.push(["placement", ...args]); return { url: "https://sendrelays.com/s/test?p=placement" }; },
+    async shareSnapshot(...args) { calls.push(["snapshot", ...args]); return { ok: true }; },
+  };
+  await handleCall(client, "relay_share_stats", { relayId: "relay_test", from: "2026-09-21T00:00:00Z" }, { mode: "full" });
+  await handleCall(client, "relay_share_placement", { relayId: "relay_test", label: "X reply", source: "x", test: true, idempotencyKey: "placement-retry" }, { mode: "full" });
+  await handleCall(client, "relay_share_snapshot", { relayId: "relay_test", placementId: "placement", observedAt: "2026-09-21T12:00:00Z", impressions: 7, linkClicks: 3 }, { mode: "full" });
+  assert.deepEqual(calls, [
+    ["stats", "relay_test", { from: "2026-09-21T00:00:00Z", to: undefined }],
+    ["placement", "relay_test", { label: "X reply", source: "x", test: true, idempotencyKey: "placement-retry" }],
+    ["snapshot", "relay_test", "placement", { observedAt: "2026-09-21T12:00:00Z", impressions: 7, linkClicks: 3 }],
+  ]);
 });

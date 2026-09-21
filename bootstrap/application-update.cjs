@@ -11,7 +11,7 @@ const rollout = require("./application-rollout.cjs");
 const CHECK_MS = 6 * 60 * 60_000;
 
 async function readOffer({ fetchImpl = globalThis.fetch, trustStore = trust, channel = "stable" } = {}) {
-  const response = await fetchImpl(`${release.applicationReleaseBase(channel)}/${channel === "stable" ? "stable/" : ""}manifest.json`, { redirect: "error", signal: AbortSignal.timeout(15_000), headers: { "Cache-Control": "no-cache" } });
+  const response = await fetchImpl(release.applicationManifestUrl(channel), { redirect: "error", signal: AbortSignal.timeout(15_000), headers: { "Cache-Control": "no-cache" } });
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`Native application offer unavailable (${response.status})`);
   let bytes = 0; const chunks = [];

@@ -155,7 +155,7 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
   assert.deepEqual(ordinary, [
     "relay_task_start", "relay_task_complete", "relay_task_unclaim",
     "relay_send", "relay_forward", "relay_share_link", "relay_contacts_search", "relay_groups_list", "relay_group_create", "relay_group_update",
-    "relay_group_delete", "relay_contact_update", "relay_session_updates", "relay_inbox_list", "relay_sent_list", "relay_thread_fetch",
+    "relay_group_delete", "relay_contact_update", "relay_session_updates", "relay_inbox_list", "relay_share_stats", "relay_share_placement", "relay_share_snapshot", "relay_sent_list", "relay_thread_fetch",
     "relay_chats_list", "relay_chat_fetch", "relay_chat_send", "relay_message_edit", "relay_message_delete", "relay_mark_read",
     "relay_inbox_delete", "relay_recently_deleted_list", "relay_recently_deleted_restore", "relay_file_download",
   ]);
@@ -164,8 +164,8 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
   assert.deepEqual(toolsForAccount(productionDeveloper).map((tool) => tool.name), ordinary);
   // The complete catalog requires the role and the dev channel together.
   const developer = productFeatures({ env: { RELAY_UPDATE_CHANNEL: "dev" }, user: DEVELOPER });
-  assert.equal(toolsForAccount(developer).length, 42);
-  assert.equal(toolsForAccount({ ...developer, orgAdmin: true }).length, 46);
+  assert.equal(toolsForAccount(developer).length, 45);
+  assert.equal(toolsForAccount({ ...developer, orgAdmin: true }).length, 49);
   assert.ok(toolsForAccount(developer).some((tool) => tool.name === "relay_task_unclaim"));
   assert.ok(toolsForAccount(developer).some((tool) => tool.name === "relay_message_edit"));
   assert.ok(toolsForAccount(developer).some((tool) => tool.name === "relay_message_delete"));

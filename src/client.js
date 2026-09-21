@@ -545,6 +545,12 @@ export class RelayClient {
     return this.#req("POST", `/v1/share-links/${encodeURIComponent(relayId)}`, { access });
   }
 
+  shareStats(relayId, range = {}) {
+    const query = new URLSearchParams(Object.entries(range).filter(([, value]) => value !== undefined));
+    return this.#req("GET", `/v1/share-links/${encodeURIComponent(relayId)}/stats?${query}`);
+  }
+  sharePlacement(relayId, body) { return this.#req("POST", `/v1/share-links/${encodeURIComponent(relayId)}/placements`, body); }
+  shareSnapshot(relayId, placementId, body) { return this.#req("PUT", `/v1/share-links/${encodeURIComponent(relayId)}/placements/${encodeURIComponent(placementId)}/snapshot`, body); }
   shareLinkStatus(relayId) {
     return this.#req("GET", `/v1/share-links/${encodeURIComponent(relayId)}`);
   }

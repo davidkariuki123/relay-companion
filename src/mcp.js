@@ -915,6 +915,108 @@ export const TOOLS = [
     },
   },
   {
+    "name": "relay_share_stats",
+    "description": "Read owner-only share statistics. Separates legacy opens, estimated external browsers, button attempts, successful copies, agent fetches and account outcomes. Does not mark read. Browser estimates are not people; owner/test events are excluded. Optional from/to are ISO timestamps.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "relayId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "relayId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "relay_share_placement",
+    "description": "Create an attributed URL for an existing share link. This sends nothing. Use separate placements for X replies and internal previews; test=true excludes that placement from acquisition. Reuse the same idempotency key on retries.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "relayId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 8
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "x",
+            "relay",
+            "internal",
+            "other"
+          ]
+        },
+        "postId": {
+          "type": "string",
+          "pattern": "^[0-9]{1,30}$"
+        },
+        "test": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "relayId",
+        "idempotencyKey",
+        "label",
+        "source"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "relay_share_snapshot",
+    "description": "Save a manually observed X analytics snapshot for an X placement. Keep X aggregate impressions and link clicks separate from Relay visits; never infer unique people or subtract guessed self clicks.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "relayId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "placementId": {
+          "type": "string"
+        },
+        "observedAt": {
+          "type": "string"
+        },
+        "impressions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "linkClicks": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "relayId",
+        "placementId",
+        "observedAt",
+        "impressions",
+        "linkClicks"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     name: "relay_sent_list",
     _meta: ALWAYS_LOAD_META,
     description:
@@ -1165,6 +1267,9 @@ export const ORDINARY_RELAY_TOOL_NAMES = new Set([
   "relay_topic_member",
   // The sender-side history an agent needs to thread a follow-up. Without it,
   // ordinary messaging can only ever start new conversations.
+  "relay_share_stats",
+  "relay_share_placement",
+  "relay_share_snapshot",
   "relay_sent_list",
   "relay_thread_fetch",
   // Chats are ordinary messaging: reading conversations and replying into them
@@ -2748,6 +2853,10 @@ async function handleAdmittedCall(client, name, args, {
       }
       return result;
     }
+    case "relay_share_stats":
+      return text(await client.shareStats(args.relayId, { from: args.from, to: args.to }));
+    case "relay_share_placement": { const { relayId, ...body } = args; return text(await client.sharePlacement(relayId, body)); }
+    case "relay_share_snapshot": { const { relayId, placementId, ...body } = args; return text(await client.shareSnapshot(relayId, placementId, body)); }
     case "relay_sent_list": {
       const response = await client.sent();
       const all = Array.isArray(response?.items) ? response.items : [];
