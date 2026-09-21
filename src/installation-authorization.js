@@ -209,6 +209,7 @@ function validateDurableState(value) {
     expiresAt,
     status,
     ...(accountSummary(value.account) ? { account: accountSummary(value.account) } : {}),
+    ...(onboardingContext(value.onboardingContext) ? { onboardingContext: onboardingContext(value.onboardingContext) } : {}),
   };
 }
 
@@ -243,12 +244,22 @@ function validateSecret(value, authorizationId, trustedWebOrigin) {
   return { ...secret, activationUrl: activationUrl.toString() };
 }
 
+function onboardingContext(value) {
+  if (/^[A-Za-z0-9_-]{1,200}$/.test(value?.shareToken || "")) return {shareToken:value.shareToken};
+  const org = value?.org;
+  if (org && typeof org.name === "string" && /^[A-Za-z0-9_-]{1,200}$/.test(org.groupId || "")) return {org:{name:org.name.slice(0,200),groupId:org.groupId}};
+  const inviter = value?.inviter;
+  if (!inviter || typeof inviter.name !== "string" || !/^[A-Za-z0-9_-]{1,200}$/.test(inviter.relayUserId || "")) return undefined;
+  return { inviter: { name: inviter.name.slice(0, 200), relayUserId: inviter.relayUserId } };
+}
+
 function publicState(state) {
   if (!state) return { status: "idle" };
   return {
     status: state.status,
     expiresAt: state.expiresAt,
     ...(accountSummary(state.account) ? { account: accountSummary(state.account) } : {}),
+    ...(onboardingContext(state.onboardingContext) ? { onboardingContext: onboardingContext(state.onboardingContext) } : {}),
   };
 }
 
@@ -334,6 +345,7 @@ export function createInstallationAuthorizationController({
   apiBase = apiUrl(),
   webBase = DEFAULT_WEB_URL,
   platform = process.platform,
+  approvalSurface,
   deviceName = os.hostname(),
   fetchImpl = globalThis.fetch,
   openExternal = async () => false,
@@ -475,6 +487,7 @@ export function createInstallationAuthorizationController({
       platform,
       codeChallenge,
       codeChallengeMethod: "S256",
+      ...(approvalSurface === "browser-v1" ? { approvalSurface } : {}),
       ...(key ? { installationKey: key } : {}),
     });
     const authorizationId = String(created.authorizationId || "");
@@ -546,6 +559,7 @@ export function createInstallationAuthorizationController({
       status,
       expiresAt,
       ...(accountSummary(remote.account) ? { account: accountSummary(remote.account) } : {}),
+      ...(onboardingContext(remote.onboardingContext) ? { onboardingContext: onboardingContext(remote.onboardingContext) } : {}),
     };
     await durableStore.write(next);
     if (status === "expired") return expire(next);
@@ -556,10 +570,11 @@ export function createInstallationAuthorizationController({
     return serialize(stateInternal);
   }
 
-  async function googleInternal({ forceAccountSelection = false, browserSignIn = false } = {}) {
+  async function googleInternal({ forceAccountSelection = false, browserSignIn = false, setupIntent } = {}) {
     const { state: durable, secret } = await activeContext({ create: true });
     const target = new URL(secret.activationUrl);
     if (browserSignIn) target.searchParams.set("signin", "1");
+    if(/^dsi_[A-Za-z0-9_-]{16,100}$/.test(setupIntent||""))target.searchParams.set("setupIntent",setupIntent);
     if (forceAccountSelection) {
       const fragment = new URLSearchParams(target.hash.slice(1));
       fragment.set("switchAccount", "1");

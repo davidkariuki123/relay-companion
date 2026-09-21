@@ -72,7 +72,7 @@ test("local rehearsal uses the real helper, contains sends, rejects other origin
   assert.equal(minted.code, 0, minted.error);
   const link = JSON.parse(minted.out);
   assert.equal(link.url.startsWith(review.url + "/s/"), true, "practice links stay on the local server");
-  assert.equal(link.shareText, `Here is where the plan stands.\n\nPaste this into your Claude Code or Codex and it'll fetch the full relay: ${link.url}`);
+  assert.equal(link.shareText, `Here is where the plan stands.\n\n${link.url}`);
   const linked = await (await fetch(review.url + "/practice/state", { headers: { Authorization: `Bearer ${config.accessToken}` } })).json();
   assert.equal(linked.ui.firstLink.url, link.url);
   assert.equal(linked.ui.firstLink.shareText, link.shareText);

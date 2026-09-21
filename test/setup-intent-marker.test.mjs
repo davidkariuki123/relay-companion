@@ -67,7 +67,7 @@ test("the application installer's marker says so, and the pill reads it as a cen
   // The pill: an application marker centres the window and starts no browser
   // sign-in on its own; the durable owner marker picks the Google-first screen.
   const payload = slice(main, "function buildPayload() {", "// Pushes are serialized");
-  assert.match(payload, /agentInstalled: Boolean\(setupIntent\) && setupIntent\.application !== true,/);
+  assert.match(payload, /agentInstalled: !installedFirstOnboarding && Boolean\(setupIntent\) && setupIntent\.application !== true,/);
   assert.match(payload, /applicationSetup: setupIntent\?\.application === true,/);
   assert.match(payload, /applicationOwned: applicationOwnedInstall\(\),/);
   assert.match(main, /onboarding: \[[^\]]*payload\.ui\.agentInstalled, payload\.ui\.applicationSetup, payload\.ui\.applicationOwned,/);
@@ -155,7 +155,7 @@ test("the pill reads the marker only while signed out, consumes it on sign-in st
   const payload = slice(main, "function buildPayload() {", "// Pushes are serialized");
   assert.match(payload, /if \(currentAccount\.paired\) consumeSetupIntent\(\);/, "a paired account's marker is stale");
   assert.match(payload, /const setupIntent = currentAccount\.paired \? null : readSetupIntent\(relayConfigDir\(\)\);/);
-  assert.match(payload, /agentInstalled: Boolean\(setupIntent\) && setupIntent\.application !== true,/);
+  assert.match(payload, /agentInstalled: !installedFirstOnboarding && Boolean\(setupIntent\) && setupIntent\.application !== true,/);
   const signIn = slice(main, 'ipcMain.handle("relay:installationAuthSignIn"', 'ipcMain.handle("relay:installationAuthGoogle"');
   assert.match(signIn, /consumeSetupIntent\(\);[\s\S]*\.signIn\(\{ forceAccountSelection: input\?\.forceAccountSelection === true \}\)/);
   // The renderer decides from the payload, so a change must reach it.
@@ -170,7 +170,7 @@ test("the first Relay is a hello to an inviter, else a share link", () => {
   assert.equal(kind({ inviter: { relayUserId: "  " } }), "link");
   assert.equal(kind({ inviter: null }), "link");
   assert.equal(kind(null), "link", "no agent-protocol.json at all");
-  assert.match(main, /firstRelayKind: firstRelayKindFor\(protocolState\),/);
+  assert.match(main, /firstRelayKind: firstRelayKindFor\(desktopOnboardingBridge\?\.state\(\)\?\.context \|\| protocolState\),/);
 });
 
 test("the protocol state carries the inviter for the current account only", () => {

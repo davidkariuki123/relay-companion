@@ -3220,12 +3220,18 @@
     .su-first-relay-sent .su-relay-moment i, .su-first-relay-sent .su-relay-moment svg { animation:none; }
     .su-countdown > span { animation:none; width:100%; }
   }
+  .su-local-prompt { display:flex; flex-direction:column; min-height:0; width:100%; }
+  .su-local-prompt .su-title { font-size:33px; line-height:1.04; }
+  .su-local-prompt .su-setup-prompt { max-height:130px; flex-shrink:1; overflow:auto; overflow-wrap:anywhere; }
+  .su-local-prompt .su-form { flex-shrink:0; }
   .su-share-text { white-space:pre-wrap; overflow-wrap:anywhere; max-height:190px; overflow:auto; }
   .su-first-link .su-share-text + .su-copy { margin-top:14px; }
   .su-form-row { grid-template-columns:1fr 1fr; }
   .su-body:has(.su-network) { justify-content:flex-start; overflow:hidden; }
   .su-network { display:flex; flex-direction:column; flex:1; min-height:0; }
-  .su-network-content { flex:1; min-height:0; overflow:auto; }
+  .su-network-content { flex:0 0 auto; min-height:0; }
+  .su-body:has(.su-network) { overflow:auto; }
+  .su-network > .su-form { margin-top:10px; }
   .su-returning { margin:23px 0 0; text-align:center; font-size:11px; line-height:1.6; color:var(--muted); }
   .su-signin { padding:0; border:0; background:none; color:var(--ink); font:inherit; font-weight:600; text-decoration:underline; text-underline-offset:3px; cursor:pointer; }
   .su-divider { display:flex; align-items:center; gap:10px; color:var(--muted-3); font-size:10px; text-transform:uppercase; letter-spacing:.12em; }
@@ -3323,6 +3329,13 @@
   .tk-agents { display:flex; flex-wrap:wrap; align-items:center; gap:6px 14px; margin:0 0 8px; }
   .tk-agents .act-btn { font-size:11.5px; line-height:1; }
   .tk-agents.icons { justify-content:space-between; }
+  .relay-link-divider { align-self:center; height:16px; width:1px; background:var(--edge); margin:0 3px; }
+  .tk-app.relay-link-icon { color:var(--muted); }
+  .tk-app.relay-link-icon:hover, .tk-app.relay-link-icon.copied { color:var(--accent); }
+  .relay-link-tooltip { position:fixed; inset:auto; margin:0; box-sizing:border-box; width:232px; max-width:calc(100vw - 24px); padding:10px 12px; border:1px solid var(--edge); border-radius:10px; background:var(--bg); color:var(--ink); font:400 12px/1.45 var(--sans); box-shadow:0 6px 24px rgba(0,0,0,.22); }
+  .relay-link-tooltip:popover-open { animation:relay-link-tooltip-in 120ms ease-out; }
+  @keyframes relay-link-tooltip-in { from { opacity:0; transform:translateY(3px); } to { opacity:1; transform:translateY(0); } }
+  @media(prefers-reduced-motion:reduce) { .relay-link-tooltip:popover-open { animation:none; } }
   .tk-apps { display:inline-flex; gap:6px; }
   .tk-app { appearance:none; cursor:pointer; width:24px; height:24px; padding:0; border-radius:7px; border:1px solid var(--edge); background:transparent; display:grid; place-items:center; }
   .tk-app img { width:16px; height:16px; border-radius:4px; display:block; }
@@ -3524,6 +3537,15 @@
   .received-task-fold .received-task-count { margin-left:auto; }
   .received-task-chevron { display:inline-block; transition:transform var(--t-base) var(--soft); }
   .received-task-fold[aria-expanded="true"] .received-task-chevron { transform:rotate(90deg); }
+
+/* Local prompt: port of the approved surface.css prompt chapter. */
+.su-body:has(.su-local-prompt){justify-content:flex-start;padding-top:8px}
+.su-local-prompt .su-title{font-size:33px;line-height:1.04;letter-spacing:-.025em;max-width:300px}
+.su-local-prompt .host-claude,.su-body .host-claude{color:var(--brand-anthropic)}
+.su-local-prompt .host-codex,.su-body .host-codex{color:var(--brand-codex)}
+.desktop-prompt-note{margin-top:16px;padding:14px 0;border-top:1px solid var(--hair);border-bottom:1px solid var(--hair);font-size:13px;line-height:1.6;color:var(--ink)}
+.desktop-local-file{margin-top:10px;font-family:var(--mono);font-size:10px;color:var(--muted)}
+.su-local-prompt .su-form{margin-top:20px}.desktop-prompt-wait{font-size:11px;line-height:1.6;color:var(--muted);margin-top:13px}
 </style>
 <link rel="stylesheet" href="./relay-anyone-tip.css" />
 </head>
@@ -3569,7 +3591,7 @@
 
     <nav class="tabs" aria-label="Relay views">
       <button class="tab active" type="button" data-view="relays">
-        Relays <span class="tab-badge gone" id="relaysBadge">0</span>
+        Inbox <span class="tab-badge gone" id="relaysBadge">0</span>
       </button>
       <button class="tab" type="button" data-view="tasks">Todo <span class="tab-badge amber gone" id="tasksBadge">0</span></button>
       <button class="tab" type="button" data-view="topics">Topics <span class="tab-badge amber gone" id="topicsBadge">0</span></button>
@@ -3584,15 +3606,14 @@
       <button class="mark-all-read gone" id="markAllRead" type="button">Mark all as read</button>
     </nav>
 
-    <div class="relays-layout" id="relaysLayout" role="group" aria-label="Relays layout" hidden>
-      <button class="relays-layout-button active" type="button" data-relays-layout="chats" aria-pressed="true">Chats</button>
-      <button class="relays-layout-button" type="button" data-relays-layout="received" aria-pressed="false">Received</button>
-      <button class="relays-layout-button" type="button" data-relays-layout="sent" aria-pressed="false">Sent</button>
+    <div class="relays-layout" id="relaysLayout" role="group" aria-label="Inbox type" hidden>
+      <button class="relays-layout-button active" type="button" data-inbox-type="chats" aria-pressed="true">Chats</button>
+      <button class="relays-layout-button" type="button" data-inbox-type="tasks" aria-pressed="false">Tasks</button>
+      <button class="relays-layout-button" type="button" data-inbox-type="relays" aria-pressed="false">Relays</button>
     </div>
-    <div class="relays-filter" id="relaysFilter" role="group" aria-label="Show" hidden>
-      <button class="relays-layout-button active" type="button" data-relays-filter="all" aria-pressed="true">All</button>
-      <button class="relays-layout-button" type="button" data-relays-filter="relays" aria-pressed="false">Relays</button>
-      <button class="relays-layout-button" type="button" data-relays-filter="tasks" aria-pressed="false">Tasks</button>
+    <div class="relays-filter" id="relaysFilter" role="group" aria-label="Direction" hidden>
+      <button class="relays-layout-button active" type="button" data-inbox-direction="received" aria-pressed="true">Received</button>
+      <button class="relays-layout-button" type="button" data-inbox-direction="sent" aria-pressed="false">Sent</button>
     </div>
     <div class="scroll" id="scroll">
       <!-- Relays view -->
@@ -3855,6 +3876,7 @@
 <script src="./chat-rows.js"></script>
 <script src="./relay-anyone-tip.cjs"></script>
 <script src="./reader-status-motion.cjs"></script>
+<script src="./link-tooltip.js"></script>
 <script>
   // Theme, two layers (Sven, round 5): the pill FOLLOWS the OS appearance by
   // default; the moon/sun button is the override — an explicit pick persists
@@ -7115,17 +7137,15 @@
       .filter((room) => room.hasActivity !== false && !isRequestRoom(room, known))
       .map((room) => ({ ...room, latestAt: room.latestAt || (room.latest && room.latest.at) || "" }));
   }
-  // This is a layout preference, scoped to the signed-in account on this device.
-  // Three segments — Chats · Received · Sent — and, on the two item lists, a
-  // filter: All · Relays · Tasks (David, 2026-09-17). Both are preferences,
-  // scoped to the signed-in account on this device.
+  // Inbox has Chats · Tasks · Relays, with Received · Sent on the two item lists.
+  // Both preferences are scoped to the signed-in account on this device.
   let relaysLayout = "chats";
-  let relaysFilter = "all";
+  let relaysFilter = "relays";
   let relaysLayoutAccount = null;
   const receivedTaskHistoryOpen = new Set();
   const relaysFilterEl = document.getElementById("relaysFilter");
   const RELAYS_LAYOUTS = ["chats", "received", "sent"];
-  const RELAYS_FILTERS = ["all", "relays", "tasks"];
+  const RELAYS_FILTERS = ["relays", "tasks"];
   function syncRelaysLayout() {
     const account = signupAccountKey();
     if (account !== relaysLayoutAccount) {
@@ -7133,29 +7153,33 @@
       receivedTaskHistoryOpen.clear();
       const savedLayout = protoPref(`relayRelaysLayout:${account}`, "chats");
       relaysLayout = RELAYS_LAYOUTS.includes(savedLayout) ? savedLayout : "chats";
-      const savedFilter = protoPref(`relayRelaysFilter:${account}`, "all");
-      relaysFilter = RELAYS_FILTERS.includes(savedFilter) ? savedFilter : "all";
+      const savedFilter = protoPref(`relayRelaysFilter:${account}`, "relays");
+      relaysFilter = RELAYS_FILTERS.includes(savedFilter) ? savedFilter : "relays";
       renderedThreadCount = 0;
     }
-    for (const button of relaysLayoutEl.querySelectorAll("[data-relays-layout]")) {
-      const selected = button.dataset.relaysLayout === relaysLayout;
+    for (const button of relaysLayoutEl.querySelectorAll("[data-inbox-type]")) {
+      const selected = button.dataset.inboxType === (relaysLayout === "chats" ? "chats" : relaysFilter);
       button.classList.toggle("active", selected);
       button.setAttribute("aria-pressed", String(selected));
     }
     if (relaysFilterEl) {
       relaysFilterEl.hidden = relaysLayout === "chats" || relaysLayoutEl.hidden;
-      for (const button of relaysFilterEl.querySelectorAll("[data-relays-filter]")) {
-        const selected = button.dataset.relaysFilter === relaysFilter;
+      for (const button of relaysFilterEl.querySelectorAll("[data-inbox-direction]")) {
+        const selected = button.dataset.inboxDirection === relaysLayout;
         button.classList.toggle("active", selected);
         button.setAttribute("aria-pressed", String(selected));
       }
     }
   }
   relaysLayoutEl.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-relays-layout]");
-    if (!button || button.dataset.relaysLayout === relaysLayout) return;
-    relaysLayout = button.dataset.relaysLayout;
+    const button = event.target.closest("[data-inbox-type]");
+    if (!button) return;
+    const type = button.dataset.inboxType;
+    if (type === (relaysLayout === "chats" ? "chats" : relaysFilter)) return;
+    if (type === "chats") relaysLayout = "chats";
+    else { relaysFilter = type; if (relaysLayout === "chats") relaysLayout = "received"; }
     setProtoPref(`relayRelaysLayout:${signupAccountKey()}`, relaysLayout);
+    setProtoPref(`relayRelaysFilter:${signupAccountKey()}`, relaysFilter);
     renderedThreadCount = 0;
     expandedRelayId = null;
     expandedSentId = null;
@@ -7164,10 +7188,10 @@
     renderRelays();
   });
   if (relaysFilterEl) relaysFilterEl.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-relays-filter]");
-    if (!button || button.dataset.relaysFilter === relaysFilter) return;
-    relaysFilter = button.dataset.relaysFilter;
-    setProtoPref(`relayRelaysFilter:${signupAccountKey()}`, relaysFilter);
+    const button = event.target.closest("[data-inbox-direction]");
+    if (!button || button.dataset.inboxDirection === relaysLayout) return;
+    relaysLayout = button.dataset.inboxDirection;
+    setProtoPref(`relayRelaysLayout:${signupAccountKey()}`, relaysLayout);
     renderedThreadCount = 0;
     expandedRelayId = null;
     expandedSentId = null;
@@ -7200,6 +7224,7 @@
   function hoverCanReveal() {
     return !(window.matchMedia && window.matchMedia("(hover: none)").matches);
   }
+  const relayLinkTooltip = RelayLinkTooltip.install(document);
   function hoverVerbsHtml(row) {
     const id = taskIdOf(row);
     const source = taskIsMine(row) ? "sent" : "relay";
@@ -7208,7 +7233,8 @@
       const app = host === "codex" ? "Codex" : "Claude Code";
       return `<button type="button" class="tk-app" data-host-open="${esc(id)}" data-host="${host}" data-source="${source}" title="Open in ${app}" aria-label="Open in ${app}"><img src="${host === "codex" ? "codexMark.svg" : "claudeCodeMark.svg"}" alt=""></button>`;
     }).join("");
-    return `<div class="tk-hoververbs${marks ? " icons" : ""}" data-stop="1"><button type="button" class="act-btn accept" data-tk-copy="${esc(id)}">Copy for your agent</button>${marks ? `<span class="tk-apps">${marks}</span>` : ""}</div>`;
+    const actions = marks + sentLinkButtonHtml(row, Boolean(marks));
+    return `<div class="tk-hoververbs${actions ? " icons" : ""}" data-stop="1"><button type="button" class="act-btn accept" data-tk-copy="${esc(id)}">Copy for your agent</button>${actions ? `<span class="tk-apps">${actions}</span>` : ""}</div>`;
   }
   function revealHoverRow(rowEl) {
     if (!rowEl || !rowEl.isConnected) return;
@@ -7227,10 +7253,20 @@
     verbs.addEventListener("click", (e) => e.stopPropagation());
     wireTaskCards(verbs, renderRelays);
     wireHostOpen(verbs);
+    verbs.querySelector('[data-relay-link]')?.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      relayLinkTooltip.hide();
+      if (shareableLinkOf(row)) await sentLinkCopy(row);
+      else {
+        await openReader(id, "sent");
+        readerBodyEl.querySelector('[data-sent-link-more]')?.click();
+      }
+    });
     rowEl.classList.add("dwelled");
     dwelledRowEl = rowEl;
   }
   function foldHoverRow() {
+    relayLinkTooltip.hide();
     clearTimeout(hoverRestTimer); hoverRestTimer = null;
     clearTimeout(hoverLeaveTimer); hoverLeaveTimer = null;
     if (!dwelledRowEl) return;
@@ -7263,7 +7299,7 @@
     const rowEl = event.target.closest(".row");
     if (!rowEl || rowEl !== hoverRowEl) return;
     const to = event.relatedTarget;
-    if (to && rowEl.contains(to)) return;
+    if (to && (rowEl.contains(to) || relayLinkTooltip.contains(to))) return;
     hoverRowEl = null;
     clearTimeout(hoverRestTimer); hoverRestTimer = null;
     if (dwelledRowEl === rowEl) {
@@ -11674,10 +11710,36 @@
     if (!row) return null;
     const ui = sentLinkUi.get(String(row.id));
     const link = row.shareLink;
+    if (ui?.linkResolved) return ui.link;
     if (link && link.kind === "sent" && link.state !== "revoked" && link.url) return { url:link.url, access:link.access === "private" ? "private" : "public" };
     // Between the mint and the next Sent refresh, the pill knows the link
     // before the row does. A revoke clears this along with the row.
     return ui && ui.link ? ui.link : null;
+  }
+  function shareableLinkOf(row) {
+    if (!row) return null;
+    const ui = sentLinkUi.get(String(row.id));
+    if (ui?.linkResolved) return ui.link;
+    const audience = audienceLinkOf(row);
+    return sentLinkOf(row) || (audience?.url && audience.state !== "revoked" ? { ...audience, access:"public" } : null);
+  }
+  function sentLinkButtonHtml(row, hasApps) {
+    if (!sentLinkEligible(row)) return "";
+    const copied = sentLinkUiFor(row.id).copied;
+    const label = copied ? "Link copied" : shareableLinkOf(row) ? "Copy link" : "Get link";
+    const icon = copied ? '<path d="m5 12 4 4L19 6"/>' : '<path d="M10 13a5 5 0 0 0 7.1 0l3-3a5 5 0 0 0-7.1-7.1l-1.7 1.7M14 11a5 5 0 0 0-7.1 0l-3 3a5 5 0 0 0 7.1 7.1l1.7-1.7"/>';
+    return `${hasApps ? '<span class="relay-link-divider" aria-hidden="true"></span>' : ""}<button type="button" class="tk-app relay-link-icon${copied ? " copied" : ""}" data-relay-link="${esc(row.id)}" aria-label="${label}" aria-describedby="relayLinkTooltip"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icon}</svg></button>`;
+  }
+  async function copyRelayLink(row) {
+    const link = shareableLinkOf(row);
+    if (!link) throw new Error("Share link is unavailable.");
+    if (audienceLinkOf(row)) {
+      await navigator.clipboard.writeText(`I sent you a Relay. Paste this into Claude Code or Codex to read it, or just click the link:\n${link.url}`);
+      return;
+    }
+    if (!window.relay.copyShareLink) throw new Error("Could not copy. Select the link and copy it.");
+    const result = await window.relay.copyShareLink(link.url);
+    if (!result || result.ok === false) throw new Error(result?.error || "Could not copy. Select the link and copy it.");
   }
   function sentLinkKickerWord(link) {
     return link ? (link.access === "private" ? " · private link" : " · public link") : "";
@@ -11700,7 +11762,7 @@
   // The menu's contents: two kinds to choose from, or the link the row has.
   function sentLinkMenuHtml(row) {
     const ui = sentLinkUiFor(row.id);
-    const link = sentLinkOf(row);
+    const link = shareableLinkOf(row);
     const who = sentLinkAudience(row);
     const disabled = ui.busy ? " disabled" : "";
     if (!link) {
@@ -11719,7 +11781,7 @@
           <button class="sv-choose" type="button" data-sent-link-copy="1">${ui.copied ? "Copied" : "Copy link"}</button>
         </div>
         <div class="sv-invite-note">${note}</div>
-        <button type="button" data-sent-link-pick="${link.access === "private" ? "public" : "private"}"${disabled}>${link.access === "private" ? "Make public" : "Make private"}</button>
+        ${audienceLinkOf(row) ? "" : `<button type="button" data-sent-link-pick="${link.access === "private" ? "public" : "private"}"${disabled}>${link.access === "private" ? "Make public" : "Make private"}</button>`}
         <button type="button" class="danger" data-sent-link-off="1"${disabled}>Turn off link</button>
         <div class="row-err">${esc(ui.error || "")}</div>`;
   }
@@ -11802,7 +11864,10 @@
     });
     // The header was just rebuilt under an open menu: keep it where the new
     // trigger is, showing what the row says now.
-    if (sentLinkMenuFor === String(row.id)) refreshSentLinkMenu();
+    if (sentLinkMenuFor === String(row.id)) {
+      trigger.setAttribute("aria-expanded", String(menu.matches(":popover-open")));
+      refreshSentLinkMenu();
+    }
   }
   async function sentLinkBind(row, access) {
     const ui = sentLinkUiFor(row.id);
@@ -11811,6 +11876,7 @@
     try {
       const res = await window.relay.bindShareLink(String(row.id), access);
       if (!res || res.ok === false) throw new Error((res && res.error) || "Could not make a link.");
+      ui.linkResolved = true;
       ui.link = { url: res.url, access: res.access === "private" ? "private" : "public" };
       ui.busy = false;
       // Main put the url on the clipboard as it minted; say so for a moment.
@@ -11826,23 +11892,31 @@
     const ui = sentLinkUiFor(row.id);
     ui.copied = true; ui.error = "";
     clearTimeout(ui.timer);
-    ui.timer = setTimeout(() => { ui.copied = false; refreshSentLinkMenu(); }, 1600);
+    ui.timer = setTimeout(() => { ui.copied = false; refreshSentLinkMenu(); refreshSentLinkButtons(row); }, 1600);
     refreshSentLinkMenu();
-    renderReader();
+    refreshSentLinkButtons(row);
+    if (activeView === "reader") renderReader();
+  }
+  function refreshSentLinkButtons(row) {
+    const copied = sentLinkUiFor(row.id).copied;
+    for (const button of document.querySelectorAll(`[data-relay-link="${cssEscape(String(row.id))}"]`)) {
+      const holder = document.createElement("div");
+      holder.innerHTML = sentLinkButtonHtml(row, false);
+      button.innerHTML = holder.firstElementChild.innerHTML;
+      button.classList.toggle("copied", copied);
+      button.setAttribute("aria-label", holder.firstElementChild.getAttribute("aria-label"));
+    }
   }
   async function sentLinkCopy(row) {
     const ui = sentLinkUiFor(row.id);
-    const link = sentLinkOf(row);
-    if (!link) return;
-    // From main, like the invite link: the renderer's clipboard needs a
-    // focused document, and the pill often is not one.
-    const res = window.relay.copyShareLink ? await window.relay.copyShareLink(link.url) : null;
-    if (res && res.ok === false) {
-      ui.error = res.error || "Could not copy. Select the link and copy it.";
+    try {
+      await copyRelayLink(row);
+      sentLinkCopiedMoment(row);
+    } catch (error) {
+      ui.error = error?.message || "Copy the link from the message page instead.";
       refreshSentLinkMenu();
-      return;
+      setRowNote(row.id, ui.error, "err");
     }
-    sentLinkCopiedMoment(row);
   }
   async function sentLinkRevoke(row) {
     const ui = sentLinkUiFor(row.id);
@@ -11851,6 +11925,7 @@
     try {
       const res = await window.relay.revokeShareLink(String(row.id));
       if (!res || res.ok === false) throw new Error((res && res.error) || "Could not turn the link off.");
+      ui.linkResolved = true;
       ui.link = null; ui.copied = false;
     } catch (error) {
       ui.error = (error && error.message) || "Could not turn the link off.";
@@ -20076,7 +20151,7 @@
   function applyInstallationState(state) {
     if (!state || typeof state !== "object") return;
     if (state.account && typeof state.account === "object") signupAccount = state.account;
-    if (state.status === "pending_approval") signupStage = "approval";
+    if (state.status === "pending_approval") signupStage = payload.ui?.desktopOnboarding ? "google" : "approval";
     else if (state.status === "approved" || state.status === "consumed") signupStage = "finishing";
     else if (state.status === "expired") signupStage = "expired";
   }
@@ -20192,6 +20267,7 @@
   }
 
   async function initializeInstallationAuthorization({ force = false } = {}) {
+    if (payload.ui?.desktopOnboarding) return;
     if (!window.relay.installationAuthState || payload.account?.paired !== false) return;
     if (signupStateLoaded && !force) return;
     if (!force && pendingOpenSignupCard()) {
@@ -20448,7 +20524,10 @@
         document.getElementById("suLinkSkip")?.addEventListener("click", () => advanceFirstRelayChapter("network"));
         return;
       }
-      const shareText = link.shareText || `${link.forHuman || ""}\n\nPaste this into your Claude Code or Codex and it'll fetch the full relay: ${link.url}`;
+      const shareText = link.shareText || `${link.forHuman || ""}\n\n${link.url}`;
+      let linkUrl = "";
+      try { const parsed = new URL(link.url); if (parsed.protocol === "https:" && !parsed.username && !parsed.password) linkUrl = parsed.href; } catch {}
+      const displayShareText = linkUrl && shareText.includes(linkUrl) ? esc(shareText).replace(esc(linkUrl), `<a href="${esc(linkUrl)}" target="_blank" rel="noopener noreferrer" aria-label="Open your Relay" style="color:var(--accent);text-decoration:underline;text-underline-offset:3px">${esc(linkUrl)} ↗</a>`) : esc(shareText);
       // A link that was itself the first Relay skipped the celebration, so the
       // moment (the squares and the tick) lands on this screen instead.
       const firstRelayWasLink = link.relayId === payload.ui?.firstRelayId;
@@ -20456,7 +20535,7 @@
         ${firstRelayWasLink ? '<div class="su-relay-moment" aria-hidden="true"><i></i><i></i><i></i><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></svg></div>' : ""}
         <p class="su-step">${firstRelayWasLink ? "Your first Relay" : "Your first link"}</p>
         <h1 class="su-title">Your link is ready.</h1>
-        <div class="su-setup-prompt su-share-text" id="suFirstLinkText">${esc(shareText)}</div>
+        <div class="su-setup-prompt su-share-text" id="suFirstLinkText">${displayShareText}</div>
         <p class="su-copy">Send it wherever you talk to them. They can ask their Claude Code or Codex to reply. Their reply will appear inside your Relay app, even if they don’t have Relay.</p>
         <div class="su-form su-form-row"><button class="su-secondary" id="suLinkCopy" type="button"${signupBusy ? " disabled" : ""}>${chapter.linkCopied ? "Copied" : "Copy message"}</button><button class="su-primary" id="suLinkContinue" type="button"${signupBusy ? " disabled" : ""}>Continue</button></div>
         ${chapter.linkError ? `<p class="su-error" role="alert">${esc(chapter.linkError)}</p>` : ""}
@@ -20549,6 +20628,24 @@
     const busy = signupBusy ? " disabled" : "";
     const error = signupError ? `<p class="su-note su-error" role="alert">${esc(signupError)}</p>` : "";
     const note = signupNote ? `<p class="su-note" role="status">${esc(signupNote)}</p>` : "";
+    const desktop = payload.ui?.desktopOnboarding;
+    if (desktop && ["prompt", "connecting", "browser", "finishing", "verifying", "cancelled"].includes(desktop.stage)) {
+      if (desktop.error) {
+        signupBodyEl.innerHTML = `<p class="su-step">Your setup</p><h1 class="su-title">Let’s try that again.</h1><p class="su-copy" role="alert">${esc(desktop.error.message)}</p><div class="su-form"><button class="su-primary" id="suDesktopRestart" type="button">Restart setup</button></div>`;
+        document.getElementById("suDesktopRestart")?.addEventListener("click", async () => { await window.relay.installationAuthRestart(); });
+      } else if (desktop.stage === "cancelled") {
+        signupBodyEl.innerHTML = `<p class="su-step">Setup paused</p><h1 class="su-title">Start when you’re ready.</h1><div class="su-form"><button class="su-primary" id="suDesktopRestart" type="button">Start again</button></div>`;
+        document.getElementById("suDesktopRestart")?.addEventListener("click", async () => { await window.relay.installationAuthRestart(); });
+      } else if (desktop.stage === "prompt") {
+        signupBodyEl.innerHTML = `<div class="su-local-prompt"><div class="su-step">Your next step</div><h1 class="su-title">Paste this into<br><span class="host-claude">Claude Code</span><br>or <span class="host-codex">Codex.</span></h1><p class="su-copy">Copy the prompt below, then paste it into a conversation in Claude Code or Codex.</p><div class="desktop-prompt-note">Read Relay’s local getting-started guide and help me connect my account and send my first Relay.<div class="desktop-local-file">↳ START-HERE.md · on this ${/Mac/.test(navigator.userAgent) ? "Mac" : "computer"}</div></div><div class="su-form"><button class="su-primary" id="suDesktopCopy" type="button">Copy prompt</button></div><div class="desktop-prompt-wait" id="suDesktopCopied" role="status"></div></div>`;
+        document.getElementById("suDesktopCopy")?.addEventListener("click", async event => { await window.relay.copySetupPrompt(); event.target.textContent = "Copied"; document.getElementById("suDesktopCopied").textContent = "Paste into Claude Code or Codex. Your agent takes the next step."; });
+      } else {
+        const waitingBrowser = ["browser", "finishing"].includes(desktop.stage);
+        signupBodyEl.innerHTML = `<p class="su-step">Your account</p><h1 class="su-title">${waitingBrowser ? "Continue in your browser." : "Follow the instructions in <span class=host-claude>Claude Code</span> or <span class=host-codex>Codex.</span>"}</h1><p class="su-copy">${waitingBrowser ? "Sign in there, or create your Relay account if this is your first time." : "Your agent will help you connect Relay. Keep that conversation open."}</p>${waitingBrowser ? '<div class="su-account" role="status"><span class="su-account-name">Waiting for sign-in…</span><span class="su-account-email">Your agent cannot see this sign-in.</span></div>' : '<p class="su-send-progress" role="status"><span aria-hidden="true"></span>Waiting for your agent…</p>'}<div class="su-form"><button class="su-link" id="suDesktopCancel" type="button">Cancel setup</button></div>`;
+        document.getElementById("suDesktopCancel")?.addEventListener("click", async () => { await window.relay.installationAuthCancel(); });
+      }
+      return;
+    }
     if (signupStage === "credential-recovery") {
       const status = payload.account?.credentialStatus || "unavailable";
       const reason = payload.account?.credentialError || "";
@@ -21047,7 +21144,8 @@
       const localChapterDone = Number(payload.ui?.completedOnboardingVersion || 0) >= Number(payload.ui?.onboardingVersion || 0);
       if (payload.ui?.networkOnboarding?.required === true && localChapterDone) signupStage = "network";
     }
-    const needsSignup = credentialRecovery || payload.account?.paired === false || tutorialPending;
+    const desktopPending = payload.ui?.desktopOnboarding && ["prompt", "connecting", "browser", "finishing", "verifying", "cancelled"].includes(payload.ui.desktopOnboarding.stage);
+    const needsSignup = desktopPending || credentialRecovery || payload.account?.paired === false || tutorialPending;
     cardEl.classList.toggle("signup", needsSignup);
     signupViewEl?.classList.toggle("gone", !needsSignup);
     if (needsSignup) {

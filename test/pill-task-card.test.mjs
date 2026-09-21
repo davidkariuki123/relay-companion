@@ -341,10 +341,11 @@ test("item filters distinguish agent documents from chat texts on both Sent and 
   }
 });
 
-test("the list: Chats · Received · Sent, the All · Relays · Tasks filter, and hover with intent", () => {
-  assert.match(inbox, /data-relays-layout="sent" aria-pressed="false">Sent</);
+test("the list: Inbox types, Received · Sent directions, and unchanged hover with intent", () => {
+  assert.match(inbox, /data-inbox-direction="sent" aria-pressed="false">Sent</);
   assert.match(inbox, /id="relaysFilter"[^>]*hidden>/);
-  for (const key of ["all", "relays", "tasks"]) assert.match(inbox, new RegExp(`data-relays-filter="${key}"`));
+  for (const key of ["chats", "tasks", "relays"]) assert.match(inbox, new RegExp(`data-inbox-type="${key}"`));
+  assert.doesNotMatch(inbox, /data-relays-filter="all"/);
   assert.match(inbox, /const RELAYS_LAYOUTS = \["chats", "received", "sent"\];/);
   assert.match(inbox, /relaysFilterEl\.hidden = !visible \|\| relaysLayout === "chats";/, "the filter belongs to the item lists only");
   assert.match(inbox, /: relaysLayout === "sent" \? \(payload\.sent \|\| \[\]\)\.filter\(relaysFilterKeeps\)/);

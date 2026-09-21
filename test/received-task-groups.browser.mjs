@@ -40,9 +40,10 @@ try {
     await page.evaluate(()=>window.events.onOpenFull());
     await page.locator('#relaysLayout').waitFor({state:'visible'});
   };
-  const received=page.locator('[data-relays-layout="received"]');
-  const chats=page.locator('[data-relays-layout="chats"]');
+  const received=page.locator('[data-inbox-direction="received"]');
+  const chats=page.locator('[data-inbox-type="chats"]');
   await open();
+  await page.locator('[data-inbox-type="tasks"]').click();
   await received.click();
   await page.evaluate(()=>{
     const template=window.fixture.relays.find(r=>r.id==='task2');
@@ -56,7 +57,7 @@ try {
     ];
     window.events.onInbox(structuredClone(window.fixture));
   });
-  await page.locator('[data-relays-filter="tasks"]').click();
+  await page.locator('[data-inbox-type="tasks"]').click();
   const rowIds=()=>page.locator('#relaysList .row').evaluateAll(rows=>rows.map(r=>r.dataset.id));
   assert.deepEqual(await rowIds(),['older-open','working'],'older unfinished tasks surface before newer completed history');
   assert.deepEqual(await page.locator('.received-task-heading').allTextContents(),['In progress1'],'no added Yours to do heading');
@@ -85,9 +86,9 @@ try {
   });
   assert.deepEqual(await rowIds(),['working','cancelled','rejected'],'completion leaves active work immediately');
   assert.equal(await completed.locator('.received-task-count').innerText(),'31');
-  await page.locator('[data-relays-filter="all"]').click();
+  await page.locator('[data-inbox-type="relays"]').click();
   assert.equal(await page.locator('.received-task-fold').count(),0,'other lists keep chronological layout');
-  await page.locator('[data-relays-filter="tasks"]').click();
+  await page.locator('[data-inbox-type="tasks"]').click();
   await page.evaluate(()=>{
     window.fixture.relays=window.fixture.relays.filter(r=>r.taskCompletedAt);
     window.events.onInbox(structuredClone(window.fixture));
@@ -100,8 +101,9 @@ try {
     window.fixture.account={...window.fixture.account,userId:'other',email:'other@example.test'};
     window.events.onInbox(structuredClone(window.fixture));
   });
+  await page.locator('[data-inbox-type="tasks"]').click();
   await received.click();
-  await page.locator('[data-relays-filter="tasks"]').click();
+  await page.locator('[data-inbox-type="tasks"]').click();
   assert.equal(await completed.getAttribute('aria-expanded'),'false','account switch resets disclosure state');
   assert.deepEqual(errors,[]);
   console.log('Received task grouping: unfinished-first, history, closed states, paging, live completion, focus, polling and account isolation passed.');

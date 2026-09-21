@@ -24,7 +24,7 @@ function harness() {
     ${section("  function esc(s)", "  function agentMentionSpans(")}
     const isTaskRow = (row) => row?.kind === "task" || row?.relayNotificationKind === "task";
     ${builders}
-    return { audienceLinkOf, sentLinkOf, sentLinkKickerWord, sentLinkEligible, sentLinkMoreHtml, sentLinkMenuHtml, sentLinkUiFor };
+    return { shareableLinkOf, sentLinkButtonHtml, audienceLinkOf, sentLinkOf, sentLinkKickerWord, sentLinkEligible, sentLinkMoreHtml, sentLinkMenuHtml, sentLinkUiFor };
   `)();
 }
 
@@ -137,4 +137,44 @@ test("main answers the two IPCs, preload exposes them, and the client posts to t
   assert.match(preload, /bindShareLink: \(relayId, access\) => ipcRenderer\.invoke\("relay:bindShareLink", \{ relayId, access \}\)/);
   assert.match(preload, /revokeShareLink: \(relayId\) => ipcRenderer\.invoke\("relay:revokeShareLink", \{ relayId \}\)/);
   assert.match(client, /bindShareLink\(relayId, access\) \{\n\s*return this\.#req\("POST", `\/v1\/share-links\/\$\{encodeURIComponent\(relayId\)\}`, \{ access \}\);/);
+});
+
+
+test("the hover link uses the last rounded-square position, with a divider only beside app icons", () => {
+  const h = harness();
+  const button = h.sentLinkButtonHtml(sent(), true);
+  assert.match(button, /relay-link-divider[\s\S]*data-relay-link="relay_1"/);
+  assert.match(button, /aria-label="Get link"/);
+  assert.match(button, /aria-describedby="relayLinkTooltip"/);
+  assert.doesNotMatch(h.sentLinkButtonHtml(sent(), false), /relay-link-divider/);
+  assert.equal(h.sentLinkButtonHtml(sent({outbound:false}), true), "");
+  assert.equal(h.sentLinkButtonHtml(sent({kind:"task"}), true), "");
+  const row = sent({shareLink:{kind:"sent",access:"private",state:"opened",url:"https://sendrelays.com/s/private"}});
+  assert.match(h.sentLinkButtonHtml(row, true), /aria-label="Copy link"/);
+  h.sentLinkUiFor(row.id).copied = true;
+  assert.match(h.sentLinkButtonHtml(row, true), /aria-label="Link copied"/);
+});
+
+test("audience links remain copyable in the reader without offering an unsupported privacy conversion", () => {
+  const h = harness();
+  const row = sent({shareLink:{kind:"audience",state:"unopened",url:"https://sendrelays.com/s/audience"}});
+  assert.equal(h.shareableLinkOf(row).url, row.shareLink.url);
+  const menu = h.sentLinkMenuHtml(row);
+  assert.match(menu, /Copy link/);
+  assert.match(menu, /Turn off link/);
+  assert.doesNotMatch(menu, /data-sent-link-pick/);
+  assert.equal(h.shareableLinkOf(sent({shareLink:{kind:"audience",state:"revoked",url:row.shareLink.url}})), null);
+});
+
+test("a privacy change or revocation overrides a stale Sent snapshot", () => {
+  const h = harness();
+  const row = sent({shareLink:{kind:"sent",access:"public",state:"opened",url:"https://sendrelays.com/s/a"}});
+  const ui = h.sentLinkUiFor(row.id);
+  ui.linkResolved = true;
+  ui.link = {url:row.shareLink.url,access:"private"};
+  assert.equal(h.shareableLinkOf(row).access, "private");
+  assert.match(h.sentLinkMenuHtml(row), /Make public/);
+  ui.link = null;
+  assert.equal(h.shareableLinkOf(row), null);
+  assert.match(h.sentLinkMenuHtml(row), /Get a private link/);
 });

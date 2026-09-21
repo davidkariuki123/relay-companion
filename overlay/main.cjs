@@ -80,9 +80,11 @@ const { execFile, execFileSync, spawn, pathToFileURL } = (() => {
 // to this narrow custom protocol, which carries an opaque message id and the
 // explicitly named host — never message content or credentials.
 const pendingRelayDeepLinks = [];
+const pendingDesktopIntents = [];
 let relayDeepLinksReady = false;
 function queueRelayDeepLink(parsed) {
   if (!parsed) return false;
+  if(parsed.setupIntent){pendingDesktopIntents.push(parsed);if(relayDeepLinksReady)void drainDesktopIntents();return true;}
   // Windows and Linux deliver custom protocols through argv/second-instance,
   // while macOS normally uses open-url. Keep the complete validated handoff on
   // every route: dropping handoffId/ackOrigin makes the browser report failure
@@ -445,6 +447,7 @@ function writePillStatus(reopenNonce = "") {
   const stableStatus = {
     pid: process.pid,
     packageRoot: path.resolve(__dirname, ".."),
+    onboardingRunId: desktopOnboardingBridge?.state()?.id || null,
     ready: pillReady,
     visible: Boolean(win && !win.isDestroyed() && win.isVisible()),
     dismissed: Boolean(dismissed),
@@ -566,6 +569,29 @@ function loadAccountModules() {
 // for high-level acts only; the browser activation token, API client secret and
 // PKCE verifier never cross IPC or enter renderer memory.
 let installationAuthorizationControllerPromise = null;
+let desktopOnboardingBridge = null;
+const installedFirstOnboarding = process.env.RELAY_DESKTOP_ONBOARDING === "1" || fs.existsSync(path.join(process.env.RELAY_CONFIG_DIR || path.join(os.homedir(), ".relay"), "desktop-onboarding.json"));
+async function drainDesktopIntents() {
+  if(!desktopOnboardingBridge && !account().paired)return;
+  while(pendingDesktopIntents.length){const item=pendingDesktopIntents.shift();try{
+    if(item.origin!==new URL(webBase()).origin)throw new Error("This setup link belongs to a different Relay environment");
+    const response=await fetch(`${(process.env.RELAY_API_URL||readConfigFile().apiUrl||"https://api.sendrelays.com").replace(/\/+$/,"")}/v1/desktop-setup-intents/${encodeURIComponent(item.setupIntent)}`,{signal:AbortSignal.timeout(10000)});
+    if(!response.ok)throw new Error("This setup link expired. Return to the download page and choose Open Relay again.");
+    const intent=await response.json();
+    if(account().paired){const destination=intent.invite?`/i/${encodeURIComponent(intent.invite)}/contact`:intent.share?`/s/${encodeURIComponent(intent.share)}`:"/app/relays";await shell.openExternal(item.origin+destination);}
+    else await desktopOnboardingBridge.adoptIntent(intent);
+    requestExternalReopen();
+  }catch(error){await dialog.showMessageBox({type:"info",title:"Relay setup",message:error.message});}}
+}
+function localOnboardingPrompt() {
+  const run = desktopOnboardingBridge?.state();
+  if (!run) return "";
+  const guide = path.resolve(__dirname, "..", "onboarding", "START-HERE.md");
+  const helper = path.resolve(__dirname, "..", "bin", "relay.js");
+  let node = "node";
+  try { node = require("../bootstrap/relay-setup.cjs").activeCanonicalCli()?.node || node; } catch {}
+  return `Help me connect the Relay app I installed to my account and learn to use it in this conversation. Read the local guide at ${JSON.stringify(guide)}. Use Node at ${JSON.stringify(node)} with the installed helper at ${JSON.stringify(helper)} for setup run ${run.id}. Explain the managed skill and integration changes before making them. Use my browser for account sign-in; do not reinstall Relay or send any message without my instruction.`;
+}
 function installationAuthorizationController() {
   if (!installationAuthorizationControllerPromise) {
     const controllerUrl = pathToFileURL(path.join(__dirname, "..", "src", "installation-authorization.js")).href;
@@ -573,6 +599,7 @@ function installationAuthorizationController() {
       .then(({ createInstallationAuthorizationController }) => createInstallationAuthorizationController({
         apiBase: process.env.RELAY_API_URL || readConfigFile().apiUrl || "https://api.sendrelays.com",
         webBase: process.env.RELAY_WEB_URL || readConfigFile().webUrl || DEFAULT_WEB_BASE,
+        approvalSurface: installedFirstOnboarding ? "browser-v1" : undefined,
         deviceName: String(readConfigFile().deviceName || "").trim() || os.hostname(),
         openExternal: (url) => shell.openExternal(url),
         onConnected: async (registration) => {
@@ -1337,6 +1364,7 @@ function connectClaude() {
 async function completeSetupTutorial() {
   const key = onboardingAccountKey();
   if (!key) return { ok: false, error: "Relay could not identify the account completing onboarding." };
+  if (desktopOnboardingBridge && desktopOnboardingBridge.state().stage !== "complete") await desktopOnboardingBridge.complete(account().userId);
   onboardingVersions[key] = COMPANION_ONBOARDING_VERSION;
   writeOverlayPrefs();
   await pushInbox(true);
@@ -2019,6 +2047,10 @@ function firstLinkForOnboarding() {
 function updateFirstRelayOnboarding(key, response) {
   if (!key) return;
   const status = firstRelayOnboarding.observe(key, response, onboardingProtocolState()?.tutorial);
+  if (desktopOnboardingBridge) void desktopOnboardingBridge.observeHistory({accountId:account().userId,
+    relayId:status === "sent" ? firstRelayOnboarding.relayId(key) : null,
+    link:firstMintedLink(response),
+  }).catch(error => console.warn("Relay could not save tutorial progress:", error.message));
   // A first send completed before this app opened: no remedial tutorial and
   // no replayed celebration for an existing sender on a new computer.
   if (status === "complete" && (Number(onboardingVersions[key]) || 0) < COMPANION_ONBOARDING_VERSION) {
@@ -2482,10 +2514,12 @@ function buildPayload() {
       firstLink: firstLinkForOnboarding(),
       // "hello" when an inviter is waiting for the first Relay, "link" when
       // the person has nobody on Relay yet and starts with a share link.
-      firstRelayKind: firstRelayKindFor(protocolState),
+      firstRelayKind: firstRelayKindFor(desktopOnboardingBridge?.state()?.context || protocolState),
       // The thin installer opened this signed-out pill moments ago for a person
       // who signs in here: the renderer may start that sign-in without a click.
-      agentInstalled: Boolean(setupIntent) && setupIntent.application !== true,
+      agentInstalled: !installedFirstOnboarding && Boolean(setupIntent) && setupIntent.application !== true,
+      desktopOnboarding: desktopOnboardingBridge?.state() || null,
+      localOnboardingPrompt: localOnboardingPrompt(),
       // The native installer's pill (setup-intent.json with application: true)
       // stands in the middle of the screen for sign-in; an application-owned
       // Relay leads its signed-out screen with Continue with Google.
@@ -3020,7 +3054,7 @@ async function pushInboxNow(force) {
     outboxRevision: payload.outboxRevision,
     account: [payload.account.paired, payload.account.email],
     onboarding: [payload.ui.onboardingRequired, payload.ui.networkOnboarding, payload.ui.completedOnboardingVersion, payload.ui.firstRelayStatus, payload.ui.firstRelayId, payload.ui.openingPreference,
-      payload.ui.firstRelayKind, payload.ui.agentInstalled, payload.ui.applicationSetup, payload.ui.applicationOwned,
+      payload.ui.desktopOnboarding, payload.ui.localOnboardingPrompt, payload.ui.firstRelayKind, payload.ui.agentInstalled, payload.ui.applicationSetup, payload.ui.applicationOwned,
       payload.ui.firstLink ? [payload.ui.firstLink.relayId, payload.ui.firstLink.state, payload.ui.firstLink.shareText] : null],
     pendingOpen: payload.pendingOpen
       ? [payload.pendingOpen.relayId, payload.pendingOpen.title, payload.pendingOpen.forHuman, payload.pendingOpen.error]
@@ -9845,6 +9879,7 @@ ipcMain.handle("relay:completeNetworkOnboarding", async (_event, userId) => {
   if (account().userId !== userId) throw new Error("Relay account changed. Try again.");
   // Finishing the invitation page must not send an existing user backwards
   // into the first-send tutorial on an installation with no local history.
+  if (desktopOnboardingBridge && desktopOnboardingBridge.state().stage !== "complete") await desktopOnboardingBridge.complete(account().userId);
   onboardingVersions[key] = COMPANION_ONBOARDING_VERSION;
   writeOverlayPrefs();
   await pushInbox(true);
@@ -9885,9 +9920,9 @@ ipcMain.handle("relay:installationAuthBegin", () => installationAuthorizationIpc
 ipcMain.handle("relay:installationAuthResume", () => installationAuthorizationIpc(async () =>
   (await installationAuthorizationController()).resume()));
 ipcMain.handle("relay:installationAuthRestart", () => installationAuthorizationIpc(async () =>
-  (await installationAuthorizationController()).restart()));
+  desktopOnboardingBridge ? desktopOnboardingBridge.restart() : (await installationAuthorizationController()).restart()));
 ipcMain.handle("relay:copySetupPrompt", () => {
-  clipboard.writeText(`Read ${webBase()}/for-agents and set me up on Relay.`);
+  clipboard.writeText(localOnboardingPrompt() || `Read ${webBase()}/for-agents and set me up on Relay.`);
   return { ok: true };
 });
 // The Your link is ready screen: the message to send with the first link, as
@@ -9929,7 +9964,7 @@ ipcMain.handle("relay:installationAuthEmailVerify", (_event, input = {}) => inst
 ipcMain.handle("relay:installationAuthApprove", () => installationAuthorizationIpc(async () =>
   (await installationAuthorizationController()).approve()));
 ipcMain.handle("relay:installationAuthCancel", () => installationAuthorizationIpc(async () =>
-  (await installationAuthorizationController()).cancel()));
+  desktopOnboardingBridge ? desktopOnboardingBridge.cancel() : (await installationAuthorizationController()).cancel()));
 ipcMain.handle("relay:pairWithCode", (_e, input) => pairWithCode(input));
 ipcMain.handle("relay:signOut", () => signOutAccount());
 ipcMain.handle("relay:providerAuthStatus", async () => {
@@ -10405,6 +10440,16 @@ if (!gotSingleInstanceLock) {
   app.on("activate", () => requestExternalReopen());
 
   app.whenReady().then(async () => {
+    if (installedFirstOnboarding) {
+      const { startDesktopOnboardingBridge } = await import("../src/desktop-onboarding-bridge.js");
+      desktopOnboardingBridge = await startDesktopOnboardingBridge({ directory: process.env.RELAY_CONFIG_DIR || path.join(os.homedir(), ".relay"),
+        authorization: await installationAuthorizationController(),
+        isPaired: () => account().paired,
+        verifyAccount: async () => { const result = await (await relayClient()).me(); return result.user || result; },
+        onChange: async () => { await pushInbox(true); },
+      });
+      await drainDesktopIntents();
+    }
     require("./application-update-notice.cjs").startInstallerNotices({ Notification: require("electron").Notification, shell });
     const acpPermissions = await import("../src/acp-permissions.js");
     let permissionDialogOpen = false;
@@ -10478,6 +10523,7 @@ if (!gotSingleInstanceLock) {
     const initialDeepLink = relayDeepLinkFromArgv(process.argv);
     queueRelayDeepLink(initialDeepLink);
     relayDeepLinksReady = true;
+    void drainDesktopIntents();
     drainRelayDeepLinks();
     createTray();
     // First paint remains local and instant. Resolve the server-owned account

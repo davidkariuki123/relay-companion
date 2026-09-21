@@ -45,25 +45,27 @@ test("unsafe links and a changed account never touch the clipboard", async () =>
 });
 
 
-test("per-Relay Copy link explains the message and preserves the browser fallback", async () => {
+test("per-Relay Copy link explains audience links and preserves the browser fallback", async () => {
   const html = readFileSync(new URL("../overlay/inbox.html", import.meta.url), "utf8");
-  // Sent rows are wired by container now (the Sent tab and the Relays tab's
-  // Sent segment share them), so the loop reads `scope`, not the element.
-  const start = html.indexOf('    for (const btn of scope.querySelectorAll("[data-sent-copy-link]"))');
-  assert.ok(start >= 0);
-  const end = html.indexOf("\n  }\n\n  // ---------- Tasks view", start);
-  assert.ok(end > start);
-  let onClick, copied, note;
+  const start = html.indexOf("  async function copyRelayLink(row) {");
+  const end = html.indexOf("  function sentLinkKickerWord(", start);
+  assert.ok(start >= 0 && end > start);
+  let copied;
   const url = "https://sendrelays.com/s/test-share";
-  vm.runInNewContext(html.slice(start, end), {
-    scope: { querySelectorAll: () => [{
-      getAttribute: name => name === "data-share-url" ? url : "relay_test",
-      addEventListener: (_event, fn) => { onClick = fn; },
-    }] },
+  const context = {
+    shareableLinkOf: () => ({url}), audienceLinkOf: () => ({}),
     navigator: { clipboard: { writeText: async text => { copied = text; } } },
-    setRowNote: (_id, text, status) => { note = { text, status }; },
-  });
-  await onClick();
+  };
+  vm.createContext(context);
+  vm.runInContext(html.slice(start, end), context);
+  await context.copyRelayLink({id:"relay_test"});
   assert.equal(copied, `I sent you a Relay. Paste this into Claude Code or Codex to read it, or just click the link:\n${url}`);
-  assert.deepEqual(note, { text: "Link copied", status: "ok" });
+  context.navigator.clipboard.writeText = async () => { throw new Error("Clipboard denied"); };
+  await assert.rejects(context.copyRelayLink({id:"relay_test"}), /Clipboard denied/);
+  context.audienceLinkOf = () => null;
+  context.window = { relay: { copyShareLink: async value => { copied = value; return {ok:true}; } } };
+  await context.copyRelayLink({id:"relay_test"});
+  assert.equal(copied, url, "sent links use the native clipboard bridge");
+  context.window.relay.copyShareLink = async () => ({ok:false,error:"Not copied"});
+  await assert.rejects(context.copyRelayLink({id:"relay_test"}), /Not copied/);
 });

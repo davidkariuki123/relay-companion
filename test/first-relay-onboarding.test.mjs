@@ -84,7 +84,7 @@ function refreshHarness() {
   const pending = [];
   const flow = createFirstRelayOnboarding();
   const scope = vm.createContext({
-    credential: "a", key: "user:a", firstRelayOnboarding: flow,
+    credential: "a", key: "user:a", firstRelayOnboarding: flow, desktopOnboardingBridge: null,
     onboardingVersions: {}, COMPANION_ONBOARDING_VERSION: 2, SENT_FETCH_LIMIT: 200,
     testFixtures: () => null, console: { error() {} },
     fs: { readFileSync() { throw new Error("no tutorial"); } }, process: { env: {} },

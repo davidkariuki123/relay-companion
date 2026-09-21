@@ -29,6 +29,11 @@ function parseRelayDeepLink(value) {
   } catch {
     return null;
   }
+  if(url.protocol === "relay:" && url.hostname === "setup") {
+    const setupIntent=url.searchParams.get("intent")||"", origin=safeAckOrigin(url.searchParams.get("origin"));
+    if(!/^dsi_[A-Za-z0-9_-]{16,100}$/.test(setupIntent)||!origin||url.username||url.password)return null;
+    return {setupIntent,origin};
+  }
   if (url.protocol !== "relay:" || url.hostname !== "open") return null;
   const messageId = String(url.searchParams.get("message") || "").trim();
   const chatId = String(url.searchParams.get("chat") || "").trim();

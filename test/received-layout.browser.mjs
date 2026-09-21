@@ -40,19 +40,20 @@ try {
     await page.evaluate(()=>window.events.onOpenFull());
     await page.locator('#relaysLayout').waitFor({state:'visible'});
   };
-  const received=page.locator('[data-relays-layout="received"]');
-  const chats=page.locator('[data-relays-layout="chats"]');
+  const received=page.locator('[data-inbox-direction="received"]');
+  const chats=page.locator('[data-inbox-type="chats"]');
   await open();
   assert.equal(await chats.getAttribute('aria-pressed'),'true');
   await page.getByRole('button',{name:'Expand tip: Five ways to use Relay',exact:true}).click();
   await page.getByRole('button',{name:'Example 2 of 5',exact:true}).click();
+  await page.locator('[data-inbox-type="relays"]').click();
   await received.click();
   assert.equal(await received.getAttribute('aria-pressed'),'true');
   assert.equal(await page.locator('.rat-card').isVisible(),true);
   assert.match(await page.locator('.rat-slide.active').innerText(),/Pick up where you left off/);
   assert.equal(await page.locator('#requestsEntry .requests-count').innerText(),'1');
   const ids=await page.locator('#relaysList .row').evaluateAll(els=>els.map(el=>el.dataset.id));
-  assert.deepEqual(ids.slice(0,4),['relay1','task2','legacy3','group8']);
+  assert.deepEqual(ids.slice(0,4),['relay1','group8','older10','older11']);
   for(const omitted of ['text4','deleted5','self6','stranger7','sent']) assert.ok(!ids.includes(omitted),omitted);
   assert.equal(ids.length,25,'first render window');
   assert.equal(await page.evaluate(()=>{
@@ -61,9 +62,11 @@ try {
     window.events.onInbox(structuredClone(window.fixture));
     return row===document.querySelector('#relaysList .row') && document.activeElement===row;
   }),true,'unchanged polling preserves rows and keyboard focus');
+  await page.locator('[data-inbox-type="tasks"]').click();
   assert.equal(await page.locator('[data-id="task2"] .kchip').innerText(),'Task');
   assert.equal(await page.locator('[data-id="legacy3"] .kchip').innerText(),'Task');
   assert.equal(await page.locator('[data-id="task2"] .rk-subject').innerText(),'Title task2');
+  await page.locator('[data-inbox-type="relays"]').click();
   const groupBadge=page.locator('[data-id="group8"] .rk-recipient-group');
   assert.equal(await groupBadge.innerText(),'Team');
   assert.equal(await groupBadge.getAttribute('aria-label'),'Sent to group: Team');
@@ -84,7 +87,7 @@ try {
   assert.equal(await received.getAttribute('aria-pressed'),'true');
   await page.getByRole('button',{name:'Minimise tip',exact:true}).click();
   await page.locator('#scroll').evaluate(el=>{el.scrollTop=el.scrollHeight;el.dispatchEvent(new Event('scroll'));});
-  await page.waitForFunction(()=>document.querySelectorAll('#relaysList .row').length===34);
+  await page.waitForFunction(()=>document.querySelectorAll('#relaysList .row').length===32);
   await page.locator('#scroll').evaluate(el=>el.scrollTop=0);
   // Electron grows the native window for the existing wide reader.
   await page.setViewportSize({width:900,height:900});
@@ -93,6 +96,7 @@ try {
   assert.match(await page.locator('#readerView').innerText(),/Human body group8/);
   await page.locator('#readerBack').click();
   await page.locator('#relaysLayout').waitFor({state:'visible'});
+  await page.locator('[data-inbox-type="tasks"]').click();
   await page.locator('[data-id="task2"]').press('Enter');
   await page.locator('#readerView').waitFor({state:'visible'});
   assert.match(await page.locator('#readerView').innerText(),/Human body task2/);
@@ -104,12 +108,15 @@ try {
   // A reload restores Received without storing or reading any correspondence.
   await open();
   assert.equal(await received.getAttribute('aria-pressed'),'true');
+  assert.equal(await page.locator('[data-inbox-type="tasks"]').getAttribute('aria-pressed'),'true');
+  await page.locator('[data-inbox-type="relays"]').click();
   await page.locator('[data-id="relay1"] [data-delete]').click();
   assert.deepEqual(await page.evaluate(()=>window.deleted),['relay1']);
   assert.equal(await page.locator('#readerView').isVisible(),false,'delete does not open a row');
   await chats.click();
   assert.equal(await page.locator('#relaysList .row').count(),0);
   assert.ok(await page.locator('#relaysList .relay-arrival').count()>0);
+  await page.locator('[data-inbox-type="relays"]').click();
   await received.click();
   await page.evaluate(()=>{
     window.fixture.relays=window.fixture.relays.filter(r=>['stranger7','text4','self6'].includes(r.id));
@@ -119,6 +126,34 @@ try {
   assert.equal(await page.locator('#requestsEntry').isVisible(),true);
   await page.evaluate(()=>{window.fixture.relays=[];window.events.onInbox(structuredClone(window.fixture));});
   assert.equal(await page.locator('#relaysEmpty .t1').innerText(),'No received relays yet');
+  // Type and direction are independent, and Sent uses the existing filters.
+  await page.evaluate(()=>{
+    window.fixture.sent.push({...window.fixture.sent[0],relayId:'sent-task',kind:'task',relayNotificationKind:'task',title:'Sent task only'});
+    window.events.onInbox(structuredClone(window.fixture));
+  });
+  const sent=page.locator('[data-inbox-direction="sent"]');
+  await sent.click();
+  assert.match(await page.locator('#relaysList').innerText(),/Sent only/);
+  assert.doesNotMatch(await page.locator('#relaysList').innerText(),/Sent task only/);
+  await page.locator('[data-inbox-type="tasks"]').click();
+  assert.equal(await sent.getAttribute('aria-pressed'),'true');
+  assert.match(await page.locator('#relaysList').innerText(),/Sent task only/);
+  assert.doesNotMatch(await page.locator('#relaysList').innerText(),/Sent only/);
+  await open();
+  assert.equal(await sent.getAttribute('aria-pressed'),'true','Sent direction survives reload');
+  assert.equal(await page.locator('[data-inbox-type="tasks"]').getAttribute('aria-pressed'),'true');
+  await chats.click();
+  assert.equal(await page.locator('#relaysFilter').isVisible(),false);
+  assert.deepEqual(await page.locator('#relaysLayout button').allTextContents(),['Chats','Tasks','Relays']);
+  assert.deepEqual(await page.locator('#relaysFilter button').allTextContents(),['Received','Sent']);
+  // Existing All preferences migrate to Relays without exposing an All tab.
+  await page.evaluate(()=>{
+    setProtoPref(`relayRelaysLayout:${signupAccountKey()}`, 'received');
+    setProtoPref(`relayRelaysFilter:${signupAccountKey()}`, 'all');
+  });
+  await open();
+  assert.equal(await received.getAttribute('aria-pressed'),'true');
+  assert.equal(await page.locator('[data-inbox-type="relays"]').getAttribute('aria-pressed'),'true');
   await page.evaluate(()=>{
     window.fixture.account={...window.fixture.account,userId:'other',email:'other@example.test'};
     window.events.onInbox(structuredClone(window.fixture));

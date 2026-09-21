@@ -94,3 +94,9 @@ test("desktop handoff failures distinguish account mismatch from a transient una
   assert.equal(relayDeepLinkFailureStatus({ code: "credential_missing" }), "account_required");
   assert.equal(relayDeepLinkFailureStatus(new Error("network reset")), "unavailable");
 });
+
+test("setup handoffs carry only an opaque intent and trusted origin", () => {
+  const id = "dsi_abcdefghijklmnopqrstuvwxyz";
+  assert.deepEqual(parseRelayDeepLink(`relay://setup?intent=${id}&origin=https%3A%2F%2Fsendrelays.com`), { setupIntent:id, origin:"https://sendrelays.com" });
+  for (const url of ["relay://setup?intent=short&origin=https://sendrelays.com",`relay://setup?intent=${id}&origin=https://evil.example`,`relay://setup?intent=${id}&origin=http://sendrelays.com`,`relay://user:pass@setup?intent=${id}&origin=https://sendrelays.com`]) assert.equal(parseRelayDeepLink(url),null);
+});

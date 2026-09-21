@@ -10,6 +10,7 @@ import readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { RelayClient } from "../src/client.js";
 import {
+  configPath,
   writeConfig,
   readConfig,
   apiUrl,
@@ -1277,6 +1278,22 @@ async function main() {
   const { flags, positional } = parseFlags(rest);
   rejectRemovedCapabilityFlags(command, flags);
   switch (command) {
+    case "onboarding": {
+      const [operation, ...args] = rest;
+      const value = flag => args[args.indexOf(flag) + 1];
+      if (!["start", "status", "ready"].includes(operation) || !args.includes("--run")) throw new Error("Use onboarding start|status|ready --run RUN_ID");
+      const { callDesktopOnboarding } = await import("../src/desktop-onboarding-bridge.js");
+      const identity = operation === "ready" ? await new RelayClient().me() : null;
+      const result = await callDesktopOnboarding({ directory: path.dirname(configPath()), operation, run: value("--run"),
+        host: args.includes("--host") ? value("--host") : undefined,
+        guideVersion: args.includes("--guide-version") ? Number(value("--guide-version")) : undefined,
+        accountId: identity?.user?.id || identity?.id });
+      if (operation === "ready") {
+        const { saveDesktopTeachingContext } = await import("../src/desktop-teaching-context.js");
+        saveDesktopTeachingContext({directory:path.dirname(configPath()),run:result,apiUrl:apiUrl()});
+      }
+      console.log(JSON.stringify(result, null, 2)); return;
+    }
     case "review-onboarding":
       return (await import("../src/onboarding-review.js")).runOnboardingReview();
     case "version":

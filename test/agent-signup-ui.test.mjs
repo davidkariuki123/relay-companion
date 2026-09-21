@@ -30,7 +30,7 @@ test("first run offers agent setup and explicit sign-in without starting authori
 
   assert.match(overlay, /cardEl\.classList\.toggle\("signup", needsSignup\)/);
   assert.match(overlay, /\.card\.collapsed \.signup-view \{ display:none; \}/);
-  assert.match(overlay, /const needsSignup = credentialRecovery \|\| payload\.account\?\.paired === false \|\| tutorialPending/);
+  assert.match(overlay, /const needsSignup = desktopPending \|\| credentialRecovery \|\| payload\.account\?\.paired === false \|\| tutorialPending/);
   assert.match(overlay, /initializeInstallationAuthorization\(\)/);
   assert.doesNotMatch(overlay, /await window\.relay\.installationAuthBegin\(\)/);
   assert.doesNotMatch(overlay, /Relay is ready for you\./);
@@ -55,7 +55,7 @@ test("an application-installed Relay signs in with Google first and offers no ag
   assert.match(stage, /document\.getElementById\("suSignIn"\)\?\.addEventListener\("click", startInstallationSignIn\);/);
   // The installer's marker never opens a browser on its own: agentInstalled is
   // false for it, so the person clicks Continue with Google themselves.
-  assert.match(main, /agentInstalled: Boolean\(setupIntent\) && setupIntent\.application !== true,/);
+  assert.match(main, /agentInstalled: !installedFirstOnboarding && Boolean\(setupIntent\) && setupIntent\.application !== true,/);
 });
 
 test("a first-run Relay is readable before account approval and binds only afterward", () => {

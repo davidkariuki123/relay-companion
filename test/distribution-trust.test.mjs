@@ -46,6 +46,14 @@ import { verifyThinSetupUninstalled } from "../scripts/verify-thin-setup-canary.
 
 const posixFsTest = process.platform === "win32" ? test.skip : test;
 
+test("runtime updater and bootstrap share the same committed release trust", () => {
+  const readTrust = relative => JSON.parse(fs.readFileSync(new URL(relative, import.meta.url), "utf8"));
+  const bootstrap = readTrust("../bootstrap/trust.json");
+  const runtime = readTrust("../src/release-trust.json");
+  assert.deepEqual(runtime, bootstrap, "signer activation must update both the installer and running updater");
+  assert.ok(runtime.keys.some(key => key.keyId === runtime.activeKeyId));
+});
+
 const {
   activeCanonicalCli,
   activateRuntime,

@@ -66,7 +66,7 @@ test("Your first link asks for a relay in the person's own words, then shows the
   assert.match(chapter, /This screen updates when your link is ready\./);
   assert.match(chapter, /id="suLinkSkip" type="button">Skip for now</);
   assert.match(chapter, /Your link is ready\./);
-  assert.match(chapter, /id="suFirstLinkText">\$\{esc\(shareText\)\}/);
+  assert.match(chapter, /id="suFirstLinkText">\$\{displayShareText\}/);
   assert.match(chapter, /Send it wherever you talk to them\. They can ask their Claude Code or Codex to reply\. Their reply will appear inside your Relay app, even if they don’t have Relay\./);
   assert.doesNotMatch(chapter, /Their reply lands here as its own chat\./);
   // A link that was itself the first Relay wears the celebration on this
