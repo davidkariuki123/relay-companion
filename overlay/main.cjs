@@ -894,7 +894,7 @@ function nativeExecutionSummary(rows) {
 
 async function executeTaskInNativeApp(event, id) {
   if (!win || win.isDestroyed() || event.sender !== win.webContents || event.senderFrame !== event.sender.mainFrame) return { ok: false, error: "Not the Relay window." };
-  if (!PRODUCT_FEATURES.taskExecution) return { ok: false, error: "Execute is available only on dev." };
+  if (!PRODUCT_FEATURES.taskExecution) return { ok: false, error: "Execute is available only to Relay developer accounts." };
   try {
     const modules = await nativeTaskModulesPromise;
     const executionConfig = readConfigFile();
@@ -905,7 +905,7 @@ async function executeTaskInNativeApp(event, id) {
       consent: async () => {
         const answer = await dialog.showMessageBox(win, {
           type: "question", title: "Enable device execution?", message: "Allow Relay to trigger work on this device?",
-          detail: "Execute starts a Task in your Codex or Claude Code app. Enabling device execution also allows Relay @agent requests to trigger work here. Agents can read, change and run files within their permissions and use your provider subscription. Continue, approve actions and stop work in the native app. Relay can read session updates to show progress. Disable future launches in Relay Settings; this does not stop work already running. This is an internal dev preview.",
+          detail: "Execute starts a Task in your Codex or Claude Code app. Enabling device execution also allows Relay @agent requests to trigger work here. Agents can read, change and run files within their permissions and use your provider subscription. Continue, approve actions and stop work in the native app. Relay can read session updates to show progress. Disable future launches in Relay Settings; this does not stop work already running. This is a developer preview.",
           buttons: ["Cancel", "Enable device execution"], defaultId: 0, cancelId: 0,
         });
         return answer.response === 1;

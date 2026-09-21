@@ -39,11 +39,22 @@ function fixture(t) {
   return { root, config, args, calls, session };
 }
 
-test("production, staging and ordinary accounts cannot reach the transport", async (t) => {
+test("ordinary accounts cannot reach the transport on any deployment; developers can on every one", async (t) => {
   const { args, calls } = fixture(t);
-  for (const environment of ["production", "staging"]) await assert.rejects(executeNativeTask({ ...args, env: { RELAY_ENV: environment } }), /developer accounts on dev/);
-  await assert.rejects(executeNativeTask({ ...args, config: { ...args.config, user: { ...args.config.user, isDeveloper: false } } }), /developer accounts on dev/);
+  const ordinary = { ...args.config.user, isDeveloper: false };
+  for (const environment of ["production", "staging", "dev"]) {
+    await assert.rejects(executeNativeTask({ ...args, env: { RELAY_ENV: environment }, config: { ...args.config, user: ordinary } }), /Relay developer accounts/);
+  }
   assert.deepEqual(calls, []);
+  // A production Companion learns the role from the raw developerAccount
+  // field: isDeveloper is masked there, so a cached profile alone never opens
+  // Execute on production, while the live role does.
+  const masked = { ...ordinary, developerAccount: true };
+  for (const environment of ["production", "staging"]) {
+    await assert.rejects(executeNativeTask({ ...args, env: { RELAY_ENV: environment }, config: { ...args.config, user: { ...ordinary, developerAccount: false } } }), /Relay developer accounts/);
+    await executeNativeTask({ ...args, env: { RELAY_ENV: environment }, config: { ...args.config, user: masked } });
+  }
+  assert.equal(calls.filter((c) => c === "gate").length, 2);
 });
 
 test("server refusal and declined consent create no provider conversation", async (t) => {

@@ -20,7 +20,7 @@ export function executionPrompt(packet, id) {
 }
 
 export async function executeNativeTask({ id, config, client, choose, consent, open, update = () => {}, isCurrentAccount = () => true, nativeApi = native, env = process.env }) {
-  if (!productFeatures({ config, env }).taskExecution) throw new Error("Execute is available only to developer accounts on dev.");
+  if (!productFeatures({ config, env }).taskExecution) throw new Error("Execute is available only to Relay developer accounts.");
   const key = executionRecordPath(config, id);
   if (active.has(key)) return { ok: false, error: "This Task is already being opened." };
   active.add(key);

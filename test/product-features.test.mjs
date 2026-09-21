@@ -11,7 +11,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const DEVELOPER = { accountKind: "human", isDeveloper: true };
 const ORDINARY_USER = { accountKind: "human", isDeveloper: false };
 const DEVELOPER_SURFACES = {
-  taskExecution: true,
+  developerAccount: true, taskExecution: true,
   topics: true, slack: true, peopleMentions: true, agentMentions: true,
   relayWork: true, agentConnections: true, aiSessions: true, connectors: true, messageMutations: true,
 };
@@ -22,10 +22,14 @@ const DEVELOPER_SURFACES = {
 // both read true on the ordinary row; only the legacy task protocol stays with
 // the developers.
 const ORDINARY_SURFACES = {
-  taskExecution: false,
+  developerAccount: false, taskExecution: false,
   topics: false, slack: false, peopleMentions: true, agentMentions: false,
   relayWork: false, agentConnections: true, aiSessions: false, connectors: false, messageMutations: true,
 };
+// The developer-account tier (Shane and David, 2026-09-21): on staging and
+// production a developer keeps the ordinary product surface except for the
+// capabilities that ride the role alone. Native Execute is the first.
+const PRODUCTION_DEVELOPER_SURFACES = { ...ORDINARY_SURFACES, developerAccount: true, taskExecution: true };
 
 test("developer capabilities require both the server-owned role and a non-production environment", async () => {
   assert.deepEqual(productFeatures({ env: { NODE_ENV: "development" }, user: ORDINARY_USER }), {
@@ -38,13 +42,13 @@ test("developer capabilities require both the server-owned role and a non-produc
     environment: "dev", developer: true, orgAdmin: false, googleContacts: true, requests: true, legacyTaskProtocol: true, todo: false, cowork: false, ...DEVELOPER_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { RELAY_UPDATE_CHANNEL: "staging" }, user: DEVELOPER }), {
-    environment: "staging", developer: false, orgAdmin: false, googleContacts: false, requests: true, legacyTaskProtocol: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
+    environment: "staging", developer: false, orgAdmin: false, googleContacts: false, requests: true, legacyTaskProtocol: false, todo: false, cowork: false, ...PRODUCTION_DEVELOPER_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { RELAY_ENV: "staging" }, user: DEVELOPER }), {
-    environment: "staging", developer: false, orgAdmin: false, googleContacts: false, requests: true, legacyTaskProtocol: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
+    environment: "staging", developer: false, orgAdmin: false, googleContacts: false, requests: true, legacyTaskProtocol: false, todo: false, cowork: false, ...PRODUCTION_DEVELOPER_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: {}, user: DEVELOPER }), {
-    environment: "production", developer: false, orgAdmin: false, googleContacts: false, requests: true, legacyTaskProtocol: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
+    environment: "production", developer: false, orgAdmin: false, googleContacts: false, requests: true, legacyTaskProtocol: false, todo: false, cowork: false, ...PRODUCTION_DEVELOPER_SURFACES,
   });
   const { todoStewardTick } = await import("../src/todo-steward-runtime.js");
   const untouchable = new Proxy({}, { get() { throw new Error("Todo client must not run"); } });
@@ -94,7 +98,7 @@ test("developer status brings the complete Task substrate on dev but never Cowor
   assert.deepEqual(
     {
       topics: features.topics, slack: features.slack, peopleMentions: features.peopleMentions, agentMentions: features.agentMentions,
-      taskExecution: features.taskExecution,
+      developerAccount: features.developerAccount, taskExecution: features.taskExecution,
       relayWork: features.relayWork, agentConnections: features.agentConnections,
       aiSessions: features.aiSessions, connectors: features.connectors, messageMutations: features.messageMutations,
     },
@@ -111,7 +115,7 @@ test("an explicit production environment wins over a local API URL, so the clone
   assert.deepEqual(
     {
       topics: clone.topics, slack: clone.slack, peopleMentions: clone.peopleMentions, agentMentions: clone.agentMentions,
-      taskExecution: clone.taskExecution,
+      developerAccount: clone.developerAccount, taskExecution: clone.taskExecution,
       relayWork: clone.relayWork, agentConnections: clone.agentConnections,
       aiSessions: clone.aiSessions, connectors: clone.connectors, messageMutations: clone.messageMutations,
     },

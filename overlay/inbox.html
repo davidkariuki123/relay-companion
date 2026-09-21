@@ -9399,7 +9399,7 @@
     if (claim?.claimant && !claim.claimant.self) return "";
     const busy = nativeExecuteBusy.has(row.id);
     const submitted = current && ["accepted", "submitting", "uncertain"].includes(current.phase);
-    return `<div class="rd-host-actions" data-stop="1"><button class="oa-item oa-primary" type="button" data-native-execute ${busy ? "disabled" : ""}>${busy ? "Opening…" : submitted ? "Continue in native app" : "Execute"}</button><div class="sv-copy">${esc(current?.status || "Run this Task in your native app · dev preview")}</div></div>`;
+    return `<div class="rd-host-actions" data-stop="1"><button class="oa-item oa-primary" type="button" data-native-execute ${busy ? "disabled" : ""}>${busy ? "Opening…" : submitted ? "Continue in native app" : "Execute"}</button><div class="sv-copy">${esc(current?.status || "Run this Task in your native app · developer preview")}</div></div>`;
   }
   function taskIdOf(row) { return String((row && (row.id || row.relayId)) || ""); }
   // The sender's side of a Task, on any projection: a room message going out,

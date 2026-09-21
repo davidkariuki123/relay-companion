@@ -28,11 +28,22 @@ function productFeatures(options = {}) {
   // production product surface even when it is offline with a cached developer
   // profile; the API independently enforces the same deployment boundary.
   // Tasks are the exception: they left the developer row on 2026-09-17.
-  const developerAccount = user?.accountKind === "human" && user?.isDeveloper === true;
+  //
+  // The server reports the role twice: isDeveloper is masked to the dev
+  // deployment (and Relay Mobile), developerAccount is the raw role on every
+  // deployment. Either proves the account; only the environment decides which
+  // tier of capability it unlocks below.
+  const developerAccount = user?.accountKind === "human" && (user?.developerAccount === true || user?.isDeveloper === true);
   const developer = (environment === "local" || environment === "dev") && developerAccount;
   return Object.freeze({
     environment,
     developer,
+    // The developer-account tier (Shane and David, 2026-09-21): capabilities
+    // the role unlocks on staging and production too, so a developer keeping
+    // the production build can test them with another developer while
+    // ordinary accounts on the same build never see them. The API enforces
+    // the same boundary per capability (hasDeveloperAccountFeatures).
+    developerAccount,
     orgAdmin: user?.accountKind === "human" && user?.canViewAdminDashboard === true,
     // Google Contacts sync is still under Dev validation, so it follows the
     // same server-owned developer-account gate as the other unreleased tools.
@@ -43,8 +54,9 @@ function productFeatures(options = {}) {
     // production alike. Until then a staging or production agent was handed a
     // catalog with no Task in it and wrote a work request as a message.
     requests: true,
-    // Native Task launch remains internal, even on production developer accounts.
-    taskExecution: developer,
+    // Native Task launch is the first developer-account-tier capability: a
+    // developer on any deployment, never an ordinary account.
+    taskExecution: developerAccount,
     // The pre-Requests task protocol (/v1/tasks, the agent inbox, task
     // sessions) the daemon polls and relay_task_create drives. Its routes
     // stay behind the developer gate on the server.
