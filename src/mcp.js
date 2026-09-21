@@ -1,7 +1,7 @@
 import TOPIC_TOOLS from "./topic-tool-contract.cjs";
 const { TOPIC_EXTRA_TOOLS, TOPIC_POST_FIELDS, TOPIC_FETCH_FIELDS, TOPIC_CONTEXT_INSTRUCTION } = TOPIC_TOOLS;
 import { classificationArguments, classificationToolProperties } from "./message-classification.js";
-import { RELAY_MCP_ESSENTIALS, RELAY_COMPOSITION_SUMMARY, RELAY_TOPIC_POSTING_RULE, RELAY_MILESTONE_STARTUP_RULE, RELAY_MILESTONE_GUIDE } from "./agent-instructions.js";
+import { RELAY_MCP_ESSENTIALS, RELAY_COMPOSITION_SUMMARY, RELAY_TOPIC_POSTING_RULE, RELAY_MILESTONE_STARTUP_RULE, RELAY_MILESTONE_GUIDE, RELAY_TASK_COMPLETION_RULE } from "./agent-instructions.js";
 import TOPIC_STANDING_RULES from "./topic-standing-rules.cjs";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -136,7 +136,7 @@ const MEDIUM_ROUTING =
   `Relay is the user's default general direct-message and saved-channel communication layer; an explicitly requested other medium overrides Relay. ${EXPLICIT_PLAIN_TEXT_ROUTING} ${UNRESOLVED_RECIPIENT_ROUTING}`;
 
 const TASK_STARTUP_RULE =
-  "Call relay_task_start before doing an inbound Task and relay_task_complete afterward; Task Runs finish automatically.";
+  "For Tasks, call relay_task_start then relay_task_complete; no extra send approval. Task Runs finish automatically.";
 
 export const RELAY_MCP_INSTRUCTIONS = [
   RELAY_MCP_ESSENTIALS,
@@ -268,7 +268,7 @@ export const TOOLS = [
     name: "relay_task_start",
     _meta: ALWAYS_LOAD_META,
     description:
-      "Mark one exact inbound Relay Task as Working when this human explicitly asks you to carry it out in the current agent session. Call before substantive work begins. For an unclaimed channel Task, Start atomically claims it for this human; it refuses a Task claimed by somebody else. Do not call merely because you read, summarize, discuss, or inspect a Task. Relay records this session as the Task owner; it does not open or foreground the Relay pill.",
+      `Mark one exact inbound Relay Task as Working when this human explicitly asks you to carry it out in the current agent session. Call before substantive work begins. For an unclaimed channel Task, Start atomically claims it for this human; it refuses a Task claimed by somebody else. Do not call merely because you read, summarize, discuss, or inspect a Task. Relay records this session as the Task owner; it does not open or foreground the Relay pill. ${RELAY_TASK_COMPLETION_RULE}`,
     inputSchema: {
       type: "object",
       properties: {
@@ -2256,7 +2256,7 @@ async function handleAdmittedCall(client, name, args, {
       if (!taskRelayId || idempotencyKey.length < 8) {
         throw new Error("taskRelayId and an idempotencyKey of at least 8 characters are required");
       }
-      return text(await client.taskStarted(taskRelayId, {
+      const result = await client.taskStarted(taskRelayId, {
         idempotencyKey,
         source: "relay_mcp_human_requested",
         ...sessionSourceBinding(sessionContext),
@@ -2265,7 +2265,17 @@ async function handleAdmittedCall(client, name, args, {
           ...(sessionSourceBinding(sessionContext).sourceProvider ? { provider: sessionSourceBinding(sessionContext).sourceProvider } : {}),
           ...(sessionSourceBinding(sessionContext).sourceNativeId ? { nativeSessionId: sessionSourceBinding(sessionContext).sourceNativeId } : {}),
         },
-      }));
+      });
+      // Older APIs return only state. Teach completion at the successful start
+      // boundary too, so an already-open agent cannot miss a refreshed skill.
+      if (result?.state !== "working" || result?.ok === false) return text(result);
+      return text({
+        ...result,
+        // Keep a newer server's contract; only backfill APIs without one.
+        agentInstruction: typeof result.agentInstruction === "string" && result.agentInstruction.trim()
+          ? result.agentInstruction
+          : `Task ${taskRelayId} is now working. ${RELAY_TASK_COMPLETION_RULE}`,
+      });
     }
     case "relay_task_complete": {
       const taskRelayId = String(args.taskRelayId || "").trim();

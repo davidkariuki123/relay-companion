@@ -5654,8 +5654,10 @@ function anchorTopRight() {
 // SETUP PLACEMENT (2026-09-17). The native application installer's setup
 // window closes as soon as this pill is up, and the pill takes its place in
 // the middle of the screen with Continue with Google, so the person sees one
-// surface from download to sign-in. The moment the account connects the pill
-// glides to its top-right home. Decided once, when the window is created,
+// surface from download to sign-in. The moment a sign-in opens the browser
+// (Continue with Google, Sign in), and at the latest when the account
+// connects, the pill glides to its top-right home so the page that opens is
+// not covered by it. Decided once, when the window is created,
 // from a fresh installer marker and a signed-out account; a harness run keeps
 // its parking spot.
 let setupCentered = false;
@@ -6046,7 +6048,12 @@ function createWindow() {
     return { action: "deny" };
   });
   win.webContents.on("will-navigate", (event, url) => {
-    if (url !== inboxUrl && event && typeof event.preventDefault === "function") event.preventDefault();
+    if (url !== inboxUrl && event && typeof event.preventDefault === "function") {
+      event.preventDefault();
+      // Markdown links have no target=_blank, so they arrive here instead of
+      // setWindowOpenHandler. Hand them to the same validated OS opener.
+      openPreviewExternal(url);
+    }
   });
   win.loadFile(inboxPath);
   // surface renderer + preload errors to the overlay log so failures are visible
@@ -9834,12 +9841,20 @@ ipcMain.handle("relay:installationAuthSignIn", (_event, input = {}) => installat
   // The setup-intent marker asked for exactly one sign-in start. Whoever
   // starts it, the renderer's auto start or a click, has used it up.
   consumeSetupIntent();
+  // A browser is about to open: the setup pill leaves the middle of the screen
+  // for home before it, so it never stands in front of the sign-in page.
+  leaveSetupPlacement();
   return (await installationAuthorizationController()).signIn({ forceAccountSelection: input?.forceAccountSelection === true });
 }));
-ipcMain.handle("relay:installationAuthGoogle", (_event, input = {}) => installationAuthorizationIpc(async () =>
-  (await installationAuthorizationController()).google({
+ipcMain.handle("relay:installationAuthGoogle", (_event, input = {}) => installationAuthorizationIpc(async () => {
+  // Continue with Google opens the browser: the setup pill glides to its
+  // top-right home on the click, not on the sign-in that follows, so the page
+  // that opens is not covered by a card in the middle of the screen.
+  leaveSetupPlacement();
+  return (await installationAuthorizationController()).google({
     forceAccountSelection: input?.forceAccountSelection === true,
-  })));
+  });
+}));
 ipcMain.handle("relay:installationAuthEmailStart", (_event, input = {}) => installationAuthorizationIpc(async () =>
   (await installationAuthorizationController()).emailStart(String(input?.email || ""))));
 ipcMain.handle("relay:installationAuthEmailVerify", (_event, input = {}) => installationAuthorizationIpc(async () =>

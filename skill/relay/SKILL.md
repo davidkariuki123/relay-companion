@@ -163,7 +163,13 @@ person marked private, or a recipient of "the team" with no reason attached.
   is what they would say to that person, within 120 words; forAgent carries
   the detail their agent needs. Set recipientName to the person the work
   names; omit it when nobody was named. Pass occasion: "milestone".
-- Mint, then hand it back: the url on its own line, what it says in one or two
+- Call relay_share_link with the actual writeup being shared and wait for a
+  successful tool result. Use the returned url exactly; never invent or
+  reconstruct a link or claim publication without a successful creation or
+  edit result. A link to an earlier writeup does not publish a later analysis:
+  mint the new writeup or confirm the requested edit before presenting it.
+  If creation fails, say the Relay was not created; do not substitute a link.
+- Then hand it back: the returned url on its own line, what it says in one or two
   sentences, and one line offering to change it: say it differently, ask them
   for something, or address it to someone specifically. Nothing has been sent;
   do not call it sent, delivered or on its way.
@@ -376,8 +382,10 @@ A technical note with dense agent context is still a message; a small or quick
 piece of work is still a Task. Respect the account's available capabilities.
 
 A Task is closed only by `relay_task_complete`. For an inbound Task, call
-`relay_task_start` before the authorized work and `relay_task_complete` with
-the result once it is genuinely finished. A reply into the Task's chat never
+`relay_task_start` before the authorized work. Opening or reading a Task does
+not authorize starting it. Once the requested work is genuinely complete, call relay_task_complete with this taskRelayId, a concise forHuman result and the complete useful evidence in forAgent, before telling the human the Task is finished. This sends the completion Relay to the requester and marks the Task Done. Returning that result is part of the human's authorization to carry out the Task: do not wait for another send instruction or request separate approval, unless the human explicitly asked to review or withhold the result. Stay within the authorized task and disclosure scope. Do not use relay_send or relay_share_link as a substitute. If work remains blocked or incomplete, report that to the human without claiming completion. Confirm the tool succeeded; after an uncertain result, retry the same payload and idempotency key, never send a separate completion.
+
+A reply into the Task's chat never
 completes it: when the approval or decision itself is the deliverable,
 `relay_task_complete` carries it as forHuman. Never send a Relay merely to
 report completion. A Task the person closed by hand — marked done, rejected
@@ -404,12 +412,13 @@ revise it before sending or requesting any required approval.
 ### A link to send around
 
 A Relay can go out as a link instead of to a Relay contact. When the person
-says create, make, write or draft a Relay or a Task without naming someone
-who is already on Relay, asks for a link, or wants something they can send
-around themselves, they want a link: mint it with `relay_share_link` and hand
-them the url. Send with `relay_send` only
-when they name a person or channel that is on Relay. Never ask for an email
-address in order to avoid a link.
+says create, make, write or draft a Relay or a Task, asks for a link, or wants
+something they can send around themselves, mint it with `relay_share_link`
+and hand them the returned url. Naming a recipient in a draft request does
+not authorize delivery. Use `relay_send` when the person explicitly asks to
+send to a resolved person or channel; that scoped send does not need another
+draft approval. Respect an explicit request to review or withhold. Never ask
+for an email address in order to avoid a link.
 
 Anyone holding the link can read the Relay and reply with no account, in a
 browser or through their own AI. Each person who replies gets their own
@@ -715,9 +724,14 @@ human asked to read them and you actually surface their contents.
 ## Everyday Relay work
 
 Before sending, resolve a named recipient with contact search and ask if the
-result is ambiguous. Never invent an address or recipient identifier. Always
-show the proposed human and agent payloads and obtain the person's approval for
-a representational send.
+result is ambiguous. Never invent an address or recipient identifier. An
+explicit request to send authorizes that scoped send; do not require another
+draft approval. A request to draft does not authorize delivery: prepare the
+draft or requested share link, then wait for a send instruction before
+delivering it to a person or channel. Respect an explicit request to review or
+withhold. Returning an authorized Task's result follows the task-completion
+rule above, without a separate send request. Setup and tutorial approvals
+remain separate; setup permission alone never authorizes a message.
 
 Before composing any Relay, apply the complete writing contract in Writing a
 Relay above. It is part of this skill for every send path; no MCP tool
@@ -764,14 +778,16 @@ new recipient, and a stable `idempotencyKey`. Relay copies the original's
 title, both documents and attachments itself and marks the new Relay as
 forwarded from its original sender by name; do not restate the original in the
 note. The original sender is not notified and does not join the new
-conversation, so treat forwarding as disclosure: confirm who is receiving it.
-Encrypted messages cannot be forwarded. Ask for approval as for any send.
+conversation, so treat forwarding as disclosure: resolve who is receiving it.
+Encrypted messages cannot be forwarded. An explicit request to forward to a
+resolved recipient authorizes that forward; clarify an ambiguous recipient.
 
 To change or take back a message the person sent, use `relay_message_edit`
 or `relay_message_delete` (or the helper's `call relay_message_edit` and
 `call relay_message_delete` with JSON on stdin) with the exact relay id from
 `relay_sent_list` or a chat, and a stable `idempotencyKey`. Only when the
-person asks: show the exact replacement text as for a send. An edit takes
+person asks: an explicit edit request authorizes that scoped edit; a draft or
+review request does not authorize publishing it. An edit takes
 `forHuman`, `forAgent` or both and leaves an omitted document unchanged; an
 empty `forAgent` removes the agent document. Every recipient sees the new
 text and the message counts as unread for them again; the previous wording is

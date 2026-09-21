@@ -74,6 +74,11 @@ test("the application installer's marker says so, and the pill reads it as a cen
   assert.match(main, /setupCentered = process\.env\.RELAY_OVERLAY_TEST !== "1" && process\.env\.RELAY_OVERLAY_PERF !== "1"\s*&& readSetupIntent\(relayConfigDir\(\)\)\?\.application === true && !account\(\)\.paired;/);
   assert.match(main, /win = createCompanionWindow\(BrowserWindow, \{\s*\.\.\.overlayHomeBounds\(\),/);
   assert.match(main, /signInHistoryPending\.add\(signedInKey\);\s*\/\/[^\n]*\n\s*leaveSetupPlacement\(\);/);
+  // A browser sign-in started from the centred pill (Continue with Google, or
+  // Sign in) moves it home on the click, so the page that opens is not
+  // covered by a card in the middle of the screen (Shane, 2026-09-20).
+  assert.match(main, /ipcMain\.handle\("relay:installationAuthGoogle"[^\n]*\n(?:\s*\/\/[^\n]*\n)*\s*leaveSetupPlacement\(\);\s*return \(await installationAuthorizationController\(\)\)\.google\(/);
+  assert.match(main, /consumeSetupIntent\(\);\n(?:\s*\/\/[^\n]*\n)*\s*leaveSetupPlacement\(\);\s*return \(await installationAuthorizationController\(\)\)\.signIn\(/);
 });
 
 test("paths that pair without a pill sign-in leave no marker", (t) => {

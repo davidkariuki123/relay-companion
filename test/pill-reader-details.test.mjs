@@ -46,5 +46,5 @@ test("Details sits under the words, before the verb and the reply", () => {
   assert.match(humanDoc, /<div class="rd-body">\$\{readerParagraphs\(r\.forHuman\)\}<\/div>\s*\$\{details\}/);
   assert.match(reader, /id="readerActions"[\s\S]*id="readerComposer"/, "the actions stay above the persistent composer");
   // A Task's ladder module sits where the claim slot used to, above the host rows.
-  assert.match(reader, /#readerActions"\)\.innerHTML = `\$\{status\}\$\{bothNote\}\$\{taskModule\}\$\{documentHostActions\}`/);
+  assert.match(reader, /#readerActions"\)\.innerHTML = `\$\{status\}\$\{bothNote\}[\s\S]*?<div class="reader-status-slot">\$\{taskModule\}<\/div>[\s\S]*?\$\{documentHostActions\}`/);
 });

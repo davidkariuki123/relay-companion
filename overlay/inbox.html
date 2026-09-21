@@ -3400,6 +3400,8 @@
   .tk-status .tk-btn { height:30px; line-height:28px; padding:0 14px; font-size:12px; border-radius:9px; }
   .tk-status .tk-ask { margin-top:10px; }
   .tk-status .task-claim-error { margin-top:8px; }
+  .reader-status-slot { display:flow-root; overflow:hidden; flex:none; }
+  #readerStatusSpacer { flex:none; pointer-events:none; }
   /* the sender's ladder in the chat card: the stepper at the chat's scale, no clocks */
   .tk-ladder { margin:0 0 9px; }
   .tk-ladder .tk-step { width:46px; gap:5px; }
@@ -3836,6 +3838,7 @@
 <script src="./chat-presentation.js"></script>
 <script src="./chat-rows.js"></script>
 <script src="./relay-anyone-tip.cjs"></script>
+<script src="./reader-status-motion.cjs"></script>
 <script>
   // Theme, two layers (Sven, round 5): the pill FOLLOWS the OS appearance by
   // default; the moon/sun button is the override — an explicit pick persists
@@ -9674,7 +9677,7 @@
     if (st.tone === "cancelled") return mine ? `${other} cancelled it after starting.` : `You cancelled this Task after starting it. ${other} sees it in the chat.`;
     if (st.tone === "done") {
       const by = taskClosedByWord(row);
-      if (mine) return `${by && by !== "you" ? by : app || other} finished it ${timeAgo(st.at)} ago. The result is a letter in your chat with ${other}.`;
+      if (mine) return `${by && by !== "you" ? by : app || other} finished it ${timeAgo(st.at)} ago. The result is a relay in your chat with ${other}.`;
       return by === "you" ? `Done. ${other} sees it in the chat.` : `${app || "Your agent"} finished it ${timeAgo(st.at)} ago. ${other} has the result.`;
     }
     const claim = taskChannelClaim(row);
@@ -11507,13 +11510,19 @@
   // the verdict waits for the spring to settle — during the morph the pane
   // rides pinned, then relaxes if the page turns out to fit. Re-runs on
   // every reader render, so opening the agent lane re-judges the page.
+  const readerStatusMotion = RelayReaderStatusMotion.createController({ scroller:scrollEl, document, window });
+  continuousMotionListeners.add((active) => readerStatusMotion.setActive(active && activeView === "reader"));
+  let readerFitFrame = null;
   function assessReaderFit() {
+    if (readerFitFrame !== null) cancelAnimationFrame(readerFitFrame);
     const tick = () => {
+      readerFitFrame = null;
       if (activeView !== "reader") return;
-      if (W.v !== W.t || H.v !== H.t) { requestAnimationFrame(tick); return; }
+      if (W.v !== W.t || H.v !== H.t) { readerFitFrame = requestAnimationFrame(tick); return; }
       readerBodyEl.classList.add("rd-fit");
       const fits = scrollEl.scrollHeight <= scrollEl.clientHeight + 1;
       readerBodyEl.classList.toggle("rd-fit", fits);
+      readerStatusMotion.setScrollable(!fits);
     };
     tick();
   }
@@ -11752,7 +11761,7 @@
   function renderReader() {
     const r = readerRow(readerId);
     if (readerAttachmentsDialog && (!r || readerAttachmentsDialog.dataset.relayId !== String(r.id))) closeReaderAttachments();
-    if (!r) { readerBodyEl.innerHTML = '<div class="cv-empty">This relay is gone.</div>'; return; }
+    if (!r) { readerStatusMotion.clear(); readerBodyEl.innerHTML = '<div class="cv-empty">This relay is gone.</div>'; return; }
     const request = isTaskRow(r);
     const sender = relaySender(r);
     const replyChat = readerReplyChat(r);
@@ -11868,6 +11877,7 @@
     // seconds, even though readerHumanDrafts restored its words afterwards.
     if (!readerBodyEl.querySelector("#readerHeader")) {
       readerBodyEl.innerHTML = `<div id="readerHeader" class="reader-slot"></div>
+        <div id="readerStatusSpacer" aria-hidden="true"></div>
         <div class="rd-foot"><div class="rd-col">
           <div id="readerActions" class="reader-slot"></div>
           <div id="readerComposer" class="reader-slot"></div>
@@ -11890,7 +11900,14 @@
       </div>
       ${documentList}
       <div class="rd-col${readerTabSwap ? " swap" : ""}">${doc}</div>`;
-    readerBodyEl.querySelector("#readerActions").innerHTML = `${status}${bothNote}${taskModule}${documentHostActions}`;
+    readerBodyEl.querySelector("#readerActions").innerHTML = `${status}${bothNote}${taskModule ? `<div class="reader-status-slot">${taskModule}</div>` : ""}${documentHostActions}`;
+    const taskMotionState = request ? taskStateFor(r) : null;
+    readerStatusMotion.bind({
+      key:JSON.stringify([accountCacheIdentity(payload.account), r.id, taskMotionState?.tone, taskMotionState?.at]),
+      slot:readerBodyEl.querySelector(".reader-status-slot"),
+      panel:readerBodyEl.querySelector(".tk-status"),
+      spacer:readerBodyEl.querySelector("#readerStatusSpacer"),
+    });
     readerBodyEl.querySelector("#readerFeedback").innerHTML = `
       <div class="row-err${note && note.cls === "ok" ? " ok" : ""}" data-err="${esc(r.id)}" data-stop="1">${esc((note && note.text) || "")}</div>`;
     if (!keepReply) {
@@ -20708,6 +20725,8 @@
     tasksViewEl.classList.toggle("hidden", activeView !== "tasks");
     topicsViewEl.classList.toggle("hidden", activeView !== "topics");
     readerViewEl.classList.toggle("hidden", activeView !== "reader");
+    if (activeView !== "reader") readerStatusMotion.clear();
+    readerStatusMotion.setActive(activeView === "reader" && rendererSurfaceActive());
     if (activeView !== "reader") closeReaderAttachments();
     requestDetailViewEl.classList.toggle("hidden", activeView !== "requestDetail");
     contactsViewEl.classList.toggle("hidden", activeView !== "contacts");

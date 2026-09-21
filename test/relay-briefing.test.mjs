@@ -136,7 +136,7 @@ test("a sent row with row.thread renders the conversation with You-markers", () 
   assert.match(seed.visible, /> First message/);
 });
 
-test("a task relay seed briefs the job while Relay owns provider completion", () => {
+test("a task relay seed briefs the job and returns its result without another send request", () => {
   const seed = renderRelayRowSeed({
     id: "relay_task_9",
     relayNotificationKind: "task",
@@ -152,11 +152,14 @@ test("a task relay seed briefs the job while Relay owns provider completion", ()
   assert.doesNotMatch(seed.visible, /relay_send|completion|operator/i);
   assert.match(seed.operatorNote, /opened this Task in this session; nothing runs until they tell you to/);
   assert.match(seed.operatorNote, /relay_task_start with taskRelayId relay_task_9/);
-  assert.match(seed.operatorNote, /relay_task_complete with the result/);
+  assert.match(seed.operatorNote, /relay_task_complete with this taskRelayId/);
   assert.doesNotMatch(seed.operatorNote, /inReplyToRelayId|type "completion"|DRAFT the final result/);
   assert.doesNotMatch(seed.operatorNote, /pressed Start|relay-output-risk|captures the provider/);
-  assert.match(seed.operatorNote, /Do not call relay_send merely/);
-  assert.match(seed.operatorNote, /failed or was blocked/);
+  assert.match(seed.operatorNote, /Do not use relay_send or relay_share_link as a substitute/);
+  assert.match(seed.operatorNote, /blocked or incomplete.*without claiming completion/);
+  assert.match(seed.operatorNote, /do not wait for another send instruction or request separate approval/);
+  assert.match(seed.operatorNote, /unless the human explicitly asked to review or withhold the result/);
+  assert.doesNotMatch(seed.operatorNote, /the human reviews before anything goes back/);
   assert.match(seed.operatorNote, /<relay_for_agent>/);
   assert.match(seed.operatorNote, /packages\/companion\/overlay\/main\.cjs/);
 });
@@ -189,6 +192,9 @@ test("provider Open carries only the two Relay documents and an optional unsent 
   assert.match(seed.visible, /My local draft, not yet sent\./);
   assert.match(seed.visible, /### What would you like to do\?$/);
   assert.match(seed.operatorNote, /<relay_for_agent>[\s\S]*Canonical agent document only\.[\s\S]*<\/relay_for_agent>/);
+  assert.match(seed.operatorNote, /relay_task_start with taskRelayId relay_task_ontology before substantive work/);
+  assert.match(seed.operatorNote, /do not wait for another send instruction/);
+  assert.doesNotMatch(seed.visible, /relay_task_start|relay_task_complete|relay_task_ontology/);
   for (const forbidden of ["Conversation thread", "Task from", "OLD REQUEST HISTORY", "OLD COMPLETION HISTORY", "LEAKED PROJECTION", "type \"completion\""]) {
     assert.doesNotMatch(`${seed.visible}\n${seed.operatorNote}`, new RegExp(forbidden));
   }
@@ -199,6 +205,22 @@ test("provider Open carries only the two Relay documents and an optional unsent 
   assert.match(artifact, /## Draft \(not sent\)[\s\S]*My local draft, not yet sent\./);
   assert.doesNotMatch(artifact, /What would you like to do\?/);
   assert.doesNotMatch(artifact, /Conversation thread|OLD REQUEST HISTORY|OLD COMPLETION HISTORY|LEAKED PROJECTION/);
+});
+
+test("native Open never gives task-start instructions for ordinary, sent or closed correspondence", () => {
+  const base = { id: "relay_task_history", kind: "task", forHuman: "The brief.", forAgent: "Context." };
+  for (const row of [
+    { ...base, kind: "message" },
+    { ...base, relayNotificationKind: "sent_relay" },
+    { ...base, direction: "outbound" },
+    { ...base, taskCompletedAt: "2026-09-21T07:32:15Z" },
+    { ...base, taskRejectedAt: "2026-09-21T07:32:15Z" },
+    { ...base, taskCancelledAt: "2026-09-21T07:32:15Z" },
+    { ...base, id: "" },
+  ]) {
+    const seed = renderRelayOpenSeed(row);
+    assert.doesNotMatch(seed.operatorNote, /call relay_task_start|call relay_task_complete/);
+  }
 });
 
 test("native provider Open reads like a letter and keeps only For Agent behind a file link", () => {

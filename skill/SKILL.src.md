@@ -451,9 +451,14 @@ does not detach the work from the Relay that introduced it.
 ## Everyday Relay work
 
 Before sending, resolve a named recipient with contact search and ask if the
-result is ambiguous. Never invent an address or recipient identifier. Always
-show the proposed human and agent payloads and obtain the person's approval for
-a representational send.
+result is ambiguous. Never invent an address or recipient identifier. An
+explicit request to send authorizes that scoped send; do not require another
+draft approval. A request to draft does not authorize delivery: prepare the
+draft or requested share link, then wait for a send instruction before
+delivering it to a person or channel. Respect an explicit request to review or
+withhold. Returning an authorized Task's result follows the task-completion
+rule above, without a separate send request. Setup and tutorial approvals
+remain separate; setup permission alone never authorizes a message.
 
 Before composing any Relay, apply the complete writing contract in Writing a
 Relay above. It is part of this skill for every send path; no MCP tool
@@ -501,14 +506,16 @@ new recipient, and a stable `idempotencyKey`. Relay copies the original's
 title, both documents and attachments itself and marks the new Relay as
 forwarded from its original sender by name; do not restate the original in the
 note. The original sender is not notified and does not join the new
-conversation, so treat forwarding as disclosure: confirm who is receiving it.
-Encrypted messages cannot be forwarded. Ask for approval as for any send.
+conversation, so treat forwarding as disclosure: resolve who is receiving it.
+Encrypted messages cannot be forwarded. An explicit request to forward to a
+resolved recipient authorizes that forward; clarify an ambiguous recipient.
 
 To change or take back a message the person sent, use `relay_message_edit`
 or `relay_message_delete` (or the helper's `call relay_message_edit` and
 `call relay_message_delete` with JSON on stdin) with the exact relay id from
 `relay_sent_list` or a chat, and a stable `idempotencyKey`. Only when the
-person asks: show the exact replacement text as for a send. An edit takes
+person asks: an explicit edit request authorizes that scoped edit; a draft or
+review request does not authorize publishing it. An edit takes
 `forHuman`, `forAgent` or both and leaves an omitted document unchanged; an
 empty `forAgent` removes the agent document. Every recipient sees the new
 text and the message counts as unread for them again; the previous wording is

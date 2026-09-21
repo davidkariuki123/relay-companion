@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { RELAY_TASK_COMPLETION_RULE } from "../src/agent-instructions.js";
 import {
   instructionsWithTopics,
   withSubscribedTopics,
@@ -94,6 +95,46 @@ test("Task lifecycle tools are developer-only and bind work to the calling agent
     }],
     ["unclaim", "relay_task_2", { expectedVersion: 3, idempotencyKey: "release_task_2" }],
   ]);
+});
+
+test("a successful Task start carries completion instructions even from an older API", async () => {
+  for (const response of [
+    { taskRelayId: "relay_task_result", state: "working" },
+    { taskRelayId: "relay_task_result", state: "working", agentInstruction: " " },
+    { ok: true, taskRelayId: "relay_task_result", state: "working", startedAt: "2026-09-21T07:31:39Z", taskClaim: { version: 2 }, agentInstruction: "A newer server's completion contract." },
+  ]) {
+    const calls = [];
+    const result = shareParse(await handleCall({
+      async taskStarted(id, payload) { calls.push({ id, payload }); return response; },
+      async taskCompleted() { assert.fail("starting must not complete unfinished work"); },
+      async sendRelay() { assert.fail("starting must not send correspondence"); },
+    }, "relay_task_start", { taskRelayId: response.taskRelayId, idempotencyKey: "task-start-proof" }));
+    assert.deepEqual(result, {
+      ...response,
+      ...(response.startedAt ? { startedAt: result.startedAt } : {}),
+      agentInstruction: response.agentInstruction?.trim()
+        ? response.agentInstruction
+        : `Task ${response.taskRelayId} is now working. ${RELAY_TASK_COMPLETION_RULE}`,
+    });
+    if (response.startedAt) assert.equal(Date.parse(result.startedAt), Date.parse(response.startedAt));
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].id, response.taskRelayId);
+    assert.equal(calls[0].payload.idempotencyKey, "task-start-proof");
+  }
+});
+
+test("a refused or closed Task start never receives working or completion instructions", async () => {
+  for (const response of [
+    { ok: false, state: "working", error: "task_claimed_by_other" },
+    { ok: true, state: "done", taskRelayId: "relay_closed" },
+    { error: "not_found" },
+  ]) {
+    const result = shareParse(await handleCall({ async taskStarted() { return response; } },
+      "relay_task_start", { taskRelayId: "relay_closed", idempotencyKey: "task-start-refused" }));
+    assert.deepEqual(result, response);
+  }
+  await assert.rejects(handleCall({ async taskStarted() { throw new Error("permission denied"); } },
+    "relay_task_start", { taskRelayId: "relay_closed", idempotencyKey: "task-start-denied" }), /permission denied/);
 });
 
 test("MCP provenance distinguishes Codex and Claude Code by the name each states at initialize", () => {
@@ -1749,6 +1790,8 @@ test("a mint tells the agent nothing was delivered, and hands it back to the hum
     idempotencyKey: "idem_share_mint_3",
   }));
   assert.match(minted.agentInstruction, /^Nothing has been delivered\./);
+  assert.equal(minted.url, "https://sendrelays.com/s/tok", "return the server's exact URL, not a constructed token");
+  assert.match(minted.agentInstruction, /url exactly as returned/);
   // The next actor is the human, not a tool: relaySendResultForAgent sets one
   // and this must not, or the model chains straight past the paste.
   assert.equal(Object.hasOwn(minted, "nextRecommendedTool"), false);
