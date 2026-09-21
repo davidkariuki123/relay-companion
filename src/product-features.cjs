@@ -43,6 +43,8 @@ function productFeatures(options = {}) {
     // production alike. Until then a staging or production agent was handed a
     // catalog with no Task in it and wrote a work request as a message.
     requests: true,
+    // Native Task launch remains internal, even on production developer accounts.
+    taskExecution: developer,
     // The pre-Requests task protocol (/v1/tasks, the agent inbox, task
     // sessions) the daemon polls and relay_task_create drives. Its routes
     // stay behind the developer gate on the server.

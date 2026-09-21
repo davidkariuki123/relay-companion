@@ -5,7 +5,8 @@ import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import updateActivity from "../bootstrap/update-activity.cjs";
-import { configDir } from "./config.js";
+import { configDir, readConfig } from "./config.js";
+import { executionEnabled } from "./native-task-launch.js";
 import { acpAvailable, acpMcpServers } from "./acp-client.js";
 import { startAcpRun, acpPermissionMode } from "./acp-session.js";
 import { acpSessionOwner } from "./acp-session-owner.js";
@@ -907,6 +908,7 @@ export async function runSessionDirectoryOnce({
   // probes, and Relay delivery share this event loop with it.
   discover = discoverSessionsAsync,
   controller = controllerObservation,
+  executionAllowed = () => executionEnabled(readConfig()),
 } = {}) {
   // Owned chat agents are user-visible foreground work. Claim them before the
   // comparatively expensive local session scan/upload so a large native
@@ -916,6 +918,9 @@ export async function runSessionDirectoryOnce({
   const urgent = operations.filter((operation) => operation.input?.agentRunRelayId);
   const ordinary = operations.filter((operation) => !urgent.includes(operation));
   const claim = async (operation) => {
+    // Opening a Relay for reading is unchanged. Device-triggered inference,
+    // including @agent, needs this account's explicit opt-in on this device.
+    if (!(operation.kind === "start" && operation.input?.relayMessageId) && !executionAllowed()) return;
     if (activeOperations.has(operation.id)) return;
     let releaseUpdateWork;
     try {

@@ -847,6 +847,63 @@ async function relayClient(options) {
   return new RelayClient(options);
 }
 
+let nativeTaskModules = null;
+const nativeTaskModulesPromise = Promise.all([
+  import("../src/native-task-launch.js"), import("../src/native-task-execute.js"),
+]).then(([launch, execute]) => (nativeTaskModules = { launch, execute }));
+
+function nativeExecutionSummary(rows) {
+  if (!PRODUCT_FEATURES.taskExecution || !nativeTaskModules) return {};
+  const config = readConfigFile();
+  return Object.fromEntries(rows.flatMap((row) => {
+    const record = nativeTaskModules.execute.executionRecord(config, row.id);
+    if (!record?.session) return [];
+    const status = record.phase === "uncertain" || record.phase === "submitting"
+      ? "Launch unconfirmed · check the existing native conversation"
+      : record.phase === "accepted" ? nativeTaskModules.launch.nativeProgress(record.session) : "Native conversation prepared";
+    return [[row.id, { phase: record.phase, provider: record.session.provider, status }]];
+  }));
+}
+
+async function executeTaskInNativeApp(event, id) {
+  if (!win || win.isDestroyed() || event.sender !== win.webContents || event.senderFrame !== event.sender.mainFrame) return { ok: false, error: "Not the Relay window." };
+  if (!PRODUCT_FEATURES.taskExecution) return { ok: false, error: "Execute is available only on dev." };
+  try {
+    const modules = await nativeTaskModulesPromise;
+    const executionConfig = readConfigFile();
+    return await modules.execute.executeNativeTask({
+      id: String(id || ""), config: executionConfig, client: await relayClient(),
+      isCurrentAccount: () => { try { return modules.launch.executionAccountKey(readConfigFile()) === modules.launch.executionAccountKey(executionConfig); } catch { return false; } },
+      open: (url) => shell.openExternal(url),
+      consent: async () => {
+        const answer = await dialog.showMessageBox(win, {
+          type: "question", title: "Enable device execution?", message: "Allow Relay to trigger work on this device?",
+          detail: "Execute starts a Task in your Codex or Claude Code app. Enabling device execution also allows Relay @agent requests to trigger work here. Agents can read, change and run files within their permissions and use your provider subscription. Continue, approve actions and stop work in the native app. Relay can read session updates to show progress. Disable future launches in Relay Settings; this does not stop work already running. This is an internal dev preview.",
+          buttons: ["Cancel", "Enable device execution"], defaultId: 0, cancelId: 0,
+        });
+        return answer.response === 1;
+      },
+      choose: async (providers, preferences) => {
+        let selected = providers[0];
+        if (providers.length > 1) {
+          const answer = await dialog.showMessageBox(win, { type: "question", title: "Execute Task", message: "Which app should run this Task?",
+            detail: "The app’s current model and permission settings will be used. Continue and change settings in that app.",
+            buttons: [...providers.map((p) => p.label), "Cancel"], cancelId: providers.length });
+          selected = providers[answer.response];
+          if (!selected) return null;
+        }
+        const folder = await dialog.showOpenDialog(win, { title: `Workspace for ${selected.label}`, properties: ["openDirectory"], ...(preferences.cwd ? { defaultPath: preferences.cwd } : {}) });
+        if (folder.canceled || !folder.filePaths[0]) return null;
+        return { provider: selected.provider, cwd: folder.filePaths[0] };
+      },
+      update: (record) => {
+        if (record.startedAt) updateStagedPacket(id, { taskStartedAt: record.startedAt, taskRunOwner: record.taskRunOwner, taskClaim: record.taskClaim });
+        void pushInbox(true).catch(() => {});
+      },
+    });
+  } catch (error) { return { ok: false, error: error.message || "Execute could not launch the native app." }; }
+}
+
 app.setName("Relay");
 function reopenNonceFromArgs(argv) {
   const args = Array.isArray(argv) ? argv.map(String) : [];
@@ -2440,6 +2497,8 @@ function buildPayload() {
       soundsMuted,
     },
     features: PRODUCT_FEATURES,
+    nativeExecutionEnabled: nativeTaskModules?.launch.executionEnabled(readConfigFile()) === true,
+    nativeExecutions: nativeExecutionSummary(relaysNow),
     // The background service the transcript depends on: "ok", "repairing"
     // while this pill puts it back, or "stopped" once that repair failed.
     // The renderer reads Relay rooms from the server while it is not "ok".
@@ -8960,6 +9019,14 @@ ipcMain.handle("relay:taskUnclaim", (_e, id, expectedVersion) =>
   mutateTaskClaim(id, "unclaim", expectedVersion),
 );
 ipcMain.handle("relay:taskStop", (_e, id) => stopTaskWork(id));
+ipcMain.handle("relay:taskExecute", executeTaskInNativeApp);
+ipcMain.handle("relay:executionDisable", async (event) => {
+  if (!win || win.isDestroyed() || event.sender !== win.webContents || event.senderFrame !== event.sender.mainFrame) return { ok: false };
+  const { launch } = await nativeTaskModulesPromise;
+  launch.setExecutionPreferences(readConfigFile(), { enabled: false });
+  await pushInbox(true);
+  return { ok: true };
+});
 ipcMain.handle("relay:taskReject", (_e, id, note) => closeTaskByHand(id, "rejected", note));
 ipcMain.handle("relay:taskCancel", (_e, id, note) => closeTaskByHand(id, "cancelled", note));
 ipcMain.handle("relay:taskDone", (_e, id, note) => closeTaskByHand(id, "done", note));

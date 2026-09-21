@@ -831,6 +831,10 @@ export class RelayClient {
     return this.#req("POST", `/v1/relays/${encodeURIComponent(id)}/task/started`, payload);
   }
 
+  taskExecute(id, payload = {}) {
+    return this.#req("POST", `/v1/relays/${encodeURIComponent(id)}/task/execute`, payload);
+  }
+
   /** The claimant's provider run is no longer live; ownership remains theirs. */
   taskStopped(id, payload = {}) {
     return this.#req("POST", `/v1/relays/${encodeURIComponent(id)}/task/stopped`, payload);

@@ -7175,11 +7175,13 @@
     scrollEl.scrollTop = 0;
     renderRelays();
   });
-  // Relays or Tasks, on either item list. A Task is kind "task" on the wire.
+  // Both item lists contain Relays and Tasks; ordinary texts stay in Chats.
+  // A non-Task is a Relay only when it carries an agent document.
   function relaysFilterKeeps(row) {
-    if (relaysFilter === "all") return true;
     const task = isTaskRow(row) || row.kind === "task" || row.request === true;
-    return relaysFilter === "tasks" ? task : !task;
+    if (task) return relaysFilter !== "relays";
+    if (relaysFilter === "tasks") return false;
+    return row.source?.host !== "relay-agent-run" && Boolean(String(row.forAgent || "").trim());
   }
   // HOVER WITH INTENT (David, 2026-09-17): a row reveals its agent verbs only
   // when the pointer RESTS on it — 1.2 s before anything moves; leaving folds
@@ -9352,6 +9354,17 @@
   const taskLocalDone = new Map();   // id -> at, a Done posted but not yet stamped by main
   const taskBusy = new Set();
   const taskCardNotes = new Map();   // id -> error text
+  const nativeExecuteBusy = new Set();
+  function nativeExecuteHtml(row) {
+    if (!payload.features?.taskExecution || taskIsMine(row)) return "";
+    const current = payload.nativeExecutions?.[row.id];
+    if (!current && (taskIsOver(row) || row.taskStartedAt)) return "";
+    const claim = taskChannelClaim(row);
+    if (claim?.claimant && !claim.claimant.self) return "";
+    const busy = nativeExecuteBusy.has(row.id);
+    const submitted = current && ["accepted", "submitting", "uncertain"].includes(current.phase);
+    return `<div class="rd-host-actions" data-stop="1"><button class="oa-item oa-primary" type="button" data-native-execute ${busy ? "disabled" : ""}>${busy ? "Opening…" : submitted ? "Continue in native app" : "Execute"}</button><div class="sv-copy">${esc(current?.status || "Run this Task in your native app · dev preview")}</div></div>`;
+  }
   function taskIdOf(row) { return String((row && (row.id || row.relayId)) || ""); }
   // The sender's side of a Task, on any projection: a room message going out,
   // a reader row that is outbound, or a Sent item (it has a recipient, no sender).
@@ -11938,6 +11951,7 @@
     // The expanded Task's ladder, helper and verbs; the old claim slot is gone.
     const taskModule = request ? taskStatusModuleHtml(r) : "";
     function composerHtml() {
+      if (onAgent && payload.nativeExecutions?.[r.id]) return "";
       // A Task has no Start dock (David, 2026-09-13): its verbs are the same
       // Open in Codex / Open in Claude Code rows a Relay has, and this reply
       // dock. The agent stamps Started / Done itself with relay_task_start and
@@ -11986,7 +12000,17 @@
       </div>
       ${documentList}
       <div class="rd-col${readerTabSwap ? " swap" : ""}">${doc}</div>`;
-    readerBodyEl.querySelector("#readerActions").innerHTML = `${status}${bothNote}${taskModule ? `<div class="reader-status-slot">${taskModule}</div>` : ""}${documentHostActions}`;
+    readerBodyEl.querySelector("#readerActions").innerHTML = `${status}${bothNote}${taskModule ? `<div class="reader-status-slot">${taskModule}</div>` : ""}${request ? nativeExecuteHtml(r) : ""}${documentHostActions}`;
+    readerBodyEl.querySelector("[data-native-execute]")?.addEventListener("click", async () => {
+      if (nativeExecuteBusy.has(r.id)) return;
+      nativeExecuteBusy.add(r.id);
+      renderReader();
+      try {
+        const result = await window.relay.taskExecute(r.id);
+        if (!result?.cancelled) setRowNote(r.id, result?.message || result?.error || "Could not launch the Task.", result?.ok ? "ok" : "err");
+      } catch (error) { setRowNote(r.id, error.message || "Could not launch the Task.", "err"); }
+      finally { nativeExecuteBusy.delete(r.id); renderReader(); }
+    });
     const taskMotionState = request ? taskStateFor(r) : null;
     readerStatusMotion.bind({
       key:JSON.stringify([accountCacheIdentity(payload.account), r.id, taskMotionState?.tone, taskMotionState?.at]),
@@ -17089,6 +17113,7 @@
   // The copyable pull sentence is always offered (David, 2026-09-16): a
   // terminal, another agent, or simply a person who prefers to paste.
   function relayHostActionsHtml(message, { persistent = false, sheet = false } = {}) {
+    if (payload.nativeExecutions?.[message?.id]) return "";
     const id = String(message && message.id || "");
     const actionsId = `relay-host-actions-${id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
     const source = message && message.direction === "out" ? "sent" : "relay";
@@ -19299,6 +19324,7 @@
     // page says what is connected, and the skill is installed for everyone
     // by setup (Sven, 2026-09-08).
     html += connectionsHtml(info, payload.features?.agentConnections === true);
+    if (payload.features?.taskExecution) html += `<div class="sv-copy">Device execution: ${payload.nativeExecutionEnabled ? "enabled" : "off"}. Execute will ask before the first launch.${payload.nativeExecutionEnabled ? '<button type="button" class="oa-item" id="executionDisable">Disable device execution</button>' : ""}</div>`;
     // Version line doubles as the manual update backstop: if the auto-updater
     // has not refreshed this machine, say so here and make it one click.
     // A machine whose updates keep FAILING outranks one that merely has an
@@ -19368,6 +19394,10 @@
       <span class="sv-version">${esc(info.version ? `Relay ${info.version}` : "Relay")}</span>
     </div>`;
     settingsViewEl.innerHTML = html;
+    settingsViewEl.querySelector("#executionDisable")?.addEventListener("click", async () => {
+      await window.relay.executionDisable();
+      renderSettings();
+    });
     for (const row of settingsViewEl.querySelectorAll("[data-perm-open]")) {
       row.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -21196,6 +21226,8 @@
       account: incomingAccount,
       ui: next.ui || payload.ui,
       features: next.features || payload.features,
+      nativeExecutions: next.nativeExecutions || {},
+      nativeExecutionEnabled: next.nativeExecutionEnabled === true,
       relays: projectedRelays,
       sent: Array.isArray(next.sent) ? next.sent : [],
       outbox: Array.isArray(next.outbox) ? next.outbox : [],

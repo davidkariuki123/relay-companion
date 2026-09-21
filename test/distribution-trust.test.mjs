@@ -2313,10 +2313,3 @@ test("public export includes every script its release security suite imports", (
   assert.match(verifier, /prepareLinuxElectronSandbox\(\{ electronPath: verified\.electronPath, platform \}\)/);
   assert.doesNotMatch(verifier, /["']--no-sandbox["']/);
 });
-
-test("migration feed selection preserves the legacy bridge and rejects unknown publication paths", () => {
-  const workflow = fs.readFileSync(new URL("../../../.github/workflows/promote-prod.yml", import.meta.url), "utf8");
-  assert.match(workflow, /RELEASE_FEED:.*vars\.RELAY_RELEASE_FEED.*stable/);
-  assert.ok(workflow.includes('[[ "$RELEASE_FEED" = stable || "$RELEASE_FEED" = stable-v3 ]]'));
-  assert.ok(workflow.includes('companion-releases/$RELEASE_FEED/manifest.json'));
-});

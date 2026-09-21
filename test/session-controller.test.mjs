@@ -340,6 +340,7 @@ test("visible owned-agent sessions are claimed before native session discovery",
     input:{ oneShot:false, agentRunRelayId:"relay_agent_response" },
   };
   await runSessionDirectoryOnce({
+    executionAllowed: () => true,
     client:{
       async sessionControllerInbox() {
         calls.push("inbox");
@@ -365,6 +366,20 @@ test("visible owned-agent sessions are claimed before native session discovery",
     ["claim", "operation_visible_agent"],
     "discover",
   ]);
+});
+
+test("without device opt-in remote work is not claimed but observation continues", async () => {
+  let claimed = 0, published = 0;
+  await runSessionDirectoryOnce({
+    client: {
+      async sessionControllerInbox() { return { operations: [{ id: "denied", kind: "start", input: { agentRunRelayId: "mention" } }] }; },
+      async claimSessionOperation() { claimed++; return { terminal: true }; },
+      async publishSessionObservations() { published++; return { sessions: [] }; },
+    },
+    discover: () => [], controller: () => ({}), executionAllowed: () => false,
+  });
+  assert.equal(claimed, 0);
+  assert.equal(published, 1);
 });
 
 test("Claude permission-mode metadata drift never restarts a catalog-current live task", () => {

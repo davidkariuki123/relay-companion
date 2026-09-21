@@ -321,6 +321,26 @@ test("the room renders the card and the event bubble in place of the claim slot 
   }
 });
 
+test("item filters distinguish agent documents from chat texts on both Sent and Received", () => {
+  const source = between(inbox, "function relaysFilterKeeps(row)", "// HOVER WITH INTENT");
+  const taskSource = between(inbox, "function isTaskRow(r)", "function taskRows()");
+  const keeps = (filter, row) => Function("relaysFilter", "row", `${taskSource}\n${source}\nreturn relaysFilterKeeps(row);`)(filter, row);
+  const texts = [
+    { kind:"message", forHuman:"cool", forAgent:"" },
+    { kind:"message", forHuman:"@SvenWellmann" },
+    { title:"A titled text", forHuman:"@Shane_Acton", forAgent:"  \n" },
+    { forHuman:"", attachments:[{ id:"image" }], forAgent:"" },
+    { source:{ host:"relay-agent-run" }, forHuman:"Agent output", forAgent:"Run context" },
+  ];
+  const relay = { kind:"message", title:"Plan", forHuman:"Here is the plan", forAgent:"Complete agent context" };
+  const tasks = [{ kind:"task", forAgent:"" }, { relayNotificationKind:"task_request" }, { relayNotificationKind:"task" }, { request:true }];
+  for (const filter of ["all", "relays", "tasks"]) {
+    for (const row of texts) assert.equal(keeps(filter, row), false, `${filter} excludes ${JSON.stringify(row)}`);
+    assert.equal(keeps(filter, relay), filter !== "tasks");
+    for (const row of tasks) assert.equal(keeps(filter, row), filter !== "relays");
+  }
+});
+
 test("the list: Chats · Received · Sent, the All · Relays · Tasks filter, and hover with intent", () => {
   assert.match(inbox, /data-relays-layout="sent" aria-pressed="false">Sent</);
   assert.match(inbox, /id="relaysFilter"[^>]*hidden>/);
