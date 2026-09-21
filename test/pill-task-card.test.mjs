@@ -304,7 +304,16 @@ test("a channel Task keeps the claim lifecycle as its verbs; Reject and Cancel n
 test("the room renders the card and the event bubble in place of the claim slot and the read line", () => {
   assert.match(inbox, /const taskEvent = m\.request \? null : taskEventOf\(m, \(parentId\) => messageById\.get\(parentId\)\);/);
   assert.match(inbox, /\$\{taskEvent \? taskEventRefHtml\(taskEvent\) : messageReplyReferenceHtml\(m\)\}/);
-  assert.match(inbox, /const receipt = m\.request \|\| m\.deletedAt \? null : receiptFor\(m, msgs\);/, "the footer is the receipt on a Task bubble, and a deleted message has none");
+  const receiptExpression = inbox.match(/const receipt = ([^;]+receiptFor\(m, msgs\));/);
+  assert.ok(receiptExpression, "the room chooses a receipt beneath each message");
+  const receiptForMessage = new Function("m", "attachments", "msgs", "receiptFor", `return ${receiptExpression[1]};`);
+  const receipt = { label: "Read" };
+  const renderReceipt = (message, attachments) => receiptForMessage(message, attachments, [], () => receipt);
+  assert.equal(renderReceipt({ request: {} }, []), null, "a task without attachments uses its card footer");
+  assert.equal(renderReceipt({ request: {} }, [{}]), receipt, "a task with attachments repeats the receipt beneath them");
+  assert.equal(renderReceipt({}, []), receipt, "an ordinary message keeps its receipt");
+  assert.equal(renderReceipt({ deletedAt: "today" }, [{}]), null, "a deleted message has no receipt");
+  assert.equal(renderReceipt({ request: {}, deletedAt: "today" }, [{}]), null, "a deleted task has no receipt");
   assert.match(inbox, /tk-event \$\{taskEvent\.tone\}\$\{taskEvent\.bare \? " bare" : ""\}/);
   // The projections carry the closed-Task fields and the type on both sides.
   for (const prefix of ["r", "s"]) {

@@ -17690,9 +17690,10 @@
       })()}
       ${(() => {
         // Receipts stay beneath the bubble; text actions use the side menu.
-        // The card's footer is the receipt on a Task bubble; the read line under it goes.
+        // A Task without attachments uses its card footer as the receipt.
+        // With attachments, repeat the normal receipt below the last attachment.
         // A deleted message carries no receipt (WhatsApp shows no ticks on one).
-        const receipt = m.request || m.deletedAt ? null : receiptFor(m, msgs);
+        const receipt = m.deletedAt || (m.request && !attachments.length) ? null : receiptFor(m, msgs);
         const bits = [];
         if (confirmingDelete) {
           // The question sits under the bubble it is about, with who it affects.
