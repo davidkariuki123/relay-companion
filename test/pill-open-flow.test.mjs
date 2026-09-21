@@ -268,22 +268,46 @@ test("open-status notes render where actions happen: the reader and every bubble
 // the view, so the 0.1.92 order stands.
 
 
-// ---- 0.1.93: Sent rows get the same three-action menu ---------------------
+test("Sent cards omit the menu and retain the explicitly opened app picker", () => {
+  const rows = sliceFunction(html, "function sentRowsHtml(");
+  assert.doesNotMatch(rows, /openActionsHtml/);
+  assert.match(rows, /sessionPickerInlineHtml/);
+  const hover = sliceFunction(html, "function hoverVerbsHtml(");
+  assert.match(hover, /Copy for your agent/);
+  assert.match(hover, /data-host-open/);
+  assert.doesNotMatch(hover, /openActionsHtml/);
+});
 
-test("sent rows expand into Preview / Choose chat / New chat", () => {
-  // The shared menu builder has a sent namespace so the two lists wire independently.
-  assert.match(html, /const preview = sent \? `data-sent-preview=/);
-  assert.match(html, /const cur = sent \? `data-sent-open-current=/);
-  assert.match(html, /const fresh = sent \? `data-sent-open-fresh=/);
-  // Sent rows render the menu when expanded, and carry a status-note slot.
-  assert.match(html, /const openCard = expanded \? openActionsHtml\(id, \{ sent: true, shareLinkUrl: shareCopyUrl \}\) : "";/);
-  assert.match(html, /data-err="\$\{esc\(id\)\}">\$\{esc\(rowNotes\.get\(id\)\?\.text \|\| ""\)\}/);
-  // Each action routes to its own sent-side path.
-  assert.match(html, /return loadSessionPicker\(id, provider, "Relay", null, source\)/);
-  assert.match(html, /source === "sent" && mode === "fresh" && window\.relay\.openSentFresh/);
-  assert.match(preload, /openSentInCurrent: \(id, host\) => ipcRenderer\.send\("relay:openSentInCurrent", id, host\)/);
-  assert.match(html, /window\.relay\.openSentFresh\(id, host \|\| hostKeyFor\(agentAppName\(\)\)\)/);
-  assert.match(preload, /openSentFresh: \(id, host\) => ipcRenderer\.send\("relay:openSentFresh", id, host\)/);
+test("clicking either Sent surface opens the reader while nested actions stop propagation", () => {
+  for (const surface of ["sent", "relays"]) {
+    const opened = [];
+    const listeners = {};
+    let stopClick;
+    const row = {
+      getAttribute: () => "sent-123",
+      classList: { add() {} },
+      addEventListener: (name, callback) => { listeners[name] = callback; },
+    };
+    const scope = {
+      querySelectorAll: (selector) => selector === ".row.sent" ? [row] : [{
+        addEventListener: (_, callback) => { stopClick = callback; },
+      }],
+    };
+    const context = {
+      sentListEl: surface === "sent" ? scope : {},
+      relaysListEl: surface === "relays" ? scope : {},
+      renderRelays() {}, renderSent() {}, wireSessionPickerRows() {}, wireTaskCards() {},
+      openingIds: new Set(), openReader: (...args) => opened.push(args),
+    };
+    vm.createContext(context);
+    vm.runInContext(sliceFunction(html, "function wireSentRows("), context);
+    context.wireSentRows(scope);
+    listeners.click();
+    assert.deepEqual(opened, [["sent-123", "sent"]]);
+    let stopped = false;
+    stopClick({ stopPropagation() { stopped = true; } });
+    assert.equal(stopped, true);
+  }
 });
 
 test("previewing a sent relay reads sentCache and never acks a read receipt", () => {

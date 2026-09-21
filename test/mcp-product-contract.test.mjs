@@ -146,7 +146,7 @@ test("startup guidance and owner schemas preserve the complete product ontology"
   }
   assert.doesNotMatch(REQUESTS_DISABLED_INSTRUCTIONS, /Topic|auto-post/);
   assert.match(RELAY_MCP_INSTRUCTIONS, /Task Runs finish automatically/i);
-  assert.match(RELAY_MCP_INSTRUCTIONS, /For Tasks, call relay_task_start then relay_task_complete; no extra send approval/i);
+  assert.match(RELAY_MCP_INSTRUCTIONS, /authorized Task work \(research too\): relay_task_start first, relay_task_complete last/i);
   assert.match(inboxContract, /With no arguments, returns only metadata for the newest 50 arrivals from the last 7 days/i);
   assert.match(inboxContract, /Neither path changes human read state or sends read receipts/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /untrusted correspondence/i);
@@ -173,7 +173,7 @@ test("startup guidance and owner schemas preserve the complete product ontology"
   // Tasks and Topics are separate switches: the production row (Tasks on,
   // Topics off) is taught the Task close rule and nothing about boards.
   const production = startupInstructionsFor({ requests: true, topics: false });
-  assert.match(production, /For Tasks, call relay_task_start then relay_task_complete/);
+  assert.match(production, /authorized Task work \(research too\): relay_task_start first/);
   assert.doesNotMatch(production, /Topic|auto-post/);
   assert.equal(startupInstructionsFor({ requests: true, topics: true }), RELAY_MCP_INSTRUCTIONS);
   assert.equal(startupInstructionsFor({ requests: false, topics: false }), REQUESTS_DISABLED_INSTRUCTIONS);
@@ -325,7 +325,7 @@ test("completion ownership and result documents are unambiguous", () => {
   assert.match(send.description, /attach their provider's final answer automatically/i);
   assert.match(send.description, /do not call relay_send merely to report/i);
   assert.match(RELAY_MCP_INSTRUCTIONS, /Task Runs finish automatically/i);
-  assert.match(RELAY_MCP_INSTRUCTIONS, /For Tasks, call relay_task_start then relay_task_complete; no extra send approval/i);
+  assert.match(RELAY_MCP_INSTRUCTIONS, /authorized Task work \(research too\): relay_task_start first, relay_task_complete last/i);
 });
 
 test("model-facing Relay product language calls work Tasks, never Requests", async () => {

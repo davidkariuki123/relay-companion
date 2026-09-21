@@ -213,7 +213,10 @@ export function validateInstalledPackageShape(packageRoot, { version, distributi
     // generated text module and the one-file installer that writes it beside
     // the managed skill. Both are stdlib-only and sibling-bootstrap-only.
     const rulesBootstrap = [...handoffBootstrap, "relay-rules-content.cjs", "relay-rules.cjs"].sort();
-    if (![legacyBootstrap, recoveryBootstrap, resilientBootstrap, monitoredBootstrap, macRecoveryBootstrap, responsiveRecoveryBootstrap, configRecoveryBootstrap, bundledNodeBootstrap, daemonProgressBootstrap, applicationBootstrap, handoffBootstrap, rulesBootstrap].some(shape => JSON.stringify(bootstrapFiles) === JSON.stringify(shape))) {
+    // Canonical transaction ownership is read using Node builtins and the
+    // already reviewed recovery launcher; it brings no application dependency.
+    const transactionBootstrap = [...rulesBootstrap, "recovery-transaction.cjs"].sort();
+    if (![legacyBootstrap, recoveryBootstrap, resilientBootstrap, monitoredBootstrap, macRecoveryBootstrap, responsiveRecoveryBootstrap, configRecoveryBootstrap, bundledNodeBootstrap, daemonProgressBootstrap, applicationBootstrap, handoffBootstrap, rulesBootstrap, transactionBootstrap].some(shape => JSON.stringify(bootstrapFiles) === JSON.stringify(shape))) {
       throw new Error("Thin installer bootstrap contents do not match the reviewed shape");
     }
     const manifest = JSON.parse(fs.readFileSync(path.join(packageRoot, "skill", "manifest.json"), "utf8"));

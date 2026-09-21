@@ -11307,6 +11307,9 @@
         if (threadEntryFollowToken() !== token) return;
         scrollRoomToNewest(chatOrder() === "chat");
         threadDetailEntryFollow = null;
+        // The room is where the reader will see it now; a short room may not
+        // have scrolled at all, so the mention check cannot wait for a scroll.
+        queueMentionVisibilityCheck();
       }));
     });
   }
@@ -13091,19 +13094,14 @@
     const base = sentDeliveryLabel(r);
     return { label: base === "Read" ? "Seen" : base, at: null, cls: "" };
   }
-  // The state word carries the only clock; the note holds who and what.
+  // The state word carries the only clock; the note holds links and attachments.
   function sentDetail(r) {
     const parts = [];
-    const rec = (r && r.recipient) || {};
     const link = audienceLinkOf(r);
-    // A guest mailbox is an internal key, never an address to show. Suppress it
-    // even when the API still sends it, so a stale server cannot leak it here.
-    if (rec.email && !/@guests\.sendrelays\.com$/i.test(String(rec.email))) parts.push(rec.email);
-    // After a claim this is an ordinary relay and its provenance is history, not
-    // status: the real address is the note, exactly as for any other row.
+    // After a claim this is an ordinary relay and its provenance is history.
     if (link && link.state === "revoked") parts.push("link revoked");
     else if (link && link.state !== "claimed") parts.push("shared by link");
-    // A link to a relay that was already sent is a fact beside the address.
+    // A link to a relay that was already sent remains useful row metadata.
     const sentLink = sentLinkOf(r);
     if (sentLink) parts.push(sentLink.access === "private" ? "private link" : "public link");
     const atts = Array.isArray(r && r.attachments) ? r.attachments : [];
@@ -13225,11 +13223,12 @@
       // A Task row keeps the clock at the top and says its state in the line
       // under the title, like every other Task row (David, 2026-09-17).
       const taskRow = Boolean(receipt);
-      // A Task row never grows the open-actions menu: a click opens the Task
-      // itself, the way Preview did (David, 2026-09-17).
-      const expanded = !taskRow && id === expandedSentId;
-      const shareCopyUrl = !isGroup && r.shareLink && r.shareLink.state !== "revoked" ? String(r.shareLink.url || "") : "";
-      const openCard = expanded ? openActionsHtml(id, { sent: true, shareLinkUrl: shareCopyUrl }) : "";
+      // Sent cards open their reader directly. Only an explicitly chosen app
+      // can reveal its session picker; hovering keeps the compact agent row.
+      const expanded = id === expandedSentId && sessionPickerState?.id === id;
+      const openCard = expanded
+        ? `<div data-stop="1">${sessionPickerInlineHtml(id, sessionPickerState.provider)}</div>`
+        : "";
       return `
       <div class="row sent ${klass}${settled ? " settled" : ""}${expanded ? " expanded" : ""}${taskRow ? " task" : ""}" data-sent-id="${esc(id)}" data-opening-id="${esc(id)}"${taskRow ? ' data-task="1"' : ""}>
         <span class="avatar" style="--av-h:${avatarHue(rec)}" aria-hidden="true">${esc(avatarInitials(rec))}</span>
@@ -13242,18 +13241,14 @@
           <div class="rk-subject">${esc(subject)}</div>
           ${taskRow ? taskRowLineHtml(r) : ""}
           ${preview ? `<div class="rk-preview">${esc(preview)}</div>` : ""}
-          <div class="row-note">${esc(detail)}</div>
+          ${detail ? `<div class="row-note">${esc(detail)}</div>` : ""}
           ${openCard}
           <div class="row-err${rowNotes.get(id)?.cls === "ok" ? " ok" : ""}" data-err="${esc(id)}">${esc(rowNotes.get(id)?.text || "")}</div>
         </div>
       </div>`;
     }).join("");
   }
-  // A sent row expands into the SAME three-action menu as a received relay:
-  // Preview (read your own message in place), Open in Current Chat, Open in
-  // New Chat — each routed to the sent-side IPC. The rows live in the Sent tab
-  // and in the Relays tab's Sent segment; `scope` says which, and a re-render
-  // repaints the surface the row is on.
+  // Both Sent surfaces open the same reader that Preview used to open.
   function wireSentRows(scope = sentListEl) {
     const rerender = scope === relaysListEl ? renderRelays : renderSent;
     wireSessionPickerRows(scope);
@@ -13261,53 +13256,10 @@
     for (const el of scope.querySelectorAll(".row.sent")) {
       const id = el.getAttribute("data-sent-id");
       if (openingIds.has(id)) el.classList.add("opening");
-      // A Task row opens the Task on click — no menu (David, 2026-09-17).
-      if (el.getAttribute("data-task") === "1") {
-        el.addEventListener("click", () => openReader(id, "sent"));
-        continue;
-      }
-      el.addEventListener("click", () => {
-        expandedSentId = expandedSentId === id ? null : id;
-        rerender();
-      });
+      el.addEventListener("click", () => openReader(id, "sent"));
     }
     for (const z of scope.querySelectorAll('[data-stop="1"]')) {
       z.addEventListener("click", (e) => e.stopPropagation());
-    }
-    for (const btn of scope.querySelectorAll("[data-sent-preview]")) {
-      btn.addEventListener("click", () => {
-        expandedSentId = null;
-        openReader(btn.getAttribute("data-sent-preview"), "sent");
-      });
-    }
-    for (const btn of scope.querySelectorAll("[data-sent-open-current]")) {
-      const id = btn.getAttribute("data-sent-open-current");
-      btn.addEventListener("click", () => {
-        expandedSentId = null;
-        openRelayFromUI(id, "sent", "current");
-        rerender(); // retain the menu while choosing a destination
-      });
-    }
-    for (const btn of scope.querySelectorAll("[data-sent-open-fresh]")) {
-      const id = btn.getAttribute("data-sent-open-fresh");
-      btn.addEventListener("click", () => {
-        expandedSentId = null;
-        openRelayFromUI(id, "sent", "fresh");
-        rerender(); // the menu must close on screen, not just in state
-      });
-    }
-    for (const btn of scope.querySelectorAll("[data-sent-copy-link]")) {
-      const id = btn.getAttribute("data-sent-copy-link");
-      btn.addEventListener("click", async () => {
-        try {
-          const url = btn.getAttribute("data-share-url") || "";
-          if (!url) throw new Error("Share link is unavailable.");
-          await navigator.clipboard.writeText(`I sent you a Relay. Paste this into Claude Code or Codex to read it, or just click the link:\n${url}`);
-          setRowNote(id, "Link copied", "ok");
-        } catch {
-          setRowNote(id, "Copy the link from the message page instead.", "err");
-        }
-      });
     }
   }
 
@@ -15661,14 +15613,16 @@
     const messages = threadMessages({ includeSlack:false }).filter((message) => message.groupId === groupId);
     const ids = messages.filter((message) => message.direction === "in" && message.unread
       && message.recipientMentioned && !message.deletedAt).sort((a,b) => new Date(a.at)-new Date(b.at)).map((message) => String(message.id));
+    // `visited` holds every mention the reader no longer needs help reaching:
+    // jumped to, or simply on screen at some point during this visit.
     const visit = { groupId, roomCoordinate:String(roomCoordinate), visitId:`mention-${crypto.randomUUID()}`,
-      ids, selected:"", visited:new Set(), rows:[], done:false, pendingTarget:String(targetId || "") };
+      ids, selected:"", visited:new Set(), rows:[], pendingTarget:String(targetId || "") };
     activeMentionVisit = visit;
     refreshMentionVisit(visit);
   }
 
   function refreshMentionVisit(visit = activeMentionVisit) {
-    if (!visit || visit.done || visit.loading || !window.relay.mentionVisit) return;
+    if (!visit || visit.loading || !window.relay.mentionVisit) return;
     visit.loading=true;
     Promise.resolve(window.relay.mentionVisit(visit.groupId, visit.visitId)).then((result) => {
       if (activeMentionVisit !== visit || !result?.ok || !result.visit) return;
@@ -15678,10 +15632,11 @@
         unread:false, recipientMentioned:true,
       }));
       const serverIds = visit.rows.map((item) => String(item.id));
-      // On first rollout, ordinary room acknowledgement may race this first
-      // request. Preserve the local unread snapshot once, then trust the server.
-      visit.ids = !visit.loaded && !response.previousOpenedAt ? [...new Set([...visit.ids, ...serverIds])] : serverIds;
-      visit.loaded=true;
+      // The server lists only mentions still unread there, and entering this
+      // room acknowledges it in the same breath. Whichever request lands first,
+      // the unread snapshot taken on entry keeps the mentions this open was for;
+      // the server adds the ones this device no longer holds locally.
+      visit.ids = [...new Set([...visit.ids, ...serverIds])];
       const targetId=visit.pendingTarget || visit.selected;
       const messages=threadMessages({ includeSlack:false });
       const target=messages.find((message) => String(message.id) === targetId);
@@ -15702,18 +15657,80 @@
       visit.ids = visit.ids.filter((id) => { const message=messages.get(id); return message && !message.deletedAt && message.recipientMentioned; });
       if (visit.selected && !visit.ids.includes(visit.selected)) visit.selected="";
     }
-    control.classList.toggle("hidden", !active || visit.done || !visit.ids.length);
-    if (!active || visit.done || !visit.ids.length) return;
+    // The control exists to reach a mention the reader cannot see. Once every
+    // mention of this visit has been on screen or jumped to, it steps aside
+    // and stays aside: a mention the reader has seen is not news any more.
+    const unseen = active ? visit.ids.find((id) => !visit.visited.has(id)) : undefined;
+    control.classList.toggle("hidden", !active || !unseen);
+    if (!active || !unseen) return;
     const index = visit.ids.indexOf(visit.selected);
-    const next = visit.ids.some((id) => !visit.visited.has(id));
+    const below = mentionRowPlacement(unseen) === "below";
     const markup = index < 0
-      ? `<button type="button" data-mention-nav="first" aria-label="Jump to ${visit.ids.length} mentions since you last opened this chat">↑ &nbsp; @ ${visit.ids.length} ${visit.ids.length === 1 ? "mention" : "mentions"}</button>`
-      : `<button type="button" data-mention-nav="previous" aria-label="Previous mention" ${index === 0 ? "disabled" : ""}>↑</button><span class="mention-position" aria-live="polite">@ ${index + 1} of ${visit.ids.length}</span><button type="button" data-mention-nav="next" aria-label="${next ? "Next mention" : "Back to latest"}">${next ? "↓" : "✓"}</button>`;
+      ? `<button type="button" data-mention-nav="first" aria-label="Jump to ${visit.ids.length} mentions since you last opened this chat">${below ? "↓" : "↑"} &nbsp; @ ${visit.ids.length} ${visit.ids.length === 1 ? "mention" : "mentions"}</button>`
+      : `<button type="button" data-mention-nav="previous" aria-label="Previous mention" ${index === 0 ? "disabled" : ""}>↑</button><span class="mention-position" aria-live="polite">@ ${index + 1} of ${visit.ids.length}</span><button type="button" data-mention-nav="next" aria-label="Next mention">↓</button>`;
     if (control.innerHTML !== markup) control.innerHTML=markup;
     if (visit.pendingTarget && visit.ids.includes(visit.pendingTarget)) {
       const target = visit.pendingTarget; visit.pendingTarget="";
       afterRoomViewTransition(() => { if (activeMentionVisit === visit) jumpToMention(target); });
     }
+    queueMentionVisibilityCheck();
+  }
+
+  // Where one mention row sits relative to the part of the room the reader can
+  // actually see: between the sticky header and the composer dock. Null when
+  // the room is not laid out (folded pill, hidden window), so nothing is
+  // mistaken for seen while there is nothing to see.
+  function mentionRowPlacement(id) {
+    const target = thHistoryEl.querySelector(`[data-msg="${CSS.escape(id)}"]`);
+    const scroller = roomScrollElement();
+    if (!target || !scroller || activeView !== "threads") return null;
+    const viewport = scroller.getBoundingClientRect();
+    const header = thDetailEl.querySelector(".th-detail-head")?.getBoundingClientRect();
+    const dock = thHistoryEl.querySelector(".th-composer-dock")?.getBoundingClientRect();
+    const top = Math.max(viewport.top, header?.bottom ?? viewport.top);
+    const bottom = Math.min(viewport.bottom, dock?.top ?? viewport.bottom);
+    const row = target.getBoundingClientRect();
+    if (!(bottom - top > 0) || !(row.height > 0)) return null;
+    const shown = Math.min(row.bottom, bottom) - Math.max(row.top, top);
+    // A row taller than the viewport counts as seen once it fills most of it.
+    if (shown >= row.height - 1 || shown >= (bottom - top) * 0.6) return "visible";
+    return row.top < top ? "above" : "below";
+  }
+
+  let mentionVisibilityCheckQueued = false;
+  function queueMentionVisibilityCheck() {
+    if (mentionVisibilityCheckQueued) return;
+    mentionVisibilityCheckQueued = true;
+    requestAnimationFrame(() => { mentionVisibilityCheckQueued = false; checkMentionVisibility(); });
+  }
+  function checkMentionVisibility() {
+    const visit = activeMentionVisit;
+    if (!visit || activeView !== "threads" || visit.roomCoordinate !== String(threadDetailId)) return;
+    // While entry is still pinning the room to its newest message, or a room
+    // transition holds the old frame, what the layout shows is not what the
+    // reader sees. The settled scroll runs this check again.
+    if (threadEntryFollowToken() || roomViewTransition) return;
+    let changed = false;
+    for (const id of visit.ids) {
+      if (visit.visited.has(id) || mentionRowPlacement(id) !== "visible") continue;
+      visit.visited.add(id); changed = true;
+    }
+    // Every mention seen and the reader back at the newest message: the
+    // navigation is over. Releasing the selection lets new arrivals follow
+    // again and lifts the highlight the reader has already moved past.
+    const scroller = roomScrollElement();
+    const atNewest = scroller && (chatOrder() === "chat"
+      ? scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= 2
+      : scroller.scrollTop <= 2);
+    if (visit.selected && atNewest && !visit.ids.some((id) => !visit.visited.has(id))) {
+      visit.selected = "";
+      renderThreadDetail();
+      return;
+    }
+    if (changed) paintMentionNavigator();
+  }
+  for (const roomScroller of [scrollEl, thDetailEl]) {
+    roomScroller.addEventListener("scroll", () => { if (activeMentionVisit) queueMentionVisibilityCheck(); }, { passive:true });
   }
 
   function jumpToMention(id) {
@@ -15749,7 +15766,6 @@
     else if (button.dataset.mentionNav === "next") {
       const unseen=visit.ids.find((id) => !visit.visited.has(id));
       if (unseen) jumpToMention(visit.ids[index+1] || unseen);
-      else { visit.done=true; visit.selected=""; renderThreadDetail(); scrollRoomToNewest(chatOrder()==="chat", { smooth:!REDUCED }); }
     }
   });
 

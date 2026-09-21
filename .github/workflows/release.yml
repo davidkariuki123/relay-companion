@@ -82,6 +82,8 @@ jobs:
           test/daemon-robustness.test.mjs
           test/recovery-readiness.test.mjs
           test/recovery-runner.test.mjs
+          test/recovery-transaction.test.mjs
+          test/recovery-launcher.test.mjs
           test/installation-health.test.mjs
 
   runtime:

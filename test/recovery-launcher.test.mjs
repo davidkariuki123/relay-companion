@@ -167,3 +167,22 @@ test('a failed in-place repair is retried by the same bundle next check, never h
   }
   assert.deepEqual(calls,[newer.version,newer.version]);
 });
+
+test('a runner that defers to a live installer completes without quarantining its bundle; a legacy lost-lock failure is retryable', async t => {
+  const {root,newer}=fixture(t); const calls=[];
+  const result=await launch({root,run:async(p,{runId})=>{
+    calls.push(p.version);
+    write(path.join(root,'status.json'),{ok:true,status:'deferred-update-in-flight',desiredVersion:'1.0.2',launcherVersion:p.version,runId,checkedAt:Date.now()});
+    return {ok:true,reason:'exit'};
+  }});
+  assert.equal(result.status,'runner-completed'); assert.deepEqual(calls,[newer.version]);
+  assert.equal(read(path.join(root,'launcher-status.json')).failedBundle,null);
+  write(path.join(root,'launcher-status.json'),{schema:1,status:'healthy'});
+  const legacy=await launch({root,run:async(p,{runId})=>{
+    calls.push(p.version);
+    write(path.join(root,'status.json'),{ok:false,status:'failed',lastError:'recovery-worker-exit-75',launcherVersion:p.version,runId,checkedAt:Date.now()});
+    return {ok:false,reason:'exit'};
+  }});
+  assert.equal(legacy.status,'runner-error'); assert.deepEqual(calls,[newer.version,newer.version]);
+  assert.equal(read(path.join(root,'launcher-status.json')).failedBundle,undefined);
+});

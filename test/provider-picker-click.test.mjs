@@ -101,6 +101,7 @@ test("a bubble's new chat is the picker's New chat: mode new, the app's surface,
 
 test("the footer renders destination choice even when the Relay already has a task", () => {
   const context = vm.createContext({
+    payload: { nativeExecutions: {} },
     esc: String, REDUCED: true,
     sessionPickerState: { id: "fixture", provider: "codex", motion: "open" },
     agentAppHosts: () => ["codex", "claude"], agentOpensInApp: () => true, chatAppEnabled: () => true,
@@ -114,6 +115,8 @@ test("the footer renders destination choice even when the Relay already has a ta
   assert.match(markup, /aria-expanded="true"/);
   assert.match(markup, /data-session-id="chosen"/);
   assert.doesNotMatch(markup, /data-continues/);
+  context.payload.nativeExecutions.fixture = { phase: "accepted" };
+  assert.equal(context.relayHostActionsHtml({ id: "fixture" }), "", "native Execute keeps its existing conversation instead of offering a second handoff");
 });
 
 for (const mode of ["existing", "new"]) test(`${mode} selection delivers once, including after footer rebinding`, async () => {

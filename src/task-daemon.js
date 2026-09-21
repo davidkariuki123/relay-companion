@@ -1008,8 +1008,12 @@ async function runTaskDaemonImpl({ intervalMs = 4000, health } = {}) {
     log(`MCP launcher repair failed: ${error?.message || error}`);
   }
   startDesktopStartupMigration({ log });
+  // The busy lease also covers this daemon's own update transaction. The
+  // scheduled recovery runner discovers the same release within minutes and
+  // must not download or activate against an installer this process launched.
+  let updaterInFlight = () => false;
   startRecoveryHeartbeat({
-    hasActiveWork: () => hasActiveTurns() || activeSessionOperationCount() > 0,
+    hasActiveWork: () => hasActiveTurns() || activeSessionOperationCount() > 0 || updaterInFlight(),
     apiOkAt: () => relayTransportHealth().lastSuccessAt,
   });
   try {
@@ -1025,6 +1029,7 @@ async function runTaskDaemonImpl({ intervalMs = 4000, health } = {}) {
     log,
     hasActiveWork: () => hasActiveTurns() || activeSessionOperationCount() > 0,
   });
+  updaterInFlight = () => autoUpdater.state?.updating === true;
   // Exit once the replacement tree is on disk.
   const bootPackageRoot = companionPackageRoot();
   const bootVersion = currentCompanionVersion(bootPackageRoot);

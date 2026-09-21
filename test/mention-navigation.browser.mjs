@@ -18,7 +18,9 @@ try {
       kind:"message",relayNotificationKind:"plain_relay",senderName:index%2 ? "Shane Acton" : "David Kariuki",senderEmail:index%2 ? "shane@example.com" : "david@example.com",
       forHuman:[2,12,22].includes(index) ? "@Sven_Wellmann please check this image."
         : index===31 ? "Ask @Shane_Acton about the image."
-        : `Conversation message ${index}. Some context around the image attachment.`,
+        // Long enough that ten rows run past one screen of the card, so a
+        // mention ten rows away is off screen and still needs the navigator.
+        : `Conversation message ${index}. Some context around the image attachment, spelled out at length so that every row of this fixture takes several lines of the card and the mentions stay a full screen apart from one another.`,
       forAgent:"",title:"",unread:true,recipientMentioned:[2,12,22].includes(index),attachments:[],
       createdAt:new Date(now-(32-index)*60000).toISOString(),updatedAt:new Date(now-(32-index)*60000).toISOString(),
     }));
@@ -35,7 +37,7 @@ try {
       mentionVisit:async(chatId,visitId)=>{
         if(!window.fixtureVisitIds.has(visitId)) { window.fixtureVisitIds.add(visitId); window.fixtureVisits++; }
         return {ok:true,visit:{chatId,visitId,openedAt:new Date().toISOString(),previousOpenedAt:window.fixtureVisits>1 ? new Date().toISOString() : null,
-          mentions:window.fixtureVisits===1 ? relays.filter(row=>row.recipientMentioned && !window.fixtureRemoved?.includes(row.id)).map(row=>({...row,relayId:row.id,state:"delivered",direction:"inbound",sender:{name:row.senderName,email:row.senderEmail}})) : [],
+          mentions:window.fixtureVisits===1 ? relays.filter(row=>(window.fixtureMentionIds ? window.fixtureMentionIds.includes(row.id) : row.recipientMentioned) && !window.fixtureRemoved?.includes(row.id)).map(row=>({...row,recipientMentioned:true,relayId:row.id,state:"delivered",direction:"inbound",sender:{name:row.senderName,email:row.senderEmail}})) : [],
         }};
       },
     };
@@ -78,8 +80,10 @@ try {
     await page.locator('[data-mention-nav="next"]').click();
     await page.locator(`[data-msg="${id}"].mention-target`).waitFor();
   }
-  await page.getByRole("button",{name:"Back to latest",exact:true}).click();
-  assert.equal(await page.locator('.th-mention-jump').isVisible(),false);
+  // Every mention has been reached: the navigator has nothing left to offer
+  // and steps aside, while the mention just reached keeps its highlight.
+  await page.waitForFunction(()=>document.querySelector('.th-mention-jump')?.classList.contains('hidden'));
+  assert.equal(await page.locator('[data-msg="relay_m22"].mention-target').count(),1);
   await page.locator('#thBack').click();
   await page.locator('#relaysList .relay-arrival').first().click();
   await page.waitForFunction(()=>window.fixtureVisits===2);
@@ -94,7 +98,8 @@ try {
   });
   await page.getByText('David mentioned you in Granular',{exact:true}).waitFor();
   if(process.env.RELAY_MENTION_SCREENSHOT) await page.locator('#card').screenshot({path:process.env.RELAY_MENTION_SCREENSHOT.replace('.png','-notification.png')});
-  await page.locator('[data-mention-target="relay_m22"]').click();
+  // The banner row carries its own reply composer; tap the label, as a reader would.
+  await page.getByText('David mentioned you in Granular',{exact:true}).click();
   await page.locator('[data-msg="relay_m22"].mention-target').waitFor();
   assert.match(await page.locator('.th-mention-jump').innerText(),/3 of 3/);
   await page.evaluate(()=>{
@@ -104,6 +109,36 @@ try {
   });
   await page.waitForFunction(()=>document.querySelector('.th-mention-jump')?.textContent.includes('2 mentions'));
   assert.equal(await page.locator('[data-msg="relay_m22"].mention-target').count(),0);
+  assert.deepEqual(errors,[]);
+  // A mention already on screen when the room opens is never offered, and
+  // scrolling away afterwards does not bring the navigator back: it was seen.
+  const openRoomWithMentions=async (ids)=>{
+    await page.reload();
+    await page.locator('#relaysList .relay-arrival').first().waitFor();
+    await page.evaluate((mentionIds)=>{
+      window.fixtureMentionIds=mentionIds;
+      window.fixturePayload.relays=window.fixturePayload.relays.map(row=>({...row,unread:true,recipientMentioned:mentionIds.includes(row.id)}));
+      window.fixtureEvents.onInbox(structuredClone(window.fixturePayload));
+    },ids);
+    await page.locator('#relaysList .relay-arrival').first().click();
+    await page.waitForFunction(()=>window.fixtureVisits===1);
+  };
+  await openRoomWithMentions(['relay_m30']);
+  await page.waitForFunction(()=>activeMentionVisit?.ids.includes('relay_m30') && activeMentionVisit.visited.has('relay_m30'));
+  assert.equal(await page.locator('.th-mention-jump').isVisible(),false);
+  await page.evaluate(()=>{ roomScrollElement().scrollTop=0; });
+  await page.waitForFunction(()=>mentionRowPlacement('relay_m30')==='below');
+  assert.equal(await page.locator('.th-mention-jump').isVisible(),false);
+  // A mention a screen above is offered, points up, and is retired the moment
+  // the reader scrolls it into view themselves.
+  await openRoomWithMentions(['relay_m3']);
+  await page.waitForFunction(()=>document.querySelector('.th-mention-jump:not(.hidden)')?.textContent.includes('1 mention'));
+  assert.match(await page.locator('.th-mention-jump').innerText(),/↑/);
+  // Entry pins the room to its newest message first; the reader scrolls after that.
+  await page.waitForFunction(()=>!threadEntryFollowToken() && mentionRowPlacement('relay_m3')==='above');
+  await page.evaluate(()=>{ document.querySelector('[data-msg="relay_m3"]').scrollIntoView({block:'center'}); });
+  await page.waitForFunction(()=>document.querySelector('.th-mention-jump')?.classList.contains('hidden'));
+  assert.equal(await page.evaluate(()=>mentionRowPlacement('relay_m3')),'visible');
   assert.deepEqual(errors,[]);
   console.log("Real Companion renderer: self and unsaved roster chips, older missing mentions, exact notification target, three-message navigation, refresh, deletion, completion and revisit passed.");
 } finally { await browser.close(); }

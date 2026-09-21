@@ -100,12 +100,18 @@ test("delayed canonical detail cannot release entry-follow before its deferred r
     function chatOrder() { return "chat"; }
     function afterRoomViewTransition(work) { deferredTransitionWork.push(work); }
     function requestAnimationFrame(work) { queueMicrotask(work); }
+    // Settling entry-follow also rearms the mention check, because a short
+    // room never scrolls. This fixture owns the follow latch, not mention
+    // navigation, so it records the call instead of running that half.
+    let mentionChecks = 0;
+    function queueMentionVisibilityCheck() { mentionChecks += 1; }
     ${helpers}
     const token = beginThreadEntryFollow(threadDetailId);
     hydrateThreadEntry(token, { includeSent:false, detailReady });
     return {
       scroller,
       pending:() => threadEntryFollowToken(),
+      mentionChecks:() => mentionChecks,
       finishTransition:() => deferredTransitionWork.splice(0).forEach((work) => work()),
     };
   `)(detailReady);
@@ -123,6 +129,7 @@ test("delayed canonical detail cannot release entry-follow before its deferred r
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(runtime.scroller.scrollTop, 1200, "the hydrated transcript lands on its newest message");
   assert.equal(runtime.pending(), 0, "ordinary refreshes preserve reading position after entry settles");
+  assert.ok(runtime.mentionChecks() > 0, "settled entry rearms the mention check, which a short room's absent scroll never would");
 });
 
 test("an invoked agent stays pinned above the composer across streaming layout changes", () => {

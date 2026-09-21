@@ -9,11 +9,16 @@ const crypto = require("node:crypto");
 const { spawn, spawnSync } = require("node:child_process");
 const { stageVerifiedRuntime, releasePlatform } = require("./relay-setup.cjs");
 const { verifyReleaseEnvelope } = require("./release-signature.cjs");
+const { inFlightTransaction, workerLostLock } = require("./recovery-transaction.cjs");
 const trust = require("./trust.json");
 const CHECK_MS = 5 * 60_000;
 const DEADLINE_MS = 25 * 60_000;
 const HEARTBEAT_MS = 60_000;
 const BUSY_GRACE_MS = 15 * 60_000;
+// A runtime committed moments ago is still starting its services. Judging it
+// dead inside this window restarts or replaces a release that was about to
+// answer, and on 2026-09-21 that judgement rolled back a healthy update.
+const STARTUP_GRACE_MS = 3 * 60_000;
 
 function read(file) { try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return null; } }
 function write(file, value) {
@@ -157,6 +162,7 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
   verifyReady = require("./recovery-readiness.cjs").waitForRecoveryReady,
   policyFactory = require("./recovery-policy.cjs").recoveryPolicy,
   validateLocal = require("./recovery-local.cjs").validateLocalRuntime,
+  transactions = inFlightTransaction,
   repairServices = require("./mac-service-recovery.cjs").repairMacServiceRegistrations } = {}) {
   const root = path.join(homeDir, ".relay");
   // Local availability is independent of update eligibility, network, memory,
@@ -205,6 +211,18 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
     write(stateFile, { schema: 1, channel, runId, launcherVersion: require("../package.json").version, checkedAt: now(), lastSuccessAt: previous?.lastSuccessAt || null, ...value });
     log(`status=${value.status}${value.desiredVersion ? ` desired=${value.desiredVersion}` : ""}${value.lastError ? ` error=${value.lastError}` : ""}`);
     return value;
+  };
+  // Another live process owns the canonical transaction: the daemon's own
+  // updater, a manual `relay update`, or a previous runner still activating.
+  // Whatever it installs is judged by readiness later, never by this runner
+  // losing a race to it. The staged download, if any, is swept by the caller.
+  const deferToTransaction = (extra = {}) => {
+    let transaction = null;
+    try { transaction = transactions({ homeDir, now: now() }); } catch (error) { log(`transaction check failed: ${error.message}`); }
+    if (!transaction) return null;
+    log(`canonical transaction in flight: owner pid=${transaction.pid} request=${transaction.requestId || "-"} version=${transaction.version || "-"}`);
+    return status({ ok: true, status: "deferred-update-in-flight", runtimeHealthy: false, ...extra,
+      transaction: { pid: transaction.pid, requestId: transaction.requestId, version: transaction.version } });
   };
   if (services.status === "deferred-update-owner") return status({ ...services, runtimeHealthy: false });
   if (services.changed || !services.ok) {
@@ -271,10 +289,18 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
         memoryFreeMB: memoryNow.freeMB };
       log(`installed ${version} not healthy: heartbeatFresh=${heartbeatFresh} daemonAlive=${daemonAlive} health=${JSON.stringify({ daemon: live?.daemon, pill: live?.pill, oldDaemon: live?.oldDaemon, oldPill: live?.oldPill })} readiness=${readiness ? `${readiness.reason || "ok"}${readiness.detail ? ` (${readiness.detail})` : ""}` : "not-attempted"} memoryPressured=${memoryNow.pressured}`);
       if (daemonAlive && now() - staleSince < STALE_CONFIRM_MS) return status({ ok: true, status: "stale-observed", ...base });
+      const deferred = deferToTransaction(base);
+      if (deferred) return deferred;
+      const repeatedCrash = require("./daemon-progress.cjs").repeatedStartupCrash(current, { homeDir, now: now() });
+      // A commit seconds ago means services are still coming up. Two matching
+      // startup crashes are proof of a broken release and end the grace early.
+      const committedAt = Number(current.committedAt);
+      if (!repeatedCrash && Number.isFinite(committedAt) && committedAt <= now() && now() - committedAt < STARTUP_GRACE_MS) {
+        return status({ ok: true, status: "starting", ...base, startupGraceRemainingMs: STARTUP_GRACE_MS - (now() - committedAt) });
+      }
       const busy = busyDecision(heartbeat, { homeDir, now: now() });
       if (busy) return status({ ok: true, status: busy, ...base });
       const restartKey = `restart:${current.packageRoot || current.version}`;
-      const repeatedCrash = require("./daemon-progress.cjs").repeatedStartupCrash(current, { homeDir, now: now() });
       if (repeatedCrash) {
         log(`repeated startup crash; skipping restart/reactivation for ${version}`);
         policy.failure(channel, version, { id: `startup:${current.packageRoot}:${repeatedCrash.fingerprint}`, reason: "repeated-startup-crash" });
@@ -318,7 +344,13 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
     }
     // Try a distinct, previously committed local release before requiring a
     // network download. Validation reads the tree without executing its imports.
+    // An inactive journal is an incomplete update only once its owner is gone.
+    // While the owner lives, the journal is an update in progress.
     const failedCandidate = current?.active !== true ? current?.candidate : null;
+    if (failedCandidate?.version || current?.active !== true) {
+      const deferred = deferToTransaction({ desiredVersion, version: current?.version });
+      if (deferred) return deferred;
+    }
     if (failedCandidate?.version) policy.failure(channel, failedCandidate.version, { id: `journal:${failedCandidate.packageRoot || failedCandidate.version}`, reason: "incomplete-update" });
     const good = read(path.join(root, "recovery", "runtime-good.json"));
     const olderGood = read(path.join(root, "recovery", "runtime-previous-good.json"));
@@ -333,7 +365,17 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
         const observed = await ready({ version: target.version }, activationAt);
         if (!observed.ok) throw Error("local-runtime-not-healthy");
         return proven({ ok: true, status: "current", desiredVersion, version: target.version, repair: "local", lastSuccessAt: now(), failures: 0 }, observed);
-      } catch (error) { progress.fail(error.message); log('local recovery failed: ' + error.message); }
+      } catch (error) {
+        // A worker that lost the lock did not fail to restore anything: someone
+        // else is installing. Give the attempt back and let them finish.
+        const lostLock = workerLostLock(error);
+        const deferred = deferToTransaction({ desiredVersion, version: current?.version });
+        if (deferred || lostLock) {
+          progress.refund('local:' + target.packageRoot);
+          return deferred || status({ ok: true, status: "deferred-update-in-flight", desiredVersion, version: current?.version, runtimeHealthy: false });
+        }
+        progress.fail(error.message); log('local recovery failed: ' + error.message);
+      }
     }
     if (discoveryError) throw discoveryError;
     let quarantine = policy.decision(channel, desiredVersion);
@@ -346,6 +388,10 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
     if (quarantine.blocked) return status({ ok: true, status: "deferred-release-cooldown", desiredVersion, runtimeHealthy: runtimeVerified, runtimeAvailable: runtimeResponsive, retryAt: quarantine.retryAt, failures: quarantine.failures });
     const busy = busyDecision(heartbeat, { homeDir, now: now() });
     if (busy) return status({ ok: true, status: busy, desiredVersion, ...repairState });
+    // Never start a five-minute download to race an installer that is already
+    // running; the daemon's updater discovers the same release we just did.
+    const deferredBeforeDownload = deferToTransaction({ desiredVersion, ...repairState });
+    if (deferredBeforeDownload) return deferredBeforeDownload;
     if (previous?.desiredVersion === desiredVersion && previous.retryAt > now()) return status({ ok: false, status: "backoff", desiredVersion, ...repairState,
       failures: previous.failures, retryAt: previous.retryAt, lastError: previous.lastError });
     // Ordinary upgrades wait for pressure to clear. An unavailable installation
@@ -369,6 +415,8 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
     if (read(path.join(root, "recovery", "policy.json"))?.autoUpdate === false) return status({ ok: true, status: "disabled", desiredVersion });
     const stillBusy = busyDecision(read(path.join(root, "recovery", "daemon.json")), { homeDir, now: now() });
     if (stillBusy) return status({ ok: true, status: stillBusy, desiredVersion });
+    const deferredAfterDownload = deferToTransaction({ desiredVersion, ...repairState });
+    if (deferredAfterDownload) return deferredAfterDownload;
     const entry = path.join(candidate.packageRoot, "src", "recovery-entry.js");
     if (!fs.existsSync(entry)) throw new Error("candidate-missing-recovery-engine");
     status({ ok: true, status: "activating", desiredVersion, ...repairState });
@@ -380,6 +428,11 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
       if (!observed.ok) throw new Error("replacement-not-healthy");
       return proven({ ok: true, status: "current", desiredVersion, version: desiredVersion, repair: "download", restarts: 0, lastSuccessAt: now(), failures: 0 }, observed);
     } catch (error) {
+      // Only a worker that owned the transaction can have judged the release.
+      // One that lost the lock, or found another owner mid-flight, judged nothing.
+      const deferred = deferToTransaction({ desiredVersion, ...repairState });
+      if (deferred) return deferred;
+      if (workerLostLock(error)) return status({ ok: true, status: "deferred-update-in-flight", desiredVersion, ...repairState, runtimeHealthy: false });
       policy.failure(channel, desiredVersion, { id: attemptId, reason: error.message });
       policy.interrupt();
       throw error;

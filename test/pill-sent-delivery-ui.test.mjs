@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
+import vm from "node:vm";
 
 const html = fs.readFileSync(new URL("../overlay/inbox.html", import.meta.url), "utf8");
 const main = fs.readFileSync(new URL("../overlay/main.cjs", import.meta.url), "utf8");
@@ -36,9 +37,22 @@ test("Opened takes the accent but never settles the row", () => {
   assert.match(html, /const settled = everyoneTask/);
 });
 
-test("a guest mailbox never reaches the Sent note", () => {
-  assert.match(html, /@guests\\.sendrelays\\.com\$/);
-  assert.match(html, /parts\.push\("shared by link"\)/);
+test("Sent notes omit recipient addresses and preserve attachment and link details", () => {
+  const source = html.slice(html.indexOf("  function sentDetail(r) {"), html.indexOf("  function sentClass(r) {"));
+  const context = vm.createContext({
+    audienceLinkOf: (r) => r.audienceLink,
+    sentLinkOf: (r) => r.sentLink,
+    fmtBytes: () => "369 KB",
+  });
+  vm.runInContext(source, context);
+  for (const email of ["person@example.com", "guest@guests.sendrelays.com"]) {
+    const row = { kind: "task", recipient: { name: "Person", email } };
+    assert.equal(context.sentDetail(row), "");
+    assert.equal(context.sentDetail({ ...row, attachments: [{ name: "image.png", bytes: 123 }] }), "image.png · 369 KB");
+    assert.equal(context.sentDetail({ ...row, attachments: [{}, {}] }), "2 attachments");
+    assert.equal(context.sentDetail({ ...row, audienceLink: { state: "unclaimed" } }), "shared by link");
+    assert.equal(context.sentDetail({ ...row, sentLink: { access: "private" } }), "private link");
+  }
 });
 
 test("each share link is its own room", () => {
@@ -69,8 +83,7 @@ test("a chat that moved when its link was claimed is followed, never shown as an
   assert.doesNotMatch(main, /That conversation moved when the recipient claimed the link/);
 });
 
-test("a live link can be copied off its own Sent row", () => {
-  assert.match(html, /data-sent-copy-link="\$\{esc\(id\)\}"/);
-  assert.match(html, /r\.shareLink && r\.shareLink\.state !== "revoked"/);
-  assert.match(html, /setRowNote\(id, "Link copied", "ok"\)/);
+test("a sent link can still be copied from the reader", () => {
+  assert.match(html, /data-sent-link-copy="1"/);
+  assert.match(html, /link.kind === "sent" && link.state !== "revoked" && link.url/);
 });

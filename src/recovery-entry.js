@@ -21,9 +21,20 @@ export async function runRecovery(version, channel) {
   let result = await execute();
   // A recovered journal restores service first; then advance to the selected fix.
   if (result.ok && result.recovered) result = await execute();
-  if (!result.ok) throw new Error(`${result.phase}: ${result.reason}: ${result.detail || ""}`);
+  if (!result.ok) {
+    const error = new Error(`${result.phase}: ${result.reason}: ${result.detail || ""}`);
+    // Another live process owns the transaction. This worker judged nothing
+    // about the release, and the runner must not count it as a failure.
+    error.transactionInProgress = result.phase === "lock" && result.reason === "transaction-in-progress";
+    throw error;
+  }
   return result;
 }
+// EX_TEMPFAIL, shared with bootstrap/recovery-transaction.cjs.
+export const EXIT_TRANSACTION_IN_PROGRESS = 75;
+export function recoveryExitCode(error) {
+  return error?.transactionInProgress === true ? EXIT_TRANSACTION_IN_PROGRESS : 1;
+}
 if (process.env.RELAY_RECOVERY_WORKER === "1") {
-  runRecovery(process.argv[2], process.argv[3]).catch((error) => { console.error(error.message); process.exitCode = 1; });
+  runRecovery(process.argv[2], process.argv[3]).catch((error) => { console.error(error.message); process.exitCode = recoveryExitCode(error); });
 }

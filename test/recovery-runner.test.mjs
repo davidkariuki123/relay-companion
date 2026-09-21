@@ -270,3 +270,80 @@ test("abandoned staged downloads are swept once the next runner owns the lock; c
   assert.ok(fs.existsSync(path.join(homeDir, ".relay", "runtime", "releases", "1.0.0")));
   assert.match(fs.readFileSync(path.join(homeDir, ".relay", "recovery", "recovery.log"), "utf8"), /swept 2 abandoned download\(s\)/);
 });
+
+// 2026-09-21: the daemon's updater and the scheduled runner discovered the same
+// release in the same minute. The runner lost the canonical lock, called that a
+// release failure, quarantined a version that was booting healthily, and rolled
+// the person back. These tests pin the rules that make the race harmless.
+const readJson = file => { try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return null; } };
+const countingPolicy = failures => () => ({ observe: () => ({ proven: true }), failure: (...call) => failures.push(call), interrupt() {}, decision: () => ({ blocked: false }), emergency: () => ({ allowed: true }) });
+const stageCandidate = async ({ destination }) => {
+  const candidate = path.join(destination, "node_modules", "relay-companion");
+  fs.mkdirSync(path.join(candidate, "src"), { recursive: true });
+  fs.writeFileSync(path.join(candidate, "src", "recovery-entry.js"), "");
+  return { packageRoot: candidate };
+};
+test("a release being installed by a live worker is deferred at every rung, never raced and never charged", async t => {
+  const homeDir = fixture(t), root = path.join(homeDir, ".relay"), failures = [];
+  const packageRoot = path.join(root, "runtime", "releases", "1.2.3", "node_modules", "relay-companion");
+  // The journal mid-activation, written by the daemon's own worker, which is alive.
+  write(path.join(root, "runtime", "current.json"), { state: "activating", active: false, candidate: { version: "1.2.3", packageRoot }, previous: null });
+  write(path.join(root, "runtime", "update-requests", "11111111-1111-1111-1111-111111111111.json"),
+    { state: "admitted", requestId: "11111111-1111-1111-1111-111111111111", version: "1.2.3", workerPid: process.pid, admittedAt: 900 });
+  const result = await recover({ homeDir, env: {}, now: () => 1000, policyFactory: countingPolicy(failures), memory: () => ({ pressured: false }), discoverImpl: async () => "1.2.3",
+    stage: () => assert.fail("must not download against a live installer"), run: () => assert.fail("must not activate against a live installer") });
+  assert.equal(result.ok, true); assert.equal(result.status, "deferred-update-in-flight");
+  assert.deepEqual(result.transaction, { pid: process.pid, requestId: "11111111-1111-1111-1111-111111111111", version: "1.2.3" });
+  assert.deepEqual(failures, [], "an update in progress is not an incomplete update");
+  // The same owner appearing after a five-minute download stops the activation too.
+  fs.rmSync(path.join(root, "runtime", "current.json"));
+  let staged = null;
+  const afterDownload = await recover({ homeDir, env: {}, now: () => 1000, policyFactory: countingPolicy(failures), memory: () => ({ pressured: false }), discoverImpl: async () => "1.2.3",
+    stage: async options => {
+      fs.rmSync(path.join(root, "runtime", "update-requests"), { recursive: true, force: true });
+      staged = options.destination;
+      write(path.join(root, "runtime", "transaction.lock", "owner.json"), { pid: process.pid, createdAt: 950, requestId: "daemon" });
+      return stageCandidate(options);
+    }, run: () => assert.fail("must not activate a second copy over a live installer") });
+  assert.equal(afterDownload.status, "deferred-update-in-flight"); assert.equal(afterDownload.transaction.pid, process.pid);
+  assert.equal(fs.existsSync(staged), false, "the abandoned staging copy is swept");
+  assert.deepEqual(failures, []);
+});
+test("a worker that lost the transaction lock is a deferral at both the local and download rungs, not a release failure", async t => {
+  const homeDir = fixture(t), root = path.join(homeDir, ".relay"), failures = [];
+  const good = { active: true, version: "1.2.2", packageRoot: path.join(root, "runtime", "releases", "1.2.2", "node_modules", "relay-companion"), channel: "stable" };
+  fs.mkdirSync(path.join(good.packageRoot, "src"), { recursive: true }); fs.writeFileSync(path.join(good.packageRoot, "src", "recovery-entry.js"), "");
+  write(path.join(root, "recovery", "runtime-good.json"), good);
+  const lost = async () => { throw new Error("recovery-worker-exit-75"); };
+  const local = await recover({ homeDir, env: {}, now: () => 1000, policyFactory: countingPolicy(failures), memory: () => ({ pressured: false }), discoverImpl: async () => "1.2.3",
+    run: lost, stage: () => assert.fail("a lost lock at the local rung must not fall through to a download") });
+  assert.equal(local.ok, true); assert.equal(local.status, "deferred-update-in-flight");
+  assert.equal(readJson(path.join(root, "recovery", "repair-progress.json"))?.attempts?.["local:" + good.packageRoot] || 0, 0, "the local attempt is given back");
+  fs.rmSync(path.join(root, "recovery", "runtime-good.json"));
+  const download = await recover({ homeDir, env: {}, now: () => 2000, policyFactory: countingPolicy(failures), memory: () => ({ pressured: false }), discoverImpl: async () => "1.2.3",
+    stage: stageCandidate, run: lost });
+  assert.equal(download.ok, true); assert.equal(download.status, "deferred-update-in-flight");
+  assert.deepEqual(failures, [], "losing the lock says nothing about the release");
+  // Any other worker exit is still the release's failure.
+  const broken = await recover({ homeDir, env: {}, now: () => 3000, policyFactory: countingPolicy(failures), memory: () => ({ pressured: false }), discoverImpl: async () => "1.2.3",
+    stage: stageCandidate, run: async () => { throw new Error("recovery-worker-exit-1"); } });
+  assert.equal(broken.ok, false); assert.equal(failures.length, 1); assert.equal(failures[0][1], "1.2.3"); assert.equal(failures[0][2].reason, "recovery-worker-exit-1");
+});
+test("a runtime committed moments ago is given a startup grace before any restart; two matching crashes end it early", async t => {
+  const homeDir = fixture(t), root = path.join(homeDir, ".relay");
+  const current = { active: true, version: "1.2.3", packageRoot: path.join(root, "runtime", "releases", "1.2.3", "node_modules", "relay-companion"), committedAt: 100_000 };
+  write(path.join(root, "runtime", "current.json"), current);
+  const restarts = [];
+  const attempt = at => recover({ homeDir, env: {}, now: () => at, memory: () => ({ pressured: false }), discoverImpl: async () => "1.2.3",
+    health: () => ({ ok: false, daemonCount: 0 }), restart: async () => { restarts.push(at); return { ok: false, reason: "service-task-missing" }; }, stage: () => assert.fail("must not download") });
+  const early = await attempt(100_000 + 30_000);
+  assert.equal(early.ok, true); assert.equal(early.status, "starting"); assert.deepEqual(restarts, []);
+  assert.ok(early.startupGraceRemainingMs > 0 && early.startupGraceRemainingMs <= 3 * 60_000);
+  const late = await attempt(100_000 + 4 * 60_000);
+  assert.equal(late.status, "restart-failed"); assert.equal(restarts.length, 1);
+  // A release that crashes twice on startup has been seen failing; no grace applies.
+  const { recordDaemonCrash } = require("../bootstrap/daemon-progress.cjs");
+  for (const pid of [20, 21]) recordDaemonCrash(new ReferenceError("removed runtime"), { ...current, homeDir, pid, now: () => 100_000 });
+  const crashed = await attempt(100_000 + 10_000);
+  assert.notEqual(crashed.status, "starting"); assert.equal(restarts.length, 1, "a repeated startup crash skips restart as before");
+});

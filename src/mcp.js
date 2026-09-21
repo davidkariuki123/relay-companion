@@ -1,7 +1,7 @@
 import TOPIC_TOOLS from "./topic-tool-contract.cjs";
 const { TOPIC_EXTRA_TOOLS, TOPIC_POST_FIELDS, TOPIC_FETCH_FIELDS, TOPIC_CONTEXT_INSTRUCTION } = TOPIC_TOOLS;
 import { classificationArguments, classificationToolProperties } from "./message-classification.js";
-import { RELAY_MCP_ESSENTIALS, RELAY_COMPOSITION_SUMMARY, RELAY_TOPIC_POSTING_RULE, RELAY_MILESTONE_STARTUP_RULE, RELAY_MILESTONE_GUIDE, RELAY_TASK_COMPLETION_RULE } from "./agent-instructions.js";
+import { RELAY_MCP_ESSENTIALS, RELAY_COMPOSITION_SUMMARY, RELAY_TOPIC_POSTING_RULE, RELAY_MILESTONE_STARTUP_RULE, RELAY_MILESTONE_GUIDE, RELAY_TASK_COMPLETION_RULE, RELAY_TASK_START_GUIDE } from "./agent-instructions.js";
 import TOPIC_STANDING_RULES from "./topic-standing-rules.cjs";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -136,7 +136,7 @@ const MEDIUM_ROUTING =
   `Relay is the user's default general direct-message and saved-channel communication layer; an explicitly requested other medium overrides Relay. ${EXPLICIT_PLAIN_TEXT_ROUTING} ${UNRESOLVED_RECIPIENT_ROUTING}`;
 
 const TASK_STARTUP_RULE =
-  "For Tasks, call relay_task_start then relay_task_complete; no extra send approval. Task Runs finish automatically.";
+  "For authorized Task work (research too): relay_task_start first, relay_task_complete last. Task Runs finish automatically.";
 
 export const RELAY_MCP_INSTRUCTIONS = [
   RELAY_MCP_ESSENTIALS,
@@ -268,7 +268,7 @@ export const TOOLS = [
     name: "relay_task_start",
     _meta: ALWAYS_LOAD_META,
     description:
-      `Mark one exact inbound Relay Task as Working when this human explicitly asks you to carry it out in the current agent session. Call before substantive work begins. For an unclaimed channel Task, Start atomically claims it for this human; it refuses a Task claimed by somebody else. Do not call merely because you read, summarize, discuss, or inspect a Task. Relay records this session as the Task owner; it does not open or foreground the Relay pill. ${RELAY_TASK_COMPLETION_RULE}`,
+      `Mark one exact inbound Relay Task as Working. ${RELAY_TASK_START_GUIDE} For an unclaimed channel Task, Start atomically claims it for this human; it refuses a Task claimed by somebody else. Relay records this session as the Task owner; it does not open or foreground the Relay pill. ${RELAY_TASK_COMPLETION_RULE}`,
     inputSchema: {
       type: "object",
       properties: {

@@ -26,14 +26,14 @@ test("a Task's open actions are a Relay's: no Start verb, no task-only tray", ()
   assert.equal(html.includes("window.relay.taskStart"), false, "no Start IPC from the pill");
 });
 
-test("a Task row opens the Task on click; the open-actions menu is for Relays only", () => {
+test("Task and Sent rows open their reader on click", () => {
   // David, 2026-09-17: clicking a Task row does what Preview did — opens the
   // Task itself — on both the Relays list and the Sent list. No three-row
   // Preview / Choose chat / New chat menu grows under a Task.
   assert.match(html, /const expanded = !isTask && r\.id === expandedRelayId;/);
-  assert.match(html, /const expanded = !taskRow && id === expandedSentId;/);
+  assert.doesNotMatch(html, /const expanded = !taskRow && id === expandedSentId;/);
   assert.match(html, /if \(el\.getAttribute\("data-task"\) === "1"\) \{\s*el\.addEventListener\("click", \(\) => openReader\(id, "relays"\)\);/);
-  assert.match(html, /if \(el\.getAttribute\("data-task"\) === "1"\) \{\s*el\.addEventListener\("click", \(\) => openReader\(id, "sent"\)\);/);
+  assert.match(html, /el\.addEventListener\("click", \(\) => openReader\(id, "sent"\)\);/);
 });
 
 test("task rows are deletable only once the Task is over", () => {
