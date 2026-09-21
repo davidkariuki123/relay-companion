@@ -89,7 +89,7 @@ test("a conversation is named only by its person or saved group", () => {
   assert.doesNotMatch(chat, />See all</);
 });
 
-function mentionRenderer({ contacts = [], account = {}, groups = [] } = {}) {
+function mentionRenderer({ contacts = [], account = {}, groups = [], plain = false } = {}) {
   const start = html.indexOf("function normalizedMentionToken(");
   const end = html.indexOf("\n  function relaySender(", start);
   assert.notEqual(start, -1, "missing mention renderer");
@@ -108,9 +108,27 @@ function mentionRenderer({ contacts = [], account = {}, groups = [] } = {}) {
     "payload",
     "groupsList",
     "esc",
-    `"use strict"; ${source}; return linkify;`,
+    `"use strict"; ${source}; return ${plain ? "mentionPreviewText" : "linkify"};`,
   )(contacts, { account }, groups, escapeHtml);
 }
+
+test("chat list previews resolve mention tokens using contacts, self and the channel roster", () => {
+  const preview = mentionRenderer({
+    plain:true,
+    contacts:[{ handle:"sven", name:"Sven Wellmann", email:"sven@example.com" }],
+    account:{ name:"David Kariuki", email:"david@example.com" },
+    groups:[{ id:"grp_granular", members:[{ name:"Shane Acton", email:"shane@example.com" }] }],
+  });
+  assert.equal(preview("@sven @Shane_Acton @David_Kariuki", "grp_granular"), "@Sven Wellmann @Shane Acton @David Kariuki");
+  assert.equal(preview("@Shane_Acton", "grp_elsewhere"), "@Shane_Acton");
+  assert.equal(preview("@unknown_handle mail@sven https://example.com/@sven"), "@unknown_handle mail@sven https://example.com/@sven");
+  const rosterPreview = mentionRenderer({ plain:true, groups:[{ id:"grp_granular", members:[{ name:"Sven Wellmann" }] }] });
+  assert.equal(rosterPreview("@Sven_Wellmann", "grp_granular"), "@Sven Wellmann");
+  const row = html.slice(html.indexOf("function relayIdentityRowHtml(identity)"), html.indexOf("// ---------- the reader:"));
+  assert.match(row, /relayListGist\(mentionPreviewText\(row\.title \|\| row\.body \|\| "Message", identity\.groupId\), 90\)/,
+    "resolve names in the row's channel before shortening the preview");
+  assert.match(row, /\$\{esc\(gist\)\}/, "display names remain HTML escaped");
+});
 
 test("known @handles render as highlighted contact names without changing unknown text", () => {
   const linkify = mentionRenderer({ contacts:[{ handle:"shane_acton", name:"Shane Acton" }] });

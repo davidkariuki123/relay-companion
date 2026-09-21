@@ -3508,6 +3508,22 @@
   .tk-hoververbs.icons { justify-content:space-between; }
   .row.dwelled { background:var(--wash); }
   .row.dwelled .row-delete { opacity:1; }
+  /* Received Tasks: unfinished work leads; history stays within reach. */
+  .received-task-heading {
+    display:flex; align-items:center; gap:6px; padding:12px 22px 5px;
+    color:var(--muted); font:500 var(--fs-meta) var(--sans);
+  }
+  .received-task-count { color:var(--muted-2); font-size:var(--fs-chip); }
+  .received-task-fold {
+    display:flex; align-items:center; gap:7px; width:calc(100% - 44px);
+    margin:10px 22px 12px; padding:15px 0 4px; border:0; border-top:1px solid var(--hair);
+    background:transparent; color:var(--muted-2); font:500 var(--fs-meta) var(--sans);
+    cursor:pointer; text-align:left; transition:color var(--t-fast) var(--settle);
+  }
+  .received-task-fold:hover { color:var(--ink); }
+  .received-task-fold .received-task-count { margin-left:auto; }
+  .received-task-chevron { display:inline-block; transition:transform var(--t-base) var(--soft); }
+  .received-task-fold[aria-expanded="true"] .received-task-chevron { transform:rotate(90deg); }
 </style>
 <link rel="stylesheet" href="./relay-anyone-tip.css" />
 </head>
@@ -5946,6 +5962,17 @@
     return name && name.indexOf("@") === -1 ? name : "";
   }
 
+  // List previews resolve the same people as chat bubbles, before truncation.
+  // Keep this plain text: the row escapes it when rendering its HTML.
+  function mentionPreviewText(text, groupId = "") {
+    const source = String(text || "");
+    return source.replace(/https?:\/\/[^\s<]+|@[A-Za-z0-9][A-Za-z0-9._-]*/g, (token, index) => {
+      if (token.startsWith("http") || /[A-Za-z0-9._%+-]/.test(index > 0 ? source[index - 1] : "")) return token;
+      const name = mentionDisplayName(token, groupId);
+      return name ? `@${name}` : token;
+    });
+  }
+
   function mentionComposerParts(text, options) {
     const source = String(text || "");
     const byToken = new Map((options || []).map((option) => [String(option.token || "").toLowerCase(), option]));
@@ -6001,7 +6028,10 @@
         found = true;
         return;
       }
-      if (node.nodeType === Node.ELEMENT_NODE && node.hasAttribute("data-mention-token")) {
+      // Count every serialized leaf before the caret, including ordinary text
+      // before/between chips and line breaks. Chips use their payload token length.
+      if (node.nodeType === Node.TEXT_NODE || (node.nodeType === Node.ELEMENT_NODE
+        && (node.hasAttribute("data-mention-token") || node.tagName === "BR"))) {
         total += composerNodeLength(node);
         return;
       }
@@ -7092,6 +7122,7 @@
   let relaysLayout = "chats";
   let relaysFilter = "all";
   let relaysLayoutAccount = null;
+  const receivedTaskHistoryOpen = new Set();
   const relaysFilterEl = document.getElementById("relaysFilter");
   const RELAYS_LAYOUTS = ["chats", "received", "sent"];
   const RELAYS_FILTERS = ["all", "relays", "tasks"];
@@ -7099,6 +7130,7 @@
     const account = signupAccountKey();
     if (account !== relaysLayoutAccount) {
       relaysLayoutAccount = account;
+      receivedTaskHistoryOpen.clear();
       const savedLayout = protoPref(`relayRelaysLayout:${account}`, "chats");
       relaysLayout = RELAYS_LAYOUTS.includes(savedLayout) ? savedLayout : "chats";
       const savedFilter = protoPref(`relayRelaysFilter:${account}`, "all");
@@ -7266,6 +7298,49 @@
           relayNotificationKind:message.request ? "task" : row.relayNotificationKind } : null;
       }).filter(Boolean);
   }
+  function receivedTaskGroupsHtml(rows) {
+    const groups = { todo:[], progress:[], done:[], closed:[] };
+    for (const row of rows) {
+      const state = taskStateFor(row);
+      const key = state.over ? (state.tone === "done" ? "done" : "closed")
+        : (row.taskStartedAt || state.tone === "started" || state.claim === "other") ? "progress" : "todo";
+      groups[key].push(row);
+    }
+    // Apply the render window after grouping and folding. Completed history
+    // cannot consume the page that should expose an older unfinished task.
+    let remaining = renderedThreadCount + RENDER_WINDOW;
+    const shownCount = groups.todo.length + groups.progress.length
+      + [...receivedTaskHistoryOpen].reduce((n, key) => n + groups[key].length, 0);
+    hasMoreThreads = shownCount > remaining;
+    let html = "";
+    for (const [key, label] of [["todo", ""], ["progress", "In progress"], ["done", "Completed"], ["closed", "Closed"]]) {
+      const items = groups[key];
+      if (!items.length) continue;
+      const history = key === "done" || key === "closed";
+      const expanded = !history || receivedTaskHistoryOpen.has(key);
+      if (history) {
+        html += `<button class="received-task-fold" type="button" data-task-history="${key}" aria-expanded="${expanded}" aria-controls="received-task-${key}"><span class="received-task-chevron" aria-hidden="true">›</span>${label}<span class="received-task-count">${items.length}</span></button>`;
+      } else if (label) {
+        html += `<div class="received-task-heading">${label}<span class="received-task-count">${items.length}</span></div>`;
+      }
+      const visible = expanded ? items.slice(0, remaining) : [];
+      const rowHtml = visible.map((row) => relayRowHtml(row, new Set(), { received:true })).join("");
+      html += history ? `<div id="received-task-${key}"${expanded ? "" : " hidden"}>${rowHtml}</div>` : rowHtml;
+      remaining -= visible.length;
+      if (expanded && visible.length < items.length) break;
+    }
+    return html;
+  }
+  relaysListEl.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-task-history]");
+    if (!button) return;
+    const key = button.dataset.taskHistory;
+    if (receivedTaskHistoryOpen.has(key)) receivedTaskHistoryOpen.delete(key);
+    else receivedTaskHistoryOpen.add(key);
+    renderRelays();
+    relaysListEl.querySelector(`[data-task-history="${key}"]`)?.focus({ preventScroll:true });
+  });
+
   function renderRelays() {
     syncRelaysLayout();
     if (requestInboxAccount !== signupAccountKey()) { requestInboxOpen = false; requestInboxError = ""; requestInboxAccount = signupAccountKey(); relayAnyoneTip.reset(); }
@@ -7404,14 +7479,25 @@
       relaysRequestsSummaryEl.innerHTML = nextSummaryHtml;
       document.getElementById("requestsEntry")?.addEventListener("click", openRequestInbox);
     }
+    const groupedTasks = relaysLayout === "received" && relaysFilter === "tasks";
     const nextListHtml = relaysLayout === "received"
-      ? visible.map((row) => relayRowHtml(row, new Set(), { received:true })).join("")
+      ? groupedTasks ? receivedTaskGroupsHtml(listRows) : visible.map((row) => relayRowHtml(row, new Set(), { received:true })).join("")
       : relaysLayout === "sent"
         ? sentRowsHtml(visible)
         : visible.map((row) => relayIdentityRowHtml(row)).join("");
     if (relaysListEl.innerHTML === nextListHtml) return;
+    const previousPositions = groupedTasks && !REDUCED
+      ? new Map([...relaysListEl.querySelectorAll(".row")].map((row) => [row.dataset.id, row.getBoundingClientRect().top])) : null;
     foldHoverRow();
     relaysListEl.innerHTML = nextListHtml;
+    if (previousPositions?.size) {
+      for (const row of relaysListEl.querySelectorAll(".row")) {
+        const previous = previousPositions.get(row.dataset.id);
+        if (previous === undefined) continue;
+        const offset = previous - row.getBoundingClientRect().top;
+        if (offset) row.animate([{ transform:`translateY(${offset}px)` }, { transform:"translateY(0)" }], { duration:240, easing:"cubic-bezier(.22,1,.28,1)" });
+      }
+    }
     peekListHtml = "";
     if (relaysLayout === "received") { wireRelayRows({ received:true }); return; }
     if (relaysLayout === "sent") { wireSentRows(relaysListEl); return; }
@@ -7743,7 +7829,7 @@
     // chat id, then the room's own thread coordinate; message ids are only a
     // compatibility fallback for legacy Relay rows.
     const roomCoordinate = identity.chatId || identity.threadId || row.threadId || row.id;
-    const gist = relayListGist(row.title || row.body || "Message", 90);
+    const gist = relayListGist(mentionPreviewText(row.title || row.body || "Message", identity.groupId), 90);
     const unreadCls = identity.unreadCount ? " unread" : "";
     const groupPeople = identity.isGroup ? [...(identity.people || [])].slice(0, 2) : [];
     while (identity.isGroup && groupPeople.length < 2) groupPeople.push(groupPeople.length ? name : (row.party || name));
