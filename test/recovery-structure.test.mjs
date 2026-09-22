@@ -96,11 +96,14 @@ test("Windows follows the stock hidden launcher only when it targets this instal
       return { status: 0, stdout: `<Arguments>${launcher}</Arguments><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>` };
     },
   };
-  fs.writeFileSync(launcher, `shell.Run "${path.join(f.target.packageRoot, "overlay", "main.cjs")}"`);
-  assert.equal((await restoreMissingPill(f.target, options)).ok, true);
-  fs.writeFileSync(launcher, 'shell.Run "some other installation"');
-  assert.equal((await restoreMissingPill(f.target, options)).reason, "service-target-unverified");
-  assert.equal(starts, 1);
+  for (const encoding of ["utf8", "utf16le"]) {
+    const bom = encoding === "utf16le" ? "\ufeff" : "";
+    fs.writeFileSync(launcher, `${bom}shell.Run "${path.join(f.target.packageRoot, "overlay", "main.cjs")}"`, encoding);
+    assert.equal((await restoreMissingPill(f.target, options)).ok, true, encoding);
+    fs.writeFileSync(launcher, `${bom}shell.Run "some other installation"`, encoding);
+    assert.equal((await restoreMissingPill(f.target, options)).reason, "service-target-unverified", encoding);
+  }
+  assert.equal(starts, 2);
 });
 
 test("an update owning the installation excludes pill repair without touching any service", async t => {

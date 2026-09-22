@@ -447,8 +447,16 @@ async function restoreMissingPill(target, {
       // Stock Windows tasks normally delegate to a hidden launcher. Follow only
       // that exact managed file, never an arbitrary path supplied by task text.
       const launcher = path.join(homeDir, ".relay", "relay-companion-pill.vbs");
+      const launcherTargetsCurrent = () => {
+        const bytes = fs.readFileSync(launcher);
+        // install.js writes the stock WScript launcher as UTF-16LE with a BOM
+        // so non-ASCII account paths survive the Windows ANSI code page.
+        const text = bytes[0] === 0xff && bytes[1] === 0xfe
+          ? bytes.subarray(2).toString("utf16le") : bytes.toString("utf8");
+        return normalize(text).includes(script);
+      };
       const targetsCurrent = xml.includes(script) || (xml.includes(normalize(launcher))
-        && normalize(fs.readFileSync(launcher, "utf8")).includes(script));
+        && launcherTargetsCurrent());
       if (!targetsCurrent || !/<MultipleInstancesPolicy>IgnoreNew<\/MultipleInstancesPolicy>/i.test(task.stdout)) return defer("service-target-unverified");
       command = "schtasks.exe"; args = ["/Run", "/TN", WINDOWS_PILL_TASK];
     } else if (platform === "linux") {
