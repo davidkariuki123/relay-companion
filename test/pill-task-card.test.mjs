@@ -33,9 +33,9 @@ const block = between(inbox, "// ---------- THE TASK CARD (2026-09-17) ---------
 
 // The helpers, run for real: the block evaluated with the few renderer
 // functions it leans on stubbed, and a payload of fixture rows.
-function boot({ relays = [], sent = [], apps = ["codex", "claude"], opens = () => true } = {}) {
+function boot({ relays = [], sent = [], apps = ["codex", "claude"], opens = () => true, features = {}, nativeExecutions = {} } = {}) {
   const context = {
-    payload: { relays, sent, account: { userId: "me" } },
+    payload: { relays, sent, account: { userId: "me" }, features, nativeExecutions },
     esc: (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])),
     timeAgo: (iso) => { const ms = Date.now() - Date.parse(iso); const m = Math.round(ms / 60000); return m < 1 ? "now" : m < 60 ? `${m}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`; },
     formatChatTime: () => "09:52",
@@ -61,7 +61,7 @@ function boot({ relays = [], sent = [], apps = ["codex", "claude"], opens = () =
     setTimeout, clearTimeout, console, Map, Set, Date, String, Number, Boolean, Array, JSON, Math,
   };
   vm.createContext(context);
-  vm.runInContext(block + "\nthis.__t = { taskStateFor, taskLadder, taskVerbsHtml, taskCardFooterHtml, taskStatusModuleHtml, taskRowLineHtml, taskEventOf, taskResultFor, taskResultLinkHtml, taskIsOver, taskAsking, taskAskRowHtml, taskStateRowHtml, taskVerb, TASK_ASK_GUARD_MS, taskIsEveryone, taskRosterCardHtml, taskRosterGroupedHtml, taskRosterYouStripHtml, taskRosterSumText, taskRosterTone, taskRosterCountsOf, taskRosterHelperText };", context);
+  vm.runInContext(block + "\nthis.__t = { taskStateFor, taskLadder, taskVerbsHtml, taskCardFooterHtml, taskStatusModuleHtml, taskRowLineHtml, taskEventOf, taskResultFor, taskResultLinkHtml, taskIsOver, taskAsking, taskAskRowHtml, taskStateRowHtml, taskVerb, TASK_ASK_GUARD_MS, taskIsEveryone, taskRosterCardHtml, taskRosterGroupedHtml, taskRosterYouStripHtml, taskRosterSumText, taskRosterTone, taskRosterCountsOf, taskRosterHelperText, nativeExecuteHtml, taskExecuteVerbHtml, nativeExecutePickerHtml, nativeExecuteChoice };", context);
   context.__t.__context = context;
   return context.__t;
 }
@@ -540,4 +540,54 @@ test("Done on an Everyone card asks on the You row, and only the sender's rows a
   // device that id opens nothing, so only the sender's rows carry the chevron.
   assert.doesNotMatch(t.taskRosterCardHtml(row), /tk-roster-link/, "a member is offered no door");
   assert.match(t.taskRosterCardHtml(everyoneSent()), /tk-roster-link/, "the sender is");
+});
+
+// ---------- EXECUTE ON THE CARD ----------
+// Execute is a developer-tier verb that runs the RECEIVED copy of a Task. It
+// sits in the agent row of the chat card beside Copy for your agent, and under
+// the ladder in the reader, behind one gate: the feature on, the viewer holds
+// the received copy, the Task not yet started or over, no other claimant.
+test("Execute is on the card for the person it was sent to, and only with the feature on", () => {
+  const off = boot().taskCardFooterHtml(inboundTask());
+  assert.doesNotMatch(off, /data-native-execute/, "no feature, no verb");
+  const t = boot({ features: { taskExecution: true } });
+  const footer = t.taskCardFooterHtml(inboundTask());
+  assert.match(footer, /class="tk-agent-verbs"><button[^>]*data-tk-copy="t1"[^>]*>Copy for your agent<\/button><button[^>]*data-native-execute="t1"[^>]*>Execute</, "beside Copy for your agent");
+  assert.doesNotMatch(t.taskCardFooterHtml(inboundTask({ taskStartedAt: ago(5) })), /data-native-execute/, "started elsewhere: nothing to launch");
+  assert.doesNotMatch(t.taskCardFooterHtml(inboundTask({ taskCompletedAt: ago(5) })), /data-native-execute/, "over: the agent row is gone too");
+  assert.doesNotMatch(t.taskCardFooterHtml(sentTask()), /data-native-execute/, "the sender has no received copy to run");
+  assert.match(t.nativeExecuteHtml(inboundTask()), /data-native-execute="t1"[^>]*>Execute<\/button><div class="sv-copy">Run this Task in your native app/, "the reader carries the caption");
+});
+
+test("a Task sent to yourself: the sender's bubble runs the received twin", () => {
+  const received = inboundTask({ id: "self1", senderName: "Me", party: "Me" });
+  const bubble = sentTask({ id: "self1", relayId: "self1" });
+  const t = boot({ features: { taskExecution: true }, relays: [received] });
+  assert.match(t.taskCardFooterHtml(bubble), /data-native-execute="self1"[^>]*>Execute</, "the twin by id");
+  const submitted = boot({ features: { taskExecution: true }, relays: [received], nativeExecutions: { self1: { phase: "accepted", provider: "claude", status: "Working in Claude Code" } } });
+  const footer = submitted.taskCardFooterHtml(bubble);
+  assert.match(footer, />Continue in native app</);
+  assert.match(footer, /tk-execute-status">Working in Claude Code</);
+  const startedTwin = inboundTask({ id: "self1", taskStartedAt: ago(2) });
+  assert.doesNotMatch(boot({ features: { taskExecution: true }, relays: [startedTwin] }).taskCardFooterHtml(bubble), /data-native-execute/, "started without a native record: nothing to launch");
+});
+
+test("Execute's one question opens in the card and the reader: pairs best first, then another folder, then Cancel", () => {
+  const t = boot({ features: { taskExecution: true } });
+  const offer = { question: "Where should the agent work?", caption: "It will read and change files in this folder.",
+    options: [{ provider: "claude", cwd: "C:\\w\\relay", label: "Claude Code · relay", why: "This Task is about relay" }, { provider: "codex", cwd: "C:\\w\\relay", label: "Codex · relay", why: "Last time" }],
+    browse: [{ provider: "claude", label: "Claude Code · another folder…" }] };
+  t.nativeExecuteChoice.set("t1", offer);
+  const footer = t.taskCardFooterHtml(inboundTask());
+  assert.doesNotMatch(footer, /data-native-execute/, "the verb steps aside while the question is open");
+  assert.match(footer, /tk-execute-title">Where should the agent work\?<\/span><span class="tk-execute-caption">It will read and change files in this folder\.</, "the question says what the folder is for");
+  assert.match(footer, /data-execute-pick="t1" data-provider="claude" data-cwd="C:\\w\\relay"[^>]*><span class="sp-name">Claude Code · relay<\/span><span class="sp-state">This Task is about relay</, "the best pair first, with its reason");
+  assert.match(footer, /data-execute-pick="t1" data-provider="codex" data-cwd="C:\\w\\relay"/);
+  assert.match(footer, /data-execute-pick="t1" data-provider="claude" data-browse="1"[^>]*><span class="sp-name">Claude Code · another folder…</, "the OS dialog is the last rung");
+  assert.match(footer, /data-execute-cancel="t1"[^>]*>Cancel</);
+  assert.ok(footer.indexOf("tk-agents") < footer.indexOf("tk-execute-pick") && footer.indexOf("tk-execute-pick") < footer.indexOf("tk-foot "), "under the agent row, above the state row");
+  const reader = t.nativeExecuteHtml(inboundTask());
+  assert.match(reader, /rd-host-actions[^>]*><div class="tk-execute-pick"/, "the reader shows the same question in place of its button");
+  t.nativeExecuteChoice.delete("t1");
+  assert.match(t.taskCardFooterHtml(inboundTask()), /data-native-execute="t1"/, "Cancel brings the verb back");
 });

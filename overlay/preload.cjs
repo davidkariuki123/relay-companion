@@ -34,7 +34,8 @@ contextBridge.exposeInMainWorld("relay", {
   openFresh: (id, host, note) => ipcRenderer.send("relay:openFresh", id, host, note),
   // The pill tray's Start task: the full start flow with the default runtime.
   taskClaim: (id, expectedVersion) => ipcRenderer.invoke("relay:taskClaim", String(id || ""), expectedVersion),
-  taskExecute: (id) => ipcRenderer.invoke("relay:taskExecute", String(id || "")),
+  taskExecute: (id, choice) => ipcRenderer.invoke("relay:taskExecute", String(id || ""), choice && typeof choice === "object"
+    ? { provider: String(choice.provider || ""), cwd: String(choice.cwd || ""), browse: choice.browse === true } : undefined),
   executionDisable: () => ipcRenderer.invoke("relay:executionDisable"),
   taskUnclaim: (id, expectedVersion) => ipcRenderer.invoke("relay:taskUnclaim", String(id || ""), expectedVersion),
   taskStop: (id) => ipcRenderer.invoke("relay:taskStop", String(id || "")),

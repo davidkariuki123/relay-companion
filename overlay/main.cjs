@@ -611,6 +611,7 @@ function installationAuthorizationController() {
           );
           sentCache = [];
           sentFingerprint = "";
+          sentUsage = null;
           sentLoadedOnce = null;
           contactsCache = [];
           contactsFingerprint = "";
@@ -876,8 +877,12 @@ async function relayClient(options) {
 
 let nativeTaskModules = null;
 const nativeTaskModulesPromise = Promise.all([
-  import("../src/native-task-launch.js"), import("../src/native-task-execute.js"),
-]).then(([launch, execute]) => (nativeTaskModules = { launch, execute }));
+  import("../src/native-task-launch.js"), import("../src/native-task-execute.js"), import("../src/native-task-workspace.js"),
+]).then(([launch, execute, workspace]) => (nativeTaskModules = { launch, execute, workspace }));
+// The app-and-workspace pairs main offered the renderer for each Task, so a
+// pick is only ever one of them; a folder chosen on disk goes through the OS
+// dialog here and never arrives from the page.
+const executeOffers = new Map();
 
 function nativeExecutionSummary(rows) {
   if (!PRODUCT_FEATURES.taskExecution || !nativeTaskModules) return {};
@@ -892,42 +897,71 @@ function nativeExecutionSummary(rows) {
   }));
 }
 
-async function executeTaskInNativeApp(event, id) {
+async function executeTaskInNativeApp(event, id, choice) {
   if (!win || win.isDestroyed() || event.sender !== win.webContents || event.senderFrame !== event.sender.mainFrame) return { ok: false, error: "Not the Relay window." };
   if (!PRODUCT_FEATURES.taskExecution) return { ok: false, error: "Execute is available only to Relay developer accounts." };
   try {
     const modules = await nativeTaskModulesPromise;
     const executionConfig = readConfigFile();
-    return await modules.execute.executeNativeTask({
-      id: String(id || ""), config: executionConfig, client: await relayClient(),
+    const client = await relayClient();
+    const key = String(id || "");
+    const pick = choice && typeof choice === "object" ? choice : null;
+    let offered = null;
+    let packetPromise = null;
+    const packetFor = () => (packetPromise ||= client.fetchRelay(key).then((response) => response.packet || response.relay || response).catch(() => null));
+    const result = await modules.execute.executeNativeTask({
+      id: key, config: executionConfig, client,
       isCurrentAccount: () => { try { return modules.launch.executionAccountKey(readConfigFile()) === modules.launch.executionAccountKey(executionConfig); } catch { return false; } },
       open: (url) => shell.openExternal(url),
       consent: async () => {
         const answer = await dialog.showMessageBox(win, {
-          type: "question", title: "Enable device execution?", message: "Allow Relay to trigger work on this device?",
-          detail: "Execute starts a Task in your Codex or Claude Code app. Enabling device execution also allows Relay @agent requests to trigger work here. Agents can read, change and run files within their permissions and use your provider subscription. Continue, approve actions and stop work in the native app. Relay can read session updates to show progress. Disable future launches in Relay Settings; this does not stop work already running. This is a developer preview.",
+          type: "question", title: "Enable device execution?", message: "Let Relay start work on this device?",
+          detail: "Work starts only when you ask: Execute on a Task here, or a message to your agent from another of your devices. Relay opens the Task in your Codex or Claude Code app, which runs it with its own permissions and your subscription. Relay reads that session to show progress. Turn this off any time in Relay Settings; work already running carries on. Developer preview.",
           buttons: ["Cancel", "Enable device execution"], defaultId: 0, cancelId: 0,
         });
         return answer.response === 1;
       },
+      // One question, asked in the page: "Where should the agent work?" with
+      // a short list of app-and-workspace pairs, best first (the Task's own
+      // repo, this Topic's and this sender's earlier choices, last time, the
+      // checkouts this person works in), then "another folder…" per app,
+      // which is the OS dialog. The first call offers; the pick comes back
+      // as a second call and is honoured only if it was offered.
       choose: async (providers, preferences) => {
-        let selected = providers[0];
-        if (providers.length > 1) {
-          const answer = await dialog.showMessageBox(win, { type: "question", title: "Execute Task", message: "Which app should run this Task?",
-            detail: "The app’s current model and permission settings will be used. Continue and change settings in that app.",
-            buttons: [...providers.map((p) => p.label), "Cancel"], cancelId: providers.length });
-          selected = providers[answer.response];
-          if (!selected) return null;
+        const selected = pick ? providers.find((p) => p.provider === pick.provider) : null;
+        const remember = async (chosen) => {
+          modules.launch.setExecutionPreferences(executionConfig, modules.workspace.rememberWorkspaceChoice(preferences, { packet: await packetFor(), ...chosen }));
+          executeOffers.delete(key);
+          return chosen;
+        };
+        const offer = async () => {
+          const packet = await packetFor();
+          offered = modules.workspace.workspaceChoices({ providers, preferences, packet, senderName: String(packet?.senderName || "").trim().split(/\s+/)[0] || "" });
+          executeOffers.set(key, offered.options);
+          return null;
+        };
+        if (selected && pick.browse === true) {
+          const folder = await dialog.showOpenDialog(win, {
+            title: `Where should ${selected.label} work?`, message: modules.workspace.WORKSPACE_CAPTION, buttonLabel: "Work here",
+            properties: ["openDirectory"], ...(preferences.cwd ? { defaultPath: preferences.cwd } : {}),
+          });
+          // Backing out of the dialog returns to the list, not to nothing.
+          if (folder.canceled || !folder.filePaths[0]) return offer();
+          return remember({ provider: selected.provider, cwd: folder.filePaths[0] });
         }
-        const folder = await dialog.showOpenDialog(win, { title: `Workspace for ${selected.label}`, properties: ["openDirectory"], ...(preferences.cwd ? { defaultPath: preferences.cwd } : {}) });
-        if (folder.canceled || !folder.filePaths[0]) return null;
-        return { provider: selected.provider, cwd: folder.filePaths[0] };
+        if (selected && pick.cwd) {
+          const match = (executeOffers.get(key) || []).find((option) => option.provider === selected.provider && option.cwd === String(pick.cwd));
+          if (match) return remember({ provider: match.provider, cwd: match.cwd });
+        }
+        return offer();
       },
       update: (record) => {
         if (record.startedAt) updateStagedPacket(id, { taskStartedAt: record.startedAt, taskRunOwner: record.taskRunOwner, taskClaim: record.taskClaim });
         void pushInbox(true).catch(() => {});
       },
     });
+    if (result?.cancelled && offered) return { ok: false, cancelled: true, choose: { question: offered.question, caption: offered.caption, options: offered.options, browse: offered.browse } };
+    return result;
   } catch (error) { return { ok: false, error: error.message || "Execute could not launch the native app." }; }
 }
 
@@ -1877,6 +1911,10 @@ let sentRefreshCommitted = 0;
 // renderer) can observe, so "did anything change?" costs a tiny stringify
 // instead of a full payload rebuild per refresh.
 let sentFingerprint = "";
+// Account-wide first-use signals from the Sent poll (files sent, files
+// received, received files opened by an agent). The teaching card reads them
+// to retire a hint the person has already acted on; null until a poll lands.
+let sentUsage = null;
 function sentFingerprintOf(items) {
   return JSON.stringify(
     (items || []).map((r) => [
@@ -1998,6 +2036,7 @@ async function refreshSent() {
     sentRefreshCommitted = refreshId;
     sentCache = Array.isArray(res && res.items) ? res.items : [];
     sentFingerprint = sentFingerprintOf(sentCache);
+    if (res && res.usage && typeof res.usage === "object") sentUsage = res.usage;
     updateFirstRelayOnboarding(accountKey, res);
     // A queued message retires against the SERVER's own view, never against our
     // record of a response: the canonical row is the same evidence the renderer
@@ -2496,6 +2535,7 @@ function buildPayload() {
   const setupIntent = currentAccount.paired ? null : readSetupIntent(relayConfigDir());
   return {
     account: currentAccount,
+    usage: sentUsage,
     ui: {
       canDismiss: trayAvailable,
       reopenSurface: reopenSurfaceName(),

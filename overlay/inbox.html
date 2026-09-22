@@ -3328,6 +3328,16 @@
   /* the agent row: the banner's row recipe at the footer's scale */
   .tk-agents { display:flex; flex-wrap:wrap; align-items:center; gap:6px 14px; margin:0 0 8px; }
   .tk-agents .act-btn { font-size:11.5px; line-height:1; }
+  .tk-agent-verbs { display:inline-flex; flex-wrap:wrap; align-items:center; gap:6px 14px; }
+  .tk-execute-status { font-size:11.5px; line-height:1.3; color:var(--muted); }
+  .tk-execute-pick { margin:0 0 10px; border:1px solid var(--hair); border-radius:12px; overflow:hidden; }
+  .tk-execute-ask { display:flex; flex-wrap:wrap; align-items:baseline; gap:2px 10px; padding:10px 14px 9px; }
+  .tk-execute-title { font-size:12.75px; font-weight:600; color:var(--ink); }
+  .tk-execute-caption { flex:1 1 auto; min-width:0; font-size:11.5px; color:var(--muted); }
+  .tk-execute-ask .act-btn { font-size:11.5px; }
+  .tk-execute-pick .sp-list-inner { border-bottom:0; }
+  .tk-execute-pick .sp-row { padding:11px 14px; }
+  .tk-execute-pick .sp-state { white-space:normal; max-width:46%; }
   .tk-agents.icons { justify-content:space-between; }
   .relay-link-divider { align-self:center; height:16px; width:1px; background:var(--edge); margin:0 3px; }
   .tk-app.relay-link-icon { color:var(--muted); }
@@ -9361,6 +9371,79 @@
     }
   }
   // ---------- THE TASK CARD (2026-09-17) ----------
+  // ---------- EXECUTE (developer preview) ----------
+  // Execute runs the RECEIVED copy of a Task. In a chat with yourself the
+  // bubble is the sender's, so the received twin is found by id; a sender who
+  // never received it has nothing to run. Same gate on the card and the reader.
+  const nativeExecuteBusy = new Set();
+  // Execute's one question, open for a Task: main's offer of app-and-workspace
+  // pairs, best first, with "another folder…" per app. Closed by a pick,
+  // Cancel, or the next launch attempt.
+  const nativeExecuteChoice = new Map(); // id -> { question, caption, options, browse }
+  function taskExecutableRow(row) {
+    if (!row || !payload.features?.taskExecution) return null;
+    const received = taskIsMine(row) ? relayById(taskIdOf(row)) : row;
+    if (!received || taskIsMine(received)) return null;
+    const id = taskIdOf(received);
+    const current = payload.nativeExecutions?.[id];
+    if (!current && (taskIsOver(received) || received.taskStartedAt)) return null;
+    const claim = taskChannelClaim(received);
+    if (claim?.claimant && !claim.claimant.self) return null;
+    return received;
+  }
+  function nativeExecuteState(row) {
+    const received = taskExecutableRow(row);
+    if (!received) return null;
+    const id = taskIdOf(received);
+    const current = payload.nativeExecutions?.[id];
+    const busy = nativeExecuteBusy.has(id);
+    const submitted = current && ["accepted", "submitting", "uncertain"].includes(current.phase);
+    return { id, busy, label: busy ? "Opening…" : submitted ? "Continue in native app" : "Execute", status: current?.status || "" };
+  }
+  // The reader: the full action under the ladder, with its caption.
+  function nativeExecuteHtml(row) {
+    const st = nativeExecuteState(row);
+    if (!st) return "";
+    if (nativeExecuteChoice.has(st.id)) return `<div class="rd-host-actions" data-stop="1">${nativeExecutePickerHtml(row)}</div>`;
+    return `<div class="rd-host-actions" data-stop="1"><button class="oa-item oa-primary" type="button" data-native-execute="${esc(st.id)}" ${st.busy ? "disabled" : ""}>${st.label}</button><div class="sv-copy">${esc(st.status || "Run this Task in your native app · developer preview")}</div></div>`;
+  }
+  // The picker, on either surface: the question in plain words, the pairs
+  // in the session list's recipe, then the OS dialog as the last rung.
+  function nativeExecutePickerHtml(row) {
+    const st = nativeExecuteState(row);
+    const pick = st && nativeExecuteChoice.get(st.id);
+    if (!pick) return "";
+    const disabled = st.busy ? " disabled" : "";
+    const rows = (pick.options || []).map((option) => `<button class="sp-row" type="button" data-execute-pick="${esc(st.id)}" data-provider="${esc(option.provider)}" data-cwd="${esc(option.cwd)}" title="${esc(option.cwd)}"${disabled}><span class="sp-name">${esc(option.label)}</span><span class="sp-state">${esc(option.why || "")}</span></button>`).join("");
+    const browse = (pick.browse || []).map((option) => `<button class="sp-row" type="button" data-execute-pick="${esc(st.id)}" data-provider="${esc(option.provider)}" data-browse="1"${disabled}><span class="sp-name">${esc(option.label)}</span><span class="sp-state">choose on disk</span></button>`).join("");
+    return `<div class="tk-execute-pick" data-stop="1"><div class="tk-execute-ask"><span class="tk-execute-title">${esc(pick.question || "Where should the agent work?")}</span><span class="tk-execute-caption">${esc(pick.caption || "It will read and change files in this folder.")}</span><button type="button" class="act-btn decline" data-execute-cancel="${esc(st.id)}">Cancel</button></div><div class="sp-list open"><div class="sp-list-inner">${rows}${browse}</div></div></div>`;
+  }
+  // The card: the same verb beside Copy for your agent, in that row's recipe.
+  function taskExecuteVerbHtml(row) {
+    const st = nativeExecuteState(row);
+    if (!st || nativeExecuteChoice.has(st.id)) return "";
+    return `<button type="button" class="act-btn accept" data-native-execute="${esc(st.id)}" ${st.busy ? "disabled" : ""}>${st.label}</button>${st.status ? `<span class="tk-execute-status">${esc(st.status)}</span>` : ""}`;
+  }
+  async function runNativeExecute(id, rerender, choice) {
+    if (!id || nativeExecuteBusy.has(id)) return;
+    nativeExecuteBusy.add(id);
+    taskCardNotes.delete(id);
+    nativeExecuteChoice.delete(id);
+    rerender();
+    try {
+      const result = await window.relay.taskExecute(id, choice);
+      if (result?.choose) nativeExecuteChoice.set(id, result.choose);
+      else if (!result?.cancelled) {
+        const text = result?.message || result?.error || "Could not launch the Task.";
+        setRowNote(id, text, result?.ok ? "ok" : "err");
+        if (!result?.ok) taskCardNotes.set(id, text);
+      }
+    } catch (error) {
+      const text = error.message || "Could not launch the Task.";
+      setRowNote(id, text, "err");
+      taskCardNotes.set(id, text);
+    } finally { nativeExecuteBusy.delete(id); rerender(); }
+  }
   // A Task is ONE object on both sides. In the chat the bubble carries a footer
   // inside it: the agent row (Copy for your agent, always; each app Settings ›
   // Your agent has on, as its mark), then the state row — the mark, the state
@@ -9390,17 +9473,6 @@
   const taskLocalDone = new Map();   // id -> at, a Done posted but not yet stamped by main
   const taskBusy = new Set();
   const taskCardNotes = new Map();   // id -> error text
-  const nativeExecuteBusy = new Set();
-  function nativeExecuteHtml(row) {
-    if (!payload.features?.taskExecution || taskIsMine(row)) return "";
-    const current = payload.nativeExecutions?.[row.id];
-    if (!current && (taskIsOver(row) || row.taskStartedAt)) return "";
-    const claim = taskChannelClaim(row);
-    if (claim?.claimant && !claim.claimant.self) return "";
-    const busy = nativeExecuteBusy.has(row.id);
-    const submitted = current && ["accepted", "submitting", "uncertain"].includes(current.phase);
-    return `<div class="rd-host-actions" data-stop="1"><button class="oa-item oa-primary" type="button" data-native-execute ${busy ? "disabled" : ""}>${busy ? "Opening…" : submitted ? "Continue in native app" : "Execute"}</button><div class="sv-copy">${esc(current?.status || "Run this Task in your native app · developer preview")}</div></div>`;
-  }
   function taskIdOf(row) { return String((row && (row.id || row.relayId)) || ""); }
   // The sender's side of a Task, on any projection: a room message going out,
   // a reader row that is outbound, or a Sent item (it has a recipient, no sender).
@@ -9597,7 +9669,7 @@
       const app = host === "codex" ? "Codex" : "Claude Code";
       return `<button type="button" class="tk-app" data-host-open="${esc(id)}" data-host="${host}" data-source="${source}" title="Open in ${app}" aria-label="Open in ${app}"><img src="${host === "codex" ? "codexMark.svg" : "claudeCodeMark.svg"}" alt=""></button>`;
     }).join("");
-    return `<div class="tk-agents${marks ? " icons" : ""}"><button type="button" class="act-btn accept" data-tk-copy="${esc(id)}">Copy for your agent</button>${marks ? `<span class="tk-apps">${marks}</span>` : ""}</div>`;
+    return `<div class="tk-agents${marks ? " icons" : ""}"><span class="tk-agent-verbs"><button type="button" class="act-btn accept" data-tk-copy="${esc(id)}">Copy for your agent</button>${taskExecuteVerbHtml(row)}</span>${marks ? `<span class="tk-apps">${marks}</span>` : ""}</div>`;
   }
   function taskStateRowHtml(row, st, { surface = "chat" } = {}) {
     const asking = taskAsking.get(taskIdOf(row));
@@ -9800,7 +9872,7 @@
       const asking = taskAsking.get(taskIdOf(row));
       return `<div class="tk-footer" data-stop="1" data-task-card="${esc(taskIdOf(row))}">${roster}${live && !mine ? taskAgentRowHtml(row) : ""}<div class="tk-foot ${tone}${asking ? " asking" : ""}"><span class="tk-state">${taskMarkHtml(tone)}<span class="tk-text">${esc(taskRosterSumText(counts))}</span></span>${taskAskRowHtml(row)}</div>${taskNoteHtml(row)}</div>`;
     }
-    return `<div class="tk-footer" data-stop="1" data-task-card="${esc(taskIdOf(row))}">${mine ? taskLadderRowHtml(row) : ""}${live ? taskAgentRowHtml(row) : ""}${taskStateRowHtml(row, st)}${taskNoteHtml(row)}</div>`;
+    return `<div class="tk-footer" data-stop="1" data-task-card="${esc(taskIdOf(row))}">${mine ? taskLadderRowHtml(row) : ""}${live ? taskAgentRowHtml(row) : ""}${live ? nativeExecutePickerHtml(row) : ""}${taskStateRowHtml(row, st)}${taskNoteHtml(row)}</div>`;
   }
   // The expanded Task's module: the ladder as a stepper, one helper line in
   // plain words, and the verbs.
@@ -9948,6 +10020,26 @@
     if (!scope) return;
     // The footer and the ladder are theirs: a click inside never opens the bubble under them.
     for (const zone of scope.querySelectorAll("[data-task-card]")) zone.addEventListener("click", (event) => event.stopPropagation());
+    for (const button of scope.querySelectorAll("[data-native-execute]")) {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        runNativeExecute(String(button.getAttribute("data-native-execute") || ""), rerender);
+      });
+    }
+    for (const button of scope.querySelectorAll("[data-execute-pick]")) {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const choice = { provider: String(button.getAttribute("data-provider") || ""), cwd: String(button.getAttribute("data-cwd") || ""), browse: button.getAttribute("data-browse") === "1" };
+        runNativeExecute(String(button.getAttribute("data-execute-pick") || ""), rerender, choice);
+      });
+    }
+    for (const button of scope.querySelectorAll("[data-execute-cancel]")) {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        nativeExecuteChoice.delete(String(button.getAttribute("data-execute-cancel") || ""));
+        rerender();
+      });
+    }
     for (const button of scope.querySelectorAll("[data-tk-copy]")) {
       button.addEventListener("click", async (event) => {
         event.stopPropagation();
@@ -12079,16 +12171,6 @@
       ${documentList}
       <div class="rd-col${readerTabSwap ? " swap" : ""}">${doc}</div>`;
     readerBodyEl.querySelector("#readerActions").innerHTML = `${status}${bothNote}${taskModule ? `<div class="reader-status-slot">${taskModule}</div>` : ""}${request ? nativeExecuteHtml(r) : ""}${documentHostActions}`;
-    readerBodyEl.querySelector("[data-native-execute]")?.addEventListener("click", async () => {
-      if (nativeExecuteBusy.has(r.id)) return;
-      nativeExecuteBusy.add(r.id);
-      renderReader();
-      try {
-        const result = await window.relay.taskExecute(r.id);
-        if (!result?.cancelled) setRowNote(r.id, result?.message || result?.error || "Could not launch the Task.", result?.ok ? "ok" : "err");
-      } catch (error) { setRowNote(r.id, error.message || "Could not launch the Task.", "err"); }
-      finally { nativeExecuteBusy.delete(r.id); renderReader(); }
-    });
     const taskMotionState = request ? taskStateFor(r) : null;
     readerStatusMotion.bind({
       key:JSON.stringify([accountCacheIdentity(payload.account), r.id, taskMotionState?.tone, taskMotionState?.at]),
