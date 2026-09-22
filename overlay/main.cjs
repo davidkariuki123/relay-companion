@@ -8498,6 +8498,7 @@ function syncTray() {
 // outlive us), then quit the app immediately for instant visual feedback.
 function quitRelayCompletely() {
   try {
+    require("../bootstrap/recovery-intent.cjs").setStopped(true);
     const uid = typeof process.getuid === "function" ? process.getuid() : 501;
     const [cmd, args] = quitRelayCommand({ platform: process.platform, uid });
     const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
@@ -10240,6 +10241,7 @@ function repairCompanionDaemon(decision) {
       const { repairDaemonService } = await import(repairUrl);
       const result = await repairDaemonService({ log: (line) => console.error(`[overlay] ${line}`) });
       if (result.ok) setServiceHealth("ok");
+      else if (result.pending) setServiceHealth("repairing", result.reason, result.detail);
       else setServiceHealth("stopped", result.reason, result.detail);
     } catch (error) {
       console.error("[overlay] daemon repair failed:", error && error.message);

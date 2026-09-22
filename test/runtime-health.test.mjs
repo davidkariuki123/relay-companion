@@ -14,7 +14,7 @@ test("macOS activation reaps an old broker that a host restarted during activati
   const killed = [];
   const run = (command, args) => {
     if (command === "/bin/ps") return { status: 0, stdout: staleBroker
-      ? `${process.getuid()} 98765 node ${root}/old/node_modules/relay-companion/src/mcp-broker-entry.js\n` : "" };
+      ? `${process.getuid?.() ?? 0} 98765 node ${root}/old/node_modules/relay-companion/src/mcp-broker-entry.js\n` : "" };
     if (command === "/bin/kill") { killed.push(args); staleBroker = false; }
     if (args[0] === "print") return { status: 1 };
     if (args[0] === "bootstrap") bootstraps += 1;

@@ -11,7 +11,7 @@ const { stageVerifiedRuntime, releasePlatform } = require("./relay-setup.cjs");
 const { verifyReleaseEnvelope } = require("./release-signature.cjs");
 const { inFlightTransaction, workerLostLock } = require("./recovery-transaction.cjs");
 const trust = require("./trust.json");
-const CHECK_MS = 5 * 60_000;
+const CHECK_MS = 60_000;
 const DEADLINE_MS = 25 * 60_000;
 const HEARTBEAT_MS = 60_000;
 const BUSY_GRACE_MS = 15 * 60_000;
@@ -22,10 +22,7 @@ const STARTUP_GRACE_MS = 3 * 60_000;
 
 function read(file) { try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return null; } }
 function write(file, value) {
-  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-  const tmp = `${file}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(value) + "\n", { mode: 0o600 });
-  fs.renameSync(tmp, file);
+  require("./recovery-launcher.cjs").write(file, value);
 }
 function compare(a, b) {
   if (!/^\d+\.\d+\.\d+$/.test(a || "") || !/^\d+\.\d+\.\d+$/.test(b || "")) return null;
@@ -118,10 +115,9 @@ function execute(node, entry, args, { timeoutMs = DEADLINE_MS, spawnImpl = spawn
 // daemon, or a machine so starved that a healthy daemon missed a few ticks.
 // Only a heartbeat that stays stale across two scheduled checks proves the
 // former while the process is still alive. A missing process needs no second look.
-// Ten minutes, two scheduled checks apart: a daemon whose process is present
-// and whose heartbeat was recent is far more often slow than dead, and every
-// false restart takes the person's Companion away with it.
-const STALE_CONFIRM_MS = 10 * 60_000;
+// Confirm across consecutive awake observations. A gap caused by sleep or a
+// stalled scheduler resets this window rather than counting as a live hang.
+const STALE_CONFIRM_MS = 60_000;
 const MAX_IN_PLACE_RESTARTS = 2;
 
 // A runner killed mid-extraction by the launcher's deadline leaves its staged
@@ -163,8 +159,13 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
   policyFactory = require("./recovery-policy.cjs").recoveryPolicy,
   validateLocal = require("./recovery-local.cjs").validateLocalRuntime,
   transactions = inFlightTransaction,
-  repairServices = require("./mac-service-recovery.cjs").repairMacServiceRegistrations } = {}) {
+  repairServices = require("./service-recovery.cjs").repairServiceRegistrations } = {}) {
   const root = path.join(homeDir, ".relay");
+  if (require("./recovery-intent.cjs").stopped(homeDir)) {
+    const result = { ok: true, status: "intentionally-stopped", runtimeHealthy: false };
+    write(path.join(root, "recovery", "status.json"), { schema: 1, checkedAt: now(), runId: env.RELAY_RECOVERY_RUN_ID || null, launcherVersion: require("../package.json").version, ...result });
+    return result;
+  }
   // Local availability is independent of update eligibility, network, memory,
   // and the journal's active flag. This helper shares the activation lock.
   let progress, reservedService;
@@ -177,9 +178,10 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
     return { ...repaired, ok: false, status: "repair-progress-unavailable", runtimeHealthy: false, lastError: error.message };
   }
   let services;
-  try { services = await repairServices({ homeDir, platform }); }
+  try { services = reservedService ? await repairServices({ homeDir, platform }) : { ok: true, changed: false, status: "service-budget-exhausted" }; }
   catch (error) { services = { ok: false, status: "service-repair-failed", lastError: error.message }; }
-  if (reservedService && (services.status === "deferred-update-owner" || (services.ok && !services.changed))) progress.refund("services");
+  const serviceQueryUncertain = /^service-registration-query-failed/.test(services.lastError || "");
+  if (reservedService && (serviceQueryUncertain || services.status === "deferred-update-owner" || (services.ok && !services.changed))) progress.refund("services");
   const ready = (target = null, after = 0) => verifyReady({ homeDir, platform, target, after, now, sleep, health });
   const rememberReady = observed => {
     const active = observed?.current || read(path.join(root, "runtime", "current.json"));
@@ -225,6 +227,7 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
       transaction: { pid: transaction.pid, requestId: transaction.requestId, version: transaction.version } });
   };
   if (services.status === "deferred-update-owner") return status({ ...services, runtimeHealthy: false });
+  if (serviceQueryUncertain) return status({ ...services, runtimeHealthy: false });
   if (services.changed || !services.ok) {
     const observed = await ready();
     if (observed.ok) return proven({ ok: true, status: "current", version: observed.current?.version, repair: "services", lastSuccessAt: now() }, observed);
@@ -235,7 +238,7 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
     // Accepted commands are not recovery. Repeated failure advances even when
     // an inactive journal or unusable registration snapshot is still present.
   }
-  if (/^(0|false|off|no)$/i.test(String(env.RELAY_AUTO_UPDATE || "")) || read(path.join(root, "recovery", "policy.json"))?.autoUpdate === false) return status({ ok: true, status: "disabled" });
+  const updatesEnabled = !/^(0|false|off|no)$/i.test(String(env.RELAY_AUTO_UPDATE || "")) && read(path.join(root, "recovery", "policy.json"))?.autoUpdate !== false;
   const downloads = path.join(root, "recovery", "downloads");
   let staged = null;
   let discoveryError = null;
@@ -243,18 +246,23 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
   let current = null;
   let runtimeResponsive = false;
   let runtimeVerified = false;
-  try {
-    sweepAbandonedDownloads(downloads, log);
-    // Discovery still comes first, but an unreachable registry no longer blocks
-    // the local rungs: a dead daemon with the right code on disk needs a restart,
-    // not a network connection.
+  let discoveryAttempted = false;
+  const discoverDesired = async () => {
+    if (!updatesEnabled || discoveryAttempted) return;
+    discoveryAttempted = true;
     try { desiredVersion = await discoverImpl(channel); log(`discovered ${desiredVersion} on ${channel}`); }
     catch (error) { discoveryError = error; log(`discovery failed: ${error.message}`); }
+  };
+  try {
+    sweepAbandonedDownloads(downloads, log);
     current = read(path.join(root, "runtime", "current.json"));
     const heartbeat = read(path.join(root, "recovery", "daemon.json"));
     const heartbeatFresh = heartbeat?.at <= now() && now() - heartbeat.at < HEARTBEAT_MS;
     const installedIsDesired = current?.active === true;
     const live = installedIsDesired ? await health(current, { platform }) : null;
+    // Local repairs never wait behind registry timeouts. Healthy installations
+    // still check for new releases; unavailable ones exhaust retained repairs first.
+    if (!installedIsDesired || (live?.ok && heartbeatFresh)) await discoverDesired();
     if (live && platform === "darwin" && !services.ok) live.ok = false;
     let readiness = null;
     if (installedIsDesired && heartbeatFresh && heartbeat.version === current.version && live.ok) {
@@ -277,7 +285,9 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
       repairState.version = current.version;
       const sameTarget = previous?.version === current.version;
       repairState.restarts = progress.count(`restart:${current.packageRoot || current.version}`);
-      repairState.staleSince = sameTarget && Number.isFinite(previous.staleSince) && previous.staleSince <= now() ? previous.staleSince : now();
+      const cadence = platform === "darwin" && read(path.join(root, "recovery", "scheduler.json"))?.intervalSeconds !== 60 ? 5 * 60_000 : CHECK_MS;
+      const consecutive = previous?.checkedAt <= now() && now() - previous.checkedAt <= cadence * 2;
+      repairState.staleSince = sameTarget && consecutive && Number.isFinite(previous.staleSince) && previous.staleSince <= now() ? previous.staleSince : now();
     }
     if (installedIsDesired && !(live.ok && heartbeatFresh && heartbeat.version === current.version)) {
       // The code on disk is the code we want; the problem is liveness. Repair in
@@ -377,6 +387,8 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
         progress.fail(error.message); log('local recovery failed: ' + error.message);
       }
     }
+    if (!updatesEnabled) return status({ ok: true, status: "disabled", runtimeHealthy: runtimeVerified, runtimeAvailable: runtimeResponsive });
+    await discoverDesired();
     if (discoveryError) throw discoveryError;
     let quarantine = policy.decision(channel, desiredVersion);
     if (quarantine.blocked && !runtimeResponsive) {

@@ -11,7 +11,7 @@
 // is a canonical runtime transaction currently owned by a live process?
 const fs = require("node:fs");
 const path = require("node:path");
-const { processAlive, nativeProcessIdentity } = require("./recovery-launcher.cjs");
+const { processAlive, nativeProcessIdentity, liveLockParticipants } = require("./recovery-launcher.cjs");
 
 // An admitted update request older than this is debris from a worker that died
 // without writing its terminal state; the lock engine reclaims after owner death.
@@ -53,7 +53,7 @@ function inFlightTransaction({ homeDir, now = Date.now(), alive = processAlive, 
     break;
   }
   if (request) return request;
-  if (owner && liveOwner(owner, { alive, identity })) {
+  if (owner && (liveOwner(owner, { alive, identity }) || liveLockParticipants(path.join(root, "transaction.lock"), owner.nonce, { isProcessAlive: alive, processIdentity: identity }))) {
     return { source: "lock", pid: Number(owner.pid), requestId: owner.requestId || null, version: null, admittedAt: Number(owner.createdAt) || null };
   }
   return null;

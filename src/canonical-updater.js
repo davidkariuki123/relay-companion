@@ -9,6 +9,7 @@ import { updateChannel } from "./config.js";
 import { recoveryPolicy } from "../bootstrap/recovery-policy.cjs";
 import { compatibleNodeRuntime, persistentNodePath, stableNodePath } from "./install.js";
 import { ACTIVE_UPDATE_WORKER_ENV } from "./update-agent-cleanup.js";
+import nodeContract from "../bootstrap/node-contract.cjs";
 import {
   canonicalRuntimeLayout,
   readCanonicalRuntime,
@@ -186,7 +187,8 @@ async function activateDrainedRuntime(target, {
     "--no-restart",
     ...targetOverride,
   ], {
-    env: { ...process.env, RELAY_SKIP_DESKTOP_POSTINSTALL: "1", [ACTIVE_UPDATE_WORKER_ENV]: "1" },
+    env: require("../bootstrap/lifecycle-ownership.cjs").ownerEnvironment({ homeDir,
+      env: { ...process.env, RELAY_SKIP_DESKTOP_POSTINSTALL: "1", [ACTIVE_UPDATE_WORKER_ENV]: "1" } }),
   });
   if (!commandOk(repair)) {
     return { ok: false, reason: "runtime-registration-failed", detail: repair?.error?.message || repair?.stderr || repair?.stdout || "" };
@@ -292,6 +294,7 @@ export async function runCanonicalUpdateTransaction({
   };
   const selectedServiceNode = resolveServiceNode(node);
   if (!selectedServiceNode) return { ok: false, phase: "input", reason: "service-node-missing", detail: node };
+  if (isElectronExecutable(selectedServiceNode)) return { ok: false, phase: "input", reason: "service-node-electron", detail: selectedServiceNode };
   let serviceNode;
   try {
     serviceNode = persistentNodePath(selectedServiceNode, { platform, homeDir });
@@ -403,12 +406,7 @@ function encodePayload(value) {
 // it, and no exit when the work ends. That immortal worker is what Sven clicked
 // "Update" into (pid 15090) — it did nothing, and it never went away.
 export function isElectronExecutable(executable = process.execPath) {
-  const value = String(executable || "");
-  if (!value) return false;
-  if (/[\\/]electron\.app[\\/]/i.test(value)) return true;
-  const base = value.split(/[\\/]/).pop().toLowerCase();
-  if (base === "electron" || base === "electron.exe") return true;
-  return value === process.execPath && Boolean(process.versions?.electron);
+  return nodeContract.isElectronExecutable(executable);
 }
 
 export function resolveUpdateWorkerNode(node = process.execPath, {

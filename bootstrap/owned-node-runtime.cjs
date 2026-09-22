@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { isElectronExecutable, nodeEnvironment } = require("./node-contract.cjs");
 
 function nodeVersionSupported(version) {
   const match = /^(\d+)\.(\d+)\.(\d+)/.exec(String(version || "").trim());
@@ -19,11 +20,13 @@ function commandOutput(result) {
 }
 
 function verifiedNodeVersion(executable, { runCommand = spawnSync, timeout = 5_000 } = {}) {
+  if (isElectronExecutable(executable)) return { ok: false, version: "", detail: "Electron is not a service Node runtime" };
   try {
-    const result = runCommand(executable, ["-p", "process.versions.node"], {
+    const result = runCommand(executable, ["-p", "process.versions.electron ? '' : process.versions.node"], {
       encoding: "utf8",
       timeout,
       windowsHide: true,
+      env: nodeEnvironment(),
     });
     const ok = result?.ok === true || (!result?.error && result?.status === 0);
     const version = commandOutput(result);
@@ -71,6 +74,7 @@ function relayOwnedNodePath(executable, {
   isTemporary = isTemporaryNodePath,
   randomBytes = crypto.randomBytes,
 } = {}) {
+  if (isElectronExecutable(executable, { realpath: realpathSync })) throw new Error("Electron is not a service Node runtime");
   if (!executable || !isTemporary(executable, { platform, realpathSync })) return executable;
 
   let source;

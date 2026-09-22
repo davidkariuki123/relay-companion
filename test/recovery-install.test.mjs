@@ -81,7 +81,7 @@ test("the probation host upgrade replaces a valid older launcher without unloadi
   t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
   const options = { homeDir, platform: "darwin", packageRoot: fileURLToPath(new URL("..", import.meta.url)),
     preserveNode: () => process.execPath, runCommand: (command, args) => {
-      if (command === "launchctl") assert.equal(args[0], "print");
+      if (command === "launchctl") assert.ok(["print", "list", "remove", "submit"].includes(args[0]), "reload must occur in the independent handover after the running controller exits");
       return { status: 0 };
     } };
   const first = installRecovery(options);
@@ -143,7 +143,7 @@ test("Windows recovery task registers from XML that starts and keeps running on 
   assert.match(xml, /<DisallowStartIfOnBatteries>false<\/DisallowStartIfOnBatteries>/);
   assert.match(xml, /<StopIfGoingOnBatteries>false<\/StopIfGoingOnBatteries>/);
   assert.match(xml, /<StartWhenAvailable>true<\/StartWhenAvailable>/);
-  assert.match(xml, /<Repetition><Interval>PT5M<\/Interval><StopAtDurationEnd>false<\/StopAtDurationEnd><\/Repetition>/);
+  assert.match(xml, /<Repetition><Interval>PT1M<\/Interval><StopAtDurationEnd>false<\/StopAtDurationEnd><\/Repetition>/);
   assert.match(xml, /<RunLevel>LeastPrivilege<\/RunLevel>/);
   assert.match(xml, /<Command>wscript\.exe<\/Command>/);
   const script = path.join(homeDir, ".relay", "recovery", "launch.vbs");

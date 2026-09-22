@@ -5,13 +5,15 @@ import { spawnSync } from "node:child_process";
 import rollout from "../bootstrap/application-rollout.cjs";
 import systemd from "../bootstrap/linux-systemd.cjs";
 import state from "../bootstrap/application-handoff.cjs";
+import nodeContract from "../bootstrap/node-contract.cjs";
+import recoveryIO from "../bootstrap/recovery-launcher.cjs";
 
 const directory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../bootstrap");
 export async function submitApplicationWorker({ platform = process.platform, node = process.execPath, env = process.env,
   run = (file, args, options) => spawnSync(file, args, { encoding: "utf8", windowsHide: true, timeout: 30_000, ...options }),
-  launchHidden, homeDir = os.homedir() } = {}) {
-  const cleanEnv = { ...env };
-  for (const key of ["NODE_OPTIONS", "NODE_PATH", "ELECTRON_RUN_AS_NODE"]) delete cleanEnv[key];
+  launchHidden, homeDir = os.homedir(), now = Date.now } = {}) {
+  node = nodeContract.resolveManagedNode({ homeDir, node, run, env });
+  const cleanEnv = nodeContract.nodeEnvironment(env);
   const parts = [node, path.join(directory, "update-watchdog.cjs"), path.join(directory, "application-update.cjs"), "--worker", "application"];
   const label = "work.relay.application.update";
   if (platform === "win32") {
@@ -20,7 +22,21 @@ export async function submitApplicationWorker({ platform = process.platform, nod
   }
   if (platform === "darwin") {
     const observed = run("/bin/launchctl", ["list", label], { env: cleanEnv });
-    if (observed.status === 0 && /"PID"\s*=\s*[1-9]\d*/.test(observed.stdout || "")) return false;
+    const pid = Number(String(observed.stdout || "").match(/"PID"\s*=\s*([1-9]\d*)/)?.[1]);
+    if (observed.status === 0 && pid) {
+      const identity = recoveryIO.nativeProcessIdentity(pid, { platform, run });
+      if (!identity) return false;
+      const file = path.join(homeDir, ".relay", "application-worker-observation.json");
+      const previous = recoveryIO.read(file);
+      const firstSeen = previous?.identity === identity && previous.at <= now() ? previous.at : now();
+      recoveryIO.write(file, { pid, identity, at: firstSeen });
+      const command = run("/bin/ps", ["-p", String(pid), "-o", "command="], { env: cleanEnv });
+      const text = String(command.stdout || "");
+      if (command.status !== 0 || !/update-watchdog\.cjs.*application-update\.cjs/.test(text)) return false;
+      // A stranded pre-contract Electron job can never run this worker. Other
+      // live jobs retain the same finite deadline as the independent guardian.
+      if (!/(?:^|\/)Electron(?:\.app\/|\s)/i.test(text) && now() - firstSeen < 25 * 60_000) return false;
+    }
     if (observed.status === 0) {
       const removed = run("/bin/launchctl", ["remove", label], { env: cleanEnv });
       if (removed.error || removed.status !== 0) return false;

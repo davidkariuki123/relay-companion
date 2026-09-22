@@ -1,4 +1,4 @@
-import { nativeProcessIdentity, nativeIdentityBirth } from "../bootstrap/recovery-launcher.cjs";
+import { nativeProcessIdentity, nativeIdentityBirth, liveLockParticipants } from "../bootstrap/recovery-launcher.cjs";
 import { verifyCanonicalTreeComplete } from "../bootstrap/runtime-tree.cjs";
 import fs from "node:fs";
 import os from "node:os";
@@ -6,6 +6,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import runtimeExecutables from "../bootstrap/runtime-executables.cjs";
+import durableFiles from "../bootstrap/mac-registration-transaction.cjs";
 
 const { verifyRuntimeExecutables } = runtimeExecutables;
 
@@ -138,7 +139,7 @@ export function reconcileCanonicalRuntimeNode({
   const { pointerPath } = canonicalRuntimeLayout({ homeDir, platform });
   const next = { ...state, node, repairedAt: now() };
   atomicWritePointer(pointerPath, next, {
-    platform,
+    fsImpl, platform,
     mkdirSync: fsImpl.mkdirSync.bind(fsImpl),
     writeFileSync: fsImpl.writeFileSync.bind(fsImpl),
     renameSync: fsImpl.renameSync.bind(fsImpl),
@@ -397,6 +398,7 @@ export async function recoverCanonicalRuntime({
   if (!state || !["activating", "recovery-required"].includes(state.state)) return { ok: true, phase: "noop", recovered: false };
   const layout = canonicalRuntimeLayout({ homeDir, platform });
   const io = {
+    fsImpl,
     mkdirSync: fsImpl.mkdirSync.bind(fsImpl),
     readFileSync: fsImpl.readFileSync.bind(fsImpl),
     writeFileSync: fsImpl.writeFileSync.bind(fsImpl),
@@ -541,16 +543,16 @@ export function verifyCanonicalCandidate(packageRoot, expectedVersion, {
 }
 
 function atomicWritePointer(pointerPath, value, {
+  fsImpl = fs,
   platform = process.platform,
   mkdirSync = fs.mkdirSync,
   writeFileSync = fs.writeFileSync,
   renameSync = fs.renameSync,
 } = {}) {
-  const api = pathsFor(platform);
-  mkdirSync(api.dirname(pointerPath), { recursive: true, mode: 0o700 });
-  const temp = `${pointerPath}.${process.pid}.${Date.now()}.tmp`;
-  writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
-  renameSync(temp, pointerPath);
+  // Preserve injected filesystem seams used by transition fault tests. Normal
+  // publication flushes the bytes before rename and the directory afterwards.
+  void platform;
+  durableFiles.atomicFile(pointerPath, `${JSON.stringify(value, null, 2)}\n`, { mkdirSync, writeFileSync, renameSync, openSync: fsImpl.openSync.bind(fsImpl), closeSync: fsImpl.closeSync.bind(fsImpl), fsyncSync: fsImpl.fsyncSync.bind(fsImpl), unlinkSync: fsImpl.unlinkSync.bind(fsImpl) });
 }
 
 export function canonicalNpmInvocation({
@@ -896,7 +898,7 @@ function acquireLock(lockPath, {
       try { observedStat = statSync(lockPath, { bigint: true }); } catch {}
       const observedAt = Number(owner?.createdAt || observedStat?.mtimeMs || 0);
       const ownerState = canonicalLockOwnerState(owner, { processAlive: isProcessAlive, processIdentity });
-      if (ownerState === "live") return { ok: false, reason: "transaction-in-progress", owner };
+      if (ownerState === "live" || liveLockParticipants(lockPath, owner?.nonce, { readdirSync, readFileSync, isProcessAlive, processIdentity })) return { ok: false, reason: "transaction-in-progress", owner };
       const stale = ownerState === "dead"
         || (ownerState === "unknown" && observedAt > 0 && now() - observedAt > staleAfterMs);
       if (!stale || attempt > 0) return { ok: false, reason: "transaction-lock-unavailable", owner };
@@ -940,7 +942,7 @@ function acquireLock(lockPath, {
         const confirmedState = canonicalLockOwnerState(confirmedOwner, { processAlive: isProcessAlive, processIdentity });
         const confirmedStale = confirmedState === "dead"
           || (confirmedState === "unknown" && confirmedAt > 0 && now() - confirmedAt > staleAfterMs);
-        if (!confirmedStale) return { ok: false, reason: "transaction-in-progress", owner: confirmedOwner };
+        if (!confirmedStale || liveLockParticipants(lockPath, confirmedOwner?.nonce, { readdirSync, readFileSync, isProcessAlive, processIdentity })) return { ok: false, reason: "transaction-in-progress", owner: confirmedOwner };
         let confirmedClaim = null;
         try { confirmedClaim = JSON.parse(readFileSync(reclaimPath, "utf8")); } catch {}
         if (confirmedClaim?.nonce !== nonce) return { ok: false, reason: "transaction-in-progress", owner: confirmedOwner };
@@ -1006,7 +1008,7 @@ function acquireLock(lockPath, {
     const release = () => {
       let currentOwner = null;
       try { currentOwner = JSON.parse(readFileSync(ownerPath, "utf8")); } catch {}
-      if (currentOwner?.nonce === nonce) rmSync(lockPath, { recursive: true, force: true });
+      if (currentOwner?.nonce === nonce && !liveLockParticipants(lockPath, nonce, { readdirSync, readFileSync, isProcessAlive, processIdentity })) rmSync(lockPath, { recursive: true, force: true });
     };
     // Machines that ran the leaking build already carry the debris, and nothing else
     // ever looks at these names. Sweep them once per transaction so an upgrade heals
@@ -1072,6 +1074,7 @@ export async function repairCanonicalRuntime({
   // the prototype, and spreading would silently drop them and fall back to the host
   // filesystem. Keep every filesystem dependency explicit.
   const io = {
+    fsImpl,
     mkdirSync: fsImpl.mkdirSync.bind(fsImpl),
     readFileSync: fsImpl.readFileSync.bind(fsImpl),
     writeFileSync: fsImpl.writeFileSync.bind(fsImpl),

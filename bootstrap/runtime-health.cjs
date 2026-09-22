@@ -407,11 +407,23 @@ async function activateWindowsRuntimeServices(target, {
 }
 
 /** One entry point for "restart what is already installed" on every platform. */
-function restartInstalledRuntimeServices(target, { platform = process.platform, ...options } = {}) {
+async function restartInstalledRuntimeServices(target, { platform = process.platform, ...options } = {}) {
+  if (!["darwin", "linux", "win32"].includes(platform)) return { ok: false, reason: "activation-platform-unsupported" };
   if (platform === "darwin") return require("./mac-service-recovery.cjs").restartMacRegisteredServices(target, options);
-  if (platform === "linux") return activateLinuxRuntimeServices(target, { platform, ...options });
-  if (platform === "win32") return activateWindowsRuntimeServices(target, { platform, ...options });
-  return Promise.resolve({ ok: false, reason: "activation-platform-unsupported" });
+  let lease, releaseDrain;
+  const homeDir = options.homeDir || require("node:os").homedir();
+  try {
+    try { lease = require("./lifecycle-ownership.cjs").lifecycleOwnership({ homeDir }); }
+    catch { return { ok: false, reason: "deferred-update-owner" }; }
+    const current = JSON.parse(fs.readFileSync(path.join(homeDir, ".relay", "runtime", "current.json"), "utf8"));
+    if (!current?.active || current.packageRoot !== target.packageRoot) return { ok: false, reason: "runtime-changed" };
+    releaseDrain = await require("./update-activity.cjs").drainCalls({ homeDir });
+    lease.assert();
+    if (platform === "linux") return await activateLinuxRuntimeServices(target, { platform, ...options });
+    if (platform === "win32") return await activateWindowsRuntimeServices(target, { platform, ...options });
+    return { ok: false, reason: "activation-platform-unsupported" };
+  } catch (error) { return { ok: false, reason: error.message }; }
+  finally { releaseDrain?.(); lease?.release(); }
 }
 
 module.exports = {

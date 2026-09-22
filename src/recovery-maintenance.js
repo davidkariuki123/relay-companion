@@ -6,10 +6,14 @@ import monitor from "../bootstrap/recovery-monitor.cjs";
 import io from "../bootstrap/recovery-launcher.cjs";
 import installer from "../bootstrap/recovery-install.cjs";
 import setup from "../bootstrap/relay-setup.cjs";
+import lifecycle from "../bootstrap/lifecycle-ownership.cjs";
+import nodeContract from "../bootstrap/node-contract.cjs";
+import intent from "../bootstrap/recovery-intent.cjs";
 
 export function repairRecoverySchedule({ homeDir = os.homedir(), now = Date.now(), repair = installer.installRecovery,
   packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..") } = {}) {
   const root = path.join(homeDir, ".relay", "recovery");
+  if (intent.stopped(homeDir)) return { status: "intentionally-stopped" };
   const health = monitor.recoveryMonitor({ homeDir, now });
   if (!health.needsRepair) return { status: "not-needed" };
   const previous = io.read(path.join(root, "maintenance.json"));
@@ -17,19 +21,22 @@ export function repairRecoverySchedule({ homeDir = os.homedir(), now = Date.now(
   // Re-register only the recovery job, never a running recovery/activation tree.
   const releaseLauncher = io.acquireLauncherLock(root);
   if (!releaseLauncher) return { status: "busy" };
-  let runLock;
+  let runLock, lease;
   try { runLock = setup.acquireCanonicalLock(path.join(root, "run.lock")); }
   catch { releaseLauncher(); return { status: "busy" }; }
   try {
+    lease = lifecycle.lifecycleOwnership({ homeDir });
+    const node = nodeContract.resolveManagedNode({ homeDir });
+    lease.assert();
     io.write(path.join(root, "maintenance.json"), { schema: 1, at: now, status: "repairing" });
-    const result = repair({ homeDir, packageRoot, node: process.execPath, reload: true });
+    const result = repair({ homeDir, packageRoot, node, reload: true });
     const status = result.ok ? "awaiting-check" : "failed";
     io.write(path.join(root, "maintenance.json"), { schema: 1, at: now, status });
     return { status };
   } catch {
     io.write(path.join(root, "maintenance.json"), { schema: 1, at: now, status: "failed" });
     return { status: "failed" };
-  } finally { runLock.release(); releaseLauncher(); }
+  } finally { lease?.release(); runLock.release(); releaseLauncher(); }
 }
 export function startRecoveryMaintenance({ homeDir = os.homedir(), now = Date.now, setIntervalImpl = setInterval,
   spawnRepair = () => new Promise((resolve, reject) => {

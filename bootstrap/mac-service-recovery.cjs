@@ -26,6 +26,7 @@ function readRegistration(label, { homeDir = os.homedir(), run = defaultRun, fsI
   const plist = JSON.parse(decoded.stdout);
   const args = plist.ProgramArguments;
   if (plist.Label !== label || !Array.isArray(args) || !args.every(x => typeof x === "string") || plist.Program) throw Error(`invalid-service-plist: ${label}`);
+  if (label === LABELS[0] && require("./node-contract.cjs").isElectronExecutable(args[0])) throw Error(`invalid-service-interpreter: ${label}`);
   const suffix = label === LABELS[0] ? /[\\/]bin[\\/]relay\.js$/ : /[\\/]overlay[\\/]main\.cjs$/;
   const script = args.find(x => /[\\/]node_modules[\\/]relay-companion[\\/]/.test(x) && suffix.test(x));
   if (!script || !path.isAbsolute(args[0]) || !path.isAbsolute(script) || (label === LABELS[0] && !args.includes("daemon"))) throw Error(`invalid-service-target: ${label}`);
@@ -84,7 +85,7 @@ async function restartMacRegisteredServices(target, {
   healthCheck = require("./runtime-health.cjs").exactRuntimeHealth,
   sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
 } = {}) {
-  let lock;
+  let lock, releaseDrain;
   try { lock = acquireLock(path.join(homeDir, ".relay", "runtime", "transaction.lock")); }
   catch { return { ok: false, reason: "deferred-update-owner" }; }
   try {
@@ -92,6 +93,7 @@ async function restartMacRegisteredServices(target, {
     if (!current?.active || current.packageRoot !== target.packageRoot) return { ok: false, reason: "runtime-changed" };
     const records = LABELS.map(label => readRegistration(label, { homeDir, run }));
     if (records.some(r => r.packageRoot !== target.packageRoot)) return { ok: false, reason: "runtime-changed" };
+    releaseDrain = await require("./update-activity.cjs").drainCalls({ homeDir, sleep });
     for (const record of records) {
       const observed = registration(record.label, { run, userId });
       if (!observed.known) return { ok: false, reason: "service-registration-query-failed" };
@@ -105,7 +107,7 @@ async function restartMacRegisteredServices(target, {
     }
     return { ok: false, reason: "restarted-runtime-not-healthy" };
   } catch (error) { return { ok: false, reason: error.message }; }
-  finally { lock.release(); }
+  finally { releaseDrain?.(); lock.release(); }
 }
 
 module.exports = { LABELS, registration, readRegistration, repairMacServiceRegistrations, restartMacRegisteredServices };

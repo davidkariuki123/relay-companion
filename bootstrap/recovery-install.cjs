@@ -52,7 +52,7 @@ function windowsRecoveryTaskXml(script, startAt = new Date()) {
   <Triggers>
     <TimeTrigger>
       <StartBoundary>${boundary}</StartBoundary>
-      <Repetition><Interval>PT5M</Interval><StopAtDurationEnd>false</StopAtDurationEnd></Repetition>
+      <Repetition><Interval>PT1M</Interval><StopAtDurationEnd>false</StopAtDurationEnd></Repetition>
       <Enabled>true</Enabled>
     </TimeTrigger>
   </Triggers>
@@ -183,7 +183,8 @@ function installRecovery({ packageRoot, node = process.execPath, homeDir = os.ho
     } else if (platform === "darwin") {
       const plist = path.join(homeDir, "Library", "LaunchAgents", `${LABEL}.plist`);
       fs.mkdirSync(path.dirname(plist), { recursive: true });
-      atomicFile(plist, `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>${LABEL}</string><key>ProgramArguments</key><array><string>${xml(launcherNode)}</string><string>${xml(launcher)}</string></array><key>EnvironmentVariables</key><dict><key>HOME</key><string>${xml(homeDir)}</string></dict><key>StartInterval</key><integer>300</integer><key>RunAtLoad</key><true/><key>ProcessType</key><string>Background</string><key>StandardOutPath</key><string>${xml(log)}</string><key>StandardErrorPath</key><string>${xml(log)}</string></dict></plist>`);
+      const priorSchedule = fs.existsSync(plist) ? fs.readFileSync(plist) : null;
+      atomicFile(plist, `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>${LABEL}</string><key>ProgramArguments</key><array><string>${xml(launcherNode)}</string><string>${xml(launcher)}</string></array><key>EnvironmentVariables</key><dict><key>HOME</key><string>${xml(homeDir)}</string></dict><key>StartInterval</key><integer>60</integer><key>RunAtLoad</key><true/><key>ProcessType</key><string>Background</string><key>StandardOutPath</key><string>${xml(log)}</string><key>StandardErrorPath</key><string>${xml(log)}</string></dict></plist>`);
       // The job dispatches through the stable host. Do not unload it on update.
       const observed = runCommand("launchctl", ["print", `gui/${userId}/${LABEL}`]);
       if (!ok(observed)) {
@@ -191,12 +192,23 @@ function installRecovery({ packageRoot, node = process.execPath, homeDir = os.ho
         if (!missing) throw Error("recovery-registration-query-failed");
         results.push(runCommand("launchctl", ["bootstrap", `gui/${userId}`, plist]));
         results.push(runCommand("launchctl", ["print", `gui/${userId}/${LABEL}`]));
+        write(path.join(root, "scheduler.json"), { schema: 1, intervalSeconds: 60, at: Date.now() });
+      }
+      if (ok(observed) && read(path.join(root, "scheduler.json"))?.intervalSeconds !== 60) {
+        const job = "work.relay.recovery.schedule-handover";
+        const pending = runCommand("launchctl", ["list", job]);
+        if (!(ok(pending) && /"PID"\s*=\s*[1-9]\d*/.test(String(pending.stdout || pending.out || "")))) {
+          if (ok(pending)) runCommand("launchctl", ["remove", job]);
+          if (priorSchedule) atomicFile(path.join(root, "scheduler-previous.plist"), priorSchedule);
+          results.push(runCommand("launchctl", ["submit", "-l", job, "-o", log, "-e", log, "--", runtimeNode,
+            path.join(bundle, "bootstrap", "recovery-schedule-handover.cjs"), homeDir, String(userId)]));
+        }
       }
     } else {
       const dir = path.join(homeDir, ".config", "systemd", "user");
       fs.mkdirSync(dir, { recursive: true });
       atomicFile(path.join(dir, `${LABEL}.service`), `[Unit]\nDescription=Relay update recovery\n[Service]\nType=oneshot\nExecStart=${unit(launcherNode)} ${unit(launcher)}\nTimeoutStartSec=1800\nKillMode=control-group\n`);
-      atomicFile(path.join(dir, `${LABEL}.timer`), `[Unit]\nDescription=Check Relay update health\n[Timer]\nOnBootSec=2min\nOnUnitInactiveSec=5min\nPersistent=true\n[Install]\nWantedBy=timers.target\n`);
+      atomicFile(path.join(dir, `${LABEL}.timer`), `[Unit]\nDescription=Check Relay update health\n[Timer]\nOnBootSec=15s\nOnUnitInactiveSec=30s\nPersistent=true\n[Install]\nWantedBy=timers.target\n`);
       // The user manager can retain a different HOME from this installer.
       // Registration is required even when thin setup defers starting services.
       for (const ext of ["service", "timer"]) {

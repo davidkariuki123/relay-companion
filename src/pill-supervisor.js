@@ -1,6 +1,6 @@
 import os from "node:os";
 import { createRequire } from "node:module";
-import { restartRelayServices } from "./install.js";
+import recovery from "../bootstrap/recovery-client.cjs";
 
 const require = createRequire(import.meta.url);
 const liveness = require("./pill-liveness.cjs");
@@ -20,7 +20,7 @@ function processAlive(pid) {
  * gives memory back rather than taking more.
  */
 export function startPillSupervisor({ homeDir = os.homedir(), now = Date.now, setIntervalImpl = setInterval,
-  intervalMs = 30_000, log = () => {}, restart = () => restartRelayServices({ services: ["pill"] }), isAlive = processAlive } = {}) {
+  intervalMs = 30_000, log = () => {}, restart = () => recovery.requestRecoveryAsync({ homeDir, reason: "pill-unresponsive" }), isAlive = processAlive } = {}) {
   let lastRestartAt = 0;
   let pending = false;
   const tick = async () => {
@@ -30,10 +30,10 @@ export function startPillSupervisor({ homeDir = os.homedir(), now = Date.now, se
     if (decision.action !== "restart") return decision;
     pending = true;
     lastRestartAt = now();
-    log(`pill supervisor: the Relay app has not reported for ${Math.round(decision.ageMs / 1000)}s while still running (worst stall ${Number(heartbeat.worstStallMs) || 0}ms); restarting it`);
+    log(`pill supervisor: the Relay app has not reported for ${Math.round(decision.ageMs / 1000)}s while still running (worst stall ${Number(heartbeat.worstStallMs) || 0}ms); requesting independent recovery`);
     try {
       const result = await restart();
-      log(`pill supervisor: restart ${result?.pill || "unknown"}${result?.detail?.pill ? ` (${result.detail.pill})` : ""}`);
+      log(`pill supervisor: recovery ${result?.reason || "unknown"}`);
     } catch (error) {
       log(`pill supervisor: restart failed: ${error?.message || error}`);
     } finally {

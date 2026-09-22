@@ -22,6 +22,7 @@ function updateLogStdio(platform = process.platform, homeDir = os.homedir()) {
 }
 
 if (require.main === module) {
+  if (process.versions.electron) throw Error("Relay update workers require the verified Node runtime, not Electron");
   const [entry, mode, payload] = process.argv.slice(2);
   if (!entry || mode !== "--worker" || !payload) throw Error("Missing update worker arguments");
   const { stdio, logPath } = updateLogStdio();

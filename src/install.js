@@ -57,6 +57,8 @@ const {
   isCanonicalCliShimSource,
 } = createRequire(import.meta.url)("../bootstrap/relay-setup.cjs");
 const { isTemporaryNodePath, relayOwnedNodePath } = createRequire(import.meta.url)("../bootstrap/owned-node-runtime.cjs");
+const { isElectronExecutable, resolveManagedNode, verifyNode } = createRequire(import.meta.url)("../bootstrap/node-contract.cjs");
+const { lifecycleOwnership } = createRequire(import.meta.url)("../bootstrap/lifecycle-ownership.cjs");
 
 export const PACKAGE_NAME = "relay-companion";
 
@@ -88,17 +90,7 @@ export function relayNodeVersionSupported(version) {
 }
 
 export function compatibleNodeRuntime(executable, { runCommand = spawnSync } = {}) {
-  try {
-    const result = runCommand(executable, ["-p", "process.versions.node"], {
-      encoding: "utf8",
-      timeout: 5000,
-      windowsHide: true,
-    });
-    const ok = result?.ok === true || (!result?.error && result?.status === 0);
-    return ok && relayNodeVersionSupported(result?.stdout ?? result?.out);
-  } catch {
-    return false;
-  }
+  return verifyNode(executable, { run: runCommand }).ok;
 }
 
 export function stableNodePath(execPath = process.execPath, {
@@ -107,8 +99,12 @@ export function stableNodePath(execPath = process.execPath, {
   existsSync = fs.existsSync,
   runCommand = spawnSync,
   env = process.env,
+  homeDir = os.homedir(),
 } = {}) {
   if (!execPath) return execPath;
+  if (isElectronExecutable(execPath, { realpath })) {
+    return resolveManagedNode({ homeDir, node: null, run: runCommand, env });
+  }
   let realExec;
   try {
     realExec = realpath(execPath);
@@ -2297,6 +2293,7 @@ export function installDaemonAutostart(
     env = process.env,
   } = {},
 ) {
+  if (isElectronExecutable(node)) return { ok: false, reason: "service-node-electron" };
   const refusal = autostartClaimRefusal(bin, { claim, homeDir, platform, ownershipGuard });
   if (refusal) return refusal;
   // The daemon runs 24/7 and only polls, so cap its V8 heap — this is the
@@ -2839,6 +2836,8 @@ function installWindowsLogonTask({
  * start the receive daemon. Returns a summary for the CLI to print.
  */
 export async function runSetupInstall({ claim = false, reload = true, agentProtocol = readConfig().agentProtocol === true } = {}) {
+  const lease = lifecycleOwnership();
+  try {
   const { bin, stable: binStable, version } = resolveStableBin();
   const packageRoot = packageRootForBin(bin);
   // First contact deliberately installs with --ignore-scripts. Prepare and verify
@@ -2955,8 +2954,11 @@ export async function runSetupInstall({ claim = false, reload = true, agentProto
   if (!hookRepair.ok) throw new Error(`Relay hook retirement failed: ${hookRepair.detail || hookRepair.reason}`);
   claudeHooks = hookRepair.claudeHooks || null;
   codexHooks = hookRepair.codexHooks || null;
+  lease.assert();
+  createRequire(import.meta.url)("../bootstrap/recovery-intent.cjs").setStopped(false);
   const recovery = installRecovery({ packageRoot: path.resolve(path.dirname(bin), ".."), node, reload });
   if (!recovery.ok) throw new Error(`Relay recovery setup failed: ${recovery.detail || recovery.reason}`);
+  lease.assert();
   const daemon = installDaemonAutostart(bin, node, { claim, reload, env: serviceEnv });
   const pill = installPillAutostart(bin, { claim, reload, env: serviceEnv });
   return {
@@ -2973,6 +2975,7 @@ export async function runSetupInstall({ claim = false, reload = true, agentProto
     skillInstall,
     agentProtocol,
   };
+  } finally { lease.release(); }
 }
 
 /** Install/update the bundled instructions without changing host integrations. */
@@ -3264,7 +3267,15 @@ export function repairDesktopSurfaces({
   claim = false,
   env = process.env,
   recoveryInstaller = installRecovery,
+  own = lifecycleOwnership,
 } = {}) {
+  let lease;
+  try { lease = own({ homeDir, env }); }
+  catch (error) {
+    const failure = { ok: false, reason: "lifecycle-busy", detail: error.message };
+    return { ok: false, daemon: failure, pill: failure };
+  }
+  try {
   try {
     node = persistentNodePath(node, { platform, homeDir });
   } catch (error) {
@@ -3289,14 +3300,18 @@ export function repairDesktopSurfaces({
     };
     return { ok: false, daemon: failure, pill: failure, updateAgents };
   }
+  lease.assert();
   const recovery = recoveryInstaller({ packageRoot: path.resolve(path.dirname(bin), ".."), node, platform, runCommand, reload, homeDir });
   if (!recovery.ok) return { ok: false, daemon: recovery, pill: recovery, recovery };
+  lease.assert();
   const pill = installPillAutostart(bin, { platform, runCommand, reload, homeDir, claim, node, env });
   // Reload the daemon last. A repair may be invoked by the updater's detached child;
   // replacing the pill first avoids killing the update-owning daemon before all other
   // desktop surfaces are ready.
+  lease.assert();
   const daemon = installDaemonAutostart(bin, node, { platform, runCommand, reload, homeDir, claim, env });
   return { ok: Boolean(daemon.ok && pill.ok), daemon, pill };
+  } finally { lease.release(); }
 }
 
 /** Remove the Relay MCP from both agents and stop/clear the background daemon. */
@@ -3524,12 +3539,22 @@ export async function restartRelayServices({
   waitSeconds = 15,
   platform = process.platform,
   pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  homeDir = os.homedir(),
+  own = lifecycleOwnership,
 } = {}) {
   const result = { daemon: "skipped", pill: "skipped", detail: {} };
+  let lease;
+  try { lease = own({ homeDir }); }
+  catch (error) {
+    for (const service of services) { result[service] = "deferred"; result.detail[service] = error.message; }
+    return result;
+  }
+  try {
   for (const service of services) {
     const spec = RELAY_SERVICES[service];
     if (!spec) continue;
     try {
+      lease.assert();
       if (platform === "darwin") {
         const uid = typeof process.getuid === "function" ? process.getuid() : 501;
         const target = `gui/${uid}/${spec.label}`;
@@ -3591,6 +3616,7 @@ export async function restartRelayServices({
     }
   }
   return result;
+  } finally { lease.release(); }
 }
 
 /**
@@ -3717,6 +3743,9 @@ export function runUninstall({
   attempts = UNINSTALL_RETRY_ATTEMPTS,
   sleep = blockingPause,
 } = {}) {
+  const lease = lifecycleOwnership({ homeDir, env });
+  try {
+  createRequire(import.meta.url)("../bootstrap/recovery-intent.cjs").setStopped(true, homeDir);
   const steps = [];
   const record = (id, label, operation) => {
     const step = retryUninstallStep(id, label, operation, { attempts, sleep });
@@ -3874,6 +3903,7 @@ export function runUninstall({
     claudeDesktop: { ...claudeDesktopRemoval, removedFrom: removedDesktopPaths },
     openSessionsNeedRestart: true,
   };
+  } finally { lease.release(); }
 }
 
 /** Human- and agent-readable uninstall result. Never claim success over a failed step. */

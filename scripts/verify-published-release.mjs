@@ -216,7 +216,10 @@ export function validateInstalledPackageShape(packageRoot, { version, distributi
     // Canonical transaction ownership is read using Node builtins and the
     // already reviewed recovery launcher; it brings no application dependency.
     const transactionBootstrap = [...rulesBootstrap, "recovery-transaction.cjs"].sort();
-    if (![legacyBootstrap, recoveryBootstrap, resilientBootstrap, monitoredBootstrap, macRecoveryBootstrap, responsiveRecoveryBootstrap, configRecoveryBootstrap, bundledNodeBootstrap, daemonProgressBootstrap, applicationBootstrap, handoffBootstrap, rulesBootstrap, transactionBootstrap].some(shape => JSON.stringify(bootstrapFiles) === JSON.stringify(shape))) {
+    // Lifecycle coordination remains stdlib-only, including the worker thread
+    // that keeps OS commands off the pill's event loop.
+    const lifecycleBootstrap = [...transactionBootstrap, "lifecycle-ownership.cjs", "node-contract.cjs", "recovery-client.cjs", "recovery-intent.cjs", "service-recovery.cjs", "recovery-schedule-handover.cjs"].sort();
+    if (![legacyBootstrap, recoveryBootstrap, resilientBootstrap, monitoredBootstrap, macRecoveryBootstrap, responsiveRecoveryBootstrap, configRecoveryBootstrap, bundledNodeBootstrap, daemonProgressBootstrap, applicationBootstrap, handoffBootstrap, rulesBootstrap, transactionBootstrap, lifecycleBootstrap].some(shape => JSON.stringify(bootstrapFiles) === JSON.stringify(shape))) {
       throw new Error("Thin installer bootstrap contents do not match the reviewed shape");
     }
     const manifest = JSON.parse(fs.readFileSync(path.join(packageRoot, "skill", "manifest.json"), "utf8"));

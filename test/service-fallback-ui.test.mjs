@@ -38,7 +38,7 @@ test("the pill judges the daemon's heartbeat on its own tick and repairs it thro
     "a missing heartbeat at start already reads rooms from the server, before any verdict");
   const repair = between(main, "function repairCompanionDaemon(decision)", "const startedAt = Date.now();");
   assert.match(repair, /src", "daemon-repair\.js"/, "registration and restart live in src/daemon-repair.js");
-  assert.match(repair, /if \(result\.ok\) setServiceHealth\("ok"\);\s*else setServiceHealth\("stopped", result\.reason, result\.detail\)/);
+  assert.match(repair, /if \(result\.ok\) setServiceHealth\("ok"\);\s*else if \(result\.pending\) setServiceHealth\("repairing", result\.reason, result\.detail\);\s*else setServiceHealth\("stopped", result\.reason, result\.detail\)/);
   assert.match(main, /RELAY_OVERLAY_TEST !== "1" && process\.env\.RELAY_OVERLAY_PERF !== "1";\s*setInterval/,
     "the overlay test and perf harnesses never repair a real machine");
   assert.match(between(main, "function buildPayload()", "// Pushes are serialized"), /service: serviceHealth,/,

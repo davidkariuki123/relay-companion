@@ -6,8 +6,26 @@ function read(file) { try { return JSON.parse(fs.readFileSync(file, "utf8")); } 
 function write(file, data) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const temp = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
-  fs.writeFileSync(temp, JSON.stringify(data) + "\n", { mode: 0o600 });
-  fs.renameSync(temp, file);
+  let fd;
+  try {
+    fd = fs.openSync(temp, "wx", 0o600);
+    fs.writeFileSync(fd, JSON.stringify(data) + "\n");
+    fs.fsyncSync(fd); fs.closeSync(fd); fd = undefined;
+    const start = Date.now();
+    for (;;) {
+      try { fs.renameSync(temp, file); break; }
+      catch (error) {
+        if (!["EPERM", "EBUSY", "EACCES"].includes(error.code) || Date.now() - start > 3000) throw error;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+      }
+    }
+    if (process.platform !== "win32") {
+      fd = fs.openSync(path.dirname(file), "r"); fs.fsyncSync(fd); fs.closeSync(fd); fd = undefined;
+    }
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+    try { fs.unlinkSync(temp); } catch (error) { if (error.code !== "ENOENT") throw error; }
+  }
 }
 function validPointer(p, root) {
   return p?.schema === 1 && /^\d+\.\d+\.\d+$/.test(p.version || "")
@@ -198,6 +216,27 @@ function acquireCanonicalReclaimClaim(reclaimPath, {
   return false;
 }
 
+// Delegated mutation workers retain the generation after their parent dies.
+// Unknown records fail closed. Reclaimers check again after winning the claim;
+// workers publish before checking that no reclaim is underway.
+function liveLockParticipants(lockPath, nonce, {
+  readdirSync = fs.readdirSync, readFileSync = fs.readFileSync,
+  isProcessAlive = processAlive, processIdentity = nativeProcessIdentity,
+} = {}) {
+  let names;
+  try { names = readdirSync(lockPath); } catch (error) { return error.code !== "ENOENT"; }
+  for (const name of names) {
+    const match = /^participant-([1-9][0-9]*)-[0-9a-f]+\.json$/.exec(name);
+    if (!match) continue;
+    let member;
+    try { member = JSON.parse(readFileSync(path.join(lockPath, name), "utf8")); }
+    catch (error) { if (error.code === "ENOENT" || !isProcessAlive(Number(match[1]))) continue; return true; }
+    if (member.nonce !== nonce) continue;
+    if (canonicalLockOwnerState(member, { isProcessAlive, processIdentity }) !== "dead") return true;
+  }
+  return false;
+}
+
 function acquireCanonicalLock(lockPath, {
   now = Date.now,
   // Preserve the shipped bootstrap's two-hour grace for incomplete records.
@@ -285,7 +324,7 @@ function acquireCanonicalLock(lockPath, {
         release() {
           let owner = null;
           try { owner = JSON.parse(readFileSync(ownerPath, "utf8")); } catch {}
-          if (owner?.nonce === nonce) rmSync(lockPath, { recursive: true, force: true });
+          if (owner?.nonce === nonce && !liveLockParticipants(lockPath, nonce)) rmSync(lockPath, { recursive: true, force: true });
         },
       };
     } catch (error) {
@@ -314,7 +353,7 @@ function acquireCanonicalLock(lockPath, {
       // have observed the directory between mkdir and owner.json being written.
       const stale = ownerState === "dead"
         || (ownerState === "unknown" && observedAt > 0 && now() - observedAt > staleAfterMs);
-      if (!stale || attempt > 0) lockFail("Another verified Relay install or update is already in progress.");
+      if (!stale || attempt > 0 || liveLockParticipants(lockPath, owner?.nonce, { readdirSync, readFileSync, isProcessAlive, processIdentity })) lockFail("Another verified Relay install or update is already in progress.");
 
       // Serialize reclaimers inside this exact lock generation, then re-read the
       // owner after winning. This closes the race where one retry replaced the
@@ -356,7 +395,7 @@ function acquireCanonicalLock(lockPath, {
         const confirmedState = canonicalLockOwnerState(confirmedOwner, { isProcessAlive, processIdentity });
         const confirmedStale = confirmedState === "dead"
           || (confirmedState === "unknown" && confirmedAt > 0 && now() - confirmedAt > staleAfterMs);
-        if (!confirmedStale) lockFail("Another verified Relay install or update is already in progress.");
+        if (!confirmedStale || liveLockParticipants(lockPath, confirmedOwner?.nonce, { readdirSync, readFileSync, isProcessAlive, processIdentity })) lockFail("Another verified Relay install or update is already in progress.");
         let confirmedClaim = null;
         try { confirmedClaim = JSON.parse(readFileSync(reclaimPath, "utf8")); } catch {}
         if (confirmedClaim?.nonce !== nonce) lockFail("Another verified Relay install or update is already in progress.");
@@ -525,5 +564,5 @@ async function launch({ root = __dirname, run = runChild, now = Date.now, env = 
     return { ok: false, status: "failed" };
   } finally { release(); }
 }
-module.exports = { launch, validPointer, read, write, acquireLauncherLock, appendRecoveryLog, acquireCanonicalLock, processAlive, nativeProcessIdentity, nativeIdentityBirth };
+module.exports = { launch, validPointer, read, write, acquireLauncherLock, appendRecoveryLog, acquireCanonicalLock, processAlive, nativeProcessIdentity, nativeIdentityBirth, liveLockParticipants };
 if (require.main === module) launch().then(result => { process.exitCode = result.ok ? 0 : 1; }).catch(e => { console.error(e.message); process.exitCode = 1; });

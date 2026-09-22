@@ -136,6 +136,7 @@ async function installFromApplication({ resourcesDir, applicationRoot, executabl
       throw new Error("Legacy installation requires the separately planned repair route");
     }
     if (current && versionCompare(bundle.receipt.version, current.version) < 0) throw new Error("An older installer cannot downgrade Relay");
+    require("./recovery-intent.cjs").setStopped(false, homeDir);
     // Live services, not files, decide whether the existing Relay is healthy.
     // A runtime whose daemon and pill are not running gets one repair through
     // its own CLI before it is judged; only a runtime that stays down blocks.

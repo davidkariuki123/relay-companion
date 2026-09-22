@@ -647,6 +647,10 @@ class MemoryWindowsFs {
     return this.files.has(key) || this.dirs.has(key) || [...this.files].some(([name]) => name.startsWith(`${key}\\`));
   }
   mkdirSync(value) { this.dirs.add(this.key(value)); }
+  openSync(value) { this.writeFileSync(value, ""); return value; }
+  closeSync() {}
+  fsyncSync() {}
+  unlinkSync(value) { this.rmSync(value); }
   writeFileSync(value, contents) { this.files.set(this.key(value), String(contents)); }
   readFileSync(value) {
     const found = this.files.get(this.key(value));

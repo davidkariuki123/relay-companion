@@ -5,6 +5,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+import lifecycle from "../bootstrap/lifecycle-ownership.cjs";
 import { spawnSync, spawn } from "node:child_process";
 import readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
@@ -446,6 +447,8 @@ async function cmdInstall(flags = {}) {
 }
 
 function cmdRepairDesktop(flags = {}) {
+  const lease = lifecycle.lifecycleOwnership();
+  try {
   const reload = !flags["no-restart"];
   const env = process.platform === "linux"
     ? { ...process.env, RELAY_ALLOW_SANDBOX_AUTHORIZATION: "1" }
@@ -462,7 +465,7 @@ function cmdRepairDesktop(flags = {}) {
     throw new Error(`Could not retire Relay agent hooks (${hookRepair.reason || "migration failed"}).`);
   }
   for (const notice of hookInstallNotices(hookRepair)) console.log(notice);
-  const repaired = repairDesktopSurfaces({ reload, claim: Boolean(flags.claim), env });
+  const repaired = repairDesktopSurfaces({ reload, claim: Boolean(flags.claim), env: { ...env, ...lease.env } });
   if (!repaired.ok) {
     const failures = [
       !repaired.daemon?.ok && `daemon: ${repaired.daemon?.message || repaired.daemon?.reason || "install failed"}`,
@@ -474,6 +477,7 @@ function cmdRepairDesktop(flags = {}) {
   const restartText = reload ? "Relay background services were reloaded." : "Relay background service files were refreshed without restarting them.";
   console.log(`${restartText}${appText}`);
   return repaired;
+  } finally { lease.release(); }
 }
 
 function printSkillInstallResult(result) {
@@ -484,6 +488,9 @@ function printSkillInstallResult(result) {
 }
 
 async function cmdRepairRuntime(flags = {}) {
+  if (process.versions.electron) throw new Error("Relay runtime repair requires verified Node, not Electron.");
+  const lease = lifecycle.lifecycleOwnership();
+  try {
   writeConfig({});
   const reload = !flags["no-restart"];
   // Internal target overrides let a verified immutable candidate restore an
@@ -526,10 +533,12 @@ async function cmdRepairRuntime(flags = {}) {
     skillInstall = { ok: false, reason: "skill-install-threw", detail: error?.message || String(error) };
     console.error(`[relay] agent skills were not refreshed (${skillInstall.detail}); continuing with the runtime repair`);
   }
-  const repaired = repairDesktopSurfaces({ reload, ...target, claim: Boolean(flags.claim) || Boolean(targetBin) });
+  lease.assert();
+  const repaired = repairDesktopSurfaces({ reload, ...target, claim: Boolean(flags.claim) || Boolean(targetBin), env: lease.env });
   if (!repaired.ok) {
     throw new Error(`Could not repair Relay runtime services. ${describe("surfaces", repaired)}`);
   }
+  lease.assert();
   const pointer = reconcileCanonicalRuntimeNode({ node: runtimeNode });
   if (!pointer.ok) {
     throw new Error(`Could not reconcile Relay's active runtime pointer (${pointer.reason || "verification failed"}).`);
@@ -541,6 +550,7 @@ async function cmdRepairRuntime(flags = {}) {
       : "";
   console.log(`Relay runtime repaired with its durable Node.${pointerText}`);
   return { ok: true, registrations, skillInstall, pointer, ...repaired };
+  } finally { lease.release(); }
 }
 
 /**
@@ -719,6 +729,7 @@ async function cmdOpen(positional, flags) {
 
 /** Launch (or signal) the desktop Relay companion pill and verify it is visible. */
 async function cmdPill(flags = {}, positional = []) {
+  createRequire(import.meta.url)("../bootstrap/recovery-intent.cjs").setStopped(false);
   migratePersistedContentFields({ log: (message) => console.log(`[relay] ${message}`) });
   const here = path.dirname(fileURLToPath(import.meta.url));
   const overlayMain = path.resolve(here, "../overlay/main.cjs");

@@ -89,14 +89,14 @@ test("genuine long work remains protected; old uninstrumented daemons are never 
   assert.equal(busyDecision(heartbeat,{homeDir,now}),null);
   assert.equal(busyDecision({...heartbeat,activityVersion:undefined},{homeDir,now}),"deferred-unverified-work");
 });
-test("discovery failure still restarts a dead daemon in place and never alters the runtime pointer", async t => {
+test("local repair precedes discovery and never alters the runtime pointer", async t => {
   const homeDir = fixture(t), pointer = path.join(homeDir, ".relay", "runtime", "current.json");
   write(pointer, { active: true, version: "1.0.0", packageRoot: path.join(homeDir, "nowhere") });
   const before = fs.readFileSync(pointer, "utf8");
   const restarts = [];
   const result = await recover({ homeDir, env: {}, now: () => 5000, discoverImpl: async () => { throw Error("offline"); }, stage: () => assert.fail("must not install"),
     health: () => ({ ok: false, daemonCount: 0 }), restart: async () => { restarts.push(1); return { ok: false, reason: "service-task-missing" }; }, memory: () => ({ pressured: false }) });
-  assert.equal(result.ok, false); assert.equal(result.status, "restart-failed"); assert.equal(result.discoveryError, "offline");
+  assert.equal(result.ok, false); assert.equal(result.status, "restart-failed"); assert.equal(result.discoveryError, undefined);
   assert.equal(restarts.length, 1);
   assert.equal(fs.readFileSync(pointer, "utf8"), before);
   // Offline with nothing installed is still just "failed": no rung applies.
@@ -130,6 +130,28 @@ test("durable update opt-out survives an independent scheduler environment", asy
   write(path.join(homeDir, ".relay", "recovery", "policy.json"), { autoUpdate: false });
   const result = await recover({ homeDir, env: {}, discoverImpl: () => assert.fail("disabled") });
   assert.equal(result.status, "disabled");
+});
+
+test("update opt-out permits local recovery without discovering another version", async t => {
+  const homeDir = fixture(t);
+  write(path.join(homeDir, ".relay", "recovery", "policy.json"), { autoUpdate: false });
+  write(path.join(homeDir, ".relay", "runtime", "current.json"), { active: true, version: "1.0.0", packageRoot: path.join(homeDir, "runtime") });
+  let restarts = 0;
+  const result = await recover({ homeDir, env: {}, now: () => 100000,
+    health: () => ({ ok: false, daemonCount: 0 }), restart: async () => { restarts++; return { ok: false, reason: "test-unhealthy" }; },
+    discoverImpl: () => assert.fail("opt-out prohibits release discovery") });
+  assert.equal(restarts, 1);
+  assert.equal(result.status, "restart-failed");
+});
+
+test("deliberate Quit prevents all recovery mutations until an explicit start", async t => {
+  const homeDir = fixture(t);
+  const intent = require("../bootstrap/recovery-intent.cjs");
+  intent.setStopped(true, homeDir);
+  const result = await recover({ homeDir, env: {}, repairServices: () => assert.fail("must stay stopped"), discoverImpl: () => assert.fail("must stay stopped") });
+  assert.equal(result.status, "intentionally-stopped");
+  intent.setStopped(false, homeDir);
+  assert.equal(intent.stopped(homeDir), false);
 });
 
 test("configuration disappearing during download fails closed before activation", async t => {

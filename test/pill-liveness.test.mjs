@@ -95,7 +95,7 @@ test("the daemon-side supervisor reads the heartbeat file, restarts through the 
     now: () => clock,
     log: (m) => logs.push(m),
     setIntervalImpl: (fn) => { timers.push(fn); return { unref() {} }; },
-    restart: async () => { restarts.push(clock); return { pill: "restarted" }; },
+    restart: async () => { restarts.push(clock); return { ok: true, reason: "recovery-requested" }; },
     isAlive: (pid) => pid === 4242,
   });
   assert.equal(timers.length, 1);
@@ -104,7 +104,7 @@ test("the daemon-side supervisor reads the heartbeat file, restarts through the 
   assert.equal((await tick()).action, "restart");
   assert.deepEqual(restarts, [clock]);
   assert.match(logs[0], /has not reported for \d+s while still running \(worst stall 134422ms\)/);
-  assert.match(logs[1], /restart restarted/);
+  assert.match(logs[1], /recovery recovery-requested/);
   clock += 1000;
   assert.equal((await tick()).reason, "cooldown");
   write(liveness.pillHeartbeatPath(homeDir), { schema: 1, pid: 9999, at: clock - liveness.PILL_STALE_MS - 5000 });

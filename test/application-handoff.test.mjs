@@ -228,7 +228,7 @@ test("native workers use independent supervisors and a deadline outside daemon s
   for (const platform of ["darwin", "linux", "win32"]) {
     const calls = [];
     assert.equal(await submitApplicationWorker({ ...f, platform, env: { NODE_OPTIONS: "unsafe" },
-      run: (file, args, options) => { assert.equal(options.env.NODE_OPTIONS, undefined); calls.push([file, ...args]); return { status: args[0] === "list" ? 1 : 0 }; },
+      run: (file, args, options) => { assert.equal(options.env.NODE_OPTIONS, undefined); if (args[0] === "-p") return { status: 0, stdout: "22.14.0" }; calls.push([file, ...args]); return { status: args[0] === "list" ? 1 : 0 }; },
       launchHidden: (parts, options) => { assert.equal(options.env.NODE_OPTIONS, undefined); calls.push(parts); return { ok: true }; } }), true);
     assert.match(calls.at(-1).join(" "), /update-watchdog\.cjs.*application-update\.cjs/);
     if (platform === "linux") assert.equal(calls[0][0], "systemd-run");

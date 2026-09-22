@@ -77,6 +77,10 @@ function stableNodePath(execPath = process.execPath, {
   spawnImpl = spawnSync,
 } = {}) {
   if (!execPath) return execPath;
+  const contract = require("./node-contract.cjs");
+  if (contract.isElectronExecutable(execPath, { realpath: realpathSync })) {
+    return contract.resolveManagedNode({ node: null, run: spawnImpl, env });
+  }
   let realExec = execPath;
   try { realExec = realpathSync(execPath); } catch {}
   const volatile = VERSION_MANAGED_NODE_RE.test(execPath)

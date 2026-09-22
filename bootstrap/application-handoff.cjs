@@ -24,6 +24,7 @@ function read(file) {
   catch (error) { if (error.code === "ENOENT") return null; throw error; }
 }
 function updateConsent({ homeDir, env = process.env }) {
+  if (require("./recovery-intent.cjs").stopped(homeDir)) return { ok: false, reason: "intentionally-stopped" };
   if (/^(0|false|off|no)$/i.test(String(env.RELAY_AUTO_UPDATE || ""))
     || read(path.join(homeDir, ".relay", "recovery", "policy.json"))?.autoUpdate === false) return { ok: false, reason: "updates-disabled" };
   const root = path.join(homeDir, ".relay");
