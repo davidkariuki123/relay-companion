@@ -1033,6 +1033,14 @@ function buildRelayMacIcon(packageRoot, resourcesDir, runCommand) {
  * to the long-running pill, instead of an activation event getting lost in a shell
  * wrapper process.
  */
+function registerRelayMacProtocol(appPath, bundleId, runCommand) {
+  runCommand("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister", ["-f", appPath]);
+  // LaunchServices selects the stable native application, never a versioned
+  // Electron runtime. JXA calls the OS API without adding a helper dependency.
+  return runCommand("/usr/bin/osascript", ["-l", "JavaScript", "-e",
+    `ObjC.import('CoreServices'); var result = $.LSSetDefaultHandlerForURLScheme($('relay'), $(${JSON.stringify(bundleId)})); if (result !== 0) throw Error('Relay URL registration failed: ' + result);`]);
+}
+
 export function installRelayMacApp({
   bin = relayBinPath(),
   electronPath,
@@ -1041,7 +1049,11 @@ export function installRelayMacApp({
   runCommand = run,
 } = {}) {
   const nativeOwner = applicationOwnership.applicationOwner({ homeDir, platform: "darwin" });
-  if (nativeOwner) return { ok: true, appPath: nativeOwner.root, appExecutablePath: nativeOwner.executable, nativeApplication: true };
+  if (nativeOwner) {
+    const registered = registerRelayMacProtocol(nativeOwner.root, "work.relay.application", runCommand);
+    return { ok: registered.ok, appPath: nativeOwner.root, appExecutablePath: nativeOwner.executable, nativeApplication: true,
+      ...(!registered.ok ? { reason: "relay_protocol_registration_failed" } : {}) };
+  }
   if (!electronPath || !overlayMain || !fs.existsSync(electronPath) || !fs.existsSync(overlayMain)) {
     return { ok: false, reason: "pill_runtime_missing", electronPath, overlayMain };
   }
@@ -1087,6 +1099,10 @@ export function installRelayMacApp({
       '  set launcherPath to POSIX path of (path to resource "relay-launcher.sh")',
       '  do shell script "/bin/sh " & quoted form of launcherPath',
       "end run",
+      "on open location relayURL",
+      '  set launcherPath to POSIX path of (path to resource "relay-launcher.sh")',
+      '  do shell script "/bin/sh " & quoted form of launcherPath & " " & quoted form of relayURL',
+      "end open location",
     ].join("\n");
     const compiled = runCommand("/usr/bin/osacompile", ["-e", appletSource, "-o", tmpPath]);
     if (!compiled.ok || !fs.existsSync(appletExecutablePath)) {
@@ -1123,7 +1139,7 @@ export function installRelayMacApp({
       "  /bin/sleep 0.1",
       '  i=$((i + 1))',
       "done",
-      `nohup ${shellSingleQuote(electronPath)} ${shellSingleQuote(overlayMain)} --relay-reopen "$nonce" >> ${shellSingleQuote(logPath)} 2>&1 &`,
+      `nohup ${shellSingleQuote(electronPath)} ${shellSingleQuote(overlayMain)} --relay-reopen "$nonce" "$@" >> ${shellSingleQuote(logPath)} 2>&1 &`,
       "exit 0",
       "",
     ].join("\n");
@@ -1144,6 +1160,10 @@ export function installRelayMacApp({
   <key>CFBundleIdentifier</key><string>${RELAY_MAC_BUNDLE_IDENTIFIER}</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleURLTypes</key><array><dict>
+    <key>CFBundleURLName</key><string>Relay</string>
+    <key>CFBundleURLSchemes</key><array><string>relay</string></array>
+  </dict></array>
   <key>CFBundleSignature</key><string>aplt</string>
   <key>CFBundleShortVersionString</key><string>${plistEscape(version)}</string>
   <key>CFBundleVersion</key><string>${plistEscape(version)}</string>
@@ -1181,10 +1201,8 @@ ${iconEntry}  <key>LSUIElement</key><true/>
     fs.renameSync(tmpPath, appPath);
     fs.rmSync(stagingDir, { recursive: true, force: true });
     runCommand("/usr/bin/touch", [appPath]);
-    runCommand(
-      "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
-      ["-f", appPath]
-    );
+    const registered = registerRelayMacProtocol(appPath, RELAY_MAC_BUNDLE_IDENTIFIER, runCommand);
+    if (!registered.ok) throw new Error("could not register the installed Relay URL handler");
     runCommand("/usr/bin/mdimport", [appPath]);
     return {
       ok: true,

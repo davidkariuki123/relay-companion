@@ -100,6 +100,10 @@ function queueRelayDeepLink(parsed) {
   return true;
 }
 function registerRelayProtocol() {
+  // macOS ignores the executable/argv overload. Registering this raw Electron
+  // bundle makes LaunchServices launch its default app instead of Relay. The
+  // installed native application/launcher owns the scheme on macOS.
+  if (process.platform === "darwin") return;
   if (process.env.RELAY_OVERLAY_TEST === "1" || process.env.RELAY_OVERLAY_PERF === "1") return;
   try {
     if (process.defaultApp && process.argv[1]) {

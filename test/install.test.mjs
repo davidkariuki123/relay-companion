@@ -308,6 +308,7 @@ test("installRelayMacApp creates a valid Spotlight-searchable Relay.app with a r
   const info = fs.readFileSync(infoPath, "utf8");
   const launcher = fs.readFileSync(launcherPath, "utf8");
   assert.match(info, /<key>CFBundleIdentifier<\/key><string>work\.relay\.companion\.launcher<\/string>/);
+  assert.match(info, /<key>CFBundleURLSchemes<\/key><array><string>relay<\/string>/);
   assert.match(info, /<key>CFBundleExecutable<\/key><string>applet<\/string>/);
   assert.match(info, /<key>CFBundlePackageType<\/key><string>APPL<\/string>/);
   assert.match(info, /<key>CFBundleIconFile<\/key><string>RelayIcon\.icns<\/string>/);
@@ -321,7 +322,7 @@ test("installRelayMacApp creates a valid Spotlight-searchable Relay.app with a r
   assert.match(launcher, /plutil -extract ready raw/);
   assert.match(launcher, /kill -0 "\$owner_pid"/);
   assert.doesNotMatch(launcher, /grep -q "state = running"/);
-  assert.match(launcher, /--relay-reopen "\$nonce"/);
+  assert.match(launcher, /--relay-reopen "\$nonce" "\$@"/);
   assert.match(launcher, new RegExp(fixture.electronPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   // plutil is a macOS system binary; Linux CI still exercises the complete
   // fixture through fakeMacCommands but cannot invoke this host-only linter.
@@ -332,6 +333,9 @@ test("installRelayMacApp creates a valid Spotlight-searchable Relay.app with a r
   const shellLint = spawnSync("/bin/sh", ["-n", launcherPath], { encoding: "utf8" });
   assert.equal(shellLint.status, 0, shellLint.stderr);
   const compileCall = calls.find((call) => call.command === "/usr/bin/osacompile");
+  assert.match(compileCall.args[1], /on open location relayURL/);
+  assert.match(compileCall.args[1], /quoted form of relayURL/);
+  assert.ok(calls.some(call => call.command === "/usr/bin/osascript" && call.args.join(" ").includes("LSSetDefaultHandlerForURLScheme")));
   assert.equal(path.basename(compileCall.args.at(-1)), "Relay.app");
   assert.match(path.basename(path.dirname(compileCall.args.at(-1))), /^\.relay-app-staging-/);
   assert.ok(calls.some((call) => call.command === "/usr/bin/codesign" && call.args[0] === "--force"));
