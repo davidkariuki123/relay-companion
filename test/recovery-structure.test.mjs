@@ -155,17 +155,19 @@ test("process death after remote acceptance preserves the same send identity on 
   const f = fixture(t), file = path.join(f.homeDir, "outbox.json"), accepted = path.join(f.homeDir, "accepted.json");
   const modulePath = fileURLToPath(new URL("../src/outbox.cjs", import.meta.url));
   const script = `const fs=require('node:fs'); const {createOutbox}=require(${JSON.stringify(modulePath)});
-    const q=createOutbox({file:${JSON.stringify(file)},scheduleTimer:()=>null,send:async entry=>{
+    const q=createOutbox({file:${JSON.stringify(file)},now:()=>1000,scheduleTimer:()=>null,send:async entry=>{
       fs.writeFileSync(${JSON.stringify(accepted)},JSON.stringify({key:entry.idempotencyKey,relayId:'accepted-once'})); process.exit(23);
     }});q.enqueue({idempotencyKey:'durable-key',text:'retained message',recipient:{self:true}});q.flush();`;
   const child = spawnSync(process.execPath, ["-e", script], { windowsHide: true, timeout: 15000, encoding: "utf8" });
   assert.equal(child.status, 23, child.stderr);
   const receipt = read(accepted); let sends = 0;
-  const resumed = createOutbox({ file, scheduleTimer: () => null, send: async entry => {
+  // Independent Windows processes can observe a wall-clock correction between
+  // enqueue and restart. This test is about crash durability, not retry clocks.
+  const resumed = createOutbox({ file, now: () => 1000, scheduleTimer: () => null, send: async entry => {
     sends++; assert.equal(entry.idempotencyKey, receipt.key); assert.equal(entry.text, "retained message");
     return { relayId: receipt.relayId };
   } });
   await resumed.flush();
   assert.equal(sends, 1); assert.equal(resumed.list()[0].relayId, "accepted-once");
-  await createOutbox({ file, scheduleTimer: () => null, send: () => assert.fail("accepted receipt must suppress another send") }).flush();
+  await createOutbox({ file, now: () => 1000, scheduleTimer: () => null, send: () => assert.fail("accepted receipt must suppress another send") }).flush();
 });
