@@ -10,6 +10,7 @@ import { prepareSnapshot, readSnapshot, restoreSnapshot } from "../bootstrap/mac
 import { macActivationTransaction } from "../bootstrap/mac-activation-transaction.cjs";
 import { acquireMacPowerAssertion } from "../bootstrap/mac-power-assertion.cjs";
 import { spawnSync } from "node:child_process";
+import { repairServiceRegistrations } from "../bootstrap/service-recovery.cjs";
 import { activateCanonicalRuntime } from "../src/canonical-updater.js";
 
 function fixture(t) {
@@ -79,6 +80,19 @@ test("registered dead services are kickstarted without stopping the live daemon"
   assert.deepEqual(result.repaired, [LABELS[1]]);
   assert.equal(f.calls.filter(x => x[1] === "kickstart").length, 1);
   assert.equal(f.calls.some(x => x.includes("-k") || x[1] === "bootout"), false);
+});
+
+test("the controller command adapter forwards plist input and repairs only the missing pill", async t => {
+  const f = fixture(t);
+  f.registered.set(LABELS[0], process.pid);
+  const result = await repairServiceRegistrations({ homeDir: f.homeDir, platform: "darwin",
+    spawn: f.opts.run,
+    own: () => assert.fail("valid plist input must not fall through to full runtime activation") });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.repaired, [LABELS[1]]);
+  assert.equal(f.registered.get(LABELS[0]), process.pid);
+  assert.deepEqual(f.calls.filter(call => ["bootstrap", "kickstart", "bootout"].includes(call[1]))
+    .map(call => call.at(-1)), [path.join(f.homeDir, "Library", "LaunchAgents", `${LABELS[1]}.plist`)]);
 });
 
 test("the watchdog's stale-runtime restart retains both registrations even when the second restart fails", async t => {

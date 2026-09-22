@@ -7,7 +7,8 @@ const nodeContract = require("./node-contract.cjs");
 // Registration restoration is part of the controller's canonical transaction.
 // The UI may bootstrap the controller, but never constructs daemon/pill jobs.
 async function repairServiceRegistrations({ homeDir = os.homedir(), platform = process.platform,
-  run = (file, args) => spawnSync(file, args, { encoding: "utf8", windowsHide: true, timeout: 10_000 }),
+  spawn = spawnSync,
+  run = (file, args, options = {}) => spawn(file, args, { encoding: "utf8", windowsHide: true, timeout: 10_000, ...options }),
   validate = require("./recovery-local.cjs").validateLocalRuntime,
   execute = (...args) => require("./recovery-runner.cjs").execute(...args),
   own = require("./lifecycle-ownership.cjs").lifecycleOwnership,
