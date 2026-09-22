@@ -26,7 +26,7 @@ async function fixture(t) {
     if (req.url === "/v1/me") return res.end(JSON.stringify({ user: { id: state.userId } }));
     if (req.url === "/v1/relays" && req.method === "POST") return res.end(JSON.stringify({ relayId: "relay_once", state: "sent" }));
     if (req.url.startsWith("/v1/relays/")) return res.end(JSON.stringify({ packet: { forHuman: "Human text", forAgent: "Full agent context" } }));
-    return res.end(JSON.stringify({ groups: [], items: [] }));
+    return res.end(JSON.stringify(state.response ?? { groups: [], items: [] }));
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise((resolve) => server.close(resolve)));
@@ -60,6 +60,21 @@ async function fixture(t) {
   };
   return { root, config, descriptor, grant, calls, state, run, local };
 }
+
+test("direct chat tools omit redundant presentation without changing raw HTTP responses", async (t) => {
+  const f = await fixture(t);
+  const full = { relayId: "relay_one", threadId: "root", inReplyToRelayId: "parent", forHuman: "Full text", forAgent: "Full evidence\nSecond line", taskState: "started" };
+  const summary = { relayId: "relay_two", forHuman: "", preview: "Summary only" };
+  f.state.response = { chatId: "chat_one", threadIds: ["root"], items: [{ ...full, preview: "Full text" }, summary], nextBeforeCursor: "opaque" };
+  const result = await f.run(["--transport=https", "call", "relay_chat_fetch"], { chatId: "chat_one" });
+  assert.equal(result.code, 0, result.stderr);
+  const text = JSON.parse(result.stdout).content[0].text;
+  assert.equal(text.includes("\n"), false);
+  assert.deepEqual(JSON.parse(text), { chatId: "chat_one", items: [full, summary], nextBeforeCursor: "opaque" });
+  const raw = await f.run(["--transport=https", "request", "GET", "/v1/chats/chat_one"]);
+  assert.equal(raw.code, 0, raw.stderr);
+  assert.deepEqual(JSON.parse(raw.stdout), f.state.response);
+});
 
 test("explicit HTTPS ignores a corrupt local descriptor for status, discovery, reads and sends", async (t) => {
   const f = await fixture(t);

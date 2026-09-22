@@ -113,8 +113,8 @@ function execute(node, entry, args, { timeoutMs = DEADLINE_MS, spawnImpl = spawn
 
 // A stale daemon heartbeat has two very different causes: a dead or wedged
 // daemon, or a machine so starved that a healthy daemon missed a few ticks.
-// Only a heartbeat that stays stale across two scheduled checks proves the
-// former while the process is still alive. A missing process needs no second look.
+// A live process needs sustained failure evidence before disruptive repair.
+// Confirmed absence can use an idempotent service start without that evidence.
 // Confirm across consecutive awake observations. A gap caused by sleep or a
 // stalled scheduler resets this window rather than counting as a live hang.
 const STALE_CONFIRM_MS = 60_000;
@@ -154,6 +154,7 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
   sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms)),
   health = require("./runtime-health.cjs").exactRuntimeHealth,
   restart = require("./runtime-health.cjs").restartInstalledRuntimeServices,
+  restorePill = require("./runtime-health.cjs").restoreMissingPill,
   memory = require("./runtime-health.cjs").memoryPressure,
   verifyReady = require("./recovery-readiness.cjs").waitForRecoveryReady,
   policyFactory = require("./recovery-policy.cjs").recoveryPolicy,
@@ -184,6 +185,7 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
   if (reservedService && (serviceQueryUncertain || services.status === "deferred-update-owner" || (services.ok && !services.changed))) progress.refund("services");
   const ready = (target = null, after = 0) => verifyReady({ homeDir, platform, target, after, now, sleep, health });
   const rememberReady = observed => {
+    progress.clearObservation();
     const active = observed?.current || read(path.join(root, "runtime", "current.json"));
     const probation = policy.observe(channel, { ...observed, current: active });
     if (!probation.proven) return probation;
@@ -226,7 +228,7 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
     return status({ ok: true, status: "deferred-update-in-flight", runtimeHealthy: false, ...extra,
       transaction: { pid: transaction.pid, requestId: transaction.requestId, version: transaction.version } });
   };
-  if (services.status === "deferred-update-owner") return status({ ...services, runtimeHealthy: false });
+  if (["deferred-update-owner", "intentionally-stopped"].includes(services.status)) return status({ ...services, runtimeHealthy: false });
   if (serviceQueryUncertain) return status({ ...services, runtimeHealthy: false });
   if (services.changed || !services.ok) {
     const observed = await ready();
@@ -256,25 +258,45 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
   try {
     sweepAbandonedDownloads(downloads, log);
     current = read(path.join(root, "runtime", "current.json"));
+    const observationStartedAt = now();
     const heartbeat = read(path.join(root, "recovery", "daemon.json"));
     const heartbeatFresh = heartbeat?.at <= now() && now() - heartbeat.at < HEARTBEAT_MS;
     const installedIsDesired = current?.active === true;
     const live = installedIsDesired ? await health(current, { platform }) : null;
+    if (live?.known === false) {
+      progress.clearObservation(); policy.interrupt();
+      return status({ ok: false, status: "observation-unavailable", runtimeHealthy: false, lastError: live.reason });
+    }
     // Local repairs never wait behind registry timeouts. Healthy installations
     // still check for new releases; unavailable ones exhaust retained repairs first.
-    if (!installedIsDesired || (live?.ok && heartbeatFresh)) await discoverDesired();
+    if (!installedIsDesired) await discoverDesired();
     if (live && platform === "darwin" && !services.ok) live.ok = false;
     let readiness = null;
     if (installedIsDesired && heartbeatFresh && heartbeat.version === current.version && live.ok) {
       const observed = await ready(current);
       readiness = observed;
       if (observed.ok) {
+        await discoverDesired();
         runtimeResponsive = true;
         runtimeVerified = !observed.legacy;
         if (!desiredVersion || compare(current.version, desiredVersion) >= 0) return proven({ ok: true, status: current.version === desiredVersion || !desiredVersion ? "current" : "ahead", desiredVersion: desiredVersion || current.version, lastSuccessAt: previous?.lastSuccessAt || now() }, observed);
         const probation = rememberReady(observed);
         if (!probation.proven && !observed.legacy) return status({ ok: true, status: "probation", runtimeHealthy: true, runtimeProven: false, desiredVersion, version: current.version, probationRemainingMs: probation.remainingMs });
-      } else { live.ok = false; policy.interrupt(); }
+      } else {
+        live.ok = false; policy.interrupt();
+        if (observed.observationInvalid) {
+          progress.clearObservation();
+          return status({ ok: false, status: "observation-unavailable", runtimeHealthy: false, lastError: observed.detail || observed.reason });
+        }
+      }
+    }
+    const latestPointer = read(path.join(root, "runtime", "current.json"));
+    const latestHeartbeat = read(path.join(root, "recovery", "daemon.json"));
+    if (installedIsDesired && (latestPointer?.packageRoot !== current.packageRoot
+      || latestPointer?.committedAt !== current.committedAt || latestPointer?.active !== true
+      || latestHeartbeat?.pid !== heartbeat?.pid)) {
+      progress.clearObservation();
+      return status({ ok: true, status: "runtime-changed", runtimeHealthy: false });
     }
     const memoryNow = memory();
     // Repair progress for the installed version survives every later status
@@ -283,11 +305,12 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
     const repairState = {};
     if (installedIsDesired) {
       repairState.version = current.version;
-      const sameTarget = previous?.version === current.version;
       repairState.restarts = progress.count(`restart:${current.packageRoot || current.version}`);
       const cadence = platform === "darwin" && read(path.join(root, "recovery", "scheduler.json"))?.intervalSeconds !== 60 ? 5 * 60_000 : CHECK_MS;
-      const consecutive = previous?.checkedAt <= now() && now() - previous.checkedAt <= cadence * 2;
-      repairState.staleSince = sameTarget && consecutive && Number.isFinite(previous.staleSince) && previous.staleSince <= now() ? previous.staleSince : now();
+      const incarnation = read(path.join(root, "recovery", "daemon-progress.json"));
+      const identity = JSON.stringify([current.packageRoot, current.version, current.committedAt,
+        heartbeat?.pid, incarnation?.pid === heartbeat?.pid ? incarnation?.startedAt : null]);
+      repairState.staleSince = progress.observe(identity, { startedAt: observationStartedAt, gapMs: cadence * 2 });
     }
     if (installedIsDesired && !(live.ok && heartbeatFresh && heartbeat.version === current.version)) {
       // The code on disk is the code we want; the problem is liveness. Repair in
@@ -298,7 +321,6 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
       const base = { desiredVersion: desiredVersion || version, version, staleSince, restarts, discoveryError: discoveryError ? String(discoveryError.message).slice(0, 300) : undefined,
         memoryFreeMB: memoryNow.freeMB };
       log(`installed ${version} not healthy: heartbeatFresh=${heartbeatFresh} daemonAlive=${daemonAlive} health=${JSON.stringify({ daemon: live?.daemon, pill: live?.pill, oldDaemon: live?.oldDaemon, oldPill: live?.oldPill })} readiness=${readiness ? `${readiness.reason || "ok"}${readiness.detail ? ` (${readiness.detail})` : ""}` : "not-attempted"} memoryPressured=${memoryNow.pressured}`);
-      if (daemonAlive && now() - staleSince < STALE_CONFIRM_MS) return status({ ok: true, status: "stale-observed", ...base });
       const deferred = deferToTransaction(base);
       if (deferred) return deferred;
       const repeatedCrash = require("./daemon-progress.cjs").repeatedStartupCrash(current, { homeDir, now: now() });
@@ -308,9 +330,27 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
       if (!repeatedCrash && Number.isFinite(committedAt) && committedAt <= now() && now() - committedAt < STARTUP_GRACE_MS) {
         return status({ ok: true, status: "starting", ...base, startupGraceRemainingMs: STARTUP_GRACE_MS - (now() - committedAt) });
       }
+      if (require("./recovery-intent.cjs").stopped(homeDir)) return status({ ok: true, status: "intentionally-stopped", runtimeHealthy: false });
+      const pillMissing = live?.known === true && live.daemonCount === 1 && live.pillCount === 0
+        && !live.oldDaemon && !live.oldPill && !live.oldBroker;
+      // Starting an absent UI does not interrupt daemon work. Reserve the same
+      // bounded restart budget; a runner death cannot grant unlimited attempts.
+      const restartKey = `restart:${current.packageRoot || current.version}`;
+      if (pillMissing && heartbeatFresh && progress.claim(restartKey, MAX_IN_PLACE_RESTARTS)) {
+        const startedAt = now();
+        const outcome = await restorePill(current, { homeDir, platform });
+        if (outcome.deferred) {
+          progress.refund(restartKey); progress.clearObservation();
+          return status({ ok: true, status: outcome.reason, runtimeHealthy: false, ...base });
+        }
+        const observed = outcome.ok ? await ready(current, startedAt) : null;
+        if (observed?.ok) return proven({ ok: true, status: "current", version, desiredVersion: base.desiredVersion, repair: "pill", lastSuccessAt: now() }, observed);
+        progress.fail(outcome.reason || observed?.reason);
+        return status({ ok: false, status: "pill-repair-failed", ...base, lastError: outcome.reason || observed?.detail || observed?.reason });
+      }
+      if (daemonAlive && now() - staleSince < STALE_CONFIRM_MS) return status({ ok: true, status: "stale-observed", ...base });
       const busy = busyDecision(heartbeat, { homeDir, now: now() });
       if (busy) return status({ ok: true, status: busy, ...base });
-      const restartKey = `restart:${current.packageRoot || current.version}`;
       if (repeatedCrash) {
         log(`repeated startup crash; skipping restart/reactivation for ${version}`);
         policy.failure(channel, version, { id: `startup:${current.packageRoot}:${repeatedCrash.fingerprint}`, reason: "repeated-startup-crash" });
@@ -322,7 +362,7 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
         try { outcome = await restart(current, { platform, homeDir }); }
         catch (error) { outcome = { ok: false, reason: error.message }; }
         log(`restart ${outcome?.ok ? "ok" : `failed: ${outcome?.reason || "unknown"}`} terminated=${JSON.stringify(outcome?.terminated || [])}`);
-        if (outcome?.reason === "deferred-update-owner" || outcome?.reason === "runtime-changed") {
+        if (outcome?.reason === "deferred-update-owner" || outcome?.reason === "runtime-changed" || outcome?.reason === "intentionally-stopped" || outcome?.reason === "service-process-query-failed") {
           progress.refund(restartKey);
           return status({ ok: true, status: outcome.reason, runtimeHealthy: false, ...base });
         }

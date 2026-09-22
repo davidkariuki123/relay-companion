@@ -14,6 +14,8 @@ async function repairServiceRegistrations({ homeDir = os.homedir(), platform = p
   drain = require("./update-activity.cjs").drainCalls,
   activate,
 } = {}) {
+  const stopped = () => require("./recovery-intent.cjs").stopped(homeDir);
+  if (stopped()) return { ok: true, changed: false, status: "intentionally-stopped" };
   if (platform === "darwin") {
     const observed = await require("./mac-service-recovery.cjs").repairMacServiceRegistrations({ homeDir, platform, run });
     if (observed.ok || observed.blocked) return observed;
@@ -39,14 +41,17 @@ async function repairServiceRegistrations({ homeDir = os.homedir(), platform = p
   try {
     try { lease = own({ homeDir }); }
     catch { return { ok: true, changed: false, status: "deferred-update-owner" }; }
+    if (stopped()) return { ok: true, changed: false, status: "intentionally-stopped" };
     const target = io.read(path.join(homeDir, ".relay", "runtime", "current.json"));
     if (!target?.active || !validate(target, { platform })) return { ok: false, changed: false, status: "service-repair-failed", lastError: "no-verified-registration-source" };
     const node = nodeContract.resolveManagedNode({ homeDir, node: target.node, run });
     releaseDrain = await drain({ homeDir });
     lease.assert();
+    if (stopped()) return { ok: true, changed: false, status: "intentionally-stopped" };
     await execute(node, path.join(target.packageRoot, "bin", "relay.js"), ["repair-runtime", "--no-restart"],
       { env: nodeContract.nodeEnvironment(lease.env), timeoutMs: 90_000 });
     lease.assert();
+    if (stopped()) return { ok: true, changed: false, status: "intentionally-stopped" };
     const health = require("./runtime-health.cjs");
     const activateRuntime = activate || (platform === "darwin" ? health.activateMacRuntimeServices
       : platform === "win32" ? health.activateWindowsRuntimeServices : health.activateLinuxRuntimeServices);

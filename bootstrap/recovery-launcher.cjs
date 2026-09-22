@@ -547,7 +547,7 @@ async function launch({ root = __dirname, run = runChild, now = Date.now, env = 
       // A worker that lost the canonical lock to a live installer judged nothing
       // about this bundle either; the runner normally reports that as a deferral.
       const lostTransaction = /recovery-worker-exit-75|transaction-in-progress/i.test(report?.lastError || "");
-      const retryableReport = ["disabled", "backoff", "emergency-backoff", "restart-failed", "reactivate-failed", "service-repair-failed", "service-repair-unhealthy"].includes(report?.status) || (report?.status === "failed" && (networkFailure || lostTransaction));
+      const retryableReport = ["disabled", "backoff", "emergency-backoff", "restart-failed", "pill-repair-failed", "observation-unavailable", "reactivate-failed", "service-repair-failed", "service-repair-unhealthy"].includes(report?.status) || (report?.status === "failed" && (networkFailure || lostTransaction));
       if (reported && retryableReport && result.reason !== "deadline") {
         write(path.join(root, "launcher-status.json"), { schema: 1, at: now(), status: "runner-error", version: candidate.version });
         log("done status=runner-error");

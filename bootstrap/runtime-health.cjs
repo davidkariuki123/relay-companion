@@ -34,7 +34,7 @@ function defaultRun(command, args, options = {}) {
 
 function runtimeProcessQuery(platform) {
   if (platform === "win32") {
-    const script = "$relaySid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { $_.CommandLine -match 'node_modules[\\\\/]relay-companion[\\\\/]' } | ForEach-Object { $relayOwner = Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid -ErrorAction SilentlyContinue; if ($relayOwner.Sid -eq $relaySid) { $_.CommandLine } }";
+    const script = "$ErrorActionPreference = 'Stop'; $relaySid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { $_.CommandLine -match 'node_modules[\\\\/]relay-companion[\\\\/]' } | ForEach-Object { $relayOwner = Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid -ErrorAction Stop; if (-not $relayOwner.Sid) { throw 'service-owner-query-failed' }; if ($relayOwner.Sid -eq $relaySid) { $_.CommandLine } }";
     return { command: "powershell.exe", args: ["-NoProfile", "-NonInteractive", "-Command", script] };
   }
   return { command: "/bin/ps", args: ["-axo", "uid=,command="] };
@@ -63,7 +63,16 @@ function exactRuntimeHealth(target, {
   userId = typeof process.getuid === "function" ? process.getuid() : 0,
 } = {}) {
   const api = platform === "win32" ? path.win32 : path.posix;
-  const lines = withoutWindowsShellWrappers(commands || runtimeProcessCommands(platform, run, userId));
+  let observed = commands;
+  if (observed === null) {
+    const query = runtimeProcessQuery(platform);
+    let result;
+    try { result = run(query.command, query.args); } catch (error) { result = { error }; }
+    // An unavailable observer is not evidence that either service disappeared.
+    if (!commandOk(result)) return { ok: false, known: false, reason: "service-process-query-failed", packageRoot: target.packageRoot };
+    observed = parseRuntimeProcessCommands(result.stdout, platform, userId);
+  }
+  const lines = withoutWindowsShellWrappers(observed);
   const normalize = (value) => (platform === "win32" ? String(value).toLowerCase() : String(value)).replaceAll("\\", "/");
   const daemonNeedle = normalize(target.bin);
   const pillNeedle = normalize(api.join(target.packageRoot, "overlay", "main.cjs"));
@@ -77,7 +86,7 @@ function exactRuntimeHealth(target, {
   const oldBroker = brokers.some((line) => !normalize(line).includes(normalize(target.packageRoot)));
   const oldDaemon = relayDaemons.some((line) => !normalize(line).includes(daemonNeedle));
   const oldPill = relayPills.some((line) => !normalize(line).includes(pillNeedle));
-  return { ok: daemon && pill && !oldDaemon && !oldPill && !oldBroker, daemon, pill, daemonCount, pillCount, brokerCount: brokers.length, oldBroker, oldDaemon, oldPill, packageRoot: target.packageRoot };
+  return { ok: daemon && pill && !oldDaemon && !oldPill && !oldBroker, known: true, daemon, pill, daemonCount, pillCount, brokerCount: brokers.length, oldBroker, oldDaemon, oldPill, packageRoot: target.packageRoot };
 }
 
 function linuxPillStatusPath({ homeDir = os.homedir(), env = process.env } = {}) {
@@ -406,6 +415,65 @@ async function activateWindowsRuntimeServices(target, {
   return { ok: false, reason: "activation-deadline-exceeded", detail: target.packageRoot, health, terminated };
 }
 
+// Use the existing OS service's idempotent start operation. Never spawn a second
+// pill directly, kill a daemon, rewrite registrations, or drain unrelated work.
+async function restoreMissingPill(target, {
+  homeDir = os.homedir(), platform = process.platform, run = defaultRun,
+  own = require("./lifecycle-ownership.cjs").lifecycleOwnership,
+  healthCheck = exactRuntimeHealth, userId = process.getuid?.() ?? 0,
+} = {}) {
+  let lease;
+  const defer = reason => ({ ok: false, deferred: true, reason });
+  const assertTarget = () => {
+    lease.assert();
+    if (require("./recovery-intent.cjs").stopped(homeDir)) throw Error("intentionally-stopped");
+    const current = JSON.parse(fs.readFileSync(path.join(homeDir, ".relay", "runtime", "current.json"), "utf8"));
+    if (!current.active || current.packageRoot !== target.packageRoot || current.committedAt !== target.committedAt) throw Error("runtime-changed");
+  };
+  try {
+    try { lease = own({ homeDir }); } catch { return defer("deferred-update-owner"); }
+    assertTarget();
+    const health = await healthCheck(target, { platform, run });
+    if (health.known === false) return defer("service-process-query-failed");
+    if (health.ok) return { ok: true, changed: false };
+    if (health.daemonCount !== 1 || health.pillCount !== 0 || health.oldDaemon || health.oldPill || health.oldBroker) return defer("runtime-changed");
+    let command, args;
+    const normalize = text => String(text).replace(/&amp;/g, "&").replace(/&quot;/g, '"').replaceAll("\\", "/").toLowerCase();
+    const script = normalize(path.join(target.packageRoot, "overlay", "main.cjs"));
+    if (platform === "win32") {
+      const task = run("schtasks.exe", ["/Query", "/TN", WINDOWS_PILL_TASK, "/XML"]);
+      if (!commandOk(task)) return defer("service-registration-query-failed");
+      const xml = normalize(task.stdout);
+      // Stock Windows tasks normally delegate to a hidden launcher. Follow only
+      // that exact managed file, never an arbitrary path supplied by task text.
+      const launcher = path.join(homeDir, ".relay", "relay-companion-pill.vbs");
+      const targetsCurrent = xml.includes(script) || (xml.includes(normalize(launcher))
+        && normalize(fs.readFileSync(launcher, "utf8")).includes(script));
+      if (!targetsCurrent || !/<MultipleInstancesPolicy>IgnoreNew<\/MultipleInstancesPolicy>/i.test(task.stdout)) return defer("service-target-unverified");
+      command = "schtasks.exe"; args = ["/Run", "/TN", WINDOWS_PILL_TASK];
+    } else if (platform === "linux") {
+      const unit = `${PILL_LABEL}.service`;
+      const service = run("systemctl", ["--user", "show", "--property=ExecStart", "--value", unit]);
+      if (!commandOk(service)) return defer("service-registration-query-failed");
+      if (!normalize(service.stdout).includes(script)) return defer("service-target-unverified");
+      command = "systemctl"; args = ["--user", "start", unit];
+    } else if (platform === "darwin") {
+      const mac = require("./mac-service-recovery.cjs");
+      const record = mac.readRegistration(PILL_LABEL, { homeDir, run });
+      if (record.packageRoot !== target.packageRoot) return defer("runtime-changed");
+      const observed = mac.registration(PILL_LABEL, { run, userId });
+      if (!observed.known || !observed.present) return defer("service-registration-query-failed");
+      command = "/bin/launchctl"; args = ["kickstart", `gui/${userId}/${PILL_LABEL}`];
+    } else return defer("activation-platform-unsupported");
+    // An updater cannot race this generation. Quit may have arrived while the
+    // observer was waiting; check it again at the mutation boundary.
+    assertTarget();
+    const started = run(command, args);
+    return commandOk(started) ? { ok: true, changed: true } : { ok: false, reason: "service-start-failed" };
+  } catch (error) { return defer(error.message); }
+  finally { lease?.release(); }
+}
+
 /** One entry point for "restart what is already installed" on every platform. */
 async function restartInstalledRuntimeServices(target, { platform = process.platform, ...options } = {}) {
   if (!["darwin", "linux", "win32"].includes(platform)) return { ok: false, reason: "activation-platform-unsupported" };
@@ -417,16 +485,26 @@ async function restartInstalledRuntimeServices(target, { platform = process.plat
     catch { return { ok: false, reason: "deferred-update-owner" }; }
     const current = JSON.parse(fs.readFileSync(path.join(homeDir, ".relay", "runtime", "current.json"), "utf8"));
     if (!current?.active || current.packageRoot !== target.packageRoot) return { ok: false, reason: "runtime-changed" };
+    if (require("./recovery-intent.cjs").stopped(homeDir)) return { ok: false, reason: "intentionally-stopped" };
+    const live = await (options.healthCheck || exactRuntimeHealth)(target, { platform, run: options.run });
+    if (live.known === false) return { ok: false, reason: "service-process-query-failed" };
     releaseDrain = await require("./update-activity.cjs").drainCalls({ homeDir });
     lease.assert();
-    if (platform === "linux") return await activateLinuxRuntimeServices(target, { platform, ...options });
-    if (platform === "win32") return await activateWindowsRuntimeServices(target, { platform, ...options });
+    const run = options.run || defaultRun;
+    const guardedRun = (...args) => {
+      lease.assert();
+      if (require("./recovery-intent.cjs").stopped(homeDir)) throw Error("intentionally-stopped");
+      return run(...args);
+    };
+    if (platform === "linux") return await activateLinuxRuntimeServices(target, { platform, ...options, run: guardedRun });
+    if (platform === "win32") return await activateWindowsRuntimeServices(target, { platform, ...options, run: guardedRun });
     return { ok: false, reason: "activation-platform-unsupported" };
   } catch (error) { return { ok: false, reason: error.message }; }
   finally { releaseDrain?.(); lease?.release(); }
 }
 
 module.exports = {
+  restoreMissingPill,
   activateLinuxRuntimeServices,
   activateMacRuntimeServices,
   activateWindowsRuntimeServices,

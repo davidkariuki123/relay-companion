@@ -1707,12 +1707,16 @@ async function inboxForAgent(client, args = {}, sessionContext = DEFAULT_MCP_SES
 // Rolling upgrades may still return historical threadTitle fields and the old
 // chat-level implicit reply target. Per-message inReplyToRelayId remains useful,
 // but neither legacy presentation field may be taught back to a current model.
+// Chat-wide chain lists and previews duplicate already-addressable messages.
+// Keep previews on summaries where the full human document is not loaded.
 function withoutThreadTitles(value) {
   if (Array.isArray(value)) return value.map(withoutThreadTitles);
   if (!value || typeof value !== "object") return value;
   return Object.fromEntries(
     Object.entries(value)
-      .filter(([key]) => key !== "threadTitle" && key !== "replyToRelayId")
+      .filter(([key]) => key !== "threadTitle" && key !== "replyToRelayId"
+        && !(key === "threadIds" && typeof value.chatId === "string")
+        && !(key === "preview" && typeof value.relayId === "string" && typeof value.forHuman === "string" && value.forHuman.length > 0))
       .map(([key, child]) => [key, withoutThreadTitles(child)]),
   );
 }
@@ -1956,7 +1960,7 @@ function text(obj) {
   // they must see the human's wall clock, not UTC (12:02Z read back to a
   // Johannesburg user as "12:02" — it was 14:02 his time).
   const started = performance.now();
-  const rendered = typeof obj === "string" ? obj : JSON.stringify(obj, localizeAtFields, 2);
+  const rendered = typeof obj === "string" ? obj : JSON.stringify(obj, localizeAtFields);
   recordReadTiming({ phase: "serialization", elapsedMs: Math.round(performance.now() - started), responseBytes: Buffer.byteLength(rendered) });
   return { content: [{ type: "text", text: rendered }] };
 }

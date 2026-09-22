@@ -155,7 +155,7 @@ test('a deadline that interrupts a working runner does not quarantine its bundle
 });
 test('a failed in-place repair is retried by the same bundle next check, never handed to an older runner', async t => {
   const {root,newer}=fixture(t); const calls=[];
-  for (const status of ['restart-failed','reactivate-failed']) {
+  for (const status of ['restart-failed','reactivate-failed','pill-repair-failed','observation-unavailable']) {
     write(path.join(root,'launcher-status.json'),{schema:1,status:'healthy'});
     const result=await launch({root,run:async(p,{runId})=>{
       calls.push(p.version);
@@ -165,7 +165,7 @@ test('a failed in-place repair is retried by the same bundle next check, never h
     assert.equal(result.status,'runner-error');
     assert.equal(read(path.join(root,'launcher-status.json')).failedBundle,undefined);
   }
-  assert.deepEqual(calls,[newer.version,newer.version]);
+  assert.deepEqual(calls,[newer.version,newer.version,newer.version,newer.version]);
 });
 
 test('a runner that defers to a live installer completes without quarantining its bundle; a legacy lost-lock failure is retryable', async t => {

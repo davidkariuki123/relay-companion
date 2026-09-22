@@ -27,6 +27,19 @@ function repairProgress(homeDir, now = Date.now) {
   const save = () => atomicFile(file, JSON.stringify({ ...state, updatedAt: now() }));
   if (damaged) save();
   return {
+    // Observation belongs to the same durable repair record as its budget, not
+    // the replaceable human-facing status. A new process/root or an unwatched
+    // interval cannot inherit the old process's failure evidence.
+    observe(identity, { startedAt = now(), gapMs } = {}) {
+      const at = now(), old = state.observation;
+      const continuing = old?.identity === identity && Number.isFinite(old.since) && Number.isFinite(old.at)
+        && old.since <= old.at && old.at <= startedAt && startedAt <= at
+        && startedAt - old.at <= gapMs;
+      const since = continuing ? old.since : startedAt;
+      state.observation = { identity, since, at }; save();
+      return since;
+    },
+    clearObservation() { if (state.observation) { delete state.observation; save(); } },
     count: key => Number(state.attempts[key]) || 0,
     claim(key, limit) {
       if (state.localExhausted || (Number(state.attempts[key]) || 0) >= limit) return false;

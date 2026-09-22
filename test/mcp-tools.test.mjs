@@ -1034,6 +1034,22 @@ test("the retired relay_chat_reply alias is unlisted but still sends", async () 
   }
 });
 
+test("chat reads remove redundant presentation but preserve documents and continuation", async () => {
+  const item = { relayId: "relay_one", threadId: "root", inReplyToRelayId: "parent", sender: { name: "Sender" }, forHuman: "Complete text", forAgent: "Complete evidence\nMore evidence", preview: "Complete text", taskState: "started" };
+  const summary = { relayId: "relay_two", forHuman: "", preview: "Summary only" };
+  const page = { chatId: "chat_one", threadIds: ["root", "other"], nextBeforeCursor: "opaque", historyScanLimited: true, items: [item, summary] };
+  const client = { async chat() { return page; }, async chats() { return { chats: [page] }; } };
+  for (const name of ["relay_chat_fetch", "relay_chats_list"]) {
+    const result = await handleCall(client, name, { chatId: "chat_one" });
+    assert.equal(result.content[0].text.includes("\n"), false);
+    const parsed = JSON.parse(result.content[0].text);
+    const actual = parsed.chats?.[0] ?? parsed;
+    const { preview, ...full } = item;
+    assert.deepEqual(actual, { chatId: "chat_one", nextBeforeCursor: "opaque", historyScanLimited: true, items: [full, summary] });
+  }
+  assert.equal(page.threadIds.length, 2, "projection must not mutate the API response");
+});
+
 test("relay_chat_fetch resolves a chat by id or by any thread in it, and refuses to guess", async () => {
   const calls = [];
   const fakeClient = {

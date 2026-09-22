@@ -49,6 +49,7 @@ async function repairMacServiceRegistrations({
   catch { return { ok: true, changed: false, status: "deferred-update-owner" }; }
   const repaired = [];
   try {
+    if (require("./recovery-intent.cjs").stopped(homeDir)) return { ok: true, changed: false, status: "intentionally-stopped" };
     const recovery = require("./mac-registration-transaction.cjs");
     const pending = recovery.readSnapshot({ homeDir, fsImpl });
     if (pending) {
@@ -67,6 +68,7 @@ async function repairMacServiceRegistrations({
       const args = observed.present
         ? ["kickstart", `gui/${userId}/${record.label}`]
         : ["bootstrap", `gui/${userId}`, record.file];
+      if (require("./recovery-intent.cjs").stopped(homeDir)) return { ok: true, changed: repaired.length > 0, status: "intentionally-stopped" };
       const result = run("/bin/launchctl", args);
       if (!commandOk(result)) throw Error(`service-registration-repair-failed: ${record.label}`);
       repaired.push(record.label);
@@ -89,6 +91,7 @@ async function restartMacRegisteredServices(target, {
   try { lock = acquireLock(path.join(homeDir, ".relay", "runtime", "transaction.lock")); }
   catch { return { ok: false, reason: "deferred-update-owner" }; }
   try {
+    if (require("./recovery-intent.cjs").stopped(homeDir)) return { ok: false, reason: "intentionally-stopped" };
     const current = JSON.parse(fs.readFileSync(path.join(homeDir, ".relay", "runtime", "current.json"), "utf8"));
     if (!current?.active || current.packageRoot !== target.packageRoot) return { ok: false, reason: "runtime-changed" };
     const records = LABELS.map(label => readRegistration(label, { homeDir, run }));
@@ -97,6 +100,7 @@ async function restartMacRegisteredServices(target, {
     for (const record of records) {
       const observed = registration(record.label, { run, userId });
       if (!observed.known) return { ok: false, reason: "service-registration-query-failed" };
+      if (require("./recovery-intent.cjs").stopped(homeDir)) return { ok: false, reason: "intentionally-stopped" };
       const args = observed.present ? ["kickstart", "-k", `gui/${userId}/${record.label}`] : ["bootstrap", `gui/${userId}`, record.file];
       if (!commandOk(run("/bin/launchctl", args))) return { ok: false, reason: "service-restart-failed" };
     }

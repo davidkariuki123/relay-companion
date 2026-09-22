@@ -88,6 +88,7 @@ jobs:
           test/recovery-install.test.mjs
           test/recovery-escalation.test.mjs
           test/lifecycle-ownership.test.mjs
+          test/recovery-structure.test.mjs
           test/service-recovery.test.mjs
           test/daemon-repair.test.mjs
           test/pill-liveness.test.mjs
@@ -128,7 +129,7 @@ jobs:
       - name: Prove the native credential store round trip
         run: node --test test/credential-store-darwin.integration.test.mjs
       - name: Prove daemon orchestration and readiness on this platform
-        run: node --test --test-concurrency=2 test/daemon-robustness.test.mjs test/recovery-readiness.test.mjs test/recovery-probe.test.mjs test/lifecycle-ownership.test.mjs test/service-recovery.test.mjs test/recovery-runner.test.mjs
+        run: node --test --test-concurrency=2 test/daemon-robustness.test.mjs test/recovery-readiness.test.mjs test/recovery-probe.test.mjs test/lifecycle-ownership.test.mjs test/service-recovery.test.mjs test/recovery-runner.test.mjs test/recovery-structure.test.mjs
       - name: Prove owned Node and recovery survive macOS shared-library relocation
         if: startsWith(matrix.platform, 'darwin-')
         run: >-

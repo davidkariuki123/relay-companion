@@ -746,6 +746,17 @@ function validateDirectArguments(args, schema, label = "arguments") {
   if (schema.type === "integer" && (args < (schema.minimum ?? -Infinity) || args > (schema.maximum ?? Infinity))) throw new Error(`Invalid ${label}.`);
 }
 
+// Match MCP's presentation projection; raw HTTP requests keep their API shape.
+function withoutRedundantPresentation(value) {
+  if (Array.isArray(value)) return value.map(withoutRedundantPresentation);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key]) => key !== "threadTitle" && key !== "replyToRelayId"
+      && !(key === "threadIds" && typeof value.chatId === "string")
+      && !(key === "preview" && typeof value.relayId === "string" && typeof value.forHuman === "string" && value.forHuman.length > 0))
+    .map(([key, child]) => [key, withoutRedundantPresentation(child)]));
+}
+
 async function directToolCommand(command, body, config) {
   transport = "https";
   // Explicit HTTPS verifies the independent credential and account. It never
@@ -819,7 +830,7 @@ async function directToolCommand(command, body, config) {
       value = await request("POST", "/v1/share-links", await prepareSendBody(draft));
     }
   }
-  return { content: [{ type: "text", text: JSON.stringify(value) }], isError: false };
+  return { content: [{ type: "text", text: JSON.stringify(withoutRedundantPresentation(value)) }], isError: false };
 }
 
 async function main(argv = process.argv.slice(2)) {

@@ -42,6 +42,7 @@ async function waitForRecoveryReady({ homeDir = os.homedir(), platform = process
   let firstProgress = null, firstProgressAt = null, progressAdvanced = false;
   // Why the last sample did not count, for the log line a failed proof leaves.
   let block = null, samples = 0, slowestSampleMs = 0;
+  let observationInvalid = false;
   const reset = (key) => { since = null; firstBeat = null; identity = key; probeSeen = false; probeIdentity = null; legacy = false; firstProgress = null; firstProgressAt = null; progressAdvanced = false; };
   const healthSummary = (value) => value ? JSON.stringify({ daemon: value.daemon, pill: value.pill, daemonCount: value.daemonCount, pillCount: value.pillCount, oldDaemon: value.oldDaemon, oldPill: value.oldPill, oldBroker: value.oldBroker }) : "null";
   const probeSummary = (value) => value?.reason || value?.daemon?.reason || value?.pill?.reason || "answer-did-not-match-the-live-processes";
@@ -67,6 +68,10 @@ async function waitForRecoveryReady({ homeDir = os.homedir(), platform = process
     const alive = Boolean(live?.ok) && jobsReady && fresh;
     const probeIdentityNow = probeMatches && !responsive.legacy ? responsive.identity || null : null;
     const suspended = gap < 0 || gap > SAMPLE_GAP_MAX_MS || sampleMs > SAMPLE_MAX_MS;
+    // Incomplete observation is neither proof of a hung application nor a
+    // reason to charge its release. A later successful proof may still win.
+    if (suspended || live?.known === false || (identity !== null && key !== identity)
+      || (platform === "darwin" && jobs.some(job => !job.known))) observationInvalid = true;
     if (suspended || !alive || key !== identity
       || (probeIdentityNow && probeIdentity && probeIdentityNow !== probeIdentity)) {
       block = suspended ? `not-watched-continuously:gap=${gap}ms,sample=${sampleMs}ms`
@@ -105,7 +110,7 @@ async function waitForRecoveryReady({ homeDir = os.homedir(), platform = process
     if (at - started >= timeoutMs) break;
     await sleep(1000);
   }
-  return { ok: false, reason: "runtime-did-not-stay-responsive",
+  return { ok: false, reason: "runtime-did-not-stay-responsive", observationInvalid,
     detail: `${block || "no-sample"}; samples=${samples} slowestSampleMs=${slowestSampleMs} probeSeen=${probeSeen}` };
 }
 module.exports = { waitForRecoveryReady, HEARTBEAT_FRESH_MS, PROBE_TIMEOUT_MS, SAMPLE_GAP_MAX_MS, SAMPLE_MAX_MS };

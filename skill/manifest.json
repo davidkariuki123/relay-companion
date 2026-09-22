@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "name": "relay",
-  "version": "1.1.68",
+  "version": "1.1.69",
   "consentVersion": 2,
-  "baseUrl": "https://sendrelays.com/skills/relay/v1.1.68",
+  "baseUrl": "https://sendrelays.com/skills/relay/v1.1.69",
   "files": [
     {
       "path": "SKILL.md",
@@ -21,7 +21,7 @@
     },
     {
       "path": "scripts/relay-protocol.mjs",
-      "sha256": "bfbc56ecaf202f77002da7eec4a33c5bfc7f3c6574df3dd385766684eb5458a3"
+      "sha256": "833924fb08ed82e67a66c72e5c895deb43f38a5b92dfcc1765c8f05ef87d38e9"
     },
     {
       "path": "scripts/relay-local.mjs",
