@@ -122,6 +122,14 @@ test("slow failed readiness contributes observation time instead of starting a f
   assert.equal(result.staleSince, 100000);
 });
 
+test("a delayed OS process query cannot supply the application's hang-confirmation evidence", async t => {
+  const f = fixture(t);
+  const result = await recover({ ...f.options,
+    health: () => { f.tick(STALE_CONFIRM_MS + 1000); return { ok: false, known: true, daemonCount: 1, pillCount: 1 }; },
+  });
+  assert.equal(result.status, "stale-observed"); assert.equal(result.staleSince, f.now());
+});
+
 test("durable observation survives status replacement but resets for a new process or an unwatched interval", t => {
   const f = fixture(t), gapMs = 120000;
   assert.equal(repairProgress(f.homeDir, f.now).observe("root:process1", { gapMs }), 100000);

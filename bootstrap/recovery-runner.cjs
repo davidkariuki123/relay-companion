@@ -258,11 +258,14 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
   try {
     sweepAbandonedDownloads(downloads, log);
     current = read(path.join(root, "runtime", "current.json"));
-    const observationStartedAt = now();
     const heartbeat = read(path.join(root, "recovery", "daemon.json"));
     const heartbeatFresh = heartbeat?.at <= now() && now() - heartbeat.at < HEARTBEAT_MS;
     const installedIsDesired = current?.active === true;
     const live = installedIsDesired ? await health(current, { platform }) : null;
+    // Slow OS inspection (including suspension while it runs) is not evidence
+    // of a stalled application. Begin at the completed process observation;
+    // subsequent responsiveness sampling reports its own continuity failures.
+    const observationStartedAt = now();
     if (live?.known === false) {
       progress.clearObservation(); policy.interrupt();
       return status({ ok: false, status: "observation-unavailable", runtimeHealthy: false, lastError: live.reason });
