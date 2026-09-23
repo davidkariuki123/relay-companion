@@ -470,8 +470,13 @@ async function restoreMissingPill(target, {
       const record = mac.readRegistration(PILL_LABEL, { homeDir, run });
       if (record.packageRoot !== target.packageRoot) return defer("runtime-changed");
       const observed = mac.registration(PILL_LABEL, { run, userId });
-      if (!observed.known || !observed.present) return defer("service-registration-query-failed");
-      command = "/bin/launchctl"; args = ["kickstart", `gui/${userId}/${PILL_LABEL}`];
+      if (!observed.known) return defer("service-registration-query-failed");
+      // The earlier registration-repair budget may already be spent. Known
+      // absence is actionable here too: this operation owns a separate bounded
+      // attempt and has validated the existing plist against the active root.
+      command = "/bin/launchctl";
+      args = observed.present ? ["kickstart", `gui/${userId}/${PILL_LABEL}`]
+        : ["bootstrap", `gui/${userId}`, record.file];
     } else return defer("activation-platform-unsupported");
     // An updater cannot race this generation. Quit may have arrived while the
     // observer was waiting; check it again at the mutation boundary.

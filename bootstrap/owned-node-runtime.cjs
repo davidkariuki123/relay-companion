@@ -88,13 +88,20 @@ function relayOwnedNodePath(executable, {
     throw new Error(`Relay refused an invalid temporary Node runtime (${sourceRuntime.detail || sourceRuntime.version || source}).`);
   }
 
+  // Owned generations are immutable and self-contained. Re-preserving one made
+  // a copy of the copy on every repair (the macOS bundle identity includes the
+  // source path), leaving 3.2 GB of Node under ~/.relay/recovery by 2026-09-23.
+  const api = platform === "win32" ? path.win32 : path.posix;
+  let ownedRoot = null;
+  try { ownedRoot = realpathSync(api.join(runtimeRoot, "node")); } catch {}
+  if (ownedRoot && source.startsWith(ownedRoot + api.sep)) return source;
+
   let digest;
   try {
     digest = fileDigest(source, fsImpl);
   } catch (error) {
     throw new Error(`Relay could not read its temporary Node runtime (${error?.message || error}).`);
   }
-  const api = platform === "win32" ? path.win32 : path.posix;
   const directory = api.join(runtimeRoot, "node", digest);
   const destination = api.join(directory, platform === "win32" ? "node.exe" : "node");
 
@@ -121,10 +128,13 @@ function relayOwnedNodePath(executable, {
       if (!checked.ok && platform === "darwin") {
         const { preserveMacOSNodeBundle } = require("./macos-node-bundle.cjs");
         try {
-          return preserveMacOSNodeBundle(source, { runtimeRoot, fsImpl, runCommand,
+          const bundled = preserveMacOSNodeBundle(source, { runtimeRoot, fsImpl, runCommand,
             // macOS may spend several seconds validating the newly signed
             // dependency closure on its first launch; subsequent starts are fast.
             version: sourceRuntime.version, verify: (candidate) => verifiedNodeVersion(candidate, { runCommand, timeout: 30_000 }) });
+          // The flat copy failed; do not leave its empty digest directory behind.
+          try { fsImpl.rmSync(temporary, { force: true }); fsImpl.rmdirSync(directory); } catch {}
+          return bundled;
         } catch (error) {
           throw new Error(`owned Node runtime failed verification before publication: ${checked.detail}; shared-library preservation failed: ${error.message}`);
         }

@@ -10,6 +10,7 @@ import { prepareSnapshot, readSnapshot, restoreSnapshot } from "../bootstrap/mac
 import { macActivationTransaction } from "../bootstrap/mac-activation-transaction.cjs";
 import { acquireMacPowerAssertion } from "../bootstrap/mac-power-assertion.cjs";
 import { spawnSync } from "node:child_process";
+import { restoreMissingPill } from "../bootstrap/runtime-health.cjs";
 import { repairServiceRegistrations } from "../bootstrap/service-recovery.cjs";
 import { activateCanonicalRuntime } from "../src/canonical-updater.js";
 
@@ -91,6 +92,23 @@ test("the controller command adapter forwards plist input and repairs only the m
   assert.equal(result.ok, true);
   assert.deepEqual(result.repaired, [LABELS[1]]);
   assert.equal(f.registered.get(LABELS[0]), process.pid);
+  assert.deepEqual(f.calls.filter(call => ["bootstrap", "kickstart", "bootout"].includes(call[1]))
+    .map(call => call.at(-1)), [path.join(f.homeDir, "Library", "LaunchAgents", `${LABELS[1]}.plist`)]);
+});
+
+test("narrow pill repair restores a known missing Mac registration without disturbing the daemon", async t => {
+  const f = fixture(t), target = { active: true, packageRoot: f.packageRoot };
+  write(path.join(f.homeDir, ".relay", "runtime", "current.json"), target);
+  f.registered.set(LABELS[0], process.pid);
+  const options = { ...f.opts, healthCheck: () => ({ known: true, ok: false, daemonCount: 1, pillCount: 0 }) };
+  const unknown = await restoreMissingPill(target, { ...options,
+    run: (cmd, args, opts) => args[0] === "print" ? { error: Error("timeout") } : f.opts.run(cmd, args, opts) });
+  assert.equal(unknown.reason, "service-registration-query-failed");
+  assert.equal(f.registered.has(LABELS[1]), false);
+  const result = await restoreMissingPill(target, options);
+  assert.equal(result.ok, true);
+  assert.equal(f.registered.get(LABELS[0]), process.pid);
+  assert.equal(f.registered.has(LABELS[1]), true);
   assert.deepEqual(f.calls.filter(call => ["bootstrap", "kickstart", "bootout"].includes(call[1]))
     .map(call => call.at(-1)), [path.join(f.homeDir, "Library", "LaunchAgents", `${LABELS[1]}.plist`)]);
 });

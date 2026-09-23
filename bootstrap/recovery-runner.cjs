@@ -228,6 +228,15 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
     return status({ ok: true, status: "deferred-update-in-flight", runtimeHealthy: false, ...extra,
       transaction: { pid: transaction.pid, requestId: transaction.requestId, version: transaction.version } });
   };
+  // Heal machines where an older build's handover stays KeepAlive forever.
+  if (platform === "darwin") {
+    try {
+      const retired = require("./recovery-schedule-handover.cjs").retireFinishedHandover({ homeDir });
+      if (retired.removed) log("retired a finished recovery schedule handover that launchd kept alive");
+    } catch (error) { log(`schedule handover check failed: ${error.message}`); }
+  }
+  // A services repair restarts the runtime; say why, whatever the outcome.
+  if (services.changed || !services.ok) log(`services ${services.status}${services.repaired?.length ? ` repaired=${services.repaired.join(",")}` : ""}${services.reason ? ` reason=${services.reason}` : ""}${services.lastError ? ` error=${services.lastError}` : ""}`);
   if (["deferred-update-owner", "intentionally-stopped"].includes(services.status)) return status({ ...services, runtimeHealthy: false });
   if (serviceQueryUncertain) return status({ ...services, runtimeHealthy: false });
   if (services.changed || !services.ok) {

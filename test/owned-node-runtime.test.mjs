@@ -153,3 +153,16 @@ test("a durable Node path is returned without touching the filesystem", () => {
     fsImpl: new Proxy({}, { get() { throw new Error("filesystem should not be used"); } }),
   }), "/usr/local/bin/node");
 });
+
+test("a Node generation Relay already owns is reused, never copied again", (t) => {
+  const root = tempRoot(t);
+  const runtimeRoot = path.join(root, "recovery");
+  const owned = path.join(runtimeRoot, "node", "abc-0123456789abcdef", "node");
+  fs.mkdirSync(path.dirname(owned), { recursive: true });
+  fs.writeFileSync(owned, "owned-node");
+  const before = fs.readdirSync(path.join(runtimeRoot, "node"));
+  const result = relayOwnedNodePath(owned, { platform: "darwin", runtimeRoot, isTemporary: () => true,
+    runCommand: () => ({ status: 0, stdout: "22.14.0\n" }) });
+  assert.equal(result, fs.realpathSync(owned));
+  assert.deepEqual(fs.readdirSync(path.join(runtimeRoot, "node")), before);
+});

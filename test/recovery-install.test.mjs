@@ -35,6 +35,8 @@ test("Mac watchdog update keeps its registration and host while publishing a com
       calls.push([command, ...args]);
       if (command === "launchctl") {
         if (args[0] === "print") return { status: registered ? 0 : 113 };
+        // Looking for a leftover schedule handover is not touching the watchdog.
+        if (args[0] === "list") return { status: 113 };
         assert.equal(args[0], "bootstrap", "updates must not unregister their watchdog");
         registered = true; return { status: 0 };
       }
@@ -269,4 +271,28 @@ test("a recovery bundle that fails to install says which step refused and why", 
   const preserved = installRecovery({ homeDir, platform: "darwin", preserveNode: () => { throw new Error("EACCES: node copy refused"); },
     packageRoot: fileURLToPath(new URL("..", import.meta.url)), runCommand: () => ({ status: 0 }) });
   assert.match(preserved.detail, /^recovery-node-preservation-failed: EACCES/);
+});
+
+test("the Mac installer hands over a stale loaded cadence and retires an idle finished handover", t => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-handover-heal-"));
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  const root = path.join(homeDir, ".relay", "recovery");
+  const install = interval => {
+    const calls = [];
+    const result = installRecovery({ homeDir, platform: "darwin", packageRoot: fileURLToPath(new URL("..", import.meta.url)),
+      preserveNode: () => process.execPath, runCommand: (command, args) => {
+        if (command === "launchctl") {
+          calls.push(args[0]);
+          if (args[0] === "print") return { status: 0, stdout: `\trun interval = ${interval} seconds\n` };
+          if (args[0] === "list") return { status: 0, stdout: '{\n\t"Label" = "work.relay.recovery.schedule-handover";\n};' };
+        }
+        return { status: 0 };
+      } });
+    assert.equal(result.ok, true);
+    return calls;
+  };
+  fs.mkdirSync(root, { recursive: true });
+  fs.writeFileSync(path.join(root, "scheduler.json"), JSON.stringify({ schema: 1, intervalSeconds: 60 }));
+  assert.deepEqual(install(300), ["print", "list", "remove", "submit"], "scheduler.json said 60 but launchd still runs the old 300 s job");
+  assert.deepEqual(install(60), ["print", "list", "remove"], "a finished handover is removed and nothing new is submitted");
 });

@@ -194,14 +194,23 @@ function installRecovery({ packageRoot, node = process.execPath, homeDir = os.ho
         results.push(runCommand("launchctl", ["print", `gui/${userId}/${LABEL}`]));
         write(path.join(root, "scheduler.json"), { schema: 1, intervalSeconds: 60, at: Date.now() });
       }
-      if (ok(observed) && read(path.join(root, "scheduler.json"))?.intervalSeconds !== 60) {
+      if (ok(observed)) {
+        // scheduler.json records intent; launchd's loaded interval is the truth.
+        // A failed handover restores the previous file, which a respawned older
+        // handover then loaded while still recording 60 (2026-09-23: 300 s live).
+        const loaded = Number(/run interval = (\d+) seconds/.exec(String(observed.stdout || ""))?.[1]) || null;
+        const needsHandover = read(path.join(root, "scheduler.json"))?.intervalSeconds !== 60 || (loaded !== null && loaded !== 60);
         const job = "work.relay.recovery.schedule-handover";
         const pending = runCommand("launchctl", ["list", job]);
         if (!(ok(pending) && /"PID"\s*=\s*[1-9]\d*/.test(String(pending.stdout || pending.out || "")))) {
+          // Submitted jobs are KeepAlive: an idle handover left by an older build
+          // re-bootstraps the watchdog every ten seconds until it is removed.
           if (ok(pending)) runCommand("launchctl", ["remove", job]);
-          if (priorSchedule) atomicFile(path.join(root, "scheduler-previous.plist"), priorSchedule);
-          results.push(runCommand("launchctl", ["submit", "-l", job, "-o", log, "-e", log, "--", runtimeNode,
-            path.join(bundle, "bootstrap", "recovery-schedule-handover.cjs"), homeDir, String(userId)]));
+          if (needsHandover) {
+            if (priorSchedule) atomicFile(path.join(root, "scheduler-previous.plist"), priorSchedule);
+            results.push(runCommand("launchctl", ["submit", "-l", job, "-o", log, "-e", log, "--", runtimeNode,
+              path.join(bundle, "bootstrap", "recovery-schedule-handover.cjs"), homeDir, String(userId)]));
+          }
         }
       }
     } else {

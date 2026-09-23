@@ -52,6 +52,60 @@ export function runtimePlatform(platform = process.platform, arch = process.arch
   return value;
 }
 
+// Cross builds assemble a foreign platform's runtime from prebuilt, pinned
+// downloads (Electron, provider engines) and a cross-compiled Go bridge. They
+// exist so a release can be produced from one Mac when hosted runners are not
+// available. Their binaries cannot be launched here, so the smoke test proves
+// layout and executable formats instead of execution.
+export function crossTarget(platformKey) {
+  const [platform, arch] = runtimePlatform(...platformKey.split("-")).split("-");
+  return {
+    platform, arch,
+    goos: platform === "win32" ? "windows" : platform,
+    goarch: arch === "x64" ? "amd64" : arch,
+    npmFlags: [`--os=${platform}`, `--cpu=${arch}`, ...(platform === "linux" ? ["--libc=glibc"] : [])],
+  };
+}
+
+// Whether this host can execute a platform's binaries: natively, or darwin-x64
+// on Apple Silicon when Rosetta is installed.
+export function hostCanExecute(platformKey, { host = runtimePlatform(), rosetta = rosettaAvailable } = {}) {
+  if (platformKey === host) return true;
+  return host === "darwin-arm64" && platformKey === "darwin-x64" && rosetta();
+}
+
+function rosettaAvailable() {
+  return spawnSync("/usr/bin/arch", ["-x86_64", "/usr/bin/true"], { timeout: 10_000 }).status === 0;
+}
+
+const EXECUTABLE_MAGIC = {
+  win32: (bytes) => bytes[0] === 0x4d && bytes[1] === 0x5a,
+  linux: (bytes) => bytes[0] === 0x7f && bytes[1] === 0x45 && bytes[2] === 0x4c && bytes[3] === 0x46,
+  darwin: (bytes) => [0xcffaedfe, 0xcafebabe].includes(bytes.readUInt32BE(0)),
+};
+
+// Layout and binary-format proof for a runtime this host cannot launch.
+export function verifyForeignRuntime(smokeRoot, platformKey) {
+  const { platform } = crossTarget(platformKey);
+  const packageRoot = path.join(smokeRoot, "node_modules", "relay-companion");
+  const electronDist = path.join(smokeRoot, "node_modules", "electron", "dist");
+  const executables = [
+    path.join(packageRoot, "native", platform === "win32" ? "mcp-bridge.exe" : "mcp-bridge"),
+    platform === "win32" ? path.join(electronDist, "electron.exe")
+      : platform === "linux" ? path.join(electronDist, "electron")
+        : path.join(electronDist, "Electron.app", "Contents", "MacOS", "Electron"),
+  ];
+  for (const file of executables) {
+    const bytes = Buffer.alloc(4);
+    const fd = fs.openSync(file, "r");
+    try { fs.readSync(fd, bytes, 0, 4, 0); } finally { fs.closeSync(fd); }
+    if (!EXECUTABLE_MAGIC[platform](bytes)) throw new Error(`${file} is not a ${platform} executable`);
+  }
+  const installed = JSON.parse(fs.readFileSync(path.join(packageRoot, "package.json"), "utf8"));
+  if (installed.name !== "relay-companion") throw new Error("Cross-built runtime has the wrong package identity");
+  return { verified: "layout", executables: executables.length };
+}
+
 export function runtimePackageJson(packageJson, dependencies) {
   return {
     name: "relay-companion",
@@ -350,12 +404,14 @@ export function buildRuntimeArtifact({
   outputDir,
   platformKey = runtimePlatform(),
   sourceSha = String(process.env.SOURCE_SHA || process.env.GITHUB_SHA || "").trim(),
+  cross = false,
 } = {}) {
   if (!/^[0-9a-f]{40}$/i.test(sourceSha)) throw new Error("A full source commit SHA is required");
   const packageJson = JSON.parse(fs.readFileSync(path.join(companionRoot, "package.json"), "utf8"));
-  if (runtimePlatform() !== platformKey) {
+  if (!cross && runtimePlatform() !== platformKey) {
     throw new Error(`Runner is ${runtimePlatform()}, refusing to label its binaries as ${platformKey}`);
   }
+  const target = crossTarget(platformKey);
   if (!/^\d+\.\d+\.\d+$/.test(packageJson.version)) throw new Error("An exact runtime version is required");
   const dependencies = JSON.parse(fs.readFileSync(path.join(companionRoot, "runtime-dependencies.json"), "utf8"));
   const runtimeLockRoot = path.join(companionRoot, "runtime-lock");
@@ -373,7 +429,7 @@ export function buildRuntimeArtifact({
     fs.copyFileSync(path.join(runtimeLockRoot, "package.json"), path.join(temporary, "package.json"));
     fs.copyFileSync(path.join(runtimeLockRoot, "package-lock.json"), path.join(temporary, "package-lock.json"));
     const npmInstall = npmRuntimeInvocation([
-      "ci", "--ignore-scripts", "--no-audit", "--no-fund",
+      "ci", "--ignore-scripts", "--no-audit", "--no-fund", ...(cross ? target.npmFlags : []),
     ]);
     run(npmInstall.command, npmInstall.args, { timeout: 15 * 60_000, cwd: temporary });
     fs.rmSync(path.join(temporary, "node_modules", ".bin"), { recursive: true, force: true });
@@ -383,28 +439,31 @@ export function buildRuntimeArtifact({
     }
     const nativeDir = path.join(packageRoot, "native");
     fs.mkdirSync(nativeDir, { recursive: true });
-    const nativeBridge = path.join(nativeDir, process.platform === "win32" ? "mcp-bridge.exe" : "mcp-bridge");
+    const nativeBridge = path.join(nativeDir, target.platform === "win32" ? "mcp-bridge.exe" : "mcp-bridge");
     run("go", ["build", "-trimpath", "-ldflags=-s -w", "-o", nativeBridge, "."], {
       cwd: path.join(companionRoot, "native-bridge"),
-      env: { ...process.env, CGO_ENABLED: "0" },
+      env: { ...process.env, CGO_ENABLED: "0", ...(cross ? { GOOS: target.goos, GOARCH: target.goarch } : {}) },
       timeout: 5 * 60_000,
     });
-    if (process.platform !== "win32") fs.chmodSync(nativeBridge, 0o755);
+    if (target.platform !== "win32") fs.chmodSync(nativeBridge, 0o755);
     fs.copyFileSync(path.join(companionRoot, "THIRD_PARTY_NOTICES.md"), path.join(packageRoot, "THIRD_PARTY_NOTICES.md"));
     fs.writeFileSync(
       path.join(packageRoot, "package.json"),
       `${JSON.stringify(runtimePackageJson(packageJson, dependencies), null, 2)}\n`,
     );
     const electronInstall = path.join(temporary, "node_modules", "electron", "install.js");
-    run(process.execPath, [electronInstall], { timeout: 15 * 60_000, env: { ...process.env } });
+    run(process.execPath, [electronInstall], { timeout: 15 * 60_000, env: { ...process.env,
+      ...(cross ? { ELECTRON_INSTALL_PLATFORM: target.platform, ELECTRON_INSTALL_ARCH: target.arch } : {}) } });
+    // Branding re-signs with the host's codesign, so a Mac bundle can only be
+    // branded on a Mac; the platform decides whether it is a Mac bundle at all.
     brandMacElectronApp(path.join(temporary, "node_modules", "electron", "dist", "Electron.app"), {
-      platform: process.platform,
+      platform: target.platform,
     });
     // Signed archives intentionally reject every link entry. Electron's macOS
     // framework layout contains a small set of internal links; record those in
     // a signed map and remove them from the tar instead of dereferencing ~500MB
     // of duplicate framework bytes.
-    const runtimeLinks = captureInternalLinks(temporary, { platform: process.platform });
+    const runtimeLinks = captureInternalLinks(temporary, { platform: target.platform });
     fs.writeFileSync(path.join(packageRoot, "runtime-links.json"), `${JSON.stringify({ schema: 1, links: runtimeLinks }, null, 2)}\n`);
     const filename = `relay-runtime-${packageJson.version}-${platformKey}.tar.gz`;
     const artifactPath = path.join(destination, filename);
@@ -427,16 +486,20 @@ export function buildRuntimeArtifact({
         path.join(smokePackageRoot, "bootstrap", "relay-setup.cjs"),
       );
       smokeBootstrap.restoreRuntimeLinks(smokeRoot);
+      if (!hostCanExecute(platformKey)) {
+        verifyForeignRuntime(smokeRoot, platformKey);
+      } else {
       runMacTrayPositionProbe(
         path.join(smokeRoot, "node_modules", "electron", "dist", "Electron.app", "Contents", "MacOS", "Electron"),
-        { platform: process.platform },
+        { platform: target.platform },
       );
-      const smokeBridge = path.join(smokePackageRoot, "native", process.platform === "win32" ? "mcp-bridge.exe" : "mcp-bridge");
+      const smokeBridge = path.join(smokePackageRoot, "native", target.platform === "win32" ? "mcp-bridge.exe" : "mcp-bridge");
       if (run(smokeBridge, ["--version"]) !== "relay-mcp-bridge-v1") {
         throw new Error("Native Relay MCP bridge failed its packaged identity check");
       }
       run(process.execPath, [path.join(companionRoot, "scripts", "verify-installed-runtime.mjs"),
         "--package-root", smokePackageRoot, "--version", packageJson.version]);
+      }
     } finally {
       fs.rmSync(smokeRoot, { recursive: true, force: true });
     }
@@ -501,7 +564,8 @@ export function buildRuntimeArtifact({
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    const result = buildRuntimeArtifact({ outputDir: option("--output"), platformKey: option("--platform", runtimePlatform()) });
+    const result = buildRuntimeArtifact({ outputDir: option("--output"), platformKey: option("--platform", runtimePlatform()),
+      cross: process.argv.includes("--cross") });
     console.log(JSON.stringify(result.fragment));
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);

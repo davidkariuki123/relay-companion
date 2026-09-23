@@ -10264,7 +10264,10 @@ function repairCompanionDaemon(decision) {
   setInterval(() => {
     const now = Date.now();
     const transport = relayModules && typeof relayModules.relayTransportHealth === "function" ? relayModules.relayTransportHealth() : null;
-    try {
+    // The heartbeat lives under the real ~/.relay whatever RELAY_HOME says. A
+    // harness pill writing it masks a hung production pill from the daemon's
+    // supervisor (2026-09-23: a leaked fixture kept it "fresh" for five days).
+    if (daemonWatchEnabled) try {
       fs.mkdirSync(path.dirname(PILL_HEARTBEAT_PATH), { recursive: true, mode: 0o700 });
       const tmp = `${PILL_HEARTBEAT_PATH}.${process.pid}.tmp`;
       fs.writeFileSync(tmp, `${JSON.stringify({ schema: 1, pid: process.pid, version: pillVersion(), at: now, startedAt, worstStallMs: worstMainStallMs, transport })}\n`, { mode: 0o600 });

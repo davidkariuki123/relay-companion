@@ -62,6 +62,22 @@ test("missing pill is restored while daemon work stays admitted and protected", 
   assert.equal(result.repair, "pill"); assert.equal(result.runtimeAvailable, true);
 });
 
+test("exhausted registration attempts still permit a bounded component repair", async t => {
+  const f = fixture(t), progress = repairProgress(f.homeDir, f.now);
+  assert.equal(progress.claim("services", 2), true);
+  assert.equal(progress.claim("services", 2), true);
+  let repairs = 0;
+  const result = await recover({ ...f.options, health: () => missingPill,
+    repairServices: () => assert.fail("registration budget is already spent"),
+    restorePill: async () => { repairs++; return { ok: true }; },
+    verifyReady: async () => ({ ok: true, current: f.target }),
+  });
+  assert.equal(result.repair, "pill"); assert.equal(repairs, 1);
+  const retained = repairProgress(f.homeDir, f.now);
+  assert.equal(retained.count("services"), 2);
+  assert.equal(retained.count(`restart:${f.target.packageRoot}`), 1);
+});
+
 for (const platform of ["win32", "linux"]) test(`${platform}: missing-pill repair uses only idempotent service start and resumes without duplication`, async t => {
   const f = fixture(t); let running = false; const calls = [];
   const run = (command, args) => {
