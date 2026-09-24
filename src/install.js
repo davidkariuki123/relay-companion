@@ -19,6 +19,7 @@ import { brokerIdentity, removeMcpBrokerProvisioning } from "./mcp-broker-state.
 import { canonicalOwnershipGuard, verifyCanonicalCandidate } from "./canonical-runtime.js";
 import { ensureStableHookLauncher, removeStableHookLauncher, stableHookLauncherPath, stableWindowsHookScriptPath } from "./hook-launcher.js";
 import { readConfig, writeConfig } from "./config.js";
+import { READ_ONLY_RELAY_TOOL_NAMES } from "./tool-permissions.js";
 import { deleteInstallationAuthorizationCredentials } from "./installation-authorization.js";
 import applicationOwnership from "../bootstrap/application-owner.cjs";
 import {
@@ -1492,12 +1493,35 @@ export function removeClaudeCodeMcpConfig(configPath = claudeCodeConfigPath()) {
 // exists to answer, which makes agent-to-agent delivery look completed while the
 // target is actually stuck. Install both current names and the two legacy aliases
 // so chats created before a companion upgrade can still finish cleanly.
+const RELAY_CLAUDE_TOPIC_POLICY_TOOLS = [
+  ...[...READ_ONLY_RELAY_TOOL_NAMES].map((name) => `mcp__relay__${name}`),
+  // The API enforces a one-time account grant before either Topic write.
+  "mcp__relay__relay_topic_post",
+  "mcp__relay__relay_topic_edit",
+];
+
 const RELAY_CLAUDE_ALLOWED_TOOLS = [
   "mcp__relay__relay_ai_sessions",
   "mcp__relay__relay_ai_session",
   "mcp__relay__relay_sessions",
   "mcp__relay__relay_session",
+  ...RELAY_CLAUDE_TOPIC_POLICY_TOOLS,
 ];
+
+export function writeClaudeTopicToolPolicy(settingsPath = claudeSettingsPath()) {
+  try {
+    const settings = fs.existsSync(settingsPath) ? readJsonObject(settingsPath) : {};
+    const permissions = settings.permissions && typeof settings.permissions === "object" && !Array.isArray(settings.permissions)
+      ? settings.permissions : {};
+    const allow = Array.isArray(permissions.allow) ? permissions.allow : [];
+    settings.permissions = { ...permissions, allow: [...new Set([...allow, ...RELAY_CLAUDE_TOPIC_POLICY_TOOLS])] };
+    writeJsonAtomic(settingsPath, settings);
+    return { ok: true, settingsPath };
+  } catch (error) {
+    return { ok: false, reason: "claude_settings_write_failed", settingsPath,
+      detail: error?.message || String(error) };
+  }
+}
 // Ours is identifiable by the command containing "relay.js claude-hook"
 // (quoting-tolerant): install replaces exactly these, uninstall removes ONLY these.
 const RELAY_CLAUDE_HOOK_COMMAND_RE = /(?:^|[\s/\\"'])relay(?:-hook)?\.js["']?\s+["']?claude-hook["']?(?:\s|$)/;
@@ -2028,6 +2052,7 @@ export function updateTomlStringArray(text, tableName, key, value, { remove = fa
 export function codexRelayMcpTomlSection(
   bin = relayBinPath(),
   node = stableNodePath(),
+  approvalMode = "writes",
 ) {
   const launch = mcpLaunchCommand({ mcpBin: bin, node });
   return [
@@ -2036,8 +2061,23 @@ export function codexRelayMcpTomlSection(
     `args = [${launch.args.map(tomlQuote).join(", ")}]`,
     "startup_timeout_sec = 30",
     "tool_timeout_sec = 300",
+    // Read-only MCP tools use their annotations; the two Topic writes reach
+    // Relay's first-post consent gate without a host prompt on every post.
+    `default_tools_approval_mode = ${tomlQuote(approvalMode)}`,
     "",
   ].join("\n");
+}
+
+const RELAY_CODEX_TOPIC_TOOL_POLICY = ["relay_topic_post", "relay_topic_edit"];
+
+function withCodexTopicToolPolicy(config) {
+  let next = config;
+  for (const name of RELAY_CODEX_TOPIC_TOOL_POLICY) {
+    const table = `mcp_servers.relay.tools.${name}`;
+    if (!tomlTableBounds(next, table))
+      next = replaceTomlTable(next, table, `[${table}]\napproval_mode = "approve"`);
+  }
+  return next;
 }
 
 export function replaceTomlTable(text, tableName, replacement) {
@@ -2101,6 +2141,10 @@ export function writeCodexMcpConfig(
       desiredLaunch,
     );
     const registeredBin = preservedCommand || bin;
+    const previousRelayTable = tomlTableBounds(existing, "mcp_servers.relay")?.table || "";
+    const previousApprovalMode = parseTomlStringAssignment(previousRelayTable, "default_tools_approval_mode");
+    const approvalMode = new Set(["auto", "prompt", "writes", "approve"]).has(previousApprovalMode)
+      ? previousApprovalMode : "writes";
     const withDirectRelay = updateTomlStringArray(
       existing,
       "features.code_mode",
@@ -2109,7 +2153,7 @@ export function writeCodexMcpConfig(
     );
     writeTextAtomic(
       configPath,
-      replaceTomlTable(withDirectRelay, "mcp_servers.relay", codexRelayMcpTomlSection(registeredBin, node)),
+      `${withCodexTopicToolPolicy(replaceTomlTable(withDirectRelay, "mcp_servers.relay", codexRelayMcpTomlSection(registeredBin, node, approvalMode))).trimEnd()}\n`,
     );
     return { ok: true, method: "config", configPath };
   } catch (error) {
@@ -2136,7 +2180,10 @@ export function codexMcpEntryAbsent(configPath = codexConfigPath()) {
 export function removeCodexMcpConfig(configPath = codexConfigPath()) {
   if (!fs.existsSync(configPath)) return { ok: true, configPath };
   try {
-    const withoutRelayServer = removeTomlTable(fs.readFileSync(configPath, "utf8"), "mcp_servers.relay");
+    let withoutRelayServer = fs.readFileSync(configPath, "utf8");
+    for (const name of RELAY_CODEX_TOPIC_TOOL_POLICY)
+      withoutRelayServer = removeTomlTable(withoutRelayServer, `mcp_servers.relay.tools.${name}`);
+    withoutRelayServer = removeTomlTable(withoutRelayServer, "mcp_servers.relay");
     writeTextAtomic(
       configPath,
       updateTomlStringArray(
@@ -2223,12 +2270,16 @@ export function installClaudeCode(
     run(command, ["mcp", "remove", "-s", "user", "relay"]); // ignore if absent
     cliResult = run(command, ["mcp", "add", "-s", "user", "relay", "--", launch.command, ...launch.args]);
     if (cliResult.ok || /already exists/i.test(cliResult.out)) {
-      return { ok: true, method: "cli" };
+      const policy = writeClaudeTopicToolPolicy();
+      return policy.ok ? { ok: true, method: "cli" } : policy;
     }
   }
 
   const configResult = writeClaudeCodeMcpConfig(bin, node, claudeCodeConfigPath());
-  if (configResult.ok) return configResult;
+  if (configResult.ok) {
+    const policy = writeClaudeTopicToolPolicy();
+    return policy.ok ? configResult : policy;
+  }
   if (cliResult) return { ok: false, reason: "registration_failed", detail: cliResult.out, configPath: configResult.configPath };
   return { ok: false, reason: "claude_code_not_found", configPath: configResult.configPath };
 }
@@ -2245,7 +2296,8 @@ export function installCodex(
     run(command, ["mcp", "remove", "relay"]); // ignore if absent
     cliResult = run(command, ["mcp", "add", "relay", "--", launch.command, ...launch.args]);
     if (cliResult.ok || /already exists/i.test(cliResult.out)) {
-      return { ok: true, method: "cli" };
+      const policy = writeCodexMcpConfig(bin, node, codexConfigPath());
+      return policy.ok ? { ok: true, method: "cli" } : policy;
     }
   }
 
@@ -3027,9 +3079,10 @@ export function repairAgentMcpRegistrations({
 } = {}) {
   const mcpBin = ensureStableMcpLauncher({ targetBin: bin, node, homeDir });
   const claude = writeClaudeCodeMcpConfig(mcpBin, node, claudeConfigFile);
+  const claudeTopicPolicy = claude.ok ? writeClaudeTopicToolPolicy(claudeSettingsFile) : null;
   const codex = writeCodexMcpConfig(mcpBin, node, codexConfigFile);
   const claudeDesktop = installClaudeDesktop(mcpBin, node, { env: { ...process.env, HOME: homeDir } });
-  // Updates remove only Relay handlers. No new host configuration is created.
+  // Retire old hooks after refreshing MCP registration and bounded tool rules.
   const hookRepair = retireAgentHooks({
     bin,
     node,
@@ -3039,7 +3092,7 @@ export function repairAgentMcpRegistrations({
   });
   const claudeHooks = hookRepair.claudeHooks || null;
   const codexHooks = hookRepair.codexHooks || null;
-  return { ok: hookRepair.ok, mcpBin, claude, codex, claudeDesktop, hookRepair, claudeHooks, codexHooks };
+  return { ok: hookRepair.ok && (claudeTopicPolicy?.ok ?? true), mcpBin, claude, claudeTopicPolicy, codex, claudeDesktop, hookRepair, claudeHooks, codexHooks };
 }
 
 function claudeConfigHasRelay(configPath) {
@@ -3127,6 +3180,10 @@ export function repairExistingAgentRegistrations({
     }
     if (claudeInstalled) {
       claude = writeClaudeCodeMcpConfig(mcpBin, node, claudeConfigFile);
+      if (claude.ok) {
+        const policy = writeClaudeTopicToolPolicy(claudeSettingsFile);
+        if (!policy.ok) claude = policy;
+      }
     }
     if (codexInstalled) {
       codex = writeCodexMcpConfig(mcpBin, node, codexConfigFile);

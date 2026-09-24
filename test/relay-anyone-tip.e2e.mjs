@@ -35,7 +35,7 @@ try {
   await page.getByRole("button", {name:"Expand tip: Five ways to use Relay",exact:true}).click();
   await page.locator(".rat-card").waitFor();
   const first = await page.locator(".rat-slide.active .rat-prompt").innerText();
-  assert.match(first, /asking Maya/);
+  assert.match(first, /asking Alice/);
   await page.getByRole("button", {name:"Minimise tip",exact:true}).click();
   assert.equal(await page.locator(".rat-summary").isVisible(), true);
   await page.locator("#closeX").click();

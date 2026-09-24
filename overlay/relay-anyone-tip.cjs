@@ -10,7 +10,7 @@
   const EXAMPLES = Object.freeze([
     {
       way: "Send to someone not on Relay",
-      prompt: "Create a Relay asking Maya what she thinks of this launch plan.",
+      prompt: "Create a Relay asking Alice what she thinks of this launch plan.",
       result: "You’ll get a link to share. They can read and reply from Claude or Codex, without a Relay account.",
     },
     {

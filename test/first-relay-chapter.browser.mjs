@@ -222,7 +222,7 @@ try {
       window.fixtureStateReads = 0;
       window.fixturePayload = {account:{paired:false,credentialStatus:'unpaired',credentialError:'',credentialStore:'',email:'',name:'',userId:''},
         ui:{canDismiss:true,onboardingRequired:false,onboardingVersion:2,completedOnboardingVersion:0,
-          setupPrompt:'Read https://sendrelays.com/for-agents and set me up on Relay.',agentInstalled,applicationOwned,
+          agentInstalled,applicationOwned,
           firstRelayStatus:'checking',firstRelayId:'',firstLink:null,networkOnboarding:{required:false,checking:false,version:2}},
         features:{},relays:[],sent:[],contacts:[],chats:[]};
       const api = {isTestOverlay:true, refresh:async () => structuredClone(window.fixturePayload),
@@ -253,8 +253,9 @@ try {
   await auto.signedOut.close();
 
   const manual = await openSignedOut({agentInstalled:false, authState:{status:'idle'}});
-  await manual.signedOut.locator('#suCopySetup').waitFor();
-  assert.equal(await manual.signedOut.locator('#suCopySetup').textContent(), 'Copy setup prompt');
+  // Relay is already installed wherever the pill runs, so no signed-out screen offers an agent setup prompt.
+  await manual.signedOut.locator('#signupView').getByText('Sign in to get started.').waitFor();
+  assert.equal(await manual.signedOut.locator('#suCopySetup').count(), 0, 'nothing for an agent to install');
   assert.equal((await manual.signedOut.locator('#suGoogle').textContent()).trim(), 'Continue with Google');
   assert.equal(await manual.signedOut.locator('#suSignIn').textContent(), 'Use email instead');
   await manual.signedOut.waitForTimeout(250);

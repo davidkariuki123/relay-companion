@@ -32,7 +32,7 @@ test("a Request arrives in the banner like any relay, newest first, wearing its 
   assert.match(peek, /const requests = requestRooms\(\)/);
   assert.match(peek, /room\.unreadCount > 0/);
   assert.match(peek, /requestRoom: true/);
-  assert.match(peek, /identityRows\.filter\(\(row\) => row\.unreadCount > 0\)\.concat\(requests\)/);
+  assert.match(peek, /bannerIdentityRows\(identityRows, allRows\)\.concat\(requests\)/);
   // Its own class: "Request" is the pane's word for a stranger's message, and
   // the product-language test retires the bare kchip that once meant a Task.
   assert.match(row, /\$\{peeking && identity\.requestRoom \? `<span class="kchip request">Request<\/span>` : ""\}/);

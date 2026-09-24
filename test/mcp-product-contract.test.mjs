@@ -140,9 +140,8 @@ test("startup guidance and owner schemas preserve the complete product ontology"
   assert.match(skillGuide, /accepted as-is/);
   // Standing approval must be visible before a deferred posting tool is opened.
   for (const guidance of [RELAY_MCP_INSTRUCTIONS, SESSION_CHECKIN_AUDIT, byName.get("relay_topic_post").description, devSkillGuide]) {
-    assert.match(guidance, /Joining a Topic approves posting under its current mandate/);
-    assert.match(guidance, /auto-post enabled \(the default\).*post qualifying work.*without asking.*tell the person/);
-    assert.match(guidance, /otherwise show the exact draft and ask first/);
+    assert.match(guidance, /Post qualifying work to joined Topics and tell the person/);
+    assert.match(guidance, /On topic_first_post_approval_required, show the draft and ask once/);
   }
   assert.doesNotMatch(REQUESTS_DISABLED_INSTRUCTIONS, /Topic|auto-post/);
   assert.match(RELAY_MCP_INSTRUCTIONS, /Task Runs finish automatically/i);

@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { executeNativeTask, executionRecord } from "../src/native-task-execute.js";
-import { claudeWorkspaceTrusted, executionEnabled, executionPreferences, setExecutionPreferences, nativeProgress, selectCodexModel, submitNativeTurn } from "../src/native-task-launch.js";
+import { executeNativeTask, executionRecord, pendingNativeDrafts, nativeExecutionStatus } from "../src/native-task-execute.js";
+import { prepareClaudeDraft } from "../src/claude-task-fallback.js";
+import { claudeWorkspaceTrusted, executionEnabled, executionPreferences, setExecutionPreferences, nativeProgress, nativeSessionReady, selectCodexModel, submitNativeTurn } from "../src/native-task-launch.js";
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-native-test-"));
@@ -16,7 +17,7 @@ function fixture(t) {
   });
   const calls = [], config = { apiUrl: "https://dev-api.example.test", user: { id: "user-test", accountKind: "human", isDeveloper: true } };
   let optedIn = false;
-  const session = { provider: "claude", nativeId: "dfed5caa-b1dc-4e87-8e19-2ea0bd49bb16", url: "claude://resume?session=dfed5caa-b1dc-4e87-8e19-2ea0bd49bb16" };
+  const session = { provider: "claude", cwd: root, nativeId: "dfed5caa-b1dc-4e87-8e19-2ea0bd49bb16", url: "claude://resume?session=dfed5caa-b1dc-4e87-8e19-2ea0bd49bb16" };
   const args = {
     id: "relay-test", config, env: { RELAY_ENV: "dev" },
     client: {
@@ -38,6 +39,142 @@ function fixture(t) {
   };
   return { root, config, args, calls, session };
 }
+
+function draftFixture(t) {
+  const f = fixture(t);
+  let bound = null;
+  Object.assign(f.args.nativeApi, {
+    claudeLaunchPreflight: async () => ({ manual: true, reason: "capacity" }),
+    claudeWorkspaceTrusted: () => true,
+    prepareClaudeDraft,
+    findClaudeDraftSession: () => bound,
+  });
+  return { ...f, bind: () => { bound = { ...executionRecord(f.config, f.args.id).session, ...f.session, fromDraft: true }; } };
+}
+
+test("capacity opens one draft without claiming or submitting; after Send, observer claims exact owner and submits once", async (t) => {
+  const f = draftFixture(t), { args, calls, config } = f;
+  const result = await executeNativeTask(args);
+  assert.equal(result.awaitingSend, true);
+  assert.deepEqual(calls, ["gate", "consent", "fetch", "open"]);
+  assert.equal(executionRecord(config, args.id).startedAt, undefined);
+  assert.match(nativeExecutionStatus(executionRecord(config, args.id)), /press Send/);
+  assert.deepEqual(pendingNativeDrafts(config), [args.id]);
+  await executeNativeTask({ ...args, observeOnly: true });
+  assert.deepEqual(calls, ["gate", "consent", "fetch", "open"], "waiting makes no network or native calls");
+  await executeNativeTask(args);
+  assert.equal(calls.filter((c) => c === "open").length, 1, "repeat click cannot duplicate draft without confirmation");
+  f.bind();
+  calls.length = 0;
+  await executeNativeTask({ ...args, observeOnly: true });
+  assert.deepEqual(calls, ["gate", "ready", "reserve", "fetch", "submit"]);
+  assert.equal(executionRecord(config, args.id).phase, "accepted");
+  assert.deepEqual(pendingNativeDrafts(config), []);
+  await executeNativeTask({ ...args, observeOnly: true });
+  assert.equal(calls.filter((c) => c === "submit").length, 1);
+});
+
+test("a closed draft can be explicitly replaced; old token is retired, no Task work has started", async (t) => {
+  const { args, config, calls } = draftFixture(t);
+  await executeNativeTask(args);
+  const previous = executionRecord(config, args.id).session.draftId;
+  await executeNativeTask({ ...args, confirmDraftRetry: async () => true });
+  assert.notEqual(executionRecord(config, args.id).session.draftId, previous);
+  assert.equal(calls.filter((c) => c === "open").length, 2);
+  assert.equal(calls.includes("reserve"), false);
+});
+
+test("full Task content is delivered only after binding; the link never truncates a large Task", async (t) => {
+  const f = draftFixture(t), { args, config } = f;
+  const context = "long task context ".repeat(3000);
+  args.client.fetchRelay = async () => ({ packet: { title: "Large task", forAgent: context, attachments: [{ id: "file-test" }] } });
+  let delivered;
+  args.nativeApi.submitNativeTurn = async (_session, _ready, prompt) => { delivered = prompt; };
+  await executeNativeTask(args);
+  const draft = executionRecord(config, args.id).session;
+  assert.ok(draft.url.length < 2000);
+  assert.equal(draft.url.includes("long+task"), false);
+  assert.equal(delivered, undefined);
+  f.bind();
+  await executeNativeTask({ ...args, observeOnly: true });
+  assert.ok(delivered.includes(context));
+  assert.ok(delivered.includes('"id":"file-test"'));
+});
+
+test("unknown open acknowledgement is watched after restart and is never blindly reopened", async (t) => {
+  const f = draftFixture(t);
+  await assert.rejects(executeNativeTask({ ...f.args, open: async () => { throw new Error("lost open acknowledgement"); } }), /lost open/);
+  assert.equal(executionRecord(f.config, f.args.id).phase, "draft_opening");
+  f.bind();
+  await executeNativeTask({ ...f.args, observeOnly: true });
+  assert.equal(f.calls.filter((c) => c === "submit").length, 1);
+});
+
+test("draft waits through slow inbox startup; disabling during startup prevents even a reservation", async (t) => {
+  const f = draftFixture(t), { args, calls, config } = f;
+  await executeNativeTask(args);
+  f.bind();
+  args.nativeApi.nativeSessionReady = async () => { throw Object.assign(new Error("warming"), { code: "CLAUDE_NOT_READY" }); };
+  assert.equal((await executeNativeTask({ ...args, observeOnly: true })).waiting, true);
+  assert.deepEqual(pendingNativeDrafts(config), [args.id]);
+  assert.equal(calls.includes("reserve"), false);
+  args.nativeApi.nativeSessionReady = async () => { args.nativeApi.setExecutionPreferences(config, { enabled: false }); return {}; };
+  await assert.rejects(executeNativeTask({ ...args, observeOnly: true }), /disabled/);
+  assert.equal(calls.includes("reserve"), false);
+});
+
+test("a chosen untrusted folder goes through native folder confirmation instead of an import error", async (t) => {
+  const { args, calls } = draftFixture(t);
+  args.nativeApi.claudeLaunchPreflight = async () => ({ manual: false, reason: "headroom" });
+  args.nativeApi.claudeWorkspaceTrusted = () => false;
+  assert.equal((await executeNativeTask(args)).awaitingSend, true);
+  assert.equal(calls.includes("prepare"), false);
+  assert.equal(calls.includes("reserve"), false);
+});
+
+test("an earlier unsent prepared conversation is preflighted before reopening", async (t) => {
+  const { args, calls } = draftFixture(t);
+  args.nativeApi.claudeLaunchPreflight = async () => ({ manual: false });
+  args.nativeApi.nativeSessionReady = async () => { throw new Error("old-version failure"); };
+  await assert.rejects(executeNativeTask(args), /old-version failure/);
+  calls.length = 0;
+  args.nativeApi.claudeLaunchPreflight = async () => ({ manual: true, reason: "capacity" });
+  assert.equal((await executeNativeTask(args)).awaitingSend, true);
+  assert.deepEqual(calls, ["gate", "open"]);
+});
+
+test("readiness timeout offers a draft, but submission ambiguity never does", async (t) => {
+  const { args, calls, config } = draftFixture(t);
+  args.nativeApi.claudeLaunchPreflight = async () => ({ manual: false });
+  args.nativeApi.nativeSessionReady = async () => { throw Object.assign(new Error("not ready"), { code: "CLAUDE_NOT_READY" }); };
+  assert.equal((await executeNativeTask(args)).awaitingSend, true);
+  assert.equal(calls.includes("reserve"), false);
+  assert.equal(executionRecord(config, args.id).session.unusedPreparedNativeId, "dfed5caa-b1dc-4e87-8e19-2ea0bd49bb16");
+});
+
+test("draft observer stops on changed account, revoked consent, different owner and ambiguous delivery", async (t) => {
+  const f = draftFixture(t), { args, calls, config } = f;
+  await executeNativeTask(args);
+  f.bind();
+  calls.length = 0;
+  await executeNativeTask({ ...args, observeOnly: true, isCurrentAccount: () => false });
+  assert.deepEqual(calls, []);
+  args.nativeApi.setExecutionPreferences(config, { enabled: false });
+  await executeNativeTask({ ...args, observeOnly: true });
+  assert.deepEqual(calls, []);
+  args.nativeApi.setExecutionPreferences(config, { enabled: true });
+  const normalReserve = args.client.taskExecute;
+  args.client.taskExecute = async (_id, input) => input ? { taskRunOwner: { nativeSessionId: "other", provider: "claude" } } : {};
+  await assert.rejects(executeNativeTask({ ...args, observeOnly: true }), /another conversation/);
+  assert.equal(calls.includes("submit"), false);
+  assert.deepEqual(pendingNativeDrafts(config), [], "failed ownership is not retried in background");
+  args.client.taskExecute = normalReserve;
+  args.nativeApi.submitNativeTurn = async () => { calls.push("submit"); throw new Error("lost acknowledgement"); };
+  await assert.rejects(executeNativeTask(args), /lost acknowledgement/);
+  assert.equal(executionRecord(config, args.id).phase, "uncertain");
+  await executeNativeTask(args);
+  assert.equal(calls.filter((c) => c === "submit").length, 1);
+});
 
 test("ordinary accounts cannot reach the transport on any deployment; developers can on every one", async (t) => {
   const { args, calls } = fixture(t);
@@ -88,14 +225,34 @@ test("lost acknowledgement survives restart and is never replayed", async (t) =>
 });
 
 test("readiness failure can retry the same conversation without a duplicate", async (t) => {
-  const { args, calls } = fixture(t);
+  const { args, calls, config } = fixture(t);
   args.nativeApi.nativeSessionReady = async () => { throw new Error("not ready"); };
   await assert.rejects(executeNativeTask(args), /not ready/);
   assert.equal(calls.includes("submit"), false);
+  assert.equal(calls.includes("reserve"), false);
+  const prepared = executionRecord(config, args.id);
+  assert.equal(prepared.phase, "prepared");
   args.nativeApi.nativeSessionReady = async () => ({});
   await executeNativeTask(args);
+  assert.equal(executionRecord(config, args.id).messageId, prepared.messageId);
+  assert.deepEqual(executionRecord(config, args.id).session, prepared.session);
   assert.equal(calls.filter((c) => c === "prepare").length, 1);
   assert.equal(calls.filter((c) => c === "submit").length, 1);
+});
+
+test("Claude readiness timeout explains capacity and preserves a safe manual recovery", async (t) => {
+  const { root } = fixture(t);
+  const previous = process.env.CLAUDE_HOME;
+  process.env.CLAUDE_HOME = root;
+  t.after(() => {
+    if (previous === undefined) delete process.env.CLAUDE_HOME; else process.env.CLAUDE_HOME = previous;
+  });
+  await assert.rejects(nativeSessionReady({ provider: "claude", nativeId: "unavailable" }, { timeoutMs: 0 }), (error) => {
+    assert.match(error.message, /may have reached its session or memory limit/);
+    assert.match(error.message, /No task prompt was sent; retrying will reuse this conversation/);
+    assert.match(error.message, /Copy for your agent/);
+    return true;
+  });
 });
 
 test("a different device winning ownership never receives a second prompt", async (t) => {

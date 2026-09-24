@@ -1,6 +1,6 @@
 ---
 name: relay
-description: Use Relay from Claude Code or Codex with Companion's local MCP tools and the protocol helper for setup and fallback. Use when the person asks what Relay is or what they can do with it, to set up Relay, read or send a Relay, check messages, act on a received Relay or continue that work, reply to a contact, share their invite link, or continue the first-run Relay tutorial. Preserve existing integrations.
+description: Use Relay from Claude Code or Codex with Companion's local MCP tools and the protocol helper as fallback. Use when the person asks what Relay is or what they can do with it, to set up Relay (people install the Relay app themselves from its download page), read or send a Relay, check messages, act on a received Relay or continue that work, reply to a contact, share their invite link, or continue the first-run Relay tutorial. Preserve existing integrations.
 ---
 
 <!--
@@ -226,77 +226,36 @@ Verify again after repair: one current daemon and pill, no obsolete broker, resp
 
 ## Check for Relay before starting setup
 
-A pasted invitation may be a request to add a contact from someone who already uses Relay. Before asking to install anything, make read-only checks in the current environment: look for an available Relay integration, the relay executable on PATH, an installed Relay skill and its supported helper, or an existing Companion installation. Do not install or update software merely to check whether it exists, and never inspect credential-file contents.
+A pasted invitation may be a request to add a contact from someone who already uses Relay. Before sending them to download Relay, make read-only checks in the current environment: look for an available Relay integration, the relay executable on PATH, an installed Relay skill and its supported helper, or an existing Companion installation. Do not install or update software merely to check whether it exists, and never inspect credential-file contents.
 
 When the existing protocol helper is available, run its status command, then request GET /v1/me through that same helper to verify the live account. Status alone describes saved local state; it does not prove the connection works. An existing hosted integration can supply an equivalent read-only account check. Keep hosted integrations intact. Missing skill discovery, a command absent from PATH, a stopped Companion, expired authorization, a network failure, or a different local/remote environment does not prove Relay is uninstalled. Preserve what is installed; explain the specific issue and resolve the account or environment with the human before replacing any connection. Reopen an installed Companion when needed instead of installing it again.
 
 If Relay is already installed or connected, treat this as contact-only unless the human explicitly asks for more setup. Use the invitation's contact page in the person's usual browser: append /contact to its /i/{token} URL. The invitation document supplies the exact link. Explain that accepting adds both people to each other's contacts without sending a message. Have the human check that the browser shows the same Relay account they use in their AI and choose Add contact. If the browser is signed out, sign in to the existing account. Use a supported system-browser opener; if unavailable, show the exact contact URL in a plain-text code block for the human to copy into their usual browser. Do not open sign-in in an AI-controlled browser. Do not request a new agent authorization, replace credentials, reinstall Companion, update or reinstall skills, or repeat the first-message tutorial just to accept another invite.
 
-The contact page confirms connected, already connected, or own-invite results only after redemption succeeds. Do not claim a contact was added just because the page opened or a name-only contact search matched. If the result is unavailable or ambiguous, report that and verify before claiming success. Opening one's own invite adds no contact. Finish with the contact result; a separate message requires the human's explicit approval. Only continue into new setup when it is actually needed and authorized. If the installation state is uncertain, ask whether the person already uses Relay rather than assuming a fresh install.
+The contact page confirms connected, already connected, or own-invite results only after redemption succeeds. Do not claim a contact was added just because the page opened or a name-only contact search matched. If the result is unavailable or ambiguous, report that and verify before claiming success. Opening one's own invite adds no contact. Finish with the contact result; a separate message requires the human's explicit approval. Only send them to download Relay when new setup is actually needed. If the installation state is uncertain, ask whether the person already uses Relay rather than assuming a fresh install.
 
-## Connect
+## Connection and reconnection
 
-Only when the checks above establish that new setup is needed, first read the
-current invitation's agent document and resolve its exact promoted package. Use
-setup permission already given in this conversation when it covers that package
-and source. Otherwise, when the host exposes a permitted built-in user-question
-interface, call it and wait for the answer; do not put the question in ordinary
-assistant chat or a final response. Put the complete permission question from
-the invitation in the interface's question field, including the exact package
-version and npm source, the exact invitation and /agent URLs to open or fetch,
-the Relay API connection, browser approval handoff, the skill the Relay app
-keeps up to date, and the Companion app that keeps running in the background,
-updates itself and registers itself with this AI. Tell the person what setup
-does before asking and answer any question about it in full. Offer a plain
-choice to set up Relay and a plain choice to decline for now. Reuse consent for the actions it
-already covers, following the complete setup scope and first-fetch guidance above.
-Only ask in chat when no permitted question interface is exposed or it cannot
-carry the complete question. Never present the question both ways, and never
-treat a suggested or preselected choice as consent.
+The Relay app connects this AI to the person's Relay account. Never start a new
+setup, run a package installer or pair a device yourself; send a person without
+Relay to the download page as described above.
 
-After a direct affirmative answer, and never before it, say briefly that
-Relay's app is starting to install. On a supported local desktop, run the
-invitation's exact pinned background-install as the first setup command, ahead
-of the browser approval step and the skill install so the download is ready
-when the person finishes signing in, unless clarification or further permission
-is needed first. Stay within the existing setup consent and ask
-follow-up questions whenever needed. Confirm from the
-result that it started or is already running, then continue without waiting for
-the download. A hidden shell on a local desktop is not a headless machine.
-Use the exact connect-start command, API origin and invitation token from the
-current `/i/:token/agent` document. If you have not read it, fetch it first;
-never guess a hostname, substitute an environment keyword, or reconstruct setup
-from an older installed skill. Open its approval URL in the person's usual
-browser. Never ask for a password, Google credential, one-time code or Relay
-access token in chat. No skill discovery or agent restart is needed.
-The installer waits for the verified
-connection before adopting that account and activating Companion, without
-another login. Skip desktop installation on a hosted/headless machine.
+When the helper's direct HTTPS access has expired or needs renewal, renew it
+with the helper's `connect-start` and `connect-finish` (see below). They create
+an authorization with `POST /v1/agent/authorizations` and consume it after
+browser approval with `POST /v1/agent/authorizations/:id/consume`. Treat older
+`/v1/invites-v2/authorizations` routes as compatibility-only. Open the approval
+in the person's usual browser as described below. Never ask for a password,
+Google credential, one-time code or Relay access token in chat.
 
-After browser approval, run connect-finish, then follow the invitation's host
-activation procedure: install the skill, attempt supported discovery refresh in
-the running Claude Code or Codex host, and verify the scope of activation. Keep
-Companion installation non-blocking; continue as soon as the HTTPS protocol is
-ready. If the approval link expires, renew browser approval without restarting
-a running installer. Before asking for first-message approval on a supported
-desktop, check background-status. If idle because installation was missed,
-run the pinned background-install now under the existing setup consent. If it
-failed or stopped, diagnose the issue and retry only when appropriate. Never
-duplicate a running installer or bypass a host permission denial. Report
-installation failures separately from the working connection.
-
-Create the authorization with `POST /v1/agent/authorizations` and consume it
-after browser approval with `POST /v1/agent/authorizations/:id/consume`. Treat
-older `/v1/invites-v2/authorizations` routes as compatibility-only.
-
-Use the exact pinned `npx relay-companion@<version> protocol ...` command from
-the invite instructions during cold setup. Once `relay` is on `PATH`, use
-`relay protocol ...`. Both delegate to the bundled helper without exposing its
-credential. If direct invocation is ever required, resolve `RELAY_SKILL_ROOT`
-to the absolute directory containing this loaded `SKILL.md` and invoke
+Once `relay` is on `PATH`, use `relay protocol ...`. It delegates to the
+bundled helper without exposing its credential. If direct invocation is ever
+required, resolve `RELAY_SKILL_ROOT` to the absolute directory containing this loaded
+`SKILL.md` and invoke
 `node "<RELAY_SKILL_ROOT>/scripts/relay-protocol.mjs" ...`; never assume the
 current working directory is the skill directory. The helper reads an
-owner-only credential file and never prints the access token. The background Companion installer registers local MCP. Do not add hooks or configure a hosted MCP server.
+owner-only credential file and never prints the access token. The Relay app
+registers local MCP. Do not add hooks or configure a hosted MCP server.
 
 Except for contact-only invitations, once per new agent session, quietly run `relay skill update` only if the `relay`
 executable is already available on `PATH`. If it is unavailable, skip the check
@@ -322,47 +281,6 @@ A successful opener only confirms that the launch request was accepted; it does 
 If a normal-browser opener is unavailable, this is a remote/headless environment, opening fails, the wrong browser opens, the human cannot find the tab, or opening or focus is unverified, say: “Copy this URL into your usual browser to approve Relay, then return here.” Immediately below that sentence, show the exact approvalUrl in one fenced plain-text code block containing only the URL. Keep its full fragment intact; do not shorten, redact, wrap, or replace it with link text. Do this before yielding to wait for approval. Never claim the browser opened or approval succeeded without evidence.
 <!-- END GENERATED RELAY BROWSER APPROVAL -->
 
-## Give the human a block for another AI
-
-After verifying the connection and attempting setup, include a copyable plain-text block in the completion response, even if the human skips or declines the first-message tutorial. This is an optional way to start using Relay in another AI, not a prerequisite for finishing here or a workaround for skill discovery. Do not paste it into another conversation yourself.
-
-Use the human's own reusable invitation from the helper's safe invite.url result or protocol invite-link. Never substitute the original inviter's link, invent a URL, or include credentials, pending-authorization data, or the one-time approval URL. Replace <my own Relay invite URL> below with that verified link. If it cannot be retrieved, report that limitation and give the block with the URL sentence omitted; do not delay the working connection or claim another surface is already connected.
-
-Introduce it with: “To use Relay in another AI, paste this there:”
-
-```text
-I already use Relay. Help me use the same Relay account in this AI too.
-My own Relay invite URL is: <my own Relay invite URL>
-Read the current Relay agent guide at https://sendrelays.com/llm_guide.md and the agent instructions linked from my invitation if provided. First check for an existing Relay connection on this device using the supported helper's status command; preserve a working connection and verify it is my intended account. Ask before installing or updating the skill for this AI. If this environment needs a new connection, guide me through setup with my existing account in my usual browser. Never copy credentials between environments. Do not send a message or repeat the first-message tutorial. Verify what works here.
-```
-
-## Verify skill activation after setup
-
-Own activation under the setup permission already given. Follow the activation
-procedure in the invitation's `/i/:token/agent` document, including checking the
-host environment and whether its personal skills directory existed before
-installation. Use the installer's absolute skill path. Check the existing
-connection with the helper's `status`; never expose credentials or reconnect a
-working account just to test discovery.
-
-Check the running host's skill catalogue or native skill invocation, not only
-connector/tool search. For Claude Code, use the exposed Skill tool for a
-read-only Relay status request if available; use a refresh capability only if
-the host exposes and supports it for standalone skills. Do not assume terminal
-slash commands work in the GUI or shell. For Codex, an already-connected,
-supported app-server can use `skills/list` with the actual workspace in `cwds`
-and `forceReload: true`; a newly launched process cannot refresh the existing
-GUI. Do not invent missing tools or silently change disabled-skill settings.
-
-Distinguish installed files, discovery in this session, and verified discovery
-in other existing sessions. Loading this file manually or successfully running
-the helper proves no other session has discovered it. Record the host, path,
-version, attempted mechanism and observed scope. If no supported refresh is
-available or it fails, continue through the helper and report that existing
-session activation remains unverified or failed. Do not claim app-wide setup
-complete, ask for restarts or compatibility messages, kill processes, alter host
-internals, add hooks/connectors/plugins, or inject prompts into other sessions.
-
 <!-- BEGIN GENERATED RELAY FIRST TUTORIAL -->
 ## First Relay tutorial
 
@@ -381,11 +299,6 @@ After setup, ask once where they usually use their agent: a desktop app, the ter
 
 After the approved send, say: "You can check for replies here in Claude Code—just ask me." Use Codex instead when that is the current host. Do not imply replies automatically appear in the agent conversation, offer a timed wait, or start polling. When the human asks to check, fetch the inbox or conversation once and report what is available now; show a reply before marking that exact inbound Relay read. Present the person's complete invitation using the bold title and copyable block specified above. The invitation connects people; it does not send a Relay.
 <!-- END GENERATED RELAY FIRST TUTORIAL -->
-
-After the tutorial finishes or the person skips it, check the pinned Companion's
-`background-status` once if background installation was started. Report whether
-installation succeeded, is still running, or failed; keep the working helper
-available. Installation success does not prove MCP is active in this session.
 
 The tutorial activation event is the approved first Relay, not app installation.
 

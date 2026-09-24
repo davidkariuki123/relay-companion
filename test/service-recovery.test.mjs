@@ -6,6 +6,7 @@ import path from "node:path";
 import io from "../bootstrap/recovery-launcher.cjs";
 import services from "../bootstrap/service-recovery.cjs";
 import schedule from "../bootstrap/recovery-schedule-handover.cjs";
+import { model } from "./helpers/handover-model.cjs";
 function fixture(t) {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-service-restore-"));
   t.after(() => { assert.equal(path.dirname(homeDir), os.tmpdir()); fs.rmSync(homeDir, { recursive: true, force: true }); });
@@ -29,16 +30,13 @@ test("uncertain task queries never authorize rebuilding registrations", async t 
   assert.equal(result.blocked, true);
 });
 test("macOS scheduler handover restores the old file when new bootstrap fails", async t => {
-  const homeDir = fixture(t), root = path.join(homeDir, ".relay", "recovery");
-  const plist = path.join(homeDir, "Library", "LaunchAgents", "work.relay.companion.recovery.plist");
-  fs.mkdirSync(path.dirname(plist), { recursive: true }); fs.mkdirSync(root, { recursive: true });
-  fs.writeFileSync(plist, "new"); fs.writeFileSync(path.join(root, "scheduler-previous.plist"), "old");
-  const calls = [];
+  const homeDir = fixture(t), m = model(homeDir);
+  m.save({ ...m.read(), bootstrapFailures: 1 });
   const result = await schedule.handover({ homeDir, userId: 123, attempts: 1,
-    run: (_file, args) => { calls.push(args[0]); return { status: calls.length === 2 ? 1 : 0 }; } });
+    run: m.run, report() {} });
   assert.equal(result.ok, false);
-  assert.deepEqual(calls, ["bootout", "bootstrap", "bootstrap", "remove"], "a failed handover still retires its KeepAlive job");
-  assert.equal(fs.readFileSync(plist, "utf8"), "old");
+  assert.deepEqual(m.mutations(), ["bootout", "bootstrap", "bootstrap", "remove"], "a confirmed restored schedule allows retirement");
+  assert.equal(JSON.parse(fs.readFileSync(m.plist, "utf8")).StartInterval, 300);
   assert.equal(fs.existsSync(path.join(homeDir, ".relay", "runtime", "transaction.lock")), false);
 });
 test("macOS handover does not unload a controller holding the launcher lock", async t => {
@@ -47,23 +45,21 @@ test("macOS handover does not unload a controller holding the launcher lock", as
   try {
     const calls = [];
     const result = await schedule.handover({ homeDir, userId: 123, attempts: 1, sleep: async () => {}, report: () => {},
-      run: (_file, args) => { calls.push(args.join(" ")); assert.equal(args[0], "remove", "controller is active"); return { status: 0 }; } });
-    assert.deepEqual(calls, ["remove work.relay.recovery.schedule-handover"]);
+      run: (_file, args) => { calls.push(args.join(" ")); assert.fail("controller is active"); } });
+    assert.deepEqual(calls, [], "contention must retain the pending handover");
     assert.equal(result.reason, "recovery-schedule-handover-deadline");
   } finally { release(); }
 });
 
 test("a successful macOS handover reports, then removes its own KeepAlive job", async t => {
-  const homeDir = fixture(t), root = path.join(homeDir, ".relay", "recovery");
-  const plist = path.join(homeDir, "Library", "LaunchAgents", "work.relay.companion.recovery.plist");
-  fs.mkdirSync(path.dirname(plist), { recursive: true }); fs.mkdirSync(root, { recursive: true }); fs.writeFileSync(plist, "new");
+  const homeDir = fixture(t), m = model(homeDir);
   const order = [];
   const result = await schedule.handover({ homeDir, userId: 123, attempts: 1,
     report: value => order.push(`report:${value.ok}`),
-    run: (_file, args) => { order.push(args[0] === "remove" ? `remove:${args[1]}` : args[0]); return { status: 0 }; } });
+    run: (file, args, options) => { if (["bootout", "bootstrap", "remove"].includes(args[0])) order.push(args[0]); return m.run(file, args, options); } });
   assert.equal(result.ok, true);
-  assert.deepEqual(order, ["bootout", "bootstrap", "report:true", "remove:work.relay.recovery.schedule-handover"]);
-  assert.equal(io.read(path.join(root, "scheduler.json")).intervalSeconds, 60);
+  assert.deepEqual(order, ["bootout", "bootstrap", "report:true", "remove", "report:true"]);
+  assert.equal(io.read(path.join(m.root, "scheduler.json")).intervalSeconds, 60);
 });
 test("a finished handover left by an older build is retired only when idle and the 60 s job is loaded", t => {
   const homeDir = fixture(t);
@@ -72,7 +68,8 @@ test("a finished handover left by an older build is retired only when idle and t
     const run = (_file, args) => {
       calls.push(args[0]);
       if (args[0] === "print") return { status: 0, stdout: `\trun interval = ${interval} seconds\n` };
-      if (args[0] === "list") return listed ? { status: 0, stdout: `{\n\t"Label" = "x";${pid ? `\n\t"PID" = ${pid};` : ""}\n};` } : { status: 113 };
+      if (args[0] === "list") return listed ? { status: 0, stdout: `{\n\t"Label" = "${schedule.HANDOVER_LABEL}";${pid ? `\n\t"PID" = ${pid};` : ""}\n};` } : { status: 113 };
+      if (args[0] === "remove") listed = false;
       return { status: 0 };
     };
     return { run, calls };
@@ -89,6 +86,6 @@ test("a finished handover left by an older build is retired only when idle and t
   probe = launchd({ listed: false });
   assert.equal(schedule.retireFinishedHandover({ homeDir, userId: 1, run: probe.run }).reason, "absent");
   probe = launchd();
-  assert.deepEqual(schedule.retireFinishedHandover({ homeDir, userId: 1, run: probe.run }), { removed: true, reason: "idle" });
-  assert.deepEqual(probe.calls, ["print", "list", "remove"]);
+  assert.deepEqual(schedule.retireFinishedHandover({ homeDir, userId: 1, run: probe.run }), { removed: true, pending: false, reason: "idle" });
+  assert.deepEqual(probe.calls, ["print", "list", "remove", "list"]);
 });

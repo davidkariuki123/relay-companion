@@ -32,7 +32,7 @@ test("Copy link puts the complete canonical invitation and short URL on the clip
     assert.equal(result.ok, true);
     assert.equal(result.url, url);
     assert.equal(clipboard, expected);
-    assert.ok(clipboard.includes("Please help me connect on Relay using this invitation:"));
+    assert.ok(clipboard.includes("Open this invitation to download the Relay app:"));
   }
 });
 

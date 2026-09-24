@@ -11,11 +11,8 @@ const main = readFileSync(path.join(ROOT, "overlay/main.cjs"), "utf8");
 const config = readFileSync(path.join(ROOT, "src/config.js"), "utf8");
 const cli = readFileSync(path.join(ROOT, "bin/relay.js"), "utf8");
 
-test("first run offers agent setup and explicit sign-in without starting authorization", () => {
+test("first run offers explicit sign-in without starting authorization", () => {
   for (const copy of [
-    "Get started with Relay",
-    "Set up Relay with",
-    "New or returning, Google signs you in.",
     "What’s your email?",
     "Enter your code.",
     "Continue in your browser.",
@@ -44,9 +41,12 @@ test("first run offers agent setup and explicit sign-in without starting authori
   assert.doesNotMatch(overlay, /Welcome back\./);
 });
 
-test("an application-installed Relay signs in with Google first and offers no agent setup prompt", () => {
-  const stage = overlay.slice(overlay.indexOf('if (signupStage === "method" && payload.ui?.applicationOwned === true) {'), overlay.indexOf('if (signupStage === "method") {'));
-  assert.ok(stage.length > 0, "the application screen is decided before the generic method stage");
+test("a signed-out Relay signs in with Google first and offers no agent setup prompt", () => {
+  const stage = overlay.slice(overlay.indexOf('if (signupStage === "method") {'), overlay.indexOf('if (signupStage === "email") {'));
+  assert.ok(stage.length > 0, "the method stage is the sign-in screen");
+  // Agents no longer install Relay, so no signed-out screen offers a setup prompt.
+  assert.doesNotMatch(overlay, /suCopySetup|payload.ui?.setupPrompt|for-agents and set me up/);
+  assert.doesNotMatch(main, /setupPrompt:|for-agents and set me up/);
   for (const copy of ["Welcome to Relay", "Sign in to get started.", "Relay is set up on this computer.", "Continue with Google", "Use email instead",
     "quit and reopen Claude Code or Codex"]) assert.match(stage, new RegExp(copy.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(stage, /class="su-primary su-google" id="suGoogle"/, "Google is the primary way in");

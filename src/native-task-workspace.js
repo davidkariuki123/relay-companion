@@ -63,8 +63,9 @@ function safeIndex() {
 }
 
 // The list the picker shows: { options, suggested, browse, question, caption }.
-// `options` are launchable pairs, best first; `browse` is one "another
-// folder…" row per installed app.
+// `options` are launchable pairs, best first, each with the folder's `name`
+// and the `app` the page draws separately; `browse` is one "another folder…"
+// chip per installed app.
 export function workspaceChoices({
   providers = [],
   preferences = {},
@@ -90,7 +91,7 @@ export function workspaceChoices({
     if (seen.has(key)) return;
     seen.add(key);
     if (!trusted(provider, clean)) return;
-    options.push({ provider, cwd: clean, label: `${providerLabel(provider)} · ${workspaceName(clean)}`, reason, why });
+    options.push({ provider, cwd: clean, name: workspaceName(clean), app: providerLabel(provider), label: `${providerLabel(provider)} · ${workspaceName(clean)}`, reason, why });
   };
 
   const route = chooseOpenCwd({
@@ -120,7 +121,7 @@ export function workspaceChoices({
   return {
     options: trimmed,
     suggested: trimmed[0] || null,
-    browse: providerOrder.map((provider) => ({ provider, label: `${providerLabel(provider)} · another folder…` })),
+    browse: providerOrder.map((provider) => ({ provider, app: providerLabel(provider), label: `${providerLabel(provider)} · another folder…` })),
     question, caption,
   };
 }

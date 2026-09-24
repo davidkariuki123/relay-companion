@@ -233,6 +233,7 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
     try {
       const retired = require("./recovery-schedule-handover.cjs").retireFinishedHandover({ homeDir });
       if (retired.removed) log("retired a finished recovery schedule handover that launchd kept alive");
+      else if (retired.pending && retired.reason !== "running") log(`schedule handover cleanup pending: ${retired.reason}`);
     } catch (error) { log(`schedule handover check failed: ${error.message}`); }
   }
   // A services repair restarts the runtime; say why, whatever the outcome.

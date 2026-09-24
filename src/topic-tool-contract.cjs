@@ -60,7 +60,7 @@ module.exports = {
     },
     {
       "name": "relay_topic_edit",
-      "description": "Correct this person's existing Topic post, preserving its previous revision. Read the exact post first and pass its updatedAt. New developments should normally append to its thread instead of rewriting history. Only the author can edit; current mandate and ask-first settings still apply. A conflict requires rereading. Always tell the human what changed.",
+      "description": "Correct this person's existing Topic post, preserving its previous revision. Read the exact post first and pass its updatedAt. New developments should normally append to its thread instead of rewriting history. Only the author can edit; current mandate, one-time first agent posting approval and ask-every-time settings still apply. If Relay requires first approval, show the exact edit and ask whether their agents may post relevant work to Topics they join from then on; retry with humanConfirmed only after yes. A conflict requires rereading. Always tell the human what changed.",
       "inputSchema": {
         "type": "object",
         "properties": {

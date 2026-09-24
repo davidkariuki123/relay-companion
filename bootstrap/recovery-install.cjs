@@ -170,6 +170,7 @@ function installRecovery({ packageRoot, node = process.execPath, homeDir = os.ho
     }
     const log = path.join(root, "recovery.log");
     const results = [];
+    let scheduleCleanup;
     if (platform === "win32") {
       const script = path.join(root, "launch.vbs");
       const command = `"${launcherNode}" "${launcher}"`;
@@ -201,11 +202,13 @@ function installRecovery({ packageRoot, node = process.execPath, homeDir = os.ho
         const loaded = Number(/run interval = (\d+) seconds/.exec(String(observed.stdout || ""))?.[1]) || null;
         const needsHandover = read(path.join(root, "scheduler.json"))?.intervalSeconds !== 60 || (loaded !== null && loaded !== 60);
         const job = "work.relay.recovery.schedule-handover";
-        const pending = runCommand("launchctl", ["list", job]);
-        if (!(ok(pending) && /"PID"\s*=\s*[1-9]\d*/.test(String(pending.stdout || pending.out || "")))) {
-          // Submitted jobs are KeepAlive: an idle handover left by an older build
-          // re-bootstraps the watchdog every ten seconds until it is removed.
-          if (ok(pending)) runCommand("launchctl", ["remove", job]);
+        scheduleCleanup = require("./recovery-schedule-handover.cjs").retireIdleHandover({
+          run: (_file, args) => runCommand("launchctl", args),
+        });
+        // An unsuccessful removal is not an installation failure, nor permission
+        // to replace a possibly live job under the same label. Keep it visible.
+        try { write(path.join(root, "scheduler-cleanup.json"), { at: Date.now(), ...scheduleCleanup }); } catch { /* Diagnostic failure is not runtime failure. */ }
+        if (!scheduleCleanup.pending) {
           if (needsHandover) {
             if (priorSchedule) atomicFile(path.join(root, "scheduler-previous.plist"), priorSchedule);
             results.push(runCommand("launchctl", ["submit", "-l", job, "-o", log, "-e", log, "--", runtimeNode,
@@ -235,7 +238,7 @@ function installRecovery({ packageRoot, node = process.execPath, homeDir = os.ho
     }
     const registered = results.every(ok);
     write(path.join(root, "registration.json"), { schema: 1, version: incoming, registered, at: Date.now(), platform });
-    return { ok: registered, node: runtimeNode, bundle, launcher, reason: registered ? null : "recovery-registration-failed" };
+    return { ok: registered, node: runtimeNode, bundle, launcher, reason: registered ? null : "recovery-registration-failed", ...(scheduleCleanup ? { scheduleCleanup } : {}) };
   } catch (error) { return { ok: false, reason: "recovery-install-failed", detail: error.message }; }
 }
 function uninstallRecovery({ homeDir = os.homedir(), platform = process.platform, runCommand = run } = {}) {

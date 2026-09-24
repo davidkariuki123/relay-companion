@@ -25,6 +25,8 @@ test("a Task about a repo lands in this machine's checkout of it, both apps, las
   const choices = workspaceChoices({ ...base, packet, preferences: { provider: "claude" } });
   assert.deepEqual(pairs(choices).slice(0, 2), ["claude:/w/relay", "codex:/w/relay"]);
   assert.equal(choices.options[0].label, "Claude Code · relay");
+  assert.equal(choices.options[0].name, "relay", "the folder's name, drawn on its own");
+  assert.equal(choices.options[0].app, "Claude Code", "the app, drawn after it");
   assert.equal(choices.options[0].why, "This Task is about relay");
   assert.equal(choices.suggested, choices.options[0]);
   assert.equal(choices.question, "Where should the agent work?");
@@ -64,7 +66,7 @@ test("only installed apps, only folders that exist, no duplicates, Claude only w
     max: 2,
   });
   assert.deepEqual(pairs(choices), ["claude:/w/relay", "claude:/w/agentos"]);
-  assert.deepEqual(choices.browse, [{ provider: "claude", label: "Claude Code · another folder…" }]);
+  assert.deepEqual(choices.browse, [{ provider: "claude", app: "Claude Code", label: "Claude Code · another folder…" }]);
   const gone = workspaceChoices({ ...base, preferences: { cwd: "/w/deleted" } });
   assert.ok(gone.options.every((o) => norm(o.cwd) !== "/w/deleted"));
   assert.deepEqual(workspaceChoices({ ...base, providers: [] }).options, []);

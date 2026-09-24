@@ -12,6 +12,7 @@ import { claudeDesktopPresent } from "./desktop-hosts.js";
 import { claudeHome, codexHome } from "./host-paths.js";
 import { configDir } from "./config.js";
 import atomicJson from "./atomic-json.cjs";
+export { claudeLaunchPreflight, prepareClaudeDraft, findClaudeDraftSession } from "./claude-task-fallback.js";
 
 const { atomicWriteJsonSync } = atomicJson;
 const readJson = (p) => { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return null; } };
@@ -215,6 +216,9 @@ export async function nativeSessionReady(session, { timeoutMs = 45000 } = {}) {
     }
     await sleep(500);
   } while (Date.now() < deadline);
+  if (session.provider === "claude") {
+    throw Object.assign(new Error("Claude has not made this conversation ready to receive the task. It may have reached its session or memory limit, including older background sessions. Check Claude for any sign-in or trust prompt. No task prompt was sent; retrying will reuse this conversation. You can also use Copy for your agent and paste the task into Claude yourself."), { code: "CLAUDE_NOT_READY" });
+  }
   throw new Error("The native app is not ready. Open it, finish any sign-in or trust prompts, then retry. No task prompt was sent.");
 }
 

@@ -20,6 +20,8 @@ import { apiUrl, readConfig } from "./config.js";
 import { storeDir } from "./host-paths.js";
 import { accountProductFeatures } from "./product-features.js";
 import { recordOutboundTaskOrigin } from "./task-completion-wake.js";
+import { READ_ONLY_RELAY_TOOL_NAMES } from "./tool-permissions.js";
+export { READ_ONLY_RELAY_TOOL_NAMES } from "./tool-permissions.js";
 
 const require = createRequire(import.meta.url);
 
@@ -193,6 +195,10 @@ export const REQUESTS_DISABLED_INSTRUCTIONS = [
 // exists to remove.
 const ALWAYS_LOAD_META = Object.freeze({ "anthropic/alwaysLoad": true });
 
+// The local MCP catalog needs the same read-only signal as the hosted catalog.
+// Codex's `writes` approval mode uses this annotation before a call reaches
+// Companion. Session updates only advance this agent session's notice cursor;
+// they do not change a person's read state or anything shared with others.
 export const TOOLS = [
   ...TOPIC_EXTRA_TOOLS,
   {
@@ -422,7 +428,7 @@ export const TOOLS = [
         forHuman: { type: "string", description: "Optional. Plain spoken sentences for people skimming the board. Omit for an agent-lane-only post." },
         forAgent: { type: "string", description: "Required. The complete useful context: what changed, where, why, evidence, what is next." },
         idempotencyKey: { type: "string", description: "A stable unique key of at least 8 characters for this post." },
-        humanConfirmed: { type: "boolean", description: "Pass true only after the person saw this exact draft and said yes; required when their setting is ask." },
+        humanConfirmed: { type: "boolean", description: "Pass true only after the person saw this exact draft and said yes to the one-time Topic posting approval or to their ask-every-time setting." },
       },
       required: ["topicId", "nature", "title", "forAgent", "idempotencyKey"],
     },
@@ -1231,7 +1237,11 @@ export const TOOLS = [
       required: ["provider", "toolName", "idempotencyKey"],
     },
   },
-];
+].map((tool) => READ_ONLY_RELAY_TOOL_NAMES.has(tool.name)
+  ? { ...tool, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } }
+  : ["relay_topic_post", "relay_topic_edit"].includes(tool.name)
+    ? { ...tool, annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false } }
+    : tool);
 
 export const ORDINARY_RELAY_TOOL_NAMES = new Set([
   "relay_send",

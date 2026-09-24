@@ -279,12 +279,14 @@ test("the Mac installer hands over a stale loaded cadence and retires an idle fi
   const root = path.join(homeDir, ".relay", "recovery");
   const install = interval => {
     const calls = [];
+    let listed = true;
     const result = installRecovery({ homeDir, platform: "darwin", packageRoot: fileURLToPath(new URL("..", import.meta.url)),
       preserveNode: () => process.execPath, runCommand: (command, args) => {
         if (command === "launchctl") {
           calls.push(args[0]);
           if (args[0] === "print") return { status: 0, stdout: `\trun interval = ${interval} seconds\n` };
-          if (args[0] === "list") return { status: 0, stdout: '{\n\t"Label" = "work.relay.recovery.schedule-handover";\n};' };
+          if (args[0] === "list") return listed ? { status: 0, stdout: '{\n\t"Label" = "work.relay.recovery.schedule-handover";\n};' } : { status: 113 };
+          if (args[0] === "remove") listed = false;
         }
         return { status: 0 };
       } });
@@ -293,6 +295,25 @@ test("the Mac installer hands over a stale loaded cadence and retires an idle fi
   };
   fs.mkdirSync(root, { recursive: true });
   fs.writeFileSync(path.join(root, "scheduler.json"), JSON.stringify({ schema: 1, intervalSeconds: 60 }));
-  assert.deepEqual(install(300), ["print", "list", "remove", "submit"], "scheduler.json said 60 but launchd still runs the old 300 s job");
-  assert.deepEqual(install(60), ["print", "list", "remove"], "a finished handover is removed and nothing new is submitted");
+  assert.deepEqual(install(300), ["print", "list", "remove", "list", "submit"], "scheduler.json said 60 but launchd still runs the old 300 s job");
+  assert.deepEqual(install(60), ["print", "list", "remove", "list"], "a finished handover is removed and nothing new is submitted");
+});
+
+for (const interval of [60, 300]) test(`refused handover removal at ${interval}s does not fail installation or replace the job`, t => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-handover-refusal-"));
+  t.after(() => fs.rmSync(homeDir, {recursive: true, force: true}));
+  const calls = [];
+  const result = installRecovery({homeDir, platform: "darwin", packageRoot: fileURLToPath(new URL("..", import.meta.url)),
+    preserveNode: () => process.execPath, runCommand(file, args) {
+      if (file !== "launchctl") return {status: 0};
+      calls.push(args[0]);
+      if (args[0] === "print") return {status: 0, stdout: `run interval = ${interval} seconds`};
+      if (args[0] === "list") return {status: 0, stdout: '{ "Label" = "work.relay.recovery.schedule-handover"; }'};
+      if (args[0] === "remove") return {status: 1};
+      assert.fail("must not submit over a job whose removal failed");
+    }});
+  assert.equal(result.ok, true);
+  assert.equal(result.scheduleCleanup.reason, "remove-failed");
+  assert.equal(result.scheduleCleanup.pending, true);
+  assert.deepEqual(calls, ["print", "list", "remove"]);
 });

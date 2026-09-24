@@ -894,11 +894,32 @@ function nativeExecutionSummary(rows) {
   return Object.fromEntries(rows.flatMap((row) => {
     const record = nativeTaskModules.execute.executionRecord(config, row.id);
     if (!record?.session) return [];
-    const status = record.phase === "uncertain" || record.phase === "submitting"
-      ? "Launch unconfirmed · check the existing native conversation"
-      : record.phase === "accepted" ? nativeTaskModules.launch.nativeProgress(record.session) : "Native conversation prepared";
+    const status = nativeTaskModules.execute.nativeExecutionStatus(record);
     return [[row.id, { phase: record.phase, provider: record.session.provider, status }]];
   }));
+}
+
+let checkingNativeDrafts = false;
+async function checkNativeDrafts() {
+  if (checkingNativeDrafts || !PRODUCT_FEATURES.taskExecution) return;
+  checkingNativeDrafts = true;
+  try {
+    const modules = await nativeTaskModulesPromise;
+    const config = readConfigFile();
+    if (!modules.launch.executionEnabled(config)) return;
+    const ids = modules.execute.pendingNativeDrafts(config);
+    if (!ids.length) return;
+    const client = await relayClient();
+    for (const id of ids) {
+      await modules.execute.executeNativeTask({ id, config, client, observeOnly: true,
+        isCurrentAccount: () => { try { return modules.launch.executionAccountKey(readConfigFile()) === modules.launch.executionAccountKey(config); } catch { return false; } },
+        update: (record) => {
+          if (record.startedAt) updateStagedPacket(id, { taskStartedAt: record.startedAt, taskRunOwner: record.taskRunOwner, taskClaim: record.taskClaim });
+          void pushInbox(true).catch(() => {});
+        },
+      }).catch(() => {}); // the persisted error is shown on this Task
+    }
+  } finally { checkingNativeDrafts = false; }
 }
 
 async function executeTaskInNativeApp(event, id, choice) {
@@ -917,6 +938,14 @@ async function executeTaskInNativeApp(event, id, choice) {
       id: key, config: executionConfig, client,
       isCurrentAccount: () => { try { return modules.launch.executionAccountKey(readConfigFile()) === modules.launch.executionAccountKey(executionConfig); } catch { return false; } },
       open: (url) => shell.openExternal(url),
+      confirmDraftRetry: async () => {
+        const answer = await dialog.showMessageBox(win, {
+          type: "question", title: "Claude draft already opened", message: "Open a fresh draft in Claude?",
+          detail: "If the draft is still open, confirm its folder and press Send there. If you closed it, open a fresh draft. The previous draft will no longer start this Task.",
+          buttons: ["Keep existing draft", "Open fresh draft"], defaultId: 0, cancelId: 0,
+        });
+        return answer.response === 1;
+      },
       consent: async () => {
         const answer = await dialog.showMessageBox(win, {
           type: "question", title: "Enable device execution?", message: "Let Relay start work on this device?",
@@ -1267,9 +1296,7 @@ function consumeSetupIntent(configDir = relayConfigDir()) {
   try { fs.rmSync(path.join(configDir, SETUP_INTENT_FILE), { force: true }); } catch {}
 }
 // Whether the native application installer owns this Relay (its durable
-// ~/.relay/application-owner.json). Its signed-out screen leads with Continue
-// with Google: Relay is already set up, so the agent setup prompt would be
-// wrong. Cached: the marker is a handful of stats and realpaths, and pushes
+// ~/.relay/application-owner.json). Cached: the marker is a handful of stats and realpaths, and pushes
 // are frequent.
 let applicationOwnedCache = { at: 0, value: false };
 function applicationOwnedInstall() {
@@ -2545,7 +2572,6 @@ function buildPayload() {
       reopenSurface: reopenSurfaceName(),
       notificationDurationMs: dwellMs(),
       onboardingVersion: COMPANION_ONBOARDING_VERSION,
-      setupPrompt: `Read ${webBase()}/for-agents and set me up on Relay.`,
       tutorialPrompt: require("./returning-tutorial-prompt.cjs")(`${webBase()}/llm_guide.md`),
       // The rules every Topic has, shown under each mandate; generated from
       // the shared guide so the pill and the agents read the same list.
@@ -9967,7 +9993,10 @@ ipcMain.handle("relay:installationAuthResume", () => installationAuthorizationIp
 ipcMain.handle("relay:installationAuthRestart", () => installationAuthorizationIpc(async () =>
   desktopOnboardingBridge ? desktopOnboardingBridge.restart() : (await installationAuthorizationController()).restart()));
 ipcMain.handle("relay:copySetupPrompt", () => {
-  clipboard.writeText(localOnboardingPrompt() || `Read ${webBase()}/for-agents and set me up on Relay.`);
+  // Only the installed app's own connect prompt exists: agents no longer install Relay.
+  const prompt = localOnboardingPrompt();
+  if (!prompt) return { ok: false };
+  clipboard.writeText(prompt);
   return { ok: true };
 });
 // The Your link is ready screen: the message to send with the first link, as
@@ -10579,6 +10608,7 @@ if (!gotSingleInstanceLock) {
     // role immediately afterward, then keep it fresh so an operator can opt a
     // developer in or out without re-pairing this device.
     refreshAccountProductFeatures().catch(() => {});
+    setInterval(() => { void checkNativeDrafts().catch(() => {}); }, 2000).unref?.();
     setInterval(() => {
       void networkOnboarding.refresh().then(() => presentNetworkOnboarding()).catch(() => {});
     }, 30_000).unref?.();

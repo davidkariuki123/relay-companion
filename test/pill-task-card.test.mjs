@@ -581,9 +581,10 @@ test("Execute's one question opens in the card and the reader: pairs best first,
   const footer = t.taskCardFooterHtml(inboundTask());
   assert.doesNotMatch(footer, /data-native-execute/, "the verb steps aside while the question is open");
   assert.match(footer, /tk-execute-title">Where should the agent work\?<\/span><span class="tk-execute-caption">It will read and change files in this folder\.</, "the question says what the folder is for");
-  assert.match(footer, /data-execute-pick="t1" data-provider="claude" data-cwd="C:\\w\\relay"[^>]*><span class="sp-name">Claude Code · relay<\/span><span class="sp-state">This Task is about relay</, "the best pair first, with its reason");
-  assert.match(footer, /data-execute-pick="t1" data-provider="codex" data-cwd="C:\\w\\relay"/);
-  assert.match(footer, /data-execute-pick="t1" data-provider="claude" data-browse="1"[^>]*><span class="sp-name">Claude Code · another folder…</, "the OS dialog is the last rung");
+  assert.match(footer, /data-execute-pick="t1" data-provider="claude" data-cwd="C:\\w\\relay"[^>]*><img class="xp-mark" src="claudeCodeMark.svg" alt=""><span class="xp-name">relay<span class="xp-app">Claude Code<\/span><\/span><span class="xp-why">This Task is about relay</, "the best pair first: the app's mark, the folder, the app, its reason");
+  assert.match(footer, /data-execute-pick="t1" data-provider="codex" data-cwd="C:\\w\\relay"[^>]*><img class="xp-mark" src="codexMark.svg"/);
+  assert.match(footer, /xp-browse-label">Another folder…<\/span><button class="xp-chip" type="button" data-execute-pick="t1" data-provider="claude" data-browse="1"[^>]*><img class="xp-mark" src="claudeCodeMark.svg" alt="">Claude Code</, "the OS dialog is the last rung, one chip per app");
+  assert.ok(footer.indexOf("xp-rows") < footer.indexOf("xp-browse"), "the pairs come before the dialog");
   assert.match(footer, /data-execute-cancel="t1"[^>]*>Cancel</);
   assert.ok(footer.indexOf("tk-agents") < footer.indexOf("tk-execute-pick") && footer.indexOf("tk-execute-pick") < footer.indexOf("tk-foot "), "under the agent row, above the state row");
   const reader = t.nativeExecuteHtml(inboundTask());

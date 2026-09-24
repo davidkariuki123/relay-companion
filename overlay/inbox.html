@@ -3330,14 +3330,49 @@
   .tk-agents .act-btn { font-size:11.5px; line-height:1; }
   .tk-agent-verbs { display:inline-flex; flex-wrap:wrap; align-items:center; gap:6px 14px; }
   .tk-execute-status { font-size:11.5px; line-height:1.3; color:var(--muted); }
-  .tk-execute-pick { margin:0 0 10px; border:1px solid var(--hair); border-radius:12px; overflow:hidden; }
-  .tk-execute-ask { display:flex; flex-wrap:wrap; align-items:baseline; gap:2px 10px; padding:10px 14px 9px; }
-  .tk-execute-title { font-size:12.75px; font-weight:600; color:var(--ink); }
-  .tk-execute-caption { flex:1 1 auto; min-width:0; font-size:11.5px; color:var(--muted); }
-  .tk-execute-ask .act-btn { font-size:11.5px; }
-  .tk-execute-pick .sp-list-inner { border-bottom:0; }
-  .tk-execute-pick .sp-row { padding:11px 14px; }
-  .tk-execute-pick .sp-state { white-space:normal; max-width:46%; }
+  /* Execute's one question. The head is a washed band: the question, its
+     caption under it, Cancel at the top right. Each pair is one row, the
+     app's mark down the left, the folder's name with the app after it, the
+     reason underneath. The last line offers the OS dialog per app as a chip.
+     Everything stacks in one column, so the narrow pill never wraps a
+     right-hand cell into three lines. */
+  .tk-execute-pick { margin:0 0 10px; border:1px solid var(--edge); border-radius:var(--r-3); overflow:hidden; background:var(--bg); }
+  .tk-execute-ask { display:grid; grid-template-columns:minmax(0,1fr) auto; column-gap:12px; align-items:start; padding:9px 12px 8px; background:var(--wash); border-bottom:1px solid var(--hair); }
+  .tk-execute-title { grid-column:1; font-size:12.75px; font-weight:600; line-height:1.3; color:var(--ink); }
+  .tk-execute-caption { grid-column:1; margin-top:1px; font-size:11px; line-height:1.35; color:var(--muted); }
+  .tk-execute-cancel { grid-column:2; grid-row:1 / 3; align-self:start; margin-top:2px; font-size:11.5px; }
+  .xp-rows { display:flex; flex-direction:column; }
+  .xp-row { appearance:none; border:0; border-bottom:1px solid var(--hair); background:transparent; width:100%; margin:0; padding:8px 12px 8px 11px; cursor:pointer; text-align:left;
+    display:grid; grid-template-columns:18px minmax(0,1fr); column-gap:9px; align-items:center; font-family:var(--sans); color:var(--ink);
+    transition:background-color var(--t-fast) var(--settle); }
+  .xp-row:last-child { border-bottom:0; }
+  .xp-row:hover { background:var(--wash); }
+  .xp-row:active { background:var(--wash-2); }
+  .xp-row:focus-visible { outline:0; box-shadow:inset 0 0 0 2px var(--edge-accent); }
+  .xp-row:disabled { cursor:default; opacity:.5; }
+  .xp-mark { width:16px; height:16px; border-radius:4px; display:block; flex:0 0 auto; }
+  .xp-row .xp-mark { grid-column:1; grid-row:1 / 3; }
+  .xp-name { grid-column:2; min-width:0; font-size:12.75px; font-weight:600; line-height:1.3; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .xp-app { font-weight:500; color:var(--muted); }
+  .xp-app::before { content:"·"; margin:0 5px; color:var(--muted-3); }
+  .xp-why { grid-column:2; margin-top:1px; font-size:11px; line-height:1.3; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .xp-browse { display:flex; flex-wrap:wrap; align-items:center; gap:6px; padding:7px 12px 8px 11px; border-top:1px solid var(--hair); background:var(--wash); }
+  .xp-browse-label { flex:1 1 auto; min-width:0; font-size:11.5px; font-weight:500; color:var(--muted); white-space:nowrap; }
+  .xp-chip { appearance:none; cursor:pointer; margin:0; padding:3px 9px 3px 5px; border:1px solid var(--edge); border-radius:var(--r-pill); background:var(--bg); color:var(--ink);
+    display:inline-flex; align-items:center; gap:6px; font:600 11px/1 var(--sans); white-space:nowrap;
+    transition:border-color var(--t-fast) var(--settle), background-color var(--t-fast) var(--settle); }
+  .xp-chip .xp-mark { width:14px; height:14px; border-radius:3px; }
+  .xp-chip:hover { border-color:color-mix(in srgb, var(--edge) 60%, var(--ink)); background:var(--wash-2); }
+  .xp-chip:focus-visible { outline:0; box-shadow:var(--focus-ring); border-color:var(--edge-accent); }
+  .xp-chip:disabled { cursor:default; opacity:.5; }
+  .tk-execute-pick .xp-row { animation:spRowIn .30s var(--settle) both; }
+  .tk-execute-pick .xp-row:nth-child(1) { animation-delay:.04s; }
+  .tk-execute-pick .xp-row:nth-child(2) { animation-delay:.08s; }
+  .tk-execute-pick .xp-row:nth-child(3) { animation-delay:.12s; }
+  .tk-execute-pick .xp-row:nth-child(4) { animation-delay:.16s; }
+  .tk-execute-pick .xp-row:nth-child(5) { animation-delay:.20s; }
+  .tk-execute-pick .xp-row:nth-child(n+6) { animation-delay:.24s; }
+  @media (prefers-reduced-motion:reduce) { .tk-execute-pick .xp-row { animation:none; opacity:1; } }
   .tk-agents.icons { justify-content:space-between; }
   .relay-link-divider { align-self:center; height:16px; width:1px; background:var(--edge); margin:0 3px; }
   .tk-app.relay-link-icon { color:var(--muted); }
@@ -7389,6 +7424,27 @@
     relaysListEl.querySelector(`[data-task-history="${key}"]`)?.focus({ preventScroll:true });
   });
 
+  function bannerIdentityRows(identityRows, allRows) {
+    // Arrival delivery and chat unread state are different: a self-send is an
+    // outbound, read bubble in chat, but still has a received notification.
+    // Use the exact pending arrivals for this presentation without changing
+    // the conversation's direction, receipts, or unread count.
+    const activeIds = new Set(activeNotificationIds);
+    const receivedIds = new Set((payload.relays || [])
+      .filter((row) => row.unread && !row.deletedAt && activeIds.has(row.id))
+      .map((row) => row.id));
+    const arrivals = allRows.filter((row) => receivedIds.has(row.id) && !row.deletedAt)
+      .sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
+    return identityRows.flatMap((room) => {
+      const arrival = arrivals.find((row) => room.isGroup
+        ? (room.groupId && row.groupId ? room.groupId === row.groupId
+          : room.threadId === row.threadId || room.threadIds?.has(row.threadId))
+        : !row.isGroup && sameDirectParty(row, room.partyKey, room.name));
+      if (arrival) return [{ ...room, latest:{ ...arrival, direction:"in" }, latestAt:arrival.at }];
+      return room.unreadCount > 0 ? [room] : [];
+    });
+  }
+
   function renderRelays() {
     syncRelaysLayout();
     if (requestInboxAccount !== signupAccountKey()) { requestInboxOpen = false; requestInboxError = ""; requestInboxAccount = signupAccountKey(); relayAnyoneTip.reset(); }
@@ -7416,7 +7472,7 @@
       const requests = requestRooms()
         .filter((room) => room.hasActivity !== false && room.unreadCount > 0)
         .map((room) => ({ ...room, latestAt: room.latestAt || (room.latest && room.latest.at) || "", requestRoom: true }));
-      const unread = identityRows.filter((row) => row.unreadCount > 0).concat(requests)
+      const unread = bannerIdentityRows(identityRows, allRows).concat(requests)
         .sort((a, b) => new Date(b.latestAt || 0) - new Date(a.latestAt || 0));
       // A reply just sent from the banner is showing its "You:" line; the
       // acknowledgement that follows would empty this list under it. The row
@@ -9398,7 +9454,7 @@
     const current = payload.nativeExecutions?.[id];
     const busy = nativeExecuteBusy.has(id);
     const submitted = current && ["accepted", "submitting", "uncertain"].includes(current.phase);
-    return { id, busy, label: busy ? "Opening…" : submitted ? "Continue in native app" : "Execute", status: current?.status || "" };
+    return { id, busy, label: busy ? "Opening…" : submitted ? "Continue in native app" : ["awaiting_send", "draft_opening"].includes(current?.phase) ? "Open Claude draft…" : "Execute", status: current?.status || "" };
   }
   // The reader: the full action under the ladder, with its caption.
   function nativeExecuteHtml(row) {
@@ -9407,16 +9463,23 @@
     if (nativeExecuteChoice.has(st.id)) return `<div class="rd-host-actions" data-stop="1">${nativeExecutePickerHtml(row)}</div>`;
     return `<div class="rd-host-actions" data-stop="1"><button class="oa-item oa-primary" type="button" data-native-execute="${esc(st.id)}" ${st.busy ? "disabled" : ""}>${st.label}</button><div class="sv-copy">${esc(st.status || "Run this Task in your native app · developer preview")}</div></div>`;
   }
-  // The picker, on either surface: the question in plain words, the pairs
-  // in the session list's recipe, then the OS dialog as the last rung.
+  // The picker, on either surface: the question in plain words with Cancel
+  // beside it, then one row per pair: the app's mark, the folder's name with
+  // the app after it, and the reason underneath in the muted voice. The pill
+  // is narrow, so nothing sits in a right-hand column that could wrap. The
+  // OS dialog is the last rung: one line, "Another folder…", with a chip per
+  // installed app.
   function nativeExecutePickerHtml(row) {
     const st = nativeExecuteState(row);
     const pick = st && nativeExecuteChoice.get(st.id);
     if (!pick) return "";
     const disabled = st.busy ? " disabled" : "";
-    const rows = (pick.options || []).map((option) => `<button class="sp-row" type="button" data-execute-pick="${esc(st.id)}" data-provider="${esc(option.provider)}" data-cwd="${esc(option.cwd)}" title="${esc(option.cwd)}"${disabled}><span class="sp-name">${esc(option.label)}</span><span class="sp-state">${esc(option.why || "")}</span></button>`).join("");
-    const browse = (pick.browse || []).map((option) => `<button class="sp-row" type="button" data-execute-pick="${esc(st.id)}" data-provider="${esc(option.provider)}" data-browse="1"${disabled}><span class="sp-name">${esc(option.label)}</span><span class="sp-state">choose on disk</span></button>`).join("");
-    return `<div class="tk-execute-pick" data-stop="1"><div class="tk-execute-ask"><span class="tk-execute-title">${esc(pick.question || "Where should the agent work?")}</span><span class="tk-execute-caption">${esc(pick.caption || "It will read and change files in this folder.")}</span><button type="button" class="act-btn decline" data-execute-cancel="${esc(st.id)}">Cancel</button></div><div class="sp-list open"><div class="sp-list-inner">${rows}${browse}</div></div></div>`;
+    const nameOf = (option) => option.name || String(option.cwd || "").split(/[\\/]/).filter(Boolean).pop() || option.label || "";
+    const appOf = (option) => option.app || (option.provider === "codex" ? "Codex" : "Claude Code");
+    const markOf = (option) => option.provider === "codex" ? "codexMark.svg" : "claudeCodeMark.svg";
+    const rows = (pick.options || []).map((option) => `<button class="xp-row" type="button" data-execute-pick="${esc(st.id)}" data-provider="${esc(option.provider)}" data-cwd="${esc(option.cwd)}" title="${esc(option.cwd)}"${disabled}><img class="xp-mark" src="${markOf(option)}" alt=""><span class="xp-name">${esc(nameOf(option))}<span class="xp-app">${esc(appOf(option))}</span></span>${option.why ? `<span class="xp-why">${esc(option.why)}</span>` : ""}</button>`).join("");
+    const browse = (pick.browse || []).map((option) => `<button class="xp-chip" type="button" data-execute-pick="${esc(st.id)}" data-provider="${esc(option.provider)}" data-browse="1" title="${esc(option.label || "")}"${disabled}><img class="xp-mark" src="${markOf(option)}" alt="">${esc(appOf(option))}</button>`).join("");
+    return `<div class="tk-execute-pick" data-stop="1"><div class="tk-execute-ask"><span class="tk-execute-title">${esc(pick.question || "Where should the agent work?")}</span><span class="tk-execute-caption">${esc(pick.caption || "It will read and change files in this folder.")}</span><button type="button" class="act-btn decline tk-execute-cancel" data-execute-cancel="${esc(st.id)}">Cancel</button></div><div class="xp-rows">${rows}</div>${browse ? `<div class="xp-browse"><span class="xp-browse-label">Another folder…</span>${browse}</div>` : ""}</div>`;
   }
   // The card: the same verb beside Copy for your agent, in that row's recipe.
   function taskExecuteVerbHtml(row) {
@@ -20843,25 +20906,11 @@
       bindSignupCancel();
       return;
     }
-    if (signupStage === "method" && payload.ui?.applicationOwned === true) {
-      // The native application installer already set Relay up on this
-      // computer, so there is nothing for an agent to install: sign in is the
-      // only step. Google signs a new person up with the same click.
-      signupBodyEl.innerHTML = `<div class="su-first-relay su-method su-application"><p class="su-step">Welcome to Relay</p><h1 class="su-title">Sign in to get started.</h1><p class="su-copy">Relay is set up on this computer. Sign in and your Relays open right here.</p><div class="su-form"><button class="su-primary su-google" id="suGoogle" type="button"${busy}>${googleMark()} Continue with Google</button></div><p class="su-returning">New or returning, Google signs you in. <button class="su-signin" id="suSignIn" type="button"${busy}>Use email instead</button></p><p class="su-application-note">Once you’re in, quit and reopen Claude Code or Codex so they pick up Relay’s tools.</p>${error}</div>`;
-      document.getElementById("suGoogle")?.addEventListener("click", startInstallationGoogle);
-      document.getElementById("suSignIn")?.addEventListener("click", startInstallationSignIn);
-      return;
-    }
     if (signupStage === "method") {
-      const prompt = payload.ui?.setupPrompt || "Read https://sendrelays.com/for-agents and set me up on Relay.";
-      signupBodyEl.innerHTML = `<div class="su-first-relay su-method"><p class="su-step">Get started with Relay</p><h1 class="su-title su-handoff-title"><span class="su-handoff-intro">Set up Relay with</span><span class="su-host-claude">Claude Code</span><span class="su-handoff-or">or <span class="su-host-codex">Codex</span>.</span></h1><p class="su-copy">Paste this into your agent to get started.</p><div class="su-setup-prompt">${esc(prompt)}</div><button class="su-primary su-copy-setup" id="suCopySetup" type="button">Copy setup prompt</button><div class="su-divider su-method-divider">or</div><button class="su-secondary su-google su-method-google" id="suGoogle" type="button"${busy}>${googleMark()} Continue with Google</button><p class="su-returning">New or returning, Google signs you in. <button class="su-signin" id="suSignIn" type="button"${busy}>Use email instead</button></p>${error}</div>`;
-      document.getElementById("suCopySetup")?.addEventListener("click", async (event) => {
-        try {
-          const result = await window.relay.copySetupPrompt();
-          if (!result?.ok) throw new Error("copy_failed");
-          event.target.textContent = "Copied";
-        } catch { signupError = "Could not copy the prompt. Select and copy the text above."; renderSignup(); }
-      });
+      // Relay is already installed on this computer (agents no longer install
+      // it), so sign in is the only step. Google signs a new person up with the
+      // same click.
+      signupBodyEl.innerHTML = `<div class="su-first-relay su-method su-application"><p class="su-step">Welcome to Relay</p><h1 class="su-title">Sign in to get started.</h1><p class="su-copy">Relay is set up on this computer. Sign in and your Relays open right here.</p><div class="su-form"><button class="su-primary su-google" id="suGoogle" type="button"${busy}>${googleMark()} Continue with Google</button></div><p class="su-returning">New or returning, Google signs you in. <button class="su-signin" id="suSignIn" type="button"${busy}>Use email instead</button></p><p class="su-application-note">Once you’re in, quit and reopen Claude Code or Codex so they pick up Relay’s tools.</p>${error}</div>`;
       document.getElementById("suGoogle")?.addEventListener("click", startInstallationGoogle);
       document.getElementById("suSignIn")?.addEventListener("click", startInstallationSignIn);
       return;

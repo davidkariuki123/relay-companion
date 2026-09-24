@@ -26,6 +26,7 @@ import {
   windowsTaskXml,
   windowsAutostartTaskStatus,
   writeClaudeCodeMcpConfig,
+  writeClaudeTopicToolPolicy,
   writeCodexMcpConfig,
 } from "../src/install.js";
 
@@ -95,11 +96,14 @@ test("agent repair refreshes MCP launchers and retires Relay hooks for existing 
     fs.readFileSync(codexConfigFile, "utf8").includes(JSON.stringify(result.mcpBin)),
     "the Codex TOML points at the launcher, quoted the way TOML requires",
   );
+  assert.match(fs.readFileSync(codexConfigFile, "utf8"), /\[mcp_servers\.relay\.tools\.relay_topic_post\]\napproval_mode = "approve"/);
   assert.equal(result.claudeHooks.ok, true);
   assert.equal(result.codexHooks.ok, true);
   assert.equal(result.hookRepair.attempted, true);
   const claudeSettings = JSON.parse(fs.readFileSync(claudeSettingsFile, "utf8"));
   assert.equal(claudeSettings.theme, "dark");
+  assert.ok(claudeSettings.permissions.allow.includes("mcp__relay__relay_topic_post"));
+  assert.ok(claudeSettings.permissions.allow.includes("mcp__relay__relay_topic_edit"));
   assert.equal(claudeSettings.hooks.UserPromptSubmit[0].hooks[0].command, "audit-claude");
   assert.equal(claudeSettings.hooks.UserPromptSubmit.some((entry) =>
     entry.hooks.some((hook) => isRelayClaudeHookCommand(hook))), false);
@@ -706,7 +710,30 @@ test("writeCodexMcpConfig replaces only the Relay MCP table", () => {
   assert.match(text, /\[features\.code_mode\]\ndirect_only_tool_namespaces = \["mcp__relay"\]/);
   assert.match(text, /\[mcp_servers\.node_repl\]/);
   assert.match(text, /\[mcp_servers\.relay\]\ncommand = "\/usr\/local\/bin\/node"\nargs = \["--max-old-space-size=32", "\/relay\/bin\/relay\.js", "mcp"\]/);
+  assert.match(text, /default_tools_approval_mode = "writes"/);
+  assert.match(text, /\[mcp_servers\.relay\.tools\.relay_topic_post\]\napproval_mode = "approve"/);
+  assert.match(text, /\[mcp_servers\.relay\.tools\.relay_topic_edit\]\napproval_mode = "approve"/);
   assert.doesNotMatch(text, /command = "old"/);
+});
+
+test("Topic tool policy preserves host choices and unrelated Claude settings", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-topic-policy-"));
+  const codex = path.join(dir, "config.toml");
+  const claude = path.join(dir, "settings.json");
+  fs.writeFileSync(codex, '[mcp_servers.relay]\ncommand = "old"\ndefault_tools_approval_mode = "prompt"\n\n[mcp_servers.relay.tools.relay_topic_post]\napproval_mode = "prompt"\n');
+  fs.writeFileSync(claude, JSON.stringify({ theme: "dark", permissions: { allow: ["mcp__other__read"] } }));
+  assert.equal(writeCodexMcpConfig("/relay/bin/relay.js", "/usr/bin/node", codex).ok, true);
+  const codexText = fs.readFileSync(codex, "utf8");
+  assert.match(codexText, /default_tools_approval_mode = "prompt"/);
+  assert.match(codexText, /\[mcp_servers\.relay\.tools\.relay_topic_post\]\napproval_mode = "prompt"/);
+  assert.equal(writeClaudeTopicToolPolicy(claude).ok, true);
+  assert.equal(writeClaudeTopicToolPolicy(claude).ok, true);
+  const settings = JSON.parse(fs.readFileSync(claude, "utf8"));
+  assert.equal(settings.theme, "dark");
+  assert.equal(settings.permissions.allow[0], "mcp__other__read");
+  assert.equal(new Set(settings.permissions.allow).size, settings.permissions.allow.length);
+  for (const tool of ["relay_session_updates", "relay_topic_fetch", "relay_topic_post", "relay_topic_edit"])
+    assert.ok(settings.permissions.allow.includes(`mcp__relay__${tool}`));
 });
 
 test("writeCodexMcpConfig merges Relay into an existing multiline direct namespace list", () => {
