@@ -40,6 +40,15 @@ if (process.argv[2] === "--child") {
     run(file, args, options) {
       if (file.endsWith("launchctl") && ["bootout", "bootstrap", "remove"].includes(args[0])) event({event: args[0]});
       if (file.endsWith("launchctl") && args[0] === "remove" && mode === "refuse-removal") return {status: 1, stderr: "injected removal refusal"};
+      if (file.endsWith("launchctl") && args[0] === "bootstrap" && mode === "failed-rollback") {
+        const marker = path.join(fixture, "failed-registrations");
+        const failures = Number(fs.existsSync(marker) ? fs.readFileSync(marker, "utf8") : 0);
+        if (failures < 2) {
+          fs.writeFileSync(marker, String(failures + 1));
+          event({event: "registration-refused", attempt: failures + 1});
+          return {status: 1, stderr: "injected registration refusal"};
+        }
+      }
       const result = command(file, args, options);
       const crash = path.join(fixture, "crashed");
       if (file.endsWith("launchctl") && args[0] === mode && success(result) && !fs.existsSync(crash)) {
@@ -101,7 +110,7 @@ if (process.argv[2] === "--child") {
     // If the upgrade left an old looping job behind, the stock controller must
     // retire it. Do not silently remove it to make the test setup succeed.
     await until(() => absent(launchctl(["list", job])), "legacy handover retirement");
-    for (const mode of ["refuse-removal", "bootout", "bootstrap"]) {
+    for (const mode of ["refuse-removal", "bootout", "bootstrap", "failed-rollback"]) {
       const fixture = fs.mkdtempSync(path.join(fixtureBase, `${mode}-`));
       fs.writeFileSync(path.join(fixture, "mode.json"), JSON.stringify({mode, packageRoot: current.packageRoot}));
       const events = () => {
@@ -135,8 +144,17 @@ if (process.argv[2] === "--child") {
       await until(() => absent(launchctl(["list", job])), "worker retirement");
       const steps = events();
       assert.equal(steps.filter(e => e.event === "bootout").length, 1, JSON.stringify(steps));
-      assert.equal(steps.filter(e => e.event === "bootstrap").length, 1, JSON.stringify(steps));
-      if (mode !== "refuse-removal") assert.equal(steps.filter(e => e.event === "crash").length, 1);
+      assert.equal(steps.filter(e => e.event === "bootstrap").length, mode === "failed-rollback" ? 3 : 1, JSON.stringify(steps));
+      if (["bootout", "bootstrap"].includes(mode)) assert.equal(steps.filter(e => e.event === "crash").length, 1);
+      if (mode === "failed-rollback") {
+        assert.equal(steps.filter(e => e.event === "registration-refused").length, 2, JSON.stringify(steps));
+        assert.ok(steps.filter(e => e.event === "start").length >= 2, "launchd must retry the independent worker");
+        assert.equal(observed().interval, 300, "the stock worker must restore the old registration after both refusals");
+        const install = require(path.join(current.packageRoot, "bootstrap", "recovery-install.cjs"));
+        const repaired = install.installRecovery({packageRoot: current.packageRoot, node: current.node, homeDir, userId: process.getuid()});
+        assert.equal(repaired.ok, true, JSON.stringify(repaired));
+        await until(() => observed().interval === 60 && absent(launchctl(["list", job])), "stock repair after failed rollback");
+      }
       assert.equal(observed().interval, 60);
       const ready = await waitForRecoveryReady({homeDir, target: current, timeoutMs: 180_000, requireProgress: true});
       assert.equal(ready.ok, true, JSON.stringify(ready));
