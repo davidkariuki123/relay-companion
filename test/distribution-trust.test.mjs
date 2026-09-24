@@ -2335,6 +2335,7 @@ test("public export retains the stock Mac candidate canary", () => {
     "companion-candidate-update-workflow.test.mjs",
     "trigger-stock-candidate-update.mjs",
     "verify-stock-handover.mjs",
+    "verify-stock-recovery-upgrade.mjs",
     "verify-stock-service-recovery.mjs",
   ]) {
     if (fs.existsSync(exporterPath)) {
@@ -2347,4 +2348,11 @@ test("public export retains the stock Mac candidate canary", () => {
   assert.match(workflow, /macos-14/);
   assert.match(workflow, /macos-15-intel/);
   assert.match(workflow, /node scripts\/verify-stock-handover\.mjs/);
+  const releaseGateTemplate = new URL("../public-release/.github/workflows/verify-companion-release-gate.yml", import.meta.url);
+  const releaseGatePublic = new URL("../.github/workflows/verify-companion-release-gate.yml", import.meta.url);
+  const releaseGate = fs.readFileSync(fs.existsSync(releaseGateTemplate) ? releaseGateTemplate : releaseGatePublic, "utf8");
+  for (const platform of ["darwin-arm64", "darwin-x64", "win32-arm64", "win32-x64", "linux-arm64", "linux-x64"]) {
+    assert.match(releaseGate, new RegExp(platform));
+  }
+  assert.match(releaseGate, /node scripts\/verify-stock-recovery-upgrade\.mjs/);
 });

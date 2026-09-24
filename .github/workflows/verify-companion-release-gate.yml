@@ -1,0 +1,130 @@
+name: Verify public Companion release gate
+run-name: gate ${{ inputs.from_version }} ${{ inputs.lived_in_from }} ${{ inputs.to_version }} ${{ inputs.source_sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      from_version:
+        description: Exact stock installer version
+        required: true
+        type: string
+      lived_in_from:
+        description: Optional older stock version that first updates to the installer version
+        required: false
+        type: string
+      to_version:
+        description: Exact published Companion candidate
+        required: true
+        type: string
+      source_sha:
+        description: Exact public source commit that published the candidate
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: ${{ matrix.platform }} stock recovery
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: darwin-arm64
+          - os: macos-15-intel
+            platform: darwin-x64
+          - os: windows-latest
+            platform: win32-x64
+          - os: windows-11-arm
+            platform: win32-arm64
+          - os: ubuntu-24.04
+            platform: linux-x64
+          - os: ubuntu-24.04-arm
+            platform: linux-arm64
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.18.0
+      - run: npm install --global npm@11.19.0
+      - name: Verify exact published source and native artifact
+        shell: bash
+        env:
+          FROM_VERSION: ${{ inputs.from_version }}
+          LIVED_IN_FROM: ${{ inputs.lived_in_from }}
+          TO_VERSION: ${{ inputs.to_version }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = davidkariuki123/relay-companion
+          [[ "$FROM_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$TO_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          if [ -n "$LIVED_IN_FROM" ]; then
+            [[ "$LIVED_IN_FROM" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+            test "$LIVED_IN_FROM" != "$FROM_VERSION"
+          fi
+          test "$(npm view relay-companion dist-tags.installer)" = "$FROM_VERSION"
+          node scripts/verify-published-release.mjs --version "$TO_VERSION" --source-sha "$SOURCE_SHA"
+          runtime_prefix="$RUNNER_TEMP/relay-runtime-$TO_VERSION"
+          mkdir -p "$runtime_prefix"
+          curl --fail --silent --show-error \
+            "https://api.sendrelays.com/v1/companion-releases/v$TO_VERSION/relay-runtime-$TO_VERSION-$PLATFORM.tar.gz" \
+            -o "$runtime_prefix/runtime.tar.gz"
+          node scripts/verify-runtime-manifest.mjs \
+            --version "$TO_VERSION" --source-sha "$SOURCE_SHA" \
+            --platform "$PLATFORM" --artifact "$runtime_prefix/runtime.tar.gz"
+          (cd "$runtime_prefix" && tar -xzf runtime.tar.gz)
+          node -e 'require("./bootstrap/relay-setup.cjs").restoreRuntimeLinks(process.argv[1])' "$runtime_prefix"
+          node scripts/verify-installed-runtime.mjs \
+            --package-root "$runtime_prefix/node_modules/relay-companion" --version "$TO_VERSION"
+          node scripts/assert-runtime-capabilities.mjs \
+            --package-root "$runtime_prefix/node_modules/relay-companion"
+      - name: Install Linux desktop test dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xdg-utils xvfb
+      - name: Verify stock update and independently scheduled recovery
+        shell: bash
+        # The shared staging gate treats the Windows ARM stock update as a
+        # reported runner gap while its native artifact still must verify.
+        continue-on-error: ${{ matrix.os == 'windows-11-arm' }}
+        env:
+          FROM_VERSION: ${{ inputs.from_version }}
+          LIVED_IN_FROM: ${{ inputs.lived_in_from }}
+          TO_VERSION: ${{ inputs.to_version }}
+        run: |
+          set -euo pipefail
+          lived_in=""
+          if [ -n "$LIVED_IN_FROM" ]; then lived_in="--lived-in-from $LIVED_IN_FROM"; fi
+          if [ "$RUNNER_OS" = Linux ]; then
+            export DISPLAY=:99
+            Xvfb "$DISPLAY" -screen 0 1280x720x24 -nolisten tcp >"$RUNNER_TEMP/recovery-xvfb.log" 2>&1 &
+            xvfb_pid=$!
+            trap 'kill "$xvfb_pid" 2>/dev/null || true' EXIT
+            if ! systemctl --user show-environment >/dev/null 2>&1; then
+              sudo loginctl enable-linger "$(id -un)"
+              sudo systemctl start "user@$(id -u).service"
+              export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+              export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+            fi
+          fi
+          # shellcheck disable=SC2086
+          node scripts/verify-stock-recovery-upgrade.mjs --from-version "$FROM_VERSION" --to-version "$TO_VERSION" $lived_in 2>&1 | tee "$RUNNER_TEMP/recovery-canary.log"
+          test "${PIPESTATUS[0]}" -eq 0
+      - name: Retain native recovery evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: recovery-canary-${{ matrix.platform }}-${{ inputs.to_version }}
+          path: ${{ runner.temp }}/recovery-canary.log
+          if-no-files-found: warn
+          retention-days: 1
