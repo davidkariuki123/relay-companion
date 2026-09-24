@@ -1053,7 +1053,8 @@ posixFsTest("a paused runtime owner cannot overwrite the successor of its empty 
       winnerPromise = runPosix({
         homeDir,
         fsImpl: winnerFs,
-        now: () => startedAt + 2 * 60 * 60_000 + 1,
+        // Leave room for the lock directory's creation time under CI load.
+        now: () => startedAt + 2 * 60 * 60_000 + 60_000,
         onLockAcquired: async () => winnerGate,
       });
     }

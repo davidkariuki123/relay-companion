@@ -36,6 +36,10 @@ if (process.argv[2] === "--child") {
   const mode = config.mode;
   const event = value => fs.appendFileSync(path.join(fixture, "events.jsonl"), JSON.stringify({pid: process.pid, ...value}) + "\n");
   event({event: "start"});
+  if (mode === "legacy-running") {
+    while (!fs.existsSync(path.join(fixture, "release"))) await sleep(250);
+    process.exit(0);
+  }
   await schedule.handover({homeDir, userId: process.getuid(), report: result => event({event: "result", result}),
     run(file, args, options) {
       if (file.endsWith("launchctl") && ["bootout", "bootstrap", "remove"].includes(args[0])) event({event: args[0]});
@@ -161,6 +165,51 @@ if (process.argv[2] === "--child") {
       reports.push({mode, passed: true, starts: steps.filter(e => e.event === "start").length, steps});
       fs.writeFileSync(path.join(process.env.RUNNER_TEMP, "relay-handover-native.json"), JSON.stringify({version: current.version, arch: process.arch, reports}, null, 2));
     }
+    // A running old loop must survive the first install. Once it becomes idle,
+    // a later stock install must keep the original loaded cadence as fallback
+    // and migrate it without replacing a running job under the same label.
+    const fixture = fs.mkdtempSync(path.join(fixtureBase, "legacy-running-"));
+    fs.writeFileSync(path.join(fixture, "mode.json"), JSON.stringify({mode: "legacy-running", packageRoot: current.packageRoot}));
+    const release = await own();
+    try {
+      assert.ok(absent(launchctl(["list", job])));
+      const removed = launchctl(["bootout", `${domain}/${label}`]);
+      assert.ok(success(removed) || absent(removed), removed.stderr);
+      atomicFile(plist, older);
+      assert.ok(success(launchctl(["bootstrap", domain, plist])));
+      assert.equal(observed().interval, 300);
+      fs.rmSync(path.join(recovery, "scheduler-previous.plist"), {force: true});
+      const submitted = launchctl(["submit", "-l", job, "-o", path.join(fixture, "worker.log"), "-e", path.join(fixture, "worker.log"), "--",
+        host, fileURLToPath(import.meta.url), "--child", fixture]);
+      assert.ok(success(submitted), submitted.stderr);
+      testFixture = fixture;
+    } finally { release(); }
+    await until(() => /"PID"\s*=\s*\d+/.test(launchctl(["list", job]).stdout || ""), "running legacy worker");
+    const installer = require(path.join(current.packageRoot, "bootstrap", "recovery-install.cjs"));
+    const install = () => installer.installRecovery({packageRoot: current.packageRoot, node: current.node, homeDir, userId: process.getuid()});
+    const running = install();
+    assert.equal(running.ok, true, JSON.stringify(running));
+    assert.equal(running.scheduleCleanup?.reason, "running", JSON.stringify(running));
+    assert.equal(observed().interval, 300);
+    const previous = path.join(recovery, "scheduler-previous.plist");
+    assert.match(fs.readFileSync(previous, "utf8"), /<key>StartInterval<\/key>\s*<integer>300<\/integer>/);
+    fs.writeFileSync(path.join(fixture, "release"), "yes");
+    let idle;
+    const deadline = Date.now() + 60_000;
+    while (Date.now() < deadline) {
+      const listed = launchctl(["list", job]);
+      if (success(listed) && !/"PID"\s*=\s*\d+/.test(listed.stdout || "")) {
+        idle = install();
+        assert.equal(idle.ok, true, JSON.stringify(idle));
+        if (!idle.scheduleCleanup?.pending) break;
+      }
+      await sleep(500);
+    }
+    assert.equal(idle?.scheduleCleanup?.pending, false, JSON.stringify(idle));
+    assert.match(fs.readFileSync(previous, "utf8"), /<key>StartInterval<\/key>\s*<integer>300<\/integer>/);
+    await until(() => observed().interval === 60 && absent(launchctl(["list", job])), "idle legacy migration");
+    reports.push({mode: "legacy-running-to-idle", passed: true, running: running.scheduleCleanup, idle: idle.scheduleCleanup});
+    fs.writeFileSync(path.join(process.env.RUNNER_TEMP, "relay-handover-native.json"), JSON.stringify({version: current.version, arch: process.arch, reports}, null, 2));
   } finally {
     // Disposable runner only. Restore its original schedule so ordinary canary
     // cleanup remains usable even after a failing fault assertion.

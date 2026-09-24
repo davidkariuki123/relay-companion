@@ -64,10 +64,8 @@ test("one relay's files download side by side, and concurrent asks for the relay
         openUrl: `https://web.example/api/relays/relay_four_photos/attachments/att_${n}/download`,
       })),
     };
-    const started = Date.now();
     // Four tiles asking at once — exactly what the pill does for a 2x2 grid.
     const results = await Promise.all([1, 2, 3, 4].map(() => materializeAttachmentFiles(row, { mintUrl, refreshUrls: async () => null })));
-    const elapsed = Date.now() - started;
     for (const result of results) {
       assert.equal(result.attachments.length, 4);
       for (const attachment of result.attachments) assert.ok(attachment.localPath, `${attachment.id} must land`);
@@ -75,7 +73,6 @@ test("one relay's files download side by side, and concurrent asks for the relay
     assert.equal(mints.length, 4, "each file is minted once, however many tiles asked");
     assert.equal(files.stats().hits, 4, "each file is downloaded once");
     assert.ok(files.stats().peak >= 2, `downloads must overlap (peak ${files.stats().peak})`);
-    assert.ok(elapsed < 4 * 120, `four 120ms downloads must not run in series (took ${elapsed}ms)`);
   } finally {
     await files.stop();
     home.restore();

@@ -124,6 +124,10 @@ function relayOwnedNodePath(executable, {
       fsImpl.writeFileSync(temporary, fsImpl.readFileSync(source), { mode: 0o700, flag: "wx" });
       fsImpl.chmodSync(temporary, 0o700);
       if (fileDigest(temporary, fsImpl) !== digest) throw new Error("the copied executable failed its integrity check");
+      // Sync before executing the copy. Linux can briefly reject a later r+
+      // open of an executable with ETXTBSY even after the version probe exits.
+      const fd = fsImpl.openSync(temporary, "r+");
+      try { fsImpl.fsyncSync(fd); } finally { fsImpl.closeSync(fd); }
       const checked = verifiedNodeVersion(temporary, { runCommand });
       if (!checked.ok && platform === "darwin") {
         const { preserveMacOSNodeBundle } = require("./macos-node-bundle.cjs");
@@ -140,8 +144,6 @@ function relayOwnedNodePath(executable, {
         }
       }
       if (!checked.ok || checked.version !== sourceRuntime.version) throw new Error(`owned Node runtime failed verification before publication: ${checked.detail || `expected ${sourceRuntime.version}, got ${checked.version}`}`);
-      const fd = fsImpl.openSync(temporary, "r+");
-      try { fsImpl.fsyncSync(fd); } finally { fsImpl.closeSync(fd); }
       // Keep the old path until replacement is complete. An interrupted repair
       // must never erase the interpreter used by the independent watchdog.
       fsImpl.renameSync(temporary, destination);

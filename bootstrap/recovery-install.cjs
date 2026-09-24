@@ -202,6 +202,14 @@ function installRecovery({ packageRoot, node = process.execPath, homeDir = os.ho
         const loaded = Number(/run interval = (\d+) seconds/.exec(String(observed.stdout || ""))?.[1]) || null;
         const needsHandover = read(path.join(root, "scheduler.json"))?.intervalSeconds !== 60 || (loaded !== null && loaded !== 60);
         const job = "work.relay.recovery.schedule-handover";
+        // A live legacy worker cannot be replaced yet. Preserve the plist
+        // matching launchd's loaded cadence now: another install will have
+        // overwritten the on-disk plist with 60 before that worker goes idle.
+        // The handover validates this fallback before it ever unloads launchd.
+        const priorInterval = Number(/<key>StartInterval<\/key>\s*<integer>(\d+)<\/integer>/.exec(String(priorSchedule || ""))?.[1]) || null;
+        if (needsHandover && loaded !== null && priorInterval === loaded) {
+          atomicFile(path.join(root, "scheduler-previous.plist"), priorSchedule);
+        }
         scheduleCleanup = require("./recovery-schedule-handover.cjs").retireIdleHandover({
           run: (_file, args) => runCommand("launchctl", args),
         });
@@ -210,7 +218,6 @@ function installRecovery({ packageRoot, node = process.execPath, homeDir = os.ho
         try { write(path.join(root, "scheduler-cleanup.json"), { at: Date.now(), ...scheduleCleanup }); } catch { /* Diagnostic failure is not runtime failure. */ }
         if (!scheduleCleanup.pending) {
           if (needsHandover) {
-            if (priorSchedule) atomicFile(path.join(root, "scheduler-previous.plist"), priorSchedule);
             results.push(runCommand("launchctl", ["submit", "-l", job, "-o", log, "-e", log, "--", runtimeNode,
               path.join(bundle, "bootstrap", "recovery-schedule-handover.cjs"), homeDir, String(userId)]));
           }

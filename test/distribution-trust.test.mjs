@@ -2321,3 +2321,21 @@ test("public export includes every script its release security suite imports", (
   assert.match(verifier, /prepareLinuxElectronSandbox\(\{ electronPath: verified\.electronPath, platform \}\)/);
   assert.doesNotMatch(verifier, /["']--no-sandbox["']/);
 });
+
+test("public export retains the stock Mac candidate canary", () => {
+  const exporter = fs.readFileSync(new URL("../scripts/export-public-release.mjs", import.meta.url), "utf8");
+  const workflow = fs.readFileSync(new URL("../public-release/.github/workflows/verify-companion-candidate-update.yml", import.meta.url), "utf8");
+  for (const script of [
+    "companion-candidate-update-workflow.test.mjs",
+    "trigger-stock-candidate-update.mjs",
+    "verify-stock-handover.mjs",
+    "verify-stock-service-recovery.mjs",
+  ]) {
+    assert.match(exporter, new RegExp(`"${script.replaceAll(".", "\\.")}"`));
+    assert.equal(fs.existsSync(new URL(`../../../scripts/${script}`, import.meta.url)), true);
+  }
+  assert.match(workflow, /runs-on: \$\{\{ matrix\.os \}\}/);
+  assert.match(workflow, /macos-14/);
+  assert.match(workflow, /macos-15-intel/);
+  assert.match(workflow, /node scripts\/verify-stock-handover\.mjs/);
+});

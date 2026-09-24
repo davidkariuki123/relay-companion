@@ -299,6 +299,44 @@ test("the Mac installer hands over a stale loaded cadence and retires an idle fi
   assert.deepEqual(install(60), ["print", "list", "remove", "list"], "a finished handover is removed and nothing new is submitted");
 });
 
+test("a running legacy handover keeps the loaded stale schedule as the next install's fallback", t => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-running-handover-"));
+  t.after(() => {
+    assert.equal(path.dirname(homeDir), os.tmpdir());
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+  const plist = path.join(homeDir, "Library", "LaunchAgents", "work.relay.companion.recovery.plist");
+  fs.mkdirSync(path.dirname(plist), { recursive: true });
+  fs.writeFileSync(plist, '<?xml version="1.0"?><plist version="1.0"><dict><key>StartInterval</key><integer>300</integer></dict></plist>');
+  let running = true;
+  let present = true;
+  let submitted = 0;
+  const runCommand = (command, args) => {
+    if (command !== "launchctl") return { status: 0 };
+    if (args[0] === "print") return { status: 0, stdout: "run interval = 300 seconds" };
+    if (args[0] === "list") return present
+      ? { status: 0, stdout: `{ "Label" = "work.relay.recovery.schedule-handover"; ${running ? '"PID" = 4242;' : ""} }` }
+      : { status: 113 };
+    if (args[0] === "remove") present = false;
+    if (args[0] === "submit") submitted++;
+    return { status: 0 };
+  };
+  const install = () => installRecovery({ homeDir, platform: "darwin", packageRoot: fileURLToPath(new URL("..", import.meta.url)),
+    preserveNode: () => process.execPath, runCommand });
+  const first = install();
+  assert.equal(first.ok, true);
+  assert.equal(first.scheduleCleanup.reason, "running");
+  assert.equal(first.scheduleCleanup.pending, true);
+  assert.equal(submitted, 0);
+  running = false;
+  const second = install();
+  assert.equal(second.ok, true);
+  assert.equal(second.scheduleCleanup.pending, false);
+  assert.equal(submitted, 1);
+  const fallback = fs.readFileSync(path.join(homeDir, ".relay", "recovery", "scheduler-previous.plist"), "utf8");
+  assert.match(fallback, /<key>StartInterval<\/key><integer>300<\/integer>/);
+});
+
 for (const interval of [60, 300]) test(`refused handover removal at ${interval}s does not fail installation or replace the job`, t => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-handover-refusal-"));
   t.after(() => fs.rmSync(homeDir, {recursive: true, force: true}));

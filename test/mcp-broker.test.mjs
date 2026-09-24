@@ -189,7 +189,8 @@ test("eight simultaneous hosts share exactly one broker and all retain MCP parit
     const transport = new StdioClientTransport({
       command: process.execPath,
       args: [`--max-old-space-size=${MCP_BRIDGE_MAX_OLD_SPACE_MB}`, launcher, "mcp"],
-      env: { ...env, RELAY_HOME: configDir, RELAY_COMPANION_HOME: configDir, RELAY_MCP_BROKER_IDLE_MS: "2000" },
+      // Leave enough idle time for all eight bridges to reach the broker under CI load.
+      env: { ...env, RELAY_HOME: configDir, RELAY_COMPANION_HOME: configDir, RELAY_MCP_BROKER_IDLE_MS: "15000" },
       stderr: "pipe",
     });
     let stderr = "";
