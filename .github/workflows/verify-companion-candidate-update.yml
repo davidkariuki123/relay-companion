@@ -1,0 +1,247 @@
+name: Verify Companion candidate auto-update
+
+on:
+  workflow_dispatch:
+    inputs:
+      from_version:
+        description: "Exact stock Companion version that initiates the update"
+        required: true
+        type: string
+      to_version:
+        description: "Exact non-fleet Companion build candidate"
+        required: true
+        type: string
+      source_sha:
+        description: "Exact public relay-companion source commit for the candidate"
+        required: true
+        type: string
+      bridge_version:
+        description: "Optional exact stock trust-bridge version before the candidate"
+        required: false
+        type: string
+      bridge_source_sha:
+        description: "Exact public source commit when bridge_version is supplied"
+        required: false
+        type: string
+      live_services:
+        description: "Use stock stable discovery with services running (target must be installer)"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-companion-candidate-${{ inputs.from_version }}-${{ inputs.to_version }}
+  cancel-in-progress: false
+
+jobs:
+  auto-update:
+    name: ${{ matrix.platform }} ${{ inputs.from_version }} -> ${{ inputs.to_version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: darwin-arm64
+          - os: macos-15-intel
+            platform: darwin-x64
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.18.0
+      - name: Upgrade the exact stock runtime to the isolated build candidate
+        shell: bash
+        env:
+          FROM_VERSION: ${{ inputs.from_version }}
+          TO_VERSION: ${{ inputs.to_version }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          BRIDGE_VERSION: ${{ inputs.bridge_version }}
+          BRIDGE_SOURCE_SHA: ${{ inputs.bridge_source_sha }}
+          LIVE_SERVICES: ${{ inputs.live_services }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "davidkariuki123/relay-companion"
+          [[ "$FROM_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$TO_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          if [ -n "$BRIDGE_VERSION" ]; then
+            [[ "$BRIDGE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+            test "$LIVE_SERVICES" != true
+            [[ "$BRIDGE_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+            node scripts/verify-published-release.mjs \
+              --version "$BRIDGE_VERSION" --source-sha "$BRIDGE_SOURCE_SHA"
+          else
+            test -z "$BRIDGE_SOURCE_SHA"
+          fi
+
+          latest_before="$(npm view relay-companion dist-tags.latest)"
+          installer_before="$(npm view relay-companion dist-tags.installer)"
+          dev_before="$(npm view relay-companion dist-tags.dev)"
+          staging_before="$(npm view relay-companion dist-tags.staging)"
+          if [ "$LIVE_SERVICES" = true ]; then
+            test "$installer_before" = "$TO_VERSION"
+          fi
+          test "$(npm view relay-companion dist-tags.build)" = "$TO_VERSION"
+          test "$(npm view "relay-companion@$TO_VERSION" relayDistribution)" = thin-installer
+          node scripts/verify-published-release.mjs \
+            --version "$TO_VERSION" --source-sha "$SOURCE_SHA"
+
+          test ! -e "$HOME/.relay"
+          mkdir -p "$HOME/.codex"
+          pointer="$HOME/.relay/runtime/current.json"
+          host_node="$(command -v node)"
+          stable_bin=""
+          cleanup() {
+            if [ -f "$pointer" ]; then
+              runtime_node="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).node' "$pointer")"
+              runtime_bin="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).bin' "$pointer")"
+              "$runtime_node" "$runtime_bin" uninstall --no-trampoline || true
+            elif [ -n "$stable_bin" ]; then
+              "$host_node" "$stable_bin" uninstall --no-trampoline || true
+            fi
+          }
+          trap cleanup EXIT
+
+          from_distribution="$(npm view "relay-companion@$FROM_VERSION" relayDistribution 2>/dev/null || true)"
+          if [ "$from_distribution" = thin-installer ]; then
+            npx --yes --no-audit --no-fund "relay-companion@$FROM_VERSION" setup
+          else
+            npm install --global --no-audit --no-fund "relay-companion@$FROM_VERSION"
+            legacy_bin="$(npm root -g)/relay-companion/bin/relay.js"
+            test -f "$legacy_bin"
+            "$host_node" "$legacy_bin" install --claim
+          fi
+
+          # setup/install starts the stock daemon, which would independently poll
+          # the live channel and race this exact-candidate canary. Pause only the
+          # two runner-local Relay services; the stock update transaction repairs
+          # and restarts them as it would on a user's installed machine.
+          if [ "$LIVE_SERVICES" != true ]; then
+            domain="gui/$(id -u)"
+            launchctl bootout "$domain/work.relay.companion" 2>/dev/null || true
+            launchctl bootout "$domain/work.relay.companion.pill" 2>/dev/null || true
+          else
+            for service in work.relay.companion work.relay.companion.pill; do
+              launchctl print "gui/$(id -u)/$service" > "$RUNNER_TEMP/$service.txt"
+              grep -q 'state = running' "$RUNNER_TEMP/$service.txt"
+            done
+          fi
+
+          stable_bin="$(npm root -g)/relay-companion/bin/relay.js"
+          if [ ! -f "$stable_bin" ]; then
+            stable_bin="$HOME/.relay/lib/node_modules/relay-companion/bin/relay.js"
+          fi
+
+          if [ -f "$pointer" ]; then
+            entry_shape=canonical
+            entry_node="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).node' "$pointer")"
+            entry_bin="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).bin' "$pointer")"
+            package_root="$(node -p 'require("path").dirname(require("path").dirname(process.argv[1]))' "$entry_bin")"
+          else
+            entry_shape=legacy
+            test -f "$stable_bin"
+            entry_node="$host_node"
+            entry_bin="$stable_bin"
+            package_root="$(node -p 'require("path").dirname(require("path").dirname(process.argv[1]))' "$entry_bin")"
+          fi
+          entry_version="$("$entry_node" "$entry_bin" version)"
+          if [ -n "$BRIDGE_VERSION" ]; then
+            test "$entry_shape" = canonical
+            test "$entry_version" = "$FROM_VERSION"
+            node scripts/trigger-stock-candidate-update.mjs \
+              --package-root "$package_root" \
+              --current-version "$entry_version" \
+              --target-version "$BRIDGE_VERSION"
+            entry_node="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).node' "$pointer")"
+            entry_bin="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).bin' "$pointer")"
+            package_root="$(node -p 'require("path").dirname(require("path").dirname(process.argv[1]))' "$entry_bin")"
+            entry_version="$("$entry_node" "$entry_bin" version)"
+            test "$entry_version" = "$BRIDGE_VERSION"
+            echo "Stock trust bridge completed: $FROM_VERSION -> $BRIDGE_VERSION"
+            # Pause only the app services again before the next stock transaction.
+            launchctl bootout "$domain/work.relay.companion" 2>/dev/null || true
+            launchctl bootout "$domain/work.relay.companion.pill" 2>/dev/null || true
+          fi
+          if [ "$LIVE_SERVICES" = true ]; then
+            # A natural update can finish before setup returns. Keep the real
+            # daemon and pill alive and use the stock updater's live discovery.
+            [ "$entry_version" = "$FROM_VERSION" ] || [ "$entry_version" = "$TO_VERSION" ]
+            "$entry_node" "$entry_bin" update
+          else
+            test "$entry_version" = "${BRIDGE_VERSION:-$FROM_VERSION}"
+
+            node scripts/trigger-stock-candidate-update.mjs \
+              --package-root "$package_root" \
+              --current-version "$entry_version" \
+              --target-version "$TO_VERSION"
+
+            current="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).version || ""' "$pointer" 2>/dev/null || true)"
+            if [ "$entry_shape" = legacy ] && [ "$current" = "$FROM_VERSION" ]; then
+              canonical_bin="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).bin' "$pointer")"
+              canonical_root="$(node -p 'require("path").dirname(require("path").dirname(process.argv[1]))' "$canonical_bin")"
+              node scripts/trigger-stock-candidate-update.mjs \
+                --package-root "$canonical_root" \
+                --current-version "$FROM_VERSION" \
+                --target-version "$TO_VERSION"
+            fi
+          fi
+
+          updated=false
+          for attempt in $(seq 1 120); do
+            if [ -f "$pointer" ] && [ "$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).version || ""' "$pointer" 2>/dev/null || true)" = "$TO_VERSION" ]; then
+              updated=true
+              break
+            fi
+            sleep 5
+          done
+          if [ "$updated" != true ]; then
+            test ! -f "$HOME/.relay/update.log" || tail -n 200 "$HOME/.relay/update.log"
+            echo "::error::Relay did not update from $FROM_VERSION to isolated candidate $TO_VERSION"
+            exit 1
+          fi
+
+          new_node="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).node' "$pointer")"
+          new_bin="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).bin' "$pointer")"
+          test "$("$new_node" "$new_bin" version)" = "$TO_VERSION"
+          "$new_node" "$new_bin" doctor
+
+          # Updating a runtime must also deliver the managed skill to existing
+          # users. Verify the installed bytes, not just the Companion version.
+          "$new_node" --input-type=module - "$new_bin" <<'NODE'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import { createRequire } from 'node:module';
+          const root = path.dirname(path.dirname(process.argv[2]));
+          const skill = createRequire(import.meta.url)(path.join(root, 'bootstrap/relay-skill.cjs'));
+          const manifest = JSON.parse(fs.readFileSync(path.join(root, 'skill/manifest.json'), 'utf8'));
+          for (const target of skill.defaultTargets()) {
+            assert.equal(skill.readState(target.directory)?.version, manifest.version, target.host);
+            assert.deepEqual(skill.localChanges(target.directory), [], target.host);
+          }
+          console.log(`Verified managed skill ${manifest.version} after the stock update.`);
+          NODE
+
+          node scripts/verify-stock-service-recovery.mjs "$TO_VERSION"
+          node scripts/verify-stock-handover.mjs "$TO_VERSION"
+
+          test "$(npm view relay-companion dist-tags.latest)" = "$latest_before"
+          test "$(npm view relay-companion dist-tags.installer)" = "$installer_before"
+          test "$(npm view relay-companion dist-tags.dev)" = "$dev_before"
+          test "$(npm view relay-companion dist-tags.staging)" = "$staging_before"
+          test "$(npm view relay-companion dist-tags.build)" = "$TO_VERSION"
+      - name: Retain measured stock recovery result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: service-recovery-${{ matrix.platform }}-${{ inputs.from_version }}
+          path: |
+            ${{ runner.temp }}/relay-service-recovery.json
+            ${{ runner.temp }}/relay-handover-native.json
+            ${{ runner.temp }}/relay-handover-native/**
+          if-no-files-found: warn
+          retention-days: 1
