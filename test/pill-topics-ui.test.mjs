@@ -46,7 +46,7 @@ test("preload bridges every topic operation", () => {
 });
 
 test("main proxies topic calls through the API client behind the developer gate", () => {
-  assert.match(main, /const topicCall = async \(fn\) => \{[\s\S]*?PRODUCT_FEATURES\.topics !== true[\s\S]*?return groupCall\(fn\);/);
+  assert.match(main, /const topicCall = async \(fn\) => \{[\s\S]*?currentProductFeatures\(\)\.topics !== true[\s\S]*?return groupCall\(fn\);/);
   for (const h of [
     "relay:topicsList", "relay:topicGet", "relay:topicCreate", "relay:topicUpdate", "relay:topicArchive", "relay:topicInvite",
     "relay:topicApprove", "relay:topicDecline", "relay:topicLeave", "relay:topicMembership", "relay:topicSeen",

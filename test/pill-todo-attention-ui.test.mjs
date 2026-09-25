@@ -95,7 +95,7 @@ test("Settings carries the assistant as one switch and one choice in the value-r
 });
 
 test("main hands the renderer a bounded steward view and forwards preferences to the daemon's file", () => {
-  assert.match(main, /todoSteward: PRODUCT_FEATURES\.todo === true \? readTodoStewardState\(\) : null,/);
+  assert.match(main, /todoSteward: currentProductFeatures\(\)\.todo === true \? readTodoStewardState\(\) : null,/);
   assert.doesNotMatch(main, /relay:todoStewardRun/);
   assert.match(main, /ipcMain\.handle\("relay:todoStewardPrefs"/);
   assert.match(main, /steward\.saveStewardPreferences\(RELAY_HOME/);

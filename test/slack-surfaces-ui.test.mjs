@@ -48,12 +48,12 @@ test("Slack surfaces and transport are fail-closed outside the dev feature row",
     "Settings cannot paint a Slack card while the feature is off");
   assert.match(html, /async function refreshSlackConnection[\s\S]{0,140}payload\.features\?\.slack !== true\) return;/,
     "the hidden UI does not probe Slack status");
-  assert.match(main, /async function refreshCanonicalChats\(\) \{\s*if \(PRODUCT_FEATURES\.slack !== true\)[\s\S]*?slackChatsCache = \[\]/,
+  assert.match(main, /async function refreshCanonicalChats\(\) \{\s*if \(currentProductFeatures\(\)\.slack !== true\)[\s\S]*?slackChatsCache = \[\]/,
     "the main process does not fetch Slack projections while disabled");
   for (const channel of ["relay:slackConnection", "relay:slackConnect", "relay:slackDisconnect"]) {
     const start = main.indexOf(`ipcMain.handle("${channel}"`);
     assert.ok(start >= 0, `${channel} handler exists`);
-    assert.match(main.slice(start, start + 450), /PRODUCT_FEATURES\.slack !== true/,
+    assert.match(main.slice(start, start + 450), /currentProductFeatures\(\)\.slack !== true/,
       `${channel} checks the product feature before transport`);
   }
 });

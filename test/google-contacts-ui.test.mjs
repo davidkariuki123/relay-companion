@@ -64,7 +64,7 @@ test("Google Contacts stays hidden and unreachable outside the Dev feature gate"
   assert.match(inbox, /class="cv-google gone" id="cvGoogle"/);
   assert.match(inbox, /cvGoogleEl\.classList\.toggle\("gone", !people \|\| payload\.features\?\.googleContacts !== true\)/);
   assert.match(inbox, /async function loadGoogleContacts\(\) \{\s*if \(payload\.features\?\.googleContacts !== true\) return;/);
-  assert.match(main, /relay:googleContactsStatus[\s\S]*PRODUCT_FEATURES\.googleContacts === true/);
-  assert.match(main, /relay:googleContactsSync[\s\S]*PRODUCT_FEATURES\.googleContacts !== true/);
-  assert.match(main, /relay:googleContactsConnect[\s\S]*PRODUCT_FEATURES\.googleContacts !== true/);
+  assert.match(main, /relay:googleContactsStatus[\s\S]*currentProductFeatures\(\)\.googleContacts === true/);
+  assert.match(main, /relay:googleContactsSync[\s\S]*currentProductFeatures\(\)\.googleContacts !== true/);
+  assert.match(main, /relay:googleContactsConnect[\s\S]*currentProductFeatures\(\)\.googleContacts !== true/);
 });

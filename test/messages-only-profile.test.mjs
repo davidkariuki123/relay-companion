@@ -122,7 +122,7 @@ test("the pill has no local capability-mode policy", () => {
   const source = fs.readFileSync(new URL("../overlay/main.cjs", import.meta.url), "utf8");
   assert.doesNotMatch(source, /mode-policy|COMPANION_MODE|RELAY_COMPANION_MODE/);
   assert.match(source, /refreshAccountProductFeatures/);
-  assert.match(source, /user: me\?\.user/);
+  assert.match(source, /accountFeatureState\.apply\(requestSnapshot, me\?\.user, latestSnapshot\)/);
 });
 
 test("the pill gates every live Task entry point by the account capability", () => {
@@ -130,18 +130,18 @@ test("the pill gates every live Task entry point by the account capability", () 
   // The legacy task protocol (/v1/tasks, its list, mutations and pages) is
   // the developers' still; a shipped Task is a Relay row on the Requests
   // board, which every account has.
-  assert.match(source, /async function refreshTasks\(\) \{\s+if \(!LEGACY_TASK_PROTOCOL_ALLOWED\)/);
-  assert.match(source, /async function runMutation\(label, fn\) \{\s+if \(!LEGACY_TASK_PROTOCOL_ALLOWED\)/);
-  assert.match(source, /function openTaskDetail\(taskId\) \{\s+if \(!LEGACY_TASK_PROTOCOL_ALLOWED\) return;/);
-  assert.match(source, /ipcMain\.handle\("relay:taskStatus"[\s\S]*?if \(!LEGACY_TASK_PROTOCOL_ALLOWED\)/);
+  assert.match(source, /async function refreshTasks\(\) \{\s+if \(currentProductFeatures\(\)\.legacyTaskProtocol !== true\)/);
+  assert.match(source, /async function runMutation\(label, fn\) \{\s+if \(currentProductFeatures\(\)\.legacyTaskProtocol !== true\)/);
+  assert.match(source, /function openTaskDetail\(taskId\) \{\s+if \(currentProductFeatures\(\)\.legacyTaskProtocol !== true\) return;/);
+  assert.match(source, /ipcMain\.handle\("relay:taskStatus"[\s\S]*?if \(currentProductFeatures\(\)\.legacyTaskProtocol !== true\)/);
   // Ordinary accounts hide every Task row while retaining it durably in the
   // staged store. Developer accounts can render and open them.
   assert.match(
     source,
-    /filter\(\(p\) => PRODUCT_FEATURES\.requests \|\| p\.relayNotificationKind !== "task"\)/,
+    /filter\(\(p\) => features\.requests \|\| p\.relayNotificationKind !== "task"\)/,
   );
-  assert.match(source, /if \(!LEGACY_TASK_PROTOCOL_ALLOWED && \(row\?\.taskId \|\| isRelayTaskWebTarget\(row\?\.actionUrl\)\)\)/);
-  assert.match(source, /function openUrlTarget\(url\) \{\s+if \(!LEGACY_TASK_PROTOCOL_ALLOWED && isRelayTaskWebTarget\(url\)\)/);
+  assert.match(source, /if \(currentProductFeatures\(\)\.legacyTaskProtocol !== true && \(row\?\.taskId \|\| isRelayTaskWebTarget\(row\?\.actionUrl\)\)\)/);
+  assert.match(source, /function openUrlTarget\(url\) \{\s+if \(currentProductFeatures\(\)\.legacyTaskProtocol !== true && isRelayTaskWebTarget\(url\)\)/);
   assert.doesNotMatch(source, /COMPANION_MODE_CLI_ARG|--full|--messages-only/);
 });
 

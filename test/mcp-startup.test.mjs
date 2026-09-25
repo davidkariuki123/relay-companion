@@ -12,7 +12,6 @@ import {
   ORG_ADMIN_TOOL_NAMES,
   RELAY_MCP_INSTRUCTIONS,
   instructionsForClient,
-  TOOLS,
   startupInstructionsFor,
 } from "../src/mcp.js";
 import { RELAY_MILESTONE_GUIDE } from "../src/agent-instructions.js";
@@ -114,12 +113,11 @@ test("MCP initialize returns complete startup teachings before tools are selecte
   assert.ok(developerNotStaff.tools.every((tool) => !ORG_ADMIN_TOOL_NAMES.has(tool.name)), "org onboarding is staff-only even for developers");
 
   const full = await inspectMcp({ developer: true, staff: true, updateChannel: "dev" });
-  assert.equal(full.instructions, RELAY_MCP_INSTRUCTIONS);
-  const pausedTodoTools = new Set(["relay_todo_update", "relay_todo_visibility", "relay_todo_reorder"]);
-  assert.deepEqual(
-    full.tools.map((tool) => tool.name),
-    TOOLS.filter((tool) => !pausedTodoTools.has(tool.name)).map((tool) => tool.name),
-  );
+  // A saved developer bit without a verified device profile grants no
+  // developer tools, even when the configured channel is Dev.
+  assert.equal(startupInstructionsFor({ requests: true, topics: true }), RELAY_MCP_INSTRUCTIONS);
+  assert.equal(full.instructions, PRODUCTION_INSTRUCTIONS);
+  assert.deepEqual(new Set(full.tools.map((tool) => tool.name)), PRODUCTION_ORDINARY_RELAY_TOOL_NAMES);
   assert.doesNotMatch(full.instructions, /relay_todo_update|todoStatuses/);
   assert.deepEqual(Object.keys(full.tools.find((tool) => tool.name === "relay_inbox_list").inputSchema.properties), ["relayIds"]);
 });

@@ -15,7 +15,7 @@ test("outbound message bubbles expose human-only edit and deliberate delete cont
   assert.match(preload, /deleteMessage:[\s\S]*relay:messageDelete/);
   assert.match(main, /client\.editMessage\(id,[\s\S]*forHuman/);
   assert.match(main, /client\.deleteMessage\(id,/);
-  assert.match(main, /PRODUCT_FEATURES\.messageMutations !== true/);
+  assert.match(main, /currentProductFeatures\(\)\.messageMutations !== true/);
   // Edit and delete follow WhatsApp's windows and never confirm inside the menu.
   assert.match(html, /const MESSAGE_EDIT_WINDOW_MS = 15 \* 60 \* 1000;/);
   assert.match(html, /const MESSAGE_DELETE_WINDOW_MS = 2 \* 24 \* 60 \* 60 \* 1000;/);
