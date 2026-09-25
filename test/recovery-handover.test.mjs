@@ -15,6 +15,7 @@ function fixture(t) {
   const m = model(homeDir);
   return { ...m, homeDir, handover: options => schedule.handover({homeDir, userId: 123, attempts: 1, sleep: async () => {}, report() {}, run: m.run, ...options}) };
 }
+const xmlPlan = (target, homeDir) => `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>${target.Label}</string><key>ProgramArguments</key><array>${target.ProgramArguments.map(arg => `<string>${arg}</string>`).join("")}</array><key>EnvironmentVariables</key><dict><key>HOME</key><string>${homeDir}</string></dict><key>StartInterval</key><integer>${target.StartInterval}</integer></dict></plist>`;
 test("failed cleanup cannot repeat a completed schedule change or mark recovery unhealthy", async t => {
   const f = fixture(t); f.save({...f.read(), removeFailure: true});
   for (let i = 0; i < 3; i++) {
@@ -36,6 +37,38 @@ test("confirmed missing schedule is bootstrapped without trying to unload it", a
   const f = fixture(t); f.save({...f.read(), loaded: null});
   assert.equal((await f.handover()).ok, true);
   assert.deepEqual(f.mutations(), ["bootstrap", "remove"]);
+});
+test("a missing rollback plist is rebuilt from the observed loaded cadence before unload", async t => {
+  const f = fixture(t), target = f.plan(60);
+  fs.writeFileSync(f.plist, xmlPlan(target, f.homeDir));
+  const previous = path.join(f.root, "scheduler-previous.plist");
+  fs.rmSync(previous);
+  const result = await f.handover();
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.match(fs.readFileSync(previous, "utf8"), /<key>StartInterval<\/key><integer>300<\/integer>/);
+  assert.equal(f.read().loaded.StartInterval, 60);
+  assert.deepEqual(f.mutations(), ["bootout", "bootstrap", "remove"]);
+});
+test("a synthesized rollback restores the old schedule after failed registration", async t => {
+  const f = fixture(t);
+  fs.writeFileSync(f.plist, xmlPlan(f.plan(60), f.homeDir));
+  fs.rmSync(path.join(f.root, "scheduler-previous.plist"));
+  f.save({...f.read(), bootstrapFailures: 1});
+  const result = await f.handover();
+  assert.equal(result.recoveryAvailable, true, JSON.stringify(result));
+  assert.equal(f.read().loaded.StartInterval, 300);
+  assert.deepEqual(f.mutations().filter(x => x !== "remove"), ["bootout", "bootstrap", "bootstrap"]);
+});
+test("an unknown loaded interpreter cannot synthesize a rollback or unload", async t => {
+  const f = fixture(t);
+  fs.writeFileSync(f.plist, xmlPlan(f.plan(60), f.homeDir));
+  const previous = path.join(f.root, "scheduler-previous.plist");
+  fs.rmSync(previous);
+  f.save({...f.read(), loaded: {...f.plan(300), ProgramArguments: ["/unrecognized/node", f.plan(300).ProgramArguments[1]]}});
+  const result = await f.handover();
+  assert.equal(result.reason, "recovery-schedule-target-unknown");
+  assert.equal(fs.existsSync(previous), false);
+  assert.deepEqual(f.mutations(), []);
 });
 test("unknown registration leaves the independent handover registered and does not mutate", async t => {
   const f = fixture(t); f.save({...f.read(), queryUnknown: true});

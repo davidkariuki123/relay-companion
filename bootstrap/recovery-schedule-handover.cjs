@@ -109,6 +109,16 @@ async function handover({ homeDir, userId, sleep = ms => new Promise(resolve => 
       if (loaded.present) {
         // Do not unload a registration with an unexpected interpreter/launcher.
         if (!plan.args.every(arg => loaded.detail.includes(arg))) return finish({ ok: false, reason: "recovery-schedule-target-unknown" });
+        // An older installer can leave disk at 60 s while launchd still runs
+        // 300 s. The installer may not see that race; this owner holds the
+        // mutation locks and can create the missing escape path from the
+        // verified target and the cadence it actually observed.
+        if (!fs.existsSync(previous)) {
+          const fallbackBytes = plan.bytes.replace(/(<key>StartInterval<\/key>\s*<integer>)\d+(<\/integer>)/,
+            (_match, open, close) => `${open}${loaded.interval}${close}`);
+          if (fallbackBytes === plan.bytes) return finish({ ok: false, reason: "recovery-schedule-fallback-unavailable" });
+          atomicFile(previous, fallbackBytes);
+        }
         // Validate the escape path before removing the currently loaded one.
         const fallback = readSchedule(previous, homeDir, run);
         if (!matches(loaded, fallback)) return finish({ ok: false, reason: "recovery-schedule-fallback-unconfirmed" });

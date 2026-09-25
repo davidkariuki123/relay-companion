@@ -3,6 +3,14 @@
 const fs = require("node:fs"), path = require("node:path");
 const LABEL = "work.relay.companion.recovery";
 const job = "work.relay.recovery.schedule-handover";
+const parseSchedule = bytes => {
+  if (String(bytes).trimStart().startsWith("{")) return JSON.parse(bytes);
+  const field = name => new RegExp(`<key>${name}<\\/key>\\s*<string>([^<]+)<\\/string>`).exec(bytes)?.[1];
+  const args = /<key>ProgramArguments<\/key>\s*<array>(.*?)<\/array>/.exec(bytes)?.[1] || "";
+  return { Label: field("Label"), StartInterval: Number(/<key>StartInterval<\/key>\s*<integer>(\d+)<\/integer>/.exec(bytes)?.[1]),
+    ProgramArguments: [...args.matchAll(/<string>([^<]+)<\/string>/g)].map(match => match[1]),
+    EnvironmentVariables: { HOME: field("HOME") } };
+};
 function model(homeDir, options = {}) {
   const stateFile = path.join(homeDir, "launchd-model.json");
   const root = path.join(homeDir, ".relay", "recovery");
@@ -19,7 +27,7 @@ function model(homeDir, options = {}) {
     save({ loaded: plan(300), job: true, calls: [], bootstrapFailures: 0 });
   }
   const run = (_file, args, commandOptions = {}) => {
-    if (_file.endsWith("plutil")) return { status: 0, stdout: String(commandOptions.input) };
+    if (_file.endsWith("plutil")) return { status: 0, stdout: JSON.stringify(parseSchedule(String(commandOptions.input))) };
     const state = read(); state.calls.push(args[0]); save(state);
     if (options.before) options.before(args, state);
     if (options.exitBefore === args[0]) process.exit(86);
@@ -38,7 +46,7 @@ function model(homeDir, options = {}) {
       state.loaded = null; save(state);
     } else if (args[0] === "bootstrap") {
       if (state.bootstrapFailures > 0) { state.bootstrapFailures--; save(state); return { status: 1 }; }
-      state.loaded = JSON.parse(fs.readFileSync(args[2], "utf8")); save(state);
+      state.loaded = parseSchedule(fs.readFileSync(args[2], "utf8")); save(state);
     } else if (args[0] === "remove") {
       if (state.removeFailure) return { status: 1, stderr: "removal refused" };
       state.job = false; save(state);
