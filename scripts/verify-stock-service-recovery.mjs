@@ -24,6 +24,28 @@ const diagnostic = () => Object.fromEntries([
   try { return [file, fs.readFileSync(path.join(root, file), "utf8").slice(-30_000)]; }
   catch { return [file, null]; }
 }));
+const failureDiagnostic = () => {
+  const files = Object.fromEntries([
+    "recovery/status.json", "recovery/launcher-status.json", "recovery/registration.json",
+    "recovery/scheduler.json", "recovery/scheduler-cleanup.json",
+    "recovery/scheduler-handover-status.json", "recovery/recovery.log",
+  ].map(file => {
+    try { return [file, fs.readFileSync(path.join(root, file), "utf8").slice(-8000)]; }
+    catch { return [file, null]; }
+  }));
+  const launchd = Object.fromEntries([
+    "work.relay.companion.recovery", "work.relay.recovery.schedule-handover",
+  ].map(label => {
+    const result = spawnSync("/bin/launchctl", ["print", `gui/${process.getuid()}/${label}`], { encoding: "utf8", timeout: 10_000 });
+    return [label, { status: result.status, stdout: String(result.stdout || "").slice(-6000), stderr: String(result.stderr || "").slice(-1000) }];
+  }));
+  const interval = file => {
+    try { return Number(/<key>StartInterval<\/key>\s*<integer>(\d+)<\/integer>/.exec(fs.readFileSync(file, "utf8"))?.[1]) || null; }
+    catch { return null; }
+  };
+  return { files, launchd, plistInterval: interval(path.join(homeDir, "Library", "LaunchAgents", "work.relay.companion.recovery.plist")),
+    previousInterval: interval(path.join(root, "recovery", "scheduler-previous.plist")) };
+};
 const { waitForRecoveryReady } = require(path.join(current.packageRoot, "bootstrap", "recovery-readiness.cjs"));
 const { activeCalls } = require(path.join(current.packageRoot, "bootstrap", "update-activity.cjs"));
 assert.equal(activeCalls({ homeDir }), 0, "fault injection must not interrupt protected work");
@@ -41,6 +63,11 @@ const report = { version, platform: process.platform, arch: process.arch, scenar
   recovered: recovered.ok, elapsedMs, targetMs: 60_000, targetMet: recovered.ok && elapsedMs <= 60_000, reason: recovered.reason || null };
 fs.writeFileSync(path.join(process.env.RUNNER_TEMP, "relay-service-recovery.json"), JSON.stringify(report, null, 2));
 console.log(JSON.stringify(report));
+if (!recovered.ok) {
+  report.diagnostic = failureDiagnostic();
+  fs.writeFileSync(path.join(process.env.RUNNER_TEMP, "relay-service-recovery.json"), JSON.stringify(report, null, 2));
+  console.log(JSON.stringify(report.diagnostic));
+}
 assert.equal(recovered.ok, true, JSON.stringify(recovered));
 assert.equal(readCurrent().packageRoot, current.packageRoot, "recovery must restore the exact installed candidate");
 if (!report.targetMet) console.log(`::warning::Recovery worked in ${elapsedMs}ms but has not met the approved 60000ms target. This remains an internal-test finding.`);
