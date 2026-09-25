@@ -180,6 +180,7 @@ if (process.argv[2] === "--child") {
       assert.equal(observed().interval, 300);
       fs.rmSync(path.join(recovery, "scheduler-previous.plist"), {force: true});
       const submitted = launchctl(["submit", "-l", job, "-o", path.join(fixture, "worker.log"), "-e", path.join(fixture, "worker.log"), "--",
+        "/usr/bin/env", "GITHUB_ACTIONS=true", `RUNNER_TEMP=${process.env.RUNNER_TEMP}`,
         host, fileURLToPath(import.meta.url), "--child", fixture]);
       assert.ok(success(submitted), submitted.stderr);
       testFixture = fixture;
