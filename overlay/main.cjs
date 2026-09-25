@@ -176,7 +176,7 @@ const {
   shouldIgnoreOverlayMouse,
   usesFixedOverlaySurface,
 } = require("./window-fit.cjs");
-const { productFeatures } = require("../src/product-features.cjs");
+const { accountFeatureKey, createAccountFeatureState } = require("../src/account-feature-state.cjs");
 const { createOutbox } = require("../src/outbox.cjs");
 const {
   RELAY_TRAY_DEFAULT_POSITION,
@@ -609,21 +609,13 @@ function installationAuthorizationController() {
         onConnected: async (registration) => {
           const { notifications } = await loadAccountModules();
           nativeCredentialCache = { version: null, token: "" };
+          remoteCredentialRejected = false;
+          adoptCurrentAccountFeatures(registration);
           notifications.resetCompanionStateForAccount(
             { user: registration.user, deviceId: registration.deviceId },
             { statePath: STATE_PATH },
           );
-          sentCache = [];
-          sentFingerprint = "";
-          sentUsage = null;
-          sentLoadedOnce = null;
-          contactsCache = [];
-          contactsFingerprint = "";
-          contactsLoadedOnce = null;
-          canonicalChatsCache = [];
-          slackChatsCache = [];
-          canonicalChatsFingerprint = "";
-          canonicalChatsLoadedOnce = null;
+          resetAccountViewCaches();
           // A desktop sign-in is either an existing sender restoring access or
           // a brand-new account set up from sendrelays.com, and only the
           // account's history can tell them apart. Hold the chapter back (never
@@ -889,7 +881,7 @@ const nativeTaskModulesPromise = Promise.all([
 const executeOffers = new Map();
 
 function nativeExecutionSummary(rows) {
-  if (!PRODUCT_FEATURES.taskExecution || !nativeTaskModules) return {};
+  if (!currentProductFeatures().taskExecution || !nativeTaskModules) return {};
   const config = readConfigFile();
   return Object.fromEntries(rows.flatMap((row) => {
     const record = nativeTaskModules.execute.executionRecord(config, row.id);
@@ -901,18 +893,21 @@ function nativeExecutionSummary(rows) {
 
 let checkingNativeDrafts = false;
 async function checkNativeDrafts() {
-  if (checkingNativeDrafts || !PRODUCT_FEATURES.taskExecution) return;
+  if (checkingNativeDrafts || !currentProductFeatures().taskExecution) return;
   checkingNativeDrafts = true;
   try {
     const modules = await nativeTaskModulesPromise;
-    const config = readConfigFile();
+    const snapshot = featureAccountSnapshot();
+    const config = snapshot.config;
+    if (!currentProductFeatures().taskExecution) return;
     if (!modules.launch.executionEnabled(config)) return;
     const ids = modules.execute.pendingNativeDrafts(config);
     if (!ids.length) return;
-    const client = await relayClient();
+    if (!accountFeatureKey(snapshot)) return;
+    const client = await relayClient({ url: snapshot.apiUrl, token: process.env.RELAY_DEVICE_TOKEN || config.deviceToken });
     for (const id of ids) {
       await modules.execute.executeNativeTask({ id, config, client, observeOnly: true,
-        isCurrentAccount: () => { try { return modules.launch.executionAccountKey(readConfigFile()) === modules.launch.executionAccountKey(config); } catch { return false; } },
+        isCurrentAccount: () => accountFeatureKey(snapshot) === accountFeatureKey(featureAccountSnapshot()),
         update: (record) => {
           if (record.startedAt) updateStagedPacket(id, { taskStartedAt: record.startedAt, taskRunOwner: record.taskRunOwner, taskClaim: record.taskClaim });
           void pushInbox(true).catch(() => {});
@@ -924,11 +919,13 @@ async function checkNativeDrafts() {
 
 async function executeTaskInNativeApp(event, id, choice) {
   if (!win || win.isDestroyed() || event.sender !== win.webContents || event.senderFrame !== event.sender.mainFrame) return { ok: false, error: "Not the Relay window." };
-  if (!PRODUCT_FEATURES.taskExecution) return { ok: false, error: "Execute is available only to Relay developer accounts." };
+  if (!currentProductFeatures().taskExecution) return { ok: false, error: "Execute is available only to Relay developer accounts." };
   try {
     const modules = await nativeTaskModulesPromise;
-    const executionConfig = readConfigFile();
-    const client = await relayClient();
+    const snapshot = featureAccountSnapshot();
+    const executionConfig = snapshot.config;
+    if (!accountFeatureKey(snapshot) || !currentProductFeatures().taskExecution) return { ok: false, error: "Execute is unavailable for this Relay account." };
+    const client = await relayClient({ url: snapshot.apiUrl, token: process.env.RELAY_DEVICE_TOKEN || executionConfig.deviceToken });
     const key = String(id || "");
     const pick = choice && typeof choice === "object" ? choice : null;
     let offered = null;
@@ -936,7 +933,7 @@ async function executeTaskInNativeApp(event, id, choice) {
     const packetFor = () => (packetPromise ||= client.fetchRelay(key).then((response) => response.packet || response.relay || response).catch(() => null));
     const result = await modules.execute.executeNativeTask({
       id: key, config: executionConfig, client,
-      isCurrentAccount: () => { try { return modules.launch.executionAccountKey(readConfigFile()) === modules.launch.executionAccountKey(executionConfig); } catch { return false; } },
+      isCurrentAccount: () => accountFeatureKey(snapshot) === accountFeatureKey(featureAccountSnapshot()),
       open: (url) => shell.openExternal(url),
       confirmDraftRetry: async () => {
         const answer = await dialog.showMessageBox(win, {
@@ -1093,16 +1090,46 @@ function readConfigFile() {
   }
 }
 
-let PRODUCT_FEATURES = productFeatures({
-  env: process.env,
-  config: readConfigFile(),
-  apiUrl: process.env.RELAY_API_URL || readConfigFile().apiUrl || "",
-});
-let TASK_FEATURES_ALLOWED = PRODUCT_FEATURES.requests;
+const accountFeatureState = createAccountFeatureState();
+function featureAccountSnapshot() {
+  const config = readConfigFile();
+  return { env: process.env, config, apiUrl: process.env.RELAY_API_URL || config.apiUrl || "" };
+}
+function currentProductFeatures() {
+  return accountFeatureState.current(featureAccountSnapshot());
+}
+function adoptCurrentAccountFeatures(registration) {
+  const snapshot = featureAccountSnapshot();
+  const token = process.env.RELAY_DEVICE_TOKEN || snapshot.config.deviceToken || "";
+  if (!registration?.deviceToken || registration.deviceToken !== token || registration.deviceId !== snapshot.config.deviceId) {
+    accountFeatureState.clear(snapshot);
+    return { applied: false, changed: true };
+  }
+  return accountFeatureState.apply(snapshot, registration.user, snapshot);
+}
+function resetAccountViewCaches() {
+  sentCache = [];
+  sentFingerprint = "";
+  sentUsage = null;
+  sentLoadedOnce = null;
+  contactsCache = [];
+  contactsFingerprint = "";
+  contactsLoadedOnce = null;
+  canonicalChatsCache = [];
+  slackChatsCache = [];
+  canonicalChatsFingerprint = "";
+  canonicalChatsLoadedOnce = null;
+  tasksCache = [];
+  tasksLoadedOnce = null;
+  reactionCache = new Map();
+  reactionFetchSig = "";
+  reactionFetchedAt = 0;
+  reactionRetryAt = 0;
+  executeOffers.clear();
+}
 // The pre-Requests task protocol (/v1/tasks and its invitations, approvals and
 // task pages) stays a developer surface on the server; a shipped Task is a
-// Relay row and rides TASK_FEATURES_ALLOWED with the rest of the Requests board.
-let LEGACY_TASK_PROTOCOL_ALLOWED = PRODUCT_FEATURES.legacyTaskProtocol === true;
+// Relay row and rides the account-bound Requests flag.
 let remoteCredentialRejected = false;
 let pendingSetupOpenRecord = null;
 let pendingSetupOpenPreviewCache = null;
@@ -1188,38 +1215,43 @@ function isRemoteCredentialRejection(error) {
 }
 
 async function refreshAccountProductFeatures() {
-  if (!deviceToken()) return false;
+  const requestSnapshot = featureAccountSnapshot();
+  accountFeatureState.current(requestSnapshot);
+  const requestIdentity = accountFeatureKey(requestSnapshot);
+  const token = process.env.RELAY_DEVICE_TOKEN || requestSnapshot.config.deviceToken || "";
+  if (!requestIdentity) return false;
   try {
-    const client = await relayClient();
+    const client = await relayClient({ url: requestSnapshot.apiUrl, token });
     const me = await client.me();
-    const next = productFeatures({
-      env: process.env,
-      config: readConfigFile(),
-      apiUrl: process.env.RELAY_API_URL || readConfigFile().apiUrl || "",
-      user: me?.user,
-    });
-    const changed = JSON.stringify(next) !== JSON.stringify(PRODUCT_FEATURES);
+    const latestSnapshot = featureAccountSnapshot();
+    const result = accountFeatureState.apply(requestSnapshot, me?.user, latestSnapshot);
+    if (!result.applied) {
+      if (requestIdentity === accountFeatureKey(latestSnapshot) && accountFeatureState.clear(latestSnapshot)) await pushInbox(true);
+      return false; // an account switch or profile mismatch won the race
+    }
+    const credentialRecovered = remoteCredentialRejected;
     remoteCredentialRejected = false;
-    PRODUCT_FEATURES = next;
-    TASK_FEATURES_ALLOWED = next.requests;
-    LEGACY_TASK_PROTOCOL_ALLOWED = next.legacyTaskProtocol === true;
-    if (changed) {
+    if (result.changed || credentialRecovered) {
       tasksLoadedOnce = null;
       canonicalChatsLoadedOnce = null;
       await refreshTasks();
       await refreshCanonicalChats();
       await pushInbox(true);
     }
-    return changed;
+    return result.changed;
   } catch (error) {
+    const latestSnapshot = featureAccountSnapshot();
+    if (requestIdentity !== accountFeatureKey(latestSnapshot)) return false;
+    const roleCleared = accountFeatureState.clear(latestSnapshot);
     if (isRemoteCredentialRejection(error)) {
-      const changed = !remoteCredentialRejected;
+      const changed = roleCleared || !remoteCredentialRejected;
       remoteCredentialRejected = true;
       if (changed) await pushInbox(true);
       return changed;
     }
     console.error("[overlay] developer profile refresh failed:", error && error.message);
-    return false;
+    if (roleCleared) await pushInbox(true);
+    return roleCleared;
   }
 }
 
@@ -1509,6 +1541,10 @@ async function pairWithCode(input) {
       platform: process.platform,
     });
     accountMod.persistPairedAccount({ deviceName, registration: res });
+    nativeCredentialCache = { version: null, token: "" };
+    remoteCredentialRejected = false;
+    adoptCurrentAccountFeatures(res);
+    resetAccountViewCaches();
     // Retire the device this computer just stopped using (only when that
     // credential was issued on this installation), so a switch never leaves a
     // live token and a stale device on the previous account.
@@ -1555,11 +1591,16 @@ async function signOutAccount() {
     const { account: accountMod, notifications } = await loadAccountModules();
     await accountMod.revokeSignedOutDevice();
     accountMod.persistSignedOutAccount();
+    nativeCredentialCache = { version: null, token: "" };
+    remoteCredentialRejected = false;
+    accountFeatureState.clear(featureAccountSnapshot());
+    resetAccountViewCaches();
     notifications.resetCompanionStateForAccount(
       { user: null, deviceId: "", force: true },
       { statePath: STATE_PATH },
     );
     const daemon = await restartCompanionDaemon();
+    await pushInbox(true);
     relaunchPillSoon({ delayMs: ACCOUNT_CHANGE_RELAUNCH_DELAY_MS });
     return { ok: true, daemon };
   } catch (error) {
@@ -1732,16 +1773,17 @@ const documentsForPacket = createPacketDocumentReader();
 function readRelays() {
   const store = readStore();
   const packets = (store && store.packets) || {};
+  const features = currentProductFeatures();
   return Object.entries(packets)
     .map(([id, p]) => ({ id, ...(p || {}) }))
     .filter((p) => p.direction === "inbound")
     // Tasks remain durably staged for ordinary accounts, but are not
     // exposed, notified, or runnable in dev/stable product surfaces.
-    .filter((p) => PRODUCT_FEATURES.requests || p.relayNotificationKind !== "task")
+    .filter((p) => features.requests || p.relayNotificationKind !== "task")
     // "task" here is the NEW tasks-as-relays kind (an ordinary relay carrying a
     // job), allowed for ordinary accounts — unlike the legacy task protocol
     // kinds the mode gate exists to keep out.
-    .filter((p) => LEGACY_TASK_PROTOCOL_ALLOWED || p.relayNotificationKind === "plain_relay" || p.relayNotificationKind === "task")
+    .filter((p) => features.legacyTaskProtocol === true || p.relayNotificationKind === "plain_relay" || p.relayNotificationKind === "task")
     .map((p) => ({ p, documents: documentsForPacket(p) }))
     .map(({ p, documents }) => ({
       id: p.id,
@@ -2210,9 +2252,11 @@ async function refreshReactions(ids, { force = false } = {}) {
   if (!force && sig === reactionFetchSig && now - reactionFetchedAt < REACTION_FETCH_FRESH_MS) return false;
   if (reactionFetchPromise) return reactionFetchPromise;
   reactionFetchPromise = (async () => {
+    const credential = deviceToken();
     try {
       const client = await relayClient();
       const result = await client.reactions(clean);
+      if (deviceToken() !== credential) return false;
       const projected = (result && result.reactions) || {};
       let changed = false;
       for (const id of clean) {
@@ -2226,6 +2270,7 @@ async function refreshReactions(ids, { force = false } = {}) {
       reactionRetryAt = 0;
       return changed;
     } catch (error) {
+      if (deviceToken() !== credential) return false;
       // A server older than the companion may not expose the reactions route yet.
       // Record the failed attempt and back off instead of letting buildPayload's
       // completion push immediately start the same request again. That hot loop
@@ -2252,14 +2297,16 @@ async function refreshReactions(ids, { force = false } = {}) {
 let tasksCache = [];
 let tasksLoadedOnce = null; // a promise that resolves after the first task load
 async function refreshTasks() {
-  if (!LEGACY_TASK_PROTOCOL_ALLOWED) {
+  if (currentProductFeatures().legacyTaskProtocol !== true) {
     tasksCache = [];
     return tasksCache;
   }
-  if (!deviceToken()) return tasksCache; // signed out: skip the poll entirely
+  const credential = deviceToken();
+  if (!credential) return tasksCache; // signed out: skip the poll entirely
   try {
     const client = await relayClient();
     const res = await client.listTasks();
+    if (deviceToken() !== credential) return tasksCache;
     tasksCache = Array.isArray(res && res.tasks) ? res.tasks : [];
   } catch (error) {
     // Keep the last good cache; surface the error in the log but don't crash.
@@ -2298,19 +2345,21 @@ function isSlackLinkedChat(chat) {
   ));
 }
 async function refreshCanonicalChats() {
-  if (PRODUCT_FEATURES.slack !== true) {
+  if (currentProductFeatures().slack !== true) {
     canonicalChatsCache = [];
     slackChatsCache = [];
     canonicalChatsFingerprint = canonicalChatsFingerprintOf([], []);
     return { relay: canonicalChatsCache, slack: slackChatsCache };
   }
-  if (!deviceToken()) return { relay: canonicalChatsCache, slack: slackChatsCache };
+  const credential = deviceToken();
+  if (!credential) return { relay: canonicalChatsCache, slack: slackChatsCache };
   try {
     const client = await relayClient();
     const [relayResult, slackResult] = await Promise.allSettled([
       client.chats({ surface: "relay" }),
       client.chats({ surface: "slack" }),
     ]);
+    if (deviceToken() !== credential) return { relay: canonicalChatsCache, slack: slackChatsCache };
     if (relayResult.status === "fulfilled") {
       canonicalChatsCache = (Array.isArray(relayResult.value?.chats) ? relayResult.value.chats : [])
         .filter(isSlackLinkedChat);
@@ -2352,10 +2401,12 @@ async function refreshContacts() {
     contactsFingerprint = contactsFingerprintOf(contactsCache);
     return contactsCache;
   }
-  if (!deviceToken()) return contactsCache; // signed out: skip the poll entirely
+  const credential = deviceToken();
+  if (!credential) return contactsCache; // signed out: skip the poll entirely
   try {
     const client = await relayClient();
     const res = await client.listContacts();
+    if (deviceToken() !== credential) return contactsCache;
     const contacts = Array.isArray(res && res.contacts) ? res.contacts : [];
     contactsCache = contacts
       .map(contactBookRow)
@@ -2600,14 +2651,14 @@ function buildPayload() {
       // signature, so relay:setSoundsMuted explicitly forces a push.
       soundsMuted,
     },
-    features: PRODUCT_FEATURES,
+    features: currentProductFeatures(),
     nativeExecutionEnabled: nativeTaskModules?.launch.executionEnabled(readConfigFile()) === true,
     nativeExecutions: nativeExecutionSummary(relaysNow),
     // The background service the transcript depends on: "ok", "repairing"
     // while this pill puts it back, or "stopped" once that repair failed.
     // The renderer reads Relay rooms from the server while it is not "ok".
     service: serviceHealth,
-    todoSteward: PRODUCT_FEATURES.todo === true ? readTodoStewardState() : null,
+    todoSteward: currentProductFeatures().todo === true ? readTodoStewardState() : null,
     pendingOpen: pendingSetupOpenPreviewCache,
     relays: hydrateReactions(relaysNow),
     sent: hydrateReactions(sentWithMaterializationState(sentCache)),
@@ -3633,7 +3684,7 @@ async function deletePacket(packetId) {
 }
 
 async function editSentMessage(input = {}) {
-  if (PRODUCT_FEATURES.messageMutations !== true) {
+  if (currentProductFeatures().messageMutations !== true) {
     return { ok: false, error: "Message editing is switched off in this Relay release." };
   }
   const id = String(input.id || "").trim();
@@ -3660,7 +3711,7 @@ async function editSentMessage(input = {}) {
 }
 
 async function deleteSentMessage(input = {}) {
-  if (PRODUCT_FEATURES.messageMutations !== true) {
+  if (currentProductFeatures().messageMutations !== true) {
     return { ok: false, error: "Sent-message deletion is switched off in this Relay release." };
   }
   const id = String(input.id || "").trim();
@@ -3832,7 +3883,7 @@ async function closeTaskByHand(relayId, kind, note) {
 }
 
 async function listTodo(input = {}) {
-  if (!PRODUCT_FEATURES.todo) return { ok: false, error: "Todo is currently unavailable." };
+  if (!currentProductFeatures().todo) return { ok: false, error: "Todo is currently unavailable." };
   try {
     const client = await relayClient();
     return await client.todo({
@@ -3846,7 +3897,7 @@ async function listTodo(input = {}) {
 }
 
 async function readTodoItem(relayId) {
-  if (!PRODUCT_FEATURES.todo) return { ok: false, error: "Todo is currently unavailable." };
+  if (!currentProductFeatures().todo) return { ok: false, error: "Todo is currently unavailable." };
   const id = String(relayId || "").trim();
   if (!id) return { ok: false, error: "Missing Todo item id." };
   try {
@@ -3909,7 +3960,7 @@ async function readTodoItem(relayId) {
 }
 
 async function updateTodoStatus(relayId, input = {}) {
-  if (!PRODUCT_FEATURES.todo) return { ok: false, error: "Todo is currently unavailable." };
+  if (!currentProductFeatures().todo) return { ok: false, error: "Todo is currently unavailable." };
   const id = String(relayId || "").trim();
   if (!id) return { ok: false, error: "Missing Todo item id." };
   const current = rowById(id);
@@ -3961,7 +4012,7 @@ async function updateTodoStatus(relayId, input = {}) {
 }
 
 async function updateTodoVisibility(relayId, input = {}) {
-  if (!PRODUCT_FEATURES.todo) return { ok: false, error: "Todo is currently unavailable." };
+  if (!currentProductFeatures().todo) return { ok: false, error: "Todo is currently unavailable." };
   const id = String(relayId || "").trim();
   if (!id) return { ok: false, error: "Missing Todo item id." };
   try {
@@ -3997,7 +4048,7 @@ function previewPayloadForPacket(packetId) {
   const id = String(packetId || "");
   if (!id) return null;
   const row = rowById(id);
-  if (row?.relayNotificationKind === "task" && !PRODUCT_FEATURES.requests) return null;
+  if (row?.relayNotificationKind === "task" && !currentProductFeatures().requests) return null;
   if (!row || row.direction !== "inbound" || RELAY_HIDDEN_KINDS.has(row.relayNotificationKind)) {
     // A Sent row lives in sentCache, not the staged packet store — read your own
     // outbound message without leaving the pill, exactly like an inbound preview.
@@ -4091,7 +4142,7 @@ function approvalIdForRow(row) {
 }
 
 async function runMutation(label, fn) {
-  if (!LEGACY_TASK_PROTOCOL_ALLOWED) {
+  if (currentProductFeatures().legacyTaskProtocol !== true) {
     return { ok: false, error: "The legacy task protocol is available only to Relay developer accounts on dev." };
   }
   try {
@@ -4886,7 +4937,7 @@ async function openPacket(packetId, { sent = false, fresh = false, host: hostOve
     }
     finishFailed(message);
   };
-  if (!LEGACY_TASK_PROTOCOL_ALLOWED && (row?.taskId || isRelayTaskWebTarget(row?.actionUrl))) {
+  if (currentProductFeatures().legacyTaskProtocol !== true && (row?.taskId || isRelayTaskWebTarget(row?.actionUrl))) {
     console.error("[overlay] refusing to open a legacy task for a non-developer account:", packetId);
     return finishFailed();
   }
@@ -5030,7 +5081,7 @@ function requestSessionPicker(packetId, { sent = false, host = "" } = {}) {
 // rail seeded with the task's objective + state. Historical coordination state
 // is read-only to the model. The web view is only used if the CLI fails.
 function openTaskDetail(taskId) {
-  if (!LEGACY_TASK_PROTOCOL_ALLOWED) return;
+  if (currentProductFeatures().legacyTaskProtocol !== true) return;
   if (!taskId) return;
   frontmostBundleId((bundle) => {
     const host = resolveClickHost(bundle);
@@ -5117,7 +5168,7 @@ function openTaskDetail(taskId) {
 }
 
 function openUrlTarget(url) {
-  if (!LEGACY_TASK_PROTOCOL_ALLOWED && isRelayTaskWebTarget(url)) {
+  if (currentProductFeatures().legacyTaskProtocol !== true && isRelayTaskWebTarget(url)) {
     console.error("[overlay] refusing to open a legacy task URL for a non-developer account");
     return;
   }
@@ -6830,9 +6881,9 @@ function isTaggedAgentWorkRow(row) {
 }
 
 function agentWorkEnabledForRow(row) {
-  if (isTaggedAgentWorkRow(row)) return PRODUCT_FEATURES.requests === true;
-  if (row?.relayNotificationKind === "task") return PRODUCT_FEATURES.requests === true;
-  if (["plain_relay", "sent_relay"].includes(row?.relayNotificationKind)) return PRODUCT_FEATURES.relayWork === true;
+  if (isTaggedAgentWorkRow(row)) return currentProductFeatures().requests === true;
+  if (row?.relayNotificationKind === "task") return currentProductFeatures().requests === true;
+  if (["plain_relay", "sent_relay"].includes(row?.relayNotificationKind)) return currentProductFeatures().relayWork === true;
   return false;
 }
 
@@ -6896,7 +6947,7 @@ function reconcileStaleHandoffs() {
 // packets endpoint (which now carries the Todo state) and retried; anything
 // else is logged and left to the session, which carries the same rule.
 async function markHandoffInProgress(row, host) {
-  if (!PRODUCT_FEATURES.todo) return { ok: false, skipped: "todo_off" };
+  if (!currentProductFeatures().todo) return { ok: false, skipped: "todo_off" };
   const id = String(row?.id || "").trim();
   if (!id || !String(row?.title || row?.displayTitle || "").trim()) return { ok: false, skipped: "untitled" };
   if (["in_progress", "done"].includes(String(row?.todoStatus || ""))) return { ok: false, skipped: row.todoStatus };
@@ -8939,7 +8990,7 @@ ipcMain.handle("relay:canonicalChat", async (event, input) => {
   }
   const { chatId: id, surface, includeSlack } = canonicalChatIpcInput(input);
   if (!id) return { ok: false, error: "Missing channel id." };
-  if (PRODUCT_FEATURES.slack !== true && (surface === "slack" || includeSlack)) {
+  if (currentProductFeatures().slack !== true && (surface === "slack" || includeSlack)) {
     return { ok: false, error: "Slack is available only to Relay developer accounts on dev." };
   }
   try {
@@ -8970,7 +9021,7 @@ ipcMain.handle("relay:canonicalChatRead", async (event, input) => {
   }
   const { chatId: id, surface, includeSlack } = canonicalChatIpcInput(input);
   if (!id) return { ok: false, error: "Missing channel id." };
-  if (PRODUCT_FEATURES.slack !== true && (surface === "slack" || includeSlack)) {
+  if (currentProductFeatures().slack !== true && (surface === "slack" || includeSlack)) {
     return { ok: false, error: "Slack is available only to Relay developer accounts on dev." };
   }
   if (!chatReadPresenceIsAvailable(win)) {
@@ -9140,7 +9191,7 @@ ipcMain.handle("relay:todoItem", (_e, id) => readTodoItem(id));
 ipcMain.handle("relay:todoStatusUpdate", (_e, id, input) => updateTodoStatus(id, input));
 ipcMain.handle("relay:todoVisibilityUpdate", (_e, id, input) => updateTodoVisibility(id, input));
 ipcMain.handle("relay:todoVisibilityRead", async (_e, id) => {
-  if (!PRODUCT_FEATURES.todo) return { ok: false, error: "Todo is currently unavailable." };
+  if (!currentProductFeatures().todo) return { ok: false, error: "Todo is currently unavailable." };
   try { return await (await relayClient()).todoVisibility(String(id || "")); }
   catch { return { ok:false }; }
 });
@@ -9183,7 +9234,7 @@ function readTodoStewardState() {
   }
 }
 ipcMain.handle("relay:todoStewardPrefs", async (_e, input) => {
-  if (!PRODUCT_FEATURES.todo) return { ok: false, error: "Todo is currently unavailable." };
+  if (!currentProductFeatures().todo) return { ok: false, error: "Todo is currently unavailable." };
   try {
     const steward = await todoStewardModule();
     steward.saveStewardPreferences(RELAY_HOME, {
@@ -9310,7 +9361,7 @@ function writeSchedules(all) {
   }
 }
 async function scheduleList() {
-  if (!PRODUCT_FEATURES.requests) return [];
+  if (!currentProductFeatures().requests) return [];
   const all = readSchedules();
   const { nextFireTimes, describeCadence, describeCountdown } = await import("../src/schedule.js");
   const now = new Date().toISOString();
@@ -9328,7 +9379,7 @@ async function scheduleList() {
   });
 }
 async function scheduleSave(input) {
-  if (!PRODUCT_FEATURES.requests) return { ok: false, error: "Tasks are currently available only to Relay developer accounts on dev." };
+  if (!currentProductFeatures().requests) return { ok: false, error: "Tasks are currently available only to Relay developer accounts on dev." };
   const all = readSchedules();
   const id = String((input && input.id) || "").trim() || `sch_${Date.now().toString(36)}`;
   const existing = all[id] || {};
@@ -9584,7 +9635,7 @@ ipcMain.handle("relay:refreshTasks", async () => {
 // Live task detail for the in-pill task view (GET /v1/tasks/:id, same payload the
 // web detail page renders from). The renderer polls this while the view is open.
 ipcMain.handle("relay:taskStatus", async (_e, taskId) => {
-  if (!LEGACY_TASK_PROTOCOL_ALLOWED) {
+  if (currentProductFeatures().legacyTaskProtocol !== true) {
     return { ok: false, error: "The legacy task protocol is available only to Relay developer accounts on dev." };
   }
   if (!taskId) return { ok: false, error: "Missing task id." };
@@ -9748,17 +9799,17 @@ ipcMain.handle("relay:capabilities", async () => {
 });
 ipcMain.handle("relay:contacts", () => readContacts());
 const googleContactsUnavailable = () => ({ ok: false, error: "Google contacts are available only in Relay Dev." });
-ipcMain.handle("relay:googleContactsStatus", () => PRODUCT_FEATURES.googleContacts === true
+ipcMain.handle("relay:googleContactsStatus", () => currentProductFeatures().googleContacts === true
   ? groupCall((c) => c.googleContactsStatus())
   : googleContactsUnavailable());
 ipcMain.handle("relay:googleContactsSync", async () => {
-  if (PRODUCT_FEATURES.googleContacts !== true) return googleContactsUnavailable();
+  if (currentProductFeatures().googleContacts !== true) return googleContactsUnavailable();
   const result = await groupCall((c) => c.syncGoogleContacts());
   if (result.ok) { await refreshContacts(); pushInbox(false); }
   return result;
 });
 ipcMain.handle("relay:googleContactsConnect", async () => {
-  if (PRODUCT_FEATURES.googleContacts !== true) return googleContactsUnavailable();
+  if (currentProductFeatures().googleContacts !== true) return googleContactsUnavailable();
   const userId = account().userId;
   if (!userId) return { ok: false, error: "Sign into Relay before connecting Google." };
   await shell.openExternal(googleContactsWebUrl(userId));
@@ -9825,7 +9876,7 @@ ipcMain.handle("relay:contactsSearch", (_e, q) => groupCall((c) => c.searchConta
 // developer surface. Membership and the versioned mandate are enforced by the
 // server; every mutation returns its view so the renderer never guesses.
 const topicCall = async (fn) => {
-  if (PRODUCT_FEATURES.topics !== true) {
+  if (currentProductFeatures().topics !== true) {
     return { ok: false, error: "Topics are available only to Relay developer accounts on dev." };
   }
   return groupCall(fn);
@@ -9899,14 +9950,14 @@ ipcMain.handle("relay:topicPostReply", async (_e, id, postId, input) => {
 // Settings tab: account card + the sign-out / switch-account lifecycle.
 ipcMain.handle("relay:accountInfo", () => accountInfo());
 ipcMain.handle("relay:slackConnection", async () => {
-  if (PRODUCT_FEATURES.slack !== true) {
+  if (currentProductFeatures().slack !== true) {
     return { ok: false, error: "Slack is available only to Relay developer accounts on dev." };
   }
   try { return { ok: true, connection: await (await relayClient()).slackConnection() }; }
   catch (error) { return { ok: false, error: (error && error.message) || String(error) }; }
 });
 ipcMain.handle("relay:slackConnect", async (_event, input = {}) => {
-  if (PRODUCT_FEATURES.slack !== true) {
+  if (currentProductFeatures().slack !== true) {
     return { ok: false, error: "Slack is available only to Relay developer accounts on dev." };
   }
   try {
@@ -9926,7 +9977,7 @@ ipcMain.handle("relay:slackConnect", async (_event, input = {}) => {
   }
 });
 ipcMain.handle("relay:slackDisconnect", async () => {
-  if (PRODUCT_FEATURES.slack !== true) {
+  if (currentProductFeatures().slack !== true) {
     return { ok: false, error: "Slack is available only to Relay developer accounts on dev." };
   }
   try { return { ok: true, result: await (await relayClient()).disconnectSlack() }; }

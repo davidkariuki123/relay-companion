@@ -16,12 +16,7 @@ export function pairedProfileTodoEnabled({ env = process.env, config = {}, apiUr
   }
 }
 
-/**
- * Prefer the server's current profile, with the last server-issued pairing
- * profile as an offline fallback. Product environment remains an independent
- * gate: a cached developer role never enables these surfaces in production,
- * and the backend independently enforces the same boundary.
- */
+/** Server-owned entitlements require a fresh profile for this paired account. */
 export async function accountProductFeatures({
   client,
   user,
@@ -30,7 +25,7 @@ export async function accountProductFeatures({
   apiUrl = "",
   timeoutMs = 2_500,
 } = {}) {
-  let resolvedUser = user || config.user || null;
+  let resolvedUser = user || null;
   if (client?.me && client?.token) {
     let timer;
     try {
@@ -41,10 +36,11 @@ export async function accountProductFeatures({
           timer.unref?.();
         }),
       ]);
-      resolvedUser = live?.user || resolvedUser;
+      resolvedUser = live?.user?.id && live.user.id === config.user?.id ? live.user : null;
     } catch {
-      // Offline startup stays usable for ordinary Relays. The cached profile
-      // came from pairing, never from an environment/config feature override.
+      // Ordinary Relays remain usable offline. A saved role is not authority to
+      // expose developer-only tools after the device changes accounts.
+      resolvedUser = null;
     } finally {
       if (timer) clearTimeout(timer);
     }

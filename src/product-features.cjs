@@ -22,11 +22,12 @@ function runtimeEnvironment({ env = process.env, config = {}, apiUrl = "" } = {}
 function productFeatures(options = {}) {
   const config = options.config || {};
   const environment = runtimeEnvironment(options);
-  const user = options.user || config.user || null;
+  // An explicit null means the server role has not been verified for this
+  // account. Never revive a saved pairing role as a fallback in that case.
+  const user = Object.prototype.hasOwnProperty.call(options, "user") ? options.user : config.user || null;
   // Developer status is a durable server-owned account role, but its product
   // entitlement exists only on local/dev. Staging deliberately exercises the
-  // production product surface even when it is offline with a cached developer
-  // profile; the API independently enforces the same deployment boundary.
+  // production product surface; the API independently enforces that boundary.
   // Tasks are the exception: they left the developer row on 2026-09-17.
   //
   // The server reports the role twice: isDeveloper is masked to the dev

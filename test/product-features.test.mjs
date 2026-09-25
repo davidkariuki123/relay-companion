@@ -8,8 +8,8 @@ import { handleCall, toolsForAccount } from "../src/mcp.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
-const DEVELOPER = { accountKind: "human", isDeveloper: true };
-const ORDINARY_USER = { accountKind: "human", isDeveloper: false };
+const DEVELOPER = { id: "usr_test", accountKind: "human", isDeveloper: true };
+const ORDINARY_USER = { id: "usr_test", accountKind: "human", isDeveloper: false };
 const DEVELOPER_SURFACES = {
   developerAccount: true, taskExecution: true,
   topics: true, slack: true, peopleMentions: true, agentMentions: true,
@@ -90,6 +90,20 @@ test("live server role outranks the cached pairing profile", async () => {
   assert.equal(production.developer, false);
   assert.equal(production.legacyTaskProtocol, false);
   assert.equal(production.requests, true, "Tasks are on for every deployment");
+
+  const switched = await accountProductFeatures({
+    client: { token: "dev_test", async me() { return { user: DEVELOPER }; } },
+    config: { user: { ...ORDINARY_USER, id: "another-account" } },
+    env: { RELAY_UPDATE_CHANNEL: "dev" },
+  });
+  assert.equal(switched.taskExecution, false, "an old client's role never follows a different paired account");
+
+  const offline = await accountProductFeatures({
+    client: { token: "dev_test", async me() { throw new Error("offline"); } },
+    config: { user: DEVELOPER },
+    env: { RELAY_UPDATE_CHANNEL: "dev" },
+  });
+  assert.equal(offline.taskExecution, false, "a saved developer role is not an offline entitlement");
 });
 
 test("developer status brings the complete Task substrate on dev but never Cowork", () => {
@@ -387,8 +401,8 @@ test("production agent-work entry points enforce the feature row before native t
   assert.match(main, /if \(!agentWorkEnabledForRow\(row\)\) return agentWorkUnavailable\(\);/);
   assert.match(main, /function providerWorkIdentity\(relayId\) \{[\s\S]*?if \(!agentWorkEnabledForRow\(row\)\) return null;/);
   assert.match(main, /function workEventAuthorized\(event, relayId\) \{[\s\S]*?if \(!agentWorkEnabledForRow\(rowById/);
-  assert.match(main, /async function scheduleList\(\) \{\s*if \(!PRODUCT_FEATURES\.requests\) return \[\];/);
-  assert.match(main, /async function scheduleSave\(input\) \{\s*if \(!PRODUCT_FEATURES\.requests\)/);
+  assert.match(main, /async function scheduleList\(\) \{\s*if \(!currentProductFeatures\(\)\.requests\) return \[\];/);
+  assert.match(main, /async function scheduleSave\(input\) \{\s*if \(!currentProductFeatures\(\)\.requests\)/);
 
   const cli = fs.readFileSync(path.join(here, "../bin/relay.js"), "utf8");
   const gate = cli.slice(cli.indexOf("async function requireTaskFeatures("), cli.indexOf("function companionVersion()"));

@@ -39,6 +39,8 @@ function connectHarness({ history }) {
   const observed = { pendingDuringRefresh: null, versionDuringRefresh: 'unset' };
   const context = vm.createContext({
     loadAccountModules: async () => ({ notifications: { resetCompanionStateForAccount: () => calls.push('reset') } }),
+    adoptCurrentAccountFeatures: () => {},
+    resetAccountViewCaches: () => {},
     nativeCredentialCache: {}, STATE_PATH: '/test/state',
     sentCache: [], sentFingerprint: '', sentLoadedOnce: null, contactsCache: [], contactsFingerprint: '', contactsLoadedOnce: null,
     canonicalChatsCache: [], slackChatsCache: [], canonicalChatsFingerprint: '', canonicalChatsLoadedOnce: null,
@@ -133,6 +135,8 @@ function switchHarness({ history, daemonFails = false }) {
   }
   const context = vm.createContext({
     console: { error: () => {} },
+    adoptCurrentAccountFeatures: () => {},
+    resetAccountViewCaches: () => {},
     loadAccountModules: async () => ({
       account: { normalizePairingCode: (code) => code, deviceNameForPairing: () => 'Mac',
         replacedDeviceCredential: () => { calls.push('read-previous'); return { deviceToken: 'dev_previous' }; },

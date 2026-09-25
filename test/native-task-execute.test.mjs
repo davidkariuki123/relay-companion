@@ -176,22 +176,18 @@ test("draft observer stops on changed account, revoked consent, different owner 
   assert.equal(calls.filter((c) => c === "submit").length, 1);
 });
 
-test("ordinary accounts cannot reach the transport on any deployment; developers can on every one", async (t) => {
+test("a saved role cannot veto a server-approved Execute or bypass a server refusal", async (t) => {
   const { args, calls } = fixture(t);
-  const ordinary = { ...args.config.user, isDeveloper: false };
-  for (const environment of ["production", "staging", "dev"]) {
-    await assert.rejects(executeNativeTask({ ...args, env: { RELAY_ENV: environment }, config: { ...args.config, user: ordinary } }), /Relay developer accounts/);
-  }
-  assert.deepEqual(calls, []);
-  // A production Companion learns the role from the raw developerAccount
-  // field: isDeveloper is masked there, so a cached profile alone never opens
-  // Execute on production, while the live role does.
-  const masked = { ...ordinary, developerAccount: true };
-  for (const environment of ["production", "staging"]) {
-    await assert.rejects(executeNativeTask({ ...args, env: { RELAY_ENV: environment }, config: { ...args.config, user: { ...ordinary, developerAccount: false } } }), /Relay developer accounts/);
-    await executeNativeTask({ ...args, env: { RELAY_ENV: environment }, config: { ...args.config, user: masked } });
-  }
-  assert.equal(calls.filter((c) => c === "gate").length, 2);
+  const cachedOrdinary = { ...args.config, user: { ...args.config.user, isDeveloper: false } };
+  await executeNativeTask({ ...args, config: cachedOrdinary });
+  assert.deepEqual(calls, ["gate", "consent", "fetch", "prepare", "open", "ready", "reserve", "fetch", "submit"]);
+
+  const denied = fixture(t);
+  denied.args.client.taskExecute = async () => { throw new Error("server refused"); };
+  await assert.rejects(executeNativeTask(denied.args), /server refused/);
+  assert.deepEqual(denied.calls, [], "the live server gate runs before native work");
+  await assert.rejects(executeNativeTask({ ...denied.args, isCurrentAccount: () => false }), /account changed/);
+  assert.deepEqual(denied.calls, []);
 });
 
 test("server refusal and declined consent create no provider conversation", async (t) => {

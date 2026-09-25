@@ -21408,6 +21408,10 @@
     return id || email;
   }
   function clearCanonicalAccountCaches() {
+    nativeExecuteBusy.clear();
+    nativeExecuteChoice.clear();
+    taskCardNotes.clear();
+    rowNotes.clear();
     activeMentionVisit = null;
     closeTodoActions();
     todoRemovalNotice?.remove(); todoRemovalNotice = null; todoRemovalUndo = null;
