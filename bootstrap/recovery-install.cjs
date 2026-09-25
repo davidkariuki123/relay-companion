@@ -185,7 +185,8 @@ function installRecovery({ packageRoot, node = process.execPath, homeDir = os.ho
       const plist = path.join(homeDir, "Library", "LaunchAgents", `${LABEL}.plist`);
       fs.mkdirSync(path.dirname(plist), { recursive: true });
       const priorSchedule = fs.existsSync(plist) ? fs.readFileSync(plist) : null;
-      atomicFile(plist, `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>${LABEL}</string><key>ProgramArguments</key><array><string>${xml(launcherNode)}</string><string>${xml(launcher)}</string></array><key>EnvironmentVariables</key><dict><key>HOME</key><string>${xml(homeDir)}</string></dict><key>StartInterval</key><integer>60</integer><key>RunAtLoad</key><true/><key>ProcessType</key><string>Background</string><key>StandardOutPath</key><string>${xml(log)}</string><key>StandardErrorPath</key><string>${xml(log)}</string></dict></plist>`);
+      const nextSchedule = `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>${LABEL}</string><key>ProgramArguments</key><array><string>${xml(launcherNode)}</string><string>${xml(launcher)}</string></array><key>EnvironmentVariables</key><dict><key>HOME</key><string>${xml(homeDir)}</string></dict><key>StartInterval</key><integer>60</integer><key>RunAtLoad</key><true/><key>ProcessType</key><string>Background</string><key>StandardOutPath</key><string>${xml(log)}</string><key>StandardErrorPath</key><string>${xml(log)}</string></dict></plist>`;
+      atomicFile(plist, nextSchedule);
       // The job dispatches through the stable host. Do not unload it on update.
       const observed = runCommand("launchctl", ["print", `gui/${userId}/${LABEL}`]);
       if (!ok(observed)) {
@@ -207,8 +208,17 @@ function installRecovery({ packageRoot, node = process.execPath, homeDir = os.ho
         // overwritten the on-disk plist with 60 before that worker goes idle.
         // The handover validates this fallback before it ever unloads launchd.
         const priorInterval = Number(/<key>StartInterval<\/key>\s*<integer>(\d+)<\/integer>/.exec(String(priorSchedule || ""))?.[1]) || null;
-        if (needsHandover && loaded !== null && priorInterval === loaded) {
-          atomicFile(path.join(root, "scheduler-previous.plist"), priorSchedule);
+        if (needsHandover && loaded !== null && loaded !== 60) {
+          const previous = path.join(root, "scheduler-previous.plist");
+          const previousInterval = Number(/<key>StartInterval<\/key>\s*<integer>(\d+)<\/integer>/.exec(String(fs.existsSync(previous) ? fs.readFileSync(previous, "utf8") : ""))?.[1]) || null;
+          if (priorInterval === loaded) atomicFile(previous, priorSchedule);
+          else if (previousInterval !== loaded) {
+            // Earlier installers could write the new plist while launchd still
+            // held 300 s. Rebuild a rollback registration at the loaded cadence
+            // from the verified stable launcher rather than leaving no fallback.
+            atomicFile(previous, nextSchedule.replace(/(<key>StartInterval<\/key>\s*<integer>)60(<\/integer>)/,
+              (_match, open, close) => `${open}${loaded}${close}`));
+          }
         }
         scheduleCleanup = require("./recovery-schedule-handover.cjs").retireIdleHandover({
           run: (_file, args) => runCommand("launchctl", args),

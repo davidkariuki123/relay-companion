@@ -2214,9 +2214,11 @@ test("public release owns immutable publication while private promotion owns fle
     // The per-platform runtime verification lives in the Release candidate
     // gate that both staging and production promotions call.
     const gate = fs.readFileSync(new URL("../../../.github/workflows/release-candidate-gate.yml", import.meta.url), "utf8");
+    const publicGate = fs.readFileSync(new URL("../public-release/.github/workflows/verify-companion-release-gate.yml", import.meta.url), "utf8");
     assert.match(promote, /uses: \.\/\.github\/workflows\/release-candidate-gate\.yml/);
-    assert.match(gate, /\(cd "\$runtime_prefix" && tar -xzf runtime\.tar\.gz\)/);
-    assert.doesNotMatch(gate, /tar -xzf "\$runtime_prefix\/runtime\.tar\.gz"/);
+    assert.match(gate, /verify-public-companion-gate\.mjs/);
+    assert.match(publicGate, /\(cd "\$runtime_prefix" && tar -xzf runtime\.tar\.gz\)/);
+    assert.doesNotMatch(publicGate, /tar -xzf "\$runtime_prefix\/runtime\.tar\.gz"/);
     assert.match(gate, /verify-installed-runtime\.mjs/);
     assert.match(gate, /assert-runtime-capabilities\.mjs/);
     assert.match(promote, /thin-installer\) TAG=installer/);

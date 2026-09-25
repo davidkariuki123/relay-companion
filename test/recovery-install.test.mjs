@@ -337,6 +337,31 @@ test("a running legacy handover keeps the loaded stale schedule as the next inst
   assert.match(fallback, /<key>StartInterval<\/key><integer>300<\/integer>/);
 });
 
+test("the Mac installer reconstructs a missing fallback when launchd still runs 300 s but disk says 60 s", t => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-stale-loaded-schedule-"));
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  const plist = path.join(homeDir, "Library", "LaunchAgents", "work.relay.companion.recovery.plist");
+  const previous = path.join(homeDir, ".relay", "recovery", "scheduler-previous.plist");
+  fs.mkdirSync(path.dirname(plist), { recursive: true });
+  fs.writeFileSync(plist, '<?xml version="1.0"?><plist version="1.0"><dict><key>StartInterval</key><integer>60</integer></dict></plist>');
+  let submitted = 0;
+  const install = () => installRecovery({ homeDir, platform: "darwin", packageRoot: fileURLToPath(new URL("..", import.meta.url)),
+    preserveNode: () => process.execPath, runCommand: (command, args) => {
+      if (command === "launchctl" && args[0] === "print") return { status: 0, stdout: "run interval = 300 seconds" };
+      if (command === "launchctl" && args[0] === "list") return { status: 113 };
+      if (command === "launchctl" && args[0] === "submit") submitted++;
+      return { status: 0 };
+    } });
+  assert.equal(install().ok, true);
+  const fallback = fs.readFileSync(previous, "utf8");
+  assert.match(fallback, /<key>StartInterval<\/key><integer>300<\/integer>/);
+  assert.match(fallback, /<key>ProgramArguments<\/key>/);
+  assert.match(fs.readFileSync(plist, "utf8"), /<key>StartInterval<\/key><integer>60<\/integer>/);
+  assert.equal(install().ok, true);
+  assert.equal(fs.readFileSync(previous, "utf8"), fallback, "a later install must preserve the loaded-cadence fallback");
+  assert.equal(submitted, 2);
+});
+
 for (const interval of [60, 300]) test(`refused handover removal at ${interval}s does not fail installation or replace the job`, t => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-handover-refusal-"));
   t.after(() => fs.rmSync(homeDir, {recursive: true, force: true}));
