@@ -59,6 +59,7 @@ const cases = {
   relay_inbox_delete: [{ itemId: 'item_test', idempotencyKey: key }, 'deleteInboxItem'],
   relay_recently_deleted_list: [{}, 'recentlyDeleted'],
   relay_recently_deleted_restore: [{ itemId: 'item_test', idempotencyKey: key }, 'restoreInboxItem'],
+  relay_files_fetch: [{ fileIds: ['att_test'] }, 'fileDownload'],
   relay_file_download: [{ fileId: 'file_test' }, 'fileDownload'],
   relay_connector_list_tools: [{}, 'toolCatalog'],
   relay_connector_request_approval: [{ provider: 'test', toolName: 'write', approvalSummary: 'Write one item', idempotencyKey: key }, 'requestToolApproval'],

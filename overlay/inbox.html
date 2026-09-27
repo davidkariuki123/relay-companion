@@ -4588,9 +4588,14 @@
   // next appearance (tray reopen / ghost banner) starts from a clean slate.
   function snapSize(w, h) {
     W.v = W.t = w; H.v = H.t = h;
+    W.vel = H.vel = 0;
     if (raf) { cancelAnimationFrame(raf); raf = null; cardEl.style.willChange = ""; }
     cardEl.style.width = w + "px";
     cardEl.style.height = h + "px";
+    // Like springTo, a snap owns the content width as well as the frame.
+    // Otherwise reopening compact retains the banner/reader width, and
+    // syncCardSize sees no target-size change with which to repair it.
+    scrollEl.style.width = Math.max(w, EXPANDED.w) + "px";
     commitSettledCardSize(w, h, ++cardMotionId);
   }
   function resetOffstage() {
@@ -16878,6 +16883,9 @@
     const { rooms } = chatSections(surface);
     const listed = rooms.find((room) =>
       room.threadId === threadId || room.chatId === threadId
+        // The first send replaces an empty group's synthetic thread with a
+        // server reply-chain id. Its open room coordinate must still resolve.
+        || (room.isGroup && room.groupId && threadId === `group-room:${room.groupId}`)
         || (room.threadIds instanceof Set && room.threadIds.has(threadId)),
     );
     if (listed) return listed;
@@ -16889,7 +16897,7 @@
     const projected = cached ? roomFromChatSummary(cached) : null;
     if (!projected) return null;
     if (surface === "slack" || isSlackIntegratedRoom(projected)) return projected;
-    return todoSummaryAsReaderRow(todoItemById(id));
+    return null;
   }
   // Messages that arrive while their Chat room is already on screen have been
   // read. A direct room spans every wire thread with that person; a group room

@@ -59,6 +59,7 @@ const EXPECTED_TOOLS = [
   "relay_inbox_delete",
   "relay_recently_deleted_list",
   "relay_recently_deleted_restore",
+  "relay_files_fetch",
   "relay_file_download",
   "relay_connector_list_tools",
   "relay_connector_request_approval",

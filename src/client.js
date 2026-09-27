@@ -2,6 +2,7 @@ import { accountIdentity, apiUrl, deviceToken } from "./config.js";
 import { compareAccountIdentity } from "./account.js";
 import { createRequire } from "node:module";
 import { COMPANION_TELEMETRY_HEADER, companionFleetTelemetryHeader } from "./fleet-telemetry.js";
+import { provisionDiagnostics } from "./diagnostics-authorization.js";
 import { applicationTelemetryHeader } from "./application-telemetry.js";
 import { readContext, recordReadTiming, readTimeout } from "./read-context.js";
 
@@ -314,6 +315,7 @@ export class RelayClient {
           err.body = data;
           throw err;
         }
+        if (auth && !this.#pinned) provisionDiagnostics({ url: this.url, token: this.token, ...this.identity });
         return data;
       } catch (error) {
         recordReadTiming({ phase: "http_failure", attempt: attempts, headersMs,

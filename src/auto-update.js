@@ -9,6 +9,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
+import diagnostics from "../bootstrap/diagnostics.cjs";
 import { recoveryPolicy } from "../bootstrap/recovery-policy.cjs";
 import {
   UPDATE_CHANNEL_STABLE,
@@ -121,7 +122,7 @@ export function latestFromRegistryDoc(doc, channel = UPDATE_CHANNEL_STABLE) {
   return typeof version === "string" && version ? version : null;
 }
 
-export function versionFromSignedRuntimeManifest(envelope, trustStore = releaseTrust) {
+export function versionFromSignedRuntimeManifest(envelope, trustStore = releaseTrust, onError = () => {}) {
   try {
     if (typeof trustStore === "string") {
       trustStore = {
@@ -133,7 +134,8 @@ export function versionFromSignedRuntimeManifest(envelope, trustStore = releaseT
     const payloadBytes = verifyReleaseEnvelope(envelope, trustStore);
     const payload = JSON.parse(payloadBytes.toString("utf8"));
     return payload?.product === "Relay" && parseVersion(payload?.version) ? payload.version : null;
-  } catch {
+  } catch (error) {
+    try { onError(error); } catch {}
     return null;
   }
 }
@@ -244,6 +246,7 @@ export async function fetchLatestVersion({
   publicKeyPem = "",
   trustStore = releaseTrust,
   stableManifestUrl = STABLE_RUNTIME_MANIFEST,
+  onError = () => {},
 } = {}) {
   if (typeof fetchImpl !== "function") return null;
   try {
@@ -254,7 +257,7 @@ export async function fetchLatestVersion({
         signal: AbortSignal.timeout(timeoutMs),
       });
       if (!response?.ok) return null;
-      return versionFromSignedRuntimeManifest(await response.json(), publicKeyPem || trustStore);
+      return versionFromSignedRuntimeManifest(await response.json(), publicKeyPem || trustStore, onError);
     }
     const base = String(registry || DEFAULT_REGISTRY).replace(/\/+$/, "");
     // Query only the mutable dist-tags document. A unique query plus explicit
@@ -272,7 +275,8 @@ export async function fetchLatestVersion({
     });
     if (!res || !res.ok) return null;
     return latestFromRegistryDoc(await res.json(), channel);
-  } catch {
+  } catch (error) {
+    try { onError(error); } catch {}
     return null;
   }
 }
@@ -848,9 +852,22 @@ export function createAutoUpdater({
 
     let latest = null;
     const checkedChannel = liveChannel();
+    const discoveryId = randomUUID();
+    const diagnosticScope = diagnostics.configIdentity(os.homedir())?.scope || null;
+    const recordDiscovery = (outcome, code, targetVersion) => {
+      // Match the actual default store; injected/sandbox stores cannot write to
+      // the real user's installation as a side effect of decision-only tests.
+      if (path.dirname(updateStatePath) !== path.join(os.homedir(), ".relay-companion")) return;
+      diagnostics.record({ component: "updater", attemptId: discoveryId, stage: "discovery", outcome, code,
+        version: runningVersion, targetVersion, channel: checkedChannel }, { scope: diagnosticScope });
+    };
+    recordDiscovery("started");
     try {
-      latest = await getLatestVersion({ channel: checkedChannel });
+      let discoveryError;
+      latest = await getLatestVersion({ channel: checkedChannel, onError: error => { discoveryError = error; } });
+      recordDiscovery(latest ? "succeeded" : "failed", latest ? null : discoveryError || "unclassified", latest);
     } catch (err) {
+      recordDiscovery("failed", err);
       log(`auto-update registry check failed: ${err && err.message ? err.message : String(err)}`);
     } finally {
       state.checking = false;

@@ -472,7 +472,7 @@ test("ordinary accounts list only messaging tools and reject developer operation
     new Set(listed.map((tool) => tool.name)),
     new Set([...ORDINARY_RELAY_TOOL_NAMES].filter((name) => !ORG_ADMIN_TOOL_NAMES.has(name))),
   );
-  assert.ok(listed.every((tool) => !/task|connector|approval|result|file/i.test(tool.name)));
+  assert.ok(listed.every((tool) => !/task|connector|approval|result/i.test(tool.name)));
   assert.deepEqual(
     new Set(toolsForAccount({ ...ordinaryFeatures, orgAdmin: true }).map((tool) => tool.name)),
     ORDINARY_RELAY_TOOL_NAMES,
@@ -1646,7 +1646,7 @@ test("obsolete coordination protocol is absent and rejected before any API call"
   // state an agent sets on its own, so a human-initiated pull clears unread
   // and sends the read receipt — without it the sender sees "delivered"
   // forever). relay_acknowledge stays retired.
-  assert.equal(TOOLS.length, 52, "the full model catalog contains only current product tools");
+  assert.equal(TOOLS.length, 53, "the full model catalog contains only current product tools");
 
   const client = new Proxy({}, {
     get() { throw new Error("removed tool must not touch the API client"); },

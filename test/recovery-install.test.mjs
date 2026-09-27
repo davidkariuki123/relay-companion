@@ -93,7 +93,7 @@ test("the probation host upgrade replaces a valid older launcher without unloadi
   fs.writeFileSync(path.join(root, "launcher-host.json"), JSON.stringify({ schema: 1, sha256: crypto.createHash("sha256").update(old).digest("hex") }));
   assert.equal(installRecovery(options).ok, true);
   assert.match(fs.readFileSync(first.launcher, "utf8"), /runtimeProven === true/);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(root, "launcher-host.json"))).schema, 3);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root, "launcher-host.json"))).schema, 4);
 });
 
 test("installer process death during bundle preparation leaves the prior launch path usable", t => {

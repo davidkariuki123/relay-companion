@@ -25,6 +25,7 @@ export const UPDATE_WORKER_LABEL_PREFIX = "work.relay.companion.update.";
 export const UPDATE_WORKER_LABEL = "work.relay.companion.update";
 export const UPDATE_REQUEST_SCHEMA = 1;
 const require = createRequire(import.meta.url);
+const diagnostics = require("../bootstrap/diagnostics.cjs");
 const { stageVerifiedRuntime, releasePlatform } = require("../bootstrap/relay-setup.cjs");
 const { systemdRunEnvironmentArgs } = require("../bootstrap/linux-systemd.cjs");
 const {
@@ -269,22 +270,30 @@ export async function runCanonicalUpdateTransaction({
 } = {}) {
   const releaseChannel = updateChannel();
   const releaseFailureId = requestId || workerId || randomUUID();
+  const diagnosticScope = diagnostics.configIdentity(homeDir)?.scope || null;
+  const diagnostic = (stage, outcome, code = null, elapsedMs = null) => diagnostics.record({
+    component: "updater", attemptId: releaseFailureId, parentAttemptId: process.env.RELAY_RECOVERY_RUN_ID,
+    channel: releaseChannel, targetVersion: version, stage, outcome, code, elapsedMs,
+  }, { homeDir, now, scope: diagnosticScope });
   const noteReleaseFailure = reason => {
     try { releasePolicy.failure(releaseChannel, version, { id: releaseFailureId, reason }); }
     catch (error) { log(`release failure history could not be saved: ${error.message}`); }
   };
   const stage = async (name, operation) => {
     const startedAt = now();
+    diagnostic(name, "started");
     onProgress({ stage: name, stageStartedAt: startedAt });
     log(`stage ${name} started`);
     try {
       const result = await operation();
+      diagnostic(name, result?.ok === false ? "failed" : "succeeded", result?.reason || (result?.ok === false ? result?.detail : null), now() - startedAt);
       if (result?.ok === false && ["activation", "startup-verification"].includes(name)) {
         noteReleaseFailure(result.reason);
       }
       log(`stage ${name} ${result?.ok === false ? "failed" : "finished"}; elapsed=${Math.max(0, now() - startedAt)}ms`);
       return result;
     } catch (error) {
+      diagnostic(name, "failed", error, now() - startedAt);
       if (["activation", "startup-verification"].includes(name)) {
         noteReleaseFailure(error.message);
       }
@@ -831,6 +840,7 @@ export async function workerMain(payload) {
       fs.appendFileSync(logPath, `[relay-update] ${new Date().toISOString()} ${message}\n`);
     } catch {}
   };
+  const diagnosticScope = diagnostics.configIdentity(options.homeDir)?.scope || null;
   const writeState = (state, extra = {}) => {
     if (!options.requestPath || !options.requestId || !options.workerId) return;
     const current = readUpdateRequest(options.requestPath) || {
@@ -844,6 +854,11 @@ export async function workerMain(payload) {
     }
     if (current.state === "rejected" && state !== "rejected") return current;
     atomicWriteRequest(options.requestPath, { ...current, ...extra, state });
+    if (["completed", "failed", "admitted"].includes(state)) diagnostics.record({
+      component: "updater", attemptId: options.requestId, parentAttemptId: process.env.RELAY_RECOVERY_RUN_ID,
+      stage: "worker", outcome: state === "completed" ? "succeeded" : state === "failed" ? "failed" : "started",
+      code: extra.result?.reason, targetVersion: options.version,
+    }, { homeDir: options.homeDir, scope: diagnosticScope });
     return { ...current, ...extra, state };
   };
   try {

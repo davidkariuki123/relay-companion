@@ -8,6 +8,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { CallToolRequestSchema, InitializeRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { hasAttachmentPayload, prepareOrdinaryRelayAttachments } from "./attachments.js";
 import { retainSentAttachmentsLocally } from "./sent-attachment-retention.js";
+import { fetchAttachments } from "./fetch-attachments.js";
 import { workspacePassportFromDeclaration } from "./repo-identity.js";
 import { fragileLinkWarning } from "./links.js";
 import { localizeAtFields } from "./local-time.cjs";
@@ -1178,9 +1179,18 @@ export const TOOLS = [
     },
   },
   {
+    name: "relay_files_fetch",
+    description: "Download selected Relay attachments to the computer running Companion and return saved paths, byte counts, checksums and individual failures. Pass fileIds from a Relay read; pass all its attachment ids to download all. Handles up to 100 files / 200 MiB per call, parallel transfers and one URL refresh on expiry. Uses existing read permissions. Paths are only usable by agents with access to this same filesystem; hosted agents need their own file-import support. Does not read or execute the contents. Use relay_file_download when you need a URL instead.",
+    inputSchema: {
+      type: "object",
+      properties: { fileIds: { type: "array", minItems: 1, maxItems: 100, items: { type: "string", minLength: 1 } } },
+      required: ["fileIds"],
+    },
+  },
+  {
     name: "relay_file_download",
     description:
-      "Get an authorized short-lived download URL for one Relay file or chat attachment. Pass the `fileId` (or `id`) of an attachment from relay_chat_fetch, relay_inbox_list, relay_thread_fetch or relay_sent_list, or a task file id. Relay mints the URL only after checking that this human or agent may read the file or the message carrying it. Treat the URL as temporary private transport: never paste the private URL into correspondence. To send a file to another person, pass its local path through relay_send instead.",
+      "Get an authorized short-lived download URL for one Relay file or chat attachment. Pass the `fileId` (or `id`) of an attachment from relay_chat_fetch, relay_inbox_list, relay_thread_fetch or relay_sent_list. Relay mints the URL only after checking that this human or agent may read the file or the message carrying it. Treat the URL as temporary private transport: never paste the private URL into correspondence. Use relay_files_fetch to save files on the Companion computer. To send a file to another person, pass its local path through relay_send instead.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1244,6 +1254,8 @@ export const TOOLS = [
     : tool);
 
 export const ORDINARY_RELAY_TOOL_NAMES = new Set([
+  "relay_file_download",
+  "relay_files_fetch",
   "relay_send",
   // Passing a received or sent Relay on to someone else is ordinary messaging.
   "relay_forward",
@@ -2960,6 +2972,8 @@ async function handleAdmittedCall(client, name, args, {
       return text(await client.restoreInboxItem(args.itemId, { idempotencyKey: args.idempotencyKey }));
     case "relay_file_download":
       return text(await client.fileDownload(args.fileId));
+    case "relay_files_fetch":
+      return text(await fetchAttachments(client, args.fileIds));
     case "relay_connector_list_tools":
       return text(await client.toolCatalog());
     case "relay_connector_request_approval":

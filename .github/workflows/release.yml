@@ -65,6 +65,7 @@ jobs:
           test/canonical-runtime.test.mjs
           test/canonical-updater.test.mjs
           test/auto-update.test.mjs
+          test/diagnostics.test.mjs
           test/linux-support.test.mjs
           test/tray-position.test.mjs
           test/mac-app-identity.test.mjs

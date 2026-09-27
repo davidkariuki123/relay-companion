@@ -11,6 +11,7 @@ const { stageVerifiedRuntime, releasePlatform } = require("./relay-setup.cjs");
 const { verifyReleaseEnvelope } = require("./release-signature.cjs");
 const { inFlightTransaction, workerLostLock } = require("./recovery-transaction.cjs");
 const trust = require("./trust.json");
+const diagnostics = require("./diagnostics.cjs");
 const CHECK_MS = 60_000;
 const DEADLINE_MS = 25 * 60_000;
 const HEARTBEAT_MS = 60_000;
@@ -208,11 +209,18 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
   const channel = channelFrom(config, env);
   const policy = policyFactory({ root: path.join(root, "recovery"), now });
   const previous = read(stateFile);
-  const runId = env.RELAY_RECOVERY_RUN_ID || null;
+  const runId = env.RELAY_RECOVERY_RUN_ID || crypto.randomUUID();
+  const diagnosticScope = diagnostics.configIdentity(homeDir)?.scope || null;
+  const diagnostic = (stage, outcome, code, targetVersion) => diagnostics.record({
+    component: "recovery", attemptId: runId, stage, outcome, code, targetVersion, channel,
+  }, { homeDir, now, scope: diagnosticScope });
+  let advertisedVersion = null, discoveryFailure = null;
   const log = recoveryLogger(root, runId, now);
   if (recoveredConfig.restored) log("restored recovery settings from validated local copy");
   const status = (value) => {
-    write(stateFile, { schema: 1, channel, runId, launcherVersion: require("../package.json").version, checkedAt: now(), lastSuccessAt: previous?.lastSuccessAt || null, ...value });
+    write(stateFile, { schema: 1, channel, runId, launcherVersion: require("../package.json").version, checkedAt: now(), lastSuccessAt: previous?.lastSuccessAt || null, advertisedVersion, discoveryError: discoveryFailure, ...value });
+    const inProgress = ["activating", "restarting", "reactivating", "restoring-local", "downloading", "starting", "probation"].includes(value.status);
+    diagnostic("health", value.lastError || value.status === "failed" ? "failed" : inProgress ? "started" : value.runtimeHealthy ? "succeeded" : "deferred", value.lastError, value.version);
     log(`status=${value.status}${value.desiredVersion ? ` desired=${value.desiredVersion}` : ""}${value.lastError ? ` error=${value.lastError}` : ""}`);
     return value;
   };
@@ -262,8 +270,9 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
   const discoverDesired = async () => {
     if (!updatesEnabled || discoveryAttempted) return;
     discoveryAttempted = true;
-    try { desiredVersion = await discoverImpl(channel); log(`discovered ${desiredVersion} on ${channel}`); }
-    catch (error) { discoveryError = error; log(`discovery failed: ${error.message}`); }
+    diagnostic("discovery", "started");
+    try { desiredVersion = await discoverImpl(channel); advertisedVersion = desiredVersion; diagnostic("discovery", "succeeded", null, desiredVersion); log(`discovered ${desiredVersion} on ${channel}`); }
+    catch (error) { discoveryError = error; discoveryFailure = diagnostics.errorCode(error); diagnostic("discovery", "failed", error); log(`discovery failed: ${error.message}`); }
   };
   try {
     sweepAbandonedDownloads(downloads, log);
@@ -420,13 +429,19 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
     const alternatives = [good?.channel === channel ? good : null, olderGood?.channel === channel ? olderGood : null, current?.previous];
     const localBusy = busyDecision(read(path.join(root, "recovery", "daemon.json")), { homeDir, now: now() });
     if (!localBusy && (!installedIsDesired || !live?.ok || !heartbeatFresh)) for (const target of alternatives) {
-      if (!target?.packageRoot || target.packageRoot === current?.packageRoot || policy.decision(channel, target.version).blocked || !validateLocal(target, { platform, arch }) || !progress.claim('local:' + target.packageRoot, 1)) continue;
+      // Preserve the original short-circuit order and one budget claim.
+      const skipped = !target?.packageRoot ? "backup-missing" : target.packageRoot === current?.packageRoot ? "backup-current"
+        : policy.decision(channel, target.version).blocked ? "backup-quarantined" : !validateLocal(target, { platform, arch }) ? "backup-invalid"
+        : !progress.claim('local:' + target.packageRoot, 1) ? "backup-budget-exhausted" : null;
+      if (skipped) { diagnostic("local-fallback", "skipped", skipped, target?.version); continue; }
+      diagnostic("local-fallback", "started", null, target.version);
       status({ ok: false, status: "restoring-local", desiredVersion, version: target.version, runtimeHealthy: false });
       try {
         const activationAt = now();
         await run(process.execPath, path.join(target.packageRoot, "src", "recovery-entry.js"), [target.version, channel], { env: { ...env, RELAY_RECOVERY_WORKER: "1" } });
         const observed = await ready({ version: target.version }, activationAt);
         if (!observed.ok) throw Error("local-runtime-not-healthy");
+        diagnostic("local-fallback", "succeeded", null, target.version);
         return proven({ ok: true, status: "current", desiredVersion, version: target.version, repair: "local", lastSuccessAt: now(), failures: 0 }, observed);
       } catch (error) {
         // A worker that lost the lock did not fail to restore anything: someone
@@ -437,6 +452,7 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
           progress.refund('local:' + target.packageRoot);
           return deferred || status({ ok: true, status: "deferred-update-in-flight", desiredVersion, version: current?.version, runtimeHealthy: false });
         }
+        diagnostic("local-fallback", "failed", error, target.version);
         progress.fail(error.message); log('local recovery failed: ' + error.message);
       }
     }

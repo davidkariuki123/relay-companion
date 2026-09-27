@@ -121,6 +121,22 @@ test("health refuses duplicate daemon and an older MCP broker", () => {
   assert.equal(exactRuntimeHealth(target, { platform: "linux", commands: [...commands, commands[0]] }).ok, false);
   assert.equal(exactRuntimeHealth(target, { platform: "linux", commands: [...commands, "node /old/node_modules/relay-companion/src/mcp-broker-entry.js"] }).oldBroker, true);
 });
+test("a discovery failure remains diagnosable even when the old working runtime returns current", async t => {
+  const homeDir = fixture(t), at = Date.now();
+  write(path.join(homeDir, ".relay", "config.json"), { user: { id: "usr_diagnostic" }, deviceId: "dev_diagnostic", updateChannel: "dev" });
+  installed(homeDir, "0.1.547");
+  write(path.join(homeDir, ".relay", "recovery", "daemon.json"), { version: "0.1.547", at });
+  const result = await recover({ homeDir, env: {}, now: () => at,
+    discoverImpl: async () => { throw Error("Relay release manifest uses unknown key relay-runtime-release-v3"); },
+    memory: () => ({ pressured: false }), health: () => ({ ok: true, daemon: true, pill: true }), stage: () => assert.fail("healthy runtime must not be replaced") });
+  assert.equal(result.status, "current");
+  const diagnostic = require("../bootstrap/diagnostics.cjs");
+  const history = diagnostic.events(homeDir, diagnostic.configIdentity(homeDir).scope).map(e => e.value);
+  const failure = history.find(e => e.stage === "discovery" && e.outcome === "failed");
+  assert.equal(failure.code, "signing-key-unknown"); assert.equal(failure.signingKeyId, "relay-runtime-release-v3");
+  assert.equal(failure.feed, "dev");
+  assert.equal(diagnostic.snapshot({ homeDir }).discoveryError, "signing-key-unknown");
+});
 test("parent deadline terminates a hung worker rather than merely timing out its promise", async () => {
   await assert.rejects(execute(process.execPath, "-e", ["setInterval(()=>{},1000)"], { timeoutMs: 100 }), /deadline-exceeded/);
 });

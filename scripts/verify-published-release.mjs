@@ -219,7 +219,10 @@ export function validateInstalledPackageShape(packageRoot, { version, distributi
     // Lifecycle coordination remains stdlib-only, including the worker thread
     // that keeps OS commands off the pill's event loop.
     const lifecycleBootstrap = [...transactionBootstrap, "lifecycle-ownership.cjs", "node-contract.cjs", "recovery-client.cjs", "recovery-intent.cjs", "service-recovery.cjs", "recovery-schedule-handover.cjs"].sort();
-    if (![legacyBootstrap, recoveryBootstrap, resilientBootstrap, monitoredBootstrap, macRecoveryBootstrap, responsiveRecoveryBootstrap, configRecoveryBootstrap, bundledNodeBootstrap, daemonProgressBootstrap, applicationBootstrap, handoffBootstrap, rulesBootstrap, transactionBootstrap, lifecycleBootstrap].some(shape => JSON.stringify(bootstrapFiles) === JSON.stringify(shape))) {
+    // Bounded diagnostics and upload-only reporting: Node builtins and sibling
+    // bootstrap helpers only, with no application dependencies or device token.
+    const diagnosticBootstrap = [...lifecycleBootstrap, "diagnostics.cjs", "diagnostics-reporter.cjs", "diagnostics-contract.json"].sort();
+    if (![legacyBootstrap, recoveryBootstrap, resilientBootstrap, monitoredBootstrap, macRecoveryBootstrap, responsiveRecoveryBootstrap, configRecoveryBootstrap, bundledNodeBootstrap, daemonProgressBootstrap, applicationBootstrap, handoffBootstrap, rulesBootstrap, transactionBootstrap, lifecycleBootstrap, diagnosticBootstrap].some(shape => JSON.stringify(bootstrapFiles) === JSON.stringify(shape))) {
       throw new Error("Thin installer bootstrap contents do not match the reviewed shape");
     }
     const manifest = JSON.parse(fs.readFileSync(path.join(packageRoot, "skill", "manifest.json"), "utf8"));

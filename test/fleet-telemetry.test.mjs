@@ -119,3 +119,11 @@ test("fleet telemetry header remains compact base64url", () => {
   assert.match(header, /^[A-Za-z0-9_-]+$/);
   assert.deepEqual(JSON.parse(Buffer.from(header, "base64url")), report);
 });
+
+test("truncation diagnostics cannot break the bounded legacy header", () => {
+  let count = 0;
+  const header = encodeCompanionFleetTelemetry({ schema: 1, installation: { oversized: "x".repeat(5000) } }, { onTruncated: () => { count++; throw Error("diagnostics unavailable"); } });
+  assert.equal(count, 1);
+  assert.ok(header.length < 4096);
+  assert.deepEqual(JSON.parse(Buffer.from(header, "base64url")), { schema: 1 });
+});

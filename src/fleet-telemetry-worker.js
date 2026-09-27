@@ -4,6 +4,7 @@ import { collectCompanionFleetTelemetry, encodeCompanionFleetTelemetry } from ".
 import { normalizeUpdateChannel } from "./config.js";
 import runtimeHealth from "../bootstrap/runtime-health.cjs";
 import installationHealth from "../bootstrap/installation-health.cjs";
+import diagnostics from "../bootstrap/diagnostics.cjs";
 
 // Resolve channel metadata without hydrating credentials or migrating config.
 // All expensive filesystem work stays here; process enumeration was collected
@@ -18,4 +19,4 @@ const report = collectCompanionFleetTelemetry({
   channel: normalizeUpdateChannel(process.env.RELAY_UPDATE_CHANNEL || config?.updateChannel),
   collectHealth: options => installationHealth.collectInstallationHealth({ ...options, commands }),
 });
-parentPort.postMessage(encodeCompanionFleetTelemetry(report));
+parentPort.postMessage(encodeCompanionFleetTelemetry(report, { onTruncated: () => diagnostics.record({ component: "collector", stage: "health", outcome: "failed", code: "report-truncated" }, { homeDir: workerData.homeDir }) }));

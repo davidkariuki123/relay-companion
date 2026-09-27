@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { Worker } from "node:worker_threads";
 import runtimeHealth from "../bootstrap/runtime-health.cjs";
+import diagnostics from "../bootstrap/diagnostics.cjs";
 
 // The parent owns the subprocess so a worker crash/termination cannot orphan
 // PowerShell. Neither process enumeration nor metadata hashing runs synchronously
@@ -103,6 +104,7 @@ export function createFleetTelemetryCache({
           if (age >= 0 && age < maxAgeMs && context(scope).key === snapshot.key
               && typeof header === "string" && header.length > 0 && header.length <= 4096) cached = { header, at: run.at };
         }).catch(() => {
+          if (snapshot.homeDir) diagnostics.record({ component: "collector", stage: "health", outcome: "failed", code: "collection-failed" }, { homeDir: snapshot.homeDir });
           // Diagnostic failures cannot fail the API request or escape as an
           // unhandled rejection. Retry at most once per cooldown.
         }).finally(() => {

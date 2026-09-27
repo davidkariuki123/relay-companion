@@ -120,11 +120,11 @@ export function collectCompanionFleetTelemetry({
   };
 }
 
-export function encodeCompanionFleetTelemetry(value) {
+export function encodeCompanionFleetTelemetry(value, { onTruncated = () => {} } = {}) {
   const encode = (report) => Buffer.from(JSON.stringify(report), "utf8").toString("base64url");
   let header = encode(value);
   // Never lose the entire report at the API's 4096-byte header boundary.
-  if (header.length > 4096) header = encode({ ...value, installation: undefined });
+  if (header.length > 4096) { try { onTruncated(); } catch {} header = encode({ ...value, installation: undefined }); }
   return header.length <= 4096 ? header : "";
 }
 

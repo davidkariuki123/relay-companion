@@ -488,7 +488,7 @@ function appendRecoveryLog(root, line, now = Date.now) {
     fs.appendFileSync(file, `${new Date(now()).toISOString()} ${line}\n`, { mode: 0o600 });
   } catch {}
 }
-async function launch({ root = __dirname, run = runChild, now = Date.now, env = process.env, timeoutMs = 25 * 60_000, attemptTimeoutMs = 12 * 60_000 } = {}) {
+async function launch({ root = __dirname, run = runChild, now = Date.now, env = process.env, timeoutMs = 25 * 60_000, attemptTimeoutMs = 12 * 60_000, reportDiagnostics = false } = {}) {
   const release = acquireLauncherLock(root);
   if (!release) return { ok: true, status: "already-running" };
   const log = (line) => appendRecoveryLog(root, `launcher ${line}`, now);
@@ -498,6 +498,17 @@ async function launch({ root = __dirname, run = runChild, now = Date.now, env = 
     const quarantine = read(path.join(root, "launcher-status.json"));
     const candidates = [selected, good, read(path.join(root, "previous-good.json"))]
       .filter((p, i, all) => validPointer(p, root) && all.findIndex(x => x?.bundle === p.bundle) === i);
+    // Separate process: no network or account authority enters the repair engine.
+    // An absent reporter in an older retained bundle is harmless.
+    try {
+      const host = candidates.find(p => fs.existsSync(path.join(p.bundle, "bootstrap", "diagnostics-reporter.cjs")));
+      if (reportDiagnostics && host) {
+        const child = spawn(host.node, [path.join(host.bundle, "bootstrap", "diagnostics-reporter.cjs")], {
+          stdio: "ignore", windowsHide: true, detached: true, env,
+        });
+        child.on("error", () => {}); child.unref();
+      }
+    } catch {}
     if (quarantine?.failedBundle === selected?.bundle && quarantine.retryAt > now() && validPointer(good, root) && good.bundle !== selected.bundle) {
       candidates.sort((a,b) => Number(a.bundle === selected.bundle) - Number(b.bundle === selected.bundle));
     }
@@ -565,4 +576,4 @@ async function launch({ root = __dirname, run = runChild, now = Date.now, env = 
   } finally { release(); }
 }
 module.exports = { launch, validPointer, read, write, acquireLauncherLock, appendRecoveryLog, acquireCanonicalLock, processAlive, nativeProcessIdentity, nativeIdentityBirth, liveLockParticipants };
-if (require.main === module) launch().then(result => { process.exitCode = result.ok ? 0 : 1; }).catch(e => { console.error(e.message); process.exitCode = 1; });
+if (require.main === module) launch({ reportDiagnostics: true }).then(result => { process.exitCode = result.ok ? 0 : 1; }).catch(e => { console.error(e.message); process.exitCode = 1; });
