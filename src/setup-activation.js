@@ -240,7 +240,10 @@ function claudeConfigHasRelay(configPath = defaultClaudeConfigPath()) {
   try {
     const cfg = JSON.parse(fs.readFileSync(configPath, "utf8"));
     const relay = cfg?.mcpServers?.relay;
-    return Boolean(relay?.command && Array.isArray(relay?.args) && relay.args.includes("mcp"));
+    // Setup registers the native bridge (`mcp-bridge --descriptor …`); older
+    // installs registered `node relay.js mcp`.
+    return Boolean(relay?.command && Array.isArray(relay?.args)
+      && (relay.args.includes("mcp") || relay.args.includes("--descriptor")));
   } catch {
     return false;
   }

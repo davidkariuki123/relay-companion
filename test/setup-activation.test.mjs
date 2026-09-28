@@ -164,3 +164,17 @@ test("verifyClaudeMcpRegistration trusts direct ~/.claude.json registration when
   assert.equal(result.currentSessionReady, false);
   assert.equal(result.reason, "registered_in_claude_config");
 });
+
+test("verifyClaudeMcpRegistration recognises the native bridge registration without the CLI", () => {
+  // A fresh Mac install runs setup with a PATH that has no `claude`, so the
+  // config is the only evidence; it holds the bridge, not `relay.js mcp`.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-activation-test-"));
+  const configPath = path.join(dir, ".claude.json");
+  fs.writeFileSync(configPath, `${JSON.stringify({ mcpServers: { relay: { type: "stdio",
+    command: "/Users/x/.relay/bin/mcp-bridge", args: ["--descriptor", "/Users/x/.relay/run/mcp/broker-v1.json"] } } }, null, 2)}\n`);
+
+  const result = verifyClaudeMcpRegistration({ configPath, runCommand: () => ({ ok: false, out: "spawn claude ENOENT" }) });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.reason, "registered_in_claude_config");
+});

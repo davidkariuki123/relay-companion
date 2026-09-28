@@ -170,9 +170,11 @@ person marked private, or a recipient of "the team" with no reason attached.
   mint the new writeup or confirm the requested edit before presenting it.
   If creation fails, say the Relay was not created; do not substitute a link.
 - Then hand it back: the returned url on its own line, what it says in one or two
-  sentences, and one line offering to change it: say it differently, ask them
-  for something, or address it to someone specifically. Nothing has been sent;
-  do not call it sent, delivered or on its way.
+  sentences, that whoever gets it needs nothing installed (they read and reply
+  in the browser, or paste the link into their own AI), and one line offering
+  to change it: say it differently, ask them for something, or address it to
+  someone specifically. Nothing has been sent; do not call it sent, delivered
+  or on its way.
 - When this person wants it changed, edit the same message with
   relay_message_edit; the url stays the same and the page shows the new text.
 - "Stop creating relays" means none for the rest of the session.
