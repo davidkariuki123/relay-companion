@@ -4,8 +4,12 @@
 const fs = require("node:fs"), os = require("node:os"), path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
+// A GUI executable is Electron or Relay by name, the app bundle itself, or
+// anything in a bundle's Contents/MacOS. The Node the application ships in
+// Relay.app/Contents/Resources is not one: a fresh macOS install has no other
+// Node, and refusing it failed every first setup (Magnus, 2026-09-28).
 function isElectronExecutable(executable, { realpath = fs.realpathSync } = {}) {
-  const electron = value => /(?:^|[\\/])(?:electron|relay)(?:\.exe|\.app(?:[\\/]|$)|$)|\.app[\\/]Contents[\\/]MacOS[\\/]/i.test(String(value || ""));
+  const electron = value => /(?:^|[\\/])(?:electron|relay)(?:\.exe|\.app[\\/]?)?$|\.app[\\/]Contents[\\/]MacOS[\\/]/i.test(String(value || ""));
   if (electron(executable) || (executable === process.execPath && process.versions.electron)) return true;
   try { return electron(realpath(executable)); } catch { return false; }
 }

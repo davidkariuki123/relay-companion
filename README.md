@@ -2,6 +2,8 @@
 
 This is the public, auditable source for the `relay-companion` npm package and Relay desktop runtime.
 
+To **create a Relay link without installing anything**, use the [SendRelays guest HTTP API instructions](https://sendrelays.com/guest-links.txt). Agents with an HTTP POST tool can create text links and exchange private replies without an account or local MCP. Web search alone cannot submit the request. This package is for the installed, connected account experience.
+
 Relay connects Claude Code, Cowork, and Codex to a shared inbox. The first-contact package has no install lifecycle and, in thin-installer releases, no dependencies. `setup` downloads the exact platform runtime from `api.sendrelays.com`, checks its signed manifest and SHA-512 digest, and only then activates it.
 
 The revocable device credential is stored in an owner-only local file on macOS/Linux or Windows Credential Manager. `~/.relay/config.json` contains non-secret account and device metadata only. Inbound Relay content is treated as untrusted correspondence and is never executed directly; any agent action remains subject to that host's approvals and sandbox.
