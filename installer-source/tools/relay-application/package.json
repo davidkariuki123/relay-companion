@@ -1,0 +1,21 @@
+{
+  "name": "relay-application-candidate",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Isolated native Relay installer candidates; no fleet publication or activation",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:ui": "node test-ui.mjs",
+    "candidate:prepare": "node prepare.mjs",
+    "package": "node package.mjs"
+  },
+  "devDependencies": {
+    "electron-builder": "26.15.7",
+    "js-yaml": "4.3.2",
+    "playwright": "1.63.0"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

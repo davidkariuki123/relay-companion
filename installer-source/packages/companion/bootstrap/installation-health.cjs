@@ -1,0 +1,98 @@
+"use strict";
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const crypto = require("node:crypto");
+const { runtimeProcessCommands, exactRuntimeHealth } = require("./runtime-health.cjs");
+const { progressPath, PROGRESS_FRESH_MS } = require("./daemon-progress.cjs");
+function read(file) { try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return null; } }
+function installationId({ homeDir = os.homedir(), create = false } = {}) {
+  const file = path.join(homeDir, ".relay", "installation-id.json");
+  const existing = read(file);
+  if (/^ins_[a-f0-9]{32}$/.test(existing?.id || "")) return existing.id;
+  if (!create || fs.existsSync(file)) return null;
+  const id = `ins_${crypto.randomBytes(16).toString("hex")}`;
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  try { fs.writeFileSync(file, JSON.stringify({ schema: 1, id }), { mode: 0o600, flag: "wx" }); }
+  catch (error) { if (error.code !== "EEXIST") throw error; }
+  return read(file)?.id || null;
+}
+function componentInventory(commands, activeVersion = null) {
+  const roles = new Map();
+  for (const command of commands) {
+    if (!/node_modules[\\/]relay-companion[\\/]/i.test(command)) continue;
+    const role = /[\\/]mcp-broker-entry\.js\b/.test(command) ? "mcp-broker"
+      : /[\\/]relay\.js.*\bdaemon\b/.test(command) ? "daemon"
+      : /[\\/]overlay[\\/]main\.cjs(?:"|'|\s|$)/.test(command) ? "pill" : null;
+    if (!role) continue;
+    const version = /[\\/]releases[\\/](\d+\.\d+\.\d+)(?:-|[\\/])/.exec(command)?.[1] || null;
+    const key = `${role}:${version}`;
+    const item = roles.get(key) || { role, version, count: 0 };
+    item.count++; roles.set(key, item);
+  }
+  const components = [...roles.values()];
+  const duplicates = ["daemon", "pill"].some(role => components.filter(c => c.role === role).reduce((n,c) => n+c.count,0) > 1);
+  const mixed = components.some(c => c.version && activeVersion && c.version !== activeVersion);
+  return { components: components.slice(0, 12), duplicates, mixed };
+}
+function collectInstallationHealth({ homeDir = os.homedir(), platform = process.platform, arch = process.arch,
+  osVersion = os.release(), commands, now = Date.now() } = {}) {
+  const root = path.join(homeDir, ".relay"), current = read(path.join(root, "runtime", "current.json"));
+  const activeVersion = current?.active === true ? current.version : null;
+  const processCommands = commands || runtimeProcessCommands(platform);
+  const inventory = componentInventory(processCommands, activeVersion);
+  const live = current?.bin && current.packageRoot ? exactRuntimeHealth(current, { platform, commands: processCommands }) : null;
+  const supervisor = read(path.join(root, "recovery", "status.json"));
+  const monitor = require("./recovery-monitor.cjs").recoveryMonitor({ homeDir, now });
+  const monitorFailure = ({ missing: "recovery-checks-missing", overdue: "recovery-checks-overdue", "launcher-failed": "recovery-launcher-failed", fallback: "recovery-fallback" })[monitor.state] || null;
+  const heartbeat = read(path.join(root, "recovery", "daemon.json"));
+  const progress = read(progressPath(homeDir));
+  const progressSupported = !!current?.packageRoot && fs.existsSync(path.join(current.packageRoot, "bootstrap", "daemon-progress.cjs"));
+  const progressMatches = progress?.packageRoot === current?.packageRoot && progress?.version === activeVersion && progress?.pid === heartbeat?.pid;
+  const progressFresh = progressMatches && progress.sequence > 0 && progress.at <= now && now - progress.at < PROGRESS_FRESH_MS;
+  const daemonResponsive = Boolean(live?.daemon && heartbeat?.version === activeVersion && heartbeat?.at <= now && now - heartbeat.at < 60_000
+    && (!progressSupported || progressFresh));
+  const componentNames = ["inbox-background", "agent-sessions", "topics", "tasks"];
+  const unhealthyComponents = progressMatches ? componentNames.filter(name => ["failed", "stalled"].includes(progress.components?.[name])) : [];
+  let serviceHealth = { state: "healthy", reason: "ready", components: unhealthyComponents };
+  if (!activeVersion) serviceHealth = { ...serviceHealth, state: "unverified", reason: "runtime-not-active" };
+  else if (!live?.daemon) serviceHealth = { ...serviceHealth, state: "failed", reason: "daemon-missing" };
+  else if (!daemonResponsive) serviceHealth = { ...serviceHealth, state: "failed", reason: "daemon-not-responsive" };
+  else if (!live?.ok) serviceHealth = { ...serviceHealth, state: "failed", reason: "service-process-mismatch" };
+  else if (unhealthyComponents.length) serviceHealth = { ...serviceHealth, state: "degraded", reason: "component-failed" };
+  else if (progressMatches && ["offline", "signed-out"].includes(progress.phase)) serviceHealth = { ...serviceHealth, state: "waiting", reason: progress.phase };
+  else if (monitorFailure || supervisor?.ok === false) serviceHealth = { ...serviceHealth, state: "degraded", reason: "recovery-failed" };
+  else if (!progressSupported) serviceHealth = { ...serviceHealth, state: "unverified", reason: "legacy-readiness" };
+  const transport = (name) => {
+    const report = read(path.join(root, "transport-health", `${name}.json`));
+    return report?.at > 0 && now >= report.at ? new Date(report.at).toISOString() : null;
+  };
+  return {
+    installationId: installationId({ homeDir }), os: platform, osVersion: osVersion.slice(0, 80), arch,
+    ...inventory, daemonResponsive, health: serviceHealth,
+    recovery: supervisor || monitorFailure ? { status: supervisor?.status || monitor.state, version: supervisor?.launcherVersion || null,
+      checkedAt: supervisor?.checkedAt > 0 ? new Date(supervisor.checkedAt).toISOString() : null,
+      desiredVersion: supervisor?.desiredVersion || null,
+      lastSuccessAt: supervisor?.lastSuccessAt > 0 ? new Date(supervisor.lastSuccessAt).toISOString() : null,
+      monitor: { state: monitor.state, repairStatus: monitor.repairStatus,
+        lastRepairAt: monitor.lastRepairAt > 0 ? new Date(monitor.lastRepairAt).toISOString() : null },
+      // Do not upload logs, URLs, usernames, or raw errors. These stay in doctor.
+      failureCode: monitorFailure || (supervisor?.ok === false ? "recovery-failed" : null) } : null,
+    transports: { mcpLastUsedAt: transport("mcp"), httpsLastUsedAt: transport("https") },
+  };
+}
+function recordTransport(name, { homeDir = os.homedir(), now = Date.now() } = {}) {
+  if (!["mcp", "https"].includes(name)) return;
+  const root = path.join(homeDir, ".relay", "transport-health");
+  try { fs.mkdirSync(root, { recursive: true, mode: 0o700 }); fs.writeFileSync(path.join(root, `${name}.json`), JSON.stringify({ at: now }), { mode: 0o600 }); } catch {}
+}
+function describeInstallationHealth(installation) {
+  const reason = installation?.health?.reason;
+  const message = ({ "daemon-missing": "Background service stopped", "daemon-not-responsive": "Background service is not responding",
+    "service-process-mismatch": "Relay services are not running together correctly", "component-failed": "An optional background component needs attention",
+    "recovery-failed": "Recovery needs attention", "offline": "Waiting for Relay's connection", "signed-out": "Waiting for sign-in",
+    "runtime-not-active": "Runtime health has not been verified", "legacy-readiness": "Background service running; readiness not verified",
+    "ready": "Relay is running" })[reason] || "Runtime health has not been verified";
+  return message + (["restarting", "reactivating", "restoring-local", "downloading"].includes(installation?.recovery?.status) ? "; recovery in progress" : "");
+}
+module.exports = { installationId, componentInventory, collectInstallationHealth, recordTransport, describeInstallationHealth };

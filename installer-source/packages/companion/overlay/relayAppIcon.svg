@@ -1,0 +1,27 @@
+<svg width="1024" height="1024" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="relayGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#C1C1FA"/>
+      <stop offset="16%" stop-color="#C0B1F9"/>
+      <stop offset="38%" stop-color="#7790F7"/>
+      <stop offset="58%" stop-color="#5F74F6"/>
+      <stop offset="82%" stop-color="#342CF5"/>
+      <stop offset="100%" stop-color="#3229F5"/>
+    </linearGradient>
+    <radialGradient id="relayHighlight" cx="28%" cy="4%" r="50%">
+      <stop offset="0%" stop-color="#C1C1FA"/>
+      <stop offset="36%" stop-color="#C0B1F9" stop-opacity="0.82"/>
+      <stop offset="100%" stop-color="#C0B1F9" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="relayGlow" cx="72%" cy="36%" r="58%">
+      <stop offset="0%" stop-color="#7590F7" stop-opacity="0.82"/>
+      <stop offset="100%" stop-color="#7590F7" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="32" height="32" rx="7" fill="#f7f4ef"/>
+  <rect x="5.5" y="13.5" width="5" height="5" rx="0.5" fill="#D9704E"/>
+  <rect x="13.5" y="13.5" width="5" height="5" rx="0.5" fill="#111111"/>
+  <rect x="21.5" y="13.5" width="5" height="5" rx="0.5" fill="url(#relayGradient)"/>
+  <rect x="21.5" y="13.5" width="5" height="5" rx="0.5" fill="url(#relayHighlight)"/>
+  <rect x="21.5" y="13.5" width="5" height="5" rx="0.5" fill="url(#relayGlow)"/>
+</svg>

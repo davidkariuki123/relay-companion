@@ -1,0 +1,266 @@
+"use strict";
+const { app, BrowserWindow, ipcMain, clipboard, dialog, protocol, net, nativeTheme, shell } = require("electron");
+const fs = require("node:fs");
+const path = require("node:path");
+const os = require("node:os");
+const { pathToFileURL } = require("node:url");
+const { spawn } = require("node:child_process");
+const { inspectInstallation, planMigration } = require("./migration.cjs");
+const { parseRelayDeepLink } = require("./deep-link.cjs");
+const { integrationStatus } = require("./integration-status.cjs");
+const { pillIsUp } = require("./pill-status.cjs");
+const { relocationPlan } = require("./relocation.cjs");
+// Standard local origin lets sandboxed education frames load bundled assets
+// without granting them same-origin access to the installer's privileged bridge.
+protocol.registerSchemesAsPrivileged([{ scheme: "relay-setup", privileges: { standard: true, secure: true } }]);
+
+// Read-only previews use a separate identity. Activating candidates explicitly
+// opt into application identity and must be tested on disposable machines.
+const candidate = JSON.parse(fs.readFileSync(path.join(process.resourcesPath, "candidate.json"), "utf8"));
+const preview = candidate.activationEnabled === false && candidate.distribution === "application-preview";
+const application = candidate.activationEnabled === true && candidate.distribution === "application"
+  && candidate.appId === "work.relay.application";
+if (!preview && !application) throw new Error("Invalid Relay application identity");
+app.setName(preview ? "Relay Migration Preview" : "Relay");
+app.setPath("userData", path.join(app.getPath("appData"), preview ? "Relay Migration Preview" : "Relay Application"));
+let setupRunning = false;
+let mainWindow;
+let setupChild;
+// On a computer this application already set up, launching Relay means
+// opening the Companion, never this window. The window appears only when
+// that quiet launch could not be confirmed.
+let quietLaunchFailed = false;
+let setupProgress = { phase: "idle", canCancel: false };
+function publishProgress(progress) {
+  setupProgress = progress;
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("application:progress", progress);
+}
+const pendingLinks = [];
+function queueLink(value) {
+  if (application && typeof value === "string" && value.length <= 2048 && parseRelayDeepLink(value)) pendingLinks.push(value);
+}
+// Relay opens in this window's place: the pill stands in the middle of the
+// screen with Continue with Google (the installer's setup-intent marker), so
+// this window leaves as soon as the pill reports itself up. If that cannot be
+// confirmed the window stays and shows Open Relay instead.
+//
+// Setup activates the runtime part way through the install step, and that
+// activation is what starts the pill (application-install.cjs). The step then
+// goes on registering agents and services for a while, so a window that only
+// left at the hand-off stood behind the pill until the step finished (Shane,
+// 2026-09-20). This watch runs from the start of the install step and hides
+// the window the moment a pill started by this setup is on screen. The
+// process stays until the step ends, and a step that then fails shows the
+// window again with its message.
+let hiddenBehindPill = false;
+function onboardingRunId() {
+  if (!candidate.desktopOnboarding) return null;
+  try { return JSON.parse(fs.readFileSync(path.join(process.env.RELAY_CONFIG_DIR || path.join(os.homedir(), ".relay"), "desktop-onboarding.json"), "utf8")).id || null; } catch { return null; }
+}
+function watchPillTakingOver({ pollMs = 250 } = {}) {
+  const since = Date.now();
+  const timer = setInterval(() => {
+    if (!pillIsUp({ since, visible: true, runId: onboardingRunId() })) return;
+    clearInterval(timer);
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) { mainWindow.hide(); hiddenBehindPill = true; }
+  }, pollMs);
+  return () => clearInterval(timer);
+}
+async function handoffToRelay({ timeoutMs = 20_000, pollMs = 250 } = {}) {
+  openRelay();
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (pillIsUp({ runId: onboardingRunId() })) {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
+      setTimeout(() => app.quit(), 250);
+      return { opened: true };
+    }
+    await new Promise(resolve => setTimeout(resolve, pollMs));
+  }
+  return { opened: false };
+}
+// Relay is already set up here when the runtime pointer is active and this
+// application owns it. Nothing in the middle of a setup transaction counts.
+// Files alone never settle it: a home folder restored onto a fresh OS carries
+// every marker and not one logon task (Shane, 2026-09-19), so the quiet launch
+// also asks whether the background service is actually alive.
+function installationState() {
+  if (!application) return { setUp: false, serviceAlive: false };
+  try {
+    const installation = inspectInstallation({ homeDir: os.homedir() });
+    const setUp = installation.pointer === "active" && installation.applicationOwner !== "absent" && installation.transaction === "absent";
+    return { setUp, serviceAlive: installation.serviceHeartbeat === "fresh" };
+  } catch { return { setUp: false, serviceAlive: false }; }
+}
+function alreadySetUp() {
+  return installationState().setUp;
+}
+function openRelay() {
+  if (!application || setupRunning) throw new Error("Relay is not ready to open");
+  const bootstrap = require(path.join(process.resourcesPath, "installer", "bootstrap", "relay-setup.cjs"));
+  const target = bootstrap.activeCanonicalCli();
+  if (!target) throw new Error("Finish Relay setup first");
+  const links = pendingLinks.splice(0);
+  const child = spawn(target.node, [target.bin, "pill", ...links], { windowsHide: true, detached: true, stdio: "ignore" });
+  child.on("error", () => { mainWindow?.show(); });
+  child.unref();
+  return { requested: true };
+}
+if (application) {
+  for (const arg of process.argv) queueLink(arg);
+  if (!app.requestSingleInstanceLock()) app.quit();
+  app.on("open-url", (event, url) => { event.preventDefault(); queueLink(url); if (app.isReady()) { try { openRelay(); } catch { mainWindow?.show(); } } });
+  app.on("second-instance", (_event, argv) => { for (const arg of argv) queueLink(arg); try { openRelay(); } catch { mainWindow?.show(); } });
+}
+app.whenReady().then(() => {
+  protocol.handle("relay-setup", request => {
+    const url = new URL(request.url);
+    let file;
+    try { file = path.resolve(__dirname, `.${decodeURIComponent(url.pathname)}`); } catch { return new Response("Not found", { status: 404 }); }
+    const relative = path.relative(__dirname, file);
+    if (url.hostname !== "app" || !relative || relative.startsWith("..") || path.isAbsolute(relative)
+      || !/\.(html|css|js|png|jpg|jpeg|svg|webp|woff2)$/.test(file) || !fs.statSync(file, { throwIfNoEntry: false })?.isFile()) {
+      return new Response("Not found", { status: 404 });
+    }
+    return net.fetch(pathToFileURL(file).href);
+  });
+  // Sized and centred like the pill that takes its place once Relay is ready.
+  const animatedInstall = application && candidate.desktopOnboarding && process.platform === "darwin" && !app.isInApplicationsFolder();
+  const win = new BrowserWindow({ width: 344, height: 524, minWidth: 344, minHeight: 524, ...(application && candidate.desktopOnboarding ? {frame:false,transparent:true,resizable:false} : {useContentSize:true}), autoHideMenuBar: true, title: "Relay", show: false,
+    // The page follows the system appearance; match it before first paint.
+    backgroundColor: application && candidate.desktopOnboarding ? "#00000000" : nativeTheme.shouldUseDarkColors ? "#221E1B" : "#FFFFFF",
+    webPreferences: { preload: path.join(__dirname, "preload.cjs"), contextIsolation: true, sandbox: true, nodeIntegration: false } });
+  mainWindow = win;
+  win.on("close", event => {
+    if (!setupRunning) return;
+    event.preventDefault();
+    if (setupProgress.canCancel && setupChild?.connected) setupChild.send({ action: "cancel-download" }, () => {});
+  });
+  const ownSender = (event) => event.sender === win.webContents && event.senderFrame === win.webContents.mainFrame;
+  ipcMain.handle("application:relocate", async (event) => {
+    if (!ownSender(event) || !application || process.platform !== "darwin" || app.isInApplicationsFolder()) throw new Error("Installation is unavailable from this window");
+    // An earlier Relay in Applications (often the copy whose first setup
+    // failed) goes to the Trash, where it can still be recovered, so the move
+    // below has no conflict to refuse (relocation.cjs).
+    const destination = path.join("/Applications", path.basename(path.resolve(path.dirname(process.execPath), "../..")));
+    const plan = relocationPlan(destination, candidate);
+    if (plan.action === "refuse") throw new Error(plan.message);
+    if (plan.action === "replace") {
+      try { await shell.trashItem(destination); }
+      catch { throw new Error("Relay could not replace the older Relay in Applications. Move it to the Trash, then try again."); }
+    }
+    const handoff = path.join(app.getPath("userData"), "installation-handoff.json");
+    fs.writeFileSync(handoff, JSON.stringify({version:candidate.version, runtimeSourceSha:candidate.runtimeSourceSha, startedAt:new Date().toISOString()}), {mode:0o600});
+    let moved = false;
+    try { moved = app.moveToApplicationsFolder({ conflictHandler: () => false }); }
+    finally { if (!moved) fs.rmSync(handoff, {force:true}); }
+    if (!moved) throw new Error("Relay could not move to Applications. Move any Relay app in Applications to the Trash, then try again.");
+    return { ok: true };
+  });
+  ipcMain.handle("migration:inspect", (event) => {
+    if (!ownSender(event)) throw new Error("Invalid caller");
+    const installation = inspectInstallation({ homeDir: os.homedir() });
+    return { candidate, installation, progress: setupProgress, launch: { quietLaunchFailed },
+      plan: planMigration({ installation, platform: candidate.platform, targetVersion: candidate.version }) };
+  });
+  ipcMain.handle("migration:tutorial", (event) => {
+    if (!ownSender(event)) throw new Error("Invalid caller");
+    clipboard.writeText("Give me the Relay tutorial.");
+  });
+  const lifecycle = (event, action) => {
+    if (!ownSender(event) || !application || setupRunning) throw new Error("Application setup is unavailable");
+    return runLifecycle(action);
+  };
+  const runLifecycle = async (action) => {
+    if (!application || setupRunning) throw new Error("Application setup is unavailable");
+    if (action === "uninstall") {
+      const answer = await dialog.showMessageBox(win, { type: "question", title: "Remove Relay integrations?",
+        message: "Remove Relay’s agent connections, unmodified managed skills and background services?",
+        detail: "Your account data, messages, encryption keys and protocol authorization will be kept. Then remove the application using your operating system.",
+        buttons: ["Cancel", "Remove integrations"], defaultId: 0, cancelId: 0 });
+      if (answer.response !== 1) return { cancelled: true };
+    }
+    setupRunning = true;
+    publishProgress({ phase: action === "install" ? "verifying" : "installing", canCancel: false });
+    const stopWatchingPill = action === "install" ? watchPillTakingOver() : () => {};
+    try {
+      const logRoot = app.getPath("logs");
+      fs.mkdirSync(logRoot, { recursive: true });
+      const logPath = path.join(logRoot, "application-setup.log");
+      const fd = fs.openSync(logPath, "a", 0o600);
+      const applicationRoot = process.platform === "darwin" ? path.resolve(path.dirname(process.execPath), "../..") : path.dirname(process.execPath);
+      const env = { ...process.env };
+      for (const key of ["NODE_OPTIONS", "NODE_PATH", "ELECTRON_RUN_AS_NODE"]) delete env[key];
+      try {
+        await new Promise((resolve, reject) => {
+          const child = spawn(path.join(process.resourcesPath, process.platform === "win32" ? "node.exe" : "node"),
+            [path.join(process.resourcesPath, "activate.cjs"), action, applicationRoot, process.execPath],
+            { windowsHide: true, stdio: ["ignore", fd, fd, "ipc"], env });
+          setupChild = child;
+          child.on("message", message => {
+            if (message?.type === "setup-progress") publishProgress(message);
+          });
+          child.once("error", reject);
+          child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(code === 2
+            ? "Download cancelled. You can retry setup when you are ready."
+            : `Relay setup needs attention. Details: ${logPath}`)));
+        });
+      } finally { fs.closeSync(fd); }
+      publishProgress({ phase: action === "install" ? "ready" : "idle", canCancel: false });
+      return { ok: true, integrations: action === "install" ? integrationStatus() : undefined };
+    } catch (error) {
+      publishProgress({ phase: "stopped", canCancel: false });
+      // The pill took this window's place before the step failed: the message
+      // belongs on screen, not behind it.
+      if (hiddenBehindPill && mainWindow && !mainWindow.isDestroyed()) { hiddenBehindPill = false; mainWindow.show(); }
+      throw error;
+    } finally { stopWatchingPill(); setupRunning = false; setupChild = null; }
+  };
+  ipcMain.handle("application:install", (event) => lifecycle(event, "install"));
+  ipcMain.handle("application:uninstall", (event) => lifecycle(event, "uninstall"));
+  ipcMain.handle("application:reconcile", (event) => lifecycle(event, "reconcile"));
+  ipcMain.handle("application:cancel-download", event => {
+    if (!ownSender(event)) throw new Error("Invalid caller");
+    if (setupProgress.canCancel && setupChild?.connected) setupChild.send({ action: "cancel-download" }, () => {});
+  });
+  ipcMain.handle("application:open", (event) => {
+    if (!ownSender(event) || !application || setupRunning) throw new Error("Relay is not ready to open");
+    return openRelay();
+  });
+  ipcMain.handle("application:handoff", (event) => {
+    if (!ownSender(event) || !application || setupRunning) throw new Error("Relay is not ready to open");
+    return handoffToRelay();
+  });
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  win.webContents.on("will-navigate", (event) => event.preventDefault());
+  win.loadURL(animatedInstall ? "relay-setup://app/native-install.html" : application && candidate.desktopOnboarding ? "relay-setup://app/native-bootstrap.html" : "relay-setup://app/index.html");
+  const state = installationState();
+  // Relocation restarts Electron. The installed copy resumes the existing
+  // bootstrap, whose verification and progress renderer remain authoritative.
+  if (application && app.isInApplicationsFolder()) {
+    const handoff = path.join(app.getPath("userData"), "installation-handoff.json");
+    try {
+      const pending = JSON.parse(fs.readFileSync(handoff, "utf8"));
+      if (pending.version === candidate.version && pending.runtimeSourceSha === candidate.runtimeSourceSha) fs.rmSync(handoff);
+    } catch (error) { if (error.code !== "ENOENT") console.error("Installation handoff could not be read:", error.message); }
+  }
+  if (state.setUp && !animatedInstall) {
+    // Launching Relay on a computer it is set up on opens the Companion, with
+    // any relay:// link, and this process leaves. The window is shown only
+    // when the Companion cannot be seen coming up.
+    // A set-up computer whose background service is not running first runs
+    // the install step again: on an already-installed runtime that step only
+    // registers and starts the services (application-install.cjs), so the
+    // Companion opens with a service behind it instead of a silent, deaf one.
+    const ready = state.serviceAlive ? Promise.resolve() : runLifecycle("install");
+    ready.then(() => handoffToRelay()).then(({ opened }) => {
+      if (opened) return;
+      quietLaunchFailed = true;
+      win.show();
+    }).catch(() => { quietLaunchFailed = true; win.show(); });
+    return;
+  }
+  win.once("ready-to-show", () => win.show());
+  if (pendingLinks.length) { try { openRelay(); } catch { /* Setup remains visible. */ } }
+});
+app.on("window-all-closed", () => app.quit());

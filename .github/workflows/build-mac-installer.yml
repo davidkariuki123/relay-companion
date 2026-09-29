@@ -1,0 +1,244 @@
+name: Build and verify Mac installer
+run-name: Mac candidate ${{ inputs.application_version }} ${{ inputs.source_sha }} ${{ inputs.channel }}
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact private source exported into installer-source
+        required: true
+        type: string
+      runtime_version:
+        description: Exact published signed runtime version
+        required: true
+        type: string
+      runtime_source_sha:
+        description: Public source from the signed runtime manifest
+        required: true
+        type: string
+      application_version:
+        description: Exact outer installer version
+        required: true
+        type: string
+      channel:
+        type: choice
+        options: [dev, stable]
+        default: dev
+      baseline_version:
+        description: Older signed stable installer for recovery tests
+        required: true
+        type: string
+      sign:
+        description: Sign and test (false rehearses packaging and cannot qualify promotion)
+        type: boolean
+        default: true
+permissions:
+  contents: read
+concurrency:
+  group: mac-candidate-${{ inputs.source_sha }}-${{ inputs.channel }}
+  cancel-in-progress: false
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Check source and manual authorization
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          VERSION: ${{ inputs.application_version }}
+          RUNTIME_VERSION: ${{ inputs.runtime_version }}
+          RUNTIME_SHA: ${{ inputs.runtime_source_sha }}
+          BASELINE: ${{ inputs.baseline_version }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REPOSITORY_ID" == 1341107733 && "$GITHUB_EVENT_NAME" == workflow_dispatch && "$GITHUB_REF" == refs/heads/main ]]
+          case "$GITHUB_ACTOR_ID" in 47708231|33625326) ;; *) exit 1 ;; esac
+          case "$GITHUB_TRIGGERING_ACTOR" in davidkariuki123|shaneacton) ;; *) exit 1 ;; esac
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ && "$RUNTIME_SHA" =~ ^[a-f0-9]{40}$ ]]
+          for value in "$VERSION" "$RUNTIME_VERSION" "$BASELINE"; do [[ "$value" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; done
+          test "$(jq -r .sourceSha installer-source/source.json)" = "$SOURCE_SHA"
+  package:
+    needs: authorize
+    name: Package ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-14, platform: darwin-arm64 }
+          - { os: macos-15-intel, platform: darwin-x64 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      RUNTIME_VERSION: ${{ inputs.runtime_version }}
+      RUNTIME_SHA: ${{ inputs.runtime_source_sha }}
+      APPLICATION_VERSION: ${{ inputs.application_version }}
+      CHANNEL: ${{ inputs.channel }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.18.0
+      - name: Build from the exact exported source
+        run: |
+          set -euo pipefail
+          tool=installer-source/tools/relay-application
+          npm ci --prefix "$tool" --ignore-scripts --no-audit --no-fund
+          node --test "$tool/test/relocation.test.mjs" "$tool/test/relocation-handler.test.mjs" scripts/verify-mac-installer.test.mjs
+          node "$tool/download.mjs" --version "$RUNTIME_VERSION" --source-sha "$RUNTIME_SHA" --output "$RUNNER_TEMP/input"
+          node "$tool/prepare.mjs" --manifest "$RUNNER_TEMP/input/manifest.json" --artifact "$RUNNER_TEMP/input/runtime.tar.gz" --version "$RUNTIME_VERSION" --source-sha "$RUNTIME_SHA" --output "$RUNNER_TEMP/candidate" --channel "$CHANNEL" --application-version "$APPLICATION_VERSION" --application-candidate
+          node "$tool/package.mjs" "$RUNNER_TEMP/candidate"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: unsigned-${{ matrix.platform }}
+          path: |
+            ${{ runner.temp }}/candidate/installers/*.zip
+            ${{ runner.temp }}/candidate/packaging-receipt.json
+          retention-days: 1
+          if-no-files-found: error
+  sign:
+    if: inputs.sign
+    needs: package
+    name: Sign ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-14, platform: darwin-arm64 }
+          - { os: macos-15-intel, platform: darwin-x64 }
+    runs-on: ${{ matrix.os }}
+    environment: mac-signing
+    timeout-minutes: 90
+    env:
+      APPLE_KEYCHAIN_PROFILE: relay-ci-notary
+      PLATFORM: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.18.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: unsigned-${{ matrix.platform }}
+          path: ${{ runner.temp }}/unsigned
+      - name: Prepare isolated signing tools and retained app
+        run: |
+          set -euo pipefail
+          npm ci --prefix installer-source/tools/relay-application --ignore-scripts --no-audit --no-fund
+          echo "APPLE_KEYCHAIN=$RUNNER_TEMP/relay-signing.keychain-db" >> "$GITHUB_ENV"
+          mkdir "$RUNNER_TEMP/app"
+          ditto -x -k "$RUNNER_TEMP"/unsigned/*.zip "$RUNNER_TEMP/app"
+      - name: Load the Developer ID certificate and notary key into a temporary keychain
+        env:
+          CERTIFICATE_P12_BASE64: ${{ secrets.RELAY_MAC_SIGNING_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.RELAY_MAC_SIGNING_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY_ID: ${{ secrets.RELAY_APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.RELAY_APPLE_API_ISSUER_ID }}
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.RELAY_APPLE_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          for name in CERTIFICATE_P12_BASE64 CERTIFICATE_PASSWORD APPLE_API_KEY_ID APPLE_API_ISSUER_ID APPLE_API_KEY_P8_BASE64; do
+            [[ -n "${!name}" ]] || { echo "::error::The mac-signing environment is missing a secret ($name); see DEPLOY.md" >&2; exit 1; }
+          done
+          umask 077
+          keychain_password="$(openssl rand -hex 24)"
+          security create-keychain -p "$keychain_password" "$APPLE_KEYCHAIN"
+          security set-keychain-settings -lut 5400 "$APPLE_KEYCHAIN"
+          security unlock-keychain -p "$keychain_password" "$APPLE_KEYCHAIN"
+          certificate="$RUNNER_TEMP/developer-id.p12"
+          key="$RUNNER_TEMP/AuthKey_$APPLE_API_KEY_ID.p8"
+          printf '%s' "$CERTIFICATE_P12_BASE64" | base64 --decode > "$certificate"
+          printf '%s' "$APPLE_API_KEY_P8_BASE64" | base64 --decode > "$key"
+          security import "$certificate" -k "$APPLE_KEYCHAIN" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$APPLE_KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$APPLE_KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          identity="$(security find-identity -v -p codesigning "$APPLE_KEYCHAIN" | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"')"
+          [[ -n "$identity" ]] || { echo "::error::The imported certificate is not a Developer ID Application identity with its private key" >&2; exit 1; }
+          xcrun notarytool store-credentials "$APPLE_KEYCHAIN_PROFILE" --key "$key" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" --keychain "$APPLE_KEYCHAIN"
+          rm -f "$certificate" "$key"
+          echo "RELAY_MAC_SIGNING_IDENTITY=$identity" >> "$GITHUB_ENV"
+          echo "Signing as $identity"
+      - name: Sign and pack the retained candidate
+        run: |
+          set -euo pipefail
+          node installer-source/tools/relay-application/sign-mac-candidate.mjs "$RUNNER_TEMP/app/Relay.app" "$RUNNER_TEMP/signed"
+          node installer-source/tools/relay-application/signed-mac.mjs pack --directory "$RUNNER_TEMP/signed" --output "$RUNNER_TEMP/pack"
+      - name: Remove the temporary keychain and notary profile
+        if: always()
+        run: |
+          security delete-keychain "$APPLE_KEYCHAIN" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/developer-id.p12" "$RUNNER_TEMP"/AuthKey_*.p8
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: signed-${{ matrix.platform }}
+          path: ${{ runner.temp }}/pack/*.tar.gz
+          retention-days: 1
+          if-no-files-found: error
+  native:
+    needs: sign
+    name: Test ${{ matrix.platform }} ${{ matrix.mode }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-14, platform: darwin-arm64, mode: fresh }
+          - { os: macos-15-intel, platform: darwin-x64, mode: fresh }
+          - { os: macos-14, platform: darwin-arm64, mode: leftover }
+          - { os: macos-15-intel, platform: darwin-x64, mode: leftover }
+          - { os: macos-14, platform: darwin-arm64, mode: same-version }
+          - { os: macos-15-intel, platform: darwin-x64, mode: same-version }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.18.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: signed-${{ matrix.platform }}
+          path: ${{ runner.temp }}/pack
+      - name: Exercise the exact signed candidate through its UI
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          INSTALLER_VERSION: ${{ inputs.application_version }}
+          INSTALLER_SOURCE_SHA: ${{ inputs.source_sha }}
+          INSTALLER_CHANNEL: ${{ inputs.channel }}
+          RUNTIME_VERSION: ${{ inputs.runtime_version }}
+          RUNTIME_SOURCE_SHA: ${{ inputs.runtime_source_sha }}
+          BASELINE_VERSION: ${{ inputs.baseline_version }}
+          INSTALLER_MODE: ${{ matrix.mode }}
+          CANDIDATE_DIRECTORY: ${{ runner.temp }}/signed
+        run: |
+          set -euo pipefail
+          node installer-source/tools/relay-application/signed-mac.mjs unpack --archive "$RUNNER_TEMP/pack/signed-mac-$PLATFORM.tar.gz" --output "$CANDIDATE_DIRECTORY"
+          node scripts/verify-mac-installer.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: mac-proof-${{ matrix.platform }}-${{ matrix.mode }}
+          path: mac-installer-evidence/proof.json
+          retention-days: 7
+          if-no-files-found: error
+  qualified:
+    needs: native
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: signed-*
+          path: packs
+          merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: mac-proof-*
+          path: proofs
+      - name: Retain qualified packs and proofs without publishing a channel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tar -czf mac-proofs.tar.gz -C proofs .
+          gh release create "mac-candidate-$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --latest=false --title "Tested Mac candidate $GITHUB_RUN_ID" --notes "Exact signed packs passed fresh, older leftover and same-version leftover installation on both Mac architectures. No channel moved." packs/*.tar.gz mac-proofs.tar.gz

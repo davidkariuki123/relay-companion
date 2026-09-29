@@ -21,7 +21,7 @@ const read = file => JSON.parse(fs.readFileSync(file, "utf8"));
 export function validateInputs({ version, sourceSha, baseline, mode }) {
   assert.match(version || "", /^\d+\.\d+\.\d+$/);
   assert.match(sourceSha || "", /^[a-f0-9]{40}$/);
-  assert.ok(["fresh", "leftover"].includes(mode), "Choose fresh or leftover mode");
+  assert.ok(["fresh", "leftover", "same-version"].includes(mode), "Choose fresh, leftover or same-version mode");
   if (mode === "leftover") {
     assert.match(baseline || "", /^\d+\.\d+\.\d+$/);
     const a = baseline.split(".").map(BigInt), b = version.split(".").map(BigInt);
@@ -50,7 +50,8 @@ export function verifyCandidate(candidate, manifest, platform) {
   assert.equal(candidate.packagingSourceDirty, false);
   assert.equal(candidate.version, manifest.runtime.version);
   assert.equal(candidate.runtimeSourceSha, manifest.runtime.sourceSha);
-  assert.equal(candidate.channel || "stable", "stable");
+  assert.equal(candidate.channel || "stable", manifest.channel || "stable");
+  if (manifest.publicSourceSha) assert.equal(candidate.packagingPublicSourceSha, manifest.publicSourceSha);
 }
 
 function run(command, args, options = {}) {
@@ -134,6 +135,20 @@ export async function main(inputs) {
   const mounts = [];
   let lastText = "", phase = "verify-download";
   const record = name => { proof.checks.push(name); console.log(`PASS ${name}`); };
+  function mountVerified(dmg, name, manifest, artifact) {
+    run("/usr/bin/codesign", ["--verify", "--strict", "--verbose=2", dmg]);
+    run("/usr/bin/xcrun", ["stapler", "validate", dmg]);
+    const mount = path.join(work, name);
+    run("/usr/bin/hdiutil", ["attach", dmg, "-nobrowse", "-readonly", "-mountpoint", mount]);
+    mounts.push(mount);
+    const app = path.join(mount, "Relay.app");
+    run("/usr/bin/codesign", ["--verify", "--deep", "--strict", "--verbose=2", app]);
+    run("/usr/bin/xcrun", ["stapler", "validate", app]);
+    run("/usr/sbin/spctl", ["--assess", "--type", "execute", "--verbose=2", app]);
+    const candidate = read(path.join(app, "Contents/Resources/candidate.json"));
+    verifyCandidate(candidate, manifest, platform);
+    return { app, candidate, manifest, artifact };
+  }
   async function download(version, sourceSha, name) {
     const response = await fetch(`https://api.sendrelays.com/v1/application-releases/v${version}/manifest.json`, { redirect: "error", signal: AbortSignal.timeout(30_000) });
     assert.equal(response.ok, true, `No immutable signed installer manifest for ${version}`);
@@ -145,24 +160,29 @@ export async function main(inputs) {
     const dmg = path.join(work, `${name}.dmg`);
     run("/usr/bin/curl", ["--fail", "--silent", "--show-error", "--max-time", "180", artifact.url, "--output", dmg], { timeout: 190_000 });
     await release.verifyApplicationArtifact(dmg, artifact);
-    run("/usr/bin/codesign", ["--verify", "--strict", "--verbose=2", dmg]);
-    run("/usr/bin/xcrun", ["stapler", "validate", dmg]);
-    const mount = path.join(work, name);
-    run("/usr/bin/hdiutil", ["attach", dmg, "-nobrowse", "-readonly", "-mountpoint", mount]);
-    mounts.push(mount);
-    const app = path.join(mount, "Relay.app");
-    run("/usr/bin/codesign", ["--verify", "--deep", "--strict", "--verbose=2", app]);
-    run("/usr/sbin/spctl", ["--assess", "--type", "execute", "--verbose=2", app]);
-    const candidate = read(path.join(app, "Contents/Resources/candidate.json"));
-    verifyCandidate(candidate, manifest, platform);
-    return { app, candidate, manifest, artifact };
+    return mountVerified(dmg, name, manifest, artifact);
+  }
+  async function retained() {
+    const { verifySignedDirectory } = await import(pathToFileURL(path.join(repo, "installer-source/tools/relay-application/signed-mac.mjs")));
+    const directory = path.resolve(inputs.candidateDirectory);
+    const { receipt } = await verifySignedDirectory(directory);
+    const manifest = { version: inputs.version, sourceSha: inputs.sourceSha, channel: inputs.channel,
+      publicSourceSha: process.env.GITHUB_SHA, runtime: { version: inputs.runtimeVersion, sourceSha: inputs.runtimeSourceSha } };
+    assert.ok(["stable", "dev"].includes(manifest.channel));
+    assert.match(manifest.runtime.version || "", /^\d+\.\d+\.\d+$/);
+    assert.match(manifest.runtime.sourceSha || "", /^[a-f0-9]{40}$/);
+    verifyCandidate(receipt, manifest, platform);
+    proof.receiptSha256 = createHash("sha256").update(fs.readFileSync(path.join(directory, "signing-receipt.json"))).digest("hex");
+    const artifact = receipt.artifacts.find(item => (item.artifact || item.filename).endsWith(".dmg"));
+    proof.candidateOrigin = "retained-signed-candidate";
+    return mountVerified(path.join(directory, artifact.artifact || artifact.filename), "candidate", manifest, artifact);
   }
   try {
-    const target = await download(inputs.version, inputs.sourceSha, "candidate");
+    const target = inputs.candidateDirectory ? await retained() : await download(inputs.version, inputs.sourceSha, "candidate");
     proof.artifact = target.artifact; proof.runtime = target.manifest.runtime;
-    record("signed-manifest-and-exact-dmg"); record("codesign-staple-and-gatekeeper-assessment");
-    if (inputs.mode === "leftover") {
-      const baseline = await download(inputs.baseline, null, "baseline");
+    record(inputs.candidateDirectory ? "exact-retained-receipt-and-dmg" : "signed-manifest-and-exact-dmg"); record("codesign-staple-and-gatekeeper-assessment");
+    if (inputs.mode !== "fresh") {
+      const baseline = inputs.mode === "same-version" ? target : await download(inputs.baseline, null, "baseline");
       run("/usr/bin/ditto", [baseline.app, destination]);
       run("/usr/bin/codesign", ["--verify", "--deep", "--strict", destination]);
       fs.mkdirSync(relayRoot, { recursive: true });
@@ -170,7 +190,7 @@ export async function main(inputs) {
         schema: 1, state: "rolled-back", previous: null, failure: "CI fixture: prior first setup failed", at: Date.now(),
       }));
       proof.baselineArtifact = baseline.artifact;
-      proof.leftoverState = "Stock signed old app plus rolled-back journal; no runtime or recovery Node";
+      proof.leftoverState = "Stock signed app plus rolled-back journal; no runtime or recovery Node";
       record("leftover-failed-install-fixture");
     }
     // Keep GitHub's development tools out of the application's search path,
@@ -268,7 +288,10 @@ export async function main(inputs) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main({ version: process.env.INSTALLER_VERSION, sourceSha: process.env.INSTALLER_SOURCE_SHA,
-    baseline: process.env.BASELINE_VERSION, mode: process.env.INSTALLER_MODE })
+    baseline: process.env.BASELINE_VERSION, mode: process.env.INSTALLER_MODE,
+    ...(process.env.CANDIDATE_DIRECTORY ? { candidateDirectory: process.env.CANDIDATE_DIRECTORY,
+      channel: process.env.INSTALLER_CHANNEL, runtimeVersion: process.env.RUNTIME_VERSION,
+      runtimeSourceSha: process.env.RUNTIME_SOURCE_SHA } : {}) })
     .then(proof => console.log(JSON.stringify(proof)))
     .catch(error => { console.error(error.stack); process.exitCode = 1; });
 }

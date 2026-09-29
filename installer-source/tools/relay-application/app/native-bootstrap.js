@@ -1,0 +1,13 @@
+// Transitional install status uses the same card, fonts and controls as Relay.
+const body=document.querySelector('main');
+let busy=false;
+function appearance(value){document.documentElement.dataset.theme=value;try{localStorage.setItem('relay-native-appearance',value)}catch{}}
+let theme='dark';try{theme=localStorage.getItem('relay-native-appearance')||theme}catch{}appearance(theme);
+document.querySelector('#themeToggle').onclick=()=>appearance(document.documentElement.dataset.theme==='dark'?'light':'dark');
+document.querySelector('#closeX').onclick=()=>window.close();
+body.innerHTML='<p class="su-step">Install Relay</p><h1 class="su-title">Preparing Relay.</h1><p class="su-copy" id="prepareStatus" role="status">Checking the installation…</p><progress id="prepareProgress" aria-label="Installation progress" style="width:100%;margin-top:24px;accent-color:var(--accent)"></progress><div class="install-actions"><p class="notice" hidden></p><button class="su-primary" id="prepareAction" hidden>Try again</button></div>';
+const status=document.querySelector('#prepareStatus'),bar=document.querySelector('#prepareProgress'),action=document.querySelector('#prepareAction');
+window.migration.onProgress(p=>{const labels={verifying:'Checking the installation…',downloading:'Downloading Relay’s files…',extracting:'Unpacking Relay…',installing:'Finishing installation…',ready:'Opening Relay…',stopped:'Installation stopped.'};status.textContent=labels[p.phase]||'Preparing Relay…';if(p.totalBytes>0){bar.max=p.totalBytes;bar.value=p.receivedBytes}else bar.removeAttribute('value')});
+async function open(){const result=await window.migration.handoff();if(!result?.opened){status.textContent='Relay is installed. Open it to continue.';bar.hidden=true;action.hidden=false;action.textContent='Open Relay';action.onclick=()=>window.migration.open()}}
+async function install(){if(busy)return;busy=true;action.hidden=true;document.querySelector('.notice').hidden=true;try{await window.migration.install();await open()}catch(error){status.textContent='Installation needs attention.';bar.hidden=true;const note=document.querySelector('.notice');note.textContent=error.message;note.hidden=false;action.textContent='Try again';action.hidden=false;action.onclick=install}finally{busy=false}}
+window.migration.inspect().then(info=>{if(info.plan.route==='fresh-install')return install();if(info.installation.pointer==='active'&&info.installation.applicationOwner!=='absent')return open();status.textContent='Relay is already on this computer. Your account and messages will be kept.';bar.hidden=true;action.textContent='Set up Relay';action.hidden=false;action.onclick=install}).catch(error=>{status.textContent=error.message;bar.hidden=true});

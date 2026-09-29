@@ -1,0 +1,64 @@
+{
+  "name": "relay-companion",
+  "version": "0.1.291",
+  "description": "Install Relay for Claude Code, Cowork, and Codex, then sign in from the Relay pill.",
+  "homepage": "https://sendrelays.com/get-started",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/davidkariuki123/relay-companion.git"
+  },
+  "bugs": {
+    "url": "https://github.com/davidkariuki123/relay-companion/issues"
+  },
+  "author": "Relay <hello@sendrelays.com>",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "keywords": [
+    "relay",
+    "mcp",
+    "claude-code",
+    "codex",
+    "agent-messaging"
+  ],
+  "type": "module",
+  "bin": {
+    "relay": "bootstrap/relay-setup.cjs"
+  },
+  "main": "bootstrap/relay-setup.cjs",
+  "scripts": {
+    "generate:chat-presentation": "node scripts/build-chat-presentation.mjs",
+    "check:chat-presentation": "node scripts/build-chat-presentation.mjs --check",
+    "mcp": "node src/mcp.js",
+    "daemon": "node src/task-daemon.js",
+    "lint": "eslint src bootstrap bin",
+    "typecheck": "npm run lint",
+    "test": "npm run lint && npm run check:chat-presentation && node --test test/*.test.mjs",
+    "test:browser": "node test/blocked-people-page.browser.mjs && node test/chat-finder.browser.mjs && node test/contact-creation.browser.mjs && node test/first-relay-chapter.browser.mjs && node test/long-paste-suggestion.browser.mjs && node test/network-onboarding.browser.mjs && node test/received-layout.browser.mjs && node test/received-task-groups.browser.mjs && node test/relay-anyone-tip.browser.mjs && node test/request-inbox.browser.mjs && node test/topic-incoming-posts.browser.mjs && node test/topic-threads.browser.mjs && node test/visible-text-read.browser.mjs && node test/read-receipts.e2e.mjs && node test/reader-composer-focus.e2e.mjs",
+    "test:e2e": "node test/e2e-overlay.mjs && node test/preview-windows-e2e.mjs && node test/card-resize-transition.e2e.mjs && node test/room-transition.e2e.mjs && node test/group-leave-flow.e2e.mjs && node test/people-row-opens-chat.e2e.mjs && node test/relay-anyone-tip.e2e.mjs && node test/codex-parity-preview-redteam.e2e.mjs && electron test/attachment-html-viewer.e2e.cjs && electron test/reader-attachments.e2e.cjs && electron test/session-picker-close.e2e.cjs && electron test/preview-face-probe.mjs",
+    "test:probes": "node test/agent-kicker-probe.mjs && node test/composer-focus-probe.mjs && node test/offline-send-probe.mjs && node test/open-note-probe.mjs && node test/reaction-names-probe.mjs"
+  },
+  "devDependencies": {
+    "@agentclientprotocol/claude-agent-acp": "0.77.0",
+    "@agentclientprotocol/codex-acp": "1.11.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "dompurify": "3.4.13",
+    "electron": "43.4.1",
+    "esbuild": "0.28.1",
+    "eslint": "^10.10.0",
+    "globals": "^17.12.0",
+    "markdown-it": "14.3.0",
+    "undici": "^7.29.0",
+    "ws": "^8.21.0"
+  },
+  "files": [
+    "bootstrap",
+    "skill"
+  ],
+  "dependencies": {}
+}

@@ -1,0 +1,39 @@
+/* Layout additions only. installed.css is an exact copy of the installed UI's
+   style blocks. Do not redeclare its tokens, fonts, lockup, or onboarding buttons. */
+.sheet{position:absolute;inset:0;height:100%;width:100%;background:var(--bg);border-radius:var(--r-card);overflow:hidden;box-shadow:var(--shadow-card);display:flex;flex-direction:column;transition:border-radius var(--t-slow) var(--settle)}
+.sheet .lockup{-webkit-app-region:drag;cursor:default}.lockup button{-webkit-app-region:no-drag}.lockup .close-x{margin-left:8px}.lockup .minimize-btn,.lockup .count{display:none}
+main{padding:35px 28px 26px;display:flex;flex:1;flex-direction:column;min-height:0;opacity:1;transition:opacity .16s var(--settle),transform .42s var(--soft)}
+.su-title.install-title{font-size:38px;line-height:1.04;letter-spacing:-.025em;max-width:300px;margin-top:10px}
+.su-copy{max-width:300px}.scene{height:196px;position:relative;margin-top:13px;flex:none;user-select:none;touch-action:none}
+.scene svg.thread{position:absolute;inset:0;width:100%;height:100%;overflow:visible}.thread path{fill:none;stroke:var(--edge);stroke-width:1;transition:stroke .2s}.scene.targeted .thread path{stroke:var(--accent)}
+.app-object{position:absolute;left:20px;top:52px;width:76px;height:76px;cursor:grab;touch-action:none;z-index:3;outline:none;border:0;padding:0;background:none}
+.app-object img{width:100%;height:100%;pointer-events:none;filter:drop-shadow(0 5px 9px rgba(0,0,0,.10));transition:filter .2s}
+.app-object::after{content:"";position:absolute;inset:0;border:1px solid var(--edge);border-radius:17px;pointer-events:none}
+.app-object:active{cursor:grabbing}.app-object:focus-visible{outline:2px solid var(--accent);outline-offset:6px;border-radius:16px}
+.destination{position:absolute;right:15px;top:47px;width:88px;height:88px;display:grid;place-items:center;border:1px solid transparent;border-radius:var(--r-card);transition:background .2s var(--settle),border-color .2s,transform .42s var(--soft)}
+.destination svg{width:65px;height:65px;fill:var(--wash-2);stroke:var(--muted-2);stroke-width:1.25;transition:stroke .2s,fill .2s,transform .42s var(--soft)}
+.targeted .destination{background:var(--accent-soft);border-color:var(--edge-accent);transform:scale(1.04)}.targeted .destination svg{stroke:var(--accent);fill:var(--accent-soft)}
+.object-label{position:absolute;top:143px;font-size:11px;color:var(--muted);width:110px;text-align:center}.object-label.source-label{left:3px}.object-label.target-label{right:4px}
+#ghost{pointer-events:none;opacity:0;z-index:4}.scene.demonstrating #source{opacity:1}.scene.demonstrating #ghost{animation:teachMove 3.4s var(--settle) both}
+@keyframes teachMove{0%,12%{opacity:0;transform:translate(0,0)}20%{opacity:.8;transform:translate(0,-6px) rotate(-3deg)}65%{opacity:.8;transform:translate(var(--travel,207px),-6px) rotate(2deg)}78%{opacity:.6;transform:translate(var(--travel,207px),0) scale(.76)}90%,100%{opacity:0;transform:translate(var(--travel,207px),0) scale(.76)}}
+.install-actions{margin-top:auto;display:grid;gap:10px}.install-actions .su-primary{width:100%}.quiet-row{display:flex;align-items:center;justify-content:center;gap:8px;color:var(--muted);font-size:11px;min-height:20px}.quiet-action{border:0;background:none;color:var(--muted);font:inherit;cursor:pointer;padding:3px;text-decoration:underline;text-decoration-color:var(--edge);text-underline-offset:3px}
+#hint{font-size:12px;color:var(--muted);text-align:center;min-height:19px;margin:0 0 12px}.notice{font-size:12px;color:var(--danger);line-height:1.5;margin:0 0 10px}.folded{border-radius:var(--r-fold)}.folded main{opacity:0;transform:translateY(-6px);pointer-events:none}
+.prompt-body{padding-top:39px}.prompt-body .su-title{font-size:38px;line-height:1.04;letter-spacing:-.025em}.host-claude{color:var(--brand-anthropic)}.host-codex{color:var(--brand-codex)}
+.prompt-note{margin-top:22px;padding:14px 0;border-top:1px solid var(--hair);border-bottom:1px solid var(--hair);font-size:13px;line-height:1.6;color:var(--ink)}.local-file{margin-top:10px;font-family:var(--mono);font-size:10px;color:var(--muted)}.prompt-body .install-actions{margin-top:26px}.waiting{font-size:11px;line-height:1.6;color:var(--muted);margin-top:13px;display:flex;align-items:baseline;gap:7px}.waiting i{width:5px;height:5px;border-radius:50%;background:var(--muted-3);flex:none}
+iframe{border:0;position:absolute;inset:0;width:100%;height:100%;background:transparent}.review{padding:22px 18px}.review h1{font:400 24px var(--serif);margin:0 0 7px}.review p{font-size:11px;line-height:1.6;color:var(--muted);margin:0 0 20px}.review label{display:block;font-size:10px;letter-spacing:.1em;color:var(--muted);text-transform:uppercase;margin:17px 0 8px}.review .choices{display:grid;gap:6px}.review button{font:500 12px var(--sans);color:var(--ink);background:var(--wash);border:1px solid var(--hair);border-radius:var(--r-1);padding:9px 10px;text-align:left;cursor:pointer}.review button.active{border-color:var(--edge-accent);background:var(--accent-soft);color:var(--accent)}.review .inline{display:flex;gap:5px}.review .inline button{flex:1;padding:8px 6px;text-align:center}.review select{font:12px var(--sans);color:var(--ink);background:var(--wash);border:1px solid var(--edge);border-radius:6px;width:100%;padding:7px}.review .foot{margin-top:20px;font-size:10px;color:var(--muted-2);line-height:1.5}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
+/* Reserve bottom breathing room even when the vertical stack is tight. */
+main:not(.prompt-body){padding-bottom:28px}
+main:not(.prompt-body) .install-actions{flex-shrink:0;margin-bottom:0}
+
+/* All expanded chapters match installed Relay’s 344 × 524 point card. */
+main,main.prompt-body{padding:22px 22px 24px}
+.su-title.install-title,.prompt-body .su-title{font-size:33px;max-width:300px}
+.scene{height:164px;margin-top:6px}
+.app-object{top:32px}.destination{top:27px}.object-label{top:123px}
+main:not(.prompt-body){padding-bottom:24px}
+main:not(.prompt-body) .install-actions{margin-bottom:0}
+#hint{font-size:11px;margin-bottom:12px}
+.prompt-note{margin-top:16px}
+.prompt-body .install-actions{margin-top:20px}
+main[hidden],.lockup[hidden]{display:none!important}

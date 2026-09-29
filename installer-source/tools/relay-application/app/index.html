@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:">
+<title>Relay</title><link rel="stylesheet" href="style.css"></head>
+<body data-state="checking"><main>
+<header>
+<p class="eyebrow" id="label">RELAY · INSTALLER PREVIEW</p>
+<h1 id="title">Welcome to Relay.</h1>
+<p id="intro">Checking this computer…</p>
+</header>
+
+<p id="setup-result" role="status" hidden></p>
+
+<section id="setup" hidden aria-label="Set up Relay">
+<p id="setup-copy">Relay runs in the background, keeps itself updated, and adds its MCP connection and managed skill to supported agents. You’ll sign in with Google or email. Existing Relay account data is preserved.</p>
+<div class="actions"><button id="install">Set up Relay</button></div>
+<p id="download-detail" class="muted"></p>
+</section>
+
+<section id="download-progress" class="card" hidden aria-label="Setup progress">
+<div class="progress-row"><strong id="progress-label" role="status">Preparing your files…</strong><span id="progress-size"></span></div>
+<progress id="progress-bar" max="100" aria-label="Relay download"></progress>
+<button id="cancel-download" class="secondary small" hidden>Cancel</button>
+</section>
+
+<!-- The Companion's own "Five ways to use Relay" card (five-ways.js is the
+     pill's relay-anyone-tip module, copied in at build time), expanded and
+     turning over on its own while Relay downloads. -->
+<section id="discover" hidden aria-label="Five ways to use Relay"><div id="relayAnyoneTip"></div></section>
+
+<!-- Relay normally opens in this window's place the moment it is ready. These
+     steps appear only when that hand-off could not be confirmed, or when this
+     computer was already set up. -->
+<section id="done" hidden aria-label="Next steps">
+<div id="agent-results" class="muted" hidden><p id="claude-status"></p><p id="codex-status"></p><p id="restart-status"></p></div>
+<ol class="next">
+<li id="next-open"><div><strong>Open Relay</strong><span>Sign in with Google or email when it asks.</span></div><button id="open">Open Relay</button></li>
+<li id="next-agent"><div><strong>Ask your agent for the tutorial</strong><span>Paste this into Claude Code or Codex: “Give me the Relay tutorial.”</span></div><div class="copy"><button id="tutorial" class="secondary">Copy tutorial prompt</button><span id="copied" role="status"></span></div></li>
+</ol>
+</section>
+
+<details id="trouble" hidden><summary>Trouble with setup?</summary>
+<p>If setup stopped partway through, check its recovery status before trying again. <button id="reconcile" class="secondary small">Check interrupted setup</button></p>
+<p>To run setup again on an existing installation, use the button below. <button id="install-again" class="secondary small">Run setup again</button></p>
+<p>To remove Relay’s agent connections and background services before deleting the application, use the button below. Your account data is kept. <button id="uninstall" class="secondary small">Remove integrations…</button></p>
+</details>
+</main>
+<script src="five-ways.js"></script><script src="renderer.js"></script></body></html>

@@ -1,0 +1,172 @@
+"use strict";
+
+const crypto = require("node:crypto");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
+const { isElectronExecutable, nodeEnvironment } = require("./node-contract.cjs");
+
+function nodeVersionSupported(version) {
+  const match = /^(\d+)\.(\d+)\.(\d+)/.exec(String(version || "").trim());
+  if (!match) return false;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  return major > 22 || (major === 22 && minor >= 12);
+}
+
+function commandOutput(result) {
+  return String(result?.stdout ?? result?.out ?? "").trim();
+}
+
+function verifiedNodeVersion(executable, { runCommand = spawnSync, timeout = 5_000 } = {}) {
+  if (isElectronExecutable(executable)) return { ok: false, version: "", detail: "Electron is not a service Node runtime" };
+  try {
+    const result = runCommand(executable, ["-p", "process.versions.electron ? '' : process.versions.node"], {
+      encoding: "utf8",
+      timeout,
+      windowsHide: true,
+      env: nodeEnvironment(),
+    });
+    const ok = result?.ok === true || (!result?.error && result?.status === 0);
+    const version = commandOutput(result);
+    return ok && nodeVersionSupported(version)
+      ? { ok: true, version }
+      : { ok: false, version, detail: result?.error?.message || result?.stderr || result?.out || "Node did not start" };
+  } catch (error) {
+    return { ok: false, version: "", detail: error?.message || String(error) };
+  }
+}
+
+function lexicalTemporaryNodePath(value, platform) {
+  if (platform === "win32" || !value) return false;
+  const normalized = path.posix.resolve(String(value).replaceAll("\\", "/"));
+  return normalized.startsWith("/tmp/") || normalized.startsWith("/private/tmp/");
+}
+
+function isTemporaryNodePath(executable, {
+  platform = process.platform,
+  realpathSync = fs.realpathSync,
+} = {}) {
+  if (lexicalTemporaryNodePath(executable, platform)) return true;
+  try {
+    return lexicalTemporaryNodePath(realpathSync(executable), platform);
+  } catch {
+    return false;
+  }
+}
+
+function fileDigest(file, fsImpl) {
+  return crypto.createHash("sha256").update(fsImpl.readFileSync(file)).digest("hex");
+}
+
+/**
+ * Preserve a temporary Node executable inside Relay's canonical runtime.
+ * Content addressing makes reuse safe, while an execution check after copying
+ * catches incomplete binaries and runtimes that depend on files beside them.
+ */
+function relayOwnedNodePath(executable, {
+  platform = process.platform,
+  runtimeRoot = path.join(os.homedir(), ".relay", "runtime"),
+  fsImpl = fs,
+  runCommand = spawnSync,
+  realpathSync = fs.realpathSync,
+  isTemporary = isTemporaryNodePath,
+  randomBytes = crypto.randomBytes,
+} = {}) {
+  if (isElectronExecutable(executable, { realpath: realpathSync })) throw new Error("Electron is not a service Node runtime");
+  if (!executable || !isTemporary(executable, { platform, realpathSync })) return executable;
+
+  let source;
+  try {
+    source = realpathSync(executable);
+  } catch (error) {
+    throw new Error(`Relay could not resolve its temporary Node runtime (${error?.message || error}).`);
+  }
+  const sourceRuntime = verifiedNodeVersion(source, { runCommand });
+  if (!sourceRuntime.ok) {
+    throw new Error(`Relay refused an invalid temporary Node runtime (${sourceRuntime.detail || sourceRuntime.version || source}).`);
+  }
+
+  // Owned generations are immutable and self-contained. Re-preserving one made
+  // a copy of the copy on every repair (the macOS bundle identity includes the
+  // source path), leaving 3.2 GB of Node under ~/.relay/recovery by 2026-09-23.
+  const api = platform === "win32" ? path.win32 : path.posix;
+  let ownedRoot = null;
+  try { ownedRoot = realpathSync(api.join(runtimeRoot, "node")); } catch {}
+  if (ownedRoot && source.startsWith(ownedRoot + api.sep)) return source;
+
+  let digest;
+  try {
+    digest = fileDigest(source, fsImpl);
+  } catch (error) {
+    throw new Error(`Relay could not read its temporary Node runtime (${error?.message || error}).`);
+  }
+  const directory = api.join(runtimeRoot, "node", digest);
+  const destination = api.join(directory, platform === "win32" ? "node.exe" : "node");
+
+  try {
+    if (fileDigest(destination, fsImpl) === digest) {
+      const existingRuntime = verifiedNodeVersion(destination, { runCommand });
+      if (existingRuntime.ok && existingRuntime.version === sourceRuntime.version) {
+        fsImpl.chmodSync(directory, 0o700);
+        fsImpl.chmodSync(destination, 0o700);
+        return destination;
+      }
+    }
+  } catch {}
+
+  try {
+    fsImpl.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    fsImpl.chmodSync(directory, 0o700);
+    const temporary = api.join(directory, `.node-${process.pid}-${randomBytes(6).toString("hex")}${platform === "win32" ? ".exe" : ""}`);
+    try {
+      fsImpl.writeFileSync(temporary, fsImpl.readFileSync(source), { mode: 0o700, flag: "wx" });
+      fsImpl.chmodSync(temporary, 0o700);
+      if (fileDigest(temporary, fsImpl) !== digest) throw new Error("the copied executable failed its integrity check");
+      // Sync before executing the copy. Linux can briefly reject a later r+
+      // open of an executable with ETXTBSY even after the version probe exits.
+      const fd = fsImpl.openSync(temporary, "r+");
+      try { fsImpl.fsyncSync(fd); } finally { fsImpl.closeSync(fd); }
+      const checked = verifiedNodeVersion(temporary, { runCommand });
+      if (!checked.ok && platform === "darwin") {
+        const { preserveMacOSNodeBundle } = require("./macos-node-bundle.cjs");
+        try {
+          const bundled = preserveMacOSNodeBundle(source, { runtimeRoot, fsImpl, runCommand,
+            // macOS may spend several seconds validating the newly signed
+            // dependency closure on its first launch; subsequent starts are fast.
+            version: sourceRuntime.version, verify: (candidate) => verifiedNodeVersion(candidate, { runCommand, timeout: 30_000 }) });
+          // The flat copy failed; do not leave its empty digest directory behind.
+          try { fsImpl.rmSync(temporary, { force: true }); fsImpl.rmdirSync(directory); } catch {}
+          return bundled;
+        } catch (error) {
+          throw new Error(`owned Node runtime failed verification before publication: ${checked.detail}; shared-library preservation failed: ${error.message}`);
+        }
+      }
+      if (!checked.ok || checked.version !== sourceRuntime.version) throw new Error(`owned Node runtime failed verification before publication: ${checked.detail || `expected ${sourceRuntime.version}, got ${checked.version}`}`);
+      // Keep the old path until replacement is complete. An interrupted repair
+      // must never erase the interpreter used by the independent watchdog.
+      fsImpl.renameSync(temporary, destination);
+    } finally {
+      try { fsImpl.rmSync(temporary, { force: true }); } catch {}
+    }
+    fsImpl.chmodSync(destination, 0o700);
+  } catch (error) {
+    throw new Error(`Relay could not install its owned Node runtime (${error?.message || error}).`);
+  }
+
+  const installedRuntime = verifiedNodeVersion(destination, { runCommand });
+  if (!installedRuntime.ok || installedRuntime.version !== sourceRuntime.version) {
+    // A transient execution failure is not permission to remove a scheduler's
+    // executable. Its bytes already passed validation before atomic publication.
+    throw new Error(`Relay's owned Node runtime failed verification (${installedRuntime.detail || installedRuntime.version || destination}).`);
+  }
+  return destination;
+}
+
+module.exports = {
+  isTemporaryNodePath,
+  nodeVersionSupported,
+  relayOwnedNodePath,
+  verifiedNodeVersion,
+};
