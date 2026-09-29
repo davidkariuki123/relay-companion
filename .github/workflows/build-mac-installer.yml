@@ -39,6 +39,9 @@ concurrency:
 jobs:
   authorize:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -57,6 +60,16 @@ jobs:
           [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ && "$RUNTIME_SHA" =~ ^[a-f0-9]{40}$ ]]
           for value in "$VERSION" "$RUNTIME_VERSION" "$BASELINE"; do [[ "$value" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; done
           test "$(jq -r .sourceSha installer-source/source.json)" = "$SOURCE_SHA"
+      - name: Require the configured main-only signing environment
+        if: inputs.sign
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/environments/mac-signing" > "$RUNNER_TEMP/environment.json"
+          jq -e '.deployment_branch_policy.protected_branches == false and .deployment_branch_policy.custom_branch_policies == true' "$RUNNER_TEMP/environment.json"
+          gh api "repos/$GITHUB_REPOSITORY/environments/mac-signing/deployment-branch-policies" > "$RUNNER_TEMP/branches.json"
+          jq -e '.total_count == 1 and .branch_policies[0].name == "main" and .branch_policies[0].type == "branch"' "$RUNNER_TEMP/branches.json"
   package:
     needs: authorize
     name: Package ${{ matrix.platform }}
