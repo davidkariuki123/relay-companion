@@ -53,3 +53,16 @@ test("embedded receipt must match both signed application and runtime identities
     assert.throws(() => verifyCandidate({ ...candidate, ...change }, manifest, "darwin-arm64"));
   }
 });
+
+test("retained Dev candidates require the exact public build identity as well as private source", () => {
+  const manifest = { version: "0.1.568", sourceSha: "a".repeat(40), publicSourceSha: "b".repeat(40), channel: "dev",
+    runtime: { version: "0.1.567", sourceSha: "c".repeat(40) } };
+  const candidate = { appId: "work.relay.application", distribution: "application", activationEnabled: true,
+    desktopOnboarding: true, platform: "darwin-x64", applicationVersion: manifest.version,
+    packagingSourceSha: manifest.sourceSha, packagingPublicSourceSha: manifest.publicSourceSha, packagingSourceDirty: false,
+    channel: "dev", version: manifest.runtime.version, runtimeSourceSha: manifest.runtime.sourceSha };
+  verifyCandidate(candidate, manifest, "darwin-x64");
+  for (const change of [{ packagingPublicSourceSha: undefined }, { packagingPublicSourceSha: "d".repeat(40) },
+    { channel: "stable" }, { channel: undefined }, { version: manifest.version }])
+    assert.throws(() => verifyCandidate({ ...candidate, ...change }, manifest, "darwin-x64"));
+});
