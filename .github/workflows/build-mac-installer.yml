@@ -108,6 +108,12 @@ jobs:
             ${{ runner.temp }}/candidate/packaging-receipt.json
           retention-days: 1
           if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: packaging-receipt-${{ matrix.platform }}
+          path: ${{ runner.temp }}/candidate/packaging-receipt.json
+          retention-days: 7
+          if-no-files-found: error
   sign:
     if: inputs.sign
     needs: package
@@ -255,3 +261,21 @@ jobs:
           set -euo pipefail
           tar -czf mac-proofs.tar.gz -C proofs .
           gh release create "mac-candidate-$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --latest=false --title "Tested Mac candidate $GITHUB_RUN_ID" --notes "Exact signed packs passed fresh, older leftover and same-version leftover installation on both Mac architectures. No channel moved." packs/*.tar.gz mac-proofs.tar.gz
+  cleanup:
+    needs: [authorize, package, sign, native, qualified]
+    if: always() && needs.authorize.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Remove large transfer artifacts after their consumers finish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" --jq '.artifacts[] | select(.name | test("^(unsigned|signed)-darwin-(arm64|x64)$")) | .id' > "$RUNNER_TEMP/transfer-artifacts.txt"
+          while read -r id; do
+            [[ "$id" =~ ^[0-9]+$ ]]
+            gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$id" --method DELETE
+          done < "$RUNNER_TEMP/transfer-artifacts.txt"
