@@ -105,6 +105,16 @@ async function installerPage(port) {
   } catch { return null; }
 }
 
+export async function clickInstallButton(client, button, onReleaseSent) {
+  await client.send("Input.dispatchMouseEvent", { type: "mousePressed", ...button, button: "left", clickCount: 1 });
+  const released = client.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...button, button: "left", clickCount: 1 });
+  // A successful move can kill the renderer before Chromium acknowledges the
+  // mouse-up. Remember the sent input before awaiting that acknowledgement;
+  // the installed app and runtime postconditions remain the success authority.
+  onReleaseSent();
+  await released;
+}
+
 export async function main(inputs) {
   validateInputs(inputs); assertDisposable();
   const platform = `darwin-${process.arch}`;
@@ -195,9 +205,9 @@ export async function main(inputs) {
           if (!clicked && state?.button && page.url.endsWith("native-install.html")) {
             record("stock-installer-ui-opened");
             // Ordinary renderer input; never call the privileged preload bridge.
-            await client.send("Input.dispatchMouseEvent", { type: "mousePressed", ...state.button, button: "left", clickCount: 1 });
-            await client.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...state.button, button: "left", clickCount: 1 });
-            clicked = true; phase = "relocate-and-activate"; record("install-button-clicked");
+            await clickInstallButton(client, state.button, () => {
+              clicked = true; phase = "relocate-and-activate"; record("install-button-input-sent");
+            });
           }
         } catch (error) {
           if (error.installerFailure) throw error;

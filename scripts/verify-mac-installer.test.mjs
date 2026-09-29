@@ -1,8 +1,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { validateInputs, assertDisposable, verifyCandidate } from "./verify-mac-installer.mjs";
+import { validateInputs, assertDisposable, verifyCandidate, clickInstallButton } from "./verify-mac-installer.mjs";
 
 const input = { version: "0.1.567", sourceSha: "a".repeat(40), baseline: "0.1.565", mode: "leftover" };
+test("successful relocation may close the renderer before mouse-up is acknowledged", async () => {
+  const release = Promise.withResolvers(), calls = [];
+  let sent = false;
+  const click = clickInstallButton({ send: async (_method, params) => {
+    calls.push(params.type);
+    if (params.type === "mouseReleased") return release.promise;
+  } }, { x: 20, y: 40 }, () => { sent = true; });
+  await Promise.resolve();
+  assert.deepEqual(calls, ["mousePressed", "mouseReleased"]);
+  assert.equal(sent, true, "native postconditions must still be checked after the renderer exits");
+  release.reject(Error("CDP disconnected during app relaunch"));
+  await assert.rejects(click, /disconnected/);
+  let pressed = false;
+  await assert.rejects(clickInstallButton({ send: async () => { throw Error("not connected"); } },
+    { x: 20, y: 40 }, () => { pressed = true; }));
+  assert.equal(pressed, false);
+});
 test("installer proof requires exact identity and never prepares a newer baseline", () => {
   validateInputs(input);
   validateInputs({ ...input, baseline: "0.1.567" });
