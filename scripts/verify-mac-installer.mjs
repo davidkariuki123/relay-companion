@@ -175,7 +175,7 @@ export async function main(inputs) {
     const port = 19347;
     phase = "open-installer-ui";
     run("/usr/bin/open", ["-n", "-a", target.app, "--args", `--remote-debugging-port=${port}`], { env: appEnv });
-    const deadline = Date.now() + 8 * 60_000;
+    const openedAt = Date.now(), deadline = openedAt + 8 * 60_000;
     let clicked = false, firstHeartbeat;
     while (Date.now() < deadline) {
       const page = await installerPage(port);
@@ -228,6 +228,8 @@ export async function main(inputs) {
               proof.health = health;
               proof.bundledNodeSha256 = createHash("sha256").update(fs.readFileSync(path.join(destination, "Contents/Resources/node"))).digest("hex");
               assert.equal(proof.bundledNodeSha256, target.candidate.nodeSha256);
+              assert.equal(createHash("sha256").update(fs.readFileSync(current.node)).digest("hex"), proof.bundledNodeSha256,
+                "The active runtime must use the installer-owned Node bytes");
               record("relocated-stock-signed-app"); record("exact-active-runtime-and-complete-journal");
               record("native-ownership-and-live-services"); record("advancing-daemon-heartbeat");
               proof.ok = true; return proof;
@@ -235,6 +237,7 @@ export async function main(inputs) {
           }
         }
       }
+      if (!clicked && Date.now() - openedAt > 90_000) throw Error(`Installer UI could not be driven: ${lastText || proof.lastObserverError || "No renderer available"}`);
       await sleep(1500);
     }
     throw Error(`Timed out at ${phase}. Last UI: ${lastText || "No installer renderer available"}`);
@@ -242,6 +245,7 @@ export async function main(inputs) {
     proof.failure = { phase, message: error.message };
     throw error;
   } finally {
+    spawnSync("/usr/sbin/screencapture", ["-x", path.join(evidence, "desktop.png")], { timeout: 10_000 });
     fs.writeFileSync(path.join(evidence, "proof.json"), JSON.stringify(proof, null, 2));
     // Only named diagnostic files from this disposable, never-signed-in user.
     for (const [source, name] of [
