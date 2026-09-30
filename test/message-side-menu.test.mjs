@@ -14,6 +14,7 @@ assert.ok(start >= 0 && end > start && pickerStart >= 0 && pickerEnd > pickerSta
 // permission gates, and the real edit/delete rules (WhatsApp's windows).
 const render = new Function('m', 'mine', 'payload', 'groupPostingBlocked', 'messageDeleteConfirmIds',
   `const textLike=true, attachmentOnly=false, editingMessage=false, esc=s=>String(s);
+   const roomReplyThreads=null, focusedReplyRoot=null;
    const REACTIONS_ENABLED=true, RX_PRIMARY=['👍'];
    ${html.slice(rulesStart, rulesEnd)}
    ${html.slice(pickerStart, pickerEnd)}

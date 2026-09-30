@@ -76,7 +76,7 @@ test("the pull sentence has one builder shared by the reader block and the banne
   assert.match(inbox, /function pullSentenceFor\(message, row = null\)/);
   const html = between(inbox, "function pullSentenceHtml(message", "function wireHostOpen(scope)");
   assert.match(html, /const sentence = pullSentenceFor\(message, row\);/);
-  assert.match(html, /Pull \$\{whose\} relay/.source ? /Copy this prompt for your agent/ : /x/);
+  assert.match(html, />Copy for your agent<\/button>/);
   assert.match(between(inbox, "function pullSentenceFor(", "function pullSentenceHtml("), /return `Pull \$\{whose\} relay “\$\{subject\}” from Relay and tell me what’s happening\.`;/);
 });
 
@@ -96,9 +96,10 @@ test("the room's composer sits under the row from the start, and only while peek
   assert.match(row, /\$\{peeking \? bannerVerbsHtml\(row\) : ""\}\n\s+\$\{peeking \? bannerComposerHtml\(identity, row\) : ""\}/);
   const composer = between(inbox, "function bannerComposerHtml(identity, row)", "function bannerReplyRecipient(identity, row)");
   assert.match(composer, /if \(!peeking \|\| !identity \|\| identity\.requestRoom \|\| identity\.provider === "slack"\) return "";/);
-  // The room composer's own box: .qr.th-qr.col, the rich field, the rail, the Relay verb. No new species.
+  // The room composer's own box: .qr.th-qr.col, the rich field, the rail, the
+  // Send verb (a typed message is a text; "Relay" is the AI-written kind). No new species.
   assert.match(composer, /<div class="qr th-qr col qr-banner" data-stop="1"><div class="th-rich-composer" contenteditable="true" role="textbox" aria-multiline="true"/);
-  assert.match(composer, /<div class="ta-rail"><span class="rt-spacer"><\/span><button type="button" class="qr-banner-send" data-stop="1">Relay<\/button><\/div><\/div>/);
+  assert.match(composer, /<div class="ta-rail"><span class="rt-spacer"><\/span><button type="button" class="qr-banner-send" data-stop="1">Send<\/button><\/div><\/div>/);
   // The placeholder names where the words go: the channel, or the person's first name.
   assert.match(composer, /\? `Reply in \$\{identity\.name\}…`\n\s+: `Reply to \$\{String\(identity\.name \|\| row\.party \|\| "them"\)\.split\(" "\)\[0\]\}…`/);
   // Its only styling is a home inside the row; the box itself is the room's.

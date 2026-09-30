@@ -28,5 +28,5 @@ test("a Task has no Start dock: its verbs are a Relay's Open rows and the reply 
   assert.equal(reader.includes("requestActionable"), false);
   assert.equal(reader.includes("requestDockHtml"), false);
   assert.match(reader, /const documentHostActions = onHuman \? `<div class="rd-host-actions"/);
-  assert.match(reader, /<textarea id="qrInput" rows="1" placeholder="Reply…">/);
+  assert.match(reader, /<textarea id="qrInput" rows="1" placeholder="\$\{replyThread \? "Reply in thread…" : "Reply…"\}">/);
 });

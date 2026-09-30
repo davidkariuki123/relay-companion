@@ -1495,6 +1495,28 @@
     border-bottom:1px solid var(--hair); color:var(--muted); font:11px/1.4 var(--sans); }
   .th-thread-focus img { width:13px; height:13px; object-fit:contain; }
   .th-thread-focus strong { color:var(--ink); font-weight:600; }
+  /* Reply threads: the line under a message that has one. On a Relay it is
+     the card's last strip; under a text it sits beside the bubble's edge. */
+  .th-rt-link { appearance:none; display:flex; align-items:center; gap:7px; width:fit-content; max-width:88%; margin:5px 16px 2px 20px;
+    padding:3px 0; border:0; background:transparent; color:var(--accent); font:600 11.5px/1.35 var(--sans); cursor:pointer; text-align:left; }
+  .th-rt-link.mine { margin-left:auto; margin-right:20px; }
+  .th-rt-link:hover .th-rt-count { text-decoration:underline; text-underline-offset:2px; }
+  .th-rt-link:focus-visible { outline:none; box-shadow:var(--focus-ring); border-radius:6px; }
+  .th-rt-link.strip { flex:1 0 calc(100% + 26px); width:calc(100% + 26px); max-width:none; margin:8px -13px -8px; padding:8px 13px;
+    border-top:1px solid var(--hair); border-radius:0 0 14px 14px; }
+  .th-rt-link.strip:hover { background:var(--wash-2); }
+  .th-rt-faces { display:inline-flex; flex:none; }
+  .th-rt-face { width:18px; height:18px; margin-left:-5px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center;
+    font:600 8.5px/1 var(--sans); background:color-mix(in srgb, currentColor 18%, var(--bg)); box-shadow:0 0 0 1.5px var(--bg); }
+  .th-rt-face:first-child { margin-left:0; }
+  .th-rt-last { color:var(--muted-2); font-weight:400; white-space:nowrap; }
+  .th-rt-new { margin-left:auto; padding:1px 7px; border-radius:999px; background:var(--accent); color:var(--on-accent); font-size:10px; font-weight:600; white-space:nowrap; }
+  .th-rt-link:not(.strip) .th-rt-new { margin-left:2px; }
+  .th-rt-chev { color:var(--muted-2); font-size:13px; line-height:1; }
+  .th-rt-link:not(.strip) .th-rt-chev { display:none; }
+  .th-rt-divider { display:flex; align-items:center; gap:10px; margin:16px 16px 4px; color:var(--muted-2);
+    font:500 10px/1 var(--mono); letter-spacing:.1em; text-transform:uppercase; }
+  .th-rt-divider::after { content:""; flex:1; height:1px; background:var(--hair); }
   .th-msg.deleted .th-msg-title { color:var(--muted-2); font-style:italic; }
   /* Inbox order ends the pane with a message and that last bubble wants air.
      Chat order ends with the composer dock, which brings its own padding.
@@ -1667,6 +1689,38 @@
   .rd-details.open .rd-details-chev { transform:rotate(90deg); }
   .rd-details-body { padding:2px 14px 0; border-top:1px solid var(--hair); }
   @media (prefers-reduced-motion:reduce) { .rd-details-chev { transition:none; } }
+  /* Reply threads in the reader: the Relay's typed replies, under Details and
+     above the Open in bar. A reply may quote another reply; threads never nest. */
+  .rd-replies { max-width:34em; margin:24px auto 0; text-align:left; font-family:var(--sans); }
+  .rd-replies-head { display:flex; align-items:baseline; gap:8px; padding-bottom:4px; }
+  .rd-replies-title { font-size:12px; font-weight:650; color:var(--ink); }
+  .rd-replies-count { font:400 10.5px var(--mono); color:var(--muted-2); }
+  .rd-replies-more { appearance:none; display:block; margin:6px 0 2px; padding:4px 0; border:0; background:transparent;
+    color:var(--accent); font:600 11.5px/1.35 var(--sans); cursor:pointer; }
+  .rd-replies-new { display:flex; align-items:center; gap:10px; margin:6px 0; color:var(--accent);
+    font:500 10px/1 var(--mono); letter-spacing:.1em; text-transform:uppercase; }
+  .rd-replies-new::before, .rd-replies-new::after { content:""; flex:1; height:1px; background:color-mix(in srgb, var(--accent) 35%, transparent); }
+  .rd-reply { position:relative; display:flex; gap:10px; padding:9px 0; }
+  .rd-reply.pending { opacity:.72; }
+  .rd-reply-face { flex:none; width:24px; height:24px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center;
+    font:600 10.5px/1 var(--sans); background:color-mix(in srgb, currentColor 18%, var(--bg)); }
+  .rd-reply-main { flex:1; min-width:0; }
+  .rd-reply-head { display:flex; align-items:baseline; gap:8px; font-size:12px; font-weight:600; }
+  .rd-reply-time { font:400 10.5px var(--mono); color:var(--muted-2); font-variant-numeric:tabular-nums; }
+  .rd-reply-quote-btn { appearance:none; margin-left:auto; padding:2px 4px; border:0; background:transparent; color:var(--muted-3);
+    font:400 9.5px var(--mono); letter-spacing:.04em; cursor:pointer; opacity:0; transition:opacity var(--t-fast) var(--settle); }
+  .rd-reply:hover .rd-reply-quote-btn, .rd-reply-quote-btn:focus-visible { opacity:1; }
+  .rd-reply-quote-btn:hover { color:var(--ink); }
+  .rd-reply-quote { width:fit-content; max-width:100%; margin-top:5px; padding:4px 9px; border-left:2px solid var(--accent); border-radius:6px;
+    background:var(--wash); display:flex; flex-direction:column; font-size:11px; line-height:1.4; }
+  .rd-reply-quote .who { color:var(--accent); font-weight:600; }
+  .rd-reply-quote .copy { color:var(--muted-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .rd-reply-text { margin-top:3px; font-size:13.5px; line-height:1.45; color:var(--ink); overflow-wrap:anywhere; white-space:pre-wrap; }
+  .rd-reply-text .deleted { color:var(--muted-2); font-style:italic; }
+  .rd-reply-text a { color:var(--accent); text-decoration:none; border-bottom:1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+  .rd-reply-files { margin-top:3px; font-size:11px; color:var(--muted-2); }
+  .rd-quote-slot:empty { display:none; }
+  .rd-quote-slot .th-reply-target { margin:0 0 8px; border:0; border-left:2px solid var(--accent); border-radius:6px; }
   .rd-agentcopy p { font-family:var(--sans); font-size:13px; line-height:1.7; color:var(--ink); margin:14px 0 0; overflow-wrap:anywhere; }
   @keyframes rdPaneIn { from { opacity:0; transform:translateY(5px); } }
   .rd-col.swap { animation:rdPaneIn .35s var(--settle); }
@@ -1763,18 +1817,45 @@
   .rd-host-actions { margin:18px auto 0; width:min(100%, 560px); }
   .rd-host-actions .th-host-actions { flex:none; width:100%; margin:0; }
   .rd-host-actions .th-host-actions-inner { border:1px solid var(--hair); border-radius:14px; }
-  /* The reader's sheet: one line of chips — "Open in" once, then each app as
-     a rectangular chip with its mark and its name; the chat apps first, the
-     agents on this Mac after. A chip is there only while its switch is on;
-     the row centres whatever is left. Chips, not tiles, so the letter keeps
-     the screen: the sheet is 40px tall, not 120 (David, 2026-09-17). */
-  .th-host-sheet { display:flex; flex-wrap:wrap; justify-content:center; align-items:center; gap:6px; padding:8px 10px; }
+  /* The reader's sheet, one bar (Shane, approved by David, 2026-09-30):
+     "Open in" on the left, the app chips, an "or" divider, and Copy for your
+     agent on the right. The sentence Copy copies is its tooltip rather than a
+     paragraph under the chips. With chat apps and agents both on, the chips
+     are two rows: the chat apps above, the agents on this Mac below, Claude
+     Code under Claude and Codex under ChatGPT; hostSheetCells places each. A
+     chip is there only while its switch is on. */
+  .th-host-sheet { display:flex; flex-wrap:wrap; align-items:center; gap:6px; padding:8px 10px 8px 14px; }
   .th-host-lead { font:600 11.5px/1 var(--sans); color:var(--muted); margin-right:4px; }
+  .th-host-grid { display:grid; grid-auto-columns:max-content; gap:6px; }
+  /* Two columns share one width, so each chat app sits exactly over its agent. */
+  .th-host-grid.cols-2 { grid-template-columns:repeat(2, 1fr); }
+  .th-host-grid .th-host-tile { width:100%; }
+  .th-host-grid [data-row="2"] { grid-row:2; }
+  .th-host-grid [data-col="1"] { grid-column:1; }
+  .th-host-grid [data-col="2"] { grid-column:2; }
+  .th-host-grid [data-col="3"] { grid-column:3; }
+  .th-host-grid [data-col="4"] { grid-column:4; }
+  .th-host-grid [data-col="5"] { grid-column:5; }
+  /* The divider: a hairline from the box's top edge to its bottom, broken by
+     "or", splitting opening in an app from copying for any other agent. */
+  .th-host-or { flex:1 1 auto; min-width:24px; align-self:stretch; margin:-8px 0; display:flex; flex-direction:column; align-items:center; gap:5px;
+    font:500 12.5px/1 var(--sans); color:var(--muted); }
+  .th-host-or::before, .th-host-or::after { content:""; flex:1; width:1px; background:color-mix(in srgb, var(--ink) 12%, transparent); }
+  .th-sheet-copy { appearance:none; flex:0 0 auto; display:inline-flex; align-items:center; gap:6px; margin-left:auto; border:0; border-radius:var(--r-2);
+    background:var(--accent-soft); color:var(--accent); font:600 12px/1.25 var(--sans); padding:8px 11px; text-align:left; cursor:pointer;
+    transition:background-color var(--t-fast) var(--settle); }
+  .th-sheet-copy svg { flex:0 0 auto; }
+  .th-sheet-copy:hover { background:var(--accent-press); }
+  .th-sheet-copy:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  /* Three chip columns leave no room for the label on one line at the
+     reader's 560px, so it stacks, filling the height the two rows give it. */
+  .th-host-sheet.wide .th-sheet-copy .l { display:block; }
   .th-host-tile { --host-color:var(--brand-codex); appearance:none; flex:0 0 auto; display:inline-flex; align-items:center; gap:7px; padding:6px 11px 6px 7px; cursor:pointer; text-align:left;
     border:1px solid var(--hair); border-radius:8px;
     background:linear-gradient(180deg, color-mix(in srgb, var(--host-color) 9%, var(--wash)), var(--wash) 80%); }
   .th-host-tile[data-host="claude"], .th-host-tile[data-host="claude-app"] { --host-color:var(--brand-anthropic); }
-  .th-host-tile[data-host="chatgpt"] { --host-color:var(--ink); background:linear-gradient(180deg, color-mix(in srgb, var(--ink) 6%, var(--wash)), var(--wash) 80%); }
+  /* ChatGPT takes Codex's blue, its default; the gated fifth app is the neutral one. */
+  .th-host-tile[data-host="conductor"] { --host-color:var(--ink); background:linear-gradient(180deg, color-mix(in srgb, var(--ink) 6%, var(--wash)), var(--wash) 80%); }
   .th-host-tile .th-host-logo { width:20px; height:20px; border-radius:5px; }
   .th-host-tile .th-host-label { font-size:12px; letter-spacing:-0.01em; }
   .th-host-tile:hover { border-color:color-mix(in srgb, var(--host-color) 40%, var(--hair)); transform:translateY(-1px); }
@@ -1808,14 +1889,12 @@
   @media (prefers-reduced-motion:reduce) {
     .th-host-tile, .th-host-tile .th-host-logo, .rd-host-actions .sp-list.open .sp-row { transition:none; animation:none; opacity:1; }
   }
-  /* The reader's pull block sits under the chips on two lines: the heading,
-     then the sentence with Copy beside it. */
+  /* With every app switched off the reader's box holds the pull block alone:
+     the heading, then the sentence with Copy beside it. */
   .rd-host-actions .th-pull { flex-direction:row; flex-wrap:wrap; align-items:center; gap:4px 10px; padding:8px 12px 9px; }
   .rd-host-actions .th-pull-heading { flex:0 0 100%; }
   .rd-host-actions .th-pull-q { flex:1 1 260px; font-size:13px; }
   .rd-host-actions .th-pull-copy { padding:5px 9px; font-size:11.5px; }
-  /* One box holds the tiles and, under a hairline, the pull block. */
-  .th-host-sheet ~ .th-pull { border-top:1px solid var(--hair); }
   /* A room bubble's bar (David, 2026-09-17): four glass tiles, then Copy
      prompt, on one 54px line, where the strip and the sentence together took
      208 and hid a short letter behind them. The "Sent with" line above it
@@ -7559,7 +7638,7 @@
     const placeholder = identity.isGroup
       ? `Reply in ${identity.name}…`
       : `Reply to ${String(identity.name || row.party || "them").split(" ")[0]}…`;
-    return `<div class="qr th-qr col qr-banner" data-stop="1"><div class="th-rich-composer" contenteditable="true" role="textbox" aria-multiline="true" aria-label="${esc(placeholder.replace(/…$/, ""))}" data-placeholder="${esc(placeholder)}"></div><div class="ta-rail"><span class="rt-spacer"></span><button type="button" class="qr-banner-send" data-stop="1">Relay</button></div></div>`;
+    return `<div class="qr th-qr col qr-banner" data-stop="1"><div class="th-rich-composer" contenteditable="true" role="textbox" aria-multiline="true" aria-label="${esc(placeholder.replace(/…$/, ""))}" data-placeholder="${esc(placeholder)}"></div><div class="ta-rail"><span class="rt-spacer"></span><button type="button" class="qr-banner-send" data-stop="1">Send</button></div></div>`;
   }
   // The room addresses a send by the newest message that carries an address;
   // the banner has that message in hand.
@@ -7722,11 +7801,14 @@
     const avatar = identity.isGroup
       ? `<span class="av-stack">${groupPeople.map((person, index) => `<span class="avatar sm${index === 0 ? " sq" : ""}" style="--av-h:${avatarHue(person)}" aria-hidden="true">${esc(avatarInitials(person))}</span>`).join("")}</span>`
       : `<span class="avatar" style="--av-h:${avatarHue(name)}" aria-hidden="true">${esc(avatarInitials(name))}</span>`;
+    // A newest message that folded into a reply thread says so.
+    const inThread = !mention && row.textLike && row.inReplyToRelayId && Array.isArray(identity.msgs)
+      && replyThreadsEnabled(identity) && replyThreadIndex(identity.msgs).rootOf.has(String(row.id || ""));
     const senderPrefix = row.direction === "out"
-      ? '<span class="gist-who">You:</span> '
+      ? `<span class="gist-who">${inThread ? "You in a thread:" : "You:"}</span> `
       : identity.isGroup
-        ? `<span class="gist-who">${esc(String(row.party || "Someone").split(" ")[0])}:</span> `
-        : "";
+        ? `<span class="gist-who">${esc(String(row.party || "Someone").split(" ")[0])}${inThread ? " in a thread" : ""}:</span> `
+        : inThread ? '<span class="gist-who">In a thread:</span> ' : "";
     return `
       <div class="relay-row relay-arrival${unreadCls}" data-thread="${esc(roomCoordinate)}" data-party="${esc(name)}" data-opening-id="${esc(row.id)}"${mention ? ` data-mention-target="${esc(mention.id)}"` : ""}>
         ${avatar}
@@ -11568,6 +11650,10 @@
     // the words, in the agent's register, closed until this contact opens it.
     // Remembered per letter while the pill runs.
     const sharedShelf = relaySharedShelf(r);
+    // Reply threads: the typed replies to this Relay read under its Details,
+    // above the Open in bar, and the composer below replies into them.
+    const replyThread = !request && !chatOwnedWork ? readerReplyThread(r) : null;
+    const repliesHtml = replyThread ? readerRepliesHtml(r, replyThread) : "";
     const detailsOpen = readerDetailsOpen.has(String(r.id));
     const details = !twoFaces && agentText ? `
         <div class="rd-details${detailsOpen ? " open" : ""}" data-stop="1">
@@ -11589,7 +11675,8 @@
         <div class="rd-rule"></div>
         <div class="rd-body">${readerParagraphs(r.forHuman)}</div>
         ${details}
-        ${scheduleContractHtml(r)}`;
+        ${scheduleContractHtml(r)}
+        ${repliesHtml}`;
     const standaloneAttachments = sharedShelf && (onAgent || !details) ? `<div class="rd-attachments-standalone">${sharedShelf}</div>` : "";
     const doc = (onAgent ? agentDoc : humanDoc) + standaloneAttachments;
     // RELAY WORK IS REQUESTS SUBSTRATE (Sven, 2026-08-17): a plain relay's
@@ -11628,12 +11715,13 @@
       if (onAgent) return relayWorkDockHtml(r, { inline: true });
       return `
       <div class="ta-dock inline" data-stop="1"><div class="qr col">
-        <textarea id="qrInput" rows="1" placeholder="Reply…">${esc(readerHumanDrafts.get(String(r.id)) || "")}</textarea>
+        <div class="rd-quote-slot"></div>
+        <textarea id="qrInput" rows="1" placeholder="${replyThread ? "Reply in thread…" : "Reply…"}">${esc(readerHumanDrafts.get(String(r.id)) || "")}</textarea>
         <div class="ta-rail">
           ${replyRail([replyChat.party], replyChat.groupName)}
           <span class="rt-spacer"></span>
           <span class="ta-acts">
-            <button type="button" id="qrSend">Relay</button>
+            <button type="button" id="qrSend">Send</button>
           </span>
         </div>
       </div></div>`;
@@ -11685,6 +11773,7 @@
     }
     document.getElementById("readerBack").addEventListener("click", (e) => { e.stopPropagation(); closeReader(); });
     wireSentLinkMore(r);
+    if (replyThread) wireReaderReplies(r, replyThread);
     const readerDelete = readerBodyEl.querySelector("[data-reader-delete]");
     if (readerDelete) readerDelete.addEventListener("click", async (event) => {
       event.stopPropagation();
@@ -11786,10 +11875,14 @@
           readerReplySending = true;
           send.disabled = true;
           const idempotencyKey = `reader_${r.id}_${Date.now()}`;
+          // Inside a Relay's thread a reply may quote one reply; otherwise it
+          // answers the Relay.
+          const quotedId = String(readerQuoteTargets.get(String(r.id)) || "");
+          const replyToId = quotedId || r.id;
           optimisticChatReplies.set(idempotencyKey, {
             ...replyChat,
             id:`optimistic:${idempotencyKey}`, relayId:"",
-            inReplyToRelayId:r.id, explicitReply:true,
+            inReplyToRelayId:replyToId, explicitReply:true,
             direction:"out", seen:false, seenAt:null, title:text, body:text,
             at:new Date().toISOString(), unread:false,
             textLike:true, request:false, pending:true,
@@ -11802,7 +11895,7 @@
           const res = await window.relay.sendReply({
             text,
             agentMentions: agentMentionSpans(text),
-            inReplyToRelayId: r.id,
+            inReplyToRelayId: replyToId,
             idempotencyKey,
             chat: replyChat,
           }).catch((error) => ({ ok:false, error:String(error?.message || error) }));
@@ -11820,6 +11913,7 @@
           input.relayResize?.();
           input.relayLongPasteReset?.();
           readerHumanDrafts.delete(String(r.id));
+          readerQuoteTargets.delete(String(r.id));
           // "Queued" would be a lie the instant the network is fine, and "Sent"
           // would be one while it is not. The message's own bubble carries the
           // state; this note only confirms the composer let go of it.
@@ -14044,6 +14138,11 @@
   // Slack threads are a subview inside one Slack-backed Relay channel. Keep
   // this separate from threadDetailId, which identifies the room itself.
   let slackFocusedThreadId = "";
+  // A reply thread under one message of an ordinary room, open as its own
+  // subview (the same shape as a Slack thread). Replies folded out of the room
+  // on screen are remembered so arriving there does not mark them read.
+  let replyThreadFocusId = "";
+  const hiddenReplyThreadIds = new Set();
   let threadDetailScrolledFor = null; // thread already auto-scrolled to newest (reset on leave)
   let threadDetailEntryFollow = null; // follows newest through the room's initial sent-cache hydration
   let threadDetailEntryFollowSeq = 0;
@@ -15483,6 +15582,8 @@
     const roomKey = room && room.partyKey;
     return threadMessages({ includeSlack:slackMessagesVisible(room) }).filter((m) => {
       if (m.direction !== "in") return false;
+      // A reply folded into a thread is read when its thread is open.
+      if (hiddenReplyThreadIds.has(String(m.id || ""))) return false;
       if (room && room.isGroup) {
         const ids = room.threadIds instanceof Set ? room.threadIds : new Set([room.threadId]);
         return ids.has(m.threadId);
@@ -15949,9 +16050,9 @@
     // together: "way too much, I can't see a message at all"; "I basically
     // just want a copy prompt"). The sentence itself lives on the expanded view.
     const inner = sheet
-      ? hostSheetHtml(options)
-        + desktopHosts.map((host) => sessionPickerInlineHtml(id, host)).join("")
-        + pullSentenceHtml(message, { hasAppAction: options.length > 0 })
+      ? (options.length
+        ? hostSheetHtml(options, message) + desktopHosts.map((host) => sessionPickerInlineHtml(id, host)).join("")
+        : pullSentenceHtml(message))
       : hostBarHtml(options, message);
     return `${persistent ? "" : `<button class="th-host-disclosure" type="button" data-host-disclosure="${esc(id)}" data-stop="1" aria-expanded="false" aria-controls="${esc(actionsId)}"><span>Open with an agent</span><span class="chev" aria-hidden="true">⌄</span></button>`}<div id="${esc(actionsId)}" class="th-host-actions${persistent ? " persistent" : ""}" data-host-actions="${esc(id)}" data-stop="1" aria-hidden="${persistent ? "false" : "true"}"${persistent ? "" : " inert"}>
       <div class="th-host-actions-inner">
@@ -16021,19 +16122,44 @@
       ...(conductorEnabled() ? [app("conductor", "conductorMark.svg", "Conductor", "conductor")] : []),
     ];
   }
-  // One line of chips (David, 2026-09-17): "Open in" once, then each app as a
-  // rectangular chip — its mark and its name — so the sheet stays a row and
-  // the letter keeps the screen. The verb lives on the chip's aria-label and
-  // in the lead word. Only the chips whose switch is on; none at all paints
-  // no sheet, so the box holds the sentence alone.
-  function hostSheetHtml(options) {
+  // One bar (Shane, approved by David, 2026-09-30): "Open in", each app as a
+  // chip with its mark and its name, an "or" divider, and Copy for your agent,
+  // whose tooltip is the sentence it copies. The verb lives on the chip's
+  // aria-label and in the lead word. Only the chips whose switch is on; none at
+  // all paints no sheet, so the box holds the pull block alone.
+  // Where each chip sits. A chat app and an agent on this Mac both on: two
+  // rows, each chat app over its maker's agent (Claude over Claude Code,
+  // ChatGPT over Codex) and Conductor at the end of the top row. Otherwise one
+  // row in the offered order.
+  function hostSheetCells(options) {
+    const column = { "claude-app": 1, chatgpt: 2, claude: 1, codex: 2 };
+    const agents = options.filter((o) => o.host === "claude" || o.host === "codex");
+    const top = options.filter((o) => !agents.includes(o));
+    if (!agents.length || !top.some((o) => column[o.host])) return options.map((o, i) => ({ o, row: 1, col: i + 1 }));
+    let last = 0;
+    return [...top, ...agents].map((o) => {
+      const row = agents.includes(o) ? 2 : 1;
+      const col = column[o.host] || last + 1;
+      if (row === 1) last = col;
+      return { o, row, col };
+    });
+  }
+  function hostSheetHtml(options, message) {
     if (!options.length) return "";
-    return `<div class="th-host-sheet">
+    const cells = hostSheetCells(options);
+    const cols = Math.max(...cells.map((c) => c.col));
+    const rows = Math.max(...cells.map((c) => c.row));
+    const sentence = pullSentenceFor(message);
+    return `<div class="th-host-sheet${rows > 1 && cols > 2 ? " wide" : ""}">
         <span class="th-host-lead" aria-hidden="true">Open in</span>
-        ${options.map((o) => `<button class="th-host-tile${o.pressed ? " pressed" : ""}" type="button" data-host="${o.host}" aria-label="Open in ${esc(o.name)}" ${o.attrs}>
+        <div class="th-host-grid${rows > 1 && cols === 2 ? " cols-2" : ""}">
+        ${cells.map(({ o, row, col }) => `<button class="th-host-tile${o.pressed ? " pressed" : ""}" type="button" data-host="${o.host}" data-row="${row}" data-col="${col}" aria-label="Open in ${esc(o.name)}" ${o.attrs}>
           <img class="th-host-logo" src="${o.mark}" alt="" />
           <span class="th-host-label">${esc(o.name)}</span>
         </button>`).join("\n        ")}
+        </div>
+        <span class="th-host-or" aria-hidden="true">or</span>
+        <button class="th-sheet-copy" type="button" data-pull-copy="${esc(sentence)}" title="${esc(sentence)}"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="4.5" width="7.5" height="7.5" rx="1.6"/><path d="M9.5 2.5V2.2c0-.4-.3-.7-.7-.7H2.7c-.4 0-.7.3-.7.7v6.1c0 .4.3.7.7.7h.3"/></svg><span><span class="l">Copy for </span><span class="l">your agent</span></span></button>
       </div>`;
   }
   // A room bubble's bar: the marks on the left, each a button that says its
@@ -16062,15 +16188,17 @@
     const whose = mine ? "my sent" : `${first}${/s$/i.test(first) ? "’" : "’s"}`;
     return `Pull ${whose} relay “${subject}” from Relay and tell me what’s happening.`;
   }
-  function pullSentenceHtml(message, { hasAppAction = false } = {}) {
+  // The reader's box when no app is switched on: the sentence itself, since
+  // there is nothing else to show, and Copy beside it.
+  function pullSentenceHtml(message) {
     const id = String(message && message.id || "");
     const row = readerRow(id) || relayById(id)
       || (payload.sent || []).find((item) => String(item.relayId || item.id || "") === id) || message || {};
     const sentence = pullSentenceFor(message, row);
     return `<div class="th-pull">
-        <div class="th-pull-heading">${hasAppAction ? "Or tell your agent this:" : "Tell your agent this:"}</div>
+        <div class="th-pull-heading">Tell your agent this:</div>
         <div class="th-pull-q">${esc(sentence)}</div>
-        <div class="th-pull-acts"><button class="th-pull-copy" type="button" data-pull-copy="${esc(sentence)}">Copy this prompt for your agent</button></div>
+        <div class="th-pull-acts"><button class="th-pull-copy" type="button" data-pull-copy="${esc(sentence)}">Copy for your agent</button></div>
       </div>`;
   }
   // A bubble's agent tile: the same delivery the picker's "New chat" makes,
@@ -16167,6 +16295,235 @@
     if (message?.explicitReply === true) return true;
     const source = message?.source;
     return source?.host === "relay-preview" && versionAtLeast(source.clientVersion, "0.1.290");
+  }
+  // ---- reply threads (developers on dev, Shane 2026-10-01) ----------------
+  // A typed reply someone chose to make folds into a thread under the message
+  // it answers instead of joining the room. Nothing on the wire changes: the
+  // reply link (inReplyToRelayId) is the thread. What folds is exactly what
+  // shows a reply quote today — a deliberate gesture, or a parent that is not
+  // the default anchor older clients set on every send. A reply to a reply
+  // joins the same thread (one level, the Slack shape); inside a thread a
+  // reply is a quote. A full Relay sent as a reply, a Task and its events and
+  // an owned agent's work keep their place in the room.
+  function replyThreadsEnabled(room) {
+    return payload.features?.replyThreads === true && !(room && room.provider === "slack");
+  }
+  function replyThreadIndex(msgs) {
+    const list = msgs || [];
+    const byId = new Map(list.map((message) => [String(message.id || ""), message]));
+    for (const message of list) {
+      for (const sibling of message.siblingIds || []) {
+        const siblingId = String(sibling || "");
+        if (siblingId && !byId.has(siblingId)) byId.set(siblingId, message);
+      }
+    }
+    const defaults = defaultReplyAnchorMap(list);
+    const deliberateParent = (message) => {
+      const parentId = String(message?.inReplyToRelayId || "");
+      if (!parentId) return null;
+      const anchors = defaults.get(String(message.id || ""));
+      if (!messageHasExplicitReplyGesture(message) && anchors && anchors.has(parentId)) return null;
+      return byId.get(parentId) || null;
+    };
+    const folds = (message) => Boolean(message && message.textLike && !message.request
+      && !message.ownedAgent && !message.agentInvocation && !message.inReplyToTopicPost
+      && !taskEventOf(message, (id) => byId.get(id)));
+    const rootFor = (message) => {
+      const seen = new Set([message]);
+      let parent = deliberateParent(message);
+      while (parent && !seen.has(parent) && folds(parent)) {
+        const up = deliberateParent(parent);
+        if (!up) break;
+        seen.add(parent);
+        parent = up;
+      }
+      if (!parent || seen.has(parent) || parent.request || parent.ownedAgent) return null;
+      return parent;
+    };
+    const rootOf = new Map();
+    const groups = new Map();
+    for (const message of list) {
+      if (!folds(message)) continue;
+      const root = rootFor(message);
+      if (!root) continue;
+      const key = String(root.id || "");
+      rootOf.set(String(message.id || ""), key);
+      const group = groups.get(key) || [];
+      group.push(message);
+      groups.set(key, group);
+    }
+    for (const group of groups.values()) group.sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));
+    return { rootOf, groups, byId };
+  }
+  // Open a text's thread as the room's subview, composer ready.
+  function openReplyThread(id) {
+    replyThreadFocusId = String(id || "");
+    threadDetailScrolledFor = null;
+    renderThreadDetail();
+    document.getElementById("thQrInput")?.focus();
+  }
+  // A Relay's thread lives in its reader, under Details for your agent.
+  let readerRevealReplies = null; // { id, focus } — scroll the reader to its replies once
+  function openRelayThreadInReader(id, source, { focus = false } = {}) {
+    const raw = (payload.relays || []).find((row) => String(row.id) === String(id));
+    const shouldAck = Boolean(raw && raw.unread);
+    if (raw) raw.unread = false;
+    readerRevealReplies = { id:String(id), focus };
+    openReader(id, source);
+    if (shouldAck) persistReadIds([id], { afterPaint:true });
+  }
+  // The typed replies folded under a Relay, from its own room.
+  function readerReplyThread(r) {
+    if (!r || !replyThreadsEnabled(null)) return null;
+    const all = threadMessages();
+    const id = String(r.id || "");
+    const self = all.find((message) => String(message.id || "") === id
+      || (message.siblingIds || []).some((sibling) => String(sibling || "") === id));
+    if (!self || self.textLike || self.request || self.ownedAgent) return null;
+    const selfName = normalizedPartyName(self.party);
+    const room = all.filter((message) => self.isGroup
+      ? Boolean((self.groupId && message.groupId === self.groupId) || (self.partyKey && message.partyKey === self.partyKey))
+      : !message.isGroup && sameDirectParty(message, self.partyKey, selfName))
+      .sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));
+    const index = replyThreadIndex(room);
+    return { root:self, replies:index.groups.get(String(self.id || "")) || [], byId:index.byId };
+  }
+  const readerRepliesExpanded = new Set(); // Relay ids whose earlier replies are shown
+  const readerQuoteTargets = new Map(); // Relay id -> the reply being quoted in its thread
+  // Replies that were new when this reader opened keep their marker while it
+  // stays open, even after reading them clears the unread flag.
+  let readerFreshReplies = { id:"", ids:new Set() };
+  const READER_REPLIES_SHOWN = 5;
+  function readerRepliesHtml(r, thread) {
+    const replies = thread.replies;
+    if (!replies.length) return "";
+    const key = String(r.id);
+    if (readerFreshReplies.id !== key) readerFreshReplies = { id:key, ids:new Set() };
+    for (const reply of replies) {
+      if (reply.direction === "in" && reply.unread) readerFreshReplies.ids.add(String(reply.id || ""));
+    }
+    const firstFresh = replies.findIndex((reply) => readerFreshReplies.ids.has(String(reply.id || "")));
+    const freshCount = replies.filter((reply) => readerFreshReplies.ids.has(String(reply.id || ""))).length;
+    let start = readerRepliesExpanded.has(key) ? 0 : Math.max(0, replies.length - READER_REPLIES_SHOWN);
+    if (firstFresh >= 0) start = Math.min(start, firstFresh);
+    const who = (message) => message.direction === "out" ? "You" : String(message.party || "Someone");
+    const rows = replies.slice(start).map((reply, offset) => {
+      const mine = reply.direction === "out";
+      const name = who(reply);
+      const parent = reply.inReplyToRelayId ? thread.byId.get(String(reply.inReplyToRelayId)) : null;
+      const quote = parent && parent !== thread.root
+        ? `<div class="rd-reply-quote"><span class="who">${esc(who(parent))}</span><span class="copy">${esc(relayListGist(String(parent.title || parent.body || "Message").replace(/\s+/g, " "), 120))}</span></div>`
+        : "";
+      const files = Array.isArray(reply.attachments) ? reply.attachments.length : 0;
+      const words = reply.deletedAt
+        ? `<span class="deleted">${mine ? "You deleted this message" : "This message was deleted"}</span>`
+        : linkify(String(reply.body || reply.title || ""), reply.groupId || "");
+      const divider = start + offset === firstFresh
+        ? `<div class="rd-replies-new" role="separator"><span>${freshCount} new</span></div>`
+        : "";
+      return `${divider}<div class="rd-reply${reply.pending ? " pending" : ""}" data-rd-reply="${esc(reply.id)}">
+          <span class="th-party ${partyColorClass(name, mine)} rd-reply-face" aria-hidden="true">${esc((mine ? "Y" : firstName(name).charAt(0) || "?").toUpperCase())}</span>
+          <div class="rd-reply-main">
+            <div class="rd-reply-head"><span class="th-party ${partyColorClass(name, mine)}">${esc(name)}</span>${chatTimestampHtml(reply.at, "rd-reply-time")}${reply.deletedAt || reply.pending ? "" : `<button type="button" class="rd-reply-quote-btn" data-rd-quote="${esc(reply.id)}">reply</button>`}</div>
+            ${quote}
+            ${String(reply.body || reply.title || "").trim() || reply.deletedAt ? `<div class="rd-reply-text">${words}</div>` : ""}
+            ${files ? `<div class="rd-reply-files">${files} ${files === 1 ? "attachment" : "attachments"}</div>` : ""}
+          </div>
+        </div>`;
+    }).join("");
+    return `<section class="rd-replies" id="readerReplies" aria-label="Replies" data-stop="1">
+        <div class="rd-replies-head"><span class="rd-replies-title">Replies</span><span class="rd-replies-count">${replies.length}</span></div>
+        ${start ? `<button type="button" class="rd-replies-more" data-rd-replies-more="${esc(key)}">Show ${start} earlier ${start === 1 ? "reply" : "replies"}</button>` : ""}
+        ${rows}
+      </section>`;
+  }
+  // The quote a reply inside a Relay's thread carries, above the composer.
+  function syncReaderQuoteChip(r, thread) {
+    const col = readerBodyEl.querySelector("#readerComposer .qr.col");
+    if (!col) return;
+    let slot = col.querySelector(".rd-quote-slot");
+    if (!slot) { slot = document.createElement("div"); slot.className = "rd-quote-slot"; col.prepend(slot); }
+    const quotedId = String(readerQuoteTargets.get(String(r.id)) || "");
+    const quoted = quotedId ? thread.replies.find((reply) => String(reply.id || "") === quotedId) : null;
+    if (quotedId && !quoted) readerQuoteTargets.delete(String(r.id));
+    const html = quoted
+      ? `<div class="th-reply-target"><div class="th-reply-target-who">Replying to ${esc(quoted.direction === "out" ? "You" : String(quoted.party || "Someone"))}</div><div class="th-reply-target-copy">${esc(relayListGist(String(quoted.title || quoted.body || "Message").replace(/\s+/g, " "), 120))}</div><button type="button" class="th-reply-target-close" data-rd-quote-cancel="1" aria-label="Cancel specific reply">×</button></div>`
+      : "";
+    if (slot.dataset.html !== html) {
+      slot.innerHTML = html;
+      slot.dataset.html = html;
+      slot.querySelector("[data-rd-quote-cancel]")?.addEventListener("click", (event) => {
+        event.stopPropagation();
+        readerQuoteTargets.delete(String(r.id));
+        syncReaderQuoteChip(r, thread);
+        document.getElementById("qrInput")?.focus();
+      });
+    }
+  }
+  function wireReaderReplies(r, thread) {
+    syncReaderQuoteChip(r, thread);
+    for (const button of readerBodyEl.querySelectorAll("[data-rd-replies-more]")) {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        readerRepliesExpanded.add(String(button.getAttribute("data-rd-replies-more") || ""));
+        const top = scrollEl ? scrollEl.scrollTop : 0;
+        renderReader();
+        if (scrollEl) scrollEl.scrollTop = top;
+      });
+    }
+    for (const button of readerBodyEl.querySelectorAll("[data-rd-quote]")) {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        readerQuoteTargets.set(String(r.id), String(button.getAttribute("data-rd-quote") || ""));
+        syncReaderQuoteChip(r, thread);
+        const input = document.getElementById("qrInput");
+        if (input) { input.focus(); input.scrollIntoView({ block:"nearest" }); }
+      });
+    }
+    // Replies on the page have been read.
+    if (activeView === "reader" && fullCardIsOnStage()) {
+      const ids = [];
+      for (const reply of thread.replies) {
+        if (reply.direction !== "in" || !reply.unread) continue;
+        const id = String(reply.id || "");
+        if (!id.startsWith("relay_")) continue;
+        const raw = (payload.relays || []).find((row) => String(row.id) === id);
+        if (raw) raw.unread = false;
+        ids.push(id);
+      }
+      persistReadIds(ids, { afterPaint:true });
+    }
+    const reveal = readerRevealReplies;
+    if (reveal && reveal.id === String(r.id)) {
+      readerRevealReplies = null;
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const section = document.getElementById("readerReplies");
+        if (section) section.scrollIntoView({ block:"start", behavior:REDUCED ? "auto" : "smooth" });
+        if (reveal.focus) document.getElementById("qrInput")?.focus({ preventScroll:Boolean(section) });
+      }));
+    }
+  }
+  // The line under a message with a thread: who replied, how many, when last,
+  // and how many are new to you.
+  function replyThreadSummaryHtml(root, replies, { strip = false, mine = false, key = "" } = {}) {
+    if (!root || !replies || !replies.length) return "";
+    const voices = [];
+    for (const reply of [...replies].reverse()) {
+      const mine = reply.direction === "out";
+      const name = mine ? "You" : String(reply.party || "Someone");
+      if (!voices.some((voice) => voice.name === name)) voices.push({ name, mine });
+    }
+    const faces = voices.slice(0, 3).map(({ name, mine }) =>
+      `<span class="th-party ${partyColorClass(name, mine)} th-rt-face" aria-hidden="true">${esc((mine ? "Y" : firstName(name).charAt(0) || "?").toUpperCase())}</span>`).join("");
+    const fresh = replies.filter((reply) => reply.direction === "in" && reply.unread).length;
+    const count = replies.length;
+    const last = formatChatTime(replies[replies.length - 1].at);
+    const label = `${count} ${count === 1 ? "reply" : "replies"}`;
+    // A Relay's thread lives in its reader; a text's opens as a room subview.
+    const opens = strip ? ` data-reply-thread-reader="${root.direction === "out" ? "sent" : "threads"}"` : "";
+    return `<button type="button" class="th-rt-link${strip ? " strip" : ""}${mine ? " mine" : ""}" data-reply-thread-open="${esc(root.id)}"${opens} data-stop="1"${key ? ` data-chat-key="${esc(key)}"` : ""} aria-label="${esc(`${label}${fresh ? `, ${fresh} new` : ""}. Open thread`)}">
+        <span class="th-rt-faces">${faces}</span><span class="th-rt-count">${esc(label)}</span>${last ? `<span class="th-rt-last">· last ${esc(last)}</span>` : ""}${fresh ? `<span class="th-rt-new">${fresh} new</span>` : ""}<span class="th-rt-chev" aria-hidden="true">›</span>
+      </button>`;
   }
   // ---- the thread reply composer: a REAL send ----------------------------
   // Files stage as chips (picker or paste); Send creates a relay through the
@@ -16301,6 +16658,32 @@
           : slackChannelAllMessages.filter((message) => !message.inReplyToRelayId && !message.slackThreadContext),
       };
     }
+    // Reply threads: the room shows each message once, its typed replies fold
+    // under it; an open thread shows the message and its replies alone.
+    const roomMsgsBeforeFold = thread.msgs;
+    const roomReplyThreads = !slackChannelAllMessages.length && isConversationRoomSource() && replyThreadsEnabled(chatRoom)
+      ? replyThreadIndex(thread.msgs)
+      : null;
+    hiddenReplyThreadIds.clear();
+    let focusedReplyRoot = null;
+    if (!roomReplyThreads) {
+      replyThreadFocusId = "";
+    } else {
+      focusedReplyRoot = replyThreadFocusId ? roomReplyThreads.byId.get(replyThreadFocusId) || null : null;
+      if (focusedReplyRoot && roomReplyThreads.rootOf.has(String(focusedReplyRoot.id || ""))) {
+        focusedReplyRoot = roomReplyThreads.byId.get(roomReplyThreads.rootOf.get(String(focusedReplyRoot.id || ""))) || null;
+      }
+      if (!focusedReplyRoot) replyThreadFocusId = "";
+      else replyThreadFocusId = String(focusedReplyRoot.id || "");
+      const visible = focusedReplyRoot
+        ? [focusedReplyRoot, ...(roomReplyThreads.groups.get(replyThreadFocusId) || [])]
+        : thread.msgs.filter((message) => !roomReplyThreads.rootOf.has(String(message.id || "")));
+      const shown = new Set(visible);
+      for (const message of thread.msgs) {
+        if (!shown.has(message)) hiddenReplyThreadIds.add(String(message.id || ""));
+      }
+      thread = { ...thread, msgs: visible };
+    }
     // A group conversation is named by its voices, newest first — "Shane &
     // David" — not by whoever happened to speak last.
     const inboundNames = [];
@@ -16316,9 +16699,9 @@
     // A visible room can contain many internal reply-chain ids. State keyed to
     // `thread.threadId` jumped whenever a newer Relay belonged to another
     // chain, losing drafts and releasing the duplicate-send gate mid-flight.
-    const threadStateKey = `${isConversationRoomSource() ? String(threadDetailId) : String(thread.threadId)}${slackFocusedThreadId ? `|slack-thread:${slackFocusedThreadId}` : ""}`;
+    const threadStateKey = `${isConversationRoomSource() ? String(threadDetailId) : String(thread.threadId)}${slackFocusedThreadId ? `|slack-thread:${slackFocusedThreadId}` : ""}${focusedReplyRoot ? `|reply-thread:${replyThreadFocusId}` : ""}`;
     setThreadHeader(roomName || voices, "");
-    if (slackFocusedThreadId) thDetailMetaEl.textContent = "Thread";
+    if (slackFocusedThreadId || focusedReplyRoot) thDetailMetaEl.textContent = "Thread";
     // No thread-level note div: every bubble carries its own row-err since the
     // block redesign, so a second copy rendered the same note twice (Sven's
     // double "Copied."). The old zero-feedback bug stays covered — every
@@ -16343,11 +16726,13 @@
       if (k && !threadPalette.has(k)) threadPalette.set(k, threadPalette.size);
     }
     const threadDraft = threadComposerDrafts.get(threadStateKey) || "";
-    const messageById = new Map(thread.msgs.map((message) => [String(message.id || ""), message]));
+    // Every message in the room resolves, folded or not: a Relay sent as a
+    // reply to a text inside a thread still quotes that text.
+    const messageById = new Map(roomMsgsBeforeFold.map((message) => [String(message.id || ""), message]));
     // A fan-out I sent is one bubble with many ids: a reply from any member
     // names the sibling that member received. Resolve every sibling to the
     // bubble, or the reply-ref below finds no parent and quotes nothing.
-    for (const message of thread.msgs) {
+    for (const message of roomMsgsBeforeFold) {
       for (const sibling of message.siblingIds || []) {
         const siblingId = String(sibling || "");
         if (siblingId && !messageById.has(siblingId)) messageById.set(siblingId, message);
@@ -16382,7 +16767,10 @@
       }
       return "";
     };
-    const defaultReplyAnchorIds = defaultReplyAnchorMap(thread.msgs);
+    const defaultReplyAnchorIds = defaultReplyAnchorMap(roomMsgsBeforeFold);
+    const replyThreadRepliesFor = (message) => roomReplyThreads && !focusedReplyRoot
+      ? roomReplyThreads.groups.get(String(message?.id || "")) || []
+      : [];
     const renderedSlackThreadContexts = new Set();
     const slackThreadContextHtml = (message) => {
       const context = message?.slackThreadContext;
@@ -16436,6 +16824,9 @@
       // default anchor, and the default is overwhelmingly the case — so a
       // placeholder here is noise on old messages, not context. Say nothing.
       if (!parent) return "";
+      // Inside a thread every reply answers the message at its top; only a
+      // quote of another reply needs saying.
+      if (focusedReplyRoot && parent === focusedReplyRoot) return "";
       // Jump to the bubble the room kept: for a fan-out that is the surviving
       // sibling, which may not be the id the reply named.
       return `<button type="button" class="th-reply-ref" data-reply-ref="${esc(String(parent.id || parentId))}" data-stop="1"><span class="th-reply-ref-who">${esc(replyPreviewAuthor(parent))}</span><span class="th-reply-ref-copy">${esc(replyPreviewCopy(parent))}</span></button>`;
@@ -16450,10 +16841,10 @@
     const threadComposer = `<div class="th-composer-dock${chatShaped ? " chat-shaped" : ""}"><div class="th-mention-jump hidden" role="group" aria-label="Mentions since you last opened this chat"></div><div class="qr th-qr col${replyTargetId ? " replying" : ""}">
           ${composerReplyTargetHtml}
           <div class="th-mention-menu hidden" id="thMentionMenu" role="listbox"></div>
-          <div id="thQrInput" class="th-rich-composer" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Reply" data-placeholder="Reply…"></div>
+          <div id="thQrInput" class="th-rich-composer" contenteditable="true" role="textbox" aria-multiline="true" aria-label="${focusedReplyRoot ? "Reply in thread" : "Reply"}" data-placeholder="${focusedReplyRoot ? "Reply in thread…" : "Reply…"}"></div>
           <div class="ta-rail">
             <span class="rt-spacer"></span>
-            <button type="button" id="thQrSend"${chatReplySending.has(threadStateKey) ? " disabled" : ""}>Relay</button>
+            <button type="button" id="thQrSend"${chatReplySending.has(threadStateKey) ? " disabled" : ""}>Send</button>
           </div>
         </div></div>`;
     const visibleThreadComposer = groupPostingBlocked
@@ -16534,7 +16925,10 @@
       if (m.ownedAgent) {
         messageActionBits.push(`<button type="button" class="th-reply-ghost" data-open-agent-work="${esc(m.id)}" data-stop="1">Open Work</button>`);
       } else if (!m.request && !groupPostingBlocked) {
-        messageActionBits.push(`<button type="button" class="th-reply-ghost" data-reply-to="${esc(m.id)}" data-stop="1">reply</button>`);
+        // With reply threads, Reply in the room opens the message's thread;
+        // inside a thread it quotes, since threads do not nest.
+        const replyLabel = roomReplyThreads && !focusedReplyRoot ? "reply in thread" : "reply";
+        messageActionBits.push(`<button type="button" class="th-reply-ghost" data-reply-to="${esc(m.id)}" data-stop="1">${replyLabel}</button>`);
       }
       // WhatsApp's windows: Edit for 15 minutes, Delete for everyone for 2 days.
       // Outside them the verb is not offered; confirmation happens on the
@@ -16606,10 +17000,16 @@
         ${showProviderByline ? providerBylineHtml(m) : ""}
         ${hasHostActions ? relayHostActionsHtml(m, { persistent:hostActionsPersistent }) : ""}
         ${!textLike && !editingMessage ? chatTimestampHtml(m.at) : ""}
+        ${hasHostActions ? replyThreadSummaryHtml(m, replyThreadRepliesFor(m), { strip:true }) : ""}
         ${taskFooter}
         ${badges}
       </div>
       ${slackThreadLinkHtml(m)}
+      ${hasHostActions ? "" : replyThreadSummaryHtml(m, replyThreadRepliesFor(m), { mine, key:`${renderKey}:thread-link` })}
+      ${focusedReplyRoot && m === focusedReplyRoot ? (() => {
+        const count = (roomReplyThreads.groups.get(replyThreadFocusId) || []).length;
+        return `<div class="th-rt-divider" role="separator" data-chat-key="${esc(renderKey)}:thread"><span>${count ? `${count} ${count === 1 ? "reply" : "replies"}` : "No replies yet"}</span></div>`;
+      })() : ""}
       ${(() => {
         // THE CARGO LAW: a bubble holds WORDS. Photos, video and files stand
         // free BENEATH it — never inside, where the enclosure outweighed the
@@ -16740,7 +17140,7 @@
         wireEditCancel(composerQr, threadStateKey);
       }
       const sendEl = composerQr.querySelector("#thQrSend");
-      if (sendEl) sendEl.textContent = editTargetId ? "Save" : "Relay";
+      if (sendEl) sendEl.textContent = editTargetId ? "Save" : "Send";
     }
     const composerSendEl = document.getElementById("thQrSend");
     if (composerSendEl) composerSendEl.disabled = chatReplySending.has(threadStateKey);
@@ -16895,6 +17295,16 @@
         slackFocusedThreadId = String(button.getAttribute("data-slack-thread-focus") || "");
         threadDetailScrolledFor = null;
         renderThreadDetail();
+      });
+    }
+    for (const button of newControls.querySelectorAll("[data-reply-thread-open]")) {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const id = String(button.getAttribute("data-reply-thread-open") || "");
+        if (!id) return;
+        const readerSource = button.getAttribute("data-reply-thread-reader");
+        if (readerSource) openRelayThreadInReader(id, readerSource);
+        else openReplyThread(id);
       });
     }
     const thQrSend = document.getElementById("thQrSend");
@@ -17089,7 +17499,7 @@
           : null;
         const emptyRoomAnchor = emptyGroupAnchor || emptySlackDirectAnchor || emptyRelayDirectAnchor;
         const sendAnchor = selectedReplyTarget || addressAnchor || newest || emptyRoomAnchor;
-        const inReplyToRelayId = selectedReplyTargetId || String(focusedSlackParent?.id || "");
+        const inReplyToRelayId = selectedReplyTargetId || String(focusedSlackParent?.id || "") || String(focusedReplyRoot?.id || "");
         const recipient = (addressAnchor && addressAnchor.addressRecipient)
           || (emptyRoomAnchor
             ? (emptyRoomAnchor.addressRecipient
@@ -17279,6 +17689,14 @@
         e.stopPropagation();
         const id = String(b.getAttribute("data-reply-to") || "");
         if (!id) return;
+        // Reply in the room opens the message's thread: a Relay's in its
+        // reader, a text's as the room's subview. A Task keeps its quote.
+        const threadTarget = roomReplyThreads && !focusedReplyRoot ? messageById.get(id) : null;
+        if (threadTarget && !threadTarget.request && !threadTarget.ownedAgent) {
+          if (threadTarget.textLike) openReplyThread(String(threadTarget.id));
+          else openRelayThreadInReader(String(threadTarget.id), threadTarget.direction === "out" ? "sent" : "threads", { focus:true });
+          return;
+        }
         // A reply and an edit cannot both own the composer; the reply wins.
         if (threadEditTargets.has(threadStateKey)) endThreadEdit(threadStateKey);
         threadReplyTargets.set(threadStateKey, id);
@@ -17432,8 +17850,9 @@
   });
   thBackEl.addEventListener("click", () => {
     sessionPickerState = null;
-    if (slackFocusedThreadId) {
+    if (slackFocusedThreadId || replyThreadFocusId) {
       slackFocusedThreadId = "";
+      replyThreadFocusId = "";
       threadDetailScrolledFor = null;
       renderThreadDetail();
       return;
@@ -17495,6 +17914,7 @@
     dismissReactionPickers();
     reactionNames.hide();
     slackFocusedThreadId = "";
+    replyThreadFocusId = "";
     threadDetailScrolledFor = null;
     threadDetailLiveFollow = RelayChatPresentation.reduceChatLiveFollow(threadDetailLiveFollow, { type:"reset" });
     const entryFollowToken = beginThreadEntryFollow(roomCoordinate);
@@ -17533,18 +17953,25 @@
     const partyKey = room && room.partyKey;
     const party = String(partyHint || (room && room.name) || "").trim().toLowerCase();
     const roomAckIds = [];
+    const inThisRoom = (m) => room && room.isGroup
+      ? (room.threadIds instanceof Set ? room.threadIds.has(m.threadId) : m.threadId === threadId)
+      : partyKey || party
+        ? sameDirectParty(m, partyKey, party)
+        : m.threadId === roomCoordinate;
+    const entryMessages = source === "slack" ? [] : threadMessages({ includeSlack:false });
+    // A reply folded into a thread is read when its thread is opened.
+    const foldedReplies = replyThreadsEnabled(room)
+      ? replyThreadIndex(entryMessages.filter(inThisRoom).sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0))).rootOf
+      : null;
     // Slack has its own read cursor. Relay opens acknowledge only Relay rows;
     // Slack opens are handled after the canonical transcript is rendered.
-    for (const m of source === "slack" ? [] : threadMessages({ includeSlack:false })) {
+    for (const m of entryMessages) {
       if (m.direction !== "in" || !m.unread) continue;
       // A row read from the server page is not in the local store to ack; the
       // canonical read in readVisibleChatRoom tells the server instead.
       if (m.serverTranscript) continue;
-      const sameRoom = room && room.isGroup
-        ? (room.threadIds instanceof Set ? room.threadIds.has(m.threadId) : m.threadId === threadId)
-        : partyKey || party
-          ? sameDirectParty(m, partyKey, party)
-          : m.threadId === roomCoordinate;
+      if (foldedReplies && foldedReplies.has(String(m.id || ""))) continue;
+      const sameRoom = inThisRoom(m);
       if (sameRoom) {
         const messageId = String(m.id);
         if (m.provider?.name !== "slack") roomAckIds.push(messageId);

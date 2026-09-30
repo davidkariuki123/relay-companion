@@ -62,6 +62,10 @@ function productFeatures(options = {}) {
     // Proven by the developers on dev first, and only ever offered on a
     // computer where Conductor is installed (src/conductor.cjs).
     conductor: developer,
+    // Reply threads (Shane, 2026-10-01): a typed reply to a message folds
+    // into a thread under it instead of the room. Pill-only presentation of
+    // the existing reply link; proven by the developers on dev first.
+    replyThreads: developer,
     // The pre-Requests task protocol (/v1/tasks, the agent inbox, task
     // sessions) the daemon polls and relay_task_create drives. Its routes
     // stay behind the developer gate on the server.

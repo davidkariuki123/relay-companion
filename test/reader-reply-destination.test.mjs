@@ -49,6 +49,8 @@ function readerHarness({ row, sent = [], chats = [], groups = [], canonical = []
     const avatarHue = () => 100;
     const esc = (value) => String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
     const agentMentionSpans = () => [];
+    const replyThread = null;
+    const readerQuoteTargets = new Map();
     const setRowNote = (...note) => state.notes.push(note);
     const fadeRowNoteLater = () => {};
     const renderReader = () => {};

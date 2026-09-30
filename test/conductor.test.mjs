@@ -246,7 +246,8 @@ test("the pill paints no Conductor tile, switch or word without both the row and
   // names the app of an option main already decided to offer.
   const mentions = inbox.split("\n").filter((line) => /conductor/i.test(line) && !/^\s*\/\//.test(line));
   for (const line of mentions) {
-    assert.match(line, /features\?\.conductor === true|conductorAvailable|conductorEnabled|conductorPreferenceKey|setConductorEnabled|conductorPromptFor|openInConductor|data-conductor-app|option\.provider === "conductor"|Opened in Conductor|in Conductor\.|conductorMark\.svg|sv-open-name">Conductor/,
+    // The chip's colour rule paints nothing unless hostOptions offered the chip.
+    assert.match(line, /features\?\.conductor === true|conductorAvailable|conductorEnabled|conductorPreferenceKey|setConductorEnabled|conductorPromptFor|openInConductor|data-conductor-app|option\.provider === "conductor"|Opened in Conductor|in Conductor\.|conductorMark\.svg|sv-open-name">Conductor|^  \.th-host-tile\[data-host="conductor"\] \{/,
       `an ungated Conductor mention: ${line.trim().slice(0, 120)}`);
   }
   assert.ok(fs.existsSync(new URL("../overlay/conductorMark.svg", import.meta.url)));

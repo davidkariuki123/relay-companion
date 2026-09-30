@@ -140,25 +140,27 @@ test("mixed terminal/desktop choices do not leak one provider's surface onto the
 
 test("the copied sentence is always offered: beside the app rows, and alone when no app is on", () => {
   const h = harness();
-  // The reader shows the sentence and copies exactly it.
+  // The reader's bar (2026-09-30): Copy for your agent after the "or", the
+  // sentence it copies as its tooltip rather than a paragraph under the chips.
   let reader = h.relayHostActionsHtml({ id:"relay-test", title:"Privacy notice" }, { persistent: true, sheet: true });
   assert.equal((reader.match(/data-host-open=/g) || []).length, 2);
-  assert.match(reader, /Or tell your agent this:/);
-  const displayed = reader.match(/class="th-pull-q">([^<]+)</)[1];
-  const copied = reader.match(/data-pull-copy="([^"]+)"/)[1];
-  assert.equal(displayed, copied);
+  assert.doesNotMatch(reader, /th-pull|tell your agent this/i);
+  assert.match(reader, /<span class="th-host-or" aria-hidden="true">or<\/span>/);
+  const [, copied, tooltip] = reader.match(/class="th-sheet-copy" type="button" data-pull-copy="([^"]+)" title="([^"]+)"/);
+  assert.equal(tooltip, copied);
   assert.equal(copied, "Pull Taylor’s relay “Privacy notice” from Relay and tell me what’s happening.");
+  assert.match(reader, /<span class="l">Copy for <\/span><span class="l">your agent<\/span>/);
   // A bubble copies the same sentence from its bar, without showing it.
   const bubble = h.relayHostActionsHtml({ id:"relay-test", title:"Privacy notice" });
   assert.equal(bubble.match(/data-pull-copy="([^"]+)"/)[1], copied);
   assert.match(bubble, /title="Pull Taylor’s relay “Privacy notice” from Relay and tell me what’s happening\."[^>]*><span>Copy prompt<\/span><span>for your agent<\/span>/);
   h.saveAgentApps([]);
   reader = h.relayHostActionsHtml({ id:"relay-test", direction:"out" }, { persistent: true, sheet: true });
-  // With no agent app on, Claude and ChatGPT are still offered, so the
-  // sentence is still the "or" (David, 2026-09-17: the four, everywhere).
-  assert.match(reader, /Or tell your agent this:/);
+  // With no agent app on, Claude and ChatGPT are still offered, so Copy is
+  // still the "or" (David, 2026-09-17: the four, everywhere).
+  assert.match(reader, /class="th-host-or"/);
   assert.doesNotMatch(reader, /data-host-open=/);
-  assert.match(reader, /Pull my sent relay/);
+  assert.match(reader, /data-pull-copy="Pull my sent relay/);
   // Nothing switches the sentence off: no apps, another account, a legacy "off" — still offered.
   assert.match(h.relayHostActionsHtml({ id:"relay-test" }), /Copy prompt/);
   h.switchAccount("account-b");
@@ -201,7 +203,7 @@ test("the reader's sheet paints exactly the chips whose switches are on, in its 
   assert.deepEqual(verbs(reader()), ["Open in Claude", "Open in ChatGPT", "Open in Claude Code", "Open in Codex"]);
   assert.match(reader(), /<span class="th-host-lead" aria-hidden="true">Open in<\/span>/);
   assert.doesNotMatch(reader(), /th-host-context|New chat|Choose a chat/, "the chips carry no two-word context");
-  assert.match(reader(), /Or tell your agent this:/);
+  assert.match(reader(), /class="th-host-or"/);
   assert.deepEqual(names(bubble()), ["Claude", "ChatGPT", "Claude Code", "Codex"]);
   assert.doesNotMatch(bubble(), /th-host-sheet/);
   // Settings lists the same four, the same way round, each its own switch.
@@ -211,7 +213,7 @@ test("the reader's sheet paints exactly the chips whose switches are on, in its 
   // Every desktop switch off: the two chat chips remain, nothing else.
   h.saveAgentApps([]);
   assert.deepEqual(labels(reader()), ["Claude", "ChatGPT"]);
-  assert.match(reader(), /Or tell your agent this:/);
+  assert.match(reader(), /class="th-host-or"/);
   // Chat switches off one at a time, the desktop ones back on.
   h.saveAgentApps(["Claude Code", "Codex"]);
   h.setChatAppEnabled("Claude", false);
@@ -242,13 +244,42 @@ test("the reader's sheet paints exactly the chips whose switches are on, in its 
   }
 });
 
+// Shane, approved by David (2026-09-30): the chips as two rows when chat apps
+// and agents are both on — each chat app over its maker's agent, Conductor at
+// the end of the top row (conductor.browser.mjs) — and one row otherwise.
+test("the reader's chips sit in rows: the chat apps over their makers' agents", () => {
+  const h = harness();
+  const cells = (html) => [...html.matchAll(/data-host="([^"]+)" data-row="(\d)" data-col="(\d)"/g)].map((m) => `${m[1]}@${m[2]},${m[3]}`);
+  const reader = () => h.relayHostActionsHtml({ id: "relay-test", title: "Test" }, { persistent: true, sheet: true });
+  assert.deepEqual(cells(reader()), ["claude-app@1,1", "chatgpt@1,2", "claude@2,1", "codex@2,2"]);
+  assert.match(reader(), /class="th-host-grid cols-2"/, "two columns share one width");
+  assert.match(reader(), /class="th-host-sheet"/, "two columns leave room for Copy on one line");
+  // Without Claude's chat app, ChatGPT keeps its column over Codex.
+  h.setChatAppEnabled("Claude", false);
+  assert.deepEqual(cells(reader()), ["chatgpt@1,2", "claude@2,1", "codex@2,2"]);
+  // Only chat apps, or only agents: one row in the offered order.
+  h.setChatAppEnabled("Claude", true);
+  h.saveAgentApps([]);
+  assert.deepEqual(cells(reader()), ["claude-app@1,1", "chatgpt@1,2"]);
+  assert.doesNotMatch(reader(), /cols-2/);
+  h.saveAgentApps(["Claude Code", "Codex"]);
+  h.saveChatApps([]);
+  assert.deepEqual(cells(reader()), ["claude@1,1", "codex@1,2"]);
+});
+
 test("the chips are rectangles with no notch, and the fold is one motion", () => {
   // The chip: an 8px rectangle, mark and name on one line; the lit chip is the
   // selection, so nothing points at it.
-  const sheet = section("  /* The reader's sheet: one line of chips", "  /* One box holds the tiles and, under a hairline, the pull block. */");
+  const sheet = section("  /* The reader's sheet, one bar", "  /* With every app switched off the reader's box");
   assert.match(sheet, /\.th-host-tile \{[^}]*display:inline-flex; align-items:center;[^}]*border-radius:8px;/);
-  assert.match(sheet, /\.th-host-sheet \{ display:flex; flex-wrap:wrap; justify-content:center;/);
+  assert.match(sheet, /\.th-host-sheet \{ display:flex; flex-wrap:wrap; align-items:center;/);
   assert.match(sheet, /\.th-host-lead \{/);
+  // The "or" is a divider across the bar's full height; ChatGPT wears Codex's
+  // blue and Conductor is the neutral chip.
+  assert.match(sheet, /\.th-host-or \{[^}]*align-self:stretch; margin:-8px 0;/);
+  assert.match(sheet, /\.th-host-or::before, \.th-host-or::after \{ content:""; flex:1; width:1px;/);
+  assert.doesNotMatch(sheet, /th-host-tile\[data-host="chatgpt"\]/);
+  assert.match(sheet, /\.th-host-tile\[data-host="conductor"\] \{ --host-color:var\(--ink\);/);
   assert.doesNotMatch(sheet, /pressed::after|hostNotchIn|repeat\(4|th-host-context/);
   assert.doesNotMatch(html, /hostNotchIn/);
   // Pressing the lit chip again folds the picker as one continuous motion
@@ -318,7 +349,7 @@ test("prompt titles cannot inject markup into the visible text or clipboard attr
     const footer = h.relayHostActionsHtml({id:'relay-test',title:'A "quoted" <img src=x> & note'}, { persistent: true, sheet });
     assert.doesNotMatch(footer, /<img src=x>/);
     assert.match(footer, /A &quot;quoted&quot; &lt;img src=x&gt; &amp; note/);
-    if (sheet) assert.equal(footer.match(/class="th-pull-q">([^<]+)</)[1], footer.match(/data-pull-copy="([^"]+)"/)[1]);
+    if (sheet) assert.equal(footer.match(/class="th-sheet-copy"[^>]*title="([^"]+)"/)[1], footer.match(/data-pull-copy="([^"]+)"/)[1]);
     else assert.equal(footer.match(/title="([^"]+)"[^>]*><span>Copy prompt<\/span>/)[1], footer.match(/data-pull-copy="([^"]+)"/)[1]);
   }
 });

@@ -767,7 +767,7 @@ test("the provenance byline is not confined to rows without an agent document", 
 
 test("the room composer prevents duplicate sends, and returns a draft only when the device itself refuses it", () => {
   assert.match(html, /let thReplySending = false;/);
-  assert.match(html, /const threadStateKey = `\$\{isConversationRoomSource\(\) \? String\(threadDetailId\) : String\(thread\.threadId\)\}\$\{slackFocusedThreadId \? `\|slack-thread:\$\{slackFocusedThreadId\}` : ""\}`/);
+  assert.match(html, /const threadStateKey = `\$\{isConversationRoomSource\(\) \? String\(threadDetailId\) : String\(thread\.threadId\)\}\$\{slackFocusedThreadId \? `\|slack-thread:\$\{slackFocusedThreadId\}` : ""\}\$\{focusedReplyRoot \? `\|reply-thread:\$\{replyThreadFocusId\}` : ""\}`/);
   assert.match(html, /if \(thReplySending \|\| chatReplySending\.has\(threadStateKey\)\) return;/);
   assert.match(html, /thQrSend\.disabled = true;/);
   assert.match(html, /chatReplySending\.add\(threadStateKey\)/);
@@ -1022,7 +1022,8 @@ test("opening a conversation reads ALL of it — never a per-message click", () 
   // Letters used to be exempt, waiting for an unfold, so a reader could open a
   // chat, read the thing, come back, and still find it bold with a count on it
   // (David, live 2026-08-13). Opening is reading — every message in the room.
-  assert.match(html, /const sameRoom = room && room\.isGroup/);
+  assert.match(html, /const inThisRoom = \(m\) => room && room\.isGroup/);
+  assert.match(html, /const sameRoom = inThisRoom\(m\);/);
   assert.match(html, /sameDirectParty\(m, partyKey, party\)/);
   assert.match(html, /roomAckIds\.push\(messageId\)/);
   assert.match(html, /persistReadIds\(roomAckIds, \{ afterPaint: true \}\)/);
@@ -1091,7 +1092,7 @@ test("handoffs retain conversation context while a picker choice makes no delive
   assert.match(html, /const documentHostActions = onHuman \? `<div class="rd-host-actions"/);
   assert.match(html, /if \(onAgent\) return relayWorkDockHtml\(r, \{ inline: true \}\)/);
   assert.match(html, /data-handoff="\$\{esc\(r\.id\)\}"/);
-  assert.match(html, /<button type="button" id="qrSend">Relay<\/button>/);
+  assert.match(html, /<button type="button" id="qrSend">Send<\/button>/);
   assert.match(html, /if \(onAgent && !workOn\) return "";/,
     "the agent document ends after its full provider actions when Relay Work is unavailable");
   // And the destination line lives where hand-offs actually happen — inside
@@ -1205,10 +1206,11 @@ test("modern pill reply gestures override the legacy adjacent-anchor suppression
 });
 
 test("the reply chip preserves explicit adjacent replies and quiets only legacy defaults", () => {
-  assert.match(html, /const defaultReplyAnchorIds = defaultReplyAnchorMap\(thread\.msgs\)/);
+  assert.match(html, /const defaultReplyAnchorIds = defaultReplyAnchorMap\(roomMsgsBeforeFold\)/);
   assert.match(html, /const defaults = defaultReplyAnchorIds\.get\(String\(\(message && message\.id\) \|\| ""\)\)/);
   assert.match(html, /if \(!messageHasExplicitReplyGesture\(message\) && defaults && defaults\.has\(parentId\)\) return "";/);
-  assert.match(html, /inReplyToRelayId:r\.id, explicitReply:true/,
+  assert.match(html, /const replyToId = quotedId \|\| r\.id;/);
+  assert.match(html, /inReplyToRelayId:replyToId, explicitReply:true/,
     "the reader reply is visibly anchored on its first optimistic frame");
   assert.match(html, /explicitReply: Boolean\(entry\.inReplyToRelayId\)/,
     "the durable outbox projection retains explicit presentation");

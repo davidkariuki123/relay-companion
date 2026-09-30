@@ -147,7 +147,7 @@ function composer({ files = [], prepare = async () => ({ files: [], attachments:
     threadEditTargets: new Map(), edits, doThEditSave: () => { edits.push(input.value); },
     threadStateKey: "room", thReplySending: false, thQrInput: input, thQrSend: {},
     thread: { ...address, msgs: [] }, chatRoom: null, addressAnchor: address,
-    messageById: new Map(), focusedSlackParent: null, threadDetailFollowSendFor: null,
+    messageById: new Map(), focusedSlackParent: null, focusedReplyRoot: null, threadDetailFollowSendFor: null,
     payload: { features: {} }, crypto: { randomUUID: () => `uuid-${calls.length}` },
     peekStagedFiles: () => files, takeStagedFiles() {}, stageFileList() {},
     composerFilePayloads: prepare, setRowNote() {}, renderThreadDetail() {},

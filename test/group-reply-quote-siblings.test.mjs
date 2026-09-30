@@ -96,7 +96,7 @@ test("a self-copy of my own fan-out carries the same sibling ids as its sent twi
 });
 
 test("the room index resolves a reply's parent through sibling ids and jumps to the kept bubble", () => {
-  const render = html.slice(html.indexOf("const messageById = new Map(thread.msgs.map("), html.indexOf("const composerReplyTargetHtml"));
+  const render = html.slice(html.indexOf("const messageById = new Map(roomMsgsBeforeFold.map("), html.indexOf("const composerReplyTargetHtml"));
   assert.match(render, /for \(const sibling of message\.siblingIds \|\| \[\]\)/, "every sibling id is registered as an alias of its bubble");
   assert.match(render, /if \(siblingId && !messageById\.has\(siblingId\)\) messageById\.set\(siblingId, message\)/, "an alias never shadows a real message id");
   assert.match(render, /const parent = messageById\.get\(parentId\);/, "the reply-ref still resolves through the one index");

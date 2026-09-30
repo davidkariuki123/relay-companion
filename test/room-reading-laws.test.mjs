@@ -322,7 +322,8 @@ test("enabled app rows share the same binder on the bubble and in the reader", (
   assert.match(footer, /const desktopHosts = agentAppHosts\(\)\.filter/);
   assert.match(footer, /const options = hostOptions\(message, source, desktopHosts\);/, "one list of hosts");
   assert.match(footer, /: hostBarHtml\(options, message\);/, "a bubble gets the bar");
-  assert.match(footer, /\+ pullSentenceHtml\(message, \{ hasAppAction: options\.length > 0 \}\)/, "the reader's pull sentence is always offered, and reads Or only beside a host");
+  assert.match(footer, /\? hostSheetHtml\(options, message\) \+ desktopHosts\.map\(\(host\) => sessionPickerInlineHtml\(id, host\)\)\.join\(""\)\n\s+: pullSentenceHtml\(message\)\)/,
+    "the reader's bar carries Copy beside the apps; with no app on, the pull block stands alone");
   assert.match(footer, /sessionPickerInlineHtml/, "the picker unfolds under the selected tile");
   assert.doesNotMatch(footer, /data-host="codex"[\s\S]*?data-host="claude"/, "no fixed pair of rows");
   assert.match(footer, /function wireHostOpen\(scope\)/);
@@ -340,12 +341,13 @@ test("enabled app rows share the same binder on the bubble and in the reader", (
     "provider rows precede the active document's composer");
   assert.match(reader, /wireHostOpen\(readerBodyEl\);/, "the reader binds through the shared binder");
   // The letter keeps its reply — the loudest control on a person's letter.
-  assert.match(reader, /<textarea id="qrInput" rows="1" placeholder="Reply…">/);
+  assert.match(reader, /<textarea id="qrInput" rows="1" placeholder="\$\{replyThread \? "Reply in thread…" : "Reply…"\}">/);
   const humanComposerStart = reader.indexOf('<textarea id="qrInput"');
   const humanComposer = reader.slice(humanComposerStart, reader.indexOf('id="qrSend"', humanComposerStart) + 80);
   assert.doesNotMatch(humanComposer, /data-open-in-host=/,
     "the human reply composer does not duplicate provider actions from the agent face");
-  assert.match(reader, /<button type="button" id="qrSend">Relay<\/button>/);
+  // A reply the person types is a text, so it is Sent; "Relay" names the AI-written kind (Shane, 2026-09-30).
+  assert.match(reader, /<button type="button" id="qrSend">Send<\/button>/);
 });
 
 test("received and sent rows choose a destination before opening", () => {
@@ -356,9 +358,10 @@ test("received and sent rows choose a destination before opening", () => {
   assert.doesNotMatch(wire, /if \(source === "relay"\)/, "sent Relays take the same path as received ones");
   assert.match(footer, /aria-expanded="\$\{pressed\(host\) \? "true" : "false"\}"/, "an agent tile says whether its picker is open under it");
   assert.doesNotMatch(html, /retiredSessionPickerEntry/);
-  // Terminal only: the sentence, and the button that copies exactly it.
+  // The reader's Copy copies exactly the sentence its tooltip shows; with no app on, the sentence is shown beside it.
+  assert.match(footer, /class="th-sheet-copy" type="button" data-pull-copy="\$\{esc\(sentence\)\}" title="\$\{esc\(sentence\)\}">/);
   assert.match(footer, /class="th-pull-q">\$\{esc\(sentence\)\}/);
-  assert.match(footer, /data-pull-copy="\$\{esc\(sentence\)\}">Copy this prompt for your agent<\/button>/);
+  assert.match(footer, /data-pull-copy="\$\{esc\(sentence\)\}">Copy for your agent<\/button>/);
   assert.match(wire, /navigator\.clipboard\.writeText\(b\.getAttribute\("data-pull-copy"\) \|\| ""\)/);
   assert.doesNotMatch(footer.slice(footer.indexOf("function pullSentenceHtml"), footer.indexOf("function wireHostOpen")), /https?:|shareLink|\/i\//,
     "no link in the sentence: the pill is here, so Relay is installed, and the agent pulls by name");

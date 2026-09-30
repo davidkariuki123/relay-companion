@@ -56,8 +56,20 @@ try {
   assert.equal(await tile.count(), 1);
   assert.equal(await tile.getAttribute("aria-label"), "Open in Conductor");
   const hosts = await page.locator("#readerActions .th-host-tile").evaluateAll((tiles) => tiles.map((t) => t.getAttribute("data-host")));
-  assert.equal(hosts.at(-1), "conductor");
-  assert.ok(hosts.includes("claude"), "the agents on this Mac keep their tiles");
+  // Row by row: the chat apps and Conductor, then the agents on this Mac.
+  assert.deepEqual(hosts, ["claude-app", "chatgpt", "conductor", "claude"], "the agents on this Mac keep their tiles");
+  // At the end of the top row, beside ChatGPT (David, 2026-09-30), and the bar still fits the reader's box.
+  assert.equal(await tile.getAttribute("data-row"), "1");
+  assert.equal(await tile.getAttribute("data-col"), "3");
+  const fit = await page.evaluate(() => {
+    const sheet = document.querySelector("#readerActions .th-host-sheet");
+    const box = sheet.getBoundingClientRect();
+    const copy = sheet.querySelector(".th-sheet-copy").getBoundingClientRect();
+    const or = sheet.querySelector(".th-host-or").getBoundingClientRect();
+    return { right: copy.right <= box.right, sameLine: Math.abs((copy.top + copy.bottom) / 2 - (box.top + box.bottom) / 2) < 2, or: or.width };
+  });
+  assert.deepEqual({ right: fit.right, sameLine: fit.sameLine }, { right: true, sameLine: true }, "Copy sits inside the bar, centred beside the chips");
+  assert.ok(fit.or >= 24, "the or divider keeps its room");
 
   // The click hands main the pull sentence and this Relay's id; the note says
   // the next step is in Conductor.
