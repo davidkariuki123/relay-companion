@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import release from "../../packages/companion/bootstrap/application-release.cjs";
@@ -55,16 +56,40 @@ export function startProof({ receipt, receiptFile, artifact, mode, channel, env 
 
 // Selecting a channel can start the installed stock updater. Wait for its
 // transaction instead of erasing its lock to make a test pass.
-export async function waitForOtherTransaction(action, { timeoutMs = 6 * 60_000, delayMs = 5000 } = {}) {
+export async function waitForOtherTransaction(action, { timeoutMs = 6 * 60_000, delayMs = 5000, onFirstWait = () => {} } = {}) {
   const deadline = Date.now() + timeoutMs;
+  let waited = false;
   for (;;) {
     try { return await action(); }
     catch (error) {
       if (!error.message.includes("Another verified Relay install or update is already in progress") || Date.now() >= deadline) throw error;
+      if (!waited) { waited = true; onFirstWait(); }
       console.log("Waiting for the existing stock update transaction to finish");
       await new Promise(resolve => setTimeout(resolve, delayMs));
     }
   }
+}
+
+// Who holds Relay's install and skill locks, and is that process still there?
+// Read-only, on a disposable runner with no account: lock records hold a
+// process id, a nonce and a start time, never a credential.
+export function lockDiagnostics(home, { run = spawnSync, platform = process.platform } = {}) {
+  const locks = [path.join(home, ".relay", "runtime", "transaction.lock")];
+  for (const host of [".claude", ".codex", ".agents"]) {
+    const skills = path.join(home, host, "skills");
+    try { for (const name of fs.readdirSync(skills)) if (/^\..*-update\.lock$/.test(name)) locks.push(path.join(skills, name)); } catch {}
+  }
+  const records = locks.filter(lock => fs.existsSync(lock)).map(lock => ({ lock, files: Object.fromEntries(fs.readdirSync(lock).map(name => {
+    try { return [name, fs.readFileSync(path.join(lock, name), "utf8").slice(0, 2000)]; } catch (error) { return [name, `unreadable: ${error.code}`]; }
+  })) }));
+  const listing = platform === "win32"
+    ? run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
+      "Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'node|electron|relay|wscript|powershell' } | ForEach-Object { '{0} parent={1} started={2} {3} :: {4}' -f $_.ProcessId, $_.ParentProcessId, $(if ($_.CreationDate) { $_.CreationDate.ToUniversalTime().ToString('o') } else { '?' }), $_.Name, $_.CommandLine }"],
+    { encoding: "utf8", windowsHide: true, timeout: 60_000 })
+    : run("ps", ["-eo", "pid,ppid,lstart,args"], { encoding: "utf8", timeout: 30_000 });
+  const processes = String(listing.stdout || listing.error?.message || listing.stderr || "").split(/\r?\n/)
+    .filter(line => platform === "win32" ? line.trim() : /relay|node|electron/i.test(line)).map(line => line.slice(0, 400));
+  return { at: new Date().toISOString(), locks: records, processes };
 }
 
 // The previous native installer exactly as people downloaded it: the immutable

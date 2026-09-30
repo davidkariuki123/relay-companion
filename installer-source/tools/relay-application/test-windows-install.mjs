@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import release from "../../packages/companion/bootstrap/application-release.cjs";
-import { nativeInstallModes, brokenConditions, applyBrokenCondition, downloadPublishedInstaller, startProof, waitForOtherTransaction } from "./native-install-proof.mjs";
+import { nativeInstallModes, brokenConditions, applyBrokenCondition, downloadPublishedInstaller, startProof, waitForOtherTransaction, lockDiagnostics } from "./native-install-proof.mjs";
 const require = createRequire(import.meta.url);
 if (process.platform !== "win32" || process.env.GITHUB_ACTIONS !== "true" || process.env.RUNNER_ENVIRONMENT !== "github-hosted" || !process.env.RUNNER_TEMP) throw new Error("Use a disposable GitHub-hosted Windows runner, never a self-hosted one");
 const args = process.argv.slice(2), arg = name => args[args.indexOf(name) + 1];
@@ -61,7 +61,8 @@ async function removePackage() {
 }
 // Selecting Dev can start the existing stock updater. Do not erase its
 // lock or disable recovery just to make the migration test pass.
-const activate = action => waitForOtherTransaction(() => run(node, [path.join(resources, "activate.cjs"), action, applicationRoot, path.join(applicationRoot, "Relay.exe")]));
+const activate = action => waitForOtherTransaction(() => run(node, [path.join(resources, "activate.cjs"), action, applicationRoot, path.join(applicationRoot, "Relay.exe")]),
+  { onFirstWait: () => { try { console.log(`DIAGNOSTICS at first wait ${JSON.stringify(lockDiagnostics(os.homedir()), null, 1)}`); } catch {} } });
 async function assertHealthy() {
   const current = read(pointerFile);
   assert.equal(current.version, receipt.version); assert.equal(current.active, true);
@@ -143,5 +144,8 @@ try {
   proof.ok = true;
 } catch (error) {
   proof.failure = String(error.message).slice(0, 2000);
+  // Say who held Relay's locks at the moment of failure; a red job that only
+  // says "in progress" cannot be told apart from a stuck or abandoned lock.
+  try { proof.diagnostics = lockDiagnostics(os.homedir()); console.log(`DIAGNOSTICS at failure ${JSON.stringify(proof.diagnostics, null, 1)}`); } catch {}
   throw error;
 } finally { write(); }

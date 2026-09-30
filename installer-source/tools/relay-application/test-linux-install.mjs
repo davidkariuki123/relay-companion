@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import release from "../../packages/companion/bootstrap/application-release.cjs";
-import { nativeInstallModes, brokenConditions, applyBrokenCondition, downloadPublishedInstaller, startProof, waitForOtherTransaction } from "./native-install-proof.mjs";
+import { nativeInstallModes, brokenConditions, applyBrokenCondition, downloadPublishedInstaller, startProof, waitForOtherTransaction, lockDiagnostics } from "./native-install-proof.mjs";
 const require = createRequire(import.meta.url);
 // The Linux counterpart of test-windows-install.mjs: install the retained
 // stock DEB with the package manager, activate through the bundled Node as the
@@ -45,7 +45,8 @@ function installPackage(file) {
   apt(["install", "-y", "-qq", file]);
   assert.ok(fs.existsSync(executable) && fs.existsSync(node) && fs.existsSync(path.join(resources, "candidate.json")));
 }
-const activate = action => waitForOtherTransaction(() => run(node, [path.join(resources, "activate.cjs"), action, applicationRoot, executable]));
+const activate = action => waitForOtherTransaction(() => run(node, [path.join(resources, "activate.cjs"), action, applicationRoot, executable]),
+  { onFirstWait: () => { try { console.log(`DIAGNOSTICS at first wait ${JSON.stringify(lockDiagnostics(os.homedir()), null, 1)}`); } catch {} } });
 async function assertHealthy() {
   const current = read(pointerFile);
   assert.equal(current.version, receipt.version); assert.equal(current.active, true);
@@ -167,5 +168,8 @@ try {
   proof.ok = true;
 } catch (error) {
   proof.failure = String(error.message).slice(0, 2000);
+  // Say who held Relay's locks at the moment of failure; a red job that only
+  // says "in progress" cannot be told apart from a stuck or abandoned lock.
+  try { proof.diagnostics = lockDiagnostics(os.homedir()); console.log(`DIAGNOSTICS at failure ${JSON.stringify(proof.diagnostics, null, 1)}`); } catch {}
   throw error;
 } finally { write(); }
