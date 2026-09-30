@@ -4,9 +4,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { configDir } from "./config.js";
 import atomicJson from "./atomic-json.cjs";
 import * as native from "./native-task-launch.js";
+import conductor from "./conductor.cjs";
 
 const active = new Set();
 const { atomicWriteJsonSync } = atomicJson;
+const { CONDUCTOR_TASK_WAITING, conductorLink, conductorTaskPrompt, isGitRepository } = conductor;
 
 export function executionRecordPath(config, id) {
   return path.join(configDir(), "native-execution", native.executionAccountKey(config), `${createHash("sha256").update(id).digest("hex")}.json`);
@@ -26,6 +28,11 @@ export function pendingNativeDrafts(config) {
   } catch { return []; }
 }
 export function nativeExecutionStatus(record) {
+  // Conductor owns the workspace and the conversation. Relay hears of this
+  // Task again only when the agent there stamps it Started.
+  if (record.session?.provider === "conductor") {
+    return record.phase === "conductor_opened" ? CONDUCTOR_TASK_WAITING : "Conductor launch unconfirmed · run Execute again if nothing opened";
+  }
   if (record.draftError) return `Task not sent · ${record.draftError}`;
   if (record.phase === "draft_opening") return "Claude draft launch unconfirmed · check Claude or open a fresh draft";
   if (record.phase === "awaiting_send") return "Ready in Claude · confirm the folder, then press Send";
@@ -92,17 +99,32 @@ export async function executeNativeTask({ id, config, client, choose, consent, o
       update(record);
       return { ok: true, message: "Opened the existing native conversation. Relay will not submit this Task twice." };
     }
-    if (!record?.session || record.phase === "preparing") {
+    // A Conductor record is a link that was opened, never a conversation Relay
+    // holds: until the agent there stamps the Task Started, Execute asks again.
+    if (!record?.session || record.phase === "preparing" || record.session.provider === "conductor") {
       const options = nativeApi.nativeProviders();
       if (!options.length) throw new Error("Install and sign in to the Codex or Claude desktop app to use Execute.");
       const chosen = await choose(options, nativeApi.executionPreferences(config));
       if (!chosen) return { ok: false, cancelled: true };
       const selected = options.find((option) => option.provider === chosen.provider);
       if (!selected) throw new Error("Choose an installed native provider.");
+      if (selected.provider === "conductor" && !isGitRepository(chosen.cwd)) throw new Error("Conductor works in a Git repository. Choose a repository folder.");
       const brief = await client.fetchRelay(id);
       const title = String((brief.packet || brief.relay || brief).title || "Relay Task").slice(0, 200);
       nativeApi.setExecutionPreferences(config, { cwd: chosen.cwd });
-      save({ phase: "preparing", messageId: randomUUID(), title });
+      save({ phase: "preparing", messageId: randomUUID(), title, ...(record?.session?.provider === "conductor" ? { session: null } : {}) });
+      if (selected.provider === "conductor") {
+        if (!allowed()) throw new Error("Device execution was disabled or the account changed. No prompt was sent.");
+        // The link carries one sentence naming this exact Task, never its
+        // documents. The person reviews Conductor's composer and clicks
+        // Create; the agent there fetches the Task and calls relay_task_start,
+        // which is the only claim. Relay reserves nothing for a session it
+        // cannot see.
+        save({ session: { provider: "conductor", cwd: chosen.cwd }, phase: "conductor_opening", draftError: null });
+        await open(conductorLink({ prompt: conductorTaskPrompt({ id, title }), path: chosen.cwd }));
+        save({ phase: "conductor_opened" });
+        return { ok: true, awaitingCreate: true, message: CONDUCTOR_TASK_WAITING };
+      }
       if (selected.provider === "claude" && nativeApi.claudeLaunchPreflight) {
         const preflight = await nativeApi.claudeLaunchPreflight();
         checkedClaudeCapacity = true;

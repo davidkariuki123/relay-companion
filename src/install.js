@@ -3399,7 +3399,7 @@ export const WINDOWS_STOP_RELAY_SERVICES_PS = [
   "$relaySid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value;",
   "$find={ @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {",
   "  $_.ProcessId -ne $PID -and $_.CommandLine -and ($_.CommandLine -match '[\\\\/]relay-companion[\\\\/]') -and (($_.CommandLine -match '[\\\\/]relay\\.js.*\\bdaemon\\b') -or ($_.CommandLine -match '[\\\\/]overlay[\\\\/]main\\.cjs') -or ($_.CommandLine -match '[\\\\/]mcp-broker-entry\\.js') -or ($_.CommandLine -match '[\\\\/]relay\\.js.*(?:\\s|\")mcp(?:\\s|\"|$)'))",
-  "} | Where-Object { $relayOwner=Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid -ErrorAction Stop; $relayOwner.Sid -eq $relaySid }) }; $p=&$find; for($i=0;$i -lt 3 -and $p.Count;$i++){ foreach($x in $p){ try { Invoke-CimMethod -InputObject $x -MethodName Terminate -ErrorAction Stop | Out-Null } catch {} }; Start-Sleep -Milliseconds 150; $p=&$find }; if($p.Count){ Write-Error ('Relay processes did not stop: '+(($p | ForEach-Object ProcessId) -join ', ')); exit 1 }",
+  "} | Where-Object { $relayOwner=Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid -ErrorAction Stop; $relayOwner.Sid -eq $relaySid }) }; $p=@(&$find); for($i=0;$i -lt 3 -and $p.Count;$i++){ foreach($x in $p){ try { Invoke-CimMethod -InputObject $x -MethodName Terminate -ErrorAction Stop | Out-Null } catch {} }; Start-Sleep -Milliseconds 150; $p=@(&$find) }; if($p.Count){ Write-Error ('Relay processes did not stop: '+(($p | ForEach-Object ProcessId) -join ', ')); exit 1 }",
 ].join(" ");
 
 /**

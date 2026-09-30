@@ -258,12 +258,37 @@ function installRecovery({ packageRoot, node = process.execPath, homeDir = os.ho
     return { ok: registered, node: runtimeNode, bundle, launcher, reason: registered ? null : "recovery-registration-failed", ...(scheduleCleanup ? { scheduleCleanup } : {}) };
   } catch (error) { return { ok: false, reason: "recovery-install-failed", detail: error.message }; }
 }
+// The task runs launch.vbs through wscript, so `schtasks /End` stops only that
+// wrapper; the launcher and runner it started keep running from the recovery
+// folder, and Windows then refuses to delete it (installer recovery failed with
+// EPERM on ~/.relay/recovery, 2026-09-30). Stop everything this user runs from
+// that folder, after the task is gone so nothing relaunches it.
+function windowsStopRecoveryScript(root) {
+  // The trailing separator keeps a sibling such as recovery-old out of the match.
+  const quoted = `'${`${String(root).replace(/[\\/]+$/, "")}\\`.replaceAll("'", "''")}'`;
+  return [
+    "$ErrorActionPreference='Stop';",
+    `$root=${quoted};`,
+    "$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value;",
+    "$inside={ param($text) $text -and $text.IndexOf($root, [StringComparison]::OrdinalIgnoreCase) -ge 0 };",
+    "$find={ @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { $_.ProcessId -ne $PID -and ((& $inside $_.ExecutablePath) -or (& $inside $_.CommandLine)) } | Where-Object { try { (Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid -ErrorAction Stop).Sid -eq $sid } catch { $false } }) };",
+    "$p=@(&$find); for($i=0;$i -lt 10 -and $p.Count;$i++){ foreach($x in $p){ try { Invoke-CimMethod -InputObject $x -MethodName Terminate -ErrorAction Stop | Out-Null } catch {} }; Start-Sleep -Milliseconds 200; $p=@(&$find) };",
+    "if($p.Count){ Write-Error ('Relay recovery processes did not stop: '+(($p | ForEach-Object ProcessId) -join ', ')); exit 1 }",
+  ].join(" ");
+}
 function uninstallRecovery({ homeDir = os.homedir(), platform = process.platform, runCommand = run } = {}) {
   if (platform === "win32") {
-    const present = runCommand("schtasks.exe", ["/Query", "/TN", TASK]);
-    if (!ok(present)) return { ok: true, absent: true };
-    runCommand("schtasks.exe", ["/End", "/TN", TASK]);
-    return { ok: ok(runCommand("schtasks.exe", ["/Delete", "/TN", TASK, "/F"])) };
+    const present = ok(runCommand("schtasks.exe", ["/Query", "/TN", TASK]));
+    if (present) {
+      runCommand("schtasks.exe", ["/End", "/TN", TASK]);
+      const deleted = runCommand("schtasks.exe", ["/Delete", "/TN", TASK, "/F"]);
+      if (!ok(deleted)) return { ok: false, reason: "recovery-stop-failed", detail: commandDetail(deleted) };
+    }
+    // A damaged installation can have a live runner and no task, so sweep either way.
+    const swept = runCommand("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
+      windowsStopRecoveryScript(path.join(homeDir, ".relay", "recovery"))]);
+    if (!ok(swept)) return { ok: false, reason: "recovery-stop-failed", detail: commandDetail(swept) };
+    return present ? { ok: true } : { ok: true, absent: true };
   }
   const files = platform === "darwin"
     ? [path.join(homeDir, "Library", "LaunchAgents", `${LABEL}.plist`)]
@@ -275,4 +300,4 @@ function uninstallRecovery({ homeDir = os.homedir(), platform = process.platform
   for (const file of files) fs.rmSync(file, { force: true });
   return { ok: true };
 }
-module.exports = { installRecovery, uninstallRecovery, windowsRecoveryTaskXml, renameWithRetry, commandDetail, LABEL, TASK };
+module.exports = { installRecovery, uninstallRecovery, windowsRecoveryTaskXml, windowsStopRecoveryScript, renameWithRetry, commandDetail, LABEL, TASK };

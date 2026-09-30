@@ -22,18 +22,22 @@
 // Pure: every fact about the machine is injected so the ranking is testable
 // without one. Claude Code only ever opens a folder it has already been
 // trusted with, so untrusted pairs are left off the list rather than offered
-// and failed a moment later.
+// and failed a moment later. Conductor makes each workspace a git worktree, so
+// it is paired only with folders that are repositories.
 import fs from "node:fs";
 import path from "node:path";
 import { chooseOpenCwd } from "./cwd-select.js";
 import { buildRepoIndex, findCheckouts } from "./repo-index.js";
 import { claudeWorkspaceTrusted } from "./native-task-launch.js";
+import conductor from "./conductor.cjs";
+
+const { isGitRepository } = conductor;
 
 export const MAX_WORKSPACE_OPTIONS = 6;
 export const WORKSPACE_QUESTION = "Where should the agent work?";
 export const WORKSPACE_CAPTION = "It will read and change files in this folder.";
 
-export function providerLabel(provider) { return provider === "codex" ? "Codex" : "Claude Code"; }
+export function providerLabel(provider) { return provider === "codex" ? "Codex" : provider === "conductor" ? "Conductor" : "Claude Code"; }
 export function workspaceName(cwd) {
   const clean = String(cwd || "");
   return clean.split(/[\\/]/).filter(Boolean).pop() || clean;
@@ -73,7 +77,7 @@ export function workspaceChoices({
   senderName = "",
   checkouts = null,
   isDirectory = defaultIsDirectory,
-  trusted = (provider, cwd) => provider !== "claude" || claudeWorkspaceTrusted(cwd),
+  trusted = (provider, cwd) => provider === "conductor" ? isGitRepository(cwd) : provider !== "claude" || claudeWorkspaceTrusted(cwd),
   findCheckoutsFn = null,
   max = MAX_WORKSPACE_OPTIONS,
 } = {}) {

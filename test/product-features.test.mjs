@@ -33,22 +33,22 @@ const PRODUCTION_DEVELOPER_SURFACES = { ...ORDINARY_SURFACES, developerAccount: 
 
 test("developer capabilities require both the server-owned role and a non-production environment", async () => {
   assert.deepEqual(productFeatures({ env: { NODE_ENV: "development" }, user: ORDINARY_USER }), {
-    environment: "local", developer: false, orgAdmin: false, googleContacts: false, requests: true, legacyTaskProtocol: false, cowork: false, ...ORDINARY_SURFACES,
+    environment: "local", developer: false, orgAdmin: false, googleContacts: false, conductor: false, requests: true, legacyTaskProtocol: false, cowork: false, ...ORDINARY_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { NODE_ENV: "development" }, user: DEVELOPER }), {
-    environment: "local", developer: true, orgAdmin: false, googleContacts: true, requests: true, legacyTaskProtocol: true, cowork: false, ...DEVELOPER_SURFACES,
+    environment: "local", developer: true, orgAdmin: false, googleContacts: true, conductor: true, requests: true, legacyTaskProtocol: true, cowork: false, ...DEVELOPER_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { RELAY_UPDATE_CHANNEL: "dev" }, user: DEVELOPER }), {
-    environment: "dev", developer: true, orgAdmin: false, googleContacts: true, requests: true, legacyTaskProtocol: true, cowork: false, ...DEVELOPER_SURFACES,
+    environment: "dev", developer: true, orgAdmin: false, googleContacts: true, conductor: true, requests: true, legacyTaskProtocol: true, cowork: false, ...DEVELOPER_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { RELAY_UPDATE_CHANNEL: "staging" }, user: DEVELOPER }), {
-    environment: "staging", developer: false, orgAdmin: false, googleContacts: false, requests: true, legacyTaskProtocol: false, cowork: false, ...PRODUCTION_DEVELOPER_SURFACES,
+    environment: "staging", developer: false, orgAdmin: false, googleContacts: false, conductor: false, requests: true, legacyTaskProtocol: false, cowork: false, ...PRODUCTION_DEVELOPER_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { RELAY_ENV: "staging" }, user: DEVELOPER }), {
-    environment: "staging", developer: false, orgAdmin: false, googleContacts: false, requests: true, legacyTaskProtocol: false, cowork: false, ...PRODUCTION_DEVELOPER_SURFACES,
+    environment: "staging", developer: false, orgAdmin: false, googleContacts: false, conductor: false, requests: true, legacyTaskProtocol: false, cowork: false, ...PRODUCTION_DEVELOPER_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: {}, user: DEVELOPER }), {
-    environment: "production", developer: false, orgAdmin: false, googleContacts: false, requests: true, legacyTaskProtocol: false, cowork: false, ...PRODUCTION_DEVELOPER_SURFACES,
+    environment: "production", developer: false, orgAdmin: false, googleContacts: false, conductor: false, requests: true, legacyTaskProtocol: false, cowork: false, ...PRODUCTION_DEVELOPER_SURFACES,
   });
   for (const environment of ["local", "dev", "staging", "production"]) {
     assert.ok(!Object.hasOwn(productFeatures({ env: { RELAY_ENV: environment }, user: DEVELOPER }), "todo"), "the Todo feature is removed on every row");

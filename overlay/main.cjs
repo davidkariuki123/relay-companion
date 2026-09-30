@@ -135,6 +135,7 @@ const {
 } = require("./host-select.cjs");
 const { parseRelayDeepLink, relayDeepLinkFromArgv, relayDeepLinkFailureStatus } = require("./deep-link.cjs");
 const { chatAppTargets } = require("./chat-app-open.cjs");
+const { conductorAvailability, conductorLink, isGitRepository } = require("../src/conductor.cjs");
 const {
   overlayWanted,
   createHostRunningTracker,
@@ -870,9 +871,15 @@ const executeOffers = new Map();
 function nativeExecutionSummary(rows) {
   if (!currentProductFeatures().taskExecution || !nativeTaskModules) return {};
   const config = readConfigFile();
+  const conductorOn = currentProductFeatures().conductor === true;
   return Object.fromEntries(rows.flatMap((row) => {
     const record = nativeTaskModules.execute.executionRecord(config, row.id);
     if (!record?.session) return [];
+    // A Conductor record is only "a link was opened". Once the agent there has
+    // stamped the Task, the server's record is the state and this one retires;
+    // an account that lost the Conductor row never sees it named.
+    if (record.session.provider === "conductor"
+      && (!conductorOn || row.taskStartedAt || row.taskCompletedAt || row.taskRejectedAt || row.taskCancelledAt)) return [];
     const status = nativeTaskModules.execute.nativeExecutionStatus(record);
     return [[row.id, { phase: record.phase, provider: record.session.provider, status }]];
   }));
@@ -918,8 +925,14 @@ async function executeTaskInNativeApp(event, id, choice) {
     let offered = null;
     let packetPromise = null;
     const packetFor = () => (packetPromise ||= client.fetchRelay(key).then((response) => response.packet || response.relay || response).catch(() => null));
+    // Conductor joins the apps Execute offers only where it is installed and
+    // the account has its row, asked at the click like every other check here.
+    const conductorOffered = conductorUsable();
+    const nativeApi = conductorOffered
+      ? { ...modules.launch, nativeProviders: (...args) => [...modules.launch.nativeProviders(...args), { provider: "conductor", label: "Conductor" }] }
+      : modules.launch;
     const result = await modules.execute.executeNativeTask({
-      id: key, config: executionConfig, client,
+      id: key, config: executionConfig, client, nativeApi,
       isCurrentAccount: () => accountFeatureKey(snapshot) === accountFeatureKey(featureAccountSnapshot()),
       open: (url) => shell.openExternal(url),
       confirmDraftRetry: async () => {
@@ -933,7 +946,7 @@ async function executeTaskInNativeApp(event, id, choice) {
       consent: async () => {
         const answer = await dialog.showMessageBox(win, {
           type: "question", title: "Enable device execution?", message: "Let Relay start work on this device?",
-          detail: "Work starts only when you ask: Execute on a Task here, or a message to your agent from another of your devices. Relay opens the Task in your Codex or Claude Code app, which runs it with its own permissions and your subscription. Relay reads that session to show progress. Turn this off any time in Relay Settings; work already running carries on. Developer preview.",
+          detail: `Work starts only when you ask: Execute on a Task here, or a message to your agent from another of your devices. Relay opens the Task in your Codex or Claude Code app, which runs it with its own permissions and your subscription. Relay reads that session to show progress.${conductorOffered ? " In Conductor, Relay opens a new workspace with the Task named in its prompt; you click Create there, and the agent reports progress to Relay itself." : ""} Turn this off any time in Relay Settings; work already running carries on. Developer preview.`,
           buttons: ["Cancel", "Enable device execution"], defaultId: 0, cancelId: 0,
         });
         return answer.response === 1;
@@ -4869,6 +4882,71 @@ async function openChatApp(chatApp, prompt) {
   } catch (error) {
     console.error("[overlay] chat app web fallback failed:", error && error.message);
     return { ok: false, via: "web" };
+  }
+}
+
+/**
+ * Conductor (developer preview). It is offered only where both hold: the
+ * account has the Conductor row, and the OS says an app on this Mac owns
+ * conductor://. Asked at every use, never remembered, so a person without
+ * Conductor is never shown an option that goes nowhere.
+ */
+function conductorCapability() {
+  return conductorAvailability({
+    platform: process.platform,
+    schemeOwner: (scheme) => app.getApplicationNameForProtocol(scheme),
+  });
+}
+function conductorUsable() {
+  return currentProductFeatures().conductor === true && conductorCapability().available === true;
+}
+
+// The repository Conductor should start the workspace from: this machine's own
+// checkout of the repo the Relay is about, through the same passport lookup
+// every open uses (src/cwd-select.js). A Relay about no repo, or about one
+// this Mac lacks, names none, and Conductor's composer keeps its own choice.
+async function conductorRepositoryFor(row) {
+  if (!row) return "";
+  const [{ chooseOpenCwd }, { findCheckouts }] = await Promise.all([import("../src/cwd-select.js"), import("../src/repo-index.js")]);
+  const route = chooseOpenCwd({ row, findCheckoutsFn: (repo) => findCheckouts(repo), allowUnanchoredFallback: false });
+  return route.openable && isGitRepository(route.cwd) ? route.cwd : "";
+}
+
+/**
+ * The Conductor tile in the reader or a room bubble. Relay cannot write a
+ * conversation into Conductor the way it does for Claude and Codex; it opens
+ * Conductor's new-workspace composer with the sentence filled in, and the
+ * person clicks Create there. The agent in that workspace has Relay's tools
+ * and fetches the Relay itself, so nothing of the letter rides the link and
+ * the row is not acknowledged: nothing has been read yet.
+ */
+async function openInConductor(relayId, prompt) {
+  if (!conductorUsable()) return { ok: false, error: "Conductor is not available on this computer." };
+  const id = String(relayId || "");
+  if (!id) return { ok: false, error: "Could not open this Relay in Conductor." };
+  let repository = "";
+  try {
+    repository = await conductorRepositoryFor(rowById(id));
+  } catch (error) {
+    console.error("[overlay] Conductor repository lookup failed:", error && error.message);
+  }
+  let url;
+  try {
+    url = conductorLink({ prompt, path: repository });
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+  // Sandboxed harness runs must never pop the user's real apps.
+  if (process.env.RELAY_OVERLAY_TEST_NO_HOST_OPEN === "1") {
+    console.error("[overlay] test seam: suppressed external open:", url);
+    return { ok: true, repository, suppressed: true };
+  }
+  try {
+    await shell.openExternal(url);
+    return { ok: true, repository };
+  } catch (error) {
+    console.error("[overlay] Conductor open failed:", error && error.message);
+    return { ok: false, error: "Conductor did not open. Check that it is installed, then try again." };
   }
 }
 
@@ -8981,6 +9059,7 @@ ipcMain.handle("relay:preview:steer", (event, input) => {
 ipcMain.on("relay:openTask", (_e, taskId) => openTaskDetail(taskId));
 ipcMain.on("relay:openUrl", (_e, url) => openUrlTarget(url));
 ipcMain.handle("relay:openChatApp", (_e, chatApp, prompt) => openChatApp(String(chatApp || ""), String(prompt || "")));
+ipcMain.handle("relay:openInConductor", (_e, relayId, prompt) => openInConductor(String(relayId || ""), String(prompt || "")));
 ipcMain.handle("relay:openAttachment", (_e, relayId, attachmentId) => openRelayAttachment(relayId, attachmentId));
 ipcMain.handle("relay:previewAttachment", (_e, relayId, attachmentId) => previewRelayAttachment(relayId, attachmentId));
 // Attachments open in a Relay viewer window, are saved as a set, are revealed,
@@ -9276,8 +9355,16 @@ ipcMain.handle("relay:capabilities", async () => {
     console.error("[overlay] capability probe failed:", error && error.message);
     capabilitiesCache = null;
   }
-  return capabilitiesCache || {};
+  return withConductorCapability(capabilitiesCache || {});
 });
+// Whether Conductor is on this computer is a fact about the machine, so it
+// rides the same answer; whether this account is offered it is the payload's
+// features.conductor, which the renderer reads like every other feature row,
+// and which main checks again at each use (conductorUsable).
+function withConductorCapability(surfaces) {
+  if (!Object.keys(surfaces).length) return surfaces;
+  return { ...surfaces, Conductor: conductorCapability() };
+}
 ipcMain.handle("relay:contacts", () => readContacts());
 const googleContactsUnavailable = () => ({ ok: false, error: "Google contacts are available only in Relay Dev." });
 ipcMain.handle("relay:googleContactsStatus", () => currentProductFeatures().googleContacts === true

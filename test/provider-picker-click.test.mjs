@@ -104,7 +104,7 @@ test("the footer renders destination choice even when the Relay already has a ta
     payload: { nativeExecutions: {} },
     esc: String, REDUCED: true,
     sessionPickerState: { id: "fixture", provider: "codex", motion: "open" },
-    agentAppHosts: () => ["codex", "claude"], agentOpensInApp: () => true, chatAppEnabled: () => true,
+    agentAppHosts: () => ["codex", "claude"], agentOpensInApp: () => true, chatAppEnabled: () => true, conductorEnabled: () => false,
     pullSentenceHtml: () => "", pullSentenceFor: () => "", // the sentence is always offered; this test is about the picker rows
     sessionPickerBodyHtml: () => '<button data-sp-new>New task</button><button data-session-id="chosen">Existing task</button>',
   });

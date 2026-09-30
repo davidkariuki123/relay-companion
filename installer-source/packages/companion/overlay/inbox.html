@@ -8120,12 +8120,12 @@
     let next = null;
     try { next = await window.relay.capabilities(); } catch { next = null; }
     if (!next || typeof next !== "object" || !Object.keys(next).length) return;
-    const before = JSON.stringify(agentAppSelection());
+    const before = JSON.stringify([agentAppSelection(), conductorAvailable()]);
     agentSurfaces = next;
     // The effective app can change with the answer (nothing saved, only Codex
     // here): repaint whatever names it — Settings' rows or a room's verbs.
     if (activeView === "settings") renderSettings();
-    else if (JSON.stringify(agentAppSelection()) !== before) renderAll();
+    else if (JSON.stringify([agentAppSelection(), conductorAvailable()]) !== before) renderAll();
   }
   // Independent agent switches (David, 2026-09-08). Preserve earlier choices,
   // but keep new choices account-scoped and never replace an unavailable app
@@ -8191,6 +8191,24 @@
     const selected = new Set(chatAppSelection());
     if (enabled) selected.add(app); else selected.delete(app);
     saveChatApps([...selected]);
+  }
+  // CONDUCTOR (developer preview, Shane, 2026-09-30). A Mac app that runs
+  // Claude Code and Codex in workspaces of its own, so it is a fifth tile and
+  // not a third agent: it takes the sentence, like a chat app, and the agent
+  // in the new workspace fetches the Relay with Relay's tools. It exists here
+  // only while the account has the Conductor row AND main says Conductor is
+  // on this computer; without both there is no tile, no switch and no word of
+  // it. Its own key, on until the person turns it off, like the chat apps.
+  function conductorAvailable() {
+    return payload.features?.conductor === true && agentSurfaces?.Conductor?.available === true;
+  }
+  function conductorPreferenceKey() { return `proto.conductorApp.v1:${signupAccountKey()}`; }
+  function conductorEnabled() {
+    return conductorAvailable() && protoPref(conductorPreferenceKey(), "on") !== "off";
+  }
+  function setConductorEnabled(enabled) {
+    if (!signupAccountKey() || !conductorAvailable()) return;
+    setProtoPref(conductorPreferenceKey(), enabled ? "on" : "off");
   }
   function agentAppName() {
     const selected = agentAppSelection();
@@ -9019,8 +9037,8 @@
     if (!pick) return "";
     const disabled = st.busy ? " disabled" : "";
     const nameOf = (option) => option.name || String(option.cwd || "").split(/[\\/]/).filter(Boolean).pop() || option.label || "";
-    const appOf = (option) => option.app || (option.provider === "codex" ? "Codex" : "Claude Code");
-    const markOf = (option) => option.provider === "codex" ? "codexMark.svg" : "claudeCodeMark.svg";
+    const appOf = (option) => option.app || (option.provider === "codex" ? "Codex" : option.provider === "conductor" ? "Conductor" : "Claude Code");
+    const markOf = (option) => option.provider === "codex" ? "codexMark.svg" : option.provider === "conductor" ? "conductorMark.svg" : "claudeCodeMark.svg";
     const rows = (pick.options || []).map((option) => `<button class="xp-row" type="button" data-execute-pick="${esc(st.id)}" data-provider="${esc(option.provider)}" data-cwd="${esc(option.cwd)}" title="${esc(option.cwd)}"${disabled}><img class="xp-mark" src="${markOf(option)}" alt=""><span class="xp-name">${esc(nameOf(option))}<span class="xp-app">${esc(appOf(option))}</span></span>${option.why ? `<span class="xp-why">${esc(option.why)}</span>` : ""}</button>`).join("");
     const browse = (pick.browse || []).map((option) => `<button class="xp-chip" type="button" data-execute-pick="${esc(st.id)}" data-provider="${esc(option.provider)}" data-browse="1" title="${esc(option.label || "")}"${disabled}><img class="xp-mark" src="${markOf(option)}" alt="">${esc(appOf(option))}</button>`).join("");
     return `<div class="tk-execute-pick" data-stop="1"><div class="tk-execute-ask"><span class="tk-execute-title">${esc(pick.question || "Where should the agent work?")}</span><span class="tk-execute-caption">${esc(pick.caption || "It will read and change files in this folder.")}</span><button type="button" class="act-btn decline tk-execute-cancel" data-execute-cancel="${esc(st.id)}">Cancel</button></div><div class="xp-rows">${rows}</div>${browse ? `<div class="xp-browse"><span class="xp-browse-label">Another folder…</span>${browse}</div>` : ""}</div>`;
@@ -15964,6 +15982,24 @@
     window.relay.openUrl(key === "chatgpt" ? `https://chatgpt.com/?q=${q}&mode=work` : `https://claude.ai/new?q=${q}`);
     return Promise.resolve({ ok: true, via: "web" });
   }
+  // What Conductor's new workspace is told: the pull sentence every agent on
+  // this Mac understands, with the Relay's own id so the agent opens exactly
+  // this one. Main builds the link and picks the repository
+  // (src/conductor.cjs); the person clicks Create in Conductor, so the note
+  // says where the next step is rather than claiming the Relay was opened.
+  function conductorPromptFor(message) {
+    const id = String(message && message.id || "");
+    return `${pullSentenceFor(message)}${/^relay_[A-Za-z0-9_]+$/.test(id) ? ` Its Relay id is ${id}.` : ""}`;
+  }
+  async function openInConductor(id, message) {
+    if (!id || !window.relay.openInConductor) return;
+    clearRowNote(id);
+    let result;
+    try { result = await window.relay.openInConductor(id, conductorPromptFor(message)); }
+    catch { result = { ok: false }; }
+    if (result?.ok) setRowNote(id, "Opened in Conductor. Click Create there to start.", "ok");
+    else setRowNote(id, result?.error || "Could not open this Relay in Conductor.", "err");
+  }
   // The four, in one order everywhere: the chat apps, then the agents on this
   // Mac whose app is on. A chat app opens a new chat with the sentence; an
   // agent's tile carries the picker's attributes, and in the reader the tile
@@ -15982,6 +16018,7 @@
       ...(chatAppEnabled("ChatGPT") ? [app("chatgpt", "chatgptMark.svg", "ChatGPT", "chatgpt")] : []),
       ...(desktopHosts.includes("claude") ? [agent("claude", "claudeCodeMark.svg", "Claude Code")] : []),
       ...(desktopHosts.includes("codex") ? [agent("codex", "codexMark.svg", "Codex")] : []),
+      ...(conductorEnabled() ? [app("conductor", "conductorMark.svg", "Conductor", "conductor")] : []),
     ];
   }
   // One line of chips (David, 2026-09-17): "Open in" once, then each app as a
@@ -16077,6 +16114,7 @@
         e.stopPropagation();
         const id = b.getAttribute("data-app-open");
         const message = readerRow(id) || relayById(id) || { id };
+        if (b.getAttribute("data-app") === "conductor") { openInConductor(id, message); return; }
         openChatApp(b.getAttribute("data-app"), message);
       });
     }
@@ -17916,7 +17954,9 @@
   // the agents on this Mac. Each row is a switch that decides one tile of the
   // reader's sheet and one of the bubble's bar; all four begin on, and all
   // four can go off. There is no Other row: the copied sentence is always
-  // offered, so it has nothing to switch (David, 2026-09-16).
+  // offered, so it has nothing to switch (David, 2026-09-16). Conductor is a
+  // fifth row only where conductorAvailable(); everywhere else the page is
+  // the four.
   function yourAgentHtml() {
     const selected = agentAppSelection();
     return `
@@ -17952,6 +17992,11 @@
               <button class="sv-switch" type="button" role="switch" data-agent-app="${app}" aria-checked="${on ? "true" : "false"}" aria-label="Open Relays with ${app}"${!available ? " disabled" : ""}></button>
             </div>`;
           }).join("")}
+          ${conductorAvailable() ? `<div class="sv-open-row">
+              <img class="sv-open-logo" src="conductorMark.svg" alt="" />
+              <span class="sv-open-copy"><span class="sv-open-name">Conductor</span><span class="sv-open-why">A new workspace per relay</span></span>
+              <button class="sv-switch" type="button" role="switch" data-conductor-app="1" aria-checked="${conductorEnabled() ? "true" : "false"}" aria-label="Open Relays with Conductor"></button>
+            </div>` : ""}
         </div>
       </div>`;
   }
@@ -18195,6 +18240,13 @@
       button.addEventListener("click", (e) => {
         e.stopPropagation();
         setChatAppEnabled(button.getAttribute("data-chat-app"), button.getAttribute("aria-checked") !== "true");
+        renderSettings();
+      });
+    }
+    for (const button of settingsViewEl.querySelectorAll("[data-conductor-app]")) {
+      button.addEventListener("click", (e) => {
+        e.stopPropagation();
+        setConductorEnabled(button.getAttribute("aria-checked") !== "true");
         renderSettings();
       });
     }

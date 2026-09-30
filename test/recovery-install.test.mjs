@@ -6,7 +6,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { installRecovery, uninstallRecovery, windowsRecoveryTaskXml, renameWithRetry, LABEL, TASK } from "../bootstrap/recovery-install.cjs";
+import { installRecovery, uninstallRecovery, windowsRecoveryTaskXml, windowsStopRecoveryScript, renameWithRetry, LABEL, TASK } from "../bootstrap/recovery-install.cjs";
 
 test("real host Node preserves and verifies the complete recovery engine before native registration", { skip: process.platform !== "darwin" }, t => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-watchdog-real-node-"));
@@ -151,6 +151,59 @@ test("Windows recovery task registers from XML that starts and keeps running on 
   const script = path.join(homeDir, ".relay", "recovery", "launch.vbs");
   assert.ok(xml.includes(`<Arguments>//B &quot;${script}&quot;</Arguments>`), "the hidden launcher script is the task action");
   assert.ok(fs.existsSync(script));
+});
+
+test("Windows recovery uninstall stops the processes the task end leaves running", t => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-recovery-uninstall-"));
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  const root = path.join(homeDir, ".relay", "recovery");
+  for (const taskPresent of [true, false]) {
+    const calls = [];
+    const result = uninstallRecovery({ homeDir, platform: "win32", runCommand: (command, args) => {
+      calls.push([command, args[0] === "-NoProfile" ? "sweep" : args[0]]);
+      if (args[0] === "-NoProfile") assert.equal(args.at(-1), windowsStopRecoveryScript(root));
+      return { status: args[0] === "/Query" && !taskPresent ? 1 : 0 };
+    } });
+    assert.deepEqual(result, taskPresent ? { ok: true } : { ok: true, absent: true });
+    assert.deepEqual(calls.map(call => call.join(" ")), taskPresent
+      ? ["schtasks.exe /Query", "schtasks.exe /End", "schtasks.exe /Delete", "powershell.exe sweep"]
+      : ["schtasks.exe /Query", "powershell.exe sweep"], "the sweep runs after the task can no longer relaunch it");
+  }
+  const failed = uninstallRecovery({ homeDir, platform: "win32", runCommand: (command, args) =>
+    args[0] === "-NoProfile" ? { status: 1, stderr: "Relay recovery processes did not stop: 42" } : { status: 0 } });
+  assert.equal(failed.ok, false);
+  assert.equal(failed.reason, "recovery-stop-failed");
+  assert.match(failed.detail, /did not stop: 42/);
+  assert.match(windowsStopRecoveryScript("C:\\Users\\o'brien\\.relay\\recovery"), /\$root='C:\\Users\\o''brien\\\.relay\\recovery\\';/);
+});
+
+test("Windows process sweeps keep a single match as a list", async () => {
+  // PowerShell 5.1 unrolls a one-item result into a CimInstance whose .Count is
+  // empty, so a lone surviving process was never terminated and still passed.
+  const { WINDOWS_STOP_RELAY_SERVICES_PS } = await import("../src/install.js");
+  for (const script of [WINDOWS_STOP_RELAY_SERVICES_PS, windowsStopRecoveryScript("C:\\Users\\x\\.relay\\recovery")]) {
+    assert.doesNotMatch(script, /\$p=&\$find/);
+    assert.equal(script.match(/\$p=@\(&\$find\)/g)?.length, 2);
+  }
+});
+
+test("Windows recovery sweep terminates this user's process running from the recovery folder only", { skip: process.platform !== "win32" }, async t => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-recovery-sweep-"));
+  const root = path.join(homeDir, ".relay", "recovery");
+  const sibling = path.join(homeDir, ".relay", "recovery-other");
+  fs.mkdirSync(root, { recursive: true }); fs.mkdirSync(sibling, { recursive: true });
+  const script = "setInterval(() => {}, 1000)";
+  fs.writeFileSync(path.join(root, "launch.cjs"), script); fs.writeFileSync(path.join(sibling, "launch.cjs"), script);
+  const { spawn } = await import("node:child_process");
+  const inside = spawn(process.execPath, [path.join(root, "launch.cjs")], { stdio: "ignore", windowsHide: true });
+  const outside = spawn(process.execPath, [path.join(sibling, "launch.cjs")], { stdio: "ignore", windowsHide: true });
+  t.after(() => { outside.kill(); inside.kill(); fs.rmSync(homeDir, { recursive: true, force: true, maxRetries: 5 }); });
+  const exited = new Promise(resolve => inside.once("exit", resolve));
+  const swept = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", windowsStopRecoveryScript(root)], { encoding: "utf8", windowsHide: true, timeout: 60_000 });
+  assert.equal(swept.status, 0, swept.stderr);
+  await exited;
+  assert.equal(outside.exitCode, null, "a folder that merely shares the prefix is left alone");
+  fs.rmSync(root, { recursive: true });
 });
 
 test("Windows recovery task XML is deterministic for a given start time", () => {

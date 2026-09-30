@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repository": "davidkariuki123/relay",
-  "sourceSha": "62343cd1d75ba4e0f5bdc516acea168d63c71b64",
+  "sourceSha": "8d22c849e0443f80bea88001116f0ee7bcbe8d74",
   "files": {
     "packages/companion/bootstrap/application-bridge.cjs": "19fd2c791512a065dd2de165a34f92bb53fe1b3d",
     "packages/companion/bootstrap/application-handoff.cjs": "8fc7cda415432706ddc06fa6adf71bfcf2b78a33",
@@ -30,7 +30,7 @@
     "packages/companion/bootstrap/owned-node-runtime.cjs": "3d839f465fd906d5010138669d8b698aa215af4d",
     "packages/companion/bootstrap/recovery-client.cjs": "5049fe3a348064bd27b7edf91ecd19e3259b0689",
     "packages/companion/bootstrap/recovery-config.cjs": "65f28ce3bb1abc54e291f72be59567874f793a51",
-    "packages/companion/bootstrap/recovery-install.cjs": "4e18811fceddde7df26b891294f418a25fd75da5",
+    "packages/companion/bootstrap/recovery-install.cjs": "3c8b2fdd0671ed7872d3b875a9d47d4aa2a33095",
     "packages/companion/bootstrap/recovery-intent.cjs": "df7bd236bfd8f430a5ff3bfbd641de84213eec2b",
     "packages/companion/bootstrap/recovery-launcher.cjs": "c20bd8f7756e848092611cfc47ab1b2c1802f3e4",
     "packages/companion/bootstrap/recovery-local.cjs": "f50ca7688973a1381b03dc6b21b54a7899643042",
@@ -59,7 +59,7 @@
     "packages/companion/overlay/fonts/newsreader-var.woff2": "8cd8effc477a72510cf1e0f8099a425dc87213cd",
     "packages/companion/overlay/fonts/plexmono-400.woff2": "52b6c7595dd5e2106676e7c52fcff18539607879",
     "packages/companion/overlay/fonts/plexmono-500.woff2": "3308bce2432c298817ed344eeac33007c83cecd0",
-    "packages/companion/overlay/inbox.html": "008ee7f757c4421351d1811adf6208bb3f8baf6c",
+    "packages/companion/overlay/inbox.html": "b0cd44f6c79d793dc6a45a4e37c9e19f65eb9a9e",
     "packages/companion/overlay/relay-anyone-tip.cjs": "b582285f7cfc241bf571226eec78d04699b9bebf",
     "packages/companion/overlay/relayAppIcon.svg": "cec4bcc14a3397cfb60048da2cad086aae66ad9c",
     "packages/companion/package.json": "98c720207d1ba3e0aa5f6fb88926e07f112caa83",

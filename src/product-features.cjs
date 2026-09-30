@@ -58,6 +58,10 @@ function productFeatures(options = {}) {
     // Native Task launch is the first developer-account-tier capability: a
     // developer on any deployment, never an ordinary account.
     taskExecution: developerAccount,
+    // Conductor as a place to open a Relay or run a Task (Shane, 2026-09-30).
+    // Proven by the developers on dev first, and only ever offered on a
+    // computer where Conductor is installed (src/conductor.cjs).
+    conductor: developer,
     // The pre-Requests task protocol (/v1/tasks, the agent inbox, task
     // sessions) the daemon polls and relay_task_create drives. Its routes
     // stay behind the developer gate on the server.
