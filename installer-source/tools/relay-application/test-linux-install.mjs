@@ -27,7 +27,8 @@ if (receipt.distribution !== "application" || !receipt.activationEnabled || rece
   || receipt.packagingSourceSha !== (process.env.CANDIDATE_SOURCE_SHA || process.env.GITHUB_SHA) || receipt.platform !== `linux-${process.arch}`) throw new Error("Wrong activating candidate");
 const run = (file, parts, options = {}) => {
   const r = spawnSync(file, parts, { encoding: "utf8", timeout: 15 * 60000, maxBuffer: 8 * 1024 * 1024, ...options });
-  if (r.error || r.status !== 0) throw new Error(`${path.basename(file)} failed: ${r.error?.message || r.stderr || r.stdout}`);
+  // A failing step names its reason on stderr and the steps it took on stdout; keep both.
+  if (r.error || r.status !== 0) throw new Error(`${path.basename(file)} failed: ${r.error?.message || [r.stderr, r.stdout].filter(Boolean).join("\n").slice(-6000)}`);
   return r.stdout;
 };
 const entries = Object.fromEntries(["deb", "rpm"].map(kind => [kind, receipt.artifacts.find(item => (item.filename || item.artifact).endsWith(`.${kind}`))]));

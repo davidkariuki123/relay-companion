@@ -27,7 +27,8 @@ const run = (file, parts, options = {}) => {
   console.log(JSON.stringify({ running: path.basename(file), action: parts[0] }));
   const r = spawnSync(file, parts, { encoding: "utf8", windowsHide: true, timeout: 15 * 60000, maxBuffer: 8 * 1024 * 1024,
     shell: /\.cmd$/.test(file), ...options });
-  if (r.error || r.status !== 0) throw new Error(`${path.basename(file)} failed: ${r.error?.message || r.stderr || r.stdout}`);
+  // A failing step names its reason on stderr and the steps it took on stdout; keep both.
+  if (r.error || r.status !== 0) throw new Error(`${path.basename(file)} failed: ${r.error?.message || [r.stderr, r.stdout].filter(Boolean).join("\n").slice(-6000)}`);
   return r.stdout;
 };
 const applicationRoot = path.join(process.env.LOCALAPPDATA, "Programs", "Relay");
