@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const { installFromApplication, reconcileApplication } = require("./installer/bootstrap/application-install.cjs");
 const { uninstallFromApplication } = require("./installer/bootstrap/application-uninstall.cjs");
-const [action, applicationRoot, executable] = process.argv.slice(2);
+const [action, applicationRoot, executable, recoveryMode] = process.argv.slice(2);
 if (!["install", "reconcile", "uninstall", "uninstall-package"].includes(action) || !path.isAbsolute(applicationRoot || "") || !path.isAbsolute(executable || "")) {
   throw new Error("Invalid application setup command");
 }
@@ -33,7 +33,7 @@ const onProgress = progress => {
 };
 (action === "reconcile" ? reconcileApplication() : ["uninstall", "uninstall-package"].includes(action)
   ? uninstallFromApplication({ applicationRoot, confirmed: true, allowUnconfigured: action === "uninstall-package" })
-  : installFromApplication({ resourcesDir, applicationRoot, executable, activationEnabled: true, onProgress, signal: controller.signal }))
+  : installFromApplication({ resourcesDir, applicationRoot, executable, activationEnabled: true, allowRecovery: recoveryMode !== "--preserve-state", onProgress, signal: controller.signal }))
   .then((result) => { if (result.ok === false) throw new Error(result.reason || result.state); })
   .catch((error) => { console.error(error.message); process.exitCode = controller.signal.aborted ? 2 : 1; })
   .finally(() => { process.removeListener("message", onMessage); if (process.connected) process.disconnect(); });

@@ -1,0 +1,212 @@
+name: Build and verify Windows and Linux installers
+run-name: Native candidate ${{ inputs.application_version }} ${{ inputs.source_sha }} ${{ inputs.channel }}
+
+# The Windows and Linux counterpart of build-mac-installer.yml. Standard hosted
+# runners are free in this public repository, so every candidate is packaged
+# here from the exported installer source and then installed for real on
+# disposable runners. Nothing is signed or published and no channel moves: the
+# private publishers accept these installers only after reading this run's
+# sixteen install proofs.
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact private source exported into installer-source
+        required: true
+        type: string
+      runtime_version:
+        description: Exact published signed runtime version
+        required: true
+        type: string
+      runtime_source_sha:
+        description: Public source from the signed runtime manifest
+        required: true
+        type: string
+      application_version:
+        description: Exact outer installer version
+        required: true
+        type: string
+      channel:
+        type: choice
+        options: [dev, stable]
+        default: dev
+      baseline_version:
+        description: Current stock installer version (npm installer tag) to bridge, upgrade and recover from
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: native-candidate-${{ inputs.source_sha }}-${{ inputs.channel }}
+  cancel-in-progress: false
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Check source and inputs
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          VERSION: ${{ inputs.application_version }}
+          RUNTIME_VERSION: ${{ inputs.runtime_version }}
+          RUNTIME_SHA: ${{ inputs.runtime_source_sha }}
+          BASELINE: ${{ inputs.baseline_version }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REPOSITORY_ID" == 1341107733 && "$GITHUB_EVENT_NAME" == workflow_dispatch && "$GITHUB_REF" == refs/heads/main ]]
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ && "$RUNTIME_SHA" =~ ^[a-f0-9]{40}$ ]]
+          for value in "$VERSION" "$RUNTIME_VERSION" "$BASELINE"; do [[ "$value" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; done
+          test "$(jq -r .sourceSha installer-source/source.json)" = "$SOURCE_SHA"
+  package:
+    needs: authorize
+    name: Package ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, platform: win32-x64 }
+          - { os: windows-11-arm, platform: win32-arm64 }
+          - { os: ubuntu-24.04, platform: linux-x64 }
+          - { os: ubuntu-24.04-arm, platform: linux-arm64 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.18.0
+      - name: Install isolated build tools
+        run: npm ci --prefix installer-source/tools/relay-application --ignore-scripts --no-audit --no-fund
+      - name: Test the exported preparation and setup-window sources
+        run: npm test --prefix installer-source/tools/relay-application
+      - name: Install Linux packaging tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y rpm
+      - name: Build from the exact exported source
+        shell: bash
+        env:
+          RUNTIME_VERSION: ${{ inputs.runtime_version }}
+          RUNTIME_SHA: ${{ inputs.runtime_source_sha }}
+          APPLICATION_VERSION: ${{ inputs.application_version }}
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          set -euo pipefail
+          tool=installer-source/tools/relay-application
+          # Outputs stay outside the exported source, which must remain exact.
+          input_dir="$(node -p 'require("node:path").resolve(process.env.RUNNER_TEMP, "input")')"
+          output_dir="$(node -p 'require("node:path").resolve(process.env.RUNNER_TEMP, "candidate")')"
+          node "$tool/download.mjs" --version "$RUNTIME_VERSION" --source-sha "$RUNTIME_SHA" --output "$input_dir"
+          node "$tool/prepare.mjs" --manifest "$input_dir/manifest.json" --artifact "$input_dir/runtime.tar.gz" --version "$RUNTIME_VERSION" --source-sha "$RUNTIME_SHA" --output "$output_dir" --channel "$CHANNEL" --application-version "$APPLICATION_VERSION" --application-candidate
+          node "$tool/package.mjs" "$output_dir"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: installer-${{ matrix.platform }}
+          path: |
+            ${{ runner.temp }}/candidate/installers/Relay-*
+            ${{ runner.temp }}/candidate/packaging-receipt.json
+          retention-days: 1
+          if-no-files-found: error
+  native:
+    needs: package
+    name: Test ${{ matrix.platform }} ${{ matrix.mode }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [win32-x64, win32-arm64, linux-x64, linux-arm64]
+        mode: [fresh, bridge, upgrade, broken]
+    runs-on: ${{ fromJSON('{"win32-x64":"windows-latest","win32-arm64":"windows-11-arm","linux-x64":"ubuntu-24.04","linux-arm64":"ubuntu-24.04-arm"}')[matrix.platform] }}
+    timeout-minutes: 35
+    env:
+      INSTALLER_MODE: ${{ matrix.mode }}
+      BASELINE_VERSION: ${{ inputs.baseline_version }}
+      CANDIDATE_CHANNEL: ${{ inputs.channel }}
+      CANDIDATE_SOURCE_SHA: ${{ inputs.source_sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.18.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: installer-${{ matrix.platform }}
+          path: ${{ runner.temp }}/retained
+      - name: Install the exact Windows installer on this disposable runner
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: node installer-source/tools/relay-application/test-windows-install.mjs --directory "$env:RUNNER_TEMP/retained" --mode $env:INSTALLER_MODE --baseline $env:BASELINE_VERSION
+      - name: Install the Linux desktop dependencies a stock setup requires
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          # A stock Linux setup registers the Relay link handler through
+          # xdg-mime and runs the pill under Xvfb.
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xdg-utils xvfb
+      - name: Install the exact Linux package on this disposable runner
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DISPLAY=:99
+          Xvfb "$DISPLAY" -screen 0 1280x720x24 -nolisten tcp >"$RUNNER_TEMP/install-xvfb.log" 2>&1 &
+          xvfb_pid=$!
+          trap 'kill "$xvfb_pid" 2>/dev/null || true' EXIT
+          if ! systemctl --user show-environment >/dev/null 2>&1; then
+            sudo loginctl enable-linger "$(id -un)"
+            sudo systemctl start "user@$(id -u).service"
+            export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+            export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+          fi
+          node installer-source/tools/relay-application/test-linux-install.mjs --directory "$RUNNER_TEMP/retained" --mode "$INSTALLER_MODE" --baseline "$BASELINE_VERSION"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: native-proof-${{ matrix.platform }}-${{ matrix.mode }}
+          path: native-install-proof.json
+          retention-days: 30
+          if-no-files-found: error
+          # A failed install job can be rerun alone; its new proof replaces the failed one.
+          overwrite: true
+  qualified:
+    needs: native
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: installer-*
+          path: packs
+      - name: Retain the tested installers without publishing a channel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir assets
+          for platform in win32-x64 win32-arm64 linux-x64 linux-arm64; do
+            cp "packs/installer-$platform/packaging-receipt.json" "assets/packaging-receipt-$platform.json"
+            cp "packs/installer-$platform"/installers/Relay-* assets/
+          done
+          gh release create "native-candidate-$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --latest=false --title "Tested Windows and Linux candidate $GITHUB_RUN_ID" --notes "Exact unsigned Windows and Linux installers that passed fresh, bridge, upgrade and broken-state installation on all four platforms. No channel moved." assets/*
+  cleanup:
+    needs: [authorize, package, native, qualified]
+    # Only after qualification: a failed install job is rerun alone against
+    # these same bytes, and unqualified transfers expire in a day regardless.
+    if: always() && needs.qualified.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Remove large transfer artifacts after their consumers finish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" --jq '.artifacts[] | select(.name | test("^installer-(win32|linux)-(arm64|x64)$")) | .id' > "$RUNNER_TEMP/transfer-artifacts.txt"
+          while read -r id; do
+            [[ "$id" =~ ^[0-9]+$ ]]
+            gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$id" --method DELETE
+          done < "$RUNNER_TEMP/transfer-artifacts.txt"

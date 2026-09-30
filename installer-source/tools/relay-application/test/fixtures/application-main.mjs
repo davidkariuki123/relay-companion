@@ -16,7 +16,7 @@ const mainSource = fs.readFileSync(new URL("../../app/main.cjs", import.meta.url
 const planSource = fs.readFileSync(new URL("../../app/relocation.cjs", import.meta.url), "utf8");
 
 export async function applicationMain({ existing, platform = "darwin", installed = false,
-  preview = false, trash = async () => {}, move } = {}) {
+  preview = false, ownsLock = true, trash = async () => {}, move } = {}) {
   const destination = "/Applications/Relay.app";
   const execPath = "/Volumes/Relay/Relay.app/Contents/MacOS/relay";
   const resources = "/Volumes/Relay/Relay.app/Contents/Resources";
@@ -42,7 +42,7 @@ export async function applicationMain({ existing, platform = "darwin", installed
   let win, ready;
   const app = {
     setName() {}, setPath(name, value) { paths[name] = value; }, getPath: name => paths[name],
-    requestSingleInstanceLock: () => true, on() {}, isInApplicationsFolder: () => installed,
+    requestSingleInstanceLock: () => ownsLock, quit() { calls.push({ action: "quit" }); }, on() {}, isInApplicationsFolder: () => installed,
     whenReady: () => ({ then(fn) { ready = Promise.resolve().then(fn); return ready; } }),
     moveToApplicationsFolder(options) {
       calls.push({ action: "move", handoff: files.get(`${paths.userData}/installation-handoff.json`) });
@@ -78,6 +78,7 @@ export async function applicationMain({ existing, platform = "darwin", installed
     "./deep-link.cjs": { parseRelayDeepLink: () => null },
     "./integration-status.cjs": { integrationStatus: () => ({}) },
     "./pill-status.cjs": { pillIsUp: () => false },
+    "./open-relay.cjs": { createRelayOpener: () => () => assert.fail("Unexpected pill launch") },
   };
   const load = name => {
     if (!(name in modules)) throw Error(`Unexpected dependency: ${name}`);
@@ -91,6 +92,7 @@ export async function applicationMain({ existing, platform = "darwin", installed
     process: { platform, resourcesPath: resources, execPath, argv: [], env: {} },
   }, { filename: "application/main.cjs" });
   await ready;
+  if (!ownsLock && !preview) return { calls, windowCreated: Boolean(win), handlers };
   assert.ok(handlers.has("application:relocate"), "the real application must register relocation");
   const event = { sender: win.webContents, senderFrame: win.webContents.mainFrame };
   return {

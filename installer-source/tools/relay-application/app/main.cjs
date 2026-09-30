@@ -9,6 +9,7 @@ const { inspectInstallation, planMigration } = require("./migration.cjs");
 const { parseRelayDeepLink } = require("./deep-link.cjs");
 const { integrationStatus } = require("./integration-status.cjs");
 const { pillIsUp } = require("./pill-status.cjs");
+const { createRelayOpener } = require("./open-relay.cjs");
 const { relocationPlan } = require("./relocation.cjs");
 // Standard local origin lets sandboxed education frames load bundled assets
 // without granting them same-origin access to the installer's privileged bridge.
@@ -24,6 +25,7 @@ if (!preview && !application) throw new Error("Invalid Relay application identit
 app.setName(preview ? "Relay Migration Preview" : "Relay");
 app.setPath("userData", path.join(app.getPath("appData"), preview ? "Relay Migration Preview" : "Relay Application"));
 let setupRunning = false;
+let ownsApplication = true;
 let mainWindow;
 let setupChild;
 // On a computer this application already set up, launching Relay means
@@ -60,24 +62,22 @@ function onboardingRunId() {
 function watchPillTakingOver({ pollMs = 250 } = {}) {
   const since = Date.now();
   const timer = setInterval(() => {
+    if (!["installing", "ready"].includes(setupProgress.phase)) return;
     if (!pillIsUp({ since, visible: true, runId: onboardingRunId() })) return;
     clearInterval(timer);
     if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) { mainWindow.hide(); hiddenBehindPill = true; }
   }, pollMs);
   return () => clearInterval(timer);
 }
-async function handoffToRelay({ timeoutMs = 20_000, pollMs = 250 } = {}) {
-  openRelay();
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (pillIsUp({ runId: onboardingRunId() })) {
-      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
-      setTimeout(() => app.quit(), 250);
-      return { opened: true };
-    }
-    await new Promise(resolve => setTimeout(resolve, pollMs));
-  }
-  return { opened: false };
+let pendingHandoff;
+function handoffToRelay() {
+  if (pendingHandoff) return pendingHandoff;
+  pendingHandoff = openRelay().then(() => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
+    setTimeout(() => app.quit(), 250);
+    return { opened: true };
+  }).finally(() => { pendingHandoff = null; });
+  return pendingHandoff;
 }
 // Relay is already set up here when the runtime pointer is active and this
 // application owns it. Nothing in the middle of a setup transaction counts.
@@ -88,31 +88,41 @@ function installationState() {
   if (!application) return { setUp: false, serviceAlive: false };
   try {
     const installation = inspectInstallation({ homeDir: os.homedir() });
-    const setUp = installation.pointer === "active" && installation.applicationOwner !== "absent" && installation.transaction === "absent";
+    const setUp = installation.pointer === "active" && installation.applicationOwner !== "absent" && installation.transaction === "absent"
+      && !installation.recoveryPending && installation.installedVersion.localeCompare(candidate.version, undefined, { numeric: true }) >= 0;
     return { setUp, serviceAlive: installation.serviceHeartbeat === "fresh" };
   } catch { return { setUp: false, serviceAlive: false }; }
 }
 function alreadySetUp() {
   return installationState().setUp;
 }
+const openPill = createRelayOpener({
+  launch: () => {
+    const bootstrap = require(path.join(process.resourcesPath, "installer", "bootstrap", "relay-setup.cjs"));
+    const target = bootstrap.activeCanonicalCli();
+    if (!target) throw new Error("Finish Relay setup first");
+    return spawn(target.node, [target.bin, "pill", ...pendingLinks.splice(0)], {
+      windowsHide: true, detached: true, stdio: "ignore",
+    });
+  },
+  isVisible: (since) => pillIsUp({ since, visible: true, runId: onboardingRunId() }),
+});
 function openRelay() {
-  if (!application || setupRunning) throw new Error("Relay is not ready to open");
-  const bootstrap = require(path.join(process.resourcesPath, "installer", "bootstrap", "relay-setup.cjs"));
-  const target = bootstrap.activeCanonicalCli();
-  if (!target) throw new Error("Finish Relay setup first");
-  const links = pendingLinks.splice(0);
-  const child = spawn(target.node, [target.bin, "pill", ...links], { windowsHide: true, detached: true, stdio: "ignore" });
-  child.on("error", () => { mainWindow?.show(); });
-  child.unref();
-  return { requested: true };
+  if (!application || setupRunning) return Promise.reject(new Error("Relay is not ready to open"));
+  return openPill().then(result => pendingLinks.length ? openRelay() : result);
+}
+function openOrShowFailure() {
+  openRelay().catch(() => { quietLaunchFailed = true; mainWindow?.show(); });
 }
 if (application) {
   for (const arg of process.argv) queueLink(arg);
-  if (!app.requestSingleInstanceLock()) app.quit();
-  app.on("open-url", (event, url) => { event.preventDefault(); queueLink(url); if (app.isReady()) { try { openRelay(); } catch { mainWindow?.show(); } } });
-  app.on("second-instance", (_event, argv) => { for (const arg of argv) queueLink(arg); try { openRelay(); } catch { mainWindow?.show(); } });
+  ownsApplication = app.requestSingleInstanceLock();
+  if (!ownsApplication) app.quit();
+  app.on("open-url", (event, url) => { event.preventDefault(); queueLink(url); if (app.isReady()) { openOrShowFailure(); } });
+  app.on("second-instance", (_event, argv) => { for (const arg of argv) queueLink(arg); openOrShowFailure(); });
 }
 app.whenReady().then(() => {
+  if (!ownsApplication) return;
   protocol.handle("relay-setup", request => {
     const url = new URL(request.url);
     let file;
@@ -171,7 +181,7 @@ app.whenReady().then(() => {
     if (!ownSender(event) || !application || setupRunning) throw new Error("Application setup is unavailable");
     return runLifecycle(action);
   };
-  const runLifecycle = async (action) => {
+  const runLifecycle = async (action, { allowRecovery = true } = {}) => {
     if (!application || setupRunning) throw new Error("Application setup is unavailable");
     if (action === "uninstall") {
       const answer = await dialog.showMessageBox(win, { type: "question", title: "Remove Relay integrations?",
@@ -191,10 +201,11 @@ app.whenReady().then(() => {
       const applicationRoot = process.platform === "darwin" ? path.resolve(path.dirname(process.execPath), "../..") : path.dirname(process.execPath);
       const env = { ...process.env };
       for (const key of ["NODE_OPTIONS", "NODE_PATH", "ELECTRON_RUN_AS_NODE"]) delete env[key];
+      for (const key of Object.keys(env)) if (/^RELAY_(CONFIG|HOME|COMPANION_HOME|NATIVE_CREDENTIALS)/.test(key)) delete env[key];
       try {
         await new Promise((resolve, reject) => {
           const child = spawn(path.join(process.resourcesPath, process.platform === "win32" ? "node.exe" : "node"),
-            [path.join(process.resourcesPath, "activate.cjs"), action, applicationRoot, process.execPath],
+            [path.join(process.resourcesPath, "activate.cjs"), action, applicationRoot, process.execPath, ...(!allowRecovery ? ["--preserve-state"] : [])],
             { windowsHide: true, stdio: ["ignore", fd, fd, "ipc"], env });
           setupChild = child;
           child.on("message", message => {
@@ -248,11 +259,9 @@ app.whenReady().then(() => {
     // Launching Relay on a computer it is set up on opens the Companion, with
     // any relay:// link, and this process leaves. The window is shown only
     // when the Companion cannot be seen coming up.
-    // A set-up computer whose background service is not running first runs
-    // the install step again: on an already-installed runtime that step only
-    // registers and starts the services (application-install.cjs), so the
-    // Companion opens with a service behind it instead of a silent, deaf one.
-    const ready = state.serviceAlive ? Promise.resolve() : runLifecycle("install");
+    // An ordinary app open must never clear local data because startup was
+    // slow. Show the disclosed setup/retry action when recovery is needed.
+    const ready = state.serviceAlive ? Promise.resolve() : runLifecycle("install", { allowRecovery: false });
     ready.then(() => handoffToRelay()).then(({ opened }) => {
       if (opened) return;
       quietLaunchFailed = true;
@@ -261,6 +270,6 @@ app.whenReady().then(() => {
     return;
   }
   win.once("ready-to-show", () => win.show());
-  if (pendingLinks.length) { try { openRelay(); } catch { /* Setup remains visible. */ } }
+  if (pendingLinks.length) openOrShowFailure();
 });
 app.on("window-all-closed", () => app.quit());

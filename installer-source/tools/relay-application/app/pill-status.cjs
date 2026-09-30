@@ -23,7 +23,7 @@ function pillIsUp({ file = pillStatusPath(), since = 0, visible = false, runId =
   let status;
   try { status = JSON.parse(fs.readFileSync(file, "utf8")); } catch { return false; }
   if (status?.ready !== true || !Number.isInteger(status.pid) || status.pid <= 0) return false;
-  if (visible && status.visible !== true) return false;
+  if (visible && (status.visible !== true || status.dismissed === true)) return false;
   if (runId && status.onboardingRunId !== runId) return false;
   if (since > 0 && !(Date.parse(status.updatedAt) >= since)) return false;
   return alive(status.pid);

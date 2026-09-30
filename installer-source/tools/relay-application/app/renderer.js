@@ -43,6 +43,7 @@ function installLabel() { return online ? "Download and set up Relay" : "Set up 
 // --- Progress (inline card, only while setup is working) ---
 function showProgress(progress) {
   const labels = { verifying: "Checking this computer…", downloading: "Preparing your files…", extracting: "Unpacking Relay…",
+    recovering: "Replacing the old installation. Local pending sends and settings are cleared; sign in again when Relay opens.",
     installing: "Connecting Relay to this computer…", ready: "Relay is ready", stopped: "Setup stopped" };
   $("#progress-label").textContent = labels[progress.phase] || "Preparing setup…";
   const bar = $("#progress-bar");
@@ -74,7 +75,7 @@ async function runSetup() {
     result = await window.migration.install();
   } catch (error) {
     const cancelled = /cancel/i.test(error.message);
-    heading(cancelled ? "Setup stopped." : "Setup needs attention.", cancelled ? "Nothing was changed. Retry whenever you’re ready." : "Nothing else was changed on this computer.");
+    heading(cancelled ? "Setup stopped." : "Setup needs attention.", cancelled ? "Download cancelled. Retry whenever you’re ready." : "Run setup again to finish. Your server-held account history has not been removed.");
     message(error.message);
     $("#install").textContent = "Retry setup";
     show("stopped");
@@ -160,8 +161,9 @@ window.migration.inspect().then(({ candidate, installation, plan, progress, laun
   $("#download-detail").textContent = online
     ? `Setup downloads ${megabytes(candidate.runtimeDownloadBytes)} from api.sendrelays.com and needs an internet connection.`
     : "Everything setup needs is included in this installer.";
-  const active = ["verifying", "downloading", "extracting", "installing"].includes(progress?.phase);
-  const owned = installation?.pointer === "active" && installation.applicationOwner !== "absent";
+  const active = ["verifying", "downloading", "extracting", "recovering", "installing"].includes(progress?.phase);
+  const owned = !launch?.quietLaunchFailed && installation?.pointer === "active" && installation.applicationOwner !== "absent"
+    && !installation.recoveryPending && installation.installedVersion.localeCompare(candidate.version, undefined, { numeric: true }) >= 0 && installation.serviceHeartbeat === "fresh";
   if (active) { working(); showProgress(progress); }
   else if (owned) {
     // Launching Relay here normally opens the Companion and never shows this
@@ -175,8 +177,8 @@ window.migration.inspect().then(({ candidate, installation, plan, progress, laun
     runSetup();
   } else {
     // An existing Relay stays as it is until the person asks to move it.
-    heading("Welcome to Relay.", "Relay is already installed on this computer. Set it up again to bring it into this application; your account and messages are kept.");
-    $("#setup-copy").textContent = "Setup checks the existing installation first. One that needs repair is left alone.";
+    heading("Welcome to Relay.", "Setup updates Relay and automatically recovers an old or broken installation if needed.");
+    $("#setup-copy").textContent = "Recovery clears pending local sends and settings. Sign in again to access your account history.";
     show("setup");
   }
 }).catch(() => {

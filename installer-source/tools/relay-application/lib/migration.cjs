@@ -42,9 +42,12 @@ function inspectInstallation({ homeDir, io = fs, now = Date.now() } = {}) {
   const owner = readMarker(path.join(root, "application-owner.json"), io);
   const transaction = readMarker(path.join(root, "runtime", "transaction.lock"), io);
   const serviceHeartbeat = serviceHeartbeatState(root, io, now);
+  const recovery = readMarker(path.join(root, "runtime", "installer-recovery.json"), io);
   let legacyInstallation = "absent";
   for (const marker of [path.join(root, "config.json"), path.join(root, "recovery"),
-    path.join(root, "daemon.pid"), path.join(homeDir, "Applications", "Relay.app")]) {
+    path.join(root, "daemon.pid"), path.join(root, "application-migration.json"),
+    path.join(root, "runtime", "installer-recovery.json"), path.join(homeDir, ".relay-companion"),
+    path.join(homeDir, "Applications", "Relay.app")]) {
     try { io.lstatSync(marker); legacyInstallation = "possible"; }
     catch (error) { if (error.code !== "ENOENT") legacyInstallation = "unknown"; }
   }
@@ -64,6 +67,7 @@ function inspectInstallation({ homeDir, io = fs, now = Date.now() } = {}) {
     transaction: transaction.status,
     // "fresh" is the only value that means the background service is running.
     serviceHeartbeat,
+    recoveryPending: recovery.status !== "absent" && (recovery.status !== "present" || recovery.value.state !== "complete"),
     legacyInstallation,
     // Even an active pointer is not evidence that the updater is currently alive.
     updaterHealth: "not-probed",

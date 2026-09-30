@@ -8353,14 +8353,33 @@
   }
   async function checkThreadIncoming() {
     const id = topicsState.openId, m = topicsState.detail?.membership;
-    if (activeView !== 'topics' || !id || m?.state !== 'active' || !m.mandateCurrent || topicsState.postsLoading || topicIncomingInFlight) return;
+    if (activeView !== 'topics' || document.visibilityState === 'hidden' || !id || m?.state !== 'active' || !m.mandateCurrent || topicsState.postsLoading || topicIncomingInFlight) return;
+    const generation = topicsState.threadGeneration, query = topicsState.threadQuery;
     topicIncomingInFlight = true;
-    const { result } = await topicCall(window.relay.topicThreads, id, { query:topicsState.threadQuery });
+    const { result, error } = await topicCall(window.relay.topicThreads, id, { query });
     topicIncomingInFlight = false;
-    if (topicsState.openId !== id || topicsState.openThreadId) return;
-    const existing = new Map(topicsState.threads.map(t => [t.id, t.attentionAt]));
-    topicsState.incoming = (result?.threads || []).filter(t => existing.get(t.id) !== t.attentionAt)
-      .map(t => ({ id:t.id, forHuman:t.summary, importance:'update' }));
+    if (error || topicsState.openId !== id || topicsState.openThreadId || topicsState.postsLoading || topicsState.threadGeneration !== generation || topicsState.threadQuery !== query) return;
+    // Quiet details and edits can change the visible summary/count without
+    // advancing attentionAt. Own-agent posts also have no unread badge.
+    const revision = t => JSON.stringify([t.version, t.updatedAt, t.attentionAt, t.postCount, t.title, t.summary, t.status]);
+    const existing = new Map(topicsState.threads.map(t => [t.id, revision(t)]));
+    const threads = result?.threads || [];
+    const fresh = threads.filter(t => existing.get(t.id) !== revision(t));
+    if (!fresh.length) return;
+    const search = topicsBodyEl?.querySelector('[data-thread-search] input');
+    const editing = topicsBodyEl?.contains(document.activeElement) && document.activeElement.matches('input, textarea, select, [contenteditable="true"]');
+    // At the top, keep the overview current automatically. While reading,
+    // searching or paging older threads, offer updates without moving the UI.
+    if (activeView === 'topics' && document.visibilityState !== 'hidden' && topicsState.pane === 'messages' && !topicsState.openPostId && !editing && (!search || search.value === query) && (!scrollEl || scrollEl.scrollTop <= 8) && topicsState.threads.length <= threads.length) {
+      topicsState.threads = threads;
+      topicsState.threadsCursor = result?.nextCursor || null;
+      topicsState.incoming = [];
+      topicsState.incomingGap = false;
+      if (result?.topic) mergeTopicSummary(result.topic);
+      renderTopics();
+      return;
+    }
+    topicsState.incoming = fresh.map(t => ({ id:t.id, forHuman:t.summary, importance:'update' }));
     paintTopicIncoming();
   }
   function topicThreadHeaderHtml() {
@@ -8454,7 +8473,7 @@
   }
   async function checkTopicIncoming() {
     if (!topicsState.openThreadId && topicsState.openId) return checkThreadIncoming();
-    const id = topicsState.openId;
+    const id = topicsState.openId, threadId = topicsState.openThreadId;
     const m = topicsState.detail?.membership || {};
     if (!id || m.state !== "active" || m.mandateCurrent !== true) return;
     if (topicIncomingInFlight || topicsState.postsLoading || topicsState.incomingGap) return;
@@ -8464,9 +8483,9 @@
       if (!newest || Date.parse(p.updatedAt) > Date.parse(newest)) newest = p.updatedAt;
     }
     topicIncomingInFlight = true;
-    const { result, error } = await topicCall(window.relay.topicPosts, id, { threadId: topicsState.openThreadId, updatesOnly:true, ...(newest ? { since: newest } : {}) });
+    const { result, error } = await topicCall(window.relay.topicPosts, id, { threadId, updatesOnly:true, ...(newest ? { since: newest } : {}) });
     topicIncomingInFlight = false;
-    if (error || topicsState.openId !== id || topicsState.postsLoading) return;
+    if (error || topicsState.openId !== id || topicsState.openThreadId !== threadId || topicsState.postsLoading) return;
     const known = new Set([...topicsState.posts, ...topicsState.incoming].map((p) => p.id + ":" + p.updatedAt));
     const fresh = (Array.isArray(result?.posts) ? result.posts : []).filter((p) => p?.id && !known.has(p.id + ":" + p.updatedAt));
     const gap = Boolean(result?.nextCursor);
@@ -8936,7 +8955,7 @@
   // A quiet refresh keeps the tab badge honest without opening the tab.
   setInterval(() => { if (payload.features?.topics === true) loadTopics({ quiet:true }).then(checkTopicIncoming); }, 90_000);
   // An open board on screen looks for new posts sooner than the badge does.
-  setInterval(() => { if (payload.features?.topics === true) checkTopicIncoming(); }, 20_000);
+  setInterval(() => { if (payload.features?.topics === true) checkTopicIncoming(); }, 5_000);
   document.addEventListener("visibilitychange", () => { if (payload.features?.topics === true) checkTopicIncoming(); });
   function applyTaskClaimProjection(row, taskClaim) {
     if (!row || !taskClaim) return;
@@ -20030,7 +20049,29 @@
       window.relay.notificationPresented?.(ids);
     }));
   });
-  if (window.relay.onOpenFull) window.relay.onOpenFull(() => trayOpen());
+  let lastExternalOpenAt = 0;
+  if (window.relay.onOpenFull) window.relay.onOpenFull((nonce) => {
+    // macOS can deliver activate and second-instance for one human action.
+    // Restore once, but acknowledge each caller after presentation.
+    const now = performance.now();
+    if (!lastExternalOpenAt || now - lastExternalOpenAt > 250
+        || cardEl.classList.contains("offstage") || cardEl.classList.contains("bye") || collapsed) trayOpen();
+    lastExternalOpenAt = now;
+    if (!nonce) return;
+    const deadline = performance.now() + 4000;
+    // The entrance animation may still be transparent or above the viewport on
+    // the first two frames. Wait for presentation, not just scheduling two frames.
+    requestAnimationFrame(function confirmPresentation() {
+      const rect = cardEl.getBoundingClientRect();
+      const style = getComputedStyle(cardEl);
+      if (!document.hidden && !cardEl.classList.contains("offstage") && !cardEl.classList.contains("bye")
+          && style.visibility === "visible" && Number(style.opacity) > 0
+          && rect.width > 0 && rect.height > 0 && rect.right > 0 && rect.bottom > 0
+          && rect.left < innerWidth && rect.top < innerHeight) {
+        window.relay.reopenPresented?.(nonce);
+      } else if (performance.now() < deadline) requestAnimationFrame(confirmPresentation);
+    });
+  });
   // The OS window was just re-shown; reset notification dwell state until the
   // pointer enters the card again.
   if (window.relay.onShown) window.relay.onShown(() => {
