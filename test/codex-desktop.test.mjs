@@ -10,14 +10,19 @@ import {
   buildCodexDesktopRetryExpression,
   buildCodexDesktopSubmitExpression,
   classifyCodexDesktopWindowUrl,
+  codexBridgeUnsupported,
   codexRolloutHasClientMessage,
+  codexThreadPrefillUrl,
   codexTurnStartMessage,
   enqueueCodexProjectMutation,
+  isBridgelessCodexInstall,
   isCodexMainCommand,
   primarySubmitRendererResult,
   primaryWindowRan,
+  requestCodexInspector,
   startCodexInspector,
   submitTurnToCodexDesktopThread,
+  transportFailureReason,
   windowsCodexMainPids,
 } from "../src/codex-desktop.js";
 
@@ -1297,4 +1302,87 @@ test("a primary window that threw is not reached", () => {
 test("an inspector failure is not reached", () => {
   assert.equal(primaryWindowRan({ pid: 1, ok: false, reason: "inspector-unavailable" }), false);
   assert.equal(primaryWindowRan(null), false);
+});
+
+// ---- Codex builds on OpenAI's OWL runtime (26.924+) -------------------------
+// These builds never register Node's Windows debug handler, so the trigger
+// throws. Relay must read that as "this app cannot be driven", stop at once and
+// hand the caller a clean reason, never an ambiguous or generic failure.
+
+test("a Windows debug trigger that throws marks the process as unsupported", () => {
+  const unsupported = () => { throw new Error("The system cannot find the file specified."); };
+  assert.equal(requestCodexInspector(301, { platform: "win32", debugProcess: unsupported }), "unsupported");
+  assert.equal(requestCodexInspector(301, { platform: "win32", debugProcess: () => {} }), "started");
+  assert.equal(requestCodexInspector(301, { platform: "darwin", debugProcess: () => {} }), "unavailable");
+  assert.equal(startCodexInspector(301, { platform: "win32", debugProcess: unsupported }), false);
+});
+
+test("only an all-process inspector refusal counts as bridge-unsupported", () => {
+  assert.equal(codexBridgeUnsupported([]), false);
+  assert.equal(codexBridgeUnsupported([{ pid: 1, ok: false, reason: "inspector-unsupported" }]), true);
+  assert.equal(codexBridgeUnsupported([
+    { pid: 1, ok: false, reason: "inspector-unsupported" },
+    { pid: 2, ok: false, reason: "inspector-unavailable" },
+  ]), false);
+});
+
+test("a failed submit reports its real transport reason instead of a generic one", () => {
+  assert.equal(transportFailureReason([{ reason: "inspector-unavailable" }, { reason: "inspector-unavailable" }]), "inspector-unavailable");
+  assert.equal(transportFailureReason([{ reason: "inspector-unavailable" }, { reason: "other" }]), "no-primary-window-result");
+  assert.equal(transportFailureReason([{ ok: true, value: [] }]), "no-primary-window-result");
+});
+
+test("an undrivable Desktop ends the submit after one probe with a definitive reason", async () => {
+  let evaluations = 0;
+  const result = await submitTurnToCodexDesktopThread({
+    threadId: "thread_owl",
+    text: "hello",
+    platform: "win32",
+    confirmAttempts: 4,
+    confirmIntervalMs: 10,
+    runtime: {
+      findCodexMainPids: async () => [601],
+      evaluateAcrossCodexPids: async () => { evaluations += 1; return [{ pid: 601, ok: false, reason: "inspector-unsupported" }]; },
+      launchCodexDesktop: async () => { throw new Error("must not launch"); },
+      waitForCodexMainPids: async () => [],
+    },
+  });
+  assert.equal(evaluations, 1);
+  assert.equal(result.submitted, false);
+  assert.equal(result.deliveryAmbiguous, false);
+  assert.equal(result.reason, "bridge-unsupported");
+});
+
+test("a background submit never launches Codex Desktop", async () => {
+  let launched = false;
+  const result = await submitTurnToCodexDesktopThread({
+    threadId: "thread_closed",
+    text: "hello",
+    platform: "win32",
+    allowLaunch: false,
+    runtime: {
+      findCodexMainPids: async () => [],
+      evaluateAcrossCodexPids: async () => [],
+      launchCodexDesktop: async () => { launched = true; return true; },
+      waitForCodexMainPids: async () => [701],
+    },
+  });
+  assert.equal(launched, false);
+  assert.equal(result.submitted, false);
+  assert.equal(result.reason, "codex-not-running");
+});
+
+test("the prefill link opens the exact thread with the prompt in its composer", () => {
+  const url = codexThreadPrefillUrl("01a0-thread", "Relay relay_1 was selected for this task & more");
+  assert.match(url, /^codex:\/\/threads\/01a0-thread\?prompt=/);
+  assert.equal(new URL(url).searchParams.get("prompt"), "Relay relay_1 was selected for this task & more");
+  assert.equal(codexThreadPrefillUrl("01a0-thread", ""), "codex://threads/01a0-thread");
+});
+
+test("an OWL Codex install is recognised from its package marker", async () => {
+  assert.equal(await isBridgelessCodexInstall("darwin"), false);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-owl-install-"));
+  fs.mkdirSync(path.join(root, "app", "resources"), { recursive: true });
+  fs.writeFileSync(path.join(root, "app", "resources", "owl-electron-app.json"), "{\"runtimeName\":\"owl\"}");
+  assert.equal(await isBridgelessCodexInstall("win32", { resolveInstallLocation: async () => root }), true);
 });

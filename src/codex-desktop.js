@@ -77,6 +77,7 @@ async function notifyCodexDesktopThreadsUnserialized({
   primeOpen = true,
   timeoutMs = Number(process.env.RELAY_CODEX_DESKTOP_TIMEOUT_MS || 8000),
   platform = process.platform,
+  bridgeless = () => isBridgelessCodexInstall(platform),
 } = {}) {
   if (process.env.RELAY_CODEX_DESKTOP_REFRESH === "0") return { attempted: false, reason: "disabled" };
   if (!["darwin", "win32"].includes(platform)) return { attempted: false, reason: "unsupported-platform" };
@@ -89,6 +90,11 @@ async function notifyCodexDesktopThreadsUnserialized({
   let pids = await findCodexMainPids(platform);
   let coldLaunched = false;
   if (!pids.length) {
+    // A build Relay cannot drive gains nothing from a Relay-owned launch: the
+    // bridge would refuse it anyway. Leave the open to the caller's
+    // codex://threads/<id> link, which launches the app straight onto the
+    // thread instead of racing a second link against its boot.
+    if (openId && await bridgeless()) return { attempted: true, ok: false, reason: "bridge-unsupported", results: [] };
     // COLD START: an open must not assume the app is already running. Returning
     // "codex-not-running" here leaves the caller's codex:// deep link as the only
     // opener, and that link is a RACE against the app's own boot — fired at a
@@ -127,6 +133,7 @@ async function notifyCodexDesktopThreadsUnserialized({
   for (;;) {
     results = await evaluateAcrossCodexPids(pids, expression, { timeoutMs, platform });
     if (results.some(primaryWindowRan)) break;
+    if (codexBridgeUnsupported(results)) break; // waiting cannot change a refusal
     if (Date.now() >= readyDeadline) break;
     await sleep(500);
     const next = await findCodexMainPids(platform);
@@ -153,9 +160,51 @@ async function notifyCodexDesktopThreadsUnserialized({
     // is active and the selected Codex window has actually taken focus.
     openConfirmed: Boolean(openId && reached),
     projectAssignmentOk: ensureWorkspaceRoot ? rendererResult?.projectAssignmentOk === true : true,
-    ...(reached ? {} : { reason: coldLaunched ? "codex-not-ready" : "codex-window-unavailable" }),
+    ...(reached ? {} : {
+      reason: codexBridgeUnsupported(results)
+        ? "bridge-unsupported"
+        : coldLaunched ? "codex-not-ready" : "codex-window-unavailable",
+    }),
     results,
   };
+}
+
+// Codex's own link for an existing thread with a prepared message: Desktop
+// opens the thread and fills its composer (it does not send). On builds Relay
+// cannot drive, this is the one route that works whether or not the thread is
+// already open, and the person sees exactly what will be sent.
+export function codexThreadPrefillUrl(threadId, prompt) {
+  const base = `codex://threads/${encodeURIComponent(String(threadId || "").trim())}`;
+  const text = String(prompt || "").trim();
+  return text ? `${base}?${new URLSearchParams({ prompt: text })}` : base;
+}
+
+let bridgelessInstallPromise = null;
+
+// Whether the installed Codex Desktop is an OWL build (see
+// requestCodexInspector). Windows only: it is the one platform where Relay
+// starts the inspector itself, and so the one where a cold launch is wasted.
+// Read once per process; an unreadable install counts as driveable so older
+// builds keep their deterministic bridge open.
+export function isBridgelessCodexInstall(platform = process.platform, {
+  resolveInstallLocation = windowsCodexInstallLocation,
+} = {}) {
+  if (platform !== "win32") return Promise.resolve(false);
+  if (!bridgelessInstallPromise) {
+    bridgelessInstallPromise = Promise.resolve()
+      .then(resolveInstallLocation)
+      .then((location) => Boolean(location) && fs.existsSync(path.win32.join(location, "app", "resources", "owl-electron-app.json")))
+      .catch(() => false);
+  }
+  return bridgelessInstallPromise;
+}
+
+async function windowsCodexInstallLocation() {
+  const powershell = path.win32.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  const { stdout } = await execFileAsync(powershell, ["-NoProfile", "-NonInteractive", "-Command",
+    "(Get-AppxPackage -Name OpenAI.Codex | Select-Object -First 1).InstallLocation",
+  ], { timeout: 4000, windowsHide: true });
+  return String(stdout || "").trim();
 }
 
 async function evaluateAcrossCodexPids(pids, expression, { timeoutMs, platform = process.platform }) {
@@ -164,6 +213,10 @@ async function evaluateAcrossCodexPids(pids, expression, { timeoutMs, platform =
     let target;
     try {
       target = await findOrStartInspectorForPid(pid, { timeoutMs, platform });
+      if (target?.unsupported) {
+        results.push({ pid, ok: false, reason: "inspector-unsupported" });
+        continue;
+      }
       if (!target) {
         results.push({ pid, ok: false, reason: "inspector-unavailable" });
         continue;
@@ -286,6 +339,9 @@ export async function submitTurnToCodexDesktopThread({
   // Acknowledgement edge for UI receipts. Callers still await rollout
   // verification before treating the turn as durably delivered.
   onSubmitted = null,
+  // Background callers (Task completion wakes) must never make an app appear
+  // on someone's screen: with no running Desktop they get codex-not-running.
+  allowLaunch = true,
 } = {}) {
   if (process.env.RELAY_CODEX_DESKTOP_REFRESH === "0") return { attempted: false, submitted: false, reason: "disabled" };
   if (!["darwin", "win32"].includes(platform)) return { attempted: false, submitted: false, reason: "unsupported-platform" };
@@ -327,6 +383,7 @@ export async function submitTurnToCodexDesktopThread({
   let attempts = 0;
   let coldLaunchTried = false;
   let submittedNotified = false;
+  let bridgeUnsupported = false;
 
   for (let confirmationRound = 1; confirmationRound <= maxAttempts && ran !== true; confirmationRound += 1) {
     if (!delivered && !deliveryAmbiguous) {
@@ -335,6 +392,9 @@ export async function submitTurnToCodexDesktopThread({
       // update/restart can leave the prior inspector socket stale while a new
       // primary renderer is already alive.
       let pids = await findPids();
+      if (!pids.length && !allowLaunch) {
+        return { attempted: false, submitted: false, ran, reason: "codex-not-running", results: allResults, clientUserMessageId };
+      }
       if (!pids.length && !coldLaunchTried) {
         coldLaunchTried = true;
         if (await launch()) pids = await waitPids(Number(process.env.RELAY_CODEX_LAUNCH_TIMEOUT_MS || 30000));
@@ -351,6 +411,12 @@ export async function submitTurnToCodexDesktopThread({
           ? await evaluate(selectedPids, expression, { timeoutMs, platform })
           : [];
         allResults.push(...results.map((entry) => ({ ...entry, attempt: attempts })));
+        if (codexBridgeUnsupported(results)) {
+          // No renderer code ran, so nothing was dispatched: a clean, final
+          // "not this way" that callers answer with another route.
+          bridgeUnsupported = true;
+          break;
+        }
         if (results.some((entry) => entry?.deliveryAmbiguous === true)) deliveryAmbiguous = true;
         const current = primarySubmitRendererResult(results);
         if (current) renderer = current;
@@ -395,13 +461,26 @@ export async function submitTurnToCodexDesktopThread({
   if (!allResults.length && !coldLaunchTried) {
     return { attempted: true, submitted: false, ran, reason: "codex-not-running", results: [], clientUserMessageId };
   }
+  if (bridgeUnsupported) {
+    return {
+      attempted: true,
+      submitted: false,
+      deliveryAmbiguous: false,
+      ran,
+      turnAttempts: attempts,
+      reason: "bridge-unsupported",
+      rendererResult: null,
+      results: allResults,
+      clientUserMessageId,
+    };
+  }
   return {
     attempted: true,
     submitted: delivered || ran === true,
     deliveryAmbiguous,
     ran,
     turnAttempts: attempts,
-    reason: renderer ? renderer.reason || null : "no-primary-window-result",
+    reason: renderer ? renderer.reason || null : transportFailureReason(allResults),
     rendererResult: renderer,
     results: allResults,
     clientUserMessageId,
@@ -449,6 +528,14 @@ export function codexRolloutHasClientMessage(rolloutPath, clientUserMessageId) {
 
 // Dig the renderer's relaySubmitCodexRenderer return value out of the
 // per-pid/per-window envelope. Exported for the fallback-ordering tests.
+// When no primary window answered, say why instead of a blanket
+// "no-primary-window-result": an inspector that never opened is a different
+// failure from a window that was reached but absent.
+export function transportFailureReason(results) {
+  const reasons = uniqueStrings((Array.isArray(results) ? results : []).map((entry) => entry?.reason || ""));
+  return reasons.length === 1 ? reasons[0] : "no-primary-window-result";
+}
+
 export function primarySubmitRendererResult(results) {
   for (const entry of Array.isArray(results) ? results : []) {
     if (!entry || !entry.ok || !Array.isArray(entry.value)) continue;
@@ -1177,33 +1264,56 @@ export function isCodexMainCommand(command) {
   return /^"?[A-Z]:\\[^"\r\n]*\\WindowsApps\\OpenAI\.Codex_[^\\"\r\n]+\\app\\(?:ChatGPT|Codex)\.exe"?(?:\s|$)/i.test(value);
 }
 
-export function startCodexInspector(pid, {
+export function startCodexInspector(pid, options = {}) {
+  return requestCodexInspector(pid, options) === "started";
+}
+
+// "started" | "unsupported" | "unavailable". UNSUPPORTED is permanent for that
+// process: Node's Windows trigger opens a handler that the target registers at
+// startup, and Codex builds on OpenAI's OWL runtime (26.924+, marked by
+// resources/owl-electron-app.json) never register it. Every later attempt
+// against the same process would fail the same way, so callers stop asking.
+export function requestCodexInspector(pid, {
   platform = process.platform,
   debugProcess = process._debugProcess,
-  kill = process.kill,
 } = {}) {
   // macOS Electron builds can leave SIGUSR1 at its default disposition: kill
   // the app. A matching executable name does not prove a debug signal handler.
   // Existing inspectors are still discovered before this function is called.
-  if (platform !== "win32") return false;
+  if (platform !== "win32") return "unavailable";
+  // SIGUSR1 is not available on Windows. Node's Windows debug trigger opens
+  // the same loopback inspector on the running Electron main process.
+  if (typeof debugProcess !== "function") return "unavailable";
   try {
-    // SIGUSR1 is not available on Windows. Node's Windows debug trigger opens
-    // the same loopback inspector on the running Electron main process.
-    if (platform === "win32") {
-      if (typeof debugProcess !== "function") return false;
-      debugProcess(pid);
-    }
-    return true;
+    debugProcess(pid);
+    return "started";
   } catch {
-    return false;
+    return "unsupported";
   }
 }
 
+const bridgeUnsupportedPids = new Set();
+
+// True when every Codex process Relay tried refused the inspector outright, so
+// no renderer code ran and nothing can have been delivered. Callers treat this
+// as a definitive "use another route", never as an ambiguous delivery.
+export function codexBridgeUnsupported(results) {
+  return Array.isArray(results)
+    && results.length > 0
+    && results.every((entry) => entry?.reason === "inspector-unsupported");
+}
+
 async function findOrStartInspectorForPid(pid, { timeoutMs, platform = process.platform }) {
+  if (bridgeUnsupportedPids.has(pid)) return { unsupported: true };
   let target = await findInspectorTargetForPid(pid);
   if (target) return target;
 
-  if (!startCodexInspector(pid, { platform })) return null;
+  const started = requestCodexInspector(pid, { platform });
+  if (started === "unsupported") {
+    bridgeUnsupportedPids.add(pid);
+    return { unsupported: true };
+  }
+  if (started !== "started") return null;
 
   const deadline = Date.now() + Math.max(500, timeoutMs);
   do {

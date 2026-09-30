@@ -13,6 +13,7 @@ import {
   resolveCodexTaskOrigin,
   resolveTaskOrigin,
   rolloutContainsRelaySend,
+  wakeRetryDelayMs,
 } from "../src/task-completion-wake.js";
 import { readClaudeTranscriptActivity } from "../src/session-directory.js";
 
@@ -413,4 +414,99 @@ test("two concurrent workers claim a completion once", async () => {
   assert.equal(sends, 1);
   assert.equal(results.flat().filter((row) => row.delivered).length, 1);
   assert.equal(readTaskCompletionWakeState(stateFile).completions.relay_completion_concurrent.state, "delivered");
+});
+
+function codexOriginFixture(prefix) {
+  const dir = tempDir(prefix);
+  const stateFile = path.join(dir, "wake.json");
+  const rollout = path.join(dir, "rollout.jsonl");
+  writeJsonLines(rollout, [
+    { timestamp: new Date().toISOString(), type: "event_msg", payload: { type: "task_complete", turn_id: "old" } },
+  ]);
+  const origin = { provider: "codex", nativeId: "codex-origin", cwd: dir, nativeRef: { sessionPath: rollout } };
+  return { dir, stateFile, rollout, origin, discover: () => [origin] };
+}
+
+test("a Codex wake never asks Desktop to launch", async () => {
+  const { stateFile, origin, discover } = codexOriginFixture("relay-completion-nolaunch-");
+  seedCompletion({ stateFile, origin, completionRelayId: "relay_completion_nolaunch" });
+  const requests = [];
+  const result = await processTaskCompletionWakes({
+    stateFile,
+    discover,
+    submitCodex: async (request) => { requests.push(request); return { submitted: false, reason: "codex-not-running" }; },
+    fallbackCodex: async () => { throw new Error("no fallback while Codex is closed"); },
+  });
+  assert.equal(requests[0].allowLaunch, false);
+  assert.equal(result[0].delivered, false);
+  assert.equal(result[0].reason, "codex-not-running");
+});
+
+test("an undrivable Desktop hands the wake to the private route, which may deliver or defer", async () => {
+  const { stateFile, rollout, origin, discover } = codexOriginFixture("relay-completion-private-");
+  seedCompletion({ stateFile, origin, completionRelayId: "relay_completion_private" });
+  const submitCodex = async () => ({ submitted: false, reason: "bridge-unsupported" });
+  const deferred = await processTaskCompletionWakes({
+    stateFile,
+    discover,
+    submitCodex,
+    fallbackCodex: async () => ({ delivered: false, reason: "thread-open-in-desktop" }),
+  });
+  assert.equal(deferred[0].reason, "thread-open-in-desktop");
+  assert.equal(readTaskCompletionWakeState(stateFile).completions.relay_completion_private.state, "pending");
+
+  const delivered = await processTaskCompletionWakes({
+    stateFile,
+    discover,
+    submitCodex,
+    fallbackCodex: async ({ exact, prompt, marker }) => {
+      assert.equal(exact.nativeId, "codex-origin");
+      assert.ok(prompt.includes(marker));
+      fs.appendFileSync(rollout, `${JSON.stringify(user(prompt))}\n`);
+      return { delivered: true, adapter: "codex_private_app_server", observed: true };
+    },
+  });
+  assert.equal(delivered[0].delivered, true);
+  const stored = readTaskCompletionWakeState(stateFile).completions.relay_completion_private;
+  assert.equal(stored.state, "delivered");
+  assert.equal(stored.adapter, "codex_private_app_server");
+});
+
+test("repeated wake failures wait longer each time instead of retrying every pass", async () => {
+  assert.equal(wakeRetryDelayMs(1), 0);
+  assert.equal(wakeRetryDelayMs(2), 15_000);
+  assert.equal(wakeRetryDelayMs(3), 30_000);
+  assert.equal(wakeRetryDelayMs(50), 30 * 60 * 1_000);
+
+  const { stateFile, origin, discover } = codexOriginFixture("relay-completion-backoff-");
+  seedCompletion({ stateFile, origin, completionRelayId: "relay_completion_backoff" });
+  let submits = 0;
+  const submitCodex = async () => { submits += 1; return { submitted: false, reason: "codex-window-unavailable" }; };
+  const start = Date.now();
+  await processTaskCompletionWakes({ stateFile, discover, submitCodex, now: () => start });
+  await processTaskCompletionWakes({ stateFile, discover, submitCodex, now: () => start + 1 });
+  assert.equal(submits, 2, "the first failure retries on the next pass");
+  await processTaskCompletionWakes({ stateFile, discover, submitCodex, now: () => start + 2 });
+  assert.equal(submits, 2, "the second failure waits before the next attempt");
+  await processTaskCompletionWakes({ stateFile, discover, submitCodex, now: () => start + 16_000 });
+  assert.equal(submits, 3);
+  assert.equal(readTaskCompletionWakeState(stateFile).completions.relay_completion_backoff.failures, 3);
+});
+
+test("a wake that cannot land within a day is dropped without another attempt", async () => {
+  const { stateFile, origin, discover } = codexOriginFixture("relay-completion-expiry-");
+  seedCompletion({ stateFile, origin, completionRelayId: "relay_completion_old" });
+  let submits = 0;
+  const logs = [];
+  const results = await processTaskCompletionWakes({
+    stateFile,
+    discover,
+    submitCodex: async () => { submits += 1; return { submitted: true, ran: true }; },
+    now: () => Date.now() + 25 * 60 * 60 * 1_000,
+    log: (line) => logs.push(line),
+  });
+  assert.deepEqual(results, []);
+  assert.equal(submits, 0);
+  assert.equal(readTaskCompletionWakeState(stateFile).completions.relay_completion_old.state, "expired");
+  assert.match(logs.join("\n"), /gave up on Task completion wake relay_completion_old/);
 });

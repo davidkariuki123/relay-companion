@@ -739,3 +739,37 @@ test("a suspended Claude CLI session is rejected before socket dispatch and rema
     else process.env.RELAY_HOME = previousHome;
   }
 });
+
+test("on an undrivable Codex Desktop a picked task opens with the Relay prompt ready to send", async () => {
+  const previousHome = process.env.RELAY_HOME;
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-session-prefill-"));
+  const rollout = path.join(root, "rollout.jsonl");
+  fs.writeFileSync(rollout, "");
+  process.env.RELAY_HOME = root;
+  fs.writeFileSync(path.join(root, "state.json"), JSON.stringify({ packets: { relay_1: { id: "relay_1" } } }));
+  try {
+    const delivery = await import(`../src/session-delivery.js?prefill=${Date.now()}`);
+    const target = targetFor(rollout);
+    let focused = false;
+    const result = await delivery.deliverRelayToSession({
+      relayId: "relay_1",
+      target,
+      deliveryMode: delivery.EXPLICIT_PICKER_DELIVERY,
+      discover: () => [target],
+      submitCodex: async () => ({ attempted: true, submitted: false, deliveryAmbiguous: false, reason: "bridge-unsupported" }),
+      notifyCodex: async () => { focused = true; return { ok: false }; },
+      pollMs: 1,
+    });
+    assert.equal(result.delivered, true);
+    assert.equal(result.awaitingUserSend, true);
+    assert.equal(result.skipExternalOpen, false);
+    assert.equal(focused, false, "a prefill hand-off must not also try to drive the window");
+    const url = new URL(result.url);
+    assert.equal(`${url.protocol}//${url.host}${url.pathname}`, `codex://threads/${CODEX_ID}`);
+    assert.match(url.searchParams.get("prompt"), /relay_1/);
+    assert.equal(result.delivery.adapter, "codex_desktop_prefill");
+  } finally {
+    if (previousHome === undefined) delete process.env.RELAY_HOME;
+    else process.env.RELAY_HOME = previousHome;
+  }
+});

@@ -14,6 +14,7 @@ import {
   readRolloutMeta,
 } from "./codex-inject.js";
 import { submitTurnToCodexDesktopThread } from "./codex-desktop.js";
+import { submitCodexTurnPrivately } from "./codex-private-turn.js";
 import {
   refreshClaudeDesktopSessionForDelivery,
   sendClaudeSocket,
@@ -29,6 +30,20 @@ const CLAIM_STALE_MS = 5 * 60 * 1_000;
 const CODEX_ORIGIN_MAX_AGE_MS = 10 * 60 * 1_000;
 const ORIGIN_SCAN_BYTES = 512 * 1024;
 const DELIVERY_SCAN_BYTES = 2 * 1024 * 1024;
+// A wake is a courtesy note, not the Task's result: the completion Relay is
+// already in the inbox. So a note that cannot land stops trying. The first
+// failure retries on the next pass (a busy session usually frees up), later
+// ones wait longer each time, and after a day the note is dropped. Without
+// this, one unreachable session was retried every daemon pass indefinitely.
+const WAKE_RETRY_BASE_MS = 15_000;
+const WAKE_RETRY_MAX_MS = 30 * 60 * 1_000;
+const WAKE_MAX_AGE_MS = Number(process.env.RELAY_TASK_WAKE_MAX_AGE_MS || 24 * 60 * 60 * 1_000);
+
+export function wakeRetryDelayMs(failures) {
+  const count = Number(failures) || 0;
+  if (count <= 1) return 0;
+  return Math.min(WAKE_RETRY_MAX_MS, WAKE_RETRY_BASE_MS * 2 ** Math.min(count - 2, 16));
+}
 
 export function taskCompletionWakeStatePath(home = storeDir()) {
   return path.join(home, "task-completion-wake.json");
@@ -466,6 +481,7 @@ async function deliverClaimedWake(claimed, {
   sendClaude,
   refreshClaude,
   submitCodex,
+  fallbackCodex,
 } = {}) {
   const exact = exactOriginSession(claimed, discover);
   if (!exact) return { delivered: false, reason: "origin-session-unavailable" };
@@ -531,7 +547,12 @@ async function deliverClaimedWake(claimed, {
     text: prompt,
     cwd: exact.cwd || process.cwd(),
     rolloutPath,
+    // A courtesy note never opens Codex. It waits for the person to have it open.
+    allowLaunch: false,
   });
+  if (result?.reason === "bridge-unsupported" && typeof fallbackCodex === "function") {
+    return fallbackCodex({ exact, prompt, marker, rolloutPath });
+  }
   if (!result?.submitted) {
     return { delivered: false, reason: result?.reason || "codex-owner-submit-failed" };
   }
@@ -546,17 +567,72 @@ async function deliverClaimedWake(claimed, {
   };
 }
 
+// Codex Desktop is running (the bridge refusal proves it) but cannot be driven.
+// Deliver through Relay's own short-lived app-server, which Codex permits only
+// while the thread is not open in Desktop; otherwise wait and try again later.
+async function wakeCodexPrivately({ exact, prompt, marker, rolloutPath }, {
+  submit = submitCodexTurnPrivately,
+  log = () => {},
+} = {}) {
+  const result = await submit({ threadId: exact.nativeId, text: prompt, cwd: exact.cwd || process.cwd(), log });
+  if (!result?.submitted) return { delivered: false, reason: result?.reason || "codex-private-submit-failed" };
+  return {
+    delivered: true,
+    adapter: "codex_private_app_server",
+    observed: await waitForMarker(rolloutPath, marker),
+  };
+}
+
+function failedWakePatch(claimed, reason, nowMs, retryAfterMs = 0) {
+  const failures = Number(claimed.failures || 0) + 1;
+  const delayMs = Math.max(Number(retryAfterMs) || 0, wakeRetryDelayMs(failures));
+  return {
+    state: "pending",
+    failures,
+    lastError: reason,
+    lastAttemptAt: new Date(nowMs).toISOString(),
+    nextAttemptAt: delayMs ? new Date(nowMs + delayMs).toISOString() : null,
+  };
+}
+
+// Age counts from when the note became deliverable: a completion that waited
+// for its outbound origin starts its clock when that origin was linked.
+function expireStaleWakes(stateFile, nowMs, log) {
+  const snapshot = readTaskCompletionWakeState(stateFile);
+  const stale = Object.values(snapshot.completions).filter((row) => {
+    if (row?.state !== "pending" && row?.state !== "claimed") return false;
+    if (row.state === "claimed" && nowMs - (Date.parse(row.claimedAt || 0) || 0) < CLAIM_STALE_MS) return false;
+    const startedMs = Date.parse(row.originLinkedAt || row.queuedAt || 0) || 0;
+    return startedMs > 0 && nowMs - startedMs > WAKE_MAX_AGE_MS;
+  });
+  if (!stale.length) return;
+  mutateState(stateFile, (state) => {
+    for (const { completionRelayId } of stale) {
+      const row = state.completions[completionRelayId];
+      if (!row || (row.state !== "pending" && row.state !== "claimed")) continue;
+      row.state = "expired";
+      row.expiredAt = new Date(nowMs).toISOString();
+      row.nextAttemptAt = null;
+      delete row.claimToken;
+      delete row.claimedAt;
+      log(`gave up on Task completion wake ${completionRelayId} after ${row.attempts || 0} attempt(s): ${row.lastError || "undelivered"}`);
+    }
+  });
+}
+
 export async function processTaskCompletionWakes({
   stateFile = taskCompletionWakeStatePath(),
   discover = null,
   sendClaude = sendClaudeSocket,
   refreshClaude = refreshClaudeDesktopSessionForDelivery,
   submitCodex = submitTurnToCodexDesktopThread,
+  fallbackCodex = (wake) => wakeCodexPrivately(wake, { log }),
   now = Date.now,
   limit = 5,
   log = () => {},
 } = {}) {
   if (!fs.existsSync(stateFile)) return [];
+  expireStaleWakes(stateFile, now(), log);
   const snapshot = readTaskCompletionWakeState(stateFile);
   const scanNowMs = now();
   const candidates = Object.values(snapshot.completions)
@@ -571,7 +647,7 @@ export async function processTaskCompletionWakes({
     const claimed = claimWake(stateFile, candidate.completionRelayId, now());
     if (!claimed) continue;
     try {
-      const result = await deliverClaimedWake(claimed, { discover, sendClaude, refreshClaude, submitCodex });
+      const result = await deliverClaimedWake(claimed, { discover, sendClaude, refreshClaude, submitCodex, fallbackCodex });
       if (result.delivered) {
         settleWake(stateFile, claimed, {
           state: "delivered",
@@ -584,24 +660,12 @@ export async function processTaskCompletionWakes({
         });
         log(`woke ${claimed.origin.provider} session ${claimed.origin.nativeId} for Task completion ${claimed.completionRelayId}`);
       } else {
-        settleWake(stateFile, claimed, {
-          state: "pending",
-          lastError: result.reason,
-          lastAttemptAt: new Date(now()).toISOString(),
-          nextAttemptAt: result.retryAfterMs
-            ? new Date(now() + result.retryAfterMs).toISOString()
-            : null,
-        });
+        settleWake(stateFile, claimed, failedWakePatch(claimed, result.reason, now(), result.retryAfterMs));
       }
       results.push({ completionRelayId: claimed.completionRelayId, ...result });
     } catch (error) {
       const message = String(error?.message || error);
-      settleWake(stateFile, claimed, {
-        state: "pending",
-        lastError: message,
-        lastAttemptAt: new Date(now()).toISOString(),
-        nextAttemptAt: null,
-      });
+      settleWake(stateFile, claimed, failedWakePatch(claimed, message, now()));
       log(`Task completion wake failed for ${claimed.completionRelayId}: ${message}`);
       results.push({ completionRelayId: claimed.completionRelayId, delivered: false, reason: message });
     }

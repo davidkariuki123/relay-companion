@@ -49,6 +49,9 @@ const CODEX_DESKTOP_UNREACHED = new Set([
   "codex-launch-failed",
   "codex-not-ready",
   "codex-window-unavailable",
+  // Codex builds on OpenAI's OWL runtime refuse the inspector outright; the
+  // codex://threads/<id> link is the whole open there.
+  "bridge-unsupported",
 ]);
 export const CODEX_OPEN_METADATA_VERSION = 3;
 
@@ -621,7 +624,9 @@ async function materializeRowInHost({
       });
     }
     const latestAssignmentResult = secondPassResult || desktopOpenResult;
-    if (activateDesktop && surface !== "terminal" && relayProjectOpen && latestAssignmentResult?.projectAssignmentOk !== true) {
+    if (activateDesktop && surface !== "terminal" && relayProjectOpen
+      && latestAssignmentResult?.projectAssignmentOk !== true
+      && latestAssignmentResult?.reason !== "bridge-unsupported") {
       // The CLI is a one-shot child, so an unref'ed retry timer dies as soon as
       // Open returns. Complete one bounded assignment-only retry while this
       // process is alive; daemon startup repair remains the durable fallback.

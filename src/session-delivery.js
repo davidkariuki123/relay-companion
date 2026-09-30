@@ -11,6 +11,7 @@ import {
 } from "./codex-app-server.js";
 import {
   codexRolloutHasClientMessage,
+  codexThreadPrefillUrl,
   notifyCodexDesktopThreads,
   submitTurnToCodexDesktopThread,
 } from "./codex-desktop.js";
@@ -565,6 +566,19 @@ async function deliverCodex(target, prompt, options = {}) {
       userMessageId: owner.clientUserMessageId || null,
     };
   }
+  if (owner?.reason === "bridge-unsupported") {
+    // This Desktop build cannot be driven, and it keeps every thread opened in
+    // its window locked against other writers. Hand the person the thread with
+    // the Relay prompt already in its composer; Desktop runs it when they send.
+    return {
+      provider: "codex",
+      nativeId: target.nativeId,
+      adapter: "codex_desktop_prefill",
+      userMessageId: null,
+      awaitingUserSend: true,
+      prefillUrl: codexThreadPrefillUrl(target.nativeId, prompt),
+    };
+  }
   // A bridge acknowledgement followed by an unconfirmed rollout is
   // ambiguous: Desktop may already have accepted the turn. Starting a second
   // App Server here is never a safe fallback because Desktop remains the
@@ -778,6 +792,20 @@ export async function deliverRelayToSession({
     throw error;
   }
   const binding = bindRelaySession(relayId, exact, delivery, { claimId: claim.claimId });
+  if (delivery.prefillUrl) {
+    // Nothing is submitted yet, so the only right presentation is the prefill
+    // link itself: no bridge focus attempt, and never a plain thread link that
+    // would open the thread with an empty composer.
+    return {
+      delivered: true,
+      awaitingUserSend: true,
+      delivery,
+      binding,
+      openedInHost: false,
+      skipExternalOpen: false,
+      url: delivery.prefillUrl,
+    };
+  }
   return { delivered: true, delivery, binding, ...(await focusSession(binding, options)) };
 }
 
