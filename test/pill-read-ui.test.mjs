@@ -25,27 +25,14 @@ test("Relays is a pure person/group index with no free-floating request receipts
   assert.doesNotMatch(relays, /receiptRowHtml|data-receipt|rl-receipt/);
 });
 
-test("tab badges report unread Relays and only unclassified Todo debt", () => {
+test("tab badges report unread Relays", () => {
   const renderAll = html.slice(html.indexOf("function renderAll()"), html.indexOf("function onPayload"));
   assert.match(renderAll, /r\.unread[\s\S]*isRelayListKind\(r\)[\s\S]*!onRequestThread\(r, reqThreads\)/,
     "request progress/completion rows hidden from Relays cannot inflate its badge");
   assert.match(renderAll, /!relayIsSelfAuthored\(r, sentByRelayId\.get\(String\(r\.id \|\| r\.relayId \|\| ""\)\), viewerEmail\)/,
     "self-authored inbox twins cannot inflate a badge their conversation does not show");
-  assert.match(renderAll, /setBadge\(tasksBadgeEl, requestsOutstandingCount\(\)\)/,
-    "the amber Todo badge reports Triage, not read state");
-  assert.doesNotMatch(renderAll, /setBadge\(tasksBadgeEl, requestsUnreadCount\(\)\)/);
+  assert.doesNotMatch(renderAll, /tasksBadgeEl/, "the Todo tab and its badge are removed");
   assert.doesNotMatch(html, /function requestsUnreadCount\(/);
-});
-
-test("only Triage inflates the Todo badge", () => {
-  const start = html.indexOf("function requestsOutstandingCount()");
-  const end = html.indexOf("\n  let chatExpanded", start);
-  assert.ok(start >= 0 && end > start, "outstanding Task counter exists");
-  const source = html.slice(start, end);
-  const count = Function("todoState", `${source}; return requestsOutstandingCount;`)({
-    counts:{ triage:2, backlog:9, todo:4, in_progress:3, done:100, canceled:7, duplicate:5 },
-  });
-  assert.equal(count(), 2);
 });
 
 test("self-authored Relay detection is shared by conversations and the unread badge", () => {

@@ -2,20 +2,6 @@ import policy from "./product-features.cjs";
 
 export const { runtimeEnvironment, productFeatures } = policy;
 
-/**
- * Whether the paired profile's row has Todo and Tasks, decided offline from
- * the cached pairing profile. The hooks use it to decide whether the recent
- * Relay context may name relay_todo_update and the Task tools. Unknown means
- * no: a hook must never point a session at a tool it cannot see.
- */
-export function pairedProfileTodoEnabled({ env = process.env, config = {}, apiUrl = "" } = {}) {
-  try {
-    return productFeatures({ env, config, apiUrl, user: config?.user || null }).todo === true;
-  } catch {
-    return false;
-  }
-}
-
 /** Server-owned entitlements require a fresh profile for this paired account. */
 export async function accountProductFeatures({
   client,

@@ -657,10 +657,6 @@ test("CLI discovers the live catalog and executes mutations through the authenti
   const file = path.join(root, "agent-local.json");
   const writes = [];
   const client = {
-    todo: async input => ({mode:"continuous",items:[{relayId:"item_tools",todoStatus:input.statuses[0],todoVersion:3}],counts:{triage:1,in_progress:0,done:0},nextCursor:input.cursor?null:"todo-page-2"}),
-    todoVisibility: async id => ({itemId:id,removed:false,version:0}),
-    updateTodoVisibility: async (id,body) => { writes.push({id,body});return {ok:true,...body}; },
-    updateTodoStatus: async (id,body) => { writes.push({id,body});return {ok:true,status:body.status}; },
     identity: { userId: "usr_tools" }, accountDrift: () => ({ status: "same" }),
     token: "test-token", me: async () => ({ user: { id: "usr_tools", accountKind: "human", isDeveloper: true } }),
     groups: async () => ({ groups: [{ id: "grp_tools", name: "Tools" }] }),
@@ -707,7 +703,7 @@ test("CLI discovers the live catalog and executes mutations through the authenti
     assert.match(result.stdout, /unavailable|Unknown tool/);
   }
   assert.ok(!tools.some(tool => tool.name.startsWith("relay_todo_")));
-  assert.equal(writes.length, 3, "paused Todo never reaches a mutation");
+  assert.equal(writes.length, 3, "the removed Todo tools never reach a mutation");
   client.updateContact = async () => { throw Object.assign(new Error("permission denied"), { status: 403 }); };
   const refused = await runProtocol(["call", "relay_contact_update"], { env, input: JSON.stringify({ contactId: "con_tools" }) });
   assert.equal(refused.code, 1);

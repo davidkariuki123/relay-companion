@@ -6,7 +6,7 @@ description: Use Relay from Claude Code or Codex with Companion's local MCP tool
 # Relay
 
 Use Relay inside the current agent conversation. Companion supplies a visual
-view and, once connected, manages its credentials, encryption and outgoing queue.
+view and, once connected, manages its credentials and outgoing queue.
 Hosted/headless agents can use the authenticated HTTPS protocol directly.
 
 <!-- BEGIN GENERATED RELAY VALUE -->
@@ -765,8 +765,8 @@ title, both documents and attachments itself and marks the new Relay as
 forwarded from its original sender by name; do not restate the original in the
 note. The original sender is not notified and does not join the new
 conversation, so treat forwarding as disclosure: resolve who is receiving it.
-Encrypted messages cannot be forwarded. An explicit request to forward to a
-resolved recipient authorizes that forward; clarify an ambiguous recipient.
+An explicit request to forward to a resolved recipient authorizes that
+forward; clarify an ambiguous recipient.
 
 To change or take back a message the person sent, use `relay_message_edit`
 or `relay_message_delete` (or the helper's `call relay_message_edit` and
@@ -785,10 +785,9 @@ member at once.
 
 To attach a local file, add `files: ["<absolute path>"]` to the JSON passed on
 stdin to `send`, or `attachments: [{path: "<absolute path>", name: "report.pdf"}]`.
-The helper reads and hashes files before sending. Companion encrypts them when
-the account uses encryption. Do not claim encryption before a successful send.
-Use `attachment <relay-id> <attachment-id>` for an authorized download URL or
-locally decrypted file path. Download URLs are private, temporary transport.
+The helper reads and hashes files before sending.
+Use `attachment <relay-id> <attachment-id>` for an authorized download URL.
+Download URLs are private, temporary transport.
 
 Put `--transport=https` before the helper command to use independent HTTPS:
 `node "<absolute-skill-directory>/scripts/relay-protocol.mjs" --transport=https status`.

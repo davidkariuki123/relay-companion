@@ -735,65 +735,6 @@ export function repairClaudeSessionModel({ sessionPath = "", model = "" } = {}) 
   };
 }
 
-export function setClaudeNativeSessionAttention(
-  nativeSession,
-  { packetId, title = nativeSession?.title || null, state = "unread", nowMs = Date.now() } = {},
-) {
-  const sessionId = nativeSession?.sessionId;
-  if (!sessionId) return { attempted: false, reason: "missing-session-id" };
-  const metadataPath = nativeSession.desktopMetadataPath || claudeDesktopSessionMetadataPath(sessionId);
-  if (!metadataPath || !fs.existsSync(metadataPath)) {
-    return { attempted: false, reason: "metadata-not-found", metadataPath: metadataPath || null };
-  }
-
-  const metadata = readJsonIfExists(metadataPath, null);
-  if (!metadata) return { attempted: false, reason: "metadata-unreadable", metadataPath };
-
-  const previousAttention = metadata.relayAttention || {};
-  const originalLastActivityAt =
-    previousAttention.originalLastActivityAt ?? (Number.isFinite(metadata.lastActivityAt) ? metadata.lastActivityAt : nowMs);
-  const originalLastFocusedAt =
-    previousAttention.originalLastFocusedAt ?? (Number.isFinite(metadata.lastFocusedAt) ? metadata.lastFocusedAt : null);
-  const timestamp = new Date(nowMs).toISOString();
-  const nextAttention = {
-    ...previousAttention,
-    packetId: packetId || previousAttention.packetId || null,
-    title: title || previousAttention.title || metadata.title || null,
-    state,
-    originalLastActivityAt,
-    originalLastFocusedAt,
-    updatedAt: timestamp,
-  };
-
-  const nextMetadata = {
-    ...metadata,
-    isArchived: false,
-    relayAttention: nextAttention,
-  };
-  if (isRelayTitle(title)) {
-    nextMetadata.title = title;
-    nextMetadata.titleSource = "user";
-  }
-
-  if (state === "unread") {
-    nextAttention.lastAppliedAt = nowMs;
-    nextMetadata.lastActivityAt = Math.max(nowMs, Number(metadata.lastActivityAt) || 0);
-  } else {
-    nextAttention.acknowledgedAt = timestamp;
-    nextMetadata.lastActivityAt = originalLastActivityAt;
-  }
-
-  writeJsonAtomic(metadataPath, nextMetadata);
-  return {
-    attempted: true,
-    metadataPath,
-    sessionId,
-    state,
-    lastActivityAt: nextMetadata.lastActivityAt,
-    originalLastActivityAt,
-  };
-}
-
 export function repairClaudeDesktopRelaySessions({ sessionIds = null } = {}) {
   const groupDir = findClaudeDesktopSessionGroupDir();
   if (!groupDir) return { attempted: false, reason: "no-claude-desktop-session-dir", repaired: [], archived: [] };

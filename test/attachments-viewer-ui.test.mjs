@@ -32,7 +32,7 @@ const cargoSource = between(
 const esc = (value) => String(value).replace(/[&<>"']/g, "");
 const cargo = new Function(
   "esc", "fmtBytes", "fileIconSvg", "fileFamilyOf", "attachmentIsImage",
-  `"use strict"; ${between(inbox, "  function relaySharedShelf", "  function readerAttachmentRows")}; ${cargoSource}; return { chatAttachmentCargo, chatAttachmentSource, fileKindLabel, attachmentMetaText, attachmentKey, chatFileShelves };`,
+  `"use strict"; ${between(inbox, "  function relaySharedShelf", "  function readerAttachmentRows")}; ${cargoSource}; return { chatAttachmentCargo, chatAttachmentSource, attachmentKey, chatFileShelves };`,
 )(
   esc,
   (bytes) => {
@@ -153,17 +153,6 @@ test("a collage is one check that stands for every photo inside it", () => {
   const group = /data-att-keys="([^"]+)"/.exec(html)[1].split("|");
   assert.deepEqual(group, [1, 2, 3, 4, 5].map((n) => `relay_1::img_${n}`),
     "including the photos folded behind +N — Download must not drop them");
-});
-
-test("the meta word after the size names the file the way a person would", () => {
-  assert.equal(cargo.fileKindLabel("server.log"), "Log");
-  assert.equal(cargo.fileKindLabel("notes.docx"), "Word");
-  assert.equal(cargo.fileKindLabel("readme.md"), "Text");
-  assert.equal(cargo.fileKindLabel("rows.csv"), "CSV");
-  assert.equal(cargo.fileKindLabel("deck.pdf"), "PDF");
-  assert.equal(cargo.fileKindLabel("export.zip"), "Zip");
-  assert.equal(cargo.attachmentMetaText({ name: "x.log", bytes: 11 * 1024 }), "11 KB · Log");
-  assert.equal(cargo.attachmentMetaText({ name: "x.log" }), "Log", "no size is not a leading separator");
 });
 
 // ---- the selection reducer -------------------------------------------------
@@ -467,7 +456,6 @@ test("the composer's own chips and the other attachment surfaces are untouched",
   assert.match(inbox, /function attachmentChips\(attachments, \{ relayId = "" \} = \{\}\)/);
   assert.match(inbox, /function attachmentPlates\(attachments, \{ relayId = "" \} = \{\}\)/);
   assert.match(inbox, /attachmentPlates\(r\.attachments, \{ relayId: r\.id \}\)/, "the relay list still uses plates");
-  assert.match(inbox, /\$\{attachmentChips\(m\.attachments\)\}/, "task messages still use chips");
   assert.match(inbox, /function relaySharedShelf\(relay\)/, "the reader keeps its shared collection entry point");
   assert.match(inbox, /\.th-msg\.attachment-only \{ display:contents; \}/);
 });

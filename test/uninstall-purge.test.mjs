@@ -534,6 +534,12 @@ test("successful uninstall explains the open-session context boundary", () => {
   assert.match(lines.join("\n"), /makes those instructions inert/i);
 });
 
+test("only a recovery that keeps the native shortcut skips removing Relay.lnk", () => {
+  const installSource = fs.readFileSync(new URL("../src/install.js", import.meta.url), "utf8");
+  assert.match(installSource, /keepWindowsShortcut = false,/, "an ordinary uninstall still removes the shortcut");
+  assert.match(installSource, /if \(!keepWindowsShortcut\) record\("windows_shortcut", "Relay's Start Menu shortcut", \(\) => removeOwnedPath\(windowsStartMenuShortcutPath\(env, homeDir\)\)\);/);
+});
+
 test("relay CLI emits structured uninstall results and fails its exit status when incomplete", () => {
   const source = fs.readFileSync(new URL("../bin/relay.js", import.meta.url), "utf8");
   const installSource = fs.readFileSync(new URL("../src/install.js", import.meta.url), "utf8");

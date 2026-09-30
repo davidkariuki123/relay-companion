@@ -18,7 +18,6 @@ import { materializeRelayOpenDocumentFiles, materializeRowForClaude } from "./cl
 import {
   ensureClaudeDesktopImported,
   isClaudeNativeSessionImported,
-  repairClaudeDesktopRelaySessions,
 } from "./claude-session-writer.js";
 import {
   DEFAULT_CODEX_OPEN_EFFORT,
@@ -1312,12 +1311,6 @@ async function refreshCodexDesktopForThreads(
     }
     return null;
   }
-}
-
-// Exposed so a `relay repair claude` style command (or tests) can drive the
-// Claude Desktop title repair pass, mirroring the original.
-export function repairClaudeTitles() {
-  return repairClaudeDesktopRelaySessions();
 }
 
 function firstNonEmpty(...values) {

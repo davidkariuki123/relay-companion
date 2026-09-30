@@ -1,0 +1,179 @@
+name: Verify published Relay Companion
+
+# Audits an immutable published build candidate on all six native platforms:
+# provenance, package shape, the signed runtime, and the exact stock setup. It
+# ran in the private repository until that repository's hosted-runner budget
+# ran out; standard runners are free here. There is no push trigger and no
+# write credential in this workflow.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Exact public Companion build candidate version"
+        required: true
+        type: string
+      source_sha:
+        description: "Public relay-companion source commit (40 hex characters)"
+        required: true
+        type: string
+      distribution:
+        description: "Expected public package shape"
+        required: true
+        type: choice
+        options: [bridge-runtime, thin-installer]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-published-relay-companion
+  cancel-in-progress: false
+
+jobs:
+  verify-public-release:
+    name: Verify public release (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: darwin-arm64
+          - os: macos-15-intel
+            platform: darwin-x64
+          - os: windows-latest
+            platform: win32-x64
+          - os: windows-11-arm
+            platform: win32-arm64
+          - os: ubuntu-24.04
+            platform: linux-x64
+          - os: ubuntu-24.04-arm
+            platform: linux-arm64
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.18.0
+      - run: npm install --global npm@11.19.0
+      - name: Install Linux canary desktop dependencies
+        if: startsWith(matrix.platform, 'linux-')
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes xdg-utils
+      - name: Validate immutable public identity and package shape
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          DISTRIBUTION: ${{ inputs.distribution }}
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$GITHUB_REPOSITORY" = "davidkariuki123/relay-companion"
+          release_run="$(gh api "repos/davidkariuki123/relay-companion/actions/workflows/release.yml/runs?head_sha=$SOURCE_SHA&status=success&per_page=1" --jq '.workflow_runs[0].id // empty')"
+          test -n "$release_run" || {
+            echo "::error::No successful public Relay Companion release workflow exists for $SOURCE_SHA"
+            exit 1
+          }
+          node scripts/verify-published-release.mjs --version "$VERSION" --source-sha "$SOURCE_SHA"
+          actual="$(npm view "relay-companion@$VERSION" relayDistribution)"
+          test "$actual" = "$DISTRIBUTION"
+          test "$(npm view relay-companion dist-tags.build)" = "$VERSION"
+          # Registry metadata grows with release history and exceeds Windows'
+          # command-line limit. Read the same JSON from disk on every platform.
+          npm view "relay-companion@$VERSION" --json > published-package.json
+          if [ "$DISTRIBUTION" = thin-installer ]; then
+            node -e 'const p=JSON.parse(require("fs").readFileSync("published-package.json", "utf8"));if(Object.keys(p.dependencies||{}).length||p.bin?.relay!=="bootstrap/relay-setup.cjs")process.exit(1)'
+          else
+            node -e 'const p=JSON.parse(require("fs").readFileSync("published-package.json", "utf8"));if(!Object.keys(p.dependencies||{}).length||p.bin?.relay!=="bin/relay.js")process.exit(1)'
+          fi
+      - name: Fetch, hash, reconstruct, and launch branded native artifact
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+          PLATFORM: ${{ matrix.platform }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/relay-runtime-$VERSION-$PLATFORM"
+          mkdir -p "$root"
+          archive="$root/runtime.tar.gz"
+          curl --fail --silent --show-error \
+            "https://api.sendrelays.com/v1/companion-releases/v$VERSION/relay-runtime-$VERSION-$PLATFORM.tar.gz" \
+            -o "$archive"
+          node scripts/verify-runtime-manifest.mjs \
+            --version "$VERSION" --source-sha "$SOURCE_SHA" --platform "$PLATFORM" --artifact "$archive"
+          (cd "$root" && tar -xzf runtime.tar.gz)
+          node -e 'require("./bootstrap/relay-setup.cjs").restoreRuntimeLinks(process.argv[1])' "$root"
+          node scripts/verify-installed-runtime.mjs \
+            --package-root "$root/node_modules/relay-companion" --version "$VERSION"
+      - name: Exercise the exact published setup without authorizing an account
+        if: startsWith(matrix.platform, 'linux-') || (startsWith(matrix.platform, 'darwin-') && inputs.distribution == 'thin-installer')
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+          DISTRIBUTION: ${{ inputs.distribution }}
+        run: |
+          set -euo pipefail
+          canary_home="$RUNNER_TEMP/relay-thin-setup-home"
+          mkdir -p "$canary_home"
+          export HOME="$canary_home"
+          export RELAY_CONFIG_DIR="$canary_home/.relay"
+          export CODEX_HOME="$canary_home/.codex"
+          export CLAUDE_HOME="$canary_home/.claude"
+          if [ "$RUNNER_OS" = Linux ]; then
+            export DISPLAY=:99
+            Xvfb "$DISPLAY" -screen 0 1280x720x24 -nolisten tcp >"$RUNNER_TEMP/relay-xvfb.log" 2>&1 &
+            xvfb_pid=$!
+            # Hosted runners are services rather than graphical logins, so
+            # create the ordinary per-user manager when the image did not
+            # already start one. Relay setup itself remains entirely unprivileged.
+            if ! systemctl --user show-environment >/dev/null 2>&1; then
+              sudo loginctl enable-linger "$(id -un)"
+              sudo systemctl start "user@$(id -u).service"
+              export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+              export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+            fi
+            systemctl --user show-environment >/dev/null
+          fi
+          # Give setup one deterministic, isolated host target. Clean GitHub
+          # runners have no real Codex/Claude install, and setup correctly
+          # fails when it cannot configure any host.
+          mkdir -p "$CODEX_HOME"
+          cleaned=0
+          cleanup() {
+            if [ "$cleaned" = 0 ] && [ -f "$canary_home/.relay/runtime/current.json" ]; then
+              runtime_node="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).node' "$canary_home/.relay/runtime/current.json")"
+              runtime_bin="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).bin' "$canary_home/.relay/runtime/current.json")"
+              "$runtime_node" "$runtime_bin" uninstall --no-trampoline
+            fi
+            if [ -n "${xvfb_pid:-}" ]; then kill "$xvfb_pid" 2>/dev/null || true; fi
+          }
+          trap 'cleanup || true' EXIT
+          # This canary runs after publication: only then can the exact stock
+          # version be exercised the way a person installs it.
+          # Reproduce the first Linux beta failure: a setup process died during
+          # its download and left a brand-new transaction lock behind. The exact
+          # published package must recover without asking the user to delete it.
+          mkdir -p "$canary_home/.relay/runtime/transaction.lock"
+          dead_setup_pid=2147483000
+          ! kill -0 "$dead_setup_pid" 2>/dev/null
+          node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({pid:Number(process.argv[2]),nonce:"canary-dead-download",createdAt:Date.now(),operation:"bootstrap-setup"}))' \
+            "$canary_home/.relay/runtime/transaction.lock/owner.json" "$dead_setup_pid"
+          if [ "$DISTRIBUTION" = thin-installer ]; then
+            mkdir -p "$canary_home/.relay/runtime/releases/.relay-download-canary"
+            echo partial > "$canary_home/.relay/runtime/releases/.relay-download-canary/runtime.tar.gz"
+          fi
+          npx --yes --no-audit --no-fund "relay-companion@$VERSION" setup
+          if [ "$DISTRIBUTION" = thin-installer ]; then
+            test ! -e "$canary_home/.relay/runtime/releases/.relay-download-canary"
+          fi
+          node scripts/verify-thin-setup-canary.mjs \
+            --version "$VERSION" --home "$canary_home"
+          cleanup
+          cleaned=1
+          node scripts/verify-thin-setup-canary.mjs \
+            --expect-uninstalled --version "$VERSION" --home "$canary_home"

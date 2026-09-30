@@ -26,8 +26,8 @@ const delivery = read("../src/session-delivery.js");
 
 const handoff = between(main, "async function handOffToAgent", "// The kick prompt is the task's REAL first user message.");
 const docks = between(inbox, "function hostMark(provider)", "function wireRequestControls");
-const controls = between(inbox, "function wireRequestControls", "// Todo's amber number counts Needs attention");
-const reader = between(inbox, "function renderReader()", "// ---------- the Tasks board");
+const controls = between(inbox, "function wireRequestControls", "let chatExpanded = false;");
+const reader = between(inbox, "function renderReader()", "// Grow the window as the user scrolls toward the end.");
 
 test("Send on the agent document is a hand-off: one verb, one IPC, no runner", () => {
   // The agent face's composer is the shared route-selecting capsule with Send
@@ -160,11 +160,6 @@ test("a Task reads as one page: the agent document folds into Details, not a sec
   // Opening a Relay that already went to an app lands on its receipt.
   const open = between(inbox, "function openReader(", "function closeReader(");
   assert.match(open, /readerTab = !picker && openedHandoff && \["starting", "running", "failed"\]\.includes\(openedHandoff\.state\) \? "agent" : "you"/);
-  // The Task board reads the receipt too.
-  const state = between(inbox, "function taskBoardState", "function relayWorkState");
-  assert.match(state, /if \(h\?\.state === "starting"\) return "running";/);
-  assert.match(state, /if \(h\?\.state === "running"\) return "running";/);
-  assert.match(state, /if \(h\?\.state === "failed"\) return "stopped";/);
 });
 
 test("a Task has no Start: it opens like a Relay from every surface", () => {
@@ -195,18 +190,4 @@ test("new native hand-off turns use ACP and preserve route and session identity"
     assert.equal(seen[0].effort, "high");
     assert.ok(seen[0].mcpServers.some(server => server.name === "relay"));
   }
-});
-
-test("a hand-off moves the titled Relay to In Progress itself, with a note the person reads", () => {
-  // The hand-off IS the start of the work (David, 2026-09-08).
-  assert.match(handoff, /if \(firstTurn\) void markHandoffInProgress\(row, host\);/);
-  const mark = between(main, "async function markHandoffInProgress(row, host)", "async function handOffToAgent(input)");
-  assert.match(mark, /if \(\["in_progress", "done"\]\.includes\(String\(row\?\.todoStatus \|\| ""\)\)\) return/);
-  assert.match(mark, /status: "in_progress",/);
-  assert.match(mark, /note: `You handed this to \$\{app\}; it is working on it\.`/);
-  // A stale local version is refreshed once through the packets endpoint, which now carries the Todo state.
-  assert.match(mark, /const fresh = await client\.fetchRelayPackets\(\[id\]\);/);
-  assert.match(mark, /const todo = fresh\?\.packets\?\.\[id\]\?\.todo;/);
-  const update = between(main, "async function updateTodoStatus(relayId, input = {})", "const statusChanged =");
-  assert.match(update, /\.\.\.\(String\(input\.note \|\| ""\)\.trim\(\) \? \{ note: String\(input\.note\)\.trim\(\) \} : \{\}\)/);
 });

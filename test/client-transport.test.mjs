@@ -174,7 +174,7 @@ test("a write without an idempotency key is never replayed after a lost response
   const warnings = captureTransportWarnings(t);
   const relay = new RelayClient({ url, token: "dev_test" });
 
-  const error = await relay.createMcpBrowserHandoff().then(
+  const error = await relay.agentRunProgress("relay_1", "working").then(
     () => null,
     (caught) => caught,
   );

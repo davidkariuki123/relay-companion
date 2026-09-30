@@ -31,6 +31,7 @@ const { execFile } = require("node:child_process");
 const { installationId } = require("../bootstrap/installation-health.cjs");
 
 const INSTALLATION_KEY_PATTERN = /^ik_[a-f0-9]{40}$/;
+const MACHINE_KEY_PATTERN = /^mk_[a-f0-9]{40}$/;
 
 function runCommand(command, args, { timeoutMs = 3000 } = {}) {
   return new Promise((resolve) => {
@@ -101,4 +102,33 @@ async function installationKey({
   }
 }
 
-module.exports = { INSTALLATION_KEY_PATTERN, installationKey, machineIdentifier };
+/**
+ * The same identity without the computer's name, so it survives a rename. The
+ * server uses it only to recognise a renamed computer and to notice clones; it
+ * never signs a computer out on it, because clones of one image share it.
+ * Null when the machine cannot be identified. Never throws.
+ */
+async function machineKey({
+  homeDir = os.homedir(),
+  platform = process.platform,
+  env = process.env,
+  run = runCommand,
+  readFile = fs.readFileSync,
+  readInstallationId = installationId,
+} = {}) {
+  try {
+    const id = readInstallationId({ homeDir, create: true });
+    if (!id) return null;
+    const machine = await machineIdentifier({ platform, env, run, readFile });
+    if (!machine) return null;
+    const digest = crypto
+      .createHash("sha256")
+      .update(["relay-machine-key-v1", platform, id, machine].join("\n"))
+      .digest("hex");
+    return `mk_${digest.slice(0, 40)}`;
+  } catch {
+    return null;
+  }
+}
+
+module.exports = { INSTALLATION_KEY_PATTERN, MACHINE_KEY_PATTERN, installationKey, machineKey, machineIdentifier };

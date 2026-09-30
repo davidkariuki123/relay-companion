@@ -10,6 +10,8 @@ import {
   pairedAccountConfig,
   persistPairedAccount,
   persistSignedOutAccount,
+  flushPendingSignOuts,
+  reportUninstalledDevice,
   signedOutAccountConfig,
 } from "../src/account.js";
 import { configPath, readConfig, readConfigState, writeConfigObject } from "../src/config.js";
@@ -442,4 +444,122 @@ test("switch account uses eight code cells and a short clickable setup link", ()
   assert.doesNotMatch(renderer, /settingsInfo\s*&&\s*settingsInfo\.setupUrl/);
   assert.doesNotMatch(renderer, /Your browser opened the Relay setup page/);
   assert.doesNotMatch(renderer, /Wrong browser\?/);
+});
+
+async function withConfigEnvAsync(fn) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-account-test-"));
+  const previousDir = process.env.RELAY_CONFIG_DIR;
+  const previousFile = process.env.RELAY_CONFIG;
+  process.env.RELAY_CONFIG_DIR = dir;
+  delete process.env.RELAY_CONFIG;
+  try {
+    return await fn(dir);
+  } finally {
+    if (previousDir === undefined) delete process.env.RELAY_CONFIG_DIR;
+    else process.env.RELAY_CONFIG_DIR = previousDir;
+    if (previousFile === undefined) delete process.env.RELAY_CONFIG;
+    else process.env.RELAY_CONFIG = previousFile;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const PENDING_KEY = `ik_${"a".repeat(40)}`;
+const SIGNED_IN = {
+  apiUrl: "https://api.sendrelays.com",
+  credentialStore: "native-v1",
+  credentialVersion: "one",
+  credentialAccount: "device-token-one",
+  deviceId: "dev_1",
+  installationKey: PENDING_KEY,
+  user: { id: "usr_1" },
+};
+
+function pendingVault() {
+  const vault = new Map([["device-token-one", "dev_offline_token"]]);
+  return {
+    vault,
+    credentialBackend: {
+      readDeviceToken: ({ account }) => vault.has(account)
+        ? { ok: true, value: vault.get(account) }
+        : { ok: false, value: "", code: "credential_not_found" },
+      deleteDeviceToken: ({ account }) => { vault.delete(account); return { ok: true }; },
+    },
+  };
+}
+
+test("a sign-out the server never heard about is kept, then finished with the same credential", async () => {
+  await withConfigEnvAsync(async () => {
+    fs.writeFileSync(configPath(), JSON.stringify(SIGNED_IN));
+    const { vault, credentialBackend } = pendingVault();
+    persistSignedOutAccount({ credentialBackend, revokeResult: "failed" });
+    const signedOut = JSON.parse(fs.readFileSync(configPath(), "utf8"));
+    assert.equal(signedOut.user, undefined);
+    assert.equal(signedOut.credentialAccount, undefined, "the kept credential is no longer the account's");
+    assert.equal(signedOut.pendingSignOuts.length, 1);
+    assert.deepEqual(
+      { ...signedOut.pendingSignOuts[0], signedOutAt: "" },
+      { credentialAccount: "device-token-one", deviceId: "dev_1", apiUrl: SIGNED_IN.apiUrl, signedOutAt: "" },
+    );
+    assert.equal(JSON.stringify(signedOut).includes("dev_offline_token"), false, "the token never reaches config.json");
+    assert.equal(vault.get("device-token-one"), "dev_offline_token");
+
+    const calls = [];
+    const offline = async () => ({ revokeSelf: async () => { throw new Error("ECONNRESET"); } });
+    assert.deepEqual(await flushPendingSignOuts({ credentialBackend, makeClient: offline }), { revoked: 0, remaining: 1 });
+    assert.equal(vault.has("device-token-one"), true, "still offline: nothing is dropped");
+
+    const recording = async (url, token) => ({ revokeSelf: async (options) => { calls.push({ url, token, ...options }); } });
+    assert.deepEqual(await flushPendingSignOuts({ credentialBackend, makeClient: recording }), { revoked: 1, remaining: 0 });
+    assert.equal(calls.length, 1);
+    assert.deepEqual(
+      { url: calls[0].url, token: calls[0].token, reason: calls[0].reason },
+      { url: SIGNED_IN.apiUrl, token: "dev_offline_token", reason: "sign_out" },
+    );
+    assert.equal(vault.has("device-token-one"), false);
+    assert.deepEqual(JSON.parse(fs.readFileSync(configPath(), "utf8")), { apiUrl: SIGNED_IN.apiUrl });
+  });
+});
+
+test("an offline sign-out of a credential from before installation keys is kept too", async () => {
+  await withConfigEnvAsync(async () => {
+    const { installationKey: _none, ...beforeKeys } = SIGNED_IN;
+    fs.writeFileSync(configPath(), JSON.stringify(beforeKeys));
+    const { vault, credentialBackend } = pendingVault();
+    persistSignedOutAccount({ credentialBackend, revokeResult: "failed" });
+    assert.equal(JSON.parse(fs.readFileSync(configPath(), "utf8")).pendingSignOuts.length, 1);
+    const online = async () => ({ revokeSelf: async () => {} });
+    assert.deepEqual(await flushPendingSignOuts({ credentialBackend, makeClient: online }), { revoked: 1, remaining: 0 });
+    assert.equal(vault.size, 0);
+  });
+});
+
+test("a kept sign-out the server already retired is cleared, and a reached server keeps nothing", async () => {
+  await withConfigEnvAsync(async () => {
+    fs.writeFileSync(configPath(), JSON.stringify(SIGNED_IN));
+    const { vault, credentialBackend } = pendingVault();
+    persistSignedOutAccount({ credentialBackend, revokeResult: "failed" });
+    const rejected = async () => ({ revokeSelf: async () => { throw Object.assign(new Error("gone"), { status: 401 }); } });
+    assert.deepEqual(await flushPendingSignOuts({ credentialBackend, makeClient: rejected }), { revoked: 0, remaining: 0 });
+    assert.equal(vault.size, 0);
+    assert.equal(JSON.parse(fs.readFileSync(configPath(), "utf8")).pendingSignOuts, undefined);
+
+    fs.writeFileSync(configPath(), JSON.stringify(SIGNED_IN));
+    vault.set("device-token-one", "dev_online_token");
+    persistSignedOutAccount({ credentialBackend, revokeResult: "revoked" });
+    assert.equal(vault.size, 0, "a sign-out the server confirmed deletes the credential at once");
+    assert.deepEqual(JSON.parse(fs.readFileSync(configPath(), "utf8")), { apiUrl: SIGNED_IN.apiUrl });
+  });
+});
+
+test("removing Relay reports the device without revoking it, and never throws", async () => {
+  const calls = [];
+  const config = { deviceToken: "dev_installed", deviceId: "dev_1", apiUrl: "https://api.sendrelays.com" };
+  const online = async (url, token) => ({ reportUninstalled: async () => { calls.push({ url, token }); }, revokeSelf: async () => { throw new Error("must not revoke"); } });
+  assert.equal(await reportUninstalledDevice(config, { makeClient: online }), "reported");
+  assert.deepEqual(calls, [{ url: config.apiUrl, token: "dev_installed" }]);
+  const failing = (status) => async () => ({ reportUninstalled: async () => { throw Object.assign(new Error("no"), status ? { status } : {}); } });
+  assert.equal(await reportUninstalledDevice(config, { makeClient: failing(404) }), "unsupported");
+  assert.equal(await reportUninstalledDevice(config, { makeClient: failing(401) }), "already_revoked");
+  assert.equal(await reportUninstalledDevice(config, { makeClient: failing() }), "failed");
+  assert.equal(await reportUninstalledDevice({}, { makeClient: online }), "none");
 });

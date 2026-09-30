@@ -33,28 +33,25 @@ const PRODUCTION_DEVELOPER_SURFACES = { ...ORDINARY_SURFACES, developerAccount: 
 
 test("developer capabilities require both the server-owned role and a non-production environment", async () => {
   assert.deepEqual(productFeatures({ env: { NODE_ENV: "development" }, user: ORDINARY_USER }), {
-    environment: "local", developer: false, orgAdmin: false, googleContacts: false, requests: true, legacyTaskProtocol: false, todo: false, cowork: false, ...ORDINARY_SURFACES,
+    environment: "local", developer: false, orgAdmin: false, googleContacts: false, requests: true, legacyTaskProtocol: false, cowork: false, ...ORDINARY_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { NODE_ENV: "development" }, user: DEVELOPER }), {
-    environment: "local", developer: true, orgAdmin: false, googleContacts: true, requests: true, legacyTaskProtocol: true, todo: false, cowork: false, ...DEVELOPER_SURFACES,
+    environment: "local", developer: true, orgAdmin: false, googleContacts: true, requests: true, legacyTaskProtocol: true, cowork: false, ...DEVELOPER_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { RELAY_UPDATE_CHANNEL: "dev" }, user: DEVELOPER }), {
-    environment: "dev", developer: true, orgAdmin: false, googleContacts: true, requests: true, legacyTaskProtocol: true, todo: false, cowork: false, ...DEVELOPER_SURFACES,
+    environment: "dev", developer: true, orgAdmin: false, googleContacts: true, requests: true, legacyTaskProtocol: true, cowork: false, ...DEVELOPER_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { RELAY_UPDATE_CHANNEL: "staging" }, user: DEVELOPER }), {
-    environment: "staging", developer: false, orgAdmin: false, googleContacts: false, requests: true, legacyTaskProtocol: false, todo: false, cowork: false, ...PRODUCTION_DEVELOPER_SURFACES,
+    environment: "staging", developer: false, orgAdmin: false, googleContacts: false, requests: true, legacyTaskProtocol: false, cowork: false, ...PRODUCTION_DEVELOPER_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { RELAY_ENV: "staging" }, user: DEVELOPER }), {
-    environment: "staging", developer: false, orgAdmin: false, googleContacts: false, requests: true, legacyTaskProtocol: false, todo: false, cowork: false, ...PRODUCTION_DEVELOPER_SURFACES,
+    environment: "staging", developer: false, orgAdmin: false, googleContacts: false, requests: true, legacyTaskProtocol: false, cowork: false, ...PRODUCTION_DEVELOPER_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: {}, user: DEVELOPER }), {
-    environment: "production", developer: false, orgAdmin: false, googleContacts: false, requests: true, legacyTaskProtocol: false, todo: false, cowork: false, ...PRODUCTION_DEVELOPER_SURFACES,
+    environment: "production", developer: false, orgAdmin: false, googleContacts: false, requests: true, legacyTaskProtocol: false, cowork: false, ...PRODUCTION_DEVELOPER_SURFACES,
   });
-  const { todoStewardTick } = await import("../src/todo-steward-runtime.js");
-  const untouchable = new Proxy({}, { get() { throw new Error("Todo client must not run"); } });
   for (const environment of ["local", "dev", "staging", "production"]) {
-    const features = productFeatures({ env: { RELAY_ENV: environment }, user: DEVELOPER });
-    assert.deepEqual(await todoStewardTick({ client: untouchable, features }), { ran: false, reason: "todo_off" });
+    assert.ok(!Object.hasOwn(productFeatures({ env: { RELAY_ENV: environment }, user: DEVELOPER }), "todo"), "the Todo feature is removed on every row");
   }
 });
 
@@ -166,10 +163,7 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
   // that starts, messages or inspects a native session is listed anywhere.
   const shipped = productFeatures({ env: {}, user: ORDINARY_USER });
   const ordinary = toolsForAccount(shipped).map((tool) => tool.name);
-  // Todo is a developer row in productFeatures and the overlay hides its tab,
-  // but it had no catalog gate, so this list used to open with the three
-  // relay_todo_* tools: every staging and production account was offered a
-  // surface it is not entitled to call, and this assertion pinned that.
+
   // Editing and deleting one's own sent messages joined the shipped catalog on
   // 2026-09-17: they are ordinary messaging, like sending.
   // Tasks joined the shipped catalog on 2026-09-17, with the inbox housekeeping
@@ -212,14 +206,15 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
       /unavailable in this Relay release/,
     );
   }
-  // A session still holding relay_todo_* from before the gate is refused before
-  // transport, the same as every other unreleased tool.
+  // The Todo tools are removed. A session still holding relay_todo_* gets an
+  // ordinary unknown-tool answer and nothing reaches the transport.
   for (const [name, args] of [
     ["relay_todo_update", { itemId: "relay_1", status: "done", expectedVersion: 1, idempotencyKey: "stale_todo_1" }],
     ["relay_todo_visibility", { itemId: "relay_1", removed: true, expectedVersion: 0, idempotencyKey: "stale_todo_2" }],
     ["relay_todo_reorder", { status: "triage", itemIds: ["relay_1"], idempotencyKey: "stale_todo_3" }],
   ]) {
-    await assert.rejects(handleCall(client, name, args, { features: shipped }), /unavailable in this Relay release/);
+    const answer = await handleCall(client, name, args, { features: shipped });
+    assert.match(answer.content[0].text, new RegExp(`Unknown tool ${name}`));
   }
   // Topics ride the same developer row: refused before transport when off, and
   // no shipped tool so much as names them.
@@ -239,38 +234,28 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
   for (const name of ["relay_topics_list", "relay_topic_fetch", "relay_topic_context", "relay_topic_threads", "relay_topic_edit", "relay_topic_post", "relay_topic_create", "relay_topic_invite", "relay_topic_member"]) {
     assert.ok(toolsForAccount(developer).some((tool) => tool.name === name), `${name} stays on dev`);
   }
-  // Todo is paused for developer accounts as well.
-  for (const name of ["relay_todo_update", "relay_todo_visibility", "relay_todo_reorder"]) {
-    assert.ok(!toolsForAccount(developer).some((tool) => tool.name === name), `${name} is paused on dev`);
-  }
-  // Removing the tools is not the whole gate. relay_inbox_list ships in every
-  // profile, and its contract taught todoStatuses and relay_todo_update by
-  // name, so a production agent that could not call Todo was still told it
-  // existed. Off, no tool in the shipped catalog mentions it at all, the read
-  // tool declares none of its Todo fields, and a remembered Todo read is refused
-  // before transport, including on dev.
-  for (const tool of toolsForAccount(shipped)) {
-    assert.doesNotMatch(JSON.stringify(tool), /todo/i, `${tool.name} must not mention Todo to a production agent`);
+  // No catalog, on any row, names the removed Todo feature, and a remembered
+  // status read is refused before transport.
+  for (const tool of [...toolsForAccount(shipped), ...toolsForAccount(developer)]) {
+    assert.doesNotMatch(JSON.stringify(tool), /todo/i, `${tool.name} must not mention Todo`);
   }
   const shippedInbox = toolsForAccount(shipped).find((tool) => tool.name === "relay_inbox_list");
   assert.deepEqual(Object.keys(shippedInbox.inputSchema.properties), ["relayIds"]);
   const developerInbox = toolsForAccount(developer).find((tool) => tool.name === "relay_inbox_list");
   assert.deepEqual(Object.keys(developerInbox.inputSchema.properties), ["relayIds"]);
   assert.doesNotMatch(developerInbox.description, /todo/i);
-  for (const args of [{ todoStatuses: ["triage"] }, { todoStatuses: ["triage"], cursor: "c1" }, { limit: 5 }]) {
-    await assert.rejects(handleCall(client, "relay_inbox_list", args, { features: shipped }), /Todo reads are unavailable in this Relay release/);
+  for (const args of [{ todoStatuses: ["triage"] }, { todoStatuses: ["triage"], cursor: "c1" }]) {
+    await assert.rejects(handleCall(client, "relay_inbox_list", args, { features: shipped }), /todoStatuses was removed/);
   }
 });
 
-test("the first payload render follows the account-gated Todo feature", () => {
+test("the first payload render follows the account-gated tabs", () => {
   const source = fs.readFileSync(path.join(here, "../overlay/inbox.html"), "utf8");
   const body = source.slice(source.indexOf("function renderAll()"), source.indexOf("markAllReadEl.addEventListener", source.indexOf("function renderAll()")));
   assert.match(body, /syncTabs\(\);/);
-  assert.match(source, /view === "tasks" && payload\.features\?\.todo !== true/);
-  assert.match(source, /payload\.features\?\.todo !== true && activeView === "tasks"/);
-  assert.match(source, /payload\.features\?\.todo === true && incomingAccount/,
-    "hidden environments must not fetch Todo data in the background");
-  assert.match(source, /data-view="tasks">Todo/);
+  assert.doesNotMatch(source, /features\?\.todo|data-view="tasks"/, "the Todo tab is removed");
+  assert.match(source, /if \(activeView === "tasks" \|\| activeView === "requestDetail"\) \{\s+activeView = "relays";/,
+    "a remembered retired view lands on the inbox");
   assert.match(source, /view === "slack" && payload\.features\?\.slack !== true/);
 });
 

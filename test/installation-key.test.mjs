@@ -12,7 +12,7 @@ import {
   signedOutAccountConfig,
 } from "../src/account.js";
 
-const { installationKey, machineIdentifier, INSTALLATION_KEY_PATTERN } = createRequire(import.meta.url)("../src/installation-key.cjs");
+const { installationKey, machineKey, machineIdentifier, INSTALLATION_KEY_PATTERN, MACHINE_KEY_PATTERN } = createRequire(import.meta.url)("../src/installation-key.cjs");
 
 const WINDOWS_GUID = "    MachineGuid    REG_SZ    8f1c2a4e-1111-4b2b-9c3d-0123456789ab\r\n";
 const OTHER_WINDOWS_GUID = "    MachineGuid    REG_SZ    2b7d9e10-2222-4c4c-8d8d-ba9876543210\r\n";
@@ -137,14 +137,28 @@ test("replaced-device revocation skips the same device and never throws", async 
   assert.equal(await revokeReplacedDevice(old, next, { makeClient: offline }), "failed");
 });
 
-test("sign-out revokes this computer's device only when this installation issued it", async () => {
+test("sign-out revokes the signed-in device with its own credential, whenever it was issued", async () => {
   const { calls, makeClient } = recordingClient();
   const config = { deviceToken: "dev_signed_in", deviceId: "dev_1", apiUrl: "https://dev-api.sendrelays.com", installationKey: KEY };
-  assert.equal(await revokeSignedOutDevice(config, { currentKey: KEY, makeClient }), "revoked");
-  assert.equal(await revokeSignedOutDevice(config, { currentKey: OTHER_KEY, makeClient }), "not_this_installation", "a copied config never revokes the original machine");
-  assert.equal(await revokeSignedOutDevice(config, { currentKey: null, makeClient }), "not_this_installation");
-  assert.equal(await revokeSignedOutDevice({ ...config, installationKey: "" }, { currentKey: KEY, makeClient }), "not_this_installation");
-  assert.equal(await revokeSignedOutDevice({}, { currentKey: KEY, makeClient }), "none");
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].token, "dev_signed_in");
+  assert.equal(await revokeSignedOutDevice(config, { makeClient }), "revoked");
+  // A credential from before installation keys existed signs out too.
+  assert.equal(await revokeSignedOutDevice({ ...config, deviceToken: "dev_before_keys", installationKey: "" }, { makeClient }), "revoked");
+  assert.equal(await revokeSignedOutDevice({}, { makeClient }), "none");
+  assert.deepEqual(calls.map((call) => call.token), ["dev_signed_in", "dev_before_keys"]);
+});
+
+test("the machine key survives a rename and still differs between machines and installations", async () => {
+  const guid = (value) => async () => `    MachineGuid    REG_SZ    ${value}\n`;
+  const base = { platform: "win32", env: {}, readInstallationId: () => "install-one", run: guid("11111111-2222-3333-4444-555555555555") };
+  const key = await machineKey(base);
+  assert.match(key, MACHINE_KEY_PATTERN);
+  assert.equal(await machineKey({ ...base, hostname: "RENAMED" }), key, "the name is not part of it");
+  assert.notEqual(
+    await installationKey({ ...base, hostname: "OLD" }),
+    await installationKey({ ...base, hostname: "RENAMED" }),
+    "while the installation key does change with the name",
+  );
+  assert.notEqual(await machineKey({ ...base, run: guid("99999999-2222-3333-4444-555555555555") }), key);
+  assert.notEqual(await machineKey({ ...base, readInstallationId: () => "install-two" }), key);
+  assert.equal(await machineKey({ ...base, run: async () => null }), null);
 });

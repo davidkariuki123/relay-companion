@@ -259,13 +259,17 @@ function acquireCanonicalLock(lockPath, {
   const nonce = crypto.randomBytes(16).toString("hex");
   const ownerPath = path.join(lockPath, "owner.json");
   const reclaimPath = path.join(lockPath, "reclaim.json");
+  // Resolve our own identity before the directory exists. On Windows the first
+  // lookup in a process starts PowerShell and can take seconds; a process
+  // stopped during it used to leave an ownerless directory, which nothing may
+  // reclaim until the two-hour grace below has passed.
+  const ownerProcessIdentity = processIdentity(process.pid);
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       mkdirSync(lockPath, { mode: 0o700 });
       let createdStat = null;
       try { createdStat = statSync(lockPath, { bigint: true }); } catch {}
       try {
-        const ownerProcessIdentity = processIdentity(process.pid);
         const publishedOwnerBytes = `${JSON.stringify({
           pid: process.pid,
           nonce,

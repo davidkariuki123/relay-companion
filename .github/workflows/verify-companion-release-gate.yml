@@ -29,6 +29,14 @@ jobs:
     name: ${{ matrix.platform }} stock recovery
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
+    # One known failure is tolerated, and it has to stay visible. The stock
+    # update canary fails on Windows ARM runners; tolerating it on the step hid
+    # it completely, because the job and the API both reported success. At job
+    # level the run still completes while this job shows as failed, and the
+    # private gate accepts that failure only when the canary is the one step
+    # that failed and the native artifact verified. Remove this line when the
+    # canary passes on Windows ARM.
+    continue-on-error: ${{ matrix.os == 'windows-11-arm' }}
     strategy:
       fail-fast: false
       matrix:
@@ -94,9 +102,6 @@ jobs:
           sudo apt-get install -y -qq xdg-utils xvfb
       - name: Verify stock update and independently scheduled recovery
         shell: bash
-        # The shared staging gate treats the Windows ARM stock update as a
-        # reported runner gap while its native artifact still must verify.
-        continue-on-error: ${{ matrix.os == 'windows-11-arm' }}
         env:
           FROM_VERSION: ${{ inputs.from_version }}
           LIVED_IN_FROM: ${{ inputs.lived_in_from }}

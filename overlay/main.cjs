@@ -369,6 +369,8 @@ let explicitlyOpened = false;
 let pillReady = false;
 let pendingReopenNonce = "";
 let lastReopenNonce = "";
+const pendingReopens = new Set();
+const presentedReopens = [];
 let lastPillStatusSig = "";
 const PRESENTED_RELAY_CAP = 500;
 // Dirty gate: the guaranteed-attention machinery calls writeOverlayPrefs on every
@@ -460,6 +462,7 @@ function writePillStatus(reopenNonce = "") {
     pillHidden: Boolean(pillHidden),
     soundsMuted: Boolean(soundsMuted),
     reopenNonce: lastReopenNonce,
+    presentedReopens: [...presentedReopens],
     terminalClaudeCodeRunning,
     tray: trayStatus(),
   };
@@ -850,22 +853,6 @@ function drainRelayDeepLinks() {
   return relayDeepLinkDrain;
 }
 
-// Relay channel deps (ESM, lazy): the wake path for "Open in current chat".
-// A session started with the relay channel takes a REAL turn on a pushed
-// event — the only supported way to wake an idle chat (live-proven 2026-08-05:
-// idle terminal session answered a queued event with zero keystrokes).
-let channelDepsPromise = null;
-function loadChannelDeps() {
-  if (!channelDepsPromise) {
-    const url = pathToFileURL(path.join(__dirname, "..", "src", "channel-server.js")).href;
-    channelDepsPromise = import(url).catch((error) => {
-      channelDepsPromise = null;
-      throw error;
-    });
-  }
-  return channelDepsPromise;
-}
-
 async function relayClient(options) {
   const { RelayClient } = await loadRelayModules();
   return new RelayClient(options);
@@ -1120,7 +1107,6 @@ function resetAccountViewCaches() {
   canonicalChatsFingerprint = "";
   canonicalChatsLoadedOnce = null;
   tasksCache = [];
-  tasksLoadedOnce = null;
   reactionCache = new Map();
   reactionFetchSig = "";
   reactionFetchedAt = 0;
@@ -1232,7 +1218,6 @@ async function refreshAccountProductFeatures() {
     const credentialRecovered = remoteCredentialRejected;
     remoteCredentialRejected = false;
     if (result.changed || credentialRecovered) {
-      tasksLoadedOnce = null;
       canonicalChatsLoadedOnce = null;
       await refreshTasks();
       await refreshCanonicalChats();
@@ -1402,62 +1387,6 @@ function accountInfo() {
   };
 }
 
-const CHAT_APP_HANDOFF_PATHS = {
-  chatgpt: "/connect/chatgpt",
-  claude: "/connect/claude",
-};
-
-function relayMcpUrl() {
-  const base = new URL(`${webBase()}/`);
-  const loopback = base.hostname === "localhost" || base.hostname === "127.0.0.1" || base.hostname === "::1";
-  if ((base.protocol !== "https:" && !(base.protocol === "http:" && loopback)) || base.username || base.password) {
-    throw new Error("Relay's MCP address is not safe to copy.");
-  }
-  return new URL("/mcp", base).toString();
-}
-
-async function connectChatApp(provider) {
-  const label = provider === "claude" ? "Claude" : "ChatGPT";
-  const expectedPath = CHAT_APP_HANDOFF_PATHS[provider];
-  if (!expectedPath) return { ok: false, error: "This chat app is not supported." };
-  if (!deviceToken()) return { ok: false, error: `Sign in to Relay before connecting ${label}.` };
-  try {
-    const client = await relayClient();
-    const handoff = await client.createMcpBrowserHandoff(provider);
-    const relayWeb = new URL(`${webBase()}/`);
-    const target = new URL(String(handoff?.url || ""));
-    const fragment = new URLSearchParams(target.hash.slice(1));
-    const token = fragment.get("handoff") || "";
-    const fragmentKeys = [...fragment.keys()];
-    if (
-      target.origin !== relayWeb.origin ||
-      target.pathname !== expectedPath ||
-      target.search ||
-      fragmentKeys.length !== 1 ||
-      fragmentKeys[0] !== "handoff" ||
-      !/^mcp_handoff\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token)
-    ) {
-      throw new Error(`Relay returned an invalid ${label} connection link.`);
-    }
-    const copiedMcpUrl = provider === "claude" ? relayMcpUrl() : "";
-    if (copiedMcpUrl) clipboard.writeText(copiedMcpUrl);
-    await shell.openExternal(target.toString());
-    return { ok: true, expiresAt: handoff.expiresAt || "", copiedMcpUrl };
-  } catch (error) {
-    const message = error && error.message ? error.message : String(error);
-    console.error(`[overlay] ${label} connection failed:`, message);
-    return { ok: false, error: message };
-  }
-}
-
-function connectChatGPT() {
-  return connectChatApp("chatgpt");
-}
-
-function connectClaude() {
-  return connectChatApp("claude");
-}
-
 async function completeSetupTutorial() {
   const key = onboardingAccountKey();
   if (!key) return { ok: false, error: "Relay could not identify the account completing onboarding." };
@@ -1589,8 +1518,9 @@ async function pairWithCode(input) {
 async function signOutAccount() {
   try {
     const { account: accountMod, notifications } = await loadAccountModules();
-    await accountMod.revokeSignedOutDevice();
-    accountMod.persistSignedOutAccount();
+    // A sign-out the server did not hear about is kept and retried by the daemon.
+    const revokeResult = await accountMod.revokeSignedOutDevice();
+    accountMod.persistSignedOutAccount({ revokeResult });
     nativeCredentialCache = { version: null, token: "" };
     remoteCredentialRejected = false;
     accountFeatureState.clear(featureAccountSnapshot());
@@ -1808,17 +1738,7 @@ function readRelays() {
       taskRoster: Array.isArray(p.taskRoster) ? p.taskRoster : null,
       taskRosterCounts: p.taskRosterCounts || null,
       taskClaim: p.taskClaim || null,
-      todoStatus: p.todoStatus || null,
       nature: p.nature || null,
-      todoVersion: Number.isInteger(p.todoVersion) ? p.todoVersion : null,
-      todoRemoved: p.todoRemoved === true,
-      todoVisibilityVersion: Number.isInteger(p.todoVisibilityVersion) ? p.todoVisibilityVersion : null,
-      duplicateOfItemId: p.duplicateOfItemId || null,
-      attentionRank: Number.isInteger(p.attentionRank) ? p.attentionRank : null,
-      assessment: p.assessment || null,
-      assessmentEvidence: Array.isArray(p.assessmentEvidence) ? p.assessmentEvidence : [],
-      assessedAt: p.assessedAt || null,
-      assessedBy: p.assessedBy || null,
       completionReview: p.completionReview || null,
       // Ordinary Relays may be worked on locally without becoming Tasks.
       // These stamps belong only to the recipient's private Work folder: they
@@ -2011,12 +1931,6 @@ function sentFingerprintOf(items) {
       r.taskAssignment,
       r.taskRosterCounts,
       r.taskClaim,
-      r.todoStatus,
-      r.todoVersion,
-      r.todoRemoved,
-      r.todoVisibilityVersion,
-      r.duplicateOfItemId,
-      r.assessment,
     ]),
   );
 }
@@ -2295,7 +2209,6 @@ async function refreshReactions(ids, { force = false } = {}) {
 // ---- tasks (live) --------------------------------------------------------
 
 let tasksCache = [];
-let tasksLoadedOnce = null; // a promise that resolves after the first task load
 async function refreshTasks() {
   if (currentProductFeatures().legacyTaskProtocol !== true) {
     tasksCache = [];
@@ -2314,13 +2227,6 @@ async function refreshTasks() {
   }
   return tasksCache;
 }
-// Ensure the live task list is loaded at least once before the first payload is
-// served, so the renderer's initial paint already includes Tasks.
-function ensureTasksLoaded() {
-  if (!tasksLoadedOnce) tasksLoadedOnce = refreshTasks().catch(() => tasksCache);
-  return tasksLoadedOnce;
-}
-
 // Slack-backed channels are canonical chats, not legacy inbox fan-out rows.
 // Keep their compact summaries beside the other network-backed caches so the
 // Pill still paints instantly offline and refreshes them without blocking its
@@ -2658,7 +2564,6 @@ function buildPayload() {
     // while this pill puts it back, or "stopped" once that repair failed.
     // The renderer reads Relay rooms from the server while it is not "ok".
     service: serviceHealth,
-    todoSteward: currentProductFeatures().todo === true ? readTodoStewardState() : null,
     pendingOpen: pendingSetupOpenPreviewCache,
     relays: hydrateReactions(relaysNow),
     sent: hydrateReactions(sentWithMaterializationState(sentCache)),
@@ -3120,13 +3025,6 @@ async function pushInboxNow(force) {
       r.taskAssignment,
       r.taskRosterCounts,
       r.taskClaim,
-      r.todoStatus,
-      r.todoVersion,
-      r.todoRemoved,
-      r.todoVisibilityVersion,
-      r.duplicateOfItemId,
-      r.assessment,
-      r.attentionRank,
       r.materializedCodex,
       r.materializedClaude,
       r.codexModel,
@@ -3181,12 +3079,6 @@ async function pushInboxNow(force) {
       ? [payload.pendingOpen.relayId, payload.pendingOpen.title, payload.pendingOpen.forHuman, payload.pendingOpen.error]
       : null,
     features: payload.features,
-    // The steward's heartbeat and last verdict move nothing else in the payload.
-    todoSteward: payload.todoSteward ? [
-      payload.todoSteward.enabled, payload.todoSteward.provider, payload.todoSteward.requestedAt,
-      payload.todoSteward.run && [payload.todoSteward.run.startedAt, payload.todoSteward.run.heartbeatAt, payload.todoSteward.run.phase],
-      payload.todoSteward.lastRun && [payload.todoSteward.lastRun.finishedAt, payload.todoSteward.lastRun.ok],
-    ] : null,
   });
   // Unchanged data: skip the send entirely. Re-sending identical payloads made the
   // renderer rebuild its DOM every few seconds (hover flicker, restarted transitions).
@@ -3882,165 +3774,6 @@ async function closeTaskByHand(relayId, kind, note) {
   }
 }
 
-async function listTodo(input = {}) {
-  if (!currentProductFeatures().todo) return { ok: false, error: "Todo is currently unavailable." };
-  try {
-    const client = await relayClient();
-    return await client.todo({
-      statuses: Array.isArray(input.statuses) ? input.statuses.map(String) : [],
-      ...(Number.isInteger(input.limit) ? { limit: input.limit } : {}),
-      ...(String(input.cursor || "").trim() ? { cursor: String(input.cursor).trim() } : {}),
-    });
-  } catch (error) {
-    return { ok: false, error: (error && error.message) || String(error), details: error?.body || null };
-  }
-}
-
-async function readTodoItem(relayId) {
-  if (!currentProductFeatures().todo) return { ok: false, error: "Todo is currently unavailable." };
-  const id = String(relayId || "").trim();
-  if (!id) return { ok: false, error: "Missing Todo item id." };
-  try {
-    const client = await relayClient();
-    const fetched = await client.fetchRelay(id);
-    const packet = fetched?.packet || {};
-    const local = rowById(id) || {};
-    return {
-      ok: true,
-      row: {
-        id,
-        direction: "inbound",
-        state: local.state || "read",
-        unread: local.unread === true,
-        relayNotificationKind: packet.kind === "task" ? "task" : "plain_relay",
-        kind: packet.kind || local.kind || "message",
-        title: packet.title || local.title || "",
-        displayTitle: packet.displayTitle || packet.title || local.displayTitle || "",
-        senderName: packet.sender?.name || local.senderName || "Someone",
-        senderEmail: packet.sender?.email || local.senderEmail || "",
-        forHuman: packet.forHuman || local.forHuman || "",
-        forAgent: packet.forAgent || local.forAgent || "",
-        createdAt: packet.createdAt || local.createdAt || new Date().toISOString(),
-        updatedAt: packet.updatedAt || local.updatedAt || packet.createdAt || new Date().toISOString(),
-        threadId: packet.threadId || local.threadId || id,
-        inReplyToRelayId: packet.inReplyToRelayId || local.inReplyToRelayId || null,
-        inReplyToTopicPost: packet.inReplyToTopicPost || local.inReplyToTopicPost || null,
-        groupSendId: packet.groupSendId || local.groupSendId || null,
-        recipientGroupId: packet.recipientGroupId || local.recipientGroupId || null,
-        recipientGroupName: packet.recipientGroupName || local.recipientGroupName || "",
-        attachments: Array.isArray(packet.attachments) ? packet.attachments : [],
-        source: packet.source || local.source || null,
-        taskState: local.taskState || null,
-        taskStartedAt: local.taskStartedAt || null,
-        taskRunOwner: local.taskRunOwner || null,
-        taskCompletedAt: local.taskCompletedAt || null,
-        taskRejectedAt: local.taskRejectedAt || null,
-        taskCancelledAt: local.taskCancelledAt || null,
-        taskClosedBy: local.taskClosedBy || null,
-        taskResultRelayId: local.taskResultRelayId || null,
-        taskAssignment: local.taskAssignment || null,
-        taskRoster: Array.isArray(local.taskRoster) ? local.taskRoster : null,
-        taskRosterCounts: local.taskRosterCounts || null,
-        taskClaim: local.taskClaim || null,
-        todoStatus: local.todoStatus || null,
-        todoVersion: Number.isInteger(local.todoVersion) ? local.todoVersion : null,
-        todoRemoved: local.todoRemoved === true,
-        todoVisibilityVersion: Number.isInteger(local.todoVisibilityVersion) ? local.todoVisibilityVersion : null,
-        duplicateOfItemId: local.duplicateOfItemId || null,
-        attentionRank: Number.isInteger(local.attentionRank) ? local.attentionRank : null,
-        assessment: local.assessment || null,
-        assessmentEvidence: Array.isArray(local.assessmentEvidence) ? local.assessmentEvidence : [],
-        assessedAt: local.assessedAt || null,
-        assessedBy: local.assessedBy || null,
-      },
-    };
-  } catch (error) {
-    return { ok: false, error: (error && error.message) || String(error) };
-  }
-}
-
-async function updateTodoStatus(relayId, input = {}) {
-  if (!currentProductFeatures().todo) return { ok: false, error: "Todo is currently unavailable." };
-  const id = String(relayId || "").trim();
-  if (!id) return { ok: false, error: "Missing Todo item id." };
-  const current = rowById(id);
-  try {
-    const client = await relayClient();
-    const result = await client.updateTodoStatus(id, {
-      status: String(input.status || ""),
-      expectedVersion: Number(input.expectedVersion),
-      idempotencyKey: String(input.idempotencyKey || `todo-status:${id}:${randomUUID()}`),
-      ...(String(input.duplicateOfItemId || "").trim()
-        ? { duplicateOfItemId: String(input.duplicateOfItemId).trim() }
-        : {}),
-      ...(String(input.note || "").trim() ? { note: String(input.note).trim() } : {}),
-      ...(Array.isArray(input.evidence) && input.evidence.length ? { evidence: input.evidence } : {}),
-    });
-    const statusChanged = current?.todoStatus && current.todoStatus !== result.status;
-    const projection = {
-      todoStatus: result.status,
-      todoVersion: result.version,
-      duplicateOfItemId: result.duplicateOfItemId || null,
-      // A person moving an item retires the steward's reason for the old place.
-      ...(statusChanged ? { attentionRank: null, assessment: null, assessmentEvidence: [], assessedAt: null, assessedBy: null } : {}),
-    };
-    const groupSendId = current?.groupSendId || null;
-    withJsonLock(STATE_PATH, () => {
-      const store = readStore();
-      for (const [packetId, packet] of Object.entries(store.packets || {})) {
-        const sameLogicalItem = packetId === id || (groupSendId && packet?.groupSendId === groupSendId);
-        if (sameLogicalItem) Object.assign(packet, projection);
-      }
-      writeStateAtomic(store);
-    });
-    sentCache = (sentCache || []).map((item) => {
-      const itemId = String(item?.relayId || item?.id || "");
-      const sameLogicalItem = itemId === id || (groupSendId && item?.groupSendId === groupSendId);
-      return sameLogicalItem ? { ...item, ...projection } : item;
-    });
-    sentFingerprint = sentFingerprintOf(sentCache);
-    await pushInbox(true);
-    return result;
-  } catch (error) {
-    return {
-      ok: false,
-      error: (error && error.message) || String(error),
-      code: error?.body?.error || null,
-      details: error?.body?.details || null,
-    };
-  }
-}
-
-async function updateTodoVisibility(relayId, input = {}) {
-  if (!currentProductFeatures().todo) return { ok: false, error: "Todo is currently unavailable." };
-  const id = String(relayId || "").trim();
-  if (!id) return { ok: false, error: "Missing Todo item id." };
-  try {
-    const client = await relayClient();
-    const result = await client.updateTodoVisibility(id, {
-      removed: input.removed,
-      expectedVersion: input.expectedVersion,
-      idempotencyKey: String(input.idempotencyKey || ""),
-    });
-    // The server already committed. A local refresh failure must not report the
-    // removal as failed and lose Undo; the daemon will reconcile the projection.
-    try {
-      withJsonLock(STATE_PATH, () => {
-        const store = readStore();
-        const packet = store.packets?.[id];
-        if (packet && Number(packet.todoVisibilityVersion || 0) <= result.version) {
-          Object.assign(packet, { todoRemoved: result.removed, todoVisibilityVersion: result.version });
-        }
-        writeStateAtomic(store);
-      });
-      await pushInbox(true);
-    } catch { /* Durable membership will arrive on the next account refresh. */ }
-    return result;
-  } catch (error) {
-    return { ok: false, error: error?.message || String(error), code: error?.body?.error || null, details: error?.body?.details || null };
-  }
-}
-
 // Preview is deliberately an allowlisted, human-facing projection of a staged
 // relay. Never pass the recipient-session briefing, local content paths, signed
 // attachment URLs, or arbitrary packet fields into the renderer.
@@ -4129,81 +3862,6 @@ function previewPayloadForSent(relayId) {
       type: item.type,
     }),
   };
-}
-
-// Find an approvalId for a share_approval row. The staged row may not carry it,
-// in which case the renderer routes to the web detail page (Review) instead.
-function approvalIdForRow(row) {
-  if (!row) return null;
-  if (row.approvalId) return row.approvalId;
-  const action = row.action || {};
-  if (action.approvalId) return action.approvalId;
-  return null;
-}
-
-async function runMutation(label, fn) {
-  if (currentProductFeatures().legacyTaskProtocol !== true) {
-    return { ok: false, error: "The legacy task protocol is available only to Relay developer accounts on dev." };
-  }
-  try {
-    await fn();
-    await refreshTasks();
-    await pushInbox(true);
-    return { ok: true };
-  } catch (error) {
-    const message = error && error.message ? error.message : String(error);
-    const conflict = error && (error.status === 409 || /stale|conflict|version/i.test(message));
-    console.error(`[overlay] ${label} failed:`, message);
-    await refreshTasks().catch(() => {});
-    await pushInbox(true).catch(() => {});
-    return { ok: false, error: message, conflict: Boolean(conflict) };
-  }
-}
-
-async function acceptTask(taskId, participantId) {
-  if (!taskId || !participantId) return { ok: false, error: "Missing task or participant id." };
-  const expectedVersion = taskVersion(taskId);
-  return runMutation("accept", async () => {
-    const client = await relayClient();
-    await client.acceptTask(taskId, participantId, {
-      idempotencyKey: idempotencyKey("accept"),
-      ...(expectedVersion != null ? { expectedVersion } : {}),
-    });
-  });
-}
-
-async function rejectTask(taskId, participantId) {
-  if (!taskId || !participantId) return { ok: false, error: "Missing task or participant id." };
-  const expectedVersion = taskVersion(taskId);
-  return runMutation("reject", async () => {
-    const client = await relayClient();
-    await client.rejectTask(taskId, participantId, {
-      idempotencyKey: idempotencyKey("reject"),
-      ...(expectedVersion != null ? { expectedVersion } : {}),
-    });
-  });
-}
-
-async function approveShare(taskId, approvalId) {
-  if (!taskId || !approvalId) return { ok: false, error: "Missing task or approval id." };
-  return runMutation("approve", async () => {
-    const client = await relayClient();
-    await client.approveShare(taskId, approvalId, { idempotencyKey: idempotencyKey("approve") });
-  });
-}
-
-async function declineShare(taskId, approvalId) {
-  if (!taskId || !approvalId) return { ok: false, error: "Missing task or approval id." };
-  return runMutation("decline", async () => {
-    const client = await relayClient();
-    await client.declineShare(taskId, approvalId, { idempotencyKey: idempotencyKey("decline") });
-  });
-}
-
-
-function taskVersion(taskId) {
-  const task = tasksCache.find((t) => t.id === taskId);
-  return task && task.version != null ? task.version : null;
 }
 
 // ---- click-to-open a Relay row -------------------------------------------
@@ -4698,8 +4356,7 @@ function nativeIdFromOpenResult(result) {
   return claude ? decodeURIComponent(claude[1]) : "";
 }
 
-// The open landed in a native session; tell the server which one so the
-// Todo steward reads that transcript first instead of searching for it.
+// The open landed in a native session; tell the server which one.
 function recordRelaySessionTouch(packetId, provider, url) {
   const id = String(packetId || "");
   const claudeSession = claudeSessionIdFromUrl(url);
@@ -5915,7 +5572,7 @@ function leaveSetupPlacement() {
 
 // Show the overlay window. It remains an ordinary focusable window over the
 // visible card; the transparent remainder is made click-through below.
-function showOverlayWindow({ force = false, reposition = true } = {}) {
+function showOverlayWindow({ force = false, reposition = true, userInitiated = false } = {}) {
   if (!win || win.isDestroyed()) return;
   const visible = win.isVisible();
   if (visible && !force) {
@@ -5938,7 +5595,7 @@ function showOverlayWindow({ force = false, reposition = true } = {}) {
   // whether the collection behavior actually drifted to decide between a real
   // re-attach and a no-op — repairing it first would force the re-show every time.
   perf.inc("spaceAsserts");
-  const shown = showInactiveOnAllSpaces(win, { force, alwaysOnTop: overlayElevated });
+  const shown = showInactiveOnAllSpaces(win, { force, userInitiated, alwaysOnTop: overlayElevated });
   if (shown) {
     if (FIXED_OVERLAY_SURFACE) {
       // A hide/show cycle can leave Electron's native ignore flag out of step
@@ -5959,7 +5616,7 @@ function showOverlayWindow({ force = false, reposition = true } = {}) {
   }
 }
 
-function maybeShow({ force = false, reposition = true } = {}) {
+function maybeShow({ force = false, reposition = true, userInitiated = false } = {}) {
   if (!win || win.isDestroyed()) return;
   // Dismissed keeps the window hidden except while a ghost notification is up.
   // trayForcedVisible honors an explicit status-area click even when no host runs.
@@ -5991,7 +5648,7 @@ function maybeShow({ force = false, reposition = true } = {}) {
     if (!force && win.isVisible() && process.platform === "darwin") {
       // no-op on the window
     } else {
-      showOverlayWindow({ force, reposition });
+      showOverlayWindow({ force, reposition, userInitiated });
     }
   } else if (win.isVisible()) {
     win.hide();
@@ -6336,9 +5993,6 @@ function createWindow() {
       // atomicWriteJsonSync creates state.json.<pid>.<nonce>.tmp and a lock
       // directory beside it. Only the committed filename is a new generation.
       if (!file || String(file) === "state.json") pushInboxQuiet({ stateChange: true });
-      // The daemon's steward writes its heartbeat and verdict here; the Todo
-      // tab's "checked 4 min ago" line follows it without polling.
-      else if (String(file) === "todo-steward.json") pushInboxQuiet({ stateChange: false });
     });
   } catch {}
   // Safety net for state.json: ONE stat() per tick unless the file generation
@@ -6421,10 +6075,6 @@ function createWindow() {
 // a destroyed window can still be observed between close and that callback.
 function livePreviews() {
   return [...previews.values()].filter((entry) => entry.win && !entry.win.isDestroyed());
-}
-
-function previewWindowExists() {
-  return livePreviews().length > 0;
 }
 
 function previewEntryFor(key) {
@@ -6942,40 +6592,6 @@ function reconcileStaleHandoffs() {
   }
   return changed;
 }
-// Move a handed-off titled Relay to In Progress with a note the person can
-// read. Best-effort: a stale local version is refreshed once through the
-// packets endpoint (which now carries the Todo state) and retried; anything
-// else is logged and left to the session, which carries the same rule.
-async function markHandoffInProgress(row, host) {
-  if (!currentProductFeatures().todo) return { ok: false, skipped: "todo_off" };
-  const id = String(row?.id || "").trim();
-  if (!id || !String(row?.title || row?.displayTitle || "").trim()) return { ok: false, skipped: "untitled" };
-  if (["in_progress", "done"].includes(String(row?.todoStatus || ""))) return { ok: false, skipped: row.todoStatus };
-  const app = host === "codex" ? "Codex" : "Claude Code";
-  const write = (version) => updateTodoStatus(id, {
-    status: "in_progress",
-    expectedVersion: version,
-    idempotencyKey: `handoff:${id}:${version}`,
-    note: `You handed this to ${app}; it is working on it.`,
-    evidence: [{ kind: "relay", ref: id, label: `Handed to ${app} from Relay` }],
-  });
-  let version = Number.isInteger(row?.todoVersion) ? row.todoVersion : null;
-  let result = version ? await write(version) : { ok: false, error: "no local todoVersion" };
-  if (result?.ok) return result;
-  try {
-    const client = await relayClient();
-    const fresh = await client.fetchRelayPackets([id]);
-    const todo = fresh?.packets?.[id]?.todo;
-    if (todo && Number.isInteger(todo.version) && todo.version !== version && !["in_progress", "done"].includes(String(todo.status || ""))) {
-      result = await write(todo.version);
-    }
-  } catch (error) {
-    result = { ok: false, error: (error && error.message) || String(error) };
-  }
-  if (!result?.ok) log(`handoff todo in_progress skipped for ${id}: ${result?.error || result?.skipped || "unknown"}`);
-  return result;
-}
-
 async function handOffToAgent(input) {
   const requestedId = String((input && input.relayId) || "").trim();
   const source = String((input && input.source) || "").toLowerCase() === "sent" ? "sent" : "relay";
@@ -7143,10 +6759,6 @@ async function handOffToAgent(input) {
       pushInbox(true);
     });
   }
-  // The hand-off IS the start of the work (David, 2026-09-08): the Todo item
-  // moves to In Progress here, deterministically, instead of hoping the
-  // session marks it. Tasks are moved by their Start receipt already.
-  if (firstTurn) void markHandoffInProgress(row, host);
   pushInbox(true);
   if (firstTurn) {
     void ensureCanonicalCompletionMonitor(id)
@@ -8474,7 +8086,7 @@ function createTrayIcon() {
 }
 
 let lastTrayShowAt = 0;
-function showFromTray() {
+function showFromTray(reopenNonce = "") {
   lastTrayShowAt = Date.now();
   setOverlayElevated(true);
   setDismissed(false);
@@ -8484,8 +8096,8 @@ function showFromTray() {
   // here — tray click, Relay.lnk, Relay.app, `relay pill` — so this is also how the
   // user reaches the Settings toggle that turns the preference off.
   explicitlyOpened = true;
-  maybeShow({ force: true });
-  if (win && !win.isDestroyed()) win.webContents.send("openFull");
+  maybeShow({ force: true, userInitiated: true });
+  if (win && !win.isDestroyed()) win.webContents.send("openFull", reopenNonce);
   syncTray();
 }
 
@@ -8494,12 +8106,18 @@ function showFromTray() {
 // an explicit "Show Relay" action: revoke any old dismissal, open the full card, and
 // acknowledge the caller only after the OS window reports visible.
 function requestExternalReopen(reopenNonce = "") {
-  if (reopenNonce) pendingReopenNonce = String(reopenNonce);
+  if (reopenNonce) {
+    pendingReopens.add(String(reopenNonce));
+    pendingReopenNonce = String(reopenNonce);
+    if (pendingReopens.size > 32) pendingReopens.delete(pendingReopens.values().next().value);
+  }
   if (!pillReady || !win || win.isDestroyed()) return false;
-  const nonce = pendingReopenNonce;
   pendingReopenNonce = "";
-  showFromTray();
-  writePillStatus(nonce);
+  // A second launch must not overwrite another caller's pending receipt. Native
+  // visibility alone is insufficient: the renderer acknowledges the restored card.
+  const nonces = [...pendingReopens];
+  showFromTray(nonces[0] || "");
+  for (const nonce of nonces.slice(1)) win.webContents.send("openFull", nonce);
   return pillIsOnScreen();
 }
 
@@ -8856,9 +8474,6 @@ ipcMain.handle("relay:continueSession", async (_event, id, source) => {
 ipcMain.on("relay:open", (_e, id, host) => {
   openPacket(id, { host: String(host || "") }).catch((error) => console.error("[overlay] open failed:", error && error.message));
 });
-ipcMain.on("relay:openSentInCurrent", (_e, id, host) => {
-  requestSessionPicker(id, { sent: true, host: String(host || "") });
-});
 ipcMain.on("relay:openSentFresh", (_e, id, host) => {
   openPacket(id, { sent: true, fresh: true, host: String(host || "") }).catch((error) =>
     console.error("[overlay] sent fresh open failed:", error && error.message),
@@ -8887,46 +8502,6 @@ ipcMain.on("relay:openFresh", (_e, id, host, note) => {
     }
   }
   openPacket(id, { fresh: true, host: String(host || "") }).catch((error) => console.error("[overlay] fresh open failed:", error && error.message));
-});
-// A Relay-owned Claude run may be opened only after its worker has exited and
-// the exact transcript has been materialized. This guard is also enforced in
-// main so a stale renderer cannot create two writers for one native session.
-ipcMain.handle("relay:openRunSession", async (_e, id) => {
-  const row = rowById(String(id || ""));
-  if (!agentWorkEnabledForRow(row)) return agentWorkUnavailable();
-  const native = row?.claudeNativeSession;
-  const sessionId = String(native?.sessionId || "");
-  if (!sessionId) return { ok: false, error: "This work has no Claude Code session to open." };
-  try {
-    const { claudeAcpWorker, waitForClaudeAcpMaterialization } = await import("../src/claude-acp-session.js");
-    const worker = claudeAcpWorker(sessionId);
-    if (worker && !worker.closed) {
-      return { ok: false, error: "Claude Code is still working. Open becomes available after this run settles." };
-    }
-    if (worker) await waitForClaudeAcpMaterialization(sessionId);
-    // Claude Desktop owns this metadata on macOS and Windows. Linux resumes the
-    // provider's materialized CLI transcript directly and has no desktop index.
-    if (process.platform !== "linux" && !claudeSessionMetaPath(sessionId)) {
-      return { ok: false, error: "The completed Claude session has not finished materializing yet." };
-    }
-    const deepLink = native.deepLink || `claude://resume?session=${encodeURIComponent(sessionId)}`;
-    if (process.platform === "linux") {
-      const launched = await launchLinuxAgentTerminal({
-        url: deepLink,
-        host: "claude",
-        cwd: native.cwd || row.openCwd || undefined,
-      });
-      if (!launched.ok) {
-        console.error("[overlay] Linux run terminal launch failed:", launched.reason, launched.detail || "");
-        return { ok: false, error: "Couldn't open Claude Code in a terminal." };
-      }
-    } else {
-      openClaudeDeepLinkVerified(deepLink, () => {}, id);
-    }
-    return { ok: true, sessionId };
-  } catch (error) {
-    return { ok: false, error: error?.message || String(error) };
-  }
 });
 ipcMain.on("relay:openInCurrent", (_e, id, host) => {
   requestSessionPicker(id, { host: String(host || "") });
@@ -9186,89 +8761,6 @@ ipcMain.handle("relay:executionDisable", async (event) => {
 ipcMain.handle("relay:taskReject", (_e, id, note) => closeTaskByHand(id, "rejected", note));
 ipcMain.handle("relay:taskCancel", (_e, id, note) => closeTaskByHand(id, "cancelled", note));
 ipcMain.handle("relay:taskDone", (_e, id, note) => closeTaskByHand(id, "done", note));
-ipcMain.handle("relay:todoList", (_e, input) => listTodo(input));
-ipcMain.handle("relay:todoItem", (_e, id) => readTodoItem(id));
-ipcMain.handle("relay:todoStatusUpdate", (_e, id, input) => updateTodoStatus(id, input));
-ipcMain.handle("relay:todoVisibilityUpdate", (_e, id, input) => updateTodoVisibility(id, input));
-ipcMain.handle("relay:todoVisibilityRead", async (_e, id) => {
-  if (!currentProductFeatures().todo) return { ok: false, error: "Todo is currently unavailable." };
-  try { return await (await relayClient()).todoVisibility(String(id || "")); }
-  catch { return { ok:false }; }
-});
-// The Todo steward lives in the daemon; the pill only asks and reads.
-async function todoStewardModule() {
-  return import("../src/todo-steward.js");
-}
-function readTodoStewardState() {
-  // No file yet means the steward has never run on this machine, not that
-  // the feature is absent: the Todo tab still offers Check now.
-  const statePath = path.join(RELAY_HOME, "todo-steward.json");
-  if (!fs.existsSync(statePath)) return { enabled: true, provider: "auto", requestedAt: 0, run: null, lastRun: null };
-  try {
-    const raw = JSON.parse(fs.readFileSync(statePath, "utf8"));
-    if (!raw || typeof raw !== "object") return null;
-    const prefs = raw.prefs && typeof raw.prefs === "object" ? raw.prefs : {};
-    return {
-      enabled: prefs.enabled !== false,
-      provider: ["auto", "codex", "claude"].includes(prefs.provider) ? prefs.provider : "auto",
-      requestedAt: Number(raw.requestedAt || 0) || 0,
-      run: raw.run && typeof raw.run === "object" ? {
-        startedAt: Number(raw.run.startedAt || 0) || 0,
-        heartbeatAt: Number(raw.run.heartbeatAt || 0) || 0,
-        provider: String(raw.run.provider || ""),
-        phase: String(raw.run.phase || ""),
-      } : null,
-      lastRun: raw.lastRun && typeof raw.lastRun === "object" ? {
-        startedAt: Number(raw.lastRun.startedAt || 0) || 0,
-        finishedAt: Number(raw.lastRun.finishedAt || 0) || 0,
-        ok: raw.lastRun.ok === true,
-        provider: String(raw.lastRun.provider || ""),
-        label: String(raw.lastRun.label || ""),
-        checked: Number(raw.lastRun.checked || 0) || 0,
-        changed: Number(raw.lastRun.changed || 0) || 0,
-        error: String(raw.lastRun.error || "").slice(0, 240),
-      } : null,
-    };
-  } catch {
-    return null;
-  }
-}
-ipcMain.handle("relay:todoStewardPrefs", async (_e, input) => {
-  if (!currentProductFeatures().todo) return { ok: false, error: "Todo is currently unavailable." };
-  try {
-    const steward = await todoStewardModule();
-    steward.saveStewardPreferences(RELAY_HOME, {
-      ...(typeof input?.enabled === "boolean" ? { enabled: input.enabled } : {}),
-      ...(typeof input?.provider === "string" ? { provider: input.provider } : {}),
-    });
-    pushInbox(true);
-    return { ok: true, steward: readTodoStewardState() };
-  } catch (error) {
-    return { ok: false, error: (error && error.message) || String(error) };
-  }
-});
-// The agent document of an ordinary Relay starts private, recipient-owned
-// work. It shares the native runner but never turns the Relay into a Task
-// and never emits Task receipts to the sender.
-async function mutateChatAgentWork(relayId, action) {
-  const id = String(relayId || "");
-  const row = rowById(id);
-  if (row?.source?.host !== "relay-agent-run") return { ok:false, error:"This is not a tagged Work session." };
-  const session = await chatAgentWorkSession(id, { fresh:true });
-  if (!session) return { ok:false, error:"This Work session is not available yet." };
-  try {
-    const client = await relayClient();
-    const key = `pill-work-${action}-${session.id}-${randomUUID()}`;
-    const result = action === "stop"
-      ? await client.stopChatAgentSession(session.id, key, session.stateVersion)
-      : await client.retryChatAgentSession(session.id, key, session.stateVersion);
-    chatAgentWorkCache.set(id, { at:0, session:result.session || session });
-    return { ok:true, session:result.session || session };
-  } catch (error) {
-    return { ok:false, error:(error && error.message) || String(error) };
-  }
-}
-
 // The agent document of an ordinary Relay: Send hands the Relay and the words
 // to the desktop app and answers with a receipt.
 ipcMain.handle("relay:agentHandoff", (_e, id, route) =>
@@ -9282,8 +8774,6 @@ ipcMain.handle("relay:agentHandoff", (_e, id, route) =>
     source: (route && route.source) || "relay",
   }),
 );
-ipcMain.handle("relay:chatAgentWorkStop", (_e, id) => mutateChatAgentWork(id, "stop"));
-ipcMain.handle("relay:chatAgentWorkRetry", (_e, id) => mutateChatAgentWork(id, "retry"));
 // The session face's feed and its Steer verb. Preview-only, like everything
 // on this channel; the feed reads only this staged relay's own session.
 // --- Scheduled requests ------------------------------------------------------
@@ -9410,7 +8900,6 @@ async function scheduleSave(input) {
 }
 ipcMain.handle("relay:schedules", () => scheduleList());
 ipcMain.handle("relay:scheduleSave", (_e, input) => scheduleSave(input || {}));
-ipcMain.handle("relay:runFeed", (_e, relayId) => taskRunFeed(relayId));
 ipcMain.handle("relay:runFeed:watch", async (event, input) => {
   const relayId = String(typeof input === "string" ? input : input?.relayId || "");
   if (!workEventAuthorized(event, relayId)) return { ok: false, error: "Not authorized for this Work feed." };
@@ -9481,10 +8970,6 @@ ipcMain.handle("relay:runFeed:attachment", async (event, input = {}) => {
     return { ok: false, error: (error && error.message) || "Attachment preview failed safely." };
   }
 });
-// Steering belongs to whoever is READING the run. It was reachable only from
-// the preview window, so the pill's own run view could watch an agent work
-// and not say a word to it.
-ipcMain.handle("relay:runSteer", (_e, input) => previewTaskSteer(input));
 ipcMain.handle("relay:preview:session", (event, relayId) => {
   if (!isPreviewEvent(event)) return { ok: false, error: "Not the preview window." };
   return taskRunFeed(relayId);
@@ -9777,10 +9262,6 @@ ipcMain.handle("relay:react", async (_e, input = {}) => {
   }
 });
 
-ipcMain.handle("relay:accept", (_e, taskId, participantId) => acceptTask(taskId, participantId));
-ipcMain.handle("relay:reject", (_e, taskId, participantId) => rejectTask(taskId, participantId));
-ipcMain.handle("relay:approve", (_e, taskId, approvalId) => approveShare(taskId, approvalId));
-ipcMain.handle("relay:decline", (_e, taskId, approvalId) => declineShare(taskId, approvalId));
 // Which agent surfaces this machine can actually reach — the picker greys the
 // rest rather than offering a promise the verb cannot keep.
 let capabilitiesCache = null;
@@ -9992,8 +9473,6 @@ ipcMain.handle("relay:credentialRetry", async () => {
 ipcMain.handle("relay:chatAgentPreferences", async () => (await relayClient()).chatAgentPreferences());
 ipcMain.handle("relay:chatAgentPreferencesSave", async (_event, input = {}) =>
   (await relayClient()).updateChatAgentPreferences(input));
-ipcMain.handle("relay:connectChatGPT", () => connectChatGPT());
-ipcMain.handle("relay:connectClaude", () => connectClaude());
 ipcMain.handle("relay:completeSetupTutorial", () => completeSetupTutorial());
 ipcMain.handle("relay:completeNetworkOnboarding", async (_event, userId) => {
   const key = onboardingAccountKey();
@@ -10037,8 +9516,6 @@ ipcMain.handle("relay:copyOnboardingInviteLink", async (_event, expectedUserId) 
 });
 ipcMain.handle("relay:installationAuthState", () => installationAuthorizationIpc(async () =>
   (await installationAuthorizationController()).state()));
-ipcMain.handle("relay:installationAuthBegin", () => installationAuthorizationIpc(async () =>
-  (await installationAuthorizationController()).begin()));
 ipcMain.handle("relay:installationAuthResume", () => installationAuthorizationIpc(async () =>
   (await installationAuthorizationController()).resume()));
 ipcMain.handle("relay:installationAuthRestart", () => installationAuthorizationIpc(async () =>
@@ -10058,11 +9535,6 @@ ipcMain.handle("relay:copyFirstLinkMessage", (_event, expectedUserId) => {
   if (!link?.shareText) throw new Error("Relay has no link to copy yet.");
   clipboard.writeText(link.shareText);
   return { ok: true, url: link.url };
-});
-ipcMain.handle("relay:copyTutorialPrompt", (_event, expectedUserId) => {
-  if (!expectedUserId || account().userId !== expectedUserId) throw new Error("Relay account changed. Try again.");
-  clipboard.writeText(require("./returning-tutorial-prompt.cjs")(`${webBase()}/llm_guide.md`));
-  return { ok: true };
 });
 ipcMain.handle("relay:installationAuthSignIn", (_event, input = {}) => installationAuthorizationIpc(async () => {
   // The setup-intent marker asked for exactly one sign-in start. Whoever
@@ -10431,6 +9903,15 @@ ipcMain.on("relay:setPos", (_e, x, y) => {
 });
 // ✕ on the card: hide the overlay entirely until the status-area Relay mark is clicked.
 // The renderer plays its exit animation first, then sends this.
+ipcMain.on("relay:reopenPresented", (event, nonce) => {
+  if (!win || win.isDestroyed() || event.sender !== win.webContents
+      || !pendingReopens.has(nonce) || !pillIsOnScreen()) return;
+  pendingReopens.delete(nonce);
+  presentedReopens.push(nonce);
+  if (presentedReopens.length > 32) presentedReopens.shift();
+  writePillStatus(nonce);
+});
+
 ipcMain.on("relay:dismiss", () => {
   // Ignore only a dismiss whose IPC was already in flight when a tray "Show Relay"
   // just landed (narrow window). A genuine ✕ click is always honored.

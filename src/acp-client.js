@@ -37,7 +37,7 @@ export function acpModelOption(options, requested, provider) {
   const normalize = value => String(value || "").toLowerCase().replace(/^claude[ -]?/, "").replace(/[^a-z0-9]/g, "");
   const matches = options.filter(option => normalize(option.name) === normalize(requested));
   if (matches.length) return matches.length === 1 ? matches[0].value : null;
-  // Chat preferences and the Todo steward use Claude family aliases. ACP may
+  // Chat preferences use Claude family aliases. ACP may
   // advertise only a context-qualified alias or a concrete model id. Resolve
   // an unversioned family only when the provider offers one matching choice.
   if (acpProvider(provider) === "claude" && /^(opus|fable|sonnet|haiku)$/.test(requested)) {

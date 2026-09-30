@@ -205,6 +205,30 @@ jobs:
           - { os: macos-15-intel, platform: darwin-x64, mode: leftover }
           - { os: macos-14, platform: darwin-arm64, mode: same-version }
           - { os: macos-15-intel, platform: darwin-x64, mode: same-version }
+          - { os: macos-14, platform: darwin-arm64, mode: legacy-0.1.267 }
+          - { os: macos-15-intel, platform: darwin-x64, mode: legacy-0.1.267 }
+          - { os: macos-14, platform: darwin-arm64, mode: broken-0.1.267 }
+          - { os: macos-15-intel, platform: darwin-x64, mode: broken-0.1.267 }
+          - { os: macos-14, platform: darwin-arm64, mode: legacy-0.1.326 }
+          - { os: macos-15-intel, platform: darwin-x64, mode: legacy-0.1.326 }
+          - { os: macos-14, platform: darwin-arm64, mode: broken-0.1.326 }
+          - { os: macos-15-intel, platform: darwin-x64, mode: broken-0.1.326 }
+          - { os: macos-14, platform: darwin-arm64, mode: legacy-0.1.413 }
+          - { os: macos-15-intel, platform: darwin-x64, mode: legacy-0.1.413 }
+          - { os: macos-14, platform: darwin-arm64, mode: broken-0.1.413 }
+          - { os: macos-15-intel, platform: darwin-x64, mode: broken-0.1.413 }
+          - { os: macos-14, platform: darwin-arm64, mode: legacy-0.1.440 }
+          - { os: macos-15-intel, platform: darwin-x64, mode: legacy-0.1.440 }
+          - { os: macos-14, platform: darwin-arm64, mode: broken-0.1.440 }
+          - { os: macos-15-intel, platform: darwin-x64, mode: broken-0.1.440 }
+          - { os: macos-14, platform: darwin-arm64, mode: legacy-0.1.454 }
+          - { os: macos-15-intel, platform: darwin-x64, mode: legacy-0.1.454 }
+          - { os: macos-14, platform: darwin-arm64, mode: broken-0.1.454 }
+          - { os: macos-15-intel, platform: darwin-x64, mode: broken-0.1.454 }
+          - { os: macos-14, platform: darwin-arm64, mode: legacy-0.1.490 }
+          - { os: macos-15-intel, platform: darwin-x64, mode: legacy-0.1.490 }
+          - { os: macos-14, platform: darwin-arm64, mode: broken-0.1.490 }
+          - { os: macos-15-intel, platform: darwin-x64, mode: broken-0.1.490 }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     steps:
@@ -260,7 +284,7 @@ jobs:
         run: |
           set -euo pipefail
           tar -czf mac-proofs.tar.gz -C proofs .
-          gh release create "mac-candidate-$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --latest=false --title "Tested Mac candidate $GITHUB_RUN_ID" --notes "Exact signed packs passed fresh, older leftover and same-version leftover installation on both Mac architectures. No channel moved." packs/*.tar.gz mac-proofs.tar.gz
+          gh release create "mac-candidate-$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --latest=false --title "Tested Mac candidate $GITHUB_RUN_ID" --notes "Exact signed packs passed fresh, replacement and six-version legacy/broken recovery installation on both Mac architectures. No channel moved." packs/*.tar.gz mac-proofs.tar.gz
   cleanup:
     needs: [authorize, package, sign, native, qualified]
     if: always() && needs.authorize.result == 'success'

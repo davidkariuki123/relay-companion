@@ -11,7 +11,6 @@ try {
   await page.addInitScript(prompt => {
     window.fixtureEvents = {};
     window.fixtureWrites = [];
-    window.fixtureTutorialCopies = [];
     window.fixtureFail = false;
     window.fixturePayload = {account:{paired:true,userId:'a',name:'Preview Person',email:'preview@example.test'},
       ui:{canDismiss:true,onboardingRequired:true,onboardingVersion:2,completedOnboardingVersion:2,tutorialPrompt:prompt,
@@ -20,10 +19,6 @@ try {
     const api = {isTestOverlay:true, refresh:async () => structuredClone(window.fixturePayload),
       contacts:async () => [], groups:async () => ({ok:true,result:[]}),
       copyOnboardingInviteLink:async userId => {window.fixtureWrites.push(['copy',userId]); return {ok:true};},
-      copyTutorialPrompt:async userId => {
-        if (window.fixtureCopyFailure) throw Error('clipboard unavailable');
-        window.fixtureTutorialCopies.push([userId,prompt]);return {ok:true};
-      },
       completeNetworkOnboarding:async userId => {
         window.fixtureWrites.push(['complete',userId]);
         if(window.fixtureFail) throw Error('offline');

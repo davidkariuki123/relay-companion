@@ -2272,9 +2272,14 @@ test("public release owns immutable publication while private promotion owns fle
     assert.doesNotMatch(catchup, /id-token:\s*write/);
     assert.doesNotMatch(catchup, /configure-aws-credentials|aws s3|apprunner|cloudformation|secrets\.AWS_/);
   }
-  const recoveryCanary = new URL("../../../.github/workflows/verify-companion-dev-update.yml", import.meta.url);
+  // Mac canaries run in the public repository, where Mac runners are free:
+  // the private copy is its template, and the public copy sits in .github.
+  const recoveryCanaryTemplate = new URL("../public-release/.github/workflows/verify-companion-dev-update.yml", import.meta.url);
+  const recoveryCanary = fs.existsSync(recoveryCanaryTemplate) ? recoveryCanaryTemplate
+    : new URL("../.github/workflows/verify-companion-dev-update.yml", import.meta.url);
   if (fs.existsSync(privatePromotion)) {
-    assert.equal(fs.existsSync(recoveryCanary), true, "the stock recovery canary workflow must exist");
+    assert.equal(fs.existsSync(recoveryCanaryTemplate), true, "the stock recovery canary workflow must exist");
+    assert.match(fs.readFileSync(catchupPromotion, "utf8"), /canary_repository=davidkariuki123\/relay-companion/, "catch-up reads the canary's runs where it runs");
   }
   if (fs.existsSync(recoveryCanary)) {
     const canary = fs.readFileSync(recoveryCanary, "utf8");
@@ -2283,9 +2288,15 @@ test("public release owns immutable publication while private promotion owns fle
     assert.match(canary, /npm install --global --no-audit --no-fund "relay-companion@\$FROM_VERSION"/);
     assert.match(canary, /npx --yes --no-audit --no-fund "relay-companion@\$FROM_VERSION" setup/);
   }
-  const privateImport = new URL("../../../.github/workflows/publish-companion.yml", import.meta.url);
+  // The six-platform audit of a published build also runs in the public
+  // repository now, from that repository's own root scripts.
+  const importTemplate = new URL("../public-release/.github/workflows/verify-published-companion.yml", import.meta.url);
+  const privateImport = fs.existsSync(importTemplate) ? importTemplate
+    : new URL("../.github/workflows/verify-published-companion.yml", import.meta.url);
   if (fs.existsSync(privateImport)) {
     const importWorkflow = fs.readFileSync(privateImport, "utf8");
+    assert.doesNotMatch(importWorkflow, /packages\/companion\//, "the public checkout has these scripts at its root");
+    assert.match(importWorkflow, /test "\$GITHUB_REPOSITORY" = "davidkariuki123\/relay-companion"/);
     assert.match(importWorkflow, /\(cd "\$root" && tar -xzf runtime\.tar\.gz\)/);
     assert.doesNotMatch(importWorkflow, /tar -xzf "\$archive"/);
     assert.match(importWorkflow, /npx --yes --no-audit --no-fund "relay-companion@\$VERSION" setup/);

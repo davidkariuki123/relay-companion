@@ -16,7 +16,7 @@ test("navigation paints the destination before revealing or resizing it", () => 
   const apply = renderAll.lastIndexOf("applyView();");
   assert.ok(renderAll.indexOf('activeView === "threads") renderThreads()') < apply);
   assert.ok(renderAll.indexOf('activeView === "reader") renderReader()') < apply);
-  assert.ok(renderAll.indexOf('activeView === "requestDetail") renderRequestDetail()') < apply);
+
 
   const applyView = between("function applyView()", 'document.getElementById("chatExpandBtn")');
   assert.ok(applyView.indexOf('readerViewEl.classList.toggle("hidden"') < applyView.indexOf("syncCardSize("));
@@ -58,12 +58,8 @@ test("expand and banner-to-full transitions populate content before the frame mo
   assert.doesNotMatch(trayOpen, /deferRenderAll/);
 });
 
-test("tab and request navigation use the same atomic commit", () => {
+test("tab navigation uses the atomic commit", () => {
   const tabs = between("for (const tab of tabEls)", "function renderAll()");
   assert.match(tabs, /activeView = view;\s*commitNavigation\(\);/);
   assert.doesNotMatch(tabs, /activeView = view;\s*syncTabs\(\);\s*applyView\(\);\s*renderAll\(\)/);
-
-  const requestDetail = between("function showRequestDetail(", "async function refreshRequestDetail");
-  assert.match(requestDetail, /activeView = "requestDetail";\s*commitNavigation\(\{ outerScrollTop: 0 \}\)/);
-  assert.match(requestDetail, /activeView = "sent";\s*commitNavigation\(\{ outerScrollTop: 0 \}\)/);
 });

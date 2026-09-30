@@ -277,3 +277,15 @@ test("subscribeActiveApplicationChanges reacts at the app activation edge", () =
   assert.deepEqual(calls, [ACTIVE_APPLICATION_CHANGED]);
   assert.equal(fired, 1);
 });
+
+test('deliberate reopen re-presents a window even when cached visibility and Space flags look intact', () => {
+  const calls = [];
+  const win = { isDestroyed: () => false, isVisible: () => true,
+    isVisibleOnAllWorkspaces: () => true, isAlwaysOnTop: () => true,
+    showInactive: () => calls.push('show'), moveTop: () => calls.push('raise'),
+    hide: () => { throw new Error('must not flicker'); } };
+  showInactiveOnAllSpaces(win, { force: true, platform: 'darwin' });
+  assert.deepEqual(calls, [], 'Space maintenance stays quiet');
+  showInactiveOnAllSpaces(win, { force: true, userInitiated: true, platform: 'darwin' });
+  assert.deepEqual(calls, ['show', 'raise']);
+});

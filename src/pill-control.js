@@ -39,7 +39,7 @@ export async function waitForPillReady(
       lastStatus.ready === true &&
       lastStatus.visible === true &&
       lastStatus.dismissed === false &&
-      lastStatus.reopenNonce === reopenNonce
+      (lastStatus.reopenNonce === reopenNonce || (Array.isArray(lastStatus.presentedReopens) && lastStatus.presentedReopens.includes(reopenNonce)))
     ) {
       return { ok: true, status: lastStatus };
     }

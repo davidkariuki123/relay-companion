@@ -524,15 +524,11 @@ test("Linux terminal discovery covers Fedora and does not depend on which", (t) 
   assert.doesNotMatch(fs.readFileSync(new URL("../overlay/linux-terminal.cjs", import.meta.url), "utf8"), /\/usr\/bin\/which/);
 });
 
-test("Linux task and completed-run opens always route through the terminal helper", () => {
+test("Linux task opens always route through the terminal helper", () => {
   const main = fs.readFileSync(new URL("../overlay/main.cjs", import.meta.url), "utf8");
   const packetOpen = main.slice(main.indexOf("async function openPacket("), main.indexOf("async function openPacketInCurrent("));
   const taskOpen = main.slice(main.indexOf("function openTaskDetail("), main.indexOf("function openUrlTarget("));
-  const runOpenStart = main.indexOf('ipcMain.handle("relay:openRunSession"');
-  const runOpen = main.slice(runOpenStart, main.indexOf('// "Open in current chat"', runOpenStart));
 
   assert.match(packetOpen, /process\.platform === "linux"[\s\S]*?launchLinuxAgentTerminal\(\{ url, host, cwd \}\)/);
   assert.match(taskOpen, /process\.platform === "linux"[\s\S]*?launchLinuxAgentTerminal\(\{ url, host, cwd \}\)/);
-  assert.match(runOpen, /process\.platform !== "linux" && !claudeSessionMetaPath\(sessionId\)/);
-  assert.match(runOpen, /process\.platform === "linux"[\s\S]*?launchLinuxAgentTerminal\(\{[\s\S]*?host: "claude"/);
 });

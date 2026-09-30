@@ -6,7 +6,7 @@ import { provisionDiagnostics } from "./diagnostics-authorization.js";
 import { applicationTelemetryHeader } from "./application-telemetry.js";
 import { readContext, recordReadTiming, readTimeout } from "./read-context.js";
 
-const { installationKey: currentInstallationKey } = createRequire(import.meta.url)("./installation-key.cjs");
+const { installationKey: currentInstallationKey, machineKey: currentMachineKey } = createRequire(import.meta.url)("./installation-key.cjs");
 
 // Reported on every device-authenticated call so the server always knows which
 // companion version each device runs — support and rollout questions get
@@ -243,6 +243,23 @@ export class RelayClient {
     return this.identity;
   }
 
+  // This computer's installation key, reported on device calls so the server
+  // can identify a device that registered before keys existed. Derived once,
+  // off the request path: a call made before it resolves simply omits it.
+  // The machine key is the same identity without the computer's name.
+  static #installationKey = "";
+  static #machineKey = "";
+  static #installationKeyLookup = null;
+  static #reportedInstallationKeys() {
+    RelayClient.#installationKeyLookup ||= Promise.resolve()
+      .then(async () => {
+        RelayClient.#installationKey = (await currentInstallationKey()) || "";
+        RelayClient.#machineKey = (await currentMachineKey()) || "";
+      })
+      .catch(() => {});
+    return { installation: RelayClient.#installationKey, machine: RelayClient.#machineKey };
+  }
+
   async #req(method, path, body, {
     auth = true,
     clientName = "relay-companion",
@@ -272,6 +289,9 @@ export class RelayClient {
       if (telemetry) headers[COMPANION_TELEMETRY_HEADER] = telemetry;
       const application = applicationTelemetryHeader();
       if (application) headers["x-relay-application-telemetry"] = application;
+      const { installation, machine } = RelayClient.#reportedInstallationKeys();
+      if (installation) headers["x-relay-installation-key"] = installation;
+      if (machine) headers["x-relay-machine-key"] = machine;
     }
     const retryable = retry && requestCanRetry(method, body);
     const deadline = context?.deadline ?? Date.now() + timeoutMs * (retryable ? 2 : 1);
@@ -367,11 +387,6 @@ export class RelayClient {
     return this.#req("POST", "/v1/invites-v2/link", {});
   }
 
-  /** A short-lived, single-use browser path for installing Relay in a chat app. */
-  createMcpBrowserHandoff(provider = "chatgpt") {
-    return this.#req("POST", "/v1/mcp/browser-handoff", { provider });
-  }
-
   listSessions(filters = {}) {
     const query = new URLSearchParams();
     for (const key of ["provider", "placement", "state", "limit"]) {
@@ -446,20 +461,6 @@ export class RelayClient {
     });
   }
 
-  stopChatAgentSession(sessionId, idempotencyKey, expectedStateVersion) {
-    return this.#req("POST", `/v1/chat-agent-sessions/${encodeURIComponent(sessionId)}/stop`, {
-      idempotencyKey,
-      ...(expectedStateVersion ? { expectedStateVersion } : {}),
-    });
-  }
-
-  retryChatAgentSession(sessionId, idempotencyKey, expectedStateVersion) {
-    return this.#req("POST", `/v1/chat-agent-sessions/${encodeURIComponent(sessionId)}/retry`, {
-      idempotencyKey,
-      ...(expectedStateVersion ? { expectedStateVersion } : {}),
-    });
-  }
-
   agentRunProgress(relayId, summary) {
     return this.#req("POST", `/v1/chat-agents/${encodeURIComponent(relayId)}/progress`, { summary });
   }
@@ -496,8 +497,17 @@ export class RelayClient {
   }
 
   /** Revoke THIS device's own token (`relay uninstall --purge`, a replaced pairing, sign-out). */
-  revokeSelf({ timeoutMs } = {}) {
-    return this.#req("DELETE", "/v1/devices/self", undefined, timeoutMs ? { timeoutMs, retry: false } : {});
+  // reason "sign_out" lets the fleet keep this computer listed as signed out.
+  // A server that predates it ignores the query and revokes as before.
+  revokeSelf({ timeoutMs, reason } = {}) {
+    const query = reason === "sign_out" ? "?reason=sign_out" : "";
+    return this.#req("DELETE", `/v1/devices/self${query}`, undefined, timeoutMs ? { timeoutMs, retry: false } : {});
+  }
+
+  // Relay was removed from this computer and the sign-in kept. The device
+  // leaves the fleet until Relay runs here again.
+  reportUninstalled({ timeoutMs } = {}) {
+    return this.#req("POST", "/v1/devices/self/uninstalled", {}, timeoutMs ? { timeoutMs, retry: false } : {});
   }
 
   createTask(payload) {
@@ -570,23 +580,10 @@ export class RelayClient {
    * signed attachment URLs. A poller running every few seconds wants this; it
    * re-fetches real packets (via fetchRelayPackets) only for what changed.
    */
-  inbox({ summary = false } = {}) {
-    return this.#req("GET", summary ? "/v1/inbox?view=summary" : "/v1/inbox");
-  }
-
-  /** Canonical managed Todo workflow projection. */
-  async todo({ statuses = [], limit, cursor } = {}) {
-    const query = new URLSearchParams();
-    if (Array.isArray(statuses) && statuses.length) query.set("statuses", statuses.join(","));
-    if (Number.isInteger(limit)) query.set("limit", String(limit));
-    if (cursor) query.set("cursor", String(cursor));
-    const suffix = query.toString();
-    return this.#req("GET", `/v1/todo${suffix ? `?${suffix}` : ""}`);
-  }
-
-  /** Change one exact Relay/Task workflow status with optimistic concurrency. */
-  async updateTodoStatus(itemId, payload, provenance = {}) {
-    return this.#req("PATCH", `/v1/todo/${encodeURIComponent(itemId)}/status`, payload, {
+  // An agent reading the inbox for the person says so through `provenance`;
+  // the app polling for itself does not.
+  inbox({ summary = false } = {}, provenance = {}) {
+    return this.#req("GET", summary ? "/v1/inbox?view=summary" : "/v1/inbox", undefined, {
       clientName: provenance.clientName || "relay-companion",
       sourceProvider: provenance.sourceProvider,
       nativeSessionId: provenance.nativeSessionId,
@@ -706,35 +703,13 @@ export class RelayClient {
     return this.#req("DELETE", `/v1/topics/${encodeURIComponent(topicId)}/posts/${encodeURIComponent(postId)}`);
   }
 
-  /** Personal Todo membership only; the Relay remains available in the chat. */
-  async todoVisibility(itemId) {
-    return this.#req("GET", `/v1/todo/${encodeURIComponent(itemId)}/visibility`);
-  }
-
-  async updateTodoVisibility(itemId, payload) {
-    return this.#req("PATCH", `/v1/todo/${encodeURIComponent(itemId)}/visibility`, payload);
-  }
-
-  /** The Companion opened a Relay in a native session: remember which one so the steward reads it first. */
+  /** The Companion opened a Relay in a native session: remember which one. */
   async recordRelaySessionTouch(relayId, { provider, nativeSessionId, cwd, title } = {}) {
     return this.#req("POST", `/v1/relays/${encodeURIComponent(relayId)}/session-touch`, {
       provider: String(provider || ""),
       nativeSessionId: String(nativeSessionId || ""),
       ...(cwd ? { cwd: String(cwd) } : {}),
       ...(title ? { title: String(title) } : {}),
-    });
-  }
-
-  /** Put the listed items first inside one Todo status; the rest follow in their current order. */
-  async reorderTodo(status, itemIds, provenance = {}) {
-    return this.#req("POST", "/v1/todo/reorder", {
-      status: String(status || ""),
-      itemIds: (Array.isArray(itemIds) ? itemIds : []).map((id) => String(id || "")).filter(Boolean),
-      ...(provenance.idempotencyKey ? { idempotencyKey: String(provenance.idempotencyKey) } : {}),
-    }, {
-      clientName: provenance.clientName || "relay-companion",
-      sourceProvider: provenance.sourceProvider,
-      nativeSessionId: provenance.nativeSessionId,
     });
   }
 
@@ -913,42 +888,10 @@ export class RelayClient {
     return this.#req("GET", `/v1/tasks/${encodeURIComponent(taskId)}`);
   }
 
-  acceptTask(taskId, participantId, payload) {
-    return this.#req(
-      "POST",
-      `/v1/tasks/${encodeURIComponent(taskId)}/invitations/${encodeURIComponent(participantId)}/accept`,
-      payload,
-    );
-  }
-
-  rejectTask(taskId, participantId, payload) {
-    return this.#req(
-      "POST",
-      `/v1/tasks/${encodeURIComponent(taskId)}/invitations/${encodeURIComponent(participantId)}/reject`,
-      payload,
-    );
-  }
-
   createTaskMessage(taskId, payload) {
     return this.#req("POST", `/v1/tasks/${encodeURIComponent(taskId)}/messages`, payload);
   }
 
-
-  approveShare(taskId, approvalId, payload) {
-    return this.#req(
-      "POST",
-      `/v1/tasks/${encodeURIComponent(taskId)}/approvals/${encodeURIComponent(approvalId)}/approve`,
-      payload,
-    );
-  }
-
-  declineShare(taskId, approvalId, payload) {
-    return this.#req(
-      "POST",
-      `/v1/tasks/${encodeURIComponent(taskId)}/approvals/${encodeURIComponent(approvalId)}/decline`,
-      payload,
-    );
-  }
 
   completeTask(taskId, payload) {
     return this.#req("POST", `/v1/tasks/${encodeURIComponent(taskId)}/results`, payload);

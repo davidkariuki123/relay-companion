@@ -7,13 +7,9 @@ function disabled() {
 }
 
 export async function listCoworkSessions() { return disabled(); }
-export async function discoverCoworkConnectorProfile() { return disabled(); }
 export async function createAndSeedCoworkSession() { return disabled(); }
 export async function readCoworkSession() { return disabled(); }
 export async function appendCoworkMessage() { return disabled(); }
-export async function archiveCoworkSession() { return disabled(); }
-
-export function selectCoworkEnvironment() { return ""; }
 
 export function coworkSessionLifecycle(session, events) {
   const actual = String(session?.status || "").toLowerCase();
@@ -50,17 +46,6 @@ function textFromContent(content) {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   return content.filter((block) => block && block.type === "text").map((block) => String(block.text || "")).join("\n");
-}
-
-export function coworkFinalAssistantText(events) {
-  const rows = Array.isArray(events) ? events : [];
-  for (let index = rows.length - 1; index >= 0; index -= 1) {
-    const payload = rows[index]?.payload || rows[index] || {};
-    if (payload.type !== "assistant" || !payload.message) continue;
-    const text = textFromContent(payload.message.content).trim();
-    if (text) return text;
-  }
-  return "";
 }
 
 export function coworkEventsToRecords(events) {

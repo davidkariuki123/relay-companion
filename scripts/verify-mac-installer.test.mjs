@@ -1,8 +1,42 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { validateInputs, assertDisposable, verifyCandidate, clickInstallButton } from "./verify-mac-installer.mjs";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { validateInputs, assertDisposable, verifyCandidate, clickInstallButton, installerModes, recoveryVersions, selectStockChannel } from "./verify-mac-installer.mjs";
+
+test("a Dev candidate's stock baseline is moved to Dev by its own CLI before any damage", t => {
+  const relayRoot = fs.mkdtempSync(path.join(os.tmpdir(), "relay-mac-channel-"));
+  t.after(() => fs.rmSync(relayRoot, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(relayRoot, "runtime"));
+  fs.writeFileSync(path.join(relayRoot, "config.json"), "{}");
+  fs.writeFileSync(path.join(relayRoot, "runtime/current.json"), JSON.stringify({ version: "0.1.440" }));
+  const calls = [];
+  const env = (updateChannel, version = "0.1.440") => (command, args) => {
+    calls.push([command, ...args]);
+    fs.writeFileSync(path.join(relayRoot, "config.json"), JSON.stringify({ updateChannel }));
+    fs.writeFileSync(path.join(relayRoot, "runtime/current.json"), JSON.stringify({ version }));
+  };
+  const options = { cli: ["/node", "/stock/bin/relay.js"], relayRoot, baselineVersion: "0.1.440" };
+  assert.equal(selectStockChannel({ ...options, channel: "stable", runCommand: env("dev") }), false);
+  assert.equal(selectStockChannel({ ...options, runCommand: env("dev") }), false);
+  assert.deepEqual(calls, [], "a Stable candidate leaves the stock channel alone");
+  assert.equal(selectStockChannel({ ...options, channel: "dev", runCommand: env("dev") }), true);
+  assert.deepEqual(calls, [["/node", "/stock/bin/relay.js", "env", "dev"]]);
+  assert.throws(() => selectStockChannel({ ...options, channel: "dev", runCommand: env("stable") }), /Dev channel/);
+  assert.throws(() => selectStockChannel({ ...options, channel: "dev", runCommand: env("dev", "0.1.568") }), /advanced/);
+});
 
 const input = { version: "0.1.567", sourceSha: "a".repeat(40), baseline: "0.1.565", mode: "leftover" };
+test("native recovery coverage includes every agreed stock starting version and broken state", () => {
+  assert.deepEqual(recoveryVersions, ["0.1.267", "0.1.326", "0.1.413", "0.1.440", "0.1.454", "0.1.490"]);
+  for (const version of recoveryVersions) for (const prefix of ["legacy", "broken"]) {
+    const mode = `${prefix}-${version}`;
+    assert.ok(installerModes.includes(mode));
+    validateInputs({ ...input, mode });
+  }
+  assert.throws(() => validateInputs({ ...input, mode: "legacy-latest" }));
+});
 test("successful relocation may close the renderer before mouse-up is acknowledged", async () => {
   const release = Promise.withResolvers(), calls = [];
   let sent = false;

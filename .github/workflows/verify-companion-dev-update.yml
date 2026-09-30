@@ -1,0 +1,150 @@
+name: Verify Companion dev auto-update
+
+on:
+  workflow_dispatch:
+    inputs:
+      from_version:
+        description: "Exact installed Companion version that initiates the update"
+        required: true
+        type: string
+      to_version:
+        description: "Exact Companion version currently promoted to dev"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-companion-dev-auto-update
+  cancel-in-progress: false
+
+jobs:
+  auto-update:
+    name: ${{ matrix.platform }} ${{ inputs.from_version }} -> ${{ inputs.to_version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: darwin-arm64
+          - os: macos-15-intel
+            platform: darwin-x64
+    steps:
+      - name: Require the macOS image's supported Node runtime
+        shell: bash
+        run: node -e 'if (Number(process.versions.node.split(".")[0]) < 22) process.exit(1)'
+      - name: Upgrade the exact old runtime through the dev channel
+        shell: bash
+        env:
+          FROM_VERSION: ${{ inputs.from_version }}
+          TO_VERSION: ${{ inputs.to_version }}
+        run: |
+          set -euo pipefail
+          [[ "$FROM_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$TO_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$(npm view relay-companion dist-tags.dev)" = "$TO_VERSION"
+
+          test ! -e "$HOME/.relay"
+          mkdir -p "$HOME/.codex"
+
+          pointer="$HOME/.relay/runtime/current.json"
+          host_node="$(command -v node)"
+          stable_bin=""
+          cleanup() {
+            if [ -f "$pointer" ]; then
+              runtime_node="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).node' "$pointer")"
+              runtime_bin="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).bin' "$pointer")"
+              "$runtime_node" "$runtime_bin" uninstall --no-trampoline || true
+            elif [ -n "$stable_bin" ]; then
+              "$host_node" "$stable_bin" uninstall --no-trampoline || true
+            fi
+          }
+          trap cleanup EXIT
+
+          # Thin installers own first contact and leave a canonical runtime.
+          # Older bridge packages, including the retained 0.1.267/0.1.326
+          # recovery cohorts, require pairing when `setup` is invoked. These
+          # runners deliberately have no Relay account, so reproduce the
+          # already-installed customer state by installing that exact stock npm
+          # package globally instead of entering its interactive pairing flow.
+          from_distribution="$(npm view "relay-companion@$FROM_VERSION" relayDistribution 2>/dev/null || true)"
+          if [ "$from_distribution" = thin-installer ]; then
+            npx --yes --no-audit --no-fund "relay-companion@$FROM_VERSION" setup
+          else
+            npm install --global --no-audit --no-fund "relay-companion@$FROM_VERSION"
+          fi
+          stable_bin="$(npm root -g)/relay-companion/bin/relay.js"
+          if [ ! -f "$stable_bin" ]; then
+            stable_bin="$HOME/.relay/lib/node_modules/relay-companion/bin/relay.js"
+          fi
+          entry_node="$host_node"
+          entry_bin="$stable_bin"
+          entry_shape=legacy
+          if [ ! -f "$entry_bin" ]; then
+            test -f "$pointer" || {
+              echo "::error::Relay $FROM_VERSION setup produced neither a legacy entry package nor a canonical runtime pointer"
+              exit 1
+            }
+            entry_node="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).node' "$pointer")"
+            entry_bin="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).bin' "$pointer")"
+            entry_shape=canonical
+          fi
+          test -f "$entry_bin"
+          test "$("$entry_node" "$entry_bin" version)" = "$FROM_VERSION"
+          "$entry_node" "$entry_bin" env dev
+
+          # Bridge builds migrate themselves into the canonical runtime before
+          # they check for a newer channel target. Exercise that same first hop.
+          # Newer setup packages already leave a canonical runtime and no
+          # npm-global entry package, so their first update is the real channel
+          # update and must not be immediately duplicated as a migration hop.
+          "$entry_node" "$entry_bin" update
+          canonicalized=false
+          updated=false
+          if [ "$entry_shape" = canonical ]; then
+            canonicalized=true
+          else
+            for attempt in $(seq 1 120); do
+              current="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).version || ""' "$pointer" 2>/dev/null || true)"
+              if [ "$current" = "$TO_VERSION" ]; then
+                updated=true
+                break
+              fi
+              if [ "$current" = "$FROM_VERSION" ]; then
+                canonicalized=true
+                break
+              fi
+              sleep 5
+            done
+            if [ "$canonicalized" != true ] && [ "$updated" != true ]; then
+              test ! -f "$HOME/.relay/update.log" || tail -n 200 "$HOME/.relay/update.log"
+              echo "::error::Relay $FROM_VERSION did not migrate into its canonical runtime"
+              exit 1
+            fi
+          fi
+
+          if [ "$updated" != true ] && [ "$entry_shape" = legacy ]; then
+            old_node="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).node' "$pointer")"
+            old_bin="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).bin' "$pointer")"
+            "$old_node" "$old_bin" update
+          fi
+
+          for attempt in $(seq 1 120); do
+            if [ -f "$pointer" ] && [ "$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).version || ""' "$pointer" 2>/dev/null || true)" = "$TO_VERSION" ]; then
+              updated=true
+              break
+            fi
+            sleep 5
+          done
+          if [ "$updated" != true ]; then
+            test ! -f "$HOME/.relay/update.log" || tail -n 200 "$HOME/.relay/update.log"
+            echo "::error::Relay did not auto-update from $FROM_VERSION to $TO_VERSION"
+            exit 1
+          fi
+
+          new_node="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).node' "$pointer")"
+          new_bin="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).bin' "$pointer")"
+          test "$("$new_node" "$new_bin" version)" = "$TO_VERSION"
+          "$new_node" "$new_bin" doctor

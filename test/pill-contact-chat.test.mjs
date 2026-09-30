@@ -124,7 +124,7 @@ test("a room entered from People keeps People lit, and Back returns there", () =
   const source = between(html, "function isConversationRoomSource(source = threadsSource)", "\n  function openThreadDetail");
   assert.match(source, /source === "chat" \|\| source === "relays" \|\| source === "slack" \|\| source === "contacts"/,
     "Slack is another room index while the existing People source remains intact");
-  assert.match(html, /: activeView === "threads" \? threadsSource/);
+  assert.match(html, /const tabView = activeView === "threads" \? threadsSource/);
 
   // Back goes back to the list that was clicked, on the row it left.
   const back = between(html, "thBackEl.addEventListener", "let threadsSource =");

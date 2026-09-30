@@ -6,7 +6,7 @@ const html = fs.readFileSync(new URL('../overlay/inbox.html', import.meta.url), 
 const start = html.indexOf('      const canReact =');
 const end = html.indexOf('      const chunkDivider =', start);
 const pickerStart = html.indexOf('  function messageReactionPickerHtml(id)');
-const pickerEnd = html.indexOf('  function reactionConfirmationHtml', pickerStart);
+const pickerEnd = html.indexOf('  async function commitReaction(', pickerStart);
 const rulesStart = html.indexOf('  const MESSAGE_EDIT_WINDOW_MS =');
 const rulesEnd = html.indexOf('  const threadEditTargets = new Map();', rulesStart);
 assert.ok(start >= 0 && end > start && pickerStart >= 0 && pickerEnd > pickerStart && rulesStart >= 0 && rulesEnd > rulesStart);

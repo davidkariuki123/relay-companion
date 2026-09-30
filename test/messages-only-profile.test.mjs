@@ -131,7 +131,7 @@ test("the pill gates every live Task entry point by the account capability", () 
   // the developers' still; a shipped Task is a Relay row on the Requests
   // board, which every account has.
   assert.match(source, /async function refreshTasks\(\) \{\s+if \(currentProductFeatures\(\)\.legacyTaskProtocol !== true\)/);
-  assert.match(source, /async function runMutation\(label, fn\) \{\s+if \(currentProductFeatures\(\)\.legacyTaskProtocol !== true\)/);
+
   assert.match(source, /function openTaskDetail\(taskId\) \{\s+if \(currentProductFeatures\(\)\.legacyTaskProtocol !== true\) return;/);
   assert.match(source, /ipcMain\.handle\("relay:taskStatus"[\s\S]*?if \(currentProductFeatures\(\)\.legacyTaskProtocol !== true\)/);
   // Ordinary accounts hide every Task row while retaining it durably in the

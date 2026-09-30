@@ -5,7 +5,6 @@ import os from "node:os";
 import path from "node:path";
 import locks from "../bootstrap/recovery-launcher.cjs";
 import lifecycle from "../bootstrap/lifecycle-ownership.cjs";
-import contract from "../bootstrap/node-contract.cjs";
 import client from "../bootstrap/recovery-client.cjs";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -15,27 +14,6 @@ function fixture(t) {
   t.after(() => { assert.equal(path.dirname(homeDir), os.tmpdir()); fs.rmSync(homeDir, { recursive: true, force: true }); });
   return homeDir;
 }
-test("Electron and aliases to Electron are rejected without executing a GUI", () => {
-  for (const executable of ["/a/Electron.app/Contents/MacOS/Electron", "/a/Relay.app/Contents/MacOS/Relay", "C:\\a\\electron.exe", "C:\\a\\Relay.exe", "/alias"]) {
-    assert.equal(contract.verifyNode(executable, { realpath: () => "/a/Electron", run: () => assert.fail("GUI executed") }).ok, false);
-  }
-  const result = contract.verifyNode("/node", { realpath: x => x, env: { NODE_OPTIONS: "--require evil", ELECTRON_RUN_AS_NODE: "1", NODE_PATH: "evil", SAFE: "yes" },
-    run: (_file, args, options) => { assert.match(args[1], /versions.electron/); assert.deepEqual(options.env, { SAFE: "yes" }); return { status: 0, stdout: "22.12.0" }; } });
-  assert.equal(result.ok, true);
-});
-test("the Node shipped inside Relay.app is Node, and a fresh home resolves to it", t => {
-  const bundled = "/Applications/Relay.app/Contents/Resources/node";
-  for (const executable of [bundled, "C:\\Program Files\\Relay\\resources\\node.exe", "/opt/Relay/resources/node"]) {
-    assert.equal(contract.isElectronExecutable(executable, { realpath: x => x }), false, executable);
-  }
-  for (const executable of ["/Applications/Relay.app", "/Applications/Relay.app/", "/opt/Relay/relay", "/a/Relay Helper.app/Contents/MacOS/Relay Helper"]) {
-    assert.equal(contract.isElectronExecutable(executable, { realpath: x => x }), true, executable);
-  }
-  // No recovery or runtime pointer exists yet on a first install.
-  const homeDir = fixture(t);
-  const run = file => file === bundled ? { status: 0, stdout: "24.18.0\n" } : assert.fail(`unexpected ${file}`);
-  assert.equal(contract.resolveManagedNode({ homeDir, node: bundled, run }), bundled);
-});
 test("a live delegated worker prevents parent release and dead-parent reclamation", t => {
   const homeDir = fixture(t), dir = path.join(homeDir, ".relay", "runtime", "transaction.lock");
   const parent = locks.acquireCanonicalLock(dir);

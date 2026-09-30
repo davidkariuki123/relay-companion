@@ -12,7 +12,8 @@ contextBridge.exposeInMainWorld("relay", {
   // The open failed (CLI error / helper wouldn't spawn). The row stays unread, so
   // say why inline instead of letting the spinner just stop.
   onOpenError: (cb) => ipcRenderer.on("openError", (_e, id, message) => cb(id, message || "")),
-  onOpenFull: (cb) => ipcRenderer.on("openFull", () => cb()), // status-area icon clicked
+  onOpenFull: (cb) => ipcRenderer.on("openFull", (_event, nonce) => cb(nonce)),
+  reopenPresented: (nonce) => ipcRenderer.send("relay:reopenPresented", nonce), // status-area icon clicked
   onOpenRelay: (cb) => ipcRenderer.on("relay:openReader", (_e, input) => cb(input || {})),
   onShown: (cb) => ipcRenderer.on("shown", () => cb()),
 
@@ -26,7 +27,6 @@ contextBridge.exposeInMainWorld("relay", {
   deliverToSession: (id, selection) => ipcRenderer.invoke("relay:deliverToSession", id, selection),
   continueSession: (id, source) => ipcRenderer.invoke("relay:continueSession", id, source),
   // Sent rows get the same open-actions menu as received relays.
-  openSentInCurrent: (id, host) => ipcRenderer.send("relay:openSentInCurrent", id, host),
   openSentFresh: (id, host) => ipcRenderer.send("relay:openSentFresh", id, host),
   // expand-card actions: inject into the live Claude session / force a fresh one
   preview: (id) => ipcRenderer.send("relay:preview", id),
@@ -43,7 +43,6 @@ contextBridge.exposeInMainWorld("relay", {
   taskReject: (id, note) => ipcRenderer.invoke("relay:taskReject", String(id || ""), String(note || "")),
   taskCancel: (id, note) => ipcRenderer.invoke("relay:taskCancel", String(id || ""), String(note || "")),
   taskDone: (id, note) => ipcRenderer.invoke("relay:taskDone", String(id || ""), String(note || "")),
-  todoList: (input = {}) => ipcRenderer.invoke("relay:todoList", input || {}),
   // Topics: invite-only boards under a mandate. Every mutation returns the
   // server's view; the renderer never guesses at membership or mandate state.
   topicsList: () => ipcRenderer.invoke("relay:topicsList"),
@@ -65,17 +64,6 @@ contextBridge.exposeInMainWorld("relay", {
   topicPostCreate: (id, input = {}) => ipcRenderer.invoke("relay:topicPostCreate", String(id || ""), input || {}),
   topicPostReply: (id, postId, input = {}) => ipcRenderer.invoke("relay:topicPostReply", String(id || ""), String(postId || ""), input || {}),
   topicPostDelete: (id, postId) => ipcRenderer.invoke("relay:topicPostDelete", String(id || ""), String(postId || "")),
-  todoVisibilityUpdate: (id, input = {}) => ipcRenderer.invoke("relay:todoVisibilityUpdate", String(id || ""), input || {}),
-  todoVisibilityRead: (id) => ipcRenderer.invoke("relay:todoVisibilityRead", String(id || "")),
-  todoStatusUpdate: (id, input = {}) => ipcRenderer.invoke(
-    "relay:todoStatusUpdate",
-    String(id || ""),
-    input || {},
-  ),
-  todoItem: (id) => ipcRenderer.invoke("relay:todoItem", String(id || "")),
-  // The Todo steward runs in the daemon; the pill only records the person's
-  // preference. Its results arrive as ordinary Todo data on the next push.
-  todoStewardPrefs: (input = {}) => ipcRenderer.invoke("relay:todoStewardPrefs", input || {}),
   requestReviewSafety: (id) => ipcRenderer.invoke("relay:requestReviewSafety", String(id || "")),
   requestCompletionSend: (id) => ipcRenderer.invoke("relay:requestCompletionSend", String(id || "")),
   // The hand-off: Send/Start opens a real session in the desktop app and
@@ -174,12 +162,6 @@ contextBridge.exposeInMainWorld("relay", {
   // renderer's clipboard needs a focused document and the pill often is not.
   copyShareLink: (url) => ipcRenderer.invoke("relay:copyShareLink", { url }),
 
-  // task mutations (return { ok, error?, conflict? })
-  accept: (taskId, participantId) => ipcRenderer.invoke("relay:accept", taskId, participantId),
-  reject: (taskId, participantId) => ipcRenderer.invoke("relay:reject", taskId, participantId),
-  approve: (taskId, approvalId) => ipcRenderer.invoke("relay:approve", taskId, approvalId),
-  decline: (taskId, approvalId) => ipcRenderer.invoke("relay:decline", taskId, approvalId),
-
   // tasks view
   refreshTasks: () => ipcRenderer.invoke("relay:refreshTasks"),
   openTask: (taskId) => ipcRenderer.send("relay:openTask", taskId),
@@ -233,8 +215,6 @@ contextBridge.exposeInMainWorld("relay", {
   credentialRetry: () => ipcRenderer.invoke("relay:credentialRetry"),
   chatAgentPreferences: () => ipcRenderer.invoke("relay:chatAgentPreferences"),
   saveChatAgentPreferences: (input) => ipcRenderer.invoke("relay:chatAgentPreferencesSave", input || {}),
-  connectChatGPT: () => ipcRenderer.invoke("relay:connectChatGPT"),
-  connectClaude: () => ipcRenderer.invoke("relay:connectClaude"),
   completeSetupTutorial: () => ipcRenderer.invoke("relay:completeSetupTutorial"),
   onboardingInviteLink: () => ipcRenderer.invoke("relay:onboardingInviteLink"),
   completeNetworkOnboarding: (userId) => ipcRenderer.invoke("relay:completeNetworkOnboarding", userId),
@@ -243,13 +223,11 @@ contextBridge.exposeInMainWorld("relay", {
   // its client secret, activation token and PKCE verifier. The renderer sees
   // only status + verified account summary and can request the next human act.
   installationAuthState: () => ipcRenderer.invoke("relay:installationAuthState"),
-  installationAuthBegin: () => ipcRenderer.invoke("relay:installationAuthBegin"),
   installationAuthResume: () => ipcRenderer.invoke("relay:installationAuthResume"),
   // Restart is an explicit human act. Main deletes only the one-time
   // installation-authorization namespace, and does so before minting again.
   installationAuthRestart: () => ipcRenderer.invoke("relay:installationAuthRestart"),
   copySetupPrompt: () => ipcRenderer.invoke("relay:copySetupPrompt"),
-  copyTutorialPrompt: (userId) => ipcRenderer.invoke("relay:copyTutorialPrompt", userId),
   copyFirstLinkMessage: (userId) => ipcRenderer.invoke("relay:copyFirstLinkMessage", userId),
   installationAuthSignIn: (options = {}) => ipcRenderer.invoke("relay:installationAuthSignIn", { forceAccountSelection: options?.forceAccountSelection === true }),
   installationAuthGoogle: (options = {}) => ipcRenderer.invoke("relay:installationAuthGoogle", {

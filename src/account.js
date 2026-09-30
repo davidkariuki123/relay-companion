@@ -2,7 +2,7 @@ import os from "node:os";
 import { createRequire } from "node:module";
 import { readConfig, withoutDeprecatedCapabilityConfig, writeConfigObject } from "./config.js";
 
-const { deleteDeviceToken } = createRequire(import.meta.url)("./credential-store.cjs");
+const { deleteDeviceToken, readDeviceToken } = createRequire(import.meta.url)("./credential-store.cjs");
 
 /**
  * Account lifecycle for the companion: the ONE config-write shape shared by
@@ -78,10 +78,10 @@ async function defaultDeviceClient(url, token) {
   return new RelayClient({ ...(url ? { url } : {}), token });
 }
 
-async function revokeWithOwnToken(credential, makeClient, timeoutMs) {
+async function revokeWithOwnToken(credential, makeClient, timeoutMs, { reason } = {}) {
   try {
     const client = await makeClient(credential.apiUrl, credential.deviceToken);
-    await client.revokeSelf({ timeoutMs });
+    await client.revokeSelf({ timeoutMs, ...(reason ? { reason } : {}) });
     return "revoked";
   } catch (error) {
     // A token the server no longer accepts is already retired (the server
@@ -114,23 +114,46 @@ export async function revokeReplacedDevice(previous, registration, {
 /**
  * Revoke this computer's device before its credential is deleted on sign-out,
  * so signing out does not leave a live token and a stale device behind. The
- * same guard applies: only a credential issued on this installation.
+ * server is told this was a sign-out, so the fleet keeps the computer listed
+ * as signed out. "failed" means the server was not reached: pass the result to
+ * persistSignedOutAccount, which keeps the credential for a later retry.
+ *
+ * Unlike a re-pair, a sign-out is not limited to credentials issued on this
+ * installation. The person asked to sign out, the credential names exactly one
+ * device, and credentials from before installation keys existed could
+ * otherwise never be signed out: their devices stayed in the fleet for good.
+ * The cost is a copied home folder: signing out on the copy signs the
+ * original out too, and that computer signs in again.
  */
 export async function revokeSignedOutDevice(config, {
-  currentKey,
   makeClient = defaultDeviceClient,
   timeoutMs = 5000,
 } = {}) {
   const credential = replacedDeviceCredential(config);
   if (!credential) return "none";
-  if (!credential.installationKey) return "not_this_installation";
-  let key = currentKey;
-  if (key === undefined) {
-    const { installationKey } = createRequire(import.meta.url)("./installation-key.cjs");
-    key = await installationKey();
+  return revokeWithOwnToken(credential, makeClient, timeoutMs, { reason: "sign_out" });
+}
+
+/**
+ * Tell the server Relay was removed from this computer while the sign-in is
+ * kept, so the fleet stops listing it. Nothing is revoked: a reinstall resumes
+ * the same device. Best effort and never throws. "unsupported" is a server
+ * that predates the report.
+ */
+export async function reportUninstalledDevice(config, {
+  makeClient = defaultDeviceClient,
+  timeoutMs = 5000,
+} = {}) {
+  const credential = replacedDeviceCredential(config);
+  if (!credential) return "none";
+  try {
+    const client = await makeClient(credential.apiUrl, credential.deviceToken);
+    await client.reportUninstalled({ timeoutMs });
+    return "reported";
+  } catch (error) {
+    const status = Number(error?.status);
+    return status === 401 ? "already_revoked" : status === 404 ? "unsupported" : "failed";
   }
-  if (!key || key !== credential.installationKey) return "not_this_installation";
-  return revokeWithOwnToken(credential, makeClient, timeoutMs);
 }
 
 /**
@@ -165,14 +188,84 @@ export function persistPairedAccount({
   );
 }
 
-export function persistSignedOutAccount({ credentialBackend = { deleteDeviceToken } } = {}) {
+/**
+ * revokeResult is what revokeSignedOutDevice returned. When it is "failed" the
+ * server never heard about the sign-out (offline, timed out), so the device
+ * would stay live there with a token this computer had already deleted.
+ * Instead the credential stays in protected storage, no longer the account's
+ * credential, and config.json records where it is so flushPendingSignOuts can
+ * finish the sign-out later. It is used for nothing but that revocation.
+ * Only a credential held in protected storage is kept; a plaintext one is
+ * deleted as before.
+ */
+export function persistSignedOutAccount({ credentialBackend = { deleteDeviceToken }, revokeResult } = {}) {
   const config = readConfig();
-  if (config.credentialStore) {
+  const next = signedOutAccountConfig(config);
+  const keep = revokeResult === "failed" && config.credentialStore && config.credentialAccount;
+  if (keep) {
+    next.pendingSignOuts = [
+      ...pendingSignOuts(config).filter((entry) => entry.credentialAccount !== config.credentialAccount),
+      {
+        credentialAccount: String(config.credentialAccount),
+        deviceId: String(config.deviceId || ""),
+        apiUrl: String(config.apiUrl || ""),
+        signedOutAt: new Date().toISOString(),
+      },
+    ].slice(-MAX_PENDING_SIGN_OUTS);
+  } else if (config.credentialStore) {
     const removed = credentialBackend.deleteDeviceToken({ account: config.credentialAccount || "device-token" });
     if (!removed.ok) throw new Error(`Could not remove Relay credential from protected storage (${removed.detail || "unknown error"}).`);
   }
-  const next = writeConfigObject(signedOutAccountConfig(config));
-  return next;
+  return writeConfigObject(next);
+}
+
+const MAX_PENDING_SIGN_OUTS = 8;
+
+function pendingSignOuts(config) {
+  return (Array.isArray(config?.pendingSignOuts) ? config.pendingSignOuts : [])
+    .filter((entry) => entry && typeof entry.credentialAccount === "string" && entry.credentialAccount);
+}
+
+/**
+ * Finish sign-outs the server never heard about. Each kept credential revokes
+ * its own device and is then deleted; one the server no longer accepts is
+ * already retired. An entry stays only while the server cannot be reached.
+ * Best effort: never throws.
+ */
+export async function flushPendingSignOuts({
+  makeClient = defaultDeviceClient,
+  credentialBackend = { deleteDeviceToken, readDeviceToken },
+  timeoutMs = 5000,
+} = {}) {
+  const outcome = { revoked: 0, remaining: 0 };
+  try {
+    const pending = pendingSignOuts(readConfig());
+    if (!pending.length) return outcome;
+    const finished = new Set();
+    for (const entry of pending) {
+      const stored = credentialBackend.readDeviceToken({ account: entry.credentialAccount });
+      const token = stored?.ok ? String(stored.value || "") : "";
+      // Nothing left to revoke with: the entry can never succeed.
+      const result = token.startsWith("dev_")
+        ? await revokeWithOwnToken({ apiUrl: entry.apiUrl, deviceToken: token }, makeClient, timeoutMs, { reason: "sign_out" })
+        : stored?.ok || stored?.code === "credential_not_found" ? "gone" : "failed";
+      if (result === "failed") continue;
+      try { credentialBackend.deleteDeviceToken({ account: entry.credentialAccount }); } catch {}
+      finished.add(entry.credentialAccount);
+      if (result === "revoked") outcome.revoked += 1;
+    }
+    // Re-read: a pairing or another sign-out may have written since.
+    const current = readConfig();
+    const remaining = pendingSignOuts(current).filter((entry) => !finished.has(entry.credentialAccount));
+    outcome.remaining = remaining.length;
+    if (finished.size) {
+      const next = { ...current };
+      if (remaining.length) next.pendingSignOuts = remaining;
+      else delete next.pendingSignOuts;
+      writeConfigObject(next);
+    }
+  } catch {}
+  return outcome;
 }
 
 /**

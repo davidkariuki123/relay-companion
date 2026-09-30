@@ -84,9 +84,9 @@ test("size preparation chooses macOS hit testing or ordinary native geometry", (
     "a missing renderer settlement cannot leave the old Windows reader bounds active");
 });
 
-test("chat, compact rooms, sent, and Tasks share the same source snapshot", () => {
+test("chat, compact rooms and sent share the same source snapshot", () => {
   const prepare = between(html, "function prepareReaderMorph", "function startReaderMorph");
-  for (const view of ["chat", "threads", "sent", "tasks"]) {
+  for (const view of ["chat", "threads", "sent"]) {
     assert.match(prepare, new RegExp(`${view}:`), `${view} is a supported compact source`);
   }
   assert.match(html, /startReaderMorph\("threads"\)/, "chat expansion uses the shared coordinator");

@@ -6,7 +6,7 @@ import test from 'node:test';
 import { createAgentToolSurface } from '../src/agent-tool-surface.js';
 import { TOOLS, toolsForAccount } from '../src/mcp.js';
 
-const features = { orgAdmin: true, requests: true, todo: true, topics: true, aiSessions: true, connectors: true, messageMutations: true };
+const features = { orgAdmin: true, requests: true, topics: true, aiSessions: true, connectors: true, messageMutations: true };
 const caller = { host: 'codex', nativeId: 'thread_test', cwd: os.tmpdir() };
 const key = 'stable-test-key';
 const message = { title: 'A useful test message', forHuman: 'Here is the update.', forAgent: 'The complete context.', idempotencyKey: key };
@@ -17,9 +17,6 @@ const cases = {
   relay_task_start: [{ taskRelayId: 'relay_test', idempotencyKey: key }, 'taskStarted'],
   relay_task_complete: [{ taskRelayId: 'relay_test', ...message }, 'taskCompleted'],
   relay_task_unclaim: [{ taskRelayId: 'relay_test', idempotencyKey: key }, 'taskUnclaimed'],
-  relay_todo_update: [{ itemId: 'item_test', status: 'triage', expectedVersion: 1, idempotencyKey: key }, 'updateTodoStatus'],
-  relay_todo_visibility: [{ itemId: 'item_test', removed: true, expectedVersion: 1, idempotencyKey: key }, 'updateTodoVisibility'],
-  relay_todo_reorder: [{ status: 'triage', itemIds: ['item_test'], idempotencyKey: key }, 'reorderTodo'],
   relay_topics_list: [{}, 'topics'],
   relay_topic_context: [{ query: 'Topic threads' }, 'topicContext'],
   relay_topic_threads: [{ topicId: 'tpc_test' }, 'topicThreads'],
@@ -93,7 +90,7 @@ test('catalog and calls obey live product restrictions', async () => {
   const api = surface({ deleteMessage: async () => { writes++; } }, {
     featuresReader: async () => current,
   });
-  current = { requests: false, aiSessions: false, todo: false, connectors: false, messageMutations: false };
+  current = { requests: false, aiSessions: false, connectors: false, messageMutations: false };
   assert.deepEqual((await api.list(caller)).tools, toolsForAccount(current, 'codex'));
   assert.equal((await api.call('relay_message_delete', cases.relay_message_delete[0], caller)).isError, true);
   assert.equal((await api.call('relay_connector_call_tool', {}, caller)).isError, true);

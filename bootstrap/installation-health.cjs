@@ -52,7 +52,7 @@ function collectInstallationHealth({ homeDir = os.homedir(), platform = process.
   const progressFresh = progressMatches && progress.sequence > 0 && progress.at <= now && now - progress.at < PROGRESS_FRESH_MS;
   const daemonResponsive = Boolean(live?.daemon && heartbeat?.version === activeVersion && heartbeat?.at <= now && now - heartbeat.at < 60_000
     && (!progressSupported || progressFresh));
-  const componentNames = ["inbox-background", "agent-sessions", "todo", "topics", "tasks"];
+  const componentNames = ["inbox-background", "agent-sessions", "topics", "tasks"];
   const unhealthyComponents = progressMatches ? componentNames.filter(name => ["failed", "stalled"].includes(progress.components?.[name])) : [];
   let serviceHealth = { state: "healthy", reason: "ready", components: unhealthyComponents };
   if (!activeVersion) serviceHealth = { ...serviceHealth, state: "unverified", reason: "runtime-not-active" };

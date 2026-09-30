@@ -60,15 +60,6 @@ async function resolveWebSocketImpl() {
   return ws;
 }
 
-export async function notifyCodexDesktopThread({ threadId, pinnedThreadIds = null, timeoutMs, open = false } = {}) {
-  return notifyCodexDesktopThreads({
-    threadIds: threadId ? [threadId] : [],
-    pinnedThreadIds,
-    timeoutMs,
-    openThreadId: open ? threadId : null,
-  });
-}
-
 export async function notifyCodexDesktopThreads(options = {}) {
   const mutatesProject = Boolean(String(options.ensureWorkspaceRoot || "").trim());
   return mutatesProject
@@ -846,23 +837,6 @@ export function codexTurnStartMessage({ threadId, text, payload = {} }) {
     timeoutMs: 600000,
     request: { id: payload.requestId || uuid(), method: "turn/start", params },
   };
-}
-
-// Ownership of a just-resumed thread takes ~7s to settle, and a turn/start
-// fired before then silently no-ops. The bridge is fire-and-forget so there is
-// no error to read — the caller re-fires this until the rollout actually grows.
-export async function relayFireCodexTurnRenderer(payload) {
-  const bridge = window.electronBridge;
-  if (!bridge?.sendMessageFromView) return { ok: false, reason: "missing-electron-bridge" };
-  const threadId = String(payload.threadId || "").trim();
-  const text = String(payload.text || "");
-  if (!threadId || !text.trim()) return { ok: false, reason: "missing-thread-or-text" };
-  try {
-    await bridge.sendMessageFromView(codexTurnStartMessage({ threadId, text, payload }));
-    return { ok: true };
-  } catch (error) {
-    return { ok: false, reason: String(error?.message || error) };
-  }
 }
 
 export async function relaySubmitCodexRenderer(payload) {

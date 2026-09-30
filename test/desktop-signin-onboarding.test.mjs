@@ -6,14 +6,13 @@ const html = fs.readFileSync(new URL('../overlay/inbox.html', import.meta.url), 
 const main = fs.readFileSync(new URL('../overlay/main.cjs', import.meta.url), 'utf8');
 
 test('opening signed-out Relay reads recovery state but never creates an authorization', async () => {
-  const source = html.slice(html.indexOf('  async function initializeInstallationAuthorization('), html.indexOf('  async function connectChatFromSignup('));
+  const source = html.slice(html.indexOf('  async function initializeInstallationAuthorization('), html.indexOf('  let networkInvite = '));
   const calls = [];
   const context = vm.createContext({
     window: { relay: {
       installationAuthState: async () => { calls.push('state'); return { status: 'idle' }; },
-      installationAuthBegin: async () => { throw new Error('must not begin on app open'); },
     } }, payload: { account: { paired: false } }, signupStateLoaded: false,
-    signupInitializationFailed: false, signupBusy: false, signupError: '', signupStage: '',
+    signupBusy: false, signupError: '', signupStage: '',
     pendingOpenSignupCard: () => '', rendererSurfaceActive: () => true,
     renderSignup: () => {}, applyInstallationState: () => {}, pollInstallationState: () => {},
   });

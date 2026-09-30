@@ -305,7 +305,7 @@ async function request(method, requestPath, body) {
   } else if (companion.status === "ready") {
     // Retain the browser-approved credential independently of Companion. Record
     // the local attempt before dispatch so a lost response still requires the
-    // encryption/account checks on a later direct retry.
+    // account checks on a later direct retry.
     if (!config.local) { config.local = true; atomicWrite(configPath(), config); }
     try {
       const result = await localRequest(local, { method: verb, path: cleanPath, body, accountId: config.account.relayUserId });
@@ -693,7 +693,7 @@ const DIRECT_TOOLS = {
   relay_chats_list: directTool("List this account's conversations without changing read state.", {}, [], { full: true }),
   relay_chat_fetch: directTool("Read a page of one chat without receipts. Defaults to the newest 25, oldest first. HTTPS requires chatId. Continue with nextBeforeCursor or nextAfterCursor; a page is not the full history.", { chatId: idField, limit: { type: "integer", minimum: 1, maximum: 200 }, beforeCursor: { type: "string" }, afterCursor: { type: "string" } }, ["chatId"], { full: true }),
   relay_thread_fetch: directTool("Read related Relays by their internal threadId without receipts.", { threadId: idField }, ["threadId"]),
-  relay_inbox_list: directTool("Read recent inbox metadata, or up to 20 exact Relay packet envelopes in items [{relayId, ...response}]. Does not send receipts. Todo queries require Companion.", { relayIds: { type: "array", items: idField, minItems: 1, maxItems: 20 } }),
+  relay_inbox_list: directTool("Read recent inbox metadata, or up to 20 exact Relay packet envelopes in items [{relayId, ...response}]. Does not send receipts.", { relayIds: { type: "array", items: idField, minItems: 1, maxItems: 20 } }),
   relay_share_stats: directTool("Read owner-only share statistics. Separates legacy opens, estimated external browsers, button attempts, successful copies, agent fetches and account outcomes. Does not mark read. Browser estimates are not people; owner/test events are excluded. Optional from/to are ISO timestamps.", {"relayId": {"type": "string", "minLength": 1}, "from": {"type": "string"}, "to": {"type": "string"}}, ["relayId"], { full: true, readOnly: true }),
   relay_share_placement: directTool("Create an attributed URL for an existing share link. This sends nothing. Use separate placements for X replies and internal previews; test=true excludes that placement from acquisition. Reuse the same idempotency key on retries.", {"relayId": {"type": "string", "minLength": 1}, "idempotencyKey": {"type": "string", "minLength": 8}, "label": {"type": "string", "maxLength": 120}, "source": {"type": "string", "enum": ["x", "relay", "internal", "other"]}, "postId": {"type": "string", "pattern": "^[0-9]{1,30}$"}, "test": {"type": "boolean"}}, ["relayId", "idempotencyKey", "label", "source"], { full: true, readOnly: false }),
   relay_share_snapshot: directTool("Save a manually observed X analytics snapshot for an X placement. Keep X aggregate impressions and link clicks separate from Relay visits; never infer unique people or subtract guessed self clicks.", {"relayId": {"type": "string", "minLength": 1}, "placementId": {"type": "string"}, "observedAt": {"type": "string"}, "impressions": {"type": "integer", "minimum": 0}, "linkClicks": {"type": "integer", "minimum": 0}}, ["relayId", "placementId", "observedAt", "impressions", "linkClicks"], { full: true, readOnly: false }),

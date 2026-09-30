@@ -957,15 +957,14 @@ test("agents can quote explicitly but cannot name threads", () => {
 });
 
 
-test("Tasks stay in human conversation while Todo indexes every managed Relay and Task", () => {
+test("Tasks stay in human conversation", () => {
   // The board uses the relay anatomy (Sven's audit: .tb-title hardcoded ink
   // and tap-navigates-to-reader made tasks feel like a different app): the
   // shared title component with the read/unread system, preview when folded,
   // and the same interaction as every bubble — tap unfolds in place.
   assert.doesNotMatch(html, /tb-title/);
   assert.match(html, /\.tb-row\.unread \.th-title \{ color:var\(--ink\); font-weight:500; \}/);
-  assert.match(html, /TODO_STATUS_ORDER = \["triage", "backlog", "todo", "in_progress", "done", "canceled", "duplicate"\]/);
-  assert.match(html, /item\.kind === "task" \? "Task" : rawTitle \? "Relay" : "Text"/, "typed texts sit on the board as texts");
+
   // The request ROOT is visible in the person's chat, labelled as a Task;
   // progress and execution controls remain on the board/reader. The terminal
   // completion Relay also returns to chat with both documents intact.
@@ -977,16 +976,12 @@ test("Tasks stay in human conversation while Todo indexes every managed Relay an
   assert.match(html, /m\.request \? "tasks" : "threads"/);
   // The dock's composer never clips: inputs must be allowed to shrink.
   assert.match(html, /\.qr textarea \{ flex:1 1 auto; min-width:0;/); // the capsule IS the field (autosizing textarea)
-  // Group membership is the status: status names live in section heads and
-  // the filter rail, not repeated as chips on every row.
-  assert.match(html, /function todoGroupHtml\(group\)/);
-  assert.match(html, /data-todo-group="\$\{esc\(status\)\}"/);
   assert.doesNotMatch(html, /tb-status/);
   // A folded task row is EXACTLY a list row: disc, name + time, serif title,
   // one quiet control. Topic and brief appear only on unfold; no preview line
   // ("disk, davids name, the thread name, the task summary and the task in
   // full detail" — Sven counting the noise).
-  assert.match(html, /function requestRowHtml|renderTasksBoard/); // the board renders rows; topic chip retired
+
   assert.doesNotMatch(html, /bodyPreview\(r\.forHuman \|\| "", title, 72\)/);
   // Title-less 1:1 conversations are named the person, plain — no suffix.
   assert.doesNotMatch(html, /\$\{t\.party\} · direct/);
@@ -1034,11 +1029,7 @@ test("opening a conversation reads ALL of it — never a per-message click", () 
   assert.match(html, /if \(m\.unread\) \{/);
   assert.match(html, /const raw = \(payload\.relays \|\| \[\]\)\.find\(\(row\) => String\(row\.id\) === String\(id\)\);/);
   assert.match(html, /if \(raw\) raw\.unread = false;/);
-  // Tasks follow the letter rule too: unfolding reads, and ACTING certainly
-  // does — a parked task must never stay bold (Sven).
-  assert.match(html, /if \(projected\?\.unread\) \{/);
-  assert.match(html, /projected\.unread = false;/);
-  assert.match(html, /persistReadIds\(\[id\], \{ afterPaint:true \}\)/);
+
   // The clock sits in a reserved bottom corner. A full last line makes room
   // underneath; it never shares the text's painted area.
   assert.match(html, /\.th-text-content \.th-blk-time \{ position:absolute; bottom:0; right:0; margin:0; \}/);
@@ -1086,9 +1077,6 @@ test("handoffs retain conversation context while a picker choice makes no delive
   // The B-rule: the conversation owns the agent thread. First hand-off starts
   // the agent on it; later ones continue that same chat — never "current
   // chat"/"new chat" vocabulary, which failed every first-timer it met.
-  assert.match(html, /const handedThreads = new Map\(\)/);
-  // Any real hand-off marks the conversation (current or fresh, never preview).
-  assert.match(html, /source !== "sent" && mode === "fresh"/);
   // The header-name sheet is GONE ("no one will see it" — Sven).
   assert.doesNotMatch(html, /convSheet/);
   // The redundant Talk/Reply mode button is gone. The visible document owns

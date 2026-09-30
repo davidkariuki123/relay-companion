@@ -163,7 +163,7 @@ test("a room quotes the Topic post a Relay answers, from the server's snapshot, 
   for (const carrier of [
     'inReplyToTopicPost: packet.inReplyToTopicPost || null,',
     'inReplyToTopicPost: p.inReplyToTopicPost && typeof p.inReplyToTopicPost === "object" ? p.inReplyToTopicPost : null,',
-    'inReplyToTopicPost: packet.inReplyToTopicPost || local.inReplyToTopicPost || null,',
+
     'r.inReplyToTopicPost ? r.inReplyToTopicPost.postId : "",',
   ]) assert.ok(main.includes(carrier), carrier);
 });
@@ -173,7 +173,7 @@ test("new posts reach an open board as an 'N new posts' pill, never by redrawing
   // Asks only for what is newer than the board, only while the board is on screen.
   assert.match(check, /if \(activeView !== "topics" \|\| document\.visibilityState === "hidden"\) return;/);
   // A post the board already shows (including the person's own, from any surface) is never counted twice.
-  assert.ok(check.includes("threadId: topicsState.openThreadId"));
+  assert.ok(check.includes("threadId, updatesOnly:true"));
   assert.ok(check.includes('!known.has(p.id + ":" + p.updatedAt)'));
   // Arrival repaints the pill alone: no renderTopics, so drafts and scroll stay put.
   assert.match(check, /paintTopicIncoming\(\);/);
@@ -187,7 +187,7 @@ test("new posts reach an open board as an 'N new posts' pill, never by redrawing
   assert.match(show, /topicCall\(window\.relay\.topicSeen, id\)/);
   assert.match(show, /if \(scrollEl\) scrollEl\.scrollTop = 0;/);
   // Triggers: a short timer, the quiet list refresh, and the window coming back.
-  assert.match(html, /setInterval\(\(\) => \{ if \(payload\.features\?\.topics === true\) checkTopicIncoming\(\); \}, 20_000\);/);
+  assert.match(html, /setInterval\(\(\) => \{ if \(payload\.features\?\.topics === true\) checkTopicIncoming\(\); \}, 5_000\);/);
   assert.match(html, /loadTopics\(\{ quiet:true \}\)\.then\(checkTopicIncoming\)/);
   assert.match(html, /document\.addEventListener\("visibilitychange", \(\) => \{ if \(payload\.features\?\.topics === true\) checkTopicIncoming\(\); \}\);/);
   // Opening, closing, or a fresh first page clears what was held.

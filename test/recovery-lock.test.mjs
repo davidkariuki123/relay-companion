@@ -106,6 +106,25 @@ test("concurrent reclaimers cannot delete the new lock generation", t => {
   winner.release();
 });
 
+test("a process stopped while resolving its own identity leaves no ownerless lock behind", t => {
+  const { root } = fixture(t), file = path.join(root, "transaction.lock");
+  const probes = [];
+  const lock = acquireCanonicalLock(file, { processIdentity(pid) {
+    // Windows starts PowerShell here, for seconds on a slow machine. Nothing may
+    // be on disk yet: a directory without an owner blocks every install, update
+    // and uninstall until the two-hour grace for incomplete records has passed.
+    probes.push({ pid, lockExists: fs.existsSync(file) });
+    return "identity-under-test";
+  } });
+  assert.deepEqual(probes, [{ pid: process.pid, lockExists: false }]);
+  assert.equal(read(path.join(file, "owner.json")).processIdentity, "identity-under-test");
+  lock.release();
+  assert.equal(fs.existsSync(file), false);
+  // The defect this prevents: an abandoned empty directory is not reclaimable.
+  fs.mkdirSync(file);
+  assert.throws(() => acquireCanonicalLock(file), /Another verified Relay install or update is already in progress/);
+});
+
 test("canonical journal recovery uses native process identity on the test host", async t => {
   const { homeDir } = fixture(t), layout = canonicalRuntimeLayout({ homeDir });
   write(layout.pointerPath, { schema: 1, active: false, state: "recovery-required", candidate: { version: "1.0.0" } });

@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repository": "davidkariuki123/relay",
-  "sourceSha": "11077b7f5738739140c44a9835197608990e2a92",
+  "sourceSha": "62343cd1d75ba4e0f5bdc516acea168d63c71b64",
   "files": {
     "packages/companion/bootstrap/application-bridge.cjs": "19fd2c791512a065dd2de165a34f92bb53fe1b3d",
     "packages/companion/bootstrap/application-handoff.cjs": "8fc7cda415432706ddc06fa6adf71bfcf2b78a33",
@@ -32,7 +32,7 @@
     "packages/companion/bootstrap/recovery-config.cjs": "65f28ce3bb1abc54e291f72be59567874f793a51",
     "packages/companion/bootstrap/recovery-install.cjs": "4e18811fceddde7df26b891294f418a25fd75da5",
     "packages/companion/bootstrap/recovery-intent.cjs": "df7bd236bfd8f430a5ff3bfbd641de84213eec2b",
-    "packages/companion/bootstrap/recovery-launcher.cjs": "47b8365d1244c7583fc87ee8846a85ec7d1d8ad8",
+    "packages/companion/bootstrap/recovery-launcher.cjs": "c20bd8f7756e848092611cfc47ab1b2c1802f3e4",
     "packages/companion/bootstrap/recovery-local.cjs": "f50ca7688973a1381b03dc6b21b54a7899643042",
     "packages/companion/bootstrap/recovery-monitor.cjs": "fb9d4f0b3cc4377bf5951a740de074278b3dd370",
     "packages/companion/bootstrap/recovery-policy.cjs": "4467ef2a9cdede15b9efa333ac38e8e45a0ce180",

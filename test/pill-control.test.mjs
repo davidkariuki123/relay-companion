@@ -45,3 +45,11 @@ test("waitForPillReady reports a timeout instead of claiming blind launch succes
   assert.equal(result.ok, false);
   assert.equal(result.reason, "pill_ready_timeout");
 });
+
+test('concurrent launches retain receipts for both callers', async () => {
+  const result = await waitForPillReady('first', {
+    readStatus: () => ({ ready: true, visible: true, dismissed: false,
+      reopenNonce: 'second', presentedReopens: ['first', 'second'] }),
+  });
+  assert.equal(result.ok, true);
+});

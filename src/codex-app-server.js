@@ -345,12 +345,6 @@ export async function withSharedCodexAppServer(fn, options = {}) {
   return fn(server.client, server);
 }
 
-export async function stopSharedCodexAppServer() {
-  if (!sharedServerPromise) return;
-  try { await (await sharedServerPromise).stop(); } catch {}
-  sharedServerPromise = null;
-}
-
 // Native app metadata/materialization still uses the native provider API.
 // Its binary is the same pinned one used by ACP; no separate CLI is needed.
 export function defaultCodexCommand() { return acpProviderBinary("codex"); }

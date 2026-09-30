@@ -112,8 +112,6 @@ test("retired claims never read snapshots or advance session state", () => {
   }
 });
 
-test("retired hooks stay silent regardless of the account feature row", () => {
-  for (const todo of [true, false]) {
-    assert.equal(claimAgentRelayHookContext("ignored", "ignored", { sessionId: "s", eventName: "UserPromptSubmit", todo }), null);
-  }
+test("retired hooks stay silent for a real session event", () => {
+  assert.equal(claimAgentRelayHookContext("ignored", "ignored", { sessionId: "s", eventName: "UserPromptSubmit" }), null);
 });

@@ -17,11 +17,14 @@ const bootstrap = fs.existsSync(path.join(repo, "bootstrap/application-release.c
 const release = require(path.join(bootstrap, "application-release.cjs"));
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const read = file => JSON.parse(fs.readFileSync(file, "utf8"));
+export const recoveryVersions = ["0.1.267", "0.1.326", "0.1.413", "0.1.440", "0.1.454", "0.1.490"];
+export const installerModes = ["fresh", "leftover", "same-version", ...recoveryVersions.flatMap(v => [`legacy-${v}`, `broken-${v}`])];
+const isRecovery = mode => mode.startsWith("legacy-") || mode.startsWith("broken-");
 
 export function validateInputs({ version, sourceSha, baseline, mode }) {
   assert.match(version || "", /^\d+\.\d+\.\d+$/);
   assert.match(sourceSha || "", /^[a-f0-9]{40}$/);
-  assert.ok(["fresh", "leftover", "same-version"].includes(mode), "Choose fresh, leftover or same-version mode");
+  assert.ok(installerModes.includes(mode), "Choose an explicitly supported installer scenario");
   if (mode === "leftover") {
     assert.match(baseline || "", /^\d+\.\d+\.\d+$/);
     const a = baseline.split(".").map(BigInt), b = version.split(".").map(BigInt);
@@ -52,6 +55,18 @@ export function verifyCandidate(candidate, manifest, platform) {
   assert.equal(candidate.runtimeSourceSha, manifest.runtime.sourceSha);
   assert.equal(candidate.channel || "stable", manifest.channel || "stable");
   if (manifest.publicSourceSha) assert.equal(candidate.packagingPublicSourceSha, manifest.publicSourceSha);
+}
+
+// A Dev pilot tester first moves their stock installation to Dev, and the
+// installer never silently retargets a Stable one. Switch with the stock
+// package's own command before any damage, then prove it did not self-update.
+export function selectStockChannel({ channel, cli, relayRoot, baselineVersion, runCommand = run }) {
+  if ((channel || "stable") !== "dev") return false;
+  runCommand(cli[0], [...cli.slice(1), "env", "dev"], { timeout: 60_000 });
+  assert.equal(read(path.join(relayRoot, "config.json")).updateChannel, "dev", "Stock relay env dev must select the Dev channel");
+  const pointer = path.join(relayRoot, "runtime/current.json");
+  if (fs.existsSync(pointer)) assert.equal(read(pointer).version, baselineVersion, "Baseline advanced after selecting Dev");
+  return true;
 }
 
 function run(command, args, options = {}) {
@@ -92,7 +107,7 @@ async function cdp(url) {
 }
 
 const domState = `(() => {
-  const e = document.querySelector('#install');
+  const e = document.querySelector('#install') || document.querySelector('#prepareAction');
   const r = e?.getBoundingClientRect();
   const notice = document.querySelector('.notice');
   return { text: document.body.innerText, notice: notice && !notice.hidden ? notice.innerText : '',
@@ -181,7 +196,57 @@ export async function main(inputs) {
     const target = inputs.candidateDirectory ? await retained() : await download(inputs.version, inputs.sourceSha, "candidate");
     proof.artifact = target.artifact; proof.runtime = target.manifest.runtime;
     record(inputs.candidateDirectory ? "exact-retained-receipt-and-dmg" : "signed-manifest-and-exact-dmg"); record("codesign-staple-and-gatekeeper-assessment");
-    if (inputs.mode !== "fresh") {
+    if (isRecovery(inputs.mode)) {
+      const version = inputs.mode.split("-").at(-1);
+      const baselineDirectory = path.join(work, "stock-baseline");
+      fs.mkdirSync(baselineDirectory);
+      const published = JSON.parse(run("npm", ["view", `relay-companion@${version}`, "dist", "--json"]));
+      const [packed] = JSON.parse(run("npm", ["pack", `relay-companion@${version}`, "--ignore-scripts", "--json"], { cwd: baselineDirectory }));
+      assert.equal(packed.integrity, published.integrity, "Starting package must match the published stock bytes");
+      run("npm", ["install", "--prefix", baselineDirectory, "--no-audit", "--no-fund", path.join(baselineDirectory, packed.filename)], { timeout: 10 * 60_000 });
+      const packageRoot = path.join(baselineDirectory, "node_modules/relay-companion");
+      const metadata = read(path.join(packageRoot, "package.json"));
+      assert.equal(metadata.version, version);
+      const bin = typeof metadata.bin === "string" ? metadata.bin : metadata.bin.relay;
+      run(process.execPath, [path.join(packageRoot, bin), "setup"], { timeout: 5 * 60_000 });
+      assert.ok(fs.existsSync(path.join(relayRoot, "config.json")), "Stock setup must actually create Relay state");
+      const pointer = path.join(relayRoot, "runtime/current.json");
+      if (fs.existsSync(pointer)) assert.equal(read(pointer).version, version, "Baseline silently advanced before the recovery test");
+      proof.startingPackage = { version, integrity: packed.integrity };
+      const labels = ["work.relay.companion", "work.relay.companion.pill"];
+      const baselineDeadline = Date.now() + 60_000;
+      let servicesRunning = false;
+      while (Date.now() < baselineDeadline) {
+        servicesRunning = labels.every(label => {
+          const status = spawnSync("/bin/launchctl", ["print", `gui/${process.getuid()}/${label}`], { encoding: "utf8", timeout: 5000 });
+          return status.status === 0 && /state = running/.test(status.stdout);
+        });
+        if (servicesRunning) break;
+        await sleep(1000);
+      }
+      assert.ok(servicesRunning, "Stock baseline services must start before testing recovery");
+      record("stock-legacy-installation");
+      record("stock-baseline-services-running");
+      if (selectStockChannel({ channel: target.candidate.channel, cli: [process.execPath, path.join(packageRoot, bin)],
+        relayRoot, baselineVersion: version })) record("stock-baseline-dev-channel");
+      if (inputs.mode.startsWith("broken-")) {
+        // Stop registrations through the OS, without modifying package code.
+        for (const label of ["work.relay.companion", "work.relay.companion.pill", "work.relay.companion.recovery"]) {
+          spawnSync("/bin/launchctl", ["bootout", `gui/${process.getuid()}/${label}`], { timeout: 15_000 });
+        }
+        fs.mkdirSync(path.dirname(pointer), { recursive: true });
+        const condition = {
+          "0.1.267": "missing-service", "0.1.326": "corrupt-config", "0.1.413": "missing-launchd",
+          "0.1.440": "stalled-activation", "0.1.454": "corrupt-pointer", "0.1.490": "recovery-required",
+        }[version];
+        if (condition === "corrupt-config") fs.writeFileSync(path.join(relayRoot, "config.json"), "{");
+        if (condition === "corrupt-pointer") fs.writeFileSync(pointer, "{");
+        if (["stalled-activation", "recovery-required"].includes(condition)) fs.writeFileSync(pointer, JSON.stringify({ schema: 1, active: false, state: condition === "stalled-activation" ? "activating" : "recovery-required", version }));
+        if (condition === "missing-launchd") fs.rmSync(path.join(os.homedir(), "Library/LaunchAgents/work.relay.companion.plist"), { force: true });
+        proof.brokenCondition = condition;
+        record("broken-installation-fixture");
+      }
+    } else if (inputs.mode !== "fresh") {
       const baseline = inputs.mode === "same-version" ? target : await download(inputs.baseline, null, "baseline");
       run("/usr/bin/ditto", [baseline.app, destination]);
       run("/usr/bin/codesign", ["--verify", "--deep", "--strict", destination]);
@@ -200,13 +265,15 @@ export async function main(inputs) {
       delete appEnv[name]; run("/bin/launchctl", ["unsetenv", name]);
     }
     run("/bin/launchctl", ["setenv", "PATH", appEnv.PATH]);
-    assert.equal(fs.existsSync(path.join(relayRoot, "runtime/current.json")), false);
-    assert.equal(fs.existsSync(path.join(relayRoot, "recovery")), false);
+    if (!isRecovery(inputs.mode)) {
+      assert.equal(fs.existsSync(path.join(relayRoot, "runtime/current.json")), false);
+      assert.equal(fs.existsSync(path.join(relayRoot, "recovery")), false);
+    }
     const port = 19347;
     phase = "open-installer-ui";
     run("/usr/bin/open", ["-n", "-a", target.app, "--args", `--remote-debugging-port=${port}`], { env: appEnv });
     const openedAt = Date.now(), deadline = openedAt + 8 * 60_000;
-    let clicked = false, firstHeartbeat;
+    let clicked = false, setupClicked = false, firstHeartbeat;
     while (Date.now() < deadline) {
       const page = await installerPage(port);
       if (page) {
@@ -229,6 +296,9 @@ export async function main(inputs) {
               clicked = true; phase = "relocate-and-activate"; record("install-button-input-sent");
             });
           }
+          if (clicked && !setupClicked && state?.button && page.url.endsWith("native-bootstrap.html")) {
+            await clickInstallButton(client, state.button, () => { setupClicked = true; record("setup-button-input-sent"); });
+          }
         } catch (error) {
           if (error.installerFailure) throw error;
           // Moving the app closes its renderer. Poll the relaunched app and
@@ -237,8 +307,9 @@ export async function main(inputs) {
         } finally { client?.close(); }
       }
       if (clicked && fs.existsSync(path.join(relayRoot, "runtime/current.json"))) {
-        const current = read(path.join(relayRoot, "runtime/current.json"));
-        const journal = read(path.join(relayRoot, "application-migration.json"));
+        let current, journal;
+        try { current = read(path.join(relayRoot, "runtime/current.json")); journal = read(path.join(relayRoot, "application-migration.json")); }
+        catch { await sleep(1500); continue; }
         if (current.active && journal.state === "complete") {
           assert.equal(current.version, target.manifest.runtime.version);
           assert.equal(current.releaseId, journal.releaseId);
@@ -262,6 +333,10 @@ export async function main(inputs) {
                 "The active runtime must use the installer-owned Node bytes");
               record("relocated-stock-signed-app"); record("exact-active-runtime-and-complete-journal");
               record("native-ownership-and-live-services"); record("advancing-daemon-heartbeat");
+              if (isRecovery(inputs.mode)) {
+                assert.equal(read(path.join(relayRoot, "runtime/installer-recovery.json")).state, "complete");
+                record("installer-recovery-complete");
+              }
               proof.ok = true; return proof;
             }
           }

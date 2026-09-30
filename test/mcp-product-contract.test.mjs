@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-import { TODO_STATUS_RULE, RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS, STARTUP_INSTRUCTIONS_BUDGET, STARTUP_INSTRUCTIONS_RESERVE, SESSION_CHECKIN_AUDIT, TOOLS, startupInstructionsFor, toolsForAccount } from "../src/mcp.js";
+import { RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS, STARTUP_INSTRUCTIONS_BUDGET, STARTUP_INSTRUCTIONS_RESERVE, SESSION_CHECKIN_AUDIT, TOOLS, startupInstructionsFor, toolsForAccount } from "../src/mcp.js";
 
 const byName = new Map(TOOLS.map((tool) => [tool.name, tool]));
 const codexByName = new Map(toolsForAccount(
@@ -22,9 +22,6 @@ const EXPECTED_TOOLS = [
   "relay_task_start",
   "relay_task_complete",
   "relay_task_unclaim",
-  "relay_todo_update",
-  "relay_todo_visibility",
-  "relay_todo_reorder",
   "relay_topics_list",
   "relay_topic_fetch",
   "relay_topic_post",
@@ -335,16 +332,13 @@ test("model-facing Relay product language calls work Tasks, never Requests", asy
   }
   const pill = await readFile(new URL("../overlay/inbox.html", import.meta.url), "utf8");
   // Requests now names messages from people outside Contacts. Work retains
-  // the Task/Todo vocabulary in its navigation, badges and empty states.
+  // the Task vocabulary in its navigation, badges and empty states.
   for (const retired of [/data-view="tasks">Requests</i, /No requests yet/i, /Untitled request/i, /What requests may do/i, /kchip">Request</i]) {
     assert.doesNotMatch(pill, retired);
   }
-  assert.match(pill, /data-view="tasks">Todo/);
+  assert.doesNotMatch(pill, /data-view="tasks"/, "the Todo tab is removed");
   assert.match(pill, /Relays from senders outside your Contacts/);
   assert.doesNotMatch(pill, /Backlog/);
-  for (const status of ["Needs attention", "Todo", "In Progress", "Done", "Canceled", "Duplicate"]) {
-    assert.match(pill, new RegExp(status));
-  }
 });
 
 test("a link is what an unresolvable recipient turns into, in both instruction strings and the tool itself", () => {
@@ -376,67 +370,45 @@ test("a link is what an unresolvable recipient turns into, in both instruction s
 });
 
 
-test("agent teaching uses the current Todo vocabulary everywhere", async () => {
+test("agent teaching never says backlog", async () => {
   assert.doesNotMatch(JSON.stringify(TOOLS), /backlog/i);
   assert.doesNotMatch(RELAY_MCP_INSTRUCTIONS, /backlog/i);
   assert.doesNotMatch(skillGuide, /backlog/i);
   for (const file of [
-    "../src/todo-steward.js",
     "../src/agent-relay-context.cjs",
     "../src/agent-instructions.js",
     "../../shared/src/agent-guide.ts",
     "../../../apps/api/src/mcp/contract.ts",
     "../../../apps/web/public/llm_guide.md",
-    "../../../docs/RELAY_TODO_STEWARD_2026-09-02.md",
-    "../../../docs/RELAY_TODO_PRIORITIZATION_AUDIT_2026-09-08.md",
   ]) {
     assert.doesNotMatch(await readFile(new URL(file, import.meta.url), "utf8"), /backlog/i, file);
   }
-  for (const name of ["relay_todo_update", "relay_todo_reorder"]) {
-    assert.deepEqual(byName.get(name).inputSchema.properties.status.enum, name === "relay_todo_update" ? ["triage", "in_progress", "done", "canceled"] : ["triage", "in_progress", "done"]);
-  }
-  assert.deepEqual(byName.get("relay_inbox_list").inputSchema.properties.todoStatuses.items.enum, ["triage", "in_progress", "done"]);
 });
 
-// THE TODO RULE (David, 2026-09-08). Before this, no interactive session had
-// ever moved a Todo item: the always-on text named only the Task tools and the
-// status tool sat deferred behind a description that read as a prohibition.
-test("startup instructions omit paused Todo while its retained tool definition stays documented", () => {
-  assert.match(TODO_STATUS_RULE, /act on an inbound titled Relay, set it in_progress with relay_todo_update before starting and done when finished/);
-  for (const instructions of [RELAY_MCP_INSTRUCTIONS]) {
-    assert.doesNotMatch(instructions, /relay_todo_update|todoStatuses/);
+test("the removed Todo feature is absent from startup instructions and the whole catalog", () => {
+  for (const instructions of [RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS]) {
+    assert.doesNotMatch(instructions, /relay_todo_|todoStatuses|Todo/);
   }
+  assert.ok(!TOOLS.some((tool) => tool.name.startsWith("relay_todo_")));
+  assert.doesNotMatch(JSON.stringify(TOOLS), /relay_todo_|todoStatus|todoVersion|Todo/);
   for (const instructions of [RELAY_MCP_INSTRUCTIONS, REQUESTS_DISABLED_INSTRUCTIONS]) {
     assert.ok(Buffer.byteLength(instructions, "utf8") <= 2_048, "every variant stays under the always-on byte budget");
   }
-  // The requests-disabled profile is the staging/production one. Todo is off in
-  // productFeatures there, the overlay hides its tab, and the relay_todo_* tools
-  // have left the catalog, so teaching the rule aimed a production session at a
-  // tool it cannot see.
-  assert.doesNotMatch(REQUESTS_DISABLED_INSTRUCTIONS, /relay_todo_update|todoStatuses/);
-  const update = byName.get("relay_todo_update");
-  assert.match(update.description, /^Set the workflow status of one exact Relay or Task\. The rule: when the human has you act on an inbound titled Relay in this session, set in_progress before substantive work and done, with a note, when that work is genuinely finished\./);
-  assert.match(update.description, /an opened item and a Todo listing both carry todoStatus and todoVersion/);
-  assert.match(update.description, /on a version conflict the error names the current version/);
-  assert.doesNotMatch(update.description, /only when the human instructed it/);
-  assert.match(byName.get("relay_inbox_list").description, /Opened items and Todo listings both carry todoStatus and todoVersion/);
+
 });
 
-test("Todo workflow teaching stays absent from every skill and the public guide while paused", async () => {
-  const { RELAY_TODO_WORKFLOW_GUIDE } = await import('../../shared/dist/agent-guide.js');
+test("the removed Todo workflow is absent from every skill and the public guide", async () => {
+  const skillSource = await readFile(new URL('../skill/SKILL.src.md',import.meta.url),'utf8');
   const devSkill = await readFile(new URL('../skill/variants/SKILL.dev.md',import.meta.url),'utf8');
   const skill = await readFile(new URL('../skill/relay/SKILL.md',import.meta.url),'utf8');
   const guide = await readFile(new URL('../../../apps/web/public/llm_guide.md',import.meta.url),'utf8');
-  assert.ok(RELAY_TODO_WORKFLOW_GUIDE?.length > 0);
-  const start='<!-- BEGIN GENERATED RELAY TODO WORKFLOW -->\n';
-  const end='\n<!-- END GENERATED RELAY TODO WORKFLOW -->';
-  // Whole and verbatim where Todo exists.
-  assert.ok(!devSkill.includes(RELAY_TODO_WORKFLOW_GUIDE));
-  // Absent, with its markers, where it does not. llm_guide.md is fetched signed
-  // out from the production site, so it can only describe the production product.
-  for (const [label, rendered] of [["dev skill", devSkill], ["production skill", skill], ["public guide", guide]]) {
-    assert.ok(!rendered.includes(RELAY_TODO_WORKFLOW_GUIDE), `${label} must not carry the Todo workflow`);
-    assert.ok(!rendered.includes(start.trim()), `${label} must not carry its section markers`);
+  // The guide's changelog is history and names the tools it records removing.
+  const changelogAt = guide.indexOf('### Changelog');
+  assert.ok(changelogAt > 0);
+  const liveGuide = guide.slice(0, changelogAt);
+  for (const [label, rendered] of [["skill source", skillSource], ["dev skill", devSkill], ["production skill", skill], ["public guide", liveGuide]]) {
+    assert.ok(!rendered.includes('Keep Todo aligned with work'), `${label} must not carry the Todo workflow`);
+    assert.ok(!rendered.includes('GENERATED RELAY TODO WORKFLOW'), `${label} must not carry its section markers`);
     assert.ok(!rendered.includes('relay_todo_update'), `${label} must not name a Todo tool`);
   }
   assert.match(skill.split('---')[1],/act on a received Relay or continue that work/);

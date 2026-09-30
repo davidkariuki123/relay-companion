@@ -102,7 +102,7 @@ test("provider routes never inherit another provider's model or historical trans
   assert.match(start, /host === "codex" && \/\^claude-\/i\.test\(requestedModel\)/);
   assert.match(start, /host === "claude" && \/\^gpt-\/i\.test\(requestedModel\)/);
 
-  const localIpc = between(main, 'ipcMain.handle("relay:agentHandoff"', 'ipcMain.handle("relay:chatAgentWorkStop"');
+  const localIpc = between(main, 'ipcMain.handle("relay:agentHandoff"', "// The session face's feed and its Steer verb.");
   assert.match(localIpc, /model: \(route && route\.model\) \|\| ""/);
 
   const preview = between(main, "async function previewTaskSession", "const providerCompletionInflight");

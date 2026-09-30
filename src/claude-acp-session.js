@@ -22,7 +22,6 @@ async function launch({ sessionId, cwd = os.homedir(), title = "Relay Task", con
   worker.closedPromise = worker.done;
   return { mode: "acp", sessionId: worker.sessionId, desktopSessionId: `local_${worker.sessionId}`, sessionPath: worker.sessionPath, cwd: path.resolve(cwd), title, model, effort, permissionMode };
 }
-export const createClaudeAcpSession = launch;
 export async function continueClaudeAcpSession(options) {
   if (!options.sessionId) throw new Error("Claude session id is required");
   const worker = acpWorker(options.sessionId);
@@ -43,10 +42,4 @@ export function claudeAcpWorkSnapshot(sessionId) {
   const worker = acpWorker(sessionId);
   if (!worker) return null;
   return { sessionId, transcriptPath: worker.sessionPath, ownerAlive: !worker.closed, expectedActive: !worker.settled, settled: worker.settled, events: structuredClone(worker.events) };
-}
-export async function waitForClaudeAcpMaterialization(sessionId) {
-  const worker = acpWorker(sessionId);
-  if (!worker) return null;
-  if (!worker.closed) throw new Error("Claude Code is still working. Open becomes available after this run settles.");
-  return worker.materializedPromise;
 }

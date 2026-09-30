@@ -62,9 +62,6 @@ function productFeatures(options = {}) {
     // sessions) the daemon polls and relay_task_create drives. Its routes
     // stay behind the developer gate on the server.
     legacyTaskProtocol: developer,
-    // Todo is paused everywhere, including local/dev developer accounts.
-    // Keep its data and implementation available for a later re-enable.
-    todo: false,
     // Topics (invite-only boards kept in sync by members' agents under an
     // approved mandate) are being proven by the developers first.
     topics: developer,

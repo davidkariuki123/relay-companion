@@ -7,7 +7,7 @@ import { LOCAL_MAX_BYTES, LOCAL_TOOL_TIMEOUT_MS, localDescriptorPath, localEndpo
 import outboxModule from "./outbox.cjs";
 import { relayReferencePrompt } from "./session-delivery.js";
 
-// The daemon owns the credential, encrypted client and durable outgoing queue.
+// The daemon owns the credential, client and durable outgoing queue.
 // MCP and command clients share RelayClient operations, not transport framing.
 export function createAgentDispatcher({ client, outboxFile, listDestinations, deliver, accountId }) {
   let toolSurface;
@@ -51,7 +51,7 @@ export function createAgentDispatcher({ client, outboxFile, listDestinations, de
     if (!allowed(method, route)) throw Object.assign(new Error("This operation is not part of the Relay agent protocol."), { code: "local_route_unavailable", status: 404 });
     if (method === "GET") {
       if (url.pathname === "/v1/me") return client.me();
-      if (url.pathname === "/v1/inbox") return client.inbox();
+      if (url.pathname === "/v1/inbox") return client.inbox({}, { clientName: "relay-agent-protocol" });
       if (url.pathname === "/v1/sent") return client.sent();
       if (url.pathname === "/v1/contacts/search") return client.searchContacts(url.searchParams.get("q") || "");
       if (url.pathname === "/v1/contact-groups") return client.groups();
@@ -60,19 +60,8 @@ export function createAgentDispatcher({ client, outboxFile, listDestinations, de
         const page = Object.fromEntries(["limit", "beforeCursor", "afterCursor"].filter((key) => url.searchParams.has(key)).map((key) => [key, url.searchParams.get(key)]));
         return client.chat(parts[3], page);
       }
-      if (parts[2] === "threads") {
-        if (/^(erelay_|egmsg_)/.test(parts[3])) return client.chatForThread(parts[3]);
-        return client.thread(parts[3]);
-      }
-      if (parts[2] === "relays" && parts[4] === "attachments") {
-        if (/^(erelay_|egmsg_)/.test(parts[3])) {
-          const fetched = await client.fetchRelay(parts[3]);
-          const attachment = fetched.packet?.attachments?.find((item) => item.id === parts[5]);
-          if (!attachment?.localPath) throw new Error("This attachment is unavailable on this device.");
-          return { attachmentId: parts[5], localPath: attachment.localPath, name: attachment.name, contentType: attachment.contentType };
-        }
-        return client.attachmentDownloadUrl(parts[3], parts[5]);
-      }
+      if (parts[2] === "threads") return client.thread(parts[3]);
+      if (parts[2] === "relays" && parts[4] === "attachments") return client.attachmentDownloadUrl(parts[3], parts[5]);
       if (parts[2] === "relays") return client.fetchRelay(parts[3]);
       if (parts[2] === "share-links") return client.shareLinkStatus(parts[3]);
     }

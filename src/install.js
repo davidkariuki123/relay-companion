@@ -1,3 +1,4 @@
+import { reloadMacLaunchAgent } from "./mac-launch-agent.js";
 import { spawn, spawnSync } from "node:child_process";
 import {
   claudeDesktopConfigDirs,
@@ -83,12 +84,6 @@ function packageRootForBin(bin = relayBinPath(), platform = process.platform) {
 // Prefer a well-known public symlink that currently resolves to the SAME runtime (it
 // follows future upgrades); fall back to execPath when none matches.
 const VERSION_MANAGED_NODE_RE = /[\\/](Cellar[\\/]node|\.nvm[\\/]versions|\.n[\\/]versions|\.fnm|fnm[\\/]|\.volta|\.hermes[\\/]node)[\\/]/i;
-export function relayNodeVersionSupported(version) {
-  const match = /^(\d+)\.(\d+)\.(\d+)/.exec(String(version || "").trim());
-  if (!match) return false;
-  const [, major, minor] = match.map(Number);
-  return major > 22 || (major === 22 && minor >= 12);
-}
 
 export function compatibleNodeRuntime(executable, { runCommand = spawnSync } = {}) {
   return verifyNode(executable, { run: runCommand }).ok;
@@ -2421,9 +2416,8 @@ ${daemonArgs.map((argument) => `    <string>${plistEscape(argument)}</string>`).
 `;
   fs.writeFileSync(plistPath, plist);
   if (!reload) return { ok: true, plistPath, logPath, started: false };
-  runCommand("launchctl", ["unload", plistPath]); // ignore if not loaded
-  const res = runCommand("launchctl", ["load", plistPath]);
-  return { ok: res.ok, plistPath, logPath, started: res.ok };
+  const res = reloadMacLaunchAgent({ label: DAEMON_LAUNCH_LABEL, plistPath, runCommand });
+  return { ...res, plistPath, logPath, started: res.ok };
 }
 
 /** Install + load a launchd agent that starts the visible Relay pill (macOS). */
@@ -2551,10 +2545,9 @@ ${pillArgs.map((argument) => `    <string>${plistEscape(argument)}</string>`).jo
       started: false,
     };
   }
-  runCommand("launchctl", ["unload", plistPath]); // ignore if not loaded
-  const res = runCommand("launchctl", ["load", plistPath]);
+  const res = reloadMacLaunchAgent({ label: PILL_LAUNCH_LABEL, plistPath, runCommand });
   return {
-    ok: res.ok,
+    ...res,
     plistPath,
     logPath,
     electronPath,
@@ -3274,10 +3267,6 @@ export function windowsAutostartTaskStatus({ platform = process.platform, runCom
   return { missing, unavailable };
 }
 
-export function missingWindowsAutostartTasks(options = {}) {
-  return windowsAutostartTaskStatus(options).missing;
-}
-
 /**
  * Re-register any Windows autostart task that has gone missing. Safe to call on
  * every daemon boot: it queries first and does nothing in the overwhelmingly
@@ -3406,9 +3395,11 @@ export function repairDesktopSurfaces({
  * uninstall remove. A live daemon actively reverses an uninstall.
  */
 export const WINDOWS_STOP_RELAY_SERVICES_PS = [
-  "$find={ @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {",
+  "$ErrorActionPreference='Stop';",
+  "$relaySid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value;",
+  "$find={ @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {",
   "  $_.ProcessId -ne $PID -and $_.CommandLine -and ($_.CommandLine -match '[\\\\/]relay-companion[\\\\/]') -and (($_.CommandLine -match '[\\\\/]relay\\.js.*\\bdaemon\\b') -or ($_.CommandLine -match '[\\\\/]overlay[\\\\/]main\\.cjs') -or ($_.CommandLine -match '[\\\\/]mcp-broker-entry\\.js') -or ($_.CommandLine -match '[\\\\/]relay\\.js.*(?:\\s|\")mcp(?:\\s|\"|$)'))",
-  "}) }; $p=&$find; for($i=0;$i -lt 3 -and $p.Count;$i++){ foreach($x in $p){ try { Invoke-CimMethod -InputObject $x -MethodName Terminate -ErrorAction Stop | Out-Null } catch {} }; Start-Sleep -Milliseconds 150; $p=&$find }; if($p.Count){ Write-Error ('Relay processes did not stop: '+(($p | ForEach-Object ProcessId) -join ', ')); exit 1 }",
+  "} | Where-Object { $relayOwner=Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid -ErrorAction Stop; $relayOwner.Sid -eq $relaySid }) }; $p=&$find; for($i=0;$i -lt 3 -and $p.Count;$i++){ foreach($x in $p){ try { Invoke-CimMethod -InputObject $x -MethodName Terminate -ErrorAction Stop | Out-Null } catch {} }; Start-Sleep -Milliseconds 150; $p=&$find }; if($p.Count){ Write-Error ('Relay processes did not stop: '+(($p | ForEach-Object ProcessId) -join ', ')); exit 1 }",
 ].join(" ");
 
 /**
@@ -3817,6 +3808,9 @@ export function runUninstall({
   runCommand = run,
   attempts = UNINSTALL_RETRY_ATTEMPTS,
   sleep = blockingPause,
+  // Installer recovery: the native Windows package owns Relay.lnk (NSIS writes
+  // its shortcut at the same path) and setup never recreates it for that owner.
+  keepWindowsShortcut = false,
 } = {}) {
   const lease = lifecycleOwnership({ homeDir, env });
   try {
@@ -3929,7 +3923,7 @@ export function runUninstall({
       record(`windows_launcher_${taskName}`, `Windows launcher ${taskName}`, () => removeOwnedPath(launcherPath));
     }
     // The Start Menu entry is the Windows counterpart to Relay.app above.
-    record("windows_shortcut", "Relay's Start Menu shortcut", () => removeOwnedPath(windowsStartMenuShortcutPath(env, homeDir)));
+    if (!keepWindowsShortcut) record("windows_shortcut", "Relay's Start Menu shortcut", () => removeOwnedPath(windowsStartMenuShortcutPath(env, homeDir)));
   } else if (platform === "linux") {
     const paths = linuxDesktopPaths({ homeDir, env });
     record("linux_mime", "Relay's Linux protocol registration", () => removeLinuxRelayMimeDefaults({ homeDir, env }));
@@ -4268,16 +4262,4 @@ export function removeClaudeDesktopMcpConfig({ env = process.env, name = "relay"
     }
   }
   return { ok: failures.length === 0, removedFrom, failures };
-}
-
-/**
- * Claude Desktop can be centrally disallowed from running user-added stdio
- * servers. Writing a config that will never load, and calling it success, is the
- * failure mode this whole change exists to remove — so check first and say so.
- */
-export function claudeDesktopLocalMcpDisabled({ platform = process.platform } = {}) {
-  if (platform !== "darwin") return false;
-  const res = run("defaults", ["read", "com.anthropic.claudefordesktop", "isLocalDevMcpEnabled"]);
-  if (!res.ok) return false; // Unset: the default is enabled.
-  return /^\s*(0|false|no)\s*$/i.test(String(res.out || ""));
 }

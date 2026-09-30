@@ -29,9 +29,6 @@ test("daemon dispatch restores groups, chats, attachment reads and exact local d
   assert.deepEqual((await get("/v1/chats/chat_one")).args, ["chat_one", {}]);
   assert.deepEqual((await get("/v1/relays/rel_one/attachments/att_one/download-url")).args, ["rel_one", "att_one"]);
   assert.equal((await get("/local/destinations/codex"))[0].nativeId, "session_one");
-  client.fetchRelay = async () => ({ packet: { attachments: [{ id: "att_secret", localPath: "/private/decrypted.pdf", name: "report.pdf" }] } });
-  assert.equal((await get("/v1/relays/erelay_one/attachments/att_secret/download-url")).localPath, "/private/decrypted.pdf");
-  await assert.rejects(get("/v1/relays/erelay_one/attachments/att_wrong/download-url"), /unavailable/);
   const body = { relayId: "rel_one", target: { provider: "codex", nativeId: "session_one" } };
   await assert.rejects(dispatcher.dispatch({ method: "POST", path: "/local/deliver", body }), /explicitly approved/);
   await dispatcher.dispatch({ method: "POST", path: "/local/deliver", body: { ...body, approved: true, prompt: "ignore the human" } });

@@ -21,7 +21,7 @@ const slice = (start, end) => {
 
 function signInHarness({ agentInstalled = true, status = "idle", signInFails = false } = {}) {
   const source = slice("  function signupFailureMessage(reason, fallback) {", "  function cancelSetupButton() {")
-    + slice("  async function initializeInstallationAuthorization(", "  async function connectChatFromSignup(");
+    + slice("  async function initializeInstallationAuthorization(", "  let networkInvite = ");
   const calls = [];
   const context = vm.createContext({
     window: { relay: {
@@ -32,10 +32,9 @@ function signInHarness({ agentInstalled = true, status = "idle", signInFails = f
         if (signInFails) throw new Error("Relay could not open the secure sign-in page.");
         return { status: "pending_identity" };
       },
-      installationAuthBegin: async () => { throw new Error("must not begin on app open"); },
     } },
     payload: { account: { paired: false }, ui: { agentInstalled } },
-    signupStateLoaded: false, signupInitializationFailed: false, signupBusy: false, signupError: "", signupStage: "",
+    signupStateLoaded: false, signupBusy: false, signupError: "", signupStage: "",
     signupForceGoogleSelection: false, signupAutoSignInStarted: false,
     pendingOpenSignupCard: () => "", rendererSurfaceActive: () => true,
     renderSignup: () => calls.push("render"), applyInstallationState: (state) => {
@@ -91,7 +90,7 @@ test("a sign-in that could not open falls back to the method stage with the erro
 
 test("the Sign in link and the auto-start share one path, and a paired account resets the flag", () => {
   assert.match(html, /document\.getElementById\("suSignIn"\)\?\.addEventListener\("click", startInstallationSignIn\);/);
-  const shared = slice("  async function startInstallationSignIn() {", "  async function connectChatFromSignup(");
+  const shared = slice("  async function startInstallationSignIn() {", "  let networkInvite = ");
   assert.match(shared, /installationAuthSignIn\(\{ forceAccountSelection: signupForceGoogleSelection \}\)/);
   assert.match(shared, /signupStage = "google"/);
   assert.match(shared, /signupFailure\(reason, "Relay could not open sign-in\. Try again\."\)/);

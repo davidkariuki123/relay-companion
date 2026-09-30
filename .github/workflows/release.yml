@@ -96,6 +96,9 @@ jobs:
           test/pill-liveness.test.mjs
           test/application-handoff.test.mjs
           test/owned-node-runtime.test.mjs
+          test/mac-installer-node.test.mjs
+          test/application-install.test.mjs
+          test/application-recovery.test.mjs
           test/installation-health.test.mjs
 
   runtime:
@@ -132,10 +135,18 @@ jobs:
         run: node --test test/credential-store-darwin.integration.test.mjs
       - name: Prove daemon orchestration and readiness on this platform
         run: node --test --test-concurrency=2 test/daemon-robustness.test.mjs test/recovery-readiness.test.mjs test/recovery-probe.test.mjs test/lifecycle-ownership.test.mjs test/service-recovery.test.mjs test/recovery-handover.test.mjs test/mac-service-recovery.test.mjs test/recovery-runner.test.mjs test/recovery-structure.test.mjs
+      - name: Prove broker security, isolation and MCP parity on macOS and Windows
+        # Linux runs these in the identity job. macOS and Windows ran them in
+        # the private repository's hosted matrix until its budget ran out.
+        if: matrix.os == 'macos-14' || matrix.os == 'windows-latest'
+        run: node --test --test-concurrency=1 test/mcp-broker.test.mjs test/mcp-startup.test.mjs test/mcp-tools.test.mjs
       - name: Prove owned Node and recovery survive macOS shared-library relocation
         if: startsWith(matrix.platform, 'darwin-')
         run: >-
           node --test test/owned-node-runtime.test.mjs
+          test/mac-installer-node.test.mjs
+          test/application-install.test.mjs
+          test/application-recovery.test.mjs
           test/macos-node-bundle.test.mjs test/recovery-install.test.mjs
           test/recovery-launcher.test.mjs
       - name: Prove AppKit honors Relay's first-run tray ordering

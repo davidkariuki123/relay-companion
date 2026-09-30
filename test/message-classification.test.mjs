@@ -4,7 +4,7 @@ import { classificationArguments, classificationToolProperties } from "../src/me
 import { handleCall, toolsForAccount } from "../src/mcp.js";
 
 test("ordinary accounts can classify a Relay without acquiring Topic or Task capabilities", async () => {
-  const features = { requests: false, topics: false, todo: false, aiSessions: false, connectors: false, messageMutations: false };
+  const features = { requests: false, topics: false, aiSessions: false, connectors: false, messageMutations: false };
   const tools = toolsForAccount(features);
   const send = tools.find((tool) => tool.name === "relay_send");
   assert.deepEqual(send.inputSchema.properties.nature, classificationToolProperties.nature);

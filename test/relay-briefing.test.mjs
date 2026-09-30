@@ -382,7 +382,7 @@ test("the staged sent record carries shareLink, without which the seed's branch 
   assert.match(source, /shareLink: item\.shareLink \|\| existing\.shareLink \|\| null,/);
 });
 
-test("opening a Relay does not teach Todo while it is paused", () => {
+test("opening a Relay never teaches the removed Todo workflow", () => {
   const row = {
     id: "relay_todo_item",
     kind: "message",

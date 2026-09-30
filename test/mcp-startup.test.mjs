@@ -20,12 +20,10 @@ const relayBin = fileURLToPath(new URL("../bin/relay.js", import.meta.url));
 
 // ORDINARY_RELAY_TOOL_NAMES is the ordinary-messaging profile; these are the
 // members of it still gated to developer accounts on dev, so a production
-// session never sees them. Todo joined this list once its catalog gate existed:
-// productFeatures has always had it on the developer row and the Companion
-// overlay has always hidden its tab. Editing and deleting a sent message left
-// this list on 2026-09-17: they ship to every account, like sending.
+// session never sees them. Editing and deleting a sent message left this list
+// on 2026-09-17: they ship to every account, like sending.
 const PRODUCTION_ORDINARY_RELAY_TOOL_NAMES = new Set(ORDINARY_RELAY_TOOL_NAMES);
-for (const gated of ["relay_todo_update", "relay_todo_visibility", "relay_todo_reorder", "relay_topics_list", "relay_topic_fetch", "relay_topic_context", "relay_topic_threads", "relay_topic_edit", "relay_topic_post", "relay_topic_create", "relay_topic_invite", "relay_topic_member"]) {
+for (const gated of ["relay_topics_list", "relay_topic_fetch", "relay_topic_context", "relay_topic_threads", "relay_topic_edit", "relay_topic_post", "relay_topic_create", "relay_topic_invite", "relay_topic_member"]) {
   PRODUCTION_ORDINARY_RELAY_TOOL_NAMES.delete(gated);
 }
 // Organisation onboarding is internal staff work, so a session that is not
@@ -118,7 +116,7 @@ test("MCP initialize returns complete startup teachings before tools are selecte
   assert.equal(startupInstructionsFor({ requests: true, topics: true }), RELAY_MCP_INSTRUCTIONS);
   assert.equal(full.instructions, PRODUCTION_INSTRUCTIONS);
   assert.deepEqual(new Set(full.tools.map((tool) => tool.name)), PRODUCTION_ORDINARY_RELAY_TOOL_NAMES);
-  assert.doesNotMatch(full.instructions, /relay_todo_update|todoStatuses/);
+  assert.doesNotMatch(full.instructions, /relay_todo_|todoStatuses/);
   assert.deepEqual(Object.keys(full.tools.find((tool) => tool.name === "relay_inbox_list").inputSchema.properties), ["relayIds"]);
 });
 

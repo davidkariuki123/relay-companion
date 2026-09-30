@@ -58,7 +58,7 @@ test("Relay identity rows show the room and latest gist without shortening the r
 
   // Both inbound and sent readers still resolve the complete semantic title;
   // relayListGist is deliberately confined to the identity list.
-  const reader = between(inbox, "function renderReader()", "// ---------- the Tasks board:");
+  const reader = between(inbox, "function renderReader()", "// Grow the window as the user scrolls toward the end.");
   const sentReaderProjection = between(inbox, "function readerRow(id)", "const RX_PRIMARY");
   assert.match(reader, /const subject = chatOwnedWork && triggerRow[\s\S]*?: request \? [\s\S]*?relaySubject\(r\)/);
   assert.match(sentReaderProjection, /title: sentSubject\(sent\)/);
@@ -68,7 +68,7 @@ test("Relay identity rows show the room and latest gist without shortening the r
 
 test("both Relay documents render the complete document system", () => {
   const markdown = between(inbox, "function mdToHtml", "function readerParagraphs");
-  const reader = between(inbox, "function renderReader()", "// ---------- the Tasks board:");
+  const reader = between(inbox, "function renderReader()", "// Grow the window as the user scrolls toward the end.");
 
   assert.match(inbox, /:is\(\.rd-body,\.rd-agentcopy\) \.md-h/);
   assert.match(inbox, /:is\(\.rd-body,\.rd-agentcopy\) \.md-codeblock/);
@@ -220,7 +220,7 @@ test("the preview's privileged channels answer only the preview window", () => {
 });
 
 test("preview payload is an explicit allowlist and never exposes briefingMarkdown", () => {
-  const projector = between(main, "function previewPayloadForPacket", "// Find an approvalId");
+  const projector = between(main, "function previewPayloadForPacket", "// ---- click-to-open a Relay row");
   const returnedObject = projector.match(/return\s*\{([\s\S]*?)^\s{2}\};/m)?.[1] || "";
   assert.ok(returnedObject, "preview payload object is present");
 
@@ -264,7 +264,7 @@ test("a chat message opens IN its conversation, not on the reading face", () => 
   // Both projections decide the face; the sent one is the case that sent David
   // to a relay-shaped window for a one-word text he had just typed to Shane.
   const packet = between(main, "function previewPayloadForPacket", "function previewPayloadForSent");
-  const sent = between(main, "function previewPayloadForSent", "// Find an approvalId");
+  const sent = between(main, "function previewPayloadForSent", "// ---- click-to-open a Relay row");
   for (const projector of [packet, sent]) assert.match(projector, /openFace: openingFaceFor\(\{/);
   assert.match(main, /require\("\.\/message-face\.cjs"\)/);
   // A typed text is sent UNTITLED — titlelessness is the marker every surface
@@ -761,7 +761,7 @@ test("Settings exposes complete subscription connection management for Claude Co
 
 test("ordinary window focus survives reader refreshes and run retries invalidate stale polls", () => {
   const dress = between(inbox, "function dressComposer", "let readerSource");
-  const reader = between(inbox, "function renderReader", "// ---------- the Tasks board");
+  const reader = between(inbox, "function renderReader", "// Grow the window as the user scrolls toward the end.");
   assert.doesNotMatch(dress, /setFocusable/);
   assert.doesNotMatch(reader, /setFocusable/);
 });
@@ -782,7 +782,7 @@ test("the session face's state words never claim more than the machine knows", (
 });
 
 test("the agent folder has no human reply button and never crashes control wiring", () => {
-  const reader = between(inbox, "function renderReader()", "function renderTasksBoard()");
+  const reader = between(inbox, "function renderReader()", "// Grow the window as the user scrolls toward the end.");
   assert.match(reader, /const send = document\.getElementById\("qrSend"\)/);
   assert.match(reader, /const input = document\.getElementById\("qrInput"\)/);
   assert.match(reader, /if \(send && input\) \{[\s\S]*?send\.addEventListener\("click", doSend\);[\s\S]*?dressComposer\(input, doSend\);[\s\S]*?\}/);

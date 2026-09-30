@@ -614,26 +614,10 @@ export function stagePlainRelayItem(
     taskRosterCounts: item.taskRosterCounts || existing.taskRosterCounts || null,
     // Channel Task ownership is live projection state, not packet content.
     taskClaim: item.taskClaim || existing.taskClaim || null,
-    // Todo is an independent workflow projection. Persist it with the staged
-    // row so status changes made by a person or agent repaint the installed
-    // app without conflating workflow with read or Task-run state.
-    todoStatus: item.todoStatus || existing.todoStatus || null,
     // The sender-declared nature (event, decision, plan, finding, opinion,
     // question) travels with the packet so the reader can label the message.
     nature: item.nature || existing.nature || null,
     classification: item.classification ?? (item.editedAt && item.editedAt !== existing.editedAt ? null : existing.classification) ?? null,
-    todoVersion: Number.isInteger(item.todoVersion) ? item.todoVersion : (existing.todoVersion || null),
-    // A poll already in flight must not overwrite a newer removal or Undo.
-    todoRemoved: Number(item.todoVisibilityVersion ?? -1) >= Number(existing.todoVisibilityVersion ?? -1) ? item.todoRemoved === true : existing.todoRemoved === true,
-    todoVisibilityVersion: Math.max(Number(item.todoVisibilityVersion || 0), Number(existing.todoVisibilityVersion || 0)),
-    duplicateOfItemId: item.duplicateOfItemId || existing.duplicateOfItemId || null,
-    // The steward's reason rides with the row so the reader can show why an
-    // item sits where it does without another request.
-    attentionRank: Number.isInteger(item.attentionRank) ? item.attentionRank : (existing.attentionRank || null),
-    assessment: item.assessment || (Number.isInteger(item.todoVersion) && item.todoVersion !== existing.todoVersion ? null : existing.assessment) || null,
-    assessmentEvidence: Array.isArray(item.assessmentEvidence) ? item.assessmentEvidence : (existing.assessmentEvidence || []),
-    assessedAt: item.assessedAt || existing.assessedAt || null,
-    assessedBy: item.assessedBy || existing.assessedBy || null,
     // The completion species has to survive staging or the pill cannot tell an
     // agent's report from correspondence, and it lands in the chat with a
     // person (David, twice). packet.type is the sender's declared type.

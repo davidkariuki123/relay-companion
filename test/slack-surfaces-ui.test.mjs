@@ -11,14 +11,12 @@ const preload = source("../overlay/preload.cjs");
 const main = source("../overlay/main.cjs");
 const client = source("../src/client.js");
 
-test("Slack is a first-class tab after Tasks with its own list and unread badge", () => {
+test("Slack is a first-class tab after Relays with its own list and unread badge", () => {
   const nav = html.slice(html.indexOf('<nav class="tabs"'), html.indexOf("</nav>", html.indexOf('<nav class="tabs"')));
   const relayAt = nav.indexOf('data-view="relays"');
   const slackAt = nav.indexOf('data-view="slack"');
-  const tasksAt = nav.indexOf('data-view="tasks"');
   assert.ok(relayAt >= 0, "Relays tab is present");
-  assert.ok(tasksAt > relayAt, "Tasks follows Relays in the existing tab rail");
-  assert.ok(slackAt > tasksAt, "Slack follows Tasks");
+  assert.ok(slackAt > relayAt, "Slack follows Relays in the existing tab rail");
   assert.match(nav, /data-view="slack"[^>]*>[\s\S]*?Slack[\s\S]*?id="slackBadge"/);
   assert.match(html, /<section class="view hidden" id="slackView">[\s\S]*?id="slackList"[\s\S]*?<\/section>/);
 });

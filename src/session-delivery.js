@@ -16,7 +16,7 @@ import {
 } from "./codex-desktop.js";
 import { waitForCodexIdle, rolloutSize } from "./codex-inject.js";
 import { storeDir } from "./host-paths.js";
-import { discoverSessions, liveClaudeRegistrations } from "./session-directory.js";
+import { discoverSessions } from "./session-directory.js";
 import { sendClaudeSocket } from "./session-controller.js";
 import { startAcpRun, acpPermissionMode } from "./acp-session.js";
 import { acpMcpServers } from "./acp-client.js";
@@ -432,25 +432,6 @@ function claudeTranscriptFor(cwd, sessionId) {
   return path.join(os.homedir(), ".claude", "projects", String(cwd).replace(/[^a-zA-Z0-9]/g, "-"), `${sessionId}.jsonl`);
 }
 
-// The engine resumes a session by ID and keeps appending to the transcript
-// the forge created, wherever that lives; a cwd the row remembers may not even
-// exist (live, 2026-09-04: the check waited on a file never written and called
-// a turn that was already answering "didn't go in"). Prefer any candidate that
-// exists, then search every project folder for the session id.
-export function locateClaudeTranscript(sessionId, candidates = []) {
-  const sid = String(sessionId || "");
-  for (const c of candidates) { if (c && fs.existsSync(c)) return c; }
-  if (!sid) return "";
-  const root = path.join(os.homedir(), ".claude", "projects");
-  let dirs = [];
-  try { dirs = fs.readdirSync(root); } catch { return ""; }
-  for (const d of dirs) {
-    const p = path.join(root, d, `${sid}.jsonl`);
-    if (fs.existsSync(p)) return p;
-  }
-  return "";
-}
-
 function transcriptHasUserRow(filePath, offset, prompt) {
   const text = appendedText(filePath, offset);
   if (!text) return false;
@@ -860,25 +841,6 @@ export async function focusSession(target, {
 // Desktop owns and submits that turn. Claude uses Relay's official-CLI worker;
 // the caller waits for the user row to be durable before importing the session
 // into Desktop, avoiding a stale pre-turn snapshot.
-export async function waitForClaudeSocket(nativeId, {
-  timeoutMs = 45_000,
-  pollMs = 500,
-  registrations = liveClaudeRegistrations,
-} = {}) {
-  const id = String(nativeId || "");
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const row = registrations().get(id);
-    if (row?.socketLive) return row;
-    if (Date.now() >= deadline) {
-      const error = new Error(`Claude Code did not register session ${id} within ${timeoutMs}ms`);
-      error.code = "SESSION_TARGET_UNAVAILABLE";
-      throw error;
-    }
-    await sleep(Math.min(pollMs, Math.max(1, deadline - Date.now())));
-  }
-}
-
 async function waitForExactSession(target, { timeoutMs = 20_000, pollMs = 500, discover = discoverSessions } = {}) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {

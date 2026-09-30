@@ -3,7 +3,7 @@ import fs from "node:fs";
 import test from "node:test";
 
 const html = fs.readFileSync(new URL("../overlay/inbox.html", import.meta.url), "utf8");
-const reader = html.slice(html.indexOf("function renderReader()"), html.indexOf("function todoWhyHtml("));
+const reader = html.slice(html.indexOf("function renderReader()"), html.indexOf("// Grow the window as the user scrolls toward the end."));
 assert.ok(reader.length > 0, "renderReader is available");
 
 // THE READER (Sven, 2026-09-08, the Minimal design): a letter is one page.

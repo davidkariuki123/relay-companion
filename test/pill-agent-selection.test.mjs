@@ -28,7 +28,8 @@ function harness({ saved = {}, surfaces = "both", preference = null } = {}) {
     ${footer}
     return { agentAppSelection, requestedAgentApps, setAgentAppEnabled, saveAgentApps,
       agentAppHosts, agentAppName, agentSurfacePreference, yourAgentHtml, relayHostActionsHtml,
-      chatAppSelection, setChatAppEnabled, saveChatApps, enabledAgentApps,
+      chatAppSelection, setChatAppEnabled, saveChatApps,
+      enabledAgentApps: () => [...chatAppSelection(), ...agentAppSelection()],
       setSurfaces: value => { agentSurfaces = value; } };
   `)((key, fallback) => store.has(key) ? store.get(key) : fallback,
     (key, value) => store.set(key, value), () => account, { ui: { openingPreference: preference } });

@@ -43,21 +43,6 @@ test("stable Node selection never persists a temporary PATH candidate", () => {
   assert.equal(result, durable);
 });
 
-test("a first macOS application install activates with the Node inside Relay.app", () => {
-  // The installer runs setup on the Node in its own bundle. Nothing under
-  // ~/.relay exists yet, so refusing it left no interpreter at all.
-  const bundled = "/Applications/Relay.app/Contents/Resources/node";
-  const options = {
-    platform: "darwin",
-    env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
-    existsSync: (candidate) => candidate === bundled,
-    spawnImpl: () => assert.fail("a stable bundled Node needs no PATH search"),
-  };
-  assert.equal(bootstrapStableNodePath(bundled, { ...options, realpathSync: (candidate) => candidate }), bundled);
-  assert.equal(stableNodePath(bundled, { ...options, realpath: (candidate) => candidate,
-    runCommand: () => assert.fail("a stable bundled Node needs no PATH search") }), bundled);
-});
-
 test("first-contact bootstrap also prefers a durable Node over its temporary interpreter", () => {
   const temporary = "/tmp/npx-456/node";
   const durable = "/usr/local/bin/node";

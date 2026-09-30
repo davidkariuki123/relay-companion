@@ -323,7 +323,7 @@ test("the room renders the card and the event bubble in place of the claim slot 
 
 test("item filters distinguish agent documents from chat texts on both Sent and Received", () => {
   const source = between(inbox, "function relaysFilterKeeps(row)", "// HOVER WITH INTENT");
-  const taskSource = between(inbox, "function isTaskRow(r)", "function taskRows()");
+  const taskSource = between(inbox, "function isTaskRow(r)", "// ---- Topics ----");
   const keeps = (filter, row) => Function("relaysFilter", "row", `${taskSource}\n${source}\nreturn relaysFilterKeeps(row);`)(filter, row);
   const texts = [
     { kind:"message", forHuman:"cool", forAgent:"" },
@@ -363,7 +363,7 @@ test("the list: Inbox types, Received · Sent directions, and unchanged hover wi
 });
 
 test("main posts the person's close and stamps the row at once; the bridge and the daemon carry the fields", () => {
-  const close = between(main, "async function closeTaskByHand(relayId, kind, note)", "async function listTodo(");
+  const close = between(main, "async function closeTaskByHand(relayId, kind, note)", "// Preview is deliberately an allowlisted");
   assert.match(close, /client\.taskRejected\(id, \{ idempotencyKey, \.\.\.\(word \? \{ note: word \} : \{\}\) \}\)/);
   assert.match(close, /client\.taskCancelled\(id, \{ idempotencyKey, \.\.\.\(word \? \{ note: word \} : \{\}\) \}\)/);
   assert.match(close, /client\.taskCompleted\(id, \{ idempotencyKey, human: true, forHuman: word \|\| "Done", forAgent: "" \}\)/);
@@ -376,7 +376,7 @@ test("main posts the person's close and stamps the row at once; the bridge and t
   assert.equal((main.match(/r\.taskRejectedAt,\s*r\.taskCancelledAt,\s*r\.taskClosedBy,\s*r\.taskResultRelayId,/g) || []).length, 3);
   assert.match(main, /taskRejectedAt: p\.taskRejectedAt \|\| null,/);
   assert.match(main, /taskRejectedAt: sent\.taskRejectedAt \|\| null,/);
-  assert.match(main, /taskRejectedAt: local\.taskRejectedAt \|\| null,/);
+
   assert.match(notifications, /taskRejectedAt: item\.taskRejectedAt \|\| existing\.taskRejectedAt \|\| null,/);
   assert.match(notifications, /taskResultRelayId: item\.taskResultRelayId \|\| existing\.taskResultRelayId \|\| null,/);
 });

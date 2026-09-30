@@ -20,10 +20,9 @@ test("real receiver loop survives optional synchronous and asynchronous failures
   const client = { token: "test", url: "https://example.invalid", accountDrift: () => ({ status: "same" }) };
   let cycles = 0, deliveries = 0, sessions = 0;
   await runReceiverLoop({ client, me: { user: { id: "test" } }, health,
-    getFeatures: () => ({ requests: true, topics: true, todo: true }),
+    getFeatures: () => ({ requests: true, topics: true }),
     followAccount: async () => null, makeClient: () => client,
     sessionTick: () => { sessions++; throw new ReferenceError("removedIntegration is not defined"); },
-    stewardTick: async () => { throw Error("provider unavailable"); },
     topicsPoll: async () => { throw Error("topics unavailable"); },
     attachments: async () => {}, completionWakes: async () => {},
     deliveryTick: async () => { deliveries++; return { ordinaryOnly: true, ordinaryRelays: [], inboxOk: true }; },
@@ -32,7 +31,7 @@ test("real receiver loop survives optional synchronous and asynchronous failures
   assert.equal(deliveries, 4); assert.equal(sessions, 4);
   assert.equal(health.snapshot().sequence, 4); assert.equal(health.ready(), true);
   assert.equal(health.snapshot().components["agent-sessions"], "failed");
-  assert.equal(health.snapshot().components.todo, "failed");
+  assert.equal(health.snapshot().components.topics, "failed");
 });
 
 test("a stuck optional component never overlaps and reports degraded health, then recovers", async () => {
@@ -62,22 +61,21 @@ test("hung task and agent operations cannot stop the real receiver scheduler or 
   assert.equal(health.snapshot().sequence, 4); assert.equal(tasks, 1); assert.equal(sessions, 1);
 });
 
-test("account switches close the old connection before rebinding and keep the new user on later ticks", async () => {
+test("account switches close the old connection before rebinding and read the new user's features", async () => {
   const { health } = healthFixture();
   let cycles = 0, switching = false;
   const client = { token: "test", url: "https://example.invalid", accountDrift: () => ({ status: switching ? "changed" : "same" }) };
   const events = [], users = [];
   await runReceiverLoop({ client, me: { user: { id: "old" } }, health,
-    getFeatures: () => ({ topics: true, todo: true }), makeClient: () => ({ ...client }),
+    getFeatures: (_log, user) => { users.push(user.id); return { topics: true }; }, makeClient: () => ({ ...client }),
     closeLocalAgentConnection: async () => { events.push("closed"); },
     followAccount: async () => { if (!switching) return null; assert.equal(events.at(-1), "closed"); switching = false; return { user: { id: "new" } }; },
     bindLocalAgentConnection: async () => { events.push("bound"); },
     sessionTick: async () => {}, deliveryTick: async () => ({ ordinaryOnly: true, ordinaryRelays: [], inboxOk: true }),
-    stewardTick: async ({ user }) => { users.push(user.id); },
     topicsPoll: async () => {}, attachments: async () => {}, completionWakes: async () => {},
     stop: () => cycles === 3, sleep: async () => { cycles++; if (cycles === 1) switching = true; await flush(); },
   });
-  assert.deepEqual(events, ["closed", "bound"]); assert.deepEqual(users, ["old", "new", "new"]);
+  assert.deepEqual(events, ["closed", "bound"]); assert.deepEqual(users, ["old", "new"]);
 });
 
 test("local readiness needs work progress; offline and sign-out are healthy waits, stale progress is not", () => {

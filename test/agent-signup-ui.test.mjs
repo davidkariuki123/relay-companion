@@ -138,7 +138,6 @@ test("email signup keeps a user recoverable when delivery is delayed or filtered
 test("renderer installation IPC is capability-shaped and never exposes credentials", () => {
   for (const method of [
     "installationAuthState",
-    "installationAuthBegin",
     "installationAuthResume",
     "installationAuthRestart",
     "installationAuthGoogle",

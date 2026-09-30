@@ -66,7 +66,7 @@ function reinforceSpacePresence(win, { moveTop = false, alwaysOnTop = true, plat
   return true;
 }
 
-function showInactiveOnAllSpaces(win, { force = false, alwaysOnTop = true, platform = process.platform } = {}) {
+function showInactiveOnAllSpaces(win, { force = false, userInitiated = false, alwaysOnTop = true, platform = process.platform } = {}) {
   if (!isUsableWindow(win)) return false;
   const visible = typeof win.isVisible === "function" ? win.isVisible() : false;
   // Capture drift BEFORE reinforceSpacePresence repairs it: once the collection
@@ -74,11 +74,11 @@ function showInactiveOnAllSpaces(win, { force = false, alwaysOnTop = true, platf
   // needed. A missing getter means we cannot verify, so take the re-show path.
   const canJoinAllSpacesIntact =
     typeof win.isVisibleOnAllWorkspaces === "function" && win.isVisibleOnAllWorkspaces();
-  if (visible && !force) {
+  if (visible && !force && !userInitiated) {
     reinforceSpacePresence(win, { alwaysOnTop, platform });
     return false;
   }
-  if (visible && canJoinAllSpacesIntact) {
+  if (visible && canJoinAllSpacesIntact && !userInitiated) {
     // Forced re-show with nothing drifted: a canJoinAllSpaces window is already on
     // the active Space, so there is nothing to re-attach. showInactive()/moveTop()
     // here re-order the window mid Space-transition animation — the residual

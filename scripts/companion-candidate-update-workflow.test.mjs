@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 
-const workflow = fs.readFileSync(new URL("../.github/workflows/verify-companion-candidate-update.yml", import.meta.url), "utf8");
+// The canary runs in the public Companion repository. There this file sits
+// beside the workflow; in the private repository the reviewed copy is the template.
+const template = new URL("../packages/companion/public-release/.github/workflows/verify-companion-candidate-update.yml", import.meta.url);
+const workflow = fs.readFileSync(fs.existsSync(template) ? template : new URL("../.github/workflows/verify-companion-candidate-update.yml", import.meta.url), "utf8");
 const trigger = fs.readFileSync(new URL("./trigger-stock-candidate-update.mjs", import.meta.url), "utf8");
 
 test("candidate update canary never moves a fleet channel", () => {

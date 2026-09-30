@@ -73,7 +73,8 @@ try {
     p.ui.firstLink = {relayId:'r_link',url:'https://sendrelays.com/s/practice_first_link',state:'unopened',shareText:${JSON.stringify(shareText)}};`);
   await page.locator('#suLinkCopy').waitFor();
   assert.equal(await page.locator('#signupView').getByText('Your link is ready.').isVisible(), true);
-  assert.equal(await page.locator('#suFirstLinkText').innerText(), shareText);
+  // The rendered link carries its external-link glyph; the words are the message.
+  assert.equal((await page.locator('#suFirstLinkText').innerText()).replace(/\s*↗$/, ''), shareText);
   assert.equal(await page.locator('#signupView').getByText('Your first link').isVisible(), true, 'a hello came first: this is the second screen');
   assert.equal(await page.locator('.su-first-link .su-relay-moment').count(), 0, 'the celebration already happened');
   assert.equal(await page.locator('#signupView').getByText('Send it wherever you talk to them. They can ask their Claude Code or Codex to reply. Their reply will appear inside your Relay app, even if they don’t have Relay.').isVisible(), true);
@@ -159,7 +160,7 @@ try {
   assert.equal(await page.locator('#signupView').getByText('Your first Relay').isVisible(), true);
   assert.equal(await page.locator('#signupView').getByText('Your first link').count(), 0);
   assert.equal(await page.locator('#signupView').getByText('Your link is ready.').isVisible(), true);
-  assert.equal(await page.locator('#suFirstLinkText').innerText(), linkShareText);
+  assert.equal((await page.locator('#suFirstLinkText').innerText()).replace(/\s*↗$/, ''), linkShareText);
   assert.equal(await page.locator('#signupView').getByText('Send it wherever you talk to them. They can ask their Claude Code or Codex to reply. Their reply will appear inside your Relay app, even if they don’t have Relay.').isVisible(), true);
   assert.equal(await page.locator('#suLinkCopy').textContent(), 'Copy message');
   assert.equal(await page.locator('#suLinkContinue').textContent(), 'Continue');
@@ -229,7 +230,6 @@ try {
         contacts:async () => [], groups:async () => ({ok:true,result:[]}),
         installationAuthState:async () => { window.fixtureStateReads += 1; return structuredClone(authState); },
         installationAuthSignIn:async options => { window.fixtureSignIns.push(options); return {status:'pending_identity'}; },
-        installationAuthBegin:async () => { throw Error('must not begin on app open'); },
       };
       window.relay = new Proxy(api,{get:(target,key) => {
         if(key in target) return target[key];

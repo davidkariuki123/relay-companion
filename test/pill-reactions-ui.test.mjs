@@ -51,7 +51,7 @@ test("successful reaction polls repaint only when reaction state actually change
 
 test("the message menu exposes the approved eight reactions on its own message", () => {
   assert.match(html, /const RX_PRIMARY = \["👍", "❤️", "😂", "🙌", "‼️", "🙏", "👀", "🔥"];/);
-  const source = between(html, "  function messageReactionPickerHtml(id)", "  function reactionConfirmationHtml");
+  const source = between(html, "  function messageReactionPickerHtml(id)", "  async function commitReaction(");
   const render = Function("REACTIONS_ENABLED", "RX_PRIMARY", "esc", `${source}; return messageReactionPickerHtml;`)(true, ["👍", "❤️", "😂", "🙌", "‼️", "🙏", "👀", "🔥"], String);
   const menu = render("relay_target");
   assert.equal((menu.match(/data-rx-pick="relay_target"/g) || []).length, 8);
@@ -155,7 +155,7 @@ test("room and view transitions explicitly retire an open picker", () => {
 
 test("Task, reader and AI-runner surfaces never render a reaction trigger", () => {
   assert.match(html, /const REACTIONS_ENABLED = true;/, "conversation reactions are enabled");
-  const reader = between(html, "function renderReader()", "// ---------- the Tasks board:");
+  const reader = between(html, "function renderReader()", "// Grow the window as the user scrolls toward the end.");
   assert.doesNotMatch(reader, /messageReactionPickerHtml|data-rx-face|reactionConfirmationHtml|wireReactionControls/);
 
   const conversation = between(html, "const rowsHtml = timeline.map", "// Chat order: history above");
@@ -164,7 +164,7 @@ test("Task, reader and AI-runner surfaces never render a reaction trigger", () =
   assert.doesNotMatch(conversation, /reactionConfirmationHtml\(m\.id\)/);
   assert.match(conversation, /<span class="kchip">Task<\/span>/, "Task roots can remain visible as bubbles");
 
-  const requests = between(html, "function renderTasksBoard()", "function wireRequestDetail()");
+  const requests = between(html, "// Grow the window as the user scrolls toward the end.", "// ---------- Contacts view ----------");
   assert.doesNotMatch(requests, /messageReactionPickerHtml|data-rx-face|wireReactionControls/);
   assert.match(html, /const newControls = RelayChatRows\.newControlsScope\(thHistoryEl\);/, "new reaction controls are scoped to the conversation");
   assert.equal((html.match(/wireReactionControls\(newControls\)/g) || []).length, 1);

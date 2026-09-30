@@ -152,7 +152,7 @@ test("collapse keeps macOS geometry stable and bounds ordinary Windows stale geo
 test("all compact-to-reader resize transitions can hold a frozen source face", () => {
   const prepare = between(html, "function prepareReaderMorph", "function startReaderMorph");
   assert.doesNotMatch(prepare, /sourceView !== "tasks"/);
-  for (const view of ["relays", "chat", "threads", "sent", "tasks", "contacts"]) {
+  for (const view of ["relays", "chat", "threads", "sent", "contacts"]) {
     assert.match(prepare, new RegExp(`${view}:`));
   }
   assert.match(html, /\}, chatExpanded \? EXPANDED : READER\)/);

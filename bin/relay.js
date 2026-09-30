@@ -71,7 +71,7 @@ import { liveToolRequirement, requiredLiveHosts, shouldRequireLiveTools } from "
 import { openRelay, openTask } from "../src/materializer.js";
 import { runClaudeHook } from "../src/claude-hook.js";
 import { runCodexHook } from "../src/codex-hook.js";
-import { normalizePairingCode, persistPairedAccount, replacedDeviceCredential, revokeReplacedDevice } from "../src/account.js";
+import { normalizePairingCode, persistPairedAccount, replacedDeviceCredential, reportUninstalledDevice, revokeReplacedDevice } from "../src/account.js";
 import { resetCompanionStateForAccount } from "../src/notifications.js";
 import {
   finishPendingSetupOpenRelay,
@@ -584,7 +584,15 @@ async function cmdUninstall(flags = {}) {
   for (const line of uninstallResultLines(uninstalled)) console.log(line);
   if (!uninstalled.ok) process.exitCode = 1;
 
-  if (!purge) return;
+  if (!purge) {
+    // After the services stop, so nothing here reports this computer again.
+    if (uninstalled.ok) {
+      const reported = await reportUninstalledDevice();
+      if (reported === "reported") console.log("Relay no longer lists this computer. Your sign-in is kept, so reinstalling picks up where you left off.");
+      else if (reported === "failed") console.log("Could not tell Relay this computer was removed (no connection). It stays listed on your account until Relay runs here again or you remove it in Settings > Devices.");
+    }
+    return;
+  }
 
   if (revocation === "revoked") console.log("Revoked this device on your Relay account.");
   else if (revocation === "already_revoked") console.log("This device was already revoked on your Relay account.");

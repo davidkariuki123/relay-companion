@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { startRecoveryHeartbeat } from "./recovery-health.js";
+import { flushPendingSignOuts } from "./account.js";
 import { startRecoveryResponder } from "../bootstrap/recovery-probe.cjs";
 import { createDaemonProgress, recordDaemonCrash } from "../bootstrap/daemon-progress.cjs";
 import { createDaemonComponents } from "./daemon-components.js";
@@ -34,7 +35,6 @@ import { startDesktopStartupMigration } from "./desktop-migration.js";
 import { ensureWindowsAutostartTasks, repairAgentMcpRegistrations } from "./install.js";
 import { apiUrl, readConfig } from "./config.js";
 import { activeSessionOperationCount, runSessionDirectoryOnce } from "./session-controller.js";
-import { todoStewardTick } from "./todo-steward-runtime.js";
 import { productFeatures } from "./product-features.js";
 import { migratePersistedContentFields } from "./content-field-migration.js";
 import agentRelayContext from "./agent-relay-context.cjs";
@@ -136,10 +136,6 @@ function freshPlainRelays(ledger, items) {
       (seen.taskCompletedAt || "") !== (item.taskCompletedAt || "") ||
       (seen.taskRunOwner || "null") !== JSON.stringify(item.taskRunOwner || null) ||
       (seen.taskClaim || "null") !== JSON.stringify(item.taskClaim || null) ||
-      (seen.todoStatus || "") !== (item.todoStatus || "") ||
-      Number(seen.todoVersion || 0) !== Number(item.todoVersion || 0) ||
-      Number(seen.todoVisibilityVersion || 0) !== Number(item.todoVisibilityVersion || 0) ||
-      (seen.duplicateOfItemId || "") !== (item.duplicateOfItemId || "") ||
       (seen.restoredAt || "") !== (item.restoredAt || "")
     );
   });
@@ -161,10 +157,6 @@ function markPlainRelaysProcessed(ledger, items) {
       taskCompletedAt: item.taskCompletedAt || "",
       taskRunOwner: JSON.stringify(item.taskRunOwner || null),
       taskClaim: JSON.stringify(item.taskClaim || null),
-      todoStatus: item.todoStatus || "",
-      todoVersion: Number(item.todoVersion || 0),
-      todoVisibilityVersion: Number(item.todoVisibilityVersion || 0),
-      duplicateOfItemId: item.duplicateOfItemId || "",
       restoredAt: item.restoredAt || "",
       processedAt,
     };
@@ -973,6 +965,31 @@ export function startMcpBrokerDescriptorGuard({
   return { stop: () => clearInterval(timer), check };
 }
 
+// A sign-out made while offline leaves its device live on the server. The
+// daemon restarts on every sign-out and sign-in, so it finishes those here:
+// once at start, then on a slow cadence for as long as any remain.
+export const PENDING_SIGN_OUT_INTERVAL_MS = 10 * 60_000;
+export function startPendingSignOutFlush({
+  log = () => {},
+  flush = flushPendingSignOuts,
+  intervalMs = PENDING_SIGN_OUT_INTERVAL_MS,
+  setIntervalImpl = setInterval,
+} = {}) {
+  let running = false;
+  const check = async () => {
+    if (running) return;
+    running = true;
+    try {
+      const outcome = await flush();
+      if (outcome.revoked) log(`finished ${outcome.revoked} earlier sign-out(s) with the server`);
+    } catch {} finally { running = false; }
+  };
+  void check();
+  const timer = setIntervalImpl(() => void check(), intervalMs);
+  if (timer && typeof timer.unref === "function") timer.unref();
+  return { stop: () => clearInterval(timer), check };
+}
+
 export async function runTaskDaemon(options = {}) {
   const packageRoot = companionPackageRoot(), version = currentCompanionVersion(packageRoot);
   const health = createDaemonProgress({ packageRoot, version });
@@ -1025,6 +1042,7 @@ async function runTaskDaemonImpl({ intervalMs = 4000, health } = {}) {
   startApplicationMaintenance();
   startPillSupervisor({ log });
   startMcpBrokerDescriptorGuard({ log, packageRoot: companionPackageRoot() });
+  startPendingSignOutFlush({ log });
   const autoUpdater = createAutoUpdater({
     log,
     hasActiveWork: () => hasActiveTurns() || activeSessionOperationCount() > 0,
@@ -1121,11 +1139,10 @@ export async function runReceiverLoop({ client, me, intervalMs = 4000, log = () 
   bindLocalAgentConnection, health, stop = () => false, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
   getFeatures = daemonProductFeatures, refreshFeatures = refreshDaemonProductFeatures,
   followAccount = followAccountDrift, makeClient = () => new RelayClient(),
-  sessionTick = sessionControllerTick, stewardTick = todoStewardTick, topicsPoll = pollTopicsOnce,
+  sessionTick = sessionControllerTick, topicsPoll = pollTopicsOnce,
   deliveryTick = daemonDeliveryTick, attachments = processInboxAttachments, completionWakes = defaultProcessTaskCompletionWakes,
 } = {}) {
   let features = getFeatures(log, me.user);
-  let user = me.user;
   let featureRefreshAt = Date.now() + ACCOUNT_FEATURE_REFRESH_MS;
   let topicsPolledAt = 0;
   const components = createDaemonComponents({ health, log });
@@ -1135,7 +1152,6 @@ export async function runReceiverLoop({ client, me, intervalMs = 4000, log = () 
     const rebound = await followAccount({ client, log, role: "receiver", health });
     if (rebound) {
       await bindLocalAgentConnection(rebound.user);
-      user = rebound.user;
       features = getFeatures(log, rebound.user);
       featureRefreshAt = Date.now() + ACCOUNT_FEATURE_REFRESH_MS;
     } else if (Date.now() >= featureRefreshAt) {
@@ -1152,14 +1168,9 @@ export async function runReceiverLoop({ client, me, intervalMs = 4000, log = () 
       const failed = results.find(result => result.status === "rejected");
       if (failed) throw failed.reason;
     });
-    const featureSnapshot = features, userSnapshot = user;
+    const featureSnapshot = features;
     // Do not rebind an in-flight operation's client during account switches.
     void components.run("agent-sessions", () => sessionTick({ client: makeClient(), log, features: featureSnapshot }));
-    // The Todo steward decides for itself whether anything is due; a run is a
-    // background provider process and never blocks delivery below.
-    if (features.todo === true) {
-      void components.run("todo", () => stewardTick({ client: makeClient(), log, features: featureSnapshot, user: userSnapshot }));
-    } else components.disable("todo");
     if (!features.topics) components.disable("topics");
     if (features.topics && Date.now() - topicsPolledAt >= TOPICS_POLL_MS) {
       topicsPolledAt = Date.now();

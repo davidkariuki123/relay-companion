@@ -222,7 +222,10 @@ export function validateInstalledPackageShape(packageRoot, { version, distributi
     // Bounded diagnostics and upload-only reporting: Node builtins and sibling
     // bootstrap helpers only, with no application dependencies or device token.
     const diagnosticBootstrap = [...lifecycleBootstrap, "diagnostics.cjs", "diagnostics-reporter.cjs", "diagnostics-contract.json"].sort();
-    if (![legacyBootstrap, recoveryBootstrap, resilientBootstrap, monitoredBootstrap, macRecoveryBootstrap, responsiveRecoveryBootstrap, configRecoveryBootstrap, bundledNodeBootstrap, daemonProgressBootstrap, applicationBootstrap, handoffBootstrap, rulesBootstrap, transactionBootstrap, lifecycleBootstrap, diagnosticBootstrap].some(shape => JSON.stringify(bootstrapFiles) === JSON.stringify(shape))) {
+    // Native installer recovery uses only Node builtins and lifecycle ownership;
+    // account cleanup itself runs in the separately verified candidate runtime.
+    const installerRecoveryBootstrap = [...diagnosticBootstrap, "application-recovery.cjs"].sort();
+    if (![legacyBootstrap, recoveryBootstrap, resilientBootstrap, monitoredBootstrap, macRecoveryBootstrap, responsiveRecoveryBootstrap, configRecoveryBootstrap, bundledNodeBootstrap, daemonProgressBootstrap, applicationBootstrap, handoffBootstrap, rulesBootstrap, transactionBootstrap, lifecycleBootstrap, diagnosticBootstrap, installerRecoveryBootstrap].some(shape => JSON.stringify(bootstrapFiles) === JSON.stringify(shape))) {
       throw new Error("Thin installer bootstrap contents do not match the reviewed shape");
     }
     const manifest = JSON.parse(fs.readFileSync(path.join(packageRoot, "skill", "manifest.json"), "utf8"));

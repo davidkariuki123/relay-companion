@@ -8,6 +8,7 @@ const crypto = require("node:crypto");
 const { spawnSync } = require("node:child_process");
 const bootstrap = require("./relay-setup.cjs");
 const { APPLICATION_ID, applicationOwner } = require("./application-owner.cjs");
+const recovery = require("./application-recovery.cjs");
 
 function read(file) { return JSON.parse(fs.readFileSync(file, "utf8")); }
 function atomic(file, value) {
@@ -75,23 +76,11 @@ function readCurrent(homeDir) {
   try { return read(file); } catch (error) { if (error.code === "ENOENT") return null; throw error; }
 }
 
-// An installed runtime whose services are not running is not proof of a
-// broken installation: a home folder restored onto a fresh OS keeps every file
-// under ~/.relay and loses every logon task (Shane, 2026-09-19). Before that
-// runtime is judged unhealthy, let its own CLI register and start its services,
-// the same command `relay doctor` names. Never throws; the caller re-checks.
-function repairInstalledRuntime(current, { run = spawnSync } = {}) {
-  if (typeof current?.node !== "string" || typeof current?.bin !== "string") return { ok: false, reason: "runtime-cli-unknown" };
-  const result = run(current.node, [current.bin, "repair-installation"], { encoding: "utf8", windowsHide: true, timeout: 3 * 60_000 });
-  const ok = !result.error && result.status === 0;
-  return { ok, reason: ok ? "repaired" : "repair-command-failed",
-    detail: String(result.error?.message || result.stderr || result.stdout || "").trim().slice(0, 500) };
-}
-
 async function installFromApplication({ resourcesDir, applicationRoot, executable, activationEnabled = false,
+  allowRecovery = true,
   homeDir = os.homedir(), verify = verifyBundle, extract = extractBundle, activate = bootstrap.activateRuntime,
   acquireLock = bootstrap.acquireCanonicalLock, health = require("./runtime-health.cjs").exactRuntimeHealth,
-  repairRuntime = repairInstalledRuntime,
+  recover = recovery.recoverWithCandidate,
   drain = require("./update-activity.cjs").drainCalls, download = bootstrap.downloadVerifiedArtifact,
   onProgress = () => {}, signal } = {}) {
   onProgress({ phase: "verifying", canCancel: false });
@@ -106,65 +95,62 @@ async function installFromApplication({ resourcesDir, applicationRoot, executabl
     throw new Error("Native activation must run in the target user's own login session");
   }
   const runtimeRoot = path.join(homeDir, ".relay", "runtime");
+  recovery.assertLocalPath(homeDir, path.join(runtimeRoot, "transaction.lock"));
+  recovery.assertLocalPath(homeDir, path.join(runtimeRoot, "releases"));
   const lock = acquireLock(path.join(runtimeRoot, "transaction.lock"));
   const ownerPath = path.join(homeDir, ".relay", "application-owner.json");
   const journalPath = path.join(homeDir, ".relay", "application-migration.json");
   let releaseDrain;
   let downloadDirectory;
   try {
-    const recordedCurrent = readCurrent(homeDir);
-    let removed;
-    try { removed = read(path.join(homeDir, ".relay", "application-uninstall.json")); } catch (error) { if (error.code !== "ENOENT") throw error; }
+    const recordedCurrent = recovery.marker(path.join(runtimeRoot, "current.json"));
+    const removed = recovery.marker(path.join(homeDir, ".relay", "application-uninstall.json"));
     const reinstall = removed?.schema === 1 && removed.state === "complete"
       && recordedCurrent?.state === "inactive" && recordedCurrent.applicationUninstalled === removed.installationId;
     if (reinstall && /^\d+\.\d+\.\d+$/.test(recordedCurrent.version || "")
       && versionCompare(bundle.receipt.version, recordedCurrent.version) < 0) throw new Error("An older installer cannot downgrade the retained Relay runtime");
-    const current = reinstall ? null : recordedCurrent;
+    let current = reinstall ? null : recordedCurrent;
     const configFile = path.join(homeDir, ".relay", "config.json");
-    let config = {};
-    try { config = read(configFile); } catch (error) { if (error.code !== "ENOENT") throw error; }
-    if (current && (config.updateChannel || "stable") !== channel) throw new Error(`Switch Relay to ${channel === "stable" ? "prod" : channel} with relay env before installing this candidate`);
-    let priorJournal;
-    try { priorJournal = read(journalPath); } catch (error) { if (error.code !== "ENOENT") throw error; }
-    if (current && (current.schema !== 1 || current.active !== true || current.state !== "active"
-      || !/^\d+\.\d+\.\d+$/.test(current.version || "")
-      || !inside(path.join(runtimeRoot, "releases"), current.packageRoot || ""))) {
-      throw new Error("Existing Relay needs recovery before application migration");
-    }
-    const retryFreshRollback = priorJournal?.schema === 1 && priorJournal.state === "rolled-back" && priorJournal.previous === null;
-    if (!current && !reinstall && !retryFreshRollback && ["config.json", "recovery"].some((name) => fs.existsSync(path.join(homeDir, ".relay", name)))) {
-      throw new Error("Legacy installation requires the separately planned repair route");
-    }
-    if (current && versionCompare(bundle.receipt.version, current.version) < 0) throw new Error("An older installer cannot downgrade Relay");
-    require("./recovery-intent.cjs").setStopped(false, homeDir);
-    // Live services, not files, decide whether the existing Relay is healthy.
-    // A runtime whose daemon and pill are not running gets one repair through
-    // its own CLI before it is judged; only a runtime that stays down blocks.
-    let repairedExisting = false;
-    if (current && !(await health(current, { platform: process.platform })).ok) {
-      onProgress({ phase: "installing", canCancel: false });
-      const repaired = await repairRuntime(current);
-      if (!repaired?.ok || !(await health(current, { platform: process.platform })).ok) {
-        throw new Error("Existing Relay is not healthy enough to bridge");
+    let config = recovery.marker(configFile) || {};
+    if (!config.invalid && (current || config.updateChannel) && (config.updateChannel || "stable") !== channel) throw new Error(`Switch Relay to ${channel === "stable" ? "prod" : channel} with relay env before installing this candidate`);
+    const priorJournal = recovery.marker(journalPath);
+    const recoveryFile = recovery.journalPath(homeDir);
+    const priorRecovery = recovery.marker(recoveryFile);
+    for (const state of [recordedCurrent?.candidate, recordedCurrent?.previous, priorRecovery]) {
+      if (/^\d+\.\d+\.\d+$/.test(state?.version || "") && versionCompare(bundle.receipt.version, state.version) < 0) {
+        throw new Error("An older installer cannot downgrade a retained Relay recovery candidate");
       }
-      repairedExisting = true;
     }
-    // Interrupted ownership changes require explicit reconciliation below; never
-    // overwrite a journal whose runtime/owner outcome is still uncertain.
+    let needsRecovery = Boolean(config.invalid || (current && (current.schema !== 1 || current.active !== true || current.state !== "active"
+      || !/^\d+\.\d+\.\d+$/.test(current.version || "")
+      || typeof current.packageRoot !== "string" || !inside(path.join(runtimeRoot, "releases"), current.packageRoot))));
+    const retryFreshRollback = priorJournal?.schema === 1 && priorJournal.state === "rolled-back" && priorJournal.previous === null;
+    if (!current && !reinstall && !retryFreshRollback && (["config.json", "recovery", "daemon.pid"].some((name) => fs.existsSync(path.join(homeDir, ".relay", name)))
+      || fs.existsSync(path.join(homeDir, ".relay-companion")))) {
+      needsRecovery = true;
+    }
+    if (current && /^\d+\.\d+\.\d+$/.test(current.version || "")) {
+      if (versionCompare(bundle.receipt.version, current.version) < 0) throw new Error("An older installer cannot downgrade Relay");
+      if (versionCompare(current.version, "0.1.500") < 0) needsRecovery = true;
+    }
+    // Never execute an old CLI as a prerequisite for rescuing it.
+    if (current && !needsRecovery && !(await health(current, { platform: process.platform })).ok) needsRecovery = true;
     if (priorJournal && !["complete", "rolled-back"].includes(priorJournal.state)) {
-      throw new Error("An interrupted application migration needs reconcileApplication first");
+      needsRecovery = true;
     }
+    if (priorRecovery && priorRecovery.state !== "complete") needsRecovery = true;
     const installedOwner = applicationOwner({ homeDir });
-    let previousOwner = null;
-    try { previousOwner = read(ownerPath); } catch (error) { if (error.code !== "ENOENT") throw error; }
+    let previousOwner = recovery.marker(ownerPath);
+    if (previousOwner?.invalid) needsRecovery = true;
     const previousApplicationVersion = previousOwner?.applicationVersion || previousOwner?.version;
     if (previousOwner?.appId === APPLICATION_ID && /^\d+\.\d+\.\d+$/.test(previousApplicationVersion || "")
       && versionCompare(previousApplicationVersion, bundle.receipt.applicationVersion || bundle.receipt.version) > 0) throw new Error("An older installer cannot downgrade the Relay application");
-    if (installedOwner?.root === root && installedOwner.packagingSourceSha === bundle.receipt.packagingSourceSha
+    if (needsRecovery && !allowRecovery) throw new Error("Relay needs recovery. Run setup again to recover this installation and sign in again.");
+    if (!needsRecovery && installedOwner?.root === root && installedOwner.packagingSourceSha === bundle.receipt.packagingSourceSha
       && (installedOwner.applicationVersion || installedOwner.version) === (bundle.receipt.applicationVersion || bundle.receipt.version)
       && current && versionCompare(current.version, bundle.receipt.version) >= 0) {
       onProgress({ phase: "ready", canCancel: false });
-      return { ok: true, alreadyInstalled: true, repaired: repairedExisting, owner: installedOwner, runtime: current, updateOwner: "canonical-runtime" };
+      return { ok: true, alreadyInstalled: true, owner: installedOwner, runtime: current, updateOwner: "canonical-runtime" };
     }
     if (bundle.receipt.runtimeDelivery === "download") {
       signal?.throwIfAborted();
@@ -184,6 +170,18 @@ async function installFromApplication({ resourcesDir, applicationRoot, executabl
     const releaseId = `${bundle.receipt.version}-${bundle.platformKey}-${crypto.randomBytes(8).toString("hex")}`;
     const releaseRoot = path.join(runtimeRoot, "releases", releaseId);
     const runtime = extract(bundle, releaseRoot);
+    if (needsRecovery) {
+      // The verified replacement exists before cleanup. The reset explicitly
+      // preserves this candidate, the canonical lease and this retry journal.
+      atomic(recoveryFile, { schema: 1, state: "cleaning", releaseRoot, version: bundle.receipt.version, at: Date.now(),
+        ...(priorRecovery?.deviceRetirement ? { deviceRetirement: priorRecovery.deviceRetirement } : {}) });
+      onProgress({ phase: "recovering", canCancel: false });
+      await recover({ bundle, runtime, releaseRoot, homeDir });
+      const cleaned = recovery.marker(recoveryFile);
+      atomic(recoveryFile, { ...cleaned, schema: 1, state: "installing", releaseRoot, version: bundle.receipt.version });
+      current = null; previousOwner = null; config = {};
+    }
+    require("./recovery-intent.cjs").setStopped(false, homeDir);
     const layout = { root: runtimeRoot, releaseId, releaseRoot, releasesDir: path.dirname(releaseRoot),
       packageRoot: runtime.packageRoot, pointerPath: path.join(runtimeRoot, "current.json"), lockPath: path.join(runtimeRoot, "transaction.lock") };
     const owner = { schema: 1, appId: APPLICATION_ID, platform: process.platform,
@@ -194,7 +192,7 @@ async function installFromApplication({ resourcesDir, applicationRoot, executabl
     const journal = { schema: 1, state: "prepared", owner, previousOwner, previous: current, releaseId, at: Date.now() };
     atomic(journalPath, journal);
     onProgress({ phase: "installing", canCancel: false });
-    releaseDrain = await drain({ homeDir });
+    if (!needsRecovery) releaseDrain = await drain({ homeDir });
     atomic(journalPath, { ...journal, state: "activating" });
     // Fresh Dev setup selects its account API before any runtime connects.
     // Existing installations must already select this channel explicitly.
@@ -210,8 +208,9 @@ async function installFromApplication({ resourcesDir, applicationRoot, executabl
       // exact-root health, advancing heartbeat, durable Node and rollback.
       const result = await activate(layout, runtime, bundle.receipt.version, { homeDir });
       atomic(journalPath, { ...journal, state: "complete", completedAt: Date.now() });
+      if (needsRecovery) atomic(recoveryFile, { ...recovery.marker(recoveryFile), state: "complete", completedAt: Date.now() });
       onProgress({ phase: "ready", canCancel: false });
-      return { ok: true, owner, runtime: result.candidate, updateOwner: "canonical-runtime" };
+      return { ok: true, recovered: needsRecovery, owner, runtime: result.candidate, updateOwner: "canonical-runtime" };
     } catch (error) {
       // Bootstrap owns service rollback. Only restore our launcher marker once
       // the durable runtime pointer proves it restored the previous owner.
@@ -258,4 +257,4 @@ async function reconcileApplication({ homeDir = os.homedir(), acquireLock = boot
   } finally { lock.release(); }
 }
 
-module.exports = { verifyBundle, extractBundle, installFromApplication, reconcileApplication, repairInstalledRuntime, versionCompare };
+module.exports = { verifyBundle, extractBundle, installFromApplication, reconcileApplication, versionCompare };

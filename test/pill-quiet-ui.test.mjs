@@ -105,7 +105,7 @@ test("the visibility gate uses explicitlyOpened, never trayForcedVisible", () =>
     const body = between(main, marker, "\n}\n");
     assert.match(body, /trayForcedVisible = false/, "still a host handoff flag, not an open latch");
   }
-  assert.match(between(main, "function showFromTray()", "\n}\n"), /explicitlyOpened = true/);
+  assert.match(between(main, "function showFromTray(", "\n}\n"), /explicitlyOpened = true/);
   assert.match(between(main, "function hideFromTray()", "\n}\n"), /explicitlyOpened = false/);
 });
 

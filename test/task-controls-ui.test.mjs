@@ -12,39 +12,8 @@ function between(source, start, end) {
   return source.slice(from, to);
 }
 
-test("Todo puts attention first, previews recent Done, and gives In Progress a live mark", () => {
-  const board = between(inbox, "function renderTasksBoard()", "// Grow the window");
-  assert.match(inbox, /TODO_ACTIVE_ORDER = \["triage", "in_progress"\]/);
-  assert.match(inbox, /TODO_ALL_PREVIEW_ORDER = \[\.\.\.TODO_ACTIVE_ORDER, "done"\]/);
-  assert.match(board, /TODO_ALL_PREVIEW_ORDER\.map/);
-  assert.match(inbox, /\.todo-mark\.in_progress/);
-});
-
-test("Todo keeps existing rows during filter fetches and lets the newest choice win", () => {
-  const loader = between(inbox, "async function loadTodo", "async function openTodoItem");
-  const rail = between(inbox, "function renderTodoRail()", "function todoGroupHtml");
-  assert.match(inbox, /#tasksList\.todo-switching/);
-  assert.match(loader, /beginTodoTransition\(\)/);
-  assert.match(loader, /finishTodoTransition\(\)/);
-  assert.match(loader, /\+\+todoState\.generation/);
-  assert.match(loader, /append && \(todoState\.loading \|\| todoState\.loadingMore/);
-  assert.doesNotMatch(loader, /!window\.relay\.todoList \|\| todoState\.loading/);
-  assert.doesNotMatch(rail, /todoState\.(items|groups) = \[\]/);
-});
-
-test("Todo filtering is a visible rail, never a dropdown", () => {
-  const board = between(inbox, "function renderTasksBoard()", "// Grow the window");
-  assert.match(inbox, /id="todoFilterRail"/);
-  assert.match(inbox, /data-todo-filter/);
-  assert.match(board, /renderTodoRail\(\)/);
-  assert.doesNotMatch(board, /<select|dropdown/i);
-});
-
-test("Canceled is workflow state while Recently Deleted remains a separate reader action", () => {
-  const board = between(inbox, "function renderTasksBoard()", "// Grow the window");
-  const reader = between(inbox, "function renderReader()", "// ---------- the Tasks board");
-  assert.match(inbox, /canceled:"Canceled"/);
-  assert.doesNotMatch(board, /data-task-delete/);
+test("Recently Deleted is a reader action on a finished Task", () => {
+  const reader = between(inbox, "function renderReader()", "// Grow the window");
   assert.match(reader, /data-reader-delete/);
   assert.match(reader, /window\.relay\.deleteRelay\(r\.id\)/);
   assert.match(reader, /Move task to Recently Deleted/);
@@ -54,7 +23,7 @@ test("a Task has no Start dock: its verbs are a Relay's Open rows and the reply 
   // David, 2026-09-13: a Task opens like any Relay. No Start label, no
   // actionable-state gate, no task-only composer; the host rows render on the
   // page and the agent stamps Started / Done via relay_task_start / complete.
-  const reader = between(inbox, "function renderReader()", "// ---------- the Tasks board");
+  const reader = between(inbox, "function renderReader()", "// Grow the window");
   assert.equal(inbox.includes('"Start again" : "Start task"'), false);
   assert.equal(reader.includes("requestActionable"), false);
   assert.equal(reader.includes("requestDockHtml"), false);

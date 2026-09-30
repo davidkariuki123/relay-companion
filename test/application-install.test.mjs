@@ -8,6 +8,7 @@ import bootstrap from "../bootstrap/relay-setup.cjs";
 import installer from "../bootstrap/application-install.cjs";
 import ownership from "../bootstrap/application-owner.cjs";
 import removal from "../bootstrap/application-uninstall.cjs";
+import recovery from "../bootstrap/application-recovery.cjs";
 import { installRelayMacApp, installWindowsStartMenuShortcut } from "../src/install.js";
 
 function fixture(t, existing = true) {
@@ -24,7 +25,7 @@ function fixture(t, existing = true) {
   const runtimeRoot = path.join(homeDir, ".relay", "runtime");
   fs.mkdirSync(runtimeRoot, { recursive: true });
   const pointer = path.join(runtimeRoot, "current.json");
-  const previous = { schema: 1, active: true, state: "active", version: "0.1.0", releaseId: "old",
+  const previous = { schema: 1, active: true, state: "active", version: "0.1.550", releaseId: "old",
     packageRoot: path.join(runtimeRoot, "releases", "old", "node_modules", "relay-companion") };
   if (existing) {
     fs.writeFileSync(pointer, JSON.stringify(previous));
@@ -35,7 +36,7 @@ function fixture(t, existing = true) {
     verify: async () => { events.push("verified"); return { receipt, platformKey: receipt.platform }; },
     acquireLock: () => { events.push("lock"); return { release: () => events.push("unlock") }; },
     health: async () => { events.push("health"); return { ok: true }; },
-    repairRuntime: async () => { events.push("repair"); return { ok: false, reason: "runtime-cli-unknown" }; },
+    recover: async () => { throw new Error("Unexpected recovery on a healthy installation"); },
     drain: async () => { events.push("drain"); return () => events.push("undrain"); },
     extract: (_bundle, root) => { events.push("extract"); return { packageRoot: path.join(root, "node_modules", "relay-companion"), bin: path.join(root, "relay.js") }; },
     activate: async (layout, runtime, version) => {
@@ -149,47 +150,105 @@ test("fresh and bridge installation share existing transaction engine and preser
   }
 });
 
-test("an installed runtime whose services are not running is repaired through its own CLI before it is judged", async (t) => {
-  // The field case: every file under ~/.relay restored onto a fresh OS, no
-  // logon task, nothing running. The installer used to call this "already
-  // installed" from the markers alone and open a pill with no service behind it.
-  const { options, events, pointer } = fixture(t);
-  await installer.installFromApplication(options);
-  events.length = 0;
-  let running = false;
-  options.health = async () => { events.push(`health:${running ? "up" : "down"}`); return { ok: running }; };
-  options.repairRuntime = async (current) => {
-    assert.equal(JSON.parse(fs.readFileSync(pointer, "utf8")).packageRoot, current.packageRoot);
-    events.push("repair"); running = true; return { ok: true, reason: "repaired" };
+test("unhealthy installations recover with the staged candidate; newer versions stay untouched", async t => {
+  const f = fixture(t);
+  f.options.health = async () => ({ ok: false });
+  f.options.recover = async ({ releaseRoot, homeDir }) => {
+    assert.ok(f.events.includes("extract"));
+    f.events.push("recover");
+    recovery.resetState({ homeDir, releaseRoot });
   };
-  const result = await installer.installFromApplication(options);
-  assert.equal(result.alreadyInstalled, true);
-  assert.equal(result.repaired, true);
-  assert.deepEqual(events.filter((event) => event !== "verified" && event !== "lock" && event !== "unlock"), ["health:down", "repair", "health:up"]);
-  assert.ok(!events.includes("activate"), "the runtime tree is never replaced to fix its services");
-  // A runtime that stays down after the repair still blocks, unchanged.
-  running = false;
-  options.repairRuntime = async () => ({ ok: false, reason: "repair-command-failed" });
-  await assert.rejects(installer.installFromApplication(options), /healthy/);
-  // The default repair shells out to the runtime's own CLI and reports rather than throws.
-  assert.equal(installer.repairInstalledRuntime({ version: "0.1.0" }).reason, "runtime-cli-unknown");
-  const runs = [];
-  const repaired = installer.repairInstalledRuntime({ node: "/n", bin: "/b/relay.js" }, { run: (cmd, args) => { runs.push([cmd, args]); return { status: 0 }; } });
-  assert.deepEqual(runs, [["/n", ["/b/relay.js", "repair-installation"]]]);
-  assert.equal(repaired.ok, true);
-  assert.equal(installer.repairInstalledRuntime({ node: "/n", bin: "/b/relay.js" }, { run: () => ({ error: new Error("ENOENT") }) }).ok, false);
+  assert.equal((await installer.installFromApplication(f.options)).recovered, true);
+  assert.ok(f.events.indexOf("recover") < f.events.indexOf("activate"));
+  assert.equal(fs.existsSync(path.join(f.options.homeDir, ".relay/config.json")), false);
+  const newer = fixture(t);
+  fs.writeFileSync(newer.pointer, JSON.stringify({ ...newer.previous, version: "1.0.0", active: false }));
+  const before = fs.readFileSync(newer.pointer);
+  await assert.rejects(installer.installFromApplication(newer.options), /downgrade/);
+  assert.deepEqual(fs.readFileSync(newer.pointer), before);
+  assert.ok(!newer.events.includes("extract"));
 });
 
-test("unhealthy and newer existing installations are not changed", async (t) => {
-  for (const mode of ["unhealthy", "newer"]) {
-    const { options, events, pointer, previous } = fixture(t);
-    if (mode === "unhealthy") options.health = async () => ({ ok: false });
-    else fs.writeFileSync(pointer, JSON.stringify({ ...previous, version: "1.0.0" }));
-    const before = fs.readFileSync(pointer);
-    await assert.rejects(installer.installFromApplication(options), /healthy|downgrade/);
-    assert.deepEqual(fs.readFileSync(pointer), before);
-    assert.ok(!events.includes("extract"));
-    assert.equal(events.at(-1), "unlock");
+test("legacy versions and broken journals recover without invoking their old CLI", async t => {
+  for (const mode of ["legacy", "0.1.267", "0.1.326", "0.1.413", "0.1.440", "0.1.454", "0.1.490", "corrupt-pointer", "corrupt-config", "interrupted"]) {
+    const f = fixture(t);
+    if (mode === "legacy") fs.rmSync(f.pointer);
+    else if (mode === "corrupt-pointer") fs.writeFileSync(f.pointer, "{");
+    else if (mode === "corrupt-config") fs.writeFileSync(path.join(f.options.homeDir, ".relay/config.json"), "{");
+    else if (mode === "interrupted") fs.writeFileSync(path.join(f.options.homeDir, ".relay/application-migration.json"), '{"state":"activating"}');
+    else fs.writeFileSync(f.pointer, JSON.stringify({ ...f.previous, version: mode }));
+    f.options.recover = async ({ homeDir, releaseRoot }) => {
+      assert.ok(f.events.includes("extract"));
+      recovery.resetState({ homeDir, releaseRoot });
+    };
+    assert.equal((await installer.installFromApplication(f.options)).recovered, true, mode);
+    assert.equal(recovery.marker(recovery.journalPath(f.options.homeDir)).state, "complete");
+    assert.equal((await installer.installFromApplication(f.options)).alreadyInstalled, true);
+  }
+});
+
+test("cleanup interruption retains a retry journal and never reports ready", async t => {
+  const f = fixture(t);
+  fs.writeFileSync(f.pointer, "{");
+  const phases = [];
+  f.options.onProgress = event => phases.push(event.phase);
+  f.options.recover = async () => { throw Error("locked file"); };
+  await assert.rejects(installer.installFromApplication(f.options), /locked file/);
+  assert.equal(recovery.marker(recovery.journalPath(f.options.homeDir)).state, "cleaning");
+  assert.ok(!phases.includes("ready"));
+  f.options.recover = async ({ homeDir, releaseRoot }) => recovery.resetState({ homeDir, releaseRoot });
+  assert.equal((await installer.installFromApplication(f.options)).recovered, true);
+});
+
+test("an ordinary application reopen cannot reset data after a transient health failure", async t => {
+  const f = fixture(t);
+  f.options.health = async () => ({ ok: false });
+  f.options.allowRecovery = false;
+  const before = fs.readFileSync(f.pointer);
+  await assert.rejects(installer.installFromApplication(f.options), /Run setup again/);
+  assert.deepEqual(fs.readFileSync(f.pointer), before);
+  assert.ok(!f.events.includes("extract"));
+  assert.equal(fs.existsSync(recovery.journalPath(f.options.homeDir)), false);
+});
+
+test("retry survives interruption after reset and during activation", async t => {
+  for (const phase of ["after-reset", "activation"]) {
+    const f = fixture(t);
+    fs.writeFileSync(f.pointer, "{");
+    const activate = f.options.activate;
+    f.options.recover = async ({ homeDir, releaseRoot }) => {
+      recovery.resetState({ homeDir, releaseRoot });
+      if (phase === "after-reset") throw Error("interrupted after cleanup");
+    };
+    if (phase === "activation") f.options.activate = async () => { throw Error("interrupted activation"); };
+    await assert.rejects(installer.installFromApplication(f.options), /interrupted/);
+    assert.notEqual(recovery.marker(recovery.journalPath(f.options.homeDir)).state, "complete");
+    f.options.recover = async ({ homeDir, releaseRoot }) => recovery.resetState({ homeDir, releaseRoot });
+    f.options.activate = activate;
+    assert.equal((await installer.installFromApplication(f.options)).recovered, true);
+    assert.equal((await installer.installFromApplication(f.options)).alreadyInstalled, true);
+  }
+});
+
+test("a newer interrupted candidate cannot be reset by an older installer", async t => {
+  const f = fixture(t);
+  fs.writeFileSync(f.pointer, JSON.stringify({ state: "activating", candidate: { version: "1.0.0" } }));
+  await assert.rejects(installer.installFromApplication(f.options), /downgrade/);
+  assert.ok(!f.events.includes("extract"));
+});
+
+test("failed download or extraction never clears a broken installation", async t => {
+  for (const failure of ["download", "extract"]) {
+    const f = fixture(t);
+    fs.writeFileSync(f.pointer, "{");
+    if (failure === "download") {
+      f.receipt.runtimeDelivery = "download";
+      f.options.verify = async () => ({ receipt: f.receipt, platformKey: f.receipt.platform, artifact: { bytes: 12, url: "unused" } });
+      f.options.download = async () => { throw Error("offline"); };
+    } else f.options.extract = () => { throw Error("bad archive"); };
+    await assert.rejects(installer.installFromApplication(f.options), /offline|bad archive/);
+    assert.equal(fs.readFileSync(f.pointer, "utf8"), "{");
+    assert.equal(fs.existsSync(recovery.journalPath(f.options.homeDir)), false);
   }
 });
 
@@ -230,7 +289,7 @@ test("interrupted commit reconciles only with exact running target proof", async
   const journalPath = path.join(options.homeDir, ".relay", "application-migration.json");
   const journal = JSON.parse(fs.readFileSync(journalPath));
   fs.writeFileSync(journalPath, JSON.stringify({ ...journal, state: "activating" }));
-  await assert.rejects(installer.installFromApplication(options), /interrupted/);
+
   assert.equal((await installer.reconcileApplication({ ...options, health: async () => ({ ok: false }) })).ok, false);
   assert.equal((await installer.reconcileApplication(options)).state, "complete");
   fs.writeFileSync(journalPath, JSON.stringify({ ...journal, state: "recovery-required" }));

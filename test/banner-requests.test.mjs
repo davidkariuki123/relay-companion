@@ -39,7 +39,6 @@ test("a Request arrives in the banner like any relay, newest first, wearing its 
   // The chip sits in the top line, before the time, like the Task chip.
   assert.ok(row.indexOf('<span class="kchip request">Request</span>') < row.indexOf('<span class="th-time">'));
   // Nothing grows the row: no extra line under the words.
-  assert.doesNotMatch(row, /todo-row-why/);
 });
 
 test("the verbs are the pane's ⋯ options, on one line, and a guest gets neither Copy nor Add to Contacts", () => {
