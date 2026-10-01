@@ -40,9 +40,22 @@ for (const key of Object.keys(env)) {
   if (/^(CSC_|WIN_CSC_|APPLE_|GH_TOKEN$|GITHUB_TOKEN$|AWS_)/.test(key) && key !== "CSC_IDENTITY_AUTO_DISCOVERY") delete env[key];
 }
 const platformFlag = process.platform === "win32" ? "--win" : process.platform === "darwin" ? "--mac" : "--linux";
-const result = spawnSync(process.execPath, [path.join(root, "node_modules", "electron-builder", "cli.js"),
-  platformFlag, `--${process.arch}`, "--config", configPath, "--publish", "never", ...(process.argv.includes("--dir") ? ["--dir"] : [])],
-{ cwd: root, env, stdio: "inherit", windowsHide: true });
+// On hosted macOS runners the DMG step intermittently fails to detach its disk
+// image ("hdiutil: couldn't eject ... Resource busy"); the same build succeeds
+// on a later attempt. A real packaging fault still fails every attempt.
+const attempts = process.platform === "darwin" ? 3 : 1;
+let result;
+for (let attempt = 1; attempt <= attempts; attempt++) {
+  if (attempt > 1) {
+    fs.rmSync(config.directories.output, { recursive: true, force: true });
+    console.error(`Packaging failed (${result.status}); retrying (${attempt}/${attempts}).`);
+    spawnSync("sleep", [String(15 * attempt)]);
+  }
+  result = spawnSync(process.execPath, [path.join(root, "node_modules", "electron-builder", "cli.js"),
+    platformFlag, `--${process.arch}`, "--config", configPath, "--publish", "never", ...(process.argv.includes("--dir") ? ["--dir"] : [])],
+  { cwd: root, env, stdio: "inherit", windowsHide: true });
+  if (!result.error && result.status === 0) break;
+}
 if (result.error || result.status !== 0) throw new Error(result.error?.message || `Packaging failed (${result.status})`);
 const artifacts = [];
 for (const entry of fs.readdirSync(config.directories.output, { withFileTypes: true })) {

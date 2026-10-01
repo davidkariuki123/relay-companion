@@ -306,7 +306,7 @@ export async function main(inputs) {
     phase = "open-installer-ui";
     run("/usr/bin/open", ["-n", "-a", target.app, "--args", `--remote-debugging-port=${port}`], { env: appEnv });
     const openedAt = Date.now(), deadline = openedAt + 8 * 60_000;
-    let clicked = false, setupSeen = false, firstHeartbeat;
+    let clicked = false, firstHeartbeat;
     while (Date.now() < deadline) {
       const page = await installerPage(port);
       if (page) {
@@ -328,11 +328,6 @@ export async function main(inputs) {
             await clickInstallButton(client, state.button, () => {
               clicked = true; phase = "relocate-and-activate"; record("install-button-input-sent");
             });
-          }
-          if (clicked && !setupSeen && page.url.endsWith("native-bootstrap.html")) {
-            // Setup starts on its own over an old Relay. Nothing here is clicked, so
-            // installer-recovery-complete below proves it ran without a person.
-            setupSeen = true; record("setup-started-without-input");
           }
         } catch (error) {
           if (error.installerFailure) throw error;
@@ -371,6 +366,11 @@ export async function main(inputs) {
               if (isRecovery(inputs.mode)) {
                 assert.equal(read(path.join(relayRoot, "runtime/installer-recovery.json")).state, "complete");
                 record("installer-recovery-complete");
+                // Only the DMG's install button is ever clicked, so a completed
+                // recovery is setup that started on its own. Recorded from the
+                // outcome: a fast handoff can close the setup window before any
+                // observer poll sees it.
+                record("setup-started-without-input");
               }
               proof.ok = true; return proof;
             }
