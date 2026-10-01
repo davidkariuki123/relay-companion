@@ -33,6 +33,8 @@ function fixture(t, existing = true) {
   }
   const events = [];
   const options = { homeDir, applicationRoot, resourcesDir, executable, activationEnabled: true,
+    // Never touch a real pill on the machine running these tests.
+    hidePill: () => ({ hidden: false, restore: () => false }),
     verify: async () => { events.push("verified"); return { receipt, platformKey: receipt.platform }; },
     acquireLock: () => { events.push("lock"); return { release: () => events.push("unlock") }; },
     health: async () => { events.push("health"); return { ok: true }; },
@@ -433,4 +435,60 @@ test("activation runs with recovery paused, and recovery resumes whether setup s
     else assert.equal((await installer.installFromApplication(options)).ok, true);
     assert.deepEqual(calls, ["pause", "repause", "activate", `resume:${!fails}`]);
   }
+});
+
+test("setup hides only the old pill, and brings it back when setup fails", async t => {
+  for (const fails of [false, true]) {
+    const f = fixture(t), calls = [];
+    const hidePill = ({ current }) => { calls.push(`hide:${current.version}`); return { hidden: true, restore: () => calls.push("restore") }; };
+    const activate = f.options.activate;
+    const options = { ...f.options, hidePill, activate: async (...args) => {
+      calls.push("activate");
+      if (fails) throw new Error("activation failed");
+      return activate(...args);
+    } };
+    if (fails) await assert.rejects(installer.installFromApplication(options), /activation failed/);
+    else assert.equal((await installer.installFromApplication(options)).ok, true);
+    assert.deepEqual(calls, fails ? ["hide:0.1.550", "activate", "restore"] : ["hide:0.1.550", "activate"]);
+  }
+});
+
+test("the pause is held by setup: Relay's own setup and pill launch leave it, a dead holder does not count", async t => {
+  const intent = (await import("../bootstrap/recovery-intent.cjs")).default;
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-held-pause-"));
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  const file = path.join(homeDir, ".relay", "recovery", "intent.json");
+  intent.setStopped(true, homeDir, { heldBy: "setup", pid: process.pid });
+  assert.equal(intent.stopped(homeDir), true);
+  assert.equal(intent.resumeUnlessHeld(homeDir), false, "activation's own setup and pill keep a live setup's pause");
+  assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).stopped, true);
+  // A setup that died while holding the pause never leaves recovery paused.
+  fs.writeFileSync(file, JSON.stringify({ schema: 1, stopped: true, heldBy: "setup", pid: 2 ** 22 + 12345 }));
+  assert.equal(intent.stopped(homeDir), false);
+  assert.equal(intent.resumeUnlessHeld(homeDir), true);
+  assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).stopped, false);
+  // A person's deliberate stop is untouched by the hold rules.
+  intent.setStopped(true, homeDir);
+  assert.equal(intent.stopped(homeDir), true);
+});
+
+test("hiding the old pill stops only the pill on each platform and reopens it from the previous Relay", async () => {
+  const { hidePreviousPill, MAC_PILL_LABEL } = (await import("../bootstrap/previous-pill.cjs")).default;
+  const current = { active: true, node: "/node", bin: "/relay/bin/relay.js" };
+  for (const [platform, expected] of [["win32", "powershell.exe"], ["darwin", "/bin/launchctl"], ["linux", "pkill"]]) {
+    const runs = [], launches = [];
+    const result = hidePreviousPill({ current, platform, uid: 501, run: (command, args) => { runs.push([command, ...args]); return { status: 0 }; },
+      launch: (command, args, options) => { launches.push([command, args, options.detached]); return { unref() {} }; } });
+    assert.equal(result.hidden, true);
+    assert.equal(runs[0][0], expected);
+    const commandText = runs[0].join(" ");
+    if (platform === "darwin") assert.match(commandText, new RegExp(`bootout gui/501/${MAC_PILL_LABEL.replace(/\./g, "\.")}$`));
+    else assert.match(commandText, /overlay[\s\S]*main/, "only the pill's overlay process");
+    assert.doesNotMatch(commandText, /daemon/, "the background service keeps running");
+    assert.equal(result.restore(), true);
+    assert.deepEqual(launches, [["/node", ["/relay/bin/relay.js", "pill"], true]]);
+  }
+  // Nothing hidden, nothing reopened; an inactive previous runtime cannot reopen its pill.
+  assert.equal(hidePreviousPill({ current, platform: "linux", run: () => ({ status: 1 }) }).restore(), false);
+  assert.equal(hidePreviousPill({ current: { active: false }, platform: "linux", run: () => ({ status: 0 }) }).restore(), false);
 });

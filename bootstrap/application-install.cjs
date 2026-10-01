@@ -33,7 +33,10 @@ async function pauseRecoveryChecks({ homeDir, timeoutMs = 3 * 60_000, pollMs = 2
   sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
   const intent = require("./recovery-intent.cjs");
   const wasStopped = intent.stopped(homeDir);
-  intent.setStopped(true, homeDir);
+  // Recorded as held by this setup, so Relay's own setup and pill launch during
+  // activation leave it paused; a dead holder no longer counts.
+  const hold = () => intent.setStopped(true, homeDir, { heldBy: "setup", pid: process.pid });
+  hold();
   const runLock = path.join(homeDir, ".relay", "recovery", "run.lock");
   for (const deadline = Date.now() + timeoutMs; ;) {
     try { bootstrap.acquireCanonicalLock(runLock).release(); break; }
@@ -44,7 +47,7 @@ async function pauseRecoveryChecks({ homeDir, timeoutMs = 3 * 60_000, pollMs = 2
     }
   }
   return {
-    repause: () => intent.setStopped(true, homeDir),
+    repause: hold,
     resume: succeeded => intent.setStopped(succeeded ? false : wasStopped, homeDir),
   };
 }
@@ -107,6 +110,7 @@ async function installFromApplication({ resourcesDir, applicationRoot, executabl
   homeDir = os.homedir(), verify = verifyBundle, extract = extractBundle, activate = bootstrap.activateRuntime,
   acquireLock = bootstrap.acquireCanonicalLock, health = require("./runtime-health.cjs").exactRuntimeHealth,
   recover = recovery.recoverWithCandidate, pauseRecovery = pauseRecoveryChecks,
+  hidePill = require("./previous-pill.cjs").hidePreviousPill,
   drain = require("./update-activity.cjs").drainCalls, download = bootstrap.downloadVerifiedArtifact,
   onProgress = () => {}, signal } = {}) {
   onProgress({ phase: "verifying", canCancel: false });
@@ -128,7 +132,7 @@ async function installFromApplication({ resourcesDir, applicationRoot, executabl
   const journalPath = path.join(homeDir, ".relay", "application-migration.json");
   let releaseDrain;
   let downloadDirectory;
-  let pausedRecovery, succeeded = false;
+  let pausedRecovery, previousPill, succeeded = false;
   try {
     const recordedCurrent = recovery.marker(path.join(runtimeRoot, "current.json"));
     const removed = recovery.marker(path.join(homeDir, ".relay", "application-uninstall.json"));
@@ -199,6 +203,8 @@ async function installFromApplication({ resourcesDir, applicationRoot, executabl
       return { ok: true, applicationOnly: true, owner, runtime: current, updateOwner: "canonical-runtime" };
     }
     pausedRecovery = await pauseRecovery({ homeDir });
+    // Only the old pill goes now; its background service runs until the switch.
+    if (current?.active === true) previousPill = hidePill({ current });
     if (bundle.receipt.runtimeDelivery === "download") {
       signal?.throwIfAborted();
       // Stage beside releases: tar requires archive and destination on one volume.
@@ -275,6 +281,7 @@ async function installFromApplication({ resourcesDir, applicationRoot, executabl
     try { releaseDrain?.(); }
     finally {
       try { pausedRecovery?.resume(succeeded); } catch { /* recovery reads a missing intent as running */ }
+      if (!succeeded) try { previousPill?.restore(); } catch { /* recovery restores a missing pill */ }
       lock.release();
       if (downloadDirectory) fs.rmSync(downloadDirectory, { recursive: true, force: true });
     }

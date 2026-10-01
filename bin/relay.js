@@ -737,7 +737,7 @@ async function cmdOpen(positional, flags) {
 
 /** Launch (or signal) the desktop Relay companion pill and verify it is visible. */
 async function cmdPill(flags = {}, positional = []) {
-  createRequire(import.meta.url)("../bootstrap/recovery-intent.cjs").setStopped(false);
+  createRequire(import.meta.url)("../bootstrap/recovery-intent.cjs").resumeUnlessHeld();
   migratePersistedContentFields({ log: (message) => console.log(`[relay] ${message}`) });
   const here = path.dirname(fileURLToPath(import.meta.url));
   const overlayMain = path.resolve(here, "../overlay/main.cjs");

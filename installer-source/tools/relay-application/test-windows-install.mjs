@@ -64,6 +64,7 @@ async function removePackage() {
 const activate = action => waitForOtherTransaction(() => run(node, [path.join(resources, "activate.cjs"), action, applicationRoot, path.join(applicationRoot, "Relay.exe")]),
   { onFirstWait: () => { try { console.log(`DIAGNOSTICS at first wait ${JSON.stringify(lockDiagnostics(os.homedir()), null, 1)}`); } catch {} } });
 const { inspectInstallation } = require("./lib/migration.cjs");
+const { pauseRecoveryChecks } = require("../../packages/companion/bootstrap/application-install.cjs");
 // The application's own setup is finished when the candidate is the active runtime and no transaction is open.
 function setUpByApplication() {
   const installation = inspectInstallation({ homeDir: os.homedir() });
@@ -137,7 +138,12 @@ try {
   };
   if (mode !== "broken") await openApplication();
   if (mode === "broken") {
+    // A broken Relay is one its own recovery did not fix: the stock recovery check
+    // restores a corrupt config from its backup within a minute (recovery-config.cjs),
+    // which raced the Dev candidate into a healthy stable Relay (0.1.577 run). Pause
+    // it before each damage, as that stuck install effectively is; setup resumes it.
     for (const [index, condition] of brokenConditions.entries()) {
+      await pauseRecoveryChecks({ homeDir: os.homedir() });
       applyBrokenCondition(relayRoot, condition);
       if (index === 0) await openApplication(); else await activate("install");
       const current = await assertHealthy();
