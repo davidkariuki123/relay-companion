@@ -53,7 +53,16 @@ const imageRoot = path.join(root, "image");
 fs.mkdirSync(imageRoot);
 fs.symlinkSync("/Applications", path.join(imageRoot, "Applications"));
 fs.cpSync(appPath, path.join(imageRoot, path.basename(appPath)), { recursive: true, verbatimSymlinks: true });
-run("hdiutil", ["create", "-volname", preview ? "Relay Migration Preview" : "Relay", "-srcfolder", imageRoot, "-format", "UDZO", dmg]);
+// hdiutil create intermittently fails with "Resource busy" on hosted macOS
+// runners; the same command succeeds moments later.
+for (let attempt = 1; ; attempt++) {
+  try { run("hdiutil", ["create", "-volname", preview ? "Relay Migration Preview" : "Relay", "-srcfolder", imageRoot, "-format", "UDZO", dmg]); break; }
+  catch (error) {
+    if (attempt >= 4 || !/Resource busy/i.test(error.message)) throw error;
+    fs.rmSync(dmg, { force: true });
+    spawnSync("sleep", [String(10 * attempt)]);
+  }
+}
 run("codesign", ["--sign", identity, ...keychainArgs, "--timestamp", dmg]);
 const authArgs = ["--keychain-profile", keychainProfile, ...(auth.keychain ? ["--keychain", auth.keychain] : [])];
 const submission = JSON.parse(run("xcrun", ["notarytool", "submit", dmg, ...authArgs, "--wait", "--output-format", "json"]));

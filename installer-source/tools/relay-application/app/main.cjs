@@ -202,8 +202,13 @@ app.whenReady().then(() => {
       const env = { ...process.env };
       for (const key of ["NODE_OPTIONS", "NODE_PATH", "ELECTRON_RUN_AS_NODE"]) delete env[key];
       for (const key of Object.keys(env)) if (/^RELAY_(CONFIG|HOME|COMPANION_HOME|NATIVE_CREDENTIALS)/.test(key)) delete env[key];
+      // An old Relay may be updating itself at the moment setup starts. Setup
+      // then exits 75; wait for that update and run setup again rather than
+      // stopping with "needs attention" (seen in CI, 2026-10-01).
+      const waitForOtherUpdateUntil = Date.now() + 10 * 60_000;
       try {
-        await new Promise((resolve, reject) => {
+        for (;;) {
+          const code = await new Promise((resolve, reject) => {
           const child = spawn(path.join(process.resourcesPath, process.platform === "win32" ? "node.exe" : "node"),
             [path.join(process.resourcesPath, "activate.cjs"), action, applicationRoot, process.execPath, ...(!allowRecovery ? ["--preserve-state"] : [])],
             { windowsHide: true, stdio: ["ignore", fd, fd, "ipc"], env });
@@ -212,10 +217,16 @@ app.whenReady().then(() => {
             if (message?.type === "setup-progress") publishProgress(message);
           });
           child.once("error", reject);
-          child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(code === 2
-            ? "Download cancelled. You can retry setup when you are ready."
-            : `Relay setup needs attention. Details: ${logPath}`)));
-        });
+          child.once("exit", resolve);
+          });
+          if (code === 0) break;
+          if (code === 75 && Date.now() < waitForOtherUpdateUntil) {
+            publishProgress({ phase: "waiting", canCancel: false });
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            continue;
+          }
+          throw new Error(code === 2 ? "Download cancelled. You can retry setup when you are ready." : `Relay setup needs attention. Details: ${logPath}`);
+        }
       } finally { fs.closeSync(fd); }
       publishProgress({ phase: action === "install" ? "ready" : "idle", canCancel: false });
       return { ok: true, integrations: action === "install" ? integrationStatus() : undefined };

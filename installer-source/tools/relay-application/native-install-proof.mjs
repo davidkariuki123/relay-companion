@@ -43,7 +43,8 @@ export function requiredChecks(mode, channel) {
 // wait until the installation it set up is the candidate, keep its output, and
 // fail on any startup error. The harness's own setup steps then run as repeats.
 export const startupFailure = /Relay startup failed|UnhandledPromiseRejection|Uncaught|is not a function|ReferenceError|TypeError/;
-export async function finishAndRun(executable, { done, timeoutMs = 12 * 60_000, pollMs = 2000, env = process.env, platform = process.platform } = {}) {
+export const setupFailure = /Relay setup needs attention/;
+export async function finishAndRun(executable, { done, setupLog, timeoutMs = 12 * 60_000, pollMs = 2000, env = process.env, platform = process.platform } = {}) {
   const child = spawn(executable, [], { env: { ...env, ELECTRON_ENABLE_LOGGING: "1" }, stdio: ["ignore", "pipe", "pipe"],
     detached: platform !== "win32" });
   let output = "", exited = null;
@@ -55,7 +56,7 @@ export async function finishAndRun(executable, { done, timeoutMs = 12 * 60_000, 
   });
   const deadline = Date.now() + timeoutMs;
   let finished = false;
-  while (!finished && !startupFailure.test(output) && !exited?.error && Date.now() < deadline) {
+  while (!finished && !startupFailure.test(output) && !setupFailure.test(output) && !exited?.error && Date.now() < deadline) {
     await new Promise(resolve => setTimeout(resolve, pollMs));
     try { finished = Boolean(done()); } catch {}
   }
@@ -68,6 +69,13 @@ export async function finishAndRun(executable, { done, timeoutMs = 12 * 60_000, 
   console.log(`APPLICATION OUTPUT ${JSON.stringify(output.slice(-4000))}`);
   if (exited?.error) throw new Error(`The installed application could not be opened: ${exited.error.message}`);
   assert.doesNotMatch(output, startupFailure, `The installed application failed while starting:\n${output.slice(-4000)}`);
+  if (setupFailure.test(output) || !finished) {
+    // The reason is in the application's own setup log, not its console output.
+    let log;
+    try { log = fs.readFileSync(setupLog, "utf8").slice(-6000); } catch { log = `(no setup log at ${setupLog})`; }
+    console.log(`APPLICATION SETUP LOG ${JSON.stringify(log)}`);
+    assert.doesNotMatch(output, setupFailure, `The application's own setup failed:\n${log}`);
+  }
   assert.ok(finished, `Opening the installed application did not finish setting Relay up within ${timeoutMs / 60_000} minutes`);
   return { output };
 }

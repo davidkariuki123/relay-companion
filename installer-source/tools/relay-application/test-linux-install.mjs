@@ -52,15 +52,26 @@ const { inspectInstallation } = require("./lib/migration.cjs");
 function setUpByApplication() {
   const installation = inspectInstallation({ homeDir: os.homedir() });
   return installation.pointer === "active" && installation.installedVersion === receipt.version
-    && installation.transaction === "absent" && installation.applicationOwner !== "absent";
+    && installation.transaction === "absent" && installation.applicationOwner !== "absent"
+    && read(path.join(relayRoot, "application-migration.json"))?.state === "complete";
 }
-async function assertHealthy() {
+// Services can take a few more seconds to settle after setup returns on the
+// slower ARM runners (two "broken" jobs failed one immediate check). Allow a
+// minute, then fail with the last reason.
+async function assertHealthy({ deadline = Date.now() + 60_000 } = {}) {
+  for (;;) {
+    try { return await checkHealthy(); }
+    catch (error) { if (Date.now() >= deadline) throw error; await new Promise(resolve => setTimeout(resolve, 2000)); }
+  }
+}
+async function checkHealthy() {
   const current = read(pointerFile);
   assert.equal(current.version, receipt.version); assert.equal(current.active, true);
   // Stock installations omit updateChannel for stable; Dev must remain explicit.
   assert.equal(read(configFile).updateChannel || "stable", channel);
   const { exactRuntimeHealth } = require(path.join(current.packageRoot, "bootstrap", "runtime-health.cjs"));
-  assert.equal((await exactRuntimeHealth(current)).ok, true);
+  const health = await exactRuntimeHealth(current);
+  assert.equal(health.ok, true, `Relay runtime is not healthy: ${JSON.stringify(health).slice(0, 800)}`);
   const { applicationOwner } = require(path.join(current.packageRoot, "bootstrap", "application-owner.cjs"));
   assert.equal(applicationOwner().installedPackagingSourceSha, receipt.packagingSourceSha);
   return current;
@@ -144,7 +155,8 @@ try {
   // "Finish and run": the application sets Relay up by itself, over whatever is there.
   // A broken Relay is damaged first, so the application itself has to repair it.
   const openApplication = async () => {
-    await finishAndRun(executable, { done: setUpByApplication });
+    await finishAndRun(executable, { done: setUpByApplication,
+      setupLog: path.join(os.homedir(), ".config", "Relay Application", "logs", "application-setup.log") });
     record("application-finish-and-run");
   };
   if (mode !== "broken") await openApplication();

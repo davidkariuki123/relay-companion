@@ -35,5 +35,8 @@ const onProgress = progress => {
   ? uninstallFromApplication({ applicationRoot, confirmed: true, allowUnconfigured: action === "uninstall-package" })
   : installFromApplication({ resourcesDir, applicationRoot, executable, activationEnabled: true, allowRecovery: recoveryMode !== "--preserve-state", onProgress, signal: controller.signal }))
   .then((result) => { if (result.ok === false) throw new Error(result.reason || result.state); })
-  .catch((error) => { console.error(error.message); process.exitCode = controller.signal.aborted ? 2 : 1; })
+  // 75 (EX_TEMPFAIL, as in recovery-transaction.cjs): another Relay install or update
+  // holds the lock, so nothing was judged; the application waits and runs this again.
+  .catch((error) => { console.error(error.message); process.exitCode = controller.signal.aborted ? 2
+    : /Another verified Relay install or update is already in progress/.test(error.message) ? 75 : 1; })
   .finally(() => { process.removeListener("message", onMessage); if (process.connected) process.disconnect(); });
