@@ -18,6 +18,9 @@ const release = require(path.join(bootstrap, "application-release.cjs"));
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const read = file => JSON.parse(fs.readFileSync(file, "utf8"));
 export const recoveryVersions = ["0.1.267", "0.1.326", "0.1.413", "0.1.440", "0.1.454", "0.1.490"];
+// Stock versions whose setup pairs interactively; their starting point is a
+// paired-settings fixture plus their own `relay install` (recorded in the proof).
+export const pairsDuringSetup = ["0.1.267", "0.1.326"];
 export const installerModes = ["fresh", "leftover", "same-version", ...recoveryVersions.flatMap(v => [`legacy-${v}`, `broken-${v}`])];
 const isRecovery = mode => mode.startsWith("legacy-") || mode.startsWith("broken-");
 
@@ -213,7 +216,20 @@ export async function main(inputs) {
       const metadata = read(path.join(packageRoot, "package.json"));
       assert.equal(metadata.version, version);
       const bin = typeof metadata.bin === "string" ? metadata.bin : metadata.bin.relay;
-      run(process.execPath, [path.join(packageRoot, bin), "setup"], { timeout: 5 * 60_000 });
+      if (pairsDuringSetup.includes(version)) {
+        // This version's setup stops for a pairing code typed in from the Relay
+        // app, so unattended it exits 0 having done nothing. Leave what pairing
+        // leaves (a paired settings file), then run the version's own `relay
+        // install`, which registers its services exactly as setup does after
+        // pairing. The credential is a placeholder and the API is unreachable on
+        // this runner, so no fake login ever reaches a Relay server.
+        fs.mkdirSync(relayRoot, { recursive: true, mode: 0o700 });
+        fs.writeFileSync(path.join(relayRoot, "config.json"), JSON.stringify({ apiUrl: "https://127.0.0.1:9",
+          webUrl: "https://sendrelays.com", deviceName: "relay-ci", deviceToken: "relay-ci-placeholder-not-a-credential",
+          deviceId: "dev_relay_ci_placeholder", user: { id: "usr_relay_ci_placeholder", name: "Relay CI", email: "ci@example.invalid" } }, null, 2), { mode: 0o600 });
+        run(process.execPath, [path.join(packageRoot, bin), "install"], { timeout: 5 * 60_000 });
+        record("paired-settings-fixture");
+      } else run(process.execPath, [path.join(packageRoot, bin), "setup"], { timeout: 5 * 60_000 });
       assert.ok(fs.existsSync(path.join(relayRoot, "config.json")), "Stock setup must actually create Relay state");
       const pointer = path.join(relayRoot, "runtime/current.json");
       if (fs.existsSync(pointer)) assert.equal(read(pointer).version, version, "Baseline silently advanced before the recovery test");

@@ -3,7 +3,7 @@ import test from "node:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { validateInputs, assertDisposable, verifyCandidate, clickInstallButton, installerModes, recoveryVersions, selectStockChannel } from "./verify-mac-installer.mjs";
+import { validateInputs, assertDisposable, verifyCandidate, clickInstallButton, installerModes, recoveryVersions, pairsDuringSetup, selectStockChannel } from "./verify-mac-installer.mjs";
 
 test("a Dev candidate's stock baseline is moved to Dev by its own CLI before any damage", t => {
   const relayRoot = fs.mkdtempSync(path.join(os.tmpdir(), "relay-mac-channel-"));
@@ -99,4 +99,14 @@ test("retained Dev candidates require the exact public build identity as well as
   for (const change of [{ packagingPublicSourceSha: undefined }, { packagingPublicSourceSha: "d".repeat(40) },
     { channel: "stable" }, { channel: undefined }, { version: manifest.version }])
     assert.throws(() => verifyCandidate({ ...candidate, ...change }, manifest, "darwin-x64"));
+});
+
+test("only the stock versions that pair during setup start from the paired-settings fixture", () => {
+  // 0.1.267 and 0.1.326 stop setup for a typed pairing code; 0.1.413 onwards set up unattended.
+  assert.deepEqual(pairsDuringSetup, ["0.1.267", "0.1.326"]);
+  for (const version of pairsDuringSetup) assert.ok(recoveryVersions.includes(version));
+  const source = fs.readFileSync(new URL("./verify-mac-installer.mjs", import.meta.url), "utf8");
+  assert.match(source, /deviceToken: "relay-ci-placeholder-not-a-credential"/);
+  assert.match(source, /apiUrl: "https:\/\/127\.0\.0\.1:9"/, "a placeholder credential never reaches a Relay server");
+  assert.match(source, /\[path\.join\(packageRoot, bin\), "install"\][\s\S]*record\("paired-settings-fixture"\)/);
 });
