@@ -193,7 +193,7 @@ export function isBridgelessCodexInstall(platform = process.platform, {
   if (!bridgelessInstallPromise) {
     bridgelessInstallPromise = Promise.resolve()
       .then(resolveInstallLocation)
-      .then((location) => Boolean(location) && fs.existsSync(path.win32.join(location, "app", "resources", "owl-electron-app.json")))
+      .then((location) => Boolean(location) && fs.existsSync(path.join(location, "app", "resources", "owl-electron-app.json")))
       .catch(() => false);
   }
   return bridgelessInstallPromise;

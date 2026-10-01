@@ -289,12 +289,11 @@ async function applyInstall({
     const detail = failure ? ` (${failure})` : "";
     console.log(`Could not install Relay pill autostart${detail}. Run \`relay pill\` to open it.`);
   }
-  // Nothing was installed because no agent lives on this machine. This is the
-  // single most likely outcome for someone who was sent a relay and followed the
-  // instructions, and it used to print the skip lines above and exit 0 -- with
-  // the downloadable .command wrapper then adding "Relay is set up." The person
-  // ends up with a paired device, a daemon and a pill, and no way to receive a
-  // relay in an agent, having been told it worked.
+  // No Claude Code, Claude Desktop or Codex was found here: someone may use only
+  // Cursor, or no AI app yet. Setup still succeeds, because the native installer
+  // runs it and would otherwise roll back a working Relay (Shane, 2026-10-01).
+  // It says plainly that Relay is not connected to an AI app yet; after each
+  // update Relay registers itself with any of those apps installed since.
   if (sweptStaleEntries.length) {
     // A stale entry is not harmless: Claude Desktop validates the schema, not the
     // filesystem, so it spawns and crashes on every single app launch.
@@ -303,15 +302,15 @@ async function applyInstall({
 
   if (!installed.length) {
     console.log("");
-    console.log(`Relay could not finish: no ${process.platform === "linux" ? "Claude Code or Codex CLI" : "Claude or Codex app"} was found on this machine.`);
-    console.log("Relay delivers into an AI assistant, so it needs one of these first:");
+    console.log(`Relay is installed, but no ${process.platform === "linux" ? "Claude Code or Codex CLI" : "Claude or Codex app"} was found to connect it to.`);
+    console.log("To use Relay from an AI assistant, install one of these:");
     if (process.platform !== "linux") {
       console.log("  Claude        https://claude.com/download        (desktop app)");
       console.log("  ChatGPT/Codex https://chatgpt.com/download       (desktop app)");
     }
     console.log("  Claude Code   https://claude.com/claude-code     (terminal)");
     if (process.platform === "linux") console.log("  Codex CLI     Install the Codex command-line app         (terminal)");
-    console.log("Install one, then run this command again.");
+    console.log("Then run `relay setup` again, or wait for Relay's next update, which connects it.");
     console.log("");
     console.log(`In the meantime you can read and reply to your relays on the web: ${absoluteWebTarget("/app/relays")}`);
     return { installed, missing, daemon, pill, activations, agentMissing: true, lifecycleFailed };
@@ -425,9 +424,10 @@ async function cmdSetup(flags) {
     console.log("The Relay is waiting in the pill. Read it there, then connect the intended recipient account to reply or open it in your agent.");
   }
   // The relay is opened/staged first -- the recipient should still get the thing
-  // they came for -- but setup did not achieve what it claims, so it must not
-  // report success. `exitCode` rather than `exit()` so nothing above is truncated.
-  if (install?.agentMissing || install?.lifecycleFailed) process.exitCode = 1;
+  // they came for -- but a broken service lifecycle must not report success. A
+  // missing AI app is not a failure (see applyInstall). `exitCode` rather than
+  // `exit()` so nothing above is truncated.
+  if (install?.lifecycleFailed) process.exitCode = 1;
 }
 
 /** Install the tools + daemon on a device that is already paired. */

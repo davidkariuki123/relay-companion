@@ -85,7 +85,9 @@ async function assertHealthy() {
 try {
   await release.verifyApplicationArtifact(installer, entry);
   record("exact-retained-receipt-and-installer");
-  fs.mkdirSync(path.join(os.homedir(), ".codex"), { recursive: true });
+  // Stock baselines finish setup only beside an AI app. A fresh install has none:
+  // Relay must install for someone with only Cursor, or no AI app yet.
+  if (mode !== "fresh") fs.mkdirSync(path.join(os.homedir(), ".codex"), { recursive: true });
   if (mode !== "fresh") {
     proof.baseline = arg("--baseline");
     if (!/^\d+\.\d+\.\d+$/.test(proof.baseline || "")) throw new Error("Exact stock baseline required");

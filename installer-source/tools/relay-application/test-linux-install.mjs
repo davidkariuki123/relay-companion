@@ -105,7 +105,9 @@ try {
   const packageName = run("dpkg-deb", ["--field", packages.deb, "Package"]).trim();
   assert.match(packageName, /^[a-z0-9][a-z0-9.+-]+$/);
   const removePackage = () => { apt(["remove", "-y", "-qq", packageName]); assert.equal(fs.existsSync(executable), false); };
-  fs.mkdirSync(path.join(os.homedir(), ".codex"), { recursive: true });
+  // Stock baselines finish setup only beside an AI app. A fresh install has none:
+  // Relay must install for someone with only Cursor, or no AI app yet.
+  if (mode !== "fresh") fs.mkdirSync(path.join(os.homedir(), ".codex"), { recursive: true });
   proof.sandboxes = { candidate: provisionSandbox(receipt.version, receipt.runtimeSourceSha) };
   if (mode !== "fresh") {
     proof.baseline = arg("--baseline");

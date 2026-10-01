@@ -78,3 +78,14 @@ test("Linux rollout kill switch survives API, IPC, and renderer boundaries", () 
   assert.match(main, /INSTALLATION_AUTH_IPC_ERROR_CODES[\s\S]*"linux_desktop_disabled"/);
   assert.match(inbox, /detail\.includes\("linux_desktop_disabled"\)[\s\S]*New Linux desktop connections are temporarily paused/);
 });
+
+test("setup succeeds without an AI app and says Relay is not connected yet", () => {
+  // Someone may use only Cursor, or no AI app yet; the native installer runs setup and
+  // would roll back a working Relay if a missing AI app failed it (2026-10-01).
+  const setup = between(cli, "async function cmdSetup", "async function cmdInstall");
+  assert.match(setup, /if \(install\?\.lifecycleFailed\) process\.exitCode = 1;/);
+  assert.doesNotMatch(setup, /agentMissing[^\n]*exitCode/);
+  const apply = between(cli, "async function applyInstall", "async function cmdSetup");
+  assert.match(apply, /Relay is installed, but no /);
+  assert.doesNotMatch(apply, /could not finish/);
+});
