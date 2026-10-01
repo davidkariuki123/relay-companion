@@ -225,7 +225,10 @@ export function validateInstalledPackageShape(packageRoot, { version, distributi
     // Native installer recovery uses only Node builtins and lifecycle ownership;
     // account cleanup itself runs in the separately verified candidate runtime.
     const installerRecoveryBootstrap = [...diagnosticBootstrap, "application-recovery.cjs"].sort();
-    if (![legacyBootstrap, recoveryBootstrap, resilientBootstrap, monitoredBootstrap, macRecoveryBootstrap, responsiveRecoveryBootstrap, configRecoveryBootstrap, bundledNodeBootstrap, daemonProgressBootstrap, applicationBootstrap, handoffBootstrap, rulesBootstrap, transactionBootstrap, lifecycleBootstrap, diagnosticBootstrap, installerRecoveryBootstrap].some(shape => JSON.stringify(bootstrapFiles) === JSON.stringify(shape))) {
+    // Setup hides only the previous Relay pill while it downloads and reopens it
+    // if setup fails: Node builtins only (2026-10-02).
+    const previousPillBootstrap = [...installerRecoveryBootstrap, "previous-pill.cjs"].sort();
+    if (![legacyBootstrap, recoveryBootstrap, resilientBootstrap, monitoredBootstrap, macRecoveryBootstrap, responsiveRecoveryBootstrap, configRecoveryBootstrap, bundledNodeBootstrap, daemonProgressBootstrap, applicationBootstrap, handoffBootstrap, rulesBootstrap, transactionBootstrap, lifecycleBootstrap, diagnosticBootstrap, installerRecoveryBootstrap, previousPillBootstrap].some(shape => JSON.stringify(bootstrapFiles) === JSON.stringify(shape))) {
       throw new Error("Thin installer bootstrap contents do not match the reviewed shape");
     }
     const manifest = JSON.parse(fs.readFileSync(path.join(packageRoot, "skill", "manifest.json"), "utf8"));
