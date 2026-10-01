@@ -206,6 +206,13 @@ export async function main(inputs) {
       // was never imported) and older versions stop before starting services.
       // The Windows and Linux harnesses already provide this Codex home.
       fs.mkdirSync(path.join(os.homedir(), ".codex"), { recursive: true });
+      // The users this models are stuck on this version. Switched to Dev, a live
+      // stock updater can install the current npm dev runtime mid-test, leaving
+      // nothing old for the installer to recover (0.1.575 Mac run). Every stock
+      // runtime honours RELAY_AUTO_UPDATE=off; set it for this login session so
+      // the stock services start with it, and clear it before the candidate runs.
+      process.env.RELAY_AUTO_UPDATE = "off";
+      spawnSync("/bin/launchctl", ["setenv", "RELAY_AUTO_UPDATE", "off"], { timeout: 15_000 });
       const baselineDirectory = path.join(work, "stock-baseline");
       fs.mkdirSync(baselineDirectory);
       const published = JSON.parse(run("npm", ["view", `relay-companion@${version}`, "dist", "--json"]));
@@ -267,6 +274,11 @@ export async function main(inputs) {
         proof.brokenCondition = condition;
         record("broken-installation-fixture");
       }
+      // The candidate and anything it starts run with updates as a person has them.
+      delete process.env.RELAY_AUTO_UPDATE;
+      spawnSync("/bin/launchctl", ["unsetenv", "RELAY_AUTO_UPDATE"], { timeout: 15_000 });
+      if (!inputs.mode.startsWith("broken-") && fs.existsSync(pointer)) assert.equal(read(pointer).version, version, "Baseline advanced before the installer ran");
+      record("stock-baseline-updates-paused");
     } else if (inputs.mode !== "fresh") {
       const baseline = inputs.mode === "same-version" ? target : await download(inputs.baseline, null, "baseline");
       run("/usr/bin/ditto", [baseline.app, destination]);

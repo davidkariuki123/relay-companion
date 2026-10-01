@@ -1,11 +1,11 @@
 {
   "schema": 1,
   "repository": "davidkariuki123/relay",
-  "sourceSha": "615464fe6eb83ca78505c229ab06d38481e114e6",
+  "sourceSha": "4054c9462de6dcbdd88541794b58438323bbe8d2",
   "files": {
     "packages/companion/bootstrap/application-bridge.cjs": "19fd2c791512a065dd2de165a34f92bb53fe1b3d",
     "packages/companion/bootstrap/application-handoff.cjs": "75faae95e7c86bf2a7f7da04b204b89454ad32b2",
-    "packages/companion/bootstrap/application-install.cjs": "e2ce4f4a3025ef2691223e084a98ec9c8deb5849",
+    "packages/companion/bootstrap/application-install.cjs": "846f76640ccb60797573feb67441873590e8918f",
     "packages/companion/bootstrap/application-owner.cjs": "d5d2081ea4e7d8d4fd87241bd54f59b14b1d6ef3",
     "packages/companion/bootstrap/application-package.cjs": "e0df8b426225f998c28b556d21f3d8a7519747c7",
     "packages/companion/bootstrap/application-recovery.cjs": "c11f86e1852c803bf88b9ffb48ed98c61a4dc2d5",

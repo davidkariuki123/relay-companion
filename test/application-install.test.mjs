@@ -399,3 +399,38 @@ test("an installed app is replaced over a newer healthy runtime, which keeps run
   fs.writeFileSync(legacy.pointer, JSON.stringify({ ...legacy.previous, version: "0.3.0" }));
   await assert.rejects(installer.installFromApplication(legacy.options), /cannot downgrade Relay/);
 });
+
+test("setup pauses Relay's own recovery checks, waits out a run in progress, and resumes afterwards", async t => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-pause-recovery-"));
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  const intent = path.join(homeDir, ".relay", "recovery", "intent.json");
+  fs.mkdirSync(path.dirname(intent), { recursive: true });
+  // A recovery run holds its run lock; the pause waits until it finishes.
+  const running = bootstrap.acquireCanonicalLock(path.join(homeDir, ".relay", "recovery", "run.lock"));
+  let waits = 0;
+  const paused = await installer.pauseRecoveryChecks({ homeDir, pollMs: 1, sleep: async () => { waits++; running.release(); } });
+  assert.equal(waits, 1);
+  assert.equal(JSON.parse(fs.readFileSync(intent, "utf8")).stopped, true);
+  paused.resume(true);
+  assert.equal(JSON.parse(fs.readFileSync(intent, "utf8")).stopped, false, "a successful setup leaves recovery running");
+  // A Relay that was deliberately stopped stays stopped when setup fails.
+  fs.writeFileSync(intent, JSON.stringify({ schema: 1, stopped: true }));
+  (await installer.pauseRecoveryChecks({ homeDir })).resume(false);
+  assert.equal(JSON.parse(fs.readFileSync(intent, "utf8")).stopped, true);
+});
+
+test("activation runs with recovery paused, and recovery resumes whether setup succeeds or fails", async t => {
+  for (const fails of [false, true]) {
+    const f = fixture(t), calls = [];
+    const pauseRecovery = async () => { calls.push("pause"); return { repause: () => calls.push("repause"), resume: ok => calls.push(`resume:${ok}`) }; };
+    const activate = f.options.activate;
+    const options = { ...f.options, pauseRecovery, activate: async (...args) => {
+      calls.push("activate");
+      if (fails) throw new Error("activation failed");
+      return activate(...args);
+    } };
+    if (fails) await assert.rejects(installer.installFromApplication(options), /activation failed/);
+    else assert.equal((await installer.installFromApplication(options)).ok, true);
+    assert.deepEqual(calls, ["pause", "repause", "activate", `resume:${!fails}`]);
+  }
+});

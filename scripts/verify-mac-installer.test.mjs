@@ -110,3 +110,13 @@ test("only the stock versions that pair during setup start from the paired-setti
   assert.match(source, /apiUrl: "https:\/\/127\.0\.0\.1:9"/, "a placeholder credential never reaches a Relay server");
   assert.match(source, /\[path\.join\(packageRoot, bin\), "install"\][\s\S]*record\("paired-settings-fixture"\)/);
 });
+
+test("stock baselines are frozen like a stuck user's Relay, and the candidate runs with updates on", () => {
+  const source = fs.readFileSync(new URL("./verify-mac-installer.mjs", import.meta.url), "utf8");
+  const freeze = source.indexOf('["setenv", "RELAY_AUTO_UPDATE", "off"]');
+  const stockSetup = source.indexOf('const baselineDirectory = path.join(work, "stock-baseline");');
+  const release = source.indexOf('["unsetenv", "RELAY_AUTO_UPDATE"]');
+  const candidateUi = source.indexOf('record("stock-installer-ui-opened")');
+  assert.ok(freeze > 0 && freeze < stockSetup, "updates are paused before the stock services first start");
+  assert.ok(release > stockSetup && release < candidateUi, "and allowed again before the candidate installs");
+});

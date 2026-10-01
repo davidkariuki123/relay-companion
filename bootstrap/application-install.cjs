@@ -23,6 +23,32 @@ function inside(root, file) {
   const relative = path.relative(root, file);
   return relative && relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
 }
+// Relay's own recovery check runs every minute. Setup stops the existing
+// services during activation; a check that notices starts repairing them and
+// collides with setup, which then fails with "Rollback failed" (CI, 2026-10-01).
+// Pause the check (recovery honours intent.json) and wait out a run already in
+// progress. The returned function restores the previous state, or leaves
+// recovery running when setup succeeded.
+async function pauseRecoveryChecks({ homeDir, timeoutMs = 3 * 60_000, pollMs = 2000,
+  sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
+  const intent = require("./recovery-intent.cjs");
+  const wasStopped = intent.stopped(homeDir);
+  intent.setStopped(true, homeDir);
+  const runLock = path.join(homeDir, ".relay", "recovery", "run.lock");
+  for (const deadline = Date.now() + timeoutMs; ;) {
+    try { bootstrap.acquireCanonicalLock(runLock).release(); break; }
+    catch (error) {
+      // Past the deadline setup proceeds, as it did before this pause existed.
+      if (!/already in progress/.test(error.message) || Date.now() >= deadline) break;
+      await sleep(pollMs);
+    }
+  }
+  return {
+    repause: () => intent.setStopped(true, homeDir),
+    resume: succeeded => intent.setStopped(succeeded ? false : wasStopped, homeDir),
+  };
+}
+
 function versionCompare(a, b) {
   const aa = a.split(".").map(BigInt), bb = b.split(".").map(BigInt);
   for (let i = 0; i < 3; i++) if (aa[i] !== bb[i]) return aa[i] > bb[i] ? 1 : -1;
@@ -80,7 +106,7 @@ async function installFromApplication({ resourcesDir, applicationRoot, executabl
   allowRecovery = true,
   homeDir = os.homedir(), verify = verifyBundle, extract = extractBundle, activate = bootstrap.activateRuntime,
   acquireLock = bootstrap.acquireCanonicalLock, health = require("./runtime-health.cjs").exactRuntimeHealth,
-  recover = recovery.recoverWithCandidate,
+  recover = recovery.recoverWithCandidate, pauseRecovery = pauseRecoveryChecks,
   drain = require("./update-activity.cjs").drainCalls, download = bootstrap.downloadVerifiedArtifact,
   onProgress = () => {}, signal } = {}) {
   onProgress({ phase: "verifying", canCancel: false });
@@ -102,6 +128,7 @@ async function installFromApplication({ resourcesDir, applicationRoot, executabl
   const journalPath = path.join(homeDir, ".relay", "application-migration.json");
   let releaseDrain;
   let downloadDirectory;
+  let pausedRecovery, succeeded = false;
   try {
     const recordedCurrent = recovery.marker(path.join(runtimeRoot, "current.json"));
     const removed = recovery.marker(path.join(homeDir, ".relay", "application-uninstall.json"));
@@ -171,6 +198,7 @@ async function installFromApplication({ resourcesDir, applicationRoot, executabl
       onProgress({ phase: "ready", canCancel: false });
       return { ok: true, applicationOnly: true, owner, runtime: current, updateOwner: "canonical-runtime" };
     }
+    pausedRecovery = await pauseRecovery({ homeDir });
     if (bundle.receipt.runtimeDelivery === "download") {
       signal?.throwIfAborted();
       // Stage beside releases: tar requires archive and destination on one volume.
@@ -200,7 +228,8 @@ async function installFromApplication({ resourcesDir, applicationRoot, executabl
       atomic(recoveryFile, { ...cleaned, schema: 1, state: "installing", releaseRoot, version: bundle.receipt.version });
       current = null; previousOwner = null; config = {};
     }
-    require("./recovery-intent.cjs").setStopped(false, homeDir);
+    // A repair may have reset the recovery folder; keep checks paused until setup ends.
+    pausedRecovery.repause();
     const layout = { root: runtimeRoot, releaseId, releaseRoot, releasesDir: path.dirname(releaseRoot),
       packageRoot: runtime.packageRoot, pointerPath: path.join(runtimeRoot, "current.json"), lockPath: path.join(runtimeRoot, "transaction.lock") };
     const owner = { schema: 1, appId: APPLICATION_ID, platform: process.platform,
@@ -229,6 +258,7 @@ async function installFromApplication({ resourcesDir, applicationRoot, executabl
       atomic(journalPath, { ...journal, state: "complete", completedAt: Date.now() });
       if (needsRecovery) atomic(recoveryFile, { ...recovery.marker(recoveryFile), state: "complete", completedAt: Date.now() });
       onProgress({ phase: "ready", canCancel: false });
+      succeeded = true;
       return { ok: true, recovered: needsRecovery, owner, runtime: result.candidate, updateOwner: "canonical-runtime" };
     } catch (error) {
       // Bootstrap owns service rollback. Only restore our launcher marker once
@@ -244,6 +274,7 @@ async function installFromApplication({ resourcesDir, applicationRoot, executabl
   } finally {
     try { releaseDrain?.(); }
     finally {
+      try { pausedRecovery?.resume(succeeded); } catch { /* recovery reads a missing intent as running */ }
       lock.release();
       if (downloadDirectory) fs.rmSync(downloadDirectory, { recursive: true, force: true });
     }
@@ -276,4 +307,4 @@ async function reconcileApplication({ homeDir = os.homedir(), acquireLock = boot
   } finally { lock.release(); }
 }
 
-module.exports = { verifyBundle, extractBundle, installFromApplication, reconcileApplication, versionCompare };
+module.exports = { pauseRecoveryChecks, verifyBundle, extractBundle, installFromApplication, reconcileApplication, versionCompare };
