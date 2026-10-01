@@ -198,6 +198,11 @@ export async function main(inputs) {
     record(inputs.candidateDirectory ? "exact-retained-receipt-and-dmg" : "signed-manifest-and-exact-dmg"); record("codesign-staple-and-gatekeeper-assessment");
     if (isRecovery(inputs.mode)) {
       const version = inputs.mode.split("-").at(-1);
+      // Stock setup finishes only beside an AI app, as on every real Mac running
+      // Relay; without one, 0.1.413-0.1.454 crash printing the web link (webUrl
+      // was never imported) and older versions stop before starting services.
+      // The Windows and Linux harnesses already provide this Codex home.
+      fs.mkdirSync(path.join(os.homedir(), ".codex"), { recursive: true });
       const baselineDirectory = path.join(work, "stock-baseline");
       fs.mkdirSync(baselineDirectory);
       const published = JSON.parse(run("npm", ["view", `relay-companion@${version}`, "dist", "--json"]));
