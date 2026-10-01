@@ -248,7 +248,9 @@ app.whenReady().then(() => {
   const state = installationState();
   // Relocation restarts Electron. The installed copy resumes the existing
   // bootstrap, whose verification and progress renderer remain authoritative.
-  if (application && app.isInApplicationsFolder()) {
+  // isInApplicationsFolder exists only on macOS: calling it elsewhere threw
+  // here and left the Windows and Linux setup window hidden for good.
+  if (application && process.platform === "darwin" && app.isInApplicationsFolder()) {
     const handoff = path.join(app.getPath("userData"), "installation-handoff.json");
     try {
       const pending = JSON.parse(fs.readFileSync(handoff, "utf8"));
@@ -271,5 +273,11 @@ app.whenReady().then(() => {
   }
   win.once("ready-to-show", () => win.show());
   if (pendingLinks.length) openOrShowFailure();
+}).catch(error => {
+  // A startup error must never leave a running Relay with no window. The
+  // install harnesses fail on this message (native-install-proof.mjs).
+  console.error("Relay startup failed:", error);
+  quietLaunchFailed = true;
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show();
 });
 app.on("window-all-closed", () => app.quit());

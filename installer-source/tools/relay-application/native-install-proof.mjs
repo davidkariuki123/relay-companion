@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import release from "../../packages/companion/bootstrap/application-release.cjs";
@@ -27,11 +27,41 @@ const artifactName = item => item.filename || item.artifact;
 
 export function requiredChecks(mode, channel) {
   return ["exact-retained-receipt-and-installer", "os-install", "stock-activation", "exact-runtime-health", "native-ownership",
+    ...(mode === "fresh" ? [] : ["application-launch-before-setup"]),
     `${channel}-channel`, "repeat-setup", "uninstall-preserves-config", "os-uninstall",
     ...(mode === "fresh" ? ["reinstall-after-removal"] : []),
     ...(["bridge", "broken"].includes(mode) ? ["stock-baseline-installation"] : []),
     ...(mode === "upgrade" ? ["signed-baseline-installer", "baseline-native-activation", "package-replaced-without-disconnect"] : []),
     ...(mode === "broken" ? brokenConditions.map(condition => `recovered-${condition}`) : [])];
+}
+
+// "Finish and run" opens the installed application, whose own startup decides
+// what happens next. The harnesses otherwise drive activate.cjs directly, so a
+// startup error was invisible to every install job: on 2026-10-01 a macOS-only
+// call left Windows with a hidden, idle Relay after every install. Open it as a
+// person would, keep its output, and fail on any startup error. Only over an
+// existing Relay: there the window waits for its button, while a fresh install
+// starts setup on its own and must not be stopped part way.
+export const startupFailure = /Relay startup failed|UnhandledPromiseRejection|Uncaught|is not a function|ReferenceError|TypeError/;
+export async function launchLikeFinishAndRun(executable, { settleMs = 20_000, env = process.env, platform = process.platform } = {}) {
+  const child = spawn(executable, [], { env: { ...env, ELECTRON_ENABLE_LOGGING: "1" }, stdio: ["ignore", "pipe", "pipe"],
+    detached: platform !== "win32" });
+  let output = "";
+  child.stdout.on("data", chunk => { output += chunk; });
+  child.stderr.on("data", chunk => { output += chunk; });
+  const exit = new Promise(resolve => { child.on("exit", code => resolve({ code })); child.on("error", error => resolve({ error })); });
+  const result = await Promise.race([exit, new Promise(resolve => setTimeout(() => resolve(null), settleMs))]);
+  // Still running is expected (a setup window waiting for its button); stop
+  // it and anything it opened before the harness continues.
+  if (!result) {
+    if (platform === "win32") spawnSync("taskkill.exe", ["/T", "/F", "/PID", String(child.pid)], { windowsHide: true });
+    else try { process.kill(-child.pid, "SIGKILL"); } catch {}
+    await exit;
+  }
+  console.log(`APPLICATION OUTPUT ${JSON.stringify(output.slice(-4000))}`);
+  if (result?.error) throw new Error(`The installed application could not be opened: ${result.error.message}`);
+  assert.doesNotMatch(output, startupFailure, `The installed application failed while starting:\n${output.slice(-4000)}`);
+  return { exited: Boolean(result), code: result?.code ?? null, output };
 }
 
 // Damage only state files, as a failed disk write or interrupted update would.

@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import release from "../../packages/companion/bootstrap/application-release.cjs";
-import { nativeInstallModes, brokenConditions, applyBrokenCondition, downloadPublishedInstaller, startProof, waitForOtherTransaction, lockDiagnostics } from "./native-install-proof.mjs";
+import { nativeInstallModes, brokenConditions, applyBrokenCondition, downloadPublishedInstaller, startProof, waitForOtherTransaction, lockDiagnostics, launchLikeFinishAndRun } from "./native-install-proof.mjs";
 const require = createRequire(import.meta.url);
 // The Linux counterpart of test-windows-install.mjs: install the retained
 // stock DEB with the package manager, activate through the bundled Node as the
@@ -131,6 +131,11 @@ try {
     // Replacing the outer package is not a request to disconnect Relay.
     assert.equal(fs.existsSync(path.join(relayRoot, "application-uninstall.json")), false);
     record("package-replaced-without-disconnect");
+  }
+  if (mode !== "fresh") {
+    // "Finish and run" opens the application over the existing Relay before any setup step.
+    await launchLikeFinishAndRun(executable);
+    record("application-launch-before-setup");
   }
   if (mode === "broken") {
     for (const condition of brokenConditions) {

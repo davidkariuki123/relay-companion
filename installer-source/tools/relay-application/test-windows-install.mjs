@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import release from "../../packages/companion/bootstrap/application-release.cjs";
-import { nativeInstallModes, brokenConditions, applyBrokenCondition, downloadPublishedInstaller, startProof, waitForOtherTransaction, lockDiagnostics } from "./native-install-proof.mjs";
+import { nativeInstallModes, brokenConditions, applyBrokenCondition, downloadPublishedInstaller, startProof, waitForOtherTransaction, lockDiagnostics, launchLikeFinishAndRun } from "./native-install-proof.mjs";
 const require = createRequire(import.meta.url);
 if (process.platform !== "win32" || process.env.GITHUB_ACTIONS !== "true" || process.env.RUNNER_ENVIRONMENT !== "github-hosted" || !process.env.RUNNER_TEMP) throw new Error("Use a disposable GitHub-hosted Windows runner, never a self-hosted one");
 const args = process.argv.slice(2), arg = name => args[args.indexOf(name) + 1];
@@ -107,6 +107,11 @@ try {
     // Replacing the outer package is not a request to disconnect Relay.
     assert.equal(fs.existsSync(path.join(relayRoot, "application-uninstall.json")), false);
     record("package-replaced-without-disconnect");
+  }
+  if (mode !== "fresh") {
+    // "Finish and run" opens the application over the existing Relay before any setup step.
+    await launchLikeFinishAndRun(path.join(applicationRoot, "Relay.exe"));
+    record("application-launch-before-setup");
   }
   if (mode === "broken") {
     for (const condition of brokenConditions) {
