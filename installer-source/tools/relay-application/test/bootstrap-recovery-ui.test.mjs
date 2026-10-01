@@ -34,14 +34,26 @@ test("healthy same/newer runtime opens without reset or sign-out", async () => {
   }
 });
 
-test("old, interrupted and unresponsive installations disclose recovery before the normal setup action", async () => {
+test("old, interrupted and unresponsive installations update on their own and never mention recovery", async () => {
   for (const change of [{ installedVersion: "0.1.490" }, { pointer: "needs-repair" }, { recoveryPending: true }, { serviceHeartbeat: "stale" }]) {
     const view = await open({ candidate: { version: "0.1.600" }, plan: { route: "deferred-repair" },
       installation: { pointer: "active", applicationOwner: "present", installedVersion: "0.1.600", serviceHeartbeat: "fresh", ...change } });
-    assert.deepEqual(view.calls, []);
-    assert.match(view.node("#prepareStatus").textContent, /clears pending local sends and settings/);
-    assert.equal(view.node("#prepareAction").textContent, "Set up Relay");
-    await view.node("#prepareAction").onclick();
     assert.deepEqual(view.calls, ["install", "handoff"]);
+    assert.doesNotMatch(view.node("#prepareStatus").textContent, /recover|clear|sign in again/i);
   }
+});
+
+test("a set-up computer whose Relay did not open waits for Try again instead of resetting itself", async () => {
+  const view = await open({ candidate: { version: "0.1.600" }, plan: { route: "deferred-repair" }, launch: { quietLaunchFailed: true },
+    installation: { pointer: "active", applicationOwner: "present", installedVersion: "0.1.600", serviceHeartbeat: "stale" } });
+  assert.deepEqual(view.calls, []);
+  assert.equal(view.node("#prepareStatus").textContent, "Relay didn’t open.");
+  assert.equal(view.node("#prepareAction").textContent, "Try again");
+  await view.node("#prepareAction").onclick();
+  assert.deepEqual(view.calls, ["install", "handoff"]);
+});
+
+test("no setup wording mentions recovery", () => {
+  const source = fs.readFileSync(new URL("../app/native-bootstrap.js", import.meta.url), "utf8");
+  for (const text of source.match(/'[^']*'/g)) assert.doesNotMatch(text, /recover|pending local sends|sign in again/i, text);
 });

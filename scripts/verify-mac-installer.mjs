@@ -273,7 +273,7 @@ export async function main(inputs) {
     phase = "open-installer-ui";
     run("/usr/bin/open", ["-n", "-a", target.app, "--args", `--remote-debugging-port=${port}`], { env: appEnv });
     const openedAt = Date.now(), deadline = openedAt + 8 * 60_000;
-    let clicked = false, setupClicked = false, firstHeartbeat;
+    let clicked = false, setupSeen = false, firstHeartbeat;
     while (Date.now() < deadline) {
       const page = await installerPage(port);
       if (page) {
@@ -296,8 +296,10 @@ export async function main(inputs) {
               clicked = true; phase = "relocate-and-activate"; record("install-button-input-sent");
             });
           }
-          if (clicked && !setupClicked && state?.button && page.url.endsWith("native-bootstrap.html")) {
-            await clickInstallButton(client, state.button, () => { setupClicked = true; record("setup-button-input-sent"); });
+          if (clicked && !setupSeen && page.url.endsWith("native-bootstrap.html")) {
+            // Setup starts on its own over an old Relay. Nothing here is clicked, so
+            // installer-recovery-complete below proves it ran without a person.
+            setupSeen = true; record("setup-started-without-input");
           }
         } catch (error) {
           if (error.installerFailure) throw error;

@@ -27,7 +27,7 @@ const artifactName = item => item.filename || item.artifact;
 
 export function requiredChecks(mode, channel) {
   return ["exact-retained-receipt-and-installer", "os-install", "stock-activation", "exact-runtime-health", "native-ownership",
-    ...(mode === "fresh" ? [] : ["application-launch-before-setup"]),
+    "application-finish-and-run",
     `${channel}-channel`, "repeat-setup", "uninstall-preserves-config", "os-uninstall",
     ...(mode === "fresh" ? ["reinstall-after-removal"] : []),
     ...(["bridge", "broken"].includes(mode) ? ["stock-baseline-installation"] : []),
@@ -35,33 +35,41 @@ export function requiredChecks(mode, channel) {
     ...(mode === "broken" ? brokenConditions.map(condition => `recovered-${condition}`) : [])];
 }
 
-// "Finish and run" opens the installed application, whose own startup decides
-// what happens next. The harnesses otherwise drive activate.cjs directly, so a
-// startup error was invisible to every install job: on 2026-10-01 a macOS-only
-// call left Windows with a hidden, idle Relay after every install. Open it as a
-// person would, keep its output, and fail on any startup error. Only over an
-// existing Relay: there the window waits for its button, while a fresh install
-// starts setup on its own and must not be stopped part way.
+// "Finish and run" opens the installed application, and the application does
+// the setup: it starts on its own and brings any existing Relay up to date.
+// The harnesses used to drive activate.cjs directly, so the application's own
+// startup was never exercised: on 2026-10-01 a macOS-only call left Windows
+// with a hidden, idle Relay after every install. Open it as a person would,
+// wait until the installation it set up is the candidate, keep its output, and
+// fail on any startup error. The harness's own setup steps then run as repeats.
 export const startupFailure = /Relay startup failed|UnhandledPromiseRejection|Uncaught|is not a function|ReferenceError|TypeError/;
-export async function launchLikeFinishAndRun(executable, { settleMs = 20_000, env = process.env, platform = process.platform } = {}) {
+export async function finishAndRun(executable, { done, timeoutMs = 12 * 60_000, pollMs = 2000, env = process.env, platform = process.platform } = {}) {
   const child = spawn(executable, [], { env: { ...env, ELECTRON_ENABLE_LOGGING: "1" }, stdio: ["ignore", "pipe", "pipe"],
     detached: platform !== "win32" });
-  let output = "";
+  let output = "", exited = null;
   child.stdout.on("data", chunk => { output += chunk; });
   child.stderr.on("data", chunk => { output += chunk; });
-  const exit = new Promise(resolve => { child.on("exit", code => resolve({ code })); child.on("error", error => resolve({ error })); });
-  const result = await Promise.race([exit, new Promise(resolve => setTimeout(() => resolve(null), settleMs))]);
-  // Still running is expected (a setup window waiting for its button); stop
-  // it and anything it opened before the harness continues.
-  if (!result) {
-    if (platform === "win32") spawnSync("taskkill.exe", ["/T", "/F", "/PID", String(child.pid)], { windowsHide: true });
-    else try { process.kill(-child.pid, "SIGKILL"); } catch {}
-    await exit;
+  const exit = new Promise(resolve => {
+    child.on("exit", code => resolve(exited = { code }));
+    child.on("error", error => resolve(exited = { error }));
+  });
+  const deadline = Date.now() + timeoutMs;
+  let finished = false;
+  while (!finished && !startupFailure.test(output) && !exited?.error && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, pollMs));
+    try { finished = Boolean(done()); } catch {}
+  }
+  // Close only the application. The Relay it set up (service, pill) keeps running.
+  if (!exited) {
+    if (platform === "win32") spawnSync("taskkill.exe", ["/F", "/IM", path.basename(executable)], { windowsHide: true });
+    else spawnSync("pkill", ["-KILL", "-f", `^${executable}`]);
+    await Promise.race([exit, new Promise(resolve => setTimeout(resolve, 10_000))]);
   }
   console.log(`APPLICATION OUTPUT ${JSON.stringify(output.slice(-4000))}`);
-  if (result?.error) throw new Error(`The installed application could not be opened: ${result.error.message}`);
+  if (exited?.error) throw new Error(`The installed application could not be opened: ${exited.error.message}`);
   assert.doesNotMatch(output, startupFailure, `The installed application failed while starting:\n${output.slice(-4000)}`);
-  return { exited: Boolean(result), code: result?.code ?? null, output };
+  assert.ok(finished, `Opening the installed application did not finish setting Relay up within ${timeoutMs / 60_000} minutes`);
+  return { output };
 }
 
 // Damage only state files, as a failed disk write or interrupted update would.

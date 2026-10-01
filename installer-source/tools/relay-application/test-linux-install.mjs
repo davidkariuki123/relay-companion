@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import release from "../../packages/companion/bootstrap/application-release.cjs";
-import { nativeInstallModes, brokenConditions, applyBrokenCondition, downloadPublishedInstaller, startProof, waitForOtherTransaction, lockDiagnostics, launchLikeFinishAndRun } from "./native-install-proof.mjs";
+import { nativeInstallModes, brokenConditions, applyBrokenCondition, downloadPublishedInstaller, startProof, waitForOtherTransaction, lockDiagnostics, finishAndRun } from "./native-install-proof.mjs";
 const require = createRequire(import.meta.url);
 // The Linux counterpart of test-windows-install.mjs: install the retained
 // stock DEB with the package manager, activate through the bundled Node as the
@@ -47,6 +47,13 @@ function installPackage(file) {
 }
 const activate = action => waitForOtherTransaction(() => run(node, [path.join(resources, "activate.cjs"), action, applicationRoot, executable]),
   { onFirstWait: () => { try { console.log(`DIAGNOSTICS at first wait ${JSON.stringify(lockDiagnostics(os.homedir()), null, 1)}`); } catch {} } });
+const { inspectInstallation } = require("./lib/migration.cjs");
+// The application's own setup is finished when the candidate is the active runtime and no transaction is open.
+function setUpByApplication() {
+  const installation = inspectInstallation({ homeDir: os.homedir() });
+  return installation.pointer === "active" && installation.installedVersion === receipt.version
+    && installation.transaction === "absent" && installation.applicationOwner !== "absent";
+}
 async function assertHealthy() {
   const current = read(pointerFile);
   assert.equal(current.version, receipt.version); assert.equal(current.active, true);
@@ -132,11 +139,9 @@ try {
     assert.equal(fs.existsSync(path.join(relayRoot, "application-uninstall.json")), false);
     record("package-replaced-without-disconnect");
   }
-  if (mode !== "fresh") {
-    // "Finish and run" opens the application over the existing Relay before any setup step.
-    await launchLikeFinishAndRun(executable);
-    record("application-launch-before-setup");
-  }
+  // "Finish and run": the application sets Relay up by itself, over whatever is there.
+  await finishAndRun(executable, { done: setUpByApplication });
+  record("application-finish-and-run");
   if (mode === "broken") {
     for (const condition of brokenConditions) {
       applyBrokenCondition(relayRoot, condition);
