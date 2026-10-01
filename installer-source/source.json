@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repository": "davidkariuki123/relay",
-  "sourceSha": "62bebf1637a9f3d3f6f30f4602399f24b3229ab5",
+  "sourceSha": "42c337fdc93e8a5bcc6cc449e2d87b38571f131b",
   "files": {
     "packages/companion/bootstrap/application-bridge.cjs": "19fd2c791512a065dd2de165a34f92bb53fe1b3d",
     "packages/companion/bootstrap/application-handoff.cjs": "75faae95e7c86bf2a7f7da04b204b89454ad32b2",
@@ -94,8 +94,8 @@
     "tools/relay-application/prepare.mjs": "b27ade8eec90727fc2c26d1fb20389a1018f49cb",
     "tools/relay-application/sign-mac-candidate.mjs": "ae49664abd2fa2c7606ec1ed0d7270b397e912f6",
     "tools/relay-application/signed-mac.mjs": "51914ef8baf7c0f57319deb903d47f6bbb9d38f5",
-    "tools/relay-application/test-linux-install.mjs": "e4d7550924b8c6908963e4afb5f54d119f9e8205",
-    "tools/relay-application/test-windows-install.mjs": "08082c65fa6e723e8527b1b8f73f432f3e70dd52",
+    "tools/relay-application/test-linux-install.mjs": "1182352c5e1dcb15c8ef99853f928575fb19d53e",
+    "tools/relay-application/test-windows-install.mjs": "a08421bb705cec0be178c2c56133c0787efa7d5d",
     "tools/relay-application/test/bootstrap-recovery-ui.test.mjs": "c7e2f6c281d5944b8fa96fa0a0c1bf990d498945",
     "tools/relay-application/test/fixtures/application-main.mjs": "03ec17c750d14fd1c833c766754613198f0f8586",
     "tools/relay-application/test/prepare.test.mjs": "cf65fc954967473654e9aacfdf51e3b919a06d3b",

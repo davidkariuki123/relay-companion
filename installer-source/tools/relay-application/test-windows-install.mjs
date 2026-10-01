@@ -116,12 +116,16 @@ try {
     record("package-replaced-without-disconnect");
   }
   // "Finish and run": the application sets Relay up by itself, over whatever is there.
-  await finishAndRun(path.join(applicationRoot, "Relay.exe"), { done: setUpByApplication });
-  record("application-finish-and-run");
+  // A broken Relay is damaged first, so the application itself has to repair it.
+  const openApplication = async () => {
+    await finishAndRun(path.join(applicationRoot, "Relay.exe"), { done: setUpByApplication });
+    record("application-finish-and-run");
+  };
+  if (mode !== "broken") await openApplication();
   if (mode === "broken") {
-    for (const condition of brokenConditions) {
+    for (const [index, condition] of brokenConditions.entries()) {
       applyBrokenCondition(relayRoot, condition);
-      await activate("install");
+      if (index === 0) await openApplication(); else await activate("install");
       const current = await assertHealthy();
       const recovery = read(path.join(relayRoot, "runtime", "installer-recovery.json"));
       assert.equal(recovery.state, "complete");
