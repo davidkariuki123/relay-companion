@@ -2369,3 +2369,19 @@ test("public export retains the stock Mac candidate canary", () => {
   }
   assert.match(releaseGate, /node scripts\/verify-stock-recovery-upgrade\.mjs/);
 });
+
+test("Dev app updates download from the Dev API only when the caller names that origin", async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-dev-origin-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const url = "https://dev-api.sendrelays.com/v1/application-releases/dev/v1.2.3/Relay-1.2.3-win32-x64.exe";
+  const refused = { bytes: 5 }, untouched = { get: () => assert.fail("An untrusted origin must not be contacted") };
+  await assert.rejects(downloadVerifiedArtifact(url, path.join(root, "a"), refused, untouched), /untrusted artifact origin/);
+  await assert.rejects(downloadVerifiedArtifact("https://example.com/Relay.exe", path.join(root, "b"), refused,
+    { ...untouched, origin: "https://example.com" }), /untrusted artifact origin/);
+  await assert.rejects(downloadVerifiedArtifact(url, path.join(root, "c"), refused,
+    { ...untouched, origin: "https://api.sendrelays.com" }), /untrusted artifact origin/);
+  let contacted = false;
+  await assert.rejects(downloadVerifiedArtifact(url, path.join(root, "d"), refused,
+    { origin: "https://dev-api.sendrelays.com", attempts: 1, get: () => { contacted = true; throw new Error("offline fixture"); } }));
+  assert.equal(contacted, true, "the named Dev origin is trusted");
+});

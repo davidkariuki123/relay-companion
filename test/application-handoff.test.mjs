@@ -270,3 +270,37 @@ test("Mac ZIP inventory rejects escaping links and writes through links before e
   archive([{ name: "Relay.app/Contents/link", data: "safe", link: true }, { name: "Relay.app/Contents/link/child", data: "bad" }]);
   assert.throws(() => native.validateZipFile(f.file), /through a symlink/);
 });
+
+function installedApp(f) {
+  const location = { root: path.join(f.homeDir, "Relay.app"), resourcesDir: path.join(f.homeDir, "Relay.app", "resources"), executable: path.join(f.homeDir, "Relay.app", "relay") };
+  writePackage(location, { ...f, version: "0.1.0", sourceSha: "c".repeat(40) });
+  const ownerFile = path.join(f.homeDir, ".relay", "application-owner.json"), installationId = crypto.randomUUID();
+  const owner = (version, packagingSourceSha) => ({ schema: 1, appId: "work.relay.application", platform: process.platform, root: location.root,
+    receipt: path.join(location.resourcesDir, "candidate.json"), executable: location.executable, version, packagingSourceSha, installationId, updateOwner: "canonical-runtime" });
+  bridge.write(ownerFile, owner("0.1.0", "c".repeat(40)));
+  return { ownerFile, owner };
+}
+
+test("an installed app is updated over a newer runtime, which keeps running untouched", async t => {
+  const f = fixture(t), { config, calls } = options(f), app = installedApp(f);
+  const newer = { ...f.previous, version: "9.0.0" }; bridge.write(f.pointer, newer);
+  config.activate = async () => { calls.push("activate"); bridge.write(app.ownerFile, app.owner(f.version, f.sourceSha)); return { ok: true }; };
+  assert.equal((await bridge.handoffApplication(config)).state, "complete");
+  assert.deepEqual(bridge.read(f.pointer), newer);
+  assert.deepEqual(calls, ["drain", "package", "activate", "undrain"]);
+  assert.equal(bridge.read(path.join(f.homeDir, ".relay", "application-handoff-complete.json")).keptRuntime, "9.0.0");
+});
+
+test("an installed app takes an offer older than its runtime; a legacy installation does not", async t => {
+  for (const owned of [true, false]) {
+    const f = fixture(t); let handoffs = 0;
+    bridge.write(f.pointer, { ...f.previous, version: "9.0.0" });
+    if (owned) installedApp(f);
+    const result = await updates.checkApplicationUpdate({ ...f, activationEnabled: true,
+      fetchImpl: async () => new Response(JSON.stringify(f.envelope)),
+      download: async (_url, file, _artifact, options) => { assert.equal(options.origin, "https://api.sendrelays.com"); fs.writeFileSync(file, f.data); },
+      handoff: async () => { handoffs++; return { state: "complete" }; } });
+    assert.equal(result.state, owned ? "complete" : "older-runtime-refused");
+    assert.equal(handoffs, owned ? 1 : 0);
+  }
+});

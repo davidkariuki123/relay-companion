@@ -61,7 +61,10 @@ async function checkApplicationUpdate({ activationEnabled = rollout.enabled, hom
     let result;
     if (owner && (versionCompare(owner.installedPackageVersion, payload.version) > 0
       || ((owner.applicationVersion || owner.version) === payload.version && owner.packagingSourceSha === payload.sourceSha))) result = { state: "current", changed: false };
-    else if (versionCompare(current.version, payload.runtime.version) > 0) result = { state: "older-runtime-refused", changed: false };
+    // An installed app is updated even when its runtime has moved past the
+    // offer's: the runtime stays and only the app changes. Before an app owns
+    // Relay, an offer older than the running runtime is still not taken.
+    else if (!owner && versionCompare(current.version, payload.runtime.version) > 0) result = { state: "older-runtime-refused", changed: false };
     else {
       const platformKey = `${platform}-${arch}`;
       const kind = platform === "darwin" ? "zip" : platform === "win32" ? "exe"
@@ -71,7 +74,7 @@ async function checkApplicationUpdate({ activationEnabled = rollout.enabled, hom
       const directory = path.join(root, "application-packages", `${payload.version}-${payload.sourceSha}-${platformKey}`);
       fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
       const file = path.join(directory, `installer.${kind}`);
-      if (!fs.existsSync(file)) await download(artifact.url, file, artifact);
+      if (!fs.existsSync(file)) await download(artifact.url, file, artifact, { origin: release.CHANNEL_ORIGINS[consent.channel] });
       await release.verifyApplicationArtifact(file, artifact);
       // Recheck the live signed policy after a potentially slow download. A
       // withdrawn offer must not start a new transaction from a cached plan.

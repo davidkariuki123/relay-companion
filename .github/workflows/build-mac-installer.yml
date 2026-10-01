@@ -145,7 +145,10 @@ jobs:
           npm ci --prefix installer-source/tools/relay-application --ignore-scripts --no-audit --no-fund
           echo "APPLE_KEYCHAIN=$RUNNER_TEMP/relay-signing.keychain-db" >> "$GITHUB_ENV"
           mkdir "$RUNNER_TEMP/app"
-          ditto -x -k "$RUNNER_TEMP"/unsigned/*.zip "$RUNNER_TEMP/app"
+          # The unsigned artifact carries installers/*.zip beside its receipt.
+          zips=("$RUNNER_TEMP"/unsigned/installers/*.zip)
+          [[ ${#zips[@]} -eq 1 && -f "${zips[0]}" ]] || { echo "::error::Expected exactly one unsigned app zip in installers/" >&2; ls -R "$RUNNER_TEMP/unsigned" >&2; exit 1; }
+          ditto -x -k "${zips[0]}" "$RUNNER_TEMP/app"
       - name: Load the Developer ID certificate and notary key into a temporary keychain
         env:
           CERTIFICATE_P12_BASE64: ${{ secrets.RELAY_MAC_SIGNING_CERTIFICATE_P12 }}

@@ -129,10 +129,13 @@ async function installFromApplication({ resourcesDir, applicationRoot, executabl
       || fs.existsSync(path.join(homeDir, ".relay-companion")))) {
       needsRecovery = true;
     }
-    if (current && /^\d+\.\d+\.\d+$/.test(current.version || "")) {
-      if (versionCompare(bundle.receipt.version, current.version) < 0) throw new Error("An older installer cannot downgrade Relay");
-      if (versionCompare(current.version, "0.1.500") < 0) needsRecovery = true;
-    }
+    // The runtime updates itself far more often than the app. Under an installed
+    // Relay app a newer runtime stays and only the app is replaced (below); a
+    // legacy installation is never handed to an app older than its runtime.
+    const newerRuntime = Boolean(current && /^\d+\.\d+\.\d+$/.test(current.version || "")
+      && versionCompare(bundle.receipt.version, current.version) < 0);
+    if (newerRuntime && recovery.marker(ownerPath)?.appId !== APPLICATION_ID) throw new Error("An older installer cannot downgrade Relay");
+    if (current && /^\d+\.\d+\.\d+$/.test(current.version || "") && versionCompare(current.version, "0.1.500") < 0) needsRecovery = true;
     // Never execute an old CLI as a prerequisite for rescuing it.
     if (current && !needsRecovery && !(await health(current, { platform: process.platform })).ok) needsRecovery = true;
     if (priorJournal && !["complete", "rolled-back"].includes(priorJournal.state)) {
@@ -151,6 +154,22 @@ async function installFromApplication({ resourcesDir, applicationRoot, executabl
       && current && versionCompare(current.version, bundle.receipt.version) >= 0) {
       onProgress({ phase: "ready", canCancel: false });
       return { ok: true, alreadyInstalled: true, owner: installedOwner, runtime: current, updateOwner: "canonical-runtime" };
+    }
+    if (newerRuntime) {
+      // Repairing would install this older runtime over the newer one; the
+      // runtime's own recovery owns that. A healthy newer runtime keeps running.
+      if (needsRecovery) throw new Error("An older installer cannot downgrade Relay");
+      const owner = { schema: 1, appId: APPLICATION_ID, platform: process.platform,
+        root, executable, receipt: receiptPath, version: bundle.receipt.version,
+        applicationVersion: bundle.receipt.applicationVersion || bundle.receipt.version,
+        packagingSourceSha: bundle.receipt.packagingSourceSha, installationId: previousOwner?.installationId || crypto.randomUUID(),
+        updateOwner: "canonical-runtime" };
+      const at = Date.now();
+      atomic(journalPath, { schema: 1, state: "complete", owner, previousOwner, previous: current, releaseId: current.releaseId,
+        runtimeKept: true, at, completedAt: at });
+      atomic(ownerPath, owner);
+      onProgress({ phase: "ready", canCancel: false });
+      return { ok: true, applicationOnly: true, owner, runtime: current, updateOwner: "canonical-runtime" };
     }
     if (bundle.receipt.runtimeDelivery === "download") {
       signal?.throwIfAborted();

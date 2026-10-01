@@ -374,3 +374,28 @@ test("an unconfigured native package can be removed without touching an existing
   assert.deepEqual(fs.readFileSync(pointer), before);
   assert.equal(fs.existsSync(path.join(options.homeDir, ".relay", "application-uninstall.json")), false);
 });
+
+test("an installed app is replaced over a newer healthy runtime, which keeps running untouched", async t => {
+  const f = fixture(t), homeDir = f.options.homeDir;
+  const newer = { ...f.previous, version: "0.3.0" };
+  fs.writeFileSync(f.pointer, JSON.stringify(newer));
+  const ownerFile = path.join(homeDir, ".relay", "application-owner.json");
+  fs.writeFileSync(ownerFile, JSON.stringify({ schema: 1, appId: ownership.APPLICATION_ID, platform: process.platform,
+    root: path.join(homeDir, "Old.app"), version: "0.1.900", applicationVersion: "0.1.900", packagingSourceSha: "c".repeat(40),
+    installationId: "kept-installation", updateOwner: "canonical-runtime" }));
+  const result = await installer.installFromApplication(f.options);
+  assert.equal(result.applicationOnly, true);
+  assert.deepEqual(JSON.parse(fs.readFileSync(f.pointer)), newer);
+  assert.ok(!f.events.includes("extract") && !f.events.includes("activate"));
+  const owner = JSON.parse(fs.readFileSync(ownerFile));
+  assert.equal(owner.packagingSourceSha, f.receipt.packagingSourceSha);
+  assert.equal(owner.installationId, "kept-installation");
+  assert.equal(JSON.parse(fs.readFileSync(path.join(homeDir, ".relay", "application-migration.json"))).runtimeKept, true);
+  // Under a broken newer runtime the older app still refuses: repair belongs to the runtime.
+  fs.writeFileSync(ownerFile, JSON.stringify({ ...owner, installationId: "kept-installation" }));
+  await assert.rejects(installer.installFromApplication({ ...f.options, health: async () => ({ ok: false }) }), /cannot downgrade Relay/);
+  // Without an installed app, the same newer runtime is refused as before.
+  const legacy = fixture(t);
+  fs.writeFileSync(legacy.pointer, JSON.stringify({ ...legacy.previous, version: "0.3.0" }));
+  await assert.rejects(installer.installFromApplication(legacy.options), /cannot downgrade Relay/);
+});

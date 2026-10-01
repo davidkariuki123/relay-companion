@@ -88,6 +88,13 @@ async function handoffApplication({ activationEnabled = false, envelope, version
   const target = { version, sourceSha }, transactionId = `application_${sourceSha}_${platformKey}`;
   let lock, releaseDrain, snapshot, location;
   const current = () => read(pointerPath);
+  // The runtime this handoff leaves running: the application's own, or a newer
+  // one already running under an installed Relay app, which only the app replaces.
+  const expectedRuntime = () => {
+    snapshot ||= read(snapshotFile);
+    const kept = snapshot?.previous?.version;
+    return /^\d+\.\d+\.\d+$/.test(kept || "") && lifecycle.versionCompare(kept, payload.runtime.version) > 0 ? kept : payload.runtime.version;
+  };
   const adapters = {
     lock() {
       lock = bootstrap.acquireCanonicalLock(path.join(base, "runtime", "transaction.lock"));
@@ -103,8 +110,11 @@ async function handoffApplication({ activationEnabled = false, envelope, version
       snapshot = read(snapshotFile);
       // Another updater may have advanced after an interrupted handoff. Never
       // turn an old journal into authorization to roll that newer runtime back.
-      if (lifecycle.versionCompare(active.version, payload.runtime.version) > 0) return { ok: false, preserveCurrent: true, reason: "newer-runtime-preserved" };
       const owner = applicationOwner({ homeDir, platform });
+      // The runtime updates itself far more often than the app. Where an app
+      // already owns Relay, a newer runtime stays and only the app is replaced;
+      // a legacy installation is never moved to an app older than its runtime.
+      if (!owner && lifecycle.versionCompare(active.version, payload.runtime.version) > 0) return { ok: false, preserveCurrent: true, reason: "newer-runtime-preserved" };
       if (owner && lifecycle.versionCompare(owner.installedPackageVersion, version) > 0) return { ok: false, preserveCurrent: true, reason: "newer-application-preserved" };
       if (snapshot && active.packageRoot !== snapshot.previous?.packageRoot
         && !(owner?.packagingSourceSha === sourceSha && active.version === payload.runtime.version)) return { ok: false, preserveCurrent: true, reason: "another-runtime-transaction-preserved" };
@@ -149,16 +159,16 @@ async function handoffApplication({ activationEnabled = false, envelope, version
       const active = current();
       const owner = applicationOwner({ homeDir, platform });
       return { ok: owner?.packagingSourceSha === sourceSha && owner.installedPackageVersion === version
-        && active?.version === payload.runtime.version && (await health(active, { platform })).ok };
+        && active?.version === expectedRuntime() && (await health(active, { platform })).ok };
     },
-    verifyRecovery: () => verifyRecovery({ homeDir, platform, version: payload.runtime.version }),
-    observeStability: () => ready({ homeDir, platform, target: { version: payload.runtime.version, packageRoot: current()?.packageRoot }, requireProgress: true }),
+    verifyRecovery: () => verifyRecovery({ homeDir, platform, version: expectedRuntime() }),
+    observeStability: () => ready({ homeDir, platform, target: { version: expectedRuntime(), packageRoot: current()?.packageRoot }, requireProgress: true }),
     async restorePrevious() {
       snapshot ||= read(snapshotFile);
       const previous = snapshot?.previous;
       if (!previous || !nativeLocationInside(path.join(base, "runtime", "releases"), previous.packageRoot)
         || !nativeLocationInside(previous.packageRoot, previous.bin)) return { ok: false };
-      if (current()?.active && lifecycle.versionCompare(current().version, payload.runtime.version) > 0) return { ok: false };
+      if (current()?.active && lifecycle.versionCompare(current().version, expectedRuntime()) > 0) return { ok: false };
       let restored = current()?.packageRoot === previous.packageRoot && (await health(previous, { platform })).ok;
       if (!restored) {
         const result = run(previous.node, [previous.bin, "repair-runtime", "--no-trampoline", "--claim"], { encoding: "utf8", windowsHide: true, timeout: 3 * 60_000 });
@@ -174,11 +184,11 @@ async function handoffApplication({ activationEnabled = false, envelope, version
     },
     async retirePrevious() {
       const active = current();
-      if (active?.version !== payload.runtime.version || !(await health(active, { platform })).ok) return { ok: false };
+      if (active?.version !== expectedRuntime() || !(await health(active, { platform })).ok) return { ok: false };
       // Known-good runtime trees and account data remain recovery-owned. Retire
       // migration eligibility, not the rollback copy or the frozen npm bridge.
       write(path.join(base, "application-handoff-complete.json"), { schema: 1, ...target, platform: platformKey,
-        runtime: payload.runtime, at: Date.now(), previousRuntimeRetained: true });
+        runtime: payload.runtime, keptRuntime: expectedRuntime() !== payload.runtime.version ? expectedRuntime() : undefined, at: Date.now(), previousRuntimeRetained: true });
       return { ok: true };
     },
   };

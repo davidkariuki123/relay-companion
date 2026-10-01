@@ -19,6 +19,9 @@ const {
 } = require("./runtime-executables.cjs");
 
 const RELEASE_ORIGIN = "https://api.sendrelays.com";
+// Dev app updates are served by the Dev API. A caller names the origin its
+// signed offer pinned; nothing else is ever trusted.
+const ARTIFACT_ORIGINS = new Set([RELEASE_ORIGIN, "https://dev-api.sendrelays.com"]);
 const RELEASE_BASE_PATH = "/v1/companion-releases";
 const PACKAGE_NAME = "relay-companion";
 // Native macOS bundles exceed Node's default 1 MiB tar-output buffer. Keep a
@@ -297,7 +300,8 @@ function sha512File(file) {
 async function downloadVerifiedArtifact(url, file, artifact, options = {}) {
   options.signal?.throwIfAborted();
   const parsed = new URL(url);
-  if (parsed.protocol !== "https:" || parsed.origin !== RELEASE_ORIGIN) {
+  const origin = options.origin || RELEASE_ORIGIN;
+  if (parsed.protocol !== "https:" || !ARTIFACT_ORIGINS.has(origin) || parsed.origin !== origin) {
     fail(`Relay refused an untrusted artifact origin: ${parsed.origin}`);
   }
   if (!Number.isSafeInteger(artifact.bytes) || artifact.bytes <= 0 || artifact.bytes > MAX_ARTIFACT_BYTES) {
