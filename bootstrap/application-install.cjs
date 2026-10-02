@@ -166,6 +166,10 @@ async function installFromApplication({ resourcesDir, applicationRoot, executabl
     const newerRuntime = Boolean(current && /^\d+\.\d+\.\d+$/.test(current.version || "")
       && versionCompare(bundle.receipt.version, current.version) < 0);
     if (newerRuntime && recovery.marker(ownerPath)?.appId !== APPLICATION_ID) throw new Error("An older installer cannot downgrade Relay");
+    // The same runtime version is the same signed runtime: an installed app whose
+    // Relay is already current only changes owner, without touching services.
+    const currentRuntime = Boolean(current && /^\d+\.\d+\.\d+$/.test(current.version || "")
+      && versionCompare(bundle.receipt.version, current.version) === 0 && recovery.marker(ownerPath)?.appId === APPLICATION_ID);
     if (current && /^\d+\.\d+\.\d+$/.test(current.version || "") && versionCompare(current.version, "0.1.500") < 0) needsRecovery = true;
     // Never execute an old CLI as a prerequisite for rescuing it.
     if (current && !needsRecovery && !(await health(current, { platform: process.platform })).ok) needsRecovery = true;
@@ -186,9 +190,10 @@ async function installFromApplication({ resourcesDir, applicationRoot, executabl
       onProgress({ phase: "ready", canCancel: false });
       return { ok: true, alreadyInstalled: true, owner: installedOwner, runtime: current, updateOwner: "canonical-runtime" };
     }
-    if (newerRuntime) {
+    if (newerRuntime || (currentRuntime && !needsRecovery)) {
       // Repairing would install this older runtime over the newer one; the
-      // runtime's own recovery owns that. A healthy newer runtime keeps running.
+      // runtime's own recovery owns that. A healthy current or newer runtime
+      // keeps running; an unhealthy same-version one is repaired below.
       if (needsRecovery) throw new Error("An older installer cannot downgrade Relay");
       const owner = { schema: 1, appId: APPLICATION_ID, platform: process.platform,
         root, executable, receipt: receiptPath, version: bundle.receipt.version,

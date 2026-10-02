@@ -433,3 +433,24 @@ for (const interval of [60, 300]) test(`refused handover removal at ${interval}s
   assert.equal(result.scheduleCleanup.pending, true);
   assert.deepEqual(calls, ["print", "list", "remove"]);
 });
+
+test("Windows recovery sweep never ends the process that asked for it", { skip: process.platform !== "win32" }, async t => {
+  // Shane's laptop, 2026-10-02: a Relay worker running on the recovery folder's
+  // Node ran this sweep and ended itself, leaving Relay stopped.
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-recovery-self-"));
+  const root = path.join(homeDir, ".relay", "recovery");
+  fs.mkdirSync(root, { recursive: true });
+  fs.writeFileSync(path.join(root, "other.cjs"), "setInterval(() => {}, 1000)");
+  fs.writeFileSync(path.join(root, "caller.cjs"), [
+    "const { spawnSync } = require('node:child_process');",
+    `const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ${JSON.stringify(windowsStopRecoveryScript(root))}], { encoding: 'utf8', windowsHide: true, timeout: 60000 });`,
+    "process.stdout.write(r.status === 0 ? 'survived' : 'sweep-failed ' + r.stderr);",
+  ].join("\n"));
+  const { spawn } = await import("node:child_process");
+  const other = spawn(process.execPath, [path.join(root, "other.cjs")], { stdio: "ignore", windowsHide: true });
+  t.after(() => { other.kill(); fs.rmSync(homeDir, { recursive: true, force: true, maxRetries: 5 }); });
+  const otherExited = new Promise(resolve => other.once("exit", resolve));
+  const caller = spawnSync(process.execPath, [path.join(root, "caller.cjs")], { encoding: "utf8", windowsHide: true, timeout: 90_000 });
+  assert.equal(caller.stdout, "survived", caller.stderr);
+  await otherExited;
+});

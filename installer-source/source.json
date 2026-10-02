@@ -1,11 +1,11 @@
 {
   "schema": 1,
   "repository": "davidkariuki123/relay",
-  "sourceSha": "13fbc2826873d0b6e219fd303800349b8ed161f7",
+  "sourceSha": "ecfaa3869fcaefacdb50adba3ca20bf411901d47",
   "files": {
     "packages/companion/bootstrap/application-bridge.cjs": "19fd2c791512a065dd2de165a34f92bb53fe1b3d",
-    "packages/companion/bootstrap/application-handoff.cjs": "75faae95e7c86bf2a7f7da04b204b89454ad32b2",
-    "packages/companion/bootstrap/application-install.cjs": "a87b63abbe1c9d48d9498c3195f55b5733ab9e72",
+    "packages/companion/bootstrap/application-handoff.cjs": "cc857469bd3e01c1c2bd00816e5f4338083f0aaa",
+    "packages/companion/bootstrap/application-install.cjs": "26bc16b106581d6fb3b743511e23160e8c24998d",
     "packages/companion/bootstrap/application-owner.cjs": "d5d2081ea4e7d8d4fd87241bd54f59b14b1d6ef3",
     "packages/companion/bootstrap/application-package.cjs": "e0df8b426225f998c28b556d21f3d8a7519747c7",
     "packages/companion/bootstrap/application-recovery.cjs": "c11f86e1852c803bf88b9ffb48ed98c61a4dc2d5",
@@ -31,7 +31,7 @@
     "packages/companion/bootstrap/previous-pill.cjs": "51363d050e823a99bb118aefa9ad2eb58eac9cef",
     "packages/companion/bootstrap/recovery-client.cjs": "5049fe3a348064bd27b7edf91ecd19e3259b0689",
     "packages/companion/bootstrap/recovery-config.cjs": "65f28ce3bb1abc54e291f72be59567874f793a51",
-    "packages/companion/bootstrap/recovery-install.cjs": "3c8b2fdd0671ed7872d3b875a9d47d4aa2a33095",
+    "packages/companion/bootstrap/recovery-install.cjs": "dd5d79c827e11323907b69c018194924609bc41b",
     "packages/companion/bootstrap/recovery-intent.cjs": "fbf8742c36dd7f0dd4d5868682a80c84d1ff0f60",
     "packages/companion/bootstrap/recovery-launcher.cjs": "c20bd8f7756e848092611cfc47ab1b2c1802f3e4",
     "packages/companion/bootstrap/recovery-local.cjs": "f50ca7688973a1381b03dc6b21b54a7899643042",

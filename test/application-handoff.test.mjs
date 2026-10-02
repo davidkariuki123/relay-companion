@@ -304,3 +304,11 @@ test("an installed app takes an offer older than its runtime; a legacy installat
     assert.equal(handoffs, owned ? 1 : 0);
   }
 });
+
+test("a background app update never asks setup for the destructive repair", async t => {
+  const f = fixture(t), { config } = options(f);
+  let seen;
+  const activate = config.activate;
+  await bridge.handoffApplication({ ...config, activate: async (args) => { seen = args; return activate(args); } });
+  assert.equal(seen.allowRecovery, false);
+});

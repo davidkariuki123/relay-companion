@@ -271,7 +271,11 @@ function windowsStopRecoveryScript(root) {
     `$root=${quoted};`,
     "$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value;",
     "$inside={ param($text) $text -and $text.IndexOf($root, [StringComparison]::OrdinalIgnoreCase) -ge 0 };",
-    "$find={ @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { $_.ProcessId -ne $PID -and ((& $inside $_.ExecutablePath) -or (& $inside $_.CommandLine)) } | Where-Object { try { (Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid -ErrorAction Stop).Sid -eq $sid } catch { $false } }) };",
+    // Never end the process that asked for this sweep or anything above it: a
+    // Relay worker running on the recovery folder's Node would end itself.
+    "$all=@(Get-CimInstance Win32_Process -ErrorAction Stop); $up=@{}; $cur=($all | Where-Object ProcessId -eq $PID).ParentProcessId;",
+    "for($i=0;$i -lt 32 -and $cur -and -not $up.ContainsKey([int]$cur);$i++){ $up[[int]$cur]=$true; $cur=($all | Where-Object ProcessId -eq $cur).ParentProcessId };",
+    "$find={ @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { $_.ProcessId -ne $PID -and -not $up.ContainsKey([int]$_.ProcessId) -and ((& $inside $_.ExecutablePath) -or (& $inside $_.CommandLine)) } | Where-Object { try { (Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid -ErrorAction Stop).Sid -eq $sid } catch { $false } }) };",
     "$p=@(&$find); for($i=0;$i -lt 10 -and $p.Count;$i++){ foreach($x in $p){ try { Invoke-CimMethod -InputObject $x -MethodName Terminate -ErrorAction Stop | Out-Null } catch {} }; Start-Sleep -Milliseconds 200; $p=@(&$find) };",
     "if($p.Count){ Write-Error ('Relay recovery processes did not stop: '+(($p | ForEach-Object ProcessId) -join ', ')); exit 1 }",
   ].join(" ");

@@ -264,11 +264,13 @@ test("outer-package versions advance independently and cannot downgrade the reco
   fs.writeFileSync(receiptFile, JSON.stringify(receipt));
   const updated = await installer.installFromApplication(options);
   assert.equal(updated.owner.applicationVersion, "1.0.1");
-  assert.equal(events.filter(event => event === "activate").length, 2);
+  // The runtime is already this version: only the owner changes, nothing is restarted.
+  assert.equal(updated.applicationOnly, true);
+  assert.equal(events.filter(event => event === "activate").length, 1);
   receipt.applicationVersion = "1.0.0";
   fs.writeFileSync(receiptFile, JSON.stringify(receipt));
   await assert.rejects(installer.installFromApplication(options), /downgrade the Relay application/);
-  assert.equal(events.filter(event => event === "activate").length, 2);
+  assert.equal(events.filter(event => event === "activate").length, 1);
 });
 
 test("service rollback restores launcher ownership, failed rollback retains recovery journal", async (t) => {
@@ -491,4 +493,24 @@ test("hiding the old pill stops only the pill on each platform and reopens it fr
   // Nothing hidden, nothing reopened; an inactive previous runtime cannot reopen its pill.
   assert.equal(hidePreviousPill({ current, platform: "linux", run: () => ({ status: 1 }) }).restore(), false);
   assert.equal(hidePreviousPill({ current: { active: false }, platform: "linux", run: () => ({ status: 0 }) }).restore(), false);
+});
+
+test("an installed app over its own current runtime only changes owner; a broken one is still repaired", async t => {
+  const f = fixture(t), homeDir = f.options.homeDir, calls = [];
+  fs.writeFileSync(f.pointer, JSON.stringify({ ...f.previous, version: "0.2.0" }));
+  const ownerFile = path.join(homeDir, ".relay", "application-owner.json");
+  fs.writeFileSync(ownerFile, JSON.stringify({ schema: 1, appId: ownership.APPLICATION_ID, platform: process.platform,
+    root: path.join(homeDir, "Old.app"), version: "0.1.900", applicationVersion: "0.1.900", packagingSourceSha: "c".repeat(40),
+    installationId: "kept-installation", updateOwner: "canonical-runtime" }));
+  const options = { ...f.options, pauseRecovery: async () => { calls.push("pause"); return { repause() {}, resume() {} }; },
+    hidePill: () => { calls.push("hide"); return { hidden: false, restore: () => false }; } };
+  const result = await installer.installFromApplication(options);
+  assert.equal(result.applicationOnly, true);
+  assert.deepEqual(calls, [], "services, pill and recovery are left alone");
+  assert.ok(!f.events.includes("extract") && !f.events.includes("activate"));
+  // The same runtime, unhealthy: a person's installer still repairs it (unless repair is withheld).
+  const broken = { ...options, health: async () => ({ ok: false }), recover: async () => { calls.push("recover"); } };
+  await assert.rejects(installer.installFromApplication({ ...broken, allowRecovery: false }), /needs recovery/);
+  await installer.installFromApplication(broken);
+  assert.ok(calls.includes("recover") && f.events.includes("activate"));
 });

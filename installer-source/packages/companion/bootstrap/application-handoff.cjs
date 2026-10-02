@@ -151,7 +151,11 @@ async function handoffApplication({ activationEnabled = false, envelope, version
         const reconciled = await reconcile({ homeDir, acquireLock: sharedLock, health });
         if (!reconciled.ok) throw new Error("Runtime recovery must finish before resuming native handoff");
       }
-      const result = await activate({ homeDir, resourcesDir: location.resourcesDir, applicationRoot: location.root,
+      // A background app update never runs the destructive repair: it would end
+      // every process in the recovery folder, including this worker, and leave
+      // Relay stopped with no recovery task (Shane's laptop, 2026-10-02). An
+      // unhealthy Relay makes this step fail, and restorePrevious repairs it.
+      const result = await activate({ homeDir, allowRecovery: false, resourcesDir: location.resourcesDir, applicationRoot: location.root,
         executable: location.executable, activationEnabled: true, acquireLock: sharedLock, drain: async () => () => {} });
       return { ok: result.ok === true };
     },
