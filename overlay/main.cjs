@@ -5647,6 +5647,26 @@ function leaveSetupPlacement() {
     if (step >= steps) { clearInterval(setupGlideTimer); setupGlideTimer = null; }
   }, durationMs / steps);
 }
+// AGENT HANDOFF (Shane, 2026-10-01). The installed app's own onboarding hands
+// the next step to the person's agent: "Paste this into Claude Code or
+// Codex". From that step on the work happens in the agent's conversation, and
+// a card in the middle of the screen stands in front of it. The pill still
+// appears centred, where the installer window just closed, so the person sees
+// where Relay went; a moment later it glides to its top-right home.
+const AGENT_HANDOFF_GLIDE_DELAY_MS = 700;
+let agentHandoffTimer = null;
+function agentOnboardingActive() {
+  const stage = desktopOnboardingBridge?.state()?.stage;
+  return Boolean(stage) && stage !== "complete";
+}
+function followAgentOnboardingPlacement() {
+  if (!setupCentered || agentHandoffTimer || !agentOnboardingActive()) return;
+  if (!win || win.isDestroyed() || !win.isVisible()) return;
+  agentHandoffTimer = setTimeout(() => {
+    agentHandoffTimer = null;
+    if (agentOnboardingActive()) leaveSetupPlacement();
+  }, AGENT_HANDOFF_GLIDE_DELAY_MS);
+}
 
 // Show the overlay window. It remains an ordinary focusable window over the
 // visible card; the transparent remainder is made click-through below.
@@ -5686,6 +5706,7 @@ function showOverlayWindow({ force = false, reposition = true, userInitiated = f
     // fast as the tenth (the "slow, then fast, then slow again" report).
     applyThrottlingPolicy();
     win.webContents.send("shown");
+    followAgentOnboardingPlacement();
     // Becoming visible is when host-running freshness starts mattering for
     // click routing again; the hidden poll cadence is slow, so take one
     // reading at the show edge (process list only — the frontmost probe
@@ -10143,7 +10164,7 @@ if (!gotSingleInstanceLock) {
         authorization: await installationAuthorizationController(),
         isPaired: () => account().paired,
         verifyAccount: async () => { const result = await (await relayClient()).me(); return result.user || result; },
-        onChange: async () => { await pushInbox(true); },
+        onChange: async () => { await pushInbox(true); followAgentOnboardingPlacement(); },
       });
       await drainDesktopIntents();
     }

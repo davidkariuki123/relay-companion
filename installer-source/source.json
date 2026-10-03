@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repository": "davidkariuki123/relay",
-  "sourceSha": "ecfaa3869fcaefacdb50adba3ca20bf411901d47",
+  "sourceSha": "801a85322652377ab57e44a74894f57814ab2c11",
   "files": {
     "packages/companion/bootstrap/application-bridge.cjs": "19fd2c791512a065dd2de165a34f92bb53fe1b3d",
     "packages/companion/bootstrap/application-handoff.cjs": "cc857469bd3e01c1c2bd00816e5f4338083f0aaa",
@@ -60,7 +60,7 @@
     "packages/companion/overlay/fonts/newsreader-var.woff2": "8cd8effc477a72510cf1e0f8099a425dc87213cd",
     "packages/companion/overlay/fonts/plexmono-400.woff2": "52b6c7595dd5e2106676e7c52fcff18539607879",
     "packages/companion/overlay/fonts/plexmono-500.woff2": "3308bce2432c298817ed344eeac33007c83cecd0",
-    "packages/companion/overlay/inbox.html": "cf99f219916712f5a68133eab42cd7d58f3753df",
+    "packages/companion/overlay/inbox.html": "ccf48732ed920bb2a406bbc08f066e8fa311c1f7",
     "packages/companion/overlay/relay-anyone-tip.cjs": "b582285f7cfc241bf571226eec78d04699b9bebf",
     "packages/companion/overlay/relayAppIcon.svg": "cec4bcc14a3397cfb60048da2cad086aae66ad9c",
     "packages/companion/package.json": "ee5c0766677353bd64d26bc84c26ba8fd2e4f7df",

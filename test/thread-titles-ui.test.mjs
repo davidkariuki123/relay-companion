@@ -796,10 +796,12 @@ test("chat composers offer owned laptop agents while human mentions stay group-o
   assert.match(html, /if \(event\.key === "Enter" \|\| event\.key === "Tab"\)/, "keyboard selection works without leaving the composer");
   assert.match(html, /button\.addEventListener\("click"[\s\S]*chooseMention/, "touch and click selection dismisses the menu too");
   assert.match(html, /\["ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"\][\s\S]*renderMentions/, "moving the caret re-evaluates the active mention");
-  assert.match(html, /thQrInput\.addEventListener\("blur"[\s\S]*closeMentions/, "leaving the composer dismisses the menu");
+  assert.match(html, /field\.addEventListener\("blur", \(event\) => \{\s*if \(!mentionMenu\?\.contains\(event\.relatedTarget\)\) closeMentions\(\);/, "leaving the composer dismisses the menu");
   assert.match(html, /\.th-mention-menu\.hidden\s*\{\s*display:none;\s*\}/, "the hidden state actually removes the mention menu");
-  assert.match(html, /prepareMentionComposer\(thQrInput, mentionOptions, threadDraft\)/,
-    "the room composer paints canonical mention tokens as rich chips");
+  assert.match(html, /prepareMentionComposer\(field, mentionOptions, initialValue\)/,
+    "the shared mention composer paints canonical mention tokens as rich chips");
+  assert.match(html, /wireMentionComposer\(thQrInput, mentionMenu, thread, threadDraft,/,
+    "the room composer uses the shared mention composer");
   assert.match(html, /data-mention-token/, "mention chips retain their canonical wire token");
   assert.match(html, /setAttribute\("contenteditable", "false"\)/, "a selected mention behaves as one atomic inline object");
   assert.match(html, /\.th-rich-composer \.th-composer-mention \{[\s\S]*border:1px solid[\s\S]*background:/,

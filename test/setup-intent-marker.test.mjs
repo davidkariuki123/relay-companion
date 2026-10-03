@@ -79,6 +79,15 @@ test("the application installer's marker says so, and the pill reads it as a cen
   // covered by a card in the middle of the screen (Shane, 2026-09-20).
   assert.match(main, /ipcMain\.handle\("relay:installationAuthGoogle"[^\n]*\n(?:\s*\/\/[^\n]*\n)*\s*leaveSetupPlacement\(\);\s*return \(await installationAuthorizationController\(\)\)\.google\(/);
   assert.match(main, /consumeSetupIntent\(\);\n(?:\s*\/\/[^\n]*\n)*\s*leaveSetupPlacement\(\);\s*return \(await installationAuthorizationController\(\)\)\.signIn\(/);
+  // The installed app's agent handoff ("Paste this into Claude Code or
+  // Codex") moves the centred pill home once it is on screen, so it does not
+  // cover the agent conversation (Shane, 2026-10-01).
+  const handoff = slice(main, "function followAgentOnboardingPlacement() {", "// Show the overlay window.");
+  assert.match(handoff, /if \(!setupCentered \|\| agentHandoffTimer \|\| !agentOnboardingActive\(\)\) return;/);
+  assert.match(handoff, /if \(agentOnboardingActive\(\)\) leaveSetupPlacement\(\);/);
+  assert.match(main, /return Boolean\(stage\) && stage !== "complete";/);
+  assert.match(main, /win\.webContents\.send\("shown"\);\n\s*followAgentOnboardingPlacement\(\);/);
+  assert.match(main, /onChange: async \(\) => \{ await pushInbox\(true\); followAgentOnboardingPlacement\(\); \},/);
 });
 
 test("paths that pair without a pill sign-in leave no marker", (t) => {

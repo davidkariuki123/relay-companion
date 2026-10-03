@@ -1524,6 +1524,7 @@
      when the dock was the final sibling of the rows. */
   #thRows.inbox-order .th-msg:last-of-type { margin-bottom:10px; }
   .th-msg.text { cursor:default; user-select:text; }
+  .th-msg.text.opens-thread { cursor:pointer; }
   .th-msg :is(.th-msg-title, .th-body) a { color:var(--accent); text-decoration:none; border-bottom:1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
   /* Mentions keep their stable @handle in the message payload, but read as the
      person's contact-book name. The outlined wash makes the reference an
@@ -2799,6 +2800,7 @@
   .th-msg.mention-target { outline:1px solid var(--accent); outline-offset:2px; background:color-mix(in srgb,var(--accent) 9%,var(--bg)); }
   .th-party.mention-arrival-label { color:var(--accent); white-space:normal; line-height:1.35; }
 
+  .rd-reply-composer { position:relative; }
   .th-mention-menu { position:absolute; left:10px; right:10px; bottom:100%; margin-bottom:7px; z-index:8; overflow:hidden;
     border:1px solid var(--edge); border-radius:12px; background:var(--bg); box-shadow:0 12px 30px color-mix(in srgb, #000 18%, transparent); }
   .th-mention-menu.hidden { display:none; }
@@ -6121,6 +6123,120 @@
       insertComposerText(field, event.clipboardData?.getData("text/plain") || "");
     });
     field.value = initialValue || "";
+  }
+
+  // The room and Relay reader share roster lookup, chips and keyboard selection.
+  function wireMentionComposer(field, mentionMenu, thread, initialValue, onDraftChange) {
+    let mentionMatches = [];
+    let mentionIndex = 0;
+    let mentionStart = -1;
+    // A DM already has exactly one human recipient, so naming that person
+    // again cannot change the audience. Human @mentions disambiguate group
+    // recipients only; the owned Claude and Codex options remain available
+    // in every developer composer below.
+    const participantMentions = new Map();
+    const refreshParticipants = () => {
+      participantMentions.clear();
+      if (payload.features?.peopleMentions === true && thread.isGroup) {
+        const group = groupsList.find((candidate) => String(candidate.id || "") === String(thread.groupId || ""))
+          || groupsList.find((candidate) => normalizedPartyName(candidate.name) === normalizedPartyName(thread.groupName));
+        // The current roster decides who can be mentioned. Historical sender
+        // labels can be stale (or belong to somebody who has left), and must
+        // not sit beside the viewer's saved contact name as a second person.
+        for (const member of group ? groupInfoRoster(group) : []) {
+          const name = String(member.name || "").trim();
+          const token = mentionTokenForContact(member);
+          if (!member.currentUser && name && token && !participantMentions.has(normalizedMentionToken(token))) {
+            participantMentions.set(normalizedMentionToken(token), {
+              token, name:`@${name}`, note:"Participant", agent:false,
+            });
+          }
+        }
+      }
+    };
+    refreshParticipants();
+    let mentionOptions = [
+      ...(payload.features?.agentMentions === true ? [
+        ownedAgentMentionOption("claude"),
+        ownedAgentMentionOption("codex"),
+      ] : []),
+      ...participantMentions.values(),
+    ];
+    let mentionProviderStatusLoading = false;
+    const refreshMentionProviderStatus = () => {
+      if (mentionProviderStatusLoading || providerAuthInfo?.providers?.claude?.authLoaded || !window.relay.providerAuthStatus) return;
+      mentionProviderStatusLoading = true;
+      window.relay.providerAuthStatus().then((result) => {
+        applyProviderAuthResult(result);
+        mentionOptions = [ownedAgentMentionOption("claude"), ownedAgentMentionOption("codex"), ...participantMentions.values()];
+        if (field.isConnected) renderMentions();
+      }).catch(() => {}).finally(() => { mentionProviderStatusLoading = false; });
+    };
+    prepareMentionComposer(field, mentionOptions, initialValue);
+    const closeMentions = () => { mentionMatches = []; mentionStart = -1; mentionMenu?.classList.add("hidden"); };
+    const chooseMention = (index) => {
+      const option = mentionMatches[index];
+      if (!option || mentionStart < 0) return;
+      const caret = field.selectionStart ?? field.value.length;
+      field.value = `${field.value.slice(0, mentionStart)}@${option.token} ${field.value.slice(caret)}`;
+      const nextCaret = mentionStart + option.token.length + 2;
+      field.setSelectionRange(nextCaret, nextCaret);
+      onDraftChange(field.value);
+      field.relayResize?.();
+      closeMentions();
+      field.focus();
+    };
+    const renderMentions = () => {
+      if (!mentionMenu) return;
+      // Rosters may arrive after the composer opens, and the reader dock stays
+      // mounted across refreshes. Always suggest the current channel members.
+      refreshParticipants();
+      mentionOptions = [
+        ...(payload.features?.agentMentions === true ? [ownedAgentMentionOption("claude"), ownedAgentMentionOption("codex")] : []),
+        ...participantMentions.values(),
+      ];
+      field.relayMentionOptions = mentionOptions;
+      const caret = field.selectionStart ?? field.value.length;
+      const before = field.value.slice(0, caret);
+      const match = before.match(/(^|\s)@([^\s@]*)$/);
+      if (!match) { closeMentions(); return; }
+      if (payload.features?.agentMentions === true) refreshMentionProviderStatus();
+      const query = String(match[2] || "").toLowerCase();
+      mentionStart = caret - query.length - 1;
+      mentionMatches = mentionOptions.filter((option) => option.token.toLowerCase().includes(query)).slice(0, 8);
+      if (!mentionMatches.length) { closeMentions(); return; }
+      mentionIndex = Math.min(mentionIndex, mentionMatches.length - 1);
+      mentionMenu.innerHTML = mentionMatches.map((option, index) => `<button type="button" class="th-mention-item${option.agent ? " agent" : ""}${index === mentionIndex ? " on" : ""}" data-mention-index="${index}" role="option" aria-selected="${index === mentionIndex ? "true" : "false"}"><span class="th-mention-dot"></span><span class="th-mention-copy"><span class="th-mention-name">${esc(option.name)}</span><span class="th-mention-note">${esc(option.note)}</span></span></button>`).join("");
+      mentionMenu.classList.remove("hidden");
+      for (const button of mentionMenu.querySelectorAll("[data-mention-index]")) {
+        button.addEventListener("mousedown", (event) => { event.preventDefault(); event.stopPropagation(); chooseMention(Number(button.getAttribute("data-mention-index"))); });
+        button.addEventListener("click", (event) => { event.preventDefault(); event.stopPropagation(); chooseMention(Number(button.getAttribute("data-mention-index"))); });
+      }
+    };
+    field.addEventListener("input", () => {
+      onDraftChange(field.value || "");
+      mentionIndex = 0;
+      renderMentions();
+    });
+    field.addEventListener("click", renderMentions);
+    field.addEventListener("keyup", (event) => {
+      if (["ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"].includes(event.key)) renderMentions();
+    });
+    field.addEventListener("blur", (event) => {
+      if (!mentionMenu?.contains(event.relatedTarget)) closeMentions();
+    });
+    field.addEventListener("keydown", (event) => {
+      if (!mentionMatches.length || mentionMenu?.classList.contains("hidden")) return;
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault(); event.stopImmediatePropagation();
+        mentionIndex = (mentionIndex + (event.key === "ArrowDown" ? 1 : -1) + mentionMatches.length) % mentionMatches.length;
+        renderMentions();
+      } else if (event.key === "Enter" || event.key === "Tab") {
+        event.preventDefault(); event.stopImmediatePropagation(); chooseMention(mentionIndex);
+      } else if (event.key === "Escape") {
+        event.preventDefault(); event.stopImmediatePropagation(); closeMentions();
+      }
+    }, true);
   }
 
   // Escape once while turning bare URLs into live anchors and known @handles
@@ -11714,9 +11830,10 @@
       if (onAgent && !workOn) return "";
       if (onAgent) return relayWorkDockHtml(r, { inline: true });
       return `
-      <div class="ta-dock inline" data-stop="1"><div class="qr col">
+      <div class="ta-dock inline" data-stop="1"><div class="qr col rd-reply-composer">
         <div class="rd-quote-slot"></div>
-        <textarea id="qrInput" rows="1" placeholder="${replyThread ? "Reply in thread…" : "Reply…"}">${esc(readerHumanDrafts.get(String(r.id)) || "")}</textarea>
+        <div class="th-mention-menu hidden" id="qrMentionMenu" role="listbox"></div>
+        <div id="qrInput" class="th-rich-composer" contenteditable="true" role="textbox" aria-multiline="true" aria-label="${replyThread ? "Reply in thread" : "Reply"}" data-placeholder="${replyThread ? "Reply in thread…" : "Reply…"}"></div>
         <div class="ta-rail">
           ${replyRail([replyChat.party], replyChat.groupName)}
           <span class="rt-spacer"></span>
@@ -11865,7 +11982,9 @@
       if (send && input && !input.dataset.readerReplyWired) {
         input.dataset.readerReplyWired = "1";
         let readerReplySending = false;
-        input.addEventListener("input", () => readerHumanDrafts.set(String(r.id), input.value || ""));
+        wireMentionComposer(input, document.getElementById("qrMentionMenu"), replyChat,
+          readerHumanDrafts.get(String(r.id)) || "",
+          (value) => readerHumanDrafts.set(String(r.id), value));
         const doSend = async () => {
           if (readerReplySending) return;
           const { r, replyChat } = input.relayReplyContext;
@@ -12293,6 +12412,17 @@
   // non-empty body made file-only messages mutate into Relays after the
   // optimistic row reconciled with Sent, which exposed agent actions and hid
   // the chat attachment design system.
+  // Relay mobile before 2026-10-03 gave an attachment-only message the body
+  // "Sent <file name>" (or "Sent N attachments"). Only that exact generated
+  // string counts; anything a person typed stays a caption.
+  function isLegacyAttachmentPlaceholder(body, attachments = []) {
+    const text = String(body || "").trim();
+    const list = Array.isArray(attachments) ? attachments : [];
+    if (!text || !list.length) return false;
+    if (list.length > 1) return text === `Sent ${list.length} attachments`;
+    const name = String(list[0]?.filename || list[0]?.name || "").trim();
+    return text === `Sent ${name || "an attachment"}`;
+  }
   function relayTextLike(body, _subject, forAgent, attachments = []) {
     const hasHumanContent = Boolean(String(body || "").trim())
       || (Array.isArray(attachments) && attachments.length > 0);
@@ -16360,6 +16490,11 @@
     replyThreadFocusId = String(id || "");
     threadDetailScrolledFor = null;
     renderThreadDetail();
+    // Rendering establishes which replies are visible. Persist their read
+    // state now; waiting for a polling payload leaves the thread counted as
+    // unread even after the person has opened it and replied.
+    readVisibleChatRoom();
+    renderAll();
     document.getElementById("thQrInput")?.focus();
   }
   // A Relay's thread lives in its reader, under Details for your agent.
@@ -16915,8 +17050,12 @@
       // where WhatsApp puts its "edited", in the anchor's own mono.
       const clockLabel = m.editedAt && !m.deletedAt ? `Edited · ${formatChatTime(m.at)}` : formatChatTime(m.at);
       const tombstone = m.deletedAt ? (mine ? "You deleted this message" : "This message was deleted") : "";
+      // An image (or file) sent without words IS the message: no filler
+      // bubble above it (Shane, 2026-10-03), including the "Sent <name>"
+      // body older phone builds generated.
       const attachmentOnly = textLike && attachments.length > 0
-        && !String(m.body || "").trim() && !editingMessage && !m.deletedAt;
+        && (!String(m.body || "").trim() || isLegacyAttachmentPlaceholder(m.body, attachments))
+        && !editingMessage && !m.deletedAt;
       const hasHostActions = !textLike && !m.request;
       const canReact = REACTIONS_ENABLED && !m.request && !m.ownedAgent && !m.pending
         && !m.deletedAt && !attachmentOnly && !editingMessage && !groupPostingBlocked;
@@ -16981,9 +17120,20 @@
       // Reject / Done / Cancel arrives as a Task-event message: a reply to the
       // Task in the reply-quote recipe, toned by the event.
       const taskEvent = m.request ? null : taskEventOf(m, (parentId) => messageById.get(parentId));
+      // With reply threads, a text in the room opens its thread when clicked
+      // (Shane, 2026-10-03). A message still sending has no thread to open.
+      const opensThread = Boolean(roomReplyThreads && !focusedReplyRoot && textLike && !m.ownedAgent
+        && !m.request && !m.pending && !m.deletedAt && !attachmentOnly && !taskEvent && !groupPostingBlocked);
       const taskFooter = m.request ? taskCardFooterHtml(m) : "";
+      // The thread link (and, inside a thread, its divider) hangs off the
+      // content: under the words, or under the image when the image is the
+      // whole message.
+      const threadTailHtml = `${hasHostActions ? "" : replyThreadSummaryHtml(m, replyThreadRepliesFor(m), { mine, key:`${renderKey}:thread-link` })}${focusedReplyRoot && m === focusedReplyRoot ? (() => {
+        const count = (roomReplyThreads.groups.get(replyThreadFocusId) || []).length;
+        return `<div class="th-rt-divider" role="separator" data-chat-key="${esc(renderKey)}:thread"><span>${count ? `${count} ${count === 1 ? "reply" : "replies"}` : "No replies yet"}</span></div>`;
+      })() : ""}`;
       return `${slackThreadContextHtml(m)}${chunkDivider}${runHeader}
-      <div class="th-msg${hasHostActions ? " has-host-actions" : ""}${m.unread ? " unread" : ""}${mine ? " mine" : ""}${cont ? " cont" : ""}${textLike ? " text" : ""}${taskEvent ? ` tk-event ${taskEvent.tone}${taskEvent.bare ? " bare" : ""}` : ""}${m.request ? " tk-card" : ""}${attachmentOnly ? " attachment-only" : ""}${agentWorking ? " agent-working" : ""}${open ? " open" : ""}${activeMentionVisit?.selected === String(m.id) ? " mention-target" : ""}${m.deletedAt ? " deleted" : ""}${editingMessage ? " editing" : ""}${confirmingDelete ? " deleting" : ""}${aggregates.length ? " has-rx" : ""}${liveCanonicalArrivalIds.has(String(m.id || "")) ? " live-arrival" : ""}"${textLike ? "" : ' role="button" tabindex="0"'}${agentWorking ? ' aria-busy="true"' : ""}${hasHostActions ? ` aria-expanded="${hostActionsPersistent ? "true" : "false"}"` : ""} data-chat-key="${esc(renderKey)}:body" data-msg="${esc(m.id)}" data-dir="${m.direction}" data-opening-id="${esc(m.id)}">
+      <div class="th-msg${hasHostActions ? " has-host-actions" : ""}${opensThread ? " opens-thread" : ""}${m.unread ? " unread" : ""}${mine ? " mine" : ""}${cont ? " cont" : ""}${textLike ? " text" : ""}${taskEvent ? ` tk-event ${taskEvent.tone}${taskEvent.bare ? " bare" : ""}` : ""}${m.request ? " tk-card" : ""}${attachmentOnly ? " attachment-only" : ""}${agentWorking ? " agent-working" : ""}${open ? " open" : ""}${activeMentionVisit?.selected === String(m.id) ? " mention-target" : ""}${m.deletedAt ? " deleted" : ""}${editingMessage ? " editing" : ""}${confirmingDelete ? " deleting" : ""}${aggregates.length ? " has-rx" : ""}${liveCanonicalArrivalIds.has(String(m.id || "")) ? " live-arrival" : ""}"${textLike ? "" : ' role="button" tabindex="0"'}${agentWorking ? ' aria-busy="true"' : ""}${hasHostActions ? ` aria-expanded="${hostActionsPersistent ? "true" : "false"}"` : ""} data-chat-key="${esc(renderKey)}:body" data-msg="${esc(m.id)}" data-dir="${m.direction}" data-opening-id="${esc(m.id)}">
         ${sideMenuHtml}
         ${taskEvent ? taskEventRefHtml(taskEvent) : messageReplyReferenceHtml(m)}
         ${`
@@ -17005,11 +17155,7 @@
         ${badges}
       </div>
       ${slackThreadLinkHtml(m)}
-      ${hasHostActions ? "" : replyThreadSummaryHtml(m, replyThreadRepliesFor(m), { mine, key:`${renderKey}:thread-link` })}
-      ${focusedReplyRoot && m === focusedReplyRoot ? (() => {
-        const count = (roomReplyThreads.groups.get(replyThreadFocusId) || []).length;
-        return `<div class="th-rt-divider" role="separator" data-chat-key="${esc(renderKey)}:thread"><span>${count ? `${count} ${count === 1 ? "reply" : "replies"}` : "No replies yet"}</span></div>`;
-      })() : ""}
+      ${attachmentOnly ? "" : threadTailHtml}
       ${(() => {
         // THE CARGO LAW: a bubble holds WORDS. Photos, video and files stand
         // free BENEATH it — never inside, where the enclosure outweighed the
@@ -17034,6 +17180,7 @@
         })).filter((item) => item.attachmentId));
         return `<div class="th-cargo${mine ? " mine" : ""}" data-chat-key="${esc(renderKey)}:cargo" data-att-msg="${esc(m.id)}"${canReplyHere ? ` data-att-reply="${esc(m.id)}"` : ""}>${chatAttachmentCargo(cargoAttachments, { relayId, mine })}${attachmentOnly ? chatTimestampHtml(m.at, "th-cargo-time") : ""}</div>`;
       })()}
+      ${attachmentOnly ? threadTailHtml : ""}
       ${(() => {
         // Receipts stay beneath the bubble; text actions use the side menu.
         // A Task without attachments uses its card footer as the receipt.
@@ -17313,92 +17460,6 @@
       thQrInput.relayLongPasteParty = thread.groupName || thread.party || chatRoom?.name || "them";
       let thReplySending = false;
       const mentionMenu = document.getElementById("thMentionMenu");
-      let mentionMatches = [];
-      let mentionIndex = 0;
-      let mentionStart = -1;
-      // A DM already has exactly one human recipient, so naming that person
-      // again cannot change the audience. Human @mentions disambiguate group
-      // recipients only; the owned Claude and Codex options remain available
-      // in every developer composer below.
-      const participantMentions = new Map();
-      if (payload.features?.peopleMentions === true && thread.isGroup) {
-        const group = groupsList.find((candidate) => String(candidate.id || "") === String(thread.groupId || ""))
-          || groupsList.find((candidate) => normalizedPartyName(candidate.name) === normalizedPartyName(thread.groupName));
-        // The current roster decides who can be mentioned. Historical sender
-        // labels can be stale (or belong to somebody who has left), and must
-        // not sit beside the viewer's saved contact name as a second person.
-        for (const member of group ? groupInfoRoster(group) : []) {
-          const name = String(member.name || "").trim();
-          const token = mentionTokenForContact(member);
-          if (!member.currentUser && name && token && !participantMentions.has(normalizedMentionToken(token))) {
-            participantMentions.set(normalizedMentionToken(token), {
-              token, name:`@${name}`, note:"Participant", agent:false,
-            });
-          }
-        }
-      }
-      let mentionOptions = [
-        ...(payload.features?.agentMentions === true ? [
-          ownedAgentMentionOption("claude"),
-          ownedAgentMentionOption("codex"),
-        ] : []),
-        ...participantMentions.values(),
-      ];
-      let mentionProviderStatusLoading = false;
-      const refreshMentionProviderStatus = () => {
-        if (mentionProviderStatusLoading || providerAuthInfo?.providers?.claude?.authLoaded || !window.relay.providerAuthStatus) return;
-        mentionProviderStatusLoading = true;
-        window.relay.providerAuthStatus().then((result) => {
-          applyProviderAuthResult(result);
-          mentionOptions = [ownedAgentMentionOption("claude"), ownedAgentMentionOption("codex"), ...participantMentions.values()];
-          if (thQrInput.isConnected) renderMentions();
-        }).catch(() => {}).finally(() => { mentionProviderStatusLoading = false; });
-      };
-      prepareMentionComposer(thQrInput, mentionOptions, threadDraft);
-      const closeMentions = () => { mentionMatches = []; mentionStart = -1; mentionMenu?.classList.add("hidden"); };
-      const chooseMention = (index) => {
-        const option = mentionMatches[index];
-        if (!option || mentionStart < 0) return;
-        const caret = thQrInput.selectionStart ?? thQrInput.value.length;
-        thQrInput.value = `${thQrInput.value.slice(0, mentionStart)}@${option.token} ${thQrInput.value.slice(caret)}`;
-        const nextCaret = mentionStart + option.token.length + 2;
-        thQrInput.setSelectionRange(nextCaret, nextCaret);
-        threadComposerDrafts.set(threadStateKey, thQrInput.value);
-        thQrInput.relayResize?.();
-        closeMentions();
-        thQrInput.focus();
-      };
-      const renderMentions = () => {
-        if (!mentionMenu) return;
-        const caret = thQrInput.selectionStart ?? thQrInput.value.length;
-        const before = thQrInput.value.slice(0, caret);
-        const match = before.match(/(^|\s)@([^\s@]*)$/);
-        if (!match) { closeMentions(); return; }
-        if (payload.features?.agentMentions === true) refreshMentionProviderStatus();
-        const query = String(match[2] || "").toLowerCase();
-        mentionStart = caret - query.length - 1;
-        mentionMatches = mentionOptions.filter((option) => option.token.toLowerCase().includes(query)).slice(0, 8);
-        if (!mentionMatches.length) { closeMentions(); return; }
-        mentionIndex = Math.min(mentionIndex, mentionMatches.length - 1);
-        mentionMenu.innerHTML = mentionMatches.map((option, index) => `<button type="button" class="th-mention-item${option.agent ? " agent" : ""}${index === mentionIndex ? " on" : ""}" data-mention-index="${index}" role="option" aria-selected="${index === mentionIndex ? "true" : "false"}"><span class="th-mention-dot"></span><span class="th-mention-copy"><span class="th-mention-name">${esc(option.name)}</span><span class="th-mention-note">${esc(option.note)}</span></span></button>`).join("");
-        mentionMenu.classList.remove("hidden");
-        for (const button of mentionMenu.querySelectorAll("[data-mention-index]")) {
-          button.addEventListener("mousedown", (event) => { event.preventDefault(); event.stopPropagation(); chooseMention(Number(button.getAttribute("data-mention-index"))); });
-          button.addEventListener("click", (event) => { event.preventDefault(); event.stopPropagation(); chooseMention(Number(button.getAttribute("data-mention-index"))); });
-        }
-      };
-      thQrInput.addEventListener("input", () => {
-        threadComposerDrafts.set(threadStateKey, thQrInput.value || "");
-        mentionIndex = 0;
-        renderMentions();
-      });
-      thQrInput.addEventListener("click", renderMentions);
-      thQrInput.addEventListener("keyup", (event) => {
-        if (["ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"].includes(event.key)) renderMentions();
-      });
-      thQrInput.addEventListener("blur", (event) => {
-        if (!mentionMenu?.contains(event.relatedTarget)) closeMentions();
-      });
       thQrInput.addEventListener("keydown", (event) => {
         // Esc leaves an edit with the old words back where they were; ↑ in an
         // empty composer edits your last text, as Slack and Discord do.
@@ -17410,17 +17471,9 @@
           const last = [...(thread.msgs || [])].reverse().find((item) => canEditMessage(item, Boolean(item.mine || item.direction === "out")));
           if (last) { event.preventDefault(); event.stopImmediatePropagation(); beginThreadEdit(threadStateKey, last.id, last); return; }
         }
-        if (!mentionMatches.length || mentionMenu?.classList.contains("hidden")) return;
-        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-          event.preventDefault(); event.stopImmediatePropagation();
-          mentionIndex = (mentionIndex + (event.key === "ArrowDown" ? 1 : -1) + mentionMatches.length) % mentionMatches.length;
-          renderMentions();
-        } else if (event.key === "Enter" || event.key === "Tab") {
-          event.preventDefault(); event.stopImmediatePropagation(); chooseMention(mentionIndex);
-        } else if (event.key === "Escape") {
-          event.preventDefault(); event.stopImmediatePropagation(); closeMentions();
-        }
       }, true);
+      wireMentionComposer(thQrInput, mentionMenu, thread, threadDraft,
+        (value) => threadComposerDrafts.set(threadStateKey, value));
       // While the composer is editing one of your texts, Relay is Save: the
       // words go to the message, not to a new one. Unchanged words end the
       // edit quietly, as WhatsApp does; empty ones are refused (an empty
@@ -17750,12 +17803,22 @@
     for (const el of newControls.querySelectorAll(".th-msg")) {
       const id = el.getAttribute("data-msg");
       if (openingIds.has(id)) el.classList.add("opening");
-      el.addEventListener("click", () => {
+      el.addEventListener("click", (event) => {
         // Resolve the exact card that was painted. A canonical direct chat can
         // be visible before inbox/Sent hydration, so rebuilding only the local
         // projection here made a real two-document Relay look clickable while
         // its click silently found no message.
         const m = messageById.get(String(id));
+        // With reply threads a text opens its thread, but it stays text: a
+        // drag that selects words, a link, a mention or a control never
+        // navigates.
+        if (m && el.classList.contains("opens-thread")) {
+          const target = event.target instanceof Element ? event.target : null;
+          if (target?.closest("a, button, input, [contenteditable], .th-mention, [data-stop='1']")) return;
+          if (String(window.getSelection?.() || "").trim()) return;
+          openReplyThread(String(m.id));
+          return;
+        }
         // Plain text is INERT (David): selectable, its links clickable, no
         // navigation hiding under it — Reply is a deliberate hover affordance.
         if (m && m.textLike && !m.ownedAgent) return;

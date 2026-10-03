@@ -341,8 +341,8 @@ test("enabled app rows share the same binder on the bubble and in the reader", (
     "provider rows precede the active document's composer");
   assert.match(reader, /wireHostOpen\(readerBodyEl\);/, "the reader binds through the shared binder");
   // The letter keeps its reply — the loudest control on a person's letter.
-  assert.match(reader, /<textarea id="qrInput" rows="1" placeholder="\$\{replyThread \? "Reply in thread…" : "Reply…"\}">/);
-  const humanComposerStart = reader.indexOf('<textarea id="qrInput"');
+  assert.match(reader, /<div id="qrInput"[^>]+contenteditable="true"[^>]+data-placeholder="\$\{replyThread \? "Reply in thread…" : "Reply…"\}">/);
+  const humanComposerStart = reader.indexOf('<div id="qrInput"');
   const humanComposer = reader.slice(humanComposerStart, reader.indexOf('id="qrSend"', humanComposerStart) + 80);
   assert.doesNotMatch(humanComposer, /data-open-in-host=/,
     "the human reply composer does not duplicate provider actions from the agent face");
