@@ -260,6 +260,14 @@ contextBridge.exposeInMainWorld("relay", {
   // values ride back on accountInfo() so an open Settings tab paints the truth.
   setPillHidden: (v) => ipcRenderer.invoke("relay:setPillHidden", Boolean(v)),
   setSoundsMuted: (v) => ipcRenderer.invoke("relay:setSoundsMuted", Boolean(v)),
+  // settings.json (src/relay-settings.cjs): one setting by id as the person,
+  // the pill's own switches saved whole, and an older pill's stored choices
+  // handed over once.
+  setSetting: (id, value) => ipcRenderer.invoke("relay:setSetting", String(id || ""), value),
+  savePillSettings: (patch) => ipcRenderer.invoke("relay:savePillSettings", patch || {}),
+  adoptLegacySettings: (legacy) => ipcRenderer.invoke("relay:adoptLegacySettings", legacy || {}),
+  // Allow / Not now on an agent's request for a setting that gives agents more freedom.
+  answerSettingRequest: (id, allow) => ipcRenderer.invoke("relay:answerSettingRequest", String(id || ""), allow === true),
 
 
   // window plumbing

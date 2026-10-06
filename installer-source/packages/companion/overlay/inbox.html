@@ -2715,6 +2715,9 @@
   .tp-banner strong { display:block; margin-bottom:4px; font-weight:600; }
   .tp-banner .mandate { margin:8px 0 10px; padding:9px 11px; border-left:2px solid var(--accent); background:var(--bg); color:var(--ink-2); font:12.5px/1.55 var(--serif); white-space:pre-wrap; overflow-wrap:anywhere; }
   .tp-banner .acts { display:flex; align-items:center; gap:14px; }
+  #settingRequests:empty { display:none; }
+  #settingRequests .tp-banner { margin:12px 12px 4px; }
+  #settingRequests .tp-banner .tp-note { margin:0 0 10px; padding:0; color:var(--ink-2); font:12px/1.5 var(--sans); }
   .tp-rules ol { margin:6px 0 0; padding-left:18px; color:var(--ink-2); font:12px/1.5 var(--sans); }
   .tp-rules li { margin-top:3px; }
   .tp-lanes { display:flex; gap:4px; padding:10px 16px 4px; }
@@ -3643,6 +3646,9 @@
       <button class="relays-layout-button" type="button" data-inbox-direction="sent" aria-pressed="false">Sent</button>
     </div>
     <div class="scroll" id="scroll">
+      <!-- An agent's request for a setting that gives agents more freedom
+           (relay_settings). The person answers it here. -->
+      <div id="settingRequests" aria-live="polite"></div>
       <!-- Relays view -->
       <section class="view" id="relaysView">
         <div id="relaysIntro" hidden><div id="relaysRequestsSummary"></div><div id="relayAnyoneTip" hidden></div></div>
@@ -4826,6 +4832,7 @@
     else delete document.documentElement.dataset.theme;
     try { localStorage.setItem("relayTheme", toDark ? "dark" : "light"); } catch {}
     try { window.relay.setTheme && window.relay.setTheme(toDark ? "dark" : "light"); } catch {}
+    savePillSetting({ theme: toDark ? "dark" : "light" });
   });
   minimizeBtnEl.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -8264,6 +8271,82 @@
     try { return localStorage.getItem(key) || fallback; } catch { return fallback; }
   }
   function setProtoPref(key, value) { try { localStorage.setItem(key, value); } catch {} }
+  // An older pill kept its switches in this window's storage. Hand them to
+  // settings.json once per account; main keeps anything already there.
+  const legacySettingsHandedOver = new Set();
+  function handOverLegacySettings() {
+    const account = signupAccountKey();
+    if (!account || legacySettingsHandedOver.has(account) || !window.relay.adoptLegacySettings) return;
+    legacySettingsHandedOver.add(account);
+    const legacy = {};
+    const list = (raw, options) => raw === "__none__" ? [] : raw.split("|").filter((item) => options.includes(item));
+    const agentApps = protoPref(agentAppsPreferenceKey(), "");
+    if (agentApps) legacy.agentApps = list(agentApps, AGENT_APP_OPTIONS);
+    const chatApps = protoPref(chatAppsPreferenceKey(), "");
+    if (chatApps) legacy.chatApps = list(chatApps, CHAT_APP_OPTIONS);
+    const conductor = protoPref(conductorPreferenceKey(), "");
+    if (conductor) legacy.conductor = conductor !== "off";
+    const taskPermissions = {};
+    for (const vendor of ["claude", "codex"]) {
+      const mode = protoPref(`proto.perm.${vendor}`, "");
+      if (mode) taskPermissions[vendor] = mode;
+    }
+    if (Object.keys(taskPermissions).length) legacy.taskPermissions = taskPermissions;
+    let theme = "";
+    try { theme = localStorage.getItem("relayTheme") || ""; } catch {}
+    if (theme === "dark" || theme === "light") legacy.theme = theme;
+    if (Object.keys(legacy).length) window.relay.adoptLegacySettings(legacy).catch(() => {});
+  }
+  // AGENT REQUESTS. relay_settings never gives agents more freedom on its
+  // own: it leaves a request in settings.json and the person answers it here.
+  // The words come from the definition (label, value), the asker from the
+  // host that made the call; nothing the agent wrote is shown.
+  const answeredSettingRequests = new Set();
+  function settingRequestText(request) {
+    const who = String(request.requestedBy || "An agent");
+    const label = String(request.label || request.setting || "a setting");
+    return request.type === "boolean"
+      ? `${who} asks to turn ${label} ${request.valueLabel === "on" ? "on" : "off"}.`
+      : `${who} asks to set ${label} to ${request.valueLabel || request.value}.`;
+  }
+  function renderSettingRequests() {
+    const host = document.getElementById("settingRequests");
+    if (!host) return;
+    const pending = (storedSettings().pending || []).filter((request) => request && !answeredSettingRequests.has(request.id));
+    const html = pending.map((request) => `<div class="tp-banner setting-request" role="status" data-stop="1">
+        <strong>${esc(settingRequestText(request))}</strong>
+        <div class="tp-note">This gives agents more freedom, so it waits for you. Allow it only if you asked for it.</div>
+        <div class="acts">
+          <button class="cv-save" type="button" data-setting-request="${esc(request.id)}" data-allow="1">Allow</button>
+          <button class="cv-cancel" type="button" data-setting-request="${esc(request.id)}" data-allow="0">Not now</button>
+        </div>
+      </div>`).join("");
+    if (host.dataset.rendered === html) return;
+    host.dataset.rendered = html;
+    host.innerHTML = html;
+    for (const button of host.querySelectorAll("[data-setting-request]")) {
+      button.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        const id = button.getAttribute("data-setting-request");
+        answeredSettingRequests.add(id);
+        renderSettingRequests();
+        try { await window.relay.answerSettingRequest?.(id, button.getAttribute("data-allow") === "1"); } catch {}
+      });
+    }
+  }
+  // The appearance settings.json holds, applied when it differs from the
+  // sheet on screen (an agent's change, or another window's). The browser copy
+  // stays the paint-time cache, so the pill opens on the right sheet.
+  function applyStoredTheme() {
+    const theme = storedSettings().theme;
+    if (theme !== "dark" && theme !== "light") return;
+    const dark = theme === "dark";
+    if ((document.documentElement.dataset.theme === "dark") === dark) return;
+    if (dark) document.documentElement.dataset.theme = "dark";
+    else delete document.documentElement.dataset.theme;
+    try { localStorage.setItem("relayTheme", theme); } catch {}
+    try { window.relay.setTheme && window.relay.setTheme(theme); } catch {}
+  }
   // A LETTER SHORT ENOUGH TO BE SELF-CONTAINED IS (Sven): bodies at or under
   // this render whole in the conversation bubble — ~eight lines at pill width,
   // readable in one glance. Longer letters keep title + preview and their tap
@@ -8274,6 +8357,15 @@
   // CLI and desktop app exist, Desktop is the default unless the user changes it.
   let agentSurfaces = null;
   const AGENT_APP_OPTIONS = ["Claude Code", "Codex"];
+  // Save one of the pill's switches to settings.json, showing it at once:
+  // the next payload carries main's copy.
+  function savePillSetting(patch) {
+    const current = storedSettings();
+    const next = { ...current, ...patch, accountKey: signupAccountKey() };
+    if (patch.taskPermissions) next.taskPermissions = { ...(current.taskPermissions || {}), ...patch.taskPermissions };
+    payload = { ...payload, settings: next };
+    try { window.relay.savePillSettings?.(patch)?.catch?.(() => {}); } catch {}
+  }
   function desktopEntry(app) {
     const key = app === "Codex" ? "_codexDesktop" : app === "Claude Code" ? "_claudeDesktop" : "";
     return key && agentSurfaces ? agentSurfaces[key] : null;
@@ -8330,7 +8422,23 @@
   // with another one. The first selected app is only the Task default.
   const AGENT_APPS_PREF = "proto.agentApps.v2";
   function agentAppsPreferenceKey() { return `proto.agentApps.v3:${signupAccountKey()}`; }
+  // settings.json (through main) is the truth once it holds a choice: the
+  // person's switch here, or an agent's change through relay_settings. The
+  // browser-stored keys below are what an older pill saved, still read until
+  // they are handed over (adoptLegacySettings) and still written for a
+  // rollback to that pill.
+  function storedSettings() {
+    const settings = payload.settings || {};
+    if (settings.accountKey === signupAccountKey()) return settings;
+    // Another account's switches (a copy from before Switch Account) never
+    // answer for this one; the device's own settings still do.
+    return Object.fromEntries(Object.entries(settings).filter(([key]) => !ACCOUNT_SETTING_KEYS.has(key)));
+  }
+  // The switches that belong to an account rather than to this computer.
+  const ACCOUNT_SETTING_KEYS = new Set(["agentApps", "chatApps", "conductor"]);
   function requestedAgentApps() {
+    const stored = storedSettings().agentApps;
+    if (Array.isArray(stored)) return stored.filter((app) => AGENT_APP_OPTIONS.includes(app));
     const scoped = protoPref(agentAppsPreferenceKey(), "");
     if (scoped) return scoped.split("|").filter((app) => AGENT_APP_OPTIONS.includes(app));
     const preference = openingPreference();
@@ -8350,6 +8458,7 @@
     if (!signupAccountKey()) return;
     const next = AGENT_APP_OPTIONS.filter((app) => apps.includes(app));
     const saved = next.length ? next.join("|") : "__none__";
+    savePillSetting({ agentApps: next });
     setProtoPref(agentAppsPreferenceKey(), saved);
     // Retain the account-scoped single-app preference for older clients.
     // Do not rewrite legacy global keys with this account's new choices.
@@ -8373,6 +8482,8 @@
   const CHAT_APP_OPTIONS = ["Claude", "ChatGPT"];
   function chatAppsPreferenceKey() { return `proto.chatApps.v1:${signupAccountKey()}`; }
   function chatAppSelection() {
+    const stored = storedSettings().chatApps;
+    if (Array.isArray(stored)) return CHAT_APP_OPTIONS.filter((app) => stored.includes(app));
     const saved = protoPref(chatAppsPreferenceKey(), "");
     if (!saved) return [...CHAT_APP_OPTIONS];
     const chosen = saved.split("|");
@@ -8382,6 +8493,7 @@
   function saveChatApps(apps) {
     if (!signupAccountKey()) return;
     const next = CHAT_APP_OPTIONS.filter((app) => apps.includes(app));
+    savePillSetting({ chatApps: next });
     setProtoPref(chatAppsPreferenceKey(), next.length ? next.join("|") : "__none__");
   }
   function setChatAppEnabled(app, enabled) {
@@ -8402,10 +8514,13 @@
   }
   function conductorPreferenceKey() { return `proto.conductorApp.v1:${signupAccountKey()}`; }
   function conductorEnabled() {
-    return conductorAvailable() && protoPref(conductorPreferenceKey(), "on") !== "off";
+    if (!conductorAvailable()) return false;
+    const stored = storedSettings().conductor;
+    return typeof stored === "boolean" ? stored : protoPref(conductorPreferenceKey(), "on") !== "off";
   }
   function setConductorEnabled(enabled) {
     if (!signupAccountKey() || !conductorAvailable()) return;
+    savePillSetting({ conductor: enabled === true });
     setProtoPref(conductorPreferenceKey(), enabled ? "on" : "off");
   }
   function agentAppName() {
@@ -9975,6 +10090,8 @@
   ];
   const PERM_DEFAULTS = { claude: "auto", codex: "full" };
   function permMode(vendor) {
+    const stored = storedSettings().taskPermissions?.[vendor];
+    if (stored) return stored;
     return protoPref(`proto.perm.${vendor}`, PERM_DEFAULTS[vendor] || "");
   }
   // THE RECEIPT is the state. main stamps agentHandoff on the row
@@ -18490,6 +18607,27 @@
         </div>
       </div>`;
   }
+  // MILESTONE RELAYS. Agents mint a Relay link unasked when finished work
+  // matters to someone; some people find that intrusive. One switch, on until
+  // the person turns it off, for the agents on this computer.
+  function milestoneRelaysHtml(info) {
+    const on = info.milestoneRelays !== false;
+    return `
+      <div class="sv-quiet-section" id="milestoneRelays" data-stop="1">
+        <div class="sv-quiet-title">Milestone Relays</div>
+        <div class="sv-quiet-list">
+          <div class="sv-quiet-row">
+            <span class="sv-quiet-copy">
+              <span class="sv-quiet-name">Let your agent create them</span>
+              <span class="sv-quiet-note">${on
+                ? "When finished work matters to someone, your agent makes a Relay link for you to share. Nothing is sent."
+                : "Your agent makes a Relay only when you ask. New agent chats pick this up."}</span>
+            </span>
+            ${svSwitchHtml("milestoneRelays", on, { label: "Let your agent create Relays at milestones" })}
+          </div>
+        </div>
+      </div>`;
+  }
   function blockedPeopleHtml() {
     return `<div class="sv-open-section" data-stop="1"><button class="sv-choose" id="svBlockedPeople" type="button">Blocked contacts</button><div id="svBlockedList" aria-live="polite"></div></div>`;
   }
@@ -18623,6 +18761,7 @@
     if (info.paired) {
       html += yourLinkHtml();
       html += yourAgentHtml();
+      html += milestoneRelaysHtml(info);
       html += blockedPeopleHtml();
     }
     html += slackSettingsHtml(info);
@@ -18713,6 +18852,7 @@
     for (const b of settingsViewEl.querySelectorAll("[data-perm]")) {
       b.addEventListener("click", (e) => {
         e.stopPropagation();
+        savePillSetting({ taskPermissions: { [b.getAttribute("data-perm")]: b.getAttribute("data-mode") } });
         setProtoPref(`proto.perm.${b.getAttribute("data-perm")}`, b.getAttribute("data-mode"));
         // Choosing folds the tray: the row's value line is the confirmation.
         permTrayOpen = null;
@@ -19050,7 +19190,9 @@
     try {
       result = key === "pillHidden"
         ? await window.relay.setPillHidden(next)
-        : await window.relay.setSoundsMuted(next);
+        : key === "milestoneRelays"
+          ? await window.relay.setSetting("milestone_relays", next)
+          : await window.relay.setSoundsMuted(next);
     } catch (error) {
       result = { ok: false, error: error?.message };
     }
@@ -20449,6 +20591,7 @@
     liveCanonicalArrivalIds.clear();
     activeCanonicalChatRefresh = null;
   }
+  let lastSettingsSignature = "";
   function onPayload(next) {
     if (!next || typeof next !== "object") return;
     // A refresh requested before enqueue can arrive after the local receipt.
@@ -20503,7 +20646,19 @@
       contacts: Array.isArray(next.contacts) ? next.contacts : (payload.contacts || []),
       chats: Array.isArray(next.chats) ? next.chats : (payload.chats || []),
       slackChats: Array.isArray(next.slackChats) ? next.slackChats : (payload.slackChats || []),
+      settings: next.settings && typeof next.settings === "object" ? next.settings : (payload.settings || {}),
     };
+    handOverLegacySettings();
+    applyStoredTheme();
+    renderSettingRequests();
+    // An agent can change a setting while You is open. The values it shows
+    // ride accountInfo, so read that again and repaint.
+    const settingsSignature = JSON.stringify(payload.settings);
+    if (settingsSignature !== lastSettingsSignature) {
+      const changed = lastSettingsSignature !== "";
+      lastSettingsSignature = settingsSignature;
+      if (changed && activeView === "settings") loadSettings();
+    }
     if (googleAccount !== signupAccountKey()) void loadGoogleContacts();
     refreshGroupRosterIfStale(payload.relays);
     const paintSurface = rendererSurfaceActive();

@@ -86,3 +86,39 @@ test("the rules file travels with the managed Claude skill: installed with it, r
   assert.equal(removed.results.find((item) => item.target === "rules")?.status, "removed");
   assert.equal(fs.existsSync(file), false);
 });
+
+test("turning milestone Relays off removes the rules file, keeps it out of skill updates, and turning them on restores it", async (t) => {
+  const homeDir = tempHome(t, "switch");
+  const env = { RELAY_CONFIG_DIR: path.join(homeDir, ".relay") };
+  const options = { homeDir, env };
+  const file = path.join(homeDir, ".claude", "rules", "relay.md");
+  assert.equal(rules.milestoneRelaysEnabled(options), true, "on until the person turns it off");
+  assert.equal(skill.applyMilestonePreference(options).status, "no_skill", "nothing is written without the Claude skill beside it");
+  assert.equal(fs.existsSync(file), false);
+
+  const installed = await skill.installBundled({ ...options, consent: true, host: "claude" });
+  assert.equal(installed.ok, true, JSON.stringify(installed));
+  assert.ok(fs.existsSync(file));
+
+  assert.equal(rules.setMilestoneRelays(false, options), false);
+  assert.equal(rules.milestoneRelaysEnabled(options), false);
+  assert.equal(JSON.parse(fs.readFileSync(rules.preferencesPath(options), "utf8")).milestoneRelays, false);
+  assert.equal(skill.applyMilestonePreference(options).status, "disabled");
+  assert.equal(fs.existsSync(file), false, "the doctrine leaves the person's rules folder at once");
+
+  // A later skill install or update does not bring it back.
+  const again = await skill.installBundled({ ...options, host: "claude" });
+  assert.equal(again.results.find((item) => item.target === "rules")?.status, "disabled");
+  assert.equal(fs.existsSync(file), false);
+
+  assert.equal(rules.setMilestoneRelays(true, options), true);
+  const restored = skill.applyMilestonePreference(options);
+  assert.equal(restored.status, "installed");
+  assert.match(fs.readFileSync(file, "utf8"), new RegExp(`skill ${installed.version.replace(/\./g, "\.")}`), "restored at the installed skill's version");
+
+  // A file the person edited is theirs: switching off leaves it and says so.
+  fs.appendFileSync(file, "\n- Only for Sven.\n");
+  rules.setMilestoneRelays(false, options);
+  assert.equal(skill.applyMilestonePreference(options).status, "kept_local_edit");
+  assert.match(fs.readFileSync(file, "utf8"), /Only for Sven/);
+});

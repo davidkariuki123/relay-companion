@@ -150,6 +150,7 @@ const { startSentLiveWake } = require("./sent-live-wake.cjs");
 const attention = require("./attention-queue.cjs");
 const { withJsonLock } = require("../src/state-lock.cjs");
 const { atomicWriteJsonSync } = require("../src/atomic-json.cjs");
+const relaySettings = require("../src/relay-settings.cjs");
 const { readDeviceToken } = require("../src/credential-store.cjs");
 const { appendLocalTrace, appendLocalTraces } = require("../src/local-trace.cjs");
 const { canonicalInboxItemId, packetIdsForCanonicalItem } = require("../src/inbox-item-id.cjs");
@@ -281,6 +282,22 @@ let attentionLatched = overlayPrefs.attentionLatched === true;
 // Both default false, so every install that predates them is untouched.
 let pillHidden = overlayPrefs.pillHidden === true;
 let soundsMuted = overlayPrefs.soundsMuted === true;
+// Both now live in ~/.relay/settings.json beside every other setting, where
+// an agent can change them through relay_settings (src/relay-settings.cjs).
+// overlay-prefs.json keeps a copy so an older pill still reads the choice. A
+// file without them yet takes this pill's values, once.
+let settingsStoreCache = {};
+try {
+  settingsStoreCache = relaySettings.readStore();
+  const seed = {};
+  if (typeof settingsStoreCache.pillHidden === "boolean") pillHidden = settingsStoreCache.pillHidden;
+  else seed.pillHidden = pillHidden;
+  if (typeof settingsStoreCache.soundsMuted === "boolean") soundsMuted = settingsStoreCache.soundsMuted;
+  else seed.soundsMuted = soundsMuted;
+  if (Object.keys(seed).length) settingsStoreCache = relaySettings.patchDevice(seed);
+} catch (error) {
+  console.error("[overlay] settings store unavailable:", error && error.message);
+}
 // First-send onboarding is separate from the old invite-sharing chapter.
 // Existing senders go straight to Relay; everyone else can continue with their
 // agent or skip. Completion belongs to the account, never the whole device.
@@ -1375,6 +1392,9 @@ function accountInfo() {
     // payload push would leave an open Settings tab showing a stale switch.
     pillHidden,
     soundsMuted,
+    // Settings › Milestone Relays: whether agents on this computer mint a Relay
+    // link unasked when finished work matters to someone.
+    milestoneRelays: milestoneRelaysEnabled(),
     // Hiding is inert without a status-area icon to bring the pill back — the same
     // law the ✕ follows. The renderer disables the row rather than offering a
     // switch that would strand the user.
@@ -2571,6 +2591,9 @@ function buildPayload() {
       soundsMuted,
     },
     features: currentProductFeatures(),
+    // The pill's switches as settings.json holds them for this account, and
+    // any agent request waiting for the person's answer.
+    settings: relaySettings.pillSnapshot(relaySettings.accountKeyFor(currentAccount), {}, settingsStoreCache),
     nativeExecutionEnabled: nativeTaskModules?.launch.executionEnabled(readConfigFile()) === true,
     nativeExecutions: nativeExecutionSummary(relaysNow),
     // The background service the transcript depends on: "ok", "repairing"
@@ -9716,53 +9739,58 @@ ipcMain.handle("relay:updateNow", () => {
 // Settings → "Keep Relay hidden". The two hide concepts are never set
 // independently: hiding implies dismissed and un-hiding implies un-dismissed, or the
 // user flips the switch off and nothing happens because a stale ✕ still holds.
+// The same change whether the person flipped the switch or an agent wrote
+// settings.json (the watcher below calls it then).
+function applyPillHidden(next) {
+  // No status-area icon means no way back, so hiding must be refused outright
+  // rather than stranding the user behind a switch they cannot reach again.
+  if (next && !trayAvailable) return { ok: false, error: "no_status_area_icon", pillHidden };
+  pillHidden = next;
+  saveDeviceSetting({ pillHidden });
+  if (next) {
+    // Same shape as the tray-hide, with one deliberate difference: the queue is
+    // DROPPED, not snoozed. The user said they do not want to be told, and
+    // keeping the entries would mean the first card after un-hiding is a single
+    // banner carrying every relay accumulated in between (THE COLLATION LAW puts
+    // them all on one card, and burstShown is 0 so digest mode does not apply).
+    // The relays are still unread in the list; only the interruption is dropped.
+    abortCurrentShow("hidden-by-setting", { penalize: false });
+    attentionQueue.clear();
+    activeAttentionIds = new Set();
+    dismissSnoozedIds = new Set();
+    attentionLatched = false;
+    dismissed = true;
+    ghostActive = false;
+    // Stay on screen for THIS session rather than vanishing under the cursor of
+    // the person who just clicked the switch. The next ✕, tray-hide or restart
+    // makes it disappear, and the row's copy says so.
+    explicitlyOpened = true;
+    writeOverlayPrefs();
+    syncTray();
+    writePillStatus();
+  } else {
+    // Turning it off must actually bring the pill back, so clear `dismissed` in
+    // the same breath — hiding always sets it, so by the time anyone reaches this
+    // switch a stale ✕ would otherwise swallow the un-hide and nothing would
+    // happen. The two flags are never set independently.
+    //
+    // Deliberately NOT showFromTray(): the user is looking at Settings inside an
+    // already-visible pill, and its openFull would snap the card to the expanded
+    // Relays view and chime — bouncing them out of the tab they just used.
+    dismissed = false;
+    dismissSnoozedIds = new Set();
+    ghostActive = false;
+    explicitlyOpened = false; // the preference is off; the override is moot
+    writeOverlayPrefs();
+    maybeShow({ force: true });
+    syncTray();
+    writePillStatus();
+  }
+  return { ok: true, pillHidden };
+}
 ipcMain.handle("relay:setPillHidden", (_event, value) => {
   try {
-    const next = value === true;
-    // No status-area icon means no way back, so hiding must be refused outright
-    // rather than stranding the user behind a switch they cannot reach again.
-    if (next && !trayAvailable) return { ok: false, error: "no_status_area_icon", pillHidden };
-    pillHidden = next;
-    if (next) {
-      // Same shape as the tray-hide, with one deliberate difference: the queue is
-      // DROPPED, not snoozed. The user said they do not want to be told, and
-      // keeping the entries would mean the first card after un-hiding is a single
-      // banner carrying every relay accumulated in between (THE COLLATION LAW puts
-      // them all on one card, and burstShown is 0 so digest mode does not apply).
-      // The relays are still unread in the list; only the interruption is dropped.
-      abortCurrentShow("hidden-by-setting", { penalize: false });
-      attentionQueue.clear();
-      activeAttentionIds = new Set();
-      dismissSnoozedIds = new Set();
-      attentionLatched = false;
-      dismissed = true;
-      ghostActive = false;
-      // Stay on screen for THIS session rather than vanishing under the cursor of
-      // the person who just clicked the switch. The next ✕, tray-hide or restart
-      // makes it disappear, and the row's copy says so.
-      explicitlyOpened = true;
-      writeOverlayPrefs();
-      syncTray();
-      writePillStatus();
-    } else {
-      // Turning it off must actually bring the pill back, so clear `dismissed` in
-      // the same breath — hiding always sets it, so by the time anyone reaches this
-      // switch a stale ✕ would otherwise swallow the un-hide and nothing would
-      // happen. The two flags are never set independently.
-      //
-      // Deliberately NOT showFromTray(): the user is looking at Settings inside an
-      // already-visible pill, and its openFull would snap the card to the expanded
-      // Relays view and chime — bouncing them out of the tab they just used.
-      dismissed = false;
-      dismissSnoozedIds = new Set();
-      ghostActive = false;
-      explicitlyOpened = false; // the preference is off; the override is moot
-      writeOverlayPrefs();
-      maybeShow({ force: true });
-      syncTray();
-      writePillStatus();
-    }
-    return { ok: true, pillHidden };
+    return applyPillHidden(value === true);
   } catch (error) {
     return { ok: false, error: (error && error.message) || String(error), pillHidden };
   }
@@ -9770,15 +9798,111 @@ ipcMain.handle("relay:setPillHidden", (_event, value) => {
 
 // Settings → "Mute all Relay sounds". playTink is the single choke point for every
 // sound the product makes, and it reads this through the inbox payload.
+function applySoundsMuted(next) {
+  soundsMuted = next;
+  saveDeviceSetting({ soundsMuted });
+  writeOverlayPrefs();
+  // payload.ui is not part of the push signature, so force this one through.
+  pushInbox(true);
+  return { ok: true, soundsMuted };
+}
 ipcMain.handle("relay:setSoundsMuted", (_event, value) => {
   try {
-    soundsMuted = value === true;
-    writeOverlayPrefs();
-    // payload.ui is not part of the push signature, so force this one through.
-    pushInbox(true);
-    return { ok: true, soundsMuted };
+    return applySoundsMuted(value === true);
   } catch (error) {
     return { ok: false, error: (error && error.message) || String(error), soundsMuted };
+  }
+});
+
+// SETTINGS.JSON (src/relay-settings.cjs). The pill's own writes go through
+// here; an agent's arrive by the file changing under the watcher, which
+// applies what main owns (hiding, sounds) exactly as the switch would and
+// repaints the pill.
+function saveDeviceSetting(patch) {
+  const changed = Object.entries(patch).some(([key, value]) => settingsStoreCache[key] !== value);
+  if (!changed) return;
+  try { settingsStoreCache = relaySettings.patchDevice(patch); }
+  catch (error) { console.error("[overlay] settings write failed:", error && error.message); }
+}
+function settingsContext() {
+  const currentAccount = account();
+  return {
+    options: {},
+    accountKey: relaySettings.accountKeyFor(currentAccount),
+    features: currentProductFeatures(),
+    config: readConfigFile(),
+    trayAvailable,
+    client: null,
+    executionModule: async () => (await nativeTaskModulesPromise).launch,
+  };
+}
+function milestoneRelaysEnabled() {
+  try { return require("../bootstrap/relay-rules.cjs").milestoneRelaysEnabled(); }
+  catch { return true; }
+}
+function onSettingsFileChanged() {
+  let next;
+  try { next = relaySettings.readStore(); } catch { return; }
+  settingsStoreCache = next;
+  try {
+    if (typeof next.pillHidden === "boolean" && next.pillHidden !== pillHidden) {
+      const applied = applyPillHidden(next.pillHidden);
+      // Refused (no status-area icon): the file must not claim otherwise.
+      if (applied.ok === false) saveDeviceSetting({ pillHidden });
+    }
+    if (typeof next.soundsMuted === "boolean" && next.soundsMuted !== soundsMuted) applySoundsMuted(next.soundsMuted);
+  } catch (error) {
+    console.error("[overlay] applying changed settings failed:", error && error.message);
+  }
+  pushInbox(true);
+}
+try {
+  fs.watchFile(relaySettings.settingsPath(), { interval: 1000, persistent: false }, (current, previous) => {
+    if (current.mtimeMs !== previous.mtimeMs || current.size !== previous.size) onSettingsFileChanged();
+  });
+} catch (error) {
+  console.error("[overlay] settings watch failed:", error && error.message);
+}
+// One setting by its id, as the person (the pill has no agent limits).
+ipcMain.handle("relay:setSetting", async (_event, id, value) => {
+  try {
+    const result = await relaySettings.setSetting(settingsContext(), id, value, { actor: "person" });
+    onSettingsFileChanged();
+    return { ok: true, ...result, milestoneRelays: milestoneRelaysEnabled() };
+  } catch (error) {
+    return { ok: false, error: (error && error.message) || String(error), milestoneRelays: milestoneRelaysEnabled() };
+  }
+});
+// The pill's own switches, saved whole as the person set them.
+ipcMain.handle("relay:savePillSettings", (_event, patch) => {
+  try {
+    settingsStoreCache = relaySettings.savePillChoices(relaySettings.accountKeyFor(account()), patch || {});
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: (error && error.message) || String(error) };
+  }
+});
+// An older pill's browser-stored choices, handed over once per account.
+// The person's answer to an agent's request (relay_settings asked for more
+// freedom for agents). Only this window can answer: the click is the consent.
+ipcMain.handle("relay:answerSettingRequest", async (event, requestId, allow) => {
+  if (!win || win.isDestroyed() || event.sender !== win.webContents || event.senderFrame !== event.sender.mainFrame) return { ok: false };
+  try {
+    const result = await relaySettings.answerPendingRequest(settingsContext(), String(requestId || ""), allow === true);
+    onSettingsFileChanged();
+    return { ok: true, ...result };
+  } catch (error) {
+    onSettingsFileChanged();
+    return { ok: false, error: (error && error.message) || String(error) };
+  }
+});
+ipcMain.handle("relay:adoptLegacySettings", (_event, legacy) => {
+  try {
+    settingsStoreCache = relaySettings.adoptLegacy(relaySettings.accountKeyFor(account()), legacy || {});
+    pushInbox(true);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: (error && error.message) || String(error) };
   }
 });
 

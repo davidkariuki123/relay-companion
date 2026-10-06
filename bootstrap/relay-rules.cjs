@@ -24,6 +24,11 @@ const content = require("./relay-rules-content.cjs");
 
 const RULES_FILE_NAME = "relay.md";
 const STATE_FILE_NAME = "agent-rules.json";
+// The person's settings on this computer (src/relay-settings.cjs owns the
+// rest of the file; this module reads and writes only milestoneRelays). Its
+// own file, not config.json: the pill and agents write it, the daemon rewrites
+// config.json, and they must never race over the device credential's pointer.
+const PREFERENCES_FILE_NAME = "settings.json";
 
 function sha256(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
@@ -37,6 +42,38 @@ function claudeRulesPath({ homeDir = os.homedir(), env = process.env } = {}) {
 
 function statePath({ homeDir = os.homedir(), env = process.env } = {}) {
   return path.join(env.RELAY_CONFIG_DIR || path.join(homeDir, ".relay"), STATE_FILE_NAME);
+}
+
+function preferencesPath({ homeDir = os.homedir(), env = process.env } = {}) {
+  return path.join(env.RELAY_CONFIG_DIR || path.join(homeDir, ".relay"), PREFERENCES_FILE_NAME);
+}
+
+function readPreferences(options) {
+  try {
+    const preferences = JSON.parse(fs.readFileSync(preferencesPath(options), "utf8"));
+    return preferences && typeof preferences === "object" && !Array.isArray(preferences) ? preferences : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Milestone Relays (links the agent mints unasked when finished work matters to
+ * someone) are on until the person turns them off. Only an explicit false turns
+ * them off, so a missing or unreadable file keeps the shipped behaviour.
+ */
+function milestoneRelaysEnabled(options = {}) {
+  return readPreferences(options).milestoneRelays !== false;
+}
+
+/**
+ * Record the person's choice. The rules file follows it on the next install
+ * (relay-skill.cjs applyMilestonePreference does that at once for the pill).
+ */
+function setMilestoneRelays(enabled, options = {}) {
+  const next = { ...readPreferences(options), schemaVersion: 1, milestoneRelays: enabled === true, updatedAt: new Date().toISOString() };
+  writeAtomically(preferencesPath(options), `${JSON.stringify(next, null, 2)}\n`);
+  return next.milestoneRelays;
 }
 
 function renderRulesFile(version) {
@@ -89,10 +126,17 @@ function writeAtomically(file, bytes) {
  *
  * Statuses: installed, updated, current, kept_local_edit (a file Relay did not
  * write, or one the person changed since; left alone and reported, ok stays
- * true because a person's own rules are theirs), failed.
+ * true because a person's own rules are theirs), disabled (the person turned
+ * milestone Relays off, so Relay's file is removed and not written), failed.
  */
 function install(options = {}) {
   const file = claudeRulesPath(options);
+  // The file carries only the milestone doctrine. With milestone Relays off
+  // it has nothing to say, so it goes; a file the person edited stays theirs.
+  if (!milestoneRelaysEnabled(options)) {
+    const removed = uninstall(options);
+    return removed.status === "removed" || removed.status === "already_absent" ? { ...removed, status: "disabled" } : removed;
+  }
   const expected = renderRulesFile(options.version);
   const expectedHash = sha256(expected);
   try {
@@ -148,4 +192,17 @@ function status(options = {}) {
   };
 }
 
-module.exports = { RULES_FILE_NAME, STATE_FILE_NAME, claudeRulesPath, statePath, renderRulesFile, install, uninstall, status };
+module.exports = {
+  RULES_FILE_NAME,
+  STATE_FILE_NAME,
+  PREFERENCES_FILE_NAME,
+  claudeRulesPath,
+  statePath,
+  preferencesPath,
+  milestoneRelaysEnabled,
+  setMilestoneRelays,
+  renderRulesFile,
+  install,
+  uninstall,
+  status,
+};

@@ -61,6 +61,7 @@ const cases = {
   relay_connector_list_tools: [{}, 'toolCatalog'],
   relay_connector_request_approval: [{ provider: 'test', toolName: 'write', approvalSummary: 'Write one item', idempotencyKey: key }, 'requestToolApproval'],
   relay_connector_call_tool: [{ provider: 'test', toolName: 'read', arguments: {}, idempotencyKey: key }, 'callTool'],
+  relay_settings: [{ action: 'list' }, null],
 };
 function surface(client, options = {}) {
   return createAgentToolSurface(client, { featuresReader: async () => features, ...options });

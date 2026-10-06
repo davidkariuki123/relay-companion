@@ -61,6 +61,7 @@ const EXPECTED_TOOLS = [
   "relay_connector_list_tools",
   "relay_connector_request_approval",
   "relay_connector_call_tool",
+  "relay_settings",
 ];
 
 test("the complete MCP catalog has unique, internally valid model contracts", () => {
@@ -164,7 +165,7 @@ test("startup guidance and owner schemas preserve the complete product ontology"
   }
   assert.match(
     source,
-    /const startupInstructions = features\.topics === false[\s\S]{0,120}?startupInstructionsFor\(features\)[\s\S]{0,120}?instructionsWithTopics\(startupInstructionsFor\(features\)[\s\S]{0,1400}?instructions: startupInstructions,[\s\S]{0,1400}?server\._instructions = instructionsForClient\(startupInstructions, request\?\.params\?\.clientInfo\)/,
+    /const startupInstructions = features\.topics === false[\s\S]{0,120}?startupInstructionsFor\(features\)[\s\S]{0,120}?instructionsWithTopics\(startupInstructionsFor\(features\)[\s\S]{0,1400}?instructions: startupInstructions,[\s\S]{0,1400}?server\._instructions = instructionsForClient\(startupInstructions, request\?\.params\?\.clientInfo, features\)/,
     "the MCP initialize response carries guidance for the active product surface",
   );
   // Tasks and Topics are separate switches: the production row (Tasks on,

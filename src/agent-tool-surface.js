@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import path from "node:path";
 import { accountProductFeatures } from "./product-features.js";
 import { apiUrl, readConfig } from "./config.js";
@@ -7,10 +8,17 @@ import {
   toolsForAccount,
 } from "./mcp.js";
 
+const require = createRequire(import.meta.url);
+
 // A transport-independent entry to the same catalog and handlers used by MCP.
 // No MCP server, session handshake, or agent restart is involved.
 export function createAgentToolSurface(client, {
-  featuresReader = () => accountProductFeatures({ client, config: readConfig(), apiUrl: apiUrl() }),
+  // The person's milestone Relay switch rides with the account features, as it
+  // does for an MCP session, so the fallback catalog says the same thing.
+  featuresReader = async () => ({
+    ...(await accountProductFeatures({ client, config: readConfig(), apiUrl: apiUrl() })),
+    milestoneRelays: require("../bootstrap/relay-rules.cjs").milestoneRelaysEnabled(),
+  }),
 } = {}) {
   const contexts = new Map();
   function context(caller = {}) {

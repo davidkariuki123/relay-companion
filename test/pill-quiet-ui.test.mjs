@@ -110,7 +110,7 @@ test("the visibility gate uses explicitlyOpened, never trayForcedVisible", () =>
 });
 
 test("hiding never strands the user: no status-area icon means the switch is refused", () => {
-  const handler = between(main, 'ipcMain.handle("relay:setPillHidden"', 'ipcMain.handle("relay:setSoundsMuted"');
+  const handler = between(main, 'function applyPillHidden(', 'ipcMain.handle("relay:setSoundsMuted"');
   assert.match(handler, /if \(next && !trayAvailable\) return \{ ok: false, error: "no_status_area_icon"/);
   assert.match(html, /info\.canHide !== false/);
   assert.match(html, /disabled: !canHide/);
@@ -118,7 +118,7 @@ test("hiding never strands the user: no status-area icon means the switch is ref
 });
 
 test("turning hiding on drops the queue instead of banking a giant digest for later", () => {
-  const handler = between(main, 'ipcMain.handle("relay:setPillHidden"', 'ipcMain.handle("relay:setSoundsMuted"');
+  const handler = between(main, 'function applyPillHidden(', 'ipcMain.handle("relay:setSoundsMuted"');
   assert.match(handler, /attentionQueue\.clear\(\)/);
   // Not abortShow: that counts a failed attempt and would strand the entry sticky
   // forever, since a hidden pill never presents again.
@@ -129,7 +129,7 @@ test("turning hiding on drops the queue instead of banking a giant digest for la
 });
 
 test("turning hiding off clears dismissed too, or the switch would appear to do nothing", () => {
-  const handler = between(main, 'ipcMain.handle("relay:setPillHidden"', 'ipcMain.handle("relay:setSoundsMuted"');
+  const handler = between(main, 'function applyPillHidden(', 'ipcMain.handle("relay:setSoundsMuted"');
   const off = handler.slice(handler.indexOf("} else {"));
   assert.match(off, /dismissed = false;/);
   // showFromTray would send openFull and snap the card to Relays, throwing the user

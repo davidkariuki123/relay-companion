@@ -177,7 +177,10 @@ person marked private, or a recipient of "the team" with no reason attached.
   or on its way.
 - When this person wants it changed, edit the same message with
   relay_message_edit; the url stays the same and the page shows the new text.
-- "Stop creating relays" means none for the rest of the session.
+- "Stop creating relays" means none for the rest of the session. When they
+  want it off for good, turn milestone_relays off with relay_settings.
+- When Relay's instructions say this person turned off milestone Relays (a
+  switch in Relay's settings), create none unless they ask.
 - When nothing qualifies, do not mention Relay at all: no "no Relay needed",
   no explanation of why not. Just finish the work.
 

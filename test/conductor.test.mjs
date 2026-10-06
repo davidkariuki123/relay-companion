@@ -236,7 +236,9 @@ test("main offers Conductor only with the account's row and the OS's registratio
 test("the pill paints no Conductor tile, switch or word without both the row and the app", () => {
   const gate = inbox.slice(inbox.indexOf("  function conductorAvailable()"), inbox.indexOf("  function agentAppName()"));
   assert.match(gate, /return payload\.features\?\.conductor === true && agentSurfaces\?\.Conductor\?\.available === true;/);
-  assert.match(gate, /return conductorAvailable\(\) && protoPref\(conductorPreferenceKey\(\), "on"\) !== "off";/);
+  assert.match(gate, /if \(!conductorAvailable\(\)\) return false;/);
+  // settings.json first (the switch here, or an agent through relay_settings), then an older pill's saved value.
+  assert.match(gate, /return typeof stored === "boolean" \? stored : protoPref\(conductorPreferenceKey\(\), "on"\) !== "off";/);
   const options = inbox.slice(inbox.indexOf("  function hostOptions("), inbox.indexOf("  function hostSheetHtml("));
   assert.match(options, /\.\.\.\(conductorEnabled\(\) \? \[app\("conductor", "conductorMark\.svg", "Conductor", "conductor"\)\] : \[\]\),/);
   const settings = inbox.slice(inbox.indexOf("  function yourAgentHtml()"), inbox.indexOf("  function blockedPeopleHtml()"));
@@ -247,7 +249,7 @@ test("the pill paints no Conductor tile, switch or word without both the row and
   const mentions = inbox.split("\n").filter((line) => /conductor/i.test(line) && !/^\s*\/\//.test(line));
   for (const line of mentions) {
     // The chip's colour rule paints nothing unless hostOptions offered the chip.
-    assert.match(line, /features\?\.conductor === true|conductorAvailable|conductorEnabled|conductorPreferenceKey|setConductorEnabled|conductorPromptFor|openInConductor|data-conductor-app|option\.provider === "conductor"|Opened in Conductor|in Conductor\.|conductorMark\.svg|sv-open-name">Conductor|^  \.th-host-tile\[data-host="conductor"\] \{/,
+    assert.match(line, /features\?\.conductor === true|conductorAvailable|conductorEnabled|conductorPreferenceKey|setConductorEnabled|conductorPromptFor|openInConductor|data-conductor-app|option\.provider === "conductor"|Opened in Conductor|in Conductor\.|conductorMark\.svg|sv-open-name">Conductor|storedSettings\(\)\.conductor|ACCOUNT_SETTING_KEYS = |legacy\.conductor|savePillSetting\(\{ conductor: |^  \.th-host-tile\[data-host="conductor"\] \{/,
       `an ungated Conductor mention: ${line.trim().slice(0, 120)}`);
   }
   assert.ok(fs.existsSync(new URL("../overlay/conductorMark.svg", import.meta.url)));

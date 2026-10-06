@@ -518,6 +518,20 @@ function rollbackOneUnlocked(directory, options = {}) {
   }
 }
 
+/**
+ * Bring Claude Code's rules file in line with the person's milestone Relay
+ * choice now, without waiting for the next skill update: off removes it, on
+ * writes it back at the version of the Claude skill already in place. With no
+ * managed Claude skill there is nothing to stand beside, so nothing is written.
+ */
+function applyMilestonePreference(options = {}) {
+  if (!relayRules.milestoneRelaysEnabled(options)) return relayRules.install(options);
+  const claude = defaultTargets({ ...options, host: "claude" }).find((target) => target.target === "primary");
+  const state = claude ? readState(claude.directory) : null;
+  if (!state?.version) return { ok: true, status: "no_skill", file: relayRules.claudeRulesPath(options) };
+  return relayRules.install({ ...options, version: state.version });
+}
+
 async function runCli(argv = process.argv.slice(2), options = {}) {
   const [command = "status", ...rest] = argv;
   const hostFlag = rest.indexOf("--host");
@@ -561,6 +575,7 @@ if (require.main === module) {
 
 module.exports = {
   acquireSkillLock,
+  applyMilestonePreference,
   skillLockPath,
   BUNDLED_ROOT,
   MANIFEST_URL,

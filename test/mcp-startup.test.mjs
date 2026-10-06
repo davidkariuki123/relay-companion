@@ -38,12 +38,15 @@ for (const task of ["relay_task_start", "relay_task_complete", "relay_task_uncla
 // close rule and stays silent about boards.
 const PRODUCTION_INSTRUCTIONS = startupInstructionsFor({ requests: true, topics: false });
 
-async function inspectMcp({ developer = false, staff = false, updateChannel = "stable", clientName = "relay-startup-test" }) {
+async function inspectMcp({ developer = false, staff = false, updateChannel = "stable", clientName = "relay-startup-test", milestoneRelays = true }) {
   const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-mcp-startup-"));
   fs.writeFileSync(path.join(configDir, "config.json"), JSON.stringify({
     user: { id: "usr_test", email: "test@example.com", accountKind: "human", isDeveloper: developer, ...(staff ? { canViewAdminDashboard: true } : {}) },
     updateChannel,
   }));
+  if (milestoneRelays === false) {
+    fs.writeFileSync(path.join(configDir, "settings.json"), JSON.stringify({ schemaVersion: 1, milestoneRelays: false }));
+  }
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [relayBin, "mcp"],
@@ -179,5 +182,22 @@ test("tools/list survives account drift; only calls refuse", async () => {
   } finally {
     await client.close();
     fs.rmSync(configDir, { recursive: true, force: true });
+  }
+});
+
+test("with milestone Relays switched off, no host is told to create one unasked", async () => {
+  const off = startupInstructionsFor({ requests: true, topics: false, milestoneRelays: false });
+  assert.doesNotMatch(off, /At a milestone, create a Relay/);
+  assert.match(off, /This person turned off milestone Relays: never create one unasked; mint or send only when they ask\./);
+  assert.ok(Buffer.byteLength(off, "utf8") <= Buffer.byteLength(PRODUCTION_INSTRUCTIONS, "utf8"), "the replacement never grows the startup block");
+
+  for (const clientName of ["claude-code", "codex-mcp-client"]) {
+    const session = await inspectMcp({ developer: false, clientName, milestoneRelays: false });
+    assert.equal(session.instructions, off, `${clientName} gets the switched-off block and no doctrine`);
+    const share = session.tools.find((tool) => tool.name === "relay_share_link");
+    const send = session.tools.find((tool) => tool.name === "relay_send");
+    assert.doesNotMatch(share.description, /milestone/i, clientName);
+    assert.equal(Object.hasOwn(share.inputSchema.properties, "occasion"), false, clientName);
+    assert.doesNotMatch(send.description, /milestone/i, clientName);
   }
 });
