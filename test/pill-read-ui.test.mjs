@@ -183,7 +183,7 @@ test("Slack Settings is one truthful card with the official mark and no optimist
   assert.doesNotMatch(html, /class="open-actions sv-actions" data-stop="1" role="menu"/);
   // Simple copy, said only while there is something to connect.
   assert.match(slackSettings, /\$\{personalConnected \? "" : '<div class="sv-slack-foot">Your channels become groups in Chats\. Messages sync both ways\.<\/div>'\}/);
-  assert.match(slackSettings, /\? \(teamName \? `Connected to \$\{teamName\}` : "Connected"\)/);
+  assert.match(slackSettings, /\? "Connected · messages sync both ways"/);
   assert.match(slackSettings, /\? "Click Allow in your browser"/);
   assert.match(slackSettings, /Your Slack chats stop syncing\. Messages already here stay\./);
   assert.doesNotMatch(slackSettings, /Relay for \$\{esc\(teamName\)\}|<span class="sv-slack-name">Your Slack<\/span>/,

@@ -84,7 +84,7 @@ test("open puts the request in the AI's composer and on the clipboard", async ()
   assert.equal(result.ok, true);
   assert.equal(h.opened.at(-1), "https://example.test/open?q=1");
   assert.equal(h.copied.at(-1).startsWith("Set up Relay for me."), true);
-  h.onboarding.copyPrompt(key);
+  await h.onboarding.copyPrompt(key);
   assert.equal(h.copied.length, 2);
 });
 
@@ -126,7 +126,7 @@ test("the pill wires the chooser, the single handoff and the server's first-Rela
   assert.match(main, /if \(serverAnswer\?\.kind === "hello" \|\| serverAnswer\?\.kind === "org"\) return "hello";/);
 });
 
-test("Claude connects by connector: no place, one handoff link, and its chat opens on its own when it connects", async () => {
+test("Claude connects by connector: no place, one handoff link, and connecting moves the app on without opening or copying anything", async () => {
   const h = harness({ schemes: { "claude://": "Claude" } });
   const key = "user:usr_alex";
   const chosen = h.onboarding.choose(key, "claude", "browser");
@@ -142,25 +142,31 @@ test("Claude connects by connector: no place, one handoff link, and its chat ope
   assert.equal((await h.onboarding.poll(key)).connectedAt, "", "still waiting for Claude");
   assert.equal(h.calls.some(([name]) => name === "create"), false, "Claude never gets a setup code");
   h.client.connectors = [{ kind: "connector", surface: "claude", name: "Claude", createdAt: "2026-10-07T12:02:00.000Z" }];
+  const opensBefore = h.opened.length;
   const connected = await h.onboarding.poll(key);
-  assert.ok(connected.connectedAt, "the handoff follows");
-  assert.equal(h.opened.at(-1), "claude://claude.ai/new?surface=chat", "the Claude app, which owns claude://, with no prefill (Claude bannered prefilled links)");
+  assert.ok(connected.connectedAt, "the app moves on to copying the first message");
+  assert.equal(h.opened.length, opensBefore, "nothing opens by itself");
+  assert.deepEqual(h.copied, [], "nothing is copied behind the person's back");
+  // The person copies, then opens Claude.
+  await h.onboarding.copyPrompt(key);
   assert.equal(h.copied.at(-1), "Help me send my first Relay to Sam.", "the person names who it is for, so Claude's safety check sees it came from them");
+  await h.onboarding.open(key);
+  assert.equal(h.opened.at(-1), "claude://claude.ai/new?surface=chat", "the Claude app, which owns claude://, with no prefill (Claude bannered prefilled links)");
 });
 
-test("a Claude that already has Relay is not auto-opened; Start opens claude.ai when no Claude app is here", async () => {
+test("a Claude that already has Relay goes straight to copying; Open Claude opens claude.ai when no Claude app is here", async () => {
   const h = harness();
   const key = "user:usr_alex";
   h.client.connectors = [{ kind: "connector", surface: "claude", name: "Claude", createdAt: "2026-09-01T00:00:00.000Z" }];
   h.onboarding.choose(key, "claude");
   const seen = await h.onboarding.poll(key);
   assert.equal(seen.connector.connected, true);
-  assert.equal(seen.connectedAt, "", "connected, but the person has not been handed to Claude yet");
-  assert.deepEqual(h.opened, [], "nothing opens until they choose Start");
-  const opened = await h.onboarding.open(key);
-  assert.ok(opened.connectedAt);
+  assert.ok(seen.connectedAt, "no Add screen for a Claude that has Relay");
+  assert.deepEqual(h.opened, [], "nothing opens by itself");
+  assert.deepEqual(h.copied, [], "nothing is copied by itself");
+  await h.onboarding.open(key);
   assert.equal(h.opened.at(-1), "https://claude.ai/new");
-  assert.equal(h.copied.at(-1), "Help me send my first Relay to Sam.", "the sentence waits on the clipboard");
+  assert.deepEqual(h.copied, [], "opening Claude never touches the clipboard");
 });
 
 test("a ChatGPT connector never counts as Claude's", async () => {
@@ -186,7 +192,7 @@ test("Copy it again copies Claude's start sentence, not a setup code", async () 
   const key = "user:usr_alex";
   h.onboarding.choose(key, "claude");
   await h.onboarding.refreshServer(key);
-  assert.deepEqual(h.onboarding.copyPrompt(key), { ok: true });
+  assert.deepEqual(await h.onboarding.copyPrompt(key), { ok: true });
   assert.equal(h.copied.at(-1), "Help me send my first Relay to Sam.");
   assert.equal(h.calls.some(([name]) => name === "create"), false, "Claude never gets a setup code");
 });

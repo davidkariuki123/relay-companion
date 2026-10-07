@@ -2153,6 +2153,8 @@
   .av-slack-mark { position:absolute; right:-4px; bottom:-3px; width:15px; height:15px; padding:2px; box-sizing:border-box;
     border-radius:50%; background:var(--bg); object-fit:contain; pointer-events:none; }
   .relay-row:hover .av-slack-mark { background:color-mix(in srgb, var(--bg) 92%, var(--ink)); }
+  .rl-row .av-slack-mark { width:11px; height:11px; right:-3px; bottom:-2px; padding:1.5px; }
+  .rl-row .avatar.channel-hash { font-size:11px; border-radius:6px; }
   .avatar.channel-hash { border-radius:8px; font-family:var(--sans); font-size:14px; font-weight:600; letter-spacing:0; }
   .av-stack { flex:0 0 auto; display:flex; align-items:flex-start; padding-top:2px; width:32px; }
   .av-stack .avatar { position:relative; }
@@ -3434,8 +3436,14 @@
   .su-key-send { padding:4px 6px; background:#d97757; color:#fff; }
   :root[data-theme="dark"] .su-key-send { background:#d97757; color:#fff; }
   .su-key-send svg { width:13px; height:13px; fill:none; stroke:currentColor; stroke-width:2.2; stroke-linecap:round; stroke-linejoin:round; }
-  /* What the paste will say, so nobody wonders what they are sending. */
-  .su-keys-says { margin-top:3px; padding-top:9px; border-top:1px solid var(--hair); color:var(--muted); font:italic 12.5px/1.4 var(--sans); }
+  /* The first message itself, as a card: what gets copied, and then that it was. */
+  .su-first-message { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; margin-top:14px; padding:12px 14px;
+    border-radius:12px; background:var(--bg); box-shadow:inset 0 0 0 1px var(--edge); color:var(--ink); font:500 13px/1.45 var(--sans); }
+  .su-first-message b { flex:none; display:inline-flex; align-items:center; gap:4px; color:var(--ok); font:600 11.5px/1.45 var(--sans);
+    animation:su-copied-in .3s var(--settle) both; }
+  @keyframes su-copied-in { from { opacity:0; transform:scale(.85); } to { opacity:1; transform:none; } }
+  .su-first-message b svg { width:11px; height:11px; fill:none; stroke:currentColor; stroke-width:2.4; stroke-linecap:round; stroke-linejoin:round; }
+  .su-first-message.copied { box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--ok) 45%, transparent); }
   /* A mouse whose wheel rolls down, over and over. */
   .su-wheel { flex:none; position:relative; width:13px; height:19px; border-radius:7px; box-shadow:inset 0 0 0 1.5px currentColor; }
   .su-wheel::after { content:""; position:absolute; left:50%; top:4px; width:2px; height:5px; margin-left:-1px; border-radius:1px; background:currentColor;
@@ -4351,6 +4359,7 @@
   let slackNudgeHidden = false;
   const SLACK_CONNECTED_ROW_MS = 7000;
   let slackArrivalWindowUntil = 0;
+  let slackStatusAskedAt = 0;
   let slackConnectFailed = false; // the last Connect tap could not open Slack (not a status-check hiccup)
   const slackArrivedRows = new Set();
   const EXPANDED = { w: 344, h: 524 };
@@ -8515,6 +8524,15 @@
       renderSlackMembers();
       if (activeView === "threads") syncSlackPeopleBanner(chatRoomForThread(threadDetailId));
     });
+  }
+  // The rail's avatar: a Slack channel wears its #, and a chat that is also in
+  // Slack wears the Slack mark, the same as on the Chats list.
+  function railAvatarHtml(room) {
+    const slack = payload.features?.slack === true && isSlackIntegratedRoom(room);
+    const base = slack && slackChannelRoom(room)
+      ? `<span class="avatar sq channel-hash" style="--av-h:${avatarHue(room.name)}" aria-hidden="true">#</span>`
+      : `<span class="avatar${room.isGroup ? " sq" : ""}" style="--av-h:${avatarHue(room.isGroup ? (room.title || room.name) : room.name)}" aria-hidden="true">${esc(avatarInitials(room.name))}</span>`;
+    return slack ? `<span class="av-slack">${base}<img class="av-slack-mark" src="slackMark.png" alt="" /></span>` : base;
   }
   function slackComposerPlaceholder(room) {
     if (payload.features?.slack !== true || !isSlackIntegratedRoom(room)) return "";
@@ -16840,7 +16858,12 @@
         hasActivity: false,
       });
     }
-    const groups = sortConversationRooms([...byGroup.values()]);
+    // A quiet Slack room is listed only when it is a live channel you are in:
+    // an archived channel or a DM nobody has written in since Slack connected
+    // is not a conversation yet, on any list.
+    const quietSlackRoom = (room) => room.hasActivity === false && isSlackIntegratedRoom(room) && !slackChannelRoomListed(room);
+    const groups = sortConversationRooms([...byGroup.values()].filter((room) => !quietSlackRoom(room)));
+    people = people.filter((room) => !quietSlackRoom(room));
     // WhatsApp/iMessage law: group and direct conversations are peers. The
     // visible Chat list is one chronology, never two type-based shelves.
     const rooms = sortConversationRooms([...groups, ...people]);
@@ -17161,7 +17184,7 @@
       || (t.threadIds instanceof Set && t.threadIds.has(threadDetailId));
     const row = (t) => `
       <button class="rl-row${roomIsOpen(t) ? " on" : ""}" type="button" data-rail-open="${esc(t.threadId)}" data-party="${esc(t.name)}">
-        <span class="avatar${t.isGroup ? " sq" : ""}" style="--av-h:${avatarHue(t.isGroup ? (t.title || t.name) : t.name)}" aria-hidden="true">${esc(avatarInitials(t.name))}</span>
+        ${railAvatarHtml(t)}
         <span class="nm">${esc(t.name)}</span>
         ${t.unreadCount && !roomIsOpen(t) ? `<span class="ct">${t.unreadCount}</span>` : ""}
       </button>`;
@@ -20185,10 +20208,19 @@
   // SLACK, ONE ROW. The whole connection lives in a single row at the top of
   // Chats: Connect → "Tap Allow in your browser" → "Slack is connected", and
   // your channels arrive below it as groups. No page, no explanation to read.
+  // Chats is where the pill opens, so Chats asks for the connection itself.
+  // Nothing else did on a cold start: the row stayed blank until You was
+  // visited (found live on 0.1.586).
   function slackNudgeState() {
     if (payload.features?.slack !== true || !window.relay.slackConnect) return "";
     if (slackJustConnectedAt && Date.now() - slackJustConnectedAt < SLACK_CONNECTED_ROW_MS) return "connected";
-    if (!slackConnectionLoaded) return "";
+    if (!slackConnectionLoaded) {
+      if (Date.now() - slackStatusAskedAt > 15_000) {
+        slackStatusAskedAt = Date.now();
+        setTimeout(() => refreshSlackConnection({ preserveWaiting:true }), 0);
+      }
+      return "";
+    }
     if (slackConnectionReady(slackConnectionInfo)) return "";
     if (slackConnectionBusy) return "opening";
     if (slackConnectionWaiting) return "waiting";
@@ -20393,7 +20425,7 @@
     const teamName = team?.name || "";
     const connectLabel = slackConnectionBusy ? "Opening…" : slackConnectionWaiting ? "Open again" : state === "paused" ? "Reconnect" : "Connect";
     const connectionLabel = personalConnected
-      ? (teamName ? `Connected to ${teamName}` : "Connected")
+      ? "Connected · messages sync both ways"
       : slackConnectionWaiting
         ? "Click Allow in your browser"
         : state === "paused"
@@ -20404,7 +20436,7 @@
       <div class="sv-slack-card${slackDisconnectConfirm ? " is-confirming" : ""}" id="svSlackCard">
         <div class="sv-slack-row">
           <img class="sv-slack-logo" src="slackMark.png" alt="Slack" />
-          <span class="sv-slack-copy"><span class="sv-slack-name">Slack</span><span class="sv-slack-note">${esc(connectionLabel)}</span></span>
+          <span class="sv-slack-copy"><span class="sv-slack-name">${esc(teamName || "Your Slack")}</span><span class="sv-slack-note">${esc(connectionLabel)}</span></span>
           ${personalConnected
             ? `<button class="sv-slack-action" type="button" id="svSlackDisconnect" aria-controls="svSlackDisconnectConfirmPanel" aria-expanded="${slackDisconnectConfirm ? "true" : "false"}" ${slackConnectionBusy || slackDisconnectConfirm ? "disabled" : ""}>Disconnect</button>`
             : `<button class="sv-slack-action${slackConnectionWaiting || slackConnectionBusy ? "" : " primary"}" type="button" id="svSlackConnect" ${slackConnectionBusy ? "disabled" : ""}>${esc(connectLabel)}</button>`}
@@ -21932,7 +21964,7 @@
       <h1 class="su-title">${title}</h1>
       <p class="su-copy">${copy}</p>
       ${already ? "" : claudeKeysHtml(celebrating)}
-      <div class="su-claude-tail">${celebrating ? `<p class="su-claude-done" role="status">Claude is connected. Opening a chat…</p>` : `<div class="su-form su-agent-actions">${primary}</div>
+      <div class="su-claude-tail">${celebrating ? `<p class="su-claude-done" role="status">Claude is connected.</p>` : `<div class="su-form su-agent-actions">${primary}</div>
       <div class="su-agent-quiet">${connector.started && !already ? `<button class="su-link" type="button" data-claude-reconnect>Already in Claude?</button><span aria-hidden="true">·</span>` : ""}<button class="su-link" type="button" data-agent-reset>Choose a different AI</button></div>
       <div class="desktop-prompt-wait" role="status">${status}</div>`}</div></div>`;
     signupBodyEl.querySelector("[data-claude-connect]")?.addEventListener("click", connectOnboardingClaude);
@@ -21947,11 +21979,14 @@
     });
     signupBodyEl.querySelector("[data-agent-reset]")?.addEventListener("click", resetOnboardingAgent);
   }
-  // CONNECTED: PASTE AND SEND. Claude opens an empty chat with the sentence on
-  // the clipboard (a prefilled link brings Claude's red caution banner), so
-  // the screen is two keys: paste, then send.
+  // CONNECTED: COPY, THEN OPEN CLAUDE (David, 2026-10-07). The person copies
+  // the first message themselves, sees it copied, and only then gets the
+  // button that opens Claude, with the two keys to press there. Nothing is
+  // prefilled (a prefilled link brings Claude's red caution banner) and
+  // nothing lands on the clipboard behind their back.
+  let claudeCopied = false;
   function renderClaudeSend(agent) {
-    const signature = JSON.stringify(["claude-send", onboardingAgentBusy, onboardingAgentNote, agent.startPrompt || ""]);
+    const signature = JSON.stringify(["claude-send", onboardingAgentBusy, onboardingAgentNote, agent.startPrompt || "", claudeCopied]);
     startOnboardingAgentPoll();
     if (signupBodyEl.dataset.firstRelaySignature === signature && signupBodyEl.querySelector(".su-claude-send")) return;
     signupBodyEl.dataset.firstRelaySignature = signature;
@@ -21959,24 +21994,32 @@
     const arrow = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5L8 3l4.5 4.5"/></svg>';
     const paste = /Mac/i.test(navigator.platform || navigator.userAgent || "") ? "⌘ V" : "Ctrl V";
     const sentence = agent.startPrompt || "Help me get started with Relay.";
-    signupBodyEl.innerHTML = `<div class="su-local-prompt su-agent-screen su-claude-connect su-claude-send"><div class="su-step">Connected</div>
-      <h1 class="su-title">Relay is in<br>${onboardingAgentTitleName(agent)}.</h1>
-      <p class="su-copy">Your first message is copied. In Claude:</p>
+    const message = `<div class="su-first-message${claudeCopied ? " copied" : ""}"><span>${esc(sentence)}</span>${claudeCopied ? `<b role="status">${tick}Copied</b>` : ""}</div>`;
+    const body = claudeCopied
+      ? `<p class="su-copy">Copied. Now open Claude, then:</p>
+      ${message}
       <div class="su-keys" role="img" aria-label="In Claude, press ${paste} to paste, then press send">
         <div class="su-keys-row"><span class="su-keys-n">1${tick}</span>Press <span class="su-key">${paste}</span> to paste</div>
         <div class="su-keys-row"><span class="su-keys-n">2${tick}</span>Press <span class="su-key su-key-send">${arrow}</span> to send</div>
-        <div class="su-keys-says">“${esc(sentence)}”</div>
       </div>
-      <div class="su-claude-tail"><div class="su-form su-agent-actions"><button class="su-primary" type="button" data-claude-start${onboardingAgentBusy ? " disabled" : ""}>Go to Claude</button></div>
-      <div class="su-agent-quiet"><button class="su-link" type="button" data-claude-copy>Copy it again</button><span aria-hidden="true">·</span><button class="su-link" type="button" data-agent-reset>Use a different AI</button></div>
-      <div class="desktop-prompt-wait" role="status">${onboardingAgentNote ? esc(onboardingAgentNote) : `<span class="su-send-progress su-agent-live" style="margin:0"><span aria-hidden="true"></span></span>This moves on when Claude starts.`}</div></div></div>`;
+      <div class="su-claude-tail"><div class="su-form su-agent-actions"><button class="su-primary" type="button" data-claude-start${onboardingAgentBusy ? " disabled" : ""}>Open Claude</button></div>
+      <div class="su-agent-quiet"><button class="su-link" type="button" data-claude-copy>Copy again</button><span aria-hidden="true">·</span><button class="su-link" type="button" data-agent-reset>Use a different AI</button></div>`
+      : `<p class="su-copy">Copy your first message to Claude:</p>
+      ${message}
+      <div class="su-claude-tail"><div class="su-form su-agent-actions"><button class="su-primary" type="button" data-claude-copy${onboardingAgentBusy ? " disabled" : ""}>Copy message</button></div>
+      <div class="su-agent-quiet"><button class="su-link" type="button" data-agent-reset>Use a different AI</button></div>`;
+    signupBodyEl.innerHTML = `<div class="su-local-prompt su-agent-screen su-claude-connect su-claude-send"><div class="su-step">Connected</div>
+      <h1 class="su-title">Relay is in<br>${onboardingAgentTitleName(agent)}.</h1>
+      ${body}
+      <div class="desktop-prompt-wait" role="status">${onboardingAgentNote ? esc(onboardingAgentNote) : claudeCopied ? `<span class="su-send-progress su-agent-live" style="margin:0"><span aria-hidden="true"></span></span>This moves on when Claude starts.` : ""}</div></div></div>`;
     signupBodyEl.querySelector("[data-claude-start]")?.addEventListener("click", openOnboardingAgent);
     signupBodyEl.querySelector("[data-claude-copy]")?.addEventListener("click", async () => {
-      try { await onboardingAgentCall("onboardingCopyAgentRequest"); onboardingAgentNote = "Copied. Paste it in Claude and send."; }
+      onboardingAgentNote = "";
+      try { await onboardingAgentCall("onboardingCopyAgentRequest"); claudeCopied = true; }
       catch { onboardingAgentNote = "Relay couldn’t copy it. Try again."; }
       signupBodyEl.dataset.firstRelaySignature = ""; renderSignup();
     });
-    signupBodyEl.querySelector("[data-agent-reset]")?.addEventListener("click", resetOnboardingAgent);
+    signupBodyEl.querySelector("[data-agent-reset]")?.addEventListener("click", () => { claudeCopied = false; resetOnboardingAgent(); });
   }
   async function connectOnboardingClaude() {
     onboardingAgentBusy = true; onboardingAgentNote = ""; renderSignup();
@@ -21992,7 +22035,7 @@
     try {
       await onboardingAgentCall("onboardingOpenAgent");
       onboardingAgentNote = option?.host === "claude"
-        ? "Claude is open. Press send there."
+        ? `Claude is open. Paste and send there.`
         : `${option?.name || "Your AI"} is open. Press send there.`;
     } catch (error) { onboardingAgentNote = String(error?.message || "Couldn’t open it. Copy the request instead.").replace(/^Error invoking remote method '[^']+': (Error: )?/, ""); }
     finally { onboardingAgentBusy = false; renderSignup(); }
@@ -22629,7 +22672,24 @@
     if (markAllReadEl.disabled || unreadCount === 0) return;
     markAllReadEl.disabled = true;
     markAllReadEl.textContent = "Marking…";
+    // The Inbox number counts chats that are also in Slack, so "all" reads
+    // them too: each one is a whole read, here and in Slack.
+    const slackUnread = payload.features?.slack === true
+      ? (payload.slackChats || []).filter((chat) => Number(chat?.unreadCount || 0) > 0)
+      : [];
+    const slackReads = slackUnread.map((chat) => Promise.resolve(
+      persistCanonicalChatRead(String(chat.chatId), { surface:"slack", includeSlack:true }),
+    ).catch(() => null));
     const result = await window.relay.markAllRead();
+    await Promise.all(slackReads);
+    if (slackUnread.length) {
+      const read = new Set(slackUnread.map((chat) => String(chat.chatId)));
+      const quiet = (summary) => read.has(String(summary.chatId)) ? { ...summary, unreadCount:0 } : summary;
+      payload.slackChats = (payload.slackChats || []).map(quiet);
+      payload.chats = (payload.chats || []).map(quiet);
+      lastPayloadSignature = "";
+      renderAll();
+    }
     markAllReadEl.textContent = "Mark all as read";
     if (!result || !result.ok) {
       markAllReadEl.disabled = false;
