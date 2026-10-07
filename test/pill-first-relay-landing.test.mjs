@@ -79,8 +79,10 @@ test("Your first link asks for a relay in the person's own words, then shows the
   assert.match(chapter, /\$\{firstRelayWasLink \? "Your first Relay" : "Your first link"\}/);
   assert.match(chapter, /id="suLinkCopy"[^>]*>\$\{chapter\.linkCopied \? "Copied" : "Copy message"\}/);
   assert.match(chapter, /id="suLinkContinue"[^>]*>Continue</);
-  assert.match(chapter, /suLinkContinue"\)\?\.addEventListener\("click", \(\) => advanceFirstRelayChapter\("network"\)\)/);
-  assert.match(chapter, /renderNetworkScreen\("Last step"\);\s*\}/, "Grow your network is the last screen");
+  // Your Slack comes next when Slack is on and not yet connected; Grow your
+  // network is still the last screen.
+  assert.match(chapter, /suLinkContinue"\)\?\.addEventListener\("click", \(\) => advanceFirstRelayChapter\(stageAfterFirstLink\(\)\)\)/);
+  assert.match(chapter, /if \(chapter\.stage === "slack"\) \{ renderSlackOnboarding\(chapter\); return; \}\s*renderNetworkScreen\("Last step"\);\s*\}/, "Grow your network is the last screen");
 });
 
 test("Grow your network has no agent tutorial block and ends with Open Relay", () => {

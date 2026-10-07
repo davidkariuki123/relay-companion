@@ -217,7 +217,8 @@ test("a Slack-linked room shows every message and says so once, with the Slack m
   assert.match(html, /\.th-detail-name\.slack::after \{[^}]*url\("slackMark\.png"\)/);
   // The composer names its destination the way Slack does.
   assert.match(html, /function slackComposerPlaceholder\(room\) \{\s*if \(payload\.features\?\.slack !== true \|\| !isSlackIntegratedRoom\(room\)\) return "";/);
-  assert.match(html, /return name \? `Message \$\{name\}` : "";/);
+  // Slack's own words: "Message #code" in a channel, "Message Sven" in a DM.
+  assert.match(html, /\? `Message \$\{slackChannelLabel\(room\)\}` : `Message \$\{name\.split\(\/\\s\+\/\)\[0\]\}`;/);
   assert.match(html, /slackComposerPlaceholder\(chatRoom\) \|\| "Reply…"/);
   // A channel nobody has written in since it connected is quiet, not broken.
   assert.match(html, /"Nothing here yet\. It syncs with Slack\."/);

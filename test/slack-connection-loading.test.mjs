@@ -64,6 +64,7 @@ function slackRow({ prefs = new Map() } = {}) {
     let relaysLayout = "chats";
     let surfaceRenderDeferred = false;
     const REDUCED = true;
+    const cardEl = { classList: { contains: () => false } };
     const rendererSurfaceActive = () => true;
     const esc = (value) => String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;");
     const signupAccountKey = () => payload.account.userId;
@@ -233,7 +234,7 @@ test("the row walks Connect → Click Allow → Slack is connected, then bows ou
   assert.equal(row.markup(), "", "the connected row leaves on its own");
 });
 
-test("Not now hides the Connect row for this account; Cancel stops main's watch", async () => {
+test("Not now snoozes the row: gone for six hours, back the next time Relay opens", async () => {
   const prefs = new Map();
   const row = slackRow({ prefs });
   const initial = row.refresh();
@@ -241,14 +242,43 @@ test("Not now hides the Connect row for this account; Cancel stops main's watch"
   await initial;
   row.click("slackNudgeHide");
   assert.equal(row.markup(), "");
-  assert.equal(prefs.get("slackNudgeHidden:user_a"), "1");
+  assert.equal(prefs.get("slackNudgeSnoozedUntil:user_a"), String(row.clock.now + 6 * 60 * 60 * 1000));
   assert.equal(row.calls.cancel, 1);
 
-  const again = slackRow({ prefs });
-  const check = again.refresh();
-  again.pending[0].resolve({ ok: true, connection: { state: "disconnected" } });
+  // Relay restarted an hour later: still snoozed, for this account only.
+  const soon = slackRow({ prefs });
+  soon.clock.now = row.clock.now + 60 * 60 * 1000;
+  const check = soon.refresh();
+  soon.pending[0].resolve({ ok: true, connection: { state: "disconnected" } });
   await check;
-  assert.equal(again.markup(), "", "the choice is remembered per account");
+  assert.equal(soon.markup(), "", "the snooze is remembered per account");
+
+  // Seven hours later the row is back on the next open.
+  const later = slackRow({ prefs });
+  later.clock.now = row.clock.now + 7 * 60 * 60 * 1000;
+  const back = later.refresh();
+  later.pending[0].resolve({ ok: true, connection: { state: "disconnected" } });
+  await back;
+  assert.match(later.markup(), /Bring your Slack chats here/);
+  assert.equal(prefs.get("slackNudgeSnoozedUntil:user_a"), "0");
+});
+
+test("a snooze that runs out while the pill is open waits for the next open", () => {
+  const snooze = between("function slackNudgeSnoozed()", "function renderSlackNudge(");
+  assert.match(snooze, /return slackNudgeSnoozedUntil > 0;/, "a stored snooze hides the row until something ends it");
+  assert.match(html, /window\.relay\.onShown\(\(\) => \{[\s\S]*?slackNudgeSnoozed\(\) && wakeSlackNudge\(\)/, "showing the pill ends a snooze that ran out");
+});
+
+test("onboarding offers Slack once, between the first link and Grow your network", () => {
+  const screen = between("  const SLACK_ONBOARDING_CONNECTED_MS", "  // OPEN RELAY (2026-09-13)");
+  assert.match(screen, /payload\.features\?\.slack === true && Boolean\(window\.relay\.slackConnect\)\s*&& !\(slackConnectionLoaded && slackConnectionReady\(slackConnectionInfo\)\)/);
+  assert.match(screen, /return slackOnboardingOffered\(\) \? "slack" : "network";/);
+  // Not now there is the same Not now as the row's: one snooze.
+  assert.match(screen, /suSlackLater"\)\?\.addEventListener\("click", \(\) => \{\s*snoozeSlackNudge\(\);/);
+  assert.match(screen, /Bring your Slack here\./);
+  assert.match(screen, /Your Slack is here\./);
+  // Connecting during onboarding never yanks the person into the inbox.
+  assert.match(html, /if \(info\.connected && activeView !== "threads" && !cardEl\.classList\.contains\("signup"\)\) \{/);
 });
 
 test("the row lives in Inbox › Chats only, and an open Inbox checks Slack once", () => {
