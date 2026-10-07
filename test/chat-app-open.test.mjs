@@ -50,7 +50,7 @@ test("the ChatGPT tile is always the web app, in Work mode", () => {
     const url = new URL(t.primary);
     assert.equal(url.origin, "https://chatgpt.com");
     assert.equal(url.searchParams.get("q"), PROMPT);
-    assert.equal(url.searchParams.get("mode"), "work");
+    assert.equal(url.pathname, "/work", "the home page ignores ?mode=work and opens Chat");
   }
 });
 

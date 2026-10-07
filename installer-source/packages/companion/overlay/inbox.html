@@ -2805,6 +2805,89 @@
   .th-msg.mention-target { outline:1px solid var(--accent); outline-offset:2px; background:color-mix(in srgb,var(--accent) 9%,var(--bg)); }
   .th-party.mention-arrival-label { color:var(--accent); white-space:normal; line-height:1.35; }
 
+  /* ---- New replies, unfolded -------------------------------------------------
+     A message with new replies holds them: words, then the news, then its reply
+     strip, one shape (a Relay card's anatomy). One mark means new everywhere: a
+     dot in the margin that fades the moment the reply has been read. */
+  .th-msg.holds-news { min-width:min(300px, 88%); }
+  .th-rt-tray { position:relative; flex:1 0 calc(100% + 26px); width:calc(100% + 26px); margin:9px -13px 0; padding:5px 13px 6px;
+    border-top:1px solid var(--hair); cursor:pointer; text-align:left; font-family:var(--sans); }
+  .th-msg.has-host-actions .th-rt-tray { margin-top:8px; }
+  .th-msg.holds-news > .th-rt-link.strip { margin-top:0; }
+  .th-rt-tray.standalone { flex:none; width:fit-content; min-width:min(300px, 88%); max-width:88%; margin:6px 16px 2px; padding:5px 13px 6px;
+    border:0; border-radius:14px; background:var(--wash); }
+  .th-rt-news { position:relative; padding:6px 0 5px; isolation:isolate; }
+  .th-rt-news + .th-rt-news { margin-top:1px; }
+  .th-rt-news-head { display:flex; align-items:baseline; gap:7px; min-width:0; }
+  .th-rt-news-head .th-party { font-size:12px; font-weight:600; }
+  .th-rt-news-time { font:400 10.5px var(--mono); color:var(--muted-2); font-variant-numeric:tabular-nums; flex:none; }
+  .th-rt-news-text { margin-top:2px; font-size:13px; line-height:19.5px; color:var(--ink); overflow-wrap:anywhere; white-space:pre-wrap; }
+  .th-rt-news-text a { color:var(--accent); text-decoration:none; border-bottom:1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+  .th-rt-news-text .deleted { color:var(--muted-2); font-style:italic; }
+  .th-rt-news-files { margin-top:3px; font-size:11px; color:var(--muted-2); }
+  .th-rt-news-quote { display:flex; gap:6px; min-width:0; margin-top:4px; padding:3px 8px; border-left:2px solid var(--accent); border-radius:6px;
+    background:color-mix(in srgb, var(--ink) 4%, transparent); font-size:10.5px; line-height:1.4; }
+  .th-rt-news-quote .who { color:var(--accent); font-weight:600; flex:none; }
+  .th-rt-news-quote .copy { color:var(--muted-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .th-rt-dot { position:absolute; left:-9.5px; top:11px; width:6px; height:6px; border-radius:50%; background:var(--accent);
+    transition:opacity .6s var(--settle), transform .6s var(--settle); pointer-events:none; }
+  .is-read > .th-rt-dot { opacity:0; transform:scale(.3); }
+  .rt-still .th-rt-dot, .rt-still.th-rt-dot, .th-rt-tray.rt-still .th-rt-fold, .th-rt-tray.rt-still .th-rt-more { transition:none; }
+  /* Hover and arrival share one surface: a soft wash behind the row. */
+  .th-rt-news::after { content:""; position:absolute; inset:0 -8px; border-radius:9px; z-index:-1; background:var(--wash-2);
+    opacity:0; transition:opacity var(--t-fast) var(--settle); }
+  .th-rt-news:hover::after { opacity:1; }
+  .th-rt-news.rt-land::after { animation:rtLand 1.45s var(--settle) both; }
+  @keyframes rtLand {
+    0%   { opacity:1; background:color-mix(in srgb, var(--accent) 15%, transparent); }
+    40%  { opacity:1; background:color-mix(in srgb, var(--accent) 10%, transparent); }
+    100% { opacity:0; background:color-mix(in srgb, var(--accent) 0%, transparent); }
+  }
+  /* Many new replies: two show, the rest wait behind one line that opens in place. */
+  .th-rt-more { appearance:none; position:relative; display:flex; align-items:center; gap:7px; width:100%; margin:3px 0 1px; padding:6px 0;
+    border:0; background:transparent; color:var(--accent); font:600 11.5px/1.35 var(--sans); cursor:pointer; text-align:left; transition:opacity .22s var(--settle); }
+  .th-rt-more .th-rt-dot { top:50%; margin-top:-3px; }
+  .th-rt-more:hover .th-rt-more-label { text-decoration:underline; text-underline-offset:2px; }
+  .th-rt-more:focus-visible { outline:none; box-shadow:var(--focus-ring); border-radius:6px; }
+  .th-rt-more-chev { opacity:.8; }
+  .th-rt-fold { display:grid; grid-template-rows:0fr; transition:grid-template-rows .36s var(--soft); }
+  .th-rt-fold-inner { min-height:0; overflow:hidden; margin:0 -10px; padding:0 10px; }
+  .th-rt-tray.open .th-rt-fold { grid-template-rows:1fr; }
+  .th-rt-tray.open .th-rt-more { opacity:0; height:0; padding:0; margin:0; overflow:hidden; pointer-events:none;
+    transition:opacity .16s var(--settle), height .3s var(--soft), padding .3s var(--soft), margin .3s var(--soft); }
+  /* The capsule: the mention control's species. It lives behind the composer,
+     rises out of it, and the room keeps its foot clear while it floats. */
+  #thRows:not(.has-unread-jump) { transition:padding-bottom .34s var(--soft); }
+  #thRows.has-unread-jump { padding-bottom:48px; transition:none; }
+  .th-composer-dock > .qr, .th-composer-dock > .th-room-status { position:relative; z-index:1; }
+  .th-unread-jump { position:absolute; right:16px; bottom:calc(100% + 7px); z-index:0; display:flex; align-items:center;
+    border:1px solid color-mix(in srgb,var(--accent) 45%,transparent); border-radius:24px;
+    background:color-mix(in srgb,var(--accent) 12%,var(--bg)); color:var(--accent);
+    box-shadow:0 3px 12px color-mix(in srgb,var(--ink) 12%,transparent); overflow:hidden; pointer-events:auto; }
+  .th-unread-jump.hidden { display:none; }
+  .th-unread-jump-btn { appearance:none; border:0; display:flex; align-items:center; gap:7px; padding:9px 14px 9px 12px; min-height:34px;
+    background:transparent; color:inherit; font:500 12px var(--sans); cursor:pointer; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .th-unread-jump-btn:hover { background:color-mix(in srgb,var(--accent) 7%,transparent); }
+  .th-unread-jump-btn:active { background:color-mix(in srgb,var(--accent) 12%,transparent); }
+  .th-unread-jump-btn:focus-visible { outline:none; box-shadow:inset var(--focus-ring); }
+  .th-unread-jump-btn:disabled, .th-unread-jump-btn[aria-disabled="true"] { cursor:default; }
+  .th-unread-jump-btn[aria-disabled="true"]:hover { background:transparent; }
+  .th-unread-glyph { position:relative; display:inline-block; width:12px; height:12px; flex:none;
+    transition:width .3s var(--soft), margin .3s var(--soft), opacity .2s var(--settle); }
+  .th-unread-glyph svg { position:absolute; inset:0; transition:transform .34s var(--soft), opacity .2s var(--settle); }
+  .th-unread-glyph .th-unread-check { opacity:0; transform:scale(.6); }
+  .th-unread-glyph[data-dir="up"] .th-unread-arrow { transform:rotate(180deg); }
+  .th-unread-glyph[data-dir="check"] .th-unread-arrow { opacity:0; transform:scale(.6); }
+  .th-unread-glyph[data-dir="check"] .th-unread-check { opacity:1; transform:none; }
+  .th-unread-glyph[data-dir="none"] { width:0; margin-right:-7px; opacity:0; }
+  .th-unread-label { display:inline-flex; align-items:center; }
+  .th-unread-num { position:relative; display:inline-grid; overflow:hidden; height:1.3em; line-height:1.3em; }
+  .th-unread-num > span { grid-area:1/1; }
+  @media (prefers-reduced-motion: reduce) {
+    .th-rt-dot, .th-unread-glyph, .th-unread-glyph svg, .th-rt-fold, .th-rt-more, #thRows:not(.has-unread-jump) { transition:none !important; }
+    .th-rt-news.rt-land::after { animation:none !important; }
+  }
+
   .rd-reply-composer { position:relative; }
   .th-mention-menu { position:absolute; left:10px; right:10px; bottom:100%; margin-bottom:7px; z-index:8; overflow:hidden;
     border:1px solid var(--edge); border-radius:12px; background:var(--bg); box-shadow:0 12px 30px color-mix(in srgb, #000 18%, transparent); }
@@ -15027,6 +15110,410 @@
     }
   });
 
+  // ---- New replies, unfolded -------------------------------------------------
+  // A typed reply folds into its thread, so one that arrived later used to wait
+  // there unseen while the chat kept counting it (David, 2026-10-03: "why do i
+  // have 6 unreads in my inbox? regardless of which chat i click on it doesnt
+  // change"). Now a message with new replies HOLDS them: they sit inside its
+  // own shape, between its words and its reply strip, the way a Relay card
+  // already carries its strip. Nothing is drawn to connect them; the shape does.
+  //
+  // The contract:
+  //   · A reply counts until it has been shown: fully on screen for a moment,
+  //     or on the screen the reader moves on from. Leaving clears nothing.
+  //   · While the chat has unread replies, every visit shows them and the
+  //     capsule (the mention control's species) steps to the next one off
+  //     screen. It never points at something already in front of you.
+  //   · Replies shown this visit stay in place after they are read, so nothing
+  //     moves under the reader; the next visit folds them again.
+  //   · Past three new replies a message leads with two and folds the rest
+  //     behind one line, opened in place by a tap or by the capsule.
+  const REPLY_NEWS_DWELL_MS = 650;
+  const REPLY_NEWS_SHOWN = 3;
+  const REPLY_NEWS_LEAD = 2;
+  let replyNews = null;
+
+  function replyNewsFor(roomKey) {
+    if (!replyNews || replyNews.room !== roomKey) {
+      replyNews = { room:roomKey, ids:new Set(), opened:new Set(), seenAt:new Map(), hadUnread:false, doneUntil:0, gliding:false };
+    }
+    return replyNews;
+  }
+
+  function replyNewsTrayHtml(root, items, byId, { standalone = false } = {}) {
+    if (!root || !items.length) return "";
+    const rootId = String(root.id || "");
+    const folds = items.length > REPLY_NEWS_SHOWN;
+    const lead = folds ? items.slice(0, REPLY_NEWS_LEAD) : items;
+    const rest = folds ? items.slice(REPLY_NEWS_LEAD) : [];
+    const onShow = new Set(items.map((item) => String(item.id || "")));
+    const row = (reply) => {
+      const name = String(reply.party || "Someone");
+      const parent = reply.inReplyToRelayId ? byId.get(String(reply.inReplyToRelayId)) : null;
+      // A quote only when it answers another reply that is not also on show.
+      const quote = parent && parent !== root && !onShow.has(String(parent.id || ""))
+        ? `<div class="th-rt-news-quote"><span class="who">${esc(replyAuthor(parent).name)}</span><span class="copy">${esc(relayListGist(String(parent.title || parent.body || "Message").replace(/\s+/g, " "), 90))}</span></div>`
+        : "";
+      const files = Array.isArray(reply.attachments) ? reply.attachments.length : 0;
+      const words = reply.deletedAt
+        ? `<span class="deleted">This message was deleted</span>`
+        : linkify(String(reply.body || reply.title || ""), reply.groupId || root.groupId || "");
+      return `<div class="th-rt-news" data-rt-news="${esc(reply.id)}">`
+        + `<span class="th-rt-dot" aria-hidden="true"></span>`
+        + `<div class="th-rt-news-head"><span class="th-party ${partyColorClass(name, false)}">${esc(name)}</span>${chatTimestampHtml(reply.at, "th-rt-news-time")}</div>`
+        + quote
+        + (String(reply.body || reply.title || "").trim() || reply.deletedAt ? `<div class="th-rt-news-text">${words}</div>` : "")
+        + (files ? `<div class="th-rt-news-files">${files} ${files === 1 ? "attachment" : "attachments"}</div>` : "")
+        + `</div>`;
+    };
+    const voices = [];
+    for (const reply of rest) {
+      const voice = replyAuthor(reply);
+      if (!voices.some((known) => known.name === voice.name)) voices.push(voice);
+    }
+    const faces = voices.slice(0, 3).map((voice) =>
+      `<span class="th-party ${partyColorClass(voice.name, voice.mine)} th-rt-face" aria-hidden="true">${esc(replyAuthorInitial(voice))}</span>`).join("");
+    const more = folds
+      ? `<button type="button" class="th-rt-more" data-rt-more="${esc(rootId)}" aria-expanded="false"><span class="th-rt-dot" aria-hidden="true"></span><span class="th-rt-faces">${faces}</span><span class="th-rt-more-label">${rest.length} more new ${rest.length === 1 ? "reply" : "replies"}</span><svg class="th-rt-more-chev" width="9" height="9" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.6 5 6.6l3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`
+        + `<div class="th-rt-fold"><div class="th-rt-fold-inner">${rest.map(row).join("")}</div></div>`
+      : "";
+    return `<div class="th-rt-tray${standalone ? " standalone" : ""}" data-rt-tray="${esc(rootId)}" data-stop="1" role="group" aria-label="${items.length} new ${items.length === 1 ? "reply" : "replies"}">${lead.map(row).join("")}${more}</div>`;
+  }
+
+  // Unread state lives on the payload rows; markup never carries it, so a
+  // read never rebuilds a bubble mid-fade. These passes paint it in place.
+  function replyNewsUnreadMap() {
+    return new Map((payload.relays || []).filter((row) => row.unread).map((row) => [String(row.id), row]));
+  }
+  function replyNewsRows() {
+    return [...(document.getElementById("thRows")?.querySelectorAll("[data-rt-news]") || [])];
+  }
+  function unreadReplyNewsIds(unread = replyNewsUnreadMap()) {
+    return replyNewsRows().map((row) => row.getAttribute("data-rt-news")).filter((id) => unread.has(id));
+  }
+  function paintReplyNews() {
+    const unread = replyNewsUnreadMap();
+    for (const row of replyNewsRows()) {
+      const read = !unread.has(row.getAttribute("data-rt-news"));
+      if (row.classList.contains("is-read") === read) { row.rtPainted = true; continue; }
+      // A row first painted already read shows no fade: only a read the reader
+      // watches happen is animated.
+      if (!row.rtPainted) row.classList.add("rt-still");
+      row.classList.toggle("is-read", read);
+      if (!row.rtPainted) requestAnimationFrame(() => row.classList.remove("rt-still"));
+      row.rtPainted = true;
+    }
+    for (const tray of document.querySelectorAll("#thRows [data-rt-tray]")) {
+      if (replyNews?.opened.has(tray.getAttribute("data-rt-tray")) && !tray.classList.contains("open")) {
+        tray.classList.add("open", "rt-still");
+        tray.querySelector("[data-rt-more]")?.setAttribute("aria-expanded", "true");
+        requestAnimationFrame(() => tray.classList.remove("rt-still"));
+      }
+      const more = tray.querySelector("[data-rt-more]");
+      if (more) {
+        const hidden = [...tray.querySelectorAll(".th-rt-fold [data-rt-news]")].some((row) => unread.has(row.getAttribute("data-rt-news")));
+        more.classList.toggle("is-read", !hidden);
+      }
+    }
+    paintUnreadNavigator();
+  }
+  function unfoldReplyNews(tray) {
+    if (!tray || tray.classList.contains("open")) return;
+    replyNews?.opened.add(tray.getAttribute("data-rt-tray"));
+    tray.classList.add("open");
+    tray.querySelector("[data-rt-more]")?.setAttribute("aria-expanded", "true");
+    if (!REDUCED) {
+      tray.querySelectorAll(".th-rt-fold [data-rt-news]").forEach((row, index) => row.animate(
+        [{ opacity:0, transform:"translateY(-6px)" }, { opacity:1, transform:"none" }],
+        { duration:300, delay:Math.min(index, 8) * 18, easing:"cubic-bezier(.22,1,.28,1)", fill:"backwards" }));
+    }
+    paintUnreadNavigator();
+  }
+
+  // The part of the room the reader can actually read: under the sticky
+  // header, above the composer, and not under the floating capsule.
+  function roomReadingBand() {
+    const scroller = roomScrollElement();
+    if (!scroller || activeView !== "threads") return null;
+    const box = scroller.getBoundingClientRect();
+    const header = thDetailEl.querySelector(".th-detail-head")?.getBoundingClientRect();
+    const dock = thHistoryEl.querySelector(".th-composer-dock")?.getBoundingClientRect();
+    const top = Math.max(box.top, header?.bottom ?? box.top);
+    let bottom = Math.min(box.bottom, dock?.top ?? box.bottom);
+    const jump = thHistoryEl.querySelector(".th-unread-jump:not(.hidden)")?.getBoundingClientRect();
+    if (jump?.height) bottom = Math.min(bottom, jump.top - 2);
+    return bottom - top > 40 ? { top, bottom, scroller } : null;
+  }
+  function replyNewsRow(id) {
+    return document.getElementById("thRows")?.querySelector(`[data-rt-news="${CSS.escape(id)}"]`) || null;
+  }
+  function replyNewsPlacement(id, band = roomReadingBand()) {
+    const row = replyNewsRow(id);
+    if (!row || !band) return null;
+    const tray = row.closest("[data-rt-tray]");
+    if (row.closest(".th-rt-fold") && !tray?.classList.contains("open")) {
+      const more = tray?.querySelector("[data-rt-more]")?.getBoundingClientRect();
+      if (!more?.height) return null;
+      return more.bottom <= band.top ? "above" : more.top >= band.bottom ? "below" : "folded";
+    }
+    const box = row.getBoundingClientRect();
+    if (!(box.height > 0)) return null;
+    const shown = Math.min(box.bottom, band.bottom) - Math.max(box.top, band.top);
+    if (shown >= box.height - 1 || shown >= (band.bottom - band.top) * 0.6) return "visible";
+    return box.top < band.top ? "above" : "below";
+  }
+  function roomAtNewest() {
+    const scroller = roomScrollElement();
+    if (!scroller) return true;
+    return chatOrder() === "chat"
+      ? scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= 4
+      : scroller.scrollTop <= 4;
+  }
+  function replyNewsActive() {
+    return Boolean(replyNews && activeView === "threads" && replyNews.room === String(threadDetailId) && !replyThreadFocusId);
+  }
+
+  let replyNewsRender = null;
+  function markReplyNewsRead(ids) {
+    const unread = replyNewsUnreadMap();
+    const now = ids.filter((id) => unread.has(id));
+    if (!now.length || !replyNews) return;
+    for (const id of now) { unread.get(id).unread = false; replyNews.seenAt.delete(id); }
+    persistReadIds(now);
+    if (!unreadReplyNewsIds().length) {
+      replyNews.doneUntil = performance.now() + 1400;
+      setTimeout(paintUnreadNavigator, 1420);
+    }
+    paintReplyNews();
+    // The chat's count and the inbox badge follow in the same breath. The
+    // room's markup carries no unread state, so this repaint rebuilds nothing
+    // on screen and the dot's fade plays through it.
+    if (!replyNewsRender) {
+      replyNewsRender = requestAnimationFrame(() => { replyNewsRender = null; renderAll(); });
+    }
+  }
+  function readReplyNewsOnScreen() {
+    if (!replyNewsActive() || replyNews.gliding || !fullCardIsOnStage() || !rendererSurfaceActive()) return;
+    if (threadEntryFollowToken() || roomViewTransition) return;
+    const band = roomReadingBand();
+    if (!band) return;
+    const now = performance.now();
+    const due = [];
+    for (const id of unreadReplyNewsIds()) {
+      if (replyNewsPlacement(id, band) !== "visible") { replyNews.seenAt.delete(id); continue; }
+      if (!replyNews.seenAt.has(id)) replyNews.seenAt.set(id, now);
+      if (now - replyNews.seenAt.get(id) >= REPLY_NEWS_DWELL_MS) due.push(id);
+    }
+    if (due.length) markReplyNewsRead(due);
+    else paintUnreadNavigator();
+  }
+  setInterval(() => { if (replyNewsActive()) readReplyNewsOnScreen(); }, 120);
+
+  function nextReplyNewsTarget(band = roomReadingBand()) {
+    return unreadReplyNewsIds().find((id) => {
+      const place = replyNewsPlacement(id, band);
+      return place && place !== "visible";
+    }) || null;
+  }
+  // One glide, not the browser's: eased in and out, a little longer for a
+  // longer trip, so the eye can follow where it is being taken.
+  function glideRoom(scroller, top) {
+    const from = scroller.scrollTop;
+    const distance = top - from;
+    if (REDUCED || Math.abs(distance) < 2) { scroller.scrollTop = top; return Promise.resolve(); }
+    const duration = Math.min(760, 380 + Math.abs(distance) * 0.18);
+    const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+    return new Promise((resolve) => {
+      const started = performance.now();
+      const step = (now) => {
+        const t = Math.min(1, (now - started) / duration);
+        scroller.scrollTop = from + distance * ease(t);
+        if (t < 1) requestAnimationFrame(step); else resolve();
+      };
+      requestAnimationFrame(step);
+    });
+  }
+  async function glideToReplyNews(id) {
+    const news = replyNews;
+    if (!news) return;
+    news.gliding = true;
+    paintUnreadNavigator();
+    // Deliberate navigation cancels the entry/live-follow latch before a late
+    // refresh or image layout can pull the reader back to the end.
+    threadDetailEntryFollow = null;
+    threadDetailLiveFollow = RelayChatPresentation.reduceChatLiveFollow(threadDetailLiveFollow, { type:"reset" });
+    try {
+      const folded = replyNewsRow(id);
+      const foldedTray = folded?.closest("[data-rt-tray]");
+      if (folded?.closest(".th-rt-fold") && foldedTray && !foldedTray.classList.contains("open")) {
+        unfoldReplyNews(foldedTray);
+        await new Promise((resolve) => setTimeout(resolve, REDUCED ? 0 : 300));
+      }
+      const band = roomReadingBand();
+      const row = replyNewsRow(id);
+      if (!band || !row) return;
+      const height = band.bottom - band.top;
+      // Show the message being answered, then as much of the news as fits; if
+      // the news alone overflows, lead with the first new reply and a little
+      // context above it.
+      const holder = row.closest(".th-msg") || row.closest("[data-rt-tray]");
+      const context = holder?.previousElementSibling?.classList.contains("th-run") ? holder.previousElementSibling : holder;
+      const unread = replyNewsUnreadMap();
+      const chunk = [...(row.closest("[data-rt-tray]")?.querySelectorAll("[data-rt-news]") || [row])]
+        .filter((node) => unread.has(node.getAttribute("data-rt-news")) && node.getBoundingClientRect().height > 0);
+      const rowTop = row.getBoundingClientRect().top;
+      const chunkBottom = Math.max(row.getBoundingClientRect().bottom, ...chunk.map((node) => node.getBoundingClientRect().bottom));
+      let y = context ? Math.min(context.getBoundingClientRect().top, rowTop) - 14 : rowTop - 56;
+      y = Math.max(y, chunkBottom - (height - 14));
+      if (y > rowTop - 10) y = rowTop - Math.min(88, height * 0.26);
+      const scroller = band.scroller;
+      const top = Math.max(0, Math.min(scroller.scrollHeight - scroller.clientHeight, scroller.scrollTop + (y - band.top)));
+      await glideRoom(scroller, top);
+      // Arrival: only the row you were brought to glows, once. The class
+      // leaves as soon as it has run, so a repaint never replays it.
+      row.classList.remove("rt-land");
+      void row.offsetWidth;
+      row.classList.add("rt-land");
+      clearTimeout(row.rtLandTimer);
+      row.rtLandTimer = setTimeout(() => row.classList.remove("rt-land"), 1500);
+    } finally {
+      news.gliding = false;
+      paintUnreadNavigator();
+    }
+  }
+  async function glideToNewest() {
+    const scroller = roomScrollElement();
+    if (!scroller || !replyNews) return;
+    replyNews.gliding = true;
+    paintUnreadNavigator();
+    try {
+      await glideRoom(scroller, chatOrder() === "chat" ? scroller.scrollHeight - scroller.clientHeight : 0);
+    } finally {
+      if (replyNews) replyNews.gliding = false;
+      paintUnreadNavigator();
+    }
+  }
+  function advanceReplyNews() {
+    if (!replyNewsActive() || replyNews.gliding) return;
+    const band = roomReadingBand();
+    // Moving on is reading: what this screen showed is acknowledged now.
+    const shown = unreadReplyNewsIds().filter((id) => replyNewsPlacement(id, band) === "visible");
+    const target = nextReplyNewsTarget(band);
+    if (shown.length) markReplyNewsRead(shown);
+    if (target) void glideToReplyNews(target);
+    else if (!roomAtNewest()) void glideToNewest();
+  }
+
+  // The capsule: the shipped mention control's species, risen from behind the
+  // composer. One button, two facts: where the next new reply is (the arrow)
+  // and how many are left (the number). At the end the arrow becomes a check,
+  // then the way back to the newest message, then it sinks away.
+  function replyNewsNavigatorState() {
+    if (!replyNewsActive() || !replyNews.hadUnread) return null;
+    const mention = thHistoryEl.querySelector(".th-mention-jump");
+    if (mention && !mention.classList.contains("hidden")) return null;
+    const band = roomReadingBand();
+    const left = unreadReplyNewsIds();
+    if (left.length) {
+      const target = nextReplyNewsTarget(band);
+      if (!target) return { kind:"reading", count:left.length, dir:"none" };
+      return { kind:"next", count:left.length, dir:replyNewsPlacement(target, band) === "above" ? "up" : "down" };
+    }
+    if (performance.now() < replyNews.doneUntil) return { kind:"done", dir:"check" };
+    if (!roomAtNewest()) return { kind:"latest", dir:"down" };
+    return null;
+  }
+  function paintUnreadNavigator() {
+    const control = thHistoryEl.querySelector(".th-unread-jump");
+    const rows = document.getElementById("thRows");
+    if (!control) return;
+    const state = replyNewsNavigatorState();
+    // While it floats, the room keeps its height free at the foot so the
+    // newest message and its receipt are never underneath it.
+    if (rows && Boolean(state) !== rows.classList.contains("has-unread-jump")) {
+      const pinned = roomAtNewest();
+      rows.classList.toggle("has-unread-jump", Boolean(state));
+      if (state && pinned && chatOrder() === "chat") { const scroller = roomScrollElement(); if (scroller) scroller.scrollTop = scroller.scrollHeight; }
+    }
+    const button = control.querySelector("[data-unread-nav]");
+    const glyph = control.querySelector(".th-unread-glyph");
+    const label = control.querySelector(".th-unread-label");
+    if (!state) {
+      if (control.classList.contains("hidden") || control.rtLeaving) return;
+      control.rtLeaving = true;
+      control.rtKey = "";
+      const finish = () => { control.rtLeaving = false; if (!replyNewsNavigatorState()) control.classList.add("hidden"); };
+      if (REDUCED) finish();
+      else control.animate([{ opacity:1, transform:"none" }, { opacity:0, transform:"translateY(14px) scale(.94)" }],
+        { duration:240, easing:"cubic-bezier(.4,0,.6,1)" }).onfinish = finish;
+      return;
+    }
+    control.rtLeaving = false;
+    control.dataset.kind = state.kind;
+    glyph.dataset.dir = state.dir;
+    button.disabled = Boolean(replyNews?.gliding);
+    button.setAttribute("aria-disabled", state.kind === "reading" || state.kind === "done" ? "true" : "false");
+    button.setAttribute("aria-label", state.kind === "done" ? "You’re caught up"
+      : state.kind === "latest" ? "Go to the newest message"
+      : state.kind === "reading" ? `${state.count} new ${state.count === 1 ? "reply" : "replies"} on screen`
+      : `${state.count} new ${state.count === 1 ? "reply" : "replies"}. Go to the next, ${state.dir === "up" ? "above" : "below"}`);
+    const words = state.kind === "done" ? "Caught up" : state.kind === "latest" ? "Latest" : "";
+    const key = `${state.kind}|${state.count ?? ""}`;
+    const counting = (kind) => kind === "next" || kind === "reading";
+    if (control.classList.contains("hidden")) {
+      control.classList.remove("hidden");
+      label.innerHTML = words ? esc(words) : `<span class="th-unread-num"><span>${state.count}</span></span>&nbsp;new`;
+      control.rtKey = key;
+      if (!REDUCED) control.animate([{ opacity:0, transform:"translateY(16px) scale(.94)" }, { opacity:1, transform:"none" }],
+        { duration:420, easing:"cubic-bezier(.2,1.25,.4,1)" });
+      return;
+    }
+    if (control.rtKey === key) return;
+    const previous = String(control.rtKey || "").split("|")[0];
+    control.rtKey = key;
+    const before = control.getBoundingClientRect().width;
+    const num = label.querySelector(".th-unread-num");
+    if (counting(previous) && counting(state.kind) && num) {
+      // The number rolls; nothing else moves.
+      while (num.children.length > 1) num.firstElementChild.remove();
+      const old = num.firstElementChild;
+      if (old && old.textContent !== String(state.count)) {
+        const next = document.createElement("span");
+        next.textContent = String(state.count);
+        num.append(next);
+        if (REDUCED) old.remove();
+        else {
+          old.animate([{ transform:"none", opacity:1 }, { transform:"translateY(-80%)", opacity:0 }],
+            { duration:220, easing:"cubic-bezier(.4,0,.2,1)", fill:"forwards" }).onfinish = () => old.remove();
+          next.animate([{ transform:"translateY(80%)", opacity:0 }, { transform:"none", opacity:1 }],
+            { duration:300, easing:"cubic-bezier(.22,1,.28,1)" });
+        }
+      }
+    } else {
+      label.innerHTML = words ? esc(words) : `<span class="th-unread-num"><span>${state.count}</span></span>&nbsp;new`;
+      if (!REDUCED) label.animate([{ opacity:.15, transform:"translateY(3px)" }, { opacity:1, transform:"none" }],
+        { duration:240, easing:"cubic-bezier(.22,1,.28,1)" });
+    }
+    const after = control.getBoundingClientRect().width;
+    if (!REDUCED && Math.abs(after - before) > 1) {
+      control.animate([{ width:`${before}px` }, { width:`${after}px` }], { duration:300, easing:"cubic-bezier(.22,1,.28,1)" });
+    }
+  }
+  thHistoryEl.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-unread-nav]");
+    if (!button) return;
+    event.preventDefault(); event.stopPropagation();
+    advanceReplyNews();
+  });
+  let replyNewsScrollQueued = false;
+  for (const roomScroller of [scrollEl, thDetailEl]) {
+    roomScroller.addEventListener("scroll", () => {
+      if (!replyNewsActive() || replyNewsScrollQueued) return;
+      replyNewsScrollQueued = true;
+      requestAnimationFrame(() => { replyNewsScrollQueued = false; paintUnreadNavigator(); });
+    }, { passive:true });
+  }
+
   function threadMessages() {
     const { includeSlack = false } = arguments[0] || {};
     const msgs = [];
@@ -16443,7 +16930,7 @@
     if (window.relay.openChatApp) return window.relay.openChatApp(key, prompt);
     // A preload from before the bridge existed: the web app, as before.
     const q = encodeURIComponent(prompt);
-    window.relay.openUrl(key === "chatgpt" ? `https://chatgpt.com/?q=${q}&mode=work` : `https://claude.ai/new?q=${q}`);
+    window.relay.openUrl(key === "chatgpt" ? `https://chatgpt.com/work?q=${q}` : `https://claude.ai/new?q=${q}`);
     return Promise.resolve({ ok: true, via: "web" });
   }
   // What Conductor's new workspace is told: the pull sentence every agent on
@@ -16916,7 +17403,7 @@
   }
   // The line under a message with a thread: who replied, how many, when last,
   // and how many are new to you.
-  function replyThreadSummaryHtml(root, replies, { strip = false, mine = false, key = "" } = {}) {
+  function replyThreadSummaryHtml(root, replies, { strip = false, mine = false, key = "", inBubble = false, quiet = false } = {}) {
     if (!root || !replies || !replies.length) return "";
     const voices = [];
     for (const reply of [...replies].reverse()) {
@@ -16925,12 +17412,14 @@
     }
     const faces = voices.slice(0, 3).map((voice) =>
       `<span class="th-party ${partyColorClass(voice.name, voice.mine)} th-rt-face" aria-hidden="true">${esc(replyAuthorInitial(voice))}</span>`).join("");
-    const fresh = replies.filter((reply) => reply.direction === "in" && reply.unread).length;
+    // A message that holds its new replies shows them; its line need not count
+    // them too, and stays the same while they are read.
+    const fresh = quiet ? 0 : replies.filter((reply) => reply.direction === "in" && reply.unread).length;
     const count = replies.length;
     const last = formatChatTime(replies[replies.length - 1].at);
     const label = `${count} ${count === 1 ? "reply" : "replies"}`;
     // A Relay's thread lives in its reader; a text's opens as a room subview.
-    const opens = strip ? ` data-reply-thread-reader="${root.direction === "out" ? "sent" : "threads"}"` : "";
+    const opens = strip && !inBubble ? ` data-reply-thread-reader="${root.direction === "out" ? "sent" : "threads"}"` : "";
     return `<button type="button" class="th-rt-link${strip ? " strip" : ""}${mine ? " mine" : ""}" data-reply-thread-open="${esc(root.id)}"${opens} data-stop="1"${key ? ` data-chat-key="${esc(key)}"` : ""} aria-label="${esc(`${label}${fresh ? `, ${fresh} new` : ""}. Open thread`)}">
         <span class="th-rt-faces">${faces}</span><span class="th-rt-count">${esc(label)}</span>${last ? `<span class="th-rt-last">· last ${esc(last)}</span>` : ""}${fresh ? `<span class="th-rt-new">${fresh} new</span>` : ""}<span class="th-rt-chev" aria-hidden="true">›</span>
       </button>`;
@@ -17181,6 +17670,20 @@
     const replyThreadRepliesFor = (message) => roomReplyThreads && !focusedReplyRoot
       ? roomReplyThreads.groups.get(String(message?.id || "")) || []
       : [];
+    // New replies this visit has shown: unread ones, plus any read since the
+    // room opened, so a reply does not vanish from under the reader.
+    const roomNews = roomReplyThreads && !focusedReplyRoot ? replyNewsFor(String(threadDetailId)) : null;
+    const replyNewsItemsFor = (message) => {
+      if (!roomNews) return [];
+      const replies = roomReplyThreads.groups.get(String(message?.id || "")) || [];
+      for (const reply of replies) {
+        if (reply.direction === "in" && reply.unread && !reply.deletedAt && !reply.ownedAgent) {
+          roomNews.ids.add(String(reply.id || ""));
+          roomNews.hadUnread = true;
+        }
+      }
+      return replies.filter((reply) => roomNews.ids.has(String(reply.id || "")));
+    };
     const renderedSlackThreadContexts = new Set();
     const slackThreadContextHtml = (message) => {
       const context = message?.slackThreadContext;
@@ -17248,7 +17751,7 @@
       : "";
     // Human chat composes only a human reply. Agent hand-offs belong to the
     // exact Relay rows above, where Codex and Claude Code are both explicit.
-    const threadComposer = `<div class="th-composer-dock${chatShaped ? " chat-shaped" : ""}"><div class="th-mention-jump hidden" role="group" aria-label="Mentions since you last opened this chat"></div><div class="qr th-qr col${replyTargetId ? " replying" : ""}">
+    const threadComposer = `<div class="th-composer-dock${chatShaped ? " chat-shaped" : ""}"><div class="th-mention-jump hidden" role="group" aria-label="Mentions since you last opened this chat"></div><div class="th-unread-jump hidden" role="group" aria-label="New replies in this chat"><button type="button" class="th-unread-jump-btn" data-unread-nav="next"><span class="th-unread-glyph" data-dir="down" aria-hidden="true"><svg class="th-unread-arrow" width="12" height="12" viewBox="0 0 12 12"><path d="M6 1.8v8.4M2.6 6.8 6 10.2l3.4-3.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><svg class="th-unread-check" width="12" height="12" viewBox="0 0 12 12"><path d="M2.4 6.3 4.9 8.7 9.7 3.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="th-unread-label"></span></button></div><div class="qr th-qr col${replyTargetId ? " replying" : ""}">
           ${composerReplyTargetHtml}
           <div class="th-mention-menu hidden" id="thMentionMenu" role="listbox"></div>
           <div id="thQrInput" class="th-rich-composer" contenteditable="true" role="textbox" aria-multiline="true" aria-label="${focusedReplyRoot ? "Reply in thread" : "Reply"}" data-placeholder="${focusedReplyRoot ? "Reply in thread…" : "Reply…"}"></div>
@@ -17258,7 +17761,7 @@
           </div>
         </div></div>`;
     const visibleThreadComposer = groupPostingBlocked
-      ? `<div class="th-composer-dock chat-shaped"><div class="th-mention-jump hidden" role="group" aria-label="Mentions since you last opened this chat"></div><div class="th-room-status">${esc(groupPostingState.reason)}</div></div>`
+      ? `<div class="th-composer-dock chat-shaped"><div class="th-mention-jump hidden" role="group" aria-label="Mentions since you last opened this chat"></div><div class="th-unread-jump hidden" role="group" aria-label="New replies in this chat"><button type="button" class="th-unread-jump-btn" data-unread-nav="next"><span class="th-unread-glyph" data-dir="down" aria-hidden="true"><svg class="th-unread-arrow" width="12" height="12" viewBox="0 0 12 12"><path d="M6 1.8v8.4M2.6 6.8 6 10.2l3.4-3.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><svg class="th-unread-check" width="12" height="12" viewBox="0 0 12 12"><path d="M2.4 6.3 4.9 8.7 9.7 3.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="th-unread-label"></span></button></div><div class="th-room-status">${esc(groupPostingState.reason)}</div></div>`
       : threadComposer;
     // Own messages are labelled "You" — the pill is a personal surface, only
     // ever read by its owner, so the account name carries no information here
@@ -17403,12 +17906,20 @@
       // The thread link (and, inside a thread, its divider) hangs off the
       // content: under the words, or under the image when the image is the
       // whole message.
-      const threadTailHtml = `${hasHostActions ? "" : replyThreadSummaryHtml(m, replyThreadRepliesFor(m), { mine, key:`${renderKey}:thread-link` })}${focusedReplyRoot && m === focusedReplyRoot ? (() => {
+      // A message with new replies holds them, inside its own shape, above its
+      // reply line, which joins it as a strip (a Relay card's anatomy). A
+      // picture sent alone has no bubble, so its news stands free below it.
+      const newsItems = replyNewsItemsFor(m);
+      const holdsNews = newsItems.length > 0 && !attachmentOnly;
+      const newsInBubble = holdsNews && !hasHostActions
+        ? `${replyNewsTrayHtml(m, newsItems, messageById)}${replyThreadSummaryHtml(m, replyThreadRepliesFor(m), { strip:true, inBubble:true, quiet:true })}`
+        : "";
+      const threadTailHtml = `${attachmentOnly && newsItems.length ? replyNewsTrayHtml(m, newsItems, messageById, { standalone:true }) : ""}${hasHostActions || holdsNews ? "" : replyThreadSummaryHtml(m, replyThreadRepliesFor(m), { mine, key:`${renderKey}:thread-link`, quiet:newsItems.length > 0 })}${focusedReplyRoot && m === focusedReplyRoot ? (() => {
         const count = (roomReplyThreads.groups.get(replyThreadFocusId) || []).length;
         return `<div class="th-rt-divider" role="separator" data-chat-key="${esc(renderKey)}:thread"><span>${count ? `${count} ${count === 1 ? "reply" : "replies"}` : "No replies yet"}</span></div>`;
       })() : ""}`;
       return `${slackThreadContextHtml(m)}${chunkDivider}${runHeader}
-      <div class="th-msg${hasHostActions ? " has-host-actions" : ""}${opensThread ? " opens-thread" : ""}${m.unread ? " unread" : ""}${mine ? " mine" : ""}${cont ? " cont" : ""}${textLike ? " text" : ""}${taskEvent ? ` tk-event ${taskEvent.tone}${taskEvent.bare ? " bare" : ""}` : ""}${m.request ? " tk-card" : ""}${attachmentOnly ? " attachment-only" : ""}${agentWorking ? " agent-working" : ""}${open ? " open" : ""}${activeMentionVisit?.selected === String(m.id) ? " mention-target" : ""}${m.deletedAt ? " deleted" : ""}${editingMessage ? " editing" : ""}${confirmingDelete ? " deleting" : ""}${aggregates.length ? " has-rx" : ""}${liveCanonicalArrivalIds.has(String(m.id || "")) ? " live-arrival" : ""}"${textLike ? "" : ' role="button" tabindex="0"'}${agentWorking ? ' aria-busy="true"' : ""}${hasHostActions ? ` aria-expanded="${hostActionsPersistent ? "true" : "false"}"` : ""} data-chat-key="${esc(renderKey)}:body" data-msg="${esc(m.id)}" data-dir="${m.direction}" data-opening-id="${esc(m.id)}">
+      <div class="th-msg${hasHostActions ? " has-host-actions" : ""}${holdsNews ? " holds-news" : ""}${opensThread ? " opens-thread" : ""}${m.unread ? " unread" : ""}${mine ? " mine" : ""}${cont ? " cont" : ""}${textLike ? " text" : ""}${taskEvent ? ` tk-event ${taskEvent.tone}${taskEvent.bare ? " bare" : ""}` : ""}${m.request ? " tk-card" : ""}${attachmentOnly ? " attachment-only" : ""}${agentWorking ? " agent-working" : ""}${open ? " open" : ""}${activeMentionVisit?.selected === String(m.id) ? " mention-target" : ""}${m.deletedAt ? " deleted" : ""}${editingMessage ? " editing" : ""}${confirmingDelete ? " deleting" : ""}${aggregates.length ? " has-rx" : ""}${liveCanonicalArrivalIds.has(String(m.id || "")) ? " live-arrival" : ""}"${textLike ? "" : ' role="button" tabindex="0"'}${agentWorking ? ' aria-busy="true"' : ""}${hasHostActions ? ` aria-expanded="${hostActionsPersistent ? "true" : "false"}"` : ""} data-chat-key="${esc(renderKey)}:body" data-msg="${esc(m.id)}" data-dir="${m.direction}" data-opening-id="${esc(m.id)}">
         ${sideMenuHtml}
         ${taskEvent ? taskEventRefHtml(taskEvent) : messageReplyReferenceHtml(m)}
         ${`
@@ -17425,7 +17936,7 @@
         ${showProviderByline ? providerBylineHtml(m) : ""}
         ${hasHostActions ? relayHostActionsHtml(m, { persistent:hostActionsPersistent }) : ""}
         ${!textLike && !editingMessage ? chatTimestampHtml(m.at) : ""}
-        ${hasHostActions ? replyThreadSummaryHtml(m, replyThreadRepliesFor(m), { strip:true }) : ""}
+        ${hasHostActions ? `${holdsNews ? replyNewsTrayHtml(m, newsItems, messageById) : ""}${replyThreadSummaryHtml(m, replyThreadRepliesFor(m), { strip:true, quiet:holdsNews })}` : newsInBubble}
         ${taskFooter}
         ${badges}
       </div>
@@ -17538,6 +18049,7 @@
       }
     }
     paintMentionNavigator();
+    paintReplyNews();
     // The composer's own faces still move while it stays put: the Relay it is
     // attached to, and the in-flight Send. Both are set in place.
     const composerQr = thHistoryEl.querySelector(".qr.th-qr");
@@ -17727,6 +18239,18 @@
         const readerSource = button.getAttribute("data-reply-thread-reader");
         if (readerSource) openRelayThreadInReader(id, readerSource);
         else openReplyThread(id);
+      });
+    }
+    // A message's new replies open its thread like its reply line does; the
+    // fold line opens in place instead.
+    for (const tray of newControls.querySelectorAll("[data-rt-tray]")) {
+      tray.addEventListener("click", (event) => {
+        if (event.target.closest("a")) return;
+        event.stopPropagation();
+        const more = event.target.closest("[data-rt-more]");
+        if (more) { unfoldReplyNews(tray); return; }
+        const id = String(tray.getAttribute("data-rt-tray") || "");
+        document.getElementById("thRows")?.querySelector(`[data-reply-thread-open="${CSS.escape(id)}"]`)?.click();
       });
     }
     const thQrSend = document.getElementById("thQrSend");
@@ -18237,6 +18761,7 @@
     return source === "chat" || source === "relays" || source === "slack" || source === "contacts";
   }
   function openThreadDetail(threadId, partyHint = "", source = "relays", options = {}) {
+    const returningFromReader = activeView === "reader";
     sessionPickerState = null;
     if (activeView === "relays" && source === "relays" && scrollEl) relaysListScrollTop = scrollEl.scrollTop;
     if (activeView === "slack" && source === "slack" && scrollEl) slackListScrollTop = scrollEl.scrollTop;
@@ -18288,6 +18813,10 @@
       ? chatRoomForThread(roomCoordinate, surface)
       : null);
     beginMentionVisit(room, roomCoordinate, options.mentionRelayId || "");
+    // Every visit starts from what is unread now, so a chat that still has
+    // unread replies shows them every time it opens. Coming back from a
+    // Relay's reader continues the same visit.
+    if (!(returningFromReader && replyNews?.room === String(roomCoordinate))) replyNews = null;
     const partyKey = room && room.partyKey;
     const party = String(partyHint || (room && room.name) || "").trim().toLowerCase();
     const roomAckIds = [];

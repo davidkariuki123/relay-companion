@@ -78,7 +78,9 @@ try {
   for (const id of ["relay_t1", "relay_t2", "relay_t4", "relay_t6"]) assert.equal(await present(id), 0, `${id} folds into its thread`);
   const strip = page.locator('[data-msg="relay_r1"] .th-rt-link.strip');
   assert.match(await strip.innerText(), /2 replies/, "a reply to a reply joins the same thread");
-  assert.match(await strip.innerText(), /1 new/);
+  // The card holds its new reply above the strip, so the strip need not count it.
+  assert.equal(await page.locator('[data-msg="relay_r1"] [data-rt-tray] [data-rt-news="relay_t2"]').count(), 1, "the new reply shows inside the card");
+  assert.doesNotMatch(await strip.innerText(), /new/);
   assert.match(await page.locator('.th-rt-link[data-reply-thread-open="relay_t3"]').innerText(), /2 replies/);
   assert.equal(await page.locator('[data-msg="relay_r2"] .th-reply-ref').count(), 1, "the full Relay keeps its quote");
   // An image sent alone shows no filler text, and its replies hang under the image.
@@ -91,7 +93,18 @@ try {
     return Boolean(cargo && link && (cargo.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING));
   }), "the replies link sits under the image");
   assert.equal(await page.locator('[data-msg="relay_t5"] .th-reply-ref').count(), 0, "a legacy anchor is not a reply");
-  assert.ok(!(await page.evaluate(() => window.acks)).includes("relay_t2"), "a folded reply is not read by opening the room");
+  // New replies are shown in the room now, and read once they have been seen:
+  // opening is not reading, being on screen is (David, 2026-10-07).
+  // Off screen they stay unread; the capsule takes the reader to each.
+  await page.waitForTimeout(900);
+  assert.deepEqual((await page.evaluate(() => window.acks)).filter((id) => ["relay_t2", "relay_t6"].includes(id)), [],
+    "new replies off screen stay unread");
+  for (let press = 0; press < 4 && !(await page.evaluate(() => ["relay_t2", "relay_t6"].every((id) => window.acks.includes(id)))); press += 1) {
+    await page.locator(".th-unread-jump-btn").click();
+    await page.waitForFunction(() => !replyNews?.gliding);
+    await page.waitForTimeout(900);
+  }
+  assert.ok(await page.evaluate(() => ["relay_t2", "relay_t6"].every((id) => window.acks.includes(id))), "the capsule reaches every new reply");
   assert.equal(await page.locator('[data-msg="relay_r1"] [data-reply-to="relay_r1"]').innerText().catch(() => ""), "reply in thread");
 
   // A text's thread opens as the room's subview; its composer answers the text.
@@ -100,17 +113,14 @@ try {
   assert.equal(await present("relay_r1"), 0);
   assert.equal(await page.locator("#thDetailMeta").innerText(), "Thread");
   assert.match(await page.locator("#thRows .th-rt-divider").innerText(), /2 replies/i);
-  await page.waitForFunction(() => window.acks.includes("relay_t6"));
-  assert.ok(!(await page.evaluate(() => window.acks)).includes("relay_t2"), "opening a text thread leaves the other thread unread");
-  assert.equal(await page.evaluate(() => chatRoomForThread(threadDetailId).unreadCount), 1);
-  assert.equal(await page.locator("#relaysBadge").innerText(), "1", "the inbox badge clears the opened thread immediately");
+  assert.equal(await page.evaluate(() => chatRoomForThread(threadDetailId).unreadCount), 0, "seen replies are read");
   assert.equal(await page.locator("#thQrInput").getAttribute("data-placeholder"), "Reply in thread…");
   assert.equal(await page.locator('[data-reply-to="relay_t4"]').innerText().catch(() => ""), "reply", "inside a thread Reply quotes");
   await page.locator("#thQrInput").fill("Tuesday works too.");
   await page.locator("#thQrSend").click();
   await page.waitForFunction(() => window.sends.length === 1);
   assert.equal((await page.evaluate(() => window.sends))[0].inReplyToRelayId, "relay_t3");
-  assert.equal(await page.evaluate(() => chatRoomForThread(threadDetailId).unreadCount), 1, "sending does not add an unread message");
+  assert.equal(await page.evaluate(() => chatRoomForThread(threadDetailId).unreadCount), 0, "sending does not add an unread message");
   // Back leaves the thread, not the room.
   await page.locator("#thBack").click();
   await page.locator('#thRows [data-msg="relay_r1"]').waitFor();
@@ -140,7 +150,6 @@ try {
   const replies = page.locator("#readerReplies");
   await replies.waitFor();
   assert.equal(await replies.locator(".rd-reply").count(), 2);
-  assert.match(await replies.locator(".rd-replies-new").innerText(), /1 new/i);
   assert.equal(await replies.locator('[data-rd-reply="relay_t2"] .rd-reply-quote').count(), 1, "the reply to a reply shows what it quotes");
   assert.equal(await replies.locator('[data-rd-reply="relay_t1"] .rd-reply-quote').count(), 0, "a reply to the Relay needs no quote");
   const order = await page.evaluate(() => {
@@ -149,7 +158,6 @@ try {
     return before(details, section) && before(section, actions);
   });
   assert.ok(order, "Replies sit between Details and the Open in bar");
-  await page.waitForFunction(() => window.acks.includes("relay_t2"));
   assert.equal(await page.locator("#qrInput").getAttribute("data-placeholder"), "Reply in thread…");
   await replies.locator('[data-rd-quote="relay_t2"]').click();
   assert.match(await page.locator("#readerComposer .th-reply-target").innerText(), /Replying to Sven/);

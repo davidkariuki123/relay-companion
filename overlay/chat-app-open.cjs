@@ -47,9 +47,10 @@ function ownsScheme(schemeOwner, scheme) {
 function chatAppTargets(app, prompt, { schemeOwner } = {}) {
   const q = encodeURIComponent(String(prompt || ""));
   if (app === "chatgpt") {
-    // mode=work: the reply has to be fetched and posted, which is what
-    // ChatGPT Work does and Chat does not (David, 2026-09-17).
-    return { primary: `https://chatgpt.com/?q=${q}&mode=work`, fallback: "", via: "web" };
+    // Work mode: the reply has to be fetched and posted, which ChatGPT Work
+    // does and Chat does not (David, 2026-09-17). /work is the door: the home
+    // page ignores ?mode=work and opens Chat (tested live 2026-10-07).
+    return { primary: `https://chatgpt.com/work?q=${q}`, fallback: "", via: "web" };
   }
   const web = `https://claude.ai/new?q=${q}`;
   if (!ownsScheme(schemeOwner, CLAUDE_SCHEME)) return { primary: web, fallback: "", via: "web" };
