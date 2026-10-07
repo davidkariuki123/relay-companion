@@ -6,7 +6,9 @@ const { atomicWriteJsonSync } = require("./atomic-json.cjs");
 
 const GUIDE_VERSION = 1;
 const transitions = Object.freeze({
-  prompt: { AGENT_STARTED: "connecting" },
+  // A person signed in here who chose a chat AI (ChatGPT, Claude) finishes
+  // without a local agent ever starting this run.
+  prompt: { AGENT_STARTED: "connecting", COMPLETED: "complete" },
   connecting: { AUTH_OPENED: "browser", ACCOUNT_SAVED: "verifying" },
   browser: { AUTH_APPROVED: "finishing" },
   finishing: { ACCOUNT_SAVED: "verifying" },
@@ -34,7 +36,8 @@ function reduce(state, event) {
   if (!stage) throw new Error(`Cannot ${event.type} from ${state.stage}`);
   if (event.type === "AGENT_STARTED" && (event.guideVersion !== GUIDE_VERSION || !["codex", "claude_code"].includes(event.host))) throw new Error("Read the current local guide with Claude Code or Codex");
   if (event.type === "ACCOUNT_SAVED" && !event.accountId) throw new Error("Missing verified account");
-  if (["HOST_VERIFIED", "SEND_CONFIRMED", "LINK_CREATED", "COMPLETED"].includes(event.type)
+  const finishingUnstarted = event.type === "COMPLETED" && state.stage === "prompt" && !state.accountId && Boolean(event.accountId);
+  if (["HOST_VERIFIED", "SEND_CONFIRMED", "LINK_CREATED", "COMPLETED"].includes(event.type) && !finishingUnstarted
     && (!state.accountId || event.accountId !== state.accountId)) throw new Error("Account changed; reconnect this setup");
   if (event.type === "SEND_CONFIRMED" && !event.relayId) throw new Error("Missing confirmed Relay");
   if (event.type === "LINK_CREATED") {
@@ -44,6 +47,7 @@ function reduce(state, event) {
   return { ...state, stage, revision: state.revision + 1, error: null,
     ...(event.type === "AGENT_STARTED" ? { host: event.host } : {}),
     ...(event.type === "ACCOUNT_SAVED" ? { accountId: event.accountId, context: event.context || state.context } : {}),
+    ...(finishingUnstarted ? { accountId: event.accountId } : {}),
     ...(event.relayId ? { relayId: event.relayId } : {}),
     ...(event.type === "LINK_CREATED" ? { linkUrl: event.url } : {}),
   };

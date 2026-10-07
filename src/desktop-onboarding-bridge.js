@@ -32,7 +32,9 @@ export async function startDesktopOnboardingBridge({ directory, authorization, v
       if (state.stage === "connecting") {
         if (await isPaired()) {
           const account = await verifyAccount();
-          await emit("ACCOUNT_SAVED", { accountId: account?.id });
+          // Signed in already: no browser approval carried the invitation, so
+          // the account's own server-side context does.
+          await emit("ACCOUNT_SAVED", { accountId: account?.id, ...(account?.onboardingContext ? { context: { ...state.context, ...account.onboardingContext } } : {}) });
         } else {
           await authorization.signIn({setupIntent:state.context?.setupIntent});
           await emit("AUTH_OPENED");

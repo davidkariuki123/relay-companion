@@ -87,7 +87,7 @@ test("the application installer's marker says so, and the pill reads it as a cen
   assert.match(handoff, /if \(agentOnboardingActive\(\)\) leaveSetupPlacement\(\);/);
   assert.match(main, /return Boolean\(stage\) && stage !== "complete";/);
   assert.match(main, /win\.webContents\.send\("shown"\);\n\s*followAgentOnboardingPlacement\(\);/);
-  assert.match(main, /onChange: async \(\) => \{ await pushInbox\(true\); followAgentOnboardingPlacement\(\); \},/);
+  assert.match(main, /await pushInbox\(true\); followAgentOnboardingPlacement\(\);/);
 });
 
 test("paths that pair without a pill sign-in leave no marker", (t) => {
@@ -168,7 +168,7 @@ test("the pill reads the marker only while signed out, consumes it on sign-in st
   const signIn = slice(main, 'ipcMain.handle("relay:installationAuthSignIn"', 'ipcMain.handle("relay:installationAuthGoogle"');
   assert.match(signIn, /consumeSetupIntent\(\);[\s\S]*\.signIn\(\{ forceAccountSelection: input\?\.forceAccountSelection === true \}\)/);
   // The renderer decides from the payload, so a change must reach it.
-  assert.match(main, /onboarding: \[[^\]]*payload\.ui\.firstRelayKind, payload\.ui\.agentInstalled,/);
+  assert.match(main, /onboarding: \[[^\]]*payload\.ui\.firstRelayKind, payload\.ui\.onboardingAgent, payload\.ui\.agentInstalled,/);
 });
 
 test("the first Relay is a hello to an inviter, else a share link", () => {
@@ -179,7 +179,7 @@ test("the first Relay is a hello to an inviter, else a share link", () => {
   assert.equal(kind({ inviter: { relayUserId: "  " } }), "link");
   assert.equal(kind({ inviter: null }), "link");
   assert.equal(kind(null), "link", "no agent-protocol.json at all");
-  assert.match(main, /firstRelayKind: firstRelayKindFor\(desktopOnboardingBridge\?\.state\(\)\?\.context \|\| protocolState\),/);
+  assert.match(main, /firstRelayKind: firstRelayKindFor\(desktopOnboardingBridge\?\.state\(\)\?\.context \|\| protocolState, agentOnboarding\.serverAnswer\(onboardingAccountKey\(currentAccount\)\)\),/);
 });
 
 test("the protocol state carries the inviter for the current account only", () => {

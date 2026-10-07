@@ -21,7 +21,7 @@ const slice = (start, end) => {
 
 test("before the send, the handoff screen stays; after it, the chapter renders", () => {
   const stage = slice('if (signupStage === "first-relay") {', 'if (signupStage === "restart-required") {');
-  assert.match(stage, /if \(status === "sent"\) \{ renderFirstRelayChapter\(\); return; \}/);
+  assert.match(stage, /if \(status === "sent"\) \{ stopOnboardingAgentPoll\(\); renderFirstRelayChapter\(\); return; \}/);
   assert.match(stage, /Follow the instructions in/);
   assert.match(stage, /Your agent will help you send your first Relay\./);
   assert.match(stage, /This screen will update when your Relay is sent\./);
@@ -35,9 +35,9 @@ test("before the send, the handoff screen stays; after it, the chapter renders",
 test("with no inviter, the handoff asks for a link and waits for it", () => {
   const stage = slice('if (signupStage === "first-relay") {', 'if (signupStage === "restart-required") {');
   assert.match(stage, /const linkFirst = payload\.ui\?\.firstRelayKind === "link";/);
-  assert.match(stage, /Ask your agent to <strong>make you a relay about something you’re working on<\/strong>\. It gives you a link and the message to send with it, and the other person needs nothing installed\./);
+  assert.match(stage, /Ask \$\{agentName \? esc\(agentName\) : "your agent"\} to <strong>make you a relay about something you’re working on<\/strong>\. It gives you a link and the message to send with it, and the other person needs nothing installed\./);
   assert.match(stage, /linkFirst \? "This screen updates when your link is ready\."/);
-  assert.match(stage, /JSON\.stringify\(\[status, signupBusy, signupError, linkFirst\]\)/, "the kind is part of the render signature");
+  assert.match(stage, /JSON\.stringify\(\[status, signupBusy, signupError, linkFirst, agentChosen\?\.host/, "the kind is part of the render signature");
   assert.match(stage, /"Your first Relay"/);
 });
 
@@ -61,13 +61,13 @@ test("the celebration auto-advances after ten seconds and Continue skips the wai
 test("Your first link asks for a relay in the person's own words, then shows the message to send", () => {
   const chapter = slice("  function renderFirstRelayChapter() {", "  // OPEN RELAY (2026-09-13)");
   assert.match(chapter, /Now relay someone who isn’t on Relay\./);
-  assert.match(chapter, /Ask your agent to <strong>make you a relay about something you’re working on<\/strong>\. It gives you a link and the message to send with it\./);
+  assert.match(chapter, /Ask \$\{esc\(onboardingAgentFor\(\)\?\.name \|\| "your agent"\)\} to <strong>make you a relay about something you’re working on<\/strong>\. It gives you a link and the message to send with it\./);
   assert.doesNotMatch(chapter, /Priya|cutover|DKIM|Postmark/, "no hard-coded situation");
   assert.match(chapter, /This screen updates when your link is ready\./);
   assert.match(chapter, /id="suLinkSkip" type="button">Skip for now</);
   assert.match(chapter, /Your link is ready\./);
   assert.match(chapter, /id="suFirstLinkText">\$\{displayShareText\}/);
-  assert.match(chapter, /Send it wherever you talk to them\. They can ask their Claude Code or Codex to reply\. Their reply will appear inside your Relay app, even if they don’t have Relay\./);
+  assert.match(chapter, /Send it wherever you talk to them\. They can ask their own AI to reply\. Their reply will appear inside your Relay app, even if they don’t have Relay\./);
   assert.doesNotMatch(chapter, /Their reply lands here as its own chat\./);
   // A link that was itself the first Relay wears the celebration on this
   // screen, since it never had one of its own.

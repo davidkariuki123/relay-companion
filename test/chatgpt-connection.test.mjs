@@ -32,6 +32,6 @@ test("versioned first-send onboarding keeps durable progress for each account", 
   assert.match(html, /signupStage === "first-relay"/);
   // The send opens the next chapter (2026-09-13): celebration, first link,
   // Grow your network; Open Relay completes it.
-  assert.match(html, /if \(status === "sent"\) \{ renderFirstRelayChapter\(\); return; \}/);
+  assert.match(html, /if \(status === "sent"\) \{ stopOnboardingAgentPoll\(\); renderFirstRelayChapter\(\); return; \}/);
   assert.doesNotMatch(html, /id="suChatSkip"/);
 });

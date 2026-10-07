@@ -103,17 +103,17 @@ test("the Sign in link and the auto-start share one path, and a paired account r
 test("the handoff asks for a link when the first Relay is one, and the hello copy stays for the invite path", () => {
   const stage = slice('if (signupStage === "first-relay") {', 'if (signupStage === "restart-required") {');
   assert.match(stage, /const linkFirst = payload\.ui\?\.firstRelayKind === "link";/);
-  assert.match(stage, /JSON\.stringify\(\[status, signupBusy, signupError, linkFirst\]\)/);
-  assert.match(stage, /linkFirst\s*\? 'Ask your agent to <strong>make you a relay about something you’re working on<\/strong>\. It gives you a link and the message to send with it, and the other person needs nothing installed\.'\s*: "Your agent will help you send your first Relay\."/);
+  assert.match(stage, /JSON\.stringify\(\[status, signupBusy, signupError, linkFirst, agentChosen\?\.host/);
+  assert.match(stage, /linkFirst\s*\? `Ask \$\{agentName \? esc\(agentName\) : "your agent"\} to <strong>make you a relay about something you’re working on<\/strong>\. It gives you a link and the message to send with it, and the other person needs nothing installed\.`\s*: agentName \? `\$\{esc\(agentName\)\} will help you send your first Relay\$\{destination\}\.` : "Your agent will help you send your first Relay\."/);
   assert.match(stage, /linkFirst \? "This screen updates when your link is ready\."\s*: "This screen will update when your Relay is sent\."/);
   // Both kinds share the handoff title and the eyebrow.
   assert.match(stage, /Follow the instructions in/);
-  assert.match(stage, /\$\{checking \|\| unavailable \? "Connected to Relay" : "Your first Relay"\}/);
+  assert.match(stage, /\$\{\(checking \|\| unavailable\) && !agentChosen \? "Connected to Relay" : "Your first Relay"\}/);
   // With no inviter there is no agent conversation known to be driving, and
   // the signup card hides the You page, so the link handoff has an exit: the
   // same Skip as Your first link, completing the local chapter. The hello
   // handoff keeps none.
-  assert.match(stage, /const skip = linkFirst && !checking\s*\? `<div class="su-form"><button class="su-link" id="suHandoffSkip" type="button"\$\{busy\}>Skip for now<\/button><\/div>`\s*: "";/);
+  assert.match(stage, /const skip = linkFirst && !checking\s*\? `<div class="su-form su-agent-quiet"><button class="su-link" id="suHandoffSkip" type="button"\$\{busy\}>Skip for now<\/button>/);
   assert.match(stage, /document\.getElementById\("suHandoffSkip"\)\?\.addEventListener\("click", completeSignupTutorial\);/);
 });
 
@@ -123,7 +123,7 @@ test("the ready screen carries the celebration when the link was the first Relay
   assert.match(chapter, /class="su-first-relay su-first-link\$\{firstRelayWasLink \? " su-first-relay-sent" : ""\}"/);
   assert.match(chapter, /\$\{firstRelayWasLink \? '<div class="su-relay-moment" aria-hidden="true"><i><\/i><i><\/i><i><\/i><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" \/><\/svg><\/div>' : ""\}/);
   assert.match(chapter, /\$\{firstRelayWasLink \? "Your first Relay" : "Your first link"\}/);
-  assert.match(chapter, /Send it wherever you talk to them\. They can ask their Claude Code or Codex to reply\. Their reply will appear inside your Relay app, even if they don’t have Relay\./);
+  assert.match(chapter, /Send it wherever you talk to them\. They can ask their own AI to reply\. Their reply will appear inside your Relay app, even if they don’t have Relay\./);
   assert.doesNotMatch(chapter, /Their reply lands here as its own chat\./);
   // The identity of the first Relay is part of what the screen renders from;
   // the state of its controls is not, since a rebuild would replay the marks'

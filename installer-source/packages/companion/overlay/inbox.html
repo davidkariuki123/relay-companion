@@ -3239,6 +3239,97 @@
   .su-application .su-title { margin-top:9px; font-size:33px; }
   .su-application .su-form { margin-top:22px; }
   .su-application .su-returning { margin-top:12px; }
+  /* WHICH AI DO YOU USE (2026-10-07). The rows are the reader's Open-in host
+     actions; the marks are the installed ones; nothing new is invented. */
+  .su-agents { margin-top:16px; border:1px solid var(--hair); border-radius:10px; overflow:hidden; background:var(--wash); }
+  .su-agents .th-host-action { min-height:48px; }
+  .su-agents .th-host-action[data-host="conductor"] { --host-color:var(--ink); }
+  .su-agent-copy { min-width:0; display:flex; flex-direction:column; gap:1px; }
+  .su-agent-mark { display:inline-block; width:.82em; height:.82em; border-radius:.2em; vertical-align:-.08em; margin-right:.16em;
+    box-shadow:0 0 0 1px color-mix(in srgb, var(--ink) 7%, transparent); }
+  .su-agent-name { white-space:nowrap; }
+  .su-agent-name.claude { color:var(--brand-anthropic); }
+  .su-agent-name.codex { color:var(--brand-codex); }
+  .su-agent-name.ink { color:var(--ink); }
+  .su-agent-app { color:var(--muted); }
+  .su-agent-back { margin-top:10px; align-self:flex-start; }
+  /* The handoff watches account history; its dot breathes so the screen reads as alive, not stuck. */
+  .su-agent-live > span { background:var(--accent); animation:su-agent-breathe 2.4s ease-in-out infinite; animation-play-state:var(--relay-loop-state); }
+  @keyframes su-agent-breathe { 0%, 100% { opacity:.35; transform:scale(.8); } 50% { opacity:1; transform:scale(1.15); } }
+  @media (prefers-reduced-motion:reduce) { .su-agent-live > span { animation:none; } }
+  .su-agent-quiet { display:flex; justify-content:center; align-items:center; gap:8px; margin-top:4px; color:var(--muted-3); font-size:11px; }
+  .su-agent-quiet .su-link { min-height:28px; font-size:12px; }
+  .su-local-prompt .su-form.su-agent-actions { gap:6px; }
+  .su-agent-request { overflow-wrap:anywhere; }
+  .su-agent-request.preparing { color:var(--muted); }
+  /* SETUP (2026-10-07). The You page's "Your AIs" pushed page: the settings
+     species (sv-open-section/list/row, sv-choose) with one status line per AI
+     and one verb. The dot is the only new mark: evidence, never decoration. */
+  .setup-page { padding:14px 0 28px; }
+  .setup-page .cv-blocked-back { margin-left:10px; }
+  .setup-page h2 { margin:10px 16px 6px; font:500 25px/1.2 var(--serif); color:var(--ink); }
+  .setup-page .cv-blocked-copy { margin:0 16px 4px; }
+  .setup-page .sv-open-section { margin-top:20px; }
+  .setup-row .sv-choose { min-width:76px; }
+  .setup-row .sv-open-why { display:flex; align-items:center; gap:5px; min-width:0; }
+  .setup-why-text { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .setup-dot { flex:none; width:6px; height:6px; border-radius:50%; background:var(--muted-3); }
+  .setup-dot.ok { background:var(--ok); }
+  .setup-dot.live { background:var(--ok); box-shadow:0 0 0 3px var(--ok-soft); }
+  .setup-dot.warn { background:var(--warn); }
+  .setup-dot.bad { background:var(--danger); }
+  .setup-dot.wait { background:var(--accent); animation:su-agent-breathe 2.4s ease-in-out infinite; animation-play-state:var(--relay-loop-state); }
+  .setup-row.ok .sv-open-why { color:var(--muted); }
+  .setup-row.just .setup-dot { animation:setup-pop .5s var(--soft) both; }
+  @keyframes setup-pop { 0% { transform:scale(.2); } 60% { transform:scale(1.5); } 100% { transform:scale(1); } }
+  @media (prefers-reduced-motion:reduce) { .setup-dot.wait, .setup-row.just .setup-dot { animation:none; } }
+  .setup-row .sv-choose.warn { background:color-mix(in srgb, var(--warn) 13%, transparent); color:var(--warn); }
+  .setup-web { border-top:1px solid var(--edge); }
+  .setup-web:first-child { border-top:0; }
+  .setup-web > .setup-row { appearance:none; border:0; background:transparent; width:100%; text-align:left; font:inherit; color:inherit; }
+  .setup-web > button.setup-row { cursor:pointer; transition:background-color var(--t-fast) var(--settle); }
+  .setup-web > button.setup-row:hover { background:var(--wash); }
+  .setup-web.open > .setup-row { background:var(--wash-2); }
+  .setup-tray { margin:0; border-radius:0; padding:8px 12px 12px; border-top:1px solid var(--hair); gap:8px; }
+  .setup-tray-copy { font:12px/1.5 var(--sans); color:var(--muted); }
+  .setup-tray-actions { display:flex; gap:6px; }
+  .setup-tray-actions .sv-choose { flex:1 1 0; padding:8px 10px; }
+  .setup-tray-actions .sv-choose.primary { background:var(--accent); color:var(--on-accent); }
+  .setup-tray-actions .sv-choose.primary:hover { background:color-mix(in srgb, var(--accent) 88%, var(--ink)); }
+  .setup-tray-status { display:flex; align-items:center; gap:6px; font:11px/1.4 var(--sans); color:var(--muted-2); }
+  .setup-conn { display:flex; align-items:center; gap:8px; min-height:34px; }
+  .setup-conn + .setup-conn { border-top:1px solid var(--hair); }
+  .setup-conn-copy { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; }
+  .setup-conn-name { font:500 12.5px/1.3 var(--sans); color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .setup-conn-when { font:10.5px/1.4 var(--sans); color:var(--muted-3); }
+  .setup-conn .sv-choose { padding:5px 9px; font-size:11.5px; }
+  .setup-conn .sv-choose.armed { background:var(--danger-soft); color:var(--danger); }
+  .setup-add { align-self:flex-start; }
+  .setup-foot { margin:14px 16px 0; font:11px/1.55 var(--sans); color:var(--muted-2); }
+  .setup-foot button { appearance:none; border:0; background:none; padding:0; font:inherit; color:var(--accent); cursor:pointer; }
+  .setup-foot button:hover { text-decoration:underline; }
+  .setup-err { margin:10px 16px 0; }
+  .setup-title { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
+  .setup-all { appearance:none; border:0; background:transparent; padding:2px 4px; margin-right:-4px; border-radius:var(--r-1);
+    font:600 12px/1.3 var(--sans); color:var(--accent); cursor:pointer; }
+  .setup-all:hover { background:var(--accent-soft); }
+  .setup-all:disabled { opacity:.5; cursor:default; }
+  /* The You page's door to it: one row, the marks of what is here. */
+  .setup-entry { appearance:none; border:0; background:transparent; width:100%; text-align:left; font:inherit; color:inherit; cursor:pointer;
+    transition:background-color var(--t-fast) var(--settle); }
+  .setup-entry:hover { background:var(--wash); }
+  .setup-marks { flex:none; display:flex; align-items:center; }
+  .setup-marks img { width:24px; height:24px; border-radius:6px; object-fit:contain; box-shadow:0 0 0 2px var(--raised, var(--bg)); background:var(--bg); }
+  .setup-marks img + img { margin-left:-6px; }
+  .setup-entry .perm-chev { margin-left:2px; }
+  /* The inbox's one quiet word about an app that is new here. */
+  .setup-nudge { position:relative; margin:4px 12px 6px; }
+  .setup-nudge .rat-summary { width:100%; margin:0; padding-right:34px; }
+  .setup-nudge .rat-summary img { width:18px; height:18px; flex:none; border-radius:5px; }
+  .setup-nudge .rat-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .setup-nudge .rat-see { color:var(--accent); }
+  .setup-nudge .rat-see.warn { color:var(--warn); }
+  .setup-nudge .rat-minimise { position:absolute; top:50%; right:6px; transform:translateY(-50%); margin:0; font-size:15px; }
   .su-application-note { margin:20px 0 0; padding-top:12px; border-top:1px solid var(--hair); font-size:11px; line-height:1.55; color:var(--muted); }
   .su-account { margin-top:21px; padding:14px; border:1px solid var(--hair); border-radius:var(--r-3); background:var(--wash); }
   .su-account-name { display:block; font-size:13px; font-weight:600; color:var(--ink); }
@@ -3653,7 +3744,7 @@
       <div id="settingRequests" aria-live="polite"></div>
       <!-- Relays view -->
       <section class="view" id="relaysView">
-        <div id="relaysIntro" hidden><div id="relaysRequestsSummary"></div><div id="relayAnyoneTip" hidden></div></div>
+        <div id="relaysIntro" hidden><div id="relaysRequestsSummary"></div><div id="setupNudge"></div><div id="relayAnyoneTip" hidden></div></div>
         <!-- Said only after the pill's own repair of the background service
              failed: a repair that works is silent, and a Repair button would
              ask the person to do the pill's job. -->
@@ -6293,6 +6384,7 @@
       && payload.account?.paired !== false && !cardEl.classList.contains("signup");
     relaysIntroEl.hidden = !visible;
     relaysLayoutEl.hidden = !visible;
+    if (visible) renderSetupNudge();
     // The filter row belongs to the two item lists only: gone with the
     // segments, and gone on Chats.
     if (relaysFilterEl) relaysFilterEl.hidden = !visible || relaysLayout === "chats";
@@ -18648,7 +18740,11 @@
             const available = appAvailable(app);
             const on = selected.includes(app);
             const logo = app === "Codex" ? "codexMark.svg" : "claudeCodeMark.svg";
+            // "Connected" is said only where Your AIs has no evidence against
+            // it: an app whose Relay registration is missing or broken says so.
+            const gap = setupAgentGap(app);
             const why = !available ? appUnavailableReason(app)
+              : gap ? `${gap} · see Your AIs`
               : on ? (agentOpensInApp(app) ? "Connected · opens relays in a new chat" : "Connected · Relay copies the sentence for you")
               : "Connected";
             return `<div class="sv-open-row${available ? "" : " off"}">
@@ -18664,6 +18760,448 @@
             </div>` : ""}
         </div>
       </div>`;
+  }
+  // YOUR AIS (Setup, 2026-10-07). One page that connects Relay to every AI a
+  // person uses, whenever they got it: the apps on this computer, read from
+  // their own config files and running processes, and the chat AIs on the
+  // web, from the server. Each row says one true thing and offers one verb.
+  // Nothing says Connected without evidence; the dot is that evidence:
+  // green = registered and valid, ringed = working right now, amber = a
+  // restart away, red = registered but broken.
+  // Conductor runs Claude Code and Codex; it is a developer preview, so its
+  // row exists only for accounts that have it (features.conductor).
+  const SETUP_RIDER = "conductor"; const setupRiderOffered = () => payload.features?.conductor === true;
+  const SETUP_LOCAL = {
+    "claude-app": { name:"Claude app", mark:"claudeMark.svg", context:"" },
+    "chatgpt-app": { name:"ChatGPT app", mark:"chatgptMark.svg", context:"Codex chats" },
+    "claude-code": { name:"Claude Code", mark:"claudeCodeMark.svg", context:"In Terminal" },
+    codex: { name:"Codex", mark:"codexMark.svg", context:"In Terminal" },
+    [SETUP_RIDER]: { name:"Conductor", mark:"conductorMark.svg", context:"Through Claude Code and Codex" },
+  };
+  const SETUP_WEB = {
+    claude: { name:"Claude", mark:"claudeMark.svg", web:"claude.ai" },
+    chatgpt: { name:"ChatGPT", mark:"chatgptMark.svg", web:"chatgpt.com" },
+  };
+  const SETUP_DOWNLOADS = { "claude-app": "https://claude.ai/download", "chatgpt-app": "https://chatgpt.com/download" };
+  let setupPageOpen = false;
+  let setupPageReturnScroll = 0;
+  let setupSnapshot = null;
+  let setupLoading = false;
+  let setupError = "";
+  let setupTray = "";          // the web row unfolded: "claude" | "chatgpt"
+  let setupArmed = "";         // a Disconnect waiting for its second click
+  let setupCopied = false;
+  let setupFocus = "";         // the row the inbox nudge pointed at
+  let setupJust = new Set();   // rows that turned Connected while on screen
+  let setupPollTimer = null;
+  let setupRunTimer = null;
+  let setupLocalBusy = {};     // verbs this renderer started, until main answers
+  let setupReveal = false;     // bring a just-unfolded tray into view
+  let setupPreparing = "";     // a setup message being made for this web AI
+  function setupUserId() { return payload.account?.userId || ""; }
+  /** The apps this page speaks of: every one installed here that this account is offered. */
+  function setupHosts() { return (setupSnapshot?.hosts || []).filter((host) => host.id !== SETUP_RIDER || setupRiderOffered()); }
+  function setupHost(id) { return setupHosts().find((host) => host.id === id) || null; }
+  function setupContext(host) {
+    if (host.id === "claude-code") return host.where === "claude-app" ? "In the Claude app" : "In Terminal";
+    return SETUP_LOCAL[host.id]?.context || "";
+  }
+  /** One row's status: the dot, the words, and the verb (if any). */
+  function setupLocalStatus(host) {
+    const busy = setupLocalBusy[host.id] || setupSnapshot?.busy?.[host.id] || "";
+    const note = setupSnapshot?.notes?.[host.id];
+    const context = setupContext(host);
+    if (busy === "connecting") return { dot:"wait", text:"Connecting…", verb:"Connecting…", disabled:true };
+    if (busy === "restarting") return { dot:"wait", text:"Restarting Claude…", verb:"Restarting…", disabled:true };
+    if (note?.tone === "error") return { dot:"bad", text:note.text, verb:host.state === "restart" ? "Restart" : "Try again", action:host.state === "restart" ? "restart" : "connect" };
+    if (host.state === "available") return { dot:"", text:context ? `${context} · not connected` : "Not connected yet", verb:"Connect", action:"connect" };
+    if (host.state === "broken") return { dot:"bad", text:"Not working · needs a fix", verb:"Fix", action:"connect" };
+    if (host.state === "restart") return { dot:"warn", text:host.stopped ? "Relay stopped running here" : "One restart to finish", verb:"Restart", action:"restart", warn:true, title:"Quits and reopens Claude" };
+    // Connected, and how we know.
+    if (host.live) return { dot:"live", text:`Connected · ${host.id === SETUP_RIDER ? "in use now" : "working now"}` };
+    if (host.id === "claude-app") return { dot:"ok", text:host.running ? "Connected" : "Connected · ready when you open it" };
+    if (host.id === SETUP_RIDER) return { dot:"ok", text:"Connected · through Claude Code and Codex" };
+    return { dot:"ok", text:host.id === "chatgpt-app" ? "Connected · new Codex chats have it" : "Connected · new chats have it" };
+  }
+  function setupDotHtml(dot) { return dot ? `<span class="setup-dot ${dot}" aria-hidden="true"></span>` : ""; }
+  function setupLocalRowHtml(host) {
+    const meta = SETUP_LOCAL[host.id];
+    const status = setupLocalStatus(host);
+    const connected = !status.action && !status.disabled;
+    const name = host.id === "chatgpt-app" && host.state === "available" ? meta.name : meta.name;
+    return `<div class="sv-open-row setup-row${connected ? " ok" : ""}${setupJust.has(host.id) ? " just" : ""}" data-setup-row="${host.id}">
+      <img class="sv-open-logo" src="${meta.mark}" alt="" />
+      <span class="sv-open-copy"><span class="sv-open-name">${esc(name)}</span>
+        <span class="sv-open-why">${setupDotHtml(status.dot)}<span class="setup-why-text">${esc(status.text)}</span></span></span>
+      ${status.verb ? `<button class="sv-choose${status.warn ? " warn" : ""}" type="button" data-setup-${status.action || "busy"}="${host.id}"${status.title ? ` title="${esc(status.title)}"` : ""}${status.disabled ? " disabled" : ""}>${esc(status.verb)}</button>` : ""}
+    </div>`;
+  }
+  function setupConnectionsFor(surface) {
+    const list = setupSnapshot?.connections;
+    return Array.isArray(list) ? list.filter((item) => item.surface === surface) : [];
+  }
+  function setupUsedWords(item) {
+    return item.lastUsedAt ? `Used ${timeAgoWords(item.lastUsedAt)}` : `Connected ${timeAgoWords(item.createdAt)}`;
+  }
+  function setupWebRowHtml(surface) {
+    const meta = SETUP_WEB[surface];
+    const connections = setupConnectionsFor(surface);
+    const run = setupSnapshot?.run?.surface === surface && setupSnapshot.run.place === "browser" ? setupSnapshot.run : null;
+    const waiting = run?.status === "pending";
+    const open = setupTray === surface;
+    const newest = connections.slice().sort((a, b) => String(b.lastUsedAt || b.createdAt).localeCompare(String(a.lastUsedAt || a.createdAt)))[0];
+    const status = waiting ? { dot:"wait", text:`Waiting for ${meta.name}…` }
+      : connections.length ? { dot:"ok", text:`${connections.length > 1 ? `${connections.length} chats connected` : "Connected"} · ${setupUsedWords(newest).toLowerCase()}` }
+      : { dot:"", text:meta.web };
+    const row = (inner, tag) => tag === "button"
+      ? `<button class="sv-open-row setup-row${connections.length ? " ok" : ""}${setupJust.has(surface) ? " just" : ""}" type="button" data-setup-web="${surface}" aria-expanded="${open ? "true" : "false"}">${inner}</button>`
+      : `<div class="sv-open-row setup-row" data-setup-row="${surface}">${inner}</div>`;
+    const copy = `<img class="sv-open-logo" src="${meta.mark}" alt="" />
+      <span class="sv-open-copy"><span class="sv-open-name">${meta.name}</span>
+        <span class="sv-open-why">${setupDotHtml(status.dot)}<span class="setup-why-text">${esc(status.text)}</span></span></span>`;
+    // Nothing connected and the tray shut: the row is a name and one verb.
+    const head = connections.length || open
+      ? row(`${copy}<svg class="perm-chev" width="8" height="12" viewBox="0 0 8 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="${open ? "transform:rotate(90deg)" : ""}"><path d="M2 2.5L5.5 6L2 9.5"/></svg>`, "button")
+      : row(`${copy}<button class="sv-choose" type="button" data-setup-web-connect="${surface}">Connect</button>`, "div");
+    let tray = "";
+    if (open) {
+      const items = connections.map((item) => `<div class="setup-conn">
+          <span class="setup-conn-copy"><span class="setup-conn-name">${esc(item.kind === "connector" ? `${item.name} connector` : item.name)}</span><span class="setup-conn-when">${esc(setupUsedWords(item))}</span></span>
+          <button class="sv-choose${setupArmed === item.id ? " armed" : ""}" type="button" data-setup-disconnect="${esc(item.id)}"${setupSnapshot?.busy?.[item.id] ? " disabled" : ""}>${setupSnapshot?.busy?.[item.id] ? "Disconnecting…" : setupArmed === item.id ? "Disconnect?" : "Disconnect"}</button>
+        </div>`).join("");
+      const request = run && run.status !== "connected"
+        ? `<div class="setup-tray-copy">${run.open ? `Opens a new ${meta.name} chat with Relay’s setup message. Send it, and this row turns to Connected.` : `Paste Relay’s setup message into a new ${meta.name} chat and send it.`}</div>
+          <div class="setup-tray-actions">${run.open ? `<button class="sv-choose primary" type="button" data-setup-run-open="${surface}">Open ${meta.name}</button>` : ""}<button class="sv-choose${run.open ? "" : " primary"}" type="button" data-setup-run-copy="${surface}">${setupCopied ? "Copied" : "Copy message"}</button></div>
+          <div class="setup-tray-status">The message works once, for 15 minutes.</div>`
+        : setupPreparing === surface ? `<div class="setup-tray-status" role="status">${setupDotHtml("wait")}Preparing…</div>`
+        // Redeemed, and the server's list not read yet: the code itself is the evidence.
+        : run?.status === "connected" && !Array.isArray(setupSnapshot?.connections) ? `<div class="setup-tray-status" role="status">${setupDotHtml("ok")}Connected</div>`
+        : connections.length ? `<button class="sv-choose setup-add" type="button" data-setup-web-connect="${surface}">Connect another chat</button>`
+        : "";
+      // Nothing left to show (the last chat was disconnected): fold away.
+      tray = items || request ? `<div class="open-actions setup-tray">${items}${request}</div>` : "";
+      if (!tray) setTimeout(() => { if (setupTray === surface) { setupTray = ""; renderSettings(); } }, 0);
+    }
+    return `<div class="setup-web${open ? " open" : ""}">${head}${tray}</div>`;
+  }
+  function setupPageHtml() {
+    const hosts = setupHosts().filter((host) => host.installed);
+    const absent = ["claude-app", "chatgpt-app"].filter((id) => setupSnapshot?.hosts && !setupHost(id)?.installed);
+    const local = setupSnapshot?.hosts
+      ? hosts.length
+        ? `<div class="sv-open-list">${hosts.map(setupLocalRowHtml).join("")}</div>`
+        : `<div class="sv-open-intro">No AI apps on this ${/Mac/.test(navigator.userAgent) ? "Mac" : "computer"} yet.</div>`
+      : `<div class="sv-open-intro">${setupLoading ? "Looking…" : "Couldn’t check this computer."}</div>`;
+    const others = Array.isArray(setupSnapshot?.connections) ? setupSnapshot.connections.filter((item) => !SETUP_WEB[item.surface]) : [];
+    const otherHtml = others.length ? `<div class="sv-open-section" data-stop="1"><div class="sv-open-title">Other connections</div>
+      <div class="sv-open-list">${others.map((item) => `<div class="sv-open-row setup-row ok">
+        <span class="sv-open-copy"><span class="sv-open-name">${esc(item.name)}</span><span class="sv-open-why">${setupDotHtml("ok")}<span class="setup-why-text">${esc(setupUsedWords(item))}</span></span></span>
+        <button class="sv-choose${setupArmed === item.id ? " armed" : ""}" type="button" data-setup-disconnect="${esc(item.id)}">${setupArmed === item.id ? "Disconnect?" : "Disconnect"}</button></div>`).join("")}</div></div>` : "";
+    const machine = /Mac/.test(navigator.userAgent) ? "Mac" : "computer";
+    return `<section class="setup-page" id="setupPage" aria-labelledby="setupTitle" data-stop="1">
+      <button class="cv-blocked-back" type="button" id="setupBack">← You</button>
+      <h2 id="setupTitle">Your AIs</h2>
+      <p class="cv-blocked-copy">Relay works inside the AIs you use. Connect each one once.</p>
+      <div class="sv-open-section"><div class="sv-open-title setup-title">On this ${machine}${setupConnectAllIds().length > 1 ? `<button class="setup-all" type="button" id="setupConnectAll"${Object.keys(setupLocalBusy).length ? " disabled" : ""}>Connect all</button>` : ""}</div>${local}</div>
+      <div class="sv-open-section"><div class="sv-open-title">On the web</div>
+        <div class="sv-open-list">${setupWebRowHtml("claude")}${setupWebRowHtml("chatgpt")}</div>
+        ${setupSnapshot?.connectionsError ? `<div class="row-err sv-err">${esc(setupSnapshot.connectionsError)}</div>` : ""}
+      </div>
+      ${otherHtml}
+      ${absent.length ? `<p class="setup-foot">Don’t have the app? ${absent.map((id) => `<button type="button" data-setup-get="${id}">Get the ${esc(SETUP_LOCAL[id].name)}</button>`).join(" · ")}</p>` : ""}
+      ${setupError ? `<div class="row-err sv-err setup-err" role="alert">${esc(setupError)}</div>` : ""}
+    </section>`;
+  }
+  /** What Your AIs knows is wrong with an agent the "Your agent" switches name, if anything. */
+  function setupAgentGap(app) {
+    // Codex's app and CLI share one config, so either one answers.
+    const host = (app === "Codex" ? ["chatgpt-app", "codex"] : ["claude-code"]).map(setupHost).find((entry) => entry?.installed);
+    if (!host) return "";
+    return host.state === "available" ? "Not connected" : host.state === "broken" ? "Needs a fix" : "";
+  }
+  /** Every app here that one click can connect (a restart is always its own click). */
+  function setupConnectAllIds() {
+    return setupHosts().filter((host) => host.installed && ["available", "broken"].includes(host.state)).map((host) => host.id);
+  }
+  async function setupConnectAll() {
+    // One at a time, in the page's order: Conductor last, since connecting
+    // Claude Code and Codex usually connects it too.
+    for (const id of setupConnectAllIds().sort((a, b) => (a === SETUP_RIDER) - (b === SETUP_RIDER))) {
+      if (!setupConnectAllIds().includes(id)) continue;
+      await setupVerb("setupConnect", id, "connecting");
+    }
+  }
+  /** The You page's door: what is here, in marks, and what is left to do. */
+  function setupEntryHtml() {
+    const hosts = setupHosts().filter((host) => host.installed);
+    const connectedLocal = hosts.filter((host) => host.state === "connected");
+    const webSurfaces = Object.keys(SETUP_WEB).filter((surface) => setupConnectionsFor(surface).length);
+    const todo = hosts.filter((host) => ["available", "restart", "broken"].includes(host.state) && host.id !== SETUP_RIDER);
+    const marks = [...connectedLocal.map((host) => SETUP_LOCAL[host.id].mark), ...webSurfaces.map((surface) => SETUP_WEB[surface].mark)];
+    const shown = [...new Set(marks.length ? marks : hosts.map((host) => SETUP_LOCAL[host.id].mark))].slice(0, 3);
+    const count = connectedLocal.length + webSurfaces.length;
+    const name = !setupSnapshot ? "Your AIs" : count ? `${count} connected` : "Connect your AIs";
+    const first = todo[0];
+    const why = !setupSnapshot ? "Checking…"
+      : first?.state === "restart" ? (first.stopped ? "Relay stopped in the Claude app" : "Restart Claude to finish")
+      : first ? `${SETUP_LOCAL[first.id].name} ${first.state === "broken" ? "needs a fix" : "isn’t connected yet"}${todo.length > 1 ? ` · ${todo.length - 1} more` : ""}`
+      : count ? "Everything here is connected" : "Claude, ChatGPT and more";
+    return `<div class="sv-open-section" id="yourAis" data-stop="1">
+      <div class="sv-open-title">Your AIs</div>
+      <div class="sv-open-list"><button class="sv-open-row setup-entry" type="button" id="setupEntry">
+        ${shown.length ? `<span class="setup-marks" aria-hidden="true">${shown.map((mark) => `<img src="${mark}" alt="">`).join("")}</span>` : ""}
+        <span class="sv-open-copy"><span class="sv-open-name">${esc(name)}</span><span class="sv-open-why">${first ? setupDotHtml(first.state === "restart" ? "warn" : first.state === "broken" ? "bad" : "") : ""}<span class="setup-why-text">${esc(why)}</span></span></span>
+        <svg class="perm-chev" width="8" height="12" viewBox="0 0 8 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 2.5L5.5 6L2 9.5"/></svg>
+      </button></div>
+    </div>`;
+  }
+  async function refreshSetup({ force = false } = {}) {
+    if (!window.relay.setupSnapshot || !setupUserId()) return;
+    const userId = setupUserId();
+    setupLoading = true;
+    try {
+      const next = await window.relay.setupSnapshot(userId, { force });
+      if (userId !== setupUserId()) return;
+      setupObserve(next);
+      setupError = "";
+    } catch { if (!setupSnapshot) setupError = "Relay couldn’t check your AIs. Try again."; }
+    finally { setupLoading = false; }
+    if (activeView === "settings") renderSettings();
+  }
+  /** Mark rows that just became connected, so their dot says so once. */
+  function setupObserve(next) {
+    const was = setupSnapshot;
+    if (was?.hosts) for (const host of next?.hosts || []) {
+      const before = was.hosts.find((entry) => entry.id === host.id);
+      if (before && before.state !== "connected" && host.state === "connected") setupJustNow(host.id);
+    }
+    if (Array.isArray(was?.connections)) for (const surface of Object.keys(SETUP_WEB)) {
+      const count = (list) => (Array.isArray(list) ? list.filter((item) => item.surface === surface).length : 0);
+      if (count(next?.connections) > count(was.connections)) setupJustNow(surface);
+    }
+    setupSnapshot = next;
+  }
+  function setupJustNow(id) {
+    setupJust.add(id);
+    setTimeout(() => { setupJust.delete(id); }, 1200);
+  }
+  function startSetupPolling() {
+    stopSetupPolling();
+    // Facts change outside Relay (an app installed, quit, opened, a chat
+    // redeemed its code), so the page looks again every few seconds while
+    // it is on screen, and never when it is not.
+    setupPollTimer = setInterval(() => {
+      if (!setupPageOpen || activeView !== "settings") { stopSetupPolling(); return; }
+      if (Object.keys(setupLocalBusy).length) return;
+      void refreshSetup();
+    }, 3000);
+  }
+  function stopSetupPolling() {
+    if (setupPollTimer) { clearInterval(setupPollTimer); setupPollTimer = null; }
+    if (setupRunTimer) { clearInterval(setupRunTimer); setupRunTimer = null; }
+  }
+  function syncSetupRunPolling() {
+    const pending = setupSnapshot?.run?.status === "pending" && setupPageOpen;
+    if (!pending && setupRunTimer) { clearInterval(setupRunTimer); setupRunTimer = null; }
+    if (pending && !setupRunTimer) {
+      setupRunTimer = setInterval(async () => {
+        if (!setupPageOpen) { clearInterval(setupRunTimer); setupRunTimer = null; return; }
+        try {
+          const surface = setupSnapshot?.run?.surface;
+          const next = await window.relay.setupPollRun(setupUserId());
+          setupObserve(next);
+          // Replaced or lapsed (another computer made a newer one): a dead
+          // code is no code, so the open tray quietly gets a fresh one.
+          if (!next?.run && surface && setupTray === surface && !setupPreparing) { void setupStartWeb(surface); return; }
+          if (next?.run?.status === "connected") {
+            setupJustNow(surface);
+            // The chat redeemed the code: fold the tray once the row says so.
+            setTimeout(() => { if (setupTray === surface) { setupTray = ""; renderSettings(); } }, 1600);
+          }
+          if (activeView === "settings") renderSettings();
+        } catch {}
+      }, 2000);
+    }
+  }
+  function openSetupPage(focus = "") {
+    setupPageReturnScroll = activeView === "settings" ? scrollEl.scrollTop : 0;
+    setupPageOpen = true;
+    setupFocus = focus;
+    setupArmed = "";
+    if (activeView !== "settings") { activeView = "settings"; commitNavigation(); }
+    else renderSettings();
+    scrollEl.scrollTop = 0;
+    const page = document.getElementById("setupPage");
+    if (page && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      page.animate([{ opacity:0, transform:"translateX(28px)" }, { opacity:1, transform:"translateX(0)" }], { duration:220, easing:"cubic-bezier(.2,.7,.2,1)" });
+    }
+    void refreshSetup({ force:true });
+    startSetupPolling();
+  }
+  function closeSetupPage() {
+    setupPageOpen = false;
+    setupTray = "";
+    setupArmed = "";
+    stopSetupPolling();
+    if (setupSnapshot?.run?.status === "pending") void window.relay.setupCancelRun?.(setupUserId()).catch(() => {});
+    renderSettings();
+    scrollEl.scrollTop = setupPageReturnScroll;
+    const entry = document.getElementById("setupEntry");
+    entry?.focus({ preventScroll:true });
+  }
+  async function setupVerb(method, id, busyWord) {
+    if (setupLocalBusy[id]) return;
+    setupLocalBusy = { ...setupLocalBusy, [id]: busyWord };
+    setupError = "";
+    renderSettings();
+    try {
+      const next = await window.relay[method](setupUserId(), id);
+      setupObserve(next);
+    } catch (error) {
+      setupError = String(error?.message || "That didn’t work. Try again.").replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
+    } finally {
+      const { [id]: _done, ...rest } = setupLocalBusy;
+      setupLocalBusy = rest;
+      renderSettings();
+    }
+  }
+  async function setupStartWeb(surface) {
+    setupTray = surface;
+    setupReveal = true;
+    setupPreparing = surface;
+    setupArmed = "";
+    setupCopied = false;
+    renderSettings();
+    try {
+      const next = await window.relay.setupPrepareRun(setupUserId(), surface, "browser");
+      setupObserve(next);
+      setupError = "";
+    } catch { setupError = "Relay couldn’t make the setup message. Check your connection and try again."; }
+    finally { setupPreparing = ""; }
+    setupReveal = true;
+    renderSettings();
+  }
+  /** Bring an unfolded tray fully into view, once it has its actions. */
+  function wireSetupReveal() {
+    const open = document.querySelector("#setupPage .setup-web.open");
+    if (!setupReveal || !open?.querySelector(".setup-tray-actions, .setup-conn, .setup-add")) return;
+    setupReveal = false;
+    const view = scrollEl.getBoundingClientRect();
+    const box = open.getBoundingClientRect();
+    const overflow = box.bottom + 12 - view.bottom;
+    if (overflow > 0) scrollEl.scrollTo({ top:scrollEl.scrollTop + Math.min(overflow, box.top - view.top - 8),
+      behavior:window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  }
+  function wireSetupPage() {
+    const page = document.getElementById("setupPage");
+    if (!page) return;
+    document.getElementById("setupBack")?.addEventListener("click", (event) => { event.stopPropagation(); closeSetupPage(); });
+    for (const button of page.querySelectorAll("[data-setup-connect]")) {
+      button.addEventListener("click", (event) => { event.stopPropagation(); void setupVerb("setupConnect", button.dataset.setupConnect, "connecting"); });
+    }
+    document.getElementById("setupConnectAll")?.addEventListener("click", (event) => { event.stopPropagation(); void setupConnectAll(); });
+    for (const button of page.querySelectorAll("[data-setup-restart]")) {
+      button.addEventListener("click", (event) => { event.stopPropagation(); void setupVerb("setupRestart", button.dataset.setupRestart, "restarting"); });
+    }
+    for (const button of page.querySelectorAll("[data-setup-web]")) {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const surface = button.dataset.setupWeb;
+        setupTray = setupTray === surface ? "" : surface;
+        setupArmed = "";
+        setupReveal = Boolean(setupTray);
+        renderSettings();
+      });
+    }
+    for (const button of page.querySelectorAll("[data-setup-web-connect]")) {
+      button.addEventListener("click", (event) => { event.stopPropagation(); void setupStartWeb(button.dataset.setupWebConnect); });
+    }
+    for (const button of page.querySelectorAll("[data-setup-run-open]")) {
+      button.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        try { await window.relay.setupOpenRun(setupUserId()); setupCopied = false; }
+        catch (error) { setupError = String(error?.message || "").replace(/^Error invoking remote method '[^']+': (Error: )?/, "") || "Couldn’t open it. Copy the message instead."; }
+        renderSettings();
+      });
+    }
+    for (const button of page.querySelectorAll("[data-setup-run-copy]")) {
+      button.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        try { await window.relay.setupCopyRun(setupUserId()); setupCopied = true; setTimeout(() => { setupCopied = false; if (setupPageOpen) renderSettings(); }, 1800); }
+        catch { setupError = "Relay couldn’t copy it. Try again."; }
+        renderSettings();
+      });
+    }
+    for (const button of page.querySelectorAll("[data-setup-disconnect]")) {
+      button.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        const id = button.dataset.setupDisconnect;
+        // Two clicks: the first only asks.
+        if (setupArmed !== id) { setupArmed = id; renderSettings(); return; }
+        setupArmed = "";
+        await setupVerb("setupDisconnect", id, "disconnecting");
+      });
+    }
+    for (const button of page.querySelectorAll("[data-setup-get]")) {
+      button.addEventListener("click", (event) => { event.stopPropagation(); window.relay.openUrl?.(SETUP_DOWNLOADS[button.dataset.setupGet]); });
+    }
+    if (setupFocus) {
+      page.querySelector(`[data-setup-row="${setupFocus}"]`)?.scrollIntoView({ block:"center" });
+      setupFocus = "";
+    }
+    wireSetupReveal();
+    syncSetupRunPolling();
+  }
+  // THE INBOX NUDGE. One row, only for an app that is on this computer and
+  // not yet working with Relay, and only until the person acts or waves it
+  // away (each app and state is waved away once, for good).
+  let setupNudgeBusy = "";
+  let setupNudgeDone = "";
+  function renderSetupNudge() {
+    const slot = document.getElementById("setupNudge");
+    if (!slot) return;
+    const nudge = payload.ui?.setupNudge;
+    const id = setupNudgeDone || nudge?.id;
+    const meta = SETUP_LOCAL[id];
+    if (!meta || !window.relay.setupConnect) { if (slot.innerHTML) slot.innerHTML = ""; return; }
+    const state = setupNudgeDone ? "done" : nudge.state;
+    const the = id === "claude-code" || id === "codex" || id === SETUP_RIDER ? meta.name : `the ${meta.name}`;
+    const title = state === "done" ? `Relay is in ${the}`
+      : state === "restart" ? (nudge?.stopped ? "Relay stopped in the Claude app" : "Restart Claude to use Relay")
+      : state === "broken" ? `Relay stopped working in ${the}`
+      : `Use Relay in ${the}`;
+    const verb = setupNudgeBusy ? (setupNudgeBusy === "restarting" ? "Restarting…" : "Connecting…")
+      : state === "done" ? "" : state === "restart" ? "Restart" : state === "broken" ? "Fix" : "Connect";
+    const signature = JSON.stringify([id, state, verb]);
+    if (slot.dataset.signature === signature && slot.innerHTML) return;
+    slot.dataset.signature = signature;
+    slot.innerHTML = `<div class="setup-nudge"><button class="rat-summary" type="button" id="setupNudgeGo"${setupNudgeBusy ? " disabled" : ""}>
+        <img src="${meta.mark}" alt=""><span class="rat-title">${esc(title)}</span>
+        ${verb ? `<span class="rat-see${state === "restart" ? " warn" : ""}">${esc(verb)}</span>` : `<span class="setup-dot live" aria-hidden="true" style="margin-left:auto"></span>`}
+      </button>${state === "done" || setupNudgeBusy ? "" : `<button class="rat-minimise" type="button" id="setupNudgeHide" aria-label="Not now">×</button>`}</div>`;
+    slot.querySelector("#setupNudgeGo")?.addEventListener("click", async () => {
+      if (setupNudgeBusy || state === "done") return;
+      const userId = setupUserId();
+      setupNudgeBusy = state === "restart" ? "restarting" : "connecting";
+      renderSetupNudge();
+      try {
+        const next = await window.relay[state === "restart" ? "setupRestart" : "setupConnect"](userId, id);
+        setupObserve(next);
+        const after = next?.hosts?.find((host) => host.id === id);
+        if (after?.state === "connected") {
+          // Said once, where the person looked, then the row leaves.
+          setupNudgeDone = id;
+          setTimeout(() => { setupNudgeDone = ""; renderSetupNudge(); }, 2600);
+        }
+      } catch {}
+      finally { setupNudgeBusy = ""; renderSetupNudge(); }
+    });
+    slot.querySelector("#setupNudgeHide")?.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      payload.ui = { ...payload.ui, setupNudge: null };
+      renderSetupNudge();
+      try { await window.relay.setupDismissNudge(setupUserId(), id, state); } catch {}
+    });
   }
   // MILESTONE RELAYS. Agents mint a Relay link unasked when finished work
   // matters to someone; some people find that intrusive. One switch, on until
@@ -18779,6 +19317,18 @@
   }
   function renderSettings() {
     if (activeView !== "settings") return;
+    if (setupPageOpen && payload.account?.paired !== false) {
+      // The page looks again every few seconds; repaint only what changed,
+      // so a hover, a focus or a half-made click is never thrown away.
+      const html = setupPageHtml();
+      if (settingsViewEl.dataset.setupHtml === html && settingsViewEl.querySelector("#setupPage")) { wireSetupReveal(); syncSetupRunPolling(); return; }
+      settingsViewEl.dataset.setupHtml = html;
+      settingsViewEl.innerHTML = html;
+      wireSetupPage();
+      if (!setupPollTimer) { startSetupPolling(); void refreshSetup(); }
+      return;
+    }
+    delete settingsViewEl.dataset.setupHtml;
     const info = settingsInfo;
     if (!info) {
       settingsViewEl.innerHTML = '<div class="td-quiet">Loading account…</div>';
@@ -18817,6 +19367,9 @@
     html += `<div class="row-err sv-err" id="svErr">${esc(svError)}</div>`;
     // David's selected B layout: account, invite link, then agent switches.
     if (info.paired) {
+      // Your AIs first (Setup, 2026-10-07): Relay does nothing until an AI
+      // has it, so the door to connecting one sits right under the account.
+      if (window.relay.setupSnapshot) html += setupEntryHtml();
       html += yourLinkHtml();
       html += yourAgentHtml();
       html += milestoneRelaysHtml(info);
@@ -18939,6 +19492,9 @@
       });
     }
     document.getElementById("svBlockedPeople")?.addEventListener("click", (event) => openBlockedPeople(event.currentTarget));
+    document.getElementById("setupEntry")?.addEventListener("click", (event) => { event.stopPropagation(); openSetupPage(); });
+    // The door's words come from a fresh look, at most every few seconds.
+    if (info.paired && window.relay.setupSnapshot && !setupLoading && (!setupSnapshot || Date.now() - (setupSnapshot.scannedAt || 0) > 5000)) void refreshSetup();
     const accountRow = document.getElementById("svAccountRow");
     if (accountRow) accountRow.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -19881,7 +20437,7 @@
         <div class="su-relay-moment" aria-hidden="true"><i></i><i></i><i></i><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></svg></div>
         <p class="su-step">You’re on your way</p>
         <h1 class="su-title">Your first Relay is sent.</h1>
-        <p class="su-copy">Nicely done. Replies land here, and in Claude Code or Codex whenever you ask.</p>
+        <p class="su-copy">Nicely done. Replies land here, and in ${esc(onboardingAgentWords() || "Claude Code or Codex")} whenever you ask.</p>
         <div class="su-form"><button class="su-primary" id="suCelebrationContinue" type="button">Continue</button></div>
         <div class="su-countdown" aria-hidden="true"><span></span></div>
       </div>`;
@@ -19902,7 +20458,7 @@
         signupBodyEl.innerHTML = `<div class="su-first-relay su-first-link">
           <p class="su-step">Your first link</p>
           <h1 class="su-title">Now relay someone who isn’t on Relay.</h1>
-          <p class="su-copy">Ask your agent to <strong>make you a relay about something you’re working on</strong>. It gives you a link and the message to send with it.</p>
+          <p class="su-copy">Ask ${esc(onboardingAgentFor()?.name || "your agent")} to <strong>make you a relay about something you’re working on</strong>. It gives you a link and the message to send with it.</p>
           <p class="su-send-progress" role="status"><span aria-hidden="true"></span>This screen updates when your link is ready.</p>
           <div class="su-form"><button class="su-link" id="suLinkSkip" type="button">Skip for now</button></div>
         </div>`;
@@ -19921,7 +20477,7 @@
         <p class="su-step">${firstRelayWasLink ? "Your first Relay" : "Your first link"}</p>
         <h1 class="su-title">Your link is ready.</h1>
         <div class="su-setup-prompt su-share-text" id="suFirstLinkText">${displayShareText}</div>
-        <p class="su-copy">Send it wherever you talk to them. They can ask their Claude Code or Codex to reply. Their reply will appear inside your Relay app, even if they don’t have Relay.</p>
+        <p class="su-copy">Send it wherever you talk to them. They can ask their own AI to reply. Their reply will appear inside your Relay app, even if they don’t have Relay.</p>
         <div class="su-form su-form-row"><button class="su-secondary" id="suLinkCopy" type="button"${signupBusy ? " disabled" : ""}>${chapter.linkCopied ? "Copied" : "Copy message"}</button><button class="su-primary" id="suLinkContinue" type="button"${signupBusy ? " disabled" : ""}>Continue</button></div>
         ${chapter.linkError ? `<p class="su-error" role="alert">${esc(chapter.linkError)}</p>` : ""}
       </div>`;
@@ -20008,13 +20564,180 @@
     return `<article class="su-relay"><p class="su-relay-from">From ${esc(sender)}</p><h2 class="su-relay-title">${esc(title)}</h2>${message}${agent}${attachments}${recipient}${pendingError}</article>`;
   }
 
+  // WHICH AI DO YOU USE (2026-10-07). After sign-in: choose the AI, say where
+  // for ChatGPT and Claude, paste one request, then one handoff screen that
+  // stays until account history shows the first Relay. The lesson, drafting
+  // and approval all happen in that AI, never here.
+  const ONBOARDING_AGENTS = [
+    { host:"claude", name:"Claude", mark:"claudeMark.svg", tone:"claude", dataHost:"claude", context:"claude.ai or the Claude app", chat:true, web:"claude.ai" },
+    { host:"chatgpt", name:"ChatGPT", mark:"chatgptMark.svg", tone:"codex", dataHost:"chatgpt", context:"chatgpt.com or the ChatGPT app", chat:true, web:"chatgpt.com" },
+    { host:"claude-code", name:"Claude Code", mark:"claudeCodeMark.svg", tone:"claude", dataHost:"claude", context:"In your terminal or the Claude app" },
+    { host:"codex", name:"Codex", mark:"codexMark.svg", tone:"codex", dataHost:"codex", context:"In your terminal or the ChatGPT app" },
+    { host:"conductor", name:"Conductor", mark:"conductorMark.svg", tone:"ink", dataHost:"conductor", context:"On this Mac" },
+  ];
+  function onboardingAgentFor(agent = payload.ui?.onboardingAgent) {
+    return ONBOARDING_AGENTS.find((option) => option.host === agent?.host) || null;
+  }
+  /** What the chosen AI is called in sentences: "the ChatGPT app" when it is the app. */
+  function onboardingAgentWords(agent = payload.ui?.onboardingAgent) {
+    const option = onboardingAgentFor(agent);
+    if (!option) return "";
+    return option.chat && agent?.place === "app" ? `the ${option.name} app` : option.name;
+  }
+  function onboardingAgentTitleName(agent = payload.ui?.onboardingAgent) {
+    const option = onboardingAgentFor(agent);
+    if (!option) return "";
+    const app = option.chat && agent?.place === "app" ? ' <span class="su-agent-app">app</span>' : "";
+    return `<span class="su-agent-name ${option.tone}"><img class="su-agent-mark" src="${option.mark}" alt="">${esc(option.name)}</span>${app}`;
+  }
+  function onboardingAgentConnected(agent = payload.ui?.onboardingAgent) {
+    const option = onboardingAgentFor(agent);
+    if (!option) return false;
+    if (agent.connectedAt) return true;
+    // A local agent without this app's setup run was connected before this chapter.
+    return !option.chat && !payload.ui?.localOnboardingPrompt;
+  }
+  function onboardingAgentRow(option, context, attrs) {
+    return `<button class="th-host-action" type="button" data-host="${option.dataHost}" ${attrs}>
+      <img class="th-host-logo" src="${option.mark}" alt=""><span class="su-agent-copy"><span class="th-host-label">${esc(option.name)}</span>
+      <span class="th-host-context">${esc(context)}</span></span><span class="th-host-arrow" aria-hidden="true">→</span></button>`;
+  }
+  let onboardingAgentBusy = false;
+  let onboardingAgentNote = "";
+  let onboardingAgentPoll = null;
+  let onboardingAgentPreparing = false;
+  function stopOnboardingAgentPoll() { if (onboardingAgentPoll) { clearInterval(onboardingAgentPoll); onboardingAgentPoll = null; } }
+  async function onboardingAgentCall(method, ...args) {
+    const userId = payload.account?.userId;
+    if (!window.relay?.[method] || !userId) throw new Error("Relay couldn’t do that here.");
+    return window.relay[method](userId, ...args);
+  }
+  function renderAgentSetup(agent) {
+    const option = onboardingAgentFor(agent);
+    const signature = JSON.stringify(["agent", agent?.host, agent?.place, agent?.run?.id, agent?.run?.status, agent?.runError, onboardingAgentBusy, onboardingAgentNote, payload.ui?.localOnboardingPrompt ? 1 : 0, agent?.openable]);
+    if (signupBodyEl.dataset.firstRelaySignature === signature && signupBodyEl.querySelector(".su-agent-screen")) return;
+    signupBodyEl.dataset.firstRelaySignature = signature;
+    if (!option) {
+      stopOnboardingAgentPoll();
+      signupBodyEl.innerHTML = `<div class="su-first-relay su-agent-screen"><p class="su-step">Your next step</p><h1 class="su-title">Which AI do you use most?</h1>
+        <p class="su-copy">Relay works inside it. You can add others later.</p>
+        <div class="su-agents" role="list">${ONBOARDING_AGENTS.filter((o) => o.host !== "conductor" || agentSurfaces?.Conductor?.available === true || agent?.host === "conductor")
+          .map((o) => onboardingAgentRow(o, o.context, `data-agent-choose="${o.host}"`)).join("")}</div></div>`;
+      signupBodyEl.querySelectorAll("[data-agent-choose]").forEach((button) => button.addEventListener("click", () => chooseOnboardingAgent(button.dataset.agentChoose, "")));
+      return;
+    }
+    if (option.chat && !agent.place) {
+      stopOnboardingAgentPoll();
+      signupBodyEl.innerHTML = `<div class="su-first-relay su-agent-screen"><p class="su-step">Your next step</p><h1 class="su-title">Where do you use ${esc(option.name)}?</h1>
+        <div class="su-agents" role="list">${onboardingAgentRow({ ...option, name:"In a browser" }, option.web, 'data-agent-place="browser"')}
+        ${onboardingAgentRow({ ...option, name:`${option.name} app` }, "On this Mac", 'data-agent-place="app"')}</div>
+        <button class="su-link su-agent-back" type="button" data-agent-reset>Choose a different AI</button></div>`;
+      signupBodyEl.querySelectorAll("[data-agent-place]").forEach((button) => button.addEventListener("click", () => chooseOnboardingAgent(option.host, button.dataset.agentPlace)));
+      signupBodyEl.querySelector("[data-agent-reset]")?.addEventListener("click", resetOnboardingAgent);
+      return;
+    }
+    const target = onboardingAgentWords(agent);
+    const run = agent.run;
+    let request, canOpen, copyLabel;
+    if (option.chat) {
+      if (!run && !agent.runError && !onboardingAgentPreparing) void prepareOnboardingAgent();
+      request = run
+        ? `${esc(run.prompt)}<div class="desktop-local-file">↳ one-time code · works once · 15 minutes</div>`
+        : agent.runError ? `<span class="su-error">${esc(agent.runError)}</span>` : "Preparing your setup request…";
+      canOpen = Boolean(run?.open);
+      copyLabel = "Copy request";
+      if (run?.status === "pending") startOnboardingAgentPoll(); else stopOnboardingAgentPoll();
+    } else {
+      request = `Read Relay’s local getting-started guide and help me connect my account and send my first Relay.<div class="desktop-local-file">↳ START-HERE.md · on this ${/Mac/.test(navigator.userAgent) ? "Mac" : "computer"}</div>`;
+      canOpen = Boolean(agent.openable?.[option.host]);
+      copyLabel = "Copy prompt";
+    }
+    // One primary action, then a quiet row: the other way in, and the way back.
+    const notReady = option.chat && !run;
+    const primary = option.chat && agent.runError && !run
+      ? `<button class="su-primary" type="button" data-agent-retry>Try again</button>`
+      : canOpen
+      ? `<button class="su-primary" type="button" data-agent-open${onboardingAgentBusy || notReady ? " disabled" : ""}>Open in ${esc(option.name)}</button>`
+      : `<button class="su-primary" type="button" data-agent-copy${onboardingAgentBusy || notReady ? " disabled" : ""}>${copyLabel}</button>`;
+    const quiet = `${canOpen ? `<button class="su-link" type="button" data-agent-copy${notReady ? " disabled" : ""}>Copy instead</button><span aria-hidden="true">·</span>` : ""}<button class="su-link" type="button" data-agent-reset>Choose a different AI</button>`;
+    signupBodyEl.innerHTML = `<div class="su-local-prompt su-agent-screen"><div class="su-step">Your next step</div>
+      <h1 class="su-title">Paste this into<br>${onboardingAgentTitleName(agent)}.</h1>
+      <div class="desktop-prompt-note su-agent-request${notReady ? " preparing" : ""}">${request}</div>
+      <div class="su-form su-agent-actions">${primary}</div>
+      <div class="su-agent-quiet">${quiet}</div>
+      <div class="desktop-prompt-wait" role="status">${esc(onboardingAgentNote || (notReady ? "" : option.chat ? `This screen moves on when ${option.name} connects.` : `${option.name} takes the next step.`))}</div></div>`;
+    signupBodyEl.querySelector("[data-agent-open]")?.addEventListener("click", openOnboardingAgent);
+    signupBodyEl.querySelector("[data-agent-retry]")?.addEventListener("click", () => { onboardingAgentNote = ""; void prepareOnboardingAgent(); });
+    signupBodyEl.querySelector("[data-agent-copy]")?.addEventListener("click", copyOnboardingAgentRequest);
+    signupBodyEl.querySelector("[data-agent-reset]")?.addEventListener("click", resetOnboardingAgent);
+  }
+  async function chooseOnboardingAgent(host, place) {
+    if (onboardingAgentBusy) return;
+    onboardingAgentBusy = true; onboardingAgentNote = "";
+    try { const snapshot = await onboardingAgentCall("onboardingChooseAgent", host, place); payload.ui = { ...payload.ui, onboardingAgent: snapshot }; }
+    catch { onboardingAgentNote = "Relay couldn’t save that. Try again."; }
+    finally { onboardingAgentBusy = false; renderSignup(); }
+  }
+  async function resetOnboardingAgent() {
+    stopOnboardingAgentPoll(); onboardingAgentNote = "";
+    try { const snapshot = await onboardingAgentCall("onboardingResetAgent"); payload.ui = { ...payload.ui, onboardingAgent: snapshot }; } catch {}
+    renderSignup();
+  }
+  async function prepareOnboardingAgent() {
+    onboardingAgentPreparing = true;
+    try { const snapshot = await onboardingAgentCall("onboardingPrepareAgent"); payload.ui = { ...payload.ui, onboardingAgent: snapshot }; }
+    catch { payload.ui = { ...payload.ui, onboardingAgent: { ...payload.ui?.onboardingAgent, runError: "Relay couldn’t make your setup request. Check your connection and try again." } }; }
+    finally { onboardingAgentPreparing = false; renderSignup(); }
+  }
+  function startOnboardingAgentPoll() {
+    if (onboardingAgentPoll) return;
+    // The AI redeems the code on its own; this asks every two seconds while
+    // the paste screen is up, and stops the moment it is not.
+    onboardingAgentPoll = setInterval(async () => {
+      if (signupStage !== "first-relay" || !signupBodyEl.querySelector(".su-agent-screen")) { stopOnboardingAgentPoll(); return; }
+      try {
+        const snapshot = await onboardingAgentCall("onboardingPollAgent");
+        payload.ui = { ...payload.ui, onboardingAgent: snapshot };
+        if (snapshot?.connectedAt || !snapshot?.run) { stopOnboardingAgentPoll(); renderSignup(); }
+      } catch {}
+    }, 2000);
+  }
+  async function copyOnboardingAgentRequest() {
+    const option = onboardingAgentFor();
+    try {
+      if (option?.chat) await onboardingAgentCall("onboardingCopyAgentRequest");
+      else await window.relay.copySetupPrompt();
+      onboardingAgentNote = option?.chat
+        ? `Copied. Paste it into ${onboardingAgentWords()}. This screen moves on when ${option.name} connects.`
+        : `Copied. Paste it into ${option?.name || "your agent"}. Your agent takes the next step.`;
+    } catch { onboardingAgentNote = "Relay couldn’t copy it. Try again."; }
+    renderSignup();
+  }
+  async function openOnboardingAgent() {
+    const option = onboardingAgentFor();
+    onboardingAgentBusy = true; renderSignup();
+    try {
+      await onboardingAgentCall("onboardingOpenAgent");
+      onboardingAgentNote = `Opened ${option?.name || "your AI"} with the request. Send it there; this screen moves on when it connects.`;
+    } catch (error) { onboardingAgentNote = String(error?.message || "Couldn’t open it. Copy the request instead.").replace(/^Error invoking remote method '[^']+': (Error: )?/, ""); }
+    finally { onboardingAgentBusy = false; renderSignup(); }
+  }
+
   function renderSignup() {
     if (!signupBodyEl) return;
     const busy = signupBusy ? " disabled" : "";
     const error = signupError ? `<p class="su-note su-error" role="alert">${esc(signupError)}</p>` : "";
     const note = signupNote ? `<p class="su-note" role="status">${esc(signupNote)}</p>` : "";
     const desktop = payload.ui?.desktopOnboarding;
-    if (desktop && ["prompt", "connecting", "browser", "finishing", "verifying", "cancelled"].includes(desktop.stage)) {
+    // SIGN IN FIRST (2026-10-07). The installed app signs the person in itself,
+    // then asks which AI they use, so its own setup prompt never comes first
+    // and a local agent that starts the helper finds the account already here.
+    // While that agent connects, the person sees the one handoff screen below.
+    const signedIn = payload.account?.paired !== false;
+    const desktopHandled = desktop && (desktop.error || desktop.stage === "cancelled"
+      || ["browser", "finishing"].includes(desktop.stage)
+      || (!signedIn && ["connecting", "verifying"].includes(desktop.stage)));
+    if (desktopHandled) {
       if (desktop.error) {
         signupBodyEl.innerHTML = `<p class="su-step">Your setup</p><h1 class="su-title">Let’s try that again.</h1><p class="su-copy" role="alert">${esc(desktop.error.message)}</p><div class="su-form"><button class="su-primary" id="suDesktopRestart" type="button">Restart setup</button></div>`;
         document.getElementById("suDesktopRestart")?.addEventListener("click", async () => { await window.relay.installationAuthRestart(); });
@@ -20084,23 +20807,39 @@
       // history shows the send (or a minted link), the celebration, Your first
       // link and Grow your network follow, and Open Relay ends onboarding.
       // Until the send, the pill has nothing else to show, so this screen stays.
-      if (status === "sent") { renderFirstRelayChapter(); return; }
+      if (status === "sent") { stopOnboardingAgentPoll(); renderFirstRelayChapter(); return; }
+      const agent = payload.ui?.onboardingAgent;
+      if (status !== "checking" && agent && !onboardingAgentConnected(agent)) { renderAgentSetup(agent); return; }
+      stopOnboardingAgentPoll();
       // GET STARTED (2026-09-13): with no inviter there is nobody to say hello
       // to, so the first Relay is a link for someone who is not on Relay yet.
       const linkFirst = payload.ui?.firstRelayKind === "link";
-      const signature = JSON.stringify([status, signupBusy, signupError, linkFirst]);
+      const agentChosen = onboardingAgentFor(agent) ? agent : null;
+      const agentConnecting = Boolean(agentChosen && desktop && ["prompt", "connecting", "verifying"].includes(desktop.stage) && !onboardingAgentFor(agentChosen).chat);
+      const signature = JSON.stringify([status, signupBusy, signupError, linkFirst, agentChosen?.host, agentChosen?.place, agentChosen?.destination, agentConnecting, payload.account?.name]);
       if (signupBodyEl.dataset.firstRelaySignature === signature && signupBodyEl.querySelector(".su-first-relay")) return;
       signupBodyEl.dataset.firstRelaySignature = signature;
       const unavailable = status === "unavailable";
       const checking = status === "checking";
-      const title = '<span class="su-handoff-intro">Follow the instructions in</span><span class="su-host-claude">Claude Code</span><span class="su-handoff-or">or <span class="su-host-codex">Codex</span>.</span>';
+      // THE ONE HANDOFF (2026-10-07). Connecting, teaching and drafting all
+      // happen in the chosen AI; this screen only says where, and changes
+      // when account history shows the send. Its status line is the only
+      // thing that moves while the person works there.
+      const agentName = agentChosen ? onboardingAgentFor(agentChosen).name : "";
+      const title = agentChosen
+        ? `<span class="su-handoff-intro">Follow the instructions in</span>${onboardingAgentTitleName(agentChosen)}.`
+        : '<span class="su-handoff-intro">Follow the instructions in</span><span class="su-host-claude">Claude Code</span><span class="su-handoff-or">or <span class="su-host-codex">Codex</span>.</span>';
+      const destination = agentChosen?.destination ? ` to ${esc(agentChosen.destination)}` : "";
       const copy = checking || unavailable
         ? "Keep going in the conversation where you set up Relay."
         : linkFirst
-          ? 'Ask your agent to <strong>make you a relay about something you’re working on</strong>. It gives you a link and the message to send with it, and the other person needs nothing installed.'
-          : "Your agent will help you send your first Relay.";
+          ? `Ask ${agentName ? esc(agentName) : "your agent"} to <strong>make you a relay about something you’re working on</strong>. It gives you a link and the message to send with it, and the other person needs nothing installed.`
+          : agentName ? `${esc(agentName)} will help you send your first Relay${destination}.` : "Your agent will help you send your first Relay.";
+      const who = esc(payload.account?.name || payload.account?.email || "");
       const progress = unavailable ? "We couldn’t check your send yet. We’ll try again."
         : checking ? "Checking whether you’ve already sent a Relay…"
+        : agentConnecting ? `Connecting ${esc(agentName)} to your account…`
+        : agentChosen && who ? `Connected as ${who}. This screen updates when your ${linkFirst ? "link is ready" : "Relay is sent"}.`
         : linkFirst ? "This screen updates when your link is ready."
         : "This screen will update when your Relay is sent.";
       // With no inviter, no agent conversation is known to be driving this
@@ -20109,16 +20848,20 @@
       // parked here with no exit, so the link handoff offers the same Skip as
       // Your first link; it completes the local chapter, and Grow your network
       // still follows for an account whose invitation chapter is pending.
+      // A chosen AI that turns out not to cooperate must never strand the
+      // person: the quiet way back to the chooser sits beside Skip.
+      const different = agentChosen && !checking ? `<button class="su-link" type="button" data-agent-reset>Use a different AI</button>` : "";
       const skip = linkFirst && !checking
-        ? `<div class="su-form"><button class="su-link" id="suHandoffSkip" type="button"${busy}>Skip for now</button></div>`
-        : "";
+        ? `<div class="su-form su-agent-quiet"><button class="su-link" id="suHandoffSkip" type="button"${busy}>Skip for now</button>${different ? `<span aria-hidden="true">·</span>${different}` : ""}</div>`
+        : different ? `<div class="su-form su-agent-quiet">${different}</div>` : "";
       signupBodyEl.innerHTML = `<div class="su-first-relay">
-        <p class="su-step">${checking || unavailable ? "Connected to Relay" : "Your first Relay"}</p>
+        <p class="su-step">${(checking || unavailable) && !agentChosen ? "Connected to Relay" : "Your first Relay"}</p>
         <h1 class="su-title su-handoff-title">${title}</h1><p class="su-copy">${copy}</p>
-        <p class="su-send-progress" role="status"><span aria-hidden="true"></span>${progress}</p>
+        <p class="su-send-progress${agentChosen && !checking && !unavailable ? " su-agent-live" : ""}" role="status"><span aria-hidden="true"></span>${progress}</p>
         ${skip}${error}
       </div>`;
       document.getElementById("suHandoffSkip")?.addEventListener("click", completeSignupTutorial);
+      signupBodyEl.querySelector("[data-agent-reset]")?.addEventListener("click", resetOnboardingAgent);
       return;
     }
     if (signupStage === "restart-required") {
@@ -20150,7 +20893,10 @@
       // Relay is already installed on this computer (agents no longer install
       // it), so sign in is the only step. Google signs a new person up with the
       // same click.
-      signupBodyEl.innerHTML = `<div class="su-first-relay su-method su-application"><p class="su-step">Welcome to Relay</p><h1 class="su-title">Sign in to get started.</h1><p class="su-copy">Relay is set up on this computer. Sign in and your Relays open right here.</p><div class="su-form"><button class="su-primary su-google" id="suGoogle" type="button"${busy}>${googleMark()} Continue with Google</button></div><p class="su-returning">New or returning, Google signs you in. <button class="su-signin" id="suSignIn" type="button"${busy}>Use email instead</button></p><p class="su-application-note">Once you’re in, quit and reopen Claude Code or Codex so they pick up Relay’s tools.</p>${error}</div>`;
+      const applicationNote = payload.ui?.desktopOnboarding
+        ? "Next, choose the AI you use. Relay works inside it."
+        : "Once you’re in, quit and reopen Claude Code or Codex so they pick up Relay’s tools.";
+      signupBodyEl.innerHTML = `<div class="su-first-relay su-method su-application"><p class="su-step">Welcome to Relay</p><h1 class="su-title">Sign in to get started.</h1><p class="su-copy">Relay is set up on this computer. Sign in and your Relays open right here.</p><div class="su-form"><button class="su-primary su-google" id="suGoogle" type="button"${busy}>${googleMark()} Continue with Google</button></div><p class="su-returning">New or returning, Google signs you in. <button class="su-signin" id="suSignIn" type="button"${busy}>Use email instead</button></p><p class="su-application-note">${applicationNote}</p>${error}</div>`;
       document.getElementById("suGoogle")?.addEventListener("click", startInstallationGoogle);
       document.getElementById("suSignIn")?.addEventListener("click", startInstallationSignIn);
       return;
@@ -20394,6 +21140,7 @@
       if (view === "relays" && requestInboxOpen) { requestInboxOpen = false; requestInboxError = ""; if (view === activeView) { renderRelays(); scrollEl.scrollTop = 0; return; } }
       if (view === activeView) {
         if (view === "contacts" && blockedPeoplePage) closeBlockedPeople();
+        if (view === "settings" && setupPageOpen) closeSetupPage();
         return;
       }
       if (sessionPickerState) sessionPickerState = null;
@@ -20501,7 +21248,9 @@
       const localChapterDone = Number(payload.ui?.completedOnboardingVersion || 0) >= Number(payload.ui?.onboardingVersion || 0);
       if (payload.ui?.networkOnboarding?.required === true && localChapterDone) signupStage = "network";
     }
-    const desktopPending = payload.ui?.desktopOnboarding && ["prompt", "connecting", "browser", "finishing", "verifying", "cancelled"].includes(payload.ui.desktopOnboarding.stage);
+    const desktopStage = payload.ui?.desktopOnboarding?.stage;
+    const desktopPending = Boolean(payload.ui?.desktopOnboarding?.error) || ["browser", "finishing", "cancelled"].includes(desktopStage)
+      || (payload.account?.paired === false && ["prompt", "connecting", "verifying"].includes(desktopStage));
     const needsSignup = desktopPending || credentialRecovery || payload.account?.paired === false || tutorialPending;
     cardEl.classList.toggle("signup", needsSignup);
     signupViewEl?.classList.toggle("gone", !needsSignup);

@@ -361,6 +361,35 @@ export class RelayClient {
     return this.#req("GET", "/v1/me");
   }
 
+  // Connect a chat AI (ChatGPT, Claude): a one-time code bound to this
+  // account, which the AI redeems itself. Only the person's device may ask.
+  createAgentSetupRun(input) {
+    // A person is watching this screen: answer within seconds, never fifteen.
+    return this.#req("POST", "/v1/agent/setup-runs", input, { timeoutMs: 8000 });
+  }
+
+  agentSetupRun(id) {
+    return this.#req("GET", `/v1/agent/setup-runs/${encodeURIComponent(id)}`);
+  }
+
+  cancelAgentSetupRun(id) {
+    return this.#req("DELETE", `/v1/agent/setup-runs/${encodeURIComponent(id)}`);
+  }
+
+  /** The AIs connected to this account from a browser or a hosted connector. */
+  agentConnections() {
+    return this.#req("GET", "/v1/agent/connections");
+  }
+
+  disconnectAgentConnection(id) {
+    return this.#req("DELETE", `/v1/agent/connections/${encodeURIComponent(id)}`);
+  }
+
+  /** Who the first Relay can go to, from server facts. Read-only. */
+  agentOnboarding() {
+    return this.#req("GET", "/v1/agent/onboarding");
+  }
+
   completeNetworkOnboarding(version) {
     return this.#req("POST", "/v1/me/onboarding-complete", { version });
   }

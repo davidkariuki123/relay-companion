@@ -290,8 +290,8 @@ test("the You page always offers which app opens relays, and the fresh open goes
   // fresh open honours it.
   const source = fs.readFileSync(path.join(here, "../overlay/inbox.html"), "utf8");
   const settings = source.slice(source.indexOf("function renderSettings()"), source.indexOf("function wireSettings()"));
-  assert.match(settings, /if \(info\.paired\) \{\s*html \+= yourLinkHtml\(\);\s*html \+= yourAgentHtml\(\);/);
-  assert.match(settings, /if \(info\.paired\) \{\s*html \+= yourLinkHtml\(\);/);
+  // Your AIs (Setup, 2026-10-07) sits first: nothing works until an AI has Relay.
+  assert.match(settings, /if \(info\.paired\) \{[\s\S]*?if \(window\.relay\.setupSnapshot\) html \+= setupEntryHtml\(\);\s*html \+= yourLinkHtml\(\);\s*html \+= yourAgentHtml\(\);/);
   assert.match(source, /<div class="sv-open-section" id="yourAgent" data-stop="1">\s*<div class="sv-open-title">Your agent<\/div>/);
   const open = source.slice(source.indexOf("function openRelayFromUI("), source.indexOf("let unreadCount = 0;"));
   assert.match(open, /mode === "fresh" && window\.relay\.openFresh\) window\.relay\.openFresh\(id, host \|\| hostKeyFor\(agentAppName\(\)\), note\)/);

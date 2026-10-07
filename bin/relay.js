@@ -34,6 +34,7 @@ import {
   TRAMPOLINE_SHIM_VERSION_ENV,
 } from "../src/cli-trampoline.js";
 import {
+  connectAgentHost,
   hookInstallNotices,
   linuxDesktopPaths,
   prepareLinuxElectronSandbox,
@@ -1351,6 +1352,14 @@ async function main() {
       return cmdPair(flags);
     case "install":
       return cmdInstall(flags);
+    case "connect-host": {
+      // The pill's Setup page: register Relay in one app the person chose.
+      // Prints one JSON line; exit status says whether it worked.
+      const result = connectAgentHost(String(positional[0] || flags.host || ""));
+      console.log(JSON.stringify(result));
+      if (!result.ok) process.exitCode = 1;
+      return;
+    }
     case "repair-installation":
     case "repair-desktop":
       return cmdRepairDesktop(flags);

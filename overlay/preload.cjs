@@ -231,6 +231,23 @@ contextBridge.exposeInMainWorld("relay", {
   // installation-authorization namespace, and does so before minting again.
   installationAuthRestart: () => ipcRenderer.invoke("relay:installationAuthRestart"),
   copySetupPrompt: () => ipcRenderer.invoke("relay:copySetupPrompt"),
+  onboardingChooseAgent: (userId, host, place) => ipcRenderer.invoke("relay:onboardingChooseAgent", String(userId || ""), String(host || ""), String(place || "")),
+  onboardingResetAgent: (userId) => ipcRenderer.invoke("relay:onboardingResetAgent", String(userId || "")),
+  onboardingPrepareAgent: (userId) => ipcRenderer.invoke("relay:onboardingPrepareAgent", String(userId || "")),
+  onboardingPollAgent: (userId) => ipcRenderer.invoke("relay:onboardingPollAgent", String(userId || "")),
+  onboardingCopyAgentRequest: (userId) => ipcRenderer.invoke("relay:onboardingCopyAgentRequest", String(userId || "")),
+  onboardingOpenAgent: (userId) => ipcRenderer.invoke("relay:onboardingOpenAgent", String(userId || "")),
+  // SETUP (2026-10-07): every AI's connection, and the verbs to connect them.
+  setupSnapshot: (userId, options = {}) => ipcRenderer.invoke("relay:setupSnapshot", String(userId || ""), { force: options?.force === true }),
+  setupConnect: (userId, hostId) => ipcRenderer.invoke("relay:setupConnect", String(userId || ""), String(hostId || "")),
+  setupRestart: (userId, hostId) => ipcRenderer.invoke("relay:setupRestart", String(userId || ""), String(hostId || "")),
+  setupDisconnect: (userId, id) => ipcRenderer.invoke("relay:setupDisconnect", String(userId || ""), String(id || "")),
+  setupDismissNudge: (userId, hostId, state) => ipcRenderer.invoke("relay:setupDismissNudge", String(userId || ""), String(hostId || ""), String(state || "")),
+  setupPrepareRun: (userId, surface, place) => ipcRenderer.invoke("relay:setupPrepareRun", String(userId || ""), String(surface || ""), String(place || "")),
+  setupPollRun: (userId) => ipcRenderer.invoke("relay:setupPollRun", String(userId || "")),
+  setupCopyRun: (userId) => ipcRenderer.invoke("relay:setupCopyRun", String(userId || "")),
+  setupOpenRun: (userId) => ipcRenderer.invoke("relay:setupOpenRun", String(userId || "")),
+  setupCancelRun: (userId) => ipcRenderer.invoke("relay:setupCancelRun", String(userId || "")),
   copyFirstLinkMessage: (userId) => ipcRenderer.invoke("relay:copyFirstLinkMessage", userId),
   installationAuthSignIn: (options = {}) => ipcRenderer.invoke("relay:installationAuthSignIn", { forceAccountSelection: options?.forceAccountSelection === true }),
   installationAuthGoogle: (options = {}) => ipcRenderer.invoke("relay:installationAuthGoogle", {

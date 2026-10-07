@@ -3089,6 +3089,77 @@ export function repairAgentMcpRegistrations({
   return { ok: hookRepair.ok && (claudeTopicPolicy?.ok ?? true), mcpBin, claude, claudeTopicPolicy, codex, claudeDesktop, hookRepair, claudeHooks, codexHooks };
 }
 
+/**
+ * Connect ONE app the person chose in the pill's Setup page: the same
+ * registration setup and repair write, for that app only. An app installed
+ * after Relay gets exactly what it would have got at setup; one that is
+ * already registered is rewritten in place (which also heals a dead path).
+ * Never opts any other app in.
+ *
+ *   claude-app   Claude app chats: claude_desktop_config.json (restart needed)
+ *   chatgpt-app  Codex in the ChatGPT app: ~/.codex/config.toml
+ *   codex        the Codex CLI: the same config.toml
+ *   claude-code  Claude Code: ~/.claude.json (its CLI when that file is absent)
+ *   conductor    Claude Code and Codex, the agents Conductor runs
+ */
+export function connectAgentHost(host, {
+  bin = relayBinPath(),
+  node = process.execPath,
+  homeDir = os.homedir(),
+  env = process.env,
+  claudeConfigFile = env.CLAUDE_CODE_CONFIG || path.join(homeDir, ".claude.json"),
+  codexConfigFile = env.CODEX_CONFIG || path.join(env.CODEX_HOME || path.join(homeDir, ".codex"), "config.toml"),
+  claudeSettingsFile = env.CLAUDE_SETTINGS
+    || path.join(env.CLAUDE_CONFIG_DIR || env.CLAUDE_HOME || path.join(homeDir, ".claude"), "settings.json"),
+  claudeCommand = env.CLAUDE_CLI_PATH || "claude",
+} = {}) {
+  if (!["claude-app", "chatgpt-app", "codex", "claude-code", "conductor"].includes(host)) {
+    return { ok: false, reason: "unknown_host" };
+  }
+  try {
+    node = persistentNodePath(node, { homeDir, env });
+  } catch (error) {
+    return { ok: false, reason: "node_runtime_preservation_failed", detail: error?.message || String(error) };
+  }
+  let mcpBin;
+  try {
+    mcpBin = ensureStableMcpLauncher({ targetBin: bin, node, homeDir, env });
+  } catch (error) {
+    return { ok: false, reason: "mcp_launcher_write_failed", detail: error?.message || String(error) };
+  }
+  const codex = () => {
+    // The ChatGPT app reads this file before Codex has ever made ~/.codex.
+    try { fs.mkdirSync(path.dirname(codexConfigFile), { recursive: true }); } catch {}
+    return writeCodexMcpConfig(mcpBin, node, codexConfigFile);
+  };
+  const claudeCode = () => {
+    const written = fs.existsSync(claudeConfigFile)
+      ? writeClaudeCodeMcpConfig(mcpBin, node, claudeConfigFile)
+      : installClaudeCode(mcpBin, node, { command: claudeCommand });
+    if (!written.ok) return written;
+    const policy = writeClaudeTopicToolPolicy(claudeSettingsFile);
+    return policy.ok ? written : policy;
+  };
+  if (host === "claude-app") {
+    // A Claude app never opened yet has no folder: it reads this file on its
+    // first launch all the same.
+    if (process.platform === "darwin" && !env.CLAUDE_USER_DATA_DIR) {
+      const base = path.join(homeDir, "Library", "Application Support");
+      if (!["Claude", "Claude-3p"].some((name) => fs.existsSync(path.join(base, name)))) {
+        try { fs.mkdirSync(path.join(base, "Claude"), { recursive: true }); } catch {}
+      }
+    }
+    const result = installClaudeDesktop(mcpBin, node, { env: { ...env, HOME: homeDir } });
+    return { ...result, host, restart: result.ok };
+  }
+  if (host === "chatgpt-app" || host === "codex") return { ...codex(), host, restart: false };
+  if (host === "claude-code") return { ...claudeCode(), host, restart: false };
+  // Conductor: whichever of its two agents can be registered here.
+  const results = { claudeCode: claudeCode(), codex: codex() };
+  const ok = results.claudeCode.ok || results.codex.ok;
+  return { ok, host, restart: false, results, ...(ok ? {} : { reason: results.claudeCode.reason || results.codex.reason }) };
+}
+
 function claudeConfigHasRelay(configPath) {
   if (!fs.existsSync(configPath)) return false;
   try {

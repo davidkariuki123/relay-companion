@@ -22,6 +22,8 @@
 const { app, dialog, BrowserWindow, Menu, Tray, clipboard, ipcMain, nativeImage, powerMonitor, powerSaveBlocker, shell, screen, systemPreferences } = require("electron");
 const { createCompanionWindow } = require("./companion-window.cjs");
 const { createFirstRelayOnboarding, firstMintedLink } = require("./first-relay-onboarding.cjs");
+const { createAgentOnboarding } = require("./agent-onboarding.cjs");
+const { createAgentConnections } = require("./agent-connections.cjs");
 const { createNetworkOnboarding } = require("./network-onboarding.cjs");
 
 if (process.platform === "linux") {
@@ -313,6 +315,34 @@ let onboardingVersions = overlayPrefs.onboardingVersions && typeof overlayPrefs.
   ? { ...overlayPrefs.onboardingVersions }
   : {};
 const networkOnboardingCompleted = { ...overlayPrefs.networkOnboardingCompleted };
+// The AI each account chose at Which AI do you use most?, and when it connected.
+const onboardingAgents = overlayPrefs.onboardingAgents && typeof overlayPrefs.onboardingAgents === "object"
+  ? { ...overlayPrefs.onboardingAgents }
+  : {};
+const agentOnboarding = createAgentOnboarding({
+  store: onboardingAgents,
+  persist: () => writeOverlayPrefs(),
+  client: () => relayClient(),
+  schemeOwner: (scheme) => app.getApplicationNameForProtocol(scheme),
+  openExternal: (url) => process.env.RELAY_OVERLAY_TEST_NO_HOST_OPEN === "1"
+    ? (console.error("[overlay] test seam: suppressed external open:", url.slice(0, 40)), Promise.resolve())
+    : shell.openExternal(url),
+  writeClipboard: (text) => clipboard.writeText(text),
+});
+const agentOnboardingRefreshing = new Set();
+// SETUP (2026-10-07): which AIs on this computer and in the browser have Relay.
+// Persisted per account: only the inbox nudges the person waved away.
+const setupConnections = overlayPrefs.setupConnections && typeof overlayPrefs.setupConnections === "object"
+  ? { ...overlayPrefs.setupConnections }
+  : {};
+const agentConnections = createAgentConnections({
+  inspect: inspectAgentHostsNow,
+  client: () => relayClient(),
+  runConnect: connectAgentHostNow,
+  restartApp: restartAgentApp,
+  store: setupConnections,
+  persist: () => writeOverlayPrefs(),
+});
 const networkOnboardingPresented = { ...overlayPrefs.networkOnboardingPresented };
 function networkOnboardingIdentity() {
   const current = account();
@@ -441,8 +471,10 @@ function writeOverlayPrefs() {
       pillHidden,
       soundsMuted,
       onboardingVersions,
+      onboardingAgents,
       networkOnboardingCompleted,
       networkOnboardingPresented,
+      setupConnections,
       presentedRelayIds: [...presentedRelayIds],
       activeAttentionIds: [...activeAttentionIds],
     });
@@ -2090,13 +2122,30 @@ function onboardingProtocolState() {
 // The first-send chapter has two shapes. An invited person hellos their
 // inviter; a person set up from sendrelays.com has nobody on Relay yet, so
 // their first Relay is a share link for someone who is not on it.
-function firstRelayKindFor(protocolState) {
+function firstRelayKindFor(protocolState, serverAnswer = null) {
+  // The server knows the invitation or organisation this account joined
+  // through, whichever computer or AI set it up; local context only fills in
+  // when an older server cannot say.
+  if (serverAnswer?.kind === "hello" || serverAnswer?.kind === "org") return "hello";
+  if (serverAnswer?.kind === "link") return "link";
   return String(protocolState?.org?.groupId || protocolState?.inviter?.relayUserId || "").trim() ? "hello" : "link";
 }
 // The tutorial's second half: the person's first link and the message to send
 // with it. Sent items carry shareText from the server; an older server's item
 // gets the same text composed here from the shared source, so the pill never
 // shows a bare url.
+function agentOnboardingSnapshot(currentAccount = account()) {
+  const key = onboardingAccountKey(currentAccount);
+  if (!key) return null;
+  // Ask the server once per account where the first Relay can go; the answer
+  // repaints the handoff's wording when it lands.
+  if (!agentOnboarding.serverAnswer(key) && !agentOnboardingRefreshing.has(key)) {
+    agentOnboardingRefreshing.add(key);
+    void agentOnboarding.refreshServer(key).then((answer) => { if (answer) pushInbox(true); })
+      .finally(() => setTimeout(() => agentOnboardingRefreshing.delete(key), 60_000));
+  }
+  return agentOnboarding.snapshot(key);
+}
 function firstLinkForOnboarding() {
   const link = firstMintedLink({ items: sentCache });
   if (!link) return null;
@@ -2574,7 +2623,11 @@ function buildPayload() {
       firstLink: firstLinkForOnboarding(),
       // "hello" when an inviter is waiting for the first Relay, "link" when
       // the person has nobody on Relay yet and starts with a share link.
-      firstRelayKind: firstRelayKindFor(desktopOnboardingBridge?.state()?.context || protocolState),
+      firstRelayKind: firstRelayKindFor(desktopOnboardingBridge?.state()?.context || protocolState, agentOnboarding.serverAnswer(onboardingAccountKey(currentAccount))),
+      // Which AI the person chose, where, and whether it has connected.
+      onboardingAgent: currentAccount.paired ? agentOnboardingSnapshot(currentAccount) : null,
+      // One app on this computer worth a quiet word in the inbox, if any.
+      setupNudge: currentAccount.paired ? setupNudgeFor(onboardingAccountKey(currentAccount)) : null,
       // The thin installer opened this signed-out pill moments ago for a person
       // who signs in here: the renderer may start that sign-in without a click.
       agentInstalled: !installedFirstOnboarding && Boolean(setupIntent) && setupIntent.application !== true,
@@ -3109,8 +3162,10 @@ async function pushInboxNow(force) {
     outboxRevision: payload.outboxRevision,
     account: [payload.account.paired, payload.account.email],
     onboarding: [payload.ui.onboardingRequired, payload.ui.networkOnboarding, payload.ui.completedOnboardingVersion, payload.ui.firstRelayStatus, payload.ui.firstRelayId, payload.ui.openingPreference,
-      payload.ui.desktopOnboarding, payload.ui.localOnboardingPrompt, payload.ui.firstRelayKind, payload.ui.agentInstalled, payload.ui.applicationSetup, payload.ui.applicationOwned,
+      payload.ui.desktopOnboarding, payload.ui.localOnboardingPrompt, payload.ui.firstRelayKind, payload.ui.onboardingAgent, payload.ui.agentInstalled, payload.ui.applicationSetup, payload.ui.applicationOwned,
       payload.ui.firstLink ? [payload.ui.firstLink.relayId, payload.ui.firstLink.state, payload.ui.firstLink.shareText] : null],
+    // SETUP: the inbox's one quiet word about an app on this computer.
+    setupNudge: payload.ui.setupNudge,
     pendingOpen: payload.pendingOpen
       ? [payload.pendingOpen.relayId, payload.pendingOpen.title, payload.pendingOpen.forHuman, payload.pendingOpen.error]
       : null,
@@ -4914,6 +4969,97 @@ async function openChatApp(chatApp, prompt) {
  * conductor://. Asked at every use, never remembered, so a person without
  * Conductor is never shown an option that goes nowhere.
  */
+// An app installed after Relay is noticed within minutes, not at the next
+// launch: one quiet scan a little after start, then every five minutes. The
+// inbox repaints only when what it would say changes.
+let setupScanTimer = null;
+function scheduleSetupScans() {
+  if (setupScanTimer) return;
+  const scan = async () => {
+    const key = account().paired ? onboardingAccountKey() : "";
+    if (!key) return;
+    const before = JSON.stringify(setupNudgeFor(key));
+    await agentConnections.refresh(key).catch(() => {});
+    if (JSON.stringify(setupNudgeFor(key)) !== before) pushInbox(true);
+  };
+  const every = Number(process.env.RELAY_OVERLAY_TEST_SETUP_SCAN_MS || 5 * 60_000);
+  setTimeout(scan, Math.min(8000, every)).unref?.();
+  setupScanTimer = setInterval(scan, every);
+  setupScanTimer.unref?.();
+}
+// SETUP (2026-10-07): the facts behind the Setup page, read fresh each time.
+async function inspectAgentHostsNow() {
+  const { inspectAgentHostsAsync } = await import(pathToFileURL(path.join(__dirname, "..", "src", "agent-host-status.js")).href);
+  return inspectAgentHostsAsync();
+}
+// The Node that runs Relay's own CLI for a registration: the installed
+// runtime's, else a stable system Node, else this Electron as Node (the
+// registration then still points at the native bridge where there is one).
+function setupNode() {
+  try {
+    const canonical = require("../bootstrap/relay-setup.cjs").activeCanonicalCli();
+    if (canonical?.node) return { command: canonical.node, env: {} };
+  } catch {}
+  for (const candidate of ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"]) {
+    if (fs.existsSync(candidate)) return { command: candidate, env: {} };
+  }
+  return { command: process.execPath, env: { ELECTRON_RUN_AS_NODE: "1" } };
+}
+/** `relay connect-host <app>`: the same registration code setup uses, for one app. */
+function connectAgentHostNow(hostId) {
+  return new Promise((resolve) => {
+    const node = setupNode();
+    const child = spawn(node.command, [RELAY_CLI, "connect-host", hostId], {
+      env: { ...process.env, ...node.env }, stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
+    });
+    let out = "";
+    let err = "";
+    const timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 60_000);
+    child.stdout.on("data", (data) => (out += data));
+    child.stderr.on("data", (data) => (err += data));
+    child.on("error", (error) => { clearTimeout(timer); resolve({ ok: false, reason: "spawn_failed", detail: error.message }); });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      const line = out.trim().split("\n").reverse().find((text) => text.startsWith("{"));
+      try { resolve(JSON.parse(line)); }
+      catch { resolve({ ok: false, reason: `exit_${code}`, detail: err.trim().slice(-400) }); }
+    });
+  });
+}
+const execFilePromise = (file, args, options = {}) => new Promise((resolve, reject) => {
+  execFile(file, args, { timeout: 20_000, ...options }, (error, stdout) => (error ? reject(error) : resolve(String(stdout || ""))));
+});
+/**
+ * Quit and reopen an app so it loads Relay (the Claude app reads its config
+ * only at launch). A normal Quit, so the app may ask about unsaved work; if it
+ * does not close, the person is told to quit it themselves.
+ */
+async function restartAgentApp(host) {
+  const testApps = process.env.RELAY_OVERLAY_TEST_APPS_DIR;
+  if (testApps && !String(host.where || "").startsWith(testApps)) throw new Error("test seam: refusing a real app");
+  if (host.running) {
+    if (testApps) { try { process.kill(host.pid, "SIGTERM"); } catch {} }
+    else {
+      const bundle = (await execFilePromise("/usr/bin/plutil", ["-extract", "CFBundleIdentifier", "raw", "-o", "-", path.join(host.where, "Contents", "Info.plist")])).trim();
+      if (!/^[A-Za-z0-9.-]+$/.test(bundle)) throw new Error("unknown bundle");
+      await execFilePromise("/usr/bin/osascript", ["-e", `tell application id "${bundle}" to quit`]);
+    }
+    const deadline = Date.now() + 20_000;
+    for (;;) {
+      const still = (await inspectAgentHostsNow()).hosts.find((entry) => entry.id === host.id);
+      if (!still?.running) break;
+      if (Date.now() > deadline) throw new Error("the app did not quit");
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
+  if (testApps) {
+    const executable = path.join(host.where, "Contents", "MacOS", path.basename(host.where, ".app"));
+    spawn(executable, [], { detached: true, stdio: "ignore" }).unref();
+  } else {
+    await execFilePromise("/usr/bin/open", [host.where]);
+  }
+}
+
 function conductorCapability() {
   return conductorAvailability({
     platform: process.platform,
@@ -6099,6 +6245,7 @@ function createWindow() {
     outbox.start();
     pillReady = true;
     presentNetworkOnboarding();
+    scheduleSetupScans();
     // Relay is independently useful and searchable even when no host app happens to
     // be open. A normal login launch still respects the persisted dismissed preference.
     maybeShow({ force: true });
@@ -9651,6 +9798,78 @@ ipcMain.handle("relay:installationAuthResume", () => installationAuthorizationIp
   (await installationAuthorizationController()).resume()));
 ipcMain.handle("relay:installationAuthRestart", () => installationAuthorizationIpc(async () =>
   desktopOnboardingBridge ? desktopOnboardingBridge.restart() : (await installationAuthorizationController()).restart()));
+// WHICH AI DO YOU USE (2026-10-07): the person's choice, the one-time setup
+// request for ChatGPT or Claude, and opening their AI with it. Each answer is
+// for the account still on screen.
+function agentOnboardingIpc(operation) {
+  return async (_event, expectedUserId, ...args) => {
+    if (!expectedUserId || account().userId !== expectedUserId) throw new Error("Relay account changed. Try again.");
+    const key = onboardingAccountKey();
+    // Push either way: a failure (the setup request could not be made) is
+    // state the renderer must show, not swallow.
+    try { return await operation(key, ...args); } finally { pushInbox(true); }
+  };
+}
+ipcMain.handle("relay:onboardingChooseAgent", agentOnboardingIpc((key, host, place) => agentOnboarding.choose(key, String(host || ""), String(place || ""))));
+ipcMain.handle("relay:onboardingResetAgent", agentOnboardingIpc((key) => agentOnboarding.reset(key)));
+ipcMain.handle("relay:onboardingPrepareAgent", agentOnboardingIpc((key) => agentOnboarding.prepare(key)));
+ipcMain.handle("relay:onboardingPollAgent", agentOnboardingIpc((key) => agentOnboarding.poll(key)));
+ipcMain.handle("relay:onboardingCopyAgentRequest", agentOnboardingIpc((key) => agentOnboarding.copyPrompt(key)));
+ipcMain.handle("relay:onboardingOpenAgent", agentOnboardingIpc((key) => agentOnboarding.open(key, localOnboardingPrompt())));
+// SETUP (2026-10-07). The Setup page's facts and verbs, each for the account
+// still on screen. Connecting a chat AI reuses the first-run chooser's setup
+// request (agentOnboarding.prepareRun …), so there is one connect flow.
+function setupIpc(operation) {
+  return async (_event, expectedUserId, ...args) => {
+    if (!expectedUserId || account().userId !== expectedUserId) throw new Error("Relay account changed. Try again.");
+    return operation(onboardingAccountKey(), ...args);
+  };
+}
+/** Conductor is a developer preview: offered only to accounts with its row. */
+function setupNudgeFor(key) {
+  return agentConnections.nudge(key, { rider: currentProductFeatures().conductor === true });
+}
+function setupSnapshot(key) {
+  return { ...agentConnections.snapshot(key, { rider: currentProductFeatures().conductor === true }), conductorOffered: currentProductFeatures().conductor === true, run: agentOnboarding.runSnapshot(key), platform: process.platform };
+}
+ipcMain.handle("relay:setupSnapshot", setupIpc(async (key, options) => {
+  const before = JSON.stringify(setupNudgeFor(key));
+  await agentConnections.refresh(key, { force: options?.force === true });
+  if (JSON.stringify(setupNudgeFor(key)) !== before) pushInbox(true);
+  return setupSnapshot(key);
+}));
+ipcMain.handle("relay:setupConnect", setupIpc(async (key, hostId) => {
+  await agentConnections.connect(key, String(hostId || ""));
+  pushInbox(true);
+  return setupSnapshot(key);
+}));
+ipcMain.handle("relay:setupRestart", setupIpc(async (key, hostId) => {
+  await agentConnections.restart(key, String(hostId || ""));
+  pushInbox(true);
+  return setupSnapshot(key);
+}));
+ipcMain.handle("relay:setupDisconnect", setupIpc(async (key, id) => {
+  await agentConnections.disconnect(key, String(id || ""));
+  return setupSnapshot(key);
+}));
+ipcMain.handle("relay:setupDismissNudge", setupIpc(async (key, hostId, state) => {
+  agentConnections.dismissNudge(key, String(hostId || ""), String(state || ""));
+  pushInbox(true);
+  return setupSnapshot(key);
+}));
+ipcMain.handle("relay:setupPrepareRun", setupIpc(async (key, surface, place) => {
+  await agentOnboarding.prepareRun(key, String(surface || ""), String(place || ""));
+  return setupSnapshot(key);
+}));
+ipcMain.handle("relay:setupPollRun", setupIpc(async (key) => {
+  const run = await agentOnboarding.pollRun(key);
+  if (run?.status === "connected") await agentConnections.connectionsChanged(key);
+  return setupSnapshot(key);
+}));
+ipcMain.handle("relay:setupCopyRun", setupIpc(async (key) => agentOnboarding.copyRun(key)));
+ipcMain.handle("relay:setupOpenRun", setupIpc(async (key) => agentOnboarding.openRun(key)));
+ipcMain.handle("relay:setupCancelRun", setupIpc(async (key) => { agentOnboarding.cancelRun(key); return setupSnapshot(key); }));
+
 ipcMain.handle("relay:copySetupPrompt", () => {
   // Only the installed app's own connect prompt exists: agents no longer install Relay.
   const prompt = localOnboardingPrompt();
@@ -10287,8 +10506,20 @@ if (!gotSingleInstanceLock) {
       desktopOnboardingBridge = await startDesktopOnboardingBridge({ directory: process.env.RELAY_CONFIG_DIR || path.join(os.homedir(), ".relay"),
         authorization: await installationAuthorizationController(),
         isPaired: () => account().paired,
-        verifyAccount: async () => { const result = await (await relayClient()).me(); return result.user || result; },
-        onChange: async () => { await pushInbox(true); followAgentOnboardingPlacement(); },
+        verifyAccount: async () => {
+          const result = await (await relayClient()).me();
+          const user = result.user || result;
+          // Already signed in here, so no browser approval carries the
+          // invitation: the server says who the first Relay can go to.
+          const answer = await agentOnboarding.refreshServer(onboardingAccountKey());
+          const onboardingContext = answer?.org ? { org: answer.org } : answer?.inviter ? { inviter: answer.inviter } : null;
+          return onboardingContext ? { ...user, onboardingContext } : user;
+        },
+        onChange: async (run) => {
+          // The local agent ran the installed helper: that is its connection.
+          if (run && !["prompt", "cancelled"].includes(run.stage)) agentOnboarding.markConnected(onboardingAccountKey());
+          await pushInbox(true); followAgentOnboardingPlacement();
+        },
       });
       await drainDesktopIntents();
     }
