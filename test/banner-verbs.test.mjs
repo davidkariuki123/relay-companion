@@ -24,8 +24,8 @@ function between(source, startMarker, endMarker) {
 
 const inbox = read("../overlay/inbox.html");
 const main = read("../overlay/main.cjs");
-const verbs = between(inbox, "function bannerVerbsHtml(row)", "function relayIdentityRowHtml(identity)");
-const row = between(inbox, "function relayIdentityRowHtml(identity)", "// ---------- the reader");
+const verbs = between(inbox, "function bannerVerbsHtml(row)", "function relayIdentityRowHtml(identity, show = null)");
+const row = between(inbox, "function relayIdentityRowHtml(identity, show = null)", "// ---------- the reader");
 const peek = between(inbox, "if (peeking) {\n      // A notification wears the SAME species as the list", "sizePeek();\n      return;\n    }");
 
 test("banner verbs follow Settings › Your agent and keep David's order", () => {
@@ -113,7 +113,7 @@ test("the room's composer sits under the row from the start, and only while peek
 });
 
 test("a reply from the banner goes down the room's path, reads the arrival, and folds the banner", () => {
-  const send = between(inbox, "async function sendBannerReply(rowEl, field, send)", "function relayIdentityRowHtml(identity)");
+  const send = between(inbox, "async function sendBannerReply(rowEl, field, send)", "function relayIdentityRowHtml(identity, show = null)");
   assert.match(send, /res = await window\.relay\.sendReply\(\{\n\s+text, recipient, files, idempotencyKey, agentMentions,\n\s+chat: \{/);
   assert.match(send, /const idempotencyKey = `pill-reply-\$\{crypto\.randomUUID\(\)\}`;/);
   // A refused send keeps the words in the field and says why under it.

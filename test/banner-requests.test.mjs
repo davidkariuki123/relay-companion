@@ -25,8 +25,8 @@ function between(source, startMarker, endMarker) {
 
 const inbox = read("../overlay/inbox.html");
 const peek = between(inbox, "if (peeking) {\n      // A notification wears the SAME species as the list", "sizePeek();\n      return;\n    }");
-const row = between(inbox, "function relayIdentityRowHtml(identity)", "// ---------- the reader");
-const verbs = between(inbox, "function bannerVerbsHtml(row)", "function relayIdentityRowHtml(identity)");
+const row = between(inbox, "function relayIdentityRowHtml(identity, show = null)", "// ---------- the reader");
+const verbs = between(inbox, "function bannerVerbsHtml(row)", "function relayIdentityRowHtml(identity, show = null)");
 
 test("a Request arrives in the banner like any relay, newest first, wearing its chip", () => {
   assert.match(peek, /const requests = requestRooms\(\)/);

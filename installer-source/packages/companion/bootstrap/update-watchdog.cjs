@@ -26,6 +26,14 @@ if (require.main === module) {
   const [entry, mode, payload] = process.argv.slice(2);
   if (!entry || mode !== "--worker" || !payload) throw Error("Missing update worker arguments");
   const { stdio, logPath } = updateLogStdio();
+  // A job can outlive the release tree that named this entry. Say so once and
+  // exit cleanly instead of crashing on every relaunch.
+  if (!fs.existsSync(entry)) {
+    const line = `[relay-update] worker entry missing: ${entry}`;
+    console.error(line);
+    if (logPath) { try { fs.appendFileSync(logPath, `${line}\n`); } catch {} }
+    process.exit(0);
+  }
   execute(process.execPath, entry, [mode, payload], { stdio }).catch(error => {
     const line = `[relay-update] ${error.message}`;
     console.error(line);

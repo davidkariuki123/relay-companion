@@ -8,7 +8,7 @@ import release from "../bootstrap/application-release.cjs";
 import native from "../bootstrap/application-package.cjs";
 import bridge from "../bootstrap/application-handoff.cjs";
 import updates from "../bootstrap/application-update.cjs";
-import { startApplicationMaintenance, submitApplicationWorker } from "../src/application-maintenance.js";
+import { applicationWorkerDirectory, reconcileApplicationWorker, startApplicationMaintenance, submitApplicationWorker } from "../src/application-maintenance.js";
 import notices from "../overlay/application-update-notice.cjs";
 
 function fixture(t) {
@@ -227,13 +227,103 @@ test("native workers use independent supervisors and a deadline outside daemon s
   const f = fixture(t);
   for (const platform of ["darwin", "linux", "win32"]) {
     const calls = [];
-    assert.equal(await submitApplicationWorker({ ...f, platform, env: { NODE_OPTIONS: "unsafe" },
+    const written = {};
+    assert.deepEqual(await submitApplicationWorker({ ...f, platform, env: { NODE_OPTIONS: "unsafe" }, writeFile: (file, text) => { written[file] = text; },
       run: (file, args, options) => { assert.equal(options.env.NODE_OPTIONS, undefined); if (args[0] === "-p") return { status: 0, stdout: "22.14.0" }; calls.push([file, ...args]); return { status: args[0] === "list" ? 1 : 0 }; },
-      launchHidden: (parts, options) => { assert.equal(options.env.NODE_OPTIONS, undefined); calls.push(parts); return { ok: true }; } }), true);
-    assert.match(calls.at(-1).join(" "), /update-watchdog\.cjs.*application-update\.cjs/);
+      launchHidden: (parts, options) => { assert.equal(options.env.NODE_OPTIONS, undefined); calls.push(parts); return { ok: true }; } }), { ok: true });
     if (platform === "linux") assert.equal(calls[0][0], "systemd-run");
-    if (platform === "darwin") assert.ok(calls.at(-1).includes("submit"));
+    if (platform === "darwin") {
+      // A run-once plist, never `launchctl submit`: submitted jobs are KeepAlive.
+      assert.equal(calls.some(call => call.includes("submit")), false);
+      assert.deepEqual(calls.at(-1).slice(1, 3), ["bootstrap", `gui/${process.getuid()}`]);
+      const plist = written[calls.at(-1)[3]];
+      assert.match(plist, /<key>KeepAlive<\/key><false\/>/);
+      assert.match(plist, /work\.relay\.application\.update/);
+      assert.match(plist, /update-watchdog\.cjs[\s\S]*application-update\.cjs/);
+    } else assert.match(calls.at(-1).join(" "), /update-watchdog\.cjs.*application-update\.cjs/);
   }
+});
+
+function releaseTree(homeDir, releaseId) {
+  const packageRoot = path.join(homeDir, ".relay", "runtime", "releases", releaseId, "node_modules", "relay-companion");
+  fs.mkdirSync(path.join(packageRoot, "bootstrap"), { recursive: true });
+  for (const name of ["update-watchdog.cjs", "application-update.cjs"]) fs.writeFileSync(path.join(packageRoot, "bootstrap", name), "");
+  return packageRoot;
+}
+
+test("the application worker comes from the committed release, never a pruned one", t => {
+  const f = fixture(t), current = releaseTree(f.homeDir, "0.1.588-current"), running = releaseTree(f.homeDir, "0.1.586-running");
+  const pointer = { schema: 1, active: true, state: "active", version: "0.1.588", packageRoot: current };
+  bridge.write(f.pointer, pointer);
+  assert.equal(applicationWorkerDirectory({ homeDir: f.homeDir, fallback: path.join(running, "bootstrap") }), path.join(current, "bootstrap"));
+  fs.rmSync(path.dirname(path.dirname(current)), { recursive: true });
+  assert.equal(applicationWorkerDirectory({ homeDir: f.homeDir, fallback: path.join(running, "bootstrap") }), path.join(running, "bootstrap"));
+  assert.equal(applicationWorkerDirectory({ homeDir: f.homeDir, fallback: path.join(f.homeDir, "pruned", "bootstrap") }), null);
+});
+
+test("a missing worker is never handed to launchd", async t => {
+  const f = fixture(t);
+  const result = await submitApplicationWorker({ ...f, platform: "darwin", fallbackDirectory: path.join(f.homeDir, "pruned", "bootstrap"),
+    run: () => assert.fail("must not launch a pruned worker") });
+  assert.deepEqual(result, { ok: false, reason: "worker-missing" });
+});
+
+function legacyJob(pruned, { pid = null, keepAlive = true } = {}) {
+  return [
+    "{",
+    `\t"Label" = "work.relay.application.update";`,
+    `\t"OnDemand" = ${keepAlive ? "false" : "true"};`,
+    `\t"LastExitStatus" = 256;`,
+    ...(pid ? [`\t"PID" = ${pid};`] : []),
+    `\t"ProgramArguments" = (`,
+    `\t\t"/node";`,
+    `\t\t"${pruned}/bootstrap/update-watchdog.cjs";`,
+    `\t\t"${pruned}/bootstrap/application-update.cjs";`,
+    `\t\t"--worker";`,
+    `\t\t"application";`,
+    "\t);",
+    "};",
+  ].join("\n");
+}
+
+test("a stale KeepAlive worker job naming a pruned release is removed once, and only while idle", async t => {
+  const f = fixture(t), pruned = path.join(f.homeDir, ".relay", "runtime", "releases", "0.1.581-pruned", "node_modules", "relay-companion");
+  let loaded = true; const calls = [];
+  const run = (file, args) => {
+    calls.push(args[0]);
+    if (args[0] === "list") return loaded ? { status: 0, stdout: legacyJob(pruned) } : { status: 113, stdout: "" };
+    if (args[0] === "remove") { loaded = false; return { status: 0 }; }
+    return assert.fail(`unexpected ${args.join(" ")}`);
+  };
+  const result = await reconcileApplicationWorker({ platform: "darwin", env: {}, run, wait: async () => {} });
+  assert.equal(result.removed, true);
+  assert.equal(result.reason, "keep-alive");
+  assert.deepEqual(calls, ["list", "remove", "list"]);
+  assert.deepEqual(await reconcileApplicationWorker({ platform: "darwin", env: {}, run, wait: async () => {} }), { removed: false });
+
+  // A run-once job whose release was pruned is also stale; a running job is left alone.
+  const idle = { status: 0, stdout: legacyJob(pruned, { keepAlive: false }) }, live = { status: 0, stdout: legacyJob(pruned, { pid: 4242 }) };
+  let removals = 0;
+  const once = await reconcileApplicationWorker({ platform: "darwin", env: {}, wait: async () => {},
+    run: (file, args) => args[0] === "remove" ? (removals++, { status: 0 }) : removals ? { status: 113 } : idle });
+  assert.deepEqual([once.removed, once.reason, once.missing], [true, "worker-missing", path.join(pruned, "bootstrap", "update-watchdog.cjs")]);
+  assert.deepEqual(await reconcileApplicationWorker({ platform: "darwin", env: {}, run: (file, args) => args[0] === "remove" ? assert.fail("running") : live }), { removed: false });
+});
+
+test("maintenance reconciles at boot, then backs off a failing launch with one log line", async t => {
+  const f = fixture(t), lines = [], ticks = [];
+  bridge.write(path.join(f.homeDir, ".relay", "recovery", "policy.json"), { autoUpdate: true });
+  let clock = 1_000_000, submits = 0, reconciles = 0;
+  startApplicationMaintenance({ enabled: true, homeDir: f.homeDir, env: {}, now: () => clock, log: line => lines.push(line),
+    setIntervalImpl: tick => { ticks.push(tick); return {}; },
+    reconcile: async () => { reconciles++; return { removed: true, reason: "keep-alive" }; },
+    submit: async () => { submits++; return { ok: false, reason: "worker-missing" }; } });
+  for (let minute = 0; minute < 30; minute++) { await ticks[0](); clock += 60_000; }
+  assert.equal(reconciles, 1);
+  // 1, 2, 4, 8, 16 minutes apart: five attempts in half an hour instead of thirty.
+  assert.equal(submits, 5);
+  assert.deepEqual(lines, ["removed stale application update job (keep-alive)",
+    "application update worker not started (worker-missing); retrying with backoff"]);
 });
 
 test("Windows recovery proof follows the task's exact hidden launcher wrapper", t => {

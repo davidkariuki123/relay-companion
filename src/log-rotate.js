@@ -40,6 +40,8 @@ export const DEFAULT_KEEP_BYTES = 1 * 1024 * 1024;
 // The always-on logs, all under ~/.relay. update.log is included because the
 // same stuck-update loop that bloats daemon.log also appends to it every lap —
 // and so is update.native.log, which that loop feeds on Windows for the same reason.
+// application-update.log reached 3.3 MB on a Mac whose worker job launchd
+// relaunched every ten seconds (2026-10-07).
 export function defaultLogPaths(homeDir = os.homedir()) {
   const dir = path.join(homeDir, ".relay");
   return [
@@ -47,6 +49,7 @@ export function defaultLogPaths(homeDir = os.homedir()) {
     path.join(dir, "pill.log"),
     path.join(dir, "update.log"),
     path.join(dir, "update.native.log"),
+    path.join(dir, "application-update.log"),
     path.join(dir, "perf.log"),
     path.join(dir, "logs", "broker.log"),
   ];

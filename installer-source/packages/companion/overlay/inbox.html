@@ -230,37 +230,59 @@
   @keyframes countRoll { from { transform:translateY(-6px); opacity:.3; } to { transform:none; opacity:1; } }
 
   .chat-search-trigger { flex:none; width:28px; height:28px; }
-  .chat-finder {
-    position:fixed; margin:0; padding:14px; box-sizing:border-box;
-    width:calc(100% - 32px); max-width:440px; overflow:hidden;
-    border:1px solid var(--edge); border-radius:var(--r-3);
-    background:var(--bg); color:var(--ink); box-shadow:var(--shadow-pop);
-    font-family:var(--sans);
-  }
-  .chat-finder [hidden] { display:none; }
-  .chat-finder:popover-open { display:flex; flex-direction:column; }
-  .chat-finder-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
-  .chat-finder-head h2 { margin:0; font-size:var(--fs-title); font-weight:600; }
-  .chat-finder-field { display:flex; align-items:center; gap:8px; padding:6px 10px; border:1px solid var(--edge); border-radius:var(--r-2); background:var(--wash); }
-  .chat-finder-field:focus-within { border-color:var(--edge-accent); box-shadow:var(--focus-ring); }
-  .chat-finder-field input { min-width:0; width:100%; border:0; background:transparent; color:var(--ink); font:13px var(--sans); padding:4px 0; }
-  .chat-finder-field input:focus { outline:none; }
-  .chat-finder-field input::-webkit-search-cancel-button { -webkit-appearance:none; }
-  .chat-finder-field input::placeholder { color:var(--muted); }
-  .chat-finder-status { margin:10px 0 2px; color:var(--muted); font-size:var(--fs-note); }
-  /* Search owns the one visible scroll lane while it is open. Explicitly clip
-     the other axis: overflow-y:auto otherwise computes overflow-x to auto and
-     the full-width conversation rows grow a native horizontal scrollbar. */
-  .chat-finder-results { overflow-y:auto; overflow-x:hidden; min-height:0; overscroll-behavior:contain; }
-  .chat-finder-results::-webkit-scrollbar { width:10px; height:0; }
-  .chat-finder-results::-webkit-scrollbar-thumb { background:var(--edge); border-radius:var(--r-pill); border:3px solid var(--bg); background-clip:padding-box; }
-  .chat-finder-results::-webkit-scrollbar-thumb:hover { background:var(--edge); background-clip:padding-box; }
-  .chat-finder-results::-webkit-scrollbar-corner { background:transparent; }
-  body:has(.chat-finder:popover-open) .scroll { overflow-y:hidden; }
-  .chat-finder-result { display:block; width:100%; text-align:left; padding:0; border:0; background:transparent; color:inherit; cursor:pointer; }
-  .chat-finder-result:hover, .chat-finder-result:focus-visible { background:var(--wash-2); }
-  .chat-finder-result .relay-row { padding-left:0; padding-right:0; }
-  .chat-finder-empty { color:var(--muted); font-size:var(--fs-body); padding:18px 0; }
+  /* SEARCH IS THE LIST (2026-10-07). The tab row becomes the field and the
+     inbox below becomes the results, in place: no card over the list, no
+     second copy of it. An empty field leaves every chat where it was. */
+  .chat-search, .chat-search-cancel { display:none; }
+  /* The field shares the rows' 16px edge, and Cancel ends where the times do. */
+  .card.searching .tabs { min-height:44px; gap:10px; padding-left:16px; padding-right:16px; }
+  .card.searching .tabs > :not(.chat-search):not(.chat-search-cancel) { display:none; }
+  .card.searching .chat-search { display:flex; }
+  .card.searching .chat-search-cancel { display:inline-flex; }
+  .card.searching .relays-layout, .card.searching .relays-filter,
+  .card.searching #relaysIntro, .card.searching #serviceStoppedNote,
+  .card.searching #relaysList, .card.searching #relaysEmpty { display:none !important; }
+  .chat-search { flex:1 1 auto; min-width:0; align-items:center; gap:7px; height:32px; padding:0 4px 0 10px; box-sizing:border-box;
+    border-radius:var(--r-2); background:var(--wash-2); color:var(--muted-2);
+    transition:background-color var(--t-fast) var(--settle), box-shadow var(--t-fast) var(--settle); }
+  .chat-search:focus-within { background:color-mix(in srgb, var(--ink) 9%, transparent); }
+  .chat-search svg { flex:none; }
+  .chat-search input { flex:1 1 auto; min-width:0; height:100%; margin:0; padding:0; border:0; outline:none; box-shadow:none;
+    background:transparent; color:var(--ink); font:13px/1 var(--sans); caret-color:var(--accent); }
+  .chat-search input:focus-visible { outline:none; box-shadow:none; }
+  .chat-search input::placeholder { color:var(--muted-2); }
+  .chat-search-clear { flex:none; display:grid; place-items:center; width:22px; height:22px; padding:0; border:0; border-radius:50%;
+    background:transparent; color:var(--muted-2); cursor:pointer; }
+  .chat-search-clear span { display:grid; place-items:center; width:15px; height:15px; border-radius:50%; background:var(--muted-3); color:var(--bg); }
+  .chat-search-clear:hover span { background:var(--muted-2); }
+  .chat-search-clear[hidden] { display:none; }
+  .chat-search-cancel { flex:none; align-items:center; height:32px; padding:0 2px; border:0; background:transparent; cursor:pointer;
+    color:var(--accent); font:500 12.5px/1 var(--sans); }
+  .chat-search-cancel:hover { color:var(--ink); }
+  .chat-search-results { display:none; }
+  .card.searching .chat-search-results { display:block; }
+  .chat-search-results .cs-label { padding:14px 16px 2px; color:var(--muted-2); font:600 10.5px/1.4 var(--sans); letter-spacing:.04em; text-transform:uppercase; }
+  .chat-search-results .cs-label:first-child { padding-top:6px; }
+  /* One lit row, shared by pointer and keys: the list's own hover would light a second. */
+  .chat-search-results .relay-row:hover { background:transparent; }
+  .chat-search-results .relay-row.is-active { background:var(--wash-2); }
+  .chat-search-results .relay-row[aria-busy="true"] { cursor:progress; }
+  .chat-search-results .relay-row .rk-body { border-bottom-color:var(--hair); }
+  .chat-search-results .cs-group .relay-row:last-child .rk-body { border-bottom:0; }
+  .chat-search-results .cs-people { display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;
+    color:var(--muted); font-family:var(--sans); font-size:12.5px; line-height:1.55; }
+  .chat-search-results .cs-address { font-family:var(--sans); font-size:12.5px; color:var(--muted-2); }
+  .chat-search-results mark.hit { background:color-mix(in srgb, var(--accent) 24%, transparent); color:var(--ink); border-radius:3px;
+    padding:0 1px; margin:0 -1px; box-decoration-break:clone; -webkit-box-decoration-break:clone; }
+  .chat-search-empty { padding:44px 28px; text-align:center; }
+  .chat-search-empty .t1 { font-family:var(--serif); font-size:15px; color:var(--ink-2); overflow-wrap:anywhere; }
+  .chat-search-empty .t2 { margin-top:6px; font-size:12.5px; color:var(--muted-2); }
+  /* The words searched for, lit inside the message the room opened at, then
+     let go: the reader's eye lands on them, and they do not stay as clutter. */
+  ::highlight(relay-search-hit) { background-color:color-mix(in srgb, var(--accent) 34%, transparent); color:var(--ink); }
+  ::highlight(relay-search-hit-1) { background-color:color-mix(in srgb, var(--accent) 22%, transparent); }
+  ::highlight(relay-search-hit-2) { background-color:color-mix(in srgb, var(--accent) 11%, transparent); }
+  .cs-live { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
 
   /* tab control — individual rounded-rect buttons (the loved control) */
   .tabs {
@@ -1298,6 +1320,10 @@
   .th-sp-go { flex:none; color:var(--accent); font-weight:600; }
   .th-sp.th-sp-ok { cursor:default; border-color:color-mix(in srgb, var(--ok) 38%, var(--hair)); background:color-mix(in srgb, var(--ok) 8%, var(--wash)); }
   .th-sp-ok .th-sp-text { white-space:normal; }
+  .th-sp.th-sp-away { cursor:default; }
+  .th-sp-away .th-sp-text { white-space:normal; line-height:1.4; }
+  .th-sp-away .th-sp-go { appearance:none; border:0; background:transparent; padding:4px 0 4px 4px; font:inherit; font-weight:600; color:var(--accent); cursor:pointer; white-space:nowrap; }
+  .th-sp-away .th-sp-go:hover { color:var(--ink); }
   @keyframes th-sp-in { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
   /* Under your own message that stayed in Relay. */
   .th-unsynced { display:flex; align-items:center; justify-content:flex-end; gap:6px; margin:3px 16px 6px auto; padding:0 2px;
@@ -3490,6 +3516,17 @@
   .su-key-send { padding:4px 6px; background:#d97757; color:#fff; }
   :root[data-theme="dark"] .su-key-send { background:#d97757; color:#fff; }
   .su-key-send svg { width:13px; height:13px; fill:none; stroke:currentColor; stroke-width:2.2; stroke-linecap:round; stroke-linejoin:round; }
+  /* Claude's own settings row, drawn: the label, and the dropdown set to Always allow. */
+  .su-claude-row { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:14px; padding:12px 12px 12px 10px;
+    border-radius:12px; background:#1f1e1d; color:#faf9f5; font:500 13px/1.2 var(--sans); pointer-events:none; user-select:none;
+    box-shadow:0 6px 18px -12px rgba(0,0,0,.5); }
+  :root[data-theme="dark"] .su-claude-row { box-shadow:inset 0 0 0 1px var(--edge); }
+  .su-claude-row span { display:inline-flex; align-items:center; gap:6px; }
+  .su-claude-row b { display:inline-flex; align-items:center; gap:6px; padding:6px 9px; border-radius:8px; background:#3a3936; color:#faf9f5;
+    font:600 12px/1 var(--sans); box-shadow:0 0 0 2px #d97757; }
+  .su-claude-row svg { width:13px; height:13px; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
+  .su-claude-row span svg { width:11px; height:11px; opacity:.7; }
+  .su-allow-why { margin:10px 0 0; color:var(--muted); font:12.5px/1.45 var(--sans); }
   /* The first message itself, as a card: what gets copied, and then that it was. */
   .su-first-message { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; margin-top:14px; padding:12px 14px;
     border-radius:12px; background:var(--bg); box-shadow:inset 0 0 0 1px var(--edge); color:var(--ink); font:500 13px/1.45 var(--sans); }
@@ -4026,9 +4063,16 @@
       </button>
       <button class="tab" type="button" data-view="topics">Topics <span class="tab-badge amber gone" id="topicsBadge">0</span></button>
       <button class="tab" type="button" data-view="contacts">Contacts <span class="tab-badge gone" id="peopleBadge">0</span></button>
-      <button class="winbtn chat-search-trigger" id="chatSearchTrigger" type="button" aria-label="Find a chat" aria-haspopup="dialog" aria-expanded="false" aria-controls="chatFinder" title="Find a chat">
+      <button class="winbtn chat-search-trigger" id="chatSearchTrigger" type="button" aria-label="Search" aria-keyshortcuts="Meta+F" title="Search  ⌘F">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg>
       </button>
+      <div class="chat-search" id="chatSearch" role="search">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg>
+        <input id="chatSearchInput" type="text" placeholder="Search chats and messages" aria-label="Search chats and messages" autocomplete="off" spellcheck="false"
+          role="combobox" aria-expanded="false" aria-controls="chatSearchResults" aria-autocomplete="list" />
+        <button class="chat-search-clear" id="chatSearchClear" type="button" aria-label="Clear search" hidden><span><svg width="7" height="7" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M2 2l6 6M8 2L2 8"/></svg></span></button>
+      </div>
+      <button class="chat-search-cancel" id="chatSearchCancel" type="button">Cancel</button>
       <button class="tab tab-you" type="button" data-view="settings" aria-label="You"><span class="tab-avatar word" id="youTabAvatar" aria-hidden="true">You</span></button>
       <button class="mark-all-read gone" id="markAllRead" type="button">Mark all as read</button>
     </nav>
@@ -4053,6 +4097,8 @@
              failed: a repair that works is silent, and a Repair button would
              ask the person to do the pill's job. -->
         <div class="service-note gone" id="serviceStoppedNote" role="status">Relay’s background service stopped and could not be restarted. Open conversations still load, but new messages won’t notify you until you restart this computer.</div>
+        <div class="chat-search-results" id="chatSearchResults" role="listbox" aria-label="Search results"></div>
+        <div class="cs-live" id="chatSearchLive" role="status" aria-live="polite"></div>
         <div id="relaysList"></div>
         <div id="relaysEmpty" class="empty gone">
           <svg class="mark" width="22" height="22" viewBox="0 0 16 16" aria-hidden="true">
@@ -4265,18 +4311,13 @@
      purpose, because the reader's header is rebuilt on every poll and a menu
      inside it would close mid-choice. Filled by sentLinkMenuHtml. -->
 <div class="th-message-menu sent-link-menu" id="sentLinkMenu" popover="auto" role="group" aria-label="Relay options" data-stop="1"></div>
-<section class="chat-finder" id="chatFinder" popover="auto" role="dialog" aria-labelledby="chatFinderTitle">
-  <div class="chat-finder-head"><h2 id="chatFinderTitle">Find a chat</h2><button class="winbtn" id="chatFinderClose" type="button" aria-label="Close chat search">✕</button></div>
-  <div class="chat-finder-field"><input id="chatFinderInput" type="search" placeholder="Search chats" aria-label="Search chats" autocomplete="off" /><button class="winbtn" id="chatFinderClear" type="button" aria-label="Clear search" hidden>✕</button></div>
-  <div class="chat-finder-status" id="chatFinderStatus" role="status"></div>
-  <div class="chat-finder-results" id="chatFinderResults"></div>
-</section>
 <script src="./google-contacts-ui.cjs"></script>
 <script src="./hover-intent.js"></script>
 <script src="./read-receipts.cjs"></script>
 <script src="./chat-typing.cjs"></script>
 <script src="./chat-presentation.js"></script>
 <script src="./chat-rows.js"></script>
+<script src="./chat-search.cjs"></script>
 <script src="./relay-anyone-tip.cjs"></script>
 <script src="./reader-status-motion.cjs"></script>
 <script src="./link-tooltip.js"></script>
@@ -8055,89 +8096,446 @@
       });
     }
   }
-  // Search the complete identity projection, before the list's render window.
+  // ---- Search ----------------------------------------------------------------
+  // SEARCH IS THE LIST (2026-10-07). The magnifier, ⌘F, or simply typing on the
+  // inbox turns the tab row into the field, and the inbox below becomes the
+  // results, live, with what matched lit. Empty, it is the inbox itself, every
+  // chat where it was. Three answers, in the order people look for them: the
+  // chat (by its name or anyone in it), the message (opened at that message),
+  // and a contact with no chat yet (opened ready to write). Enter takes the lit
+  // row, and Back from a room opened here returns to the same results.
   const chatSearchTrigger = document.getElementById("chatSearchTrigger");
-  const chatFinder = document.getElementById("chatFinder");
-  const chatFinderInput = document.getElementById("chatFinderInput");
-  const chatFinderResults = document.getElementById("chatFinderResults");
-  const chatFinderStatus = document.getElementById("chatFinderStatus");
-  const chatFinderClear = document.getElementById("chatFinderClear");
-  let chatFinderAccount = null;
-  function closeChatFinder(restoreFocus = false) {
-    if (chatFinder.matches(":popover-open")) chatFinder.hidePopover();
-    chatSearchTrigger.setAttribute("aria-expanded", "false");
-    chatFinderInput.value = "";
-    chatFinderResults.replaceChildren();
-    chatFinderAccount = null;
-    if (restoreFocus) chatSearchTrigger.focus();
+  const chatSearchInput = document.getElementById("chatSearchInput");
+  const chatSearchClear = document.getElementById("chatSearchClear");
+  const chatSearchResultsEl = document.getElementById("chatSearchResults");
+  const chatSearchLiveEl = document.getElementById("chatSearchLive");
+  const chatSearch = { open:false, account:null, active:"", html:null, said:"", listScrollTop:0, shown:false };
+  const SEARCH_MESSAGE_LIMIT = 40;
+  const SEARCH_PEOPLE_LIMIT = 6;
+  function chatSearchShowing() {
+    return chatSearch.open && activeView === "relays" && !collapsed && !peeking;
   }
-  function positionChatFinder() {
-    if (!chatFinder.matches(":popover-open")) return;
-    const card = cardEl.getBoundingClientRect();
-    const trigger = chatSearchTrigger.getBoundingClientRect();
-    const top = trigger.bottom + 8;
-    chatFinder.style.width = `${Math.max(0, card.width - 24)}px`;
-    chatFinder.style.left = `${card.left + 12}px`;
-    chatFinder.style.top = `${top}px`;
-    chatFinder.style.maxHeight = `${Math.max(0, card.bottom - top - 12)}px`;
+  // A search lives as long as the person is in it, including a room opened
+  // from it. Another tab, another account or folding the pill ends it.
+  function chatSearchBelongsHere() {
+    if (collapsed || chatSearch.account !== signupAccountKey()) return false;
+    if (activeView === "relays") return true;
+    if (activeView === "threads") return threadsReturnSource === "relays";
+    if (activeView === "reader") return (readerSource || "relays") === "relays";
+    return false;
   }
-  function renderChatFinder() {
-    if (!chatFinder.matches(":popover-open")) return;
-    if (chatFinderAccount !== signupAccountKey() || activeView !== "relays" || collapsed || peeking) {
-      closeChatFinder(); return;
+  // The people in a room, as search shows them: never the person searching.
+  // Everyone in it: the saved roster, the room's people, and whoever wrote.
+  function searchPeople(room) {
+    const me = normalizedPartyName(payload.account?.name);
+    const group = room.groupId ? groupsList.find((item) => String(item.id) === String(room.groupId)) : null;
+    const names = [
+      ...(group ? groupInfoRoster(group).map((person) => String(person.name || person.email || "").trim()) : []),
+      ...(room.people || []),
+      ...(room.msgs || []).filter((message) => message.direction === "in" && !message.ownedAgent).map((message) => message.party),
+    ];
+    const seen = new Set();
+    return names.filter((name) => {
+      const key = normalizedPartyName(name);
+      if (!key || key === me || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+  function searchableText(value) { return String(value || "").replace(/\s+/g, " ").trim(); }
+  function chatSearchModel(query) {
+    const terms = RelayChatSearch.terms(query);
+    const rooms = relayIdentityRows();
+    if (!terms.length) return { terms, chats:rooms.map((room) => ({ room, match:null })), messages:[] };
+    const chats = [];
+    rooms.forEach((room, order) => {
+      const match = RelayChatSearch.matchRoom(room.name, room.isGroup ? searchPeople(room) : [], terms);
+      if (match) { chats.push({ room, match, order }); return; }
+      // A person's address finds their chat as surely as their name does.
+      const address = room.isGroup ? "" : roomAddress(room);
+      const addressRanges = address ? RelayChatSearch.matchText(address, terms) : null;
+      if (addressRanges) chats.push({ room, match:{ score:1, nameRanges:[], members:[], address, addressRanges }, order });
+    });
+    // One letter names a person; it is not yet a word worth finding in messages.
+    const messages = [];
+    if (terms.join(" ").length >= 2) {
+      for (const room of rooms) {
+        for (const message of room.msgs || []) {
+          if (message.deletedAt) continue;
+          const title = searchableText(message.title);
+          const body = searchableText(mentionPreviewText(message.body, room.groupId));
+          const text = title && body && title !== body ? `${title} — ${body}` : title || body;
+          const ranges = text ? RelayChatSearch.matchText(text, terms) : null;
+          if (ranges) messages.push({ room, message, text, ranges });
+        }
+      }
+      messages.sort((a, b) => new Date(b.message.at || 0) - new Date(a.message.at || 0));
     }
-    const query = chatFinderInput.value.trim().toLocaleLowerCase();
-    const rows = relayIdentityRows().filter((room) => String(room.name || "").toLocaleLowerCase().includes(query));
-    chatFinderClear.hidden = !chatFinderInput.value;
-    chatFinderStatus.textContent = query ? `${rows.length} ${rows.length === 1 ? "chat" : "chats"}` : "Recent chats";
-    const html = rows.map((room) => `<button type="button" class="chat-finder-result">${relayIdentityRowHtml(room)}</button>`).join("")
-      || `<div class="chat-finder-empty">${query ? "No chats found. Try another name." : "No chats yet."}</div>`;
-    // Inbox pushes must preserve the query and focused result when unchanged.
-    if (chatFinderResults.innerHTML !== html) {
-      chatFinderResults.innerHTML = html;
-      for (const button of chatFinderResults.querySelectorAll(".chat-finder-result")) {
-        button.addEventListener("click", () => {
-          const row = button.querySelector(".relay-arrival");
-          closeChatFinder();
-          startRoomViewTransition(() => {
-            openThreadDetail(row.getAttribute("data-thread"), row.getAttribute("data-party") || "", "relays");
-          }, { motion:"forward" });
-        });
+    // A contact already in a chat is found as that chat.
+    const inChats = new Set(rooms.filter((room) => !room.isGroup)
+      .flatMap((room) => [String(room.partyKey || "").toLowerCase(), `name:${normalizedPartyName(room.name)}`]));
+    const self = String(payload.account?.email || "").toLowerCase();
+    const people = [];
+    for (const contact of contactsList || []) {
+      const emails = contactEmails(contact).map((email) => String(email).toLowerCase());
+      if (emails.includes(self) || emails.some((email) => inChats.has(`email:${email}`)) || inChats.has(`name:${normalizedPartyName(contact.name)}`)) continue;
+      const nameRanges = contact.name ? RelayChatSearch.matchText(contact.name, terms) : null;
+      const address = contactEmails(contact)[0] || "";
+      const addressRanges = !nameRanges && address ? RelayChatSearch.matchText(address, terms) : null;
+      if (!nameRanges && !addressRanges) continue;
+      const whole = terms.join(" ");
+      const score = RelayChatSearch.fold(contact.name || address).folded.startsWith(whole) ? 0 : 1;
+      chats.push({ person:{ contact, address, nameRanges:nameRanges || [], addressRanges:addressRanges || [] }, match:{ score }, order:rooms.length + people.length });
+      people.push(contact);
+      if (people.length >= SEARCH_PEOPLE_LIMIT) break;
+    }
+    // An address nobody here has yet is somewhere to talk too: Relay writes to
+    // anyone by address, so typing one offers exactly that.
+    const typed = query.trim();
+    if (/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]{2,}$/.test(typed)) {
+      const address = typed.toLowerCase();
+      const known = address === self || inChats.has(`email:${address}`)
+        || (contactsList || []).some((contact) => contactEmails(contact).some((email) => String(email).toLowerCase() === address));
+      if (!known) chats.push({ person:{ contact:null, address:typed, nameRanges:[{ start:0, end:typed.length }], addressRanges:[], fresh:true }, match:{ score:-1 }, order:-1 });
+    }
+    // A contact with no chat yet is still somewhere to talk, so it sits among
+    // the chats: a person named in the query comes before the groups they are in.
+    chats.sort((a, b) => a.match.score - b.match.score || a.order - b.order);
+    return { terms, chats, messages:messages.slice(0, SEARCH_MESSAGE_LIMIT) };
+  }
+  function chatSearchHtml(model, query) {
+    const lit = (text, ranges) => RelayChatSearch.highlight(text, ranges, esc);
+    const option = (kind, key) => `role="option" aria-selected="false" id="cs-${kind}-${esc(String(key).replace(/[^\w-]/g, "_"))}" data-search-kind="${kind}" data-search-key="${esc(key)}"`;
+    const personRow = ({ contact, address, nameRanges, addressRanges, fresh }) => relayIdentityRowHtml({
+      name:contact?.name || address, latest:{ id:"", title:"" }, hasActivity:false, unreadCount:0, threadId:`contact:${contact ? contactKey(contact) : address}`,
+    }, {
+      attrs:fresh ? option("address", address) : option("person", contactKey(contact)), nameHtml:lit(contact?.name || address, nameRanges),
+      lineHtml:`<span class="cs-address">${fresh ? "New chat" : lit(address, addressRanges)}</span>`,
+    });
+    const chatRow = ({ room, match, person }) => {
+      if (person) return personRow(person);
+      const key = room.chatId || room.threadId;
+      if (!match) return relayIdentityRowHtml(room, { attrs:option("chat", key) });
+      const show = { attrs:option("chat", key), nameHtml:lit(room.name, match.nameRanges) };
+      if (match.address) show.lineHtml = `<span class="cs-address">${lit(match.address, match.addressRanges)}</span>`;
+      // Found by someone in it: say who, lit, instead of the latest message.
+      if (match.members.length) {
+        const hits = new Map(match.members.map((member) => [member.person, member.ranges]));
+        const people = [...match.members.map((member) => member.person), ...searchPeople(room).filter((person) => !hits.has(person) && person !== room.name)];
+        show.lineHtml = `<span class="cs-people">${people.map((person) => lit(person, hits.get(person) || [])).join(", ")}</span>`;
+      }
+      return relayIdentityRowHtml(room, show);
+    };
+    const messageRow = ({ room, message, text, ranges }) => {
+      const cut = RelayChatSearch.snippet(text, ranges);
+      const who = message.direction === "out" ? "You:" : room.isGroup ? `${String(message.party || "Someone").split(" ")[0]}:` : "";
+      return relayIdentityRowHtml(room, {
+        attrs:`${option("message", message.id)} data-search-room="${esc(room.chatId || room.threadId)}"`,
+        at:message.at || "", noCount:true,
+        lineHtml:`${who ? `<span class="gist-who">${esc(who)}</span> ` : ""}${lit(cut.text, cut.ranges)}`,
+      });
+    };
+    if (!model.terms.length) return model.chats.map(chatRow).join("");
+    const sections = [
+      ["Chats", model.chats.map(chatRow)],
+      ["Messages", model.messages.map(messageRow)],
+    ].filter(([, rows]) => rows.length);
+    if (!sections.length) {
+      const hint = query.includes("@") ? "Finish the address to start a new chat." : "Try a name, or a word from a message.";
+      return `<div class="chat-search-empty"><div class="t1">No results for “${esc(query.trim())}”</div><div class="t2">${hint}</div></div>`;
+    }
+    return sections.map(([label, rows]) => `<div class="cs-label" role="presentation">${label}</div><div class="cs-group" role="group" aria-label="${label}">${rows.join("")}</div>`).join("");
+  }
+  function chatSearchOptions() { return [...chatSearchResultsEl.querySelectorAll("[data-search-kind]")]; }
+  function chatSearchOptionKey(el) { return el ? `${el.dataset.searchKind}:${el.dataset.searchKey}` : ""; }
+  function paintChatSearchActive({ reveal = false } = {}) {
+    const options = chatSearchOptions();
+    let active = options.find((el) => chatSearchOptionKey(el) === chatSearch.active) || null;
+    // While typing, the first answer is lit: it is what Enter will open.
+    if (!active && chatSearchInput.value.trim()) active = options[0] || null;
+    chatSearch.active = chatSearchOptionKey(active);
+    for (const el of options) {
+      el.classList.toggle("is-active", el === active);
+      el.setAttribute("aria-selected", String(el === active));
+    }
+    if (active) chatSearchInput.setAttribute("aria-activedescendant", active.id);
+    else chatSearchInput.removeAttribute("aria-activedescendant");
+    if (active && reveal) {
+      // Keep a little of the next row in view, so the list reads as going on.
+      const view = scrollEl.getBoundingClientRect();
+      const box = active.getBoundingClientRect();
+      const margin = 28;
+      if (box.bottom > view.bottom - margin) scrollEl.scrollTop += box.bottom - view.bottom + margin;
+      else if (box.top < view.top + margin) scrollEl.scrollTop -= view.top + margin - box.top;
+    }
+  }
+  function renderChatSearch() {
+    if (chatSearch.open && !chatSearchBelongsHere()) endChatSearch();
+    const showing = chatSearchShowing();
+    cardEl.classList.toggle("searching", showing);
+    chatSearchInput.setAttribute("aria-expanded", String(showing));
+    const returning = showing && !chatSearch.shown;
+    chatSearch.shown = showing;
+    if (!showing) return;
+    // Back from a room opened here: the field has the cursor again, so the
+    // next keystroke refines the same search.
+    if (returning && document.activeElement !== chatSearchInput) queueMicrotask(() => { if (chatSearchShowing()) chatSearchInput.focus({ preventScroll:true }); });
+    const query = chatSearchInput.value;
+    chatSearchClear.hidden = !query;
+    const model = chatSearchModel(query);
+    const html = chatSearchHtml(model, query);
+    // Inbox pushes arrive every few seconds; unchanged results are not touched,
+    // so hover, the lit row and the scroll position all hold.
+    if (chatSearch.html !== html) {
+      chatSearch.html = html;
+      chatSearchResultsEl.innerHTML = html;
+    }
+    paintChatSearchActive();
+    const said = !model.terms.length ? "" : model.chats.length + model.messages.length
+      ? [[model.chats.length, "chat"], [model.messages.length, "message"]]
+        .filter(([count]) => count).map(([count, word]) => `${count} ${word}${count === 1 ? "" : "s"}`).join(", ")
+      : "No results";
+    if (said !== chatSearch.said) { chatSearch.said = said; chatSearchLiveEl.textContent = said; }
+  }
+  // The field and the list arrive together: the tabs give way to the field
+  // and the rows slide to sit under it, from wherever they were.
+  function slideRows(el, fromTop) {
+    if (REDUCED || !el.isConnected) return;
+    const delta = fromTop - el.getBoundingClientRect().top;
+    if (!delta || Math.abs(delta) > 260) return;
+    el.animate([{ transform:`translateY(${delta}px)` }, { transform:"none" }], { duration:260, easing:"cubic-bezier(.22,1,.28,1)" });
+  }
+  function openChatSearch() {
+    if (activeView !== "relays" || collapsed || peeking) return;
+    if (chatSearch.open) { chatSearchInput.focus(); chatSearchInput.select(); return; }
+    const listTop = relaysListEl.getBoundingClientRect().top;
+    chatSearch.open = true;
+    chatSearch.account = signupAccountKey();
+    chatSearch.active = "";
+    chatSearch.listScrollTop = scrollEl.scrollTop;
+    chatSearchInput.value = "";
+    if (!contactsList.length) void loadContacts().then(() => renderChatSearch());
+    if (!groupsList.length) void Promise.resolve(loadGroups()).then(() => renderChatSearch()).catch(() => {});
+    renderChatSearch();
+    scrollEl.scrollTop = 0;
+    chatSearchInput.focus();
+    if (!REDUCED) {
+      const field = document.getElementById("chatSearch");
+      field.animate([{ opacity:0, transform:"translateX(14px)" }, { opacity:1, transform:"none" }], { duration:200, easing:"cubic-bezier(.22,1,.28,1)" });
+      document.getElementById("chatSearchCancel").animate([{ opacity:0 }, { opacity:1 }], { duration:200, delay:60, easing:"ease-out", fill:"backwards" });
+      if (chatSearch.listScrollTop === 0) slideRows(chatSearchResultsEl, listTop);
+    }
+  }
+  function endChatSearch() {
+    if (!chatSearch.open) return;
+    chatSearch.open = false;
+    chatSearch.active = "";
+    chatSearch.html = null;
+    chatSearch.said = "";
+    chatSearch.shown = false;
+    chatSearchInput.value = "";
+    chatSearchInput.removeAttribute("aria-activedescendant");
+    chatSearchResultsEl.replaceChildren();
+    chatSearchLiveEl.textContent = "";
+    cardEl.classList.remove("searching");
+  }
+  // The person's own way out: Cancel, or Escape on an empty field.
+  function closeChatSearch({ restoreFocus = false } = {}) {
+    if (!chatSearch.open) return;
+    const resultsTop = chatSearchResultsEl.getBoundingClientRect().top;
+    const scrollTop = chatSearch.listScrollTop;
+    endChatSearch();
+    renderAll();
+    scrollEl.scrollTop = scrollTop;
+    if (!REDUCED) {
+      for (const tab of document.querySelectorAll(".tabs > :not(.chat-search):not(.chat-search-cancel)")) {
+        if (tab.offsetParent) tab.animate([{ opacity:0 }, { opacity:1 }], { duration:180, easing:"ease-out" });
+      }
+      if (scrollTop === 0) slideRows(relaysListEl, resultsTop);
+    }
+    if (restoreFocus) chatSearchTrigger.focus({ preventScroll:true });
+    else chatSearchInput.blur();
+  }
+  function setChatSearchQuery(value) {
+    chatSearchInput.value = value;
+    chatSearch.active = "";
+    renderChatSearch();
+    scrollEl.scrollTop = 0;
+  }
+  // A message found by search: the room opens already at it, and it glows once.
+  function revealSearchHit(id, room) {
+    if (activeView !== "threads") return null;
+    threadDetailEntryFollow = null;
+    threadDetailLiveFollow = RelayChatPresentation.reduceChatLiveFollow(threadDetailLiveFollow, { type:"reset" });
+    const find = () => thHistoryEl.querySelector(`[data-msg="${CSS.escape(String(id))}"]`);
+    let target = find();
+    if (!target && room && replyThreadsEnabled(room)) {
+      // A reply folded into a thread is found inside that thread.
+      const ordered = [...(room.msgs || [])].sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));
+      const root = replyThreadIndex(ordered).rootOf.get(String(id));
+      if (root) {
+        replyThreadFocusId = String(root);
+        threadDetailScrolledFor = null;
+        renderThreadDetail();
+        threadDetailEntryFollow = null;
+        target = find();
       }
     }
-    positionChatFinder();
+    if (!target) return null;
+    expandedMsgIds.add(String(id));
+    const scroller = roomScrollElement();
+    const header = thDetailEl.querySelector(".th-detail-head");
+    const view = scroller.getBoundingClientRect();
+    const box = target.getBoundingClientRect();
+    const room_ = view.height - (header?.offsetHeight || 0);
+    const offset = box.height < room_ - 80 ? (room_ - box.height) / 2 : 24;
+    scroller.scrollTop = Math.max(0, box.top - view.top + scroller.scrollTop - (header?.offsetHeight || 0) - offset);
+    return target;
   }
-  chatSearchTrigger.addEventListener("click", () => {
-    if (chatFinder.matches(":popover-open")) { closeChatFinder(true); return; }
-    chatFinderAccount = signupAccountKey();
-    chatFinderInput.value = "";
-    chatFinder.showPopover();
-    chatSearchTrigger.setAttribute("aria-expanded", "true");
-    renderChatFinder();
-    chatFinderInput.focus();
-  });
-  document.getElementById("chatFinderClose").addEventListener("click", () => closeChatFinder(true));
-  chatFinderClear.addEventListener("click", () => {
-    chatFinderInput.value = ""; renderChatFinder(); chatFinderInput.focus();
-  });
-  chatFinderInput.addEventListener("input", renderChatFinder);
-  chatFinder.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeChatFinder(true); }
-    if (event.target === chatFinderInput && event.key === "Enter" && !event.isComposing) {
-      event.preventDefault(); chatFinderResults.querySelector("button")?.click();
+  let searchHitTimer = 0;
+  function lightSearchWords(target, terms) {
+    if (typeof Highlight !== "function" || !CSS.highlights || !terms.length) return;
+    const ranges = [];
+    const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT, {
+      acceptNode:(node) => node.parentElement?.closest(".th-time, .th-who, button, time, [aria-hidden='true']") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+    });
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      for (const hit of RelayChatSearch.findAll(node.nodeValue, terms)) {
+        const range = document.createRange();
+        range.setStart(node, hit.start);
+        range.setEnd(node, hit.end);
+        ranges.push(range);
+      }
     }
+    // ::highlight cannot transition, so it steps down in three shades.
+    clearTimeout(searchHitTimer);
+    const names = ["relay-search-hit", "relay-search-hit-1", "relay-search-hit-2"];
+    const show = (step) => {
+      for (const name of names) CSS.highlights.delete(name);
+      if (step < names.length) {
+        CSS.highlights.set(names[step], new Highlight(...ranges));
+        searchHitTimer = setTimeout(() => show(step + 1), step === 0 ? 2200 : 140);
+      }
+    };
+    show(0);
+  }
+  function flashSearchHit(id, terms = []) {
+    const target = thHistoryEl.querySelector(`[data-msg="${CSS.escape(String(id))}"]`);
+    if (!target) return;
+    lightSearchWords(target, terms);
+    target.classList.remove("reply-source-flash");
+    void target.offsetWidth;
+    target.classList.add("reply-source-flash");
+    setTimeout(() => target.classList.remove("reply-source-flash"), 1250);
+  }
+  async function openSearchContact(key, row, typedAddress = "") {
+    const contact = typedAddress ? null : contactsList.find((item) => contactKey(item) === key);
+    const address = typedAddress || (contact ? contactEmails(contact)[0] || "" : "");
+    const fail = (words) => {
+      if (!chatSearchShowing() || !row.isConnected) return;
+      row.removeAttribute("aria-busy");
+      const line = row.querySelector(".th-title");
+      if (line) line.innerHTML = `<span class="cs-address">${esc(words)}</span>`;
+      chatSearch.html = null;
+    };
+    if ((!contact && !typedAddress) || !address || !window.relay.openChatWith) { fail(address ? "That chat could not be opened." : "No address to write to."); return; }
+    row.setAttribute("aria-busy", "true");
+    const line = row.querySelector(".th-title");
+    if (line) line.innerHTML = `<span class="cs-address">Opening…</span>`;
+    const res = await Promise.resolve(window.relay.openChatWith(address, contact?.name || "")).catch(() => null);
+    if (!chatSearchShowing()) return;
+    if (!res || res.ok === false || !res.chat?.chatId) { fail(res?.error || "That chat could not be opened."); return; }
+    storeCanonicalChatDetail(res.chat, { surface:"relay" });
+    const anchor = directContactRoomAnchor(res.chat, contact, address, res.recipient);
+    contactChatAnchors.set(anchor.chatId, anchor);
+    const room = chatSections().people.find((item) => item.partyKey === anchor.partyKey || item.chatId === anchor.chatId);
+    if (!room) { fail("That chat could not be opened."); return; }
+    row.removeAttribute("aria-busy");
+    startRoomViewTransition(() => openThreadDetail(room.threadId, room.name || contact?.name || address, "relays", { hydrated:true }), { motion:"forward" });
+  }
+  function openChatSearchOption(el) {
+    if (!el || !chatSearchShowing()) return;
+    chatSearch.active = chatSearchOptionKey(el);
+    paintChatSearchActive();
+    const kind = el.dataset.searchKind;
+    if (kind === "person") { void openSearchContact(el.dataset.searchKey, el); return; }
+    if (kind === "address") { void openSearchContact("", el, el.dataset.searchKey); return; }
+    const thread = el.getAttribute("data-thread");
+    const party = el.getAttribute("data-party") || "";
+    if (kind === "message") {
+      const id = el.dataset.searchKey;
+      const room = relayIdentityRows().find((item) => (item.chatId || item.threadId) === el.dataset.searchRoom) || null;
+      startRoomViewTransition(() => {
+        openThreadDetail(thread, party, "relays");
+        revealSearchHit(id, room);
+      }, { motion:"forward" });
+      const terms = RelayChatSearch.terms(chatSearchInput.value);
+      afterRoomViewTransition(() => requestAnimationFrame(() => flashSearchHit(id, terms)));
+      return;
+    }
+    startRoomViewTransition(() => openThreadDetail(thread, party, "relays"), { motion:"forward" });
+  }
+  function moveChatSearchActive(step) {
+    const options = chatSearchOptions();
+    if (!options.length) return;
+    const index = options.findIndex((el) => chatSearchOptionKey(el) === chatSearch.active);
+    const next = index === -1 ? (step > 0 ? 0 : options.length - 1) : Math.min(options.length - 1, Math.max(0, index + step));
+    chatSearch.active = chatSearchOptionKey(options[next]);
+    paintChatSearchActive({ reveal:true });
+  }
+  chatSearchResultsEl.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-search-kind]");
+    if (option) openChatSearchOption(option);
+  });
+  // The pointer and the arrow keys light the same row, so Enter never opens
+  // something other than what the person is looking at.
+  chatSearchResultsEl.addEventListener("pointermove", (event) => {
+    const option = event.target.closest("[data-search-kind]");
+    if (!option || chatSearchOptionKey(option) === chatSearch.active) return;
+    chatSearch.active = chatSearchOptionKey(option);
+    paintChatSearchActive();
+  });
+  chatSearchTrigger.addEventListener("click", openChatSearch);
+  document.getElementById("chatSearchCancel").addEventListener("click", () => closeChatSearch());
+  chatSearchClear.addEventListener("click", () => { setChatSearchQuery(""); chatSearchInput.focus(); });
+  chatSearchInput.addEventListener("input", () => { chatSearch.active = ""; renderChatSearch(); scrollEl.scrollTop = 0; });
+  chatSearchInput.addEventListener("keydown", (event) => {
+    if (event.isComposing) return;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      const buttons = [...chatFinderResults.querySelectorAll("button")];
-      const index = buttons.indexOf(document.activeElement);
-      const next = event.key === "ArrowDown" ? buttons[index + 1] : buttons[index - 1];
-      if (next) { event.preventDefault(); next.focus(); }
-      else if (event.key === "ArrowUp" && index === 0) { event.preventDefault(); chatFinderInput.focus(); }
+      event.preventDefault();
+      moveChatSearchActive(event.key === "ArrowDown" ? 1 : -1);
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      openChatSearchOption(chatSearchOptions().find((el) => chatSearchOptionKey(el) === chatSearch.active));
+    } else if (event.key === "Escape") {
+      // First Escape clears, the second leaves.
+      event.preventDefault(); event.stopPropagation();
+      if (chatSearchInput.value) setChatSearchQuery("");
+      else closeChatSearch({ restoreFocus:true });
     }
   });
-  chatFinder.addEventListener("toggle", () => {
-    if (!chatFinder.matches(":popover-open")) closeChatFinder();
+  // ⌘F searches, and so does typing a letter anywhere on the inbox: the
+  // keystroke lands in the field it opens.
+  document.addEventListener("keydown", (event) => {
+    if (event.defaultPrevented || event.isComposing || activeView !== "relays" || collapsed || peeking || roomViewTransition) return;
+    if (event.key === "Escape" && chatSearchShowing() && event.target !== chatSearchInput) {
+      event.preventDefault();
+      if (chatSearchInput.value) { setChatSearchQuery(""); chatSearchInput.focus(); } else closeChatSearch({ restoreFocus:true });
+      return;
+    }
+    if (cardEl.classList.contains("signup") || document.querySelector(":popover-open")) return;
+    const key = String(event.key || "");
+    if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && key.toLowerCase() === "f") {
+      event.preventDefault();
+      openChatSearch();
+      return;
+    }
+    const target = event.target;
+    if (event.metaKey || event.ctrlKey || event.altKey || key.length !== 1 || key === " ") return;
+    if (target instanceof HTMLElement && (target.isContentEditable || target.closest("input, textarea, select, [contenteditable]"))) return;
+    if (!chatSearch.open) openChatSearch();
+    else chatSearchInput.focus();
   });
-  window.addEventListener("resize", positionChatFinder);
 
   // THE BANNER'S VERBS (David, 2026-09-16): the same three the reader offers,
   // in the row recipe. Copy for your agent is always there — whatever agent a
@@ -8461,6 +8859,14 @@
           ? `<button type="button" class="th-sp" data-slack-people><span class="th-sp-faces">${faces}</span><span class="th-sp-text">${count === 1 ? `${esc(people.notOnRelay[0].name)} isn’t on Relay yet` : `${count} people here aren’t on Relay yet`}</span><span class="th-sp-go">Invite</span></button>`
           : `<button type="button" class="th-sp quiet" data-slack-people><span class="th-sp-faces">${faces}</span><span class="th-sp-text">Invited · ${count} not here yet</span><span class="th-sp-go">See who</span></button>`;
       }
+    } else if (room && !room.isGroup) {
+      // A person who is not on Relay never hears about a message until they
+      // join, so the room says so, with the one thing that fixes it.
+      const away = directPartyOffRelay(room);
+      if (away) {
+        const first = String(away.name || "").trim().split(/\s+/)[0] || "They";
+        html = `<div class="th-sp th-sp-away"><span class="th-sp-faces">${slackFaceHtml(away)}</span><span class="th-sp-text">${esc(first)} isn’t on Relay yet. Send them your invite link.</span><button type="button" class="th-sp-go" data-copy-invite>Copy invite link</button></div>`;
+      }
     }
     if (thSlackPeopleEl.dataset.html === html) return;
     // Folding away, not vanishing: the conversation slides up into its place.
@@ -8483,6 +8889,17 @@
     thSlackPeopleEl.innerHTML = html;
     thSlackPeopleEl.classList.toggle("gone", !html);
     thSlackPeopleEl.querySelector("[data-slack-people]")?.addEventListener("click", () => openSlackMembers(room));
+    thSlackPeopleEl.querySelector("[data-copy-invite]")?.addEventListener("click", (event) => copyInviteLinkFromPeople(event.currentTarget));
+  }
+  // The other person in a direct chat, when they have no Relay account: the
+  // chat says so (server), or the contact book does.
+  function directPartyOffRelay(room) {
+    const detail = canonicalChatDetails.get(String(room.chatId || ""));
+    const away = (detail?.participants || []).find((person) => !person.self && person.onRelay === false);
+    if (away) return away;
+    const address = roomAddress(room);
+    const contact = address && (contactsList || []).find((item) => contactEmails(item).some((email) => String(email).toLowerCase() === address));
+    return contact && contact.onRelay === false ? { name:contact.name || address } : null;
   }
   function openSlackMembers(room) {
     if (!room?.chatId) return;
@@ -8599,8 +9016,10 @@
     // Slack's own words: "Message #code" in a channel, "Message Sven" in a DM.
     return /channel$/.test(room.integration?.type || "") ? `Message ${slackChannelLabel(room)}` : `Message ${name.split(/\s+/)[0]}`;
   }
-  function relayIdentityRowHtml(identity) {
-    const mentionRows = peeking && identity.groupId ? threadMessages({ includeSlack:false })
+  // `show` lets search paint the same row with its hit highlighted: nameHtml,
+  // lineHtml (the whole second line), at (the time shown), attrs, noCount.
+  function relayIdentityRowHtml(identity, show = null) {
+    const mentionRows = peeking && !show && identity.groupId ? threadMessages({ includeSlack:false })
       .filter((message) => message.groupId === identity.groupId && message.direction === "in" && message.unread && message.recipientMentioned && !message.deletedAt)
       .sort((a,b) => new Date(b.at)-new Date(a.at)) : [];
     const mention = mentionRows[0] || null;
@@ -8639,16 +9058,16 @@
         ? `<span class="gist-who">${esc(String(row.party || "Someone").split(" ")[0])}${inThread ? " in a thread" : ""}:</span> `
         : inThread ? '<span class="gist-who">In a thread:</span> ' : "";
     return `
-      <div class="relay-row relay-arrival${unreadCls}" data-thread="${esc(roomCoordinate)}" data-party="${esc(name)}" data-opening-id="${esc(row.id)}"${mention ? ` data-mention-target="${esc(mention.id)}"` : ""}>
+      <div class="relay-row relay-arrival${unreadCls}" data-thread="${esc(roomCoordinate)}" data-party="${esc(name)}" data-opening-id="${esc(row.id)}"${mention ? ` data-mention-target="${esc(mention.id)}"` : ""}${show?.attrs ? ` ${show.attrs}` : ""}>
         ${avatar}
         <span class="rk-body">
           <span class="th-top">
-            <span class="th-party${mention ? " mention-arrival-label" : ""}">${esc(mention ? `${String(mention.party || "Someone").split(" ")[0]} mentioned you in ${name}` : name)}</span>
+            <span class="th-party${mention ? " mention-arrival-label" : ""}">${show?.nameHtml ?? esc(mention ? `${String(mention.party || "Someone").split(" ")[0]} mentioned you in ${name}` : name)}</span>
             ${peeking && row.direction !== "out" && bannerIsTask(row) ? `<span class="kchip">Task</span>` : ""}
             ${peeking && identity.requestRoom ? `<span class="kchip request">Request</span>` : ""}
-            <span class="th-time">${quietRoom ? "" : esc(timeAgo(identity.latestAt))}</span>
+            <span class="th-time">${show?.at ? esc(timeAgo(show.at)) : quietRoom ? "" : esc(timeAgo(identity.latestAt))}</span>
           </span>
-          <span class="rk-line"><span class="th-title">${senderPrefix}${esc(gist)}</span>${identity.unreadCount ? `<span class="th-count">${identity.unreadCount}</span>` : ""}</span>
+          <span class="rk-line"><span class="th-title">${show?.lineHtml ?? `${senderPrefix}${esc(gist)}`}</span>${identity.unreadCount && !show?.noCount ? `<span class="th-count">${identity.unreadCount}</span>` : ""}</span>
           ${peeking ? bannerVerbsHtml(row) : ""}
           ${peeking ? bannerComposerHtml(identity, row) : ""}
         </span>
@@ -22198,7 +22617,37 @@
   // prefilled (a prefilled link brings Claude's red caution banner) and
   // nothing lands on the clipboard behind their back.
   let claudeCopied = false;
+  // ONE LAST CLICK IN CLAUDE (David, 2026-10-07). Claude starts every custom
+  // connector's tools on "Needs approval", and in Auto mode that sends each
+  // send through a safety check that refused tutorial-drafted Relays carrying
+  // business news (2 of 2; 2 of 2 went through on "Always allow", runs 16-17).
+  // Claude has just shown its Relay settings page, so the one fix is there:
+  // Write/delete tools → Always allow. Relay can't see that setting, so the
+  // person says Done.
+  let claudeAllowed = false;
+  function renderClaudeAllow(agent) {
+    const signature = JSON.stringify(["claude-allow", onboardingAgentBusy]);
+    startOnboardingAgentPoll();
+    if (signupBodyEl.dataset.firstRelaySignature === signature && signupBodyEl.querySelector(".su-claude-allow")) return;
+    signupBodyEl.dataset.firstRelaySignature = signature;
+    const check = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.2"/><path d="M5.3 8.2l1.8 1.8 3.6-3.8"/></svg>';
+    const chevron = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5L6 7.5 9 4.5"/></svg>';
+    signupBodyEl.innerHTML = `<div class="su-local-prompt su-agent-screen su-claude-connect su-claude-allow"><div class="su-step">Connected</div>
+      <h1 class="su-title">Relay is in<br>${onboardingAgentTitleName(agent)}.</h1>
+      <p class="su-copy">One last click, on the page Claude is showing:</p>
+      <div class="su-claude-row" role="img" aria-label="In Claude, next to Write/delete tools, choose Always allow">
+        <span>${chevron}Write/delete tools</span><b>${check}Always allow${chevron}</b>
+      </div>
+      <p class="su-allow-why">So Claude sends when you say yes, without stopping to double-check.</p>
+      <div class="su-claude-tail"><div class="su-form su-agent-actions"><button class="su-primary" type="button" data-claude-allowed>Done</button></div>
+      <div class="su-agent-quiet"><button class="su-link" type="button" data-agent-reset>Use a different AI</button></div></div></div>`;
+    signupBodyEl.querySelector("[data-claude-allowed]")?.addEventListener("click", () => {
+      claudeAllowed = true; signupBodyEl.dataset.firstRelaySignature = ""; renderSignup();
+    });
+    signupBodyEl.querySelector("[data-agent-reset]")?.addEventListener("click", () => { claudeAllowed = false; resetOnboardingAgent(); });
+  }
   function renderClaudeSend(agent) {
+    if (!claudeAllowed) { renderClaudeAllow(agent); return; }
     const signature = JSON.stringify(["claude-send", onboardingAgentBusy, onboardingAgentNote, agent.startPrompt || "", claudeCopied]);
     startOnboardingAgentPoll();
     if (signupBodyEl.dataset.firstRelaySignature === signature && signupBodyEl.querySelector(".su-claude-send")) return;
@@ -22760,7 +23209,7 @@
   continuousMotionListeners.add(syncChatTypingContext);
 
   function renderAll() {
-    renderChatFinder();
+    renderChatSearch();
     if (blockedPeoplePage && (activeView !== "contacts" || blockedPeoplePage.account !== signupAccountKey())) {
       closeBlockedPeople({ restoreFocus:false, animate:false });
     }

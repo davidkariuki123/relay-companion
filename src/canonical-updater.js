@@ -532,13 +532,15 @@ function plistEscape(value) {
     .replaceAll("'", "&apos;");
 }
 
-function updateWorkerPlist(programArguments, logPath) {
+// Run-once: `launchctl submit` would instead keep the job alive and replay its
+// original arguments forever, long after the release tree they name is pruned.
+export function updateWorkerPlist(programArguments, logPath, label = UPDATE_WORKER_LABEL) {
   const argumentsXml = programArguments.map((argument) => `    <string>${plistEscape(argument)}</string>`).join("\n");
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>${UPDATE_WORKER_LABEL}</string>
+  <key>Label</key><string>${plistEscape(label)}</string>
   <key>ProgramArguments</key>
   <array>
 ${argumentsXml}

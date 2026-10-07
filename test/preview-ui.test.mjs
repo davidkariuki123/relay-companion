@@ -38,7 +38,7 @@ function inlineFunction(source, name, nextMarker) {
 }
 
 test("Relay identity rows show the room and latest gist without shortening the reader", () => {
-  const arrival = between(inbox, "function relayIdentityRowHtml(identity)", "// ---------- the reader:");
+  const arrival = between(inbox, "function relayIdentityRowHtml(identity, show = null)", "// ---------- the reader:");
   assert.match(arrival, /const name = identity\.name/);
   assert.match(arrival, /esc\(mention \?[^\n]+ : name\)/);
   assert.match(arrival, /const gist = relayListGist\(mentionPreviewText\(row\.title \|\| row\.body \|\| "Message", identity\.groupId\), 90\)/);

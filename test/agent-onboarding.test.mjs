@@ -196,3 +196,11 @@ test("Copy it again copies Claude's start sentence, not a setup code", async () 
   assert.equal(h.copied.at(-1), "Help me send my first Relay to Sam.");
   assert.equal(h.calls.some(([name]) => name === "create"), false, "Claude never gets a setup code");
 });
+
+test("after connecting, Claude's Write/delete tools go to Always allow before the first message", () => {
+  const html = fs.readFileSync(new URL("../overlay/inbox.html", import.meta.url), "utf8");
+  // Auto mode's check refused tutorial-drafted sends on "Needs approval"; "Always allow" sent them (runs 16-17).
+  assert.match(html, /function renderClaudeSend\(agent\) \{\n    if \(!claudeAllowed\) \{ renderClaudeAllow\(agent\); return; \}/);
+  assert.match(html, /<span>\$\{chevron\}Write\/delete tools<\/span><b>\$\{check\}Always allow\$\{chevron\}<\/b>/);
+  assert.match(html, /data-claude-allowed>Done<\/button>/);
+});

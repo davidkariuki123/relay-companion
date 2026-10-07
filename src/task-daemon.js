@@ -1039,7 +1039,7 @@ async function runTaskDaemonImpl({ intervalMs = 4000, health } = {}) {
       ready: () => health.ready(), progress: () => health.snapshot() });
   } catch (error) { log(`local recovery responder unavailable: ${error.message}`); }
   startRecoveryMaintenance();
-  startApplicationMaintenance();
+  startApplicationMaintenance({ log });
   startPillSupervisor({ log });
   startMcpBrokerDescriptorGuard({ log, packageRoot: companionPackageRoot() });
   startPendingSignOutFlush({ log });

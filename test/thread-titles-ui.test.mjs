@@ -124,7 +124,7 @@ test("chat list previews resolve mention tokens using contacts, self and the cha
   assert.equal(preview("@unknown_handle mail@sven https://example.com/@sven"), "@unknown_handle mail@sven https://example.com/@sven");
   const rosterPreview = mentionRenderer({ plain:true, groups:[{ id:"grp_granular", members:[{ name:"Sven Wellmann" }] }] });
   assert.equal(rosterPreview("@Sven_Wellmann", "grp_granular"), "@Sven Wellmann");
-  const row = html.slice(html.indexOf("function relayIdentityRowHtml(identity)"), html.indexOf("// ---------- the reader:"));
+  const row = html.slice(html.indexOf("function relayIdentityRowHtml(identity, show = null)"), html.indexOf("// ---------- the reader:"));
   assert.match(row, /relayListGist\(mentionPreviewText\(row\.title \|\| row\.body \|\| "Message", identity\.groupId\), 90\)/,
     "resolve names in the row's channel before shortening the preview");
   assert.match(row, /\$\{esc\(gist\)\}/, "display names remain HTML escaped");
@@ -323,7 +323,7 @@ test("a newer Task becomes the person's latest Relays preview", () => {
 });
 
 test("Relays previews use WhatsApp sender attribution and stacked group identity", () => {
-  const row = html.slice(html.indexOf("function relayIdentityRowHtml(identity)"), html.indexOf("// ---------- the reader:"));
+  const row = html.slice(html.indexOf("function relayIdentityRowHtml(identity, show = null)"), html.indexOf("// ---------- the reader:"));
   assert.match(row, /row\.direction === "out"[\s\S]*?You:/);
   assert.match(row, /identity\.isGroup[\s\S]*?row\.party/);
   assert.match(row, /class="av-stack"/);
