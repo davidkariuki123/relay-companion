@@ -185,9 +185,13 @@ test("a short-lived caller exits promptly and kills its unfinished scan", async 
     const ready = setInterval(()=>{if(fs.existsSync(${JSON.stringify(pidFile)}))clearInterval(ready)},20);`;
   await promisify(execFile)(process.execPath, ["--input-type=module", "-e", script], { timeout: 5000, windowsHide: true });
   const pid = Number(fs.readFileSync(pidFile, "utf8"));
+  // A killed child whose parent already exited is a zombie until something
+  // reaps it, and a CI container without an init process never does; signal 0
+  // still "succeeds" on a zombie. It is dead all the same.
+  const zombie = () => { try { return /^\d+ \(.*\) Z /.test(fs.readFileSync(`/proc/${pid}/stat`, "utf8")); } catch { return false; } };
   let alive = true;
-  for (let attempt = 0; alive && attempt < 50; attempt++) {
-    try { process.kill(pid, 0); await delay(20); } catch { alive = false; }
+  for (let attempt = 0; alive && attempt < 250; attempt++) {
+    try { process.kill(pid, 0); if (zombie()) alive = false; else await delay(20); } catch { alive = false; }
   }
   assert.equal(alive, false, "exiting caller must not leave its query process behind");
 });

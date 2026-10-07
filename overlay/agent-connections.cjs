@@ -102,7 +102,10 @@ function createAgentConnections({
       const order = ["claude-app", "chatgpt-app", "claude-code", "codex", "conductor"];
       const candidates = local.hosts
         // Conductor is offered only to accounts that have it (a developer preview).
-        .filter((host) => host.installed && (rider || host.id !== "conductor") && ["available", "restart", "broken"].includes(host.state) && !dismissed[`${host.id}:${host.state}`])
+        .filter((host) => host.installed && (rider || host.id !== "conductor") && ["available", "restart", "broken"].includes(host.state)
+          // Something broken stays until it is fixed (David, 2026-10-07); only an
+          // invitation to connect a new app can be waved away.
+          && (host.state !== "available" || !dismissed[`${host.id}:${host.state}`]))
         .sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
       // Conductor rides Claude Code and Codex: never its own nudge while either is offered.
       const first = candidates.find((host) => host.id !== "conductor") || candidates[0];

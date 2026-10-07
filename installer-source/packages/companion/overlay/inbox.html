@@ -3271,6 +3271,14 @@
   .setup-page .cv-blocked-copy { margin:0 16px 4px; }
   .setup-page .sv-open-section { margin-top:20px; }
   .setup-row .sv-choose { min-width:76px; }
+  /* One row per app a person opens; its modes (Chat, Code…) underneath. */
+  .setup-app { align-items:flex-start; }
+  .setup-app .sv-open-logo { margin-top:2px; }
+  .setup-modes { display:grid; gap:6px; margin-top:6px; min-width:0; }
+  .setup-mode { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:7px; min-height:26px; }
+  .setup-mode-name { color:var(--ink); font-size:12px; font-weight:600; }
+  .setup-mode-state { display:flex; align-items:center; gap:5px; min-width:0; color:var(--muted); font-size:11.5px; }
+  .setup-mode .sv-choose { min-width:0; padding:4px 10px; font-size:11.5px; }
   .setup-row .sv-open-why { display:flex; align-items:center; gap:5px; min-width:0; }
   .setup-why-text { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .setup-dot { flex:none; width:6px; height:6px; border-radius:50%; background:var(--muted-3); }
@@ -18836,6 +18844,53 @@
       ${status.verb ? `<button class="sv-choose${status.warn ? " warn" : ""}" type="button" data-setup-${status.action || "busy"}="${host.id}"${status.title ? ` title="${esc(status.title)}"` : ""}${status.disabled ? " disabled" : ""}>${esc(status.verb)}</button>` : ""}
     </div>`;
   }
+  // BY THE APP A PERSON OPENS (David, 2026-10-07): "Claude app" and "Claude
+  // Code" as two rows read as a contradiction when Claude Code is the Claude
+  // app's Code tab. Registrations stay per config file underneath; the page
+  // shows each app once with its modes: Claude app → Chat (its own config) and
+  // Code (Claude Code's, shared with Terminal); ChatGPT app → Chat & Codex
+  // (Codex's config, shared with Terminal); Terminal → whatever runs there.
+  function setupAppGroups(hosts) {
+    const by = Object.fromEntries(hosts.map((host) => [host.id, host]));
+    const groups = [];
+    if (by["claude-app"]) groups.push({ key:"claude-app", name:"Claude app", mark:SETUP_LOCAL["claude-app"].mark,
+      modes:[{ label:"Chat", host:by["claude-app"] }, ...(by["claude-code"] ? [{ label:"Code", host:by["claude-code"] }] : [])] });
+    if (by["chatgpt-app"]) groups.push({ key:"chatgpt-app", name:"ChatGPT app", mark:SETUP_LOCAL["chatgpt-app"].mark,
+      modes:[{ label:"Chat & Codex", host:by["chatgpt-app"] }] });
+    const terminal = [
+      ...(by["claude-code"] && (by["claude-code"].where === "terminal" || !by["claude-app"]) ? [{ label:"Claude Code", host:by["claude-code"] }] : []),
+      ...(by.codex && (by.codex.where === "terminal" || !by["chatgpt-app"]) ? [{ label:"Codex", host:by.codex }] : []),
+    ];
+    if (terminal.length) groups.push({ key:"terminal", name:"Terminal", mark:terminal[0].host.id === "codex" ? SETUP_LOCAL.codex.mark : SETUP_LOCAL["claude-code"].mark, modes:terminal });
+    if (by[SETUP_RIDER]) groups.push({ key:SETUP_RIDER, name:SETUP_LOCAL[SETUP_RIDER].name, mark:SETUP_LOCAL[SETUP_RIDER].mark, modes:[{ label:"", host:by[SETUP_RIDER] }] });
+    return groups;
+  }
+  /** One mode's words: short, about what the person can do there now. */
+  function setupModeStatus(host) {
+    const status = setupLocalStatus(host);
+    if (status.disabled) return status;
+    if (status.action === "restart") {
+      const armed = setupArmed === `restart:${host.id}`;
+      return { ...status, text: host.stopped ? "Relay stopped" : "Restart to finish", verb: armed ? "Restart Claude?" : "Restart", armed };
+    }
+    if (status.action === "connect") return { ...status, text: host.state === "broken" ? "Needs a fix" : status.dot === "bad" ? status.text : "Not connected" };
+    if (host.live) return { ...status, text:"Working now" };
+    if (host.id === "claude-app") return { ...status, text: host.running ? "Connected" : "Ready when you open it" };
+    if (host.id === SETUP_RIDER) return { ...status, text:"Through Claude Code and Codex" };
+    return { ...status, text:"Ready in new chats" };
+  }
+  function setupAppRowHtml(group) {
+    const allOk = group.modes.every(({ host }) => { const status = setupModeStatus(host); return !status.action && !status.disabled; });
+    const lines = group.modes.map(({ label, host }) => {
+      const status = setupModeStatus(host);
+      const verb = status.verb ? `<button class="sv-choose${status.warn ? " warn" : ""}${status.armed ? " armed" : ""}" type="button" data-setup-${status.action || "busy"}="${host.id}"${status.action === "restart" ? ` title="Quits and reopens the Claude app. Chats in progress there close."` : ""}${status.disabled ? " disabled" : ""}>${esc(status.verb)}</button>` : "<span></span>";
+      return `<span class="setup-mode">${label ? `<span class="setup-mode-name">${esc(label)}</span>` : "<span></span>"}<span class="setup-mode-state">${setupDotHtml(status.dot)}<span class="setup-why-text">${esc(status.text)}</span></span>${verb}</span>`;
+    }).join("");
+    return `<div class="sv-open-row setup-row setup-app${allOk ? " ok" : ""}${group.modes.some(({ host }) => setupJust.has(host.id)) ? " just" : ""}" data-setup-row="${group.key}">
+      <img class="sv-open-logo" src="${group.mark}" alt="" />
+      <span class="sv-open-copy"><span class="sv-open-name">${esc(group.name)}</span><span class="setup-modes">${lines}</span></span>
+    </div>`;
+  }
   function setupConnectionsFor(surface) {
     const list = setupSnapshot?.connections;
     return Array.isArray(list) ? list.filter((item) => item.surface === surface) : [];
@@ -18889,7 +18944,7 @@
     const absent = ["claude-app", "chatgpt-app"].filter((id) => setupSnapshot?.hosts && !setupHost(id)?.installed);
     const local = setupSnapshot?.hosts
       ? hosts.length
-        ? `<div class="sv-open-list">${hosts.map(setupLocalRowHtml).join("")}</div>`
+        ? `<div class="sv-open-list">${setupAppGroups(hosts).map(setupAppRowHtml).join("")}</div>`
         : `<div class="sv-open-intro">No AI apps on this ${/Mac/.test(navigator.userAgent) ? "Mac" : "computer"} yet.</div>`
       : `<div class="sv-open-intro">${setupLoading ? "Looking…" : "Couldn’t check this computer."}</div>`;
     const others = Array.isArray(setupSnapshot?.connections) ? setupSnapshot.connections.filter((item) => !SETUP_WEB[item.surface]) : [];
@@ -18943,7 +18998,7 @@
     const name = !setupSnapshot ? "Your AIs" : count ? `${count} connected` : "Connect your AIs";
     const first = todo[0];
     const why = !setupSnapshot ? "Checking…"
-      : first?.state === "restart" ? (first.stopped ? "Relay stopped in the Claude app" : "Restart Claude to finish")
+      : first?.state === "restart" ? (first.stopped ? "Relay stopped in Claude’s chats" : "Restart Claude to finish")
       : first ? `${SETUP_LOCAL[first.id].name} ${first.state === "broken" ? "needs a fix" : "isn’t connected yet"}${todo.length > 1 ? ` · ${todo.length - 1} more` : ""}`
       : count ? "Everything here is connected" : "Claude, ChatGPT and more";
     return `<div class="sv-open-section" id="yourAis" data-stop="1">
@@ -19101,7 +19156,14 @@
     }
     document.getElementById("setupConnectAll")?.addEventListener("click", (event) => { event.stopPropagation(); void setupConnectAll(); });
     for (const button of page.querySelectorAll("[data-setup-restart]")) {
-      button.addEventListener("click", (event) => { event.stopPropagation(); void setupVerb("setupRestart", button.dataset.setupRestart, "restarting"); });
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        // Restart quits the whole Claude app, Code tab included: ask once.
+        const armedKey = `restart:${button.dataset.setupRestart}`;
+        if (setupArmed !== armedKey) { setupArmed = armedKey; renderSettings(); return; }
+        setupArmed = "";
+        void setupVerb("setupRestart", button.dataset.setupRestart, "restarting");
+      });
     }
     for (const button of page.querySelectorAll("[data-setup-web]")) {
       button.addEventListener("click", (event) => {
@@ -19156,6 +19218,7 @@
   // not yet working with Relay, and only until the person acts or waves it
   // away (each app and state is waved away once, for good).
   let setupNudgeBusy = "";
+  let setupNudgeArmed = false; // Restart asks once: it quits the whole Claude app
   let setupNudgeDone = "";
   function renderSetupNudge() {
     const slot = document.getElementById("setupNudge");
@@ -19167,20 +19230,22 @@
     const state = setupNudgeDone ? "done" : nudge.state;
     const the = id === "claude-code" || id === "codex" || id === SETUP_RIDER ? meta.name : `the ${meta.name}`;
     const title = state === "done" ? `Relay is in ${the}`
-      : state === "restart" ? (nudge?.stopped ? "Relay stopped in the Claude app" : "Restart Claude to use Relay")
+      : state === "restart" ? (nudge?.stopped ? "Relay stopped in Claude’s chats" : "Restart Claude to use Relay")
       : state === "broken" ? `Relay stopped working in ${the}`
       : `Use Relay in ${the}`;
     const verb = setupNudgeBusy ? (setupNudgeBusy === "restarting" ? "Restarting…" : "Connecting…")
-      : state === "done" ? "" : state === "restart" ? "Restart" : state === "broken" ? "Fix" : "Connect";
+      : state === "done" ? "" : state === "restart" ? (setupNudgeArmed ? "Restart Claude?" : "Restart") : state === "broken" ? "Fix" : "Connect";
     const signature = JSON.stringify([id, state, verb]);
     if (slot.dataset.signature === signature && slot.innerHTML) return;
     slot.dataset.signature = signature;
     slot.innerHTML = `<div class="setup-nudge"><button class="rat-summary" type="button" id="setupNudgeGo"${setupNudgeBusy ? " disabled" : ""}>
         <img src="${meta.mark}" alt=""><span class="rat-title">${esc(title)}</span>
         ${verb ? `<span class="rat-see${state === "restart" ? " warn" : ""}">${esc(verb)}</span>` : `<span class="setup-dot live" aria-hidden="true" style="margin-left:auto"></span>`}
-      </button>${state === "done" || setupNudgeBusy ? "" : `<button class="rat-minimise" type="button" id="setupNudgeHide" aria-label="Not now">×</button>`}</div>`;
+      </button>${state === "done" || setupNudgeBusy || state === "restart" || state === "broken" ? "" : `<button class="rat-minimise" type="button" id="setupNudgeHide" aria-label="Not now">×</button>`}</div>`;
     slot.querySelector("#setupNudgeGo")?.addEventListener("click", async () => {
       if (setupNudgeBusy || state === "done") return;
+      if (state === "restart" && !setupNudgeArmed) { setupNudgeArmed = true; renderSetupNudge(); return; }
+      setupNudgeArmed = false;
       const userId = setupUserId();
       setupNudgeBusy = state === "restart" ? "restarting" : "connecting";
       renderSetupNudge();
