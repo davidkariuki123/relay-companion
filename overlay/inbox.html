@@ -18985,7 +18985,6 @@
         ${taskFooter}
         ${badges}
       </div>
-      ${slackThreadLinkHtml(m)}
       ${slackUnsyncedHtml(m)}
       ${attachmentOnly ? "" : threadTailHtml}
       ${(() => {
@@ -19018,7 +19017,8 @@
         // A Task without attachments uses its card footer as the receipt.
         // With attachments, repeat the normal receipt below the last attachment.
         // A deleted message carries no receipt (WhatsApp shows no ticks on one).
-        const receipt = m.deletedAt || (m.request && !attachments.length) ? null : receiptFor(m, msgs);
+        // A message typed in Slack has no Relay delivery to report: no "Sent".
+        const receipt = m.deletedAt || m.origin === "slack" || (m.request && !attachments.length) ? null : receiptFor(m, msgs);
         const bits = [];
         if (confirmingDelete) {
           // The question sits under the bubble it is about, with who it affects.
@@ -19039,7 +19039,7 @@
         const under = bits.length ? `<div class="th-under${mine ? " mine" : ""}${confirmingDelete ? " confirming" : ""}" data-chat-key="${esc(renderKey)}:receipt">${bits.join("")}</div>` : "";
         const details = receipt && expandedReceiptIds.has(m.id) ? receiptDetailsHtml(receipt, m.id) : "";
         return under + details;
-      })()}`;
+      })()}${slackThreadLinkHtml(m)}`;
     }).join("");
     // A Slack thread needs no banner of its own: the header already says
     // Thread beside the channel's name and mark.
@@ -20027,7 +20027,12 @@
       return false;
     }
     if (activeView === "settings") renderSettings();
-    else if (activeView === "threads") { if (threadDetailId) renderThreadDetail(); }
+    else if (activeView === "threads") {
+      if (threadDetailId) renderThreadDetail();
+      // The wide pill shows the list beside the room: its Slack row moves
+      // with the room's (both said "Click Allow" until one of them repainted).
+      renderSlackNudge(relaysLayout === "chats");
+    }
     else { renderSlackNudge(); renderRelays(); }
     return true;
   }
@@ -20095,7 +20100,10 @@
     slackConnectionWaitingSince = 0;
     slackConnectionError = "";
     slackArrivalWindowUntil = Date.now() + SLACK_CONNECTED_ROW_MS;
-    setTimeout(() => { if (activeView === "relays") renderSlackNudge(); }, SLACK_CONNECTED_ROW_MS + 50);
+    setTimeout(() => {
+      if (activeView === "relays") renderSlackNudge();
+      else if (activeView === "threads") renderSlackNudge(relaysLayout === "chats");
+    }, SLACK_CONNECTED_ROW_MS + 50);
   }
   // Main saw Slack say yes before this renderer's own check did.
   window.relay.onSlackConnection?.((info) => {

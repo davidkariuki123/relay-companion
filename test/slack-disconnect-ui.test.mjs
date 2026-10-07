@@ -15,17 +15,16 @@ function between(source, startMarker, endMarker) {
 test("Slack disconnect confirmation is a footer inside the existing Slack card", () => {
   const settings = between(html, "function slackSettingsHtml(info)", "function renderSettings()");
   const cardStart = settings.indexOf('<div class="sv-slack-card');
-  const syncCopy = settings.indexOf('<div class="sv-slack-foot">');
+  const row = settings.indexOf('<div class="sv-slack-row">');
   const confirmation = settings.indexOf('<div class="sv-slack-confirm"');
   const cardEnd = settings.indexOf('</div>\n      ${slackConnectionError');
 
-  assert.ok(cardStart >= 0 && syncCopy > cardStart && confirmation > syncCopy && cardEnd > confirmation);
+  assert.ok(cardStart >= 0 && row > cardStart && confirmation > row && cardEnd > confirmation);
   assert.doesNotMatch(settings, /sv-integration-backdrop|aria-modal="true"/);
   assert.match(settings, /Disconnect Slack\?/);
   assert.match(settings, /Your Slack chats stop syncing\. Messages already here stay\./);
-  // The sync explanation is for someone still deciding; a connected card carries
-  // only its Disconnect and the confirmation footer.
-  assert.match(settings, /\$\{personalConnected \? "" : '<div class="sv-slack-foot">/);
+  // One line on the card says what Slack does; no second paragraph under it.
+  assert.doesNotMatch(settings, /sv-slack-foot/);
 });
 
 test("the calm footer animates the card open and respects reduced motion", () => {
