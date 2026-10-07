@@ -499,7 +499,7 @@ test("the task face declares itself and its runtime in the document", () => {
   assert.match(previewHtml, /id="taskChip"/);
   assert.match(previewHtml, /id="taskState"/);
   assert.match(previewHtml, /id="runtimePop"/);
-  assert.match(previewHtml, /data-rt-model="claude-opus-5"/);
+  assert.match(previewHtml, /data-rt-model="opus"/);
   cssRule(previewHtml, ".task-chip");
   cssRule(previewHtml, ".runtime-pop");
   // Codex is offered only when detected; the projector says whether it is.

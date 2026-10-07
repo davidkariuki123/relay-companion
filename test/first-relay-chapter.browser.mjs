@@ -65,7 +65,7 @@ try {
   await page.locator('#suLinkSkip').waitFor();
   assert.equal(await page.locator('#signupView').getByText('Now relay someone who isn’t on Relay.').isVisible(), true);
   assert.equal(await page.locator('#signupView').getByText('This screen updates when your link is ready.').isVisible(), true);
-  assert.equal(await page.locator('#signupView').getByText('make you a relay about something you’re working on').isVisible(), true);
+  assert.equal(await page.locator('#signupView').getByText('Answer there').isVisible(), true);
   assert.equal(await page.locator('#suCelebrationContinue').count(), 0);
 
   // 3. The account's history shows the minted link: the message to send appears.
@@ -77,7 +77,7 @@ try {
   assert.equal((await page.locator('#suFirstLinkText').innerText()).replace(/\s*↗$/, ''), shareText);
   assert.equal(await page.locator('#signupView').getByText('Your first link').isVisible(), true, 'a hello came first: this is the second screen');
   assert.equal(await page.locator('.su-first-link .su-relay-moment').count(), 0, 'the celebration already happened');
-  assert.equal(await page.locator('#signupView').getByText('Send it wherever you talk to them. They can ask their Claude Code or Codex to reply. Their reply will appear inside your Relay app, even if they don’t have Relay.').isVisible(), true);
+  assert.equal(await page.locator('#signupView').getByText('Send it wherever you talk to them. They can ask their own AI to reply. Their reply will appear inside your Relay app, even if they don’t have Relay.').isVisible(), true);
   assert.equal(await page.locator('#suLinkCopy').textContent(), 'Copy message');
   assert.equal(await page.locator('#suLinkContinue').textContent(), 'Continue');
   await page.evaluate(() => {window.fixtureCopyFailure = true;});
@@ -141,9 +141,9 @@ try {
     p.ui.firstRelayKind = 'link'; p.ui.firstRelayStatus = 'waiting'; p.ui.firstRelayId = ''; p.ui.firstLink = null;
     p.ui.networkOnboarding.required = false;`);
   await page.locator('#signupView').getByText('Follow the instructions in').waitFor();
-  assert.equal(await page.locator('#signupView').getByText('Your first Relay').isVisible(), true);
-  assert.equal(await page.locator('#signupView').getByText('make you a relay about something you’re working on').isVisible(), true);
-  assert.equal(await page.locator('#signupView').getByText('and the other person needs nothing installed.').isVisible(), true);
+  assert.equal(await page.locator('#signupView').getByText('Your first Relay', { exact: true }).isVisible(), true);
+  assert.equal(await page.locator('#signupView').getByText('will help you make your first Relay link').isVisible(), true);
+  assert.equal(await page.locator('#signupView').getByText('The other person needs nothing installed.').isVisible(), true);
   assert.equal(await page.locator('#signupView').getByText('This screen updates when your link is ready.').isVisible(), true);
   assert.equal(await page.locator('#signupView').getByText('Your agent will help you send your first Relay.').count(), 0);
   assert.equal(await page.locator('#suLinkSkip').count(), 0, 'before the link, the handoff has no Your-first-link Skip');
@@ -161,7 +161,7 @@ try {
   assert.equal(await page.locator('#signupView').getByText('Your first link').count(), 0);
   assert.equal(await page.locator('#signupView').getByText('Your link is ready.').isVisible(), true);
   assert.equal((await page.locator('#suFirstLinkText').innerText()).replace(/\s*↗$/, ''), linkShareText);
-  assert.equal(await page.locator('#signupView').getByText('Send it wherever you talk to them. They can ask their Claude Code or Codex to reply. Their reply will appear inside your Relay app, even if they don’t have Relay.').isVisible(), true);
+  assert.equal(await page.locator('#signupView').getByText('Send it wherever you talk to them. They can ask their own AI to reply. Their reply will appear inside your Relay app, even if they don’t have Relay.').isVisible(), true);
   assert.equal(await page.locator('#suLinkCopy').textContent(), 'Copy message');
   assert.equal(await page.locator('#suLinkContinue').textContent(), 'Continue');
   // Copy message changes the controls in place: the marks are the same nodes

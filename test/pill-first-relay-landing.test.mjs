@@ -35,7 +35,7 @@ test("before the send, the handoff screen stays; after it, the chapter renders",
 test("with no inviter, the handoff asks for a link and waits for it", () => {
   const stage = slice('if (signupStage === "first-relay") {', 'if (signupStage === "restart-required") {');
   assert.match(stage, /const linkFirst = payload\.ui\?\.firstRelayKind === "link";/);
-  assert.match(stage, /Ask \$\{agentName \? esc\(agentName\) : "your agent"\} to <strong>make you a relay about something you’re working on<\/strong>\. It gives you a link and the message to send with it, and the other person needs nothing installed\./);
+  assert.match(stage, /\$\{agentName \? esc\(agentName\) : "Your agent"\} will help you make your first Relay link\. The other person needs nothing installed\./);
   assert.match(stage, /linkFirst \? "This screen updates when your link is ready\."/);
   assert.match(stage, /JSON\.stringify\(\[status, signupBusy, signupError, linkFirst, agentChosen\?\.host/, "the kind is part of the render signature");
   assert.match(stage, /"Your first Relay"/);
@@ -63,7 +63,7 @@ test("the celebration auto-advances after twelve seconds and Continue skips the 
 test("Your first link asks for a relay in the person's own words, then shows the message to send", () => {
   const chapter = slice("  function renderFirstRelayChapter() {", "  // OPEN RELAY (2026-09-13)");
   assert.match(chapter, /Now relay someone who isn’t on Relay\./);
-  assert.match(chapter, /Ask \$\{esc\(onboardingAgentFor\(\)\?\.name \|\| "your agent"\)\} to <strong>make you a relay about something you’re working on<\/strong>\. It gives you a link and the message to send with it\./);
+  assert.match(chapter, /\$\{esc\(onboardingAgentFor\(\)\?\.name \|\| "Your agent"\)\} is asking who it’s for\. <strong>Answer there<\/strong>, and your link shows up here, ready to send\./);
   assert.doesNotMatch(chapter, /Priya|cutover|DKIM|Postmark/, "no hard-coded situation");
   assert.match(chapter, /This screen updates when your link is ready\./);
   assert.match(chapter, /id="suLinkSkip" type="button">Skip for now</);

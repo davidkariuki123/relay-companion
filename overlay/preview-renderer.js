@@ -100,9 +100,9 @@ try { if (localStorage.getItem("relayTheme") === "dark") document.documentElemen
   const actOpen = new Set();
   const sessionSummaryStabilizer = RelayWorkUI.createSummaryStabilizer({ delayMs:1000 });
   let sessionScrollController = null;
-  /** The runtime the Start button will use. Claude Code · Opus 5 · high. */
-  const runtime = { host: "claude", model: "claude-opus-5", effort: "high" };
-  const MODEL_LABELS = { "claude-opus-5": "Opus 5", "claude-sonnet-5": "Sonnet 5" };
+  /** The runtime the Start button will use. Claude Code · Opus 5.5 · high. */
+  const runtime = { host: "claude", model: "opus", effort: "high" };
+  const MODEL_LABELS = { opus: "Opus 5.5", sonnet: "Sonnet 5.5" };
   const EFFORT_LABELS = { high: "High thinking", medium: "Standard thinking" };
 
   function text(value) {

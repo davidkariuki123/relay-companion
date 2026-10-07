@@ -455,3 +455,7 @@ test("a read of a Slack-linked room is a whole read: one call, both summaries qu
   runtime();
   assert.equal(persisted.length, 1, "the same read generation is not posted twice");
 });
+
+test("an empty Slack DM never replaces the real last message of the chat it joins", () => {
+  assert.match(html, /if \(projected\.hasActivity && new Date\(projected\.latest\.at \|\| 0\) > new Date\(existing\.latest\.at \|\| 0\)\) \{/);
+});

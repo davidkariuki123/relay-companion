@@ -104,7 +104,7 @@ test("the handoff asks for a link when the first Relay is one, and the hello cop
   const stage = slice('if (signupStage === "first-relay") {', 'if (signupStage === "restart-required") {');
   assert.match(stage, /const linkFirst = payload\.ui\?\.firstRelayKind === "link";/);
   assert.match(stage, /JSON\.stringify\(\[status, signupBusy, signupError, linkFirst, agentChosen\?\.host/);
-  assert.match(stage, /linkFirst\s*\? `Ask \$\{agentName \? esc\(agentName\) : "your agent"\} to <strong>make you a relay about something you’re working on<\/strong>\. It gives you a link and the message to send with it, and the other person needs nothing installed\.`\s*: agentName \? `\$\{esc\(agentName\)\} will help you send your first Relay\$\{destination\}\.` : "Your agent will help you send your first Relay\."/);
+  assert.match(stage, /linkFirst\s*\? `\$\{agentName \? esc\(agentName\) : "Your agent"\} will help you make your first Relay link\. The other person needs nothing installed\.`\s*: agentName \? `\$\{esc\(agentName\)\} will help you send your first Relay\$\{destination\}\.` : "Your agent will help you send your first Relay\."/);
   assert.match(stage, /linkFirst \? "This screen updates when your link is ready\."\s*: "This screen will update when your Relay is sent\."/);
   // Both kinds share the handoff title and the eyebrow.
   assert.match(stage, /Follow the instructions in/);

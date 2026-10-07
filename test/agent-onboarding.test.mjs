@@ -204,3 +204,8 @@ test("after connecting, Claude's Write/delete tools go to Always allow before th
   assert.match(html, /<span>\$\{chevron\}Write\/delete tools<\/span><b>\$\{check\}Always allow\$\{chevron\}<\/b>/);
   assert.match(html, /data-claude-allowed>Done<\/button>/);
 });
+
+test("picking ChatGPT in the chooser goes straight to the browser, with no where-question", () => {
+  const html = fs.readFileSync(new URL("../overlay/inbox.html", import.meta.url), "utf8");
+  assert.match(html, /chooseOnboardingAgent\(button\.dataset\.agentChoose, button\.dataset\.agentChoose === "chatgpt" \? "browser" : ""\)/);
+});

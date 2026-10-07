@@ -6,7 +6,7 @@ import { startAcpRun, acpWorker, subscribeAcpWorker } from "./acp-session.js";
 import { relayMcpLaunchSpec } from "./runtime.js";
 import { claudeHome } from "./host-paths.js";
 
-async function launch({ sessionId, cwd = os.homedir(), title = "Relay Task", content, model = "claude-opus-5", effort = "high", permissionMode = "auto", adopt = adoptClaudeSessionIntoDesktop, startRun = startAcpRun, onPermission } = {}) {
+async function launch({ sessionId, cwd = os.homedir(), title = "Relay Task", content, model = "opus", effort = "high", permissionMode = "auto", adopt = adoptClaudeSessionIntoDesktop, startRun = startAcpRun, onPermission } = {}) {
   const worker = await startRun({ provider: "claude", sessionId, cwd, prompt: String(content || ""), model, effort,
     mode: permissionMode, mcpServers: acpMcpServers({ relay: relayMcpLaunchSpec() }), onPermission });
   worker.sessionPath = path.join(claudeHome(), "projects", path.resolve(cwd).replace(/[^a-zA-Z0-9]/g, "-"), `${worker.sessionId}.jsonl`);

@@ -3515,6 +3515,8 @@
   .su-keys-scroll { font-weight:600; }
   .su-key-send { padding:4px 6px; background:#d97757; color:#fff; }
   :root[data-theme="dark"] .su-key-send { background:#d97757; color:#fff; }
+  .su-key-send.chatgpt, :root[data-theme="dark"] .su-key-send.chatgpt { background:#0d0d0d; color:#fff; box-shadow:inset 0 0 0 1px rgba(255,255,255,.18); }
+  .su-keys-says { margin-top:3px; padding-top:9px; border-top:1px solid var(--hair); color:var(--muted); font:12.5px/1.4 var(--sans); }
   .su-key-send svg { width:13px; height:13px; fill:none; stroke:currentColor; stroke-width:2.2; stroke-linecap:round; stroke-linejoin:round; }
   /* Claude's own settings row, drawn: the label, and the dropdown set to Always allow. */
   .su-claude-row { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:14px; padding:12px 12px 12px 10px;
@@ -7456,6 +7458,10 @@
   // Display names → runtime ids the main process speaks (claude-opus-5,
   // gpt-5.3-codex). The rail shows the human name; the runtime needs the id.
   const CODEX_MODEL_ID = {
+    "6.1 Sol": "gpt-6.1-sol",
+    "6 Astra": "gpt-6-astra",
+    "6 Sol": "gpt-6-sol",
+    "6 Luna": "gpt-6-luna",
     "5.6 Sol": "gpt-5.6-sol",
     "5.6 Terra": "gpt-5.6-terra",
     "5.6 Luna": "gpt-5.6-luna",
@@ -7470,7 +7476,12 @@
     if (hostKeyFor(appName) === "codex") {
       return CODEX_MODEL_ID[String(modelName || "").trim()] || m;
     }
-    return m.startsWith("claude-") ? m : `claude-${m}`;
+    // A Claude choice is its family: each computer's Claude Code resolves
+    // "opus" to the newest Opus it has, so the label can move on without a
+    // pinned id that an older install would refuse.
+    if (CLAUDE_MODEL_ID[String(modelName || "").trim()]) return CLAUDE_MODEL_ID[String(modelName || "").trim()];
+    const id = m.replace(/\./g, "-");
+    return id.startsWith("claude-") ? id : `claude-${id}`;
   }
   function hostKeyFor(appName) {
     const n = String(appName || "").toLowerCase();
@@ -11238,6 +11249,12 @@
   // The vendor square (David's law): Claude-family apps wear the anthropic
   // ORANGE; Codex/ChatGPT wear the codex BLUE. Everywhere an agent app is
   // named with a square, the square is the vendor's.
+  const CLAUDE_MODEL_ID = {
+    "Opus 5.5": "opus",
+    "Fable 5.1": "fable",
+    "Sonnet 5.5": "sonnet",
+    "Haiku 4.5": "haiku",
+  };
   function vendorSq(app) {
     return /claude/i.test(String(app)) ? "var(--brand-anthropic)" : "var(--agent-sq)";
   }
@@ -11246,11 +11263,11 @@
   // it per request. Model lists read from the installed apps' own binaries
   // (Claude CLI 2.1.222; ChatGPT.app app.asar), 2026-08-12.
   const AGENT_ROUTES = {
-    "Claude Code":   { models:["Opus 5","Fable 5","Sonnet 5","Haiku 4.5"], efforts:["low","medium","high","xhigh","max"], model:"Opus 5", effort:"high" },
+    "Claude Code":   { models:["Opus 5.5","Fable 5.1","Sonnet 5.5","Haiku 4.5"], efforts:["low","medium","high","xhigh","max"], model:"Opus 5.5", effort:"high" },
     // The app's OWN catalogue, read from ChatGPT.app/Contents/Resources/app.asar
     // (gpt-5.6-sol / -terra / -luna, gpt-5.5, gpt-5.4, gpt-5.3-codex[-spark]).
     // Labels are the app's, so the picker reads like the one the user knows.
-    "Codex":         { models:["5.6 Sol","5.6 Terra","5.6 Luna","5.5","5.4","5.3 Codex","5.3 Codex Spark"], efforts:["auto","low","medium","high","xhigh"], model:"5.6 Sol", effort:"high" },
+    "Codex":         { models:["6.1 Sol","6 Astra","6 Sol","6 Luna","5.6 Sol","5.6 Terra","5.6 Luna"], efforts:["auto","low","medium","high","xhigh","max"], model:"5.6 Sol", effort:"high" },
   };
   const taskRoutes = new Map(); // packetId -> { app, model, effort } (ad-hoc overrides)
   function routeFor(id) {
@@ -17286,7 +17303,9 @@
         existing.provider = "slack";
         existing.channel = projected.channel;
         for (const id of summaryThreadIds) existing.threadIds.add(id);
-        if (new Date(projected.latest.at || 0) > new Date(existing.latest.at || 0)) {
+        // An empty side never speaks for the room: a Slack DM with nothing in
+        // it must not turn a real conversation into "No messages yet".
+        if (projected.hasActivity && new Date(projected.latest.at || 0) > new Date(existing.latest.at || 0)) {
           existing.latest = projected.latest;
           existing.threadId = projected.threadId;
         }
@@ -20175,8 +20194,8 @@
     if (payload.features?.agentMentions !== true || !window.relay.chatAgentPreferences) return "";
     if (!chatAgentPreferences) return `<div class="sv-open-section" data-stop="1"><div class="sv-open-title">Chat agents</div><div class="sv-open-intro">${esc(chatAgentPreferencesError || "Loading model defaults…")}</div></div>`;
     const rows = [
-      { key:"claude", label:"@Claude", logo:"claudeCodeMark.svg", models:[["opus","Opus 5"],["fable","Fable 5"],["sonnet","Sonnet 5"],["haiku","Haiku 4.5"]], efforts:["low","medium","high","xhigh","max"] },
-      { key:"codex", label:"@Codex", logo:"codexMark.svg", models:[["gpt-5.6-sol","5.6 Sol"],["gpt-5.6-terra","5.6 Terra"],["gpt-5.6-luna","5.6 Luna"],["gpt-5.5","5.5"],["gpt-5.4","5.4"]], efforts:["auto","low","medium","high","xhigh"] },
+      { key:"claude", label:"@Claude", logo:"claudeCodeMark.svg", models:[["opus","Opus 5.5"],["fable","Fable 5.1"],["sonnet","Sonnet 5.5"],["haiku","Haiku 4.5"]], efforts:["low","medium","high","xhigh","max"] },
+      { key:"codex", label:"@Codex", logo:"codexMark.svg", models:[["gpt-6.1-sol","6.1 Sol"],["gpt-6-astra","6 Astra"],["gpt-6-sol","6 Sol"],["gpt-6-luna","6 Luna"],["gpt-5.6-sol","5.6 Sol"],["gpt-5.6-terra","5.6 Terra"],["gpt-5.6-luna","5.6 Luna"]], efforts:["auto","low","medium","high","xhigh","max"] },
     ];
     return `<div class="sv-open-section sv-agent-defaults" data-stop="1">
       <div class="sv-open-title">Chat agents</div>
@@ -22105,7 +22124,7 @@
     signupBodyEl.dataset.networkSignature = signature;
     signupBodyEl.innerHTML = `<div class="su-first-relay su-network"><div class="su-network-content"><p class="su-step">${esc(step)}</p>
       <h1 class="su-title">Grow your network.</h1>
-      <p class="su-copy">Share your invite link with someone you’d like to Relay. When they join, you can message each other from your agents.</p>
+      <p class="su-copy">Send your invite link to someone you work with. Once they join, your AIs can Relay each other.</p>
       <div class="su-form"><button class="su-secondary" id="suNetworkCopy" type="button"${state.busy ? " disabled" : ""}>${state.copied ? "Copy link again" : "Copy invite link"}</button></div>
       ${state.copied ? '<p class="su-copy" role="status">Link copied. Paste it wherever you talk to them.</p>' : ""}
       </div><div class="su-form"><button class="su-primary" id="suNetworkContinue" type="button"${state.busy ? " disabled" : ""}>Open Relay</button></div>
@@ -22149,7 +22168,7 @@
         signupBodyEl.innerHTML = `<div class="su-first-relay su-first-link">
           <p class="su-step">Your first link</p>
           <h1 class="su-title">Now relay someone who isn’t on Relay.</h1>
-          <p class="su-copy">Ask ${esc(onboardingAgentFor()?.name || "your agent")} to <strong>make you a relay about something you’re working on</strong>. It gives you a link and the message to send with it.</p>
+          <p class="su-copy">${esc(onboardingAgentFor()?.name || "Your agent")} is asking who it’s for. <strong>Answer there</strong>, and your link shows up here, ready to send.</p>
           <p class="su-send-progress" role="status"><span aria-hidden="true"></span>This screen updates when your link is ready.</p>
           <div class="su-form"><button class="su-link" id="suLinkSkip" type="button">Skip for now</button></div>
         </div>`;
@@ -22434,7 +22453,11 @@
         <p class="su-copy">Relay works inside it. You can add others later.</p>
         <div class="su-agents" role="list">${ONBOARDING_AGENTS.filter((o) => o.host !== "conductor" || agentSurfaces?.Conductor?.available === true || agent?.host === "conductor")
           .map((o) => onboardingAgentRow(o, o.context, `data-agent-choose="${o.host}"`)).join("")}</div></div>`;
-      signupBodyEl.querySelectorAll("[data-agent-choose]").forEach((button) => button.addEventListener("click", () => chooseOnboardingAgent(button.dataset.agentChoose, "")));
+      // ChatGPT goes straight to the browser (live run 20, 2026-10-07): setup
+      // and the lesson both run there on the same account, and the Mac app has
+      // no link that opens Work with the message ready. "Copy instead" stays
+      // for anyone who would rather paste into the app.
+      signupBodyEl.querySelectorAll("[data-agent-choose]").forEach((button) => button.addEventListener("click", () => chooseOnboardingAgent(button.dataset.agentChoose, button.dataset.agentChoose === "chatgpt" ? "browser" : "")));
       return;
     }
     if (option.host === "claude") { renderClaudeConnect(agent, option); return; }
@@ -22474,14 +22497,26 @@
     const quiet = `${canOpen ? `<button class="su-link" type="button" data-agent-copy${notReady ? " disabled" : ""}>Copy instead</button><span aria-hidden="true">·</span>` : ""}<button class="su-link" type="button" data-agent-reset>Choose a different AI</button>`;
     // A chat AI that opens with the request already typed needs no pasting:
     // the screen says so and draws the one thing left to press, like Claude's.
-    if (option.chat && canOpen && run) {
+    // In the browser it will open, so the screen is this one from the first
+    // frame, its button held for the second the request takes; a different
+    // title while preparing read as a different step (run 22).
+    const preparingOpen = option.chat && !run && !agent.runError && agent.place === "browser";
+    if (option.chat && ((canOpen && run) || preparingOpen)) {
       const send = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5L8 3l4.5 4.5"/></svg>';
+      // Two numbered steps, the same shapes as Claude's: what to click here,
+      // then what to press there. No picture of the message: a shortened copy
+      // ("Set up Relay for me…") read as something to type (David, 2026-10-08).
+      const tick = '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 5.3l2.3 2.2L8.5 2.6"/></svg>';
       signupBodyEl.innerHTML = `<div class="su-local-prompt su-agent-screen su-claude-connect"><div class="su-step">Your next step</div>
         <h1 class="su-title">Add Relay to<br>${onboardingAgentTitleName(agent)}.</h1>
-        <p class="su-copy">It opens with a message ready. Press send:</p>
-        <div class="su-composer ${option.host}" role="img" aria-label="${esc(option.name)}’s message box with Relay’s setup message, and its send button"><span>Set up Relay for me…</span><b>${send}</b></div>
-        <div class="su-claude-tail"><div class="su-form su-agent-actions"><button class="su-primary" type="button" data-agent-open${onboardingAgentBusy ? " disabled" : ""}>Open ${esc(option.name)}</button></div>
-        <div class="su-agent-quiet"><button class="su-link" type="button" data-agent-copy>Copy instead</button><span aria-hidden="true">·</span><button class="su-link" type="button" data-agent-reset>Choose a different AI</button></div>
+        <p class="su-copy">Two clicks:</p>
+        <div class="su-keys" role="img" aria-label="Click Open ${esc(option.name)} below, then press send in ${esc(option.name)}">
+          <div class="su-keys-row"><span class="su-keys-n">1${tick}</span>Click <span class="su-key">Open ${esc(option.name)}</span> below</div>
+          <div class="su-keys-row"><span class="su-keys-n">2${tick}</span>In ${esc(option.name)}, press <span class="su-key su-key-send ${option.host}">${send}</span> to send</div>
+          <div class="su-keys-says">Relay’s setup message is already typed in for you.</div>
+        </div>
+        <div class="su-claude-tail"><div class="su-form su-agent-actions"><button class="su-primary" type="button" data-agent-open${onboardingAgentBusy || !run ? " disabled" : ""}>Open ${esc(option.name)}</button></div>
+        <div class="su-agent-quiet"><button class="su-link" type="button" data-agent-copy${run ? "" : " disabled"}>Copy instead</button><span aria-hidden="true">·</span><button class="su-link" type="button" data-agent-reset>Choose a different AI</button></div>
         <div class="desktop-prompt-wait" role="status">${esc(onboardingAgentNote || `This moves on when ${option.name} connects.`)}</div></div></div>`;
       signupBodyEl.querySelector("[data-agent-open]")?.addEventListener("click", openOnboardingAgent);
       signupBodyEl.querySelector("[data-agent-copy]")?.addEventListener("click", copyOnboardingAgentRequest);
@@ -22623,7 +22658,8 @@
   // business news (2 of 2; 2 of 2 went through on "Always allow", runs 16-17).
   // Claude has just shown its Relay settings page, so the one fix is there:
   // Write/delete tools → Always allow. Relay can't see that setting, so the
-  // person says Done.
+  // person says Done. On a laptop the row sits at the bottom of Claude's page,
+  // under its "Connected" toast (run 18), so the line says to scroll to it.
   let claudeAllowed = false;
   function renderClaudeAllow(agent) {
     const signature = JSON.stringify(["claude-allow", onboardingAgentBusy]);
@@ -22634,7 +22670,7 @@
     const chevron = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5L6 7.5 9 4.5"/></svg>';
     signupBodyEl.innerHTML = `<div class="su-local-prompt su-agent-screen su-claude-connect su-claude-allow"><div class="su-step">Connected</div>
       <h1 class="su-title">Relay is in<br>${onboardingAgentTitleName(agent)}.</h1>
-      <p class="su-copy">One last click, on the page Claude is showing:</p>
+      <p class="su-copy">One last thing in Claude. Scroll down to this row and pick Always allow:</p>
       <div class="su-claude-row" role="img" aria-label="In Claude, next to Write/delete tools, choose Always allow">
         <span>${chevron}Write/delete tools</span><b>${check}Always allow${chevron}</b>
       </div>
@@ -22818,7 +22854,7 @@
       const copy = checking || unavailable
         ? "Keep going in the conversation where you set up Relay."
         : linkFirst
-          ? `Ask ${agentName ? esc(agentName) : "your agent"} to <strong>make you a relay about something you’re working on</strong>. It gives you a link and the message to send with it, and the other person needs nothing installed.`
+          ? `${agentName ? esc(agentName) : "Your agent"} will help you make your first Relay link. The other person needs nothing installed.`
           : agentName ? `${esc(agentName)} will help you send your first Relay${destination}.` : "Your agent will help you send your first Relay.";
       const who = esc(payload.account?.name || payload.account?.email || "");
       const progress = unavailable ? "We couldn’t check your send yet. We’ll try again."

@@ -6,7 +6,8 @@ import net from "node:net";
 import path from "node:path";
 import updateActivity from "../bootstrap/update-activity.cjs";
 import { configDir, readConfig } from "./config.js";
-import { executionEnabled } from "./native-task-launch.js";
+import { executionEnabled, nativeProviders } from "./native-task-launch.js";
+import { runTaskOperation, TASK_RUN_OFF_MESSAGE } from "./task-run-remote.js";
 import { acpAvailable, acpMcpServers } from "./acp-client.js";
 import { startAcpRun, acpPermissionMode } from "./acp-session.js";
 import { acpSessionOwner } from "./acp-session-owner.js";
@@ -381,11 +382,20 @@ function controllerObservation() {
   // Provider installation can change while the daemon is running. Refresh the
   // executable probe so a queued @mention resumes without a Relay restart.
   if (!cachedControllerCapabilities || Date.now() - cachedControllerCapabilitiesAt > 10_000) {
+    let native = [];
+    try { native = nativeProviders(); } catch {}
     cachedControllerCapabilities = {
       claude: acpAvailable("claude"),
       codex: acpAvailable("codex"),
       start: true,
       send: true,
+      // The desktop apps a Task can run in here, for another device that asks
+      // (task-run-remote.js), and whether this account allowed it on this computer.
+      nativeExecute: {
+        claude: native.some((option) => option.provider === "claude"),
+        codex: native.some((option) => option.provider === "codex"),
+        allowed: (() => { try { return executionEnabled(readConfig()); } catch { return false; } })(),
+      },
     };
     cachedControllerCapabilitiesAt = Date.now();
   }
@@ -866,6 +876,7 @@ async function processClaim(client, claim, log) {
       });
       return;
     }
+    if (await runTaskOperation(client, operation, claim.claimToken, { log, recordEvidence: evidence })) return;
     if (await materializeRelayOperation(client, operation, claim.claimToken, { log })) return;
     if (await recoverClaim({ client, claim, target: claim.target, operation })) return;
     const input = operation.input || {};
@@ -922,6 +933,15 @@ async function explainExecutionOff(client, operation) {
   }
 }
 
+async function refuseTaskRun(client, operation) {
+  if (activeOperations.has(operation.id)) return;
+  try {
+    const claim = await client.claimSessionOperation(operation.id);
+    if (claim.terminal) return;
+    await evidence(client, operation.id, claim.claimToken, "failed", {}, TASK_RUN_OFF_MESSAGE);
+  } catch {}
+}
+
 export async function runSessionDirectoryOnce({
   client,
   log = () => {},
@@ -930,19 +950,25 @@ export async function runSessionDirectoryOnce({
   discover = discoverSessionsAsync,
   controller = controllerObservation,
   executionAllowed = () => executionEnabled(readConfig()),
+  // Production developer accounts have Task runs but not AI sessions: answer
+  // Task operations only, and publish this computer without scanning sessions.
+  tasksOnly = false,
 } = {}) {
   // Owned chat agents are user-visible foreground work. Claim them before the
   // comparatively expensive local session scan/upload so a large native
   // session directory cannot add several seconds before the CLI even starts.
   const inbox = await client.sessionControllerInbox();
-  const operations = inbox.operations || [];
+  const operations = (inbox.operations || []).filter((operation) => !tasksOnly || operation.input?.taskRelayId);
   const urgent = operations.filter((operation) => operation.input?.agentRunRelayId);
   const ordinary = operations.filter((operation) => !urgent.includes(operation));
   const claim = async (operation) => {
     // Opening a Relay for reading is unchanged. Device-triggered inference,
     // including @agent, needs this account's explicit opt-in on this device.
     if (!(operation.kind === "start" && operation.input?.relayMessageId) && !executionAllowed()) {
-      await explainExecutionOff(client, operation);
+      // A Task asked for from another device says why at once, so the person
+      // who asked is not left waiting on a computer that will never start it.
+      if (operation.input?.taskRelayId) await refuseTaskRun(client, operation);
+      else await explainExecutionOff(client, operation);
       return;
     }
     if (activeOperations.has(operation.id)) return;
@@ -962,7 +988,7 @@ export async function runSessionDirectoryOnce({
   };
   for (const operation of urgent) await claim(operation);
 
-  const observations = await discover();
+  const observations = tasksOnly ? [] : await discover();
   const published = await client.publishSessionObservations(observations, controller());
   cachePublishedSessions(published);
   for (const operation of ordinary) {

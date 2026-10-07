@@ -353,6 +353,15 @@ test("the daemon's session controller neither uploads nor listens when AI sessio
   assert.equal(result.ran, true);
   assert.equal(result.error, failing);
   assert.deepEqual(logs, ["session directory unavailable: 503 during a rolling deploy"]);
+
+  // A developer on the production build has Execute but not AI sessions: the
+  // tick answers Task runs asked for from another device, without the scan.
+  const productionDeveloper = productFeatures({ env: { RELAY_UPDATE_CHANNEL: "stable" }, user: DEVELOPER });
+  assert.equal(productionDeveloper.aiSessions, false);
+  assert.equal(productionDeveloper.taskExecution, true);
+  let options = null;
+  assert.deepEqual(await sessionControllerTick({ client: untouchable, log, features: productionDeveloper, run: async (opts) => { options = opts; } }), { ran: true });
+  assert.equal(options.tasksOnly, true);
 });
 
 test("one role-aware daemon polls the legacy task protocol only for a developer account", async () => {

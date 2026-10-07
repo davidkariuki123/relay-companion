@@ -801,9 +801,13 @@ export function startAutoUpdateLoop({
 // directory failure must never stop ordinary Relay delivery or a developer's
 // Task runtime while a new API release rolls through.
 export async function sessionControllerTick({ client, log, features, run = runSessionDirectoryOnce } = {}) {
-  if (features && features.aiSessions === false) return { ran: false };
+  // AI sessions are developer-only on Dev. A Task run asked for from another
+  // device needs only the Execute tier, so those accounts still answer Task
+  // operations everywhere, without the session scan.
+  const tasksOnly = Boolean(features && features.aiSessions === false);
+  if (tasksOnly && features.taskExecution !== true) return { ran: false };
   try {
-    await run({ client, log });
+    await run({ client, log, ...(tasksOnly ? { tasksOnly: true } : {}) });
     return { ran: true };
   } catch (err) {
     log(`session directory unavailable: ${err.message}`);

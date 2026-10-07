@@ -8293,7 +8293,7 @@ async function previewTaskSteer(input) {
       return { ok: true };
     }
     const claudeCode = await import("../src/claude-acp-session.js");
-    const claudeModel = requestedModel || row.claudeNativeSession.model || "claude-opus-5";
+    const claudeModel = requestedModel || row.claudeNativeSession.model || "opus";
     const claudeEffort = requestedEffort || row.claudeNativeSession.effort || "high";
     await claudeCode.continueClaudeAcpSession({
       sessionId,

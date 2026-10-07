@@ -166,12 +166,12 @@ const TASK_MODES = {
 };
 const TASK_DEFAULTS = { claude: "auto", codex: "full" };
 const CHAT_AGENT_MODELS = {
-  claude: [["opus", "Opus 5"], ["fable", "Fable 5"], ["sonnet", "Sonnet 5"], ["haiku", "Haiku 4.5"]],
-  codex: [["gpt-5.6-sol", "5.6 Sol"], ["gpt-5.6-terra", "5.6 Terra"], ["gpt-5.6-luna", "5.6 Luna"], ["gpt-5.5", "5.5"], ["gpt-5.4", "5.4"]],
+  claude: [["opus", "Opus 5.5"], ["fable", "Fable 5.1"], ["sonnet", "Sonnet 5.5"], ["haiku", "Haiku 4.5"]],
+  codex: [["gpt-6.1-sol", "6.1 Sol"], ["gpt-6-astra", "6 Astra"], ["gpt-6-sol", "6 Sol"], ["gpt-6-luna", "6 Luna"], ["gpt-5.6-sol", "5.6 Sol"], ["gpt-5.6-terra", "5.6 Terra"], ["gpt-5.6-luna", "5.6 Luna"]],
 };
 const CHAT_AGENT_EFFORTS = {
   claude: ["low", "medium", "high", "xhigh", "max"],
-  codex: ["auto", "low", "medium", "high", "xhigh"],
+  codex: ["auto", "low", "medium", "high", "xhigh", "max"],
 };
 
 function rank(options, value) {
