@@ -65,7 +65,7 @@ try {
  // Esc leaves with the words untouched and the draft back.
  await field.press('Escape');
  await composer.locator('.th-edit-band').waitFor({state:'detached'});
- assert.equal(await send.innerText(),'Relay');
+ assert.equal(await send.innerText(),'Send');
  assert.equal(await field.evaluate(el=>el.value),'a draft in progress');
  assert.equal(await page.evaluate(()=>window.writes.length),0);
  await field.fill('');
@@ -108,7 +108,7 @@ try {
  assert.equal(await page.evaluate(()=>window.writes.length),2);
  await page.waitForFunction(()=>/^Edited · \d{1,2}:\d{2}/.test(document.querySelector('[data-msg="edit-me"] .th-blk-time')?.textContent||''));
  assert.match(await bubble.locator('.th-msg-title').innerText(),/LAST LINE/);
- assert.equal(await send.innerText(),'Relay');
+ assert.equal(await send.innerText(),'Send');
  assert.equal(await field.evaluate(el=>el.value),'');
 
  // ↑ in an empty composer edits your newest editable text.
@@ -117,6 +117,10 @@ try {
  await composer.locator('.th-edit-band').waitFor();
  assert.equal(await page.evaluate(()=>document.querySelector('.qr.th-qr').dataset.editTarget),'edit-me');
  await field.press('Escape');
+ // Leaving the edit moves the room; let it come to rest before opening the
+ // menu, or that late scroll closes the menu under the next click.
+ await composer.locator('.th-edit-band').waitFor({state:'detached'});
+ await page.waitForFunction(()=>new Promise(r=>{const room=document.querySelector('[data-msg="edit-me"]');let last=room?.getBoundingClientRect().top,still=0;const tick=()=>{const now=room?.getBoundingClientRect().top;still=now===last?still+1:0;last=now;still>=5?r(true):requestAnimationFrame(tick)};requestAnimationFrame(tick)}));
 
  // Delete asks under the bubble, with who stops seeing it. Keep restores.
  await menuOf('edit-me');

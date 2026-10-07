@@ -1718,6 +1718,8 @@
   .rd-reply-quote .copy { color:var(--muted-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .rd-reply-text { margin-top:3px; font-size:13.5px; line-height:1.45; color:var(--ink); overflow-wrap:anywhere; white-space:pre-wrap; }
   .rd-reply-text .deleted { color:var(--muted-2); font-style:italic; }
+  .rd-reply-text.rd-reply-working { color:var(--muted-2); }
+  .rd-reply .rd-reply-work { opacity:1; }
   .rd-reply-text a { color:var(--accent); text-decoration:none; border-bottom:1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
   .rd-reply-files { margin-top:3px; font-size:11px; color:var(--muted-2); }
   .rd-quote-slot:empty { display:none; }
@@ -7075,19 +7077,34 @@
   // and flushed once the input blurs / the answer is sent.
   let pendingRelaysRender = false;
 
+  function positionMessageSideMenu(menu, trigger) {
+    // macOS draws the card on a larger transparent window. Only the card
+    // accepts mouse input, so a menu in that transparent margin is unclickable.
+    const card = cardEl.getBoundingClientRect();
+    const leftEdge = Math.max(0, card.left) + 8;
+    const rightEdge = Math.min(window.innerWidth, card.right) - 8;
+    const topEdge = Math.max(0, card.top) + 8;
+    const bottomEdge = Math.min(window.innerHeight, card.bottom) - 8;
+    menu.style.maxWidth = `${rightEdge - leftEdge}px`;
+    menu.style.maxHeight = `${bottomEdge - topEdge}px`;
+    menu.style.overflowY = "auto";
+    const rect = trigger.getBoundingClientRect();
+    const bounds = menu.getBoundingClientRect();
+    const left = Math.max(leftEdge, Math.min(rect.right - bounds.width, rightEdge - bounds.width));
+    const preferredTop = rect.bottom + bounds.height + 4 <= bottomEdge
+      ? rect.bottom + 4 : rect.top - bounds.height - 4;
+    const top = Math.max(topEdge, Math.min(preferredTop, bottomEdge - bounds.height));
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+  }
+
   function wireMessageSideMenus(container) {
     for (const trigger of container.querySelectorAll("[data-message-more]")) {
       const menu = document.getElementById(trigger.getAttribute("aria-controls"));
       if (!menu) continue;
       const open = () => {
         menu.showPopover();
-        const rect = trigger.getBoundingClientRect();
-        const bounds = menu.getBoundingClientRect();
-        const left = Math.min(Math.max(8, rect.right - bounds.width), window.innerWidth - bounds.width - 8);
-        const top = rect.bottom + bounds.height + 4 <= window.innerHeight - 8
-          ? rect.bottom + 4 : Math.max(8, rect.top - bounds.height - 4);
-        menu.style.left = `${left}px`;
-        menu.style.top = `${top}px`;
+        positionMessageSideMenu(menu, trigger);
         trigger.setAttribute("aria-expanded", "true");
         (menu.querySelector("[data-message-delete-cancel]") || menu.querySelector("button"))?.focus({ preventScroll:true });
       };
@@ -10224,8 +10241,13 @@
     }).join("");
     document.body.appendChild(routeMenuEl);
     const a = anchor.getBoundingClientRect();
-    routeMenuEl.style.left = Math.max(8, Math.min(a.left - 6, window.innerWidth - routeMenuEl.offsetWidth - 8)) + "px";
-    routeMenuEl.style.top = Math.max(8, a.top - routeMenuEl.offsetHeight - 8) + "px";
+    // Inside the card: on macOS the window around it is click-through.
+    const card = cardEl.getBoundingClientRect();
+    const leftEdge = Math.max(0, card.left) + 8;
+    const rightEdge = Math.min(window.innerWidth, card.right) - 8;
+    const topEdge = Math.max(0, card.top) + 8;
+    routeMenuEl.style.left = Math.max(leftEdge, Math.min(a.left - 6, rightEdge - routeMenuEl.offsetWidth)) + "px";
+    routeMenuEl.style.top = Math.max(topEdge, a.top - routeMenuEl.offsetHeight - 8) + "px";
     for (const b of routeMenuEl.querySelectorAll(".rt-item")) {
       b.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -11731,13 +11753,7 @@
     const menu = document.getElementById("sentLinkMenu");
     const trigger = sentLinkMenuFor ? document.querySelector(`[data-sent-link-more="${cssEscape(String(sentLinkMenuFor))}"]`) : null;
     if (!menu || !trigger || !menu.matches(":popover-open")) return;
-    const rect = trigger.getBoundingClientRect();
-    const bounds = menu.getBoundingClientRect();
-    const left = Math.min(Math.max(8, rect.right - bounds.width), window.innerWidth - bounds.width - 8);
-    const top = rect.bottom + bounds.height + 4 <= window.innerHeight - 8
-      ? rect.bottom + 4 : Math.max(8, rect.top - bounds.height - 4);
-    menu.style.left = `${left}px`;
-    menu.style.top = `${top}px`;
+    positionMessageSideMenu(menu, trigger);
   }
   function cssEscape(value) {
     return window.CSS && CSS.escape ? CSS.escape(value) : String(value).replace(/["\\]/g, "\\$&");
@@ -16572,28 +16588,40 @@
       if (!messageHasExplicitReplyGesture(message) && anchors && anchors.has(parentId)) return null;
       return byId.get(parentId) || null;
     };
+    const agentWork = (message) => Boolean(message && (message.ownedAgent || message.agentInvocation));
     const folds = (message) => Boolean(message && message.textLike && !message.request
-      && !message.ownedAgent && !message.agentInvocation && !message.inReplyToTopicPost
+      && !agentWork(message) && !message.inReplyToTopicPost
       && !taskEventOf(message, (id) => byId.get(id)));
-    const rootFor = (message) => {
-      const seen = new Set([message]);
-      let parent = deliberateParent(message);
-      while (parent && !seen.has(parent) && folds(parent)) {
-        const up = deliberateParent(parent);
-        if (!up) break;
-        seen.add(parent);
-        parent = up;
+    // The thread a message lives in, by the id of the message at its top; null
+    // for a message that stays in the room. An agent called with @ answers
+    // where it was called (Shane, 2026-10-06): its run always names the
+    // message that called it, so it joins that message's thread, and a reply
+    // to the agent stays there too. Called from the room, it answers there.
+    const threadOf = new Map();
+    const keyFor = (message, depth = 0) => {
+      const id = String(message.id || "");
+      if (threadOf.has(id)) return threadOf.get(id);
+      threadOf.set(id, null);
+      let key = null;
+      if (depth < 64 && !message.request) {
+        if (agentWork(message)) {
+          const caller = byId.get(String(message.inReplyToRelayId || ""));
+          key = caller ? keyFor(caller, depth + 1) : null;
+        } else if (folds(message)) {
+          const parent = deliberateParent(message);
+          if (parent && !parent.request && parent !== message) {
+            key = keyFor(parent, depth + 1) || (agentWork(parent) ? null : String(parent.id || ""));
+          }
+        }
       }
-      if (!parent || seen.has(parent) || parent.request || parent.ownedAgent) return null;
-      return parent;
+      threadOf.set(id, key);
+      return key;
     };
     const rootOf = new Map();
     const groups = new Map();
     for (const message of list) {
-      if (!folds(message)) continue;
-      const root = rootFor(message);
-      if (!root) continue;
-      const key = String(root.id || "");
+      const key = keyFor(message);
+      if (!key) continue;
       rootOf.set(String(message.id || ""), key);
       const group = groups.get(key) || [];
       group.push(message);
@@ -16658,12 +16686,18 @@
     const freshCount = replies.filter((reply) => readerFreshReplies.ids.has(String(reply.id || ""))).length;
     let start = readerRepliesExpanded.has(key) ? 0 : Math.max(0, replies.length - READER_REPLIES_SHOWN);
     if (firstFresh >= 0) start = Math.min(start, firstFresh);
-    const who = (message) => message.direction === "out" ? "You" : String(message.party || "Someone");
+    const who = (message) => replyAuthor(message).name;
     const rows = replies.slice(start).map((reply, offset) => {
-      const mine = reply.direction === "out";
-      const name = who(reply);
+      const author = replyAuthor(reply);
+      const { name, mine } = author;
+      // An agent answering here shows its work as it goes; its full run opens
+      // in its own reader.
+      const agentWorking = author.agent && !String(reply.body || "").trim() && !reply.deletedAt;
       const parent = reply.inReplyToRelayId ? thread.byId.get(String(reply.inReplyToRelayId)) : null;
-      const quote = parent && parent !== thread.root
+      // An agent always answers the message that called it; quoting the
+      // message right above it would only repeat it.
+      const callerAbove = author.agent && parent && parent === replies[start + offset - 1];
+      const quote = parent && parent !== thread.root && !callerAbove
         ? `<div class="rd-reply-quote"><span class="who">${esc(who(parent))}</span><span class="copy">${esc(relayListGist(String(parent.title || parent.body || "Message").replace(/\s+/g, " "), 120))}</span></div>`
         : "";
       const files = Array.isArray(reply.attachments) ? reply.attachments.length : 0;
@@ -16674,11 +16708,15 @@
         ? `<div class="rd-replies-new" role="separator"><span>${freshCount} new</span></div>`
         : "";
       return `${divider}<div class="rd-reply${reply.pending ? " pending" : ""}" data-rd-reply="${esc(reply.id)}">
-          <span class="th-party ${partyColorClass(name, mine)} rd-reply-face" aria-hidden="true">${esc((mine ? "Y" : firstName(name).charAt(0) || "?").toUpperCase())}</span>
+          <span class="th-party ${partyColorClass(name, mine)} rd-reply-face" aria-hidden="true">${esc(replyAuthorInitial(author))}</span>
           <div class="rd-reply-main">
-            <div class="rd-reply-head"><span class="th-party ${partyColorClass(name, mine)}">${esc(name)}</span>${chatTimestampHtml(reply.at, "rd-reply-time")}${reply.deletedAt || reply.pending ? "" : `<button type="button" class="rd-reply-quote-btn" data-rd-quote="${esc(reply.id)}">reply</button>`}</div>
+            <div class="rd-reply-head"><span class="th-party ${partyColorClass(name, mine)}">${esc(name)}</span>${chatTimestampHtml(reply.at, "rd-reply-time")}${author.agent
+              ? `<button type="button" class="rd-reply-quote-btn rd-reply-work" data-rd-open-work="${esc(reply.id)}">open work</button>`
+              : reply.deletedAt || reply.pending ? "" : `<button type="button" class="rd-reply-quote-btn" data-rd-quote="${esc(reply.id)}">reply</button>`}</div>
             ${quote}
-            ${String(reply.body || reply.title || "").trim() || reply.deletedAt ? `<div class="rd-reply-text">${words}</div>` : ""}
+            ${agentWorking
+              ? '<div class="rd-reply-text rd-reply-working">Working<span class="agent-working-indicator" aria-hidden="true"><span class="agent-working-dot"></span><span class="agent-working-dot"></span><span class="agent-working-dot"></span></span></div>'
+              : String(reply.body || reply.title || "").trim() || reply.deletedAt ? `<div class="rd-reply-text">${words}</div>` : ""}
             ${files ? `<div class="rd-reply-files">${files} ${files === 1 ? "attachment" : "attachments"}</div>` : ""}
           </div>
         </div>`;
@@ -16723,6 +16761,12 @@
         if (scrollEl) scrollEl.scrollTop = top;
       });
     }
+    for (const button of readerBodyEl.querySelectorAll("[data-rd-open-work]")) {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        openReader(String(button.getAttribute("data-rd-open-work") || ""), "threads");
+      });
+    }
     for (const button of readerBodyEl.querySelectorAll("[data-rd-quote]")) {
       button.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -16755,18 +16799,32 @@
       }));
     }
   }
+  // Who a thread reply is from. An agent answering in the thread is named as
+  // itself ("My Claude", or the other person's agent), never as "You".
+  function replyAuthor(message) {
+    if (message?.ownedAgent) {
+      const author = RelayChatPresentation.chatMessageAuthorPresentation({
+        direction:message.direction, sender:{ name:message.party }, source:message.source, ownedAgent:true,
+      });
+      return { name:author.label, mine:false, agent:true };
+    }
+    const mine = message?.direction === "out";
+    return { name:mine ? "You" : String(message?.party || "Someone"), mine, agent:false };
+  }
+  function replyAuthorInitial({ name, mine }) {
+    return (mine ? "Y" : (name.startsWith("My ") ? name.slice(3) : firstName(name)).charAt(0) || "?").toUpperCase();
+  }
   // The line under a message with a thread: who replied, how many, when last,
   // and how many are new to you.
   function replyThreadSummaryHtml(root, replies, { strip = false, mine = false, key = "" } = {}) {
     if (!root || !replies || !replies.length) return "";
     const voices = [];
     for (const reply of [...replies].reverse()) {
-      const mine = reply.direction === "out";
-      const name = mine ? "You" : String(reply.party || "Someone");
-      if (!voices.some((voice) => voice.name === name)) voices.push({ name, mine });
+      const voice = replyAuthor(reply);
+      if (!voices.some((known) => known.name === voice.name)) voices.push(voice);
     }
-    const faces = voices.slice(0, 3).map(({ name, mine }) =>
-      `<span class="th-party ${partyColorClass(name, mine)} th-rt-face" aria-hidden="true">${esc((mine ? "Y" : firstName(name).charAt(0) || "?").toUpperCase())}</span>`).join("");
+    const faces = voices.slice(0, 3).map((voice) =>
+      `<span class="th-party ${partyColorClass(voice.name, voice.mine)} th-rt-face" aria-hidden="true">${esc(replyAuthorInitial(voice))}</span>`).join("");
     const fresh = replies.filter((reply) => reply.direction === "in" && reply.unread).length;
     const count = replies.length;
     const last = formatChatTime(replies[replies.length - 1].at);

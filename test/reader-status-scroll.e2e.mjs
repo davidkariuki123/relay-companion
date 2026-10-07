@@ -23,9 +23,11 @@ try {
   await page.addInitScript(() => {
     const row = { id:"motion-task", threadId:"motion-task", relayNotificationKind:"task", kind:"task",
       senderName:"Test Sender", senderEmail:"sender@example.com", title:"Read the release notes",
-      forHuman:Array.from({ length:7 }, (_, i) => `Paragraph ${i + 1}. This synthetic letter exercises the real reader. Scroll through the notes while the task's status yields room to read.`).join("\n\n"),
+      forHuman:Array.from({ length:12 }, (_, i) => `Paragraph ${i + 1}. This synthetic letter exercises the real reader. Scroll through the notes while the task's status yields room to read.`).join("\n\n"),
       forAgent:"Synthetic details for this preview.", createdAt:new Date(Date.now() - 3600000).toISOString(),
       taskStartedAt:new Date(Date.now() - 600000).toISOString() };
+    // Long enough that every fixed scroll offset below is reachable: the
+    // one-bar Open in box (c3ed1fcc) shortened the reader past 450px.
     window.testRow = row;
     window.testPayload = { account:{ paired:true, userId:"motion-test", name:"Test Reader", email:"self@example.com" },
       ui:{ soundsMuted:true }, features:{}, relays:[row], sent:[], contacts:[], chats:[] };

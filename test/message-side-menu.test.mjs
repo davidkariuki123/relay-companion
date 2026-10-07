@@ -61,3 +61,27 @@ test('the menu never carries the delete confirmation; that question lives under 
   assert.doesNotMatch(confirming, /data-message-delete-confirm=/);
   assert.match(confirming, /data-message-delete=/);
 });
+
+test('message menus fit the clickable card within the larger Mac compositor', () => {
+  const start = html.indexOf('  function positionMessageSideMenu(');
+  const end = html.indexOf('  function wireMessageSideMenus(', start);
+  assert.ok(start >= 0 && end > start);
+  for (const card of [
+    { left:376, right:720, top:0, bottom:524 }, // Mac's narrow pill
+    { left:0, right:720, top:0, bottom:800 }, // expanded conversation
+    { left:0, right:344, top:0, bottom:524 }, // ordinary native window
+  ]) {
+    const position = new Function('cardEl', 'window', `${html.slice(start, end)}; return positionMessageSideMenu;`)(
+      { getBoundingClientRect:() => card }, { innerWidth:720, innerHeight:800 });
+    for (const trigger of [
+      { right:card.left + 48, top:16, bottom:48 },
+      { right:card.right - 12, top:card.bottom - 40, bottom:card.bottom - 8 },
+    ]) {
+      const menu = { style:{}, getBoundingClientRect:() => ({ width:244, height:220 }) };
+      position(menu, { getBoundingClientRect:() => trigger });
+      const left = Number.parseFloat(menu.style.left), top = Number.parseFloat(menu.style.top);
+      assert.ok(left >= card.left + 8 && left + 244 <= card.right - 8, 'all menu labels accept native clicks');
+      assert.ok(top >= card.top + 8 && top + 220 <= card.bottom - 8, 'menu stays vertically inside the card');
+    }
+  }
+});
