@@ -523,7 +523,7 @@ try {
     if (compact.collapsed || compact.width !== 344 || compact.height !== 524) throw new Error(JSON.stringify(compact));
     return compact;
   }, { label: "conversation card is open before Expand" });
-  await evalIn(pageConn, `document.getElementById('thExpand').click(); 'expand conversation'`);
+  await evalIn(pageConn, `document.getElementById('wideToggle').click(); 'expand conversation'`);
   const expandedConversation = await retry(async () => {
     const ui = await evalIn(pageConn, `(() => {
       const r = document.getElementById('card').getBoundingClientRect();
@@ -545,7 +545,7 @@ try {
       Math.abs(expandedInputState.nativeBounds.height - expectedExpandedNative.height) <= 1,
     JSON.stringify(expandedInputState),
   );
-  await evalIn(pageConn, `document.getElementById('thExpand').click(); 'collapse conversation'`);
+  await evalIn(pageConn, `document.getElementById('wideToggle').click(); 'collapse conversation'`);
   await retry(async () => {
     const ui = await evalIn(pageConn, `(() => {
       const r = document.getElementById('card').getBoundingClientRect();

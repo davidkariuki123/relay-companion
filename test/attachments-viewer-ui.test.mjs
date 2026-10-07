@@ -507,7 +507,9 @@ test("a focused viewer or preview drops the pill's floating level so it can be i
   assert.match(helper, /documentWin\.on\("focus", \(\) => setOverlayElevated\(false\)\)/);
 });
 
-test("the expanded room and rail wear the list's hairline scrollbar, not Chromium's default", () => {
-  assert.match(inbox, /:is\(#threadsView\.chat-max \.chat-rail, #threadsView\.chat-max #thDetail\)::-webkit-scrollbar \{ width:10px; \}/);
-  assert.match(inbox, /:is\(#threadsView\.chat-max \.chat-rail, #threadsView\.chat-max #thDetail\)::-webkit-scrollbar-thumb \{ background:var\(--edge\)/);
+test("the expanded room and sidebar wear the list's hairline scrollbar, not Chromium's default", () => {
+  assert.match(inbox, /#threadsView\.chat-max #thDetail::-webkit-scrollbar \{ width:10px; \}/);
+  assert.match(inbox, /#threadsView\.chat-max #thDetail::-webkit-scrollbar-thumb \{ background:var\(--edge\)/);
+  assert.match(inbox, /\.wide-side-list::-webkit-scrollbar \{ width:10px; \}/);
+  assert.match(inbox, /\.wide-side-list::-webkit-scrollbar-thumb \{ background:var\(--edge\)/);
 });

@@ -30,8 +30,9 @@ test("a relay tap lands in the glance frame; only Chat-sourced opens earn the sp
   // A Slack-linked room reads its Slack projection whichever list opened it,
   // so the split is earned by the list it came from, not the projection.
   assert.match(open, /const returnSource = source === "slack" \? "relays" : source;/);
-  assert.match(open, /chatExpanded = options\.expanded === undefined \? returnSource === "chat" : Boolean\(options\.expanded\)/);
-  assert.doesNotMatch(open, /chatExpanded = false;/);
+  // The frame is the app's (the expanded app, 2026-10-07): opening a room
+  // from any list never writes the mode.
+  assert.doesNotMatch(open, /appExpanded\s*=/);
 });
 
 test("every room entry follows newest through every asynchronous hydration phase", () => {
@@ -47,7 +48,7 @@ test("every room entry follows newest through every asynchronous hydration phase
   assert.match(open, /hydrateThreadEntry\(entryFollowToken, \{[\s\S]*includeSent:true,[\s\S]*detailReady:canonicalDetailReady/,
     "both outbound and canonical hydration are handed to the entry-follow latch");
 
-  const render = html.slice(html.indexOf("function renderThreadDetail()"), html.indexOf('document.getElementById("thExpand")'));
+  const render = html.slice(html.indexOf("function renderThreadDetail()"), html.indexOf("function syncExpandButton()"));
   assert.match(render, /const entryFollowToken = threadEntryFollowToken\(\)/);
   assert.match(render, /if \(threadDetailScrolledFor !== threadStateKey \|\| followOwnSend \|\| followLiveAgent \|\| entryFollowToken\)/);
   assert.match(render, /else if \(threadDetailScrolledFor !== threadStateKey \|\| entryFollowToken\)/);

@@ -559,15 +559,17 @@ test("the macOS compositor canvas and ordinary native window clamp cover every c
   };
   const expanded = sizeOf("EXPANDED");
   const peek = sizeOf("PEEK");
+  const reader = sizeOf("READER");
+  const wide = sizeOf("WIDE");
   const max = main.match(/const CARD_MAX = \{ w: (\d+), h: (\d+) \}/);
   assert.ok(max, "CARD_MAX is declared in main.cjs");
 
   assert.ok(
-    Number(max[1]) >= Math.max(expanded.w, peek.w),
-    `CARD_MAX.w (${max[1]}) must cover the widest state (expanded ${expanded.w}, peek ${peek.w})`,
+    Number(max[1]) >= Math.max(expanded.w, peek.w, reader.w, wide.w),
+    `CARD_MAX.w (${max[1]}) must cover the widest state (expanded ${expanded.w}, peek ${peek.w}, reader ${reader.w}, expanded app ${wide.w})`,
   );
   assert.ok(
-    Number(max[2]) >= Math.max(expanded.h, peek.h),
+    Number(max[2]) >= Math.max(expanded.h, peek.h, reader.h, wide.h),
     `CARD_MAX.h (${max[2]}) must cover the tallest state`,
   );
 });

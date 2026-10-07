@@ -22,7 +22,8 @@ function fixture(width) {
     commitSettledCardSize:(...args) => commits.push(args),
     springTo:(...args) => springs.push(args),
   });
-  vm.runInContext(snapSource + syncSource, context);
+  // The small card (the expanded app is off): the frame is the reader's or the card's.
+  vm.runInContext("function openFrameSize(readerOpen = readerOpenNow) { return readerOpen ? READER : EXPANDED; }\n" + snapSource + syncSource, context);
   return { context, commits, springs, cancelled };
 }
 

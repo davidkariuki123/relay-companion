@@ -17,7 +17,7 @@ function harness({ reduced = false, barrier = Promise.resolve() } = {}) {
     cardEl:{style:{}}, scrollEl:{style:{}}, cardMotionId:0,
     activeView:'threads', threadDetailEntryFollow:{token:1},
     window:{relay:{prepareCardSize:() => barrier}},
-    document:{documentElement:{classList:{add(){},remove(){}}},
+    document:{documentElement:{classList:{add(){},remove(){},toggle(){}},dataset:{}},
       startViewTransition(update) {
         callback = update;
         queueMicrotask(() => { update(); ready.resolve(); });

@@ -180,7 +180,7 @@ try {
           if(now-started<850)requestAnimationFrame(sample);
         }
         requestAnimationFrame(sample);
-        ${direction === 'open' ? `openReader(${JSON.stringify(row.id)}, "relays")` : direction === 'close' ? 'closeReader()' : 'document.getElementById("thExpand").click()' };
+        ${direction === 'open' ? `openReader(${JSON.stringify(row.id)}, "relays")` : direction === 'close' ? 'closeReader()' : 'document.getElementById("wideToggle").click()' };
         await new Promise(resolve=>setTimeout(resolve,900));
         return frames;
       })()`);

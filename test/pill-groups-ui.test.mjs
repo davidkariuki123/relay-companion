@@ -85,7 +85,7 @@ test("People details and See info share the same roster component", () => {
   // groups (isGroup alone can be inferred from legacy name-variant rows and
   // put the button on a 1:1) and only in the EXPANDED frame (at pill width it
   // crushed the room name and wrapped) — with CSS that actually hides it.
-  assert.match(html, /!\(chatExpanded && room && room\.isGroup && \(room\.groupName \|\| room\.groupId\)\)/);
+  assert.match(html, /!\(appExpanded && room && room\.isGroup && \(room\.groupName \|\| room\.groupId\)\)/);
   assert.match(html, /\.th-info\.hidden \{ display:none; \}/);
   assert.match(html, /groupInfoGroup = groupsList\.find\(\(group\) => wantedId/);
   assert.match(html, /function groupDetailsMarkup\(g, \{ sheet = false \} = \{\}\)/);

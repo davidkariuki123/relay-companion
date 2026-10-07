@@ -155,7 +155,7 @@ test("all compact-to-reader resize transitions can hold a frozen source face", (
   for (const view of ["relays", "chat", "threads", "sent", "contacts"]) {
     assert.match(prepare, new RegExp(`${view}:`));
   }
-  assert.match(html, /\}, chatExpanded \? EXPANDED : READER\)/);
+  assert.match(html, /\}, next \? wideSize\(\) : \(activeView === "reader" \? READER : EXPANDED\), \{ reveal: next \? "grow" : "shrink" \}\)/);
   assert.match(prepare, /snapshot\.style\.width = `\$\{Math\.round\(cardEl\.getBoundingClientRect\(\)\.width\)\}px`/);
   assert.match(prepare, /node\.dataset\.readerMorphId = node\.id/);
   assert.match(prepare, /frozen\.scrollTop = live\.scrollTop/);
@@ -163,8 +163,8 @@ test("all compact-to-reader resize transitions can hold a frozen source face", (
   const start = between(html, "function startReaderMorph", "let peeking");
   assert.ok(start.indexOf('classList.add("reader-morph-destination")') < start.indexOf("requestAnimationFrame(async"),
     "the destination is hidden before the first paint opportunity");
-  assert.match(start, /destinationView === "reader" \|\| \(destinationView === "threads" && chatExpanded\)/);
-  assert.match(start, /syncCardSize\(destinationView === "reader" \|\| \(destinationView === "threads" && chatExpanded\)\)/);
+  assert.match(start, /const destinationSize = openFrameSize\(destinationView === "reader"\)/);
+  assert.match(start, /syncCardSize\(destinationView === "reader"\)/);
 });
 
 test("compact room navigation animates exact viewport pixels with a matching Back transition", () => {
@@ -204,8 +204,9 @@ test("compact room navigation animates exact viewport pixels with a matching Bac
   const back = between(html, 'thBackEl.addEventListener("click", () => {', "let threadsSource");
   assert.match(back, /startRoomViewTransition\(navigateBack, \{ motion:"back" \}\)/,
     "compact Back reverses the exact-pixel transition");
-  assert.match(back, /startCardViewTransition\(navigateBack, EXPANDED\)/,
-    "expanded Back uses the whole-card snapshot resize");
+  assert.match(back, /if \(wideLayoutActive\(\)\) \{[\s\S]*?startFrameNavigation\(navigateBack, EXPANDED\)/,
+    "expanded Back only empties the pane: the frame never moves");
+  assert.doesNotMatch(back, /appExpanded\s*=/, "Back never folds the expanded app");
 });
 
 test("the room transition names one stable viewport and cleans up on actual completion", () => {

@@ -25,12 +25,16 @@ function between(source, start, end) {
 }
 
 test("reader navigation captures the whole card before committing its destination", () => {
-  const open = between(html, "function openReader(id, source, picker = null)", "function closeReader()");
-  assert.ok(open.indexOf("captureRoomScroll()") < open.indexOf("startCardViewTransition("));
-  assert.ok(open.indexOf("startCardViewTransition(") < open.indexOf('activeView = "reader"'));
+  const open = between(html, "function openReader(id, source, picker = null)", "function startFrameNavigation(");
+  assert.ok(open.indexOf("captureRoomScroll()") < open.indexOf("startFrameNavigation("));
+  assert.ok(open.indexOf("startFrameNavigation(") < open.indexOf('activeView = "reader"'));
+  // The small card morphs its whole frame; the expanded app swaps its pane.
+  const frame = between(html, "function startFrameNavigation(", "function closeReader()");
+  assert.match(frame, /if \(wideLayoutActive\(\)\) \{[\s\S]*?startRoomViewTransition\([\s\S]*?motion:"swap"/);
+  assert.match(frame, /return startCardViewTransition\(update, compactSize\)/);
   assert.doesNotMatch(open, /prepareReaderMorph|startReaderMorph/);
   const close = between(html, "function closeReader()", "function safeHref");
-  assert.match(close, /startCardViewTransition/);
+  assert.match(close, /startFrameNavigation/);
   assert.match(close, /return \(\) => restoreRoomScroll\(back.roomScroll\)/);
 });
 
@@ -38,7 +42,7 @@ test("the native window growth barrier resolves before visible reader motion beg
   const start = between(html, "function startReaderMorph", "let peeking");
   const prepareAt = start.indexOf("await window.relay.prepareCardSize(destinationSize.w, destinationSize.h)");
   const revealAt = start.indexOf('classList.add("reader-morph-go")');
-  const springAt = start.indexOf('syncCardSize(destinationView === "reader" || (destinationView === "threads" && chatExpanded))');
+  const springAt = start.indexOf('syncCardSize(destinationView === "reader")');
   assert.ok(prepareAt >= 0 && prepareAt < revealAt && revealAt < springAt);
   assert.match(preload, /prepareCardSize: \(w, h\) => ipcRenderer\.invoke\("relay:prepareCardSize", w, h\)/);
   assert.match(main, /ipcMain\.handle\("relay:prepareCardSize"/);

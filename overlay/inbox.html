@@ -451,7 +451,6 @@
   .reader-morph-snapshot [data-reader-morph-id="thRows"] > * { flex:none; }
   .reader-morph-snapshot [data-reader-morph-id="thRows"].inbox-order .th-msg:last-of-type { margin-bottom:10px; }
   .reader-morph-snapshot[data-reader-morph-id="threadsView"].chat-max { flex-direction:row; height:100%; min-height:0; overflow:hidden; }
-  .reader-morph-snapshot[data-reader-morph-id="threadsView"].chat-max .chat-rail { display:flex; flex-direction:column; width:182px; height:100%; min-height:0; flex:0 0 auto; border-right:1px solid var(--hair); overflow-y:auto; overflow-x:hidden; padding-top:4px; overflow-anchor:none; }
   .reader-morph-snapshot[data-reader-morph-id="threadsView"].chat-max [data-reader-morph-id="thDetail"] { flex:1 1 auto; min-width:0; height:100%; margin:0; max-width:none; overflow-y:auto; }
   .scroll.reader-morph:not(.reader-morph-go) .reader-morph-destination { opacity:0; }
   .scroll.reader-morph.reader-morph-go:not(.reader-morph-push) .reader-morph-snapshot {
@@ -522,6 +521,22 @@
     overflow:hidden; border-radius:16px;
   }
   html.card-view-transition::view-transition-image-pair(relay-card) { isolation:isolate; }
+  /* Expand and Collapse open the window out of its top-right corner (where
+     the card lives) and fold it back there. Neither face is ever stretched:
+     each is pinned to that corner at its own size, and the frame growing or
+     shrinking around them is what reveals or hides the other pane. */
+  html.card-view-transition.card-reveal::view-transition-old(relay-card),
+  html.card-view-transition.card-reveal::view-transition-new(relay-card) {
+    inset:0 0 auto auto; width:auto; height:auto; object-fit:none; object-position:right top;
+  }
+  /* The larger face is always opaque underneath (the frame never shows the
+     desktop through itself); the smaller one dissolves on top of it. */
+  html.card-view-transition.card-reveal[data-card-reveal="grow"]::view-transition-old(relay-card) { z-index:2; animation:cardRevealOut .22s var(--settle) both; }
+  html.card-view-transition.card-reveal[data-card-reveal="grow"]::view-transition-new(relay-card) { z-index:1; animation:none; opacity:1; }
+  html.card-view-transition.card-reveal[data-card-reveal="shrink"]::view-transition-old(relay-card) { z-index:1; animation:none; opacity:1; }
+  html.card-view-transition.card-reveal[data-card-reveal="shrink"]::view-transition-new(relay-card) { z-index:2; animation:cardRevealIn .22s var(--settle) both; }
+  @keyframes cardRevealOut { from { opacity:1; } to { opacity:0; } }
+  @keyframes cardRevealIn { from { opacity:0; } to { opacity:1; } }
   html.card-view-transition::view-transition-old(relay-card),
   html.card-view-transition::view-transition-new(relay-card) {
     width:100%; height:100%; object-fit:fill;
@@ -2177,8 +2192,6 @@
   .av-slack-mark { position:absolute; right:-4px; bottom:-3px; width:15px; height:15px; padding:2px; box-sizing:border-box;
     border-radius:50%; background:var(--bg); object-fit:contain; pointer-events:none; }
   .relay-row:hover .av-slack-mark { background:color-mix(in srgb, var(--bg) 92%, var(--ink)); }
-  .rl-row .av-slack-mark { width:11px; height:11px; right:-3px; bottom:-2px; padding:1.5px; }
-  .rl-row .avatar.channel-hash { font-size:11px; border-radius:6px; }
   .avatar.channel-hash { border-radius:8px; font-family:var(--sans); font-size:14px; font-weight:600; letter-spacing:0; }
   .av-stack { flex:0 0 auto; display:flex; align-items:flex-start; padding-top:2px; width:32px; }
   .av-stack .avatar { position:relative; }
@@ -3068,37 +3081,94 @@
   .th-expand { appearance:none; background:transparent; border:1px solid var(--hair); border-radius:var(--r-pill); cursor:pointer; color:var(--muted); font-family:var(--sans); font-size:11px; font-weight:600; padding:4px 11px; display:flex; align-items:center; gap:6px; flex:0 0 auto; transition:color var(--t-fast) var(--settle), border-color var(--t-fast) var(--settle); }
   .th-expand .xg { font-size:13px; line-height:1; }
   .th-expand:hover { color:var(--ink); border-color:var(--muted-3); }
-  /* THE SPLIT (David's law): expanded Chat is Slack-shaped — a rail of
-     conversations on the left, the room taking the rest. The rail replaces
-     the list while a room is open at the big frame. */
+  /* THE SPLIT (David's law): expanded Chat is Slack-shaped — the list on
+     the left (the expanded app's sidebar), the room taking the rest. In the
+     pane the room scrolls on its own. */
   #threadsView.chat-max:not(.hidden) {
     flex-direction:row; height:100%; min-height:0; overflow:hidden;
   }
-  .chat-rail { display:none; }
-  #threadsView.chat-max .chat-rail { display:flex; flex-direction:column; width:182px; height:100%; min-height:0; flex:0 0 auto;
-    border-right:1px solid var(--hair); overflow-y:auto; overflow-x:hidden; padding-top:4px;
-    /* This rail is rebuilt as unread state changes. Chromium's scroll
-       anchoring otherwise follows the bottom Your people row and can leave
-       every conversation above the viewport after a room opens. */
-    overflow-anchor:none; }
   #threadsView.chat-max #thDetail { flex:1 1 auto; min-width:0; height:100%; margin:0; max-width:none; overflow-y:auto; }
-  /* The expanded rail and room scroll on their own (the shared .scroll is
-     not their scroller here), so they wear the same 4px hairline thumb the
+  /* The expanded room scrolls on its own (the shared .scroll is not its
+     scroller here), so it wears the same 4px hairline thumb the
      list does — never Chromium's 15px grey default down the frame's right edge. */
-  :is(#threadsView.chat-max .chat-rail, #threadsView.chat-max #thDetail)::-webkit-scrollbar { width:10px; }
-  :is(#threadsView.chat-max .chat-rail, #threadsView.chat-max #thDetail)::-webkit-scrollbar-thumb { background:var(--edge); border-radius:var(--r-pill); border:3px solid var(--bg); background-clip:padding-box; }
-  :is(#threadsView.chat-max .chat-rail, #threadsView.chat-max #thDetail)::-webkit-scrollbar:horizontal { height:0; }
-  :is(#threadsView.chat-max .chat-rail, #threadsView.chat-max #thDetail)::-webkit-scrollbar-corner { background:transparent; }
-  .rl-h { font-family:var(--sans); font-size:10px; font-weight:600; letter-spacing:.02em; color:var(--muted-2); padding:10px 14px 5px; }
-  .rl-row { display:flex; align-items:center; gap:8px; padding:6px 14px; cursor:pointer; border:0; background:transparent;
-    font-family:var(--sans); font-size:12px; color:var(--ink-2); min-width:0; width:100%; text-align:left;
-    transition:background-color var(--t-fast) var(--settle); }
-  .rl-row:hover { background:var(--wash); }
-  .rl-row.on { background:var(--accent-soft); color:var(--accent); font-weight:600; }
-  .rl-row .avatar { width:18px; height:18px; font-size:7px; flex:0 0 auto; margin-top:0; }
-  .rl-row .nm { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
-  .rl-row .ct { margin-left:auto; flex:0 0 auto; font-size:10px; font-weight:600; background:var(--accent); color:var(--on-accent); border-radius:999px; padding:2px 6px; }
-  .chat-rail .people-row { margin-top:auto; padding:11px 14px; }
+  #threadsView.chat-max #thDetail::-webkit-scrollbar { width:10px; }
+  #threadsView.chat-max #thDetail::-webkit-scrollbar-thumb { background:var(--edge); border-radius:var(--r-pill); border:3px solid var(--bg); background-clip:padding-box; }
+  #threadsView.chat-max #thDetail::-webkit-scrollbar:horizontal { height:0; }
+  #threadsView.chat-max #thDetail::-webkit-scrollbar-corner { background:transparent; }
+  /* ---- THE EXPANDED APP (2026-10-07) ----
+     Expand is a mode of the whole app. The card becomes two panes under one
+     titlebar: the sidebar (the tab row and the list you know from the small
+     card, same rows, same width) and the pane beside it, where whatever you
+     open appears. Nothing in the sidebar moves when the pane changes. */
+  .wide-side { display:none; }
+  /* The switch: the room's old Expand pill, moved up to the window's own
+     row. Both words get the same box, so the label changing never moves it. */
+  .wide-toggle { appearance:none; flex:0 0 auto; display:inline-flex; align-items:center; justify-content:center; gap:6px;
+    min-width:84px; height:24px; padding:0 10px; margin-right:6px; box-sizing:border-box;
+    border:1px solid var(--hair); border-radius:var(--r-pill); background:transparent; cursor:pointer;
+    color:var(--muted); font:600 11px/1 var(--sans);
+    transition:color var(--t-fast) var(--settle), border-color var(--t-fast) var(--settle), background-color var(--t-fast) var(--settle); }
+  .wide-toggle:hover { color:var(--ink); border-color:var(--muted-3); }
+  .wide-toggle:active { background:var(--wash-2); }
+  .wide-toggle:focus-visible { outline:none; box-shadow:var(--focus-ring); border-color:var(--edge-accent); }
+  .wide-toggle svg { flex:none; }
+  .wide-toggle .shrink { display:none; }
+  .wide-toggle[aria-pressed="true"] .grow { display:none; }
+  .wide-toggle[aria-pressed="true"] .shrink { display:block; }
+  .card.collapsed .wide-toggle, .card.peek .wide-toggle, .card.signup .wide-toggle { display:none; }
+  .card.wide .card-surface {
+    display:grid;
+    grid-template-columns:var(--wide-side, 320px) minmax(0, 1fr);
+    grid-template-rows:44px auto minmax(0, 1fr);
+  }
+  .card.wide .card-surface > * { grid-column:1 / -1; min-width:0; }
+  .card.wide .lockup { grid-row:1; }
+  .card.wide .tabs { grid-column:1; grid-row:2; }
+  .card.wide .wide-side { grid-column:1; grid-row:3; display:flex; flex-direction:column; min-height:0; }
+  .card.wide .scroll { grid-column:2; grid-row:2 / -1; width:auto !important; min-width:0; }
+  /* The seam between the panes belongs to the frame, not to either pane, so
+     a sticky header or composer can never paint over it. */
+  .card.wide .card-surface::after {
+    content:""; grid-column:1; grid-row:2 / -1; justify-self:end; width:1px;
+    background:var(--hair); pointer-events:none; z-index:6;
+  }
+  .wide-side-head { flex:none; }
+  .wide-side-list {
+    flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden;
+    overscroll-behavior:contain; padding-bottom:8px; overflow-anchor:none;
+  }
+  .wide-side-list::-webkit-scrollbar { width:10px; }
+  .wide-side-list::-webkit-scrollbar-thumb { background:var(--edge); border-radius:var(--r-pill); border:3px solid var(--bg); background-clip:padding-box; }
+  .wide-side-list::-webkit-scrollbar:horizontal { height:0; }
+  .topics-side[hidden] { display:none; }
+  /* You follows the same law: your page is the sidebar, Your AIs is the
+     pane, and its row in the page is lit while it is open. */
+  .card.wide #setupPane #setupBack { display:none; }
+  .card.wide #settingsView #setupEntry { background:var(--wash-2); }
+  /* The open thing is lit in the list by #wideSelection (generated). */
+  /* Back is a promise that there is somewhere to go back to. Beside the
+     list there is not: the list is right there. */
+  .card.wide.pane-root :is(#thBack, #readerBack) { display:none; }
+  .card.wide.pane-root .th-detail-head { padding-left:16px; }
+  /* Every pane's title sits on the sidebar tab row's centre line (y = 66),
+     so the two columns read as one window, not two cards side by side. */
+  .card.wide .th-detail-head { height:50px; padding-bottom:6px; }
+  .card.wide #readerView .reader-bar { padding-top:14px; padding-bottom:10px; }
+  .card.wide #setupPane .setup-page { padding-top:0; }
+  .card.wide #setupPane .setup-page h2 { margin-top:7px; }
+  .card.wide #topicsView [data-topic-back] { display:none; }
+  .wide-empty:not(.hidden) { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; min-height:100%; padding:0 40px; text-align:center; }
+  .wide-empty .mark { opacity:.5; margin-bottom:14px; }
+  .wide-empty .t1 { font-family:var(--serif); font-size:17px; color:var(--ink-2); }
+  .wide-empty .t2 { margin-top:6px; font-size:12.5px; line-height:1.5; color:var(--muted-2); max-width:280px; }
+  .wide-empty .keys { margin-top:10px; display:flex; align-items:center; gap:3px; }
+  .wide-empty kbd { font-family:var(--sans); font-size:10.5px; line-height:1; color:var(--muted); min-width:18px; padding:3px 4px; box-sizing:border-box; text-align:center; border-radius:5px; background:var(--wash-2); }
+  .wide-empty kbd:last-of-type { margin-right:5px; }
+  /* Swapping what the pane shows is not navigation: a short dissolve, no push. */
+  html.room-view-transition[data-room-motion="swap"]::view-transition-old(relay-room) { animation:wideSwapOut .14s var(--settle) both; }
+  html.room-view-transition[data-room-motion="swap"]::view-transition-new(relay-room) { animation:wideSwapIn .18s var(--settle) both; }
+  @keyframes wideSwapOut { from { opacity:1; } to { opacity:0; } }
+  @keyframes wideSwapIn { from { opacity:0; transform:translate3d(0,4px,0); } to { opacity:1; transform:none; } }
   .th-msg.text .th-msg-title { font-family:var(--sans); font-size:13px; font-weight:400; line-height:1.5; color:var(--ink-2, var(--ink)); white-space:pre-wrap; }
   .th-msg.text.unread .th-msg-title { color:var(--ink); }
   .runs-in { margin:8px 16px 0; font-family:var(--sans); font-size:10.5px; color:var(--muted-2); }
@@ -4046,6 +4116,14 @@
         <svg class="moon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>
         <svg class="sun" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
       </button>
+      <!-- THE SWITCH: one control, one place, both directions. The card grows
+           and folds from its top-right corner, so this button stays under the
+           pointer through the motion and simply reads the other way. -->
+      <button class="wide-toggle" id="wideToggle" type="button" aria-pressed="false" aria-keyshortcuts="Meta+Shift+E" title="Expand  ⌘⇧E">
+        <svg class="grow" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 1h3v3M9 1L5.8 4.2M4 9H1V6M1 9l3.2-3.2"/></svg>
+        <svg class="shrink" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.6 1.4v3h3M9 1L5.6 4.4M4.4 8.6v-3h-3M1 9l3.4-3.4"/></svg>
+        <span class="wl" id="wideToggleLabel">Expand</span>
+      </button>
       <button class="winbtn minimize-btn" id="minimizeBtn" type="button" aria-label="Minimize" title="Minimize">
         <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M1.2 5h7.6"/></svg>
       </button>
@@ -4088,10 +4166,21 @@
       <button class="relays-layout-button active" type="button" data-inbox-direction="received" aria-pressed="true">Received</button>
       <button class="relays-layout-button" type="button" data-inbox-direction="sent" aria-pressed="false">Sent</button>
     </div>
+    <!-- The expanded app's sidebar: the list you know from the small card,
+         beside whatever you open. Empty in the small card; its pieces are
+         moved here, not copied, so there is only ever one of each. -->
+    <div class="wide-side" id="wideSide">
+      <div class="wide-side-head" id="wideSideHead"></div>
+      <div class="wide-side-list" id="wideSideList">
+        <div class="topics-side" id="topicsSide"></div>
+      </div>
+    </div>
     <div class="scroll" id="scroll">
       <!-- An agent's request for a setting that gives agents more freedom
            (relay_settings). The person answers it here. -->
       <div id="settingRequests" aria-live="polite"></div>
+      <!-- The expanded app's pane when nothing is open in it yet. -->
+      <section class="view hidden wide-empty" id="wideEmpty" aria-live="polite"></section>
       <!-- Relays view -->
       <section class="view" id="relaysView">
         <div id="relaysIntro" hidden><div id="relaysRequestsSummary"></div><div id="setupNudge"></div><div id="slackNudge"></div><div id="relayAnyoneTip" hidden></div></div>
@@ -4138,7 +4227,6 @@
           <div class="t1">No conversations yet</div>
           <div class="t2">Messages with people and groups appear here.</div>
         </div>
-        <div id="chatRail" class="chat-rail"></div>
         <div id="thDetail" class="gone">
           <div class="th-detail-head th-bar-sticky">
             <button class="th-back" type="button" id="thBack" aria-label="Back">
@@ -4150,7 +4238,6 @@
             </span>
             <span class="th-detail-meta" id="thDetailMeta"></span>
             <button class="th-info hidden" type="button" id="thGroupInfo">See info</button>
-            <button class="th-expand" type="button" id="thExpand" aria-label="Expand the conversation"><span class="xg">⤢</span><span class="xl">Expand</span></button>
           </div>
           <!-- Selection takes the header over rather than adding a second bar:
                while you are picking files, the room name is not the question. -->
@@ -4304,6 +4391,8 @@
 
       <!-- Settings view (account card + sign-out / switch-account; rendered by JS) -->
       <section class="view hidden" id="settingsView"></section>
+      <!-- The expanded app's pane beside the You page: Your AIs. -->
+      <section class="view hidden" id="setupPane"></section>
     </div>
     </div>
     </div>
@@ -4413,8 +4502,8 @@
   const thDetailMetaEl = document.getElementById("thDetailMeta");
   const thGroupInfoEl = document.getElementById("thGroupInfo");
   function setThreadHeader(name, _count) {
-    // The header's right side belongs to the EXPAND affordance, not a relay
-    // count — nobody cares how many relays a chat holds (David). The second
+    // The header's right side holds no relay count — nobody cares how many
+    // relays a chat holds (David). Expand lives in the titlebar now. The second
     // argument is accepted and ignored so main's call sites keep working.
     thDetailNameEl.textContent = name || "Conversation";
     thDetailMetaEl.textContent = "";
@@ -4424,7 +4513,7 @@
     // be INFERRED from legacy name-variant rows, putting it on what reads as a
     // 1:1 — where the roster sheet could only error. Named groups, split only.
     thGroupInfoEl.classList.toggle("hidden",
-      !(chatExpanded && room && room.isGroup && (room.groupName || room.groupId)));
+      !(appExpanded && room && room.isGroup && (room.groupName || room.groupId)));
     syncSlackVisibilityButton(room);
   }
   const thHistoryEl = document.getElementById("thHistory");
@@ -4435,6 +4524,7 @@
   const thSelectExitEl = document.getElementById("thSelectExit");
   const relayHostHoverIntent = window.RelayHoverIntent.installRelayHoverIntent({ document, window });
   const settingsViewEl = document.getElementById("settingsView");
+  const setupPaneEl = document.getElementById("setupPane");
   const signInBannerEl = document.getElementById("signInBanner");
   const serviceStoppedNoteEl = document.getElementById("serviceStoppedNote");
   const signupViewEl = document.getElementById("signupView");
@@ -4468,6 +4558,28 @@
   // window's exact size, but one surface and one motion instead of a second
   // window beside the pill (David's round). A whole-card snapshot owns the resize.
   const READER = { w: 720, h: 760 };
+  // THE EXPANDED APP (David, 2026-10-07): Expand is a mode of the whole app,
+  // not of one room. The list you know from the small card becomes the
+  // sidebar, and whatever you open — a chat, a Relay, a topic — opens beside
+  // it. Back, tabs and the list never fold the frame; only Collapse does.
+  // The choice is yours and outlives a restart.
+  const WIDE = { w: 900, h: 760 };
+  const WIDE_SIDE = EXPANDED.w; // the sidebar IS the small card's list, at its own width
+  let wideDomReady = false; // the expanded app's DOM helpers are defined further down
+  let appExpanded = (() => { try { return localStorage.getItem("relayAppExpanded") === "1"; } catch { return false; } })();
+  function wideSize() {
+    // Never wider or taller than the screen that holds the card.
+    const aw = Number(window.screen?.availWidth) || WIDE.w + 48;
+    const ah = Number(window.screen?.availHeight) || WIDE.h + 48;
+    return { w: Math.max(READER.w, Math.min(WIDE.w, aw - 48)), h: Math.max(EXPANDED.h, Math.min(WIDE.h, ah - 48)) };
+  }
+  // The frame the open card wears: the app expanded, else the reader's page,
+  // else the small card.
+  function openFrameSize(readerOpen = readerOpenNow) {
+    // Sign-up and onboarding are the small card's, whatever the mode.
+    if (appExpanded && !cardEl.classList.contains("signup")) return wideSize();
+    return readerOpen ? READER : EXPANDED;
+  }
   const PILL = { w: 244, h: 44 }; // wide enough for mark + word + "N unread" + ✕
   const PEEK = { w: 400, h: 118 };
 
@@ -4656,6 +4768,10 @@
     }
   }
   new MutationObserver(reconcileSurfaceActivity).observe(cardEl, { attributes:true, attributeFilter:["class"] });
+  // The expanded app's two panes exist only on the open card: folding to the
+  // pill, a banner, a hidden card or sign-up put every piece back home first.
+  new MutationObserver(() => { if (wideDomReady) { syncWideDom(); syncPaneRoot(); paintWideSelection(); } })
+    .observe(cardEl, { attributes:true, attributeFilter:["class"] });
   document.addEventListener("visibilitychange", reconcileSurfaceActivity);
   let readerOpenNow = false; // the reader holds the card at READER size
   let readerMorphInFlight = false;
@@ -4668,7 +4784,7 @@
   function syncCardSize(readerOpen) {
     readerOpenNow = Boolean(readerOpen);
     if (collapsed || peeking || ghost || readerMorphInFlight || cardViewTransition) return;
-    const t = readerOpenNow ? READER : EXPANDED;
+    const t = openFrameSize();
     if (W.t !== t.w || H.t !== t.h) springTo(t.w, t.h);
   }
   function cleanReaderMorph() {
@@ -4692,7 +4808,8 @@
   }
   function prepareReaderMorph(sourceView, { motion = "morph" } = {}) {
     cleanReaderMorph();
-    if (REDUCED || collapsed || peeking || ghost || cardViewTransition) return false;
+    // The expanded app never morphs between frames: it already is the frame.
+    if (REDUCED || collapsed || peeking || ghost || cardViewTransition || wideLayoutActive()) return false;
     const source = {
       relays: relaysViewEl,
       chat: chatViewEl,
@@ -4765,15 +4882,13 @@
       // can animate without being clipped. Older main processes resolve this
       // barrier immediately, so the call remains backward-compatible.
       if (window.relay.prepareCardSize) {
-        const destinationSize = destinationView === "reader" || (destinationView === "threads" && chatExpanded)
-          ? READER
-          : EXPANDED;
+        const destinationSize = openFrameSize(destinationView === "reader");
         try { await window.relay.prepareCardSize(destinationSize.w, destinationSize.h); } catch {}
       }
       if (!readerMorphSnapshot || activeView !== destinationView) { cleanReaderMorph(); return; }
       scrollEl.classList.add("reader-morph-go");
       readerMorphInFlight = false;
-      syncCardSize(destinationView === "reader" || (destinationView === "threads" && chatExpanded));
+      syncCardSize(destinationView === "reader");
       // Frozen/background frames do not reliably dispatch animationend. The
       // settled DOM is still deterministic when the app becomes active again.
       readerMorphTimer = setTimeout(cleanReaderMorph, 480);
@@ -4837,7 +4952,8 @@
     const token = ++roomViewTransitionToken;
     const root = document.documentElement;
     root.classList.add("room-view-transition");
-    root.dataset.roomMotion = motion === "back" ? "back" : "forward";
+    // Beside the sidebar nothing is pushed or popped: the pane's contents swap.
+    root.dataset.roomMotion = wideLayoutActive() || motion === "swap" ? "swap" : motion === "back" ? "back" : "forward";
     // Name the stable viewport, not either live child view. Chromium captures
     // the exact old and new pixels of this box, including its current scroll
     // position, then animates the two flat images as one plane apiece.
@@ -4880,7 +4996,8 @@
     if (cardViewTransition !== state) return;
     cardViewTransition = null;
     cardEl.style.viewTransitionName = "";
-    document.documentElement.classList.remove("card-view-transition");
+    document.documentElement.classList.remove("card-view-transition", "card-reveal");
+    delete document.documentElement.dataset.cardReveal;
     // Keep the native viewport at the larger size until Chromium retires the
     // snapshots. Resizing it during capture/animation aborts View Transitions.
     commitSettledCardSize(W.t, H.t, ++cardMotionId);
@@ -4894,7 +5011,7 @@
     state.transition?.skipTransition();
     finishCardViewTransition(state);
   }
-  async function startCardViewTransition(update, size) {
+  async function startCardViewTransition(update, size, { reveal = false } = {}) {
     cancelCardViewTransition();
     supersedeRoomViewTransition();
     cleanReaderMorph();
@@ -4931,6 +5048,8 @@
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       if (cardViewTransition !== state) return;
       document.documentElement.classList.add("card-view-transition");
+      document.documentElement.classList.toggle("card-reveal", Boolean(reveal));
+      document.documentElement.dataset.cardReveal = reveal === "shrink" ? "shrink" : "grow";
       cardEl.style.viewTransitionName = "relay-card";
       state.transition = document.startViewTransition(commit);
       state.transition.ready.catch(() => {});
@@ -4981,7 +5100,7 @@
     // state from the first shrinking frame through native-window settlement.
     cardEl.classList.toggle("collapsed", collapsed);
     syncContinuousMotion();
-    const openSize = readerOpenNow ? READER : EXPANDED;
+    const openSize = openFrameSize();
     springTo(collapsed ? PILL.w : openSize.w, collapsed ? PILL.h : openSize.h);
     playTink();
     // List rebuilds are deferred while folded; catch up now that the card is visible.
@@ -5014,7 +5133,9 @@
     cardEl.classList.add("offstage");
     cardEl.classList.remove("collapsed", "ghost", "bye");
     syncContinuousMotion();
-    snapSize(EXPANDED.w, EXPANDED.h);
+    // Parked at the size it will reopen at, so the entrance is not a resize.
+    const home = openFrameSize(false);
+    snapSize(home.w, home.h);
   }
   // ✕ — the card leaves gracefully, then the main process hides the window and keeps
   // it hidden (persisted) until the status-area Relay mark is clicked.
@@ -5132,7 +5253,8 @@
     if (wasOffstage) {
       // fresh entrance: snap to expanded and replay the appear animation
       cardEl.classList.remove("ghost", "bye", "offstage");
-      snapSize(EXPANDED.w, EXPANDED.h);
+      const home = openFrameSize(false);
+      snapSize(home.w, home.h);
       cardEl.style.animation = "none";
       void cardEl.offsetWidth;
       cardEl.style.animation = "";
@@ -5270,6 +5392,7 @@
   const minimizeBtnEl = document.getElementById("minimizeBtn");
   themeToggleEl.addEventListener("mousedown", (e) => { e.stopPropagation(); });
   minimizeBtnEl.addEventListener("mousedown", (e) => { e.stopPropagation(); });
+  document.getElementById("wideToggle").addEventListener("mousedown", (e) => { e.stopPropagation(); });
   themeToggleEl.addEventListener("click", (e) => {
     e.stopPropagation();
     const toDark = document.documentElement.dataset.theme !== "dark";
@@ -6757,7 +6880,7 @@
     return { recent, lastSender };
   }
   function syncRelayAnyoneTip() {
-    const visible = activeView === "relays" && !peeking && !requestInboxOpen
+    const visible = (wideLayoutActive() ? wideSideTab() === "relays" : activeView === "relays") && !peeking && !requestInboxOpen
       && payload.account?.paired !== false && !cardEl.classList.contains("signup");
     relaysIntroEl.hidden = !visible;
     relaysLayoutEl.hidden = !visible;
@@ -7103,7 +7226,8 @@
       const overflow = getComputedStyle(node).overflowY;
       if ((overflow === "auto" || overflow === "scroll") && node.clientHeight > 0) return node;
     }
-    return activeView === "threads" && chatExpanded ? thDetailEl : scrollEl;
+    // The expanded app's room scrolls in its own pane (chat-max).
+    return activeView === "threads" && threadsViewEl.classList.contains("chat-max") ? thDetailEl : scrollEl;
   }
 
   function sessionPickerFitTail(reveal, scroller) {
@@ -7709,7 +7833,7 @@
     expandedRelayId = null;
     expandedSentId = null;
     foldHoverRow();
-    scrollEl.scrollTop = 0;
+    listScrollEl().scrollTop = 0;
     renderRelays();
   });
   if (relaysFilterEl) relaysFilterEl.addEventListener("click", (event) => {
@@ -7721,7 +7845,7 @@
     expandedRelayId = null;
     expandedSentId = null;
     foldHoverRow();
-    scrollEl.scrollTop = 0;
+    listScrollEl().scrollTop = 0;
     renderRelays();
   });
   // Both item lists contain Relays and Tasks; ordinary texts stay in Chats.
@@ -8124,7 +8248,12 @@
   const SEARCH_MESSAGE_LIMIT = 40;
   const SEARCH_PEOPLE_LIMIT = 6;
   function chatSearchShowing() {
-    return chatSearch.open && activeView === "relays" && !collapsed && !peeking;
+    return chatSearch.open && chatSearchListShowing() && !collapsed && !peeking;
+  }
+  // The inbox list is on screen: the Inbox itself, or the expanded app's
+  // sidebar beside whatever is open from it.
+  function chatSearchListShowing() {
+    return wideLayoutActive() ? wideSideTab() === "relays" : activeView === "relays";
   }
   // A search lives as long as the person is in it, including a room opened
   // from it. Another tab, another account or folding the pill ends it.
@@ -8273,11 +8402,12 @@
     else chatSearchInput.removeAttribute("aria-activedescendant");
     if (active && reveal) {
       // Keep a little of the next row in view, so the list reads as going on.
-      const view = scrollEl.getBoundingClientRect();
+      const list = listScrollEl();
+      const view = list.getBoundingClientRect();
       const box = active.getBoundingClientRect();
       const margin = 28;
-      if (box.bottom > view.bottom - margin) scrollEl.scrollTop += box.bottom - view.bottom + margin;
-      else if (box.top < view.top + margin) scrollEl.scrollTop -= view.top + margin - box.top;
+      if (box.bottom > view.bottom - margin) list.scrollTop += box.bottom - view.bottom + margin;
+      else if (box.top < view.top + margin) list.scrollTop -= view.top + margin - box.top;
     }
   }
   function renderChatSearch() {
@@ -8317,18 +8447,18 @@
     el.animate([{ transform:`translateY(${delta}px)` }, { transform:"none" }], { duration:260, easing:"cubic-bezier(.22,1,.28,1)" });
   }
   function openChatSearch() {
-    if (activeView !== "relays" || collapsed || peeking) return;
+    if (!chatSearchListShowing() || collapsed || peeking) return;
     if (chatSearch.open) { chatSearchInput.focus(); chatSearchInput.select(); return; }
     const listTop = relaysListEl.getBoundingClientRect().top;
     chatSearch.open = true;
     chatSearch.account = signupAccountKey();
     chatSearch.active = "";
-    chatSearch.listScrollTop = scrollEl.scrollTop;
+    chatSearch.listScrollTop = listScrollEl().scrollTop;
     chatSearchInput.value = "";
     if (!contactsList.length) void loadContacts().then(() => renderChatSearch());
     if (!groupsList.length) void Promise.resolve(loadGroups()).then(() => renderChatSearch()).catch(() => {});
     renderChatSearch();
-    scrollEl.scrollTop = 0;
+    listScrollEl().scrollTop = 0;
     chatSearchInput.focus();
     if (!REDUCED) {
       const field = document.getElementById("chatSearch");
@@ -8357,7 +8487,7 @@
     const scrollTop = chatSearch.listScrollTop;
     endChatSearch();
     renderAll();
-    scrollEl.scrollTop = scrollTop;
+    listScrollEl().scrollTop = scrollTop;
     if (!REDUCED) {
       for (const tab of document.querySelectorAll(".tabs > :not(.chat-search):not(.chat-search-cancel)")) {
         if (tab.offsetParent) tab.animate([{ opacity:0 }, { opacity:1 }], { duration:180, easing:"ease-out" });
@@ -8371,7 +8501,7 @@
     chatSearchInput.value = value;
     chatSearch.active = "";
     renderChatSearch();
-    scrollEl.scrollTop = 0;
+    listScrollEl().scrollTop = 0;
   }
   // A message found by search: the room opens already at it, and it glows once.
   function revealSearchHit(id, room) {
@@ -8509,7 +8639,7 @@
   chatSearchTrigger.addEventListener("click", openChatSearch);
   document.getElementById("chatSearchCancel").addEventListener("click", () => closeChatSearch());
   chatSearchClear.addEventListener("click", () => { setChatSearchQuery(""); chatSearchInput.focus(); });
-  chatSearchInput.addEventListener("input", () => { chatSearch.active = ""; renderChatSearch(); scrollEl.scrollTop = 0; });
+  chatSearchInput.addEventListener("input", () => { chatSearch.active = ""; renderChatSearch(); listScrollEl().scrollTop = 0; });
   chatSearchInput.addEventListener("keydown", (event) => {
     if (event.isComposing) return;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -8528,7 +8658,7 @@
   // ⌘F searches, and so does typing a letter anywhere on the inbox: the
   // keystroke lands in the field it opens.
   document.addEventListener("keydown", (event) => {
-    if (event.defaultPrevented || event.isComposing || activeView !== "relays" || collapsed || peeking || roomViewTransition) return;
+    if (event.defaultPrevented || event.isComposing || !chatSearchListShowing() || collapsed || peeking || roomViewTransition) return;
     if (event.key === "Escape" && chatSearchShowing() && event.target !== chatSearchInput) {
       event.preventDefault();
       if (chatSearchInput.value) { setChatSearchQuery(""); chatSearchInput.focus(); } else closeChatSearch({ restoreFocus:true });
@@ -8544,6 +8674,9 @@
     const target = event.target;
     if (event.metaKey || event.ctrlKey || event.altKey || key.length !== 1 || key === " ") return;
     if (target instanceof HTMLElement && (target.isContentEditable || target.closest("input, textarea, select, [contenteditable]"))) return;
+    // Typing finds things on the list itself; with a chat open beside it the
+    // keys are that chat's (⌘F still searches).
+    if (activeView !== "relays") return;
     if (!chatSearch.open) openChatSearch();
     else chatSearchInput.focus();
   });
@@ -9013,13 +9146,7 @@
   }
   // The rail's avatar: a Slack channel wears its #, and a chat that is also in
   // Slack wears the Slack mark, the same as on the Chats list.
-  function railAvatarHtml(room) {
-    const slack = payload.features?.slack === true && isSlackIntegratedRoom(room);
-    const base = slack && slackChannelRoom(room)
-      ? `<span class="avatar sq channel-hash" style="--av-h:${avatarHue(room.name)}" aria-hidden="true">#</span>`
-      : `<span class="avatar${room.isGroup ? " sq" : ""}" style="--av-h:${avatarHue(room.isGroup ? (room.title || room.name) : room.name)}" aria-hidden="true">${esc(avatarInitials(room.name))}</span>`;
-    return slack ? `<span class="av-slack">${base}<img class="av-slack-mark" src="slackMark.png" alt="" /></span>` : base;
-  }
+
   function slackComposerPlaceholder(room) {
     if (payload.features?.slack !== true || !isSlackIntegratedRoom(room)) return "";
     const name = String(room.name || "").trim();
@@ -10194,6 +10321,11 @@
   }
   function renderTopics() {
     if (!topicsBodyEl) return;
+    // The expanded app: the list is the sidebar's, the board is the pane's.
+    const wide = wideLayoutActive();
+    if (wide) paintTopicList(topicsSideEl);
+    else if (topicsSideEl.childElementCount) { topicsSideEl.innerHTML = ""; delete topicsSideEl.dataset.listHtml; }
+    if (activeView === "topics") syncWidePane();
     if (topicsState.openId) {
       topicsEmptyEl.classList.add("gone");
       const d = topicsState.detail;
@@ -10201,25 +10333,41 @@
         : topicsState.postsError ? `<div class="tp-detail"><button class="gd-back" type="button" data-topic-back>‹ Topics</button><div class="tp-error">${esc(topicsState.postsError)}</div></div>`
         : `<div class="tp-loading">Loading…</div>`;
       wireTopicDetail();
+      if (wide) paintWideSelection();
       return;
     }
+    if (wide) {
+      // Nothing open: the pane says so (applyView shows #wideEmpty).
+      topicsEmptyEl.classList.add("gone");
+      if (topicsBodyEl.childElementCount) topicsBodyEl.innerHTML = "";
+      paintWideSelection();
+      return;
+    }
+    paintTopicList(topicsBodyEl);
+  }
+  function paintTopicList(container) {
     if (topicsState.loading && !topicsState.loaded) {
       topicsEmptyEl.classList.add("gone");
-      topicsBodyEl.innerHTML = `<div class="tp-loading">Loading topics…</div>`;
+      container.innerHTML = `<div class="tp-loading">Loading topics…</div>`;
       return;
     }
     if (topicsState.error && !topicsState.loaded) {
       topicsEmptyEl.classList.add("gone");
-      topicsBodyEl.innerHTML = `<div class="tp-error">${esc(topicsState.error)}</div>`;
+      container.innerHTML = `<div class="tp-error">${esc(topicsState.error)}</div>`;
       return;
     }
     const attention = topicsState.topics.filter(topicNeedsAttention);
     const rest = topicsState.topics.filter((t) => !topicNeedsAttention(t));
-    topicsEmptyEl.classList.toggle("gone", topicsState.topics.length > 0 || topicsState.creating);
-    topicsBodyEl.innerHTML = topicNewFormHtml() + `<div class="tp-list">${[...attention, ...rest].map(topicRowHtml).join("")}</div>`;
-    wireTopicList();
+    topicsEmptyEl.classList.toggle("gone", container !== topicsBodyEl || topicsState.topics.length > 0 || topicsState.creating);
+    const html = topicNewFormHtml() + `<div class="tp-list">${[...attention, ...rest].map(topicRowHtml).join("")}</div>`;
+    // A half-typed new topic must survive the list's quiet refresh.
+    if (container.dataset.listHtml === html && container.querySelector(".tp-list")) return;
+    container.dataset.listHtml = html;
+    container.innerHTML = html;
+    wireTopicList(container);
   }
-  function wireTopicList() {
+  function wireTopicList(container = topicsBodyEl) {
+    const topicsBodyEl = container;
     for (const row of topicsBodyEl.querySelectorAll("[data-topic-open]")) {
       const open = () => openTopic(row.getAttribute("data-topic-open"));
       row.addEventListener("click", open);
@@ -11780,7 +11928,6 @@
       onDone("later", id);
     });
   }
-  let chatExpanded = false; // the conversation borrowing the reader's frame (⤢)
   let readerTab = "you"; // which face of the Task folder is open ("you" | "agent")
   const readerDetailsOpen = new Set(); // letters whose Details this contact opened; closed until then
   let readerTabSwap = false; // true only for the render caused by a tab switch (drives the pane animation)
@@ -12342,7 +12489,8 @@
     // In the expanded split, the conversation and its rail are siblings. The
     // room owns scrolling so following the newest message cannot drag every
     // conversation in the rail above the card's viewport.
-    return activeView === "threads" && chatExpanded ? thDetailEl : scrollEl;
+    // The expanded app's room scrolls in its own pane (chat-max).
+    return activeView === "threads" && threadsViewEl.classList.contains("chat-max") ? thDetailEl : scrollEl;
   }
   function beginThreadEntryFollow(threadId) {
     const token = ++threadDetailEntryFollowSeq;
@@ -12484,19 +12632,22 @@
       presented = true;
     }
     sessionPickerState = picker;
-    if (activeView !== "reader") {
+    // Picked from the expanded app's list, a Relay REPLACES what the pane
+    // showed: there is nothing to go back to but the list beside it.
+    if (wideLayoutActive() && wideSideActivation) {
+      readerReturn = { view: wideSideTab() === "contacts" ? "contacts" : wideSideTab() === "topics" ? "topics" : "relays", threadId: null, outerScrollTop: 0 };
+    } else if (activeView !== "reader") {
       readerReturn = {
         view: activeView,
         threadId: threadDetailId,
         party: threadDetailPartyHint,
-        expanded: chatExpanded,
         source: threadsSource === "slack" ? threadsReturnSource : threadsSource,
         roomScroll: captureRoomScroll(),
         expandedMessages: [...expandedMsgIds],
         outerScrollTop: scrollEl ? scrollEl.scrollTop : 0,
       };
     }
-    return startCardViewTransition(() => {
+    return startFrameNavigation(() => {
       readerId = id;
       const opened = readerRow(id);
       // A Relay that already went to an app opens on its receipt.
@@ -12507,19 +12658,31 @@
       commitNavigation({ outerScrollTop: 0 });
     }, READER);
   }
+  // A navigation that may change the card's frame. In the expanded app the
+  // frame never changes: the sidebar holds still and only the pane beside it
+  // swaps, so the motion is the pane's, not the card's.
+  function startFrameNavigation(update, compactSize) {
+    if (wideLayoutActive()) {
+      return startRoomViewTransition(() => {
+        const restore = update();
+        if (typeof restore === "function") { threadDetailEntryFollow = null; restore(); }
+        if (activeView === "reader") assessReaderFit();
+      }, { motion:"swap" });
+    }
+    return startCardViewTransition(update, compactSize);
+  }
   function closeReader() {
     closeReaderAttachments();
     cleanReaderMorph();
     sessionPickerState = null;
     const back = readerReturn || { view: "relays", threadId: null };
-    startCardViewTransition(() => {
+    startFrameNavigation(() => {
       readerId = null;
       if (back.view === "threads" && back.threadId) {
         // Re-ENTER the room through the same door that opened it. Restoring the
         // fields by hand looked equivalent and was not: the pane came back blank
         // (David, live). One entry point, one state.
-        const wasExpanded = Boolean(back.expanded);
-        openThreadDetail(back.threadId, back.party || "", back.source || "chat", { expanded: wasExpanded });
+        openThreadDetail(back.threadId, back.party || "", back.source || "chat");
         if (back.expandedMessages?.length) {
           for (const id of back.expandedMessages) expandedMsgIds.add(id);
           renderThreadDetail();
@@ -12528,7 +12691,7 @@
       }
       activeView = back.view || "relays";
       commitNavigation({ outerScrollTop: back.outerScrollTop });
-    }, back.view === "threads" && back.expanded ? READER : EXPANDED);
+    }, EXPANDED);
   }
   // Paragraph-level rendering only: escaped text, blank-line splits.
   // The letter's markdown. Agents write the way agents write — bold, code,
@@ -13352,6 +13515,16 @@
     if (activeView === "relays" && hasMoreThreads) {
       renderedThreadCount += RENDER_WINDOW;
       renderRelays();
+    }
+  }, { passive: true });
+  // The same window, read from the sidebar's scroller in the expanded app.
+  document.getElementById("wideSideList").addEventListener("scroll", (event) => {
+    const list = event.currentTarget;
+    if (list.scrollTop + list.clientHeight < list.scrollHeight - 240) return;
+    if (wideLayoutActive() && wideSideTab() === "relays" && hasMoreThreads) {
+      renderedThreadCount += RENDER_WINDOW;
+      renderRelays();
+      paintWideSelection();
     }
   }, { passive: true });
 
@@ -14385,6 +14558,7 @@
     cvOpeningKey = null;
     const contact = key ? contactsList.find((item) => contactKey(item) === key) : null;
     if (!contact) return;
+    wideContactKey = key;
     cvPeopleErrorEl.textContent = "";
     // A direct room's identity is `email:<address>`; older rows carry only the
     // displayed name. Match the address first — a contact renamed in the book
@@ -14575,8 +14749,8 @@
     cvSegPeopleNEl.textContent = contactsList.length ? String(contactsList.length) : "";
     cvSegGroupsNEl.textContent = groupsList.length ? String(groupsList.length) : "";
   }
-  cvSegPeopleEl.addEventListener("click", () => { contactsPane = "people"; applyContactsPane(); });
-  cvSegGroupsEl.addEventListener("click", () => { contactsPane = "groups"; applyContactsPane(); loadGroups(); });
+  cvSegPeopleEl.addEventListener("click", () => { contactsPane = "people"; applyContactsPane(); if (wideLayoutActive()) syncWidePane(); });
+  cvSegGroupsEl.addEventListener("click", () => { contactsPane = "groups"; applyContactsPane(); loadGroups(); if (wideLayoutActive()) syncWidePane(); });
 
   const cvgListEl = document.getElementById("cvgList");
   const cvgEmptyEl = document.getElementById("cvgEmpty");
@@ -15055,6 +15229,7 @@
   function openGroupRoom(groupId) {
     const group = groupsList.find((candidate) => candidate.id === groupId) || null;
     if (!group) return;
+    wideContactKey = `group:${group.id}`;
     cvgShowError("");
     const wantedId = String(group.id);
     const wantedName = normalizedPartyName(group.name);
@@ -17591,9 +17766,6 @@
     const roomCoordinate = isSlackIntegratedRoom(selected) && selected.chatId
       ? String(selected.chatId)
       : threadId;
-    // If this tap came from the split rail, retain that room's deliberate rail
-    // position before threadDetailId changes to the destination room.
-    rememberChatRailScroll();
     const morphFromList = prepareReaderMorph(activeView);
     openThreadDetail(roomCoordinate, partyHint || "", roomSource, {
       expanded:options.expanded !== false,
@@ -17658,90 +17830,9 @@
     const pr = chatListEl.querySelector("#peopleRow");
     if (pr) pr.addEventListener("click", () => { activeView = "contacts"; commitNavigation(); });
   }
-  // ---- the split's rail: every conversation beside the open room ----
-  const chatRailScrollByRoom = new Map();
-  let chatRailRenderedRoomKey = "";
-  function chatRailRoomKey(threadId = threadDetailId) {
-    const room = chatRoomForThread(threadId, conversationSurface());
-    if (!room) return String(threadId || "");
-    if (room.isGroup) return `group:${normalizedPartyName(room.groupName || room.name)}`;
-    return stablePartyKey(room.partyKey) || `person:${normalizedPartyName(room.name)}`;
-  }
-  function setChatRailScrollTop(railEl, savedScroll) {
-    const parsed = Number(savedScroll);
-    const target = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-    railEl.scrollTop = target;
-    return target;
-  }
-  function rememberChatRailScroll() {
-    const railEl = document.getElementById("chatRail");
-    if (!railEl || !chatRailRenderedRoomKey || !chatExpanded) return;
-    chatRailScrollByRoom.set(chatRailRenderedRoomKey, Math.max(0, Number(railEl.scrollTop) || 0));
-  }
-  function positionChatRail(railEl, roomKey) {
-    // A room that has never been visited always starts at the newest
-    // conversation. Returning to a room restores only an explicit rail scroll.
-    const hasSavedPosition = chatRailScrollByRoom.has(roomKey);
-    const target = setChatRailScrollTop(railEl, chatRailScrollByRoom.get(roomKey));
-    requestAnimationFrame(() => {
-      if (activeView !== "threads" || !chatExpanded || chatRailRoomKey() !== roomKey) return;
-      if (hasSavedPosition) setChatRailScrollTop(railEl, target);
-      else railEl.querySelector(".rl-row.on")?.scrollIntoView({ block:"nearest" });
-    });
-  }
-  function renderChatRail() {
-    const railEl = document.getElementById("chatRail");
-    if (!chatExpanded || !threadDetailId) {
-      railEl.innerHTML = "";
-      chatRailRenderedRoomKey = "";
-      return;
-    }
-    const { rooms } = chatSections();
-    const roomKey = chatRailRoomKey();
-    const roomIsOpen = (t) => t.threadId === threadDetailId || t.chatId === threadDetailId
-      || (t.threadIds instanceof Set && t.threadIds.has(threadDetailId));
-    const row = (t) => `
-      <button class="rl-row${roomIsOpen(t) ? " on" : ""}" type="button" data-rail-open="${esc(t.threadId)}" data-party="${esc(t.name)}">
-        ${railAvatarHtml(t)}
-        <span class="nm">${esc(t.name)}</span>
-        ${t.unreadCount && !roomIsOpen(t) ? `<span class="ct">${t.unreadCount}</span>` : ""}
-      </button>`;
-    // One list of chats, Slack-linked or not, so the rail always ends in People.
-    const peopleFooter = `<button class="people-row" type="button" data-rail-people>
-         <span class="pd">${contactsList.slice(0, 2).map((c) => `<span class="avatar" style="--av-h:${avatarHue(c.name || c.email)}" aria-hidden="true">${esc(avatarInitials(c.name || c.email))}</span>`).join("")}</span>
-         <span class="lab">Your contacts</span>
-         <span class="n">${contactsList.length || ""}</span><span class="chev">&#8250;</span>
-       </button>`;
-    const nextHtml = rooms.map(row).join("") + peopleFooter;
-    // Keeping an unchanged rail intact avoids manufacturing a new browser
-    // scroll anchor on every inbox poll. When content really changes, restore
-    // the room's explicit rail position immediately after the replacement.
-    if (railEl.innerHTML !== nextHtml) {
-      railEl.innerHTML = nextHtml;
-      for (const el of railEl.querySelectorAll("[data-rail-open]")) {
-        // Open from the LIST this room came from, not its Slack projection:
-        // openThreadDetail picks the projection per room.
-        el.addEventListener("click", () => openRoom(
-          el.getAttribute("data-rail-open"),
-          el.getAttribute("data-party"),
-          threadsSource === "slack" ? threadsReturnSource : threadsSource,
-        ));
-      }
-      const pp = railEl.querySelector("[data-rail-people]");
-      if (pp) pp.addEventListener("click", () => {
-        rememberChatRailScroll();
-        chatExpanded = false; syncExpandButton();
-        activeView = "contacts"; commitNavigation();
-      });
-    }
-    chatRailRenderedRoomKey = roomKey;
-    positionChatRail(railEl, roomKey);
-  }
-  document.getElementById("chatRail").addEventListener("scroll", () => {
-    if (!chatExpanded || !chatRailRenderedRoomKey) return;
-    const railEl = document.getElementById("chatRail");
-    chatRailScrollByRoom.set(chatRailRenderedRoomKey, Math.max(0, Number(railEl.scrollTop) || 0));
-  }, { passive: true });
+  // The split's names-only rail is retired: in the expanded app the sidebar
+  // is the list itself (rows, previews, Chats/Tasks/Relays), so a second,
+  // thinner copy of it beside the room only said less.
   function renderThreads() {
     const showingDetail = Boolean(threadDetailId);
     // Walking out of a room ends its selection here rather than waiting for the
@@ -17749,7 +17840,6 @@
     // early, and the header would stay taken over by a bar for a closed room.
     if (!showingDetail && attachmentSelection) { attachmentSelection = null; applyAttachmentSelection(); }
     thDetailEl.classList.toggle("gone", !showingDetail);
-    renderChatRail();
     threadsListEl.classList.toggle("gone", showingDetail);
     if (showingDetail) return renderThreadDetail();
     // A detail-less internal route returns to the index that opened it.
@@ -18390,6 +18480,8 @@
   }
 
   function renderThreadDetail() {
+    // Back shows inside a chat's thread even beside the list (see syncPaneRoot).
+    syncPaneRoot();
     // Register queue aliases before building history can retire optimistic rows.
     for (const [key, row] of optimisticChatReplies) RelayChatRows.rememberSend(key, row);
     for (const row of payload.outbox || []) RelayChatRows.rememberSend(row.id, row);
@@ -19605,38 +19697,85 @@
     // power path: hold ⌥ on the reader's Open in {app}.)
   }
   function syncExpandButton() {
-    const b = document.getElementById("thExpand");
-    if (b) b.innerHTML = chatExpanded
-      ? '<span class="xg">⤡</span><span class="xl">Collapse</span>'
-      : '<span class="xg">⤢</span><span class="xl">Expand</span>';
+    // One switch, one place: the titlebar's, in every view and both modes.
+    const toggle = document.getElementById("wideToggle");
+    if (toggle) {
+      const label = appExpanded ? "Collapse" : "Expand";
+      document.getElementById("wideToggleLabel").textContent = label;
+      toggle.setAttribute("aria-pressed", String(appExpanded));
+      toggle.title = `${label}  ⌘⇧E`;
+    }
     // See info follows the frame: re-run its gate on every toggle, not just
     // on room open (setThreadHeader runs the same expression).
     if (typeof thGroupInfoEl !== "undefined" && thGroupInfoEl) {
       const room = threadDetailId ? chatRoomForThread(threadDetailId) : null;
       thGroupInfoEl.classList.toggle("hidden",
-        !(chatExpanded && room && room.isGroup && (room.groupName || room.groupId)));
+        !(appExpanded && room && room.isGroup && (room.groupName || room.groupId)));
       syncSlackVisibilityButton(room);
     }
   }
+  // Expand and Collapse are one switch for the whole app. Whatever is open
+  // stays open through it: a room keeps its place in the conversation, a
+  // topic its board, and the list you were in becomes (or stops being) the
+  // sidebar beside it.
   let compactRoomResizeReturn = null;
-  document.getElementById("thExpand").addEventListener("click", (e) => {
-    e.stopPropagation();
-    const roomScroll = chatExpanded && compactRoomResizeReturn?.threadId === threadDetailId
-      ? compactRoomResizeReturn.scroll : captureRoomScroll();
-    if (!chatExpanded) compactRoomResizeReturn = { threadId:threadDetailId, scroll:roomScroll };
-    else compactRoomResizeReturn = null;
-    rememberChatRailScroll();
+  function setAppExpanded(next) {
+    next = Boolean(next);
+    if (next === appExpanded || collapsed || peeking || ghost || cardEl.classList.contains("signup")) return;
+    const inRoom = activeView === "threads" && Boolean(threadDetailId);
+    const roomScroll = inRoom
+      ? (appExpanded && compactRoomResizeReturn?.threadId === threadDetailId ? compactRoomResizeReturn.scroll : captureRoomScroll())
+      : null;
+    compactRoomResizeReturn = inRoom && next ? { threadId:threadDetailId, scroll:roomScroll } : null;
+    try { localStorage.setItem("relayAppExpanded", next ? "1" : "0"); } catch {}
+    dismissReactionPickers();
     startCardViewTransition(() => {
-      if (chatExpanded) sessionPickerState = null;
-      chatExpanded = !chatExpanded;
+      if (!next) sessionPickerState = null;
+      // Your AIs opened itself beside the You page; the small card shows the
+      // page you were on, not a page you never asked for.
+      if (!next && setupPaneAuto) { setupPageOpen = false; setupPaneAuto = false; stopSetupPolling(); }
+      appExpanded = next;
       syncExpandButton();
-      // Populate/clear the rail before the frame begins moving. Building it
-      // after springTo made the first wide frame an empty column.
-      renderChatRail();
-      applyView();
-      return () => restoreRoomScroll(roomScroll);
-    }, chatExpanded ? EXPANDED : READER);
+      commitNavigation();
+      if (roomScroll) return () => restoreRoomScroll(roomScroll);
+      return undefined;
+    }, next ? wideSize() : (activeView === "reader" ? READER : EXPANDED), { reveal: next ? "grow" : "shrink" });
+  }
+  document.getElementById("wideToggle").addEventListener("click", (e) => {
+    e.stopPropagation();
+    setAppExpanded(!appExpanded);
   });
+  // ⌘⇧E expands and collapses from anywhere. In the expanded app ⌥↑ / ⌥↓
+  // walk the sidebar's list, opening each chat in the pane as you go.
+  document.addEventListener("keydown", (e) => {
+    if (e.defaultPrevented || e.isComposing) return;
+    if (e.metaKey && e.shiftKey && !e.altKey && !e.ctrlKey && e.code === "KeyE") {
+      e.preventDefault();
+      setAppExpanded(!appExpanded);
+      return;
+    }
+    if (!e.altKey || e.metaKey || e.ctrlKey || e.shiftKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+    if (!wideLayoutActive()) return;
+    // Mid-draft, ⌥↑ / ⌥↓ are the Mac's own caret moves: the words win.
+    const field = e.target instanceof HTMLElement ? e.target.closest("input, textarea, [contenteditable]") : null;
+    if (field && (field.value || field.textContent || "").trim()) return;
+    if (wideStep(e.key === "ArrowDown" ? 1 : -1)) e.preventDefault();
+  });
+  function wideStep(direction) {
+    const side = wideSideTab();
+    const rows = side === "relays" ? [...relaysListEl.querySelectorAll(".relay-row[data-thread], .row[data-id], .row[data-sent-id]")]
+      : side === "contacts" ? [...(contactsPane === "groups" ? document.querySelectorAll("#cvgList .cvg-item[data-group]") : cvListEl.querySelectorAll(".cv-item[data-contact]"))]
+      : side === "topics" ? [...topicsSideEl.querySelectorAll("[data-topic-open]")]
+      : [];
+    if (!rows.length) return false;
+    let index = -1;
+    if (wideLitSelector) index = rows.findIndex((row) => { try { return Boolean(row.closest(wideLitSelector)); } catch { return false; } });
+    const next = rows[index < 0 ? (direction > 0 ? 0 : rows.length - 1) : Math.max(0, Math.min(rows.length - 1, index + direction))];
+    if (!next || (index >= 0 && next === rows[index])) return true;
+    next.scrollIntoView({ block:"nearest" });
+    next.click();
+    return true;
+  }
   thBackEl.addEventListener("click", () => {
     sessionPickerState = null;
     if (slackFocusedThreadId || replyThreadFocusId) {
@@ -19648,9 +19787,8 @@
     }
     if (!groupInfoBackdropEl.classList.contains("hidden")) closeGroupInfo();
     // Compact rooms are a same-frame navigation stack and reverse their push.
-    // Expanded rooms are also shrinking the card, so they keep the quieter
-    // resize morph instead of combining a full-width swipe with frame motion.
-    const wasExpanded = chatExpanded;
+    // In the expanded app the list is already beside the room: Back only
+    // empties the pane, and the frame never moves.
     const backFrom = threadsSource === "slack" ? threadsReturnSource : threadsSource;
     const destinationView = backFrom === "chat" ? "chat"
       : backFrom === "contacts" ? "contacts"
@@ -19665,17 +19803,17 @@
       threadDetailRecovery = null;
       threadDetailScrolledFor = null;
       threadDetailLiveFollow = RelayChatPresentation.reduceChatLiveFollow(threadDetailLiveFollow, { type:"reset" });
-      chatExpanded = false;
       // Back goes back to the LIST that was clicked. A room entered from People
       // returns to Contacts, on the row it left, not to Relays.
       activeView = destinationView;
       commitNavigation({ outerScrollTop: returnTop });
     };
-    if (!wasExpanded) {
-      startRoomViewTransition(navigateBack, { motion:"back" });
+    if (wideLayoutActive()) {
+      wideMemory.delete(wideSideTab());
+      startFrameNavigation(navigateBack, EXPANDED);
       return;
     }
-    startCardViewTransition(navigateBack, EXPANDED);
+    startRoomViewTransition(navigateBack, { motion:"back" });
   });
   let threadsSource = "chat"; // which projection the open conversation reads ("slack" for a chat that is also in Slack)
   let threadsReturnSource = "relays"; // the list Back returns to
@@ -19728,10 +19866,14 @@
     // all you wanted was the message. Relay-sourced opens land compact; ⤢
     // Expand is the opt-in. Chat rooms keep David's law (openRoom asserts it
     // and callers may pass options.expanded explicitly).
-    chatExpanded = options.expanded === undefined ? returnSource === "chat" : Boolean(options.expanded);
+    // The frame is the app's, never the room's: a room opens in whichever
+    // mode the person is in (options.expanded is a legacy hint, ignored).
     syncExpandButton();
     threadDetailId = roomCoordinate;
     threadDetailChatId = canonicalChatId;
+    // The list it was opened from remembers it, for the expanded app's tab hops.
+    wideMemory.set(returnSource === "contacts" ? "contacts" : "relays", { threadId:roomCoordinate, party:partyHint, source:returnSource, contactKey:returnSource === "contacts" ? wideContactKey : "" });
+    if (returnSource !== "contacts") wideContactKey = "";
     threadDetailLoadError = "";
     threadDetailRecovery = null;
     threadDetailPartyHint = partyHint;
@@ -20293,6 +20435,7 @@
   };
   const SETUP_DOWNLOADS = { "claude-app": "https://claude.ai/download", "chatgpt-app": "https://chatgpt.com/download" };
   let setupPageOpen = false;
+  let setupPaneAuto = false; // opened by the expanded app's You pane, not by the person
   let setupPageReturnScroll = 0;
   let setupSnapshot = null;
   let setupLoading = false;
@@ -20587,6 +20730,7 @@
   function openSetupPage(focus = "") {
     setupPageReturnScroll = activeView === "settings" ? scrollEl.scrollTop : 0;
     setupPageOpen = true;
+    setupPaneAuto = false;
     setupFocus = focus;
     setupArmed = "";
     if (activeView !== "settings") { activeView = "settings"; commitNavigation(); }
@@ -21010,18 +21154,27 @@
   }
   function renderSettings() {
     if (activeView !== "settings") return;
-    if (setupPageOpen && payload.account?.paired !== false) {
+    // The expanded app: the You page is the sidebar (the small card's page,
+    // at its own width) and Your AIs opens beside it, the way every other
+    // tab opens what you pick. In the small card the page swaps instead.
+    const wide = wideLayoutActive();
+    const paired = payload.account?.paired !== false;
+    if (wide && paired && !setupPageOpen) { setupPageOpen = true; setupPaneAuto = true; setupFocus = ""; setupArmed = ""; }
+    const setupHost = wide ? setupPaneEl : settingsViewEl;
+    if (setupPageOpen && paired) {
       // The page looks again every few seconds; repaint only what changed,
       // so a hover, a focus or a half-made click is never thrown away.
       const html = setupPageHtml();
-      if (settingsViewEl.dataset.setupHtml === html && settingsViewEl.querySelector("#setupPage")) { wireSetupReveal(); syncSetupRunPolling(); return; }
-      settingsViewEl.dataset.setupHtml = html;
-      settingsViewEl.innerHTML = html;
-      wireSetupPage();
+      if (setupHost.dataset.setupHtml === html && setupHost.querySelector("#setupPage")) { wireSetupReveal(); syncSetupRunPolling(); }
+      else {
+        setupHost.dataset.setupHtml = html;
+        setupHost.innerHTML = html;
+        wireSetupPage();
+      }
       if (!setupPollTimer) { startSetupPolling(); void refreshSetup(); }
-      return;
+      if (!wide) return;
     }
-    delete settingsViewEl.dataset.setupHtml;
+    if (!wide) delete settingsViewEl.dataset.setupHtml;
     const info = settingsInfo;
     if (!info) {
       settingsViewEl.innerHTML = '<div class="td-quiet">Loading account…</div>';
@@ -21146,6 +21299,9 @@
       <svg class="rd-end" width="16" height="4" viewBox="0 0 16 4" aria-hidden="true"><rect x="0" width="4" height="4"/><rect x="6" width="4" height="4"/><rect x="12" width="4" height="4"/></svg>
       <span class="sv-version">${esc(info.version ? `Relay ${info.version}` : "Relay")}</span>
     </div>`;
+    // Identical page, no DOM write: Your AIs polls beside it every few seconds.
+    if (settingsViewEl.dataset.pageHtml === html && settingsViewEl.querySelector(".sv-colophon")) return;
+    settingsViewEl.dataset.pageHtml = html;
     settingsViewEl.innerHTML = html;
     settingsViewEl.querySelector("#executionDisable")?.addEventListener("click", async () => {
       await window.relay.executionDisable();
@@ -23050,10 +23206,175 @@
     renderAll();
     if (outerScrollTop !== null && scrollEl) scrollEl.scrollTop = Math.max(0, Number(outerScrollTop) || 0);
   }
+  // ---------- the expanded app ----------
+  const wideSideEl = document.getElementById("wideSide");
+  const wideSideHeadEl = document.getElementById("wideSideHead");
+  const wideSideListEl = document.getElementById("wideSideList");
+  const topicsSideEl = document.getElementById("topicsSide");
+  const wideEmptyEl = document.getElementById("wideEmpty");
+  // What each list had open in the pane, so hopping Inbox → Topics → Inbox
+  // finds the same chat still open: the pane is the list's, and remembers.
+  const wideMemory = new Map();
+  let wideContactKey = ""; // the contact whose chat the pane is showing
+  function wideLayoutActive() {
+    return appExpanded && !collapsed && !peeking && !ghost
+      && !cardEl.classList.contains("signup") && !cardEl.classList.contains("offstage");
+  }
+  // Which list the sidebar shows for a view: the tab the person is in, or
+  // the list the open thing was opened from. The You page has none.
+  function wideSideTab(view = activeView) {
+    if (view === "settings") return "settings";
+    if (view === "topics") return "topics";
+    if (view === "contacts") return "contacts";
+    if (view === "threads") return (threadsSource === "slack" ? threadsReturnSource : threadsSource) === "contacts" ? "contacts" : "relays";
+    if (view === "reader") {
+      const back = readerReturn;
+      if (back?.view === "threads") return back.source === "contacts" ? "contacts" : "relays";
+      if (back?.view === "topics" || back?.view === "contacts") return back.view;
+      if (back?.view === "settings") return "settings";
+      return "relays";
+    }
+    return "relays";
+  }
+  // The pieces that become the sidebar are MOVED, never copied, so every id,
+  // listener and draft stays the only one of its kind. A comment marks each
+  // piece's home in the small card.
+  const wideHomes = new Map();
+  function wideHomeOf(el) {
+    if (!wideHomes.has(el)) {
+      const marker = document.createComment(` home of #${el.id} `);
+      el.parentNode.insertBefore(marker, el);
+      wideHomes.set(el, marker);
+    }
+    return wideHomes.get(el);
+  }
+  let wideDomOn = false;
+  wideDomReady = true;
+  function syncWideDom() {
+    const wide = wideLayoutActive();
+    cardEl.classList.toggle("wide", wide);
+    cardEl.style.setProperty("--wide-side", `${WIDE_SIDE}px`);
+    if (wide === wideDomOn) return;
+    const movers = [
+      [relaysLayoutEl, wideSideHeadEl],
+      [relaysFilterEl, wideSideHeadEl],
+      [relaysViewEl, wideSideListEl],
+      [contactsViewEl, wideSideListEl],
+      [settingsViewEl, wideSideListEl],
+    ];
+    // Keep the list where the person was reading it: the scroller changes
+    // (the card's own scroller in the small card, the sidebar's here), the
+    // place in the list does not.
+    const listView = ["relays", "contacts", "chat", "sent", "settings"].includes(activeView);
+    const fromTop = wide ? (listView ? scrollEl.scrollTop : (wideSideTab() === "contacts" ? contactsListScrollTop : relaysListScrollTop))
+      : wideSideListEl.scrollTop;
+    for (const [el, wideParent] of movers) {
+      if (!el) continue;
+      const home = wideHomeOf(el);
+      if (wide) wideParent.appendChild(el);
+      else home.parentNode.insertBefore(el, home.nextSibling);
+    }
+    wideDomOn = wide;
+    if (wide) {
+      wideSideListEl.scrollTop = fromTop;
+    } else if (listView) {
+      scrollEl.scrollTop = fromTop;
+    } else if (wideSideTab() === "contacts") {
+      contactsListScrollTop = fromTop;
+    } else {
+      relaysListScrollTop = fromTop;
+    }
+  }
+  // Whether the click being handled began in the sidebar (the list), as
+  // opposed to inside the pane. Set in the capture phase, before any row's
+  // own handler runs; keyboard activation dispatches a click too.
+  let wideSideActivation = false;
+  document.addEventListener("click", (event) => {
+    wideSideActivation = wideSideEl.contains(event.target);
+    // The row whose thing is already open does nothing: no reload, no flash,
+    // no jump to the bottom. In a chat the caret just goes back to its reply.
+    if (!wideSideActivation || !wideLitSelector || !wideLayoutActive()) return;
+    if (event.target.closest("[data-stop], [data-message-more], .row-delete, .cv-person-more, .cvg-edit, input, textarea")) return;
+    const row = event.target.closest(".relay-row, .row, .cv-item, .cvg-item, [data-topic-open]");
+    if (!row || !(row.matches(wideLitSelector) || row.closest(wideLitSelector))) return;
+    event.stopPropagation();
+    event.preventDefault();
+    if (activeView === "threads") document.getElementById("thQrInput")?.focus({ preventScroll:true });
+  }, true);
+  // The list scroller of the moment: the sidebar's in the expanded app.
+  function listScrollEl() { return wideLayoutActive() ? wideSideListEl : scrollEl; }
+  function wideEmptyHtml(tab) {
+    const mark = `<svg class="mark" width="22" height="22" viewBox="0 0 16 16" aria-hidden="true"><rect x="0" y="6" width="4" height="4"/><rect x="6" y="6" width="4" height="4"/><rect x="12" y="6" width="4" height="4"/></svg>`;
+    const words = tab === "topics" ? "Pick a topic" : tab === "contacts" ? "Pick someone to talk to" : tab === "groups" ? "Pick a group" : "Pick a chat";
+    const noun = tab === "topics" ? "topics" : tab === "contacts" ? "people" : tab === "groups" ? "groups" : "chats";
+    return `${mark}<div class="t1">${words}</div><div class="t2 keys"><kbd>⌥</kbd><kbd>↑</kbd><kbd>↓</kbd> move between ${noun}</div>`;
+  }
+  // The pane with nothing open in it says so, in the words of the list beside it.
+  function syncWidePane() {
+    const wide = wideLayoutActive();
+    const topicOpen = Boolean(topicsState.openId);
+    const paneEmpty = wide && (["relays", "contacts", "chat", "sent"].includes(activeView) || (activeView === "topics" && !topicOpen));
+    wideEmptyEl.classList.toggle("hidden", !paneEmpty);
+    topicsViewEl.classList.toggle("hidden", activeView !== "topics" || (wide && !topicOpen));
+    if (!paneEmpty) return;
+    const emptyTab = activeView === "contacts" ? (contactsPane === "groups" ? "groups" : "contacts") : activeView === "topics" ? "topics" : "relays";
+    if (wideEmptyEl.dataset.tab !== emptyTab) { wideEmptyEl.dataset.tab = emptyTab; wideEmptyEl.innerHTML = wideEmptyHtml(emptyTab); }
+  }
+  // Back only shows where there is somewhere to go back to: a thread inside
+  // a chat, or the chat a Relay was opened from.
+  function syncPaneRoot() {
+    const wide = wideLayoutActive();
+    const root = wide && ((activeView === "threads" && !slackFocusedThreadId && !replyThreadFocusId)
+      || (activeView === "reader" && readerReturn?.view !== "threads"));
+    cardEl.classList.toggle("pane-root", Boolean(root));
+  }
+  // Light the row whose thing is open in the pane. Never by touching the
+  // rows: the lists' "identical markup, no DOM write" guards compare their
+  // HTML, and a class written into a row would make every poll a rebuild.
+  // A tiny generated stylesheet names the open row instead.
+  const wideSelectionStyle = document.createElement("style");
+  wideSelectionStyle.id = "wideSelection";
+  let wideLitSelector = "";
+  document.head.appendChild(wideSelectionStyle);
+  function paintWideSelection() {
+    const wide = wideLayoutActive();
+    const lit = [];
+    const q = (value) => `"${CSS.escape(String(value))}"`;
+    if (wide && activeView === "threads" && threadDetailId) {
+      const openKey = wideRoomKey(threadDetailId);
+      const side = wideSideTab();
+      if (side === "relays") {
+        for (const el of relaysListEl.querySelectorAll(".relay-row[data-thread]")) {
+          const thread = el.getAttribute("data-thread");
+          if (thread && wideRoomKey(thread) === openKey) lit.push(`#relaysList .relay-row[data-thread=${q(thread)}]`);
+        }
+      } else if (side === "contacts" && wideContactKey.startsWith("group:")) {
+        lit.push(`#cvgList .cvg-item[data-group=${q(wideContactKey.slice(6))}]`);
+      } else if (side === "contacts" && wideContactKey) {
+        lit.push(`#cvList .cv-person:has(> .cv-item[data-contact=${q(wideContactKey)}])`);
+      }
+    }
+    if (wide && activeView === "reader" && readerId) {
+      lit.push(`#relaysList .row[data-id=${q(readerId)}]`, `#relaysList .row[data-sent-id=${q(readerId)}]`);
+    }
+    if (wide && topicsState.openId) lit.push(`#topicsSide [data-topic-open=${q(topicsState.openId)}]`);
+    wideLitSelector = lit.join(", ");
+    const css = lit.length ? `.card.wide :is(${lit.join(", ")}) { background:var(--wash-2); }
+.card.wide :is(${lit.join(", ")}) .rk-body { border-bottom-color:transparent; }
+.card.wide :is(${lit.join(", ")}) > .cv-item { background:transparent; }` : "";
+    if (wideSelectionStyle.textContent !== css) wideSelectionStyle.textContent = css;
+  }
+  function wideRoomKey(threadId) {
+    const room = chatRoomForThread(threadId, conversationSurface());
+    if (!room) return String(threadId || "");
+    if (room.isGroup) return `group:${normalizedPartyName(room.groupName || room.name)}`;
+    return stablePartyKey(room.partyKey) || `person:${normalizedPartyName(room.name)}`;
+  }
   function syncTabs() {
     // Conversations belong to CHAT (the Chat tab lists them; a thread detail
     // is its drill-down), and contacts is Chat's pushed pane — its tab is retired.
-    const tabView = activeView === "threads" ? (threadsSource === "slack" ? threadsReturnSource : threadsSource)
+    const tabView = wideLayoutActive() ? wideSideTab()
+      : activeView === "threads" ? (threadsSource === "slack" ? threadsReturnSource : threadsSource)
       : activeView === "contacts" ? "contacts"
       : activeView === "reader" ? (readerSource || "relays")
       : activeView;
@@ -23064,7 +23385,7 @@
       ));
       tab.classList.toggle("active", view === tabView);
     }
-    chatSearchTrigger.classList.toggle("gone", activeView !== "relays");
+    chatSearchTrigger.classList.toggle("gone", wideLayoutActive() ? wideSideTab() !== "relays" : activeView !== "relays");
     // You is your avatar: your initials once an account is paired, the word
     // until then. Words over glyphs — a gear says "machine", initials say "you".
     if (youTabAvatarEl) {
@@ -23074,24 +23395,36 @@
     }
   }
   function applyView() {
+    // The expanded app first: which pieces are the sidebar decides what the
+    // rest of this pass shows and where.
+    syncWideDom();
+    const wide = wideLayoutActive();
+    const side = wide ? wideSideTab() : null;
     syncChatTypingContext();
     syncRelayAnyoneTip();
     // Visibility is committed only after renderAll has built the destination.
     // Toggle layout first; retarget the native/card frame last so its first
     // animated frame already contains the final view rather than a blank pane.
-    threadsViewEl.classList.toggle("chat-max", chatExpanded);
+    threadsViewEl.classList.toggle("chat-max", wide);
     scrollEl.classList.toggle("room-scroll-active", activeView === "threads" && Boolean(threadDetailId));
-    relaysViewEl.classList.toggle("hidden", activeView !== "relays");
-    chatViewEl.classList.toggle("hidden", activeView !== "chat");
+    // In the expanded app the lists live in the sidebar (shown by the list
+    // the person is in) and the pane shows the open thing, or says nothing is.
+    relaysViewEl.classList.toggle("hidden", wide ? side !== "relays" : activeView !== "relays");
+    topicsSideEl.hidden = !(wide && side === "topics");
+    chatViewEl.classList.toggle("hidden", wide || activeView !== "chat");
     threadsViewEl.classList.toggle("hidden", activeView !== "threads");
-    sentViewEl.classList.toggle("hidden", activeView !== "sent");
-    topicsViewEl.classList.toggle("hidden", activeView !== "topics");
+    sentViewEl.classList.toggle("hidden", wide || activeView !== "sent");
+    syncWidePane();
     readerViewEl.classList.toggle("hidden", activeView !== "reader");
     if (activeView !== "reader") readerStatusMotion.clear();
     readerStatusMotion.setActive(activeView === "reader" && rendererSurfaceActive());
     if (activeView !== "reader") closeReaderAttachments();
-    contactsViewEl.classList.toggle("hidden", activeView !== "contacts");
-    settingsViewEl.classList.toggle("hidden", activeView !== "settings");
+    contactsViewEl.classList.toggle("hidden", wide ? side !== "contacts" : activeView !== "contacts");
+    settingsViewEl.classList.toggle("hidden", wide ? side !== "settings" : activeView !== "settings");
+    setupPaneEl.classList.toggle("hidden", !(wide && activeView === "settings" && setupPageOpen));
+    syncExpandButton();
+    syncPaneRoot();
+    paintWideSelection();
     // Entry side-effects fire only when the view actually CHANGED — applyView
     // is re-asserted on every render pass now (self-healing visibility), and
     // refreshing sent/settings on each pass would ping-pong with the payload
@@ -23129,8 +23462,9 @@
       window.relay.refreshSent().catch(() => {});
     }
     if (activeView === "topics" && payload.features?.topics === true && viewChanged) loadTopics();
-    // The reader — or an expanded conversation — holds the card at READER size.
-    syncCardSize(activeView === "reader" || (activeView === "threads" && chatExpanded));
+    // The expanded app holds its frame whatever is open; otherwise the reader
+    // holds the card at READER size.
+    syncCardSize(activeView === "reader");
   }
   document.getElementById("chatExpandBtn").addEventListener("click", (e) => {
     e.stopPropagation();
@@ -23149,6 +23483,7 @@
       if (roomViewTransition) {
         supersedeRoomViewTransition();
       }
+      if (wideLayoutActive()) { wideTabHop(view); return; }
       // Tab hops over an open conversation move the HIGHLIGHT, never the
       // screen (David): Chat owns every conversation, and the tab it came
       // from keeps a claim too — hop freely between them, nothing re-renders.
@@ -23169,6 +23504,31 @@
       activeView = view;
       commitNavigation();
     });
+  }
+
+  // A tab in the expanded app swaps the sidebar's list, and the pane shows
+  // what that list last had open there, so Inbox → Topics → Inbox comes back
+  // to the same chat. The lit tab only takes its list back to the top.
+  function wideTabHop(view) {
+    if (view === "relays" && requestInboxOpen) {
+      requestInboxOpen = false; requestInboxError = "";
+      if (wideSideTab() === "relays") { renderRelays(); wideSideListEl.scrollTop = 0; return; }
+    }
+    const target = view === "chat" ? "relays" : view;
+    if (target === wideSideTab()) {
+      if (view === "contacts" && blockedPeoplePage) closeBlockedPeople();
+      wideSideListEl.scrollTo({ top:0, behavior:REDUCED ? "auto" : "smooth" });
+      return;
+    }
+    if (sessionPickerState) sessionPickerState = null;
+    const memory = target === "relays" || target === "contacts" ? wideMemory.get(target) : null;
+    if (memory && chatRoomForThread(memory.threadId, conversationSurface(memory.source))) {
+      wideContactKey = memory.contactKey || "";
+      openThreadDetail(memory.threadId, memory.party || "", memory.source);
+      return;
+    }
+    activeView = target;
+    commitNavigation();
   }
 
   // Typing is an independent, in-place header update. Never render a chat,
@@ -23344,8 +23704,12 @@
       refreshPaneCounts();
     }
     if (paintSurface) {
+      // The expanded app keeps the sidebar's list live beside the open thing.
+      const wideSide = wideLayoutActive() ? wideSideTab() : null;
       if (activeView === "chat") renderChat();
-      if (activeView === "relays") renderRelays();
+      if (activeView === "relays" || wideSide === "relays") renderRelays();
+      if (wideSide === "topics" && activeView !== "topics") renderTopics();
+      if (activeView === "relays") { /* painted above */ }
       else if (activeView === "threads") renderThreads();
       else if (activeView === "sent") renderSent();
       else if (activeView === "reader") renderReader();

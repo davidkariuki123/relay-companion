@@ -126,7 +126,9 @@ test("a room entered from People keeps People lit, and Back returns there", () =
     "Slack is another room index while the existing People source remains intact");
   // A Slack-linked room reads the Slack projection, but the tab that stays lit
   // is still the list it was opened from (there is no Slack tab).
-  assert.match(html, /const tabView = activeView === "threads" \? \(threadsSource === "slack" \? threadsReturnSource : threadsSource\)/);
+  // In the expanded app the lit tab is the sidebar's list, which is the same
+  // list the room was opened from.
+  assert.match(html, /const tabView = wideLayoutActive\(\) \? wideSideTab\(\)\s*: activeView === "threads" \? \(threadsSource === "slack" \? threadsReturnSource : threadsSource\)/);
 
   // Back goes back to the list that was clicked, on the row it left.
   const back = between(html, "thBackEl.addEventListener", "let threadsSource =");

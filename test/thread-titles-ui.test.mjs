@@ -82,165 +82,12 @@ test("a conversation is named only by its person or saved group", () => {
   assert.match(html, /t\.name = t\.isGroup \? \(t\.groupName \|\| setLabel\) : t\.people\[0\]/);
   assert.match(html, /setThreadHeader\(roomName \|\| voices, ""\)/);
   assert.doesNotMatch(html, /explicitTitle|allTopics|topicsPanelOpen|Search topics|>Topics</);
-  const chat = html.slice(html.indexOf("function renderChat()"), html.indexOf("function renderChatRail()"));
-  assert.match(chat, /const \{ rooms \} = chatSections\(\)/);
-  assert.match(chat, /rooms\.map\(row\)\.join\(""\)/);
-  assert.doesNotMatch(chat, />Groups<|>People<|section\("Groups"|section\("People"/);
-  assert.doesNotMatch(chat, />See all</);
-});
-
-function mentionRenderer({ contacts = [], account = {}, groups = [], plain = false } = {}) {
-  const start = html.indexOf("function normalizedMentionToken(");
-  const end = html.indexOf("\n  function relaySender(", start);
-  assert.notEqual(start, -1, "missing mention renderer");
-  assert.notEqual(end, -1, "missing mention renderer boundary");
-  const source = html.slice(start, end)
-    + html.slice(html.indexOf("function contactNameForEmail("), html.indexOf("function emailPrefix("))
-    + html.slice(html.indexOf("function contactEmails("), html.indexOf("function contactKey("));
-  const escapeHtml = (value) => String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-  return Function(
-    "contactsList",
-    "payload",
-    "groupsList",
-    "esc",
-    `"use strict"; ${source}; return ${plain ? "mentionPreviewText" : "linkify"};`,
-  )(contacts, { account }, groups, escapeHtml);
-}
-
-test("chat list previews resolve mention tokens using contacts, self and the channel roster", () => {
-  const preview = mentionRenderer({
-    plain:true,
-    contacts:[{ handle:"sven", name:"Sven Wellmann", email:"sven@example.com" }],
-    account:{ name:"David Kariuki", email:"david@example.com" },
-    groups:[{ id:"grp_granular", members:[{ name:"Shane Acton", email:"shane@example.com" }] }],
-  });
-  assert.equal(preview("@sven @Shane_Acton @David_Kariuki", "grp_granular"), "@Sven Wellmann @Shane Acton @David Kariuki");
-  assert.equal(preview("@Shane_Acton", "grp_elsewhere"), "@Shane_Acton");
-  assert.equal(preview("@unknown_handle mail@sven https://example.com/@sven"), "@unknown_handle mail@sven https://example.com/@sven");
-  const rosterPreview = mentionRenderer({ plain:true, groups:[{ id:"grp_granular", members:[{ name:"Sven Wellmann" }] }] });
-  assert.equal(rosterPreview("@Sven_Wellmann", "grp_granular"), "@Sven Wellmann");
-  const row = html.slice(html.indexOf("function relayIdentityRowHtml(identity, show = null)"), html.indexOf("// ---------- the reader:"));
-  assert.match(row, /relayListGist\(mentionPreviewText\(row\.title \|\| row\.body \|\| "Message", identity\.groupId\), 90\)/,
-    "resolve names in the row's channel before shortening the preview");
-  assert.match(row, /\$\{esc\(gist\)\}/, "display names remain HTML escaped");
-});
-
-test("known @handles render as highlighted contact names without changing unknown text", () => {
-  const linkify = mentionRenderer({ contacts:[{ handle:"shane_acton", name:"Shane Acton" }] });
-
-  assert.equal(
-    linkify("@Shane_Acton what's the word?"),
-    '<span class="th-mention" aria-label="Mentioned Shane Acton">@Shane Acton</span> what&#039;s the word?',
-  );
-  assert.equal(linkify("Ask @not_saved"), "Ask @not_saved", "unknown handles stay honest");
-  assert.equal(linkify("mail shane@shane_acton.dev"), "mail shane@shane_acton.dev", "email domains are not mentions");
-  assert.match(linkify("https://example.com/@shane_acton"), /^<a href=/, "a URL remains one link token");
-  assert.match(html, /\.th-msg\.text \.th-mention \{[\s\S]*?border:1px solid[\s\S]*?background:/);
-  assert.match(html, /else if \(activeView === "threads"\) renderThreads\(\)/, "an open room repaints after contact names load");
-});
-
-test("mentions of the viewer render as name chips without a self contact or loaded roster", () => {
-  const account = { name:"David Kariuki", email:"david@example.com" };
-  const linkify = mentionRenderer({ account });
-  assert.equal(
-    linkify("ah here it is @David_Kariuki"),
-    'ah here it is <span class="th-mention" aria-label="Mentioned David Kariuki">@David Kariuki</span>',
-  );
-  assert.match(linkify("@dAvId_KaRiUkI"), />@David Kariuki<\/span>$/);
-  assert.equal(account.name, "David Kariuki", "rendering never rewrites the account or message");
-});
-
-test("an explicit self handle is supported without inventing another name token", () => {
-  const linkify = mentionRenderer({ account:{ name:"David Kariuki", handle:"david", email:"david@example.com" } });
-  assert.match(linkify("@david"), />@David Kariuki<\/span>$/);
-  assert.equal(linkify("@David_Kariuki"), "@David_Kariuki");
-});
-
-test("received mentions resolve unsaved channel owners and members only in their own channel", () => {
-  const linkify = mentionRenderer({
-    groups:[{
-      id:"grp_designs", owned:false,
-      owner:{ name:"Sven Wellmann", email:"sven@example.com" },
-      members:[{ name:"Shane Acton", handle:"shane", email:"shane@example.com" }],
-    }],
-  });
-  assert.match(linkify("Ask @Sven_Wellmann and @shane", "grp_designs"),
-    /Mentioned Sven Wellmann[\s\S]*Mentioned Shane Acton/);
-  assert.equal(linkify("@Sven_Wellmann @shane", "grp_unrelated"), "@Sven_Wellmann @shane");
-  assert.equal(linkify("@Sven_Wellmann @shane"), "@Sven_Wellmann @shane", "a DM does not borrow another room's roster");
-  assert.equal(linkify("@Shane_Acton @unknown", "grp_designs"), "@Shane_Acton @unknown");
-});
-
-test("channel tokens keep the viewer's preferred names, including their own profile", () => {
-  const linkify = mentionRenderer({
-    account:{ name:"David Kariuki", email:"david@example.com" },
-    contacts:[{ name:"Sven Ozwellmann", handle:"sven", emails:["sven@example.com"] }],
-    groups:[{
-      id:"grp_designs", owned:false,
-      owner:{ name:"Sven Wellmann", email:"sven@example.com" },
-      members:[{ name:"David K", handle:"dk", email:"DAVID@example.com" }],
-    }],
-  });
-  assert.match(linkify("@Sven_Wellmann", "grp_designs"), />@Sven Ozwellmann<\/span>$/);
-  assert.match(linkify("@sven", "grp_designs"), />@Sven Ozwellmann<\/span>$/);
-  assert.match(linkify("@dk", "grp_designs"), />@David Kariuki<\/span>$/);
-  assert.equal(linkify("@dk", "grp_other"), "@dk");
-});
-
-test("self and roster rendering escapes names and preserves emails and links", () => {
-  const linkify = mentionRenderer({
-    account:{ name:'David <b> & "K"', handle:"david" },
-    groups:[{ id:"grp_designs", members:[{ name:"bad@example.com", handle:"bad" }] }],
-  });
-  assert.equal(linkify("hello @david"),
-    'hello <span class="th-mention" aria-label="Mentioned David &lt;b&gt; &amp; &quot;K&quot;">@David &lt;b&gt; &amp; &quot;K&quot;</span>');
-  assert.equal(linkify("name@david"), "name@david");
-  assert.equal(linkify("https://example.com/@david"),
-    '<a href="https://example.com/@david" data-stop="1" target="_blank" rel="noreferrer noopener">https://example.com/@david</a>');
-  assert.equal(linkify("@bad", "grp_designs"), "@bad", "email-only labels do not become named chips");
-});
-
-test("direct and group conversations share one newest-first chronology", () => {
-  const source = html.slice(html.indexOf("function chatSections()"), html.indexOf("function chatRoomForThread("));
-  assert.match(source, /const rooms = sortConversationRooms\(\[\.\.\.groups, \.\.\.people\]\)/);
-  assert.match(source, /return \{ convos, groups, people, rooms \}/);
-
-  const sortSource = html.slice(html.indexOf("function sortConversationRooms("), html.indexOf("function chatSections()"));
-  const sortConversationRooms = Function(`"use strict"; ${sortSource}; return sortConversationRooms;`)();
-  const sorted = sortConversationRooms([
-    { name: "Older person", isGroup: false, latest: { at: "2026-08-14T08:00:00Z" } },
-    { name: "Newest group", isGroup: true, latest: { at: "2026-08-14T10:00:00Z" } },
-    { name: "Middle person", isGroup: false, latest: { at: "2026-08-14T09:00:00Z" } },
-    { name: "Quiet Z", isGroup: true, hasActivity:false, latest: { at: "2026-08-21T11:00:00Z" } },
-    { name: "Quiet A", isGroup: true, hasActivity:false, latest: { at: "2026-08-21T12:00:00Z" } },
-  ]);
-  assert.deepEqual(
-    sorted.map((room) => room.name),
-    ["Newest group", "Middle person", "Older person", "Quiet A", "Quiet Z"],
-    "activity is chronological; empty saved rooms follow it but remain listed",
-  );
-
-  const chat = html.slice(html.indexOf("function renderChat()"), html.indexOf("function renderChatRail()"));
+  const chat = html.slice(html.indexOf("function renderChat()"), html.indexOf("function renderThreads()"));
   assert.doesNotMatch(chat, /tb-group/);
-  const rail = html.slice(html.indexOf("function renderChatRail()"), html.indexOf("function renderThreads()"));
-  assert.match(rail, /const \{ rooms \} = chatSections\(\)/);
   // One list of chats (David, 2026-10-07): Slack-linked rooms sit in the same
-  // rail, so there is no Slack rail without People and no surface switch.
+  // list, so there is no Slack list without People and no surface switch.
   const sections = html.slice(html.indexOf("function chatSections()"), html.indexOf("function chatRoomForThread("));
   assert.doesNotMatch(sections, /conversationSurface\(\)|surface === "slack"/);
-  assert.match(rail, /const peopleFooter = `<button class="people-row" type="button" data-rail-people>/,
-    "the rail always ends in People");
-  assert.doesNotMatch(rail, /surface === "slack"/);
-  // A rail tap opens from the list this room came from; openThreadDetail picks
-  // the Slack projection per room, so a Relay-only room never inherits it.
-  assert.match(rail, /threadsSource === "slack" \? threadsReturnSource : threadsSource,\s*\)\);/);
-  assert.match(rail, /rooms\.map\(row\)\.join\(""\)/);
-  assert.doesNotMatch(rail, /rl-h|>Groups<|>People</);
 });
 
 // Extract only the function under test; nearby UI copy is not a JS boundary.
@@ -339,60 +186,26 @@ test("merged people and group rooms retain every internal reply-chain id", () =>
   assert.match(sections, /room\.threadIds instanceof Set && room\.threadIds\.has\(threadId\)/);
 });
 
-test("opening a person or group room deterministically keeps its rail visible", () => {
+test("opening a room never changes the app's frame", () => {
   const open = html.slice(html.indexOf("function openThreadDetail("), html.indexOf("// ---------- Settings view"));
-  // Re-landed (Sven, 2026-08-16): a relay tap lands in the glance frame —
-  // only Chat-sourced opens earn the split. The invariant this test guards is
-  // unchanged: chatExpanded is derived deterministically from source/options,
-  // never a bare reset that races openRoom, so a room entered from Chat
-  // always keeps its rail. A Slack-linked room reads its Slack projection,
-  // so the split follows the list it was opened from.
-  assert.match(open, /chatExpanded = options\.expanded === undefined \? returnSource === "chat" : Boolean\(options\.expanded\)/);
-  assert.doesNotMatch(open, /chatExpanded = false/);
+  // THE EXPANDED APP (David, 2026-10-07): Expand is a mode of the whole app.
+  // A room opens in whichever mode the person is in; nothing about a room,
+  // its source or a legacy options.expanded hint may write the mode.
+  assert.doesNotMatch(open, /appExpanded\s*=/);
+  assert.doesNotMatch(open, /chatExpanded/);
   const noDetail = html.slice(html.indexOf("function renderThreads()"), html.indexOf("function renderThreadDetail"));
   assert.match(noDetail, /activeView = "chat"/);
   assert.doesNotMatch(noDetail, /buildThreads\(\)/);
 });
 
-test("a newly opened room positions the newest conversations at the top of the rail", () => {
-  const scrollSource = html.slice(
-    html.indexOf("function setChatRailScrollTop("),
-    html.indexOf("function rememberChatRailScroll("),
-  );
-  const setChatRailScrollTop = Function(`"use strict"; ${scrollSource}; return setChatRailScrollTop;`)();
-  const rail = { scrollTop: 976, clientHeight: 260 };
-  const newestConversation = { offsetTop: 4, offsetHeight: 44 };
-  const nextConversation = { offsetTop: 52, offsetHeight: 44 };
-  const isInViewport = (row) => (
-    row.offsetTop + row.offsetHeight > rail.scrollTop
-      && row.offsetTop < rail.scrollTop + rail.clientHeight
-  );
-
-  // No saved position means first visit, even when Chromium carried a stale
-  // bottom scrollTop through the split layout's DOM replacement.
-  assert.equal(setChatRailScrollTop(rail, undefined), 0);
-  assert.equal(rail.scrollTop, 0);
-  assert.equal(isInViewport(newestConversation), true);
-  assert.equal(isInViewport(nextConversation), true);
-
-  // A position is restored only when the user actually scrolled that room.
-  assert.equal(setChatRailScrollTop(rail, 84), 84);
-  assert.equal(rail.scrollTop, 84);
-
-  const render = html.slice(html.indexOf("function renderChatRail()"), html.indexOf("function renderThreads()"));
-  assert.match(render, /const nextHtml =/);
-  assert.match(render, /if \(railEl\.innerHTML !== nextHtml\)/);
-  assert.match(render, /positionChatRail\(railEl, roomKey\)/);
-  assert.match(html, /railEl\.querySelector\("\.rl-row\.on"\)\?\.scrollIntoView\(\{ block:"nearest" \}\)/);
-  assert.match(html, /#threadsView\.chat-max \.chat-rail[\s\S]*?overflow-anchor:none/);
-  // The real failure was subtler than a nonzero rail.scrollTop: the long room
-  // enlarged #threadsView and the OUTER card scroller moved the entire rail
-  // thousands of pixels upward. The split is now viewport-sized and the room
-  // is the only scrolling sibling, so the first headings remain on screen.
+test("the expanded room is viewport-sized and scrolls in its own pane", () => {
+  // The names-only rail is retired: the expanded app's sidebar is the list.
+  assert.doesNotMatch(html, /chat-rail|renderChatRail|rl-row/);
+  // The long room must not enlarge #threadsView and move the OUTER scroller:
+  // the split is viewport-sized and the room is the only scrolling child.
   assert.match(html, /#threadsView\.chat-max:not\(\.hidden\) \{[\s\S]*?height:100%; min-height:0; overflow:hidden/);
-  assert.match(html, /#threadsView\.chat-max \.chat-rail \{[\s\S]*?height:100%; min-height:0/);
   assert.match(html, /#threadsView\.chat-max #thDetail \{[\s\S]*?height:100%;[\s\S]*?overflow-y:auto/);
-  assert.match(html, /function roomScrollElement\(\)[\s\S]*?chatExpanded \? thDetailEl : scrollEl/);
+  assert.match(html, /function roomScrollElement\(\)[\s\S]*?threadsViewEl\.classList\.contains\("chat-max"\) \? thDetailEl : scrollEl/);
 });
 
 test("reader Back restores the exact room scroll anchor", () => {

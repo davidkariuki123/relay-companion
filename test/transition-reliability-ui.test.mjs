@@ -40,14 +40,17 @@ test("a navigation commits once and restores scroll before the browser paints", 
 
 test("Reader Back restores the final room state without an intermediate wrong frame", () => {
   const close = between("function closeReader()", "// Paragraph-level rendering");
-  assert.match(close, /openThreadDetail\(back\.threadId, back\.party \|\| "", back\.source \|\| "chat", \{ expanded: wasExpanded \}\)/);
-  assert.doesNotMatch(close, /openThreadDetail\([^;]+;[\s\S]*?chatExpanded = wasExpanded/);
+  assert.match(close, /openThreadDetail\(back\.threadId, back\.party \|\| "", back\.source \|\| "chat"\)/);
+  assert.doesNotMatch(close, /appExpanded\s*=/);
   assert.match(close, /commitNavigation\(\{ outerScrollTop: back\.outerScrollTop \}\)/);
 });
 
 test("expand and banner-to-full transitions populate content before the frame moves", () => {
-  const expand = between('document.getElementById("thExpand")', "thBackEl.addEventListener");
-  assert.ok(expand.indexOf("renderChatRail();") < expand.indexOf("applyView();"));
+  const expand = between("function setAppExpanded(", 'document.getElementById("wideToggle").addEventListener("click"');
+  // The whole destination is built inside the transition's update, before
+  // the frame starts moving: mode, button, then one committed navigation.
+  assert.ok(expand.indexOf("startCardViewTransition(") < expand.indexOf("appExpanded = next;"));
+  assert.ok(expand.indexOf("appExpanded = next;") < expand.indexOf("commitNavigation();"));
 
   const openFull = between("function openFull()", "// ---------- the ✕");
   assert.match(openFull, /renderAll\(\)/);

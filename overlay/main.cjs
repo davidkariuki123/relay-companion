@@ -210,7 +210,7 @@ const OUTBOX_PATH = path.join(RELAY_HOME, "outbox.json");
 // from). Spawned with ELECTRON_RUN_AS_NODE so Electron runs it as plain Node.
 const RELAY_CLI = path.resolve(__dirname, "..", "bin", "relay.js");
 // Maximum harness parking footprint; it safely covers the largest reader frame.
-const WIN = { width: 760, height: 880 }; // holds the READER/split frame (720x760) the design expands into
+const WIN = { width: 940, height: 880 }; // holds the expanded app (900x760), the widest frame the design expands into
 const PREVIEW_WIN = { width: 720, height: 760, minWidth: 480, minHeight: 480 };
 // A second preview steps down-right of the first so a stack stays individually
 // clickable instead of hiding behind whichever opened last. Six offsets is as
@@ -6056,7 +6056,7 @@ function pollHosts({ probeFrontmost = true } = {}) {
 // and size changes on different frames, retaining the old surface long enough
 // to look exactly like a duplicate pill.
 const CARD_INITIAL = { w: 344, h: 524 };    // EXPANDED in inbox.html; renderer publishes its live size before announcing readiness
-const CARD_MAX = { w: 720, h: 800 };        // READER in inbox.html (the pill expanded into the page; PEEK is 400px wide)
+const CARD_MAX = { w: 900, h: 800 };        // WIDE in inbox.html (the expanded app; READER is 720, PEEK is 400px wide)
 const FIXED_OVERLAY_SURFACE = usesFixedOverlaySurface(process.platform);
 const HIT_IN = 6;
 const HIT_OUT = 12;

@@ -213,8 +213,8 @@ try {
   await evaluate(page, "document.querySelector('[data-view=\"relays\"]').click(); true");
   await waitFor(page, "Boolean(document.querySelector('#relaysList .relay-arrival'))");
   await evaluate(page, "document.querySelector('#relaysList .relay-arrival').click(); true");
-  await waitFor(page, "Boolean(document.querySelector('#thExpand'))");
-  await evaluate(page, "document.querySelector('#thExpand').click(); true");
+  await waitFor(page, "Boolean(document.querySelector('#wideToggle'))");
+  await evaluate(page, "document.querySelector('#wideToggle').click(); true");
   await waitFor(page, "Boolean(document.querySelector('#thGroupInfo:not(.hidden)'))");
   await evaluate(page, "document.querySelector('#thGroupInfo').click(); true");
   await waitFor(page, "Boolean(document.querySelector('#groupInfoDetail .group-detail.in-sheet [data-gd-leave]'))");

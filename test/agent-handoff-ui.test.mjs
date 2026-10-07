@@ -26,7 +26,7 @@ const delivery = read("../src/session-delivery.js");
 
 const handoff = between(main, "async function handOffToAgent", "// The kick prompt is the task's REAL first user message.");
 const docks = between(inbox, "function hostMark(provider)", "function wireRequestControls");
-const controls = between(inbox, "function wireRequestControls", "let chatExpanded = false;");
+const controls = between(inbox, "function wireRequestControls", 'let readerTab = "you";');
 const reader = between(inbox, "function renderReader()", "// Grow the window as the user scrolls toward the end.");
 
 test("Send on the agent document is a hand-off: one verb, one IPC, no runner", () => {
