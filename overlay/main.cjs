@@ -25,6 +25,14 @@ const { createFirstRelayOnboarding, firstMintedLink } = require("./first-relay-o
 const { createAgentOnboarding } = require("./agent-onboarding.cjs");
 const { createAgentConnections } = require("./agent-connections.cjs");
 const { createNetworkOnboarding } = require("./network-onboarding.cjs");
+const { createTeachingTelemetry } = require("./teaching-telemetry.cjs");
+// What people do with the inbox's Five ways card, for engagement telemetry.
+const teachingTelemetry = createTeachingTelemetry({
+  async send(event, context) {
+    if (process.env.RELAY_OVERLAY_TEST === "1" || !deviceToken()) return;
+    await (await relayClient()).onboardingEvent(event, "companion_inbox", context);
+  },
+});
 
 if (process.platform === "linux") {
   app.setName("Relay");
@@ -965,6 +973,17 @@ async function checkNativeDrafts() {
   } finally { checkingNativeDrafts = false; }
 }
 
+// The one question that switches device execution on, asked by the first
+// Execute or by Allow on an @agent reply waiting for this computer.
+async function askDeviceExecutionConsent(conductorOffered = false) {
+  const answer = await dialog.showMessageBox(win, {
+    type: "question", title: "Enable device execution?", message: "Let Relay start work on this device?",
+    detail: `Work starts only when you ask: Execute on a Task here, or a message to your agent from another of your devices. Relay opens the Task in your Codex or Claude Code app, which runs it with its own permissions and your subscription. Relay reads that session to show progress.${conductorOffered ? " In Conductor, Relay opens a new workspace with the Task named in its prompt; you click Create there, and the agent reports progress to Relay itself." : ""} Turn this off any time in Relay Settings; work already running carries on. Developer preview.`,
+    buttons: ["Cancel", "Enable device execution"], defaultId: 0, cancelId: 0,
+  });
+  return answer.response === 1;
+}
+
 async function executeTaskInNativeApp(event, id, choice) {
   if (!win || win.isDestroyed() || event.sender !== win.webContents || event.senderFrame !== event.sender.mainFrame) return { ok: false, error: "Not the Relay window." };
   if (!currentProductFeatures().taskExecution) return { ok: false, error: "Execute is available only to Relay developer accounts." };
@@ -997,20 +1016,14 @@ async function executeTaskInNativeApp(event, id, choice) {
         });
         return answer.response === 1;
       },
-      consent: async () => {
-        const answer = await dialog.showMessageBox(win, {
-          type: "question", title: "Enable device execution?", message: "Let Relay start work on this device?",
-          detail: `Work starts only when you ask: Execute on a Task here, or a message to your agent from another of your devices. Relay opens the Task in your Codex or Claude Code app, which runs it with its own permissions and your subscription. Relay reads that session to show progress.${conductorOffered ? " In Conductor, Relay opens a new workspace with the Task named in its prompt; you click Create there, and the agent reports progress to Relay itself." : ""} Turn this off any time in Relay Settings; work already running carries on. Developer preview.`,
-          buttons: ["Cancel", "Enable device execution"], defaultId: 0, cancelId: 0,
-        });
-        return answer.response === 1;
-      },
+      consent: () => askDeviceExecutionConsent(conductorOffered),
       // One question, asked in the page: "Where should the agent work?" with
       // a short list of app-and-workspace pairs, best first (the Task's own
       // repo, this Topic's and this sender's earlier choices, last time, the
       // checkouts this person works in), then "another folder…" per app,
       // which is the OS dialog. The first call offers; the pick comes back
-      // as a second call and is honoured only if it was offered.
+      // as a second call and is honoured only if it was offered. A Task that
+      // names exactly one checkout here, with a known app, is not asked.
       choose: async (providers, preferences) => {
         const selected = pick ? providers.find((p) => p.provider === pick.provider) : null;
         const remember = async (chosen) => {
@@ -1037,7 +1050,10 @@ async function executeTaskInNativeApp(event, id, choice) {
           const match = (executeOffers.get(key) || []).find((option) => option.provider === selected.provider && option.cwd === String(pick.cwd));
           if (match) return remember({ provider: match.provider, cwd: match.cwd });
         }
-        return offer();
+        await offer();
+        // The Task names one checkout here and we know the app: skip the question.
+        if (!pick && offered?.auto) return remember({ provider: offered.auto.provider, cwd: offered.auto.cwd });
+        return null;
       },
       update: (record) => {
         if (record.startedAt) updateStagedPacket(id, { taskStartedAt: record.startedAt, taskRunOwner: record.taskRunOwner, taskClaim: record.taskClaim });
@@ -1165,6 +1181,7 @@ function resetAccountViewCaches() {
   sentCache = [];
   sentFingerprint = "";
   sentUsage = null;
+  teachingTelemetry.reset();
   sentLoadedOnce = null;
   contactsCache = [];
   contactsFingerprint = "";
@@ -2653,6 +2670,7 @@ function buildPayload() {
     // any agent request waiting for the person's answer.
     settings: relaySettings.pillSnapshot(relaySettings.accountKeyFor(currentAccount), {}, settingsStoreCache),
     nativeExecutionEnabled: nativeTaskModules?.launch.executionEnabled(readConfigFile()) === true,
+    nativeExecutionMode: nativeTaskModules?.launch.executionMode?.(readConfigFile()) || "auto",
     nativeExecutions: nativeExecutionSummary(relaysNow),
     // The background service the transcript depends on: "ok", "repairing"
     // while this pill puts it back, or "stopped" once that repair failed.
@@ -8817,6 +8835,10 @@ ipcMain.on("relay:openFresh", (_e, id, host, note) => {
 ipcMain.on("relay:openInCurrent", (_e, id, host) => {
   requestSessionPicker(id, { host: String(host || "") });
 });
+ipcMain.on("relay:teachingEvent", (event, name, way) => {
+  if (!win || win.isDestroyed() || event.sender !== win.webContents) return;
+  teachingTelemetry.record(name, way);
+});
 ipcMain.on("relay:preview", (event, id) => {
   if (win && !win.isDestroyed() && event && event.sender !== win.webContents) return;
   if (!openPreview(id)) console.error("[preview] relay not found:", id);
@@ -9066,6 +9088,33 @@ ipcMain.handle("relay:executionDisable", async (event) => {
   if (!win || win.isDestroyed() || event.sender !== win.webContents || event.senderFrame !== event.sender.mainFrame) return { ok: false };
   const { launch } = await nativeTaskModulesPromise;
   launch.setExecutionPreferences(readConfigFile(), { enabled: false });
+  await pushInbox(true);
+  return { ok: true };
+});
+// Allow on an @agent reply that is waiting for this computer: the same
+// question as the first Execute. The daemon starts the waiting run on its
+// next tick.
+ipcMain.handle("relay:executionEnable", async (event) => {
+  if (!win || win.isDestroyed() || event.sender !== win.webContents || event.senderFrame !== event.sender.mainFrame) return { ok: false };
+  if (!currentProductFeatures().taskExecution) return { ok: false, error: "Device execution is available only to Relay developer accounts." };
+  const snapshot = featureAccountSnapshot();
+  if (!accountFeatureKey(snapshot)) return { ok: false, error: "Reconnect your Relay account first." };
+  const { launch } = await nativeTaskModulesPromise;
+  if (!launch.executionEnabled(snapshot.config)) {
+    if (!await askDeviceExecutionConsent()) return { ok: false, cancelled: true };
+    if (accountFeatureKey(snapshot) !== accountFeatureKey(featureAccountSnapshot())) return { ok: false, error: "The Relay account changed. Nothing was enabled." };
+    launch.setExecutionPreferences(snapshot.config, { enabled: true, acceptedAt: new Date().toISOString(), version: 1 });
+  }
+  await pushInbox(true);
+  return { ok: true };
+});
+// How Execute's Claude conversations start: Auto (the default) or asking
+// before each action. Applies to the next Task launched, not running ones.
+ipcMain.handle("relay:executionMode", async (event, mode) => {
+  if (!win || win.isDestroyed() || event.sender !== win.webContents || event.senderFrame !== event.sender.mainFrame) return { ok: false };
+  const { launch } = await nativeTaskModulesPromise;
+  if (!launch.EXECUTION_MODES.includes(mode)) return { ok: false };
+  launch.setExecutionPreferences(readConfigFile(), { permissionMode: mode });
   await pushInbox(true);
   return { ok: true };
 });

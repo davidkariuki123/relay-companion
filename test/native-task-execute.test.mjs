@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { executeNativeTask, executionRecord, pendingNativeDrafts, nativeExecutionStatus } from "../src/native-task-execute.js";
+import { executeNativeTask, executionPrompt, executionRecord, pendingNativeDrafts, nativeExecutionStatus } from "../src/native-task-execute.js";
 import { prepareClaudeDraft } from "../src/claude-task-fallback.js";
-import { claudeWorkspaceTrusted, executionEnabled, executionPreferences, setExecutionPreferences, nativeProgress, nativeSessionReady, selectCodexModel, submitNativeTurn } from "../src/native-task-launch.js";
+import { claudeWorkspaceTrusted, executionEnabled, executionMode, executionPreferences, setExecutionPreferences, nativeProgress, nativeSessionReady, prepareNativeSession, selectCodexModel, submitNativeTurn } from "../src/native-task-launch.js";
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-native-test-"));
@@ -44,15 +44,16 @@ function draftFixture(t) {
   const f = fixture(t);
   let bound = null;
   Object.assign(f.args.nativeApi, {
+    // The capacity estimate never gates; an untrusted folder is what opens a draft.
     claudeLaunchPreflight: async () => ({ manual: true, reason: "capacity" }),
-    claudeWorkspaceTrusted: () => true,
+    claudeWorkspaceTrusted: () => false,
     prepareClaudeDraft,
     findClaudeDraftSession: () => bound,
   });
   return { ...f, bind: () => { bound = { ...executionRecord(f.config, f.args.id).session, ...f.session, fromDraft: true }; } };
 }
 
-test("capacity opens one draft without claiming or submitting; after Send, observer claims exact owner and submits once", async (t) => {
+test("a draft opens without claiming or submitting; after Send, observer claims exact owner and submits once", async (t) => {
   const f = draftFixture(t), { args, calls, config } = f;
   const result = await executeNativeTask(args);
   assert.equal(result.awaitingSend, true);
@@ -132,20 +133,49 @@ test("a chosen untrusted folder goes through native folder confirmation instead 
   assert.equal(calls.includes("reserve"), false);
 });
 
-test("an earlier unsent prepared conversation is preflighted before reopening", async (t) => {
-  const { args, calls } = draftFixture(t);
-  args.nativeApi.claudeLaunchPreflight = async () => ({ manual: false });
-  args.nativeApi.nativeSessionReady = async () => { throw new Error("old-version failure"); };
-  await assert.rejects(executeNativeTask(args), /old-version failure/);
-  calls.length = 0;
-  args.nativeApi.claudeLaunchPreflight = async () => ({ manual: true, reason: "capacity" });
-  assert.equal((await executeNativeTask(args)).awaitingSend, true);
-  assert.deepEqual(calls, ["gate", "open"]);
+test("automatic launch is tried on any version or capacity estimate, and succeeds without a draft", async (t) => {
+  const { args, calls, config } = draftFixture(t);
+  args.nativeApi.claudeWorkspaceTrusted = () => true;
+  args.nativeApi.claudeLaunchPreflight = async () => ({ manual: true, reason: "unknown_version" });
+  const result = await executeNativeTask(args);
+  assert.equal(result.awaitingSend, undefined);
+  assert.deepEqual(calls, ["gate", "consent", "fetch", "prepare", "open", "ready", "reserve", "fetch", "submit"]);
+  assert.equal(executionRecord(config, args.id).phase, "accepted");
+});
+
+test("any failure before reservation falls back to one draft in the same folder; nothing is reserved or sent", async (t) => {
+  const { args, calls, config, root } = draftFixture(t);
+  args.nativeApi.claudeWorkspaceTrusted = () => true;
+  args.nativeApi.nativeSessionReady = async () => { calls.push("ready"); throw new Error("unexpected Mac failure"); };
+  const result = await executeNativeTask(args);
+  assert.equal(result.awaitingSend, true);
+  assert.match(result.message, new RegExp(`choose the ${path.basename(root)} folder`));
+  assert.deepEqual(calls, ["gate", "consent", "fetch", "prepare", "open", "ready", "open"]);
+  const session = executionRecord(config, args.id).session;
+  assert.equal(session.cwd, root);
+  assert.equal(session.preflight.reason, "launch_failed");
+  assert.match(session.preflight.error, /unexpected Mac failure/);
+  assert.equal(session.unusedPreparedNativeId, "dfed5caa-b1dc-4e87-8e19-2ea0bd49bb16");
+});
+
+test("a failure preparing the Claude conversation also falls back; a Codex failure does not", async (t) => {
+  const f = draftFixture(t);
+  f.args.nativeApi.claudeWorkspaceTrusted = () => true;
+  f.args.nativeApi.prepareNativeSession = async () => { f.calls.push("prepare"); throw new Error("could not write"); };
+  assert.equal((await executeNativeTask(f.args)).awaitingSend, true);
+  assert.equal(f.calls.includes("reserve"), false);
+  const g = fixture(t);
+  g.args.choose = async () => ({ provider: "codex", cwd: g.root });
+  g.args.nativeApi.nativeProviders = () => [{ provider: "codex" }];
+  g.args.nativeApi.prepareClaudeDraft = prepareClaudeDraft;
+  g.args.nativeApi.prepareNativeSession = async ({ cwd, persist }) => { persist({ provider: "codex", cwd, nativeId: "codex-thread", url: "codex://threads/codex-thread" }); };
+  g.args.nativeApi.nativeSessionReady = async () => { throw new Error("codex not ready"); };
+  await assert.rejects(executeNativeTask({ ...g.args, id: "relay-codex" }), /codex not ready/);
 });
 
 test("readiness timeout offers a draft, but submission ambiguity never does", async (t) => {
   const { args, calls, config } = draftFixture(t);
-  args.nativeApi.claudeLaunchPreflight = async () => ({ manual: false });
+  args.nativeApi.claudeWorkspaceTrusted = () => true;
   args.nativeApi.nativeSessionReady = async () => { throw Object.assign(new Error("not ready"), { code: "CLAUDE_NOT_READY" }); };
   assert.equal((await executeNativeTask(args)).awaitingSend, true);
   assert.equal(calls.includes("reserve"), false);
@@ -299,6 +329,51 @@ test("a Claude seed is never reported as actual model completion", (t) => {
   assert.match(nativeProgress({ provider: "claude", transcript }), /finished a turn/);
 });
 
+test("Tasks start in Auto unless the person chose Manual; the mode reaches the conversation Relay prepares", async (t) => {
+  const { args, config } = fixture(t);
+  assert.equal(executionMode(config), "auto");
+  setExecutionPreferences(config, { permissionMode: "default" });
+  assert.equal(executionMode(config), "default");
+  setExecutionPreferences(config, { permissionMode: "bypassPermissions" });
+  assert.equal(executionMode(config), "auto", "only Auto or Manual are ever used");
+  let prepared;
+  args.nativeApi.executionMode = () => "auto";
+  const prepare = args.nativeApi.prepareNativeSession;
+  args.nativeApi.prepareNativeSession = async (input) => { prepared = input; return prepare(input); };
+  await executeNativeTask(args);
+  assert.equal(prepared.permissionMode, "auto");
+});
+
+test("the conversation Relay creates records the mode on a hidden notice that is never progress", async (t) => {
+  const { root } = fixture(t), cwd = path.join(root, "work");
+  fs.mkdirSync(cwd);
+  const saved = { CLAUDE_HOME: process.env.CLAUDE_HOME, USERPROFILE: process.env.USERPROFILE, HOME: process.env.HOME };
+  process.env.CLAUDE_HOME = path.join(root, "claude-home");
+  process.env.USERPROFILE = root; process.env.HOME = root;
+  t.after(() => { for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } });
+  fs.writeFileSync(path.join(root, ".claude.json"), JSON.stringify({ projects: { [cwd]: { hasTrustDialogAccepted: true } } }));
+  const rowsOf = (session) => fs.readFileSync(session.transcript, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  const auto = await prepareNativeSession({ provider: "claude", cwd, title: "T", permissionMode: "auto", persist: () => {} });
+  const [, notice, seed] = rowsOf(auto);
+  assert.equal(notice.type, "user");
+  assert.equal(notice.isMeta, true);
+  assert.equal(notice.permissionMode, "auto");
+  assert.equal(seed.parentUuid, notice.uuid, "the seed stays the last row");
+  assert.equal(nativeProgress(auto), "Waiting for the native app");
+  const plain = await prepareNativeSession({ provider: "claude", cwd, title: "T", persist: () => {} });
+  assert.equal(rowsOf(plain).some((row) => row.type === "user"), false, "no choice: Claude's own default");
+});
+
+test("the Task names the chosen folder and project, and says where the conversation opened instead", () => {
+  const packet = { title: "T", source: { workspace: { kind: "name", key: "relay", label: "relay" } } };
+  const inFolder = executionPrompt(packet, "relay-1", { cwd: "/Users/david/relay" });
+  assert.ok(inFolder.includes("chose to run this Task in /Users/david/relay, their checkout of the relay project"));
+  assert.match(inFolder, /If this conversation is not already in that folder, use its full path and first read its project instructions/);
+  const elsewhere = executionPrompt(packet, "relay-1", { cwd: "/Users/david/relay", openedCwd: "/Users/david" });
+  assert.ok(elsewhere.includes("This conversation opened in /Users/david instead"));
+  assert.doesNotMatch(executionPrompt({ title: "T" }, "relay-1", {}), /Workspace:/);
+});
+
 test("Codex chooses a catalog model and never sends a blank model", async () => {
   const models = [{ model: "provider-default", isDefault: true }, { model: "configured-model", isDefault: false }];
   assert.equal(selectCodexModel(models, "configured-model"), "configured-model");
@@ -321,4 +396,16 @@ test("Codex task_complete with an error is a failed turn, not success", (t) => {
   assert.match(nativeProgress({ provider: "codex", transcript }), /could not finish/);
   fs.appendFileSync(transcript, JSON.stringify({ type: "event_msg", payload: { type: "task_complete", last_agent_message: "Actual answer" } }) + "\n");
   assert.match(nativeProgress({ provider: "codex", transcript }), /finished a turn/);
+});
+
+test("Settings offers Auto or Manual for Tasks, and main accepts only those two", () => {
+  const html = fs.readFileSync(new URL("../overlay/inbox.html", import.meta.url), "utf8");
+  const main = fs.readFileSync(new URL("../overlay/main.cjs", import.meta.url), "utf8");
+  const preload = fs.readFileSync(new URL("../overlay/preload.cjs", import.meta.url), "utf8");
+  assert.match(html, /Tasks start in \$\{auto \? "Auto mode/);
+  assert.match(html, /id="executionMode" data-mode="\$\{auto \? "default" : "auto"\}"/);
+  assert.match(html, /window\.relay\.executionMode\(mode\)/);
+  assert.match(html, /nativeExecutionMode: next\.nativeExecutionMode === "default" \? "default" : "auto"/);
+  assert.match(preload, /executionMode: \(mode\) => ipcRenderer\.invoke\("relay:executionMode", mode\)/);
+  assert.match(main, /ipcMain\.handle\("relay:executionMode"[\s\S]{0,400}launch\.EXECUTION_MODES\.includes\(mode\)/);
 });

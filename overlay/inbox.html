@@ -1782,6 +1782,11 @@
   .rd-reply-text .deleted { color:var(--muted-2); font-style:italic; }
   .rd-reply-text.rd-reply-working { color:var(--muted-2); }
   .rd-reply .rd-reply-work { opacity:1; }
+  .agent-allow { margin-top:8px; display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; font-size:12.5px; line-height:1.45; color:var(--muted-2); white-space:normal; }
+  .agent-allow button { appearance:none; padding:4px 10px; border:1px solid var(--accent); border-radius:999px; background:transparent;
+    color:var(--accent); font:600 12px var(--sans, inherit); cursor:pointer; }
+  .agent-allow button:hover { background:color-mix(in srgb, var(--accent) 12%, transparent); }
+  .agent-allow button:disabled { opacity:.55; cursor:default; }
   .rd-reply-text a { color:var(--accent); text-decoration:none; border-bottom:1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
   .rd-reply-files { margin-top:3px; font-size:11px; color:var(--muted-2); }
   .rd-quote-slot:empty { display:none; }
@@ -3337,6 +3342,14 @@
   .su-first-relay-sent .su-relay-moment svg { animation:su-first-send .65s var(--settle) .3s both; }
   @keyframes su-first-send { from { opacity:0; transform:translateY(9px) rotate(-8deg); } to { opacity:1; transform:none; } }
   @keyframes su-relay-hop { 0%, 100% { transform:none; } 50% { transform:translateY(-7px) rotate(8deg); } }
+  /* The first Relay as its reader sees it: their short message, and a quiet
+     line for everything their AI got. */
+  .su-sent-card { margin-top:14px; padding:12px 14px; border-radius:12px; background:var(--wash); box-shadow:inset 0 0 0 1px var(--hair); }
+  .su-sent-to { margin:0; color:var(--muted); font-size:10px; font-weight:600; letter-spacing:.12em; text-transform:uppercase; }
+  .su-sent-human { margin:6px 0 0; color:var(--ink); font:400 14px/1.45 var(--serif); display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden; }
+  .su-sent-agent { display:flex; align-items:center; gap:7px; margin:10px 0 0; padding-top:9px; border-top:1px solid var(--hair); color:var(--muted); font-size:11.5px; }
+  .su-sent-agent span { width:6px; height:6px; border-radius:2px; background:#7164ff; flex:none; }
+  .su-first-relay-sent .su-sent-card { animation:su-first-send .6s var(--settle) .35s both; }
   .su-countdown { margin-top:12px; height:3px; border-radius:2px; background:var(--hair); overflow:hidden; }
   .su-countdown > span { display:block; height:100%; width:0; border-radius:2px; background:var(--accent); animation:su-countdown var(--su-countdown-ms, 10s) linear forwards; }
   @keyframes su-countdown { from { width:0; } to { width:100%; } }
@@ -3403,29 +3416,59 @@
      themselves (Claude's and Relay's are all dark), so the person matches
      shapes instead of reading steps. When Claude connects they tick off in a
      row, and Claude's chat opens. */
-  /* A picture of the buttons, never buttons: they sit in a soft tray, a size
-     down, so nobody tries to click them here. */
-  .su-keys { display:flex; flex-wrap:wrap; justify-content:center; align-items:center; gap:5px 4px; margin-top:14px; padding:12px 8px;
-    border-radius:12px; background:var(--wash); box-shadow:inset 0 0 0 1px var(--hair); pointer-events:none; user-select:none; }
-  .su-key { display:inline-flex; align-items:center; gap:4px; padding:6px 9px; border-radius:7px; background:#1f1e1d; color:#faf9f5;
-    font:600 11.5px/1 var(--sans); box-shadow:0 1px 0 rgba(0,0,0,.18), 0 3px 8px -3px rgba(0,0,0,.35); transition:background .25s var(--settle), color .25s var(--settle); }
+  /* A picture of the steps, never buttons: they sit in a soft tray, a size
+     down, so nobody tries to click them here. One numbered line per thing to
+     do. Claude's Add sits at the bottom of a long box, below the fold on a
+     laptop, and people didn't think to scroll (David, 2026-10-07: an arrow on
+     the key doesn't read as "scroll"), so scrolling is a step of its own,
+     with a mouse wheel that moves. */
+  .su-keys { display:flex; flex-direction:column; gap:7px; margin-top:14px; padding:12px 14px;
+    border-radius:12px; background:var(--wash); box-shadow:inset 0 0 0 1px var(--hair); pointer-events:none; user-select:none; text-align:left; }
+  .su-keys-row { display:flex; align-items:center; gap:9px; min-height:24px; color:var(--ink); font:500 12.5px/1.2 var(--sans); }
+  .su-keys-n { position:relative; flex:none; display:grid; place-items:center; width:18px; height:18px; border-radius:50%;
+    background:var(--bg); box-shadow:inset 0 0 0 1px var(--edge); color:var(--muted); font:600 10px/1 var(--sans); }
+  .su-key { display:inline-flex; align-items:center; padding:5px 9px; border-radius:7px; background:#1f1e1d; color:#faf9f5;
+    font:600 11.5px/1 var(--sans); box-shadow:0 1px 0 rgba(0,0,0,.18), 0 3px 8px -3px rgba(0,0,0,.35); }
   :root[data-theme="dark"] .su-key { background:#faf9f5; color:#1f1e1d; }
-  .su-key-then { color:var(--muted-3); font-size:12px; }
-  .su-key-down { font-weight:500; opacity:.7; margin-left:-1px; }
-  /* The tick is a badge on the key's corner: it adds no width, so nothing reflows. */
-  .su-key { position:relative; }
-  .su-key svg { position:absolute; top:-5px; right:-5px; width:14px; height:14px; padding:3px; border-radius:50%; background:#fff; color:var(--ok);
-    fill:none; stroke:currentColor; stroke-width:2.4; stroke-linecap:round; stroke-linejoin:round; box-shadow:0 1px 3px rgba(0,0,0,.3);
+  .su-keys-scroll { font-weight:600; }
+  .su-key-send { padding:4px 6px; background:#d97757; color:#fff; }
+  :root[data-theme="dark"] .su-key-send { background:#d97757; color:#fff; }
+  .su-key-send svg { width:13px; height:13px; fill:none; stroke:currentColor; stroke-width:2.2; stroke-linecap:round; stroke-linejoin:round; }
+  /* What the paste will say, so nobody wonders what they are sending. */
+  .su-keys-says { margin-top:3px; padding-top:9px; border-top:1px solid var(--hair); color:var(--muted); font:italic 12.5px/1.4 var(--sans); }
+  /* A mouse whose wheel rolls down, over and over. */
+  .su-wheel { flex:none; position:relative; width:13px; height:19px; border-radius:7px; box-shadow:inset 0 0 0 1.5px currentColor; }
+  .su-wheel::after { content:""; position:absolute; left:50%; top:4px; width:2px; height:5px; margin-left:-1px; border-radius:1px; background:currentColor;
+    animation:su-wheel 1.3s ease-in-out infinite; animation-play-state:var(--relay-loop-state); }
+  @keyframes su-wheel { 0% { transform:none; opacity:1; } 70% { transform:translateY(6px); opacity:0; } 71% { transform:none; opacity:0; } 100% { opacity:1; } }
+  /* Done: each number turns into a tick, top to bottom. */
+  .su-keys-n svg { position:absolute; inset:0; width:18px; height:18px; padding:4px; border-radius:50%; background:var(--ok); color:#fff;
+    fill:none; stroke:currentColor; stroke-width:2.4; stroke-linecap:round; stroke-linejoin:round;
     opacity:0; transform:scale(.4); transition:opacity .2s var(--settle), transform .3s var(--settle); }
-  .su-keys.done .su-key { background:var(--ok); color:#fff; animation:su-key-tick .45s var(--settle) both; }
-  .su-keys.done .su-key svg { opacity:1; transform:none; }
-  .su-keys.done .su-key:nth-of-type(2), .su-keys.done .su-key:nth-of-type(2) svg { animation-delay:.12s; transition-delay:.12s; }
-  .su-keys.done .su-key:nth-of-type(3), .su-keys.done .su-key:nth-of-type(3) svg { animation-delay:.24s; transition-delay:.24s; }
-  .su-keys.done .su-key:nth-of-type(4), .su-keys.done .su-key:nth-of-type(4) svg { animation-delay:.36s; transition-delay:.36s; }
+  .su-keys.done .su-keys-n svg { opacity:1; transform:none; }
+  .su-keys.done .su-keys-row:nth-child(2) svg { transition-delay:.1s; }
+  .su-keys.done .su-keys-row:nth-child(3) svg { transition-delay:.2s; }
+  .su-keys.done .su-keys-row:nth-child(4) svg { transition-delay:.3s; }
+  .su-keys.done .su-keys-row:nth-child(5) svg { transition-delay:.4s; }
+  .su-keys.done .su-wheel::after { animation:none; }
+  @media (prefers-reduced-motion:reduce) { .su-wheel::after { animation:none; } }
   .su-claude-done { margin-top:20px; color:var(--ink); font-size:13px; font-weight:600; text-align:center; animation:su-first-send .5s var(--settle) .45s both; }
-  @keyframes su-key-tick { 0% { transform:none; } 45% { transform:translateY(-3px) scale(1.06); } 100% { transform:none; } }
-  @media (prefers-reduced-motion:reduce) { .su-keys.done .su-key { animation:none; } }
   .su-claude-connect .su-form { margin-top:20px; }
+  /* Claude's message box, drawn: the sentence already in it and the send
+     button to press. A picture, never a control. */
+  .su-composer { display:flex; align-items:flex-end; justify-content:space-between; gap:10px; margin-top:14px; padding:12px 10px 10px 14px; min-height:70px;
+    border-radius:16px; background:var(--bg); box-shadow:inset 0 0 0 1px var(--edge), 0 6px 18px -12px rgba(0,0,0,.4); pointer-events:none; user-select:none;
+    font:400 13px/1.4 var(--sans); color:var(--ink); }
+  .su-composer span { align-self:flex-start; }
+  .su-composer b { flex:none; display:grid; place-items:center; width:30px; height:30px; border-radius:9px; background:#d97757; color:#fff;
+    animation:su-send-nudge 2.2s ease-in-out infinite; animation-play-state:var(--relay-loop-state); }
+  .su-composer svg { width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+  @keyframes su-send-nudge { 0%, 70%, 100% { transform:none; box-shadow:0 0 0 0 rgba(217,119,87,.45); } 35% { transform:translateY(-2px); box-shadow:0 0 0 7px rgba(217,119,87,0); } }
+  @media (prefers-reduced-motion:reduce) { .su-composer b { animation:none; } }
+  /* ChatGPT's send is a round dark button. */
+  .su-composer.chatgpt b { border-radius:50%; background:#0d0d0d; animation-name:su-send-nudge-dark; }
+  :root[data-theme="dark"] .su-composer.chatgpt b { background:#f4f4f4; color:#0d0d0d; }
+  @keyframes su-send-nudge-dark { 0%, 70%, 100% { transform:none; box-shadow:0 0 0 0 rgba(120,120,120,.45); } 35% { transform:translateY(-2px); box-shadow:0 0 0 7px rgba(120,120,120,0); } }
   /* The same height whether it holds the buttons or the celebration, so the
      keys never move while they tick off. */
   .su-claude-tail { min-height:120px; }
@@ -3468,6 +3511,10 @@
   .setup-web.open > .setup-row { background:var(--wash-2); }
   .setup-tray { margin:0; border-radius:0; padding:8px 12px 12px; border-top:1px solid var(--hair); gap:8px; }
   .setup-tray-copy { font:12px/1.5 var(--sans); color:var(--muted); }
+  /* The tray is tighter than the onboarding screen. */
+  .setup-tray .su-keys { margin-top:0; padding:9px 12px; gap:5px; }
+  .setup-tray .su-keys-row { font-size:12px; min-height:22px; }
+  .setup-tray .su-key { padding:4px 8px; font-size:11px; }
   .setup-tray-actions { display:flex; gap:6px; }
   .setup-tray-actions .sv-choose { flex:1 1 0; padding:8px 10px; }
   .setup-tray-actions .sv-choose.primary { background:var(--accent); color:var(--on-accent); }
@@ -6573,7 +6620,32 @@
   let payload = { account: { paired: false }, ui: { canDismiss: true, reopenSurface: "the Relay icon", onboardingVersion:1, completedOnboardingVersion:0, onboardingRequired:false }, features: { requests:false, slack:false, peopleMentions:true, agentMentions:false, cowork:false, messageMutations:false, environment:"production" }, pendingOpen:null, relays: [], sent: [], requests: [], contacts: [], chats: [], slackChats: [] };
   // The teaching card owns its DOM: inbox polls must preserve its current
   // example, timer, focus and expanded state (each open collapses it again).
-  const relayAnyoneTip = window.RelayAnyoneTip.create(document.getElementById("relayAnyoneTip"));
+  const relayAnyoneTip = window.RelayAnyoneTip.create(document.getElementById("relayAnyoneTip"), {
+    onEvent: (name, way) => window.relay?.teachingEvent?.(name, way),
+  });
+  // The people this person relays with, newest first, and who last sent them
+  // something: the smart card writes its examples with their names. Read from
+  // what the inbox already holds; nothing leaves the app.
+  function teachingPeople() {
+    const self = String(payload.account?.email || "").toLowerCase();
+    const rows = [
+      ...(payload.relays || []).filter((row) => row && row.direction === "inbound" && !row.deletedAt)
+        .map((row) => ({ at: row.createdAt, email: row.senderEmail, name: relaySender(row), received: true })),
+      ...(payload.sent || []).filter((row) => row && !row.deletedAt && !row.recipientGroupId && !row.groupSendId && row.recipient?.email)
+        .map((row) => ({ at: row.createdAt, email: row.recipient.email, name: personName(row.recipient.name, row.recipient.email) })),
+    ].sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
+    const seen = new Set(), recent = [];
+    let lastSender = "";
+    for (const row of rows) {
+      const key = String(row.email || row.name || "").toLowerCase();
+      // Not the person themselves, and not Relay's own welcome.
+      if (!key || key === self || /^relay\b/i.test(row.name || "")) continue;
+      if (row.received && !lastSender) lastSender = row.name;
+      if (!seen.has(key)) { seen.add(key); recent.push(row.name); }
+      if (recent.length >= 5 && lastSender) break;
+    }
+    return { recent, lastSender };
+  }
   function syncRelayAnyoneTip() {
     const visible = activeView === "relays" && !peeking && !requestInboxOpen
       && payload.account?.paired !== false && !cardEl.classList.contains("signup");
@@ -6584,6 +6656,8 @@
     // The filter row belongs to the two item lists only: gone with the
     // segments, and gone on Chats.
     if (relaysFilterEl) relaysFilterEl.hidden = !visible || relaysLayout === "chats";
+    const smartTips = payload.features?.smartTips === true;
+    relayAnyoneTip.setTeaching({ smart: smartTips, usage: payload.usage, people: smartTips ? teachingPeople() : {} });
     relayAnyoneTip.setVisible(visible);
     relayAnyoneTip.setActive(visible && rendererSurfaceActive());
   }
@@ -17565,7 +17639,9 @@
       const { name, mine } = author;
       // An agent answering here shows its work as it goes; its full run opens
       // in its own reader.
-      const agentWorking = author.agent && !String(reply.body || "").trim() && !reply.deletedAt;
+      // A run waiting for this computer's Allow is not working yet.
+      const allowHtml = agentRunAllowHtml(reply);
+      const agentWorking = author.agent && !String(reply.body || "").trim() && !reply.deletedAt && !allowHtml;
       const parent = reply.inReplyToRelayId ? thread.byId.get(String(reply.inReplyToRelayId)) : null;
       // An agent always answers the message that called it; quoting the
       // message right above it would only repeat it.
@@ -17590,6 +17666,7 @@
             ${agentWorking
               ? '<div class="rd-reply-text rd-reply-working">Working<span class="agent-working-indicator" aria-hidden="true"><span class="agent-working-dot"></span><span class="agent-working-dot"></span><span class="agent-working-dot"></span></span></div>'
               : String(reply.body || reply.title || "").trim() || reply.deletedAt ? `<div class="rd-reply-text">${words}</div>` : ""}
+            ${allowHtml}
             ${files ? `<div class="rd-reply-files">${files} ${files === 1 ? "attachment" : "attachments"}</div>` : ""}
           </div>
         </div>`;
@@ -17684,6 +17761,33 @@
     const mine = message?.direction === "out";
     return { name:mine ? "You" : String(message?.party || "Someone"), mine, agent:false };
   }
+  // My @agent run that has not answered while this computer has not allowed
+  // agent runs is waiting for this computer. Its reply carries Allow, which
+  // asks the first Execute's question; the run starts once it is on.
+  function agentRunAllowHtml(message) {
+    if (!message?.ownedAgent || message.direction !== "out" || message.deletedAt) return "";
+    if (String(message.agent || "").trim()) return "";
+    if (!payload.features?.taskExecution || payload.nativeExecutionEnabled) return "";
+    const agent = message.source?.surface === "codex" ? "Codex" : "Claude";
+    // The daemon's waiting reply already says why; otherwise say it here.
+    const why = String(message.body || "").trim() ? "" : `<span>${agent} can't start until this computer allows Relay to run agents.</span>`;
+    return `<div class="agent-allow" data-stop="1">${why}<button type="button" data-agent-allow="1">Allow on this computer</button></div>`;
+  }
+  document.addEventListener("click", async (event) => {
+    const button = event.target?.closest?.("[data-agent-allow]");
+    if (!button) return;
+    event.stopPropagation();
+    event.preventDefault();
+    if (button.disabled) return;
+    button.disabled = true;
+    const result = await window.relay.executionEnable().catch(() => null);
+    if (result?.ok) {
+      payload.nativeExecutionEnabled = true;
+      for (const block of document.querySelectorAll(".agent-allow")) block.remove();
+    } else {
+      button.disabled = false;
+    }
+  }, true);
   function replyAuthorInitial({ name, mine }) {
     return (mine ? "Y" : (name.startsWith("My ") ? name.slice(3) : firstName(name)).charAt(0) || "?").toUpperCase();
   }
@@ -18103,10 +18207,13 @@
       // The attachment menu offers Reply only where the room actually has a
       // reply-to-message action — the same condition the reply ghost uses.
       const canReplyHere = !m.ownedAgent && !m.request && !groupPostingBlocked;
+      // A run waiting for this computer's Allow is not working yet.
+      const allowHtml = agentRunAllowHtml(m);
       const agentWorking = m.ownedAgent
         && !String(m.body || "").trim()
         && !String(m.agent || "").trim()
-        && !m.deletedAt;
+        && !m.deletedAt
+        && !allowHtml;
       const editingMessage = String(threadEditTargets.get(threadStateKey) || "") === String(m.id);
       const confirmingDelete = messageDeleteConfirmIds.has(m.id);
       // The clock the bubble reserves and shows: "Edited · 22:12" once edited,
@@ -18215,6 +18322,7 @@
           ${!textLike && !open && !inlineBody && m.preview ? `<span class="th-preview">${esc(m.preview)}</span>` : ""}
           ${!textLike && !open && inlineBody ? `<div class="th-body" data-stop="0">${readerParagraphs(m.body)}</div>` : ""}
           ${!textLike && open ? `<div class="th-body" data-stop="0">${readerParagraphs(m.body)}</div>` : ""}
+          ${allowHtml}
         `}
 
         <div class="row-err${rowNotes.get(m.id)?.cls === "ok" ? " ok" : ""}" data-err="${esc(m.id)}" data-stop="1">${esc(rowNotes.get(m.id)?.text || "")}</div>
@@ -19764,7 +19872,7 @@
           <button class="sv-choose${setupArmed === item.id ? " armed" : ""}" type="button" data-setup-disconnect="${esc(item.id)}"${setupSnapshot?.busy?.[item.id] ? " disabled" : ""}>${setupSnapshot?.busy?.[item.id] ? "Disconnecting…" : setupArmed === item.id ? "Disconnect?" : "Disconnect"}</button>
         </div>`).join("");
       const request = claudeWaiting
-        ? `<div class="setup-tray-copy">Relay is filled in there. Just click:</div>${claudeKeysHtml(false)}
+        ? `<div class="setup-tray-copy">Relay is filled in there. Now:</div>${claudeKeysHtml(false)}
           <div class="setup-tray-actions" style="margin-top:10px"><button class="sv-choose" type="button" data-setup-web-connect="claude">Open Claude again</button></div>`
         : run && run.status !== "connected"
         ? `<div class="setup-tray-copy">${run.open ? `Opens a new ${meta.name} chat with Relay’s setup message. Send it, and this row turns to Connected.` : `Paste Relay’s setup message into a new ${meta.name} chat and send it.`}</div>
@@ -20389,6 +20497,11 @@
     // by setup (Sven, 2026-09-08).
     html += connectionsHtml(info, payload.features?.agentConnections === true);
     if (payload.features?.taskExecution) html += `<div class="sv-copy">Device execution: ${payload.nativeExecutionEnabled ? "enabled" : "off"}. Execute will ask before the first launch.${payload.nativeExecutionEnabled ? '<button type="button" class="oa-item" id="executionDisable">Disable device execution</button>' : ""}</div>`;
+    // How Execute starts a Task's Claude conversation. Auto by default.
+    if (payload.features?.taskExecution) {
+      const auto = payload.nativeExecutionMode !== "default";
+      html += `<div class="sv-copy">Tasks start in ${auto ? "Auto mode: Claude Code works without asking before each step, and its own safety checks still apply" : "Manual mode: Claude Code asks before each step"}.<button type="button" class="oa-item" id="executionMode" data-mode="${auto ? "default" : "auto"}">${auto ? "Ask before each step instead" : "Use Auto mode instead"}</button></div>`;
+    }
     // Version line doubles as the manual update backstop: if the auto-updater
     // has not refreshed this machine, say so here and make it one click.
     // A machine whose updates keep FAILING outranks one that merely has an
@@ -20456,6 +20569,12 @@
     settingsViewEl.innerHTML = html;
     settingsViewEl.querySelector("#executionDisable")?.addEventListener("click", async () => {
       await window.relay.executionDisable();
+      renderSettings();
+    });
+    settingsViewEl.querySelector("#executionMode")?.addEventListener("click", async (event) => {
+      const mode = event.currentTarget.getAttribute("data-mode");
+      const result = await window.relay.executionMode(mode);
+      if (result?.ok) payload.nativeExecutionMode = mode;
       renderSettings();
     });
     for (const row of settingsViewEl.querySelectorAll("[data-perm-open]")) {
@@ -21366,7 +21485,7 @@
   // opens the room of the relay you wrote. A first send that was itself a link
   // has no hello to celebrate, so it starts at Your first link. Nothing here
   // persists: closing the pill mid-chapter replays the celebration.
-  function firstRelayCelebrationMs() { return Number(window.__relayCelebrationMs) > 0 ? Number(window.__relayCelebrationMs) : 10000; }
+  function firstRelayCelebrationMs() { return Number(window.__relayCelebrationMs) > 0 ? Number(window.__relayCelebrationMs) : 12000; }
   let firstRelayChapter = { account:null, stage:"celebrate", timer:null, linkCopied:false, linkError:"" };
   function firstRelayChapterForAccount() {
     const account = signupAccountKey();
@@ -21447,7 +21566,7 @@
         <div class="su-relay-moment" aria-hidden="true"><i></i><i></i><i></i><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></svg></div>
         <p class="su-step">You’re on your way</p>
         <h1 class="su-title">Your first Relay is sent.</h1>
-        <p class="su-copy">Nicely done. Replies land here, and in ${esc(onboardingAgentWords() || "Claude Code or Codex")} whenever you ask.</p>
+        ${firstRelayPreviewHtml() || `<p class="su-copy">Nicely done. Replies land here, and in ${esc(onboardingAgentWords() || "Claude Code or Codex")} whenever you ask.</p>`}
         <div class="su-form"><button class="su-primary" id="suCelebrationContinue" type="button">Continue</button></div>
         <div class="su-countdown" aria-hidden="true"><span></span></div>
       </div>`;
@@ -21607,6 +21726,24 @@
     // A local agent without this app's setup run was connected before this chapter.
     return !option.chat && !payload.ui?.localOnboardingPrompt;
   }
+  // THE AHA, SEEN FROM BOTH SIDES (2026-10-07). The first Relay as its
+  // recipient sees it: the short message they read, and the detail their AI
+  // got, counted. One line in, two layers out, is what Relay is.
+  function firstRelayPreviewHtml() {
+    const id = String(payload.ui?.firstRelayId || "");
+    const sent = (payload.sent || []).find((item) => String(item.relayId || item.id || "") === id)
+      || (payload.sent || []).slice().sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")))[0];
+    const human = String(sent?.forHuman || "").trim();
+    if (!sent || !human) return "";
+    const words = (text) => String(text || "").trim().split(/\s+/).filter(Boolean).length;
+    const agentWords = words(sent.forAgent);
+    const who = String(sent.recipient?.name || sent.recipient?.email || "").trim().split(/\s+/)[0] || "They";
+    return `<div class="su-sent-card">
+        <p class="su-sent-to">${esc(who)} reads</p>
+        <p class="su-sent-human">${esc(human.length > 220 ? `${human.slice(0, 217)}…` : human)}</p>
+        ${agentWords ? `<p class="su-sent-agent"><span aria-hidden="true"></span>${esc(who)}’s AI got the rest · ${agentWords} words</p>` : ""}
+      </div>`;
+  }
   function onboardingAgentRow(option, context, attrs) {
     return `<button class="th-host-action" type="button" data-host="${option.dataHost}" ${attrs}>
       <img class="th-host-logo" src="${option.mark}" alt=""><span class="su-agent-copy"><span class="th-host-label">${esc(option.name)}</span>
@@ -21671,6 +21808,22 @@
       ? `<button class="su-primary" type="button" data-agent-open${onboardingAgentBusy || notReady ? " disabled" : ""}>Open in ${esc(option.name)}</button>`
       : `<button class="su-primary" type="button" data-agent-copy${onboardingAgentBusy || notReady ? " disabled" : ""}>${copyLabel}</button>`;
     const quiet = `${canOpen ? `<button class="su-link" type="button" data-agent-copy${notReady ? " disabled" : ""}>Copy instead</button><span aria-hidden="true">·</span>` : ""}<button class="su-link" type="button" data-agent-reset>Choose a different AI</button>`;
+    // A chat AI that opens with the request already typed needs no pasting:
+    // the screen says so and draws the one thing left to press, like Claude's.
+    if (option.chat && canOpen && run) {
+      const send = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5L8 3l4.5 4.5"/></svg>';
+      signupBodyEl.innerHTML = `<div class="su-local-prompt su-agent-screen su-claude-connect"><div class="su-step">Your next step</div>
+        <h1 class="su-title">Add Relay to<br>${onboardingAgentTitleName(agent)}.</h1>
+        <p class="su-copy">It opens with a message ready. Press send:</p>
+        <div class="su-composer ${option.host}" role="img" aria-label="${esc(option.name)}’s message box with Relay’s setup message, and its send button"><span>Set up Relay for me…</span><b>${send}</b></div>
+        <div class="su-claude-tail"><div class="su-form su-agent-actions"><button class="su-primary" type="button" data-agent-open${onboardingAgentBusy ? " disabled" : ""}>Open ${esc(option.name)}</button></div>
+        <div class="su-agent-quiet"><button class="su-link" type="button" data-agent-copy>Copy instead</button><span aria-hidden="true">·</span><button class="su-link" type="button" data-agent-reset>Choose a different AI</button></div>
+        <div class="desktop-prompt-wait" role="status">${esc(onboardingAgentNote || `This moves on when ${option.name} connects.`)}</div></div></div>`;
+      signupBodyEl.querySelector("[data-agent-open]")?.addEventListener("click", openOnboardingAgent);
+      signupBodyEl.querySelector("[data-agent-copy]")?.addEventListener("click", copyOnboardingAgentRequest);
+      signupBodyEl.querySelector("[data-agent-reset]")?.addEventListener("click", resetOnboardingAgent);
+      return;
+    }
     signupBodyEl.innerHTML = `<div class="su-local-prompt su-agent-screen"><div class="su-step">Your next step</div>
       <h1 class="su-title">Paste this into<br>${onboardingAgentTitleName(agent)}.</h1>
       <div class="desktop-prompt-note su-agent-request${notReady ? " preparing" : ""}">${request}</div>
@@ -21721,7 +21874,7 @@
             return;
           }
           payload.ui = { ...payload.ui, onboardingAgent: snapshot };
-          if (snapshot.connectedAt || (!snapshot.connector?.started && snapshot.connector?.checked)) stopOnboardingAgentPoll();
+          if ((snapshot.connectedAt && snapshot.tutorialStarted) || (!snapshot.connectedAt && !snapshot.connector?.started && snapshot.connector?.checked)) stopOnboardingAgentPoll();
           renderSignup();
           return;
         }
@@ -21749,9 +21902,10 @@
   let claudeJustConnected = 0;
   function claudeKeysHtml(done) {
     const tick = '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 5.3l2.3 2.2L8.5 2.6"/></svg>';
-    // Claude's Add sits at the bottom of a long box, below the fold on a laptop: the arrow says scroll.
-    const keys = ["Continue", "Add", "Connect", "Allow"].map((word) => `<span class="su-key">${tick}${word === "Add" ? 'Add <span class="su-key-down" aria-hidden="true">↓</span>' : word}</span>`);
-    return `<div class="su-keys${done ? " done" : ""}" role="img" aria-label="In Claude, click Continue, then Add at the bottom, then Connect, then Allow on Relay’s page">${keys.join('<span class="su-key-then" aria-hidden="true">›</span>')}</div>`;
+    const key = (word) => `Click <span class="su-key">${word}</span>`;
+    const rows = [key("Continue"), `Scroll down <span class="su-wheel" aria-hidden="true"></span>`, key("Add"), key("Connect"), key("Allow")]
+      .map((body, i) => `<div class="su-keys-row${i === 1 ? " su-keys-scroll" : ""}"><span class="su-keys-n">${i + 1}${tick}</span>${body}</div>`);
+    return `<div class="su-keys${done ? " done" : ""}" role="img" aria-label="In Claude: click Continue, scroll down, click Add, click Connect, then click Allow">${rows.join("")}</div>`;
   }
   function renderClaudeConnect(agent, option) {
     const connector = agent.connector || {};
@@ -21765,7 +21919,7 @@
     const already = connector.connected && !celebrating;
     const title = already ? `${onboardingAgentTitleName(agent)}<br>has Relay.` : `Add Relay to<br>${onboardingAgentTitleName(agent)}.`;
     const copy = already ? "Start a chat and Claude takes it from there."
-      : connector.started ? "Relay is filled in there. Just click:" : "It opens with Relay filled in. Just click:";
+      : connector.started ? "Relay is filled in there. Now:" : "It opens with Relay filled in. Then:";
     // Once Claude is open the person is there, so the way back steps down to secondary.
     const primary = already
       ? `<button class="su-primary" type="button" data-claude-start${onboardingAgentBusy ? " disabled" : ""}>Start in Claude</button>`
@@ -21793,6 +21947,37 @@
     });
     signupBodyEl.querySelector("[data-agent-reset]")?.addEventListener("click", resetOnboardingAgent);
   }
+  // CONNECTED: PASTE AND SEND. Claude opens an empty chat with the sentence on
+  // the clipboard (a prefilled link brings Claude's red caution banner), so
+  // the screen is two keys: paste, then send.
+  function renderClaudeSend(agent) {
+    const signature = JSON.stringify(["claude-send", onboardingAgentBusy, onboardingAgentNote, agent.startPrompt || ""]);
+    startOnboardingAgentPoll();
+    if (signupBodyEl.dataset.firstRelaySignature === signature && signupBodyEl.querySelector(".su-claude-send")) return;
+    signupBodyEl.dataset.firstRelaySignature = signature;
+    const tick = '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 5.3l2.3 2.2L8.5 2.6"/></svg>';
+    const arrow = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5L8 3l4.5 4.5"/></svg>';
+    const paste = /Mac/i.test(navigator.platform || navigator.userAgent || "") ? "⌘ V" : "Ctrl V";
+    const sentence = agent.startPrompt || "Help me get started with Relay.";
+    signupBodyEl.innerHTML = `<div class="su-local-prompt su-agent-screen su-claude-connect su-claude-send"><div class="su-step">Connected</div>
+      <h1 class="su-title">Relay is in<br>${onboardingAgentTitleName(agent)}.</h1>
+      <p class="su-copy">Your first message is copied. In Claude:</p>
+      <div class="su-keys" role="img" aria-label="In Claude, press ${paste} to paste, then press send">
+        <div class="su-keys-row"><span class="su-keys-n">1${tick}</span>Press <span class="su-key">${paste}</span> to paste</div>
+        <div class="su-keys-row"><span class="su-keys-n">2${tick}</span>Press <span class="su-key su-key-send">${arrow}</span> to send</div>
+        <div class="su-keys-says">“${esc(sentence)}”</div>
+      </div>
+      <div class="su-claude-tail"><div class="su-form su-agent-actions"><button class="su-primary" type="button" data-claude-start${onboardingAgentBusy ? " disabled" : ""}>Go to Claude</button></div>
+      <div class="su-agent-quiet"><button class="su-link" type="button" data-claude-copy>Copy it again</button><span aria-hidden="true">·</span><button class="su-link" type="button" data-agent-reset>Use a different AI</button></div>
+      <div class="desktop-prompt-wait" role="status">${onboardingAgentNote ? esc(onboardingAgentNote) : `<span class="su-send-progress su-agent-live" style="margin:0"><span aria-hidden="true"></span></span>This moves on when Claude starts.`}</div></div></div>`;
+    signupBodyEl.querySelector("[data-claude-start]")?.addEventListener("click", openOnboardingAgent);
+    signupBodyEl.querySelector("[data-claude-copy]")?.addEventListener("click", async () => {
+      try { await onboardingAgentCall("onboardingCopyAgentRequest"); onboardingAgentNote = "Copied. Paste it in Claude and send."; }
+      catch { onboardingAgentNote = "Relay couldn’t copy it. Try again."; }
+      signupBodyEl.dataset.firstRelaySignature = ""; renderSignup();
+    });
+    signupBodyEl.querySelector("[data-agent-reset]")?.addEventListener("click", resetOnboardingAgent);
+  }
   async function connectOnboardingClaude() {
     onboardingAgentBusy = true; onboardingAgentNote = ""; renderSignup();
     try {
@@ -21806,7 +21991,9 @@
     onboardingAgentBusy = true; renderSignup();
     try {
       await onboardingAgentCall("onboardingOpenAgent");
-      onboardingAgentNote = `Opened ${option?.name || "your AI"} with the request. Send it there; this screen moves on when it connects.`;
+      onboardingAgentNote = option?.host === "claude"
+        ? "Claude is open. Press send there."
+        : `${option?.name || "Your AI"} is open. Press send there.`;
     } catch (error) { onboardingAgentNote = String(error?.message || "Couldn’t open it. Copy the request instead.").replace(/^Error invoking remote method '[^']+': (Error: )?/, ""); }
     finally { onboardingAgentBusy = false; renderSignup(); }
   }
@@ -21900,6 +22087,9 @@
       // Claude's keys tick off for a moment before the handoff takes the screen.
       const claudeCelebrating = agent?.host === "claude" && claudeJustConnected > Date.now();
       if (status !== "checking" && agent && (!onboardingAgentConnected(agent) || claudeCelebrating)) { renderAgentSetup(agent); return; }
+      // Claude's chat is open with the start sentence but nobody has pressed
+      // send: say exactly that, with a picture of it, until Claude starts.
+      if (status !== "checking" && agent?.host === "claude" && agent.connectedAt && !agent.tutorialStarted) { renderClaudeSend(agent); return; }
       stopOnboardingAgentPoll();
       // GET STARTED (2026-09-13): with no inviter there is nobody to say hello
       // to, so the first Relay is a link for someone who is not on Relay yet.
@@ -22536,6 +22726,7 @@
       features: next.features || payload.features,
       nativeExecutions: next.nativeExecutions || {},
       nativeExecutionEnabled: next.nativeExecutionEnabled === true,
+      nativeExecutionMode: next.nativeExecutionMode === "default" ? "default" : "auto",
       relays: projectedRelays,
       sent: Array.isArray(next.sent) ? next.sent : [],
       outbox: Array.isArray(next.outbox) ? next.outbox : [],
@@ -22545,6 +22736,9 @@
       chats: Array.isArray(next.chats) ? next.chats : (payload.chats || []),
       slackChats: Array.isArray(next.slackChats) ? next.slackChats : (payload.slackChats || []),
       settings: next.settings && typeof next.settings === "object" ? next.settings : (payload.settings || {}),
+      // First-use signals for the ways-to-use-Relay card; null until the
+      // account's Sent poll has reported them.
+      usage: "usage" in next ? (next.usage && typeof next.usage === "object" ? next.usage : null) : (payload.usage || null),
     };
     handOverLegacySettings();
     applyStoredTheme();

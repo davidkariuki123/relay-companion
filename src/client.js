@@ -420,6 +420,11 @@ export class RelayClient {
     return this.#req("POST", "/v1/me/onboarding-complete", { version });
   }
 
+  /** A content-free engagement event from one of the app's teaching surfaces. */
+  onboardingEvent(event, surface, context) {
+    return this.#req("POST", "/v1/onboarding/events", { event, surface, ...(context ? { context } : {}) }, { timeoutMs: 8000 });
+  }
+
   // The server holds healthy waits for 25 seconds. The ordinary request's
   // 15-second deadline must not interrupt them; reconnect belongs to the receiver.
   waitForAccountChange(since, signal) {

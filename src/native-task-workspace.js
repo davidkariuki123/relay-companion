@@ -66,7 +66,8 @@ function safeIndex() {
   try { return buildRepoIndex(); } catch { return []; }
 }
 
-// The list the picker shows: { options, suggested, browse, question, caption }.
+// The list the picker shows: { options, auto, suggested, browse, question, caption }.
+// `auto` is the one pair Execute uses without asking, or null.
 // `options` are launchable pairs, best first, each with the folder's `name`
 // and the `app` the page draws separately; `browse` is one "another folder…"
 // chip per installed app.
@@ -83,7 +84,7 @@ export function workspaceChoices({
 } = {}) {
   const installed = providers.map((p) => String(p?.provider || "")).filter(Boolean);
   const question = WORKSPACE_QUESTION, caption = WORKSPACE_CAPTION;
-  if (!installed.length) return { options: [], suggested: null, browse: [], question, caption };
+  if (!installed.length) return { options: [], auto: null, suggested: null, browse: [], question, caption };
   // The app Execute used last time is listed first within every rung.
   const providerOrder = [...installed].sort((a, b) => (a === preferences.provider ? -1 : b === preferences.provider ? 1 : 0));
   const options = [], seen = new Set();
@@ -122,8 +123,16 @@ export function workspaceChoices({
     for (const provider of providerOrder) add(provider, checkout.dir, "recent", why);
   }
   const trimmed = options.slice(0, max);
+  // When the Task names exactly one checkout on this machine and we know which
+  // app this person uses, there is nothing to ask: work there. Several
+  // checkouts of the repo, or no remembered app, still ask.
+  const app = installed.includes(preferences.provider) ? preferences.provider : installed.length === 1 ? installed[0] : "";
+  const auto = route.reason === "workspace-passport" && app
+    ? options.find((option) => option.reason === "passport" && option.provider === app) || null
+    : null;
   return {
     options: trimmed,
+    auto,
     suggested: trimmed[0] || null,
     browse: providerOrder.map((provider) => ({ provider, app: providerLabel(provider), label: `${providerLabel(provider)} · another folder…` })),
     question, caption,

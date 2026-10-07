@@ -44,12 +44,17 @@ test("an unheard profile check is unverified; any answer from the server is veri
   assert.equal(ordinary.verified, true, "a heard 'not a developer' is the authority and is not retried");
   assert.equal(ordinary.features.topics, false);
 
+  // The lookup's timeout timer is unref'd (it must never hold a CLI open), so a
+  // check that never answers leaves nothing else alive in this test process.
+  // Hold the loop open while the timeout runs; on the Linux release runner the
+  // drained loop cancelled this test and every one after it.
+  const keepAlive = setInterval(() => {}, 1_000);
   const slow = await resolveAccountProductFeatures({
     client: { token: "dev_test", me: () => new Promise(() => {}) },
     config: { user: DEVELOPER },
     env: { RELAY_ENV: "dev" },
     timeoutMs: 20,
-  });
+  }).finally(() => clearInterval(keepAlive));
   assert.equal(slow.verified, false, "a timeout is unheard too");
 });
 

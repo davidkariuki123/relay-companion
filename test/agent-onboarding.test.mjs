@@ -119,7 +119,7 @@ test("the pill wires the chooser, the single handoff and the server's first-Rela
   assert.match(html, /Paste this into<br>\$\{onboardingAgentTitleName\(agent\)\}\./);
   assert.match(html, /if \(status !== "checking" && agent && \(!onboardingAgentConnected\(agent\) \|\| claudeCelebrating\)\) \{ renderAgentSetup\(agent\); return; \}/);
   assert.match(html, /if \(option\.host === "claude"\) \{ renderClaudeConnect\(agent, option\); return; \}/, "Claude connects by connector, with no where screen");
-  assert.match(html, /\["Continue", "Add", "Connect", "Allow"\]/, "the four clicks are drawn as buttons");
+  assert.match(html, /\[key\("Continue"\), `Scroll down <span class="su-wheel"[^`]*`, key\("Add"\), key\("Connect"\), key\("Allow"\)\]/, "the clicks are drawn as buttons, and scrolling to Add is a step of its own");
   assert.match(html, /Connected as \$\{who\}\. This screen updates when your/);
   assert.doesNotMatch(html, /Preview the authenticated response/);
   assert.match(main, /onboardingAgents,\n\s+networkOnboardingCompleted,/, "the choice survives a restart");
@@ -144,8 +144,8 @@ test("Claude connects by connector: no place, one handoff link, and its chat ope
   h.client.connectors = [{ kind: "connector", surface: "claude", name: "Claude", createdAt: "2026-10-07T12:02:00.000Z" }];
   const connected = await h.onboarding.poll(key);
   assert.ok(connected.connectedAt, "the handoff follows");
-  assert.equal(h.opened.at(-1), "claude://claude.ai/new?surface=chat&q=Help%20me%20get%20started%20with%20Relay.", "the Claude app, which owns claude://");
-  assert.equal(h.copied.at(-1), "Help me get started with Relay.");
+  assert.equal(h.opened.at(-1), "claude://claude.ai/new?surface=chat", "the Claude app, which owns claude://, with no prefill (Claude bannered prefilled links)");
+  assert.equal(h.copied.at(-1), "Help me send my first Relay to Sam.", "the person names who it is for, so Claude's safety check sees it came from them");
 });
 
 test("a Claude that already has Relay is not auto-opened; Start opens claude.ai when no Claude app is here", async () => {
@@ -159,7 +159,8 @@ test("a Claude that already has Relay is not auto-opened; Start opens claude.ai 
   assert.deepEqual(h.opened, [], "nothing opens until they choose Start");
   const opened = await h.onboarding.open(key);
   assert.ok(opened.connectedAt);
-  assert.equal(h.opened.at(-1), "https://claude.ai/new?q=Help%20me%20get%20started%20with%20Relay.");
+  assert.equal(h.opened.at(-1), "https://claude.ai/new");
+  assert.equal(h.copied.at(-1), "Help me send my first Relay to Sam.", "the sentence waits on the clipboard");
 });
 
 test("a ChatGPT connector never counts as Claude's", async () => {
@@ -169,4 +170,23 @@ test("a ChatGPT connector never counts as Claude's", async () => {
   await h.onboarding.connectClaude(key);
   h.client.connectors = [{ kind: "connector", surface: "chatgpt", name: "ChatGPT", createdAt: "2026-10-07T12:02:00.000Z" }];
   assert.equal((await h.onboarding.poll(key)).connectedAt, "");
+});
+
+test("Claude's first sentence names who the first Relay is for", async () => {
+  const { claudeStartPrompt } = require("../overlay/agent-onboarding.cjs");
+  assert.equal(claudeStartPrompt({ kind: "hello", inviter: { name: "Sam Taylor", relayUserId: "usr_sam" } }), "Help me send my first Relay to Sam Taylor.");
+  assert.equal(claudeStartPrompt({ kind: "org", org: { name: "Harbor Coffee", groupId: "grp_1" } }), "Help me send my first Relay to Harbor Coffee.");
+  assert.equal(claudeStartPrompt({ kind: "link" }), "Help me make my first Relay link.");
+  assert.equal(claudeStartPrompt({ kind: "done" }), "Help me get started with Relay.");
+  assert.equal(claudeStartPrompt(null), "Help me get started with Relay.");
+});
+
+test("Copy it again copies Claude's start sentence, not a setup code", async () => {
+  const h = harness();
+  const key = "user:usr_alex";
+  h.onboarding.choose(key, "claude");
+  await h.onboarding.refreshServer(key);
+  assert.deepEqual(h.onboarding.copyPrompt(key), { ok: true });
+  assert.equal(h.copied.at(-1), "Help me send my first Relay to Sam.");
+  assert.equal(h.calls.some(([name]) => name === "create"), false, "Claude never gets a setup code");
 });

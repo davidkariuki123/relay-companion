@@ -16,6 +16,7 @@ import {
   materializeRelayOperation,
   publishAndFind,
   runSessionDirectoryOnce,
+  executionOffMessage,
   sessionOperationPrompt,
   settleClaudeRelayRun,
   waitForClaudeCompletion,
@@ -370,16 +371,37 @@ test("visible owned-agent sessions are claimed before native session discovery",
 
 test("without device opt-in remote work is not claimed but observation continues", async () => {
   let claimed = 0, published = 0;
-  await runSessionDirectoryOnce({
+  const progress = [];
+  const run = () => runSessionDirectoryOnce({
     client: {
-      async sessionControllerInbox() { return { operations: [{ id: "denied", kind: "start", input: { agentRunRelayId: "mention" } }] }; },
+      async sessionControllerInbox() { return { operations: [{ id: "denied", kind: "start", input: { provider: "claude", agentRunRelayId: "mention" } }] }; },
       async claimSessionOperation() { claimed++; return { terminal: true }; },
       async publishSessionObservations() { published++; return { sessions: [] }; },
+      async agentRunProgress(relayId, summary) { progress.push([relayId, summary]); },
     },
     discover: () => [], controller: () => ({}), executionAllowed: () => false,
   });
+  await run();
+  await run();
   assert.equal(claimed, 0);
-  assert.equal(published, 1);
+  assert.equal(published, 2);
+  // The waiting reply says why once, rather than "Working" for ever.
+  assert.deepEqual(progress, [["mention", executionOffMessage("claude")]]);
+  assert.ok(executionOffMessage("codex").length <= 280);
+});
+
+test("a failed opt-in notice is retried on the next tick", async () => {
+  let attempts = 0;
+  const client = {
+    async sessionControllerInbox() { return { operations: [{ id: "denied-retry", kind: "start", input: { agentRunRelayId: "mention-retry" } }] }; },
+    async publishSessionObservations() { return { sessions: [] }; },
+    async agentRunProgress() { attempts++; if (attempts === 1) throw new Error("offline"); },
+  };
+  const options = { client, discover: () => [], controller: () => ({}), executionAllowed: () => false };
+  await runSessionDirectoryOnce(options);
+  await runSessionDirectoryOnce(options);
+  await runSessionDirectoryOnce(options);
+  assert.equal(attempts, 2);
 });
 
 test("Claude permission-mode metadata drift never restarts a catalog-current live task", () => {

@@ -45,7 +45,7 @@ test("draft carries workspace and a bounded handshake, creates no transcript, bi
   fs.mkdirSync(dir, { recursive: true });
   const id = randomUUID(), file = path.join(dir, `${id}.jsonl`);
   const row = { type: "user", sessionId: id, cwd, message: { content: draft.draftPrompt } };
-  for (const patch of [{ type: "assistant" }, { isSidechain: true }, { cwd: root }, { sessionId: "wrong" }, { message: { content: [{ type: "tool_result", content: draft.draftPrompt }] } }]) {
+  for (const patch of [{ type: "assistant" }, { isSidechain: true }, { sessionId: "wrong" }, { message: { content: [{ type: "tool_result", content: draft.draftPrompt }] } }]) {
     fs.writeFileSync(file, JSON.stringify({ ...row, ...patch }) + "\n");
     assert.equal(findClaudeDraftSession(draft, { home: root }), null);
   }
@@ -54,4 +54,20 @@ test("draft carries workspace and a bounded handshake, creates no transcript, bi
   const other = randomUUID();
   fs.writeFileSync(path.join(dir, `${other}.jsonl`), JSON.stringify({ ...row, sessionId: other }) + "\n");
   assert.throws(() => findClaudeDraftSession(draft, { home: root }), /more than one/);
+});
+test("a draft Claude opened without the chosen folder is still found, and says where it opened", (t) => {
+  const root = fixture(t), cwd = path.join(root, "relay"), elsewhere = path.join(root, "home");
+  fs.mkdirSync(cwd);
+  const draft = prepareClaudeDraft({ cwd, title: "T", persist: () => {} });
+  const dir = path.join(root, "projects", elsewhere.replace(/[^a-zA-Z0-9]/g, "-"));
+  fs.mkdirSync(dir, { recursive: true });
+  const id = randomUUID();
+  fs.writeFileSync(path.join(dir, `${id}.jsonl`), JSON.stringify({ type: "user", sessionId: id, cwd: elsewhere, message: { content: draft.draftPrompt } }) + "\n");
+  const bound = findClaudeDraftSession(draft, { home: root });
+  assert.equal(bound.nativeId, id);
+  assert.equal(bound.cwd, cwd, "the chosen folder is kept for the Task");
+  assert.equal(bound.openedCwd, elsewhere);
+  const old = new Date(Date.parse(draft.draftCreatedAt) - 60000);
+  fs.utimesSync(dir, old, old);
+  assert.equal(findClaudeDraftSession(draft, { home: root }), null, "folders untouched since the draft are not read");
 });

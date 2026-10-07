@@ -1,4 +1,4 @@
-// Native Desktop only. Preflight is an estimate, never an admission API.
+// Native Desktop only. Preflight is a diagnostic estimate, never a gate.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -12,8 +12,8 @@ const run = promisify(execFile);
 const read = (file) => { try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return null; } };
 const names = (dir) => { try { return fs.readdirSync(dir); } catch { return []; } };
 const alive = (pid) => { try { if (!Number.isInteger(pid) || pid < 1) return false; process.kill(pid, 0); return true; } catch { return false; } };
-// Inspected stock Windows versions. New versions fall back to a draft until
-// their governor is verified; do not assume a provider-internal limit forever.
+// Inspected stock Windows versions. The estimate is recorded only to explain a
+// fallback; Execute always tries the automatic launch first, on every version.
 const inspected = new Set(["2.2553.1", "2.2553.13", "2.7032.0"]);
 export async function claudeDesktopVersion() {
   if (process.platform !== "win32") return null;
@@ -53,11 +53,20 @@ export function prepareClaudeDraft({ cwd, title, persist, preflight, previousSes
   return session;
 }
 
+// Claude can open the draft without the chosen folder (its own confirmation
+// step decides), so the conversation is looked for in every project folder,
+// chosen one first. The launch reference in the opening message is unique, so
+// where it opened does not change which conversation it is; the Task tells the
+// agent which folder to work in. Only folders touched since the draft are read.
 export function findClaudeDraftSession(draft, { home = claudeHome() } = {}) {
   if (!draft?.draftId || !draft.draftPrompt || !draft.cwd) return null;
-  const dir = path.join(home, "projects", draft.cwd.replace(/[^a-zA-Z0-9]/g, "-"));
+  const projects = path.join(home, "projects");
+  const chosen = path.join(projects, draft.cwd.replace(/[^a-zA-Z0-9]/g, "-"));
+  const since = Date.parse(draft.draftCreatedAt) - 2000;
+  const touched = (dir) => { try { return fs.statSync(dir).mtimeMs >= since; } catch { return false; } };
+  const dirs = [chosen, ...names(projects).map((n) => path.join(projects, n)).filter((dir) => dir !== chosen && touched(dir))];
   const matches = [];
-  for (const name of names(dir)) {
+  for (const dir of dirs) for (const name of names(dir)) {
     if (!/^[0-9a-f-]{36}\.jsonl$/i.test(name)) continue;
     const transcript = path.join(dir, name), nativeId = name.slice(0, -6);
     let fd;
@@ -66,14 +75,14 @@ export function findClaudeDraftSession(draft, { home = claudeHome() } = {}) {
       fd = fs.openSync(transcript, "r");
       const bytes = Buffer.alloc(Math.min(fs.fstatSync(fd).size, 512 * 1024));
       fs.readSync(fd, bytes, 0, bytes.length, 0);
-      const found = bytes.toString("utf8").split("\n").some((line) => {
-        let row; try { row = JSON.parse(line); } catch { return false; }
-        if (row.type !== "user" || row.isSidechain || row.sessionId !== nativeId || !row.cwd || path.resolve(row.cwd) !== path.resolve(draft.cwd)) return false;
+      const found = bytes.toString("utf8").split("\n").map((line) => { try { return JSON.parse(line); } catch { return null; } }).find((row) => {
+        if (row?.type !== "user" || row.isSidechain || row.sessionId !== nativeId || !row.cwd) return false;
         const content = row.message?.content;
         const text = typeof content === "string" ? content : Array.isArray(content) ? content.filter((c) => c.type === "text").map((c) => c.text).join("\n") : "";
         return text.trim() === draft.draftPrompt;
       });
-      if (found) matches.push({ ...draft, nativeId, transcript, url: `claude://resume?session=${nativeId}`, fromDraft: true });
+      if (found) matches.push({ ...draft, nativeId, transcript, url: `claude://resume?session=${nativeId}`, fromDraft: true,
+        ...(path.resolve(found.cwd) !== path.resolve(draft.cwd) ? { openedCwd: found.cwd } : {}) });
     } catch { /* provider file being written */ }
     finally { if (fd !== undefined) fs.closeSync(fd); }
   }

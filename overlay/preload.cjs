@@ -20,6 +20,9 @@ contextBridge.exposeInMainWorld("relay", {
   // pull the full payload on demand
   refresh: () => ipcRenderer.invoke("relay:get"),
 
+  // What the person does with the Five ways card; content-free.
+  teachingEvent: (name, way) => ipcRenderer.send("relay:teachingEvent", String(name || ""), String(way || "")),
+
   // Relay rows
   open: (id, host) => ipcRenderer.send("relay:open", id, host),
   openSent: (id, host) => ipcRenderer.send("relay:openSent", id, host),
@@ -37,6 +40,8 @@ contextBridge.exposeInMainWorld("relay", {
   taskExecute: (id, choice) => ipcRenderer.invoke("relay:taskExecute", String(id || ""), choice && typeof choice === "object"
     ? { provider: String(choice.provider || ""), cwd: String(choice.cwd || ""), browse: choice.browse === true } : undefined),
   executionDisable: () => ipcRenderer.invoke("relay:executionDisable"),
+  executionEnable: () => ipcRenderer.invoke("relay:executionEnable"),
+  executionMode: (mode) => ipcRenderer.invoke("relay:executionMode", mode),
   taskUnclaim: (id, expectedVersion) => ipcRenderer.invoke("relay:taskUnclaim", String(id || ""), expectedVersion),
   taskStop: (id) => ipcRenderer.invoke("relay:taskStop", String(id || "")),
   // A person's close, from the card or the expanded Task; the note is optional.

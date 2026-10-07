@@ -22,6 +22,16 @@ const RUN_REFRESH_MARGIN_MS = 60 * 1000;
 // Claude chat, on the web, in the app and on the phone. After it connects, a
 // new chat opens with this sentence and Relay's connector runs the lesson.
 const CLAUDE_START_PROMPT = "Help me get started with Relay.";
+// The sentence names who the first Relay is for, because the person sends it.
+// Claude's Auto mode refuses a send whose recipient came only from a tool
+// ("the recipient came from the Relay setup, not from you"), and it never
+// reached Relay (run 10, 2026-10-07). Sent by the person, the name is theirs.
+function claudeStartPrompt(known) {
+  const who = known?.kind === "org" ? known.org?.name : known?.kind === "hello" ? known.inviter?.name : "";
+  if (who) return `Help me send my first Relay to ${who}.`;
+  if (known?.kind === "link") return "Help me make my first Relay link.";
+  return CLAUDE_START_PROMPT;
+}
 
 function createAgentOnboarding({ store = {}, persist = () => {}, client, schemeOwner = () => "", openExternal, writeClipboard, now = Date.now }) {
   const runs = new Map(); // key -> live setup run (code only in memory)
@@ -64,6 +74,9 @@ function createAgentOnboarding({ store = {}, persist = () => {}, client, schemeO
         destination: known?.org?.name || known?.inviter?.name || "",
         openable: { "claude-code": ownsScheme("claude://"), codex: ownsScheme("codex://"), claudeApp: ownsScheme("claude://") },
         connector: chosen?.host === "claude" ? api.connectorSnapshot(key) : null,
+        // An AI asked Relay how to begin (server fact): the lesson is under way.
+        tutorialStarted: Boolean(known?.tutorialStartedAt),
+        startPrompt: claudeStartPrompt(known),
       };
     },
     connectorSnapshot(key) {
@@ -98,14 +111,20 @@ function createAgentOnboarding({ store = {}, persist = () => {}, client, schemeO
       connectors.set(key, { ...before, connected, checked: true });
       return { connected, justNow: connected && !before.connected && Boolean(before.startedAt) };
     },
-    /** A new Claude chat with the start sentence: the Claude app when it is here, else claude.ai. */
+    /**
+     * A new, empty Claude chat, with the start sentence on the clipboard: the
+     * Claude app when it is here, else claude.ai. Never prefilled: Claude puts
+     * a red "Use caution before running this prompt" banner over any prefilled
+     * link, and that was the first thing people saw of Relay there (David,
+     * 2026-10-07: paste instead).
+     */
     async openClaudeChat(key) {
       const chosen = record(key);
-      const q = encodeURIComponent(CLAUDE_START_PROMPT);
-      writeClipboard(CLAUDE_START_PROMPT);
-      const web = `https://claude.ai/new?q=${q}`;
+      // Who the first Relay is for comes from the server: ask once if this app hasn't yet.
+      writeClipboard(claudeStartPrompt(server.get(key) || await api.refreshServer(key)));
+      const web = "https://claude.ai/new";
       if (ownsScheme("claude://")) {
-        try { await openExternal(`claude://claude.ai/new?surface=chat&q=${q}`); }
+        try { await openExternal("claude://claude.ai/new?surface=chat"); }
         catch { await openExternal(web); }
       } else await openExternal(web);
       if (chosen && !chosen.connectedAt) save(key, { ...chosen, connectedAt: new Date(now()).toISOString() });
@@ -210,6 +229,11 @@ function createAgentOnboarding({ store = {}, persist = () => {}, client, schemeO
         if (justNow) return api.openClaudeChat(key);
         return api.snapshot(key);
       }
+      // Claude's chat is open with the start sentence: wait for Claude to ask Relay how to begin.
+      if (chosen?.host === "claude" && !server.get(key)?.tutorialStartedAt) {
+        await api.refreshServer(key);
+        return api.snapshot(key);
+      }
       if (!runs.get(key) || !chosen || runs.get(key).status !== "pending") return api.snapshot(key);
       const run = await api.pollRun(key);
       if (run?.status === "connected" && !chosen.connectedAt) save(key, { ...chosen, connectedAt: run.connectedAt || new Date(now()).toISOString() });
@@ -221,7 +245,11 @@ function createAgentOnboarding({ store = {}, persist = () => {}, client, schemeO
       const chosen = record(key);
       if (chosen?.host && !chosen.connectedAt) save(key, { ...chosen, connectedAt: new Date(now()).toISOString() });
     },
-    copyPrompt(key) { return api.copyRun(key); },
+    copyPrompt(key) {
+      // Claude has no code: its start sentence is what gets pasted.
+      if (record(key)?.host === "claude") { writeClipboard(claudeStartPrompt(server.get(key))); return { ok: true }; }
+      return api.copyRun(key);
+    },
     /** Open the chosen AI with the request already in its composer, where it has a link for that. */
     async open(key, localPrompt = "") {
       const chosen = record(key);
@@ -246,4 +274,4 @@ function createAgentOnboarding({ store = {}, persist = () => {}, client, schemeO
   return api;
 }
 
-module.exports = { createAgentOnboarding, AGENT_ONBOARDING_HOSTS: HOSTS, CLAUDE_START_PROMPT };
+module.exports = { createAgentOnboarding, AGENT_ONBOARDING_HOSTS: HOSTS, CLAUDE_START_PROMPT, claudeStartPrompt };

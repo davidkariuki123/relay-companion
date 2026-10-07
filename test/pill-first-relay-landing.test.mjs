@@ -41,9 +41,11 @@ test("with no inviter, the handoff asks for a link and waits for it", () => {
   assert.match(stage, /"Your first Relay"/);
 });
 
-test("the celebration auto-advances after ten seconds and Continue skips the wait", () => {
+test("the celebration auto-advances after twelve seconds and Continue skips the wait", () => {
   const chapter = slice("  function renderFirstRelayChapter() {", "  // OPEN RELAY (2026-09-13)");
-  assert.match(html, /function firstRelayCelebrationMs\(\) \{ return Number\(window\.__relayCelebrationMs\) > 0 \? Number\(window\.__relayCelebrationMs\) : 10000; \}/);
+  assert.match(html, /function firstRelayCelebrationMs\(\) \{ return Number\(window\.__relayCelebrationMs\) > 0 \? Number\(window\.__relayCelebrationMs\) : 12000; \}/);
+  // The aha from both sides: the message the reader reads, and the count of what their AI got.
+  assert.match(chapter, /firstRelayPreviewHtml\(\)/);
   assert.match(chapter, /setTimeout\(\(\) => \{[\s\S]*?chapter\.stage = "link"; renderSignup\(\);[\s\S]*?\}, firstRelayCelebrationMs\(\)\)/);
   assert.match(chapter, /Your first Relay is sent\./);
   assert.match(chapter, /su-relay-moment/);

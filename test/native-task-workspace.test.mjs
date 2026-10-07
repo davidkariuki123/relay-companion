@@ -33,6 +33,21 @@ test("a Task about a repo lands in this machine's checkout of it, both apps, las
   assert.equal(choices.caption, "It will read and change files in this folder.");
 });
 
+test("a Task naming one checkout here, with a known app, is not asked; otherwise the list is", () => {
+  const packet = { source: { workspace: { kind: "name", key: "relay", label: "relay" } } };
+  const known = workspaceChoices({ ...base, packet, preferences: { provider: "claude" } });
+  assert.equal(known.auto.provider, "claude");
+  assert.equal(norm(known.auto.cwd), "/w/relay");
+  const oneApp = workspaceChoices({ ...base, packet, providers: [{ provider: "claude", label: "Claude Code" }] });
+  assert.equal(norm(oneApp.auto.cwd), "/w/relay", "the only installed app needs no remembering");
+  assert.equal(workspaceChoices({ ...base, packet }).auto, null, "two apps and none remembered: ask which");
+  const untrusted = workspaceChoices({ ...base, packet, preferences: { provider: "claude" }, trusted: (provider) => provider !== "claude" });
+  assert.equal(untrusted.auto, null, "the remembered app cannot open it: ask");
+  const twoCheckouts = workspaceChoices({ ...base, packet, preferences: { provider: "claude" }, findCheckoutsFn: () => [{ dir: "/w/relay" }, { dir: "/w/old" }] });
+  assert.equal(twoCheckouts.auto, null, "several checkouts of the repo: ask");
+  assert.equal(workspaceChoices({ ...base, preferences: { provider: "claude", cwd: "/w/relay" } }).auto, null, "no workspace label: ask");
+});
+
 test("a bare name resolves too; a repo this machine lacks fails closed to the short list, never a guess", () => {
   const named = workspaceChoices({ ...base, packet: { source: { workspace: { kind: "name", key: "agentos" } } } });
   assert.equal(norm(named.options[0].cwd), "/w/agentos");

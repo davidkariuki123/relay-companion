@@ -35,6 +35,8 @@ import {
 import { createWorkConversation, replayWorkEvents, workPresentationSnapshot } from "./work-conversation.js";
 
 const activeOperations = new Set();
+// @agent runs already told that this computer has not allowed agent runs.
+const executionOffNotices = new Set();
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function currentPlacement() {
@@ -901,6 +903,25 @@ async function processClaim(client, claim, log) {
   }
 }
 
+// An @agent run this computer may not start stays queued and starts on the
+// first tick after the person allows it. Until then its reply says why, once,
+// instead of showing "Working" for ever.
+export function executionOffMessage(provider) {
+  const agent = provider === "codex" ? "Codex" : "Claude";
+  return `${agent} is waiting: this computer hasn't allowed Relay to run agents yet. Press Allow on this reply in Relay on that computer, or run Execute on a Task there once. This starts by itself after that.`;
+}
+
+async function explainExecutionOff(client, operation) {
+  const runRelayId = String(operation.input?.agentRunRelayId || "");
+  if (!runRelayId || executionOffNotices.has(operation.id)) return;
+  executionOffNotices.add(operation.id);
+  try {
+    await client.agentRunProgress(runRelayId, executionOffMessage(operation.input?.provider));
+  } catch {
+    executionOffNotices.delete(operation.id);
+  }
+}
+
 export async function runSessionDirectoryOnce({
   client,
   log = () => {},
@@ -920,7 +941,10 @@ export async function runSessionDirectoryOnce({
   const claim = async (operation) => {
     // Opening a Relay for reading is unchanged. Device-triggered inference,
     // including @agent, needs this account's explicit opt-in on this device.
-    if (!(operation.kind === "start" && operation.input?.relayMessageId) && !executionAllowed()) return;
+    if (!(operation.kind === "start" && operation.input?.relayMessageId) && !executionAllowed()) {
+      await explainExecutionOff(client, operation);
+      return;
+    }
     if (activeOperations.has(operation.id)) return;
     let releaseUpdateWork;
     try {

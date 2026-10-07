@@ -227,7 +227,9 @@ test("main offers Conductor only with the account's row and the OS's registratio
   const execute = main.slice(main.indexOf("async function executeTaskInNativeApp("), main.indexOf("function reopenNonceFromArgs("));
   assert.match(execute, /const conductorOffered = conductorUsable\(\);/);
   assert.match(execute, /conductorOffered\s*\? \{ \.\.\.modules\.launch, nativeProviders: \(\.\.\.args\) => \[\.\.\.modules\.launch\.nativeProviders\(\.\.\.args\), \{ provider: "conductor", label: "Conductor" \}\] \}\s*: modules\.launch/);
-  assert.match(execute, /\$\{conductorOffered \? " In Conductor, /, "the consent names Conductor only where it is offered");
+  assert.match(execute, /consent: \(\) => askDeviceExecutionConsent\(conductorOffered\),/);
+  const consent = main.slice(main.indexOf("async function askDeviceExecutionConsent("), main.indexOf("async function executeTaskInNativeApp("));
+  assert.match(consent, /\$\{conductorOffered \? " In Conductor, /, "the consent names Conductor only where it is offered");
 
   const summary = main.slice(main.indexOf("function nativeExecutionSummary("), main.indexOf("let checkingNativeDrafts"));
   assert.match(summary, /record\.session\.provider === "conductor"\s*&& \(!conductorOn \|\| row\.taskStartedAt \|\| row\.taskCompletedAt \|\| row\.taskRejectedAt \|\| row\.taskCancelledAt\)\) return \[\];/);

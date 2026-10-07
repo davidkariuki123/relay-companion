@@ -14,7 +14,7 @@ try {
   page.on("pageerror", (error) => errors.push(error.message));
   await page.clock.install();
   await page.addInitScript(() => {
-    window.events = {}; window.copied = []; window.copyFails = false; window.dismissed = 0;
+    window.events = {}; window.teaching = []; window.copied = []; window.copyFails = false; window.dismissed = 0;
     Object.defineProperty(navigator, "clipboard", {value:{writeText:async (text) => {
       if (window.copyFails) throw new Error("clipboard unavailable");
       window.copied.push(text);
@@ -34,6 +34,7 @@ try {
       contacts:async () => [], groups:async () => ({ok:true,result:[]}),
       accountInfo:async () => structuredClone(window.fixture.account), agentSurfaces:async () => ({}),
       dismiss:() => { window.dismissed++; },
+      teachingEvent:(name, way) => { window.teaching.push(way ? [name, way] : [name]); },
     };
     window.relay = new Proxy(api, {get:(target,key) => key in target ? target[key]
       : String(key).startsWith("on") ? (callback) => { window.events[key] = callback; return () => {}; }
@@ -121,6 +122,18 @@ try {
   await page.getByRole("button", {name:"Minimise tip",exact:true}).click();
   assert.equal(await page.locator(".rat-summary").isVisible(), true);
   assert.equal(await page.locator(".rat-card").isVisible(), false);
+  // Engagement telemetry: what the person chose, never the automatic rotation
+  // or a click on the example already showing.
+  const teaching = await page.evaluate(() => window.teaching);
+  assert.deepEqual(teaching[0], ["shown"], "the card reports coming on screen");
+  assert.deepEqual(teaching.filter(([name]) => name !== "shown"), [
+    ["expanded"],
+    ["example_chosen", "check_inbox"], ["example_copied", "check_inbox"],
+    ["example_chosen", "pull_together"], ["example_copied", "pull_together"],
+    ["example_chosen", "share_link"], ["example_chosen", "pick_up"],
+    ["minimised"],
+  ]);
+  assert.equal(new Set(EXAMPLES.map((example) => example.id)).size, EXAMPLES.length, "every example has its own id");
   await page.evaluate(() => window.events.onInbox(structuredClone(window.fixture)));
   await page.locator("#requestsEntry").click();
   assert.equal(await page.locator("#relayAnyoneTip").isVisible(), false, "tip stays out of the Requests page");
@@ -186,5 +199,5 @@ try {
     }
   }
   assert.deepEqual(errors, []);
-  console.log("PASS: Five ways to use Relay with per-slide way and result, five timed examples, poll stability, no pause button, copy success/failure, keyboard/swipe, minimise, Requests, close/reopen, reduced motion, light/dark layout.");
+  console.log("PASS: Five ways to use Relay with per-slide way and result, five timed examples, poll stability, no pause button, copy success/failure, engagement events, keyboard/swipe, minimise, Requests, close/reopen, reduced motion, light/dark layout.");
 } finally { await browser.close(); }

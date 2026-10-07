@@ -31,6 +31,16 @@ export function setExecutionPreferences(config, patch) {
   const { file, ...current } = executionPreferences(config);
   atomicWriteJsonSync(file, { ...current, ...patch }, { mode: 0o600 });
 }
+// How a Task's conversation starts: "auto" (the default) or "default", which
+// is Claude's ask-before-acting mode. A Relay setting; the app's own rules
+// still apply (it refuses Auto where Auto is unavailable).
+export const EXECUTION_MODES = ["auto", "default"];
+export function executionMode(config) {
+  try {
+    const mode = executionPreferences(config).permissionMode;
+    return EXECUTION_MODES.includes(mode) ? mode : "auto";
+  } catch { return "auto"; }
+}
 export function executionEnabled(config) {
   try { return executionPreferences(config).enabled === true; } catch { return false; }
 }
@@ -101,7 +111,7 @@ export function selectCodexModel(models, configured) {
   return selected.model;
 }
 
-export async function prepareNativeSession({ provider, binary, cwd, title, persist }) {
+export async function prepareNativeSession({ provider, binary, cwd, title, permissionMode, persist }) {
   if (!path.isAbsolute(cwd) || !fs.statSync(cwd).isDirectory()) throw new Error("Choose an existing workspace folder.");
   if (provider === "claude") {
     if (!claudeWorkspaceTrusted(cwd)) throw new Error("Open this folder in Claude Code and accept its workspace trust prompt once, then try Execute again. Relay will not change Claude’s trust settings.");
@@ -110,9 +120,17 @@ export async function prepareNativeSession({ provider, binary, cwd, title, persi
     const session = { provider, nativeId, cwd, transcript, url: `claude://resume?session=${nativeId}` };
     // Save identity before creating any provider files.
     persist(session);
+    // Claude Desktop starts an imported conversation in the mode its last user
+    // row records. Relay records the person's chosen mode on a hidden notice;
+    // without one, Claude uses its own default.
+    const mode = EXECUTION_MODES.includes(permissionMode) ? permissionMode : null;
+    const notice = mode ? { type: "user", parentUuid: null, isSidechain: false, isMeta: true, uuid: randomUUID(), timestamp: new Date().toISOString(), sessionId: nativeId, cwd,
+      userType: "external", entrypoint: "relay-execute", permissionMode: mode,
+      message: { role: "user", content: "[Relay opened this conversation for a Relay Task. The Task arrives in a later message.]" } } : null;
     const rows = [
       { type: "custom-title", customTitle: title, sessionId: nativeId },
-      { type: "assistant", parentUuid: null, isSidechain: false, uuid: randomUUID(), timestamp: new Date().toISOString(), sessionId: nativeId, cwd,
+      ...(notice ? [notice] : []),
+      { type: "assistant", parentUuid: notice?.uuid ?? null, isSidechain: false, uuid: randomUUID(), timestamp: new Date().toISOString(), sessionId: nativeId, cwd,
         userType: "external", entrypoint: "relay-execute", message: { id: `relay-seed-${randomUUID()}`, type: "message", role: "assistant",
           content: [{ type: "text", text: "[Relay created this empty conversation. This notice is from Relay, not a model response. No task has run yet.]" }], stop_reason: "end_turn", usage: {} } },
     ];
