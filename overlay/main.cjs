@@ -323,9 +323,14 @@ const agentOnboarding = createAgentOnboarding({
   store: onboardingAgents,
   persist: () => writeOverlayPrefs(),
   client: () => relayClient(),
-  schemeOwner: (scheme) => app.getApplicationNameForProtocol(scheme),
+  // Test seams: an end-to-end harness reads each opened link from a private
+  // file and opens it in its own browser, and can hide the Claude app so a
+  // test never drives the person's real one.
+  schemeOwner: (scheme) => process.env.RELAY_OVERLAY_TEST_NO_CLAUDE_APP === "1" && scheme === "claude://" ? "" : app.getApplicationNameForProtocol(scheme),
   openExternal: (url) => process.env.RELAY_OVERLAY_TEST_NO_HOST_OPEN === "1"
-    ? (console.error("[overlay] test seam: suppressed external open:", url.slice(0, 40)), Promise.resolve())
+    ? (console.error("[overlay] test seam: suppressed external open:", url.slice(0, 40)),
+      process.env.RELAY_OVERLAY_TEST_OPEN_LOG && fs.appendFileSync(process.env.RELAY_OVERLAY_TEST_OPEN_LOG, `${url}\n`, { mode: 0o600 }),
+      Promise.resolve())
     : shell.openExternal(url),
   writeClipboard: (text) => clipboard.writeText(text),
 });
@@ -4448,7 +4453,7 @@ function nativeIdFromOpenResult(result) {
 }
 
 // The open landed in a native session; tell the server which one.
-function recordRelaySessionTouch(packetId, provider, url) {
+function recordRelaySessionTouch(packetId, provider, url, surface = "") {
   const id = String(packetId || "");
   const claudeSession = claudeSessionIdFromUrl(url);
   const codexThread = /^codex:\/\/threads\/([^/?#]+)/.exec(String(url || ""))?.[1];
@@ -4456,16 +4461,31 @@ function recordRelaySessionTouch(packetId, provider, url) {
   if (!id || !nativeSessionId || id.startsWith("erelay_") || id.startsWith("egmsg_")) return;
   const row = rowById(id);
   const relayId = String(row?.sourceRelayId || id);
+  const nativeProvider = claudeSession ? "claude" : "codex";
   relayClient()
-    .then((client) => client.recordRelaySessionTouch(relayId, {
-      provider: claudeSession ? "claude" : "codex",
-      nativeSessionId,
-      ...(row?.openCwd ? { cwd: row.openCwd } : {}),
-    }))
+    .then(async (client) => {
+      await client.recordRelaySessionTouch(relayId, {
+        provider: nativeProvider,
+        nativeSessionId,
+        ...(row?.openCwd ? { cwd: row.openCwd } : {}),
+      }).catch(() => {});
+      // The person handed this Relay to an agent: record which one, apart
+      // from reading. Sent Relays are filtered out by the API.
+      await client.reportAgentPresented({
+        via: "pill_open",
+        relayIds: [relayId],
+        agent: {
+          provider: nativeProvider,
+          app: surface === "terminal" ? "cli" : "desktop",
+          ...(row?.openModel ? { model: String(row.openModel).slice(0, 120) } : {}),
+          nativeSessionId,
+        },
+      });
+    })
     .catch(() => {});
 }
 async function presentSessionOpen(result, provider, packetId, observedBundle = null) {
-  if (result?.url) recordRelaySessionTouch(packetId, provider, result.url);
+  if (result?.url) recordRelaySessionTouch(packetId, provider, result.url, result.surface);
   // A confirmed Codex bridge open has already selected, shown and focused the
   // one primary window. Calling `open -b` after that re-activates every visible
   // ChatGPT surface, including its compact hotkey window. Activation belongs
@@ -4925,6 +4945,7 @@ function openUrlTarget(url) {
   // contract that keeps them from launching Claude/Codex).
   if (process.env.RELAY_OVERLAY_TEST_NO_HOST_OPEN === "1") {
     console.error("[overlay] test seam: suppressed external open:", target);
+    if (process.env.RELAY_OVERLAY_TEST_OPEN_LOG) fs.appendFileSync(process.env.RELAY_OVERLAY_TEST_OPEN_LOG, `${target}\n`, { mode: 0o600 });
     return;
   }
   shell.openExternal(target).catch((error) => console.error("[overlay] open failed:", error && error.message));
@@ -5112,6 +5133,16 @@ async function openInConductor(relayId, prompt) {
   }
   try {
     await shell.openExternal(url);
+    // Handed to an agent in Conductor; which agent is the person's choice
+    // there, and its own reads say so once it opens the Relay.
+    const relayIdForReport = String(rowById(id)?.sourceRelayId || id);
+    relayClient()
+      .then((client) => client.reportAgentPresented({
+        via: "pill_open",
+        relayIds: [relayIdForReport],
+        agent: { harness: "conductor", app: "desktop" },
+      }))
+      .catch(() => {});
     return { ok: true, repository };
   } catch (error) {
     console.error("[overlay] Conductor open failed:", error && error.message);
@@ -5446,7 +5477,9 @@ function createAttachmentViewerWindow(key) {
     movable: true,
     minimizable: true,
     maximizable: true,
-    fullscreenable: false,
+    // The header's full-screen button and F / F11 ask main for this; the page
+    // cannot use the DOM Fullscreen API because every permission is denied.
+    fullscreenable: true,
     // No native AppKit shadow: on a dark desktop it is a large black halo
     // around a dark window (David, 2026-09-17). The page paints a hairline
     // edge instead, so the window still reads on any background.
@@ -5508,6 +5541,13 @@ function createAttachmentViewerWindow(key) {
   });
   viewerWin.webContents.on("did-finish-load", () => resetWindowZoom(viewerWin));
   viewerWin.once("ready-to-show", () => sendAttachmentViewerPayload(entry));
+  // macOS enters full screen with an animation and the person can leave it
+  // from the system too, so the page learns the state from the window.
+  const reportFullScreen = (on) => {
+    if (!viewerWin.isDestroyed()) viewerWin.webContents.send("relay:viewer:fullscreen", on);
+  };
+  viewerWin.on("enter-full-screen", () => reportFullScreen(true));
+  viewerWin.on("leave-full-screen", () => reportFullScreen(false));
   yieldOverlayToDocumentWindow(viewerWin);
   viewerWin.on("closed", () => {
     if (attachmentViewers.get(key) === entry) attachmentViewers.delete(key);
@@ -6028,6 +6068,8 @@ function applyIgnore(next, { force = false } = {}) {
     return;
   }
   next = Boolean(next);
+  // An invisible test window (companion-window.cjs) never takes a click.
+  if (process.env.RELAY_OVERLAY_TEST_INVISIBLE === "1") next = true;
   if (!force && next === hitIgnoring) return;
   hitIgnoring = next;
   if (win && !win.isDestroyed()) win.setIgnoreMouseEvents(next, { forward: true });
@@ -9301,6 +9343,8 @@ ipcMain.on("relay:viewer:window", (event, action) => {
   if (!entry || entry.win.isDestroyed()) return;
   if (action === "minimize") entry.win.minimize();
   else if (action === "close") entry.win.close();
+  else if (action === "fullscreen") entry.win.setFullScreen(!entry.win.isFullScreen());
+  else if (action === "leave-fullscreen" && entry.win.isFullScreen()) entry.win.setFullScreen(false);
 });
 ipcMain.on("relay:ack", (_e, id) => ackPacket(id));
 ipcMain.handle("relay:ackMany", async (event, ids) => {
@@ -9715,6 +9759,49 @@ ipcMain.handle("relay:slackConnection", async () => {
   try { return { ok: true, connection: await (await relayClient()).slackConnection() }; }
   catch (error) { return { ok: false, error: (error && error.message) || String(error) }; }
 });
+// Slack approval happens in the browser. The pill does not make the person
+// come back and check: main watches the connection itself, pulls the new
+// chats the moment Slack says yes, and brings Relay forward to show them.
+const SLACK_WATCH_INTERVAL_MS = 1500;
+const SLACK_WATCH_LIMIT_MS = 10 * 60 * 1000;
+let slackConnectWatch = null;
+function slackConnectionIsReady(connection) {
+  return connection?.state === "connected"
+    && connection?.team?.connected === true
+    && connection?.personal?.state === "connected";
+}
+function stopSlackConnectWatch() {
+  if (slackConnectWatch?.timer) clearTimeout(slackConnectWatch.timer);
+  slackConnectWatch = null;
+}
+function watchSlackConnect() {
+  stopSlackConnectWatch();
+  const watch = { startedAt: Date.now(), timer: null };
+  slackConnectWatch = watch;
+  const tick = async () => {
+    if (slackConnectWatch !== watch) return;
+    if (Date.now() - watch.startedAt > SLACK_WATCH_LIMIT_MS) { stopSlackConnectWatch(); return; }
+    let connection = null;
+    try { connection = await (await relayClient()).slackConnection(); } catch {}
+    if (slackConnectWatch !== watch) return;
+    if (slackConnectionIsReady(connection)) {
+      stopSlackConnectWatch();
+      try { await refreshCanonicalChats(); } catch {}
+      try { await pushInbox(true); } catch {}
+      if (win && !win.isDestroyed()) {
+        showFromTray();
+        try { win.focus(); } catch {}
+        win.webContents.send("slackConnection", { connection, connected: true });
+      }
+      // Channels can keep arriving for a few seconds after the approval while
+      // Slack lists them; one more pull catches the stragglers.
+      setTimeout(() => { refreshCanonicalChats().then(() => pushInbox(true)).catch(() => {}); }, 4000);
+      return;
+    }
+    watch.timer = setTimeout(tick, SLACK_WATCH_INTERVAL_MS);
+  };
+  watch.timer = setTimeout(tick, SLACK_WATCH_INTERVAL_MS);
+}
 ipcMain.handle("relay:slackConnect", async (_event, input = {}) => {
   if (currentProductFeatures().slack !== true) {
     return { ok: false, error: "Slack is available only to Relay developer accounts on dev." };
@@ -9722,19 +9809,50 @@ ipcMain.handle("relay:slackConnect", async (_event, input = {}) => {
   try {
     const client = await relayClient();
     const result = input?.reconnect
-      ? await client.reconnectSlack({ returnSurface: "settings" })
+      ? await client.reconnectSlack({ returnSurface: "app" })
       : await client.startSlackConnection({
         mode: input?.mode === "user" ? "user" : "combined",
-        returnSurface: "settings",
+        returnSurface: "app",
         ...(input?.expectedTeamId ? { expectedTeamId: String(input.expectedTeamId) } : {}),
       });
     if (!result?.authorizationUrl) throw new Error("Slack did not return an approval URL.");
     await shell.openExternal(result.authorizationUrl);
+    watchSlackConnect();
     return { ok: true, waiting: true };
   } catch (error) {
-    return { ok: false, error: (error && error.message) || String(error) };
+    return { ok: false, error: slackConnectErrorText(error) };
   }
 });
+ipcMain.handle("relay:slackConnectCancel", () => { stopSlackConnectWatch(); return { ok: true }; });
+ipcMain.handle("relay:slackInvite", async (event, input = {}) => {
+  if (win && !win.isDestroyed() && event && event.sender !== win.webContents) return { ok: false, error: "Not the pill." };
+  if (currentProductFeatures().slack !== true) return { ok: false, error: "Slack isn’t available here." };
+  const chatId = String(input?.chatId || "").trim();
+  if (!chatId) return { ok: false, error: "Missing chat." };
+  try {
+    const result = await (await relayClient()).inviteSlackTeammates(chatId, input?.slackUserId ? String(input.slackUserId) : "");
+    // The group's roster now carries the invitation.
+    refreshCanonicalChats().then(() => pushInbox(true)).catch(() => {});
+    return { ok: true, result };
+  } catch (error) {
+    const code = String(error?.body?.error || error?.code || "");
+    return {
+      ok: false,
+      code,
+      error: code === "slack_authorization_required"
+        ? "Connect your Slack to invite teammates."
+        : String(error?.body?.message || "Couldn’t send the invitation. Try again."),
+    };
+  }
+});
+// Words a person can act on, not the server's error codes.
+function slackConnectErrorText(error) {
+  const code = String(error?.code || error?.body?.error || "");
+  const message = String(error?.message || "");
+  if (code === "slack_not_configured" || /not configured/i.test(message)) return "Slack isn’t available yet. Try again later.";
+  if (/network|fetch|ENOTFOUND|ECONN|timed? ?out/i.test(message)) return "Couldn’t reach Relay. Check your internet and try again.";
+  return "Couldn’t open Slack. Try again.";
+}
 ipcMain.handle("relay:slackDisconnect", async () => {
   if (currentProductFeatures().slack !== true) {
     return { ok: false, error: "Slack is available only to Relay developer accounts on dev." };
@@ -9816,6 +9934,7 @@ ipcMain.handle("relay:onboardingPrepareAgent", agentOnboardingIpc((key) => agent
 ipcMain.handle("relay:onboardingPollAgent", agentOnboardingIpc((key) => agentOnboarding.poll(key)));
 ipcMain.handle("relay:onboardingCopyAgentRequest", agentOnboardingIpc((key) => agentOnboarding.copyPrompt(key)));
 ipcMain.handle("relay:onboardingOpenAgent", agentOnboardingIpc((key) => agentOnboarding.open(key, localOnboardingPrompt())));
+ipcMain.handle("relay:onboardingConnectClaude", agentOnboardingIpc((key) => agentOnboarding.connectClaude(key)));
 // SETUP (2026-10-07). The Setup page's facts and verbs, each for the account
 // still on screen. Connecting a chat AI reuses the first-run chooser's setup
 // request (agentOnboarding.prepareRun …), so there is one connect flow.
@@ -9830,11 +9949,15 @@ function setupNudgeFor(key) {
   return agentConnections.nudge(key, { rider: currentProductFeatures().conductor === true });
 }
 function setupSnapshot(key) {
-  return { ...agentConnections.snapshot(key, { rider: currentProductFeatures().conductor === true }), conductorOffered: currentProductFeatures().conductor === true, run: agentOnboarding.runSnapshot(key), platform: process.platform };
+  return { ...agentConnections.snapshot(key, { rider: currentProductFeatures().conductor === true }), conductorOffered: currentProductFeatures().conductor === true, run: agentOnboarding.runSnapshot(key),
+    claudeConnector: agentOnboarding.connectorSnapshot(key), platform: process.platform };
 }
 ipcMain.handle("relay:setupSnapshot", setupIpc(async (key, options) => {
   const before = JSON.stringify(setupNudgeFor(key));
-  await agentConnections.refresh(key, { force: options?.force === true });
+  // While Claude's connector is being added, ask the server every time.
+  const claudePending = agentOnboarding.connectorSnapshot(key).started && !agentOnboarding.connectorSnapshot(key).connected;
+  if (claudePending) await agentOnboarding.checkConnector(key).catch(() => {});
+  await agentConnections.refresh(key, { force: options?.force === true || claudePending });
   if (JSON.stringify(setupNudgeFor(key)) !== before) pushInbox(true);
   return setupSnapshot(key);
 }));
@@ -9869,6 +9992,12 @@ ipcMain.handle("relay:setupPollRun", setupIpc(async (key) => {
 ipcMain.handle("relay:setupCopyRun", setupIpc(async (key) => agentOnboarding.copyRun(key)));
 ipcMain.handle("relay:setupOpenRun", setupIpc(async (key) => agentOnboarding.openRun(key)));
 ipcMain.handle("relay:setupCancelRun", setupIpc(async (key) => { agentOnboarding.cancelRun(key); return setupSnapshot(key); }));
+// Claude connects by connector: open its filled-in add screen; the page's own
+// polling of the server's connection list turns the row to Connected.
+ipcMain.handle("relay:setupConnectClaude", setupIpc(async (key) => {
+  await agentOnboarding.connectClaude(key);
+  return setupSnapshot(key);
+}));
 
 ipcMain.handle("relay:copySetupPrompt", () => {
   // Only the installed app's own connect prompt exists: agents no longer install Relay.

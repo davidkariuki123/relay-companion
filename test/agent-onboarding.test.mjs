@@ -21,6 +21,9 @@ function harness({ schemes = {}, openFails = false } = {}) {
     async agentSetupRun(id) { calls.push(["read", id]); return { id, status, connectedAt: status === "connected" ? "2026-10-07T12:01:00.000Z" : null }; },
     async cancelAgentSetupRun(id) { calls.push(["cancel", id]); },
     async agentOnboarding() { calls.push(["onboarding"]); return { kind: "hello", inviter: { name: "Sam", relayUserId: "usr_sam" } }; },
+    connectors: [],
+    async mcpBrowserHandoff(provider) { calls.push(["handoff", provider]); return { url: "https://sendrelays.com/connect/claude#handoff=mcp_handoff.x.y" }; },
+    async agentConnections() { calls.push(["connections"]); return { connections: this.connectors }; },
   };
   const store = {};
   const opened = [];
@@ -31,7 +34,7 @@ function harness({ schemes = {}, openFails = false } = {}) {
     openExternal: async (url) => { if (openFails && url.startsWith("claude://")) throw new Error("refused"); opened.push(url); },
     writeClipboard: (text) => copied.push(text), now: () => clock,
   });
-  return { onboarding, calls, store, opened, copied, tick: (ms) => { clock += ms; }, setStatus: (value) => { status = value; } };
+  return { onboarding, calls, store, opened, copied, client, tick: (ms) => { clock += ms; }, setStatus: (value) => { status = value; } };
 }
 
 test("a chat AI gets one live code, re-minted only when it lapses, and connects when the AI redeems it", async () => {
@@ -59,7 +62,7 @@ test("a chat AI gets one live code, re-minted only when it lapses, and connects 
 test("changing the AI cancels the old code so a stale request cannot connect", async () => {
   const h = harness();
   const key = "user:usr_alex";
-  h.onboarding.choose(key, "claude", "browser");
+  h.onboarding.choose(key, "chatgpt", "browser");
   await h.onboarding.prepare(key);
   h.onboarding.choose(key, "chatgpt", "app");
   await new Promise((resolve) => setImmediate(resolve));
@@ -71,20 +74,15 @@ test("changing the AI cancels the old code so a stale request cannot connect", a
   assert.equal(h.store[key], undefined);
 });
 
-test("open puts the request in the AI's composer and on the clipboard, with a web fallback for the Claude app", async () => {
-  const h = harness({ openFails: true });
+test("open puts the request in the AI's composer and on the clipboard", async () => {
+  const h = harness();
   const key = "user:usr_alex";
-  h.onboarding.choose(key, "claude", "app");
+  h.onboarding.choose(key, "chatgpt", "browser");
   const created = await h.onboarding.prepare(key);
   assert.ok(created.run.open);
-  h.store[key] = { ...h.store[key] };
-  // Simulate the Claude app's own link.
-  const result = await (async () => {
-    const run = h.onboarding.snapshot(key).run;
-    assert.ok(run);
-    return h.onboarding.open(key);
-  })();
+  const result = await h.onboarding.open(key);
   assert.equal(result.ok, true);
+  assert.equal(h.opened.at(-1), "https://example.test/open?q=1");
   assert.equal(h.copied.at(-1).startsWith("Set up Relay for me."), true);
   h.onboarding.copyPrompt(key);
   assert.equal(h.copied.length, 2);
@@ -119,9 +117,56 @@ test("the pill wires the chooser, the single handoff and the server's first-Rela
   assert.match(html, /Which AI do you use most\?/);
   assert.match(html, /Where do you use \$\{esc\(option\.name\)\}\?/);
   assert.match(html, /Paste this into<br>\$\{onboardingAgentTitleName\(agent\)\}\./);
-  assert.match(html, /if \(status !== "checking" && agent && !onboardingAgentConnected\(agent\)\) \{ renderAgentSetup\(agent\); return; \}/);
+  assert.match(html, /if \(status !== "checking" && agent && \(!onboardingAgentConnected\(agent\) \|\| claudeCelebrating\)\) \{ renderAgentSetup\(agent\); return; \}/);
+  assert.match(html, /if \(option\.host === "claude"\) \{ renderClaudeConnect\(agent, option\); return; \}/, "Claude connects by connector, with no where screen");
+  assert.match(html, /\["Continue", "Add", "Connect", "Allow"\]/, "the four clicks are drawn as buttons");
   assert.match(html, /Connected as \$\{who\}\. This screen updates when your/);
   assert.doesNotMatch(html, /Preview the authenticated response/);
   assert.match(main, /onboardingAgents,\n\s+networkOnboardingCompleted,/, "the choice survives a restart");
   assert.match(main, /if \(serverAnswer\?\.kind === "hello" \|\| serverAnswer\?\.kind === "org"\) return "hello";/);
+});
+
+test("Claude connects by connector: no place, one handoff link, and its chat opens on its own when it connects", async () => {
+  const h = harness({ schemes: { "claude://": "Claude" } });
+  const key = "user:usr_alex";
+  const chosen = h.onboarding.choose(key, "claude", "browser");
+  assert.equal(chosen.place, "", "Claude's connector works wherever Claude does, so no where");
+  assert.deepEqual(chosen.connector, { started: false, connected: false, checked: false, error: "" });
+  // First look: Claude has no Relay yet, and nothing opens on its own.
+  assert.equal((await h.onboarding.poll(key)).connector.checked, true);
+  assert.deepEqual(h.opened, []);
+  const started = await h.onboarding.connectClaude(key);
+  assert.deepEqual(h.calls.filter(([name]) => name === "handoff"), [["handoff", "claude"]]);
+  assert.equal(h.opened[0], "https://sendrelays.com/connect/claude#handoff=mcp_handoff.x.y");
+  assert.equal(started.connector.started, true);
+  assert.equal((await h.onboarding.poll(key)).connectedAt, "", "still waiting for Claude");
+  assert.equal(h.calls.some(([name]) => name === "create"), false, "Claude never gets a setup code");
+  h.client.connectors = [{ kind: "connector", surface: "claude", name: "Claude", createdAt: "2026-10-07T12:02:00.000Z" }];
+  const connected = await h.onboarding.poll(key);
+  assert.ok(connected.connectedAt, "the handoff follows");
+  assert.equal(h.opened.at(-1), "claude://claude.ai/new?surface=chat&q=Help%20me%20get%20started%20with%20Relay.", "the Claude app, which owns claude://");
+  assert.equal(h.copied.at(-1), "Help me get started with Relay.");
+});
+
+test("a Claude that already has Relay is not auto-opened; Start opens claude.ai when no Claude app is here", async () => {
+  const h = harness();
+  const key = "user:usr_alex";
+  h.client.connectors = [{ kind: "connector", surface: "claude", name: "Claude", createdAt: "2026-09-01T00:00:00.000Z" }];
+  h.onboarding.choose(key, "claude");
+  const seen = await h.onboarding.poll(key);
+  assert.equal(seen.connector.connected, true);
+  assert.equal(seen.connectedAt, "", "connected, but the person has not been handed to Claude yet");
+  assert.deepEqual(h.opened, [], "nothing opens until they choose Start");
+  const opened = await h.onboarding.open(key);
+  assert.ok(opened.connectedAt);
+  assert.equal(h.opened.at(-1), "https://claude.ai/new?q=Help%20me%20get%20started%20with%20Relay.");
+});
+
+test("a ChatGPT connector never counts as Claude's", async () => {
+  const h = harness();
+  const key = "user:usr_alex";
+  h.onboarding.choose(key, "claude");
+  await h.onboarding.connectClaude(key);
+  h.client.connectors = [{ kind: "connector", surface: "chatgpt", name: "ChatGPT", createdAt: "2026-10-07T12:02:00.000Z" }];
+  assert.equal((await h.onboarding.poll(key)).connectedAt, "");
 });

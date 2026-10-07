@@ -12,8 +12,9 @@
   const el = {
     name: $("vName"), meta: $("vMeta"), acts: $("vActs"),
     download: $("vDownload"), reveal: $("vReveal"), more: $("vMore"),
-    min: $("vMin"), close: $("vClose"), message: $("vMessage"),
+    full: $("vFull"), min: $("vMin"), close: $("vClose"), message: $("vMessage"),
     stage: $("vStage"), image: $("vImage"), prev: $("vPrev"), next: $("vNext"), strip: $("vStrip"),
+    zoomOut: $("vZoomOut"), zoomPct: $("vZoomPct"), zoomIn: $("vZoomIn"),
     fileHead: $("vFileHead"), fileTile: $("vFileTile"), fileName: $("vFileName"), fileMeta: $("vFileMeta"),
     text: $("vText"), pdf: $("vPdf"), html: $("vHtml"), htmlNote: $("vHtmlNote"),
     none: $("vNone"), noneTile: $("vNoneTile"), noneName: $("vNoneName"),
@@ -29,6 +30,9 @@
     minimise: "M3.5 8h9",
     left: "M10 3L5 8l5 5",
     right: "M6 3l5 5-5 5",
+    plus: "M8 3.5v9M3.5 8h9",
+    fullscreen: "M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10",
+    exitFullscreen: "M6 2.5V6H2.5M13.5 6H10V2.5M10 13.5V10h3.5M2.5 10H6v3.5",
     file: "M4 2.2h5.3l3 3.4v8.2H4zM9.3 2.2v3.4h3",
   };
   function icon(name, size = 16) {
@@ -75,7 +79,7 @@
 
   // ---- state ---------------------------------------------------------------
   let view = { kind: "image", chatTitle: "", items: [], index: 0 };
-  let actual = false; // double-click toggles fit / 100%
+  let fullScreen = false;
   const contentCache = new Map();
 
   const current = () => view.items[view.index] || null;
@@ -155,8 +159,7 @@
     const next = Math.max(0, Math.min(index, view.items.length - 1));
     if (next === view.index) return;
     view.index = next;
-    actual = false;
-    el.stage.classList.remove("actual");
+    resetZoom(false);
     paintImage();
   }
 
@@ -242,7 +245,10 @@
   label(el.download, "download", "Download");
   label(el.reveal, "reveal", "Reveal");
   el.more.replaceChildren(icon("more"));
+  el.full.replaceChildren(icon("fullscreen"));
   el.min.replaceChildren(icon("minimise"));
+  el.zoomOut.replaceChildren(icon("minimise", 14));
+  el.zoomIn.replaceChildren(icon("plus", 14));
   el.close.replaceChildren(icon("close"));
   el.prev.replaceChildren(icon("left"));
   el.next.replaceChildren(icon("right"));
@@ -254,6 +260,7 @@
   el.download.addEventListener("click", download);
   el.noneDownload.addEventListener("click", download);
   el.reveal.addEventListener("click", () => act((item) => bridge.reveal(item.relayId, item.attachmentId)));
+  el.full.addEventListener("click", () => bridge.toggleFullScreen());
   el.min.addEventListener("click", () => bridge.minimize());
   el.close.addEventListener("click", () => bridge.close());
   el.prev.addEventListener("click", () => goTo(view.index - 1));
@@ -290,14 +297,146 @@
   });
   document.addEventListener("click", () => { moreOpen?.remove(); moreOpen = null; });
 
+  // ---- zoom and pan ---------------------------------------------------------
+  // The picture is laid out fitted, then scaled and moved by one transform.
+  // `scale` is relative to that fitted size (1 = fit); the offset moves the
+  // picture's centre away from where layout put it, in stage pixels.
+  const ZOOM_MAX = 16;
+  const ZOOM_STEP = 1.5;
+  const zoom = { scale: 1, x: 0, y: 0 };
+  let pan = null;
+  let fittedWidth = 0; // the picture's laid-out width when zoom last painted
+
+  // How many fitted pixels make one pixel of the original picture: zooming to
+  // this scale shows it at 100%. A picture smaller than the stage is never
+  // upscaled to fit, so for it this is 1.
+  function actualScale() {
+    const shown = el.image.offsetWidth;
+    return shown > 0 && el.image.naturalWidth > 0 ? Math.max(1, el.image.naturalWidth / shown) : 1;
+  }
+
+  // Keep the picture over the stage: a side larger than the stage cannot be
+  // dragged past its edge, a side that fits stays centred. Layout centres the
+  // picture inside symmetric padding, so its resting centre is the stage's.
+  function clampZoom() {
+    const stage = el.stage.getBoundingClientRect();
+    const slackX = Math.max(0, (el.image.offsetWidth * zoom.scale - stage.width) / 2);
+    const slackY = Math.max(0, (el.image.offsetHeight * zoom.scale - stage.height) / 2);
+    zoom.x = Math.max(-slackX, Math.min(slackX, zoom.x));
+    zoom.y = Math.max(-slackY, Math.min(slackY, zoom.y));
+  }
+
+  function paintZoom({ glide = false } = {}) {
+    fittedWidth = el.image.offsetWidth;
+    clampZoom();
+    el.image.classList.toggle("glide", glide);
+    el.image.style.transform = zoom.scale === 1 && !zoom.x && !zoom.y
+      ? ""
+      : `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})`;
+    el.stage.classList.toggle("zoomed", zoom.scale > 1);
+    const natural = el.image.naturalWidth;
+    el.zoomPct.textContent = zoom.scale === 1 || !natural
+      ? "Fit"
+      : `${Math.round((el.image.offsetWidth * zoom.scale / natural) * 100)}%`;
+    el.zoomOut.disabled = zoom.scale <= 1;
+    el.zoomIn.disabled = zoom.scale >= ZOOM_MAX;
+  }
+
+  function resetZoom(glide = true) {
+    zoom.scale = 1;
+    zoom.x = 0;
+    zoom.y = 0;
+    pan = null;
+    el.stage.classList.remove("panning");
+    paintZoom({ glide });
+  }
+
+  // Zoom to `scale`, keeping the picture point under (clientX, clientY) where
+  // it is. Without a point, zoom about the middle of the stage.
+  function zoomTo(scale, clientX, clientY, { glide = false } = {}) {
+    if (view.kind !== "image" || !el.image.naturalWidth) return;
+    const next = Math.max(1, Math.min(ZOOM_MAX, scale));
+    const stage = el.stage.getBoundingClientRect();
+    const cx = stage.left + stage.width / 2;
+    const cy = stage.top + stage.height / 2;
+    const px = (Number.isFinite(clientX) ? clientX : cx) - cx;
+    const py = (Number.isFinite(clientY) ? clientY : cy) - cy;
+    const ratio = next / zoom.scale;
+    zoom.x = px - (px - zoom.x) * ratio;
+    zoom.y = py - (py - zoom.y) * ratio;
+    zoom.scale = next;
+    if (next === 1) { zoom.x = 0; zoom.y = 0; }
+    paintZoom({ glide });
+  }
+
   // Double-click toggles fit / 100%: the two sizes a photo is ever looked at.
-  el.stage.addEventListener("dblclick", () => {
-    actual = !actual;
-    el.stage.classList.toggle("actual", actual);
+  // A picture already shown at its own size goes to double instead.
+  function toggleActualSize(clientX, clientY) {
+    if (zoom.scale > 1) { resetZoom(); return; }
+    const actual = actualScale();
+    zoomTo(actual > 1.05 ? actual : 2, clientX, clientY, { glide: true });
+  }
+
+  const onStageControl = (target) => target instanceof Element && target.closest("button");
+
+  el.stage.addEventListener("wheel", (event) => {
+    if (view.kind !== "image" || el.stage.hidden) return;
+    event.preventDefault();
+    // A mouse notch is ~100 pixels (or 3 lines); a trackpad pinch arrives as
+    // many small ctrl+wheel steps, so it gets a steeper curve.
+    const delta = event.deltaMode === 1 ? event.deltaY * 33 : event.deltaY;
+    zoomTo(zoom.scale * Math.exp(-delta * (event.ctrlKey ? 0.01 : 0.0025)), event.clientX, event.clientY);
+  }, { passive: false });
+
+  el.stage.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || zoom.scale <= 1 || onStageControl(event.target)) return;
+    event.preventDefault();
+    pan = { id: event.pointerId, x: event.clientX - zoom.x, y: event.clientY - zoom.y };
+    el.stage.setPointerCapture(event.pointerId);
+    el.stage.classList.add("panning");
+  });
+  el.stage.addEventListener("pointermove", (event) => {
+    if (!pan || event.pointerId !== pan.id) return;
+    zoom.x = event.clientX - pan.x;
+    zoom.y = event.clientY - pan.y;
+    paintZoom();
+  });
+  const endPan = (event) => {
+    if (!pan || event.pointerId !== pan.id) return;
+    pan = null;
+    el.stage.classList.remove("panning");
+  };
+  el.stage.addEventListener("pointerup", endPan);
+  el.stage.addEventListener("pointercancel", endPan);
+
+  el.stage.addEventListener("dblclick", (event) => {
+    if (onStageControl(event.target)) return;
+    toggleActualSize(event.clientX, event.clientY);
+  });
+  el.zoomIn.addEventListener("click", () => zoomTo(zoom.scale * ZOOM_STEP, NaN, NaN, { glide: true }));
+  el.zoomOut.addEventListener("click", () => zoomTo(zoom.scale / ZOOM_STEP, NaN, NaN, { glide: true }));
+  el.zoomPct.addEventListener("click", () => toggleActualSize());
+  el.image.addEventListener("load", () => paintZoom());
+  // Resizing (full screen included) refits the picture. Keep what the person
+  // was looking at the same size on screen, so 100% stays 100%, and pull the
+  // picture back over the stage.
+  window.addEventListener("resize", () => {
+    const width = el.image.offsetWidth;
+    if (fittedWidth && width && zoom.scale > 1) {
+      zoom.scale = Math.max(1, Math.min(ZOOM_MAX, zoom.scale * (fittedWidth / width)));
+      if (zoom.scale === 1) { zoom.x = 0; zoom.y = 0; }
+    }
+    paintZoom();
   });
 
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") { bridge.close(); return; }
+    // Esc steps back one level: out of full screen first, then the window.
+    if (event.key === "Escape") { if (fullScreen) bridge.leaveFullScreen(); else bridge.close(); return; }
+    if (event.key === "F11" || (event.key.toLowerCase() === "f" && !event.metaKey && !event.ctrlKey && !event.altKey)) {
+      event.preventDefault();
+      bridge.toggleFullScreen();
+      return;
+    }
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") { event.preventDefault(); download(); return; }
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "c" && view.kind === "image") {
       event.preventDefault();
@@ -307,9 +446,20 @@
     if (view.kind !== "image") return;
     if (event.key === "ArrowLeft") { event.preventDefault(); goTo(view.index - 1); }
     else if (event.key === "ArrowRight") { event.preventDefault(); goTo(view.index + 1); }
+    else if (event.metaKey || event.ctrlKey || event.altKey) return;
+    else if (event.key === "+" || event.key === "=") { event.preventDefault(); zoomTo(zoom.scale * ZOOM_STEP, NaN, NaN, { glide: true }); }
+    else if (event.key === "-" || event.key === "_") { event.preventDefault(); zoomTo(zoom.scale / ZOOM_STEP, NaN, NaN, { glide: true }); }
+    else if (event.key === "0") { event.preventDefault(); resetZoom(); }
   });
 
   // ---- main's word ---------------------------------------------------------
+  bridge.onFullScreen((on) => {
+    fullScreen = on;
+    document.documentElement.classList.toggle("fs", on);
+    el.full.replaceChildren(icon(on ? "exitFullscreen" : "fullscreen"));
+    el.full.setAttribute("aria-label", on ? "Exit full screen" : "Full screen");
+    el.full.title = on ? "Exit full screen (Esc)" : "Full screen (F)";
+  });
   bridge.onTheme((theme) => document.documentElement.setAttribute("data-theme", theme === "dark" ? "dark" : "light"));
   bridge.onContent((payload) => {
     document.documentElement.setAttribute("data-theme", payload.theme === "dark" ? "dark" : "light");
@@ -319,8 +469,7 @@
       items: Array.isArray(payload.items) ? payload.items : [],
       index: Number.isInteger(payload.index) ? payload.index : 0,
     };
-    actual = false;
-    el.stage.classList.remove("actual");
+    resetZoom(false);
     if (!view.items.length) { fail("This attachment is no longer in the conversation."); return; }
     if (view.kind === "image") paintImage(); else paintFile();
   });

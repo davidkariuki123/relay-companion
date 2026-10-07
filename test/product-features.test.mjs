@@ -257,7 +257,12 @@ test("the first payload render follows the account-gated tabs", () => {
   assert.doesNotMatch(source, /features\?\.todo|data-view="tasks"/, "the Todo tab is removed");
   assert.match(source, /if \(activeView === "tasks" \|\| activeView === "requestDetail"\) \{\s+activeView = "relays";/,
     "a remembered retired view lands on the inbox");
-  assert.match(source, /view === "slack" && payload\.features\?\.slack !== true/);
+  // Slack has no tab of its own (David, 2026-10-07): its chats live in Inbox ›
+  // Chats, so the only account-gated tab left is Topics.
+  assert.match(source, /view === "topics" && payload\.features\?\.topics !== true/);
+  assert.doesNotMatch(source, /data-view="slack"|view === "slack"/);
+  assert.match(source, /if \(payload\.features\?\.slack !== true && threadsSource === "slack"\) \{\s*activeView = "relays";\s*threadsSource = "relay";/,
+    "an account that loses Slack never stays inside a Slack projection");
 });
 
 test("customer builds keep person mentions while hiding Slack and agent mentions", () => {
@@ -291,7 +296,8 @@ test("the You page always offers which app opens relays, and the fresh open goes
   const source = fs.readFileSync(path.join(here, "../overlay/inbox.html"), "utf8");
   const settings = source.slice(source.indexOf("function renderSettings()"), source.indexOf("function wireSettings()"));
   // Your AIs (Setup, 2026-10-07) sits first: nothing works until an AI has Relay.
-  assert.match(settings, /if \(info\.paired\) \{[\s\S]*?if \(window\.relay\.setupSnapshot\) html \+= setupEntryHtml\(\);\s*html \+= yourLinkHtml\(\);\s*html \+= yourAgentHtml\(\);/);
+  // Slack, the other thing Relay connects to, sits beside it.
+  assert.match(settings, /if \(info\.paired\) \{[\s\S]*?if \(window\.relay\.setupSnapshot\) html \+= setupEntryHtml\(\);(?:\s*\/\/[^\n]*)*\s*html \+= slackSettingsHtml\(info\);\s*html \+= yourLinkHtml\(\);\s*html \+= yourAgentHtml\(\);/);
   assert.match(source, /<div class="sv-open-section" id="yourAgent" data-stop="1">\s*<div class="sv-open-title">Your agent<\/div>/);
   const open = source.slice(source.indexOf("function openRelayFromUI("), source.indexOf("let unreadCount = 0;"));
   assert.match(open, /mode === "fresh" && window\.relay\.openFresh\) window\.relay\.openFresh\(id, host \|\| hostKeyFor\(agentAppName\(\)\), note\)/);

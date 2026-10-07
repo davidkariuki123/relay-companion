@@ -26,7 +26,10 @@ test("daemon dispatch restores groups, chats, attachment reads and exact local d
   t.after(() => dispatcher.stop());
   const get = (route) => dispatcher.dispatch({ method: "GET", path: route, accountId: "usr_test" });
   assert.equal((await get("/v1/contact-groups")).method, "groups");
-  assert.deepEqual((await get("/v1/chats/chat_one")).args, ["chat_one", {}]);
+  // Reads through the helper are an agent's, and say so to the API.
+  assert.deepEqual((await get("/v1/chats/chat_one")).args, ["chat_one", {}, { clientName: "relay-agent-protocol" }]);
+  assert.deepEqual((await get("/v1/threads/thread_one")).args, ["thread_one", { clientName: "relay-agent-protocol" }]);
+  assert.deepEqual((await get("/v1/relays/rel_one")).args, ["rel_one", { clientName: "relay-agent-protocol" }]);
   assert.deepEqual((await get("/v1/relays/rel_one/attachments/att_one/download-url")).args, ["rel_one", "att_one"]);
   assert.equal((await get("/local/destinations/codex"))[0].nativeId, "session_one");
   const body = { relayId: "rel_one", target: { provider: "codex", nativeId: "session_one" } };

@@ -27,7 +27,10 @@ test("a relay tap lands in the glance frame; only Chat-sourced opens earn the sp
   // see the message." Compact by default, ⤢ Expand opt-in; David's law for
   // Chat rooms untouched (openRoom asserts it; options.expanded still wins).
   const open = html.slice(html.indexOf("function openThreadDetail("), html.indexOf("// ---------- Settings view"));
-  assert.match(open, /chatExpanded = options\.expanded === undefined \? source === "chat" : Boolean\(options\.expanded\)/);
+  // A Slack-linked room reads its Slack projection whichever list opened it,
+  // so the split is earned by the list it came from, not the projection.
+  assert.match(open, /const returnSource = source === "slack" \? "relays" : source;/);
+  assert.match(open, /chatExpanded = options\.expanded === undefined \? returnSource === "chat" : Boolean\(options\.expanded\)/);
   assert.doesNotMatch(open, /chatExpanded = false;/);
 });
 
@@ -40,7 +43,8 @@ test("every room entry follows newest through every asynchronous hydration phase
   assert.match(open, /let canonicalDetailReady = Promise\.resolve\(null\)/);
   assert.match(open, /canonicalDetailReady = requestCanonicalChatDetail\(room, source, \{ includeSlack \}\)/,
     "a cold Slack transcript remains part of the guarded room entry");
-  assert.match(open, /hydrateThreadEntry\(entryFollowToken, \{[\s\S]*includeSent:source !== "slack",[\s\S]*detailReady:canonicalDetailReady/,
+  // A chat that is also in Slack shows every message, so its own sends hydrate too.
+  assert.match(open, /hydrateThreadEntry\(entryFollowToken, \{[\s\S]*includeSent:true,[\s\S]*detailReady:canonicalDetailReady/,
     "both outbound and canonical hydration are handed to the entry-follow latch");
 
   const render = html.slice(html.indexOf("function renderThreadDetail()"), html.indexOf('document.getElementById("thExpand")'));

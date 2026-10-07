@@ -80,16 +80,31 @@
 
     /* The IMAGE stage. Arrows appear on hover and on keyboard focus. */
     .stage { position:relative; flex:1 1 auto; display:flex; align-items:center; justify-content:center;
-      min-height:0; overflow:auto; padding:18px 56px; background:var(--bg); }
-    .stage img { display:block; max-width:100%; max-height:100%; height:auto; border-radius:var(--r-3); object-fit:contain; }
-    .stage.actual { align-items:flex-start; justify-content:flex-start; }
-    .stage.actual img { max-width:none; max-height:none; }
-    .arr { position:absolute; top:50%; transform:translateY(-50%); width:32px; height:32px; display:grid;
+      min-height:0; overflow:hidden; padding:18px 56px; background:var(--bg); touch-action:none; }
+    /* Zoom and pan are one transform on the fitted picture, so layout never
+       moves: the wheel zooms about the pointer and a drag pans. */
+    .stage img { display:block; max-width:100%; max-height:100%; height:auto; border-radius:var(--r-3); object-fit:contain;
+      transform-origin:50% 50%; -webkit-user-drag:none; user-select:none; }
+    .stage img.glide { transition:transform var(--t-base) var(--settle); }
+    .stage.zoomed { cursor:grab; }
+    .stage.zoomed img { border-radius:0; }
+    .stage.panning { cursor:grabbing; }
+    .arr { position:absolute; z-index:2; top:50%; transform:translateY(-50%); width:32px; height:32px; display:grid;
       place-items:center; border-radius:var(--r-pill); background:var(--wash-2); color:var(--muted);
       opacity:0; transition:opacity var(--t-base) var(--settle); }
     .stage:hover .arr, .arr:focus-visible { opacity:1; }
     .arr.l { left:14px; } .arr.r { right:14px; }
     .arr[disabled] { display:none; }
+    .zm { position:absolute; z-index:2; right:14px; bottom:12px; display:flex; align-items:center; gap:2px; padding:3px;
+      border-radius:var(--r-pill); background:var(--bg); border:1px solid var(--hair); color:var(--muted);
+      opacity:0; transition:opacity var(--t-base) var(--settle); cursor:default; }
+    .stage:hover .zm, .stage.zoomed .zm, .zm:focus-within { opacity:1; }
+    .zm button { height:24px; min-width:24px; display:grid; place-items:center; border-radius:var(--r-pill); padding:0 4px; }
+    .zm button:hover { background:var(--wash-2); color:var(--ink); }
+    .zm .pct { min-width:46px; font-family:var(--mono); font-size:10.5px; }
+
+    /* Full screen is the window's, not the page's; drop the window hairline. */
+    :root.fs body::after { display:none; }
 
     .strip { display:flex; align-items:center; justify-content:center; gap:6px; height:64px; padding:0 16px;
       border-top:1px solid var(--hair); flex:none; overflow-x:auto; }
@@ -142,6 +157,7 @@
       <button type="button" class="ab ic" id="vMore" aria-label="More actions" aria-haspopup="true"></button>
     </span>
     <span class="wc">
+      <button type="button" class="ab ic" id="vFull" aria-label="Full screen" title="Full screen (F)"></button>
       <button type="button" class="ab ic" id="vMin" aria-label="Minimise"></button>
       <button type="button" class="ab ic" id="vClose" aria-label="Close"></button>
     </span>
@@ -152,8 +168,13 @@
   <!-- image -->
   <div class="stage" id="vStage" hidden>
     <button type="button" class="arr l" id="vPrev" aria-label="Previous image"></button>
-    <img id="vImage" alt="" />
+    <img id="vImage" alt="" draggable="false" />
     <button type="button" class="arr r" id="vNext" aria-label="Next image"></button>
+    <span class="zm" id="vZoom">
+      <button type="button" id="vZoomOut" aria-label="Zoom out" title="Zoom out (−)"></button>
+      <button type="button" class="pct" id="vZoomPct" title="Fit / 100% (0)">Fit</button>
+      <button type="button" id="vZoomIn" aria-label="Zoom in" title="Zoom in (+)"></button>
+    </span>
   </div>
   <div class="strip" id="vStrip" hidden></div>
 

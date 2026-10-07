@@ -218,8 +218,10 @@ test("the pill draws Your AIs from that evidence, first on the You page, with th
   assert.match(main, /if \(testApps && !String\(host\.where \|\| ""\)\.startsWith\(testApps\)\) throw/);
 
   const settings = inbox.slice(inbox.indexOf("function renderSettings()"), inbox.indexOf("function wireSettings()"));
-  assert.match(settings, /if \(window\.relay\.setupSnapshot\) html \+= setupEntryHtml\(\);\s*html \+= yourLinkHtml\(\);/);
-  assert.match(inbox, /<div id="relaysIntro" hidden><div id="relaysRequestsSummary"><\/div><div id="setupNudge"><\/div><div id="relayAnyoneTip" hidden><\/div><\/div>/);
+  // Your AIs first; Slack, the other thing Relay connects to, sits right after it.
+  assert.match(settings, /if \(window\.relay\.setupSnapshot\) html \+= setupEntryHtml\(\);(?:\s*\/\/[^\n]*)*\s*html \+= slackSettingsHtml\(info\);\s*html \+= yourLinkHtml\(\);/);
+  // The inbox's one quiet word is the setup nudge; the Slack row is its sibling.
+  assert.match(inbox, /<div id="relaysIntro" hidden><div id="relaysRequestsSummary"><\/div><div id="setupNudge"><\/div><div id="slackNudge"><\/div><div id="relayAnyoneTip" hidden><\/div><\/div>/);
 
   // "Connected" only from a registered, valid entry; "working now" only from a live bridge.
   const status = inbox.slice(inbox.indexOf("function setupLocalStatus(host)"), inbox.indexOf("function setupDotHtml("));

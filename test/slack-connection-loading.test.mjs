@@ -1,3 +1,9 @@
+// Slack's connection lives in ONE row at the top of Inbox › Chats (David,
+// 2026-10-07): Connect → "Click Allow in your browser" → "Slack is connected".
+// There is no Slack tab or connection page any more. The laws the old tab
+// protected still hold for the row: an unresolved or failed status check is
+// not a disconnected account, a late older answer cannot replace a newer one,
+// and a connected account never falls back to a Connect action on a blip.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
@@ -17,150 +23,239 @@ const connected = {
   personal: { state: "connected" },
 };
 
-function slackSurface() {
+function slackRow({ prefs = new Map() } = {}) {
   const pending = [];
+  const connects = [];
   const paints = [];
   const handlers = new Map();
-  const hidden = new Set();
+  const timers = [];
+  const clock = { now: 1_000_000 };
+  const calls = { cancel: 0, relays: 0, settings: 0, navigations: 0 };
   let markup = "";
-  const list = {
+  let mainListener = null;
+  const slot = {
+    dataset: {},
     get innerHTML() { return markup; },
     set innerHTML(value) { markup = value; paints.push(value); handlers.clear(); },
-    querySelectorAll: () => [],
+    get firstElementChild() {
+      if (!markup) return null;
+      const state = (markup.match(/data-slack-nudge="(\w+)"/) || [])[1];
+      return { dataset: { slackNudge: state }, classList: { contains: () => false, add() {} } };
+    },
+    querySelector: (selector) => {
+      const id = selector.replace(/^#/, "");
+      return markup.includes(`id="${id}"`)
+        ? { addEventListener: (event, callback) => handlers.set(`${id}:${event}`, callback) }
+        : null;
+    },
   };
-  const empty = { classList: {
-    add: (name) => hidden.add(name),
-    toggle: (name, force) => force ? hidden.add(name) : hidden.delete(name),
-  } };
-  const document = {
-    getElementById: (id) => markup.includes(`id="${id}"`)
-      ? { addEventListener: (event, callback) => handlers.set(`${id}:${event}`, callback) }
-      : null,
-  };
+  const document = { getElementById: (id) => id === "slackNudge" ? slot : null };
   const window = { relay: {
     slackConnection: () => new Promise((resolve, reject) => pending.push({ resolve, reject })),
+    slackConnect: (input) => new Promise((resolve) => connects.push({ input, resolve })),
+    slackConnectCancel: () => { calls.cancel += 1; },
+    onSlackConnection: (callback) => { mainListener = callback; },
   } };
-  const runtime = new Function("window", "document", "slackListEl", "slackEmptyEl", `
-    const payload = { features: { slack: true }, account: { name: "Test" } };
-    let activeView = "slack";
+  const runtime = new Function("window", "document", "prefs", "timers", "clock", "calls", `
+    const Date = { now: () => clock.now };
+    const setTimeout = (callback, ms) => { timers.push({ callback, ms }); return timers.length; };
+    const payload = { features: { slack: true }, account: { userId: "user_a", name: "Test" } };
+    let activeView = "relays";
+    let relaysLayout = "chats";
     let surfaceRenderDeferred = false;
-    const scrollEl = null;
-    const slackListScrollTop = 0;
+    const REDUCED = true;
     const rendererSurfaceActive = () => true;
-    const requestAnimationFrame = (callback) => callback();
     const esc = (value) => String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;");
-    const cvInitials = () => "T";
-    const chatSections = () => ({ rooms: [{ name: "Test conversation" }] });
-    const relayIdentityRowHtml = (room) => '<button class="relay-arrival">' + room.name + '</button>';
-    ${between("let slackConnectionInfo = null;", "let slackDisconnectConfirm = false;")}
-    ${between("const SLACK_CONNECTION_POLL_MS", "async function connectSlackFromSurface()")}
-    ${between("function renderSlack()", "// ---- the split's rail")}
-    const connectSlackFromSurface = () => {};
-    const renderSettings = () => {};
+    const signupAccountKey = () => payload.account.userId;
+    const protoPref = (key, fallback) => prefs.has(key) ? prefs.get(key) : fallback;
+    const setProtoPref = (key, value) => prefs.set(key, value);
+    const commitNavigation = () => { calls.navigations += 1; };
+    const renderSettings = () => { calls.settings += 1; };
+    // The real renderRelays repaints the row through the intro, Chats only.
+    const renderRelays = () => { calls.relays += 1; renderSlackNudge(relaysLayout === "chats"); };
+    ${between("let slackConnectionInfo = null;", "const EXPANDED")}
+    ${between("const SLACK_CONNECTION_POLL_MS", "function resetSignOutArm()")}
+    ${between("function slackNudgeState()", "function renderSetupNudge()")}
     return {
-      render: renderSlack,
+      render: renderSlackNudge,
       refresh: refreshSlackConnection,
+      state: slackNudgeState,
       setView: (view) => { activeView = view; },
+      setLayout: (layout) => { relaysLayout = layout; },
+      view: () => activeView,
+      layout: () => relaysLayout,
+      waiting: () => slackConnectionWaiting,
     };
-  `)(window, document, list, empty);
+  `)(window, document, prefs, timers, clock, calls);
   return {
-    ...runtime, pending, paints,
+    ...runtime, pending, connects, paints, timers, clock, calls, prefs,
     markup: () => markup,
-    emptyHidden: () => hidden.has("gone"),
-    clickRetry: () => {
-      const retry = handlers.get("slackTabRetry:click");
-      assert.ok(retry, "status errors have a working retry action");
-      retry();
+    main: (info) => { assert.ok(mainListener, "the renderer listens for main's connection event"); mainListener(info); },
+    click: (id) => {
+      const handler = handlers.get(`${id}:click`);
+      assert.ok(handler, `#${id} has a working click action`);
+      handler({ stopPropagation() {} });
     },
   };
 }
 
 function assertNoConnect(markup) {
-  assert.doesNotMatch(markup, /slackTabConnect|Connect your Slack to Relay\./);
+  assert.doesNotMatch(markup, /Bring your Slack chats here|>Connect</);
 }
 
-test("a delayed first connection check never paints the disconnected page", async () => {
-  const surface = slackSurface();
-  surface.render();
-  const checking = surface.refresh();
-  for (let frame = 0; frame < 3; frame += 1) surface.render();
-  assert.match(surface.markup(), /data-slack-connect-state="loading"/);
-  assert.equal(surface.emptyHidden(), true, "unknown status is not an empty conversation list");
-  surface.paints.forEach(assertNoConnect);
+test("a delayed first connection check never paints the Connect row", async () => {
+  const row = slackRow();
+  row.render();
+  const checking = row.refresh();
+  for (let frame = 0; frame < 3; frame += 1) row.render();
+  assert.equal(row.markup(), "", "unknown status is not a disconnected account");
+  row.paints.forEach(assertNoConnect);
 
-  surface.pending[0].resolve({ ok: true, connection: connected });
+  row.pending[0].resolve({ ok: true, connection: connected });
   await checking;
-  assert.match(surface.markup(), /Test conversation/);
-  surface.paints.forEach(assertNoConnect);
+  assert.equal(row.markup(), "", "an account that is already connected needs no row");
+  row.paints.forEach(assertNoConnect);
 });
 
 test("only a successful disconnected or paused response shows the connect action", async () => {
   for (const state of ["disconnected", "paused"]) {
-    const surface = slackSurface();
-    surface.render();
-    assertNoConnect(surface.markup());
-    const checking = surface.refresh();
-    surface.pending[0].resolve({ ok: true, connection: { state } });
+    const row = slackRow();
+    row.render();
+    assertNoConnect(row.markup());
+    const checking = row.refresh();
+    row.pending[0].resolve({ ok: true, connection: { state } });
     await checking;
-    assert.match(surface.markup(), /data-slack-connect-state="disconnected"/);
-    assert.match(surface.markup(), state === "paused" ? /Reconnect Slack/ : /Connect Slack/);
+    assert.match(row.markup(), new RegExp(`data-slack-nudge="${state === "paused" ? "paused" : "connect"}"`));
+    if (state === "paused") {
+      assert.match(row.markup(), /Reconnect your Slack/);
+      assert.match(row.markup(), /class="rat-see">Reconnect</);
+      assert.doesNotMatch(row.markup(), /slackNudgeHide/, "a paused connection cannot be waved away");
+    } else {
+      assert.match(row.markup(), /Bring your Slack chats here/);
+      assert.match(row.markup(), /class="rat-see">Connect</);
+      assert.match(row.markup(), /id="slackNudgeHide" aria-label="Not now"/);
+    }
   }
 });
 
-test("failed initial checks stay unresolved and recover through retry", async () => {
+test("failed initial checks stay unresolved and recover on the next check", async () => {
   for (const failure of ["response", "exception", "missing connection"]) {
-    const surface = slackSurface();
-    surface.render();
-    const checking = surface.refresh();
-    if (failure === "exception") surface.pending[0].reject(new Error("Network unavailable"));
-    else surface.pending[0].resolve(failure === "response"
+    const row = slackRow();
+    row.render();
+    const checking = row.refresh();
+    if (failure === "exception") row.pending[0].reject(new Error("Network unavailable"));
+    else row.pending[0].resolve(failure === "response"
       ? { ok: false, error: "Network <unavailable>" }
       : { ok: true });
     await checking;
-    assert.match(surface.markup(), /data-slack-connect-state="error"/);
-    assertNoConnect(surface.markup());
-    if (failure === "response") assert.match(surface.markup(), /Network &lt;unavailable>/);
+    assert.equal(row.state(), "", "a failed first check paints nothing rather than guessing");
+    assert.equal(row.markup(), "");
 
-    surface.clickRetry();
-    assert.match(surface.markup(), /data-slack-connect-state="loading"/);
-    surface.pending[1].resolve({ ok: true, connection: connected });
-    await Promise.resolve();
-    assert.match(surface.markup(), /Test conversation/);
-    surface.paints.forEach(assertNoConnect);
+    const retry = row.refresh();
+    row.pending[1].resolve({ ok: true, connection: { state: "disconnected" } });
+    await retry;
+    assert.match(row.markup(), /data-slack-nudge="connect"/, "the next successful check resolves the row");
   }
 });
 
-test("tab re-entry and refresh failures preserve a known connected conversation list", async () => {
-  const surface = slackSurface();
-  const initial = surface.refresh();
-  surface.pending[0].resolve({ ok: true, connection: connected });
+test("refresh failures never take a connected account back to Connect", async () => {
+  const row = slackRow();
+  const initial = row.refresh();
+  row.pending[0].resolve({ ok: true, connection: connected });
   await initial;
-  const connectedMarkup = surface.markup();
-  surface.setView("relays");
-  surface.setView("slack");
-  surface.render();
-  const refreshing = surface.refresh();
-  assert.equal(surface.markup(), connectedMarkup);
-  surface.pending[1].resolve({ ok: false, error: "Temporary outage" });
+  assert.equal(row.markup(), "");
+  row.setView("settings");
+  row.setView("relays");
+  row.render();
+  const refreshing = row.refresh();
+  row.pending[1].resolve({ ok: false, error: "Temporary outage" });
   await refreshing;
-  assert.equal(surface.markup(), connectedMarkup);
-  surface.paints.forEach(assertNoConnect);
+  assert.equal(row.markup(), "");
+  row.paints.forEach(assertNoConnect);
 
-  const disconnected = surface.refresh();
-  surface.pending[2].resolve({ ok: true, connection: { state: "disconnected" } });
+  const disconnected = row.refresh();
+  row.pending[2].resolve({ ok: true, connection: { state: "disconnected" } });
   await disconnected;
-  assert.match(surface.markup(), /slackTabConnect/, "a confirmed disconnect still updates the tab");
+  assert.match(row.markup(), /Bring your Slack chats here/, "a confirmed disconnect still updates the row");
 });
 
 test("a late older disconnected response cannot replace a newer connected result", async () => {
-  const surface = slackSurface();
-  surface.render();
-  const older = surface.refresh();
-  const newer = surface.refresh();
-  surface.pending[1].resolve({ ok: true, connection: connected });
+  const row = slackRow();
+  row.render();
+  const older = row.refresh();
+  const newer = row.refresh();
+  row.pending[1].resolve({ ok: true, connection: connected });
   await newer;
-  surface.pending[0].resolve({ ok: true, connection: { state: "disconnected" } });
+  row.pending[0].resolve({ ok: true, connection: { state: "disconnected" } });
   await older;
-  assert.match(surface.markup(), /Test conversation/);
-  surface.paints.forEach(assertNoConnect);
+  assert.equal(row.markup(), "");
+  row.paints.forEach(assertNoConnect);
+});
+
+test("the row walks Connect → Click Allow → Slack is connected, then bows out", async () => {
+  const row = slackRow();
+  const initial = row.refresh();
+  row.pending[0].resolve({ ok: true, connection: { state: "disconnected" } });
+  await initial;
+  row.click("slackNudgeGo");
+  assert.match(row.markup(), /data-slack-nudge="opening"/);
+  assert.match(row.markup(), /Click Allow in your browser/);
+  assert.match(row.markup(), /id="slackNudgeGo" disabled/, "a second click cannot open a second browser tab");
+  assert.deepEqual(row.connects[0].input, { mode: "combined" });
+  row.connects[0].resolve({ ok: true, waiting: true });
+  await Promise.resolve(); await Promise.resolve();
+  assert.match(row.markup(), /data-slack-nudge="waiting"/);
+  assert.match(row.markup(), /Click Allow in your browser/);
+  assert.match(row.markup(), /class="rat-see">Open again</);
+  assert.match(row.markup(), /id="slackNudgeHide" aria-label="Cancel"/);
+
+  // "Open again" re-opens Slack's page instead of being swallowed by the pending flag.
+  row.click("slackNudgeGo");
+  assert.equal(row.connects.length, 2);
+  row.connects[1].resolve({ ok: true, waiting: true });
+  await Promise.resolve(); await Promise.resolve();
+
+  // Main watched the connection and says yes before the renderer's own check.
+  row.setLayout("received");
+  row.main({ connection: connected, connected: true });
+  assert.equal(row.layout(), "chats", "the person is taken to Chats to see their Slack arrive");
+  assert.equal(row.prefs.get("relayRelaysLayout:user_a"), "chats");
+  assert.match(row.markup(), /data-slack-nudge="connected"/);
+  assert.match(row.markup(), /Slack is connected/);
+  assert.match(row.markup(), /slack-nudge-check/);
+  assertNoConnect(row.markup());
+  assert.equal(row.waiting(), false);
+
+  const bowOut = row.timers.find((timer) => timer.ms > 7000);
+  assert.ok(bowOut, "the connected row schedules its own exit");
+  row.clock.now += 7100;
+  bowOut.callback();
+  assert.equal(row.markup(), "", "the connected row leaves on its own");
+});
+
+test("Not now hides the Connect row for this account; Cancel stops main's watch", async () => {
+  const prefs = new Map();
+  const row = slackRow({ prefs });
+  const initial = row.refresh();
+  row.pending[0].resolve({ ok: true, connection: { state: "disconnected" } });
+  await initial;
+  row.click("slackNudgeHide");
+  assert.equal(row.markup(), "");
+  assert.equal(prefs.get("slackNudgeHidden:user_a"), "1");
+  assert.equal(row.calls.cancel, 1);
+
+  const again = slackRow({ prefs });
+  const check = again.refresh();
+  again.pending[0].resolve({ ok: true, connection: { state: "disconnected" } });
+  await check;
+  assert.equal(again.markup(), "", "the choice is remembered per account");
+});
+
+test("the row lives in Inbox › Chats only, and an open Inbox checks Slack once", () => {
+  assert.match(html, /<div id="setupNudge"><\/div><div id="slackNudge"><\/div>/);
+  assert.match(html, /renderSlackNudge\(visible && relaysLayout === "chats"\);/);
+  assert.match(html, /if \(activeView === "relays" && payload\.features\?\.slack === true && viewChanged && !slackConnectionLoaded\) \{\s*refreshSlackConnection\(\{ preserveWaiting:true \}\);/);
+  // A room repaints too: its "Not sent to Slack" note follows the connection.
+  assert.match(html, /if \(activeView !== "settings" && activeView !== "relays" && activeView !== "threads"\) return false;/);
+  assert.doesNotMatch(html, /id="slackTabConnect"|Connect your Slack to Relay\./);
 });

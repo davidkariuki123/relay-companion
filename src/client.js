@@ -146,6 +146,16 @@ function requestCanRetry(method, body) {
   );
 }
 
+/** Who a read is for: the pill by default, or an agent session with its identity. */
+function provenanceOptions(provenance = {}) {
+  return {
+    clientName: provenance.clientName || "relay-companion",
+    sourceProvider: provenance.sourceProvider,
+    nativeSessionId: provenance.nativeSessionId,
+    agent: provenance.agent || null,
+  };
+}
+
 // Per-process transport health. The daemon publishes lastSuccessAt in its
 // recovery heartbeat; the pill compares its own failing streak against it to
 // tell "my transport is wedged" from "Relay is down" (src/pill-liveness.cjs).
@@ -265,6 +275,7 @@ export class RelayClient {
     clientName = "relay-companion",
     sourceProvider = "",
     nativeSessionId = "",
+    agent = null,
     signal,
     timeoutMs = 15000,
     retry = true,
@@ -279,6 +290,12 @@ export class RelayClient {
     const nativeSession = String(nativeSessionId || "").replace(/[^\x20-\x7e]/g, "_").trim().slice(0, 240);
     if (provider) headers["x-relay-source-provider"] = provider;
     if (nativeSession) headers["x-relay-native-session-id"] = nativeSession;
+    // The agent behind an MCP call (see agent-identity.js): which app it runs
+    // in, which model, which MCP host. The API keeps it with agent reads.
+    for (const [key, header, max] of [["app", "x-relay-agent-app", 40], ["model", "x-relay-agent-model", 80], ["host", "x-relay-agent-host", 120], ["harness", "x-relay-agent-harness", 40]]) {
+      const value = String(agent?.[key] || "").replace(/[^\x20-\x7e]/g, "_").trim().slice(0, max);
+      if (value) headers[header] = value;
+    }
     headers["x-relay-send-contract"] = "2";
     if (context) headers["x-relay-request-id"] = context.requestId;
     if (auth && this.token) headers.Authorization = `Bearer ${this.token}`;
@@ -374,6 +391,15 @@ export class RelayClient {
 
   cancelAgentSetupRun(id) {
     return this.#req("DELETE", `/v1/agent/setup-runs/${encodeURIComponent(id)}`);
+  }
+
+  /**
+   * A one-time link that carries this signed-in app's account into the
+   * browser, then on to the AI's add-connector screen: Relay's consent page
+   * then needs no website sign-in, and connects this exact account.
+   */
+  mcpBrowserHandoff(provider) {
+    return this.#req("POST", "/v1/mcp/browser-handoff", { provider });
   }
 
   /** The AIs connected to this account from a browser or a hosted connector. */
@@ -777,11 +803,7 @@ export class RelayClient {
   }
 
   fetchRelay(id, provenance = {}) {
-    return this.#req("GET", `/v1/relays/${encodeURIComponent(id)}`, undefined, {
-      clientName: provenance.clientName || "relay-companion",
-      sourceProvider: provenance.sourceProvider,
-      nativeSessionId: provenance.nativeSessionId,
-    });
+    return this.#req("GET", `/v1/relays/${encodeURIComponent(id)}`, undefined, provenanceOptions(provenance));
   }
 
   /**
@@ -793,10 +815,19 @@ export class RelayClient {
   async fetchRelayPackets(ids, provenance = {}) {
     const wanted = ids || [];
     if (!wanted.length) return { packets: {} };
-    return this.#req("POST", "/v1/relays/packets", { ids: wanted }, {
-      clientName: provenance.clientName || "relay-companion",
-      sourceProvider: provenance.sourceProvider,
-      nativeSessionId: provenance.nativeSessionId,
+    return this.#req("POST", "/v1/relays/packets", { ids: wanted }, provenanceOptions(provenance));
+  }
+
+  /**
+   * Tell the API which Relays were put in front of an agent session: the
+   * session check-in, or the pill handing a Relay to a chat. Changes no read
+   * state. Best effort: one quick try, the caller ignores failure.
+   */
+  reportAgentPresented(body, provenance = {}) {
+    return this.#req("POST", "/v1/relays/agent-presented", body, {
+      ...provenanceOptions(provenance),
+      timeoutMs: 5000,
+      retry: false,
     });
   }
 
@@ -958,8 +989,8 @@ export class RelayClient {
     return this.#req("POST", "/v1/tools/call", payload);
   }
 
-  thread(threadId) {
-    return this.#req("GET", `/v1/threads/${encodeURIComponent(threadId)}`);
+  thread(threadId, provenance = {}) {
+    return this.#req("GET", `/v1/threads/${encodeURIComponent(threadId)}`, undefined, provenanceOptions(provenance));
   }
 
   // Chats: every thread between the same set of people, merged into one
@@ -974,7 +1005,7 @@ export class RelayClient {
     return this.#req("GET", relayListPath);
   }
 
-  async chat(chatId, options = {}) {
+  async chat(chatId, options = {}, provenance = {}) {
     const surface = options && options.surface === "slack" ? "slack" : "relay";
     const includeSlack = options && options.includeSlack === true;
     const managedBase = `/v1/chats/${encodeURIComponent(chatId)}`;
@@ -982,10 +1013,11 @@ export class RelayClient {
     for (const key of ["limit", "beforeCursor", "afterCursor"]) if (options[key] !== undefined) page.set(key, String(options[key]));
     const suffix = page.size ? `&${page}` : "";
     const relayPath = `${managedBase}?surface=relay${suffix}`;
+    const via = provenanceOptions(provenance);
     // Native surfaces address the managed canonical room directly.
-    if (surface === "slack") return this.#req("GET", `${managedBase}?surface=slack&includeSlack=true${suffix}`);
-    if (includeSlack) return this.#req("GET", `${managedBase}?surface=relay&includeSlack=true${suffix}`);
-    return this.#req("GET", relayPath);
+    if (surface === "slack") return this.#req("GET", `${managedBase}?surface=slack&includeSlack=true${suffix}`, undefined, via);
+    if (includeSlack) return this.#req("GET", `${managedBase}?surface=relay&includeSlack=true${suffix}`, undefined, via);
+    return this.#req("GET", relayPath, undefined, via);
   }
 
   sendChatMessage(chatId, input) {
@@ -1006,6 +1038,11 @@ export class RelayClient {
 
   disconnectSlack() {
     return this.#req("POST", "/v1/integrations/slack/disconnect-user", {});
+  }
+
+  /** Invite one Slack teammate (their DM) or, with no id, the whole channel. */
+  inviteSlackTeammates(chatId, slackUserId) {
+    return this.#req("POST", `/v1/chats/${encodeURIComponent(chatId)}/slack-invite`, slackUserId ? { slackUserId } : {});
   }
 
   openMentionVisit(chatId, visitId) {
@@ -1034,10 +1071,10 @@ export class RelayClient {
   }
 
   /** The chat around an open message, in one round trip. */
-  chatForThread(threadId, options = {}) {
+  chatForThread(threadId, options = {}, provenance = {}) {
     const page = new URLSearchParams();
     for (const key of ["limit", "beforeCursor", "afterCursor"]) if (options[key] !== undefined) page.set(key, String(options[key]));
-    return this.#req("GET", `/v1/chats/by-thread/${encodeURIComponent(threadId)}${page.size ? `?${page}` : ""}`);
+    return this.#req("GET", `/v1/chats/by-thread/${encodeURIComponent(threadId)}${page.size ? `?${page}` : ""}`, undefined, provenanceOptions(provenance));
   }
 
   /**

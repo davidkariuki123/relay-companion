@@ -412,15 +412,42 @@ test("the image viewer is one window per chat and retargets, a file gets its own
   assert.match(open, /safe\.items\.filter\(\(item\) => item\.image\)/, "the filmstrip is images only");
 });
 
-test("the viewer's keys are ←/→, Esc, ⌘S and double-click to toggle fit", () => {
+test("the viewer's keys are ←/→, Esc, ⌘S, F, +/−/0 and double-click to toggle fit", () => {
   assert.match(viewerRenderer, /event\.key === "ArrowLeft"/);
   assert.match(viewerRenderer, /event\.key === "ArrowRight"/);
-  assert.match(viewerRenderer, /if \(event\.key === "Escape"\) \{ bridge\.close\(\)/);
+  assert.match(viewerRenderer, /if \(event\.key === "Escape"\) \{ if \(fullScreen\) bridge\.leaveFullScreen\(\); else bridge\.close\(\)/,
+    "Esc leaves full screen before it closes the window");
   assert.match(viewerRenderer, /event\.key\.toLowerCase\(\) === "s"[\s\S]*download\(\)/);
-  assert.match(viewerRenderer, /el\.stage\.addEventListener\("dblclick"/);
-  assert.match(viewerRenderer, /el\.stage\.classList\.toggle\("actual", actual\)/);
+  assert.match(viewerRenderer, /event\.key === "F11" \|\| \(event\.key\.toLowerCase\(\) === "f"[\s\S]{0,120}bridge\.toggleFullScreen\(\)/);
+  assert.match(viewerRenderer, /el\.stage\.addEventListener\("dblclick"[\s\S]{0,120}toggleActualSize\(event\.clientX, event\.clientY\)/);
+  assert.match(viewerRenderer, /event\.key === "0"\) \{ event\.preventDefault\(\); resetZoom\(\); \}/);
   // Names arrive with the attachment: they are printed, never parsed as markup.
   assert.doesNotMatch(viewerRenderer, /\.innerHTML\s*=/);
+});
+
+test("full screen belongs to the window, asked for over the viewer bridge", () => {
+  const create = between(main, "function createAttachmentViewerWindow(key)", "function sendAttachmentViewerPayload(entry)");
+  assert.match(create, /fullscreenable: true/);
+  assert.match(create, /viewerWin\.on\("enter-full-screen", \(\) => reportFullScreen\(true\)\)/);
+  assert.match(create, /viewerWin\.on\("leave-full-screen", \(\) => reportFullScreen\(false\)\)/);
+  const control = between(main, 'ipcMain.on("relay:viewer:window"', 'ipcMain.on("relay:ack"');
+  assert.match(control, /const entry = viewerEntryForEvent\(event\)/, "only a live viewer can ask");
+  assert.match(control, /action === "fullscreen"\) entry\.win\.setFullScreen\(!entry\.win\.isFullScreen\(\)\)/);
+  assert.match(control, /action === "leave-fullscreen" && entry\.win\.isFullScreen\(\)\) entry\.win\.setFullScreen\(false\)/);
+  assert.match(viewerPreload, /toggleFullScreen: \(\) => ipcRenderer\.send\("relay:viewer:window", "fullscreen"\)/);
+  assert.match(viewerPreload, /onFullScreen: \(cb\) => ipcRenderer\.on\("relay:viewer:fullscreen", \(_e, on\) => cb\(on === true\)\)/);
+  assert.match(viewerHtml, /<button type="button" class="ab ic" id="vFull" aria-label="Full screen"/);
+});
+
+test("the image zooms about the pointer, pans by drag and stays over the stage", () => {
+  assert.match(viewerHtml, /\.stage \{[^}]*overflow:hidden;/, "zoom is a transform, never a scrollbar");
+  assert.match(viewerHtml, /<span class="zm" id="vZoom">/);
+  assert.match(viewerRenderer, /el\.stage\.addEventListener\("wheel", [\s\S]{0,700}\{ passive: false \}\)/);
+  assert.match(viewerRenderer, /zoom\.x = px - \(px - zoom\.x\) \* ratio;/, "the point under the pointer stays put");
+  assert.match(viewerRenderer, /el\.stage\.setPointerCapture\(event\.pointerId\)/);
+  assert.match(viewerRenderer, /zoom\.x = Math\.max\(-slackX, Math\.min\(slackX, zoom\.x\)\)/);
+  // Every other picture opens fitted.
+  assert.match(between(viewerRenderer, "function goTo(index)", "// ---- the file stages"), /resetZoom\(false\)/);
 });
 
 test("selection takes the header over and stands the composer down", () => {

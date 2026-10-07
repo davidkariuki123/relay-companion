@@ -30,6 +30,13 @@ function createCompanionWindow(BrowserWindow, options = {}, { platform = process
 
   const window = new BrowserWindow(nativeOptions);
   if (platform === "win32") window.setSkipTaskbar(true);
+  // Test seam: an end-to-end harness that drives this app over the debugging
+  // port must never cover the person's own Relay. The page still renders and
+  // can be captured; the window is invisible and lets every click through.
+  if (process.env.RELAY_OVERLAY_TEST_INVISIBLE === "1") {
+    window.setOpacity(0);
+    window.setIgnoreMouseEvents(true);
+  }
   return window;
 }
 

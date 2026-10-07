@@ -7,6 +7,10 @@ import { LOCAL_MAX_BYTES, LOCAL_TOOL_TIMEOUT_MS, localDescriptorPath, localEndpo
 import outboxModule from "./outbox.cjs";
 import { relayReferencePrompt } from "./session-delivery.js";
 
+// Reads through this helper are an agent's, so the API records them as
+// agent_opened rather than the person reading in the pill.
+const AGENT_READ = Object.freeze({ clientName: "relay-agent-protocol" });
+
 // The daemon owns the credential, client and durable outgoing queue.
 // MCP and command clients share RelayClient operations, not transport framing.
 export function createAgentDispatcher({ client, outboxFile, listDestinations, deliver, accountId }) {
@@ -58,11 +62,11 @@ export function createAgentDispatcher({ client, outboxFile, listDestinations, de
       if (url.pathname === "/v1/chats") return client.chats();
       if (parts[2] === "chats") {
         const page = Object.fromEntries(["limit", "beforeCursor", "afterCursor"].filter((key) => url.searchParams.has(key)).map((key) => [key, url.searchParams.get(key)]));
-        return client.chat(parts[3], page);
+        return client.chat(parts[3], page, AGENT_READ);
       }
-      if (parts[2] === "threads") return client.thread(parts[3]);
+      if (parts[2] === "threads") return client.thread(parts[3], AGENT_READ);
       if (parts[2] === "relays" && parts[4] === "attachments") return client.attachmentDownloadUrl(parts[3], parts[5]);
-      if (parts[2] === "relays") return client.fetchRelay(parts[3]);
+      if (parts[2] === "relays") return client.fetchRelay(parts[3], AGENT_READ);
       if (parts[2] === "share-links") return client.shareLinkStatus(parts[3]);
     }
     // A Relay for someone who is not on Relay, minted once by idempotency key

@@ -228,13 +228,17 @@ test("direct and group conversations share one newest-first chronology", () => {
   const chat = html.slice(html.indexOf("function renderChat()"), html.indexOf("function renderChatRail()"));
   assert.doesNotMatch(chat, /tb-group/);
   const rail = html.slice(html.indexOf("function renderChatRail()"), html.indexOf("function renderThreads()"));
-  assert.match(rail, /const surface = conversationSurface\(\)/);
   assert.match(rail, /const \{ rooms \} = chatSections\(\)/);
+  // One list of chats (David, 2026-10-07): Slack-linked rooms sit in the same
+  // rail, so there is no Slack rail without People and no surface switch.
   const sections = html.slice(html.indexOf("function chatSections()"), html.indexOf("function chatRoomForThread("));
-  assert.match(sections, /activeView === "threads" \? conversationSurface\(\) : "relay"/,
-    "the shared rail derives Relay versus Slack from its current conversation surface");
-  assert.match(rail, /const peopleFooter = surface === "slack" \? ""/,
-    "the Relay people affordance remains while the Slack rail stays link-only");
+  assert.doesNotMatch(sections, /conversationSurface\(\)|surface === "slack"/);
+  assert.match(rail, /const peopleFooter = `<button class="people-row" type="button" data-rail-people>/,
+    "the rail always ends in People");
+  assert.doesNotMatch(rail, /surface === "slack"/);
+  // A rail tap opens from the list this room came from; openThreadDetail picks
+  // the Slack projection per room, so a Relay-only room never inherits it.
+  assert.match(rail, /threadsSource === "slack" \? threadsReturnSource : threadsSource,\s*\)\);/);
   assert.match(rail, /rooms\.map\(row\)\.join\(""\)/);
   assert.doesNotMatch(rail, /rl-h|>Groups<|>People</);
 });
@@ -267,8 +271,8 @@ test("the Relays tab is one latest-message row per exact identity", () => {
   };
   const quiet = { name: "New group", hasActivity: false, latest: { at: "2026-08-13T14:00:00Z" } };
   // Nobody here is a stranger: every room is known, so no request is hidden.
-  const relayIdentityRows = Function("chatSections", "knownAddresses", "isRequestRoom", `"use strict"; ${identitySource}; return relayIdentityRows;`)(
-    () => ({ rooms: [shane, granular, quiet] }), () => new Set(), () => false,
+  const relayIdentityRows = Function("chatSections", "knownAddresses", "isRequestRoom", "slackChannelRoomListed", `"use strict"; ${identitySource}; return relayIdentityRows;`)(
+    () => ({ rooms: [shane, granular, quiet] }), () => new Set(), () => false, () => false,
   );
   const rows = relayIdentityRows();
   assert.deepEqual(rows, [shane, granular]);
@@ -279,7 +283,8 @@ test("the Relays tab is one latest-message row per exact identity", () => {
   assert.match(render, /const allRows = threadMessages\(\)[\s\S]*?\.sort\(\(a, b\) => new Date\(b\.at/);
   assert.match(identitySource, /const \{ rooms \} = chatSections\(\)/);
   // A stranger's first message is a request and waits in People (2026-09-08).
-  assert.match(identitySource, /filter\(\(room\) => room\.hasActivity !== false && !isRequestRoom\(room, known\)\)/);
+  // Slack channels you are in are listed before anyone writes in them.
+  assert.match(identitySource, /filter\(\(room\) => \(room\.hasActivity !== false \|\| slackChannelRoomListed\(room\)\) && !isRequestRoom\(room, known\)\)/);
   assert.match(identitySource, /latestAt: room\.latestAt \|\| \(room\.latest && room\.latest\.at\)/);
   assert.doesNotMatch(identitySource, /message\.party|message\.partyKey|new Map/,
     "Relays must not rebuild room identity from agent-authored messages");
@@ -340,8 +345,9 @@ test("opening a person or group room deterministically keeps its rail visible", 
   // only Chat-sourced opens earn the split. The invariant this test guards is
   // unchanged: chatExpanded is derived deterministically from source/options,
   // never a bare reset that races openRoom, so a room entered from Chat
-  // always keeps its rail.
-  assert.match(open, /chatExpanded = options\.expanded === undefined \? source === "chat" : Boolean\(options\.expanded\)/);
+  // always keeps its rail. A Slack-linked room reads its Slack projection,
+  // so the split follows the list it was opened from.
+  assert.match(open, /chatExpanded = options\.expanded === undefined \? returnSource === "chat" : Boolean\(options\.expanded\)/);
   assert.doesNotMatch(open, /chatExpanded = false/);
   const noDetail = html.slice(html.indexOf("function renderThreads()"), html.indexOf("function renderThreadDetail"));
   assert.match(noDetail, /activeView = "chat"/);
@@ -733,12 +739,12 @@ test("specific replies use an attached composer preview and render a source refe
   assert.match(html, /margin:0 42px 7px 0/);
 });
 
-test("a bubble wears no 'Sent with' line: From Slack is the only provenance byline, and it RENDERS", () => {
+test("a bubble wears no provenance line at all: no 'Sent with', no 'From Slack'", () => {
   // The "Sent with Codex / Claude Code" line went on 2026-09-17 (David): its
   // height became the bar's marks, and which agent wrote a letter is the
-  // letter's business. Slack provenance stays, because it changes what the
-  // message is. Executed, not pattern-matched: the byline once shipped green
-  // on source-text assertions and never rendered.
+  // letter's business. The "From Slack" band went on 2026-10-07 (David):
+  // where a text was typed does not matter; a chat that is also in Slack says
+  // so once, beside its name. Executed, not pattern-matched.
   assert.doesNotMatch(html, /PROVIDER_BYLINE|Sent with \$\{esc\(provider\.label\)\}/);
   const start = html.indexOf("const providerBylineHtml = ");
   assert.notEqual(start, -1, "the byline moved — this test extracts it by name");
@@ -749,10 +755,9 @@ test("a bubble wears no 'Sent with' line: From Slack is the only provenance byli
     assert.equal(providerBylineHtml({ source: { host: "relay-mcp", surface } }), "", `no byline for ${surface}`);
   }
   assert.equal(providerBylineHtml({}), "");
-  assert.match(providerBylineHtml({ origin: "slack" }), /slackMark\.png[^>]*>From Slack</);
-  assert.match(providerBylineHtml({ provider: { name: "slack" } }), /From Slack</);
-  assert.equal(providerBylineHtml({ origin: "slack", deletedAt: "2026-09-17T00:00:00Z" }), "", "a withdrawn message keeps no footer");
-  assert.match(html, /\.th-provider-byline \{[^}]*border-top:1px solid var\(--hair\)/s);
+  assert.equal(providerBylineHtml({ origin: "slack" }), "", "a message typed in Slack wears no label");
+  assert.equal(providerBylineHtml({ provider: { name: "slack" } }), "");
+  assert.doesNotMatch(html, />From Slack</);
 });
 
 test("the provenance byline is not confined to rows without an agent document", () => {

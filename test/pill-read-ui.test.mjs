@@ -181,20 +181,39 @@ test("Slack Settings is one truthful card with the official mark and no optimist
   assert.match(html, /class="open-actions sv-actions" data-stop="1" aria-label="Account actions"/,
     "permanent account actions stay ordinary page controls instead of trapping Settings in a modal menu role");
   assert.doesNotMatch(html, /class="open-actions sv-actions" data-stop="1" role="menu"/);
-  assert.match(slackSettings, /New Slack messages sync with Relay, and Relays send from your Slack account\. Earlier Slack history is not imported\./);
+  // Simple copy, said only while there is something to connect.
+  assert.match(slackSettings, /\$\{personalConnected \? "" : '<div class="sv-slack-foot">Your channels become groups in Chats\. Messages sync both ways\.<\/div>'\}/);
+  assert.match(slackSettings, /\? \(teamName \? `Connected to \$\{teamName\}` : "Connected"\)/);
+  assert.match(slackSettings, /\? "Click Allow in your browser"/);
+  assert.match(slackSettings, /Your Slack chats stop syncing\. Messages already here stay\./);
   assert.doesNotMatch(slackSettings, /Relay for \$\{esc\(teamName\)\}|<span class="sv-slack-name">Your Slack<\/span>/,
-    "Settings keeps its compact one-card ontology even though the Slack tab teaches both grants");
+    "Settings keeps its compact one-card ontology");
   assert.match(slackSettings, /id="svSlackConnect"/);
   assert.match(slackSettings, /id="svSlackDisconnectConfirm"/);
   assert.doesNotMatch(slackSettings, /data-slack-toggle|Mirror my DMs/);
   assert.match(preload, /slackConnection: \(\) => ipcRenderer\.invoke\("relay:slackConnection"\)/);
+  assert.match(preload, /slackConnectCancel: \(\) => ipcRenderer\.invoke\("relay:slackConnectCancel"\)/);
+  assert.match(preload, /onSlackConnection: \(callback\) => \{[\s\S]*?ipcRenderer\.on\("slackConnection", listener\);[\s\S]*?return \(\) => ipcRenderer\.removeListener\("slackConnection", listener\);/);
 });
 
 test("Slack Settings follows browser-owned OAuth to its real server state", () => {
-  assert.match(html, /const SLACK_CONNECTION_POLL_MS = 2000/,
+  assert.match(html, /const SLACK_CONNECTION_POLL_MS = 1500/,
     "a visible Slack connection surface polls the lightweight status endpoint");
-  assert.match(html, /\(activeView === "settings" \|\| activeView === "slack"\) && rendererSurfaceActive\(\)[\s\S]*refreshSlackConnection\(\{ preserveWaiting:true \}\)/,
-    "polling runs only while Settings or Slack is on an active renderer surface");
+  assert.match(html, /\(activeView === "settings" \|\| \(\(activeView === "relays" \|\| activeView === "threads"\) && slackConnectionWaiting\)\) && rendererSurfaceActive\(\)[\s\S]*refreshSlackConnection\(\{ preserveWaiting:true \}\)/,
+    "polling runs only while Settings is open, or Inbox while an approval is pending, on an active renderer surface");
+  // The approval returns to the app, and main watches the connection itself so
+  // the person never has to come back and check.
+  const connect = main.slice(main.indexOf('ipcMain.handle("relay:slackConnect"'), main.indexOf('ipcMain.handle("relay:slackDisconnect"'));
+  assert.match(connect, /reconnectSlack\(\{ returnSurface: "app" \}\)/);
+  assert.match(connect, /returnSurface: "app",/);
+  assert.doesNotMatch(connect, /returnSurface: "settings"/);
+  assert.match(connect, /await shell\.openExternal\(result\.authorizationUrl\);\s*watchSlackConnect\(\);/);
+  assert.match(connect, /ipcMain\.handle\("relay:slackConnectCancel", \(\) => \{ stopSlackConnectWatch\(\); return \{ ok: true \}; \}\);/);
+  const watch = main.slice(main.indexOf("function watchSlackConnect()"), main.indexOf('ipcMain.handle("relay:slackConnect"'));
+  assert.match(watch, /if \(slackConnectionIsReady\(connection\)\) \{\s*stopSlackConnectWatch\(\);/,
+    "main stops watching only on the complete team and personal grant");
+  assert.match(watch, /win\.webContents\.send\("slackConnection", \{ connection, connected: true \}\)/);
+  assert.match(watch, /Date\.now\(\) - watch\.startedAt > SLACK_WATCH_LIMIT_MS/, "the watch is bounded");
   assert.match(html, /slackConnectionReady\(result\.connection\)[\s\S]*slackConnectionWaiting = false/,
     "the pending affordance clears only when the server reports the complete team and personal grant");
   assert.match(html, /slackConnectionWaitingSince = result\?\.ok === true \? Date\.now\(\) : 0/,
@@ -203,12 +222,19 @@ test("Slack Settings follows browser-owned OAuth to its real server state", () =
     "an ordinary status read must not silently cancel a still-pending OAuth flow");
 });
 
-test("From Slack is message provenance, not a blanket channel label", () => {
+test("a chat that is also in Slack says so once beside its name; messages carry no From Slack band", () => {
+  // Where a text was typed does not matter (David, 2026-10-07). The message
+  // model still knows its origin, but no bubble wears it.
   assert.match(html, /provider: item\.provider \|\| \(item\.origin === "slack" \? \{ name:"slack" \} : null\)/);
-  assert.match(html, /message\?\.origin === "slack" \|\| message\?\.provider\?\.name === "slack"/);
-  assert.match(html, /<img src="slackMark\.png" alt="" \/>From Slack/);
-  assert.match(html, /const showProviderByline = !continuesIntoNext \|\| providerKey\(nextMessage\) !== providerKey\(m\)/,
-    "a Slack provenance shelf closes a sender run instead of repeating inside every short bubble");
+  assert.match(html, /const providerBylineHtml = \(\) => "";/);
+  assert.doesNotMatch(html, />From Slack</);
+  assert.doesNotMatch(html, /class="th-provider-byline"><img/);
+  // The room header: the Slack mark after the room name, set by the room's exact binding.
+  assert.match(html, /\.th-detail-name\.slack::after \{[^}]*background:url\("slackMark\.png"\)/);
+  const sync = html.slice(html.indexOf("function syncSlackVisibilityButton("), html.indexOf("// Store one server generation."));
+  assert.match(sync, /const linked = payload\.features\?\.slack === true && isSlackIntegratedRoom\(room\);/);
+  assert.match(sync, /thDetailNameEl\.classList\.toggle\("slack", linked\);/);
+  assert.doesNotMatch(sync, /thSlackVisibility|aria-pressed/);
 });
 
 test("Slack-linked files stay chat cargo while agent documents open the deployed Relay reader", () => {

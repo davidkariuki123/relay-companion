@@ -11,6 +11,7 @@ import { retainSentAttachmentsLocally } from "./sent-attachment-retention.js";
 import { fetchAttachments } from "./fetch-attachments.js";
 import { workspacePassportFromDeclaration } from "./repo-identity.js";
 import { fragileLinkWarning } from "./links.js";
+import { agentIdentity } from "./agent-identity.js";
 import { localizeAtFields } from "./local-time.cjs";
 import { createRequire } from "node:module";
 import { createHash, randomUUID } from "node:crypto";
@@ -19,7 +20,7 @@ import { CHAT_READ_TOOLS, recordReadTiming, withReadContext } from "./read-conte
 import { accountDriftMessage } from "./account.js";
 import { apiUrl, readConfig } from "./config.js";
 import { storeDir } from "./host-paths.js";
-import { accountProductFeatures } from "./product-features.js";
+import { resolveAccountProductFeatures, retryAccountProductFeatures } from "./product-features.js";
 import { recordOutboundTaskOrigin } from "./task-completion-wake.js";
 import { READ_ONLY_RELAY_TOOL_NAMES } from "./tool-permissions.js";
 export { READ_ONLY_RELAY_TOOL_NAMES } from "./tool-permissions.js";
@@ -1477,6 +1478,7 @@ export function rememberCallingClient(clientInfo, sessionContext = DEFAULT_MCP_S
   const name = String(clientInfo?.name || "").trim();
   if (!name) return;
   sessionContext.callingClientName = name;
+  sessionContext.callingClientVersion = String(clientInfo?.version || "").trim();
   if (!SURFACE_BY_MCP_CLIENT[name] && !unknownClientReported) {
     unknownClientReported = true;
     // stderr only: stdout is the MCP wire. An unrecognised host stays
@@ -1525,6 +1527,27 @@ function sessionSourceBinding(sessionContext = DEFAULT_MCP_SESSION_CONTEXT) {
   if (surface === "codex") return { sourceProvider: "codex" };
   if (surface === "claude_code") return { sourceProvider: "claude" };
   return {};
+}
+
+// An agent's read of Relay bodies: the API records it as agent_opened, with
+// who the agent is, and never as the person reading.
+async function agentReadProvenance(sessionContext = DEFAULT_MCP_SESSION_CONTEXT) {
+  const binding = sessionSourceBinding(sessionContext);
+  return {
+    clientName: "relay-local-mcp",
+    sourceProvider: binding.sourceProvider,
+    nativeSessionId: binding.sourceNativeId,
+    agent: await agentIdentity(sessionContext, binding),
+  };
+}
+
+/** Tell the API which Relays this session was shown. Best effort; never delays or fails the tool. */
+function reportAgentPresented(client, sessionContext, relayIds, via) {
+  const ids = (relayIds || []).filter((id) => typeof id === "string" && id.startsWith("relay_"));
+  if (!ids.length || typeof client?.reportAgentPresented !== "function") return;
+  agentReadProvenance(sessionContext)
+    .then((provenance) => client.reportAgentPresented({ via, relayIds: ids.slice(0, 200) }, provenance))
+    .catch(() => {});
 }
 
 function toSentSummary(item) {
@@ -1624,12 +1647,7 @@ async function inboxForAgent(client, args = {}, sessionContext = DEFAULT_MCP_SES
   }
   if (Object.hasOwn(args, "relayIds")) {
     const relayIds = exactInboxRelayIds(args.relayIds);
-    const binding = sessionSourceBinding(sessionContext);
-    const response = await client.fetchRelayPackets(relayIds, {
-      clientName: "relay-local-mcp",
-      sourceProvider: binding.sourceProvider,
-      nativeSessionId: binding.sourceNativeId,
-    });
+    const response = await client.fetchRelayPackets(relayIds, await agentReadProvenance(sessionContext));
     const packets = response?.packets && typeof response.packets === "object" ? response.packets : {};
     const items = [];
     const unavailableRelayIds = [];
@@ -1983,13 +2001,13 @@ async function waitForAiSessionInspection(client, operationId, { timeoutMs = 45_
  * Requiring one or the other (rather than defaulting) keeps a vague call from
  * quietly acting on the wrong conversation.
  */
-async function fetchChatForAgent(client, args, paged = false) {
+async function fetchChatForAgent(client, args, paged = false, provenance = {}) {
   const chatId = String(args?.chatId || "").trim();
   const threadId = String(args?.threadId || "").trim();
   const page = paged ? { limit: args.limit ?? 25, beforeCursor: args.beforeCursor, afterCursor: args.afterCursor } : {};
   if (paged && (!Number.isInteger(page.limit) || page.limit < 1 || page.limit > 200 || (page.beforeCursor && page.afterCursor))) throw new Error("Use limit 1–200 and only one of beforeCursor or afterCursor.");
-  if (chatId) return client.chat(chatId, page);
-  if (threadId) return client.chatForThread(threadId, page);
+  if (chatId) return client.chat(chatId, page, provenance);
+  if (threadId) return client.chatForThread(threadId, page, provenance);
   throw new Error(
     "Name the conversation: pass chatId from relay_chats_list, or threadId from any relay in it.",
   );
@@ -2746,6 +2764,7 @@ async function handleAdmittedCall(client, name, args, {
       }
       const taken = board.take();
       sessionContext.onSessionDigestChange?.();
+      reportAgentPresented(client, sessionContext, (taken.relays || []).map((relay) => relay.relayId), "session_updates");
       // The check-in reply is the carrier with no byte budget: the person's
       // boards and mandates ride every reply, so the agent that calls in
       // before its final response has them in front of it when it audits.
@@ -2806,12 +2825,12 @@ async function handleAdmittedCall(client, name, args, {
       });
     }
     case "relay_thread_fetch":
-      return text(withoutThreadTitles(await client.thread(args.threadId)));
+      return text(withoutThreadTitles(await client.thread(args.threadId, await agentReadProvenance(sessionContext))));
     case "relay_chats_list":
       return text(withoutThreadTitles(await client.chats()));
     case "relay_chat_fetch":
       try {
-        return text(withoutThreadTitles(await fetchChatForAgent(client, args, true)));
+        return text(withoutThreadTitles(await fetchChatForAgent(client, args, true, await agentReadProvenance(sessionContext))));
       } catch (err) {
         const moved = movedChatResult(err);
         if (moved) return text(moved);
@@ -2931,16 +2950,21 @@ export async function createRelayMcpSession({
   clientFactory = () => new RelayClient(),
   onClose = null,
   sessionDigestEnabled = true,
+  profileRetryDelaysMs = undefined,
 } = {}) {
   if (!transport) throw new Error("Relay MCP session requires a transport");
   const client = clientFactory();
+  const resolveFeatures = () => resolveAccountProductFeatures({
+    client,
+    env: process.env,
+    config: readConfig(),
+    apiUrl: apiUrl(),
+  });
+  const initialFeatures = await resolveFeatures();
+  // One object for the session's life: handlers read it by reference, so a
+  // late profile answer (below) changes what this session offers in place.
   const features = {
-    ...(await accountProductFeatures({
-      client,
-      env: process.env,
-      config: readConfig(),
-      apiUrl: apiUrl(),
-    })),
+    ...initialFeatures.features,
     // The person's own switch on this computer (Settings › Milestone Relays),
     // read once per session like the rest of the startup text.
     milestoneRelays: milestoneRelaysEnabled(),
@@ -3028,14 +3052,34 @@ export async function createRelayMcpSession({
   let closed = false;
   let channelPump = null;
   let digestWatch = null;
+  let featureRetry = null;
   server.onclose = () => {
     if (closed) return;
     closed = true;
     channelPump?.stop?.();
     digestWatch?.stop?.();
+    featureRetry?.stop?.();
     onClose?.();
   };
   await server.connect(transport);
+  // The profile check that decides developer tools gets one short try when
+  // the session opens. If the server went unheard (the app had just
+  // restarted, or the network dropped), this session would otherwise keep
+  // the ordinary tool list until it ends. Keep asking in the background, and
+  // when the answer arrives, update the session's features and tell the host
+  // its tool list changed so it reads the new catalog.
+  if (!initialFeatures.verified) {
+    featureRetry = retryAccountProductFeatures({
+      resolve: resolveFeatures,
+      ...(profileRetryDelaysMs ? { delaysMs: profileRetryDelaysMs } : {}),
+      onResolved: (next) => {
+        if (closed) return;
+        const changed = Object.keys(next).some((key) => features[key] !== next[key]);
+        Object.assign(features, next);
+        if (changed) server.sendToolListChanged().catch(() => {});
+      },
+    });
+  }
   // The event board: watch the daemon's snapshots for this account and, when
   // this session's digest changes, tell the host the tool list changed so it
   // re-reads relay_session_updates. Needs a device credential to scope the
@@ -3049,7 +3093,7 @@ export async function createRelayMcpSession({
         homeDir: storeDir(),
         accountScope: client.token,
         sessionKey,
-        topicsEnabled: features.topics !== false,
+        topicsEnabled: () => features.topics !== false,
       });
       const announce = () => {
         server.sendToolListChanged().catch(() => {});
@@ -3087,6 +3131,7 @@ export async function createRelayMcpSession({
     close: async () => {
       channelPump?.stop?.();
       digestWatch?.stop?.();
+      featureRetry?.stop?.();
       await server.close();
     },
   };

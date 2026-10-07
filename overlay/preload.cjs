@@ -215,6 +215,13 @@ contextBridge.exposeInMainWorld("relay", {
   slackConnection: () => ipcRenderer.invoke("relay:slackConnection"),
   slackConnect: (input = {}) => ipcRenderer.invoke("relay:slackConnect", input || {}),
   slackDisconnect: () => ipcRenderer.invoke("relay:slackDisconnect"),
+  slackConnectCancel: () => ipcRenderer.invoke("relay:slackConnectCancel"),
+  slackInvite: (chatId, slackUserId) => ipcRenderer.invoke("relay:slackInvite", { chatId: String(chatId || ""), slackUserId: slackUserId ? String(slackUserId) : "" }),
+  onSlackConnection: (callback) => {
+    const listener = (_event, info) => callback(info);
+    ipcRenderer.on("slackConnection", listener);
+    return () => ipcRenderer.removeListener("slackConnection", listener);
+  },
   credentialRetry: () => ipcRenderer.invoke("relay:credentialRetry"),
   chatAgentPreferences: () => ipcRenderer.invoke("relay:chatAgentPreferences"),
   saveChatAgentPreferences: (input) => ipcRenderer.invoke("relay:chatAgentPreferencesSave", input || {}),
@@ -237,6 +244,7 @@ contextBridge.exposeInMainWorld("relay", {
   onboardingPollAgent: (userId) => ipcRenderer.invoke("relay:onboardingPollAgent", String(userId || "")),
   onboardingCopyAgentRequest: (userId) => ipcRenderer.invoke("relay:onboardingCopyAgentRequest", String(userId || "")),
   onboardingOpenAgent: (userId) => ipcRenderer.invoke("relay:onboardingOpenAgent", String(userId || "")),
+  onboardingConnectClaude: (userId) => ipcRenderer.invoke("relay:onboardingConnectClaude", String(userId || "")),
   // SETUP (2026-10-07): every AI's connection, and the verbs to connect them.
   setupSnapshot: (userId, options = {}) => ipcRenderer.invoke("relay:setupSnapshot", String(userId || ""), { force: options?.force === true }),
   setupConnect: (userId, hostId) => ipcRenderer.invoke("relay:setupConnect", String(userId || ""), String(hostId || "")),
@@ -248,6 +256,7 @@ contextBridge.exposeInMainWorld("relay", {
   setupCopyRun: (userId) => ipcRenderer.invoke("relay:setupCopyRun", String(userId || "")),
   setupOpenRun: (userId) => ipcRenderer.invoke("relay:setupOpenRun", String(userId || "")),
   setupCancelRun: (userId) => ipcRenderer.invoke("relay:setupCancelRun", String(userId || "")),
+  setupConnectClaude: (userId) => ipcRenderer.invoke("relay:setupConnectClaude", String(userId || "")),
   copyFirstLinkMessage: (userId) => ipcRenderer.invoke("relay:copyFirstLinkMessage", userId),
   installationAuthSignIn: (options = {}) => ipcRenderer.invoke("relay:installationAuthSignIn", { forceAccountSelection: options?.forceAccountSelection === true }),
   installationAuthGoogle: (options = {}) => ipcRenderer.invoke("relay:installationAuthGoogle", {

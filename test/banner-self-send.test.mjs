@@ -40,16 +40,21 @@ test("a self-sent Task paints its title and Task chip despite having no chat unr
   assert.equal(banner.latest.id, task.id);
   assert.equal(banner.latest.direction, "in", "the banner presents the received copy");
   assert.equal(banner.unreadCount, 0, "notification selection does not invent unread chat debt");
+  // A Relay-only room: the Slack mark on the avatar is decided by the account's
+  // Slack feature and the room's exact integration binding, neither present here.
   const render = Function("peeking", "esc", "relayListGist", "mentionPreviewText", "avatarHue",
     "avatarInitials", "timeAgo", "bannerIsTask", "bannerVerbsHtml", "bannerComposerHtml",
+    "payload", "isSlackIntegratedRoom",
     `${rowSource}\nreturn relayIdentityRowHtml;`)(
     true, String, String, String, () => 0, () => "SA", () => "now",
     (row) => row.request, () => "", () => "",
+    { features:{} }, () => false,
   );
   const markup = render(banner);
   assert.match(markup, /Test Relay tasks/);
   assert.match(markup, /class="kchip">Task</);
   assert.match(markup, /data-opening-id="relay_self"/);
+  assert.doesNotMatch(markup, /av-slack/, "a Relay-only room never wears the Slack mark");
   assert.deepEqual({ task, room, received }, before, "chat ownership and raw read state stay intact");
 });
 

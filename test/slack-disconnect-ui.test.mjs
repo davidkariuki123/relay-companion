@@ -22,7 +22,10 @@ test("Slack disconnect confirmation is a footer inside the existing Slack card",
   assert.ok(cardStart >= 0 && syncCopy > cardStart && confirmation > syncCopy && cardEnd > confirmation);
   assert.doesNotMatch(settings, /sv-integration-backdrop|aria-modal="true"/);
   assert.match(settings, /Disconnect Slack\?/);
-  assert.match(settings, /New messages and Relay deliveries will stop syncing\. Messages already in Relay will stay\./);
+  assert.match(settings, /Your Slack chats stop syncing\. Messages already here stay\./);
+  // The sync explanation is for someone still deciding; a connected card carries
+  // only its Disconnect and the confirmation footer.
+  assert.match(settings, /\$\{personalConnected \? "" : '<div class="sv-slack-foot">/);
 });
 
 test("the calm footer animates the card open and respects reduced motion", () => {

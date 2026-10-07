@@ -9,11 +9,9 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -233,37 +231,6 @@ func connect(desc descriptor, request hello, deadline time.Time) (io.ReadWriteCl
 	return nil, nil, fmt.Errorf("broker did not become ready before the startup deadline: %w", last)
 }
 
-func proxy(connection io.ReadWriteCloser, reader *bufio.Reader) error {
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(signals)
-	type copyResult struct {
-		fromBroker bool
-		err        error
-	}
-	done := make(chan copyResult, 2)
-	go func() {
-		_, err := io.Copy(connection, os.Stdin)
-		done <- copyResult{err: err}
-	}()
-	go func() {
-		_, err := io.Copy(os.Stdout, reader)
-		done <- copyResult{fromBroker: true, err: err}
-	}()
-	select {
-	case result := <-done:
-		if result.err != nil {
-			return result.err
-		}
-		if result.fromBroker {
-			return errors.New("Relay MCP broker connection closed; reload Relay MCP in this host")
-		}
-		return nil
-	case <-signals:
-		return nil
-	}
-}
-
 func run(descriptorPath string) error {
 	desc, capability, err := readDescriptor(descriptorPath)
 	if err != nil {
@@ -293,8 +260,21 @@ func run(descriptorPath string) error {
 	if err != nil {
 		return err
 	}
-	defer connection.Close()
-	return proxy(connection, reader)
+	// Every later broker is found afresh: an update rewrites the descriptor to
+	// name the new release before it stops the old broker, and dialling the
+	// descriptor this process started with would bring the old release back.
+	redial := func(deadline time.Time) (io.ReadWriteCloser, *bufio.Reader, error) {
+		desc, capability, err := readDescriptor(descriptorPath)
+		if err != nil {
+			return nil, nil, err
+		}
+		next := request
+		next.Protocol = desc.Protocol
+		next.DomainID = desc.DomainID
+		next.Capability = base64.RawURLEncoding.EncodeToString(capability)
+		return connect(desc, next, deadline)
+	}
+	return proxy(redial, connection, reader)
 }
 
 func main() {

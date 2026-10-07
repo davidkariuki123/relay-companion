@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld("relayViewer", {
   onContent: (cb) => ipcRenderer.on("relay:viewer:content", (_e, payload) => cb(payload || {})),
   onTheme: (cb) => ipcRenderer.on("relay:viewer:theme", (_e, theme) => cb(String(theme || "light"))),
   onDownloadProgress: (cb) => ipcRenderer.on("relay:viewer:download", (_e, payload) => cb(payload || {})),
+  onFullScreen: (cb) => ipcRenderer.on("relay:viewer:fullscreen", (_e, on) => cb(on === true)),
 
   // viewer -> main
   ready: () => ipcRenderer.send("relay:viewer:ready"),
@@ -28,4 +29,6 @@ contextBridge.exposeInMainWorld("relayViewer", {
   copyImage: (relayId, attachmentId) => ipcRenderer.invoke("relay:viewer:copyImage", id(relayId), id(attachmentId)),
   minimize: () => ipcRenderer.send("relay:viewer:window", "minimize"),
   close: () => ipcRenderer.send("relay:viewer:window", "close"),
+  toggleFullScreen: () => ipcRenderer.send("relay:viewer:window", "fullscreen"),
+  leaveFullScreen: () => ipcRenderer.send("relay:viewer:window", "leave-fullscreen"),
 });

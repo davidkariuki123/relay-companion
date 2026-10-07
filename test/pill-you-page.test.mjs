@@ -77,7 +77,9 @@ test("Your invite link is on the page with Copy, and says what joining through i
 
 test("candidate B sits directly below account and above agent settings", () => {
   const settings = slice("function renderSettings()", "function wireSettings()");
-  const order = ["svAccountRow", "yourLinkHtml()", "yourAgentHtml()", "slackSettingsHtml(info)", "connectionsHtml(info", "quietPrefsHtml(info)", "sv-colophon"]
+  // Slack moved up beside Your AIs (David, 2026-10-07): the two things Relay
+  // connects to come first, then the link and the agent settings.
+  const order = ["svAccountRow", "setupEntryHtml()", "slackSettingsHtml(info)", "yourLinkHtml()", "yourAgentHtml()", "connectionsHtml(info", "quietPrefsHtml(info)", "sv-colophon"]
     .map((marker) => settings.indexOf(marker));
   assert.ok(order.every((index) => index >= 0), order);
   assert.deepEqual([...order].sort((a, b) => a - b), order);

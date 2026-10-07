@@ -161,6 +161,9 @@ function noticeForResult(digest, { topicsEnabled = true } = {}) {
 }
 
 function createSessionDigest({ homeDir, accountScope, sessionKey, topicsEnabled = true, nowMs = Date.now() }) {
+  // A session that learns late that Topics are on (its first profile check
+  // failed) passes a function, so the board follows the session's live setting.
+  const topicsOn = () => (typeof topicsEnabled === "function" ? topicsEnabled() : topicsEnabled);
   const { file, state } = openSessionDigest({ homeDir, accountScope, sessionKey, nowMs });
   let lastDescription = null;
   const persist = () => {
@@ -170,11 +173,11 @@ function createSessionDigest({ homeDir, accountScope, sessionKey, topicsEnabled 
   const snapshots = () => ({ inbox: readInbox(homeDir, accountScope), topics: readTopics(homeDir, accountScope) });
   // Prime the description so the first watcher tick announces only a change
   // that happens after the board opened, never the state it opened with.
-  try { lastDescription = describeDigest(computeDigest(state, snapshots()), { topicsEnabled }); } catch {}
+  try { lastDescription = describeDigest(computeDigest(state, snapshots()), { topicsEnabled: topicsOn() }); } catch {}
   const api = {
     refresh() {
       const digest = computeDigest(state, snapshots());
-      const description = describeDigest(digest, { topicsEnabled });
+      const description = describeDigest(digest, { topicsEnabled: topicsOn() });
       const changed = description !== lastDescription;
       lastDescription = description;
       return { changed, description, digest };
@@ -184,7 +187,7 @@ function createSessionDigest({ homeDir, accountScope, sessionKey, topicsEnabled 
     },
     /** The result line, read fresh and without touching the announced description or any cursor. */
     notice() {
-      return noticeForResult(computeDigest(state, snapshots()), { topicsEnabled });
+      return noticeForResult(computeDigest(state, snapshots()), { topicsEnabled: topicsOn() });
     },
     /** The person's subscribed topics as the daemon last recorded them, mandates included. Reading moves nothing. */
     subscribedTopics() {

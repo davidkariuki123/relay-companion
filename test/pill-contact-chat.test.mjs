@@ -124,11 +124,21 @@ test("a room entered from People keeps People lit, and Back returns there", () =
   const source = between(html, "function isConversationRoomSource(source = threadsSource)", "\n  function openThreadDetail");
   assert.match(source, /source === "chat" \|\| source === "relays" \|\| source === "slack" \|\| source === "contacts"/,
     "Slack is another room index while the existing People source remains intact");
-  assert.match(html, /const tabView = activeView === "threads" \? threadsSource/);
+  // A Slack-linked room reads the Slack projection, but the tab that stays lit
+  // is still the list it was opened from (there is no Slack tab).
+  assert.match(html, /const tabView = activeView === "threads" \? \(threadsSource === "slack" \? threadsReturnSource : threadsSource\)/);
 
   // Back goes back to the list that was clicked, on the row it left.
   const back = between(html, "thBackEl.addEventListener", "let threadsSource =");
-  assert.match(back, /threadsSource === "contacts" \? "contacts"/);
+  // A Slack-linked room reads the Slack projection, yet Back still returns to
+  // the list it was opened from.
+  assert.match(back, /const backFrom = threadsSource === "slack" \? threadsReturnSource : threadsSource;/);
+  assert.match(back, /backFrom === "contacts" \? "contacts"/);
+  const opener = between(html, "\n  function openThreadDetail", "\n  let settingsInfo");
+  assert.match(opener, /const returnSource = source === "slack" \? "relays" : source;/);
+  assert.match(opener, /threadsReturnSource = returnSource;/);
+  // A reader opened from that room hands the same list back on close.
+  assert.match(html, /source: threadsSource === "slack" \? threadsReturnSource : threadsSource,\s*roomScroll: captureRoomScroll\(\),/);
   assert.match(back, /destinationView === "contacts" \? contactsListScrollTop/);
   assert.match(back, /activeView = destinationView;/);
   assert.match(html, /if \(activeView === "contacts" && source === "contacts" && scrollEl\) contactsListScrollTop = scrollEl\.scrollTop;/);
