@@ -459,3 +459,10 @@ test("a read of a Slack-linked room is a whole read: one call, both summaries qu
 test("an empty Slack DM never replaces the real last message of the chat it joins", () => {
   assert.match(html, /if \(projected\.hasActivity && new Date\(projected\.latest\.at \|\| 0\) > new Date\(existing\.latest\.at \|\| 0\)\) \{/);
 });
+
+test("a Slack channel keeps its #name when the saved groups pass reaches its room", () => {
+  assert.match(html, /const slackChannelRoom = isSlackIntegratedRoom\(existing\) && \/channel\$\/\.test\(existing\.integration\?\.type \|\| ""\);/);
+  assert.match(html, /existing\.name = slackChannelRoom \? existing\.name : group\.name \|\| existing\.name;/);
+  // and a Slack channel's group row finds its room by chat id instead of seeding an empty twin
+  assert.match(html, /\.find\(\(room\) => room\.chatId && String\(room\.chatId\) === String\(group\.id\)\)/);
+});

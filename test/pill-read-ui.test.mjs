@@ -181,8 +181,9 @@ test("Slack Settings is one truthful card with the official mark and no optimist
   assert.match(html, /class="open-actions sv-actions" data-stop="1" aria-label="Account actions"/,
     "permanent account actions stay ordinary page controls instead of trapping Settings in a modal menu role");
   assert.doesNotMatch(html, /class="open-actions sv-actions" data-stop="1" role="menu"/);
-  // Simple copy, said only while there is something to connect.
-  assert.match(slackSettings, /\$\{personalConnected \? "" : '<div class="sv-slack-foot">Your channels become groups in Chats\. Messages sync both ways\.<\/div>'\}/);
+  // One line says it; no second paragraph repeating the card.
+  assert.match(slackSettings, /: "Your channels and DMs, synced";/);
+  assert.doesNotMatch(slackSettings, /sv-slack-foot/);
   assert.match(slackSettings, /\? "Connected · messages sync both ways"/);
   assert.match(slackSettings, /\? "Click Allow in your browser"/);
   assert.match(slackSettings, /Your Slack chats stop syncing\. Messages already here stay\./);

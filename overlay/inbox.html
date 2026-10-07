@@ -1319,7 +1319,11 @@
   .th-detail-name.slack-channel { cursor:pointer; }
   /* The room's one line about Slack people: who is not here yet, or the
      moment your own Slack connected. It rides under the header. */
-  .th-slack-people { position:sticky; top:56px; z-index:2; flex:none; padding:8px 12px 0; background:var(--bg); }
+  .th-slack-people { position:sticky; top:56px; z-index:2; flex:none; padding:8px 12px 2px; background:var(--bg); }
+  /* Messages scroll under the line like under a header, so its lower edge
+     fades instead of slicing through a bubble. */
+  .th-slack-people::after { content:""; position:absolute; left:0; right:0; top:100%; height:14px; pointer-events:none;
+    background:linear-gradient(var(--bg), color-mix(in srgb, var(--bg) 0%, transparent)); }
   .th-slack-people.gone { display:none; }
   .th-slack-people.folding { overflow:hidden; pointer-events:none; }
   .th-sp { appearance:none; width:100%; display:flex; align-items:center; gap:10px; padding:8px 10px; border:1px solid var(--hair);
@@ -3269,7 +3273,6 @@
   .sv-slack-action:disabled { opacity:.45; cursor:default; }
   .sv-slack-action.primary { background:var(--accent); border-color:var(--accent); color:var(--on-accent, #fff); }
   .sv-slack-action.primary:hover { filter:brightness(1.06); border-color:var(--accent); }
-  .sv-slack-foot { padding:10px 12px; border-top:1px solid var(--edge); background:color-mix(in srgb,var(--wash) 62%,transparent); font:10.5px/1.45 var(--sans); color:var(--muted-2); }
   .sv-slack-dialog-copy { margin-top:9px; color:var(--muted); font:12px/1.5 var(--sans); }
   /* The Slack tab's disconnected face borrows the onboarding chapter's
      hierarchy, but it is ordinary product chrome now: no step count, finish
@@ -8951,13 +8954,16 @@
   function slackInvitePreviewText(room, person) {
     const channel = slackChannelLabel(room).slice(1);
     const url = inviteLinkInfo?.url || "your Relay invite link";
-    if (!person) return `Hey all! #${channel} is on Relay now. It syncs with Slack and sits right next to Claude and ChatGPT, so our AIs can share context and pass work between us. Join here, it takes a minute: ${url}`;
+    if (!person) return `Hey all! #${channel} is on Relay now. It syncs with Slack, and our AIs can pass work to each other. Join here: ${url}`;
     const first = String(person.name || "").trim().split(/\s+/)[0];
-    return `${first ? `Hey ${first}!` : "Hey!"} I'm using Relay for #${channel}. It syncs with Slack and sits right next to Claude and ChatGPT, so our AIs can share context and pass work between us. Join me, it takes a minute: ${url}`;
+    return `${first ? `Hey ${first}!` : "Hey!"} I'm using Relay for #${channel}. It syncs with Slack, and our AIs can pass work to each other. Join me: ${url}`;
   }
-  function slackFaceHtml(person, extra = "") {
+  function slackFaceHtml(person, extra = "", { stacked = false } = {}) {
     const name = String(person?.name || "Slack member");
-    return `<span class="avatar sm${extra}" style="--av-h:${avatarHue(name)}" aria-hidden="true">${esc(avatarInitials(name))}</span>`;
+    // Overlapping faces hide half of a second letter ("JL" read as "JI"), so a
+    // face in a stack carries one clear initial.
+    const initials = stacked ? avatarInitials(name).slice(0, 1) : avatarInitials(name);
+    return `<span class="avatar sm${extra}" style="--av-h:${avatarHue(name)}" aria-hidden="true">${esc(initials)}</span>`;
   }
   let slackCelebrateRoomUntil = 0;
   // The "not on Relay yet" line is said, not shouted: it shows when you open
@@ -8997,7 +9003,7 @@
         html = `<div class="th-sp th-sp-ok"><span class="slack-nudge-check" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M3.5 8.4l3 3 6-6.6"/></svg></span><span class="th-sp-text"><b>Slack is connected.</b> Everything you send here now goes to Slack too.</span></div>`;
       } else if (slackChannelRoom(room) && people.notOnRelay.length && slackPeopleLineDue(String(room.chatId))) {
         const waiting = people.notOnRelay.filter((person) => !person.invited);
-        const faces = people.notOnRelay.slice(0, 3).map((person) => slackFaceHtml(person)).join("");
+        const faces = people.notOnRelay.slice(0, 3).map((person) => slackFaceHtml(person, "", { stacked:true })).join("");
         const count = people.notOnRelay.length;
         html = waiting.length
           ? `<button type="button" class="th-sp" data-slack-people><span class="th-sp-faces">${faces}</span><span class="th-sp-text">${count === 1 ? `${esc(people.notOnRelay[0].name)} isn’t on Relay yet` : `${count} people here aren’t on Relay yet`}</span><span class="th-sp-go">Invite</span></button>`
@@ -17524,12 +17530,19 @@
       const people = roster
         .map((person) => String(person.name || person.email || "").trim())
         .filter(Boolean);
-      const existing = byGroup.get(key) || [...byGroup.values()].find((room) =>
-        !room.groupId && normalizedPartyName(room.groupName || room.name) === normalizedPartyName(group.name));
+      // A Slack channel's group row names the same chat as its room, so it
+      // finds the room by chat id rather than seeding an empty twin.
+      const existing = byGroup.get(key)
+        || [...byGroup.values()].find((room) => room.chatId && String(room.chatId) === String(group.id))
+        || [...byGroup.values()].find((room) =>
+          !room.groupId && normalizedPartyName(room.groupName || room.name) === normalizedPartyName(group.name));
       if (existing) {
         existing.groupId = String(group.id);
-        existing.groupName = group.name || existing.groupName;
-        existing.name = group.name || existing.name;
+        // A Slack channel keeps Slack's name, #code, wherever it is shown;
+        // the saved group behind it may only know "code".
+        const slackChannelRoom = isSlackIntegratedRoom(existing) && /channel$/.test(existing.integration?.type || "");
+        existing.groupName = slackChannelRoom ? existing.groupName : group.name || existing.groupName;
+        existing.name = slackChannelRoom ? existing.name : group.name || existing.name;
         for (const person of people) if (!existing.people.includes(person)) existing.people.push(person);
         continue;
       }
@@ -21122,7 +21135,7 @@
         ? "Click Allow in your browser"
         : state === "paused"
           ? "Needs a quick reconnect"
-          : "Your Slack chats, in Relay";
+          : "Your channels and DMs, synced";
     return `<section class="sv-slack-section" data-stop="1">
       <div class="sv-open-title">Slack</div>
       <div class="sv-slack-card${slackDisconnectConfirm ? " is-confirming" : ""}" id="svSlackCard">
@@ -21133,7 +21146,6 @@
             ? `<button class="sv-slack-action" type="button" id="svSlackDisconnect" aria-controls="svSlackDisconnectConfirmPanel" aria-expanded="${slackDisconnectConfirm ? "true" : "false"}" ${slackConnectionBusy || slackDisconnectConfirm ? "disabled" : ""}>Disconnect</button>`
             : `<button class="sv-slack-action${slackConnectionWaiting || slackConnectionBusy ? "" : " primary"}" type="button" id="svSlackConnect" ${slackConnectionBusy ? "disabled" : ""}>${esc(connectLabel)}</button>`}
         </div>
-        ${personalConnected ? "" : '<div class="sv-slack-foot">Your channels become groups in Chats. Messages sync both ways.</div>'}
         ${personalConnected ? `<div class="sv-slack-confirm" id="svSlackDisconnectConfirmPanel" role="region" aria-labelledby="slackDisconnectTitle" aria-hidden="${slackDisconnectConfirm ? "false" : "true"}" ${slackDisconnectConfirm ? "" : "inert"}>
           <div class="sv-slack-confirm-clip">
             <div class="sv-slack-confirm-content">
