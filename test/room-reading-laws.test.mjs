@@ -158,6 +158,7 @@ test("an invoked agent stays pinned above the composer across streaming layout c
     };
     function requestAnimationFrame(work) { work(); }
     function roomScrollElement() { return scroller; }
+    function roomEntryStickActive() { return false; }
     function scrollRoomToNewest(chatShaped) {
       scroller.scrollTop = chatShaped ? scroller.scrollHeight : 0;
     }

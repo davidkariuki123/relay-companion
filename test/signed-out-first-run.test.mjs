@@ -58,3 +58,13 @@ test("a sign-in that lapsed before anyone chose an account returns to the first 
   assert.match(expired, />Sign in again</);
   assert.doesNotMatch(expired, /authorization|approval|Restart setup/);
 });
+
+// Fresh Mac VM (2026-10-08): "Use email instead" opened the website's sign-in
+// page in the browser; a new email there met "Couldn't find your account".
+// The app has its own email + code screens, and the server makes the account.
+test("Use email instead stays in the app", () => {
+  const method = html.slice(html.indexOf('<p class="su-step">Welcome to Relay</p>'), html.indexOf('if (signupStage === "email") {'));
+  assert.match(method, /getElementById\("suSignIn"\)\?\.addEventListener\("click", \(\) => \{ signupStage = "email";/);
+  assert.doesNotMatch(method, /"suSignIn"\)\?\.addEventListener\("click", startInstallationSignIn\)/);
+  assert.match(html, /<h1 class="su-title">What’s your email\?<\/h1>/);
+});

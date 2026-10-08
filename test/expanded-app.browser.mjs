@@ -29,14 +29,18 @@ try {
       account:{paired:true,userId:'self',name:'Test User',email:'self@example.test',hasSentRelay:true},
       ui:{canDismiss:true,onboardingRequired:false,completedOnboardingVersion:1},
       features:{requests:false,todo:false,slack:false,replyThreads:true,topics:true},
-      contacts:[{contactId:'c-sven',name:'Sven Wellmann',email:'sven@example.test'},{contactId:'c-shane',name:'Shane Acton',email:'shane@example.test'},{contactId:'c-kiara',name:'Kiara Moodley',email:'kiara@example.test'}],
+      contacts:[{contactId:'c-sven',name:'Sven Wellmann',email:'sven@example.test'},{contactId:'c-shane',name:'Shane Acton',email:'shane@example.test'},{contactId:'c-kiara',name:'Kiara Moodley',email:'kiara@example.test'},{contactId:'c-aron',name:'Aron van Ammers',email:'aron@example.test'}],
       relays, sent:[], requests:[], chats:[], slackChats:[],
     };
     const api = {isTestOverlay:true,refresh:async()=>structuredClone(window.fixture),refreshSent:async()=>({items:[]}),contacts:async()=>window.fixture.contacts,
       groups:async()=>({ok:true,result:[]}),accountInfo:async()=>window.fixture.account,agentSurfaces:async()=>({}),setupSnapshot:async()=>({hosts:[],scannedAt:Date.now()}),
       topicsList:async()=>({ok:true,result:[topic]}),topicGet:async()=>({ok:true,result:{...topic,members:[]}}),
       topicThreads:async()=>({ok:true,result:{topic,threads:[],nextCursor:null}}),topicSeen:async()=>({ok:true,result:topic}),
-      topicPosts:async()=>({ok:true,result:{topic,posts:[],nextCursor:null}})};
+      topicPosts:async()=>({ok:true,result:{topic,posts:[],nextCursor:null}}),
+      // Someone you have never written to: the chat is created on the server.
+      openChatWith:async(email,name)=>{ await new Promise(r=>setTimeout(r,120)); return {ok:true,recipient:{email},
+        chat:{chatId:'chat_aron',kind:'direct',title:name,participants:[{id:'self',name:'Test User',self:true},{id:'aron',name,self:false,email}],items:[],unreadCount:0,messageCount:0,updatedAt:ago(1)}}; },
+      canonicalChat:async()=>({ok:false})};
     window.relay = new Proxy(api,{get:(target,key)=>key in target ? target[key] : String(key).startsWith('on') ? callback=>{window.events[key]=callback;return()=>{};} : async()=>({ok:true})});
   });
   await page.goto(new URL('../overlay/inbox.html',import.meta.url).href);
@@ -79,6 +83,23 @@ try {
   await page.waitForFunction(() => threadDetailId === 'room-sven');
   assert.equal(await width(), 900);
 
+  // A chat opens on its newest message and stays there while what loads late
+  // settles in; a real scroll lets go (David, 2026-10-08: chats opened 100 to
+  // 340px short, the last message under the composer).
+  await page.waitForTimeout(400);
+  const gap = () => page.evaluate(() => { const el = roomScrollElement(); return Math.round(el.scrollHeight - el.clientHeight - el.scrollTop); });
+  await page.evaluate(() => { const late = document.createElement('div'); late.id = 'lateGrowth'; late.style.height = '1400px'; document.getElementById('thRows').prepend(late); });
+  await page.waitForTimeout(150);
+  assert.ok(await gap() <= 2, `late content left the room ${await gap()}px short of its newest message`);
+  await page.evaluate(() => { roomScrollElement().scrollTop -= 101; });
+  await page.waitForTimeout(150);
+  assert.ok(await gap() <= 2, 'a layout nudge with no gesture goes back to the newest');
+  await page.mouse.move(650, 400);
+  await page.mouse.wheel(0, -300);
+  await page.waitForTimeout(250);
+  assert.ok(await gap() > 100, 'a real scroll is the person\'s and is never undone');
+  await page.evaluate(() => document.getElementById('lateGrowth')?.remove());
+
   // Switching chats beside the list is instant: one click merges the inbox at
   // most twice (before and after it marks the chat read), never once per row.
   for (const party of ['Shane Acton', 'Kiara Moodley', 'Sven Wellmann']) {
@@ -107,6 +128,14 @@ try {
   await page.locator('.tab[data-view="contacts"]').click();
   await settle();
   assert.equal(await wide(), true, 'Contacts stays expanded');
+  // One person's chat open beside the list, then someone you have never
+  // written to: their chat is created and opens in the pane (it used to be
+  // dropped because the list was no longer "the Contacts view").
+  await page.locator('#cvList .cv-item').filter({ hasText:'Kiara Moodley' }).click();
+  await page.waitForFunction(() => activeView === 'threads' && threadDetailId === 'room-kiara');
+  await page.locator('#cvList .cv-item').filter({ hasText:'Aron van Ammers' }).click();
+  await page.waitForFunction(() => String(threadDetailId).includes('chat_aron'));
+  assert.equal(await width(), 900);
   await page.locator('.tab[data-view="settings"]').click();
   await settle();
   assert.equal(await wide(), true, 'You stays expanded');

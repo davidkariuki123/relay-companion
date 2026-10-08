@@ -92,8 +92,9 @@ test("a sign-in that could not open falls back to the method stage with the erro
   assert.equal(h.context.signupAutoSignInStarted, true, "no retry loop: the person clicks Sign in");
 });
 
-test("the Sign in link and the auto-start share one path, and a paired account resets the flag", () => {
-  assert.match(html, /document\.getElementById\("suSignIn"\)\?\.addEventListener\("click", startInstallationSignIn\);/);
+test("the auto-start opens the browser sign-in, and a paired account resets the flag", () => {
+  // "Use email instead" no longer shares this path: it stays in the app.
+  assert.match(html, /document\.getElementById\("suSignIn"\)\?\.addEventListener\("click", \(\) => \{ signupStage = "email";/);
   const shared = slice("  async function startInstallationSignIn() {", "  let networkInvite = ");
   assert.match(shared, /installationAuthSignIn\(\{ forceAccountSelection: signupForceGoogleSelection \}\)/);
   assert.match(shared, /signupStage = "google"/);

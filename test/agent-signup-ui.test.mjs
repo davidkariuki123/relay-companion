@@ -52,7 +52,8 @@ test("a signed-out Relay signs in with Google first and offers no agent setup pr
   assert.match(stage, /class="su-primary su-google" id="suGoogle"/, "Google is the primary way in");
   assert.doesNotMatch(stage, /su-setup-prompt|Copy setup prompt|setupPrompt/, "Relay is already set up; there is nothing for an agent to install");
   assert.match(stage, /document\.getElementById\("suGoogle"\)\?\.addEventListener\("click", startInstallationGoogle\);/);
-  assert.match(stage, /document\.getElementById\("suSignIn"\)\?\.addEventListener\("click", startInstallationSignIn\);/);
+  // Email stays in the app's own email + code screens; only Google opens the browser.
+  assert.match(stage, /document\.getElementById\("suSignIn"\)\?\.addEventListener\("click", \(\) => \{ signupStage = "email";/);
   // The installer's marker never opens a browser on its own: agentInstalled is
   // false for it, so the person clicks Continue with Google themselves.
   assert.match(main, /agentInstalled: !installedFirstOnboarding && Boolean\(setupIntent\) && setupIntent\.application !== true,/);

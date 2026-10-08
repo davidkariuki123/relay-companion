@@ -228,7 +228,7 @@ test("reader Back restores the exact room scroll anchor", () => {
   };
   const history = { querySelectorAll: () => [before, anchor] };
   const capture = Function("activeView", "roomScrollElement", "thHistoryEl", `"use strict"; return (${captureSource.trim()});`)("threads", () => scroll, history);
-  const restore = Function("roomScrollElement", "thHistoryEl", `"use strict"; return (${restoreSource.trim()});`)(() => scroll, history);
+  const restore = Function("roomScrollElement", "thHistoryEl", "roomEntryStick", `"use strict"; return (${restoreSource.trim()});`)(() => scroll, history, null);
   const saved = capture();
   assert.deepEqual(saved, { top: 312, anchorId: "anchor", anchorOffset: 48 });
   anchorDocumentTop += 60; // new content arrived above while the reader was open

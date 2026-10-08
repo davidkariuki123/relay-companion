@@ -5095,7 +5095,7 @@
       // A return to a saved position also retires room-entry auto-follow so
       // its queued frame cannot move the live page behind the new snapshot.
       if (typeof restore === "function") {
-        threadDetailEntryFollow = null;
+        threadDetailEntryFollow = null; roomEntryStick = null;
         restore();
       }
       if (activeView === "reader") assessReaderFit();
@@ -8587,7 +8587,7 @@
   // A message found by search: the room opens already at it, and it glows once.
   function revealSearchHit(id, room) {
     if (activeView !== "threads") return null;
-    threadDetailEntryFollow = null;
+    threadDetailEntryFollow = null; roomEntryStick = null;
     threadDetailLiveFollow = RelayChatPresentation.reduceChatLiveFollow(threadDetailLiveFollow, { type:"reset" });
     const find = () => thHistoryEl.querySelector(`[data-msg="${CSS.escape(String(id))}"]`);
     let target = find();
@@ -8599,7 +8599,7 @@
         replyThreadFocusId = String(root);
         threadDetailScrolledFor = null;
         renderThreadDetail();
-        threadDetailEntryFollow = null;
+        threadDetailEntryFollow = null; roomEntryStick = null;
         target = find();
       }
     }
@@ -12835,11 +12835,11 @@
       threadDetailFollowLayoutQueued = true;
       requestAnimationFrame(() => {
         threadDetailFollowLayoutQueued = false;
-        if (!rowsEl.isConnected
-          || !RelayChatPresentation.shouldPinChatLiveFollow(
-            threadDetailLiveFollow,
-            String(rowsEl.dataset.roomFollowKey || ""),
-          )) return;
+        if (!rowsEl.isConnected) return;
+        if (!roomEntryStickActive() && !RelayChatPresentation.shouldPinChatLiveFollow(
+          threadDetailLiveFollow,
+          String(rowsEl.dataset.roomFollowKey || ""),
+        )) return;
         scrollRoomToNewest(rowsEl.classList.contains("chat-order"));
       });
     });
@@ -12857,6 +12857,13 @@
         if (threadEntryFollowToken() !== token) return;
         scrollRoomToNewest(chatOrder() === "chat");
         threadDetailEntryFollow = null;
+        // Opening a chat lands on its newest message and STAYS there while
+        // what loads late settles in (thread strips, attachment rows, Slack's
+        // history, fonts). Released at the first wheel, key or touch. The pin
+        // used to let go two frames after hydration, and a chat in the
+        // expanded app then opened 100 to 340px short, its last message under
+        // the composer (David, 2026-10-08).
+        roomEntryStick = { room:String(threadDetailId || ""), until:performance.now() + ROOM_ENTRY_STICK_MS };
         // The room is where the reader will see it now; a short room may not
         // have scrolled at all, so the mention check cannot wait for a scroll.
         queueMentionVisibilityCheck();
@@ -12875,7 +12882,24 @@
     // newest message until that exact request has reconciled as well.
     Promise.allSettled([sentReady, fontsReady, detailReady]).then(() => settleThreadEntryFollow(token));
   }
+  const ROOM_ENTRY_STICK_MS = 4000;
+  let roomEntryStick = null;
+  function roomEntryStickActive() {
+    if (!roomEntryStick) return false;
+    if (activeView !== "threads" || String(threadDetailId || "") !== roomEntryStick.room || performance.now() > roomEntryStick.until) {
+      roomEntryStick = null;
+      return false;
+    }
+    return true;
+  }
   function interruptThreadEntryFollow(event) {
+    if (event.type === "keydown") {
+      const target = event.target;
+      const typing = target && (target.matches?.("input, textarea, select") || target.isContentEditable);
+      if (!typing && ["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) roomEntryStick = null;
+    } else if (event.type !== "pointerdown" || event.target === roomScrollElement()) {
+      roomEntryStick = null;
+    }
     if (!threadEntryFollowToken() && !threadDetailLiveFollow.following) return;
     if (event.type === "keydown") {
       const target = event.target;
@@ -12892,6 +12916,13 @@
     });
   }
   function releaseRoomLiveFollowIfDetached(event) {
+    // Nothing the person did moved the room (every gesture clears the stick
+    // first), so a layout nudge during the stick goes back to the newest.
+    if (event.target === roomScrollElement() && roomEntryStickActive()) {
+      const el = event.target;
+      if (el.scrollHeight - el.clientHeight - el.scrollTop > 2) scrollRoomToNewest(chatOrder() === "chat");
+      return;
+    }
     if (!threadDetailLiveFollow.following || event.target !== roomScrollElement()) return;
     const roomScrollEl = roomScrollElement();
     const distanceFromBottom = roomScrollEl.scrollHeight - roomScrollEl.clientHeight - roomScrollEl.scrollTop;
@@ -12924,6 +12955,7 @@
   function restoreRoomScroll(saved) {
     const roomScrollEl = roomScrollElement();
     if (!saved || !roomScrollEl) return;
+    roomEntryStick = null; // a saved place wins over landing on the newest
     // Restore the numeric position first as a safe fallback. Then pin the same
     // visible message to the same viewport offset, so a refresh while reading
     // cannot shift the user when older/newer messages changed the room height.
@@ -12979,7 +13011,7 @@
     if (wideLayoutActive()) {
       if (roomViewTransition) supersedeRoomViewTransition();
       const restore = update();
-      if (typeof restore === "function") { threadDetailEntryFollow = null; restore(); }
+      if (typeof restore === "function") { threadDetailEntryFollow = null; roomEntryStick = null; restore(); }
       if (activeView === "reader") assessReaderFit();
       return Promise.resolve();
     }
@@ -14948,7 +14980,12 @@
     }
     // A failure belongs to the row it came from: by the time a slow one
     // answers, the person may have opened somebody else's.
-    const stillCurrent = () => cvOpenGeneration === openGeneration && cvOpeningKey === key && activeView === "contacts";
+    // In the expanded app the Contacts list stays beside an open chat, so
+    // "still on Contacts" includes a chat opened from it: the check used to
+    // demand the Contacts view itself, and the second person you picked never
+    // opened (Aron after Advait, David, 2026-10-08).
+    const stillCurrent = () => cvOpenGeneration === openGeneration && cvOpeningKey === key
+      && (activeView === "contacts" || (wideLayoutActive() && wideSideTab() === "contacts"));
     const onThisRow = (message) => { if (stillCurrent()) cvPeopleErrorEl.textContent = message; };
     cvOpeningKey = key;
     Promise.resolve(window.relay.openChatWith(email, c.name || ""))
@@ -16557,7 +16594,7 @@
     visit.selected=id; visit.visited.add(id);
     // Deliberate navigation cancels the entry/live-follow latch before a late
     // sent-cache refresh or image layout can pull the reader back to the end.
-    threadDetailEntryFollow=null;
+    threadDetailEntryFollow=null; roomEntryStick=null;
     threadDetailLiveFollow=RelayChatPresentation.reduceChatLiveFollow(threadDetailLiveFollow, { type:"reset" });
     expandedMsgIds.add(id);
     renderThreadDetail();
@@ -16838,6 +16875,7 @@
     // Deliberate navigation cancels the entry/live-follow latch before a late
     // refresh or image layout can pull the reader back to the end.
     threadDetailEntryFollow = null;
+    roomEntryStick = null;
     threadDetailLiveFollow = RelayChatPresentation.reduceChatLiveFollow(threadDetailLiveFollow, { type:"reset" });
     try {
       const folded = replyNewsRow(id);
@@ -19644,7 +19682,7 @@
         const restoreFocus = document.activeElement === receiptButton;
         if (expandedReceiptIds.has(id)) expandedReceiptIds.delete(id);
         else expandedReceiptIds.add(id);
-        threadDetailEntryFollow = null;
+        threadDetailEntryFollow = null; roomEntryStick = null;
         threadDetailLiveFollow = RelayChatPresentation.reduceChatLiveFollow(threadDetailLiveFollow, { type:"reset" });
         renderThreadDetail();
         if (restoreFocus) thHistoryEl.querySelector(`[data-receipt-toggle="${CSS.escape(id)}"]`)?.focus({ preventScroll:true });
@@ -23551,7 +23589,11 @@
         : "Once you’re in, quit and reopen Claude Code or Codex so they pick up Relay’s tools.";
       signupBodyEl.innerHTML = `<div class="su-first-relay su-method su-application"><p class="su-step">Welcome to Relay</p><h1 class="su-title">Sign in to get started.</h1><p class="su-copy">Relay is set up on this computer. Sign in once and it's ready.</p><div class="su-form"><button class="su-primary su-google" id="suGoogle" type="button"${busy}>${googleMark()} Continue with Google</button></div><p class="su-returning">New or returning, Google signs you in. <button class="su-signin" id="suSignIn" type="button"${busy}>Use email instead</button></p><p class="su-application-note">${applicationNote}</p>${error}</div>`;
       document.getElementById("suGoogle")?.addEventListener("click", startInstallationGoogle);
-      document.getElementById("suSignIn")?.addEventListener("click", startInstallationSignIn);
+      // Email stays in the app: its own screen sends a one-time code, and the
+      // server makes the account for a new email. This used to open the
+      // website's sign-in page, where a new email met "Couldn't find your
+      // account" (fresh Mac VM, 2026-10-08). Only Google needs the browser.
+      document.getElementById("suSignIn")?.addEventListener("click", () => { signupStage = "email"; signupError = ""; renderSignup(); });
       return;
     }
     if (signupStage === "email") {

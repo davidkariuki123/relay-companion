@@ -108,7 +108,8 @@ test("clicking a contact opens the conversation; only Edit opens the card", () =
   assert.match(opener, /if \(!window\.relay\.openChatWith\) \{/);
   // A room that will not open says so on the LIST, which is what was clicked:
   // the card that used to carry this is shut on this path.
-  assert.match(opener, /cvOpenGeneration === openGeneration && cvOpeningKey === key && activeView === "contacts"/);
+  assert.match(opener, /cvOpenGeneration === openGeneration && cvOpeningKey === key\n\s+&& \(activeView === "contacts" \|\| \(wideLayoutActive\(\) && wideSideTab\(\) === "contacts"\)\)/,
+    "a chat opened beside the expanded Contacts list still counts as Contacts");
   assert.match(opener, /if \(!stillCurrent\(\)\) return;/, "a slow result cannot open the previously clicked person");
   assert.match(opener, /storeCanonicalChatDetail\(res\.chat, \{ surface:"relay" \}\)/);
   assert.match(opener, /directContactRoomAnchor\(res\.chat, c, email, res\.recipient\)/);

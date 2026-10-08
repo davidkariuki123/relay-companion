@@ -156,7 +156,10 @@ try {
     createdAt:new Date(Date.now()+i*60000).toISOString()});
     pushTestPayload(testPayload); openThreadDetail('thread_receipt','Receipt test','relays');`);
   await pause(800);
+  // The person scrolls up to it: a wheel first (a freshly opened room holds
+  // its newest message until someone actually scrolls), then the distance.
   await evaluate(`const s=roomScrollElement(),b=document.querySelector('[data-receipt-toggle]');
+    s.dispatchEvent(new WheelEvent('wheel',{bubbles:true,deltaY:-40}));
     s.scrollTop+=b.getBoundingClientRect().bottom-document.querySelector('.th-composer-dock').getBoundingClientRect().top+4;`);
   await pause(100);
   await clickReceipt();
