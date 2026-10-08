@@ -100,3 +100,17 @@ test("setup handoffs carry only an opaque intent and trusted origin", () => {
   assert.deepEqual(parseRelayDeepLink(`relay://setup?intent=${id}&origin=https%3A%2F%2Fsendrelays.com`), { setupIntent:id, origin:"https://sendrelays.com" });
   for (const url of ["relay://setup?intent=short&origin=https://sendrelays.com",`relay://setup?intent=${id}&origin=https://evil.example`,`relay://setup?intent=${id}&origin=http://sendrelays.com`,`relay://user:pass@setup?intent=${id}&origin=https://sendrelays.com`]) assert.equal(parseRelayDeepLink(url),null);
 });
+
+test("a Slack card click by this account opens the Relay in the pill, once, whatever browser Slack used", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const main = await readFile(new URL("../overlay/main.cjs", import.meta.url), "utf8");
+  const client = await readFile(new URL("../src/client.js", import.meta.url), "utf8");
+  assert.match(client, /claimSlackOpenRequests\(\) \{\s*return this\.#req\("POST", "\/v1\/slack\/open-requests\/claim", \{\}\);/);
+  // Claimed at boot and on every account-change wake, through the relay:// queue.
+  assert.match(main, /claimSlackOpens\(\);\s*sentLiveWake = startSentLiveWake\(/);
+  assert.match(main, /onChange: async \(\) => \{\s*claimSlackOpens\(\);/);
+  assert.match(main, /queueRelayDeepLink\(\{ messageId: String\(request\.messageId\), host: request\.host/);
+  // The browser's relay:// link and the server's word are one click: the second only answers the browser.
+  assert.match(main, /\(parsed\.host === "relay" \|\| parsed\.host === "conductor"\) && !freshRelayOpen\(parsed\)/);
+  assert.match(main, /const RELAY_OPEN_DEDUPE_MS = 15_000;/);
+});

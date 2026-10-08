@@ -92,9 +92,27 @@ const { execFile, execFileSync, spawn, pathToFileURL } = (() => {
 const pendingRelayDeepLinks = [];
 const pendingDesktopIntents = [];
 let relayDeepLinksReady = false;
+// One click in Slack can reach the pill twice: the browser's relay:// link
+// (when that browser is signed in to Relay) and the server's word that this
+// account clicked. Whichever lands first opens it; the other is the same click.
+const RELAY_OPEN_DEDUPE_MS = 15_000;
+const recentRelayOpens = new Map();
+function freshRelayOpen(parsed) {
+  const key = `${parsed.messageId}:${parsed.host}`;
+  const now = Date.now();
+  for (const [seen, at] of recentRelayOpens) if (now - at > RELAY_OPEN_DEDUPE_MS) recentRelayOpens.delete(seen);
+  if (recentRelayOpens.has(key)) return false;
+  recentRelayOpens.set(key, now);
+  return true;
+}
 function queueRelayDeepLink(parsed) {
   if (!parsed) return false;
   if(parsed.setupIntent){pendingDesktopIntents.push(parsed);if(relayDeepLinksReady)void drainDesktopIntents();return true;}
+  if ((parsed.host === "relay" || parsed.host === "conductor") && !freshRelayOpen(parsed)) {
+    // Still answer the browser, so its page says the Relay opened.
+    if (parsed.handoffId) void acknowledgeRelayDeepLink(parsed);
+    return true;
+  }
   // Windows and Linux deliver custom protocols through argv/second-instance,
   // while macOS normally uses open-url. Keep the complete validated handoff on
   // every route: dropping handoffId/ackOrigin makes the browser report failure
@@ -2302,9 +2320,24 @@ function startSentLiveWakeForAccount() {
     }
     if (deviceToken() !== token) { sentLiveWakeToken = ""; return; }
     if (typeof client.waitForAccountChange !== "function") return;
+    // Open Relay clicked in Slack by this account: the server wakes this
+    // cursor, and the pill opens the Relay whatever browser Slack used.
+    const claimSlackOpens = () => {
+      if (currentProductFeatures().slack !== true || typeof client.claimSlackOpenRequests !== "function") return;
+      client.claimSlackOpenRequests()
+        .then((body) => {
+          for (const request of Array.isArray(body?.requests) ? body.requests : []) {
+            if (!request?.messageId || !["relay", "conductor"].includes(request.host)) continue;
+            queueRelayDeepLink({ messageId: String(request.messageId), host: request.host, ...(request.chatId ? { chatId: String(request.chatId) } : {}) });
+          }
+        })
+        .catch((error) => console.error("[overlay] Slack open requests unavailable:", error && error.message));
+    };
+    claimSlackOpens();
     sentLiveWake = startSentLiveWake({
       wait: (since, signal) => client.waitForAccountChange(since, signal),
       onChange: async () => {
+        claimSlackOpens();
         // refreshSent() logs its own failures and returns the old cache; the
         // commit counter is what proves the server answered. An unanswered
         // wake keeps its cursor so the change is asked for again.

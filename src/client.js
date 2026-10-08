@@ -472,6 +472,11 @@ export class RelayClient {
     return this.#req("GET", `/v1/session-operations/${encodeURIComponent(operationId)}`);
   }
 
+  /** Slack card clicks (Open Relay, Open in Conductor) this account made in the last minute; each is returned once. */
+  claimSlackOpenRequests() {
+    return this.#req("POST", "/v1/slack/open-requests/claim", {});
+  }
+
   sessionControllerInbox() {
     return this.#req("GET", "/v1/session-operations/controller-inbox");
   }
