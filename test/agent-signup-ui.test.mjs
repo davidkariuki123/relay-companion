@@ -172,7 +172,13 @@ test("a wrong identity stays human-confirmed and returns to the method chooser b
   assert.match(overlay, /window\.relay\.installationAuthRestart\(\)/);
   assert.match(overlay, /installationAuthSignIn\(\{ forceAccountSelection: signupForceGoogleSelection \}\)/);
   assert.match(overlay, /installationAuthApprove\(\)/);
-  assert.ok(overlay.indexOf("Change account") < overlay.indexOf("installationAuthApprove()"));
+  // Approval runs only from the person's own confirmation: the "Use this
+  // account" button after a browser sign-in, or the email code they just typed
+  // into this app (their own address, proven on this computer).
+  const callers = [...overlay.matchAll(/approveSignupAccount\b/g)].map((m) => overlay.slice(m.index - 120, m.index));
+  assert.equal(callers.length, 3, "definition, the Use this account button, the typed email code");
+  assert.ok(callers.some((c) => /getElementById\("suApprove"\)\?\.addEventListener\("click", $/.test(c)));
+  assert.ok(callers.some((c) => /state\?\.status === "pending_approval"\) \{ await $/.test(c)));
   assert.match(overlay, /Sign in to Relay/);
   assert.match(overlay, /Claude Code · Cowork · Codex/);
   assert.match(overlay, /Account verified/);

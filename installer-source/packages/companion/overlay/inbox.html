@@ -22719,6 +22719,19 @@
     return account && typeof account === "object" ? "expired" : "method";
   }
 
+  async function approveSignupAccount() {
+    signupBusy = true; signupError = ""; renderSignup();
+    try {
+      const state = await window.relay.installationAuthApprove();
+      signupBusy = false; signupStage = "finishing"; applyInstallationState(state);
+      if (state?.status === "consumed") {
+        signupConnectionCommitted = true;
+        try { onPayload(await window.relay.refresh()); } catch {}
+      }
+      renderSignup(); pollInstallationState();
+    } catch (reason) { signupFailure(reason, "Relay could not connect this account."); }
+  }
+
   function applyInstallationState(state) {
     if (!state || typeof state !== "object") return;
     if (state.account && typeof state.account === "object") signupAccount = state.account;
@@ -23885,33 +23898,32 @@
         signupBusy = true; signupError = ""; renderSignup();
         try {
           const state = await window.relay.installationAuthEmailVerify(code);
-          signupBusy = false; applyInstallationState(state); renderSignup();
+          signupBusy = false; applyInstallationState(state);
+          // The code was typed into this app on this computer: that is the
+          // approval. The desktop flow otherwise waits for the browser to
+          // approve, which never happens on the email path, so a new user sat
+          // on "Continue in your browser" forever (fresh Mac VM, 2026-10-08).
+          if (state?.status === "pending_approval") { await approveSignupAccount(); return; }
+          renderSignup();
         } catch (reason) { signupFailure(reason, "That code did not work."); }
       });
       return;
     }
     if (signupStage === "google") {
       const retry = signupError ? `<button class="su-primary" id="suResume" type="button"${busy}>Try again</button>` : "";
-      signupBodyEl.innerHTML = `<p class="su-step">Your account</p><h1 class="su-title">Continue in your browser.</h1><p class="su-copy">Sign in there, or create your Relay account if this is your first time.</p><div class="su-account"><span class="su-account-name">Waiting for sign-in…</span><span class="su-account-email">Look for the new tab in your browser.</span></div><div class="su-form">${retry}${cancelSetupButton()}</div>${error}`;
+      signupBodyEl.innerHTML = `<p class="su-step">Your account</p><h1 class="su-title">Continue in your browser.</h1><p class="su-copy">Sign in there, or create your Relay account if this is your first time.</p><div class="su-account"><span class="su-account-name">Waiting for sign-in…</span><span class="su-account-email">Look for the new tab in your browser.</span></div><div class="su-form">${retry}<button class="su-link" id="suUseEmail" type="button"${busy}>Use email instead</button>${cancelSetupButton()}</div>${error}`;
       bindSignupResume();
       bindSignupCancel();
+      // Someone waiting on Google may have no Google account, or an address
+      // Google refuses (fresh Mac VM, 2026-10-08). Email is one click away
+      // here, not behind Cancel setup.
+      document.getElementById("suUseEmail")?.addEventListener("click", () => { stopSignupPolling(); signupStage = "email"; signupError = ""; renderSignup(); });
       return;
     }
     if (signupStage === "approval") {
       const account = signupAccount || {};
       signupBodyEl.innerHTML = `<p class="su-step">Your account</p><h1 class="su-title">You’re signed in.</h1><p class="su-copy">Use this account in Relay and its Claude Code and Codex integrations on this computer.</p><div class="su-account"><span class="su-account-name">${esc(account.displayName || account.email || "Relay account")}</span>${account.email ? `<span class="su-account-email">${esc(account.email)}</span>` : ""}<span class="su-device">This computer<br />Claude Code · Cowork · Codex</span></div><div class="su-form"><button class="su-primary" id="suApprove" type="button"${busy}>Use this account</button><button class="su-link" id="suAnother" type="button"${busy}>Change account</button>${cancelSetupButton()}</div>${error}`;
-      document.getElementById("suApprove")?.addEventListener("click", async () => {
-        signupBusy = true; signupError = ""; renderSignup();
-        try {
-          const state = await window.relay.installationAuthApprove();
-          signupBusy = false; signupStage = "finishing"; applyInstallationState(state);
-          if (state?.status === "consumed") {
-            signupConnectionCommitted = true;
-            try { onPayload(await window.relay.refresh()); } catch {}
-          }
-          renderSignup(); pollInstallationState();
-        } catch (reason) { signupFailure(reason, "Relay could not connect this account."); }
-      });
+      document.getElementById("suApprove")?.addEventListener("click", approveSignupAccount);
       document.getElementById("suAnother")?.addEventListener("click", async () => {
         await restartInstallationSetup({ forceGoogleSelection:true });
       });

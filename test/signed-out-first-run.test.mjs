@@ -78,3 +78,23 @@ test("the email and code screens speak to a new person and offer one way back", 
   assert.match(screens, /id="suEmailBack" type="button">Back</);
   assert.match(screens, />Use another email</);
 });
+
+// Fresh Mac VM (2026-10-08): waiting on Google, the only way to email was
+// Cancel setup; Google had just refused the person's address.
+test("the browser wait offers email in one click", () => {
+  const google = html.slice(html.indexOf('if (signupStage === "google") {'), html.indexOf('if (signupStage === "approval") {'));
+  assert.match(google, /id="suUseEmail" type="button"\$\{busy\}>Use email instead</);
+  assert.match(google, /getElementById\("suUseEmail"\)\?\.addEventListener\("click", \(\) => \{ stopSignupPolling\(\); signupStage = "email";/);
+});
+
+// Fresh Mac VM (2026-10-08): after a correct email code the pill showed
+// "Continue in your browser" and waited forever; only the Google path has a
+// browser that approves.
+test("a verified email code finishes sign-in in the app", () => {
+  const code = html.slice(html.indexOf('if (signupStage === "code") {'), html.indexOf('if (signupStage === "google") {'));
+  assert.match(code, /installationAuthEmailVerify\(code\);\s*signupBusy = false; applyInstallationState\(state\);[\s\S]*?if \(state\?\.status === "pending_approval"\) \{ await approveSignupAccount\(\); return; \}/);
+  const approve = html.slice(html.indexOf("async function approveSignupAccount()"), html.indexOf("function applyInstallationState("));
+  assert.match(approve, /window\.relay\.installationAuthApprove\(\)/);
+  assert.match(approve, /signupStage = "finishing"/);
+  assert.match(html, /getElementById\("suApprove"\)\?\.addEventListener\("click", approveSignupAccount\);/);
+});
