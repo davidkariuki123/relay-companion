@@ -36,7 +36,10 @@ export function builderConfiguration({ appDir, resourcesDir, electronDist, outpu
     artifactName: application ? `Relay-\${version}-${platform}.\${ext}` : "Relay-Migration-Preview-${version}-${os}-${arch}.${ext}",
     ...(application ? { protocols: [{ name: "Relay", schemes: ["relay"] }] } : {}),
     publish: null,
-    mac: { target: ["dmg", "zip"], category: "public.app-category.productivity", identity: null },
+    // Without an icon electron-builder ships Electron's atom, which is what a
+    // fresh Mac showed in the Dock, the DMG and Finder (live run 29, 2026-10-08).
+    mac: { target: ["dmg", "zip"], category: "public.app-category.productivity", identity: null,
+      ...(resourcesDir ? { icon: path.join(resourcesDir, "relay.icns") } : {}) },
     win: { target: ["nsis"], signExecutable: false, ...(resourcesDir ? { icon: path.join(resourcesDir, "relay.ico") } : {}) },
     nsis: { oneClick: false, perMachine: false, allowElevation: false,
       allowToChangeInstallationDirectory: false, runAfterFinish: application,
@@ -111,6 +114,7 @@ export async function prepareCandidate({ manifestFile, artifactFile, version, so
   fs.copyFileSync(artifactFile, path.join(archiveDirectory, "runtime.tar.gz"));
   fs.writeFileSync(path.join(resourcesDir, "runtime-manifest.json"), envelopeBytes);
   fs.copyFileSync(path.join(packageRoot, "overlay", "relay.ico"), path.join(resourcesDir, "relay.ico"));
+  fs.copyFileSync(path.join(root, "lib", "relay.icns"), path.join(resourcesDir, "relay.icns"));
   // Preserve Node as an installer resource; no dependency on the user's PATH.
   const nodeName = process.platform === "win32" ? "node.exe" : "node";
   fs.copyFileSync(process.execPath, path.join(resourcesDir, nodeName));

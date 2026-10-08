@@ -2942,6 +2942,11 @@
   .th-rt-tray.standalone { flex:none; width:fit-content; min-width:min(300px, 88%); max-width:88%; margin:6px 16px 2px; padding:5px 13px 6px;
     border:0; border-radius:14px; background:var(--wash); }
   .th-rt-news { position:relative; padding:6px 0 5px; isolation:isolate; }
+  /* The reply before the news: the same row, quieter, two lines at most. */
+  .th-rt-context { padding:6px 0 5px; opacity:.62; }
+  .th-rt-context .th-rt-news-head .th-party { font-size:12px; font-weight:600; }
+  .th-rt-context-text { margin-top:2px; font-size:12.5px; line-height:18px; color:var(--ink-2); overflow:hidden;
+    display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow-wrap:anywhere; }
   .th-rt-news + .th-rt-news { margin-top:1px; }
   .th-rt-news-head { display:flex; align-items:baseline; gap:7px; min-width:0; }
   .th-rt-news-head .th-party { font-size:12px; font-weight:600; }
@@ -16612,13 +16617,33 @@
     return replyNews;
   }
 
-  function replyNewsTrayHtml(root, items, byId, { standalone = false } = {}) {
+  function replyNewsTrayHtml(root, items, byId, { standalone = false, thread = [] } = {}) {
     if (!root || !items.length) return "";
     const rootId = String(root.id || "");
     const folds = items.length > REPLY_NEWS_SHOWN;
     const lead = folds ? items.slice(0, REPLY_NEWS_LEAD) : items;
     const rest = folds ? items.slice(REPLY_NEWS_LEAD) : [];
     const onShow = new Set(items.map((item) => String(item.id || "")));
+    // A new reply arrives in the middle of a conversation: "Makes sense"
+    // under a Relay, alone, answers nothing you can see (David, Designs,
+    // 2026-10-08). Replies sent from the reader all name the Relay, not the
+    // message they answer, so the one honest context is what came just
+    // before: the thread's previous reply, quiet, above the news.
+    const firstAt = new Date(lead[0]?.at || 0).getTime();
+    const before = (thread || [])
+      .filter((reply) => !onShow.has(String(reply.id || "")) && String(reply.id || "") !== rootId && !reply.deletedAt
+        && new Date(reply.at || 0).getTime() < firstAt)
+      .sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0))
+      .pop() || null;
+    const leadParent = lead[0]?.inReplyToRelayId ? byId.get(String(lead[0].inReplyToRelayId)) : null;
+    const contextHtml = before && !(leadParent && leadParent !== root)
+      ? (() => {
+        const voice = replyAuthor(before);
+        return `<div class="th-rt-context" data-rt-context="${esc(before.id)}">`
+          + `<div class="th-rt-news-head"><span class="th-party ${partyColorClass(voice.name, voice.mine)}">${esc(voice.name)}</span>${chatTimestampHtml(before.at, "th-rt-news-time")}</div>`
+          + `<div class="th-rt-context-text">${esc(String(before.body || before.title || "Message").replace(/\s+/g, " "))}</div></div>`;
+      })()
+      : "";
     const row = (reply) => {
       const name = String(reply.party || "Someone");
       const parent = reply.inReplyToRelayId ? byId.get(String(reply.inReplyToRelayId)) : null;
@@ -16649,7 +16674,7 @@
       ? `<button type="button" class="th-rt-more" data-rt-more="${esc(rootId)}" aria-expanded="false"><span class="th-rt-dot" aria-hidden="true"></span><span class="th-rt-faces">${faces}</span><span class="th-rt-more-label">${rest.length} more new ${rest.length === 1 ? "reply" : "replies"}</span><svg class="th-rt-more-chev" width="9" height="9" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.6 5 6.6l3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`
         + `<div class="th-rt-fold"><div class="th-rt-fold-inner">${rest.map(row).join("")}</div></div>`
       : "";
-    return `<div class="th-rt-tray${standalone ? " standalone" : ""}" data-rt-tray="${esc(rootId)}" data-stop="1" role="group" aria-label="${items.length} new ${items.length === 1 ? "reply" : "replies"}">${lead.map(row).join("")}${more}</div>`;
+    return `<div class="th-rt-tray${standalone ? " standalone" : ""}" data-rt-tray="${esc(rootId)}" data-stop="1" role="group" aria-label="${items.length} new ${items.length === 1 ? "reply" : "replies"}">${contextHtml}${lead.map(row).join("")}${more}</div>`;
   }
 
   // Unread state lives on the payload rows; markup never carries it, so a
@@ -19331,9 +19356,9 @@
       const newsItems = replyNewsItemsFor(m);
       const holdsNews = newsItems.length > 0 && !attachmentOnly;
       const newsInBubble = holdsNews && !hasHostActions
-        ? `${replyNewsTrayHtml(m, newsItems, messageById)}${replyThreadSummaryHtml(m, replyThreadRepliesFor(m), { strip:true, inBubble:true, quiet:true })}`
+        ? `${replyNewsTrayHtml(m, newsItems, messageById, { thread:replyThreadRepliesFor(m) })}${replyThreadSummaryHtml(m, replyThreadRepliesFor(m), { strip:true, inBubble:true, quiet:true })}`
         : "";
-      const threadTailHtml = `${attachmentOnly && newsItems.length ? replyNewsTrayHtml(m, newsItems, messageById, { standalone:true }) : ""}${hasHostActions || holdsNews ? "" : replyThreadSummaryHtml(m, replyThreadRepliesFor(m), { mine, key:`${renderKey}:thread-link`, quiet:newsItems.length > 0 })}${focusedReplyRoot && m === focusedReplyRoot ? (() => {
+      const threadTailHtml = `${attachmentOnly && newsItems.length ? replyNewsTrayHtml(m, newsItems, messageById, { standalone:true, thread:replyThreadRepliesFor(m) }) : ""}${hasHostActions || holdsNews ? "" : replyThreadSummaryHtml(m, replyThreadRepliesFor(m), { mine, key:`${renderKey}:thread-link`, quiet:newsItems.length > 0 })}${focusedReplyRoot && m === focusedReplyRoot ? (() => {
         const count = (roomReplyThreads.groups.get(replyThreadFocusId) || []).length;
         return `<div class="th-rt-divider" role="separator" data-chat-key="${esc(renderKey)}:thread"><span>${count ? `${count} ${count === 1 ? "reply" : "replies"}` : "No replies yet"}</span></div>`;
       })() : ""}`;
@@ -19356,7 +19381,7 @@
         ${showProviderByline ? providerBylineHtml(m) : ""}
         ${hasHostActions ? relayHostActionsHtml(m, { persistent:hostActionsPersistent }) : ""}
         ${!textLike && !editingMessage ? chatTimestampHtml(m.at) : ""}
-        ${hasHostActions ? `${holdsNews ? replyNewsTrayHtml(m, newsItems, messageById) : ""}${replyThreadSummaryHtml(m, replyThreadRepliesFor(m), { strip:true, quiet:holdsNews })}` : newsInBubble}
+        ${hasHostActions ? `${holdsNews ? replyNewsTrayHtml(m, newsItems, messageById, { thread:replyThreadRepliesFor(m) }) : ""}${replyThreadSummaryHtml(m, replyThreadRepliesFor(m), { strip:true, quiet:holdsNews })}` : newsInBubble}
         ${taskFooter}
         ${badges}
       </div>

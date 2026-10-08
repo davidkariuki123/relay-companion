@@ -62,10 +62,16 @@ try {
 
   // A tap on the banner opens the chat on the reply it announced.
   await page.waitForFunction(() => collapsed && !peeking, null, { timeout: 5000 });
+  await page.evaluate(() => { const first = window.fixture.relays.find((row) => row.id === "relay_outline"); first.unread = false; first.state = "read"; });
   await arrive("relay_fullscreen", "Maybe it should just be a full app");
   await page.locator('.relay-arrival[data-opening-id="relay_fullscreen"] .th-party').click();
   await page.waitForFunction(() => activeView === "threads");
   await page.waitForFunction(() => replyNewsPlacement("relay_fullscreen") === "visible");
+  // The news never arrives alone: the reply before it sits above, quieter,
+  // because a reply sent from the reader names the Relay, not what it answers.
+  const tray = page.locator('[data-rt-tray]:has([data-rt-news="relay_fullscreen"])');
+  assert.equal(await tray.locator("[data-rt-context]").getAttribute("data-rt-context"), "relay_outline");
+  assert.match(await tray.locator(".th-rt-context").innerText(), /needs a subtle outline/);
 
   assert.deepEqual(errors, []);
   console.log("thread reply arrival: ok");
