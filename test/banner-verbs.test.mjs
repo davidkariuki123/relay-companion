@@ -93,15 +93,15 @@ test("a text wears no agent verbs — they belong to a relay", () => {
 
 test("the room's composer sits under the row from the start, and only while peeking", () => {
   // Right after the verbs, inside the row body, on the same peeking condition.
-  assert.match(row, /\$\{peeking \? bannerVerbsHtml\(row\) : ""\}\n\s+\$\{peeking \? bannerComposerHtml\(identity, row\) : ""\}/);
-  const composer = between(inbox, "function bannerComposerHtml(identity, row)", "function bannerReplyRecipient(identity, row)");
+  assert.match(row, /\$\{peeking \? bannerVerbsHtml\(row\) : ""\}\n\s+\$\{peeking \? bannerComposerHtml\(identity, row, inThread\) : ""\}/);
+  const composer = between(inbox, "function bannerComposerHtml(identity, row, inThread = false)", "function groupRoomRecipient(room)");
   assert.match(composer, /if \(!peeking \|\| !identity \|\| identity\.requestRoom \|\| identity\.provider === "slack"\) return "";/);
   // The room composer's own box: .qr.th-qr.col, the rich field, the rail, the
   // Send verb (a typed message is a text; "Relay" is the AI-written kind). No new species.
-  assert.match(composer, /<div class="qr th-qr col qr-banner" data-stop="1"><div class="th-rich-composer" contenteditable="true" role="textbox" aria-multiline="true"/);
+  assert.match(composer, /<div class="qr th-qr col qr-banner" data-stop="1"\$\{inThread \? ` data-reply-to="\$\{esc\(row\.id\)\}"` : ""\}><div class="th-rich-composer" contenteditable="true" role="textbox" aria-multiline="true"/);
   assert.match(composer, /<div class="ta-rail"><span class="rt-spacer"><\/span><button type="button" class="qr-banner-send" data-stop="1">Send<\/button><\/div><\/div>/);
-  // The placeholder names where the words go: the channel, or the person's first name.
-  assert.match(composer, /\? `Reply in \$\{identity\.name\}…`\n\s+: `Reply to \$\{String\(identity\.name \|\| row\.party \|\| "them"\)\.split\(" "\)\[0\]\}…`/);
+  // The placeholder names where the words go: the thread, the channel, or the person's first name.
+  assert.match(composer, /const placeholder = inThread \? "Reply in thread…" : identity\.isGroup\n\s+\? `Reply in \$\{identity\.name\}…`\n\s+: `Reply to \$\{String\(identity\.name \|\| row\.party \|\| "them"\)\.split\(" "\)\[0\]\}…`/);
   // Its only styling is a home inside the row; the box itself is the room's.
   assert.match(inbox, /\.card\.peek \.qr\.qr-banner \{ margin:12px 0 0; padding:10px 10px 6px 16px; \}/);
   // The field is dressed like the room's (grow, +, paste, Enter sends) and stages its own files.
@@ -114,13 +114,15 @@ test("the room's composer sits under the row from the start, and only while peek
 
 test("a reply from the banner goes down the room's path, reads the arrival, and folds the banner", () => {
   const send = between(inbox, "async function sendBannerReply(rowEl, field, send)", "function relayIdentityRowHtml(identity, show = null)");
-  assert.match(send, /res = await window\.relay\.sendReply\(\{\n\s+text, recipient, files, idempotencyKey, agentMentions,\n\s+chat: \{/);
+  assert.match(send, /res = await window\.relay\.sendReply\(\{\n\s+text, recipient, files, idempotencyKey, agentMentions,\n\s+\.\.\.\(inReplyToRelayId \? \{ inReplyToRelayId \} : \{\}\),\n\s+chat: \{/);
+  // A reply that arrived in a thread is answered in it.
+  assert.match(send, /const inReplyToRelayId = String\(field\.closest\("\.qr-banner"\)\?\.getAttribute\("data-reply-to"\) \|\| ""\);/);
   assert.match(send, /const idempotencyKey = `pill-reply-\$\{crypto\.randomUUID\(\)\}`;/);
   // A refused send keeps the words in the field and says why under it.
   assert.match(send, /bannerReplyNote\(rowEl, \(res && res\.error\) \|\| "Send failed — try again\."\);/);
   // Replying reads the arrival; the words take the row's own "You:" line; the banner folds a beat later.
   assert.match(send, /if \(arrivalId\) persistReadIds\(\[arrivalId\]\);/);
-  assert.match(send, /<span class="gist-who">You:<\/span> \$\{esc\(shown\)\}/);
+  assert.match(send, /<span class="gist-who">\$\{inReplyToRelayId \? "You in a thread:" : "You:"\}<\/span> \$\{esc\(shown\)\}/);
   assert.match(send, /bannerReplySettling = true;\n\s+sizePeek\(\);/);
   assert.match(send, /if \(ghost\) dismissOverlay\(\);\n\s+else \{ foldToPill\(\); sendAttentionDone\(true\); \}/);
   // While it settles the rows hold; a rebuild carries every live draft over.

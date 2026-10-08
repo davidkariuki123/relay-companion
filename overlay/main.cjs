@@ -327,6 +327,14 @@ const networkOnboardingCompleted = { ...overlayPrefs.networkOnboardingCompleted 
 const onboardingAgents = overlayPrefs.onboardingAgents && typeof overlayPrefs.onboardingAgents === "object"
   ? { ...overlayPrefs.onboardingAgents }
   : {};
+// Test seam: an end-to-end harness reads each opened link from a private file
+// and opens it in its own browser instead of the person's.
+function openExternalOrTestSeam(url) {
+  if (process.env.RELAY_OVERLAY_TEST_NO_HOST_OPEN !== "1") return shell.openExternal(url);
+  console.error("[overlay] test seam: suppressed external open:", String(url).slice(0, 40));
+  if (process.env.RELAY_OVERLAY_TEST_OPEN_LOG) fs.appendFileSync(process.env.RELAY_OVERLAY_TEST_OPEN_LOG, `${url}\n`, { mode: 0o600 });
+  return Promise.resolve();
+}
 const agentOnboarding = createAgentOnboarding({
   store: onboardingAgents,
   persist: () => writeOverlayPrefs(),
@@ -335,11 +343,7 @@ const agentOnboarding = createAgentOnboarding({
   // file and opens it in its own browser, and can hide the Claude app so a
   // test never drives the person's real one.
   schemeOwner: (scheme) => process.env.RELAY_OVERLAY_TEST_NO_CLAUDE_APP === "1" && scheme === "claude://" ? "" : app.getApplicationNameForProtocol(scheme),
-  openExternal: (url) => process.env.RELAY_OVERLAY_TEST_NO_HOST_OPEN === "1"
-    ? (console.error("[overlay] test seam: suppressed external open:", url.slice(0, 40)),
-      process.env.RELAY_OVERLAY_TEST_OPEN_LOG && fs.appendFileSync(process.env.RELAY_OVERLAY_TEST_OPEN_LOG, `${url}\n`, { mode: 0o600 }),
-      Promise.resolve())
-    : shell.openExternal(url),
+  openExternal: (url) => openExternalOrTestSeam(url),
   writeClipboard: (text) => clipboard.writeText(text),
 });
 const agentOnboardingRefreshing = new Set();
@@ -671,7 +675,9 @@ function installationAuthorizationController() {
         webBase: process.env.RELAY_WEB_URL || readConfigFile().webUrl || DEFAULT_WEB_BASE,
         approvalSurface: installedFirstOnboarding ? "browser-v1" : undefined,
         deviceName: String(readConfigFile().deviceName || "").trim() || os.hostname(),
-        openExternal: (url) => shell.openExternal(url),
+        // The sign-in page goes through the same test seam: an end-to-end run
+        // of a signed-out install opened it in the person's real browser.
+        openExternal: (url) => openExternalOrTestSeam(url),
         onConnected: async (registration) => {
           const { notifications } = await loadAccountModules();
           nativeCredentialCache = { version: null, token: "" };

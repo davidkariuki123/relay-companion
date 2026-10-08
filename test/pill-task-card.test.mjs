@@ -544,7 +544,7 @@ test("Done on an Everyone card asks on the You row, and only the sender's rows a
 
 // ---------- EXECUTE ON THE CARD ----------
 // Execute is a developer-tier verb that runs the RECEIVED copy of a Task. It
-// sits in the agent row of the chat card beside Copy for your agent, and under
+// sits first in the chat card's verbs row, at Reject and Done's level, and under
 // the ladder in the reader, behind one gate: the feature on, the viewer holds
 // the received copy, the Task not yet started or over, no other claimant.
 test("Execute is on the card for the person it was sent to, and only with the feature on", () => {
@@ -552,7 +552,13 @@ test("Execute is on the card for the person it was sent to, and only with the fe
   assert.doesNotMatch(off, /data-native-execute/, "no feature, no verb");
   const t = boot({ features: { taskExecution: true } });
   const footer = t.taskCardFooterHtml(inboundTask());
-  assert.match(footer, /class="tk-agent-verbs"><button[^>]*data-tk-copy="t1"[^>]*>Copy for your agent<\/button><button[^>]*data-native-execute="t1"[^>]*>Execute</, "beside Copy for your agent");
+  assert.match(footer, /class="tk-verbs"><button type="button" class="tk-btn execute" data-native-execute="t1"[^>]*>Execute<\/button><button[^>]*data-task-verb="reject"[^>]*>Reject<\/button><button[^>]*data-task-verb="done"/, "a button first in the row with Reject and Done");
+  assert.doesNotMatch(footer, /tk-agent-verbs"><button[^>]*data-tk-copy="t1"[^>]*>Copy for your agent<\/button><button/, "no longer a link in the agent row");
+  t.taskAsking.set("t1", { kind: "reject" });
+  assert.doesNotMatch(t.taskCardFooterHtml(inboundTask()), /data-native-execute/, "asking why: only Keep and the seal");
+  t.taskAsking.delete("t1");
+  const everyone = t.taskCardFooterHtml(inboundTask({ taskAssignment: "everyone", taskRoster: [{ relayId: "t1", self: true, state: "seen", name: "Me" }, { relayId: "x", state: "seen", name: "Sven" }], taskRosterCounts: { total: 2, done: 0, started: 0, rejected: 0, cancelled: 0, seen: 2, sent: 0 } }));
+  assert.match(everyone, /tk-roster-row open you[\s\S]*class="tk-verbs"><button type="button" class="tk-btn execute" data-native-execute="t1"[^>]*>Execute<\/button><button[^>]*>Reject</, "an Everyone Task: on your own row, beside your Reject and Done");
   assert.doesNotMatch(t.taskCardFooterHtml(inboundTask({ taskStartedAt: ago(5) })), /data-native-execute/, "started elsewhere: nothing to launch");
   assert.doesNotMatch(t.taskCardFooterHtml(inboundTask({ taskCompletedAt: ago(5) })), /data-native-execute/, "over: the agent row is gone too");
   assert.doesNotMatch(t.taskCardFooterHtml(sentTask()), /data-native-execute/, "the sender has no received copy to run");
@@ -563,10 +569,10 @@ test("a Task sent to yourself: the sender's bubble runs the received twin", () =
   const received = inboundTask({ id: "self1", senderName: "Me", party: "Me" });
   const bubble = sentTask({ id: "self1", relayId: "self1" });
   const t = boot({ features: { taskExecution: true }, relays: [received] });
-  assert.match(t.taskCardFooterHtml(bubble), /data-native-execute="self1"[^>]*>Execute</, "the twin by id");
+  assert.match(t.taskCardFooterHtml(bubble), /class="tk-verbs"><button[^>]*data-native-execute="self1"[^>]*>Execute<\/button><\/span>/, "the twin by id, alone in the verbs row");
   const submitted = boot({ features: { taskExecution: true }, relays: [received], nativeExecutions: { self1: { phase: "accepted", provider: "claude", status: "Working in Claude Code" } } });
   const footer = submitted.taskCardFooterHtml(bubble);
-  assert.match(footer, />Continue in native app</);
+  assert.match(footer, /title="Continue in native app">Continue</, "the short word on the card, the whole one on hover");
   assert.match(footer, /tk-execute-status">Working in Claude Code</);
   const startedTwin = inboundTask({ id: "self1", taskStartedAt: ago(2) });
   assert.doesNotMatch(boot({ features: { taskExecution: true }, relays: [startedTwin] }).taskCardFooterHtml(bubble), /data-native-execute/, "started without a native record: nothing to launch");

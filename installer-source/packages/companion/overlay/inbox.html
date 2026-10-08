@@ -34,6 +34,7 @@
     --wash-3:rgba(31,26,23,.10);    /* pressed */
     --edge:rgba(31,26,23,.16);      /* input borders, scrollbar */
     --paper-edge:rgba(255,255,255,.9);
+    --window-edge:rgba(31,26,23,.14);  /* the card's own outline */
     /* The native window is fitted exactly to this surface. Exterior CSS shadows
        are visible only while a shrink is pending, then get clipped at rest — a
        dark halo that appears to collapse into an outline. Keep the surface edge
@@ -76,6 +77,7 @@
     --wash-3:rgba(237,231,225,.11);
     --edge:rgba(237,231,225,.18);
     --paper-edge:rgba(255,255,255,.06);
+    --window-edge:rgba(237,231,225,.13);
     --shadow-card:inset 0 1px 0 var(--paper-edge);
     --shadow-pill:inset 0 1px 0 var(--paper-edge);
     --shadow-pop:0 12px 30px -18px rgba(0,0,0,.6);
@@ -111,6 +113,14 @@
     animation:appIn var(--t-slow) var(--soft) both;
   }
   .card[data-continuous-motion="running"] { --relay-loop-state:running; }
+  /* The window has no native shadow, so on an app of the same colour the
+     card had no edge at all; the big expanded card most of all (Shane,
+     2026-10-08). One hairline, drawn just inside the rounded edge because
+     the native window is fitted to the card and would clip anything outside. */
+  .card::after {
+    content:""; position:absolute; inset:0; z-index:40; pointer-events:none;
+    border-radius:inherit; box-shadow:inset 0 0 0 1px var(--window-edge);
+  }
   .card.collapsed {
     border-radius:var(--r-fold);
     box-shadow:var(--shadow-pill);
@@ -3105,17 +3115,14 @@
      card, same rows, same width) and the pane beside it, where whatever you
      open appears. Nothing in the sidebar moves when the pane changes. */
   .wide-side { display:none; }
-  /* The switch: the room's old Expand pill, moved up to the window's own
-     row. Both words get the same box, so the label changing never moves it. */
-  .wide-toggle { appearance:none; flex:0 0 auto; display:inline-flex; align-items:center; justify-content:center; gap:6px;
-    min-width:84px; height:24px; padding:0 10px; margin-right:6px; box-sizing:border-box;
-    border:1px solid var(--hair); border-radius:var(--r-pill); background:transparent; cursor:pointer;
-    color:var(--muted); font:600 11px/1 var(--sans);
-    transition:color var(--t-fast) var(--settle), border-color var(--t-fast) var(--settle), background-color var(--t-fast) var(--settle); }
-  .wide-toggle:hover { color:var(--ink); border-color:var(--muted-3); }
-  .wide-toggle:active { background:var(--wash-2); }
-  .wide-toggle:focus-visible { outline:none; box-shadow:var(--focus-ring); border-color:var(--edge-accent); }
-  .wide-toggle svg { flex:none; }
+  /* The switch is a window control like its neighbours (Sven, 2026-10-08:
+     the worded, outlined pill made the titlebar look messy): the same quiet
+     20px square, arrows out to expand and in to collapse. It never moves
+     between the two sizes, so the way back is under the pointer; the word
+     lives in its tooltip and its accessible name. */
+  .wide-toggle { position:relative; }
+  .wide-toggle:focus-visible { outline:none; box-shadow:var(--focus-ring); }
+  .wide-toggle .wl { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
   .wide-toggle .shrink { display:none; }
   .wide-toggle[aria-pressed="true"] .grow { display:none; }
   .wide-toggle[aria-pressed="true"] .shrink { display:block; }
@@ -3583,7 +3590,7 @@
   .su-keys-scroll { font-weight:600; }
   .su-key-send { padding:4px 6px; background:#d97757; color:#fff; }
   :root[data-theme="dark"] .su-key-send { background:#d97757; color:#fff; }
-  .su-key-send.chatgpt, :root[data-theme="dark"] .su-key-send.chatgpt { background:#0d0d0d; color:#fff; box-shadow:inset 0 0 0 1px rgba(255,255,255,.18); }
+  .su-key-send.chatgpt, :root[data-theme="dark"] .su-key-send.chatgpt, .su-key-send.codex, :root[data-theme="dark"] .su-key-send.codex { background:#0d0d0d; color:#fff; box-shadow:inset 0 0 0 1px rgba(255,255,255,.18); }
   .su-keys-says { margin-top:3px; padding-top:9px; border-top:1px solid var(--hair); color:var(--muted); font:12.5px/1.4 var(--sans); }
   .su-key-send svg { width:13px; height:13px; fill:none; stroke:currentColor; stroke-width:2.2; stroke-linecap:round; stroke-linejoin:round; }
   /* Claude's own settings row, drawn: the label, and the dropdown set to Always allow. */
@@ -3620,6 +3627,8 @@
   .su-keys.done .su-keys-row:nth-child(4) svg { transition-delay:.3s; }
   .su-keys.done .su-keys-row:nth-child(5) svg { transition-delay:.4s; }
   .su-keys.done .su-wheel::after { animation:none; }
+  .su-keys-row.is-done .su-keys-n svg { opacity:1; transform:none; }
+  .su-keys-where { color:var(--muted); font-weight:400; }
   @media (prefers-reduced-motion:reduce) { .su-wheel::after { animation:none; } }
   .su-claude-done { margin-top:20px; color:var(--ink); font-size:13px; font-weight:600; text-align:center; animation:su-first-send .5s var(--settle) .45s both; }
   .su-claude-connect .su-form { margin-top:20px; }
@@ -3816,7 +3825,7 @@
   :root { --tk-on:#FFFFFF; }
   :root[data-theme="dark"] { --tk-on:#141110; }
   .th-msg .tk-footer { flex:1 0 100%; min-width:0; margin-top:7px; padding-top:8px; border-top:1px solid var(--hair); cursor:default; }
-  .th-msg .tk-foot { display:flex; align-items:center; gap:8px; min-height:26px; cursor:default; }
+  .th-msg .tk-foot { display:flex; flex-wrap:wrap; align-items:center; gap:6px 8px; min-height:26px; cursor:default; }
   /* the agent row: the banner's row recipe at the footer's scale */
   .tk-agents { display:flex; flex-wrap:wrap; align-items:center; gap:6px 14px; margin:0 0 8px; }
   .tk-agents .act-btn { font-size:11.5px; line-height:1; }
@@ -3901,6 +3910,9 @@
   .tk-btn.ghost:hover { color:var(--ink); border-color:color-mix(in srgb, var(--edge) 60%, var(--ink)); }
   .tk-btn.danger { background:transparent; border-color:color-mix(in srgb, var(--danger) 55%, transparent); color:var(--danger); }
   .tk-btn.danger:hover { background:color-mix(in srgb, var(--danger) 10%, transparent); }
+  /* Execute: Reject's outline in the accent, so it reads as a step forward beside Done */
+  .tk-btn.execute { background:transparent; border-color:color-mix(in srgb, var(--accent) 60%, transparent); color:var(--accent); }
+  .tk-btn.execute:hover { background:color-mix(in srgb, var(--accent) 12%, transparent); }
   .tk-btn:active { transform:translateY(.5px); }
   .tk-btn:disabled { opacity:.45; cursor:default; }
   /* Reject asks for a word: a second line inside the footer, in the composer's field recipe */
@@ -3998,6 +4010,11 @@
   .tk-roster-row[data-task-result-of] { cursor:pointer; }
   .tk-roster-row[data-task-result-of]:hover { background:var(--wash); }
   .tk-roster-row .tk-verbs { margin-left:2px; }
+  /* with Execute there are three verbs: on a narrow card they drop under your
+     name together, at the right, rather than squeeze it to an ellipsis */
+  .tk-roster-row.you { flex-wrap:wrap; row-gap:6px; padding:3px 0; }
+  .tk-roster-row.you .tk-roster-name { flex:0 0 auto; }
+  .tk-roster-row.you .tk-verbs { margin-left:auto; }
   .tk-roster-row .tk-btn { height:24px; line-height:22px; padding:0 9px; font-size:11px; border-radius:7px; }
   .tk-roster-link { flex:0 0 auto; margin-left:2px; color:var(--muted-2); font-family:var(--sans); font-size:14px; line-height:1; }
   /* the counted line: who is left, in the same marks, ellipsised before it wraps */
@@ -4117,7 +4134,7 @@
       <!-- THE SWITCH: one control, one place, both directions. The card grows
            and folds from its top-right corner, so this button stays under the
            pointer through the motion and simply reads the other way. -->
-      <button class="wide-toggle" id="wideToggle" type="button" aria-pressed="false" aria-keyshortcuts="Meta+Shift+E" title="Expand  ⌘⇧E">
+      <button class="winbtn wide-toggle" id="wideToggle" type="button" aria-pressed="false" aria-keyshortcuts="Meta+Shift+E" title="Expand  ⌘⇧E">
         <svg class="grow" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 1h3v3M9 1L5.8 4.2M4 9H1V6M1 9l3.2-3.2"/></svg>
         <svg class="shrink" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.6 1.4v3h3M9 1L5.6 4.4M4.4 8.6v-3h-3M1 9l3.4-3.4"/></svg>
         <span class="wl" id="wideToggleLabel">Expand</span>
@@ -8123,6 +8140,7 @@
           const morphFromList = prepareReaderMorph(activeView, { motion:"forward" });
           openThreadDetail(el.getAttribute("data-thread"), el.getAttribute("data-party") || "", "relays", { mentionRelayId:el.getAttribute("data-mention-target") || "" });
           if (morphFromList) startReaderMorph("threads");
+          landOnArrivedReply(el.getAttribute("data-opening-id") || "");
         });
       }
       // The verbs never fall through to the row's own open. Copy keeps the
@@ -8765,19 +8783,33 @@
   // person. A Request (a stranger, a share-link guest) keeps its own verbs and
   // no composer: answering them is a decision taken in the room. Slack rooms
   // keep today's banner.
-  function bannerComposerHtml(identity, row) {
+  // A reply that arrived in a thread is answered in that thread, the way a
+  // Slack notification for a thread reply answers in the thread.
+  function bannerComposerHtml(identity, row, inThread = false) {
     if (!peeking || !identity || identity.requestRoom || identity.provider === "slack") return "";
     if (!row || !String(row.id || "").startsWith("relay_")) return "";
     const recipient = bannerReplyRecipient(identity, row);
     if (!recipient) return "";
-    const placeholder = identity.isGroup
+    const placeholder = inThread ? "Reply in thread…" : identity.isGroup
       ? `Reply in ${identity.name}…`
       : `Reply to ${String(identity.name || row.party || "them").split(" ")[0]}…`;
-    return `<div class="qr th-qr col qr-banner" data-stop="1"><div class="th-rich-composer" contenteditable="true" role="textbox" aria-multiline="true" aria-label="${esc(placeholder.replace(/…$/, ""))}" data-placeholder="${esc(placeholder)}"></div><div class="ta-rail"><span class="rt-spacer"></span><button type="button" class="qr-banner-send" data-stop="1">Send</button></div></div>`;
+    return `<div class="qr th-qr col qr-banner" data-stop="1"${inThread ? ` data-reply-to="${esc(row.id)}"` : ""}><div class="th-rich-composer" contenteditable="true" role="textbox" aria-multiline="true" aria-label="${esc(placeholder.replace(/…$/, ""))}" data-placeholder="${esc(placeholder)}"></div><div class="ta-rail"><span class="rt-spacer"></span><button type="button" class="qr-banner-send" data-stop="1">Send</button></div></div>`;
   }
-  // The room addresses a send by the newest message that carries an address;
-  // the banner has that message in hand.
+  // A group room speaks to the group, always. A room folds thread replies
+  // under their Relay and gathers a Task's completions, which are direct
+  // messages to you, so the newest visible row with an address can be one
+  // member's private message. Inheriting its address sent two Granular
+  // messages to Shane alone (David, 2026-10-08). Slack rooms keep their own
+  // chat address.
+  function groupRoomRecipient(room) {
+    if (!room || !room.isGroup || isSlackIntegratedRoom(room)) return null;
+    return room.groupId ? { groupId:String(room.groupId) } : null;
+  }
+  // Any other room addresses a send by the newest message that carries an
+  // address; the banner has that message in hand.
   function bannerReplyRecipient(identity, row) {
+    const group = groupRoomRecipient(identity);
+    if (group) return group;
     const candidates = [row, ...[...(identity.msgs || [])].reverse()];
     for (const message of candidates) {
       const recipient = message && message.addressRecipient;
@@ -8871,12 +8903,14 @@
     }
     const idempotencyKey = `pill-reply-${crypto.randomUUID()}`;
     const agentMentions = payload.features?.agentMentions === true ? agentMentionSpans(text) : [];
+    const inReplyToRelayId = String(field.closest(".qr-banner")?.getAttribute("data-reply-to") || "");
     let res;
     try {
       res = await window.relay.sendReply({
         text, recipient, files, idempotencyKey, agentMentions,
+        ...(inReplyToRelayId ? { inReplyToRelayId } : {}),
         chat: {
-          threadId: identity.threadId || "",
+          threadId: (inReplyToRelayId && row?.threadId) || identity.threadId || "",
           party: identity.name || "",
           partyKey: identity.partyKey || "",
           isGroup: Boolean(identity.isGroup),
@@ -8906,7 +8940,7 @@
     rowEl.querySelector(".rk-actions")?.remove();
     field.closest(".qr-banner")?.remove();
     const shown = text || (files.length === 1 ? String(files[0].name || "1 file") : `${files.length} files`);
-    if (body) body.insertAdjacentHTML("beforeend", `<span class="rk-line"><span class="th-title"><span class="gist-who">You:</span> ${esc(shown)}</span></span><span class="row-note">Sent to ${esc(identity.name || "them")}</span>`);
+    if (body) body.insertAdjacentHTML("beforeend", `<span class="rk-line"><span class="th-title"><span class="gist-who">${inReplyToRelayId ? "You in a thread:" : "You:"}</span> ${esc(shown)}</span></span><span class="row-note">Sent to ${esc(identity.name || "them")}</span>`);
     bannerReplySettling = true;
     sizePeek();
     setTimeout(() => {
@@ -9223,7 +9257,7 @@
           </span>
           <span class="rk-line"><span class="th-title">${show?.lineHtml ?? `${senderPrefix}${esc(gist)}`}</span>${identity.unreadCount && !show?.noCount ? `<span class="th-count">${identity.unreadCount}</span>` : ""}</span>
           ${peeking ? bannerVerbsHtml(row) : ""}
-          ${peeking ? bannerComposerHtml(identity, row) : ""}
+          ${peeking ? bannerComposerHtml(identity, row, inThread) : ""}
         </span>
       </div>`;
   }
@@ -10629,7 +10663,10 @@
     const current = payload.nativeExecutions?.[id];
     const busy = nativeExecuteBusy.has(id);
     const submitted = current && ["accepted", "submitting", "uncertain"].includes(current.phase);
-    return { id, busy, label: busy ? "Opening…" : submitted ? "Continue in native app" : ["awaiting_send", "draft_opening"].includes(current?.phase) ? "Open Claude draft…" : "Execute", status: current?.status || "" };
+    const draft = ["awaiting_send", "draft_opening"].includes(current?.phase);
+    // The card's button sits beside Reject and Done, so it wears the short word.
+    return { id, busy, label: busy ? "Opening…" : submitted ? "Continue in native app" : draft ? "Open Claude draft…" : "Execute",
+      short: busy ? "Opening…" : submitted ? "Continue" : draft ? "Open draft" : "Execute", status: current?.status || "" };
   }
   // The reader: the full action under the ladder, with its caption.
   function nativeExecuteHtml(row) {
@@ -10656,11 +10693,17 @@
     const browse = (pick.browse || []).map((option) => `<button class="xp-chip" type="button" data-execute-pick="${esc(st.id)}" data-provider="${esc(option.provider)}" data-browse="1" title="${esc(option.label || "")}"${disabled}><img class="xp-mark" src="${markOf(option)}" alt="">${esc(appOf(option))}</button>`).join("");
     return `<div class="tk-execute-pick" data-stop="1"><div class="tk-execute-ask"><span class="tk-execute-title">${esc(pick.question || "Where should the agent work?")}</span><span class="tk-execute-caption">${esc(pick.caption || "It will read and change files in this folder.")}</span><button type="button" class="act-btn decline tk-execute-cancel" data-execute-cancel="${esc(st.id)}">Cancel</button></div><div class="xp-rows">${rows}</div>${browse ? `<div class="xp-browse"><span class="xp-browse-label">Another folder…</span>${browse}</div>` : ""}</div>`;
   }
-  // The card: the same verb beside Copy for your agent, in that row's recipe.
+  // The card: a verb at Reject and Done's level, first in their row. Where it
+  // stands rides the agent row, which has the width for a sentence.
   function taskExecuteVerbHtml(row) {
     const st = nativeExecuteState(row);
     if (!st || nativeExecuteChoice.has(st.id)) return "";
-    return `<button type="button" class="act-btn accept" data-native-execute="${esc(st.id)}" ${st.busy ? "disabled" : ""}>${st.label}</button>${st.status ? `<span class="tk-execute-status">${esc(st.status)}</span>` : ""}`;
+    return `<button type="button" class="tk-btn execute" data-native-execute="${esc(st.id)}" title="${esc(st.label)}"${st.busy ? " disabled" : ""}>${esc(st.short)}</button>`;
+  }
+  function taskExecuteStatusHtml(row) {
+    const st = nativeExecuteState(row);
+    if (!st || !st.status || nativeExecuteChoice.has(st.id)) return "";
+    return `<span class="tk-execute-status">${esc(st.status)}</span>`;
   }
   async function runNativeExecute(id, rerender, choice) {
     if (!id || nativeExecuteBusy.has(id)) return;
@@ -10860,16 +10903,20 @@
     openReader(result.id, result.source);
   }
   const taskBtn = (label, kind, attrs = "", disabled = false) => `<button type="button" class="tk-btn ${kind}" ${attrs}${disabled ? " disabled" : ""}>${label}</button>`;
-  // The verbs a Task offers this viewer, in this state. Two at a time, never
-  // three: Reject before any work, Cancel after it began; on a channel Task
-  // the claim lifecycle (Claim · Unclaim · Release) plus Done.
+  // The verbs a Task offers this viewer, in this state. Two decisions at a
+  // time: Reject before any work, Cancel after it began; on a channel Task
+  // the claim lifecycle (Claim · Unclaim · Release) plus Done. Execute, where
+  // it applies, rides in front of them on the card (Shane, 2026-10-08); the
+  // reader has its own, captioned, under the ladder.
   function taskVerbsHtml(row, st, { surface = "chat" } = {}) {
     const id = taskIdOf(row);
-    if (taskIsMine(row)) return "";
+    if (st.over) return "";
+    const execute = surface === "chat" && !taskAsking.has(id) ? taskExecuteVerbHtml(row) : "";
+    // A Task sent to yourself: the bubble is the sender's, but Execute runs the received twin.
+    if (taskIsMine(row)) return execute ? `<span class="tk-verbs">${execute}</span>` : "";
     const busy = taskBusy.has(id);
     const at = (verb) => `data-task-verb="${verb}" data-task-id="${esc(id)}"`;
     const done = surface === "reader" ? "Mark done" : "Done";
-    if (st.over) return "";
     // Asking comes before the claim: a channel Task's Done asks too (it has
     // no Reject or Cancel, so only "done" can be asking there).
     const asking = taskAsking.get(id);
@@ -10877,15 +10924,16 @@
       const seal = asking.kind === "cancel" ? "Cancel" : asking.kind === "reject" ? "Reject" : done;
       return `<span class="tk-verbs">${taskBtn("Keep", "ghost", at("keep"), busy)}${taskBtn(seal, asking.kind === "done" ? "primary" : "danger", at(asking.kind), busy)}</span>`;
     }
+    const verbs = (html) => html || execute ? `<span class="tk-verbs">${execute}${html}</span>` : "";
     const claim = taskChannelClaim(row);
     if (claim) {
-      if (st.claim === "unclaimed") return claim.capabilities && claim.capabilities.canClaim === true ? `<span class="tk-verbs">${taskBtn("Claim", "primary", at("claim"), busy)}</span>` : "";
+      if (st.claim === "unclaimed") return verbs(claim.capabilities && claim.capabilities.canClaim === true ? taskBtn("Claim", "primary", at("claim"), busy) : "");
       if (st.claim === "other") return "";
-      if (st.claim === "mine") return `<span class="tk-verbs">${claim.capabilities && claim.capabilities.canUnclaim === true ? taskBtn("Unclaim", "ghost", at("unclaim"), busy) : ""}${taskBtn(done, "primary", at("done"), busy)}</span>`;
-      return `<span class="tk-verbs">${taskBtn("Release", "ghost", at("release"), busy)}${taskBtn(done, "primary", at("done"), busy)}</span>`;
+      if (st.claim === "mine") return verbs(`${claim.capabilities && claim.capabilities.canUnclaim === true ? taskBtn("Unclaim", "ghost", at("unclaim"), busy) : ""}${taskBtn(done, "primary", at("done"), busy)}`);
+      return verbs(`${taskBtn("Release", "ghost", at("release"), busy)}${taskBtn(done, "primary", at("done"), busy)}`);
     }
-    if (st.tone === "started") return `<span class="tk-verbs">${taskBtn("Cancel", "ghost", at("cancel"), busy)}${taskBtn(done, "primary", at("done"), busy)}</span>`;
-    return `<span class="tk-verbs">${taskBtn("Reject", "ghost", at("reject"), busy)}${taskBtn(done, "primary", at("done"), busy)}</span>`;
+    if (st.tone === "started") return verbs(`${taskBtn("Cancel", "ghost", at("cancel"), busy)}${taskBtn(done, "primary", at("done"), busy)}`);
+    return verbs(`${taskBtn("Reject", "ghost", at("reject"), busy)}${taskBtn(done, "primary", at("done"), busy)}`);
   }
   // Reject asks for a word before it refuses; Cancel and Done too. One line
   // inside the footer, in the composer's field recipe. Nothing leaves until sealed.
@@ -10907,7 +10955,7 @@
       const app = host === "codex" ? "Codex" : "Claude Code";
       return `<button type="button" class="tk-app" data-host-open="${esc(id)}" data-host="${host}" data-source="${source}" title="Open in ${app}" aria-label="Open in ${app}"><img src="${host === "codex" ? "codexMark.svg" : "claudeCodeMark.svg"}" alt=""></button>`;
     }).join("");
-    return `<div class="tk-agents${marks ? " icons" : ""}"><span class="tk-agent-verbs"><button type="button" class="act-btn accept" data-tk-copy="${esc(id)}">Copy for your agent</button>${taskExecuteVerbHtml(row)}</span>${marks ? `<span class="tk-apps">${marks}</span>` : ""}</div>`;
+    return `<div class="tk-agents${marks ? " icons" : ""}"><span class="tk-agent-verbs"><button type="button" class="act-btn accept" data-tk-copy="${esc(id)}">Copy for your agent</button>${taskExecuteStatusHtml(row)}</span>${marks ? `<span class="tk-apps">${marks}</span>` : ""}</div>`;
   }
   function taskStateRowHtml(row, st, { surface = "chat" } = {}) {
     const asking = taskAsking.get(taskIdOf(row));
@@ -11108,7 +11156,7 @@
       const counts = taskRosterCountsOf(row);
       const tone = taskRosterTone(counts);
       const asking = taskAsking.get(taskIdOf(row));
-      return `<div class="tk-footer" data-stop="1" data-task-card="${esc(taskIdOf(row))}">${roster}${live && !mine ? taskAgentRowHtml(row) : ""}<div class="tk-foot ${tone}${asking ? " asking" : ""}"><span class="tk-state">${taskMarkHtml(tone)}<span class="tk-text">${esc(taskRosterSumText(counts))}</span></span>${taskAskRowHtml(row)}</div>${taskNoteHtml(row)}</div>`;
+      return `<div class="tk-footer" data-stop="1" data-task-card="${esc(taskIdOf(row))}">${roster}${live && !mine ? taskAgentRowHtml(row) : ""}${live && !mine ? nativeExecutePickerHtml(row) : ""}<div class="tk-foot ${tone}${asking ? " asking" : ""}"><span class="tk-state">${taskMarkHtml(tone)}<span class="tk-text">${esc(taskRosterSumText(counts))}</span></span>${taskAskRowHtml(row)}</div>${taskNoteHtml(row)}</div>`;
     }
     return `<div class="tk-footer" data-stop="1" data-task-card="${esc(taskIdOf(row))}">${mine ? taskLadderRowHtml(row) : ""}${live ? taskAgentRowHtml(row) : ""}${live ? nativeExecutePickerHtml(row) : ""}${taskStateRowHtml(row, st)}${taskNoteHtml(row)}</div>`;
   }
@@ -13426,10 +13474,27 @@
           if (readerReplySending) return;
           const { r, replyChat } = input.relayReplyContext;
           const text = (input.value || "").trim();
-          if (!text) return;
-          chatTypingController.stop();
+          const staged = peekStagedFiles(input);
+          if (!text && !staged.length) return;
           readerReplySending = true;
           send.disabled = true;
+          // The + is on this composer too: its files go with the words, the
+          // way the room's do. They leave the chip row only once prepared.
+          takeStagedFiles(input);
+          let files;
+          let attachments;
+          try {
+            ({ files, attachments } = staged.length
+              ? await composerFilePayloads(staged)
+              : { files: [], attachments: [] });
+          } catch (error) {
+            readerReplySending = false;
+            send.disabled = false;
+            stageFileList(input, staged.map((f) => f.file || f));
+            setRowNote(r.id, `Could not attach that file: ${(error && error.message) || String(error)}`, "err");
+            return;
+          }
+          chatTypingController.stop();
           const idempotencyKey = `reader_${r.id}_${Date.now()}`;
           // Inside a Relay's thread a reply may quote one reply; otherwise it
           // answers the Relay.
@@ -13439,10 +13504,11 @@
             ...replyChat,
             id:`optimistic:${idempotencyKey}`, relayId:"",
             inReplyToRelayId:replyToId, explicitReply:true,
-            direction:"out", seen:false, seenAt:null, title:text, body:text,
+            direction:"out", seen:false, seenAt:null,
+            title:text || (files.length === 1 ? String(files[0].name || "1 file") : `${files.length} files`), body:text,
             at:new Date().toISOString(), unread:false,
             textLike:true, request:false, pending:true,
-            reactions:{ aggregates:[], events:[] }, preview:"",
+            reactions:{ aggregates:[], events:[] }, attachments, preview:"",
           });
           // Same contract as the room composer: Send commits the reply to this
           // device's outbox and answers immediately. The queue owes the
@@ -13452,6 +13518,7 @@
             text,
             agentMentions: agentMentionSpans(text),
             inReplyToRelayId: replyToId,
+            files,
             idempotencyKey,
             chat: replyChat,
           }).catch((error) => ({ ok:false, error:String(error?.message || error) }));
@@ -13460,6 +13527,7 @@
           if (!res?.ok) {
             // Only a device that cannot hold the message at all gets here.
             optimisticChatReplies.delete(idempotencyKey);
+            if (staged.length && input.isConnected) stageFileList(input, staged.map((f) => f.file || f));
             setRowNote(r.id, res?.error || "Reply did not send.", "err");
             if (activeView === "reader" && String(readerId) === String(r.id) && input.isConnected) input.focus();
             return;
@@ -16534,6 +16602,19 @@
       paintUnreadNavigator();
     }
   }
+  // A banner that announced a reply in a thread opens on that reply. The room
+  // opens at its newest message, and a reply folded under a Relay further up
+  // was then off screen behind a small "↑ 1 new": the notification led
+  // somewhere its message was not (David, Granular, 2026-10-08).
+  function landOnArrivedReply(id) {
+    if (!id) return;
+    const room = String(threadDetailId || "");
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (activeView !== "threads" || String(threadDetailId || "") !== room) return;
+      if (!replyNewsRow(id) || replyNewsPlacement(id, roomReadingBand()) === "visible") return;
+      void glideToReplyNews(id);
+    }));
+  }
   async function glideToNewest() {
     const scroller = roomScrollElement();
     if (!scroller || !replyNews) return;
@@ -19443,9 +19524,23 @@
             }
           : null;
         const emptyRoomAnchor = emptyGroupAnchor || emptySlackDirectAnchor || emptyRelayDirectAnchor;
-        const sendAnchor = selectedReplyTarget || addressAnchor || newest || emptyRoomAnchor;
         const inReplyToRelayId = selectedReplyTargetId || String(focusedSlackParent?.id || "") || String(focusedReplyRoot?.id || "");
-        const recipient = (addressAnchor && addressAnchor.addressRecipient)
+        // A group room is its own address and its own anchor. The one
+        // exception is answering a message that is not the group's (a Task
+        // completion is a direct message): that reply follows its parent,
+        // because the server keeps a reply in its parent's room.
+        const replyParent = selectedReplyTarget || focusedReplyRoot || null;
+        const roomGroup = groupRoomRecipient(chatRoom);
+        const parentOutsideGroup = Boolean(roomGroup && inReplyToRelayId && replyParent
+          && replyParent.addressRecipient && !replyParent.addressRecipient.groupId
+          && String(replyParent.groupId || "") !== roomGroup.groupId);
+        const groupSend = Boolean(roomGroup && !parentOutsideGroup);
+        const sendAnchor = groupSend
+          ? { ...emptyGroupAnchor, threadId:(replyParent && replyParent.threadId) || emptyGroupAnchor.threadId }
+          : (selectedReplyTarget || addressAnchor || newest || emptyRoomAnchor);
+        const recipient = (groupSend && roomGroup)
+          || (parentOutsideGroup && replyParent.addressRecipient)
+          || (addressAnchor && addressAnchor.addressRecipient)
           || (emptyRoomAnchor
             ? (emptyRoomAnchor.addressRecipient
               || (emptyRoomAnchor.provider === "slack"
@@ -22647,6 +22742,9 @@
   }
   let onboardingAgentBusy = false;
   let onboardingAgentNote = "";
+  // The local AI whose prompt was just copied: its screen turns into the
+  // steps left to do there (live run 28: after Copy, only a footnote changed).
+  let localPromptCopiedFor = "";
   let onboardingAgentPoll = null;
   let onboardingAgentPreparing = false;
   function stopOnboardingAgentPoll() { if (onboardingAgentPoll) { clearInterval(onboardingAgentPoll); onboardingAgentPoll = null; } }
@@ -22657,7 +22755,7 @@
   }
   function renderAgentSetup(agent) {
     const option = onboardingAgentFor(agent);
-    const signature = JSON.stringify(["agent", agent?.host, agent?.place, agent?.run?.id, agent?.run?.status, agent?.runError, onboardingAgentBusy, onboardingAgentNote, payload.ui?.localOnboardingPrompt ? 1 : 0, agent?.openable]);
+    const signature = JSON.stringify(["agent", agent?.host, agent?.place, agent?.run?.id, agent?.run?.status, agent?.runError, onboardingAgentBusy, onboardingAgentNote, payload.ui?.localOnboardingPrompt ? 1 : 0, agent?.openable, localPromptCopiedFor]);
     if (signupBodyEl.dataset.firstRelaySignature === signature && signupBodyEl.querySelector(".su-agent-screen")) return;
     signupBodyEl.dataset.firstRelaySignature = signature;
     if (!option) {
@@ -22714,7 +22812,11 @@
     // frame, its button held for the second the request takes; a different
     // title while preparing read as a different step (run 22).
     const preparingOpen = option.chat && !run && !agent.runError && agent.place === "browser";
-    if (option.chat && ((canOpen && run) || preparingOpen)) {
+    // A local AI that opens with the message typed in (Codex, Claude Code)
+    // is the same two clicks: "Paste this into Codex" above an Open button
+    // read as a paste job (live run 28, 2026-10-08).
+    const ready = option.chat ? Boolean(run) : true;
+    if ((option.chat && ((canOpen && run) || preparingOpen)) || (!option.chat && canOpen && localPromptCopiedFor !== option.host)) {
       const send = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5L8 3l4.5 4.5"/></svg>';
       // Two numbered steps, the same shapes as Claude's: what to click here,
       // then what to press there. No picture of the message: a shortened copy
@@ -22728,10 +22830,27 @@
           <div class="su-keys-row"><span class="su-keys-n">2${tick}</span>In ${esc(option.name)}, press <span class="su-key su-key-send ${option.host}">${send}</span> to send</div>
           <div class="su-keys-says">Relay’s setup message is already typed in for you.</div>
         </div>
-        <div class="su-claude-tail"><div class="su-form su-agent-actions"><button class="su-primary" type="button" data-agent-open${onboardingAgentBusy || !run ? " disabled" : ""}>Open ${esc(option.name)}</button></div>
-        <div class="su-agent-quiet"><button class="su-link" type="button" data-agent-copy${run ? "" : " disabled"}>Copy instead</button><span aria-hidden="true">·</span><button class="su-link" type="button" data-agent-reset>Choose a different AI</button></div>
-        <div class="desktop-prompt-wait" role="status">${esc(onboardingAgentNote || `This moves on when ${option.name} connects.`)}</div></div></div>`;
+        <div class="su-claude-tail"><div class="su-form su-agent-actions"><button class="su-primary" type="button" data-agent-open${onboardingAgentBusy || !ready ? " disabled" : ""}>Open ${esc(option.name)}</button></div>
+        <div class="su-agent-quiet"><button class="su-link" type="button" data-agent-copy${ready ? "" : " disabled"}>Copy instead</button><span aria-hidden="true">·</span><button class="su-link" type="button" data-agent-reset>Choose a different AI</button></div>
+        <div class="desktop-prompt-wait" role="status">${esc(onboardingAgentNote || (option.chat ? `This moves on when ${option.name} connects.` : "This screen moves on by itself."))}</div></div></div>`;
       signupBodyEl.querySelector("[data-agent-open]")?.addEventListener("click", openOnboardingAgent);
+      signupBodyEl.querySelector("[data-agent-copy]")?.addEventListener("click", copyOnboardingAgentRequest);
+      signupBodyEl.querySelector("[data-agent-reset]")?.addEventListener("click", resetOnboardingAgent);
+      return;
+    }
+    if (!option.chat && localPromptCopiedFor === option.host) {
+      const tick = '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 5.3l2.3 2.2L8.5 2.6"/></svg>';
+      const paste = /Mac/.test(navigator.userAgent) ? "⌘ V" : "Ctrl V";
+      signupBodyEl.innerHTML = `<div class="su-local-prompt su-agent-screen su-claude-connect"><div class="su-step">Your next step</div>
+        <h1 class="su-title">Paste this into<br>${onboardingAgentTitleName(agent)}.</h1>
+        <div class="desktop-prompt-note su-agent-request">${request}</div>
+        <div class="su-keys" role="img" aria-label="Copied. Open ${esc(option.name)}, paste, then press Return">
+          <div class="su-keys-row is-done"><span class="su-keys-n">1${tick}</span>Copied</div>
+          <div class="su-keys-row"><span class="su-keys-n">2${tick}</span><span>Open ${esc(option.name)} <span class="su-keys-where">${esc(option.context.charAt(0).toLowerCase() + option.context.slice(1))}</span></span></div>
+          <div class="su-keys-row"><span class="su-keys-n">3${tick}</span>Press <span class="su-key">${paste}</span> then <span class="su-key">Return</span></div>
+        </div>
+        <div class="su-agent-quiet"><button class="su-link" type="button" data-agent-copy>Copy again</button><span aria-hidden="true">·</span><button class="su-link" type="button" data-agent-reset>Choose a different AI</button></div>
+        <div class="desktop-prompt-wait" role="status">${esc(onboardingAgentNote || "This screen moves on by itself.")}</div></div>`;
       signupBodyEl.querySelector("[data-agent-copy]")?.addEventListener("click", copyOnboardingAgentRequest);
       signupBodyEl.querySelector("[data-agent-reset]")?.addEventListener("click", resetOnboardingAgent);
       return;
@@ -22755,7 +22874,7 @@
     finally { onboardingAgentBusy = false; renderSignup(); }
   }
   async function resetOnboardingAgent() {
-    stopOnboardingAgentPoll(); onboardingAgentNote = "";
+    stopOnboardingAgentPoll(); onboardingAgentNote = ""; localPromptCopiedFor = "";
     try { const snapshot = await onboardingAgentCall("onboardingResetAgent"); payload.ui = { ...payload.ui, onboardingAgent: snapshot }; } catch {}
     renderSignup();
   }
@@ -22800,9 +22919,8 @@
     try {
       if (option?.chat) await onboardingAgentCall("onboardingCopyAgentRequest");
       else await window.relay.copySetupPrompt();
-      onboardingAgentNote = option?.chat
-        ? `Copied. Paste it into ${onboardingAgentWords()}. This screen moves on when ${option.name} connects.`
-        : `Copied. Paste it into ${option?.name || "your agent"}. Your agent takes the next step.`;
+      if (option?.chat) onboardingAgentNote = `Copied. Paste it into ${onboardingAgentWords()}. This screen moves on when ${option.name} connects.`;
+      else { localPromptCopiedFor = option?.host || ""; onboardingAgentNote = ""; }
     } catch { onboardingAgentNote = "Relay couldn’t copy it. Try again."; }
     renderSignup();
   }
@@ -23133,7 +23251,7 @@
       const applicationNote = payload.ui?.desktopOnboarding
         ? "Next, choose the AI you use. Relay works inside it."
         : "Once you’re in, quit and reopen Claude Code or Codex so they pick up Relay’s tools.";
-      signupBodyEl.innerHTML = `<div class="su-first-relay su-method su-application"><p class="su-step">Welcome to Relay</p><h1 class="su-title">Sign in to get started.</h1><p class="su-copy">Relay is set up on this computer. Sign in and your Relays open right here.</p><div class="su-form"><button class="su-primary su-google" id="suGoogle" type="button"${busy}>${googleMark()} Continue with Google</button></div><p class="su-returning">New or returning, Google signs you in. <button class="su-signin" id="suSignIn" type="button"${busy}>Use email instead</button></p><p class="su-application-note">${applicationNote}</p>${error}</div>`;
+      signupBodyEl.innerHTML = `<div class="su-first-relay su-method su-application"><p class="su-step">Welcome to Relay</p><h1 class="su-title">Sign in to get started.</h1><p class="su-copy">Relay is set up on this computer. Sign in once and it's ready.</p><div class="su-form"><button class="su-primary su-google" id="suGoogle" type="button"${busy}>${googleMark()} Continue with Google</button></div><p class="su-returning">New or returning, Google signs you in. <button class="su-signin" id="suSignIn" type="button"${busy}>Use email instead</button></p><p class="su-application-note">${applicationNote}</p>${error}</div>`;
       document.getElementById("suGoogle")?.addEventListener("click", startInstallationGoogle);
       document.getElementById("suSignIn")?.addEventListener("click", startInstallationSignIn);
       return;
@@ -23181,7 +23299,7 @@
     }
     if (signupStage === "google") {
       const retry = signupError ? `<button class="su-primary" id="suResume" type="button"${busy}>Try again</button>` : "";
-      signupBodyEl.innerHTML = `<p class="su-step">Your account</p><h1 class="su-title">Continue in your browser.</h1><p class="su-copy">Sign in there, or create your Relay account if this is your first time.</p><div class="su-account"><span class="su-account-name">Waiting for sign-in…</span><span class="su-account-email">Your agent cannot see this sign-in.</span></div><div class="su-form">${retry}${cancelSetupButton()}</div>${error}`;
+      signupBodyEl.innerHTML = `<p class="su-step">Your account</p><h1 class="su-title">Continue in your browser.</h1><p class="su-copy">Sign in there, or create your Relay account if this is your first time.</p><div class="su-account"><span class="su-account-name">Waiting for sign-in…</span><span class="su-account-email">Look for the new tab in your browser.</span></div><div class="su-form">${retry}${cancelSetupButton()}</div>${error}`;
       bindSignupResume();
       bindSignupCancel();
       return;

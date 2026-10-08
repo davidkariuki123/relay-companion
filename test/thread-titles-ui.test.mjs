@@ -510,7 +510,10 @@ test("a dated chunk reintroduces the sender even inside the same wire thread", (
 test("a room send addresses the room and quotes only a chosen Relay", () => {
   assert.match(html, /const selectedReplyTargetId = String\(threadReplyTargets\.get\(threadStateKey\) \|\| ""\)/);
   assert.match(html, /const inReplyToRelayId = selectedReplyTargetId \|\| String\(focusedSlackParent\?\.id \|\| ""\)/);
-  assert.match(html, /const recipient = \(addressAnchor && addressAnchor\.addressRecipient\)/);
+  // A group room speaks to the group; only a reply to a message outside the
+  // group follows its parent. Other rooms inherit their newest address.
+  assert.match(html, /const recipient = \(groupSend && roomGroup\)\n\s+\|\| \(parentOutsideGroup && replyParent\.addressRecipient\)\n\s+\|\| \(addressAnchor && addressAnchor\.addressRecipient\)/);
+  assert.match(html, /if \(!room \|\| !room\.isGroup \|\| isSlackIntegratedRoom\(room\)\) return null;\n\s+return room\.groupId \? \{ groupId:String\(room\.groupId\) \} : null;/);
   assert.match(html, /emptyRoomAnchor\.provider === "slack"[\s\S]*\? \{ chatId:emptyRoomAnchor\.chatId \}[\s\S]*: \{ groupId:emptyRoomAnchor\.groupId \}/,
     "an exact Slack direct or channel addresses its chat while Relay groups retain their group recipient");
   assert.match(html, /sendReply\(\{\s*text, recipient, \.\.\.\(inReplyToRelayId \? \{ inReplyToRelayId \} : \{\}\), files, idempotencyKey,/);

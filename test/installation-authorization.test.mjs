@@ -371,6 +371,39 @@ test("begin replaces an expired authorization that never reached an identity", a
   assert.ok(stores.events.indexOf("durable:remove") < stores.events.lastIndexOf("durable:write"));
 });
 
+test("Continue with Google on a lapsed first-run link opens a fresh one instead of Setup expired", async () => {
+  const stores = memoryStores({
+    durable: { schemaVersion: 1, authorizationId: AUTHORIZATION_ID, expiresAt: EXPIRES, status: "pending_identity" },
+    secret: { authorizationId: AUTHORIZATION_ID, clientSecret: CLIENT_SECRET, codeVerifier: "v".repeat(43), activationUrl: ACTIVATION_URL },
+  });
+  const opened = [];
+  const replacementExpires = "2026-08-20T10:30:00.000Z";
+  const { controller, calls } = harness({
+    stores,
+    now: () => Date.parse(EXPIRES) + 1,
+    openExternal: async (url) => { opened.push(url); return true; },
+    fetchImpl: async (url, init) => {
+      calls.push({ url: String(url), body: JSON.parse(init.body) });
+      return response({ ...createReply(), expiresAt: replacementExpires });
+    },
+  });
+  const state = await controller.google();
+  assert.notEqual(state.status, "expired");
+  assert.equal(calls.length, 1, "one replacement authorization is minted");
+  assert.equal(opened.length, 1, "and its sign-in page opens");
+  assert.equal(stores.peekDurable().expiresAt, replacementExpires);
+});
+
+test("Continue with Google keeps an expired identified authorization for explicit restart", async () => {
+  const stores = memoryStores({
+    durable: { schemaVersion: 1, authorizationId: AUTHORIZATION_ID, expiresAt: EXPIRES, status: "expired", account: { email: "alex@example.com", displayName: "Alex" } },
+  });
+  const { controller, calls } = harness({ stores, openExternal: async () => true });
+  await assert.rejects(controller.google(), (error) => error.code === "authorization_expired");
+  assert.equal(calls.length, 0);
+  assert.equal(stores.peekDurable().account.email, "alex@example.com");
+});
+
 test("begin preserves an expired identified authorization for explicit restart", async () => {
   const stores = memoryStores({
     durable: {

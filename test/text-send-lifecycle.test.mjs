@@ -158,6 +158,8 @@ function composer({ files = [], prepare = async () => ({ files: [], attachments:
     } } },
   });
   vm.runInContext(section("  function acceptOutboxReceipt(", "  function activeSlackRoomRecoveryMatches("), c);
+  vm.runInContext(section("  function isSlackIntegratedRoom(room)", "  // The background service stages"), c);
+  vm.runInContext(section("  function groupRoomRecipient(room)", "  // Any other room addresses"), c);
   vm.runInContext(`${section("      const doThReply = async () => {", "      threadComposerSend = doThReply;")}
     globalThis.send = doThReply;`, c);
   return { c, calls, input };

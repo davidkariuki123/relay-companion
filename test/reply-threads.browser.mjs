@@ -187,6 +187,17 @@ try {
   assert.equal(await readerInput.locator(".th-composer-mention").innerText(), "@Sven Wellmann", "mouse selection works too");
   await readerInput.fill("");
   assert.equal(await page.locator("#readerComposer .th-reply-target").count(), 0, "the quote clears after the send");
+  // A photo attached in a Relay's thread goes with the reply and leaves the
+  // composer; it used to stay behind while only the words went.
+  await page.locator("#readerComposer input[type=file]").setInputFiles({ name: "shot.png", mimeType: "image/png",
+    buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64") });
+  await page.locator("#readerComposer .cmp-chip").waitFor();
+  await page.locator("#qrSend").click();
+  await page.waitForFunction(() => window.sends.length === 3);
+  const imageSend = (await page.evaluate(() => window.sends))[2];
+  assert.equal(imageSend.inReplyToRelayId, "relay_r1");
+  assert.deepEqual(imageSend.files.map((file) => file.name), ["shot.png"], "the photo goes with the reply");
+  assert.equal(await page.locator("#readerComposer .cmp-chip").count(), 0, "the sent photo leaves the composer");
 
   // Without the developer row nothing changes: every reply in the room.
   await page.evaluate(() => { window.fixture = { ...window.fixture, features: {} }; onPayload(window.fixture); closeReader(); });

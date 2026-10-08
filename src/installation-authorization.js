@@ -424,6 +424,14 @@ export function createInstallationAuthorizationController({
 
   async function activeContext({ create = false } = {}) {
     let state = await readDurable();
+    // A sign-in click on a lapsed first-run link with no account chosen gets
+    // a fresh link, the same rule beginInternal applies: someone who stepped
+    // away mid-sign-in saw "Setup expired" and a Restart button instead (live
+    // run 27, 2026-10-08). An identified record still waits for explicit Restart.
+    if (create && state && (state.status === "expired" || Date.parse(state.expiresAt) <= now()) && !accountSummary(state.account)) {
+      await beginInternal();
+      state = await readDurable();
+    }
     if (state && Date.parse(state.expiresAt) <= now()) {
       await expire(state);
       throw new InstallationRequestError("authorization_expired", 410);
