@@ -79,6 +79,16 @@ try {
   await page.waitForFunction(() => threadDetailId === 'room-sven');
   assert.equal(await width(), 900);
 
+  // Switching chats beside the list is instant: one click merges the inbox at
+  // most twice (before and after it marks the chat read), never once per row.
+  for (const party of ['Shane Acton', 'Kiara Moodley', 'Sven Wellmann']) {
+    const builds = await page.evaluate(() => chatIndexBuilds);
+    await page.locator(`#relaysList .relay-row[data-party="${party}"]`).click();
+    await page.waitForFunction(() => activeView === 'threads');
+    assert.ok(await page.evaluate(() => chatIndexBuilds) - builds <= 2, `opening ${party} rebuilt the inbox ${await page.evaluate(() => chatIndexBuilds) - builds} times`);
+  }
+  await page.locator('#relaysList .relay-row[data-party="Sven Wellmann"]').click();
+
   // ⌥↓ walks the list, opening each chat in the pane.
   await page.locator('#thQrInput').evaluate(el => el.blur());
   await page.keyboard.press('Alt+ArrowDown');

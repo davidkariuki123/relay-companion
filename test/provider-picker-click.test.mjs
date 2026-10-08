@@ -165,11 +165,8 @@ for (const provider of ["codex", "claude"]) {
         const context = vm.createContext({
           activeView: "threads", appExpanded: expanded, readerId: null,
           wideLayoutActive: () => expanded, wideSideActivation: false, wideSideTab: () => "relays",
-          assessReaderFit: () => {}, threadDetailEntryFollow: null,
-          startRoomViewTransition: (update, options) => {
-            calls.push(["transition", options.motion]);
-            return new Promise(resolve => { commit = () => { update(); resolve(); }; });
-          },
+          assessReaderFit: () => {}, threadDetailEntryFollow: null, roomViewTransition: null,
+          supersedeRoomViewTransition: () => {},
           readerSource: "relays", readerReturn: null, readerTab: "agent",
           threadDetailId: "chat-fixture", threadDetailPartyHint: "Fixture",
           threadsSource: "relays", expandedMsgIds: new Set(["fixture"]),
@@ -196,20 +193,25 @@ for (const provider of ["codex", "claude"]) {
         });
         vm.runInContext(loader + reader, context);
         const pending = context.loadSessionPicker("fixture", provider, "Fixture", null, source);
-        assert.equal(context.activeView, "threads", "source remains visible until transition commits");
         assert.equal(context.readerReturn.roomScroll.top, 234);
         assert.equal(context.readerReturn.threadId, "chat-fixture");
-        // The small card grows into the reader's frame; the expanded app
-        // swaps its pane and keeps its frame.
-        assert.deepEqual(calls, [["transition", expanded ? "swap" : 720]]);
-        commit();
+        if (expanded) {
+          // The expanded app keeps its frame and swaps the pane at once.
+          assert.equal(context.activeView, "reader", "the pane swaps the moment it is picked");
+          assert.deepEqual(calls[0], ["render", "reader", provider]);
+        } else {
+          // The small card grows into the reader's frame.
+          assert.equal(context.activeView, "threads", "source remains visible until transition commits");
+          assert.deepEqual(calls, [["transition", 720]]);
+          commit();
+        }
         await pending;
         assert.equal(context.activeView, "reader");
         assert.equal(context.readerId, "fixture");
         assert.equal(context.readerTab, "you", "provider click shows the letter even with an active handoff");
         assert.equal(context.readerSource, source === "sent" ? "sent" : "threads");
         assert.equal(context.appExpanded, expanded, "the app's mode is untouched by opening a reader");
-        assert.deepEqual(calls.slice(1), [
+        assert.deepEqual(calls.slice(expanded ? 0 : 1), [
           ["render", "reader", provider], ["reveal", "reader"],
           ["fetch", "fixture", provider, source, "desktop"], ["result"],
         ]);

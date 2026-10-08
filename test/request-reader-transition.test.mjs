@@ -28,9 +28,11 @@ test("reader navigation captures the whole card before committing its destinatio
   const open = between(html, "function openReader(id, source, picker = null)", "function startFrameNavigation(");
   assert.ok(open.indexOf("captureRoomScroll()") < open.indexOf("startFrameNavigation("));
   assert.ok(open.indexOf("startFrameNavigation(") < open.indexOf('activeView = "reader"'));
-  // The small card morphs its whole frame; the expanded app swaps its pane.
+  // The small card morphs its whole frame; the expanded app swaps its pane
+  // at once — no snapshot, no dissolve, nothing to wait for.
   const frame = between(html, "function startFrameNavigation(", "function closeReader()");
-  assert.match(frame, /if \(wideLayoutActive\(\)\) \{[\s\S]*?startRoomViewTransition\([\s\S]*?motion:"swap"/);
+  assert.match(frame, /if \(wideLayoutActive\(\)\) \{[\s\S]*?const restore = update\(\);[\s\S]*?return Promise\.resolve\(\);/);
+  assert.doesNotMatch(frame, /startRoomViewTransition/);
   assert.match(frame, /return startCardViewTransition\(update, compactSize\)/);
   assert.doesNotMatch(open, /prepareReaderMorph|startReaderMorph/);
   const close = between(html, "function closeReader()", "function safeHref");

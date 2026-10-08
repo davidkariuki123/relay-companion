@@ -3168,11 +3168,6 @@
   .wide-empty .keys { margin-top:10px; display:flex; align-items:center; gap:3px; }
   .wide-empty kbd { font-family:var(--sans); font-size:10.5px; line-height:1; color:var(--muted); min-width:18px; padding:3px 4px; box-sizing:border-box; text-align:center; border-radius:5px; background:var(--wash-2); }
   .wide-empty kbd:last-of-type { margin-right:5px; }
-  /* Swapping what the pane shows is not navigation: a short dissolve, no push. */
-  html.room-view-transition[data-room-motion="swap"]::view-transition-old(relay-room) { animation:wideSwapOut .14s var(--settle) both; }
-  html.room-view-transition[data-room-motion="swap"]::view-transition-new(relay-room) { animation:wideSwapIn .18s var(--settle) both; }
-  @keyframes wideSwapOut { from { opacity:1; } to { opacity:0; } }
-  @keyframes wideSwapIn { from { opacity:0; transform:translate3d(0,4px,0); } to { opacity:1; transform:none; } }
   .th-msg.text .th-msg-title { font-family:var(--sans); font-size:13px; font-weight:400; line-height:1.5; color:var(--ink-2, var(--ink)); white-space:pre-wrap; }
   .th-msg.text.unread .th-msg-title { color:var(--ink); }
   .runs-in { margin:8px 16px 0; font-family:var(--sans); font-size:10.5px; color:var(--muted-2); }
@@ -4945,7 +4940,11 @@
     // View Transitions give compact room navigation real pixel snapshots. If
     // the API is unavailable, instant navigation is preferable to reviving the
     // DOM-clone push whose scroll/sticky layers can tear independently.
-    if (REDUCED || collapsed || peeking || ghost || typeof document.startViewTransition !== "function") {
+    // Beside the sidebar there is nothing to move: the pane just shows the
+    // next thing, the moment it is picked (Messages, Mail and Slack all swap
+    // instantly). A snapshot first costs a frame and reads as lag.
+    if (REDUCED || collapsed || peeking || ghost || wideLayoutActive() || typeof document.startViewTransition !== "function") {
+      if (roomViewTransition) supersedeRoomViewTransition();
       update();
       return false;
     }
@@ -4955,8 +4954,7 @@
     const token = ++roomViewTransitionToken;
     const root = document.documentElement;
     root.classList.add("room-view-transition");
-    // Beside the sidebar nothing is pushed or popped: the pane's contents swap.
-    root.dataset.roomMotion = wideLayoutActive() || motion === "swap" ? "swap" : motion === "back" ? "back" : "forward";
+    root.dataset.roomMotion = motion === "back" ? "back" : "forward";
     // Name the stable viewport, not either live child view. Chromium captures
     // the exact old and new pixels of this box, including its current scroll
     // position, then animates the two flat images as one plane apiece.
@@ -5096,6 +5094,11 @@
     cancelCardViewTransition();
     clearPeek();
     if (v === collapsed) return;
+    // Folding to the pill and back returns exactly the view you left: the
+    // expanded app hands its panes back to the small card while folded, which
+    // moves the room's scroller, so its place is anchored to a message.
+    const inRoom = activeView === "threads" && Boolean(threadDetailId);
+    if (v && inRoom) foldRoomScroll = { threadId:threadDetailId, scroll:captureRoomScroll() };
     collapsed = v;
     if (!collapsed) presented = true; // expanded on purpose: the reader is looking at it
     refreshCountLabel();
@@ -5110,8 +5113,15 @@
     if (!collapsed) {
       flushPendingRelaysRender();
       flushDeferredSurfaceRender();
+      const saved = foldRoomScroll;
+      foldRoomScroll = null;
+      if (saved && saved.threadId === threadDetailId && activeView === "threads") {
+        // The panes are back in place after the class observer's microtask.
+        queueMicrotask(() => restoreRoomScroll(saved.scroll));
+      }
     }
   }
+  let foldRoomScroll = null;
   // Park the card invisibly at expanded size while the OS window is hidden, so the
   // next appearance (tray reopen / ghost banner) starts from a clean slate.
   function snapSize(w, h) {
@@ -12669,11 +12679,11 @@
   // swaps, so the motion is the pane's, not the card's.
   function startFrameNavigation(update, compactSize) {
     if (wideLayoutActive()) {
-      return startRoomViewTransition(() => {
-        const restore = update();
-        if (typeof restore === "function") { threadDetailEntryFollow = null; restore(); }
-        if (activeView === "reader") assessReaderFit();
-      }, { motion:"swap" });
+      if (roomViewTransition) supersedeRoomViewTransition();
+      const restore = update();
+      if (typeof restore === "function") { threadDetailEntryFollow = null; restore(); }
+      if (activeView === "reader") assessReaderFit();
+      return Promise.resolve();
     }
     return startCardViewTransition(update, compactSize);
   }
@@ -19709,15 +19719,21 @@
     // "no one will see it" (Sven). Whole-conversation hand-off keeps its one
     // power path: hold ⌥ on the reader's Open in {app}.)
   }
-  function syncExpandButton() {
-    // One switch, one place: the titlebar's, in every view and both modes.
+  // One switch, one place: the titlebar's, in every view and both modes.
+  // Cheap on purpose: applyView runs it on every pass.
+  function syncWideToggle() {
     const toggle = document.getElementById("wideToggle");
-    if (toggle) {
-      const label = appExpanded ? "Collapse" : "Expand";
-      document.getElementById("wideToggleLabel").textContent = label;
+    if (!toggle) return;
+    const label = appExpanded ? "Collapse" : "Expand";
+    const labelEl = document.getElementById("wideToggleLabel");
+    if (labelEl.textContent !== label) labelEl.textContent = label;
+    if (toggle.getAttribute("aria-pressed") !== String(appExpanded)) {
       toggle.setAttribute("aria-pressed", String(appExpanded));
       toggle.title = `${label}  ⌘⇧E`;
     }
+  }
+  function syncExpandButton() {
+    syncWideToggle();
     // See info follows the frame: re-run its gate on every toggle, not just
     // on room open (setThreadHeader runs the same expression).
     if (typeof thGroupInfoEl !== "undefined" && thGroupInfoEl) {
@@ -23361,12 +23377,20 @@
     const lit = [];
     const q = (value) => `"${CSS.escape(String(value))}"`;
     if (wide && activeView === "threads" && threadDetailId) {
-      const openKey = wideRoomKey(threadDetailId);
       const side = wideSideTab();
       if (side === "relays") {
+        // The open room and its row are matched through ONE build of the room
+        // index: the row's thread and the open coordinate may differ (a room
+        // spans several wire threads), and a lookup per row rebuilt the whole
+        // index once per row — a third of a second per click on a real inbox.
+        const room = chatRoomForThread(threadDetailId, conversationSurface());
+        const ids = new Set([String(threadDetailId)]);
+        if (room) {
+          for (const id of [room.threadId, room.chatId, ...(room.threadIds instanceof Set ? room.threadIds : [])]) if (id) ids.add(String(id));
+        }
         for (const el of relaysListEl.querySelectorAll(".relay-row[data-thread]")) {
           const thread = el.getAttribute("data-thread");
-          if (thread && wideRoomKey(thread) === openKey) lit.push(`#relaysList .relay-row[data-thread=${q(thread)}]`);
+          if (thread && ids.has(thread)) lit.push(`#relaysList .relay-row[data-thread=${q(thread)}]`);
         }
       } else if (side === "contacts" && wideContactKey.startsWith("group:")) {
         lit.push(`#cvgList .cvg-item[data-group=${q(wideContactKey.slice(6))}]`);
@@ -23384,12 +23408,7 @@
 .card.wide :is(${lit.join(", ")}) > .cv-item { background:transparent; }` : "";
     if (wideSelectionStyle.textContent !== css) wideSelectionStyle.textContent = css;
   }
-  function wideRoomKey(threadId) {
-    const room = chatRoomForThread(threadId, conversationSurface());
-    if (!room) return String(threadId || "");
-    if (room.isGroup) return `group:${normalizedPartyName(room.groupName || room.name)}`;
-    return stablePartyKey(room.partyKey) || `person:${normalizedPartyName(room.name)}`;
-  }
+
   function syncTabs() {
     // Conversations belong to CHAT (the Chat tab lists them; a thread detail
     // is its drill-down), and contacts is Chat's pushed pane — its tab is retired.
@@ -23442,7 +23461,7 @@
     contactsViewEl.classList.toggle("hidden", wide ? side !== "contacts" : activeView !== "contacts");
     settingsViewEl.classList.toggle("hidden", wide ? side !== "settings" : activeView !== "settings");
     setupPaneEl.classList.toggle("hidden", !(wide && activeView === "settings" && setupPageOpen));
-    syncExpandButton();
+    syncWideToggle();
     syncPaneRoot();
     paintWideSelection();
     // Entry side-effects fire only when the view actually CHANGED — applyView
@@ -23952,6 +23971,79 @@
   }
 
   window.relay.onInbox(onPayload);
+
+  // ONE CLICK, ONE BUILD. (Wraps the two pure builders defined above; they
+  // stay exactly as written so each can be read and tested on its own.) Opening a chat asks "which room is this?" from
+  // half a dozen places (the open, the list, the header, the lit row, the
+  // typing context), and every answer used to re-merge every message: eight
+  // full builds per click, the bulk of a click's time on a real inbox. The
+  // merge is remembered for the rest of the current synchronous pass only,
+  // and only while a fingerprint of everything it reads still matches: the
+  // source lists, each row's read/edit/delete state, and the pending-send and
+  // transcript maps (whose writes bump chatDataEpoch below). Callers get a
+  // fresh array, so sorting one never reorders another's.
+  let threadMessagesMemo = null;
+  let chatDataEpoch = 0;
+  let chatIndexBuilds = 0; // full merges since launch; a test pins the per-click budget
+  for (const map of [optimisticChatReplies, canonicalChatDetails]) {
+    for (const method of ["set", "delete", "clear"]) {
+      const original = map[method].bind(map);
+      map[method] = (...args) => { chatDataEpoch += 1; return original(...args); };
+    }
+  }
+  function chatDataFingerprint(includeSlack) {
+    let hash = 0;
+    for (const list of [payload.relays || [], payload.sent || []]) {
+      for (const row of list) {
+        hash = (hash * 31 + (row.unread ? 1 : 0) + (row.deletedAt ? 2 : 0)
+          + String(row.editedAt || "").length * 7 + String(row.forHuman || "").length * 13
+          + String(row.title || "").length * 17 + String(row.state || "").length) | 0;
+      }
+    }
+    return [payload.relays, payload.sent, payload.outbox, activeMentionVisit?.rows, payload.account,
+      includeSlack, hash, chatDataEpoch];
+  }
+  const computeThreadMessages = threadMessages;
+  threadMessages = function rememberedThreadMessages() {
+    const includeSlack = Boolean((arguments[0] || {}).includeSlack);
+    const print = chatDataFingerprint(includeSlack);
+    const memo = threadMessagesMemo?.get(includeSlack);
+    if (memo && memo.print.length === print.length && memo.print.every((part, index) => part === print[index])) {
+      return memo.msgs.slice();
+    }
+    chatIndexBuilds += 1;
+    const msgs = computeThreadMessages({ includeSlack });
+    if (!threadMessagesMemo) {
+      threadMessagesMemo = new Map();
+      queueMicrotask(() => { threadMessagesMemo = null; });
+    }
+    // The build itself can retire pending sends (bumping the epoch); remember
+    // it under the state it leaves behind.
+    threadMessagesMemo.set(includeSlack, { print: chatDataFingerprint(includeSlack), msgs });
+    return msgs.slice();
+  };
+  // The room index, remembered for the rest of the current synchronous pass
+  // under the same rule as threadMessages(): only while everything it reads
+  // still matches (the messages' fingerprint, contacts, groups, the chat and
+  // Slack summaries, the surface).
+  let chatSectionsMemo = null;
+  function chatSectionsFingerprint() {
+    let groupHash = 0;
+    for (const group of groupsList) groupHash = (groupHash * 31 + String(group?.id || "").length + String(group?.name || "").length * 7 + (group?.members?.length || 0) * 13) | 0;
+    return [...chatDataFingerprint(false), contactsList, contactsList.length, groupsList, groupsList.length, groupHash,
+      payload.chats, payload.slackChats, payload.features, conversationSurface()];
+  }
+  const computeChatSections = chatSections;
+  chatSections = function rememberedChatSections() {
+    const print = chatSectionsFingerprint();
+    if (chatSectionsMemo && chatSectionsMemo.print.length === print.length && chatSectionsMemo.print.every((part, index) => part === print[index])) {
+      return chatSectionsMemo.value;
+    }
+    const value = computeChatSections();
+    if (!chatSectionsMemo) queueMicrotask(() => { chatSectionsMemo = null; });
+    chatSectionsMemo = { print: chatSectionsFingerprint(), value };
+    return value;
+  };
   if (window.relay.onOpenRelay) window.relay.onOpenRelay(async (input) => {
     const messageId = String(input?.messageId || "");
     const chatId = String(input?.chatId || "");
