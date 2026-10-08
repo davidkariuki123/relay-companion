@@ -10814,7 +10814,7 @@
     const claim = taskChannelClaim(row);
     const caption = (current && current.status)
       || (remembered && !pick ? remembered.why : "")
-      || (claim && (claim.state === "unclaimed" || !claim.claimant) ? "Running it takes it for you, so nobody else starts it too." : "");
+      || (claim && (claim.state === "unclaimed" || !claim.claimant) ? "Running it claims it for you, so nobody else starts it too." : "");
     return `<div class="tk-run${pick ? " picking" : ""}">${where}`
       + `<div class="tk-run-apps"><span class="tk-run-marks" role="group" aria-label="${lead}">${marks}</span>`
       + `<button type="button" class="th-host-copy tk-run-copy" data-tk-copy="${esc(taskIdOf(row))}"><span>Copy prompt</span><span>for your agent</span></button></div>`
@@ -10977,14 +10977,14 @@
       const working = claim.workState === "working" || (!claim.workState && Boolean(row.taskStartedAt));
       const people = Number(claim.memberCount || 0);
       if (claim.state === "unclaimed" || !claimant) {
-        const released = claim.releasedAt && claim.releasedBy ? `Nobody has it · ${claim.releasedBy.self ? "you" : firstName(claim.releasedBy.name) || "someone"} gave it back` : "Nobody has taken it yet";
+        const released = claim.releasedAt && claim.releasedBy ? `Nobody has it · ${claim.releasedBy.self ? "you" : firstName(claim.releasedBy.name) || "someone"} unclaimed it` : "Nobody has claimed it yet";
         return { tone: "open", at: row.createdAt, over: false, text: released, rungs: ["now", "todo", "todo", "todo"], labels: ["Sent", "Claimed", "Started", "Done"], claim: "unclaimed" };
       }
       const who = claimant.self ? "you" : String(claimant.name || "someone");
       if (working || row.taskStartedAt) {
         return { tone: "started", at: row.taskStartedAt || claim.claimedAt || row.createdAt, over: false, text: `In progress · ${who} · ${timeAgo(row.taskStartedAt || claim.claimedAt || row.createdAt)}`, rungs: ["past", "past", "now", "todo"], labels: ["Sent", "Claimed", "Started", "Done"], claim: claimant.self ? "working" : "other" };
       }
-      return { tone: claimant.self ? "started" : "cancelled", at: claim.claimedAt || row.createdAt, over: false, text: claimant.self ? `You took it${claim.claimedAt ? ` · ${timeAgo(claim.claimedAt)}` : ""}` : mine ? `${firstName(who) || who} took it${claim.claimedAt ? ` · ${timeAgo(claim.claimedAt)}` : ""}` : `${firstName(who) || who} took it · nothing for you to do`, rungs: ["past", "now", "todo", "todo"], labels: ["Sent", "Claimed", "Started", "Done"], claim: claimant.self ? "mine" : "other" };
+      return { tone: claimant.self ? "started" : "cancelled", at: claim.claimedAt || row.createdAt, over: false, text: claimant.self ? `You claimed it${claim.claimedAt ? ` · ${timeAgo(claim.claimedAt)}` : ""}` : mine ? `${firstName(who) || who} claimed it${claim.claimedAt ? ` · ${timeAgo(claim.claimedAt)}` : ""}` : `${firstName(who) || who} claimed it · nothing for you to do`, rungs: ["past", "now", "todo", "todo"], labels: ["Sent", "Claimed", "Started", "Done"], claim: claimant.self ? "mine" : "other" };
     }
     if (row.taskStartedAt) {
       const text = mine ? `Started · ${other || "them"} · ${timeAgo(row.taskStartedAt)}` : `In progress · ${timeAgo(row.taskStartedAt)}`;
@@ -11058,7 +11058,7 @@
   const taskBtn = (label, kind, attrs = "", disabled = false) => `<button type="button" class="tk-btn ${kind}" ${attrs}${disabled ? " disabled" : ""}>${label}</button>`;
   // The verbs a Task offers this viewer, in this state. Two decisions at a
   // time: Reject before any work, Cancel after it began; on a channel Task
-  // the claim lifecycle (Take it · Give it back · Release) plus Done. On the
+  // the claim lifecycle (Claim · Unclaim · Release) plus Done. On the
   // card the Task runs from the Run block's app icons (Shane, 2026-10-08);
   // the reader has Execute, captioned, under the ladder.
   function taskVerbsHtml(row, st, { surface = "chat" } = {}) {
@@ -11079,9 +11079,9 @@
     const verbs = (html) => html ? `<span class="tk-verbs">${html}</span>` : "";
     const claim = taskChannelClaim(row);
     if (claim) {
-      if (st.claim === "unclaimed") return verbs(claim.capabilities && claim.capabilities.canClaim === true ? taskBtn("Take it", "primary", at("claim"), busy) : "");
+      if (st.claim === "unclaimed") return verbs(claim.capabilities && claim.capabilities.canClaim === true ? taskBtn("Claim", "primary", at("claim"), busy) : "");
       if (st.claim === "other") return "";
-      if (st.claim === "mine") return verbs(`${claim.capabilities && claim.capabilities.canUnclaim === true ? taskBtn("Give it back", "ghost", at("unclaim"), busy) : ""}${taskBtn(done, "primary", at("done"), busy)}`);
+      if (st.claim === "mine") return verbs(`${claim.capabilities && claim.capabilities.canUnclaim === true ? taskBtn("Unclaim", "ghost", at("unclaim"), busy) : ""}${taskBtn(done, "primary", at("done"), busy)}`);
       return verbs(`${taskBtn("Release", "ghost", at("release"), busy)}${taskBtn(done, "primary", at("done"), busy)}`);
     }
     if (st.tone === "started") return verbs(`${taskBtn("Cancel", "ghost", at("cancel"), busy)}${taskBtn(done, "primary", at("done"), busy)}`);
@@ -11403,9 +11403,9 @@
     }
     const claim = taskChannelClaim(row);
     if (claim) {
-      if (st.claim === "unclaimed") return "Nobody has this yet. Take it, or run it from your agent, to take it on.";
+      if (st.claim === "unclaimed") return "Nobody has claimed this yet. Claim it, or run it from your agent, to take it on.";
       if (st.claim === "other") return `${st.text}. It is theirs unless they release it.`;
-      if (st.claim === "mine") return "You took it. Start it with your agent, or Give it back so someone else can.";
+      if (st.claim === "mine") return "You claimed it. Start it with your agent, or Unclaim it so someone else can.";
       return `In progress since ${formatChatTime(row.taskStartedAt || st.at)}. Release stops the run and hands it back to the channel.`;
     }
     if (st.tone === "started") return mine ? `${other} started ${timeAgo(row.taskStartedAt)} ago.` : `In progress since ${formatChatTime(row.taskStartedAt)}. Your agent stamps Done when it finishes, or you can.`;
@@ -13786,9 +13786,15 @@
           // "Queued" would be a lie the instant the network is fine, and "Sent"
           // would be one while it is not. The message's own bubble carries the
           // state; this note only confirms the composer let go of it.
-          setRowNote(r.id, `Sent to ${replyChat.party}.`, "ok");
-          fadeRowNoteLater(r.id, 3000);
-          if (activeView === "reader" && String(readerId) === String(r.id)) renderReader();
+          // No "Sent to …" note: your reply appears in the thread, and the
+          // thread brings it into view (David: the green line was noise).
+          if (activeView === "reader" && String(readerId) === String(r.id)) {
+            renderReader();
+            requestAnimationFrame(() => {
+              const sentRows = readerBodyEl.querySelectorAll("#readerReplies .rd-reply");
+              sentRows[sentRows.length - 1]?.scrollIntoView({ block:"nearest", behavior:REDUCED ? "auto" : "smooth" });
+            });
+          }
         };
         send.addEventListener("click", doSend);
         dressComposer(input, doSend);
@@ -17751,11 +17757,21 @@
   // person is a contact on Relay: "email:<their address>", the key Relay rooms
   // are built under. Empty when the other side is not a known Relay account.
   function directSummaryPartyKey(chat) {
-    const others = (chat?.participants || []).filter((person) => !person.self && person.onRelay !== false);
+    const participants = chat?.participants || [];
+    // A DM with yourself (Slack's "You") is your note-to-self chat.
+    if (participants.length && participants.every((person) => person.self)) {
+      const own = String(participants[0].email || payload.account?.email || "").trim().toLowerCase();
+      return own ? `email:${own}` : "";
+    }
+    const others = participants.filter((person) => !person.self && person.onRelay !== false);
     if (others.length !== 1) return "";
     const id = String(others[0].id || others[0].relayUserId || "");
     if (!id.startsWith("usr_")) return "";
-    const contact = contactsList.find((candidate) => String(candidate.relayUserId || "") === id);
+    // Main pushes the contact book with every payload; the Contacts page's own
+    // list loads only when visited. Reading both keeps one person one chat from
+    // the first paint (it showed Sven twice until Contacts was opened).
+    const contact = contactsList.find((candidate) => String(candidate.relayUserId || "") === id)
+      || (payload.contacts || []).find((candidate) => String(candidate.relayUserId || "") === id);
     const email = String(contact?.email || "").trim().toLowerCase();
     return email ? `email:${email}` : "";
   }
@@ -18653,7 +18669,9 @@
       const files = Array.isArray(reply.attachments) ? reply.attachments.length : 0;
       const words = reply.deletedAt
         ? `<span class="deleted">${mine ? "You deleted this message" : "This message was deleted"}</span>`
-        : linkify(String(reply.body || reply.title || ""), reply.groupId || "");
+        // A reply carries its group through the thread it sits in, so an
+        // @mention lights the same chip it does in the room.
+        : linkify(String(reply.body || reply.title || ""), reply.groupId || thread.root?.groupId || r.groupId || r.recipientGroupId || "");
       const divider = start + offset === firstFresh
         ? `<div class="rd-replies-new" role="separator"><span>${freshCount} new</span></div>`
         : "";

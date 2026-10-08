@@ -289,22 +289,22 @@ test("a channel Task keeps the claim lifecycle as its verbs; Reject and Cancel n
   const unclaimed = inboundTask({ taskClaim: { scope: "channel", state: "unclaimed", workState: "idle", version: 0, capabilities: { canClaim: true } } });
   const st = t.taskStateFor(unclaimed);
   // Who has it, in plain words (Shane, 2026-10-08), and the verbs say what they do.
-  assert.equal(st.text, "Nobody has taken it yet");
-  assert.match(t.taskVerbsHtml(unclaimed, st), /data-task-verb="claim"[^>]*>Take it</);
+  assert.equal(st.text, "Nobody has claimed it yet");
+  assert.match(t.taskVerbsHtml(unclaimed, st), /data-task-verb="claim"[^>]*>Claim</);
   assert.doesNotMatch(t.taskVerbsHtml(unclaimed, st), /Reject|Done/);
   const mine = inboundTask({ taskClaim: { scope: "channel", state: "claimed", workState: "idle", version: 1, claimant: { self: true, name: "David" }, claimedAt: ago(3), capabilities: { canUnclaim: true } } });
-  assert.match(t.taskStateFor(mine).text, /^You took it · 3m$/);
-  assert.match(t.taskVerbsHtml(mine, t.taskStateFor(mine)), /data-task-verb="unclaim"[^>]*>Give it back<[\s\S]*Done/);
+  assert.match(t.taskStateFor(mine).text, /^You claimed it · 3m$/);
+  assert.match(t.taskVerbsHtml(mine, t.taskStateFor(mine)), /data-task-verb="unclaim"[^>]*>Unclaim<[\s\S]*Done/);
   const working = inboundTask({ taskStartedAt: ago(20), taskClaim: { scope: "channel", state: "claimed", workState: "working", version: 1, claimant: { self: true, name: "David" }, claimedAt: ago(25) } });
   assert.match(t.taskStateFor(working).text, /^In progress · you · 20m$/);
   assert.match(t.taskVerbsHtml(working, t.taskStateFor(working)), /Release[\s\S]*Done/);
   const theirs = inboundTask({ taskClaim: { scope: "channel", state: "claimed", workState: "idle", version: 1, claimant: { self: false, name: "Anna Keller" }, claimedAt: ago(20) } });
-  assert.equal(t.taskStateFor(theirs).text, "Anna took it · nothing for you to do");
+  assert.equal(t.taskStateFor(theirs).text, "Anna claimed it · nothing for you to do");
   assert.equal(t.taskVerbsHtml(theirs, t.taskStateFor(theirs)), "");
   const sender = sentTask({ taskClaim: { scope: "channel", state: "claimed", workState: "idle", version: 1, claimant: { self: false, name: "Anna Keller" }, claimedAt: ago(20) } });
-  assert.match(t.taskStateFor(sender).text, /^Anna took it · 20m$/, "the sender is not told there is nothing to do");
+  assert.match(t.taskStateFor(sender).text, /^Anna claimed it · 20m$/, "the sender is not told there is nothing to do");
   const released = inboundTask({ taskClaim: { scope: "channel", state: "unclaimed", workState: "idle", version: 2, releasedAt: ago(1), releasedBy: { self: false, name: "Anna Keller" }, capabilities: { canClaim: true } } });
-  assert.equal(t.taskStateFor(released).text, "Nobody has it · Anna gave it back");
+  assert.equal(t.taskStateFor(released).text, "Nobody has it · Anna unclaimed it");
 });
 
 test("an Anyone card leads with who has it, keeps the Run block while it could be yours, then says who it went to", () => {
@@ -314,11 +314,11 @@ test("an Anyone card leads with who has it, keeps the Run block while it could b
   const open = inboundTask({ groupId: "grp1", taskClaim: claim({ state: "unclaimed", capabilities: { canClaim: true } }) });
   t.taskRunPlans.set("t1", plan);
   const footer = t.taskCardFooterHtml(open);
-  assert.ok(footer.indexOf("Nobody has taken it yet") < footer.indexOf("tk-run") && footer.indexOf("tk-run") < footer.indexOf("Sent to 3 people"), "who has it, the Run block, then who it went to");
-  assert.match(footer, /tk-run-caption">Running it takes it for you, so nobody else starts it too\.</);
+  assert.ok(footer.indexOf("Nobody has claimed it yet") < footer.indexOf("tk-run") && footer.indexOf("tk-run") < footer.indexOf("Sent to 3 people"), "who has it, the Run block, then who it went to");
+  assert.match(footer, /tk-run-caption">Running it claims it for you, so nobody else starts it too\.</);
   const theirs = inboundTask({ groupId: "grp1", taskClaim: claim({ state: "claimed", claimant: { self: false, name: "Anna Keller" }, claimedAt: ago(20) }) });
   const taken = t.taskCardFooterHtml(theirs);
-  assert.match(taken, /Anna took it · nothing for you to do/);
+  assert.match(taken, /Anna claimed it · nothing for you to do/);
   assert.doesNotMatch(taken, /tk-run|tk-agents|data-task-verb/, "nothing to press when it is someone else's");
   assert.match(t.taskChipHtml(open), /class="kchip">Task<\/span><span class="tk-kind anyone">[\s\S]*One of you<\/span>/);
   assert.equal(t.taskChipHtml(inboundTask()), '<span class="kchip">Task</span>', "a Task to one person names no kind");

@@ -466,3 +466,12 @@ test("a Slack channel keeps its #name when the saved groups pass reaches its roo
   // and a Slack channel's group row finds its room by chat id instead of seeding an empty twin
   assert.match(html, /\.find\(\(room\) => room\.chatId && String\(room\.chatId\) === String\(group\.id\)\)/);
 });
+
+test("one person is one chat from the first paint, and Slack's 'You' DM is your self chat", () => {
+  const fn = html.slice(html.indexOf("  function directSummaryPartyKey(chat) {"), html.indexOf("  function directSummaryPartyKey(chat) {") + 1600);
+  // Main's contact book (payload.contacts) resolves the person even before the
+  // Contacts page loads its own list; Sven showed up twice until then.
+  assert.match(fn, /\|\| \(payload\.contacts \|\| \[\]\)\.find\(\(candidate\) => String\(candidate\.relayUserId \|\| ""\) === id\)/);
+  // A DM whose every participant is you joins your note-to-self chat.
+  assert.match(fn, /participants\.every\(\(person\) => person\.self\)/);
+});
