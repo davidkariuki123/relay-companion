@@ -490,7 +490,11 @@ test("repairDesktopSurfaces --no-restart rewrites both LaunchAgents and Relay.ap
   const daemonPlist = fs.readFileSync(result.daemon.plistPath, "utf8");
   const pillPlist = fs.readFileSync(result.pill.plistPath, "utf8");
   assert.match(daemonPlist, new RegExp(fixture.bin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(pillPlist, new RegExp(fixture.electronPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  // The pill launches through the stable Relay.app link (one path across
+  // updates, see stablePillExecutable), which points at this release's bundle.
+  const stablePill = path.join(fixture.homeDir, ".relay", "runtime", "Relay.app");
+  assert.match(pillPlist, new RegExp(path.join(stablePill, "Contents", "MacOS", path.basename(fixture.electronPath)).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.equal(fs.realpathSync(path.join(stablePill, "Contents", "MacOS", path.basename(fixture.electronPath))), fs.realpathSync(fixture.electronPath));
   assert.match(daemonPlist, /<key>KeepAlive<\/key><true\/>/);
   assert.match(pillPlist, /<key>KeepAlive<\/key>\s*<dict>\s*<key>SuccessfulExit<\/key><false\/>\s*<\/dict>/);
   assert.doesNotMatch(pillPlist, /<key>KeepAlive<\/key><true\/>/);
