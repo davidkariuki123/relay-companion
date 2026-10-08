@@ -98,7 +98,8 @@ test("the expanded reader names Granular and queues a reply to Shane's exact gro
   assert.equal(pending.groupId, request.chat.groupId);
   assert.equal(pending.partyKey, request.chat.partyKey);
   assert.equal(pending.inReplyToRelayId, "relay_shane");
-  assert.deepEqual(state.notes.at(-1), ["relay_shane", "Sent to Granular.", "ok"]);
+  // The reply shows itself in the thread; no green "Sent to Granular." note (David, 2026-10-08).
+  assert.equal(state.notes.some((note) => /^Sent to /.test(String(note[1] || ""))), false);
 });
 
 test("a queued reader reply restores in Granular after a renderer restart", async () => {

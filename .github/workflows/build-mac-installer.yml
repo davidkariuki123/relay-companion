@@ -96,7 +96,7 @@ jobs:
           set -euo pipefail
           tool=installer-source/tools/relay-application
           npm ci --prefix "$tool" --ignore-scripts --no-audit --no-fund
-          node --test "$tool/test/relocation.test.mjs" "$tool/test/relocation-handler.test.mjs" scripts/verify-mac-installer.test.mjs
+          node --test "$tool/test/relocation.test.mjs" "$tool/test/relocation-handler.test.mjs" "$tool/test/mac-dmg.test.mjs" scripts/verify-mac-installer.test.mjs
           node "$tool/download.mjs" --version "$RUNTIME_VERSION" --source-sha "$RUNTIME_SHA" --output "$RUNNER_TEMP/input"
           node "$tool/prepare.mjs" --manifest "$RUNNER_TEMP/input/manifest.json" --artifact "$RUNNER_TEMP/input/runtime.tar.gz" --version "$RUNTIME_VERSION" --source-sha "$RUNTIME_SHA" --output "$RUNNER_TEMP/candidate" --channel "$CHANNEL" --application-version "$APPLICATION_VERSION" --application-candidate
           node "$tool/package.mjs" "$RUNNER_TEMP/candidate"

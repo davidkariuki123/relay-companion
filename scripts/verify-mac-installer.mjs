@@ -193,7 +193,14 @@ export async function main(inputs) {
     proof.receiptSha256 = createHash("sha256").update(fs.readFileSync(path.join(directory, "signing-receipt.json"))).digest("hex");
     const artifact = receipt.artifacts.find(item => (item.artifact || item.filename).endsWith(".dmg"));
     proof.candidateOrigin = "retained-signed-candidate";
-    return mountVerified(path.join(directory, artifact.artifact || artifact.filename), "candidate", manifest, artifact);
+    const target = mountVerified(path.join(directory, artifact.artifact || artifact.filename), "candidate", manifest, artifact);
+    // The signed image a person opens shows the install window: Relay left,
+    // Applications right, the background picture and a 640 x 400 window.
+    const { assertVolumeLayout } = await import(pathToFileURL(path.join(repo, "installer-source/tools/relay-application/lib/mac-dmg.mjs")));
+    assertVolumeLayout(path.dirname(target.app), { volumeName: "Relay",
+      background: path.join(repo, "installer-source/tools/relay-application/lib/mac-dmg-background.tiff") });
+    record("dmg-install-window-layout");
+    return target;
   }
   try {
     const target = inputs.candidateDirectory ? await retained() : await download(inputs.version, inputs.sourceSha, "candidate");

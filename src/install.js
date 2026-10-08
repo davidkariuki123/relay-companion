@@ -61,6 +61,10 @@ const {
 const { isTemporaryNodePath, relayOwnedNodePath } = createRequire(import.meta.url)("../bootstrap/owned-node-runtime.cjs");
 const { isElectronExecutable, resolveManagedNode, verifyNode } = createRequire(import.meta.url)("../bootstrap/node-contract.cjs");
 const { lifecycleOwnership } = createRequire(import.meta.url)("../bootstrap/lifecycle-ownership.cjs");
+const {
+  associatedBundleIdentifiersPlist,
+  preferredMacElectronExecutable,
+} = createRequire(import.meta.url)("../bootstrap/mac-background-identity.cjs");
 
 export const PACKAGE_NAME = "relay-companion";
 
@@ -2204,7 +2208,10 @@ function electronPathForPackageRoot(packageRoot) {
   try {
     const require = createRequire(path.join(packageRoot, "package.json"));
     const electronPath = require("electron");
-    return typeof electronPath === "string" && electronPath ? electronPath : null;
+    // Electron's path.txt always names MacOS/Electron. A Relay-built macOS
+    // runtime renames the bundle executable to MacOS/Relay (MacOS/Electron is
+    // its compatibility link) so the pill's launch agent shows as "Relay".
+    return typeof electronPath === "string" && electronPath ? preferredMacElectronExecutable(electronPath) : null;
   } catch {
     return null;
   }
@@ -2404,6 +2411,9 @@ ${daemonArgs.map((argument) => `    <string>${plistEscape(argument)}</string>`).
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
+  <!-- Files this agent under Relay.app in Login Items, so macOS names it
+       "Relay" instead of the Node it runs (see mac-background-identity.cjs). -->
+${associatedBundleIdentifiersPlist("  ")}
   <key>StandardOutPath</key><string>${plistEscape(logPath)}</string>
   <key>StandardErrorPath</key><string>${plistEscape(logPath)}</string>
   <key>EnvironmentVariables</key>
@@ -2523,6 +2533,9 @@ ${pillArgs.map((argument) => `    <string>${plistEscape(argument)}</string>`).jo
        throttling; LowPriorityIO off keeps its disk reads from being deferred. -->
   <key>ProcessType</key><string>Interactive</string>
   <key>LowPriorityIO</key><false/>
+  <!-- Files this agent under Relay.app in Login Items where macOS can verify
+       the association (see mac-background-identity.cjs). -->
+${associatedBundleIdentifiersPlist("  ")}
   <key>StandardOutPath</key><string>${plistEscape(logPath)}</string>
   <key>StandardErrorPath</key><string>${plistEscape(logPath)}</string>
   <key>EnvironmentVariables</key>

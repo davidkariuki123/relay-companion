@@ -5,7 +5,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import test from "node:test";
 import { spawnSync } from "node:child_process";
-import { prepareCandidate, portableTarInvocation } from "../prepare.mjs";
+import { prepareCandidate, portableTarInvocation, stockElectronLayoutForBuilder } from "../prepare.mjs";
 import migration from "../lib/migration.cjs";
 
 test("Windows extraction accepts both Git Bash tar and Windows bsdtar", () => {
@@ -87,4 +87,38 @@ test("online candidates exclude the runtime from resources while retaining verif
     assert.equal(fs.readFileSync(path.join(outputDir, "app/five-ways.js"), "utf8"),
       fs.readFileSync(path.resolve(import.meta.dirname, "../../../packages/companion/overlay/relay-anyone-tip.cjs"), "utf8"));
   }
+});
+
+test("electron-builder receives the stock Electron layout from a runtime whose executable is MacOS/Relay", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-builder-electron-layout-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const dist = path.join(root, "dist");
+  const macos = path.join(dist, "Electron.app", "Contents", "MacOS");
+  fs.mkdirSync(macos, { recursive: true });
+  fs.writeFileSync(path.join(macos, "Relay"), "main", { mode: 0o755 });
+  fs.symlinkSync("Relay", path.join(macos, "Electron"));
+  const calls = [];
+  const runCommand = (command, args) => { calls.push([command, ...args]); return ""; };
+  assert.deepEqual(stockElectronLayoutForBuilder(dist, { platform: "darwin", runCommand }), { restored: true });
+  // electron-builder renames MacOS/Electron to "relay"; a link there, or a
+  // surviving "Relay" on a case-insensitive volume, would break the app.
+  assert.deepEqual(fs.readdirSync(macos), ["Electron"]);
+  assert.equal(fs.lstatSync(path.join(macos, "Electron")).isFile(), true);
+  assert.equal(fs.readFileSync(path.join(macos, "Electron"), "utf8"), "main");
+  assert.deepEqual(calls, [["/usr/bin/plutil", "-replace", "CFBundleExecutable", "-string", "Electron",
+    path.join(dist, "Electron.app", "Contents", "Info.plist")]]);
+  // Older runtimes, and a second pass, are left alone.
+  assert.deepEqual(stockElectronLayoutForBuilder(dist, { platform: "darwin", runCommand }), { restored: false, reason: "stock-layout" });
+  assert.equal(calls.length, 1);
+  assert.deepEqual(stockElectronLayoutForBuilder(dist, { platform: "win32", runCommand }), { restored: false, reason: "not-darwin" });
+});
+
+test("an unexpected Relay executable layout stops the build", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-builder-electron-layout-bad-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const macos = path.join(root, "Electron.app", "Contents", "MacOS");
+  fs.mkdirSync(macos, { recursive: true });
+  fs.writeFileSync(path.join(macos, "Relay"), "main", { mode: 0o755 });
+  fs.writeFileSync(path.join(macos, "Electron"), "a second binary", { mode: 0o755 });
+  assert.throws(() => stockElectronLayoutForBuilder(root, { platform: "darwin", runCommand: () => "" }), /unexpected Electron executable layout/);
 });

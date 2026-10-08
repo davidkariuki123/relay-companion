@@ -50,6 +50,33 @@ export function builderConfiguration({ appDir, resourcesDir, electronDist, outpu
   };
 }
 
+// The signed Relay runtime renames its macOS Electron executable to
+// MacOS/Relay, keeping MacOS/Electron as a link to it, so the pill's launch
+// agent is not named "Electron" (packages/companion/bootstrap/mac-background-identity.cjs).
+// electron-builder builds this application from the same dist and renames
+// MacOS/Electron to the executableName "relay": handed the link it would
+// produce a symlinked main executable, and on a case-insensitive volume
+// "relay" is "Relay", so the rename would replace the binary with a link to
+// itself. Give the builder the stock layout it expects; it re-brands and the
+// application is signed afterwards, so this copy's ad-hoc signature is moot.
+export function stockElectronLayoutForBuilder(electronDist, { platform = process.platform, runCommand = run, fsImpl = fs } = {}) {
+  if (platform !== "darwin") return { restored: false, reason: "not-darwin" };
+  const app = path.join(electronDist, "Electron.app");
+  const macos = path.join(app, "Contents", "MacOS");
+  const stock = path.join(macos, "Electron");
+  const renamed = path.join(macos, "Relay");
+  const stockStat = fsImpl.lstatSync(stock, { throwIfNoEntry: false });
+  // Runtimes built before the rename already have the stock layout.
+  if (!fsImpl.lstatSync(renamed, { throwIfNoEntry: false })) return { restored: false, reason: "stock-layout" };
+  if (!stockStat?.isSymbolicLink() || fsImpl.readlinkSync(stock) !== "Relay" || !fsImpl.lstatSync(renamed).isFile()) {
+    throw new Error("Verified runtime has an unexpected Electron executable layout");
+  }
+  fsImpl.unlinkSync(stock);
+  fsImpl.renameSync(renamed, stock);
+  runCommand("/usr/bin/plutil", ["-replace", "CFBundleExecutable", "-string", "Electron", path.join(app, "Contents", "Info.plist")]);
+  return { restored: true };
+}
+
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { encoding: "utf8", windowsHide: true, ...options });
   if (result.error || result.status !== 0) throw new Error(result.error?.message || result.stderr || `${command} failed`);
@@ -92,6 +119,7 @@ export async function prepareCandidate({ manifestFile, artifactFile, version, so
   if (application && !fs.existsSync(path.join(packageRoot, "bootstrap", "application-owner.cjs"))) throw new Error("Publish a stock bridge runtime with application ownership before building an activating application candidate");
   const electronMetadata = JSON.parse(fs.readFileSync(path.join(extracted, "node_modules", "electron", "package.json"), "utf8"));
   const electronDist = path.join(extracted, "node_modules", "electron", "dist");
+  stockElectronLayoutForBuilder(electronDist);
   const appDir = path.join(output, "app");
   const resourcesDir = path.join(output, "resources");
   fs.cpSync(path.join(root, "app"), appDir, { recursive: true, force: false, errorOnExist: true });

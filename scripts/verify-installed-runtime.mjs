@@ -12,6 +12,7 @@ import { ensureCandidateElectronRuntime, verifyCanonicalCandidate } from "../src
 import { prepareLinuxElectronSandbox } from "./prepare-linux-electron-sandbox.mjs";
 import { assertRuntimeCapabilities } from "./assert-runtime-capabilities.mjs";
 const { RELAY_MAC_BUNDLE_IDENTIFIER } = createRequire(import.meta.url)("../src/mac-app-identity.cjs");
+const { LEGACY_MAC_EXECUTABLE_NAME, RELAY_MAC_EXECUTABLE_NAME } = createRequire(import.meta.url)("../bootstrap/mac-background-identity.cjs");
 
 export function electronVersionArgs(platform = process.platform) {
   // Never teach a release gate to bypass the sandbox used in production. The
@@ -24,6 +25,7 @@ export function electronVersionArgs(platform = process.platform) {
 export function verifyMacElectronIdentity(electronPath, {
   platform = process.platform,
   spawn = spawnSync,
+  fsImpl = fs,
 } = {}) {
   if (platform !== "darwin") return { verified: false, reason: "not-darwin" };
   const appPath = path.resolve(path.dirname(electronPath), "../..");
@@ -37,6 +39,25 @@ export function verifyMacElectronIdentity(electronPath, {
   if (plist.error || plist.status !== 0 || identifier !== RELAY_MAC_BUNDLE_IDENTIFIER) {
     throw new Error(`Electron bundle identity is not Relay-owned (${plist.error?.message || identifier || plist.stderr || plist.status}).`);
   }
+  // macOS names the pill's ad-hoc signed launch agent after this file, so a
+  // runtime whose agent would show as "Electron" must not ship. The legacy
+  // MacOS/Electron path must remain a link to it for verifiers in the field.
+  const executable = spawn("/usr/bin/plutil", ["-extract", "CFBundleExecutable", "raw", "-o", "-", infoPath], {
+    encoding: "utf8",
+    windowsHide: true,
+    timeout: 30_000,
+  });
+  const executableName = String(executable.stdout || "").trim();
+  if (executable.error || executable.status !== 0 || executableName !== RELAY_MAC_EXECUTABLE_NAME
+    || path.basename(electronPath) !== RELAY_MAC_EXECUTABLE_NAME) {
+    throw new Error(`Relay Electron bundle executable is not ${RELAY_MAC_EXECUTABLE_NAME} (${executable.error?.message || executableName || executable.stderr || executable.status}; launched ${path.basename(electronPath)}).`);
+  }
+  const legacy = path.join(path.dirname(electronPath), LEGACY_MAC_EXECUTABLE_NAME);
+  let legacyTarget = null;
+  try { legacyTarget = fsImpl.readlinkSync(legacy); } catch {}
+  if (legacyTarget !== RELAY_MAC_EXECUTABLE_NAME) {
+    throw new Error(`Relay Electron bundle lacks its ${LEGACY_MAC_EXECUTABLE_NAME} -> ${RELAY_MAC_EXECUTABLE_NAME} compatibility link (${legacyTarget || "missing"}).`);
+  }
   const signature = spawn("/usr/bin/codesign", ["--verify", "--deep", "--strict", appPath], {
     encoding: "utf8",
     windowsHide: true,
@@ -45,7 +66,7 @@ export function verifyMacElectronIdentity(electronPath, {
   if (signature.error || signature.status !== 0) {
     throw new Error(`Relay Electron bundle signature is invalid (${signature.error?.message || signature.stderr || signature.status}).`);
   }
-  return { verified: true, appPath, bundleIdentifier: identifier };
+  return { verified: true, appPath, bundleIdentifier: identifier, executable: executableName };
 }
 
 export async function verifyInstalledManagedSkills(packageRoot) {

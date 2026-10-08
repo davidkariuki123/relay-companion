@@ -6,6 +6,7 @@ const crypto = require("node:crypto");
 const { spawnSync } = require("node:child_process");
 const { relayOwnedNodePath } = require("./owned-node-runtime.cjs");
 const { atomicFile } = require("./mac-registration-transaction.cjs");
+const { associatedBundleIdentifiersPlist } = require("./mac-background-identity.cjs");
 const { read, write, compare } = require("./recovery-runner.cjs");
 const LABEL = "work.relay.companion.recovery";
 const TASK = "Relay Companion Recovery";
@@ -185,7 +186,7 @@ function installRecovery({ packageRoot, node = process.execPath, homeDir = os.ho
       const plist = path.join(homeDir, "Library", "LaunchAgents", `${LABEL}.plist`);
       fs.mkdirSync(path.dirname(plist), { recursive: true });
       const priorSchedule = fs.existsSync(plist) ? fs.readFileSync(plist) : null;
-      const nextSchedule = `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>${LABEL}</string><key>ProgramArguments</key><array><string>${xml(launcherNode)}</string><string>${xml(launcher)}</string></array><key>EnvironmentVariables</key><dict><key>HOME</key><string>${xml(homeDir)}</string></dict><key>StartInterval</key><integer>60</integer><key>RunAtLoad</key><true/><key>ProcessType</key><string>Background</string><key>StandardOutPath</key><string>${xml(log)}</string><key>StandardErrorPath</key><string>${xml(log)}</string></dict></plist>`;
+      const nextSchedule = `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>${LABEL}</string><key>ProgramArguments</key><array><string>${xml(launcherNode)}</string><string>${xml(launcher)}</string></array><key>EnvironmentVariables</key><dict><key>HOME</key><string>${xml(homeDir)}</string></dict><key>StartInterval</key><integer>60</integer><key>RunAtLoad</key><true/><key>ProcessType</key><string>Background</string>${associatedBundleIdentifiersPlist()}<key>StandardOutPath</key><string>${xml(log)}</string><key>StandardErrorPath</key><string>${xml(log)}</string></dict></plist>`;
       atomicFile(plist, nextSchedule);
       // The job dispatches through the stable host. Do not unload it on update.
       const observed = runCommand("launchctl", ["print", `gui/${userId}/${LABEL}`]);

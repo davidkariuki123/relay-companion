@@ -637,15 +637,15 @@ export function ensureCandidateElectronRuntime(packageRoot, {
   });
   if (!electronRoot) return { ok: false, reason: "electron-package-missing" };
 
-  const electronRelative = platform === "win32"
-    ? api.join("dist", "electron.exe")
-    : platform === "darwin"
-      ? api.join("dist", "Electron.app", "Contents", "MacOS", "Electron")
-      : api.join("dist", "electron");
-  const electronPath = api.join(electronRoot, electronRelative);
-  try {
-    if (existsSync(electronPath)) return { ok: true, electronPath, electronRoot, repaired: false };
-  } catch {}
+  // A Relay-built macOS runtime's main executable is MacOS/Relay; stock and
+  // older runtimes only have MacOS/Electron, which is also what Electron's own
+  // install.js produces when it has to repair a missing runtime below.
+  const candidates = runtimeExecutables.electronMainCandidates(platform).map((relative) => api.join(electronRoot, relative));
+  const present = candidates.find((candidate) => {
+    try { return existsSync(candidate); } catch { return false; }
+  });
+  if (present) return { ok: true, electronPath: present, electronRoot, repaired: false };
+  const electronPath = candidates.at(-1);
 
   if (onlyWhenUnscripted) {
     try {

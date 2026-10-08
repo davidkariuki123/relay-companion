@@ -13,6 +13,9 @@ const sourceBootstrap = createRequire(import.meta.url)(path.join(companionRoot, 
 const { RELAY_MAC_BUNDLE_IDENTIFIER } = createRequire(import.meta.url)(
   path.join(companionRoot, "src", "mac-app-identity.cjs"),
 );
+const { LEGACY_MAC_EXECUTABLE_NAME, RELAY_MAC_EXECUTABLE_NAME } = createRequire(import.meta.url)(
+  path.join(companionRoot, "bootstrap", "mac-background-identity.cjs"),
+);
 const NORMALIZED_ARCHIVE_TIME = new Date("2000-01-01T00:00:00.000Z");
 
 function run(command, args, options = {}) {
@@ -93,7 +96,7 @@ export function verifyForeignRuntime(smokeRoot, platformKey) {
     path.join(packageRoot, "native", platform === "win32" ? "mcp-bridge.exe" : "mcp-bridge"),
     platform === "win32" ? path.join(electronDist, "electron.exe")
       : platform === "linux" ? path.join(electronDist, "electron")
-        : path.join(electronDist, "Electron.app", "Contents", "MacOS", "Electron"),
+        : path.join(electronDist, "Electron.app", "Contents", "MacOS", RELAY_MAC_EXECUTABLE_NAME),
   ];
   for (const file of executables) {
     const bytes = Buffer.alloc(4);
@@ -134,10 +137,12 @@ export function brandMacElectronApp(electronApp, {
   if (path.basename(appPath) !== "Electron.app" || !fs.existsSync(infoPath)) {
     throw new Error(`Electron application bundle is missing: ${appPath}`);
   }
+  renameMacElectronExecutable(appPath);
   for (const [key, value] of [
     ["CFBundleIdentifier", RELAY_MAC_BUNDLE_IDENTIFIER],
     ["CFBundleName", "Relay"],
     ["CFBundleDisplayName", "Relay"],
+    ["CFBundleExecutable", RELAY_MAC_EXECUTABLE_NAME],
   ]) {
     runCommand("/usr/bin/plutil", ["-replace", key, "-string", value, infoPath]);
   }
@@ -150,7 +155,35 @@ export function brandMacElectronApp(electronApp, {
   if (identifier !== RELAY_MAC_BUNDLE_IDENTIFIER) {
     throw new Error(`Branded Electron bundle has unexpected identifier: ${identifier || "missing"}`);
   }
-  return { branded: true, appPath, bundleIdentifier: identifier };
+  const executable = runCommand("/usr/bin/plutil", ["-extract", "CFBundleExecutable", "raw", "-o", "-", infoPath]);
+  if (executable !== RELAY_MAC_EXECUTABLE_NAME) {
+    throw new Error(`Branded Electron bundle has unexpected executable: ${executable || "missing"}`);
+  }
+  return { branded: true, appPath, bundleIdentifier: identifier, executable };
+}
+
+// macOS names an ad-hoc signed launch agent after its executable file, so the
+// pill's agent showed as "Electron" (see bootstrap/mac-background-identity.cjs).
+// The bundle executable becomes MacOS/Relay. MacOS/Electron stays as a relative
+// link to it: installers, updaters and recovery engines already in the field
+// verify a new runtime by that path, and the signed runtime-links map carries
+// the link through the archive like Electron's own framework links.
+export function renameMacElectronExecutable(appPath, { fsImpl = fs } = {}) {
+  const macos = path.join(appPath, "Contents", "MacOS");
+  const branded = path.join(macos, RELAY_MAC_EXECUTABLE_NAME);
+  const legacy = path.join(macos, LEGACY_MAC_EXECUTABLE_NAME);
+  const legacyStat = fsImpl.lstatSync(legacy, { throwIfNoEntry: false });
+  if (!fsImpl.existsSync(branded)) {
+    if (!legacyStat?.isFile()) throw new Error(`Electron main executable is missing: ${legacy}`);
+    fsImpl.renameSync(legacy, branded);
+  } else if (legacyStat && !legacyStat.isSymbolicLink()) {
+    throw new Error(`Electron bundle has two main executables: ${macos}`);
+  }
+  if (!fsImpl.lstatSync(legacy, { throwIfNoEntry: false })) fsImpl.symlinkSync(RELAY_MAC_EXECUTABLE_NAME, legacy, "file");
+  if (fsImpl.readlinkSync(legacy) !== RELAY_MAC_EXECUTABLE_NAME || !fsImpl.statSync(branded).isFile()) {
+    throw new Error(`Electron compatibility link is not ${LEGACY_MAC_EXECUTABLE_NAME} -> ${RELAY_MAC_EXECUTABLE_NAME}: ${macos}`);
+  }
+  return { executable: branded, legacy };
 }
 
 export function runMacTrayPositionProbe(electronPath, {
@@ -490,7 +523,7 @@ export function buildRuntimeArtifact({
         verifyForeignRuntime(smokeRoot, platformKey);
       } else {
       runMacTrayPositionProbe(
-        path.join(smokeRoot, "node_modules", "electron", "dist", "Electron.app", "Contents", "MacOS", "Electron"),
+        path.join(smokeRoot, "node_modules", "electron", "dist", "Electron.app", "Contents", "MacOS", RELAY_MAC_EXECUTABLE_NAME),
         { platform: target.platform },
       );
       const smokeBridge = path.join(smokePackageRoot, "native", target.platform === "win32" ? "mcp-bridge.exe" : "mcp-bridge");

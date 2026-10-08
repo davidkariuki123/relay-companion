@@ -2,6 +2,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const { LEGACY_MAC_EXECUTABLE_NAME, RELAY_MAC_EXECUTABLE_NAME } = require("./mac-background-identity.cjs");
 
 const MAC_HELPER_EXECUTABLES = [
   ["Electron Helper.app", "Electron Helper"],
@@ -18,6 +19,21 @@ function pathsFor(platform) {
   return platformName(platform) === "win32" ? path.win32 : path.posix;
 }
 
+// Electron's main executable inside its npm package, most preferred first.
+// Relay-built macOS runtimes name the bundle executable MacOS/Relay so macOS
+// shows the pill's launch agent as "Relay" (see mac-background-identity.cjs);
+// stock and older runtimes have only MacOS/Electron.
+function electronMainCandidates(platform = process.platform) {
+  const name = platformName(platform);
+  const api = pathsFor(name);
+  if (name === "win32") return [api.join("dist", "electron.exe")];
+  if (name === "darwin") {
+    return [RELAY_MAC_EXECUTABLE_NAME, LEGACY_MAC_EXECUTABLE_NAME]
+      .map((executable) => api.join("dist", "Electron.app", "Contents", "MacOS", executable));
+  }
+  return [api.join("dist", "electron")];
+}
+
 function runtimeExecutableInventory(packageRoot, {
   platform = process.platform,
   existsSync = fs.existsSync,
@@ -25,14 +41,14 @@ function runtimeExecutableInventory(packageRoot, {
   const name = platformName(platform);
   const api = pathsFor(name);
   const roots = [api.join(packageRoot, "node_modules", "electron"), api.join(api.dirname(packageRoot), "electron")];
-  const mainRelative = name === "win32"
-    ? api.join("dist", "electron.exe")
-    : name === "darwin"
-      ? api.join("dist", "Electron.app", "Contents", "MacOS", "Electron")
-      : api.join("dist", "electron");
-  const electronRoot = roots.find((root) => {
-    try { return existsSync(api.join(root, mainRelative)); } catch { return false; }
-  });
+  let electronRoot = null;
+  let mainRelative = null;
+  for (const root of roots) {
+    mainRelative = electronMainCandidates(name).find((relative) => {
+      try { return existsSync(api.join(root, relative)); } catch { return false; }
+    }) || null;
+    if (mainRelative) { electronRoot = root; break; }
+  }
   if (!electronRoot) return { ok: false, reason: "candidate-electron-missing", paths: [] };
 
   const entries = [{ role: "electron", path: api.join(electronRoot, mainRelative) }];
@@ -130,6 +146,7 @@ function repairRuntimeExecutablePermissions(packageRoot, {
 
 module.exports = {
   MAC_HELPER_EXECUTABLES,
+  electronMainCandidates,
   repairRuntimeExecutablePermissions,
   runtimeExecutableInventory,
   verifyRuntimeExecutables,

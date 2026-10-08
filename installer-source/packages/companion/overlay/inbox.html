@@ -13795,7 +13795,7 @@
           // thread brings it into view (David: the green line was noise).
           if (activeView === "reader" && String(readerId) === String(r.id)) {
             renderReader();
-            requestAnimationFrame(() => {
+            globalThis.requestAnimationFrame?.(() => {
               const sentRows = readerBodyEl.querySelectorAll("#readerReplies .rd-reply");
               sentRows[sentRows.length - 1]?.scrollIntoView({ block:"nearest", behavior:REDUCED ? "auto" : "smooth" });
             });

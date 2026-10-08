@@ -228,7 +228,10 @@ export function validateInstalledPackageShape(packageRoot, { version, distributi
     // Setup hides only the previous Relay pill while it downloads and reopens it
     // if setup fails: Node builtins only (2026-10-02).
     const previousPillBootstrap = [...installerRecoveryBootstrap, "previous-pill.cjs"].sort();
-    if (![legacyBootstrap, recoveryBootstrap, resilientBootstrap, monitoredBootstrap, macRecoveryBootstrap, responsiveRecoveryBootstrap, configRecoveryBootstrap, bundledNodeBootstrap, daemonProgressBootstrap, applicationBootstrap, handoffBootstrap, rulesBootstrap, transactionBootstrap, lifecycleBootstrap, diagnosticBootstrap, installerRecoveryBootstrap, previousPillBootstrap].some(shape => JSON.stringify(bootstrapFiles) === JSON.stringify(shape))) {
+    // How macOS names Relay's launch agents (2026-10-08): two constants and a
+    // path helper over Node builtins and the reviewed application-owner.cjs.
+    const backgroundIdentityBootstrap = [...previousPillBootstrap, "mac-background-identity.cjs"].sort();
+    if (![legacyBootstrap, recoveryBootstrap, resilientBootstrap, monitoredBootstrap, macRecoveryBootstrap, responsiveRecoveryBootstrap, configRecoveryBootstrap, bundledNodeBootstrap, daemonProgressBootstrap, applicationBootstrap, handoffBootstrap, rulesBootstrap, transactionBootstrap, lifecycleBootstrap, diagnosticBootstrap, installerRecoveryBootstrap, previousPillBootstrap, backgroundIdentityBootstrap].some(shape => JSON.stringify(bootstrapFiles) === JSON.stringify(shape))) {
       throw new Error("Thin installer bootstrap contents do not match the reviewed shape");
     }
     const manifest = JSON.parse(fs.readFileSync(path.join(packageRoot, "skill", "manifest.json"), "utf8"));

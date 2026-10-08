@@ -178,7 +178,7 @@ const {
   chatReadPresenceAvailable,
   observedFreshSystemInput,
 } = require("./chat-read-presence.cjs");
-const { elevationForFrontmost } = require("./elevation-policy.cjs");
+const { elevationForFrontmost, startExplicitOpenHold, applyExplicitOpenHold } = require("./elevation-policy.cjs");
 const { openingFaceFor } = require("./message-face.cjs");
 const perf = require("./perf-counters.cjs");
 const {
@@ -4037,6 +4037,9 @@ function rememberForegroundHost(host) {
 
 const RELAY_BUNDLE_IDS = [
   RELAY_MAC_BUNDLE_IDENTIFIER,
+  // Relay.app in /Applications: the Dock icon is briefly frontmost while it
+  // hands an open to this pill, and that is Relay, not the person leaving.
+  "work.relay.application",
   "com.github.Electron",
   "com.granular.relay",
   "work.granular.relay",
@@ -4068,9 +4071,13 @@ function yieldOverlayToDocumentWindow(documentWin) {
   documentWin.on("focus", () => setOverlayElevated(false));
 }
 
+let explicitOpenHold = null;
 function observeFrontmostBundle(bundle) {
   const host = hostFromBundle(bundle);
   if (host) rememberForegroundHost(host);
+  const held = applyExplicitOpenHold({ hold: explicitOpenHold, bundle, now: Date.now(), selfBundles: RELAY_BUNDLE_IDS });
+  explicitOpenHold = held.hold;
+  if (held.keep) return setOverlayElevated(true);
   setOverlayElevated(elevationForFrontmost({
     bundle,
     current: overlayElevated,
@@ -8451,6 +8458,7 @@ function createTrayIcon() {
 let lastTrayShowAt = 0;
 function showFromTray(reopenNonce = "") {
   lastTrayShowAt = Date.now();
+  explicitOpenHold = startExplicitOpenHold({ now: lastTrayShowAt });
   setOverlayElevated(true);
   setDismissed(false);
   ghostActive = false;
@@ -8494,6 +8502,7 @@ function pillIsOnScreen() {
 // clicked again — reachable because the tray exists whenever this runs.
 function hideFromTray() {
   dismissed = true;
+  explicitOpenHold = null;
   attentionLatched = false;
   // Same contract as the ✕: hiding never confirms unseen relays; it snoozes
   // them until a new arrival or a leave-and-return.

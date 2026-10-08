@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { assertNewOutput } from "./prepare.mjs";
+import { buildMacDmg } from "./lib/mac-dmg.mjs";
 
 // Separate from packaging: a build never discovers a certificate. This runs
 // either in sign-application-mac.yml, where the mac-signing environment lends
@@ -49,20 +50,11 @@ run("xcrun", ["stapler", "validate", appPath]);
 run("spctl", ["--assess", "--type", "execute", "--verbose=2", appPath]);
 if (createHash("sha256").update(fs.readFileSync(node)).digest("hex") !== candidate.nodeSha256) throw new Error("Nested signing changed the sealed Node runtime");
 const dmg = path.join(root, `${preview ? "Relay-Migration-Preview" : "Relay"}-${candidate.applicationVersion || candidate.version}-${candidate.platform}.dmg`);
-const imageRoot = path.join(root, "image");
-fs.mkdirSync(imageRoot);
-fs.symlinkSync("/Applications", path.join(imageRoot, "Applications"));
-fs.cpSync(appPath, path.join(imageRoot, path.basename(appPath)), { recursive: true, verbatimSymlinks: true });
-// hdiutil create intermittently fails with "Resource busy" on hosted macOS
-// runners; the same command succeeds moments later.
-for (let attempt = 1; ; attempt++) {
-  try { run("hdiutil", ["create", "-volname", preview ? "Relay Migration Preview" : "Relay", "-srcfolder", imageRoot, "-format", "UDZO", dmg]); break; }
-  catch (error) {
-    if (attempt >= 4 || !/Resource busy/i.test(error.message)) throw error;
-    fs.rmSync(dmg, { force: true });
-    spawnSync("sleep", [String(10 * attempt)]);
-  }
-}
+// The disk image opens as the install window: Relay.app left, an arrow, the
+// Applications folder right, on a picture that says what to do. See
+// lib/mac-dmg.mjs; the layout is checked on the mounted volume before the
+// image is compressed, then signed and notarized below exactly as before.
+buildMacDmg({ app: appPath, output: dmg, volumeName: preview ? "Relay Migration Preview" : "Relay", run });
 run("codesign", ["--sign", identity, ...keychainArgs, "--timestamp", dmg]);
 const authArgs = ["--keychain-profile", keychainProfile, ...(auth.keychain ? ["--keychain", auth.keychain] : [])];
 const submission = JSON.parse(run("xcrun", ["notarytool", "submit", dmg, ...authArgs, "--wait", "--output-format", "json"]));

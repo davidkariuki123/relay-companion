@@ -28,6 +28,7 @@ const require = createRequire(import.meta.url);
 const diagnostics = require("../bootstrap/diagnostics.cjs");
 const { stageVerifiedRuntime, releasePlatform } = require("../bootstrap/relay-setup.cjs");
 const { systemdRunEnvironmentArgs } = require("../bootstrap/linux-systemd.cjs");
+const { associatedBundleIdentifiersPlist } = require("../bootstrap/mac-background-identity.cjs");
 const {
   activateLinuxRuntimeServices,
   activateMacRuntimeServices,
@@ -548,6 +549,7 @@ ${argumentsXml}
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><false/>
   <key>ProcessType</key><string>Background</string>
+${associatedBundleIdentifiersPlist("  ")}
   <key>StandardOutPath</key><string>${plistEscape(logPath)}</string>
   <key>StandardErrorPath</key><string>${plistEscape(logPath)}</string>
 </dict>
