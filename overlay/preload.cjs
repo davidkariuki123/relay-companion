@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld("relay", {
   taskClaim: (id, expectedVersion) => ipcRenderer.invoke("relay:taskClaim", String(id || ""), expectedVersion),
   taskExecute: (id, choice) => ipcRenderer.invoke("relay:taskExecute", String(id || ""), choice && typeof choice === "object"
     ? { provider: String(choice.provider || ""), cwd: String(choice.cwd || ""), browse: choice.browse === true } : undefined),
+  taskRunPlan: (id) => ipcRenderer.invoke("relay:taskRunPlan", String(id || "")),
   executionDisable: () => ipcRenderer.invoke("relay:executionDisable"),
   executionEnable: () => ipcRenderer.invoke("relay:executionEnable"),
   executionMode: (mode) => ipcRenderer.invoke("relay:executionMode", mode),

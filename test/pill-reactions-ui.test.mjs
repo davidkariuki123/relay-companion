@@ -162,7 +162,8 @@ test("Task, reader and AI-runner surfaces never render a reaction trigger", () =
   assert.match(conversation, /const canReact = REACTIONS_ENABLED && !m\.request && !m\.ownedAgent && !m\.pending/);
   assert.match(conversation, /!m\.deletedAt && !attachmentOnly && !editingMessage && !groupPostingBlocked/);
   assert.doesNotMatch(conversation, /reactionConfirmationHtml\(m\.id\)/);
-  assert.match(conversation, /<span class="kchip">Task<\/span>/, "Task roots can remain visible as bubbles");
+  assert.match(conversation, /\$\{m\.request \? taskChipHtml\(m\) : ""\}/, "Task roots can remain visible as bubbles");
+  assert.match(html, /if \(!kind\) return '<span class="kchip">Task<\/span>';/, "labelled as a Task");
 
   const requests = between(html, "// Grow the window as the user scrolls toward the end.", "// ---------- Contacts view ----------");
   assert.doesNotMatch(requests, /messageReactionPickerHtml|data-rx-face|wireReactionControls/);

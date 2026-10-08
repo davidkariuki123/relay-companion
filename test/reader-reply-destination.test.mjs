@@ -57,6 +57,12 @@ function readerHarness({ row, sent = [], chats = [], groups = [], canonical = []
     const fadeRowNoteLater = () => {};
     const renderReader = () => {};
     const chatTypingController = { stop() {} };
+    // The reader's + (3adcf2ae): no files are staged here; attachments are
+    // covered by reply-threads.browser.mjs.
+    const peekStagedFiles = () => [];
+    const takeStagedFiles = () => [];
+    const stageFileList = () => {};
+    const composerFilePayloads = async () => ({ files: [], attachments: [] });
     ${functions.map(pillFunction).join("\n")}
     const r = readerRow(id);
     const sender = relaySender(r);

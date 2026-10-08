@@ -100,3 +100,22 @@ test("remembering a choice keys it by the sender's address and the Topic id, and
   const bare = rememberWorkspaceChoice({}, { packet: {}, provider: "codex", cwd: "/w/relay", at: "t2" });
   assert.deepEqual(bare, { provider: "codex", cwd: "/w/relay" });
 });
+
+test("the card's plan: the folder only when the Task names exactly one checkout here, and the app chosen before with its reason", () => {
+  const packet = { senderEmail: "sven@example.com", inReplyToTopicPost: { topicId: "tpc_1" }, source: { workspace: { kind: "name", key: "relay", label: "relay" } } };
+  const one = workspaceChoices({ ...base, packet });
+  assert.equal(norm(one.folder.cwd), "/w/relay");
+  assert.equal(one.folder.name, "relay");
+  const two = workspaceChoices({ ...base, packet, findCheckoutsFn: () => [{ dir: "/w/relay" }, { dir: "/w/old" }] });
+  assert.equal(two.folder, null, "several checkouts: the card asks which");
+  assert.equal(workspaceChoices({ ...base }).folder, null, "a Task about no repo names no folder");
+  assert.equal(one.remembered, null, "nothing chosen before");
+  const last = workspaceChoices({ ...base, packet, preferences: { provider: "codex", cwd: "/w/notes" } });
+  assert.deepEqual(last.remembered, { provider: "codex", reason: "last", why: "Codex is what you used last time." });
+  const sender = workspaceChoices({ ...base, packet, senderName: "Sven", preferences: { provider: "codex", bySender: { "sven@example.com": { provider: "claude", cwd: "/w/relay" } } } });
+  assert.deepEqual(sender.remembered, { provider: "claude", reason: "sender", why: "Claude Code is where you ran Sven's last Task." });
+  const topic = workspaceChoices({ ...base, packet, senderName: "Sven", preferences: { provider: "codex", bySender: { "sven@example.com": { provider: "claude", cwd: "/w/relay" } }, byTopic: { tpc_1: { provider: "codex", cwd: "/w/relay" } } } });
+  assert.deepEqual(topic.remembered, { provider: "codex", reason: "topic", why: "Codex is where this Topic's Tasks run." });
+  const gone = workspaceChoices({ ...base, packet, providers: [{ provider: "claude", label: "Claude Code" }], preferences: { provider: "codex" } });
+  assert.equal(gone.remembered, null, "an app no longer on this computer is not singled out");
+});

@@ -250,11 +250,12 @@ test("the pill paints no Conductor tile, switch or word without both the row and
   // names the app of an option main already decided to offer.
   const mentions = inbox.split("\n").filter((line) => /conductor/i.test(line) && !/^\s*\/\//.test(line));
   for (const line of mentions) {
-    // The chip's colour rule paints nothing unless hostOptions offered the chip.
+    // The chip's colour rule paints nothing unless hostOptions offered the chip;
+    // the Task card's Run mark likewise exists only behind conductorEnabled().
     // Which AI do you use most? (2026-10-07, David) lists Conductor during
     // first-run setup whenever the app is on this Mac, row or not: choosing it
     // only shows the local setup prompt to paste there.
-    assert.match(line, /o\.host !== "conductor" \|\| agentSurfaces\?\.Conductor\?\.available === true|^  \.su-agents \.th-host-action\[data-host="conductor"\] \{|features\?\.conductor === true|conductorAvailable|conductorEnabled|conductorPreferenceKey|setConductorEnabled|conductorPromptFor|openInConductor|data-conductor-app|option\.provider === "conductor"|Opened in Conductor|in Conductor\.|conductorMark\.svg|sv-open-name">Conductor|storedSettings\(\)\.conductor|ACCOUNT_SETTING_KEYS = |legacy\.conductor|savePillSetting\(\{ conductor: |^  \.th-host-tile\[data-host="conductor"\] \{/,
+    assert.match(line, /o\.host !== "conductor" \|\| agentSurfaces\?\.Conductor\?\.available === true|^  \.su-agents \.th-host-action\[data-host="conductor"\] \{|features\?\.conductor === true|conductorAvailable|conductorEnabled|conductorPreferenceKey|setConductorEnabled|conductorPromptFor|openInConductor|data-conductor-app|option\.provider === "conductor"|Opened in Conductor|in Conductor\.|conductorMark\.svg|sv-open-name">Conductor|storedSettings\(\)\.conductor|ACCOUNT_SETTING_KEYS = |legacy\.conductor|savePillSetting\(\{ conductor: |^  \.th-host-tile\[data-host="conductor"\] \{|^  \.tk-run-mark\[data-host="conductor"\] \{/,
       `an ungated Conductor mention: ${line.trim().slice(0, 120)}`);
   }
   assert.ok(fs.existsSync(new URL("../overlay/conductorMark.svg", import.meta.url)));

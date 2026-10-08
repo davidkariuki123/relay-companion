@@ -61,7 +61,7 @@ function boot({ relays = [], sent = [], apps = ["codex", "claude"], opens = () =
     setTimeout, clearTimeout, console, Map, Set, Date, String, Number, Boolean, Array, JSON, Math,
   };
   vm.createContext(context);
-  vm.runInContext(block + "\nthis.__t = { taskStateFor, taskLadder, taskVerbsHtml, taskCardFooterHtml, taskStatusModuleHtml, taskRowLineHtml, taskEventOf, taskResultFor, taskResultLinkHtml, taskIsOver, taskAsking, taskAskRowHtml, taskStateRowHtml, taskVerb, TASK_ASK_GUARD_MS, taskIsEveryone, taskRosterCardHtml, taskRosterGroupedHtml, taskRosterYouStripHtml, taskRosterSumText, taskRosterTone, taskRosterCountsOf, taskRosterHelperText, nativeExecuteHtml, taskExecuteVerbHtml, nativeExecutePickerHtml, nativeExecuteChoice };", context);
+  vm.runInContext(block + "\nthis.__t = { taskStateFor, taskLadder, taskVerbsHtml, taskCardFooterHtml, taskStatusModuleHtml, taskRowLineHtml, taskEventOf, taskResultFor, taskResultLinkHtml, taskIsOver, taskAsking, taskAskRowHtml, taskStateRowHtml, taskVerb, TASK_ASK_GUARD_MS, taskIsEveryone, taskRosterCardHtml, taskRosterGroupedHtml, taskRosterYouStripHtml, taskRosterSumText, taskRosterTone, taskRosterCountsOf, taskRosterHelperText, nativeExecuteHtml, nativeExecutePickerHtml, nativeExecuteChoice, taskRunBlockHtml, taskRunPlans, taskRunPicking, taskRunTap, taskEveryonePositionHtml, taskChipHtml };", context);
   context.__t.__context = context;
   return context.__t;
 }
@@ -288,17 +288,40 @@ test("a channel Task keeps the claim lifecycle as its verbs; Reject and Cancel n
   const t = boot();
   const unclaimed = inboundTask({ taskClaim: { scope: "channel", state: "unclaimed", workState: "idle", version: 0, capabilities: { canClaim: true } } });
   const st = t.taskStateFor(unclaimed);
-  assert.equal(st.text, "Unclaimed");
-  assert.match(t.taskVerbsHtml(unclaimed, st), /Claim</);
+  // Who has it, in plain words (Shane, 2026-10-08), and the verbs say what they do.
+  assert.equal(st.text, "Nobody has taken it yet");
+  assert.match(t.taskVerbsHtml(unclaimed, st), /data-task-verb="claim"[^>]*>Take it</);
   assert.doesNotMatch(t.taskVerbsHtml(unclaimed, st), /Reject|Done/);
   const mine = inboundTask({ taskClaim: { scope: "channel", state: "claimed", workState: "idle", version: 1, claimant: { self: true, name: "David" }, claimedAt: ago(3), capabilities: { canUnclaim: true } } });
-  assert.match(t.taskVerbsHtml(mine, t.taskStateFor(mine)), /Unclaim[\s\S]*Done/);
+  assert.match(t.taskStateFor(mine).text, /^You took it · 3m$/);
+  assert.match(t.taskVerbsHtml(mine, t.taskStateFor(mine)), /data-task-verb="unclaim"[^>]*>Give it back<[\s\S]*Done/);
   const working = inboundTask({ taskStartedAt: ago(20), taskClaim: { scope: "channel", state: "claimed", workState: "working", version: 1, claimant: { self: true, name: "David" }, claimedAt: ago(25) } });
   assert.match(t.taskStateFor(working).text, /^In progress · you · 20m$/);
   assert.match(t.taskVerbsHtml(working, t.taskStateFor(working)), /Release[\s\S]*Done/);
   const theirs = inboundTask({ taskClaim: { scope: "channel", state: "claimed", workState: "idle", version: 1, claimant: { self: false, name: "Anna Keller" }, claimedAt: ago(20) } });
-  assert.match(t.taskStateFor(theirs).text, /^Claimed by Anna Keller · 20m$/);
+  assert.equal(t.taskStateFor(theirs).text, "Anna took it · nothing for you to do");
   assert.equal(t.taskVerbsHtml(theirs, t.taskStateFor(theirs)), "");
+  const sender = sentTask({ taskClaim: { scope: "channel", state: "claimed", workState: "idle", version: 1, claimant: { self: false, name: "Anna Keller" }, claimedAt: ago(20) } });
+  assert.match(t.taskStateFor(sender).text, /^Anna took it · 20m$/, "the sender is not told there is nothing to do");
+  const released = inboundTask({ taskClaim: { scope: "channel", state: "unclaimed", workState: "idle", version: 2, releasedAt: ago(1), releasedBy: { self: false, name: "Anna Keller" }, capabilities: { canClaim: true } } });
+  assert.equal(t.taskStateFor(released).text, "Nobody has it · Anna gave it back");
+});
+
+test("an Anyone card leads with who has it, keeps the Run block while it could be yours, then says who it went to", () => {
+  const plan = { ok: true, providers: [{ provider: "claude" }, { provider: "codex" }], folder: null, remembered: null, options: [] };
+  const t = boot({ features: { taskExecution: true } });
+  const claim = (over) => ({ scope: "channel", workState: "idle", version: 1, memberCount: 3, ...over });
+  const open = inboundTask({ groupId: "grp1", taskClaim: claim({ state: "unclaimed", capabilities: { canClaim: true } }) });
+  t.taskRunPlans.set("t1", plan);
+  const footer = t.taskCardFooterHtml(open);
+  assert.ok(footer.indexOf("Nobody has taken it yet") < footer.indexOf("tk-run") && footer.indexOf("tk-run") < footer.indexOf("Sent to 3 people"), "who has it, the Run block, then who it went to");
+  assert.match(footer, /tk-run-caption">Running it takes it for you, so nobody else starts it too\.</);
+  const theirs = inboundTask({ groupId: "grp1", taskClaim: claim({ state: "claimed", claimant: { self: false, name: "Anna Keller" }, claimedAt: ago(20) }) });
+  const taken = t.taskCardFooterHtml(theirs);
+  assert.match(taken, /Anna took it · nothing for you to do/);
+  assert.doesNotMatch(taken, /tk-run|tk-agents|data-task-verb/, "nothing to press when it is someone else's");
+  assert.match(t.taskChipHtml(open), /class="kchip">Task<\/span><span class="tk-kind anyone">[\s\S]*One of you<\/span>/);
+  assert.equal(t.taskChipHtml(inboundTask()), '<span class="kchip">Task</span>', "a Task to one person names no kind");
 });
 
 test("the room renders the card and the event bubble in place of the claim slot and the read line", () => {
@@ -399,44 +422,69 @@ const ROSTER = [
 const everyoneTask = (over = {}) => inboundTask({ taskAssignment: "everyone", taskRoster: ROSTER, taskRosterCounts: ROSTER_COUNTS, ...over });
 const everyoneSent = (over = {}) => sentTask({ taskAssignment: "everyone", taskRoster: ROSTER.filter((m) => !m.self), taskRosterCounts: ROSTER_COUNTS, ...over });
 
-test("a member's card: You first with their own verbs, then the newest movements, then the rest counted", () => {
+test("a member's card: where they stand first, then their own row with its verbs, then everyone in one line", () => {
   const t = boot();
   const row = everyoneTask();
   assert.equal(t.taskIsEveryone(row), true);
   const card = t.taskRosterCardHtml(row);
-  // You is pinned first, and carries the verbs — the sum line keeps none.
-  assert.match(card, /^<div class="tk-roster"><div class="tk-roster-row open you"/);
-  assert.match(card, /tk-roster-row open you[\s\S]*?>You<\/span>[\s\S]*?data-task-verb="reject"[\s\S]*?data-task-verb="done"/);
-  // Three movements, newest first, and never the seen or the unseen.
-  const names = [...card.matchAll(/class="tk-roster-name">([^<]*)</g)].map((m) => m[1]);
-  assert.deepEqual(names.slice(0, 4), ["You", "Priya Natarajan", "Anna Keller", "Ben Okafor"]);
-  assert.equal(names.length, 4, "the card never grows past You plus three");
-  assert.doesNotMatch(card, /Chen Feng|Nils Berg/, "people who have only seen it are counted, not listed");
-  // The counted line is the EXACT counts, not the length of the list on the wire.
-  assert.match(card, /<span class="tk-roster-more-n">96 more<\/span>/);
-  // The breakdown describes the REMAINDER it sits beside, so the four people
-  // already named above it are subtracted: it must never sum past "96 more".
-  assert.match(card, /10 done · <i class="tk-mark started"><\/i>3 in progress · <i class="tk-mark rejected"><\/i>3 rejected · <i class="tk-mark open"><\/i>80 waiting/);
-  assert.doesNotMatch(card, /0 cancelled/, "a state nobody is in is left out");
-  // A Done row is a door to that person's result; an In progress row is not.
-  assert.match(card, /data-task-result-of="res-priya"/);
-  assert.equal(card.split("data-task-result-of=").length - 1, 2);
+  // Shane, 2026-10-08: a member's card keeps only their own row; the position
+  // line above and the tally below say how everyone else is getting on.
+  assert.equal(card.split("tk-roster-row ").length - 1, 1, "only You");
+  assert.match(card, /^<div class="tk-roster"><div class="tk-roster-row open you"[\s\S]*?>You<\/span>[\s\S]*?data-task-verb="reject"[\s\S]*?data-task-verb="done"/);
+  assert.doesNotMatch(card, /tk-roster-more/, "no counted line: the tally says it");
+  const footer = t.taskCardFooterHtml(row);
+  assert.match(footer, /^<div class="tk-footer"[^>]*><div class="tk-pos open">/, "the position comes first");
+  assert.match(footer, /tk-pos open"><span class="tk-mark open"[^>]*><\/span><span>Priya and 11 others are done · <b>yours is still to do<\/b><\/span>/);
+  assert.ok(footer.indexOf("tk-pos") < footer.indexOf("tk-roster-row") && footer.indexOf("tk-roster-row") < footer.indexOf("tk-tally"), "position, your row, then the tally");
+  assert.match(footer, /<button type="button" class="tk-tally started" data-task-roster-open="t1"><span class="tk-state">[\s\S]*100 people · 12 done<\/span><\/span><span class="tk-tally-chev"/, "the tally opens the roster");
+  assert.match(t.taskChipHtml(row), /<span class="tk-kind everyone">[\s\S]*Each of you<\/span>/);
 });
 
-test("the sender's card carries the same roster, with no You row and no verbs", () => {
+test("a member's position reads in names, never pronouns, in every state", () => {
+  const t = boot();
+  const two = (ownState, other, over = {}) => everyoneTask({
+    taskRoster: [rosterMember("You", ownState, { self: true, relayId: "t1" }), rosterMember("Sven Wellmann", other)],
+    taskRosterCounts: { total: 2, done: [ownState, other].filter((s) => s === "done").length, started: 0, rejected: [ownState, other].filter((s) => s === "rejected").length, cancelled: 0, seen: 0, sent: 0 },
+    ...over,
+  });
+  const text = (row) => t.taskEveryonePositionHtml(row).replace(/<[^>]+>/g, "").replace(/&#39;/g, "'");
+  assert.equal(text(two("seen", "seen")), "Nobody's done yet · yours is still to do");
+  assert.equal(text(two("seen", "done")), "Sven's done · yours is still to do");
+  assert.equal(text(two("done", "seen", { taskCompletedAt: ago(1) })), "Yours is done · Sven's is still to do");
+  assert.equal(text(two("rejected", "done", { taskRejectedAt: ago(1) })), "You turned yours down · everyone else is done");
+  assert.equal(text(two("done", "done", { taskCompletedAt: ago(1) })), "Everyone's done, you included");
+  assert.match(t.taskEveryonePositionHtml(two("seen", "done")), /<b>yours is still to do<\/b>/, "your own part is the strong one");
+  assert.equal(t.taskEveryonePositionHtml(everyoneSent()), "", "the sender owes nothing, so has no position");
+});
+
+test("the sender's card carries the roster, with no You row and no verbs", () => {
   const t = boot();
   const card = t.taskRosterCardHtml(everyoneSent());
   assert.doesNotMatch(card, /tk-roster-row[^"]*you/, "the sender does not owe it");
   assert.doesNotMatch(card, /data-task-verb/, "and has nothing to press");
+  // Three movements, newest first, and never the seen or the unseen.
+  const names = [...card.matchAll(/class="tk-roster-name">([^<]*)</g)].map((m) => m[1]);
+  assert.deepEqual(names, ["Priya Natarajan", "Anna Keller", "Ben Okafor"]);
+  assert.doesNotMatch(card, /Chen Feng|Nils Berg/, "people who have only seen it are counted, not listed");
+  // The counted line is the EXACT counts, not the length of the list on the wire.
   assert.match(card, /<span class="tk-roster-more-n">97 more<\/span>/, "with no You row, one more person is in the count");
+  // The breakdown describes the REMAINDER it sits beside, so the people
+  // already named above it are subtracted: it must never sum past "97 more".
+  assert.match(card, /10 done · <i class="tk-mark started"><\/i>3 in progress · <i class="tk-mark rejected"><\/i>3 rejected · <i class="tk-mark open"><\/i>81 waiting/);
+  assert.doesNotMatch(card, /0 cancelled/, "a state nobody is in is left out");
+  // Every Done row is a door to that person's result; an In progress row is not.
+  assert.match(card, /data-task-result-of="res-priya"/);
+  assert.equal(card.split("data-task-result-of=").length - 1, 2);
 });
 
 test("the sum reads in words and takes the tone of what is happening", () => {
   const t = boot();
-  assert.equal(t.taskRosterSumText(ROSTER_COUNTS), "Everyone · 12 of 100 done");
+  // It counts people: "0 of 2 done" read as two steps for the agent (Shane, 2026-10-08).
+  assert.equal(t.taskRosterSumText(ROSTER_COUNTS), "100 people · 12 done");
+  assert.equal(t.taskRosterSumText({ total: 2, done: 0 }), "2 people · none done yet");
   assert.equal(t.taskRosterTone(ROSTER_COUNTS), "started");
   const allDone = { total: 4, done: 4, started: 0, rejected: 0, cancelled: 0, seen: 0, sent: 0 };
-  assert.equal(t.taskRosterSumText(allDone), "Everyone · all 4 done");
+  assert.equal(t.taskRosterSumText(allDone), "4 people · all done");
   assert.equal(t.taskRosterTone(allDone), "done");
   const onlyRefused = { total: 4, done: 0, started: 0, rejected: 2, cancelled: 0, seen: 2, sent: 0 };
   assert.equal(t.taskRosterTone(onlyRefused), "rejected");
@@ -489,17 +537,17 @@ test("the You strip and the helper say what is theirs and what is the room's", (
   assert.match(strip, /Yours to do/);
   assert.match(strip, /data-task-verb="done"[^>]*>Mark done</, "the reader's verbs, not the card's");
   assert.equal(t.taskRosterYouStripHtml(everyoneSent(), t.taskStateFor(everyoneSent())), "", "the sender has no strip");
-  assert.match(t.taskRosterHelperText(row), /^12 of 100 done · 3 people rejected it\. Your own Reject and Done speak only for you\.$/);
+  assert.match(t.taskRosterHelperText(row), /^100 people · 12 done · 3 people rejected it\. Your own Reject and Done speak only for you\.$/);
   assert.match(t.taskRosterHelperText(everyoneSent()), /Every Done row opens that person's result\.$/);
 });
 
 test("the list line: a member reads their own state first, the sender reads the sum", () => {
   const t = boot();
   const mine = t.taskRowLineHtml(everyoneTask());
-  assert.match(mine, /<span>Yours to do · everyone · 12 of 100 done<\/span>/);
+  assert.match(mine, /<span>Yours to do · 100 people · 12 done<\/span>/);
   assert.doesNotMatch(mine, /tk-link/, "a member's own row offers no results link");
   const theirs = t.taskRowLineHtml(everyoneSent());
-  assert.match(theirs, /<span>Everyone · 12 of 100 done · 3 rejected<\/span>/);
+  assert.match(theirs, /<span>100 people · 12 done · 3 rejected<\/span>/);
   assert.match(theirs, /data-task-roster-open[^>]*>12 results/);
   // An Everyone Task with nothing done yet offers no results link.
   const early = t.taskRowLineHtml(everyoneSent({ taskRosterCounts: { total: 4, done: 0, started: 1, rejected: 0, cancelled: 0, seen: 3, sent: 0 } }));
@@ -513,7 +561,7 @@ test("the card, the reader and the lists all fork on the assignment", () => {
   // roster never arrived falls back to the ordinary state row that carries them.
   assert.match(footer, /const roster = taskIsEveryone\(row\) \? taskRosterCardHtml\(row\) : "";/);
   assert.match(footer, /if \(taskIsEveryone\(row\) && roster\) \{/);
-  assert.match(footer, /live && !mine \? taskAgentRowHtml\(row\) : ""/, "a member may still hand their own copy to an agent");
+  assert.match(footer, /\$\{live \? taskAgentAreaHtml\(row\) : ""\}/, "a member may still run their own copy or hand it to an agent");
   const module = inbox.slice(inbox.indexOf("function taskStatusModuleHtml(row)"), inbox.indexOf("function taskRowLineHtml(row)"));
   assert.match(module, /const grouped = taskIsEveryone\(row\) \? taskRosterGroupedHtml\(row\) : "";/);
   assert.match(module, /if \(taskIsEveryone\(row\) && grouped\) \{/);
@@ -542,59 +590,154 @@ test("Done on an Everyone card asks on the You row, and only the sender's rows a
   assert.match(t.taskRosterCardHtml(everyoneSent()), /tk-roster-link/, "the sender is");
 });
 
-// ---------- EXECUTE ON THE CARD ----------
-// Execute is a developer-tier verb that runs the RECEIVED copy of a Task. It
-// sits first in the chat card's verbs row, at Reject and Done's level, and under
-// the ladder in the reader, behind one gate: the feature on, the viewer holds
+// ---------- RUN FROM THE CARD (Shane, 2026-10-08) ----------
+// Running a Task on this computer is a developer-tier action on the RECEIVED
+// copy. On the card it is the Run block: one icon per coding app main found
+// on this computer and Settings › Your agent has on, under a line naming the
+// folder when the Task names exactly one checkout here. The reader keeps
+// Execute and the full question. One gate: the feature on, the viewer holds
 // the received copy, the Task not yet started or over, no other claimant.
-test("Execute is on the card for the person it was sent to, and only with the feature on", () => {
+const PLAN = (over = {}) => ({ ok: true, providers: [{ provider: "claude", app: "Claude Code" }, { provider: "codex", app: "Codex" }],
+  folder: { cwd: "C:\\Users\\me\\Documents\\relay", name: "relay" }, remembered: null,
+  options: [{ provider: "claude", cwd: "C:\\Users\\me\\Documents\\relay", name: "relay", why: "This Task is about relay" }, { provider: "codex", cwd: "C:\\Users\\me\\Documents\\relay", name: "relay", why: "This Task is about relay" }], ...over });
+
+test("the Run block replaces Execute on the card, only with the feature on and only for the received copy", () => {
   const off = boot().taskCardFooterHtml(inboundTask());
-  assert.doesNotMatch(off, /data-native-execute/, "no feature, no verb");
+  assert.doesNotMatch(off, /data-native-execute|data-task-run/, "no feature, nothing to run");
   const t = boot({ features: { taskExecution: true } });
+  // Before main has answered, the agent row stands in and a marker asks for the plan.
+  const asking = t.taskCardFooterHtml(inboundTask());
+  assert.match(asking, /<div class="tk-run-plan" data-task-run-plan="t1" hidden><\/div><div class="tk-agents/);
+  assert.doesNotMatch(asking, /class="tk-btn execute"/, "no Execute verb beside Reject and Done any more");
+  t.taskRunPlans.set("t1", PLAN());
   const footer = t.taskCardFooterHtml(inboundTask());
-  assert.match(footer, /class="tk-verbs"><button type="button" class="tk-btn execute" data-native-execute="t1"[^>]*>Execute<\/button><button[^>]*data-task-verb="reject"[^>]*>Reject<\/button><button[^>]*data-task-verb="done"/, "a button first in the row with Reject and Done");
-  assert.doesNotMatch(footer, /tk-agent-verbs"><button[^>]*data-tk-copy="t1"[^>]*>Copy for your agent<\/button><button/, "no longer a link in the agent row");
+  assert.match(footer, /<div class="tk-run"><div class="tk-run-where">Run in<span class="tk-run-folder" title="C:\\Users\\me\\Documents\\relay">[\s\S]*?relay<\/span><span class="tk-run-path">Documents\\relay<\/span><\/div>/, "the folder on its own line, with enough path to tell it apart");
+  assert.match(footer, /data-task-run="t1" data-provider="claude" title="Run in Claude Code"[\s\S]*data-task-run="t1" data-provider="codex" title="Run in Codex"/, "one mark per app, named on hover");
+  assert.match(footer, /class="th-host-copy tk-run-copy" data-tk-copy="t1"><span>Copy prompt<\/span><span>for your agent<\/span>/);
+  assert.doesNotMatch(footer, /tk-agents/, "the Run block is the agent area");
+  assert.ok(footer.indexOf("tk-run") < footer.indexOf("tk-foot "), "above the state row");
+  assert.match(footer, /data-task-verb="reject"[^>]*>Reject<\/button><button[^>]*data-task-verb="done"/, "Reject and Done stay where they were");
   t.taskAsking.set("t1", { kind: "reject" });
-  assert.doesNotMatch(t.taskCardFooterHtml(inboundTask()), /data-native-execute/, "asking why: only Keep and the seal");
+  assert.doesNotMatch(t.taskCardFooterHtml(inboundTask()), /class="tk-btn execute"/, "asking why: only Keep and the seal");
   t.taskAsking.delete("t1");
-  const everyone = t.taskCardFooterHtml(inboundTask({ taskAssignment: "everyone", taskRoster: [{ relayId: "t1", self: true, state: "seen", name: "Me" }, { relayId: "x", state: "seen", name: "Sven" }], taskRosterCounts: { total: 2, done: 0, started: 0, rejected: 0, cancelled: 0, seen: 2, sent: 0 } }));
-  assert.match(everyone, /tk-roster-row open you[\s\S]*class="tk-verbs"><button type="button" class="tk-btn execute" data-native-execute="t1"[^>]*>Execute<\/button><button[^>]*>Reject</, "an Everyone Task: on your own row, beside your Reject and Done");
-  assert.doesNotMatch(t.taskCardFooterHtml(inboundTask({ taskStartedAt: ago(5) })), /data-native-execute/, "started elsewhere: nothing to launch");
-  assert.doesNotMatch(t.taskCardFooterHtml(inboundTask({ taskCompletedAt: ago(5) })), /data-native-execute/, "over: the agent row is gone too");
-  assert.doesNotMatch(t.taskCardFooterHtml(sentTask()), /data-native-execute/, "the sender has no received copy to run");
-  assert.match(t.nativeExecuteHtml(inboundTask()), /data-native-execute="t1"[^>]*>Execute<\/button><div class="sv-copy">Run this Task in your native app/, "the reader carries the caption");
+  assert.doesNotMatch(t.taskCardFooterHtml(inboundTask({ taskStartedAt: ago(5) })), /data-task-run|data-native-execute/, "started elsewhere: nothing to launch");
+  assert.doesNotMatch(t.taskCardFooterHtml(inboundTask({ taskCompletedAt: ago(5) })), /data-task-run|data-native-execute/, "over: the agent area is gone too");
+  assert.doesNotMatch(t.taskCardFooterHtml(sentTask()), /data-task-run|data-native-execute/, "the sender has no received copy to run");
+  assert.match(t.nativeExecuteHtml(inboundTask()), /data-native-execute="t1"[^>]*>Execute<\/button><div class="sv-copy">Run this Task in your native app/, "the reader keeps Execute and its caption");
 });
 
-test("a Task sent to yourself: the sender's bubble runs the received twin", () => {
+test("only the apps on this computer that Settings › Your agent has on get a mark; none leaves the agent row", () => {
+  const t = boot({ features: { taskExecution: true }, apps: ["claude"] });
+  t.taskRunPlans.set("t1", PLAN());
+  const footer = t.taskCardFooterHtml(inboundTask());
+  assert.match(footer, /data-provider="claude"/);
+  assert.doesNotMatch(footer, /data-task-run="t1" data-provider="codex"/, "Codex is installed but switched off");
+  const conductorOff = boot({ features: { taskExecution: true } });
+  conductorOff.taskRunPlans.set("t1", PLAN({ providers: [{ provider: "claude" }, { provider: "conductor" }] }));
+  assert.doesNotMatch(conductorOff.taskCardFooterHtml(inboundTask()), /data-provider="conductor"/, "Conductor only with its own switch on");
+  const none = boot({ features: { taskExecution: true } });
+  none.taskRunPlans.set("t1", PLAN({ providers: [] }));
+  const bare = none.taskCardFooterHtml(inboundTask());
+  assert.doesNotMatch(bare, /tk-run/);
+  assert.match(bare, /tk-agents[\s\S]*data-tk-copy="t1"[^>]*>Copy for your agent</, "no coding app: Copy for your agent, as before");
+  const failed = boot({ features: { taskExecution: true } });
+  failed.taskRunPlans.set("t1", null);
+  assert.match(failed.taskCardFooterHtml(inboundTask()), /tk-agents/, "a plan main could not give leaves the agent row");
+});
+
+test("the app chosen before wears its colour and says why; an Everyone copy says yours", () => {
+  const t = boot({ features: { taskExecution: true } });
+  t.taskRunPlans.set("t1", PLAN({ remembered: { provider: "claude", reason: "sender", why: "Claude Code is where you ran Sven's last Task." } }));
+  const footer = t.taskCardFooterHtml(inboundTask());
+  assert.match(footer, /class="th-host-mark tk-run-mark last" data-host="claude"/);
+  assert.match(footer, /tk-run-caption">Claude Code is where you ran Sven&#39;s last Task\.</);
+  const one = boot({ features: { taskExecution: true }, apps: ["claude"] });
+  one.taskRunPlans.set("t1", PLAN({ remembered: { provider: "claude", reason: "last", why: "Claude Code is what you used last time." } }));
+  assert.doesNotMatch(one.taskCardFooterHtml(inboundTask()), /tk-run-mark last|tk-run-caption/, "with one app there is nothing to single out");
+  const everyone = inboundTask({ taskAssignment: "everyone", taskRoster: [{ relayId: "t1", self: true, state: "seen", name: "Me" }, { relayId: "x", state: "seen", name: "Sven" }], taskRosterCounts: { total: 2, done: 0, started: 0, rejected: 0, cancelled: 0, seen: 2, sent: 0 } });
+  const card = t.taskCardFooterHtml(everyone);
+  assert.match(card, /tk-run-where">Run yours in</);
+  assert.match(card, /title="Run yours in Claude Code"/);
+  assert.ok(card.indexOf("tk-roster-row") < card.indexOf("tk-run") && card.indexOf("tk-run") < card.indexOf("tk-tally"), "your row, your Run block, then the tally");
+});
+
+test("with no folder known there is no folder line, and an app's tap opens its folder list", () => {
+  const t = boot({ features: { taskExecution: true } });
+  const plan = PLAN({ folder: null, options: [
+    { provider: "claude", cwd: "C:\\w\\relay", name: "relay", why: "Where Sven's last Task ran" },
+    { provider: "codex", cwd: "C:\\w\\relay", name: "relay", why: "Recent in Codex" },
+    { provider: "claude", cwd: "C:\\w\\MoonRot", name: "MoonRot", why: "Recent in Claude Code" }] });
+  t.taskRunPlans.set("t1", plan);
+  const closed = t.taskCardFooterHtml(inboundTask());
+  assert.doesNotMatch(closed, /tk-run-where/, "the tap asks, so the card does not");
+  let rerendered = 0;
+  t.taskRunTap("t1", "claude", () => { rerendered += 1; });
+  assert.equal(rerendered, 1);
+  const open = t.taskCardFooterHtml(inboundTask());
+  assert.match(open, /class="tk-run picking"/);
+  assert.match(open, /tk-run-mark pressed" data-host="claude"[^>]*aria-expanded="true"/);
+  assert.match(open, /tk-execute-title">Claude Code in which folder\?<\/span><span class="tk-execute-caption">It will read and change files there\.</);
+  const picks = [...open.matchAll(/data-execute-pick="t1" data-provider="claude" data-cwd="([^"]*)"/g)].map((m) => m[1]);
+  assert.deepEqual(picks, ["C:\\w\\relay", "C:\\w\\MoonRot"], "that app's folders, best first, and no other app's");
+  assert.match(open, /data-execute-pick="t1" data-provider="claude" data-browse="1">Another folder…</, "then the OS dialog");
+  assert.match(open, /data-task-run-cancel="t1"[^>]*>Cancel</);
+  t.taskRunTap("t1", "claude", () => {});
+  assert.doesNotMatch(t.taskCardFooterHtml(inboundTask()), /picking/, "a second tap closes it");
+});
+
+test("with the folder known a tap launches straight away, with exactly the pair main offered", async () => {
+  const calls = [];
+  const t = boot({ features: { taskExecution: true } });
+  t.__context.window.relay.taskExecute = async (id, choice) => { calls.push([id, choice]); return { ok: true, message: "Opened." }; };
+  t.__context.setRowNote = () => {};
+  t.__context.taskCardNotes = new Map();
+  t.taskRunPlans.set("t1", PLAN());
+  t.taskRunTap("t1", "codex", () => {});
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  same(calls, [["t1", { provider: "codex", cwd: "C:\\Users\\me\\Documents\\relay" }]]);
+  assert.equal(t.taskRunPlans.has("t1"), false, "the choice was remembered, so the plan is read again");
+});
+
+test("once it is launched the block is one line saying where it runs, with the app's mark to go back", () => {
   const received = inboundTask({ id: "self1", senderName: "Me", party: "Me" });
   const bubble = sentTask({ id: "self1", relayId: "self1" });
-  const t = boot({ features: { taskExecution: true }, relays: [received] });
-  assert.match(t.taskCardFooterHtml(bubble), /class="tk-verbs"><button[^>]*data-native-execute="self1"[^>]*>Execute<\/button><\/span>/, "the twin by id, alone in the verbs row");
   const submitted = boot({ features: { taskExecution: true }, relays: [received], nativeExecutions: { self1: { phase: "accepted", provider: "claude", status: "Working in Claude Code" } } });
   const footer = submitted.taskCardFooterHtml(bubble);
-  assert.match(footer, /title="Continue in native app">Continue</, "the short word on the card, the whole one on hover");
-  assert.match(footer, /tk-execute-status">Working in Claude Code</);
+  assert.match(footer, /<div class="tk-run status"><span class="tk-run-dot" aria-hidden="true"><\/span><span class="tk-run-state">Working in Claude Code<\/span><button type="button" class="th-host-mark tk-run-mark sm" data-host="claude" data-native-execute="self1" title="Continue in native app"/);
+  // A Task sent to yourself: the sender's bubble runs the received twin, by id.
+  const fresh = boot({ features: { taskExecution: true }, relays: [received] });
+  fresh.taskRunPlans.set("self1", PLAN());
+  assert.match(fresh.taskCardFooterHtml(bubble), /data-task-run="self1" data-provider="claude"/);
   const startedTwin = inboundTask({ id: "self1", taskStartedAt: ago(2) });
-  assert.doesNotMatch(boot({ features: { taskExecution: true }, relays: [startedTwin] }).taskCardFooterHtml(bubble), /data-native-execute/, "started without a native record: nothing to launch");
+  assert.doesNotMatch(boot({ features: { taskExecution: true }, relays: [startedTwin] }).taskCardFooterHtml(bubble), /data-native-execute|data-task-run/, "started without a native record: nothing to launch");
 });
 
-test("Execute's one question opens in the card and the reader: pairs best first, then another folder, then Cancel", () => {
+test("main's own question still opens in the card and the reader when a pick was no longer offered", () => {
   const t = boot({ features: { taskExecution: true } });
+  t.taskRunPlans.set("t1", PLAN());
   const offer = { question: "Where should the agent work?", caption: "It will read and change files in this folder.",
     options: [{ provider: "claude", cwd: "C:\\w\\relay", label: "Claude Code · relay", why: "This Task is about relay" }, { provider: "codex", cwd: "C:\\w\\relay", label: "Codex · relay", why: "Last time" }],
     browse: [{ provider: "claude", label: "Claude Code · another folder…" }] };
   t.nativeExecuteChoice.set("t1", offer);
   const footer = t.taskCardFooterHtml(inboundTask());
-  assert.doesNotMatch(footer, /data-native-execute/, "the verb steps aside while the question is open");
+  assert.doesNotMatch(footer, /data-task-run=/, "the Run block steps aside while the question is open");
   assert.match(footer, /tk-execute-title">Where should the agent work\?<\/span><span class="tk-execute-caption">It will read and change files in this folder\.</, "the question says what the folder is for");
   assert.match(footer, /data-execute-pick="t1" data-provider="claude" data-cwd="C:\\w\\relay"[^>]*><img class="xp-mark" src="claudeCodeMark.svg" alt=""><span class="xp-name">relay<span class="xp-app">Claude Code<\/span><\/span><span class="xp-why">This Task is about relay</, "the best pair first: the app's mark, the folder, the app, its reason");
-  assert.match(footer, /data-execute-pick="t1" data-provider="codex" data-cwd="C:\\w\\relay"[^>]*><img class="xp-mark" src="codexMark.svg"/);
   assert.match(footer, /xp-browse-label">Another folder…<\/span><button class="xp-chip" type="button" data-execute-pick="t1" data-provider="claude" data-browse="1"[^>]*><img class="xp-mark" src="claudeCodeMark.svg" alt="">Claude Code</, "the OS dialog is the last rung, one chip per app");
-  assert.ok(footer.indexOf("xp-rows") < footer.indexOf("xp-browse"), "the pairs come before the dialog");
   assert.match(footer, /data-execute-cancel="t1"[^>]*>Cancel</);
-  assert.ok(footer.indexOf("tk-agents") < footer.indexOf("tk-execute-pick") && footer.indexOf("tk-execute-pick") < footer.indexOf("tk-foot "), "under the agent row, above the state row");
   const reader = t.nativeExecuteHtml(inboundTask());
   assert.match(reader, /rd-host-actions[^>]*><div class="tk-execute-pick"/, "the reader shows the same question in place of its button");
   t.nativeExecuteChoice.delete("t1");
-  assert.match(t.taskCardFooterHtml(inboundTask()), /data-native-execute="t1"/, "Cancel brings the verb back");
+  assert.match(t.taskCardFooterHtml(inboundTask()), /data-task-run="t1"/, "Cancel brings the Run block back");
+});
+
+test("main works the Run plan out once, and its pairs are the offers Execute honours", () => {
+  assert.match(main, /ipcMain\.handle\("relay:taskRunPlan", taskRunPlan\);/);
+  const planAt = main.indexOf("async function taskRunPlan(event, id)");
+  const plan = main.slice(planAt, main.indexOf('app.setName("Relay");', planAt));
+  assert.match(plan, /event\.sender !== win\.webContents/, "only the pill's own page may ask");
+  assert.match(plan, /if \(!currentProductFeatures\(\)\.taskExecution\) return/, "the same developer-tier gate as Execute");
+  assert.match(plan, /executeOffers\.set\(key, plan\.options\);/, "a tap is honoured only if main offered that pair");
+  assert.match(preload, /taskRunPlan: \(id\) => ipcRenderer\.invoke\("relay:taskRunPlan", String\(id \|\| ""\)\)/);
+  assert.match(inbox, /for \(const marker of scope\.querySelectorAll\("\[data-task-run-plan\]"\)\) loadTaskRunPlan\(/);
 });

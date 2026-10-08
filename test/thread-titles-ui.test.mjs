@@ -795,7 +795,9 @@ test("Tasks stay in human conversation", () => {
   assert.match(html, /if \(!request && !isRelayListKind\(r\)\) continue;/);
   assert.match(html, /const textLike = request \? false : ownedAgent \|\| relayTextLike/);
   assert.match(html, /if \(!completion && !request && onRequestThread/, "completion bypasses the execution-only filter");
-  assert.match(html, /m\.request \? '<span class="kchip">Task<\/span>'/);
+  assert.match(html, /m\.request \? taskChipHtml\(m\) : ""/);
+  // A group Task also says who owes it beside the chip (Shane, 2026-10-08).
+  assert.match(html, /<span class="tk-kind-line"><span class="kchip">Task<\/span><span class="tk-kind \$\{kind\}">/);
   assert.match(html, /m\.request \? "tasks" : "threads"/);
   // The dock's composer never clips: inputs must be allowed to shrink.
   assert.match(html, /\.qr textarea \{ flex:1 1 auto; min-width:0;/); // the capsule IS the field (autosizing textarea)

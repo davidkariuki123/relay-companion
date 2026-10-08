@@ -66,8 +66,10 @@ function safeIndex() {
   try { return buildRepoIndex(); } catch { return []; }
 }
 
-// The list the picker shows: { options, auto, suggested, browse, question, caption }.
+// The list the picker shows: { options, auto, folder, remembered, suggested, browse, question, caption }.
 // `auto` is the one pair Execute uses without asking, or null.
+// `folder` is the checkout the Task names when there is exactly one here;
+// `remembered` is the app chosen before, and why.
 // `options` are launchable pairs, best first, each with the folder's `name`
 // and the `app` the page draws separately; `browse` is one "another folder…"
 // chip per installed app.
@@ -84,7 +86,7 @@ export function workspaceChoices({
 } = {}) {
   const installed = providers.map((p) => String(p?.provider || "")).filter(Boolean);
   const question = WORKSPACE_QUESTION, caption = WORKSPACE_CAPTION;
-  if (!installed.length) return { options: [], auto: null, suggested: null, browse: [], question, caption };
+  if (!installed.length) return { options: [], auto: null, folder: null, remembered: null, suggested: null, browse: [], question, caption };
   // The app Execute used last time is listed first within every rung.
   const providerOrder = [...installed].sort((a, b) => (a === preferences.provider ? -1 : b === preferences.provider ? 1 : 0));
   const options = [], seen = new Set();
@@ -130,9 +132,22 @@ export function workspaceChoices({
   const auto = route.reason === "workspace-passport" && app
     ? options.find((option) => option.reason === "passport" && option.provider === app) || null
     : null;
+  // What the Task card shows before anyone taps: the folder, when the Task
+  // names exactly one checkout here, and the app this person chose before for
+  // this Topic, this sender, or at all, with the reason in their words.
+  const folderCwd = route.reason === "workspace-passport" && route.openable ? usable(route.cwd, isDirectory) : "";
+  const folder = folderCwd ? { cwd: folderCwd, name: workspaceName(folderCwd) } : null;
+  const remembered = [
+    [byTopic, "topic", (label) => `${label} is where this Topic's Tasks run.`],
+    [bySender, "sender", (label) => `${label} is where you ran ${senderName ? `${senderName}'s` : "their"} last Task.`],
+    [preferences.provider ? { provider: preferences.provider } : null, "last", (label) => `${label} is what you used last time.`],
+  ].map(([choice, reason, why]) => choice && installed.includes(choice.provider)
+    ? { provider: choice.provider, reason, why: why(providerLabel(choice.provider)) } : null).find(Boolean) || null;
   return {
     options: trimmed,
     auto,
+    folder,
+    remembered,
     suggested: trimmed[0] || null,
     browse: providerOrder.map((provider) => ({ provider, app: providerLabel(provider), label: `${providerLabel(provider)} · another folder…` })),
     question, caption,

@@ -3831,6 +3831,51 @@
   .tk-agents .act-btn { font-size:11.5px; line-height:1; }
   .tk-agent-verbs { display:inline-flex; flex-wrap:wrap; align-items:center; gap:6px 14px; }
   .tk-execute-status { font-size:11.5px; line-height:1.3; color:var(--muted); }
+  /* Run from the card (Shane, 2026-10-08): the folder on its own line, then
+     the room bar's app marks and Copy prompt. The app chosen before wears its
+     colour; while one app's folder list is open the others step back. */
+  .tk-run { margin:0 0 8px; min-width:0; }
+  .tk-run-where { display:flex; flex-wrap:wrap; align-items:center; gap:4px 6px; margin:0 0 7px; min-width:0; font:500 11.5px/1.3 var(--sans); color:var(--muted); }
+  .tk-run-folder { display:inline-flex; align-items:center; gap:4px; padding:3px 7px 3px 6px; border:1px solid var(--hair); border-radius:6px; background:var(--wash); color:var(--ink); font-weight:650; }
+  .tk-run-folder svg { width:12px; height:12px; color:var(--muted); flex:none; }
+  .tk-run-path { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:10.5px; color:var(--muted-2); }
+  .tk-run-apps { display:flex; align-items:center; gap:10px; min-width:0; }
+  .tk-run-marks { display:flex; flex-wrap:wrap; gap:4px; min-width:0; }
+  .tk-run-copy { margin-left:auto; }
+  .tk-run-mark[data-host="conductor"] { --host-color:var(--ink); }
+  .tk-run-mark.last { border-color:color-mix(in srgb, var(--host-color) 60%, transparent); background:color-mix(in srgb, var(--host-color) 16%, var(--wash)); }
+  .tk-run-mark.pressed { border-color:var(--host-color); box-shadow:0 0 0 3px color-mix(in srgb, var(--host-color) 18%, transparent); }
+  .tk-run.picking .tk-run-mark:not(.pressed) { opacity:.5; }
+  .tk-run-mark:disabled { cursor:default; opacity:.5; transform:none; }
+  .tk-run-mark.sm { width:28px; height:28px; border-radius:8px; flex:none; }
+  .tk-run-mark.sm .th-host-logo { width:16px; height:16px; border-radius:4px; }
+  .tk-run-caption { margin-top:6px; font-size:11px; line-height:1.35; color:var(--muted-2); }
+  .tk-run-pop { margin:8px 0 0; }
+  .tk-run-folder-mark { display:grid; place-items:center; color:var(--muted); }
+  .tk-run-folder-mark svg { width:14px; height:14px; }
+  .xp-row.tk-run-browse { display:block; font-size:12px; font-weight:600; color:var(--accent); }
+  .tk-run.status { display:flex; align-items:center; gap:8px; min-height:28px; font:500 12px/1.3 var(--sans); color:var(--ink); }
+  .tk-run-dot { width:8px; height:8px; flex:none; border-radius:50%; background:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent); }
+  .tk-run-state { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  /* A group Task's kind beside its chip, and a member's own position above their row. */
+  .tk-kind-line { display:flex; align-items:center; gap:8px; margin:0 0 5px; }
+  .th-msg-title .tk-kind-line .kchip { margin-right:0; vertical-align:0; }
+  .tk-kind { display:inline-flex; align-items:center; gap:5px; font:600 12px/1 var(--sans); color:var(--ink); }
+  .tk-kind svg { width:14px; height:14px; flex:none; color:var(--muted); }
+  .tk-pos { display:flex; align-items:center; gap:7px; margin:0 0 6px; min-width:0; font:500 12px/1.35 var(--sans); color:var(--muted); }
+  .tk-pos b { color:var(--ink); font-weight:650; }
+  .tk-pos.started .tk-mark { color:var(--accent); }
+  .tk-pos.done .tk-mark { color:var(--ok); }
+  .tk-pos.rejected .tk-mark { color:var(--danger); }
+  /* Everyone, in one line under the card: it opens the roster. */
+  .tk-tally { appearance:none; width:100%; display:flex; align-items:center; gap:8px; min-height:28px; margin:2px 0 0; padding:6px 0 0;
+    border:0; border-top:1px solid var(--hair); background:transparent; cursor:pointer; text-align:left; }
+  .tk-tally.quiet { cursor:default; }
+  .tk-tally:not(.quiet):hover .tk-text { text-decoration:underline; text-underline-offset:2px; }
+  .tk-tally.started .tk-state { color:var(--accent); }
+  .tk-tally.done .tk-state { color:var(--ok); }
+  .tk-tally.rejected .tk-state { color:var(--danger); }
+  .tk-tally-chev { margin-left:auto; flex:none; color:var(--muted-2); font-family:var(--sans); font-size:14px; line-height:1; }
   /* Execute's one question. The head is a washed band: the question, its
      caption under it, Cancel at the top right. Each pair is one row, the
      app's mark down the left, the folder's name with the app after it, the
@@ -10693,12 +10738,114 @@
     const browse = (pick.browse || []).map((option) => `<button class="xp-chip" type="button" data-execute-pick="${esc(st.id)}" data-provider="${esc(option.provider)}" data-browse="1" title="${esc(option.label || "")}"${disabled}><img class="xp-mark" src="${markOf(option)}" alt="">${esc(appOf(option))}</button>`).join("");
     return `<div class="tk-execute-pick" data-stop="1"><div class="tk-execute-ask"><span class="tk-execute-title">${esc(pick.question || "Where should the agent work?")}</span><span class="tk-execute-caption">${esc(pick.caption || "It will read and change files in this folder.")}</span><button type="button" class="act-btn decline tk-execute-cancel" data-execute-cancel="${esc(st.id)}">Cancel</button></div><div class="xp-rows">${rows}</div>${browse ? `<div class="xp-browse"><span class="xp-browse-label">Another folder…</span>${browse}</div>` : ""}</div>`;
   }
-  // The card: a verb at Reject and Done's level, first in their row. Where it
-  // stands rides the agent row, which has the width for a sentence.
-  function taskExecuteVerbHtml(row) {
+  // ---------- RUN FROM THE CARD (Shane, 2026-10-08) ----------
+  // The card runs the Task itself, in place of an Execute verb: one icon per
+  // coding app on this computer that Settings › Your agent has on, under a
+  // line naming the folder when the Task names exactly one checkout here. A
+  // tap runs it there. With no folder known there is no folder line, and the
+  // tap opens a short folder list for that app instead. Main works the plan
+  // out once per Task (taskRunPlan) and its pairs are the offers Execute
+  // honours. No coding app: the agent row, Copy for your agent, as before.
+  // The reader keeps Execute and the full question.
+  const taskRunPlans = new Map(); // received id -> plan from main, or null when there is none
+  const taskRunPicking = new Map(); // received id -> the app whose folder list is open
+  const TASK_RUN_APPS = {
+    claude: { app: "Claude Code", mark: "claudeCodeMark.svg" },
+    codex: { app: "Codex", mark: "codexMark.svg" },
+    conductor: { app: "Conductor", mark: "conductorMark.svg" },
+  };
+  const TASK_RUN_FOLDER_SVG = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M1.8 4.2c0-.6.5-1 1-1h3.4l1.5 1.6h5.5c.6 0 1 .4 1 1v6.4c0 .6-.4 1-1 1H2.8c-.5 0-1-.4-1-1z"/></svg>';
+  function taskRunProviders(plan) {
+    const on = agentAppHosts();
+    return (plan && plan.providers || []).filter((p) => TASK_RUN_APPS[p.provider]
+      && (p.provider === "conductor" ? typeof conductorEnabled === "function" && conductorEnabled() : on.includes(p.provider)));
+  }
+  // "Documents\relay": enough of the path to tell two checkouts apart.
+  function taskRunFolderPath(cwd) {
+    const raw = String(cwd || "");
+    return raw.split(/[\\/]/).filter(Boolean).slice(-2).join(raw.includes("\\") ? "\\" : "/");
+  }
+  // Launching, or launched: one line saying where it runs, and the app's mark
+  // to go back to that conversation.
+  function taskRunStatusHtml(st, current) {
+    const provider = current && TASK_RUN_APPS[current.provider] ? current.provider : "";
+    const app = provider ? TASK_RUN_APPS[provider] : null;
+    const text = st.busy ? "Opening…" : (current && current.status) || (app ? `Opened in ${app.app}` : st.label);
+    const back = app
+      ? `<button type="button" class="th-host-mark tk-run-mark sm" data-host="${provider}" data-native-execute="${esc(st.id)}" title="${esc(st.label)}" aria-label="${esc(st.label)}"${st.busy ? " disabled" : ""}><img class="th-host-logo" src="${app.mark}" alt=""></button>`
+      : `<button type="button" class="tk-btn execute" data-native-execute="${esc(st.id)}" title="${esc(st.label)}"${st.busy ? " disabled" : ""}>${esc(st.short)}</button>`;
+    return `<div class="tk-run status"><span class="tk-run-dot" aria-hidden="true"></span><span class="tk-run-state">${esc(text)}</span>${back}</div>`;
+  }
+  // The folder list one app's tap opens when the Task names no folder here:
+  // the reader's pairs for that app, best first, then the OS dialog.
+  function taskRunFoldersHtml(id, plan, provider) {
+    const app = TASK_RUN_APPS[provider].app;
+    const rows = (plan.options || []).filter((option) => option.provider === provider).map((option) =>
+      `<button class="xp-row" type="button" data-execute-pick="${esc(id)}" data-provider="${esc(provider)}" data-cwd="${esc(option.cwd)}" title="${esc(option.cwd)}"><span class="xp-mark tk-run-folder-mark">${TASK_RUN_FOLDER_SVG}</span><span class="xp-name">${esc(option.name || taskRunFolderPath(option.cwd))}</span>${option.why ? `<span class="xp-why">${esc(option.why)}</span>` : ""}</button>`).join("");
+    const browse = `<button class="xp-row tk-run-browse" type="button" data-execute-pick="${esc(id)}" data-provider="${esc(provider)}" data-browse="1">Another folder…</button>`;
+    return `<div class="tk-execute-pick tk-run-pop" data-stop="1"><div class="tk-execute-ask"><span class="tk-execute-title">${esc(app)} in which folder?</span><span class="tk-execute-caption">It will read and change files there.</span><button type="button" class="act-btn decline tk-execute-cancel" data-task-run-cancel="${esc(id)}">Cancel</button></div><div class="xp-rows">${rows}${browse}</div></div>`;
+  }
+  // The Run block, or "" when this Task has nothing to run here. A plan not
+  // yet read leaves a marker that wireTaskCards fills.
+  function taskRunBlockHtml(row) {
     const st = nativeExecuteState(row);
-    if (!st || nativeExecuteChoice.has(st.id)) return "";
-    return `<button type="button" class="tk-btn execute" data-native-execute="${esc(st.id)}" title="${esc(st.label)}"${st.busy ? " disabled" : ""}>${esc(st.short)}</button>`;
+    if (!st) return "";
+    const current = payload.nativeExecutions && payload.nativeExecutions[st.id];
+    if (st.busy || st.label !== "Execute") return taskRunStatusHtml(st, current);
+    // Main asked its own question (a pick it no longer offered): that list is drawn below.
+    if (nativeExecuteChoice.has(st.id)) return "";
+    if (!taskRunPlans.has(st.id)) return `<div class="tk-run-plan" data-task-run-plan="${esc(st.id)}" hidden></div>`;
+    const plan = taskRunPlans.get(st.id);
+    const providers = taskRunProviders(plan);
+    if (!providers.length) return "";
+    const yours = taskIsEveryone(row) && !taskIsMine(row);
+    const lead = yours ? "Run yours in" : "Run in";
+    const pick = providers.some((p) => p.provider === taskRunPicking.get(st.id)) ? taskRunPicking.get(st.id) : "";
+    const folder = plan.folder;
+    const remembered = providers.length > 1 && plan.remembered && providers.some((p) => p.provider === plan.remembered.provider) ? plan.remembered : null;
+    const where = folder
+      ? `<div class="tk-run-where">${lead}<span class="tk-run-folder" title="${esc(folder.cwd)}">${TASK_RUN_FOLDER_SVG}${esc(folder.name)}</span><span class="tk-run-path">${esc(taskRunFolderPath(folder.cwd))}</span></div>`
+      : "";
+    const marks = providers.map((p) => {
+      const app = TASK_RUN_APPS[p.provider];
+      const verb = `${lead} ${app.app}`;
+      return `<button type="button" class="th-host-mark tk-run-mark${remembered && remembered.provider === p.provider ? " last" : ""}${pick === p.provider ? " pressed" : ""}" data-host="${p.provider}" data-task-run="${esc(st.id)}" data-provider="${p.provider}" title="${esc(verb)}" aria-label="${esc(verb)}"${pick === p.provider ? ' aria-expanded="true"' : ""}${st.busy ? " disabled" : ""}><img class="th-host-logo" src="${app.mark}" alt=""></button>`;
+    }).join("");
+    const claim = taskChannelClaim(row);
+    const caption = (current && current.status)
+      || (remembered && !pick ? remembered.why : "")
+      || (claim && (claim.state === "unclaimed" || !claim.claimant) ? "Running it takes it for you, so nobody else starts it too." : "");
+    return `<div class="tk-run${pick ? " picking" : ""}">${where}`
+      + `<div class="tk-run-apps"><span class="tk-run-marks" role="group" aria-label="${lead}">${marks}</span>`
+      + `<button type="button" class="th-host-copy tk-run-copy" data-tk-copy="${esc(taskIdOf(row))}"><span>Copy prompt</span><span>for your agent</span></button></div>`
+      + `${caption ? `<div class="tk-run-caption">${esc(caption)}</div>` : ""}${pick ? taskRunFoldersHtml(st.id, plan, pick) : ""}</div>`;
+  }
+  // The card's agent area: the Run block where this Task can run here,
+  // otherwise the agent row. While the plan is being read the agent row
+  // stands in, so the card never jumps empty.
+  function taskAgentAreaHtml(row) {
+    const run = taskRunBlockHtml(row);
+    if (run && !run.startsWith('<div class="tk-run-plan"')) return run;
+    return `${run}${taskAgentRowHtml(row)}`;
+  }
+  // A tap on an app: with the folder known, run it there; otherwise open
+  // (or close) that app's folder list.
+  function taskRunTap(id, provider, rerender) {
+    const plan = taskRunPlans.get(id);
+    if (!plan) return;
+    const direct = plan.folder && (plan.options || []).find((option) => option.provider === provider && option.cwd === plan.folder.cwd);
+    if (direct) { runNativeExecute(id, rerender, { provider, cwd: direct.cwd }); return; }
+    if (taskRunPicking.get(id) === provider) taskRunPicking.delete(id); else taskRunPicking.set(id, provider);
+    rerender();
+  }
+  async function loadTaskRunPlan(id, rerender) {
+    if (!id || taskRunPlans.has(id) || !window.relay || typeof window.relay.taskRunPlan !== "function") return;
+    taskRunPlans.set(id, null); // asked once; a failure leaves the agent row
+    try {
+      const plan = await window.relay.taskRunPlan(id);
+      if (plan && plan.ok) taskRunPlans.set(id, plan);
+    } catch { /* the agent row stays */ }
+    rerender();
   }
   function taskExecuteStatusHtml(row) {
     const st = nativeExecuteState(row);
@@ -10710,6 +10857,7 @@
     nativeExecuteBusy.add(id);
     taskCardNotes.delete(id);
     nativeExecuteChoice.delete(id);
+    taskRunPicking.delete(id);
     rerender();
     try {
       const result = await window.relay.taskExecute(id, choice);
@@ -10723,7 +10871,12 @@
       const text = error.message || "Could not launch the Task.";
       setRowNote(id, text, "err");
       taskCardNotes.set(id, text);
-    } finally { nativeExecuteBusy.delete(id); rerender(); }
+    } finally {
+      // The choice was remembered: the card reads its plan again.
+      taskRunPlans.delete(id);
+      nativeExecuteBusy.delete(id);
+      rerender();
+    }
   }
   // A Task is ONE object on both sides. In the chat the bubble carries a footer
   // inside it: the agent row (Copy for your agent, always; each app Settings ›
@@ -10824,14 +10977,14 @@
       const working = claim.workState === "working" || (!claim.workState && Boolean(row.taskStartedAt));
       const people = Number(claim.memberCount || 0);
       if (claim.state === "unclaimed" || !claimant) {
-        const released = claim.releasedAt && claim.releasedBy ? `Unclaimed again · released by ${claim.releasedBy.self ? "you" : claim.releasedBy.name || "someone"}` : (people ? `Unclaimed · ${people} people` : "Unclaimed");
+        const released = claim.releasedAt && claim.releasedBy ? `Nobody has it · ${claim.releasedBy.self ? "you" : firstName(claim.releasedBy.name) || "someone"} gave it back` : "Nobody has taken it yet";
         return { tone: "open", at: row.createdAt, over: false, text: released, rungs: ["now", "todo", "todo", "todo"], labels: ["Sent", "Claimed", "Started", "Done"], claim: "unclaimed" };
       }
       const who = claimant.self ? "you" : String(claimant.name || "someone");
       if (working || row.taskStartedAt) {
         return { tone: "started", at: row.taskStartedAt || claim.claimedAt || row.createdAt, over: false, text: `In progress · ${who} · ${timeAgo(row.taskStartedAt || claim.claimedAt || row.createdAt)}`, rungs: ["past", "past", "now", "todo"], labels: ["Sent", "Claimed", "Started", "Done"], claim: claimant.self ? "working" : "other" };
       }
-      return { tone: claimant.self ? "started" : "cancelled", at: claim.claimedAt || row.createdAt, over: false, text: `Claimed by ${who}${claim.claimedAt ? ` · ${timeAgo(claim.claimedAt)}` : ""}`, rungs: ["past", "now", "todo", "todo"], labels: ["Sent", "Claimed", "Started", "Done"], claim: claimant.self ? "mine" : "other" };
+      return { tone: claimant.self ? "started" : "cancelled", at: claim.claimedAt || row.createdAt, over: false, text: claimant.self ? `You took it${claim.claimedAt ? ` · ${timeAgo(claim.claimedAt)}` : ""}` : mine ? `${firstName(who) || who} took it${claim.claimedAt ? ` · ${timeAgo(claim.claimedAt)}` : ""}` : `${firstName(who) || who} took it · nothing for you to do`, rungs: ["past", "now", "todo", "todo"], labels: ["Sent", "Claimed", "Started", "Done"], claim: claimant.self ? "mine" : "other" };
     }
     if (row.taskStartedAt) {
       const text = mine ? `Started · ${other || "them"} · ${timeAgo(row.taskStartedAt)}` : `In progress · ${timeAgo(row.taskStartedAt)}`;
@@ -10905,15 +11058,14 @@
   const taskBtn = (label, kind, attrs = "", disabled = false) => `<button type="button" class="tk-btn ${kind}" ${attrs}${disabled ? " disabled" : ""}>${label}</button>`;
   // The verbs a Task offers this viewer, in this state. Two decisions at a
   // time: Reject before any work, Cancel after it began; on a channel Task
-  // the claim lifecycle (Claim · Unclaim · Release) plus Done. Execute, where
-  // it applies, rides in front of them on the card (Shane, 2026-10-08); the
-  // reader has its own, captioned, under the ladder.
+  // the claim lifecycle (Take it · Give it back · Release) plus Done. On the
+  // card the Task runs from the Run block's app icons (Shane, 2026-10-08);
+  // the reader has Execute, captioned, under the ladder.
   function taskVerbsHtml(row, st, { surface = "chat" } = {}) {
     const id = taskIdOf(row);
     if (st.over) return "";
-    const execute = surface === "chat" && !taskAsking.has(id) ? taskExecuteVerbHtml(row) : "";
-    // A Task sent to yourself: the bubble is the sender's, but Execute runs the received twin.
-    if (taskIsMine(row)) return execute ? `<span class="tk-verbs">${execute}</span>` : "";
+    // A Task sent to yourself: the bubble is the sender's, and it runs from the Run block.
+    if (taskIsMine(row)) return "";
     const busy = taskBusy.has(id);
     const at = (verb) => `data-task-verb="${verb}" data-task-id="${esc(id)}"`;
     const done = surface === "reader" ? "Mark done" : "Done";
@@ -10924,12 +11076,12 @@
       const seal = asking.kind === "cancel" ? "Cancel" : asking.kind === "reject" ? "Reject" : done;
       return `<span class="tk-verbs">${taskBtn("Keep", "ghost", at("keep"), busy)}${taskBtn(seal, asking.kind === "done" ? "primary" : "danger", at(asking.kind), busy)}</span>`;
     }
-    const verbs = (html) => html || execute ? `<span class="tk-verbs">${execute}${html}</span>` : "";
+    const verbs = (html) => html ? `<span class="tk-verbs">${html}</span>` : "";
     const claim = taskChannelClaim(row);
     if (claim) {
-      if (st.claim === "unclaimed") return verbs(claim.capabilities && claim.capabilities.canClaim === true ? taskBtn("Claim", "primary", at("claim"), busy) : "");
+      if (st.claim === "unclaimed") return verbs(claim.capabilities && claim.capabilities.canClaim === true ? taskBtn("Take it", "primary", at("claim"), busy) : "");
       if (st.claim === "other") return "";
-      if (st.claim === "mine") return verbs(`${claim.capabilities && claim.capabilities.canUnclaim === true ? taskBtn("Unclaim", "ghost", at("unclaim"), busy) : ""}${taskBtn(done, "primary", at("done"), busy)}`);
+      if (st.claim === "mine") return verbs(`${claim.capabilities && claim.capabilities.canUnclaim === true ? taskBtn("Give it back", "ghost", at("unclaim"), busy) : ""}${taskBtn(done, "primary", at("done"), busy)}`);
       return verbs(`${taskBtn("Release", "ghost", at("release"), busy)}${taskBtn(done, "primary", at("done"), busy)}`);
     }
     if (st.tone === "started") return verbs(`${taskBtn("Cancel", "ghost", at("cancel"), busy)}${taskBtn(done, "primary", at("done"), busy)}`);
@@ -11004,11 +11156,69 @@
     for (const member of members) if (out[member.state] !== undefined) out[member.state] += 1;
     return out;
   }
-  // The sum, in the words the state line and the row line both use.
+  // The sum, in the words the state line and the row line both use. It
+  // counts PEOPLE: "0 of 2 done" read as two steps for the agent (Shane,
+  // 2026-10-08), so the number names who it is.
+  function taskRosterPeopleText(total) { return `${total} ${total === 1 ? "person" : "people"}`; }
   function taskRosterSumText(counts) {
     if (!counts || !counts.total) return "Everyone";
-    if (counts.done === counts.total) return `Everyone · all ${counts.total} done`;
-    return `Everyone · ${counts.done} of ${counts.total} done`;
+    if (counts.done === counts.total) return `${taskRosterPeopleText(counts.total)} · all done`;
+    return `${taskRosterPeopleText(counts.total)} · ${counts.done ? `${counts.done} done` : "none done yet"}`;
+  }
+  // A member's own position, first on their card (Shane, 2026-10-08): what
+  // the others have done, then whether yours is done, so the verbs and the
+  // Run block under it plainly act on YOUR copy. Names, not pronouns:
+  // "Sven's done", never "Sven did his". Up to two names, then a count.
+  // A group Task says who owes it beside its chip, in plain words, so the
+  // card is read right before its title (Shane, 2026-10-08): Everyone is
+  // "Each of you", one job for whoever takes it is "One of you".
+  const TASK_KIND_PEOPLE_SVG = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="6" cy="5.5" r="2.3"/><path d="M1.8 13c.4-2.3 2.1-3.6 4.2-3.6s3.8 1.3 4.2 3.6"/><circle cx="11.2" cy="6.2" r="1.8"/><path d="M11.4 9.5c1.6.1 2.6 1.2 2.9 3"/></svg>';
+  const TASK_KIND_PERSON_SVG = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="5.3" r="2.5"/><path d="M3.4 13.4c.5-2.5 2.3-3.9 4.6-3.9s4.1 1.4 4.6 3.9"/></svg>';
+  function taskKindOf(row) {
+    if (taskIsEveryone(row)) return "everyone";
+    if (taskChannelClaim(row) || (row && row.taskAssignment === "anyone" && row.groupId)) return "anyone";
+    return "";
+  }
+  function taskChipHtml(row) {
+    const kind = taskKindOf(row);
+    if (!kind) return '<span class="kchip">Task</span>';
+    const word = kind === "everyone" ? "Each of you" : "One of you";
+    return `<span class="tk-kind-line"><span class="kchip">Task</span><span class="tk-kind ${kind}">${kind === "everyone" ? TASK_KIND_PEOPLE_SVG : TASK_KIND_PERSON_SVG}${word}</span></span>`;
+  }
+  function taskEveryoneOthersDone(members, n) {
+    const names = members.filter((m) => !m.self && m.state === "done").map((m) => firstName(m.name)).filter(Boolean);
+    if (!n) return "Nobody's done yet";
+    if (n === 1) return names[0] ? `${names[0]}'s done` : "1 other is done";
+    if (n === 2 && names.length >= 2) return `${names[0]} and ${names[1]} are done`;
+    return names[0] ? `${names[0]} and ${n - 1} ${n - 1 === 1 ? "other" : "others"} are done` : `${n} others are done`;
+  }
+  function taskEveryoneOthersLeft(members, n) {
+    const names = members.filter((m) => !m.self && !["done", "rejected", "cancelled"].includes(m.state)).map((m) => firstName(m.name)).filter(Boolean);
+    if (!n) return "everyone else is done";
+    if (n === 1) return names[0] ? `${names[0]}'s is still to do` : "1 other is still to do";
+    return `${n} others still to do`;
+  }
+  function taskEveryonePositionHtml(row) {
+    if (taskIsMine(row)) return "";
+    const members = taskRosterOf(row);
+    const own = members.find((member) => member.self);
+    if (!own) return "";
+    const counts = taskRosterCountsOf(row);
+    const st = taskStateFor(row);
+    const others = Math.max(0, (counts.total || 0) - 1);
+    const othersDone = Math.max(0, (counts.done || 0) - (own.state === "done" ? 1 : 0));
+    const othersOver = Math.max(0, othersDone + (counts.rejected || 0) + (counts.cancelled || 0) - (["rejected", "cancelled"].includes(own.state) ? 1 : 0));
+    const strong = (text) => `<b>${esc(text)}</b>`;
+    let html;
+    if (st.tone === "done" && others && othersDone >= others) html = `${strong("Everyone's done")}, you included`;
+    else if (st.tone === "done" || st.tone === "rejected" || st.tone === "cancelled") {
+      const yours = st.tone === "done" ? "Yours is done" : st.tone === "rejected" ? "You turned yours down" : "You cancelled yours";
+      html = others ? `${strong(yours)} · ${esc(taskEveryoneOthersLeft(members, Math.max(0, others - othersOver)))}` : strong(yours);
+    } else {
+      const yours = st.tone === "started" ? "yours is in progress" : "yours is still to do";
+      html = others ? `${esc(taskEveryoneOthersDone(members, othersDone))} · ${strong(yours)}` : strong(yours.charAt(0).toUpperCase() + yours.slice(1));
+    }
+    return `<div class="tk-pos ${st.tone}">${taskMarkHtml(st.tone)}<span>${html}</span></div>`;
   }
   // The tone the sum wears: green once everyone is done, accent while anyone
   // is moving, danger when the only movement is refusal.
@@ -11077,6 +11287,9 @@
     const verbs = own ? taskVerbsHtml(row, st) : "";
     const others = members.filter((member) => !own || member.relayId !== own.relayId);
     const movements = others.filter((member) => ["done", "started", "rejected", "cancelled"].includes(member.state));
+    // A member reads where they stand in the line above and everyone in the
+    // tally below, so their card keeps only their own row (Shane, 2026-10-08).
+    if (own) return `<div class="tk-roster">${taskRosterRowHtml(own, { you: true, verbs })}</div>`;
     const shown = movements.slice(0, TASK_ROSTER_CARD_ROWS);
     const rows = (own ? [taskRosterRowHtml(own, { you: true, verbs })] : [])
       .concat(shown.map((member) => taskRosterRowHtml(member, { chevron: mine })));
@@ -11131,7 +11344,7 @@
   function taskRosterHelperText(row) {
     const counts = taskRosterCountsOf(row);
     const mine = taskIsMine(row);
-    const parts = [`${counts.done} of ${counts.total} done`];
+    const parts = [taskRosterSumText(counts)];
     if (counts.rejected) parts.push(`${counts.rejected} ${counts.rejected === 1 ? "person" : "people"} rejected it`);
     const tail = mine
       ? "Every Done row opens that person's result."
@@ -11152,13 +11365,28 @@
     // roster never arrived would be unactionable. Fall back to the ordinary
     // state row, which always carries them.
     const roster = taskIsEveryone(row) ? taskRosterCardHtml(row) : "";
+    const open = `<div class="tk-footer" data-stop="1" data-task-card="${esc(taskIdOf(row))}">`;
     if (taskIsEveryone(row) && roster) {
       const counts = taskRosterCountsOf(row);
       const tone = taskRosterTone(counts);
       const asking = taskAsking.get(taskIdOf(row));
-      return `<div class="tk-footer" data-stop="1" data-task-card="${esc(taskIdOf(row))}">${roster}${live && !mine ? taskAgentRowHtml(row) : ""}${live && !mine ? nativeExecutePickerHtml(row) : ""}<div class="tk-foot ${tone}${asking ? " asking" : ""}"><span class="tk-state">${taskMarkHtml(tone)}<span class="tk-text">${esc(taskRosterSumText(counts))}</span></span>${taskAskRowHtml(row)}</div>${taskNoteHtml(row)}</div>`;
+      const sum = `<span class="tk-state">${taskMarkHtml(tone)}<span class="tk-text">${esc(taskRosterSumText(counts))}</span></span>`;
+      // A member: where they stand first, their own row, the Run block for
+      // their copy, then everyone in one line that opens the roster.
+      const position = taskEveryonePositionHtml(row);
+      if (!mine && position) {
+        return `${open}${position}${roster}${asking ? `<div class="tk-foot asking">${taskAskRowHtml(row)}</div>` : ""}${live ? taskAgentAreaHtml(row) : ""}${live ? nativeExecutePickerHtml(row) : ""}<button type="button" class="tk-tally ${tone}" data-task-roster-open="${esc(taskIdOf(row))}">${sum}<span class="tk-tally-chev" aria-hidden="true">›</span></button>${taskNoteHtml(row)}</div>`;
+      }
+      return `${open}${roster}${live && !mine ? taskAgentAreaHtml(row) : ""}${live && !mine ? nativeExecutePickerHtml(row) : ""}<div class="tk-foot ${tone}${asking ? " asking" : ""}">${sum}${taskAskRowHtml(row)}</div>${taskNoteHtml(row)}</div>`;
     }
-    return `<div class="tk-footer" data-stop="1" data-task-card="${esc(taskIdOf(row))}">${mine ? taskLadderRowHtml(row) : ""}${live ? taskAgentRowHtml(row) : ""}${live ? nativeExecutePickerHtml(row) : ""}${taskStateRowHtml(row, st)}${taskNoteHtml(row)}</div>`;
+    // An Anyone Task, to a member: who has it first, with the verbs; the Run
+    // block only while it could still be theirs; then who it went to.
+    const claim = taskChannelClaim(row);
+    if (claim && !mine) {
+      const people = Number(claim.memberCount || 0);
+      return `${open}${taskStateRowHtml(row, st)}${live && st.claim !== "other" ? taskAgentAreaHtml(row) : ""}${live ? nativeExecutePickerHtml(row) : ""}${people ? `<div class="tk-tally quiet"><span class="tk-state">${taskMarkHtml("open")}<span class="tk-text">Sent to ${esc(taskRosterPeopleText(people))}</span></span></div>` : ""}${taskNoteHtml(row)}</div>`;
+    }
+    return `${open}${mine ? taskLadderRowHtml(row) : ""}${live ? taskAgentAreaHtml(row) : ""}${live ? nativeExecutePickerHtml(row) : ""}${taskStateRowHtml(row, st)}${taskNoteHtml(row)}</div>`;
   }
   // The expanded Task's module: the ladder as a stepper, one helper line in
   // plain words, and the verbs.
@@ -11175,9 +11403,9 @@
     }
     const claim = taskChannelClaim(row);
     if (claim) {
-      if (st.claim === "unclaimed") return "Nobody has this yet. Claim it to take it on.";
+      if (st.claim === "unclaimed") return "Nobody has this yet. Take it, or run it from your agent, to take it on.";
       if (st.claim === "other") return `${st.text}. It is theirs unless they release it.`;
-      if (st.claim === "mine") return "Claimed by you. Start it with your agent, or Unclaim to hand it back.";
+      if (st.claim === "mine") return "You took it. Start it with your agent, or Give it back so someone else can.";
       return `In progress since ${formatChatTime(row.taskStartedAt || st.at)}. Release stops the run and hands it back to the channel.`;
     }
     if (st.tone === "started") return mine ? `${other} started ${timeAgo(row.taskStartedAt)} ago.` : `In progress since ${formatChatTime(row.taskStartedAt)}. Your agent stamps Done when it finishes, or you can.`;
@@ -11219,7 +11447,7 @@
         : st.rungs;
       const text = mine
         ? `${taskRosterSumText(counts)}${counts.rejected ? ` · ${counts.rejected} rejected` : ""}`
-        : `${st.text} · everyone · ${counts.done} of ${counts.total} done`;
+        : `${st.text} · ${taskRosterSumText(counts)}`;
       const results = mine && counts.done ? `<button type="button" class="tk-link" data-task-roster-open="${esc(taskIdOf(row))}">${counts.done} ${counts.done === 1 ? "result" : "results"}<span class="tk-link-chev" aria-hidden="true">›</span></button>` : "";
       return `<div class="tk-rowline ${tone}">${taskRungsHtml(rungs)}<span>${esc(text)}</span>${results}</div>`;
     }
@@ -11326,15 +11554,32 @@
         rerender();
       });
     }
+    // The Run block: an app's icon runs the Task, or opens that app's folder list.
+    for (const button of scope.querySelectorAll("[data-task-run]")) {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        taskRunTap(String(button.getAttribute("data-task-run") || ""), String(button.getAttribute("data-provider") || ""), rerender);
+      });
+    }
+    for (const button of scope.querySelectorAll("[data-task-run-cancel]")) {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        taskRunPicking.delete(String(button.getAttribute("data-task-run-cancel") || ""));
+        rerender();
+      });
+    }
+    for (const marker of scope.querySelectorAll("[data-task-run-plan]")) loadTaskRunPlan(String(marker.getAttribute("data-task-run-plan") || ""), rerender);
     for (const button of scope.querySelectorAll("[data-tk-copy]")) {
       button.addEventListener("click", async (event) => {
         event.stopPropagation();
         const id = String(button.getAttribute("data-tk-copy") || "");
         const row = taskRowById(id) || { id };
+        // The Run block's Copy is two lines; put back whatever it said.
+        const label = button.innerHTML;
         try {
           await navigator.clipboard.writeText(pullSentenceFor(row, row));
           button.textContent = "Copied";
-          setTimeout(() => { if (button.isConnected) button.textContent = "Copy for your agent"; }, 1400);
+          setTimeout(() => { if (button.isConnected) button.innerHTML = label; }, 1400);
         } catch { button.textContent = "Could not copy"; }
       });
     }
@@ -19081,7 +19326,7 @@
         ${`
           ${textLike ? '<div class="th-text-content">' : ""}<span class="th-msg-title"${textLike ? ` data-clock="${esc(clockLabel)}"` : ""}>${agentWorking
             ? '<span class="agent-working-indicator" aria-hidden="true"><span class="agent-working-dot"></span><span class="agent-working-dot"></span><span class="agent-working-dot"></span></span>'
-            : taskEvent ? (taskEvent.bare ? "" : linkify(taskEvent.note, m.groupId || thread.groupId)) : `${m.request ? '<span class="kchip">Task</span>' : ""}${tombstone ? esc(tombstone) : textLike ? linkify(m.title, m.groupId || thread.groupId) : esc(m.title)}${textLike ? "" : `<span class="th-more">${open ? "‹" : "›"}</span>`}`}</span>${textLike ? `${chatTimestampHtml(m.at, "th-blk-time", clockLabel)}</div>` : ""}
+            : taskEvent ? (taskEvent.bare ? "" : linkify(taskEvent.note, m.groupId || thread.groupId)) : `${m.request ? taskChipHtml(m) : ""}${tombstone ? esc(tombstone) : textLike ? linkify(m.title, m.groupId || thread.groupId) : esc(m.title)}${textLike ? "" : `<span class="th-more">${open ? "‹" : "›"}</span>`}`}</span>${textLike ? `${chatTimestampHtml(m.at, "th-blk-time", clockLabel)}</div>` : ""}
 
           ${!textLike && !open && !inlineBody && m.preview ? `<span class="th-preview">${esc(m.preview)}</span>` : ""}
           ${!textLike && !open && inlineBody ? `<div class="th-body" data-stop="0">${readerParagraphs(m.body)}</div>` : ""}

@@ -14,8 +14,9 @@ test("the chat Task bubble carries its card footer inside it (the claim slot is 
   assert.match(html, /\.th-msg \.tk-footer \{ flex:1 0 100%/);
   // A channel Task's verbs are the claim lifecycle, re-homed into the footer.
   const verbs = html.slice(html.indexOf("function taskVerbsHtml(row, st"), html.indexOf("function taskAskRowHtml(row)"));
-  assert.match(verbs, /taskBtn\("Claim", "primary", at\("claim"\)/);
-  assert.match(verbs, /taskBtn\("Unclaim", "ghost", at\("unclaim"\)/);
+  // Plain words on the card (Shane, 2026-10-08): the verbs still post claim and unclaim.
+  assert.match(verbs, /taskBtn\("Take it", "primary", at\("claim"\)/);
+  assert.match(verbs, /taskBtn\("Give it back", "ghost", at\("unclaim"\)/);
   assert.match(verbs, /taskBtn\("Release", "ghost", at\("release"\)/);
 });
 

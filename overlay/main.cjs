@@ -1071,6 +1071,34 @@ async function executeTaskInNativeApp(event, id, choice) {
   } catch (error) { return { ok: false, error: error.message || "Execute could not launch the native app." }; }
 }
 
+// The Task card's Run row, worked out before anyone taps (Shane, 2026-10-08):
+// the coding apps on this computer, the folder when the Task names exactly one
+// checkout here, and the app this person chose before. Its pairs become the
+// offers Execute honours, so a tap on the card launches exactly as a pick in
+// the reader does, and a folder the page names but main did not offer is not
+// accepted.
+async function taskRunPlan(event, id) {
+  if (!win || win.isDestroyed() || event.sender !== win.webContents || event.senderFrame !== event.sender.mainFrame) return { ok: false, error: "Not the Relay window." };
+  if (!currentProductFeatures().taskExecution) return { ok: false, error: "Execute is available only to Relay developer accounts." };
+  try {
+    const modules = await nativeTaskModulesPromise;
+    const key = String(id || "");
+    const row = rowById(key);
+    if (!row) return { ok: false, error: "This Task is not on this computer." };
+    const providers = [...modules.launch.nativeProviders(), ...(conductorUsable() ? [{ provider: "conductor", label: "Conductor" }] : [])];
+    const preferences = modules.launch.executionPreferences(readConfigFile());
+    const plan = modules.workspace.workspaceChoices({ providers, preferences, packet: row, senderName: String(row.senderName || "").trim().split(/\s+/)[0] || "" });
+    executeOffers.set(key, plan.options);
+    return {
+      ok: true,
+      providers: providers.map((p) => ({ provider: p.provider, app: modules.workspace.providerLabel(p.provider) })),
+      folder: plan.folder,
+      remembered: plan.remembered,
+      options: plan.options.map(({ provider, cwd, name, app, why }) => ({ provider, cwd, name, app, why })),
+    };
+  } catch (error) { return { ok: false, error: error.message || "Could not read this computer's apps." }; }
+}
+
 app.setName("Relay");
 function reopenNonceFromArgs(argv) {
   const args = Array.isArray(argv) ? argv.map(String) : [];
@@ -9090,6 +9118,7 @@ ipcMain.handle("relay:taskUnclaim", (_e, id, expectedVersion) =>
 );
 ipcMain.handle("relay:taskStop", (_e, id) => stopTaskWork(id));
 ipcMain.handle("relay:taskExecute", executeTaskInNativeApp);
+ipcMain.handle("relay:taskRunPlan", taskRunPlan);
 ipcMain.handle("relay:executionDisable", async (event) => {
   if (!win || win.isDestroyed() || event.sender !== win.webContents || event.senderFrame !== event.sender.mainFrame) return { ok: false };
   const { launch } = await nativeTaskModulesPromise;
