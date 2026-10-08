@@ -103,7 +103,9 @@ try {
   // A replacement with different height must keep the total extent stable.
   await scroll(450); await hidden();
   await page.evaluate(() => {
-    document.querySelector(".tk-status .tk-helper").textContent = "A longer status explanation. ".repeat(12);
+    // The status box no longer carries a helper sentence (#610); grow it
+    // with a taller line instead, which is what this step is about.
+    document.querySelector(".tk-status").insertAdjacentHTML("beforeend", '<div class="tk-test-grow" style="height:96px"></div>');
   });
   await page.waitForTimeout(100);
   const resized = await state();

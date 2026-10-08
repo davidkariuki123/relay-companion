@@ -25048,6 +25048,14 @@
       // "Open in Conductor" from Slack: the same hand-off as the Conductor
       // chip in this reader, so Conductor gets the sentence it always gets.
       if (input?.app === "conductor") openInConductor(messageId, readerRow(messageId) || relayById(messageId) || { id:messageId });
+      // "Open in Claude Code" / "Open in Codex" from Slack: a new session with
+      // this Relay, exactly what the reader's own tile starts.
+      if (input?.app === "claude" || input?.app === "codex") {
+        const message = readerRow(messageId) || relayById(messageId) || { id:messageId };
+        const tile = document.querySelector(`.rd-host-actions [data-host-open="${CSS.escape(messageId)}"][data-host="${input.app}"]`)
+          || document.createElement("span");
+        openNewSessionFromBubble(tile, messageId, input.app, message.direction === "out" ? "sent" : "relay");
+      }
     } catch {}
   });
   // The renderer holds the only connectivity signal either process has. A

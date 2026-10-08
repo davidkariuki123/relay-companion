@@ -32,11 +32,13 @@ try {
   assert.deepEqual(await page.evaluate(() => window.executeCalls), ["task-native"]);
   fixture.nativeExecutions = { "task-native": { phase: "accepted", provider: "claude", status: "Working in Claude Code" } };
   await page.evaluate((input) => { onPayload(input); renderReader(); }, fixture);
-  assert.equal(await page.locator("[data-native-execute]").textContent(), "Continue in native app");
+  // The reader runs a live Task from the card's Run block (#610): a running
+  // Task shows its state and the app's mark, whose name is the verb.
+  assert.equal(await page.locator("[data-native-execute]").getAttribute("aria-label"), "Continue in native app");
   assert.match(await page.locator("#readerActions").textContent(), /Working in Claude Code/);
   fixture.nativeExecutions = { "task-native": { phase: "awaiting_send", provider: "claude", status: "Ready in Claude · press Send, and choose the relay folder if asked" } };
   await page.evaluate((input) => { onPayload(input); renderReader(); }, fixture);
-  assert.equal(await page.locator("[data-native-execute]").textContent(), "Open Claude draft…");
+  assert.equal(await page.locator("[data-native-execute]").getAttribute("aria-label"), "Open Claude draft…");
   assert.match(await page.locator("#readerActions").textContent(), /press Send, and choose the relay folder if asked/);
   // The one question: main offers app-and-workspace pairs, the page shows
   // them in place of the button, and the pick goes back as the choice.

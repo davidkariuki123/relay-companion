@@ -108,7 +108,7 @@ function freshRelayOpen(parsed) {
 function queueRelayDeepLink(parsed) {
   if (!parsed) return false;
   if(parsed.setupIntent){pendingDesktopIntents.push(parsed);if(relayDeepLinksReady)void drainDesktopIntents();return true;}
-  if ((parsed.host === "relay" || parsed.host === "conductor") && !freshRelayOpen(parsed)) {
+  if (["relay", "conductor", "claude", "codex"].includes(parsed.host) && !freshRelayOpen(parsed)) {
     // Still answer the browser, so its page says the Relay opened.
     if (parsed.handoffId) void acknowledgeRelayDeepLink(parsed);
     return true;
@@ -123,6 +123,7 @@ function queueRelayDeepLink(parsed) {
     ...(parsed.chatId ? { chatId: parsed.chatId } : {}),
     ...(parsed.handoffId ? { handoffId: parsed.handoffId } : {}),
     ...(parsed.ackOrigin ? { ackOrigin: parsed.ackOrigin } : {}),
+    ...(parsed.viaSlack ? { viaSlack: true } : {}),
   });
   if (relayDeepLinksReady) drainRelayDeepLinks();
   return true;
@@ -883,7 +884,9 @@ async function openRelayDeepLink(parsed) {
   ]);
   // Open Relay (and Conductor, which starts from the Relay the pill opens):
   // the Relay itself, in the pill, from a Slack card.
-  if (parsed.host === "relay" || parsed.host === "conductor") {
+  // A Slack card click claimed from the server (any host) is a chat message:
+  // open it from its chat, then hand it to the app the person picked.
+  if (parsed.host === "relay" || parsed.host === "conductor" || parsed.viaSlack) {
     const client = new RelayClient();
     await refreshCanonicalChats();
     const chatId = String(
@@ -901,7 +904,7 @@ async function openRelayDeepLink(parsed) {
     // opens a browser tab, so a late one would land on top of the open Relay.
     await acknowledgeRelayDeepLink(parsed);
     await pushInbox(true);
-    pendingRelayReader = { messageId: parsed.messageId, chatId, ...(parsed.host === "conductor" ? { app: "conductor" } : {}) };
+    pendingRelayReader = { messageId: parsed.messageId, chatId, ...(parsed.host !== "relay" ? { app: parsed.host } : {}) };
     requestExternalReopen(randomUUID());
     // Hot Pills receive this immediately. Cold Pills keep it until the renderer
     // explicitly confirms that its openReader listener is installed.
@@ -2327,8 +2330,8 @@ function startSentLiveWakeForAccount() {
       client.claimSlackOpenRequests()
         .then((body) => {
           for (const request of Array.isArray(body?.requests) ? body.requests : []) {
-            if (!request?.messageId || !["relay", "conductor"].includes(request.host)) continue;
-            queueRelayDeepLink({ messageId: String(request.messageId), host: request.host, ...(request.chatId ? { chatId: String(request.chatId) } : {}) });
+            if (!request?.messageId || !["relay", "conductor", "claude", "codex"].includes(request.host)) continue;
+            queueRelayDeepLink({ messageId: String(request.messageId), host: request.host, viaSlack: true, ...(request.chatId ? { chatId: String(request.chatId) } : {}) });
           }
         })
         .catch((error) => console.error("[overlay] Slack open requests unavailable:", error && error.message));
