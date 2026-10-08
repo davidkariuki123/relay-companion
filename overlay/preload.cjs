@@ -328,6 +328,7 @@ contextBridge.exposeInMainWorld("relay", {
   prepareCardSize: (w, h) => ipcRenderer.invoke("relay:prepareCardSize", w, h),
   setTheme: (t) => ipcRenderer.send("relay:theme", t), // preview window wears the same sheet
   setPos: (x, y) => ipcRenderer.send("relay:setPos", x, y),
+  cardResizing: (on) => ipcRenderer.send("relay:cardResizing", Boolean(on)),
   soundBytes: (name) => ipcRenderer.invoke("relay:soundBytes", name),
 
   // dismissal (the card's ✕ / the status-area mark / ghost notifications)

@@ -292,6 +292,13 @@ let attentionLatched = overlayPrefs.attentionLatched === true;
 // Both default false, so every install that predates them is untouched.
 let pillHidden = overlayPrefs.pillHidden === true;
 let soundsMuted = overlayPrefs.soundsMuted === true;
+// Settings → Notifications → "New messages": which arrivals present a banner.
+// "all" (every message), "direct" (direct messages, mentions and Tasks; busy
+// groups only count) or "count" (nothing pops up; the count still moves).
+// Hiding the pill entirely stays pillHidden. Default "all": no install changes.
+const NOTIFY_STYLES = new Set(["all", "direct", "count"]);
+const normalizeNotifyStyle = (value) => NOTIFY_STYLES.has(value) ? value : "all";
+let notifyStyle = normalizeNotifyStyle(overlayPrefs.notifyStyle);
 // Both now live in ~/.relay/settings.json beside every other setting, where
 // an agent can change them through relay_settings (src/relay-settings.cjs).
 // overlay-prefs.json keeps a copy so an older pill still reads the choice. A
@@ -304,6 +311,8 @@ try {
   else seed.pillHidden = pillHidden;
   if (typeof settingsStoreCache.soundsMuted === "boolean") soundsMuted = settingsStoreCache.soundsMuted;
   else seed.soundsMuted = soundsMuted;
+  if (NOTIFY_STYLES.has(settingsStoreCache.notifyStyle)) notifyStyle = settingsStoreCache.notifyStyle;
+  else seed.notifyStyle = notifyStyle;
   if (Object.keys(seed).length) settingsStoreCache = relaySettings.patchDevice(seed);
 } catch (error) {
   console.error("[overlay] settings store unavailable:", error && error.message);
@@ -487,6 +496,7 @@ function writeOverlayPrefs() {
       attentionLatched,
       pillHidden,
       soundsMuted,
+      notifyStyle,
       onboardingVersions,
       onboardingAgents,
       networkOnboardingCompleted,
@@ -528,6 +538,7 @@ function writePillStatus(reopenNonce = "") {
     // that failed to come up — otherwise a quiet machine reads as a broken one.
     pillHidden: Boolean(pillHidden),
     soundsMuted: Boolean(soundsMuted),
+    notifyStyle,
     reopenNonce: lastReopenNonce,
     presentedReopens: [...presentedReopens],
     terminalClaudeCodeRunning,
@@ -1102,6 +1113,11 @@ async function taskRunPlan(event, id) {
 }
 
 app.setName("Relay");
+// No Dock icon from the first instant, not only once the app is ready: a pill
+// that is slow to reach ready, or loses the single-instance race, otherwise
+// shows a generic Electron atom in the Dock meanwhile. (The runtime bundle is
+// also LSUIElement; this covers older trees and a bare Electron.)
+if (process.platform === "darwin" && app.dock) { try { app.dock.hide(); } catch {} }
 function reopenNonceFromArgs(argv) {
   const args = Array.isArray(argv) ? argv.map(String) : [];
   for (let i = 0; i < args.length; i += 1) {
@@ -1482,6 +1498,7 @@ function accountInfo() {
     // payload push would leave an open Settings tab showing a stale switch.
     pillHidden,
     soundsMuted,
+    notifyStyle,
     // Settings › Milestone Relays: whether agents on this computer mint a Relay
     // link unasked when finished work matters to someone.
     milestoneRelays: milestoneRelaysEnabled(),
@@ -1773,9 +1790,16 @@ function scheduleAccountReset(current) {
   }, 0);
 }
 
-function readStore() {
+// The last store the pill DISPLAYED. A read that fails for a moment (a busy
+// file, a descriptor limit) used to return {} and paint an empty inbox until
+// the next push: the history "disappeared". Display keeps showing what it
+// had; read-modify-write callers never get it (writing it back would undo
+// the daemon's newer rows). A missing file is real emptiness, not a failure.
+let lastDisplayedStore = null;
+function readStore({ forDisplay = false } = {}) {
   try {
     const store = JSON.parse(fs.readFileSync(STATE_PATH, "utf8")) || {};
+    if (forDisplay) lastDisplayedStore = store;
     const cfg = readConfigFile();
     const current = {
       userId: (cfg.user && cfg.user.id) || "",
@@ -1796,11 +1820,14 @@ function readStore() {
       }
       if (wrongUserId || wrongEmail) {
         scheduleAccountReset(current);
+        lastDisplayedStore = null;
         return emptyStoreFor(current); // callers see the fresh view immediately
       }
     }
     return store;
-  } catch {
+  } catch (error) {
+    if (forDisplay && lastDisplayedStore && error?.code !== "ENOENT") return lastDisplayedStore;
+    if (error?.code === "ENOENT") lastDisplayedStore = null;
     return {};
   }
 }
@@ -1824,7 +1851,7 @@ const documentsForPacket = createPacketDocumentReader();
 
 // The inbound Relay attention rows, newest + unread first.
 function readRelays() {
-  const store = readStore();
+  const store = readStore({ forDisplay: true });
   const packets = (store && store.packets) || {};
   const features = currentProductFeatures();
   return Object.entries(packets)
@@ -1973,6 +2000,18 @@ function sentWithMaterializationState(items) {
 const RELAY_HIDDEN_KINDS = new Set(["task_request", "share_approval"]);
 function visibleRelayRows(rows) {
   return rows.filter((row) => !RELAY_HIDDEN_KINDS.has(row && row.relayNotificationKind));
+}
+
+// Whether an unread row earns a banner under the person's notification style.
+// Every unread row still counts; this only decides what pops up. "direct"
+// keeps a busy group quiet unless it names you or asks you for something.
+function attentionWorthy(row, style = notifyStyle) {
+  if (!row) return false;
+  if (style === "count") return false;
+  if (style === "direct") {
+    return !row.recipientGroupId || row.recipientMentioned === true || row.kind === "task" || row.urgency === "high";
+  }
+  return true;
 }
 
 async function markAllVisibleRelaysRead() {
@@ -2979,7 +3018,7 @@ function pumpAttention(prebuiltPayload = null) {
       || signInHistoryPending.has(onboardingAccountKey(payload.account))
       || ["unavailable", "missing", "corrupt"].includes(payload.account?.credentialStatus)) return false;
   const unreadRows = new Map(
-    visibleRelayRows(payload.relays).filter((r) => r.unread).map((r) => [r.id, r]),
+    visibleRelayRows(payload.relays).filter((r) => r.unread && attentionWorthy(r)).map((r) => [r.id, r]),
   );
   attention.reconcileWithUnread(attentionQueue, new Set(unreadRows.keys()));
   if (!attention.pendingCount(attentionQueue)) {
@@ -3125,10 +3164,13 @@ async function pushInboxNow(force) {
   const payload = buildPayload();
   const rows = payload.relays;
   const notifiableRows = visibleRelayRows(rows);
-  const unreadIds = notifiableRows
-    .filter((row) => row.unread && !pendingAckIds.has(String(row.id)))
-    .map((row) => row.id);
-  markRelaysPresented([], unreadIds); // prune old read/deleted history without evicting current unread ids
+  const unreadRows = notifiableRows.filter((row) => row.unread && !pendingAckIds.has(String(row.id)));
+  const unreadIds = unreadRows.filter((row) => attentionWorthy(row)).map((row) => row.id);
+  // A row the notification style keeps quiet is presented by the count alone:
+  // recording it as presented means a louder style later never bursts a
+  // backlog of old messages onto the screen at once.
+  const quietIds = unreadRows.filter((row) => !attentionWorthy(row)).map((row) => row.id);
+  markRelaysPresented(quietIds, unreadRows.map((row) => row.id)); // also prunes old read/deleted history
   // Queue every unseen unread relay; drop entries handled elsewhere (read on
   // web/another device, deleted, tombstoned). The queue — not this send — is
   // what guarantees a notification eventually happens.
@@ -6222,6 +6264,7 @@ const NATIVE_GEOMETRY_VERIFY_MS = 80;
 let cardSize = { w: CARD_INITIAL.w, h: CARD_INITIAL.h };
 let hitTimer = null;
 let hitIgnoring = false;
+let cardResizeHoldUntil = 0; // relay:cardResizing: an edge drag is holding the pointer
 let nativeGeometryTimer = null;
 let nativeGeometryGeneration = 0;
 const HIT_TEST_POINTER_BLIND = process.env.RELAY_OVERLAY_TEST_IGNORE_POINTER === "1";
@@ -6260,6 +6303,13 @@ function hitTick() {
   hitTimer = null;
   if (!win || win.isDestroyed()) return;
   if (!FIXED_OVERLAY_SURFACE) return;
+  // An edge drag owns the pointer until it lets go (bounded, in case the
+  // renderer never says so): click-through mid-drag would drop the drag.
+  if (cardResizeHoldUntil > Date.now()) {
+    applyIgnore(false);
+    scheduleHit(POLL_NEAR_MS);
+    return;
+  }
   if (HIT_TEST_POINTER_BLIND) {
     applyIgnore(false);
     scheduleHit(POLL_HIDDEN_MS);
@@ -10374,6 +10424,19 @@ ipcMain.handle("relay:setSoundsMuted", (_event, value) => {
   }
 });
 
+// Settings → Notifications → "New messages". A quieter style drops what is
+// queued but no longer earns a banner on the next pump; a louder one queues
+// nothing retroactively (old unread messages never burst out at once).
+function applyNotifyStyle(next) {
+  notifyStyle = normalizeNotifyStyle(next);
+  saveDeviceSetting({ notifyStyle });
+  const unread = new Set(visibleRelayRows(buildPayload().relays).filter((r) => r.unread && attentionWorthy(r)).map((r) => r.id));
+  attention.reconcileWithUnread(attentionQueue, unread);
+  writeOverlayPrefs();
+  pushInbox(true);
+  return { ok: true, notifyStyle };
+}
+
 // SETTINGS.JSON (src/relay-settings.cjs). The pill's own writes go through
 // here; an agent's arrive by the file changing under the watcher, which
 // applies what main owns (hiding, sounds) exactly as the switch would and
@@ -10411,6 +10474,7 @@ function onSettingsFileChanged() {
       if (applied.ok === false) saveDeviceSetting({ pillHidden });
     }
     if (typeof next.soundsMuted === "boolean" && next.soundsMuted !== soundsMuted) applySoundsMuted(next.soundsMuted);
+    if (NOTIFY_STYLES.has(next.notifyStyle) && next.notifyStyle !== notifyStyle) applyNotifyStyle(next.notifyStyle);
   } catch (error) {
     console.error("[overlay] applying changed settings failed:", error && error.message);
   }
@@ -10529,6 +10593,7 @@ let worstMainStallMs = 0;
 const pillLiveness = require("../src/pill-liveness.cjs");
 const PILL_HEARTBEAT_PATH = pillLiveness.pillHeartbeatPath(os.homedir());
 const DAEMON_HEARTBEAT_PATH = pillLiveness.daemonHeartbeatPath(os.homedir());
+const INBOX_HEALTH_PATH = pillLiveness.inboxHealthPath(os.homedir());
 // The background service as this pill last judged it, pushed to the renderer
 // as payload.service. "ok" while the daemon's heartbeat is fresh; "checking"
 // when it is not yet, inside the logon grace; "repairing" while
@@ -10629,7 +10694,14 @@ function repairCompanionDaemon(decision) {
         lastRepairAt: lastDaemonRepairAt,
         updating: updateInFlight || updateTransactionOpen(),
       });
+      // Alive is not enough: a service whose inbox receiver stopped has a fresh
+      // heartbeat and a stale store (ao1, 2026-10-08: history "disappeared" for
+      // minutes). Until it is receiving again, rooms read from the server.
+      const inboxVerdict = decision.reason === "fresh"
+        ? pillLiveness.inboxReceiveDecision({ inbox: readJson(INBOX_HEALTH_PATH), heartbeat: readJson(DAEMON_HEARTBEAT_PATH), now })
+        : null;
       if (decision.action === "repair") void repairCompanionDaemon(decision);
+      else if (inboxVerdict && !inboxVerdict.receiving) setServiceHealth("checking", inboxVerdict.reason);
       // Back on its own (the recovery launcher, a logon, a person): say so.
       else if (decision.reason === "fresh" && serviceHealth.daemon !== "ok") setServiceHealth("ok");
       // No heartbeat yet inside the logon grace: not a verdict, but the rooms
@@ -10688,6 +10760,11 @@ ipcMain.handle("relay:prepareCardSize", (event, w, h) => {
     scheduleNativeGeometryReconcile(NATIVE_GEOMETRY_WATCHDOG_MS);
   }
   return { ok:true, ...(surface ? { surfaceInset: surface.inset } : {}) };
+});
+ipcMain.on("relay:cardResizing", (event, on) => {
+  if (!win || win.isDestroyed() || event.sender !== win.webContents) return;
+  cardResizeHoldUntil = on ? Date.now() + 60_000 : 0;
+  if (FIXED_OVERLAY_SURFACE) scheduleHit(0);
 });
 ipcMain.on("relay:setPos", (_e, x, y) => {
   if (appSurface) return; // the full app fills the screen; there is nowhere to drag it
@@ -10808,8 +10885,9 @@ ipcMain.on("relay:attentionDone", (_event, payload) => {
 ipcMain.handle("relay:soundBytes", (_e, name) => {
   const clean = String(name).replace(/[^A-Za-z]/g, "");
   const candidates = [
-    path.join(__dirname, "sounds", `${clean.toLowerCase()}.wav`), // bundled WAV (Chromium decodes reliably)
-    `/System/Library/Sounds/${clean}.aiff`, // fallback to the system sound
+    // Bundled WAV only (Chromium decodes it reliably). Never fall back to a
+    // macOS system sound: those are the Mac's ALERT sounds and read as an error.
+    path.join(__dirname, "sounds", `${clean.toLowerCase()}.wav`),
   ];
   for (const file of candidates) {
     try {
@@ -10821,7 +10899,9 @@ ipcMain.handle("relay:soundBytes", (_e, name) => {
 });
 
 if (!gotSingleInstanceLock) {
-  app.quit();
+  // Leave at once: quit() waits on ready and window teardown that a losing
+  // second copy never needs.
+  app.exit(0);
 } else {
   app.on("second-instance", (_event, argv, _workingDirectory, additionalData = {}) => {
     const deepLink = relayDeepLinkFromArgv(argv);
@@ -11043,6 +11123,7 @@ if (!gotSingleInstanceLock) {
           trayForcedVisible,
           pillHidden,
           soundsMuted,
+          notifyStyle,
           explicitlyOpened,
           hostRunning,
           terminalClaudeCodeRunning,

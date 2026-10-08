@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { brandMacElectronApp, renameMacElectronExecutable, runMacTrayPositionProbe } from "../scripts/build-runtime-artifact.mjs";
+import { brandMacElectronApp, localizeMacDisplayName, renameMacElectronExecutable, runMacTrayPositionProbe } from "../scripts/build-runtime-artifact.mjs";
 import { verifyMacElectronIdentity } from "../scripts/verify-installed-runtime.mjs";
 import { createRequire } from "node:module";
 
@@ -35,11 +35,25 @@ test("the runtime builder brands and verifies the outer Electron application", (
         .map(({ args }) => args.slice(0, 4)),
       [
         ["-replace", "CFBundleIdentifier", "-string", RELAY_MAC_BUNDLE_IDENTIFIER],
-        ["-replace", "CFBundleName", "-string", "Relay"],
-        ["-replace", "CFBundleDisplayName", "-string", "Relay"],
+        ["-replace", "CFBundleName", "-string", "Electron"],
+        ["-replace", "CFBundleDisplayName", "-string", "Electron"],
         ["-replace", "CFBundleExecutable", "-string", "Relay"],
+        ["-replace", "LSHasLocalizedDisplayName", "-bool", "true"],
+        // A background agent from launch: no Electron atom in the Dock, ever.
+        ["-replace", "LSUIElement", "-bool", "true"],
       ],
     );
+    const plistEdit = calls.findIndex(({ args }) => args.includes("LSUIElement"));
+    assert.ok(plistEdit >= 0 && plistEdit < calls.findIndex(({ command, args }) => command === "/usr/bin/codesign" && args.includes("--sign")),
+      "LSUIElement is set before the bundle is re-signed");
+    // macOS prompts ("… wants access to control Claude") use the localized
+    // display name; the base name matches the Electron.app folder so macOS
+    // honors the localization, which says Relay.
+    const strings = fs.readFileSync(path.join(appPath, "Contents", "Resources", "en.lproj", "InfoPlist.strings"), "utf8");
+    assert.match(strings, /"CFBundleDisplayName" = "Relay";/);
+    const localized = calls.findIndex(({ args }) => args.includes("LSHasLocalizedDisplayName"));
+    assert.ok(localized >= 0 && localized < calls.findIndex(({ command, args }) => command === "/usr/bin/codesign" && args.includes("--sign")),
+      "the localization is in place before the bundle is re-signed");
     // macOS names the ad-hoc signed pill agent after this file: it must be
     // Relay, and the legacy path must stay a relative link for old verifiers.
     const macos = path.join(appPath, "Contents", "MacOS");
@@ -180,4 +194,18 @@ test("the branded runtime probe covers first run, quit, app.exit, and relaunch",
   assert.ok(calls.every(({ options }) => options.env.ELECTRON_RUN_AS_NODE === undefined));
   assert.ok(calls.every(({ options }) => options.env.SAFE_VALUE === "kept"));
   assert.equal(inherited.ELECTRON_RUN_AS_NODE, "1", "the caller's environment is not mutated");
+});
+
+test("every localization of the pill's bundle names it Relay", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-display-name-test-"));
+  try {
+    const appPath = path.join(root, "Electron.app");
+    for (const loc of ["fr.lproj", "ja.lproj"]) fs.mkdirSync(path.join(appPath, "Contents", "Resources", loc), { recursive: true });
+    assert.equal(localizeMacDisplayName(appPath), 3, "adds en.lproj and fills the existing ones");
+    for (const loc of ["en.lproj", "fr.lproj", "ja.lproj"]) {
+      assert.match(fs.readFileSync(path.join(appPath, "Contents", "Resources", loc, "InfoPlist.strings"), "utf8"), /"CFBundleDisplayName" = "Relay";/);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

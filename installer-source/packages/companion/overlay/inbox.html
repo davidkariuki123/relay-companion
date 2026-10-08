@@ -121,6 +121,20 @@
     content:""; position:absolute; inset:0; z-index:40; pointer-events:none;
     border-radius:inherit; box-shadow:inset 0 0 0 1px var(--window-edge);
   }
+  /* Drag to resize: the left edge, the bottom edge and the bottom-left
+     corner (the card is pinned top-right). Invisible bands inside the edge,
+     above the content; only the corner shows a grip, and only on hover. */
+  .card-resize { position:absolute; z-index:45; display:none; touch-action:none; }
+  /* The full app (.wide) fills the screen; only the small card and the reader take a size. */
+  .card:not(.collapsed):not(.peek):not(.ghost):not(.signup):not(.offstage):not(.bye):not(.wide) > .card-resize { display:block; }
+  .card-resize[data-resize="w"] { left:0; top:56px; bottom:16px; width:6px; cursor:ew-resize; }
+  .card-resize[data-resize="s"] { left:16px; right:24px; bottom:0; height:6px; cursor:ns-resize; }
+  .card-resize[data-resize="sw"] { left:0; bottom:0; width:16px; height:16px; cursor:nesw-resize; }
+  .card-grip { position:absolute; left:5px; bottom:5px; width:7px; height:7px; opacity:0; transition:opacity .2s ease;
+    border-left:1.5px solid var(--muted-3); border-bottom:1.5px solid var(--muted-3); border-bottom-left-radius:3px; }
+  .card-resize[data-resize="sw"]:hover .card-grip, .card.resizing .card-grip { opacity:.9; }
+  .card.resizing, .card.resizing * { user-select:none !important; }
+  .card.resizing { transition:none; }
   .card.collapsed {
     border-radius:var(--r-fold);
     box-shadow:var(--shadow-pill);
@@ -1831,9 +1845,11 @@
     font:400 9.5px var(--mono); letter-spacing:.04em; cursor:pointer; opacity:0; transition:opacity var(--t-fast) var(--settle); }
   .rd-reply:hover .rd-reply-quote-btn, .rd-reply-quote-btn:focus-visible { opacity:1; }
   .rd-reply-quote-btn:hover { color:var(--ink); }
-  .rd-reply-quote { width:fit-content; max-width:100%; margin-top:5px; padding:4px 9px; border-left:2px solid var(--accent); border-radius:6px;
-    background:var(--wash); display:flex; flex-direction:column; font-size:11px; line-height:1.4; }
-  .rd-reply-quote .who { color:var(--accent); font-weight:600; }
+  /* Same quiet quote line as a room bubble's (.th-reply-ref): connector, name, first words. */
+  .rd-reply-quote { position:relative; display:flex; align-items:baseline; gap:6px; max-width:100%; min-width:0; margin-top:5px; padding:0 0 0 17px; font-size:11px; line-height:1.4; }
+  .rd-reply-quote::before, .th-rt-news-quote::before { content:""; position:absolute; left:2px; top:.55em; width:9px; height:8px;
+    border-left:1.5px solid var(--muted-3); border-top:1.5px solid var(--muted-3); border-top-left-radius:6px; }
+  .rd-reply-quote .who { flex:none; color:var(--ink); opacity:.78; font-weight:600; }
   .rd-reply-quote .copy { color:var(--muted-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .rd-reply-text { margin-top:3px; font-size:13.5px; line-height:1.45; color:var(--ink); overflow-wrap:anywhere; white-space:pre-wrap; }
   .rd-reply-text .deleted { color:var(--muted-2); font-style:italic; }
@@ -1847,7 +1863,7 @@
   .rd-reply-text a { color:var(--accent); text-decoration:none; border-bottom:1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
   .rd-reply-files { margin-top:3px; font-size:11px; color:var(--muted-2); }
   .rd-quote-slot:empty { display:none; }
-  .rd-quote-slot .th-reply-target { margin:0 0 8px; border:0; border-left:2px solid var(--accent); border-radius:6px; }
+  .rd-quote-slot .th-reply-target { margin:0 0 8px; border:0; border-radius:10px; }
   .rd-agentcopy p { font-family:var(--sans); font-size:13px; line-height:1.7; color:var(--ink); margin:14px 0 0; overflow-wrap:anywhere; }
   @keyframes rdPaneIn { from { opacity:0; transform:translateY(5px); } }
   .rd-col.swap { animation:rdPaneIn .35s var(--settle); }
@@ -2600,23 +2616,27 @@
   .th-receipt-when { color:var(--muted-2); text-align:right; }
   .th-under .th-reply-ghost { position:static; opacity:0; transition:opacity .15s ease; }
   .th-msg:hover + .th-under .th-reply-ghost, .th-under:hover .th-reply-ghost { opacity:.75; }
-  /* A reply stays in the room's chronology. Its source is an inset preview,
-     never a side thread: tap it to return to the exact Relay it answers. */
-  /* The bubble clock owns the top-right lane. End the source card before it
-     instead of padding beneath it, so the clock never sits on the card edge. */
-  .th-reply-ref { flex:0 0 calc(100% - 42px); width:calc(100% - 42px); min-width:0; appearance:none; border:0; border-left:2px solid var(--accent);
-    border-radius:7px; background:color-mix(in srgb, var(--ink) 4%, transparent); padding:6px 9px; margin:0 42px 7px 0;
+  /* A reply stays in the room's chronology. Its source is one quiet line
+     above the words, never a side thread: tap it to return to the exact
+     message it answers. No box, no accent bar, no shadow (ao1, 2026-10-08:
+     the rounded card with a coloured left edge read as stock AI chrome). A
+     small curved connector says "in reply to", the name and the first words
+     say to what. The bubble clock owns the top-right lane, so the line ends
+     before it. */
+  .th-reply-ref { position:relative; display:flex; align-items:baseline; gap:6px; flex:0 0 calc(100% - 42px); width:calc(100% - 42px); min-width:0;
+    appearance:none; border:0; border-radius:0; background:transparent; padding:0 0 0 17px; margin:0 42px 5px 0;
     color:inherit; cursor:pointer; text-align:left; font-family:var(--sans); }
-  .th-reply-ref:hover { background:color-mix(in srgb, var(--ink) 7%, transparent); }
+  .th-reply-ref::before { content:""; position:absolute; left:2px; top:.55em; width:9px; height:8px;
+    border-left:1.5px solid var(--muted-3); border-top:1.5px solid var(--muted-3); border-top-left-radius:6px; }
   .th-reply-ref:disabled { cursor:default; opacity:.72; }
-  .th-reply-ref-who { display:block; color:var(--accent); font-size:9.5px; font-weight:600; line-height:1.3;
+  .th-reply-ref-who { flex:none; max-width:45%; color:var(--ink); opacity:.78; font-size:11px; font-weight:600; line-height:1.35;
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .th-reply-ref-copy { display:block; margin-top:2px; color:var(--muted-2); font-size:10.5px; line-height:1.35;
-    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .th-reply-ref-copy { flex:1 1 auto; min-width:0; color:var(--muted-2); font-size:11px; line-height:1.35;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; transition:color .15s ease; }
+  .th-reply-ref:hover .th-reply-ref-copy, .th-reply-ref:focus-visible .th-reply-ref-copy { color:var(--ink); }
   .th-msg.reply-source-flash { animation:replySourceFlash 1.2s var(--settle); }
   @keyframes replySourceFlash {
-    0%,100% { box-shadow:none; }
-    18%,70% { box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 24%, transparent); background:var(--wash-2); }
+    18%,70% { background:color-mix(in srgb, var(--accent) 12%, var(--wash)); }
   }
   /* Native Codex uses its 14px chat token at a 1.5 line-height for both
      activity and assistant prose.  The Work face inherits those measured
@@ -2959,9 +2979,8 @@
   .th-rt-news-text a { color:var(--accent); text-decoration:none; border-bottom:1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
   .th-rt-news-text .deleted { color:var(--muted-2); font-style:italic; }
   .th-rt-news-files { margin-top:3px; font-size:11px; color:var(--muted-2); }
-  .th-rt-news-quote { display:flex; gap:6px; min-width:0; margin-top:4px; padding:3px 8px; border-left:2px solid var(--accent); border-radius:6px;
-    background:color-mix(in srgb, var(--ink) 4%, transparent); font-size:10.5px; line-height:1.4; }
-  .th-rt-news-quote .who { color:var(--accent); font-weight:600; flex:none; }
+  .th-rt-news-quote { position:relative; display:flex; align-items:baseline; gap:6px; min-width:0; margin-top:4px; padding:0 0 0 17px; font-size:10.5px; line-height:1.4; }
+  .th-rt-news-quote .who { color:var(--ink); opacity:.78; font-weight:600; flex:none; }
   .th-rt-news-quote .copy { color:var(--muted-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .th-rt-dot { position:absolute; left:-9.5px; top:11px; width:6px; height:6px; border-radius:50%; background:var(--accent);
     transition:opacity .6s var(--settle), transform .6s var(--settle); pointer-events:none; }
@@ -3360,6 +3379,25 @@
   .sv-quiet-copy { min-width:0; flex:1 1 auto; display:flex; flex-direction:column; }
   .sv-quiet-name { font-size:13px; font-weight:600; color:var(--ink); }
   .sv-quiet-note { margin-top:3px; font-size:11px; line-height:1.4; color:var(--muted-2); }
+  .sv-quiet-row.off .sv-quiet-name { color:var(--muted-2); }
+  .sv-notify-row { width:100%; appearance:none; border:0; background:transparent; align-items:center; cursor:pointer; text-align:left; font-family:var(--sans); color:inherit; }
+  .sv-notify-row:hover { background:var(--wash); }
+  .sv-notify-row:focus-visible { outline:2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset:-2px; }
+  .sv-notify-value { flex:none; max-width:55%; font-size:12.5px; color:var(--muted-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .sv-notify-chev { flex:none; width:10px; height:10px; color:var(--muted-3); transition:transform .18s var(--soft); }
+  .sv-notify-row[aria-expanded="true"] .sv-notify-chev { transform:rotate(90deg); }
+  .sv-notify-tray { padding:2px 6px 8px; }
+  .sv-notify-tray + .sv-quiet-row { border-top:1px solid var(--edge); }
+  .sv-notify-tray[hidden] { display:none; }
+  .sv-notify-choice { display:flex; align-items:flex-start; gap:10px; width:100%; appearance:none; border:0; border-radius:var(--r-2); background:transparent;
+    padding:8px 8px; text-align:left; cursor:pointer; font-family:var(--sans); color:inherit; }
+  .sv-notify-choice:hover:not(:disabled) { background:var(--wash); }
+  .sv-notify-choice:disabled { opacity:.45; cursor:default; }
+  .sv-notify-choice:focus-visible { outline:none; box-shadow:var(--focus-ring); }
+  .sv-notify-dot { flex:none; width:14px; height:14px; margin-top:1px; border-radius:50%; box-sizing:border-box; border:1.5px solid var(--muted-3); transition:border .15s ease; }
+  .sv-notify-choice.on .sv-notify-dot { border:4.5px solid var(--accent); }
+  .sv-notify-choice .sv-quiet-name { font-weight:550; }
+  @media (prefers-reduced-motion:reduce) { .sv-notify-chev, .sv-notify-dot { transition:none; } }
   .sv-switch {
     appearance:none; -webkit-appearance:none; border:0; cursor:pointer; flex:0 0 auto;
     position:relative; width:34px; height:20px; margin-top:1px; padding:0; border-radius:999px;
@@ -3734,7 +3772,10 @@
   .setup-entry .perm-chev { margin-left:2px; }
   /* The inbox's one quiet word about an app that is new here. */
   .setup-nudge { position:relative; margin:4px 12px 6px; }
-  .setup-nudge .rat-summary { width:100%; margin:0; padding-right:34px; }
+  /* Room for the × only when there is one: a row without it (Reconnect your
+     Slack) ends its action on the same right edge as Five ways' See how. */
+  .setup-nudge .rat-summary { width:100%; margin:0; }
+  .setup-nudge:has(> .rat-minimise) .rat-summary { padding-right:34px; }
   .setup-nudge .rat-summary img { width:18px; height:18px; flex:none; border-radius:5px; }
   .setup-nudge .rat-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .setup-nudge .rat-see { color:var(--accent); }
@@ -3983,7 +4024,9 @@
   .tk-foot .tk-verbs + .tk-link { margin-left:8px; }
   .tk-rowline .tk-link { margin-left:2px; }
   /* the Task-event message: the reply-quote recipe, toned by the event */
-  .th-msg.tk-event .th-reply-ref { width:100%; flex-basis:100%; margin-right:0; cursor:pointer; }
+  .th-msg.tk-event .th-reply-ref { width:100%; flex-basis:100%; margin-right:0; padding-left:0; cursor:pointer; }
+  .th-msg.tk-event .th-reply-ref::before { display:none; } /* the Task mark is its own connector */
+  .th-msg.tk-event .th-reply-ref-who { max-width:none; opacity:1; }
   .th-msg.tk-event.bare .th-reply-ref { margin-bottom:2px; }
   .tk-event .th-reply-ref-who { display:flex; align-items:center; gap:6px; }
   .tk-event .th-reply-ref-who .tk-mark { width:10px; height:10px; }
@@ -4172,6 +4215,9 @@
     </defs>
   </svg>
   <div class="card" id="card">
+    <div class="card-resize" data-resize="w" aria-hidden="true"></div>
+    <div class="card-resize" data-resize="s" aria-hidden="true"></div>
+    <div class="card-resize" data-resize="sw" aria-hidden="true"><span class="card-grip"></span></div>
     <div class="card-surface">
     <div class="lockup" id="lockup">
       <svg class="mark" width="17" height="17" viewBox="0 0 16 16" aria-hidden="true">
@@ -4636,6 +4682,44 @@
   const WIDE_SIDE = EXPANDED.w; // the sidebar IS the small card's list, at its own width
   let wideDomReady = false; // the expanded app's DOM helpers are defined further down
   let appExpanded = (() => { try { return localStorage.getItem("relayAppExpanded") === "1"; } catch { return false; } })();
+  // YOUR SIZE (ao1 feedback, 2026-10-08: "sometimes the chat box gets in the
+  // way. Being able to drag to resize would help"). Drag the card's left or
+  // bottom edge, or its bottom-left corner, and each frame keeps the size you
+  // gave it: the small card, the reader and the expanded app separately, across
+  // restarts. Double-click an edge to go back to the designed size. The card
+  // stays pinned at its top-right corner, so it grows away from the screen edge.
+  // The expanded app is not resized here: it fills the screen (wideSize).
+  const CARD_LIMIT = { w: 900, h: 800 }; // main.cjs CARD_MAX: the surface the card is drawn on
+  const FRAME_MIN = { small: { w: EXPANDED.w, h: 380 }, reader: { w: 520, h: 460 } };
+  const FRAMES_KEY = "relayCardFrames";
+  let userFrames = (() => {
+    try { const v = JSON.parse(localStorage.getItem(FRAMES_KEY) || "{}"); return v && typeof v === "object" ? v : {}; } catch { return {}; }
+  })();
+  function saveUserFrames() { try { localStorage.setItem(FRAMES_KEY, JSON.stringify(userFrames)); } catch {} }
+  // Never wider or taller than the screen that holds the card, nor the surface.
+  function frameLimit() {
+    const aw = Number(window.screen?.availWidth) || CARD_LIMIT.w + 48;
+    const ah = Number(window.screen?.availHeight) || CARD_LIMIT.h + 48;
+    return { w: Math.min(CARD_LIMIT.w, aw - 48), h: Math.min(CARD_LIMIT.h, ah - 48) };
+  }
+  function clampFrame(mode, size) {
+    const min = FRAME_MIN[mode], max = frameLimit();
+    return {
+      w: Math.round(Math.max(min.w, Math.min(max.w, Number(size.w) || min.w))),
+      h: Math.round(Math.max(min.h, Math.min(max.h, Number(size.h) || min.h))),
+    };
+  }
+  function designedFrame(mode) { return mode === "reader" ? READER : EXPANDED; }
+  function frameSize(mode) {
+    const own = userFrames[mode];
+    return own && Number(own.w) > 0 && Number(own.h) > 0 ? clampFrame(mode, own) : designedFrame(mode);
+  }
+  function smallSize() { return frameSize("small"); }
+  function readerSize() { return frameSize("reader"); }
+  function openFrameMode(readerOpen = readerOpenNow) {
+    if (appExpanded && !cardEl.classList.contains("signup")) return "wide";
+    return readerOpen ? "reader" : "small";
+  }
   // The expanded app fills the screen it is on (David and Shane, 2026-10-08):
   // two thirds was too big to work beside and too small to be the app. The
   // native window grows to the screen's work area to hold it (main.cjs,
@@ -4648,53 +4732,67 @@
   // The frame the open card wears: the app expanded, else the reader's page,
   // else the small card.
   function openFrameSize(readerOpen = readerOpenNow) {
-    // Sign-up and onboarding are the small card's, whatever the mode.
-    if (appExpanded && !cardEl.classList.contains("signup")) return wideSize();
-    return readerOpen ? READER : EXPANDED;
+    // Sign-up and onboarding are the small card's designed size, whatever the mode.
+    if (cardEl.classList.contains("signup")) return EXPANDED;
+    const mode = openFrameMode(readerOpen);
+    return mode === "wide" ? wideSize() : frameSize(mode);
   }
   const PILL = { w: 244, h: 44 }; // wide enough for mark + word + "N unread" + ✕
   const PEEK = { w: 400, h: 118 };
 
   // ---------- sound (warmed away from the first interaction) ----------
-  let actx = null, tinkBuf = null;
+  // ONE sound, and it means one thing: someone wrote to you (ao1 feedback,
+  // 2026-10-08). Relay used to play macOS's Tink on every open and fold as
+  // well. Tink is one of the system's ALERT sounds, so people heard "error"
+  // each time they touched the card. Your own taps are silent now, and the
+  // arrival chime is Relay's own (sounds/arrive.wav: two soft marimba notes a
+  // fourth apart), so it can never be mistaken for the Mac complaining.
+  let actx = null, arriveBuf = null, lastArrivalSoundAt = 0;
+  const ARRIVAL_SOUND_GAP_MS = 2500; // a burst of messages is one chime, not a drum roll
   function initAudio() {
     if (actx) return;
     try { actx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" }); } catch { return; }
-    Promise.resolve(window.relay.soundBytes("Tink"))
+    Promise.resolve(window.relay.soundBytes("Arrive"))
       .then((ab) => (ab ? actx.decodeAudioData(ab) : null))
-      .then((b) => { if (b) tinkBuf = b; })
+      .then((b) => { if (b) arriveBuf = b; })
       .catch(() => {});
   }
-  function synthTink() {
+  // Fallback when the file cannot be read: the same two soft notes, built live.
+  function synthArrival() {
     if (!actx) return;
-    const t = actx.currentTime;
-    const o = actx.createOscillator(); o.type = "triangle";
-    o.frequency.setValueAtTime(2100, t); o.frequency.exponentialRampToValueAtTime(1300, t + 0.05);
-    const g = actx.createGain();
-    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.5, t + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
-    o.connect(g).connect(actx.destination); o.start(t); o.stop(t + 0.13);
+    const t0 = actx.currentTime;
+    for (const [freq, at, decay, peak] of [[784, 0, 0.26, 0.16], [1046.5, 0.075, 0.42, 0.18]]) {
+      const t = t0 + at;
+      const o = actx.createOscillator(); o.type = "sine"; o.frequency.setValueAtTime(freq, t);
+      const g = actx.createGain();
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, t + decay);
+      o.connect(g).connect(actx.destination); o.start(t); o.stop(t + decay + 0.02);
+    }
   }
-  // Settings → "Play sounds". Seeded false and updated from every inbox
-  // payload, so the very first arrival after launch is already correct; the toggle
-  // also sets it optimistically so the next sound is silent without a round trip.
+  // Settings → "Sound". Seeded false and updated from every inbox payload, so
+  // the very first arrival after launch is already correct; the toggle also
+  // sets it optimistically so the next sound is silent without a round trip.
   let soundsMuted = false;
-  function playTink() {
+  function playArrivalSound() {
     if (REDUCED) return;
     if (soundsMuted) return;
     // A test overlay must never make noise on the developer's machine — the
     // sound is indistinguishable from the real pill's and lands mid-work.
     if (window.relay && window.relay.isTestOverlay) return;
+    const now = Date.now();
+    if (now - lastArrivalSoundAt < ARRIVAL_SOUND_GAP_MS) return;
     // AudioContext/device startup can synchronously wake Chromium's audio
-    // service. Never put that cold-start work on the same pointer event as a
-    // card morph; prime it while idle and sacrifice one sound if the service is
-    // still suspended. The next interaction gets both smooth motion and sound.
+    // service. Never put that cold-start work on the same event as a card
+    // morph; prime it while idle and sacrifice one sound if the service is
+    // still suspended.
     if (!actx) { primeAudio(); return; }
     if (actx.state === "suspended") { void actx.resume(); return; }
-    if (tinkBuf) {
-      const src = actx.createBufferSource(); src.buffer = tinkBuf;
-      const g = actx.createGain(); g.gain.value = 0.6;
+    lastArrivalSoundAt = now;
+    if (arriveBuf) {
+      const src = actx.createBufferSource(); src.buffer = arriveBuf;
+      const g = actx.createGain(); g.gain.value = 0.55;
       src.connect(g).connect(actx.destination); src.start();
-    } else { synthTink(); }
+    } else { synthArrival(); }
   }
   let audioPrimeQueued = false;
   function primeAudio() {
@@ -4856,6 +4954,7 @@
   function syncCardSize(readerOpen) {
     readerOpenNow = Boolean(readerOpen);
     if (collapsed || peeking || ghost || readerMorphInFlight || cardViewTransition) return;
+    if (cardEl.classList.contains("resizing")) return; // the person's hand owns the size mid-drag
     const t = openFrameSize();
     if (W.t !== t.w || H.t !== t.h) springTo(t.w, t.h);
   }
@@ -5182,7 +5281,7 @@
     syncContinuousMotion();
     const openSize = openFrameSize();
     springTo(collapsed ? PILL.w : openSize.w, collapsed ? PILL.h : openSize.h);
-    playTink();
+    // Your own open and fold are silent: sound is only for arrivals.
     // List rebuilds are deferred while folded; catch up now that the card is visible.
     if (!collapsed) {
       flushPendingRelaysRender();
@@ -5314,7 +5413,7 @@
     commitNavigation({ outerScrollTop: 0 });
     // Size to the rendered first row (no pill morph — the banner just appears at size).
     snapSize(PEEK.w, peekHeight());
-    playTink();
+    playArrivalSound();
     // Leave after ~7s — but never rug-pull someone mid-reply or with the pointer on
     // the banner; check again shortly instead (macOS banners hold while hovered too).
     ghostTimer = setTimeout(function tick() {
@@ -5350,7 +5449,6 @@
     // the first full frame. renderAll commits content then syncCardSize starts
     // the morph; the old two-frame defer visibly swapped lists mid-animation.
     renderAll();
-    playTink();
   }
   // The banner must show its WHOLE first row — a clipped preview reads as broken.
   // Measure after render; QR question rows are tall, so allow room before capping.
@@ -5411,7 +5509,7 @@
       cardEl.classList.add("notifying"); // state-only marker; the chrome stays put
       notifInteracted = true; // an open inbox is deliberate engagement already
       renderAll();
-      playTink();
+      playArrivalSound();
       sendAttentionDone(true);
       return;
     }
@@ -5429,7 +5527,7 @@
     commitNavigation({ outerScrollTop: 0 });
     // Size AFTER the render above: peekHeight measures the rows now in the DOM.
     sizePeek();
-    playTink();
+    playArrivalSound();
     // The banner folds itself back to the pill once it has been seen (main's
     // shipped behaviour, and David's law: show once, fold, never re-parade) —
     // but never out from under an engaged user: a pointer on the card or a
@@ -5462,7 +5560,6 @@
     // `peeking` is already false, so this paints the full destination list
     // before applyView retargets the frame. No banner-to-list swap mid-spring.
     renderAll();
-    playTink();
   }
 
   // ---------- the ✕ ----------
@@ -5533,6 +5630,53 @@
     if (peeking) { openFull(); return; }
     requestToggle();
   });
+
+  // ---------- drag an edge to resize (sizes in YOUR SIZE above) ----------
+  let resizeDrag = null;
+  for (const handle of cardEl.querySelectorAll(".card-resize")) {
+    handle.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0 || collapsed || peeking || ghost) return;
+      const mode = openFrameMode();
+      if (mode === "wide") return;
+      e.preventDefault(); e.stopPropagation();
+      resizeDrag = { edge: handle.dataset.resize, mode, x: e.screenX, y: e.screenY, w: W.t, h: H.t, id: e.pointerId };
+      try { handle.setPointerCapture(e.pointerId); } catch {}
+      cardEl.classList.add("resizing");
+      // macOS draws the card on a larger click-through surface; hold input on
+      // it while the pointer may briefly outrun the edge.
+      window.relay.cardResizing?.(true);
+    });
+    handle.addEventListener("pointermove", (e) => {
+      if (!resizeDrag || e.pointerId !== resizeDrag.id) return;
+      const grow = resizeDrag.edge !== "s" ? resizeDrag.x - e.screenX : 0;
+      const tall = resizeDrag.edge !== "w" ? e.screenY - resizeDrag.y : 0;
+      const next = clampFrame(resizeDrag.mode, { w: resizeDrag.w + grow, h: resizeDrag.h + tall });
+      if (next.w !== W.t || next.h !== H.t) snapSize(next.w, next.h);
+    });
+    const end = (e) => {
+      if (!resizeDrag || e.pointerId !== resizeDrag.id) return;
+      const { mode, w, h } = resizeDrag;
+      resizeDrag = null;
+      cardEl.classList.remove("resizing");
+      window.relay.cardResizing?.(false);
+      if (W.t === w && H.t === h) return; // a click, not a drag
+      userFrames = { ...userFrames, [mode]: { w: W.t, h: H.t } };
+      saveUserFrames();
+    };
+    handle.addEventListener("pointerup", end);
+    handle.addEventListener("pointercancel", end);
+    // Double-click an edge: back to the size this frame was designed at.
+    handle.addEventListener("dblclick", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const mode = openFrameMode();
+      if (!userFrames[mode]) return;
+      const { [mode]: _dropped, ...rest } = userFrames;
+      userFrames = rest;
+      saveUserFrames();
+      const home = frameSize(mode);
+      springTo(home.w, home.h);
+    });
+  }
 
   // ---------- ordinary window hover ----------
   function setInteractive(v) { interactive = Boolean(v); }
@@ -5700,6 +5844,26 @@
     const boundary = available.lastIndexOf(" ");
     const cut = boundary >= Math.floor(cap * 0.6) ? boundary : available.length;
     return available.slice(0, cut).replace(/[,:;\-–—]+$/u, "").trimEnd() + "…";
+  }
+
+  // What a chat row says for its newest message. Words when there are words;
+  // a message that is only a picture or a file says what it is ("Photo",
+  // "2 photos", "brief.pdf", "3 files"), never a bare "You:" (David,
+  // 2026-10-08: an image sent to Granular listed as "You:" and nothing).
+  function attachmentListGist(attachments) {
+    const list = Array.isArray(attachments) ? attachments.filter(Boolean) : [];
+    if (!list.length) return "";
+    if (list.every(attachmentIsImage)) return list.length === 1 ? "Photo" : `${list.length} photos`;
+    if (list.length === 1) return String(list[0].filename || list[0].name || "File").trim() || "File";
+    return `${list.length} files`;
+  }
+  function messageListGist(message, groupId = "") {
+    const attachments = message?.attachments || [];
+    // A typed message's words are its body; its title can be a stand-in
+    // ("Relay") made up for a message that had none.
+    const text = String((message?.textLike ? message.body : message?.title || message?.body) || "").trim();
+    if (text && !isLegacyAttachmentPlaceholder(text, attachments)) return mentionPreviewText(text, groupId);
+    return attachmentListGist(attachments) || text || "Message";
   }
 
   // map enums -> humane copy (never show a raw enum)
@@ -9000,7 +9164,7 @@
     const body = rowEl.querySelector(".rk-body");
     rowEl.querySelector(".rk-actions")?.remove();
     field.closest(".qr-banner")?.remove();
-    const shown = text || (files.length === 1 ? String(files[0].name || "1 file") : `${files.length} files`);
+    const shown = text || attachmentListGist(files.map((file) => ({ name:file.name, contentType:file.type })));
     if (body) body.insertAdjacentHTML("beforeend", `<span class="rk-line"><span class="th-title"><span class="gist-who">${inReplyToRelayId ? "You in a thread:" : "You:"}</span> ${esc(shown)}</span></span><span class="row-note">Sent to ${esc(identity.name || "them")}</span>`);
     bannerReplySettling = true;
     sizePeek();
@@ -9280,7 +9444,7 @@
     // chat id, then the room's own thread coordinate; message ids are only a
     // compatibility fallback for legacy Relay rows.
     const roomCoordinate = identity.chatId || identity.threadId || row.threadId || row.id;
-    const gist = relayListGist(mentionPreviewText(row.title || row.body || "Message", identity.groupId), 90);
+    const gist = relayListGist(messageListGist(row, identity.groupId), 90);
     const unreadCls = identity.unreadCount ? " unread" : "";
     const groupPeople = identity.isGroup ? [...(identity.people || [])].slice(0, 2) : [];
     while (identity.isGroup && groupPeople.length < 2) groupPeople.push(groupPeople.length ? name : (row.party || name));
@@ -13048,7 +13212,7 @@
       }
       activeView = back.view || "relays";
       commitNavigation({ outerScrollTop: back.outerScrollTop });
-    }, EXPANDED);
+    }, smallSize());
   }
   // Paragraph-level rendering only: escaped text, blank-line splits.
   // The letter's markdown. Agents write the way agents write — bold, code,
@@ -18254,7 +18418,7 @@
         <span class="rk-body">
           <span class="th-top"><span class="th-party">${esc(t.name)}</span><span class="th-time">${t.hasActivity === false ? "" : esc(timeAgo(t.latest.at))}</span></span>
           <span class="rk-line">
-            <span class="th-title">${t.latest.direction === "out" ? `<span class="gist-who">You:</span> ` : (t.isGroup ? `<span class="gist-who">${esc(String(t.latest.party || "").split(" ")[0])}:</span> ` : "")}${esc(t.latest.title)}</span>
+            <span class="th-title">${t.latest.direction === "out" ? `<span class="gist-who">You:</span> ` : (t.isGroup ? `<span class="gist-who">${esc(String(t.latest.party || "").split(" ")[0])}:</span> ` : "")}${esc(relayListGist(messageListGist(t.latest), 90))}</span>
             ${t.unreadCount ? `<span class="th-count">${t.unreadCount}</span>` : ""}
           </span>
         </span>
@@ -20233,7 +20397,7 @@
       commitNavigation();
       if (roomScroll) return () => restoreRoomScroll(roomScroll);
       return undefined;
-    }, next ? wideSize() : (activeView === "reader" ? READER : EXPANDED), { reveal: next ? "grow" : "shrink" });
+    }, next ? wideSize() : (activeView === "reader" ? readerSize() : smallSize()), { reveal: next ? "grow" : "shrink" });
   }
   document.getElementById("wideToggle").addEventListener("click", (e) => {
     e.stopPropagation();
@@ -20304,7 +20468,7 @@
     };
     if (wideLayoutActive()) {
       wideMemory.delete(wideSideTab());
-      startFrameNavigation(navigateBack, EXPANDED);
+      startFrameNavigation(navigateBack, smallSize());
       return;
     }
     startRoomViewTransition(navigateBack, { motion:"back" });
@@ -20800,32 +20964,62 @@
     return `<button class="sv-switch" type="button" role="switch" data-quiet="${esc(key)}"${inverted ? ' data-quiet-inverted="1"' : ""}
       aria-checked="${checked ? "true" : "false"}" aria-label="${esc(label)}" ${disabled ? "disabled" : ""}></button>`;
   }
+  // NOTIFICATIONS (ao1 feedback, 2026-10-08: "settings around notification
+  // style"). One value row, loudest to quietest, so there is never a pair of
+  // switches that contradict each other: a banner for everything, only for
+  // what is yours (direct messages, mentions, Tasks), only the count, or no
+  // pill at all until the status-area icon is clicked (pillHidden). Tapping the
+  // row unfolds its choices inline; choosing folds it back.
+  const NOTIFY_CHOICES = [
+    { value:"all", name:"Every message", short:"Every message", note:"A banner for each new message." },
+    { value:"direct", name:"Direct messages and mentions", short:"Direct and mentions", note:"Groups only count, unless someone mentions you." },
+    { value:"count", name:"Just the count", short:"Just the count", note:"Nothing pops up; the pill shows the count." },
+    { value:"hidden", name:"Menu bar only", short:"Menu bar only", note:"" },
+  ];
+  let notifyTrayOpen = false;
+  function notifyChoiceOf(info) {
+    if (info.pillHidden === true) return "hidden";
+    return ["all", "direct", "count"].includes(info.notifyStyle) ? info.notifyStyle : "all";
+  }
   function quietPrefsHtml(info) {
-    const hidden = info.pillHidden === true;
     const muted = info.soundsMuted === true;
-    // Without a status-area icon there is no way to bring a hidden pill back, so the
-    // switch is refused rather than offered — the same law the ✕ already follows.
+    // Without a status-area icon there is no way to bring a hidden pill back, so
+    // Menu bar only is refused rather than offered — the same law the ✕ follows.
     const canHide = info.canHide !== false;
     const surface = info.reopenSurface || "the Relay icon";
+    const current = notifyChoiceOf(info);
+    // "Menu bar" is the Mac's word; elsewhere the icon lives in a tray or launcher.
+    const hiddenName = /menu bar/i.test(surface) ? "Menu bar only" : "Out of sight";
+    for (const choice of NOTIFY_CHOICES) if (choice.value === "hidden") choice.name = choice.short = hiddenName;
+    const currentChoice = NOTIFY_CHOICES.find((choice) => choice.value === current) || NOTIFY_CHOICES[0];
+    const banners = current === "all" || current === "direct";
+    const choices = NOTIFY_CHOICES.map((choice) => {
+      const disabled = choice.value === "hidden" && !canHide && current !== "hidden";
+      const note = choice.value === "hidden"
+        ? (canHide ? `Relay stays out of sight until you click ${esc(surface)}.` : `Unavailable: ${esc(surface)} is not on this computer.`)
+        : esc(choice.note);
+      return `<button class="sv-notify-choice${choice.value === current ? " on" : ""}" type="button" role="radio"
+          aria-checked="${choice.value === current ? "true" : "false"}" data-notify-choice="${choice.value}" ${disabled ? "disabled" : ""}>
+          <span class="sv-notify-dot" aria-hidden="true"></span>
+          <span class="sv-quiet-copy"><span class="sv-quiet-name">${esc(choice.name)}</span><span class="sv-quiet-note">${note}</span></span>
+        </button>`;
+    }).join("");
     return `
       <div class="sv-quiet-section" id="quietPrefs" data-stop="1">
         <div class="sv-quiet-title">Notifications</div>
         <div class="sv-quiet-list">
-          <div class="sv-quiet-row">
-            <span class="sv-quiet-copy">
-              <span class="sv-quiet-name">Show Relay automatically</span>
-              <span class="sv-quiet-note">${canHide
-                ? "When new messages arrive."
-                : `Always shown because ${esc(surface)} is unavailable.`}</span>
-            </span>
-            ${svSwitchHtml("pillHidden", !hidden, { disabled: !canHide, label: "Show Relay automatically", inverted: true })}
-          </div>
-          <div class="sv-quiet-row">
+          <button class="sv-quiet-row sv-notify-row" type="button" id="svNotifyRow" aria-expanded="${notifyTrayOpen ? "true" : "false"}" aria-controls="svNotifyTray">
+            <span class="sv-quiet-copy"><span class="sv-quiet-name">New messages</span></span>
+            <span class="sv-notify-value">${esc(currentChoice.short)}</span>
+            <svg class="sv-notify-chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M3.5 2 6.5 5 3.5 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <div class="sv-notify-tray${notifyTrayOpen ? " open" : ""}" id="svNotifyTray" role="radiogroup" aria-label="New messages"${notifyTrayOpen ? "" : " hidden"}>${choices}</div>
+          <div class="sv-quiet-row${banners ? "" : " off"}">
             <span class="sv-quiet-copy">
               <span class="sv-quiet-name">Play sounds</span>
-              <span class="sv-quiet-note">For new messages.</span>
+              <span class="sv-quiet-note">${banners ? "A soft chime when a banner shows." : "Plays only with banners."}</span>
             </span>
-            ${svSwitchHtml("soundsMuted", !muted, { label: "Play sounds", inverted: true })}
+            ${svSwitchHtml("soundsMuted", !muted, { label: "Play sounds", inverted: true, disabled: !banners })}
           </div>
         </div>
       </div>`;
@@ -21898,6 +22092,13 @@
     for (const sw of settingsViewEl.querySelectorAll("[data-quiet]")) {
       sw.addEventListener("click", () => toggleQuietPref(sw.getAttribute("data-quiet"), sw));
     }
+    document.getElementById("svNotifyRow")?.addEventListener("click", () => {
+      notifyTrayOpen = !notifyTrayOpen;
+      renderSettings();
+    });
+    for (const choice of settingsViewEl.querySelectorAll("[data-notify-choice]")) {
+      choice.addEventListener("click", () => chooseNotifyStyle(choice.getAttribute("data-notify-choice")));
+    }
     const slackConnect = document.getElementById("svSlackConnect");
     if (slackConnect) slackConnect.addEventListener("click", () => {
       // "Open again" re-opens Slack's approval page.
@@ -22177,6 +22378,33 @@
     const applied = result?.ok === true ? next : Boolean(result?.[key]);
     settingsInfo = { ...settingsInfo, [key]: applied };
     if (key === "soundsMuted") soundsMuted = applied;
+    renderSettings();
+  }
+  // Optimistic like the switches: paint the choice and fold the tray at once,
+  // then take main's answer as the truth. Menu bar only is pillHidden; every
+  // other choice shows the pill and sets the banner style.
+  async function chooseNotifyStyle(value) {
+    if (!settingsInfo || !value) return;
+    const before = { pillHidden:settingsInfo.pillHidden === true, notifyStyle:settingsInfo.notifyStyle || "all" };
+    const hidden = value === "hidden";
+    settingsInfo = { ...settingsInfo, pillHidden:hidden, ...(hidden ? {} : { notifyStyle:value }) };
+    notifyTrayOpen = false;
+    renderSettings();
+    let ok = true;
+    try {
+      if (hidden !== before.pillHidden) {
+        const result = await window.relay.setPillHidden(hidden);
+        ok = result?.ok !== false;
+        settingsInfo = { ...settingsInfo, pillHidden:ok ? hidden : before.pillHidden };
+      }
+      if (ok && !hidden && value !== before.notifyStyle) {
+        const result = await window.relay.setSetting("notification_style", value);
+        ok = result?.ok !== false;
+        settingsInfo = { ...settingsInfo, notifyStyle:ok ? value : before.notifyStyle };
+      }
+    } catch {
+      settingsInfo = { ...settingsInfo, ...before };
+    }
     renderSettings();
   }
   // Switch account / sign in: open the pairing page in the browser and reveal

@@ -290,6 +290,21 @@ const SETTINGS = [
     write: (ctx, value) => patchDevice({ soundsMuted: value !== true }, ctx.options),
   },
   {
+    id: "notification_style",
+    label: "New messages",
+    where: "You › Notifications",
+    description: "Which new messages make the Relay pill show a banner: every message, only direct messages and mentions (busy groups just count), or none (only the count changes). Hiding the pill entirely is show_automatically.",
+    type: "choice",
+    scope: "device",
+    options: [
+      { value: "all", label: "Every message" },
+      { value: "direct", label: "Direct messages and mentions" },
+      { value: "count", label: "Just the count" },
+    ],
+    read: (ctx) => ["all", "direct", "count"].includes(readStore(ctx.options).notifyStyle) ? readStore(ctx.options).notifyStyle : "all",
+    write: (ctx, value) => patchDevice({ notifyStyle: value }, ctx.options),
+  },
+  {
     id: "theme",
     label: "Appearance",
     where: "The sun and moon button at the top of the pill",

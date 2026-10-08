@@ -551,8 +551,8 @@ test("specific replies use an attached composer preview and render a source refe
   // they received (group-reply-quote-siblings.test.mjs).
   assert.match(html, /data-reply-ref="\$\{esc\(String\(parent\.id \|\| parentId\)\)\}"/);
   assert.match(html, /source\.scrollIntoView\(\{ block:"center", behavior:REDUCED \? "auto" : "smooth" \}\)/);
-  assert.match(html, /\.th-reply-ref \{ flex:0 0 calc\(100% - 42px\); width:calc\(100% - 42px\)/);
-  assert.match(html, /margin:0 42px 7px 0/);
+  assert.match(html, /\.th-reply-ref \{[^}]*flex:0 0 calc\(100% - 42px\); width:calc\(100% - 42px\)/);
+  assert.match(html, /margin:0 42px 5px 0/);
 });
 
 test("a bubble wears no provenance line at all: no 'Sent with', no 'From Slack'", () => {

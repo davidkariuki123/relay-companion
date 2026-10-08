@@ -23,19 +23,58 @@ function codeOnly(source) {
 // once set, nothing in the product may undo them except the user. These pin the
 // pieces that make that true end to end.
 
-test("Settings names notification controls positively and keeps their copy concise", () => {
+test("Settings offers one New messages choice, loudest to quietest, and a sound switch", () => {
+  // ao1 feedback (2026-10-08): "settings around notification style". One value
+  // row, never two switches that can contradict each other.
   assert.match(html, /<div class="sv-quiet-title">Notifications<\/div>/);
   assert.match(html, /\.sv-open-title, \.sv-quiet-title \{[^}]*font-size:15px/);
   assert.match(html, /\.sv-quiet-title \{ margin-bottom:10px; \}/);
-  assert.match(html, /<span class="sv-quiet-name">Show Relay automatically<\/span>/);
-  assert.match(html, /<span class="sv-quiet-note">\$\{canHide[\s\S]*?"When new messages arrive\."/);
+  assert.match(html, /<span class="sv-quiet-name">New messages<\/span>/);
+  const choices = between(html, "const NOTIFY_CHOICES = [", "];");
+  assert.deepEqual([...choices.matchAll(/value:"([a-z]+)"/g)].map((m) => m[1]), ["all", "direct", "count", "hidden"]);
+  assert.match(choices, /name:"Every message"/);
+  assert.match(choices, /name:"Direct messages and mentions"/);
+  assert.match(choices, /name:"Just the count"/);
+  assert.match(html, /role="radio"[\s\S]{0,120}data-notify-choice="\$\{choice\.value\}"/);
   assert.match(html, /<span class="sv-quiet-name">Play sounds<\/span>/);
-  assert.match(html, /<span class="sv-quiet-note">For new messages\.<\/span>/);
+  assert.match(html, /"A soft chime when a banner shows\."/);
   assert.doesNotMatch(html, />Quiet<\/div>|Relay keeps running and collecting your messages/);
   assert.match(html, /role="switch" data-quiet="\$\{esc\(key\)\}"/);
   assert.match(html, /aria-checked="\$\{checked \? "true" : "false"\}"/);
-  assert.match(html, /svSwitchHtml\("pillHidden", !hidden, \{[^}]*inverted: true/);
   assert.match(html, /svSwitchHtml\("soundsMuted", !muted, \{[^}]*inverted: true/);
+});
+
+test("Menu bar only is pillHidden; every other choice shows the pill and sets the banner style", () => {
+  const choose = between(html, "async function chooseNotifyStyle(value)", "// Switch account / sign in");
+  assert.match(choose, /const hidden = value === "hidden";/);
+  assert.match(choose, /window\.relay\.setPillHidden\(hidden\)/);
+  assert.match(choose, /window\.relay\.setSetting\("notification_style", value\)/);
+  assert.match(html, /if \(info\.pillHidden === true\) return "hidden";/);
+});
+
+test("only arrivals the style lets through are queued; the rest are presented by the count alone", () => {
+  const worthy = between(main, "function attentionWorthy(", "\n}\n");
+  const attentionWorthy = new Function(`${worthy}\n}\nreturn attentionWorthy;`)();
+  const dm = { recipientGroupId: null };
+  const group = { recipientGroupId: "grp_1" };
+  for (const [row, all, direct, count] of [
+    [dm, true, true, false],
+    [group, true, false, false],
+    [{ ...group, recipientMentioned: true }, true, true, false],
+    [{ ...group, kind: "task" }, true, true, false],
+    [{ ...group, urgency: "high" }, true, true, false],
+  ]) {
+    assert.equal(attentionWorthy(row, "all"), all);
+    assert.equal(attentionWorthy(row, "direct"), direct);
+    assert.equal(attentionWorthy(row, "count"), count);
+  }
+  const push = between(main, "async function pushInboxNow(", "const sig = JSON.stringify(");
+  assert.match(push, /const unreadIds = unreadRows\.filter\(\(row\) => attentionWorthy\(row\)\)/);
+  assert.match(push, /markRelaysPresented\(quietIds, /, "a louder style later must not burst a backlog");
+  const pump = between(main, "function pumpAttention(", "const digestMode");
+  assert.match(pump, /r\.unread && attentionWorthy\(r\)/);
+  assert.match(main, /\n\s+notifyStyle,\n\s+onboardingVersions,/, "written to overlay-prefs.json's whitelist");
+  assert.match(main, /if \(NOTIFY_STYLES\.has\(next\.notifyStyle\) && next\.notifyStyle !== notifyStyle\) applyNotifyStyle\(next\.notifyStyle\);/);
 });
 
 test("the notification section stops clicks, so flipping a switch never folds the card", () => {
@@ -62,11 +101,26 @@ test("both preferences are written to overlay-prefs.json, whose writer is a whit
   assert.match(main, /let soundsMuted = overlayPrefs\.soundsMuted === true;/);
 });
 
-test("playTink is gated once, so every sound Relay makes is muted together", () => {
-  const play = between(html, "function playTink()", "window.addEventListener(\"mousedown\"");
+test("one arrival sound, gated once: never for your own taps, never a macOS alert sound", () => {
+  // ao1 feedback (2026-10-08): "it makes an error noise every time i interact
+  // with the relay box". The old Tink is a macOS ALERT sound and played on every
+  // open and fold as well as on arrivals.
+  const play = between(html, "function playArrivalSound()", "let audioPrimeQueued");
   assert.match(play, /if \(soundsMuted\) return;/);
-  // All six call sites route through playTink; assert none of them grew a bypass.
-  assert.doesNotMatch(html, /tinkBuf.*createBufferSource[\s\S]{0,80}playTink/);
+  assert.match(play, /now - lastArrivalSoundAt < ARRIVAL_SOUND_GAP_MS/, "a burst of messages is one chime");
+  assert.doesNotMatch(html, /playTink|"Tink"/);
+  assert.match(html, /window\.relay\.soundBytes\("Arrive"\)/);
+  assert.ok(fs.existsSync(new URL("../overlay/sounds/arrive.wav", import.meta.url)));
+  assert.ok(!fs.existsSync(new URL("../overlay/sounds/tink.wav", import.meta.url)));
+  assert.doesNotMatch(between(main, 'ipcMain.handle("relay:soundBytes"', "\n});"), /\/System\/Library\/Sounds/);
+  // Your own open, fold and expand are silent.
+  for (const marker of ["function setCollapsed(v)", "function trayOpen()", "function openFull()"]) {
+    const at = html.indexOf(marker);
+    assert.notEqual(at, -1, marker);
+    const body = html.slice(at, html.indexOf("\n  }\n", at));
+    assert.doesNotMatch(body, /playArrivalSound\(\)/, marker);
+  }
+  assert.equal((html.match(/playArrivalSound\(\);/g) || []).length, 3, "banner, ghost banner and on-stage arrival");
   assert.match(html, /soundsMuted = Boolean\(next\.ui && next\.ui\.soundsMuted\)/, "kept in step with every payload");
   assert.match(main, /\n\s+soundsMuted,\n\s+\},/, "shipped to the renderer on payload.ui");
 });
@@ -113,7 +167,7 @@ test("hiding never strands the user: no status-area icon means the switch is ref
   const handler = between(main, 'function applyPillHidden(', 'ipcMain.handle("relay:setSoundsMuted"');
   assert.match(handler, /if \(next && !trayAvailable\) return \{ ok: false, error: "no_status_area_icon"/);
   assert.match(html, /info\.canHide !== false/);
-  assert.match(html, /disabled: !canHide/);
+  assert.match(html, /const disabled = choice\.value === "hidden" && !canHide && current !== "hidden";/);
   assert.match(main, /canHide: trayAvailable,/, "accountInfo carries it to the renderer");
 });
 

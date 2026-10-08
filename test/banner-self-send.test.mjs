@@ -44,11 +44,11 @@ test("a self-sent Task paints its title and Task chip despite having no chat unr
   // Slack feature and the room's exact integration binding, neither present here.
   const render = Function("peeking", "esc", "relayListGist", "mentionPreviewText", "avatarHue",
     "avatarInitials", "timeAgo", "bannerIsTask", "bannerVerbsHtml", "bannerComposerHtml",
-    "payload", "isSlackIntegratedRoom",
+    "payload", "isSlackIntegratedRoom", "messageListGist",
     `${rowSource}\nreturn relayIdentityRowHtml;`)(
     true, String, String, String, () => 0, () => "SA", () => "now",
     (row) => row.request, () => "", () => "",
-    { features:{} }, () => false,
+    { features:{} }, () => false, (row) => row.title || row.body || "Message",
   );
   const markup = render(banner);
   assert.match(markup, /Test Relay tasks/);

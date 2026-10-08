@@ -104,7 +104,28 @@ function daemonRepairDecision({ heartbeat, now = Date.now(), pillStartedAt = 0, 
   return { action: "repair", reason: "stale", ageMs };
 }
 
+// Whether the service is actually RECEIVING messages (src/inbox-health.js),
+// which a fresh heartbeat alone does not prove. No evidence from this very
+// process (an older service, or the file of one that has since been replaced)
+// is not a verdict. A service that woke recently has not had time to receive.
+const INBOX_STALL_MS = 2 * 60_000;
+function inboxHealthPath(homeDir) {
+  return path.join(homeDir, ".relay", "recovery", "inbox.json");
+}
+function inboxReceiveDecision({ inbox, heartbeat, now = Date.now(), stallMs = INBOX_STALL_MS } = {}) {
+  if (!inbox || inbox.schema !== 1 || !heartbeat || Number(inbox.pid) !== Number(heartbeat.pid)) return { receiving: true, reason: "unknown" };
+  const okAt = Number(inbox.okAt) || 0;
+  if (okAt && now - okAt < stallMs) return { receiving: true, reason: "receiving" };
+  const awakeSince = Number(heartbeat.awakeSince) || 0;
+  if (inbox.state !== "unbound" && awakeSince && now - awakeSince < stallMs) return { receiving: true, reason: "waking" };
+  return { receiving: false, reason: inbox.state === "unbound" ? `unbound:${inbox.reason || "unknown"}` : "not-receiving",
+    sinceMs: okAt ? now - okAt : null };
+}
+
 module.exports = {
+  inboxHealthPath,
+  inboxReceiveDecision,
+  INBOX_STALL_MS,
   pillHeartbeatPath,
   daemonHeartbeatPath,
   daemonHeartbeatIsFresh,

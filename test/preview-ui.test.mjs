@@ -41,13 +41,13 @@ test("Relay identity rows show the room and latest gist without shortening the r
   const arrival = between(inbox, "function relayIdentityRowHtml(identity, show = null)", "// ---------- the reader:");
   assert.match(arrival, /const name = identity\.name/);
   assert.match(arrival, /esc\(mention \?[^\n]+ : name\)/);
-  assert.match(arrival, /const gist = relayListGist\(mentionPreviewText\(row\.title \|\| row\.body \|\| "Message", identity\.groupId\), 90\)/);
+  assert.match(arrival, /const gist = relayListGist\(messageListGist\(row, identity\.groupId\), 90\)/);
   assert.match(arrival, /\$\{senderPrefix\}\$\{esc\(gist\)\}/);
   assert.match(arrival, /identity\.unreadCount/);
   assert.match(arrival, /class="av-stack"/);
   assert.doesNotMatch(arrival, /threadTitle/);
 
-  const shorten = inlineFunction(inbox, "relayListGist", "// map enums -> humane copy");
+  const shorten = inlineFunction(inbox, "relayListGist", "// What a chat row says for its newest message.");
   const complete = "Postmark account is still pending approval although DNS is ready and nothing is needed until their team replies";
   const shortened = shorten(complete, 90);
   assert.ok(shortened.length <= 90, `Relay gist is bounded: ${shortened.length}`);

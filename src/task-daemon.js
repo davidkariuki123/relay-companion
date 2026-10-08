@@ -34,6 +34,7 @@ import { startLogRotation } from "./log-rotate.js";
 import { startDesktopStartupMigration } from "./desktop-migration.js";
 import { ensureWindowsAutostartTasks, repairAgentMcpRegistrations } from "./install.js";
 import { apiUrl, readConfig } from "./config.js";
+import { signInInProgress } from "./installation-authorization.js";
 import { activeSessionOperationCount, runSessionDirectoryOnce } from "./session-controller.js";
 import { productFeatures } from "./product-features.js";
 import { migratePersistedContentFields } from "./content-field-migration.js";
@@ -1049,7 +1050,9 @@ async function runTaskDaemonImpl({ intervalMs = 4000, health } = {}) {
   startPendingSignOutFlush({ log });
   const autoUpdater = createAutoUpdater({
     log,
-    hasActiveWork: () => hasActiveTurns() || activeSessionOperationCount() > 0,
+    // A sign-in in progress is work too: an update restart closes the panel
+    // someone is typing their code into.
+    hasActiveWork: () => hasActiveTurns() || activeSessionOperationCount() > 0 || signInInProgress(),
   });
   updaterInFlight = () => autoUpdater.state?.updating === true;
   // Exit once the replacement tree is on disk.

@@ -436,7 +436,7 @@ function arrivalHarness({ collapsed = false, peeking = false, reader = false, si
       remove: (...names) => names.forEach((name) => classes.delete(name)),
     } },
     window: { relay: { attentionDone: (receipt) => calls.push(["done", receipt.dwelled]) } },
-    cancelBye() {}, refreshCountLabel() {}, playTink() {},
+    cancelBye() {}, refreshCountLabel() {}, playArrivalSound() {},
     renderAll: () => calls.push(["render"]),
     commitNavigation: () => calls.push(["navigate"]),
     sizePeek: () => calls.push(["resize"]),

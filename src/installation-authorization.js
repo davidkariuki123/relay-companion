@@ -44,6 +44,22 @@ function statePath() {
   return path.join(path.dirname(configPath()), INSTALLATION_AUTHORIZATION_FILE);
 }
 
+// Someone is in the middle of signing in on this computer: a setup record
+// exists, has not lapsed, and has not finished connecting. The updater treats
+// this as active work, because a restart took the sign-in panel away from a
+// new user mid-code (fresh Mac VM, 2026-10-08). A lapsed or finished record
+// never holds an update back.
+export function signInInProgress({ file = statePath(), now = Date.now(), readFileSync = fs.readFileSync } = {}) {
+  try {
+    const state = JSON.parse(readFileSync(file, "utf8"));
+    if (!state || state.status === "expired" || state.status === "consumed") return false;
+    const expiresAt = Date.parse(state.expiresAt);
+    return Number.isFinite(expiresAt) && expiresAt > now;
+  } catch {
+    return false;
+  }
+}
+
 function defaultStateStore(file = statePath()) {
   return {
     read() {

@@ -49,7 +49,7 @@ test("list names every setting with its value, where it lives and what an agent 
   const ctx = context(t);
   const rows = await settings.listSettings(ctx);
   const byId = new Map(rows.map((row) => [row.id, row]));
-  for (const id of ["milestone_relays", "show_automatically", "play_sounds", "theme", "open_with_claude", "open_with_chatgpt", "open_with_claude_code", "open_with_codex", "task_permissions_claude_code", "task_permissions_codex", "account", "blocked_contacts"]) {
+  for (const id of ["milestone_relays", "show_automatically", "play_sounds", "notification_style", "theme", "open_with_claude", "open_with_chatgpt", "open_with_claude_code", "open_with_codex", "task_permissions_claude_code", "task_permissions_codex", "account", "blocked_contacts"]) {
     assert.ok(byId.has(id), id);
     assert.ok(byId.get(id).where, `${id} says where it lives in the pill`);
   }
@@ -90,6 +90,9 @@ test("an agent makes agents do less at once, and anything that gives them more f
   // Neutral preferences apply in either direction.
   assert.equal((await settings.setSetting(ctx, "play_sounds", false)).status, "changed");
   assert.equal(settings.readStore(ctx.options).soundsMuted, true);
+  assert.equal((await settings.setSetting(ctx, "notification_style", "direct")).status, "changed");
+  assert.equal(settings.readStore(ctx.options).notifyStyle, "direct");
+  await assert.rejects(settings.setSetting(ctx, "notification_style", "loud"));
   assert.equal((await settings.setSetting(ctx, "open_with_codex", false)).status, "changed");
   assert.deepEqual(settings.pillSnapshot("usr_self", ctx.options).agentApps, ["Claude Code"]);
   assert.equal((await settings.setSetting(ctx, "theme", "light")).status, "changed");

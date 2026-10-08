@@ -138,14 +138,29 @@ export function brandMacElectronApp(electronApp, {
     throw new Error(`Electron application bundle is missing: ${appPath}`);
   }
   renameMacElectronExecutable(appPath);
+  // macOS names an app in its permission prompts ("… wants access to control
+  // Claude") by the bundle's display name, and that comes from the folder,
+  // Electron.app, unless the bundle supplies a localized one. macOS trusts a
+  // localized name only while the base name still matches the folder (a
+  // renamed app keeps its new name), so the base name stays "Electron" and
+  // every localization says "Relay". Verified with displayNameAtPath on a
+  // re-signed copy, 2026-10-08.
   for (const [key, value] of [
     ["CFBundleIdentifier", RELAY_MAC_BUNDLE_IDENTIFIER],
-    ["CFBundleName", "Relay"],
-    ["CFBundleDisplayName", "Relay"],
+    ["CFBundleName", "Electron"],
+    ["CFBundleDisplayName", "Electron"],
     ["CFBundleExecutable", RELAY_MAC_EXECUTABLE_NAME],
   ]) {
     runCommand("/usr/bin/plutil", ["-replace", key, "-string", value, infoPath]);
   }
+  runCommand("/usr/bin/plutil", ["-replace", "LSHasLocalizedDisplayName", "-bool", "true", infoPath]);
+  localizeMacDisplayName(appPath);
+  // Every process this bundle starts is a background agent from its first
+  // instant, so none can put a generic Electron atom in the Dock: not a pill in
+  // the moment before app.dock.hide() runs, not a pill restarted in a loop, not a
+  // script someone runs with this binary (ao1 feedback, 2026-10-08: "a bunch of
+  // the electron icons on my dash").
+  runCommand("/usr/bin/plutil", ["-replace", "LSUIElement", "-bool", "true", infoPath]);
   // The final signed runtime archive owns these branded bytes. Re-sign the
   // complete Electron bundle after the plist mutation and before link capture;
   // the archive reconstructs the exact internal symlinks before verification.
@@ -160,6 +175,17 @@ export function brandMacElectronApp(electronApp, {
     throw new Error(`Branded Electron bundle has unexpected executable: ${executable || "missing"}`);
   }
   return { branded: true, appPath, bundleIdentifier: identifier, executable };
+}
+
+export function localizeMacDisplayName(appPath, { fsImpl = fs, name = "Relay" } = {}) {
+  const resources = path.join(appPath, "Contents", "Resources");
+  fsImpl.mkdirSync(path.join(resources, "en.lproj"), { recursive: true });
+  const strings = `"CFBundleDisplayName" = "${name}";\n"CFBundleName" = "${name}";\n`;
+  const localizations = fsImpl.readdirSync(resources).filter((entry) => entry.endsWith(".lproj"));
+  for (const localization of localizations) {
+    fsImpl.writeFileSync(path.join(resources, localization, "InfoPlist.strings"), strings);
+  }
+  return localizations.length;
 }
 
 // macOS names an ad-hoc signed launch agent after its executable file, so the

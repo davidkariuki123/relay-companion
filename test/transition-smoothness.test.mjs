@@ -155,7 +155,7 @@ test("all compact-to-reader resize transitions can hold a frozen source face", (
   for (const view of ["relays", "chat", "threads", "sent", "contacts"]) {
     assert.match(prepare, new RegExp(`${view}:`));
   }
-  assert.match(html, /\}, next \? wideSize\(\) : \(activeView === "reader" \? READER : EXPANDED\), \{ reveal: next \? "grow" : "shrink" \}\)/);
+  assert.match(html, /\}, next \? wideSize\(\) : \(activeView === "reader" \? readerSize\(\) : smallSize\(\)\), \{ reveal: next \? "grow" : "shrink" \}\)/);
   assert.match(prepare, /snapshot\.style\.width = `\$\{Math\.round\(cardEl\.getBoundingClientRect\(\)\.width\)\}px`/);
   assert.match(prepare, /node\.dataset\.readerMorphId = node\.id/);
   assert.match(prepare, /frozen\.scrollTop = live\.scrollTop/);
@@ -204,7 +204,7 @@ test("compact room navigation animates exact viewport pixels with a matching Bac
   const back = between(html, 'thBackEl.addEventListener("click", () => {', "let threadsSource");
   assert.match(back, /startRoomViewTransition\(navigateBack, \{ motion:"back" \}\)/,
     "compact Back reverses the exact-pixel transition");
-  assert.match(back, /if \(wideLayoutActive\(\)\) \{[\s\S]*?startFrameNavigation\(navigateBack, EXPANDED\)/,
+  assert.match(back, /if \(wideLayoutActive\(\)\) \{[\s\S]*?startFrameNavigation\(navigateBack, smallSize\(\)\)/,
     "expanded Back only empties the pane: the frame never moves");
   assert.doesNotMatch(back, /appExpanded\s*=/, "Back never folds the expanded app");
 });

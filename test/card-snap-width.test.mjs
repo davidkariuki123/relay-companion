@@ -14,7 +14,7 @@ function fixture(width) {
   const context = vm.createContext({
     W:{ v:width, t:width, vel:4 }, H:{ v:760, t:760, vel:3 },
     raf:7, cardMotionId:0, EXPANDED:{ w:344, h:524 }, READER:{ w:720, h:760 },
-    cardEl:{ style:{ width:`${width}px`, height:"760px", willChange:"width" } },
+    cardEl:{ style:{ width:`${width}px`, height:"760px", willChange:"width" }, classList:{ contains:() => false } },
     scrollEl:{ style:{ width:`${width}px` } },
     collapsed:false, peeking:false, ghost:false, readerMorphInFlight:false, cardViewTransition:null,
     readerOpenNow:false,
